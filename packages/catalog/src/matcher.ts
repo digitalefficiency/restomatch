@@ -212,4 +212,121 @@ export async function matchProduct(
   return null;
 }
 
+/**
+ * Top-N variant: returns up to `limit` candidates from embedding + fuzzy
+ * strategies, useful when OCR confidence is low and human review will pick
+ * the right product from suggestions.
+ *
+ * Alias and barcode are exact-match so we never need top-N for them — if
+ * one of those matches, it short-circuits at confidence 1.
+ */
+export async function matchProductTopN(
+  db: Database,
+  input: CatalogMatchInput,
+  limit = 3,
+  thresholds: MatcherThresholds = DEFAULT_THRESHOLDS,
+): Promise<MatchCandidate[]> {
+  // Exact matches short-circuit (these are always rank-1)
+  const aliasMatch = await matchByAlias(db, input.supplierId ?? null, input.rawDescription);
+  if (aliasMatch) return [aliasMatch];
+
+  if (input.barcode) {
+    const barcodeMatch = await matchByBarcode(db, input.restaurantId, input.barcode);
+    if (barcodeMatch) return [barcodeMatch];
+  }
+
+  const candidates: MatchCandidate[] = [];
+
+  if (input.embedding) {
+    const embeddingCandidates = await topNByEmbedding(
+      db,
+      input.restaurantId,
+      input.embedding,
+      limit,
+      thresholds.embeddingMinSimilarity,
+    );
+    candidates.push(...embeddingCandidates);
+  }
+
+  const fuzzyCandidates = await topNByFuzzy(
+    db,
+    input.restaurantId,
+    input.rawDescription,
+    limit,
+    thresholds.fuzzyMinSimilarity,
+  );
+  for (const f of fuzzyCandidates) {
+    if (!candidates.some((c) => c.productId === f.productId)) candidates.push(f);
+  }
+
+  return candidates.sort((a, b) => b.confidence - a.confidence).slice(0, limit);
+}
+
+async function topNByEmbedding(
+  db: Database,
+  restaurantId: string,
+  embedding: number[],
+  limit: number,
+  threshold: number,
+): Promise<MatchCandidate[]> {
+  if (embedding.length === 0) return [];
+  const vectorLiteral = `[${embedding.join(',')}]`;
+  const rows = await db
+    .select({
+      productId: products.id,
+      canonicalName: products.canonicalName,
+      similarity: sql<number>`1 - (${products.embedding} <=> ${vectorLiteral}::vector)`.as(
+        'similarity',
+      ),
+    })
+    .from(products)
+    .where(and(eq(products.restaurantId, restaurantId), sql`${products.embedding} IS NOT NULL`))
+    .orderBy(sql`${products.embedding} <=> ${vectorLiteral}::vector`)
+    .limit(limit);
+
+  return rows
+    .map<MatchCandidate>((row) => ({
+      productId: row.productId,
+      canonicalName: row.canonicalName,
+      confidence: Number(row.similarity),
+      matchedBy: 'embedding',
+    }))
+    .filter((c) => c.confidence >= threshold);
+}
+
+async function topNByFuzzy(
+  db: Database,
+  restaurantId: string,
+  rawName: string,
+  limit: number,
+  threshold: number,
+): Promise<MatchCandidate[]> {
+  const normalized = rawName.trim();
+  if (!normalized) return [];
+  const rows = await db
+    .select({
+      productId: products.id,
+      canonicalName: products.canonicalName,
+      similarity: sql<number>`similarity(${products.canonicalName}, ${normalized})`.as(
+        'similarity',
+      ),
+    })
+    .from(products)
+    .where(
+      and(
+        eq(products.restaurantId, restaurantId),
+        sql`similarity(${products.canonicalName}, ${normalized}) >= ${threshold}`,
+      ),
+    )
+    .orderBy(sql`similarity(${products.canonicalName}, ${normalized}) DESC`)
+    .limit(limit);
+
+  return rows.map<MatchCandidate>((row) => ({
+    productId: row.productId,
+    canonicalName: row.canonicalName,
+    confidence: Number(row.similarity),
+    matchedBy: 'fuzzy',
+  }));
+}
+
 export { or };

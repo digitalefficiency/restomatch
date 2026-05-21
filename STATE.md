@@ -1,10 +1,10 @@
 # RestoMatch — Build State
 
-**Active milestone:** M3 (complete, awaiting approval to start M4)
-**Last completed task:** Catalog matcher with 4 strategies + learning loop, 26 integration tests
-**Next planned task:** Milestone 4 — OCR Pipeline (Document AI + Claude Vision mocks + reconciliation)
+**Active milestone:** M4 (complete, awaiting approval to start M5)
+**Last completed task:** OCR pipeline with reconciler, providers, catalog integration; worker wired end-to-end
+**Next planned task:** Milestone 5 — MarketMan adapter (procurement platform sync)
 **Open blockers:** none
-**Tests at end of session:** 93 passing (48 matching + 26 catalog + 15 API + 2 DB + 2 E2E)
+**Tests at end of session:** 120 passing (48 matching + 29 catalog + 24 ocr + 15 API + 2 DB + 2 E2E)
 
 ## Quick start for next session
 
@@ -34,3 +34,6 @@ DATABASE_URL_TEST="postgres://romkoren@localhost:5432/restomatch_test" pnpm test
 - Catalog matcher uses pgvector cosine distance via raw SQL `<=>` operator with `vector_literal::vector` casting (Drizzle doesn't expose pgvector ops).
 - pg_trgm GIN index not yet added (deferred to M9 perf pass) — `similarity()` is fast on small datasets.
 - MockEmbeddingProvider uses char-bigrams + FNV-1a hash → similar strings produce similar vectors.
+- OCR reconciler: Claude wins string conflicts (Hebrew strength), Document AI tie-breaks numerics. Line matching by Dice bigram coefficient, threshold 0.4.
+- OCR pipeline: auto-link product when top candidate confidence ≥ 0.95; otherwise leave productId null and surface candidates for human review.
+- Real Google Document AI + Claude Vision providers deferred until credentials arrive. Tests use `StubOcrProvider`. Worker requires `mockProviders` until then.

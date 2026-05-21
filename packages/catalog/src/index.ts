@@ -6,6 +6,7 @@ export {
   matchByEmbedding,
   matchByFuzzy,
   matchProduct,
+  matchProductTopN,
 } from './matcher';
 export {
   recordConfirmedMatch,

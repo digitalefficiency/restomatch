@@ -23,6 +23,7 @@ import {
   matchByEmbedding,
   matchByFuzzy,
   matchProduct,
+  matchProductTopN,
 } from '../matcher';
 import { recordConfirmedMatch } from '../learning';
 
@@ -374,6 +375,64 @@ describe('matchProduct (composite)', () => {
       rawDescription: 'completely-unrelated-product-xyz-123',
     });
     expect(match).toBeNull();
+  });
+});
+
+describe('matchProductTopN', () => {
+  it('returns multiple candidates ranked by confidence', async () => {
+    await seedRestaurantWithProducts();
+    const queryEmbedding = await embedder.embed('עגבניה שרי');
+    const candidates = await matchProductTopN(
+      db,
+      {
+        restaurantId,
+        supplierId: null,
+        rawDescription: 'עגבניה שרי',
+        embedding: queryEmbedding,
+      },
+      3,
+      { embeddingMinSimilarity: 0.1, fuzzyMinSimilarity: 0.1 },
+    );
+    expect(candidates.length).toBeGreaterThan(0);
+    // Sorted descending by confidence
+    for (let i = 1; i < candidates.length; i += 1) {
+      expect(candidates[i - 1]!.confidence).toBeGreaterThanOrEqual(candidates[i]!.confidence);
+    }
+  });
+
+  it('short-circuits to alias when it exists', async () => {
+    const { tomato } = await seedRestaurantWithProducts();
+    await db.insert(productAliases).values({
+      productId: tomato.id,
+      supplierId,
+      supplierNameRaw: 'cherry tomato',
+      confidence: '1.000',
+    });
+    const candidates = await matchProductTopN(db, {
+      restaurantId,
+      supplierId,
+      rawDescription: 'cherry tomato',
+    });
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.matchedBy).toBe('alias');
+  });
+
+  it('deduplicates products that match via both embedding and fuzzy', async () => {
+    await seedRestaurantWithProducts();
+    const queryEmbedding = await embedder.embed('עגבניה שרי');
+    const candidates = await matchProductTopN(
+      db,
+      {
+        restaurantId,
+        supplierId: null,
+        rawDescription: 'עגבניה שרי',
+        embedding: queryEmbedding,
+      },
+      5,
+      { embeddingMinSimilarity: 0.1, fuzzyMinSimilarity: 0.1 },
+    );
+    const ids = candidates.map((c) => c.productId);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });
 

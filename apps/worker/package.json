@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@restomatch/catalog": "workspace:*",
     "@restomatch/db": "workspace:*",
     "@restomatch/matching": "workspace:*",
     "@restomatch/ocr": "workspace:*",
