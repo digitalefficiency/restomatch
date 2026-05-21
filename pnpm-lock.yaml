@@ -187,6 +187,9 @@ importers:
       '@restomatch/catalog':
         specifier: workspace:*
         version: link:../../packages/catalog
+      '@restomatch/charts':
+        specifier: workspace:*
+        version: link:../../packages/charts
       '@restomatch/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -276,10 +279,17 @@ importers:
         version: 2.1.9(@types/node@22.19.19)(lightningcss@1.27.0)(msw@2.14.6(@types/node@22.19.19)(typescript@5.9.3))(terser@5.47.1)
 
   packages/charts:
+    dependencies:
+      '@restomatch/db':
+        specifier: workspace:*
+        version: link:../db
     devDependencies:
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.19)(lightningcss@1.27.0)(msw@2.14.6(@types/node@22.19.19)(typescript@5.9.3))(terser@5.47.1)
 
   packages/db:
     dependencies:

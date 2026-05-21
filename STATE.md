@@ -1,17 +1,17 @@
 # RestoMatch — Build State
 
-**Active milestone:** M6 (complete, awaiting approval to start M7)
-**Last completed task:** Receiving flow end-to-end with mobile screens, daily expectations cron, suppliers.external_ref
-**Next planned task:** Milestone 7 — Owner Dashboard (Web + Mobile parity)
+**Active milestone:** M7 (complete, awaiting approval to start M8)
+**Last completed task:** Owner dashboard with KPIs/Leaks/Suppliers on both web and mobile + baselines worker
+**Next planned task:** Milestone 8 — Approvals Engine (discrepancy routing, WhatsApp/Push, manager queue)
 **Open blockers:** none
-**Tests at end of session:** 154 passing (48 matching + 29 catalog + 24 ocr + 17 procurement + 32 api + 2 db + 2 E2E)
+**Tests at end of session:** 175 passing (48 matching + 29 catalog + 24 ocr + 17 procurement + 17 charts + 36 api + 2 db + 2 E2E)
 
 ## Quick start for next session
 
 ```bash
 brew services list | grep -E "(postgresql|redis)"
 cd ~/Desktop/restomatch
-git log --oneline -8
+git log --oneline -9
 DATABASE_URL_TEST="postgres://romkoren@localhost:5432/restomatch_test" pnpm typecheck
 DATABASE_URL_TEST="postgres://romkoren@localhost:5432/restomatch_test" pnpm test
 ```
@@ -37,13 +37,16 @@ DATABASE_URL_TEST="postgres://romkoren@localhost:5432/restomatch_test" pnpm test
 - OCR pipeline: auto-link product when top candidate confidence ≥ 0.95.
 - Per-restaurant review threshold lives in `restaurants.settings.ocrReviewThreshold` (jsonb).
 - HTTP client in `@restomatch/procurement` retries 5xx + 429 with exponential backoff. 4xx never retries.
-- Procurement adapters use `// VERIFY: pending real API contract` tags on interfaces until real docs land.
 - MSW 2.x (not nock) for HTTP test mocking — works with Node 20 fetch.
 - Sync worker upserts POs by `(source_platform, source_ref)` — unique key prevents duplicates.
-- **Suppliers now have `external_ref` + `source_platform`** with unique index. 3-tier sync lookup: by external_ref → by name (lowercase) → insert new.
+- Suppliers have `external_ref` + `source_platform` with unique index. 3-tier sync lookup: by external_ref → by name (lowercase) → insert new.
 - credentialsVaultRef uses `env:VAR_NAME` convention until M9 brings real Vault.
-- **Test concurrency: `--concurrency=1`** at the root test script — packages share test DB; race conditions break parallel runs.
-- Vitest configs in db/catalog/api/matching all use `pool: 'forks', singleFork: true`.
-- **Filesystem note:** if file Write call returns success but content seems reverted later, re-read before next edit. Linter/watcher may rollback between sessions.
+- Test concurrency: `--concurrency=1` at the root test script — packages share test DB.
+- Vitest configs in db/catalog/api/matching/charts all use `pool: 'forks', singleFork: true`.
+- **Filesystem note:** if file Write call returns success but content seems reverted later, re-read before next edit.
 - Receiving flow: tRPC `receiving.*` covers todayExpectations/getPo/startReceipt/markGrLine/submitReceipt/registerInvoice/pendingInvoices.
-- Daily expectations worker writes to `audit_log` with action='daily_expectations.computed'. Notification triggers come in M8.
+- Daily expectations worker writes to `audit_log`. Notification triggers come in M8.
+- **`@restomatch/charts` package owns SQL** for KPIs/leaks/suppliers/baselines — tRPC router delegates to it directly. Tests run against real DB.
+- **`computeBaselines` uses Postgres `PERCENTILE_CONT`** with HAVING `COUNT(*) >= minSamples`. Upsert by (product, supplier, window_days).
+- **`computeOwnerKpis.weekCleanMatchPct` defaults to 100% when there are no match_runs** — better UX than NaN on empty restaurants.
+- **`computeLeaks.monthExcessIls`** uses qty=10/month proxy until receipt-history aggregation lands (M9).

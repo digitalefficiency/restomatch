@@ -1,65 +1,73 @@
-import { redirect } from 'next/navigation';
-import { auth, signOut } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
 
 export default async function DashboardPage() {
-  const session = await auth();
-  if (!session?.user?.id) {
-    redirect('/login');
-  }
-
   const caller = await createServerCaller();
-  const memberships = await caller.onboarding.myMemberships();
-
-  if (memberships.length === 0) {
-    redirect('/onboarding');
-  }
-
-  const active = memberships.find((m) => m.restaurantId === session.user.restaurantId) ?? memberships[0]!;
-
-  async function logout() {
-    'use server';
-    await signOut({ redirectTo: '/' });
-  }
+  const kpis = await caller.owner.kpis();
 
   return (
-    <main className="min-h-screen p-8">
-      <div className="max-w-3xl mx-auto">
-        <header className="flex items-start justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-white">{active.restaurantName}</h1>
-            <p className="text-sm text-neutral-400 mt-1">
-              {session.user.email} · {labelForRole(active.role)}
-            </p>
-          </div>
-          <form action={logout}>
-            <button className="text-sm text-neutral-400 hover:text-white border border-neutral-700 rounded-md px-3 py-1.5">
-              התנתק
-            </button>
-          </form>
-        </header>
+    <div>
+      <h2 className="text-2xl font-bold mb-6">סקירה כללית</h2>
 
-        <div className="rounded-xl border border-neutral-800 bg-surface p-6">
-          <h2 className="text-lg font-semibold mb-3">סטטוס המערכת</h2>
-          <ul className="space-y-2 text-sm text-neutral-300">
-            <li>• Auth.js v5 + Drizzle adapter — פעיל</li>
-            <li>• tRPC v11 + multi-tenant RBAC — פעיל</li>
-            <li>• Postgres + pgvector — פעיל</li>
-            <li>• Milestone 1 — Foundation</li>
-          </ul>
-        </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Kpi
+          label="הפסד פוטנציאלי החודש"
+          value={formatCurrency(kpis.monthPotentialLossIls)}
+          tone="warning"
+          subtitle="דיסקרפנסיות פתוחות עם חומרה בינונית ומעלה"
+        />
+        <Kpi
+          label="חיסכון שנשמר החודש"
+          value={formatCurrency(kpis.monthSavingsCapturedIls)}
+          tone="accent"
+          subtitle="כסף שמנעת לאחר אישור/דחיית הפרשים"
+        />
+        <Kpi
+          label="ממתינות לאישור"
+          value={kpis.pendingApprovalsCount.toString()}
+          tone="default"
+          subtitle="חריגות בתור — מנהל/בעלים"
+        />
+        <Kpi
+          label="התאמות נקיות השבוע"
+          value={`${kpis.weekCleanMatchPct.toFixed(1)}%`}
+          tone={kpis.weekCleanMatchPct >= 80 ? 'accent' : 'warning'}
+          subtitle="ממוצע מהשבעה ימים האחרונים"
+        />
       </div>
-    </main>
+    </div>
   );
 }
 
-function labelForRole(role: string): string {
-  const map: Record<string, string> = {
-    owner: 'בעלים',
-    manager: 'מנהל/ת',
-    receiver: 'מקבל סחורה',
-    bookkeeper: 'חשב/ת',
-    chef: 'שף',
-  };
-  return map[role] ?? role;
+function Kpi({
+  label,
+  value,
+  subtitle,
+  tone,
+}: {
+  label: string;
+  value: string;
+  subtitle?: string;
+  tone: 'default' | 'accent' | 'warning';
+}) {
+  const accent =
+    tone === 'accent'
+      ? 'text-accent'
+      : tone === 'warning'
+        ? 'text-warning'
+        : 'text-white';
+  return (
+    <div className="rounded-xl border border-neutral-800 bg-surface p-5">
+      <p className="text-xs uppercase tracking-wider text-neutral-500 mb-2">{label}</p>
+      <p className={`text-3xl font-bold ${accent}`}>{value}</p>
+      {subtitle ? <p className="text-xs text-neutral-500 mt-2">{subtitle}</p> : null}
+    </div>
+  );
+}
+
+function formatCurrency(value: number): string {
+  return new Intl.NumberFormat('he-IL', {
+    style: 'currency',
+    currency: 'ILS',
+    maximumFractionDigits: 0,
+  }).format(value);
 }

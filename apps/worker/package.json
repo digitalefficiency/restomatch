@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@restomatch/catalog": "workspace:*",
+    "@restomatch/charts": "workspace:*",
     "@restomatch/db": "workspace:*",
     "@restomatch/matching": "workspace:*",
     "@restomatch/ocr": "workspace:*",
