@@ -36,6 +36,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
           <nav className="flex gap-1 text-sm">
             <NavLink href="/dashboard">סקירה</NavLink>
+            <NavLink href="/dashboard/approvals">תור אישורים</NavLink>
             <NavLink href="/dashboard/leaks">בלש דליפות</NavLink>
             <NavLink href="/dashboard/suppliers">ספקים</NavLink>
           </nav>

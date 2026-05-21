@@ -655,6 +655,50 @@ export const supplierIntegrations = pgTable('supplier_integrations', {
 });
 
 /* ──────────────────────────────────────────────────────────────────────────
+ * Notifications outbox
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export const notificationChannel = pgEnum('notification_channel', [
+  'whatsapp',
+  'push',
+  'email',
+]);
+
+export const notificationStatus = pgEnum('notification_status', [
+  'queued',
+  'sent',
+  'failed',
+  'cancelled',
+]);
+
+export const notificationsOutbox = pgTable(
+  'notifications_outbox',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    channel: notificationChannel('channel').notNull(),
+    target: text('target').notNull(),
+    subject: text('subject'),
+    body: text('body').notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown> | null>().default(sql`NULL`),
+    status: notificationStatus('status').notNull().default('queued'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    lastError: text('last_error'),
+    scheduledAt: timestamp('scheduled_at', { withTimezone: true }).notNull().defaultNow(),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    relatedEntityType: text('related_entity_type'),
+    relatedEntityId: uuid('related_entity_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('notifications_status_scheduled_idx').on(t.status, t.scheduledAt),
+    index('notifications_related_idx').on(t.relatedEntityType, t.relatedEntityId),
+  ],
+);
+
+/* ──────────────────────────────────────────────────────────────────────────
  * Relations
  * ────────────────────────────────────────────────────────────────────────── */
 

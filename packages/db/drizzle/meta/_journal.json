@@ -15,6 +15,13 @@
       "when": 1779386087981,
       "tag": "0001_dry_sentinel",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1779388003738,
+      "tag": "0002_sturdy_puck",
+      "breakpoints": true
     }
   ]
 }

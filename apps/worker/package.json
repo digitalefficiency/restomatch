@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@restomatch/api": "workspace:*",
     "@restomatch/catalog": "workspace:*",
     "@restomatch/charts": "workspace:*",
     "@restomatch/db": "workspace:*",
