@@ -1,0 +1,26 @@
+{
+  "name": "@restomatch/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@restomatch/db": "workspace:*",
+    "@restomatch/matching": "workspace:*",
+    "@restomatch/ocr": "workspace:*",
+    "@restomatch/procurement": "workspace:*",
+    "@restomatch/types": "workspace:*",
+    "bullmq": "^5.34.5",
+    "ioredis": "^5.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
