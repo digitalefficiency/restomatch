@@ -15,8 +15,9 @@ export type DiscrepancyType =
   | 'TOTAL_MISMATCH';
 
 export type Severity = 'info' | 'warn' | 'block';
+export type MatchStatus = 'clean' | 'minor' | 'major' | 'blocked';
 
-export interface DiscrepancyResult {
+export interface Discrepancy {
   type: DiscrepancyType;
   severity: Severity;
   productId: string | null;
@@ -27,44 +28,69 @@ export interface DiscrepancyResult {
   actual: number | null;
   deltaAmount: number;
   toleranceUsed: string;
+  message?: string;
+}
+
+export interface PoLineInput {
+  id: string;
+  productId: string | null;
+  qtyOrdered: number;
+  unit: string;
+  unitPriceExpected: number | null;
+}
+
+export interface GrLineInput {
+  id: string;
+  poLineId: string | null;
+  productId: string | null;
+  qtyReceived: number;
+}
+
+export interface InvoiceLineInput {
+  id: string;
+  productId: string | null;
+  qtyBilled: number;
+  unit: string;
+  unitPriceBilled: number;
+  lineTotal: number;
+}
+
+export interface InvoiceHeaderInput {
+  invoiceNumber: string;
+  invoiceDate: Date;
+  supplierId: string;
+  totalExclVat: number;
+  vatAmount: number;
+  totalInclVat: number;
+}
+
+export interface BaselineEntry {
+  p50: number;
+  p90: number;
 }
 
 export interface MatchInput {
-  poLines: Array<{
-    id: string;
-    productId: string | null;
-    qtyOrdered: number;
-    unit: string;
-    unitPriceExpected: number | null;
-  }>;
-  grLines: Array<{
-    id: string;
-    poLineId: string | null;
-    productId: string | null;
-    qtyReceived: number;
-  }>;
-  invoiceLines: Array<{
-    id: string;
-    productId: string | null;
-    qtyBilled: number;
-    unit: string;
-    unitPriceBilled: number;
-    lineTotal: number;
-  }>;
-  invoiceTotal?: number;
-  vatAmount?: number;
+  invoice: InvoiceHeaderInput;
+  poLines: PoLineInput[];
+  grLines: GrLineInput[];
+  invoiceLines: InvoiceLineInput[];
   vatRate: number;
   tolerances: Tolerances;
+
+  /** Optional: historical price baselines per productId */
+  baselines?: Record<string, BaselineEntry>;
+
+  /** Optional: known invoice numbers for the supplier — used for duplicate detection */
+  knownInvoiceNumbers?: ReadonlySet<string>;
+
+  /** Optional: expected delivery date for the PO — used for DATE_ANOMALY check */
+  expectedDeliveryDate?: Date;
 }
 
 export interface MatchOutput {
-  status: 'clean' | 'minor' | 'major' | 'blocked';
+  status: MatchStatus;
   totalDiscrepancyAmount: number;
-  discrepancies: DiscrepancyResult[];
+  discrepancies: Discrepancy[];
 }
 
-export function runMatch(_input: MatchInput): MatchOutput {
-  throw new Error(
-    'runMatch not yet implemented — implement per plan section 5.2 (3-way matching logic).',
-  );
-}
+export { runMatch } from './engine';

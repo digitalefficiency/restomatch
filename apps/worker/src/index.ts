@@ -1,5 +1,6 @@
 import { startBaselinesWorker } from './jobs/baselines';
 import { startDailyExpectationsWorker } from './jobs/dailyExpectations';
+import { startMatchInvoiceWorker } from './jobs/matchInvoice';
 import { startOcrInvoiceWorker } from './jobs/ocrInvoice';
 import { startSyncPlatformsWorker } from './jobs/syncPlatforms';
 
@@ -8,6 +9,7 @@ const workers = [
   startDailyExpectationsWorker(),
   startBaselinesWorker(),
   startOcrInvoiceWorker(),
+  startMatchInvoiceWorker(),
 ];
 
 console.log(`[worker] started ${workers.length} workers`);
