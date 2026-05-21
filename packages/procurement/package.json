@@ -9,13 +9,16 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@restomatch/types": "workspace:*",
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "typescript": "^5.7.3"
+    "msw": "^2.7.0",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
   }
 }

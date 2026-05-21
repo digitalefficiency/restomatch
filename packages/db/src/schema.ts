@@ -127,6 +127,8 @@ export interface RestaurantSettings {
     qtyAbsolute?: number;
   };
   baselineWindowDays?: number;
+  /** Confidence below which OCR results are flagged for human review (0-1). */
+  ocrReviewThreshold?: number;
 }
 
 export const users = pgTable(
