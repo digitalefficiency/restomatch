@@ -1,20 +1,24 @@
-export default function Home() {
+import Link from 'next/link';
+import { auth } from '@/auth';
+
+export default async function Home() {
+  const session = await auth();
+  const ctaHref = session?.user?.id ? '/dashboard' : '/login';
+  const ctaLabel = session?.user?.id ? 'לדשבורד' : 'כניסה למערכת';
+
   return (
     <main className="min-h-screen flex items-center justify-center p-8">
       <div className="max-w-2xl text-right">
-        <h1 className="text-4xl font-bold mb-4 text-white">RestoMatch</h1>
-        <p className="text-lg text-neutral-400 mb-8">
-          התאמת חשבוניות, הזמנות וקבלת סחורה למסעדות — סקפלד ראשוני.
+        <h1 className="text-5xl font-bold mb-3 text-white tracking-tight">RestoMatch</h1>
+        <p className="text-xl text-neutral-400 mb-8">
+          התאמת חשבוניות, הזמנות וקבלת סחורה למסעדות.
         </p>
-        <div className="rounded-lg border border-neutral-800 bg-surface p-6">
-          <h2 className="text-xl font-semibold mb-3">צעדים הבאים</h2>
-          <ul className="space-y-2 text-neutral-300 list-disc list-inside">
-            <li>הקמת בסיס נתונים Postgres עם pgvector (Neon מומלץ)</li>
-            <li>הרצת <code className="text-accent">pnpm db:generate</code> ו-<code className="text-accent">db:migrate</code></li>
-            <li>חיבור Auth.js + הגדרת ראשון restaurant + owner</li>
-            <li>מימוש MarketMan adapter ב-<code className="text-accent">packages/procurement</code></li>
-          </ul>
-        </div>
+        <Link
+          href={ctaHref}
+          className="inline-block bg-primary hover:bg-primary-hover rounded-md px-5 py-2.5 font-medium transition-colors"
+        >
+          {ctaLabel}
+        </Link>
       </div>
     </main>
   );

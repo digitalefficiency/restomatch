@@ -9,9 +9,7 @@ const config: NextConfig = {
     '@restomatch/types',
     '@restomatch/ui-tokens',
   ],
-  experimental: {
-    typedRoutes: true,
-  },
+  serverExternalPackages: ['nodemailer', 'postgres'],
 };
 
 export default config;

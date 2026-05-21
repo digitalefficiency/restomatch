@@ -9,15 +9,22 @@
     ".": "./src/index.ts",
     "./client": "./src/client.ts"
   },
-  "scripts": { "typecheck": "tsc --noEmit" },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
   "dependencies": {
     "@restomatch/db": "workspace:*",
     "@restomatch/types": "workspace:*",
     "@restomatch/charts": "workspace:*",
     "@trpc/server": "^11.0.0-rc.683",
     "@trpc/client": "^11.0.0-rc.683",
+    "drizzle-orm": "^0.38.3",
     "superjson": "^2.2.2",
     "zod": "^3.24.1"
   },
-  "devDependencies": { "typescript": "^5.7.3" }
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
 }

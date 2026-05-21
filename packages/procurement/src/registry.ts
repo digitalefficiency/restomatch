@@ -1,5 +1,5 @@
-import { MarketManAdapter } from './adapters/marketman.js';
-import type { PlatformId, ProcurementAdapter } from './types.js';
+import { MarketManAdapter } from './adapters/marketman';
+import type { PlatformId, ProcurementAdapter } from './types';
 
 const adapters = new Map<PlatformId, ProcurementAdapter>([['marketman', new MarketManAdapter()]]);
 

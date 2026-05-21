@@ -1,10 +1,15 @@
-import type { Database } from '@restomatch/db';
+import type { Database, UserRole } from '@restomatch/db';
 
 export interface Session {
   userId: string;
-  restaurantId: string;
-  role: 'owner' | 'manager' | 'receiver' | 'bookkeeper' | 'chef';
+  restaurantId: string | null;
+  role: UserRole | null;
 }
+
+export type MemberSession = Session & {
+  restaurantId: string;
+  role: UserRole;
+};
 
 export interface AppContext {
   db: Database;
@@ -12,3 +17,4 @@ export interface AppContext {
 }
 
 export type AuthedContext = AppContext & { session: Session };
+export type MemberContext = AppContext & { session: MemberSession };

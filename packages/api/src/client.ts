@@ -1,6 +1,6 @@
 import { createTRPCClient, httpBatchLink, type CreateTRPCClient } from '@trpc/client';
 import superjson from 'superjson';
-import type { AppRouter } from './index.js';
+import type { AppRouter } from './index';
 
 export function createApiClient(baseUrl: string, getHeaders?: () => Record<string, string>) {
   return createTRPCClient<AppRouter>({

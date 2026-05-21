@@ -1,6 +1,7 @@
 import { initTRPC, TRPCError } from '@trpc/server';
 import superjson from 'superjson';
-import type { AppContext } from './context.js';
+import type { UserRole } from '@restomatch/db';
+import type { AppContext, MemberSession } from './context';
 
 const t = initTRPC.context<AppContext>().create({ transformer: superjson });
 
@@ -14,9 +15,37 @@ export const authedProcedure = t.procedure.use(({ ctx, next }) => {
   return next({ ctx: { ...ctx, session: ctx.session } });
 });
 
-export const ownerProcedure = authedProcedure.use(({ ctx, next }) => {
-  if (ctx.session.role !== 'owner') {
-    throw new TRPCError({ code: 'FORBIDDEN', message: 'Owner role required' });
+const memberProcedureBase = authedProcedure.use(({ ctx, next }) => {
+  if (!ctx.session.restaurantId || !ctx.session.role) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'User has no active restaurant membership',
+    });
   }
-  return next();
+  const session: MemberSession = {
+    userId: ctx.session.userId,
+    restaurantId: ctx.session.restaurantId,
+    role: ctx.session.role,
+  };
+  return next({ ctx: { ...ctx, session } });
 });
+
+export const memberProcedure = memberProcedureBase;
+
+function requireRoles(allowed: ReadonlyArray<UserRole>) {
+  return memberProcedureBase.use(({ ctx, next }) => {
+    if (!allowed.includes(ctx.session.role)) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: `Required role: ${allowed.join('|')}, got: ${ctx.session.role}`,
+      });
+    }
+    return next();
+  });
+}
+
+export const ownerProcedure = requireRoles(['owner']);
+export const managerProcedure = requireRoles(['owner', 'manager']);
+export const receiverProcedure = requireRoles(['owner', 'manager', 'receiver']);
+export const bookkeeperProcedure = requireRoles(['owner', 'bookkeeper']);
+export const chefProcedure = requireRoles(['owner', 'manager', 'chef']);

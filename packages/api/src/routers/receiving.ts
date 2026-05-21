@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { authedProcedure, router } from '../trpc.js';
+import { authedProcedure, router } from '../trpc';
 
 export const receivingRouter = router({
   todayExpectations: authedProcedure.query(async () => {

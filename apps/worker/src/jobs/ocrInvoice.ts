@@ -1,4 +1,4 @@
-import { makeWorker } from '../queue.js';
+import { makeWorker } from '../queue';
 
 export interface OcrInvoiceJob {
   restaurantId: string;

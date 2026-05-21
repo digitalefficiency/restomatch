@@ -3,7 +3,7 @@ import type {
   NormalizedProduct,
   NormalizedSupplier,
   ProcurementAdapter,
-} from '../types.js';
+} from '../types';
 import type { NormalizedPurchaseOrder } from '@restomatch/types';
 
 export class MarketManAdapter implements ProcurementAdapter {

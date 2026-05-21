@@ -1,7 +1,7 @@
-import { startBaselinesWorker } from './jobs/baselines.js';
-import { startDailyExpectationsWorker } from './jobs/dailyExpectations.js';
-import { startOcrInvoiceWorker } from './jobs/ocrInvoice.js';
-import { startSyncPlatformsWorker } from './jobs/syncPlatforms.js';
+import { startBaselinesWorker } from './jobs/baselines';
+import { startDailyExpectationsWorker } from './jobs/dailyExpectations';
+import { startOcrInvoiceWorker } from './jobs/ocrInvoice';
+import { startSyncPlatformsWorker } from './jobs/syncPlatforms';
 
 const workers = [
   startSyncPlatformsWorker(),

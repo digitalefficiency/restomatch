@@ -1,9 +1,9 @@
 import type { OwnerKpis } from '@restomatch/charts';
 import { emptyKpis } from '@restomatch/charts';
-import { authedProcedure, ownerProcedure, router } from '../trpc.js';
+import { memberProcedure, ownerProcedure, router } from '../trpc';
 
 export const ownerRouter = router({
-  kpis: authedProcedure.query(async (): Promise<OwnerKpis> => {
+  kpis: memberProcedure.query(async (): Promise<OwnerKpis> => {
     return emptyKpis();
   }),
 
@@ -11,7 +11,7 @@ export const ownerRouter = router({
     return [] as Array<unknown>;
   }),
 
-  suppliers: authedProcedure.query(async () => {
+  suppliers: memberProcedure.query(async () => {
     return [] as Array<unknown>;
   }),
 });
