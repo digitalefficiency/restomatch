@@ -55,7 +55,12 @@ export function startSyncPlatformsWorker() {
     const ctx = { restaurantId: job.data.restaurantId, credentials };
 
     // 1. Sync suppliers first (needed for FK on POs)
-    const supplierMap = await syncSuppliers(db, job.data.restaurantId, await adapter.listSuppliers(ctx));
+    const supplierMap = await syncSuppliers(
+      db,
+      job.data.restaurantId,
+      job.data.platform,
+      await adapter.listSuppliers(ctx),
+    );
 
     // 2. Sync orders (and their lines)
     const orders = await adapter.listOrders(ctx, since);
@@ -84,30 +89,56 @@ export function startSyncPlatformsWorker() {
 }
 
 /**
- * Insert any new suppliers (by externalId stored in a synthetic column hack
- * for now — production should add an `external_ref` column to suppliers).
- * For M5, we look up by name within the restaurant — good enough since the
- * platform is the source of truth and rename events are rare.
+ * Sync suppliers from the platform.
  *
- * VERIFY: pending suppliers.external_ref column (track via M5.1 migration).
+ * Lookup order:
+ *   1. By (sourcePlatform, externalRef) — the platform-supplied UUID.
+ *   2. By restaurant-scoped lowercase name — for suppliers added manually
+ *      before the platform connection existed (one-time backfill).
+ *
+ * If neither matches, inserts a new supplier with the externalRef populated.
  */
 async function syncSuppliers(
   db: ReturnType<typeof createDb>,
   restaurantId: string,
+  platform: PlatformId,
   externalSuppliers: { externalId: string; name: string; businessId?: string; contactEmail?: string }[],
 ): Promise<Map<string, string>> {
   const supplierMap = new Map<string, string>(); // externalId → internal supplier.id
 
   const existing = await db
-    .select({ id: suppliers.id, name: suppliers.name })
+    .select({
+      id: suppliers.id,
+      name: suppliers.name,
+      externalRef: suppliers.externalRef,
+      sourcePlatform: suppliers.sourcePlatform,
+    })
     .from(suppliers)
     .where(eq(suppliers.restaurantId, restaurantId));
-  const byName = new Map(existing.map((s) => [s.name.toLowerCase().trim(), s.id]));
+
+  const byExternalRef = new Map<string, string>();
+  const byName = new Map<string, string>();
+  for (const s of existing) {
+    if (s.externalRef && s.sourcePlatform === platform) {
+      byExternalRef.set(s.externalRef, s.id);
+    }
+    byName.set(s.name.toLowerCase().trim(), s.id);
+  }
 
   for (const ext of externalSuppliers) {
-    const matchId = byName.get(ext.name.toLowerCase().trim());
-    if (matchId) {
-      supplierMap.set(ext.externalId, matchId);
+    const byRef = byExternalRef.get(ext.externalId);
+    if (byRef) {
+      supplierMap.set(ext.externalId, byRef);
+      continue;
+    }
+    const nameMatch = byName.get(ext.name.toLowerCase().trim());
+    if (nameMatch) {
+      // Backfill external_ref so future syncs hit the fast path
+      await db
+        .update(suppliers)
+        .set({ externalRef: ext.externalId, sourcePlatform: platform })
+        .where(eq(suppliers.id, nameMatch));
+      supplierMap.set(ext.externalId, nameMatch);
       continue;
     }
     const [inserted] = await db
@@ -117,6 +148,8 @@ async function syncSuppliers(
         name: ext.name,
         businessId: ext.businessId,
         contactEmail: ext.contactEmail,
+        externalRef: ext.externalId,
+        sourcePlatform: platform,
       })
       .returning({ id: suppliers.id });
     if (inserted) supplierMap.set(ext.externalId, inserted.id);

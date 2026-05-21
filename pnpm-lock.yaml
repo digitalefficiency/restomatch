@@ -38,9 +38,21 @@ importers:
       '@restomatch/ui-tokens':
         specifier: workspace:*
         version: link:../../packages/ui-tokens
+      '@tanstack/react-query':
+        specifier: ^5.62.11
+        version: 5.100.11(react@18.3.1)
+      '@trpc/client':
+        specifier: ^11.0.0-rc.683
+        version: 11.17.0(@trpc/server@11.17.0(typescript@5.9.3))(typescript@5.9.3)
+      '@trpc/react-query':
+        specifier: ^11.0.0-rc.683
+        version: 11.17.0(@tanstack/react-query@5.100.11(react@18.3.1))(@trpc/client@11.17.0(@trpc/server@11.17.0(typescript@5.9.3))(typescript@5.9.3))(@trpc/server@11.17.0(typescript@5.9.3))(react@18.3.1)(typescript@5.9.3)
       expo:
         specifier: ~52.0.20
         version: 52.0.49(@babel/core@7.29.0)(@babel/preset-env@7.29.5(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.5(@babel/core@7.29.0)(@babel/preset-env@7.29.5(@babel/core@7.29.0))(@types/react@18.3.29)(react@18.3.1)))(graphql@16.14.0)(react-native@0.76.5(@babel/core@7.29.0)(@babel/preset-env@7.29.5(@babel/core@7.29.0))(@types/react@18.3.29)(react@18.3.1))(react@18.3.1)
+      expo-constants:
+        specifier: ~17.0.5
+        version: 17.0.8(expo@52.0.49(@babel/core@7.29.0)(@babel/preset-env@7.29.5(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.5(@babel/core@7.29.0)(@babel/preset-env@7.29.5(@babel/core@7.29.0))(@types/react@18.3.29)(react@18.3.1)))(graphql@16.14.0)(react-native@0.76.5(@babel/core@7.29.0)(@babel/preset-env@7.29.5(@babel/core@7.29.0))(@types/react@18.3.29)(react@18.3.1))(react@18.3.1))(react-native@0.76.5(@babel/core@7.29.0)(@babel/preset-env@7.29.5(@babel/core@7.29.0))(@types/react@18.3.29)(react@18.3.1))
       expo-router:
         specifier: ~4.0.13
         version: 4.0.22(9c64c7a3ade4f2cae57935e3b2e61872)
@@ -71,6 +83,9 @@ importers:
       react-native-screens:
         specifier: ~4.4.0
         version: 4.4.0(react-native@0.76.5(@babel/core@7.29.0)(@babel/preset-env@7.29.5(@babel/core@7.29.0))(@types/react@18.3.29)(react@18.3.1))(react@18.3.1)
+      superjson:
+        specifier: ^2.2.2
+        version: 2.2.6
       zustand:
         specifier: ^5.0.2
         version: 5.0.13(@types/react@18.3.29)(react@18.3.1)(use-sync-external-store@1.6.0(react@18.3.1))
@@ -231,6 +246,15 @@ importers:
         specifier: ^3.24.1
         version: 3.25.76
     devDependencies:
+      '@restomatch/catalog':
+        specifier: workspace:*
+        version: link:../catalog
+      '@restomatch/matching':
+        specifier: workspace:*
+        version: link:../matching
+      '@restomatch/ocr':
+        specifier: workspace:*
+        version: link:../ocr
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
@@ -8063,6 +8087,11 @@ snapshots:
 
   '@tanstack/query-core@5.100.11': {}
 
+  '@tanstack/react-query@5.100.11(react@18.3.1)':
+    dependencies:
+      '@tanstack/query-core': 5.100.11
+      react: 18.3.1
+
   '@tanstack/react-query@5.100.11(react@19.0.0)':
     dependencies:
       '@tanstack/query-core': 5.100.11
@@ -8071,6 +8100,14 @@ snapshots:
   '@trpc/client@11.17.0(@trpc/server@11.17.0(typescript@5.9.3))(typescript@5.9.3)':
     dependencies:
       '@trpc/server': 11.17.0(typescript@5.9.3)
+      typescript: 5.9.3
+
+  '@trpc/react-query@11.17.0(@tanstack/react-query@5.100.11(react@18.3.1))(@trpc/client@11.17.0(@trpc/server@11.17.0(typescript@5.9.3))(typescript@5.9.3))(@trpc/server@11.17.0(typescript@5.9.3))(react@18.3.1)(typescript@5.9.3)':
+    dependencies:
+      '@tanstack/react-query': 5.100.11(react@18.3.1)
+      '@trpc/client': 11.17.0(@trpc/server@11.17.0(typescript@5.9.3))(typescript@5.9.3)
+      '@trpc/server': 11.17.0(typescript@5.9.3)
+      react: 18.3.1
       typescript: 5.9.3
 
   '@trpc/react-query@11.17.0(@tanstack/react-query@5.100.11(react@19.0.0))(@trpc/client@11.17.0(@trpc/server@11.17.0(typescript@5.9.3))(typescript@5.9.3))(@trpc/server@11.17.0(typescript@5.9.3))(react@19.0.0)(typescript@5.9.3)':

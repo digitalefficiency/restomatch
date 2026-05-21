@@ -8,6 +8,13 @@
       "when": 1779381627120,
       "tag": "0000_romantic_betty_brant",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1779386087981,
+      "tag": "0001_dry_sentinel",
+      "breakpoints": true
     }
   ]
 }

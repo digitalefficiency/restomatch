@@ -236,13 +236,18 @@ export const suppliers = pgTable(
     contactEmail: text('contact_email'),
     contactWhatsapp: varchar('contact_whatsapp', { length: 32 }),
     paymentTerms: text('payment_terms'),
+    externalRef: text('external_ref'),
+    sourcePlatform: procurementPlatform('source_platform'),
     deliverySchedule: jsonb('delivery_schedule')
       .$type<DeliverySchedule | null>()
       .default(sql`NULL`),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('suppliers_restaurant_idx').on(t.restaurantId)],
+  (t) => [
+    index('suppliers_restaurant_idx').on(t.restaurantId),
+    uniqueIndex('suppliers_external_ref_unique').on(t.sourcePlatform, t.externalRef),
+  ],
 );
 
 export type DeliverySchedule = Partial<

@@ -24,6 +24,9 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@restomatch/catalog": "workspace:*",
+    "@restomatch/matching": "workspace:*",
+    "@restomatch/ocr": "workspace:*",
     "typescript": "^5.7.3",
     "vitest": "^2.1.8"
   }
