@@ -1,5 +1,6 @@
 import { router } from './trpc';
 import { approvalsRouter } from './routers/approvals';
+import { exportsRouter } from './routers/exports';
 import { onboardingRouter } from './routers/onboarding';
 import { ownerRouter } from './routers/owner';
 import { receivingRouter } from './routers/receiving';
@@ -9,6 +10,7 @@ export const appRouter = router({
   receiving: receivingRouter,
   onboarding: onboardingRouter,
   approvals: approvalsRouter,
+  exports: exportsRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -39,6 +39,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <NavLink href="/dashboard/approvals">תור אישורים</NavLink>
             <NavLink href="/dashboard/leaks">בלש דליפות</NavLink>
             <NavLink href="/dashboard/suppliers">ספקים</NavLink>
+            <NavLink href="/dashboard/exports">ייצוא</NavLink>
           </nav>
           <form action={logout}>
             <button className="text-sm text-neutral-400 hover:text-white border border-neutral-700 rounded-md px-3 py-1.5">
