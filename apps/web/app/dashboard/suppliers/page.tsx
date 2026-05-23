@@ -7,12 +7,12 @@ export default async function SuppliersPage() {
   return (
     <div>
       <h2 className="text-2xl font-bold mb-2">דירוג ספקים</h2>
-      <p className="text-sm text-neutral-400 mb-6">
+      <p className="text-sm text-slate-500 mb-6">
         רעיון: ספק שגדל ב-clean match% הוא ספק שלא מוסיף עלויות סמויות.
       </p>
 
       {scorecards.length === 0 ? (
-        <div className="rounded-xl border border-neutral-800 bg-surface p-6 text-neutral-400">
+        <div className="rounded-xl border border-slate-200 bg-white p-6 text-slate-500">
           אין ספקים עם נתוני קבלה מספיקים. דוח זה מתבסס על match runs מהזמן האחרון.
         </div>
       ) : (
@@ -20,12 +20,12 @@ export default async function SuppliersPage() {
           {scorecards.map((s) => (
             <article
               key={s.supplierId}
-              className="rounded-xl border border-neutral-800 bg-surface p-5"
+              className="rounded-xl border border-slate-200 bg-white p-5"
             >
               <header className="flex items-start justify-between mb-4">
                 <div>
                   <h3 className="text-lg font-semibold">{s.supplierName}</h3>
-                  <p className="text-xs text-neutral-500 mt-1">
+                  <p className="text-xs text-slate-500 mt-1">
                     {s.matchRunsCount} השוואות בתקופה
                   </p>
                 </div>
@@ -62,10 +62,10 @@ function Row({
   tone?: 'default' | 'warning' | 'danger';
 }) {
   const color =
-    tone === 'danger' ? 'text-danger' : tone === 'warning' ? 'text-warning' : 'text-white';
+    tone === 'danger' ? 'text-danger' : tone === 'warning' ? 'text-warning' : 'text-slate-900';
   return (
     <div className="flex items-center justify-between">
-      <dt className="text-sm text-neutral-400">{label}</dt>
+      <dt className="text-sm text-slate-500">{label}</dt>
       <dd className={`text-base font-semibold tabular-nums ${color}`}>{value}</dd>
     </div>
   );
@@ -78,7 +78,7 @@ function TrendBadge({ trend }: { trend: 'up' | 'down' | 'flat' }) {
       ? 'text-accent bg-accent/10'
       : trend === 'down'
         ? 'text-danger bg-danger/10'
-        : 'text-neutral-400 bg-neutral-800';
+        : 'text-slate-500 bg-slate-100';
   return (
     <span
       className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-lg font-bold ${tone}`}

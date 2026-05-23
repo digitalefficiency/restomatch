@@ -26,11 +26,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <main className="min-h-screen">
-      <header className="border-b border-neutral-800 bg-surface">
+      <header className="border-b border-slate-200 bg-white">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between gap-6">
           <div>
-            <h1 className="text-xl font-semibold text-white">{active.restaurantName}</h1>
-            <p className="text-xs text-neutral-400">
+            <h1 className="text-xl font-semibold text-slate-900">{active.restaurantName}</h1>
+            <p className="text-xs text-slate-500">
               {session.user.email} · {labelForRole(active.role)}
             </p>
           </div>
@@ -42,7 +42,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <NavLink href="/dashboard/exports">ייצוא</NavLink>
           </nav>
           <form action={logout}>
-            <button className="text-sm text-neutral-400 hover:text-white border border-neutral-700 rounded-md px-3 py-1.5">
+            <button className="text-sm text-slate-500 hover:text-slate-900 border border-slate-200 rounded-md px-3 py-1.5">
               התנתק
             </button>
           </form>
@@ -57,7 +57,7 @@ function NavLink({ href, children }: { href: string; children: React.ReactNode }
   return (
     <Link
       href={href}
-      className="px-3 py-1.5 rounded-md text-neutral-300 hover:bg-neutral-800 hover:text-white"
+      className="px-3 py-1.5 rounded-md text-slate-700 hover:bg-slate-100 hover:text-slate-900"
     >
       {children}
     </Link>

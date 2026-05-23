@@ -29,18 +29,18 @@ export default async function LeaksPage() {
   return (
     <div>
       <h2 className="text-2xl font-bold mb-2">בלש הדליפות</h2>
-      <p className="text-sm text-neutral-400 mb-6">
+      <p className="text-sm text-slate-500 mb-6">
         מוצרים שבהם המחיר האחרון חורג מהגבול ה-90 ההיסטורי.
       </p>
 
       {leaks.length === 0 ? (
-        <div className="rounded-xl border border-neutral-800 bg-surface p-6 text-neutral-400">
+        <div className="rounded-xl border border-slate-200 bg-white p-6 text-slate-500">
           לא נמצאו דליפות פעילות. נדרשים לפחות 3 דגימות מחיר לכל ספק לפני שה-baseline מחושב.
         </div>
       ) : (
-        <div className="rounded-xl border border-neutral-800 bg-surface overflow-hidden">
+        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="bg-neutral-900/50 text-neutral-400">
+            <thead className="bg-slate-50/50 text-slate-500">
               <tr>
                 <th className="text-right p-3 font-medium">מוצר</th>
                 <th className="text-right p-3 font-medium">ספק</th>
@@ -54,11 +54,11 @@ export default async function LeaksPage() {
               {leaks.map((row) => (
                 <tr
                   key={`${row.productId}-${row.supplierId}`}
-                  className="border-t border-neutral-800"
+                  className="border-t border-slate-200"
                 >
                   <td className="p-3">
                     <div className="font-medium">{row.productName}</div>
-                    <div className="text-xs text-neutral-500">{row.category ?? '—'}</div>
+                    <div className="text-xs text-slate-500">{row.category ?? '—'}</div>
                   </td>
                   <td className="p-3">{row.supplierName}</td>
                   <td className="p-3 tabular-nums">{formatCurrency(row.baselineP50)}</td>

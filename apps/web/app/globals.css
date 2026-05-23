@@ -4,12 +4,17 @@
 
 @layer base {
   :root {
-    color-scheme: dark;
+    color-scheme: light;
   }
   html {
     direction: rtl;
+    background: linear-gradient(180deg, #fafbfd 0%, #f4f6fa 100%);
+    background-attachment: fixed;
+    min-height: 100vh;
   }
   body {
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    color: #0f172a;
+    background: transparent;
   }
 }

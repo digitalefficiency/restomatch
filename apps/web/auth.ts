@@ -86,7 +86,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (user?.id) {
         t.userId = user.id;
       }
-      if (t.userId && t.restaurantId === undefined) {
+      // Re-query while we don't have a confirmed membership. Once
+      // restaurantId is a real UUID, cache it on the JWT.
+      if (t.userId && !t.restaurantId) {
         const membership = await db
           .select()
           .from(memberships)

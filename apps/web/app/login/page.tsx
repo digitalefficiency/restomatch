@@ -19,9 +19,9 @@ export default async function LoginPage({ searchParams }: PageProps) {
 
   return (
     <main className="min-h-screen flex items-center justify-center p-6">
-      <div className="w-full max-w-md bg-surface border border-neutral-800 rounded-xl p-8">
-        <h1 className="text-2xl font-bold mb-2 text-white">כניסה ל-RestoMatch</h1>
-        <p className="text-sm text-neutral-400 mb-6">
+      <div className="w-full max-w-md bg-white border border-slate-200 rounded-xl p-8">
+        <h1 className="text-2xl font-bold mb-2 text-slate-900">כניסה ל-RestoMatch</h1>
+        <p className="text-sm text-slate-500 mb-6">
           הזן את כתובת המייל שלך — נשלח לך קישור-קסם להתחברות.
         </p>
 
@@ -35,7 +35,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
 
         <form action={action} className="space-y-4">
           <div>
-            <label htmlFor="email" className="block text-sm text-neutral-300 mb-1.5">
+            <label htmlFor="email" className="block text-sm text-slate-700 mb-1.5">
               כתובת מייל
             </label>
             <input
@@ -45,7 +45,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
               required
               autoComplete="email"
               placeholder="you@restaurant.co.il"
-              className="w-full rounded-md bg-bg border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 focus:border-primary outline-none"
+              className="w-full rounded-md bg-white border border-slate-200 px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-primary outline-none"
             />
           </div>
           <button
@@ -56,7 +56,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
           </button>
         </form>
 
-        <p className="mt-6 text-xs text-neutral-500 text-center">
+        <p className="mt-6 text-xs text-slate-500 text-center">
           ב-development הקישור יודפס ל-stdout של השרת.
         </p>
       </div>

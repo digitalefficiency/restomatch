@@ -8,12 +8,12 @@ export default async function ApprovalsPage() {
   return (
     <div>
       <h2 className="text-2xl font-bold mb-2">תור אישורים</h2>
-      <p className="text-sm text-neutral-400 mb-6">
+      <p className="text-sm text-slate-500 mb-6">
         חריגות שמחכות להחלטה שלך. אישור = הופך לחיסכון. דחייה = משאיר את החריגה כהפסד אך מתעד את ההחלטה.
       </p>
 
       {queue.length === 0 ? (
-        <div className="rounded-xl border border-neutral-800 bg-surface p-6 text-neutral-400">
+        <div className="rounded-xl border border-slate-200 bg-white p-6 text-slate-500">
           אין חריגות בתור כרגע. ✓
         </div>
       ) : (

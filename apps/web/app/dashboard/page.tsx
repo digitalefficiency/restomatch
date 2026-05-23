@@ -1,7 +1,12 @@
+import { redirect } from 'next/navigation';
 import { createServerCaller } from '@/lib/trpc/server';
 
 export default async function DashboardPage() {
   const caller = await createServerCaller();
+  const memberships = await caller.onboarding.myMemberships();
+  if (memberships.length === 0) {
+    redirect('/onboarding');
+  }
   const kpis = await caller.owner.kpis();
 
   return (
@@ -54,12 +59,12 @@ function Kpi({
       ? 'text-accent'
       : tone === 'warning'
         ? 'text-warning'
-        : 'text-white';
+        : 'text-slate-900';
   return (
-    <div className="rounded-xl border border-neutral-800 bg-surface p-5">
-      <p className="text-xs uppercase tracking-wider text-neutral-500 mb-2">{label}</p>
+    <div className="rounded-xl border border-slate-200 bg-white p-5">
+      <p className="text-xs uppercase tracking-wider text-slate-500 mb-2">{label}</p>
       <p className={`text-3xl font-bold ${accent}`}>{value}</p>
-      {subtitle ? <p className="text-xs text-neutral-500 mt-2">{subtitle}</p> : null}
+      {subtitle ? <p className="text-xs text-slate-500 mt-2">{subtitle}</p> : null}
     </div>
   );
 }

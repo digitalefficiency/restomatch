@@ -47,24 +47,24 @@ export function ExportsForm() {
   }
 
   return (
-    <div className="rounded-xl border border-neutral-800 bg-surface p-6 max-w-2xl">
+    <div className="rounded-xl border border-slate-200 bg-white p-6 max-w-2xl">
       <div className="grid grid-cols-2 gap-4 mb-6">
         <div>
-          <label className="block text-sm text-neutral-300 mb-1.5">מתאריך</label>
+          <label className="block text-sm text-slate-700 mb-1.5">מתאריך</label>
           <input
             type="date"
             value={from}
             onChange={(e) => setFrom(e.target.value)}
-            className="w-full rounded-md bg-bg border border-neutral-700 px-3 py-2 text-white"
+            className="w-full rounded-md bg-white border border-slate-200 px-3 py-2 text-slate-900"
           />
         </div>
         <div>
-          <label className="block text-sm text-neutral-300 mb-1.5">עד תאריך</label>
+          <label className="block text-sm text-slate-700 mb-1.5">עד תאריך</label>
           <input
             type="date"
             value={to}
             onChange={(e) => setTo(e.target.value)}
-            className="w-full rounded-md bg-bg border border-neutral-700 px-3 py-2 text-white"
+            className="w-full rounded-md bg-white border border-slate-200 px-3 py-2 text-slate-900"
           />
         </div>
       </div>
@@ -94,7 +94,7 @@ export function ExportsForm() {
         </p>
       ) : null}
 
-      <p className="mt-6 text-xs text-neutral-500">
+      <p className="mt-6 text-xs text-slate-500">
         רק חשבוניות בסטטוס "matched", "approved" או "paid" נכללות בייצוא. חשבוניות עם
         חריגות פתוחות לא תופענה.
       </p>

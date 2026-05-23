@@ -13,4 +13,10 @@ config.resolver.nodeModulesPaths = [
 ];
 config.resolver.disableHierarchicalLookup = true;
 
+// Enable resolution of modern ESM packages that use the `exports` field
+// in package.json (e.g. copy-anything inside superjson, drizzle-orm,
+// some tRPC v11 internals). Without this, Metro falls back to `main`
+// which often points to non-existent paths in ESM-first packages.
+config.resolver.unstable_enablePackageExports = true;
+
 module.exports = config;

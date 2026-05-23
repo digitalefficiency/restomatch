@@ -94,3 +94,12 @@ export interface MatchOutput {
 }
 
 export { runMatch } from './engine';
+export {
+  reconcileInvoiceToPo,
+  type ReconciliationLine,
+  type ReconciliationLineStatus,
+  type ReconciliationResult as InvoiceReconciliationResult,
+  type ReconciliationSummary,
+  type PoLineRef,
+  type InvoiceLineRef,
+} from './reconciliation';

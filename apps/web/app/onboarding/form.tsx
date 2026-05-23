@@ -33,7 +33,7 @@ export function OnboardingForm() {
       className="space-y-4"
     >
       <div>
-        <label htmlFor="name" className="block text-sm text-neutral-300 mb-1.5">
+        <label htmlFor="name" className="block text-sm text-slate-700 mb-1.5">
           שם המסעדה <span className="text-danger">*</span>
         </label>
         <input
@@ -44,13 +44,13 @@ export function OnboardingForm() {
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="כפר הזיתים"
-          className="w-full rounded-md bg-bg border border-neutral-700 px-3 py-2 text-white outline-none focus:border-primary"
+          className="w-full rounded-md bg-white border border-slate-200 px-3 py-2 text-slate-900 outline-none focus:border-primary"
         />
       </div>
 
       <div>
-        <label htmlFor="businessId" className="block text-sm text-neutral-300 mb-1.5">
-          ח״פ / עוסק מורשה <span className="text-neutral-500">(לא חובה)</span>
+        <label htmlFor="businessId" className="block text-sm text-slate-700 mb-1.5">
+          ח״פ / עוסק מורשה <span className="text-slate-500">(לא חובה)</span>
         </label>
         <input
           id="businessId"
@@ -59,7 +59,7 @@ export function OnboardingForm() {
           value={businessId}
           onChange={(e) => setBusinessId(e.target.value)}
           placeholder="514778123"
-          className="w-full rounded-md bg-bg border border-neutral-700 px-3 py-2 text-white outline-none focus:border-primary"
+          className="w-full rounded-md bg-white border border-slate-200 px-3 py-2 text-slate-900 outline-none focus:border-primary"
         />
       </div>
 
