@@ -5,6 +5,7 @@ import { gsap } from 'gsap';
 import {
   AlertTriangle,
   ArrowLeft,
+  ArrowUpRight,
   Check,
   ChevronDown,
   Clock,
@@ -17,6 +18,7 @@ import {
   Wallet,
   X,
 } from 'lucide-react';
+import Link from 'next/link';
 import { useMemo, useRef, useState } from 'react';
 import {
   MOCK_INVOICE_AUDITS,
@@ -230,22 +232,41 @@ function InvoiceRow({
 }) {
   const statusInfo = statusBadge(record.status);
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onToggle}
-      className={`audit-row w-full text-right rounded-2xl border bg-white/90 backdrop-blur-xl px-5 py-4 transition-all ${
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onToggle();
+        }
+      }}
+      className={`audit-row w-full text-right rounded-2xl border bg-white/90 backdrop-blur-xl px-5 py-4 transition-all cursor-pointer ${
         isExpanded
           ? 'border-blue-400 shadow-[0_2px_8px_rgba(37,99,235,0.12),0_16px_36px_-12px_rgba(37,99,235,0.18)]'
           : 'border-slate-200/70 hover:border-blue-300 hover:bg-blue-50/20 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)]'
       }`}
     >
       <div className="flex items-center gap-4">
-        <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-blue-100 to-blue-50 border border-blue-200/70 flex items-center justify-center font-bold text-blue-700 shrink-0">
+        <Link
+          href={`/showcase/dashboard/suppliers/${record.supplierId}`}
+          onClick={(e) => e.stopPropagation()}
+          className="w-11 h-11 rounded-xl bg-gradient-to-br from-blue-100 to-blue-50 border border-blue-200/70 flex items-center justify-center font-bold text-blue-700 shrink-0 hover:from-blue-200 hover:to-blue-100 hover:border-blue-300 transition-colors"
+          title={`לעמוד הספק ${record.supplierName}`}
+        >
           {record.supplierInitials}
-        </div>
+        </Link>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1 flex-wrap">
-            <span className="font-semibold text-slate-900 text-base">{record.supplierName}</span>
+            <Link
+              href={`/showcase/dashboard/suppliers/${record.supplierId}`}
+              onClick={(e) => e.stopPropagation()}
+              className="group inline-flex items-center gap-1 font-semibold text-slate-900 text-base hover:text-blue-700 transition-colors"
+            >
+              <span>{record.supplierName}</span>
+              <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-600 transition-colors" />
+            </Link>
             <span className="text-xs text-slate-400 font-mono">·</span>
             <span className="text-xs text-slate-500 font-mono">{record.invoiceNumber}</span>
             <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusInfo.tint} mr-2`}>
@@ -309,7 +330,7 @@ function InvoiceRow({
           }`}
         />
       </div>
-    </button>
+    </div>
   );
 }
 

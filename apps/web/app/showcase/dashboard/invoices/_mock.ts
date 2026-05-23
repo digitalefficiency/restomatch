@@ -40,6 +40,7 @@ export interface AuditTimelineEvent {
 export interface InvoiceAuditRecord {
   id: string;
   invoiceNumber: string;
+  supplierId: string;
   supplierName: string;
   supplierInitials: string;
   scannedAt: string;
@@ -67,6 +68,7 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
   {
     id: 'inv-7821',
     invoiceNumber: 'INV-7821',
+    supplierId: 'sup-avi',
     supplierName: 'ירקני אבי',
     supplierInitials: 'יא',
     scannedAt: isoAt(8, 12),
@@ -179,6 +181,7 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
   {
     id: 'inv-7822',
     invoiceNumber: 'INV-4882',
+    supplierId: 'sup-kerem',
     supplierName: 'קצביית הכרם',
     supplierInitials: 'קה',
     scannedAt: isoAt(9, 35),
@@ -252,6 +255,7 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
   {
     id: 'inv-7823',
     invoiceNumber: 'INV-2210',
+    supplierId: 'sup-brans',
     supplierName: 'מאפיית ברנס',
     supplierInitials: 'מב',
     scannedAt: isoAt(6, 8),
@@ -313,6 +317,7 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
   {
     id: 'inv-7824',
     invoiceNumber: 'INV-9012',
+    supplierId: 'sup-kobi',
     supplierName: 'דגי קובי',
     supplierInitials: 'דק',
     scannedAt: isoAt(11, 5),
@@ -384,6 +389,7 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
   {
     id: 'inv-7825',
     invoiceNumber: 'INV-3344',
+    supplierId: 'sup-shegev',
     supplierName: 'אלכוהול שגב',
     supplierInitials: 'אש',
     scannedAt: isoAt(14, 22),
