@@ -74,6 +74,7 @@ export function fromAuditRecord(record: InvoiceAuditRecord): ScanData {
     ocrConfidence: record.discrepanciesCount === 0 ? 0.97 : 0.88,
     capturedBy: `נסרק ע״י ${record.scannedBy}`,
     driverSignature: 'יוסי',
+    rawImageUrl: record.rawImageUrl,
   };
 }
 
@@ -105,6 +106,7 @@ export function fromAuditRecordToCompare(record: InvoiceAuditRecord): {
     invoiceNumber: record.invoiceNumber,
     invoiceDate: record.scannedAt,
     ocrConfidence: record.discrepanciesCount === 0 ? 0.97 : 0.88,
+    rawImageUrl: record.rawImageUrl,
   };
 
   const lines: CompareLine[] = record.lines.map((l: LineComparison) => ({
@@ -145,6 +147,7 @@ export function fromSupplierInvoiceListItem(
     ocrConfidence: invoice.status === 'clean' ? 0.97 : invoice.status === 'minor' ? 0.92 : 0.86,
     capturedBy: 'נסרק מטלפון',
     driverSignature: 'יוסי',
+    rawImageUrl: `/scans/${invoice.id}`,
   };
 }
 

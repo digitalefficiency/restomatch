@@ -43,6 +43,13 @@ export interface InvoiceAuditRecord {
   supplierId: string;
   supplierName: string;
   supplierInitials: string;
+  /**
+   * Object-storage URL where the receiver's phone photo of the original
+   * invoice is stored (simulated via a Next.js page route at
+   * /scans/[invoiceId]). The UI loads this as an <iframe> so the
+   * architecture mirrors fetching a JPG/PDF from S3 in production.
+   */
+  rawImageUrl: string;
   scannedAt: string;
   scannedBy: string;
   approvedAt: string;
@@ -69,6 +76,7 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
     id: 'inv-7821',
     invoiceNumber: 'INV-7821',
     supplierId: 'sup-avi',
+    rawImageUrl: '/scans/inv-7821',
     supplierName: 'ירקני אבי',
     supplierInitials: 'יא',
     scannedAt: isoAt(8, 12),
@@ -182,6 +190,7 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
     id: 'inv-7822',
     invoiceNumber: 'INV-4882',
     supplierId: 'sup-kerem',
+    rawImageUrl: '/scans/inv-7822',
     supplierName: 'קצביית הכרם',
     supplierInitials: 'קה',
     scannedAt: isoAt(9, 35),
@@ -256,6 +265,7 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
     id: 'inv-7823',
     invoiceNumber: 'INV-2210',
     supplierId: 'sup-brans',
+    rawImageUrl: '/scans/inv-7823',
     supplierName: 'מאפיית ברנס',
     supplierInitials: 'מב',
     scannedAt: isoAt(6, 8),
@@ -318,6 +328,7 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
     id: 'inv-7824',
     invoiceNumber: 'INV-9012',
     supplierId: 'sup-kobi',
+    rawImageUrl: '/scans/inv-7824',
     supplierName: 'דגי קובי',
     supplierInitials: 'דק',
     scannedAt: isoAt(11, 5),
@@ -390,6 +401,7 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
     id: 'inv-7825',
     invoiceNumber: 'INV-3344',
     supplierId: 'sup-shegev',
+    rawImageUrl: '/scans/inv-7825',
     supplierName: 'אלכוהול שגב',
     supplierInitials: 'אש',
     scannedAt: isoAt(14, 22),

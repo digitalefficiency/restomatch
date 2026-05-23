@@ -62,6 +62,8 @@ export interface CompareData {
   invoiceNumber: string;
   invoiceDate: string;
   ocrConfidence: number;
+  /** Database-backed URL of the original scanned invoice (loaded via iframe). */
+  rawImageUrl: string;
 }
 
 interface Props {
@@ -316,7 +318,12 @@ export function InvoicePoCompareViewer({ data, lines, onClose }: Props) {
                 <PoPaper data={data} lines={lines} focusKey={focusKey} />
               </div>
 
-              {/* Invoice paper - left side in RTL flow (came second) */}
+              {/* Invoice paper - left side in RTL flow (came second).
+                  Loaded via iframe from /scans/[invoiceId] so the document
+                  is fetched from the database/storage URL rather than
+                  rendered inline. The focusKey-based ring highlight is
+                  not available across the iframe boundary; sidebar focus
+                  still drives the PO side. */}
               <div className="order-2">
                 <PaperLabel
                   icon={<FileText className="w-4 h-4" />}
@@ -324,7 +331,23 @@ export function InvoicePoCompareViewer({ data, lines, onClose }: Props) {
                   sub={`${data.invoiceNumber} · נסרקה ${formatDate(data.invoiceDate)}`}
                   tone="amber"
                 />
-                <InvoicePaper data={data} lines={lines} focusKey={focusKey} />
+                <div
+                  className="bg-slate-200 rounded-md shadow-[0_16px_44px_-16px_rgba(15,23,42,0.28)] overflow-hidden"
+                  style={{ width: 540, height: 760 }}
+                >
+                  <iframe
+                    key={data.rawImageUrl}
+                    src={data.rawImageUrl}
+                    title={`סריקת חשבונית ${data.invoiceNumber}`}
+                    className="w-full h-full border-0"
+                    style={{
+                      transform: 'scale(0.75)',
+                      transformOrigin: 'top center',
+                      width: '720px',
+                      height: '1020px',
+                    }}
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -500,214 +523,6 @@ function PoPaper({
             ✓ נשלח בדוא״ל
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Invoice Paper (scanned look, supplier-issued)
-// ---------------------------------------------------------------------------
-
-function InvoicePaper({
-  data,
-  lines,
-  focusKey,
-}: {
-  data: CompareData;
-  lines: CompareLine[];
-  focusKey: LineKey | null;
-}) {
-  const invoiceLines = lines
-    .map((l, i) => ({ ...l, idx: i }))
-    .filter((l) => l.invoiceQty !== null);
-  const subtotal = invoiceLines.reduce(
-    (s, l) => s + (l.invoiceQty ?? 0) * (l.invoiceUnitPrice ?? 0),
-    0,
-  );
-  const vat = subtotal * 0.17;
-  const total = subtotal + vat;
-
-  return (
-    <div
-      className="relative bg-[#fdfcf8] shadow-[0_16px_44px_-16px_rgba(15,23,42,0.28),0_2px_8px_rgba(15,23,42,0.08)] rounded-md"
-      style={{
-        width: 540,
-        minHeight: 760,
-        transform: 'rotate(-0.4deg)',
-        fontFamily: '"Heebo", system-ui, sans-serif',
-      }}
-    >
-      {/* Paper grain */}
-      <div
-        className="absolute inset-0 rounded-md pointer-events-none opacity-[0.05] mix-blend-multiply"
-        style={{
-          backgroundImage:
-            'repeating-linear-gradient(90deg, rgba(0,0,0,0.4) 0, rgba(0,0,0,0.4) 1px, transparent 1px, transparent 4px)',
-        }}
-      />
-      {/* Camera glare */}
-      <div
-        className="absolute inset-0 rounded-md pointer-events-none opacity-40"
-        style={{
-          background:
-            'radial-gradient(ellipse 50% 30% at 80% 12%, rgba(255,255,255,0.5), transparent 70%)',
-        }}
-      />
-
-      {/* Supplier header band */}
-      <div
-        className="rounded-t-md px-6 py-4 flex items-center justify-between text-white"
-        style={{
-          background: `linear-gradient(135deg, ${data.supplierColor}, ${shade(data.supplierColor, -15)})`,
-        }}
-      >
-        <div>
-          <div className="text-xl font-extrabold tracking-tight">{data.supplierName}</div>
-          <div className="text-[11px] opacity-90 mt-0.5">ח.פ. {data.supplierBusinessId}</div>
-        </div>
-        <div className="w-12 h-12 rounded-lg bg-white/20 border border-white/30 flex items-center justify-center font-bold text-base">
-          {data.supplierInitials}
-        </div>
-      </div>
-
-      <div className="px-6 pt-5 pb-8 text-slate-900 relative">
-        {/* Title row */}
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="text-2xl font-bold tracking-tight">חשבונית מס</h2>
-          <div className="text-left text-xs space-y-0.5">
-            <div className="flex items-baseline gap-2 justify-end">
-              <span className="text-slate-500">מס׳ חשבונית:</span>
-              <span className="font-mono font-bold tabular-nums">{data.invoiceNumber}</span>
-            </div>
-            <div className="flex items-baseline gap-2 justify-end">
-              <span className="text-slate-500">תאריך:</span>
-              <span className="tabular-nums">{formatDate(data.invoiceDate)}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Customer block */}
-        <div className="bg-slate-50/80 rounded-lg px-4 py-2.5 mb-5 border border-slate-200/60 text-xs">
-          <div className="uppercase tracking-wider text-slate-500 font-semibold mb-1 text-[10px]">
-            לכבוד
-          </div>
-          <div className="font-bold text-sm">{data.customerName}</div>
-          <div className="text-slate-500 mt-0.5">ח.פ. {data.customerBusinessId}</div>
-        </div>
-
-        {/* Lines */}
-        <div className="overflow-hidden border border-slate-200 rounded-lg mb-5">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="bg-slate-100/60 text-slate-700">
-                <th className="px-2 py-2 text-right font-semibold text-[10px] uppercase tracking-wider w-8">
-                  #
-                </th>
-                <th className="px-2 py-2 text-right font-semibold text-[10px] uppercase tracking-wider">
-                  תיאור
-                </th>
-                <th className="px-2 py-2 text-right font-semibold text-[10px] uppercase tracking-wider tabular-nums">
-                  כמות
-                </th>
-                <th className="px-2 py-2 text-right font-semibold text-[10px] uppercase tracking-wider tabular-nums">
-                  מחיר
-                </th>
-                <th className="px-2 py-2 text-right font-semibold text-[10px] uppercase tracking-wider tabular-nums">
-                  סה״כ
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {invoiceLines.map((line) => {
-                const key = lineKey(line, line.idx);
-                const focused = focusKey === key;
-                const accent = statusAccent(line.status);
-                const lineTotal = (line.invoiceQty ?? 0) * (line.invoiceUnitPrice ?? 0);
-                return (
-                  <tr
-                    key={key}
-                    className={`border-t border-slate-100 transition-all ${
-                      focused
-                        ? `${accent.bgStrong} ring-2 ring-inset ${accent.ring}`
-                        : line.idx % 2 === 0
-                          ? 'bg-white'
-                          : 'bg-slate-50/40'
-                    }`}
-                  >
-                    <td className="px-2 py-2 text-slate-500 tabular-nums">{line.idx + 1}</td>
-                    <td className="px-2 py-2 font-medium">
-                      {line.productName}
-                      {line.status === 'unordered' ? (
-                        <span className="block text-[10px] text-red-700 mt-0.5 font-semibold">
-                          ⚠ לא בהזמנה המקורית
-                        </span>
-                      ) : null}
-                    </td>
-                    <td className="px-2 py-2 tabular-nums">
-                      <DiffMark on={line.status === 'qty_short' || line.status === 'qty_over'} tone="amber">
-                        {line.invoiceQty} {line.unit}
-                      </DiffMark>
-                    </td>
-                    <td className="px-2 py-2 tabular-nums">
-                      <DiffMark
-                        on={line.status === 'price_higher' || line.status === 'price_lower'}
-                        tone={line.status === 'price_lower' ? 'emerald' : 'red'}
-                      >
-                        ₪{line.invoiceUnitPrice?.toFixed(2)}
-                      </DiffMark>
-                    </td>
-                    <td className="px-2 py-2 tabular-nums font-semibold">
-                      ₪{lineTotal.toFixed(2)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Totals */}
-        <div className="flex justify-start">
-          <div className="w-56 space-y-1 text-xs">
-            <PaperTotalRow label="סכום ביניים" value={subtotal} />
-            <PaperTotalRow label="מע״מ 17%" value={vat} />
-            <div className="border-t-2 border-slate-300 my-1" />
-            <div className="flex items-baseline justify-between bg-slate-900 text-white px-3 py-2 rounded-md">
-              <span className="text-[10px] uppercase tracking-wider opacity-80">סה״כ לתשלום</span>
-              <span className="font-bold tabular-nums">
-                ₪{total.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="mt-8 border-t border-dashed border-slate-300 pt-3 text-[11px] text-slate-500 flex items-end justify-between">
-          <div>
-            <div>חתימת נהג:</div>
-            <span
-              className="text-blue-700 text-base inline-block mt-1"
-              style={{
-                fontFamily: '"Caveat", "Heebo", cursive',
-                transform: 'rotate(-2deg)',
-              }}
-            >
-              יוסי
-            </span>
-          </div>
-          <div className="opacity-70 text-right">
-            תודה רבה ויום נעים!
-            <br />
-            {data.supplierName}
-          </div>
-        </div>
-
-        {/* Tape sticker */}
-        <div
-          className="absolute -top-3 right-12 w-14 h-5 bg-gradient-to-b from-amber-200/70 to-amber-300/70 rounded-sm shadow-sm"
-          style={{ transform: 'rotate(-3deg)' }}
-        />
       </div>
     </div>
   );
@@ -958,13 +773,4 @@ function formatDate(iso: string): string {
     month: '2-digit',
     year: 'numeric',
   });
-}
-
-function shade(hex: string, percent: number): string {
-  const num = parseInt(hex.replace('#', ''), 16);
-  const amt = Math.round(2.55 * percent);
-  const R = Math.max(0, Math.min(255, (num >> 16) + amt));
-  const G = Math.max(0, Math.min(255, ((num >> 8) & 0x00ff) + amt));
-  const B = Math.max(0, Math.min(255, (num & 0x0000ff) + amt));
-  return `#${((1 << 24) + (R << 16) + (G << 8) + B).toString(16).slice(1)}`;
 }
