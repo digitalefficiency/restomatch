@@ -30,12 +30,24 @@ export interface ScanData {
   supplierName: string;
   supplierInitials: string;
   supplierBusinessId: string;
-  /** Header band color — supplier brand color. Tailwind-friendly hex. */
+  /** Brand colour — used for the supplier's logotype across the top. */
   supplierColor: string;
+  /** Supplier street address (one line). Matches the printed letterhead. */
+  supplierAddress?: string;
+  /** Phone / fax line for the supplier letterhead. */
+  supplierPhone?: string;
+  /**
+   * Document type. Produce / fish / bakery suppliers usually issue
+   * "תעודת משלוח" (delivery note) — the receiver signs it on arrival;
+   * meat / liquor often jump straight to "חשבונית מס" (tax invoice).
+   */
+  documentType?: 'delivery_note' | 'tax_invoice';
   invoiceNumber: string;
   invoiceDate: string;
   customerName: string;
   customerBusinessId: string;
+  /** Customer's accounts-receivable balance, printed bottom-right. */
+  customerBalanceIls?: number;
   lines: ScanLine[];
   /** Overall OCR confidence 0..1. */
   ocrConfidence: number;

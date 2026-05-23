@@ -41,6 +41,28 @@ const SUPPLIER_BUSINESS_IDS: Record<string, string> = {
   'sup-shegev': '514779203',
 };
 
+const SUPPLIER_ADDRESSES: Record<string, string> = {
+  'sup-avi': 'הסולם 4, א. הסולם · טל׳ 04-5162939 · פקס 04-5143406',
+  'sup-kerem': 'רחוב התעשייה 15, רעננה · טל׳ 09-7711224',
+  'sup-kobi': 'נמל אשדוד שער 7 · טל׳ 08-8554433 · פקס 08-8554434',
+  'sup-brans': 'רחוב הזורע 12, נתניה · טל׳ 09-8821190',
+  'sup-shegev': 'רחוב המסגר 8, תל אביב · טל׳ 03-6122334',
+};
+
+/**
+ * Israeli restaurants commonly receive either a "תעודת משלוח" (delivery
+ * note — given on arrival, signed by the receiver) or a "חשבונית מס"
+ * (tax invoice — usually arrives later by mail). Real-world: produce /
+ * fish / bakery → delivery note; meat / liquor → tax invoice.
+ */
+const SUPPLIER_DOC_TYPES: Record<string, 'delivery_note' | 'tax_invoice'> = {
+  'sup-avi': 'delivery_note',
+  'sup-kerem': 'tax_invoice',
+  'sup-kobi': 'delivery_note',
+  'sup-brans': 'delivery_note',
+  'sup-shegev': 'tax_invoice',
+};
+
 export function fromAuditRecord(record: InvoiceAuditRecord): ScanData {
   const lines: ScanLine[] = record.lines
     .filter((l) => l.invoiceQty !== null && l.invoiceUnitPrice !== null)
@@ -66,10 +88,14 @@ export function fromAuditRecord(record: InvoiceAuditRecord): ScanData {
     supplierInitials: record.supplierInitials,
     supplierBusinessId: SUPPLIER_BUSINESS_IDS[record.supplierId] ?? '000000000',
     supplierColor: SUPPLIER_COLORS[record.supplierId] ?? DEFAULT_COLOR,
+    supplierAddress: SUPPLIER_ADDRESSES[record.supplierId],
+    supplierPhone: undefined,
+    documentType: SUPPLIER_DOC_TYPES[record.supplierId] ?? 'delivery_note',
     invoiceNumber: record.invoiceNumber,
     invoiceDate: record.scannedAt,
     customerName: RESTAURANT_NAME,
     customerBusinessId: RESTAURANT_BUSINESS_ID,
+    customerBalanceIls: 24_335,
     lines,
     ocrConfidence: record.discrepanciesCount === 0 ? 0.97 : 0.88,
     capturedBy: `נסרק ע״י ${record.scannedBy}`,
@@ -139,10 +165,13 @@ export function fromSupplierInvoiceListItem(
     supplierInitials: profile.metadata.initials,
     supplierBusinessId: profile.metadata.businessId,
     supplierColor: SUPPLIER_COLORS[profile.metadata.id] ?? DEFAULT_COLOR,
+    supplierAddress: SUPPLIER_ADDRESSES[profile.metadata.id],
+    documentType: SUPPLIER_DOC_TYPES[profile.metadata.id] ?? 'delivery_note',
     invoiceNumber: invoice.invoiceNumber,
     invoiceDate: invoice.scannedAt,
     customerName: RESTAURANT_NAME,
     customerBusinessId: RESTAURANT_BUSINESS_ID,
+    customerBalanceIls: 24_335,
     lines,
     ocrConfidence: invoice.status === 'clean' ? 0.97 : invoice.status === 'minor' ? 0.92 : 0.86,
     capturedBy: 'נסרק מטלפון',
