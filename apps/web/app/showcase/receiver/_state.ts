@@ -16,8 +16,17 @@ export type WizardStep =
   | 'CONFIRMED';
 
 export interface CapturedImage {
-  url: string; // object URL or remote URL
+  url: string; // object URL or remote URL (for in-wizard preview)
   filename: string;
+  /**
+   * If the image was uploaded to Supabase Storage, the wizard records
+   * the generated invoice id + the public /scans/<id> route so the
+   * Confirmed step can offer "view scan" linking to the real file.
+   */
+  invoiceId?: string;
+  scanRouteUrl?: string;
+  publicUrl?: string;
+  mimeType?: string;
 }
 
 export interface LineMark {

@@ -93,6 +93,7 @@ export default function ReceiverWizard() {
           supplierName={state.selectedSupplier?.supplierName ?? ''}
           result={state.reconciliation}
           confirmedAt={state.confirmedAt}
+          capturedImage={state.image}
           onReset={() => dispatch({ type: 'RESET' })}
         />
       ) : null}

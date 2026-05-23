@@ -2,18 +2,27 @@
 
 import { useGSAP } from '@gsap/react';
 import { gsap } from 'gsap';
-import { Check, Plus, Receipt, ShieldCheck } from 'lucide-react';
+import { Check, ExternalLink, FileImage, Plus, Receipt, ShieldCheck } from 'lucide-react';
+import Link from 'next/link';
 import { useRef } from 'react';
 import type { ReconciliationResult } from '../_mock';
+import type { CapturedImage } from '../_state';
 
 interface Props {
   supplierName: string;
   result: ReconciliationResult | null;
   confirmedAt: string | null;
+  capturedImage: CapturedImage | null;
   onReset: () => void;
 }
 
-export function Confirmed({ supplierName, result, confirmedAt, onReset }: Props) {
+export function Confirmed({
+  supplierName,
+  result,
+  confirmedAt,
+  capturedImage,
+  onReset,
+}: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
   useGSAP(
@@ -80,6 +89,33 @@ export function Confirmed({ supplierName, result, confirmedAt, onReset }: Props)
           />
         ) : null}
       </div>
+
+      {capturedImage?.scanRouteUrl ? (
+        <div className="confirm-content mb-4 rounded-2xl border border-emerald-200 bg-emerald-50/40 px-4 py-3 text-right">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-white border border-emerald-200 flex items-center justify-center shrink-0">
+              <FileImage className="w-5 h-5 text-emerald-700" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-emerald-900">
+                החשבונית נשמרה ב-Supabase Storage
+              </div>
+              <div className="text-[11px] font-mono text-emerald-800/80 truncate">
+                {capturedImage.invoiceId}
+              </div>
+            </div>
+            <Link
+              href={capturedImage.scanRouteUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-2 rounded-lg shadow-[0_2px_8px_rgba(5,150,105,0.25)]"
+            >
+              צפה בסריקה
+              <ExternalLink className="w-3 h-3" />
+            </Link>
+          </div>
+        </div>
+      ) : null}
 
       <button
         type="button"

@@ -104,21 +104,17 @@ function UploadedScanCanvas({
 
       <div className="max-w-3xl w-full bg-white rounded-md shadow-[0_24px_64px_-24px_rgba(15,23,42,0.45)] overflow-hidden">
         {isPdf ? (
-          <object
-            data={publicUrl}
-            type="application/pdf"
-            className="w-full"
+          // <iframe> triggers Chrome's built-in PDF viewer reliably
+          // (unlike <object>, which silently falls back to its inner
+          // content if the URL doesn't 200 with the right content-type).
+          // Hash params turn off the toolbar/navpanel for a cleaner
+          // embedded look — users can still click "פתח בנפרד" for full UI.
+          <iframe
+            src={`${publicUrl}#toolbar=1&navpanes=0&view=FitH`}
+            title="חשבונית סרוקה"
+            className="w-full border-0 bg-slate-100"
             style={{ height: '80vh' }}
-          >
-            <a
-              href={publicUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block p-8 text-center text-blue-700 underline"
-            >
-              הדפדפן לא תומך בתצוגת PDF — לחץ להורדה
-            </a>
-          </object>
+          />
         ) : (
           <img
             src={publicUrl}
@@ -127,6 +123,19 @@ function UploadedScanCanvas({
             style={{ maxHeight: '90vh', objectFit: 'contain' }}
           />
         )}
+        <div className="px-4 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between text-xs">
+          <span className="text-slate-500">
+            לא נטען? יכול להיות חוסם פופאפים או דפדפן ללא תוסף PDF.
+          </span>
+          <a
+            href={publicUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-blue-700 hover:text-blue-900 font-semibold"
+          >
+            פתח בטאב נפרד
+          </a>
+        </div>
       </div>
     </div>
   );
