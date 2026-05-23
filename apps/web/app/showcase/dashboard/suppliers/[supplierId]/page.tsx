@@ -6,10 +6,12 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowUp,
+  ArrowUpRight,
   Calendar,
   Check,
   Clock,
   CreditCard,
+  FileImage,
   FileText,
   Mail,
   MessageCircle,
@@ -24,12 +26,15 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { use, useRef } from 'react';
+import { use, useRef, useState } from 'react';
+import { InvoiceScanViewer } from '../../_components/InvoiceScanViewer';
+import { fromSupplierInvoiceListItem } from '../../_components/scanDataAdapters';
 import {
   getSupplierProfile,
   type ActivityEvent,
   type PriceTrendProduct,
   type SupplierInvoiceListItem,
+  type SupplierProfile,
 } from './_mock';
 
 interface PageProps {
@@ -40,6 +45,7 @@ export default function SupplierDetailPage({ params }: PageProps) {
   const { supplierId } = use(params);
   const profile = getSupplierProfile(supplierId);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [scanInvoiceId, setScanInvoiceId] = useState<string | null>(null);
 
   useGSAP(
     () => {
@@ -188,13 +194,17 @@ export default function SupplierDetailPage({ params }: PageProps) {
       {/* Recent invoices + Activity */}
       <section className="detail-block grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
-          <SectionHeader title="חשבוניות אחרונות" subtitle={`${recentInvoices.length} מהחודש האחרון`} />
+          <SectionHeader
+            title="חשבוניות אחרונות"
+            subtitle={`${recentInvoices.length} מהחודש האחרון · לחץ לצפייה בסריקה`}
+          />
           <div className="rounded-2xl border border-slate-200/70 bg-white/90 backdrop-blur-xl overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)]">
             {recentInvoices.map((inv, idx) => (
               <InvoiceListRow
                 key={inv.id}
                 invoice={inv}
                 isLast={idx === recentInvoices.length - 1}
+                onOpenScan={() => setScanInvoiceId(inv.id)}
               />
             ))}
           </div>
@@ -205,6 +215,19 @@ export default function SupplierDetailPage({ params }: PageProps) {
           <ActivityFeed events={activity} />
         </div>
       </section>
+
+      {scanInvoiceId
+        ? (() => {
+            const inv = recentInvoices.find((i) => i.id === scanInvoiceId);
+            if (!inv) return null;
+            return (
+              <InvoiceScanViewer
+                data={fromSupplierInvoiceListItem(inv, profile as SupplierProfile)}
+                onClose={() => setScanInvoiceId(null)}
+              />
+            );
+          })()
+        : null}
     </main>
   );
 }
@@ -413,9 +436,11 @@ function Sparkline({ data, stroke, fillStart }: { data: number[]; stroke: string
 function InvoiceListRow({
   invoice,
   isLast,
+  onOpenScan,
 }: {
   invoice: SupplierInvoiceListItem;
   isLast: boolean;
+  onOpenScan: () => void;
 }) {
   const status = invoice.status;
   const tint =
@@ -436,14 +461,22 @@ function InvoiceListRow({
           : 'נחסם';
 
   return (
-    <Link
-      href="/showcase/dashboard/invoices"
-      className={`flex items-center gap-4 px-5 py-4 hover:bg-blue-50/30 transition-colors ${
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpenScan}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onOpenScan();
+        }
+      }}
+      className={`flex items-center gap-4 px-5 py-4 hover:bg-blue-50/30 cursor-pointer transition-colors ${
         isLast ? '' : 'border-b border-slate-100'
       }`}
     >
-      <div className="w-9 h-9 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center shrink-0">
-        <FileText className="w-4 h-4" />
+      <div className="w-9 h-9 rounded-lg bg-blue-50 text-blue-700 border border-blue-100 flex items-center justify-center shrink-0">
+        <FileImage className="w-4 h-4" />
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-0.5">
@@ -487,7 +520,15 @@ function InvoiceListRow({
           </div>
         ) : null}
       </div>
-    </Link>
+      <Link
+        href="/showcase/dashboard/invoices"
+        onClick={(e) => e.stopPropagation()}
+        className="shrink-0 w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-500 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 flex items-center justify-center transition-colors"
+        title="פתח בעמוד ביקורת החשבוניות"
+      >
+        <ArrowUpRight className="w-4 h-4" />
+      </Link>
+    </div>
   );
 }
 

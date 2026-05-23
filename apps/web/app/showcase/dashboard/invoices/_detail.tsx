@@ -9,6 +9,7 @@ import {
   Check,
   ChevronDown,
   Clock,
+  FileImage,
   MessageCircle,
   Minus,
   Plus,
@@ -18,7 +19,9 @@ import {
   User,
   X,
 } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { InvoiceScanViewer } from '../_components/InvoiceScanViewer';
+import { fromAuditRecord } from '../_components/scanDataAdapters';
 import type {
   AuditTimelineEvent,
   InvoiceAuditRecord,
@@ -34,6 +37,7 @@ interface Props {
 export function InvoiceDetail({ record, onClose }: Props) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
+  const [scanOpen, setScanOpen] = useState(false);
 
   useGSAP(
     () => {
@@ -125,13 +129,24 @@ export function InvoiceDetail({ record, onClose }: Props) {
               </div>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setScanOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 h-9 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-semibold transition-colors"
+              title="צפה בסריקת החשבונית המקורית"
+            >
+              <FileImage className="w-3.5 h-3.5" />
+              צפה בסריקה
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         <div className="px-6 py-6 space-y-8">
@@ -156,6 +171,26 @@ export function InvoiceDetail({ record, onClose }: Props) {
               icon={<Sparkles className="w-4 h-4" />}
             />
           </div>
+
+          {/* Scan preview tile */}
+          <button
+            type="button"
+            onClick={() => setScanOpen(true)}
+            className="detail-line w-full text-right rounded-2xl border border-slate-200/70 bg-gradient-to-l from-blue-50/40 to-white hover:from-blue-50 hover:border-blue-300 transition-all px-5 py-4 flex items-center gap-4 group"
+          >
+            <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-100 to-blue-50 border border-blue-200/70 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+              <FileImage className="w-6 h-6 text-blue-700" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="font-semibold text-slate-900">סריקת המקור</div>
+              <div className="text-xs text-slate-500 mt-0.5">
+                צילום החשבונית כפי שהגיע מהשטח · ניתן להציג OCR overlay לבחינת ביטחון
+              </div>
+            </div>
+            <div className="text-xs text-blue-700 font-semibold group-hover:underline shrink-0">
+              פתח →
+            </div>
+          </button>
 
           {/* Discrepancies callout */}
           {issueLines.length > 0 ? (
@@ -232,6 +267,13 @@ export function InvoiceDetail({ record, onClose }: Props) {
           </div>
         </div>
       </div>
+
+      {scanOpen ? (
+        <InvoiceScanViewer
+          data={fromAuditRecord(record)}
+          onClose={() => setScanOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }
