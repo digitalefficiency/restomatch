@@ -25,6 +25,7 @@ export default function ShowcaseLayout({ children }: { children: React.ReactNode
           <nav className="flex gap-1 text-sm">
             <ShowcaseLink href="/showcase/receiver">Backdoor App</ShowcaseLink>
             <ShowcaseLink href="/showcase/dashboard">Control Center</ShowcaseLink>
+            <ShowcaseLink href="/showcase/dashboard/invoices">ביקורת חשבוניות</ShowcaseLink>
             <ShowcaseLink href="/showcase/approvals">Hierarchy Matrix</ShowcaseLink>
           </nav>
         </div>
