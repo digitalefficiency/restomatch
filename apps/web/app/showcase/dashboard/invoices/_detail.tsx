@@ -8,6 +8,7 @@ import {
   ArrowUp,
   Check,
   ChevronDown,
+  ClipboardList,
   Clock,
   FileImage,
   MessageCircle,
@@ -20,8 +21,9 @@ import {
   X,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { InvoicePoCompareViewer } from '../_components/InvoicePoCompareViewer';
 import { InvoiceScanViewer } from '../_components/InvoiceScanViewer';
-import { fromAuditRecord } from '../_components/scanDataAdapters';
+import { fromAuditRecord, fromAuditRecordToCompare } from '../_components/scanDataAdapters';
 import type {
   AuditTimelineEvent,
   InvoiceAuditRecord,
@@ -38,6 +40,7 @@ export function InvoiceDetail({ record, onClose }: Props) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const [scanOpen, setScanOpen] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
 
   useGSAP(
     () => {
@@ -132,12 +135,21 @@ export function InvoiceDetail({ record, onClose }: Props) {
           <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
+              onClick={() => setCompareOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 h-9 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors shadow-[0_4px_12px_rgba(37,99,235,0.25)]"
+              title="הצג הזמנה וחשבונית צד-לצד"
+            >
+              <ClipboardList className="w-3.5 h-3.5" />
+              השווה צד-לצד
+            </button>
+            <button
+              type="button"
               onClick={() => setScanOpen(true)}
               className="inline-flex items-center gap-1.5 px-3 h-9 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-semibold transition-colors"
               title="צפה בסריקת החשבונית המקורית"
             >
               <FileImage className="w-3.5 h-3.5" />
-              צפה בסריקה
+              סריקה
             </button>
             <button
               type="button"
@@ -172,25 +184,51 @@ export function InvoiceDetail({ record, onClose }: Props) {
             />
           </div>
 
-          {/* Scan preview tile */}
-          <button
-            type="button"
-            onClick={() => setScanOpen(true)}
-            className="detail-line w-full text-right rounded-2xl border border-slate-200/70 bg-gradient-to-l from-blue-50/40 to-white hover:from-blue-50 hover:border-blue-300 transition-all px-5 py-4 flex items-center gap-4 group"
-          >
-            <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-100 to-blue-50 border border-blue-200/70 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-              <FileImage className="w-6 h-6 text-blue-700" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="font-semibold text-slate-900">סריקת המקור</div>
-              <div className="text-xs text-slate-500 mt-0.5">
-                צילום החשבונית כפי שהגיע מהשטח · ניתן להציג OCR overlay לבחינת ביטחון
+          {/* Scan + compare tiles */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => setCompareOpen(true)}
+              className="detail-line w-full text-right rounded-2xl border border-blue-300 bg-gradient-to-l from-blue-100/60 to-blue-50/20 hover:from-blue-100 hover:border-blue-400 transition-all px-5 py-4 flex items-center gap-4 group shadow-[0_2px_8px_rgba(37,99,235,0.08),0_12px_28px_-16px_rgba(37,99,235,0.18)]"
+            >
+              <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-600 to-blue-500 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform shadow-[0_4px_12px_rgba(37,99,235,0.35)]">
+                <ClipboardList className="w-6 h-6 text-white" />
               </div>
-            </div>
-            <div className="text-xs text-blue-700 font-semibold group-hover:underline shrink-0">
-              פתח →
-            </div>
-          </button>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-slate-900 flex items-center gap-2">
+                  השווה הזמנה ↔ חשבונית
+                  <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold">
+                    מומלץ
+                  </span>
+                </div>
+                <div className="text-xs text-slate-500 mt-0.5">
+                  ראה את שני המסמכים אחד לצד השני · חריגות מסומנות בשניהם
+                </div>
+              </div>
+              <div className="text-xs text-blue-700 font-semibold group-hover:underline shrink-0">
+                פתח →
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setScanOpen(true)}
+              className="detail-line w-full text-right rounded-2xl border border-slate-200/70 bg-gradient-to-l from-amber-50/40 to-white hover:from-amber-50 hover:border-amber-300 transition-all px-5 py-4 flex items-center gap-4 group"
+            >
+              <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-amber-100 to-amber-50 border border-amber-200/70 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                <FileImage className="w-6 h-6 text-amber-700" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-slate-900">סריקת המקור</div>
+                <div className="text-xs text-slate-500 mt-0.5">
+                  צילום החשבונית בלבד · OCR overlay לבחינת ביטחון
+                </div>
+              </div>
+              <div className="text-xs text-amber-700 font-semibold group-hover:underline shrink-0">
+                פתח →
+              </div>
+            </button>
+          </div>
 
           {/* Discrepancies callout */}
           {issueLines.length > 0 ? (
@@ -274,6 +312,19 @@ export function InvoiceDetail({ record, onClose }: Props) {
           onClose={() => setScanOpen(false)}
         />
       ) : null}
+
+      {compareOpen
+        ? (() => {
+            const { data, lines } = fromAuditRecordToCompare(record);
+            return (
+              <InvoicePoCompareViewer
+                data={data}
+                lines={lines}
+                onClose={() => setCompareOpen(false)}
+              />
+            );
+          })()
+        : null}
     </div>
   );
 }

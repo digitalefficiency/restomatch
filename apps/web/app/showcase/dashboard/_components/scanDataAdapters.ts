@@ -10,13 +10,14 @@
  *   invoice.
  */
 
+import type { CompareData, CompareLine } from './InvoicePoCompareViewer';
+import type { ScanData, ScanLine } from './InvoiceScanViewer';
 import type { InvoiceAuditRecord, LineComparison } from '../invoices/_mock';
 import type {
   PriceTrendProduct,
   SupplierInvoiceListItem,
   SupplierProfile,
 } from '../suppliers/[supplierId]/_mock';
-import type { ScanData, ScanLine } from './InvoiceScanViewer';
 
 /** Per-supplier brand colour band used at the top of the rendered scan. */
 const SUPPLIER_COLORS: Record<string, string> = {
@@ -74,6 +75,51 @@ export function fromAuditRecord(record: InvoiceAuditRecord): ScanData {
     capturedBy: `נסרק ע״י ${record.scannedBy}`,
     driverSignature: 'יוסי',
   };
+}
+
+/**
+ * Build a side-by-side PO ↔ Invoice comparison payload from the same
+ * audit record. The PO half is synthesised (we don't keep the real PO
+ * mock as a separate entity in the showcase) — the PO number, issue
+ * date and approver are derived deterministically from the invoice id.
+ */
+export function fromAuditRecordToCompare(record: InvoiceAuditRecord): {
+  data: CompareData;
+  lines: CompareLine[];
+} {
+  const issuedAt = new Date(record.scannedAt);
+  issuedAt.setDate(issuedAt.getDate() - 1);
+  issuedAt.setHours(15, 30, 0, 0);
+
+  const data: CompareData = {
+    supplierName: record.supplierName,
+    supplierInitials: record.supplierInitials,
+    supplierBusinessId: SUPPLIER_BUSINESS_IDS[record.supplierId] ?? '000000000',
+    supplierColor: SUPPLIER_COLORS[record.supplierId] ?? DEFAULT_COLOR,
+    customerName: RESTAURANT_NAME,
+    customerBusinessId: RESTAURANT_BUSINESS_ID,
+    poNumber: `PO-${record.id.replace('inv-', '')}`,
+    poIssuedAt: issuedAt.toISOString(),
+    poExpectedAt: record.scannedAt,
+    poApprovedBy: 'רומי המנהל',
+    invoiceNumber: record.invoiceNumber,
+    invoiceDate: record.scannedAt,
+    ocrConfidence: record.discrepanciesCount === 0 ? 0.97 : 0.88,
+  };
+
+  const lines: CompareLine[] = record.lines.map((l: LineComparison) => ({
+    productName: l.productName,
+    unit: l.unit,
+    poQty: l.poQty,
+    poUnitPrice: l.poUnitPrice,
+    invoiceQty: l.invoiceQty,
+    invoiceUnitPrice: l.invoiceUnitPrice,
+    status: l.status,
+    variance: l.variance,
+    note: l.note,
+  }));
+
+  return { data, lines };
 }
 
 /**
