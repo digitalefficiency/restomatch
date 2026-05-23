@@ -315,13 +315,25 @@ export function InvoicePaper({ data }: InvoicePaperProps) {
         tone="blue"
         className="absolute"
         style={{
-          top: 122,
-          left: 32,
-          fontSize: 22,
-          transform: 'rotate(-4deg)',
+          top: 78,
+          left: 200,
+          fontSize: 20,
+          transform: 'rotate(-5deg)',
         }}
       >
         הזמנה 218
+      </PenScrawl>
+      <PenScrawl
+        tone="blue"
+        className="absolute"
+        style={{
+          bottom: 230,
+          right: 90,
+          fontSize: 18,
+          transform: 'rotate(-3deg)',
+        }}
+      >
+        ✓ בדקתי
       </PenScrawl>
     </div>
   );

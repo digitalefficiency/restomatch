@@ -9,6 +9,7 @@ export default auth((req) => {
     req.nextUrl.pathname === '/' ||
     req.nextUrl.pathname.startsWith('/login') ||
     req.nextUrl.pathname.startsWith('/showcase') ||
+    req.nextUrl.pathname.startsWith('/scans') ||
     req.nextUrl.pathname.startsWith('/api/auth') ||
     req.nextUrl.pathname.startsWith('/_next') ||
     req.nextUrl.pathname.includes('.');
