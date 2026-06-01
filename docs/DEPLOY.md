@@ -1,6 +1,6 @@
 # Deployment Guide — RestoMatch
 
-מדריך פריסה לסביבת staging ו-production. מניח שיש כבר חשבונות Vercel, Neon, Upstash, Cloudflare, Anthropic.
+מדריך פריסה לסביבת staging ו-production. מניח שיש כבר חשבונות Vercel, Supabase, Upstash, Anthropic.
 
 ## Architecture
 
@@ -9,9 +9,9 @@ Web (Vercel)  ─┐
                 ├─ tRPC (Edge + Node mix)
 Mobile (Expo) ─┘     │
                      ▼
-              Postgres (Neon)
+        Postgres + Storage (Supabase)
               Redis (Upstash)        ──┐
-              Object Storage (R2)      │
+                                       │
                                        ▼
                                 Worker (Fly.io)
                                 — BullMQ consumers
@@ -19,19 +19,24 @@ Mobile (Expo) ─┘     │
                                 — Outbox dispatcher
 ```
 
-## Postgres (Neon)
+## Postgres (Supabase)
 
-1. Create project `restomatch-prod` (region: `aws-eu-central-1`)
-2. Enable extensions in dashboard SQL editor:
+The same Supabase project already backs invoice Storage — consolidate the primary
+DB onto it (do **not** create a separate DB provider).
+
+1. Use the existing Supabase project (or create one, region `eu-central-1`).
+2. Enable extensions — Supabase dashboard → Database → Extensions, or SQL editor:
    ```sql
    CREATE EXTENSION IF NOT EXISTS vector;
    CREATE EXTENSION IF NOT EXISTS pg_trgm;
    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
    ```
-3. Generate two connection strings:
-   - `DATABASE_URL` — pooled (used by web + worker for queries)
-   - `DATABASE_URL_DIRECT` — direct (used by migrations only)
-4. Run migrations: `DATABASE_URL=... pnpm db:migrate`
+3. Connection strings — Settings → Database → Connection pooling:
+   - `DATABASE_URL` — pooled, port 6543 (web + worker queries)
+   - `DATABASE_URL_DIRECT` — direct, port 5432 (migrations only)
+4. Run migrations: `DATABASE_URL_DIRECT=... pnpm db:migrate`
+5. Apply RLS during this step (NOT auto-run): `packages/db/drizzle/rls/*.sql`
+   — see `packages/db/drizzle/rls/README.md`.
 
 ## Redis (Upstash)
 
@@ -39,12 +44,16 @@ Mobile (Expo) ─┘     │
 2. Connection string in env as `REDIS_URL`
 3. Enable persistence for production (not required for staging)
 
-## Object Storage (Cloudflare R2)
+## Object Storage (Supabase Storage)
 
-1. Create bucket `restomatch-invoices`
-2. Lifecycle rule: move objects to "Infrequent Access" after 90 days
-3. Create API token with `Object Read & Write` scope
-4. Env vars: `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`
+Invoice scans are already served from the Supabase `invoice-scans` bucket.
+
+1. Bucket `invoice-scans` exists in the Supabase project.
+2. **Harden it**: set the bucket to private and apply
+   `packages/db/drizzle/rls/0001_invoice_scans_rls.sql`; the web app then serves
+   signed URLs instead of public URLs (see `apps/web/lib/supabase/*`).
+3. Env vars: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`,
+   and `SUPABASE_SERVICE_ROLE_KEY` (server-only, for signed uploads).
 
 ## Web (Vercel)
 

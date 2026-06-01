@@ -451,6 +451,40 @@ export const invoiceLines = pgTable(
   (t) => [index('invoice_lines_invoice_product_idx').on(t.invoiceId, t.productId)],
 );
 
+/**
+ * Uploaded invoice scans (photo / PDF) stored in Supabase Storage. The receiver
+ * mobile flow inserts a row here after upload; the /scans/[invoiceId] page reads
+ * it to embed the file from the bucket. Codifies the table that previously lived
+ * only in the Supabase dashboard so it travels with migrations.
+ *
+ * NOTE: restaurantId is nullable for parity with current rows (the browser
+ * uploader does not yet set it). The per-restaurant RLS migration
+ * (drizzle/rls/0002_core_tenant_rls.sql) backfills + tightens it during the
+ * Phase-3 Supabase consolidation.
+ */
+export const invoiceScans = pgTable(
+  'invoice_scans',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    invoiceId: uuid('invoice_id')
+      .notNull()
+      .references(() => invoices.id, { onDelete: 'cascade' }),
+    restaurantId: uuid('restaurant_id').references(() => restaurants.id, {
+      onDelete: 'cascade',
+    }),
+    bucket: text('bucket').notNull().default('invoice-scans'),
+    storagePath: text('storage_path').notNull(),
+    mimeType: text('mime_type').notNull(),
+    pageCount: integer('page_count'),
+    supplierName: text('supplier_name'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('invoice_scans_invoice_idx').on(t.invoiceId),
+    index('invoice_scans_restaurant_idx').on(t.restaurantId),
+  ],
+);
+
 /* ──────────────────────────────────────────────────────────────────────────
  * Matching engine
  * ────────────────────────────────────────────────────────────────────────── */
