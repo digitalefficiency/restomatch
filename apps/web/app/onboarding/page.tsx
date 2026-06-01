@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
+import { Card } from '@/lib/components';
 import { OnboardingForm } from './form';
 
 export default async function OnboardingPage() {
@@ -17,14 +18,14 @@ export default async function OnboardingPage() {
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center p-6">
-      <div className="w-full max-w-lg bg-white border border-slate-200 rounded-xl p-8">
-        <h1 className="text-2xl font-bold mb-2 text-slate-900">ברוך הבא ל-RestoMatch</h1>
-        <p className="text-sm text-slate-500 mb-6">
+    <main className="flex min-h-screen items-center justify-center p-6">
+      <Card elevated padding="lg" className="w-full max-w-lg">
+        <h1 className="mb-2 text-2xl font-bold text-slate-900">ברוך הבא ל-RestoMatch</h1>
+        <p className="mb-6 text-sm text-slate-500">
           תחילה — בוא נצור את המסעדה שלך. תיכנס אוטומטית כבעלים.
         </p>
         <OnboardingForm />
-      </div>
+      </Card>
     </main>
   );
 }

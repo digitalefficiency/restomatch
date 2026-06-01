@@ -1,4 +1,6 @@
+import { CheckCircle2 } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
+import { EmptyState, SectionHeader } from '@/lib/components';
 import { ApprovalsList } from './list';
 
 export default async function ApprovalsPage() {
@@ -7,15 +9,17 @@ export default async function ApprovalsPage() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold mb-2">תור אישורים</h2>
-      <p className="text-sm text-slate-500 mb-6">
-        חריגות שמחכות להחלטה שלך. אישור = הופך לחיסכון. דחייה = משאיר את החריגה כהפסד אך מתעד את ההחלטה.
-      </p>
+      <SectionHeader
+        title="תור אישורים"
+        subtitle="חריגות שמחכות להחלטה שלך. אישור = הופך לחיסכון. דחייה = משאיר את החריגה כהפסד אך מתעד את ההחלטה."
+      />
 
       {queue.length === 0 ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-6 text-slate-500">
-          אין חריגות בתור כרגע. ✓
-        </div>
+        <EmptyState
+          icon={<CheckCircle2 className="h-6 w-6" />}
+          title="אין חריגות בתור כרגע"
+          description="כל ההפרשים טופלו. חריגות חדשות יופיעו כאן ברגע שהמערכת תזהה אותן בקבלות ובחשבוניות."
+        />
       ) : (
         <ApprovalsList initial={queue} />
       )}

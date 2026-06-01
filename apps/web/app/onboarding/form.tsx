@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { trpc } from '@/lib/trpc/client';
+import { Button, Field, Input } from '@/lib/components';
 
 export function OnboardingForm() {
   const router = useRouter();
@@ -32,11 +33,15 @@ export function OnboardingForm() {
       }}
       className="space-y-4"
     >
-      <div>
-        <label htmlFor="name" className="block text-sm text-slate-700 mb-1.5">
-          שם המסעדה <span className="text-danger">*</span>
-        </label>
-        <input
+      <Field
+        htmlFor="name"
+        label={
+          <>
+            שם המסעדה <span className="text-danger">*</span>
+          </>
+        }
+      >
+        <Input
           id="name"
           required
           minLength={2}
@@ -44,38 +49,39 @@ export function OnboardingForm() {
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="כפר הזיתים"
-          className="w-full rounded-md bg-white border border-slate-200 px-3 py-2 text-slate-900 outline-none focus:border-primary"
         />
-      </div>
+      </Field>
 
-      <div>
-        <label htmlFor="businessId" className="block text-sm text-slate-700 mb-1.5">
-          ח״פ / עוסק מורשה <span className="text-slate-500">(לא חובה)</span>
-        </label>
-        <input
+      <Field
+        htmlFor="businessId"
+        label={
+          <>
+            ח״פ / עוסק מורשה <span className="text-slate-500">(לא חובה)</span>
+          </>
+        }
+      >
+        <Input
           id="businessId"
           inputMode="numeric"
           pattern="\d{9,12}"
           value={businessId}
           onChange={(e) => setBusinessId(e.target.value)}
           placeholder="514778123"
-          className="w-full rounded-md bg-white border border-slate-200 px-3 py-2 text-slate-900 outline-none focus:border-primary"
         />
-      </div>
+      </Field>
 
       {error ? (
-        <div className="rounded-md bg-danger/10 border border-danger/30 px-3 py-2 text-sm text-danger">
+        <div
+          role="alert"
+          className="rounded-md border-r-4 border-danger bg-danger/5 px-3 py-2 text-sm text-danger"
+        >
           {error}
         </div>
       ) : null}
 
-      <button
-        type="submit"
-        disabled={create.isPending}
-        className="w-full bg-primary hover:bg-primary-hover disabled:opacity-50 rounded-md py-2.5 font-medium transition-colors"
-      >
-        {create.isPending ? 'יוצר…' : 'צור מסעדה והמשך'}
-      </button>
+      <Button type="submit" className="w-full" loading={create.isPending}>
+        צור מסעדה והמשך
+      </Button>
     </form>
   );
 }

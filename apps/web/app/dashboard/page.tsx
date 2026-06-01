@@ -1,5 +1,7 @@
 import { redirect } from 'next/navigation';
+import { AlertTriangle, CheckCircle2, ClipboardCheck, Wallet } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
+import { KpiCard, SectionHeader } from '@/lib/components';
 
 export default async function DashboardPage() {
   const caller = await createServerCaller();
@@ -11,60 +13,41 @@ export default async function DashboardPage() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold mb-6">סקירה כללית</h2>
+      <SectionHeader
+        title="סקירה כללית"
+        subtitle="תמונת מצב יומית — איפה כסף בורח, ומה דורש את ההחלטה שלך עכשיו."
+      />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Kpi
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <KpiCard
           label="הפסד פוטנציאלי החודש"
           value={formatCurrency(kpis.monthPotentialLossIls)}
           tone="warning"
+          icon={<AlertTriangle className="h-5 w-5" />}
           subtitle="דיסקרפנסיות פתוחות עם חומרה בינונית ומעלה"
         />
-        <Kpi
+        <KpiCard
           label="חיסכון שנשמר החודש"
           value={formatCurrency(kpis.monthSavingsCapturedIls)}
           tone="accent"
+          icon={<Wallet className="h-5 w-5" />}
           subtitle="כסף שמנעת לאחר אישור/דחיית הפרשים"
         />
-        <Kpi
+        <KpiCard
           label="ממתינות לאישור"
           value={kpis.pendingApprovalsCount.toString()}
-          tone="default"
+          tone="neutral"
+          icon={<ClipboardCheck className="h-5 w-5" />}
           subtitle="חריגות בתור — מנהל/בעלים"
         />
-        <Kpi
+        <KpiCard
           label="התאמות נקיות השבוע"
           value={`${kpis.weekCleanMatchPct.toFixed(1)}%`}
           tone={kpis.weekCleanMatchPct >= 80 ? 'accent' : 'warning'}
+          icon={<CheckCircle2 className="h-5 w-5" />}
           subtitle="ממוצע מהשבעה ימים האחרונים"
         />
       </div>
-    </div>
-  );
-}
-
-function Kpi({
-  label,
-  value,
-  subtitle,
-  tone,
-}: {
-  label: string;
-  value: string;
-  subtitle?: string;
-  tone: 'default' | 'accent' | 'warning';
-}) {
-  const accent =
-    tone === 'accent'
-      ? 'text-accent'
-      : tone === 'warning'
-        ? 'text-warning'
-        : 'text-slate-900';
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5">
-      <p className="text-xs uppercase tracking-wider text-slate-500 mb-2">{label}</p>
-      <p className={`text-3xl font-bold ${accent}`}>{value}</p>
-      {subtitle ? <p className="text-xs text-slate-500 mt-2">{subtitle}</p> : null}
     </div>
   );
 }

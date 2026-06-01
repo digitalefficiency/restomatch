@@ -1,7 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+import { CheckCircle2, FileDown, XCircle } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
+import { Button, Card, Field, Input } from '@/lib/components';
 
 function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
@@ -14,13 +16,13 @@ function firstOfMonthISO(): string {
 export function ExportsForm() {
   const [from, setFrom] = useState(firstOfMonthISO());
   const [to, setTo] = useState(todayISO());
-  const [status, setStatus] = useState<string>('');
+  const [status, setStatus] = useState<{ ok: boolean; message: string } | null>(null);
   const [busy, setBusy] = useState<'csv' | 'uniform1000' | null>(null);
 
   const utils = trpc.useUtils();
 
   async function download(kind: 'csv' | 'uniform1000') {
-    setStatus('');
+    setStatus(null);
     setBusy(kind);
     try {
       const data =
@@ -38,66 +40,73 @@ export function ExportsForm() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      setStatus(`✓ הורד: ${data.rowCount} שורות`);
+      setStatus({ ok: true, message: `הורד בהצלחה — ${data.rowCount} שורות` });
     } catch (err) {
-      setStatus(`✗ ${err instanceof Error ? err.message : String(err)}`);
+      setStatus({ ok: false, message: err instanceof Error ? err.message : String(err) });
     } finally {
       setBusy(null);
     }
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-6 max-w-2xl">
-      <div className="grid grid-cols-2 gap-4 mb-6">
-        <div>
-          <label className="block text-sm text-slate-700 mb-1.5">מתאריך</label>
-          <input
+    <Card elevated padding="lg" className="max-w-2xl">
+      <div className="mb-6 grid grid-cols-2 gap-4">
+        <Field label="מתאריך" htmlFor="export-from">
+          <Input
+            id="export-from"
             type="date"
             value={from}
             onChange={(e) => setFrom(e.target.value)}
-            className="w-full rounded-md bg-white border border-slate-200 px-3 py-2 text-slate-900"
           />
-        </div>
-        <div>
-          <label className="block text-sm text-slate-700 mb-1.5">עד תאריך</label>
-          <input
-            type="date"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            className="w-full rounded-md bg-white border border-slate-200 px-3 py-2 text-slate-900"
-          />
-        </div>
+        </Field>
+        <Field label="עד תאריך" htmlFor="export-to">
+          <Input id="export-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        </Field>
       </div>
 
       <div className="flex gap-3">
-        <button
+        <Button
+          variant="primary"
+          className="flex-1"
           onClick={() => download('csv')}
           disabled={busy !== null}
-          className="flex-1 bg-primary hover:bg-primary-hover disabled:opacity-50 rounded-md py-2.5 font-medium"
+          loading={busy === 'csv'}
         >
-          {busy === 'csv' ? 'מכין…' : 'הורד CSV'}
-        </button>
-        <button
+          <FileDown className="h-4 w-4" aria-hidden="true" />
+          הורד CSV
+        </Button>
+        <Button
+          variant="accent"
+          className="flex-1"
           onClick={() => download('uniform1000')}
           disabled={busy !== null}
-          className="flex-1 bg-accent hover:bg-accent/80 text-bg disabled:opacity-50 rounded-md py-2.5 font-medium"
+          loading={busy === 'uniform1000'}
         >
-          {busy === 'uniform1000' ? 'מכין…' : 'הורד קובץ 1000'}
-        </button>
+          <FileDown className="h-4 w-4" aria-hidden="true" />
+          הורד קובץ אחיד (1000)
+        </Button>
       </div>
 
       {status ? (
         <p
-          className={`mt-4 text-sm ${status.startsWith('✓') ? 'text-accent' : 'text-danger'}`}
+          role="status"
+          className={`mt-4 flex items-center gap-1.5 text-sm ${
+            status.ok ? 'text-accent' : 'text-danger'
+          }`}
         >
-          {status}
+          {status.ok ? (
+            <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+          ) : (
+            <XCircle className="h-4 w-4" aria-hidden="true" />
+          )}
+          {status.message}
         </p>
       ) : null}
 
       <p className="mt-6 text-xs text-slate-500">
-        רק חשבוניות בסטטוס "matched", "approved" או "paid" נכללות בייצוא. חשבוניות עם
-        חריגות פתוחות לא תופענה.
+        רק חשבוניות בסטטוס "matched", "approved" או "paid" נכללות בייצוא. חשבוניות עם חריגות פתוחות
+        לא תופענה.
       </p>
-    </div>
+    </Card>
   );
 }

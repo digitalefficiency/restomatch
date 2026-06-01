@@ -1,7 +1,8 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { auth, signOut } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
+import { Button } from '@/lib/components';
+import { DashboardNav } from './nav';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
@@ -26,41 +27,24 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <main className="min-h-screen">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between gap-6">
+      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/85 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-4">
           <div>
             <h1 className="text-xl font-semibold text-slate-900">{active.restaurantName}</h1>
             <p className="text-xs text-slate-500">
               {session.user.email} · {labelForRole(active.role)}
             </p>
           </div>
-          <nav className="flex gap-1 text-sm">
-            <NavLink href="/dashboard">סקירה</NavLink>
-            <NavLink href="/dashboard/approvals">תור אישורים</NavLink>
-            <NavLink href="/dashboard/leaks">בלש דליפות</NavLink>
-            <NavLink href="/dashboard/suppliers">ספקים</NavLink>
-            <NavLink href="/dashboard/exports">ייצוא</NavLink>
-          </nav>
+          <DashboardNav />
           <form action={logout}>
-            <button className="text-sm text-slate-500 hover:text-slate-900 border border-slate-200 rounded-md px-3 py-1.5">
+            <Button variant="secondary" size="sm">
               התנתק
-            </button>
+            </Button>
           </form>
         </div>
       </header>
-      <div className="max-w-6xl mx-auto px-6 py-8">{children}</div>
+      <div className="mx-auto max-w-6xl px-6 py-8">{children}</div>
     </main>
-  );
-}
-
-function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <Link
-      href={href}
-      className="px-3 py-1.5 rounded-md text-slate-700 hover:bg-slate-100 hover:text-slate-900"
-    >
-      {children}
-    </Link>
   );
 }
 

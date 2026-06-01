@@ -1,4 +1,6 @@
+import { ArrowDownRight, ArrowUpRight, Minus, Truck } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
+import { Badge, Card, EmptyState, SectionHeader, type BadgeTone } from '@/lib/components';
 
 export default async function SuppliersPage() {
   const caller = await createServerCaller();
@@ -6,28 +8,25 @@ export default async function SuppliersPage() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold mb-2">דירוג ספקים</h2>
-      <p className="text-sm text-slate-500 mb-6">
-        רעיון: ספק שגדל ב-clean match% הוא ספק שלא מוסיף עלויות סמויות.
-      </p>
+      <SectionHeader
+        title="דירוג ספקים"
+        subtitle="ספק שגדל ב-clean match% הוא ספק שלא מוסיף עלויות סמויות."
+      />
 
       {scorecards.length === 0 ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-6 text-slate-500">
-          אין ספקים עם נתוני קבלה מספיקים. דוח זה מתבסס על match runs מהזמן האחרון.
-        </div>
+        <EmptyState
+          icon={<Truck className="h-6 w-6" />}
+          title="אין עדיין נתוני ספקים"
+          description="הדוח מתבסס על השוואות (match runs) מהזמן האחרון. ברגע שייכנסו קבלות וחשבוניות, הספקים יופיעו כאן."
+        />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {scorecards.map((s) => (
-            <article
-              key={s.supplierId}
-              className="rounded-xl border border-slate-200 bg-white p-5"
-            >
-              <header className="flex items-start justify-between mb-4">
+            <Card key={s.supplierId} as="article" elevated>
+              <header className="mb-4 flex items-start justify-between">
                 <div>
-                  <h3 className="text-lg font-semibold">{s.supplierName}</h3>
-                  <p className="text-xs text-slate-500 mt-1">
-                    {s.matchRunsCount} השוואות בתקופה
-                  </p>
+                  <h3 className="text-lg font-semibold text-slate-900">{s.supplierName}</h3>
+                  <p className="mt-1 text-xs text-slate-500">{s.matchRunsCount} השוואות בתקופה</p>
                 </div>
                 <TrendBadge trend={s.trend} />
               </header>
@@ -44,7 +43,7 @@ export default async function SuppliersPage() {
                   tone={s.duplicateInvoicesCount > 0 ? 'danger' : 'default'}
                 />
               </dl>
-            </article>
+            </Card>
           ))}
         </div>
       )}
@@ -72,18 +71,15 @@ function Row({
 }
 
 function TrendBadge({ trend }: { trend: 'up' | 'down' | 'flat' }) {
-  const label = trend === 'up' ? '↑' : trend === 'down' ? '↓' : '→';
-  const tone =
-    trend === 'up'
-      ? 'text-accent bg-accent/10'
-      : trend === 'down'
-        ? 'text-danger bg-danger/10'
-        : 'text-slate-500 bg-slate-100';
+  const map: Record<typeof trend, { tone: BadgeTone; icon: React.ReactNode; label: string }> = {
+    up: { tone: 'accent', icon: <ArrowUpRight className="h-3.5 w-3.5" />, label: 'משתפר' },
+    down: { tone: 'danger', icon: <ArrowDownRight className="h-3.5 w-3.5" />, label: 'מדרדר' },
+    flat: { tone: 'neutral', icon: <Minus className="h-3.5 w-3.5" />, label: 'יציב' },
+  };
+  const { tone, icon, label } = map[trend];
   return (
-    <span
-      className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-lg font-bold ${tone}`}
-    >
+    <Badge tone={tone} icon={icon}>
       {label}
-    </span>
+    </Badge>
   );
 }

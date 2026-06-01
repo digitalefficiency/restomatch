@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { trpc } from '@/lib/trpc/client';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
+import { trpc } from '@/lib/trpc/client';
+import { Badge, Button, Card, Textarea, type BadgeTone } from '@/lib/components';
 
 type QueueItem = inferRouterOutputs<AppRouter>['approvals']['myQueue'][number];
 
@@ -23,47 +24,48 @@ export function ApprovalsList({ initial }: { initial: QueueItem[] }) {
   return (
     <div className="space-y-3">
       {queue.data?.map((d) => (
-        <article
-          key={d.id}
-          className="rounded-xl border border-slate-200 bg-white p-5"
-        >
-          <header className="flex items-start justify-between gap-3 mb-3">
+        <Card key={d.id} as="article" elevated aria-label={typeLabel(d.type)}>
+          <header className="mb-3 flex items-start justify-between gap-3">
             <div>
               <SeverityBadge severity={d.severity} />
-              <h3 className="text-lg font-semibold mt-2">{typeLabel(d.type)}</h3>
-              <p className="text-sm text-slate-500 mt-1">
+              <h3 className="mt-2 text-lg font-semibold text-slate-900">{typeLabel(d.type)}</h3>
+              <p className="mt-1 text-sm text-slate-500">
                 ההפסד המוערך:{' '}
                 <span className="font-semibold text-slate-900">
                   ₪{Number(d.deltaAmount ?? 0).toLocaleString('he-IL')}
                 </span>
               </p>
             </div>
-            <div className="text-xs text-slate-500 whitespace-nowrap">
+            <div className="whitespace-nowrap text-xs text-slate-500">
               {new Date(d.createdAt).toLocaleString('he-IL')}
             </div>
           </header>
 
           {activeReject === d.id ? (
             <div className="space-y-2">
-              <textarea
+              <Textarea
                 value={rejectReason}
                 onChange={(e) => setRejectReason(e.target.value)}
                 placeholder="סיבת דחייה (חובה)"
                 rows={2}
-                className="w-full rounded-md bg-white border border-slate-200 px-3 py-2 text-sm focus:border-primary outline-none"
+                aria-label="סיבת דחייה"
               />
-              <div className="flex gap-2 justify-end">
-                <button
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => {
                     setActiveReject(null);
                     setRejectReason('');
                   }}
-                  className="text-xs text-slate-500 px-3 py-1.5 hover:text-slate-900"
                 >
                   ביטול
-                </button>
-                <button
-                  disabled={!rejectReason.trim() || reject.isPending}
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  loading={reject.isPending}
+                  disabled={!rejectReason.trim()}
                   onClick={() =>
                     reject.mutate(
                       { discrepancyId: d.id, reason: rejectReason },
@@ -75,46 +77,42 @@ export function ApprovalsList({ initial }: { initial: QueueItem[] }) {
                       },
                     )
                   }
-                  className="text-xs bg-danger hover:bg-danger/80 disabled:opacity-50 px-3 py-1.5 rounded-md font-medium"
                 >
                   אשר דחייה
-                </button>
+                </Button>
               </div>
             </div>
           ) : (
-            <div className="flex gap-2 justify-end">
-              <button
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                className="border-danger/30 text-danger hover:bg-danger/10 hover:text-danger"
                 onClick={() => setActiveReject(d.id)}
-                className="text-sm text-danger border border-danger/30 hover:bg-danger/10 px-3 py-1.5 rounded-md"
               >
                 דחה
-              </button>
-              <button
-                disabled={approve.isPending}
+              </Button>
+              <Button
+                variant="accent"
+                size="sm"
+                loading={approve.isPending}
                 onClick={() => approve.mutate({ discrepancyId: d.id })}
-                className="text-sm bg-accent hover:bg-accent/80 text-bg disabled:opacity-50 px-3 py-1.5 rounded-md font-medium"
               >
                 אשר
-              </button>
+              </Button>
             </div>
           )}
-        </article>
+        </Card>
       ))}
     </div>
   );
 }
 
 function SeverityBadge({ severity }: { severity: string }) {
-  const tone =
-    severity === 'block'
-      ? 'bg-danger/15 text-danger'
-      : severity === 'warn'
-        ? 'bg-warning/15 text-warning'
-        : 'bg-slate-100 text-slate-700';
+  const tone: BadgeTone =
+    severity === 'block' ? 'danger' : severity === 'warn' ? 'warning' : 'neutral';
   const label = severity === 'block' ? 'חמור' : severity === 'warn' ? 'בינוני' : 'מידע';
-  return (
-    <span className={`inline-block text-xs px-2 py-0.5 rounded-full ${tone}`}>{label}</span>
-  );
+  return <Badge tone={tone}>{label}</Badge>;
 }
 
 function typeLabel(type: string): string {

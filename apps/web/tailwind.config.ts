@@ -5,7 +5,7 @@ import { typography } from '@restomatch/ui-tokens';
 // Brand colors below override the dark tokens from @restomatch/ui-tokens
 // for the web app only. Mobile (RN) still uses the dark tokens directly.
 const config: Config = {
-  content: ['./app/**/*.{ts,tsx}', './components/**/*.{ts,tsx}'],
+  content: ['./app/**/*.{ts,tsx}', './components/**/*.{ts,tsx}', './lib/**/*.{ts,tsx}'],
   theme: {
     extend: {
       colors: {

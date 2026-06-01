@@ -1,5 +1,7 @@
 import { TRPCError } from '@trpc/server';
+import { Droplets, ShieldAlert } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
+import { Badge, Card, EmptyState, SectionHeader } from '@/lib/components';
 
 export default async function LeaksPage() {
   const caller = await createServerCaller();
@@ -18,68 +20,70 @@ export default async function LeaksPage() {
   if (forbidden) {
     return (
       <div>
-        <h2 className="text-2xl font-bold mb-4">בלש הדליפות</h2>
-        <div className="rounded-xl border border-warning/30 bg-warning/10 p-4 text-warning">
-          רק לבעלי תפקיד "בעלים" יש גישה לבלש הדליפות.
-        </div>
+        <SectionHeader title="בלש הדליפות" />
+        <Card
+          padding="md"
+          className="flex items-center gap-3 border-warning/30 bg-warning/5 text-warning"
+        >
+          <ShieldAlert className="h-5 w-5 shrink-0" aria-hidden="true" />
+          <span>רק לבעלי תפקיד "בעלים" יש גישה לבלש הדליפות.</span>
+        </Card>
       </div>
     );
   }
 
   return (
     <div>
-      <h2 className="text-2xl font-bold mb-2">בלש הדליפות</h2>
-      <p className="text-sm text-slate-500 mb-6">
-        מוצרים שבהם המחיר האחרון חורג מהגבול ה-90 ההיסטורי.
-      </p>
+      <SectionHeader
+        title="בלש הדליפות"
+        subtitle="מוצרים שבהם המחיר האחרון חורג מהגבול ה-90 ההיסטורי."
+      />
 
       {leaks.length === 0 ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-6 text-slate-500">
-          לא נמצאו דליפות פעילות. נדרשים לפחות 3 דגימות מחיר לכל ספק לפני שה-baseline מחושב.
-        </div>
+        <EmptyState
+          icon={<Droplets className="h-6 w-6" />}
+          title="לא נמצאו דליפות פעילות"
+          description="נדרשים לפחות 3 דגימות מחיר לכל ספק לפני שה-baseline מחושב. המשך לקלוט חשבוניות והדליפות יתחילו לצוף."
+        />
       ) : (
-        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+        <Card elevated padding="none" className="overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50/50 text-slate-500">
+            <thead className="bg-slate-50 text-slate-500">
               <tr>
-                <th className="text-right p-3 font-medium">מוצר</th>
-                <th className="text-right p-3 font-medium">ספק</th>
-                <th className="text-right p-3 font-medium">מחיר ממוצע</th>
-                <th className="text-right p-3 font-medium">מחיר אחרון</th>
-                <th className="text-right p-3 font-medium">שינוי</th>
-                <th className="text-right p-3 font-medium">הפסד צפוי</th>
+                <th scope="col" className="p-3 text-right font-medium">מוצר</th>
+                <th scope="col" className="p-3 text-right font-medium">ספק</th>
+                <th scope="col" className="p-3 text-right font-medium">מחיר ממוצע</th>
+                <th scope="col" className="p-3 text-right font-medium">מחיר אחרון</th>
+                <th scope="col" className="p-3 text-right font-medium">שינוי</th>
+                <th scope="col" className="p-3 text-right font-medium">הפסד צפוי</th>
               </tr>
             </thead>
             <tbody>
               {leaks.map((row) => (
                 <tr
                   key={`${row.productId}-${row.supplierId}`}
-                  className="border-t border-slate-200"
+                  className="border-t border-slate-100 transition-colors hover:bg-slate-50/60"
                 >
                   <td className="p-3">
-                    <div className="font-medium">{row.productName}</div>
+                    <div className="font-medium text-slate-900">{row.productName}</div>
                     <div className="text-xs text-slate-500">{row.category ?? '—'}</div>
                   </td>
-                  <td className="p-3">{row.supplierName}</td>
-                  <td className="p-3 tabular-nums">{formatCurrency(row.baselineP50)}</td>
-                  <td className="p-3 tabular-nums">{formatCurrency(row.lastObservedPrice)}</td>
-                  <td className="p-3 tabular-nums">
-                    <span
-                      className={
-                        row.deltaPct >= 0.1
-                          ? 'text-danger font-semibold'
-                          : 'text-warning font-semibold'
-                      }
-                    >
+                  <td className="p-3 text-slate-700">{row.supplierName}</td>
+                  <td className="p-3 tabular-nums text-slate-700">{formatCurrency(row.baselineP50)}</td>
+                  <td className="p-3 tabular-nums text-slate-900">{formatCurrency(row.lastObservedPrice)}</td>
+                  <td className="p-3">
+                    <Badge tone={row.deltaPct >= 0.1 ? 'danger' : 'warning'}>
                       +{(row.deltaPct * 100).toFixed(1)}%
-                    </span>
+                    </Badge>
                   </td>
-                  <td className="p-3 tabular-nums">{formatCurrency(row.monthExcessIls)}</td>
+                  <td className="p-3 font-semibold tabular-nums text-slate-900">
+                    {formatCurrency(row.monthExcessIls)}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
+        </Card>
       )}
     </div>
   );
