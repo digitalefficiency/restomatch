@@ -77,17 +77,17 @@ export function InvoicePaper({ data }: InvoicePaperProps) {
       {/* ========================================================== */}
       <div className="relative px-10 pt-7 pb-2 flex items-start justify-between">
         {/* Date block — left */}
-        <div className="text-[11px] leading-relaxed text-slate-700 tabular-nums shrink-0">
+        <div className="text-[11px] leading-relaxed text-stone-700 tabular-nums shrink-0">
           <div className="flex gap-2">
-            <span className="text-slate-500">תאריך:</span>
+            <span className="text-stone-500">תאריך:</span>
             <span className="font-semibold">{dateText}</span>
           </div>
           <div className="flex gap-2">
-            <span className="text-slate-500">שעה:</span>
+            <span className="text-stone-500">שעה:</span>
             <span>{timeText}</span>
           </div>
           <div className="flex gap-2">
-            <span className="text-slate-500">דף:</span>
+            <span className="text-stone-500">דף:</span>
             <span>1 מ-1</span>
           </div>
         </div>
@@ -107,11 +107,11 @@ export function InvoicePaper({ data }: InvoicePaperProps) {
             {data.supplierName}
           </div>
           {data.supplierAddress ? (
-            <div className="text-[10px] text-slate-600 mt-1.5 leading-tight">
+            <div className="text-[10px] text-stone-600 mt-1.5 leading-tight">
               {data.supplierAddress}
             </div>
           ) : null}
-          <div className="text-[10px] text-slate-600 mt-0.5">
+          <div className="text-[10px] text-stone-600 mt-0.5">
             ח.פ. {data.supplierBusinessId}
           </div>
         </div>
@@ -129,34 +129,34 @@ export function InvoicePaper({ data }: InvoicePaperProps) {
       <div className="px-10 pt-4 pb-3 flex items-start justify-between gap-6">
         {/* Customer (לכבוד) — right */}
         <div className="text-right max-w-xs">
-          <div className="text-[11px] text-slate-500 mb-0.5">לכבוד:</div>
+          <div className="text-[11px] text-stone-500 mb-0.5">לכבוד:</div>
           <div className="font-bold text-sm">
             {data.customerName}
-            <span className="text-slate-500 font-normal text-xs mr-1">
+            <span className="text-stone-500 font-normal text-xs mr-1">
               ({data.customerBusinessId.slice(0, 7)})
             </span>
           </div>
-          <div className="text-[11px] text-slate-600 mt-0.5">
+          <div className="text-[11px] text-stone-600 mt-0.5">
             ח.פ. {data.customerBusinessId}
           </div>
-          <div className="text-[11px] text-slate-600">רחוב המסעדנים 14, רעננה</div>
-          <div className="text-[11px] text-slate-600">טל: 09-7711224</div>
+          <div className="text-[11px] text-stone-600">רחוב המסעדנים 14, רעננה</div>
+          <div className="text-[11px] text-stone-600">טל: 09-7711224</div>
         </div>
 
         {/* Title — center-left */}
         <div className="text-center pt-1">
-          <div className="text-2xl font-bold tracking-tight text-slate-800">{docTitle}</div>
+          <div className="text-2xl font-bold tracking-tight text-stone-800">{docTitle}</div>
           <div className="text-3xl font-black tabular-nums tracking-tight mt-1">
             {data.invoiceNumber.replace(/[^0-9]/g, '') || data.invoiceNumber}
           </div>
-          <div className="text-[10px] text-slate-400 uppercase tracking-widest mt-1">
+          <div className="text-[10px] text-stone-400 uppercase tracking-widest mt-1">
             מקור
           </div>
         </div>
       </div>
 
       {/* "משלוח:" line — present on real ערן וצחי docs */}
-      <div className="px-10 mb-1 text-[11px] text-slate-500">
+      <div className="px-10 mb-1 text-[11px] text-stone-500">
         משלוח: ______________________
       </div>
 
@@ -167,7 +167,7 @@ export function InvoicePaper({ data }: InvoicePaperProps) {
         <table className="w-full text-[12px]" style={{ borderCollapse: 'collapse' }}>
           <thead>
             <tr
-              className="text-slate-800"
+              className="text-stone-800"
               style={{ borderBottom: '2px solid #475569' }}
             >
               <th className="px-2 py-1.5 text-right font-bold text-[11px] w-8">מ.ס.</th>
@@ -194,10 +194,10 @@ export function InvoicePaper({ data }: InvoicePaperProps) {
               return (
                 <tr
                   key={i}
-                  className="text-slate-900"
+                  className="text-stone-900"
                   style={{ borderBottom: '1px dotted #cbd5e1' }}
                 >
-                  <td className="px-2 py-1.5 tabular-nums text-slate-600">{i + 1}</td>
+                  <td className="px-2 py-1.5 tabular-nums text-stone-600">{i + 1}</td>
                   <td className="px-2 py-1.5 font-medium">
                     {line.name}
                     {hasCorrection ? (
@@ -212,9 +212,9 @@ export function InvoicePaper({ data }: InvoicePaperProps) {
                       </PenScrawl>
                     ) : null}
                   </td>
-                  <td className="px-2 py-1.5 text-slate-700">{line.unit}</td>
+                  <td className="px-2 py-1.5 text-stone-700">{line.unit}</td>
                   <td className="px-2 py-1.5 tabular-nums">{line.unitPrice.toFixed(2)}</td>
-                  <td className="px-2 py-1.5 tabular-nums text-slate-500">0.00</td>
+                  <td className="px-2 py-1.5 tabular-nums text-stone-500">0.00</td>
                   <td className="px-2 py-1.5 tabular-nums font-semibold">
                     {lineTotal.toFixed(2)}
                   </td>
@@ -243,17 +243,17 @@ export function InvoicePaper({ data }: InvoicePaperProps) {
       <div className="px-10 pt-3 pb-2 flex items-start justify-between gap-8">
         {/* Customer balance — right */}
         {data.customerBalanceIls !== undefined ? (
-          <div className="text-[11px] text-slate-600 max-w-[200px]">
+          <div className="text-[11px] text-stone-600 max-w-[200px]">
             <div className="flex justify-between gap-3">
               <span>יתרת לקוח:</span>
-              <span className="font-bold tabular-nums text-slate-900">
+              <span className="font-bold tabular-nums text-stone-900">
                 {data.customerBalanceIls.toLocaleString('he-IL', {
                   minimumFractionDigits: 2,
                   maximumFractionDigits: 2,
                 })}
               </span>
             </div>
-            <div className="text-[10px] text-slate-400 mt-0.5">
+            <div className="text-[10px] text-stone-400 mt-0.5">
               (סוגד התשלום — לעיון)
             </div>
           </div>
@@ -282,17 +282,17 @@ export function InvoicePaper({ data }: InvoicePaperProps) {
       {/* ========================================================== */}
       {/* Signature lines                                              */}
       {/* ========================================================== */}
-      <div className="px-10 mt-8 flex items-end justify-between gap-6 text-[10px] text-slate-500">
+      <div className="px-10 mt-8 flex items-end justify-between gap-6 text-[10px] text-stone-500">
         <div className="flex-1 text-center">
-          <div className="border-t border-slate-400 pt-1">חתימת לקוח</div>
+          <div className="border-t border-stone-400 pt-1">חתימת לקוח</div>
         </div>
         <div className="flex-1 text-center">
-          <div className="border-t border-slate-400 pt-1">שם המקבל</div>
+          <div className="border-t border-stone-400 pt-1">שם המקבל</div>
         </div>
         <div className="flex-1 text-center relative">
-          <div className="border-t border-slate-400 pt-1">חתימת מוסר</div>
+          <div className="border-t border-stone-400 pt-1">חתימת מוסר</div>
           {data.driverSignature ? (
-            <PenScrawl tone="blue" className="absolute -top-4 left-1/2 -translate-x-1/2 text-lg">
+            <PenScrawl tone="blue" className="absolute -top-4 left-1/2 -transtone-x-1/2 text-lg">
               {data.driverSignature}
             </PenScrawl>
           ) : null}
@@ -302,7 +302,7 @@ export function InvoicePaper({ data }: InvoicePaperProps) {
       {/* ========================================================== */}
       {/* Print code footer                                            */}
       {/* ========================================================== */}
-      <div className="px-10 mt-8 pb-4 text-[9px] text-slate-400 tabular-nums flex justify-between">
+      <div className="px-10 mt-8 pb-4 text-[9px] text-stone-400 tabular-nums flex justify-between">
         <span>BRW58CDC989C7B3_001364</span>
         <span>הופק במערכת RestoMatch</span>
       </div>
@@ -381,7 +381,7 @@ function ReceivedStamp() {
 function TotalRow({ label, value }: { label: string; value: number }) {
   return (
     <div className="flex justify-between">
-      <span className="text-slate-700">{label}:</span>
+      <span className="text-stone-700">{label}:</span>
       <span className="font-semibold tabular-nums">
         {value.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
       </span>

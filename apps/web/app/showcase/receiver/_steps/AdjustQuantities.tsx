@@ -74,12 +74,12 @@ export function AdjustQuantities({ result, marks, onUpdateMark, onSubmit, onBack
       ) : null}
 
       {showMatched ? (
-        <div className="mb-4 rounded-xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-700">
+        <div className="mb-4 rounded-xl border border-stone-200 bg-white/70 p-3 text-sm text-stone-700">
           <ul className="space-y-1.5">
             {matchedLines.map((l) => (
               <li key={l.productName} className="flex items-center justify-between">
                 <span className="font-medium">{l.productName}</span>
-                <span className="text-slate-500 tabular-nums">
+                <span className="text-stone-500 tabular-nums">
                   {l.invoiceQty} {l.invoiceUnit} × ₪{l.invoiceUnitPrice}
                 </span>
               </li>
@@ -111,7 +111,7 @@ export function AdjustQuantities({ result, marks, onUpdateMark, onSubmit, onBack
           <button
             type="button"
             onClick={onBack}
-            className="text-sm text-slate-500 hover:text-slate-800 underline underline-offset-4 decoration-slate-300"
+            className="text-sm text-stone-500 hover:text-stone-800 underline underline-offset-4 decoration-stone-300"
           >
             חזור לתוצאות
           </button>
@@ -119,7 +119,7 @@ export function AdjustQuantities({ result, marks, onUpdateMark, onSubmit, onBack
             type="button"
             onClick={onSubmit}
             disabled={stats.pending > 0}
-            className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-xl px-5 py-3 font-medium shadow-[0_4px_12px_rgba(37,99,235,0.25)] disabled:shadow-none transition-all"
+            className="inline-flex items-center gap-2 bg-teal-600 hover:bg-teal-700 disabled:bg-stone-200 disabled:text-stone-400 text-white rounded-xl px-5 py-3 font-medium shadow-[0_4px_12px_rgba(37,99,235,0.25)] disabled:shadow-none transition-all"
           >
             <Check className="w-5 h-5" strokeWidth={3} />
             {stats.pending > 0
@@ -152,12 +152,12 @@ function AdjustCard({ line, mark, onUpdate }: AdjustCardProps) {
 
   return (
     <div
-      className={`adjust-card rounded-2xl border bg-white/90 backdrop-blur-xl p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)] ${mark.touched ? 'border-slate-200' : accent.border}`}
+      className={`adjust-card rounded-2xl border bg-white/90 backdrop-blur-xl p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)] ${mark.touched ? 'border-stone-200' : accent.border}`}
     >
       <div className="flex items-start justify-between mb-3">
         <div>
-          <div className="font-semibold text-slate-900">{line.productName}</div>
-          <div className="text-xs text-slate-500 mt-1 tabular-nums">
+          <div className="font-semibold text-stone-900">{line.productName}</div>
+          <div className="text-xs text-stone-500 mt-1 tabular-nums">
             {line.poQty !== null ? (
               <span>הוזמן: {line.poQty} {line.poUnit}</span>
             ) : (
@@ -165,7 +165,7 @@ function AdjustCard({ line, mark, onUpdate }: AdjustCardProps) {
             )}
             {line.invoiceQty !== null ? (
               <>
-                <span className="text-slate-300 mx-1.5">·</span>
+                <span className="text-stone-300 mx-1.5">·</span>
                 <span>חויב: {line.invoiceQty} {line.invoiceUnit}</span>
               </>
             ) : null}
@@ -178,13 +178,13 @@ function AdjustCard({ line, mark, onUpdate }: AdjustCardProps) {
       </div>
 
       {/* Stepper */}
-      <div className="flex items-center justify-between bg-slate-50 rounded-xl p-2 mb-3">
+      <div className="flex items-center justify-between bg-stone-50 rounded-xl p-2 mb-3">
         <button
           type="button"
           onClick={() => incrementQty(-1)}
-          className="w-10 h-10 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 active:scale-95 transition-all flex items-center justify-center"
+          className="w-10 h-10 rounded-lg bg-white border border-stone-200 hover:bg-stone-100 active:scale-95 transition-all flex items-center justify-center"
         >
-          <Minus className="w-4 h-4 text-slate-700" strokeWidth={2.5} />
+          <Minus className="w-4 h-4 text-stone-700" strokeWidth={2.5} />
         </button>
         <div className="flex items-baseline gap-2">
           <input
@@ -192,18 +192,18 @@ function AdjustCard({ line, mark, onUpdate }: AdjustCardProps) {
             inputMode="decimal"
             value={mark.qtyReceived}
             onChange={(e) => setQty(Number(e.target.value))}
-            className="w-20 text-center text-2xl font-bold tabular-nums bg-transparent border-0 focus:outline-none text-slate-900"
+            className="w-20 text-center text-2xl font-bold tabular-nums bg-transparent border-0 focus:outline-none text-stone-900"
             min={0}
             step={0.1}
           />
-          <span className="text-sm text-slate-500">{line.invoiceUnit ?? line.poUnit ?? ''}</span>
+          <span className="text-sm text-stone-500">{line.invoiceUnit ?? line.poUnit ?? ''}</span>
         </div>
         <button
           type="button"
           onClick={() => incrementQty(1)}
-          className="w-10 h-10 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 active:scale-95 transition-all flex items-center justify-center"
+          className="w-10 h-10 rounded-lg bg-white border border-stone-200 hover:bg-stone-100 active:scale-95 transition-all flex items-center justify-center"
         >
-          <Plus className="w-4 h-4 text-slate-700" strokeWidth={2.5} />
+          <Plus className="w-4 h-4 text-stone-700" strokeWidth={2.5} />
         </button>
       </div>
 
@@ -263,8 +263,8 @@ function Chip({
 }) {
   const tones = {
     neutral: active
-      ? 'bg-blue-600 text-white border-blue-600'
-      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50',
+      ? 'bg-teal-600 text-white border-teal-600'
+      : 'bg-white text-stone-700 border-stone-200 hover:bg-stone-50',
     red: active
       ? 'bg-red-600 text-white border-red-600'
       : 'bg-white text-red-700 border-red-200 hover:bg-red-50',
@@ -309,8 +309,8 @@ function statusAccent(status: LineStatus) {
     case 'missing_from_invoice':
       return {
         label: 'חסר בחשבונית',
-        tint: 'bg-slate-100 text-slate-700 border-slate-200',
-        border: 'border-slate-200/60',
+        tint: 'bg-stone-100 text-stone-700 border-stone-200',
+        border: 'border-stone-200/60',
         icon: <X className="w-3 h-3" strokeWidth={3} />,
       };
     default:

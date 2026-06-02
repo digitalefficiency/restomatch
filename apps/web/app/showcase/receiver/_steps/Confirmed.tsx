@@ -58,14 +58,14 @@ export function Confirmed({
         <Check className="w-12 h-12 text-white" strokeWidth={3} />
       </div>
 
-      <h1 className="confirm-content text-3xl font-bold tracking-tight text-slate-900 mb-2">
+      <h1 className="confirm-content text-3xl font-bold tracking-tight text-stone-900 mb-2">
         הקבלה נסגרה
       </h1>
-      <p className="confirm-content text-slate-500 mb-8">
+      <p className="confirm-content text-stone-500 mb-8">
         תועדה ב-{time} מהספק "{supplierName}". מנוע ההתאמה מריץ עכשיו את ההצלבה הסופית.
       </p>
 
-      <div className="confirm-content rounded-2xl border border-slate-200/70 bg-white/90 backdrop-blur-xl p-5 mb-6 text-right space-y-3 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)]">
+      <div className="confirm-content rounded-2xl border border-stone-200/70 bg-white/90 backdrop-blur-xl p-5 mb-6 text-right space-y-3 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)]">
         <RowItem
           icon={<Receipt className="w-4 h-4" />}
           label="חשבונית"
@@ -120,7 +120,7 @@ export function Confirmed({
       <button
         type="button"
         onClick={onReset}
-        className="confirm-content inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl px-5 py-3 font-medium shadow-[0_4px_12px_rgba(37,99,235,0.25)] transition-all"
+        className="confirm-content inline-flex items-center gap-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl px-5 py-3 font-medium shadow-[0_4px_12px_rgba(37,99,235,0.25)] transition-all"
       >
         <Plus className="w-4 h-4" strokeWidth={3} />
         קבלה נוספת
@@ -133,7 +133,7 @@ function RowItem({
   icon,
   label,
   value,
-  valueClass = 'text-slate-900 font-semibold',
+  valueClass = 'text-stone-900 font-semibold',
 }: {
   icon: React.ReactNode;
   label: string;
@@ -142,8 +142,8 @@ function RowItem({
 }) {
   return (
     <div className="flex items-center justify-between">
-      <div className="flex items-center gap-2 text-sm text-slate-500">
-        <span className="text-slate-400">{icon}</span>
+      <div className="flex items-center gap-2 text-sm text-stone-500">
+        <span className="text-stone-400">{icon}</span>
         <span>{label}</span>
       </div>
       <span className={`text-sm ${valueClass}`}>{value}</span>

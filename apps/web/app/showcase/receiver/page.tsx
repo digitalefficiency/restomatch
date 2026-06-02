@@ -34,8 +34,8 @@ export default function ReceiverWizard() {
               key={i}
               className={`h-1.5 flex-1 rounded-full transition-all ${
                 isDone || isCurrent
-                  ? 'bg-gradient-to-r from-blue-500 to-blue-700'
-                  : 'bg-slate-200'
+                  ? 'bg-gradient-to-r from-teal-500 to-teal-700'
+                  : 'bg-stone-200'
               }`}
             />
           );

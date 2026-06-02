@@ -138,11 +138,11 @@ export default function DashboardShowcase() {
   return (
     <main ref={containerRef} className="max-w-7xl mx-auto px-6 py-12 space-y-12" dir="rtl">
       <div className="section-block">
-        <p className="text-xs uppercase tracking-[0.2em] text-blue-600 font-semibold mb-2">
+        <p className="text-xs uppercase tracking-[0.2em] text-teal-600 font-semibold mb-2">
           Control Center
         </p>
-        <h1 className="text-4xl font-bold tracking-tight mb-2 text-slate-900">לוח הבעלים</h1>
-        <p className="text-slate-500">
+        <h1 className="text-4xl font-bold tracking-tight mb-2 text-stone-900">לוח הבעלים</h1>
+        <p className="text-stone-500">
           תמונה לייב של המסעדה — איפה כסף בורח, מי ספק מדויק, מה דורש את ההחלטה שלך עכשיו.
         </p>
       </div>
@@ -201,17 +201,17 @@ function KpiCard({ kpi }: { kpi: Kpi }) {
     good: {
       icon: 'text-emerald-600 bg-emerald-50 ring-emerald-100',
       glow: 'bg-emerald-400',
-      number: 'text-slate-900',
+      number: 'text-stone-900',
     },
     warn: {
       icon: 'text-amber-600 bg-amber-50 ring-amber-100',
       glow: 'bg-amber-400',
-      number: 'text-slate-900',
+      number: 'text-stone-900',
     },
     neutral: {
-      icon: 'text-blue-600 bg-blue-50 ring-blue-100',
-      glow: 'bg-blue-400',
-      number: 'text-slate-900',
+      icon: 'text-teal-600 bg-teal-50 ring-teal-100',
+      glow: 'bg-teal-400',
+      number: 'text-stone-900',
     },
   } as const;
   const t = tones[kpi.tone];
@@ -229,7 +229,7 @@ function KpiCard({ kpi }: { kpi: Kpi }) {
   return (
     <div
       ref={cardRef}
-      className="relative rounded-2xl border border-slate-200/70 bg-white/90 backdrop-blur-xl p-6 overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-8px_rgba(15,23,42,0.06)]"
+      className="relative rounded-2xl border border-stone-200/70 bg-white/90 backdrop-blur-xl p-6 overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-8px_rgba(15,23,42,0.06)]"
     >
       <div className="flex items-start justify-between mb-4">
         <div
@@ -250,15 +250,15 @@ function KpiCard({ kpi }: { kpi: Kpi }) {
         </div>
       </div>
 
-      <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">
+      <div className="text-xs uppercase tracking-wider text-stone-500 font-semibold mb-2">
         {kpi.label}
       </div>
       <div className="text-4xl font-bold tabular-nums tracking-tight flex items-baseline gap-1">
-        {kpi.prefix ? <span className="text-2xl text-slate-400">{kpi.prefix}</span> : null}
+        {kpi.prefix ? <span className="text-2xl text-stone-400">{kpi.prefix}</span> : null}
         <span ref={numberRef} className={t.number}>
           0
         </span>
-        {kpi.suffix ? <span className="text-2xl text-slate-400">{kpi.suffix}</span> : null}
+        {kpi.suffix ? <span className="text-2xl text-stone-400">{kpi.suffix}</span> : null}
       </div>
 
       <div
@@ -272,21 +272,21 @@ function Heatmap() {
   const [hover, setHover] = useState<{ p: number; s: number; x: number; y: number } | null>(null);
 
   return (
-    <div className="relative rounded-2xl border border-slate-200/70 bg-white/90 backdrop-blur-xl p-6 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-8px_rgba(15,23,42,0.06)]">
+    <div className="relative rounded-2xl border border-stone-200/70 bg-white/90 backdrop-blur-xl p-6 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-8px_rgba(15,23,42,0.06)]">
       <div
         className="grid gap-0.5"
         style={{ gridTemplateColumns: `120px repeat(${SUPPLIERS.length}, 1fr)` }}
       >
         <div />
         {SUPPLIERS.map((s) => (
-          <div key={s} className="text-xs text-slate-500 font-medium text-center pb-3 px-1">
+          <div key={s} className="text-xs text-stone-500 font-medium text-center pb-3 px-1">
             {s}
           </div>
         ))}
 
         {PRODUCTS.map((product, pIdx) => (
           <div key={product} className="contents">
-            <div className="text-sm font-medium text-slate-700 pr-3 py-1 flex items-center">
+            <div className="text-sm font-medium text-stone-700 pr-3 py-1 flex items-center">
               {product}
             </div>
             {SUPPLIERS.map((_, sIdx) => {
@@ -296,7 +296,7 @@ function Heatmap() {
                 <button
                   key={`${pIdx}-${sIdx}`}
                   type="button"
-                  className="relative aspect-square m-0.5 rounded-md transition-all hover:scale-110 hover:z-10 hover:ring-2 hover:ring-blue-300 focus:outline-none flex items-center justify-center"
+                  className="relative aspect-square m-0.5 rounded-md transition-all hover:scale-110 hover:z-10 hover:ring-2 hover:ring-teal-300 focus:outline-none flex items-center justify-center"
                   style={{
                     background: cellColor(cell.variance),
                     boxShadow:
@@ -317,7 +317,7 @@ function Heatmap() {
                 >
                   <span
                     className={`text-[10px] font-bold tabular-nums ${
-                      Math.abs(cell.variance) > 0.4 ? 'text-white' : 'text-slate-700'
+                      Math.abs(cell.variance) > 0.4 ? 'text-white' : 'text-stone-700'
                     }`}
                   >
                     {cell.variance > 0 ? '+' : ''}
@@ -330,7 +330,7 @@ function Heatmap() {
         ))}
       </div>
 
-      <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-center gap-6 text-xs text-slate-500">
+      <div className="mt-6 pt-4 border-t border-stone-100 flex items-center justify-center gap-6 text-xs text-stone-500">
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-sm" style={{ background: cellColor(-0.7) }} />
           <span>זול מהממוצע</span>
@@ -383,12 +383,12 @@ function HeatTooltip({ hover }: { hover: { p: number; s: number; x: number; y: n
         transform: 'translate(-50%, -100%)',
       }}
     >
-      <div className="bg-white border border-slate-200 rounded-xl p-3 min-w-[220px] shadow-[0_8px_24px_-8px_rgba(15,23,42,0.18),0_4px_8px_-4px_rgba(15,23,42,0.08)]">
-        <div className="text-xs text-slate-500 mb-0.5">{supplier}</div>
-        <div className="font-semibold text-sm mb-2 text-slate-900">{product}</div>
+      <div className="bg-white border border-stone-200 rounded-xl p-3 min-w-[220px] shadow-[0_8px_24px_-8px_rgba(15,23,42,0.18),0_4px_8px_-4px_rgba(15,23,42,0.08)]">
+        <div className="text-xs text-stone-500 mb-0.5">{supplier}</div>
+        <div className="font-semibold text-sm mb-2 text-stone-900">{product}</div>
         <Sparkline data={cell.series} variance={cell.variance} />
         <div className="mt-2 flex items-center justify-between text-xs">
-          <span className="text-slate-500">12 שבועות אחרונים</span>
+          <span className="text-stone-500">12 שבועות אחרונים</span>
           <span
             className={`font-bold tabular-nums ${
               cell.variance > 0 ? 'text-red-600' : 'text-emerald-600'
@@ -473,10 +473,10 @@ function LiveFlow() {
   return (
     <div
       ref={containerRef}
-      className="relative rounded-2xl border border-slate-200/70 bg-white/90 backdrop-blur-xl p-6 overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-8px_rgba(15,23,42,0.06)]"
+      className="relative rounded-2xl border border-stone-200/70 bg-white/90 backdrop-blur-xl p-6 overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-8px_rgba(15,23,42,0.06)]"
     >
       <div className="relative pr-2">
-        <div className="absolute top-2 bottom-2 right-[14px] w-px bg-gradient-to-b from-blue-300/70 via-slate-200 to-transparent" />
+        <div className="absolute top-2 bottom-2 right-[14px] w-px bg-gradient-to-b from-teal-300/70 via-stone-200 to-transparent" />
         <div className="space-y-5">
           {EVENTS.map((e) => (
             <FlowEventRow key={e.id} event={e} />
@@ -505,8 +505,8 @@ function FlowEventRow({ event }: { event: FlowEvent }) {
       icon: <AlertCircle className="w-3.5 h-3.5" />,
     },
     sync: {
-      dot: 'bg-blue-500',
-      label: 'text-blue-600',
+      dot: 'bg-teal-500',
+      label: 'text-teal-600',
       icon: <Clock className="w-3.5 h-3.5" />,
     },
   } as const;
@@ -530,8 +530,8 @@ function FlowEventRow({ event }: { event: FlowEvent }) {
             <span>{event.time}</span>
           </div>
         </div>
-        <div className="text-sm font-medium text-slate-800">{event.title}</div>
-        <div className="text-xs text-slate-500 mt-0.5">{event.detail}</div>
+        <div className="text-sm font-medium text-stone-800">{event.title}</div>
+        <div className="text-xs text-stone-500 mt-0.5">{event.detail}</div>
       </div>
     </div>
   );
@@ -540,8 +540,8 @@ function FlowEventRow({ event }: { event: FlowEvent }) {
 function SectionHeader({ title, subtitle }: { title: string; subtitle: string }) {
   return (
     <div className="mb-4">
-      <h2 className="text-xl font-bold tracking-tight text-slate-900">{title}</h2>
-      <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>
+      <h2 className="text-xl font-bold tracking-tight text-stone-900">{title}</h2>
+      <p className="text-xs text-stone-500 mt-0.5">{subtitle}</p>
     </div>
   );
 }

@@ -5,13 +5,13 @@ export default function ShowcaseIndex() {
   return (
     <main className="max-w-5xl mx-auto px-6 py-20" dir="rtl">
       <div className="mb-14">
-        <p className="text-xs uppercase tracking-[0.2em] text-blue-600 font-semibold mb-3">
+        <p className="text-xs uppercase tracking-[0.2em] text-teal-600 font-semibold mb-3">
           Preview
         </p>
-        <h1 className="text-5xl font-bold tracking-tight mb-3 text-slate-900">
+        <h1 className="text-5xl font-bold tracking-tight mb-3 text-stone-900">
           תצוגה מקדימה
         </h1>
-        <p className="text-slate-500 text-lg max-w-2xl leading-relaxed">
+        <p className="text-stone-500 text-lg max-w-2xl leading-relaxed">
           שלושת המסכים המרכזיים של המערכת — מיועדים להדגמה ולסקירת חוויית משתמש לפני
           חיבור לנתונים אמיתיים.
         </p>
@@ -65,28 +65,28 @@ function ShowcaseCard({
   return (
     <Link
       href={href}
-      className="group relative rounded-2xl border border-slate-200/70 bg-white/80 backdrop-blur-xl p-6 pb-12 shadow-[0_1px_2px_rgba(15,23,42,0.03)] hover:border-blue-300/70 hover:shadow-[0_2px_4px_rgba(37,99,235,0.06),0_12px_32px_-8px_rgba(37,99,235,0.12)] hover:-translate-y-0.5 transition-all duration-300"
+      className="group relative rounded-2xl border border-stone-200/70 bg-white/80 backdrop-blur-xl p-6 pb-12 shadow-[0_1px_2px_rgba(15,23,42,0.03)] hover:border-teal-300/70 hover:shadow-[0_2px_4px_rgba(37,99,235,0.06),0_12px_32px_-8px_rgba(37,99,235,0.12)] hover:-transtone-y-0.5 transition-all duration-300"
     >
       <div className="flex items-center justify-between mb-6">
-        <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-blue-50 text-blue-600 border border-blue-100 group-hover:bg-blue-100 group-hover:border-blue-200 transition-colors">
+        <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-teal-50 text-teal-600 border border-teal-100 group-hover:bg-teal-100 group-hover:border-teal-200 transition-colors">
           {icon}
         </div>
-        <span className="text-[10px] uppercase tracking-[0.15em] text-slate-400 font-semibold tabular-nums">
+        <span className="text-[10px] uppercase tracking-[0.15em] text-stone-400 font-semibold tabular-nums">
           {eyebrow}
         </span>
       </div>
 
-      <h3 className="font-semibold text-lg mb-1 tracking-tight text-slate-900 leading-snug">
+      <h3 className="font-semibold text-lg mb-1 tracking-tight text-stone-900 leading-snug">
         {title}
       </h3>
-      <p className="text-sm text-slate-500 mb-3">{subtitle}</p>
-      <p className="text-sm text-slate-600 leading-relaxed">{description}</p>
+      <p className="text-sm text-stone-500 mb-3">{subtitle}</p>
+      <p className="text-sm text-stone-600 leading-relaxed">{description}</p>
 
       <div className="absolute bottom-5 left-6 right-6 flex items-center justify-between text-xs">
-        <span className="text-blue-600 font-medium opacity-0 group-hover:opacity-100 transition-opacity">
+        <span className="text-teal-600 font-medium opacity-0 group-hover:opacity-100 transition-opacity">
           פתח תצוגה
         </span>
-        <ArrowLeft className="w-4 h-4 text-slate-300 group-hover:text-blue-600 group-hover:-translate-x-1 transition-all" />
+        <ArrowLeft className="w-4 h-4 text-stone-300 group-hover:text-teal-600 group-hover:-transtone-x-1 transition-all" />
       </div>
     </Link>
   );

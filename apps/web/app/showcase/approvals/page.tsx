@@ -204,18 +204,18 @@ export default function ApprovalsShowcase() {
   return (
     <main ref={containerRef} className="max-w-6xl mx-auto px-6 py-12" dir="rtl">
       <div className="mb-10">
-        <p className="text-xs uppercase tracking-[0.2em] text-blue-600 font-semibold mb-2">
+        <p className="text-xs uppercase tracking-[0.2em] text-teal-600 font-semibold mb-2">
           Decision Hierarchy
         </p>
-        <h1 className="text-4xl font-bold tracking-tight mb-2 text-slate-900">מטריצת אישורים</h1>
-        <p className="text-slate-500 max-w-2xl">
+        <h1 className="text-4xl font-bold tracking-tight mb-2 text-stone-900">מטריצת אישורים</h1>
+        <p className="text-stone-500 max-w-2xl">
           הגדרת ניתוב לפי תפקיד וסוג חריגה. כל שורה ניתנת להרחבה לתצוגת ה-audit log
           האימוטבילי — כל החלטה היסטורית עם hash קריפטוגרפי לתיעוד tamper-proof.
         </p>
       </div>
 
-      <div className="rounded-2xl border border-slate-200/70 bg-white/90 backdrop-blur-xl overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-8px_rgba(15,23,42,0.06)]">
-        <div className="grid grid-cols-[40px_1fr_140px_160px_120px_60px] gap-4 px-5 py-3 border-b border-slate-200/70 text-xs uppercase tracking-wider text-slate-500 font-semibold bg-slate-50/50">
+      <div className="rounded-2xl border border-stone-200/70 bg-white/90 backdrop-blur-xl overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-8px_rgba(15,23,42,0.06)]">
+        <div className="grid grid-cols-[40px_1fr_140px_160px_120px_60px] gap-4 px-5 py-3 border-b border-stone-200/70 text-xs uppercase tracking-wider text-stone-500 font-semibold bg-stone-50/50">
           <div>#</div>
           <div>סוג חריגה</div>
           <div>תפקיד מאשר</div>
@@ -229,7 +229,7 @@ export default function ApprovalsShowcase() {
         ))}
       </div>
 
-      <div className="mt-6 text-xs text-slate-500 flex items-center gap-4 flex-wrap">
+      <div className="mt-6 text-xs text-stone-500 flex items-center gap-4 flex-wrap">
         <LegendSwatch tone="auto" label="אוטומטי" />
         <LegendSwatch tone="review-manager" label="סקירת מנהל" />
         <LegendSwatch tone="review-owner" label="סקירת בעלים" />
@@ -267,7 +267,7 @@ function RuleRow({ rule, idx }: { rule: Rule; idx: number }) {
 
   const toneStyles: Record<SeverityTier, string> = {
     auto: 'bg-emerald-50/30 hover:bg-emerald-50/60 border-r-emerald-300',
-    'review-manager': 'bg-blue-50/30 hover:bg-blue-50/60 border-r-blue-300',
+    'review-manager': 'bg-teal-50/30 hover:bg-teal-50/60 border-r-teal-300',
     'review-owner': 'bg-amber-50/40 hover:bg-amber-50/70 border-r-amber-400',
     block: 'bg-amber-50/60 hover:bg-amber-50 border-r-amber-500',
     'hard-block': 'bg-red-50/60 hover:bg-red-50 border-r-red-500',
@@ -275,39 +275,39 @@ function RuleRow({ rule, idx }: { rule: Rule; idx: number }) {
 
   return (
     <div
-      className={`rule-row border-b border-slate-100 last:border-b-0 border-r-2 ${toneStyles[rule.severity]}`}
+      className={`rule-row border-b border-stone-100 last:border-b-0 border-r-2 ${toneStyles[rule.severity]}`}
     >
       <button
         type="button"
         onClick={() => setExpanded(!expanded)}
         className="w-full grid grid-cols-[40px_1fr_140px_160px_120px_60px] gap-4 px-5 py-4 items-center text-right transition-colors"
       >
-        <div className="text-xs text-slate-400 tabular-nums font-bold">
+        <div className="text-xs text-stone-400 tabular-nums font-bold">
           {String(idx + 1).padStart(2, '0')}
         </div>
 
         <div>
-          <div className="font-semibold text-sm flex items-center gap-2 text-slate-900">
+          <div className="font-semibold text-sm flex items-center gap-2 text-stone-900">
             {rule.severity === 'hard-block' ? (
               <Lock className="w-3.5 h-3.5 text-red-600" />
             ) : null}
             {rule.type}
           </div>
-          <div className="text-xs text-slate-500 mt-0.5">{rule.description}</div>
+          <div className="text-xs text-stone-500 mt-0.5">{rule.description}</div>
         </div>
 
         <RoleBadge role={rule.approverRole} />
         <ActionBadge action={rule.action} />
 
         <div className="text-center">
-          <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-md bg-white border border-slate-200 text-xs font-bold tabular-nums text-slate-700">
+          <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-md bg-white border border-stone-200 text-xs font-bold tabular-nums text-stone-700">
             {rule.matchesThisMonth.toLocaleString('he-IL')}
           </span>
         </div>
 
         <div className="flex justify-end">
           <ChevronDown
-            className={`w-4 h-4 text-slate-400 transition-transform ${
+            className={`w-4 h-4 text-stone-400 transition-transform ${
               expanded ? 'rotate-180' : ''
             }`}
           />
@@ -323,11 +323,11 @@ function RuleRow({ rule, idx }: { rule: Rule; idx: number }) {
 
 function AuditLog({ entries }: { entries: AuditEntry[] }) {
   return (
-    <div className="bg-slate-50/80 border-t border-slate-200/70 px-5 py-5">
-      <div className="flex items-center gap-2 mb-4 text-xs text-slate-500">
-        <Lock className="w-3.5 h-3.5 text-blue-600" />
-        <span className="font-semibold text-slate-700">Immutable Audit Log</span>
-        <span className="text-slate-300">·</span>
+    <div className="bg-stone-50/80 border-t border-stone-200/70 px-5 py-5">
+      <div className="flex items-center gap-2 mb-4 text-xs text-stone-500">
+        <Lock className="w-3.5 h-3.5 text-teal-600" />
+        <span className="font-semibold text-stone-700">Immutable Audit Log</span>
+        <span className="text-stone-300">·</span>
         <span>{entries.length} רישומים · SHA-256 hash chain</span>
       </div>
 
@@ -337,7 +337,7 @@ function AuditLog({ entries }: { entries: AuditEntry[] }) {
         ))}
       </div>
 
-      <div className="mt-4 pt-3 border-t border-dashed border-slate-200 flex items-center justify-between text-[10px] text-slate-400">
+      <div className="mt-4 pt-3 border-t border-dashed border-stone-200 flex items-center justify-between text-[10px] text-stone-400">
         <span>* כל החלטה חתומה ב-hash שמתבסס על ההחלטה הקודמת — כל שינוי רטרואקטיבי נחשף.</span>
         <span className="tabular-nums text-emerald-600">verified ✓</span>
       </div>
@@ -350,7 +350,7 @@ function AuditEntryRow({ entry }: { entry: AuditEntry }) {
     approved: 'text-emerald-700 bg-emerald-50 border-emerald-200',
     rejected: 'text-red-700 bg-red-50 border-red-200',
     escalated: 'text-amber-700 bg-amber-50 border-amber-200',
-    auto: 'text-blue-700 bg-blue-50 border-blue-200',
+    auto: 'text-teal-700 bg-teal-50 border-teal-200',
   } as const;
 
   const decisionLabel = {
@@ -361,18 +361,18 @@ function AuditEntryRow({ entry }: { entry: AuditEntry }) {
   };
 
   return (
-    <div className="grid grid-cols-[140px_1fr_120px_100px_140px] gap-3 items-center text-xs py-2 px-3 rounded-lg bg-white border border-slate-200/70 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
-      <div className="flex items-center gap-1.5 text-slate-500 tabular-nums">
+    <div className="grid grid-cols-[140px_1fr_120px_100px_140px] gap-3 items-center text-xs py-2 px-3 rounded-lg bg-white border border-stone-200/70 shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+      <div className="flex items-center gap-1.5 text-stone-500 tabular-nums">
         <Clock className="w-3 h-3" />
         {entry.timestamp}
       </div>
       <div>
-        <div className="flex items-center gap-2 text-slate-700">
-          <User className="w-3 h-3 text-slate-400" />
+        <div className="flex items-center gap-2 text-stone-700">
+          <User className="w-3 h-3 text-stone-400" />
           <span className="font-medium">{entry.actor}</span>
           <RoleBadge role={entry.actorRole} small />
         </div>
-        {entry.note ? <div className="text-[11px] text-slate-500 mt-0.5">{entry.note}</div> : null}
+        {entry.note ? <div className="text-[11px] text-stone-500 mt-0.5">{entry.note}</div> : null}
       </div>
       <div>
         <span
@@ -381,11 +381,11 @@ function AuditEntryRow({ entry }: { entry: AuditEntry }) {
           {decisionLabel[entry.decision]}
         </span>
       </div>
-      <div className="font-bold tabular-nums text-slate-900">
+      <div className="font-bold tabular-nums text-stone-900">
         ₪{entry.amount.toLocaleString('he-IL')}
       </div>
       <div
-        className="flex items-center gap-1.5 text-slate-500 font-mono text-[10px] tabular-nums"
+        className="flex items-center gap-1.5 text-stone-500 font-mono text-[10px] tabular-nums"
         title={entry.hash}
       >
         <Hash className="w-3 h-3" />
@@ -400,17 +400,17 @@ function RoleBadge({ role, small }: { role: ApproverRole; small?: boolean }) {
     auto: {
       label: 'אוטומטי',
       icon: <Zap className="w-3 h-3" />,
-      tint: 'text-slate-600 bg-slate-100 border-slate-200',
+      tint: 'text-stone-600 bg-stone-100 border-stone-200',
     },
     clerk: {
       label: 'מקבל',
       icon: <User className="w-3 h-3" />,
-      tint: 'text-slate-700 bg-slate-100 border-slate-200',
+      tint: 'text-stone-700 bg-stone-100 border-stone-200',
     },
     manager: {
       label: 'מנהל',
       icon: <Shield className="w-3 h-3" />,
-      tint: 'text-blue-700 bg-blue-50 border-blue-200',
+      tint: 'text-teal-700 bg-teal-50 border-teal-200',
     },
     owner: {
       label: 'בעלים',
@@ -446,7 +446,7 @@ function ActionBadge({ action }: { action: Action }) {
     queue_review: {
       label: 'תור סקירה',
       icon: <Clock className="w-3 h-3" />,
-      tint: 'text-blue-700 bg-blue-50 border-blue-200',
+      tint: 'text-teal-700 bg-teal-50 border-teal-200',
     },
     hold_invoice: {
       label: 'חוסם תשלום',
@@ -478,7 +478,7 @@ function ActionBadge({ action }: { action: Action }) {
 function LegendSwatch({ tone, label }: { tone: SeverityTier; label: string }) {
   const colors: Record<SeverityTier, string> = {
     auto: 'bg-emerald-100 border-emerald-300',
-    'review-manager': 'bg-blue-100 border-blue-300',
+    'review-manager': 'bg-teal-100 border-teal-300',
     'review-owner': 'bg-amber-100 border-amber-300',
     block: 'bg-amber-200 border-amber-400',
     'hard-block': 'bg-red-200 border-red-400',

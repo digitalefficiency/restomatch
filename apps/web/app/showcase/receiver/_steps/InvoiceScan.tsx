@@ -140,20 +140,20 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack }: Props) {
 
       <div
         ref={viewfinderRef}
-        className="relative mb-4 mx-auto max-w-md aspect-[4/5] rounded-2xl overflow-hidden border border-slate-200 bg-gradient-to-br from-slate-50 to-slate-100 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_24px_48px_-12px_rgba(15,23,42,0.12)]"
+        className="relative mb-4 mx-auto max-w-md aspect-[4/5] rounded-2xl overflow-hidden border border-stone-200 bg-gradient-to-br from-stone-50 to-stone-100 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_24px_48px_-12px_rgba(15,23,42,0.12)]"
       >
         {previewUrl ? (
           <img src={previewUrl} alt="חשבונית" className="scan-element absolute inset-0 w-full h-full object-contain" />
         ) : (
           <>
-            <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-stone-400">
               <Camera className="scan-element w-16 h-16 mb-3" />
               <p className="scan-element text-sm">המסגרת מציינת איפה למקם את החשבונית</p>
             </div>
-            <div className="viewfinder-corner absolute top-6 right-6 w-10 h-10 border-t-2 border-r-2 border-blue-500 rounded-tr-lg" />
-            <div className="viewfinder-corner absolute top-6 left-6 w-10 h-10 border-t-2 border-l-2 border-blue-500 rounded-tl-lg" />
-            <div className="viewfinder-corner absolute bottom-6 right-6 w-10 h-10 border-b-2 border-r-2 border-blue-500 rounded-br-lg" />
-            <div className="viewfinder-corner absolute bottom-6 left-6 w-10 h-10 border-b-2 border-l-2 border-blue-500 rounded-bl-lg" />
+            <div className="viewfinder-corner absolute top-6 right-6 w-10 h-10 border-t-2 border-r-2 border-teal-500 rounded-tr-lg" />
+            <div className="viewfinder-corner absolute top-6 left-6 w-10 h-10 border-t-2 border-l-2 border-teal-500 rounded-tl-lg" />
+            <div className="viewfinder-corner absolute bottom-6 right-6 w-10 h-10 border-b-2 border-r-2 border-teal-500 rounded-br-lg" />
+            <div className="viewfinder-corner absolute bottom-6 left-6 w-10 h-10 border-b-2 border-l-2 border-teal-500 rounded-bl-lg" />
           </>
         )}
 
@@ -182,14 +182,14 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack }: Props) {
             <button
               onClick={confirmCapture}
               disabled={upload.phase !== 'uploaded'}
-              className="scan-element inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-xl px-5 py-3 font-medium shadow-[0_4px_12px_rgba(37,99,235,0.3)] disabled:shadow-none transition-all"
+              className="scan-element inline-flex items-center justify-center gap-2 bg-teal-600 hover:bg-teal-700 disabled:bg-stone-200 disabled:text-stone-400 text-white rounded-xl px-5 py-3 font-medium shadow-[0_4px_12px_rgba(37,99,235,0.3)] disabled:shadow-none transition-all"
             >
               {upload.phase === 'uploading' ? 'מעלה לשרת...' : 'עבד את החשבונית'}
               {upload.phase === 'uploaded' ? <ArrowLeft className="w-4 h-4" /> : null}
             </button>
             <button
               onClick={reset}
-              className="scan-element inline-flex items-center justify-center gap-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl px-5 py-3 font-medium transition-all"
+              className="scan-element inline-flex items-center justify-center gap-2 bg-white border border-stone-200 hover:bg-stone-50 text-stone-700 rounded-xl px-5 py-3 font-medium transition-all"
             >
               <RefreshCw className="w-4 h-4" />
               צלם מחדש
@@ -199,14 +199,14 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack }: Props) {
           <>
             <button
               onClick={triggerFilePicker}
-              className="scan-element inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl px-5 py-3 font-medium shadow-[0_4px_12px_rgba(37,99,235,0.3)] transition-all"
+              className="scan-element inline-flex items-center justify-center gap-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl px-5 py-3 font-medium shadow-[0_4px_12px_rgba(37,99,235,0.3)] transition-all"
             >
               <Camera className="w-5 h-5" />
               צלם / העלה קובץ
             </button>
             <button
               onClick={useMockImage}
-              className="scan-element inline-flex items-center justify-center gap-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl px-5 py-3 font-medium transition-all"
+              className="scan-element inline-flex items-center justify-center gap-2 bg-white border border-stone-200 hover:bg-stone-50 text-stone-700 rounded-xl px-5 py-3 font-medium transition-all"
             >
               <ImageIcon className="w-5 h-5" />
               השתמש בחשבונית-דמה (ללא העלאה)
@@ -218,7 +218,7 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack }: Props) {
       <button
         type="button"
         onClick={onBack}
-        className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-800"
+        className="inline-flex items-center gap-2 text-sm text-stone-500 hover:text-stone-800"
       >
         <ArrowRight className="w-4 h-4" />
         חזור לבחירת ספק
@@ -230,9 +230,9 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack }: Props) {
 function UploadStatusBanner({ state }: { state: UploadState }) {
   if (state.phase === 'uploading') {
     return (
-      <div className="rounded-xl bg-white/95 backdrop-blur-md border border-blue-200 px-3 py-2 shadow-sm flex items-center gap-2 text-xs">
-        <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />
-        <span className="font-medium text-slate-800">מעלה ל-Supabase Storage...</span>
+      <div className="rounded-xl bg-white/95 backdrop-blur-md border border-teal-200 px-3 py-2 shadow-sm flex items-center gap-2 text-xs">
+        <Loader2 className="w-4 h-4 text-teal-600 animate-spin" />
+        <span className="font-medium text-stone-800">מעלה ל-Supabase Storage...</span>
       </div>
     );
   }
@@ -253,9 +253,9 @@ function UploadStatusBanner({ state }: { state: UploadState }) {
       );
     }
     return (
-      <div className="rounded-xl bg-slate-50/95 backdrop-blur-md border border-slate-200 px-3 py-2 shadow-sm flex items-center gap-2 text-xs">
-        <CloudUpload className="w-4 h-4 text-slate-500" />
-        <span className="text-slate-700">מצב הדגמה — לא נשמר בשרת</span>
+      <div className="rounded-xl bg-stone-50/95 backdrop-blur-md border border-stone-200 px-3 py-2 shadow-sm flex items-center gap-2 text-xs">
+        <CloudUpload className="w-4 h-4 text-stone-500" />
+        <span className="text-stone-700">מצב הדגמה — לא נשמר בשרת</span>
       </div>
     );
   }

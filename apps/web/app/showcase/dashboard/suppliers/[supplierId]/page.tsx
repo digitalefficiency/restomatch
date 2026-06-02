@@ -71,33 +71,33 @@ export default function SupplierDetailPage({ params }: PageProps) {
   return (
     <main ref={containerRef} className="max-w-7xl mx-auto px-6 py-10 space-y-8" dir="rtl">
       {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm text-slate-500">
+      <div className="flex items-center gap-2 text-sm text-stone-500">
         <Link
           href="/showcase/dashboard/invoices"
-          className="hover:text-blue-600 inline-flex items-center gap-1"
+          className="hover:text-teal-600 inline-flex items-center gap-1"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
           ביקורת חשבוניות
         </Link>
-        <span className="text-slate-300">/</span>
-        <span className="text-slate-700 font-medium">{metadata.name}</span>
+        <span className="text-stone-300">/</span>
+        <span className="text-stone-700 font-medium">{metadata.name}</span>
       </div>
 
       {/* Hero */}
       <section className="detail-block grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Left: identity */}
-        <div className="lg:col-span-2 rounded-2xl border border-slate-200/70 bg-white/90 backdrop-blur-xl p-6 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)]">
+        <div className="lg:col-span-2 rounded-2xl border border-stone-200/70 bg-white/90 backdrop-blur-xl p-6 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)]">
           <div className="flex items-start justify-between gap-4 mb-5">
             <div className="flex items-center gap-4">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-100 to-blue-50 border border-blue-200/70 flex items-center justify-center text-2xl font-bold text-blue-700">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-teal-100 to-teal-50 border border-teal-200/70 flex items-center justify-center text-2xl font-bold text-teal-700">
                 {metadata.initials}
               </div>
               <div>
-                <h1 className="text-2xl font-bold tracking-tight text-slate-900 mb-1">
+                <h1 className="text-2xl font-bold tracking-tight text-stone-900 mb-1">
                   {metadata.name}
                 </h1>
-                <div className="flex items-center gap-2 text-xs text-slate-500">
-                  <span className="px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200">
+                <div className="flex items-center gap-2 text-xs text-stone-500">
+                  <span className="px-2 py-0.5 rounded-full bg-stone-100 border border-stone-200">
                     {metadata.category}
                   </span>
                   <span>·</span>
@@ -127,8 +127,8 @@ export default function SupplierDetailPage({ params }: PageProps) {
         </div>
 
         {/* Right: action panel */}
-        <div className="rounded-2xl border border-slate-200/70 bg-white/90 backdrop-blur-xl p-6 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)] flex flex-col gap-3">
-          <h2 className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1">
+        <div className="rounded-2xl border border-stone-200/70 bg-white/90 backdrop-blur-xl p-6 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)] flex flex-col gap-3">
+          <h2 className="text-xs uppercase tracking-wider text-stone-500 font-semibold mb-1">
             פעולות
           </h2>
           <ActionButton
@@ -198,7 +198,7 @@ export default function SupplierDetailPage({ params }: PageProps) {
             title="חשבוניות אחרונות"
             subtitle={`${recentInvoices.length} מהחודש האחרון · לחץ לצפייה בסריקה`}
           />
-          <div className="rounded-2xl border border-slate-200/70 bg-white/90 backdrop-blur-xl overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)]">
+          <div className="rounded-2xl border border-stone-200/70 bg-white/90 backdrop-blur-xl overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)]">
             {recentInvoices.map((inv, idx) => (
               <InvoiceListRow
                 key={inv.id}
@@ -243,11 +243,11 @@ function ContactRow({
 }) {
   return (
     <div>
-      <div className="text-xs text-slate-500 mb-0.5 flex items-center gap-1.5">
-        <span className="text-slate-400">{icon}</span>
+      <div className="text-xs text-stone-500 mb-0.5 flex items-center gap-1.5">
+        <span className="text-stone-400">{icon}</span>
         <span>{label}</span>
       </div>
-      <div className="text-sm font-medium text-slate-800 truncate">{value}</div>
+      <div className="text-sm font-medium text-stone-800 truncate">{value}</div>
     </div>
   );
 }
@@ -260,7 +260,7 @@ function StatusPill({ kpi }: { kpi: { cleanDeliveryPct: number; openDisputes: nu
     ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
     : isWatch
       ? 'bg-amber-50 text-amber-700 border-amber-200'
-      : 'bg-blue-50 text-blue-700 border-blue-200';
+      : 'bg-teal-50 text-teal-700 border-teal-200';
   const icon = isHealthy ? (
     <Check className="w-3 h-3" strokeWidth={3} />
   ) : (
@@ -286,10 +286,10 @@ function ActionButton({
   danger?: boolean;
 }) {
   const cls = primary
-    ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-[0_4px_12px_rgba(37,99,235,0.25)]'
+    ? 'bg-teal-600 hover:bg-teal-700 text-white shadow-[0_4px_12px_rgba(37,99,235,0.25)]'
     : danger
       ? 'bg-white border border-red-200 hover:bg-red-50 text-red-700'
-      : 'bg-white border border-slate-200 hover:bg-slate-50 text-slate-700';
+      : 'bg-white border border-stone-200 hover:bg-stone-50 text-stone-700';
   return (
     <button
       type="button"
@@ -318,18 +318,18 @@ function KpiCard({
     emerald: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
     amber: 'bg-amber-50 text-amber-700 ring-amber-100',
     red: 'bg-red-50 text-red-700 ring-red-100',
-    blue: 'bg-blue-50 text-blue-700 ring-blue-100',
+    blue: 'bg-teal-50 text-teal-700 ring-teal-100',
   } as const;
   return (
-    <div className="rounded-2xl border border-slate-200/70 bg-white/90 backdrop-blur-xl p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)]">
+    <div className="rounded-2xl border border-stone-200/70 bg-white/90 backdrop-blur-xl p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)]">
       <div className={`w-10 h-10 rounded-xl ring-1 flex items-center justify-center mb-3 ${map[tone]}`}>
         {icon}
       </div>
-      <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-1">
+      <div className="text-xs uppercase tracking-wider text-stone-500 font-semibold mb-1">
         {label}
       </div>
-      <div className="text-2xl font-bold tabular-nums text-slate-900 mb-1">{value}</div>
-      {subtitle ? <div className="text-xs text-slate-500">{subtitle}</div> : null}
+      <div className="text-2xl font-bold tabular-nums text-stone-900 mb-1">{value}</div>
+      {subtitle ? <div className="text-xs text-stone-500">{subtitle}</div> : null}
     </div>
   );
 }
@@ -345,11 +345,11 @@ function PriceTrendCard({ product }: { product: PriceTrendProduct }) {
       : 'rgba(100,116,139,0.12)';
 
   return (
-    <div className="rounded-2xl border border-slate-200/70 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)]">
+    <div className="rounded-2xl border border-stone-200/70 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)]">
       <div className="flex items-start justify-between mb-3">
         <div>
-          <div className="font-semibold text-slate-900 text-base mb-0.5">{product.name}</div>
-          <div className="text-xs text-slate-500">לפי {product.unit}</div>
+          <div className="font-semibold text-stone-900 text-base mb-0.5">{product.name}</div>
+          <div className="text-xs text-stone-500">לפי {product.unit}</div>
         </div>
         <span
           className={`inline-flex items-center gap-1 text-xs font-bold rounded-full px-2 py-0.5 ${
@@ -357,7 +357,7 @@ function PriceTrendCard({ product }: { product: PriceTrendProduct }) {
               ? 'bg-red-50 text-red-700'
               : trendDown
                 ? 'bg-emerald-50 text-emerald-700'
-                : 'bg-slate-100 text-slate-600'
+                : 'bg-stone-100 text-stone-600'
           }`}
         >
           {trendUp ? (
@@ -376,18 +376,18 @@ function PriceTrendCard({ product }: { product: PriceTrendProduct }) {
 
       <Sparkline data={product.series} stroke={color} fillStart={fillStart} />
 
-      <div className="mt-3 pt-3 border-t border-slate-100 flex items-baseline justify-between">
+      <div className="mt-3 pt-3 border-t border-stone-100 flex items-baseline justify-between">
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+          <div className="text-[10px] uppercase tracking-wider text-stone-500 font-semibold">
             מחיר אחרון
           </div>
-          <div className="text-lg font-bold tabular-nums text-slate-900">₪{product.currentPrice}</div>
+          <div className="text-lg font-bold tabular-nums text-stone-900">₪{product.currentPrice}</div>
         </div>
         <div className="text-left">
-          <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+          <div className="text-[10px] uppercase tracking-wider text-stone-500 font-semibold">
             ממוצע 60י׳
           </div>
-          <div className="text-sm font-semibold tabular-nums text-slate-500">
+          <div className="text-sm font-semibold tabular-nums text-stone-500">
             ₪{product.avgPrice60d}
           </div>
         </div>
@@ -447,7 +447,7 @@ function InvoiceListRow({
     status === 'clean'
       ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
       : status === 'minor'
-        ? 'bg-slate-50 text-slate-700 border-slate-200'
+        ? 'bg-stone-50 text-stone-700 border-stone-200'
         : status === 'major'
           ? 'bg-amber-50 text-amber-700 border-amber-200'
           : 'bg-red-50 text-red-700 border-red-200';
@@ -471,16 +471,16 @@ function InvoiceListRow({
           onOpenScan();
         }
       }}
-      className={`flex items-center gap-4 px-5 py-4 hover:bg-blue-50/30 cursor-pointer transition-colors ${
-        isLast ? '' : 'border-b border-slate-100'
+      className={`flex items-center gap-4 px-5 py-4 hover:bg-teal-50/30 cursor-pointer transition-colors ${
+        isLast ? '' : 'border-b border-stone-100'
       }`}
     >
-      <div className="w-9 h-9 rounded-lg bg-blue-50 text-blue-700 border border-blue-100 flex items-center justify-center shrink-0">
+      <div className="w-9 h-9 rounded-lg bg-teal-50 text-teal-700 border border-teal-100 flex items-center justify-center shrink-0">
         <FileImage className="w-4 h-4" />
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-0.5">
-          <span className="font-semibold text-slate-900 text-sm font-mono">
+          <span className="font-semibold text-stone-900 text-sm font-mono">
             {invoice.invoiceNumber}
           </span>
           <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${tint}`}>
@@ -492,7 +492,7 @@ function InvoiceListRow({
             </span>
           ) : null}
         </div>
-        <div className="text-xs text-slate-500 flex items-center gap-2">
+        <div className="text-xs text-stone-500 flex items-center gap-2">
           <Calendar className="w-3 h-3" />
           <span>
             {new Date(invoice.scannedAt).toLocaleDateString('he-IL', {
@@ -511,7 +511,7 @@ function InvoiceListRow({
         </div>
       </div>
       <div className="text-left">
-        <div className="font-bold tabular-nums text-slate-900 text-sm">
+        <div className="font-bold tabular-nums text-stone-900 text-sm">
           ₪{invoice.totalIls.toLocaleString('he-IL')}
         </div>
         {invoice.savingsCapturedIls > 0 ? (
@@ -523,7 +523,7 @@ function InvoiceListRow({
       <Link
         href="/showcase/dashboard/invoices"
         onClick={(e) => e.stopPropagation()}
-        className="shrink-0 w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-500 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 flex items-center justify-center transition-colors"
+        className="shrink-0 w-8 h-8 rounded-lg bg-white border border-stone-200 text-stone-500 hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 flex items-center justify-center transition-colors"
         title="פתח בעמוד ביקורת החשבוניות"
       >
         <ArrowUpRight className="w-4 h-4" />
@@ -534,8 +534,8 @@ function InvoiceListRow({
 
 function ActivityFeed({ events }: { events: ActivityEvent[] }) {
   return (
-    <div className="rounded-2xl border border-slate-200/70 bg-white/90 backdrop-blur-xl p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)]">
-      <div className="relative pr-4 border-r-2 border-slate-200/70 space-y-4">
+    <div className="rounded-2xl border border-stone-200/70 bg-white/90 backdrop-blur-xl p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)]">
+      <div className="relative pr-4 border-r-2 border-stone-200/70 space-y-4">
         {events.map((e) => (
           <ActivityEventRow key={e.id} event={e} />
         ))}
@@ -552,13 +552,13 @@ function ActivityEventRow({ event }: { event: ActivityEvent }) {
         className={`absolute -right-[22px] top-1 w-3 h-3 rounded-full ring-4 ring-white ${config.dot}`}
       />
       <div className="flex items-baseline justify-between gap-2 mb-0.5">
-        <span className="text-sm font-semibold text-slate-800">{event.title}</span>
-        <span className="text-xs text-slate-500 tabular-nums shrink-0">
+        <span className="text-sm font-semibold text-stone-800">{event.title}</span>
+        <span className="text-xs text-stone-500 tabular-nums shrink-0">
           {formatRelative(event.at)}
         </span>
       </div>
       {event.detail ? (
-        <div className="text-xs text-slate-500 leading-relaxed">{event.detail}</div>
+        <div className="text-xs text-stone-500 leading-relaxed">{event.detail}</div>
       ) : null}
       {event.amount !== undefined && event.type === 'invoice_closed' ? (
         <div className="text-xs font-semibold text-emerald-700 tabular-nums mt-1 inline-flex items-center gap-1">
@@ -584,9 +584,9 @@ function activityConfig(type: ActivityEvent['type']) {
     case 'dispute_opened':
       return { dot: 'bg-amber-600' };
     case 'late_delivery':
-      return { dot: 'bg-slate-400' };
+      return { dot: 'bg-stone-400' };
     default:
-      return { dot: 'bg-blue-500' };
+      return { dot: 'bg-teal-500' };
   }
 }
 
@@ -606,8 +606,8 @@ function formatRelative(iso: string): string {
 function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <div className="mb-4">
-      <h2 className="text-lg font-bold tracking-tight text-slate-900">{title}</h2>
-      {subtitle ? <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p> : null}
+      <h2 className="text-lg font-bold tracking-tight text-stone-900">{title}</h2>
+      {subtitle ? <p className="text-xs text-stone-500 mt-0.5">{subtitle}</p> : null}
     </div>
   );
 }
