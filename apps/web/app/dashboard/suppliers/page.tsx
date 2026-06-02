@@ -25,8 +25,8 @@ export default async function SuppliersPage() {
             <Card key={s.supplierId} as="article" elevated>
               <header className="mb-4 flex items-start justify-between">
                 <div>
-                  <h3 className="text-lg font-semibold text-slate-900">{s.supplierName}</h3>
-                  <p className="mt-1 text-xs text-slate-500">{s.matchRunsCount} השוואות בתקופה</p>
+                  <h3 className="text-lg font-semibold text-stone-900">{s.supplierName}</h3>
+                  <p className="mt-1 text-xs text-stone-500">{s.matchRunsCount} השוואות בתקופה</p>
                 </div>
                 <TrendBadge trend={s.trend} />
               </header>
@@ -61,10 +61,10 @@ function Row({
   tone?: 'default' | 'warning' | 'danger';
 }) {
   const color =
-    tone === 'danger' ? 'text-danger' : tone === 'warning' ? 'text-warning' : 'text-slate-900';
+    tone === 'danger' ? 'text-danger' : tone === 'warning' ? 'text-warning' : 'text-stone-900';
   return (
     <div className="flex items-center justify-between">
-      <dt className="text-sm text-slate-500">{label}</dt>
+      <dt className="text-sm text-stone-500">{label}</dt>
       <dd className={`text-base font-semibold tabular-nums ${color}`}>{value}</dd>
     </div>
   );

@@ -27,11 +27,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <main className="min-h-screen">
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/85 backdrop-blur-xl">
+      <header className="sticky top-0 z-30 border-b border-stone-200 bg-white/85 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-4">
           <div>
-            <h1 className="text-xl font-semibold text-slate-900">{active.restaurantName}</h1>
-            <p className="text-xs text-slate-500">
+            <h1 className="text-xl font-semibold text-stone-900">{active.restaurantName}</h1>
+            <p className="text-xs text-stone-500">
               {session.user.email} · {labelForRole(active.role)}
             </p>
           </div>

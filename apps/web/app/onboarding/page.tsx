@@ -20,8 +20,8 @@ export default async function OnboardingPage() {
   return (
     <main className="flex min-h-screen items-center justify-center p-6">
       <Card elevated padding="lg" className="w-full max-w-lg">
-        <h1 className="mb-2 text-2xl font-bold text-slate-900">ברוך הבא ל-RestoMatch</h1>
-        <p className="mb-6 text-sm text-slate-500">
+        <h1 className="mb-2 text-2xl font-bold text-stone-900">ברוך הבא ל-RestoMatch</h1>
+        <p className="mb-6 text-sm text-stone-500">
           תחילה — בוא נצור את המסעדה שלך. תיכנס אוטומטית כבעלים.
         </p>
         <OnboardingForm />

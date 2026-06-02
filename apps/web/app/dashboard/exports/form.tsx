@@ -103,7 +103,7 @@ export function ExportsForm() {
         </p>
       ) : null}
 
-      <p className="mt-6 text-xs text-slate-500">
+      <p className="mt-6 text-xs text-stone-500">
         רק חשבוניות בסטטוס "matched", "approved" או "paid" נכללות בייצוא. חשבוניות עם חריגות פתוחות
         לא תופענה.
       </p>

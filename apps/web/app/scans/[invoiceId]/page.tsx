@@ -109,7 +109,7 @@ function UploadedScanCanvas({
     >
       <div className="mb-3 flex w-full max-w-3xl items-center gap-2 rounded-full border border-emerald-200 bg-white px-4 py-2 shadow-sm">
         <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
-        <span className="truncate font-mono text-xs text-slate-600">{publicUrl}</span>
+        <span className="truncate font-mono text-xs text-stone-600">{publicUrl}</span>
         <span className="mr-auto shrink-0 text-[10px] font-semibold text-emerald-700">
           ✓ נטען מ-Supabase Storage
           {pageCount ? ` · ${pageCount} עמודים` : ''}
@@ -122,7 +122,7 @@ function UploadedScanCanvas({
           <iframe
             src={`${publicUrl}#toolbar=1&navpanes=0&view=FitH`}
             title="חשבונית סרוקה"
-            className="w-full border-0 bg-slate-100"
+            className="w-full border-0 bg-stone-100"
             style={{ height: '80vh' }}
           />
         ) : (
@@ -133,8 +133,8 @@ function UploadedScanCanvas({
             style={{ maxHeight: '90vh', objectFit: 'contain' }}
           />
         )}
-        <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-4 py-3 text-xs">
-          <span className="text-slate-500">לא נטען? יכול להיות חוסם פופאפים או דפדפן ללא תוסף PDF.</span>
+        <div className="flex items-center justify-between border-t border-stone-200 bg-stone-50 px-4 py-3 text-xs">
+          <span className="text-stone-500">לא נטען? יכול להיות חוסם פופאפים או דפדפן ללא תוסף PDF.</span>
           <a
             href={publicUrl}
             target="_blank"

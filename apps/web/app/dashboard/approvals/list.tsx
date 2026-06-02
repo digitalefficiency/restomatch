@@ -28,15 +28,15 @@ export function ApprovalsList({ initial }: { initial: QueueItem[] }) {
           <header className="mb-3 flex items-start justify-between gap-3">
             <div>
               <SeverityBadge severity={d.severity} />
-              <h3 className="mt-2 text-lg font-semibold text-slate-900">{typeLabel(d.type)}</h3>
-              <p className="mt-1 text-sm text-slate-500">
+              <h3 className="mt-2 text-lg font-semibold text-stone-900">{typeLabel(d.type)}</h3>
+              <p className="mt-1 text-sm text-stone-500">
                 ההפסד המוערך:{' '}
-                <span className="font-semibold text-slate-900">
+                <span className="font-semibold text-stone-900">
                   ₪{Number(d.deltaAmount ?? 0).toLocaleString('he-IL')}
                 </span>
               </p>
             </div>
-            <div className="whitespace-nowrap text-xs text-slate-500">
+            <div className="whitespace-nowrap text-xs text-stone-500">
               {new Date(d.createdAt).toLocaleString('he-IL')}
             </div>
           </header>

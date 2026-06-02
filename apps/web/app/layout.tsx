@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 export default function RootLayout(props: { children: React.ReactNode }) {
   return (
     <html lang="he" dir="rtl">
-      <body className="antialiased font-sans text-slate-900">
+      <body className="antialiased font-sans text-stone-900">
         <TrpcProvider>{props.children}</TrpcProvider>
       </body>
     </html>

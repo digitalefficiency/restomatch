@@ -7,7 +7,7 @@ export default async function ExportsPage() {
   return (
     <div>
       <h2 className="text-2xl font-bold mb-2">ייצואים להנהלת חשבונות</h2>
-      <p className="text-sm text-slate-500 mb-6">
+      <p className="text-sm text-stone-500 mb-6">
         ייצא חשבוניות שאושרו במערכת לקבצים מובנים — CSV לצרכים כלליים, או "קובץ 1000" עברית
         להעלאה ישירה לתוכנת ההנהח״ש.
       </p>

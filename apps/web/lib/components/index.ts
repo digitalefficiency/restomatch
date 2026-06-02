@@ -10,3 +10,5 @@ export { Input, Textarea, Field } from './Input';
 export { Spinner } from './Spinner';
 export { EmptyState } from './EmptyState';
 export { FlowBar } from './FlowBar';
+export { LeakHeatmap } from './LeakHeatmap';
+export type { LeakCell } from './LeakHeatmap';

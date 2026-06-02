@@ -1,7 +1,8 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Wallet } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
-import { KpiCard, SectionHeader } from '@/lib/components';
+import { KpiCard, LeakHeatmap, SectionHeader } from '@/lib/components';
 
 export default async function DashboardPage() {
   const caller = await createServerCaller();
@@ -10,6 +11,14 @@ export default async function DashboardPage() {
     redirect('/onboarding');
   }
   const kpis = await caller.owner.kpis();
+
+  // Leak grid is owner-only; other roles simply won't see this section.
+  let leaks: Awaited<ReturnType<typeof caller.owner.leaks>> = [];
+  try {
+    leaks = await caller.owner.leaks({ limit: 8 });
+  } catch {
+    leaks = [];
+  }
 
   return (
     <div>
@@ -48,6 +57,24 @@ export default async function DashboardPage() {
           subtitle="ממוצע מהשבעה ימים האחרונים"
         />
       </div>
+
+      {leaks.length > 0 ? (
+        <div className="mt-10">
+          <SectionHeader
+            title="בלש דליפות"
+            subtitle="המוצרים שדולפים הכי הרבה כסף החודש."
+            action={
+              <Link
+                href="/dashboard/leaks"
+                className="text-sm font-medium text-primary hover:text-primary-hover"
+              >
+                לכל הדליפות →
+              </Link>
+            }
+          />
+          <LeakHeatmap items={leaks} max={8} />
+        </div>
+      ) : null}
     </div>
   );
 }
