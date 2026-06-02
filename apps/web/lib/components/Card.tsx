@@ -3,7 +3,7 @@ import { cn } from './cn';
 interface CardProps extends React.HTMLAttributes<HTMLElement> {
   children: React.ReactNode;
   className?: string;
-  /** Premium soft shadow + hairline border (matches showcase). */
+  /** Premium warm shadow + hairline border. */
   elevated?: boolean;
   /** Inner padding shorthand. */
   padding?: 'none' | 'sm' | 'md' | 'lg';
@@ -18,8 +18,8 @@ const paddings = {
 } as const;
 
 /**
- * Surface container used across the dashboard. Default = hairline border;
- * `elevated` adds the cinematic soft shadow used in the showcase.
+ * Surface container ("Ledger" language): crisp white surface on the warm-paper
+ * canvas, warm hairline border; `elevated` adds the soft warm shadow.
  */
 export function Card({
   children,
@@ -33,9 +33,7 @@ export function Card({
     <Tag
       className={cn(
         'rounded-2xl bg-white',
-        elevated
-          ? 'border border-slate-200/70 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-8px_rgba(15,23,42,0.06)]'
-          : 'border border-slate-200',
+        elevated ? 'border border-stone-200/80 shadow-card' : 'border border-stone-200',
         paddings[padding],
         className,
       )}

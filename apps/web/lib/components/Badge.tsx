@@ -3,11 +3,11 @@ import { cn } from './cn';
 export type BadgeTone = 'danger' | 'warning' | 'accent' | 'info' | 'neutral';
 
 const tones: Record<BadgeTone, string> = {
-  danger: 'bg-danger/12 text-danger',
-  warning: 'bg-warning/15 text-warning',
+  danger: 'bg-danger/10 text-danger',
+  warning: 'bg-warning/12 text-warning',
   accent: 'bg-accent/12 text-accent',
   info: 'bg-primary/10 text-primary',
-  neutral: 'bg-slate-100 text-slate-600',
+  neutral: 'bg-stone-100 text-stone-600',
 };
 
 /** Pill badge for severity / status / trend indicators. */

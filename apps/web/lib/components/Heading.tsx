@@ -18,10 +18,11 @@ export function Heading({
   className?: string;
 }) {
   const Tag = `h${level}` as React.ElementType;
-  return <Tag className={cn(levelStyles[level], 'text-slate-900', className)}>{children}</Tag>;
+  return <Tag className={cn(levelStyles[level], 'text-ink')}>{children}</Tag>;
 }
 
-/** Section title + optional subtitle + optional trailing action (RTL-aware). */
+/** Section title + optional subtitle + optional trailing action, with the
+ *  money-flow signature accent above the title (RTL-aware). */
 export function SectionHeader({
   title,
   subtitle,
@@ -38,8 +39,9 @@ export function SectionHeader({
   return (
     <div className={cn('mb-6 flex items-start justify-between gap-4', className)}>
       <div>
+        <div className="mb-2 h-0.5 w-10 rounded-full flow-stream" aria-hidden="true" />
         <Heading level={level}>{title}</Heading>
-        {subtitle ? <p className="mt-1 text-sm text-slate-500">{subtitle}</p> : null}
+        {subtitle ? <p className="mt-1 text-sm text-stone-500">{subtitle}</p> : null}
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}
     </div>

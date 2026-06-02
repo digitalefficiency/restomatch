@@ -139,7 +139,7 @@ function UploadedScanCanvas({
             href={publicUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 font-semibold text-blue-700 hover:text-blue-900"
+            className="inline-flex items-center gap-1 font-semibold text-primary hover:text-primary-hover"
           >
             פתח בטאב נפרד
           </a>

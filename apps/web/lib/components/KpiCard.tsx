@@ -4,15 +4,15 @@ import { cn } from './cn';
 export type KpiTone = 'accent' | 'warning' | 'danger' | 'neutral';
 
 const tones: Record<KpiTone, { icon: string; glow: string }> = {
-  accent: { icon: 'text-emerald-600 bg-emerald-50 ring-emerald-100', glow: 'bg-emerald-400' },
-  warning: { icon: 'text-amber-600 bg-amber-50 ring-amber-100', glow: 'bg-amber-400' },
-  danger: { icon: 'text-red-600 bg-red-50 ring-red-100', glow: 'bg-red-400' },
-  neutral: { icon: 'text-blue-600 bg-blue-50 ring-blue-100', glow: 'bg-blue-400' },
+  accent: { icon: 'text-emerald-700 bg-emerald-50 ring-emerald-100', glow: 'bg-emerald-400' },
+  warning: { icon: 'text-amber-700 bg-amber-50 ring-amber-100', glow: 'bg-amber-400' },
+  danger: { icon: 'text-rose-700 bg-rose-50 ring-rose-100', glow: 'bg-rose-400' },
+  neutral: { icon: 'text-teal-700 bg-teal-50 ring-teal-100', glow: 'bg-teal-400' },
 };
 
 /**
- * KPI card — colored icon chip, optional trend delta, soft glow.
- * Static (no animation) so it renders in server components.
+ * KPI card ("Ledger" language): money-flow top stream, colored icon chip,
+ * optional trend delta, soft glow. Static — renders in server components.
  */
 export function KpiCard({
   label,
@@ -38,16 +38,17 @@ export function KpiCard({
   const deltaColor =
     deltaTone === 'good'
       ? deltaUp
-        ? 'text-emerald-600'
-        : 'text-red-600'
+        ? 'text-emerald-700'
+        : 'text-rose-600'
       : deltaTone === 'bad'
         ? deltaUp
-          ? 'text-red-600'
-          : 'text-emerald-600'
-        : 'text-slate-500';
+          ? 'text-rose-600'
+          : 'text-emerald-700'
+        : 'text-stone-500';
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-slate-200/70 bg-white p-6 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-8px_rgba(15,23,42,0.06)]">
+    <div className="relative overflow-hidden rounded-2xl border border-stone-200/80 bg-white p-6 shadow-card">
+      <div className="absolute inset-x-0 top-0 h-0.5 flow-stream" aria-hidden="true" />
       <div className="mb-4 flex items-start justify-between">
         {icon ? (
           <div className={cn('flex h-10 w-10 items-center justify-center rounded-xl ring-1', t.icon)}>
@@ -67,9 +68,9 @@ export function KpiCard({
         ) : null}
       </div>
 
-      <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</p>
-      <p className="text-3xl font-bold tabular-nums tracking-tight text-slate-900">{value}</p>
-      {subtitle ? <p className="mt-2 text-xs text-slate-500">{subtitle}</p> : null}
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-500">{label}</p>
+      <p className="text-3xl font-bold tabular-nums tracking-tight text-ink">{value}</p>
+      {subtitle ? <p className="mt-2 text-xs text-stone-500">{subtitle}</p> : null}
 
       <div
         className={cn(

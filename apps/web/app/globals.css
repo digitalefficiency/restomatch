@@ -8,13 +8,21 @@
   }
   html {
     direction: rtl;
-    background: linear-gradient(180deg, #fafbfd 0%, #f4f6fa 100%);
+    /* Warm-paper canvas — the "Ledger" identity (not cold white). */
+    background: linear-gradient(180deg, #faf9f5 0%, #f1efe8 100%);
     background-attachment: fixed;
     min-height: 100vh;
   }
   body {
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
-    color: #0f172a;
+    color: #15201a;
     background: transparent;
+  }
+}
+
+@layer utilities {
+  /* Money-flow signature motif — emerald→lime gradient stream. */
+  .flow-stream {
+    background-image: linear-gradient(90deg, #0b5e4a 0%, #15a34a 45%, #4ade80 75%, transparent 100%);
   }
 }

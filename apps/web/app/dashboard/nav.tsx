@@ -25,10 +25,10 @@ export function DashboardNav() {
             href={href}
             aria-current={active ? 'page' : undefined}
             className={cn(
-              'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 transition-colors',
+              'inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 transition-colors',
               active
                 ? 'bg-primary/10 font-medium text-primary'
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+                : 'text-stone-600 hover:bg-stone-100 hover:text-ink',
             )}
           >
             <Icon className="h-4 w-4" aria-hidden="true" />

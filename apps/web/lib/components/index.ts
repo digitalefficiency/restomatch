@@ -9,3 +9,4 @@ export type { KpiTone } from './KpiCard';
 export { Input, Textarea, Field } from './Input';
 export { Spinner } from './Spinner';
 export { EmptyState } from './EmptyState';
+export { FlowBar } from './FlowBar';
