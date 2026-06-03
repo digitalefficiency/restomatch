@@ -11,6 +11,7 @@ import type {
   PoLineInput,
   Severity,
 } from './index';
+import { unitConversionFactor } from './units';
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Tunable thresholds (not exposed via Tolerances yet — sane defaults)
@@ -222,9 +223,35 @@ export function runMatch(input: MatchInput): MatchOutput {
     }
 
     if (inv) {
+      // 5c. Unit handling — convert when units differ but are convertible
+      // (e.g. kg↔g, l↔ml); only flag UNIT_MISMATCH when no conversion exists.
+      // All downstream qty/price checks then use the PO-unit-normalized values.
+      let invQty = inv.qtyBilled;
+      let invPrice = inv.unitPriceBilled;
+      if (inv.unit !== po.unit) {
+        const factor = unitConversionFactor(inv.unit, po.unit);
+        if (factor === null) {
+          out.push(
+            discrepancy('UNIT_MISMATCH', 'warn', {
+              productId: po.productId,
+              poLineId: po.id,
+              invoiceLineId: inv.id,
+              expected: null,
+              actual: null,
+              deltaAmount: 0,
+              toleranceUsed: 'unit must match between PO and invoice',
+              message: `PO unit "${po.unit}" vs invoice unit "${inv.unit}"`,
+            }),
+          );
+        } else {
+          invQty = inv.qtyBilled * factor;
+          invPrice = inv.unitPriceBilled / factor;
+        }
+      }
+
       // 5b. Billed > received: block (overcharge)
-      if (gr && inv.qtyBilled > gr.qtyReceived) {
-        const diff = inv.qtyBilled - gr.qtyReceived;
+      if (gr && invQty > gr.qtyReceived) {
+        const diff = invQty - gr.qtyReceived;
         const effectiveTol = Math.max(
           tolerances.qtyAbsolute,
           gr.qtyReceived * tolerances.qtyPercent,
@@ -237,8 +264,8 @@ export function runMatch(input: MatchInput): MatchOutput {
               grLineId: gr.id,
               invoiceLineId: inv.id,
               expected: gr.qtyReceived,
-              actual: inv.qtyBilled,
-              deltaAmount: diff * inv.unitPriceBilled,
+              actual: invQty,
+              deltaAmount: diff * invPrice,
               toleranceUsed: 'billed quantity exceeds received quantity',
               message: 'Invoice charges for more units than were received',
             }),
@@ -246,25 +273,9 @@ export function runMatch(input: MatchInput): MatchOutput {
         }
       }
 
-      // 5c. Unit mismatch
-      if (inv.unit !== po.unit) {
-        out.push(
-          discrepancy('UNIT_MISMATCH', 'warn', {
-            productId: po.productId,
-            poLineId: po.id,
-            invoiceLineId: inv.id,
-            expected: null,
-            actual: null,
-            deltaAmount: 0,
-            toleranceUsed: 'unit must match between PO and invoice',
-            message: `PO unit "${po.unit}" vs invoice unit "${inv.unit}"`,
-          }),
-        );
-      }
-
-      // 5d. Price comparison: PO expected vs invoice billed
+      // 5d. Price comparison: PO expected vs invoice billed (unit-normalized)
       if (po.unitPriceExpected !== null) {
-        const priceEval = evaluatePrice(po.unitPriceExpected, inv.unitPriceBilled, inv.qtyBilled, tolerances);
+        const priceEval = evaluatePrice(po.unitPriceExpected, invPrice, invQty, tolerances);
         if (priceEval) {
           out.push(
             discrepancy(priceEval.discrepancy.type, priceEval.discrepancy.severity, {
