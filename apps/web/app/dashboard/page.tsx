@@ -1,8 +1,15 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { AlertTriangle, CheckCircle2, ClipboardCheck, Wallet } from 'lucide-react';
+import { Activity, AlertTriangle, CheckCircle2, ClipboardCheck, Wallet } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
-import { KpiCard, LeakHeatmap, SectionHeader } from '@/lib/components';
+import {
+  ActivityFeed,
+  Card,
+  EmptyState,
+  KpiCard,
+  LeakHeatmap,
+  SectionHeader,
+} from '@/lib/components';
 
 export default async function DashboardPage() {
   const caller = await createServerCaller();
@@ -19,6 +26,8 @@ export default async function DashboardPage() {
   } catch {
     leaks = [];
   }
+
+  const activity = await caller.activity.feed({ limit: 8 });
 
   return (
     <div>
@@ -75,6 +84,21 @@ export default async function DashboardPage() {
           <LeakHeatmap items={leaks} max={8} />
         </div>
       ) : null}
+
+      <div className="mt-10">
+        <SectionHeader title="פעילות אחרונה" subtitle="מה קרה במערכת לאחרונה." />
+        {activity.length > 0 ? (
+          <Card elevated padding="lg">
+            <ActivityFeed items={activity} />
+          </Card>
+        ) : (
+          <EmptyState
+            icon={<Activity className="h-6 w-6" />}
+            title="עדיין אין פעילות"
+            description="ברגע שתקלוט חשבוניות ותטפל בחריגות, היומן יתחיל להתמלא כאן."
+          />
+        )}
+      </div>
     </div>
   );
 }

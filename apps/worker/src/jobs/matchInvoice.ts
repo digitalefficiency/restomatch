@@ -1,6 +1,7 @@
 import {
   buildRules,
   evaluateApproval,
+  logActivity,
   MockPushNotifier,
   MockWhatsAppNotifier,
   resolveApprovalThresholds,
@@ -157,6 +158,15 @@ export function startMatchInvoiceWorker() {
         });
       }
     }
+
+    await logActivity(db, {
+      restaurantId: job.data.restaurantId,
+      eventType: 'invoice_matched',
+      title: 'חשבונית הותאמה',
+      detail: `${result.discrepancies.length} חריגות · הפסד פוטנציאלי ₪${result.totalDiscrepancyAmount.toFixed(0)}`,
+      entityType: 'match_run',
+      entityId: matchRun.id,
+    });
 
     console.log(
       `[match-invoice] restaurant=${job.data.restaurantId} invoice=${job.data.invoiceId} ` +

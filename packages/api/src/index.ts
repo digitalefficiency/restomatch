@@ -1,4 +1,5 @@
 import { router } from './trpc';
+import { activityRouter } from './routers/activity';
 import { approvalsRouter } from './routers/approvals';
 import { exportsRouter } from './routers/exports';
 import { onboardingRouter } from './routers/onboarding';
@@ -11,6 +12,7 @@ export const appRouter = router({
   onboarding: onboardingRouter,
   approvals: approvalsRouter,
   exports: exportsRouter,
+  activity: activityRouter,
 });
 
 export type AppRouter = typeof appRouter;
@@ -53,3 +55,4 @@ export {
   type NotificationPayload,
   type NotificationChannel,
 } from './notifications';
+export { logActivity, type ActivityEventInput, type ActivityEventType } from './activity';

@@ -10,6 +10,7 @@ import {
   type UserRole,
 } from '@restomatch/db';
 import { authedProcedure, managerProcedure, memberProcedure, router } from '../trpc';
+import { logActivity } from '../activity';
 
 const ResolutionEnum = z.enum(['accepted', 'rejected', 'escalated']);
 
@@ -96,6 +97,17 @@ export const approvalsRouter = router({
         entityId: input.discrepancyId,
         after: { note: input.note ?? null, role: ctx.session.role },
       });
+      await logActivity(ctx.db, {
+        restaurantId: ctx.session.restaurantId,
+        eventType: 'discrepancy_approved',
+        title: 'חריגה אושרה',
+        detail: updated.deltaAmount
+          ? `חיסכון ₪${Number(updated.deltaAmount).toLocaleString('he-IL')}`
+          : null,
+        entityType: 'discrepancy',
+        entityId: input.discrepancyId,
+        actorId: ctx.session.userId,
+      });
       return updated;
     }),
 
@@ -132,6 +144,15 @@ export const approvalsRouter = router({
         entityType: 'discrepancy',
         entityId: input.discrepancyId,
         after: { reason: input.reason, role: ctx.session.role },
+      });
+      await logActivity(ctx.db, {
+        restaurantId: ctx.session.restaurantId,
+        eventType: 'discrepancy_rejected',
+        title: 'חריגה נדחתה',
+        detail: input.reason,
+        entityType: 'discrepancy',
+        entityId: input.discrepancyId,
+        actorId: ctx.session.userId,
       });
       return updated;
     }),

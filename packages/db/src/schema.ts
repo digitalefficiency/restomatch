@@ -561,6 +561,38 @@ export const discrepancies = pgTable(
 );
 
 /* ──────────────────────────────────────────────────────────────────────────
+ * Activity feed — denormalized timeline of what happened, per restaurant.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export const activityEventType = pgEnum('activity_event_type', [
+  'invoice_received',
+  'invoice_matched',
+  'discrepancy_approved',
+  'discrepancy_rejected',
+  'alias_learned',
+  'sync_completed',
+]);
+
+export const activityEvents = pgTable(
+  'activity_events',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    eventType: activityEventType('event_type').notNull(),
+    entityType: text('entity_type'),
+    entityId: uuid('entity_id'),
+    actorId: uuid('actor_id').references(() => users.id, { onDelete: 'set null' }),
+    title: text('title').notNull(),
+    detail: text('detail'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('activity_events_restaurant_created_idx').on(t.restaurantId, t.createdAt)],
+);
+
+/* ──────────────────────────────────────────────────────────────────────────
  * Pricing analytics
  * ────────────────────────────────────────────────────────────────────────── */
 
