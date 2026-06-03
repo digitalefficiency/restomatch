@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TRPCError } from '@trpc/server';
 import {
   and,
   auditLog,
@@ -87,7 +88,7 @@ export const approvalsRouter = router({
           ),
         )
         .returning();
-      if (!updated) throw new Error('discrepancy not found');
+      if (!updated) throw new TRPCError({ code: 'NOT_FOUND', message: 'discrepancy not found' });
 
       await ctx.db.insert(auditLog).values({
         restaurantId: ctx.session.restaurantId,
@@ -135,7 +136,7 @@ export const approvalsRouter = router({
           ),
         )
         .returning();
-      if (!updated) throw new Error('discrepancy not found');
+      if (!updated) throw new TRPCError({ code: 'NOT_FOUND', message: 'discrepancy not found' });
 
       await ctx.db.insert(auditLog).values({
         restaurantId: ctx.session.restaurantId,
@@ -175,7 +176,7 @@ export const approvalsRouter = router({
           ),
         )
         .returning();
-      if (!updated) throw new Error('discrepancy not found');
+      if (!updated) throw new TRPCError({ code: 'NOT_FOUND', message: 'discrepancy not found' });
 
       await ctx.db.insert(auditLog).values({
         restaurantId: ctx.session.restaurantId,
@@ -234,11 +235,14 @@ async function ensureCanAct(
       ),
     )
     .limit(1);
-  if (!row) throw new Error('discrepancy not found');
+  if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'discrepancy not found' });
   if (!row.requiredRole) return; // no required role → anyone can resolve
   const allowed = expandVisibleRoles(ctx.session.role);
   if (!allowed.includes(row.requiredRole)) {
-    throw new Error(`role ${ctx.session.role} cannot act on discrepancy requiring ${row.requiredRole}`);
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: `role ${ctx.session.role} cannot act on discrepancy requiring ${row.requiredRole}`,
+    });
   }
 }
 

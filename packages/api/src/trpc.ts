@@ -1,14 +1,24 @@
 import { initTRPC, TRPCError } from '@trpc/server';
 import superjson from 'superjson';
+import { captureException } from '@restomatch/observability';
 import type { UserRole } from '@restomatch/db';
 import type { AppContext, MemberSession } from './context';
 
 const t = initTRPC.context<AppContext>().create({ transformer: superjson });
 
-export const router = t.router;
-export const publicProcedure = t.procedure;
+/** Report procedure errors to observability (no-op until a client is registered). */
+const errorCapture = t.middleware(async ({ next, path, type }) => {
+  const result = await next();
+  if (!result.ok) {
+    captureException(result.error, { trpcPath: path, trpcType: type });
+  }
+  return result;
+});
 
-export const authedProcedure = t.procedure.use(({ ctx, next }) => {
+export const router = t.router;
+export const publicProcedure = t.procedure.use(errorCapture);
+
+export const authedProcedure = publicProcedure.use(({ ctx, next }) => {
   if (!ctx.session) {
     throw new TRPCError({ code: 'UNAUTHORIZED' });
   }

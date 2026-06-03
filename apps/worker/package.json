@@ -15,6 +15,7 @@
     "@restomatch/charts": "workspace:*",
     "@restomatch/db": "workspace:*",
     "@restomatch/matching": "workspace:*",
+    "@restomatch/observability": "workspace:*",
     "@restomatch/ocr": "workspace:*",
     "@restomatch/procurement": "workspace:*",
     "@restomatch/types": "workspace:*",

@@ -217,6 +217,9 @@ importers:
       '@restomatch/matching':
         specifier: workspace:*
         version: link:../../packages/matching
+      '@restomatch/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
       '@restomatch/ocr':
         specifier: workspace:*
         version: link:../../packages/ocr
@@ -251,6 +254,9 @@ importers:
       '@restomatch/db':
         specifier: workspace:*
         version: link:../db
+      '@restomatch/observability':
+        specifier: workspace:*
+        version: link:../observability
       '@restomatch/types':
         specifier: workspace:*
         version: link:../types

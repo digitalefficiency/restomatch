@@ -1,3 +1,4 @@
+import { captureException } from '@restomatch/observability';
 import { Queue, Worker, type WorkerOptions } from 'bullmq';
 import IORedis from 'ioredis';
 
@@ -14,7 +15,11 @@ export function makeWorker<T>(
   processor: (job: { data: T; id?: string }) => Promise<unknown>,
   options: Partial<WorkerOptions> = {},
 ) {
-  return new Worker<T>(name, processor as never, { connection, ...options });
+  const worker = new Worker<T>(name, processor as never, { connection, ...options });
+  worker.on('failed', (job, err) => {
+    captureException(err, { queue: name, jobId: job?.id });
+  });
+  return worker;
 }
 
 export { connection };

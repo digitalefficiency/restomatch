@@ -17,6 +17,7 @@
     "@restomatch/db": "workspace:*",
     "@restomatch/types": "workspace:*",
     "@restomatch/charts": "workspace:*",
+    "@restomatch/observability": "workspace:*",
     "@trpc/server": "^11.0.0-rc.683",
     "@trpc/client": "^11.0.0-rc.683",
     "drizzle-orm": "^0.38.3",
