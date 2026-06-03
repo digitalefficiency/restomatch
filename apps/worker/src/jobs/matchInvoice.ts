@@ -1,8 +1,9 @@
 import {
-  DEFAULT_RULES,
+  buildRules,
   evaluateApproval,
   MockPushNotifier,
   MockWhatsAppNotifier,
+  resolveApprovalThresholds,
   type ApprovalContext,
 } from '@restomatch/api';
 import {
@@ -43,6 +44,8 @@ export function startMatchInvoiceWorker() {
       ...job.data.input,
       tolerances: resolveTolerances(restaurant?.settings?.tolerances),
     };
+    // Per-restaurant approval-routing thresholds (settings.approvalThresholds).
+    const rules = buildRules(resolveApprovalThresholds(restaurant?.settings?.approvalThresholds));
     const result = runMatch(input);
 
     // Persist match_run
@@ -75,7 +78,7 @@ export function startMatchInvoiceWorker() {
           poExists: input.poLines.length > 0,
         },
       };
-      const decision = evaluateApproval(ctx, DEFAULT_RULES);
+      const decision = evaluateApproval(ctx, rules);
 
       const initialStatus =
         decision.action === 'auto_approve' ? 'accepted' : 'open';

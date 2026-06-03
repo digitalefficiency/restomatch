@@ -88,4 +88,18 @@ describe('onboarding router', () => {
       caller.onboarding.createRestaurant({ name: 'NoAuth' }),
     ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
   });
+
+  it('createRestaurant returns UNAUTHORIZED for a ghost userId and orphans nothing', async () => {
+    // Simulates a stale JWT cookie whose userId was deleted from the DB
+    // (e.g. after a reseed). Must fail cleanly, not leak a raw FK error,
+    // and must not leave a restaurant behind.
+    const ghostId = '00000000-0000-0000-0000-000000000000';
+    const caller = callerForUser(ghostId);
+    await expect(
+      caller.onboarding.createRestaurant({ name: 'Ghost Bistro' }),
+    ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+
+    const remaining = await db.select().from(restaurants);
+    expect(remaining).toHaveLength(0);
+  });
 });

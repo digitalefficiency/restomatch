@@ -34,11 +34,15 @@ export {
 } from './trpc';
 export {
   evaluateApproval,
+  buildRules,
   DEFAULT_RULES,
+  DEFAULT_APPROVAL_THRESHOLDS,
+  resolveApprovalThresholds,
   decisionMessage,
   type ApprovalContext,
   type ApprovalDecision,
   type ApprovalAction,
+  type ApprovalThresholds,
 } from './approvals/engine';
 export {
   enqueueNotification,

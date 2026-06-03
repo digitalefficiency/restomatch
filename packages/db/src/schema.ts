@@ -127,6 +127,15 @@ export interface RestaurantSettings {
     qtyAbsolute?: number;
     blockPricePercent?: number;
   };
+  /** Per-restaurant approval-routing thresholds (see approvals engine). */
+  approvalThresholds?: {
+    largeInvoiceWithoutPo?: number;
+    unorderedItemSignificant?: number;
+    cumulativeLargeAmount?: number;
+    cumulativeLargePct?: number;
+    cumulativeMediumAmountMin?: number;
+    cumulativeMediumPctMin?: number;
+  };
   baselineWindowDays?: number;
   /** Confidence below which OCR results are flagged for human review (0-1). */
   ocrReviewThreshold?: number;

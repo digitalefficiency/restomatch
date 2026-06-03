@@ -58,77 +58,128 @@ interface Rule {
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
- * Default rules (from plan §7, sorted by priority — highest fires first)
+ * Per-restaurant approval thresholds
+ *
+ * The default rules embed money/percent thresholds. These are tunable per
+ * restaurant via `restaurants.settings.approvalThresholds` — `buildRules()`
+ * substitutes them so the per-tenant routing config is live, not hardcoded.
  * ────────────────────────────────────────────────────────────────────────── */
 
-export const DEFAULT_RULES: Rule[] = [
-  {
-    id: 'duplicate-invoice',
-    name: 'חשבונית כפולה — חסימת תשלום',
-    priority: 100,
-    predicate: (ctx) => ctx.discrepancy.type === 'DUPLICATE_INVOICE',
-    decision: { requiredRole: 'bookkeeper', action: 'block' },
-  },
-  {
-    id: 'large-invoice-without-po',
-    name: 'חשבונית מעל ₪5,000 ללא PO',
-    priority: 95,
-    predicate: (ctx) =>
-      ctx.discrepancy.type === 'UNORDERED_ARRIVAL' && ctx.matchRun.totalInvoiceAmount > 5000,
-    decision: { requiredRole: 'owner', action: 'block' },
-  },
-  {
-    id: 'unordered-item-significant',
-    name: 'פריט שלא הוזמן מעל ₪100',
-    priority: 90,
-    predicate: (ctx) =>
-      ctx.discrepancy.type === 'UNORDERED_ITEM' && ctx.discrepancy.deltaAmount > 100,
-    decision: { requiredRole: 'owner', action: 'block' },
-  },
-  {
-    id: 'severity-block',
-    name: 'חומרה גבוהה — אישור בעלים',
-    priority: 80,
-    predicate: (ctx) => ctx.discrepancy.severity === 'block',
-    decision: { requiredRole: 'owner', action: 'block' },
-  },
-  {
-    id: 'cumulative-large',
-    name: 'הפרש מצטבר מעל 5% או ₪300',
-    priority: 70,
-    predicate: (ctx) => {
-      const pct =
-        ctx.matchRun.totalInvoiceAmount > 0
-          ? ctx.matchRun.totalDiscrepancyAmount / ctx.matchRun.totalInvoiceAmount
-          : 0;
-      return pct > 0.05 || ctx.matchRun.totalDiscrepancyAmount > 300;
+export interface ApprovalThresholds {
+  /** Invoice without any PO above this amount → owner blocks. */
+  largeInvoiceWithoutPo?: number;
+  /** Unordered item with delta above this → owner blocks. */
+  unorderedItemSignificant?: number;
+  /** Cumulative discrepancy amount (or pct) above this → owner queue. */
+  cumulativeLargeAmount?: number;
+  cumulativeLargePct?: number;
+  /** Cumulative amount (or pct) above this, up to the large band → manager queue. */
+  cumulativeMediumAmountMin?: number;
+  cumulativeMediumPctMin?: number;
+}
+
+export const DEFAULT_APPROVAL_THRESHOLDS: Required<ApprovalThresholds> = {
+  largeInvoiceWithoutPo: 5000,
+  unorderedItemSignificant: 100,
+  cumulativeLargeAmount: 300,
+  cumulativeLargePct: 0.05,
+  cumulativeMediumAmountMin: 50,
+  cumulativeMediumPctMin: 0.02,
+};
+
+/** Merge a restaurant's partial threshold overrides over the defaults. */
+export function resolveApprovalThresholds(
+  overrides?: Partial<ApprovalThresholds> | null,
+): Required<ApprovalThresholds> {
+  const clean: Partial<ApprovalThresholds> = {};
+  if (overrides) {
+    for (const [key, value] of Object.entries(overrides)) {
+      if (value !== undefined && value !== null) {
+        (clean as Record<string, number>)[key] = value as number;
+      }
+    }
+  }
+  return { ...DEFAULT_APPROVAL_THRESHOLDS, ...clean };
+}
+
+function discrepancyPct(ctx: ApprovalContext): number {
+  return ctx.matchRun.totalInvoiceAmount > 0
+    ? ctx.matchRun.totalDiscrepancyAmount / ctx.matchRun.totalInvoiceAmount
+    : 0;
+}
+
+/**
+ * Build the rule set (priority DESC, highest fires first) with the given
+ * thresholds substituted. `DEFAULT_RULES` is `buildRules()` with defaults.
+ */
+export function buildRules(t: Required<ApprovalThresholds> = DEFAULT_APPROVAL_THRESHOLDS): Rule[] {
+  return [
+    {
+      id: 'duplicate-invoice',
+      name: 'חשבונית כפולה — חסימת תשלום',
+      priority: 100,
+      predicate: (ctx) => ctx.discrepancy.type === 'DUPLICATE_INVOICE',
+      decision: { requiredRole: 'bookkeeper', action: 'block' },
     },
-    decision: { requiredRole: 'owner', action: 'queue_review' },
-  },
-  {
-    id: 'cumulative-medium',
-    name: 'הפרש מצטבר 2-5% או ₪50-300',
-    priority: 60,
-    predicate: (ctx) => {
-      const pct =
-        ctx.matchRun.totalInvoiceAmount > 0
-          ? ctx.matchRun.totalDiscrepancyAmount / ctx.matchRun.totalInvoiceAmount
-          : 0;
-      return (
-        (pct > 0.02 && pct <= 0.05) ||
-        (ctx.matchRun.totalDiscrepancyAmount > 50 && ctx.matchRun.totalDiscrepancyAmount <= 300)
-      );
+    {
+      id: 'large-invoice-without-po',
+      name: `חשבונית מעל ₪${t.largeInvoiceWithoutPo.toLocaleString('he-IL')} ללא PO`,
+      priority: 95,
+      predicate: (ctx) =>
+        ctx.discrepancy.type === 'UNORDERED_ARRIVAL' &&
+        ctx.matchRun.totalInvoiceAmount > t.largeInvoiceWithoutPo,
+      decision: { requiredRole: 'owner', action: 'block' },
     },
-    decision: { requiredRole: 'manager', action: 'queue_review' },
-  },
-  {
-    id: 'minor-info',
-    name: 'הפרש זניח (≤2%, info)',
-    priority: 10,
-    predicate: (ctx) => ctx.discrepancy.severity === 'info',
-    decision: { requiredRole: null, action: 'auto_approve' },
-  },
-];
+    {
+      id: 'unordered-item-significant',
+      name: `פריט שלא הוזמן מעל ₪${t.unorderedItemSignificant.toLocaleString('he-IL')}`,
+      priority: 90,
+      predicate: (ctx) =>
+        ctx.discrepancy.type === 'UNORDERED_ITEM' &&
+        ctx.discrepancy.deltaAmount > t.unorderedItemSignificant,
+      decision: { requiredRole: 'owner', action: 'block' },
+    },
+    {
+      id: 'severity-block',
+      name: 'חומרה גבוהה — אישור בעלים',
+      priority: 80,
+      predicate: (ctx) => ctx.discrepancy.severity === 'block',
+      decision: { requiredRole: 'owner', action: 'block' },
+    },
+    {
+      id: 'cumulative-large',
+      name: `הפרש מצטבר מעל ${t.cumulativeLargePct * 100}% או ₪${t.cumulativeLargeAmount}`,
+      priority: 70,
+      predicate: (ctx) =>
+        discrepancyPct(ctx) > t.cumulativeLargePct ||
+        ctx.matchRun.totalDiscrepancyAmount > t.cumulativeLargeAmount,
+      decision: { requiredRole: 'owner', action: 'queue_review' },
+    },
+    {
+      id: 'cumulative-medium',
+      name: `הפרש מצטבר ${t.cumulativeMediumPctMin * 100}-${t.cumulativeLargePct * 100}% או ₪${t.cumulativeMediumAmountMin}-${t.cumulativeLargeAmount}`,
+      priority: 60,
+      predicate: (ctx) => {
+        const pct = discrepancyPct(ctx);
+        return (
+          (pct > t.cumulativeMediumPctMin && pct <= t.cumulativeLargePct) ||
+          (ctx.matchRun.totalDiscrepancyAmount > t.cumulativeMediumAmountMin &&
+            ctx.matchRun.totalDiscrepancyAmount <= t.cumulativeLargeAmount)
+        );
+      },
+      decision: { requiredRole: 'manager', action: 'queue_review' },
+    },
+    {
+      id: 'minor-info',
+      name: 'הפרש זניח (≤2%, info)',
+      priority: 10,
+      predicate: (ctx) => ctx.discrepancy.severity === 'info',
+      decision: { requiredRole: null, action: 'auto_approve' },
+    },
+  ];
+}
+
+export const DEFAULT_RULES: Rule[] = buildRules();
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Evaluator

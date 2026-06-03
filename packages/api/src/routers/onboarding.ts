@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm';
-import { memberships, restaurants } from '@restomatch/db';
+import { TRPCError } from '@trpc/server';
+import { memberships, restaurants, users } from '@restomatch/db';
 import { z } from 'zod';
 import { authedProcedure, router } from '../trpc';
 
@@ -30,23 +31,44 @@ export const onboardingRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const [restaurant] = await ctx.db
-        .insert(restaurants)
-        .values({
-          name: input.name,
-          businessId: input.businessId,
-        })
-        .returning();
-      if (!restaurant) {
-        throw new Error('failed to create restaurant');
+      // The session is a stateless JWT stored in the browser cookie. If the
+      // DB was reseeded/reset the user row can be gone while the cookie still
+      // carries a ghost userId. Verify the user exists first, otherwise the
+      // membership insert dies on a raw FK violation and orphans a restaurant.
+      const [user] = await ctx.db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.id, ctx.session.userId))
+        .limit(1);
+      if (!user) {
+        throw new TRPCError({
+          code: 'UNAUTHORIZED',
+          message: 'החשבון שלך כבר לא קיים. התנתק והתחבר מחדש כדי להמשיך.',
+        });
       }
 
-      await ctx.db.insert(memberships).values({
-        userId: ctx.session.userId,
-        restaurantId: restaurant.id,
-        role: 'owner',
-      });
+      return ctx.db.transaction(async (tx) => {
+        const [restaurant] = await tx
+          .insert(restaurants)
+          .values({
+            name: input.name,
+            businessId: input.businessId,
+          })
+          .returning();
+        if (!restaurant) {
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'failed to create restaurant',
+          });
+        }
 
-      return restaurant;
+        await tx.insert(memberships).values({
+          userId: ctx.session.userId,
+          restaurantId: restaurant.id,
+          role: 'owner',
+        });
+
+        return restaurant;
+      });
     }),
 });
