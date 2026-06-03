@@ -50,6 +50,7 @@ export default async function LeaksPage() {
           <LeakHeatmap items={leaks} />
           <Card elevated padding="none" className="overflow-hidden">
           <table className="w-full text-sm">
+            <caption className="sr-only">דליפות מחיר לפי מוצר וספק</caption>
             <thead className="bg-stone-50 text-stone-500">
               <tr>
                 <th scope="col" className="p-3 text-right font-medium">מוצר</th>
