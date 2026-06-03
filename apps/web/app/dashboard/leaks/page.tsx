@@ -1,7 +1,7 @@
 import { TRPCError } from '@trpc/server';
 import { Droplets, ShieldAlert } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
-import { Badge, Card, EmptyState, LeakHeatmap, SectionHeader } from '@/lib/components';
+import { Badge, Card, EmptyState, LeakHeatmap, SectionHeader, Sparkline } from '@/lib/components';
 
 export default async function LeaksPage() {
   const caller = await createServerCaller();
@@ -57,6 +57,7 @@ export default async function LeaksPage() {
                 <th scope="col" className="p-3 text-right font-medium">מחיר ממוצע</th>
                 <th scope="col" className="p-3 text-right font-medium">מחיר אחרון</th>
                 <th scope="col" className="p-3 text-right font-medium">שינוי</th>
+                <th scope="col" className="p-3 text-right font-medium">מגמה</th>
                 <th scope="col" className="p-3 text-right font-medium">הפסד צפוי</th>
               </tr>
             </thead>
@@ -77,6 +78,9 @@ export default async function LeaksPage() {
                     <Badge tone={row.deltaPct >= 0.1 ? 'danger' : 'warning'}>
                       +{(row.deltaPct * 100).toFixed(1)}%
                     </Badge>
+                  </td>
+                  <td className="p-3">
+                    <Sparkline data={row.series} />
                   </td>
                   <td className="p-3 font-semibold tabular-nums text-stone-900">
                     {formatCurrency(row.monthExcessIls)}

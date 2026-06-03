@@ -96,6 +96,48 @@ describe('computeLeaks', () => {
     expect(leaks[0]?.deltaPct).toBeCloseTo(0.375, 2);
   });
 
+  it('quantifies month excess from real 30-day quantity, not a constant', async () => {
+    const [r] = await db.insert(restaurants).values({ name: 'Qty Bistro' }).returning();
+    const [s] = await db.insert(suppliers).values({ restaurantId: r!.id, name: 'ספק' }).returning();
+    const [p] = await db
+      .insert(products)
+      .values({ restaurantId: r!.id, canonicalName: 'בצל' })
+      .returning();
+    await db.insert(priceBaselines).values({
+      restaurantId: r!.id,
+      productId: p!.id,
+      supplierId: s!.id,
+      windowDays: 90,
+      p50: '8',
+      p90: '9',
+      mean: '8',
+      stddev: '0.5',
+      sampleSize: 30,
+    });
+    // Two purchases this month: qty 7 + 13 = 20; latest price 11.
+    await db.insert(priceHistory).values({
+      restaurantId: r!.id,
+      productId: p!.id,
+      supplierId: s!.id,
+      observedAt: new Date(Date.now() - 5 * 86400000),
+      unitPrice: '10',
+      qty: '7',
+    });
+    await db.insert(priceHistory).values({
+      restaurantId: r!.id,
+      productId: p!.id,
+      supplierId: s!.id,
+      observedAt: new Date(),
+      unitPrice: '11',
+      qty: '13',
+    });
+    const leaks = await computeLeaks(db, r!.id);
+    expect(leaks).toHaveLength(1);
+    // (11 - 8) * 20 = 60 — the old constant ×10 would give 30.
+    expect(leaks[0]?.monthExcessIls).toBeCloseTo(60, 1);
+    expect(leaks[0]?.series).toEqual([10, 11]);
+  });
+
   it('does not flag prices within p90 threshold', async () => {
     const { restaurantId } = await seedWithBaseline(8.5, 8, 9); // under p90
     const leaks = await computeLeaks(db, restaurantId);

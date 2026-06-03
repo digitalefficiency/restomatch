@@ -14,3 +14,4 @@ export { LeakHeatmap } from './LeakHeatmap';
 export type { LeakCell } from './LeakHeatmap';
 export { ActivityFeed } from './ActivityFeed';
 export type { ActivityItem } from './ActivityFeed';
+export { Sparkline } from './Sparkline';

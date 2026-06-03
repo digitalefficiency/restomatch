@@ -1,6 +1,5 @@
 import {
   and,
-  desc,
   eq,
   gte,
   priceBaselines,
@@ -23,6 +22,8 @@ export interface LeakRow {
   lastObservedAt: string;
   deltaPct: number;
   monthExcessIls: number;
+  /** Recent unit-price observations (oldest → newest) for a sparkline. */
+  series: number[];
 }
 
 export interface ComputeLeaksOptions {
@@ -31,11 +32,14 @@ export interface ComputeLeaksOptions {
   minDeltaPct?: number;
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 /**
- * Top "leak" candidates — products where the most recent invoice price
- * exceeds the supplier's p90 baseline by more than `minDeltaPct` (default 5%).
+ * Top "leak" candidates — products where the most recent invoice price exceeds
+ * the supplier's p90 baseline by more than `minDeltaPct` (default 5%).
  *
- * Returns rows ordered by impact: deltaPct DESC, then estimated month excess.
+ * Month excess is quantified from the REAL last-30-day quantity (falling back
+ * to the observation count, then 1) instead of a constant.
  */
 export async function computeLeaks(
   db: Database,
@@ -45,10 +49,9 @@ export async function computeLeaks(
   const limit = options.limit ?? 20;
   const minDeltaPct = options.minDeltaPct ?? 0.05;
   const windowDays = options.windowDays ?? 90;
+  const monthlySince = new Date(Date.now() - 30 * DAY_MS);
 
-  // For each (product, supplier) in this restaurant, get:
-  //   - the latest observed price
-  //   - the latest baseline
+  // Latest observed price per (product, supplier).
   const latestPricesSubquery = db
     .select({
       productId: priceHistory.productId,
@@ -59,6 +62,24 @@ export async function computeLeaks(
     .where(eq(priceHistory.restaurantId, restaurantId))
     .groupBy(priceHistory.productId, priceHistory.supplierId)
     .as('latest');
+
+  // Real 30-day quantity + observation count per (product, supplier).
+  const monthlyQtySubquery = db
+    .select({
+      productId: priceHistory.productId,
+      supplierId: priceHistory.supplierId,
+      qtySum: sql<string>`COALESCE(SUM(${priceHistory.qty}), 0)`.as('qty_sum'),
+      obsCount: sql<string>`COUNT(*)`.as('obs_count'),
+    })
+    .from(priceHistory)
+    .where(
+      and(
+        eq(priceHistory.restaurantId, restaurantId),
+        gte(priceHistory.observedAt, monthlySince),
+      ),
+    )
+    .groupBy(priceHistory.productId, priceHistory.supplierId)
+    .as('monthly');
 
   const rows = await db
     .select({
@@ -71,6 +92,8 @@ export async function computeLeaks(
       baselineP90: priceBaselines.p90,
       lastObservedPrice: priceHistory.unitPrice,
       lastObservedAt: priceHistory.observedAt,
+      qtySum: monthlyQtySubquery.qtySum,
+      obsCount: monthlyQtySubquery.obsCount,
     })
     .from(priceHistory)
     .innerJoin(
@@ -91,6 +114,13 @@ export async function computeLeaks(
         eq(priceBaselines.windowDays, windowDays),
       ),
     )
+    .leftJoin(
+      monthlyQtySubquery,
+      and(
+        eq(monthlyQtySubquery.productId, priceHistory.productId),
+        eq(monthlyQtySubquery.supplierId, priceHistory.supplierId),
+      ),
+    )
     .where(eq(priceHistory.restaurantId, restaurantId));
 
   const leaks: LeakRow[] = [];
@@ -102,9 +132,11 @@ export async function computeLeaks(
     if (actual <= p90) continue;
     const deltaPct = (actual - p50) / p50;
     if (deltaPct < minDeltaPct) continue;
-    // Rough month excess estimate: (actual - p50) × monthly typical qty (10)
-    // Replace with real qty aggregation when available.
-    const monthExcessIls = (actual - p50) * 10;
+
+    const qtySum = Number(r.qtySum ?? 0);
+    const obsCount = Number(r.obsCount ?? 0);
+    const monthlyQty = qtySum > 0 ? qtySum : obsCount > 0 ? obsCount : 1;
+
     leaks.push({
       productId: r.productId,
       productName: r.productName,
@@ -116,14 +148,43 @@ export async function computeLeaks(
       lastObservedPrice: actual,
       lastObservedAt: r.lastObservedAt.toISOString(),
       deltaPct,
-      monthExcessIls,
+      monthExcessIls: (actual - p50) * monthlyQty,
+      series: [],
     });
   }
 
   leaks.sort((a, b) => b.deltaPct - a.deltaPct || b.monthExcessIls - a.monthExcessIls);
-  return leaks.slice(0, limit);
-}
+  const top = leaks.slice(0, limit);
 
-/* unused-import guard */
-void desc;
-void gte;
+  // Attach a recent price series per leak (one batch query) for sparklines.
+  if (top.length > 0) {
+    const seriesSince = new Date(Date.now() - windowDays * DAY_MS);
+    const points = await db
+      .select({
+        productId: priceHistory.productId,
+        supplierId: priceHistory.supplierId,
+        unitPrice: priceHistory.unitPrice,
+      })
+      .from(priceHistory)
+      .where(
+        and(
+          eq(priceHistory.restaurantId, restaurantId),
+          gte(priceHistory.observedAt, seriesSince),
+        ),
+      )
+      .orderBy(priceHistory.observedAt);
+
+    const byPair = new Map<string, number[]>();
+    for (const pt of points) {
+      const key = `${pt.productId}|${pt.supplierId}`;
+      const arr = byPair.get(key) ?? [];
+      arr.push(Number(pt.unitPrice));
+      byPair.set(key, arr);
+    }
+    for (const leak of top) {
+      leak.series = (byPair.get(`${leak.productId}|${leak.supplierId}`) ?? []).slice(-12);
+    }
+  }
+
+  return top;
+}
