@@ -1,4 +1,5 @@
 import type { Tolerances } from '@restomatch/types';
+import { DEFAULT_TOLERANCES } from './tolerances';
 
 export type ReconciliationLineStatus =
   | 'matched'
@@ -54,14 +55,6 @@ export interface ReconciliationResult {
   lines: ReconciliationLine[];
   summary: ReconciliationSummary;
 }
-
-const DEFAULT_TOLERANCES: Required<Tolerances> = {
-  pricePercent: 0.02,
-  priceAbsolute: 5,
-  qtyPercent: 0.03,
-  qtyAbsolute: 1,
-  blockPricePercent: 0.1,
-};
 
 /**
  * Reconcile an invoice (parsed by OCR) against one or more PO line sets,

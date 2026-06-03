@@ -125,6 +125,7 @@ export interface RestaurantSettings {
     priceAbsolute?: number;
     qtyPercent?: number;
     qtyAbsolute?: number;
+    blockPricePercent?: number;
   };
   baselineWindowDays?: number;
   /** Confidence below which OCR results are flagged for human review (0-1). */

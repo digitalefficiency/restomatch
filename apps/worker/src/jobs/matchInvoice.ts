@@ -5,8 +5,16 @@ import {
   MockWhatsAppNotifier,
   type ApprovalContext,
 } from '@restomatch/api';
-import { createDb, discrepancies, eq, invoices, matchRuns, type UserRole } from '@restomatch/db';
-import { runMatch, type MatchInput, type MatchOutput } from '@restomatch/matching';
+import {
+  createDb,
+  discrepancies,
+  eq,
+  invoices,
+  matchRuns,
+  restaurants,
+  type UserRole,
+} from '@restomatch/db';
+import { resolveTolerances, runMatch, type MatchInput, type MatchOutput } from '@restomatch/matching';
 import { makeWorker } from '../queue';
 
 export interface MatchInvoiceJob {
@@ -24,7 +32,18 @@ export function startMatchInvoiceWorker() {
     if (!url) throw new Error('DATABASE_URL is required');
     const db = createDb(url);
 
-    const result = runMatch(job.data.input);
+    // Per-restaurant tolerances (settings.tolerances) are authoritative here —
+    // this is what makes the multi-tenant config live instead of dead code.
+    const [restaurant] = await db
+      .select({ settings: restaurants.settings })
+      .from(restaurants)
+      .where(eq(restaurants.id, job.data.restaurantId))
+      .limit(1);
+    const input: MatchInput = {
+      ...job.data.input,
+      tolerances: resolveTolerances(restaurant?.settings?.tolerances),
+    };
+    const result = runMatch(input);
 
     // Persist match_run
     const [matchRun] = await db
@@ -39,7 +58,7 @@ export function startMatchInvoiceWorker() {
     if (!matchRun) throw new Error('failed to insert match_run');
 
     // Evaluate + persist each discrepancy with required_role
-    const totalInvoiceAmount = job.data.input.invoice.totalInclVat;
+    const totalInvoiceAmount = input.invoice.totalInclVat;
     const persistedIds: string[] = [];
     const roleNeedsNotification = new Set<UserRole>();
 
@@ -53,7 +72,7 @@ export function startMatchInvoiceWorker() {
         matchRun: {
           totalDiscrepancyAmount: result.totalDiscrepancyAmount,
           totalInvoiceAmount,
-          poExists: job.data.input.poLines.length > 0,
+          poExists: input.poLines.length > 0,
         },
       };
       const decision = evaluateApproval(ctx, DEFAULT_RULES);

@@ -94,6 +94,7 @@ export interface MatchOutput {
 }
 
 export { runMatch } from './engine';
+export { DEFAULT_TOLERANCES, resolveTolerances } from './tolerances';
 export {
   reconcileInvoiceToPo,
   type ReconciliationLine,
