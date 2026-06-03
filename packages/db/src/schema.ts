@@ -541,6 +541,9 @@ export const discrepancies = pgTable(
     deltaAmount: numeric('delta_amount', { precision: 12, scale: 2 }),
     toleranceUsed: text('tolerance_used'),
     requiresRole: userRole('requires_role'),
+    /** Approval rule that routed this discrepancy (decision audit / explainability). */
+    ruleId: text('rule_id'),
+    ruleName: text('rule_name'),
     resolutionStatus: resolutionStatus('resolution_status').notNull().default('open'),
     resolvedBy: uuid('resolved_by').references(() => users.id, { onDelete: 'set null' }),
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),

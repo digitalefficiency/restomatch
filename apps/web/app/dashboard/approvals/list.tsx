@@ -41,6 +41,8 @@ export function ApprovalsList({ initial }: { initial: QueueItem[] }) {
             </div>
           </header>
 
+          <WhyFlagged d={d} />
+
           {activeReject === d.id ? (
             <div className="space-y-2">
               <Textarea
@@ -104,6 +106,26 @@ export function ApprovalsList({ initial }: { initial: QueueItem[] }) {
           )}
         </Card>
       ))}
+    </div>
+  );
+}
+
+/** "Why was this flagged?" — surfaces the decision record (expected vs actual,
+ *  the tolerance breached, and the approval rule that routed it). */
+function WhyFlagged({ d }: { d: QueueItem }) {
+  const hasValues = d.expectedValue != null && d.actualValue != null;
+  if (!hasValues && !d.toleranceUsed && !d.ruleName) return null;
+  return (
+    <div className="mb-3 rounded-xl bg-stone-50 px-3 py-2 text-xs text-stone-600">
+      <div className="mb-1 font-semibold text-stone-700">למה סומן?</div>
+      {hasValues ? (
+        <div>
+          צפוי <span className="font-medium tabular-nums">{d.expectedValue}</span> · בפועל{' '}
+          <span className="font-medium tabular-nums">{d.actualValue}</span>
+        </div>
+      ) : null}
+      {d.toleranceUsed ? <div>סף: {d.toleranceUsed}</div> : null}
+      {d.ruleName ? <div>ניתוב: {d.ruleName}</div> : null}
     </div>
   );
 }

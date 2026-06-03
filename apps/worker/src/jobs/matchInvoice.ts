@@ -33,6 +33,20 @@ export function startMatchInvoiceWorker() {
     if (!url) throw new Error('DATABASE_URL is required');
     const db = createDb(url);
 
+    // Idempotency: if this invoice was already matched, skip — avoids duplicate
+    // match_runs / discrepancies when a job is retried.
+    const existingRun = await db
+      .select({ id: matchRuns.id })
+      .from(matchRuns)
+      .where(eq(matchRuns.invoiceId, job.data.invoiceId))
+      .limit(1);
+    if (existingRun.length > 0) {
+      console.log(
+        `[match-invoice] invoice=${job.data.invoiceId} already matched — skipping (idempotent)`,
+      );
+      return { status: 'clean', totalDiscrepancyAmount: 0, discrepancies: [] };
+    }
+
     // Per-restaurant tolerances (settings.tolerances) are authoritative here —
     // this is what makes the multi-tenant config live instead of dead code.
     const [restaurant] = await db
@@ -99,6 +113,8 @@ export function startMatchInvoiceWorker() {
           deltaAmount: d.deltaAmount.toString(),
           toleranceUsed: d.toleranceUsed,
           requiresRole: decision.requiredRole,
+          ruleId: decision.ruleId,
+          ruleName: decision.ruleName,
           resolutionStatus: initialStatus,
         })
         .returning({ id: discrepancies.id });

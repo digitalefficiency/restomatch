@@ -46,6 +46,10 @@ export const approvalsRouter = router({
           resolutionStatus: discrepancies.resolutionStatus,
           requiredRole: discrepancies.requiresRole,
           deltaAmount: discrepancies.deltaAmount,
+          expectedValue: discrepancies.expectedValue,
+          actualValue: discrepancies.actualValue,
+          toleranceUsed: discrepancies.toleranceUsed,
+          ruleName: discrepancies.ruleName,
           message: discrepancies.resolutionNote, // reuse field for now
           createdAt: discrepancies.createdAt,
           matchRunId: discrepancies.matchRunId,
