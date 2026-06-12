@@ -1,6 +1,5 @@
-import { eq } from 'drizzle-orm';
 import { TRPCError } from '@trpc/server';
-import { memberships, restaurants, users } from '@restomatch/db';
+import { eq, memberships, restaurants, users } from '@restomatch/db';
 import { z } from 'zod';
 import { authedProcedure, router } from '../trpc';
 

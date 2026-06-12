@@ -6,15 +6,27 @@ import {
   type MatcherThresholds,
 } from './types';
 
+/**
+ * pgvector literals are built by string interpolation; reject anything that is
+ * not a plain finite number so no other token can ever reach the SQL string.
+ */
+function toVectorLiteral(embedding: number[]): string {
+  if (!embedding.every(Number.isFinite)) {
+    throw new Error('embedding contains non-finite values');
+  }
+  return `[${embedding.join(',')}]`;
+}
+
 /* ──────────────────────────────────────────────────────────────────────────
  * Strategy 1: alias exact lookup
  *
- * Matches on (supplier_id, supplier_name_raw) — case insensitive.
- * Confidence = 1.0 for exact matches.
+ * Restaurant-scoped (through products), then (supplier_id, supplier_name_raw)
+ * — case insensitive. Confidence = 1.0 for exact matches.
  * ────────────────────────────────────────────────────────────────────────── */
 
 export async function matchByAlias(
   db: Database,
+  restaurantId: string,
   supplierId: string | null,
   rawName: string,
 ): Promise<MatchCandidate | null> {
@@ -25,6 +37,8 @@ export async function matchByAlias(
     ? eq(productAliases.supplierId, supplierId)
     : isNull(productAliases.supplierId);
 
+  // product_aliases has no restaurant_id — tenant scope goes through products,
+  // otherwise a null-supplier alias from another restaurant can match at 1.0.
   const rows = await db
     .select({
       productId: products.id,
@@ -33,7 +47,10 @@ export async function matchByAlias(
       supplierNameRaw: productAliases.supplierNameRaw,
     })
     .from(productAliases)
-    .innerJoin(products, eq(products.id, productAliases.productId))
+    .innerJoin(
+      products,
+      and(eq(products.id, productAliases.productId), eq(products.restaurantId, restaurantId)),
+    )
     .where(and(supplierFilter, sql`lower(${productAliases.supplierNameRaw}) = ${normalized}`))
     .limit(1);
 
@@ -97,7 +114,7 @@ export async function matchByEmbedding(
 
   // pgvector cosine distance = 1 - cosine similarity
   // Use <=> operator (cosine distance) and convert
-  const vectorLiteral = `[${embedding.join(',')}]`;
+  const vectorLiteral = toVectorLiteral(embedding);
 
   const rows = await db
     .select({
@@ -180,7 +197,12 @@ export async function matchProduct(
   thresholds: MatcherThresholds = DEFAULT_THRESHOLDS,
 ): Promise<MatchCandidate | null> {
   // 1. Alias
-  const aliasMatch = await matchByAlias(db, input.supplierId ?? null, input.rawDescription);
+  const aliasMatch = await matchByAlias(
+    db,
+    input.restaurantId,
+    input.supplierId ?? null,
+    input.rawDescription,
+  );
   if (aliasMatch) return aliasMatch;
 
   // 2. Barcode
@@ -227,7 +249,12 @@ export async function matchProductTopN(
   thresholds: MatcherThresholds = DEFAULT_THRESHOLDS,
 ): Promise<MatchCandidate[]> {
   // Exact matches short-circuit (these are always rank-1)
-  const aliasMatch = await matchByAlias(db, input.supplierId ?? null, input.rawDescription);
+  const aliasMatch = await matchByAlias(
+    db,
+    input.restaurantId,
+    input.supplierId ?? null,
+    input.rawDescription,
+  );
   if (aliasMatch) return [aliasMatch];
 
   if (input.barcode) {
@@ -270,7 +297,7 @@ async function topNByEmbedding(
   threshold: number,
 ): Promise<MatchCandidate[]> {
   if (embedding.length === 0) return [];
-  const vectorLiteral = `[${embedding.join(',')}]`;
+  const vectorLiteral = toVectorLiteral(embedding);
   const rows = await db
     .select({
       productId: products.id,

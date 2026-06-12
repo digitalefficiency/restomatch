@@ -177,11 +177,16 @@ async function syncOrders(
       continue;
     }
 
+    // restaurantId in the lookup is load-bearing: external ids are only unique
+    // per platform account, so two restaurants syncing the same platform can
+    // collide on (sourcePlatform, sourceRef) — without this filter one
+    // restaurant's sync overwrites the other's PO and replaces its lines.
     const existing = await db
       .select({ id: purchaseOrders.id })
       .from(purchaseOrders)
       .where(
         and(
+          eq(purchaseOrders.restaurantId, restaurantId),
           eq(purchaseOrders.sourcePlatform, order.platform === 'email' || order.platform === 'manual' ? 'restomatch' : (order.platform as PlatformId)),
           eq(purchaseOrders.sourceRef, order.externalId),
         ),

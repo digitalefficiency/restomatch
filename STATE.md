@@ -1,10 +1,10 @@
 # RestoMatch — Build State
 
-**Active milestone:** M8 (complete, awaiting approval to start M9)
-**Last completed task:** Approvals engine + 7 rules + outbox + WhatsApp/Push mocks + approvals UI on web+mobile
-**Next planned task:** Milestone 9 — Polish + Pilot Prep (cron, offline, exports, Sentry, real OCR providers, deploy)
+**Active milestone:** Production master plan (see ~/.claude/plans/lovely-scribbling-pony.md) — Phase 1 security sprint, Session 1 COMPLETE
+**Last completed task:** Tenant-isolation sweep: fixed markGrLine cross-tenant IDOR + registerInvoice unverified supplierId/grId; scoped worker jobs (matchInvoice/ocrInvoice/syncPlatforms) + catalog matchByAlias; added tenant.ts guards + 21-test cross-tenant attack suite (mutation-verified)
+**Next planned task:** Phase 1 Session 2 — wire withRestaurant GUC into tRPC context, apply RLS migrations in test harness under non-owner role, RLS raw-select test
 **Open blockers:** none
-**Tests at end of session:** 205 passing (48 matching + 29 catalog + 24 ocr + 17 procurement + 17 charts + 66 api + 2 db + 2 E2E)
+**Tests at end of session:** 262 passing (69 matching + 29 catalog + 24 ocr + 17 procurement + 18 charts + 100 api + 5 db) + 2 E2E
 
 ## Quick start for next session
 
@@ -48,3 +48,8 @@ DATABASE_URL_TEST="postgres://romkoren@localhost:5432/restomatch_test" pnpm test
 - **Notifications dispatched per unique role per match_run**, not per discrepancy — summary message.
 - **Info-level discrepancies auto-resolved at insertion** (resolution_status='accepted') — never enter the queue.
 - **Real WhatsApp/Push/Email providers deferred to M9** — mocks write to `notifications_outbox` and mark sent immediately. Real impl swaps the constructor.
+- **Tenant guards (`packages/api/src/tenant.ts`)** — every procedure taking a client-supplied entity id MUST verify ownership (assertGrOwned/assertSupplierOwned/...). Child tables (gr_lines, po_lines, invoice_lines) have no restaurant_id — scope through the parent join.
+- **Cross-tenant attack suite** (`packages/api/src/__tests__/cross-tenant.attack.test.ts`) — its COVERAGE manifest must list every tRPC procedure (attack/isolation/justified exemption); adding a procedure without declaring coverage fails the suite.
+- **Worker job payloads are not a trust boundary** — jobs verify entity ∈ payload.restaurantId before any write (matchInvoice, ocrInvoice); ocrInvoice derives supplierId from the verified invoice row, not the payload.
+- **syncPlatforms PO lookup is restaurant-scoped** — TODO Phase 2 migration: composite unique index on (restaurant_id, source_platform, source_ref).
+- **pgvector literals** go through `toVectorLiteral()` in catalog/matcher.ts (rejects non-finite values).

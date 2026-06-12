@@ -1,5 +1,5 @@
 import { matchProductTopN, MockEmbeddingProvider } from '@restomatch/catalog';
-import { createDb, eq, invoiceLines, invoices, restaurants } from '@restomatch/db';
+import { and, createDb, eq, invoiceLines, invoices, restaurants } from '@restomatch/db';
 import {
   runOcrPipeline,
   StubOcrProvider,
@@ -38,6 +38,22 @@ export function startOcrInvoiceWorker() {
     if (!url) throw new Error('DATABASE_URL is required');
     const db = createDb(url);
 
+    // Tenant guard: job payloads are not a trust boundary — verify the invoice
+    // belongs to the payload's restaurant, and take supplierId from the verified
+    // row rather than the payload.
+    const [invoice] = await db
+      .select({ id: invoices.id, supplierId: invoices.supplierId })
+      .from(invoices)
+      .where(
+        and(eq(invoices.id, job.data.invoiceId), eq(invoices.restaurantId, job.data.restaurantId)),
+      )
+      .limit(1);
+    if (!invoice) {
+      throw new Error(
+        `[ocr-invoice] invoice=${job.data.invoiceId} not found in restaurant=${job.data.restaurantId} — refusing to process`,
+      );
+    }
+
     const providers = buildProviders(job.data);
 
     const matcher: CatalogMatcherFn = async (line) => {
@@ -46,7 +62,7 @@ export function startOcrInvoiceWorker() {
         db,
         {
           restaurantId: job.data.restaurantId,
-          supplierId: job.data.supplierId,
+          supplierId: invoice.supplierId,
           rawDescription: line.rawDescription,
           embedding,
         },
@@ -92,7 +108,9 @@ export function startOcrInvoiceWorker() {
         ocrConfidence: result.confidence.toString(),
         status: result.needsHumanReview ? 'parsed' : 'matched',
       })
-      .where(eq(invoices.id, job.data.invoiceId));
+      .where(
+        and(eq(invoices.id, job.data.invoiceId), eq(invoices.restaurantId, job.data.restaurantId)),
+      );
 
     await db.delete(invoiceLines).where(eq(invoiceLines.invoiceId, job.data.invoiceId));
     if (r.lines.length > 0) {

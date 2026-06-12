@@ -146,7 +146,7 @@ describe('matchByAlias', () => {
       supplierNameRaw: 'עגבניה שרי קילו',
       confidence: '1.000',
     });
-    const match = await matchByAlias(db, supplierId, 'עגבניה שרי קילו');
+    const match = await matchByAlias(db, restaurantId, supplierId,'עגבניה שרי קילו');
     expect(match).toMatchObject({
       productId: tomato.id,
       canonicalName: 'עגבניה שרי',
@@ -163,13 +163,13 @@ describe('matchByAlias', () => {
       supplierNameRaw: 'Cherry Tomato',
       confidence: '1.000',
     });
-    const match = await matchByAlias(db, supplierId, 'CHERRY TOMATO');
+    const match = await matchByAlias(db, restaurantId, supplierId,'CHERRY TOMATO');
     expect(match?.productId).toBe(tomato.id);
   });
 
   it('returns null when no alias exists', async () => {
     await seedRestaurantWithProducts();
-    const match = await matchByAlias(db, supplierId, 'unknown product xyz');
+    const match = await matchByAlias(db, restaurantId, supplierId,'unknown product xyz');
     expect(match).toBeNull();
   });
 
@@ -181,7 +181,7 @@ describe('matchByAlias', () => {
       supplierNameRaw: 'עגבניה שרי',
       confidence: '1.000',
     });
-    const match = await matchByAlias(db, altSupplierId, 'עגבניה שרי');
+    const match = await matchByAlias(db, restaurantId, altSupplierId,'עגבניה שרי');
     expect(match).toBeNull();
   });
 
@@ -193,7 +193,7 @@ describe('matchByAlias', () => {
       supplierNameRaw: 'universal tomato',
       confidence: '0.900',
     });
-    const match = await matchByAlias(db, null, 'universal tomato');
+    const match = await matchByAlias(db, restaurantId, null,'universal tomato');
     expect(match?.productId).toBe(tomato.id);
   });
 
@@ -205,7 +205,7 @@ describe('matchByAlias', () => {
       supplierNameRaw: 'עגבניה שרי',
       confidence: '1.000',
     });
-    const match = await matchByAlias(db, supplierId, '  עגבניה שרי  ');
+    const match = await matchByAlias(db, restaurantId, supplierId,'  עגבניה שרי  ');
     expect(match?.productId).toBe(tomato.id);
   });
 });
@@ -448,7 +448,7 @@ describe('recordConfirmedMatch (learning loop)', () => {
     expect(result.aliasId).toBeTruthy();
 
     // Now subsequent matchByAlias should find it
-    const match = await matchByAlias(db, supplierId, 'cherry tomatoes 1kg');
+    const match = await matchByAlias(db, restaurantId, supplierId,'cherry tomatoes 1kg');
     expect(match?.productId).toBe(tomato.id);
   });
 

@@ -8,6 +8,7 @@ import {
   type ApprovalContext,
 } from '@restomatch/api';
 import {
+  and,
   createDb,
   discrepancies,
   eq,
@@ -34,12 +35,32 @@ export function startMatchInvoiceWorker() {
     if (!url) throw new Error('DATABASE_URL is required');
     const db = createDb(url);
 
+    // Tenant guard: job payloads are not a trust boundary — verify the invoice
+    // actually belongs to the payload's restaurant before any write.
+    const [invoice] = await db
+      .select({ id: invoices.id })
+      .from(invoices)
+      .where(
+        and(eq(invoices.id, job.data.invoiceId), eq(invoices.restaurantId, job.data.restaurantId)),
+      )
+      .limit(1);
+    if (!invoice) {
+      throw new Error(
+        `[match-invoice] invoice=${job.data.invoiceId} not found in restaurant=${job.data.restaurantId} — refusing to match`,
+      );
+    }
+
     // Idempotency: if this invoice was already matched, skip — avoids duplicate
     // match_runs / discrepancies when a job is retried.
     const existingRun = await db
       .select({ id: matchRuns.id })
       .from(matchRuns)
-      .where(eq(matchRuns.invoiceId, job.data.invoiceId))
+      .where(
+        and(
+          eq(matchRuns.invoiceId, job.data.invoiceId),
+          eq(matchRuns.restaurantId, job.data.restaurantId),
+        ),
+      )
       .limit(1);
     if (existingRun.length > 0) {
       console.log(
@@ -132,7 +153,9 @@ export function startMatchInvoiceWorker() {
     await db
       .update(invoices)
       .set({ status: finalInvoiceStatus })
-      .where(eq(invoices.id, job.data.invoiceId));
+      .where(
+        and(eq(invoices.id, job.data.invoiceId), eq(invoices.restaurantId, job.data.restaurantId)),
+      );
 
     // Fire mocked notifications to each role needing attention
     if (roleNeedsNotification.size > 0) {

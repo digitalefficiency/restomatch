@@ -32,3 +32,4 @@ coverage
 web-build
 
 drizzle/meta
+.gstack/

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TRPCError } from '@trpc/server';
 import {
   and,
   asc,
@@ -15,6 +16,7 @@ import {
   purchaseOrders,
   suppliers,
 } from '@restomatch/db';
+import { assertGrOwned, assertSupplierOwned } from '../tenant';
 import { memberProcedure, receiverProcedure, router } from '../trpc';
 
 const TodayExpectationSchema = z.object({
@@ -53,7 +55,13 @@ export const receivingRouter = router({
         receiptStatus: goodsReceipts.status,
       })
       .from(purchaseOrders)
-      .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
+      .innerJoin(
+        suppliers,
+        and(
+          eq(suppliers.id, purchaseOrders.supplierId),
+          eq(suppliers.restaurantId, ctx.session.restaurantId),
+        ),
+      )
       .leftJoin(goodsReceipts, eq(goodsReceipts.poId, purchaseOrders.id))
       .where(
         and(
@@ -104,7 +112,13 @@ export const receivingRouter = router({
           totalEstimated: purchaseOrders.totalEstimated,
         })
         .from(purchaseOrders)
-        .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
+        .innerJoin(
+          suppliers,
+          and(
+            eq(suppliers.id, purchaseOrders.supplierId),
+            eq(suppliers.restaurantId, ctx.session.restaurantId),
+          ),
+        )
         .where(
           and(
             eq(purchaseOrders.id, input.poId),
@@ -112,7 +126,7 @@ export const receivingRouter = router({
           ),
         )
         .limit(1);
-      if (!po) throw new Error('PO not found');
+      if (!po) throw new TRPCError({ code: 'NOT_FOUND', message: 'PO not found' });
 
       const lines = await ctx.db
         .select()
@@ -154,7 +168,7 @@ export const receivingRouter = router({
           ),
         )
         .limit(1);
-      if (!po[0]) throw new Error('PO not found');
+      if (!po[0]) throw new TRPCError({ code: 'NOT_FOUND', message: 'PO not found' });
 
       const lines = await ctx.db.select().from(poLines).where(eq(poLines.poId, input.poId));
 
@@ -191,15 +205,17 @@ export const receivingRouter = router({
     .input(
       z.object({
         grLineId: z.string().uuid(),
-        qtyReceived: z.number().nonnegative(),
-        qtyRejected: z.number().nonnegative().default(0),
+        qtyReceived: z.number().nonnegative().max(999_999_999),
+        qtyRejected: z.number().nonnegative().max(999_999_999).default(0),
         rejectReason: z.string().max(500).optional(),
         conditionNotes: z.string().max(500).optional(),
         condition: ConditionEnum.optional(),
-        photos: z.array(z.string().url()).optional(),
+        photos: z.array(z.string().url().max(2048)).max(20).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      // gr_lines has no restaurant_id — tenant scope goes through the parent
+      // goods_receipt, inside the UPDATE itself so there is no TOCTOU window.
       const [updated] = await ctx.db
         .update(grLines)
         .set({
@@ -212,9 +228,20 @@ export const receivingRouter = router({
               : input.conditionNotes ?? null,
           photos: input.photos ?? [],
         })
-        .where(eq(grLines.id, input.grLineId))
+        .where(
+          and(
+            eq(grLines.id, input.grLineId),
+            inArray(
+              grLines.grId,
+              ctx.db
+                .select({ id: goodsReceipts.id })
+                .from(goodsReceipts)
+                .where(eq(goodsReceipts.restaurantId, ctx.session.restaurantId)),
+            ),
+          ),
+        )
         .returning();
-      if (!updated) throw new Error('GR line not found');
+      if (!updated) throw new TRPCError({ code: 'NOT_FOUND', message: 'GR line not found' });
       return updated;
     }),
 
@@ -223,8 +250,12 @@ export const receivingRouter = router({
    * exceeded its ordered qty; 'partial' otherwise.
    */
   submitReceipt: receiverProcedure
-    .input(z.object({ grId: z.string().uuid(), signatureUrl: z.string().url().optional() }))
+    .input(
+      z.object({ grId: z.string().uuid(), signatureUrl: z.string().url().max(2048).optional() }),
+    )
     .mutation(async ({ ctx, input }) => {
+      await assertGrOwned(ctx.db, input.grId, ctx.session.restaurantId);
+
       const rows = await ctx.db
         .select({
           poLineId: grLines.poLineId,
@@ -255,7 +286,7 @@ export const receivingRouter = router({
           ),
         )
         .returning();
-      if (!receipt) throw new Error('GR not found');
+      if (!receipt) throw new TRPCError({ code: 'NOT_FOUND', message: 'GR not found' });
       return receipt;
     }),
 
@@ -268,11 +299,14 @@ export const receivingRouter = router({
     .input(
       z.object({
         grId: z.string().uuid(),
-        imageUrl: z.string().url(),
+        imageUrl: z.string().url().max(2048),
         supplierId: z.string().uuid(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      await assertGrOwned(ctx.db, input.grId, ctx.session.restaurantId);
+      await assertSupplierOwned(ctx.db, input.supplierId, ctx.session.restaurantId);
+
       const [invoice] = await ctx.db
         .insert(invoices)
         .values({
@@ -303,7 +337,13 @@ export const receivingRouter = router({
         createdAt: invoices.createdAt,
       })
       .from(invoices)
-      .leftJoin(suppliers, eq(suppliers.id, invoices.supplierId))
+      .leftJoin(
+        suppliers,
+        and(
+          eq(suppliers.id, invoices.supplierId),
+          eq(suppliers.restaurantId, ctx.session.restaurantId),
+        ),
+      )
       .where(
         and(
           eq(invoices.restaurantId, ctx.session.restaurantId),

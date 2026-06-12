@@ -97,7 +97,10 @@ async function fetchInvoices(
       ocrConfidence: invoices.ocrConfidence,
     })
     .from(invoices)
-    .leftJoin(suppliers, eq(suppliers.id, invoices.supplierId))
+    .leftJoin(
+      suppliers,
+      and(eq(suppliers.id, invoices.supplierId), eq(suppliers.restaurantId, restaurantId)),
+    )
     .where(
       and(
         eq(invoices.restaurantId, restaurantId),
