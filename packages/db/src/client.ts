@@ -29,3 +29,21 @@ export async function withRestaurant<T>(
     return fn(tx as unknown as Database);
   });
 }
+
+/**
+ * Same idea for user-scoped (authed but not member) contexts: sets only
+ * `app.current_user_id`, which the `memberships_self` / `users_self` /
+ * `restaurants_member_select` RLS policies read. Used by procedures that run
+ * before a restaurant is selected (onboarding) and by the auth membership
+ * lookup once the web app moves to an RLS-enforced role.
+ */
+export async function withUser<T>(
+  db: Database,
+  userId: string,
+  fn: (tx: Database) => Promise<T>,
+): Promise<T> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select set_config('app.current_user_id', ${userId}, true)`);
+    return fn(tx as unknown as Database);
+  });
+}

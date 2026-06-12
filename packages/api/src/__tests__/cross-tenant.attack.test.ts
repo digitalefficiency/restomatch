@@ -1,28 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import {
-  activityEvents,
-  auditLog,
-  createDb,
-  discrepancies,
-  eq,
-  goodsReceipts,
-  grLines,
-  invoiceLines,
-  invoices,
-  matchRuns,
-  memberships,
-  poLines,
-  priceBaselines,
-  priceHistory,
-  productAliases,
-  products,
-  purchaseOrders,
-  restaurants,
-  suppliers,
-  users,
-} from '@restomatch/db';
+import { createDb, discrepancies, eq, goodsReceipts, grLines, invoices } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
+import { resetDb, seedTenant, type Tenant } from './fixtures';
 
 /**
  * CROSS-TENANT ATTACK SUITE
@@ -41,174 +21,8 @@ const TEST_DB_URL =
   process.env.DATABASE_URL_TEST ?? 'postgres://romkoren@localhost:5432/restomatch_test';
 const db = createDb(TEST_DB_URL);
 
-interface Tenant {
-  restaurantId: string;
-  ownerUserId: string;
-  supplierId: string;
-  supplierName: string;
-  poId: string;
-  poLineId: string;
-  grId: string;
-  grLineId: string;
-  invoiceId: string;
-  invoiceNumber: string;
-  matchRunId: string;
-  discrepancyId: string;
-}
-
 let A: Tenant;
 let B: Tenant;
-
-async function resetDb() {
-  await db.delete(activityEvents);
-  await db.delete(auditLog);
-  await db.delete(discrepancies);
-  await db.delete(matchRuns);
-  await db.delete(invoiceLines);
-  await db.delete(invoices);
-  await db.delete(grLines);
-  await db.delete(goodsReceipts);
-  await db.delete(priceBaselines);
-  await db.delete(priceHistory);
-  await db.delete(poLines);
-  await db.delete(purchaseOrders);
-  await db.delete(productAliases);
-  await db.delete(products);
-  await db.delete(suppliers);
-  await db.delete(memberships);
-  await db.delete(users);
-  await db.delete(restaurants);
-}
-
-async function seedTenant(tag: string): Promise<Tenant> {
-  const [restaurant] = await db.insert(restaurants).values({ name: `Resto ${tag}` }).returning();
-  if (!restaurant) throw new Error('seed: restaurant');
-
-  const [owner] = await db
-    .insert(users)
-    .values({ email: `owner-${tag}@attack.test`, name: `Owner ${tag}` })
-    .returning();
-  if (!owner) throw new Error('seed: user');
-  await db
-    .insert(memberships)
-    .values({ userId: owner.id, restaurantId: restaurant.id, role: 'owner' });
-
-  const supplierName = `ספק ${tag}`;
-  const [supplier] = await db
-    .insert(suppliers)
-    .values({ restaurantId: restaurant.id, name: supplierName, businessId: `51234567${tag === 'A' ? '1' : '2'}` })
-    .returning();
-  if (!supplier) throw new Error('seed: supplier');
-
-  const today = new Date();
-  today.setHours(11, 0, 0, 0);
-  const [po] = await db
-    .insert(purchaseOrders)
-    .values({
-      restaurantId: restaurant.id,
-      supplierId: supplier.id,
-      expectedDeliveryAt: today,
-      status: 'sent',
-      source: 'manual',
-    })
-    .returning();
-  if (!po) throw new Error('seed: po');
-
-  const [poLine] = await db
-    .insert(poLines)
-    .values({ poId: po.id, rawDescription: `עגבניות ${tag}`, qtyOrdered: '10', unit: 'kg', unitPriceExpected: '8.5' })
-    .returning();
-  if (!poLine) throw new Error('seed: poLine');
-
-  const [gr] = await db
-    .insert(goodsReceipts)
-    .values({ restaurantId: restaurant.id, poId: po.id, receivedBy: owner.id, status: 'pending' })
-    .returning();
-  if (!gr) throw new Error('seed: gr');
-
-  const [grLine] = await db
-    .insert(grLines)
-    .values({ grId: gr.id, poLineId: poLine.id, qtyReceived: '5', qtyRejected: '0' })
-    .returning();
-  if (!grLine) throw new Error('seed: grLine');
-
-  const invoiceNumber = `INV-${tag}-1`;
-  const [invoice] = await db
-    .insert(invoices)
-    .values({
-      restaurantId: restaurant.id,
-      supplierId: supplier.id,
-      invoiceNumber,
-      invoiceDate: today,
-      totalExclVat: '100.00',
-      vatAmount: '17.00',
-      totalInclVat: '117.00',
-      status: 'matched',
-      source: 'photo',
-      createdBy: owner.id,
-    })
-    .returning();
-  if (!invoice) throw new Error('seed: invoice');
-
-  const [matchRun] = await db
-    .insert(matchRuns)
-    .values({
-      restaurantId: restaurant.id,
-      poId: po.id,
-      grId: gr.id,
-      invoiceId: invoice.id,
-      overallStatus: 'major',
-      totalDiscrepancyAmount: '100.00',
-    })
-    .returning();
-  if (!matchRun) throw new Error('seed: matchRun');
-
-  const [discrepancy] = await db
-    .insert(discrepancies)
-    .values({
-      matchRunId: matchRun.id,
-      restaurantId: restaurant.id,
-      type: 'PRICE_HIGHER',
-      severity: 'warn',
-      deltaAmount: '100.00',
-      requiresRole: 'manager',
-      resolutionStatus: 'open',
-    })
-    .returning();
-  if (!discrepancy) throw new Error('seed: discrepancy');
-
-  await db.insert(auditLog).values({
-    restaurantId: restaurant.id,
-    userId: owner.id,
-    action: 'discrepancy.created',
-    entityType: 'discrepancy',
-    entityId: discrepancy.id,
-    after: { tag },
-  });
-
-  await db.insert(activityEvents).values({
-    restaurantId: restaurant.id,
-    eventType: 'invoice_matched',
-    title: `אירוע סודי של ${tag}`,
-    entityType: 'match_run',
-    entityId: matchRun.id,
-  });
-
-  return {
-    restaurantId: restaurant.id,
-    ownerUserId: owner.id,
-    supplierId: supplier.id,
-    supplierName,
-    poId: po.id,
-    poLineId: poLine.id,
-    grId: gr.id,
-    grLineId: grLine.id,
-    invoiceId: invoice.id,
-    invoiceNumber,
-    matchRunId: matchRun.id,
-    discrepancyId: discrepancy.id,
-  };
-}
 
 function callerFor(tenant: Tenant) {
   const session: Session = {
@@ -221,13 +35,13 @@ function callerFor(tenant: Tenant) {
 }
 
 beforeAll(async () => {
-  await resetDb();
-  A = await seedTenant('A');
-  B = await seedTenant('B');
+  await resetDb(db);
+  A = await seedTenant(db, 'A');
+  B = await seedTenant(db, 'B');
 });
 
 afterAll(async () => {
-  await resetDb();
+  await resetDb(db);
 });
 
 /* ──────────────────────────────────────────────────────────────────────────

@@ -1,10 +1,10 @@
 # RestoMatch — Build State
 
-**Active milestone:** Production master plan (see ~/.claude/plans/lovely-scribbling-pony.md) — Phase 1 security sprint, Session 1 COMPLETE
-**Last completed task:** Tenant-isolation sweep: fixed markGrLine cross-tenant IDOR + registerInvoice unverified supplierId/grId; scoped worker jobs (matchInvoice/ocrInvoice/syncPlatforms) + catalog matchByAlias; added tenant.ts guards + 21-test cross-tenant attack suite (mutation-verified)
-**Next planned task:** Phase 1 Session 2 — wire withRestaurant GUC into tRPC context, apply RLS migrations in test harness under non-owner role, RLS raw-select test
+**Active milestone:** Production master plan (see ~/.claude/plans/lovely-scribbling-pony.md) — Phase 1 security sprint, Sessions 1+2 COMPLETE
+**Last completed task:** RLS layer end-to-end: GUC wiring in tRPC (member + user-scoped tx wrappers with rollback-on-error), completed 0002 policies (children via parent-join, users_self, restaurants_member_select, completeness invariant), non-owner test role + 32-test RLS attack suite, identity-table privilege separation. Adversarially reviewed by a 27-agent workflow; all confirmed findings fixed or scheduled.
+**Next planned task:** Phase 1 Session 3 — private invoice-scans bucket + signed URLs + session check on /scans/[invoiceId] (review found it serves any tenant's documents unauthenticated — HIGH); rate limiting on magic links; JWT membershipCheckedAt re-validation; auth.ts membership lookups via withUser
 **Open blockers:** none
-**Tests at end of session:** 262 passing (69 matching + 29 catalog + 24 ocr + 17 procurement + 18 charts + 100 api + 5 db) + 2 E2E
+**Tests at end of session:** 294 passing (69 matching + 29 catalog + 24 ocr + 17 procurement + 18 charts + 132 api + 5 db) + 2 E2E
 
 ## Quick start for next session
 
@@ -53,3 +53,8 @@ DATABASE_URL_TEST="postgres://romkoren@localhost:5432/restomatch_test" pnpm test
 - **Worker job payloads are not a trust boundary** — jobs verify entity ∈ payload.restaurantId before any write (matchInvoice, ocrInvoice); ocrInvoice derives supplierId from the verified invoice row, not the payload.
 - **syncPlatforms PO lookup is restaurant-scoped** — TODO Phase 2 migration: composite unique index on (restaurant_id, source_platform, source_ref).
 - **pgvector literals** go through `toVectorLiteral()` in catalog/matcher.ts (rejects non-finite values).
+- **RLS GUC wiring:** memberProcedure runs in a `withRestaurant` tx (sets `app.current_restaurant_id` + `app.current_user_id`, rolls back on procedure error); onboarding uses `userScopedProcedure` (`withUser`, user GUC only). `createRestaurant` generates the restaurant uuid in code and sets the GUC before inserting — no GUC ⇒ no inserts anywhere.
+- **RLS harness:** `rls.attack.test.ts` applies `drizzle/rls/0002` to the test DB and probes via non-owner `restomatch_app` role (helpers in `packages/db/src/rls.ts`). The raw-SQL probes are the RLS proof; the tRPC block is functional regression. 0002 ends with a completeness invariant: any table with restaurant_id but RLS disabled fails the apply.
+- **Identity tables (users/accounts/sessions/...)** are a separate trust zone: app role has only RLS-scoped self-SELECT on users; Auth.js runs on the owner/service connection.
+- **Phase-2 deploy requirement (from adversarial review, HIGH):** web app must get a dedicated non-owner DATABASE_URL_APP on Supabase (mirror ensureRlsAppRole grants) + startup assertion `rolbypassrls=false`; owner/service URL stays for worker + migrations only. Until then RLS is inert in production.
+- **Session 3 inputs (from adversarial review):** /scans/[invoiceId] serves any tenant's documents unauthenticated (public bucket + anon key) — fix with session check + signed URLs + backfill invoice_scans.restaurantId; auth.ts membership lookups should use `withUser`; JWT pins role/restaurant until expiry.

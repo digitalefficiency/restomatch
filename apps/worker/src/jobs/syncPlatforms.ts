@@ -37,14 +37,20 @@ export function startSyncPlatformsWorker() {
       )
       .limit(1);
     const connection = connectionRows[0];
-    if (!connection && !job.data.credentialsOverride) {
+    // credentialsOverride is a dev/test escape hatch only — in production a
+    // sync may run solely for restaurants with a real procurement_connection,
+    // otherwise a forged job payload could pull a foreign platform account
+    // into this restaurant's data.
+    const allowOverride =
+      process.env.NODE_ENV !== 'production' && job.data.credentialsOverride !== undefined;
+    if (!connection && !allowOverride) {
       throw new Error(
         `No procurement_connection for restaurant ${job.data.restaurantId} platform ${job.data.platform}`,
       );
     }
 
     const credentials =
-      job.data.credentialsOverride ??
+      (allowOverride ? job.data.credentialsOverride : undefined) ??
       (connection ? loadCredentials(connection.credentialsVaultRef) : {});
     const adapter = getAdapter(job.data.platform);
 

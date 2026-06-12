@@ -1,10 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import { TRPCError } from '@trpc/server';
-import { eq, memberships, restaurants, users } from '@restomatch/db';
+import { eq, memberships, restaurants, sql, users } from '@restomatch/db';
 import { z } from 'zod';
-import { authedProcedure, router } from '../trpc';
+import { router, userScopedProcedure } from '../trpc';
 
 export const onboardingRouter = router({
-  myMemberships: authedProcedure.query(async ({ ctx }) => {
+  myMemberships: userScopedProcedure.query(async ({ ctx }) => {
     const rows = await ctx.db
       .select({
         restaurantId: memberships.restaurantId,
@@ -17,7 +18,7 @@ export const onboardingRouter = router({
     return rows;
   }),
 
-  createRestaurant: authedProcedure
+  createRestaurant: userScopedProcedure
     .input(
       z.object({
         name: z.string().min(2).max(120),
@@ -47,9 +48,17 @@ export const onboardingRouter = router({
       }
 
       return ctx.db.transaction(async (tx) => {
+        // Generate the tenant id up front and set the RLS GUC to it, so the
+        // insert satisfies restaurants_tenant and RETURNING can see the row.
+        // Without a GUC the policies allow no inserts at all.
+        const restaurantId = randomUUID();
+        await tx.execute(
+          sql`select set_config('app.current_restaurant_id', ${restaurantId}, true)`,
+        );
         const [restaurant] = await tx
           .insert(restaurants)
           .values({
+            id: restaurantId,
             name: input.name,
             businessId: input.businessId,
           })

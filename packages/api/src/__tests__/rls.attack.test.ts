@@ -1,0 +1,316 @@
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+  activityEvents,
+  applyCoreTenantRls,
+  auditLog,
+  createDb,
+  discrepancies,
+  ensureRlsAppRole,
+  eq,
+  goodsReceipts,
+  grLines,
+  invoiceLines,
+  invoiceScans,
+  invoices,
+  matchRuns,
+  memberships,
+  poLines,
+  productAliases,
+  products,
+  purchaseOrders,
+  restaurants,
+  sessions,
+  sql,
+  suppliers,
+  users,
+  withRestaurant,
+  withUser,
+  type Database,
+} from '@restomatch/db';
+import { appRouter } from '../index';
+import type { AppContext, Session } from '../context';
+import { resetDb, seedTenant, type Tenant } from './fixtures';
+
+/**
+ * RLS ATTACK SUITE — the database-level backstop.
+ *
+ * The cross-tenant suite proves the APP layer rejects foreign ids; this suite
+ * proves the DATABASE rejects them even if the app layer is bypassed entirely
+ * (raw SQL through a compromised code path). It applies the policies from
+ * drizzle/rls/0002 and connects as `restomatch_app` — a non-owner role that
+ * cannot bypass RLS — exactly like the production app role on Supabase.
+ *
+ * Owner-role connections (the rest of the test suite, the worker) bypass RLS
+ * by design; this file is where the policies themselves are exercised.
+ */
+
+const TEST_DB_URL =
+  process.env.DATABASE_URL_TEST ?? 'postgres://romkoren@localhost:5432/restomatch_test';
+const ownerDb = createDb(TEST_DB_URL);
+
+let appDb: Database;
+let A: Tenant;
+let B: Tenant;
+
+function callerFor(tenant: Tenant, db: Database) {
+  const session: Session = {
+    userId: tenant.ownerUserId,
+    restaurantId: tenant.restaurantId,
+    role: 'owner',
+  };
+  const ctx: AppContext = { db, session };
+  return appRouter.createCaller(ctx);
+}
+
+beforeAll(async () => {
+  await applyCoreTenantRls(TEST_DB_URL);
+  const appUrl = await ensureRlsAppRole(TEST_DB_URL);
+  appDb = createDb(appUrl);
+  await resetDb(ownerDb);
+  A = await seedTenant(ownerDb, 'A');
+  B = await seedTenant(ownerDb, 'B');
+});
+
+afterAll(async () => {
+  await resetDb(ownerDb);
+});
+
+describe('harness sanity', () => {
+  it('the app role genuinely cannot bypass RLS (guards role-config drift)', async () => {
+    const rows = (await appDb.execute(
+      sql`select rolsuper, rolbypassrls from pg_roles where rolname = current_user`,
+    )) as unknown as Array<{ rolsuper: boolean; rolbypassrls: boolean }>;
+    expect(rows[0]).toMatchObject({ rolsuper: false, rolbypassrls: false });
+  });
+});
+
+describe('raw SQL under the RLS-enforced role', () => {
+  it('sees zero tenant rows when no GUC is set', async () => {
+    const rows = await appDb.select({ id: suppliers.id }).from(suppliers);
+    expect(rows).toHaveLength(0);
+  });
+
+  it('sees only its own restaurant row', async () => {
+    const rows = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx.select({ id: restaurants.id }).from(restaurants),
+    );
+    expect(rows).toEqual([{ id: A.restaurantId }]);
+  });
+
+  it('sees only its own suppliers', async () => {
+    const rows = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx.select({ id: suppliers.id, name: suppliers.name }).from(suppliers),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.name).toBe(A.supplierName);
+  });
+
+  it('child table without restaurant_id is scoped through its parent (gr_lines)', async () => {
+    const rows = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx.select({ id: grLines.id }).from(grLines),
+    );
+    expect(rows).toEqual([{ id: A.grLineId }]);
+  });
+
+  it('blocks a cross-tenant UPDATE even with raw access (0 rows matched)', async () => {
+    const updated = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx
+        .update(grLines)
+        .set({ qtyReceived: '999' })
+        .where(eq(grLines.id, B.grLineId))
+        .returning({ id: grLines.id }),
+    );
+    expect(updated).toHaveLength(0);
+
+    const [line] = await ownerDb
+      .select({ qtyReceived: grLines.qtyReceived })
+      .from(grLines)
+      .where(eq(grLines.id, B.grLineId));
+    expect(line?.qtyReceived).toBe('5.000');
+  });
+
+  it('blocks any INSERT when no GUC is set (no bootstrap hole)', async () => {
+    await expect(
+      appDb.insert(restaurants).values({ name: 'no-guc probe' }),
+    ).rejects.toThrow(/row-level security/);
+  });
+
+  it('blocks a cross-tenant INSERT (WITH CHECK violation)', async () => {
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) =>
+        tx.insert(discrepancies).values({
+          matchRunId: B.matchRunId,
+          restaurantId: B.restaurantId,
+          type: 'PRICE_HIGHER',
+          severity: 'warn',
+          deltaAmount: '1.00',
+          resolutionStatus: 'open',
+        }),
+      ),
+    ).rejects.toThrow(/row-level security/);
+  });
+});
+
+describe('every tenant table is invisible cross-tenant (raw probes)', () => {
+  // Both tenants are fully seeded, so each probe must see A's rows (proving
+  // the policy admits the right tenant) and exactly zero of B's.
+  const PARENT_PROBES: Array<{
+    name: string;
+    probe: (tx: Database) => Promise<Array<{ rid: string | null }>>;
+  }> = [
+    { name: 'suppliers', probe: (tx) => tx.select({ rid: suppliers.restaurantId }).from(suppliers) },
+    { name: 'products', probe: (tx) => tx.select({ rid: products.restaurantId }).from(products) },
+    {
+      name: 'purchase_orders',
+      probe: (tx) => tx.select({ rid: purchaseOrders.restaurantId }).from(purchaseOrders),
+    },
+    {
+      name: 'goods_receipts',
+      probe: (tx) => tx.select({ rid: goodsReceipts.restaurantId }).from(goodsReceipts),
+    },
+    { name: 'invoices', probe: (tx) => tx.select({ rid: invoices.restaurantId }).from(invoices) },
+    { name: 'match_runs', probe: (tx) => tx.select({ rid: matchRuns.restaurantId }).from(matchRuns) },
+    {
+      name: 'discrepancies',
+      probe: (tx) => tx.select({ rid: discrepancies.restaurantId }).from(discrepancies),
+    },
+    { name: 'audit_log', probe: (tx) => tx.select({ rid: auditLog.restaurantId }).from(auditLog) },
+    {
+      name: 'activity_events',
+      probe: (tx) => tx.select({ rid: activityEvents.restaurantId }).from(activityEvents),
+    },
+    {
+      name: 'memberships',
+      probe: (tx) => tx.select({ rid: memberships.restaurantId }).from(memberships),
+    },
+  ];
+
+  it.each(PARENT_PROBES.map((p) => [p.name, p] as const))(
+    '%s: GUC=A sees only tenant-A rows',
+    async (_name, entry) => {
+      const rows = await withRestaurant(appDb, A.restaurantId, (tx) => entry.probe(tx));
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows.every((r) => r.rid === A.restaurantId)).toBe(true);
+    },
+  );
+
+  const CHILD_PROBES: Array<{
+    name: string;
+    probe: (tx: Database) => Promise<Array<{ id: string }>>;
+    ownId: () => string;
+  }> = [
+    {
+      name: 'po_lines',
+      probe: (tx) => tx.select({ id: poLines.id }).from(poLines),
+      ownId: () => A.poLineId,
+    },
+    {
+      name: 'gr_lines',
+      probe: (tx) => tx.select({ id: grLines.id }).from(grLines),
+      ownId: () => A.grLineId,
+    },
+    {
+      name: 'invoice_lines',
+      probe: (tx) => tx.select({ id: invoiceLines.id }).from(invoiceLines),
+      ownId: () => A.invoiceLineId,
+    },
+    {
+      name: 'product_aliases',
+      probe: (tx) => tx.select({ id: productAliases.id }).from(productAliases),
+      ownId: () => A.productAliasId,
+    },
+  ];
+
+  it.each(CHILD_PROBES.map((p) => [p.name, p] as const))(
+    '%s: parent-join policy admits only tenant-A rows',
+    async (_name, entry) => {
+      const rows = await withRestaurant(appDb, A.restaurantId, (tx) => entry.probe(tx));
+      expect(rows.map((r) => r.id)).toEqual([entry.ownId()]);
+    },
+  );
+
+  it('invoice_scans: NULL-restaurant rows are invisible, scoped rows visible (intended)', async () => {
+    await ownerDb.insert(invoiceScans).values([
+      { invoiceId: A.invoiceId, restaurantId: A.restaurantId, storagePath: `a/${A.invoiceId}.pdf`, mimeType: 'application/pdf' },
+      { invoiceId: B.invoiceId, restaurantId: null, storagePath: `legacy/${B.invoiceId}.pdf`, mimeType: 'application/pdf' },
+    ]);
+    const rows = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx.select({ rid: invoiceScans.restaurantId }).from(invoiceScans),
+    );
+    expect(rows).toEqual([{ rid: A.restaurantId }]);
+    await ownerDb.delete(invoiceScans);
+  });
+});
+
+describe('identity tables are a separate trust zone', () => {
+  it('users: visible only as the self row under the user GUC', async () => {
+    const noGuc = await appDb.select({ id: users.id }).from(users);
+    expect(noGuc).toHaveLength(0);
+
+    const self = await withUser(appDb, A.ownerUserId, (tx) =>
+      tx.select({ id: users.id }).from(users),
+    );
+    expect(self).toEqual([{ id: A.ownerUserId }]);
+  });
+
+  it('sessions: the app role has no access at all', async () => {
+    await expect(appDb.select().from(sessions)).rejects.toThrow(/permission denied/);
+  });
+});
+
+// NOTE: enforcement itself is proven by the raw-SQL probes above, which bypass
+// the app layer. This block proves the OPPOSITE direction — the app keeps
+// functioning when the connection role is RLS-enforced (GUC wiring complete,
+// grants sufficient). Its negative cases are caught by the app layer first.
+describe('tRPC functional regression through the RLS-enforced role', () => {
+  it('onboarding.myMemberships works via the user GUC (no restaurant context)', async () => {
+    const caller = callerFor(A, appDb);
+    const rows = await caller.onboarding.myMemberships();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ restaurantId: A.restaurantId, role: 'owner' });
+  });
+
+  it('own-tenant reads still work (GUC wiring keeps the app functional)', async () => {
+    const caller = callerFor(A, appDb);
+    const po = await caller.receiving.getPo({ poId: A.poId });
+    expect(po.id).toBe(A.poId);
+  });
+
+  it('foreign-tenant read is NOT_FOUND', async () => {
+    const caller = callerFor(A, appDb);
+    await expect(caller.receiving.getPo({ poId: B.poId })).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+  });
+
+  it('foreign-tenant write attack dies with zero mutation', async () => {
+    const caller = callerFor(A, appDb);
+    await expect(
+      caller.receiving.markGrLine({ grLineId: B.grLineId, qtyReceived: 777 }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [line] = await ownerDb
+      .select({ qtyReceived: grLines.qtyReceived })
+      .from(grLines)
+      .where(eq(grLines.id, B.grLineId));
+    expect(line?.qtyReceived).toBe('5.000');
+  });
+
+  it('approval queue contains only own-tenant discrepancies', async () => {
+    const caller = callerFor(A, appDb);
+    const queue = await caller.approvals.myQueue();
+    expect(queue.map((q) => q.id)).toEqual([A.discrepancyId]);
+  });
+
+  it('own-tenant write path works under RLS (approve + audit + activity)', async () => {
+    const caller = callerFor(A, appDb);
+    const updated = await caller.approvals.approve({ discrepancyId: A.discrepancyId });
+    expect(updated.resolutionStatus).toBe('accepted');
+  });
+
+  it('onboarding.createRestaurant works under the app role (bootstrap policies)', async () => {
+    const caller = callerFor(A, appDb);
+    const restaurant = await caller.onboarding.createRestaurant({ name: 'מסעדת RLS' });
+    expect(restaurant.id).toBeTruthy();
+    await ownerDb.delete(restaurants).where(eq(restaurants.id, restaurant.id));
+  });
+});

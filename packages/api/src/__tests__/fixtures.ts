@@ -1,0 +1,240 @@
+import {
+  activityEvents,
+  auditLog,
+  discrepancies,
+  goodsReceipts,
+  grLines,
+  invoiceLines,
+  invoices,
+  matchRuns,
+  memberships,
+  poLines,
+  priceBaselines,
+  priceHistory,
+  productAliases,
+  products,
+  purchaseOrders,
+  restaurants,
+  suppliers,
+  users,
+  type Database,
+} from '@restomatch/db';
+
+/** A fully-populated tenant graph for isolation/attack tests. */
+export interface Tenant {
+  restaurantId: string;
+  ownerUserId: string;
+  supplierId: string;
+  supplierName: string;
+  productId: string;
+  productAliasId: string;
+  poId: string;
+  poLineId: string;
+  grId: string;
+  grLineId: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  invoiceLineId: string;
+  matchRunId: string;
+  discrepancyId: string;
+}
+
+export async function resetDb(db: Database): Promise<void> {
+  await db.delete(activityEvents);
+  await db.delete(auditLog);
+  await db.delete(discrepancies);
+  await db.delete(matchRuns);
+  await db.delete(invoiceLines);
+  await db.delete(invoices);
+  await db.delete(grLines);
+  await db.delete(goodsReceipts);
+  await db.delete(priceBaselines);
+  await db.delete(priceHistory);
+  await db.delete(poLines);
+  await db.delete(purchaseOrders);
+  await db.delete(productAliases);
+  await db.delete(products);
+  await db.delete(suppliers);
+  await db.delete(memberships);
+  await db.delete(users);
+  await db.delete(restaurants);
+}
+
+export async function seedTenant(db: Database, tag: string): Promise<Tenant> {
+  const [restaurant] = await db.insert(restaurants).values({ name: `Resto ${tag}` }).returning();
+  if (!restaurant) throw new Error('seed: restaurant');
+
+  const [owner] = await db
+    .insert(users)
+    .values({ email: `owner-${tag}@attack.test`, name: `Owner ${tag}` })
+    .returning();
+  if (!owner) throw new Error('seed: user');
+  await db
+    .insert(memberships)
+    .values({ userId: owner.id, restaurantId: restaurant.id, role: 'owner' });
+
+  const supplierName = `ספק ${tag}`;
+  const [supplier] = await db
+    .insert(suppliers)
+    .values({
+      restaurantId: restaurant.id,
+      name: supplierName,
+      businessId: `51234567${tag === 'A' ? '1' : '2'}`,
+    })
+    .returning();
+  if (!supplier) throw new Error('seed: supplier');
+
+  const [product] = await db
+    .insert(products)
+    .values({
+      restaurantId: restaurant.id,
+      canonicalName: `עגבניה ${tag}`,
+      category: 'ירקות',
+      defaultUnit: 'ק״ג',
+    })
+    .returning();
+  if (!product) throw new Error('seed: product');
+
+  const [productAlias] = await db
+    .insert(productAliases)
+    .values({
+      productId: product.id,
+      supplierId: supplier.id,
+      supplierNameRaw: `tomato-${tag}`,
+      confidence: '1.0',
+    })
+    .returning();
+  if (!productAlias) throw new Error('seed: productAlias');
+
+  const today = new Date();
+  today.setHours(11, 0, 0, 0);
+  const [po] = await db
+    .insert(purchaseOrders)
+    .values({
+      restaurantId: restaurant.id,
+      supplierId: supplier.id,
+      expectedDeliveryAt: today,
+      status: 'sent',
+      source: 'manual',
+    })
+    .returning();
+  if (!po) throw new Error('seed: po');
+
+  const [poLine] = await db
+    .insert(poLines)
+    .values({
+      poId: po.id,
+      rawDescription: `עגבניות ${tag}`,
+      qtyOrdered: '10',
+      unit: 'kg',
+      unitPriceExpected: '8.5',
+    })
+    .returning();
+  if (!poLine) throw new Error('seed: poLine');
+
+  const [gr] = await db
+    .insert(goodsReceipts)
+    .values({ restaurantId: restaurant.id, poId: po.id, receivedBy: owner.id, status: 'pending' })
+    .returning();
+  if (!gr) throw new Error('seed: gr');
+
+  const [grLine] = await db
+    .insert(grLines)
+    .values({ grId: gr.id, poLineId: poLine.id, qtyReceived: '5', qtyRejected: '0' })
+    .returning();
+  if (!grLine) throw new Error('seed: grLine');
+
+  const invoiceNumber = `INV-${tag}-1`;
+  const [invoice] = await db
+    .insert(invoices)
+    .values({
+      restaurantId: restaurant.id,
+      supplierId: supplier.id,
+      invoiceNumber,
+      invoiceDate: today,
+      totalExclVat: '100.00',
+      vatAmount: '17.00',
+      totalInclVat: '117.00',
+      status: 'matched',
+      source: 'photo',
+      createdBy: owner.id,
+    })
+    .returning();
+  if (!invoice) throw new Error('seed: invoice');
+
+  const [invoiceLine] = await db
+    .insert(invoiceLines)
+    .values({
+      invoiceId: invoice.id,
+      productId: product.id,
+      rawDescription: `עגבניות ${tag}`,
+      qtyBilled: '10',
+      unit: 'kg',
+      unitPriceBilled: '10.00',
+      lineTotal: '100.00',
+    })
+    .returning();
+  if (!invoiceLine) throw new Error('seed: invoiceLine');
+
+  const [matchRun] = await db
+    .insert(matchRuns)
+    .values({
+      restaurantId: restaurant.id,
+      poId: po.id,
+      grId: gr.id,
+      invoiceId: invoice.id,
+      overallStatus: 'major',
+      totalDiscrepancyAmount: '100.00',
+    })
+    .returning();
+  if (!matchRun) throw new Error('seed: matchRun');
+
+  const [discrepancy] = await db
+    .insert(discrepancies)
+    .values({
+      matchRunId: matchRun.id,
+      restaurantId: restaurant.id,
+      type: 'PRICE_HIGHER',
+      severity: 'warn',
+      deltaAmount: '100.00',
+      requiresRole: 'manager',
+      resolutionStatus: 'open',
+    })
+    .returning();
+  if (!discrepancy) throw new Error('seed: discrepancy');
+
+  await db.insert(auditLog).values({
+    restaurantId: restaurant.id,
+    userId: owner.id,
+    action: 'discrepancy.created',
+    entityType: 'discrepancy',
+    entityId: discrepancy.id,
+    after: { tag },
+  });
+
+  await db.insert(activityEvents).values({
+    restaurantId: restaurant.id,
+    eventType: 'invoice_matched',
+    title: `אירוע סודי של ${tag}`,
+    entityType: 'match_run',
+    entityId: matchRun.id,
+  });
+
+  return {
+    restaurantId: restaurant.id,
+    ownerUserId: owner.id,
+    supplierId: supplier.id,
+    supplierName,
+    productId: product.id,
+    productAliasId: productAlias.id,
+    poId: po.id,
+    poLineId: poLine.id,
+    grId: gr.id,
+    grLineId: grLine.id,
+    invoiceId: invoice.id,
+    invoiceNumber,
+    invoiceLineId: invoiceLine.id,
+    matchRunId: matchRun.id,
+    discrepancyId: discrepancy.id,
+  };
+}

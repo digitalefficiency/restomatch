@@ -1,5 +1,6 @@
 export * from './schema';
-export { createDb, withRestaurant, type Database } from './client';
+export { createDb, withRestaurant, withUser, type Database } from './client';
+export { applyCoreTenantRls, ensureRlsAppRole } from './rls';
 export {
   and,
   asc,
