@@ -1,5 +1,6 @@
 import { router } from './trpc';
 import { activityRouter } from './routers/activity';
+import { adminRouter } from './routers/admin';
 import { approvalsRouter } from './routers/approvals';
 import { exportsRouter } from './routers/exports';
 import { onboardingRouter } from './routers/onboarding';
@@ -13,6 +14,7 @@ export const appRouter = router({
   approvals: approvalsRouter,
   exports: exportsRouter,
   activity: activityRouter,
+  admin: adminRouter,
 });
 
 export type AppRouter = typeof appRouter;
@@ -24,6 +26,7 @@ export type {
   Session,
 } from './context';
 export {
+  adminProcedure,
   authedProcedure,
   bookkeeperProcedure,
   chefProcedure,

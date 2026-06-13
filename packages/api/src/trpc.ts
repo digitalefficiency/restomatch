@@ -2,7 +2,9 @@ import { initTRPC, TRPCError } from '@trpc/server';
 import superjson from 'superjson';
 import { captureException } from '@restomatch/observability';
 import {
+  eq,
   sql,
+  users,
   withRestaurant,
   withUser,
   type Database,
@@ -120,6 +122,41 @@ export const managerProcedure = requireRoles(['owner', 'manager']);
 export const receiverProcedure = requireRoles(['owner', 'manager', 'receiver']);
 export const bookkeeperProcedure = requireRoles(['owner', 'bookkeeper']);
 export const chefProcedure = requireRoles(['owner', 'manager', 'chef']);
+
+/**
+ * Platform-admin procedure for the internal ops console. Cross-tenant BY
+ * DESIGN — it does NOT establish a restaurant GUC and runs on the owner/service
+ * connection (ctx.adminDb), so it bypasses per-tenant RLS to manage every
+ * tenant. Authorized by the users.is_platform_admin flag OR the
+ * PLATFORM_ADMIN_EMAILS env allowlist (bootstrap for the first admin).
+ */
+export const adminProcedure = authedProcedure.use(async ({ ctx, next }) => {
+  const conn = ctx.adminDb ?? ctx.db;
+  const [user] = await conn
+    .select({
+      email: users.email,
+      emailVerified: users.emailVerified,
+      isAdmin: users.isPlatformAdmin,
+    })
+    .from(users)
+    .where(eq(users.id, ctx.session.userId))
+    .limit(1);
+  const allowlist = (process.env.PLATFORM_ADMIN_EMAILS ?? '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  // The allowlist trusts an email address, so require it to be verified — a
+  // second auth provider could otherwise mint a session for an allowlisted
+  // email without proving mailbox control.
+  const allowlisted =
+    !!user && user.emailVerified != null && allowlist.includes(user.email.toLowerCase());
+  const isAdmin = !!user && (user.isAdmin || allowlisted);
+  if (!isAdmin) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'platform admin only' });
+  }
+  // Admin resolvers query cross-tenant on the owner connection.
+  return next({ ctx: { ...ctx, db: conn } });
+});
 
 /**
  * Plan-feature gate, composed onto a role procedure with `.use()`:

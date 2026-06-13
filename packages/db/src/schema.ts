@@ -162,6 +162,8 @@ export const users = pgTable(
     name: text('name'),
     image: text('image'),
     phone: varchar('phone', { length: 32 }),
+    /** Platform operator (internal ops console). NOT a tenant role. */
+    isPlatformAdmin: boolean('is_platform_admin').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

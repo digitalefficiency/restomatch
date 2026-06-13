@@ -13,6 +13,12 @@ export type MemberSession = Session & {
 
 export interface AppContext {
   db: Database;
+  /**
+   * Owner/service connection for cross-tenant platform-admin queries (they must
+   * bypass per-tenant RLS). Falls back to `db` when unset — correct today since
+   * `db` is the owner connection until DATABASE_URL_APP is provisioned.
+   */
+  adminDb?: Database;
   session: Session | null;
 }
 

@@ -2,11 +2,13 @@ import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 import { appRouter, isOriginAllowed, type AppContext } from '@restomatch/api';
 import { auth } from '@/auth';
 import { db } from '@/lib/db';
+import { authDb } from '@/lib/authDb';
 
 async function createContext(): Promise<AppContext> {
   const session = await auth();
   return {
     db,
+    adminDb: authDb,
     session: session?.user?.id
       ? {
           userId: session.user.id,

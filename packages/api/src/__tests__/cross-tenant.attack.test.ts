@@ -72,6 +72,12 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'receiving.submitReceipt': 'attack',
   'receiving.registerInvoice': 'attack',
   'receiving.pendingInvoices': 'isolation',
+  'admin.listRestaurants': 'admin-denial',
+  'admin.getRestaurant': 'admin-denial',
+  'admin.assignPlan': 'admin-denial',
+  'admin.setOverrides': 'admin-denial',
+  'admin.setMemberRole': 'admin-denial',
+  'admin.listLeads': 'admin-denial',
 };
 
 function listProcedurePaths(): string[] {
@@ -292,5 +298,40 @@ describe('list/aggregate isolation (A must not see B)', () => {
     const rows = await caller.onboarding.myMemberships();
     expect(rows).toHaveLength(1);
     expect(rows[0]?.restaurantId).toBe(A.restaurantId);
+  });
+});
+
+describe('platform-admin procedures reject a non-admin tenant user', () => {
+  // A is a normal restaurant owner, not a platform admin, and no
+  // PLATFORM_ADMIN_EMAILS allowlist is set in tests.
+  it('admin.listRestaurants → FORBIDDEN', async () => {
+    await expect(callerFor(A).admin.listRestaurants()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+  it('admin.getRestaurant → FORBIDDEN', async () => {
+    await expect(
+      callerFor(A).admin.getRestaurant({ restaurantId: B.restaurantId }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+  it('admin.assignPlan → FORBIDDEN (and changes nothing)', async () => {
+    await expect(
+      callerFor(A).admin.assignPlan({ restaurantId: B.restaurantId, planKey: 'pro' }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+  it('admin.setOverrides → FORBIDDEN', async () => {
+    await expect(
+      callerFor(A).admin.setOverrides({ restaurantId: B.restaurantId, overrides: {} }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+  it('admin.setMemberRole → FORBIDDEN', async () => {
+    await expect(
+      callerFor(A).admin.setMemberRole({
+        restaurantId: B.restaurantId,
+        userId: B.ownerUserId,
+        role: 'owner',
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+  it('admin.listLeads → FORBIDDEN', async () => {
+    await expect(callerFor(A).admin.listLeads()).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 });

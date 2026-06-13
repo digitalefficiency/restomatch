@@ -138,7 +138,7 @@ export async function seedTenant(db: Database, tag: string): Promise<Tenant> {
 
   const [owner] = await db
     .insert(users)
-    .values({ email: `owner-${tag}@attack.test`, name: `Owner ${tag}` })
+    .values({ email: `owner-${tag}@attack.test`, name: `Owner ${tag}`, emailVerified: new Date() })
     .returning();
   if (!owner) throw new Error('seed: user');
   await db

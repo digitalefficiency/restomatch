@@ -50,6 +50,13 @@
       "when": 1781327871427,
       "tag": "0006_blushing_rafael_vega",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1781384344660,
+      "tag": "0007_cooing_rumiko_fujikawa",
+      "breakpoints": true
     }
   ]
 }
