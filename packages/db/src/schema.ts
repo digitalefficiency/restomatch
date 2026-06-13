@@ -104,6 +104,16 @@ export const approvalAction = pgEnum('approval_action', [
   'notify',
 ]);
 
+export const planKey = pgEnum('plan_key', ['trial', 'basic', 'pro', 'chain']);
+export const subscriptionStatus = pgEnum('subscription_status', [
+  'trialing',
+  'active',
+  'past_due',
+  'canceled',
+]);
+export const usageMetric = pgEnum('usage_metric', ['ocr_scans', 'whatsapp_sends']);
+export const billingProvider = pgEnum('billing_provider', ['noop', 'grow', 'cardcom']);
+
 /* ──────────────────────────────────────────────────────────────────────────
  * Organization
  * ────────────────────────────────────────────────────────────────────────── */
@@ -115,6 +125,8 @@ export const restaurants = pgTable('restaurants', {
   vatRate: numeric('vat_rate', { precision: 5, scale: 4 }).notNull().default('0.17'),
   timezone: text('timezone').notNull().default('Asia/Jerusalem'),
   settings: jsonb('settings').$type<RestaurantSettings>().notNull().default({}),
+  /** Billing account this restaurant belongs to (a chain shares one). */
+  billingAccountId: uuid('billing_account_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -778,16 +790,154 @@ export const notificationsOutbox = pgTable(
 );
 
 /* ──────────────────────────────────────────────────────────────────────────
+ * Billing & entitlements
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** Per-plan hard limits. null = unlimited on that axis. */
+export interface PlanLimits {
+  invoicesPerMonth: number | null;
+  restaurants: number | null;
+  seatsPerRestaurant: number | null;
+}
+
+/** Feature flags gated by plan tier. */
+export type FeatureKey =
+  | 'integrations'
+  | 'whatsapp_alerts'
+  | 'advanced_analytics'
+  | 'accounting_export';
+
+/** Admin per-tenant overrides layered on top of the plan. */
+export interface SubscriptionOverrides {
+  limits?: Partial<PlanLimits>;
+  features?: FeatureKey[];
+}
+
+export const billingAccounts = pgTable('billing_accounts', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name').notNull(),
+  ownerUserId: uuid('owner_user_id').references(() => users.id, { onDelete: 'set null' }),
+  provider: billingProvider('provider').notNull().default('noop'),
+  providerCustomerRef: text('provider_customer_ref'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const plans = pgTable('plans', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  key: planKey('key').notNull().unique(),
+  nameHe: text('name_he').notNull(),
+  priceAgorotMonthly: integer('price_agorot_monthly').notNull().default(0),
+  limits: jsonb('limits').$type<PlanLimits>().notNull(),
+  features: text('features').array().$type<FeatureKey[]>().notNull().default([]),
+  active: boolean('active').notNull().default(true),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const subscriptions = pgTable(
+  'subscriptions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    billingAccountId: uuid('billing_account_id')
+      .notNull()
+      .references(() => billingAccounts.id, { onDelete: 'cascade' }),
+    planId: uuid('plan_id')
+      .notNull()
+      .references(() => plans.id, { onDelete: 'restrict' }),
+    status: subscriptionStatus('status').notNull().default('trialing'),
+    trialEndsAt: timestamp('trial_ends_at', { withTimezone: true }),
+    currentPeriodStart: timestamp('current_period_start', { withTimezone: true }),
+    currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
+    providerSubscriptionRef: text('provider_subscription_ref'),
+    overrides: jsonb('overrides').$type<SubscriptionOverrides>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('subscriptions_account_idx').on(t.billingAccountId)],
+);
+
+/** Time-windowed usage counters; incremented atomically per (account, period, metric). */
+export const usageCounters = pgTable(
+  'usage_counters',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    billingAccountId: uuid('billing_account_id')
+      .notNull()
+      .references(() => billingAccounts.id, { onDelete: 'cascade' }),
+    period: varchar('period', { length: 7 }).notNull(), // YYYY-MM
+    metric: usageMetric('metric').notNull(),
+    used: integer('used').notNull().default(0),
+  },
+  (t) => [uniqueIndex('usage_counters_unique_idx').on(t.billingAccountId, t.period, t.metric)],
+);
+
+/** Idempotent log of billing-provider webhook events. */
+export const billingEvents = pgTable(
+  'billing_events',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    billingAccountId: uuid('billing_account_id').references(() => billingAccounts.id, {
+      onDelete: 'set null',
+    }),
+    provider: billingProvider('provider').notNull(),
+    eventType: text('event_type').notNull(),
+    idempotencyKey: text('idempotency_key').notNull().unique(),
+    payload: jsonb('payload'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('billing_events_account_idx').on(t.billingAccountId)],
+);
+
+/** Marketing-landing lead capture. Not tenant-scoped (pre-customer). */
+export const leads = pgTable('leads', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name').notNull(),
+  phone: text('phone'),
+  email: text('email'),
+  restaurantName: text('restaurant_name'),
+  monthlyProcurementAgorot: integer('monthly_procurement_agorot'),
+  source: text('source'),
+  note: text('note'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/* ──────────────────────────────────────────────────────────────────────────
  * Relations
  * ────────────────────────────────────────────────────────────────────────── */
 
-export const restaurantsRelations = relations(restaurants, ({ many }) => ({
+export const restaurantsRelations = relations(restaurants, ({ one, many }) => ({
+  billingAccount: one(billingAccounts, {
+    fields: [restaurants.billingAccountId],
+    references: [billingAccounts.id],
+  }),
   memberships: many(memberships),
   suppliers: many(suppliers),
   products: many(products),
   purchaseOrders: many(purchaseOrders),
   goodsReceipts: many(goodsReceipts),
   invoices: many(invoices),
+}));
+
+export const billingAccountsRelations = relations(billingAccounts, ({ one, many }) => ({
+  owner: one(users, { fields: [billingAccounts.ownerUserId], references: [users.id] }),
+  restaurants: many(restaurants),
+  subscription: one(subscriptions),
+}));
+
+export const subscriptionsRelations = relations(subscriptions, ({ one }) => ({
+  billingAccount: one(billingAccounts, {
+    fields: [subscriptions.billingAccountId],
+    references: [billingAccounts.id],
+  }),
+  plan: one(plans, { fields: [subscriptions.planId], references: [plans.id] }),
+}));
+
+export const usageCountersRelations = relations(usageCounters, ({ one }) => ({
+  billingAccount: one(billingAccounts, {
+    fields: [usageCounters.billingAccountId],
+    references: [billingAccounts.id],
+  }),
 }));
 
 export const usersRelations = relations(users, ({ many }) => ({
@@ -910,3 +1060,10 @@ export type InvoiceLine = typeof invoiceLines.$inferSelect;
 export type MatchRun = typeof matchRuns.$inferSelect;
 export type Discrepancy = typeof discrepancies.$inferSelect;
 export type ProcurementConnection = typeof procurementConnections.$inferSelect;
+export type BillingAccount = typeof billingAccounts.$inferSelect;
+export type Plan = typeof plans.$inferSelect;
+export type NewPlan = typeof plans.$inferInsert;
+export type Subscription = typeof subscriptions.$inferSelect;
+export type UsageCounter = typeof usageCounters.$inferSelect;
+export type Lead = typeof leads.$inferSelect;
+export type NewLead = typeof leads.$inferInsert;

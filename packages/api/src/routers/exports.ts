@@ -9,7 +9,10 @@ import {
   matchRuns,
   suppliers,
 } from '@restomatch/db';
-import { bookkeeperProcedure, router } from '../trpc';
+import { bookkeeperProcedure, requireFeature, router } from '../trpc';
+
+/** Bookkeeping exports require the accounting_export plan feature. */
+const exportProcedure = bookkeeperProcedure.use(requireFeature('accounting_export'));
 import { toCsv } from '../exports/csv';
 import { toUniform1000Lines, type Uniform1000Invoice } from '../exports/uniform-1000';
 
@@ -23,7 +26,7 @@ export const exportsRouter = router({
    * CSV — approved/matched invoices in a period.
    * Format: invoice_number, date, supplier, totalExclVat, vat, totalInclVat, status, ocr_confidence.
    */
-  invoicesCsv: bookkeeperProcedure
+  invoicesCsv: exportProcedure
     .input(PeriodSchema)
     .query(async ({ ctx, input }) => {
       const rows = await fetchInvoices(ctx.db, ctx.session.restaurantId, input.from, input.to);
@@ -49,7 +52,7 @@ export const exportsRouter = router({
    * Israeli uniform file (קובץ 1000) — record type C100 only for now.
    * Returns the raw text body; caller wraps in a download response.
    */
-  uniform1000: bookkeeperProcedure
+  uniform1000: exportProcedure
     .input(PeriodSchema)
     .query(async ({ ctx, input }) => {
       const rows = await fetchInvoices(ctx.db, ctx.session.restaurantId, input.from, input.to);

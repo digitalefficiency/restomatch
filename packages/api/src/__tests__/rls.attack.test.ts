@@ -3,6 +3,7 @@ import {
   activityEvents,
   applyCoreTenantRls,
   auditLog,
+  billingAccounts,
   createDb,
   discrepancies,
   ensureRlsAppRole,
@@ -14,6 +15,7 @@ import {
   invoices,
   matchRuns,
   memberships,
+  plans,
   poLines,
   productAliases,
   products,
@@ -21,15 +23,18 @@ import {
   restaurants,
   sessions,
   sql,
+  subscriptions,
   suppliers,
+  usageCounters,
   users,
   withRestaurant,
   withUser,
   type Database,
 } from '@restomatch/db';
 import { appRouter } from '../index';
+import { meterOcrScan } from '../entitlements';
 import type { AppContext, Session } from '../context';
-import { resetDb, seedTenant, type Tenant } from './fixtures';
+import { attachSubscription, resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
 
 /**
  * RLS ATTACK SUITE — the database-level backstop.
@@ -51,6 +56,7 @@ const ownerDb = createDb(TEST_DB_URL);
 let appDb: Database;
 let A: Tenant;
 let B: Tenant;
+let billingAcctA: string;
 
 function callerFor(tenant: Tenant, db: Database) {
   const session: Session = {
@@ -67,8 +73,15 @@ beforeAll(async () => {
   const appUrl = await ensureRlsAppRole(TEST_DB_URL);
   appDb = createDb(appUrl);
   await resetDb(ownerDb);
+  await seedPlans(ownerDb);
   A = await seedTenant(ownerDb, 'A');
   B = await seedTenant(ownerDb, 'B');
+  // A is a paying tenant with a billing account + a metered scan; B has none.
+  billingAcctA = await attachSubscription(ownerDb, A.restaurantId, {
+    planKey: 'pro',
+    status: 'active',
+  });
+  await meterOcrScan(ownerDb, A.restaurantId);
 });
 
 afterAll(async () => {
@@ -239,6 +252,66 @@ describe('every tenant table is invisible cross-tenant (raw probes)', () => {
     );
     expect(rows).toEqual([{ rid: A.restaurantId }]);
     await ownerDb.delete(invoiceScans);
+  });
+});
+
+describe('billing tables scoped through the restaurant→account link', () => {
+  it('tenant A sees its own billing account / subscription / usage', async () => {
+    const acct = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx.select({ id: billingAccounts.id }).from(billingAccounts),
+    );
+    expect(acct).toHaveLength(1);
+    const sub = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx.select({ id: subscriptions.id }).from(subscriptions),
+    );
+    expect(sub).toHaveLength(1);
+    const usage = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx.select({ used: usageCounters.used }).from(usageCounters),
+    );
+    expect(usage).toHaveLength(1);
+  });
+
+  it('tenant B sees none of A\'s billing rows', async () => {
+    const acct = await withRestaurant(appDb, B.restaurantId, (tx) =>
+      tx.select({ id: billingAccounts.id }).from(billingAccounts),
+    );
+    expect(acct).toHaveLength(0);
+    const sub = await withRestaurant(appDb, B.restaurantId, (tx) =>
+      tx.select({ id: subscriptions.id }).from(subscriptions),
+    );
+    expect(sub).toHaveLength(0);
+    const usage = await withRestaurant(appDb, B.restaurantId, (tx) =>
+      tx.select({ used: usageCounters.used }).from(usageCounters),
+    );
+    expect(usage).toHaveLength(0);
+  });
+
+  it('no GUC ⇒ no billing rows visible at all', async () => {
+    const acct = await appDb.select({ id: billingAccounts.id }).from(billingAccounts);
+    expect(acct).toHaveLength(0);
+  });
+
+  it('the app role can READ the plans catalog but cannot rewrite pricing/limits', async () => {
+    const cat = await appDb.select({ key: plans.key }).from(plans);
+    expect(cat.length).toBeGreaterThan(0); // public reference data is readable
+    // ...but a tenant must not be able to inflate limits / zero out pricing.
+    await expect(
+      appDb.update(plans).set({ priceAgorotMonthly: 1 }).where(eq(plans.key, 'pro')),
+    ).rejects.toThrow(/permission denied/);
+  });
+
+  it('the app role cannot self-upgrade by writing subscriptions or usage', async () => {
+    await expect(
+      appDb
+        .update(subscriptions)
+        .set({ status: 'active' })
+        .where(eq(subscriptions.billingAccountId, billingAcctA)),
+    ).rejects.toThrow(/permission denied/);
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) =>
+        tx.update(usageCounters).set({ used: 0 }),
+      ),
+    ).rejects.toThrow(/permission denied/);
   });
 });
 

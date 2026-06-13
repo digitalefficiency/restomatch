@@ -1,6 +1,8 @@
 import { createDb } from '../src/client';
+import { PLAN_SEED_LIST } from '../src/plans';
 import {
   memberships,
+  plans,
   poLines,
   products,
   purchaseOrders,
@@ -14,6 +16,30 @@ async function main() {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL is required');
   const db = createDb(url);
+
+  console.log('[seed] plans (idempotent upsert)');
+  for (const p of PLAN_SEED_LIST) {
+    await db
+      .insert(plans)
+      .values({
+        key: p.key,
+        nameHe: p.nameHe,
+        priceAgorotMonthly: p.priceAgorotMonthly,
+        limits: p.limits,
+        features: p.features,
+        sortOrder: p.sortOrder,
+      })
+      .onConflictDoUpdate({
+        target: plans.key,
+        set: {
+          nameHe: p.nameHe,
+          priceAgorotMonthly: p.priceAgorotMonthly,
+          limits: p.limits,
+          features: p.features,
+          sortOrder: p.sortOrder,
+        },
+      });
+  }
 
   console.log('[seed] clearing existing data');
   await db.delete(poLines);

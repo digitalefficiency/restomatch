@@ -1,8 +1,16 @@
 import { initTRPC, TRPCError } from '@trpc/server';
 import superjson from 'superjson';
 import { captureException } from '@restomatch/observability';
-import { sql, withRestaurant, withUser, type Database, type UserRole } from '@restomatch/db';
+import {
+  sql,
+  withRestaurant,
+  withUser,
+  type Database,
+  type FeatureKey,
+  type UserRole,
+} from '@restomatch/db';
 import type { AppContext, MemberSession } from './context';
+import { getEntitlements } from './entitlements';
 
 const t = initTRPC.context<AppContext>().create({ transformer: superjson });
 
@@ -112,3 +120,30 @@ export const managerProcedure = requireRoles(['owner', 'manager']);
 export const receiverProcedure = requireRoles(['owner', 'manager', 'receiver']);
 export const bookkeeperProcedure = requireRoles(['owner', 'bookkeeper']);
 export const chefProcedure = requireRoles(['owner', 'manager', 'chef']);
+
+/**
+ * Plan-feature gate, composed onto a role procedure with `.use()`:
+ *   bookkeeperProcedure.use(requireFeature('accounting_export'))
+ *
+ * Runs inside the member transaction (GUC set), so getEntitlements reads under
+ * RLS. Throws FORBIDDEN with code ENTITLEMENT_REQUIRED so the web can show an
+ * upgrade CTA. This is the single revenue-enforcement point — keep gates here,
+ * not scattered in resolvers.
+ */
+export function requireFeature(feature: FeatureKey) {
+  return t.middleware(async ({ ctx, next }) => {
+    const session = ctx.session as MemberSession | null;
+    if (!session?.restaurantId) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'no active restaurant' });
+    }
+    const ent = await getEntitlements(ctx.db, session.restaurantId);
+    if (!ent.active || !ent.features.includes(feature)) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: `ENTITLEMENT_REQUIRED:${feature}`,
+        cause: { code: 'ENTITLEMENT_REQUIRED', feature, planKey: ent.planKey },
+      });
+    }
+    return next();
+  });
+}

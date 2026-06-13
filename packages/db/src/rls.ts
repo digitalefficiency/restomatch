@@ -63,6 +63,18 @@ export async function ensureRlsAppRole(adminConnectionString: string): Promise<s
       revoke all on accounts, sessions, verification_tokens, authenticators
         from ${RLS_APP_ROLE};
       revoke insert, update, delete on users from ${RLS_APP_ROLE};
+
+      -- Billing/catalog tables are written only by the worker, admin, and
+      -- webhooks on the owner/service connection. The tenant app role gets
+      -- read-only access (plans is public reference data; billing_accounts/
+      -- subscriptions/usage_counters are RLS-scoped SELECT). Crucially, plans
+      -- has NO RLS, so without this revoke the blanket grant would let a tenant
+      -- rewrite plan pricing/limits and self-escalate every tenant on the plan.
+      revoke insert, update, delete on
+        plans, billing_accounts, subscriptions, usage_counters, billing_events
+        from ${RLS_APP_ROLE};
+      -- leads: public submit (INSERT policy) only; no edits/reads of others.
+      revoke update, delete on leads from ${RLS_APP_ROLE};
     `);
   } finally {
     await client.end();

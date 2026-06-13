@@ -32,8 +32,24 @@ export {
   ownerProcedure,
   publicProcedure,
   receiverProcedure,
+  requireFeature,
   router,
+  userScopedProcedure,
 } from './trpc';
+export {
+  PLAN_SEED,
+  PLAN_SEED_LIST,
+  getEntitlements,
+  getQuota,
+  recordUsage,
+  meterOcrScan,
+  usagePeriod,
+  QuotaExceededError,
+  type Entitlements,
+  type QuotaState,
+  type UsageMetric,
+  type PlanSeed,
+} from './entitlements';
 export {
   evaluateApproval,
   buildRules,

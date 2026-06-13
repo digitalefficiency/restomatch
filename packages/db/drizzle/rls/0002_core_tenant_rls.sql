@@ -144,6 +144,59 @@ create policy product_aliases_tenant on product_aliases
     )
   );
 
+-- ── Billing & entitlements: scoped through the restaurant→billing_account link ─
+-- billing_accounts / subscriptions / usage_counters have no restaurant_id (a
+-- chain shares one account); a member sees them iff the CURRENT restaurant
+-- links to that account. The restaurants subquery is itself RLS-filtered to the
+-- current restaurant, so this resolves to "the current restaurant's account".
+-- Writes happen on the owner/service connection (worker metering, admin, webhooks).
+
+alter table billing_accounts enable row level security;
+drop policy if exists billing_accounts_tenant on billing_accounts;
+create policy billing_accounts_tenant on billing_accounts
+  for select using (
+    exists (
+      select 1 from restaurants r
+      where r.billing_account_id = billing_accounts.id
+        and r.id = app.current_restaurant_id()
+    )
+  );
+
+alter table subscriptions enable row level security;
+drop policy if exists subscriptions_tenant on subscriptions;
+create policy subscriptions_tenant on subscriptions
+  for select using (
+    exists (
+      select 1 from restaurants r
+      where r.billing_account_id = subscriptions.billing_account_id
+        and r.id = app.current_restaurant_id()
+    )
+  );
+
+alter table usage_counters enable row level security;
+drop policy if exists usage_counters_tenant on usage_counters;
+create policy usage_counters_tenant on usage_counters
+  for select using (
+    exists (
+      select 1 from restaurants r
+      where r.billing_account_id = usage_counters.billing_account_id
+        and r.id = app.current_restaurant_id()
+    )
+  );
+
+-- billing_events: webhook log. No member access at all (admin/service only).
+alter table billing_events enable row level security;
+
+-- leads: anyone may submit (public landing form), nobody on the tenant role may
+-- read (admin reads via the owner connection). RLS-enabled with only an INSERT
+-- policy ⇒ SELECT returns zero rows for the app role.
+alter table leads enable row level security;
+drop policy if exists leads_insert on leads;
+create policy leads_insert on leads for insert with check (true);
+
+-- plans is public pricing reference data — intentionally left without RLS so
+-- the catalog is readable everywhere.
+
 -- ── Completeness invariant: has restaurant_id ⇒ RLS enabled ────────────────
 -- The allowlist above is hand-maintained while the app role's grants include
 -- all future tables; this guard turns a forgotten table from a silent

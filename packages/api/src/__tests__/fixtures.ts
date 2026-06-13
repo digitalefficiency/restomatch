@@ -1,13 +1,17 @@
 import {
   activityEvents,
   auditLog,
+  billingAccounts,
   discrepancies,
+  eq,
   goodsReceipts,
   grLines,
   invoiceLines,
   invoices,
   matchRuns,
   memberships,
+  PLAN_SEED_LIST,
+  plans,
   poLines,
   priceBaselines,
   priceHistory,
@@ -15,9 +19,13 @@ import {
   products,
   purchaseOrders,
   restaurants,
+  subscriptions,
   suppliers,
+  usageCounters,
   users,
   type Database,
+  type FeatureKey,
+  type SubscriptionOverrides,
 } from '@restomatch/db';
 
 /** A fully-populated tenant graph for isolation/attack tests. */
@@ -55,10 +63,74 @@ export async function resetDb(db: Database): Promise<void> {
   await db.delete(productAliases);
   await db.delete(products);
   await db.delete(suppliers);
+  await db.delete(usageCounters);
+  await db.delete(subscriptions);
+  // restaurants.billing_account_id → billing_accounts (set null), so null first.
+  await db.update(restaurants).set({ billingAccountId: null });
+  await db.delete(billingAccounts);
   await db.delete(memberships);
   await db.delete(users);
   await db.delete(restaurants);
 }
+
+/** Upsert the canonical plan catalog into the test DB. */
+export async function seedPlans(db: Database): Promise<void> {
+  for (const p of PLAN_SEED_LIST) {
+    await db
+      .insert(plans)
+      .values({
+        key: p.key,
+        nameHe: p.nameHe,
+        priceAgorotMonthly: p.priceAgorotMonthly,
+        limits: p.limits,
+        features: p.features,
+        sortOrder: p.sortOrder,
+      })
+      .onConflictDoUpdate({
+        target: plans.key,
+        set: { limits: p.limits, features: p.features },
+      });
+  }
+}
+
+/**
+ * Give a restaurant a billing account + subscription on `planKey`. Requires
+ * seedPlans() to have run. Returns the billing account id.
+ */
+export async function attachSubscription(
+  db: Database,
+  restaurantId: string,
+  opts: {
+    planKey: 'trial' | 'basic' | 'pro' | 'chain';
+    status?: 'trialing' | 'active' | 'past_due' | 'canceled';
+    trialEndsAt?: Date | null;
+    overrides?: SubscriptionOverrides;
+  },
+): Promise<string> {
+  const [account] = await db
+    .insert(billingAccounts)
+    .values({ name: `acct ${restaurantId.slice(0, 8)}` })
+    .returning();
+  if (!account) throw new Error('attachSubscription: account');
+  await db
+    .update(restaurants)
+    .set({ billingAccountId: account.id })
+    .where(eq(restaurants.id, restaurantId));
+
+  const [plan] = await db.select().from(plans).where(eq(plans.key, opts.planKey)).limit(1);
+  if (!plan) throw new Error(`attachSubscription: plan ${opts.planKey} not seeded`);
+
+  await db.insert(subscriptions).values({
+    billingAccountId: account.id,
+    planId: plan.id,
+    status: opts.status ?? 'active',
+    trialEndsAt: opts.trialEndsAt ?? null,
+    overrides: opts.overrides ?? {},
+  });
+  return account.id;
+}
+
+export type { FeatureKey };
 
 export async function seedTenant(db: Database, tag: string): Promise<Tenant> {
   const [restaurant] = await db.insert(restaurants).values({ name: `Resto ${tag}` }).returning();

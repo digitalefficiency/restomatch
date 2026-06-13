@@ -1,9 +1,11 @@
 import {
   buildRules,
   evaluateApproval,
+  getEntitlements,
   logActivity,
   MockPushNotifier,
   MockWhatsAppNotifier,
+  recordUsage,
   resolveApprovalThresholds,
   type ApprovalContext,
 } from '@restomatch/api';
@@ -157,19 +159,29 @@ export function startMatchInvoiceWorker() {
         and(eq(invoices.id, job.data.invoiceId), eq(invoices.restaurantId, job.data.restaurantId)),
       );
 
-    // Fire mocked notifications to each role needing attention
+    // Fire notifications to each role needing attention. WhatsApp is a paid
+    // feature (whatsapp_alerts) — gate it on entitlements so a basic/inactive
+    // plan doesn't receive (and, once the real provider is wired, get billed
+    // for) alerts it isn't entitled to. Push is always on.
     if (roleNeedsNotification.size > 0) {
+      const ent = await getEntitlements(db, job.data.restaurantId);
+      const whatsappAllowed = ent.active && ent.features.includes('whatsapp_alerts');
       const summary = `${result.discrepancies.length} חריגות, סה"כ הפסד פוטנציאלי ₪${result.totalDiscrepancyAmount.toFixed(0)}`;
       for (const role of roleNeedsNotification) {
-        await whatsapp.send(db, {
-          restaurantId: job.data.restaurantId,
-          channel: 'whatsapp',
-          target: `role:${role}`,
-          subject: 'דרושה החלטה לחשבונית',
-          body: summary,
-          relatedEntityType: 'match_run',
-          relatedEntityId: matchRun.id,
-        });
+        if (whatsappAllowed) {
+          await whatsapp.send(db, {
+            restaurantId: job.data.restaurantId,
+            channel: 'whatsapp',
+            target: `role:${role}`,
+            subject: 'דרושה החלטה לחשבונית',
+            body: summary,
+            relatedEntityType: 'match_run',
+            relatedEntityId: matchRun.id,
+          });
+          if (ent.billingAccountId) {
+            await recordUsage(db, ent.billingAccountId, 'whatsapp_sends');
+          }
+        }
         await push.send(db, {
           restaurantId: job.data.restaurantId,
           channel: 'push',

@@ -43,6 +43,13 @@
       "when": 1780461711527,
       "tag": "0005_overjoyed_meteorite",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781327871427,
+      "tag": "0006_blushing_rafael_vega",
+      "breakpoints": true
     }
   ]
 }

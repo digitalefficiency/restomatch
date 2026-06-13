@@ -1,3 +1,4 @@
+import { meterOcrScan } from '@restomatch/api';
 import { matchProductTopN, MockEmbeddingProvider } from '@restomatch/catalog';
 import { and, createDb, eq, invoiceLines, invoices, restaurants } from '@restomatch/db';
 import {
@@ -53,6 +54,12 @@ export function startOcrInvoiceWorker() {
         `[ocr-invoice] invoice=${job.data.invoiceId} not found in restaurant=${job.data.restaurantId} — refusing to process`,
       );
     }
+
+    // Authoritative usage metering — counts the scan and enforces the plan's
+    // monthly OCR cap here at the worker (race-safe), so the limit can't be
+    // bypassed by enqueuing jobs directly. No-op for restaurants without a
+    // billing account (implicit trial). Throws QuotaExceededError when over cap.
+    await meterOcrScan(db, job.data.restaurantId);
 
     const providers = buildProviders(job.data);
 
