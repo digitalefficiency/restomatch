@@ -13,7 +13,8 @@ import {
   type UserRole,
 } from '@restomatch/db';
 import { authConfig } from './auth.config';
-import { db } from './lib/db';
+import { authDb } from './lib/authDb';
+import { enforceMagicLinkLimit } from './lib/rateLimit';
 
 declare module 'next-auth' {
   interface Session extends DefaultSession {
@@ -29,10 +30,15 @@ interface AppJwt {
   userId?: string;
   restaurantId?: string | null;
   role?: UserRole | null;
+  /** Epoch ms of the last membership re-validation. */
+  membershipCheckedAt?: number;
   [key: string]: unknown;
 }
 
-const adapter = DrizzleAdapter(db, {
+/** How long a cached membership/role is trusted before re-querying. */
+const MEMBERSHIP_REVALIDATE_MS = 10 * 60 * 1000;
+
+const adapter = DrizzleAdapter(authDb, {
   usersTable: users,
   accountsTable: accounts,
   sessionsTable: sessions,
@@ -47,6 +53,16 @@ async function sendMagicLink({
   identifier: string;
   url: string;
 }): Promise<void> {
+  // Throttle per destination mailbox (collapsing +tag / dot aliases): blocks
+  // magic-link bombing / address probing. Fails open on a Redis outage so login
+  // stays available.
+  const rl = await enforceMagicLinkLimit(identifier);
+  if (!rl.allowed) {
+    throw new Error(
+      `יותר מדי בקשות התחברות לכתובת הזו. נסו שוב בעוד ${Math.ceil(rl.resetSec / 60)} דקות.`,
+    );
+  }
+
   if (process.env.NODE_ENV !== 'production' || !process.env.EMAIL_FROM) {
     console.log('\n──────── MAGIC LINK ────────');
     console.log(`to: ${identifier}`);
@@ -68,7 +84,7 @@ async function sendMagicLink({
 export const { handlers, signIn, signOut, auth } = NextAuth({
   ...authConfig,
   adapter,
-  session: { strategy: 'jwt' },
+  session: { strategy: 'jwt', maxAge: 7 * 24 * 60 * 60 },
   providers: [
     Nodemailer({
       from: process.env.EMAIL_FROM ?? 'auth@restomatch.local',
@@ -81,26 +97,43 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     }),
   ],
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger }) {
       const t = token as AppJwt;
       if (user?.id) {
         t.userId = user.id;
       }
-      // Re-query while we don't have a confirmed membership. Once
-      // restaurantId is a real UUID, cache it on the JWT.
-      if (t.userId && !t.restaurantId) {
-        const membership = await db
+      if (!t.userId) return t;
+
+      // Re-validate membership + role periodically (and on first sight / on an
+      // explicit session update) so a revoked membership or a demoted role
+      // stops granting access within MEMBERSHIP_REVALIDATE_MS instead of
+      // surviving for the whole JWT lifetime.
+      const now = Date.now();
+      const stale =
+        t.membershipCheckedAt === undefined ||
+        now - t.membershipCheckedAt > MEMBERSHIP_REVALIDATE_MS;
+      if (stale || trigger === 'update') {
+        const userId = t.userId;
+        // Identity-layer read on the privileged auth connection (it must see
+        // the user's memberships across tenants to pick the active one).
+        const rows = await authDb
           .select()
           .from(memberships)
-          .where(eq(memberships.userId, t.userId))
-          .limit(1);
-        if (membership[0]) {
-          t.restaurantId = membership[0].restaurantId;
-          t.role = membership[0].role;
+          .where(eq(memberships.userId, userId));
+        // Keep the active restaurant if its membership still exists (and pick
+        // up any role change); otherwise fall back to any membership, else none.
+        const active = t.restaurantId
+          ? rows.find((m) => m.restaurantId === t.restaurantId)
+          : undefined;
+        const chosen = active ?? rows[0];
+        if (chosen) {
+          t.restaurantId = chosen.restaurantId;
+          t.role = chosen.role;
         } else {
           t.restaurantId = null;
           t.role = null;
         }
+        t.membershipCheckedAt = now;
       }
       return t;
     },
@@ -124,7 +157,7 @@ export async function switchActiveRestaurant(
   userId: string,
   restaurantId: string,
 ): Promise<{ role: UserRole } | null> {
-  const result = await db
+  const result = await authDb
     .select()
     .from(memberships)
     .where(and(eq(memberships.userId, userId), eq(memberships.restaurantId, restaurantId)))

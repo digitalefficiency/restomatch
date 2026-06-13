@@ -9,7 +9,7 @@ const config: NextConfig = {
     '@restomatch/types',
     '@restomatch/ui-tokens',
   ],
-  serverExternalPackages: ['nodemailer', 'postgres'],
+  serverExternalPackages: ['nodemailer', 'postgres', 'ioredis'],
 };
 
 export default config;

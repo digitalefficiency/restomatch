@@ -3,7 +3,6 @@
 import { useGSAP } from '@gsap/react';
 import { gsap } from 'gsap';
 import { Check, ExternalLink, FileImage, Plus, Receipt, ShieldCheck } from 'lucide-react';
-import Link from 'next/link';
 import { useRef } from 'react';
 import type { ReconciliationResult } from '../_mock';
 import type { CapturedImage } from '../_state';
@@ -104,15 +103,18 @@ export function Confirmed({
                 {capturedImage.invoiceId}
               </div>
             </div>
-            <Link
-              href={capturedImage.scanRouteUrl}
+            {/* Showcase demo: link straight to the uploaded object URL. The
+                in-app /scans route is auth-gated tenant data, so it would
+                dead-end at /login for an anonymous demo visitor. */}
+            <a
+              href={capturedImage.publicUrl ?? capturedImage.scanRouteUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="shrink-0 inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-2 rounded-lg shadow-[0_2px_8px_rgba(5,150,105,0.25)]"
             >
               צפה בסריקה
               <ExternalLink className="w-3 h-3" />
-            </Link>
+            </a>
           </div>
         </div>
       ) : null}

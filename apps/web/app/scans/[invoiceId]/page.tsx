@@ -1,20 +1,21 @@
 /**
- * Standalone "scanned invoice" page. This URL is what the database row
- * (invoices.raw_image_url) points to — the rest of the UI loads it via
- * an <iframe> so it behaves exactly like fetching a JPG/PDF from object
- * storage in production.
+ * Standalone "scanned invoice" page — tenant-private invoice documents.
+ *
+ * SECURITY: invoice scans contain another business's supplier relationships and
+ * pricing. This route requires an authenticated session (also enforced in
+ * middleware) and resolves a scan ONLY when its restaurant matches the caller's
+ * session, served via a short-lived signed URL. Cross-tenant or unauthenticated
+ * requests 404.
  *
  * Resolution order:
- *   1. Supabase invoice_scans table — a real photo / PDF uploaded by the
- *      receiver, embedded from the bucket's public URL. This is the
- *      production path.
- *   2. (non-production only) showcase demo papers — rendered from mock
- *      fixtures. These are DYNAMICALLY imported so they never ship in the
- *      production bundle, and are disabled in production: prod /scans serves
- *      a real scan or 404s. Set NEXT_PUBLIC_ENABLE_SCAN_MOCKS=1 to force-enable.
+ *   1. Supabase invoice_scans — the real uploaded photo/PDF, tenant-scoped and
+ *      signed. This is the production path.
+ *   2. (non-production only) showcase demo papers from mock fixtures, dynamically
+ *      imported so they never ship in the production bundle.
  */
 
 import { notFound } from 'next/navigation';
+import { auth } from '@/auth';
 import { InvoicePaper } from '@/app/showcase/dashboard/_components/InvoicePaperShared';
 import { resolveUploadedScan } from '@/lib/supabase/server';
 
@@ -32,11 +33,14 @@ function scanMocksEnabled(): boolean {
 
 export default async function ScanPage({ params }: PageProps) {
   const { invoiceId } = await params;
+  const session = await auth();
 
-  // 1. Real uploaded scan in Supabase storage — the production path.
-  const uploaded = await resolveUploadedScan(invoiceId);
-  if (uploaded) {
-    return <UploadedScanCanvas {...uploaded} />;
+  // 1. Real uploaded scan — requires auth + tenant ownership, served signed.
+  if (session?.user?.id) {
+    const uploaded = await resolveUploadedScan(invoiceId, session.user.restaurantId ?? null);
+    if (uploaded) {
+      return <UploadedScanCanvas {...uploaded} />;
+    }
   }
 
   // 2. Demo fixtures — never in production.
@@ -87,16 +91,17 @@ function MockScanCanvas({ scanData }: { scanData: ScanData }) {
 }
 
 function UploadedScanCanvas({
-  publicUrl,
+  signedUrl,
   mimeType,
   pageCount,
   supplierName,
 }: {
-  publicUrl: string;
+  signedUrl: string;
   mimeType: string;
   pageCount: number | null;
   supplierName: string | null;
 }) {
+  const publicUrl = signedUrl;
   const isPdf = mimeType === 'application/pdf';
   return (
     <div
@@ -109,11 +114,12 @@ function UploadedScanCanvas({
     >
       <div className="mb-3 flex w-full max-w-3xl items-center gap-2 rounded-full border border-emerald-200 bg-white px-4 py-2 shadow-sm">
         <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
-        <span className="truncate font-mono text-xs text-stone-600">{publicUrl}</span>
+        <span className="truncate font-mono text-xs text-stone-600">
+          חשבונית סרוקה{supplierName ? ` · ${supplierName}` : ''}
+        </span>
         <span className="mr-auto shrink-0 text-[10px] font-semibold text-emerald-700">
-          ✓ נטען מ-Supabase Storage
+          ✓ קישור מאובטח
           {pageCount ? ` · ${pageCount} עמודים` : ''}
-          {supplierName ? ` · ${supplierName}` : ''}
         </span>
       </div>
 

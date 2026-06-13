@@ -56,3 +56,13 @@ export {
   type NotificationChannel,
 } from './notifications';
 export { logActivity, type ActivityEventInput, type ActivityEventType } from './activity';
+export {
+  checkRateLimit,
+  MemoryRateLimitStore,
+  RateLimitError,
+  type RateLimitStore,
+  type RateLimitOptions,
+  type RateLimitResult,
+} from './rateLimit';
+export { isOriginAllowed, type OriginCheckInput } from './csrf';
+export { canonicalizeEmail } from './email';

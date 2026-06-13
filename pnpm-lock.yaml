@@ -147,6 +147,9 @@ importers:
       gsap:
         specifier: ^3.12.5
         version: 3.15.0
+      ioredis:
+        specifier: ^5.4.2
+        version: 5.10.1
       lucide-react:
         specifier: ^0.469.0
         version: 0.469.0(react@19.0.0)
