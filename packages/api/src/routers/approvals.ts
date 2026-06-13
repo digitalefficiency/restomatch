@@ -7,6 +7,7 @@ import {
   discrepancies,
   eq,
   inArray,
+  lt,
   matchRuns,
   type UserRole,
 } from '@restomatch/db';
@@ -36,9 +37,19 @@ export const approvalsRouter = router({
    * - Bookkeeper sees items requiring bookkeeper.
    */
   myQueue: memberProcedure
-    .input(z.object({ limit: z.number().int().positive().max(100).default(50) }).optional())
+    .input(
+      z
+        .object({
+          limit: z.number().int().positive().max(100).default(50),
+          // NON-BREAKING: ISO cursor → only rows strictly older than it. Return
+          // shape stays an array (desc by createdAt).
+          cursor: z.string().datetime().optional(),
+        })
+        .optional(),
+    )
     .query(async ({ ctx, input }) => {
       const limit = input?.limit ?? 50;
+      const cursorDate = input?.cursor ? new Date(input.cursor) : null;
       const roles = expandVisibleRoles(ctx.session.role);
       const rows = await ctx.db
         .select({
@@ -62,6 +73,7 @@ export const approvalsRouter = router({
             eq(discrepancies.restaurantId, ctx.session.restaurantId),
             inArray(discrepancies.resolutionStatus, ['open', 'escalated']),
             inArray(discrepancies.requiresRole, roles),
+            cursorDate ? lt(discrepancies.createdAt, cursorDate) : undefined,
           ),
         )
         .orderBy(desc(discrepancies.createdAt))

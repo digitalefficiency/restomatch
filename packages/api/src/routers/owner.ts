@@ -32,7 +32,13 @@ export const ownerRouter = router({
       return computeLeaks(ctx.db, ctx.session.restaurantId, input ?? {});
     }),
 
-  suppliers: memberAnalyticsProcedure.query(async ({ ctx }): Promise<SupplierScorecard[]> => {
-    return computeSupplierScorecards(ctx.db, ctx.session.restaurantId);
-  }),
+  // NON-BREAKING pagination: still returns an array. Supplier scorecards have no
+  // createdAt cursor, so we expose an optional `limit` and slice the (already
+  // restaurant-scoped, name-ordered) result instead.
+  suppliers: memberAnalyticsProcedure
+    .input(z.object({ limit: z.number().int().positive().max(200).optional() }).optional())
+    .query(async ({ ctx, input }): Promise<SupplierScorecard[]> => {
+      const cards = await computeSupplierScorecards(ctx.db, ctx.session.restaurantId);
+      return input?.limit ? cards.slice(0, input.limit) : cards;
+    }),
 });

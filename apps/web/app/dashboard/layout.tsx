@@ -3,6 +3,7 @@ import { auth, signOut } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
 import { Button } from '@/lib/components';
 import { DashboardNav } from './nav';
+import { DashboardSearch } from './search';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
@@ -36,11 +37,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
             </p>
           </div>
           <DashboardNav />
-          <form action={logout}>
-            <Button variant="secondary" size="sm">
-              התנתק
-            </Button>
-          </form>
+          <div className="flex items-center gap-3">
+            <DashboardSearch />
+            <form action={logout}>
+              <Button variant="secondary" size="sm">
+                התנתק
+              </Button>
+            </form>
+          </div>
         </div>
       </header>
       <div className="mx-auto max-w-6xl px-6 py-8">{children}</div>

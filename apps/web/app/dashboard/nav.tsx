@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BarChart3, FileDown, Inbox, LayoutDashboard, Truck } from 'lucide-react';
+import { BarChart3, FileDown, Inbox, LayoutDashboard, Settings, Truck } from 'lucide-react';
 import { cn } from '@/lib/components';
 
 const LINKS = [
@@ -11,6 +11,7 @@ const LINKS = [
   { href: '/dashboard/leaks', label: 'בלש דליפות', icon: BarChart3 },
   { href: '/dashboard/suppliers', label: 'ספקים', icon: Truck },
   { href: '/dashboard/exports', label: 'ייצוא', icon: FileDown },
+  { href: '/dashboard/settings', label: 'הגדרות', icon: Settings },
 ];
 
 export function DashboardNav() {

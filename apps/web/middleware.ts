@@ -15,7 +15,11 @@ export default auth((req) => {
   const lastSegment = path.slice(path.lastIndexOf('/') + 1);
   const looksLikeAsset = /\.[a-z0-9]+$/i.test(lastSegment);
   const isPublic =
+    // Marketing landing pages — anonymous visitors can view these. /scans and
+    // /admin are intentionally absent so they keep redirecting to login.
     path === '/' ||
+    path === '/pricing' ||
+    path === '/about' ||
     path.startsWith('/login') ||
     path.startsWith('/showcase') ||
     path.startsWith('/api/auth') ||

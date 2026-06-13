@@ -3,9 +3,13 @@ import { activityRouter } from './routers/activity';
 import { adminRouter } from './routers/admin';
 import { approvalsRouter } from './routers/approvals';
 import { exportsRouter } from './routers/exports';
+import { leadsRouter } from './routers/leads';
 import { onboardingRouter } from './routers/onboarding';
 import { ownerRouter } from './routers/owner';
+import { plansRouter } from './routers/plans';
 import { receivingRouter } from './routers/receiving';
+import { searchRouter } from './routers/search';
+import { settingsRouter } from './routers/settings';
 
 export const appRouter = router({
   owner: ownerRouter,
@@ -15,6 +19,10 @@ export const appRouter = router({
   exports: exportsRouter,
   activity: activityRouter,
   admin: adminRouter,
+  settings: settingsRouter,
+  plans: plansRouter,
+  leads: leadsRouter,
+  search: searchRouter,
 });
 
 export type AppRouter = typeof appRouter;

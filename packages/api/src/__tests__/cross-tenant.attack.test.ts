@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createDb, discrepancies, eq, goodsReceipts, grLines, invoices } from '@restomatch/db';
+import { createDb, discrepancies, eq, goodsReceipts, grLines, invoices, restaurants } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
@@ -78,6 +78,14 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'admin.setOverrides': 'admin-denial',
   'admin.setMemberRole': 'admin-denial',
   'admin.listLeads': 'admin-denial',
+  // Phase 5+6 additions
+  'settings.get': 'isolation',
+  'settings.update': 'isolation',
+  'search.global': 'isolation',
+  'plans.list':
+    'public marketing catalog (publicProcedure); reads the global plans table only, no tenant-scoped rows — nothing to isolate',
+  'leads.create':
+    'public landing capture (publicProcedure); writes to the non-tenant leads table, takes no entity ids and reads nothing tenant-scoped',
 };
 
 function listProcedurePaths(): string[] {
@@ -298,6 +306,41 @@ describe('list/aggregate isolation (A must not see B)', () => {
     const rows = await caller.onboarding.myMemberships();
     expect(rows).toHaveLength(1);
     expect(rows[0]?.restaurantId).toBe(A.restaurantId);
+  });
+
+  it('settings.get + settings.update read/write only the caller restaurant', async () => {
+    const callerA = callerFor(A);
+    // A updates its own settings; B must be untouched.
+    await callerA.settings.update({ ocrReviewThreshold: 0.81, tolerances: { pricePercent: 0.04 } });
+    const settingsA = await callerA.settings.get();
+    expect(settingsA.ocrReviewThreshold).toBe(0.81);
+    expect(settingsA.tolerances?.pricePercent).toBe(0.04);
+
+    const [rowB] = await db
+      .select({ settings: restaurants.settings })
+      .from(restaurants)
+      .where(eq(restaurants.id, B.restaurantId));
+    expect(rowB?.settings?.ocrReviewThreshold).toBeUndefined();
+    expect(rowB?.settings?.tolerances?.pricePercent).toBeUndefined();
+  });
+
+  it('search.global returns only the caller restaurant entities', async () => {
+    const caller = callerFor(A);
+    // Supplier names are "ספק A"/"ספק B"; product names "עגבניה A"/"עגבניה B".
+    const supplierHits = await caller.search.global({ q: 'ספק' });
+    const supplierNames = supplierHits.suppliers.map((s) => s.name);
+    expect(supplierNames).toContain(A.supplierName);
+    expect(supplierNames).not.toContain(B.supplierName);
+
+    const productHits = await caller.search.global({ q: 'עגבניה' });
+    const productNames = productHits.products.map((p) => p.canonicalName);
+    expect(productNames.some((n) => n.includes('A'))).toBe(true);
+    expect(productNames.some((n) => n.includes('B'))).toBe(false);
+
+    const invoiceHits = await caller.search.global({ q: 'INV' });
+    const invoiceNumbers = invoiceHits.invoices.map((i) => i.invoiceNumber);
+    expect(invoiceNumbers).toContain(A.invoiceNumber);
+    expect(invoiceNumbers).not.toContain(B.invoiceNumber);
   });
 });
 

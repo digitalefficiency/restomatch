@@ -16,3 +16,11 @@ export { ActivityFeed } from './ActivityFeed';
 export type { ActivityItem } from './ActivityFeed';
 export { Sparkline } from './Sparkline';
 export { Skeleton } from './Skeleton';
+export {
+  EntitlementUpsell,
+  ErrorNotice,
+  entitlementCauseOf,
+  featureLabel,
+} from './EntitlementUpsell';
+export type { EntitlementCause } from './EntitlementUpsell';
+export { LoadMore } from './LoadMore';

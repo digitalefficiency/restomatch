@@ -1,23 +1,45 @@
 import { TRPCError } from '@trpc/server';
 import { Droplets, ShieldAlert } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
-import { Badge, Card, EmptyState, LeakHeatmap, SectionHeader, Sparkline } from '@/lib/components';
+import {
+  Badge,
+  Card,
+  EmptyState,
+  EntitlementUpsell,
+  LeakHeatmap,
+  SectionHeader,
+  Sparkline,
+  entitlementCauseOf,
+} from '@/lib/components';
 
 export default async function LeaksPage() {
   const caller = await createServerCaller();
   let leaks: Awaited<ReturnType<typeof caller.owner.leaks>> = [];
-  let forbidden = false;
+  let blocked: 'entitlement' | 'role' | null = null;
   try {
     leaks = await caller.owner.leaks({ limit: 50 });
   } catch (err) {
-    if (err instanceof TRPCError && err.code === 'FORBIDDEN') {
-      forbidden = true;
+    // Distinguish a missing plan feature (→ upsell) from a role restriction
+    // (→ explain the role requirement). Both arrive as FORBIDDEN.
+    if (entitlementCauseOf(err)) {
+      blocked = 'entitlement';
+    } else if (err instanceof TRPCError && err.code === 'FORBIDDEN') {
+      blocked = 'role';
     } else {
       throw err;
     }
   }
 
-  if (forbidden) {
+  if (blocked === 'entitlement') {
+    return (
+      <div>
+        <SectionHeader title="בלש הדליפות" />
+        <EntitlementUpsell feature="advanced_analytics" title="שדרגו את המנוי כדי לפתוח את בלש הדליפות" />
+      </div>
+    );
+  }
+
+  if (blocked === 'role') {
     return (
       <div>
         <SectionHeader title="בלש הדליפות" />

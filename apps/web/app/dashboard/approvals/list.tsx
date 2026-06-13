@@ -4,26 +4,52 @@ import { useState } from 'react';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
 import { trpc } from '@/lib/trpc/client';
-import { Badge, Button, Card, Textarea, type BadgeTone } from '@/lib/components';
+import { Badge, Button, Card, LoadMore, Textarea, type BadgeTone } from '@/lib/components';
 
 type QueueItem = inferRouterOutputs<AppRouter>['approvals']['myQueue'][number];
 
+const PAGE = 50;
+
 export function ApprovalsList({ initial }: { initial: QueueItem[] }) {
   const utils = trpc.useUtils();
-  const queue = trpc.approvals.myQueue.useQuery(undefined, { initialData: initial });
-  const approve = trpc.approvals.approve.useMutation({
-    onSuccess: () => utils.approvals.myQueue.invalidate(),
-  });
-  const reject = trpc.approvals.reject.useMutation({
-    onSuccess: () => utils.approvals.myQueue.invalidate(),
-  });
+
+  // Local list seeded from the server page; cursor pagination appends older rows.
+  const [items, setItems] = useState<QueueItem[]>(initial);
+  const [hasMore, setHasMore] = useState(initial.length >= PAGE);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  // After a decision, refetch the first page so the resolved row drops out.
+  async function refreshFirstPage() {
+    const fresh = await utils.approvals.myQueue.fetch({ limit: PAGE });
+    setItems(fresh);
+    setHasMore(fresh.length >= PAGE);
+  }
+
+  const approve = trpc.approvals.approve.useMutation({ onSuccess: refreshFirstPage });
+  const reject = trpc.approvals.reject.useMutation({ onSuccess: refreshFirstPage });
+
+  async function loadMore() {
+    const last = items[items.length - 1];
+    if (!last) return;
+    setLoadingMore(true);
+    try {
+      const next = await utils.approvals.myQueue.fetch({
+        limit: PAGE,
+        cursor: new Date(last.createdAt).toISOString(),
+      });
+      setItems((prev) => [...prev, ...next]);
+      setHasMore(next.length >= PAGE);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   const [activeReject, setActiveReject] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
 
   return (
     <div className="space-y-3">
-      {queue.data?.map((d) => (
+      {items.map((d) => (
         <Card key={d.id} as="article" elevated aria-label={typeLabel(d.type)}>
           <header className="mb-3 flex items-start justify-between gap-3">
             <div>
@@ -106,6 +132,7 @@ export function ApprovalsList({ initial }: { initial: QueueItem[] }) {
           )}
         </Card>
       ))}
+      <LoadMore onClick={loadMore} loading={loadingMore} hasMore={hasMore} />
     </div>
   );
 }

@@ -57,6 +57,13 @@
       "when": 1781384344660,
       "tag": "0007_cooing_rumiko_fujikawa",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1781470744660,
+      "tag": "0008_search_trgm_indexes",
+      "breakpoints": true
     }
   ]
 }

@@ -3,13 +3,14 @@ import { redirect } from 'next/navigation';
 import { Activity, AlertTriangle, CheckCircle2, ClipboardCheck, Wallet } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
 import {
-  ActivityFeed,
-  Card,
   EmptyState,
+  EntitlementUpsell,
   KpiCard,
   LeakHeatmap,
   SectionHeader,
+  entitlementCauseOf,
 } from '@/lib/components';
+import { PaginatedActivityFeed } from './activity';
 
 export default async function DashboardPage() {
   const caller = await createServerCaller();
@@ -19,11 +20,18 @@ export default async function DashboardPage() {
   }
   const kpis = await caller.owner.kpis();
 
-  // Leak grid is owner-only; other roles simply won't see this section.
+  // Leak grid is owner-only; other roles simply won't see this section. If the
+  // feature is gated behind a paid plan, surface a compact upsell teaser rather
+  // than hiding the section entirely.
   let leaks: Awaited<ReturnType<typeof caller.owner.leaks>> = [];
+  let leaksEntitlementBlocked = false;
   try {
     leaks = await caller.owner.leaks({ limit: 8 });
-  } catch {
+  } catch (err) {
+    if (entitlementCauseOf(err)) {
+      leaksEntitlementBlocked = true;
+    }
+    // Role/other errors: silently omit the section (non-owners don't see it).
     leaks = [];
   }
 
@@ -67,7 +75,19 @@ export default async function DashboardPage() {
         />
       </div>
 
-      {leaks.length > 0 ? (
+      {leaksEntitlementBlocked ? (
+        <div className="mt-10">
+          <SectionHeader
+            title="בלש דליפות"
+            subtitle="המוצרים שדולפים הכי הרבה כסף החודש."
+          />
+          <EntitlementUpsell
+            feature="advanced_analytics"
+            title="שדרגו כדי לפתוח את בלש הדליפות"
+            compact
+          />
+        </div>
+      ) : leaks.length > 0 ? (
         <div className="mt-10">
           <SectionHeader
             title="בלש דליפות"
@@ -88,9 +108,7 @@ export default async function DashboardPage() {
       <div className="mt-10">
         <SectionHeader title="פעילות אחרונה" subtitle="מה קרה במערכת לאחרונה." />
         {activity.length > 0 ? (
-          <Card elevated padding="lg">
-            <ActivityFeed items={activity} />
-          </Card>
+          <PaginatedActivityFeed initial={activity} />
         ) : (
           <EmptyState
             icon={<Activity className="h-6 w-6" />}
