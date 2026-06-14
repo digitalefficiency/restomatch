@@ -25,11 +25,7 @@ function leakColor(deltaPct: number): { bg: string; text: string; intensity: num
 }
 
 function fmtIls(v: number): string {
-  return new Intl.NumberFormat('he-IL', {
-    style: 'currency',
-    currency: 'ILS',
-    maximumFractionDigits: 0,
-  }).format(v);
+  return formatIls(v);
 }
 
 /**

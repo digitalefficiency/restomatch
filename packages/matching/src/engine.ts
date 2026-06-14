@@ -12,6 +12,7 @@ import type {
   Severity,
 } from './index';
 import { unitConversionFactor } from './units';
+import { mulIls, quantizeIls, sumIls, toAgorot, toShekels } from './money';
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Tunable thresholds (not exposed via Tolerances yet — sane defaults)
@@ -73,7 +74,7 @@ function evaluatePrice(
       productId: null,
       expected,
       actual,
-      deltaAmount: absDiff * qty,
+      deltaAmount: mulIls(absDiff, qty),
       toleranceUsed: `price: ±${tolerances.pricePercent * 100}% or ₪${tolerances.priceAbsolute}`,
     },
   };
@@ -122,7 +123,7 @@ function evaluateQty(
       productId: null,
       expected: ordered,
       actual: received,
-      deltaAmount: absDiff * unitPrice,
+      deltaAmount: mulIls(unitPrice, absDiff),
       toleranceUsed: `qty: ±${tolerances.qtyPercent * 100}% or ${tolerances.qtyAbsolute} units`,
     },
   };
@@ -143,7 +144,7 @@ export function runMatch(input: MatchInput): MatchOutput {
         productId: null,
         expected: null,
         actual: null,
-        deltaAmount: invoice.totalInclVat,
+        deltaAmount: quantizeIls(invoice.totalInclVat),
         toleranceUsed: 'invoice number uniqueness per supplier',
         message: `Invoice number ${invoice.invoiceNumber} already exists for supplier ${invoice.supplierId}`,
       }),
@@ -176,7 +177,7 @@ export function runMatch(input: MatchInput): MatchOutput {
         productId: null,
         expected: null,
         actual: null,
-        deltaAmount: invoice.totalInclVat,
+        deltaAmount: quantizeIls(invoice.totalInclVat),
         toleranceUsed: 'PO must exist for invoice',
         message: 'Invoice arrived without any matching purchase order',
       }),
@@ -265,7 +266,7 @@ export function runMatch(input: MatchInput): MatchOutput {
               invoiceLineId: inv.id,
               expected: gr.qtyReceived,
               actual: invQty,
-              deltaAmount: diff * invPrice,
+              deltaAmount: mulIls(invPrice, diff),
               toleranceUsed: 'billed quantity exceeds received quantity',
               message: 'Invoice charges for more units than were received',
             }),
@@ -318,7 +319,7 @@ export function runMatch(input: MatchInput): MatchOutput {
           grLineId: gr?.id ?? null,
           expected: po.qtyOrdered,
           actual: 0,
-          deltaAmount: po.qtyOrdered * (po.unitPriceExpected ?? 0),
+          deltaAmount: mulIls(po.unitPriceExpected ?? 0, po.qtyOrdered),
           toleranceUsed: 'PO line must appear on invoice',
         }),
       );
@@ -335,7 +336,7 @@ export function runMatch(input: MatchInput): MatchOutput {
           invoiceLineId: il.id,
           expected: null,
           actual: il.qtyBilled,
-          deltaAmount: il.lineTotal,
+          deltaAmount: quantizeIls(il.lineTotal),
           toleranceUsed: 'invoice line must match a PO line',
           message: `Invoice line for ${il.productId ?? 'unknown product'} has no matching PO line`,
         }),
@@ -343,40 +344,40 @@ export function runMatch(input: MatchInput): MatchOutput {
     }
   }
 
-  // 7. TOTAL_MISMATCH — sum of line totals vs invoice subtotal
-  const linesSum = invoiceLines.reduce((s, l) => s + l.lineTotal, 0);
-  if (
-    invoiceLines.length > 0 &&
-    Math.abs(linesSum - invoice.totalExclVat) > TOTAL_TOLERANCE_ILS
-  ) {
+  // 7. TOTAL_MISMATCH — sum of line totals vs invoice subtotal (compared in agorot)
+  const linesSum = sumIls(invoiceLines.map((l) => l.lineTotal));
+  const totalDiffAgorot = Math.abs(toAgorot(linesSum) - toAgorot(invoice.totalExclVat));
+  if (invoiceLines.length > 0 && totalDiffAgorot > toAgorot(TOTAL_TOLERANCE_ILS)) {
     out.push(
       discrepancy('TOTAL_MISMATCH', 'block', {
         productId: null,
         expected: linesSum,
         actual: invoice.totalExclVat,
-        deltaAmount: Math.abs(linesSum - invoice.totalExclVat),
+        deltaAmount: toShekels(totalDiffAgorot),
         toleranceUsed: `±₪${TOTAL_TOLERANCE_ILS}`,
         message: `Lines sum to ₪${linesSum.toFixed(2)} but invoice subtotal claims ₪${invoice.totalExclVat.toFixed(2)}`,
       }),
     );
   }
 
-  // 8. VAT_MISMATCH — vat amount vs subtotal × vatRate
-  const expectedVat = invoice.totalExclVat * vatRate;
-  if (invoiceLines.length > 0 && Math.abs(invoice.vatAmount - expectedVat) > TOTAL_TOLERANCE_ILS) {
+  // 8. VAT_MISMATCH — vat amount vs subtotal × vatRate (compared in agorot)
+  const expectedVat = quantizeIls(invoice.totalExclVat * vatRate);
+  const vatDiffAgorot = Math.abs(toAgorot(invoice.vatAmount) - toAgorot(expectedVat));
+  if (invoiceLines.length > 0 && vatDiffAgorot > toAgorot(TOTAL_TOLERANCE_ILS)) {
     out.push(
       discrepancy('VAT_MISMATCH', 'warn', {
         productId: null,
         expected: expectedVat,
         actual: invoice.vatAmount,
-        deltaAmount: Math.abs(invoice.vatAmount - expectedVat),
+        deltaAmount: toShekels(vatDiffAgorot),
         toleranceUsed: `${vatRate * 100}% VAT on subtotal, ±₪${TOTAL_TOLERANCE_ILS}`,
       }),
     );
   }
 
-  // 9. Compute totals & overall status
-  const totalDiscrepancyAmount = out.reduce((s, d) => s + Math.abs(d.deltaAmount), 0);
+  // 9. Compute totals & overall status. Summed in integer agorot so the leak
+  // figure is exact no matter how many discrepancy lines contribute.
+  const totalDiscrepancyAmount = sumIls(out.map((d) => Math.abs(d.deltaAmount)));
   const status = deriveStatus(out);
 
   return {
@@ -422,7 +423,7 @@ function evaluateBaseline(
     productId: null,
     expected: baseline.p90,
     actual: actualPrice,
-    deltaAmount: (actualPrice - baseline.p90) * qty,
+    deltaAmount: mulIls(actualPrice - baseline.p90, qty),
     toleranceUsed: `actual exceeds historical p90 of ₪${baseline.p90}`,
     message: `Price ₪${actualPrice} exceeds supplier's 90th-percentile (₪${baseline.p90})`,
   };
