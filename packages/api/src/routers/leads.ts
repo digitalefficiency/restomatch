@@ -6,9 +6,10 @@ import { publicProcedure, router } from '../trpc';
  * Public landing lead-capture (Phase 6 marketing). Spam defense: a honeypot
  * field (`hp`) a human never fills — if a bot fills it we silently succeed
  * without inserting, so the bot can't distinguish a drop from a save — plus
- * bounded strings so a single request can't write unbounded text.
- * TODO (hardening): add a per-IP Redis rate limit at the web edge (the
- * enforceRateLimit infra from apps/web/lib/rateLimit.ts) for defense in depth.
+ * bounded strings so a single request can't write unbounded text. A per-IP
+ * rate limit is enforced at the web edge (the tRPC route handler wires
+ * enforceRateLimit via trpcRequestTargets('leads.create', …)) for defense in
+ * depth — AppContext carries no IP, so the limit lives at the edge, not here.
  */
 const LeadInput = z.object({
   name: z.string().trim().min(1).max(200),

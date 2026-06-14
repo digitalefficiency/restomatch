@@ -92,4 +92,5 @@ export {
   type RateLimitResult,
 } from './rateLimit';
 export { isOriginAllowed, type OriginCheckInput } from './csrf';
+export { clientIpFromHeaders, trpcRequestTargets, type HeaderReader } from './edge';
 export { canonicalizeEmail } from './email';
