@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { Activity, AlertTriangle, CheckCircle2, ClipboardCheck, Wallet } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
+import { formatIls } from '@/lib/money';
 import {
   EmptyState,
   EntitlementUpsell,
