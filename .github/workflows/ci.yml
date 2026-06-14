@@ -1,0 +1,76 @@
+name: CI
+
+# The enforcement gate. Verified to pass on a clean checkout: the schema is
+# bootstrapped with `db migrate` (no vitest globalSetup exists — DB-backed tests
+# assume the schema is already present), then the suite runs serially against a
+# Postgres 16 + pgvector service container.
+#
+# Scope note: web typecheck/lint and the Next build are intentionally NOT in this
+# v1 gate — apps/web's tsconfig includes `.next/types/**`, so `tsc --noEmit`
+# needs a prior `next build`. Adding a web build+lint+typecheck job is a tracked
+# follow-up (see AGENTS.md "Test / CI facts"); do not silently disable it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: typecheck + test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: restomatch_test
+          # trust auth so the test-created `restomatch_app` non-owner role can
+          # log in over TCP without a scram handshake (rls.attack.test.ts).
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # migrate reads DATABASE_URL; the DB-backed tests read DATABASE_URL_TEST.
+      # Both must point at the SAME database so tests see the migrated schema.
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/restomatch_test
+      DATABASE_URL_TEST: postgres://postgres:postgres@localhost:5432/restomatch_test
+      # No REDIS_URL on purpose → rate limiting falls back to the in-memory store.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Bootstrap test DB (extensions + migrations 0000..0008)
+        run: pnpm --filter @restomatch/db migrate
+
+      - name: Typecheck (all packages except web)
+        run: pnpm turbo run typecheck --concurrency=1 --filter='!@restomatch/web'
+
+      - name: Test (serial; DB-backed suites + RLS attack + the leak canary)
+        run: pnpm turbo run test --concurrency=1
