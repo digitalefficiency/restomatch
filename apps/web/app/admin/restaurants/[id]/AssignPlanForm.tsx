@@ -29,12 +29,14 @@ export function AssignPlanForm({
 
   return (
     <div>
-      <label className="mb-2 block text-xs font-medium text-stone-500">שיוך תוכנית</label>
+      <label className="mb-2 block font-mono text-xs font-medium uppercase tracking-wider text-subtle">
+        שיוך תוכנית
+      </label>
       <div className="flex items-center gap-2">
         <select
           value={plan}
           onChange={(e) => setPlan(e.target.value as (typeof PLANS)[number]['key'])}
-          className="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm"
+          className="rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm text-ink transition-colors focus:border-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           {PLANS.map((p) => (
             <option key={p.key} value={p.key}>
@@ -51,9 +53,9 @@ export function AssignPlanForm({
         </Button>
       </div>
       {assign.error ? (
-        <p className="mt-2 text-xs text-rose-600">{assign.error.message}</p>
+        <p className="mt-2 text-xs text-danger">{assign.error.message}</p>
       ) : null}
-      {assign.isSuccess ? <p className="mt-2 text-xs text-emerald-600">נשמר ✓</p> : null}
+      {assign.isSuccess ? <p className="mt-2 text-xs text-primary">נשמר ✓</p> : null}
     </div>
   );
 }

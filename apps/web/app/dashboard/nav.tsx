@@ -27,9 +27,10 @@ export function DashboardNav() {
             aria-current={active ? 'page' : undefined}
             className={cn(
               'inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 transition-colors',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
               active
-                ? 'bg-primary/10 font-medium text-primary'
-                : 'text-stone-600 hover:bg-stone-100 hover:text-ink',
+                ? 'bg-primary/12 font-semibold text-primary ring-1 ring-primary/25'
+                : 'text-muted hover:bg-surface-2 hover:text-ink',
             )}
           >
             <Icon className="h-4 w-4" aria-hidden="true" />

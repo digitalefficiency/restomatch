@@ -44,16 +44,22 @@ export function SuppliersList({ initial }: { initial: Scorecard[] }) {
     <div className="space-y-6">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {items.map((s) => (
-          <Card key={s.supplierId} as="article" elevated>
-            <header className="mb-4 flex items-start justify-between">
-              <div>
-                <h3 className="text-lg font-semibold text-stone-900">{s.supplierName}</h3>
-                <p className="mt-1 text-xs text-stone-500">{s.matchRunsCount} השוואות בתקופה</p>
+          <Card key={s.supplierId} as="article" elevated flow>
+            <header className="mb-4 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="truncate text-lg font-bold tracking-tight text-ink">{s.supplierName}</h3>
+                <p className="mt-1 font-mono text-xs tabular-nums text-subtle">
+                  {s.matchRunsCount} <span className="font-sans">השוואות בתקופה</span>
+                </p>
               </div>
               <TrendBadge trend={s.trend} />
             </header>
-            <dl className="space-y-3">
-              <Row label="התאמות נקיות" value={`${s.cleanMatchPct.toFixed(1)}%`} />
+            <dl className="space-y-3 border-t border-line pt-4">
+              <Row
+                label="התאמות נקיות"
+                value={`${s.cleanMatchPct.toFixed(1)}%`}
+                tone={s.cleanMatchPct >= 80 ? 'good' : 'warning'}
+              />
               <Row
                 label="סטיית מחיר ממוצעת"
                 value={`${(s.avgPriceDeltaPct * 100).toFixed(1)}%`}
@@ -80,14 +86,20 @@ function Row({
 }: {
   label: string;
   value: string;
-  tone?: 'default' | 'warning' | 'danger';
+  tone?: 'default' | 'good' | 'warning' | 'danger';
 }) {
   const color =
-    tone === 'danger' ? 'text-danger' : tone === 'warning' ? 'text-warning' : 'text-stone-900';
+    tone === 'danger'
+      ? 'text-danger'
+      : tone === 'warning'
+        ? 'text-warn'
+        : tone === 'good'
+          ? 'text-primary'
+          : 'text-ink';
   return (
     <div className="flex items-center justify-between">
-      <dt className="text-sm text-stone-500">{label}</dt>
-      <dd className={`text-base font-semibold tabular-nums ${color}`}>{value}</dd>
+      <dt className="text-sm text-muted">{label}</dt>
+      <dd className={`font-mono text-base font-bold tabular-nums ${color}`}>{value}</dd>
     </div>
   );
 }

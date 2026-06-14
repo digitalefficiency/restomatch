@@ -68,7 +68,8 @@ export function Processing({ supplierId, onComplete }: Props) {
         subtitle="זה לוקח 5-15 שניות. אנחנו מזהים פריטי-שורה ומשווים אותם להזמנה."
       />
 
-      <div className="rounded-2xl border border-stone-200/70 bg-white/90 backdrop-blur-xl p-6 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_24px_48px_-12px_rgba(15,23,42,0.08)]">
+      <div className="relative overflow-hidden rounded-2xl border border-line bg-surface p-6 shadow-card">
+        <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px flow-stream" />
         <div className="space-y-4">
           {STEPS.map((step, idx) => {
             const Icon = step.icon;
@@ -80,16 +81,16 @@ export function Processing({ supplierId, onComplete }: Props) {
               <div
                 key={step.id}
                 className={`proc-step flex items-center gap-4 p-3 rounded-xl transition-all ${
-                  isActive ? 'bg-teal-50/60 border border-teal-200/60' : 'bg-transparent'
+                  isActive ? 'bg-primary/8 border border-primary/25' : 'bg-transparent'
                 }`}
               >
                 <div
                   className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${
                     isDone
-                      ? 'bg-emerald-50 text-emerald-600 ring-1 ring-emerald-200'
+                      ? 'bg-primary/12 text-primary ring-1 ring-primary/25'
                       : isActive
-                        ? 'bg-teal-100 text-teal-700 ring-1 ring-teal-200'
-                        : 'bg-stone-100 text-stone-400'
+                        ? 'bg-primary/15 text-primary ring-1 ring-primary/30'
+                        : 'bg-surface-2 text-subtle ring-1 ring-line'
                   }`}
                 >
                   {isDone ? (
@@ -103,12 +104,12 @@ export function Processing({ supplierId, onComplete }: Props) {
                 <div className="flex-1">
                   <div
                     className={`font-medium ${
-                      isPending ? 'text-stone-400' : 'text-stone-900'
+                      isPending ? 'text-subtle' : 'text-ink'
                     }`}
                   >
                     {step.label}
                   </div>
-                  <div className="text-xs text-stone-500 mt-0.5">
+                  <div className="text-xs text-muted mt-0.5">
                     {isDone ? 'הסתיים' : isActive ? 'מתבצע…' : 'ממתין'}
                   </div>
                 </div>
@@ -117,16 +118,16 @@ export function Processing({ supplierId, onComplete }: Props) {
           })}
         </div>
 
-        <div className="mt-6 pt-4 border-t border-stone-100">
-          <div className="flex items-center justify-between text-xs text-stone-500">
+        <div className="mt-6 pt-4 border-t border-line">
+          <div className="flex items-center justify-between text-xs text-muted">
             <span>שלב {Math.min(currentStep + 1, STEPS.length)} מתוך {STEPS.length}</span>
             <span className="tabular-nums font-mono">
               {Math.round((currentStep / STEPS.length) * 100)}%
             </span>
           </div>
-          <div className="mt-2 h-1.5 bg-stone-100 rounded-full overflow-hidden">
+          <div className="mt-2 h-1.5 bg-surface-2 rounded-full overflow-hidden">
             <div
-              className="h-full bg-gradient-to-r from-teal-500 to-teal-700 transition-all duration-500 ease-out"
+              className="h-full flow-stream transition-all duration-500 ease-out"
               style={{ width: `${(currentStep / STEPS.length) * 100}%` }}
             />
           </div>

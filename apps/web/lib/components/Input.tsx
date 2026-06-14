@@ -1,7 +1,7 @@
 import { cn } from './cn';
 
 const fieldBase =
-  'w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-ink placeholder-stone-400 transition-colors focus:border-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary';
+  'w-full rounded-xl border border-line bg-surface-2 px-3 py-2 text-ink placeholder-subtle transition-colors focus:border-primary/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-0 disabled:opacity-50 disabled:cursor-not-allowed';
 
 export function Input({ className, ...rest }: React.InputHTMLAttributes<HTMLInputElement>) {
   return <input className={cn(fieldBase, className)} {...rest} />;
@@ -31,12 +31,12 @@ export function Field({
   const hintId = htmlFor ? `${htmlFor}-hint` : undefined;
   return (
     <div className={className}>
-      <label htmlFor={htmlFor} className="mb-1.5 block text-sm text-stone-700">
+      <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-medium text-muted">
         {label}
       </label>
       {children}
       {hint ? (
-        <p id={hintId} className="mt-1 text-xs text-stone-500">
+        <p id={hintId} className="mt-1 text-xs text-subtle">
           {hint}
         </p>
       ) : null}

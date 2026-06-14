@@ -110,16 +110,16 @@ export function SettingsForm({ initial, canEdit }: { initial: Settings; canEdit:
       {!canEdit ? (
         <Card
           padding="md"
-          className="flex items-center gap-3 border-stone-200 bg-stone-50 text-stone-600"
+          className="flex items-center gap-3 border-warn/30 bg-warn/5 text-muted"
         >
-          <Lock className="h-5 w-5 shrink-0" aria-hidden="true" />
+          <Lock className="h-5 w-5 shrink-0 text-warn" aria-hidden="true" />
           <span>תצוגה בלבד — רק לבעלי תפקיד "בעלים" יש הרשאה לעדכן את הגדרות ההתאמה.</span>
         </Card>
       ) : null}
 
-      <Card elevated padding="lg">
-        <h3 className="mb-1 text-lg font-semibold text-ink">ספי סבילות</h3>
-        <p className="mb-5 text-sm text-stone-500">
+      <Card flow elevated padding="lg">
+        <h3 className="mb-1 text-lg font-bold text-ink">ספי סבילות</h3>
+        <p className="mb-5 text-sm text-muted">
           אחוזים מוזנים כמספר שלם (5 = 5%). שדה ריק משאיר את הערך הקיים ללא שינוי.
         </p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -139,9 +139,9 @@ export function SettingsForm({ initial, canEdit }: { initial: Settings; canEdit:
         </div>
       </Card>
 
-      <Card elevated padding="lg">
-        <h3 className="mb-1 text-lg font-semibold text-ink">ספי אישור</h3>
-        <p className="mb-5 text-sm text-stone-500">
+      <Card flow elevated padding="lg">
+        <h3 className="mb-1 text-lg font-bold text-ink">ספי אישור</h3>
+        <p className="mb-5 text-sm text-muted">
           הסכומים שמכתיבים מתי חריגה מנותבת לתור האישורים לפי גודלה.
         </p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -161,9 +161,9 @@ export function SettingsForm({ initial, canEdit }: { initial: Settings; canEdit:
         </div>
       </Card>
 
-      <Card elevated padding="lg">
-        <h3 className="mb-1 text-lg font-semibold text-ink">סף בדיקת OCR</h3>
-        <p className="mb-5 text-sm text-stone-500">
+      <Card flow elevated padding="lg">
+        <h3 className="mb-1 text-lg font-bold text-ink">סף בדיקת OCR</h3>
+        <p className="mb-5 text-sm text-muted">
           רמת ביטחון שמתחתיה חשבונית סרוקה נשלחת לבדיקה ידנית (5 = 5%).
         </p>
         <Field label="סף בדיקה (%)" htmlFor="set-ocr" className="max-w-xs">
@@ -189,8 +189,8 @@ export function SettingsForm({ initial, canEdit }: { initial: Settings; canEdit:
           {status ? (
             <p
               role="status"
-              className={`flex items-center gap-1.5 text-sm ${
-                status.ok ? 'text-accent' : 'text-danger'
+              className={`flex items-center gap-1.5 text-sm font-medium ${
+                status.ok ? 'text-primary' : 'text-danger'
               }`}
             >
               {status.ok ? (

@@ -21,9 +21,9 @@ export default async function LoginPage({ searchParams }: PageProps) {
 
   return (
     <main className="flex min-h-screen items-center justify-center p-6">
-      <Card elevated padding="lg" className="w-full max-w-md">
-        <h1 className="mb-2 text-2xl font-bold text-stone-900">כניסה ל-RestoMatch</h1>
-        <p className="mb-6 text-sm text-stone-500">
+      <Card elevated flow padding="lg" className="w-full max-w-md">
+        <h1 className="mb-2 text-2xl font-bold text-ink">כניסה ל-RestoMatch</h1>
+        <p className="mb-6 text-sm text-muted">
           הזן את כתובת המייל שלך — נשלח לך קישור-קסם להתחברות.
         </p>
 
@@ -57,7 +57,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
           </Button>
         </form>
 
-        <p className="mt-6 text-center text-xs text-stone-500">
+        <p className="mt-6 text-center text-xs text-subtle">
           ב-development הקישור יודפס ל-stdout של השרת.
         </p>
       </Card>

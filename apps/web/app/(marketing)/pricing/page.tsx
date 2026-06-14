@@ -43,10 +43,10 @@ export default async function PricingPage() {
     <div className="mx-auto max-w-6xl px-6 py-20">
       <div className="mx-auto mb-14 max-w-2xl text-center">
         <div className="mx-auto mb-4 h-0.5 w-12 rounded-full flow-stream" aria-hidden="true" />
-        <h1 className="text-3xl font-bold tracking-tight text-ink sm:text-4xl">
+        <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">
           תוכנית לכל מטבח
         </h1>
-        <p className="mt-4 text-base text-stone-500">
+        <p className="mt-4 text-base text-muted">
           התחילו בחינם, ושדרגו כשתראו כמה כסף RestoMatch עוצרת. ללא התחייבות, ביטול בכל עת.
         </p>
       </div>
@@ -59,61 +59,64 @@ export default async function PricingPage() {
             <div
               key={plan.key}
               className={
-                'relative flex flex-col rounded-3xl p-6 ' +
+                'relative flex flex-col overflow-hidden rounded-3xl p-6 ' +
                 (isHighlight
-                  ? 'border-2 border-primary bg-white shadow-card'
-                  : 'border border-stone-200 bg-white')
+                  ? 'border-2 border-primary/60 bg-surface shadow-glow-primary'
+                  : 'border border-line bg-surface shadow-card')
               }
             >
               {isHighlight ? (
-                <span className="absolute -top-3 right-6 inline-flex items-center gap-1 rounded-full bg-primary px-3 py-1 text-xs font-semibold text-white shadow-[0_4px_12px_rgba(11,94,74,0.25)]">
+                <span aria-hidden="true" className="absolute inset-x-0 top-0 h-px flow-stream" />
+              ) : null}
+              {isHighlight ? (
+                <span className="absolute -top-3 right-6 inline-flex items-center gap-1 rounded-full bg-primary px-3 py-1 text-xs font-semibold text-on-primary shadow-glow-primary">
                   <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
                   הכי פופולרי
                 </span>
               ) : null}
 
               <h2 className="text-lg font-bold text-ink">{plan.nameHe}</h2>
-              <p className="mt-1 min-h-[2.5rem] text-sm text-stone-500">
+              <p className="mt-1 min-h-[2.5rem] text-sm text-muted">
                 {planTaglines[plan.key] ?? ''}
               </p>
 
               <div className="mt-4 flex items-baseline gap-1">
-                <span className="text-3xl font-bold tracking-tight text-ink tabular-nums">
+                <span className="font-mono text-3xl font-extrabold tabular-nums tracking-tight text-ink">
                   {priceIls === 0 ? 'חינם' : ils.format(priceIls)}
                 </span>
                 {priceIls > 0 ? (
-                  <span className="text-sm text-stone-400">/ חודש</span>
+                  <span className="text-sm text-subtle">/ חודש</span>
                 ) : null}
               </div>
 
               <Link
                 href="/#lead"
                 className={
-                  'mt-5 inline-flex w-full items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors ' +
+                  'mt-5 inline-flex w-full items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg ' +
                   (isHighlight
-                    ? 'bg-primary text-white hover:bg-primary-hover'
-                    : 'border border-stone-200 bg-white text-stone-700 hover:bg-stone-50 hover:text-ink')
+                    ? 'bg-primary text-on-primary shadow-glow-primary hover:brightness-110 focus-visible:ring-primary'
+                    : 'border border-line bg-surface-2 text-ink hover:border-primary/40 hover:text-primary focus-visible:ring-primary/60')
                 }
               >
                 {plan.key === 'trial' ? 'התחילו בחינם' : 'דברו איתנו'}
               </Link>
 
-              <ul className="mt-6 space-y-3 border-t border-stone-100 pt-6 text-sm">
-                <li className="flex items-start gap-2 text-stone-600">
-                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
+              <ul className="mt-6 space-y-3 border-t border-line pt-6 text-sm">
+                <li className="flex items-start gap-2 text-muted">
+                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
                   <span>{limitLabel(plan.limits.invoicesPerMonth, 'חשבונית בחודש', 'חשבוניות בחודש')}</span>
                 </li>
-                <li className="flex items-start gap-2 text-stone-600">
-                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
+                <li className="flex items-start gap-2 text-muted">
+                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
                   <span>{limitLabel(plan.limits.restaurants, 'מסעדה', 'מסעדות')}</span>
                 </li>
-                <li className="flex items-start gap-2 text-stone-600">
-                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
+                <li className="flex items-start gap-2 text-muted">
+                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
                   <span>{limitLabel(plan.limits.seatsPerRestaurant, 'משתמש למסעדה', 'משתמשים למסעדה')}</span>
                 </li>
                 {plan.features.map((feature) => (
-                  <li key={feature} className="flex items-start gap-2 text-stone-600">
-                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
+                  <li key={feature} className="flex items-start gap-2 text-muted">
+                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
                     <span>{featureLabels[feature] ?? feature}</span>
                   </li>
                 ))}
@@ -123,7 +126,7 @@ export default async function PricingPage() {
         })}
       </div>
 
-      <p className="mt-12 text-center text-sm text-stone-400">
+      <p className="mt-12 text-center text-sm text-subtle">
         כל המחירים אינם כוללים מע״מ. צריכים משהו מותאם לרשת גדולה?{' '}
         <Link href="/#lead" className="font-medium text-primary hover:underline">
           דברו איתנו

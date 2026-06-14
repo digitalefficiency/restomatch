@@ -126,32 +126,32 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
         e.stopPropagation();
         onClose();
       }}
-      className="fixed inset-0 z-[60] bg-stone-950/60 backdrop-blur-md flex items-center justify-center p-4 sm:p-8"
+      className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-md flex items-center justify-center p-4 sm:p-8"
       dir="rtl"
     >
       <div
         ref={sheetRef}
         onClick={(e) => e.stopPropagation()}
-        className="bg-white rounded-3xl shadow-2xl max-w-6xl w-full max-h-[92vh] overflow-hidden flex flex-col"
+        className="bg-surface border border-line rounded-3xl shadow-card max-w-6xl w-full max-h-[92vh] overflow-hidden flex flex-col"
       >
         {/* Viewer toolbar */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-stone-200 bg-stone-50/50">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-line bg-surface-2">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-100 to-teal-50 border border-teal-200 flex items-center justify-center shrink-0">
-              <FileText className="w-5 h-5 text-teal-700" />
+            <div className="w-10 h-10 rounded-xl bg-primary/12 border border-primary/25 flex items-center justify-center shrink-0">
+              <FileText className="w-5 h-5 text-primary" />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm font-bold text-stone-900 truncate">
+                <span className="text-sm font-bold text-ink truncate">
                   סריקת חשבונית {data.invoiceNumber}
                 </span>
                 <ConfidenceBadge value={data.ocrConfidence} />
               </div>
-              <div className="text-xs text-stone-500 flex items-center gap-2 flex-wrap">
+              <div className="text-xs text-muted flex items-center gap-2 flex-wrap">
                 <Camera className="w-3 h-3" />
                 <span>{data.capturedBy ?? 'נסרק מטלפון'}</span>
-                <span className="text-stone-300">·</span>
-                <span>{dateText}</span>
+                <span className="text-subtle">·</span>
+                <span className="font-mono tabular-nums">{dateText}</span>
               </div>
             </div>
           </div>
@@ -160,28 +160,28 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
             <button
               type="button"
               onClick={() => setZoom((z) => Math.max(0.6, z - 0.1))}
-              className="w-8 h-8 rounded-lg bg-white border border-stone-200 hover:bg-stone-100 flex items-center justify-center"
+              className="w-8 h-8 rounded-lg bg-surface border border-line hover:border-primary/40 flex items-center justify-center"
               title="הקטן"
             >
-              <ZoomOut className="w-4 h-4 text-stone-700" />
+              <ZoomOut className="w-4 h-4 text-muted" />
             </button>
-            <span className="text-xs tabular-nums text-stone-500 w-10 text-center">
+            <span className="text-xs font-mono tabular-nums text-muted w-10 text-center">
               {Math.round(zoom * 100)}%
             </span>
             <button
               type="button"
               onClick={() => setZoom((z) => Math.min(1.6, z + 0.1))}
-              className="w-8 h-8 rounded-lg bg-white border border-stone-200 hover:bg-stone-100 flex items-center justify-center"
+              className="w-8 h-8 rounded-lg bg-surface border border-line hover:border-primary/40 flex items-center justify-center"
               title="הגדל"
             >
-              <ZoomIn className="w-4 h-4 text-stone-700" />
+              <ZoomIn className="w-4 h-4 text-muted" />
             </button>
-            <div className="w-px h-6 bg-stone-200 mx-1" />
+            <div className="w-px h-6 bg-line mx-1" />
             <a
               href={data.rawImageUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 px-3 h-8 rounded-lg bg-white border border-stone-200 hover:bg-stone-100 text-xs font-medium text-stone-700"
+              className="inline-flex items-center gap-1.5 px-3 h-8 rounded-lg bg-surface border border-line hover:border-primary/40 hover:text-primary text-xs font-medium text-ink"
               title="פתח את הסריקה בטאב חדש"
             >
               <ExternalLink className="w-3.5 h-3.5" />
@@ -189,7 +189,7 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
             </a>
             <button
               type="button"
-              className="inline-flex items-center gap-1.5 px-3 h-8 rounded-lg bg-white border border-stone-200 hover:bg-stone-100 text-xs font-medium text-stone-700"
+              className="inline-flex items-center gap-1.5 px-3 h-8 rounded-lg bg-surface border border-line hover:border-primary/40 hover:text-primary text-xs font-medium text-ink"
               title="הורד את הסריקה המקורית"
             >
               <Download className="w-3.5 h-3.5" />
@@ -198,10 +198,10 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
             <button
               type="button"
               onClick={onClose}
-              className="w-8 h-8 rounded-full bg-stone-100 hover:bg-stone-200 flex items-center justify-center"
+              className="w-8 h-8 rounded-full bg-surface-2 hover:bg-line flex items-center justify-center"
               title="סגור"
             >
-              <X className="w-4 h-4 text-stone-700" />
+              <X className="w-4 h-4 text-muted" />
             </button>
           </div>
         </div>
@@ -210,15 +210,15 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
         <div className="flex-1 flex min-h-0 overflow-hidden">
           {/* Scan canvas — iframe loads the actual document from the URL stored
               in invoices.raw_image_url (simulated via /scans/[id] page route) */}
-          <div className="flex-1 relative overflow-hidden bg-stone-200">
+          <div className="flex-1 relative overflow-hidden bg-bg">
             {/* URL bar — reinforces "this is loaded from storage" */}
-            <div className="absolute top-3 left-3 right-3 z-10 flex items-center gap-2 bg-white/95 border border-stone-200 rounded-full px-3 py-1.5 shadow-sm pointer-events-none">
-              <div className="w-2 h-2 rounded-full bg-emerald-500" />
-              <span className="text-[11px] font-mono text-stone-600 truncate">
+            <div className="absolute top-3 left-3 right-3 z-10 flex items-center gap-2 glass border border-line rounded-full px-3 py-1.5 pointer-events-none">
+              <div className="w-2 h-2 rounded-full bg-primary" />
+              <span className="text-[11px] font-mono text-muted truncate">
                 {typeof window !== 'undefined' ? window.location.origin : ''}
                 {data.rawImageUrl}
               </span>
-              <span className="text-[10px] text-stone-400 mr-auto shrink-0">
+              <span className="text-[10px] text-subtle mr-auto shrink-0">
                 נטען מהשרת
               </span>
             </div>
@@ -227,7 +227,7 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
               key={data.rawImageUrl}
               src={data.rawImageUrl}
               title={`סריקת חשבונית ${data.invoiceNumber}`}
-              className="w-full h-full border-0 bg-stone-200"
+              className="w-full h-full border-0 bg-bg"
               style={{
                 transform: `scale(${zoom})`,
                 transformOrigin: 'top center',
@@ -236,14 +236,14 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
           </div>
 
           {/* Extraction sidebar */}
-          <aside className="w-80 shrink-0 border-r border-stone-200 bg-white overflow-y-auto hidden lg:block">
-            <div className="px-5 py-4 border-b border-stone-100">
-              <div className="text-xs uppercase tracking-wider text-stone-500 font-semibold mb-1">
+          <aside className="w-80 shrink-0 border-r border-line bg-surface overflow-y-auto hidden lg:block">
+            <div className="px-5 py-4 border-b border-line">
+              <div className="text-xs uppercase tracking-wider text-subtle font-semibold mb-1">
                 שדות שחולצו
               </div>
-              <div className="text-xs text-stone-500">
+              <div className="text-xs text-muted">
                 ה-OCR זיהה את השדות הבאים. ביטחון כללי{' '}
-                <span className="font-bold text-stone-700 tabular-nums">
+                <span className="font-bold text-ink font-mono tabular-nums">
                   {Math.round(data.ocrConfidence * 100)}%
                 </span>
                 .
@@ -265,20 +265,20 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
               />
             </div>
 
-            <div className="border-t border-stone-100 px-5 py-4">
-              <div className="text-xs uppercase tracking-wider text-stone-500 font-semibold mb-3 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-teal-500" />
+            <div className="border-t border-line px-5 py-4">
+              <div className="text-xs uppercase tracking-wider text-subtle font-semibold mb-3 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-primary" />
                 <span>שורות שחולצו ({data.lines.length})</span>
               </div>
               <ul className="space-y-2">
                 {data.lines.map((line, i) => (
                   <li
                     key={i}
-                    className="flex items-center justify-between gap-2 text-xs px-2.5 py-2 rounded-lg bg-stone-50 border border-stone-100"
+                    className="flex items-center justify-between gap-2 text-xs px-2.5 py-2 rounded-lg bg-surface-2 border border-line"
                   >
                     <div className="min-w-0 flex-1">
-                      <div className="font-medium text-stone-800 truncate">{line.name}</div>
-                      <div className="text-[10px] text-stone-500 tabular-nums">
+                      <div className="font-medium text-ink truncate">{line.name}</div>
+                      <div className="text-[10px] text-muted font-mono tabular-nums">
                         {line.qty} {line.unit} × ₪{line.unitPrice.toFixed(2)}
                       </div>
                     </div>
@@ -288,9 +288,9 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
               </ul>
             </div>
 
-            <div className="border-t border-stone-100 px-5 py-4">
-              <div className="rounded-xl bg-teal-50/60 border border-teal-200/70 px-3 py-2.5 text-xs text-teal-900 flex items-start gap-2">
-                <Check className="w-3.5 h-3.5 shrink-0 mt-0.5 text-teal-600" strokeWidth={3} />
+            <div className="border-t border-line px-5 py-4">
+              <div className="rounded-xl bg-primary/8 border border-primary/25 px-3 py-2.5 text-xs text-ink flex items-start gap-2">
+                <Check className="w-3.5 h-3.5 shrink-0 mt-0.5 text-primary" strokeWidth={3} />
                 <div>
                   הסריקה נשמרה כמסמך-מקור immutable עם hash. עומדת בדרישות תיעוד של רשות המסים.
                 </div>
@@ -308,13 +308,13 @@ function ConfidenceBadge({ value }: { value: number }) {
   const pct = Math.round(value * 100);
   const tone =
     value >= 0.92
-      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+      ? 'bg-primary/12 text-primary ring-1 ring-primary/25'
       : value >= 0.8
-        ? 'bg-amber-50 text-amber-700 border-amber-200'
-        : 'bg-red-50 text-red-700 border-red-200';
+        ? 'bg-warn/12 text-warn ring-1 ring-warn/25'
+        : 'bg-danger/12 text-danger ring-1 ring-danger/25';
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${tone}`}
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold font-mono tabular-nums ${tone}`}
     >
       OCR {pct}%
     </span>
@@ -323,7 +323,7 @@ function ConfidenceBadge({ value }: { value: number }) {
 
 function ConfidenceDot({ value }: { value: number }) {
   const tone =
-    value >= 0.92 ? 'bg-emerald-500' : value >= 0.8 ? 'bg-amber-500' : 'bg-red-500';
+    value >= 0.92 ? 'bg-primary' : value >= 0.8 ? 'bg-warn' : 'bg-danger';
   return (
     <span
       className={`w-2 h-2 rounded-full shrink-0 ${tone}`}
@@ -348,28 +348,28 @@ function ExtractedField({
   return (
     <div>
       <div className="flex items-center justify-between mb-0.5">
-        <span className="text-[10px] uppercase tracking-wider text-stone-500 font-semibold">
+        <span className="text-[10px] uppercase tracking-wider text-subtle font-semibold">
           {label}
         </span>
-        <span className="text-[10px] tabular-nums text-stone-400">
+        <span className="text-[10px] font-mono tabular-nums text-subtle">
           {Math.round(confidence * 100)}%
         </span>
       </div>
       <div
-        className={`text-sm ${mono ? 'font-mono' : ''} ${
-          emphasize ? 'font-bold text-teal-700' : 'text-stone-800'
+        className={`text-sm ${mono ? 'font-mono tabular-nums' : ''} ${
+          emphasize ? 'font-bold text-primary' : 'text-ink'
         }`}
       >
         {value}
       </div>
-      <div className="mt-1 h-1 rounded-full bg-stone-100 overflow-hidden">
+      <div className="mt-1 h-1 rounded-full bg-surface-2 overflow-hidden">
         <div
           className={`h-full rounded-full ${
             confidence >= 0.92
-              ? 'bg-emerald-500'
+              ? 'bg-primary'
               : confidence >= 0.8
-                ? 'bg-amber-500'
-                : 'bg-red-500'
+                ? 'bg-warn'
+                : 'bg-danger'
           }`}
           style={{ width: `${Math.round(confidence * 100)}%` }}
         />

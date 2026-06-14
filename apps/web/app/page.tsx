@@ -66,34 +66,40 @@ export default async function Home() {
       <section className="relative overflow-hidden">
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute -top-24 left-1/2 h-72 w-[40rem] -translate-x-1/2 rounded-full bg-accent-glow/20 blur-3xl"
+          className="glow-primary-blob pointer-events-none absolute -top-28 left-1/2 h-80 w-[44rem] -translate-x-1/2 rounded-full blur-3xl"
         />
-        <div className="mx-auto max-w-6xl px-6 pb-16 pt-20 sm:pt-28">
+        <div
+          aria-hidden="true"
+          className="glow-gold-blob pointer-events-none absolute -bottom-40 left-1/4 h-72 w-[30rem] rounded-full blur-3xl"
+        />
+        <div className="relative mx-auto max-w-6xl px-6 pb-20 pt-20 sm:pt-28">
           <div className="mx-auto max-w-3xl text-center">
-            <div className="mx-auto mb-5 h-0.5 w-12 rounded-full flow-stream" aria-hidden="true" />
-            <p className="mb-4 text-xs font-semibold uppercase tracking-[0.2em] text-primary">
+            <div className="mx-auto mb-6 h-0.5 w-14 rounded-full flow-stream" aria-hidden="true" />
+            <p className="mb-4 font-mono text-xs font-semibold uppercase tracking-[0.22em] text-primary">
               הזמנה · קבלת סחורה · חשבונית
             </p>
-            <h1 className="text-4xl font-bold leading-[1.1] tracking-tight text-ink sm:text-6xl">
+            <h1 className="text-4xl font-extrabold leading-[1.08] tracking-tight text-ink sm:text-6xl">
               כמה כסף דולף לך
               <br />
-              בקבלת סחורה?
+              <span className="bg-gradient-to-l from-gold via-primary to-primary bg-clip-text text-transparent">
+                בקבלת סחורה?
+              </span>
             </h1>
-            <p className="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-stone-500">
+            <p className="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-muted">
               RestoMatch משווה כל חשבונית להזמנה ולמשלוח, ותופסת מחירים שעלו, סחורה
               חסרה ופריטים שלא הוזמנו — לפני שאתם משלמים.
             </p>
             <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Link
                 href="#lead"
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 text-base font-semibold text-white shadow-[0_4px_12px_rgba(11,94,74,0.25)] transition-all hover:bg-primary-hover hover:shadow-[0_6px_20px_rgba(11,94,74,0.35)] sm:w-auto"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 text-base font-semibold text-on-primary shadow-glow-primary transition-all hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-bg sm:w-auto"
               >
                 התחילו עכשיו
                 <ArrowLeft className="h-4 w-4" aria-hidden="true" />
               </Link>
               <Link
                 href="#lead"
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-stone-200 bg-white px-6 py-3 text-base font-semibold text-stone-700 transition-colors hover:bg-stone-50 hover:text-ink sm:w-auto"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-line bg-surface-2 px-6 py-3 text-base font-semibold text-ink transition-colors hover:border-primary/40 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg sm:w-auto"
               >
                 דברו איתנו
               </Link>
@@ -108,7 +114,7 @@ export default async function Home() {
           <h2 className="text-2xl font-bold tracking-tight text-ink sm:text-3xl">
             איך זה עובד
           </h2>
-          <p className="mt-3 text-base text-stone-500">
+          <p className="mt-3 text-base text-muted">
             שלושה צעדים — מהמשלוח שמגיע ועד החלטה לפני שמשלמים.
           </p>
         </div>
@@ -118,18 +124,19 @@ export default async function Home() {
             return (
               <li
                 key={step.title}
-                className="relative rounded-2xl border border-stone-200/80 bg-white p-6 shadow-card"
+                className="relative overflow-hidden rounded-2xl border border-line bg-surface p-6 shadow-card"
               >
+                <span aria-hidden="true" className="absolute inset-x-0 top-0 h-px flow-stream" />
                 <div className="mb-4 flex items-center justify-between">
-                  <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/12 text-primary ring-1 ring-primary/25">
                     <Icon className="h-5 w-5" aria-hidden="true" />
                   </span>
-                  <span className="text-3xl font-bold text-stone-200 tabular-nums">
+                  <span className="font-mono text-3xl font-extrabold tabular-nums text-line">
                     {i + 1}
                   </span>
                 </div>
-                <h3 className="text-lg font-semibold text-ink">{step.title}</h3>
-                <p className="mt-2 text-sm leading-relaxed text-stone-500">{step.body}</p>
+                <h3 className="text-lg font-bold text-ink">{step.title}</h3>
+                <p className="mt-2 text-sm leading-relaxed text-muted">{step.body}</p>
               </li>
             );
           })}
@@ -137,14 +144,14 @@ export default async function Home() {
       </section>
 
       {/* BENEFITS */}
-      <section id="benefits" className="scroll-mt-24 bg-surface-alt">
+      <section id="benefits" className="scroll-mt-24 border-y border-line bg-surface/40">
         <div className="mx-auto max-w-6xl px-6 py-16">
           <div className="mx-auto mb-12 max-w-2xl text-center">
             <div className="mx-auto mb-4 h-0.5 w-10 rounded-full flow-stream" aria-hidden="true" />
             <h2 className="text-2xl font-bold tracking-tight text-ink sm:text-3xl">
               למה מסעדות עוברות ל‑RestoMatch
             </h2>
-            <p className="mt-3 text-base text-stone-500">
+            <p className="mt-3 text-base text-muted">
               לא עוד חשבונית שנחתמת בלי בדיקה. שליטה מלאה על מה שנכנס ומה שיוצא.
             </p>
           </div>
@@ -154,13 +161,13 @@ export default async function Home() {
               return (
                 <div
                   key={b.title}
-                  className="rounded-2xl border border-stone-200 bg-white p-6"
+                  className="rounded-2xl border border-line bg-surface p-6 shadow-card"
                 >
-                  <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent/10 text-accent">
+                  <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gold/12 text-gold ring-1 ring-gold/25">
                     <Icon className="h-5 w-5" aria-hidden="true" />
                   </span>
-                  <h3 className="mt-4 text-lg font-semibold text-ink">{b.title}</h3>
-                  <p className="mt-2 text-sm leading-relaxed text-stone-500">{b.body}</p>
+                  <h3 className="mt-4 text-lg font-bold text-ink">{b.title}</h3>
+                  <p className="mt-2 text-sm leading-relaxed text-muted">{b.body}</p>
                 </div>
               );
             })}
@@ -170,17 +177,24 @@ export default async function Home() {
 
       {/* ROI / LEAK CALCULATOR */}
       <section className="mx-auto max-w-6xl px-6 py-16">
-        <div className="overflow-hidden rounded-3xl border border-stone-200/80 bg-white shadow-card">
+        <div className="relative overflow-hidden rounded-3xl border border-line bg-surface shadow-card">
+          <span aria-hidden="true" className="absolute inset-x-0 top-0 h-px flow-stream" />
           <div className="grid grid-cols-1 gap-0 lg:grid-cols-[1fr_1.4fr]">
-            <div className="bg-primary p-8 text-white sm:p-10">
-              <div className="mb-4 h-0.5 w-10 rounded-full bg-accent-glow" aria-hidden="true" />
-              <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">
-                כמה אתם מפסידים היום?
-              </h2>
-              <p className="mt-3 text-sm leading-relaxed text-emerald-50/90">
-                הזינו את הרכש החודשי שלכם והעריכו את אחוז הדליפה. תראו בשנייה כמה
-                כסף בורח בשנה — וכמה RestoMatch יכולה להחזיר.
-              </p>
+            <div className="relative overflow-hidden border-b border-line bg-surface-2 p-8 sm:p-10 lg:border-b-0 lg:border-l">
+              <div
+                aria-hidden="true"
+                className="glow-danger-blob pointer-events-none absolute -bottom-16 -left-10 h-48 w-48 rounded-full blur-2xl"
+              />
+              <div className="relative">
+                <div className="mb-4 h-0.5 w-10 rounded-full leak-gradient" aria-hidden="true" />
+                <h2 className="text-2xl font-bold tracking-tight text-ink sm:text-3xl">
+                  כמה אתם מפסידים היום?
+                </h2>
+                <p className="mt-3 text-sm leading-relaxed text-muted">
+                  הזינו את הרכש החודשי שלכם והעריכו את אחוז הדליפה. תראו בשנייה כמה
+                  כסף בורח בשנה — וכמה RestoMatch יכולה להחזיר.
+                </p>
+              </div>
             </div>
             <div className="p-8 sm:p-10">
               <RoiCalculator />
@@ -190,14 +204,14 @@ export default async function Home() {
       </section>
 
       {/* SOCIAL PROOF (placeholder strip) */}
-      <section aria-label="לקוחות" className="border-y border-stone-200/70 bg-surface-alt">
+      <section aria-label="לקוחות" className="border-y border-line bg-surface/40">
         <div className="mx-auto max-w-6xl px-6 py-10">
-          <p className="mb-6 text-center text-xs font-semibold uppercase tracking-[0.18em] text-stone-400">
+          <p className="mb-6 text-center font-mono text-xs font-semibold uppercase tracking-[0.18em] text-subtle">
             מסעדות ורשתות שכבר עוצרות דליפות
           </p>
           <div className="flex flex-wrap items-center justify-center gap-x-10 gap-y-4">
             {proofLogos.map((logo) => (
-              <span key={logo} className="text-base font-semibold text-stone-300">
+              <span key={logo} className="text-base font-semibold text-muted/70">
                 {logo}
               </span>
             ))}
@@ -213,11 +227,12 @@ export default async function Home() {
             <h2 className="text-2xl font-bold tracking-tight text-ink sm:text-3xl">
               בואו נראה כמה תחסכו
             </h2>
-            <p className="mt-3 text-base text-stone-500">
+            <p className="mt-3 text-base text-muted">
               השאירו פרטים ונחזור אליכם לתיאום הדגמה קצרה — מותאמת למסעדה שלכם.
             </p>
           </div>
-          <div className="rounded-3xl border border-stone-200/80 bg-white p-6 shadow-card sm:p-8">
+          <div className="relative overflow-hidden rounded-3xl border border-line bg-surface p-6 shadow-card sm:p-8">
+            <span aria-hidden="true" className="absolute inset-x-0 top-0 h-px flow-stream" />
             <LeadForm />
           </div>
         </div>

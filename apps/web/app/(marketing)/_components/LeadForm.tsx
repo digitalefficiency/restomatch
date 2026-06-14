@@ -32,13 +32,13 @@ export function LeadForm() {
     return (
       <div
         role="status"
-        className="flex flex-col items-center gap-3 rounded-2xl border border-accent/30 bg-accent/5 px-6 py-10 text-center"
+        className="flex flex-col items-center gap-3 rounded-2xl border border-primary/25 bg-primary/8 px-6 py-10 text-center shadow-glow-primary"
       >
-        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent/15 text-accent">
+        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/15 text-primary ring-1 ring-primary/25">
           <CheckCircle2 className="h-6 w-6" aria-hidden="true" />
         </span>
         <h3 className="text-lg font-bold text-ink">תודה! קיבלנו את הפרטים</h3>
-        <p className="max-w-sm text-sm text-stone-500">
+        <p className="max-w-sm text-sm text-muted">
           נחזור אליכם בהקדם כדי לתאם הדגמה ולהראות כמה כסף RestoMatch יכולה לחסוך
           לכם כבר החודש.
         </p>
@@ -152,7 +152,7 @@ export function LeadForm() {
       <Button type="submit" className="w-full" loading={create.isPending}>
         דברו איתנו
       </Button>
-      <p className="text-center text-xs text-stone-400">
+      <p className="text-center text-xs text-subtle">
         בלחיצה אתם מאשרים שניצור איתכם קשר. ללא ספאם.
       </p>
     </form>

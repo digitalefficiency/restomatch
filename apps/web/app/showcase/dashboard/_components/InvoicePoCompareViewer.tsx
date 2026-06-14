@@ -123,30 +123,30 @@ export function InvoicePoCompareViewer({ data, lines, onClose }: Props) {
         e.stopPropagation();
         onClose();
       }}
-      className="fixed inset-0 z-[60] bg-stone-950/70 backdrop-blur-md flex items-stretch justify-center p-2 sm:p-4"
+      className="fixed inset-0 z-[60] bg-black/75 backdrop-blur-md flex items-stretch justify-center p-2 sm:p-4"
       dir="rtl"
     >
       <div
         ref={sheetRef}
         onClick={(e) => e.stopPropagation()}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-[1400px] max-h-[96vh] flex flex-col overflow-hidden"
+        className="bg-surface border border-line rounded-2xl shadow-card w-full max-w-[1400px] max-h-[96vh] flex flex-col overflow-hidden"
       >
         {/* Toolbar */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-stone-200 bg-stone-50/60">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-line bg-surface-2">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-100 to-teal-50 border border-teal-200 flex items-center justify-center shrink-0">
-              <ClipboardList className="w-5 h-5 text-teal-700" />
+            <div className="w-10 h-10 rounded-xl bg-primary/12 border border-primary/25 flex items-center justify-center shrink-0">
+              <ClipboardList className="w-5 h-5 text-primary" />
             </div>
             <div className="min-w-0">
-              <div className="text-sm font-bold text-stone-900 flex items-center gap-2 flex-wrap">
+              <div className="text-sm font-bold text-ink flex items-center gap-2 flex-wrap">
                 <span>השוואה צד-לצד:</span>
-                <span className="font-mono text-stone-700">{data.poNumber}</span>
-                <span className="text-stone-300">↔</span>
-                <span className="font-mono text-stone-700">{data.invoiceNumber}</span>
+                <span className="font-mono tabular-nums text-muted">{data.poNumber}</span>
+                <span className="text-subtle">↔</span>
+                <span className="font-mono tabular-nums text-muted">{data.invoiceNumber}</span>
               </div>
-              <div className="text-xs text-stone-500 flex items-center gap-2 flex-wrap">
+              <div className="text-xs text-muted flex items-center gap-2 flex-wrap">
                 <span>{data.supplierName}</span>
-                <span className="text-stone-300">·</span>
+                <span className="text-subtle">·</span>
                 <DiffStatBadge stats={stats} />
               </div>
             </div>
@@ -156,26 +156,26 @@ export function InvoicePoCompareViewer({ data, lines, onClose }: Props) {
             <button
               type="button"
               onClick={() => setZoom((z) => Math.max(0.5, z - 0.1))}
-              className="w-8 h-8 rounded-lg bg-white border border-stone-200 hover:bg-stone-100 flex items-center justify-center"
+              className="w-8 h-8 rounded-lg bg-surface border border-line hover:border-primary/40 flex items-center justify-center"
               title="הקטן"
             >
-              <ZoomOut className="w-4 h-4 text-stone-700" />
+              <ZoomOut className="w-4 h-4 text-muted" />
             </button>
-            <span className="text-xs tabular-nums text-stone-500 w-10 text-center">
+            <span className="text-xs font-mono tabular-nums text-muted w-10 text-center">
               {Math.round(zoom * 100)}%
             </span>
             <button
               type="button"
               onClick={() => setZoom((z) => Math.min(1.4, z + 0.1))}
-              className="w-8 h-8 rounded-lg bg-white border border-stone-200 hover:bg-stone-100 flex items-center justify-center"
+              className="w-8 h-8 rounded-lg bg-surface border border-line hover:border-primary/40 flex items-center justify-center"
               title="הגדל"
             >
-              <ZoomIn className="w-4 h-4 text-stone-700" />
+              <ZoomIn className="w-4 h-4 text-muted" />
             </button>
-            <div className="w-px h-6 bg-stone-200 mx-1" />
+            <div className="w-px h-6 bg-line mx-1" />
             <button
               type="button"
-              className="inline-flex items-center gap-1.5 px-3 h-8 rounded-lg bg-white border border-stone-200 hover:bg-stone-100 text-xs font-medium text-stone-700"
+              className="inline-flex items-center gap-1.5 px-3 h-8 rounded-lg bg-surface border border-line hover:border-primary/40 hover:text-primary text-xs font-medium text-ink"
               title="הורד את שני המסמכים"
             >
               <Download className="w-3.5 h-3.5" />
@@ -184,10 +184,10 @@ export function InvoicePoCompareViewer({ data, lines, onClose }: Props) {
             <button
               type="button"
               onClick={onClose}
-              className="w-8 h-8 rounded-full bg-stone-100 hover:bg-stone-200 flex items-center justify-center"
+              className="w-8 h-8 rounded-full bg-surface-2 hover:bg-line flex items-center justify-center"
               title="סגור"
             >
-              <X className="w-4 h-4 text-stone-700" />
+              <X className="w-4 h-4 text-muted" />
             </button>
           </div>
         </div>
@@ -195,12 +195,12 @@ export function InvoicePoCompareViewer({ data, lines, onClose }: Props) {
         {/* Body: 2 papers + diff panel */}
         <div className="flex-1 min-h-0 flex">
           {/* Diff panel */}
-          <aside className="w-80 shrink-0 border-l border-stone-200 bg-white overflow-y-auto hidden xl:flex flex-col">
-            <div className="px-5 py-4 border-b border-stone-100">
-              <div className="text-xs uppercase tracking-wider text-stone-500 font-semibold mb-1">
+          <aside className="w-80 shrink-0 border-l border-line bg-surface overflow-y-auto hidden xl:flex flex-col">
+            <div className="px-5 py-4 border-b border-line">
+              <div className="text-xs uppercase tracking-wider text-subtle font-semibold mb-1">
                 ניתוח שורות
               </div>
-              <div className="text-xs text-stone-500">
+              <div className="text-xs text-muted">
                 לחץ על שורה כדי להבליט אותה בשני המסמכים.
               </div>
             </div>
@@ -215,18 +215,18 @@ export function InvoicePoCompareViewer({ data, lines, onClose }: Props) {
                     key={key}
                     type="button"
                     onClick={() => setFocusKey(isFocus ? null : key)}
-                    className={`w-full text-right rounded-xl border px-3 py-2.5 transition-all ${
+                    className={`w-full text-right rounded-xl border px-3 py-2.5 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
                       isFocus
-                        ? `${accent.borderStrong} ${accent.bgStrong} ring-2 ring-offset-1 ${accent.ring}`
-                        : `border-stone-200 bg-white hover:bg-stone-50`
+                        ? `${accent.borderStrong} ${accent.bgStrong}`
+                        : `border-line bg-surface-2 hover:border-primary/40`
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2 mb-1">
-                      <span className="text-xs font-semibold text-stone-900 truncate">
+                      <span className="text-xs font-semibold text-ink truncate">
                         {line.productName}
                       </span>
                       <span
-                        className={`shrink-0 inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${accent.tint}`}
+                        className={`shrink-0 inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${accent.tint}`}
                       >
                         {accent.icon}
                         <span>{accent.label}</span>
@@ -249,8 +249,8 @@ export function InvoicePoCompareViewer({ data, lines, onClose }: Props) {
                     </div>
                     {line.variance > 0 ? (
                       <div className="mt-1.5 flex items-center justify-between text-[10px]">
-                        <span className="text-stone-500">הפסד פוטנציאלי</span>
-                        <span className="font-bold text-red-600 tabular-nums">
+                        <span className="text-muted">הפסד פוטנציאלי</span>
+                        <span className="font-bold text-danger font-mono tabular-nums">
                           ₪{line.variance.toFixed(2)}
                         </span>
                       </div>
@@ -261,28 +261,28 @@ export function InvoicePoCompareViewer({ data, lines, onClose }: Props) {
             </div>
 
             {/* Footer summary */}
-            <div className="border-t border-stone-200 px-5 py-4 bg-stone-50/60 space-y-2">
+            <div className="border-t border-line px-5 py-4 bg-surface-2 space-y-2">
               <SummaryRow label="סה״כ הוזמן" value={stats.totalPoIls} tone="slate" />
               <SummaryRow label="סה״כ חויב" value={stats.totalInvoiceIls} tone="slate" />
-              <div className="border-t border-stone-200 pt-2 flex items-baseline justify-between">
-                <span className="text-xs font-semibold text-stone-700">פער כללי</span>
+              <div className="border-t border-line pt-2 flex items-baseline justify-between">
+                <span className="text-xs font-semibold text-ink">פער כללי</span>
                 <span
-                  className={`text-sm font-bold tabular-nums ${
-                    stats.delta > 0 ? 'text-red-600' : stats.delta < 0 ? 'text-emerald-700' : 'text-stone-600'
+                  className={`text-sm font-bold font-mono tabular-nums ${
+                    stats.delta > 0 ? 'text-danger' : stats.delta < 0 ? 'text-primary' : 'text-muted'
                   }`}
                 >
                   {stats.delta > 0 ? '+' : ''}₪{Math.abs(stats.delta).toFixed(2)}
                 </span>
               </div>
               {issueLines.length > 0 ? (
-                <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 flex items-start gap-1.5">
+                <div className="text-[11px] text-warn bg-warn/8 border border-warn/25 rounded-lg px-2.5 py-1.5 flex items-start gap-1.5">
                   <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
                   <span>
                     {issueLines.length} שורות לבדיקה. הצוות עדכן {stats.adjustedCount} מהן.
                   </span>
                 </div>
               ) : (
-                <div className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+                <div className="text-[11px] text-primary bg-primary/8 border border-primary/25 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
                   <Check className="w-3 h-3" strokeWidth={3} />
                   <span>כל השורות תאמו 1:1</span>
                 </div>
@@ -292,10 +292,10 @@ export function InvoicePoCompareViewer({ data, lines, onClose }: Props) {
 
           {/* Papers canvas */}
           <div
-            className="flex-1 overflow-auto bg-gradient-to-br from-stone-100 via-stone-100/80 to-stone-200/60 p-4 sm:p-8"
+            className="flex-1 overflow-auto bg-bg p-4 sm:p-8"
             style={{
               backgroundImage:
-                'radial-gradient(circle at 1px 1px, rgba(15,23,42,0.06) 1px, transparent 0)',
+                'radial-gradient(circle at 1px 1px, rgba(42,58,49,0.5) 1px, transparent 0)',
               backgroundSize: '24px 24px',
             }}
           >
@@ -332,7 +332,7 @@ export function InvoicePoCompareViewer({ data, lines, onClose }: Props) {
                   tone="amber"
                 />
                 <div
-                  className="bg-stone-200 rounded-md shadow-[0_16px_44px_-16px_rgba(15,23,42,0.28)] overflow-hidden"
+                  className="bg-surface-2 rounded-md shadow-[0_16px_44px_-16px_rgba(0,0,0,0.6)] overflow-hidden"
                   style={{ width: 540, height: 760 }}
                 >
                   <iframe
@@ -562,8 +562,8 @@ function PaperLabel({
   tone: 'blue' | 'amber';
 }) {
   const map = {
-    blue: 'bg-teal-50 border-teal-200 text-teal-700',
-    amber: 'bg-amber-50 border-amber-200 text-amber-700',
+    blue: 'bg-info/12 border-info/25 text-info',
+    amber: 'bg-warn/12 border-warn/25 text-warn',
   };
   return (
     <div className="flex items-center gap-2 mb-3 w-fit mx-auto">
@@ -573,7 +573,7 @@ function PaperLabel({
         {icon}
         <span>{label}</span>
       </div>
-      <span className="text-[11px] text-stone-500">{sub}</span>
+      <span className="text-[11px] text-muted">{sub}</span>
     </div>
   );
 }
@@ -603,19 +603,19 @@ function DiffCell({
   emphasize?: boolean;
 }) {
   return (
-    <div className={`rounded-lg px-2 py-1.5 ${emphasize ? 'bg-amber-50 border border-amber-200' : 'bg-stone-50 border border-stone-100'}`}>
-      <div className="text-[9px] uppercase tracking-wider text-stone-500 font-semibold">
+    <div className={`rounded-lg px-2 py-1.5 ${emphasize ? 'bg-warn/8 border border-warn/25' : 'bg-surface border border-line'}`}>
+      <div className="text-[9px] uppercase tracking-wider text-subtle font-semibold">
         {label}
       </div>
       {qty !== null ? (
-        <div className="font-bold tabular-nums text-stone-900">
-          {qty} <span className="text-[10px] font-normal text-stone-500">{unit}</span>
+        <div className="font-bold font-mono tabular-nums text-ink">
+          {qty} <span className="text-[10px] font-normal text-muted">{unit}</span>
         </div>
       ) : (
-        <div className="text-stone-400 italic text-xs">חסר</div>
+        <div className="text-subtle italic text-xs">חסר</div>
       )}
       {price !== null && qty !== null ? (
-        <div className="text-[9px] text-stone-500 tabular-nums">× ₪{price.toFixed(2)}</div>
+        <div className="text-[9px] text-muted font-mono tabular-nums">× ₪{price.toFixed(2)}</div>
       ) : null}
     </div>
   );
@@ -630,11 +630,11 @@ function SummaryRow({
   value: number;
   tone: 'slate' | 'red' | 'emerald';
 }) {
-  const cls = tone === 'red' ? 'text-red-600' : tone === 'emerald' ? 'text-emerald-700' : 'text-stone-700';
+  const cls = tone === 'red' ? 'text-danger' : tone === 'emerald' ? 'text-primary' : 'text-ink';
   return (
     <div className="flex items-baseline justify-between">
-      <span className="text-xs text-stone-500">{label}</span>
-      <span className={`text-sm font-semibold tabular-nums ${cls}`}>
+      <span className="text-xs text-muted">{label}</span>
+      <span className={`text-sm font-semibold font-mono tabular-nums ${cls}`}>
         ₪{value.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
       </span>
     </div>
@@ -648,18 +648,18 @@ function DiffStatBadge({
 }) {
   if (stats.issueCount === 0) {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+      <span className="inline-flex items-center gap-1 rounded-full ring-1 ring-primary/25 bg-primary/12 px-2 py-0.5 text-[10px] font-semibold text-primary">
         <Check className="w-3 h-3" strokeWidth={3} />
         תאמו 1:1
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+    <span className="inline-flex items-center gap-1 rounded-full ring-1 ring-warn/25 bg-warn/12 px-2 py-0.5 text-[10px] font-semibold text-warn">
       <AlertTriangle className="w-3 h-3" />
       {stats.issueCount} חריגות
       {stats.delta !== 0 ? (
-        <span className={stats.delta > 0 ? 'text-red-700' : 'text-emerald-700'}>
+        <span className={`font-mono tabular-nums ${stats.delta > 0 ? 'text-danger' : 'text-primary'}`}>
           · {stats.delta > 0 ? '+' : ''}₪{Math.abs(stats.delta).toFixed(0)}
         </span>
       ) : null}
@@ -676,64 +676,64 @@ function statusAccent(status: CompareLine['status']) {
     case 'qty_short':
       return {
         label: 'התקבל פחות',
-        tint: 'bg-amber-50 text-amber-700 border-amber-200',
-        ring: 'ring-amber-400',
-        borderStrong: 'border-amber-300',
-        bgStrong: 'bg-amber-50/80',
+        tint: 'bg-warn/12 text-warn ring-1 ring-warn/25',
+        ring: 'ring-warn/50',
+        borderStrong: 'border-warn/40',
+        bgStrong: 'bg-warn/12',
         icon: <ArrowDown className="w-2.5 h-2.5" strokeWidth={3} />,
       };
     case 'qty_over':
       return {
         label: 'התקבל יותר',
-        tint: 'bg-amber-50 text-amber-700 border-amber-200',
-        ring: 'ring-amber-400',
-        borderStrong: 'border-amber-300',
-        bgStrong: 'bg-amber-50/80',
+        tint: 'bg-warn/12 text-warn ring-1 ring-warn/25',
+        ring: 'ring-warn/50',
+        borderStrong: 'border-warn/40',
+        bgStrong: 'bg-warn/12',
         icon: <ArrowUp className="w-2.5 h-2.5" strokeWidth={3} />,
       };
     case 'price_higher':
       return {
         label: 'מחיר עלה',
-        tint: 'bg-red-50 text-red-700 border-red-200',
-        ring: 'ring-red-400',
-        borderStrong: 'border-red-300',
-        bgStrong: 'bg-red-50/80',
+        tint: 'bg-danger/12 text-danger ring-1 ring-danger/25',
+        ring: 'ring-danger/50',
+        borderStrong: 'border-danger/40',
+        bgStrong: 'bg-danger/12',
         icon: <ArrowUp className="w-2.5 h-2.5" strokeWidth={3} />,
       };
     case 'price_lower':
       return {
         label: 'מחיר ירד',
-        tint: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-        ring: 'ring-emerald-400',
-        borderStrong: 'border-emerald-300',
-        bgStrong: 'bg-emerald-50/80',
+        tint: 'bg-primary/12 text-primary ring-1 ring-primary/25',
+        ring: 'ring-primary/50',
+        borderStrong: 'border-primary/40',
+        bgStrong: 'bg-primary/12',
         icon: <ArrowDown className="w-2.5 h-2.5" strokeWidth={3} />,
       };
     case 'unordered':
       return {
         label: 'לא הוזמן',
-        tint: 'bg-red-50 text-red-700 border-red-200',
-        ring: 'ring-red-400',
-        borderStrong: 'border-red-300',
-        bgStrong: 'bg-red-50/80',
+        tint: 'bg-danger/12 text-danger ring-1 ring-danger/25',
+        ring: 'ring-danger/50',
+        borderStrong: 'border-danger/40',
+        bgStrong: 'bg-danger/12',
         icon: <Sparkles className="w-2.5 h-2.5" />,
       };
     case 'missing_from_invoice':
       return {
         label: 'חסר בחשבונית',
-        tint: 'bg-stone-50 text-stone-700 border-stone-200',
-        ring: 'ring-stone-400',
-        borderStrong: 'border-stone-300',
-        bgStrong: 'bg-stone-100/80',
+        tint: 'bg-surface-2 text-muted ring-1 ring-line',
+        ring: 'ring-line',
+        borderStrong: 'border-line',
+        bgStrong: 'bg-surface-2',
         icon: <X className="w-2.5 h-2.5" strokeWidth={3} />,
       };
     default:
       return {
         label: 'תואם',
-        tint: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-        ring: 'ring-emerald-400',
-        borderStrong: 'border-emerald-300',
-        bgStrong: 'bg-emerald-50/80',
+        tint: 'bg-primary/12 text-primary ring-1 ring-primary/25',
+        ring: 'ring-primary/50',
+        borderStrong: 'border-primary/40',
+        bgStrong: 'bg-primary/12',
         icon: <Check className="w-2.5 h-2.5" strokeWidth={3} />,
       };
   }

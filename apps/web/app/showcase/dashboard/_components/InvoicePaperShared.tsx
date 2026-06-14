@@ -292,7 +292,7 @@ export function InvoicePaper({ data }: InvoicePaperProps) {
         <div className="flex-1 text-center relative">
           <div className="border-t border-stone-400 pt-1">חתימת מוסר</div>
           {data.driverSignature ? (
-            <PenScrawl tone="blue" className="absolute -top-4 left-1/2 -transtone-x-1/2 text-lg">
+            <PenScrawl tone="blue" className="absolute -top-4 left-1/2 -translate-x-1/2 text-lg">
               {data.driverSignature}
             </PenScrawl>
           ) : null}

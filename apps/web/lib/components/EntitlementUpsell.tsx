@@ -86,7 +86,7 @@ export function EntitlementUpsell({
           </span>
           <div>
             <p className="text-sm font-semibold text-ink">{title ?? `שדרגו כדי לפתוח את ${label}`}</p>
-            <p className="mt-0.5 text-xs text-stone-500">
+            <p className="mt-0.5 text-xs text-muted">
               התכונה הזו זמינה במסלולים בתשלום.
             </p>
           </div>
@@ -110,10 +110,10 @@ export function EntitlementUpsell({
         <Lock className="h-6 w-6" aria-hidden="true" />
       </span>
       <div>
-        <h3 className="text-lg font-semibold text-ink">
+        <h3 className="text-lg font-bold text-ink">
           {title ?? `שדרגו את המנוי כדי לפתוח את ${label}`}
         </h3>
-        <p className="mx-auto mt-1.5 max-w-md text-sm text-stone-500">
+        <p className="mx-auto mt-1.5 max-w-md text-sm text-muted">
           {label} זמינה במסלולים בתשלום. שדרגו את החשבון כדי לקבל גישה מלאה.
         </p>
       </div>

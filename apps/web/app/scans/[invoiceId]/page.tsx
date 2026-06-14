@@ -14,6 +14,7 @@
  *      imported so they never ship in the production bundle.
  */
 
+import { ExternalLink, Lock } from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { auth } from '@/auth';
 import { InvoicePaper } from '@/app/showcase/dashboard/_components/InvoicePaperShared';
@@ -76,14 +77,16 @@ async function loadDemoScan(invoiceId: string): Promise<ScanData | null> {
   return null;
 }
 
+/** Dark "command center" stage: near-black canvas with a faint money-green dot
+ *  grid + soft top aura, on which the scanned paper floats. */
+const STAGE_BG =
+  'radial-gradient(circle at 1px 1px, rgba(34,211,154,0.05) 1px, transparent 0) 0 0 / 24px 24px, radial-gradient(120% 60% at 50% 0%, rgba(34,211,154,0.06) 0%, transparent 60%), #0E1512';
+
 function MockScanCanvas({ scanData }: { scanData: ScanData }) {
   return (
     <div
       className="flex min-h-screen w-full items-center justify-center p-8"
-      style={{
-        background:
-          'radial-gradient(circle at 1px 1px, rgba(15,23,42,0.06) 1px, transparent 0) 0 0 / 24px 24px, linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%)',
-      }}
+      style={{ background: STAGE_BG }}
     >
       <InvoicePaper data={scanData} />
     </div>
@@ -107,23 +110,25 @@ function UploadedScanCanvas({
     <div
       className="flex min-h-screen w-full flex-col items-center justify-start p-4 sm:p-8"
       dir="rtl"
-      style={{
-        background:
-          'radial-gradient(circle at 1px 1px, rgba(15,23,42,0.06) 1px, transparent 0) 0 0 / 24px 24px, linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%)',
-      }}
+      style={{ background: STAGE_BG }}
     >
-      <div className="mb-3 flex w-full max-w-3xl items-center gap-2 rounded-full border border-emerald-200 bg-white px-4 py-2 shadow-sm">
-        <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
-        <span className="truncate font-mono text-xs text-stone-600">
+      {/* Secure-link badge — kept prominent: a signed, tenant-scoped document. */}
+      <div className="mb-3 flex w-full max-w-3xl items-center gap-2 rounded-full border border-line bg-surface/80 px-4 py-2 shadow-card backdrop-blur">
+        <span className="relative flex h-2 w-2 shrink-0">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/60" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+        </span>
+        <span className="truncate font-mono text-xs text-muted">
           חשבונית סרוקה{supplierName ? ` · ${supplierName}` : ''}
         </span>
-        <span className="mr-auto shrink-0 text-[10px] font-semibold text-emerald-700">
-          ✓ קישור מאובטח
+        <span className="me-auto inline-flex shrink-0 items-center gap-1 rounded-full bg-primary/12 px-2 py-0.5 text-[10px] font-semibold text-primary ring-1 ring-primary/25">
+          <Lock className="h-2.5 w-2.5" aria-hidden="true" />
+          קישור מאובטח
           {pageCount ? ` · ${pageCount} עמודים` : ''}
         </span>
       </div>
 
-      <div className="w-full max-w-3xl overflow-hidden rounded-md bg-white shadow-[0_24px_64px_-24px_rgba(15,23,42,0.45)]">
+      <div className="w-full max-w-3xl overflow-hidden rounded-xl border border-line bg-surface shadow-card">
         {isPdf ? (
           <iframe
             src={`${publicUrl}#toolbar=1&navpanes=0&view=FitH`}
@@ -135,18 +140,19 @@ function UploadedScanCanvas({
           <img
             src={publicUrl}
             alt="חשבונית סרוקה"
-            className="h-auto w-full"
+            className="h-auto w-full bg-stone-100"
             style={{ maxHeight: '90vh', objectFit: 'contain' }}
           />
         )}
-        <div className="flex items-center justify-between border-t border-stone-200 bg-stone-50 px-4 py-3 text-xs">
-          <span className="text-stone-500">לא נטען? יכול להיות חוסם פופאפים או דפדפן ללא תוסף PDF.</span>
+        <div className="flex items-center justify-between gap-3 border-t border-line bg-surface-2 px-4 py-3 text-xs">
+          <span className="text-subtle">לא נטען? יכול להיות חוסם פופאפים או דפדפן ללא תוסף PDF.</span>
           <a
             href={publicUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 font-semibold text-primary hover:text-primary-hover"
+            className="inline-flex shrink-0 items-center gap-1 font-semibold text-primary hover:brightness-110"
           >
+            <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
             פתח בטאב נפרד
           </a>
         </div>

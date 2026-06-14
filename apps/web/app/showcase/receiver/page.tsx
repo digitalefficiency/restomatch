@@ -33,9 +33,7 @@ export default function ReceiverWizard() {
             <div
               key={i}
               className={`h-1.5 flex-1 rounded-full transition-all ${
-                isDone || isCurrent
-                  ? 'bg-gradient-to-r from-teal-500 to-teal-700'
-                  : 'bg-stone-200'
+                isDone || isCurrent ? 'flow-stream' : 'bg-surface-2'
               }`}
             />
           );

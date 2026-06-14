@@ -6,12 +6,14 @@ export default async function AdminLeadsPage() {
 
   return (
     <div>
-      <h1 className="mb-1 text-2xl font-semibold text-stone-900">לידים</h1>
-      <p className="mb-6 text-sm text-stone-500">{leads.length} פניות מהאתר השיווקי</p>
+      <h1 className="mb-1 text-2xl font-bold text-ink">לידים</h1>
+      <p className="mb-6 text-sm text-muted">
+        <span className="font-mono tabular-nums">{leads.length}</span> פניות מהאתר השיווקי
+      </p>
 
-      <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
+      <div className="overflow-hidden rounded-xl border border-line bg-surface shadow-card">
         <table className="w-full text-right text-sm">
-          <thead className="border-b border-stone-200 bg-stone-50 text-xs text-stone-500">
+          <thead className="border-b border-line bg-surface-2 font-mono text-xs uppercase tracking-wider text-subtle">
             <tr>
               <th className="px-4 py-3 font-medium">שם</th>
               <th className="px-4 py-3 font-medium">טלפון</th>
@@ -21,26 +23,26 @@ export default async function AdminLeadsPage() {
               <th className="px-4 py-3 font-medium">תאריך</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-stone-100">
+          <tbody className="divide-y divide-line">
             {leads.map((l) => (
-              <tr key={l.id} className="hover:bg-stone-50">
-                <td className="px-4 py-3 font-medium text-stone-800">{l.name}</td>
-                <td className="px-4 py-3 tabular-nums text-stone-600">{l.phone ?? '—'}</td>
-                <td className="px-4 py-3 text-stone-600">{l.restaurantName ?? '—'}</td>
-                <td className="px-4 py-3 tabular-nums text-stone-600">
+              <tr key={l.id} className="transition-colors hover:bg-surface-2">
+                <td className="px-4 py-3 font-medium text-ink">{l.name}</td>
+                <td className="px-4 py-3 font-mono tabular-nums text-muted">{l.phone ?? '—'}</td>
+                <td className="px-4 py-3 text-muted">{l.restaurantName ?? '—'}</td>
+                <td className="px-4 py-3 font-mono tabular-nums text-gold">
                   {l.monthlyProcurementAgorot
                     ? `₪${(l.monthlyProcurementAgorot / 100).toLocaleString('he-IL')}`
                     : '—'}
                 </td>
-                <td className="px-4 py-3 text-stone-500">{l.source ?? '—'}</td>
-                <td className="px-4 py-3 text-stone-500">
+                <td className="px-4 py-3 text-subtle">{l.source ?? '—'}</td>
+                <td className="px-4 py-3 font-mono tabular-nums text-subtle">
                   {new Date(l.createdAt).toLocaleDateString('he-IL')}
                 </td>
               </tr>
             ))}
             {leads.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-stone-400">
+                <td colSpan={6} className="px-4 py-8 text-center text-subtle">
                   אין לידים עדיין
                 </td>
               </tr>

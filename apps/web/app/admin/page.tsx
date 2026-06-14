@@ -20,12 +20,14 @@ export default async function AdminRestaurantsPage() {
 
   return (
     <div>
-      <h1 className="mb-1 text-2xl font-semibold text-stone-900">מסעדות</h1>
-      <p className="mb-6 text-sm text-stone-500">{restaurants.length} מסעדות במערכת</p>
+      <h1 className="mb-1 text-2xl font-bold text-ink">מסעדות</h1>
+      <p className="mb-6 text-sm text-muted">
+        <span className="font-mono tabular-nums">{restaurants.length}</span> מסעדות במערכת
+      </p>
 
-      <div className="overflow-hidden rounded-lg border border-stone-200 bg-white">
+      <div className="overflow-hidden rounded-xl border border-line bg-surface shadow-card">
         <table className="w-full text-right text-sm">
-          <thead className="border-b border-stone-200 bg-stone-50 text-xs text-stone-500">
+          <thead className="border-b border-line bg-surface-2 font-mono text-xs uppercase tracking-wider text-subtle">
             <tr>
               <th className="px-4 py-3 font-medium">מסעדה</th>
               <th className="px-4 py-3 font-medium">תוכנית</th>
@@ -35,32 +37,32 @@ export default async function AdminRestaurantsPage() {
               <th className="px-4 py-3 font-medium">נוצרה</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-stone-100">
+          <tbody className="divide-y divide-line">
             {restaurants.map((r) => (
-              <tr key={r.id} className="hover:bg-stone-50">
+              <tr key={r.id} className="transition-colors hover:bg-surface-2">
                 <td className="px-4 py-3">
                   <Link
                     href={`/admin/restaurants/${r.id}`}
-                    className="font-medium text-emerald-700 hover:underline"
+                    className="font-medium text-primary hover:underline"
                   >
                     {r.name}
                   </Link>
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-4 py-3 text-muted">
                   {PLAN_LABEL[r.planKey] ?? r.planKey}
-                  {r.implicit ? <span className="mr-1 text-xs text-stone-400">(משתמע)</span> : null}
+                  {r.implicit ? <span className="mr-1 text-xs text-subtle">(משתמע)</span> : null}
                 </td>
-                <td className="px-4 py-3">{STATUS_LABEL[r.status] ?? r.status}</td>
-                <td className="px-4 py-3 tabular-nums">{r.ocrScansThisMonth}</td>
-                <td className="px-4 py-3 tabular-nums">{r.members}</td>
-                <td className="px-4 py-3 text-stone-500">
+                <td className="px-4 py-3 text-muted">{STATUS_LABEL[r.status] ?? r.status}</td>
+                <td className="px-4 py-3 font-mono tabular-nums text-ink">{r.ocrScansThisMonth}</td>
+                <td className="px-4 py-3 font-mono tabular-nums text-ink">{r.members}</td>
+                <td className="px-4 py-3 font-mono tabular-nums text-subtle">
                   {new Date(r.createdAt).toLocaleDateString('he-IL')}
                 </td>
               </tr>
             ))}
             {restaurants.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-stone-400">
+                <td colSpan={6} className="px-4 py-8 text-center text-subtle">
                   אין מסעדות עדיין
                 </td>
               </tr>

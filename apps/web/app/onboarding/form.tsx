@@ -56,7 +56,7 @@ export function OnboardingForm() {
         htmlFor="businessId"
         label={
           <>
-            ח״פ / עוסק מורשה <span className="text-stone-500">(לא חובה)</span>
+            ח״פ / עוסק מורשה <span className="text-subtle">(לא חובה)</span>
           </>
         }
       >

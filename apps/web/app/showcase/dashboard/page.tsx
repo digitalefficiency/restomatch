@@ -138,11 +138,12 @@ export default function DashboardShowcase() {
   return (
     <main ref={containerRef} className="max-w-7xl mx-auto px-6 py-12 space-y-12" dir="rtl">
       <div className="section-block">
-        <p className="text-xs uppercase tracking-[0.2em] text-teal-600 font-semibold mb-2">
+        <div className="mb-2 h-0.5 w-12 rounded-full flow-stream" aria-hidden="true" />
+        <p className="text-xs uppercase tracking-[0.2em] text-primary font-semibold mb-2">
           Control Center
         </p>
-        <h1 className="text-4xl font-bold tracking-tight mb-2 text-stone-900">לוח הבעלים</h1>
-        <p className="text-stone-500">
+        <h1 className="text-4xl font-extrabold tracking-tight mb-2 text-ink">לוח הבעלים</h1>
+        <p className="text-muted">
           תמונה לייב של המסעדה — איפה כסף בורח, מי ספק מדויק, מה דורש את ההחלטה שלך עכשיו.
         </p>
       </div>
@@ -199,38 +200,40 @@ function KpiCard({ kpi }: { kpi: Kpi }) {
 
   const tones = {
     good: {
-      icon: 'text-emerald-600 bg-emerald-50 ring-emerald-100',
-      glow: 'bg-emerald-400',
-      number: 'text-stone-900',
+      icon: 'text-gold bg-gold/12 ring-gold/25',
+      glow: 'glow-gold-blob',
+      number: 'text-gold',
     },
     warn: {
-      icon: 'text-amber-600 bg-amber-50 ring-amber-100',
-      glow: 'bg-amber-400',
-      number: 'text-stone-900',
+      icon: 'text-danger bg-danger/12 ring-danger/25',
+      glow: 'glow-danger-blob',
+      number: 'text-danger',
     },
     neutral: {
-      icon: 'text-teal-600 bg-teal-50 ring-teal-100',
-      glow: 'bg-teal-400',
-      number: 'text-stone-900',
+      icon: 'text-primary bg-primary/12 ring-primary/25',
+      glow: 'glow-primary-blob',
+      number: 'text-ink',
     },
   } as const;
   const t = tones[kpi.tone];
 
   const deltaPositive = kpi.delta >= 0;
+  // good metric: up = green; warn metric (loss): up = danger; neutral (queue): up = danger.
   const deltaColor =
     kpi.tone === 'good'
-      ? 'text-emerald-600'
+      ? 'text-primary'
       : kpi.tone === 'warn'
-        ? 'text-red-600'
+        ? 'text-danger'
         : deltaPositive
-          ? 'text-red-600'
-          : 'text-emerald-600';
+          ? 'text-danger'
+          : 'text-primary';
 
   return (
     <div
       ref={cardRef}
-      className="relative rounded-2xl border border-stone-200/70 bg-white/90 backdrop-blur-xl p-6 overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-8px_rgba(15,23,42,0.06)]"
+      className="relative rounded-2xl border border-line bg-surface p-6 overflow-hidden shadow-card"
     >
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px flow-stream" />
       <div className="flex items-start justify-between mb-4">
         <div
           className={`w-10 h-10 rounded-xl flex items-center justify-center ring-1 ${t.icon}`}
@@ -243,26 +246,26 @@ function KpiCard({ kpi }: { kpi: Kpi }) {
           ) : (
             <TrendingDown className="w-3 h-3" />
           )}
-          <span>
+          <span className="font-mono tabular-nums">
             {kpi.delta > 0 ? '+' : ''}
             {kpi.delta}%
           </span>
         </div>
       </div>
 
-      <div className="text-xs uppercase tracking-wider text-stone-500 font-semibold mb-2">
+      <div className="text-xs uppercase tracking-wider text-subtle font-semibold mb-2">
         {kpi.label}
       </div>
-      <div className="text-4xl font-bold tabular-nums tracking-tight flex items-baseline gap-1">
-        {kpi.prefix ? <span className="text-2xl text-stone-400">{kpi.prefix}</span> : null}
+      <div className="font-mono text-3xl font-extrabold tabular-nums tracking-tight flex items-baseline gap-1">
+        {kpi.prefix ? <span className={`text-2xl ${t.number} opacity-70`}>{kpi.prefix}</span> : null}
         <span ref={numberRef} className={t.number}>
           0
         </span>
-        {kpi.suffix ? <span className="text-2xl text-stone-400">{kpi.suffix}</span> : null}
+        {kpi.suffix ? <span className={`text-2xl ${t.number} opacity-70`}>{kpi.suffix}</span> : null}
       </div>
 
       <div
-        className={`pointer-events-none absolute -bottom-12 -right-12 w-48 h-48 rounded-full blur-3xl opacity-[0.12] ${t.glow}`}
+        className={`pointer-events-none absolute -bottom-12 -left-12 w-48 h-48 rounded-full blur-2xl opacity-70 ${t.glow}`}
       />
     </div>
   );
@@ -272,21 +275,21 @@ function Heatmap() {
   const [hover, setHover] = useState<{ p: number; s: number; x: number; y: number } | null>(null);
 
   return (
-    <div className="relative rounded-2xl border border-stone-200/70 bg-white/90 backdrop-blur-xl p-6 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-8px_rgba(15,23,42,0.06)]">
+    <div className="relative rounded-2xl border border-line bg-surface p-6 shadow-card">
       <div
         className="grid gap-0.5"
         style={{ gridTemplateColumns: `120px repeat(${SUPPLIERS.length}, 1fr)` }}
       >
         <div />
         {SUPPLIERS.map((s) => (
-          <div key={s} className="text-xs text-stone-500 font-medium text-center pb-3 px-1">
+          <div key={s} className="text-xs text-muted font-medium text-center pb-3 px-1">
             {s}
           </div>
         ))}
 
         {PRODUCTS.map((product, pIdx) => (
           <div key={product} className="contents">
-            <div className="text-sm font-medium text-stone-700 pr-3 py-1 flex items-center">
+            <div className="text-sm font-medium text-ink pr-3 py-1 flex items-center">
               {product}
             </div>
             {SUPPLIERS.map((_, sIdx) => {
@@ -296,13 +299,13 @@ function Heatmap() {
                 <button
                   key={`${pIdx}-${sIdx}`}
                   type="button"
-                  className="relative aspect-square m-0.5 rounded-md transition-all hover:scale-110 hover:z-10 hover:ring-2 hover:ring-teal-300 focus:outline-none flex items-center justify-center"
+                  className="relative aspect-square m-0.5 rounded-md transition-all hover:scale-110 hover:z-10 hover:ring-2 hover:ring-primary/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary flex items-center justify-center"
                   style={{
                     background: cellColor(cell.variance),
                     boxShadow:
                       cell.variance > 0.5
-                        ? `0 0 16px ${cellColor(cell.variance, 0.4)}`
-                        : 'inset 0 0 0 1px rgba(15,23,42,0.04)',
+                        ? `0 0 18px ${cellColor(cell.variance, 0.5)}`
+                        : 'inset 0 0 0 1px rgba(42,58,49,0.6)',
                   }}
                   onMouseEnter={(e) => {
                     const rect = e.currentTarget.getBoundingClientRect();
@@ -316,8 +319,8 @@ function Heatmap() {
                   onMouseLeave={() => setHover(null)}
                 >
                   <span
-                    className={`text-[10px] font-bold tabular-nums ${
-                      Math.abs(cell.variance) > 0.4 ? 'text-white' : 'text-stone-700'
+                    className={`text-[10px] font-bold font-mono tabular-nums ${
+                      Math.abs(cell.variance) > 0.4 ? 'text-on-primary' : 'text-muted'
                     }`}
                   >
                     {cell.variance > 0 ? '+' : ''}
@@ -330,7 +333,7 @@ function Heatmap() {
         ))}
       </div>
 
-      <div className="mt-6 pt-4 border-t border-stone-100 flex items-center justify-center gap-6 text-xs text-stone-500">
+      <div className="mt-6 pt-4 border-t border-line flex items-center justify-center gap-6 text-xs text-muted">
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-sm" style={{ background: cellColor(-0.7) }} />
           <span>זול מהממוצע</span>
@@ -351,20 +354,24 @@ function Heatmap() {
 }
 
 function cellColor(variance: number, alpha = 1): string {
-  // -1 = emerald (cheap), 0 = neutral white-ish, +1 = red (expensive)
+  // -1 = money-green (cheap), 0 = raised surface, +1 = neon danger (expensive).
+  // Base = surface-2 #1C2A23 = rgb(28,42,35).
+  const baseR = 28;
+  const baseG = 42;
+  const baseB = 35;
   if (variance <= 0) {
     const t = Math.abs(variance);
-    // White → emerald-500
-    const r = Math.round(255 + (16 - 255) * t);
-    const g = Math.round(255 + (185 - 255) * t);
-    const b = Math.round(255 + (129 - 255) * t);
+    // surface-2 → primary #22D39A = rgb(34,211,154)
+    const r = Math.round(baseR + (34 - baseR) * t);
+    const g = Math.round(baseG + (211 - baseG) * t);
+    const b = Math.round(baseB + (154 - baseB) * t);
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
   const t = variance;
-  // White → red-600
-  const r = Math.round(255 + (220 - 255) * t);
-  const g = Math.round(255 + (38 - 255) * t);
-  const b = Math.round(255 + (38 - 255) * t);
+  // surface-2 → danger #FF5C7A = rgb(255,92,122)
+  const r = Math.round(baseR + (255 - baseR) * t);
+  const g = Math.round(baseG + (92 - baseG) * t);
+  const b = Math.round(baseB + (122 - baseB) * t);
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
@@ -383,15 +390,15 @@ function HeatTooltip({ hover }: { hover: { p: number; s: number; x: number; y: n
         transform: 'translate(-50%, -100%)',
       }}
     >
-      <div className="bg-white border border-stone-200 rounded-xl p-3 min-w-[220px] shadow-[0_8px_24px_-8px_rgba(15,23,42,0.18),0_4px_8px_-4px_rgba(15,23,42,0.08)]">
-        <div className="text-xs text-stone-500 mb-0.5">{supplier}</div>
-        <div className="font-semibold text-sm mb-2 text-stone-900">{product}</div>
+      <div className="bg-surface-2 border border-line rounded-xl p-3 min-w-[220px] shadow-card">
+        <div className="text-xs text-subtle mb-0.5">{supplier}</div>
+        <div className="font-semibold text-sm mb-2 text-ink">{product}</div>
         <Sparkline data={cell.series} variance={cell.variance} />
         <div className="mt-2 flex items-center justify-between text-xs">
-          <span className="text-stone-500">12 שבועות אחרונים</span>
+          <span className="text-muted">12 שבועות אחרונים</span>
           <span
-            className={`font-bold tabular-nums ${
-              cell.variance > 0 ? 'text-red-600' : 'text-emerald-600'
+            className={`font-bold font-mono tabular-nums ${
+              cell.variance > 0 ? 'text-danger' : 'text-primary'
             }`}
           >
             {cell.variance > 0 ? '+' : ''}
@@ -417,9 +424,10 @@ function Sparkline({ data, variance }: { data: number[]; variance: number }) {
   const path = points
     .map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`)
     .join(' ');
-  const stroke = variance > 0 ? '#DC2626' : '#059669';
-  const fillStart = variance > 0 ? 'rgba(220,38,38,0.18)' : 'rgba(5,150,105,0.18)';
-  const fillEnd = variance > 0 ? 'rgba(220,38,38,0)' : 'rgba(5,150,105,0)';
+  // Rising price = leak (danger), falling = money-green.
+  const stroke = variance > 0 ? '#FF5C7A' : '#22D39A';
+  const fillStart = variance > 0 ? 'rgba(255,92,122,0.22)' : 'rgba(34,211,154,0.22)';
+  const fillEnd = variance > 0 ? 'rgba(255,92,122,0)' : 'rgba(34,211,154,0)';
   const gradId = `g-${variance > 0 ? 'r' : 'g'}`;
 
   return (
@@ -473,10 +481,10 @@ function LiveFlow() {
   return (
     <div
       ref={containerRef}
-      className="relative rounded-2xl border border-stone-200/70 bg-white/90 backdrop-blur-xl p-6 overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-8px_rgba(15,23,42,0.06)]"
+      className="relative rounded-2xl border border-line bg-surface p-6 overflow-hidden shadow-card"
     >
       <div className="relative pr-2">
-        <div className="absolute top-2 bottom-2 right-[14px] w-px bg-gradient-to-b from-teal-300/70 via-stone-200 to-transparent" />
+        <div className="absolute top-2 bottom-2 right-[14px] w-px bg-gradient-to-b from-primary/70 via-line to-transparent" />
         <div className="space-y-5">
           {EVENTS.map((e) => (
             <FlowEventRow key={e.id} event={e} />
@@ -490,23 +498,23 @@ function LiveFlow() {
 function FlowEventRow({ event }: { event: FlowEvent }) {
   const colorMap = {
     block: {
-      dot: 'bg-red-600',
-      label: 'text-red-600',
+      dot: 'bg-danger',
+      label: 'text-danger',
       icon: <ShieldAlert className="w-3.5 h-3.5" />,
     },
     approve: {
-      dot: 'bg-emerald-600',
-      label: 'text-emerald-600',
+      dot: 'bg-primary',
+      label: 'text-primary',
       icon: <CheckCircle2 className="w-3.5 h-3.5" />,
     },
     flag: {
-      dot: 'bg-amber-500',
-      label: 'text-amber-600',
+      dot: 'bg-warn',
+      label: 'text-warn',
       icon: <AlertCircle className="w-3.5 h-3.5" />,
     },
     sync: {
-      dot: 'bg-teal-500',
-      label: 'text-teal-600',
+      dot: 'bg-info',
+      label: 'text-info',
       icon: <Clock className="w-3.5 h-3.5" />,
     },
   } as const;
@@ -519,7 +527,7 @@ function FlowEventRow({ event }: { event: FlowEvent }) {
         {event.type === 'block' ? (
           <span className={`flow-radar absolute inset-0 rounded-full ${colors.dot} opacity-60`} />
         ) : null}
-        <span className={`relative block w-3 h-3 rounded-full ${colors.dot} ring-4 ring-white`} />
+        <span className={`relative block w-3 h-3 rounded-full ${colors.dot} ring-4 ring-surface`} />
       </div>
       <div className="flex-1 pb-1">
         <div className="flex items-center justify-between mb-0.5">
@@ -527,11 +535,11 @@ function FlowEventRow({ event }: { event: FlowEvent }) {
             className={`flex items-center gap-1.5 text-xs font-semibold ${colors.label}`}
           >
             {colors.icon}
-            <span>{event.time}</span>
+            <span className="font-mono tabular-nums">{event.time}</span>
           </div>
         </div>
-        <div className="text-sm font-medium text-stone-800">{event.title}</div>
-        <div className="text-xs text-stone-500 mt-0.5">{event.detail}</div>
+        <div className="text-sm font-medium text-ink">{event.title}</div>
+        <div className="text-xs text-muted mt-0.5">{event.detail}</div>
       </div>
     </div>
   );
@@ -540,8 +548,9 @@ function FlowEventRow({ event }: { event: FlowEvent }) {
 function SectionHeader({ title, subtitle }: { title: string; subtitle: string }) {
   return (
     <div className="mb-4">
-      <h2 className="text-xl font-bold tracking-tight text-stone-900">{title}</h2>
-      <p className="text-xs text-stone-500 mt-0.5">{subtitle}</p>
+      <div className="mb-2 h-0.5 w-10 rounded-full flow-stream" aria-hidden="true" />
+      <h2 className="text-xl font-bold tracking-tight text-ink">{title}</h2>
+      <p className="text-xs text-muted mt-0.5">{subtitle}</p>
     </div>
   );
 }

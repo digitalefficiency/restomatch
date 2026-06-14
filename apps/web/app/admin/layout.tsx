@@ -13,23 +13,23 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   if (!(await isPlatformAdmin(session.user.id))) notFound();
 
   return (
-    <main className="min-h-screen bg-stone-50" dir="rtl">
-      <header className="sticky top-0 z-30 border-b border-stone-200 bg-white">
+    <main className="min-h-screen bg-bg" dir="rtl">
+      <header className="glass sticky top-0 z-30 border-b border-line">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-4">
           <div className="flex items-center gap-2">
-            <span className="rounded bg-stone-900 px-2 py-1 text-xs font-bold text-white">
+            <span className="rounded bg-primary px-2 py-1 font-mono text-xs font-bold text-on-primary">
               ADMIN
             </span>
-            <span className="text-sm text-stone-600">קונסולת תפעול · RestoMatch</span>
+            <span className="text-sm text-muted">קונסולת תפעול · RestoMatch</span>
           </div>
-          <nav className="flex gap-4 text-sm font-medium text-stone-600">
-            <Link href="/admin" className="hover:text-stone-900">
+          <nav className="flex gap-4 text-sm font-medium text-muted">
+            <Link href="/admin" className="transition-colors hover:text-ink">
               מסעדות
             </Link>
-            <Link href="/admin/leads" className="hover:text-stone-900">
+            <Link href="/admin/leads" className="transition-colors hover:text-ink">
               לידים
             </Link>
-            <Link href="/dashboard" className="text-stone-400 hover:text-stone-900">
+            <Link href="/dashboard" className="text-subtle transition-colors hover:text-ink">
               ← לדשבורד
             </Link>
           </nav>

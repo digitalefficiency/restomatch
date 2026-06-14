@@ -54,32 +54,32 @@ export function AdjustQuantities({ result, marks, onUpdateMark, onSubmit, onBack
         <button
           type="button"
           onClick={() => setShowMatched(!showMatched)}
-          className="adjust-card mb-4 w-full text-right rounded-2xl border border-emerald-200/60 bg-emerald-50/40 px-5 py-3 flex items-center justify-between hover:bg-emerald-50/70 transition-colors"
+          className="adjust-card mb-4 w-full text-right rounded-2xl border border-primary/25 bg-primary/8 px-5 py-3 flex items-center justify-between hover:bg-primary/12 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
         >
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-lg bg-primary/15 text-primary flex items-center justify-center">
               <Check className="w-4 h-4" strokeWidth={3} />
             </div>
             <div>
-              <div className="text-sm font-semibold text-emerald-900">
+              <div className="text-sm font-semibold text-ink">
                 {matchedLines.length} שורות תואמות — אישור אוטומטי
               </div>
-              <div className="text-xs text-emerald-800/70">לחץ להרחבה</div>
+              <div className="text-xs text-muted">לחץ להרחבה</div>
             </div>
           </div>
           <ChevronDown
-            className={`w-5 h-5 text-emerald-600 transition-transform ${showMatched ? 'rotate-180' : ''}`}
+            className={`w-5 h-5 text-primary transition-transform ${showMatched ? 'rotate-180' : ''}`}
           />
         </button>
       ) : null}
 
       {showMatched ? (
-        <div className="mb-4 rounded-xl border border-stone-200 bg-white/70 p-3 text-sm text-stone-700">
+        <div className="mb-4 rounded-xl border border-line bg-surface-2 p-3 text-sm text-ink">
           <ul className="space-y-1.5">
             {matchedLines.map((l) => (
               <li key={l.productName} className="flex items-center justify-between">
                 <span className="font-medium">{l.productName}</span>
-                <span className="text-stone-500 tabular-nums">
+                <span className="text-muted font-mono tabular-nums">
                   {l.invoiceQty} {l.invoiceUnit} × ₪{l.invoiceUnitPrice}
                 </span>
               </li>
@@ -106,12 +106,12 @@ export function AdjustQuantities({ result, marks, onUpdateMark, onSubmit, onBack
       </div>
 
       {/* Footer */}
-      <div className="sticky bottom-0 pb-4 pt-4 -mx-6 px-6 bg-gradient-to-t from-white via-white to-transparent">
+      <div className="sticky bottom-0 pb-4 pt-4 -mx-6 px-6 bg-gradient-to-t from-bg via-bg to-transparent">
         <div className="flex items-center justify-between gap-3">
           <button
             type="button"
             onClick={onBack}
-            className="text-sm text-stone-500 hover:text-stone-800 underline underline-offset-4 decoration-stone-300"
+            className="text-sm text-muted hover:text-ink underline underline-offset-4 decoration-line"
           >
             חזור לתוצאות
           </button>
@@ -119,7 +119,7 @@ export function AdjustQuantities({ result, marks, onUpdateMark, onSubmit, onBack
             type="button"
             onClick={onSubmit}
             disabled={stats.pending > 0}
-            className="inline-flex items-center gap-2 bg-teal-600 hover:bg-teal-700 disabled:bg-stone-200 disabled:text-stone-400 text-white rounded-xl px-5 py-3 font-medium shadow-[0_4px_12px_rgba(37,99,235,0.25)] disabled:shadow-none transition-all"
+            className="inline-flex items-center gap-2 bg-primary hover:brightness-110 disabled:bg-surface-2 disabled:text-subtle text-on-primary rounded-xl px-5 py-3 font-medium shadow-glow-primary disabled:shadow-none transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:ring-primary"
           >
             <Check className="w-5 h-5" strokeWidth={3} />
             {stats.pending > 0
@@ -152,39 +152,39 @@ function AdjustCard({ line, mark, onUpdate }: AdjustCardProps) {
 
   return (
     <div
-      className={`adjust-card rounded-2xl border bg-white/90 backdrop-blur-xl p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)] ${mark.touched ? 'border-stone-200' : accent.border}`}
+      className={`adjust-card rounded-2xl border bg-surface p-4 shadow-card ${mark.touched ? 'border-line' : accent.border}`}
     >
       <div className="flex items-start justify-between mb-3">
         <div>
-          <div className="font-semibold text-stone-900">{line.productName}</div>
-          <div className="text-xs text-stone-500 mt-1 tabular-nums">
+          <div className="font-semibold text-ink">{line.productName}</div>
+          <div className="text-xs text-muted mt-1 font-mono tabular-nums">
             {line.poQty !== null ? (
               <span>הוזמן: {line.poQty} {line.poUnit}</span>
             ) : (
-              <span className="text-red-600">לא בהזמנה</span>
+              <span className="text-danger">לא בהזמנה</span>
             )}
             {line.invoiceQty !== null ? (
               <>
-                <span className="text-stone-300 mx-1.5">·</span>
+                <span className="text-subtle mx-1.5">·</span>
                 <span>חויב: {line.invoiceQty} {line.invoiceUnit}</span>
               </>
             ) : null}
           </div>
         </div>
-        <span className={`shrink-0 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${accent.tint}`}>
+        <span className={`shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${accent.tint}`}>
           {accent.icon}
           <span>{accent.label}</span>
         </span>
       </div>
 
       {/* Stepper */}
-      <div className="flex items-center justify-between bg-stone-50 rounded-xl p-2 mb-3">
+      <div className="flex items-center justify-between bg-surface-2 rounded-xl p-2 mb-3">
         <button
           type="button"
           onClick={() => incrementQty(-1)}
-          className="w-10 h-10 rounded-lg bg-white border border-stone-200 hover:bg-stone-100 active:scale-95 transition-all flex items-center justify-center"
+          className="w-10 h-10 rounded-lg bg-surface border border-line hover:border-primary/40 active:scale-95 transition-all flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
         >
-          <Minus className="w-4 h-4 text-stone-700" strokeWidth={2.5} />
+          <Minus className="w-4 h-4 text-ink" strokeWidth={2.5} />
         </button>
         <div className="flex items-baseline gap-2">
           <input
@@ -192,18 +192,18 @@ function AdjustCard({ line, mark, onUpdate }: AdjustCardProps) {
             inputMode="decimal"
             value={mark.qtyReceived}
             onChange={(e) => setQty(Number(e.target.value))}
-            className="w-20 text-center text-2xl font-bold tabular-nums bg-transparent border-0 focus:outline-none text-stone-900"
+            className="w-20 text-center text-2xl font-bold font-mono tabular-nums bg-transparent border-0 focus:outline-none text-ink"
             min={0}
             step={0.1}
           />
-          <span className="text-sm text-stone-500">{line.invoiceUnit ?? line.poUnit ?? ''}</span>
+          <span className="text-sm text-muted">{line.invoiceUnit ?? line.poUnit ?? ''}</span>
         </div>
         <button
           type="button"
           onClick={() => incrementQty(1)}
-          className="w-10 h-10 rounded-lg bg-white border border-stone-200 hover:bg-stone-100 active:scale-95 transition-all flex items-center justify-center"
+          className="w-10 h-10 rounded-lg bg-surface border border-line hover:border-primary/40 active:scale-95 transition-all flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
         >
-          <Plus className="w-4 h-4 text-stone-700" strokeWidth={2.5} />
+          <Plus className="w-4 h-4 text-ink" strokeWidth={2.5} />
         </button>
       </div>
 
@@ -241,7 +241,7 @@ function AdjustCard({ line, mark, onUpdate }: AdjustCardProps) {
       </div>
 
       {mark.touched ? (
-        <div className="mt-3 text-xs text-emerald-700 flex items-center gap-1">
+        <div className="mt-3 text-xs text-primary flex items-center gap-1">
           <Check className="w-3.5 h-3.5" strokeWidth={3} />
           סודר
         </div>
@@ -263,20 +263,20 @@ function Chip({
 }) {
   const tones = {
     neutral: active
-      ? 'bg-teal-600 text-white border-teal-600'
-      : 'bg-white text-stone-700 border-stone-200 hover:bg-stone-50',
+      ? 'bg-primary text-on-primary border-primary'
+      : 'bg-surface-2 text-muted border-line hover:border-primary/40 hover:text-primary',
     red: active
-      ? 'bg-red-600 text-white border-red-600'
-      : 'bg-white text-red-700 border-red-200 hover:bg-red-50',
+      ? 'bg-danger text-on-primary border-danger'
+      : 'bg-surface-2 text-danger border-danger/30 hover:bg-danger/10',
     amber: active
-      ? 'bg-amber-600 text-white border-amber-600'
-      : 'bg-white text-amber-700 border-amber-200 hover:bg-amber-50',
+      ? 'bg-warn text-on-primary border-warn'
+      : 'bg-surface-2 text-warn border-warn/30 hover:bg-warn/10',
   };
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-all ${tones[tone]}`}
+      className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${tones[tone]}`}
     >
       {label}
     </button>
@@ -288,36 +288,36 @@ function statusAccent(status: LineStatus) {
     case 'qty_diff':
       return {
         label: 'כמות שונה',
-        tint: 'bg-amber-50 text-amber-700 border-amber-200',
-        border: 'border-amber-200/60',
+        tint: 'bg-warn/12 text-warn ring-1 ring-warn/25',
+        border: 'border-warn/30',
         icon: <AlertTriangle className="w-3 h-3" />,
       };
     case 'price_diff':
       return {
         label: 'מחיר שונה',
-        tint: 'bg-orange-50 text-orange-700 border-orange-200',
-        border: 'border-orange-200/60',
+        tint: 'bg-warn/12 text-warn ring-1 ring-warn/25',
+        border: 'border-warn/30',
         icon: <Zap className="w-3 h-3" />,
       };
     case 'unordered':
       return {
         label: 'לא בהזמנה',
-        tint: 'bg-red-50 text-red-700 border-red-200',
-        border: 'border-red-200/60',
+        tint: 'bg-danger/12 text-danger ring-1 ring-danger/25',
+        border: 'border-danger/30',
         icon: <Plus className="w-3 h-3" strokeWidth={3} />,
       };
     case 'missing_from_invoice':
       return {
         label: 'חסר בחשבונית',
-        tint: 'bg-stone-100 text-stone-700 border-stone-200',
-        border: 'border-stone-200/60',
+        tint: 'bg-surface-2 text-muted ring-1 ring-line',
+        border: 'border-line',
         icon: <X className="w-3 h-3" strokeWidth={3} />,
       };
     default:
       return {
         label: 'תואם',
-        tint: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-        border: 'border-emerald-200/60',
+        tint: 'bg-primary/12 text-primary ring-1 ring-primary/25',
+        border: 'border-primary/30',
         icon: <Check className="w-3 h-3" strokeWidth={3} />,
       };
   }

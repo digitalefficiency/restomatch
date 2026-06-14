@@ -22,6 +22,7 @@ export default async function SuppliersPage() {
       return (
         <div>
           <SectionHeader
+            level={1}
             title="דירוג ספקים"
             subtitle="ספק שגדל ב-clean match% הוא ספק שלא מוסיף עלויות סמויות."
           />
@@ -35,6 +36,7 @@ export default async function SuppliersPage() {
   return (
     <div>
       <SectionHeader
+        level={1}
         title="דירוג ספקים"
         subtitle="ספק שגדל ב-clean match% הוא ספק שלא מוסיף עלויות סמויות."
       />

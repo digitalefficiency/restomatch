@@ -72,13 +72,14 @@ export default function InvoiceAuditPage() {
   return (
     <main ref={containerRef} className="max-w-7xl mx-auto px-6 py-10 space-y-8" dir="rtl">
       <div>
-        <p className="text-xs uppercase tracking-[0.18em] text-teal-600 font-semibold mb-2">
+        <div className="mb-2 h-0.5 w-12 rounded-full flow-stream" aria-hidden="true" />
+        <p className="text-xs uppercase tracking-[0.18em] text-primary font-semibold mb-2">
           ביקורת בעלים
         </p>
-        <h1 className="text-4xl font-bold tracking-tight text-stone-900 mb-2">
+        <h1 className="text-4xl font-extrabold tracking-tight text-ink mb-2">
           חשבוניות שעברו דרך הצוות
         </h1>
-        <p className="text-stone-500 max-w-2xl">
+        <p className="text-muted max-w-2xl">
           מה הספקים חייבו, מה הצוות אישר בפועל, ואיפה היו פערים. לחץ על חשבונית כדי לראות
           את ההשוואה המלאה.
         </p>
@@ -103,7 +104,7 @@ export default function InvoiceAuditPage() {
           label="נחסך עקב בדיקה"
           value={`₪${stats.savingsCaptured.toLocaleString('he-IL')}`}
           icon={<Wallet className="w-5 h-5" />}
-          tone="emerald"
+          tone="gold"
           subtitle="פערים שהעובד תפס לפני שמירה"
         />
         <KpiCard
@@ -117,7 +118,7 @@ export default function InvoiceAuditPage() {
 
       {/* Filters */}
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-sm text-stone-500 font-medium ml-2">סנן:</span>
+        <span className="text-sm text-muted font-medium ml-2">סנן:</span>
         <FilterChip
           active={filter === 'all'}
           onClick={() => setFilter('all')}
@@ -151,7 +152,7 @@ export default function InvoiceAuditPage() {
           />
         ))}
         {filtered.length === 0 ? (
-          <div className="rounded-2xl border border-stone-200/70 bg-white/80 p-10 text-center text-stone-500">
+          <div className="rounded-2xl border border-line bg-surface p-10 text-center text-muted">
             אין חשבוניות שעונות לסינון.
           </div>
         ) : null}
@@ -173,26 +174,31 @@ function KpiCard({
   value: string;
   subtitle?: string;
   icon: React.ReactNode;
-  tone: 'blue' | 'amber' | 'emerald' | 'red';
+  tone: 'blue' | 'amber' | 'gold' | 'red';
 }) {
   const map = {
-    blue: 'bg-teal-50 text-teal-700 ring-teal-100',
-    amber: 'bg-amber-50 text-amber-700 ring-amber-100',
-    emerald: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
-    red: 'bg-red-50 text-red-700 ring-red-100',
+    blue: { icon: 'bg-info/12 text-info ring-info/25', value: 'text-ink', glow: 'glow-primary-blob' },
+    amber: { icon: 'bg-warn/12 text-warn ring-warn/25', value: 'text-ink', glow: 'glow-gold-blob' },
+    gold: { icon: 'bg-gold/12 text-gold ring-gold/25', value: 'text-gold', glow: 'glow-gold-blob' },
+    red: { icon: 'bg-danger/12 text-danger ring-danger/25', value: 'text-danger', glow: 'glow-danger-blob' },
   } as const;
+  const t = map[tone];
   return (
-    <div className="audit-kpi rounded-2xl border border-stone-200/70 bg-white/90 backdrop-blur-xl p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)]">
+    <div className="audit-kpi relative overflow-hidden rounded-2xl border border-line bg-surface p-5 shadow-card">
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px flow-stream" />
       <div className="flex items-start justify-between mb-3">
-        <div className={`w-10 h-10 rounded-xl ring-1 flex items-center justify-center ${map[tone]}`}>
+        <div className={`w-10 h-10 rounded-xl ring-1 flex items-center justify-center ${t.icon}`}>
           {icon}
         </div>
       </div>
-      <div className="text-xs uppercase tracking-wider text-stone-500 font-semibold mb-1">
+      <div className="text-xs uppercase tracking-wider text-subtle font-semibold mb-1">
         {label}
       </div>
-      <div className="text-3xl font-bold tabular-nums text-stone-900 mb-1">{value}</div>
-      {subtitle ? <div className="text-xs text-stone-500">{subtitle}</div> : null}
+      <div className={`font-mono text-3xl font-extrabold tabular-nums mb-1 ${t.value}`}>{value}</div>
+      {subtitle ? <div className="text-xs text-muted">{subtitle}</div> : null}
+      <div
+        className={`pointer-events-none absolute -bottom-10 -left-10 w-40 h-40 rounded-full blur-2xl opacity-60 ${t.glow}`}
+      />
     </div>
   );
 }
@@ -210,10 +216,10 @@ function FilterChip({
     <button
       type="button"
       onClick={onClick}
-      className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-all ${
+      className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
         active
-          ? 'bg-teal-600 border-teal-600 text-white shadow-[0_2px_8px_rgba(37,99,235,0.25)]'
-          : 'bg-white border-stone-200 text-stone-700 hover:bg-stone-50 hover:border-stone-300'
+          ? 'bg-primary border-primary text-on-primary shadow-glow-primary'
+          : 'bg-surface-2 border-line text-muted hover:text-ink hover:border-primary/40'
       }`}
     >
       {label}
@@ -242,17 +248,17 @@ function InvoiceRow({
           onToggle();
         }
       }}
-      className={`audit-row w-full text-right rounded-2xl border bg-white/90 backdrop-blur-xl px-5 py-4 transition-all cursor-pointer ${
+      className={`audit-row w-full text-right rounded-2xl border bg-surface px-5 py-4 transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
         isExpanded
-          ? 'border-teal-400 shadow-[0_2px_8px_rgba(37,99,235,0.12),0_16px_36px_-12px_rgba(37,99,235,0.18)]'
-          : 'border-stone-200/70 hover:border-teal-300 hover:bg-teal-50/20 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)]'
+          ? 'border-primary/50 shadow-glow-primary'
+          : 'border-line hover:border-primary/40 shadow-card'
       }`}
     >
       <div className="flex items-center gap-4">
         <Link
           href={`/showcase/dashboard/suppliers/${record.supplierId}`}
           onClick={(e) => e.stopPropagation()}
-          className="w-11 h-11 rounded-xl bg-gradient-to-br from-teal-100 to-teal-50 border border-teal-200/70 flex items-center justify-center font-bold text-teal-700 shrink-0 hover:from-teal-200 hover:to-teal-100 hover:border-teal-300 transition-colors"
+          className="w-11 h-11 rounded-xl bg-primary/12 border border-primary/25 flex items-center justify-center font-bold text-primary shrink-0 hover:bg-primary/20 transition-colors"
           title={`לעמוד הספק ${record.supplierName}`}
         >
           {record.supplierInitials}
@@ -262,21 +268,21 @@ function InvoiceRow({
             <Link
               href={`/showcase/dashboard/suppliers/${record.supplierId}`}
               onClick={(e) => e.stopPropagation()}
-              className="group inline-flex items-center gap-1 font-semibold text-stone-900 text-base hover:text-teal-700 transition-colors"
+              className="group inline-flex items-center gap-1 font-semibold text-ink text-base hover:text-primary transition-colors"
             >
               <span>{record.supplierName}</span>
-              <ArrowUpRight className="w-3.5 h-3.5 text-stone-400 group-hover:text-teal-600 transition-colors" />
+              <ArrowUpRight className="w-3.5 h-3.5 text-subtle group-hover:text-primary transition-colors" />
             </Link>
-            <span className="text-xs text-stone-400 font-mono">·</span>
-            <span className="text-xs text-stone-500 font-mono">{record.invoiceNumber}</span>
-            <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusInfo.tint} mr-2`}>
+            <span className="text-xs text-subtle font-mono">·</span>
+            <span className="text-xs text-muted font-mono tabular-nums">{record.invoiceNumber}</span>
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusInfo.tint} mr-2`}>
               {statusInfo.label}
             </span>
           </div>
-          <div className="flex items-center gap-4 text-xs text-stone-500 flex-wrap">
+          <div className="flex items-center gap-4 text-xs text-muted flex-wrap">
             <span className="flex items-center gap-1">
               <Clock className="w-3 h-3" />
-              <span className="tabular-nums">
+              <span className="font-mono tabular-nums">
                 {new Date(record.scannedAt).toLocaleTimeString('he-IL', {
                   hour: '2-digit',
                   minute: '2-digit',
@@ -289,15 +295,15 @@ function InvoiceRow({
             </span>
             <span className="flex items-center gap-1">
               <FileCheck2 className="w-3 h-3" />
-              <span className="tabular-nums">{record.lines.length} פריטים</span>
+              <span className="font-mono tabular-nums">{record.lines.length} פריטים</span>
             </span>
             {record.discrepanciesCount > 0 ? (
-              <span className="flex items-center gap-1 text-amber-700 font-semibold">
+              <span className="flex items-center gap-1 text-warn font-semibold">
                 <AlertTriangle className="w-3 h-3" />
-                <span className="tabular-nums">{record.discrepanciesCount} חריגות</span>
+                <span className="font-mono tabular-nums">{record.discrepanciesCount} חריגות</span>
               </span>
             ) : (
-              <span className="flex items-center gap-1 text-emerald-700">
+              <span className="flex items-center gap-1 text-primary">
                 <Check className="w-3 h-3" strokeWidth={3} />
                 <span>תקין</span>
               </span>
@@ -305,27 +311,27 @@ function InvoiceRow({
           </div>
         </div>
         <div className="text-left">
-          <div className="text-[10px] text-stone-400 uppercase tracking-wider font-semibold">חויב</div>
-          <div className="font-bold tabular-nums text-stone-900">
+          <div className="text-[10px] text-subtle uppercase tracking-wider font-semibold">חויב</div>
+          <div className="font-mono font-bold tabular-nums text-ink">
             ₪{record.totalInvoiceIls.toLocaleString('he-IL')}
           </div>
           {record.totalApprovedIls !== record.totalInvoiceIls ? (
-            <div className="text-[10px] text-stone-500 mt-0.5">
+            <div className="text-[10px] text-muted mt-0.5">
               אושר{' '}
-              <span className="font-semibold tabular-nums text-emerald-700">
+              <span className="font-semibold font-mono tabular-nums text-gold">
                 ₪{record.totalApprovedIls.toLocaleString('he-IL')}
               </span>
             </div>
           ) : null}
           {record.savingsCapturedIls > 0 ? (
-            <div className="text-[10px] text-emerald-700 font-semibold mt-0.5 tabular-nums flex items-center gap-1 justify-end">
+            <div className="text-[10px] text-gold font-semibold mt-0.5 font-mono tabular-nums flex items-center gap-1 justify-end">
               <Sparkles className="w-3 h-3" />
               ₪{record.savingsCapturedIls.toLocaleString('he-IL')} נחסכו
             </div>
           ) : null}
         </div>
         <ChevronDown
-          className={`w-5 h-5 text-stone-400 transition-transform shrink-0 ${
+          className={`w-5 h-5 text-subtle transition-transform shrink-0 ${
             isExpanded ? 'rotate-180' : ''
           }`}
         />
@@ -337,13 +343,13 @@ function InvoiceRow({
 function statusBadge(status: InvoiceAuditStatus): { label: string; tint: string } {
   switch (status) {
     case 'clean':
-      return { label: 'תקין', tint: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+      return { label: 'תקין', tint: 'bg-primary/12 text-primary ring-1 ring-primary/25' };
     case 'minor':
-      return { label: 'הערה', tint: 'bg-stone-50 text-stone-700 border-stone-200' };
+      return { label: 'הערה', tint: 'bg-surface-2 text-muted ring-1 ring-line' };
     case 'major':
-      return { label: 'חריגות', tint: 'bg-amber-50 text-amber-700 border-amber-200' };
+      return { label: 'חריגות', tint: 'bg-warn/12 text-warn ring-1 ring-warn/25' };
     case 'blocked':
-      return { label: 'תשלום נחסם', tint: 'bg-red-50 text-red-700 border-red-200' };
+      return { label: 'תשלום נחסם', tint: 'bg-danger/12 text-danger ring-1 ring-danger/25' };
   }
 }
 

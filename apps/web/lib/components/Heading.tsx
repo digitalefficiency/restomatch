@@ -1,9 +1,9 @@
 import { cn } from './cn';
 
 const levelStyles: Record<1 | 2 | 3 | 4, string> = {
-  1: 'text-3xl sm:text-4xl font-bold tracking-tight',
+  1: 'text-3xl sm:text-4xl font-extrabold tracking-tight',
   2: 'text-2xl font-bold tracking-tight',
-  3: 'text-lg font-semibold',
+  3: 'text-lg font-bold',
   4: 'text-base font-semibold',
 };
 
@@ -41,7 +41,7 @@ export function SectionHeader({
       <div>
         <div className="mb-2 h-0.5 w-10 rounded-full flow-stream" aria-hidden="true" />
         <Heading level={level}>{title}</Heading>
-        {subtitle ? <p className="mt-1 text-sm text-stone-500">{subtitle}</p> : null}
+        {subtitle ? <p className="mt-1 text-sm text-muted">{subtitle}</p> : null}
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}
     </div>

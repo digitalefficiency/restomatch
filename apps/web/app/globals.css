@@ -4,25 +4,123 @@
 
 @layer base {
   :root {
-    color-scheme: light;
+    color-scheme: dark;
+    /* Signature money-flow palette (kept here too for raw CSS / gradients). */
+    --rm-bg: #0e1512;
+    --rm-surface: #16201b;
+    --rm-surface-2: #1c2a23;
+    --rm-line: #2a3a31;
+    --rm-ink: #ecf5ef;
+    --rm-muted: #9db2a6;
+    --rm-subtle: #6b8478;
+    --rm-primary: #22d39a;
+    --rm-gold: #e0b341;
+    --rm-danger: #ff5c7a;
   }
+
   html {
     direction: rtl;
-    /* Warm-paper canvas — the "Ledger" identity (not cold white). */
-    background: linear-gradient(180deg, #faf9f5 0%, #f1efe8 100%);
+    /* Near-black green-ink canvas — the "command center for money" identity.
+       A faint money-green aura up top, fading into the dark. */
+    background-color: #0e1512;
+    background-image: radial-gradient(
+      ellipse 90% 55% at 50% -10%,
+      rgba(34, 211, 154, 0.06),
+      transparent 60%
+    );
     background-attachment: fixed;
     min-height: 100vh;
   }
+
   body {
-    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
-    color: #15201a;
+    color: var(--rm-ink);
     background: transparent;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Money figures / KPIs lean on tabular mono — terminal feel. */
+  .nums {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
+
+  /* Dark text selection — money-green tint. */
+  ::selection {
+    background: rgba(34, 211, 154, 0.28);
+    color: var(--rm-ink);
+  }
+
+  /* Custom dark scrollbar. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #2a3a31 transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: #2a3a31;
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: #3a5145;
+    background-clip: padding-box;
   }
 }
 
 @layer utilities {
-  /* Money-flow signature motif — emerald→lime gradient stream. */
+  /* SIGNATURE MOTIF — "money flow": a flowing primary→gold gradient stream.
+     Used as a thin top-accent on cards / section headers. (RTL-friendly:
+     left-to-right reads as "flow into savings", neutral on both sides.) */
   .flow-stream {
-    background-image: linear-gradient(90deg, #0b5e4a 0%, #15a34a 45%, #4ade80 75%, transparent 100%);
+    background-image: linear-gradient(
+      90deg,
+      rgba(34, 211, 154, 0) 0%,
+      #22d39a 22%,
+      #6fe0bd 50%,
+      #e0b341 82%,
+      rgba(224, 179, 65, 0) 100%
+    );
+  }
+
+  /* Alias kept for any consumer that referenced the accent by intent. */
+  .flow-accent {
+    background-image: linear-gradient(90deg, #22d39a 0%, #6fe0bd 50%, #e0b341 100%);
+  }
+
+  /* LEAK gradient — a downward danger stream for "money leaking / loss". */
+  .leak-gradient {
+    background-image: linear-gradient(
+      180deg,
+      rgba(255, 92, 122, 0.9) 0%,
+      rgba(255, 92, 122, 0.35) 60%,
+      rgba(255, 92, 122, 0) 100%
+    );
+  }
+
+  /* Subtle radial glow helpers (decorative blobs inside cards). */
+  .glow-primary-blob {
+    background: radial-gradient(circle, rgba(34, 211, 154, 0.22), transparent 70%);
+  }
+  .glow-gold-blob {
+    background: radial-gradient(circle, rgba(224, 179, 65, 0.18), transparent 70%);
+  }
+  .glow-danger-blob {
+    background: radial-gradient(circle, rgba(255, 92, 122, 0.2), transparent 70%);
+  }
+
+  /* Frosted glass for sticky nav / headers on the dark canvas. */
+  .glass {
+    background-color: rgba(22, 32, 27, 0.72);
+    backdrop-filter: saturate(140%) blur(14px);
+    -webkit-backdrop-filter: saturate(140%) blur(14px);
   }
 }

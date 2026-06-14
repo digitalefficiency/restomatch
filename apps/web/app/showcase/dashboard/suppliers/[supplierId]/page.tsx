@@ -71,33 +71,34 @@ export default function SupplierDetailPage({ params }: PageProps) {
   return (
     <main ref={containerRef} className="max-w-7xl mx-auto px-6 py-10 space-y-8" dir="rtl">
       {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm text-stone-500">
+      <div className="flex items-center gap-2 text-sm text-muted">
         <Link
           href="/showcase/dashboard/invoices"
-          className="hover:text-teal-600 inline-flex items-center gap-1"
+          className="hover:text-primary inline-flex items-center gap-1"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
           ביקורת חשבוניות
         </Link>
-        <span className="text-stone-300">/</span>
-        <span className="text-stone-700 font-medium">{metadata.name}</span>
+        <span className="text-subtle">/</span>
+        <span className="text-ink font-medium">{metadata.name}</span>
       </div>
 
       {/* Hero */}
       <section className="detail-block grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Left: identity */}
-        <div className="lg:col-span-2 rounded-2xl border border-stone-200/70 bg-white/90 backdrop-blur-xl p-6 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)]">
+        <div className="lg:col-span-2 relative overflow-hidden rounded-2xl border border-line bg-surface p-6 shadow-card">
+          <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px flow-stream" />
           <div className="flex items-start justify-between gap-4 mb-5">
             <div className="flex items-center gap-4">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-teal-100 to-teal-50 border border-teal-200/70 flex items-center justify-center text-2xl font-bold text-teal-700">
+              <div className="w-16 h-16 rounded-2xl bg-primary/12 border border-primary/25 flex items-center justify-center text-2xl font-bold text-primary">
                 {metadata.initials}
               </div>
               <div>
-                <h1 className="text-2xl font-bold tracking-tight text-stone-900 mb-1">
+                <h1 className="text-2xl font-bold tracking-tight text-ink mb-1">
                   {metadata.name}
                 </h1>
-                <div className="flex items-center gap-2 text-xs text-stone-500">
-                  <span className="px-2 py-0.5 rounded-full bg-stone-100 border border-stone-200">
+                <div className="flex items-center gap-2 text-xs text-muted">
+                  <span className="px-2 py-0.5 rounded-full bg-surface-2 border border-line">
                     {metadata.category}
                   </span>
                   <span>·</span>
@@ -127,8 +128,8 @@ export default function SupplierDetailPage({ params }: PageProps) {
         </div>
 
         {/* Right: action panel */}
-        <div className="rounded-2xl border border-stone-200/70 bg-white/90 backdrop-blur-xl p-6 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)] flex flex-col gap-3">
-          <h2 className="text-xs uppercase tracking-wider text-stone-500 font-semibold mb-1">
+        <div className="rounded-2xl border border-line bg-surface p-6 shadow-card flex flex-col gap-3">
+          <h2 className="text-xs uppercase tracking-wider text-subtle font-semibold mb-1">
             פעולות
           </h2>
           <ActionButton
@@ -152,14 +153,14 @@ export default function SupplierDetailPage({ params }: PageProps) {
           label="משלוחים נקיים"
           value={`${kpi.cleanDeliveryPct}%`}
           icon={<Check className="w-5 h-5" />}
-          tone={kpi.cleanDeliveryPct >= kpi.cleanDeliveryRestaurantAvg ? 'emerald' : 'amber'}
+          tone={kpi.cleanDeliveryPct >= kpi.cleanDeliveryRestaurantAvg ? 'primary' : 'amber'}
           subtitle={`ממוצע המסעדה: ${kpi.cleanDeliveryRestaurantAvg}%`}
         />
         <KpiCard
           label="סטיית מחיר ממוצעת"
           value={`${kpi.avgPriceVariancePct >= 0 ? '+' : ''}${kpi.avgPriceVariancePct}%`}
           icon={<TrendingUp className="w-5 h-5" />}
-          tone={kpi.avgPriceVariancePct > 3 ? 'red' : kpi.avgPriceVariancePct > 1 ? 'amber' : 'emerald'}
+          tone={kpi.avgPriceVariancePct > 3 ? 'red' : kpi.avgPriceVariancePct > 1 ? 'amber' : 'primary'}
           subtitle="מעל מחירי ההזמנה"
         />
         <KpiCard
@@ -173,7 +174,7 @@ export default function SupplierDetailPage({ params }: PageProps) {
           label="חריגות פתוחות"
           value={kpi.openDisputes.toString()}
           icon={<ShieldAlert className="w-5 h-5" />}
-          tone={kpi.openDisputes > 0 ? 'red' : 'emerald'}
+          tone={kpi.openDisputes > 0 ? 'red' : 'primary'}
           subtitle={`${kpi.flaggedInvoicesThisMonth}/${kpi.totalInvoicesThisMonth} חשבוניות סומנו`}
         />
       </section>
@@ -198,7 +199,7 @@ export default function SupplierDetailPage({ params }: PageProps) {
             title="חשבוניות אחרונות"
             subtitle={`${recentInvoices.length} מהחודש האחרון · לחץ לצפייה בסריקה`}
           />
-          <div className="rounded-2xl border border-stone-200/70 bg-white/90 backdrop-blur-xl overflow-hidden shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)]">
+          <div className="rounded-2xl border border-line bg-surface overflow-hidden shadow-card">
             {recentInvoices.map((inv, idx) => (
               <InvoiceListRow
                 key={inv.id}
@@ -243,11 +244,11 @@ function ContactRow({
 }) {
   return (
     <div>
-      <div className="text-xs text-stone-500 mb-0.5 flex items-center gap-1.5">
-        <span className="text-stone-400">{icon}</span>
+      <div className="text-xs text-muted mb-0.5 flex items-center gap-1.5">
+        <span className="text-subtle">{icon}</span>
         <span>{label}</span>
       </div>
-      <div className="text-sm font-medium text-stone-800 truncate">{value}</div>
+      <div className="text-sm font-medium text-ink truncate">{value}</div>
     </div>
   );
 }
@@ -257,17 +258,17 @@ function StatusPill({ kpi }: { kpi: { cleanDeliveryPct: number; openDisputes: nu
   const isWatch = kpi.openDisputes > 0 || kpi.cleanDeliveryPct < 80;
   const label = isHealthy ? 'ספק יציב' : isWatch ? 'בבדיקה' : 'תקין';
   const tint = isHealthy
-    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+    ? 'bg-primary/12 text-primary ring-1 ring-primary/25'
     : isWatch
-      ? 'bg-amber-50 text-amber-700 border-amber-200'
-      : 'bg-teal-50 text-teal-700 border-teal-200';
+      ? 'bg-warn/12 text-warn ring-1 ring-warn/25'
+      : 'bg-info/12 text-info ring-1 ring-info/25';
   const icon = isHealthy ? (
     <Check className="w-3 h-3" strokeWidth={3} />
   ) : (
     <ShieldAlert className="w-3 h-3" />
   );
   return (
-    <span className={`shrink-0 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold ${tint}`}>
+    <span className={`shrink-0 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${tint}`}>
       {icon}
       <span>{label}</span>
     </span>
@@ -286,14 +287,14 @@ function ActionButton({
   danger?: boolean;
 }) {
   const cls = primary
-    ? 'bg-teal-600 hover:bg-teal-700 text-white shadow-[0_4px_12px_rgba(37,99,235,0.25)]'
+    ? 'bg-primary hover:brightness-110 text-on-primary shadow-glow-primary'
     : danger
-      ? 'bg-white border border-red-200 hover:bg-red-50 text-red-700'
-      : 'bg-white border border-stone-200 hover:bg-stone-50 text-stone-700';
+      ? 'bg-surface-2 border border-danger/30 hover:bg-danger/10 text-danger'
+      : 'bg-surface-2 border border-line hover:border-primary/40 hover:text-primary text-ink';
   return (
     <button
       type="button"
-      className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all ${cls}`}
+      className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${cls}`}
     >
       {icon}
       <span>{label}</span>
@@ -311,25 +312,30 @@ function KpiCard({
   label: string;
   value: string;
   icon: React.ReactNode;
-  tone: 'emerald' | 'amber' | 'red' | 'blue';
+  tone: 'primary' | 'amber' | 'red' | 'blue';
   subtitle?: string;
 }) {
   const map = {
-    emerald: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
-    amber: 'bg-amber-50 text-amber-700 ring-amber-100',
-    red: 'bg-red-50 text-red-700 ring-red-100',
-    blue: 'bg-teal-50 text-teal-700 ring-teal-100',
+    primary: { icon: 'bg-primary/12 text-primary ring-primary/25', value: 'text-ink', glow: 'glow-primary-blob' },
+    amber: { icon: 'bg-warn/12 text-warn ring-warn/25', value: 'text-ink', glow: 'glow-gold-blob' },
+    red: { icon: 'bg-danger/12 text-danger ring-danger/25', value: 'text-danger', glow: 'glow-danger-blob' },
+    blue: { icon: 'bg-info/12 text-info ring-info/25', value: 'text-ink', glow: 'glow-primary-blob' },
   } as const;
+  const t = map[tone];
   return (
-    <div className="rounded-2xl border border-stone-200/70 bg-white/90 backdrop-blur-xl p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)]">
-      <div className={`w-10 h-10 rounded-xl ring-1 flex items-center justify-center mb-3 ${map[tone]}`}>
+    <div className="relative overflow-hidden rounded-2xl border border-line bg-surface p-5 shadow-card">
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px flow-stream" />
+      <div className={`w-10 h-10 rounded-xl ring-1 flex items-center justify-center mb-3 ${t.icon}`}>
         {icon}
       </div>
-      <div className="text-xs uppercase tracking-wider text-stone-500 font-semibold mb-1">
+      <div className="text-xs uppercase tracking-wider text-subtle font-semibold mb-1">
         {label}
       </div>
-      <div className="text-2xl font-bold tabular-nums text-stone-900 mb-1">{value}</div>
-      {subtitle ? <div className="text-xs text-stone-500">{subtitle}</div> : null}
+      <div className={`font-mono text-2xl font-extrabold tabular-nums mb-1 ${t.value}`}>{value}</div>
+      {subtitle ? <div className="text-xs text-muted">{subtitle}</div> : null}
+      <div
+        className={`pointer-events-none absolute -bottom-10 -left-10 w-40 h-40 rounded-full blur-2xl opacity-60 ${t.glow}`}
+      />
     </div>
   );
 }
@@ -337,27 +343,28 @@ function KpiCard({
 function PriceTrendCard({ product }: { product: PriceTrendProduct }) {
   const trendUp = product.trendPct > 0.5;
   const trendDown = product.trendPct < -0.5;
-  const color = trendUp ? '#DC2626' : trendDown ? '#059669' : '#64748B';
+  // Rising price = leak (danger), falling = money-green, flat = muted.
+  const color = trendUp ? '#FF5C7A' : trendDown ? '#22D39A' : '#9DB2A6';
   const fillStart = trendUp
-    ? 'rgba(220,38,38,0.16)'
+    ? 'rgba(255,92,122,0.22)'
     : trendDown
-      ? 'rgba(5,150,105,0.16)'
-      : 'rgba(100,116,139,0.12)';
+      ? 'rgba(34,211,154,0.22)'
+      : 'rgba(157,178,166,0.14)';
 
   return (
-    <div className="rounded-2xl border border-stone-200/70 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)]">
+    <div className="rounded-2xl border border-line bg-surface p-5 shadow-card">
       <div className="flex items-start justify-between mb-3">
         <div>
-          <div className="font-semibold text-stone-900 text-base mb-0.5">{product.name}</div>
-          <div className="text-xs text-stone-500">לפי {product.unit}</div>
+          <div className="font-semibold text-ink text-base mb-0.5">{product.name}</div>
+          <div className="text-xs text-muted">לפי {product.unit}</div>
         </div>
         <span
-          className={`inline-flex items-center gap-1 text-xs font-bold rounded-full px-2 py-0.5 ${
+          className={`inline-flex items-center gap-1 text-xs font-bold rounded-full px-2 py-0.5 ring-1 ${
             trendUp
-              ? 'bg-red-50 text-red-700'
+              ? 'bg-danger/12 text-danger ring-danger/25'
               : trendDown
-                ? 'bg-emerald-50 text-emerald-700'
-                : 'bg-stone-100 text-stone-600'
+                ? 'bg-primary/12 text-primary ring-primary/25'
+                : 'bg-surface-2 text-muted ring-line'
           }`}
         >
           {trendUp ? (
@@ -367,7 +374,7 @@ function PriceTrendCard({ product }: { product: PriceTrendProduct }) {
           ) : (
             <Minus className="w-3 h-3" strokeWidth={3} />
           )}
-          <span className="tabular-nums">
+          <span className="font-mono tabular-nums">
             {product.trendPct > 0 ? '+' : ''}
             {product.trendPct.toFixed(1)}%
           </span>
@@ -376,18 +383,18 @@ function PriceTrendCard({ product }: { product: PriceTrendProduct }) {
 
       <Sparkline data={product.series} stroke={color} fillStart={fillStart} />
 
-      <div className="mt-3 pt-3 border-t border-stone-100 flex items-baseline justify-between">
+      <div className="mt-3 pt-3 border-t border-line flex items-baseline justify-between">
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-stone-500 font-semibold">
+          <div className="text-[10px] uppercase tracking-wider text-subtle font-semibold">
             מחיר אחרון
           </div>
-          <div className="text-lg font-bold tabular-nums text-stone-900">₪{product.currentPrice}</div>
+          <div className="text-lg font-bold font-mono tabular-nums text-ink">₪{product.currentPrice}</div>
         </div>
         <div className="text-left">
-          <div className="text-[10px] uppercase tracking-wider text-stone-500 font-semibold">
+          <div className="text-[10px] uppercase tracking-wider text-subtle font-semibold">
             ממוצע 60י׳
           </div>
-          <div className="text-sm font-semibold tabular-nums text-stone-500">
+          <div className="text-sm font-semibold font-mono tabular-nums text-muted">
             ₪{product.avgPrice60d}
           </div>
         </div>
@@ -445,12 +452,12 @@ function InvoiceListRow({
   const status = invoice.status;
   const tint =
     status === 'clean'
-      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+      ? 'bg-primary/12 text-primary ring-1 ring-primary/25'
       : status === 'minor'
-        ? 'bg-stone-50 text-stone-700 border-stone-200'
+        ? 'bg-surface-2 text-muted ring-1 ring-line'
         : status === 'major'
-          ? 'bg-amber-50 text-amber-700 border-amber-200'
-          : 'bg-red-50 text-red-700 border-red-200';
+          ? 'bg-warn/12 text-warn ring-1 ring-warn/25'
+          : 'bg-danger/12 text-danger ring-1 ring-danger/25';
   const label =
     status === 'clean'
       ? 'תקין'
@@ -471,30 +478,30 @@ function InvoiceListRow({
           onOpenScan();
         }
       }}
-      className={`flex items-center gap-4 px-5 py-4 hover:bg-teal-50/30 cursor-pointer transition-colors ${
-        isLast ? '' : 'border-b border-stone-100'
+      className={`flex items-center gap-4 px-5 py-4 hover:bg-surface-2 cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50 ${
+        isLast ? '' : 'border-b border-line'
       }`}
     >
-      <div className="w-9 h-9 rounded-lg bg-teal-50 text-teal-700 border border-teal-100 flex items-center justify-center shrink-0">
+      <div className="w-9 h-9 rounded-lg bg-primary/12 text-primary border border-primary/25 flex items-center justify-center shrink-0">
         <FileImage className="w-4 h-4" />
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-0.5">
-          <span className="font-semibold text-stone-900 text-sm font-mono">
+          <span className="font-semibold text-ink text-sm font-mono tabular-nums">
             {invoice.invoiceNumber}
           </span>
-          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${tint}`}>
+          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${tint}`}>
             {label}
           </span>
           {invoice.discrepanciesCount > 0 ? (
-            <span className="text-xs text-amber-700 font-medium">
+            <span className="text-xs text-warn font-medium">
               · {invoice.discrepanciesCount} חריגות
             </span>
           ) : null}
         </div>
-        <div className="text-xs text-stone-500 flex items-center gap-2">
+        <div className="text-xs text-muted flex items-center gap-2">
           <Calendar className="w-3 h-3" />
-          <span>
+          <span className="font-mono tabular-nums">
             {new Date(invoice.scannedAt).toLocaleDateString('he-IL', {
               day: '2-digit',
               month: '2-digit',
@@ -502,7 +509,7 @@ function InvoiceListRow({
           </span>
           <span>·</span>
           <Clock className="w-3 h-3" />
-          <span className="tabular-nums">
+          <span className="font-mono tabular-nums">
             {new Date(invoice.scannedAt).toLocaleTimeString('he-IL', {
               hour: '2-digit',
               minute: '2-digit',
@@ -511,11 +518,11 @@ function InvoiceListRow({
         </div>
       </div>
       <div className="text-left">
-        <div className="font-bold tabular-nums text-stone-900 text-sm">
+        <div className="font-bold font-mono tabular-nums text-ink text-sm">
           ₪{invoice.totalIls.toLocaleString('he-IL')}
         </div>
         {invoice.savingsCapturedIls > 0 ? (
-          <div className="text-xs text-emerald-700 font-semibold tabular-nums flex items-center gap-0.5 justify-end mt-0.5">
+          <div className="text-xs text-gold font-semibold font-mono tabular-nums flex items-center gap-0.5 justify-end mt-0.5">
             <Sparkles className="w-3 h-3" />₪{invoice.savingsCapturedIls.toLocaleString('he-IL')}
           </div>
         ) : null}
@@ -523,7 +530,7 @@ function InvoiceListRow({
       <Link
         href="/showcase/dashboard/invoices"
         onClick={(e) => e.stopPropagation()}
-        className="shrink-0 w-8 h-8 rounded-lg bg-white border border-stone-200 text-stone-500 hover:bg-teal-50 hover:text-teal-700 hover:border-teal-200 flex items-center justify-center transition-colors"
+        className="shrink-0 w-8 h-8 rounded-lg bg-surface-2 border border-line text-muted hover:text-primary hover:border-primary/40 flex items-center justify-center transition-colors"
         title="פתח בעמוד ביקורת החשבוניות"
       >
         <ArrowUpRight className="w-4 h-4" />
@@ -534,8 +541,8 @@ function InvoiceListRow({
 
 function ActivityFeed({ events }: { events: ActivityEvent[] }) {
   return (
-    <div className="rounded-2xl border border-stone-200/70 bg-white/90 backdrop-blur-xl p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)]">
-      <div className="relative pr-4 border-r-2 border-stone-200/70 space-y-4">
+    <div className="rounded-2xl border border-line bg-surface p-5 shadow-card">
+      <div className="relative pr-4 border-r-2 border-line space-y-4">
         {events.map((e) => (
           <ActivityEventRow key={e.id} event={e} />
         ))}
@@ -549,23 +556,23 @@ function ActivityEventRow({ event }: { event: ActivityEvent }) {
   return (
     <div className="relative">
       <div
-        className={`absolute -right-[22px] top-1 w-3 h-3 rounded-full ring-4 ring-white ${config.dot}`}
+        className={`absolute -right-[22px] top-1 w-3 h-3 rounded-full ring-4 ring-surface ${config.dot}`}
       />
       <div className="flex items-baseline justify-between gap-2 mb-0.5">
-        <span className="text-sm font-semibold text-stone-800">{event.title}</span>
-        <span className="text-xs text-stone-500 tabular-nums shrink-0">
+        <span className="text-sm font-semibold text-ink">{event.title}</span>
+        <span className="text-xs text-muted font-mono tabular-nums shrink-0">
           {formatRelative(event.at)}
         </span>
       </div>
       {event.detail ? (
-        <div className="text-xs text-stone-500 leading-relaxed">{event.detail}</div>
+        <div className="text-xs text-muted leading-relaxed">{event.detail}</div>
       ) : null}
       {event.amount !== undefined && event.type === 'invoice_closed' ? (
-        <div className="text-xs font-semibold text-emerald-700 tabular-nums mt-1 inline-flex items-center gap-1">
+        <div className="text-xs font-semibold text-gold font-mono tabular-nums mt-1 inline-flex items-center gap-1">
           <Sparkles className="w-3 h-3" />₪{event.amount.toLocaleString('he-IL')} נחסך
         </div>
       ) : event.amount !== undefined && event.type === 'invoice_blocked' ? (
-        <div className="text-xs font-semibold text-red-700 tabular-nums mt-1">
+        <div className="text-xs font-semibold text-danger font-mono tabular-nums mt-1">
           ₪{event.amount.toLocaleString('he-IL')} חסומים
         </div>
       ) : null}
@@ -576,17 +583,17 @@ function ActivityEventRow({ event }: { event: ActivityEvent }) {
 function activityConfig(type: ActivityEvent['type']) {
   switch (type) {
     case 'invoice_blocked':
-      return { dot: 'bg-red-600' };
+      return { dot: 'bg-danger' };
     case 'invoice_closed':
-      return { dot: 'bg-emerald-600' };
+      return { dot: 'bg-primary' };
     case 'price_alert':
-      return { dot: 'bg-amber-500' };
+      return { dot: 'bg-warn' };
     case 'dispute_opened':
-      return { dot: 'bg-amber-600' };
+      return { dot: 'bg-warn' };
     case 'late_delivery':
-      return { dot: 'bg-stone-400' };
+      return { dot: 'bg-subtle' };
     default:
-      return { dot: 'bg-teal-500' };
+      return { dot: 'bg-info' };
   }
 }
 
@@ -606,8 +613,9 @@ function formatRelative(iso: string): string {
 function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <div className="mb-4">
-      <h2 className="text-lg font-bold tracking-tight text-stone-900">{title}</h2>
-      {subtitle ? <p className="text-xs text-stone-500 mt-0.5">{subtitle}</p> : null}
+      <div className="mb-2 h-0.5 w-10 rounded-full flow-stream" aria-hidden="true" />
+      <h2 className="text-lg font-bold tracking-tight text-ink">{title}</h2>
+      {subtitle ? <p className="text-xs text-muted mt-0.5">{subtitle}</p> : null}
     </div>
   );
 }

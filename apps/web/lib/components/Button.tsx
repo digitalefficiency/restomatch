@@ -1,20 +1,29 @@
 import { cn } from './cn';
 import { Spinner } from './Spinner';
 
-type Variant = 'primary' | 'secondary' | 'accent' | 'danger' | 'ghost';
+type Variant = 'primary' | 'secondary' | 'accent' | 'danger' | 'ghost' | 'gold';
 type Size = 'sm' | 'md';
 
 const base =
-  'inline-flex items-center justify-center gap-2 rounded-xl font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-offset-bg disabled:opacity-50 disabled:cursor-not-allowed';
+  'inline-flex items-center justify-center gap-2 rounded-xl font-semibold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg disabled:opacity-45 disabled:cursor-not-allowed disabled:shadow-none';
 
 const variants: Record<Variant, string> = {
-  // text-white explicit on filled variants — guarantees contrast.
-  primary: 'bg-primary text-white hover:bg-primary-hover focus-visible:ring-primary',
-  accent: 'bg-accent text-white hover:bg-accent/90 focus-visible:ring-accent',
-  danger: 'bg-danger text-white hover:bg-danger/90 focus-visible:ring-danger',
+  // Neon money-green primary with on-primary ink text — the hero action.
+  primary:
+    'bg-primary text-on-primary hover:brightness-110 shadow-glow-primary focus-visible:ring-primary',
+  // `accent` kept as an alias of primary (positive action) for back-compat.
+  accent:
+    'bg-primary text-on-primary hover:brightness-110 shadow-glow-primary focus-visible:ring-primary',
+  // Gold action — money recovered / savings emphasis.
+  gold: 'bg-gold text-on-primary hover:brightness-110 shadow-glow-gold focus-visible:ring-gold',
+  // Danger — leak / block / destructive.
+  danger:
+    'bg-danger text-on-primary hover:brightness-110 shadow-glow-danger focus-visible:ring-danger',
+  // Secondary — ghost on dark: raised surface with hairline border.
   secondary:
-    'border border-stone-200 bg-white text-stone-700 hover:bg-stone-50 hover:text-ink focus-visible:ring-stone-300',
-  ghost: 'text-stone-500 hover:bg-stone-100 hover:text-ink focus-visible:ring-stone-300',
+    'border border-line bg-surface-2 text-ink hover:border-primary/40 hover:text-primary focus-visible:ring-primary/60',
+  // Ghost — quietest action.
+  ghost: 'text-muted hover:bg-surface-2 hover:text-ink focus-visible:ring-line',
 };
 
 const sizes: Record<Size, string> = {
@@ -31,7 +40,7 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 
 /**
  * Presentational button — no client hooks, usable from server + client.
- * Consistent focus ring + disabled + loading state.
+ * Consistent focus ring + disabled + loading state, dark "command center" look.
  */
 export function Button({
   variant = 'primary',

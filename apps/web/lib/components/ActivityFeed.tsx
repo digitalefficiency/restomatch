@@ -10,15 +10,30 @@ export interface ActivityItem {
 }
 
 const META: Record<string, { icon: React.ReactNode; tone: string }> = {
-  invoice_matched: { icon: <FileCheck2 className="h-4 w-4" />, tone: 'text-blue-700 bg-blue-50' },
-  invoice_received: { icon: <FileCheck2 className="h-4 w-4" />, tone: 'text-teal-700 bg-teal-50' },
+  invoice_matched: {
+    icon: <FileCheck2 className="h-4 w-4" />,
+    tone: 'text-info bg-info/12 ring-info/25',
+  },
+  invoice_received: {
+    icon: <FileCheck2 className="h-4 w-4" />,
+    tone: 'text-primary bg-primary/12 ring-primary/25',
+  },
   discrepancy_approved: {
     icon: <CheckCircle2 className="h-4 w-4" />,
-    tone: 'text-emerald-700 bg-emerald-50',
+    tone: 'text-primary bg-primary/12 ring-primary/25',
   },
-  discrepancy_rejected: { icon: <XCircle className="h-4 w-4" />, tone: 'text-rose-700 bg-rose-50' },
-  alias_learned: { icon: <Sparkles className="h-4 w-4" />, tone: 'text-amber-700 bg-amber-50' },
-  sync_completed: { icon: <RefreshCw className="h-4 w-4" />, tone: 'text-teal-700 bg-teal-50' },
+  discrepancy_rejected: {
+    icon: <XCircle className="h-4 w-4" />,
+    tone: 'text-danger bg-danger/12 ring-danger/25',
+  },
+  alias_learned: {
+    icon: <Sparkles className="h-4 w-4" />,
+    tone: 'text-gold bg-gold/12 ring-gold/25',
+  },
+  sync_completed: {
+    icon: <RefreshCw className="h-4 w-4" />,
+    tone: 'text-primary bg-primary/12 ring-primary/25',
+  },
 };
 
 function whenLabel(d: Date | string): string {
@@ -38,13 +53,13 @@ export function ActivityFeed({ items }: { items: ActivityItem[] }) {
       {items.map((e) => {
         const m = META[e.eventType] ?? {
           icon: <FileCheck2 className="h-4 w-4" />,
-          tone: 'text-stone-600 bg-stone-100',
+          tone: 'text-muted bg-surface-2 ring-line',
         };
         return (
           <li key={e.id} className="flex items-start gap-3">
             <span
               className={cn(
-                'mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ring-1 ring-black/5',
+                'mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ring-1',
                 m.tone,
               )}
             >
@@ -53,11 +68,11 @@ export function ActivityFeed({ items }: { items: ActivityItem[] }) {
             <div className="min-w-0 flex-1">
               <div className="flex items-center justify-between gap-2">
                 <p className="truncate text-sm font-medium text-ink">{e.title}</p>
-                <time className="shrink-0 text-xs tabular-nums text-stone-400">
+                <time className="shrink-0 font-mono text-xs tabular-nums text-subtle">
                   {whenLabel(e.createdAt)}
                 </time>
               </div>
-              {e.detail ? <p className="truncate text-xs text-stone-500">{e.detail}</p> : null}
+              {e.detail ? <p className="truncate text-xs text-muted">{e.detail}</p> : null}
             </div>
           </li>
         );

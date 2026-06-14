@@ -1,8 +1,8 @@
 import { cn } from './cn';
 
-/** Tiny inline price-trend chart. Rising price = rose (bad), falling = green. */
+/** Tiny inline price-trend chart. Rising price = danger (bad), falling = money-green. */
 export function Sparkline({ data, className }: { data: number[]; className?: string }) {
-  if (!data || data.length < 2) return <span className="text-xs text-stone-300">—</span>;
+  if (!data || data.length < 2) return <span className="text-xs text-subtle">—</span>;
 
   const w = 80;
   const h = 24;
@@ -18,7 +18,10 @@ export function Sparkline({ data, className }: { data: number[]; className?: str
     .join(' ');
 
   const rising = data[data.length - 1]! >= data[0]!;
-  const stroke = rising ? '#E11D48' : '#15A34A';
+  // Rising price = leak (danger), falling price = money saved (primary green).
+  const stroke = rising ? '#FF5C7A' : '#22D39A';
+  const gid = `spark-${rising ? 'up' : 'dn'}`;
+  const areaPoints = `0,${h} ${points} ${w},${h}`;
 
   return (
     <svg
@@ -27,6 +30,13 @@ export function Sparkline({ data, className }: { data: number[]; className?: str
       preserveAspectRatio="none"
       aria-hidden="true"
     >
+      <defs>
+        <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={stroke} stopOpacity="0.28" />
+          <stop offset="100%" stopColor={stroke} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <polygon points={areaPoints} fill={`url(#${gid})`} stroke="none" />
       <polyline
         points={points}
         fill="none"

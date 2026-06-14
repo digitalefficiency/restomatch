@@ -37,46 +37,51 @@ export default async function DashboardPage() {
 
   const activity = await caller.activity.feed({ limit: 8 });
 
+  const cleanMatchHealthy = kpis.weekCleanMatchPct >= 80;
+
   return (
     <div>
       <SectionHeader
-        title="סקירה כללית"
+        level={1}
+        title="חדר הבקרה"
         subtitle="תמונת מצב יומית — איפה כסף בורח, ומה דורש את ההחלטה שלך עכשיו."
       />
 
+      {/* Hero KPI row — big MONO money figures. Loss in danger, savings in gold. */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard
           label="הפסד פוטנציאלי החודש"
           value={formatCurrency(kpis.monthPotentialLossIls)}
-          tone="warning"
+          tone="danger"
           icon={<AlertTriangle className="h-5 w-5" />}
           subtitle="דיסקרפנסיות פתוחות עם חומרה בינונית ומעלה"
         />
         <KpiCard
           label="חיסכון שנשמר החודש"
           value={formatCurrency(kpis.monthSavingsCapturedIls)}
-          tone="accent"
+          tone="gold"
           icon={<Wallet className="h-5 w-5" />}
           subtitle="כסף שמנעת לאחר אישור/דחיית הפרשים"
         />
         <KpiCard
           label="ממתינות לאישור"
           value={kpis.pendingApprovalsCount.toString()}
-          tone="neutral"
+          tone={kpis.pendingApprovalsCount > 0 ? 'warning' : 'neutral'}
           icon={<ClipboardCheck className="h-5 w-5" />}
           subtitle="חריגות בתור — מנהל/בעלים"
         />
         <KpiCard
           label="התאמות נקיות השבוע"
           value={`${kpis.weekCleanMatchPct.toFixed(1)}%`}
-          tone={kpis.weekCleanMatchPct >= 80 ? 'accent' : 'warning'}
+          tone={cleanMatchHealthy ? 'accent' : 'warning'}
           icon={<CheckCircle2 className="h-5 w-5" />}
-          subtitle="ממוצע מהשבעה ימים האחרונים"
+          subtitle="ממוצע משבעת הימים האחרונים"
         />
       </div>
 
+      {/* Leak heatmap — the centerpiece data-viz. */}
       {leaksEntitlementBlocked ? (
-        <div className="mt-10">
+        <div className="mt-12">
           <SectionHeader
             title="בלש דליפות"
             subtitle="המוצרים שדולפים הכי הרבה כסף החודש."
@@ -88,14 +93,14 @@ export default async function DashboardPage() {
           />
         </div>
       ) : leaks.length > 0 ? (
-        <div className="mt-10">
+        <div className="mt-12">
           <SectionHeader
             title="בלש דליפות"
             subtitle="המוצרים שדולפים הכי הרבה כסף החודש."
             action={
               <Link
                 href="/dashboard/leaks"
-                className="text-sm font-medium text-primary hover:text-primary-hover"
+                className="rounded-lg text-sm font-semibold text-primary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
               >
                 לכל הדליפות →
               </Link>
@@ -105,7 +110,8 @@ export default async function DashboardPage() {
         </div>
       ) : null}
 
-      <div className="mt-10">
+      {/* Live activity feed. */}
+      <div className="mt-12">
         <SectionHeader title="פעילות אחרונה" subtitle="מה קרה במערכת לאחרונה." />
         {activity.length > 0 ? (
           <PaginatedActivityFeed initial={activity} />

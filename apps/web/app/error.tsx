@@ -25,17 +25,18 @@ export default function Error({
   return (
     <main className="flex min-h-screen items-center justify-center px-6 py-16">
       <Card elevated padding="lg" className="flex max-w-md flex-col items-center gap-4 text-center">
-        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-danger/10 text-danger ring-1 ring-danger/15">
+        <span aria-hidden="true" className="absolute inset-x-0 top-0 h-0.5 leak-gradient" />
+        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-danger/12 text-danger ring-1 ring-danger/25">
           <AlertTriangle className="h-6 w-6" aria-hidden="true" />
         </span>
         <div>
-          <h1 className="text-xl font-semibold text-ink">משהו השתבש</h1>
-          <p className="mx-auto mt-1.5 max-w-sm text-sm text-stone-500">
+          <h1 className="text-xl font-bold text-ink">משהו השתבש</h1>
+          <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted">
             נתקלנו בתקלה בלתי צפויה. אפשר לנסות שוב — אם הבעיה חוזרת, רעננו את העמוד או חזרו מאוחר
             יותר.
           </p>
           {error.digest ? (
-            <p className="mt-3 text-xs tabular-nums text-stone-400">קוד שגיאה: {error.digest}</p>
+            <p className="mt-3 font-mono text-xs tabular-nums text-subtle">קוד שגיאה: {error.digest}</p>
           ) : null}
         </div>
         <div className="flex flex-wrap items-center justify-center gap-3">

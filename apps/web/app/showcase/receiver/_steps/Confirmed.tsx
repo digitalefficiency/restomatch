@@ -53,18 +53,19 @@ export function Confirmed({
 
   return (
     <div ref={ref} dir="rtl" className="max-w-md mx-auto text-center py-8">
-      <div className="confirm-check w-24 h-24 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 mx-auto mb-6 flex items-center justify-center shadow-[0_8px_32px_rgba(5,150,105,0.35)]">
-        <Check className="w-12 h-12 text-white" strokeWidth={3} />
+      <div className="confirm-check w-24 h-24 rounded-full bg-primary text-on-primary mx-auto mb-6 flex items-center justify-center shadow-glow-primary">
+        <Check className="w-12 h-12" strokeWidth={3} />
       </div>
 
-      <h1 className="confirm-content text-3xl font-bold tracking-tight text-stone-900 mb-2">
+      <h1 className="confirm-content text-3xl font-extrabold tracking-tight text-ink mb-2">
         הקבלה נסגרה
       </h1>
-      <p className="confirm-content text-stone-500 mb-8">
+      <p className="confirm-content text-muted mb-8">
         תועדה ב-{time} מהספק "{supplierName}". מנוע ההתאמה מריץ עכשיו את ההצלבה הסופית.
       </p>
 
-      <div className="confirm-content rounded-2xl border border-stone-200/70 bg-white/90 backdrop-blur-xl p-5 mb-6 text-right space-y-3 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.06)]">
+      <div className="confirm-content relative overflow-hidden rounded-2xl border border-line bg-surface p-5 mb-6 text-right space-y-3 shadow-card">
+        <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px flow-stream" />
         <RowItem
           icon={<Receipt className="w-4 h-4" />}
           label="חשבונית"
@@ -84,22 +85,22 @@ export function Confirmed({
             icon={<Plus className="w-4 h-4" />}
             label="חיסכון פוטנציאלי שתועד"
             value={`₪${result.summary.headlineDelta.toLocaleString('he-IL')}`}
-            valueClass="text-emerald-600 font-bold"
+            valueClass="text-gold font-bold font-mono tabular-nums"
           />
         ) : null}
       </div>
 
       {capturedImage?.scanRouteUrl ? (
-        <div className="confirm-content mb-4 rounded-2xl border border-emerald-200 bg-emerald-50/40 px-4 py-3 text-right">
+        <div className="confirm-content mb-4 rounded-2xl border border-primary/25 bg-primary/8 px-4 py-3 text-right">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-white border border-emerald-200 flex items-center justify-center shrink-0">
-              <FileImage className="w-5 h-5 text-emerald-700" />
+            <div className="w-10 h-10 rounded-lg bg-surface border border-primary/25 flex items-center justify-center shrink-0">
+              <FileImage className="w-5 h-5 text-primary" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold text-emerald-900">
+              <div className="text-sm font-semibold text-ink">
                 החשבונית נשמרה ב-Supabase Storage
               </div>
-              <div className="text-[11px] font-mono text-emerald-800/80 truncate">
+              <div className="text-[11px] font-mono text-muted truncate">
                 {capturedImage.invoiceId}
               </div>
             </div>
@@ -110,7 +111,7 @@ export function Confirmed({
               href={capturedImage.publicUrl ?? capturedImage.scanRouteUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="shrink-0 inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-2 rounded-lg shadow-[0_2px_8px_rgba(5,150,105,0.25)]"
+              className="shrink-0 inline-flex items-center gap-1 bg-primary hover:brightness-110 text-on-primary text-xs font-semibold px-3 py-2 rounded-lg shadow-glow-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:ring-primary"
             >
               צפה בסריקה
               <ExternalLink className="w-3 h-3" />
@@ -122,7 +123,7 @@ export function Confirmed({
       <button
         type="button"
         onClick={onReset}
-        className="confirm-content inline-flex items-center gap-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl px-5 py-3 font-medium shadow-[0_4px_12px_rgba(37,99,235,0.25)] transition-all"
+        className="confirm-content inline-flex items-center gap-2 bg-primary hover:brightness-110 text-on-primary rounded-xl px-5 py-3 font-medium shadow-glow-primary transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:ring-primary"
       >
         <Plus className="w-4 h-4" strokeWidth={3} />
         קבלה נוספת
@@ -135,7 +136,7 @@ function RowItem({
   icon,
   label,
   value,
-  valueClass = 'text-stone-900 font-semibold',
+  valueClass = 'text-ink font-semibold',
 }: {
   icon: React.ReactNode;
   label: string;
@@ -144,8 +145,8 @@ function RowItem({
 }) {
   return (
     <div className="flex items-center justify-between">
-      <div className="flex items-center gap-2 text-sm text-stone-500">
-        <span className="text-stone-400">{icon}</span>
+      <div className="flex items-center gap-2 text-sm text-muted">
+        <span className="text-subtle">{icon}</span>
         <span>{label}</span>
       </div>
       <span className={`text-sm ${valueClass}`}>{value}</span>

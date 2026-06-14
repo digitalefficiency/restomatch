@@ -28,12 +28,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <main className="min-h-screen">
-      <header className="sticky top-0 z-30 border-b border-stone-200 bg-white/85 backdrop-blur-xl">
+      <header className="glass sticky top-0 z-40 border-b border-line">
+        <span aria-hidden="true" className="absolute inset-x-0 top-0 h-px flow-stream" />
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-4">
           <div>
-            <h1 className="text-xl font-semibold text-stone-900">{active.restaurantName}</h1>
-            <p className="text-xs text-stone-500">
-              {session.user.email} · {labelForRole(active.role)}
+            <h1 className="text-xl font-bold tracking-tight text-ink">{active.restaurantName}</h1>
+            <p className="font-mono text-xs tabular-nums text-subtle">
+              {session.user.email} · <span className="font-sans text-muted">{labelForRole(active.role)}</span>
             </p>
           </div>
           <DashboardNav />
