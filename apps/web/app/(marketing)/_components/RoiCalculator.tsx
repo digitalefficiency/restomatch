@@ -3,11 +3,16 @@
 import { useState } from 'react';
 import { TrendingDown, ShieldCheck } from 'lucide-react';
 
-const ils = new Intl.NumberFormat('he-IL', {
-  style: 'currency',
-  currency: 'ILS',
-  maximumFractionDigits: 0,
-});
+/**
+ * Deterministic ₪ formatter. Intl.NumberFormat('he-IL', currency) renders
+ * differently under Node's ICU (SSR) vs the browser's (whitespace / RTL marks),
+ * which trips a React hydration mismatch — so format by hand instead.
+ */
+function ils(n: number): string {
+  return `₪${Math.round(n)
+    .toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+}
 
 /**
  * Interactive ROI / leak calculator. The visitor enters monthly procurement (₪)
@@ -88,7 +93,7 @@ export function RoiCalculator() {
             <span className="text-sm font-semibold">הפסד שנתי משוער</span>
           </div>
           <p className="mt-2 text-4xl font-bold tracking-tight text-danger tabular-nums">
-            {ils.format(annualLoss)}
+            {ils(annualLoss)}
           </p>
           <p className="mt-1 text-sm text-stone-500">
             כסף שדולף בקבלת הסחורה — בכל שנה, מחדש.
@@ -101,7 +106,7 @@ export function RoiCalculator() {
             <span className="text-sm font-semibold">RestoMatch מחזירה עד</span>
           </div>
           <p className="mt-2 text-4xl font-bold tracking-tight text-primary tabular-nums">
-            {ils.format(recovered)}
+            {ils(recovered)}
           </p>
           <p className="mt-1 text-sm text-stone-500">
             על בסיס תפיסה של כ‑{Math.round(RECOVERY_RATE * 100)}% מהדליפות עוד לפני
