@@ -33,3 +33,4 @@ web-build
 
 drizzle/meta
 .gstack/
+.vercel
