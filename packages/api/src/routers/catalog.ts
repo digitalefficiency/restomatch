@@ -1,3 +1,4 @@
+import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import {
   and,
@@ -184,7 +185,7 @@ export const catalogRouter = router({
           createdBy: ctx.session.userId,
         })
         .returning({ id: catalogImports.id });
-      if (!imp) throw new Error('failed to create catalog import');
+      if (!imp) throw new TRPCError({ code: 'NOT_FOUND', message: 'failed to create catalog import' });
 
       // Large files → background worker (when a queue is available).
       if (rows.length > INLINE_ROW_LIMIT) {
@@ -237,7 +238,7 @@ export const catalogRouter = router({
           ),
         )
         .returning({ id: supplierCatalogItems.id });
-      if (!row) throw new Error('catalog item not found');
+      if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'catalog item not found' });
       return { ok: true };
     }),
 });

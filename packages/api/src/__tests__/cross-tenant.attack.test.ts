@@ -47,6 +47,21 @@ function callerFor(tenant: Tenant) {
   return appRouter.createCaller(ctx);
 }
 
+/**
+ * Caller bound to a tenant's restaurant but carrying an arbitrary session role —
+ * the role check in requireRoles reads the session role, not the DB membership,
+ * so this drives the managerProcedure role gate without reseeding memberships.
+ */
+function callerWithRole(tenant: Tenant, role: Session['role']) {
+  const session: Session = {
+    userId: tenant.ownerUserId,
+    restaurantId: tenant.restaurantId,
+    role,
+  };
+  const ctx: AppContext = { db, session };
+  return appRouter.createCaller(ctx);
+}
+
 beforeAll(async () => {
   await resetDb(db);
   A = await seedTenant(db, 'A');
@@ -114,13 +129,16 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'orders.list': 'isolation',
   'orders.get': 'attack',
   'orders.createDraft': 'attack',
+  'orders.previewDelivery': 'attack',
+  'orders.importPo':
+    'managerProcedure that ingests an uploaded document; takes no client-supplied tenant entity id (supplier is resolved FROM the parsed doc) and is gated on ANTHROPIC_API_KEY. Cross-tenant reach is bounded by the member tx restaurant GUC, and the import is keyed to ctx.session.restaurantId. Role denial is covered in the managerProcedure-role-denial block.',
   'orders.cancelOrder': 'attack',
   'orders.placeOrder': 'attack',
-  // guardrail does NOT call assertSupplierOwned; isolation is via the
-  // restaurant-scoped baseline query. Proven by a B-only baseline that A's
-  // call must not read. (Defense-in-depth: add assertSupplierOwned — flagged
-  // to the orders-router owner.)
-  'orders.guardrail': 'isolation',
+  // guardrail now calls assertSupplierOwned (wave 3b): a foreign supplierId is
+  // rejected with NOT_FOUND before any baseline is read. Defense-in-depth on
+  // top of the restaurant-scoped baseline query (which already excluded B's
+  // rows). The B-only baseline fixture still proves no leak through the query.
+  'orders.guardrail': 'attack',
   'match.runForInvoice': 'attack',
   'plans.list':
     'public marketing catalog (publicProcedure); reads the global plans table only, no tenant-scoped rows — nothing to isolate',
@@ -595,15 +613,23 @@ describe('orders router: foreign id attacks + list isolation (A → B)', () => {
     expect(after).toHaveLength(before.length);
   });
 
+  it('orders.previewDelivery rejects a foreign supplierId before deriving a date', async () => {
+    await expect(
+      callerFor(A).orders.previewDelivery({ supplierId: B.supplierId }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
   it('orders.guardrail rejects a foreign supplierId (advanced_analytics, implicit trial)', async () => {
-    // assertSupplierOwned is NOT called in guardrail; isolation is via the
-    // restaurant-scoped baseline query. A foreign supplierId must therefore
-    // produce zero warnings rather than reading B's baselines.
-    const out = await callerFor(A).orders.guardrail({
-      supplierId: B.supplierId,
-      lines: [{ productId: B.productId, unitPriceExpected: 1000 }],
-    });
-    expect(out.warnings).toHaveLength(0);
+    // wave 3b: guardrail now calls assertSupplierOwned, so a foreign supplierId
+    // is rejected with NOT_FOUND before any baseline read — A can no longer even
+    // probe B's product/supplier pair. (The restaurant-scoped baseline query was
+    // already the leak backstop; this is defense-in-depth.)
+    await expect(
+      callerFor(A).orders.guardrail({
+        supplierId: B.supplierId,
+        lines: [{ productId: B.productId, unitPriceExpected: 1000 }],
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
   it('orders.list excludes B purchase orders even with a B supplierId filter', async () => {
@@ -670,4 +696,92 @@ describe('platform-admin procedures reject a non-admin tenant user', () => {
   it('admin.listLeads → FORBIDDEN', async () => {
     await expect(callerFor(A).admin.listLeads()).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
+});
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Role denial: managerProcedure writes are owner/manager only. A member-tier
+ * caller (member / receiver / chef / bookkeeper — none of which are in
+ * ['owner','manager']) must be rejected with FORBIDDEN by the requireRoles
+ * middleware BEFORE the resolver runs — even when the caller is operating on
+ * its OWN tenant's ids (so the denial is the role gate, not tenant ownership).
+ *
+ * Writes covered: suppliers.update (incl orderSchedule), catalog.commitImport,
+ * orders.placeOrder. Authorization is orthogonal to tenancy, so this guards the
+ * "a receiver fat-fingers a manager-only mutation" path the attack tests above
+ * (all owner-role) cannot reach.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+describe('role denial: managerProcedure writes reject member-tier callers', () => {
+  // No bare 'member' role exists in the UserRole enum; the member-tier (non-
+  // manager) roles are receiver / chef / bookkeeper — all outside the
+  // ['owner','manager'] managerProcedure allowlist. receiver + chef stand in.
+  const denied = ['receiver', 'chef'] as const;
+
+  for (const role of denied) {
+    it(`suppliers.update (incl orderSchedule) → FORBIDDEN for ${role} and leaves A untouched`, async () => {
+      const [before] = await db
+        .select({ name: suppliers.name })
+        .from(suppliers)
+        .where(eq(suppliers.id, A.supplierId));
+      await expect(
+        callerWithRole(A, role).suppliers.update({
+          supplierId: A.supplierId,
+          patch: {
+            name: 'ROLE-HIJACK',
+            orderSchedule: {
+              windows: [
+                {
+                  orderDays: [1],
+                  cutoff: '10:00',
+                  fulfillment: { kind: 'lead_days', leadDays: 1 },
+                },
+              ],
+            },
+          },
+        }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      const [after] = await db
+        .select({ name: suppliers.name, orderSchedule: suppliers.orderSchedule })
+        .from(suppliers)
+        .where(eq(suppliers.id, A.supplierId));
+      expect(after?.name).toBe(before?.name);
+      expect(after?.name).not.toBe('ROLE-HIJACK');
+      expect(after?.orderSchedule ?? null).toBeNull();
+    });
+
+    it(`catalog.commitImport → FORBIDDEN for ${role} and writes no import row for A`, async () => {
+      const beforeA = await db
+        .select({ id: catalogImports.id })
+        .from(catalogImports)
+        .where(eq(catalogImports.restaurantId, A.restaurantId));
+      await expect(
+        callerWithRole(A, role).catalog.commitImport({
+          supplierId: A.supplierId,
+          file: { filename: 'x.csv', text: 'name,price\nx,1' },
+          mapping: { name: 'name', price: 'price' },
+        }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      const afterA = await db
+        .select({ id: catalogImports.id })
+        .from(catalogImports)
+        .where(eq(catalogImports.restaurantId, A.restaurantId));
+      expect(afterA).toHaveLength(beforeA.length);
+    });
+
+    it(`orders.placeOrder → FORBIDDEN for ${role} and never mutates A's PO`, async () => {
+      const [before] = await db
+        .select({ status: purchaseOrders.status, sentAt: purchaseOrders.sentAt })
+        .from(purchaseOrders)
+        .where(eq(purchaseOrders.id, A.poId));
+      await expect(
+        callerWithRole(A, role).orders.placeOrder({ poId: A.poId, channel: 'none' }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      const [after] = await db
+        .select({ status: purchaseOrders.status, sentAt: purchaseOrders.sentAt })
+        .from(purchaseOrders)
+        .where(eq(purchaseOrders.id, A.poId));
+      expect(after?.status).toBe(before?.status);
+      expect(after?.sentAt ?? null).toEqual(before?.sentAt ?? null);
+    });
+  }
 });

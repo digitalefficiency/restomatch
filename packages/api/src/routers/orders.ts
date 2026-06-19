@@ -523,6 +523,7 @@ export const ordersRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
+      await assertSupplierOwned(ctx.db, input.supplierId, restaurantId);
       const windowDays = await baselineWindow(ctx.db, restaurantId);
       const warnings = await computeGuardrail(ctx.db, restaurantId, input.supplierId, input.lines, windowDays);
       return { warnings };
