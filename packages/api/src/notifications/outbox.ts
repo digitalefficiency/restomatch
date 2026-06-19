@@ -8,8 +8,13 @@ import type { NotificationPayload } from './types';
 export async function enqueueNotification(
   db: Database,
   payload: NotificationPayload,
-): Promise<{ id: string }> {
-  const [row] = await db
+): Promise<{ id: string; deduped: boolean }> {
+  // When a dedupeKey is supplied, rely on the partial unique index
+  // (notifications_dedupe_key_unique) for idempotency: a duplicate enqueue is
+  // swallowed by ON CONFLICT DO NOTHING and yields no RETURNING row. Callers
+  // that need the existing row's id can re-read by dedupeKey, but most just
+  // need to know the send is already in flight (deduped=true).
+  const insert = db
     .insert(notificationsOutbox)
     .values({
       restaurantId: payload.restaurantId,
@@ -21,10 +26,27 @@ export async function enqueueNotification(
       status: 'queued',
       relatedEntityType: payload.relatedEntityType ?? null,
       relatedEntityId: payload.relatedEntityId ?? null,
-    })
-    .returning({ id: notificationsOutbox.id });
-  if (!row) throw new Error('failed to enqueue notification');
-  return { id: row.id };
+      dedupeKey: payload.dedupeKey ?? null,
+    });
+
+  const [row] = payload.dedupeKey
+    ? await insert
+        .onConflictDoNothing({ target: notificationsOutbox.dedupeKey })
+        .returning({ id: notificationsOutbox.id })
+    : await insert.returning({ id: notificationsOutbox.id });
+
+  if (!row) {
+    if (payload.dedupeKey) {
+      const [existing] = await db
+        .select({ id: notificationsOutbox.id })
+        .from(notificationsOutbox)
+        .where(eq(notificationsOutbox.dedupeKey, payload.dedupeKey))
+        .limit(1);
+      if (existing) return { id: existing.id, deduped: true };
+    }
+    throw new Error('failed to enqueue notification');
+  }
+  return { id: row.id, deduped: false };
 }
 
 /**

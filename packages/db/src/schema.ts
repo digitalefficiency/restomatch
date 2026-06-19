@@ -915,6 +915,9 @@ export const notificationChannel = pgEnum('notification_channel', [
 
 export const notificationStatus = pgEnum('notification_status', [
   'queued',
+  // In-flight: a worker has atomically claimed the row (FOR UPDATE SKIP
+  // LOCKED) and is dispatching it. Prevents a second worker from re-claiming.
+  'sending',
   'sent',
   'failed',
   'cancelled',
@@ -939,11 +942,22 @@ export const notificationsOutbox = pgTable(
     sentAt: timestamp('sent_at', { withTimezone: true }),
     relatedEntityType: text('related_entity_type'),
     relatedEntityId: uuid('related_entity_id'),
+    /**
+     * Idempotency key for the producer. When set, a PARTIAL unique index
+     * guarantees a given logical send (e.g. `po:{poId}:placed`) is enqueued at
+     * most once — so a retried/duplicated producer call cannot double-send a PO
+     * to a supplier. NULL rows are not deduped (the partial index ignores them).
+     */
+    dedupeKey: text('dedupe_key'),
+    claimedAt: timestamp('claimed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index('notifications_status_scheduled_idx').on(t.status, t.scheduledAt),
     index('notifications_related_idx').on(t.relatedEntityType, t.relatedEntityId),
+    uniqueIndex('notifications_dedupe_key_unique')
+      .on(t.dedupeKey)
+      .where(sql`${t.dedupeKey} IS NOT NULL`),
   ],
 );
 

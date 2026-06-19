@@ -479,16 +479,27 @@ export const ordersRouter = router({
         const body = renderOrderDocument(supplier?.name ?? 'ספק', po.expectedDeliveryAt, lines, tz);
         // Decouple from the (churning) notifier module: write to the outbox the
         // outboxDispatch worker already drains.
-        await ctx.db.insert(notificationsOutbox).values({
-          restaurantId,
-          channel: input.channel,
-          target,
-          subject: `הזמנה חדשה — ${supplier?.name ?? ''}`.trim(),
-          body,
-          status: 'queued',
-          relatedEntityType: 'purchase_order',
-          relatedEntityId: input.poId,
-        });
+        //
+        // Idempotency: a dedupeKey scoped to this PO's "placed" send + the
+        // partial unique index (notifications_dedupe_key_unique) make a retried
+        // or double-fired placeOrder enqueue the row at most once. Without this,
+        // a retry would queue a SECOND order document and we'd send the same PO
+        // to the supplier twice — a leak we'd be causing. ON CONFLICT DO NOTHING
+        // swallows the duplicate quietly; the PO still transitions to `sent`.
+        await ctx.db
+          .insert(notificationsOutbox)
+          .values({
+            restaurantId,
+            channel: input.channel,
+            target,
+            subject: `הזמנה חדשה — ${supplier?.name ?? ''}`.trim(),
+            body,
+            status: 'queued',
+            relatedEntityType: 'purchase_order',
+            relatedEntityId: input.poId,
+            dedupeKey: `po:${input.poId}:placed`,
+          })
+          .onConflictDoNothing({ target: notificationsOutbox.dedupeKey });
         sentChannel = input.channel;
       }
 

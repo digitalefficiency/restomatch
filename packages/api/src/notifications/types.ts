@@ -11,6 +11,12 @@ export interface NotificationPayload {
   payload?: Record<string, unknown>;
   relatedEntityType?: string;
   relatedEntityId?: string;
+  /**
+   * Optional idempotency key. When set, the partial unique index on
+   * notifications_outbox.dedupe_key prevents enqueuing the same logical
+   * notification twice (the duplicate insert is silently swallowed).
+   */
+  dedupeKey?: string;
 }
 
 export interface NotificationSendResult {

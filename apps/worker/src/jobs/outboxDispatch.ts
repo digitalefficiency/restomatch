@@ -1,8 +1,16 @@
 /**
  * Picks up queued notifications from `notifications_outbox` and dispatches
- * via the real provider client. On success, marks `status=sent` and
- * `sent_at=now()`. On failure, marks `status=failed` with `last_error`
- * after maxAttempts is exceeded; otherwise leaves queued for retry.
+ * via the real provider client.
+ *
+ * Concurrency safety (wave 3): each tick ATOMICALLY claims a batch with a
+ * single `UPDATE ... SET status='sending', claimed_at=now() WHERE id IN
+ * (SELECT id ... FOR UPDATE SKIP LOCKED LIMIT n) RETURNING *`. Because the
+ * claim and the status flip happen in one locked statement, two concurrent
+ * workers/ticks can never grab the same row — so a PO is never sent twice.
+ *
+ * On success the row flips `status=sent` / `sent_at=now()`. On failure it goes
+ * back to `queued` with backoff (claim released) until MAX_ATTEMPTS, then parks
+ * as `status=failed` with `last_error`.
  *
  * Real provider integration (WhatsApp Cloud, Expo Push, Resend) is plug-in:
  * we look up the provider by channel and call its `dispatch` method.
@@ -16,7 +24,7 @@ import {
   WhatsAppCloudNotifier,
   type NotificationPayload,
 } from '@restomatch/api';
-import { and, createDb, eq, lte, notificationsOutbox } from '@restomatch/db';
+import { createDb, eq, notificationsOutbox, sql } from '@restomatch/db';
 import { makeWorker } from '../queue';
 
 export interface OutboxDispatchJob {
@@ -26,6 +34,19 @@ export interface OutboxDispatchJob {
 
 const MAX_ATTEMPTS = 5;
 
+/** Shape of a claimed outbox row (subset we dispatch with). */
+interface ClaimedRow {
+  id: string;
+  restaurant_id: string;
+  channel: 'whatsapp' | 'push' | 'email';
+  target: string;
+  subject: string | null;
+  body: string;
+  related_entity_type: string | null;
+  related_entity_id: string | null;
+  attempt_count: number;
+}
+
 export function startOutboxDispatchWorker() {
   return makeWorker<OutboxDispatchJob>('outbox-dispatch', async (job) => {
     const url = process.env.DATABASE_URL;
@@ -33,27 +54,46 @@ export function startOutboxDispatchWorker() {
     const db = createDb(url);
 
     const batchSize = job.data.batchSize ?? 50;
-    const now = new Date();
 
-    const queued = await db
-      .select()
-      .from(notificationsOutbox)
-      .where(
-        and(
-          eq(notificationsOutbox.status, 'queued'),
-          lte(notificationsOutbox.scheduledAt, now),
-        ),
+    // Atomically CLAIM a batch: flip queued -> sending and stamp claimed_at in a
+    // single statement whose subquery locks the chosen rows FOR UPDATE SKIP
+    // LOCKED. Concurrent workers/ticks therefore never select the same row, so
+    // a notification (and thus a PO send) is dispatched by exactly one worker —
+    // no double-send. The old SELECT-then-UPDATE had a race window between the
+    // unlocked read and the write where two ticks could both grab a row.
+    const claimed = (await db.execute(sql`
+      UPDATE ${notificationsOutbox}
+      SET status = 'sending', claimed_at = now()
+      WHERE id IN (
+        SELECT id FROM ${notificationsOutbox}
+        WHERE status = 'queued' AND scheduled_at <= now()
+        ORDER BY scheduled_at
+        FOR UPDATE SKIP LOCKED
+        LIMIT ${batchSize}
       )
-      .limit(batchSize);
+      RETURNING id, restaurant_id, channel, target, subject, body,
+                related_entity_type, related_entity_id, attempt_count
+    `)) as unknown as ClaimedRow[];
 
-    if (queued.length === 0) {
+    if (claimed.length === 0) {
       return { dispatched: 0, failed: 0 };
     }
 
     let dispatched = 0;
     let failed = 0;
 
-    for (const row of queued) {
+    for (const claimedRow of claimed) {
+      const row = {
+        id: claimedRow.id,
+        restaurantId: claimedRow.restaurant_id,
+        channel: claimedRow.channel,
+        target: claimedRow.target,
+        subject: claimedRow.subject,
+        body: claimedRow.body,
+        relatedEntityType: claimedRow.related_entity_type,
+        relatedEntityId: claimedRow.related_entity_id,
+        attemptCount: claimedRow.attempt_count,
+      };
       try {
         await dispatch(row);
         await db
@@ -65,22 +105,29 @@ export function startOutboxDispatchWorker() {
         const newAttempt = (row.attemptCount ?? 0) + 1;
         const errMessage = err instanceof Error ? err.message : String(err);
         if (newAttempt >= MAX_ATTEMPTS) {
+          // Terminal failure: leave it parked as `failed` (claimedAt cleared).
           await db
             .update(notificationsOutbox)
             .set({
               status: 'failed',
               attemptCount: newAttempt,
               lastError: errMessage,
+              claimedAt: null,
             })
             .where(eq(notificationsOutbox.id, row.id));
           failed += 1;
         } else {
+          // Retry: release the claim by flipping back to `queued` and clearing
+          // claimedAt, so the next tick re-claims it once the backoff elapses.
+          // (Without this the row stays stuck in `sending` forever.)
           await db
             .update(notificationsOutbox)
             .set({
+              status: 'queued',
               attemptCount: newAttempt,
               lastError: errMessage,
               scheduledAt: backoff(newAttempt),
+              claimedAt: null,
             })
             .where(eq(notificationsOutbox.id, row.id));
         }
@@ -88,7 +135,7 @@ export function startOutboxDispatchWorker() {
     }
 
     console.log(
-      `[outbox-dispatch] checked=${queued.length} dispatched=${dispatched} failed=${failed}`,
+      `[outbox-dispatch] claimed=${claimed.length} dispatched=${dispatched} failed=${failed}`,
     );
     return { dispatched, failed };
   });
