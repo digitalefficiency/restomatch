@@ -77,20 +77,29 @@ export async function commitCatalogRows(
     let embedding: number[] | null = null;
     if (!productId) {
       embedding = await embedder.embed(row.supplierNameRaw);
-      const candidates = await matchProductTopN(
-        db,
-        {
-          restaurantId,
-          supplierId,
-          rawDescription: row.supplierNameRaw,
-          // SKU-first (strategy-0): a price-list row whose מק״ט already maps to a
-          // product resolves exactly, before name embedding/fuzzy.
-          ...(row.supplierSku ? { supplierSku: row.supplierSku } : {}),
-          embedding,
-          ...(row.barcodeEan ? { barcode: row.barcodeEan } : {}),
-        },
-        1,
-      );
+      // matchProductTopN is supplier-scoped (the false-leak guard): every
+      // candidate it returns is a product THIS supplier already sells (via a
+      // product_aliases or linked supplier_catalog_items row). It returns []
+      // when supplierId is null/unknown or when no same-supplier product
+      // clears threshold — so we never auto-link to another supplier's product
+      // (which would raise a phantom price-leak). No same-supplier candidate
+      // ⇒ force CREATE-NEW below.
+      const candidates = supplierId
+        ? await matchProductTopN(
+            db,
+            {
+              restaurantId,
+              supplierId,
+              rawDescription: row.supplierNameRaw,
+              // SKU-first (strategy-0): a price-list row whose מק״ט already maps to a
+              // product resolves exactly, before name embedding/fuzzy.
+              ...(row.supplierSku ? { supplierSku: row.supplierSku } : {}),
+              embedding,
+              ...(row.barcodeEan ? { barcode: row.barcodeEan } : {}),
+            },
+            1,
+          )
+        : [];
       const top = candidates[0];
       if (top && top.confidence >= AUTO_LINK) {
         productId = top.productId;

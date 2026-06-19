@@ -132,6 +132,27 @@ async function seedRestaurantWithProducts(): Promise<{ tomato: TestProduct; cucu
   };
 }
 
+/**
+ * Link products to a supplier so the supplier-scoped matchers (barcode,
+ * embedding, fuzzy) treat them as candidates. Mirrors the production link:
+ * a product is a candidate for supplier S iff S already sells it. Uses a
+ * product_aliases row (the alias text is intentionally junk so it never
+ * itself name-matches the queries under test).
+ */
+async function linkProductsToSupplier(
+  supplier: string,
+  productIds: string[],
+): Promise<void> {
+  await db.insert(productAliases).values(
+    productIds.map((productId, i) => ({
+      productId,
+      supplierId: supplier,
+      supplierNameRaw: `__scope_link_${supplier}_${i}__`,
+      confidence: '1.000',
+    })),
+  );
+}
+
 beforeEach(async () => {
   await resetDb();
 });
@@ -327,9 +348,16 @@ describe('matchBySku (מק״ט, strategy-0)', () => {
 });
 
 describe('matchByBarcode', () => {
-  it('finds product by exact barcode', async () => {
+  it('finds product by exact barcode when the supplier sells it', async () => {
     const { tomato } = await seedRestaurantWithProducts();
-    const match = await matchByBarcode(db, restaurantId, '7290000000011');
+    // Supplier-scope: the supplier must already sell the product (alias link).
+    await db.insert(productAliases).values({
+      productId: tomato.id,
+      supplierId,
+      supplierNameRaw: 'עגבניה שרי',
+      confidence: '1.000',
+    });
+    const match = await matchByBarcode(db, restaurantId, supplierId, '7290000000011');
     expect(match).toMatchObject({
       productId: tomato.id,
       canonicalName: 'עגבניה שרי',
@@ -340,82 +368,175 @@ describe('matchByBarcode', () => {
 
   it('returns null for unknown barcode', async () => {
     await seedRestaurantWithProducts();
-    const match = await matchByBarcode(db, restaurantId, '0000000000000');
+    const match = await matchByBarcode(db, restaurantId, supplierId, '0000000000000');
     expect(match).toBeNull();
   });
 
   it('is restaurant-scoped (no cross-tenant leak)', async () => {
     await seedRestaurantWithProducts();
-    const match = await matchByBarcode(db, otherRestaurantId, '7290000000011');
+    const match = await matchByBarcode(db, otherRestaurantId, supplierId, '7290000000011');
     expect(match).toBeNull();
+  });
+
+  it('returns null without a supplier — a barcode is unscoped', async () => {
+    const { tomato } = await seedRestaurantWithProducts();
+    await db.insert(productAliases).values({
+      productId: tomato.id,
+      supplierId,
+      supplierNameRaw: 'עגבניה שרי',
+      confidence: '1.000',
+    });
+    const match = await matchByBarcode(db, restaurantId, null, '7290000000011');
+    expect(match).toBeNull();
+  });
+
+  it('is supplier-scoped: supplier B cannot match supplier A-only product by barcode', async () => {
+    const { tomato } = await seedRestaurantWithProducts();
+    // Tomato is only linked to supplierId (via alias), NOT altSupplierId.
+    await db.insert(productAliases).values({
+      productId: tomato.id,
+      supplierId,
+      supplierNameRaw: 'עגבניה שרי',
+      confidence: '1.000',
+    });
+    // altSupplier scans the same barcode → must NOT resolve to A's product.
+    const match = await matchByBarcode(db, restaurantId, altSupplierId, '7290000000011');
+    expect(match).toBeNull();
+    // Sanity: the owning supplier still matches.
+    const owned = await matchByBarcode(db, restaurantId, supplierId, '7290000000011');
+    expect(owned?.productId).toBe(tomato.id);
   });
 });
 
 describe('matchByEmbedding', () => {
   it('finds product when similar text embedding queried', async () => {
-    const { tomato } = await seedRestaurantWithProducts();
+    const { tomato, cucumber, lettuce } = await seedRestaurantWithProducts();
+    await linkProductsToSupplier(supplierId, [tomato.id, cucumber.id, lettuce.id]);
     // Same string → identical vector → similarity 1
     const queryEmbedding = await embedder.embed('עגבניה שרי');
-    const match = await matchByEmbedding(db, restaurantId, queryEmbedding, 0.5);
+    const match = await matchByEmbedding(db, restaurantId, supplierId, queryEmbedding, 0.5);
     expect(match?.productId).toBe(tomato.id);
     expect(match?.confidence).toBeGreaterThan(0.99);
     expect(match?.matchedBy).toBe('embedding');
   });
 
   it('finds product with similar-but-not-identical text', async () => {
-    const { tomato } = await seedRestaurantWithProducts();
+    const { tomato, cucumber, lettuce } = await seedRestaurantWithProducts();
+    await linkProductsToSupplier(supplierId, [tomato.id, cucumber.id, lettuce.id]);
     const queryEmbedding = await embedder.embed('עגבניה שרי טריה');
-    const match = await matchByEmbedding(db, restaurantId, queryEmbedding, 0.5);
+    const match = await matchByEmbedding(db, restaurantId, supplierId, queryEmbedding, 0.5);
     expect(match?.productId).toBe(tomato.id);
     expect(match?.confidence).toBeGreaterThan(0.5);
   });
 
   it('returns null when below threshold', async () => {
-    await seedRestaurantWithProducts();
+    const { tomato, cucumber, lettuce } = await seedRestaurantWithProducts();
+    await linkProductsToSupplier(supplierId, [tomato.id, cucumber.id, lettuce.id]);
     const queryEmbedding = await embedder.embed('שווארמה כבש');
-    const match = await matchByEmbedding(db, restaurantId, queryEmbedding, 0.95);
+    const match = await matchByEmbedding(db, restaurantId, supplierId, queryEmbedding, 0.95);
     expect(match).toBeNull();
   });
 
   it('is restaurant-scoped', async () => {
-    await seedRestaurantWithProducts();
+    const { tomato, cucumber, lettuce } = await seedRestaurantWithProducts();
+    await linkProductsToSupplier(supplierId, [tomato.id, cucumber.id, lettuce.id]);
     const queryEmbedding = await embedder.embed('עגבניה שרי');
-    const match = await matchByEmbedding(db, otherRestaurantId, queryEmbedding, 0.5);
+    const match = await matchByEmbedding(db, otherRestaurantId, supplierId, queryEmbedding, 0.5);
     expect(match).toBeNull();
   });
 
   it('returns null for empty vector', async () => {
     await seedRestaurantWithProducts();
-    const match = await matchByEmbedding(db, restaurantId, [], 0.5);
+    const match = await matchByEmbedding(db, restaurantId, supplierId, [], 0.5);
     expect(match).toBeNull();
+  });
+
+  it('returns null without a supplier — embedding candidates are unscoped', async () => {
+    const { tomato, cucumber, lettuce } = await seedRestaurantWithProducts();
+    await linkProductsToSupplier(supplierId, [tomato.id, cucumber.id, lettuce.id]);
+    const queryEmbedding = await embedder.embed('עגבניה שרי');
+    const match = await matchByEmbedding(db, restaurantId, null, queryEmbedding, 0.5);
+    expect(match).toBeNull();
+  });
+
+  it('is supplier-scoped: supplier B cannot embed-match supplier A-only product', async () => {
+    const { tomato, cucumber, lettuce } = await seedRestaurantWithProducts();
+    // All products belong ONLY to supplierId, none to altSupplierId.
+    await linkProductsToSupplier(supplierId, [tomato.id, cucumber.id, lettuce.id]);
+    const queryEmbedding = await embedder.embed('עגבניה שרי');
+    const match = await matchByEmbedding(db, restaurantId, altSupplierId, queryEmbedding, 0.5);
+    expect(match).toBeNull();
+    // Sanity: the owning supplier still matches.
+    const owned = await matchByEmbedding(db, restaurantId, supplierId, queryEmbedding, 0.5);
+    expect(owned?.productId).toBe(tomato.id);
+  });
+
+  it('over-fetches the ANN so an in-scope product behind closer out-of-scope rows is not dropped', async () => {
+    // Regression for the no-under-fetch ANN case: if the supplier predicate
+    // rode inside a LIMIT 1 ORDER BY, the single nearest row (out-of-scope)
+    // would be returned then filtered away, yielding NO match even though an
+    // in-scope product exists slightly further out. Over-fetch must surface it.
+    const { tomato, cucumber, lettuce } = await seedRestaurantWithProducts();
+    // The NEAREST product to the query (cucumber's exact name) belongs to the
+    // OTHER supplier; the in-scope supplier only sells the (further) tomato.
+    await linkProductsToSupplier(altSupplierId, [cucumber.id]);
+    await linkProductsToSupplier(supplierId, [tomato.id, lettuce.id]);
+    const queryEmbedding = await embedder.embed('מלפפון חממה'); // nearest = cucumber (out of scope)
+    const match = await matchByEmbedding(db, restaurantId, supplierId, queryEmbedding, 0.1);
+    // Must skip the closer out-of-scope cucumber and still return an in-scope
+    // product (tomato or lettuce) rather than null.
+    expect(match).not.toBeNull();
+    expect([tomato.id, lettuce.id]).toContain(match?.productId);
   });
 });
 
 describe('matchByFuzzy', () => {
   it('matches similar canonical name via pg_trgm', async () => {
-    const { tomato } = await seedRestaurantWithProducts();
-    const match = await matchByFuzzy(db, restaurantId, 'עגבניה שרי', 0.3);
+    const { tomato, cucumber, lettuce } = await seedRestaurantWithProducts();
+    await linkProductsToSupplier(supplierId, [tomato.id, cucumber.id, lettuce.id]);
+    const match = await matchByFuzzy(db, restaurantId, supplierId, 'עגבניה שרי', 0.3);
     expect(match?.productId).toBe(tomato.id);
     expect(match?.matchedBy).toBe('fuzzy');
   });
 
   it('matches with minor typo', async () => {
-    const { cucumber } = await seedRestaurantWithProducts();
+    const { tomato, cucumber, lettuce } = await seedRestaurantWithProducts();
+    await linkProductsToSupplier(supplierId, [tomato.id, cucumber.id, lettuce.id]);
     // typo: מלפפן instead of מלפפון
-    const match = await matchByFuzzy(db, restaurantId, 'מלפפן חממה', 0.3);
+    const match = await matchByFuzzy(db, restaurantId, supplierId, 'מלפפן חממה', 0.3);
     expect(match?.productId).toBe(cucumber.id);
   });
 
   it('returns null when no match meets threshold', async () => {
-    await seedRestaurantWithProducts();
-    const match = await matchByFuzzy(db, restaurantId, 'completely unrelated text', 0.5);
+    const { tomato, cucumber, lettuce } = await seedRestaurantWithProducts();
+    await linkProductsToSupplier(supplierId, [tomato.id, cucumber.id, lettuce.id]);
+    const match = await matchByFuzzy(db, restaurantId, supplierId, 'completely unrelated text', 0.5);
     expect(match).toBeNull();
   });
 
   it('is restaurant-scoped', async () => {
-    await seedRestaurantWithProducts();
-    const match = await matchByFuzzy(db, otherRestaurantId, 'עגבניה שרי', 0.3);
+    const { tomato, cucumber, lettuce } = await seedRestaurantWithProducts();
+    await linkProductsToSupplier(supplierId, [tomato.id, cucumber.id, lettuce.id]);
+    const match = await matchByFuzzy(db, otherRestaurantId, supplierId, 'עגבניה שרי', 0.3);
     expect(match).toBeNull();
+  });
+
+  it('returns null without a supplier — fuzzy candidates are unscoped', async () => {
+    const { tomato, cucumber, lettuce } = await seedRestaurantWithProducts();
+    await linkProductsToSupplier(supplierId, [tomato.id, cucumber.id, lettuce.id]);
+    const match = await matchByFuzzy(db, restaurantId, null, 'עגבניה שרי', 0.3);
+    expect(match).toBeNull();
+  });
+
+  it('is supplier-scoped: supplier B cannot fuzzy-match supplier A-only product', async () => {
+    const { tomato, cucumber, lettuce } = await seedRestaurantWithProducts();
+    // Products belong ONLY to supplierId.
+    await linkProductsToSupplier(supplierId, [tomato.id, cucumber.id, lettuce.id]);
+    const match = await matchByFuzzy(db, restaurantId, altSupplierId, 'עגבניה שרי', 0.3);
+    expect(match).toBeNull();
+    // Sanity: the owning supplier still matches.
+    const owned = await matchByFuzzy(db, restaurantId, supplierId, 'עגבניה שרי', 0.3);
+    expect(owned?.productId).toBe(tomato.id);
   });
 });
 
@@ -489,7 +610,8 @@ describe('matchProduct (composite)', () => {
   });
 
   it('falls through alias → barcode', async () => {
-    const { tomato } = await seedRestaurantWithProducts();
+    const { tomato, cucumber, lettuce } = await seedRestaurantWithProducts();
+    await linkProductsToSupplier(supplierId, [tomato.id, cucumber.id, lettuce.id]);
     const match = await matchProduct(db, {
       restaurantId,
       supplierId,
@@ -501,7 +623,8 @@ describe('matchProduct (composite)', () => {
   });
 
   it('falls through alias → barcode → embedding', async () => {
-    const { tomato } = await seedRestaurantWithProducts();
+    const { tomato, cucumber, lettuce } = await seedRestaurantWithProducts();
+    await linkProductsToSupplier(supplierId, [tomato.id, cucumber.id, lettuce.id]);
     // Use an embedding from the exact canonical name → guaranteed similarity ≈ 1
     const queryEmbedding = await embedder.embed('עגבניה שרי');
     const match = await matchProduct(
@@ -519,7 +642,8 @@ describe('matchProduct (composite)', () => {
   });
 
   it('falls through alias → barcode → embedding → fuzzy', async () => {
-    const { tomato } = await seedRestaurantWithProducts();
+    const { tomato, cucumber, lettuce } = await seedRestaurantWithProducts();
+    await linkProductsToSupplier(supplierId, [tomato.id, cucumber.id, lettuce.id]);
     const match = await matchProduct(db, {
       restaurantId,
       supplierId,
@@ -527,6 +651,25 @@ describe('matchProduct (composite)', () => {
     });
     expect(match?.productId).toBe(tomato.id);
     expect(match?.matchedBy).toBe('fuzzy');
+  });
+
+  it('false-leak guard: invoice from supplier A must NOT match supplier B-only product', async () => {
+    const { tomato, cucumber, lettuce } = await seedRestaurantWithProducts();
+    // Every product is sold ONLY by supplierId (supplier A).
+    await linkProductsToSupplier(supplierId, [tomato.id, cucumber.id, lettuce.id]);
+    // An invoice line from altSupplierId (supplier B) for the SAME goods —
+    // exact name, exact barcode, exact embedding. None may resolve, because B
+    // does not sell any of these products; matching anyway would raise a
+    // phantom cross-supplier price-leak.
+    const queryEmbedding = await embedder.embed('עגבניה שרי');
+    const match = await matchProduct(db, {
+      restaurantId,
+      supplierId: altSupplierId,
+      rawDescription: 'עגבניה שרי',
+      barcode: '7290000000011',
+      embedding: queryEmbedding,
+    });
+    expect(match).toBeNull();
   });
 
   it('returns null when nothing matches', async () => {
@@ -542,13 +685,14 @@ describe('matchProduct (composite)', () => {
 
 describe('matchProductTopN', () => {
   it('returns multiple candidates ranked by confidence', async () => {
-    await seedRestaurantWithProducts();
+    const { tomato, cucumber, lettuce } = await seedRestaurantWithProducts();
+    await linkProductsToSupplier(supplierId, [tomato.id, cucumber.id, lettuce.id]);
     const queryEmbedding = await embedder.embed('עגבניה שרי');
     const candidates = await matchProductTopN(
       db,
       {
         restaurantId,
-        supplierId: null,
+        supplierId,
         rawDescription: 'עגבניה שרי',
         embedding: queryEmbedding,
       },
@@ -580,7 +724,27 @@ describe('matchProductTopN', () => {
   });
 
   it('deduplicates products that match via both embedding and fuzzy', async () => {
-    await seedRestaurantWithProducts();
+    const { tomato, cucumber, lettuce } = await seedRestaurantWithProducts();
+    await linkProductsToSupplier(supplierId, [tomato.id, cucumber.id, lettuce.id]);
+    const queryEmbedding = await embedder.embed('עגבניה שרי');
+    const candidates = await matchProductTopN(
+      db,
+      {
+        restaurantId,
+        supplierId,
+        rawDescription: 'עגבניה שרי',
+        embedding: queryEmbedding,
+      },
+      5,
+      { embeddingMinSimilarity: 0.1, fuzzyMinSimilarity: 0.1 },
+    );
+    const ids = candidates.map((c) => c.productId);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('returns [] for a null/unknown supplier (false-leak guard)', async () => {
+    const { tomato, cucumber, lettuce } = await seedRestaurantWithProducts();
+    await linkProductsToSupplier(supplierId, [tomato.id, cucumber.id, lettuce.id]);
     const queryEmbedding = await embedder.embed('עגבניה שרי');
     const candidates = await matchProductTopN(
       db,
@@ -593,8 +757,53 @@ describe('matchProductTopN', () => {
       5,
       { embeddingMinSimilarity: 0.1, fuzzyMinSimilarity: 0.1 },
     );
-    const ids = candidates.map((c) => c.productId);
-    expect(new Set(ids).size).toBe(ids.length);
+    expect(candidates).toEqual([]);
+  });
+
+  it('returns only same-supplier candidates (no cross-supplier leak)', async () => {
+    const { tomato, cucumber, lettuce } = await seedRestaurantWithProducts();
+    // Products are sold ONLY by supplierId; query under altSupplierId.
+    await linkProductsToSupplier(supplierId, [tomato.id, cucumber.id, lettuce.id]);
+    const queryEmbedding = await embedder.embed('עגבניה שרי');
+    const candidates = await matchProductTopN(
+      db,
+      {
+        restaurantId,
+        supplierId: altSupplierId,
+        rawDescription: 'עגבניה שרי',
+        embedding: queryEmbedding,
+      },
+      5,
+      { embeddingMinSimilarity: 0.1, fuzzyMinSimilarity: 0.1 },
+    );
+    expect(candidates).toEqual([]);
+  });
+
+  it('over-fetches the ANN: an in-scope product is returned even behind closer out-of-scope rows', async () => {
+    // no-under-fetch ANN regression at the top-N layer.
+    const { tomato, cucumber, lettuce } = await seedRestaurantWithProducts();
+    // Nearest match to the query belongs to the other supplier; in-scope
+    // supplier sells only the further products.
+    await linkProductsToSupplier(altSupplierId, [cucumber.id]);
+    await linkProductsToSupplier(supplierId, [tomato.id, lettuce.id]);
+    const queryEmbedding = await embedder.embed('מלפפון חממה'); // nearest = cucumber (out of scope)
+    const candidates = await matchProductTopN(
+      db,
+      {
+        restaurantId,
+        supplierId,
+        rawDescription: 'מלפפון חממה',
+        embedding: queryEmbedding,
+      },
+      3,
+      { embeddingMinSimilarity: 0.1, fuzzyMinSimilarity: 0.1 },
+    );
+    expect(candidates.length).toBeGreaterThan(0);
+    // The closer cucumber (other supplier) must never appear.
+    expect(candidates.map((c) => c.productId)).not.toContain(cucumber.id);
+    for (const c of candidates) {
+      expect([tomato.id, lettuce.id]).toContain(c.productId);
+    }
   });
 });
 

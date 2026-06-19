@@ -28,6 +28,78 @@ function toVectorLiteral(embedding: number[]): string {
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
+ * Supplier-scope predicate (the false-leak guard)
+ *
+ * A product is a candidate for supplier S only if S already sells it — i.e.
+ * there is EITHER a product_aliases row with supplier_id = S, OR a (linked)
+ * supplier_catalog_items row with supplier_id = S pointing at the product.
+ * This decouples exclusivity from the not-yet-existent products.supplier_id
+ * column: it uses the EXISTING supplier→product links so an invoice/import
+ * from supplier A can never fuzzy/embed/barcode-match supplier B's product
+ * and raise a phantom price-leak.
+ *
+ * Returns a correlated EXISTS predicate over `products.id` to be AND-ed into a
+ * WHERE clause (used by barcode + fuzzy, whose predicate rides inside WHERE).
+ * The embedding ANN over-fetches then filters in app code via the candidate
+ * set below, because an EXISTS in WHERE would defeat the ivfflat index plan.
+ *
+ * supplierId must be present: a null/unknown supplier cannot be scoped, so the
+ * caller (commit.ts) routes those to review/create-new rather than auto-link.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+function supplierScopeSql(supplierId: string) {
+  return sql`(
+    EXISTS (
+      SELECT 1 FROM ${productAliases}
+      WHERE ${productAliases.productId} = ${products.id}
+        AND ${productAliases.supplierId} = ${supplierId}
+    )
+    OR EXISTS (
+      SELECT 1 FROM ${supplierCatalogItems}
+      WHERE ${supplierCatalogItems.productId} = ${products.id}
+        AND ${supplierCatalogItems.supplierId} = ${supplierId}
+    )
+  )`;
+}
+
+/**
+ * The product ids supplier S already sells — its alias links UNION its linked
+ * catalog items. Used to filter the over-fetched embedding ANN in app code
+ * (the supplier predicate cannot ride inside the ivfflat ORDER BY without
+ * dropping valid rows). Returns a Set for O(1) membership.
+ */
+async function supplierProductIds(
+  db: Database,
+  restaurantId: string,
+  supplierId: string,
+): Promise<Set<string>> {
+  const [aliasRows, catalogRows] = await Promise.all([
+    db
+      .select({ productId: productAliases.productId })
+      .from(productAliases)
+      .innerJoin(
+        products,
+        and(eq(products.id, productAliases.productId), eq(products.restaurantId, restaurantId)),
+      )
+      .where(eq(productAliases.supplierId, supplierId)),
+    db
+      .select({ productId: supplierCatalogItems.productId })
+      .from(supplierCatalogItems)
+      .where(
+        and(
+          eq(supplierCatalogItems.restaurantId, restaurantId),
+          eq(supplierCatalogItems.supplierId, supplierId),
+        ),
+      ),
+  ]);
+
+  const ids = new Set<string>();
+  for (const r of aliasRows) ids.add(r.productId);
+  for (const r of catalogRows) if (r.productId) ids.add(r.productId);
+  return ids;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
  * Strategy 0: supplier SKU exact lookup (מק״ט)
  *
  * The stable per-supplier key — preferred over fuzzy Hebrew names. Source of
@@ -161,14 +233,19 @@ export async function matchByAlias(
 /* ──────────────────────────────────────────────────────────────────────────
  * Strategy 2: barcode exact lookup
  *
- * Restaurant-scoped. Confidence = 1.0.
+ * Restaurant-scoped AND supplier-scoped (the false-leak guard): a barcode only
+ * resolves to a product the queried supplier already sells. Without a supplier
+ * a barcode is unscoped, so we refuse to match (caller routes to review).
+ * Confidence = 1.0.
  * ────────────────────────────────────────────────────────────────────────── */
 
 export async function matchByBarcode(
   db: Database,
   restaurantId: string,
+  supplierId: string | null,
   barcode: string,
 ): Promise<MatchCandidate | null> {
+  if (!supplierId) return null;
   const normalized = barcode.trim();
   if (!normalized) return null;
 
@@ -178,7 +255,13 @@ export async function matchByBarcode(
       canonicalName: products.canonicalName,
     })
     .from(products)
-    .where(and(eq(products.restaurantId, restaurantId), eq(products.barcodeEan, normalized)))
+    .where(
+      and(
+        eq(products.restaurantId, restaurantId),
+        eq(products.barcodeEan, normalized),
+        supplierScopeSql(supplierId),
+      ),
+    )
     .limit(1);
 
   const row = rows[0];
@@ -194,87 +277,44 @@ export async function matchByBarcode(
 /* ──────────────────────────────────────────────────────────────────────────
  * Strategy 3: pgvector embedding similarity (cosine)
  *
- * Returns the closest product if similarity ≥ threshold.
+ * Returns the closest product the supplier already sells, if similarity ≥
+ * threshold. The supplier predicate canNOT ride inside the ivfflat ORDER BY
+ * (an unindexed filter there would drop valid in-scope rows that fall outside
+ * the probed lists), so we over-fetch the ANN then filter by supplier in app
+ * code. Without a supplier we refuse to match (caller routes to review).
  * ────────────────────────────────────────────────────────────────────────── */
 
 export async function matchByEmbedding(
   db: Database,
   restaurantId: string,
+  supplierId: string | null,
   embedding: number[],
   threshold = DEFAULT_THRESHOLDS.embeddingMinSimilarity,
 ): Promise<MatchCandidate | null> {
-  if (embedding.length === 0) return null;
-
-  // pgvector cosine distance = 1 - cosine similarity
-  // Use <=> operator (cosine distance) and convert
-  const vectorLiteral = toVectorLiteral(embedding);
-
-  const rows = await db
-    .select({
-      productId: products.id,
-      canonicalName: products.canonicalName,
-      similarity: sql<number>`1 - (${products.embedding} <=> ${vectorLiteral}::vector)`.as(
-        'similarity',
-      ),
-    })
-    .from(products)
-    .where(and(eq(products.restaurantId, restaurantId), sql`${products.embedding} IS NOT NULL`))
-    .orderBy(sql`${products.embedding} <=> ${vectorLiteral}::vector`)
-    .limit(1);
-
-  const row = rows[0];
-  if (!row) return null;
-  const similarity = Number(row.similarity);
-  if (similarity < threshold) return null;
-  return {
-    productId: row.productId,
-    canonicalName: row.canonicalName,
-    confidence: similarity,
-    matchedBy: 'embedding',
-  };
+  if (!supplierId) return null;
+  const candidates = await topNByEmbedding(db, restaurantId, supplierId, embedding, 1, threshold);
+  return candidates[0] ?? null;
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Strategy 4: pg_trgm fuzzy match
  *
- * Uses similarity() against canonical_name. Restaurant-scoped.
+ * Uses similarity() against canonical_name. Restaurant-scoped AND
+ * supplier-scoped (the false-leak guard): only products the supplier already
+ * sells are candidates. Without a supplier we refuse to match (caller routes
+ * to review).
  * ────────────────────────────────────────────────────────────────────────── */
 
 export async function matchByFuzzy(
   db: Database,
   restaurantId: string,
+  supplierId: string | null,
   rawName: string,
   threshold = DEFAULT_THRESHOLDS.fuzzyMinSimilarity,
 ): Promise<MatchCandidate | null> {
-  const normalized = rawName.trim();
-  if (!normalized) return null;
-
-  const rows = await db
-    .select({
-      productId: products.id,
-      canonicalName: products.canonicalName,
-      similarity: sql<number>`similarity(${products.canonicalName}, ${normalized})`.as(
-        'similarity',
-      ),
-    })
-    .from(products)
-    .where(
-      and(
-        eq(products.restaurantId, restaurantId),
-        sql`similarity(${products.canonicalName}, ${normalized}) >= ${threshold}`,
-      ),
-    )
-    .orderBy(sql`similarity(${products.canonicalName}, ${normalized}) DESC`)
-    .limit(1);
-
-  const row = rows[0];
-  if (!row) return null;
-  return {
-    productId: row.productId,
-    canonicalName: row.canonicalName,
-    confidence: Number(row.similarity),
-    matchedBy: 'fuzzy',
-  };
+  if (!supplierId) return null;
+  const candidates = await topNByFuzzy(db, restaurantId, supplierId, rawName, 1, threshold);
+  return candidates[0] ?? null;
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -309,27 +349,34 @@ export async function matchProduct(
   );
   if (aliasMatch) return aliasMatch;
 
-  // 2. Barcode
+  // 2. Barcode (supplier-scoped)
   if (input.barcode) {
-    const barcodeMatch = await matchByBarcode(db, input.restaurantId, input.barcode);
+    const barcodeMatch = await matchByBarcode(
+      db,
+      input.restaurantId,
+      input.supplierId ?? null,
+      input.barcode,
+    );
     if (barcodeMatch) return barcodeMatch;
   }
 
-  // 3. Embedding
+  // 3. Embedding (supplier-scoped)
   if (input.embedding) {
     const embeddingMatch = await matchByEmbedding(
       db,
       input.restaurantId,
+      input.supplierId ?? null,
       input.embedding,
       thresholds.embeddingMinSimilarity,
     );
     if (embeddingMatch) return embeddingMatch;
   }
 
-  // 4. Fuzzy
+  // 4. Fuzzy (supplier-scoped)
   const fuzzyMatch = await matchByFuzzy(
     db,
     input.restaurantId,
+    input.supplierId ?? null,
     input.rawDescription,
     thresholds.fuzzyMinSimilarity,
   );
@@ -372,9 +419,20 @@ export async function matchProductTopN(
   if (aliasMatch) return [aliasMatch];
 
   if (input.barcode) {
-    const barcodeMatch = await matchByBarcode(db, input.restaurantId, input.barcode);
+    const barcodeMatch = await matchByBarcode(
+      db,
+      input.restaurantId,
+      input.supplierId ?? null,
+      input.barcode,
+    );
     if (barcodeMatch) return [barcodeMatch];
   }
+
+  // From here only same-supplier fuzzy/embedding candidates are eligible. A
+  // null/unknown supplier cannot be scoped, so we return no candidates (the
+  // false-leak guard) — commit.ts then routes the row to review / create-new.
+  const supplierId = input.supplierId ?? null;
+  if (!supplierId) return [];
 
   const candidates: MatchCandidate[] = [];
 
@@ -382,6 +440,7 @@ export async function matchProductTopN(
     const embeddingCandidates = await topNByEmbedding(
       db,
       input.restaurantId,
+      supplierId,
       input.embedding,
       limit,
       thresholds.embeddingMinSimilarity,
@@ -392,6 +451,7 @@ export async function matchProductTopN(
   const fuzzyCandidates = await topNByFuzzy(
     db,
     input.restaurantId,
+    supplierId,
     input.rawDescription,
     limit,
     thresholds.fuzzyMinSimilarity,
@@ -406,38 +466,51 @@ export async function matchProductTopN(
 async function topNByEmbedding(
   db: Database,
   restaurantId: string,
+  supplierId: string,
   embedding: number[],
   limit: number,
   threshold: number,
 ): Promise<MatchCandidate[]> {
   if (embedding.length === 0) return [];
   const vectorLiteral = toVectorLiteral(embedding);
-  const rows = await db
-    .select({
-      productId: products.id,
-      canonicalName: products.canonicalName,
-      similarity: sql<number>`1 - (${products.embedding} <=> ${vectorLiteral}::vector)`.as(
-        'similarity',
-      ),
-    })
-    .from(products)
-    .where(and(eq(products.restaurantId, restaurantId), sql`${products.embedding} IS NOT NULL`))
-    .orderBy(sql`${products.embedding} <=> ${vectorLiteral}::vector`)
-    .limit(limit);
+
+  // Supplier scope cannot ride inside the ivfflat ORDER BY without dropping
+  // valid in-scope rows that fall outside the probed lists, so over-fetch the
+  // ANN (limit*5, capped at 50) and filter by supplier in app code below. The
+  // restriction to this supplier's products is the false-leak guard.
+  const fetchLimit = Math.min(limit * 5, 50);
+  const [rows, scope] = await Promise.all([
+    db
+      .select({
+        productId: products.id,
+        canonicalName: products.canonicalName,
+        similarity: sql<number>`1 - (${products.embedding} <=> ${vectorLiteral}::vector)`.as(
+          'similarity',
+        ),
+      })
+      .from(products)
+      .where(and(eq(products.restaurantId, restaurantId), sql`${products.embedding} IS NOT NULL`))
+      .orderBy(sql`${products.embedding} <=> ${vectorLiteral}::vector`)
+      .limit(fetchLimit),
+    supplierProductIds(db, restaurantId, supplierId),
+  ]);
 
   return rows
+    .filter((row) => scope.has(row.productId))
     .map<MatchCandidate>((row) => ({
       productId: row.productId,
       canonicalName: row.canonicalName,
       confidence: Number(row.similarity),
       matchedBy: 'embedding',
     }))
-    .filter((c) => c.confidence >= threshold);
+    .filter((c) => c.confidence >= threshold)
+    .slice(0, limit);
 }
 
 async function topNByFuzzy(
   db: Database,
   restaurantId: string,
+  supplierId: string,
   rawName: string,
   limit: number,
   threshold: number,
@@ -457,6 +530,8 @@ async function topNByFuzzy(
       and(
         eq(products.restaurantId, restaurantId),
         sql`similarity(${products.canonicalName}, ${normalized}) >= ${threshold}`,
+        // Supplier scope (false-leak guard): only products this supplier sells.
+        supplierScopeSql(supplierId),
       ),
     )
     .orderBy(sql`similarity(${products.canonicalName}, ${normalized}) DESC`)

@@ -10,6 +10,15 @@ export interface MatchCandidate {
 
 export interface CatalogMatchInput {
   restaurantId: string;
+  /**
+   * The supplier this invoice/import line came from. Load-bearing for the
+   * false-leak guard: barcode, embedding and fuzzy candidates are restricted
+   * to products this supplier ALREADY sells (via a product_aliases row or a
+   * linked supplier_catalog_items row). A null/unknown supplier cannot be
+   * scoped, so those name/barcode strategies refuse to match and the caller
+   * routes the row to review / create-new rather than auto-linking it to
+   * another supplier's product (which would raise a phantom price-leak).
+   */
   supplierId?: string | null;
   rawDescription: string;
   /**
