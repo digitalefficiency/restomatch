@@ -24,6 +24,7 @@ import { managerProcedure, memberProcedure, requireFeature, router } from '../tr
 import { assertPoOwned, assertSupplierOwned } from '../tenant';
 import { getEntitlements } from '../entitlements';
 import { importPurchaseOrder } from '../orders/importPo';
+import { deriveExpectedDelivery, type DerivedDelivery } from '../lib/deriveDelivery';
 
 /** Cap on an uploaded order document, decoded — a single-page PO PDF is ~50KB. */
 const MAX_PO_DOC_BYTES = 8 * 1024 * 1024;
@@ -111,6 +112,41 @@ async function computeGuardrail(
     }
   }
   return warnings;
+}
+
+/** Shape returned to the wizard so it can CONFIRM the derived date (never silent). */
+export interface DeliveryDerivation {
+  expectedDeliveryAt: string; // ISO UTC
+  nextOrderCutoffAt: string; // ISO UTC
+  missedCutoff: boolean;
+  windowUsed: DerivedDelivery['windowUsed'];
+}
+
+/**
+ * Derive the expected delivery for a supplier as of `nowUtc`, anchored to the
+ * restaurant's timezone. Returns null when the supplier has no order schedule
+ * (caller keeps manual entry). Holiday set is intentionally omitted — the IL
+ * holiday JSON is a later wave (see deriveExpectedDelivery).
+ */
+async function deriveForSupplier(
+  db: Database,
+  restaurantId: string,
+  supplierId: string,
+  nowUtc: Date,
+): Promise<DerivedDelivery | null> {
+  const [supplier] = await db
+    .select({ orderSchedule: suppliers.orderSchedule })
+    .from(suppliers)
+    .where(eq(suppliers.id, supplierId))
+    .limit(1);
+  if (!supplier?.orderSchedule) return null;
+  const [restaurant] = await db
+    .select({ timezone: restaurants.timezone })
+    .from(restaurants)
+    .where(eq(restaurants.id, restaurantId))
+    .limit(1);
+  const tz = restaurant?.timezone ?? DEFAULT_TZ;
+  return deriveExpectedDelivery(supplier.orderSchedule, nowUtc, tz);
 }
 
 async function baselineWindow(db: Database, restaurantId: string): Promise<number> {
@@ -209,6 +245,27 @@ export const ordersRouter = router({
       const restaurantId = ctx.session.restaurantId;
       await assertSupplierOwned(ctx.db, input.supplierId, restaurantId);
 
+      // Cadence: when the manager didn't pick a date, DERIVE it from the
+      // supplier's order schedule (NEW POs only — this is createDraft). If the
+      // order is placed after today's cutoff, `derivation.missedCutoff` is true
+      // and we surface it so the UI can explain the roll rather than silently
+      // shifting the date. A supplier with no schedule → derivation is null and
+      // expectedDeliveryAt stays whatever the manual entry provided (or null).
+      let expectedDeliveryAt: Date | null = input.expectedDeliveryAt ?? null;
+      let derivation: DeliveryDerivation | null = null;
+      if (!input.expectedDeliveryAt) {
+        const derived = await deriveForSupplier(ctx.db, restaurantId, input.supplierId, new Date());
+        if (derived) {
+          expectedDeliveryAt = derived.expectedDeliveryAt;
+          derivation = {
+            expectedDeliveryAt: derived.expectedDeliveryAt.toISOString(),
+            nextOrderCutoffAt: derived.nextOrderCutoffAt.toISOString(),
+            missedCutoff: derived.missedCutoff,
+            windowUsed: derived.windowUsed,
+          };
+        }
+      }
+
       // Pre-fill missing unit prices from the supplier's catalog list price.
       const productIds = input.lines
         .map((l) => l.productId)
@@ -252,7 +309,7 @@ export const ordersRouter = router({
           supplierId: input.supplierId,
           status: 'draft',
           source: 'manual',
-          expectedDeliveryAt: input.expectedDeliveryAt ?? null,
+          expectedDeliveryAt,
           totalEstimated,
           notes: input.notes ?? null,
           createdBy: ctx.session.userId,
@@ -270,7 +327,29 @@ export const ordersRouter = router({
           unitPriceExpected: l.unitPriceExpected,
         })),
       );
-      return { poId: po.id };
+      return { poId: po.id, derivation };
+    }),
+
+  /**
+   * Cadence preview for the order wizard: after a supplier is chosen, derive the
+   * delivery date the manager will CONFIRM. Returns null when the supplier has
+   * no order schedule (the wizard then falls back to manual date entry). The
+   * `missedCutoff` flag lets the UI say "too late for tomorrow — next delivery
+   * is X" instead of silently rolling.
+   */
+  previewDelivery: memberProcedure
+    .input(z.object({ supplierId: z.string().uuid() }))
+    .query(async ({ ctx, input }): Promise<DeliveryDerivation | null> => {
+      const restaurantId = ctx.session.restaurantId;
+      await assertSupplierOwned(ctx.db, input.supplierId, restaurantId);
+      const derived = await deriveForSupplier(ctx.db, restaurantId, input.supplierId, new Date());
+      if (!derived) return null;
+      return {
+        expectedDeliveryAt: derived.expectedDeliveryAt.toISOString(),
+        nextOrderCutoffAt: derived.nextOrderCutoffAt.toISOString(),
+        missedCutoff: derived.missedCutoff,
+        windowUsed: derived.windowUsed,
+      };
     }),
 
   /**

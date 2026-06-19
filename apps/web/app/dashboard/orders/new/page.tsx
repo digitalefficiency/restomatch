@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
-import { ArrowRight, CheckCircle2, Plus, Trash2, TriangleAlert } from 'lucide-react';
+import { ArrowRight, CalendarClock, CheckCircle2, Plus, Trash2, TriangleAlert } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
 import {
   Badge,
@@ -35,6 +35,43 @@ type Step = 'SUPPLIER' | 'BUILD' | 'REVIEW' | 'SENT';
 
 const lineTotal = (l: DraftLine) => (l.unitPriceExpected ?? 0) * l.qty;
 
+type DeliveryPreview = NonNullable<Outputs['orders']['previewDelivery']>;
+
+/** Hebrew long date (weekday + day + month) in Asia/Jerusalem wall clock. */
+function formatDeliveryDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('he-IL', {
+    timeZone: 'Asia/Jerusalem',
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
+}
+
+/**
+ * Shows the DERIVED delivery date for the manager to confirm. When the order is
+ * placed after today's cutoff we say so explicitly instead of silently rolling.
+ */
+function DeliveryPanel({ d }: { d: DeliveryPreview }) {
+  return (
+    <div className="mt-4 rounded-xl border border-line bg-surface-2 p-3 text-sm">
+      <p className="flex items-center gap-2 text-ink">
+        <CalendarClock className="h-4 w-4 text-primary" />
+        <span>
+          אספקה צפויה:{' '}
+          <span className="font-semibold">{formatDeliveryDate(d.expectedDeliveryAt)}</span>
+        </span>
+      </p>
+      {d.missedCutoff && (
+        <p className="mt-2 text-xs text-warn">
+          הוקדם המועד האחרון להזמנה להיום — המשלוח הקרוב ביותר הוא{' '}
+          {formatDeliveryDate(d.expectedDeliveryAt)}.
+        </p>
+      )}
+      <p className="mt-1 text-xs text-subtle">התאריך נגזר מלוח ההזמנות של הספק. אשרו או ערכו ידנית בהמשך.</p>
+    </div>
+  );
+}
+
 export default function NewOrderPage() {
   const [step, setStep] = useState<Step>('SUPPLIER');
   const [supplierId, setSupplierId] = useState('');
@@ -48,6 +85,13 @@ export default function NewOrderPage() {
   const catalog = trpc.catalog.items.useQuery(
     { supplierId, search: search.trim() || undefined, limit: 20 },
     { enabled: step === 'BUILD' && !!supplierId },
+  );
+
+  // Cadence: derive the delivery date for the manager to CONFIRM (never silent).
+  // null = supplier has no order schedule → no derived date is shown.
+  const delivery = trpc.orders.previewDelivery.useQuery(
+    { supplierId },
+    { enabled: !!supplierId, retry: false },
   );
 
   const total = useMemo(() => lines.reduce((sum, l) => sum + lineTotal(l), 0), [lines]);
@@ -118,6 +162,7 @@ export default function NewOrderPage() {
               ))}
             </select>
           </Field>
+          {supplierId && delivery.data && <DeliveryPanel d={delivery.data} />}
           <div className="mt-4">
             <Button variant="primary" size="sm" disabled={!supplierId} onClick={() => setStep('BUILD')}>
               המשך <ArrowRight className="h-4 w-4" />
@@ -247,6 +292,8 @@ export default function NewOrderPage() {
             <span>סה״כ משוער</span>
             <span className="font-mono tabular-nums">{formatIls(total)}</span>
           </div>
+
+          {delivery.data && <DeliveryPanel d={delivery.data} />}
 
           {guardrail.isFetching && (
             <p className="mt-3 flex items-center gap-2 text-xs text-subtle"><Spinner className="h-3.5 w-3.5" /> בודק מול בסיס המחירים…</p>

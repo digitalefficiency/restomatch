@@ -275,6 +275,15 @@ export const suppliers = pgTable(
     deliverySchedule: jsonb('delivery_schedule')
       .$type<DeliverySchedule | null>()
       .default(sql`NULL`),
+    /**
+     * ACTIONABLE order cadence (Wave 2): order weekdays + cutoff + fulfillment
+     * mapping, used to DERIVE expectedDeliveryAt on new POs. Separate from the
+     * info-only deliverySchedule above. Shape mirrors `OrderSchedule` in
+     * @restomatch/types (validated there at the API edge).
+     */
+    orderSchedule: jsonb('order_schedule')
+      .$type<OrderSchedule | null>()
+      .default(sql`NULL`),
     /** Soft-deactivate: a supplier with POs can't be hard-deleted (po.supplierId is onDelete:restrict). */
     active: boolean('active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -289,6 +298,28 @@ export const suppliers = pgTable(
 export type DeliverySchedule = Partial<
   Record<'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat', string[]>
 >;
+
+/**
+ * ACTIONABLE order cadence persisted on suppliers.order_schedule. Structural
+ * mirror of the canonical Zod `OrderSchedule` in @restomatch/types — kept local
+ * (like DeliverySchedule) so @restomatch/db stays dependency-free of types.
+ * Weekday convention: 0 = Sunday … 6 = Saturday.
+ */
+export type OrderFulfillment =
+  | { kind: 'lead_days'; leadDays: number }
+  | { kind: 'next_named_day'; deliversOnDay: number };
+
+export interface OrderWindow {
+  orderDays: number[];
+  /** 'HH:MM' restaurant-local cutoff. */
+  cutoff: string;
+  fulfillment: OrderFulfillment;
+}
+
+export interface OrderSchedule {
+  windows: OrderWindow[];
+  tz?: string;
+}
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Catalog

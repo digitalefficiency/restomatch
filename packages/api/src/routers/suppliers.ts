@@ -1,6 +1,7 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { and, asc, eq, suppliers, type Supplier } from '@restomatch/db';
+import { OrderSchedule } from '@restomatch/types';
 import { managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
 
@@ -38,6 +39,8 @@ const SupplierCreate = z
     contactWhatsapp: z.string().trim().max(32).optional(),
     paymentTerms: z.string().trim().max(500).optional(),
     deliverySchedule: DeliveryScheduleSchema.optional(),
+    /** ACTIONABLE order cadence (drives expectedDeliveryAt). Info-only deliverySchedule stays separate. */
+    orderSchedule: OrderSchedule.optional(),
   })
   .strict();
 
@@ -50,6 +53,7 @@ const SupplierPatch = z
     contactWhatsapp: z.string().trim().max(32).nullish(),
     paymentTerms: z.string().trim().max(500).nullish(),
     deliverySchedule: DeliveryScheduleSchema.nullish(),
+    orderSchedule: OrderSchedule.nullish(),
   })
   .strict();
 
@@ -94,6 +98,7 @@ export const suppliersRouter = router({
           contactWhatsapp: input.contactWhatsapp ?? null,
           paymentTerms: input.paymentTerms ?? null,
           deliverySchedule: input.deliverySchedule ?? null,
+          orderSchedule: input.orderSchedule ?? null,
         })
         .returning();
       return mustExist(row, 'supplier');
@@ -111,6 +116,7 @@ export const suppliersRouter = router({
       if (patch.contactWhatsapp !== undefined) set.contactWhatsapp = patch.contactWhatsapp;
       if (patch.paymentTerms !== undefined) set.paymentTerms = patch.paymentTerms;
       if (patch.deliverySchedule !== undefined) set.deliverySchedule = patch.deliverySchedule;
+      if (patch.orderSchedule !== undefined) set.orderSchedule = patch.orderSchedule;
       const [row] = await ctx.db
         .update(suppliers)
         .set(set)

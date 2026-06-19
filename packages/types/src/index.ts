@@ -98,6 +98,56 @@ export interface OcrInvoiceJob {
   mockProviders?: { docAi: InvoiceOcrResult; claude: InvoiceOcrResult };
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * Order cadence (Wave 2)
+ *
+ * The ACTIONABLE order schedule a supplier publishes: which weekdays the
+ * restaurant can place an order, the daily cutoff time, and how a placed order
+ * maps to a delivery date. This is SEPARATE from the info-only deliverySchedule
+ * (free-text time slots) — orderSchedule drives expectedDeliveryAt derivation.
+ *
+ * Weekday convention matches JS Date#getDay / Intl: 0 = Sunday … 6 = Saturday.
+ * cutoff + all day math anchor to the restaurant's timezone, never server-local.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** A weekday index, Sunday = 0 … Saturday = 6 (JS Date#getDay convention). */
+export const Weekday = z.number().int().min(0).max(6);
+export type Weekday = z.infer<typeof Weekday>;
+
+/** 24-hour 'HH:MM' wall-clock time, e.g. '14:30'. */
+export const CutoffTime = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, {
+  message: 'cutoff must be HH:MM (00:00–23:59)',
+});
+
+/**
+ * How a placed order maps to a delivery date:
+ *  - lead_days: deliver `leadDays` calendar days after the order day
+ *    (0 = same day, 1 = next day, …).
+ *  - next_named_day: deliver on the next occurrence of `deliversOnDay`
+ *    (a fixed weekday) at or after the order day.
+ */
+export const OrderFulfillment = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('lead_days'), leadDays: z.number().int().min(0).max(30) }),
+  z.object({ kind: z.literal('next_named_day'), deliversOnDay: Weekday }),
+]);
+export type OrderFulfillment = z.infer<typeof OrderFulfillment>;
+
+export const OrderWindow = z.object({
+  /** Weekdays an order can be placed in this window (0 = Sun … 6 = Sat). */
+  orderDays: z.array(Weekday).min(1).max(7),
+  /** Daily cutoff time (restaurant-local wall clock) for this window. */
+  cutoff: CutoffTime,
+  fulfillment: OrderFulfillment,
+});
+export type OrderWindow = z.infer<typeof OrderWindow>;
+
+export const OrderSchedule = z.object({
+  windows: z.array(OrderWindow).min(1).max(14),
+  /** Optional IANA tz override; callers default to the restaurant timezone. */
+  tz: z.string().min(1).max(64).optional(),
+});
+export type OrderSchedule = z.infer<typeof OrderSchedule>;
+
 export const Tolerances = z.object({
   pricePercent: z.number().nonnegative().default(0.02),
   priceAbsolute: z.number().nonnegative().default(5),
