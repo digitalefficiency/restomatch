@@ -10,12 +10,15 @@ import {
   grLines,
   gte,
   inArray,
+  invoiceLines,
   invoices,
   lte,
   poLines,
+  products,
   purchaseOrders,
   suppliers,
 } from '@restomatch/db';
+import { enqueueOcrInvoice } from '@restomatch/queue';
 import { assertGrOwned, assertSupplierOwned } from '../tenant';
 import { memberProcedure, receiverProcedure, router } from '../trpc';
 
@@ -135,6 +138,124 @@ export const receivingRouter = router({
         .orderBy(asc(poLines.id));
 
       return { ...po, lines };
+    }),
+
+  /**
+   * Goods receipt detail for the receiving screen: the goods_receipts row plus
+   * its gr_lines joined to po_lines so the UI has the grLineId (needed by
+   * markGrLine), the ordered qty/unit and the current received/rejected qty.
+   * Look up by grId, or fall back to the PO's receipt via poId. Tenant scope is
+   * enforced on goods_receipts.restaurantId exactly like getPo.
+   */
+  getReceipt: memberProcedure
+    .input(
+      z
+        .object({
+          grId: z.string().uuid().optional(),
+          poId: z.string().uuid().optional(),
+        })
+        .refine((v) => Boolean(v.grId) || Boolean(v.poId), {
+          message: 'grId or poId is required',
+        }),
+    )
+    .query(async ({ ctx, input }) => {
+      const [receipt] = await ctx.db
+        .select({
+          id: goodsReceipts.id,
+          poId: goodsReceipts.poId,
+          status: goodsReceipts.status,
+          receivedAt: goodsReceipts.receivedAt,
+          signatureUrl: goodsReceipts.signatureUrl,
+          notes: goodsReceipts.notes,
+        })
+        .from(goodsReceipts)
+        .where(
+          and(
+            eq(goodsReceipts.restaurantId, ctx.session.restaurantId),
+            input.grId
+              ? eq(goodsReceipts.id, input.grId)
+              : eq(goodsReceipts.poId, input.poId!),
+          ),
+        )
+        .limit(1);
+      if (!receipt) throw new TRPCError({ code: 'NOT_FOUND', message: 'Receipt not found' });
+
+      const lines = await ctx.db
+        .select({
+          grLineId: grLines.id,
+          poLineId: grLines.poLineId,
+          productId: grLines.productId,
+          productName: products.canonicalName,
+          rawDescription: poLines.rawDescription,
+          orderedQty: poLines.qtyOrdered,
+          unit: poLines.unit,
+          qtyReceived: grLines.qtyReceived,
+          qtyRejected: grLines.qtyRejected,
+          rejectReason: grLines.rejectReason,
+          conditionNotes: grLines.conditionNotes,
+          photos: grLines.photos,
+        })
+        .from(grLines)
+        .leftJoin(poLines, eq(poLines.id, grLines.poLineId))
+        .leftJoin(products, eq(products.id, grLines.productId))
+        .where(eq(grLines.grId, receipt.id))
+        .orderBy(asc(grLines.id));
+
+      return {
+        ...receipt,
+        lines: lines.map((l) => ({
+          ...l,
+          // Surface a human label even when no catalog product is linked.
+          productName: l.productName ?? l.rawDescription ?? null,
+        })),
+      };
+    }),
+
+  /**
+   * Invoice detail for the receiving / review screen: OCR status + confidence,
+   * invoice number, and parsed invoice lines. Tenant scoped on
+   * invoices.restaurantId.
+   */
+  getInvoice: memberProcedure
+    .input(z.object({ invoiceId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const [invoice] = await ctx.db
+        .select({
+          id: invoices.id,
+          status: invoices.status,
+          ocrConfidence: invoices.ocrConfidence,
+          invoiceNumber: invoices.invoiceNumber,
+          supplierId: invoices.supplierId,
+          rawImageUrl: invoices.rawImageUrl,
+          createdAt: invoices.createdAt,
+        })
+        .from(invoices)
+        .where(
+          and(
+            eq(invoices.id, input.invoiceId),
+            eq(invoices.restaurantId, ctx.session.restaurantId),
+          ),
+        )
+        .limit(1);
+      if (!invoice) throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
+
+      const lines = await ctx.db
+        .select({
+          id: invoiceLines.id,
+          productId: invoiceLines.productId,
+          rawDescription: invoiceLines.rawDescription,
+          qtyBilled: invoiceLines.qtyBilled,
+          unit: invoiceLines.unit,
+          unitPriceBilled: invoiceLines.unitPriceBilled,
+          lineTotal: invoiceLines.lineTotal,
+          vatRate: invoiceLines.vatRate,
+          ocrConfidenceLine: invoiceLines.ocrConfidenceLine,
+        })
+        .from(invoiceLines)
+        .where(eq(invoiceLines.invoiceId, invoice.id))
+        .orderBy(asc(invoiceLines.id));
+
+      return { ...invoice, lines };
     }),
 
   /**
@@ -319,6 +440,24 @@ export const receivingRouter = router({
         })
         .returning();
       if (!invoice) throw new Error('failed to register invoice');
+
+      // Server-authoritative enqueue of the OCR job. The queue producer no-ops
+      // (console.warn) when REDIS_URL is unset, so wrap defensively to ensure a
+      // transient enqueue failure never rolls back an already-persisted invoice.
+      try {
+        await enqueueOcrInvoice({
+          restaurantId: ctx.session.restaurantId,
+          invoiceId: invoice.id,
+          supplierId: input.supplierId,
+          imageUrl: input.imageUrl,
+        });
+      } catch (err) {
+        console.error(
+          `[receiving.registerInvoice] failed to enqueue ocr-invoice for invoice=${invoice.id}`,
+          err,
+        );
+      }
+
       return { invoiceId: invoice.id };
     }),
 

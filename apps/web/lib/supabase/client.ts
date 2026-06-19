@@ -55,7 +55,21 @@ export class SupabaseNotConfiguredError extends Error {
  */
 export async function uploadInvoiceScan(
   file: File,
-  opts: { supplierName?: string } = {},
+  opts: {
+    supplierName?: string;
+    /**
+     * Active restaurant id (authenticated dashboard flow). When present it is
+     * stamped onto the invoice_scans mapping row so resolveUploadedScan — which
+     * filters on restaurant_id — can find the document. Anonymous showcase
+     * uploads omit it and stay on the walk-ins/ prefix (RLS-constrained).
+     */
+    restaurantId?: string;
+    /**
+     * Storage prefix inside the bucket. Defaults to 'walk-ins'. Authenticated
+     * uploads pass e.g. the restaurant id so files are namespaced per tenant.
+     */
+    storagePrefix?: string;
+  } = {},
 ): Promise<UploadedScan> {
   const supabase = getClient();
   if (!supabase) throw new SupabaseNotConfiguredError();
@@ -63,7 +77,8 @@ export async function uploadInvoiceScan(
   // Generate a stable id for the rest of the wizard / scans route.
   const invoiceId = `walk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const ext = guessExtension(file);
-  const storagePath = `walk-ins/${invoiceId}.${ext}`;
+  const prefix = (opts.storagePrefix ?? 'walk-ins').replace(/^\/+|\/+$/g, '');
+  const storagePath = `${prefix}/${invoiceId}.${ext}`;
 
   // 1. Upload bytes to the bucket
   const { error: uploadError } = await supabase.storage
@@ -91,6 +106,9 @@ export async function uploadInvoiceScan(
     storage_path: storagePath,
     mime_type: file.type || guessMime(ext),
     supplier_name: opts.supplierName ?? null,
+    // Stamp the active restaurant so resolveUploadedScan (filters on
+    // restaurant_id) can find the row for authenticated dashboard users.
+    restaurant_id: opts.restaurantId ?? null,
     page_count: null,
   });
   if (insertError) {

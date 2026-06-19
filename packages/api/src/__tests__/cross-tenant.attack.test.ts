@@ -1,5 +1,18 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createDb, discrepancies, eq, goodsReceipts, grLines, invoices, restaurants } from '@restomatch/db';
+import {
+  catalogImports,
+  createDb,
+  discrepancies,
+  eq,
+  goodsReceipts,
+  grLines,
+  invoices,
+  priceBaselines,
+  purchaseOrders,
+  restaurants,
+  supplierCatalogItems,
+  suppliers,
+} from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
@@ -67,6 +80,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'owner.suppliers': 'isolation',
   'receiving.todayExpectations': 'isolation',
   'receiving.getPo': 'attack',
+  'receiving.getReceipt': 'attack',
+  'receiving.getInvoice': 'attack',
   'receiving.startReceipt': 'attack',
   'receiving.markGrLine': 'attack',
   'receiving.submitReceipt': 'attack',
@@ -82,6 +97,31 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'settings.get': 'isolation',
   'settings.update': 'isolation',
   'search.global': 'isolation',
+  // Phase-2 supplier-centric surface (suppliers / catalog / orders / on-demand match).
+  // Every procedure that takes a client-supplied supplierId / productId / poId /
+  // invoiceId / itemId MUST reject a foreign id before it reads or writes; every
+  // list/aggregate must exclude the other tenant's rows and its ₪ totals.
+  'suppliers.list': 'isolation',
+  'suppliers.get': 'attack',
+  'suppliers.create': 'isolation',
+  'suppliers.update': 'attack',
+  'suppliers.setActive': 'attack',
+  'catalog.items': 'isolation',
+  'catalog.productDetail': 'attack',
+  'catalog.parsePreview': 'attack',
+  'catalog.commitImport': 'attack',
+  'catalog.setItemActive': 'attack',
+  'orders.list': 'isolation',
+  'orders.get': 'attack',
+  'orders.createDraft': 'attack',
+  'orders.cancelOrder': 'attack',
+  'orders.placeOrder': 'attack',
+  // guardrail does NOT call assertSupplierOwned; isolation is via the
+  // restaurant-scoped baseline query. Proven by a B-only baseline that A's
+  // call must not read. (Defense-in-depth: add assertSupplierOwned — flagged
+  // to the orders-router owner.)
+  'orders.guardrail': 'isolation',
+  'match.runForInvoice': 'attack',
   'plans.list':
     'public marketing catalog (publicProcedure); reads the global plans table only, no tenant-scoped rows — nothing to isolate',
   'leads.create':
@@ -341,6 +381,259 @@ describe('list/aggregate isolation (A must not see B)', () => {
     const invoiceNumbers = invoiceHits.invoices.map((i) => i.invoiceNumber);
     expect(invoiceNumbers).toContain(A.invoiceNumber);
     expect(invoiceNumbers).not.toContain(B.invoiceNumber);
+  });
+});
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Phase-2 supplier-centric surface (the "supplier as the center" navigation).
+ *
+ * These procedures all take a client-supplied id (supplierId / productId / poId /
+ * itemId / invoiceId). The attack is: tenant A passes tenant B's id and must be
+ * rejected with NOT_FOUND before any read/write touches B's data, and every list
+ * must exclude B's rows. Catalog items are seeded inline (the base fixture does
+ * not seed supplier_catalog_items) using the owner connection (no RLS at the
+ * tRPC layer in this suite — the DB-role backstop lives in rls.attack.test.ts).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+let aCatalogItemId: string;
+let bCatalogItemId: string;
+
+beforeAll(async () => {
+  const [aItem] = await db
+    .insert(supplierCatalogItems)
+    .values({
+      restaurantId: A.restaurantId,
+      supplierId: A.supplierId,
+      productId: A.productId,
+      supplierNameRaw: 'עגבניה קטלוג A',
+      supplierSku: 'SKU-A',
+      listPrice: '8.5000',
+    })
+    .returning({ id: supplierCatalogItems.id });
+  const [bItem] = await db
+    .insert(supplierCatalogItems)
+    .values({
+      restaurantId: B.restaurantId,
+      supplierId: B.supplierId,
+      productId: B.productId,
+      supplierNameRaw: 'עגבניה קטלוג B',
+      supplierSku: 'SKU-B',
+      listPrice: '9.0000',
+    })
+    .returning({ id: supplierCatalogItems.id });
+  aCatalogItemId = aItem!.id;
+  bCatalogItemId = bItem!.id;
+
+  // A B-only baseline at the default 90-day window: if orders.guardrail leaked
+  // across tenants, A asking about B's product at a wildly high price (1000)
+  // would read this baseline and raise a 'high' warning. Isolation ⇒ 0 warnings.
+  await db.insert(priceBaselines).values({
+    restaurantId: B.restaurantId,
+    productId: B.productId,
+    supplierId: B.supplierId,
+    windowDays: 90,
+    p50: '8.0000',
+    p90: '9.0000',
+    sampleSize: 5,
+  });
+});
+
+describe('suppliers router: foreign id attacks + list isolation (A → B)', () => {
+  it('suppliers.get rejects a foreign supplierId', async () => {
+    await expect(callerFor(A).suppliers.get({ supplierId: B.supplierId })).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+  });
+
+  it('suppliers.update rejects a foreign supplierId and leaves B untouched', async () => {
+    await expect(
+      callerFor(A).suppliers.update({ supplierId: B.supplierId, patch: { name: 'HIJACKED' } }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [row] = await db
+      .select({ name: suppliers.name })
+      .from(suppliers)
+      .where(eq(suppliers.id, B.supplierId));
+    expect(row?.name).toBe(B.supplierName);
+  });
+
+  it('suppliers.setActive rejects a foreign supplierId and leaves B active', async () => {
+    await expect(
+      callerFor(A).suppliers.setActive({ supplierId: B.supplierId, active: false }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [row] = await db
+      .select({ active: suppliers.active })
+      .from(suppliers)
+      .where(eq(suppliers.id, B.supplierId));
+    expect(row?.active).toBe(true);
+  });
+
+  it('suppliers.list excludes B suppliers and suppliers.create lands only in A', async () => {
+    const before = await callerFor(A).suppliers.list();
+    expect(before.map((s) => s.id)).not.toContain(B.supplierId);
+    expect(before.every((s) => s.restaurantId === A.restaurantId)).toBe(true);
+
+    const created = await callerFor(A).suppliers.create({ name: 'ספק חדש A' });
+    expect(created.restaurantId).toBe(A.restaurantId);
+    // The new row must NOT be visible to B.
+    const bList = await callerFor(B).suppliers.list();
+    expect(bList.map((s) => s.id)).not.toContain(created.id);
+    // cleanup so it does not leak into later list-count assertions
+    await db.delete(suppliers).where(eq(suppliers.id, created.id));
+  });
+});
+
+describe('catalog router: foreign id attacks + isolation (A → B)', () => {
+  it('catalog.productDetail returns null for a foreign productId (no B prices leak)', async () => {
+    const detail = await callerFor(A).catalog.productDetail({ productId: B.productId });
+    expect(detail).toBeNull();
+  });
+
+  it('catalog.setItemActive cannot toggle a foreign item (0 rows, B unchanged)', async () => {
+    await expect(
+      callerFor(A).catalog.setItemActive({ itemId: bCatalogItemId, active: false }),
+    ).rejects.toThrow(/not found/i);
+    const [row] = await db
+      .select({ active: supplierCatalogItems.active })
+      .from(supplierCatalogItems)
+      .where(eq(supplierCatalogItems.id, bCatalogItemId));
+    expect(row?.active).toBe(true);
+  });
+
+  it('catalog.parsePreview rejects a foreign supplierId before parsing', async () => {
+    await expect(
+      callerFor(A).catalog.parsePreview({
+        supplierId: B.supplierId,
+        file: { filename: 'x.csv', text: 'name,price\nx,1' },
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('catalog.commitImport rejects a foreign supplierId and writes no import row for B', async () => {
+    const beforeB = await db
+      .select({ id: catalogImports.id })
+      .from(catalogImports)
+      .where(eq(catalogImports.restaurantId, B.restaurantId));
+    await expect(
+      callerFor(A).catalog.commitImport({
+        supplierId: B.supplierId,
+        file: { filename: 'x.csv', text: 'name,price\nx,1' },
+        mapping: { name: 'name', price: 'price' },
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const afterB = await db
+      .select({ id: catalogImports.id })
+      .from(catalogImports)
+      .where(eq(catalogImports.restaurantId, B.restaurantId));
+    expect(afterB).toHaveLength(beforeB.length);
+  });
+
+  it('catalog.items excludes B catalog rows and B prices, even with B supplierId filter', async () => {
+    const all = await callerFor(A).catalog.items({});
+    expect(all.map((i) => i.id)).toContain(aCatalogItemId);
+    expect(all.map((i) => i.id)).not.toContain(bCatalogItemId);
+    expect(all.some((i) => i.supplierName === B.supplierName)).toBe(false);
+
+    // Passing B's supplierId must not punch through the restaurant scope.
+    const filteredByB = await callerFor(A).catalog.items({ supplierId: B.supplierId });
+    expect(filteredByB.map((i) => i.id)).not.toContain(bCatalogItemId);
+  });
+});
+
+describe('orders router: foreign id attacks + list isolation (A → B)', () => {
+  it('orders.get rejects a foreign poId', async () => {
+    await expect(callerFor(A).orders.get({ poId: B.poId })).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+  });
+
+  it('orders.cancelOrder rejects a foreign poId and leaves B status untouched', async () => {
+    const [beforeRow] = await db
+      .select({ status: purchaseOrders.status })
+      .from(purchaseOrders)
+      .where(eq(purchaseOrders.id, B.poId));
+    await expect(callerFor(A).orders.cancelOrder({ poId: B.poId })).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+    const [afterRow] = await db
+      .select({ status: purchaseOrders.status })
+      .from(purchaseOrders)
+      .where(eq(purchaseOrders.id, B.poId));
+    expect(afterRow?.status).toBe(beforeRow?.status);
+  });
+
+  it('orders.placeOrder rejects a foreign poId and never enqueues / mutates B', async () => {
+    const [beforeRow] = await db
+      .select({ status: purchaseOrders.status, sentAt: purchaseOrders.sentAt })
+      .from(purchaseOrders)
+      .where(eq(purchaseOrders.id, B.poId));
+    await expect(
+      callerFor(A).orders.placeOrder({ poId: B.poId, channel: 'none' }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [afterRow] = await db
+      .select({ status: purchaseOrders.status, sentAt: purchaseOrders.sentAt })
+      .from(purchaseOrders)
+      .where(eq(purchaseOrders.id, B.poId));
+    expect(afterRow?.status).toBe(beforeRow?.status);
+    expect(afterRow?.sentAt ?? null).toEqual(beforeRow?.sentAt ?? null);
+  });
+
+  it('orders.createDraft rejects a foreign supplierId and inserts no PO for A', async () => {
+    const before = await db
+      .select({ id: purchaseOrders.id })
+      .from(purchaseOrders)
+      .where(eq(purchaseOrders.restaurantId, A.restaurantId));
+    await expect(
+      callerFor(A).orders.createDraft({
+        supplierId: B.supplierId,
+        lines: [{ rawDescription: 'x', qty: 1, unit: 'kg' }],
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const after = await db
+      .select({ id: purchaseOrders.id })
+      .from(purchaseOrders)
+      .where(eq(purchaseOrders.restaurantId, A.restaurantId));
+    expect(after).toHaveLength(before.length);
+  });
+
+  it('orders.guardrail rejects a foreign supplierId (advanced_analytics, implicit trial)', async () => {
+    // assertSupplierOwned is NOT called in guardrail; isolation is via the
+    // restaurant-scoped baseline query. A foreign supplierId must therefore
+    // produce zero warnings rather than reading B's baselines.
+    const out = await callerFor(A).orders.guardrail({
+      supplierId: B.supplierId,
+      lines: [{ productId: B.productId, unitPriceExpected: 1000 }],
+    });
+    expect(out.warnings).toHaveLength(0);
+  });
+
+  it('orders.list excludes B purchase orders even with a B supplierId filter', async () => {
+    const all = await callerFor(A).orders.list();
+    expect(all.map((o) => o.id)).not.toContain(B.poId);
+    const filteredByB = await callerFor(A).orders.list({ supplierId: B.supplierId });
+    expect(filteredByB.map((o) => o.id)).not.toContain(B.poId);
+  });
+});
+
+describe('match router + receiving detail reads: foreign id attacks (A → B)', () => {
+  it('match.runForInvoice rejects a foreign invoiceId and creates no run for A', async () => {
+    await expect(
+      callerFor(A).match.runForInvoice({ invoiceId: B.invoiceId }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('receiving.getReceipt rejects a foreign grId / poId', async () => {
+    await expect(callerFor(A).receiving.getReceipt({ grId: B.grId })).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+    await expect(callerFor(A).receiving.getReceipt({ poId: B.poId })).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+  });
+
+  it('receiving.getInvoice rejects a foreign invoiceId', async () => {
+    await expect(
+      callerFor(A).receiving.getInvoice({ invoiceId: B.invoiceId }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 });
 

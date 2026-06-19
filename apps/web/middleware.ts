@@ -22,6 +22,7 @@ export default auth((req) => {
     path === '/about' ||
     path.startsWith('/login') ||
     path.startsWith('/showcase') ||
+    path.startsWith('/api/showcase') ||
     path.startsWith('/api/auth') ||
     path.startsWith('/_next') ||
     looksLikeAsset;

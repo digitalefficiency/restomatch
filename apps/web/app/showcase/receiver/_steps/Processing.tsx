@@ -4,12 +4,82 @@ import { useGSAP } from '@gsap/react';
 import { gsap } from 'gsap';
 import { Check, FileScan, Loader2, Package, Scale } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { mockReconcile, type ReconciliationResult } from '../_mock';
+import {
+  mockReconcile,
+  type ContactChangeAlert,
+  type ReconciliationLine,
+  type ReconciliationResult,
+} from '../_mock';
 import { StepHeader } from './SupplierSelect';
 
 interface Props {
   supplierId: string;
+  /** Public URL of the uploaded invoice. When present, runs real Claude Vision OCR. */
+  imageUrl?: string;
   onComplete: (result: ReconciliationResult) => void;
+}
+
+interface OcrLine {
+  sku?: string;
+  rawDescription: string;
+  qty: number;
+  unit: string;
+  unitPrice: number;
+  lineTotal: number;
+  vatRate?: number;
+}
+interface OcrResult {
+  invoiceNumber?: string;
+  invoiceDate?: string;
+  supplier?: { businessId?: string };
+  lines: OcrLine[];
+  totals: { subtotal?: number; vat?: number; total?: number };
+  confidence?: number;
+}
+
+/** Map the real OCR extraction into the wizard's reconciliation shape. */
+function ocrToReconciliation(
+  ocr: OcrResult,
+  supplierId: string,
+  contactAlerts?: ContactChangeAlert[],
+): ReconciliationResult {
+  const lines: ReconciliationLine[] = ocr.lines.map((l, i) => ({
+    invoiceLineIndex: i,
+    poLineId: null,
+    productId: null,
+    sku: l.sku ?? null,
+    productName: l.rawDescription,
+    poQty: null,
+    poUnit: null,
+    invoiceQty: l.qty,
+    invoiceUnit: l.unit,
+    poUnitPrice: null,
+    invoiceUnitPrice: l.unitPrice,
+    status: 'unordered',
+    deltaIls: 0,
+  }));
+  return {
+    invoiceMeta: {
+      invoiceNumber: ocr.invoiceNumber ?? '—',
+      invoiceDate: ocr.invoiceDate ?? '',
+      totalInclVat: ocr.totals.total ?? 0,
+      ocrConfidence: ocr.confidence ?? 0.9,
+    },
+    matchedSupplierId: supplierId,
+    matchedPoIds: [],
+    contactAlerts,
+    supplierBusinessId: ocr.supplier?.businessId,
+    lines,
+    summary: {
+      matchedCount: 0,
+      qtyDiffCount: 0,
+      priceDiffCount: 0,
+      unorderedCount: lines.length,
+      missingCount: 0,
+      overallConfidence: ocr.confidence ?? 0.9,
+      headlineDelta: 0,
+    },
+  };
 }
 
 const STEPS = [
@@ -18,9 +88,10 @@ const STEPS = [
   { id: 'compare', label: 'משווה להזמנה', icon: Scale, duration: 800 },
 ] as const;
 
-export function Processing({ supplierId, onComplete }: Props) {
+export function Processing({ supplierId, imageUrl, onComplete }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [currentStep, setCurrentStep] = useState(0);
+  const [ocrError, setOcrError] = useState<string | null>(null);
 
   useGSAP(
     () => {
@@ -35,30 +106,68 @@ export function Processing({ supplierId, onComplete }: Props) {
     { scope: ref },
   );
 
+  const startedRef = useRef(false);
   useEffect(() => {
+    if (startedRef.current) return; // run once per mount (parent re-renders new onComplete)
+    startedRef.current = true;
     let cancelled = false;
-    let accumulated = 0;
     const timers: ReturnType<typeof setTimeout>[] = [];
 
+    // Drive the visual step indicator.
+    let accumulated = 0;
     for (let i = 0; i < STEPS.length; i += 1) {
       accumulated += STEPS[i]!.duration;
-      const timer = setTimeout(() => {
-        if (cancelled) return;
-        setCurrentStep(i + 1);
-        if (i === STEPS.length - 1) {
-          setTimeout(() => {
-            if (!cancelled) onComplete(mockReconcile(supplierId));
-          }, 400);
+      timers.push(
+        setTimeout(() => {
+          if (!cancelled) setCurrentStep((s) => Math.max(s, i + 1));
+        }, accumulated),
+      );
+    }
+
+    if (imageUrl) {
+      // Real OCR — Claude Vision reads the uploaded invoice (items/qty/prices).
+      void (async () => {
+        try {
+          const res = await fetch('/api/showcase/ocr', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ url: imageUrl }),
+          });
+          const data = (await res.json()) as {
+            ok?: boolean;
+            result?: OcrResult;
+            contactAlerts?: ContactChangeAlert[];
+            error?: string;
+          };
+          if (cancelled) return;
+          setCurrentStep(STEPS.length);
+          if (data.ok && data.result && data.result.lines.length > 0) {
+            onComplete(ocrToReconciliation(data.result, supplierId, data.contactAlerts));
+          } else {
+            setOcrError(data.error ?? 'לא זוהו פריטים בחשבונית');
+            onComplete(mockReconcile(supplierId));
+          }
+        } catch (err) {
+          if (cancelled) return;
+          setOcrError(err instanceof Error ? err.message : String(err));
+          onComplete(mockReconcile(supplierId));
         }
-      }, accumulated);
-      timers.push(timer);
+      })();
+    } else {
+      // No uploaded file (demo image) — keep the mock flow.
+      timers.push(
+        setTimeout(() => {
+          if (!cancelled) onComplete(mockReconcile(supplierId));
+        }, accumulated + 400),
+      );
     }
 
     return () => {
       cancelled = true;
       timers.forEach(clearTimeout);
     };
-  }, [supplierId, onComplete]);
+  }, [supplierId, imageUrl, onComplete]);
+  void ocrError;
 
   return (
     <div ref={ref} dir="rtl" className="max-w-md mx-auto py-6">

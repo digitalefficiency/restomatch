@@ -47,6 +47,7 @@ declare t text;
 begin
   foreach t in array array[
     'memberships','suppliers','products',
+    'supplier_catalog_items','catalog_imports',
     'purchase_orders','goods_receipts','invoices','invoice_scans',
     'match_runs','discrepancies','activity_events','price_history',
     'price_baselines','approval_rules','audit_log','procurement_connections',

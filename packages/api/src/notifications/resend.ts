@@ -11,6 +11,7 @@
  *   );
  */
 
+import { EmailNotifier } from './email';
 import type { NotificationPayload } from './types';
 
 export interface ResendConfig {
@@ -60,4 +61,18 @@ export function makeResendDispatcher(
     }
     return { externalId: result.data?.id };
   };
+}
+
+/**
+ * Production email notifier backed by Resend. Thin subclass of EmailNotifier
+ * wired with the Resend dispatcher — writes to the outbox, sends via Resend,
+ * and marks the row sent on success (failure leaves it for worker retry).
+ *
+ * `send()` is fully implemented via the inherited EmailNotifier.send + the
+ * Resend dispatcher; no further work needed to enable it.
+ */
+export class ResendEmailNotifier extends EmailNotifier {
+  constructor(config: ResendConfig) {
+    super(makeResendDispatcher(config));
+  }
 }

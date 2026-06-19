@@ -8,6 +8,7 @@ import {
   invoices,
   poLines,
   purchaseOrders,
+  supplierCatalogItems,
   suppliers,
   type Database,
 } from '@restomatch/db';
@@ -105,6 +106,24 @@ export async function assertSupplierOwned(
     .where(and(eq(suppliers.id, supplierId), eq(suppliers.restaurantId, restaurantId)))
     .limit(1);
   if (!row) throw notFound('supplier');
+}
+
+export async function assertCatalogItemOwned(
+  db: Database,
+  catalogItemId: string,
+  restaurantId: string,
+): Promise<void> {
+  const [row] = await db
+    .select({ id: supplierCatalogItems.id })
+    .from(supplierCatalogItems)
+    .where(
+      and(
+        eq(supplierCatalogItems.id, catalogItemId),
+        eq(supplierCatalogItems.restaurantId, restaurantId),
+      ),
+    )
+    .limit(1);
+  if (!row) throw notFound('catalog item');
 }
 
 export async function assertDiscrepancyOwned(

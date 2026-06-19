@@ -18,6 +18,7 @@
     "@restomatch/observability": "workspace:*",
     "@restomatch/ocr": "workspace:*",
     "@restomatch/procurement": "workspace:*",
+    "@restomatch/queue": "workspace:*",
     "@restomatch/types": "workspace:*",
     "bullmq": "^5.34.5",
     "ioredis": "^5.4.2"

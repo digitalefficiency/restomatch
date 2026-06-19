@@ -25,6 +25,8 @@ export interface ReconciliationLine {
   invoiceLineIndex: number | null;
   poLineId: string | null;
   productId: string | null;
+  /** Supplier catalog number (מק״ט) from the invoice, when extracted. */
+  sku?: string | null;
   productName: string;
   poQty: number | null;
   poUnit: string | null;
@@ -36,6 +38,15 @@ export interface ReconciliationLine {
   deltaIls: number;
 }
 
+export interface ContactChangeAlert {
+  role: string;
+  name: string | null;
+  oldPhone: string;
+  newPhone: string;
+  /** new primary first, then kept-secondary numbers */
+  allNumbers: string[];
+}
+
 export interface ReconciliationResult {
   invoiceMeta: {
     invoiceNumber: string;
@@ -43,6 +54,9 @@ export interface ReconciliationResult {
     totalInclVat: number;
     ocrConfidence: number;
   };
+  /** Supplier-contact change alerts (e.g. agent phone changed since last invoice). */
+  contactAlerts?: ContactChangeAlert[];
+  supplierBusinessId?: string;
   matchedSupplierId: string;
   matchedPoIds: string[];
   lines: ReconciliationLine[];

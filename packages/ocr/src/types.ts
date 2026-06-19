@@ -21,7 +21,7 @@ export interface ProductCandidate {
   productId: string;
   canonicalName: string;
   confidence: number;
-  matchedBy: 'alias' | 'barcode' | 'embedding' | 'fuzzy';
+  matchedBy: 'sku' | 'alias' | 'barcode' | 'embedding' | 'fuzzy';
 }
 
 export interface ResolvedInvoiceLine extends InvoiceOcrLine {

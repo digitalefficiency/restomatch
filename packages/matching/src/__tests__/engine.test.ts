@@ -329,6 +329,23 @@ describe('runMatch — aggregate checks', () => {
     );
     expect(ofType(out.discrepancies, 'VAT_MISMATCH')).toEqual([]);
   });
+
+  it('per-supplier 18% VAT (Zestt) suppresses the false VAT_MISMATCH the 17% default would raise', () => {
+    // Real numbers from order_7158745.pdf: ₪5054 ex-VAT, ₪909.72 VAT (18%), ₪5963.72 incl.
+    const po = poLine({ id: 'po-z', qtyOrdered: 1, unitPriceExpected: 5054 });
+    const scenario = {
+      poLines: [po],
+      grLines: [grLine({ poLineId: po.id, qtyReceived: 1 })],
+      invoiceLines: [invoiceLine({ qtyBilled: 1, unitPriceBilled: 5054, lineTotal: 5054 })],
+      invoice: invoiceHeader({ totalExclVat: 5054, vatAmount: 909.72, totalInclVat: 5963.72 }),
+    };
+    // 5054 × 0.18 = 909.72 → no mismatch once the supplier's real rate is threaded.
+    const at18 = runMatch(input({ ...scenario, vatRate: 0.18 }));
+    expect(ofType(at18.discrepancies, 'VAT_MISMATCH')).toEqual([]);
+    // 5054 × 0.17 = 859.18 ≠ 909.72 → the default would fire a phantom mismatch.
+    const at17 = runMatch(input({ ...scenario, vatRate: 0.17 }));
+    expect(ofType(at17.discrepancies, 'VAT_MISMATCH')).toHaveLength(1);
+  });
 });
 
 describe('runMatch — duplicate detection', () => {

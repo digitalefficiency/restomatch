@@ -61,6 +61,7 @@ export default function ReceiverWizard() {
       {state.step === 'PROCESSING' && state.selectedSupplier ? (
         <Processing
           supplierId={state.selectedSupplier.supplierId}
+          imageUrl={state.image?.publicUrl}
           onComplete={(result) => dispatch({ type: 'PROCESSING_COMPLETE', result })}
         />
       ) : null}

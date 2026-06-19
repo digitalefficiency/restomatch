@@ -10,6 +10,10 @@ import { plansRouter } from './routers/plans';
 import { receivingRouter } from './routers/receiving';
 import { searchRouter } from './routers/search';
 import { settingsRouter } from './routers/settings';
+import { suppliersRouter } from './routers/suppliers';
+import { catalogRouter } from './routers/catalog';
+import { ordersRouter } from './routers/orders';
+import { matchRouter } from './routers/match';
 
 export const appRouter = router({
   owner: ownerRouter,
@@ -23,6 +27,10 @@ export const appRouter = router({
   plans: plansRouter,
   leads: leadsRouter,
   search: searchRouter,
+  suppliers: suppliersRouter,
+  catalog: catalogRouter,
+  orders: ordersRouter,
+  match: matchRouter,
 });
 
 export type AppRouter = typeof appRouter;
@@ -78,11 +86,38 @@ export {
   MockWhatsAppNotifier,
   MockPushNotifier,
   EmailNotifier,
+  WhatsAppCloudNotifier,
+  ResendEmailNotifier,
+  makeResendDispatcher,
+  createNotifiers,
+  createEmailNotifier,
+  createWhatsAppNotifier,
+  createPushNotifier,
+  isResendConfigured,
+  isWhatsAppCloudConfigured,
+  type Notifiers,
   type Notifier,
   type NotificationPayload,
   type NotificationChannel,
 } from './notifications';
 export { logActivity, type ActivityEventInput, type ActivityEventType } from './activity';
+export { buildMatchInputForInvoice, type BuiltMatchInput } from './match/buildMatchInput';
+export { persistMatchRun, type PersistMatchArgs, type PersistMatchResult } from './match/persist';
+export {
+  parseCatalogFile,
+  autoDetectMapping,
+  extractCatalogRows,
+  parseNumeric,
+  type ParsedTable,
+  type CatalogRow,
+  type CatalogFileInput,
+} from './catalog/parse';
+export {
+  commitCatalogRows,
+  type CommitArgs,
+  type CommitResult,
+  type AmbiguousRow,
+} from './catalog/commit';
 export {
   checkRateLimit,
   MemoryRateLimitStore,

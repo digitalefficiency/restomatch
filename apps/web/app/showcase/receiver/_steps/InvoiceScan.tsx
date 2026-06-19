@@ -26,6 +26,16 @@ interface Props {
   image: CapturedImage | null;
   onCapture: (image: CapturedImage) => void;
   onBack: () => void;
+  /**
+   * Extra options forwarded to uploadInvoiceScan. The authenticated dashboard
+   * flow passes the active restaurantId + a tenant storage prefix so the scan
+   * mapping row is resolvable; the anonymous showcase omits it (walk-ins/).
+   */
+  uploadOpts?: {
+    supplierName?: string;
+    restaurantId?: string;
+    storagePrefix?: string;
+  };
 }
 
 type UploadState =
@@ -34,7 +44,7 @@ type UploadState =
   | { phase: 'uploaded'; result: CapturedImage }
   | { phase: 'error'; message: string };
 
-export function InvoiceScan({ supplierName, image, onCapture, onBack }: Props) {
+export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadOpts }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const viewfinderRef = useRef<HTMLDivElement>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(image?.url ?? null);
@@ -73,7 +83,10 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack }: Props) {
     // Real upload to Supabase Storage in the background
     setUpload({ phase: 'uploading', pct: 30 });
     try {
-      const uploaded = await uploadInvoiceScan(file, { supplierName });
+      const uploaded = await uploadInvoiceScan(file, {
+        supplierName,
+        ...uploadOpts,
+      });
       setUpload({
         phase: 'uploaded',
         result: {

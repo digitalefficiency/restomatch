@@ -9,6 +9,13 @@
  * Until credentials are provisioned, the dispatcher runs but does nothing
  * (the mock notifiers already marked rows as `sent` at enqueue time).
  */
+import {
+  isResendConfigured,
+  isWhatsAppCloudConfigured,
+  makeResendDispatcher,
+  WhatsAppCloudNotifier,
+  type NotificationPayload,
+} from '@restomatch/api';
 import { and, createDb, eq, lte, notificationsOutbox } from '@restomatch/db';
 import { makeWorker } from '../queue';
 
@@ -88,21 +95,58 @@ export function startOutboxDispatchWorker() {
 }
 
 /**
- * Actual provider dispatch. Hard-coded to no-op (rows from the mock
- * notifiers are already `sent` at enqueue, so they never appear here).
- * When real credentials are wired, plug in:
- *   if (row.channel === 'whatsapp') return whatsappCloud.send(...)
- *   if (row.channel === 'push')     return expoPush.send(...)
- *   if (row.channel === 'email')    return resend.send(...)
+ * Actual provider dispatch for a queued outbox row.
+ *
+ * Provider selection is env-gated so this stays a no-op (and tests stay
+ * hermetic) until real credentials are provisioned:
+ *   whatsapp -> WhatsAppCloudNotifier  when WHATSAPP_PHONE_NUMBER_ID +
+ *               WHATSAPP_ACCESS_TOKEN are set
+ *   email    -> Resend                 when RESEND_API_KEY is set
+ *   push     -> no real provider wired yet (no-op)
+ *
+ * Rows enqueued by the mock notifiers are already `sent` at enqueue and never
+ * reach here. Rows left `queued` (real-provider path, or a failed first send)
+ * are delivered here without re-enqueueing. Throwing marks the row for retry.
  */
-async function dispatch(_row: {
+async function dispatch(row: {
+  restaurantId: string;
   channel: 'whatsapp' | 'push' | 'email';
   target: string;
   subject: string | null;
   body: string;
+  relatedEntityType: string | null;
+  relatedEntityId: string | null;
 }): Promise<void> {
-  // No-op until real provider clients are wired (M9.1).
-  // For now, any `queued` row that reaches here will succeed silently.
+  const env = process.env;
+
+  if (row.channel === 'whatsapp') {
+    if (!isWhatsAppCloudConfigured(env)) return; // no creds -> no-op
+    const notifier = new WhatsAppCloudNotifier({
+      phoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID!,
+      accessToken: env.WHATSAPP_ACCESS_TOKEN!,
+      apiBase: env.WHATSAPP_API_BASE,
+    });
+    await notifier.dispatch(row.target, row.body);
+    return;
+  }
+
+  if (row.channel === 'email') {
+    if (!isResendConfigured(env)) return; // no creds -> no-op
+    const send = makeResendDispatcher({ apiKey: env.RESEND_API_KEY!, from: env.RESEND_FROM });
+    const payload: NotificationPayload = {
+      restaurantId: row.restaurantId,
+      channel: 'email',
+      target: row.target,
+      subject: row.subject ?? undefined,
+      body: row.body,
+      relatedEntityType: row.relatedEntityType ?? undefined,
+      relatedEntityId: row.relatedEntityId ?? undefined,
+    };
+    await send(payload);
+    return;
+  }
+
+  // push: no real provider wired yet -> no-op
   return;
 }
 

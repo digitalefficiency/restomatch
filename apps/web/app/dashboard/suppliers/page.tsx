@@ -7,41 +7,21 @@ import {
   entitlementCauseOf,
 } from '@/lib/components';
 import { SuppliersList } from './list';
+import { SuppliersTabs } from './tabs';
+import { SupplierManager } from './manager';
 
 const PAGE = 9;
 
 export default async function SuppliersPage() {
   const caller = await createServerCaller();
 
-  let scorecards: Awaited<ReturnType<typeof caller.owner.suppliers>> = [];
+  // Scorecards are advanced_analytics-gated; render the upsell in that tab
+  // instead of failing the whole page (management stays available to everyone).
+  let scorecardsNode: React.ReactNode;
   try {
-    scorecards = await caller.owner.suppliers({ limit: PAGE });
-  } catch (err) {
-    const ent = entitlementCauseOf(err);
-    if (ent) {
-      return (
-        <div>
-          <SectionHeader
-            level={1}
-            title="דירוג ספקים"
-            subtitle="ספק שגדל ב-clean match% הוא ספק שלא מוסיף עלויות סמויות."
-          />
-          <EntitlementUpsell cause={ent} />
-        </div>
-      );
-    }
-    throw err;
-  }
-
-  return (
-    <div>
-      <SectionHeader
-        level={1}
-        title="דירוג ספקים"
-        subtitle="ספק שגדל ב-clean match% הוא ספק שלא מוסיף עלויות סמויות."
-      />
-
-      {scorecards.length === 0 ? (
+    const scorecards = await caller.owner.suppliers({ limit: PAGE });
+    scorecardsNode =
+      scorecards.length === 0 ? (
         <EmptyState
           icon={<Truck className="h-6 w-6" />}
           title="אין עדיין נתוני ספקים"
@@ -49,7 +29,21 @@ export default async function SuppliersPage() {
         />
       ) : (
         <SuppliersList initial={scorecards} />
-      )}
+      );
+  } catch (err) {
+    const ent = entitlementCauseOf(err);
+    if (ent) scorecardsNode = <EntitlementUpsell cause={ent} />;
+    else throw err;
+  }
+
+  return (
+    <div>
+      <SectionHeader
+        level={1}
+        title="ספקים"
+        subtitle="הקמת ספקים, פרטי קשר ותנאי תשלום — והדירוג שמראה מי מוסיף עלויות סמויות."
+      />
+      <SuppliersTabs management={<SupplierManager />} scorecards={scorecardsNode} />
     </div>
   );
 }

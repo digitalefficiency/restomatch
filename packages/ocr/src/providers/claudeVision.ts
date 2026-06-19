@@ -1,65 +1,207 @@
 /**
- * Anthropic Claude Vision provider — production scaffold.
+ * Anthropic Claude Vision provider — real implementation.
  *
- * VERIFY: pending real credentials. When ANTHROPIC_API_KEY is set:
- *   `npm i @anthropic-ai/sdk` before enabling.
+ * Sends the invoice image/PDF to Claude with a Hebrew-invoice extraction prompt
+ * and parses the JSON response into InvoiceOcrResult. Claude excels at Hebrew
+ * line-item extraction, including handwritten or noisy scans.
  *
- * Strategy: send the image as a content block to Claude with a JSON-output
- * system prompt that defines the InvoiceOcrResult schema. Claude excels at
- * Hebrew line-item extraction, especially handwritten or noisy scans.
+ * CREDENTIAL GATE (AGENTS.md): instantiating this class needs a real
+ * ANTHROPIC_API_KEY. Ingest must stay on StubOcrProvider until keys AND
+ * Supabase/RLS are live (Phase-6). The worker only constructs this when the key
+ * is present; otherwise it fails loudly rather than running an un-isolated real
+ * ingest.
+ *
+ * The SDK is imported LAZILY (dynamic import inside extract) and typed loosely,
+ * so this package typechecks and the unit tests run even when
+ * `@anthropic-ai/sdk` is not installed in the sandbox. The dependency is
+ * declared in package.json; install is owned by the foundation agent.
  */
 
-import type { InvoiceOcrResult } from '@restomatch/types';
+import { InvoiceOcrResult } from '@restomatch/types';
 import type { ImageSource, OcrProvider } from '../types';
 
 export interface ClaudeVisionConfig {
   apiKey: string;
-  /** Claude model id, e.g. "claude-sonnet-4-6" */
-  model: string;
+  /**
+   * Claude model id. Falls back to OCR_CLAUDE_MODEL env, then 'claude-opus-4-8'.
+   */
+  model?: string;
+  /** Output cap; invoices with many lines need headroom. Defaults to 16000. */
+  maxTokens?: number;
+  /**
+   * When true, fetch the image bytes ourselves and send base64 instead of
+   * handing Claude a URL. Required when the scan bucket is private (Anthropic
+   * cannot fetch a signed/expiring URL reliably). Auto-enabled for non-http
+   * sources. Defaults to false (let Anthropic fetch public URLs).
+   */
+  fetchBytes?: boolean;
 }
 
-const SYSTEM_PROMPT = `אתה מומחה לקריאת חשבוניות עבריות. הוצא JSON בפורמט הבא:
+const DEFAULT_MODEL = 'claude-opus-4-8';
+const DEFAULT_MAX_TOKENS = 16000;
+
+const SYSTEM_PROMPT = `אתה מומחה לקריאת חשבוניות עבריות. הוצא JSON בפורמט הבא בדיוק:
 {
-  "supplier": { "name": string, "businessId": string? },
+  "supplier": { "name": string, "businessId": string?, "phone": string?, "contacts": [{ "role": string, "name": string?, "phone": string? }]? },
   "invoiceNumber": string,
   "invoiceDate": "YYYY-MM-DD",
   "allocationNumber": string | null,
-  "lines": [{ "rawDescription": string, "qty": number, "unit": string, "unitPrice": number, "lineTotal": number, "vatRate": number? }],
-  "totals": { "subtotal": number, "vat": number, "total": number }
+  "lines": [{ "sku": string?, "rawDescription": string, "qty": number, "unit": string, "unitPrice": number, "lineTotal": number, "vatRate": number?, "confidence": number? }],
+  "totals": { "subtotal": number, "vat": number, "total": number },
+  "confidence": number?
 }
 
 חוקים:
 - אם שדה לא קריא — השאר ריק או null, אל תנחש.
 - "unit" בעברית כפי שמופיע (ק״ג / יח׳ / חבילה / וכו').
-- חוקי מע״מ ישראליים: בודק שה-VAT = subtotal * 0.17 בעברית.
+- מע״מ ישראלי: בדוק שה-vat ≈ subtotal × שיעור המע״מ; אם לא, העדף את הסכומים המודפסים על החשבונית.
+- "contacts" = כל איש קשר מודפס על החשבונית: מנהל אזור / סוכן / מנהל תיק לקוח / נהג. לכל אחד role (התפקיד בעברית), name וטלפון אם מופיע. "phone" ברמת supplier = טלפון ראשי של הספק אם מופיע.
+- "sku" = מספר הפריט/המק״ט אצל הספק (עמודת "מק״ט"), כפי שמודפס. אם אין — השמט.
 - אם יש "מספר הקצאה" — שמור אותו ב-allocationNumber.
+- כל הסכומים מספריים (לא מחרוזות), נקודה עשרונית.
+- "confidence" = רמת הביטחון שלך (0..1), ברמת החשבונית וגם פר-שורה. אם אינך בטוח — תן ערך נמוך.
 
-החזר JSON בלבד, ללא טקסט נוסף.`;
+החזר JSON בלבד, ללא טקסט נוסף, ללא code fences.`;
+
+// Loose alias for the lazily-imported SDK content block, so we don't depend on
+// the SDK's published types at compile time (the import is dynamic).
+type AnthropicContentBlock = Record<string, unknown>;
+
+interface ImagePayload {
+  /** http(s) URL string, or null when we resolved to bytes. */
+  url: string | null;
+  /** base64-encoded bytes, when url is null. */
+  data: string | null;
+  mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'application/pdf';
+}
+
+function detectImageMime(buf: Buffer): 'image/png' | 'image/jpeg' | 'image/webp' | 'application/pdf' {
+  if (buf.subarray(0, 5).toString('latin1') === '%PDF-') return 'application/pdf';
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png';
+  if (buf[0] === 0xff && buf[1] === 0xd8) return 'image/jpeg';
+  if (
+    buf.subarray(0, 4).toString('latin1') === 'RIFF' &&
+    buf.subarray(8, 12).toString('latin1') === 'WEBP'
+  )
+    return 'image/webp';
+  return 'image/jpeg';
+}
+
+function mediaTypeFromUrl(url: string): ImagePayload['mediaType'] {
+  if (/\.pdf(\?|#|$)/i.test(url)) return 'application/pdf';
+  if (/\.png(\?|#|$)/i.test(url)) return 'image/png';
+  if (/\.webp(\?|#|$)/i.test(url)) return 'image/webp';
+  return 'image/jpeg';
+}
+
+/** Resolve the ImageSource into either a URL or base64 bytes + media type. */
+async function resolveImage(image: ImageSource, fetchBytes: boolean): Promise<ImagePayload> {
+  // Buffer → always base64 (with magic-byte detection).
+  if (Buffer.isBuffer(image)) {
+    return {
+      url: null,
+      data: image.toString('base64'),
+      mediaType: detectImageMime(image),
+    };
+  }
+
+  const asUrl =
+    image instanceof URL
+      ? image.toString()
+      : typeof image === 'string' && /^https?:\/\//i.test(image)
+        ? image
+        : null;
+
+  if (asUrl) {
+    const mediaType = mediaTypeFromUrl(asUrl);
+    if (!fetchBytes) {
+      return { url: asUrl, data: null, mediaType };
+    }
+    // Private bucket: fetch the bytes ourselves and send base64.
+    const res = await fetch(asUrl);
+    if (!res.ok) {
+      throw new Error(`ClaudeVision: failed to fetch image (${res.status}) from ${asUrl.slice(0, 80)}`);
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    return { url: null, data: buf.toString('base64'), mediaType: detectImageMime(buf) };
+  }
+
+  // Bare non-URL string → assume base64-encoded image bytes.
+  return { url: null, data: image as string, mediaType: 'image/jpeg' };
+}
+
+/** Build the image/document content block for the Anthropic messages API. */
+function toContentBlock(payload: ImagePayload): AnthropicContentBlock {
+  const isPdf = payload.mediaType === 'application/pdf';
+  const blockType = isPdf ? 'document' : 'image';
+
+  if (payload.url) {
+    return { type: blockType, source: { type: 'url', url: payload.url } };
+  }
+  return {
+    type: blockType,
+    source: { type: 'base64', media_type: payload.mediaType, data: payload.data },
+  };
+}
+
+/** Extract the model's text output and isolate the JSON object. */
+function parseJsonFromText(text: string): unknown {
+  const cleaned = text.replace(/```(?:json)?/gi, '').trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error(`ClaudeVision: no JSON object found in response: ${cleaned.slice(0, 200)}`);
+  }
+  return JSON.parse(cleaned.slice(start, end + 1));
+}
 
 export class ClaudeVision implements OcrProvider {
   readonly id = 'claude_vision' as const;
 
   constructor(private readonly config: ClaudeVisionConfig) {}
 
-  async extract(_image: ImageSource): Promise<InvoiceOcrResult> {
-    // VERIFY: implementation pending — uses @anthropic-ai/sdk
-    // Pseudocode:
-    //   const client = new Anthropic({ apiKey: this.config.apiKey });
-    //   const response = await client.messages.create({
-    //     model: this.config.model,
-    //     max_tokens: 4096,
-    //     system: SYSTEM_PROMPT,
-    //     messages: [{
-    //       role: 'user',
-    //       content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: imageBase64 } }],
-    //     }],
-    //   });
-    //   const json = response.content[0].text;
-    //   return InvoiceOcrResult.parse(JSON.parse(json));
-    void SYSTEM_PROMPT;
-    throw new Error(
-      `ClaudeVision not yet wired — install @anthropic-ai/sdk and implement extract(). ` +
-        `Model: ${this.config.model}`,
-    );
+  private get model(): string {
+    return this.config.model ?? process.env.OCR_CLAUDE_MODEL ?? DEFAULT_MODEL;
+  }
+
+  async extract(image: ImageSource): Promise<InvoiceOcrResult> {
+    // LAZY import: keeps the package typecheck/test green when the SDK isn't
+    // fetched in the sandbox. Typed loosely (any) on purpose.
+    const { default: Anthropic } = (await import('@anthropic-ai/sdk')) as { default: any };
+    const client = new Anthropic({ apiKey: this.config.apiKey });
+
+    const fetchBytes =
+      this.config.fetchBytes ??
+      // Non-http sources can never be URL-delivered.
+      !(image instanceof URL || (typeof image === 'string' && /^https?:\/\//i.test(image)));
+    const payload = await resolveImage(image, fetchBytes);
+
+    // No assistant prefill — opus-4-8 returns 400 on prefilled assistant turns.
+    // We instruct JSON-only in the system prompt and parse the text block.
+    const response = await client.messages.create({
+      model: this.model,
+      max_tokens: this.config.maxTokens ?? DEFAULT_MAX_TOKENS,
+      system: SYSTEM_PROMPT,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            toContentBlock(payload),
+            { type: 'text', text: 'הוצא את נתוני החשבונית כ-JSON לפי הסכמה.' },
+          ],
+        },
+      ],
+    });
+
+    const text: string = (response.content ?? [])
+      .filter((b: { type?: string }) => b?.type === 'text')
+      .map((b: { text?: string }) => b.text ?? '')
+      .join('');
+
+    // Parse, then validate against the canonical schema. On any parse/validation
+    // failure we THROW so the BullMQ job retries — never silently emit a partial
+    // invoice (no manufactured ₪). Model-reported confidence (top-level + per
+    // line) flows through because InvoiceOcrResult preserves those fields.
+    return InvoiceOcrResult.parse(parseJsonFromText(text));
   }
 }

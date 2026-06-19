@@ -45,11 +45,14 @@ export async function recordConfirmedMatch(
     .limit(1);
 
   if (existing[0]) {
-    if (params.confidence !== undefined) {
-      await db
-        .update(productAliases)
-        .set({ confidence: params.confidence.toString() })
-        .where(eq(productAliases.id, existing[0].id));
+    // Backfill the SKU onto an existing (name-keyed) alias so a SKU learned
+    // after the name still lands — otherwise supplier_sku only ever gets set on
+    // first insert and matchBySku could never resolve this alias.
+    const updates: { confidence?: string; supplierSku?: string } = {};
+    if (params.confidence !== undefined) updates.confidence = params.confidence.toString();
+    if (params.supplierSku) updates.supplierSku = params.supplierSku;
+    if (Object.keys(updates).length > 0) {
+      await db.update(productAliases).set(updates).where(eq(productAliases.id, existing[0].id));
     }
     return { aliasId: existing[0].id, created: false };
   }

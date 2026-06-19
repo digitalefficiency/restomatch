@@ -45,6 +45,9 @@ export const poSource = pgEnum('po_source', [
   'recurring',
 ]);
 
+/** Channel a manual/outbound PO was transmitted on when placed (null = not transmitted). */
+export const poSentChannel = pgEnum('po_sent_channel', ['email', 'whatsapp']);
+
 export const grStatus = pgEnum('gr_status', ['pending', 'partial', 'completed', 'rejected']);
 
 export const invoiceStatus = pgEnum('invoice_status', [
@@ -260,11 +263,19 @@ export const suppliers = pgTable(
     contactEmail: text('contact_email'),
     contactWhatsapp: varchar('contact_whatsapp', { length: 32 }),
     paymentTerms: text('payment_terms'),
+    /**
+     * Per-supplier VAT rate override (e.g. 0.18). Null falls back to the
+     * restaurant default. Lets a supplier billing at a non-default rate avoid a
+     * spurious VAT_MISMATCH in the engine. See buildMatchInputForInvoice.
+     */
+    vatRate: numeric('vat_rate', { precision: 5, scale: 4 }),
     externalRef: text('external_ref'),
     sourcePlatform: procurementPlatform('source_platform'),
     deliverySchedule: jsonb('delivery_schedule')
       .$type<DeliverySchedule | null>()
       .default(sql`NULL`),
+    /** Soft-deactivate: a supplier with POs can't be hard-deleted (po.supplierId is onDelete:restrict). */
+    active: boolean('active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -323,6 +334,94 @@ export const productAliases = pgTable(
 );
 
 /* ──────────────────────────────────────────────────────────────────────────
+ * Supplier catalog (priced price-list) + bulk imports
+ *
+ * product_aliases links a supplier's raw name → a canonical product but carries
+ * NO price. supplier_catalog_items is the priced price-list: the Excel/CSV import
+ * target and the source of unit_price_expected when building a PO from catalog.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export const catalogImportStatus = pgEnum('catalog_import_status', [
+  'pending',
+  'mapped',
+  'committed',
+  'failed',
+]);
+
+/** Maps canonical catalog fields → the source spreadsheet's column headers. */
+export interface CatalogColumnMapping {
+  sku?: string;
+  name?: string;
+  unit?: string;
+  price?: string;
+  barcode?: string;
+  packSize?: string;
+}
+
+export const catalogImports = pgTable(
+  'catalog_imports',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    supplierId: uuid('supplier_id')
+      .notNull()
+      .references(() => suppliers.id, { onDelete: 'cascade' }),
+    filename: text('filename').notNull(),
+    status: catalogImportStatus('status').notNull().default('pending'),
+    rowCount: integer('row_count').notNull().default(0),
+    createdItems: integer('created_items').notNull().default(0),
+    updatedItems: integer('updated_items').notNull().default(0),
+    columnMapping: jsonb('column_mapping')
+      .$type<CatalogColumnMapping>()
+      .notNull()
+      .default({}),
+    error: text('error'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('catalog_imports_restaurant_idx').on(t.restaurantId, t.createdAt)],
+);
+
+export const supplierCatalogItems = pgTable(
+  'supplier_catalog_items',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    supplierId: uuid('supplier_id')
+      .notNull()
+      .references(() => suppliers.id, { onDelete: 'cascade' }),
+    /** Linked canonical product once matched; null until a match is confirmed. */
+    productId: uuid('product_id').references(() => products.id, { onDelete: 'set null' }),
+    supplierSku: varchar('supplier_sku', { length: 64 }),
+    supplierNameRaw: text('supplier_name_raw').notNull(),
+    unit: varchar('unit', { length: 32 }),
+    packSize: numeric('pack_size', { precision: 12, scale: 3 }),
+    /** Agorot-safe scale, matches po_lines.unit_price_expected / invoice_lines.unit_price_billed. */
+    listPrice: numeric('list_price', { precision: 12, scale: 4 }),
+    currency: varchar('currency', { length: 3 }).notNull().default('ILS'),
+    barcodeEan: varchar('barcode_ean', { length: 32 }),
+    active: boolean('active').notNull().default(true),
+    sourceImportId: uuid('source_import_id').references(() => catalogImports.id, {
+      onDelete: 'set null',
+    }),
+    observedAt: timestamp('observed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('supplier_catalog_items_restaurant_supplier_idx').on(t.restaurantId, t.supplierId),
+    // Plain unique: Postgres treats NULL skus as distinct, so multiple no-SKU
+    // rows per supplier are allowed (deduped by name/barcode in app logic),
+    // while real (supplier, sku) pairs are unique. Mirrors suppliers_external_ref_unique.
+    uniqueIndex('supplier_catalog_items_sku_unique').on(t.supplierId, t.supplierSku),
+  ],
+);
+
+/* ──────────────────────────────────────────────────────────────────────────
  * Purchase Orders
  * ────────────────────────────────────────────────────────────────────────── */
 
@@ -342,8 +441,16 @@ export const purchaseOrders = pgTable(
     sourcePlatform: procurementPlatform('source_platform'),
     sourceRef: text('source_ref'),
     totalEstimated: numeric('total_estimated', { precision: 12, scale: 2 }),
+    /**
+     * Per-PO VAT rate as printed on the imported order (e.g. 0.18). Wins over the
+     * supplier/restaurant default when reconciling this order's invoice.
+     */
+    vatRate: numeric('vat_rate', { precision: 5, scale: 4 }),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     notes: text('notes'),
+    /** Outbound placement: set when a manual draft is placed (status → sent). */
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    sentChannel: poSentChannel('sent_channel'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -362,6 +469,13 @@ export const poLines = pgTable(
       .notNull()
       .references(() => purchaseOrders.id, { onDelete: 'cascade' }),
     productId: uuid('product_id').references(() => products.id, { onDelete: 'set null' }),
+    /**
+     * Supplier catalog number (מק״ט) as printed on the order, when present.
+     * The stable per-supplier key the engine pairs on before productId — see
+     * matchBySku in @restomatch/catalog. Kept even when productId is unresolved
+     * so the line can be mapped later without re-importing the PO.
+     */
+    supplierSku: varchar('supplier_sku', { length: 64 }),
     rawDescription: text('raw_description'),
     qtyOrdered: numeric('qty_ordered', { precision: 12, scale: 3 }).notNull(),
     unit: varchar('unit', { length: 32 }).notNull(),
@@ -464,6 +578,12 @@ export const invoiceLines = pgTable(
       .notNull()
       .references(() => invoices.id, { onDelete: 'cascade' }),
     productId: uuid('product_id').references(() => products.id, { onDelete: 'set null' }),
+    /**
+     * Supplier catalog number (מק״ט) as extracted from the invoice, when present.
+     * Persisted from the OCR pipeline (previously dropped) so invoice lines pair
+     * to PO/catalog rows by SKU even when name matching is ambiguous.
+     */
+    supplierSku: varchar('supplier_sku', { length: 64 }),
     rawDescription: text('raw_description').notNull(),
     qtyBilled: numeric('qty_billed', { precision: 12, scale: 3 }).notNull(),
     unit: varchar('unit', { length: 32 }).notNull(),
@@ -960,6 +1080,7 @@ export const suppliersRelations = relations(suppliers, ({ one, many }) => ({
     references: [restaurants.id],
   }),
   aliases: many(productAliases),
+  catalogItems: many(supplierCatalogItems),
   purchaseOrders: many(purchaseOrders),
   invoices: many(invoices),
 }));
@@ -970,12 +1091,44 @@ export const productsRelations = relations(products, ({ one, many }) => ({
     references: [restaurants.id],
   }),
   aliases: many(productAliases),
+  catalogItems: many(supplierCatalogItems),
   priceHistory: many(priceHistory),
 }));
 
 export const productAliasesRelations = relations(productAliases, ({ one }) => ({
   product: one(products, { fields: [productAliases.productId], references: [products.id] }),
   supplier: one(suppliers, { fields: [productAliases.supplierId], references: [suppliers.id] }),
+}));
+
+export const supplierCatalogItemsRelations = relations(supplierCatalogItems, ({ one }) => ({
+  restaurant: one(restaurants, {
+    fields: [supplierCatalogItems.restaurantId],
+    references: [restaurants.id],
+  }),
+  supplier: one(suppliers, {
+    fields: [supplierCatalogItems.supplierId],
+    references: [suppliers.id],
+  }),
+  product: one(products, {
+    fields: [supplierCatalogItems.productId],
+    references: [products.id],
+  }),
+  import: one(catalogImports, {
+    fields: [supplierCatalogItems.sourceImportId],
+    references: [catalogImports.id],
+  }),
+}));
+
+export const catalogImportsRelations = relations(catalogImports, ({ one, many }) => ({
+  restaurant: one(restaurants, {
+    fields: [catalogImports.restaurantId],
+    references: [restaurants.id],
+  }),
+  supplier: one(suppliers, {
+    fields: [catalogImports.supplierId],
+    references: [suppliers.id],
+  }),
+  items: many(supplierCatalogItems),
 }));
 
 export const purchaseOrdersRelations = relations(purchaseOrders, ({ one, many }) => ({
@@ -1052,8 +1205,16 @@ export type Restaurant = typeof restaurants.$inferSelect;
 export type NewRestaurant = typeof restaurants.$inferInsert;
 export type User = typeof users.$inferSelect;
 export type Supplier = typeof suppliers.$inferSelect;
+export type NewSupplier = typeof suppliers.$inferInsert;
 export type Product = typeof products.$inferSelect;
+export type NewProduct = typeof products.$inferInsert;
+export type SupplierCatalogItem = typeof supplierCatalogItems.$inferSelect;
+export type NewSupplierCatalogItem = typeof supplierCatalogItems.$inferInsert;
+export type CatalogImport = typeof catalogImports.$inferSelect;
+export type NewCatalogImport = typeof catalogImports.$inferInsert;
 export type PurchaseOrder = typeof purchaseOrders.$inferSelect;
+export type NewPurchaseOrder = typeof purchaseOrders.$inferInsert;
+export type NewPoLine = typeof poLines.$inferInsert;
 export type PoLine = typeof poLines.$inferSelect;
 export type GoodsReceipt = typeof goodsReceipts.$inferSelect;
 export type GrLine = typeof grLines.$inferSelect;

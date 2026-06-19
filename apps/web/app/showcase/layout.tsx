@@ -24,6 +24,7 @@ export default function ShowcaseLayout({ children }: { children: React.ReactNode
             <ShowcaseLink href="/showcase/receiver">Backdoor App</ShowcaseLink>
             <ShowcaseLink href="/showcase/dashboard">Control Center</ShowcaseLink>
             <ShowcaseLink href="/showcase/dashboard/invoices">ביקורת חשבוניות</ShowcaseLink>
+            <ShowcaseLink href="/showcase/deliveries">מעקב אספקות</ShowcaseLink>
             <ShowcaseLink href="/showcase/approvals">Hierarchy Matrix</ShowcaseLink>
           </nav>
         </div>

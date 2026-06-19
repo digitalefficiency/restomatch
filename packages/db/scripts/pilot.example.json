@@ -1,0 +1,61 @@
+{
+  "restaurant": {
+    "name": "מסעדת הפיילוט בע״מ",
+    "businessId": "515123456",
+    "vatRate": 0.18,
+    "timezone": "Asia/Jerusalem"
+  },
+  "members": [
+    { "email": "owner@pilot.co.il", "name": "בעל/ת המסעדה", "role": "owner", "phone": "+972500000001" },
+    { "email": "manager@pilot.co.il", "name": "מנהל/ת תפעול", "role": "manager" },
+    { "email": "receiver@pilot.co.il", "name": "מקבל/ת סחורה", "role": "receiver" },
+    { "email": "bookkeeper@pilot.co.il", "name": "הנהלת חשבונות", "role": "bookkeeper" },
+    { "email": "chef@pilot.co.il", "name": "שף/ית", "role": "chef" }
+  ],
+  "suppliers": [
+    {
+      "name": "ירקן הפיילוט",
+      "businessId": "301111111",
+      "contactWhatsapp": "+972500000010",
+      "deliverySchedule": { "sun": ["08:00"], "tue": ["08:00"], "thu": ["08:00"] }
+    },
+    {
+      "name": "קצביית הפיילוט",
+      "businessId": "301222222",
+      "deliverySchedule": { "mon": ["09:30"], "wed": ["09:30"] }
+    },
+    {
+      "name": "מאפיית הפיילוט",
+      "deliverySchedule": { "sun": ["06:00"], "mon": ["06:00"], "wed": ["06:00"], "fri": ["06:00"] }
+    }
+  ],
+  "products": [
+    { "name": "עגבניה שרי", "category": "ירקות", "unit": "ק״ג" },
+    { "name": "מלפפון חממה", "category": "ירקות", "unit": "ק״ג" },
+    { "name": "בצל יבש", "category": "ירקות", "unit": "ק״ג" },
+    { "name": "חזה עוף", "category": "בשרים", "unit": "ק״ג" },
+    { "name": "אנטריקוט", "category": "בשרים", "unit": "ק״ג" },
+    { "name": "לחמניית המבורגר", "category": "לחמים", "unit": "יח׳" },
+    { "name": "פיתה לבנה", "category": "לחמים", "unit": "יח׳" }
+  ],
+  "purchaseOrders": [
+    {
+      "supplier": "ירקן הפיילוט",
+      "status": "sent",
+      "expectedDeliveryAt": "2026-06-22",
+      "lines": [
+        { "product": "עגבניה שרי", "qty": 20, "unitPrice": 7.5 },
+        { "product": "מלפפון חממה", "qty": 15, "unitPrice": 6.0 },
+        { "product": "בצל יבש", "qty": 25, "unitPrice": 3.2 }
+      ]
+    },
+    {
+      "supplier": "קצביית הפיילוט",
+      "status": "closed",
+      "lines": [
+        { "product": "חזה עוף", "qty": 30, "unitPrice": 28.9 },
+        { "product": "אנטריקוט", "qty": 12, "unitPrice": 119.0 }
+      ]
+    }
+  ]
+}

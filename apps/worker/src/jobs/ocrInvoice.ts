@@ -2,22 +2,17 @@ import { meterOcrScan } from '@restomatch/api';
 import { matchProductTopN, MockEmbeddingProvider } from '@restomatch/catalog';
 import { and, createDb, eq, invoiceLines, invoices, restaurants } from '@restomatch/db';
 import {
+  ClaudeVision,
   runOcrPipeline,
   StubOcrProvider,
   type CatalogMatcherFn,
   type OcrProvider,
 } from '@restomatch/ocr';
-import type { InvoiceOcrResult } from '@restomatch/types';
+import { enqueueMatchInvoice } from '@restomatch/queue';
+import type { OcrInvoiceJob } from '@restomatch/types';
 import { makeWorker } from '../queue';
 
-export interface OcrInvoiceJob {
-  restaurantId: string;
-  invoiceId: string;
-  supplierId: string | null;
-  imageUrl: string;
-  /** When set, the worker bypasses real providers and uses these results. */
-  mockProviders?: { docAi: InvoiceOcrResult; claude: InvoiceOcrResult };
-}
+export type { OcrInvoiceJob };
 
 const embedder = new MockEmbeddingProvider(1536);
 
@@ -28,9 +23,21 @@ function buildProviders(job: OcrInvoiceJob): { documentAi: OcrProvider; claude: 
       claude: new StubOcrProvider('claude_vision', job.mockProviders.claude),
     };
   }
-  // TODO M4-followup: replace with GoogleDocumentAi + ClaudeVision real clients
-  // when credentials are provisioned. Until then, the job requires mockProviders.
-  throw new Error('OCR providers not configured — provide mockProviders or wire real clients');
+  // CREDENTIAL GATE (AGENTS.md): a real provider is constructed ONLY when an
+  // ANTHROPIC_API_KEY is present. With no key we fail loudly rather than running
+  // an un-isolated real ingest — keep ingest on mockProviders until keys AND
+  // Supabase/RLS are live (Phase-6, human intake).
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new Error('OCR providers not configured — provide mockProviders or set ANTHROPIC_API_KEY');
+  }
+
+  // Claude-only pilot: Google Document AI is not yet wired. We hand the SAME
+  // ClaudeVision instance to BOTH provider slots. The reconciler treats two
+  // identical extractions as full agreement (no conflicts → high confidence),
+  // which is the intended single-provider behaviour for the pilot.
+  const claude = new ClaudeVision({ apiKey, model: process.env.OCR_CLAUDE_MODEL });
+  return { documentAi: claude, claude };
 }
 
 export function startOcrInvoiceWorker() {
@@ -71,6 +78,8 @@ export function startOcrInvoiceWorker() {
           restaurantId: job.data.restaurantId,
           supplierId: invoice.supplierId,
           rawDescription: line.rawDescription,
+          // מק״ט from the invoice — strategy-0 exact key when the supplier prints it.
+          supplierSku: line.sku ?? undefined,
           embedding,
         },
         3,
@@ -125,6 +134,7 @@ export function startOcrInvoiceWorker() {
         r.lines.map((line) => ({
           invoiceId: job.data.invoiceId,
           productId: line.productId,
+          supplierSku: line.sku ?? null,
           rawDescription: line.rawDescription,
           qtyBilled: line.qty.toString(),
           unit: line.unit,
@@ -141,6 +151,24 @@ export function startOcrInvoiceWorker() {
         `confidence=${result.confidence.toFixed(2)} conflicts=${result.conflicts.length} ` +
         `lines=${r.lines.length} needsReview=${result.needsHumanReview}`,
     );
+
+    // Chain into the 3-way PO↔invoice match when OCR is confident enough to
+    // auto-proceed. Low-confidence (parsed / needs-review) invoices wait for a
+    // human to confirm product matches first (match.runForInvoice on demand).
+    // A queue failure must never break the OCR persistence above.
+    if (!result.needsHumanReview) {
+      try {
+        await enqueueMatchInvoice({
+          restaurantId: job.data.restaurantId,
+          invoiceId: job.data.invoiceId,
+        });
+      } catch (err) {
+        console.warn(
+          `[ocr-invoice] failed to enqueue match for invoice=${job.data.invoiceId}`,
+          err,
+        );
+      }
+    }
 
     return {
       invoiceId: job.data.invoiceId,

@@ -4,8 +4,10 @@ import {
   applyCoreTenantRls,
   auditLog,
   billingAccounts,
+  catalogImports,
   createDb,
   discrepancies,
+  supplierCatalogItems,
   ensureRlsAppRole,
   eq,
   goodsReceipts,
@@ -385,5 +387,67 @@ describe('tRPC functional regression through the RLS-enforced role', () => {
     const restaurant = await caller.onboarding.createRestaurant({ name: 'מסעדת RLS' });
     expect(restaurant.id).toBeTruthy();
     await ownerDb.delete(restaurants).where(eq(restaurants.id, restaurant.id));
+  });
+});
+
+// Phase-2: the priced supplier catalog + import-audit tables are tenant-scoped
+// by restaurant_id (added to the RLS policy array). These probes prove the
+// policy admits the right tenant and rejects cross-tenant reads/writes.
+describe('phase-2 catalog tables are tenant-isolated (raw probes)', () => {
+  let aSupplierId: string;
+  let bSupplierId: string;
+
+  beforeAll(async () => {
+    const [a] = await ownerDb
+      .select({ id: suppliers.id })
+      .from(suppliers)
+      .where(eq(suppliers.restaurantId, A.restaurantId));
+    const [b] = await ownerDb
+      .select({ id: suppliers.id })
+      .from(suppliers)
+      .where(eq(suppliers.restaurantId, B.restaurantId));
+    aSupplierId = a!.id;
+    bSupplierId = b!.id;
+    await ownerDb.insert(supplierCatalogItems).values([
+      { restaurantId: A.restaurantId, supplierId: aSupplierId, supplierNameRaw: 'עגבניה A', listPrice: '8.5000' },
+      { restaurantId: B.restaurantId, supplierId: bSupplierId, supplierNameRaw: 'עגבניה B', listPrice: '9.0000' },
+    ]);
+    await ownerDb.insert(catalogImports).values([
+      { restaurantId: A.restaurantId, supplierId: aSupplierId, filename: 'a.csv', rowCount: 1 },
+      { restaurantId: B.restaurantId, supplierId: bSupplierId, filename: 'b.csv', rowCount: 1 },
+    ]);
+  });
+
+  afterAll(async () => {
+    await ownerDb.delete(supplierCatalogItems);
+    await ownerDb.delete(catalogImports);
+  });
+
+  it('supplier_catalog_items: GUC=A sees only tenant-A rows', async () => {
+    const rows = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx.select({ rid: supplierCatalogItems.restaurantId }).from(supplierCatalogItems),
+    );
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => r.rid === A.restaurantId)).toBe(true);
+  });
+
+  it('catalog_imports: GUC=A sees only tenant-A rows', async () => {
+    const rows = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx.select({ rid: catalogImports.restaurantId }).from(catalogImports),
+    );
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => r.rid === A.restaurantId)).toBe(true);
+  });
+
+  it('blocks a cross-tenant catalog INSERT (WITH CHECK violation)', async () => {
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) =>
+        tx.insert(supplierCatalogItems).values({
+          restaurantId: B.restaurantId,
+          supplierId: bSupplierId,
+          supplierNameRaw: 'cross-tenant probe',
+        }),
+      ),
+    ).rejects.toThrow(/row-level security/);
   });
 });

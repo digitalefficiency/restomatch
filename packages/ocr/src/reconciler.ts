@@ -229,8 +229,19 @@ function reconcileLine(
   )!;
   const vatRate =
     pickNumber(docLine.vatRate, claudeLine.vatRate, `lines[${index}].vatRate`, conflicts);
+  // Supplier SKU (מק״ט): prefer Claude (better Hebrew/RTL handling), fall back
+  // to Document AI. Carried through so invoice lines can pair by SKU downstream
+  // — previously dropped here, which is why SKU matching never fired.
+  const sku =
+    pickString(
+      docLine.sku ?? undefined,
+      claudeLine.sku ?? undefined,
+      `lines[${index}].sku`,
+      conflicts,
+    ) ?? null;
 
   return {
+    sku,
     rawDescription,
     qty,
     unit,

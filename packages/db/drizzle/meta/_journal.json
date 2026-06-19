@@ -64,6 +64,27 @@
       "when": 1781470744660,
       "tag": "0008_search_trgm_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1781560000000,
+      "tag": "0009_phase2_supplier_catalog",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1781650000000,
+      "tag": "0010_phase0_sku_bridge",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1781660000000,
+      "tag": "0011_phase1_supplier_po_vat",
+      "breakpoints": true
     }
   ]
 }

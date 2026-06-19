@@ -4,6 +4,7 @@ import { useGSAP } from '@gsap/react';
 import { gsap } from 'gsap';
 import { AlertTriangle, ArrowLeft, Check, Minus, Plus, X, Zap } from 'lucide-react';
 import { useRef } from 'react';
+import { messageTemplates, telLink, waLink } from '@/lib/messageTemplates';
 import type { LineStatus, ReconciliationResult } from '../_mock';
 import { StepHeader } from './SupplierSelect';
 
@@ -100,11 +101,63 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
         </div>
       ) : null}
 
+      {/* Supplier-contact change alerts (e.g. agent phone changed since last invoice) */}
+      {result.contactAlerts && result.contactAlerts.length > 0 ? (
+        <div className="mb-6 space-y-3">
+          {result.contactAlerts.map((a, i) => {
+            const msg = messageTemplates.agentVerification({
+              supplierName: 'הספק',
+              role: a.role,
+              name: a.name ?? undefined,
+              newPhone: a.newPhone,
+            });
+            return (
+              <div key={i} className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <div className="font-semibold text-ink">⚠️ פרטי הסוכן השתנו</div>
+                    <div className="text-sm text-muted mt-1">
+                      {a.role}
+                      {a.name ? ` · ${a.name}` : ''}: הטלפון השתנה מ-
+                      <span className="line-through mx-1">{a.oldPhone}</span> ל-
+                      <span className="font-semibold text-ink mx-1">{a.newPhone}</span>. הישן נשמר
+                      כמספר משני.
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 mt-3">
+                      <span className="text-sm text-muted">אמת בוואטסאפ מול:</span>
+                      {a.allNumbers.map((p) => (
+                        <a
+                          key={p}
+                          href={waLink(p, msg)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 bg-surface-2 border border-line text-ink rounded-xl px-3 py-1.5 text-sm font-medium hover:border-primary/40 hover:text-primary transition-all"
+                        >
+                          {p}
+                        </a>
+                      ))}
+                      <a
+                        href={telLink(a.newPhone)}
+                        className="inline-flex items-center gap-1 bg-surface-2 border border-line text-muted rounded-xl px-3 py-1.5 text-sm font-medium hover:text-ink transition-all"
+                      >
+                        התקשר
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+
       {/* Comparison table */}
       <div className="rounded-2xl border border-line bg-surface overflow-hidden shadow-card mb-6">
         <table className="w-full text-sm">
           <thead className="bg-surface-2 text-subtle text-xs uppercase tracking-wider">
             <tr>
+              <th className="text-right p-3 font-semibold">מק״ט</th>
               <th className="text-right p-3 font-semibold">מוצר</th>
               <th className="text-right p-3 font-semibold">בהזמנה</th>
               <th className="text-right p-3 font-semibold">בחשבונית</th>
@@ -118,6 +171,9 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
                 key={`${line.productName}-${i}`}
                 className={`recon-row border-t border-line ${rowTone(line.status)}`}
               >
+                <td className="p-3 font-mono tabular-nums text-subtle text-xs whitespace-nowrap">
+                  {line.sku ?? '—'}
+                </td>
                 <td className="p-3 font-medium text-ink">
                   <span className={line.status === 'missing_from_invoice' ? 'line-through opacity-70' : ''}>
                     {line.productName}

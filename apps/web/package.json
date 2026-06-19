@@ -13,11 +13,13 @@
     "test:e2e:install": "playwright install chromium"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.69.0",
     "@auth/drizzle-adapter": "^1.7.4",
     "@gsap/react": "^2.1.2",
     "@restomatch/api": "workspace:*",
     "@restomatch/charts": "workspace:*",
     "@restomatch/db": "workspace:*",
+    "@restomatch/ocr": "workspace:*",
     "@restomatch/types": "workspace:*",
     "@restomatch/ui-tokens": "workspace:*",
     "@supabase/supabase-js": "^2.106.1",

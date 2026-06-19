@@ -1,4 +1,14 @@
-import { and, eq, isNull, or, products, productAliases, sql, type Database } from '@restomatch/db';
+import {
+  and,
+  eq,
+  isNull,
+  or,
+  products,
+  productAliases,
+  sql,
+  supplierCatalogItems,
+  type Database,
+} from '@restomatch/db';
 import {
   DEFAULT_THRESHOLDS,
   type CatalogMatchInput,
@@ -15,6 +25,89 @@ function toVectorLiteral(embedding: number[]): string {
     throw new Error('embedding contains non-finite values');
   }
   return `[${embedding.join(',')}]`;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Strategy 0: supplier SKU exact lookup (מק״ט)
+ *
+ * The stable per-supplier key — preferred over fuzzy Hebrew names. Source of
+ * truth is product_aliases (where recordConfirmedMatch persists supplier_sku);
+ * falls back to supplier_catalog_items, whose priced price-list may already
+ * carry a SKU→product link before any alias exists.
+ *
+ * Tenant scope: product_aliases has no restaurant_id, so it is scoped through
+ * the products join (matching matchByAlias). supplier_catalog_items is scoped
+ * by its own restaurant_id AND the products join for defence in depth.
+ *
+ * Requires supplierId: SKU namespaces collide across suppliers (100003 means
+ * different goods per supplier), so a SKU is meaningless without it.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export async function matchBySku(
+  db: Database,
+  restaurantId: string,
+  supplierId: string | null,
+  supplierSku: string,
+): Promise<MatchCandidate | null> {
+  if (!supplierId) return null;
+  const normalized = supplierSku.trim();
+  if (!normalized) return null;
+
+  // 1. product_aliases (source of truth) — tenant scope via products join.
+  const aliasRows = await db
+    .select({
+      productId: products.id,
+      canonicalName: products.canonicalName,
+      aliasId: productAliases.id,
+    })
+    .from(productAliases)
+    .innerJoin(
+      products,
+      and(eq(products.id, productAliases.productId), eq(products.restaurantId, restaurantId)),
+    )
+    .where(
+      and(eq(productAliases.supplierId, supplierId), eq(productAliases.supplierSku, normalized)),
+    )
+    .limit(1);
+
+  const aliasRow = aliasRows[0];
+  if (aliasRow) {
+    return {
+      productId: aliasRow.productId,
+      canonicalName: aliasRow.canonicalName,
+      confidence: 1.0,
+      matchedBy: 'sku',
+      aliasId: aliasRow.aliasId,
+    };
+  }
+
+  // 2. supplier_catalog_items (priced price-list). The inner join drops rows
+  // whose product_id is still null (unlinked), so only resolved SKUs return.
+  const catalogRows = await db
+    .select({
+      productId: products.id,
+      canonicalName: products.canonicalName,
+    })
+    .from(supplierCatalogItems)
+    .innerJoin(products, eq(products.id, supplierCatalogItems.productId))
+    .where(
+      and(
+        eq(supplierCatalogItems.restaurantId, restaurantId),
+        eq(supplierCatalogItems.supplierId, supplierId),
+        eq(supplierCatalogItems.supplierSku, normalized),
+        eq(products.restaurantId, restaurantId),
+      ),
+    )
+    .limit(1);
+
+  const catalogRow = catalogRows[0];
+  if (!catalogRow) return null;
+  return {
+    productId: catalogRow.productId,
+    canonicalName: catalogRow.canonicalName,
+    confidence: 1.0,
+    matchedBy: 'sku',
+  };
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -196,6 +289,17 @@ export async function matchProduct(
   input: CatalogMatchInput,
   thresholds: MatcherThresholds = DEFAULT_THRESHOLDS,
 ): Promise<MatchCandidate | null> {
+  // 0. Supplier SKU (highest-priority exact key)
+  if (input.supplierSku) {
+    const skuMatch = await matchBySku(
+      db,
+      input.restaurantId,
+      input.supplierId ?? null,
+      input.supplierSku,
+    );
+    if (skuMatch) return skuMatch;
+  }
+
   // 1. Alias
   const aliasMatch = await matchByAlias(
     db,
@@ -249,6 +353,16 @@ export async function matchProductTopN(
   thresholds: MatcherThresholds = DEFAULT_THRESHOLDS,
 ): Promise<MatchCandidate[]> {
   // Exact matches short-circuit (these are always rank-1)
+  if (input.supplierSku) {
+    const skuMatch = await matchBySku(
+      db,
+      input.restaurantId,
+      input.supplierId ?? null,
+      input.supplierSku,
+    );
+    if (skuMatch) return [skuMatch];
+  }
+
   const aliasMatch = await matchByAlias(
     db,
     input.restaurantId,

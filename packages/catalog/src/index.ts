@@ -1,6 +1,7 @@
 export * from './types';
 export { MockEmbeddingProvider, cosineSimilarity } from './embeddings';
 export {
+  matchBySku,
   matchByAlias,
   matchByBarcode,
   matchByEmbedding,

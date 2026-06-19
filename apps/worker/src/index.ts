@@ -2,6 +2,7 @@ import { registerSentryClient } from '@restomatch/observability';
 import { registerCronSchedules } from './cron';
 import { startBaselinesWorker } from './jobs/baselines';
 import { startDailyExpectationsWorker } from './jobs/dailyExpectations';
+import { startImportCatalogWorker } from './jobs/importCatalog';
 import { startMatchInvoiceWorker } from './jobs/matchInvoice';
 import { startOcrInvoiceWorker } from './jobs/ocrInvoice';
 import { startOutboxDispatchWorker } from './jobs/outboxDispatch';
@@ -45,6 +46,7 @@ const workers = [
   startBaselinesWorker(),
   startOcrInvoiceWorker(),
   startMatchInvoiceWorker(),
+  startImportCatalogWorker(),
   startOutboxDispatchWorker(),
 ];
 

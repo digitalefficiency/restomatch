@@ -13,11 +13,13 @@ import {
   products,
   purchaseOrders,
   restaurants,
+  supplierCatalogItems,
   suppliers,
   users,
 } from '@restomatch/db';
 import { MockEmbeddingProvider } from '../embeddings';
 import {
+  matchBySku,
   matchByAlias,
   matchByBarcode,
   matchByEmbedding,
@@ -43,6 +45,7 @@ async function resetDb() {
   await db.delete(priceHistory);
   await db.delete(poLines);
   await db.delete(purchaseOrders);
+  await db.delete(supplierCatalogItems);
   await db.delete(productAliases);
   await db.delete(products);
   await db.delete(suppliers);
@@ -210,6 +213,119 @@ describe('matchByAlias', () => {
   });
 });
 
+describe('matchBySku (מק״ט, strategy-0)', () => {
+  it('finds product by exact (supplier, sku) via product_aliases', async () => {
+    const { tomato } = await seedRestaurantWithProducts();
+    await db.insert(productAliases).values({
+      productId: tomato.id,
+      supplierId,
+      supplierSku: '300099',
+      supplierNameRaw: 'עגבניה שרי קילו',
+      confidence: '1.000',
+    });
+    const match = await matchBySku(db, restaurantId, supplierId, '300099');
+    expect(match).toMatchObject({
+      productId: tomato.id,
+      canonicalName: 'עגבניה שרי',
+      confidence: 1,
+      matchedBy: 'sku',
+    });
+  });
+
+  it('requires a supplierId — a SKU is meaningless without it', async () => {
+    const { tomato } = await seedRestaurantWithProducts();
+    await db.insert(productAliases).values({
+      productId: tomato.id,
+      supplierId,
+      supplierSku: '300099',
+      supplierNameRaw: 'עגבניה שרי',
+      confidence: '1.000',
+    });
+    const match = await matchBySku(db, restaurantId, null, '300099');
+    expect(match).toBeNull();
+  });
+
+  it('is scoped by supplier — same SKU, different supplier does not collide', async () => {
+    const { tomato } = await seedRestaurantWithProducts();
+    await db.insert(productAliases).values({
+      productId: tomato.id,
+      supplierId,
+      supplierSku: '100003',
+      supplierNameRaw: 'עגבניה שרי',
+      confidence: '1.000',
+    });
+    // Same SKU number, asked for under a different supplier → no match.
+    const match = await matchBySku(db, restaurantId, altSupplierId, '100003');
+    expect(match).toBeNull();
+  });
+
+  it('falls back to a linked supplier_catalog_items row when no alias exists', async () => {
+    const { cucumber } = await seedRestaurantWithProducts();
+    await db.insert(supplierCatalogItems).values({
+      restaurantId,
+      supplierId,
+      productId: cucumber.id,
+      supplierSku: '500500',
+      supplierNameRaw: 'מלפפון ארגז',
+      unit: 'ק״ג',
+      listPrice: '12.5000',
+    });
+    const match = await matchBySku(db, restaurantId, supplierId, '500500');
+    expect(match?.productId).toBe(cucumber.id);
+    expect(match?.matchedBy).toBe('sku');
+  });
+
+  it('ignores an unlinked (productId=null) catalog item', async () => {
+    await seedRestaurantWithProducts();
+    await db.insert(supplierCatalogItems).values({
+      restaurantId,
+      supplierId,
+      productId: null,
+      supplierSku: '777',
+      supplierNameRaw: 'מוצר לא ממופה',
+      unit: 'ק״ג',
+    });
+    const match = await matchBySku(db, restaurantId, supplierId, '777');
+    expect(match).toBeNull();
+  });
+
+  it('does not leak across tenants — alias product in another restaurant is invisible', async () => {
+    await seedRestaurantWithProducts();
+    // A product + SKU alias that belong to the OTHER restaurant.
+    const [otherProduct] = await db
+      .insert(products)
+      .values({ restaurantId: otherRestaurantId, canonicalName: 'מוצר של מסעדה אחרת' })
+      .returning();
+    if (!otherProduct) throw new Error('failed to create other-restaurant product');
+    await db.insert(productAliases).values({
+      productId: otherProduct.id,
+      supplierId,
+      supplierSku: '300099',
+      supplierNameRaw: 'foreign',
+      confidence: '1.000',
+    });
+    // Querying as OUR restaurant must not surface the other tenant's product.
+    const match = await matchBySku(db, restaurantId, supplierId, '300099');
+    expect(match).toBeNull();
+  });
+
+  it('trims whitespace and returns null for empty/unknown sku', async () => {
+    const { tomato } = await seedRestaurantWithProducts();
+    await db.insert(productAliases).values({
+      productId: tomato.id,
+      supplierId,
+      supplierSku: '300099',
+      supplierNameRaw: 'עגבניה שרי',
+      confidence: '1.000',
+    });
+    expect((await matchBySku(db, restaurantId, supplierId, '  300099  '))?.productId).toBe(
+      tomato.id,
+    );
+    expect(await matchBySku(db, restaurantId, supplierId, '   ')).toBeNull();
+    expect(await matchBySku(db, restaurantId, supplierId, '999999')).toBeNull();
+  });
+});
+
 describe('matchByBarcode', () => {
   it('finds product by exact barcode', async () => {
     const { tomato } = await seedRestaurantWithProducts();
@@ -304,6 +420,52 @@ describe('matchByFuzzy', () => {
 });
 
 describe('matchProduct (composite)', () => {
+  it('prefers SKU (strategy-0) over alias/embedding/fuzzy', async () => {
+    const { tomato, cucumber } = await seedRestaurantWithProducts();
+    // Name-alias points to cucumber; SKU points to tomato. SKU must win.
+    await db.insert(productAliases).values([
+      {
+        productId: cucumber.id,
+        supplierId,
+        supplierNameRaw: 'מארז מעורב',
+        confidence: '1.000',
+      },
+      {
+        productId: tomato.id,
+        supplierId,
+        supplierSku: '300099',
+        supplierNameRaw: 'עגבניה שרי קילו',
+        confidence: '1.000',
+      },
+    ]);
+    const match = await matchProduct(db, {
+      restaurantId,
+      supplierId,
+      supplierSku: '300099',
+      rawDescription: 'מארז מעורב', // would alias-match cucumber
+    });
+    expect(match?.productId).toBe(tomato.id);
+    expect(match?.matchedBy).toBe('sku');
+  });
+
+  it('falls through SKU → alias when the sku is unknown', async () => {
+    const { tomato } = await seedRestaurantWithProducts();
+    await db.insert(productAliases).values({
+      productId: tomato.id,
+      supplierId,
+      supplierNameRaw: 'עגבניה שרי קילו',
+      confidence: '1.000',
+    });
+    const match = await matchProduct(db, {
+      restaurantId,
+      supplierId,
+      supplierSku: 'no-such-sku',
+      rawDescription: 'עגבניה שרי קילו',
+    });
+    expect(match?.productId).toBe(tomato.id);
+    expect(match?.matchedBy).toBe('alias');
+  });
+
   it('prefers alias over other strategies', async () => {
     const { tomato, cucumber } = await seedRestaurantWithProducts();
     // Alias points to cucumber, even though embedding/fuzzy would point to tomato
@@ -450,6 +612,32 @@ describe('recordConfirmedMatch (learning loop)', () => {
     // Now subsequent matchByAlias should find it
     const match = await matchByAlias(db, restaurantId, supplierId,'cherry tomatoes 1kg');
     expect(match?.productId).toBe(tomato.id);
+  });
+
+  it('backfills supplier_sku onto an existing name alias, enabling matchBySku', async () => {
+    const { tomato } = await seedRestaurantWithProducts();
+    // First confirmation by name only — no SKU yet.
+    const first = await recordConfirmedMatch(db, {
+      productId: tomato.id,
+      supplierId,
+      rawName: 'עגבניה שרי קילו',
+    });
+    expect(first.created).toBe(true);
+    expect(await matchBySku(db, restaurantId, supplierId, '300099')).toBeNull();
+
+    // Re-confirm the SAME name, now carrying the SKU → must update in place.
+    const second = await recordConfirmedMatch(db, {
+      productId: tomato.id,
+      supplierId,
+      rawName: 'עגבניה שרי קילו',
+      supplierSku: '300099',
+    });
+    expect(second.created).toBe(false);
+    expect(second.aliasId).toBe(first.aliasId);
+
+    // The SKU now resolves at confidence 1.
+    const bySku = await matchBySku(db, restaurantId, supplierId, '300099');
+    expect(bySku?.productId).toBe(tomato.id);
   });
 
   it('updates confidence on re-confirmation', async () => {

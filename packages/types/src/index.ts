@@ -38,6 +38,8 @@ export const NormalizedPurchaseOrder = z.object({
 export type NormalizedPurchaseOrder = z.infer<typeof NormalizedPurchaseOrder>;
 
 export const InvoiceOcrLine = z.object({
+  /** Supplier catalog number (מק״ט) as printed on the invoice, when present. */
+  sku: z.string().nullable().optional(),
   rawDescription: z.string(),
   qty: z.number(),
   unit: z.string(),
@@ -48,10 +50,22 @@ export const InvoiceOcrLine = z.object({
 });
 export type InvoiceOcrLine = z.infer<typeof InvoiceOcrLine>;
 
+/** A named contact on the invoice (agent, area manager, account manager, driver). */
+export const InvoiceContact = z.object({
+  /** Role as printed (e.g. "מנהל אזור", "סוכן", "מנהל תיק לקוח", "נהג"). */
+  role: z.string().nullable().optional(),
+  name: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+});
+export type InvoiceContact = z.infer<typeof InvoiceContact>;
+
 export const InvoiceOcrResult = z.object({
   supplier: z.object({
     name: z.string().optional(),
     businessId: z.string().optional(),
+    phone: z.string().nullable().optional(),
+    /** Named people on the invoice — used for cross-referencing & change alerts. */
+    contacts: z.array(InvoiceContact).optional(),
   }),
   invoiceNumber: z.string().optional(),
   invoiceDate: z.string().optional(),
@@ -65,6 +79,19 @@ export const InvoiceOcrResult = z.object({
   confidence: z.number().min(0).max(1).optional(),
 });
 export type InvoiceOcrResult = z.infer<typeof InvoiceOcrResult>;
+
+/**
+ * Payload for the 'ocr-invoice' BullMQ job. Shared between the API (producer)
+ * and the worker (consumer) so neither needs to depend on the other.
+ */
+export interface OcrInvoiceJob {
+  restaurantId: string;
+  invoiceId: string;
+  supplierId: string | null;
+  imageUrl: string;
+  /** When set, the worker bypasses real providers and uses these results. */
+  mockProviders?: { docAi: InvoiceOcrResult; claude: InvoiceOcrResult };
+}
 
 export const Tolerances = z.object({
   pricePercent: z.number().nonnegative().default(0.02),
