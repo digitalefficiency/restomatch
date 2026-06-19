@@ -16,11 +16,15 @@ import {
   poLines,
   products,
   purchaseOrders,
+  restaurants,
   suppliers,
 } from '@restomatch/db';
 import { enqueueOcrInvoice } from '@restomatch/queue';
 import { assertGrOwned, assertSupplierOwned } from '../tenant';
+import { endOfDayInTz, startOfDayInTz } from '../lib/time';
 import { memberProcedure, receiverProcedure, router } from '../trpc';
+
+const DEFAULT_TZ = 'Asia/Jerusalem';
 
 const TodayExpectationSchema = z.object({
   poId: z.string().uuid(),
@@ -42,10 +46,18 @@ export const receivingRouter = router({
    * with any in-progress goods_receipt status surfaced.
    */
   todayExpectations: memberProcedure.query(async ({ ctx }): Promise<TodayExpectation[]> => {
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(startOfDay);
-    endOfDay.setHours(23, 59, 59, 999);
+    // Day boundaries must follow the RESTAURANT'S wall clock, not the server's
+    // local time (UTC in prod) — otherwise "today" is wrong by up to a day at
+    // either end. Load the restaurant timezone (default Asia/Jerusalem).
+    const [restaurant] = await ctx.db
+      .select({ timezone: restaurants.timezone })
+      .from(restaurants)
+      .where(eq(restaurants.id, ctx.session.restaurantId))
+      .limit(1);
+    const tz = restaurant?.timezone ?? DEFAULT_TZ;
+    const now = new Date();
+    const startOfDay = startOfDayInTz(now, tz);
+    const endOfDay = endOfDayInTz(now, tz);
 
     const rows = await ctx.db
       .select({

@@ -1,8 +1,16 @@
-import type { InvoiceOcrLine, InvoiceOcrResult } from '@restomatch/types';
+import type { InvoiceOcrLine, InvoiceOcrResult, NormalizedPurchaseOrder } from '@restomatch/types';
 
 export type OcrProviderId = 'document_ai' | 'claude_vision';
 
 export type ImageSource = Buffer | URL | string;
+
+/**
+ * Parses an uploaded order document (PDF/image) into a normalized purchase
+ * order. Implemented by ClaudePoParser (real) and StubPoParser (tests/pilot).
+ */
+export interface PoDocumentParser {
+  parse(image: ImageSource): Promise<NormalizedPurchaseOrder>;
+}
 
 export interface OcrProvider {
   readonly id: OcrProviderId;

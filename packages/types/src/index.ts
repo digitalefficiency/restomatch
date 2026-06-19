@@ -6,10 +6,14 @@ export type Currency = z.infer<typeof Currency>;
 export const PurchaseOrderLine = z.object({
   externalId: z.string().optional(),
   productHint: z.string().optional(),
+  /** Supplier catalog number (מק״ט) as printed on the order, when present. */
+  sku: z.string().nullable().optional(),
   rawDescription: z.string(),
   qty: z.number().positive(),
   unit: z.string(),
   unitPrice: z.number().nonnegative().optional(),
+  /** Printed line total — used only for the import-time totals checksum. */
+  lineTotal: z.number().nonnegative().optional(),
 });
 export type PurchaseOrderLine = z.infer<typeof PurchaseOrderLine>;
 
@@ -18,6 +22,7 @@ export const NormalizedPurchaseOrder = z.object({
   platform: z.enum([
     'marketman',
     'zester',
+    'zestt',
     'tabit',
     'yarpa',
     'nash',

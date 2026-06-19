@@ -3,11 +3,21 @@ import type { NormalizedPurchaseOrder } from '@restomatch/types';
 export type PlatformId =
   | 'marketman'
   | 'zester'
+  | 'zestt'
   | 'tabit'
   | 'yarpa'
   | 'nash'
   | 'restigo'
   | 'restomatch';
+
+/**
+ * A source of PO data that arrives as a document (PDF/image) rather than an API
+ * feed — e.g. a Zestt order export. Structurally satisfied by the OCR package's
+ * Claude PO parser; kept here so procurement does not hard-depend on its types.
+ */
+export interface PoDocumentParser {
+  parse(image: unknown): Promise<NormalizedPurchaseOrder>;
+}
 
 export interface NormalizedSupplier {
   externalId: string;
@@ -48,4 +58,11 @@ export interface ProcurementAdapter {
   listProducts(ctx: AdapterContext): Promise<NormalizedProduct[]>;
 
   handleWebhook?(ctx: AdapterContext, payload: unknown): Promise<NormalizedPurchaseOrder[]>;
+
+  /**
+   * Parse an uploaded order document (PDF/image) into a normalized PO. Optional:
+   * only document-sourced platforms (e.g. Zestt PDF export) implement it; API
+   * platforms omit it. `image` is an OCR ImageSource (Buffer | URL | base64).
+   */
+  parseDocument?(ctx: AdapterContext, image: unknown): Promise<NormalizedPurchaseOrder>;
 }

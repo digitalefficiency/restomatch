@@ -91,6 +91,7 @@ export const resolutionStatus = pgEnum('resolution_status', [
 export const procurementPlatform = pgEnum('procurement_platform', [
   'marketman',
   'zester',
+  'zestt',
   'tabit',
   'yarpa',
   'nash',
@@ -446,6 +447,10 @@ export const purchaseOrders = pgTable(
      * supplier/restaurant default when reconciling this order's invoice.
      */
     vatRate: numeric('vat_rate', { precision: 5, scale: 4 }),
+    /** Buyer-side order number on an imported PO (Zestt "מספר הזמנה (לקוח)"). */
+    customerRef: text('customer_ref'),
+    /** Buyer/branch name as printed on an imported PO (Zestt "מאת"). */
+    buyerName: text('buyer_name'),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     notes: text('notes'),
     /** Outbound placement: set when a manual draft is placed (status → sent). */

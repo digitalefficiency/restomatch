@@ -27,6 +27,9 @@ import {
   type MatchInput,
   type PoLineInput,
 } from '@restomatch/matching';
+import { addCalendarDaysInTz, endOfDayInTz, startOfDayInTz } from '../lib/time';
+
+const DEFAULT_TZ = 'Asia/Jerusalem';
 
 /** PO statuses eligible to be matched against an incoming invoice. */
 const ELIGIBLE_PO_STATUSES = ['sent', 'confirmed', 'partial'] as const;
@@ -116,12 +119,32 @@ export async function buildMatchInputForInvoice(
 
   const invoiceDate = inv.invoiceDate ?? inv.createdAt;
 
+  // ── Restaurant settings: timezone, tolerances, vat rate, baseline window. ──
+  // Loaded up-front because the ±window math below must anchor to the
+  // restaurant's LOCAL calendar day, not the server's UTC clock.
+  const [restaurant] = await db
+    .select({
+      settings: restaurants.settings,
+      vatRate: restaurants.vatRate,
+      timezone: restaurants.timezone,
+    })
+    .from(restaurants)
+    .where(eq(restaurants.id, restaurantId))
+    .limit(1);
+  const tz = restaurant?.timezone ?? DEFAULT_TZ;
+
   // ── Discover the candidate PO: same supplier, eligible status, expected
   //    delivery within ±window of the invoice date; nearest delivery wins. ──
   let po: PoCandidate | null = null;
   if (inv.supplierId) {
-    const lo = new Date(invoiceDate.getTime() - PO_MATCH_WINDOW_DAYS * DAY_MS);
-    const hi = new Date(invoiceDate.getTime() + PO_MATCH_WINDOW_DAYS * DAY_MS);
+    // Anchor the window to LOCAL-day midnights: from the start of the day
+    // PO_MATCH_WINDOW_DAYS before the invoice date, to the end of the day
+    // PO_MATCH_WINDOW_DAYS after it. This keeps the ±7-day window aligned to the
+    // restaurant's calendar (DST-safe) instead of raw getTime() ± 7*DAY, which
+    // drifts by the UTC offset and shifts the window edges by a day near
+    // midnight. PO_MATCH_WINDOW_DAYS itself is unchanged (engine constant).
+    const lo = startOfDayInTz(addCalendarDaysInTz(invoiceDate, -PO_MATCH_WINDOW_DAYS, tz), tz);
+    const hi = endOfDayInTz(addCalendarDaysInTz(invoiceDate, PO_MATCH_WINDOW_DAYS, tz), tz);
     const candidates = await db
       .select({
         id: purchaseOrders.id,
@@ -141,7 +164,7 @@ export async function buildMatchInputForInvoice(
         ),
       )
       .orderBy(asc(purchaseOrders.expectedDeliveryAt));
-    po = pickNearest(candidates, invoiceDate);
+    po = pickNearest(candidates, invoiceDate, tz);
   }
 
   let poLineInputs: PoLineInput[] = [];
@@ -192,12 +215,7 @@ export async function buildMatchInputForInvoice(
     }
   }
 
-  // ── Restaurant settings: tolerances, vat rate, baseline window. ──
-  const [restaurant] = await db
-    .select({ settings: restaurants.settings, vatRate: restaurants.vatRate })
-    .from(restaurants)
-    .where(eq(restaurants.id, restaurantId))
-    .limit(1);
+  // ── Tolerances, vat rate, baseline window (restaurant loaded above). ──
   const tolerances = resolveTolerances(restaurant?.settings?.tolerances);
 
   // VAT rate precedence: PO override → supplier override → restaurant default →
@@ -296,16 +314,24 @@ export async function buildMatchInputForInvoice(
   return { input, poId: po?.id ?? null, grId };
 }
 
-/** Pick the PO whose expectedDeliveryAt is closest to the invoice date (nulls last). */
+/**
+ * Pick the PO whose expectedDeliveryAt falls on the LOCAL calendar day closest
+ * to the invoice's local day (nulls last). Comparing whole local days — rather
+ * than raw ms — means a PO due "the same day" as the invoice wins regardless of
+ * the time-of-day the timestamps happen to carry, and the result doesn't drift
+ * by the UTC offset near midnight.
+ */
 function pickNearest(
   candidates: PoCandidate[],
   invoiceDate: Date,
+  tz: string,
 ): PoCandidate | null {
   if (candidates.length === 0) return null;
+  const invDayStart = startOfDayInTz(invoiceDate, tz);
   let best = candidates[0]!;
-  let bestDelta = deltaMs(best.expectedDeliveryAt, invoiceDate);
+  let bestDelta = dayDelta(best.expectedDeliveryAt, invDayStart, tz);
   for (const c of candidates.slice(1)) {
-    const d = deltaMs(c.expectedDeliveryAt, invoiceDate);
+    const d = dayDelta(c.expectedDeliveryAt, invDayStart, tz);
     if (d < bestDelta) {
       best = c;
       bestDelta = d;
@@ -314,5 +340,12 @@ function pickNearest(
   return best;
 }
 
-const deltaMs = (d: Date | null, ref: Date): number =>
-  d == null ? Number.POSITIVE_INFINITY : Math.abs(d.getTime() - ref.getTime());
+/**
+ * Absolute number of LOCAL calendar days between a candidate's expected
+ * delivery and the (already-local-day-aligned) invoice day. Nulls sort last.
+ */
+const dayDelta = (d: Date | null, invDayStart: Date, tz: string): number => {
+  if (d == null) return Number.POSITIVE_INFINITY;
+  const candDayStart = startOfDayInTz(d, tz);
+  return Math.abs(candDayStart.getTime() - invDayStart.getTime()) / DAY_MS;
+};

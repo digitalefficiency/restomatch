@@ -85,6 +85,20 @@
       "when": 1781660000000,
       "tag": "0011_phase1_supplier_po_vat",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1781670000000,
+      "tag": "0012_phase2_zestt_enum",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1781680000000,
+      "tag": "0013_phase2_po_customer_buyer",
+      "breakpoints": true
     }
   ]
 }

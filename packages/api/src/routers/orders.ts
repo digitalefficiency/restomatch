@@ -18,11 +18,19 @@ import {
   supplierCatalogItems,
   type Database,
 } from '@restomatch/db';
+import { ClaudePoParser } from '@restomatch/ocr';
+import { ZesttAdapter } from '@restomatch/procurement';
 import { managerProcedure, memberProcedure, requireFeature, router } from '../trpc';
 import { assertPoOwned, assertSupplierOwned } from '../tenant';
 import { getEntitlements } from '../entitlements';
+import { importPurchaseOrder } from '../orders/importPo';
+
+/** Cap on an uploaded order document, decoded — a single-page PO PDF is ~50KB. */
+const MAX_PO_DOC_BYTES = 8 * 1024 * 1024;
 
 const DEFAULT_BASELINE_WINDOW_DAYS = 90;
+/** Fallback timezone for date formatting when a restaurant has none set. */
+const DEFAULT_TZ = 'Asia/Jerusalem';
 /** % over the 90-day median at which we surface an "elevated price" warning. */
 const ELEVATED_PCT = 0.05;
 
@@ -265,6 +273,59 @@ export const ordersRouter = router({
       return { poId: po.id };
     }),
 
+  /**
+   * Import a purchase order from an uploaded document (Zestt PDF export). Parses
+   * the PDF via Claude, resolves the supplier + per-line SKUs, and upserts the
+   * order idempotently. A failed totals checksum lands the PO as a draft for
+   * review rather than feeding the matcher a misread order.
+   *
+   * CREDENTIAL GATE: needs ANTHROPIC_API_KEY (mirrors the invoice OCR worker).
+   * Until keys are live, ingest stays gated — the procedure fails loudly.
+   */
+  importPo: managerProcedure
+    .input(
+      z.object({
+        platform: z.literal('zestt').default('zestt'),
+        file: z.object({
+          filename: z.string().trim().max(255),
+          /** base64-encoded PDF/image bytes. */
+          base64: z.string().min(1),
+        }),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: 'OCR not configured — set ANTHROPIC_API_KEY to import order documents',
+        });
+      }
+
+      const bytes = Buffer.from(input.file.base64, 'base64');
+      if (bytes.length === 0) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'הקובץ ריק או לא תקין' });
+      }
+      if (bytes.length > MAX_PO_DOC_BYTES) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'הקובץ גדול מדי' });
+      }
+
+      const adapter = new ZesttAdapter(new ClaudePoParser({ apiKey, platform: 'zestt' }));
+      const normalized = await adapter.parseDocument(
+        { restaurantId, credentials: { apiKey } },
+        bytes,
+      );
+
+      const result = await importPurchaseOrder(ctx.db, {
+        restaurantId,
+        normalized,
+        createdBy: ctx.session.userId,
+      });
+      return result;
+    }),
+
   cancelOrder: managerProcedure
     .input(z.object({ poId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
@@ -299,6 +360,14 @@ export const ordersRouter = router({
         .from(suppliers)
         .where(eq(suppliers.id, po.supplierId))
         .limit(1);
+      // The delivery date printed on the supplier-facing doc must be formatted
+      // in the restaurant's wall-clock timezone, not the server's.
+      const [restaurant] = await ctx.db
+        .select({ timezone: restaurants.timezone })
+        .from(restaurants)
+        .where(eq(restaurants.id, restaurantId))
+        .limit(1);
+      const tz = restaurant?.timezone ?? DEFAULT_TZ;
       const lines = await ctx.db
         .select({
           rawDescription: poLines.rawDescription,
@@ -328,7 +397,7 @@ export const ordersRouter = router({
             message: `לספק אין ${input.channel === 'email' ? 'אימייל' : 'וואטסאפ'} מוגדר`,
           });
         }
-        const body = renderOrderDocument(supplier?.name ?? 'ספק', po.expectedDeliveryAt, lines);
+        const body = renderOrderDocument(supplier?.name ?? 'ספק', po.expectedDeliveryAt, lines, tz);
         // Decouple from the (churning) notifier module: write to the outbox the
         // outboxDispatch worker already drains.
         await ctx.db.insert(notificationsOutbox).values({
@@ -375,10 +444,11 @@ function renderOrderDocument(
   supplierName: string,
   expectedDeliveryAt: Date | null,
   lines: Array<{ rawDescription: string | null; qtyOrdered: string; unit: string }>,
+  tz: string = DEFAULT_TZ,
 ): string {
   const header = `הזמנה לספק ${supplierName}`;
   const delivery = expectedDeliveryAt
-    ? `אספקה מבוקשת: ${expectedDeliveryAt.toLocaleDateString('he-IL')}`
+    ? `אספקה מבוקשת: ${expectedDeliveryAt.toLocaleDateString('he-IL', { timeZone: tz })}`
     : '';
   const items = lines
     .map((l) => `• ${l.rawDescription ?? 'פריט'} — ${l.qtyOrdered} ${l.unit}`)

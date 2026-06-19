@@ -19,6 +19,13 @@
 
 import { InvoiceOcrResult } from '@restomatch/types';
 import type { ImageSource, OcrProvider } from '../types';
+import {
+  joinTextBlocks,
+  mustFetchBytes,
+  parseJsonFromText,
+  resolveImage,
+  toContentBlock,
+} from './_anthropic';
 
 export interface ClaudeVisionConfig {
   apiKey: string;
@@ -63,98 +70,6 @@ const SYSTEM_PROMPT = `אתה מומחה לקריאת חשבוניות עברי�
 
 החזר JSON בלבד, ללא טקסט נוסף, ללא code fences.`;
 
-// Loose alias for the lazily-imported SDK content block, so we don't depend on
-// the SDK's published types at compile time (the import is dynamic).
-type AnthropicContentBlock = Record<string, unknown>;
-
-interface ImagePayload {
-  /** http(s) URL string, or null when we resolved to bytes. */
-  url: string | null;
-  /** base64-encoded bytes, when url is null. */
-  data: string | null;
-  mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'application/pdf';
-}
-
-function detectImageMime(buf: Buffer): 'image/png' | 'image/jpeg' | 'image/webp' | 'application/pdf' {
-  if (buf.subarray(0, 5).toString('latin1') === '%PDF-') return 'application/pdf';
-  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png';
-  if (buf[0] === 0xff && buf[1] === 0xd8) return 'image/jpeg';
-  if (
-    buf.subarray(0, 4).toString('latin1') === 'RIFF' &&
-    buf.subarray(8, 12).toString('latin1') === 'WEBP'
-  )
-    return 'image/webp';
-  return 'image/jpeg';
-}
-
-function mediaTypeFromUrl(url: string): ImagePayload['mediaType'] {
-  if (/\.pdf(\?|#|$)/i.test(url)) return 'application/pdf';
-  if (/\.png(\?|#|$)/i.test(url)) return 'image/png';
-  if (/\.webp(\?|#|$)/i.test(url)) return 'image/webp';
-  return 'image/jpeg';
-}
-
-/** Resolve the ImageSource into either a URL or base64 bytes + media type. */
-async function resolveImage(image: ImageSource, fetchBytes: boolean): Promise<ImagePayload> {
-  // Buffer → always base64 (with magic-byte detection).
-  if (Buffer.isBuffer(image)) {
-    return {
-      url: null,
-      data: image.toString('base64'),
-      mediaType: detectImageMime(image),
-    };
-  }
-
-  const asUrl =
-    image instanceof URL
-      ? image.toString()
-      : typeof image === 'string' && /^https?:\/\//i.test(image)
-        ? image
-        : null;
-
-  if (asUrl) {
-    const mediaType = mediaTypeFromUrl(asUrl);
-    if (!fetchBytes) {
-      return { url: asUrl, data: null, mediaType };
-    }
-    // Private bucket: fetch the bytes ourselves and send base64.
-    const res = await fetch(asUrl);
-    if (!res.ok) {
-      throw new Error(`ClaudeVision: failed to fetch image (${res.status}) from ${asUrl.slice(0, 80)}`);
-    }
-    const buf = Buffer.from(await res.arrayBuffer());
-    return { url: null, data: buf.toString('base64'), mediaType: detectImageMime(buf) };
-  }
-
-  // Bare non-URL string → assume base64-encoded image bytes.
-  return { url: null, data: image as string, mediaType: 'image/jpeg' };
-}
-
-/** Build the image/document content block for the Anthropic messages API. */
-function toContentBlock(payload: ImagePayload): AnthropicContentBlock {
-  const isPdf = payload.mediaType === 'application/pdf';
-  const blockType = isPdf ? 'document' : 'image';
-
-  if (payload.url) {
-    return { type: blockType, source: { type: 'url', url: payload.url } };
-  }
-  return {
-    type: blockType,
-    source: { type: 'base64', media_type: payload.mediaType, data: payload.data },
-  };
-}
-
-/** Extract the model's text output and isolate the JSON object. */
-function parseJsonFromText(text: string): unknown {
-  const cleaned = text.replace(/```(?:json)?/gi, '').trim();
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error(`ClaudeVision: no JSON object found in response: ${cleaned.slice(0, 200)}`);
-  }
-  return JSON.parse(cleaned.slice(start, end + 1));
-}
-
 export class ClaudeVision implements OcrProvider {
   readonly id = 'claude_vision' as const;
 
@@ -170,10 +85,7 @@ export class ClaudeVision implements OcrProvider {
     const { default: Anthropic } = (await import('@anthropic-ai/sdk')) as { default: any };
     const client = new Anthropic({ apiKey: this.config.apiKey });
 
-    const fetchBytes =
-      this.config.fetchBytes ??
-      // Non-http sources can never be URL-delivered.
-      !(image instanceof URL || (typeof image === 'string' && /^https?:\/\//i.test(image)));
+    const fetchBytes = this.config.fetchBytes ?? mustFetchBytes(image);
     const payload = await resolveImage(image, fetchBytes);
 
     // No assistant prefill — opus-4-8 returns 400 on prefilled assistant turns.
@@ -193,10 +105,7 @@ export class ClaudeVision implements OcrProvider {
       ],
     });
 
-    const text: string = (response.content ?? [])
-      .filter((b: { type?: string }) => b?.type === 'text')
-      .map((b: { text?: string }) => b.text ?? '')
-      .join('');
+    const text = joinTextBlocks(response.content);
 
     // Parse, then validate against the canonical schema. On any parse/validation
     // failure we THROW so the BullMQ job retries — never silently emit a partial

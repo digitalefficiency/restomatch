@@ -17,6 +17,8 @@
     "@restomatch/catalog": "workspace:*",
     "@restomatch/db": "workspace:*",
     "@restomatch/matching": "workspace:*",
+    "@restomatch/ocr": "workspace:*",
+    "@restomatch/procurement": "workspace:*",
     "@restomatch/queue": "workspace:*",
     "@restomatch/types": "workspace:*",
     "@restomatch/charts": "workspace:*",
@@ -30,7 +32,6 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@restomatch/ocr": "workspace:*",
     "@types/papaparse": "^5.3.14",
     "typescript": "^5.7.3",
     "vitest": "^2.1.8"

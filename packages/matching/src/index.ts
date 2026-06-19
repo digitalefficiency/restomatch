@@ -94,6 +94,7 @@ export interface MatchOutput {
 }
 
 export { runMatch } from './engine';
+export { toAgorot, toShekels, quantizeIls, mulIls, sumIls } from './money';
 export { DEFAULT_TOLERANCES, resolveTolerances } from './tolerances';
 export { unitConversionFactor, areConvertible } from './units';
 export {
