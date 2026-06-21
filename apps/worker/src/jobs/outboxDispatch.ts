@@ -42,6 +42,7 @@ interface ClaimedRow {
   target: string;
   subject: string | null;
   body: string;
+  payload: Record<string, unknown> | null;
   related_entity_type: string | null;
   related_entity_id: string | null;
   attempt_count: number;
@@ -71,7 +72,7 @@ export function startOutboxDispatchWorker() {
         FOR UPDATE SKIP LOCKED
         LIMIT ${batchSize}
       )
-      RETURNING id, restaurant_id, channel, target, subject, body,
+      RETURNING id, restaurant_id, channel, target, subject, body, payload,
                 related_entity_type, related_entity_id, attempt_count
     `)) as unknown as ClaimedRow[];
 
@@ -90,6 +91,7 @@ export function startOutboxDispatchWorker() {
         target: claimedRow.target,
         subject: claimedRow.subject,
         body: claimedRow.body,
+        html: typeof claimedRow.payload?.__html === 'string' ? claimedRow.payload.__html : undefined,
         relatedEntityType: claimedRow.related_entity_type,
         relatedEntityId: claimedRow.related_entity_id,
         attemptCount: claimedRow.attempt_count,
@@ -161,6 +163,7 @@ async function dispatch(row: {
   target: string;
   subject: string | null;
   body: string;
+  html?: string;
   relatedEntityType: string | null;
   relatedEntityId: string | null;
 }): Promise<void> {
@@ -186,6 +189,7 @@ async function dispatch(row: {
       target: row.target,
       subject: row.subject ?? undefined,
       body: row.body,
+      html: row.html,
       relatedEntityType: row.relatedEntityType ?? undefined,
       relatedEntityId: row.relatedEntityId ?? undefined,
     };

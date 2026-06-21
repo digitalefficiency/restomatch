@@ -95,6 +95,18 @@ export {
   createPushNotifier,
   isResendConfigured,
   isWhatsAppCloudConfigured,
+  renderEmail,
+  magicLinkEmail,
+  inviteEmail,
+  supplierDelayEmail,
+  orderNotPlacedEmail,
+  approvalNeededEmail,
+  weeklyLeakReportEmail,
+  endOfDayReportEmail,
+  recipientsForRestaurant,
+  MANAGER_ROLES,
+  type RenderedEmail,
+  type Recipient,
   type Notifiers,
   type Notifier,
   type NotificationPayload,
@@ -129,3 +141,4 @@ export {
 export { isOriginAllowed, type OriginCheckInput } from './csrf';
 export { clientIpFromHeaders, trpcRequestTargets, type HeaderReader } from './edge';
 export { canonicalizeEmail } from './email';
+export { startOfDayInTz, endOfDayInTz, addCalendarDaysInTz } from './lib/time';

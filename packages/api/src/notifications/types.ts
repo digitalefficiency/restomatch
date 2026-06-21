@@ -8,6 +8,12 @@ export interface NotificationPayload {
   target: string;
   subject?: string;
   body: string;
+  /**
+   * Optional rich HTML body (email only). When present, email notifiers send
+   * this as the `html` part with `body` as the plain-text fallback. Stored in
+   * the outbox `payload` jsonb under `__html` so no schema change is needed.
+   */
+  html?: string;
   payload?: Record<string, unknown>;
   relatedEntityType?: string;
   relatedEntityId?: string;

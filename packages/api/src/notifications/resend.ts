@@ -26,6 +26,7 @@ interface ResendClient {
       to: string;
       subject: string;
       text: string;
+      html?: string;
     }): Promise<{ data?: { id?: string } | null; error?: { message?: string } | null }>;
   };
 }
@@ -54,6 +55,7 @@ export function makeResendDispatcher(
       to: payload.target,
       subject: payload.subject ?? '(ללא נושא)',
       text: payload.body,
+      ...(payload.html ? { html: payload.html } : {}),
     });
 
     if (result.error) {

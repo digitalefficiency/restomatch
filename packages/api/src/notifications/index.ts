@@ -6,6 +6,24 @@ export { MockPushNotifier } from './push';
 export { EmailNotifier } from './email';
 export { makeResendDispatcher, ResendEmailNotifier, type ResendConfig } from './resend';
 export {
+  renderEmail,
+  ilsSpan,
+  magicLinkEmail,
+  inviteEmail,
+  supplierDelayEmail,
+  orderNotPlacedEmail,
+  approvalNeededEmail,
+  weeklyLeakReportEmail,
+  endOfDayReportEmail,
+  type RenderedEmail,
+  type EmailLayout,
+} from './templates';
+export {
+  recipientsForRestaurant,
+  MANAGER_ROLES,
+  type Recipient,
+} from './recipients';
+export {
   createNotifiers,
   createEmailNotifier,
   createWhatsAppNotifier,

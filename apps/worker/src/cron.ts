@@ -14,11 +14,17 @@
 import { makeQueue } from './queue';
 import type { BaselinesJob } from './jobs/baselines';
 import type { DailyExpectationsJob } from './jobs/dailyExpectations';
+import type { EndOfDayReportJob } from './jobs/endOfDayReport';
+import type { OrderRemindersJob } from './jobs/orderReminders';
 import type { OutboxDispatchJob } from './jobs/outboxDispatch';
+import type { SupplierDelaysJob } from './jobs/supplierDelays';
 
 const dailyExpectationsQueue = makeQueue<DailyExpectationsJob>('daily-expectations');
 const baselinesQueue = makeQueue<BaselinesJob>('baselines');
 const outboxQueue = makeQueue<OutboxDispatchJob>('outbox-dispatch');
+const orderRemindersQueue = makeQueue<OrderRemindersJob>('order-reminders');
+const supplierDelaysQueue = makeQueue<SupplierDelaysJob>('supplier-delays');
+const endOfDayReportQueue = makeQueue<EndOfDayReportJob>('end-of-day-report');
 
 const TZ = 'Asia/Jerusalem';
 
@@ -44,11 +50,38 @@ export async function registerCronSchedules(): Promise<void> {
     { name: 'outbox-dispatch', data: {} },
   );
 
-  console.log('[cron] registered: daily-expectations(06:00), baselines(02:00), outbox-dispatch(60s)');
+  // Order reminders — every day 09:00 IL: alert on order-days with no PO placed
+  await orderRemindersQueue.upsertJobScheduler(
+    'order-reminders-09',
+    { pattern: '0 9 * * *', tz: TZ },
+    { name: 'order-reminders', data: {} },
+  );
+
+  // Supplier delays — every day 10:00 IL: alert on placed POs past delivery
+  await supplierDelaysQueue.upsertJobScheduler(
+    'supplier-delays-10',
+    { pattern: '0 10 * * *', tz: TZ },
+    { name: 'supplier-delays', data: {} },
+  );
+
+  // End-of-day report — every day 19:00 IL: open-credits digest to managers
+  await endOfDayReportQueue.upsertJobScheduler(
+    'end-of-day-report-19',
+    { pattern: '0 19 * * *', tz: TZ },
+    { name: 'end-of-day-report', data: {} },
+  );
+
+  console.log(
+    '[cron] registered: daily-expectations(06:00), baselines(02:00), outbox-dispatch(60s), ' +
+      'order-reminders(09:00), supplier-delays(10:00), end-of-day-report(19:00)',
+  );
 }
 
 export async function unregisterCronSchedules(): Promise<void> {
   await dailyExpectationsQueue.removeJobScheduler('daily-expectations-06');
   await baselinesQueue.removeJobScheduler('baselines-02');
   await outboxQueue.removeJobScheduler('outbox-dispatch-60s');
+  await orderRemindersQueue.removeJobScheduler('order-reminders-09');
+  await supplierDelaysQueue.removeJobScheduler('supplier-delays-10');
+  await endOfDayReportQueue.removeJobScheduler('end-of-day-report-19');
 }

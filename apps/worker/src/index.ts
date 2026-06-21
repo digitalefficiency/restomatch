@@ -3,9 +3,12 @@ import { registerCronSchedules } from './cron';
 import { startBaselinesWorker } from './jobs/baselines';
 import { startDailyExpectationsWorker } from './jobs/dailyExpectations';
 import { startImportCatalogWorker } from './jobs/importCatalog';
+import { startEndOfDayReportWorker } from './jobs/endOfDayReport';
 import { startMatchInvoiceWorker } from './jobs/matchInvoice';
 import { startOcrInvoiceWorker } from './jobs/ocrInvoice';
+import { startOrderRemindersWorker } from './jobs/orderReminders';
 import { startOutboxDispatchWorker } from './jobs/outboxDispatch';
+import { startSupplierDelaysWorker } from './jobs/supplierDelays';
 import { startSyncPlatformsWorker } from './jobs/syncPlatforms';
 
 interface SentryNode {
@@ -48,6 +51,9 @@ const workers = [
   startMatchInvoiceWorker(),
   startImportCatalogWorker(),
   startOutboxDispatchWorker(),
+  startOrderRemindersWorker(),
+  startSupplierDelaysWorker(),
+  startEndOfDayReportWorker(),
 ];
 
 console.log(`[worker] started ${workers.length} workers`);

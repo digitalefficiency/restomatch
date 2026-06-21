@@ -22,7 +22,12 @@ export async function enqueueNotification(
       target: payload.target,
       subject: payload.subject ?? null,
       body: payload.body,
-      payload: payload.payload ?? null,
+      // Fold an optional HTML body into the jsonb payload (under `__html`) so we
+      // can deliver rich email without a schema change. Plain `body` stays the
+      // text fallback.
+      payload: payload.html
+        ? { ...(payload.payload ?? {}), __html: payload.html }
+        : (payload.payload ?? null),
       status: 'queued',
       relatedEntityType: payload.relatedEntityType ?? null,
       relatedEntityId: payload.relatedEntityId ?? null,
