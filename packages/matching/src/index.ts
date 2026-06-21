@@ -34,6 +34,8 @@ export interface Discrepancy {
 export interface PoLineInput {
   id: string;
   productId: string | null;
+  /** Supplier catalog number (מק״ט). Pairing fallback when productId is unresolved. */
+  supplierSku?: string | null;
   qtyOrdered: number;
   unit: string;
   unitPriceExpected: number | null;
@@ -49,6 +51,8 @@ export interface GrLineInput {
 export interface InvoiceLineInput {
   id: string;
   productId: string | null;
+  /** Supplier catalog number (מק״ט). Pairing fallback when productId is unresolved. */
+  supplierSku?: string | null;
   qtyBilled: number;
   unit: string;
   unitPriceBilled: number;

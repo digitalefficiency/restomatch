@@ -99,6 +99,7 @@ export async function buildMatchInputForInvoice(
     .select({
       id: invoiceLines.id,
       productId: invoiceLines.productId,
+      supplierSku: invoiceLines.supplierSku,
       qtyBilled: invoiceLines.qtyBilled,
       unit: invoiceLines.unit,
       unitPriceBilled: invoiceLines.unitPriceBilled,
@@ -111,6 +112,7 @@ export async function buildMatchInputForInvoice(
   const invoiceLineInputs: InvoiceLineInput[] = invLineRows.map((l) => ({
     id: l.id,
     productId: l.productId,
+    supplierSku: l.supplierSku,
     qtyBilled: num(l.qtyBilled),
     unit: l.unit,
     unitPriceBilled: num(l.unitPriceBilled),
@@ -175,6 +177,7 @@ export async function buildMatchInputForInvoice(
       .select({
         id: poLines.id,
         productId: poLines.productId,
+        supplierSku: poLines.supplierSku,
         qtyOrdered: poLines.qtyOrdered,
         unit: poLines.unit,
         unitPriceExpected: poLines.unitPriceExpected,
@@ -184,6 +187,7 @@ export async function buildMatchInputForInvoice(
     poLineInputs = poLineRows.map((p) => ({
       id: p.id,
       productId: p.productId,
+      supplierSku: p.supplierSku,
       qtyOrdered: num(p.qtyOrdered),
       unit: p.unit,
       unitPriceExpected: p.unitPriceExpected == null ? null : Number(p.unitPriceExpected),

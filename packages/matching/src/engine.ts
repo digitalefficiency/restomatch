@@ -198,13 +198,31 @@ export function runMatch(input: MatchInput): MatchOutput {
     invoiceLinesByProduct.set(key, list);
   }
 
+  // Secondary index by supplier SKU (מק״ט) — the pairing fallback for lines that
+  // share a SKU but aren't yet mapped to a product (e.g. a freshly imported order
+  // whose SKUs haven't been linked). Without it, an unmapped order produces a
+  // false MISSING_ON_INVOICE + UNORDERED_ITEM pair per line.
+  const invoiceLinesBySku = new Map<string, InvoiceLineInput[]>();
+  for (const il of invoiceLines) {
+    if (!il.supplierSku) continue;
+    const list = invoiceLinesBySku.get(il.supplierSku) ?? [];
+    list.push(il);
+    invoiceLinesBySku.set(il.supplierSku, list);
+  }
+
   const matchedInvoiceLineIds = new Set<string>();
+  const pickUnmatched = (list: InvoiceLineInput[] | undefined): InvoiceLineInput | undefined =>
+    list?.find((l) => !matchedInvoiceLineIds.has(l.id));
 
   // 5. Per-PO-line analysis
   for (const po of poLines) {
     const gr = grByPoLineId.get(po.id);
-    const invLines = po.productId ? invoiceLinesByProduct.get(po.productId) ?? [] : [];
-    const inv = invLines.find((l) => !matchedInvoiceLineIds.has(l.id));
+    let inv = pickUnmatched(po.productId ? invoiceLinesByProduct.get(po.productId) : undefined);
+    // Fall back to SKU pairing ONLY when the PO line has no resolved product —
+    // a productId-set line that finds no invoice match is a genuine MISSING.
+    if (!inv && !po.productId && po.supplierSku) {
+      inv = pickUnmatched(invoiceLinesBySku.get(po.supplierSku));
+    }
     if (inv) matchedInvoiceLineIds.add(inv.id);
 
     // 5a. Qty: ordered vs received

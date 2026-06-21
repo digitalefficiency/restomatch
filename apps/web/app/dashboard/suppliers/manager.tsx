@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import type { DeliverySchedule } from '@restomatch/db';
 import { Pencil, Plus, Power, Truck } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
@@ -24,7 +25,7 @@ interface Supplier {
 }
 
 type Day = 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat';
-const DAYS: { key: Day; label: string }[] = [
+export const DAYS: { key: Day; label: string }[] = [
   { key: 'sun', label: 'ראשון' },
   { key: 'mon', label: 'שני' },
   { key: 'tue', label: 'שלישי' },
@@ -34,7 +35,7 @@ const DAYS: { key: Day; label: string }[] = [
   { key: 'sat', label: 'שבת' },
 ];
 
-interface FormState {
+export interface FormState {
   name: string;
   businessId: string;
   contactEmail: string;
@@ -54,7 +55,7 @@ const emptyForm: FormState = {
 };
 
 /** Stored {day:["HH:MM"]} → form {day:"HH:MM"} (first time per day). */
-function scheduleToForm(s: Supplier['deliverySchedule']): Partial<Record<Day, string>> {
+export function scheduleToForm(s: DeliverySchedule | null): Partial<Record<Day, string>> {
   const out: Partial<Record<Day, string>> = {};
   if (!s) return out;
   for (const d of DAYS) {
@@ -64,7 +65,7 @@ function scheduleToForm(s: Supplier['deliverySchedule']): Partial<Record<Day, st
   return out;
 }
 
-function toPatch(form: FormState) {
+export function toPatch(form: FormState) {
   const deliverySchedule: Partial<Record<Day, string[]>> = {};
   let hasSchedule = false;
   for (const d of DAYS) {
@@ -91,11 +92,9 @@ export function SupplierManager() {
   const utils = trpc.useUtils();
   const list = trpc.suppliers.list.useQuery({ includeInactive: true });
   const [creating, setCreating] = useState(false);
-  const [editId, setEditId] = useState<string | null>(null);
 
   const invalidate = () => utils.suppliers.list.invalidate();
   const create = trpc.suppliers.create.useMutation({ onSuccess: () => { setCreating(false); void invalidate(); } });
-  const update = trpc.suppliers.update.useMutation({ onSuccess: () => { setEditId(null); void invalidate(); } });
   const setActive = trpc.suppliers.setActive.useMutation({ onSuccess: () => void invalidate() });
 
   if (list.isLoading) {
@@ -113,7 +112,7 @@ export function SupplierManager() {
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-muted">{suppliers.length} ספקים</p>
         {!creating && (
-          <Button variant="primary" size="sm" onClick={() => { setEditId(null); setCreating(true); }}>
+          <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
             <Plus className="h-4 w-4" /> ספק חדש
           </Button>
         )}
@@ -138,34 +137,14 @@ export function SupplierManager() {
         />
       ) : (
         <div className="space-y-3">
-          {suppliers.map((s) =>
-            editId === s.id ? (
-              <SupplierForm
-                key={s.id}
-                title={`עריכת ${s.name}`}
-                initial={{
-                  name: s.name,
-                  businessId: s.businessId ?? '',
-                  contactEmail: s.contactEmail ?? '',
-                  contactWhatsapp: s.contactWhatsapp ?? '',
-                  paymentTerms: s.paymentTerms ?? '',
-                  schedule: scheduleToForm(s.deliverySchedule),
-                }}
-                submitting={update.isPending}
-                error={update.error?.message ?? null}
-                onCancel={() => setEditId(null)}
-                onSubmit={(form) => update.mutate({ supplierId: s.id, patch: toPatch(form) })}
-              />
-            ) : (
-              <SupplierRow
-                key={s.id}
-                supplier={s}
-                onEdit={() => { setCreating(false); setEditId(s.id); }}
-                onToggleActive={() => setActive.mutate({ supplierId: s.id, active: !s.active })}
-                toggling={setActive.isPending}
-              />
-            ),
-          )}
+          {suppliers.map((s) => (
+            <SupplierRow
+              key={s.id}
+              supplier={s}
+              onToggleActive={() => setActive.mutate({ supplierId: s.id, active: !s.active })}
+              toggling={setActive.isPending}
+            />
+          ))}
         </div>
       )}
     </div>
@@ -174,12 +153,10 @@ export function SupplierManager() {
 
 function SupplierRow({
   supplier,
-  onEdit,
   onToggleActive,
   toggling,
 }: {
   supplier: Supplier;
-  onEdit: () => void;
   onToggleActive: () => void;
   toggling: boolean;
 }) {
@@ -188,7 +165,12 @@ function SupplierRow({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h3 className="truncate text-base font-bold text-ink">{supplier.name}</h3>
+            <Link
+              href={`/dashboard/suppliers/${supplier.id}`}
+              className="truncate text-base font-bold text-ink underline-offset-4 hover:text-primary hover:underline"
+            >
+              {supplier.name}
+            </Link>
             {!supplier.active && <Badge tone="neutral">לא פעיל</Badge>}
             {supplier.sourcePlatform && <Badge tone="info">{supplier.sourcePlatform}</Badge>}
           </div>
@@ -209,9 +191,11 @@ function SupplierRow({
           </dl>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Button variant="secondary" size="sm" onClick={onEdit}>
-            <Pencil className="h-3.5 w-3.5" /> עריכה
-          </Button>
+          <Link href={`/dashboard/suppliers/${supplier.id}`}>
+            <Button variant="secondary" size="sm">
+              <Pencil className="h-3.5 w-3.5" /> עריכה
+            </Button>
+          </Link>
           <Button variant="ghost" size="sm" loading={toggling} onClick={onToggleActive}>
             <Power className="h-3.5 w-3.5" /> {supplier.active ? 'השבת' : 'הפעל'}
           </Button>
@@ -221,7 +205,7 @@ function SupplierRow({
   );
 }
 
-function SupplierForm({
+export function SupplierForm({
   title,
   initial,
   submitting,

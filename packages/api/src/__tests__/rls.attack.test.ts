@@ -12,6 +12,7 @@ import {
   eq,
   goodsReceipts,
   grLines,
+  invitations,
   invoiceLines,
   invoiceScans,
   invoices,
@@ -197,6 +198,10 @@ describe('every tenant table is invisible cross-tenant (raw probes)', () => {
     {
       name: 'memberships',
       probe: (tx) => tx.select({ rid: memberships.restaurantId }).from(memberships),
+    },
+    {
+      name: 'invitations',
+      probe: (tx) => tx.select({ rid: invitations.restaurantId }).from(invitations),
     },
   ];
 

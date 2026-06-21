@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
 import { ArrowDownRight, ArrowUpRight, Minus } from 'lucide-react';
@@ -47,7 +48,12 @@ export function SuppliersList({ initial }: { initial: Scorecard[] }) {
           <Card key={s.supplierId} as="article" elevated flow>
             <header className="mb-4 flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <h3 className="truncate text-lg font-bold tracking-tight text-ink">{s.supplierName}</h3>
+                <Link
+                  href={`/dashboard/suppliers/${s.supplierId}`}
+                  className="truncate text-lg font-bold tracking-tight text-ink underline-offset-4 hover:text-primary hover:underline"
+                >
+                  {s.supplierName}
+                </Link>
                 <p className="mt-1 font-mono text-xs tabular-nums text-subtle">
                   {s.matchRunsCount} <span className="font-sans">השוואות בתקופה</span>
                 </p>

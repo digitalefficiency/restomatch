@@ -12,8 +12,11 @@ import {
   Settings,
   ShoppingCart,
   Truck,
+  Users,
 } from 'lucide-react';
+import type { UserRole } from '@restomatch/db';
 import { cn } from '@/lib/components';
+import { canSeeRoute } from '@/lib/roles';
 
 const LINKS = [
   { href: '/dashboard', label: 'סקירה', icon: LayoutDashboard },
@@ -24,14 +27,15 @@ const LINKS = [
   { href: '/dashboard/catalog', label: 'קטלוג', icon: Boxes },
   { href: '/dashboard/orders', label: 'הזמנות', icon: ShoppingCart },
   { href: '/dashboard/exports', label: 'ייצוא', icon: FileDown },
+  { href: '/dashboard/team', label: 'צוות', icon: Users },
   { href: '/dashboard/settings', label: 'הגדרות', icon: Settings },
 ];
 
-export function DashboardNav() {
+export function DashboardNav({ role }: { role: UserRole }) {
   const pathname = usePathname();
   return (
     <nav className="flex flex-wrap gap-1 text-sm" aria-label="ניווט ראשי">
-      {LINKS.map(({ href, label, icon: Icon }) => {
+      {LINKS.filter(({ href }) => canSeeRoute(role, href)).map(({ href, label, icon: Icon }) => {
         const active = href === '/dashboard' ? pathname === href : pathname.startsWith(href);
         return (
           <Link

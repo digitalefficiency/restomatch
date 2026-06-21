@@ -14,6 +14,8 @@ import { suppliersRouter } from './routers/suppliers';
 import { catalogRouter } from './routers/catalog';
 import { ordersRouter } from './routers/orders';
 import { matchRouter } from './routers/match';
+import { mappingRouter } from './routers/mapping';
+import { teamRouter } from './routers/team';
 
 export const appRouter = router({
   owner: ownerRouter,
@@ -31,6 +33,8 @@ export const appRouter = router({
   catalog: catalogRouter,
   orders: ordersRouter,
   match: matchRouter,
+  mapping: mappingRouter,
+  team: teamRouter,
 });
 
 export type AppRouter = typeof appRouter;

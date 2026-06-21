@@ -1,6 +1,8 @@
 import NextAuth from 'next-auth';
 import { NextResponse } from 'next/server';
+import type { UserRole } from '@restomatch/db';
 import { authConfig } from './auth.config';
+import { allowedRolesForPath } from './lib/roles';
 
 const { auth } = NextAuth(authConfig);
 
@@ -32,6 +34,21 @@ export default auth((req) => {
     url.pathname = '/login';
     url.searchParams.set('callbackUrl', req.nextUrl.pathname);
     return NextResponse.redirect(url);
+  }
+
+  // Server-side role gate: a signed-in member hitting a dashboard route their
+  // role can't see is bounced to the overview. The nav hides these links and the
+  // tRPC procedures enforce data access — this also blocks direct-URL access.
+  // (Role can be briefly stale within the JWT revalidation window; acceptable.)
+  const role = (req.auth?.user as { role?: UserRole | null } | undefined)?.role ?? null;
+  if (req.auth && role && path.startsWith('/dashboard')) {
+    const allowed = allowedRolesForPath(path);
+    if (allowed && !allowed.includes(role)) {
+      const url = req.nextUrl.clone();
+      url.pathname = '/dashboard';
+      url.search = '';
+      return NextResponse.redirect(url);
+    }
   }
   return NextResponse.next();
 });

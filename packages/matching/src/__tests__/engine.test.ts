@@ -348,6 +348,59 @@ describe('runMatch — aggregate checks', () => {
   });
 });
 
+describe('runMatch — supplier SKU pairing fallback (unmapped order)', () => {
+  it('pairs PO↔invoice by מק״ט when neither line is mapped to a product', () => {
+    // A freshly imported Zestt order: SKUs present, productId not yet linked.
+    const po = poLine({ id: 'po-z', productId: null, supplierSku: '300099', qtyOrdered: 12, unitPriceExpected: 84 });
+    const out = runMatch(
+      input({
+        poLines: [po],
+        grLines: [grLine({ poLineId: po.id, productId: null, qtyReceived: 12 })],
+        invoiceLines: [
+          invoiceLine({ productId: null, supplierSku: '300099', qtyBilled: 12, unitPriceBilled: 84, lineTotal: 1008 }),
+        ],
+        invoice: invoiceHeader({ totalExclVat: 1008, vatAmount: 171.36, totalInclVat: 1179.36 }),
+      }),
+    );
+    // SKU pairing means no phantom MISSING_ON_INVOICE + UNORDERED_ITEM pair.
+    expect(ofType(out.discrepancies, 'MISSING_ON_INVOICE')).toEqual([]);
+    expect(ofType(out.discrepancies, 'UNORDERED_ITEM')).toEqual([]);
+  });
+
+  it('still surfaces a real price discrepancy on a SKU-paired line', () => {
+    const po = poLine({ id: 'po-z', productId: null, supplierSku: '300099', qtyOrdered: 12, unitPriceExpected: 84 });
+    const out = runMatch(
+      input({
+        poLines: [po],
+        grLines: [grLine({ poLineId: po.id, productId: null, qtyReceived: 12 })],
+        // Billed at 95 vs ordered 84 → price leak, even though unmapped.
+        invoiceLines: [
+          invoiceLine({ productId: null, supplierSku: '300099', qtyBilled: 12, unitPriceBilled: 95, lineTotal: 1140 }),
+        ],
+        invoice: invoiceHeader({ totalExclVat: 1140, vatAmount: 193.8, totalInclVat: 1333.8 }),
+      }),
+    );
+    expect(ofType(out.discrepancies, 'PRICE_HIGHER')).toHaveLength(1);
+    expect(ofType(out.discrepancies, 'UNORDERED_ITEM')).toEqual([]);
+  });
+
+  it('does NOT use the SKU fallback to mask a genuine MISSING (productId set, no match)', () => {
+    const po = poLine({ id: 'po-1', productId: 'product-9', supplierSku: '300099', qtyOrdered: 10, unitPriceExpected: 8 });
+    const out = runMatch(
+      input({
+        poLines: [po],
+        grLines: [grLine({ poLineId: po.id, productId: 'product-9', qtyReceived: 10 })],
+        // Different product + different SKU → the ordered line was not invoiced.
+        invoiceLines: [
+          invoiceLine({ productId: 'other', supplierSku: 'XYZ', qtyBilled: 5, unitPriceBilled: 8, lineTotal: 40 }),
+        ],
+        invoice: invoiceHeader({ totalExclVat: 40, vatAmount: 6.8, totalInclVat: 46.8 }),
+      }),
+    );
+    expect(ofType(out.discrepancies, 'MISSING_ON_INVOICE')).toHaveLength(1);
+  });
+});
+
 describe('runMatch — duplicate detection', () => {
   it('DUPLICATE_INVOICE when invoice number already exists for supplier', () => {
     const known = new Set(['INV-1001', 'INV-1002']);

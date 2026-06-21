@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { auth, signOut } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
 import { Button } from '@/lib/components';
+import { labelForRole } from '@/lib/roles';
 import { DashboardNav } from './nav';
 import { DashboardSearch } from './search';
 
@@ -37,7 +38,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               {session.user.email} · <span className="font-sans text-muted">{labelForRole(active.role)}</span>
             </p>
           </div>
-          <DashboardNav />
+          <DashboardNav role={active.role} />
           <div className="flex items-center gap-3">
             <DashboardSearch />
             <form action={logout}>
@@ -51,15 +52,4 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <div className="mx-auto max-w-6xl px-6 py-8">{children}</div>
     </main>
   );
-}
-
-function labelForRole(role: string): string {
-  const map: Record<string, string> = {
-    owner: 'בעלים',
-    manager: 'מנהל/ת',
-    receiver: 'מקבל סחורה',
-    bookkeeper: 'חשב/ת',
-    chef: 'שף',
-  };
-  return map[role] ?? role;
 }

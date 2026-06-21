@@ -235,6 +235,9 @@ importers:
       '@restomatch/procurement':
         specifier: workspace:*
         version: link:../../packages/procurement
+      '@restomatch/queue':
+        specifier: workspace:*
+        version: link:../../packages/queue
       '@restomatch/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -272,6 +275,12 @@ importers:
       '@restomatch/observability':
         specifier: workspace:*
         version: link:../observability
+      '@restomatch/ocr':
+        specifier: workspace:*
+        version: link:../ocr
+      '@restomatch/procurement':
+        specifier: workspace:*
+        version: link:../procurement
       '@restomatch/queue':
         specifier: workspace:*
         version: link:../queue
@@ -300,9 +309,6 @@ importers:
         specifier: ^3.24.1
         version: 3.25.76
     devDependencies:
-      '@restomatch/ocr':
-        specifier: workspace:*
-        version: link:../ocr
       '@types/papaparse':
         specifier: ^5.3.14
         version: 5.5.2

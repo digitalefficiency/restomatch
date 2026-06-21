@@ -14,6 +14,8 @@ import {
 } from '@restomatch/db';
 import { authConfig } from './auth.config';
 import { authDb } from './lib/authDb';
+import { isEmailConfigured, sendEmail } from './lib/email';
+import { magicLinkEmail } from './lib/emailTemplates';
 import { enforceMagicLinkLimit } from './lib/rateLimit';
 
 declare module 'next-auth' {
@@ -63,7 +65,10 @@ async function sendMagicLink({
     );
   }
 
-  if (process.env.NODE_ENV !== 'production' || !process.env.EMAIL_FROM) {
+  // Dev / preview / no provider: print the link to stdout (and the e2e file
+  // hook) so login still works without an email provider. The check-email page
+  // tells devs to grep the server log for this banner.
+  if (!isEmailConfigured()) {
     console.log('\n──────── MAGIC LINK ────────');
     console.log(`to: ${identifier}`);
     console.log(`url: ${url}`);
@@ -78,7 +83,9 @@ async function sendMagicLink({
     }
     return;
   }
-  throw new Error('production email sending not configured yet');
+
+  const { subject, html, text } = magicLinkEmail({ url });
+  await sendEmail({ to: identifier, subject, html, text });
 }
 
 export const { handlers, signIn, signOut, auth } = NextAuth({

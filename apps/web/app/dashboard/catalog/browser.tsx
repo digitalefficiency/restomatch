@@ -17,21 +17,34 @@ const PAGE = 50;
 export function CatalogBrowser({
   suppliers,
   initial,
+  lockedSupplierId,
 }: {
   suppliers: Supplier[];
   initial: CatalogItem[];
+  /**
+   * When set (supplier-detail "hub" view), the supplier filter is hidden and
+   * every query is scoped to this supplier. `initial` should already be that
+   * supplier's items so the first paint matches the locked scope.
+   */
+  lockedSupplierId?: string;
 }) {
   const [supplierId, setSupplierId] = useState<string>('');
   const [search, setSearch] = useState('');
   const [limit, setLimit] = useState(PAGE);
 
+  const locked = !!lockedSupplierId;
+  const effectiveSupplierId = lockedSupplierId ?? (supplierId || undefined);
+
   const q = trpc.catalog.items.useQuery(
     {
-      supplierId: supplierId || undefined,
+      supplierId: effectiveSupplierId,
       search: search.trim() || undefined,
       limit,
     },
-    { initialData: !supplierId && !search.trim() && limit === PAGE ? initial : undefined },
+    {
+      initialData:
+        !search.trim() && limit === PAGE && (locked || !supplierId) ? initial : undefined,
+    },
   );
 
   const items = q.data ?? [];
@@ -40,22 +53,24 @@ export function CatalogBrowser({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
-        <div className="min-w-[12rem]">
-          <label className="mb-1.5 block text-sm font-medium text-muted" htmlFor="cat-supplier">
-            ספק
-          </label>
-          <select
-            id="cat-supplier"
-            value={supplierId}
-            onChange={(e) => { setSupplierId(e.target.value); setLimit(PAGE); }}
-            className="w-full rounded-xl border border-line bg-surface-2 px-3 py-2 text-ink focus:border-primary/50 focus:outline-none"
-          >
-            <option value="">כל הספקים</option>
-            {suppliers.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
-        </div>
+        {!locked && (
+          <div className="min-w-[12rem]">
+            <label className="mb-1.5 block text-sm font-medium text-muted" htmlFor="cat-supplier">
+              ספק
+            </label>
+            <select
+              id="cat-supplier"
+              value={supplierId}
+              onChange={(e) => { setSupplierId(e.target.value); setLimit(PAGE); }}
+              className="w-full rounded-xl border border-line bg-surface-2 px-3 py-2 text-ink focus:border-primary/50 focus:outline-none"
+            >
+              <option value="">כל הספקים</option>
+              {suppliers.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="relative min-w-[16rem] flex-1">
           <label className="mb-1.5 block text-sm font-medium text-muted" htmlFor="cat-search">
             חיפוש
@@ -84,7 +99,7 @@ export function CatalogBrowser({
           <table className="w-full text-right text-sm">
             <thead>
               <tr className="border-b border-line text-xs uppercase tracking-wide text-subtle">
-                <th className="px-4 py-3 font-medium">ספק</th>
+                {!locked && <th className="px-4 py-3 font-medium">ספק</th>}
                 <th className="px-4 py-3 font-medium">תיאור הספק</th>
                 <th className="px-4 py-3 font-medium">מוצר</th>
                 <th className="px-4 py-3 font-medium">מק״ט</th>
@@ -96,7 +111,7 @@ export function CatalogBrowser({
             <tbody>
               {items.map((it) => (
                 <tr key={it.id} className="border-b border-line/60 last:border-0 hover:bg-surface-2/60">
-                  <td className="px-4 py-3 text-muted">{it.supplierName}</td>
+                  {!locked && <td className="px-4 py-3 text-muted">{it.supplierName}</td>}
                   <td className="px-4 py-3 text-ink">{it.supplierNameRaw}</td>
                   <td className="px-4 py-3 text-muted">{it.canonicalName ?? '—'}</td>
                   <td className="px-4 py-3 font-mono text-xs text-subtle">{it.supplierSku ?? '—'}</td>

@@ -16,8 +16,8 @@ export default async function CatalogPage() {
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <SectionHeader
           level={1}
-          title="קטלוג"
-          subtitle="מחירוני הספקים שלכם — הבסיס לבניית הזמנות ולהצלבת חשבוניות."
+          title="חיפוש מאוחד בקטלוג"
+          subtitle="חיפוש אחד לרוחב כל הספקים — מצאו כל מוצר מכל מחירון במקום אחד, הבסיס לבניית הזמנות ולהצלבת חשבוניות."
         />
         <Link href="/dashboard/catalog/import">
           <Button variant="primary" size="sm">

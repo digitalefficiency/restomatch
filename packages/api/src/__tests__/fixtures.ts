@@ -6,6 +6,7 @@ import {
   eq,
   goodsReceipts,
   grLines,
+  invitations,
   invoiceLines,
   invoices,
   matchRuns,
@@ -68,6 +69,7 @@ export async function resetDb(db: Database): Promise<void> {
   // restaurants.billing_account_id → billing_accounts (set null), so null first.
   await db.update(restaurants).set({ billingAccountId: null });
   await db.delete(billingAccounts);
+  await db.delete(invitations);
   await db.delete(memberships);
   await db.delete(users);
   await db.delete(restaurants);
@@ -290,6 +292,16 @@ export async function seedTenant(db: Database, tag: string): Promise<Tenant> {
     title: `אירוע סודי של ${tag}`,
     entityType: 'match_run',
     entityId: matchRun.id,
+  });
+
+  // A pending team invite, so the RLS attack suite can prove cross-tenant
+  // isolation of `invitations` (it carries email + token — must never leak).
+  await db.insert(invitations).values({
+    restaurantId: restaurant.id,
+    email: `invitee-${tag}@attack.test`,
+    role: 'receiver',
+    tokenHash: `attack-token-${tag}`,
+    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
   });
 
   return {
