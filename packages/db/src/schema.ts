@@ -28,6 +28,13 @@ export const userRole = pgEnum('user_role', [
   'chef',
 ]);
 
+export const invitationStatus = pgEnum('invitation_status', [
+  'pending',
+  'accepted',
+  'revoked',
+  'expired',
+]);
+
 export const poStatus = pgEnum('po_status', [
   'draft',
   'sent',
@@ -249,6 +256,50 @@ export const memberships = pgTable(
 );
 
 /* ──────────────────────────────────────────────────────────────────────────
+ * Team invitations — self-serve email invite → accept-on-login → membership.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export const invitations = pgTable(
+  'invitations',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    /** Destination mailbox, stored canonicalized (lower-cased) for match/dedupe. */
+    email: text('email').notNull(),
+    /** Role granted on accept. NEVER taken from client input at accept time. */
+    role: userRole('role').notNull(),
+    /**
+     * sha256(raw token) as hex. The raw token lives only in the invite email
+     * link, never persisted — a DB/log leak therefore cannot replay an invite.
+     */
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    status: invitationStatus('status').notNull().default('pending'),
+    invitedByUserId: uuid('invited_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+    acceptedByUserId: uuid('accepted_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('invitations_token_hash_unique').on(t.tokenHash),
+    // At most one PENDING invite per (restaurant, email). Partial so an
+    // accepted/revoked/expired row never blocks re-inviting the same address.
+    uniqueIndex('invitations_pending_unique')
+      .on(t.restaurantId, t.email)
+      .where(sql`${t.status} = 'pending'`),
+    index('invitations_restaurant_idx').on(t.restaurantId, t.status),
+    index('invitations_email_idx').on(t.email),
+  ],
+);
+
+/* ──────────────────────────────────────────────────────────────────────────
  * Suppliers
  * ────────────────────────────────────────────────────────────────────────── */
 
@@ -332,6 +383,32 @@ export const products = pgTable(
     restaurantId: uuid('restaurant_id')
       .notNull()
       .references(() => restaurants.id, { onDelete: 'cascade' }),
+    /**
+     * Exclusivity FOUNDATION (Wave 4): the supplier that owns this product.
+     *
+     * NULLABLE in this wave-set — the NOT-NULL flip is DEFERRED post-pilot, so we
+     * never block existing rows (legacy products have no owner yet; the backfill
+     * script assigns owners or reports needs_owner). The FK is ON DELETE RESTRICT:
+     * a supplier that owns products cannot be hard-deleted (mirrors
+     * purchase_orders.supplier_id), forcing a soft-deactivate + re-point instead.
+     *
+     * WARNING: the FK alone does NOT enforce same-tenant — a row could reference a
+     * supplier in another restaurant. commitCatalogRows asserts
+     * supplier.restaurantId === product.restaurantId at write time.
+     *
+     * The matcher (matchProductTopN) treats a populated supplier_id as a direct
+     * "this supplier sells this product" proof (additive to the existing
+     * alias/catalog-item supplier-scope guard); when null it is inert.
+     */
+    supplierId: uuid('supplier_id').references(() => suppliers.id, { onDelete: 'restrict' }),
+    /**
+     * INERT RESERVE (Wave 4): reserved for a future "product group" abstraction
+     * (e.g. equivalent SKUs across suppliers collapsing to one logical product for
+     * cross-supplier price comparison). NOT referenced by any code or FK this
+     * wave — authored now so the later group migration is purely additive and does
+     * not require a second column add on the hot products table. NULL until then.
+     */
+    productGroupId: uuid('product_group_id'),
     canonicalName: text('canonical_name').notNull(),
     category: text('category'),
     defaultUnit: varchar('default_unit', { length: 32 }),
@@ -342,6 +419,9 @@ export const products = pgTable(
   },
   (t) => [
     index('products_restaurant_idx').on(t.restaurantId),
+    // Supports the matcher's supplier-scope predicate and per-supplier product
+    // lookups once supplier_id is populated.
+    index('products_restaurant_supplier_idx').on(t.restaurantId, t.supplierId),
     index('products_embedding_idx').using('ivfflat', t.embedding.op('vector_cosine_ops')),
   ],
 );
@@ -1140,6 +1220,11 @@ export const productsRelations = relations(products, ({ one, many }) => ({
     fields: [products.restaurantId],
     references: [restaurants.id],
   }),
+  // Exclusivity owner (Wave 4); null until backfilled / assigned at import time.
+  supplier: one(suppliers, {
+    fields: [products.supplierId],
+    references: [suppliers.id],
+  }),
   aliases: many(productAliases),
   catalogItems: many(supplierCatalogItems),
   priceHistory: many(priceHistory),
@@ -1254,6 +1339,8 @@ export type UserRole = 'owner' | 'manager' | 'receiver' | 'bookkeeper' | 'chef';
 export type Restaurant = typeof restaurants.$inferSelect;
 export type NewRestaurant = typeof restaurants.$inferInsert;
 export type User = typeof users.$inferSelect;
+export type Invitation = typeof invitations.$inferSelect;
+export type NewInvitation = typeof invitations.$inferInsert;
 export type Supplier = typeof suppliers.$inferSelect;
 export type NewSupplier = typeof suppliers.$inferInsert;
 export type Product = typeof products.$inferSelect;

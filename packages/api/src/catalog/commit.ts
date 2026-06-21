@@ -1,4 +1,4 @@
-import { and, eq, products, supplierCatalogItems, type Database } from '@restomatch/db';
+import { and, eq, products, suppliers, supplierCatalogItems, type Database } from '@restomatch/db';
 import {
   matchProductTopN,
   recordConfirmedMatch,
@@ -49,6 +49,25 @@ export async function commitCatalogRows(
   embedder: EmbeddingProvider,
 ): Promise<CommitResult> {
   const { restaurantId, supplierId } = args;
+
+  // Same-tenant assertion (Wave 4). products.supplier_id carries an ON DELETE
+  // RESTRICT FK to suppliers(id), but a cross-DB FK does NOT enforce that the
+  // supplier belongs to the SAME restaurant as the product we're about to write
+  // — a stray supplierId from another tenant would otherwise stamp a wrong owner
+  // (and leak that supplier into this restaurant's exclusivity scope). The tRPC
+  // path calls assertSupplierOwned before us, but the worker path does not, so we
+  // re-verify here (defence in depth; cheap single-row lookup once per commit).
+  const [sup] = await db
+    .select({ id: suppliers.id })
+    .from(suppliers)
+    .where(and(eq(suppliers.id, supplierId), eq(suppliers.restaurantId, restaurantId)))
+    .limit(1);
+  if (!sup) {
+    throw new Error(
+      `[catalog.commit] supplier ${supplierId} does not belong to restaurant ${restaurantId} — refusing to commit`,
+    );
+  }
+
   let created = 0;
   let updated = 0;
   let createdProducts = 0;
@@ -118,6 +137,10 @@ export async function commitCatalogRows(
           .insert(products)
           .values({
             restaurantId,
+            // Exclusivity FOUNDATION (Wave 4): a product first seen on THIS
+            // supplier's price-list is owned by THIS supplier. Same-tenant was
+            // asserted above, so this FK can never cross restaurants.
+            supplierId,
             canonicalName: row.supplierNameRaw,
             defaultUnit: row.unit,
             barcodeEan: row.barcodeEan,

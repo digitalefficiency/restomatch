@@ -31,12 +31,19 @@ function toVectorLiteral(embedding: number[]): string {
  * Supplier-scope predicate (the false-leak guard)
  *
  * A product is a candidate for supplier S only if S already sells it — i.e.
- * there is EITHER a product_aliases row with supplier_id = S, OR a (linked)
- * supplier_catalog_items row with supplier_id = S pointing at the product.
- * This decouples exclusivity from the not-yet-existent products.supplier_id
- * column: it uses the EXISTING supplier→product links so an invoice/import
- * from supplier A can never fuzzy/embed/barcode-match supplier B's product
- * and raise a phantom price-leak.
+ * ANY of:
+ *   • products.supplier_id = S  (Wave 4 exclusivity owner — direct proof; null
+ *     until backfilled, in which case this disjunct is simply never true and
+ *     the predicate falls back to the link-based checks below);
+ *   • a product_aliases row with supplier_id = S; OR
+ *   • a (linked) supplier_catalog_items row with supplier_id = S.
+ *
+ * The alias/catalog-item checks let exclusivity work BEFORE products.supplier_id
+ * is populated (the column is nullable this wave). When it IS populated it is the
+ * strongest signal, so it's an additive OR — populated rows widen scope to their
+ * owner; legacy null rows behave exactly as before. Either way an invoice/import
+ * from supplier A can never fuzzy/embed/barcode-match supplier B's product and
+ * raise a phantom price-leak.
  *
  * Returns a correlated EXISTS predicate over `products.id` to be AND-ed into a
  * WHERE clause (used by barcode + fuzzy, whose predicate rides inside WHERE).
@@ -49,7 +56,8 @@ function toVectorLiteral(embedding: number[]): string {
 
 function supplierScopeSql(supplierId: string) {
   return sql`(
-    EXISTS (
+    ${products.supplierId} = ${supplierId}
+    OR EXISTS (
       SELECT 1 FROM ${productAliases}
       WHERE ${productAliases.productId} = ${products.id}
         AND ${productAliases.supplierId} = ${supplierId}
@@ -63,17 +71,23 @@ function supplierScopeSql(supplierId: string) {
 }
 
 /**
- * The product ids supplier S already sells — its alias links UNION its linked
- * catalog items. Used to filter the over-fetched embedding ANN in app code
- * (the supplier predicate cannot ride inside the ivfflat ORDER BY without
- * dropping valid rows). Returns a Set for O(1) membership.
+ * The product ids supplier S already sells — products it OWNS (Wave 4:
+ * products.supplier_id = S) UNION its alias links UNION its linked catalog
+ * items. Used to filter the over-fetched embedding ANN in app code (the
+ * supplier predicate cannot ride inside the ivfflat ORDER BY without dropping
+ * valid rows). Mirrors supplierScopeSql exactly. Returns a Set for O(1)
+ * membership. The owned-products disjunct is inert while supplier_id is null.
  */
 async function supplierProductIds(
   db: Database,
   restaurantId: string,
   supplierId: string,
 ): Promise<Set<string>> {
-  const [aliasRows, catalogRows] = await Promise.all([
+  const [ownedRows, aliasRows, catalogRows] = await Promise.all([
+    db
+      .select({ productId: products.id })
+      .from(products)
+      .where(and(eq(products.restaurantId, restaurantId), eq(products.supplierId, supplierId))),
     db
       .select({ productId: productAliases.productId })
       .from(productAliases)
@@ -94,6 +108,7 @@ async function supplierProductIds(
   ]);
 
   const ids = new Set<string>();
+  for (const r of ownedRows) ids.add(r.productId);
   for (const r of aliasRows) ids.add(r.productId);
   for (const r of catalogRows) if (r.productId) ids.add(r.productId);
   return ids;

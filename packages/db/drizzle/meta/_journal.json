@@ -120,6 +120,20 @@
       "when": 1781710000000,
       "tag": "0016_outbox_dedupe",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1781720000000,
+      "tag": "0017_products_supplier_fk",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1781730000000,
+      "tag": "0018_invitations",
+      "breakpoints": true
     }
   ]
 }
