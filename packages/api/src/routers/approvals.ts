@@ -26,6 +26,7 @@ const ApprovalQueueItemSchema = z.object({
   message: z.string().nullable(),
   createdAt: z.date(),
   matchRunId: z.string().uuid(),
+  invoiceId: z.string().uuid().nullable(),
 });
 export type ApprovalQueueItem = z.infer<typeof ApprovalQueueItemSchema>;
 
@@ -66,8 +67,11 @@ export const approvalsRouter = router({
           message: discrepancies.resolutionNote, // reuse field for now
           createdAt: discrepancies.createdAt,
           matchRunId: discrepancies.matchRunId,
+          // Invoice behind this discrepancy → deep-link to the OCR correction screen.
+          invoiceId: matchRuns.invoiceId,
         })
         .from(discrepancies)
+        .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
         .where(
           and(
             eq(discrepancies.restaurantId, ctx.session.restaurantId),

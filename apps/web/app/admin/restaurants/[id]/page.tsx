@@ -2,13 +2,12 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { createServerCaller } from '@/lib/trpc/server';
 import { AssignPlanForm } from './AssignPlanForm';
+import { OverridesForm } from './OverridesForm';
+import { MemberRoles } from './MemberRoles';
 
-const ROLE_LABEL: Record<string, string> = {
-  owner: 'בעלים',
-  manager: 'מנהל',
-  receiver: 'קבלן',
-  bookkeeper: 'הנה"ח',
-  chef: 'שף',
+type Overrides = {
+  limits?: { invoicesPerMonth?: number | null; restaurants?: number | null; seatsPerRestaurant?: number | null };
+  features?: string[];
 };
 
 interface PageProps {
@@ -59,20 +58,19 @@ export default async function AdminRestaurantDetail({ params }: PageProps) {
               currentPlan={subscription?.planKey ?? null}
             />
           </div>
+          {subscription ? (
+            <OverridesForm
+              restaurantId={restaurant.id}
+              current={(subscription.overrides ?? {}) as Overrides}
+            />
+          ) : null}
         </section>
 
         <section className="rounded-xl border border-line bg-surface p-5 shadow-card">
           <h2 className="mb-4 font-mono text-xs font-semibold uppercase tracking-wider text-subtle">
             משתמשים (<span className="tabular-nums">{members.length}</span>)
           </h2>
-          <ul className="space-y-2 text-sm">
-            {members.map((m) => (
-              <li key={m.userId} className="flex justify-between gap-4">
-                <span className="text-ink">{m.email}</span>
-                <span className="text-subtle">{ROLE_LABEL[m.role] ?? m.role}</span>
-              </li>
-            ))}
-          </ul>
+          <MemberRoles restaurantId={restaurant.id} members={members} />
         </section>
       </div>
     </div>

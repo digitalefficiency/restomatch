@@ -1,0 +1,20 @@
+# Keep the worker image lean + the build reproducible (deps come from a frozen
+# pnpm install, not the host node_modules). Context is the repo root.
+**/node_modules
+**/.next
+**/dist
+**/.turbo
+**/.vite
+**/coverage
+.git
+.github
+.vercel
+.gstack
+**/*.tsbuildinfo
+**/.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+apps/web/.next
+apps/mobile

@@ -20,9 +20,9 @@ import {
   suppliers,
 } from '@restomatch/db';
 import { enqueueOcrInvoice } from '@restomatch/queue';
-import { assertGrOwned, assertSupplierOwned } from '../tenant';
+import { assertGrOwned, assertInvoiceOwned, assertSupplierOwned } from '../tenant';
 import { endOfDayInTz, startOfDayInTz } from '../lib/time';
-import { memberProcedure, receiverProcedure, router } from '../trpc';
+import { managerProcedure, memberProcedure, receiverProcedure, router } from '../trpc';
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
 
@@ -237,6 +237,10 @@ export const receivingRouter = router({
           status: invoices.status,
           ocrConfidence: invoices.ocrConfidence,
           invoiceNumber: invoices.invoiceNumber,
+          invoiceDate: invoices.invoiceDate,
+          totalExclVat: invoices.totalExclVat,
+          vatAmount: invoices.vatAmount,
+          totalInclVat: invoices.totalInclVat,
           supplierId: invoices.supplierId,
           rawImageUrl: invoices.rawImageUrl,
           createdAt: invoices.createdAt,
@@ -268,6 +272,97 @@ export const receivingRouter = router({
         .orderBy(asc(invoiceLines.id));
 
       return { ...invoice, lines };
+    }),
+
+  /**
+   * Correct an OCR-misread invoice HEADER (number / date / totals). The ₪ leak
+   * is computed from these billed figures, so a wrong OCR read otherwise yields
+   * an uncorrectable wrong number — this is the in-app fix. Re-run match.runForInvoice
+   * afterwards to recompute discrepancies. Owner/manager only.
+   */
+  updateInvoiceHeader: managerProcedure
+    .input(
+      z.object({
+        invoiceId: z.string().uuid(),
+        patch: z
+          .object({
+            invoiceNumber: z.string().trim().max(120).nullable().optional(),
+            invoiceDate: z.coerce.date().nullable().optional(),
+            totalExclVat: z.number().finite().nonnegative().max(100_000_000).nullable().optional(),
+            vatAmount: z.number().finite().nonnegative().max(100_000_000).nullable().optional(),
+            totalInclVat: z.number().finite().nonnegative().max(100_000_000).nullable().optional(),
+          })
+          .strict()
+          .refine((v) => Object.values(v).some((x) => x !== undefined), {
+            message: 'אין שינויים לעדכן',
+          }),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      await assertInvoiceOwned(ctx.db, input.invoiceId, restaurantId);
+      const p = input.patch;
+      const set: Partial<typeof invoices.$inferInsert> = { updatedAt: new Date() };
+      if (p.invoiceNumber !== undefined) set.invoiceNumber = p.invoiceNumber?.trim() || null;
+      if (p.invoiceDate !== undefined) set.invoiceDate = p.invoiceDate;
+      if (p.totalExclVat !== undefined)
+        set.totalExclVat = p.totalExclVat == null ? null : String(p.totalExclVat);
+      if (p.vatAmount !== undefined) set.vatAmount = p.vatAmount == null ? null : String(p.vatAmount);
+      if (p.totalInclVat !== undefined)
+        set.totalInclVat = p.totalInclVat == null ? null : String(p.totalInclVat);
+      await ctx.db
+        .update(invoices)
+        .set(set)
+        .where(and(eq(invoices.id, input.invoiceId), eq(invoices.restaurantId, restaurantId)));
+      return { ok: true };
+    }),
+
+  /**
+   * Correct an OCR-misread invoice LINE (qty / unit / price / total / description).
+   * invoice_lines has no restaurant_id — ownership is scoped through the parent
+   * invoice join. Owner/manager only; re-run the match afterwards.
+   */
+  updateInvoiceLine: managerProcedure
+    .input(
+      z.object({
+        lineId: z.string().uuid(),
+        patch: z
+          .object({
+            rawDescription: z.string().trim().min(1).max(400).optional(),
+            qtyBilled: z.number().finite().nonnegative().max(1_000_000).optional(),
+            unit: z.string().trim().min(1).max(32).optional(),
+            unitPriceBilled: z.number().finite().nonnegative().max(10_000_000).optional(),
+            lineTotal: z.number().finite().nonnegative().max(100_000_000).optional(),
+          })
+          .strict()
+          .refine((v) => Object.values(v).some((x) => x !== undefined), {
+            message: 'אין שינויים לעדכן',
+          }),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      // Scope through the parent invoice (invoice_lines carries no restaurant_id).
+      const [owned] = await ctx.db
+        .select({ id: invoiceLines.id })
+        .from(invoiceLines)
+        .innerJoin(
+          invoices,
+          and(eq(invoices.id, invoiceLines.invoiceId), eq(invoices.restaurantId, restaurantId)),
+        )
+        .where(eq(invoiceLines.id, input.lineId))
+        .limit(1);
+      if (!owned) throw new TRPCError({ code: 'NOT_FOUND', message: 'invoice line not found' });
+
+      const p = input.patch;
+      const set: Partial<typeof invoiceLines.$inferInsert> = {};
+      if (p.rawDescription !== undefined) set.rawDescription = p.rawDescription;
+      if (p.qtyBilled !== undefined) set.qtyBilled = String(p.qtyBilled);
+      if (p.unit !== undefined) set.unit = p.unit;
+      if (p.unitPriceBilled !== undefined) set.unitPriceBilled = String(p.unitPriceBilled);
+      if (p.lineTotal !== undefined) set.lineTotal = String(p.lineTotal);
+      await ctx.db.update(invoiceLines).set(set).where(eq(invoiceLines.id, input.lineId));
+      return { ok: true };
     }),
 
   /**

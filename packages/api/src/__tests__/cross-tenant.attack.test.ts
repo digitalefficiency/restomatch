@@ -1,13 +1,20 @@
+import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  and,
   catalogImports,
   createDb,
   discrepancies,
   eq,
   goodsReceipts,
   grLines,
+  invitations,
+  invoiceLines,
   invoices,
+  memberships,
+  poLines,
   priceBaselines,
+  products,
   purchaseOrders,
   restaurants,
   supplierCatalogItems,
@@ -101,6 +108,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'receiving.markGrLine': 'attack',
   'receiving.submitReceipt': 'attack',
   'receiving.registerInvoice': 'attack',
+  'receiving.updateInvoiceHeader': 'attack',
+  'receiving.updateInvoiceLine': 'attack',
   'receiving.pendingInvoices': 'isolation',
   'admin.listRestaurants': 'admin-denial',
   'admin.getRestaurant': 'admin-denial',
@@ -111,6 +120,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   // Phase 5+6 additions
   'settings.get': 'isolation',
   'settings.update': 'isolation',
+  'settings.profile': 'isolation',
+  'settings.updateProfile': 'isolation',
   'search.global': 'isolation',
   // Phase-2 supplier-centric surface (suppliers / catalog / orders / on-demand match).
   // Every procedure that takes a client-supplied supplierId / productId / poId /
@@ -126,6 +137,9 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'catalog.parsePreview': 'attack',
   'catalog.commitImport': 'attack',
   'catalog.setItemActive': 'attack',
+  'catalog.createItem': 'attack',
+  'catalog.updateItem': 'attack',
+  'catalog.deleteItem': 'attack',
   'orders.list': 'isolation',
   'orders.get': 'attack',
   'orders.createDraft': 'attack',
@@ -133,6 +147,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'orders.importPo':
     'managerProcedure that ingests an uploaded document; takes no client-supplied tenant entity id (supplier is resolved FROM the parsed doc) and is gated on ANTHROPIC_API_KEY. Cross-tenant reach is bounded by the member tx restaurant GUC, and the import is keyed to ctx.session.restaurantId. Role denial is covered in the managerProcedure-role-denial block.',
   'orders.cancelOrder': 'attack',
+  'orders.updateOrderLine': 'attack',
+  'orders.deleteOrderLine': 'attack',
   'orders.placeOrder': 'attack',
   // guardrail now calls assertSupplierOwned (wave 3b): a foreign supplierId is
   // rejected with NOT_FOUND before any baseline is read. Defense-in-depth on
@@ -144,6 +160,27 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
     'public marketing catalog (publicProcedure); reads the global plans table only, no tenant-scoped rows — nothing to isolate',
   'leads.create':
     'public landing capture (publicProcedure); writes to the non-tenant leads table, takes no entity ids and reads nothing tenant-scoped',
+  // Team management (ownerProcedure, except acceptInvite=userScoped). Every
+  // mutation that takes a client-supplied id (invite id / member userId) must
+  // reject a foreign one; list excludes the other tenant's members + invites;
+  // acceptInvite is bound to the invited address. See the team.* block below.
+  'team.list': 'isolation',
+  'team.invite':
+    'ownerProcedure write keyed to ctx.session.restaurantId; takes no client-supplied tenant entity id (cannot target another tenant). Owner-role denial is covered in the ownerProcedure role-denial block.',
+  'team.resendInvite': 'attack',
+  'team.revokeInvite': 'attack',
+  'team.updateMemberRole': 'attack',
+  'team.removeMember': 'attack',
+  'team.acceptInvite': 'attack',
+  // Catalog SKU→product mapping queue (member reads / managerProcedure confirm).
+  // Lists are restaurant-scoped even with a foreign supplierId filter; confirm
+  // calls assertSupplierOwned before any write. See the mapping.* block below.
+  'mapping.unmapped': 'isolation',
+  'mapping.searchProducts': 'isolation',
+  'mapping.confirm': 'attack',
+  // Canonical product management (rename / recategorize / exclusivity / delete).
+  'products.update': 'attack',
+  'products.delete': 'attack',
 };
 
 function listProcedurePaths(): string[] {
@@ -382,6 +419,21 @@ describe('list/aggregate isolation (A must not see B)', () => {
     expect(rowB?.settings?.tolerances?.pricePercent).toBeUndefined();
   });
 
+  it('settings.profile + settings.updateProfile read/write only the caller restaurant', async () => {
+    const callerA = callerFor(A);
+    // A changes its VAT + timezone; B must keep its defaults.
+    await callerA.settings.updateProfile({ vatRate: 0.18, timezone: 'Asia/Jerusalem' });
+    const profileA = await callerA.settings.profile();
+    expect(profileA.vatRate).toBe(0.18);
+    expect(profileA.timezone).toBe('Asia/Jerusalem');
+
+    const [rowB] = await db
+      .select({ vatRate: restaurants.vatRate })
+      .from(restaurants)
+      .where(eq(restaurants.id, B.restaurantId));
+    expect(Number(rowB?.vatRate)).toBe(0.17); // B's default VAT untouched
+  });
+
   it('search.global returns only the caller restaurant entities', async () => {
     const caller = callerFor(A);
     // Supplier names are "ספק A"/"ספק B"; product names "עגבניה A"/"עגבניה B".
@@ -555,6 +607,47 @@ describe('catalog router: foreign id attacks + isolation (A → B)', () => {
     const filteredByB = await callerFor(A).catalog.items({ supplierId: B.supplierId });
     expect(filteredByB.map((i) => i.id)).not.toContain(bCatalogItemId);
   });
+
+  it('catalog.createItem rejects a foreign supplierId and writes nothing for B', async () => {
+    const beforeB = await db
+      .select({ id: supplierCatalogItems.id })
+      .from(supplierCatalogItems)
+      .where(eq(supplierCatalogItems.restaurantId, B.restaurantId));
+    await expect(
+      callerFor(A).catalog.createItem({
+        supplierId: B.supplierId,
+        supplierNameRaw: 'hijack',
+        listPrice: 1,
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const afterB = await db
+      .select({ id: supplierCatalogItems.id })
+      .from(supplierCatalogItems)
+      .where(eq(supplierCatalogItems.restaurantId, B.restaurantId));
+    expect(afterB).toHaveLength(beforeB.length);
+  });
+
+  it('catalog.updateItem cannot edit a foreign item (B price unchanged)', async () => {
+    await expect(
+      callerFor(A).catalog.updateItem({ itemId: bCatalogItemId, patch: { listPrice: 999 } }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [row] = await db
+      .select({ listPrice: supplierCatalogItems.listPrice })
+      .from(supplierCatalogItems)
+      .where(eq(supplierCatalogItems.id, bCatalogItemId));
+    expect(row?.listPrice).toBe('9.0000'); // B's seeded price, untouched
+  });
+
+  it('catalog.deleteItem cannot delete a foreign item (B item survives)', async () => {
+    await expect(
+      callerFor(A).catalog.deleteItem({ itemId: bCatalogItemId }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [row] = await db
+      .select({ id: supplierCatalogItems.id })
+      .from(supplierCatalogItems)
+      .where(eq(supplierCatalogItems.id, bCatalogItemId));
+    expect(row?.id).toBe(bCatalogItemId);
+  });
 });
 
 describe('orders router: foreign id attacks + list isolation (A → B)', () => {
@@ -638,6 +731,29 @@ describe('orders router: foreign id attacks + list isolation (A → B)', () => {
     const filteredByB = await callerFor(A).orders.list({ supplierId: B.supplierId });
     expect(filteredByB.map((o) => o.id)).not.toContain(B.poId);
   });
+
+  it('orders.updateOrderLine cannot edit a foreign line (B unchanged)', async () => {
+    const [before] = await db
+      .select({ qty: poLines.qtyOrdered })
+      .from(poLines)
+      .where(eq(poLines.id, B.poLineId));
+    await expect(
+      callerFor(A).orders.updateOrderLine({ lineId: B.poLineId, patch: { qtyOrdered: 999 } }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [after] = await db
+      .select({ qty: poLines.qtyOrdered })
+      .from(poLines)
+      .where(eq(poLines.id, B.poLineId));
+    expect(after?.qty).toBe(before?.qty);
+  });
+
+  it('orders.deleteOrderLine cannot delete a foreign line (B survives)', async () => {
+    await expect(
+      callerFor(A).orders.deleteOrderLine({ lineId: B.poLineId }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [row] = await db.select({ id: poLines.id }).from(poLines).where(eq(poLines.id, B.poLineId));
+    expect(row?.id).toBe(B.poLineId);
+  });
 });
 
 describe('match router + receiving detail reads: foreign id attacks (A → B)', () => {
@@ -660,6 +776,35 @@ describe('match router + receiving detail reads: foreign id attacks (A → B)', 
     await expect(
       callerFor(A).receiving.getInvoice({ invoiceId: B.invoiceId }),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('receiving.updateInvoiceHeader rejects a foreign invoiceId and leaves B untouched', async () => {
+    await expect(
+      callerFor(A).receiving.updateInvoiceHeader({
+        invoiceId: B.invoiceId,
+        patch: { invoiceNumber: 'HIJACK' },
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [row] = await db
+      .select({ invoiceNumber: invoices.invoiceNumber })
+      .from(invoices)
+      .where(eq(invoices.id, B.invoiceId));
+    expect(row?.invoiceNumber).toBe(B.invoiceNumber);
+  });
+
+  it('receiving.updateInvoiceLine rejects a foreign lineId and leaves B untouched', async () => {
+    await expect(
+      callerFor(A).receiving.updateInvoiceLine({
+        lineId: B.invoiceLineId,
+        patch: { unitPriceBilled: 999 },
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [row] = await db
+      .select({ qtyBilled: invoiceLines.qtyBilled, unitPriceBilled: invoiceLines.unitPriceBilled })
+      .from(invoiceLines)
+      .where(eq(invoiceLines.id, B.invoiceLineId));
+    expect(row?.qtyBilled).toBe('10.000'); // B's seeded line, untouched
+    expect(row?.unitPriceBilled).toBe('10.0000');
   });
 });
 
@@ -782,6 +927,267 @@ describe('role denial: managerProcedure writes reject member-tier callers', () =
         .where(eq(purchaseOrders.id, A.poId));
       expect(after?.status).toBe(before?.status);
       expect(after?.sentAt ?? null).toEqual(before?.sentAt ?? null);
+    });
+  }
+});
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Team router (owner-gated membership + invitation management) and the catalog
+ * SKU→product mapping queue — both registered in appRouter during the
+ * supplier-catalog wave but previously undeclared in COVERAGE. team.* mutations
+ * take a client-supplied invite id / member userId; acceptInvite is bound to the
+ * invited mailbox; mapping.confirm calls assertSupplierOwned. Seed inline: a B
+ * invite with a known raw token (for the email-binding attack) and one unmapped
+ * (supplier SKU, no productId) line per tenant (for queue isolation).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+let bInviteId: string;
+const ACCEPT_RAW_TOKEN = 'cross-tenant-accept-raw-token';
+
+beforeAll(async () => {
+  const [bInv] = await db
+    .select({ id: invitations.id })
+    .from(invitations)
+    .where(and(eq(invitations.restaurantId, B.restaurantId), eq(invitations.status, 'pending')))
+    .limit(1);
+  bInviteId = bInv!.id;
+
+  // A B invite addressed to newcomer-b@attack.test with a KNOWN raw token, so A's
+  // owner (a different mailbox) can attempt to accept it and prove the binding.
+  await db.insert(invitations).values({
+    restaurantId: B.restaurantId,
+    email: 'newcomer-b@attack.test',
+    role: 'receiver',
+    tokenHash: createHash('sha256').update(ACCEPT_RAW_TOKEN).digest('hex'),
+    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+  });
+
+  // One unmapped line per tenant so the mapping queue has cross-tenant rows.
+  await db.insert(poLines).values({
+    poId: A.poId,
+    rawDescription: 'פריט לא ממופה A',
+    qtyOrdered: '3',
+    unit: 'kg',
+    supplierSku: 'UNMAPPED-A',
+  });
+  await db.insert(poLines).values({
+    poId: B.poId,
+    rawDescription: 'פריט לא ממופה B',
+    qtyOrdered: '3',
+    unit: 'kg',
+    supplierSku: 'UNMAPPED-B',
+  });
+});
+
+describe('team router: foreign-id attacks + list isolation (A → B)', () => {
+  it('team.list returns only A members + invites, never B', async () => {
+    const { members, invites } = await callerFor(A).team.list();
+    expect(members.every((m) => m.userId === A.ownerUserId)).toBe(true);
+    const inviteEmails = invites.map((i) => i.email);
+    expect(inviteEmails).toContain('invitee-A@attack.test');
+    expect(inviteEmails).not.toContain('invitee-B@attack.test');
+    expect(inviteEmails).not.toContain('newcomer-b@attack.test');
+  });
+
+  it('team.resendInvite rejects a foreign invite id and leaves B pending', async () => {
+    await expect(callerFor(A).team.resendInvite({ id: bInviteId })).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+    const [inv] = await db
+      .select({ status: invitations.status })
+      .from(invitations)
+      .where(eq(invitations.id, bInviteId));
+    expect(inv?.status).toBe('pending');
+  });
+
+  it('team.revokeInvite cannot revoke a foreign invite (B stays pending)', async () => {
+    // revokeInvite is idempotent (no throw) but scoped to the caller restaurant,
+    // so a foreign id changes nothing.
+    await callerFor(A).team.revokeInvite({ id: bInviteId });
+    const [inv] = await db
+      .select({ status: invitations.status })
+      .from(invitations)
+      .where(eq(invitations.id, bInviteId));
+    expect(inv?.status).toBe('pending');
+  });
+
+  it('team.updateMemberRole rejects a foreign userId and leaves B owner intact', async () => {
+    await expect(
+      callerFor(A).team.updateMemberRole({ userId: B.ownerUserId, role: 'receiver' }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const rows = await db
+      .select({ role: memberships.role })
+      .from(memberships)
+      .where(
+        and(eq(memberships.restaurantId, B.restaurantId), eq(memberships.userId, B.ownerUserId)),
+      );
+    expect(rows.map((r) => r.role)).toEqual(['owner']);
+  });
+
+  it('team.removeMember cannot remove a foreign member (B membership intact)', async () => {
+    // Idempotent for a non-member: B's user is not a member of A, so this no-op
+    // must NOT touch B's membership.
+    await callerFor(A).team.removeMember({ userId: B.ownerUserId });
+    const rows = await db
+      .select({ role: memberships.role })
+      .from(memberships)
+      .where(
+        and(eq(memberships.restaurantId, B.restaurantId), eq(memberships.userId, B.ownerUserId)),
+      );
+    expect(rows).toHaveLength(1);
+  });
+
+  it('team.acceptInvite rejects an invite bound to a different mailbox (no membership leak)', async () => {
+    // A's owner (owner-A@attack.test) holds the raw token of a B invite addressed
+    // to newcomer-b@attack.test. The email binding must reject it (FORBIDDEN) and
+    // never enroll A's user into B; the invite stays pending.
+    await expect(
+      callerFor(A).team.acceptInvite({ token: ACCEPT_RAW_TOKEN }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    const leaked = await db
+      .select({ userId: memberships.userId })
+      .from(memberships)
+      .where(
+        and(eq(memberships.restaurantId, B.restaurantId), eq(memberships.userId, A.ownerUserId)),
+      );
+    expect(leaked).toHaveLength(0);
+    const [inv] = await db
+      .select({ status: invitations.status })
+      .from(invitations)
+      .where(
+        and(
+          eq(invitations.restaurantId, B.restaurantId),
+          eq(invitations.email, 'newcomer-b@attack.test'),
+        ),
+      );
+    expect(inv?.status).toBe('pending');
+  });
+});
+
+describe('mapping router: foreign-id attack + queue isolation (A → B)', () => {
+  it('mapping.unmapped excludes B lines, even with a B supplierId filter', async () => {
+    const aQueue = await callerFor(A).mapping.unmapped();
+    const aSkus = aQueue.map((u) => u.supplierSku);
+    expect(aSkus).toContain('UNMAPPED-A');
+    expect(aSkus).not.toContain('UNMAPPED-B');
+
+    // A B supplierId filter must not punch through the restaurant scope.
+    const filteredByB = await callerFor(A).mapping.unmapped({ supplierId: B.supplierId });
+    expect(filteredByB.map((u) => u.supplierSku)).not.toContain('UNMAPPED-B');
+
+    // Positive control: B sees its own unmapped line.
+    const bQueue = await callerFor(B).mapping.unmapped();
+    expect(bQueue.map((u) => u.supplierSku)).toContain('UNMAPPED-B');
+  });
+
+  it('mapping.searchProducts returns only A products', async () => {
+    const hits = await callerFor(A).mapping.searchProducts({ q: 'עגבניה' });
+    const names = hits.map((p) => p.canonicalName);
+    expect(names.some((n) => n.includes('A'))).toBe(true);
+    expect(names.some((n) => n.includes('B'))).toBe(false);
+  });
+
+  it('mapping.confirm rejects a foreign supplierId before creating a product', async () => {
+    const before = await db
+      .select({ id: products.id })
+      .from(products)
+      .where(eq(products.restaurantId, B.restaurantId));
+    await expect(
+      callerFor(A).mapping.confirm({
+        supplierId: B.supplierId,
+        supplierSku: 'UNMAPPED-B',
+        rawName: 'hijack',
+        newProductName: 'hijack product',
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const after = await db
+      .select({ id: products.id })
+      .from(products)
+      .where(eq(products.restaurantId, B.restaurantId));
+    expect(after).toHaveLength(before.length);
+  });
+});
+
+describe('products router: foreign-id attacks (A → B)', () => {
+  it('products.update cannot rename a foreign product (B unchanged)', async () => {
+    await expect(
+      callerFor(A).products.update({ productId: B.productId, patch: { canonicalName: 'HIJACK' } }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [row] = await db
+      .select({ canonicalName: products.canonicalName })
+      .from(products)
+      .where(eq(products.id, B.productId));
+    expect(row?.canonicalName).toBe('עגבניה B');
+  });
+
+  it('products.update rejects assigning a foreign supplier as exclusivity owner', async () => {
+    // A owns the product but tries to set B's supplier as owner → NOT_FOUND.
+    await expect(
+      callerFor(A).products.update({ productId: A.productId, patch: { supplierId: B.supplierId } }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [row] = await db
+      .select({ supplierId: products.supplierId })
+      .from(products)
+      .where(eq(products.id, A.productId));
+    expect(row?.supplierId ?? null).toBeNull();
+  });
+
+  it('products.delete cannot delete a foreign product (B survives)', async () => {
+    await expect(
+      callerFor(A).products.delete({ productId: B.productId }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [row] = await db.select({ id: products.id }).from(products).where(eq(products.id, B.productId));
+    expect(row?.id).toBe(B.productId);
+  });
+});
+
+describe('role denial: ownerProcedure team writes reject non-owner callers', () => {
+  // team.* mutations are ownerProcedure — manager/receiver fall outside the
+  // ['owner'] allowlist and must be rejected by requireRoles BEFORE the resolver,
+  // even on the caller's OWN tenant ids (the role gate, not tenancy).
+  const denied = ['manager', 'receiver'] as const;
+  for (const role of denied) {
+    it(`team.invite → FORBIDDEN for ${role}`, async () => {
+      await expect(
+        callerWithRole(A, role).team.invite({ email: 'x@attack.test', role: 'receiver' }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    });
+    it(`team.updateMemberRole → FORBIDDEN for ${role} and leaves A owner intact`, async () => {
+      await expect(
+        callerWithRole(A, role).team.updateMemberRole({ userId: A.ownerUserId, role: 'receiver' }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      const rows = await db
+        .select({ role: memberships.role })
+        .from(memberships)
+        .where(
+          and(eq(memberships.restaurantId, A.restaurantId), eq(memberships.userId, A.ownerUserId)),
+        );
+      expect(rows.map((r) => r.role)).toEqual(['owner']);
+    });
+  }
+});
+
+describe('role denial: mapping.confirm rejects member-tier callers', () => {
+  const denied = ['receiver', 'chef'] as const;
+  for (const role of denied) {
+    it(`mapping.confirm → FORBIDDEN for ${role} and creates no product`, async () => {
+      const before = await db
+        .select({ id: products.id })
+        .from(products)
+        .where(eq(products.restaurantId, A.restaurantId));
+      await expect(
+        callerWithRole(A, role).mapping.confirm({
+          supplierId: A.supplierId,
+          supplierSku: 'UNMAPPED-A',
+          rawName: 'role hijack',
+          newProductName: 'role hijack product',
+        }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      const after = await db
+        .select({ id: products.id })
+        .from(products)
+        .where(eq(products.restaurantId, A.restaurantId));
+      expect(after).toHaveLength(before.length);
     });
   }
 });

@@ -24,6 +24,7 @@ const selectClass =
   'rounded-xl border border-line bg-surface-2 px-3 py-2 text-sm text-ink transition-colors focus:border-primary/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:opacity-50';
 
 const dateFmt = new Intl.DateTimeFormat('he-IL', {
+  timeZone: 'Asia/Jerusalem',
   day: '2-digit',
   month: '2-digit',
   year: 'numeric',

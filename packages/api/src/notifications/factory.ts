@@ -25,6 +25,8 @@ import { WhatsAppCloudNotifier } from './whatsappCloud';
 export interface NotifierFactoryEnv {
   RESEND_API_KEY?: string;
   RESEND_FROM?: string;
+  /** Shared sender var validated by packages env (web auth + worker both use it). */
+  EMAIL_FROM?: string;
   WHATSAPP_PHONE_NUMBER_ID?: string;
   WHATSAPP_ACCESS_TOKEN?: string;
   WHATSAPP_API_BASE?: string;
@@ -46,7 +48,12 @@ export function isWhatsAppCloudConfigured(env: NotifierFactoryEnv = process.env 
  */
 export function createEmailNotifier(env: NotifierFactoryEnv = process.env as NotifierFactoryEnv): EmailNotifier {
   if (isResendConfigured(env)) {
-    return new ResendEmailNotifier({ apiKey: env.RESEND_API_KEY!, from: env.RESEND_FROM });
+    // Honor the documented EMAIL_FROM (validated by the env layer) when the
+    // optional RESEND_FROM isn't set, so the configured sender actually applies.
+    return new ResendEmailNotifier({
+      apiKey: env.RESEND_API_KEY!,
+      from: env.RESEND_FROM ?? env.EMAIL_FROM,
+    });
   }
   return new EmailNotifier();
 }

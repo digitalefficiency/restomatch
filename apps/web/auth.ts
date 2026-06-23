@@ -118,7 +118,14 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       const now = Date.now();
       const stale =
         t.membershipCheckedAt === undefined ||
-        now - t.membershipCheckedAt > MEMBERSHIP_REVALIDATE_MS;
+        now - t.membershipCheckedAt > MEMBERSHIP_REVALIDATE_MS ||
+        // A user with no active restaurant is re-checked on EVERY request (one
+        // indexed membership query) until they have one. This makes a freshly
+        // onboarded owner / a just-accepted invitee visible on the very next
+        // request instead of being bounced from /dashboard, /team and /settings
+        // for up to MEMBERSHIP_REVALIDATE_MS. Users who already have a restaurant
+        // keep the cached revalidation window.
+        t.restaurantId == null;
       if (stale || trigger === 'update') {
         const userId = t.userId;
         // Identity-layer read on the privileged auth connection (it must see

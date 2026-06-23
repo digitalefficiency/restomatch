@@ -25,6 +25,27 @@ const INLINE_ROW_LIMIT = 1500;
 /** Hard cap to bound request size / parse cost. */
 const MAX_ROWS = 20000;
 
+/** Postgres unique-violation backstop for the (supplier, sku) index. */
+function isUniqueViolation(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false;
+  const code = (err as { code?: string }).code;
+  const causeCode = (err as { cause?: { code?: string } }).cause?.code;
+  return code === '23505' || causeCode === '23505';
+}
+
+/** Editable fields of a single catalog row (price/SKU/unit/name/etc). */
+const ItemPatchSchema = z
+  .object({
+    supplierNameRaw: z.string().trim().min(1).max(400).optional(),
+    supplierSku: z.string().trim().max(64).nullable().optional(),
+    unit: z.string().trim().max(32).nullable().optional(),
+    packSize: z.number().finite().nonnegative().max(1_000_000).nullable().optional(),
+    listPrice: z.number().finite().nonnegative().max(10_000_000).nullable().optional(),
+    barcodeEan: z.string().trim().max(32).nullable().optional(),
+    productId: z.string().uuid().nullable().optional(),
+  })
+  .strict();
+
 const FileInput = z
   .object({
     filename: z.string().min(1).max(255),
@@ -102,7 +123,19 @@ export const catalogRouter = router({
     .query(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
       const [product] = await ctx.db
-        .select()
+        // Explicit projection: never ship the 1536-dim `embedding` vector to the client.
+        .select({
+          id: products.id,
+          restaurantId: products.restaurantId,
+          supplierId: products.supplierId,
+          productGroupId: products.productGroupId,
+          canonicalName: products.canonicalName,
+          category: products.category,
+          defaultUnit: products.defaultUnit,
+          barcodeEan: products.barcodeEan,
+          createdAt: products.createdAt,
+          updatedAt: products.updatedAt,
+        })
         .from(products)
         .where(and(eq(products.id, input.productId), eq(products.restaurantId, restaurantId)))
         .limit(1);
@@ -231,6 +264,130 @@ export const catalogRouter = router({
       const [row] = await ctx.db
         .update(supplierCatalogItems)
         .set({ active: input.active, updatedAt: new Date() })
+        .where(
+          and(
+            eq(supplierCatalogItems.id, input.itemId),
+            eq(supplierCatalogItems.restaurantId, restaurantId),
+          ),
+        )
+        .returning({ id: supplierCatalogItems.id });
+      if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'catalog item not found' });
+      return { ok: true };
+    }),
+
+  /**
+   * Add a single priced catalog row for a supplier — the in-app alternative to
+   * re-uploading a whole spreadsheet. The (supplier, SKU) unique index is the
+   * backstop; a clash returns CONFLICT.
+   */
+  createItem: managerProcedure
+    .input(
+      z
+        .object({
+          supplierId: z.string().uuid(),
+          supplierNameRaw: z.string().trim().min(1).max(400),
+          supplierSku: z.string().trim().max(64).optional(),
+          unit: z.string().trim().max(32).optional(),
+          packSize: z.number().finite().nonnegative().max(1_000_000).optional(),
+          listPrice: z.number().finite().nonnegative().max(10_000_000).optional(),
+          barcodeEan: z.string().trim().max(32).optional(),
+          productId: z.string().uuid().optional(),
+        })
+        .strict(),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      await assertSupplierOwned(ctx.db, input.supplierId, restaurantId);
+      if (input.productId) {
+        const [owned] = await ctx.db
+          .select({ id: products.id })
+          .from(products)
+          .where(and(eq(products.id, input.productId), eq(products.restaurantId, restaurantId)))
+          .limit(1);
+        if (!owned) throw new TRPCError({ code: 'NOT_FOUND', message: 'product not found' });
+      }
+      try {
+        const [row] = await ctx.db
+          .insert(supplierCatalogItems)
+          .values({
+            restaurantId,
+            supplierId: input.supplierId,
+            supplierNameRaw: input.supplierNameRaw,
+            supplierSku: input.supplierSku?.trim() || null,
+            unit: input.unit?.trim() || null,
+            packSize: input.packSize == null ? null : String(input.packSize),
+            listPrice: input.listPrice == null ? null : String(input.listPrice),
+            barcodeEan: input.barcodeEan?.trim() || null,
+            productId: input.productId ?? null,
+          })
+          .returning({ id: supplierCatalogItems.id });
+        return { id: row!.id };
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          throw new TRPCError({ code: 'CONFLICT', message: 'כבר קיים פריט עם המק״ט הזה לספק.' });
+        }
+        throw err;
+      }
+    }),
+
+  /** Edit a single catalog row (price / SKU / unit / name / pack / barcode / linked product). */
+  updateItem: managerProcedure
+    .input(
+      z.object({
+        itemId: z.string().uuid(),
+        patch: ItemPatchSchema.refine((v) => Object.values(v).some((x) => x !== undefined), {
+          message: 'אין שינויים לעדכן',
+        }),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      const p = input.patch;
+      if (p.productId) {
+        const [owned] = await ctx.db
+          .select({ id: products.id })
+          .from(products)
+          .where(and(eq(products.id, p.productId), eq(products.restaurantId, restaurantId)))
+          .limit(1);
+        if (!owned) throw new TRPCError({ code: 'NOT_FOUND', message: 'product not found' });
+      }
+      const set: Partial<typeof supplierCatalogItems.$inferInsert> = { updatedAt: new Date() };
+      if (p.supplierNameRaw !== undefined) set.supplierNameRaw = p.supplierNameRaw;
+      if (p.supplierSku !== undefined) set.supplierSku = p.supplierSku?.trim() || null;
+      if (p.unit !== undefined) set.unit = p.unit?.trim() || null;
+      if (p.packSize !== undefined) set.packSize = p.packSize == null ? null : String(p.packSize);
+      if (p.listPrice !== undefined) set.listPrice = p.listPrice == null ? null : String(p.listPrice);
+      if (p.barcodeEan !== undefined) set.barcodeEan = p.barcodeEan?.trim() || null;
+      if (p.productId !== undefined) set.productId = p.productId;
+
+      try {
+        const [row] = await ctx.db
+          .update(supplierCatalogItems)
+          .set(set)
+          .where(
+            and(
+              eq(supplierCatalogItems.id, input.itemId),
+              eq(supplierCatalogItems.restaurantId, restaurantId),
+            ),
+          )
+          .returning({ id: supplierCatalogItems.id });
+        if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'catalog item not found' });
+        return { ok: true };
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          throw new TRPCError({ code: 'CONFLICT', message: 'כבר קיים פריט עם המק״ט הזה לספק.' });
+        }
+        throw err;
+      }
+    }),
+
+  /** Delete a single catalog row. */
+  deleteItem: managerProcedure
+    .input(z.object({ itemId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      const [row] = await ctx.db
+        .delete(supplierCatalogItems)
         .where(
           and(
             eq(supplierCatalogItems.id, input.itemId),

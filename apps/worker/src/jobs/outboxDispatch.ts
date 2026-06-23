@@ -182,7 +182,10 @@ async function dispatch(row: {
 
   if (row.channel === 'email') {
     if (!isResendConfigured(env)) return; // no creds -> no-op
-    const send = makeResendDispatcher({ apiKey: env.RESEND_API_KEY!, from: env.RESEND_FROM });
+    const send = makeResendDispatcher({
+      apiKey: env.RESEND_API_KEY!,
+      from: env.RESEND_FROM ?? env.EMAIL_FROM,
+    });
     const payload: NotificationPayload = {
       restaurantId: row.restaurantId,
       channel: 'email',

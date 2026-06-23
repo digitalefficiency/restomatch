@@ -2,16 +2,18 @@ import { auth } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
 import { SectionHeader } from '@/lib/components';
 import { SettingsForm } from './form';
+import { ProfileForm } from './profile-form';
 
 export default async function SettingsPage() {
   const caller = await createServerCaller();
-  const [settings, memberships, session] = await Promise.all([
+  const [settings, profile, memberships, session] = await Promise.all([
     caller.settings.get(),
+    caller.settings.profile(),
     caller.onboarding.myMemberships(),
     auth(),
   ]);
 
-  // settings.update is owner-only; resolve the caller's role on the active
+  // Both editors are owner-only; resolve the caller's role on the active
   // restaurant (matching the layout's selection) to decide between an editable
   // form and a read-only view.
   const active =
@@ -19,12 +21,21 @@ export default async function SettingsPage() {
   const isOwner = (active?.role ?? null) === 'owner';
 
   return (
-    <div>
-      <SectionHeader
-        title="הגדרות התאמה"
-        subtitle="ספי הסבילות והאישורים שמכתיבים מתי חריגה נחסמת, נכנסת לתור או מאושרת אוטומטית."
-      />
-      <SettingsForm initial={settings} canEdit={isOwner} />
+    <div className="space-y-10">
+      <div>
+        <SectionHeader
+          title="פרטי המסעדה"
+          subtitle="שם, ח״פ, שיעור מע״מ ואזור זמן — נושאי משקל לחישוב הדליפה ולגבולות היום."
+        />
+        <ProfileForm initial={profile} canEdit={isOwner} />
+      </div>
+      <div>
+        <SectionHeader
+          title="הגדרות התאמה"
+          subtitle="ספי הסבילות והאישורים שמכתיבים מתי חריגה נחסמת, נכנסת לתור או מאושרת אוטומטית."
+        />
+        <SettingsForm initial={settings} canEdit={isOwner} />
+      </div>
     </div>
   );
 }

@@ -31,27 +31,60 @@ interface ResendClient {
   };
 }
 
+const DEFAULT_FROM = 'RestoMatch <auth@restomatch.co.il>';
+
+/** Load the optional `resend` SDK constructor, or null if it isn't installed. */
+async function loadResendCtor(): Promise<(new (apiKey: string) => ResendClient) | null> {
+  try {
+    // Non-literal specifier: the SDK is optional and not required at build time.
+    const pkg = 'resend';
+    const mod = (await import(pkg)) as { Resend: new (apiKey: string) => ResendClient };
+    return mod.Resend;
+  } catch {
+    return null;
+  }
+}
+
+/** Send via the Resend HTTP API directly — no SDK dependency (Node 20+ fetch). */
+async function sendViaResendHttp(
+  apiKey: string,
+  from: string,
+  payload: NotificationPayload,
+): Promise<{ externalId?: string }> {
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      from,
+      to: payload.target,
+      subject: payload.subject ?? '(ללא נושא)',
+      text: payload.body,
+      ...(payload.html ? { html: payload.html } : {}),
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`Resend HTTP send failed (${res.status}): ${detail.slice(0, 200)}`);
+  }
+  const data = (await res.json().catch(() => ({}))) as { id?: string };
+  return { externalId: data.id };
+}
+
 export function makeResendDispatcher(
   config: ResendConfig,
 ): (payload: NotificationPayload) => Promise<{ externalId?: string }> {
   return async (payload) => {
-    // Non-literal specifier: the SDK is not required at build time, and dev/test
-    // runs (where it isn't installed) won't fail to bundle.
-    const pkg = 'resend';
-    let ResendCtor: new (apiKey: string) => ResendClient;
-    try {
-      ({ Resend: ResendCtor } = (await import(pkg)) as {
-        Resend: new (apiKey: string) => ResendClient;
-      });
-    } catch {
-      throw new Error(
-        'Resend SDK not installed — run `pnpm --filter @restomatch/web add resend` to enable email sending.',
-      );
+    const from = config.from ?? DEFAULT_FROM;
+    // Prefer the SDK when installed; otherwise fall back to the Resend HTTP API
+    // so production email works WITHOUT adding the dependency (no `pnpm add` gate).
+    const ResendCtor = await loadResendCtor();
+    if (!ResendCtor) {
+      return sendViaResendHttp(config.apiKey, from, payload);
     }
 
     const resend = new ResendCtor(config.apiKey);
     const result = await resend.emails.send({
-      from: config.from ?? 'RestoMatch <auth@restomatch.co.il>',
+      from,
       to: payload.target,
       subject: payload.subject ?? '(ללא נושא)',
       text: payload.body,

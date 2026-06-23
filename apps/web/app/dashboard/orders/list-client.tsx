@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
 import { ShoppingCart } from 'lucide-react';
@@ -84,10 +85,18 @@ export function OrdersList({ initial }: { initial: Order[] }) {
             <tbody>
               {orders.map((o) => (
                 <tr key={o.id} className="border-b border-line/60 last:border-0 hover:bg-surface-2/60">
-                  <td className="px-4 py-3 font-medium text-ink">{o.supplierName}</td>
+                  <td className="px-4 py-3 font-medium text-ink">
+                    <Link href={`/dashboard/orders/${o.id}`} className="text-primary hover:underline">
+                      {o.supplierName}
+                    </Link>
+                  </td>
                   <td className="px-4 py-3"><Badge tone={STATUS[o.status].tone}>{STATUS[o.status].label}</Badge></td>
                   <td className="px-4 py-3 text-muted">
-                    {o.expectedDeliveryAt ? new Date(o.expectedDeliveryAt).toLocaleDateString('he-IL') : '—'}
+                    {o.expectedDeliveryAt
+                      ? new Date(o.expectedDeliveryAt).toLocaleDateString('he-IL', {
+                          timeZone: 'Asia/Jerusalem',
+                        })
+                      : '—'}
                   </td>
                   <td className="px-4 py-3 tabular-nums text-muted">{o.lineCount}</td>
                   <td className="px-4 py-3 font-mono tabular-nums text-ink">

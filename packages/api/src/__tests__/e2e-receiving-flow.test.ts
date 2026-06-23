@@ -81,6 +81,11 @@ describe('E2E — full receiving flow', () => {
         restaurantId: restaurant!.id,
         canonicalName: 'עגבניה שרי',
         defaultUnit: 'ק״ג',
+        // Link the product to the supplier so the supplier-scoped catalog matcher
+        // (supplierScopeSql: false-leak guard — only products this supplier sells)
+        // considers it as a fuzzy candidate. Without this the matcher correctly
+        // returns 0 candidates for an unlinked product.
+        supplierId: supplier!.id,
       })
       .returning();
 

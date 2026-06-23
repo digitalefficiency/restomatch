@@ -165,7 +165,10 @@ export const mappingRouter = router({
       } else {
         const [created] = await ctx.db
           .insert(products)
-          .values({ restaurantId: rid, canonicalName: input.newProductName! })
+          // Stamp the exclusivity owner (input.supplierId is already asserted
+          // same-tenant above) so OCR/mapping-created products don't accumulate
+          // NULL-owner rows that leave exclusivity inert + un-backfillable.
+          .values({ restaurantId: rid, canonicalName: input.newProductName!, supplierId: input.supplierId })
           .returning({ id: products.id });
         if (!created) throw new Error('failed to create product');
         productId = created.id;

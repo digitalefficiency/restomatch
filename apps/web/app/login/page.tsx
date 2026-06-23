@@ -3,11 +3,14 @@ import { signIn } from '@/auth';
 import { Button, Card, Field, Input } from '@/lib/components';
 
 interface PageProps {
-  searchParams: Promise<{ callbackUrl?: string; error?: string }>;
+  searchParams: Promise<{ callbackUrl?: string; error?: string; email?: string }>;
 }
 
 export default async function LoginPage({ searchParams }: PageProps) {
-  const { callbackUrl, error } = await searchParams;
+  const { callbackUrl, error, email: invitedEmail } = await searchParams;
+  // When arriving from an invite link, the address is fixed (acceptInvite is
+  // bound to it) — prefill + lock it so an alias/typo can't dead-end the accept.
+  const lockedEmail = invitedEmail?.trim() || undefined;
 
   async function action(formData: FormData) {
     'use server';
@@ -42,7 +45,11 @@ export default async function LoginPage({ searchParams }: PageProps) {
         ) : null}
 
         <form action={action} className="space-y-4">
-          <Field label="כתובת מייל" htmlFor="email">
+          <Field
+            label="כתובת מייל"
+            htmlFor="email"
+            hint={lockedEmail ? 'ההזמנה נשלחה לכתובת הזו — התחברו איתה כדי לקבל גישה.' : undefined}
+          >
             <Input
               id="email"
               name="email"
@@ -50,6 +57,8 @@ export default async function LoginPage({ searchParams }: PageProps) {
               required
               autoComplete="email"
               placeholder="you@restaurant.co.il"
+              defaultValue={lockedEmail}
+              readOnly={!!lockedEmail}
             />
           </Field>
           <Button type="submit" className="w-full">

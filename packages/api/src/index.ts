@@ -15,6 +15,7 @@ import { catalogRouter } from './routers/catalog';
 import { ordersRouter } from './routers/orders';
 import { matchRouter } from './routers/match';
 import { mappingRouter } from './routers/mapping';
+import { productsRouter } from './routers/products';
 import { teamRouter } from './routers/team';
 
 export const appRouter = router({
@@ -34,6 +35,7 @@ export const appRouter = router({
   orders: ordersRouter,
   match: matchRouter,
   mapping: mappingRouter,
+  products: productsRouter,
   team: teamRouter,
 });
 

@@ -224,12 +224,19 @@ export const ordersRouter = router({
         .from(purchaseOrders)
         .where(eq(purchaseOrders.id, input.poId))
         .limit(1);
+      const [supplier] = po
+        ? await ctx.db
+            .select({ name: suppliers.name })
+            .from(suppliers)
+            .where(eq(suppliers.id, po.supplierId))
+            .limit(1)
+        : [];
       const lines = await ctx.db
         .select()
         .from(poLines)
         .where(eq(poLines.poId, input.poId))
         .orderBy(asc(poLines.id));
-      return { po, lines };
+      return { po, lines, supplierName: supplier?.name ?? null };
     }),
 
   createDraft: managerProcedure
@@ -414,6 +421,77 @@ export const ordersRouter = router({
         .update(purchaseOrders)
         .set({ status: 'cancelled', updatedAt: new Date() })
         .where(and(eq(purchaseOrders.id, input.poId), eq(purchaseOrders.restaurantId, restaurantId)));
+      return { ok: true };
+    }),
+
+  /**
+   * Edit a single DRAFT order line (qty / unit / price / description) before it
+   * is sent. po_lines carries no restaurant_id — ownership + draft-only status
+   * are checked through the parent PO. A sent order's lines are frozen (it has
+   * already gone to the supplier).
+   */
+  updateOrderLine: managerProcedure
+    .input(
+      z.object({
+        lineId: z.string().uuid(),
+        patch: z
+          .object({
+            rawDescription: z.string().trim().min(1).max(400).optional(),
+            qtyOrdered: z.number().positive().max(1_000_000).optional(),
+            unit: z.string().trim().min(1).max(32).optional(),
+            unitPriceExpected: z.number().nonnegative().max(10_000_000).nullable().optional(),
+          })
+          .strict()
+          .refine((v) => Object.values(v).some((x) => x !== undefined), {
+            message: 'אין שינויים לעדכן',
+          }),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      const [owned] = await ctx.db
+        .select({ status: purchaseOrders.status })
+        .from(poLines)
+        .innerJoin(
+          purchaseOrders,
+          and(eq(purchaseOrders.id, poLines.poId), eq(purchaseOrders.restaurantId, restaurantId)),
+        )
+        .where(eq(poLines.id, input.lineId))
+        .limit(1);
+      if (!owned) throw new TRPCError({ code: 'NOT_FOUND', message: 'order line not found' });
+      if (owned.status !== 'draft') {
+        throw new TRPCError({ code: 'CONFLICT', message: 'רק שורות בטיוטה ניתנות לעריכה' });
+      }
+      const p = input.patch;
+      const set: Partial<typeof poLines.$inferInsert> = {};
+      if (p.rawDescription !== undefined) set.rawDescription = p.rawDescription;
+      if (p.qtyOrdered !== undefined) set.qtyOrdered = String(p.qtyOrdered);
+      if (p.unit !== undefined) set.unit = p.unit;
+      if (p.unitPriceExpected !== undefined)
+        set.unitPriceExpected = p.unitPriceExpected == null ? null : String(p.unitPriceExpected);
+      await ctx.db.update(poLines).set(set).where(eq(poLines.id, input.lineId));
+      return { ok: true };
+    }),
+
+  /** Remove a line from a DRAFT order. */
+  deleteOrderLine: managerProcedure
+    .input(z.object({ lineId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      const [owned] = await ctx.db
+        .select({ status: purchaseOrders.status })
+        .from(poLines)
+        .innerJoin(
+          purchaseOrders,
+          and(eq(purchaseOrders.id, poLines.poId), eq(purchaseOrders.restaurantId, restaurantId)),
+        )
+        .where(eq(poLines.id, input.lineId))
+        .limit(1);
+      if (!owned) throw new TRPCError({ code: 'NOT_FOUND', message: 'order line not found' });
+      if (owned.status !== 'draft') {
+        throw new TRPCError({ code: 'CONFLICT', message: 'רק שורות בטיוטה ניתנות למחיקה' });
+      }
+      await ctx.db.delete(poLines).where(eq(poLines.id, input.lineId));
       return { ok: true };
     }),
 

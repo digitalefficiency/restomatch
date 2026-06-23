@@ -1,9 +1,10 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
-import { ArrowLeftRight, ShieldAlert } from 'lucide-react';
+import { ArrowLeftRight, FileText, ShieldAlert } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
 import { Badge, Button, Card, LoadMore, Textarea, type BadgeTone } from '@/lib/components';
 
@@ -121,11 +122,22 @@ export function ApprovalsList({ initial }: { initial: QueueItem[] }) {
                     </p>
                   </div>
                   <time className="shrink-0 whitespace-nowrap font-mono text-xs tabular-nums text-subtle">
-                    {new Date(d.createdAt).toLocaleString('he-IL')}
+                    {new Date(d.createdAt).toLocaleString('he-IL', {
+                      timeZone: 'Asia/Jerusalem',
+                    })}
                   </time>
                 </header>
 
                 <WhyFlagged d={d} />
+
+                {d.invoiceId ? (
+                  <Link
+                    href={`/dashboard/invoices/${d.invoiceId}`}
+                    className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-info hover:underline"
+                  >
+                    <FileText className="h-3.5 w-3.5" aria-hidden="true" /> תקן חשבונית / OCR
+                  </Link>
+                ) : null}
 
                 {isRejecting ? (
                   <div className="mt-3 space-y-2 rounded-xl border border-danger/25 bg-danger/5 p-3">

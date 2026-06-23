@@ -1,5 +1,7 @@
 import { registerSentryClient } from '@restomatch/observability';
+import { assertWorkerEnv } from './env';
 import { registerCronSchedules } from './cron';
+import { startHealthServer } from './health';
 import { startBaselinesWorker } from './jobs/baselines';
 import { startDailyExpectationsWorker } from './jobs/dailyExpectations';
 import { startImportCatalogWorker } from './jobs/importCatalog';
@@ -41,6 +43,10 @@ async function initObservability(): Promise<void> {
   }
 }
 
+// Fail fast if the worker is misconfigured (missing REDIS_URL/keys in prod)
+// rather than booting into a process that looks healthy but does nothing.
+assertWorkerEnv();
+
 void initObservability();
 
 const workers = [
@@ -58,12 +64,16 @@ const workers = [
 
 console.log(`[worker] started ${workers.length} workers`);
 
+// HTTP health endpoint for the deploy platform's liveness/readiness probe.
+const healthServer = startHealthServer(workers.length);
+
 void registerCronSchedules().catch((err) => {
   console.error('[worker] failed to register cron schedules', err);
 });
 
 const shutdown = async (signal: string) => {
   console.log(`[worker] ${signal} received, shutting down`);
+  healthServer.close();
   await Promise.all(workers.map((w) => w.close()));
   process.exit(0);
 };

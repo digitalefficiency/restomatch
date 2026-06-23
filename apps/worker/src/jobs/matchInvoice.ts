@@ -1,16 +1,20 @@
 import {
+  approvalNeededEmail,
   buildMatchInputForInvoice,
   buildRules,
+  createEmailNotifier,
   createPushNotifier,
   createWhatsAppNotifier,
   getEntitlements,
   persistMatchRun,
+  recipientsForRestaurant,
   recordUsage,
   resolveApprovalThresholds,
 } from '@restomatch/api';
-import { and, createDb, eq, invoices, matchRuns, restaurants } from '@restomatch/db';
+import { and, createDb, eq, invoices, matchRuns, restaurants, suppliers } from '@restomatch/db';
 import { runMatch, type MatchOutput } from '@restomatch/matching';
 import { makeWorker } from '../queue';
+import { appBaseUrl } from '../lib/notifyHelpers';
 
 /**
  * The producer sends only identifiers; the worker discovers the PO/GR and
@@ -27,6 +31,8 @@ export interface MatchInvoiceJob {
 // Push has no real provider yet (always mock).
 const whatsapp = createWhatsAppNotifier();
 const push = createPushNotifier();
+// Real Resend email when RESEND_API_KEY is set, else dev/console EmailNotifier.
+const email = createEmailNotifier();
 
 export function startMatchInvoiceWorker() {
   return makeWorker<MatchInvoiceJob>('match-invoice', async (job): Promise<MatchOutput> => {
@@ -115,6 +121,42 @@ export function startMatchInvoiceWorker() {
           relatedEntityType: 'match_run',
           relatedEntityId: persisted.matchRunId,
         });
+      }
+
+      // Email the REAL mailbox of each manager-tier recipient — the
+      // "we caught a ₪ leak, decide now" moment. (WhatsApp/push above use the
+      // symbolic role: target; email needs concrete addresses.) Idempotent at
+      // the job level: an already-matched invoice skips this whole block.
+      const recipients = await recipientsForRestaurant(
+        db,
+        restaurantId,
+        persisted.rolesNeedingNotification,
+      );
+      if (recipients.length > 0) {
+        const [sup] = await db
+          .select({ name: suppliers.name })
+          .from(invoices)
+          .innerJoin(suppliers, eq(suppliers.id, invoices.supplierId))
+          .where(eq(invoices.id, invoiceId))
+          .limit(1);
+        const rendered = approvalNeededEmail({
+          supplierName: sup?.name ?? 'ספק',
+          discrepancyCount: result.discrepancies.length,
+          atRiskIls: `₪${result.totalDiscrepancyAmount.toFixed(0)}`,
+          approvalsUrl: `${appBaseUrl()}/dashboard/approvals`,
+        });
+        for (const r of recipients) {
+          await email.send(db, {
+            restaurantId,
+            channel: 'email',
+            target: r.email,
+            subject: rendered.subject,
+            body: rendered.text,
+            html: rendered.html,
+            relatedEntityType: 'match_run',
+            relatedEntityId: persisted.matchRunId,
+          });
+        }
       }
     }
 
