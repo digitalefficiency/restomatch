@@ -5,7 +5,26 @@
 > (ראה `AGENTS.md` §"Autonomy is PR-only"). עבודת הקוד שלא דורשת credentials מתועדת
 > בנפרד ב-`STATE.md` / רשימת המשימות.
 
-## ⚠️ הממצא שמכתיב את הסדר
+---
+
+> ## 🟢 עדכון 2026-06-26 — קאטאובר המיגרציות כבר בוצע (אומת חי)
+>
+> אימות ישיר מול ה-Supabase החי (פרויקט `cringgshiafwsszyqufo`, read-only):
+> - **הסכמה כבר עד מיגרציה 0018** — `invitations`, `supplier_catalog_items`,
+>   `catalog_imports` כולן קיימות; 38 טבלאות, **RLS מופעל על כולן**, 0 advisors ברמת ERROR.
+> - תפקיד `restomatch_app` קיים עם **`rolbypassrls = false`** (RLS ייאכף ברגע
+>   ש-`DATABASE_URL_APP` מצביע עליו).
+>
+> **לכן §0–§3 כאן (גיבוי-לפני-DDL, הרצת מיגרציות 0009–0018, החלת RLS) — בוצעו כבר.
+> אל תריץ אותן שוב** — drizzle הוא forward-only והרצה חוזרת עלולה להיכשל / לגרום drift.
+> מה שבאמת נותר לעלייה לאוויר מרוכז ב-[`GO-LIVE-RUNBOOK.md`](./GO-LIVE-RUNBOOK.md):
+> Redis (Upstash), Resend (key + דומיין מאומת), הוספת `RESEND_API_KEY`/`EMAIL_FROM`/`REDIS_URL`
+> ל-Vercel, deploy ל-web, ופריסת ה-worker ל-Fly (טרם הועלה). §4–§8 כאן (env, worker, web,
+> smoke, שער אבטחה) עדיין תקפים.
+
+---
+
+## ⚠️ הממצא שמכתיב את הסדר (מיושן — נכון ל-2026-06-21, ראה עדכון למעלה)
 
 האודיט אימת מול ה-DB החי: **פרודקשן תקוע ב-migration 0008. מיגרציות 0009–0018 מעולם
 לא הורצו.** הטבלאות `catalog_imports`, `supplier_catalog_items`, `invitations` לא קיימות
