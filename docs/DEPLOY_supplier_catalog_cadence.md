@@ -3,7 +3,25 @@
 > Branch-specific release runbook. For standing infra (Supabase/Vercel/Fly/Upstash
 > coordinates, env list) see [`DEPLOY.md`](./DEPLOY.md).
 
-## Why this exists
+---
+
+> ## 🟢 Update 2026-06-26 — migrations 0009→0018 are ALREADY APPLIED (verified live)
+>
+> Verified read-only against the live Supabase project `cringgshiafwsszyqufo`:
+> the schema is **current through 0018** (`invitations`, `supplier_catalog_items`,
+> `catalog_imports` all exist), 38 tables with **RLS enabled on every one**, 0 ERROR
+> advisors; role `restomatch_app` exists with **`rolbypassrls = false`**.
+>
+> **So §1–§3 below (back up, `pnpm migrate`, re-apply RLS) are DONE — do NOT re-run them**
+> (drizzle is forward-only; re-running risks failure/drift). §4–§6 (env, deploy, verify)
+> still apply. The actual remaining go-live steps are consolidated in
+> [`GO-LIVE-RUNBOOK.md`](./GO-LIVE-RUNBOOK.md): Redis (Upstash), Resend (key + verified
+> domain), add `RESEND_API_KEY`/`EMAIL_FROM`/`REDIS_URL` to Vercel, deploy web, deploy the
+> Fly worker (never deployed yet).
+
+---
+
+## Why this exists (stale — as of 2026-06-21; see update above)
 
 Production is **~10 migrations behind this branch.** Verified against the live DB
 (read-only):
