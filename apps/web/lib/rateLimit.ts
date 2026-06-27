@@ -81,3 +81,36 @@ export async function enforceMagicLinkLimit(
 ): Promise<RateLimitResult> {
   return enforceRateLimit(canonicalizeEmail(email), MAGIC_LINK_LIMIT);
 }
+
+/** Password-reset request limit per destination mailbox: 3 per 15 minutes. */
+export const PASSWORD_RESET_MAILBOX_LIMIT: RateLimitOptions = {
+  limit: 3,
+  windowSec: 15 * 60,
+  prefix: 'pwreset:mbox',
+};
+
+/** Password-reset request limit per client IP: 10 per 15 minutes. */
+export const PASSWORD_RESET_IP_LIMIT: RateLimitOptions = {
+  limit: 10,
+  windowSec: 15 * 60,
+  prefix: 'pwreset:ip',
+};
+
+/**
+ * Throttle password-reset requests on BOTH the destination mailbox AND the
+ * client IP (B.4). The mailbox key collapses aliases; the IP key bounds a
+ * single source spraying many addresses. Allowed only when BOTH pass. Fails
+ * OPEN per limiter on a Redis outage — the durable brute-force ceiling for the
+ * login itself is the DB lockout backstop (C.2), independent of Redis.
+ */
+export async function enforcePasswordResetLimit(
+  email: string,
+  ip: string,
+): Promise<RateLimitResult> {
+  const byMailbox = await enforceRateLimit(canonicalizeEmail(email), PASSWORD_RESET_MAILBOX_LIMIT);
+  const byIp = await enforceRateLimit(ip || 'unknown', PASSWORD_RESET_IP_LIMIT);
+  // Return the more restrictive (already-blocked) result so the caller surfaces
+  // a single, uniform "too many attempts" message.
+  if (!byMailbox.allowed) return byMailbox;
+  return byIp;
+}

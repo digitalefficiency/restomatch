@@ -9,6 +9,7 @@ export {
   renderEmail,
   ilsSpan,
   magicLinkEmail,
+  passwordResetEmail,
   inviteEmail,
   supplierDelayEmail,
   orderNotPlacedEmail,

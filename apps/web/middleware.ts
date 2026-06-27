@@ -29,10 +29,29 @@ export default auth((req) => {
     path.startsWith('/_next') ||
     looksLikeAsset;
 
-  if (!req.auth && !isPublic) {
+  // Treat a token with no user id as unauthenticated. When the jwt callback
+  // revokes a session (tokenVersion mismatch / remember-me window elapsed) it
+  // re-issues an EMPTY token, so `req.auth` is truthy but carries no user id —
+  // honouring that here is the edge half of session revocation (B.2).
+  const sessionUser = req.auth?.user as
+    | { id?: string; twoFactorPending?: boolean }
+    | undefined;
+  const isAuthed = Boolean(req.auth) && Boolean(sessionUser?.id);
+  if (!isAuthed && !isPublic) {
     const url = req.nextUrl.clone();
     url.pathname = '/login';
     url.searchParams.set('callbackUrl', req.nextUrl.pathname);
+    return NextResponse.redirect(url);
+  }
+
+  // 2FA session gate (Epic C): once a user is 2FA-enrolled, the FIRST factor
+  // (password OR magic-link) leaves the session pending until the TOTP step.
+  // A pending session may only reach /login (incl. /login/2fa); everything else
+  // bounces to the second-factor screen. Inert for users without 2FA enrolled.
+  if (isAuthed && sessionUser?.twoFactorPending && !path.startsWith('/login')) {
+    const url = req.nextUrl.clone();
+    url.pathname = '/login/2fa';
+    url.search = '';
     return NextResponse.redirect(url);
   }
 

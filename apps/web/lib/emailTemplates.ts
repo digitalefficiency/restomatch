@@ -6,4 +6,4 @@
  * paths (auth.ts, dashboard/team/actions.ts).
  */
 export type { RenderedEmail as EmailContent } from '@restomatch/api';
-export { magicLinkEmail, inviteEmail } from '@restomatch/api';
+export { magicLinkEmail, inviteEmail, passwordResetEmail } from '@restomatch/api';

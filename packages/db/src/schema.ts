@@ -300,6 +300,85 @@ export const invitations = pgTable(
 );
 
 /* ──────────────────────────────────────────────────────────────────────────
+ * Credential auth (Epic B/C) — password (argon2id), reset tokens, 2FA.
+ *
+ * These are an IDENTITY trust zone, NOT tenant data: they carry no
+ * restaurant_id and are REVOKE'd in full from the tenant app role
+ * (restomatch_app) in packages/db/src/rls.ts. Every read/write goes through the
+ * OWNER auth connection (authDb / ctx.adminDb) via server actions / route
+ * handlers — never the tenant db / memberProcedure. Password hashing
+ * (@restomatch/crypto argon2id) and TOTP secret encryption (AUTH_ENC_KEY) live
+ * node-runtime only; the columns here only ever store ciphertext / argon2 PHC
+ * strings, never plaintext.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export const userCredentials = pgTable('user_credentials', {
+  /** 1:1 with users; the row is created lazily on first set-password / failed login. */
+  userId: uuid('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  /** argon2id PHC string. NULL = no password yet (magic-link-only user). Never plaintext. */
+  passwordHash: text('password_hash'),
+  passwordUpdatedAt: timestamp('password_updated_at', { withTimezone: true }),
+  /**
+   * Session-revocation epoch. Stamped into the JWT at sign-in and re-compared on
+   * every revalidation; bumping it (reset / change-password / "log out
+   * everywhere") invalidates every live session for the user.
+   */
+  tokenVersion: integer('token_version').notNull().default(0),
+  /** DB lockout backstop — survives a Redis outage (the Redis limiter fails open). */
+  failedLoginCount: integer('failed_login_count').notNull().default(0),
+  lockedUntil: timestamp('locked_until', { withTimezone: true }),
+  /** AES-256-GCM ciphertext of the TOTP secret (AUTH_ENC_KEY). NULL = 2FA not enrolled. */
+  totpSecretEnc: text('totp_secret_enc'),
+  totpEnabledAt: timestamp('totp_enabled_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const passwordResetTokens = pgTable(
+  'password_reset_tokens',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /**
+     * sha256(raw token) as hex — mirrors invitations.token_hash. The raw token
+     * lives only in the reset email link, never persisted, so a DB/log leak
+     * cannot replay a reset.
+     */
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    /** One-time: set when consumed so a replayed/leaked token is inert. */
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('password_reset_tokens_token_hash_unique').on(t.tokenHash),
+    index('password_reset_tokens_user_idx').on(t.userId),
+  ],
+);
+
+/** One-time 2FA recovery codes (Epic C). Only sha256(code) is stored. */
+export const userRecoveryCodes = pgTable(
+  'user_recovery_codes',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    codeHash: varchar('code_hash', { length: 64 }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('user_recovery_codes_user_code_unique').on(t.userId, t.codeHash),
+    index('user_recovery_codes_user_idx').on(t.userId),
+  ],
+);
+
+/* ──────────────────────────────────────────────────────────────────────────
  * Suppliers
  * ────────────────────────────────────────────────────────────────────────── */
 

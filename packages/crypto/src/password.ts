@@ -53,3 +53,29 @@ export async function verifyPassword(storedHash: string, plain: string): Promise
     return false;
   }
 }
+
+/**
+ * Whether a stored hash was produced with weaker parameters (or a different
+ * variant/version) than the current {@link ARGON2ID_OPTIONS}, so the caller can
+ * transparently re-hash on the next successful login. Conservative: any hash it
+ * cannot positively confirm as "argon2id at the current m/t/p (or stronger)" is
+ * reported as needing a rehash. Parses the PHC string
+ * `$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>` — never throws.
+ */
+export function needsRehash(storedHash: string): boolean {
+  if (!storedHash) return true;
+  const m = /^\$argon2id\$v=(\d+)\$m=(\d+),t=(\d+),p=(\d+)\$/.exec(storedHash);
+  if (!m) return true; // not argon2id (e.g. a legacy/foreign hash) → rehash
+  const version = Number(m[1]);
+  const memoryCost = Number(m[2]);
+  const timeCost = Number(m[3]);
+  const parallelism = Number(m[4]);
+  // v0x13 == 19. An older version, or any cost factor below the current target,
+  // means the stored hash is weaker than what we mint today.
+  if (version !== 19) return true;
+  return (
+    memoryCost < ARGON2ID_OPTIONS.memoryCost ||
+    timeCost < ARGON2ID_OPTIONS.timeCost ||
+    parallelism < ARGON2ID_OPTIONS.parallelism
+  );
+}

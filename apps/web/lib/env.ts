@@ -25,6 +25,10 @@ const WebEnvSchema = z.object({
   REDIS_URL: z.string().min(1).optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   SENTRY_DSN: z.string().min(1).optional(),
+  // Symmetric key (32 bytes; hex/base64) used to encrypt the TOTP secret at rest
+  // (user_credentials.totp_secret_enc, Epic C). Required in production so 2FA
+  // secrets are never stored in plaintext. Validated below.
+  AUTH_ENC_KEY: z.string().min(1).optional(),
 });
 
 export type WebEnv = z.infer<typeof WebEnvSchema>;
@@ -49,6 +53,15 @@ export function assertWebEnv(env: NodeJS.ProcessEnv = process.env): WebEnv {
     if (!v.AUTH_URL && !v.APP_URL) missing.push('AUTH_URL or APP_URL');
     if (!v.REDIS_URL) missing.push('REDIS_URL — OCR/match/cron queue (uploads vanish without it)');
     if (!v.SUPABASE_SERVICE_ROLE_KEY) missing.push('SUPABASE_SERVICE_ROLE_KEY — signed scan URLs');
+    // AUTH_ENC_KEY encrypts the TOTP secret at rest (Epic C). Required in prod so
+    // 2FA secrets are never plaintext.
+    // NOTE on AUTH_SECRET rotation: AUTH_SECRET signs/encrypts the session JWT.
+    // Rotating it invalidates EVERY live token at once — including long-lived
+    // "remember me" sessions (up to 30d) — forcing a full re-login. To rotate
+    // without a mass logout, pass AUTH_SECRET as an array (old + new) so old
+    // tokens still verify during the overlap window, then drop the old key.
+    if (!v.AUTH_ENC_KEY)
+      missing.push('AUTH_ENC_KEY — encrypts the TOTP secret at rest (2FA, Epic C)');
     if (missing.length > 0) {
       throw new Error(`[env] missing required production secrets:\n - ${missing.join('\n - ')}`);
     }

@@ -1,1 +1,1 @@
-export { ARGON2ID_OPTIONS, hashPassword, verifyPassword } from './password';
+export { ARGON2ID_OPTIONS, hashPassword, verifyPassword, needsRehash } from './password';

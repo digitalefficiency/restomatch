@@ -35,6 +35,59 @@ export async function applyCoreTenantRls(adminConnectionString: string): Promise
 }
 
 /**
+ * Idempotent creation of the Epic B credential-auth identity tables
+ * (user_credentials / password_reset_tokens / user_recovery_codes) for the
+ * LOCAL TEST DB only. Production gets these via the 0019 migration; the shared
+ * test DB is push-based (no migration journal), so the RLS attack suite and the
+ * credential tests call this to guarantee the tables exist before
+ * ensureRlsAppRole revokes on them. Mirrors applyCoreTenantRls for tests.
+ */
+export async function applyAuthCredentialTables(adminConnectionString: string): Promise<void> {
+  const client = postgres(adminConnectionString, { max: 1, prepare: false });
+  try {
+    await client.unsafe(`
+      create table if not exists user_credentials (
+        user_id uuid primary key references users(id) on delete cascade,
+        password_hash text,
+        password_updated_at timestamptz,
+        token_version integer not null default 0,
+        failed_login_count integer not null default 0,
+        locked_until timestamptz,
+        totp_secret_enc text,
+        totp_enabled_at timestamptz,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      );
+      create table if not exists password_reset_tokens (
+        id uuid primary key default gen_random_uuid(),
+        user_id uuid not null references users(id) on delete cascade,
+        token_hash varchar(64) not null,
+        expires_at timestamptz not null,
+        used_at timestamptz,
+        created_at timestamptz not null default now()
+      );
+      create unique index if not exists password_reset_tokens_token_hash_unique
+        on password_reset_tokens (token_hash);
+      create index if not exists password_reset_tokens_user_idx
+        on password_reset_tokens (user_id);
+      create table if not exists user_recovery_codes (
+        id uuid primary key default gen_random_uuid(),
+        user_id uuid not null references users(id) on delete cascade,
+        code_hash varchar(64) not null,
+        used_at timestamptz,
+        created_at timestamptz not null default now()
+      );
+      create unique index if not exists user_recovery_codes_user_code_unique
+        on user_recovery_codes (user_id, code_hash);
+      create index if not exists user_recovery_codes_user_idx
+        on user_recovery_codes (user_id);
+    `);
+  } finally {
+    await client.end();
+  }
+}
+
+/**
  * Ensures a non-owner login role with full table privileges (but no RLS
  * bypass) exists, and returns a connection string for it. Call AFTER
  * applyCoreTenantRls so the `app` schema exists.
@@ -75,6 +128,25 @@ export async function ensureRlsAppRole(adminConnectionString: string): Promise<s
         from ${RLS_APP_ROLE};
       -- leads: public submit (INSERT policy) only; no edits/reads of others.
       revoke update, delete on leads from ${RLS_APP_ROLE};
+
+      -- Credential auth (Epic B/C) is a separate identity trust zone managed
+      -- ONLY on the owner auth connection via server actions / route handlers.
+      -- The tenant app role gets NOTHING: a compromised tenant path must not be
+      -- able to read password hashes / TOTP secrets, replay reset tokens or
+      -- recovery codes, or forge a tokenVersion bump (session-revocation
+      -- bypass). REVOKE ALL is gated on table existence so this stays a no-op on
+      -- a DB that has not yet applied 0019_user_credentials.
+      do $$ begin
+        if to_regclass('public.user_credentials') is not null then
+          execute 'revoke all on user_credentials from ${RLS_APP_ROLE}';
+        end if;
+        if to_regclass('public.password_reset_tokens') is not null then
+          execute 'revoke all on password_reset_tokens from ${RLS_APP_ROLE}';
+        end if;
+        if to_regclass('public.user_recovery_codes') is not null then
+          execute 'revoke all on user_recovery_codes from ${RLS_APP_ROLE}';
+        end if;
+      end $$;
     `);
   } finally {
     await client.end();
