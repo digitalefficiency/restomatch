@@ -17,6 +17,7 @@ import { useRef, useState } from 'react';
 import {
   SupabaseNotConfiguredError,
   uploadInvoiceScan,
+  type UploadedScan,
 } from '@/lib/supabase/client';
 import type { CapturedImage } from '../_state';
 import { StepHeader } from './SupplierSelect';
@@ -27,15 +28,20 @@ interface Props {
   onCapture: (image: CapturedImage) => void;
   onBack: () => void;
   /**
-   * Extra options forwarded to uploadInvoiceScan. The authenticated dashboard
-   * flow passes the active restaurantId + a tenant storage prefix so the scan
-   * mapping row is resolvable; the anonymous showcase omits it (walk-ins/).
+   * Extra options for the default (anonymous showcase) uploader. The
+   * authenticated dashboard flow ignores these and injects `uploadFile` instead.
    */
   uploadOpts?: {
     supplierName?: string;
-    restaurantId?: string;
-    storagePrefix?: string;
   };
+  /**
+   * Authenticated upload path: when provided, the file is uploaded via the
+   * SERVER (scans.upload mutation) which derives the tenant + storage path from
+   * the session — the browser never chooses a restaurant id or prefix. The
+   * anonymous showcase leaves this undefined and falls back to the walk-ins/
+   * uploader above.
+   */
+  uploadFile?: (file: File) => Promise<UploadedScan>;
 }
 
 type UploadState =
@@ -44,7 +50,7 @@ type UploadState =
   | { phase: 'uploaded'; result: CapturedImage }
   | { phase: 'error'; message: string };
 
-export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadOpts }: Props) {
+export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadOpts, uploadFile }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const viewfinderRef = useRef<HTMLDivElement>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(image?.url ?? null);
@@ -80,13 +86,13 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadOpts
     setPreviewUrl(localUrl);
     setFilename(file.name);
 
-    // Real upload to Supabase Storage in the background
+    // Real upload in the background. Authenticated dashboard flow goes through
+    // the server (uploadFile); the anonymous showcase uses the walk-ins/ client.
     setUpload({ phase: 'uploading', pct: 30 });
     try {
-      const uploaded = await uploadInvoiceScan(file, {
-        supplierName,
-        ...uploadOpts,
-      });
+      const uploaded = uploadFile
+        ? await uploadFile(file)
+        : await uploadInvoiceScan(file, { supplierName, ...uploadOpts });
       setUpload({
         phase: 'uploaded',
         result: {

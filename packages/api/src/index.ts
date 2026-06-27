@@ -8,6 +8,7 @@ import { onboardingRouter } from './routers/onboarding';
 import { ownerRouter } from './routers/owner';
 import { plansRouter } from './routers/plans';
 import { receivingRouter } from './routers/receiving';
+import { scansRouter } from './routers/scans';
 import { searchRouter } from './routers/search';
 import { settingsRouter } from './routers/settings';
 import { suppliersRouter } from './routers/suppliers';
@@ -21,6 +22,7 @@ import { teamRouter } from './routers/team';
 export const appRouter = router({
   owner: ownerRouter,
   receiving: receivingRouter,
+  scans: scansRouter,
   onboarding: onboardingRouter,
   approvals: approvalsRouter,
   exports: exportsRouter,

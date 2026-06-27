@@ -49,6 +49,7 @@ begin
     'memberships','invitations','suppliers','products',
     'supplier_catalog_items','catalog_imports',
     'purchase_orders','goods_receipts','invoices','invoice_scans',
+    'storage_namespaces',
     'match_runs','discrepancies','activity_events','price_history',
     'price_baselines','approval_rules','audit_log','procurement_connections',
     'email_inboxes','supplier_integrations','notifications_outbox'

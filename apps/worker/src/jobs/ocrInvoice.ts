@@ -36,7 +36,15 @@ function buildProviders(job: OcrInvoiceJob): { documentAi: OcrProvider; claude: 
   // ClaudeVision instance to BOTH provider slots. The reconciler treats two
   // identical extractions as full agreement (no conflicts → high confidence),
   // which is the intended single-provider behaviour for the pilot.
-  const claude = new ClaudeVision({ apiKey, model: process.env.OCR_CLAUDE_MODEL });
+  //
+  // PR1/A.1: the scan bucket is PRIVATE, so the invoice URL is a signed/expiring
+  // URL. fetchBytes makes the worker fetch the bytes itself and send base64 —
+  // Anthropic cannot reliably fetch a private/signed URL.
+  const claude = new ClaudeVision({
+    apiKey,
+    model: process.env.OCR_CLAUDE_MODEL,
+    fetchBytes: true,
+  });
   return { documentAi: claude, claude };
 }
 

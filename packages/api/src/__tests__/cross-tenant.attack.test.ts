@@ -111,6 +111,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'receiving.updateInvoiceHeader': 'attack',
   'receiving.updateInvoiceLine': 'attack',
   'receiving.pendingInvoices': 'isolation',
+  'scans.upload':
+    'memberProcedure write keyed to ctx.session.restaurantId; takes NO client-supplied tenant id or storage prefix (PR1/A.3 — the tenant + object path are derived server-side from the session), so it cannot target another tenant. The actual byte upload + service-role mapping insert are Supabase-network-bound and verified by storage.attack.test (membership gate) + against real Supabase; role denial is implicit in memberProcedure.',
   'admin.listRestaurants': 'admin-denial',
   'admin.getRestaurant': 'admin-denial',
   'admin.assignPlan': 'admin-denial',

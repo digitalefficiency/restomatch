@@ -14,21 +14,42 @@ import postgres from 'postgres';
 
 const RLS_APP_ROLE = 'restomatch_app';
 
-function coreTenantRlsSql(): string {
+function rlsSql(file: string): string {
   const here = dirname(fileURLToPath(import.meta.url));
   // src/ and a compiled dist/ both sit one level below the package root.
-  return readFileSync(join(here, '..', 'drizzle', 'rls', '0002_core_tenant_rls.sql'), 'utf8');
+  return readFileSync(join(here, '..', 'drizzle', 'rls', file), 'utf8');
 }
 
 /**
  * Applies 0002_core_tenant_rls.sql (multi-statement) using an owner/admin
- * connection. Idempotent. 0001 is Supabase-only (storage schema) and is NOT
- * applied here.
+ * connection. Idempotent.
  */
 export async function applyCoreTenantRls(adminConnectionString: string): Promise<void> {
   const client = postgres(adminConnectionString, { max: 1, prepare: false });
   try {
-    await client.unsafe(coreTenantRlsSql());
+    await client.unsafe(rlsSql('0002_core_tenant_rls.sql'));
+  } finally {
+    await client.end();
+  }
+}
+
+/**
+ * Applies 0001_invoice_scans_rls.sql — the Supabase Storage isolation layer
+ * (bucket privacy + per-restaurant storage.objects path-prefix policies).
+ *
+ * In PRODUCTION run this on the owner/direct connection (storage.objects is
+ * owned by supabase_storage_admin; service_role bypasses RLS).
+ *
+ * In TESTS the storage schema does not exist in vanilla Postgres, so the caller
+ * MUST first create a minimal shim (storage.buckets / storage.objects /
+ * storage.foldername) — see packages/api/src/__tests__/storage.attack.test.ts.
+ * Idempotent. Call AFTER applyCoreTenantRls so app.current_restaurant_id()
+ * exists.
+ */
+export async function applyStorageRls(adminConnectionString: string): Promise<void> {
+  const client = postgres(adminConnectionString, { max: 1, prepare: false });
+  try {
+    await client.unsafe(rlsSql('0001_invoice_scans_rls.sql'));
   } finally {
     await client.end();
   }

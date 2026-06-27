@@ -287,6 +287,9 @@ importers:
       '@restomatch/types':
         specifier: workspace:*
         version: link:../types
+      '@supabase/supabase-js':
+        specifier: ^2.106.1
+        version: 2.106.1
       '@trpc/client':
         specifier: ^11.0.0-rc.683
         version: 11.17.0(@trpc/server@11.17.0(typescript@5.9.3))(typescript@5.9.3)

@@ -3,7 +3,9 @@
  * returns the structured extraction (items, quantities, prices). Synchronous
  * (no worker/queue) so the receiver wizard can show the real invoice contents.
  *
- * Constrained to invoice-scans public URLs to avoid being a generic fetch proxy.
+ * Constrained to invoice-scans SIGNED URLs (the bucket is private) to avoid
+ * being a generic fetch proxy. We fetch the bytes ourselves and hand Claude
+ * base64 (fetchBytes) — Anthropic cannot reliably fetch a private/expiring URL.
  */
 import { NextResponse } from 'next/server';
 import postgres from 'postgres';
@@ -106,8 +108,9 @@ async function reconcileContacts(
 }
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+// Private bucket → reads come as signed URLs (/object/sign/...).
 const ALLOWED_PREFIX = SUPABASE_URL
-  ? `${SUPABASE_URL}/storage/v1/object/public/invoice-scans/`
+  ? `${SUPABASE_URL}/storage/v1/object/sign/invoice-scans/`
   : '';
 
 export async function POST(req: Request) {
@@ -156,7 +159,7 @@ export async function POST(req: Request) {
 
   if (!ALLOWED_PREFIX || !url.startsWith(ALLOWED_PREFIX)) {
     return NextResponse.json(
-      { ok: false, error: 'url must be a public invoice-scans URL' },
+      { ok: false, error: 'url must be a signed invoice-scans URL' },
       { status: 400 },
     );
   }
@@ -165,6 +168,8 @@ export async function POST(req: Request) {
     const provider = new ClaudeVision({
       apiKey,
       model: process.env.OCR_CLAUDE_MODEL ?? 'claude-opus-4-8',
+      // Private bucket: fetch the bytes server-side, never hand Anthropic the URL.
+      fetchBytes: true,
     });
     const result = await provider.extract(url);
     // Persist supplier contacts + detect agent phone changes (best-effort:

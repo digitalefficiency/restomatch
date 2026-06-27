@@ -1,14 +1,19 @@
 'use client';
 
 /**
- * Browser Supabase client + helper that uploads a captured invoice file
- * from the receiver wizard into the invoice-scans bucket, then writes
- * a mapping row in public.invoice_scans so /scans/[invoiceId] resolves
- * to the real document.
+ * Browser Supabase client for the ANONYMOUS showcase receiver only.
  *
- * Anon-only flow: the showcase has no auth on the receiver wizard, so
- * uploads use the publishable key and are constrained by RLS to the
- * walk-ins/ prefix only.
+ * SECURITY (PR1 / A.1 + A.3):
+ *  - The bucket is PRIVATE. We never call getPublicUrl(); reads are served as
+ *    short-lived signed URLs (here for the showcase, and server-side for the
+ *    authenticated /scans/[invoiceId] viewer).
+ *  - The AUTHENTICATED dashboard upload does NOT go through here anymore — it
+ *    goes through the server `scans.upload` tRPC mutation, which derives the
+ *    tenant + path from the session (see ReceivingWizard). The browser can no
+ *    longer choose a restaurant id or a storage prefix.
+ *  - The anonymous showcase stays constrained by storage RLS to the shared
+ *    `walk-ins/` prefix and writes NO invoice_scans mapping row (those rows are
+ *    now strictly tenant-scoped — restaurant_id is NOT NULL).
  */
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
@@ -32,7 +37,10 @@ function getClient(): SupabaseClient | null {
 export interface UploadedScan {
   /** The logical invoice id (used as /scans/[invoiceId]). */
   invoiceId: string;
-  /** Direct public URL to the file inside Supabase Storage. */
+  /**
+   * Short-lived SIGNED URL to the file inside Supabase Storage (the bucket is
+   * private — this is NOT a public URL). Used for the immediate in-flow OCR.
+   */
   publicUrl: string;
   /** Relative scans-route URL (preferred for in-app linking). */
   scanRouteUrl: string;
@@ -48,39 +56,32 @@ export class SupabaseNotConfiguredError extends Error {
   }
 }
 
+const SIGNED_URL_TTL_SEC = 60 * 30; // 30 minutes — enough for the showcase OCR.
+
 /**
- * Upload a file picked / captured in the receiver wizard. Returns the
- * generated invoice id and the resolved public URL. Throws if Supabase
- * isn't configured or the upload fails.
+ * ANONYMOUS showcase upload only. Uploads a captured file to the shared
+ * `walk-ins/` prefix (storage RLS-constrained) and returns a short-lived SIGNED
+ * URL for the demo OCR/preview. Writes NO invoice_scans mapping row — those are
+ * strictly tenant-scoped now. Throws if Supabase isn't configured or upload
+ * fails.
+ *
+ * The AUTHENTICATED dashboard flow must NOT use this — it uploads via the
+ * server `scans.upload` mutation (tenant + path derived from the session).
  */
 export async function uploadInvoiceScan(
   file: File,
-  opts: {
-    supplierName?: string;
-    /**
-     * Active restaurant id (authenticated dashboard flow). When present it is
-     * stamped onto the invoice_scans mapping row so resolveUploadedScan — which
-     * filters on restaurant_id — can find the document. Anonymous showcase
-     * uploads omit it and stay on the walk-ins/ prefix (RLS-constrained).
-     */
-    restaurantId?: string;
-    /**
-     * Storage prefix inside the bucket. Defaults to 'walk-ins'. Authenticated
-     * uploads pass e.g. the restaurant id so files are namespaced per tenant.
-     */
-    storagePrefix?: string;
-  } = {},
+  opts: { supplierName?: string } = {},
 ): Promise<UploadedScan> {
+  void opts.supplierName; // (no longer persisted on the anon path)
   const supabase = getClient();
   if (!supabase) throw new SupabaseNotConfiguredError();
 
   // Generate a stable id for the rest of the wizard / scans route.
   const invoiceId = `walk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const ext = guessExtension(file);
-  const prefix = (opts.storagePrefix ?? 'walk-ins').replace(/^\/+|\/+$/g, '');
-  const storagePath = `${prefix}/${invoiceId}.${ext}`;
+  const storagePath = `walk-ins/${invoiceId}.${ext}`;
 
-  // 1. Upload bytes to the bucket
+  // 1. Upload bytes to the (private) bucket — RLS allows anon under walk-ins/.
   const { error: uploadError } = await supabase.storage
     .from('invoice-scans')
     .upload(storagePath, file, {
@@ -91,35 +92,18 @@ export async function uploadInvoiceScan(
     throw new Error(`Supabase upload failed: ${uploadError.message}`);
   }
 
-  // 2. Resolve the public URL
-  const { data: publicUrlData } = supabase.storage
+  // 2. Sign a short-lived URL (private bucket — never getPublicUrl()).
+  const { data: signed, error: signError } = await supabase.storage
     .from('invoice-scans')
-    .getPublicUrl(storagePath);
-  if (!publicUrlData?.publicUrl) {
-    throw new Error('Could not resolve public URL after upload');
-  }
-
-  // 3. Insert a mapping row so /scans/[id] knows where to look
-  const { error: insertError } = await supabase.from('invoice_scans').insert({
-    invoice_id: invoiceId,
-    bucket: 'invoice-scans',
-    storage_path: storagePath,
-    mime_type: file.type || guessMime(ext),
-    supplier_name: opts.supplierName ?? null,
-    // Stamp the active restaurant so resolveUploadedScan (filters on
-    // restaurant_id) can find the row for authenticated dashboard users.
-    restaurant_id: opts.restaurantId ?? null,
-    page_count: null,
-  });
-  if (insertError) {
-    // Best-effort cleanup of the just-uploaded file
+    .createSignedUrl(storagePath, SIGNED_URL_TTL_SEC);
+  if (signError || !signed?.signedUrl) {
     await supabase.storage.from('invoice-scans').remove([storagePath]).catch(() => {});
-    throw new Error(`Supabase mapping insert failed: ${insertError.message}`);
+    throw new Error(`Could not sign URL after upload: ${signError?.message ?? 'unknown'}`);
   }
 
   return {
     invoiceId,
-    publicUrl: publicUrlData.publicUrl,
+    publicUrl: signed.signedUrl,
     scanRouteUrl: `/scans/${invoiceId}`,
     storagePath,
     mimeType: file.type || guessMime(ext),
