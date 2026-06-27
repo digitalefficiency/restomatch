@@ -18,8 +18,12 @@ const sql = postgres(url, { max: 1, prepare: false });
 
 function migrationSql(): string {
   const here = dirname(fileURLToPath(import.meta.url));
-  const file = join(here, '..', '..', 'drizzle', '0019_user_credentials.sql');
-  const body = readFileSync(file, 'utf8').split('--> statement-breakpoint').join('\n');
+  const read = (tag: string) =>
+    readFileSync(join(here, '..', '..', 'drizzle', `${tag}.sql`), 'utf8')
+      .split('--> statement-breakpoint')
+      .join('\n');
+  // 0019 creates the three identity tables; 0020 adds the 2FA ticket columns.
+  const body = `${read('0019_user_credentials')}\n${read('0020_two_factor_ticket')}`;
   return `DROP TABLE IF EXISTS user_recovery_codes, password_reset_tokens, user_credentials CASCADE;\n${body}`;
 }
 
@@ -55,6 +59,10 @@ describe('0019 migration shape — user_credentials', () => {
     expect(by.locked_until?.is_nullable).toBe('YES');
     expect(by.totp_secret_enc?.is_nullable).toBe('YES');
     expect(by.totp_enabled_at?.is_nullable).toBe('YES');
+    // 0020 — second-factor pass ticket (Epic C), both nullable + additive.
+    expect(by.two_factor_ticket_hash?.is_nullable).toBe('YES');
+    expect(by.two_factor_ticket_hash?.data_type).toBe('character varying');
+    expect(by.two_factor_ticket_expires?.is_nullable).toBe('YES');
   });
 
   it('keys on user_id (PK) with an ON DELETE CASCADE FK to users', async () => {

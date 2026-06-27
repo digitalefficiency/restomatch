@@ -26,6 +26,8 @@ const FORBIDDEN = [
   'next-auth/providers/credentials',
   './lib/passwords',
   '@/lib/passwords',
+  './lib/totp',
+  '@/lib/totp',
 ];
 
 function resolveLocal(spec: string, fromFile: string): string | null {

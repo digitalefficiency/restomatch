@@ -141,6 +141,13 @@
       "when": 1781740000000,
       "tag": "0019_user_credentials",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1781750000000,
+      "tag": "0020_two_factor_ticket",
+      "breakpoints": true
     }
   ]
 }

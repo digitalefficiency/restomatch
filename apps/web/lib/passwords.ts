@@ -38,6 +38,79 @@ export function lockDurationMs(failedCount: number): number {
   return Math.min(LOCK_BASE_MS * 2 ** over, LOCK_MAX_MS);
 }
 
+export interface LockState {
+  /** True when an active lock window is in effect right now. */
+  locked: boolean;
+  failedLoginCount: number;
+  lockedUntil: Date | null;
+}
+
+/**
+ * Read the durable lockout state for a user (the Redis-independent backstop —
+ * C.2). Returns null when no credential row exists yet. Shared by the login
+ * (authorizeCredentials) and the TOTP / recovery second-factor paths so a brute
+ * force survives a Redis outage on EITHER factor.
+ */
+export async function readLockState(userId: string): Promise<LockState | null> {
+  const [cred] = await authDb
+    .select({
+      failedLoginCount: userCredentials.failedLoginCount,
+      lockedUntil: userCredentials.lockedUntil,
+    })
+    .from(userCredentials)
+    .where(eq(userCredentials.userId, userId))
+    .limit(1);
+  if (!cred) return null;
+  return {
+    locked: cred.lockedUntil != null && cred.lockedUntil.getTime() > Date.now(),
+    failedLoginCount: cred.failedLoginCount,
+    lockedUntil: cred.lockedUntil,
+  };
+}
+
+/**
+ * Record one failed attempt and arm the exponential-backoff lock once the
+ * threshold is crossed. `prev*` are the values just read so the increment is
+ * computed without a second round-trip. Idempotent on the lock window: an
+ * already-locked account keeps its existing lockedUntil until the count grows.
+ */
+export async function registerFailedAttempt(
+  userId: string,
+  prevCount: number,
+  prevLockedUntil: Date | null,
+): Promise<void> {
+  const now = Date.now();
+  const nextCount = prevCount + 1;
+  const dur = lockDurationMs(nextCount);
+  await authDb
+    .update(userCredentials)
+    .set({
+      failedLoginCount: nextCount,
+      lockedUntil: dur > 0 ? new Date(now + dur) : prevLockedUntil,
+      updatedAt: new Date(now),
+    })
+    .where(eq(userCredentials.userId, userId));
+}
+
+/** Clear the failure counter + lock on a successful auth of either factor. */
+export async function clearFailedAttempts(userId: string): Promise<void> {
+  const now = new Date();
+  await authDb
+    .update(userCredentials)
+    .set({ failedLoginCount: 0, lockedUntil: null, updatedAt: now })
+    .where(eq(userCredentials.userId, userId));
+}
+
+/** Canonical login email for a user id — keys the per-account rate limiter. */
+export async function getUserEmailById(userId: string): Promise<string | null> {
+  const [row] = await authDb
+    .select({ email: users.email })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  return row?.email ?? null;
+}
+
 /* ── Reset-token policy (B.4) ────────────────────────────────────────────── */
 const RESET_TTL_MS = 60 * 60 * 1000; // 1 hour
 

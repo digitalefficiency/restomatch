@@ -14,6 +14,8 @@ export async function createServerCaller() {
           userId: session.user.id,
           restaurantId: session.user.restaurantId ?? null,
           role: session.user.role ?? null,
+          // Epic C: a 2FA-pending first factor is not a usable session.
+          twoFactorPending: session.user.twoFactorPending === true,
         }
       : null,
   };

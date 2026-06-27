@@ -18,6 +18,7 @@ import { authDb } from './lib/authDb';
 import { isEmailConfigured, sendEmail } from './lib/email';
 import { magicLinkEmail } from './lib/emailTemplates';
 import { authorizeCredentials, getSessionSecurityState } from './lib/passwords';
+import { consumeTwoFactorTicket } from './lib/totp';
 import { enforceMagicLinkLimit } from './lib/rateLimit';
 import {
   SESSION_TTL_LONG_SEC,
@@ -104,7 +105,7 @@ async function sendMagicLink({
   await sendEmail({ to: identifier, subject, html, text });
 }
 
-export const { handlers, signIn, signOut, auth } = NextAuth({
+export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
   ...authConfig,
   adapter,
   // 30d is the absolute ceiling (the "remember me" window + cookie Max-Age). The
@@ -149,11 +150,25 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     }),
   ],
   callbacks: {
-    async jwt({ token, user, trigger }) {
+    async jwt({ token, user, trigger, session }) {
       const t = token as AppJwt;
       const now = Date.now();
       const signInId = user?.id;
       const isSignIn = Boolean(signInId);
+
+      // Second-factor clearance (Epic C). The /login/2fa step verifies a TOTP /
+      // recovery code SERVER-SIDE, mints a one-time DB ticket, and triggers this
+      // update with the raw nonce. We re-validate the nonce against the stored
+      // hash here (NOT a client-supplied boolean) — so a hand-crafted POST to
+      // the session-update endpoint cannot clear the gate without a real factor.
+      if (trigger === 'update' && t.userId) {
+        const ticket = (session as { twoFactorTicket?: unknown } | undefined)?.twoFactorTicket;
+        if (typeof ticket === 'string' && ticket) {
+          if (await consumeTwoFactorTicket(t.userId, ticket)) {
+            t.twoFactorPending = false;
+          }
+        }
+      }
 
       if (signInId) {
         t.userId = signInId;

@@ -27,6 +27,8 @@ export default defineConfig({
       NODE_ENV: 'test',
       // Throwaway signing secret for handler-level tests — never the prod value.
       AUTH_SECRET: 'test-only-secret-not-production-0123456789',
+      // Throwaway 32-byte (hex) key so the TOTP AES-GCM round-trip runs in tests.
+      AUTH_ENC_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
     },
   },
 });

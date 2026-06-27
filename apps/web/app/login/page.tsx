@@ -1,9 +1,12 @@
 import { AlertCircle } from 'lucide-react';
 import { AuthError } from 'next-auth';
 import Link from 'next/link';
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { clientIpFromHeaders } from '@restomatch/api';
 import { signIn } from '@/auth';
 import { Button, Card, Field, Input } from '@/lib/components';
+import { enforceLoginLimit } from '@/lib/rateLimit';
 
 interface PageProps {
   searchParams: Promise<{ callbackUrl?: string; error?: string; email?: string; sent?: string }>;
@@ -33,6 +36,11 @@ export default async function LoginPage({ searchParams }: PageProps) {
     const password = String(formData.get('password') ?? '');
     const rememberMe = formData.get('rememberMe') === 'on';
     if (!email || !password) redirect('/login?error=CredentialsSignin');
+    // Edge rate-limit on email AND IP (C.2). Uniform 'rate' error reveals no
+    // lock/account state. The durable floor is the DB lockout in authorize().
+    const ip = clientIpFromHeaders(await headers());
+    const rl = await enforceLoginLimit(email, ip);
+    if (!rl.allowed) redirect('/login?error=rate');
     try {
       await signIn('credentials', { email, password, rememberMe, redirectTo });
     } catch (err) {
@@ -67,7 +75,9 @@ export default async function LoginPage({ searchParams }: PageProps) {
                 ? 'הקישור פג תוקף או שכבר נעשה בו שימוש. נסו שוב.'
                 : error === 'CredentialsSignin'
                   ? 'אימייל או סיסמה שגויים.'
-                  : 'אירעה שגיאה בהתחברות. נסו שוב.'}
+                  : error === 'rate'
+                    ? 'יותר מדי ניסיונות. נסו שוב מאוחר יותר.'
+                    : 'אירעה שגיאה בהתחברות. נסו שוב.'}
             </span>
           </div>
         ) : null}

@@ -4,6 +4,12 @@ export interface Session {
   userId: string;
   restaurantId: string | null;
   role: UserRole | null;
+  /**
+   * True when the user is 2FA-enrolled but has not yet presented the second
+   * factor (Epic C session gate). A pending session is treated as
+   * UNAUTHENTICATED by authedProcedure — it must complete /login/2fa first.
+   */
+  twoFactorPending?: boolean;
 }
 
 export type MemberSession = Session & {

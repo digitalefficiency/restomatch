@@ -332,6 +332,17 @@ export const userCredentials = pgTable('user_credentials', {
   /** AES-256-GCM ciphertext of the TOTP secret (AUTH_ENC_KEY). NULL = 2FA not enrolled. */
   totpSecretEnc: text('totp_secret_enc'),
   totpEnabledAt: timestamp('totp_enabled_at', { withTimezone: true }),
+  /**
+   * One-time, short-lived second-factor "pass ticket" (Epic C). After the
+   * /login/2fa step verifies a TOTP / recovery code SERVER-SIDE, it mints a
+   * random nonce, stores only sha256(nonce) here, and hands the nonce to the
+   * Auth.js session update — the jwt callback re-validates it against this hash
+   * before clearing twoFactorPending. The client never sees the hash and cannot
+   * forge the nonce, so a direct POST to the session-update endpoint cannot
+   * bypass the second factor. NULL once consumed / expired.
+   */
+  twoFactorTicketHash: varchar('two_factor_ticket_hash', { length: 64 }),
+  twoFactorTicketExpires: timestamp('two_factor_ticket_expires', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
