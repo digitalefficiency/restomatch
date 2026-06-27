@@ -107,6 +107,7 @@ export {
   isWhatsAppCloudConfigured,
   renderEmail,
   magicLinkEmail,
+  passwordResetEmail,
   inviteEmail,
   supplierDelayEmail,
   orderNotPlacedEmail,

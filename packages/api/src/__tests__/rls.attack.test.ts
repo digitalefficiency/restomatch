@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   activityEvents,
   applyAuditImmutableRls,
+  applyAuthCredentialTables,
   applyCoreTenantRls,
   approvalRules,
   auditLog,
@@ -22,6 +23,7 @@ import {
   matchRuns,
   memberships,
   notificationsOutbox,
+  passwordResetTokens,
   plans,
   poLines,
   priceBaselines,
@@ -37,6 +39,8 @@ import {
   supplierIntegrations,
   suppliers,
   usageCounters,
+  userCredentials,
+  userRecoveryCodes,
   users,
   withRestaurant,
   withUser,
@@ -84,6 +88,9 @@ beforeAll(async () => {
   // 0.4: split audit_log into append-only SELECT+INSERT + install the
   // immutability trigger. Must run after 0002 (it supersedes audit_log_tenant).
   await applyAuditImmutableRls(TEST_DB_URL);
+  // Ensure the Epic B credential-auth identity tables exist BEFORE the app role
+  // is provisioned, so ensureRlsAppRole's REVOKE ALL on them actually applies.
+  await applyAuthCredentialTables(TEST_DB_URL);
   const appUrl = await ensureRlsAppRole(TEST_DB_URL);
   appDb = createDb(appUrl);
   await resetDb(ownerDb);
@@ -390,6 +397,42 @@ describe('identity tables are a separate trust zone', () => {
 
   it('sessions: the app role has no access at all', async () => {
     await expect(appDb.select().from(sessions)).rejects.toThrow(/permission denied/);
+  });
+});
+
+// Epic B.1: the credential-auth tables are a separate identity trust zone —
+// managed ONLY on the owner auth connection. A compromised tenant code path
+// running as restomatch_app must not be able to read password hashes / TOTP
+// secrets, replay reset tokens or recovery codes, or forge a tokenVersion bump.
+describe('credential-auth tables are fully denied to the tenant app role', () => {
+  it('user_credentials: select / insert / update / delete all permission-denied', async () => {
+    await expect(appDb.select().from(userCredentials)).rejects.toThrow(/permission denied/);
+    await expect(
+      appDb.insert(userCredentials).values({ userId: A.ownerUserId, passwordHash: 'x' }),
+    ).rejects.toThrow(/permission denied/);
+    // A tokenVersion bump here would be a session-revocation bypass.
+    await expect(
+      appDb.update(userCredentials).set({ tokenVersion: 9999 }),
+    ).rejects.toThrow(/permission denied/);
+    await expect(appDb.delete(userCredentials)).rejects.toThrow(/permission denied/);
+  });
+
+  it('password_reset_tokens: the app role can neither read nor mint tokens', async () => {
+    await expect(appDb.select().from(passwordResetTokens)).rejects.toThrow(/permission denied/);
+    await expect(
+      appDb.insert(passwordResetTokens).values({
+        userId: A.ownerUserId,
+        tokenHash: 'deadbeef',
+        expiresAt: new Date(Date.now() + 3600_000),
+      }),
+    ).rejects.toThrow(/permission denied/);
+  });
+
+  it('user_recovery_codes: the app role can neither read nor write codes', async () => {
+    await expect(appDb.select().from(userRecoveryCodes)).rejects.toThrow(/permission denied/);
+    await expect(
+      appDb.insert(userRecoveryCodes).values({ userId: A.ownerUserId, codeHash: 'deadbeef' }),
+    ).rejects.toThrow(/permission denied/);
   });
 });
 

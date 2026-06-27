@@ -29,7 +29,10 @@ export const router = t.router;
 export const publicProcedure = t.procedure.use(errorCapture);
 
 export const authedProcedure = publicProcedure.use(({ ctx, next }) => {
-  if (!ctx.session) {
+  // A 2FA-pending session has only passed the FIRST factor — treat it as
+  // unauthenticated everywhere (Epic C). The /login/2fa second step runs as a
+  // server action, not a tRPC procedure, so no carve-out is needed here.
+  if (!ctx.session || ctx.session.twoFactorPending) {
     throw new TRPCError({ code: 'UNAUTHORIZED' });
   }
   return next({ ctx: { ...ctx, session: ctx.session } });

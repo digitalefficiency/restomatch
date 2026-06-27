@@ -4,6 +4,7 @@ export {
   applyCoreTenantRls,
   applyStorageRls,
   applyAuditImmutableRls,
+  applyAuthCredentialTables,
   ensureRlsAppRole,
 } from './rls';
 export { PLAN_SEED, PLAN_SEED_LIST, type PlanSeed } from './plans';

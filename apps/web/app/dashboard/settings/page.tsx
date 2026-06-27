@@ -1,9 +1,11 @@
 import { auth } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
 import { SectionHeader } from '@/lib/components';
+import { countUnusedRecoveryCodes, isTwoFactorEnabled } from '@/lib/totp';
 import { SettingsForm } from './form';
 import { ProfileForm } from './profile-form';
 import { DsrSection } from './dsr';
+import { TwoFactorSection } from './TwoFactorSection';
 
 export default async function SettingsPage() {
   const caller = await createServerCaller();
@@ -13,6 +15,11 @@ export default async function SettingsPage() {
     caller.onboarding.myMemberships(),
     auth(),
   ]);
+
+  const userId = session?.user?.id;
+  const [twoFactorEnabled, recoveryRemaining] = userId
+    ? await Promise.all([isTwoFactorEnabled(userId), countUnusedRecoveryCodes(userId)])
+    : [false, 0];
 
   // Both editors are owner-only; resolve the caller's role on the active
   // restaurant (matching the layout's selection) to decide between an editable
@@ -36,6 +43,16 @@ export default async function SettingsPage() {
           subtitle="ספי הסבילות והאישורים שמכתיבים מתי חריגה נחסמת, נכנסת לתור או מאושרת אוטומטית."
         />
         <SettingsForm initial={settings} canEdit={isOwner} />
+      </div>
+      <div>
+        <SectionHeader
+          title="אבטחת חשבון"
+          subtitle="אימות דו-שלבי מוסיף שכבת הגנה שאי-אפשר לעקוף גם דרך קישור-הקסם למייל."
+        />
+        <TwoFactorSection
+          initialEnabled={twoFactorEnabled}
+          recoveryRemaining={recoveryRemaining}
+        />
       </div>
       <div>
         <SectionHeader

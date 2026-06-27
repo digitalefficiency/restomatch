@@ -43,7 +43,20 @@ export default auth((req) => {
     path.startsWith('/_next') ||
     looksLikeAsset;
 
-  if (!req.auth && !isPublic) {
+  // Treat a token with no user id as unauthenticated. The AUTHORITATIVE
+  // per-request revocation gate is the NODE jwt callback in auth.ts: it re-reads
+  // token_version on EVERY request (B.2) and, on a mismatch / elapsed remember-me
+  // window, re-issues an EMPTY token. The edge can't do a DB read, so it does NOT
+  // independently validate token_version here — it only HONOURS the emptied token
+  // the node callback produces (req.auth truthy but no user id) as best-effort
+  // defence-in-depth. Every protected surface (dashboard RSC, tRPC route, server
+  // actions) calls node auth(), so the node callback is the real gate; this edge
+  // check is a backstop, not a substitute for it.
+  const sessionUser = req.auth?.user as
+    | { id?: string; twoFactorPending?: boolean }
+    | undefined;
+  const isAuthed = Boolean(req.auth) && Boolean(sessionUser?.id);
+  if (!isAuthed && !isPublic) {
     // API auth failures get JSON, never an HTML login redirect — so non-browser
     // clients see a real 401 and browsers don't render the login page inside a
     // fetch (D1.4). Page routes still redirect to /login.
@@ -51,6 +64,17 @@ export default auth((req) => {
     const url = req.nextUrl.clone();
     url.pathname = '/login';
     url.searchParams.set('callbackUrl', req.nextUrl.pathname);
+    return NextResponse.redirect(url);
+  }
+
+  // 2FA session gate (Epic C): once a user is 2FA-enrolled, the FIRST factor
+  // (password OR magic-link) leaves the session pending until the TOTP step.
+  // A pending session may only reach /login (incl. /login/2fa); everything else
+  // bounces to the second-factor screen. Inert for users without 2FA enrolled.
+  if (isAuthed && sessionUser?.twoFactorPending && !path.startsWith('/login')) {
+    const url = req.nextUrl.clone();
+    url.pathname = '/login/2fa';
+    url.search = '';
     return NextResponse.redirect(url);
   }
 

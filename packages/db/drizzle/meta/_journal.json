@@ -162,6 +162,34 @@
       "when": 1781770000000,
       "tag": "0022_legal_compliance",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1781780000000,
+      "tag": "0023_user_credentials",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1781790000000,
+      "tag": "0024_two_factor_ticket",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1781800000000,
+      "tag": "0025_totp_last_step",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1781810000000,
+      "tag": "0026_revoke_identity_tables",
+      "breakpoints": true
     }
   ]
 }

@@ -158,6 +158,22 @@ export function magicLinkEmail(args: { url: string }): RenderedEmail {
   return { subject, html, text };
 }
 
+/* ─────────────────────────── password reset ─────────────────────── */
+
+export function passwordResetEmail(args: { url: string }): RenderedEmail {
+  const subject = 'איפוס הסיסמה שלך ב-RestoMatch';
+  const html = renderEmail({
+    preview: 'קישור לאיפוס הסיסמה — תקף לשעה אחת.',
+    heading: 'איפוס סיסמה',
+    bodyHtml: `
+      <p style="margin:0 0 10px">קיבלנו בקשה לאיפוס הסיסמה לחשבון שלך. לחיצה על הכפתור תאפשר לבחור סיסמה חדשה.</p>
+      <p style="margin:0;color:${COLORS.muted};font-size:13px">הקישור תקף לשעה אחת וניתן לשימוש פעם אחת. אם לא ביקשת לאפס סיסמה — אפשר להתעלם מהודעה זו, הסיסמה הנוכחית תישאר בתוקף.</p>`,
+    cta: { label: 'בחירת סיסמה חדשה', url: args.url },
+  });
+  const text = `איפוס סיסמה ב-RestoMatch\n\nכדי לבחור סיסמה חדשה, פתח את הקישור (תקף לשעה, חד-פעמי):\n${args.url}\n\nאם לא ביקשת לאפס סיסמה, אפשר להתעלם מהודעה זו.`;
+  return { subject, html, text };
+}
+
 /* ─────────────────────────── team invite ────────────────────────── */
 
 export function inviteEmail(args: {
