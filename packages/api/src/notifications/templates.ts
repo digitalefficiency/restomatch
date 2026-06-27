@@ -61,6 +61,13 @@ export interface EmailLayout {
   cta?: { label: string; url: string };
   /** Optional accent color for the heading rule (defaults to primary). */
   accent?: string;
+  /**
+   * Marketing-only one-click opt-out (E.7 — Communications Law §30A). When set,
+   * the footer renders an unsubscribe line. TRANSACTIONAL emails (magic-link,
+   * supplier-delay, approval, reports) MUST NOT pass this — they are operational
+   * and exempt from the marketing opt-out requirement.
+   */
+  unsubscribeUrl?: string;
 }
 
 /** Brand frame shared by every email. Builders supply only the inner body. */
@@ -105,6 +112,14 @@ export function renderEmail(layout: EmailLayout): string {
           <div style="border-top:1px solid ${COLORS.line};margin-top:8px;padding-top:14px;
                       color:${COLORS.muted};font-size:12px;line-height:1.6;text-align:right">
             הודעה זו נשלחה אוטומטית מ-RestoMatch. אם אינך מזהה אותה, אפשר להתעלם.
+            ${
+              layout.unsubscribeUrl
+                ? `<br><a href="${escapeHtml(layout.unsubscribeUrl)}"
+                       style="color:${COLORS.muted};text-decoration:underline">
+                     להסרה מרשימת הדיוור — לחצו כאן
+                   </a>`
+                : ''
+            }
           </div>
         </td></tr>
       </table>

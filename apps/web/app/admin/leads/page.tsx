@@ -1,4 +1,5 @@
 import { createServerCaller } from '@/lib/trpc/server';
+import { LeadEraseButton } from './erase-button';
 
 export default async function AdminLeadsPage() {
   const caller = await createServerCaller();
@@ -21,6 +22,7 @@ export default async function AdminLeadsPage() {
               <th className="px-4 py-3 font-medium">רכש חודשי</th>
               <th className="px-4 py-3 font-medium">מקור</th>
               <th className="px-4 py-3 font-medium">תאריך</th>
+              <th className="px-4 py-3 font-medium">פרטיות</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
@@ -38,11 +40,14 @@ export default async function AdminLeadsPage() {
                 <td className="px-4 py-3 font-mono tabular-nums text-subtle">
                   {new Date(l.createdAt).toLocaleDateString('he-IL')}
                 </td>
+                <td className="px-4 py-3">
+                  <LeadEraseButton leadId={l.id} />
+                </td>
               </tr>
             ))}
             {leads.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-subtle">
+                <td colSpan={7} className="px-4 py-8 text-center text-subtle">
                   אין לידים עדיין
                 </td>
               </tr>

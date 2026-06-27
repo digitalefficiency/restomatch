@@ -183,6 +183,15 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   // Canonical product management (rename / recategorize / exclusivity / delete).
   'products.update': 'attack',
   'products.delete': 'attack',
+  // Data-subject-rights (E.6). Not tenant-scoped: export/delete act ONLY on the
+  // caller's own identity (keyed to ctx.session.userId — no client-supplied
+  // target, so a member can never reach another user); eraseLead operates on the
+  // non-tenant leads table and is platform-admin gated (admin-denial).
+  'dsr.exportMyData':
+    'authed self-service; reads only the caller-owned user/membership/lead/activity rows keyed to ctx.session.userId — no client-supplied tenant entity id',
+  'dsr.deleteMyAccount':
+    'authed self-service; anonymizes ONLY the caller (ctx.session.userId) — takes no target id, cannot reach another user',
+  'dsr.eraseLead': 'admin-denial',
 };
 
 function listProcedurePaths(): string[] {

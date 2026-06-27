@@ -10,6 +10,7 @@ import { startMatchInvoiceWorker } from './jobs/matchInvoice';
 import { startOcrInvoiceWorker } from './jobs/ocrInvoice';
 import { startOrderRemindersWorker } from './jobs/orderReminders';
 import { startOutboxDispatchWorker } from './jobs/outboxDispatch';
+import { startRetentionWorker } from './jobs/retention';
 import { startSupplierDelaysWorker } from './jobs/supplierDelays';
 import { startSyncPlatformsWorker } from './jobs/syncPlatforms';
 
@@ -60,6 +61,7 @@ const workers = [
   startOrderRemindersWorker(),
   startSupplierDelaysWorker(),
   startEndOfDayReportWorker(),
+  startRetentionWorker(),
 ];
 
 console.log(`[worker] started ${workers.length} workers`);

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Heebo, JetBrains_Mono } from 'next/font/google';
 import { TrpcProvider } from '@/lib/trpc/client';
+import { CookieConsent } from '@/lib/components/CookieConsent';
 import './globals.css';
 
 // Heebo drives Hebrew text + display (heavy weights for big numbers/headlines).
@@ -29,6 +30,7 @@ export default function RootLayout(props: { children: React.ReactNode }) {
     <html lang="he" dir="rtl" className={`${heebo.variable} ${mono.variable}`}>
       <body className="min-h-screen bg-bg font-sans text-ink antialiased">
         <TrpcProvider>{props.children}</TrpcProvider>
+        <CookieConsent />
       </body>
     </html>
   );

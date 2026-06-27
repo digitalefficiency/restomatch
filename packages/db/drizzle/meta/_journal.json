@@ -155,6 +155,13 @@
       "when": 1781760000000,
       "tag": "0021_products_supplier_same_tenant",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1781770000000,
+      "tag": "0022_legal_compliance",
+      "breakpoints": true
     }
   ]
 }
