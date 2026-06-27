@@ -5,17 +5,22 @@ import {
   isOriginAllowed,
   trpcRequestTargets,
   type AppContext,
+  type RateLimitOptions,
 } from '@restomatch/api';
 import { auth } from '@/auth';
 import { db } from '@/lib/db';
 import { authDb } from '@/lib/authDb';
-import { enforceRateLimit } from '@/lib/rateLimit';
+import { enforceRateLimit, trustedProxyHops } from '@/lib/rateLimit';
 
-// Public lead capture (leads.create) is an unauthenticated write surface, so
-// throttle it per client IP for defense in depth (the honeypot + bounded
-// strings in leads.ts handle content abuse; this caps volume). Redis-backed
-// when REDIS_URL is set, in-memory otherwise (enforceRateLimit fails open).
-const LEADS_RATE_LIMIT = { limit: 10, windowSec: 60 * 60, prefix: 'leads' };
+// Per-IP limits on the sensitive/unauthenticated tRPC procedures (defense in
+// depth on top of each procedure's own validation). Redis-backed when REDIS_URL
+// is set, in-memory otherwise (enforceRateLimit fails open). D1.6.
+//  - leads.create: public, unauthenticated write surface (caps volume).
+//  - team.acceptInvite: token-redemption surface — throttle invite-token probing.
+const PER_PROCEDURE_LIMITS: Array<{ procedure: string; opts: RateLimitOptions }> = [
+  { procedure: 'leads.create', opts: { limit: 10, windowSec: 60 * 60, prefix: 'leads' } },
+  { procedure: 'team.acceptInvite', opts: { limit: 20, windowSec: 60 * 60, prefix: 'accept-invite' } },
+];
 
 async function createContext(): Promise<AppContext> {
   const session = await auth();
@@ -48,9 +53,13 @@ const handler = async (req: Request) => {
     });
   }
 
-  // Per-IP rate limit on the public lead-capture endpoint.
-  if (trpcRequestTargets('leads.create', req.method, req.url)) {
-    const rl = await enforceRateLimit(clientIpFromHeaders(req.headers), LEADS_RATE_LIMIT);
+  // Per-IP rate limits on the sensitive procedures (a batched request can target
+  // several, so check each). IP is attributed via a trusted proxy hop, not the
+  // spoofable left-most x-forwarded-for entry (D1.6).
+  const ip = clientIpFromHeaders(req.headers, { trustedProxyHops: trustedProxyHops() });
+  for (const { procedure, opts } of PER_PROCEDURE_LIMITS) {
+    if (!trpcRequestTargets(procedure, req.method, req.url)) continue;
+    const rl = await enforceRateLimit(ip, opts);
     if (!rl.allowed) {
       return new Response(JSON.stringify({ error: 'too many requests' }), {
         status: 429,

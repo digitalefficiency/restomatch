@@ -72,6 +72,34 @@ export const MAGIC_LINK_LIMIT: RateLimitOptions = {
 };
 
 /**
+ * Public OCR endpoint limit: 10 requests per client IP per hour. The endpoint
+ * runs Claude Vision (cost-amplification / DoS surface), so this is intentionally
+ * tight — D1.5.
+ */
+export const SHOWCASE_OCR_LIMIT: RateLimitOptions = {
+  limit: 10,
+  windowSec: 60 * 60,
+  prefix: 'showcase-ocr',
+};
+
+/**
+ * Number of TRUSTED reverse proxies in front of the app, from
+ * `TRUSTED_PROXY_HOPS`. The client IP is then read that many hops from the RIGHT
+ * of `x-forwarded-for` (a hop a client cannot forge) instead of the spoofable
+ * left-most entry — D1.6. Defaults to 0 (legacy left-most) so attribution only
+ * tightens once the proxy depth is declared (e.g. `1` behind Vercel/Cloudflare).
+ */
+export function trustedProxyHops(env: NodeJS.ProcessEnv = process.env): number {
+  const n = Number.parseInt(env.TRUSTED_PROXY_HOPS ?? '', 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/** Throttle the public OCR endpoint per client IP. Fails open on a Redis outage. */
+export async function enforceOcrLimit(ip: string): Promise<RateLimitResult> {
+  return enforceRateLimit(ip, SHOWCASE_OCR_LIMIT);
+}
+
+/**
  * Throttle magic-link sends per destination MAILBOX (collapsing +tag / dot
  * aliases) so an attacker can't multiply the limit by cycling aliases that all
  * reach one inbox. Returns whether the send is allowed plus minutes-to-reset.

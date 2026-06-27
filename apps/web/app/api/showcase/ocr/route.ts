@@ -7,11 +7,24 @@
  */
 import { NextResponse } from 'next/server';
 import postgres from 'postgres';
+import { clientIpFromHeaders, isOriginAllowed } from '@restomatch/api';
 import { ClaudeVision } from '@restomatch/ocr';
+import { enforceOcrLimit, trustedProxyHops } from '@/lib/rateLimit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
+
+/** Reject oversized request bodies before parsing — the body is a tiny `{url}`. */
+const MAX_BODY_BYTES = 4096;
+
+/**
+ * Persisting OCR-derived supplier contacts is an UNAUTHENTICATED write on the
+ * owner DB connection driven by model output — a poisoning vector (R-05/R-14).
+ * Gated OFF by default; only the dev/demo environment that wants the live
+ * contact-change UX opts in with SHOWCASE_OCR_PERSIST_CONTACTS=1. (D1.5)
+ */
+const PERSIST_CONTACTS = process.env.SHOWCASE_OCR_PERSIST_CONTACTS === '1';
 
 interface OcrContact {
   role?: string | null;
@@ -98,6 +111,33 @@ const ALLOWED_PREFIX = SUPABASE_URL
   : '';
 
 export async function POST(req: Request) {
+  // CSRF / abuse: this is a public, expensive (Claude Vision) endpoint. Require a
+  // same-origin POST so a third-party page can't drive it, then throttle per IP.
+  if (
+    !isOriginAllowed({
+      method: req.method,
+      origin: req.headers.get('origin'),
+      host: req.headers.get('host'),
+      allowedUrls: [process.env.AUTH_URL, process.env.NEXTAUTH_URL, process.env.APP_URL],
+    })
+  ) {
+    return NextResponse.json({ ok: false, error: 'origin not allowed' }, { status: 403 });
+  }
+
+  const contentLength = Number(req.headers.get('content-length') ?? '0');
+  if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
+    return NextResponse.json({ ok: false, error: 'payload too large' }, { status: 413 });
+  }
+
+  const ip = clientIpFromHeaders(req.headers, { trustedProxyHops: trustedProxyHops() });
+  const rl = await enforceOcrLimit(ip);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { ok: false, error: 'too many requests' },
+      { status: 429, headers: { 'retry-after': String(rl.resetSec) } },
+    );
+  }
+
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
@@ -128,18 +168,24 @@ export async function POST(req: Request) {
     });
     const result = await provider.extract(url);
     // Persist supplier contacts + detect agent phone changes (best-effort:
-    // never fail the OCR response on a contact-store hiccup).
+    // never fail the OCR response on a contact-store hiccup). Gated OFF in prod
+    // (PERSIST_CONTACTS) — see note above.
     let contactAlerts: ContactAlert[] = [];
-    try {
-      contactAlerts = await reconcileContacts(result.supplier?.businessId, result.supplier?.contacts);
-    } catch {
-      contactAlerts = [];
+    if (PERSIST_CONTACTS) {
+      try {
+        contactAlerts = await reconcileContacts(
+          result.supplier?.businessId,
+          result.supplier?.contacts,
+        );
+      } catch {
+        contactAlerts = [];
+      }
     }
     return NextResponse.json({ ok: true, result, contactAlerts });
   } catch (err) {
-    return NextResponse.json(
-      { ok: false, error: err instanceof Error ? err.message : String(err) },
-      { status: 500 },
-    );
+    // Log the detail server-side; return a generic message so the public
+    // endpoint never leaks provider/internal error text. (D1.5)
+    console.error('[showcase/ocr] extraction failed:', err);
+    return NextResponse.json({ ok: false, error: 'OCR failed' }, { status: 500 });
   }
 }
