@@ -148,6 +148,13 @@
       "when": 1781750000000,
       "tag": "0020_invoice_scans_restaurant_not_null",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1781760000000,
+      "tag": "0021_products_supplier_same_tenant",
+      "breakpoints": true
     }
   ]
 }

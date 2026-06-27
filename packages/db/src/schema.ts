@@ -392,9 +392,11 @@ export const products = pgTable(
      * a supplier that owns products cannot be hard-deleted (mirrors
      * purchase_orders.supplier_id), forcing a soft-deactivate + re-point instead.
      *
-     * WARNING: the FK alone does NOT enforce same-tenant — a row could reference a
-     * supplier in another restaurant. commitCatalogRows asserts
-     * supplier.restaurantId === product.restaurantId at write time.
+     * SAME-TENANT: the original single-column FK did NOT prevent referencing a
+     * supplier in another restaurant. Migration 0019 replaces it with a composite
+     * FK (supplier_id, restaurant_id) → suppliers(id, restaurant_id), so the DB
+     * now rejects cross-tenant references referentially (RLS-independent).
+     * commitCatalogRows still asserts the same at write time for a friendly error.
      *
      * The matcher (matchProductTopN) treats a populated supplier_id as a direct
      * "this supplier sells this product" proof (additive to the existing

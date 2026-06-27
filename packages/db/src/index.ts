@@ -1,6 +1,11 @@
 export * from './schema';
 export { createDb, withRestaurant, withUser, type Database } from './client';
-export { applyCoreTenantRls, applyStorageRls, ensureRlsAppRole } from './rls';
+export {
+  applyCoreTenantRls,
+  applyStorageRls,
+  applyAuditImmutableRls,
+  ensureRlsAppRole,
+} from './rls';
 export { PLAN_SEED, PLAN_SEED_LIST, type PlanSeed } from './plans';
 export {
   and,
