@@ -1151,8 +1151,49 @@ export const leads = pgTable('leads', {
   monthlyProcurementAgorot: integer('monthly_procurement_agorot'),
   source: text('source'),
   note: text('note'),
+  // Marketing-consent capture (E.7 — Israeli anti-spam, Communications Law §30A).
+  // `marketingConsent` is the durable opt-in flag; the other three columns are
+  // the evidence trail (exact wording shown, timestamp, source IP) needed to
+  // prove a freely-given, informed opt-in. Default false → legacy leads are
+  // treated as NOT consented until re-captured.
+  marketingConsent: boolean('marketing_consent').notNull().default(false),
+  consentText: text('consent_text'),
+  consentAt: timestamp('consent_at', { withTimezone: true }),
+  consentSourceIp: text('consent_source_ip'),
+  // One-click opt-out: a stable token a future marketing send embeds in its
+  // unsubscribe link; `unsubscribedAt` records the withdrawal.
+  unsubscribeToken: uuid('unsubscribe_token').notNull().defaultRandom(),
+  unsubscribedAt: timestamp('unsubscribed_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Data-Subject-Rights (DSR) request log — append-only audit trail for Amendment
+ * 13 rights handling (E.6): access / export / delete / erase. NOT tenant-scoped
+ * (no restaurant_id): a subject is either a platform `user` (who may belong to
+ * several restaurants) or a marketing `lead`, so this sits outside the
+ * per-restaurant RLS model and is written only via the owner/admin connection
+ * (mirrors `leads` / `users`).
+ */
+export const dsrRequests = pgTable(
+  'dsr_requests',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    /** 'user' | 'lead' */
+    subjectType: text('subject_type').notNull(),
+    subjectId: uuid('subject_id'),
+    subjectEmail: text('subject_email'),
+    /** 'export' | 'delete' | 'erase' */
+    action: text('action').notNull(),
+    requestedByUserId: uuid('requested_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    status: text('status').notNull().default('completed'),
+    details: jsonb('details'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('dsr_requests_subject_idx').on(t.subjectType, t.subjectId, t.createdAt)],
+);
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Relations
@@ -1367,3 +1408,5 @@ export type Subscription = typeof subscriptions.$inferSelect;
 export type UsageCounter = typeof usageCounters.$inferSelect;
 export type Lead = typeof leads.$inferSelect;
 export type NewLead = typeof leads.$inferInsert;
+export type DsrRequest = typeof dsrRequests.$inferSelect;
+export type NewDsrRequest = typeof dsrRequests.$inferInsert;

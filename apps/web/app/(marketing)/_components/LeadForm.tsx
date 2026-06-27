@@ -1,9 +1,15 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { CheckCircle2 } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
 import { Button, Field, Input } from '@/lib/components';
+
+// The exact opt-in wording shown to the visitor — persisted server-side as
+// evidence of an informed marketing consent (E.7, Communications Law §30A).
+const MARKETING_CONSENT_TEXT =
+  'אני מאשר/ת קבלת תכנים שיווקיים ועדכונים מ-RestoMatch בדוא"ל / SMS, וניתן להסיר את ההסכמה בכל עת.';
 
 /**
  * Lead-capture form for the marketing landing. Calls leads.create (public).
@@ -16,6 +22,7 @@ export function LeadForm() {
   const [phone, setPhone] = useState('');
   const [restaurantName, setRestaurantName] = useState('');
   const [monthlyIls, setMonthlyIls] = useState('');
+  const [marketingConsent, setMarketingConsent] = useState(false);
   const [hp, setHp] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -60,6 +67,8 @@ export function LeadForm() {
           restaurantName: restaurantName.trim() || undefined,
           monthlyProcurementAgorot,
           source: 'landing',
+          marketingConsent,
+          consentText: marketingConsent ? MARKETING_CONSENT_TEXT : undefined,
           hp: hp.trim() || undefined,
         });
       }}
@@ -149,11 +158,27 @@ export function LeadForm() {
         </div>
       ) : null}
 
+      {/* Explicit, unchecked-by-default marketing opt-in (E.7). */}
+      <label htmlFor="lead-marketing-consent" className="flex items-start gap-2.5 text-sm text-muted">
+        <input
+          id="lead-marketing-consent"
+          type="checkbox"
+          checked={marketingConsent}
+          onChange={(e) => setMarketingConsent(e.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 rounded border-line accent-primary"
+        />
+        <span>{MARKETING_CONSENT_TEXT}</span>
+      </label>
+
       <Button type="submit" className="w-full" loading={create.isPending}>
         דברו איתנו
       </Button>
       <p className="text-center text-xs text-subtle">
-        בלחיצה אתם מאשרים שניצור איתכם קשר. ללא ספאם.
+        נשתמש בפרטים כדי ליצור איתכם קשר בנוגע לבקשתכם. למידע נוסף ראו{' '}
+        <Link href="/privacy" className="underline hover:text-muted">
+          מדיניות הפרטיות
+        </Link>
+        .
       </p>
     </form>
   );

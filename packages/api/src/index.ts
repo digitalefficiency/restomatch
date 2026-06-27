@@ -12,6 +12,7 @@ import { searchRouter } from './routers/search';
 import { settingsRouter } from './routers/settings';
 import { suppliersRouter } from './routers/suppliers';
 import { catalogRouter } from './routers/catalog';
+import { dsrRouter } from './routers/dsr';
 import { ordersRouter } from './routers/orders';
 import { matchRouter } from './routers/match';
 import { mappingRouter } from './routers/mapping';
@@ -37,6 +38,7 @@ export const appRouter = router({
   mapping: mappingRouter,
   products: productsRouter,
   team: teamRouter,
+  dsr: dsrRouter,
 });
 
 export type AppRouter = typeof appRouter;
@@ -144,6 +146,12 @@ export {
   type RateLimitOptions,
   type RateLimitResult,
 } from './rateLimit';
+export {
+  runRetention,
+  DEFAULT_RETENTION_CONFIG,
+  type RetentionConfig,
+  type RetentionReport,
+} from './retention';
 export { isOriginAllowed, type OriginCheckInput } from './csrf';
 export { clientIpFromHeaders, trpcRequestTargets, type HeaderReader } from './edge';
 export { canonicalizeEmail } from './email';

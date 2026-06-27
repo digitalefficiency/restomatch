@@ -134,6 +134,13 @@
       "when": 1781730000000,
       "tag": "0018_invitations",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1781740000000,
+      "tag": "0019_legal_compliance",
+      "breakpoints": true
     }
   ]
 }
