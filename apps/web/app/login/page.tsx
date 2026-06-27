@@ -1,12 +1,9 @@
 import { AlertCircle } from 'lucide-react';
 import { AuthError } from 'next-auth';
 import Link from 'next/link';
-import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { clientIpFromHeaders } from '@restomatch/api';
 import { signIn } from '@/auth';
 import { Button, Card, Field, Input } from '@/lib/components';
-import { enforceLoginLimit } from '@/lib/rateLimit';
 
 interface PageProps {
   searchParams: Promise<{ callbackUrl?: string; error?: string; email?: string; sent?: string }>;
@@ -36,11 +33,12 @@ export default async function LoginPage({ searchParams }: PageProps) {
     const password = String(formData.get('password') ?? '');
     const rememberMe = formData.get('rememberMe') === 'on';
     if (!email || !password) redirect('/login?error=CredentialsSignin');
-    // Edge rate-limit on email AND IP (C.2). Uniform 'rate' error reveals no
-    // lock/account state. The durable floor is the DB lockout in authorize().
-    const ip = clientIpFromHeaders(await headers());
-    const rl = await enforceLoginLimit(email, ip);
-    if (!rl.allowed) redirect('/login?error=rate');
+    // The email+IP login throttle now lives INSIDE the Credentials authorize()
+    // callback (auth.ts) so it is enforced on EVERY entry point — including a
+    // script POSTing straight to /api/auth/callback/credentials, which this page
+    // action can't see. Enforcing it here too would double-count the limiter and
+    // halve the ceiling for legitimate users, so it is intentionally not repeated.
+    // A throttled/wrong attempt surfaces the same uniform CredentialsSignin.
     try {
       await signIn('credentials', { email, password, rememberMe, redirectTo });
     } catch (err) {

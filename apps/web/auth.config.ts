@@ -10,9 +10,13 @@ export const authConfig = {
     signIn: '/login',
     verifyRequest: '/login/check-email',
   },
-  // Intentionally provider-less: the Credentials provider (argon2id) and every
-  // node-only crypto dep live ONLY in auth.ts. Keeping this edge config
-  // provider-less guarantees argon2/otplib never enter the middleware bundle.
+  // Intentionally provider-less AND jwt-callback-less: the Credentials provider
+  // (argon2id) and every node-only crypto dep live ONLY in auth.ts. Keeping this
+  // edge config provider-less guarantees argon2/otplib never enter the middleware
+  // bundle. Consequence: the edge does NOT run a jwt callback, so token_version /
+  // absolute-expiry revocation is enforced by the NODE jwt callback in auth.ts
+  // (on every request) — middleware only honours the emptied token that callback
+  // re-issues (see middleware.ts), it is not an independent revocation check.
   providers: [],
   callbacks: {
     async session({ session, token }) {

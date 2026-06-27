@@ -1,6 +1,6 @@
 'use server';
 
-import { auth } from '@/auth';
+import { requireFullSession } from '@/lib/authGuards';
 import {
   confirmTotpEnrollment,
   disableTwoFactor,
@@ -11,32 +11,28 @@ import {
 
 /**
  * Settings-side 2FA enrollment server actions (Epic C.1). All run on the OWNER
- * auth connection (via lib/totp → authDb) for the signed-in user only. A
- * twoFactorPending session can never reach here — the middleware gate bounces it
- * to /login/2fa before any dashboard route renders.
+ * auth connection (via lib/totp → authDb) for the signed-in user only.
+ *
+ * SECURITY: server actions are independent HTTP endpoints dispatched by a global
+ * Next-Action id, NOT by route — so the middleware /login/2fa redirect is NOT a
+ * boundary for them. Every action here calls requireFullSession() so a
+ * twoFactorPending session (an attacker holding only the FIRST factor) is bounced
+ * to /login/2fa and can never start / confirm / disable enrollment. The primitive
+ * itself is also hardened: startTotpEnrollment refuses to disarm an already-armed
+ * 2FA without an explicit disable (which requires the current second factor).
  */
-
-async function requireUserId(): Promise<string> {
-  const session = await auth();
-  const userId = session?.user?.id;
-  if (!userId) throw new Error('unauthenticated');
-  return userId;
-}
 
 /** Begin enrollment → returns the QR + secret. Does NOT arm 2FA yet. */
 export async function startTwoFactorEnrollmentAction(): Promise<EnrollmentChallenge> {
-  const session = await auth();
-  const userId = session?.user?.id;
-  if (!userId) throw new Error('unauthenticated');
-  const label = session.user.email ?? userId;
-  return startTotpEnrollment(userId, label);
+  const { userId, email } = await requireFullSession();
+  return startTotpEnrollment(userId, email ?? userId);
 }
 
 /** Confirm a code → arms 2FA + returns the one-time recovery codes (shown once). */
 export async function confirmTwoFactorEnrollmentAction(
   code: string,
 ): Promise<{ ok: boolean; recoveryCodes?: string[] }> {
-  const userId = await requireUserId();
+  const { userId } = await requireFullSession();
   const result = await confirmTotpEnrollment(userId, code);
   if (!result) return { ok: false };
   return { ok: true, recoveryCodes: result.recoveryCodes };
@@ -44,12 +40,12 @@ export async function confirmTwoFactorEnrollmentAction(
 
 /** Disable 2FA — requires a CURRENT second factor (TOTP or recovery code). */
 export async function disableTwoFactorAction(code: string): Promise<{ ok: boolean }> {
-  const userId = await requireUserId();
+  const { userId } = await requireFullSession();
   return { ok: await disableTwoFactor(userId, code) };
 }
 
 /** Current armed state (for optimistic UI refresh). */
 export async function twoFactorStatusAction(): Promise<{ enabled: boolean }> {
-  const userId = await requireUserId();
+  const { userId } = await requireFullSession();
   return { enabled: await isTwoFactorEnabled(userId) };
 }

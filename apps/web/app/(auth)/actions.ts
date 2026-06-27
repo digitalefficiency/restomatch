@@ -3,7 +3,8 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { clientIpFromHeaders } from '@restomatch/api';
-import { auth, signOut } from '@/auth';
+import { signOut } from '@/auth';
+import { requireFullSession } from '@/lib/authGuards';
 import { isEmailConfigured, sendEmail } from '@/lib/email';
 import { passwordResetEmail } from '@/lib/emailTemplates';
 import { passwordPolicyError } from '@/lib/passwordPolicy';
@@ -80,46 +81,48 @@ export async function resetPasswordAction(formData: FormData): Promise<void> {
 }
 
 /**
- * First-time set-password for a magic-link-verified user (must be signed in).
+ * First-time set-password for a magic-link-verified user. requireFullSession
+ * blocks an anonymous caller (→ /login) AND a twoFactorPending caller
+ * (→ /login/2fa): a server action is a global HTTP endpoint, so the middleware
+ * 2FA redirect is NOT a boundary for it — the gate must live here.
  */
 export async function setPasswordAction(formData: FormData): Promise<void> {
-  const session = await auth();
-  if (!session?.user?.id) redirect('/login');
+  const { userId } = await requireFullSession();
   const password = String(formData.get('password') ?? '');
   const confirm = String(formData.get('confirm') ?? '');
   if (password !== confirm) redirect('/set-password?error=mismatch');
   const policy = passwordPolicyError(password);
   if (policy) redirect('/set-password?error=policy');
-  await setUserPassword(session.user.id, password);
+  await setUserPassword(userId, password);
   redirect('/dashboard?password=set');
 }
 
 /**
  * Change password (verifies the current one) and bump tokenVersion so other
- * devices are logged out. Must be signed in.
+ * devices are logged out. requireFullSession gates anonymous + pending callers
+ * (the middleware redirect does not protect a server action — see authGuards).
  */
 export async function changePasswordAction(formData: FormData): Promise<void> {
-  const session = await auth();
-  if (!session?.user?.id) redirect('/login');
+  const { userId } = await requireFullSession();
   const current = String(formData.get('current') ?? '');
   const password = String(formData.get('password') ?? '');
   const confirm = String(formData.get('confirm') ?? '');
   if (password !== confirm) redirect('/set-password?error=mismatch');
   const policy = passwordPolicyError(password);
   if (policy) redirect('/set-password?error=policy');
-  const ok = await changeUserPassword(session.user.id, current, password);
+  const ok = await changeUserPassword(userId, current, password);
   if (!ok) redirect('/set-password?error=current');
   redirect('/set-password?changed=1');
 }
 
 /**
  * "Log out everywhere": bump tokenVersion (revokes every live JWT on its next
- * revalidation) then end this device's session too.
+ * request) then end this device's session too. Gated to a fully-authenticated
+ * session — a twoFactorPending session bails out via cancelTwoFactorAction, not
+ * here. requireFullSession redirects an anonymous/pending caller before any bump.
  */
 export async function logOutEverywhereAction(): Promise<void> {
-  const session = await auth();
-  if (session?.user?.id) {
-    await bumpTokenVersion(session.user.id);
-  }
+  const { userId } = await requireFullSession();
+  await bumpTokenVersion(userId);
   await signOut({ redirectTo: '/login' });
 }

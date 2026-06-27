@@ -148,6 +148,20 @@
       "when": 1781750000000,
       "tag": "0020_two_factor_ticket",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1781760000000,
+      "tag": "0021_totp_last_step",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1781770000000,
+      "tag": "0022_revoke_identity_tables",
+      "breakpoints": true
     }
   ]
 }

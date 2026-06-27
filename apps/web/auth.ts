@@ -1,7 +1,9 @@
 import { DrizzleAdapter } from '@auth/drizzle-adapter';
+import { headers } from 'next/headers';
 import NextAuth, { type DefaultSession } from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
 import Nodemailer from 'next-auth/providers/nodemailer';
+import { clientIpFromHeaders } from '@restomatch/api';
 import {
   accounts,
   and,
@@ -19,7 +21,7 @@ import { isEmailConfigured, sendEmail } from './lib/email';
 import { magicLinkEmail } from './lib/emailTemplates';
 import { authorizeCredentials, getSessionSecurityState } from './lib/passwords';
 import { consumeTwoFactorTicket } from './lib/totp';
-import { enforceMagicLinkLimit } from './lib/rateLimit';
+import { enforceLoginLimit, enforceMagicLinkLimit } from './lib/rateLimit';
 import {
   SESSION_TTL_LONG_SEC,
   isSessionExpired,
@@ -123,6 +125,19 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
       authorize: async (creds) => {
         const email = typeof creds?.email === 'string' ? creds.email : '';
         const password = typeof creds?.password === 'string' ? creds.password : '';
+        // Throttle HERE — not only in the /login page server action (B.5 / C.2).
+        // Auth.js exposes the credentials flow at POST /api/auth/callback/
+        // credentials, which middleware leaves public; a script can fetch a CSRF
+        // token and POST straight to it, skipping the page action entirely. So
+        // the email+IP login limit must run INSIDE authorize() to be
+        // un-bypassable. Reads the client IP from the request headers. Fails OPEN
+        // on a Redis outage — the durable floor is the per-account DB lockout in
+        // authorizeCredentials. A rate-limited attempt returns the same uniform
+        // null as a wrong password (surfaced as CredentialsSignin), revealing no
+        // account/lock state.
+        const ip = clientIpFromHeaders(await headers());
+        const rl = await enforceLoginLimit(email, ip);
+        if (!rl.allowed) return null;
         const result = await authorizeCredentials({ email, password });
         if (!result) return null;
         const rememberMe =
@@ -192,13 +207,33 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
 
       // "Remember me" lifetime (B.5): enforce the absolute window from loginAt
       // ourselves — a non-remembered session expires after ~1d, remembered ~30d.
+      // Runs EVERY request (unconditionally), like the revocation check below.
       if (t.loginAt !== undefined && isSessionExpired(t.loginAt, t.rememberMe === true, now)) {
         return {} as AppJwt; // expired ⇒ unauthenticated on the next request
+      }
+
+      // Session revocation (B.2): re-read token_version on EVERY request for an
+      // already-authenticated token (skipped only on the very first sign-in,
+      // where t.ver was just stamped above). This is deliberately OUTSIDE the
+      // membership-revalidation cache below: bumping token_version (reset /
+      // change-password / "log out everywhere") must reject a stale/stolen cookie
+      // on the very NEXT request — not only when the 10-minute membership window
+      // happens to be stale. It is a single indexed PK lookup on user_credentials,
+      // mirroring the unconditional loginAt-expiry check directly above. The node
+      // jwt callback is the authoritative per-request revocation gate (middleware
+      // only honours the emptied token it re-issues — see middleware.ts).
+      if (!isSignIn) {
+        const sec = await getSessionSecurityState(t.userId);
+        if ((t.ver ?? 0) !== sec.tokenVersion) {
+          return {} as AppJwt; // revoked ⇒ unauthenticated
+        }
       }
 
       // Re-validate membership/role periodically (and on first sight / explicit
       // update) so a revoked membership or demoted role stops granting access
       // within MEMBERSHIP_REVALIDATE_MS instead of for the whole JWT lifetime.
+      // NOTE: this caches membership/role ONLY — the revocation check above is
+      // intentionally NOT gated by this window.
       const stale =
         t.membershipCheckedAt === undefined ||
         now - t.membershipCheckedAt > MEMBERSHIP_REVALIDATE_MS ||
@@ -217,16 +252,6 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
           .select()
           .from(memberships)
           .where(eq(memberships.userId, userId));
-
-        // Session revocation (B.2): re-read token_version and reject a token
-        // minted before a reset / change-password / "log out everywhere".
-        // Skipped on the very first sign-in (t.ver was just stamped above).
-        if (!isSignIn) {
-          const sec = await getSessionSecurityState(userId);
-          if ((t.ver ?? 0) !== sec.tokenVersion) {
-            return {} as AppJwt; // revoked ⇒ unauthenticated
-          }
-        }
 
         // Keep the active restaurant if its membership still exists (and pick
         // up any role change); otherwise fall back to any membership, else none.

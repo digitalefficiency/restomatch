@@ -333,6 +333,15 @@ export const userCredentials = pgTable('user_credentials', {
   totpSecretEnc: text('totp_secret_enc'),
   totpEnabledAt: timestamp('totp_enabled_at', { withTimezone: true }),
   /**
+   * Last successfully-consumed TOTP time-step (floor(epoch/30) + matched delta).
+   * RFC 6238 §5.2 one-time-use: a code whose step is <= this is rejected as a
+   * replay, so a TOTP captured in flight cannot be re-used inside its ±1-step
+   * (~90s) validity window. Advanced atomically (WHERE totp_last_step < step) so
+   * two concurrent submissions of the same code can't both succeed. NULL until
+   * the first TOTP is consumed. Recovery codes (already one-time) don't touch it.
+   */
+  totpLastStep: integer('totp_last_step'),
+  /**
    * One-time, short-lived second-factor "pass ticket" (Epic C). After the
    * /login/2fa step verifies a TOTP / recovery code SERVER-SIDE, it mints a
    * random nonce, stores only sha256(nonce) here, and hands the nonce to the

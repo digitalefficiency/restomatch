@@ -55,6 +55,7 @@ export async function applyAuthCredentialTables(adminConnectionString: string): 
         locked_until timestamptz,
         totp_secret_enc text,
         totp_enabled_at timestamptz,
+        totp_last_step integer,
         two_factor_ticket_hash varchar(64),
         two_factor_ticket_expires timestamptz,
         created_at timestamptz not null default now(),
@@ -63,6 +64,8 @@ export async function applyAuthCredentialTables(adminConnectionString: string): 
       -- 0020 (Epic C): additive ticket columns for a DB created before that migration.
       alter table user_credentials add column if not exists two_factor_ticket_hash varchar(64);
       alter table user_credentials add column if not exists two_factor_ticket_expires timestamptz;
+      -- 0021 (Epic C): TOTP one-time-use replay marker, additive for an older DB.
+      alter table user_credentials add column if not exists totp_last_step integer;
       create table if not exists password_reset_tokens (
         id uuid primary key default gen_random_uuid(),
         user_id uuid not null references users(id) on delete cascade,

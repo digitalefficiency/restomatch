@@ -155,6 +155,22 @@ describe('enrollment', () => {
     expect(await confirmTotpEnrollment(u.id, '000000')).toBeNull();
     expect(await isTwoFactorEnabled(u.id)).toBe(false);
   });
+
+  // Adversarial finding #3 (primitive hardening): a 2FA-enrolled account must NOT
+  // be silently disarmed by re-starting enrollment — replacing it requires an
+  // explicit disable (which re-authenticates with the current second factor).
+  it('refuses to re-enroll an already-armed 2FA (no silent disarm)', async () => {
+    const u = await makeUser();
+    const secret = await enroll(u.id);
+    const before = await readCred(u.id);
+    await expect(startTotpEnrollment(u.id, u.email)).rejects.toThrow();
+    const after = await readCred(u.id);
+    expect(after?.totpEnabledAt).not.toBeNull(); // still armed
+    expect(after?.totpSecretEnc).toBe(before?.totpSecretEnc); // secret untouched
+    expect(await isTwoFactorEnabled(u.id)).toBe(true);
+    // The original secret still verifies (it was never replaced).
+    expect(await verifySecondFactor(u.id, authenticator.generate(secret))).toBe('ok');
+  });
 });
 
 describe('verifySecondFactor — TOTP, recovery, and lockout backstop', () => {
@@ -162,6 +178,18 @@ describe('verifySecondFactor — TOTP, recovery, and lockout backstop', () => {
     const u = await makeUser();
     const secret = await enroll(u.id);
     expect(await verifySecondFactor(u.id, authenticator.generate(secret))).toBe('ok');
+  });
+
+  // Adversarial finding #4 (RFC 6238 §5.2): a TOTP value is one-time-use — a code
+  // accepted once is rejected on replay even while still inside its ±1-step window.
+  it('rejects a replayed TOTP code within its validity window (one-time-use)', async () => {
+    const u = await makeUser();
+    const secret = await enroll(u.id);
+    const code = authenticator.generate(secret);
+    expect(await verifySecondFactor(u.id, code)).toBe('ok'); // first use
+    expect(await verifySecondFactor(u.id, code)).toBe('invalid'); // replay rejected
+    // The replay is counted as a failed attempt (feeds the lockout backstop).
+    expect((await readCred(u.id))?.failedLoginCount).toBe(1);
   });
 
   it('accepts a recovery code exactly once (one-time)', async () => {

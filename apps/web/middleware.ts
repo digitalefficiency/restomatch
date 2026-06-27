@@ -29,10 +29,15 @@ export default auth((req) => {
     path.startsWith('/_next') ||
     looksLikeAsset;
 
-  // Treat a token with no user id as unauthenticated. When the jwt callback
-  // revokes a session (tokenVersion mismatch / remember-me window elapsed) it
-  // re-issues an EMPTY token, so `req.auth` is truthy but carries no user id —
-  // honouring that here is the edge half of session revocation (B.2).
+  // Treat a token with no user id as unauthenticated. The AUTHORITATIVE
+  // per-request revocation gate is the NODE jwt callback in auth.ts: it re-reads
+  // token_version on EVERY request (B.2) and, on a mismatch / elapsed remember-me
+  // window, re-issues an EMPTY token. The edge can't do a DB read, so it does NOT
+  // independently validate token_version here — it only HONOURS the emptied token
+  // the node callback produces (req.auth truthy but no user id) as best-effort
+  // defence-in-depth. Every protected surface (dashboard RSC, tRPC route, server
+  // actions) calls node auth(), so the node callback is the real gate; this edge
+  // check is a backstop, not a substitute for it.
   const sessionUser = req.auth?.user as
     | { id?: string; twoFactorPending?: boolean }
     | undefined;
