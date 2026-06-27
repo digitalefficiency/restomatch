@@ -5,6 +5,7 @@
     "DATABASE_URL",
     "DATABASE_URL_APP",
     "DATABASE_URL_DIRECT",
+    "DATABASE_URL_TEST",
     "AUTH_SECRET",
     "AUTH_URL",
     "APP_URL",
