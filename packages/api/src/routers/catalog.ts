@@ -182,7 +182,7 @@ export const catalogRouter = router({
     .input(z.object({ supplierId: z.string().uuid(), file: FileInput }))
     .mutation(async ({ ctx, input }) => {
       await assertSupplierOwned(ctx.db, input.supplierId, ctx.session.restaurantId);
-      const table = parseCatalogFile(input.file);
+      const table = await parseCatalogFile(input.file);
       if (table.rows.length > MAX_ROWS) {
         throw new Error(`קובץ גדול מדי (${table.rows.length} שורות, מקסימום ${MAX_ROWS})`);
       }
@@ -200,7 +200,7 @@ export const catalogRouter = router({
     .mutation(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
       await assertSupplierOwned(ctx.db, input.supplierId, restaurantId);
-      const table = parseCatalogFile(input.file);
+      const table = await parseCatalogFile(input.file);
       if (table.rows.length > MAX_ROWS) {
         throw new Error(`קובץ גדול מדי (${table.rows.length} שורות, מקסימום ${MAX_ROWS})`);
       }

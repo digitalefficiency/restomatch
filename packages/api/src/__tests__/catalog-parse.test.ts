@@ -1,3 +1,4 @@
+import { Workbook } from 'exceljs';
 import { describe, expect, it } from 'vitest';
 import {
   autoDetectMapping,
@@ -5,6 +6,15 @@ import {
   parseCatalogFile,
   parseNumeric,
 } from '../catalog/parse';
+
+/** Build a real .xlsx buffer from an array-of-arrays (used by the XLSX tests). */
+async function xlsxBufferFromAoa(aoa: Array<Array<string | number>>): Promise<Buffer> {
+  const wb = new Workbook();
+  const ws = wb.addWorksheet('Sheet1');
+  for (const row of aoa) ws.addRow(row);
+  const out = await wb.xlsx.writeBuffer();
+  return Buffer.from(out);
+}
 
 describe('parseNumeric', () => {
   it('strips the shekel sign and parses', () => {
@@ -49,14 +59,14 @@ describe('autoDetectMapping (Hebrew headers)', () => {
 describe('parseCatalogFile + extractCatalogRows (CSV)', () => {
   const csv = ['מק"ט,תיאור,יחידה,מחיר', '1001,עגבניות,ק"ג,8.50', '1002,מלפפון,ק"ג,6.00'].join('\n');
 
-  it('parses headers and rows', () => {
-    const table = parseCatalogFile({ filename: 'prices.csv', text: csv });
+  it('parses headers and rows', async () => {
+    const table = await parseCatalogFile({ filename: 'prices.csv', text: csv });
     expect(table.headers).toEqual(expect.arrayContaining(['תיאור', 'מחיר']));
     expect(table.rows).toHaveLength(2);
   });
 
-  it('projects rows onto catalog rows via the auto mapping', () => {
-    const table = parseCatalogFile({ filename: 'prices.csv', text: csv });
+  it('projects rows onto catalog rows via the auto mapping', async () => {
+    const table = await parseCatalogFile({ filename: 'prices.csv', text: csv });
     const rows = extractCatalogRows(table, autoDetectMapping(table.headers));
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({
@@ -67,11 +77,57 @@ describe('parseCatalogFile + extractCatalogRows (CSV)', () => {
     });
   });
 
-  it('skips rows without a product name', () => {
+  it('skips rows without a product name', async () => {
     const csvWithBlank = ['מק"ט,תיאור,מחיר', '2001,,9.90', '2002,בצל,4.20'].join('\n');
-    const table = parseCatalogFile({ filename: 'p.csv', text: csvWithBlank });
+    const table = await parseCatalogFile({ filename: 'p.csv', text: csvWithBlank });
     const rows = extractCatalogRows(table, autoDetectMapping(table.headers));
     expect(rows).toHaveLength(1);
     expect(rows[0]!.supplierNameRaw).toBe('בצל');
+  });
+});
+
+describe('parseCatalogFile + extractCatalogRows (XLSX via exceljs)', () => {
+  it('parses Hebrew headers and rows from a real .xlsx buffer', async () => {
+    const buf = await xlsxBufferFromAoa([
+      ['מק"ט', 'תיאור', 'יחידה', 'מחיר'],
+      ['1001', 'עגבניות', 'ק"ג', '8.50'],
+      ['1002', 'מלפפון', 'ק"ג', 6],
+    ]);
+    const table = await parseCatalogFile({ filename: 'prices.xlsx', base64: buf.toString('base64') });
+    expect(table.headers).toEqual(expect.arrayContaining(['תיאור', 'מחיר']));
+    expect(table.rows).toHaveLength(2);
+
+    const rows = extractCatalogRows(table, autoDetectMapping(table.headers));
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      supplierSku: '1001',
+      supplierNameRaw: 'עגבניות',
+      unit: 'ק"ג',
+      listPrice: 8.5,
+    });
+    expect(rows[1]!.listPrice).toBe(6);
+  });
+
+  it('does not pollute Object.prototype from a hostile __proto__ header', async () => {
+    const buf = await xlsxBufferFromAoa([
+      ['__proto__', 'constructor', 'תיאור', 'מחיר'],
+      ['polluted', 'evil', 'בצל', '4.20'],
+    ]);
+    const table = await parseCatalogFile({ filename: 'evil.xlsx', base64: buf.toString('base64') });
+    // The parse must not have mutated the global prototype chain.
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(Object.prototype).not.toHaveProperty('polluted');
+    // The legitimate row data is still readable.
+    const rows = extractCatalogRows(table, autoDetectMapping(table.headers));
+    expect(rows[0]!.supplierNameRaw).toBe('בצל');
+  });
+
+  it('rejects an oversized spreadsheet before parsing', async () => {
+    // 10 MiB + 1 byte of arbitrary bytes — must be refused by the size guard,
+    // not handed to the parser.
+    const oversized = Buffer.alloc(10 * 1024 * 1024 + 1, 0x41);
+    await expect(
+      parseCatalogFile({ filename: 'huge.xlsx', base64: oversized.toString('base64') }),
+    ).rejects.toThrow(/גדול מדי/);
   });
 });

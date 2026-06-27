@@ -26,9 +26,9 @@
     "@trpc/server": "^11.0.0-rc.683",
     "@trpc/client": "^11.0.0-rc.683",
     "drizzle-orm": "^0.38.3",
+    "exceljs": "^4.4.0",
     "papaparse": "^5.4.1",
     "superjson": "^2.2.2",
-    "xlsx": "^0.18.5",
     "zod": "^3.24.1"
   },
   "devDependencies": {
