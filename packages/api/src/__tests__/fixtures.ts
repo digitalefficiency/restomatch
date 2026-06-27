@@ -1,8 +1,10 @@
 import {
   activityEvents,
+  approvalRules,
   auditLog,
   billingAccounts,
   discrepancies,
+  emailInboxes,
   eq,
   goodsReceipts,
   grLines,
@@ -11,16 +13,19 @@ import {
   invoices,
   matchRuns,
   memberships,
+  notificationsOutbox,
   PLAN_SEED_LIST,
   plans,
   poLines,
   priceBaselines,
   priceHistory,
+  procurementConnections,
   productAliases,
   products,
   purchaseOrders,
   restaurants,
   subscriptions,
+  supplierIntegrations,
   suppliers,
   usageCounters,
   users,
@@ -51,6 +56,11 @@ export interface Tenant {
 export async function resetDb(db: Database): Promise<void> {
   await db.delete(activityEvents);
   await db.delete(auditLog);
+  await db.delete(notificationsOutbox);
+  await db.delete(approvalRules);
+  await db.delete(procurementConnections);
+  await db.delete(emailInboxes);
+  await db.delete(supplierIntegrations);
   await db.delete(discrepancies);
   await db.delete(matchRuns);
   await db.delete(invoiceLines);
@@ -302,6 +312,58 @@ export async function seedTenant(db: Database, tag: string): Promise<Tenant> {
     role: 'receiver',
     tokenHash: `attack-token-${tag}`,
     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+  });
+
+  // One row in every other restaurant_id-scoped table, so the RLS attack suite
+  // can prove direct cross-tenant isolation for ALL of them (Epic 0.6). Several
+  // carry secrets (vault refs, oauth tokens, outbound contact targets).
+  await db.insert(priceHistory).values({
+    restaurantId: restaurant.id,
+    productId: product.id,
+    supplierId: supplier.id,
+    observedAt: today,
+    unitPrice: '8.5000',
+    qty: '10.000',
+    sourceInvoiceId: invoice.id,
+  });
+  await db.insert(priceBaselines).values({
+    restaurantId: restaurant.id,
+    productId: product.id,
+    supplierId: supplier.id,
+    windowDays: 30,
+    p50: '8.5000',
+    sampleSize: 1,
+  });
+  await db.insert(approvalRules).values({
+    restaurantId: restaurant.id,
+    name: `כלל אישור ${tag}`,
+    conditionJsonlogic: { '>': [{ var: 'deltaAmount' }, 0] },
+    autoAction: 'queue_review',
+    priority: 0,
+    enabled: true,
+  });
+  await db.insert(procurementConnections).values({
+    restaurantId: restaurant.id,
+    platform: 'restomatch',
+    credentialsVaultRef: `vault://conn-${tag}`,
+  });
+  await db.insert(emailInboxes).values({
+    restaurantId: restaurant.id,
+    emailAddress: `inbox-${tag}@attack.test`,
+    oauthTokensVaultRef: `vault://oauth-${tag}`,
+  });
+  await db.insert(supplierIntegrations).values({
+    restaurantId: restaurant.id,
+    supplierId: supplier.id,
+    kind: 'api_rest',
+    credentialsVaultRef: `vault://integ-${tag}`,
+  });
+  await db.insert(notificationsOutbox).values({
+    restaurantId: restaurant.id,
+    channel: 'email',
+    target: `ops-${tag}@attack.test`,
+    subject: 'בדיקה',
+    body: `התראה סודית של ${tag}`,
   });
 
   return {

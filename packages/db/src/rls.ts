@@ -14,10 +14,10 @@ import postgres from 'postgres';
 
 const RLS_APP_ROLE = 'restomatch_app';
 
-function coreTenantRlsSql(): string {
+function rlsSqlFile(name: string): string {
   const here = dirname(fileURLToPath(import.meta.url));
   // src/ and a compiled dist/ both sit one level below the package root.
-  return readFileSync(join(here, '..', 'drizzle', 'rls', '0002_core_tenant_rls.sql'), 'utf8');
+  return readFileSync(join(here, '..', 'drizzle', 'rls', name), 'utf8');
 }
 
 /**
@@ -28,7 +28,22 @@ function coreTenantRlsSql(): string {
 export async function applyCoreTenantRls(adminConnectionString: string): Promise<void> {
   const client = postgres(adminConnectionString, { max: 1, prepare: false });
   try {
-    await client.unsafe(coreTenantRlsSql());
+    await client.unsafe(rlsSqlFile('0002_core_tenant_rls.sql'));
+  } finally {
+    await client.end();
+  }
+}
+
+/**
+ * Applies 0003_audit_immutable.sql — splits audit_log into append-only
+ * SELECT+INSERT policies and installs the immutability trigger. Idempotent.
+ * Call AFTER applyCoreTenantRls (0002 enables RLS on audit_log + the `app`
+ * schema must exist).
+ */
+export async function applyAuditImmutableRls(adminConnectionString: string): Promise<void> {
+  const client = postgres(adminConnectionString, { max: 1, prepare: false });
+  try {
+    await client.unsafe(rlsSqlFile('0003_audit_immutable.sql'));
   } finally {
     await client.end();
   }
@@ -75,6 +90,12 @@ export async function ensureRlsAppRole(adminConnectionString: string): Promise<s
         from ${RLS_APP_ROLE};
       -- leads: public submit (INSERT policy) only; no edits/reads of others.
       revoke update, delete on leads from ${RLS_APP_ROLE};
+
+      -- audit_log is APPEND-ONLY (0003): the tenant role may INSERT + SELECT its
+      -- own rows but never mutate/erase them. Without this revoke a compromised
+      -- tenant path could rewrite or delete its own audit trail (R-27). The
+      -- BEFORE UPDATE/DELETE trigger in 0003 is the defence-in-depth backstop.
+      revoke update, delete on audit_log from ${RLS_APP_ROLE};
     `);
   } finally {
     await client.end();
