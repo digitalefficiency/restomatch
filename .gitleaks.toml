@@ -14,11 +14,15 @@ paths = [
   '''\.env\.\w+\.example$''',
   '''docs/ENV-PRODUCTION\.md$''',
 ]
-# Literal placeholder tokens that appear in committed examples/docs.
+# Literal placeholder tokens that appear in committed examples/docs/tests.
 regexes = [
   '''replace-me-with-openssl-rand-base64-32''',
   '''<password>''',
   '''<project-ref>''',
   '''<anon / publishable key>''',
   '''<region>''',
+  # Throwaway, sequential test keys (never real secrets) — used in vitest.config.ts
+  # + env.test.ts so the AES-GCM/JWT crypto round-trips run under test.
+  '''0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef''',
+  '''test-only-secret-not-production-0123456789''',
 ]
