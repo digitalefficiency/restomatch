@@ -249,11 +249,22 @@ describe('every tenant table is invisible cross-tenant (raw probes)', () => {
     },
   );
 
-  it('invoice_scans: NULL-restaurant rows are invisible, scoped rows visible (intended)', async () => {
+  it('invoice_scans: restaurant_id is NOT NULL (A.7) and scoped rows isolate per tenant', async () => {
+    // A.7: the unscoped (NULL-tenant) scan class is gone — the column is NOT
+    // NULL. Probe via raw SQL (drizzle now rejects a null restaurant_id at the
+    // type level) so the DB constraint itself is what we exercise.
+    await expect(
+      ownerDb.execute(
+        sql`insert into invoice_scans (invoice_id, restaurant_id, storage_path, mime_type)
+            values (${B.invoiceId}, ${null}, ${`legacy/${B.invoiceId}.pdf`}, 'application/pdf')`,
+      ),
+    ).rejects.toThrow(/not[- ]null|null value/i);
+
     await ownerDb.insert(invoiceScans).values([
-      { invoiceId: A.invoiceId, restaurantId: A.restaurantId, storagePath: `a/${A.invoiceId}.pdf`, mimeType: 'application/pdf' },
-      { invoiceId: B.invoiceId, restaurantId: null, storagePath: `legacy/${B.invoiceId}.pdf`, mimeType: 'application/pdf' },
+      { invoiceId: A.invoiceId, restaurantId: A.restaurantId, storagePath: `${A.restaurantId}/${A.invoiceId}.pdf`, mimeType: 'application/pdf' },
+      { invoiceId: B.invoiceId, restaurantId: B.restaurantId, storagePath: `${B.restaurantId}/${B.invoiceId}.pdf`, mimeType: 'application/pdf' },
     ]);
+    // GUC=A sees only A's scan row (table RLS), never B's.
     const rows = await withRestaurant(appDb, A.restaurantId, (tx) =>
       tx.select({ rid: invoiceScans.restaurantId }).from(invoiceScans),
     );

@@ -717,10 +717,13 @@ export const invoiceLines = pgTable(
  * it to embed the file from the bucket. Codifies the table that previously lived
  * only in the Supabase dashboard so it travels with migrations.
  *
- * NOTE: restaurantId is nullable for parity with current rows (the browser
- * uploader does not yet set it). The per-restaurant RLS migration
- * (drizzle/rls/0002_core_tenant_rls.sql) backfills + tightens it during the
- * Phase-3 Supabase consolidation.
+ * SECURITY: restaurantId is NOT NULL — every scan is tenant-scoped. The
+ * server-side upload mutation (packages/api scans.upload) derives it from the
+ * authenticated session; the anonymous showcase no longer writes a mapping row.
+ * The NOT NULL + backfill is applied by drizzle/0020_invoice_scans_restaurant_not_null.sql
+ * (guarded — refuses to tighten while any unscoped row remains). The
+ * per-restaurant table RLS lives in drizzle/rls/0002_core_tenant_rls.sql; the
+ * storage-layer isolation in drizzle/rls/0001_invoice_scans_rls.sql.
  */
 export const invoiceScans = pgTable(
   'invoice_scans',
@@ -729,9 +732,11 @@ export const invoiceScans = pgTable(
     invoiceId: uuid('invoice_id')
       .notNull()
       .references(() => invoices.id, { onDelete: 'cascade' }),
-    restaurantId: uuid('restaurant_id').references(() => restaurants.id, {
-      onDelete: 'cascade',
-    }),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, {
+        onDelete: 'cascade',
+      }),
     bucket: text('bucket').notNull().default('invoice-scans'),
     storagePath: text('storage_path').notNull(),
     mimeType: text('mime_type').notNull(),
@@ -742,6 +747,31 @@ export const invoiceScans = pgTable(
   (t) => [
     index('invoice_scans_invoice_idx').on(t.invoiceId),
     index('invoice_scans_restaurant_idx').on(t.restaurantId),
+  ],
+);
+
+/**
+ * Per-restaurant storage namespace registry. onboarding.createRestaurant records
+ * the bucket prefix ('<restaurantId>/') for each tenant inside the same
+ * transaction that creates the restaurant, so every tenant gets an explicit,
+ * quota-trackable, isolated storage namespace at creation time. The
+ * prefix-scoped storage.objects RLS (drizzle/rls/0001_invoice_scans_rls.sql)
+ * then enforces isolation on that namespace.
+ */
+export const storageNamespaces = pgTable(
+  'storage_namespaces',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    bucket: text('bucket').notNull().default('invoice-scans'),
+    /** Object-name prefix that scopes this tenant's files, e.g. '<restaurantId>/'. */
+    prefix: text('prefix').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('storage_namespaces_restaurant_bucket_idx').on(t.restaurantId, t.bucket),
   ],
 );
 

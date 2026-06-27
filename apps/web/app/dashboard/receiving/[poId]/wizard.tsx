@@ -15,10 +15,22 @@ import {
   type LineMark,
 } from '@/app/showcase/receiver/_state';
 import { trpc } from '@/lib/trpc/client';
+import type { UploadedScan } from '@/lib/supabase/client';
 import {
   adaptReconciliation,
   type PoLineRow,
 } from './_adapters';
+
+/** Encode a File to base64 (chunked to avoid call-stack limits on large files). */
+async function fileToBase64(file: File): Promise<string> {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  let binary = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < buf.length; i += CHUNK) {
+    binary += String.fromCharCode(...buf.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
 
 interface PoForClient {
   id: string;
@@ -68,6 +80,33 @@ export function ReceivingWizard({
   const registerInvoice = trpc.receiving.registerInvoice.useMutation();
   const markGrLine = trpc.receiving.markGrLine.useMutation();
   const submitReceipt = trpc.receiving.submitReceipt.useMutation();
+  const uploadScan = trpc.scans.upload.useMutation();
+
+  /**
+   * Authenticated upload path (A.3): the file is uploaded by the SERVER
+   * (scans.upload), which derives the tenant + storage path from the session.
+   * The browser sends only bytes — never a restaurant id or a storage prefix.
+   */
+  const authedUpload = useCallback(
+    async (file: File): Promise<UploadedScan> => {
+      const contentBase64 = await fileToBase64(file);
+      const r = await uploadScan.mutateAsync({
+        contentBase64,
+        mimeType: file.type || 'application/octet-stream',
+        supplierName: po.supplierName,
+      });
+      return {
+        invoiceId: r.invoiceId,
+        // Short-lived signed URL for the immediate OCR/register step.
+        publicUrl: r.signedUrl ?? r.scanRouteUrl,
+        scanRouteUrl: r.scanRouteUrl,
+        storagePath: r.storagePath,
+        mimeType: r.mimeType,
+      };
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [po.supplierName],
+  );
 
   const stepIndex = STEP_ORDER.indexOf(step);
 
@@ -264,11 +303,7 @@ export function ReceivingWizard({
         <InvoiceScan
           supplierName={po.supplierName}
           image={image}
-          uploadOpts={{
-            supplierName: po.supplierName,
-            restaurantId: restaurantId ?? undefined,
-            storagePrefix: restaurantId ?? undefined,
-          }}
+          uploadFile={restaurantId ? authedUpload : undefined}
           onCapture={(img) => void onCapture(img)}
           onBack={() => history.back()}
         />
