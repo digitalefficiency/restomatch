@@ -13,6 +13,7 @@ import {
   type UserRole,
 } from '@restomatch/db';
 import { authConfig } from './auth.config';
+import { authCookieConfig, resolveUseSecureCookies } from './lib/authCookies';
 import { authDb } from './lib/authDb';
 import { isEmailConfigured, sendEmail } from './lib/email';
 import { magicLinkEmail } from './lib/emailTemplates';
@@ -39,6 +40,12 @@ interface AppJwt {
 
 /** How long a cached membership/role is trusted before re-querying. */
 const MEMBERSHIP_REVALIDATE_MS = 10 * 60 * 1000;
+
+// Pin cookie Secure/HttpOnly/SameSite + name prefixes explicitly instead of
+// relying on Auth.js URL auto-detection (D1.3). This REPRODUCES today's defaults
+// exactly (no cookie-name change ⇒ no session invalidation) and gives Epic B a
+// single place to vary lifetimes from.
+const useSecureCookies = resolveUseSecureCookies();
 
 const adapter = DrizzleAdapter(authDb, {
   usersTable: users,
@@ -92,6 +99,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   ...authConfig,
   adapter,
   session: { strategy: 'jwt', maxAge: 7 * 24 * 60 * 60 },
+  useSecureCookies,
+  cookies: authCookieConfig(useSecureCookies),
   providers: [
     Nodemailer({
       from: process.env.EMAIL_FROM ?? 'auth@restomatch.local',

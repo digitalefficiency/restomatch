@@ -145,6 +145,11 @@ export {
   type RateLimitResult,
 } from './rateLimit';
 export { isOriginAllowed, type OriginCheckInput } from './csrf';
-export { clientIpFromHeaders, trpcRequestTargets, type HeaderReader } from './edge';
+export {
+  clientIpFromHeaders,
+  trpcRequestTargets,
+  type HeaderReader,
+  type ClientIpOptions,
+} from './edge';
 export { canonicalizeEmail } from './email';
 export { startOfDayInTz, endOfDayInTz, addCalendarDaysInTz } from './lib/time';

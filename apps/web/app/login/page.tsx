@@ -1,6 +1,7 @@
 import { AlertCircle } from 'lucide-react';
 import { signIn } from '@/auth';
 import { Button, Card, Field, Input } from '@/lib/components';
+import { safeRelativePath } from '@/lib/safeRedirect';
 
 interface PageProps {
   searchParams: Promise<{ callbackUrl?: string; error?: string; email?: string }>;
@@ -16,9 +17,11 @@ export default async function LoginPage({ searchParams }: PageProps) {
     'use server';
     const email = String(formData.get('email') ?? '').trim();
     if (!email) return;
+    // Validate callbackUrl as a same-origin relative path (open-redirect guard) —
+    // never trust the raw query value as a redirect target. D1.7.
     await signIn('nodemailer', {
       email,
-      redirectTo: callbackUrl ?? '/dashboard',
+      redirectTo: safeRelativePath(callbackUrl),
     });
   }
 

@@ -3,8 +3,14 @@ import { NextResponse } from 'next/server';
 import type { UserRole } from '@restomatch/db';
 import { authConfig } from './auth.config';
 import { allowedRolesForPath } from './lib/roles';
+import { buildCsp, cspHeaderName, generateNonce, isCspReportOnly } from './lib/securityHeaders';
 
 const { auth } = NextAuth(authConfig);
+
+/** 401 JSON for API auth failures (never an HTML login redirect) — D1.4. */
+function unauthorizedJson(): NextResponse {
+  return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+}
 
 export default auth((req) => {
   // NOTE: /scans is intentionally NOT public — invoice documents are tenant
@@ -16,6 +22,12 @@ export default auth((req) => {
   // make a dynamic route accidentally public.
   const lastSegment = path.slice(path.lastIndexOf('/') + 1);
   const looksLikeAsset = /\.[a-z0-9]+$/i.test(lastSegment);
+  // API surfaces that authenticate per-request (not via the page login redirect):
+  //  - /api/trpc enforces auth PER PROCEDURE (publicProcedure runs anonymously;
+  //    authedProcedure returns a JSON 401), so the middleware must NOT block it,
+  //    otherwise the public lead form (leads.create) gets a 307 → /login. (D1.4)
+  //  - /api/healthz is an unauthenticated liveness probe.
+  const isApi = path.startsWith('/api');
   const isPublic =
     // Marketing landing pages — anonymous visitors can view these. /scans and
     // /admin are intentionally absent so they keep redirecting to login.
@@ -26,10 +38,16 @@ export default auth((req) => {
     path.startsWith('/showcase') ||
     path.startsWith('/api/showcase') ||
     path.startsWith('/api/auth') ||
+    path.startsWith('/api/trpc') ||
+    path.startsWith('/api/healthz') ||
     path.startsWith('/_next') ||
     looksLikeAsset;
 
   if (!req.auth && !isPublic) {
+    // API auth failures get JSON, never an HTML login redirect — so non-browser
+    // clients see a real 401 and browsers don't render the login page inside a
+    // fetch (D1.4). Page routes still redirect to /login.
+    if (isApi) return unauthorizedJson();
     const url = req.nextUrl.clone();
     url.pathname = '/login';
     url.searchParams.set('callbackUrl', req.nextUrl.pathname);
@@ -50,7 +68,26 @@ export default auth((req) => {
       return NextResponse.redirect(url);
     }
   }
-  return NextResponse.next();
+
+  // Document responses carry a strict, nonce-based CSP (Report-Only by default —
+  // set CSP_ENFORCE=1 to enforce; D1.2). API/JSON responses don't render scripts
+  // so they skip it.
+  if (isApi) return NextResponse.next();
+
+  const nonce = generateNonce();
+  const csp = buildCsp(nonce);
+  const reportOnly = isCspReportOnly();
+  // Forward the nonce + CSP on the REQUEST under the enforcing header name so
+  // Next.js stamps the nonce onto its own bootstrap scripts EVEN while we ship
+  // Report-Only — that way the report stream isn't polluted by framework scripts
+  // and only surfaces genuinely-unexpected sources before we promote to enforce.
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set('x-nonce', nonce);
+  requestHeaders.set('content-security-policy', csp);
+  const res = NextResponse.next({ request: { headers: requestHeaders } });
+  // The RESPONSE header is Report-Only (safe default) or enforcing once promoted.
+  res.headers.set(cspHeaderName(reportOnly), csp);
+  return res;
 });
 
 export const config = {
