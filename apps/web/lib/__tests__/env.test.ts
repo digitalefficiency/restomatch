@@ -40,6 +40,8 @@ describe('assertWebEnv — production hardening', () => {
     AUTH_URL: 'https://app.example.com',
     REDIS_URL: 'redis://localhost:6379',
     SUPABASE_SERVICE_ROLE_KEY: 'svc',
+    // Required in production by Epic B/C (B.6) — AES-256-GCM key for the TOTP secret.
+    AUTH_ENC_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
   };
 
   it('passes with all required production secrets', () => {

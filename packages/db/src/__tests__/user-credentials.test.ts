@@ -22,8 +22,9 @@ function migrationSql(): string {
     readFileSync(join(here, '..', '..', 'drizzle', `${tag}.sql`), 'utf8')
       .split('--> statement-breakpoint')
       .join('\n');
-  // 0019 creates the three identity tables; 0020 adds the 2FA ticket columns.
-  const body = `${read('0019_user_credentials')}\n${read('0020_two_factor_ticket')}`;
+  // 0023 creates the three identity tables; 0024 adds the 2FA ticket columns.
+  // (Renumbered from 0019/0020 during the security-stack consolidation merge.)
+  const body = `${read('0023_user_credentials')}\n${read('0024_two_factor_ticket')}`;
   return `DROP TABLE IF EXISTS user_recovery_codes, password_reset_tokens, user_credentials CASCADE;\n${body}`;
 }
 
