@@ -1,12 +1,17 @@
+import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   activityEvents,
+  applyAuditImmutableRls,
+  applyAuthCredentialTables,
   applyCoreTenantRls,
+  approvalRules,
   auditLog,
   billingAccounts,
   catalogImports,
   createDb,
   discrepancies,
+  emailInboxes,
   supplierCatalogItems,
   ensureRlsAppRole,
   eq,
@@ -18,8 +23,13 @@ import {
   invoices,
   matchRuns,
   memberships,
+  notificationsOutbox,
+  passwordResetTokens,
   plans,
   poLines,
+  priceBaselines,
+  priceHistory,
+  procurementConnections,
   productAliases,
   products,
   purchaseOrders,
@@ -27,8 +37,11 @@ import {
   sessions,
   sql,
   subscriptions,
+  supplierIntegrations,
   suppliers,
   usageCounters,
+  userCredentials,
+  userRecoveryCodes,
   users,
   withRestaurant,
   withUser,
@@ -53,7 +66,7 @@ import { attachSubscription, resetDb, seedPlans, seedTenant, type Tenant } from 
  */
 
 const TEST_DB_URL =
-  process.env.DATABASE_URL_TEST ?? 'postgres://romkoren@localhost:5432/restomatch_test';
+  testDbUrl();
 const ownerDb = createDb(TEST_DB_URL);
 
 let appDb: Database;
@@ -73,6 +86,12 @@ function callerFor(tenant: Tenant, db: Database) {
 
 beforeAll(async () => {
   await applyCoreTenantRls(TEST_DB_URL);
+  // 0.4: split audit_log into append-only SELECT+INSERT + install the
+  // immutability trigger. Must run after 0002 (it supersedes audit_log_tenant).
+  await applyAuditImmutableRls(TEST_DB_URL);
+  // Ensure the Epic B credential-auth identity tables exist BEFORE the app role
+  // is provisioned, so ensureRlsAppRole's REVOKE ALL on them actually applies.
+  await applyAuthCredentialTables(TEST_DB_URL);
   const appUrl = await ensureRlsAppRole(TEST_DB_URL);
   appDb = createDb(appUrl);
   await resetDb(ownerDb);
@@ -203,6 +222,39 @@ describe('every tenant table is invisible cross-tenant (raw probes)', () => {
       name: 'invitations',
       probe: (tx) => tx.select({ rid: invitations.restaurantId }).from(invitations),
     },
+    // Epic 0.6: the seven tables the suite previously omitted. Several carry
+    // secrets (vault refs, oauth tokens) or outbound PII (notification targets).
+    {
+      name: 'price_history',
+      probe: (tx) => tx.select({ rid: priceHistory.restaurantId }).from(priceHistory),
+    },
+    {
+      name: 'price_baselines',
+      probe: (tx) => tx.select({ rid: priceBaselines.restaurantId }).from(priceBaselines),
+    },
+    {
+      name: 'approval_rules',
+      probe: (tx) => tx.select({ rid: approvalRules.restaurantId }).from(approvalRules),
+    },
+    {
+      name: 'procurement_connections',
+      probe: (tx) =>
+        tx.select({ rid: procurementConnections.restaurantId }).from(procurementConnections),
+    },
+    {
+      name: 'email_inboxes',
+      probe: (tx) => tx.select({ rid: emailInboxes.restaurantId }).from(emailInboxes),
+    },
+    {
+      name: 'supplier_integrations',
+      probe: (tx) =>
+        tx.select({ rid: supplierIntegrations.restaurantId }).from(supplierIntegrations),
+    },
+    {
+      name: 'notifications_outbox',
+      probe: (tx) =>
+        tx.select({ rid: notificationsOutbox.restaurantId }).from(notificationsOutbox),
+    },
   ];
 
   it.each(PARENT_PROBES.map((p) => [p.name, p] as const))(
@@ -249,11 +301,22 @@ describe('every tenant table is invisible cross-tenant (raw probes)', () => {
     },
   );
 
-  it('invoice_scans: NULL-restaurant rows are invisible, scoped rows visible (intended)', async () => {
+  it('invoice_scans: restaurant_id is NOT NULL (A.7) and scoped rows isolate per tenant', async () => {
+    // A.7: the unscoped (NULL-tenant) scan class is gone — the column is NOT
+    // NULL. Probe via raw SQL (drizzle now rejects a null restaurant_id at the
+    // type level) so the DB constraint itself is what we exercise.
+    await expect(
+      ownerDb.execute(
+        sql`insert into invoice_scans (invoice_id, restaurant_id, storage_path, mime_type)
+            values (${B.invoiceId}, ${null}, ${`legacy/${B.invoiceId}.pdf`}, 'application/pdf')`,
+      ),
+    ).rejects.toThrow(/not[- ]null|null value/i);
+
     await ownerDb.insert(invoiceScans).values([
-      { invoiceId: A.invoiceId, restaurantId: A.restaurantId, storagePath: `a/${A.invoiceId}.pdf`, mimeType: 'application/pdf' },
-      { invoiceId: B.invoiceId, restaurantId: null, storagePath: `legacy/${B.invoiceId}.pdf`, mimeType: 'application/pdf' },
+      { invoiceId: A.invoiceId, restaurantId: A.restaurantId, storagePath: `${A.restaurantId}/${A.invoiceId}.pdf`, mimeType: 'application/pdf' },
+      { invoiceId: B.invoiceId, restaurantId: B.restaurantId, storagePath: `${B.restaurantId}/${B.invoiceId}.pdf`, mimeType: 'application/pdf' },
     ]);
+    // GUC=A sees only A's scan row (table RLS), never B's.
     const rows = await withRestaurant(appDb, A.restaurantId, (tx) =>
       tx.select({ rid: invoiceScans.restaurantId }).from(invoiceScans),
     );
@@ -335,6 +398,42 @@ describe('identity tables are a separate trust zone', () => {
 
   it('sessions: the app role has no access at all', async () => {
     await expect(appDb.select().from(sessions)).rejects.toThrow(/permission denied/);
+  });
+});
+
+// Epic B.1: the credential-auth tables are a separate identity trust zone —
+// managed ONLY on the owner auth connection. A compromised tenant code path
+// running as restomatch_app must not be able to read password hashes / TOTP
+// secrets, replay reset tokens or recovery codes, or forge a tokenVersion bump.
+describe('credential-auth tables are fully denied to the tenant app role', () => {
+  it('user_credentials: select / insert / update / delete all permission-denied', async () => {
+    await expect(appDb.select().from(userCredentials)).rejects.toThrow(/permission denied/);
+    await expect(
+      appDb.insert(userCredentials).values({ userId: A.ownerUserId, passwordHash: 'x' }),
+    ).rejects.toThrow(/permission denied/);
+    // A tokenVersion bump here would be a session-revocation bypass.
+    await expect(
+      appDb.update(userCredentials).set({ tokenVersion: 9999 }),
+    ).rejects.toThrow(/permission denied/);
+    await expect(appDb.delete(userCredentials)).rejects.toThrow(/permission denied/);
+  });
+
+  it('password_reset_tokens: the app role can neither read nor mint tokens', async () => {
+    await expect(appDb.select().from(passwordResetTokens)).rejects.toThrow(/permission denied/);
+    await expect(
+      appDb.insert(passwordResetTokens).values({
+        userId: A.ownerUserId,
+        tokenHash: 'deadbeef',
+        expiresAt: new Date(Date.now() + 3600_000),
+      }),
+    ).rejects.toThrow(/permission denied/);
+  });
+
+  it('user_recovery_codes: the app role can neither read nor write codes', async () => {
+    await expect(appDb.select().from(userRecoveryCodes)).rejects.toThrow(/permission denied/);
+    await expect(
+      appDb.insert(userRecoveryCodes).values({ userId: A.ownerUserId, codeHash: 'deadbeef' }),
+    ).rejects.toThrow(/permission denied/);
   });
 });
 
@@ -454,5 +553,96 @@ describe('phase-2 catalog tables are tenant-isolated (raw probes)', () => {
         }),
       ),
     ).rejects.toThrow(/row-level security/);
+  });
+});
+
+// Epic 0.4 — audit_log is append-only (immutable, tamper-evident). The tenant
+// app role may INSERT + SELECT its own rows but never mutate/erase them.
+describe('audit_log is append-only under the RLS-enforced role', () => {
+  it('the app role can INSERT and SELECT its own audit rows', async () => {
+    const inserted = await withRestaurant(appDb, A.restaurantId, async (tx) => {
+      await tx.insert(auditLog).values({
+        restaurantId: A.restaurantId,
+        userId: A.ownerUserId,
+        action: 'team.member_invited',
+        entityType: 'invitation',
+        after: { probe: 'append-only' },
+      });
+      return tx.select({ id: auditLog.id }).from(auditLog);
+    });
+    expect(inserted.length).toBeGreaterThan(0);
+  });
+
+  it('the app role cannot UPDATE audit rows (permission denied)', async () => {
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) =>
+        tx.update(auditLog).set({ action: 'tampered' }),
+      ),
+    ).rejects.toThrow(/permission denied/);
+  });
+
+  it('the app role cannot DELETE audit rows (permission denied)', async () => {
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) => tx.delete(auditLog)),
+    ).rejects.toThrow(/permission denied/);
+  });
+
+  it('the immutability trigger holds even if UPDATE/DELETE is re-granted (drift backstop)', async () => {
+    // Simulate a future grant drift: re-grant the privilege AND add a permissive
+    // policy so RLS would otherwise admit the rows. The trigger must still refuse.
+    await ownerDb.execute(sql`grant update, delete on audit_log to restomatch_app`);
+    await ownerDb.execute(sql`drop policy if exists audit_drift_probe on audit_log`);
+    await ownerDb.execute(
+      sql`create policy audit_drift_probe on audit_log using (restaurant_id = app.current_restaurant_id())`,
+    );
+    try {
+      await expect(
+        withRestaurant(appDb, A.restaurantId, (tx) =>
+          tx.update(auditLog).set({ action: 'tampered' }),
+        ),
+      ).rejects.toThrow(/append-only/);
+      await expect(
+        withRestaurant(appDb, A.restaurantId, (tx) => tx.delete(auditLog)),
+      ).rejects.toThrow(/append-only/);
+    } finally {
+      await ownerDb.execute(sql`drop policy if exists audit_drift_probe on audit_log`);
+      await ownerDb.execute(sql`revoke update, delete on audit_log from restomatch_app`);
+    }
+  });
+});
+
+// Epic 0.5 — products.supplier_id is referentially same-tenant (composite FK).
+// Enforced by the DB regardless of RLS, so it holds for owner/worker paths too.
+describe('products.supplier_id cannot cross tenants (composite FK)', () => {
+  it('rejects INSERT of a product owned by a foreign-tenant supplier', async () => {
+    await expect(
+      ownerDb.insert(products).values({
+        restaurantId: A.restaurantId,
+        supplierId: B.supplierId, // B's supplier under A's restaurant
+        canonicalName: 'cross-tenant supplier probe',
+      }),
+    ).rejects.toThrow(/foreign key|constraint/i);
+  });
+
+  it('rejects UPDATE re-pointing a product at a foreign-tenant supplier', async () => {
+    await expect(
+      ownerDb
+        .update(products)
+        .set({ supplierId: B.supplierId })
+        .where(eq(products.id, A.productId)),
+    ).rejects.toThrow(/foreign key|constraint/i);
+  });
+
+  it('admits a product owned by a SAME-tenant supplier', async () => {
+    const [p] = await ownerDb
+      .insert(products)
+      .values({
+        restaurantId: A.restaurantId,
+        supplierId: A.supplierId,
+        canonicalName: 'same-tenant supplier ok',
+      })
+      .returning({ id: products.id });
+    expect(p?.id).toBeTruthy();
+    if (p) await ownerDb.delete(products).where(eq(products.id, p.id));
   });
 });

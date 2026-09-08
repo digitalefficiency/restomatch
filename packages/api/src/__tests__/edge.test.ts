@@ -20,6 +20,31 @@ describe('clientIpFromHeaders', () => {
     expect(clientIpFromHeaders(headers({}))).toBe('unknown');
     expect(clientIpFromHeaders(headers({ 'x-forwarded-for': '   ' }))).toBe('unknown');
   });
+
+  it('with trustedProxyHops=1, ignores a spoofed left-most XFF and trusts the proxy hop', () => {
+    // Attacker prepends a fake IP; the real connecting IP is appended by our one
+    // trusted proxy (right-most). The limiter must key on the real one.
+    const h = headers({ 'x-forwarded-for': '1.1.1.1, 203.0.113.7' });
+    expect(clientIpFromHeaders(h, { trustedProxyHops: 1 })).toBe('203.0.113.7');
+    // ... and a longer forged chain still resolves to the trusted right-most hop.
+    const h2 = headers({ 'x-forwarded-for': 'evil, evil2, 203.0.113.7' });
+    expect(clientIpFromHeaders(h2, { trustedProxyHops: 1 })).toBe('203.0.113.7');
+  });
+
+  it('with trustedProxyHops=2, takes the second hop from the right', () => {
+    const h = headers({ 'x-forwarded-for': 'client, 203.0.113.7, 10.0.0.1' });
+    expect(clientIpFromHeaders(h, { trustedProxyHops: 2 })).toBe('203.0.113.7');
+  });
+
+  it('clamps when the chain is shorter than the configured hop count (no negative index)', () => {
+    const h = headers({ 'x-forwarded-for': '203.0.113.7' });
+    expect(clientIpFromHeaders(h, { trustedProxyHops: 3 })).toBe('203.0.113.7');
+  });
+
+  it('defaults to the left-most entry when no trusted hops are configured', () => {
+    const h = headers({ 'x-forwarded-for': '203.0.113.7, 10.0.0.1' });
+    expect(clientIpFromHeaders(h)).toBe('203.0.113.7');
+  });
 });
 
 describe('trpcRequestTargets', () => {

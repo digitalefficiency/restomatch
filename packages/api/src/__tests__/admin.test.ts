@@ -1,3 +1,4 @@
+import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createDb, eq, leads, memberships, users } from '@restomatch/db';
 import { appRouter } from '../index';
@@ -6,7 +7,7 @@ import type { AppContext, Session } from '../context';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
 
 const TEST_DB_URL =
-  process.env.DATABASE_URL_TEST ?? 'postgres://romkoren@localhost:5432/restomatch_test';
+  testDbUrl();
 const db = createDb(TEST_DB_URL);
 
 function adminCaller(userId: string) {

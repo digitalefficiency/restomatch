@@ -22,11 +22,14 @@ export default defineConfig({
     command: `pnpm exec next dev --turbopack -p ${PORT}`,
     env: {
       DATABASE_URL:
-        process.env.DATABASE_URL_TEST ?? 'postgres://romkoren@localhost:5432/restomatch_test',
+        process.env.DATABASE_URL_TEST ?? 'postgres://postgres:postgres@localhost:5432/restomatch_test',
       AUTH_SECRET: 'dev-test-secret-32-characters-long!!',
       AUTH_URL: `http://localhost:${PORT}`,
       MAGIC_LINK_FILE,
       NODE_ENV: 'development',
+      // resolveWebDbUrl() is fail-closed: without DATABASE_URL_APP the owner DB is
+      // only allowed under NODE_ENV=test or this explicit dev/e2e opt-in.
+      ALLOW_OWNER_DB: '1',
     },
     url: `http://localhost:${PORT}`,
     reuseExistingServer: !process.env.CI,

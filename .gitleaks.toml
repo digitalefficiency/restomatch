@@ -1,0 +1,28 @@
+# gitleaks configuration for the CI secret-scan job (.github/workflows/secret-scan.yml).
+# Extends the upstream default ruleset and allowlists known placeholder/example
+# files so the scan fails only on genuine, high-entropy secrets.
+
+title = "RestoMatch gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Placeholder example/config files — contain no real secrets"
+paths = [
+  '''\.env\.example$''',
+  '''\.env\.\w+\.example$''',
+  '''docs/ENV-PRODUCTION\.md$''',
+]
+# Literal placeholder tokens that appear in committed examples/docs/tests.
+regexes = [
+  '''replace-me-with-openssl-rand-base64-32''',
+  '''<password>''',
+  '''<project-ref>''',
+  '''<anon / publishable key>''',
+  '''<region>''',
+  # Throwaway, sequential test keys (never real secrets) — used in vitest.config.ts
+  # + env.test.ts so the AES-GCM/JWT crypto round-trips run under test.
+  '''0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef''',
+  '''test-only-secret-not-production-0123456789''',
+]

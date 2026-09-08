@@ -43,6 +43,22 @@ describe('checkRateLimit (fixed window)', () => {
     expect(after.count).toBe(1);
   });
 
+  it('blocks the 11th call under the public OCR limit (10/hour per IP)', async () => {
+    // Mirrors apps/web SHOWCASE_OCR_LIMIT (D1.5): 10 per IP per hour, keyed by IP.
+    let t = 1_000_000_000_000;
+    const store = new MemoryRateLimitStore(() => t);
+    const opts = { limit: 10, windowSec: 60 * 60, prefix: 'showcase-ocr', now: () => t };
+    const ip = '203.0.113.7';
+
+    const results = [];
+    for (let i = 0; i < 11; i += 1) {
+      results.push(await checkRateLimit(store, ip, opts));
+    }
+    expect(results.slice(0, 10).every((r) => r.allowed)).toBe(true);
+    expect(results[10]!.allowed).toBe(false);
+    expect(results[10]!.resetSec).toBeGreaterThan(0);
+  });
+
   it('reports a sane resetSec within the window', async () => {
     const windowSec = 900;
     // pick a time near the start of a window

@@ -12,5 +12,8 @@ export {
   setSentryUser,
   setSentryTag,
   isSentryEnabled,
+  scrubPii,
+  scrubSentryEvent,
+  redactString,
   type SentryClient,
 } from './sentry';

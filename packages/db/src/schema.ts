@@ -133,7 +133,8 @@ export const restaurants = pgTable('restaurants', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: text('name').notNull(),
   businessId: varchar('business_id', { length: 32 }),
-  vatRate: numeric('vat_rate', { precision: 5, scale: 4 }).notNull().default('0.17'),
+  // Israel's standard VAT has been 18% since 2025-01-01 (plan v2 M4; migration 0027).
+  vatRate: numeric('vat_rate', { precision: 5, scale: 4 }).notNull().default('0.18'),
   timezone: text('timezone').notNull().default('Asia/Jerusalem'),
   settings: jsonb('settings').$type<RestaurantSettings>().notNull().default({}),
   /** Billing account this restaurant belongs to (a chain shares one). */
@@ -300,6 +301,105 @@ export const invitations = pgTable(
 );
 
 /* ──────────────────────────────────────────────────────────────────────────
+ * Credential auth (Epic B/C) — password (argon2id), reset tokens, 2FA.
+ *
+ * These are an IDENTITY trust zone, NOT tenant data: they carry no
+ * restaurant_id and are REVOKE'd in full from the tenant app role
+ * (restomatch_app) in packages/db/src/rls.ts. Every read/write goes through the
+ * OWNER auth connection (authDb / ctx.adminDb) via server actions / route
+ * handlers — never the tenant db / memberProcedure. Password hashing
+ * (@restomatch/crypto argon2id) and TOTP secret encryption (AUTH_ENC_KEY) live
+ * node-runtime only; the columns here only ever store ciphertext / argon2 PHC
+ * strings, never plaintext.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export const userCredentials = pgTable('user_credentials', {
+  /** 1:1 with users; the row is created lazily on first set-password / failed login. */
+  userId: uuid('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  /** argon2id PHC string. NULL = no password yet (magic-link-only user). Never plaintext. */
+  passwordHash: text('password_hash'),
+  passwordUpdatedAt: timestamp('password_updated_at', { withTimezone: true }),
+  /**
+   * Session-revocation epoch. Stamped into the JWT at sign-in and re-compared on
+   * every revalidation; bumping it (reset / change-password / "log out
+   * everywhere") invalidates every live session for the user.
+   */
+  tokenVersion: integer('token_version').notNull().default(0),
+  /** DB lockout backstop — survives a Redis outage (the Redis limiter fails open). */
+  failedLoginCount: integer('failed_login_count').notNull().default(0),
+  lockedUntil: timestamp('locked_until', { withTimezone: true }),
+  /** AES-256-GCM ciphertext of the TOTP secret (AUTH_ENC_KEY). NULL = 2FA not enrolled. */
+  totpSecretEnc: text('totp_secret_enc'),
+  totpEnabledAt: timestamp('totp_enabled_at', { withTimezone: true }),
+  /**
+   * Last successfully-consumed TOTP time-step (floor(epoch/30) + matched delta).
+   * RFC 6238 §5.2 one-time-use: a code whose step is <= this is rejected as a
+   * replay, so a TOTP captured in flight cannot be re-used inside its ±1-step
+   * (~90s) validity window. Advanced atomically (WHERE totp_last_step < step) so
+   * two concurrent submissions of the same code can't both succeed. NULL until
+   * the first TOTP is consumed. Recovery codes (already one-time) don't touch it.
+   */
+  totpLastStep: integer('totp_last_step'),
+  /**
+   * One-time, short-lived second-factor "pass ticket" (Epic C). After the
+   * /login/2fa step verifies a TOTP / recovery code SERVER-SIDE, it mints a
+   * random nonce, stores only sha256(nonce) here, and hands the nonce to the
+   * Auth.js session update — the jwt callback re-validates it against this hash
+   * before clearing twoFactorPending. The client never sees the hash and cannot
+   * forge the nonce, so a direct POST to the session-update endpoint cannot
+   * bypass the second factor. NULL once consumed / expired.
+   */
+  twoFactorTicketHash: varchar('two_factor_ticket_hash', { length: 64 }),
+  twoFactorTicketExpires: timestamp('two_factor_ticket_expires', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const passwordResetTokens = pgTable(
+  'password_reset_tokens',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /**
+     * sha256(raw token) as hex — mirrors invitations.token_hash. The raw token
+     * lives only in the reset email link, never persisted, so a DB/log leak
+     * cannot replay a reset.
+     */
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    /** One-time: set when consumed so a replayed/leaked token is inert. */
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('password_reset_tokens_token_hash_unique').on(t.tokenHash),
+    index('password_reset_tokens_user_idx').on(t.userId),
+  ],
+);
+
+/** One-time 2FA recovery codes (Epic C). Only sha256(code) is stored. */
+export const userRecoveryCodes = pgTable(
+  'user_recovery_codes',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    codeHash: varchar('code_hash', { length: 64 }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('user_recovery_codes_user_code_unique').on(t.userId, t.codeHash),
+    index('user_recovery_codes_user_idx').on(t.userId),
+  ],
+);
+
+/* ──────────────────────────────────────────────────────────────────────────
  * Suppliers
  * ────────────────────────────────────────────────────────────────────────── */
 
@@ -392,9 +492,11 @@ export const products = pgTable(
      * a supplier that owns products cannot be hard-deleted (mirrors
      * purchase_orders.supplier_id), forcing a soft-deactivate + re-point instead.
      *
-     * WARNING: the FK alone does NOT enforce same-tenant — a row could reference a
-     * supplier in another restaurant. commitCatalogRows asserts
-     * supplier.restaurantId === product.restaurantId at write time.
+     * SAME-TENANT: the original single-column FK did NOT prevent referencing a
+     * supplier in another restaurant. Migration 0019 replaces it with a composite
+     * FK (supplier_id, restaurant_id) → suppliers(id, restaurant_id), so the DB
+     * now rejects cross-tenant references referentially (RLS-independent).
+     * commitCatalogRows still asserts the same at write time for a friendly error.
      *
      * The matcher (matchProductTopN) treats a populated supplier_id as a direct
      * "this supplier sells this product" proof (additive to the existing
@@ -622,7 +724,16 @@ export const goodsReceipts = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('gr_restaurant_idx').on(t.restaurantId, t.receivedAt)],
+  (t) => [
+    index('gr_restaurant_idx').on(t.restaurantId, t.receivedAt),
+    // M7 (plan v2): ONE goods receipt per PO. startReceipt is documented as
+    // idempotent, but select-then-insert raced (double-tap / two receivers) and a
+    // second GR doubled the received qty inside buildMatchInput. Partial: a GR
+    // without a PO (walk-in / invoice-first) is unconstrained.
+    uniqueIndex('goods_receipts_po_unique')
+      .on(t.restaurantId, t.poId)
+      .where(sql`po_id is not null`),
+  ],
 );
 
 export const grLines = pgTable(
@@ -717,10 +828,13 @@ export const invoiceLines = pgTable(
  * it to embed the file from the bucket. Codifies the table that previously lived
  * only in the Supabase dashboard so it travels with migrations.
  *
- * NOTE: restaurantId is nullable for parity with current rows (the browser
- * uploader does not yet set it). The per-restaurant RLS migration
- * (drizzle/rls/0002_core_tenant_rls.sql) backfills + tightens it during the
- * Phase-3 Supabase consolidation.
+ * SECURITY: restaurantId is NOT NULL — every scan is tenant-scoped. The
+ * server-side upload mutation (packages/api scans.upload) derives it from the
+ * authenticated session; the anonymous showcase no longer writes a mapping row.
+ * The NOT NULL + backfill is applied by drizzle/0020_invoice_scans_restaurant_not_null.sql
+ * (guarded — refuses to tighten while any unscoped row remains). The
+ * per-restaurant table RLS lives in drizzle/rls/0002_core_tenant_rls.sql; the
+ * storage-layer isolation in drizzle/rls/0001_invoice_scans_rls.sql.
  */
 export const invoiceScans = pgTable(
   'invoice_scans',
@@ -729,9 +843,11 @@ export const invoiceScans = pgTable(
     invoiceId: uuid('invoice_id')
       .notNull()
       .references(() => invoices.id, { onDelete: 'cascade' }),
-    restaurantId: uuid('restaurant_id').references(() => restaurants.id, {
-      onDelete: 'cascade',
-    }),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, {
+        onDelete: 'cascade',
+      }),
     bucket: text('bucket').notNull().default('invoice-scans'),
     storagePath: text('storage_path').notNull(),
     mimeType: text('mime_type').notNull(),
@@ -742,6 +858,31 @@ export const invoiceScans = pgTable(
   (t) => [
     index('invoice_scans_invoice_idx').on(t.invoiceId),
     index('invoice_scans_restaurant_idx').on(t.restaurantId),
+  ],
+);
+
+/**
+ * Per-restaurant storage namespace registry. onboarding.createRestaurant records
+ * the bucket prefix ('<restaurantId>/') for each tenant inside the same
+ * transaction that creates the restaurant, so every tenant gets an explicit,
+ * quota-trackable, isolated storage namespace at creation time. The
+ * prefix-scoped storage.objects RLS (drizzle/rls/0001_invoice_scans_rls.sql)
+ * then enforces isolation on that namespace.
+ */
+export const storageNamespaces = pgTable(
+  'storage_namespaces',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    bucket: text('bucket').notNull().default('invoice-scans'),
+    /** Object-name prefix that scopes this tenant's files, e.g. '<restaurantId>/'. */
+    prefix: text('prefix').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('storage_namespaces_restaurant_bucket_idx').on(t.restaurantId, t.bucket),
   ],
 );
 
@@ -1151,8 +1292,49 @@ export const leads = pgTable('leads', {
   monthlyProcurementAgorot: integer('monthly_procurement_agorot'),
   source: text('source'),
   note: text('note'),
+  // Marketing-consent capture (E.7 — Israeli anti-spam, Communications Law §30A).
+  // `marketingConsent` is the durable opt-in flag; the other three columns are
+  // the evidence trail (exact wording shown, timestamp, source IP) needed to
+  // prove a freely-given, informed opt-in. Default false → legacy leads are
+  // treated as NOT consented until re-captured.
+  marketingConsent: boolean('marketing_consent').notNull().default(false),
+  consentText: text('consent_text'),
+  consentAt: timestamp('consent_at', { withTimezone: true }),
+  consentSourceIp: text('consent_source_ip'),
+  // One-click opt-out: a stable token a future marketing send embeds in its
+  // unsubscribe link; `unsubscribedAt` records the withdrawal.
+  unsubscribeToken: uuid('unsubscribe_token').notNull().defaultRandom(),
+  unsubscribedAt: timestamp('unsubscribed_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Data-Subject-Rights (DSR) request log — append-only audit trail for Amendment
+ * 13 rights handling (E.6): access / export / delete / erase. NOT tenant-scoped
+ * (no restaurant_id): a subject is either a platform `user` (who may belong to
+ * several restaurants) or a marketing `lead`, so this sits outside the
+ * per-restaurant RLS model and is written only via the owner/admin connection
+ * (mirrors `leads` / `users`).
+ */
+export const dsrRequests = pgTable(
+  'dsr_requests',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    /** 'user' | 'lead' */
+    subjectType: text('subject_type').notNull(),
+    subjectId: uuid('subject_id'),
+    subjectEmail: text('subject_email'),
+    /** 'export' | 'delete' | 'erase' */
+    action: text('action').notNull(),
+    requestedByUserId: uuid('requested_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    status: text('status').notNull().default('completed'),
+    details: jsonb('details'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('dsr_requests_subject_idx').on(t.subjectType, t.subjectId, t.createdAt)],
+);
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Relations
@@ -1367,3 +1549,5 @@ export type Subscription = typeof subscriptions.$inferSelect;
 export type UsageCounter = typeof usageCounters.$inferSelect;
 export type Lead = typeof leads.$inferSelect;
 export type NewLead = typeof leads.$inferInsert;
+export type DsrRequest = typeof dsrRequests.$inferSelect;
+export type NewDsrRequest = typeof dsrRequests.$inferInsert;

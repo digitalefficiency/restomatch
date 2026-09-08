@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { TRPCError } from '@trpc/server';
-import { eq, memberships, restaurants, sql, users } from '@restomatch/db';
+import { eq, memberships, restaurants, sql, storageNamespaces, users } from '@restomatch/db';
 import { z } from 'zod';
 import { router, userScopedProcedure } from '../trpc';
 
@@ -74,6 +74,17 @@ export const onboardingRouter = router({
           userId: ctx.session.userId,
           restaurantId: restaurant.id,
           role: 'owner',
+        });
+
+        // A.4 — auto-provision an isolated, quota-trackable storage namespace
+        // for this tenant in the SAME transaction. The prefix '<restaurantId>/'
+        // is what the prefix-scoped storage.objects RLS
+        // (drizzle/rls/0001_invoice_scans_rls.sql) and the server-side scans
+        // upload (scans.upload) key on.
+        await tx.insert(storageNamespaces).values({
+          restaurantId: restaurant.id,
+          bucket: 'invoice-scans',
+          prefix: `${restaurant.id}/`,
         });
 
         return restaurant;

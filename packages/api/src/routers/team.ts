@@ -13,6 +13,7 @@ import {
 } from '@restomatch/db';
 import { z } from 'zod';
 import { canonicalizeEmail } from '../email';
+import { recordAudit } from '../audit';
 import type { MemberContext } from '../context';
 import { ownerProcedure, router, userScopedProcedure } from '../trpc';
 
@@ -162,6 +163,15 @@ export const teamRouter = router({
         throw err;
       }
 
+      // Audit (never store the raw token — only that an invite was issued).
+      await recordAudit(ctx.db, {
+        restaurantId: ctx.session.restaurantId,
+        userId: ctx.session.userId,
+        action: 'team.member_invited',
+        entityType: 'invitation',
+        after: { email, role: input.role },
+      });
+
       const [restaurant] = await ctx.db
         .select({ name: restaurants.name })
         .from(restaurants)
@@ -209,6 +219,15 @@ export const teamRouter = router({
         })
         .where(eq(invitations.id, inv.id));
 
+      await recordAudit(ctx.db, {
+        restaurantId: ctx.session.restaurantId,
+        userId: ctx.session.userId,
+        action: 'team.invite_resent',
+        entityType: 'invitation',
+        entityId: inv.id,
+        after: { email: inv.email, role: inv.role },
+      });
+
       const [restaurant] = await ctx.db
         .select({ name: restaurants.name })
         .from(restaurants)
@@ -233,7 +252,7 @@ export const teamRouter = router({
   revokeInvite: ownerProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      await ctx.db
+      const revoked = await ctx.db
         .update(invitations)
         .set({ status: 'revoked', updatedAt: new Date() })
         .where(
@@ -242,7 +261,19 @@ export const teamRouter = router({
             eq(invitations.restaurantId, ctx.session.restaurantId),
             eq(invitations.status, 'pending'),
           ),
-        );
+        )
+        .returning({ id: invitations.id, email: invitations.email });
+      // Audit only a real state change (idempotent no-op writes nothing).
+      if (revoked[0]) {
+        await recordAudit(ctx.db, {
+          restaurantId: ctx.session.restaurantId,
+          userId: ctx.session.userId,
+          action: 'team.invite_revoked',
+          entityType: 'invitation',
+          entityId: revoked[0].id,
+          after: { email: revoked[0].email },
+        });
+      }
       return { ok: true };
     }),
 
@@ -281,6 +312,15 @@ export const teamRouter = router({
         restaurantId: ctx.session.restaurantId,
         role: input.role,
       });
+      await recordAudit(ctx.db, {
+        restaurantId: ctx.session.restaurantId,
+        userId: ctx.session.userId,
+        action: 'team.member_role_changed',
+        entityType: 'user',
+        entityId: input.userId,
+        before: { roles: current.map((r) => r.role) },
+        after: { role: input.role },
+      });
       return { ok: true };
     }),
 
@@ -309,6 +349,14 @@ export const teamRouter = router({
             eq(memberships.userId, input.userId),
           ),
         );
+      await recordAudit(ctx.db, {
+        restaurantId: ctx.session.restaurantId,
+        userId: ctx.session.userId,
+        action: 'team.member_removed',
+        entityType: 'user',
+        entityId: input.userId,
+        before: { roles: roles.map((r) => r.role) },
+      });
       return { ok: true };
     }),
 
@@ -369,6 +417,16 @@ export const teamRouter = router({
             updatedAt: new Date(),
           })
           .where(and(eq(invitations.id, inv.id), eq(invitations.status, 'pending')));
+        // Runs on the owner connection (the accepter is not yet RLS-scoped to the
+        // tenant) — bypasses RLS, so the audit_log_insert policy does not apply.
+        await recordAudit(tx, {
+          restaurantId: inv.restaurantId,
+          userId: ctx.session.userId,
+          action: 'team.invite_accepted',
+          entityType: 'invitation',
+          entityId: inv.id,
+          after: { role: inv.role },
+        });
       });
 
       return { restaurantId: inv.restaurantId, role: inv.role };

@@ -63,23 +63,40 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
               </p>
             </div>
 
-            <nav aria-label="קישורי תחתית" className="flex flex-col gap-2 text-sm">
-              <span className="mb-1 font-mono text-xs font-semibold uppercase tracking-[0.18em] text-subtle">
-                ניווט
-              </span>
-              <Link href="/#benefits" className="text-muted hover:text-ink">
-                יתרונות
-              </Link>
-              <Link href="/pricing" className="text-muted hover:text-ink">
-                מחירים
-              </Link>
-              <Link href="/about" className="text-muted hover:text-ink">
-                אודות
-              </Link>
-              <Link href="/login" className="text-muted hover:text-ink">
-                כניסה למערכת
-              </Link>
-            </nav>
+            <div className="flex flex-col gap-8 sm:flex-row sm:gap-16">
+              <nav aria-label="קישורי תחתית" className="flex flex-col gap-2 text-sm">
+                <span className="mb-1 font-mono text-xs font-semibold uppercase tracking-[0.18em] text-subtle">
+                  ניווט
+                </span>
+                <Link href="/#benefits" className="text-muted hover:text-ink">
+                  יתרונות
+                </Link>
+                <Link href="/pricing" className="text-muted hover:text-ink">
+                  מחירים
+                </Link>
+                <Link href="/about" className="text-muted hover:text-ink">
+                  אודות
+                </Link>
+                <Link href="/login" className="text-muted hover:text-ink">
+                  כניסה למערכת
+                </Link>
+              </nav>
+
+              <nav aria-label="קישורים משפטיים" className="flex flex-col gap-2 text-sm">
+                <span className="mb-1 font-mono text-xs font-semibold uppercase tracking-[0.18em] text-subtle">
+                  משפטי
+                </span>
+                <Link href="/privacy" className="text-muted hover:text-ink">
+                  מדיניות פרטיות
+                </Link>
+                <Link href="/terms" className="text-muted hover:text-ink">
+                  תנאי שימוש
+                </Link>
+                <Link href="/cookies" className="text-muted hover:text-ink">
+                  מדיניות עוגיות
+                </Link>
+              </nav>
+            </div>
           </div>
 
           <div className="mt-10 border-t border-line pt-6 font-mono text-xs tabular-nums text-subtle">

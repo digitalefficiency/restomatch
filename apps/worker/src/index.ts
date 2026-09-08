@@ -2,6 +2,8 @@ import { registerSentryClient } from '@restomatch/observability';
 import { assertWorkerEnv } from './env';
 import { registerCronSchedules } from './cron';
 import { startHealthServer } from './health';
+import { startHeartbeat } from './heartbeat';
+import { connection } from './queue';
 import { startBaselinesWorker } from './jobs/baselines';
 import { startDailyExpectationsWorker } from './jobs/dailyExpectations';
 import { startImportCatalogWorker } from './jobs/importCatalog';
@@ -10,6 +12,7 @@ import { startMatchInvoiceWorker } from './jobs/matchInvoice';
 import { startOcrInvoiceWorker } from './jobs/ocrInvoice';
 import { startOrderRemindersWorker } from './jobs/orderReminders';
 import { startOutboxDispatchWorker } from './jobs/outboxDispatch';
+import { startRetentionWorker } from './jobs/retention';
 import { startSupplierDelaysWorker } from './jobs/supplierDelays';
 import { startSyncPlatformsWorker } from './jobs/syncPlatforms';
 
@@ -60,6 +63,7 @@ const workers = [
   startOrderRemindersWorker(),
   startSupplierDelaysWorker(),
   startEndOfDayReportWorker(),
+  startRetentionWorker(),
 ];
 
 console.log(`[worker] started ${workers.length} workers`);
@@ -67,12 +71,17 @@ console.log(`[worker] started ${workers.length} workers`);
 // HTTP health endpoint for the deploy platform's liveness/readiness probe.
 const healthServer = startHealthServer(workers.length);
 
+// Liveness beat for the web-side watchdog (/api/cron/worker-heartbeat) — the
+// pilot worker runs on a laptop, so a silent stop must page the owner.
+const stopHeartbeat = startHeartbeat(connection, workers.length);
+
 void registerCronSchedules().catch((err) => {
   console.error('[worker] failed to register cron schedules', err);
 });
 
 const shutdown = async (signal: string) => {
   console.log(`[worker] ${signal} received, shutting down`);
+  stopHeartbeat();
   healthServer.close();
   await Promise.all(workers.map((w) => w.close()));
   process.exit(0);

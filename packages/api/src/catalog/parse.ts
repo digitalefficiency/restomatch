@@ -1,6 +1,20 @@
 import Papa from 'papaparse';
-import * as XLSX from 'xlsx';
+// exceljs is a CommonJS bundle with no ESM named exports. Under Node's native
+// ESM loader (the worker runs `tsx src/index.ts` as type:module) a named import
+// `{ Workbook }` throws "does not provide an export named 'Workbook'" — vitest's
+// transform masked it in CI. The default import works on both loaders.
+import ExcelJS from 'exceljs';
+import type { Cell } from 'exceljs';
+const { Workbook } = ExcelJS;
 import type { CatalogColumnMapping } from '@restomatch/db';
+
+/**
+ * Hard byte ceiling for a spreadsheet, enforced BEFORE handing the bytes to the
+ * parser. Bounds zip-bomb / decompression and parse cost on an untrusted upload.
+ * Mirrors the ~9 MB binary cap the tRPC `FileInput` schema already enforces on
+ * the base64 payload (catalog.ts).
+ */
+const MAX_XLSX_BYTES = 10 * 1024 * 1024;
 
 /**
  * Pure spreadsheet parsing + Hebrew header detection for supplier price-list
@@ -41,35 +55,71 @@ function parseCsv(text: string): ParsedTable {
   return { headers, rows };
 }
 
-function parseXlsx(buf: Buffer): ParsedTable {
-  const wb = XLSX.read(buf, { type: 'buffer' });
-  const sheetName = wb.SheetNames[0];
-  if (!sheetName) return { headers: [], rows: [] };
-  const sheet = wb.Sheets[sheetName]!;
-  const aoa = XLSX.utils.sheet_to_json<Array<string | number | null>>(sheet, {
-    header: 1,
-    raw: false,
-    defval: '',
-    blankrows: false,
+/**
+ * Stringify a single ExcelJS cell deterministically. Handles rich-text,
+ * formula results, hyperlinks and dates without applying locale number
+ * formatting (so `parseNumeric` sees the raw value, matching the previous
+ * SheetJS `raw:false` behaviour for our purposes).
+ */
+function cellToString(cell: Cell): string {
+  const v = cell.value;
+  if (v == null) return '';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'bigint') return String(v);
+  if (v instanceof Date) return v.toISOString();
+  if (typeof v === 'object') {
+    if ('richText' in v && Array.isArray(v.richText)) {
+      return v.richText.map((t) => t.text ?? '').join('');
+    }
+    if ('result' in v) {
+      const r = (v as { result?: unknown }).result;
+      return r == null ? '' : String(r);
+    }
+    if ('text' in v) return String((v as { text?: unknown }).text ?? '');
+    return '';
+  }
+  return String(v);
+}
+
+async function parseXlsx(buf: Buffer): Promise<ParsedTable> {
+  // Size guard BEFORE parse — never decompress an oversized untrusted upload.
+  if (buf.byteLength > MAX_XLSX_BYTES) {
+    throw new Error(`קובץ גדול מדי (${buf.byteLength} bytes, מקסימום ${MAX_XLSX_BYTES})`);
+  }
+  const wb = new Workbook();
+  // Cast bridges the generic-`Buffer` friction between @types/node and exceljs's
+  // bundled typings (Buffer<ArrayBufferLike> vs Buffer<ArrayBuffer>).
+  await wb.xlsx.load(buf as unknown as Parameters<typeof wb.xlsx.load>[0]);
+  const sheet = wb.worksheets[0];
+  if (!sheet || sheet.actualRowCount === 0) return { headers: [], rows: [] };
+
+  const headers: string[] = [];
+  sheet.getRow(1).eachCell({ includeEmpty: true }, (cell, col) => {
+    headers[col - 1] = cellToString(cell).trim();
   });
-  if (aoa.length === 0) return { headers: [], rows: [] };
-  const headers = (aoa[0] ?? []).map((h) => String(h ?? '').trim());
+  for (let i = 0; i < headers.length; i++) headers[i] = headers[i] ?? '';
+
   const rows: Array<Record<string, string>> = [];
-  for (const line of aoa.slice(1)) {
-    const row: Record<string, string> = {};
+  const lastRow = sheet.rowCount;
+  for (let r = 2; r <= lastRow; r++) {
+    const line = sheet.getRow(r);
+    // Null-prototype row object: a malicious `__proto__` / `constructor` header
+    // can never reach Object.prototype (defence-in-depth vs prototype pollution).
+    const row: Record<string, string> = Object.create(null) as Record<string, string>;
     let hasValue = false;
-    headers.forEach((h, i) => {
-      const v = String((line as Array<string | number | null>)[i] ?? '').trim();
+    for (let i = 0; i < headers.length; i++) {
+      const h = headers[i] ?? '';
+      const v = cellToString(line.getCell(i + 1)).trim();
       if (h) row[h] = v;
       if (v) hasValue = true;
-    });
+    }
     if (hasValue) rows.push(row);
   }
   return { headers: headers.filter(Boolean), rows };
 }
 
 /** Parse an uploaded catalog file into a header + row table. */
-export function parseCatalogFile(file: CatalogFileInput): ParsedTable {
+export async function parseCatalogFile(file: CatalogFileInput): Promise<ParsedTable> {
   const ext = file.filename.toLowerCase().split('.').pop() ?? '';
   if (ext === 'csv' || (file.text != null && !file.base64)) {
     const text =

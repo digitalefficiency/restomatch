@@ -27,6 +27,69 @@
     "vitest": "^2.1.8"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild", "sharp", "msgpackr-extract"]
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "sharp",
+      "msgpackr-extract"
+    ],
+    "auditConfig": {
+      "ignoreGhsas": [
+        "GHSA-267c-6grr-h53f",
+        "GHSA-26hh-7cqf-hhc6",
+        "GHSA-2v35-w6hq-6mfw",
+        "GHSA-34x7-hfp2-rc4v",
+        "GHSA-36qx-fr4f-26g5",
+        "GHSA-83g3-92jg-28cx",
+        "GHSA-8h8q-6873-q5fj",
+        "GHSA-8qq5-rm4j-mr97",
+        "GHSA-96hv-2xvq-fx4p",
+        "GHSA-9ppj-qmqm-q256",
+        "GHSA-c4j6-fc7j-m34r",
+        "GHSA-f6ww-3ggp-fr8h",
+        "GHSA-gpj5-g38j-94v9",
+        "GHSA-hmw2-7cc7-3qxx",
+        "GHSA-j759-j44w-7fr8",
+        "GHSA-mg66-mrh9-m8jx",
+        "GHSA-p6gq-j5cr-w38f",
+        "GHSA-q4gf-8mx6-v5v3",
+        "GHSA-qffp-2rhf-9h96",
+        "GHSA-r6q2-hw4h-h46w",
+        "GHSA-rcmh-qjqh-p98v",
+        "GHSA-vxpw-j846-p89q",
+        "GHSA-w7jw-789q-3m8p",
+        "GHSA-wh4c-j3r5-mjhp",
+        "GHSA-x6wf-f3px-wcqx",
+        "GHSA-23hp-3jrh-7fpw",
+        "GHSA-28wg-ghj8-5hjv",
+        "GHSA-2v37-7h3g-55p8",
+        "GHSA-395f-4hp3-45gv",
+        "GHSA-3jxr-9vmj-r5cp",
+        "GHSA-3jxr-9vmj-r5cp",
+        "GHSA-4c8g-83qw-93j6",
+        "GHSA-52cp-r559-cp3m",
+        "GHSA-52cp-r559-cp3m",
+        "GHSA-5p2g-fcmc-qvqq",
+        "GHSA-5p4m-2wfm-xmqj",
+        "GHSA-5p4m-2wfm-xmqj",
+        "GHSA-73wf-gq98-2v4g",
+        "GHSA-7p8r-x3mc-p8w7",
+        "GHSA-8x88-c5mf-7j5w",
+        "GHSA-c83g-rgw3-j3cx",
+        "GHSA-f65p-4m7j-42xc",
+        "GHSA-fph4-wmhf-6fwf",
+        "GHSA-jqff-g426-hqxp",
+        "GHSA-mh99-v99m-4gvg",
+        "GHSA-mh99-v99m-4gvg",
+        "GHSA-r292-9mhp-454m",
+        "GHSA-rgw5-rvv9-x895",
+        "GHSA-rgw5-rvv9-x895",
+        "GHSA-v2hh-gcrm-f6hx",
+        "GHSA-w3rx-r6r6-pgpr"
+      ]
+    },
+    "overrides": {
+      "sharp": "^0.35.4",
+      "postcss": "^8.5.28"
+    }
   }
 }

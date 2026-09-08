@@ -1,12 +1,12 @@
 /**
- * Next.js startup hook. Fail fast on a misconfigured production environment
- * (missing DATABASE_URL_APP/RESEND/REDIS/etc.) instead of booting and degrading
- * silently. Runs once per server process, Node runtime only (the edge runtime
- * lacks the full process.env + the db module).
+ * Next.js startup hook. Runs once per server process, for BOTH runtimes; only
+ * the Node runtime does real work (env + tenant-boundary boot guards live in
+ * instrumentation.node.ts). Keep the dynamic import INSIDE the constant-guarded
+ * `if` — see instrumentation.node.ts for why an early return is not enough.
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
-    const { assertWebEnv } = await import('./lib/env');
-    assertWebEnv();
+    const { registerNode } = await import('./instrumentation.node');
+    await registerNode();
   }
 }

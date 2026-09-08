@@ -34,7 +34,7 @@ export function startImportCatalogWorker() {
     }
 
     try {
-      const table = parseCatalogFile(file);
+      const table = await parseCatalogFile(file);
       const rows = extractCatalogRows(table, mapping);
       const result = await commitCatalogRows(
         db,

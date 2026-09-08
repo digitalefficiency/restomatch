@@ -1,3 +1,4 @@
+import { testDbUrl } from '@restomatch/db';
 import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -38,7 +39,7 @@ import { resetDb, seedTenant, type Tenant } from './fixtures';
  */
 
 const TEST_DB_URL =
-  process.env.DATABASE_URL_TEST ?? 'postgres://romkoren@localhost:5432/restomatch_test';
+  testDbUrl();
 const db = createDb(TEST_DB_URL);
 
 let A: Tenant;
@@ -111,6 +112,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'receiving.updateInvoiceHeader': 'attack',
   'receiving.updateInvoiceLine': 'attack',
   'receiving.pendingInvoices': 'isolation',
+  'scans.upload':
+    'memberProcedure write keyed to ctx.session.restaurantId; takes NO client-supplied tenant id or storage prefix (PR1/A.3 — the tenant + object path are derived server-side from the session), so it cannot target another tenant. The actual byte upload + service-role mapping insert are Supabase-network-bound and verified by storage.attack.test (membership gate) + against real Supabase; role denial is implicit in memberProcedure.',
   'admin.listRestaurants': 'admin-denial',
   'admin.getRestaurant': 'admin-denial',
   'admin.assignPlan': 'admin-denial',
@@ -181,6 +184,15 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   // Canonical product management (rename / recategorize / exclusivity / delete).
   'products.update': 'attack',
   'products.delete': 'attack',
+  // Data-subject-rights (E.6). Not tenant-scoped: export/delete act ONLY on the
+  // caller's own identity (keyed to ctx.session.userId — no client-supplied
+  // target, so a member can never reach another user); eraseLead operates on the
+  // non-tenant leads table and is platform-admin gated (admin-denial).
+  'dsr.exportMyData':
+    'authed self-service; reads only the caller-owned user/membership/lead/activity rows keyed to ctx.session.userId — no client-supplied tenant entity id',
+  'dsr.deleteMyAccount':
+    'authed self-service; anonymizes ONLY the caller (ctx.session.userId) — takes no target id, cannot reach another user',
+  'dsr.eraseLead': 'admin-denial',
 };
 
 function listProcedurePaths(): string[] {
@@ -431,7 +443,7 @@ describe('list/aggregate isolation (A must not see B)', () => {
       .select({ vatRate: restaurants.vatRate })
       .from(restaurants)
       .where(eq(restaurants.id, B.restaurantId));
-    expect(Number(rowB?.vatRate)).toBe(0.17); // B's default VAT untouched
+    expect(Number(rowB?.vatRate)).toBe(0.18); // B's default VAT untouched
   });
 
   it('search.global returns only the caller restaurant entities', async () => {

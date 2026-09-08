@@ -1,7 +1,8 @@
+import { testDbUrl } from '../test-env';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createDb, restaurants } from '../index';
 
-const url = process.env.DATABASE_URL_TEST ?? 'postgres://romkoren@localhost:5432/restomatch_test';
+const url = testDbUrl();
 const db = createDb(url);
 
 describe('db schema smoke', () => {
@@ -16,7 +17,7 @@ describe('db schema smoke', () => {
       .returning();
     expect(r).toBeDefined();
     expect(r?.id).toMatch(/^[0-9a-f-]{36}$/);
-    expect(r?.vatRate).toBe('0.1700');
+    expect(r?.vatRate).toBe('0.1800');
     expect(r?.timezone).toBe('Asia/Jerusalem');
   });
 

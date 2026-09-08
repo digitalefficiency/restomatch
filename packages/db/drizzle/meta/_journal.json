@@ -134,6 +134,69 @@
       "when": 1781730000000,
       "tag": "0018_invitations",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1781740000000,
+      "tag": "0019_storage_namespaces",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1781750000000,
+      "tag": "0020_invoice_scans_restaurant_not_null",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1781760000000,
+      "tag": "0021_products_supplier_same_tenant",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1781770000000,
+      "tag": "0022_legal_compliance",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1781780000000,
+      "tag": "0023_user_credentials",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1781790000000,
+      "tag": "0024_two_factor_ticket",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1781800000000,
+      "tag": "0025_totp_last_step",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1781810000000,
+      "tag": "0026_revoke_identity_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1781820000000,
+      "tag": "0027_leak_trust",
+      "breakpoints": true
     }
   ]
 }

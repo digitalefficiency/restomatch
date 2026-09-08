@@ -8,10 +8,12 @@ import { onboardingRouter } from './routers/onboarding';
 import { ownerRouter } from './routers/owner';
 import { plansRouter } from './routers/plans';
 import { receivingRouter } from './routers/receiving';
+import { scansRouter } from './routers/scans';
 import { searchRouter } from './routers/search';
 import { settingsRouter } from './routers/settings';
 import { suppliersRouter } from './routers/suppliers';
 import { catalogRouter } from './routers/catalog';
+import { dsrRouter } from './routers/dsr';
 import { ordersRouter } from './routers/orders';
 import { matchRouter } from './routers/match';
 import { mappingRouter } from './routers/mapping';
@@ -21,6 +23,7 @@ import { teamRouter } from './routers/team';
 export const appRouter = router({
   owner: ownerRouter,
   receiving: receivingRouter,
+  scans: scansRouter,
   onboarding: onboardingRouter,
   approvals: approvalsRouter,
   exports: exportsRouter,
@@ -37,6 +40,7 @@ export const appRouter = router({
   mapping: mappingRouter,
   products: productsRouter,
   team: teamRouter,
+  dsr: dsrRouter,
 });
 
 export type AppRouter = typeof appRouter;
@@ -103,6 +107,7 @@ export {
   isWhatsAppCloudConfigured,
   renderEmail,
   magicLinkEmail,
+  passwordResetEmail,
   inviteEmail,
   supplierDelayEmail,
   orderNotPlacedEmail,
@@ -144,7 +149,18 @@ export {
   type RateLimitOptions,
   type RateLimitResult,
 } from './rateLimit';
+export {
+  runRetention,
+  DEFAULT_RETENTION_CONFIG,
+  type RetentionConfig,
+  type RetentionReport,
+} from './retention';
 export { isOriginAllowed, type OriginCheckInput } from './csrf';
-export { clientIpFromHeaders, trpcRequestTargets, type HeaderReader } from './edge';
+export {
+  clientIpFromHeaders,
+  trpcRequestTargets,
+  type HeaderReader,
+  type ClientIpOptions,
+} from './edge';
 export { canonicalizeEmail } from './email';
 export { startOfDayInTz, endOfDayInTz, addCalendarDaysInTz } from './lib/time';

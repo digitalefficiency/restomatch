@@ -5,6 +5,7 @@ import { Button } from '@/lib/components';
 import { labelForRole } from '@/lib/roles';
 import { DashboardNav } from './nav';
 import { DashboardSearch } from './search';
+import { WorkerStatusBanner } from './worker-status';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
@@ -49,7 +50,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
         </div>
       </header>
-      <div className="mx-auto max-w-6xl px-6 py-8">{children}</div>
+      <div className="mx-auto max-w-6xl px-6 py-8">
+        <WorkerStatusBanner />
+        {children}
+      </div>
     </main>
   );
 }

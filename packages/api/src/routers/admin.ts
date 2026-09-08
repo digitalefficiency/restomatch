@@ -2,7 +2,6 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import {
   and,
-  auditLog,
   billingAccounts,
   count,
   desc,
@@ -17,6 +16,7 @@ import {
   type PlanLimits,
 } from '@restomatch/db';
 import { adminProcedure, router } from '../trpc';
+import { recordAudit } from '../audit';
 import { usagePeriod } from '../entitlements';
 
 const PlanKeyEnum = z.enum(['trial', 'basic', 'pro', 'chain']);
@@ -213,7 +213,7 @@ export const adminRouter = router({
             set: { planId: plan.id, status, trialEndsAt, updatedAt: new Date() },
           });
 
-        await tx.insert(auditLog).values({
+        await recordAudit(tx, {
           restaurantId: r.id,
           userId: ctx.session.userId,
           action: 'admin.plan_assigned',
@@ -263,7 +263,7 @@ export const adminRouter = router({
         .set({ overrides, updatedAt: new Date() })
         .where(eq(subscriptions.billingAccountId, r.billingAccountId));
 
-      await ctx.db.insert(auditLog).values({
+      await recordAudit(ctx.db, {
         restaurantId: input.restaurantId,
         userId: ctx.session.userId,
         action: 'admin.overrides_set',
@@ -325,7 +325,7 @@ export const adminRouter = router({
             eq(memberships.userId, input.userId),
           ),
         );
-      await ctx.db.insert(auditLog).values({
+      await recordAudit(ctx.db, {
         restaurantId: input.restaurantId,
         userId: ctx.session.userId,
         action: 'admin.role_set',

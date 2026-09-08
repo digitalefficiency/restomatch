@@ -26,9 +26,10 @@ describe('invoice_scans schema parity', () => {
     );
   });
 
-  it('invoice_id is required; restaurant_id is nullable (current-row parity)', () => {
+  it('invoice_id and restaurant_id are both required (A.7 — no unscoped scans)', () => {
     expect(cols.invoiceId.notNull).toBe(true);
-    expect(cols.restaurantId.notNull).toBe(false);
+    // restaurant_id is NOT NULL after 0020 — every scan is tenant-scoped.
+    expect(cols.restaurantId.notNull).toBe(true);
   });
 
   it('maps camelCase fields to the snake_case columns the client reads', () => {

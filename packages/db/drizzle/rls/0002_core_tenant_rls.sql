@@ -49,6 +49,7 @@ begin
     'memberships','invitations','suppliers','products',
     'supplier_catalog_items','catalog_imports',
     'purchase_orders','goods_receipts','invoices','invoice_scans',
+    'storage_namespaces',
     'match_runs','discrepancies','activity_events','price_history',
     'price_baselines','approval_rules','audit_log','procurement_connections',
     'email_inboxes','supplier_integrations','notifications_outbox'
@@ -214,5 +215,27 @@ begin
     and not pc.relrowsecurity;
   if missing is not null then
     raise exception 'RLS: tables with restaurant_id but row security disabled: %', missing;
+  end if;
+end $$;
+
+-- ── Credential-auth identity tables (Epic B/C): deny the tenant app role ─────
+-- user_credentials / password_reset_tokens / user_recovery_codes are managed
+-- ONLY on the owner auth connection (server actions / route handlers). The
+-- tenant role must never read password hashes / TOTP secrets, replay reset
+-- tokens or recovery codes, or forge a tokenVersion bump. This mirrors the
+-- REVOKE in packages/db/src/rls.ts (ensureRlsAppRole) for the production
+-- cutover. Gated on role + table existence so it is a safe no-op pre-0019 or on
+-- a DB where the app role has not been provisioned yet.
+do $$ begin
+  if exists (select 1 from pg_roles where rolname = 'restomatch_app') then
+    if to_regclass('public.user_credentials') is not null then
+      execute 'revoke all on user_credentials from restomatch_app';
+    end if;
+    if to_regclass('public.password_reset_tokens') is not null then
+      execute 'revoke all on password_reset_tokens from restomatch_app';
+    end if;
+    if to_regclass('public.user_recovery_codes') is not null then
+      execute 'revoke all on user_recovery_codes from restomatch_app';
+    end if;
   end if;
 end $$;

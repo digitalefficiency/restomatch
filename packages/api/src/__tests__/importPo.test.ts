@@ -1,3 +1,4 @@
+import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { and, createDb, eq, poLines, productAliases, purchaseOrders } from '@restomatch/db';
 import type { NormalizedPurchaseOrder } from '@restomatch/types';
@@ -5,7 +6,7 @@ import { importPurchaseOrder } from '../orders/importPo';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 
 const TEST_DB_URL =
-  process.env.DATABASE_URL_TEST ?? 'postgres://romkoren@localhost:5432/restomatch_test';
+  testDbUrl();
 const db = createDb(TEST_DB_URL);
 
 let t: Tenant;
