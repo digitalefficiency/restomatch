@@ -136,15 +136,61 @@ export async function applyAuthCredentialTables(adminConnectionString: string): 
  * bypass) exists, and returns a connection string for it. Call AFTER
  * applyCoreTenantRls so the `app` schema exists.
  */
-export async function ensureRlsAppRole(adminConnectionString: string): Promise<string> {
+export interface EnsureRlsAppRoleOptions {
+  /** Explicit password; otherwise APP_ROLE_PASSWORD, otherwise a local-only throwaway. */
+  password?: string;
+}
+
+/**
+ * Resolve the login password for the non-owner app role (plan v2, S1).
+ *
+ * Before this, the role was created with password === its own name. Because the
+ * GUC-based policies let any holder of the role read ANY tenant by setting
+ * app.current_restaurant_id, a guessable password on an internet-reachable
+ * Supabase cluster is a full cross-tenant breach. So: a real password is
+ * REQUIRED for anything that is not clearly a local/test database, and it is
+ * re-applied (`alter role … password`) on every run so a re-provision rotates
+ * rather than silently keeping the old secret.
+ */
+export function resolveAppRolePassword(
+  adminConnectionString: string,
+  explicit?: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const candidate = explicit ?? env.APP_ROLE_PASSWORD;
+  if (candidate && candidate.length > 0) {
+    if (candidate.length < 24 || /[\s'\\]/.test(candidate)) {
+      throw new Error(
+        '[rls] APP_ROLE_PASSWORD must be at least 24 characters with no whitespace, quotes or backslashes (generate: openssl rand -hex 32)',
+      );
+    }
+    return candidate;
+  }
+  if (/localhost|127\.0\.0\.1|_test/.test(adminConnectionString)) {
+    // Disposable dev/CI databases (trust auth in CI): keep the historical
+    // throwaway so the attack suites can log in without ceremony.
+    return RLS_APP_ROLE;
+  }
+  throw new Error(
+    '[rls] APP_ROLE_PASSWORD is required to provision restomatch_app on a non-local database (plan v2 S1) — never use the default password in production',
+  );
+}
+
+export async function ensureRlsAppRole(
+  adminConnectionString: string,
+  opts: EnsureRlsAppRoleOptions = {},
+): Promise<string> {
+  const password = resolveAppRolePassword(adminConnectionString, opts.password);
   const client = postgres(adminConnectionString, { max: 1, prepare: false });
   try {
     await client.unsafe(`
       do $$ begin
         if not exists (select 1 from pg_roles where rolname = '${RLS_APP_ROLE}') then
-          create role ${RLS_APP_ROLE} login password '${RLS_APP_ROLE}';
+          create role ${RLS_APP_ROLE} login;
         end if;
       end $$;
+      -- Always (re)set the password so a re-provision ROTATES the secret (S1).
+      alter role ${RLS_APP_ROLE} with login password '${password}';
       grant usage on schema public to ${RLS_APP_ROLE};
       grant usage on schema app to ${RLS_APP_ROLE};
       grant select, insert, update, delete on all tables in schema public to ${RLS_APP_ROLE};
@@ -204,6 +250,6 @@ export async function ensureRlsAppRole(adminConnectionString: string): Promise<s
 
   const url = new URL(adminConnectionString);
   url.username = RLS_APP_ROLE;
-  url.password = RLS_APP_ROLE;
+  url.password = password;
   return url.toString();
 }

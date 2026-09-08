@@ -65,7 +65,7 @@ async function main() {
     .values({
       name: 'כפר הזיתים',
       businessId: '514778123',
-      vatRate: '0.17',
+      vatRate: '0.18',
       timezone: 'Asia/Jerusalem',
       settings: {
         tolerances: {

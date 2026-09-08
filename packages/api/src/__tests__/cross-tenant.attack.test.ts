@@ -443,7 +443,7 @@ describe('list/aggregate isolation (A must not see B)', () => {
       .select({ vatRate: restaurants.vatRate })
       .from(restaurants)
       .where(eq(restaurants.id, B.restaurantId));
-    expect(Number(rowB?.vatRate)).toBe(0.17); // B's default VAT untouched
+    expect(Number(rowB?.vatRate)).toBe(0.18); // B's default VAT untouched
   });
 
   it('search.global returns only the caller restaurant entities', async () => {

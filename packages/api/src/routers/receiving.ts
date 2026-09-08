@@ -401,6 +401,9 @@ export const receivingRouter = router({
 
       const lines = await ctx.db.select().from(poLines).where(eq(poLines.poId, input.poId));
 
+      // M7: the partial unique index goods_receipts_po_unique (restaurant_id, po_id)
+      // makes this race-safe — a concurrent double-tap conflicts instead of
+      // creating a second receipt (which doubled qtyReceived in the match).
       const [receipt] = await ctx.db
         .insert(goodsReceipts)
         .values({
@@ -409,8 +412,22 @@ export const receivingRouter = router({
           receivedBy: ctx.session.userId,
           status: 'pending',
         })
+        .onConflictDoNothing()
         .returning();
-      if (!receipt) throw new Error('failed to create goods receipt');
+      if (!receipt) {
+        const [raced] = await ctx.db
+          .select({ id: goodsReceipts.id })
+          .from(goodsReceipts)
+          .where(
+            and(
+              eq(goodsReceipts.poId, input.poId),
+              eq(goodsReceipts.restaurantId, ctx.session.restaurantId),
+            ),
+          )
+          .limit(1);
+        if (!raced) throw new Error('failed to create goods receipt');
+        return { receiptId: raced.id, alreadyExisted: true as const };
+      }
 
       if (lines.length > 0) {
         await ctx.db.insert(grLines).values(

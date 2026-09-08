@@ -77,8 +77,8 @@ Applies: `0019_storage_namespaces`, `0020_invoice_scans_restaurant_not_null`,
 **After** Phase 3 (the REVOKEs are table-existence-gated, so the new identity tables
 must exist first):
 ```bash
-PROVISION_STORAGE_RLS=1 DATABASE_URL=<OWNER_DIRECT> \
-  pnpm --filter @restomatch/db provision-rls
+PROVISION_STORAGE_RLS=1 APP_ROLE_PASSWORD=<openssl rand -hex 32> DATABASE_URL=<OWNER_DIRECT> \
+  pnpm --filter @restomatch/db provision-rls --print-app-url
 ```
 This (re-)applies `rls/0002` (core tenant — now picks up the new identity-table +
 audit REVOKEs), `rls/0003` (append-only audit), the `restomatch_app` login role, and
