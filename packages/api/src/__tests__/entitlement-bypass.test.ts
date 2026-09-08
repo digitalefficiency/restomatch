@@ -1,3 +1,4 @@
+import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createDb } from '@restomatch/db';
 import { appRouter } from '../index';
@@ -15,7 +16,7 @@ import { attachSubscription, resetDb, seedPlans, seedTenant, type Tenant } from 
  */
 
 const TEST_DB_URL =
-  process.env.DATABASE_URL_TEST ?? 'postgres://romkoren@localhost:5432/restomatch_test';
+  testDbUrl();
 const db = createDb(TEST_DB_URL);
 
 function caller(tenant: Tenant) {

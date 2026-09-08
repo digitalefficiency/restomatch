@@ -1,3 +1,4 @@
+import { testDbUrl } from '@restomatch/db';
 import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -38,7 +39,7 @@ import { resetDb, seedTenant, type Tenant } from './fixtures';
  */
 
 const TEST_DB_URL =
-  process.env.DATABASE_URL_TEST ?? 'postgres://romkoren@localhost:5432/restomatch_test';
+  testDbUrl();
 const db = createDb(TEST_DB_URL);
 
 let A: Tenant;

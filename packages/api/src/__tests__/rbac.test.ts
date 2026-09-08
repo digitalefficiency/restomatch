@@ -1,3 +1,4 @@
+import { testDbUrl } from '@restomatch/db';
 import { TRPCError } from '@trpc/server';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDb, memberships, restaurants, users } from '@restomatch/db';
@@ -11,7 +12,7 @@ import type { AppContext, Session } from '../context';
  */
 
 const TEST_DB_URL =
-  process.env.DATABASE_URL_TEST ?? 'postgres://romkoren@localhost:5432/restomatch_test';
+  testDbUrl();
 const db = createDb(TEST_DB_URL);
 
 let restaurantId: string;

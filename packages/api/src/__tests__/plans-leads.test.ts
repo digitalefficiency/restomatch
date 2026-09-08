@@ -1,10 +1,11 @@
+import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { count, createDb, leads, plans } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext } from '../context';
 import { seedPlans } from './fixtures';
 
-const url = process.env.DATABASE_URL_TEST ?? 'postgres://romkoren@localhost:5432/restomatch_test';
+const url = testDbUrl();
 const db = createDb(url);
 
 /** Public caller — no session. */

@@ -1,7 +1,8 @@
+import { testDbUrl } from '../test-env';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createDb, restaurants } from '../index';
 
-const url = process.env.DATABASE_URL_TEST ?? 'postgres://romkoren@localhost:5432/restomatch_test';
+const url = testDbUrl();
 const db = createDb(url);
 
 describe('db schema smoke', () => {
