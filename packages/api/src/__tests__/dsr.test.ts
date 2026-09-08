@@ -1,3 +1,4 @@
+import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   accounts,
@@ -14,7 +15,7 @@ import { appRouter } from '../index';
 import type { AppContext } from '../context';
 import { resetDb, seedTenant } from './fixtures';
 
-const url = process.env.DATABASE_URL_TEST ?? 'postgres://romkoren@localhost:5432/restomatch_test';
+const url = testDbUrl();
 const db = createDb(url);
 
 /** Authed caller for a given user — db doubles as the owner/admin connection. */

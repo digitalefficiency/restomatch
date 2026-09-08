@@ -32,7 +32,7 @@ export const meta = {
 // agorot (packages/matching/src/money.ts); display via formatIls
 // (apps/web/lib/money.ts). A drift in either is an anomaly.
 
-const PROD_URL = (args && (args.url || args.prodUrl)) || 'https://restomatch.vercel.app'
+const PROD_URL = (args && (args.url || args.prodUrl)) || 'https://project-6bs41.vercel.app'
 
 // ---- schemas -------------------------------------------------------------
 
@@ -200,7 +200,7 @@ Set regression=true only for a real degradation beyond normal noise (e.g. LCP or
       `Read STATE.md and AGENTS.md first. This is the NUMBERS-CANARY: prove the leak ₪ figures are unchanged to the agora after this deploy.
 The golden fixtures and the assertion live in the IMMUTABILITY LIST — RUN them, never edit them: packages/matching/src/__tests__/leak-canary.test.ts and fixtures.ts, and packages/matching/src/money.ts (integer-agorot math: toAgorot/quantizeIls/mulIls/sumIls).
 Steps (the repo's serial test protocol):
-1. Bootstrap the test DB schema: with DATABASE_URL pointed at the local test DB (postgres://romkoren@localhost:5432/restomatch_test) run \`pnpm --filter @restomatch/db migrate\`.
+1. Bootstrap the test DB schema: with DATABASE_URL pointed at the local test DB (postgres://postgres:postgres@localhost:5432/restomatch_test) run \`pnpm --filter @restomatch/db migrate\`.
 2. Run the canary only: \`pnpm --filter @restomatch/matching test -- leak-canary\` (or \`pnpm turbo run test --concurrency=1 --filter=@restomatch/matching\` if needed). These tests assert the surfaced leak in ₪ to the agora.
 For each golden fixture report the surfaced leak ils, the expectedIls baked into the fixture, and matchedToAgora (true iff equal to the agora — no rounding slack). passed=true only if the leak-canary suite is fully green. Set drift=true if ANY ₪ figure differs from its expected fixture value or any leak-canary assertion fails; list failing test names. summary = one line. Do NOT modify the fixtures, money.ts, or the assertion to make it pass.`,
       { label: 'numbers-canary', phase: 'Numbers', schema: NUMBERS_SCHEMA, model: 'sonnet' }

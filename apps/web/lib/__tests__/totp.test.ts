@@ -1,3 +1,4 @@
+import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { authenticator } from 'otplib';
 import {
@@ -34,7 +35,7 @@ import {
  */
 
 const TEST_DB =
-  process.env.DATABASE_URL_TEST ?? 'postgres://romkoren@localhost:5432/restomatch_test';
+  testDbUrl();
 const ownerDb: Database = createDb(TEST_DB);
 
 // Match the verifier's ±1-step tolerance when minting tokens in tests.

@@ -1,3 +1,4 @@
+import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import postgres from 'postgres';
 import {
@@ -34,7 +35,7 @@ import { resetDb, seedTenant, type Tenant } from './fixtures';
  */
 
 const TEST_DB_URL =
-  process.env.DATABASE_URL_TEST ?? 'postgres://romkoren@localhost:5432/restomatch_test';
+  testDbUrl();
 const RLS_APP_ROLE = 'restomatch_app';
 const BUCKET = 'invoice-scans';
 

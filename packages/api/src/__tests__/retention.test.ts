@@ -1,8 +1,9 @@
+import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createDb, leads, verificationTokens } from '@restomatch/db';
 import { runRetention } from '../retention';
 
-const url = process.env.DATABASE_URL_TEST ?? 'postgres://romkoren@localhost:5432/restomatch_test';
+const url = testDbUrl();
 const db = createDb(url);
 
 const DAY = 24 * 60 * 60 * 1000;

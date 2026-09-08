@@ -1,3 +1,4 @@
+import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   auditLog,
@@ -25,7 +26,7 @@ import type { AppContext } from '../context';
 import { MockWhatsAppNotifier } from '../notifications';
 
 const TEST_DB_URL =
-  process.env.DATABASE_URL_TEST ?? 'postgres://romkoren@localhost:5432/restomatch_test';
+  testDbUrl();
 const db = createDb(TEST_DB_URL);
 
 async function resetDb() {

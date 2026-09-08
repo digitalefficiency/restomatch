@@ -1,3 +1,4 @@
+import { testDbUrl } from '../test-env';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,7 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * unique indexes the schema + RLS revokes depend on.
  */
 
-const url = process.env.DATABASE_URL_TEST ?? 'postgres://romkoren@localhost:5432/restomatch_test';
+const url = testDbUrl();
 const sql = postgres(url, { max: 1, prepare: false });
 
 function migrationSql(): string {

@@ -3,7 +3,7 @@ import { defineConfig } from 'vitest/config';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 const TEST_DB =
-  process.env.DATABASE_URL_TEST ?? 'postgres://romkoren@localhost:5432/restomatch_test';
+  process.env.DATABASE_URL_TEST ?? 'postgres://postgres:postgres@localhost:5432/restomatch_test';
 
 /**
  * Unit/integration tests for the web app's security + auth helpers (headers/CSP,

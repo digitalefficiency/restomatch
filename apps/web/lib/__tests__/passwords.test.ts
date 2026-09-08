@@ -1,3 +1,4 @@
+import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDb, eq, inArray, userCredentials, users, type Database } from '@restomatch/db';
 import {
@@ -20,7 +21,7 @@ import {
  */
 
 const TEST_DB =
-  process.env.DATABASE_URL_TEST ?? 'postgres://romkoren@localhost:5432/restomatch_test';
+  testDbUrl();
 const ownerDb: Database = createDb(TEST_DB);
 
 const created: string[] = [];

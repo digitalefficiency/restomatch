@@ -5,6 +5,7 @@
  * Uses real DB + real catalog matcher + real matching engine.
  * OCR providers are stubs returning a hand-crafted fixture.
  */
+import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { matchProductTopN } from '@restomatch/catalog';
 import {
@@ -33,7 +34,7 @@ import { appRouter } from '../index';
 import type { AppContext } from '../context';
 
 const TEST_DB_URL =
-  process.env.DATABASE_URL_TEST ?? 'postgres://romkoren@localhost:5432/restomatch_test';
+  testDbUrl();
 const db = createDb(TEST_DB_URL);
 
 async function resetDb() {

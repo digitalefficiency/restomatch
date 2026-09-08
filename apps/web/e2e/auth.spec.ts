@@ -1,10 +1,11 @@
+import { testDbUrl } from '@restomatch/db';
 import { expect, test } from '@playwright/test';
 import { readFile, unlink } from 'node:fs/promises';
 import { createDb, memberships, restaurants, users } from '@restomatch/db';
 import { MAGIC_LINK_FILE } from '../playwright.config';
 
 const TEST_DB_URL =
-  process.env.DATABASE_URL_TEST ?? 'postgres://romkoren@localhost:5432/restomatch_test';
+  testDbUrl();
 
 test.beforeEach(async () => {
   const db = createDb(TEST_DB_URL);
