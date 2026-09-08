@@ -86,6 +86,10 @@
         "GHSA-v2hh-gcrm-f6hx",
         "GHSA-w3rx-r6r6-pgpr"
       ]
+    },
+    "overrides": {
+      "sharp": "^0.35.4",
+      "postcss": "^8.5.28"
     }
   }
 }
