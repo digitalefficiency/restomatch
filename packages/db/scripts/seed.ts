@@ -190,6 +190,29 @@ async function main() {
     { name: 'כפיות פלסטיק', category: 'חד״פ', unit: 'חבילה' },
     { name: 'קופסאות take-away', category: 'חד״פ', unit: 'חבילה' },
   ];
+  // Product exclusivity: every product belongs to exactly one supplier (the
+  // matcher treats a populated supplier_id as a direct hint, and price
+  // baselines are keyed by (product, supplier) — a product bought from three
+  // different suppliers never accumulates the 3 samples a baseline needs).
+  const supplierForCategory: Record<string, string> = {
+    'ירקות': 'ירקני אבי',
+    'בשרים': 'קצביית הכרם',
+    'לחמים': 'מאפיית ברנס',
+    'דגים': 'קובי דגים',
+    'אלכוהול': 'יקבי גליל',
+    'חלב': 'גבינות מירון',
+    'תבלינים': 'תבלינים פרשמן',
+    'שמנים': 'תבלינים פרשמן',
+    'יבשים': 'מלון בן-עמי',
+    'משקאות': 'משקאות שטיינברג',
+    'חד״פ': 'חד״פ מהיר',
+  };
+  const supplierIdByName = new Map(insertedSuppliers.map((s) => [s.name, s.id] as const));
+  const supplierIdForCategory = (category: string): string => {
+    const id = supplierIdByName.get(supplierForCategory[category] ?? '');
+    if (!id) throw new Error(`[seed] no supplier mapped for category ${category}`);
+    return id;
+  };
   const insertedProducts = await db
     .insert(products)
     .values(
@@ -198,27 +221,45 @@ async function main() {
         canonicalName: p.name,
         category: p.category,
         defaultUnit: p.unit,
+        supplierId: supplierIdForCategory(p.category),
       })),
     )
     .returning();
+  const productsBySupplier = new Map<string, typeof insertedProducts>();
+  for (const product of insertedProducts) {
+    const list = productsBySupplier.get(product.supplierId!) ?? [];
+    list.push(product);
+    productsBySupplier.set(product.supplierId!, list);
+  }
+  // Stable list price per product (₪5–43.5) so price_history has a real
+  // baseline; per-PO jitter stays within ±3%.
+  const listPriceByProductId = new Map(
+    insertedProducts.map((product, idx) => [product.id, 5 + (idx % 12) * 3.5] as const),
+  );
 
   console.log('[seed] purchase orders');
-  // 20 POs spread across the last 60 days, across multiple suppliers
+  // 30 POs spread across the last ~60 days: 3 per supplier, each carrying that
+  // supplier's full basket, so every product is observed 3× under its own
+  // supplier (the minimum the baselines job needs). The last three are still
+  // open ('sent'); the final one is due today so the receiving inbox has work.
+  const PO_COUNT = 30;
   const now = new Date();
   const poInserts: Array<{
     poId: string;
     lines: Array<{ productId: string; qty: number; unit: string; price: number }>;
   }> = [];
-  for (let i = 0; i < 20; i += 1) {
+  for (let i = 0; i < PO_COUNT; i += 1) {
     const supplier = insertedSuppliers[i % insertedSuppliers.length]!;
-    const expectedDeliveryAt = new Date(now.getTime() - (60 - i * 3) * 24 * 3600 * 1000);
+    const basket = productsBySupplier.get(supplier.id) ?? [];
+    if (basket.length === 0) continue;
+    const expectedDeliveryAt = new Date(now.getTime() - (58 - i * 2) * 24 * 3600 * 1000);
     const [po] = await db
       .insert(purchaseOrders)
       .values({
         restaurantId: restaurant.id,
         supplierId: supplier.id,
         expectedDeliveryAt,
-        status: i < 17 ? 'closed' : 'sent',
+        status: i < PO_COUNT - 3 ? 'closed' : 'sent',
         source: 'manual',
         totalEstimated: null,
         createdBy: insertedUsers[0]!.id,
@@ -226,12 +267,11 @@ async function main() {
       .returning();
     if (!po) continue;
 
-    // 3-6 line items per PO
-    const lineCount = 3 + (i % 4);
-    const linesToInsert = Array.from({ length: lineCount }).map((_, j) => {
-      const product = insertedProducts[(i * 3 + j) % insertedProducts.length]!;
+    // One line per product in the supplier's basket (3–10 lines per PO).
+    const linesToInsert = basket.map((product, j) => {
       const qty = (j + 1) * 2 + (i % 5);
-      const price = 5 + ((i + j) % 10) + Math.random() * 3;
+      const listPrice = listPriceByProductId.get(product.id)!;
+      const price = listPrice * (0.97 + Math.random() * 0.06);
       return {
         poId: po.id,
         productId: product.id,

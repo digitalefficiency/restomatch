@@ -68,7 +68,7 @@ async function main() {
 
   const tolerances = resolveTolerances(restaurant.settings?.tolerances);
   const rules = buildRules(resolveApprovalThresholds(restaurant.settings?.approvalThresholds));
-  const vatRate = Number(restaurant.vatRate ?? '0.17');
+  const vatRate = Number(restaurant.vatRate ?? '0.18');
 
   const pos = await db
     .select()
