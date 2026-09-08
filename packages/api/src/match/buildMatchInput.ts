@@ -47,8 +47,8 @@ export interface BuiltMatchInput {
 
 const num = (v: string | null, fallback = 0): number => (v == null ? fallback : Number(v));
 
-/** Default Israeli VAT used when no rate is configured at any level. */
-const DEFAULT_VAT_RATE = 0.17;
+/** Default Israeli VAT used when no rate is configured at any level (18% since 2025-01-01). */
+const DEFAULT_VAT_RATE = 0.18;
 
 /** First non-null rate (numeric string) wins; otherwise the default. */
 const firstVatRate = (...rates: Array<string | null>): number => {
@@ -223,8 +223,9 @@ export async function buildMatchInputForInvoice(
   const tolerances = resolveTolerances(restaurant?.settings?.tolerances);
 
   // VAT rate precedence: PO override → supplier override → restaurant default →
-  // 0.17. A supplier billing at a non-default rate (e.g. Zestt's 18%) would
-  // otherwise false-fire VAT_MISMATCH against the 17% restaurant default.
+  // the 18% default. A supplier billing at a non-default rate (e.g. a 17%
+  // legacy invoice or a VAT-exempt Eilat supplier) would otherwise false-fire
+  // VAT_MISMATCH against the restaurant default.
   let supplierVatRate: string | null = null;
   if (inv.supplierId) {
     const [sup] = await db

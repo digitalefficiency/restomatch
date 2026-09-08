@@ -52,13 +52,19 @@ async function main(): Promise<void> {
   console.log('[provision-rls] applying 0003_audit_immutable (append-only audit_log)');
   await applyAuditImmutableRls(url);
 
-  console.log('[provision-rls] ensuring restomatch_app role + grants/revokes');
-  await ensureRlsAppRole(url);
+  console.log('[provision-rls] ensuring restomatch_app role + grants/revokes (password from APP_ROLE_PASSWORD)');
+  const appUrl = await ensureRlsAppRole(url);
 
   const storage = await maybeApplyStorageRls(url);
   console.log(`[provision-rls] storage RLS (0001): ${storage ? 'applied' : 'skipped'}`);
 
-  console.log('[provision-rls] done. Point DATABASE_URL_APP at the restomatch_app role.');
+  console.log('[provision-rls] done. Set DATABASE_URL_APP (Vercel → Production) to the restomatch_app connection string.');
+  if (process.argv.includes('--print-app-url')) {
+    // Contains the password — printed only on request, never in CI logs.
+    console.log(`[provision-rls] DATABASE_URL_APP=${appUrl}`);
+  } else {
+    console.log('[provision-rls] (re-run with --print-app-url to print the full DATABASE_URL_APP once)');
+  }
 }
 
 main().catch((err) => {

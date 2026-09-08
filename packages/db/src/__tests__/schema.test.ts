@@ -17,7 +17,7 @@ describe('db schema smoke', () => {
       .returning();
     expect(r).toBeDefined();
     expect(r?.id).toMatch(/^[0-9a-f-]{36}$/);
-    expect(r?.vatRate).toBe('0.1700');
+    expect(r?.vatRate).toBe('0.1800');
     expect(r?.timezone).toBe('Asia/Jerusalem');
   });
 

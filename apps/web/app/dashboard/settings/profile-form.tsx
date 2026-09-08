@@ -12,7 +12,7 @@ type Profile = inferRouterOutputs<AppRouter>['settings']['profile'];
 export function ProfileForm({ initial, canEdit }: { initial: Profile; canEdit: boolean }) {
   const [name, setName] = useState(initial.name);
   const [businessId, setBusinessId] = useState(initial.businessId ?? '');
-  // VAT is stored as a fraction (0.17) but edited as a whole percent (17).
+  // VAT is stored as a fraction (0.18) but edited as a whole percent (18).
   const [vat, setVat] = useState(String(Math.round(initial.vatRate * 1000) / 10));
   const [timezone, setTimezone] = useState(initial.timezone);
   const [status, setStatus] = useState<{ ok: boolean; message: string } | null>(null);
@@ -71,7 +71,7 @@ export function ProfileForm({ initial, canEdit }: { initial: Profile; canEdit: b
               placeholder="514778123"
             />
           </Field>
-          <Field label="שיעור מע״מ (%)" htmlFor="prof-vat" hint="ברירת מחדל 17%.">
+          <Field label="שיעור מע״מ (%)" htmlFor="prof-vat" hint="ברירת מחדל 18% (שיעור המע״מ בישראל מ-2025).">
             <Input
               id="prof-vat"
               type="number"

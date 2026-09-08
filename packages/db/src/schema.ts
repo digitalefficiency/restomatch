@@ -133,7 +133,8 @@ export const restaurants = pgTable('restaurants', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: text('name').notNull(),
   businessId: varchar('business_id', { length: 32 }),
-  vatRate: numeric('vat_rate', { precision: 5, scale: 4 }).notNull().default('0.17'),
+  // Israel's standard VAT has been 18% since 2025-01-01 (plan v2 M4; migration 0027).
+  vatRate: numeric('vat_rate', { precision: 5, scale: 4 }).notNull().default('0.18'),
   timezone: text('timezone').notNull().default('Asia/Jerusalem'),
   settings: jsonb('settings').$type<RestaurantSettings>().notNull().default({}),
   /** Billing account this restaurant belongs to (a chain shares one). */
@@ -723,7 +724,16 @@ export const goodsReceipts = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('gr_restaurant_idx').on(t.restaurantId, t.receivedAt)],
+  (t) => [
+    index('gr_restaurant_idx').on(t.restaurantId, t.receivedAt),
+    // M7 (plan v2): ONE goods receipt per PO. startReceipt is documented as
+    // idempotent, but select-then-insert raced (double-tap / two receivers) and a
+    // second GR doubled the received qty inside buildMatchInput. Partial: a GR
+    // without a PO (walk-in / invoice-first) is unconstrained.
+    uniqueIndex('goods_receipts_po_unique')
+      .on(t.restaurantId, t.poId)
+      .where(sql`po_id is not null`),
+  ],
 );
 
 export const grLines = pgTable(
