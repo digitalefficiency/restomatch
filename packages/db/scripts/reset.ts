@@ -10,8 +10,16 @@ async function main() {
   }
 
   const sql = postgres(url, { max: 1, prepare: false });
-  console.log('[reset] dropping public schema');
-  await sql.unsafe(`DROP SCHEMA public CASCADE; CREATE SCHEMA public;`);
+  // Drop the migration tracker too: with `drizzle.__drizzle_migrations` left in
+  // place the migrator believes every migration is applied and skips them, so
+  // `pnpm reset` produced an empty public schema and `seed` failed on a missing
+  // `plans` table. The `app` schema (RLS helper functions) is recreated by rls/0002.
+  console.log('[reset] dropping public, drizzle and app schemas');
+  await sql.unsafe(`
+    DROP SCHEMA IF EXISTS drizzle CASCADE;
+    DROP SCHEMA IF EXISTS app CASCADE;
+    DROP SCHEMA public CASCADE; CREATE SCHEMA public;
+  `);
   console.log('[reset] done');
   await sql.end();
 }

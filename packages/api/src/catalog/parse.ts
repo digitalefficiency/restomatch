@@ -1,5 +1,11 @@
 import Papa from 'papaparse';
-import { type Cell, Workbook } from 'exceljs';
+// exceljs is a CommonJS bundle with no ESM named exports. Under Node's native
+// ESM loader (the worker runs `tsx src/index.ts` as type:module) a named import
+// `{ Workbook }` throws "does not provide an export named 'Workbook'" — vitest's
+// transform masked it in CI. The default import works on both loaders.
+import ExcelJS from 'exceljs';
+import type { Cell } from 'exceljs';
+const { Workbook } = ExcelJS;
 import type { CatalogColumnMapping } from '@restomatch/db';
 
 /**
