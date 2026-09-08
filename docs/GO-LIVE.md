@@ -21,11 +21,12 @@
 | Security stack | PR #9 (`release/security-hardening`) code-complete, CI `typecheck + test` green, unmerged |
 | GitHub | `main` is still the empty placeholder; no branch protection; Dependency graph not enabled |
 
-## A. Repo + CI first (🤖 Session 1, human-PR)
-- [ ] PR "wave0/s1-ci-state": CI matrix (web build + typecheck soak, worker tests with job-scoped Redis, `provision-rls` + `check-rls` after migrate, Playwright soak), `testDbUrl()` replacing 28 hard-coded DSNs, this checklist, `STATE.md` rewrite. 👤 review + merge into `release/security-hardening`.
-- [ ] 👤 GitHub → Settings → Code security: enable **Dependency graph** (unblocks the `dependency review` job; then remove its `continue-on-error`).
+## A. Repo + CI first (🤖 Sessions 1–2 done; 👤 review + merge)
+- [ ] 👤 Merge in this order (stacked PRs; GitHub retargets bases automatically): **#13** (security dependency bump → `wave0/s1-ci-state`), **#10** (CI matrix + `testDbUrl()` + this checklist → `release/security-hardening`), **#11** (S2–S5, R7, M8, worker watchdog, cutover scripts), **#12** (HUMAN-PR: S1 app-role password, M4 VAT 18%, M7, migration 0027). All are CI-green on the real gates; `pnpm audit` turns green once #13 is in.
+- [ ] 👤 GitHub → Settings → Code security: enable **Dependency graph** (then drop the `continue-on-error` on the `dependency review` step). Consider branch protection on `main` requiring `typecheck + test`, `worker tests`, `web build + typecheck`.
+- [ ] 👤 Vercel → Settings → Environment Variables → add `CRON_SECRET` (Production) so `/api/cron/worker-heartbeat` accepts Vercel Cron (schedule ships in `apps/web/vercel.json`; minute-level crons need a Pro plan), and `WORKER_ALERT_EMAILS` (your mailbox).
 
-## B. Pre-cutover code fixes (🤖 Session 2; S1 + M4 are human-PRs)
+## B. Pre-cutover code fixes (🤖 Session 2 — DONE in #11/#12/#13; kept as the review checklist)
 - [ ] S1 `packages/db/src/rls.ts`: `APP_ROLE_PASSWORD` required in production, throwaway default only for `_test`/`localhost` URLs, `alter role … with password` on every run, print the connection string.
 - [ ] S2 `AUTH_ENC_KEY` (+ `TRUSTED_PROXY_HOPS`, `APP_ROLE_PASSWORD`) in `.env.example` + `docs/ENV-PRODUCTION.md`.
 - [ ] S3 `trustedProxyHops()` at `auth.ts`, `(auth)/actions.ts`, `login/2fa/actions.ts`.
@@ -35,7 +36,7 @@
 - [ ] M7 unique `goods_receipts(restaurant_id, po_id)` + upsert in `startReceipt`; M8 idempotency key on `registerInvoice`.
 - [ ] M4 (human-PR): VAT default 0.18 in `schema.ts`, `buildMatchInput.ts`, the engine default + leak-canary fixtures + `schema.test.ts`; migration `0027_leak_trust.sql` also updates untouched `0.17` rows.
 - [ ] `packages/db/scripts/verify-cutover.ts` (migrations at 0026, RLS complete, bucket private, app role no-bypass, legal routes 200, dump age < 2 h) + `rehearse-cutover.ts` (apply journal ≤ 18 → seed an unscoped scan + a cross-tenant product → assert 0020 aborts → run both backfills → finish → `provision-rls` → `verify-cutover`).
-- [ ] `apps/worker/scripts/start-worker.sh` + launchd plist; heartbeat key in Redis every 60 s; Vercel cron `/api/cron/worker-heartbeat` (5 min) emails the owner when stale > 10 min; dashboard banner "OCR pending — worker offline".
+- [x] `apps/worker/scripts/start-worker.sh` + launchd plist; heartbeat key in Redis every 60 s; Vercel cron `/api/cron/worker-heartbeat` (5 min) emails the owner when stale > 10 min; dashboard banner. 👤 Install: copy the plist per its header, `chmod 600 ~/.restomatch/worker.env`, `launchctl bootstrap`.
 
 ## C. Live verification + backup (👤 Session 3, agent-prepared commands)
 - [ ] `psql "$DATABASE_URL_DIRECT" -c "select id, hash, created_at from drizzle.__drizzle_migrations order by id desc limit 3;"` → expect the 0018 entry on top.

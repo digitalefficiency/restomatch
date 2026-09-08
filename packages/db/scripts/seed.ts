@@ -15,6 +15,15 @@ import {
 async function main() {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL is required');
+  // This script DELETES every restaurant/user/supplier/product/PO below. It is a
+  // dev/test fixture, never a production tool (plans are repriced by migration).
+  // Same guard as reset.ts: refuse anything that is not clearly local/test.
+  if (!url.includes('localhost') && !url.includes('127.0.0.1') && !url.includes('_test')) {
+    throw new Error(
+      '[seed] refusing to run against a non-local, non-test database (it deletes all tenant data): ' +
+        url.replace(/:[^:@/]+@/, ':***@'),
+    );
+  }
   const db = createDb(url);
 
   console.log('[seed] plans (idempotent upsert)');

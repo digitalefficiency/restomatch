@@ -1,6 +1,6 @@
 # RestoMatch — Build State
 
-**Updated:** 2026-09-08 · plan v2, Wave 0, Session 1 (branch `wave0/s1-ci-state` off `release/security-hardening` @ 6daed6b)
+**Updated:** 2026-09-08 · plan v2, Wave 0, Sessions 1–2 done (branches `wave0/s1-ci-state` → `wave0/s2-precutover` → `wave0/s2-human-prs`, plus `wave0/s2-deps-security`; all off `release/security-hardening` @ 6daed6b)
 **Canonical repo:** `~/restomatch`. **Never** work in `~/Desktop/restomatch` — it is an iCloud-evicted replica (dataless git objects, 90% of files missing).
 **Master plan:** `~/.claude/plans/idempotent-shimmying-wave.md` — 8 waves, ~32 sessions. Read it before touching anything; this file is the per-session pointer.
 **Go-live checklist:** `docs/GO-LIVE.md` (the one ordered list; 👤 = owner-run prod steps).
@@ -20,9 +20,10 @@
 
 ## Wave 0 progress
 
-- [x] **Session 1** — move to `~/restomatch`; T0 CI matrix (`.github/workflows/ci.yml`: web build + typecheck soak, worker tests with job-scoped Redis, `provision-rls` + `check-rls` after migrate, Playwright soak, dependency-review non-blocking until Dependency graph is enabled); `testDbUrl()` in `packages/db/src/test-env.ts` replacing 28 hard-coded `romkoren@localhost` DSNs; first `apps/worker` test; `docs/GO-LIVE.md`; stale cutover docs retired. → **PR for the owner (ci.yml is human-PR per AGENTS.md).**
-- [ ] **Session 2** — S1–S5, R7, M7, M8 (agent) + S1/M4 human-PRs drafted; `verify-cutover.ts` + `rehearse-cutover.ts`; worker start script + launchd + heartbeat cron. See GO-LIVE §B.
-- [ ] **Session 3** — 👤 live verification, backup + restore rehearsal, Resend domain, inbox MX, security-stack cutover Phases 0–8, `main` + Preview env, MarketMan partner email. See GO-LIVE §C–F.
+- [x] **Session 1** — move to `~/restomatch`; T0 CI matrix (`.github/workflows/ci.yml`: web build + typecheck soak, worker tests with job-scoped Redis, `provision-rls` + `check-rls` after migrate, Playwright soak, dependency-review non-blocking until Dependency graph is enabled); `testDbUrl()` in `packages/db/src/test-env.ts` replacing 28 hard-coded `romkoren@localhost` DSNs; first `apps/worker` test; `docs/GO-LIVE.md`; stale cutover docs retired. → **PR #10** (human-PR: `ci.yml`). First-ever `next build` in CI exposed and fixed an edge-bundle leak in `instrumentation.ts`.
+- [x] **Session 2 (agent part)** — **PR #11**: S2–S5, R7, M8, worker heartbeat + `/api/cron/worker-heartbeat` + dashboard banner, `start-worker.sh` + launchd, `cutoverChecks.ts` + `verify-cutover` + `rehearse-cutover`. **PR #12 (HUMAN-PR)**: S1 app-role password, M4 VAT 18%, M7 one receipt per PO, migration **0027_leak_trust**. **PR #13**: security dependency bump (next 15.5.25, next-auth beta.32, sharp, postcss) — clears the audit gate.
+- [ ] **👤 Merge order** (each PR is stacked; GitHub retargets the base automatically): **#13 → into `wave0/s1-ci-state`**, then **#10 → `release/security-hardening`**, then **#11**, then **#12**. Every PR is CI-green on `typecheck + test`, `worker tests`, `web build + typecheck`; only `pnpm audit` is red until #13 lands. Then enable **Dependency graph** in repo settings.
+- [ ] **Session 3** — 👤 live verification, backup + restore rehearsal (`rehearse-cutover`), Resend domain, inbox MX, security-stack cutover Phases 0–8 (with `APP_ROLE_PASSWORD`), `main` + Preview env, MarketMan partner email. See GO-LIVE §C–F.
 
 ## Quick start
 

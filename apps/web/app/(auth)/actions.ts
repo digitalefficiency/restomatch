@@ -15,7 +15,7 @@ import {
   resetPasswordWithToken,
   setUserPassword,
 } from '@/lib/passwords';
-import { enforcePasswordResetLimit } from '@/lib/rateLimit';
+import { enforcePasswordResetLimit, trustedProxyHops } from '@/lib/rateLimit';
 
 /** Absolute base URL for emailed links (prefers explicit env, else the request host). */
 async function baseUrl(): Promise<string> {
@@ -37,7 +37,7 @@ export async function requestPasswordResetAction(formData: FormData): Promise<vo
   if (!email) redirect('/reset?sent=1');
 
   const h = await headers();
-  const ip = clientIpFromHeaders(h);
+  const ip = clientIpFromHeaders(h, { trustedProxyHops: trustedProxyHops() });
   const rl = await enforcePasswordResetLimit(email, ip);
   if (!rl.allowed) {
     redirect(`/reset?error=rate&wait=${Math.ceil(rl.resetSec / 60)}`);

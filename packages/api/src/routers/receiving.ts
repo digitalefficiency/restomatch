@@ -21,6 +21,7 @@ import {
 } from '@restomatch/db';
 import { enqueueOcrInvoice } from '@restomatch/queue';
 import { assertGrOwned, assertInvoiceOwned, assertSupplierOwned } from '../tenant';
+import { isAllowedScanUrl } from '../lib/scanUrls';
 import { endOfDayInTz, startOfDayInTz } from '../lib/time';
 import { managerProcedure, memberProcedure, receiverProcedure, router } from '../trpc';
 
@@ -532,8 +533,33 @@ export const receivingRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      // S4 / A.8: the worker fetches this URL server-side. Only a signed URL on
+      // our private invoice-scans bucket is acceptable (no SSRF to internal hosts).
+      if (!isAllowedScanUrl(input.imageUrl)) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'imageUrl must be a signed invoice-scans URL issued by scans.upload',
+        });
+      }
       await assertGrOwned(ctx.db, input.grId, ctx.session.restaurantId);
       await assertSupplierOwned(ctx.db, input.supplierId, ctx.session.restaurantId);
+
+      // M8: idempotent on (restaurant, image URL). A double-tap / client retry
+      // used to create a second invoice row AND a second OCR job (double spend),
+      // which the matcher then flagged as a false DUPLICATE_INVOICE.
+      const [existing] = await ctx.db
+        .select({ id: invoices.id })
+        .from(invoices)
+        .where(
+          and(
+            eq(invoices.restaurantId, ctx.session.restaurantId),
+            eq(invoices.rawImageUrl, input.imageUrl),
+          ),
+        )
+        .limit(1);
+      if (existing) {
+        return { invoiceId: existing.id, alreadyExisted: true as const };
+      }
 
       const [invoice] = await ctx.db
         .insert(invoices)
@@ -565,7 +591,7 @@ export const receivingRouter = router({
         );
       }
 
-      return { invoiceId: invoice.id };
+      return { invoiceId: invoice.id, alreadyExisted: false as const };
     }),
 
   /**

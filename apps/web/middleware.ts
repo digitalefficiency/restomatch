@@ -2,6 +2,7 @@ import NextAuth from 'next-auth';
 import { NextResponse } from 'next/server';
 import type { UserRole } from '@restomatch/db';
 import { authConfig } from './auth.config';
+import { isPublicPath } from './lib/publicPaths';
 import { allowedRolesForPath } from './lib/roles';
 import { buildCsp, cspHeaderName, generateNonce, isCspReportOnly } from './lib/securityHeaders';
 
@@ -15,33 +16,16 @@ function unauthorizedJson(): NextResponse {
 export default auth((req) => {
   // NOTE: /scans is intentionally NOT public — invoice documents are tenant
   // data. The page itself re-checks the session and tenant ownership; keeping
-  // it out of this list means unauthenticated requests redirect to login.
+  // it out of the public list means unauthenticated requests redirect to login.
+  // The list itself lives in lib/publicPaths.ts (single source of truth, unit
+  // tested) — add marketing/legal/auth-recovery routes THERE.
   const path = req.nextUrl.pathname;
-  // Only the LAST path segment having a file extension marks a static asset —
-  // a dot anywhere in the path (e.g. a dynamic /scans/<id-with-dot>) must not
-  // make a dynamic route accidentally public.
-  const lastSegment = path.slice(path.lastIndexOf('/') + 1);
-  const looksLikeAsset = /\.[a-z0-9]+$/i.test(lastSegment);
-  // API surfaces that authenticate per-request (not via the page login redirect):
-  //  - /api/trpc enforces auth PER PROCEDURE (publicProcedure runs anonymously;
-  //    authedProcedure returns a JSON 401), so the middleware must NOT block it,
-  //    otherwise the public lead form (leads.create) gets a 307 → /login. (D1.4)
-  //  - /api/healthz is an unauthenticated liveness probe.
+  // API surfaces authenticate per-request (not via the page login redirect):
+  // /api/trpc enforces auth PER PROCEDURE (publicProcedure runs anonymously;
+  // authedProcedure returns a JSON 401), so the middleware must NOT block it,
+  // otherwise the public lead form (leads.create) gets a 307 → /login. (D1.4)
   const isApi = path.startsWith('/api');
-  const isPublic =
-    // Marketing landing pages — anonymous visitors can view these. /scans and
-    // /admin are intentionally absent so they keep redirecting to login.
-    path === '/' ||
-    path === '/pricing' ||
-    path === '/about' ||
-    path.startsWith('/login') ||
-    path.startsWith('/showcase') ||
-    path.startsWith('/api/showcase') ||
-    path.startsWith('/api/auth') ||
-    path.startsWith('/api/trpc') ||
-    path.startsWith('/api/healthz') ||
-    path.startsWith('/_next') ||
-    looksLikeAsset;
+  const isPublic = isPublicPath(path);
 
   // Treat a token with no user id as unauthenticated. The AUTHORITATIVE
   // per-request revocation gate is the NODE jwt callback in auth.ts: it re-reads
@@ -63,7 +47,7 @@ export default auth((req) => {
     if (isApi) return unauthorizedJson();
     const url = req.nextUrl.clone();
     url.pathname = '/login';
-    url.searchParams.set('callbackUrl', req.nextUrl.pathname);
+    url.searchParams.set('callbackUrl', req.nextUrl.pathname + req.nextUrl.search);
     return NextResponse.redirect(url);
   }
 

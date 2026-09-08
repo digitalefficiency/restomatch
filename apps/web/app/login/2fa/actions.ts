@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation';
 import { clientIpFromHeaders } from '@restomatch/api';
 import { auth, signOut, unstable_update } from '@/auth';
 import { getUserEmailById } from '@/lib/passwords';
-import { enforceTwoFactorLimit } from '@/lib/rateLimit';
+import { enforceTwoFactorLimit, trustedProxyHops } from '@/lib/rateLimit';
 import { issueTwoFactorTicket, verifySecondFactor } from '@/lib/totp';
 
 /**
@@ -29,7 +29,7 @@ export async function verifyTwoFactorAction(formData: FormData): Promise<void> {
   const code = String(formData.get('code') ?? '').trim();
   if (!code) redirect('/login/2fa?error=invalid');
 
-  const ip = clientIpFromHeaders(await headers());
+  const ip = clientIpFromHeaders(await headers(), { trustedProxyHops: trustedProxyHops() });
   const email = (await getUserEmailById(userId)) ?? userId;
   const rl = await enforceTwoFactorLimit(email, ip);
   if (!rl.allowed) redirect('/login/2fa?error=invalid');
