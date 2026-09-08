@@ -354,6 +354,65 @@ describe('receiving.registerInvoice', () => {
   });
 });
 
+describe('receiving.registerInvoice — idempotency (M8) and scan-URL pinning (S4)', () => {
+  it('re-registering the same image URL returns the existing invoice and creates no second row', async () => {
+    const s = await seed();
+    const caller = callerFor({
+      userId: s.receiverId,
+      restaurantId: s.restaurantId,
+      role: 'receiver',
+    });
+    const { receiptId } = await caller.receiving.startReceipt({ poId: s.todayPoId });
+    const first = await caller.receiving.registerInvoice({
+      grId: receiptId,
+      imageUrl: 'https://example.com/double-tap.jpg',
+      supplierId: s.supplierId,
+    });
+    const second = await caller.receiving.registerInvoice({
+      grId: receiptId,
+      imageUrl: 'https://example.com/double-tap.jpg',
+      supplierId: s.supplierId,
+    });
+    expect(first.alreadyExisted).toBe(false);
+    expect(second.alreadyExisted).toBe(true);
+    expect(second.invoiceId).toBe(first.invoiceId);
+    const rows = await db.select().from(invoices);
+    expect(rows).toHaveLength(1);
+  });
+
+  it('rejects an image URL outside the signed invoice-scans prefix when storage is configured', async () => {
+    const s = await seed();
+    const caller = callerFor({
+      userId: s.receiverId,
+      restaurantId: s.restaurantId,
+      role: 'receiver',
+    });
+    const { receiptId } = await caller.receiving.startReceipt({ poId: s.todayPoId });
+    const saved = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://abc.supabase.co';
+    try {
+      await expect(
+        caller.receiving.registerInvoice({
+          grId: receiptId,
+          imageUrl: 'http://169.254.169.254/latest/meta-data',
+          supplierId: s.supplierId,
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      const ok = await caller.receiving.registerInvoice({
+        grId: receiptId,
+        imageUrl: 'https://abc.supabase.co/storage/v1/object/sign/invoice-scans/r1/scan.pdf?token=t',
+        supplierId: s.supplierId,
+      });
+      expect(ok.invoiceId).toBeTruthy();
+    } finally {
+      if (saved === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+      else process.env.NEXT_PUBLIC_SUPABASE_URL = saved;
+    }
+    const rows = await db.select().from(invoices);
+    expect(rows).toHaveLength(1);
+  });
+});
+
 describe('receiving.getPo', () => {
   it('returns PO with lines', async () => {
     const s = await seed();

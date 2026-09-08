@@ -22,7 +22,7 @@ import { isEmailConfigured, sendEmail } from './lib/email';
 import { magicLinkEmail } from './lib/emailTemplates';
 import { authorizeCredentials, getSessionSecurityState } from './lib/passwords';
 import { consumeTwoFactorTicket } from './lib/totp';
-import { enforceLoginLimit, enforceMagicLinkLimit } from './lib/rateLimit';
+import { enforceLoginLimit, enforceMagicLinkLimit, trustedProxyHops } from './lib/rateLimit';
 import {
   SESSION_TTL_LONG_SEC,
   isSessionExpired,
@@ -148,7 +148,7 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         // authorizeCredentials. A rate-limited attempt returns the same uniform
         // null as a wrong password (surfaced as CredentialsSignin), revealing no
         // account/lock state.
-        const ip = clientIpFromHeaders(await headers());
+        const ip = clientIpFromHeaders(await headers(), { trustedProxyHops: trustedProxyHops() });
         const rl = await enforceLoginLimit(email, ip);
         if (!rl.allowed) return null;
         const result = await authorizeCredentials({ email, password });
