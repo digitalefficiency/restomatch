@@ -10,8 +10,9 @@ import { Eyebrow, FadeUp, RiseLine } from '../components/primitives';
 // Focus rects (units of screenshot width; x0,y0,x1,y1) measured on the captures in public/shots.
 type U = [number, number, number, number];
 const FOCUS: Record<Locale, Record<'hero' | 'beer' | 'appr' | 'claim', U>> = {
-  he: { hero: [0.62, 0.29, 0.88, 0.4], beer: [0.08, 0.46, 0.885, 0.505], appr: [0.117, 0.242, 0.883, 0.455], claim: [0.117, 0.33, 0.883, 0.405] },
-  en: { hero: [0.12, 0.29, 0.38, 0.4], beer: [0.08, 0.46, 0.885, 0.505], appr: [0.117, 0.242, 0.883, 0.455], claim: [0.117, 0.33, 0.883, 0.405] },
+  // beer = product → change columns of the leak-detective row; claim = amount column + total line
+  he: { hero: [0.62, 0.29, 0.88, 0.4], beer: [0.34, 0.458, 0.885, 0.507], appr: [0.117, 0.242, 0.883, 0.455], claim: [0.117, 0.345, 0.5, 0.407] },
+  en: { hero: [0.12, 0.29, 0.38, 0.4], beer: [0.08, 0.458, 0.66, 0.507], appr: [0.117, 0.242, 0.883, 0.455], claim: [0.5, 0.345, 0.883, 0.407] },
 };
 
 // One beat per screen. Within a beat (relative to `push`): camera push 0→28,

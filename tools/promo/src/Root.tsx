@@ -9,7 +9,7 @@ import { Match } from './scenes/Match';
 import { Product, PRODUCT_DURATION } from './scenes/Product';
 import { Receiver, RECEIVER_DURATION } from './scenes/Receiver';
 import { Chains, CHAINS_DURATION } from './scenes/Chains';
-import { Value, VALUE_DURATION } from './scenes/Value';
+import { Value } from './scenes/Value';
 import { Cta } from './scenes/Cta';
 import { HeroLoop, HERO_LOOP_FRAMES } from './scenes/HeroLoop';
 import { PhoneDash, PHONE_DASH_DURATION } from './scenes/PhoneDash';
@@ -28,14 +28,16 @@ const Shell: React.FC<{ d: number; children: React.ReactNode }> = ({ d, children
 type Beat = { from: number; d: number; el: (l: Locale) => React.ReactNode };
 
 // Main film timeline (30 fps). Overlaps of ~8 frames = crossfades.
+const CHAINS_FROM = 992 + RECEIVER_DURATION - 8;
+const VALUE_FROM = CHAINS_FROM + CHAINS_DURATION - 8;
 export const TIMELINE: Beat[] = [
   { from: 0, d: 180, el: (l) => <Hook locale={l} /> },
   { from: 172, d: 206, el: (l) => <Problem locale={l} /> },
   { from: 372, d: 78, el: (l) => <Match locale={l} /> },
   { from: 440, d: PRODUCT_DURATION, el: (l) => <Product locale={l} /> },
   { from: 992, d: RECEIVER_DURATION, el: (l) => <Receiver locale={l} /> },
-  { from: 1214, d: CHAINS_DURATION, el: (l) => <Chains locale={l} /> },
-  { from: 1214 + CHAINS_DURATION - 8, d: 1646 - (1214 + CHAINS_DURATION - 8), el: (l) => <Value locale={l} duration={1646 - (1214 + CHAINS_DURATION - 8)} /> },
+  { from: CHAINS_FROM, d: CHAINS_DURATION, el: (l) => <Chains locale={l} /> },
+  { from: VALUE_FROM, d: 1646 - VALUE_FROM, el: (l) => <Value locale={l} duration={1646 - VALUE_FROM} /> },
   { from: 1638, d: 162, el: (l) => <Cta locale={l} /> },
 ];
 export const PROMO_FRAMES = 1800;
