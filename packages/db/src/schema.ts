@@ -1,6 +1,7 @@
 import { relations, sql } from 'drizzle-orm';
 import {
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -1189,6 +1190,54 @@ export const supplierIntegrations = pgTable('supplier_integrations', {
   syncCursor: text('sync_cursor'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * POS sales import (0058, wave-1 `integrations`) — what was sold, per day and
+ * POS item. The hook food-cost-per-dish reads. Re-import replaces the days a
+ * file covers (one row per restaurant · day · item).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export const posSalesImports = pgTable(
+  'pos_sales_imports',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    provider: varchar('provider', { length: 32 }).notNull(),
+    filename: text('filename').notNull(),
+    periodFrom: date('period_from', { mode: 'string' }).notNull(),
+    periodTo: date('period_to', { mode: 'string' }).notNull(),
+    rowCount: integer('row_count').notNull().default(0),
+    totalNet: numeric('total_net', { precision: 12, scale: 2 }).notNull().default('0'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('pos_sales_imports_restaurant_idx').on(t.restaurantId, t.createdAt)],
+);
+
+export const posSales = pgTable(
+  'pos_sales',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    importId: uuid('import_id')
+      .notNull()
+      .references(() => posSalesImports.id, { onDelete: 'cascade' }),
+    soldOn: date('sold_on', { mode: 'string' }).notNull(),
+    itemRef: varchar('item_ref', { length: 64 }).notNull(),
+    itemName: text('item_name').notNull(),
+    qty: numeric('qty', { precision: 12, scale: 3 }).notNull(),
+    netAmount: numeric('net_amount', { precision: 12, scale: 2 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('pos_sales_day_item_idx').on(t.restaurantId, t.soldOn, t.itemRef),
+    index('pos_sales_import_idx').on(t.importId),
+  ],
+);
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Notifications outbox

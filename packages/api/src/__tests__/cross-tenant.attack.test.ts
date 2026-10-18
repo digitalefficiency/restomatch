@@ -223,6 +223,15 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
     'attack — integrations.test.ts: a foreign supplier id in supplierAccounts → NOT_FOUND, nothing saved; owner-only',
   'integrations.accountingExport':
     "isolation — integrations.test.ts: A's file never carries B's invoices, suppliers or mapping; bookkeeper/owner + flag only",
+  'integrations.posPreview': 'parses the uploaded file only; reads and writes no tenant rows (integrations.test.ts)',
+  'integrations.posImport':
+    "attack — integrations.test.ts: the day-range replace is pinned to the caller restaurant; B's sales for the same days survive",
+  'integrations.posImports': 'isolation — integrations.test.ts: lists only the caller restaurant imports',
+  'integrations.posSummary': "isolation — integrations.test.ts: A's per-item totals exclude B's sales for the same days",
+  'integrations.procurementProviders':
+    "isolation — integrations.test.ts: B's procurement connection never shows as A's",
+  'integrations.procurementPreview':
+    'runs the platform adapter on its recorded offline fixture; takes only a platform enum, no tenant ids, writes nothing',
   // Data-subject-rights (E.6). Not tenant-scoped: export/delete act ONLY on the
   // caller's own identity (keyed to ctx.session.userId — no client-supplied
   // target, so a member can never reach another user); eraseLead operates on the

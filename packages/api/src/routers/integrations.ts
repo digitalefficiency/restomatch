@@ -1,7 +1,22 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
-import { and, eq, inArray, restaurants, suppliers, type RestaurantSettings } from '@restomatch/db';
-import { bookkeeperProcedure, memberProcedure, ownerProcedure, requireFeature, router } from '../trpc';
+import {
+  and,
+  desc,
+  eq,
+  gte,
+  inArray,
+  lte,
+  posSales,
+  posSalesImports,
+  procurementConnections,
+  restaurants,
+  sql,
+  suppliers,
+  type RestaurantSettings,
+} from '@restomatch/db';
+import { getAdapter, listSupportedPlatforms, type PlatformId } from '@restomatch/procurement';
+import { bookkeeperProcedure, chefProcedure, managerProcedure, memberProcedure, ownerProcedure, requireFeature, router } from '../trpc';
 import { featureEnabled } from '../lib/features';
 import { localIsoDate } from '../exports/period';
 import { fetchInvoices } from './exports';
@@ -13,6 +28,8 @@ import {
   type AccountingConfig,
   type AccountingInvoice,
 } from '../integrations/accounting';
+import { agorotToPlain } from '../integrations/accounting/common';
+import { MAX_POS_BYTES, POS_PROVIDER_IDS, POS_PROVIDERS, PosFileError, type PosParseResult } from '../integrations/pos';
 
 /**
  * Wave-1 integrations (MASTER-PLAN §3 #9), behind the per-restaurant
@@ -54,7 +71,57 @@ const ownerIntegrationsProcedure = ownerProcedure.use(async ({ ctx, next }) => {
   await assertIntegrations(ctx.db, ctx.session.restaurantId);
   return next();
 });
-export { assertIntegrations };
+/** POS import + procurement preview: owner / manager. */
+const managerIntegrationsProcedure = managerProcedure.use(async ({ ctx, next }) => {
+  await assertIntegrations(ctx.db, ctx.session.restaurantId);
+  return next();
+});
+/** Sold-items summary (food cost per dish reads it): owner / manager / chef. */
+const kitchenIntegrationsProcedure = chefProcedure.use(async ({ ctx, next }) => {
+  await assertIntegrations(ctx.db, ctx.session.restaurantId);
+  return next();
+});
+
+const PosFileInput = z.object({
+  provider: z.enum(POS_PROVIDER_IDS).default('csv'),
+  filename: z.string().trim().min(1).max(200),
+  // ~5 MB of bytes as base64.
+  base64: z.string().min(1).max(Math.ceil((MAX_POS_BYTES * 4) / 3) + 8),
+});
+
+function parsePosFile(input: z.infer<typeof PosFileInput>): PosParseResult {
+  try {
+    return POS_PROVIDERS[input.provider]!.parse({
+      filename: input.filename,
+      bytes: new Uint8Array(Buffer.from(input.base64, 'base64')),
+    });
+  } catch (e) {
+    if (e instanceof PosFileError) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: e.missing.length ? `${e.message}:${e.missing.join(',')}` : e.message,
+      });
+    }
+    throw e;
+  }
+}
+
+function posSummaryOf(parsed: PosParseResult) {
+  const days = parsed.rows.map((r) => r.soldOn).sort();
+  const totalNet = parsed.rows.reduce((a, r) => a + r.netAgorot, 0);
+  return {
+    rowCount: parsed.rows.length,
+    from: days[0] ?? null,
+    to: days[days.length - 1] ?? null,
+    totalNetAgorot: totalNet,
+    columns: parsed.columns,
+    issues: parsed.issues.slice(0, 50),
+    issueCount: parsed.issues.length,
+    sample: parsed.rows.slice(0, 20),
+  };
+}
+
+const PROCUREMENT_PLATFORMS = ['marketman', 'zester'] as const satisfies readonly PlatformId[];
 
 export function accountingConfigOf(settings: IntegrationSettings): AccountingConfig {
   const saved = settings.integrations?.accounting ?? {};
@@ -185,6 +252,155 @@ export const integrationsRouter = router({
         rowCount: file.rowCount,
         skippedCount: skipped,
         undatedCount,
+      };
+    }),
+  /** Parse a POS sales export without saving: columns found, day range, totals, bad lines. */
+  posPreview: managerIntegrationsProcedure.input(PosFileInput).mutation(({ input }) => posSummaryOf(parsePosFile(input))),
+
+  /**
+   * Save a POS sales export. Replaces the restaurant's rows for the days the
+   * file covers (inside the member transaction), so re-importing a corrected
+   * file never double-counts a day.
+   */
+  posImport: managerIntegrationsProcedure.input(PosFileInput).mutation(async ({ ctx, input }) => {
+    const parsed = parsePosFile(input);
+    const summary = posSummaryOf(parsed);
+    if (summary.rowCount === 0 || !summary.from || !summary.to) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'POS_FILE_NO_ROWS' });
+    }
+    const restaurantId = ctx.session.restaurantId;
+    const [imp] = await ctx.db
+      .insert(posSalesImports)
+      .values({
+        restaurantId,
+        provider: input.provider,
+        filename: input.filename,
+        periodFrom: summary.from,
+        periodTo: summary.to,
+        rowCount: summary.rowCount,
+        totalNet: agorotToPlain(summary.totalNetAgorot),
+        createdBy: ctx.session.userId,
+      })
+      .returning({ id: posSalesImports.id });
+    const replaced = await ctx.db
+      .delete(posSales)
+      .where(and(eq(posSales.restaurantId, restaurantId), gte(posSales.soldOn, summary.from), lte(posSales.soldOn, summary.to)))
+      .returning({ id: posSales.id });
+    for (let i = 0; i < parsed.rows.length; i += 1000) {
+      await ctx.db.insert(posSales).values(
+        parsed.rows.slice(i, i + 1000).map((r) => ({
+          restaurantId,
+          importId: imp!.id,
+          soldOn: r.soldOn,
+          itemRef: r.itemRef,
+          itemName: r.itemName,
+          qty: (r.qtyMilli / 1000).toFixed(3),
+          netAmount: agorotToPlain(r.netAgorot),
+        })),
+      );
+    }
+    return { importId: imp!.id, ...summary, replacedRows: replaced.length, sample: undefined };
+  }),
+
+  /** Recent POS imports (newest first). */
+  posImports: managerIntegrationsProcedure.query(async ({ ctx }) =>
+    ctx.db
+      .select({
+        id: posSalesImports.id,
+        provider: posSalesImports.provider,
+        filename: posSalesImports.filename,
+        periodFrom: posSalesImports.periodFrom,
+        periodTo: posSalesImports.periodTo,
+        rowCount: posSalesImports.rowCount,
+        totalNet: posSalesImports.totalNet,
+        createdAt: posSalesImports.createdAt,
+      })
+      .from(posSalesImports)
+      .where(eq(posSalesImports.restaurantId, ctx.session.restaurantId))
+      .orderBy(desc(posSalesImports.createdAt))
+      .limit(20),
+  ),
+
+  /**
+   * Sold quantity + net sales per POS item for a period — the hook food cost
+   * per dish (S17) reads. Money comes back as NUMERIC strings (shekels).
+   */
+  posSummary: kitchenIntegrationsProcedure
+    .input(z.object({ from: z.string().date(), to: z.string().date() }))
+    .query(async ({ ctx, input }) =>
+      ctx.db
+        .select({
+          itemRef: posSales.itemRef,
+          itemName: sql<string>`max(${posSales.itemName})`,
+          qty: sql<string>`sum(${posSales.qty})::numeric(14,3)::text`,
+          netAmount: sql<string>`sum(${posSales.netAmount})::numeric(14,2)::text`,
+          days: sql<number>`count(distinct ${posSales.soldOn})::int`,
+        })
+        .from(posSales)
+        .where(
+          and(
+            eq(posSales.restaurantId, ctx.session.restaurantId),
+            gte(posSales.soldOn, input.from),
+            lte(posSales.soldOn, input.to),
+          ),
+        )
+        .groupBy(posSales.itemRef)
+        .orderBy(desc(sql`sum(${posSales.netAmount})`)),
+    ),
+
+  /** Procurement platforms: which have an adapter and whether this restaurant is connected. */
+  procurementProviders: managerIntegrationsProcedure.query(async ({ ctx }) => {
+    const rows = await ctx.db
+      .select({
+        platform: procurementConnections.platform,
+        enabled: procurementConnections.enabled,
+        lastSyncAt: procurementConnections.lastSyncAt,
+        vaultRef: procurementConnections.credentialsVaultRef,
+      })
+      .from(procurementConnections)
+      .where(eq(procurementConnections.restaurantId, ctx.session.restaurantId));
+    const supported = new Set(listSupportedPlatforms());
+    return PROCUREMENT_PLATFORMS.map((platform) => {
+      const conn = rows.find((r) => r.platform === platform);
+      return {
+        platform,
+        displayName: getAdapter(platform).displayName,
+        adapter: supported.has(platform),
+        connected: !!conn?.enabled,
+        mode: conn ? (conn.vaultRef.startsWith('fixture:') ? ('sample' as const) : ('live' as const)) : null,
+        lastSyncAt: conn?.lastSyncAt ?? null,
+      };
+    });
+  }),
+
+  /**
+   * What a sync would bring in, on the platform's recorded sample data (no
+   * account, no network, nothing saved). Real syncs run in the worker once the
+   * owner connects an account (activation steps in the integrations report).
+   */
+  procurementPreview: managerIntegrationsProcedure
+    .input(z.object({ platform: z.enum(PROCUREMENT_PLATFORMS) }))
+    .query(async ({ ctx, input }) => {
+      const adapter = getAdapter(input.platform);
+      const actx = { restaurantId: ctx.session.restaurantId, credentials: { mode: 'fixture' as const } };
+      const [supplierRows, products, orders] = await Promise.all([
+        adapter.listSuppliers(actx),
+        adapter.listProducts(actx),
+        adapter.listOrders(actx, new Date(0)),
+      ]);
+      return {
+        platform: input.platform,
+        sample: true,
+        suppliers: supplierRows.length,
+        products: products.length,
+        orders: orders.map((o) => ({
+          externalId: o.externalId,
+          supplierName: o.supplierName ?? '',
+          status: o.status,
+          expectedDeliveryAt: o.expectedDeliveryAt ?? null,
+          lines: o.lines.length,
+          totalEstimated: o.totalEstimated ?? null,
+        })),
       };
     }),
 });

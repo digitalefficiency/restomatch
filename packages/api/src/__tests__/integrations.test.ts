@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createDb, eq, restaurants, suppliers, testDbUrl } from '@restomatch/db';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { createDb, eq, posSales, procurementConnections, restaurants, suppliers, testDbUrl } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
@@ -179,5 +181,101 @@ describe('integrations — cross-tenant attacks', () => {
     expect(text).not.toMatch(/9999|B-CARD|BB/);
     const [sb] = await db.select({ name: suppliers.name }).from(suppliers).where(eq(suppliers.id, B.supplierId));
     expect(text).not.toContain(sb!.name);
+  });
+});
+
+const POS_FX = join(__dirname, '..', 'integrations', 'pos', '__tests__', 'fixtures');
+const posFile = (name: string) => ({ filename: name, base64: readFileSync(join(POS_FX, name)).toString('base64') });
+const csv64 = (text: string) => ({ filename: 'z.csv', base64: Buffer.from(text, 'utf8').toString('base64') });
+
+describe('POS sales import', () => {
+  beforeEach(async () => {
+    await setFlag(A, true);
+  });
+
+  it('preview parses without saving; import saves; summary sums per item', async () => {
+    const pre = await callerFor(A).integrations.posPreview(posFile('pos-sales-he-windows1255.csv'));
+    expect(pre).toMatchObject({ rowCount: 4, from: '2026-10-01', to: '2026-10-02', totalNetAgorot: 136150, issueCount: 3 });
+    expect(await db.select().from(posSales).where(eq(posSales.restaurantId, A.restaurantId))).toHaveLength(0);
+
+    const imp = await callerFor(A).integrations.posImport(posFile('pos-sales-he-windows1255.csv'));
+    expect(imp).toMatchObject({ rowCount: 4, replacedRows: 0 });
+    const sum = await callerFor(A).integrations.posSummary({ from: '2026-10-01', to: '2026-10-31' });
+    expect(sum.find((r) => r.itemRef === '101')).toMatchObject({ itemName: 'שקשוקה', qty: '5.500', netAmount: '297.00', days: 2 });
+    expect(sum[0]!.itemRef).toBe('205'); // highest net first
+    expect((await callerFor(A).integrations.posImports())[0]).toMatchObject({ rowCount: 4, totalNet: '1361.50' });
+  });
+
+  it('re-importing the same days replaces them (never double-counts)', async () => {
+    await callerFor(A).integrations.posImport(posFile('pos-sales-en-utf8.csv'));
+    const again = await callerFor(A).integrations.posImport(posFile('pos-sales-en-utf8.csv'));
+    expect(again.replacedRows).toBe(3);
+    const sum = await callerFor(A).integrations.posSummary({ from: '2026-10-01', to: '2026-10-31' });
+    expect(sum.find((r) => r.itemRef === '101')?.netAmount).toBe('324.00');
+  });
+
+  it('a file with nothing usable is BAD_REQUEST with a stable code', async () => {
+    await expect(callerFor(A).integrations.posImport(posFile('pos-sales-missing-columns.csv'))).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message: 'POS_FILE_NO_COLUMNS:qty,net',
+    });
+    await expect(
+      callerFor(A).integrations.posImport(csv64('date,item,qty,net\nnot-a-date,Soup,1,10\n')),
+    ).rejects.toMatchObject({ message: 'POS_FILE_NO_ROWS' });
+  });
+
+  it('roles: manager imports, chef reads the summary only, receiver/bookkeeper nothing', async () => {
+    await expect(callerFor(A, 'manager').integrations.posImport(posFile('pos-sales-en-utf8.csv'))).resolves.toBeTruthy();
+    await expect(callerFor(A, 'chef').integrations.posSummary({ from: '2026-10-01', to: '2026-10-31' })).resolves.toHaveLength(2);
+    await expect(callerFor(A, 'chef').integrations.posImport(posFile('pos-sales-en-utf8.csv'))).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    for (const role of ['receiver', 'bookkeeper'] as const) {
+      await expect(
+        callerFor(A, role).integrations.posSummary({ from: '2026-10-01', to: '2026-10-31' }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    }
+  });
+});
+
+describe('procurement providers (offline sample data)', () => {
+  beforeEach(async () => {
+    await setFlag(A, true);
+  });
+
+  it('lists MarketMan + Zester with connection state; preview runs on the recorded fixture', async () => {
+    const before = await callerFor(A).integrations.procurementProviders();
+    expect(before.map((p) => [p.platform, p.adapter, p.connected])).toEqual([
+      ['marketman', true, false],
+      ['zester', true, false],
+    ]);
+    await db.insert(procurementConnections).values({ restaurantId: A.restaurantId, platform: 'zester', credentialsVaultRef: 'fixture:demo' });
+    const after = await callerFor(A).integrations.procurementProviders();
+    expect(after.find((p) => p.platform === 'zester')).toMatchObject({ connected: true, mode: 'sample' });
+    const pre = await callerFor(A).integrations.procurementPreview({ platform: 'zester' });
+    expect(pre).toMatchObject({ sample: true, suppliers: 2, products: 3 });
+    expect(pre.orders.map((o) => o.externalId)).toEqual(['zs-o-501', 'zs-o-502']);
+  });
+});
+
+describe('POS + procurement — cross-tenant attacks', () => {
+  beforeEach(async () => {
+    await setFlag(A, true);
+    await setFlag(B, true);
+  });
+
+  it("A's import never deletes B's sales for the same days; summaries stay per restaurant", async () => {
+    await callerFor(B).integrations.posImport(posFile('pos-sales-en-utf8.csv'));
+    await callerFor(A).integrations.posImport(posFile('pos-sales-en-utf8.csv'));
+    await callerFor(A).integrations.posImport(posFile('pos-sales-en-utf8.csv'));
+    expect(await db.select().from(posSales).where(eq(posSales.restaurantId, B.restaurantId))).toHaveLength(3);
+    const a = await callerFor(A).integrations.posSummary({ from: '2026-10-01', to: '2026-10-31' });
+    expect(a.find((r) => r.itemRef === '101')?.netAmount).toBe('324.00'); // A's only, not A + B
+    const imports = await callerFor(A).integrations.posImports();
+    expect(imports).toHaveLength(2);
+  });
+
+  it("procurementProviders shows only the caller's connections", async () => {
+    await db.insert(procurementConnections).values({ restaurantId: B.restaurantId, platform: 'marketman', credentialsVaultRef: 'env:B_KEY' });
+    const a = await callerFor(A).integrations.procurementProviders();
+    expect(a.every((p) => !p.connected)).toBe(true);
   });
 });
