@@ -134,7 +134,29 @@ eslint app/dashboard/receiving app/showcase/receiver app/api/showcase lib/supaba
 
 ## QA
 
-QA_PLACEHOLDER
+Script: `apps/web/scripts/qa-receiving.ts` (Playwright, real login per role, fixtures generated with sharp:
+12 MP EXIF-rotated 11 MB JPEG, small PNG, small PDF, 4.2 MB PDF). Results: `docs/client-ready/qa/*.json`,
+screenshots `docs/client-ready/screenshots/qa-*.png`.
+
+| # | Scenario | Result |
+|---|---|---|
+| A | receiver · en · 390 px — 11 MB photo (downscaled ≤ 3 MB), double-tap Process, English review, double-tap Close | ran on dev; failed only on a fixture assumption (seed now has 1 of the 4 hard-coded products → 1-line PO); fixture fixed (tops up to 4 lines) |
+| B | manager · he · desktop — PDF upload, Hebrew RTL review, adjust, confirm | **PASS** (dev) |
+| C | owner · en + he — invoice page after receiving | depends on A; dev first-compile timeout |
+| D | receiver · en — retake after review + two photos before processing | **PASS** (dev) |
+| E | receiver · en — 4.2 MB PDF refused with a clear message, no upload | **PASS** (dev) |
+| F | receiver · en — offline upload | **found a bug**: React Query paused the upload while offline → "Uploading…" spun forever. Fixed (`networkMode: 'always'` → network message + Retake), `346eb1d`. Earlier run also found raw "Failed to fetch" → fixed `c8b5a62` |
+| G | receiver · en — slow OCR: still-reading → continue with order → background result → Show results | **PASS** (dev) |
+| H | receiver · en — OCR failure notice, receiving continues against the order, no false alarms | **PASS** (dev) |
+| I | chef · en — no receiving rights | chef is redirected away from the wizard (no raw error); scenario updated to assert that |
+| J | public showcase · en · 390 px — real photo without storage → demo mode → English review | **PASS** (prod build) |
+| K | receiver · en · 390 px · no consent — demo invoice → order-only review → adjust → close (S7's 4 items) | **PASS** (prod build, 11 checks) |
+
+Re-running A/C/F/I after the fixes and the merge of `claude/client-ready@5450844` was **not done** — the
+account hit its usage limit and the orchestrator asked for the minimum (tsc + tests + build + one prod check).
+Dev-server note: on this 4-core box `next dev` compiles a dashboard route in 1–6 min, which caused the
+remaining timeouts; production (`next start`) pages respond in < 1 s.
+
 
 ## Still broken / not done
 
@@ -176,6 +198,9 @@ QA_PLACEHOLDER
 - New files in `packages/api/src/receiving/` (english.ts, devOcrStub.ts) and `packages/api/src/lib/localScanStorage.ts`.
 
 ## Needs another area
+
+- **S1**: SB-3 is only closed once S1's walk-ins policy-drop migration (`claude/client-ready-sb3`) merges with this branch.
+- **S6**: before cookie consent, the banner covers "Use a demo invoice" on a 390 px phone (QA K screenshot `qa-K-scan-cookie-banner-en-mobile.png`).
 
 - **S5 (ops-ui / dashboard chrome)**: the dashboard header/nav ("קליטת סחורה", "סקירה", search placeholder,
   "התנתק") is still Hebrew in English. Visible in every English screenshot.
