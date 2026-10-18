@@ -1,7 +1,8 @@
 import { commitCatalogRows, extractCatalogRows, parseCatalogFile } from '@restomatch/api';
 import { MockEmbeddingProvider } from '@restomatch/catalog';
-import { and, catalogImports, createDb, eq, type CatalogColumnMapping } from '@restomatch/db';
+import { and, catalogImports, eq, type CatalogColumnMapping } from '@restomatch/db';
 import { makeWorker } from '../queue';
+import { jobDb } from '../db';
 
 /** Background commit of a large supplier price-list import (mirrors the inline tRPC path). */
 export interface CatalogImportJob {
@@ -18,7 +19,7 @@ export function startImportCatalogWorker() {
   return makeWorker<CatalogImportJob>('import-catalog', async (job) => {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error('DATABASE_URL is required');
-    const db = createDb(url);
+    const db = jobDb(url);
     const { restaurantId, supplierId, importId, file, mapping } = job.data;
 
     // Tenant guard: the import row must belong to the payload's restaurant.
