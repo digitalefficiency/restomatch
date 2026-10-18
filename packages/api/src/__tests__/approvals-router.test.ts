@@ -340,3 +340,21 @@ describe('approvals role deadlock (DUPLICATE_INVOICE → bookkeeper)', () => {
     });
   });
 });
+
+describe('approvals.myQueue view filters', () => {
+  it('filters by discrepancy type and severity', async () => {
+    const s = await seed();
+    const owner = caller({ userId: s.ownerId, restaurantId: s.restaurantId, role: 'owner' });
+    expect((await owner.approvals.myQueue({ types: ['QTY_OVER'] })).map((q) => q.id)).toEqual([s.discrepancyManagerId]);
+    expect((await owner.approvals.myQueue({ severities: ['block'] })).map((q) => q.id)).toEqual([s.discrepancyOwnerId]);
+    expect(await owner.approvals.myQueue({ types: ['VAT_MISMATCH'] })).toEqual([]);
+  });
+
+  it('rejects unknown filter values', async () => {
+    const s = await seed();
+    const owner = caller({ userId: s.ownerId, restaurantId: s.restaurantId, role: 'owner' });
+    // @ts-expect-error — not a severity
+    await expect(owner.approvals.myQueue({ severities: ['critical'] })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(owner.approvals.myQueue({ supplierIds: ['nope'] })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+});
