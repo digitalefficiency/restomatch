@@ -162,6 +162,8 @@ select version from supabase_migrations.schema_migrations where version = '20260
 ```
 If the first query returns rows, re-run `packages/db/drizzle/rls/0001_invoice_scans_rls.sql` in the SQL editor, then `pnpm db:doctor`. Expect `no anonymous storage access` = PASS.
 
+**If the policy count above is 6** (on a project that already had the walk-ins policies): the storage block did not apply and the anon walk-ins policies were NOT dropped — same fix as below; the SB-3 query must return 0 rows afterwards.
+
 **If the policy count above is below 4:** the migration role was not allowed to manage `storage.objects` policies, and the deploy log only shows a WARNING (`storage.objects policies NOT applied`). Run `packages/db/drizzle/rls/0001_invoice_scans_rls.sql` in the SQL editor, then re-run `pnpm db:doctor`. Expect `tenant storage policies` = PASS.
 
 ## 5. Environment for the new project
