@@ -25,7 +25,7 @@ const MorphLine: React.FC<{ i: number; at: number; w: number }> = ({ i, at, w })
   const appear = prog(f, 8 + i * 5, 26 + i * 5);
   const flagColor = l.flag ? C.gold : C.primary;
   const beamX = (1 - p) * w;
-  const en = prog(f, at + 24, at + 38);
+  const en = prog(f, at + 20, at + 34);
   const done = en;
   return (
     <div
@@ -68,7 +68,7 @@ const MorphLine: React.FC<{ i: number; at: number; w: number }> = ({ i, at, w })
       >
         <span>{l.he}</span>
         <span style={{ fontFamily: FONT.sans, fontSize: 28 * k, opacity: 0.8 }}>
-          {l.qty} · <bdi dir="ltr">{l.price}</bdi>
+          {l.qty} · <bdi dir="rtl">{`${l.price.replace('₪', '')} ₪`}</bdi>
         </span>
       </div>
       {/* English — revealed behind the beam */}

@@ -201,7 +201,7 @@ export const Problem: React.FC<{ locale: Locale }> = ({ locale }) => {
         <RiseLine at={40} style={{ fontSize: vertical ? 74 : 68, fontWeight: 800, lineHeight: 1.1, color: C.muted }}>
           {t.t2}
         </RiseLine>
-        <RiseLine at={80} style={{ fontSize: vertical ? 56 : 54, fontWeight: 700, lineHeight: 1.2, marginTop: 26, color: C.danger }}>
+        <RiseLine at={80} style={{ fontSize: vertical ? 56 : 48, fontWeight: 700, lineHeight: 1.2, marginTop: 26, color: C.danger }}>
           {t.t3}
         </RiseLine>
       </div>

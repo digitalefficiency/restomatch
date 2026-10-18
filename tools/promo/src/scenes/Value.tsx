@@ -2,7 +2,7 @@ import React from 'react';
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
 import { COPY, FACTS, ilsText, Locale } from '../copy';
 import { C, EASE_IN, FONT, prog } from '../theme';
-import { CountUp, FadeUp, LightSweep, RiseLine } from '../components/primitives';
+import { CountUp, FadeUp, RiseLine } from '../components/primitives';
 
 export const VALUE_DURATION = 330;
 
@@ -57,7 +57,6 @@ export const Value: React.FC<{ locale: Locale; duration?: number }> = ({ locale,
                       }}
                     >
                       <CountUp value={s.value} at={at} dur={72 - i * 16} locale={locale} />
-                      <LightSweep at={84} dur={26} opacity={0.4} />
                     </div>
                     <div style={{ height: 3, width: 120, margin: '14px auto', background: s.color, opacity: 0.6, borderRadius: 3 }} />
                     <div style={{ fontSize: 28, color: C.subtle }}>{s.note}</div>
@@ -96,7 +95,7 @@ export const Value: React.FC<{ locale: Locale; duration?: number }> = ({ locale,
                   >
                     {i + 1}
                   </div>
-                  <div style={{ fontSize: 36, fontWeight: 600, color: C.ink }}>{s}</div>
+                  <div style={{ fontSize: 42, fontWeight: 600, color: C.ink }}>{s}</div>
                   {!vertical && i < 2 ? (
                     <div style={{ width: 60, height: 2, background: C.line, marginInlineStart: 16 }} />
                   ) : null}

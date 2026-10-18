@@ -2,7 +2,7 @@ import React from 'react';
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
 import { COPY, FACTS, Locale } from '../copy';
 import { C, EASE_IN_OUT, FONT, prog } from '../theme';
-import { FadeUp, LightSweep, ReelNumber, RiseLine } from '../components/primitives';
+import { FadeUp, ReelNumber, RiseLine } from '../components/primitives';
 
 /** 0–6 s: the owner's question, kinetic; then the ₪ reel spins up and lands. */
 export const Hook: React.FC<{ locale: Locale }> = ({ locale }) => {
@@ -66,7 +66,6 @@ export const Hook: React.FC<{ locale: Locale }> = ({ locale }) => {
             }}
           />
           <ReelNumber id="hook" value={FACTS.leak} at={84} dur={46} size={vertical ? 300 : 280} color={C.danger} />
-          <LightSweep at={142} dur={30} opacity={0.5} />
         </div>
         <FadeUp at={140} style={{ marginTop: 18 }}>
           <div
@@ -86,7 +85,7 @@ export const Hook: React.FC<{ locale: Locale }> = ({ locale }) => {
         <FadeUp at={148}>
           <div
             dir={dir}
-            style={{ marginTop: 16, fontFamily: FONT.sans, fontSize: 24, color: C.subtle, letterSpacing: '0.04em' }}
+            style={{ marginTop: 16, fontFamily: FONT.sans, fontSize: 28, color: C.subtle, letterSpacing: '0.04em' }}
           >
             {t.tag}
           </div>

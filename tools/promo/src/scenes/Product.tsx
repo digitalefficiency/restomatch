@@ -162,7 +162,7 @@ export const Product: React.FC<{ locale: Locale }> = ({ locale }) => {
           <div style={{ position: 'relative', height: 520 }}>
             {BEATS.map((b, i) => {
               const at = i === 0 ? 30 : b.from + 4;
-              const out = i < 3 ? BEATS[i + 1].from - 6 : 520;
+              const out = i < 3 ? BEATS[i + 1].from - 18 : 520; // exit finishes before the next caption rises
               if (f < at - 2 || f > out + 20) return null;
               const blf = f - b.push;
               const ca = prog(blf, SPOT_IN + 4, SPOT_IN + 16) * (1 - prog(blf, SPOT_OUT + 4, SPOT_OUT + 14));
