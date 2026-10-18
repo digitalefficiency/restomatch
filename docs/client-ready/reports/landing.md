@@ -286,7 +286,7 @@ All ₪ goes through `formatIls()`. Prices come from `PLAN_SEED`, and the proof 
 |---|---|
 | Facts strip | `/about` (`FactsStrip`) |
 | Problem in ₪ (4 leak types plus the ₪2,250 example) | `/about#problem` |
-| Full features (Receiver card, approvals, leak heatmap, dark mode, accounting export) | `/about#features`. Nav "Features" now points here. |
+| Full features (Receiver card, approvals, leak heatmap, "quiet when all is well", accounting export) | `/about#features`. Nav "Features" now points here. |
 | ROI calculator | `/about#roi`. The proof block links to it. |
 | Trust and security (RLS, 2FA, Amendment 13, audit log) | `/about#trust`. The CTA trust line links to it. |
 | FAQ | still on `/`, collapsed |
@@ -314,7 +314,7 @@ export const heroMedia = { available: false, loop: { webm, mp4 }, poster, promoV
 
 How:
 - `gsap` is **dynamically imported** inside `HeroMatch` (`import('gsap')` in an effect), so it is no longer in the initial chunk.
-- The lead form is `next/dynamic({ ssr:false })`, mounted by an `IntersectionObserver` (600 px ahead), or immediately when the URL hash is `#lead`. The container reserves `min-h-[26rem]` so there is no CLS.
+- The lead form is `next/dynamic({ ssr:false })`, mounted by an `IntersectionObserver` (600 px ahead), or immediately when the URL hash is `#lead`. The container reserves the form's height (`min-h-[31rem]` on phones, `26rem` from `sm`), so mounting in view (e.g. landing on `/#lead`) does not shift the page.
 - The ROI calculator is off `/`.
 - The scroll animations are pure CSS, with no JS.
 
@@ -325,7 +325,7 @@ How:
 | he | 82 · 95 · 91 (3 runs) | 100 | 100 | 100 | 3.7 · 2.9 · 3.3 s | 0.006 |
 | en | 95 | 100 | 100 | 100 | 2.9 s | 0.005 |
 
-**LCP is not yet under the 2.5 s target.** The LCP element is the SSR'd hero sentence: TTFB 0.46 s plus about 2.4 s of render delay. Under the 4× CPU throttle that delay is the shared React/Next bootstrap (the 103 kB shared chunk). It is not landing code: there is no render-blocking CSS, fonts are `font-display: swap`, and the hero has no entrance animation. That puts it at parity with the round-2 v1 numbers (2.6–3.0 s), while Best-practices went 96 → 100. Unthrottled Chromium LCP is 180–244 ms. A next lever, if needed: move the hero match card's client island behind `requestIdleCallback`, or trim the shared chunk. Both are outside this round.
+**LCP is not yet under the 2.5 s target.** The LCP element is the SSR'd hero sentence: TTFB 0.46 s plus about 2.4 s of render delay. Under the 4× CPU throttle that delay is the shared React/Next bootstrap (the 103 kB shared chunk). It is not landing code: there is no render-blocking CSS, fonts are `font-display: swap`, and the hero has no entrance animation. That puts it at parity with the round-2 v1 numbers (2.6–3.0 s), while Best-practices went 96 → 100. Unthrottled Chromium LCP is 160–256 ms across all Layer-2 runs. A next lever, if needed: move the hero match card's client island behind `requestIdleCallback`, or trim the shared chunk. Both are outside this round.
 
 ### Accessibility and motion
 - `prefers-reduced-motion`:
