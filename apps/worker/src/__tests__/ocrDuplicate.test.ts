@@ -110,6 +110,17 @@ describe('writeOcrHeader', () => {
     expect(out.duplicateOf).toBeUndefined();
   });
 
+  it('stores a blank number as NULL, so two unreadable numbers never collide', async () => {
+    const first = await newInvoice();
+    const second = await newInvoice();
+    await writeOcrHeader(db, { restaurantId, invoiceId: first, supplierId }, header(''));
+    const out = await writeOcrHeader(db, { restaurantId, invoiceId: second, supplierId }, header('  '));
+    expect(out.duplicateOf).toBeUndefined();
+    const rows = await db.select().from(invoices).where(eq(invoices.restaurantId, restaurantId));
+    expect(rows.map((r) => r.invoiceNumber)).toEqual([null, null]);
+    expect(rows.every((r) => r.status === 'matched')).toBe(true);
+  });
+
   it('never writes another tenant’s invoice', async () => {
     const id = await newInvoice();
     const [other] = await db.insert(restaurants).values({ name: 'Other tenant' }).returning();

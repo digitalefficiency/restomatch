@@ -112,9 +112,12 @@ export function AdjustQuantities({
                 <span className="text-muted">
                   <Qty qty={l.invoiceQty} unit={l.invoiceUnit} />
                   {l.invoiceUnitPrice !== null ? (
-                    <bdi dir="ltr" className="font-mono tabular-nums">
-                      {' '}× {formatIls(l.invoiceUnitPrice, { locale, maximumFractionDigits: 2 })}
-                    </bdi>
+                    <>
+                      {' × '}
+                      <bdi dir="ltr" className="font-mono tabular-nums">
+                        {formatIls(l.invoiceUnitPrice, { locale, maximumFractionDigits: 2 })}
+                      </bdi>
+                    </>
                   ) : null}
                 </span>
               </li>

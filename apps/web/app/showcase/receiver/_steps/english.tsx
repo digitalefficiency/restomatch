@@ -12,7 +12,7 @@
 import { useCallback, useSyncExternalStore } from 'react';
 import { Languages } from 'lucide-react';
 import { unitLabel } from '@restomatch/translate/units';
-import { useLocale, useT } from '@/lib/i18n/client';
+import { useDir, useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
 import { receiving } from '@/lib/i18n/messages/receiving';
 
@@ -124,10 +124,13 @@ export function useUnitLabel(): (unit: string | null | undefined) => string {
 /** "12 kg" — always LTR so the number and unit don't flip in RTL. */
 export function Qty({ qty, unit }: { qty: number | null; unit?: string | null }) {
   const locale = useLocale();
+  const dir = useDir();
   const label = useUnitLabel();
   if (qty === null) return <span>—</span>;
+  // Page direction, not a forced LTR: in Hebrew "37.5 ליטר" must keep the
+  // number first (to the right), it read "ליטר 37.5" inside an LTR isolate.
   return (
-    <bdi dir="ltr" className="whitespace-nowrap font-mono tabular-nums">
+    <bdi dir={dir} className="whitespace-nowrap font-mono tabular-nums">
       {formatNumber(qty, locale, { maximumFractionDigits: 3 })}
       {unit ? ` ${label(unit)}` : ''}
     </bdi>

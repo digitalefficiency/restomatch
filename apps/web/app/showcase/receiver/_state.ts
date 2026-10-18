@@ -190,3 +190,15 @@ export function nonMatchedLines(result: ReconciliationResult | null): Reconcilia
   if (!result) return [];
   return result.lines.filter((l) => l.status !== 'matched');
 }
+
+/**
+ * Not one invoice line paired with an order line, though both sides have
+ * lines: almost always another supplier's invoice, or the wrong order opened.
+ */
+export function noLinePaired(lines: ReconciliationLine[]): boolean {
+  return (
+    lines.some((l) => l.poLineId !== null) &&
+    lines.some((l) => l.poLineId === null && l.invoiceLineIndex !== null) &&
+    !lines.some((l) => l.poLineId !== null && l.invoiceLineIndex !== null)
+  );
+}

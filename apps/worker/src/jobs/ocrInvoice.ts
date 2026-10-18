@@ -258,7 +258,10 @@ export async function writeOcrHeader(
   header: InvoiceHeader,
 ): Promise<{ duplicateOf?: string | null }> {
   const where = and(eq(invoices.id, ids.invoiceId), eq(invoices.restaurantId, ids.restaurantId));
-  const invoiceNumber = header.invoiceNumber;
+  // Blank → NULL: the prompt allows '' for an unreadable number, and '' is a
+  // value to the unique index (a second blank collides); NULLs never do.
+  const invoiceNumber = header.invoiceNumber?.trim() || null;
+  header = { ...header, invoiceNumber };
   try {
     await db.update(invoices).set(header).where(where);
     return {};

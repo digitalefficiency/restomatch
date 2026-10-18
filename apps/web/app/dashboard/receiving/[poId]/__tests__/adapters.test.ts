@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { noLinePaired } from '@/app/showcase/receiver/_state';
 import { adaptReconciliation, keepAdjusted, type InvoiceLineRow, type PoLineRow } from '../_adapters';
 
 /** EN-5: the receiving review is calm — no false "missing" / "not ordered" alarms. */
@@ -79,6 +80,34 @@ describe('adaptReconciliation — calm statuses (EN-5)', () => {
       invoiceLines: [inv({ id: 'a', productId: 'p1', qtyBilled: '4', unitPriceBilled: '20' })],
     });
     expect(result.lines.filter((l) => l.invoiceLineIndex !== null)).toHaveLength(1);
+  });
+});
+
+describe('noLinePaired — "is this the right invoice?" banner', () => {
+  const recon = (invoiceLines: InvoiceLineRow[]) =>
+    adaptReconciliation({ po, poLines, receiptLines: [], invoiceLines }).result.lines;
+
+  it('another supplier’s invoice: lines on both sides, none paired', () => {
+    expect(
+      noLinePaired(
+        recon([
+          inv({ id: 'a', rawDescription: 'לימון צהוב', qtyBilled: '1.15', unitPriceBilled: '8' }),
+          inv({ id: 'b', rawDescription: 'שמיר', qtyBilled: '1', unitPriceBilled: '2' }),
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  it('not when at least one line paired, or when there is no invoice yet', () => {
+    expect(
+      noLinePaired(
+        recon([
+          inv({ id: 'a', productId: 'p1', qtyBilled: '4', unitPriceBilled: '20' }),
+          inv({ id: 'b', rawDescription: 'שמיר', qtyBilled: '1', unitPriceBilled: '2' }),
+        ]),
+      ),
+    ).toBe(false);
+    expect(noLinePaired(recon([]))).toBe(false);
   });
 });
 
