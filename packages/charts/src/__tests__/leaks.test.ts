@@ -137,6 +137,8 @@ describe('computeLeaks', () => {
     // (11 - 8) * 20 = 60 — the old constant ×10 would give 30.
     expect(leaks[0]?.monthExcessIls).toBeCloseTo(60, 1);
     expect(leaks[0]?.series).toEqual([10, 11]);
+    // Actually paid above p50: (10 − 8) × 7 + (11 − 8) × 13 = 53.
+    expect(leaks[0]?.paidExcessIls).toBe(53);
   });
 
   it('does not flag prices within p90 threshold', async () => {
