@@ -160,6 +160,7 @@ function UploadedScanCanvas({
             style={{ height: '80vh' }}
           />
         ) : (
+          // eslint-disable-next-line @next/next/no-img-element -- signed / blob URL of a private scan: next/image cannot optimize it
           <img
             src={publicUrl}
             alt={t('scannedInvoice')}

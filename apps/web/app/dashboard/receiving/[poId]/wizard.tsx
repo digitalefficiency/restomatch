@@ -87,7 +87,7 @@ export function ReceivingWizard({
 }) {
   const [step, setStep] = useState<Step>('SCAN_INVOICE');
   const [grId, setGrId] = useState<string | null>(null);
-  const [invoiceId, setInvoiceId] = useState<string | null>(null);
+  const [, setInvoiceId] = useState<string | null>(null);
   const [image, setImage] = useState<CapturedImage | null>(null);
   const [result, setResult] = useState<ReconciliationResult | null>(null);
   const [marks, setMarks] = useState<Record<string, LineMark>>({});
@@ -167,22 +167,9 @@ export function ReceivingWizard({
 
   const stepIndex = STEP_ORDER.indexOf(step);
 
-  // Eagerly ensure a goods_receipt exists (idempotent) so we have grLineIds the
-  // moment the user finishes scanning. Runs once on mount.
-  const startedRef = useRef(false);
-  useEffect(() => {
-    if (startedRef.current) return;
-    startedRef.current = true;
-    void (async () => {
-      try {
-        const r = await startReceipt.mutateAsync({ poId: po.id });
-        setGrId(r.receiptId);
-      } catch (err) {
-        setError(errorText(err, t, locale));
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // The goods receipt is created on the receiver's first real action (capture,
+  // or the PO-only fallback) — not on page view, which used to create a
+  // receipt (and its audit trail) for anyone who merely opened the PO.
 
   /** After capture: register the invoice for OCR, then poll until parsed. */
   const onCapture = useCallback(

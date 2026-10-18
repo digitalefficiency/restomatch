@@ -72,7 +72,7 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadOpts
   const fileInputRef = useRef<HTMLInputElement>(null);
   const viewfinderRef = useRef<HTMLDivElement>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(image?.url ?? null);
-  const [filename, setFilename] = useState<string | null>(image?.filename ?? null);
+  const [, setFilename] = useState<string | null>(image?.filename ?? null);
   const [upload, setUpload] = useState<UploadState>(
     image?.invoiceId ? { phase: 'uploaded', result: image } : { phase: 'idle' },
   );
@@ -188,6 +188,7 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadOpts
         className="relative mb-4 mx-auto max-w-md aspect-[4/5] rounded-2xl overflow-hidden border border-line bg-surface-2 shadow-card"
       >
         {previewUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element -- signed / blob URL of a private scan: next/image cannot optimize it
           <img src={previewUrl} alt={t('steps.scan.invoiceAlt')} className="scan-element absolute inset-0 w-full h-full object-contain" />
         ) : (
           <>
