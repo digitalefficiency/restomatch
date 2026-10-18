@@ -465,9 +465,14 @@ export async function runDoctor(url: string, opts: DoctorOptions = {}): Promise<
       if (!role) {
         add('app role', appRole, 'FAIL', 'role does not exist — run provision-rls with APP_ROLE_PASSWORD');
       } else {
-        const okRole = !role.rolbypassrls && !role.rolsuper && role.rolcanlogin;
-        add('app role', appRole, okRole ? 'PASS' : 'FAIL',
-          `bypassrls=${role.rolbypassrls} superuser=${role.rolsuper} canlogin=${role.rolcanlogin}${okRole ? '' : ' — must be f/f/t'}`);
+        const safe = !role.rolbypassrls && !role.rolsuper;
+        add('app role', appRole, !safe ? 'FAIL' : role.rolcanlogin ? 'PASS' : 'WARN',
+          `bypassrls=${role.rolbypassrls} superuser=${role.rolsuper} canlogin=${role.rolcanlogin}` +
+            (!safe
+              ? ' — must not bypass RLS or be superuser'
+              : role.rolcanlogin
+                ? ''
+                : ' — no LOGIN yet (a Supabase/git deploy creates it NOLOGIN): ALTER ROLE restomatch_app WITH LOGIN PASSWORD \'…\' or run provision-rls with APP_ROLE_PASSWORD'));
         const tables = (await tx`
           select c.relname as t,
                  has_table_privilege(${appRole}, c.oid, 'SELECT') as sel,
