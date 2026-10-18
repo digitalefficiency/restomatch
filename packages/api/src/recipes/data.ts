@@ -1,0 +1,230 @@
+import { TRPCError } from '@trpc/server';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  inArray,
+  lt,
+  priceHistory,
+  products,
+  recipeItems,
+  recipes,
+  restaurants,
+  type Database,
+} from '@restomatch/db';
+import { appError } from '../errors';
+import { featureEnabled } from '../lib/features';
+import { DEFAULT_TARGET_BP, vatRateToBp, type CostRecipe, type ProductPrice } from './cost';
+
+/**
+ * Tenant-scoped reads for the recipe cost engine. Every query filters on the
+ * caller's restaurant_id (and runs inside the member RLS transaction), so a
+ * foreign id simply resolves to nothing.
+ */
+
+interface RecipeSettings {
+  recipes?: { targetFoodCostBp?: number };
+}
+
+export interface RestaurantCostContext {
+  vatBp: bigint;
+  targetBp: number;
+  timezone: string;
+  settings: unknown;
+}
+
+export async function loadRestaurant(db: Database, restaurantId: string): Promise<RestaurantCostContext> {
+  const [r] = await db
+    .select({ vatRate: restaurants.vatRate, settings: restaurants.settings, timezone: restaurants.timezone })
+    .from(restaurants)
+    .where(eq(restaurants.id, restaurantId))
+    .limit(1);
+  if (!r) throw new TRPCError({ code: 'NOT_FOUND', message: 'restaurant not found' });
+  const target = (r.settings as RecipeSettings | null)?.recipes?.targetFoodCostBp;
+  return {
+    vatBp: vatRateToBp(r.vatRate),
+    targetBp: Number.isInteger(target) && target! > 0 && target! < 10_000 ? target! : DEFAULT_TARGET_BP,
+    timezone: r.timezone,
+    settings: r.settings,
+  };
+}
+
+/** FORBIDDEN (appCode FEATURE_DISABLED) unless `recipes` is on for this restaurant. */
+export async function assertRecipesEnabled(db: Database, restaurantId: string): Promise<RestaurantCostContext> {
+  const ctx = await loadRestaurant(db, restaurantId);
+  if (!featureEnabled(ctx.settings, 'recipes')) {
+    throw appError('FORBIDDEN', 'FEATURE_DISABLED', 'FEATURE_DISABLED:recipes', { feature: 'recipes' });
+  }
+  return ctx;
+}
+
+export interface RecipeRow {
+  id: string;
+  name: string;
+  nameEn: string | null;
+  category: string | null;
+  isSubRecipe: boolean;
+  yieldQty: string;
+  yieldUnit: string;
+  menuPriceAgorot: number | null;
+  menuPriceIncludesVat: boolean;
+  active: boolean;
+  notes: string | null;
+  updatedAt: Date;
+}
+
+export interface ItemRow {
+  id: string;
+  recipeId: string;
+  productId: string | null;
+  subRecipeId: string | null;
+  quantity: string;
+  unit: string;
+  wastePct: string;
+  unitsPerProductUnit: string | null;
+  sortOrder: number;
+  note: string | null;
+}
+
+export async function loadRecipes(db: Database, restaurantId: string): Promise<{ rows: RecipeRow[]; items: ItemRow[] }> {
+  const rows = await db
+    .select({
+      id: recipes.id,
+      name: recipes.name,
+      nameEn: recipes.nameEn,
+      category: recipes.category,
+      isSubRecipe: recipes.isSubRecipe,
+      yieldQty: recipes.yieldQty,
+      yieldUnit: recipes.yieldUnit,
+      menuPriceAgorot: recipes.menuPriceAgorot,
+      menuPriceIncludesVat: recipes.menuPriceIncludesVat,
+      active: recipes.active,
+      notes: recipes.notes,
+      updatedAt: recipes.updatedAt,
+    })
+    .from(recipes)
+    .where(eq(recipes.restaurantId, restaurantId))
+    .orderBy(asc(recipes.name));
+  const items = await db
+    .select({
+      id: recipeItems.id,
+      recipeId: recipeItems.recipeId,
+      productId: recipeItems.productId,
+      subRecipeId: recipeItems.subRecipeId,
+      quantity: recipeItems.quantity,
+      unit: recipeItems.unit,
+      wastePct: recipeItems.wastePct,
+      unitsPerProductUnit: recipeItems.unitsPerProductUnit,
+      sortOrder: recipeItems.sortOrder,
+      note: recipeItems.note,
+    })
+    .from(recipeItems)
+    .where(eq(recipeItems.restaurantId, restaurantId))
+    .orderBy(asc(recipeItems.sortOrder), asc(recipeItems.createdAt));
+  return { rows, items };
+}
+
+export function toCostRecipes(rows: RecipeRow[], items: ItemRow[]): CostRecipe[] {
+  const byRecipe = new Map<string, ItemRow[]>();
+  for (const it of items) byRecipe.set(it.recipeId, [...(byRecipe.get(it.recipeId) ?? []), it]);
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    isSubRecipe: r.isSubRecipe,
+    yieldQty: r.yieldQty,
+    yieldUnit: r.yieldUnit,
+    menuPriceAgorot: r.menuPriceAgorot,
+    menuPriceIncludesVat: r.menuPriceIncludesVat,
+    items: (byRecipe.get(r.id) ?? []).map((it) => ({
+      id: it.id,
+      productId: it.productId,
+      subRecipeId: it.subRecipeId,
+      quantity: it.quantity,
+      unit: it.unit,
+      wastePct: it.wastePct,
+      unitsPerProductUnit: it.unitsPerProductUnit,
+    })),
+  }));
+}
+
+export interface PriceWithDate extends ProductPrice {
+  observedAt: Date;
+}
+
+/**
+ * The latest ACTUALLY PAID unit price per product (price_history, ex-VAT, per
+ * the product's default unit), optionally as of an instant (`before`, exclusive).
+ *
+ * Contract prices (the `contracts` feature, S11) would be preferred here once
+ * they exist; this function is the single seam to add that source — nothing in
+ * the cost engine depends on where a price came from.
+ */
+export async function latestPrices(
+  db: Database,
+  restaurantId: string,
+  opts: { before?: Date; productIds?: string[] } = {},
+): Promise<Map<string, PriceWithDate>> {
+  const conds = [eq(priceHistory.restaurantId, restaurantId)];
+  if (opts.before) conds.push(lt(priceHistory.observedAt, opts.before));
+  if (opts.productIds) {
+    if (opts.productIds.length === 0) return new Map();
+    conds.push(inArray(priceHistory.productId, opts.productIds));
+  }
+  const rows = await db
+    .selectDistinctOn([priceHistory.productId], {
+      productId: priceHistory.productId,
+      unitPrice: priceHistory.unitPrice,
+      observedAt: priceHistory.observedAt,
+      unit: products.defaultUnit,
+    })
+    .from(priceHistory)
+    .innerJoin(products, and(eq(products.id, priceHistory.productId), eq(products.restaurantId, restaurantId)))
+    .where(and(...conds))
+    .orderBy(priceHistory.productId, desc(priceHistory.observedAt));
+  return new Map(rows.map((r) => [r.productId, { unitPrice: r.unitPrice, unit: r.unit, observedAt: r.observedAt }]));
+}
+
+/** The first price per product observed at or after `from` (baseline for products first bought this period). */
+export async function earliestPricesFrom(
+  db: Database,
+  restaurantId: string,
+  from: Date,
+): Promise<Map<string, PriceWithDate>> {
+  const rows = await db
+    .selectDistinctOn([priceHistory.productId], {
+      productId: priceHistory.productId,
+      unitPrice: priceHistory.unitPrice,
+      observedAt: priceHistory.observedAt,
+      unit: products.defaultUnit,
+    })
+    .from(priceHistory)
+    .innerJoin(products, and(eq(products.id, priceHistory.productId), eq(products.restaurantId, restaurantId)))
+    .where(and(eq(priceHistory.restaurantId, restaurantId), gte(priceHistory.observedAt, from)))
+    .orderBy(priceHistory.productId, asc(priceHistory.observedAt));
+  return new Map(rows.map((r) => [r.productId, { unitPrice: r.unitPrice, unit: r.unit, observedAt: r.observedAt }]));
+}
+
+export interface ProductInfo {
+  id: string;
+  name: string;
+  nameEn: string | null;
+  unit: string | null;
+  category: string | null;
+}
+
+export async function loadProducts(db: Database, restaurantId: string, ids: string[]): Promise<Map<string, ProductInfo>> {
+  if (ids.length === 0) return new Map();
+  const rows = await db
+    .select({
+      id: products.id,
+      name: products.canonicalName,
+      nameEn: products.nameEn,
+      unit: products.defaultUnit,
+      category: products.category,
+    })
+    .from(products)
+    .where(and(eq(products.restaurantId, restaurantId), inArray(products.id, ids)));
+  return new Map(rows.map((r) => [r.id, r]));
+}

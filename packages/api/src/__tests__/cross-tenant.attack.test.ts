@@ -6,6 +6,7 @@ import {
   catalogImports,
   inArray,
   createDb,
+  desc,
   discrepancies,
   eq,
   goodsReceipts,
@@ -16,8 +17,11 @@ import {
   memberships,
   poLines,
   priceBaselines,
+  priceHistory,
   products,
   purchaseOrders,
+  recipeItems,
+  recipes,
   restaurants,
   supplierCatalogItems,
   suppliers,
@@ -207,6 +211,21 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'dsr.deleteMyAccount':
     'authed self-service; anonymizes ONLY the caller (ctx.session.userId) — takes no target id, cannot reach another user',
   'dsr.eraseLead': 'admin-denial',
+  // Food cost per dish (wave 1, flag `recipes`; S17). Ids are checked against
+  // the caller's restaurant before any read/write (plus same-tenant composite
+  // FKs + RLS in 0057); lists/aggregates are restaurant-scoped. See the
+  // recipes.* block at the end.
+  'recipes.enabled': 'isolation',
+  'recipes.list': 'isolation',
+  'recipes.get': 'attack',
+  'recipes.save': 'attack',
+  'recipes.delete': 'attack',
+  'recipes.searchProducts': 'isolation',
+  'recipes.subRecipes': 'isolation',
+  'recipes.impact': 'attack',
+  'recipes.changes': 'isolation',
+  'recipes.setTarget': 'isolation',
+  'recipes.importCsv': 'attack',
 };
 
 function listProcedurePaths(): string[] {
@@ -1409,4 +1428,97 @@ describe('role denial: mapping.confirm rejects member-tier callers', () => {
       expect(after).toHaveLength(before.length);
     });
   }
+});
+
+describe('recipes.* (wave 1 food cost) — foreign ids rejected, lists isolated', () => {
+  let recipeB: string;
+  let subB: string;
+  const on = (rid: string) =>
+    db.update(restaurants).set({ settings: { features: { recipes: true } } }).where(eq(restaurants.id, rid));
+
+  beforeAll(async () => {
+    await on(A.restaurantId);
+    await on(B.restaurantId);
+    await db.insert(priceHistory).values([
+      { restaurantId: A.restaurantId, productId: A.productId, supplierId: A.supplierId, observedAt: new Date(), unitPrice: '10.0000' },
+      { restaurantId: B.restaurantId, productId: B.productId, supplierId: B.supplierId, observedAt: new Date(), unitPrice: '77.7700' },
+    ]);
+    subB = (await callerFor(B).recipes.save({ name: 'B sauce', isSubRecipe: true, yieldUnit: 'ק״ג', items: [{ productId: B.productId, quantity: '1', unit: 'ק״ג', wastePct: 0 }] })).id;
+    recipeB = (await callerFor(B).recipes.save({ name: 'B dish', menuPriceAgorot: 9900, items: [{ subRecipeId: subB, quantity: '100', unit: 'גרם', wastePct: 0 }] })).id;
+    await callerFor(A).recipes.save({ name: 'A dish', menuPriceAgorot: 5000, items: [{ productId: A.productId, quantity: '200', unit: 'גרם', wastePct: 0 }] });
+  });
+
+  afterAll(async () => {
+    await db.delete(recipeItems).where(inArray(recipeItems.restaurantId, [A.restaurantId, B.restaurantId]));
+    await db.delete(recipes).where(inArray(recipes.restaurantId, [A.restaurantId, B.restaurantId]));
+    await db.update(restaurants).set({ settings: {} }).where(inArray(restaurants.id, [A.restaurantId, B.restaurantId]));
+  });
+
+  const bDish = async () => (await db.select().from(recipes).where(eq(recipes.id, recipeB)))[0];
+
+  it('recipes.get rejects a foreign recipe id', async () => {
+    await expect(callerFor(A).recipes.get({ id: recipeB })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('recipes.save cannot overwrite a foreign recipe, nor use a foreign product / sub-recipe', async () => {
+    await expect(callerFor(A).recipes.save({ id: recipeB, name: 'hijack', items: [] })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(
+      callerFor(A).recipes.save({ name: 'steal product', items: [{ productId: B.productId, quantity: '1', unit: 'ק״ג', wastePct: 0 }] }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(
+      callerFor(A).recipes.save({ name: 'steal sauce', items: [{ subRecipeId: subB, quantity: '1', unit: 'ק״ג', wastePct: 0 }] }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect((await bDish())?.name).toBe('B dish');
+    expect(await db.select().from(recipeItems).where(eq(recipeItems.recipeId, recipeB))).toHaveLength(1);
+  });
+
+  it('recipes.delete rejects a foreign id and deletes nothing', async () => {
+    await expect(callerFor(A).recipes.delete({ id: recipeB })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(await bDish()).toBeDefined();
+  });
+
+  it('recipes.impact rejects a foreign productId', async () => {
+    await expect(callerFor(A).recipes.impact({ productId: B.productId, changePct: 10 })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('recipes.importCsv never resolves another tenant’s product or sub-recipe by name', async () => {
+    const csv = `recipe,ingredient,quantity,unit\nxt,עגבניה B,1,ק״ג\nxt2,B sauce,1,ק״ג`;
+    const res = await callerFor(A).recipes.importCsv({ csv, dryRun: false });
+    expect(res.ok).toBe(false);
+    expect(res.errors.map((e) => e.code)).toEqual(['unknownIngredient', 'unknownIngredient']);
+  });
+
+  it('list / subRecipes / searchProducts / changes / enabled only see the caller’s restaurant', async () => {
+    const a = callerFor(A);
+    const list = await a.recipes.list();
+    expect(list.recipes.map((r) => r.name)).toEqual(['A dish']);
+    // Priced from A's own latest paid price — never B's ₪77.77/kg (→ 1555 agorot).
+    const [latestA] = await db
+      .select({ p: priceHistory.unitPrice })
+      .from(priceHistory)
+      .where(eq(priceHistory.productId, A.productId))
+      .orderBy(desc(priceHistory.observedAt))
+      .limit(1);
+    expect(list.recipes[0]!.portionCostAgorot).toBe(Math.round(Number(latestA!.p) * 20));
+    expect(list.recipes[0]!.portionCostAgorot).not.toBe(1555);
+    expect(await a.recipes.subRecipes()).toEqual([]);
+    const found = await a.recipes.searchProducts({ search: 'עגבניה' });
+    expect(found.map((p) => p.id)).toEqual([A.productId]);
+    const changes = await a.recipes.changes();
+    expect(changes.rows.every((r) => r.recipeId !== recipeB)).toBe(true);
+    expect(await a.recipes.enabled()).toEqual({ enabled: true });
+  });
+
+  it('recipes.setTarget writes only the caller’s restaurant settings', async () => {
+    await callerFor(A).recipes.setTarget({ targetPct: 25 });
+    expect((await callerFor(A).recipes.list()).targetBp).toBe(2500);
+    expect((await callerFor(B).recipes.list()).targetBp).toBe(3000);
+  });
+
+  it('every recipes procedure is FORBIDDEN for B while B has the flag off', async () => {
+    await db.update(restaurants).set({ settings: {} }).where(eq(restaurants.id, B.restaurantId));
+    await expect(callerFor(B).recipes.list()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(callerFor(B).recipes.get({ id: recipeB })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await on(B.restaurantId);
+  });
 });
