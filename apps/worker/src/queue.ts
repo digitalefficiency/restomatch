@@ -10,6 +10,19 @@ export function makeQueue<T>(name: string) {
   return new Queue<T>(name, { connection });
 }
 
+/**
+ * One log line per failed job. Without it a failure is only visible in Sentry
+ * (env-gated), i.e. invisible on a laptop/container without SENTRY_DSN.
+ */
+export function formatJobFailure(
+  name: string,
+  job: { id?: string; attemptsMade?: number } | undefined,
+  err: unknown,
+): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  return `[${name}] job=${job?.id ?? '?'} attempt=${job?.attemptsMade ?? '?'} failed: ${msg}`;
+}
+
 export function makeWorker<T>(
   name: string,
   processor: (job: { data: T; id?: string }) => Promise<unknown>,
@@ -17,7 +30,14 @@ export function makeWorker<T>(
 ) {
   const worker = new Worker<T>(name, processor as never, { connection, ...options });
   worker.on('failed', (job, err) => {
+    console.error(formatJobFailure(name, job, err));
     captureException(err, { queue: name, jobId: job?.id });
+  });
+  // BullMQ re-emits connection/processing errors as 'error'; an EventEmitter
+  // with no 'error' listener throws, which would take the whole process down
+  // on a transient Redis blip instead of letting ioredis reconnect.
+  worker.on('error', (err) => {
+    console.error(`[${name}] worker error: ${err instanceof Error ? err.message : String(err)}`);
   });
   return worker;
 }

@@ -19,7 +19,8 @@
     "db:doctor": "pnpm --filter @restomatch/db run doctor",
     "db:supabase-sync": "pnpm --filter @restomatch/db run supabase-sync",
     "test": "turbo run test --concurrency=1",
-    "test:e2e": "pnpm --filter @restomatch/web test:e2e"
+    "test:e2e": "pnpm --filter @restomatch/web test:e2e",
+    "dev:worker": "set -a && . apps/web/.env.local && set +a && pnpm --filter @restomatch/worker dev"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

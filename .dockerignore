@@ -16,5 +16,9 @@
 .env
 .env.*
 !.env.example
-apps/web/.next
-apps/mobile
+# Apps the worker image doesn't run: keep only their manifests so the pnpm
+# workspace still matches pnpm-lock.yaml (frozen install).
+apps/web/**
+!apps/web/package.json
+apps/mobile/**
+!apps/mobile/package.json
