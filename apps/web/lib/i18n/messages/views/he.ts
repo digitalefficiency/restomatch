@@ -104,6 +104,17 @@ export const he = {
     refresh: 'מתרענן כל דקה',
     updated: 'עודכן {time}',
   },
+  csv: {
+    supplier: 'ספק',
+    invoice: 'חשבונית',
+    date: 'תאריך',
+    total: 'סה״כ חשבונית',
+    leak: 'דליפה',
+    status: 'סטטוס',
+    type: 'סוג פער',
+    severity: 'חומרה',
+    product: 'מוצר',
+  },
   range: '{from} – {to}',
   filteredNote: 'התצוגה מסוננת — המספרים מתייחסים לסינון בלבד.',
 };

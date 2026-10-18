@@ -106,6 +106,17 @@ export const en: Shape<typeof he> = {
     refresh: 'Refreshes every minute',
     updated: 'Updated {time}',
   },
+  csv: {
+    supplier: 'Supplier',
+    invoice: 'Invoice',
+    date: 'Date',
+    total: 'Invoice total',
+    leak: 'Leak',
+    status: 'Status',
+    type: 'Discrepancy type',
+    severity: 'Severity',
+    product: 'Product',
+  },
   range: '{from} – {to}',
   filteredNote: 'This view is filtered — the numbers cover the filter only.',
 };

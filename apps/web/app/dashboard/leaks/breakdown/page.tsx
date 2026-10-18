@@ -13,30 +13,54 @@ import {
   resolutionLabel,
   severityLabel,
 } from '../../approvals/vocab';
+import { views as viewsNs } from '@/lib/i18n/messages/views';
+import {
+  DeltaBadge,
+  ViewToolbar,
+  isDefaultData,
+  parseView,
+  rangeLabel,
+  toViewInput,
+} from '@/lib/components/views';
 
 /**
  * Drill-down behind the hero leak number: every invoice that contributed to the
  * month's leak (largest first) with the discrepancy lines that caused it, then
- * the invoices calmly waiting for a PO link. `?m=-1` = previous month.
+ * the invoices calmly waiting for a PO link. `?m=-1` = previous month. Any
+ * view param (period / compare / filters, see lib/components/views) switches
+ * to that view; the plain URL stays the classic month drill-down.
  */
 export default async function LeakBreakdownPage({
   searchParams,
 }: {
-  searchParams: Promise<{ m?: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const sp = await searchParams;
-  const parsed = Number.parseInt(sp.m ?? '0', 10);
-  const monthOffset = Number.isFinite(parsed) ? Math.min(0, Math.max(-24, parsed)) : 0;
+  const m = Array.isArray(sp.m) ? sp.m[0] : sp.m;
+  const parsed = Number.parseInt(m ?? '0', 10);
+  const view = parseView(sp);
+  const viewMode = !isDefaultData(view);
+  const monthOffset = viewMode ? 0 : Number.isFinite(parsed) ? Math.min(0, Math.max(-24, parsed)) : 0;
 
   const caller = await createServerCaller();
-  const [t, ta, locale] = await Promise.all([getT(leaksNs), getT(approvalsNs), getLocale()]);
-  const [hero, rows] = await Promise.all([
-    caller.owner.leakHero({ monthOffset }),
-    caller.owner.leakBreakdown({ monthOffset, limit: 100 }),
+  const [t, ta, tv, locale] = await Promise.all([getT(leaksNs), getT(approvalsNs), getT(viewsNs), getLocale()]);
+  const viewInput = toViewInput(view);
+  const [summary, rows, options] = await Promise.all([
+    viewMode
+      ? caller.owner.leakSummary({ view: viewInput, compare: view.compare })
+      : caller.owner.leakHero({ monthOffset }).then((current) => ({ current, previous: null })),
+    viewMode
+      ? caller.owner.leakBreakdown({ view: viewInput, limit: 200 })
+      : caller.owner.leakBreakdown({ monthOffset, limit: 100 }),
+    caller.owner.viewOptions(),
   ]);
+  const hero = summary.current;
+  const compact = view.density === 'compact';
 
   const ils = (v: number, digits = 2) => formatIls(v, { locale, maximumFractionDigits: digits });
-  const month = formatDate(hero.monthStart, locale, { month: 'long', year: 'numeric' });
+  const month = rangeLabel(viewMode ? view.period : 'this_month', hero.monthStart, hero.monthEnd, locale);
+  // Claims are month-based (?m=): offer them for the month periods only.
+  const claimsOffset = !viewMode ? monthOffset : view.period === 'this_month' ? 0 : view.period === 'last_month' ? -1 : null;
   const leaking = rows.filter((r) => !r.pendingLink);
   const pending = rows.filter((r) => r.pendingLink);
 
@@ -52,6 +76,35 @@ export default async function LeakBreakdownPage({
 
       <SectionHeader level={1} title={t('breakdown.title')} subtitle={t('breakdown.subtitle', { month })} />
 
+      <ViewToolbar
+        page="breakdown"
+        view={view}
+        period
+        compare
+        density
+        saved
+        filters={['supplier', 'category', 'type', 'severity', 'status']}
+        options={options}
+        exportData={{
+          columns: [
+            { key: 'supplier', label: tv('csv.supplier') },
+            { key: 'invoice', label: tv('csv.invoice') },
+            { key: 'date', label: tv('csv.date') },
+            { key: 'total', label: tv('csv.total') },
+            { key: 'leak', label: tv('csv.leak') },
+            { key: 'status', label: tv('csv.status') },
+          ],
+          rows: rows.map((r) => ({
+            supplier: displayName(locale, r.supplierName, r.supplierNameEn),
+            invoice: r.invoiceNumber ?? '',
+            date: r.invoiceDate ? new Date(r.invoiceDate).toISOString().slice(0, 10) : '',
+            total: r.totalInclVat,
+            leak: r.pendingLink ? null : r.leakIls,
+            status: r.pendingLink ? t('breakdown.pendingTitle') : r.status === 'paid' ? t('breakdown.paid') : t('breakdown.unpaid'),
+          })),
+        }}
+      />
+
       {/* Month switcher + total — the same number as the hero. */}
       <Card padding="md" className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -62,6 +115,9 @@ export default async function LeakBreakdownPage({
           {hero.leakPct != null ? (
             <p className="text-sm text-muted">{t('breakdown.ofSpend', { pct: formatPercent(hero.leakPct, locale, 1) })}</p>
           ) : null}
+          {summary.previous ? (
+            <DeltaBadge className="mt-1" current={hero.leakIls} previous={summary.previous.leakIls} compare={view.compare} showAmount />
+          ) : null}
         </div>
         <nav className="flex flex-wrap items-center gap-2" aria-label={month}>
           <Link
@@ -71,22 +127,22 @@ export default async function LeakBreakdownPage({
             <FileBarChart className="h-4 w-4" aria-hidden="true" />
             {t('report.open')}
           </Link>
-          {leaking.length > 0 ? (
+          {leaking.length > 0 && claimsOffset != null ? (
             <Link
-              href={`/dashboard/leaks/claims${monthOffset ? `?m=${monthOffset}` : ''}`}
+              href={`/dashboard/leaks/claims${claimsOffset ? `?m=${claimsOffset}` : ''}`}
               className="inline-flex items-center gap-1.5 rounded-xl bg-gold/12 px-3 py-1.5 text-sm font-semibold text-gold ring-1 ring-gold/30 hover:bg-gold/20"
             >
               <FileCheck2 className="h-4 w-4" aria-hidden="true" />
               {t('claims.open')}
             </Link>
           ) : null}
-          {monthOffset > -24 ? (
+          {!viewMode && monthOffset > -24 ? (
             <Link href={`/dashboard/leaks/breakdown?m=${monthOffset - 1}`} className={navLink}>
               <ArrowRight className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
               {t('breakdown.prevMonth')}
             </Link>
           ) : null}
-          {monthOffset < 0 ? (
+          {!viewMode && monthOffset < 0 ? (
             <>
               <Link href={`/dashboard/leaks/breakdown?m=${monthOffset + 1}`} className={navLink}>
                 {t('breakdown.nextMonth')}
@@ -147,7 +203,7 @@ export default async function LeakBreakdownPage({
                     return (
                       <li
                         key={l.discrepancyId}
-                        className={`flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${l.countsAsLeak ? '' : 'opacity-70'}`}
+                        className={`flex flex-col gap-1 px-4 ${compact ? 'py-1.5' : 'py-3'} sm:flex-row sm:items-center sm:justify-between ${l.countsAsLeak ? '' : 'opacity-70'}`}
                       >
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
