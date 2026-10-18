@@ -160,12 +160,12 @@ export function InvoicePoCompareViewer({ data, lines, invoiceScan, onClose }: Pr
               <div className="text-sm font-bold text-ink flex items-center gap-2 flex-wrap">
                 <span>{t('compare.title')}</span>
                 <span className="font-mono tabular-nums text-muted">{data.poNumber}</span>
-                <span className="text-subtle">↔</span>
+                <span className="text-muted">↔</span>
                 <span className="font-mono tabular-nums text-muted">{data.invoiceNumber}</span>
               </div>
               <div className="text-xs text-muted flex items-center gap-2 flex-wrap">
                 <span>{mockText(data.supplierName, locale)}</span>
-                <span className="text-subtle">·</span>
+                <span className="text-muted">·</span>
                 <DiffStatBadge stats={stats} />
               </div>
             </div>
@@ -219,7 +219,7 @@ export function InvoicePoCompareViewer({ data, lines, invoiceScan, onClose }: Pr
           {/* Diff panel */}
           <aside className="w-80 shrink-0 border-e border-line bg-surface overflow-y-auto hidden xl:flex flex-col">
             <div className="px-5 py-4 border-b border-line">
-              <div className="text-xs uppercase tracking-wider text-subtle font-semibold mb-1">
+              <div className="text-xs uppercase tracking-wider text-muted font-semibold mb-1">
                 {t('compare.analysis')}
               </div>
               <div className="text-xs text-muted">{t('compare.analysisHint')}</div>
@@ -630,7 +630,7 @@ function DiffCell({
 }) {
   return (
     <div className={`rounded-lg px-2 py-1.5 ${emphasize ? 'bg-warn/8 border border-warn/25' : 'bg-surface border border-line'}`}>
-      <div className="text-[9px] uppercase tracking-wider text-subtle font-semibold">
+      <div className="text-[9px] uppercase tracking-wider text-muted font-semibold">
         {label}
       </div>
       {qty !== null ? (
@@ -638,7 +638,7 @@ function DiffCell({
           {qty} <span className="text-[10px] font-normal text-muted">{unit}</span>
         </div>
       ) : (
-        <div className="text-subtle italic text-xs">{missingLabel}</div>
+        <div className="text-muted italic text-xs">{missingLabel}</div>
       )}
       {price !== null && qty !== null ? (
         <div className="text-[9px] text-muted font-mono tabular-nums">× ₪{price.toFixed(2)}</div>

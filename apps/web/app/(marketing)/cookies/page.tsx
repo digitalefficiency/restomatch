@@ -11,7 +11,7 @@ export async function generateMetadata(): Promise<Metadata> {
     title: t('legal.cookies.metaTitle'),
     description: t('legal.cookies.metaDescription'),
     metadataBase,
-    alternates: alternatesFor('/cookies'),
+    alternates: alternatesFor('/cookies', t.locale),
   };
 }
 
@@ -40,7 +40,7 @@ export default async function CookiePolicyPage() {
         <LegalClause>{t('legal.cookies.s2.c1')}</LegalClause>
         <div className="overflow-x-auto rounded-xl border border-line bg-surface">
           <table className="w-full text-start text-sm">
-            <thead className="border-b border-line bg-surface-2 font-mono text-xs uppercase tracking-wider text-subtle">
+            <thead className="border-b border-line bg-surface-2 font-mono text-xs uppercase tracking-wider text-muted">
               <tr>
                 <th className="px-4 py-2.5 text-start font-medium">{t('legal.cookies.s2.table.cookie')}</th>
                 <th className="px-4 py-2.5 text-start font-medium">{t('legal.cookies.s2.table.purpose')}</th>
@@ -54,7 +54,7 @@ export default async function CookiePolicyPage() {
                     {c.name ?? t('legal.cookies.s2.analyticsName')}
                   </td>
                   <td className="px-4 py-2.5 text-muted">{t(`legal.cookies.s2.purpose.${c.id}`)}</td>
-                  <td className="px-4 py-2.5 text-subtle">{t(`legal.cookies.s2.category.${c.category}`)}</td>
+                  <td className="px-4 py-2.5 text-muted">{t(`legal.cookies.s2.category.${c.category}`)}</td>
                 </tr>
               ))}
             </tbody>

@@ -52,7 +52,7 @@ export async function LegalShell({
       <div className="mb-2 h-0.5 w-12 rounded-full flow-stream" aria-hidden="true" />
       <h1 className="text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">{title}</h1>
       {intro ? <p className="mt-4 text-lg leading-relaxed text-muted">{intro}</p> : null}
-      <p className="mt-3 font-mono text-xs tabular-nums text-subtle">
+      <p className="mt-3 font-mono text-xs tabular-nums text-muted">
         {t('legal.shell.lastUpdated', { date: lastUpdated ?? t('legal.shell.notSet') })} · {tag}
       </p>
 
@@ -60,7 +60,7 @@ export async function LegalShell({
         {children}
       </div>
 
-      <div className="mt-12 border-t border-line pt-6 text-sm text-subtle">
+      <div className="mt-12 border-t border-line pt-6 text-sm text-muted">
         {t('legal.shell.related')}{' '}
         <Link href="/privacy" className="text-muted underline hover:text-ink">
           {t('legal.shell.linkPrivacy')}

@@ -35,7 +35,7 @@ import { MarketingShell } from './(marketing)/_components/MarketingShell';
 import { RoiCalculator } from './(marketing)/_components/RoiCalculator';
 import { LeadForm } from './(marketing)/_components/LeadForm';
 import { HeroMatch } from './(marketing)/_components/HeroMatch';
-import { SITE_URL, alternatesFor, metadataBase } from './(marketing)/_components/seo';
+import { SITE_URL, metadataBase } from './(marketing)/_components/seo';
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getT(landing);
@@ -44,9 +44,8 @@ export async function generateMetadata(): Promise<Metadata> {
     description: t('meta.description'),
     metadataBase,
     // Next's resolver collapses `/?lang=en` to the bare origin on the root
-    // route, so the root's hreflang <link>s are rendered in the page (React
-    // hoists them into <head>) — canonical stays here.
-    alternates: { canonical: alternatesFor('/').canonical },
+    // route, so the root's canonical + hreflang <link>s are rendered in the
+    // page instead (React hoists them into <head>).
     openGraph: { title: t('meta.title'), description: t('meta.description'), url: '/' },
     twitter: { title: t('meta.title'), description: t('meta.description') },
   };
@@ -152,6 +151,7 @@ export default async function Home() {
 
   return (
     <MarketingShell>
+      <link rel="canonical" href={locale === 'en' ? `${SITE_URL}/?lang=en` : `${SITE_URL}/`} />
       <link rel="alternate" hrefLang="he" href={`${SITE_URL}/`} />
       <link rel="alternate" hrefLang="en" href={`${SITE_URL}/?lang=en`} />
       <link rel="alternate" hrefLang="x-default" href={`${SITE_URL}/`} />
@@ -263,7 +263,7 @@ export default async function Home() {
             </span>{' '}
             {t('problem.mathB')}
           </p>
-          <p className="mx-auto mt-2 max-w-2xl text-xs leading-relaxed text-subtle">{t('problem.mathNote')}</p>
+          <p className="mx-auto mt-2 max-w-2xl text-xs leading-relaxed text-muted">{t('problem.mathNote')}</p>
         </div>
       </section>
 
@@ -287,7 +287,7 @@ export default async function Home() {
                 <span className="relative mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-primary/30 bg-bg text-primary shadow-glow-primary">
                   <Icon className="h-6 w-6" aria-hidden="true" />
                 </span>
-                <p className="mt-5 text-xs font-semibold tabular-nums text-subtle">
+                <p className="mt-5 text-xs font-semibold tabular-nums text-muted">
                   {t('how.step', { n: i + 1 })}
                 </p>
                 <h3 className="mt-1 text-lg font-bold text-ink">{title}</h3>
@@ -340,7 +340,7 @@ export default async function Home() {
               <div className="rounded-[2rem] border border-line bg-bg p-3 shadow-card">
                 <div className="mx-auto mb-3 h-1 w-16 rounded-full bg-line" />
                 <div className="rounded-2xl border border-line bg-surface p-3" dir="rtl" lang="he">
-                  <p className="font-mono text-[10px] uppercase tracking-wider text-subtle">INVOICE · 4471</p>
+                  <p className="font-mono text-[10px] uppercase tracking-wider text-muted">INVOICE · 4471</p>
                   <p className="mt-1 text-sm font-semibold text-muted">{'חזה עוף טרי 30 ק״ג'}</p>
                 </div>
                 <div className="my-2 flex justify-center text-primary">
@@ -369,8 +369,9 @@ export default async function Home() {
               {(
                 [
                   { rule: t('features.approvals.r1'), out: t('features.approvals.o1'), tone: 'text-danger' },
-                  { rule: t('features.approvals.r2'), out: t('features.approvals.o2'), tone: 'text-warn' },
-                  { rule: t('features.approvals.r3'), out: t('features.approvals.o3'), tone: 'text-primary' },
+                  { rule: t('features.approvals.r2'), out: t('features.approvals.o2'), tone: 'text-danger' },
+                  { rule: t('features.approvals.r3'), out: t('features.approvals.o3'), tone: 'text-warn' },
+                  { rule: t('features.approvals.r4'), out: t('features.approvals.o4'), tone: 'text-primary' },
                 ] as const
               ).map((r) => (
                 <li key={r.rule} className="flex items-center justify-between gap-3 rounded-lg border border-line bg-bg/60 px-3 py-2">
@@ -382,7 +383,7 @@ export default async function Home() {
           </FeatureCard>
           {/* Leak detective */}
           <FeatureCard icon={ScanSearch} title={t('features.detective.title')} body={t('features.detective.body')}>
-            <div aria-hidden="true" className="grid grid-cols-[auto_repeat(6,minmax(0,1fr))] items-center gap-1.5 text-[10px] text-subtle">
+            <div aria-hidden="true" className="grid grid-cols-[auto_repeat(6,minmax(0,1fr))] items-center gap-1.5 text-[10px] text-muted">
               {(
                 [
                   [t('features.heat.rowA'), [0, 1, 3, 4, 2, 1]],
@@ -502,7 +503,7 @@ export default async function Home() {
               <p className="text-sm font-semibold text-gold">{t('pricing.fromLabel').trim()}</p>
               <p className="mt-2 flex items-baseline gap-1.5">
                 <span className="font-mono text-4xl font-extrabold tabular-nums text-ink">{ils(basicIls)}</span>
-                <span className="text-sm text-subtle">{t('pricing.perMonth')}</span>
+                <span className="text-sm text-muted">{t('pricing.perMonth')}</span>
               </p>
               <p className="mt-3 text-sm leading-relaxed text-muted">{t('pricing.paidBody')}</p>
             </div>
@@ -525,7 +526,7 @@ export default async function Home() {
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 text-start text-base font-semibold text-ink transition-colors hover:bg-surface-2 focus:outline-none focus-visible:bg-surface-2 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/60 [&::-webkit-details-marker]:hidden">
                   {f.q}
                   <ChevronDown
-                    className="h-4 w-4 shrink-0 text-subtle transition-transform group-open:rotate-180 motion-reduce:transition-none"
+                    className="h-4 w-4 shrink-0 text-muted transition-transform group-open:rotate-180 motion-reduce:transition-none"
                     aria-hidden="true"
                   />
                 </summary>

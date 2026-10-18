@@ -1,9 +1,9 @@
 'use client';
 
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { gsap } from 'gsap';
 import { useGSAP } from '@gsap/react';
-import { Check, ClipboardList, FileText, PackageCheck, RotateCcw, TriangleAlert } from 'lucide-react';
+import { Check, ClipboardList, FileText, PackageCheck, Pause, Play, RotateCcw, TriangleAlert } from 'lucide-react';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { landing } from '@/lib/i18n/messages/landing';
 import { formatIls } from '@/lib/money';
@@ -56,6 +56,10 @@ export function HeroMatch() {
   const locale = useLocale();
   const root = useRef<HTMLDivElement>(null);
   const tl = useRef<gsap.core.Timeline | null>(null);
+  // WCAG 2.2.2: the loop runs > 5 s, so it must be pausable. `animating` also
+  // hides the controls when the timeline never starts (reduced motion / no JS).
+  const [animating, setAnimating] = useState(false);
+  const [paused, setPaused] = useState(false);
 
   useGSAP(
     () => {
@@ -97,8 +101,11 @@ export function HeroMatch() {
             '<0.1',
           );
         tl.current = timeline;
+        setAnimating(true);
+        setPaused(false);
         return () => {
           tl.current = null;
+          setAnimating(false);
         };
       });
       return () => mm.revert();
@@ -117,7 +124,7 @@ export function HeroMatch() {
       <div aria-hidden="true" className="glow-primary-blob pointer-events-none absolute -inset-10 rounded-full blur-3xl" />
       <div
         role="img"
-        aria-label={t('visual.label')}
+        aria-label={t('visual.labelFull', { amount: formatIls(TOTAL, { locale }) })}
         className="relative overflow-hidden rounded-3xl border border-line bg-surface/90 shadow-card backdrop-blur"
       >
         <span aria-hidden="true" className="absolute inset-x-0 top-0 h-px flow-stream" />
@@ -150,7 +157,7 @@ export function HeroMatch() {
         {/* Invoice header */}
         <div className="flex items-baseline justify-between gap-3 px-4 pt-4 sm:px-5">
           <p className="text-sm font-bold text-ink">{t('visual.invoiceTitle')}</p>
-          <p className="truncate text-xs text-subtle">{t('visual.supplier')}</p>
+          <p className="truncate text-xs text-muted">{t('visual.supplier')}</p>
         </div>
 
         {/* Lines */}
@@ -160,7 +167,7 @@ export function HeroMatch() {
             aria-hidden="true"
             className="pointer-events-none absolute inset-x-2 top-0 rounded-xl border border-primary/40 bg-primary/[0.06] opacity-0 shadow-glow-primary sm:inset-x-3"
           />
-          <div className="grid grid-cols-[minmax(0,1.6fr)_repeat(3,minmax(0,1fr))_auto] items-center gap-x-2 px-2 pb-1.5 text-[11px] text-subtle ltr:font-mono ltr:text-[10px] ltr:uppercase ltr:tracking-wider sm:text-xs ltr:sm:text-[11px]">
+          <div className="grid grid-cols-[minmax(0,1.6fr)_repeat(3,minmax(0,1fr))_auto] items-center gap-x-2 px-2 pb-1.5 text-[11px] text-muted ltr:font-mono ltr:text-[10px] ltr:uppercase ltr:tracking-wider sm:text-xs ltr:sm:text-[11px]">
             <span>{t('visual.colItem')}</span>
             <span className="text-center">{t('visual.colOrdered')}</span>
             <span className="text-center">{t('visual.colReceived')}</span>
@@ -234,18 +241,39 @@ export function HeroMatch() {
         </div>
       </div>
 
-      <figcaption className="relative mt-3 flex items-center justify-between px-1 text-[11px] text-subtle">
+      <figcaption className="relative mt-3 flex items-center justify-between px-1 text-[11px] text-muted">
         <span className="rounded-full border border-line bg-surface-2/70 px-2 py-0.5 font-medium">
           {t('visual.illustrative')}
         </span>
-        <button
-          type="button"
-          onClick={() => tl.current?.restart()}
-          className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-subtle transition-colors hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 motion-reduce:hidden"
-        >
-          <RotateCcw className="h-3 w-3" aria-hidden="true" />
-          {t('visual.replay')}
-        </button>
+        {animating ? (
+          <span className="flex items-center gap-1">
+            <button
+              type="button"
+              aria-pressed={paused}
+              onClick={() => {
+                const timeline = tl.current;
+                if (!timeline) return;
+                timeline.paused(!paused);
+                setPaused(!paused);
+              }}
+              className="inline-flex min-h-8 items-center gap-1 rounded-md px-2 py-1 text-muted transition-colors hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+            >
+              {paused ? <Play className="h-3 w-3" aria-hidden="true" /> : <Pause className="h-3 w-3" aria-hidden="true" />}
+              {paused ? t('visual.play') : t('visual.pause')}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                tl.current?.restart();
+                setPaused(false);
+              }}
+              className="inline-flex min-h-8 items-center gap-1 rounded-md px-2 py-1 text-muted transition-colors hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+            >
+              <RotateCcw className="h-3 w-3" aria-hidden="true" />
+              {t('visual.replay')}
+            </button>
+          </span>
+        ) : null}
       </figcaption>
     </figure>
   );

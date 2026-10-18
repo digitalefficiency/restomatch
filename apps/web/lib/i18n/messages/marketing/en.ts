@@ -70,6 +70,7 @@ export const en: Shape<typeof he> = {
     breakevenBody: 'The Pro plan ({price}/month) pays for itself if it catches {pct} of your purchasing.',
     breakevenRatio: "That's just {ratio} of the leak you estimated.",
     breakevenOver: "At this estimate the leak is below the subscription price — you may already run a tight ship, and we'll tell you so honestly.",
+    srSummary: 'Estimated leak: {month} a month, {year} a year.',
     disclaimer: "Illustrative calculator only. We don't promise savings — your real number shows up after two weeks of scanning.",
   },
   cookie: {
@@ -81,10 +82,10 @@ export const en: Shape<typeof he> = {
   },
   pricing: {
     metaTitle: 'Pricing · RestoMatch',
-    metaDescription: 'RestoMatch plans — from a free trial to restaurant groups. Cancel anytime.',
+    metaDescription: 'RestoMatch plans — from a free trial to restaurant groups.',
     eyebrow: 'Pricing',
     title: 'A plan for every kitchen',
-    lead: 'Start free, and upgrade once you see how much RestoMatch stops. No commitment, cancel anytime.',
+    lead: 'Start on the free trial plan — no credit card — and upgrade once you see how much RestoMatch stops.',
     recommended: 'Recommended',
     free: 'Free',
     perMonth: '/ month',
@@ -103,7 +104,7 @@ export const en: Shape<typeof he> = {
     footnoteLink: 'Talk to us',
     anchorTitle: 'How we priced it',
     anchorBody:
-      "The subscription is priced as a small slice of the leak it's meant to catch. If the pilot doesn't find enough to justify the price, we'll tell you — and you won't pay for something that doesn't work.",
+      "The subscription is priced as a small slice of the leak it's meant to catch. If the pilot doesn't find enough to justify the price, we'll tell you so honestly.",
     plans: {
       trial: { name: 'Trial', tagline: 'Every feature at a limited volume — so you can see the value' },
       basic: { name: 'Basic', tagline: 'For a single restaurant that wants to stop leaks' },

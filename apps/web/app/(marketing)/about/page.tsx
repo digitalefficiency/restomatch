@@ -11,7 +11,7 @@ export async function generateMetadata(): Promise<Metadata> {
     title: t('about.metaTitle'),
     description: t('about.metaDescription'),
     metadataBase,
-    alternates: alternatesFor('/about'),
+    alternates: alternatesFor('/about', t.locale),
     openGraph: { title: t('about.metaTitle'), description: t('about.metaDescription'), url: '/about' },
   };
 }
