@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowLeft, ArrowRight, ExternalLink, FileText, Hourglass, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ExternalLink, FileCheck2, FileText, Hourglass, ShieldCheck } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
 import { formatDate, formatPercent } from '@/lib/i18n/format';
@@ -63,7 +63,16 @@ export default async function LeakBreakdownPage({
             <p className="text-sm text-muted">{t('breakdown.ofSpend', { pct: formatPercent(hero.leakPct, locale, 1) })}</p>
           ) : null}
         </div>
-        <nav className="flex items-center gap-2" aria-label={month}>
+        <nav className="flex flex-wrap items-center gap-2" aria-label={month}>
+          {leaking.length > 0 ? (
+            <Link
+              href={`/dashboard/leaks/claims${monthOffset ? `?m=${monthOffset}` : ''}`}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-gold/12 px-3 py-1.5 text-sm font-semibold text-gold ring-1 ring-gold/30 hover:bg-gold/20"
+            >
+              <FileCheck2 className="h-4 w-4" aria-hidden="true" />
+              {t('claims.open')}
+            </Link>
+          ) : null}
           {monthOffset > -24 ? (
             <Link href={`/dashboard/leaks/breakdown?m=${monthOffset - 1}`} className={navLink}>
               <ArrowRight className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
