@@ -31,10 +31,21 @@ function errorKey(error: string) {
       return 'login.errors.rate' as const;
     case 'EmailSignin':
     case 'EmailSignInError':
+    // sendVerificationRequest throwing (the per-mailbox throttle) surfaces as
+    // Auth.js "Configuration" — the only server-side failure of that send.
+    case 'Configuration':
       return 'login.errors.emailSignin' as const;
     default:
       return 'login.errors.generic' as const;
   }
+}
+
+/** Back to /login with an error, keeping callbackUrl (e.g. an invite token) + locked email. */
+function back(code: string, redirectTo: string, lockedEmail: string | undefined): string {
+  const qs = new URLSearchParams({ error: code });
+  if (redirectTo !== '/dashboard') qs.set('callbackUrl', redirectTo);
+  if (lockedEmail) qs.set('email', lockedEmail);
+  return `/login?${qs.toString()}`;
 }
 
 export default async function LoginPage({ searchParams }: PageProps) {
@@ -45,13 +56,6 @@ export default async function LoginPage({ searchParams }: PageProps) {
   // When arriving from an invite link, the address is fixed (acceptInvite is
   // bound to it) — prefill + lock it so an alias/typo can't dead-end the accept.
   const lockedEmail = invitedEmail?.trim() || undefined;
-  // Keep callbackUrl (e.g. the invite token) across an error round-trip.
-  const back = (code: string) => {
-    const qs = new URLSearchParams({ error: code });
-    if (redirectTo !== '/dashboard') qs.set('callbackUrl', redirectTo);
-    if (lockedEmail) qs.set('email', lockedEmail);
-    return `/login?${qs.toString()}`;
-  };
 
   // Password login (PRIMARY). signIn() handles CSRF internally — never hand-roll
   // a POST to the callback. On bad credentials Auth.js throws CredentialsSignin;
@@ -61,7 +65,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
     const email = String(formData.get('email') ?? '').trim();
     const password = String(formData.get('password') ?? '');
     const rememberMe = formData.get('rememberMe') === 'on';
-    if (!email || !password) redirect(back('CredentialsSignin'));
+    if (!email || !password) redirect(back('CredentialsSignin', redirectTo, lockedEmail));
     // The email+IP login throttle lives INSIDE the Credentials authorize()
     // callback (auth.ts) so it is enforced on EVERY entry point — including a
     // script POSTing straight to /api/auth/callback/credentials. Enforcing it
@@ -70,7 +74,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
     try {
       await signIn('credentials', { email, password, rememberMe, redirectTo });
     } catch (err) {
-      if (err instanceof AuthError) redirect(back('CredentialsSignin'));
+      if (err instanceof AuthError) redirect(back('CredentialsSignin', redirectTo, lockedEmail));
       throw err; // re-throw the success NEXT_REDIRECT
     }
   }
@@ -85,7 +89,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
     try {
       await signIn('nodemailer', { email, redirectTo });
     } catch (err) {
-      if (err instanceof AuthError) redirect(back('EmailSignin'));
+      if (err instanceof AuthError) redirect(back('EmailSignin', redirectTo, lockedEmail));
       throw err; // the success NEXT_REDIRECT → /login/check-email
     }
   }

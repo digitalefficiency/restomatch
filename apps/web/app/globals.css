@@ -19,7 +19,8 @@
   }
 
   html {
-    direction: rtl;
+    /* Direction comes from <html dir> (root layout, per rm_locale). A CSS
+       `direction: rtl` here overrode dir="ltr" and laid English out RTL. */
     /* Near-black green-ink canvas — the "command center for money" identity.
        A faint money-green aura up top, fading into the dark. */
     background-color: #0e1512;

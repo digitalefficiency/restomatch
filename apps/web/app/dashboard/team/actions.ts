@@ -55,6 +55,13 @@ async function deliverInvite(res: {
     locale: lang,
   });
   await sendEmail({ to: res.email, subject, html, text });
+  if (!isEmailConfigured()) {
+    // Dev/preview: print the link (like the reset flow) so it is testable.
+    console.log('\n──────── INVITE LINK ────────');
+    console.log(`to: ${res.email}`);
+    console.log(`url: ${url}`);
+    console.log('─────────────────────────────\n');
+  }
   return url;
 }
 
