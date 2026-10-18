@@ -5,13 +5,20 @@ const config: NextConfig = {
   reactStrictMode: true,
   // Don't advertise the framework/version (fingerprinting aid) — D1.1.
   poweredByHeader: false,
-  // The tRPC AppRouter type is too large for `tsc` to fully infer at build time
-  // (deep router/procedure tree), so type-check intermittently drops routers
-  // like `suppliers` from the client proxy type even though they resolve fine at
-  // runtime. Compilation (swc) still runs and catches real syntax/import errors;
-  // we skip the over-strict type/lint gate at build (CI already excludes it).
-  typescript: { ignoreBuildErrors: true },
+  // `next build` type-checks for real. The old `ignoreBuildErrors` escape hatch
+  // (an "AppRouter inference drops routers" report) did not reproduce on a clean
+  // checkout — 925k instantiations, ~20s, 0 errors across repeated runs; the
+  // likely source was the iCloud-evicted ~/Desktop replica with dataless files.
+  // test/appRouterShape.test.ts pins the inferred router keys so a regression
+  // fails tsc loudly instead of silently.
+  typescript: { ignoreBuildErrors: false },
+  // Lint runs as its own step (`pnpm lint`, eslint.config.mjs), not inside build.
   eslint: { ignoreDuringBuilds: true },
+  // Next streams generateMetadata into <body> for most user agents. Crawlers and
+  // link-unfurlers listed here get blocking metadata in <head> instead, so the
+  // landing/showcase titles, descriptions and OG tags are seen (S6 SEO ask).
+  htmlLimitedBots:
+    /Googlebot|Google-InspectionTool|Bingbot|Slurp|DuckDuckBot|Baiduspider|YandexBot|Applebot|facebookexternalhit|Twitterbot|LinkedInBot|Slackbot|WhatsApp|TelegramBot|Discordbot|Pinterest/i,
   transpilePackages: [
     '@restomatch/api',
     '@restomatch/charts',

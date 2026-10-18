@@ -1,78 +1,116 @@
-import { testDbUrl } from '@restomatch/db';
 import { expect, test } from '@playwright/test';
-import { readFile, unlink } from 'node:fs/promises';
-import { createDb, memberships, restaurants, users } from '@restomatch/db';
-import { MAGIC_LINK_FILE } from '../playwright.config';
+import { authenticator } from 'otplib';
+import { e2eSql, ensurePasswordUser, loginViaMagicLink } from './helpers';
 
-const TEST_DB_URL =
-  testDbUrl();
+/**
+ * Auth flows as they exist after the security stack (password primary, TOTP
+ * 2FA, magic link as backup). Field selectors use `name=` attributes, not the
+ * visible (translatable) labels.
+ */
+const PASSWORD = 'E2e-Correct-Horse-9!';
 
-test.beforeEach(async () => {
-  const db = createDb(TEST_DB_URL);
-  await db.delete(memberships);
-  await db.delete(restaurants);
-  await db.delete(users);
-  try {
-    await unlink(MAGIC_LINK_FILE);
-  } catch {
-    /* file may not exist */
-  }
+test.describe('password login', () => {
+  test.beforeAll(async () => {
+    await ensurePasswordUser({ email: 'e2e-password@restomatch.test', password: PASSWORD });
+  });
+
+  test('correct password → dashboard', async ({ page }) => {
+    await page.goto('/login');
+    const form = page.locator('form', { has: page.locator('input[name="password"]') });
+    await form.locator('input[name="email"]').fill('e2e-password@restomatch.test');
+    await form.locator('input[name="password"]').fill(PASSWORD);
+    await form.locator('button[type="submit"]').click();
+    await expect(page).toHaveURL(/\/dashboard/);
+    await expect(page.locator('header')).toContainText('e2e-password@restomatch.test');
+  });
+
+  test('wrong password → uniform error, stays on /login', async ({ page }) => {
+    await page.goto('/login');
+    const form = page.locator('form', { has: page.locator('input[name="password"]') });
+    await form.locator('input[name="email"]').fill('e2e-password@restomatch.test');
+    await form.locator('input[name="password"]').fill('definitely-wrong');
+    await form.locator('button[type="submit"]').click();
+    await expect(page).toHaveURL(/\/login\?error=CredentialsSignin/);
+    await expect(page.getByRole('alert')).toBeVisible();
+  });
+
+  test('unauthenticated dashboard visit → /login', async ({ page }) => {
+    await page.goto('/dashboard/approvals');
+    await expect(page).toHaveURL(/\/login/);
+  });
 });
 
-async function waitForMagicLink(): Promise<string> {
-  for (let i = 0; i < 30; i += 1) {
+test.describe('two-factor (TOTP)', () => {
+  const secret = authenticator.generateSecret();
+
+  test.beforeAll(async () => {
+    await ensurePasswordUser({ email: 'e2e-2fa@restomatch.test', password: PASSWORD, totpSecret: secret });
+  });
+
+  test('password → /login/2fa gate → code → dashboard', async ({ page }) => {
+    await page.goto('/login');
+    const form = page.locator('form', { has: page.locator('input[name="password"]') });
+    await form.locator('input[name="email"]').fill('e2e-2fa@restomatch.test');
+    await form.locator('input[name="password"]').fill(PASSWORD);
+    await form.locator('button[type="submit"]').click();
+    // The 2FA screen renders, but after the password server action the address
+    // bar can keep the action's redirect target (/dashboard) — a Next quirk when
+    // middleware redirects the RSC fetch (reported to S4). Assert on the form.
+    await expect(page.locator('input[name="code"]')).toBeVisible();
+
+    // The pending session must not reach the app before the second factor.
+    await page.goto('/dashboard');
+    await expect(page).toHaveURL(/\/login\/2fa/);
+    await expect(page.locator('input[name="code"]')).toBeVisible();
+
+    await page.locator('input[name="code"]').fill(authenticator.generate(secret));
+    await page.locator('form', { has: page.locator('input[name="code"]') }).locator('button[type="submit"]').first().click();
+    await expect(page).toHaveURL(/\/dashboard/);
+    await expect(page.locator('input[name="code"]')).toHaveCount(0);
+    await expect(page.locator('header')).toContainText('e2e-2fa@restomatch.test');
+  });
+
+  test('wrong code keeps the gate closed', async ({ page }) => {
+    await page.goto('/login');
+    const form = page.locator('form', { has: page.locator('input[name="password"]') });
+    await form.locator('input[name="email"]').fill('e2e-2fa@restomatch.test');
+    await form.locator('input[name="password"]').fill(PASSWORD);
+    await form.locator('button[type="submit"]').click();
+    // The 2FA screen renders, but after the password server action the address
+    // bar can keep the action's redirect target (/dashboard) — a Next quirk when
+    // middleware redirects the RSC fetch (reported to S4). Assert on the form.
+    await expect(page.locator('input[name="code"]')).toBeVisible();
+    await page.locator('input[name="code"]').fill('000000');
+    await page.locator('form', { has: page.locator('input[name="code"]') }).locator('button[type="submit"]').first().click();
+    await expect(page).toHaveURL(/\/login\/2fa\?error=/);
+    await expect(page.getByRole('alert')).toBeVisible();
+    // Still gated: the app is unreachable without the second factor.
+    await page.goto('/dashboard/approvals');
+    await expect(page).toHaveURL(/\/login\/2fa/);
+  });
+});
+
+test.describe('magic link (backup) + onboarding', () => {
+  const email = `e2e-new-${Date.now()}@restomatch.test`;
+
+  test.afterAll(async () => {
+    const sql = e2eSql();
     try {
-      const raw = await readFile(MAGIC_LINK_FILE, 'utf8');
-      const parsed = JSON.parse(raw) as { url: string };
-      return parsed.url;
-    } catch {
-      await new Promise((r) => setTimeout(r, 500));
+      await sql`delete from restaurants where id in (
+        select restaurant_id from memberships m join users u on u.id = m.user_id where u.email = ${email})`;
+      await sql`delete from users where email = ${email}`;
+    } finally {
+      await sql.end();
     }
-  }
-  throw new Error('magic link file did not appear within 15s');
-}
+  });
 
-test('signup → magic link → onboarding → dashboard', async ({ page }) => {
-  await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'RestoMatch' })).toBeVisible();
-
-  await page.getByRole('link', { name: 'כניסה למערכת' }).click();
-  await expect(page).toHaveURL(/\/login/);
-
-  await page.getByLabel('כתובת מייל').fill('e2e-owner@restomatch.test');
-  await page.getByRole('button', { name: 'שלח לי קישור התחברות' }).click();
-
-  // Auth.js redirects to its built-in /api/auth/verify-request page
-  // after sending the magic link. We don't assert on the exact URL
-  // because the verifyRequest page config doesn't always override it.
-  const magicUrl = await waitForMagicLink();
-  await page.goto(magicUrl);
-
-  await expect(page).toHaveURL(/\/onboarding/, { timeout: 10_000 });
-
-  await page.getByLabel(/שם המסעדה/).fill('כפר הזיתים E2E');
-  await page.getByRole('button', { name: /צור מסעדה והמשך/ }).click();
-
-  await expect(page).toHaveURL(/\/dashboard/, { timeout: 10_000 });
-  await expect(page.getByRole('heading', { name: 'כפר הזיתים E2E' })).toBeVisible();
-  await expect(page.getByText('בעלים')).toBeVisible();
-});
-
-test('logged-in user redirects from /login to /dashboard via session check', async ({
-  page,
-}) => {
-  // Walk through signup to establish session
-  await page.goto('/login');
-  await page.getByLabel('כתובת מייל').fill('e2e-redirect@restomatch.test');
-  await page.getByRole('button', { name: 'שלח לי קישור התחברות' }).click();
-  const magicUrl = await waitForMagicLink();
-  await page.goto(magicUrl);
-  await expect(page).toHaveURL(/\/onboarding/, { timeout: 10_000 });
-  await page.getByLabel(/שם המסעדה/).fill('Redirect Restaurant');
-  await page.getByRole('button', { name: /צור מסעדה והמשך/ }).click();
-  await expect(page).toHaveURL(/\/dashboard/, { timeout: 10_000 });
-
-  // Now visit home — CTA should say "לדשבורד"
-  await page.goto('/');
-  await expect(page.getByRole('link', { name: 'לדשבורד' })).toBeVisible();
+  test('new user: magic link → onboarding → own restaurant dashboard', async ({ page }) => {
+    await loginViaMagicLink(page, email, '/dashboard');
+    await expect(page).toHaveURL(/\/onboarding/);
+    const form = page.locator('form', { has: page.locator('input#name') });
+    await form.locator('input#name').fill('מסעדת E2E');
+    await form.locator('button[type="submit"]').click();
+    await expect(page).toHaveURL(/\/dashboard/);
+    await expect(page.getByRole('banner')).toContainText('מסעדת E2E');
+  });
 });
