@@ -131,3 +131,11 @@ describe('PDF runs vs fontkit script detection', () => {
     expect(drawn('Top: ירקות השרון', 'ltr')).toBe('Top: ןורשה תוקרי');
   });
 });
+
+describe('bidi: numbers in RTL lines (refuter case)', () => {
+  it('keeps "amount · percent" in reading order after Hebrew', () => {
+    // Visual (left→right) of: ספק 1,234 ₪ · 1.6%  →  1.6% · ₪ 1,234 קפס
+    expect(visualOrder('ספק 1,234 ₪ · 1.6%', 'rtl')).toBe('1.6% · ₪ 1,234 קפס');
+    expect(visualOrder('INV 12 ספק', 'rtl')).toBe('קפס INV 12');
+  });
+});

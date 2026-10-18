@@ -29,7 +29,7 @@ const NEXT: Record<Status, Status[]> = {
   disputed: ['letter_sent', 'acknowledged', 'written_off'],
   written_off: ['claimed'],
 };
-const CREDITABLE: Status[] = ['claimed', 'letter_sent', 'acknowledged', 'disputed'];
+const CREDITABLE: Status[] = ['claimed', 'letter_sent', 'acknowledged', 'credited', 'disputed'];
 const CLOSED: Status[] = ['recovered', 'written_off'];
 const TONE: Record<Status, BadgeTone> = {
   claimed: 'neutral',
@@ -86,7 +86,7 @@ export function TrackerClient({ claims, suggestions }: { claims: Claim[]; sugges
   const creditable = useMemo(() => {
     const m = new Map<string, { supplierId: string; name: string; ids: string[]; owed: number }>();
     for (const c of claims) {
-      if (!c.supplierId || !CREDITABLE.includes(c.status)) continue;
+      if (!c.supplierId || !CREDITABLE.includes(c.status) || c.outstandingAgorot <= 0) continue;
       const g = m.get(c.supplierId) ?? {
         supplierId: c.supplierId,
         name: displayName(locale, c.supplierName, c.supplierNameEn) || '—',

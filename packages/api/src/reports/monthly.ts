@@ -195,6 +195,26 @@ export async function ensureMonthlyReport(
   return { id: row!.id, data, sentAt: row!.sentAt, created: !existing };
 }
 
+/**
+ * The report for a month as the owner received it: the frozen snapshot when
+ * the worker already generated that month, otherwise computed live (the
+ * current month, or a month generated before the flag was on). Read-only.
+ */
+export async function loadMonthlyReport(
+  db: Database,
+  restaurantId: string,
+  month: string,
+  opts: { now?: Date } = {},
+): Promise<{ data: MonthlyReportData; frozen: boolean }> {
+  const [row] = await db
+    .select({ snapshot: monthlyReports.snapshot })
+    .from(monthlyReports)
+    .where(and(eq(monthlyReports.restaurantId, restaurantId), eq(monthlyReports.month, `${month}-01`)))
+    .limit(1);
+  if (row) return { data: row.snapshot as unknown as MonthlyReportData, frozen: true };
+  return { data: await computeMonthlyReport(db, restaurantId, month, opts), frozen: false };
+}
+
 /* ───────────────────────────── vocabulary ───────────────────────────── */
 
 const ISSUE_LABELS: Record<ReportLocale, Record<string, string>> = {
@@ -416,8 +436,11 @@ export function monthlyReportWhatsApp(
   if (top) lines.push(`${c.topSupplier}: ${supplierLabel(top, locale)} (${f.ils(top.leakAgorot)})`);
   const first = data.nextActions[0];
   if (first) lines.push(`➜ ${nextActionText(first, locale)}`);
-  if (opts.reportUrl) lines.push(opts.reportUrl);
+  // Truncate the body, never the link (it goes last and must survive).
+  const tail = opts.reportUrl ? `\n${opts.reportUrl}` : '';
   let text = lines.join('\n');
-  if (text.length > WHATSAPP_MAX) text = `${text.slice(0, WHATSAPP_MAX - 1)}…`;
+  const room = WHATSAPP_MAX - tail.length;
+  if (text.length > room) text = `${text.slice(0, Math.max(0, room - 1))}…`;
+  text += tail;
   return text;
 }

@@ -38,7 +38,7 @@ export async function findOverdue(
   now: Date,
 ): Promise<{ claimIds: string[]; suppliers: OverdueSupplier[] }> {
   const res = await db.execute(sql`
-    SELECT c.id, COALESCE(s.name, '—') AS supplier_name, s.name_en AS supplier_name_en,
+    SELECT c.id, c.supplier_id, COALESCE(s.name, '—') AS supplier_name, s.name_en AS supplier_name_en,
            GREATEST(0, c.amount_agorot - c.credited_agorot) AS outstanding,
            floor(extract(epoch FROM (${now.toISOString()}::timestamptz - COALESCE(c.letter_sent_at, c.claimed_at))) / 86400)::int AS waiting
     FROM recovery_claims c
@@ -53,9 +53,9 @@ export async function findOverdue(
   const rows = (Array.isArray(res) ? res : ((res as { rows?: unknown[] }).rows ?? [])) as Array<Record<string, unknown>>;
   const bySupplier = new Map<string, OverdueSupplier>();
   for (const r of rows) {
-    const key = String(r.supplier_name);
+    const key = String(r.supplier_id ?? r.supplier_name);
     const s = bySupplier.get(key) ?? {
-      supplierName: key,
+      supplierName: String(r.supplier_name),
       supplierNameEn: (r.supplier_name_en as string | null) ?? null,
       count: 0,
       outstandingAgorot: 0,

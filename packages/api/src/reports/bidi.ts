@@ -18,7 +18,8 @@ const isLatinOrDigit = (ch: string) => /[A-Za-z0-9À-ÿ]/.test(ch);
 const isJoiner = (ch: string) => /[.,:/%\-+'_@]/.test(ch);
 const MIRROR: Record<string, string> = { '(': ')', ')': '(', '[': ']', ']': '[', '{': '}', '}': '{', '<': '>', '>': '<' };
 
-type T = 'R' | 'L' | 'N';
+type T = 'R' | 'L' | 'EN' | 'N';
+const isDigit = (ch: string) => /[0-9]/.test(ch);
 
 export function visualOrder(text: string, dir: Dir): string {
   const chars = [...text.replace(/[‎‏‪-‮⁦-⁩]/g, '')];
@@ -31,19 +32,39 @@ export function visualOrder(text: string, dir: Dir): string {
     const nextL = types[i + 1] === 'L';
     if ((prevL && nextL) || (prevL && chars[i] === '%')) types[i] = 'L';
   }
-  // Resolve neutrals.
+  // RTL paragraphs: a number run (digits + joiners, no Latin letter) is a weak
+  // European number. UBA W7: it becomes L only after a Latin letter; N1: for
+  // neutral resolution it counts as R — so in "ספק 1,234 ₪ · 1.6%" the amount
+  // and the percent keep their reading order.
+  if (dir === 'rtl') {
+    let i = 0;
+    while (i < chars.length) {
+      if (types[i] !== 'L') { i++; continue; }
+      let j = i;
+      while (j < chars.length && types[j] === 'L') j++;
+      const run = chars.slice(i, j);
+      if (run.some(isDigit) && !run.some((ch) => /[A-Za-z\u00C0-\u00FF]/.test(ch))) {
+        let k = i - 1;
+        while (k >= 0 && types[k] !== 'R' && types[k] !== 'L') k--;
+        if (k < 0 || types[k] === 'R') for (let m = i; m < j; m++) types[m] = 'EN';
+      }
+      i = j;
+    }
+  }
+  // Resolve neutrals (EN counts as R).
+  const strong = (t: T): T => (t === 'EN' ? 'R' : t);
   const base: T = dir === 'rtl' ? 'R' : 'L';
   for (let i = 0; i < types.length; i++) {
     if (types[i] !== 'N') continue;
     let j = i;
     while (j < types.length && types[j] === 'N') j++;
-    const before = i === 0 ? base : types[i - 1]!;
-    const after = j === types.length ? base : types[j]!;
+    const before = i === 0 ? base : strong(types[i - 1]!);
+    const after = j === types.length ? base : strong(types[j]!);
     const t: T = before === after ? before : base;
     for (let k = i; k < j; k++) types[k] = t;
     i = j - 1;
   }
-  // Levels: RTL paragraph → R=1, L=2; LTR paragraph → L=0, R=1.
+  // Levels: RTL paragraph → R=1, L/EN=2; LTR paragraph → L=0, R=1.
   const levels = types.map((t) => (dir === 'rtl' ? (t === 'R' ? 1 : 2) : t === 'R' ? 1 : 0));
   const out = chars.map((ch, i) => (levels[i]! % 2 === 1 && MIRROR[ch] ? MIRROR[ch]! : ch));
   const max = Math.max(...levels);

@@ -51,23 +51,32 @@ const CLAIMABLE_FILTER = sql`d.severity IN ('warn','block')
  */
 export async function syncClaims(db: Database, restaurantId: string, actorId?: string | null): Promise<number> {
   const res = await db.execute(sql`
-    WITH cand AS (
+    WITH claimed AS (
+      -- Agorot already claimed per invoice: new claims only get what is left of the cap.
+      SELECT invoice_id, SUM(amount_agorot) AS agorot
+      FROM recovery_claims
+      WHERE restaurant_id = ${restaurantId} AND invoice_id IS NOT NULL
+      GROUP BY invoice_id
+    ),
+    cand AS (
       SELECT
         d.id AS discrepancy_id,
         i.id AS invoice_id,
         i.supplier_id,
         COALESCE(d.resolved_at, d.created_at) AS claimed_at,
         round(abs(d.delta_amount) * 100)::bigint AS raw_agorot,
-        round(COALESCE(i.total_incl_vat, 0) * 100)::bigint AS cap_agorot,
+        GREATEST(0, round(COALESCE(i.total_incl_vat, 0) * 100)::bigint - COALESCE(cl.agorot, 0)) AS cap_agorot,
         SUM(round(abs(d.delta_amount) * 100)::bigint) OVER (
           PARTITION BY i.id ORDER BY d.created_at, d.id
         ) AS cum_agorot
       FROM discrepancies d
       JOIN match_runs mr ON mr.id = d.match_run_id AND mr.restaurant_id = ${restaurantId}
       JOIN invoices i ON i.id = mr.invoice_id AND i.restaurant_id = ${restaurantId}
+      LEFT JOIN claimed cl ON cl.invoice_id = i.id
       WHERE d.restaurant_id = ${restaurantId}
         AND d.delta_amount IS NOT NULL
         AND ${CLAIMABLE_FILTER}
+        AND NOT EXISTS (SELECT 1 FROM recovery_claims rc WHERE rc.discrepancy_id = d.id)
     )
     INSERT INTO recovery_claims (restaurant_id, discrepancy_id, supplier_id, invoice_id, amount_agorot, claimed_at, created_by)
     SELECT ${restaurantId}, c.discrepancy_id, c.supplier_id, c.invoice_id,
@@ -124,6 +133,8 @@ export interface RecoveryClaimRow {
 export const OVERDUE_DAYS = 14;
 /** Do not chase the same claim more often than this. */
 export const REMIND_EVERY_DAYS = 7;
+/** Upper bound for a tracker read (totals are summed over these rows). */
+export const MAX_CLAIMS = 5000;
 
 export async function listClaims(
   db: Database,
@@ -131,7 +142,7 @@ export async function listClaims(
   opts: { status?: RecoveryStatus; supplierId?: string; now?: Date; limit?: number } = {},
 ): Promise<RecoveryClaimRow[]> {
   const now = opts.now ?? new Date();
-  const limit = Math.min(Math.max(opts.limit ?? 200, 1), 500);
+  const limit = Math.min(Math.max(opts.limit ?? 200, 1), MAX_CLAIMS);
   const res = await db.execute(sql`
     SELECT
       c.id, c.status, c.amount_agorot, c.credited_agorot, c.supplier_id, c.invoice_id,
@@ -258,7 +269,8 @@ export function summarize(claims: RecoveryClaimRow[]): RecoverySummary {
     sum.credited += c.creditedAgorot;
     sum.outstanding += c.outstandingAgorot;
     if (c.status === 'recovered') sum.recovered += c.creditedAgorot;
-    if (c.status === 'written_off') sum.writtenOff += Math.max(0, c.amountAgorot - c.creditedAgorot);
+    // Written off: the whole remainder; recovered short of the claim: the shortfall the team let go.
+    if (c.status === 'written_off' || c.status === 'recovered') sum.writtenOff += Math.max(0, c.amountAgorot - c.creditedAgorot);
     if (c.status === 'disputed') sum.disputed += c.outstandingAgorot;
     if (c.overdue) {
       sum.overdueCount += 1;
@@ -312,7 +324,7 @@ export async function computeRecoverySummary(
   restaurantId: string,
   now: Date = new Date(),
 ): Promise<RecoverySummary> {
-  return summarize(await listClaims(db, restaurantId, { now, limit: 500 }));
+  return summarize(await listClaims(db, restaurantId, { now, limit: MAX_CLAIMS }));
 }
 
 /**
@@ -355,12 +367,19 @@ export async function returnedInMonth(
   };
 }
 
-async function loadOwnedClaims(db: Database, restaurantId: string, ids: string[]) {
+/**
+ * Load claims of this restaurant, ROW-LOCKED (FOR UPDATE) when `lock` is set:
+ * concurrent credit notes / transitions on the same claim serialise inside the
+ * member transaction and the second one sees the first one's result.
+ */
+async function loadOwnedClaims(db: Database, restaurantId: string, ids: string[], lock = false) {
   if (ids.length === 0) return [];
-  const rows = await db
+  const q = db
     .select()
     .from(recoveryClaims)
-    .where(and(eq(recoveryClaims.restaurantId, restaurantId), inArray(recoveryClaims.id, ids)));
+    .where(and(eq(recoveryClaims.restaurantId, restaurantId), inArray(recoveryClaims.id, ids)))
+    .orderBy(recoveryClaims.id);
+  const rows = lock ? await q.for('update') : await q;
   if (rows.length !== new Set(ids).size) throw notFound('claim');
   return rows;
 }
@@ -371,7 +390,7 @@ export async function transitionClaim(
   restaurantId: string,
   input: { claimId: string; to: RecoveryStatus; note?: string | null; actorId?: string | null; at?: Date },
 ): Promise<{ id: string; status: RecoveryStatus }> {
-  const [claim] = await loadOwnedClaims(db, restaurantId, [input.claimId]);
+  const [claim] = await loadOwnedClaims(db, restaurantId, [input.claimId], true);
   if (!claim) throw notFound('claim');
   if (input.to === 'credited') {
     throw new TRPCError({ code: 'BAD_REQUEST', message: 'a claim becomes credited through a credit note' });
@@ -522,12 +541,21 @@ export async function recordCreditNote(
   }
   if (!issuedOn) throw new TRPCError({ code: 'BAD_REQUEST', message: 'issue date is required' });
 
-  const claims = (await loadOwnedClaims(db, restaurantId, input.claimIds)).sort(
+  if (input.invoiceLineId) {
+    const [used] = await db
+      .select({ id: creditNotes.id })
+      .from(creditNotes)
+      .where(and(eq(creditNotes.invoiceLineId, input.invoiceLineId), eq(creditNotes.restaurantId, restaurantId)))
+      .limit(1);
+    if (used) throw new TRPCError({ code: 'CONFLICT', message: 'this credit line is already recorded' });
+  }
+
+  const claims = (await loadOwnedClaims(db, restaurantId, [...new Set(input.claimIds)], true)).sort(
     (a, b) => a.claimedAt.getTime() - b.claimedAt.getTime() || a.id.localeCompare(b.id),
   );
   for (const c of claims) {
     if (c.supplierId !== supplierId) throw notFound('claim');
-    if (!(CREDITABLE as readonly string[]).includes(c.status)) {
+    if (!(CREDITABLE as readonly string[]).includes(c.status) || c.creditedAgorot >= c.amountAgorot) {
       throw new TRPCError({ code: 'CONFLICT', message: `claim is ${c.status}` });
     }
   }

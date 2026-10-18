@@ -21,8 +21,8 @@ export const RECOVERY_TRANSITIONS: Record<RecoveryStatus, readonly RecoveryStatu
   written_off: ['claimed'],
 };
 
-/** Statuses a credit note may be applied to. */
-export const CREDITABLE: readonly RecoveryStatus[] = ['claimed', 'letter_sent', 'acknowledged', 'disputed'];
+/** Statuses a credit note may be applied to (`credited` too, while part of the claim is still owed). */
+export const CREDITABLE: readonly RecoveryStatus[] = ['claimed', 'letter_sent', 'acknowledged', 'credited', 'disputed'];
 
 /** Statuses whose remaining amount is still owed by the supplier. */
 export const OPEN_STATUSES: readonly RecoveryStatus[] = [

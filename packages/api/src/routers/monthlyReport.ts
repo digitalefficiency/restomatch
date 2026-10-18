@@ -1,12 +1,12 @@
 import { z } from 'zod';
 import { assertFeatureOn } from '../lib/featureGate';
-import { computeMonthlyReport, monthlyReportEmail, monthlyReportWhatsApp, previousMonthKey } from '../reports/monthly';
+import { loadMonthlyReport, monthlyReportEmail, monthlyReportWhatsApp, previousMonthKey } from '../reports/monthly';
 import { renderMonthlyReportPdf } from '../reports/pdf';
 import { managerProcedure, router } from '../trpc';
 
 /**
  * Monthly "one number" report (flag `monthlyReport`): preview this month's (or
- * any past month's) report in the dashboard — the data, the email exactly as it
+ * any past month's — the frozen snapshot once the worker sent it) report in the dashboard — the data, the email exactly as it
  * will be sent, the WhatsApp text — and download the PDF. Owner/manager only
  * (it lists supplier spend), like owner.leakReport. Read-only.
  */
@@ -24,15 +24,15 @@ export const monthlyReportRouter = router({
     .query(async ({ ctx, input }) => {
       const month = input?.month ?? previousMonthKey(new Date());
       const locale = input?.locale ?? 'he';
-      const data = await computeMonthlyReport(ctx.db, ctx.session.restaurantId, month);
+      const { data, frozen } = await loadMonthlyReport(ctx.db, ctx.session.restaurantId, month);
       const email = monthlyReportEmail(data, { locale });
-      return { data, email, whatsapp: monthlyReportWhatsApp(data, { locale }) };
+      return { data, frozen, email, whatsapp: monthlyReportWhatsApp(data, { locale }) };
     }),
 
   pdf: reportProcedure
     .input(z.object({ month: monthInput, locale: localeInput }))
     .query(async ({ ctx, input }) => {
-      const data = await computeMonthlyReport(ctx.db, ctx.session.restaurantId, input.month);
+      const { data } = await loadMonthlyReport(ctx.db, ctx.session.restaurantId, input.month);
       const bytes = await renderMonthlyReportPdf(data, { locale: input.locale });
       return {
         filename: `restomatch-report-${input.month}-${input.locale}.pdf`,

@@ -6,6 +6,7 @@ import {
   computeRecoverySummary,
   creditLineSuggestions,
   listClaims,
+  MAX_CLAIMS,
   recordCreditNote,
   returnedInMonth,
   summarize,
@@ -46,7 +47,7 @@ export const recoveryRouter = router({
     await syncClaims(ctx.db, ctx.session.restaurantId, ctx.session.userId);
     const now = new Date();
     const [claims, returned] = await Promise.all([
-      listClaims(ctx.db, ctx.session.restaurantId, { now, limit: 500 }),
+      listClaims(ctx.db, ctx.session.restaurantId, { now, limit: MAX_CLAIMS }),
       returnedInMonth(ctx.db, ctx.session.restaurantId, { now }),
     ]);
     return { summary: summarize(claims), returnedThisMonth: returned };

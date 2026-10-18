@@ -19,7 +19,7 @@ import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { enqueueRecoveryReminders } from '../recovery/reminders';
 import { syncClaims } from '../recovery/service';
-import { computeMonthlyReport, monthlyReportEmail, monthlyReportWhatsApp, WHATSAPP_MAX } from '../reports/monthly';
+import { computeMonthlyReport, ensureMonthlyReport, monthlyReportEmail, monthlyReportWhatsApp, WHATSAPP_MAX } from '../reports/monthly';
 import { renderMonthlyReportPdf } from '../reports/pdf';
 import { sendMonthlyReports } from '../reports/send';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
@@ -281,5 +281,101 @@ describe('monthly report', () => {
   it('sendMonthlyReports skips restaurants without the flag', async () => {
     await setFlags({ recovery: true });
     expect(await sendMonthlyReports(db, { restaurantId: T.restaurantId })).toMatchObject({ restaurants: 0, emails: 0 });
+  });
+});
+
+describe('refuter regressions', () => {
+  it('cap holds when a later discrepancy is accepted first (claimed never exceeds the invoice / the hero)', async () => {
+    await db.update(discrepancies).set({ resolutionStatus: 'open' }).where(eq(discrepancies.id, T.discrepancyId));
+    const [extra] = await db
+      .insert(discrepancies)
+      .values({ matchRunId: T.matchRunId, restaurantId: T.restaurantId, type: 'QTY_OVER', severity: 'warn', deltaAmount: '40.00', resolutionStatus: 'accepted' })
+      .returning();
+    try {
+      await syncClaims(db, T.restaurantId);
+      await db.update(discrepancies).set({ resolutionStatus: 'accepted' }).where(eq(discrepancies.id, T.discrepancyId));
+      await syncClaims(db, T.restaurantId);
+      const all = await db.select().from(recoveryClaims).where(eq(recoveryClaims.restaurantId, T.restaurantId));
+      const total = all.reduce((s, c) => s + c.amountAgorot, 0);
+      expect(total).toBe(11700); // invoice total ₪117.00
+      const hero = await computeLeakHero(db, T.restaurantId);
+      expect(total).toBe(Math.round(hero.recoveredIls * 100));
+    } finally {
+      await db.delete(discrepancies).where(eq(discrepancies.id, extra!.id));
+    }
+  });
+
+  it('parallel credit notes on one claim never over-credit (row lock)', async () => {
+    const c = caller();
+    const [claim] = await c.recovery.list();
+    const results = await Promise.allSettled(
+      Array.from({ length: 8 }, (_, i) =>
+        appRouter
+          .createCaller({ db, session: { userId: T.ownerUserId, restaurantId: T.restaurantId, role: 'owner' } })
+          .recovery.recordCreditNote({ claimIds: [claim!.id], supplierId: T.supplierId, amountAgorot: 10000, issuedOn: '2026-10-10', number: `P-${i}` }),
+      ),
+    );
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const notes = await db.select().from(creditNotes).where(eq(creditNotes.restaurantId, T.restaurantId));
+    expect(notes).toHaveLength(1);
+    const [after] = await db.select().from(recoveryClaims).where(eq(recoveryClaims.id, claim!.id));
+    expect(after!.creditedAgorot).toBe(10000);
+    const credited = await db.select().from(recoveryEvents).where(eq(recoveryEvents.claimId, claim!.id));
+    expect(credited.filter((e) => e.toStatus === 'credited')).toHaveLength(1);
+  });
+
+  it('a partly credited claim can be topped up; recovering short books the shortfall as written off', async () => {
+    const c = caller();
+    const [claim] = await c.recovery.list();
+    await c.recovery.recordCreditNote({ claimIds: [claim!.id], supplierId: T.supplierId, amountAgorot: 6000, issuedOn: '2026-10-10' });
+    await c.recovery.recordCreditNote({ claimIds: [claim!.id], supplierId: T.supplierId, amountAgorot: 1000, issuedOn: '2026-10-11' });
+    let { summary } = await c.recovery.summary();
+    expect(summary).toMatchObject({ claimedAgorot: 10000, creditedAgorot: 7000, outstandingAgorot: 3000 });
+    await c.recovery.transition({ claimIds: [claim!.id], to: 'recovered' });
+    ({ summary } = await c.recovery.summary());
+    expect(summary).toMatchObject({ creditedAgorot: 7000, recoveredAgorot: 7000, outstandingAgorot: 0, writtenOffAgorot: 3000 });
+    expect(summary.claimedAgorot).toBe(summary.creditedAgorot + summary.outstandingAgorot + summary.writtenOffAgorot);
+  });
+
+  it('re-using a credit line is a CONFLICT, not a 500', async () => {
+    const c = caller();
+    const [claim] = await c.recovery.list();
+    const [inv] = await db
+      .insert(invoices)
+      .values({ restaurantId: T.restaurantId, supplierId: T.supplierId, invoiceNumber: 'INV-R-CR2', invoiceDate: new Date(Date.now() + 86_400_000), source: 'manual', status: 'matched' })
+      .returning();
+    const [line] = await db
+      .insert(invoiceLines)
+      .values({ invoiceId: inv!.id, rawDescription: 'זיכוי', qtyBilled: '1', unit: 'unit', unitPriceBilled: '-30', lineTotal: '-30.00' })
+      .returning();
+    try {
+      await c.recovery.recordCreditNote({ claimIds: [claim!.id], invoiceLineId: line!.id });
+      await expect(c.recovery.recordCreditNote({ claimIds: [claim!.id], invoiceLineId: line!.id })).rejects.toMatchObject({ code: 'CONFLICT' });
+    } finally {
+      await db.delete(invoices).where(eq(invoices.id, inv!.id));
+    }
+  });
+
+  it('preview and PDF show the frozen snapshot once the month was generated', async () => {
+    const d = new Date();
+    const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const frozen = await ensureMonthlyReport(db, T.restaurantId, month);
+    await db
+      .update(monthlyReports)
+      .set({ snapshot: { ...frozen.data, leakAgorot: 4242 } as never })
+      .where(eq(monthlyReports.id, frozen.id));
+    const p = await caller().monthlyReport.preview({ month, locale: 'he' });
+    expect(p.frozen).toBe(true);
+    expect(p.data.leakAgorot).toBe(4242);
+  });
+
+  it('WhatsApp truncation keeps the report link', async () => {
+    const d = new Date();
+    const data = await computeMonthlyReport(db, T.restaurantId, `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    data.topSuppliers = [{ name: 'א'.repeat(900), nameEn: null, leakAgorot: 100, leakPct: 0.02 }];
+    const url = 'https://app.test/dashboard/reports/monthly?month=2026-09';
+    const text = monthlyReportWhatsApp(data, { reportUrl: url });
+    expect(text.length).toBeLessThanOrEqual(WHATSAPP_MAX);
+    expect(text.endsWith(url)).toBe(true);
   });
 });
