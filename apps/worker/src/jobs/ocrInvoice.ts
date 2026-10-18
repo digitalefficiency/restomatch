@@ -1,6 +1,6 @@
 import { fillEnglishNames, meterOcrScan } from '@restomatch/api';
 import { matchProductTopN, MockEmbeddingProvider } from '@restomatch/catalog';
-import { and, eq, invoiceLines, invoices, restaurants, type Database } from '@restomatch/db';
+import { and, eq, invoiceLines, invoices, ne, restaurants, type Database } from '@restomatch/db';
 import {
   ClaudeVision,
   runOcrPipeline,
@@ -117,9 +117,14 @@ export function startOcrInvoiceWorker() {
       });
 
       const r = result.reconciled;
-      await db
-        .update(invoices)
-        .set({
+      const { duplicateOf } = await writeOcrHeader(
+        db,
+        {
+          restaurantId: job.data.restaurantId,
+          invoiceId: job.data.invoiceId,
+          supplierId: invoice.supplierId,
+        },
+        {
           invoiceNumber: r.invoiceNumber ?? null,
           invoiceDate: r.invoiceDate ? new Date(r.invoiceDate) : null,
           totalExclVat: r.totals.subtotal?.toString() ?? null,
@@ -133,10 +138,10 @@ export function startOcrInvoiceWorker() {
           },
           ocrConfidence: result.confidence.toString(),
           status: result.needsHumanReview ? 'parsed' : 'matched',
-        })
-        .where(
-          and(eq(invoices.id, job.data.invoiceId), eq(invoices.restaurantId, job.data.restaurantId)),
-        );
+        },
+      );
+      // A number already on file holds the invoice for a human (no auto-match).
+      const needsHumanReview = result.needsHumanReview || duplicateOf !== undefined;
 
       await db.delete(invoiceLines).where(eq(invoiceLines.invoiceId, job.data.invoiceId));
       if (r.lines.length > 0) {
@@ -170,14 +175,15 @@ export function startOcrInvoiceWorker() {
       console.log(
         `[ocr-invoice] restaurant=${job.data.restaurantId} invoice=${job.data.invoiceId} ` +
           `confidence=${result.confidence.toFixed(2)} conflicts=${result.conflicts.length} ` +
-          `lines=${r.lines.length} needsReview=${result.needsHumanReview}`,
+          `lines=${r.lines.length} needsReview=${needsHumanReview}` +
+          (duplicateOf !== undefined ? ` duplicateOf=${duplicateOf ?? 'unknown'}` : ''),
       );
 
       // Chain into the 3-way PO↔invoice match when OCR is confident enough to
       // auto-proceed. Low-confidence (parsed / needs-review) invoices wait for a
       // human to confirm product matches first (match.runForInvoice on demand).
       // A queue failure must never break the OCR persistence above.
-      if (!result.needsHumanReview) {
+      if (!needsHumanReview) {
         try {
           await enqueueMatchInvoice({
             restaurantId: job.data.restaurantId,
@@ -194,7 +200,7 @@ export function startOcrInvoiceWorker() {
       return {
         invoiceId: job.data.invoiceId,
         confidence: result.confidence,
-        needsHumanReview: result.needsHumanReview,
+        needsHumanReview,
         conflicts: result.conflicts.length,
         lines: r.lines.length,
       };
@@ -213,6 +219,90 @@ export function startOcrInvoiceWorker() {
   });
 }
 
+type InvoiceHeader = Pick<
+  typeof invoices.$inferInsert,
+  | 'invoiceNumber'
+  | 'invoiceDate'
+  | 'totalExclVat'
+  | 'vatAmount'
+  | 'totalInclVat'
+  | 'allocationNumber'
+  | 'ocrPayload'
+  | 'ocrConfidence'
+  | 'status'
+>;
+
+/** Postgres unique violation on invoices_dedupe_idx (supplier_id, invoice_number). */
+function isInvoiceNumberTaken(err: unknown): boolean {
+  for (let e = err; typeof e === 'object' && e !== null; e = (e as { cause?: unknown }).cause) {
+    const pg = e as { code?: string; constraint_name?: string };
+    if (pg.code === '23505') return pg.constraint_name === 'invoices_dedupe_idx';
+  }
+  return false;
+}
+
+/**
+ * Write the OCR header onto the invoice. invoices_dedupe_idx is UNIQUE on
+ * (supplier_id, invoice_number), so a scan whose number is already on file for
+ * this supplier (the same paper photographed twice, or a supplier billing
+ * twice) used to throw here: the job failed and the receiver lost the whole
+ * read. Keep the read instead, without the number, record which invoice holds
+ * it, and leave the row for a human (status 'parsed').
+ *
+ * `duplicateOf` is undefined when the number was free, else the id of the
+ * invoice that already carries it (null if that row could not be found).
+ */
+export async function writeOcrHeader(
+  db: Database,
+  ids: { restaurantId: string; invoiceId: string; supplierId: string | null },
+  header: InvoiceHeader,
+): Promise<{ duplicateOf?: string | null }> {
+  const where = and(eq(invoices.id, ids.invoiceId), eq(invoices.restaurantId, ids.restaurantId));
+  const invoiceNumber = header.invoiceNumber;
+  try {
+    await db.update(invoices).set(header).where(where);
+    return {};
+  } catch (err) {
+    if (!invoiceNumber || !isInvoiceNumberTaken(err)) throw err;
+  }
+
+  // supplier_id NULL never conflicts (NULLs are distinct), so it is set here.
+  const [existing] = ids.supplierId
+    ? await db
+        .select({ id: invoices.id })
+        .from(invoices)
+        .where(
+          and(
+            eq(invoices.restaurantId, ids.restaurantId),
+            eq(invoices.supplierId, ids.supplierId),
+            eq(invoices.invoiceNumber, invoiceNumber),
+            ne(invoices.id, ids.invoiceId),
+          ),
+        )
+        .limit(1)
+    : [];
+  const duplicateOf = existing?.id ?? null;
+  const payload = header.ocrPayload;
+  await db
+    .update(invoices)
+    .set({
+      ...header,
+      invoiceNumber: null,
+      status: 'parsed',
+      ocrPayload: payload
+        ? {
+            ...payload,
+            raw: {
+              ...(payload.raw as object),
+              duplicateOf: { invoiceId: duplicateOf, invoiceNumber },
+            },
+          }
+        : payload,
+    })
+    .where(where);
+  return { duplicateOf };
+}
+
 /**
  * Terminal OCR failure: status 'parsed' (= needs a human) with confidence 0 and
  * a machine-readable failure marker in ocr_payload (`raw.ocrFailed`). The
@@ -227,7 +317,9 @@ export async function markOcrFailed(
   err: unknown,
 ): Promise<void> {
   const reason =
-    err instanceof Error && err.name === 'QuotaExceededError' ? 'quota_exceeded' : 'extraction_failed';
+    err instanceof Error && err.name === 'QuotaExceededError'
+      ? 'quota_exceeded'
+      : 'extraction_failed';
   await db
     .update(invoices)
     .set({
@@ -248,4 +340,3 @@ export async function markOcrFailed(
       ),
     );
 }
-
