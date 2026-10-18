@@ -20,6 +20,7 @@ export const en: Shape<typeof he> = {
     revokeFailed: 'Revoking the invite failed.',
     copyLink: 'Copy link',
     copyLinkTitle: 'Copy the invite link (no email provider configured)',
+    rateLimited: 'Too many invites sent in the last hour. Please try again later.',
     copied: 'Copied',
   },
   members: {

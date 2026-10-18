@@ -21,6 +21,7 @@ export const he = {
     revokeFailed: 'ביטול ההזמנה נכשל.',
     copyLink: 'העתקת קישור',
     copyLinkTitle: 'העתקת קישור ההזמנה (אין ספק מייל מוגדר)',
+    rateLimited: 'נשלחו יותר מדי הזמנות בשעה האחרונה. נסו שוב מאוחר יותר.',
     copied: 'הועתק',
   },
   members: {

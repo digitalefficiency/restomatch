@@ -2,6 +2,9 @@
 
 import { revalidatePath } from 'next/cache';
 import type { UserRole } from '@restomatch/db';
+import { auth } from '@/auth';
+import type { RateLimitOptions } from '@restomatch/api';
+import { enforceRateLimit } from '@/lib/rateLimit';
 import { createServerCaller } from '@/lib/trpc/server';
 import { isEmailConfigured, sendEmail } from '@/lib/email';
 import { inviteEmail } from '@/lib/emailTemplates';
@@ -17,6 +20,20 @@ interface ActionResult {
   message: string;
   /** In dev/preview (no email provider) we surface the link so it's testable. */
   devLink?: string;
+}
+
+/**
+ * Invite/resend emails go to arbitrary mailboxes, so a compromised (or hostile)
+ * owner account could be used as a spam relay. Cap outbound invite emails per
+ * inviter. Fails open on a Redis outage, like every other limiter.
+ */
+const INVITE_EMAIL_LIMIT: RateLimitOptions = { limit: 20, windowSec: 60 * 60 };
+
+async function inviteAllowed(): Promise<boolean> {
+  const session = await auth();
+  const userId = session?.user?.id;
+  if (!userId) return true; // the tRPC owner gate rejects it anyway
+  return (await enforceRateLimit(`invite:${userId}`, INVITE_EMAIL_LIMIT)).allowed;
 }
 
 function baseUrl(): string {
@@ -75,6 +92,9 @@ export async function inviteMember(input: {
   role: UserRole;
   locale?: Locale | null;
 }): Promise<ActionResult> {
+  if (!(await inviteAllowed())) {
+    return { ok: false, message: (await getT(team))('invite.rateLimited') };
+  }
   try {
     const caller = await createServerCaller();
     const res = await caller.team.invite({
@@ -96,6 +116,9 @@ export async function inviteMember(input: {
 }
 
 export async function resendInvite(input: { id: string }): Promise<ActionResult> {
+  if (!(await inviteAllowed())) {
+    return { ok: false, message: (await getT(team))('invite.rateLimited') };
+  }
   try {
     const caller = await createServerCaller();
     const res = await caller.team.resendInvite(input);
