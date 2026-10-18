@@ -1,5 +1,8 @@
 import { createServerCaller } from '@/lib/trpc/server';
-import { SectionHeader } from '@/lib/components';
+import { Breadcrumbs, SectionHeader } from '@/lib/components';
+import { getT } from '@/lib/i18n/server';
+import { catalog as catalogNs } from '@/lib/i18n/messages/catalog';
+import { components } from '@/lib/i18n/messages/components';
 import { SkuMapper } from './mapper';
 
 /**
@@ -10,18 +13,16 @@ import { SkuMapper } from './mapper';
  */
 export default async function CatalogMappingPage() {
   const caller = await createServerCaller();
-  const initial = await caller.mapping.unmapped();
+  const [initial, t, tc] = await Promise.all([caller.mapping.unmapped(), getT(catalogNs), getT(components)]);
 
   return (
     <div>
-      <SectionHeader
-        level={1}
-        title="מיפוי מק״טים"
-        subtitle="מק״טים מהזמנות וחשבוניות שעדיין לא חוברו למוצר בקטלוג. חיבור חד-פעמי — וכל הזמנה עתידית מאותו ספק תזוהה אוטומטית."
+      <Breadcrumbs
+        label={tc('breadcrumbs.label')}
+        items={[{ label: t('mapping.breadcrumb'), href: '/dashboard/catalog' }, { label: t('mapping.title') }]}
       />
-      <div className="mt-4">
-        <SkuMapper initial={initial} />
-      </div>
+      <SectionHeader level={1} title={t('mapping.title')} subtitle={t('mapping.subtitle')} />
+      <SkuMapper initial={initial} />
     </div>
   );
 }
