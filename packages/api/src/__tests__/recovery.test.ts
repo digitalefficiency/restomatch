@@ -465,6 +465,20 @@ describe('money cross-QA (S3) regressions', () => {
     expect(history.map((h) => h.toStatus)).toEqual(['claimed', 'written_off', 'claimed']);
   });
 
+  it('HIGH 3: a claim the owner wrote off by hand stays written off when its discrepancy is re-accepted', async () => {
+    await syncClaims(db, T.restaurantId);
+    const [claim] = await caller().recovery.list();
+    await caller().recovery.transition({ claimIds: [claim!.id], to: 'written_off', note: 'owner gave up' });
+    await db.update(discrepancies).set({ resolutionStatus: 'rejected' }).where(eq(discrepancies.id, T.discrepancyId));
+    await syncClaims(db, T.restaurantId);
+    await db.update(discrepancies).set({ resolutionStatus: 'accepted' }).where(eq(discrepancies.id, T.discrepancyId));
+    await syncClaims(db, T.restaurantId);
+    const [c] = await db.select().from(recoveryClaims).where(eq(recoveryClaims.id, claim!.id));
+    expect(c!.status).toBe('written_off');
+    const history = await caller().recovery.history({ claimId: c!.id });
+    expect(history.map((h) => h.toStatus)).toEqual(['claimed', 'written_off']);
+  });
+
   it('MEDIUM 5: a credit-note number is recorded once per supplier; an idempotency key replays', async () => {
     const c = caller();
     const [claim] = await c.recovery.list();
@@ -542,4 +556,21 @@ describe('re-match vs claims (S3 blocker 1)', () => {
     expect(await db.select().from(recoveryClaims).where(eq(recoveryClaims.restaurantId, T.restaurantId))).toHaveLength(0);
   });
 
+});
+
+describe('sendMonthlyReports isolates a failing restaurant (S4 M1)', () => {
+  it('a tenant with an invalid timezone between two good ones is logged and skipped; both good ones are sent', async () => {
+    const bad = await seedTenant(db, 'TZBAD');
+    const good = await seedTenant(db, 'TZOK');
+    const on = { settings: { features: { all: true } } as never };
+    await db.update(restaurants).set(on).where(eq(restaurants.id, good.restaurantId));
+    await db.update(restaurants).set({ ...on, timezone: 'Mars/Olympus_Mons' }).where(eq(restaurants.id, bad.restaurantId));
+    const res = await sendMonthlyReports(db, { now: new Date() });
+    expect(res.failed).toEqual([bad.restaurantId]);
+    for (const id of [T.restaurantId, good.restaurantId]) {
+      const [stored] = await db.select().from(monthlyReports).where(eq(monthlyReports.restaurantId, id));
+      expect(stored?.sentAt).not.toBeNull();
+    }
+    expect(await db.select().from(monthlyReports).where(eq(monthlyReports.restaurantId, bad.restaurantId))).toHaveLength(0);
+  });
 });
