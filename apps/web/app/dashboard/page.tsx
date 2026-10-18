@@ -115,7 +115,8 @@ export default async function DashboardPage({
       previous: null,
       spend: p.spendIls,
     })) ?? [];
-  const cleanMatchHealthy = kpis.weekCleanMatchPct >= 80;
+  // NUM-10: null = no match runs this week — show "no matches yet", never a fake 100%.
+  const cleanMatchHealthy = kpis.weekCleanMatchPct == null || kpis.weekCleanMatchPct >= 80;
   const heatmapItems = leaks.map((l) => ({
     ...l,
     productName: displayName(locale, l.productName, l.productNameEn),
@@ -229,10 +230,10 @@ export default async function DashboardPage({
         )}
         <KpiCard
           label={t('kpis.clean')}
-          value={formatPercent(kpis.weekCleanMatchPct / 100, locale, 1)}
-          tone={cleanMatchHealthy ? 'accent' : 'warning'}
+          value={kpis.weekCleanMatchPct == null ? '—' : formatPercent(kpis.weekCleanMatchPct / 100, locale, 1)}
+          tone={kpis.weekCleanMatchPct == null ? 'neutral' : cleanMatchHealthy ? 'accent' : 'warning'}
           icon={<CheckCircle2 className="h-5 w-5" />}
-          subtitle={t('kpis.cleanHint')}
+          subtitle={kpis.weekCleanMatchPct == null ? t('kpis.cleanNone') : t('kpis.cleanHint')}
         />
       </div>
       </TvMode>

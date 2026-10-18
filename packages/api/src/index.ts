@@ -202,6 +202,7 @@ export {
   type ChainBranchesResult,
   type ChainOverviewResult,
 } from './routers/chain';
+export { NOT_BILLING_OWNER } from './routers/chain';
 // Wave 1 · S12 — ₪-back tracker + monthly report.
 export { isFeatureOn, assertFeatureOn } from './lib/featureGate';
 export {
