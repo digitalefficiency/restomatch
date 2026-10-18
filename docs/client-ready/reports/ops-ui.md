@@ -26,7 +26,7 @@ Also checked by hand in he and en:
 ## Fixed (problem → fix → test)
 
 **Cross-cutting**
-1. **Every English page rendered right-to-left.** `globals.css` sets `html { direction: rtl }`, and that beat `<html dir="ltr">`. → I appended `html[dir='ltr'] { direction: ltr }` to `apps/web/app/globals.css` (S6 owns that file; it is a 4-line append). Checked in the screenshots.
+1. **Every English page rendered right-to-left.** `globals.css` sets `html { direction: rtl }`, and that beat `<html dir="ltr">`. → S6 landed the identical `html[dir='ltr']` rule in the base. After merging the base, S5 carries no `globals.css` change.
 2. **Global search results could not be clicked.** They were plain `<li>`s. → They are now a proper ARIA combobox (↑/↓, Enter, Esc, click). Groups the role can't open are hidden (a receiver gets no supplier links). Search also matches and shows `name_en`. → `app/dashboard/__tests__/ops-logic.test.ts` ("global search options"); router: `ops-routers.test.ts` ("search.global matches + returns English names").
 3. **Entitlement upsells never showed on the client.** The `ENTITLEMENT_REQUIRED` cause isn't serialized over tRPC, so the WhatsApp-gated and guardrail-gated branches were dead code. → `entitlementCauseOf` also reads the `ENTITLEMENT_REQUIRED:<feature>` message. → `lib/components/__tests__/ops-components.test.ts`.
 4. **Raw server messages were shown in the UI.** These were Hebrew, or raw zod JSON. → `friendlyError(err, t, overrides)` maps tRPC codes to localized text per screen. → `ops-components.test.ts`.
@@ -101,13 +101,11 @@ Also checked by hand in he and en:
 ## Immutable files touched
 
 - `packages/api/src/__tests__/cross-tenant.attack.test.ts`: **additive only**, 2 new attack tests for `nameEn`. No assertion was changed and no COVERAGE entry was added or removed (no new procedures).
-- `apps/web/app/globals.css`: not on the immutability list, but owned by S6. It is a 4-line append (`html[dir='ltr']`), required for every English screen.
 - Nothing else on the AGENTS.md list was touched. The matching engine, schema, RLS, `leads.ts`, `outbox.ts`, `cron.ts` and `plans.ts` are untouched. The leak-canary is unchanged and green.
 
 ## Needs another area
 
-- **S6:** keep the `html[dir='ltr'] { direction: ltr }` rule I appended to `globals.css`, or move the base `direction: rtl` to `html:not([dir])`.
-- **S1 (seed):** populate `products.name_en` / `suppliers.name_en` and a supplier price list in `seed-demo.ts`. The fixtures in `docs/client-ready/fixtures/ops/` can be reused.
+- **S1 (seed):** the merged base now seeds `name_en`. Still worth adding: a supplier price list (`supplier_catalog_items` is empty after seeding). The fixtures in `docs/client-ready/fixtures/ops/` can be reused.
 - **S3:**
   - `owner.suppliers` scorecards don't return `nameEn`, so the scorecards tab shows Hebrew supplier names in English.
   - `logActivity` titles are stored as Hebrew sentences. I localize the known templates client-side (`lib/components/activityText.ts`); storing `metadata` (invoice number, counts, ₪) and rendering it would be cleaner.
@@ -121,6 +119,7 @@ pnpm --filter @restomatch/api exec vitest run src/__tests__/ops-routers.test.ts 
 pnpm --filter @restomatch/api exec vitest run src/__tests__/cross-tenant.attack.test.ts → 82 passed
 pnpm --filter @restomatch/web exec vitest run app/dashboard/__tests__/ops-logic.test.ts lib/components/__tests__/ops-components.test.ts lib/__tests__/i18n.test.ts → 59 passed
 DATABASE_URL_TEST=… pnpm test   (dev server stopped) → Tasks 12/12 successful (api 410, web 160, matching 76 incl. leak-canary, …)
+after merging origin/claude/client-ready (S1+S3+S6, migrations 0029–0032 applied) → Tasks 12/12 successful (api 423, web 165, matching 86, db 43)
 pnpm --filter @restomatch/web exec tsc --noEmit -p .  → 0 errors
 cd apps/web && set -a && . ./.env.local && set +a && pnpm build → green (only pre-existing bullmq / jose dependency warnings)
 Playwright e2e (scratchpad driver, real UI) → 8/8 PASS
