@@ -175,6 +175,9 @@ if [[ $SEED == 1 ]]; then
   DATABASE_URL="${PG_URL_BASE}/restomatch_dev" pnpm --filter @restomatch/worker exec tsx scripts/seed-demo.ts | tail -2
   # Chain demo (S8): two more branches on the same billing account (the main branch is unchanged).
   DATABASE_URL="${PG_URL_BASE}/restomatch_dev" pnpm --filter @restomatch/worker exec tsx scripts/seed-chain-demo.ts | tail -3
+  # wave 1 (S11): contract price lists + a price-trend alert (additive, idempotent)
+  DATABASE_URL="${PG_URL_BASE}/restomatch_dev" pnpm --filter @restomatch/worker exec tsx scripts/seed-wave1-contracts-demo.ts | tail -1 \
+    || warn "wave-1 contracts demo data failed (non-fatal)"
 fi
 
 # ── 5. apps/web/.env.local ──────────────────────────────────────────────────

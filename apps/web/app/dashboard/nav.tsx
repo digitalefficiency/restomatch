@@ -9,6 +9,7 @@ import {
   BarChart3,
   Boxes,
   FileDown,
+  FileSignature,
   Inbox,
   LayoutDashboard,
   LogOut,
@@ -26,7 +27,8 @@ import {
 } from 'lucide-react';
 import type { UserRole } from '@restomatch/db';
 import { cn } from '@/lib/components';
-import { useT } from '@/lib/i18n/client';
+import { useLocale, useT } from '@/lib/i18n/client';
+import { formatNumber } from '@/lib/i18n/format';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { nav } from '@/lib/i18n/messages/nav';
 import { canSeeRoute } from '@/lib/roles';
@@ -40,6 +42,7 @@ type LinkKey =
   | 'chain'
   | 'suppliers'
   | 'catalog'
+  | 'contracts'
   | 'orders'
   | 'exports'
   | 'team'
@@ -52,6 +55,8 @@ interface NavItem {
   href: string;
   icon: LucideIcon;
   group: GroupKey;
+  /** Wave-1 contracts/priceAlerts entry: shown only when the layout says a flag is on. */
+  wave1?: boolean;
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -62,6 +67,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'chain', href: '/dashboard/chain', icon: Network, group: 'operations' },
   { key: 'suppliers', href: '/dashboard/suppliers', icon: Truck, group: 'purchasing' },
   { key: 'catalog', href: '/dashboard/catalog', icon: Boxes, group: 'purchasing' },
+  { key: 'contracts', href: '/dashboard/contracts', icon: FileSignature, group: 'purchasing', wave1: true },
   { key: 'orders', href: '/dashboard/orders', icon: ShoppingCart, group: 'purchasing' },
   { key: 'exports', href: '/dashboard/exports', icon: FileDown, group: 'admin' },
   { key: 'team', href: '/dashboard/team', icon: Users, group: 'admin' },
@@ -78,18 +84,36 @@ function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+/** Wave-1 nav state from the layout: contracts/priceAlerts flag on (+ finance role) and the open-alert count. */
+export interface Wave1Nav {
+  visible: boolean;
+  badge: number;
+}
+
 /**
  * `showChain`: owners who run more than one branch get the Chain tab (branch
  * management is then one click away in the branch switcher and on the chain
  * page); single-branch owners get the Branches tab instead (open a branch /
  * see the chain plan). One of the two, so the tab row still fits.
  */
-function visibleItems(role: UserRole, showChain = false): NavItem[] {
+function visibleItems(role: UserRole, showChain = false, wave1?: Wave1Nav): NavItem[] {
   return NAV_ITEMS.filter(
-    ({ key, href }) =>
+    ({ key, href, wave1: gated }) =>
       canSeeRoute(role, href) &&
       (key !== 'chain' || showChain) &&
-      (key !== 'branches' || !showChain),
+      (key !== 'branches' || !showChain) &&
+      (!gated || wave1?.visible === true),
+  );
+}
+
+/** Small open-alert count pill next to the contracts entry. */
+function NavBadge({ itemKey, wave1 }: { itemKey: LinkKey; wave1?: Wave1Nav }) {
+  const locale = useLocale();
+  if (itemKey !== 'contracts' || !wave1 || wave1.badge <= 0) return null;
+  return (
+    <span className="ms-1 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-danger/15 px-1.5 text-[10px] font-bold tabular-nums text-danger ring-1 ring-danger/30">
+      {wave1.badge > 99 ? `${formatNumber(99, locale)}+` : formatNumber(wave1.badge, locale)}
+    </span>
   );
 }
 
@@ -101,10 +125,10 @@ const focusRing =
  * with hairline separators. Scrolls horizontally instead of wrapping if a
  * narrow laptop can't fit every tab.
  */
-export function DesktopNav({ role, showChain = false }: { role: UserRole; showChain?: boolean }) {
+export function DesktopNav({ role, showChain = false, wave1 }: { role: UserRole; showChain?: boolean; wave1?: Wave1Nav }) {
   const t = useT(nav);
   const pathname = usePathname();
-  const items = visibleItems(role, showChain);
+  const items = visibleItems(role, showChain, wave1);
   return (
     <nav aria-label={t('mainLabel')} className="hidden lg:block">
       <ul className="-mb-px flex items-stretch gap-1 overflow-x-auto text-sm [scrollbar-width:none]">
@@ -132,6 +156,7 @@ export function DesktopNav({ role, showChain = false }: { role: UserRole; showCh
                       >
                         <Icon className="h-4 w-4" aria-hidden="true" />
                         {t(`links.${key}`)}
+                        <NavBadge itemKey={key} wave1={wave1} />
                       </Link>
                     </li>
                   );
@@ -157,6 +182,7 @@ export function MobileNav({
   email,
   showChain = false,
   branchSwitcher,
+  wave1,
 }: {
   role: UserRole;
   logout: () => Promise<void>;
@@ -165,6 +191,7 @@ export function MobileNav({
   showChain?: boolean;
   /** The branch switcher (list variant), for users with more than one membership. */
   branchSwitcher?: React.ReactNode;
+  wave1?: Wave1Nav;
 }) {
   const t = useT(nav);
   const pathname = usePathname();
@@ -176,7 +203,7 @@ export function MobileNav({
   useEffect(() => setMounted(true), []);
   const closeRef = useRef<HTMLButtonElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const items = visibleItems(role, showChain);
+  const items = visibleItems(role, showChain, wave1);
   const primary = items.slice(0, 4);
 
   // Close on navigation.
@@ -284,6 +311,7 @@ export function MobileNav({
                             >
                               <Icon className="h-4 w-4" aria-hidden="true" />
                               {t(`links.${key}`)}
+                              <NavBadge itemKey={key} wave1={wave1} />
                             </Link>
                           </li>
                         );

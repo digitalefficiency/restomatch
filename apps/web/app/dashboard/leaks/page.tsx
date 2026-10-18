@@ -23,6 +23,7 @@ import { canSeeRoute } from '@/lib/roles';
 import { parseView } from '@/lib/components/views';
 import { displayName } from '../approvals/vocab';
 import { LeakExplorer } from './explorer';
+import { OverContractCard } from '../contracts/over-contract';
 
 export default async function LeaksPage({
   searchParams,
@@ -83,6 +84,7 @@ export default async function LeaksPage({
         <SectionHeader level={1} title={t('detective.title')} />
         {leakLinks}
         {explorer}
+        <OverContractCard variant="compact" />
         <EntitlementUpsell feature="advanced_analytics" title={t('detective.upsell')} />
       </div>
     );
@@ -94,6 +96,7 @@ export default async function LeaksPage({
         <SectionHeader level={1} title={t('detective.title')} />
         {leakLinks}
         {explorer}
+        <OverContractCard variant="compact" />
         <Card padding="md" className="flex items-center gap-3 border-warn/30 bg-warn/5 text-warn">
           <ShieldAlert className="h-5 w-5 shrink-0" aria-hidden="true" />
           <span>{t('detective.roleOnly')}</span>
@@ -123,6 +126,8 @@ export default async function LeaksPage({
       />
       {leakLinks}
       {explorer}
+      {/* Wave-1: lines billed above contract (renders nothing when off / none). */}
+      <OverContractCard variant="compact" />
 
       {rows.length === 0 ? (
         <EmptyState

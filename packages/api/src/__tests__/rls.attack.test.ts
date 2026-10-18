@@ -27,6 +27,8 @@ import {
   passwordResetTokens,
   plans,
   poLines,
+  priceAlertThresholds,
+  priceAlerts,
   priceBaselines,
   priceHistory,
   procurementConnections,
@@ -37,6 +39,7 @@ import {
   sessions,
   sql,
   subscriptions,
+  supplierContractPrices,
   supplierIntegrations,
   suppliers,
   usageCounters,
@@ -644,5 +647,67 @@ describe('products.supplier_id cannot cross tenants (composite FK)', () => {
       .returning({ id: products.id });
     expect(p?.id).toBeTruthy();
     if (p) await ownerDb.delete(products).where(eq(products.id, p.id));
+  });
+});
+
+describe('wave 1 (S11) tables: supplier_contract_prices / price_alert_thresholds / price_alerts (raw RLS)', () => {
+  beforeAll(async () => {
+    for (const t of [A, B]) {
+      await ownerDb.insert(supplierContractPrices).values({
+        restaurantId: t.restaurantId,
+        supplierId: t.supplierId,
+        productId: t.productId,
+        contractPrice: '9.0000',
+        validFrom: '2026-01-01',
+      });
+      await ownerDb.insert(priceAlertThresholds).values({ restaurantId: t.restaurantId, thresholdPct: '0.1000' });
+      await ownerDb.insert(priceAlerts).values({
+        restaurantId: t.restaurantId,
+        productId: t.productId,
+        supplierId: t.supplierId,
+        windowDays: 21,
+        thresholdPct: '0.1000',
+        startPrice: '6',
+        endPrice: '7',
+        pctChange: '0.1667',
+        startAt: new Date('2026-09-27'),
+        endAt: new Date('2026-10-17'),
+        observations: 4,
+        dedupeKey: `rls-${t.restaurantId}`,
+      });
+    }
+  });
+
+  afterAll(async () => {
+    await ownerDb.delete(supplierContractPrices);
+    await ownerDb.delete(priceAlertThresholds);
+    await ownerDb.delete(priceAlerts);
+  });
+
+  it('GUC=A sees only tenant-A rows in all three tables', async () => {
+    const [c, th, al] = await withRestaurant(appDb, A.restaurantId, async (tx) => [
+      await tx.select({ rid: supplierContractPrices.restaurantId }).from(supplierContractPrices),
+      await tx.select({ rid: priceAlertThresholds.restaurantId }).from(priceAlertThresholds),
+      await tx.select({ rid: priceAlerts.restaurantId }).from(priceAlerts),
+    ]);
+    for (const rows of [c, th, al]) {
+      expect(rows).toEqual([{ rid: A.restaurantId }]);
+    }
+  });
+
+  it('blocks a cross-tenant INSERT and leaves B rows untouched by UPDATE', async () => {
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) =>
+        tx.insert(priceAlertThresholds).values({ restaurantId: B.restaurantId, category: 'x', thresholdPct: '0.5' }),
+      ),
+    ).rejects.toThrow(/row-level security/);
+    const updated = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx
+        .update(supplierContractPrices)
+        .set({ contractPrice: '0.0100' })
+        .where(eq(supplierContractPrices.restaurantId, B.restaurantId))
+        .returning({ id: supplierContractPrices.id }),
+    );
+    expect(updated).toHaveLength(0);
   });
 });

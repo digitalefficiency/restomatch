@@ -36,6 +36,7 @@ import {
 } from '@/lib/components/views';
 import { views as viewsNs } from '@/lib/i18n/messages/views';
 import { PaginatedActivityFeed } from './activity';
+import { PriceAlertsTeaser } from './contracts/overview-card';
 import { displayName } from './approvals/vocab';
 
 export default async function DashboardPage({
@@ -219,6 +220,9 @@ export default async function DashboardPage({
         />
       </div>
       </TvMode>
+
+      {/* Wave-1 price alerts teaser — renders nothing when off / no open alerts. */}
+      <PriceAlertsTeaser />
 
       {/* Leak heatmap — the centerpiece data-viz. */}
       {leaksEntitlementBlocked ? (

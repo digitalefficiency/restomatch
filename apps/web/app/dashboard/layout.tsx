@@ -13,6 +13,7 @@ import { BranchSwitcher } from './branch-switcher';
 import { DesktopNav, MobileNav } from './nav';
 import { DashboardSearch } from './search';
 import { WorkerStatusBanner } from './worker-status';
+import { getWave1Access } from './contracts/access';
 
 /**
  * Dashboard app shell. Sticky frosted header: restaurant + user on the start
@@ -38,6 +39,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
     memberships.find((m) => m.restaurantId === session.user.restaurantId) ?? memberships[0]!;
   const [t, locale] = await Promise.all([getT(nav), getLocale()]);
   const roleLabel = labelForRole(active.role, locale);
+  // Wave-1 nav entry (contracts / price alerts): flag on + finance role; fails silent.
+  const wave1Access = await getWave1Access();
+  const wave1 = {
+    visible: wave1Access.contracts || wave1Access.priceAlerts,
+    badge: wave1Access.openAlerts,
+  };
   const email = session.user.email ?? '';
   // Branches (S8): the switcher lists every membership; the chain tab is for
   // owners who run more than one branch (the chain router re-checks in the DB).
@@ -73,6 +80,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 restaurantName={active.restaurantName}
                 email={email}
                 showChain={showChain}
+                wave1={wave1}
                 branchSwitcher={
                   memberships.length > 1 ? (
                     <BranchSwitcher variant="list" branches={switcherBranches} activeId={active.restaurantId} />
@@ -107,7 +115,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               </div>
               <LocaleSwitcher className="lg:hidden" />
             </div>
-            <DesktopNav role={active.role} showChain={showChain} />
+            <DesktopNav role={active.role} showChain={showChain} wave1={wave1} />
           </div>
         </header>
         <main id="main-content" tabIndex={-1} className="mx-auto max-w-6xl px-4 py-6 focus:outline-none sm:px-6 sm:py-8">
