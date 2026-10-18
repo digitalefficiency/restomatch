@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { canSeeRoute } from '@/lib/roles';
-import { Activity, ArrowLeft, CheckCircle2, ClipboardCheck, Hourglass, ShieldCheck } from 'lucide-react';
+import { Activity, ArrowLeft, CheckCircle2, ClipboardCheck, FileText, Hourglass, ShieldCheck } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
 import { formatDate, formatNumber, formatPercent } from '@/lib/i18n/format';
@@ -11,6 +11,7 @@ import { overview } from '@/lib/i18n/messages/overview';
 import type { he as overviewHe } from '@/lib/i18n/messages/overview/he';
 import type { Translator } from '@/lib/i18n/translate';
 import { leaks as leaksNs } from '@/lib/i18n/messages/leaks';
+import { recovery as recoveryNs } from '@/lib/i18n/messages/recovery';
 import {
   EmptyState,
   EntitlementUpsell,
@@ -36,12 +37,18 @@ export default async function DashboardPage() {
   const canDecide = canSeeRoute(role, '/dashboard/approvals');
   const [t, tl, locale] = await Promise.all([getT(overview), getT(leaksNs), getLocale()]);
 
-  const [kpis, hero, lastMonth, activity] = await Promise.all([
+  const [kpis, hero, lastMonth, activity, flags, tr] = await Promise.all([
     caller.owner.kpis(),
     caller.owner.leakHero(),
     caller.owner.leakHero({ monthOffset: -1 }),
     caller.activity.feed({ limit: 8 }),
+    caller.recovery.flags(),
+    getT(recoveryNs),
   ]);
+  // Wave 1 (flags `recovery` / `monthlyReport`): "₪ actually returned this month"
+  // joins the hero, and a link previews the monthly report.
+  const returned = flags.recovery ? await caller.recovery.returnedThisMonth() : null;
+  const canPreviewReport = flags.monthlyReport && canSeeRoute(role, '/dashboard/reports');
 
   // Leak grid is owner-only; other roles simply won't see this section. If the
   // feature is gated behind a paid plan, surface a compact upsell teaser rather
@@ -92,6 +99,16 @@ export default async function DashboardPage() {
         lastMonthLeak={lastMonth.invoiceCount > 0 ? lastMonth.leakIls : null}
         pct={(v) => formatPercent(v, locale, 1)}
         num={(v) => formatNumber(v, locale)}
+        returned={
+          returned
+            ? {
+                label: tr('report.returned'),
+                value: ils(returned.returnedAgorot / 100),
+                href: canSeeRoute(role, '/dashboard/recovery') ? '/dashboard/recovery' : undefined,
+              }
+            : undefined
+        }
+        reportLink={canPreviewReport ? tr('report.preview') : undefined}
       />
 
       {/* Secondary KPIs — the decisions waiting and the match health. */}
@@ -179,6 +196,8 @@ function LeakHero({
   lastMonthLeak,
   pct,
   num,
+  returned,
+  reportLink,
 }: {
   t: OverviewT;
   hero: Hero;
@@ -189,6 +208,10 @@ function LeakHero({
   lastMonthLeak: number | null;
   pct: (v: number) => string;
   num: (v: number) => string;
+  /** Flag `recovery`: "₪ actually returned this month" tile. */
+  returned?: { label: string; value: string; href?: string };
+  /** Flag `monthlyReport`: label of the "preview this month's report" link. */
+  reportLink?: string;
 }) {
   const hasLeak = hero.leakIls > 0;
   return (
@@ -236,13 +259,18 @@ function LeakHero({
           ) : null}
         </div>
 
-        <dl className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-3 lg:grid-cols-1">
+        <dl
+          className={`grid grid-cols-1 gap-3 lg:grid-cols-1 ${returned ? 'min-[420px]:grid-cols-2' : 'min-[420px]:grid-cols-3'}`}
+        >
           <HeroStat label={t('hero.caught')} value={ils(hero.caughtBeforePaymentIls)} hint={t('hero.caughtHint')} tone="gold" />
           <HeroStat label={t('hero.recovered')} value={ils(hero.recoveredIls)} hint={t('hero.recoveredHint')} tone="primary" />
           <HeroStat
             label={t('hero.invoices')}
             value={t('hero.invoicesValue', { withLeak: num(hero.invoicesWithLeak), total: num(hero.matchedInvoiceCount) })}
           />
+          {returned ? (
+            <HeroStat label={returned.label} value={returned.value} tone="gold" href={returned.href} testId="hero-returned" />
+          ) : null}
         </dl>
       </div>
 
@@ -255,6 +283,16 @@ function LeakHero({
 
       <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="max-w-xl text-xs text-subtle">{t('hero.calc')}</p>
+        {reportLink ? (
+          <Link
+            href="/dashboard/reports/monthly"
+            data-testid="hero-report-preview"
+            className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl border border-line bg-surface-2 px-4 py-2 text-sm font-semibold text-ink transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+          >
+            <FileText className="h-4 w-4" aria-hidden="true" />
+            {reportLink}
+          </Link>
+        ) : null}
         {canDrill && (hasLeak || hero.pendingLinkCount > 0) ? (
           <Link
             href="/dashboard/leaks/breakdown"
@@ -274,17 +312,30 @@ function HeroStat({
   value,
   hint,
   tone,
+  href,
+  testId,
 }: {
   label: string;
   value: string;
   hint?: string;
   tone?: 'gold' | 'primary';
+  /** Optional drill-down (the value becomes a link). */
+  href?: string;
+  testId?: string;
 }) {
   const color = tone === 'gold' ? 'text-gold' : tone === 'primary' ? 'text-primary' : 'text-ink';
   return (
-    <div className="rounded-xl border border-line bg-surface-2/60 px-4 py-3">
+    <div className="rounded-xl border border-line bg-surface-2/60 px-4 py-3" data-testid={testId}>
       <dt className="text-xs font-semibold text-subtle">{label}</dt>
-      <dd className={`mt-0.5 font-mono text-xl font-bold tabular-nums ${color}`}>{value}</dd>
+      <dd className={`mt-0.5 font-mono text-xl font-bold tabular-nums ${color}`}>
+        {href ? (
+          <Link href={href} className="hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/60">
+            {value}
+          </Link>
+        ) : (
+          value
+        )}
+      </dd>
       {hint ? <dd className="mt-0.5 text-[11px] leading-snug text-muted">{hint}</dd> : null}
     </div>
   );

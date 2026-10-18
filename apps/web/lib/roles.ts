@@ -47,6 +47,9 @@ export const ROUTE_ROLES: Record<string, UserRole[]> = {
   // and approvals.approve/reject/escalate accept bookkeeper-routed items.
   '/dashboard/approvals': ['owner', 'manager', 'bookkeeper'],
   '/dashboard/leaks': ['owner', 'manager', 'bookkeeper'],
+  // Wave 1 (S12): ₪-back tracker = finance roles (like leaks); the monthly report = owner/manager.
+  '/dashboard/recovery': ['owner', 'manager', 'bookkeeper'],
+  '/dashboard/reports': ['owner', 'manager'],
   '/dashboard/suppliers': ['owner', 'manager'],
   '/dashboard/catalog': ['owner', 'manager'],
   '/dashboard/orders': ['owner', 'manager'],

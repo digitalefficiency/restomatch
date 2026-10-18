@@ -209,6 +209,7 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
     'authed self-service; anonymizes ONLY the caller (ctx.session.userId) — takes no target id, cannot reach another user',
   'dsr.eraseLead': 'admin-denial',
   // Wave 1 · S12 — ₪-back tracker (flag `recovery`) + monthly report (flag `monthlyReport`).
+  'recovery.flags': 'isolation',
   'recovery.summary': 'isolation',
   'recovery.list': 'isolation',
   'recovery.history': 'attack',
@@ -1515,6 +1516,8 @@ describe('recovery + monthly report (A → B)', () => {
   it('flags are per restaurant: B with the flag off is refused while A works', async () => {
     await db.update(restaurants).set({ settings: {} as never }).where(eq(restaurants.id, B.restaurantId));
     try {
+      expect(await callerFor(B).recovery.flags()).toEqual({ recovery: false, monthlyReport: false });
+      expect(await callerFor(A).recovery.flags()).toEqual({ recovery: true, monthlyReport: true });
       await expect(callerFor(B).recovery.summary()).rejects.toMatchObject({ code: 'FORBIDDEN' });
       await expect(callerFor(A).recovery.summary()).resolves.toBeDefined();
     } finally {

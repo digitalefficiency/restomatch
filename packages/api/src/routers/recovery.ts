@@ -1,6 +1,6 @@
 import { RECOVERY_STATUSES } from '@restomatch/db';
 import { z } from 'zod';
-import { assertFeatureOn } from '../lib/featureGate';
+import { assertFeatureOn, isFeatureOn } from '../lib/featureGate';
 import {
   claimHistory,
   computeRecoverySummary,
@@ -32,6 +32,15 @@ const status = z.enum(RECOVERY_STATUSES);
 const monthOffset = z.number().int().min(-24).max(0).optional();
 
 export const recoveryRouter = router({
+  /** Which of this area's flags are on for the caller's restaurant (nav / hero / routes). Never gated. */
+  flags: memberProcedure.query(async ({ ctx }) => {
+    const [recovery, monthlyReport] = await Promise.all([
+      isFeatureOn(ctx.db, ctx.session.restaurantId, 'recovery'),
+      isFeatureOn(ctx.db, ctx.session.restaurantId, 'monthlyReport'),
+    ]);
+    return { recovery, monthlyReport };
+  }),
+
   /** Totals, ageing, per-supplier recovery rate + this month's returned ₪. Materialises new claims first. */
   summary: recoveryProcedure.query(async ({ ctx }) => {
     await syncClaims(ctx.db, ctx.session.restaurantId, ctx.session.userId);
