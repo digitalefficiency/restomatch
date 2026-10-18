@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { WithOriginal, originalProps } from '@/lib/i18n/original';
+import { WithOriginal } from '@/lib/i18n/original';
 import { auth } from '@/auth';
 import { TRPCError } from '@trpc/server';
 import { ArrowLeft, ArrowRight, ShieldAlert } from 'lucide-react';

@@ -13,7 +13,7 @@
  */
 
 import { AlertTriangle, CheckCircle2, Clock, Phone, MessageCircle, Truck } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { showcase } from '@/lib/i18n/messages/showcase';
 import { mockText } from '../_lib/mockText';
@@ -100,10 +100,8 @@ export default function DeliveriesPage() {
     return now.getTime() > deadline.getTime() ? 'late' : 'pending';
   }
 
-  const lateCount = useMemo(
-    () => deliveries.filter((d) => statusOf(d) === 'late').length,
-    [deliveries, now, handled],
-  );
+  // A handful of rows — computed per render (statusOf reads now + handled).
+  const lateCount = deliveries.filter((d) => statusOf(d) === 'late').length;
 
   return (
     <main className="max-w-4xl mx-auto px-4 sm:px-6 py-10">

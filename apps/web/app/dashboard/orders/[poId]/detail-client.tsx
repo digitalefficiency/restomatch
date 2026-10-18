@@ -364,4 +364,3 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
     </div>
   );
 }
-
