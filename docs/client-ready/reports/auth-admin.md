@@ -103,6 +103,16 @@ cd apps/web && set -a && . ./.env.local && set +a && pnpm build → ✓ Compiled
 Playwright flow script (scratchpad, against next dev)        → every check in "Works" PASS
 ```
 
+**After merging `origin/claude/client-ready` (S1 + S3 + S6, a35f265):** `pnpm test` → 12/12 tasks, 849 tests
+(db 45 · api 412 · web 148 · matching 86 · charts 26 · …), web `tsc` 0 errors, `pnpm build` green.
+
+> ⚠️ **Migration-order pitfall for the orchestrator:** drizzle's migrator only applies journal entries
+> whose `when` is newer than the last applied one. A database that already ran a session branch with a
+> higher number (e.g. my 0039) **silently skips** later-merged lower numbers (S1's 0029–0032), and
+> `db:doctor` / the 0029–0032 shape tests then fail. Fix on such a DB: delete the high-number rows from
+> `drizzle.__drizzle_migrations` (all session migrations are idempotent) and re-run `migrate`, or
+> rebuild with `./scripts/dev-setup.sh`. Production applies them in one ordered run, so it is unaffected.
+
 Focused suites added/extended: `packages/db/src/__tests__/migration-0039.test.ts`,
 `packages/api/src/__tests__/team-locale.test.ts`, `cross-tenant.attack.test.ts` (member-locale block),
 `dsr.test.ts` (JWT revocation + credential wipe), `notifications/__tests__/templates.test.ts` (English
