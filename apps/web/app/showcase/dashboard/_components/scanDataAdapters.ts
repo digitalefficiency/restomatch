@@ -125,7 +125,7 @@ export function fromAuditRecordToCompare(record: InvoiceAuditRecord): {
     supplierColor: SUPPLIER_COLORS[record.supplierId] ?? DEFAULT_COLOR,
     customerName: RESTAURANT_NAME,
     customerBusinessId: RESTAURANT_BUSINESS_ID,
-    poNumber: `PO-${record.id.replace('inv-', '')}`,
+    poNumber: record.poNumber,
     poIssuedAt: issuedAt.toISOString(),
     poExpectedAt: record.scannedAt,
     poApprovedBy: 'רומי המנהל',
@@ -182,23 +182,24 @@ export function fromSupplierInvoiceListItem(
 
 /**
  * Distribute the invoice total across the supplier's known top products
- * with plausible quantities. The math is loose on purpose — this is just
- * to fill the rendered scan with believable rows.
+ * with plausible quantities. The rows only approximate `totalIls`, so the
+ * supplier mock re-derives each header-only invoice's totals FROM these rows
+ * (see `withSynthTotals` there) — the list and the rendered scan always agree.
  */
-function synthesiseLines(totalIls: number, products: PriceTrendProduct[]): ScanLine[] {
+export function synthesiseLines(totalIls: number, products: PriceTrendProduct[]): ScanLine[] {
   if (products.length === 0) {
     return [
       {
         name: 'פריט כללי',
         qty: 1,
         unit: 'יח׳',
-        unitPrice: totalIls / 1.17,
+        unitPrice: totalIls,
         confidence: 0.9,
       },
     ];
   }
 
-  const subtotalTarget = totalIls / 1.17;
+  const subtotalTarget = totalIls; // list totals are ex-VAT, like the scan's subtotal
   // Cap at 6 lines so the rendered table stays readable.
   const picks = products.slice(0, Math.min(6, products.length));
   const weights = picks.map((_, i) => 1 / (i + 1));

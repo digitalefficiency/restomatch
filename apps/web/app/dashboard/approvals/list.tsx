@@ -23,10 +23,26 @@ import {
 
 type QueueItem = inferRouterOutputs<AppRouter>['approvals']['myQueue'][number];
 
+/** The view filters the server page was rendered with (URL → myQueue input). */
+export interface QueueFilters {
+  types?: QueueItem['type'][];
+  severities?: QueueItem['severity'][];
+  supplierIds?: string[];
+}
+
 // Must equal the server page size so "has more" is right on first paint.
 const PAGE = 50;
 
-export function ApprovalsList({ initial }: { initial: QueueItem[] }) {
+export function ApprovalsList({
+  initial,
+  filters = {},
+  density = 'comfortable',
+}: {
+  initial: QueueItem[];
+  filters?: QueueFilters;
+  density?: 'comfortable' | 'compact';
+}) {
+  const compact = density === 'compact';
   const t = useT(approvals);
   const locale = useLocale();
   const utils = trpc.useUtils();
@@ -41,7 +57,7 @@ export function ApprovalsList({ initial }: { initial: QueueItem[] }) {
 
   // After a decision, refetch the first page so the resolved row drops out.
   async function refreshFirstPage() {
-    const fresh = await utils.approvals.myQueue.fetch({ limit: PAGE });
+    const fresh = await utils.approvals.myQueue.fetch({ limit: PAGE, ...filters });
     setItems(fresh);
     setHasMore(fresh.length >= PAGE);
   }
@@ -67,6 +83,7 @@ export function ApprovalsList({ initial }: { initial: QueueItem[] }) {
     try {
       const next = await utils.approvals.myQueue.fetch({
         limit: PAGE,
+        ...filters,
         cursor: new Date(last.createdAt).toISOString(),
       });
       setItems((prev) => [...prev, ...next]);
@@ -107,7 +124,7 @@ export function ApprovalsList({ initial }: { initial: QueueItem[] }) {
         </Card>
       ) : null}
 
-      <div className="space-y-3">
+      <div className={compact ? 'space-y-2' : 'space-y-3'}>
         {items.map((d) => {
           const isBlock = d.severity === 'block';
           const isRejecting = activeReject === d.id;
@@ -134,7 +151,7 @@ export function ApprovalsList({ initial }: { initial: QueueItem[] }) {
                 }
               />
 
-              <div className="p-4 ps-5">
+              <div className={compact ? 'p-3 ps-4' : 'p-4 ps-5'}>
                 <header className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -164,7 +181,7 @@ export function ApprovalsList({ initial }: { initial: QueueItem[] }) {
                   </time>
                 </header>
 
-                <WhyFlagged d={d} t={t} />
+                {compact ? null : <WhyFlagged d={d} t={t} />}
 
                 {d.invoiceId ? (
                   <Link

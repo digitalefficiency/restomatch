@@ -1,4 +1,5 @@
 import { sql, type Database } from '@restomatch/db';
+import { lineFilter, viewInvoicesSql, type ViewSpec } from './leak-views';
 
 /**
  * The owner's 10-second story: "₪X leaked this month, Y% of spend, Z caught
@@ -178,14 +179,19 @@ export interface LeakBreakdownInvoice {
 export async function computeLeakBreakdown(
   db: Database,
   restaurantId: string,
-  options: LeakHeroOptions & { limit?: number } = {},
+  options: LeakHeroOptions & { limit?: number; view?: ViewSpec } = {},
 ): Promise<LeakBreakdownInvoice[]> {
   const now = options.now ?? new Date();
   const offset = options.monthOffset ?? 0;
   const limit = Math.min(Math.max(options.limit ?? 50, 1), 200);
+  // A view (period + filters) replaces the month; without one, the hero month as before.
+  const cte = options.view
+    ? viewInvoicesSql(restaurantId, options.view)
+    : monthInvoicesCte(restaurantId, now, offset);
+  const counts = options.view ? lineFilter(restaurantId, options.view.filters) : LEAK_FILTER;
 
   const invRes = await db.execute(sql`
-    WITH ${monthInvoicesCte(restaurantId, now, offset)}
+    WITH ${cte}
     SELECT
       per.id, per.status, per.total, LEAST(per.raw_leak, per.total) AS leak, per.pending_link,
       i.invoice_number, COALESCE(i.invoice_date, i.created_at) AS invoice_date,
@@ -205,7 +211,7 @@ export async function computeLeakBreakdown(
     SELECT
       mr.invoice_id, d.id, d.type, d.severity, d.resolution_status, d.delta_amount,
       d.expected_value, d.actual_value,
-      (${LEAK_FILTER}) AS counts,
+      (${counts}) AS counts,
       p.canonical_name AS product_name, p.name_en AS product_name_en,
       il.raw_description AS line_desc, il.raw_description_en AS line_desc_en
     FROM discrepancies d

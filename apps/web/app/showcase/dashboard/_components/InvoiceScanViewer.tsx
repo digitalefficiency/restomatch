@@ -20,6 +20,7 @@ import { showcase } from '@/lib/i18n/messages/showcase';
 import { formatIls } from '@/lib/money';
 import { localDate } from '../../_lib/time';
 import { mockText } from '../../_lib/mockText';
+import { SHOWCASE_VAT_RATE } from '../../_lib/money';
 import { InvoicePaper } from './InvoicePaperShared';
 
 export interface ScanLine {
@@ -123,7 +124,7 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
     () => data.lines.reduce((sum, l) => sum + l.qty * l.unitPrice, 0),
     [data.lines],
   );
-  const vat = subtotal * 0.17;
+  const vat = subtotal * SHOWCASE_VAT_RATE;
   const total = subtotal + vat;
 
   const dateText = localDate(data.invoiceDate);

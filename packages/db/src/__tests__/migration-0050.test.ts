@@ -48,6 +48,20 @@ describe('0050 / 0051 migration shape', () => {
     ]);
   });
 
+  it('0050 itself enables per-restaurant RLS on all four tables (no rls/*.sql edit)', async () => {
+    const rows = (await sql`
+      select c.relname, c.relrowsecurity, p.polname
+      from pg_class c left join pg_policy p on p.polrelid = c.oid
+      where c.relname in ('ingest_channels','ingest_senders','ingest_messages','ingest_documents')
+      order by c.relname
+    `) as unknown as Array<{ relname: string; relrowsecurity: boolean; polname: string | null }>;
+    expect(rows).toHaveLength(4);
+    for (const r of rows) {
+      expect(r.relrowsecurity).toBe(true);
+      expect(r.polname).toBe(`${r.relname}_tenant`);
+    }
+  });
+
   it('token hashes are unique and only one channel per kind is active', async () => {
     const [c] = await db
       .insert(ingestChannels)

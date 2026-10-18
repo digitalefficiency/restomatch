@@ -12,7 +12,8 @@
 --                   route can resolve its tenant on the RLS-enforced app role before it sets the
 --                   restaurant GUC; it returns nothing for an unknown/revoked token.
 --
--- Additive only. RLS for the four tenant tables: drizzle/rls/0002_core_tenant_rls.sql.
+-- Additive only. RLS for the four tenant tables is enabled HERE (sessions must not edit rls/*.sql,
+-- MASTER-PLAN §4) with the same per-restaurant policy shape rls/0002 gives every tenant table.
 CREATE TABLE IF NOT EXISTS "ingest_channels" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE CASCADE,
@@ -101,4 +102,18 @@ BEGIN
     GRANT USAGE ON SCHEMA app TO restomatch_app;
     GRANT EXECUTE ON FUNCTION app.ingest_resolve_channel(text) TO restomatch_app;
   END IF;
+END $$;--> statement-breakpoint
+-- Per-restaurant RLS, identical in shape to rls/0002's loop. app.current_restaurant_id() is (re)defined
+-- with rls/0002's exact body so this works before provision-rls has run (fresh test/CI databases).
+CREATE OR REPLACE FUNCTION app.current_restaurant_id() RETURNS uuid
+  LANGUAGE sql STABLE
+  AS $$ select nullif(current_setting('app.current_restaurant_id', true), '')::uuid $$;--> statement-breakpoint
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['ingest_channels','ingest_senders','ingest_messages','ingest_documents'] LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format('DROP POLICY IF EXISTS %I ON %I', t || '_tenant', t);
+    EXECUTE format('CREATE POLICY %I ON %I USING (restaurant_id = app.current_restaurant_id())', t || '_tenant', t);
+  END LOOP;
 END $$;

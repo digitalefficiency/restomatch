@@ -116,7 +116,7 @@ export const he = {
   invoices: {
     eyebrow: 'ביקורת בעלים',
     title: 'חשבוניות שעברו דרך הצוות',
-    lead: 'מה הספקים חייבו, מה הצוות אישר בפועל ואיפה היו פערים. לחצו על חשבונית כדי לראות את ההשוואה המלאה.',
+    lead: 'מה הספקים חייבו, מה הצוות אישר בפועל ואיפה היו פערים. לחצו על חשבונית כדי לראות את ההשוואה המלאה. הסכומים לפני מע״מ.',
     kpi: {
       scanned: 'נסרקו היום',
       withIssues: 'עם חריגות',
@@ -151,9 +151,9 @@ export const he = {
     scanButton: 'סריקה',
     scanButtonTitle: 'צפייה בסריקת החשבונית המקורית',
     tiles: {
-      billed: 'חויב בחשבונית',
-      approved: 'אושר ע״י הצוות',
-      saved: 'חיסכון שתועד',
+      billed: 'חויב בחשבונית (לפני מע״מ)',
+      approved: 'אושר ע״י הצוות (לפני מע״מ)',
+      saved: 'חיסכון שתועד (לפני מע״מ)',
     },
     compareCard: {
       title: 'השוואת הזמנה ↔ חשבונית',
@@ -214,8 +214,8 @@ export const he = {
     invoice: 'חשבונית',
     missing: 'חסר',
     potentialLoss: 'הפסד פוטנציאלי',
-    totalOrdered: 'סה״כ הוזמן',
-    totalBilled: 'סה״כ חויב',
+    totalOrdered: 'סה״כ הוזמן (לפני מע״מ)',
+    totalBilled: 'סה״כ חויב (לפני מע״מ)',
     netDiff: 'פער כולל',
     toReview: '{count} שורות לבדיקה. הצוות עדכן {adjusted} מהן.',
     allMatched: 'כל השורות תאמו 1:1',
@@ -238,7 +238,7 @@ export const he = {
       price: 'מחיר',
       total: 'סה״כ',
       subtotal: 'סכום ביניים',
-      vat: 'מע״מ 17%',
+      vat: 'מע״מ 18%',
       orderTotal: 'סה״כ הזמנה',
       approvedBy: 'אושר ע״י: {name}',
       terms: 'תנאי תשלום: שוטף +30',
