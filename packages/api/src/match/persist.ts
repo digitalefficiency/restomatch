@@ -11,6 +11,7 @@ import type { MatchInput, MatchOutput } from '@restomatch/matching';
 import { evaluateApproval, type ApprovalContext } from '../approvals/engine';
 import { buildRules } from '../approvals/engine';
 import { logActivity } from '../activity';
+import { writePriceHistoryForInvoice } from './priceHistory';
 
 export interface PersistMatchArgs {
   restaurantId: string;
@@ -97,6 +98,12 @@ export async function persistMatchRun(
     .update(invoices)
     .set({ status: finalInvoiceStatus })
     .where(and(eq(invoices.id, args.invoiceId), eq(invoices.restaurantId, args.restaurantId)));
+
+  // Feed the leak detective / price baselines (M1). Idempotent per invoice; a
+  // duplicate invoice is not written (it would double-weight its prices).
+  await writePriceHistoryForInvoice(db, args.restaurantId, args.invoiceId, {
+    skip: result.discrepancies.some((d) => d.type === 'DUPLICATE_INVOICE'),
+  });
 
   await logActivity(db, {
     restaurantId: args.restaurantId,

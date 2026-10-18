@@ -35,7 +35,7 @@ drizzle/meta
 .gstack/
 .vercel
 
-# redis-server --daemonize (scripts/dev-setup.sh) writes its snapshot to the cwd
+# Redis local snapshot (redis-server --daemonize writes it to the cwd)
 dump.rdb
 
 # Playwright output (apps/web/e2e)

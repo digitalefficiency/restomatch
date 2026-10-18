@@ -16,6 +16,7 @@
     "db:migrate": "pnpm --filter @restomatch/db migrate",
     "db:seed": "pnpm --filter @restomatch/db seed",
     "db:studio": "pnpm --filter @restomatch/db studio",
+    "db:doctor": "pnpm --filter @restomatch/db run doctor",
     "test": "turbo run test --concurrency=1",
     "test:e2e": "pnpm --filter @restomatch/web test:e2e"
   },

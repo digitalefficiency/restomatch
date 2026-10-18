@@ -22,7 +22,9 @@ const UNIT_MAP: Record<string, UnitDef> = {
 };
 
 function norm(unit: string): string {
-  return unit.trim().toLowerCase().replace(/["'.\s]/g, '');
+  // Strip ASCII quotes/dots/space AND the Hebrew geresh/gershayim (׳ ״) so
+  // "ק״ג" (the common typed form) normalizes like "ק\"ג" → "קג".
+  return unit.trim().toLowerCase().replace(/["'.\s\u05F3\u05F4]/g, '');
 }
 
 /**

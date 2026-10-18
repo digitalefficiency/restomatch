@@ -4,15 +4,18 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Cookie } from 'lucide-react';
 import { getConsentChoice, setConsentChoice, type ConsentChoice } from '@/lib/cookieConsent';
+import { useT } from '@/lib/i18n/client';
+import { marketing } from '@/lib/i18n/messages/marketing';
 
 /**
  * Cookie-consent banner (E.3). Appears on first visit until the visitor makes a
  * choice; the choice is stored in a first-party cookie and the banner does not
  * reappear after reload. Strictly-necessary cookies (Auth.js session/CSRF) are
  * always active and are disclosed in the cookie policy; analytics stay off until
- * &quot;קבלת הכל&quot;.
+ * "accept all".
  */
 export function CookieConsent() {
+  const t = useT(marketing);
   // Start hidden; decide after mount so SSR/CSR markup matches and we can read
   // the existing cookie.
   const [visible, setVisible] = useState(false);
@@ -32,7 +35,7 @@ export function CookieConsent() {
     <div
       role="dialog"
       aria-live="polite"
-      aria-label="הסכמה לשימוש בעוגיות"
+      aria-label={t('cookie.label')}
       className="fixed inset-x-0 bottom-0 z-50 px-4 pb-4"
     >
       <div className="glass mx-auto flex max-w-3xl flex-col gap-4 rounded-2xl border border-line bg-surface/95 p-5 shadow-card sm:flex-row sm:items-center sm:justify-between">
@@ -41,10 +44,9 @@ export function CookieConsent() {
             <Cookie className="h-4 w-4" aria-hidden="true" />
           </span>
           <p className="text-sm leading-relaxed text-muted">
-            אנו משתמשים בעוגיות חיוניות לתפעול המאובטח של המערכת. עוגיות לא-חיוניות
-            (כגון אנליטיקה) יופעלו רק לאחר אישורכם.{' '}
+            {t('cookie.body')}{' '}
             <Link href="/cookies" className="text-primary underline hover:no-underline">
-              למדיניות העוגיות
+              {t('cookie.link')}
             </Link>
             .
           </p>
@@ -53,16 +55,16 @@ export function CookieConsent() {
           <button
             type="button"
             onClick={() => choose('necessary')}
-            className="rounded-xl border border-line bg-surface-2 px-4 py-2 text-sm font-medium text-ink transition-colors hover:border-primary/40"
+            className="rounded-xl border border-line bg-surface-2 px-4 py-2.5 text-sm font-medium text-ink transition-colors hover:border-primary/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
           >
-            רק חיוניות
+            {t('cookie.necessary')}
           </button>
           <button
             type="button"
             onClick={() => choose('all')}
-            className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-on-primary shadow-glow-primary transition-opacity hover:opacity-90"
+            className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-on-primary shadow-glow-primary transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
           >
-            קבלת הכל
+            {t('cookie.all')}
           </button>
         </div>
       </div>

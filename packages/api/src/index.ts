@@ -117,6 +117,7 @@ export {
   recipientsForRestaurant,
   MANAGER_ROLES,
   type RenderedEmail,
+  type EmailLocale,
   type Recipient,
   type Notifiers,
   type Notifier,
@@ -125,6 +126,7 @@ export {
 } from './notifications';
 export { logActivity, type ActivityEventInput, type ActivityEventType } from './activity';
 export { buildMatchInputForInvoice, type BuiltMatchInput } from './match/buildMatchInput';
+export { backfillPriceHistory, writePriceHistoryForInvoice } from './match/priceHistory';
 export { persistMatchRun, type PersistMatchArgs, type PersistMatchResult } from './match/persist';
 export {
   parseCatalogFile,

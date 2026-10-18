@@ -1,3 +1,4 @@
+import { assertSeedTarget } from '../src/seedGuard';
 import postgres from 'postgres';
 
 async function main() {
@@ -5,9 +6,7 @@ async function main() {
   if (!url) {
     throw new Error('DATABASE_URL is required');
   }
-  if (!url.includes('localhost') && !url.includes('_test')) {
-    throw new Error('Refusing to reset non-local non-test database: ' + url);
-  }
+  assertSeedTarget(url, 'reset');
 
   const sql = postgres(url, { max: 1, prepare: false });
   // Drop the migration tracker too: with `drizzle.__drizzle_migrations` left in

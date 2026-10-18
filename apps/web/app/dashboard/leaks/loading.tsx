@@ -1,8 +1,11 @@
 import { Skeleton } from '@/lib/components';
+import { getT } from '@/lib/i18n/server';
+import { leaks } from '@/lib/i18n/messages/leaks';
 
-export default function Loading() {
+export default async function Loading() {
+  const t = await getT(leaks);
   return (
-    <div role="status" aria-label="טוען">
+    <div role="status" aria-label={t('loading')}>
       <div className="mb-6 space-y-2">
         <div className="h-0.5 w-10 rounded-full flow-stream" aria-hidden="true" />
         <Skeleton className="h-8 w-44" />

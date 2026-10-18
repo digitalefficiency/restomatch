@@ -8,6 +8,8 @@ import {
   leads,
   memberships,
   sessions,
+  userCredentials,
+  userRecoveryCodes,
   users,
   verificationTokens,
 } from '@restomatch/db';
@@ -95,6 +97,29 @@ describe('dsr.deleteMyAccount', () => {
       .from(dsrRequests)
       .where(eq(dsrRequests.subjectId, t.ownerUserId));
     expect(audit.some((r) => r.action === 'delete')).toBe(true);
+  });
+
+  it('revokes live JWTs (token_version bump) and erases password / TOTP material', async () => {
+    const t = await seedTenant(db, 'A');
+    await db.insert(userCredentials).values({
+      userId: t.ownerUserId,
+      passwordHash: '$argon2id$v=19$m=1,t=1,p=1$c2FsdA$aGFzaA',
+      totpSecretEnc: 'ciphertext',
+      totpEnabledAt: new Date(),
+      tokenVersion: 4,
+    });
+    await db.insert(userRecoveryCodes).values({ userId: t.ownerUserId, codeHash: 'h'.repeat(64) });
+
+    await userCaller(t.ownerUserId).dsr.deleteMyAccount({ confirm: true });
+
+    const [cred] = await db.select().from(userCredentials).where(eq(userCredentials.userId, t.ownerUserId));
+    expect(cred!.tokenVersion).toBe(5);
+    expect(cred!.passwordHash).toBeNull();
+    expect(cred!.totpSecretEnc).toBeNull();
+    expect(cred!.totpEnabledAt).toBeNull();
+    expect(
+      await db.select().from(userRecoveryCodes).where(eq(userRecoveryCodes.userId, t.ownerUserId)),
+    ).toHaveLength(0);
   });
 
   it('refuses when the caller is the sole owner of a restaurant that has other members', async () => {

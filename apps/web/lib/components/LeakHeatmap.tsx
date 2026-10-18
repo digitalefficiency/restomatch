@@ -1,5 +1,6 @@
 import { cn } from './cn';
 import { formatIls } from '../money';
+import { intlLocaleOf, type Locale } from '../i18n/config';
 
 export interface LeakCell {
   productName: string;
@@ -25,9 +26,6 @@ function leakColor(deltaPct: number): { bg: string; text: string; intensity: num
   return { bg: `rgb(${r}, ${g}, ${b})`, text, intensity };
 }
 
-function fmtIls(v: number): string {
-  return formatIls(v);
-}
 
 /**
  * Leak heatmap — the signature data-viz. Each tile is a leaking (product,
@@ -35,7 +33,25 @@ function fmtIls(v: number): string {
  * a danger glow that intensifies with the leak, sorted by monthly money lost.
  * Server-safe (no hooks).
  */
-export function LeakHeatmap({ items, max = 24 }: { items: LeakCell[]; max?: number }) {
+export function LeakHeatmap({
+  items,
+  max = 24,
+  locale = 'he',
+  labels,
+}: {
+  items: LeakCell[];
+  max?: number;
+  locale?: Locale;
+  /** Translated legend strings; `more` may contain `{count}`. Hebrew by default. */
+  labels?: { mild: string; severe: string; more: string };
+}) {
+  const fmtIls = (v: number) => formatIls(v, { locale });
+  const pct = (v: number, digits: number) =>
+    new Intl.NumberFormat(intlLocaleOf(locale), {
+      maximumFractionDigits: digits,
+      minimumFractionDigits: digits,
+    }).format(v * 100);
+  const l = labels ?? { mild: 'קל', severe: 'חריג', more: 'ועוד {count} פריטים בטבלה למטה' };
   const sorted = [...items].sort((a, b) => b.monthExcessIls - a.monthExcessIls);
   const shown = sorted.slice(0, max);
   const hidden = sorted.length - shown.length;
@@ -60,10 +76,10 @@ export function LeakHeatmap({ items, max = 24 }: { items: LeakCell[]; max?: numb
                   ? `0 0 0 1px rgba(255,92,122,${0.25 + intensity * 0.35}), 0 8px 26px -8px rgba(255,92,122,${0.3 + intensity * 0.4})`
                   : undefined,
               }}
-              title={`${c.productName} · ${c.supplierName}: +${(c.deltaPct * 100).toFixed(1)}% · ${fmtIls(c.monthExcessIls)}`}
+              title={`${c.productName} · ${c.supplierName}: +${pct(c.deltaPct, 1)}% · ${fmtIls(c.monthExcessIls)}`}
             >
-              <div className="font-mono text-lg font-extrabold tabular-nums">
-                +{(c.deltaPct * 100).toFixed(0)}%
+              <div className="font-mono text-lg font-extrabold tabular-nums" dir="ltr">
+                +{pct(c.deltaPct, 0)}%
               </div>
               <div className="mt-1 truncate text-sm font-semibold">{c.productName}</div>
               <div className="truncate text-xs opacity-80">{c.supplierName}</div>
@@ -76,15 +92,15 @@ export function LeakHeatmap({ items, max = 24 }: { items: LeakCell[]; max?: numb
       </div>
       <div className="mt-4 flex items-center justify-between text-xs text-muted">
         <div className="flex items-center gap-2">
-          <span>קל</span>
+          <span>{l.mild}</span>
           <span
-            className="h-3 w-24 rounded-full ring-1 ring-line"
+            className="h-3 w-24 rounded-full ring-1 ring-line rtl:-scale-x-100"
             style={{ background: 'linear-gradient(90deg, #1C2A23, #FF5C7A)' }}
             aria-hidden="true"
           />
-          <span>חריג</span>
+          <span>{l.severe}</span>
         </div>
-        {hidden > 0 ? <span>ועוד {hidden} פריטים בטבלה למטה</span> : null}
+        {hidden > 0 ? <span>{l.more.replace('{count}', String(hidden))}</span> : null}
       </div>
     </div>
   );
