@@ -260,3 +260,49 @@ describe('local-demo OCR stub', () => {
     expect(await buildDevOcrStub(db, A.restaurantId, B.grId)).toBeNull();
   });
 });
+
+describe('EN-3 — a failed OCR is visible, never silent', () => {
+  it('getInvoice exposes ocrFailed + reason (and never the raw payload)', async () => {
+    await db
+      .update(invoices)
+      .set({
+        status: 'parsed',
+        ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'quota_exceeded' } },
+      })
+      .where(eq(invoices.id, A.invoiceId));
+    const inv = await callerFor(A).receiving.getInvoice({ invoiceId: A.invoiceId });
+    expect(inv.ocrFailed).toBe(true);
+    expect(inv.ocrFailureReason).toBe('quota_exceeded');
+    expect(inv).not.toHaveProperty('ocrPayload');
+  });
+
+  it('a normal invoice reports ocrFailed=false', async () => {
+    const inv = await callerFor(A).receiving.getInvoice({ invoiceId: A.invoiceId });
+    expect(inv.ocrFailed).toBe(false);
+    expect(inv.ocrFailureReason).toBeNull();
+  });
+});
+
+describe('EN-BUDGET-1 — the Claude budget is charged only for real Claude calls', () => {
+  it('glossary-covered pages never consume budget; a real miss consumes exactly one unit', async () => {
+    const { CLAUDE_CALLS_PER_RESTAURANT_PER_HOUR, __resetClaudeBudget, takeClaudeBudget } = await import(
+      '../receiving/english'
+    );
+    __resetClaudeBudget();
+    const { translator } = fakeClaude();
+    __setReceivingTranslator(translator);
+    // Every name on the seeded PO is in the glossary → no budget spent, however often.
+    for (let i = 0; i < CLAUDE_CALLS_PER_RESTAURANT_PER_HOUR + 5; i += 1) {
+      const r = await callerFor(A).receiving.ensureEnglish({ poId: A.poId });
+      expect(r.claude).toBe(false);
+    }
+    // One unit used by a real miss, the rest still available.
+    await addPoLines(A.poId, ['שמשון הגיבור']);
+    const r = await callerFor(A).receiving.ensureEnglish({ poId: A.poId });
+    expect(r.claude).toBe(true);
+    let left = 0;
+    while (takeClaudeBudget(A.restaurantId)) left += 1;
+    expect(left).toBe(CLAUDE_CALLS_PER_RESTAURANT_PER_HOUR - 1);
+    __resetClaudeBudget();
+  });
+});

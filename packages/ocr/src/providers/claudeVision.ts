@@ -27,6 +27,7 @@ import {
   resolveImage,
   toContentBlock,
 } from './_anthropic';
+import { normalizeExtraction } from './normalizeExtraction';
 
 export interface ClaudeVisionConfig {
   apiKey: string;
@@ -130,6 +131,6 @@ export class ClaudeVision implements OcrProvider {
     // failure we THROW so the BullMQ job retries — never silently emit a partial
     // invoice (no manufactured ₪). Model-reported confidence (top-level + per
     // line) flows through because InvoiceOcrResult preserves those fields.
-    return InvoiceOcrResultWithEnglish.parse(parseJsonFromText(text));
+    return InvoiceOcrResultWithEnglish.parse(normalizeExtraction(parseJsonFromText(text)));
   }
 }

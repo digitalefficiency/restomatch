@@ -324,6 +324,7 @@ function statusAccent(status: LineStatus): { border: string } {
     case 'unordered':
       return { border: 'border-danger/30' };
     case 'missing_from_invoice':
+    case 'pending_review':
       return { border: 'border-line' };
     default:
       return { border: 'border-primary/30' };

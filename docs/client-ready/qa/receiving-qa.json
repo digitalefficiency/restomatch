@@ -1,0 +1,99 @@
+{
+  "base": "http://localhost:3000",
+  "at": "2026-10-18T13:38:15.727Z",
+  "pass": 5,
+  "total": 9,
+  "results": [
+    {
+      "id": "A",
+      "title": "receiver · en · 390px — huge photo, double-tap process, English review, double-tap close",
+      "status": "FAIL",
+      "checks": [
+        "12 MP photo stored downscaled (959867 bytes ≤ 3 MB; original 10974210)",
+        "English names with Hebrew originals underneath",
+        "English page is LTR",
+        "double-tap registered exactly one invoice (got 1)",
+        "receipt closed once (completed)"
+      ],
+      "error": "check failed: invoice lines have English persisted",
+      "ms": 377204
+    },
+    {
+      "id": "B",
+      "title": "manager · he · desktop — PDF upload, Hebrew RTL review, adjust, confirm",
+      "status": "PASS",
+      "checks": [
+        "Hebrew page is RTL",
+        "desktop shows the comparison table",
+        "no English names in the Hebrew UI",
+        "PDF registered as one invoice"
+      ],
+      "ms": 520067
+    },
+    {
+      "id": "C",
+      "title": "owner · en + he — invoice page after receiving",
+      "status": "FAIL",
+      "checks": [],
+      "error": "page.goto: Timeout 180000ms exceeded.",
+      "ms": 218966
+    },
+    {
+      "id": "D",
+      "title": "receiver · en — retake after review + two photos before processing",
+      "status": "PASS",
+      "checks": [
+        "only the processed photo became an invoice",
+        "retake registered a second scan (no stale result shown)"
+      ],
+      "ms": 121665
+    },
+    {
+      "id": "E",
+      "title": "receiver · en — huge PDF is refused with a clear message (no upload)",
+      "status": "PASS",
+      "checks": [
+        "\"too large\" message shown",
+        "nothing registered"
+      ],
+      "ms": 16144
+    },
+    {
+      "id": "F",
+      "title": "receiver · en — offline upload shows a network message, recovers when back online",
+      "status": "FAIL",
+      "checks": [],
+      "error": "locator.waitFor: Timeout 60000ms exceeded.",
+      "ms": 63169
+    },
+    {
+      "id": "G",
+      "title": "receiver · en — slow OCR: still-reading → continue with order → background result",
+      "status": "PASS",
+      "checks": [
+        "PO-only review shows no \"missing\" alarms",
+        "calm \"check by hand\" banner instead",
+        "invoice result arrived in the background and was shown on demand"
+      ],
+      "ms": 72546
+    },
+    {
+      "id": "H",
+      "title": "receiver · en — OCR failure is shown, receiving continues against the order",
+      "status": "PASS",
+      "checks": [
+        "failed-read notice shown",
+        "no false alarms on the PO-only review"
+      ],
+      "ms": 65395
+    },
+    {
+      "id": "I",
+      "title": "chef · en — no receiving rights: translated error, never raw server text",
+      "status": "FAIL",
+      "checks": [],
+      "error": "locator.waitFor: Timeout 60000ms exceeded.",
+      "ms": 69179
+    }
+  ]
+}
