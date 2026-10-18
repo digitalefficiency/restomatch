@@ -236,3 +236,70 @@ describe('recipes: CSV import', () => {
     expect(missing).toMatchObject({ ok: false, errors: [{ code: 'missingColumn' }] });
   });
 });
+
+describe('recipes: refuter regressions', () => {
+  it('D1: an absurd batch is rejected at save and can never blank the list', async () => {
+    const tiny = await caller().recipes.save({
+      name: 'tiny', isSubRecipe: true, yieldQty: '0.0001', yieldUnit: 'מנה',
+      items: [{ productId: chicken, quantity: '10', unit: 'ק״ג', wastePct: 0 }],
+    });
+    await expect(
+      caller().recipes.save({ name: 'huge', items: [{ subRecipeId: tiny.id, quantity: '99999999', unit: 'מנה', wastePct: 95 }] }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'recipes.tooLarge' });
+    await expect(caller().recipes.list()).resolves.toBeDefined();
+    await caller().recipes.delete({ id: tiny.id });
+  });
+
+  it('D2: what passes a dry run also commits — limits, nested sub-recipes, in-use subs', async () => {
+    const long = `recipe,ingredient,quantity,unit\n${'x'.repeat(121)},Flour,1,ק״ג`;
+    expect((await caller().recipes.importCsv({ csv: long, dryRun: true })).errors[0]).toMatchObject({ code: 'tooLong' });
+    const pricey = `recipe,ingredient,quantity,unit,menu_price\nGold,Flour,1,ק״ג,250000`;
+    expect((await caller().recipes.importCsv({ csv: pricey, dryRun: true })).errors[0]).toMatchObject({ code: 'badPrice' });
+    const many = ['recipe,ingredient,quantity,unit', ...Array.from({ length: 81 }, () => 'Big,Flour,1,גרם')].join('\n');
+    expect((await caller().recipes.importCsv({ csv: many, dryRun: true })).errors[0]).toMatchObject({ code: 'tooManyLines' });
+    // sauceA uses baseB, defined on a LATER row.
+    const nested = ['recipe,ingredient,quantity,unit,sub_recipe,yield_unit', 'sauceA,baseB,100,גרם,yes,ק״ג', 'baseB,Flour,1,ק״ג,yes,ק״ג'].join('\n');
+    expect(await caller().recipes.importCsv({ csv: nested, dryRun: true })).toMatchObject({ ok: true });
+    expect(await caller().recipes.importCsv({ csv: nested, dryRun: false })).toMatchObject({ ok: true });
+    const cyc = ['recipe,ingredient,quantity,unit,sub_recipe,yield_unit', 'c1,c2,1,ק״ג,yes,ק״ג', 'c2,c1,1,ק״ג,yes,ק״ג'].join('\n');
+    expect((await caller().recipes.importCsv({ csv: cyc, dryRun: true })).errors.map((e) => e.code)).toContain('subRecipeCycle');
+    // Re-import of a sub-recipe used by a dish, without a sub_recipe column, keeps it a sub-recipe.
+    await caller().recipes.importCsv({ csv: 'recipe,ingredient,quantity,unit\nusesB,baseB,50,גרם', dryRun: false });
+    const reimport = 'recipe,ingredient,quantity,unit,yield_unit\nbaseB,Flour,2,ק״ג,ק״ג';
+    expect(await caller().recipes.importCsv({ csv: reimport, dryRun: false })).toMatchObject({ ok: true });
+    expect((await caller().recipes.list()).recipes.find((r) => r.name === 'baseB')!.isSubRecipe).toBe(true);
+    // Explicitly turning it into a dish is reported in the dry run, not a commit-time 409.
+    const toDish = 'recipe,ingredient,quantity,unit,sub_recipe\nbaseB,Flour,2,ק״ג,no';
+    expect((await caller().recipes.importCsv({ csv: toDish, dryRun: true })).errors[0]).toMatchObject({ code: 'subRecipeInUse' });
+  });
+
+  it('D3: a CSV replace keeps the menu price, names, notes and flags it does not state', async () => {
+    const { id } = await caller().recipes.save({
+      name: 'plate', nameEn: 'Plate', category: 'mains', notes: 'keep me', menuPriceAgorot: 5000, menuPriceIncludesVat: false,
+      items: [{ productId: flour, quantity: '1', unit: 'ק״ג', wastePct: 0 }],
+    });
+    expect(await caller().recipes.importCsv({ csv: 'recipe,ingredient,quantity,unit\nplate,Flour,200,גרם', dryRun: false })).toMatchObject({ ok: true });
+    const d = await caller().recipes.get({ id });
+    expect(d.recipe).toMatchObject({ menuPriceAgorot: 5000, nameEn: 'Plate', category: 'mains', menuPriceIncludesVat: false });
+    expect(d.notes).toBe('keep me');
+    expect(d.items).toHaveLength(1);
+  });
+
+  it('D4: mangled numbers are rejected, not reinterpreted', async () => {
+    const res = await caller().recipes.importCsv({
+      csv: ['recipe,ingredient,quantity,unit,waste_pct,menu_price', 'n1,Flour,1,ק״ג,0x10,', 'n2,Flour,1,ק״ג,1e1,', 'n3,Flour,1,ק״ג,,"68,50"'].join('\n'),
+      dryRun: true,
+    });
+    expect(res.errors.map((e) => e.code).sort()).toEqual(['badPrice', 'badWaste', 'badWaste']);
+    const ok = await caller().recipes.importCsv({ csv: 'recipe,ingredient,quantity,unit,menu_price\nn4,Flour,1,ק״ג,"1,250.50"', dryRun: true });
+    expect(ok.ok).toBe(true);
+  });
+
+  it('names are unique case-insensitively; waste keeps ≤ 2 decimals exactly', async () => {
+    await caller().recipes.save({ name: 'Pasta', items: [] });
+    await expect(caller().recipes.save({ name: 'pasta', items: [] })).rejects.toMatchObject({ message: 'recipes.duplicateName' });
+    await expect(
+      caller().recipes.save({ name: 'w', items: [{ productId: flour, quantity: '1', unit: 'ק״ג', wastePct: 2.675 }] }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+});

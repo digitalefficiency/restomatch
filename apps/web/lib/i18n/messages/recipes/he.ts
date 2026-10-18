@@ -100,6 +100,7 @@ export const he = {
       unitMismatch: 'יחידה לא תואמת',
       missingSubRecipe: 'תת-מתכון חסר',
       cycle: 'הפניה מעגלית',
+      overflow: 'כמות לא סבירה',
     },
   },
   changes: {
@@ -160,6 +161,10 @@ export const he = {
       badYield: 'תפוקה לא תקינה "{value}"',
       unknownIngredient: 'לא נמצא מוצר או תת-מתכון בשם "{value}"',
       empty: 'הקובץ ריק או חסר שם מנה',
+      tooLong: 'טקסט ארוך מדי "{value}…"',
+      tooManyLines: 'יותר מ-80 רכיבים במתכון "{value}"',
+      subRecipeCycle: 'תת-המתכון "{value}" מכיל את עצמו',
+      subRecipeInUse: '"{value}" משמש כתת-מתכון במנות אחרות — אי אפשר להפוך אותו למנה',
     },
   },
   errors: {
@@ -171,6 +176,8 @@ export const he = {
     notFound: 'המתכון לא נמצא.',
     productNotFound: 'המוצר לא נמצא.',
     subRecipeNotFound: 'תת-המתכון לא נמצא.',
+    tooLarge: 'הכמויות יוצרות עלות לא סבירה — בדקו כמות ותפוקה.',
+    importFailed: 'הייבוא נכשל ולא נשמר דבר. בדקו את הקובץ ונסו שוב.',
   },
   units: {
     portion: 'מנה',

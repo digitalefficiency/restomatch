@@ -102,6 +102,7 @@ export const en: Shape<typeof he> = {
       unitMismatch: 'Unit mismatch',
       missingSubRecipe: 'Missing sub-recipe',
       cycle: 'Circular reference',
+      overflow: 'Implausible quantity',
     },
   },
   changes: {
@@ -162,6 +163,10 @@ export const en: Shape<typeof he> = {
       badYield: 'Invalid yield “{value}”',
       unknownIngredient: 'No product or sub-recipe named “{value}”',
       empty: 'The file is empty or a row has no dish name',
+      tooLong: 'Text too long “{value}…”',
+      tooManyLines: 'More than 80 ingredients in “{value}”',
+      subRecipeCycle: 'Sub-recipe “{value}” contains itself',
+      subRecipeInUse: '“{value}” is used as a sub-recipe in other dishes — it cannot become a dish',
     },
   },
   errors: {
@@ -173,6 +178,8 @@ export const en: Shape<typeof he> = {
     notFound: 'Recipe not found.',
     productNotFound: 'Product not found.',
     subRecipeNotFound: 'Sub-recipe not found.',
+    tooLarge: 'These quantities make an implausible cost — check the quantity and yield.',
+    importFailed: 'The import failed and nothing was saved. Check the file and try again.',
   },
   units: {
     portion: 'portion',

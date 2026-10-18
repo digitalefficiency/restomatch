@@ -273,3 +273,16 @@ describe('sub-recipe cycles', () => {
     expect([...res.values()].some((r) => r.lines.some((l) => l.status === 'cycle'))).toBe(true);
   });
 });
+
+describe('overflow is contained', () => {
+  it('an absurd recipe gets `overflow` lines; its neighbours still cost normally', () => {
+    const p = prices({ x: { unitPrice: '40.0000', unit: 'ק״ג' } });
+    const tiny = dish('tiny', [line('t', 'x', '10', 'ק״ג')], { isSubRecipe: true, yieldQty: '0.0001' });
+    const huge = dish('huge', [{ id: 'h', productId: null, subRecipeId: 'tiny', quantity: '99999999', unit: 'מנה', wastePct: '95', unitsPerProductUnit: null }]);
+    const fine = dish('fine', [line('f', 'x', '1', 'ק״ג')]);
+    const res = costRecipes([tiny, huge, fine], p, VAT);
+    expect(res.get('huge')!.lines[0]!.status).toBe('overflow');
+    expect(res.get('huge')!.complete).toBe(false);
+    expect(res.get('fine')!.batchCostAgorot).toBe(4000);
+  });
+});

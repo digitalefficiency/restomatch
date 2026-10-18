@@ -178,6 +178,19 @@ function Name({ name, nameEn }: { name: string; nameEn: string | null }) {
   );
 }
 
+/**
+ * "before → after" that reads correctly in RTL too: the pair is isolated LTR
+ * (time flows left→right like the numbers) and each value is its own <bdi>, so
+ * the RLM marks inside Hebrew ₪ strings cannot reorder the arrow or the sign.
+ */
+function Arrow({ from, to }: { from: string; to: string }) {
+  return (
+    <bdi dir="ltr" className="tabular-nums">
+      <bdi>{from}</bdi> → <bdi>{to}</bdi>
+    </bdi>
+  );
+}
+
 function DishesTab({ data }: { data: ListOutput }) {
   const t = useT(recipesNs);
   const locale = useLocale();
@@ -318,9 +331,7 @@ function ChangesTab() {
                             {locale === 'en' && r.driver.nameEn ? r.driver.nameEn : r.driver.name}
                           </span>
                           {': '}
-                          <span className="tabular-nums" dir="ltr">
-                            {priceText(r.driver.priceBefore, locale)} → {priceText(r.driver.priceNow, locale)}
-                          </span>{' '}
+                          <Arrow from={priceText(r.driver.priceBefore, locale)} to={priceText(r.driver.priceNow, locale)} />{' '}
                           (<UnitTextSafe unit={r.driver.unit} />)
                         </>
                       ) : (
@@ -331,17 +342,19 @@ function ChangesTab() {
                 </div>
                 <div className="text-end text-sm tabular-nums">
                   <span className="block text-xs text-subtle">{t('changes.delta')}</span>
-                  <span className={cn('font-bold', r.costDeltaAgorot > 0 ? 'text-danger' : 'text-primary')}>
+                  <bdi dir="ltr" className={cn('font-bold', r.costDeltaAgorot > 0 ? 'text-danger' : 'text-primary')}>
                     {ilsDelta(r.costDeltaAgorot, locale)}
-                  </span>
+                  </bdi>
                 </div>
-                <div className="text-end text-sm">
-                  <span className="block text-xs text-subtle">{t('changes.foodCost')}</span>
-                  <span className="tabular-nums" dir="ltr">
-                    {pct(r.beforeFoodCostBp, locale)} → {pct(r.afterFoodCostBp, locale)}
-                  </span>
-                </div>
-                <Badge tone={LIGHT_TONE[r.afterLight]}>{t(`list.light.${r.afterLight}`)}</Badge>
+                {r.isSubRecipe ? null : (
+                  <>
+                    <div className="text-end text-sm">
+                      <span className="block text-xs text-subtle">{t('changes.foodCost')}</span>
+                      <Arrow from={pct(r.beforeFoodCostBp, locale)} to={pct(r.afterFoodCostBp, locale)} />
+                    </div>
+                    <Badge tone={LIGHT_TONE[r.afterLight]}>{t(`list.light.${r.afterLight}`)}</Badge>
+                  </>
+                )}
               </Card>
             </li>
           ))}
@@ -403,7 +416,8 @@ function ImpactTab() {
           <p className="text-base font-semibold text-ink">
             {t('impact.headline', {
               product: displayName(impact.data.product.name, impact.data.product.nameEn, locale).primary,
-              change: `${impact.data.changeBp >= 0 ? '+' : '−'}${pct(Math.abs(impact.data.changeBp), locale)}`,
+              // LRI…PDI keeps the sign in front of the number inside a Hebrew sentence.
+              change: `\u2066${impact.data.changeBp >= 0 ? '+' : '−'}${pct(Math.abs(impact.data.changeBp), locale)}\u2069`,
               count: formatNumber(impact.data.rows.length, locale),
             })}
           </p>
@@ -424,18 +438,14 @@ function ImpactTab() {
                   </span>
                   <span className="text-sm text-muted">
                     {r.beforeFoodCostBp != null ? (
-                      <span dir="ltr" className="tabular-nums">
-                        {pct(r.beforeFoodCostBp, locale)} → {pct(r.afterFoodCostBp, locale)}
-                      </span>
+                      <Arrow from={pct(r.beforeFoodCostBp, locale)} to={pct(r.afterFoodCostBp, locale)} />
                     ) : (
-                      <span className="tabular-nums" dir="ltr">
-                        {ils(r.beforeCostAgorot, locale)} → {ils(r.afterCostAgorot, locale)}
-                      </span>
+                      <Arrow from={ils(r.beforeCostAgorot, locale)} to={ils(r.afterCostAgorot, locale)} />
                     )}
                     {r.marginDeltaAgorot != null ? (
-                      <span className={cn('ms-3 font-semibold tabular-nums', r.marginDeltaAgorot < 0 ? 'text-danger' : 'text-primary')}>
+                      <bdi dir="ltr" className={cn('ms-3 font-semibold tabular-nums', r.marginDeltaAgorot < 0 ? 'text-danger' : 'text-primary')}>
                         {ilsDelta(r.marginDeltaAgorot, locale)}
-                      </span>
+                      </bdi>
                     ) : null}
                   </span>
                 </li>

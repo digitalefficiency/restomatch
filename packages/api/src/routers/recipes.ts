@@ -65,7 +65,13 @@ const itemInput = z
     subRecipeId: z.string().uuid().nullable().optional(),
     quantity: qtyString,
     unit: unitString,
-    wastePct: z.number().min(0).max(95).default(0),
+    // ≤ 2 decimals so the stored NUMERIC(5,2) is exactly what was sent (no silent rounding).
+    wastePct: z
+      .number()
+      .min(0)
+      .max(95)
+      .refine((v) => Math.abs(v * 100 - Math.round(v * 100)) < 1e-9, 'max 2 decimals')
+      .default(0),
     unitsPerProductUnit: qtyString.nullable().optional(),
     note: z.string().trim().max(200).nullable().optional(),
   })
@@ -208,7 +214,7 @@ async function writeRecipe(
     .where(
       and(
         eq(recipes.restaurantId, restaurantId),
-        eq(recipes.name, input.name),
+        sql`lower(${recipes.name}) = lower(${input.name})`,
         ...(input.id ? [ne(recipes.id, input.id)] : []),
       ),
     )
@@ -260,13 +266,17 @@ async function writeRecipe(
         subRecipeId: it.subRecipeId ?? null,
         quantity: it.quantity,
         unit: it.unit,
-        wastePct: it.wastePct.toFixed(2),
+        wastePct: (Math.round(it.wastePct * 100) / 100).toFixed(2),
         unitsPerProductUnit: it.unitsPerProductUnit ?? null,
         sortOrder: i,
         note: it.note || null,
       })),
     );
   }
+  // Reject a save that makes any recipe's cost absurd (overflow), instead of
+  // storing a row that would show every screen an `overflow` dish.
+  const all = await loadAll(db, restaurantId, 0n);
+  if ([...all.costs.values()].some((c) => c.lines.some((l) => l.status === 'overflow'))) fail('BAD_REQUEST', 'tooLarge');
   return id!;
 }
 
@@ -498,7 +508,7 @@ export const recipesRouter = router({
       await ctx.db
         .update(restaurants)
         .set({
-          settings: sql`jsonb_set(coalesce(${restaurants.settings}, '{}'::jsonb), '{recipes}', coalesce(${restaurants.settings}->'recipes', '{}'::jsonb) || ${JSON.stringify({ targetFoodCostBp })}::jsonb)`,
+          settings: sql`jsonb_set(coalesce(${restaurants.settings}, '{}'::jsonb), '{recipes}', (case when jsonb_typeof(${restaurants.settings}->'recipes') = 'object' then ${restaurants.settings}->'recipes' else '{}'::jsonb end) || ${JSON.stringify({ targetFoodCostBp })}::jsonb)`,
         })
         .where(eq(restaurants.id, rid));
       return { targetBp: targetFoodCostBp };
@@ -521,9 +531,27 @@ export const recipesRouter = router({
         .from(products)
         .where(eq(products.restaurantId, rid));
       const existing = await ctx.db
-        .select({ id: recipes.id, name: recipes.name, isSubRecipe: recipes.isSubRecipe })
+        .select({
+          id: recipes.id,
+          name: recipes.name,
+          nameEn: recipes.nameEn,
+          category: recipes.category,
+          isSubRecipe: recipes.isSubRecipe,
+          menuPriceAgorot: recipes.menuPriceAgorot,
+          menuPriceIncludesVat: recipes.menuPriceIncludesVat,
+          active: recipes.active,
+          notes: recipes.notes,
+        })
         .from(recipes)
         .where(eq(recipes.restaurantId, rid));
+      const usedAsSub = new Set(
+        (
+          await ctx.db
+            .select({ id: recipeItems.subRecipeId })
+            .from(recipeItems)
+            .where(and(eq(recipeItems.restaurantId, rid), sql`${recipeItems.subRecipeId} is not null`))
+        ).map((r) => r.id!),
+      );
       const key = (s: string) => s.trim().toLowerCase();
       const prodByName = new Map<string, (typeof prodRows)[number]>();
       for (const p of prodRows) {
@@ -532,14 +560,41 @@ export const recipesRouter = router({
       }
       const existingByName = new Map(existing.map((r) => [key(r.name), r] as const));
       const errors = [...parsed.errors];
-      const csvSubs = new Set(parsed.recipes.filter((r) => r.isSubRecipe).map((r) => key(r.name)));
+      // Effective sub-recipe flag: the CSV's, else the existing recipe's (a replace keeps it).
+      const isSub = (r: CsvRecipe) => r.isSubRecipe ?? existingByName.get(key(r.name))?.isSubRecipe ?? false;
+      const csvByName = new Map(parsed.recipes.map((r) => [key(r.name), r] as const));
+      const firstRow = (r: CsvRecipe) => r.lines[0]?.row ?? 2;
       for (const r of parsed.recipes) {
         for (const l of r.lines) {
-          if (!prodByName.has(key(l.ingredient)) && !csvSubs.has(key(l.ingredient)) && !existingByName.get(key(l.ingredient))?.isSubRecipe) {
-            errors.push({ row: l.row, code: 'unknownIngredient', value: l.ingredient });
-          }
+          const k = key(l.ingredient);
+          if (prodByName.has(k)) continue;
+          const csvSub = csvByName.get(k);
+          if (csvSub ? isSub(csvSub) : existingByName.get(k)?.isSubRecipe) continue;
+          errors.push({ row: l.row, code: 'unknownIngredient', value: l.ingredient });
         }
+        const ex = existingByName.get(key(r.name));
+        if (ex && usedAsSub.has(ex.id) && !isSub(r)) errors.push({ row: firstRow(r), code: 'subRecipeInUse', value: r.name });
       }
+      // Sub-recipes in dependency order (a sauce that uses a base comes after the base).
+      const subs = parsed.recipes.filter(isSub);
+      const ordered: CsvRecipe[] = [];
+      const state = new Map<string, 'visiting' | 'done'>();
+      const visit = (r: CsvRecipe): boolean => {
+        const k = key(r.name);
+        if (state.get(k) === 'done') return true;
+        if (state.get(k) === 'visiting') return false;
+        state.set(k, 'visiting');
+        for (const l of r.lines) {
+          const dep = prodByName.has(key(l.ingredient)) ? undefined : csvByName.get(key(l.ingredient));
+          if (dep && isSub(dep) && !visit(dep)) return false;
+        }
+        state.set(k, 'done');
+        ordered.push(r);
+        return true;
+      };
+      for (const r of subs) if (!visit(r)) errors.push({ row: firstRow(r), code: 'subRecipeCycle', value: r.name });
+      ordered.push(...parsed.recipes.filter((r) => !isSub(r)));
+
       const preview = parsed.recipes.map((r) => ({
         name: r.name,
         lines: r.lines.length,
@@ -547,10 +602,9 @@ export const recipesRouter = router({
       }));
       if (errors.length || input.dryRun) return { ok: errors.length === 0, errors, recipes: preview };
 
-      // Sub-recipes first so dishes can reference them by id.
-      const ordered: CsvRecipe[] = [...parsed.recipes.filter((r) => r.isSubRecipe), ...parsed.recipes.filter((r) => !r.isSubRecipe)];
       const idByName = new Map(existing.map((r) => [key(r.name), r.id] as const));
       for (const r of ordered) {
+        const ex = existingByName.get(key(r.name));
         const items = r.lines.map((l) => {
           const p = prodByName.get(key(l.ingredient));
           const subId = !p ? idByName.get(key(l.ingredient)) : undefined;
@@ -564,19 +618,25 @@ export const recipesRouter = router({
             note: null,
           };
         });
-        const id = await writeRecipe(ctx.db, rid, recipeInput.parse({
-          id: idByName.get(key(r.name)),
-          name: r.name,
-          nameEn: r.nameEn,
-          category: r.category,
-          isSubRecipe: r.isSubRecipe,
+        // A replace only swaps the lines + the fields the CSV states; the menu
+        // price, names, notes and flags the CSV leaves blank are KEPT.
+        const parsedInput = recipeInput.safeParse({
+          id: ex?.id,
+          name: ex?.name ?? r.name,
+          nameEn: r.nameEn ?? ex?.nameEn ?? null,
+          category: r.category ?? ex?.category ?? null,
+          isSubRecipe: isSub(r),
           yieldQty: r.yieldQty,
           yieldUnit: r.yieldUnit,
-          menuPriceAgorot: r.menuPriceAgorot,
-          menuPriceIncludesVat: true,
-          active: true,
+          menuPriceAgorot: r.menuPriceAgorot ?? ex?.menuPriceAgorot ?? null,
+          menuPriceIncludesVat: ex?.menuPriceIncludesVat ?? true,
+          active: ex?.active ?? true,
+          notes: ex?.notes ?? null,
           items,
-        }));
+        });
+        // Unreachable after the checks above; if it ever happens the whole import rolls back.
+        if (!parsedInput.success) fail('BAD_REQUEST', 'importFailed');
+        const id = await writeRecipe(ctx.db, rid, parsedInput.data);
         idByName.set(key(r.name), id);
       }
       return { ok: true, errors: [], recipes: preview };

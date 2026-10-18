@@ -32,7 +32,8 @@ export interface CsvRecipe {
   name: string;
   nameEn: string | null;
   category: string | null;
-  isSubRecipe: boolean;
+  /** null = the CSV did not say (a replace keeps the existing value). */
+  isSubRecipe: boolean | null;
   yieldQty: string;
   yieldUnit: string;
   menuPriceAgorot: number | null;
@@ -41,11 +42,15 @@ export interface CsvRecipe {
 
 export interface CsvError {
   row: number;
-  code: 'missingColumn' | 'tooManyRows' | 'badQuantity' | 'badUnit' | 'badWaste' | 'badPrice' | 'badYield' | 'unknownIngredient' | 'empty';
+  code:
+    | 'missingColumn' | 'tooManyRows' | 'badQuantity' | 'badUnit' | 'badWaste' | 'badPrice' | 'badYield'
+    | 'unknownIngredient' | 'empty' | 'tooLong' | 'tooManyLines' | 'subRecipeCycle' | 'subRecipeInUse';
   value?: string;
 }
 
 const MAX_ROWS = 2000;
+/** Mirrors the save procedure's zod limits so a dry run that passes also commits. */
+export const CSV_LIMITS = { name: 120, nameEn: 120, category: 60, lines: 80, maxPriceAgorot: 10_000_000 } as const;
 
 const HEADERS: Record<string, keyof RawRow> = {
   recipe: 'recipe', dish: 'recipe', מנה: 'recipe', מתכון: 'recipe',
@@ -80,7 +85,7 @@ export function parseCsvRows(text: string): string[][] {
       if (c === '"' && s[i + 1] === '"') { field += '"'; i++; }
       else if (c === '"') quoted = false;
       else field += c;
-    } else if (c === '"') quoted = true;
+    } else if (c === '"' && field === '') quoted = true;
     else if (c === ',') { row.push(field); field = ''; }
     else if (c === '\n' || c === '\r') {
       if (c === '\r' && s[i + 1] === '\n') i++;
@@ -95,6 +100,10 @@ export function parseCsvRows(text: string): string[][] {
 }
 
 const DEC = /^\d{1,8}(\.\d{1,4})?$/;
+/** ₪ amount: "68", "68.50", "1,250.00" (comma ONLY as a thousands separator). */
+const PRICE = /^(\d{1,7}|\d{1,3}(,\d{3}){1,2})(\.\d{1,2})?$/;
+/** Waste %: 0–95 with ≤ 2 decimals (no hex / exponent forms). */
+const WASTE = /^\d{1,2}(\.\d{1,2})?%?$/;
 const YES = new Set(['yes', 'y', 'true', '1', 'כן', 'v', '✓']);
 
 export function parseRecipeCsv(text: string): { recipes: CsvRecipe[]; errors: CsvError[]; fatal?: CsvError } {
@@ -116,12 +125,19 @@ export function parseRecipeCsv(text: string): { recipes: CsvRecipe[]; errors: Cs
     if (!name) { errors.push({ row: rowNo, code: 'empty' }); return; }
     let r = byName.get(name.toLowerCase());
     if (!r) {
-      r = { name, nameEn: null, category: null, isSubRecipe: false, yieldQty: '1', yieldUnit: 'מנה', menuPriceAgorot: null, lines: [] };
+      if (name.length > CSV_LIMITS.name) { errors.push({ row: rowNo, code: 'tooLong', value: name.slice(0, 40) }); return; }
+      r = { name, nameEn: null, category: null, isSubRecipe: null, yieldQty: '1', yieldUnit: 'מנה', menuPriceAgorot: null, lines: [] };
       byName.set(name.toLowerCase(), r);
     }
     current = r;
-    if (raw.nameEn) r.nameEn = raw.nameEn;
-    if (raw.category) r.category = raw.category;
+    if (raw.nameEn) {
+      if (raw.nameEn.length > CSV_LIMITS.nameEn) errors.push({ row: rowNo, code: 'tooLong', value: raw.nameEn.slice(0, 40) });
+      else r.nameEn = raw.nameEn;
+    }
+    if (raw.category) {
+      if (raw.category.length > CSV_LIMITS.category) errors.push({ row: rowNo, code: 'tooLong', value: raw.category.slice(0, 40) });
+      else r.category = raw.category;
+    }
     if (raw.sub) r.isSubRecipe = YES.has(raw.sub.toLowerCase());
     if (raw.yieldUnit) r.yieldUnit = raw.yieldUnit.slice(0, 32);
     if (raw.yieldQty) {
@@ -129,22 +145,25 @@ export function parseRecipeCsv(text: string): { recipes: CsvRecipe[]; errors: Cs
       else r.yieldQty = raw.yieldQty;
     }
     if (raw.price) {
-      const clean = raw.price.replace(/[₪\s,]/g, '');
-      if (!/^\d{1,7}(\.\d{1,2})?$/.test(clean)) errors.push({ row: rowNo, code: 'badPrice', value: raw.price });
-      else r.menuPriceAgorot = Number(parseScaled(clean, 2));
+      const clean = raw.price.replace(/[₪\s]/g, '');
+      const agorot = PRICE.test(clean) ? Number(parseScaled(clean.replace(/,/g, ''), 2)) : NaN;
+      if (!Number.isFinite(agorot) || agorot > CSV_LIMITS.maxPriceAgorot) errors.push({ row: rowNo, code: 'badPrice', value: raw.price });
+      else r.menuPriceAgorot = agorot;
     }
     if (!raw.ingredient) return; // a recipe-only row (e.g. just the price)
     if (!DEC.test(raw.quantity) || Number(raw.quantity) <= 0) { errors.push({ row: rowNo, code: 'badQuantity', value: raw.quantity }); return; }
     if (!raw.unit || raw.unit.length > 32) { errors.push({ row: rowNo, code: 'badUnit', value: raw.unit }); return; }
+    if (raw.waste && !WASTE.test(raw.waste)) { errors.push({ row: rowNo, code: 'badWaste', value: raw.waste }); return; }
     const waste = raw.waste ? Number(raw.waste.replace('%', '')) : 0;
-    if (!Number.isFinite(waste) || waste < 0 || waste > 95) { errors.push({ row: rowNo, code: 'badWaste', value: raw.waste }); return; }
+    if (waste > 95) { errors.push({ row: rowNo, code: 'badWaste', value: raw.waste }); return; }
     if (raw.unitsPer && (!DEC.test(raw.unitsPer) || Number(raw.unitsPer) <= 0)) { errors.push({ row: rowNo, code: 'badQuantity', value: raw.unitsPer }); return; }
+    if (r.lines.length >= CSV_LIMITS.lines) { errors.push({ row: rowNo, code: 'tooManyLines', value: r.name.slice(0, 40) }); return; }
     r.lines.push({
       row: rowNo,
       ingredient: raw.ingredient,
       quantity: raw.quantity,
       unit: raw.unit,
-      wastePct: Math.round(waste * 100) / 100,
+      wastePct: waste,
       unitsPerProductUnit: raw.unitsPer || null,
     });
   });

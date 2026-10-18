@@ -57,6 +57,8 @@ function norm(u: string): string {
 }
 const MASS = new Set(['mg', 'g', 'gr', 'גרם', 'kg', 'קג', 'קילו']);
 const VOLUME = new Set(['ml', 'מל', 'cl', 'l', 'ליטר']);
+/** Count synonyms — mirror of the server's COUNT_UNITS (recipes/cost.ts). */
+const COUNT = new Set(['יח', 'יחידה', 'יחידות', 'unit', 'units', 'pc', 'pcs', 'ea', 'each']);
 
 /** Units a recipe line can use for an ingredient sold in `sourceUnit`. */
 export function unitOptions(sourceUnit: string | null | undefined): string[] {
@@ -72,7 +74,7 @@ export function convertsTo(unit: string, sourceUnit: string | null | undefined):
   const a = norm(unit);
   const b = norm(sourceUnit);
   if (a === b) return true;
-  return (MASS.has(a) && MASS.has(b)) || (VOLUME.has(a) && VOLUME.has(b));
+  return (MASS.has(a) && MASS.has(b)) || (VOLUME.has(a) && VOLUME.has(b)) || (COUNT.has(a) && COUNT.has(b));
 }
 
 function uniq(xs: string[]): string[] {
@@ -87,10 +89,13 @@ function uniq(xs: string[]): string[] {
 
 /** "₪68" / "68.50" → integer agorot, or null when empty/invalid. */
 export function shekelInputToAgorot(v: string): number | null {
-  const clean = v.replace(/[₪\s,]/g, '');
-  if (!clean) return null;
-  if (!/^\d{1,7}(\.\d{1,2})?$/.test(clean)) return NaN;
+  const raw = v.replace(/[₪\s]/g, '');
+  if (!raw) return null;
+  // Comma only as a thousands separator ("1,250.50"); "68,50" is rejected, never ₪6,850.
+  if (!/^(\d{1,6}|\d{1,3},\d{3})(\.\d{1,2})?$/.test(raw)) return NaN;
+  const clean = raw.replace(/,/g, '');
   const [i, f = ''] = clean.split('.');
+  if (Number(i) > 100_000) return NaN; // server cap: ₪100,000
   return Number(i) * 100 + Number(f.padEnd(2, '0'));
 }
 

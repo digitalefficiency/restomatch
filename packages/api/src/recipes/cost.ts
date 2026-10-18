@@ -122,7 +122,7 @@ export type PriceMap = ReadonlyMap<string, ProductPrice>;
 
 /* ── Outputs ───────────────────────────────────────────────────────────── */
 
-export type LineStatus = 'ok' | 'missingPrice' | 'unitMismatch' | 'missingSubRecipe' | 'cycle';
+export type LineStatus = 'ok' | 'missingPrice' | 'unitMismatch' | 'missingSubRecipe' | 'cycle' | 'overflow';
 
 export interface LineCost {
   itemId: string;
@@ -159,10 +159,18 @@ export class RecipeCycleError extends Error {
 
 const BP = 10_000n;
 
-function toSafeNumber(n: bigint): number {
-  if (n > BigInt(Number.MAX_SAFE_INTEGER) || n < BigInt(Number.MIN_SAFE_INTEGER)) {
-    throw new RangeError('amount exceeds safe integer range');
+/** ₪1bn in agorot — any single amount beyond this is nonsense input, not a dish. */
+export const MAX_AMOUNT_AGOROT = 100_000_000_000n;
+
+export class AmountOverflowError extends RangeError {
+  constructor() {
+    super('amount exceeds the supported range');
+    this.name = 'AmountOverflowError';
   }
+}
+
+function toSafeNumber(n: bigint): number {
+  if (n > MAX_AMOUNT_AGOROT || n < -MAX_AMOUNT_AGOROT) throw new AmountOverflowError();
   return Number(n);
 }
 
@@ -191,9 +199,35 @@ export function costRecipes(
   const done = new Map<string, RecipeCost>();
   const visiting = new Set<string>();
 
+  /**
+   * An absurd batch (e.g. 99 999 999 portions of a 0.0001-yield sub-recipe)
+   * marks THAT recipe's lines `overflow` instead of throwing, so one bad row
+   * can never blank every recipes screen (the save path rejects it too).
+   */
   const costOf = (r: CostRecipe): RecipeCost => {
     const memo = done.get(r.id);
     if (memo) return memo;
+    try {
+      return costOfUnsafe(r);
+    } catch (err) {
+      if (!(err instanceof AmountOverflowError)) throw err;
+      visiting.delete(r.id);
+      const result: RecipeCost = {
+        recipeId: r.id,
+        batchCostAgorot: 0,
+        portionCostAgorot: 0,
+        netMenuPriceAgorot: null,
+        foodCostBp: null,
+        grossMarginAgorot: null,
+        complete: false,
+        lines: r.items.map((it) => ({ itemId: it.id, productId: it.productId, subRecipeId: it.subRecipeId, status: 'overflow', costAgorot: 0 })),
+      };
+      done.set(r.id, result);
+      return result;
+    }
+  };
+
+  const costOfUnsafe = (r: CostRecipe): RecipeCost => {
     visiting.add(r.id);
     const yieldScaled = parseScaled(r.yieldQty, 4);
     const lines: LineCost[] = [];

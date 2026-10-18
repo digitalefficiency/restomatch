@@ -55,7 +55,7 @@ interface Line {
   status?: string;
 }
 
-const RECIPE_ERRORS = ['duplicateName', 'cycle', 'notSubRecipe', 'unitMismatch', 'inUse', 'notFound', 'productNotFound', 'subRecipeNotFound'] as const;
+const RECIPE_ERRORS = ['duplicateName', 'cycle', 'notSubRecipe', 'unitMismatch', 'inUse', 'notFound', 'productNotFound', 'subRecipeNotFound', 'tooLarge', 'importFailed'] as const;
 let seq = 0;
 const newKey = () => `l${++seq}`;
 
@@ -134,8 +134,10 @@ export function RecipeEditor({ recipeId, startAsSub = false }: { recipeId?: stri
   const del = trpc.recipes.delete.useMutation({
     onSuccess: async () => {
       toast.success(t('editor.deleted'));
-      await utils.recipes.invalidate();
+      // Never refetch the deleted recipe (recipes.get → NOT_FOUND): drop it, refresh the lists.
+      utils.recipes.get.setData({ id: recipeId ?? '' }, undefined);
       router.push('/dashboard/recipes');
+      await Promise.all([utils.recipes.list.invalidate(), utils.recipes.changes.invalidate(), utils.recipes.subRecipes.invalidate()]);
     },
     onError: (e) => toast.error(errorText(e)),
   });
