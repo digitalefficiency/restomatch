@@ -23,6 +23,7 @@ const config: NextConfig = {
     '@restomatch/api',
     '@restomatch/charts',
     '@restomatch/db',
+    '@restomatch/ingest',
     '@restomatch/ocr',
     '@restomatch/translate',
     '@restomatch/types',

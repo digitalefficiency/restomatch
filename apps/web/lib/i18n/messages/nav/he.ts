@@ -10,6 +10,7 @@ export const he = {
     overview: 'סקירה',
     receiving: 'קליטת סחורה',
     approvals: 'תור אישורים',
+    inbox: 'תיבת חשבוניות',
     leaks: 'בלש דליפות',
     suppliers: 'ספקים',
     catalog: 'קטלוג',

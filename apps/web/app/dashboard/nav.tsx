@@ -12,6 +12,7 @@ import {
   Inbox,
   LayoutDashboard,
   LogOut,
+  Mail,
   Menu,
   MoreHorizontal,
   PackageCheck,
@@ -23,6 +24,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { UserRole } from '@restomatch/db';
+import type { FeatureKey } from '@restomatch/api';
 import { cn } from '@/lib/components';
 import { useT } from '@/lib/i18n/client';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
@@ -34,6 +36,7 @@ type LinkKey =
   | 'overview'
   | 'receiving'
   | 'approvals'
+  | 'inbox'
   | 'leaks'
   | 'suppliers'
   | 'catalog'
@@ -48,12 +51,21 @@ interface NavItem {
   href: string;
   icon: LucideIcon;
   group: GroupKey;
+  /** Wave-1 flag(s): the item shows only when one of them is enabled. */
+  features?: FeatureKey[];
 }
 
 export const NAV_ITEMS: NavItem[] = [
   { key: 'overview', href: '/dashboard', icon: LayoutDashboard, group: 'operations' },
   { key: 'receiving', href: '/dashboard/receiving', icon: PackageCheck, group: 'operations' },
   { key: 'approvals', href: '/dashboard/approvals', icon: Inbox, group: 'operations' },
+  {
+    key: 'inbox',
+    href: '/dashboard/inbox',
+    icon: Mail,
+    group: 'operations',
+    features: ['ingestWhatsapp', 'ingestEmail'],
+  },
   { key: 'leaks', href: '/dashboard/leaks', icon: BarChart3, group: 'operations' },
   { key: 'suppliers', href: '/dashboard/suppliers', icon: Truck, group: 'purchasing' },
   { key: 'catalog', href: '/dashboard/catalog', icon: Boxes, group: 'purchasing' },
@@ -72,8 +84,11 @@ function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-function visibleItems(role: UserRole): NavItem[] {
-  return NAV_ITEMS.filter(({ href }) => canSeeRoute(role, href));
+function visibleItems(role: UserRole, enabled: readonly FeatureKey[] = []): NavItem[] {
+  return NAV_ITEMS.filter(
+    ({ href, features }) =>
+      canSeeRoute(role, href) && (!features || features.some((f) => enabled.includes(f))),
+  );
 }
 
 const focusRing =
@@ -84,10 +99,10 @@ const focusRing =
  * with hairline separators. Scrolls horizontally instead of wrapping if a
  * narrow laptop can't fit every tab.
  */
-export function DesktopNav({ role }: { role: UserRole }) {
+export function DesktopNav({ role, features }: { role: UserRole; features?: FeatureKey[] }) {
   const t = useT(nav);
   const pathname = usePathname();
-  const items = visibleItems(role);
+  const items = visibleItems(role, features);
   return (
     <nav aria-label={t('mainLabel')} className="hidden lg:block">
       <ul className="-mb-px flex items-stretch gap-1 overflow-x-auto text-sm [scrollbar-width:none]">
@@ -138,11 +153,13 @@ export function MobileNav({
   logout,
   restaurantName,
   email,
+  features,
 }: {
   role: UserRole;
   logout: () => Promise<void>;
   restaurantName: string;
   email: string;
+  features?: FeatureKey[];
 }) {
   const t = useT(nav);
   const pathname = usePathname();
@@ -154,7 +171,7 @@ export function MobileNav({
   useEffect(() => setMounted(true), []);
   const closeRef = useRef<HTMLButtonElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const items = visibleItems(role);
+  const items = visibleItems(role, features);
   const primary = items.slice(0, 4);
 
   // Close on navigation.

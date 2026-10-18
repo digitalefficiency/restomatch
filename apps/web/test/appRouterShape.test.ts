@@ -22,6 +22,7 @@ const ROUTER_KEYS = [
   'catalog',
   'dsr',
   'exports',
+  'ingest',
   'leads',
   'mapping',
   'match',

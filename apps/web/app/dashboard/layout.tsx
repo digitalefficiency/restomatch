@@ -8,6 +8,7 @@ import { getLocale, getT } from '@/lib/i18n/server';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { nav } from '@/lib/i18n/messages/nav';
 import { labelForRole } from '@/lib/roles';
+import { enabledFeatures } from '@/lib/ingest/features';
 import { LocaleSync } from './locale-sync';
 import { DesktopNav, MobileNav } from './nav';
 import { DashboardSearch } from './search';
@@ -35,7 +36,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const active =
     memberships.find((m) => m.restaurantId === session.user.restaurantId) ?? memberships[0]!;
-  const [t, locale] = await Promise.all([getT(nav), getLocale()]);
+  const [t, locale, features] = await Promise.all([getT(nav), getLocale(), enabledFeatures(active.restaurantId)]);
   const roleLabel = labelForRole(active.role, locale);
   const email = session.user.email ?? '';
 
@@ -62,6 +63,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 logout={logout}
                 restaurantName={active.restaurantName}
                 email={email}
+                features={features}
               />
               <div className="min-w-0 flex-1 lg:flex-none">
                 <p className="truncate text-lg font-bold tracking-tight text-ink">
@@ -90,7 +92,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               </div>
               <LocaleSwitcher className="lg:hidden" />
             </div>
-            <DesktopNav role={active.role} />
+            <DesktopNav role={active.role} features={features} />
           </div>
         </header>
         <main id="main-content" tabIndex={-1} className="mx-auto max-w-6xl px-4 py-6 focus:outline-none sm:px-6 sm:py-8">
