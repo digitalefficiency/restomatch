@@ -1,6 +1,6 @@
 import { fillEnglishNames, meterOcrScan } from '@restomatch/api';
 import { matchProductTopN, MockEmbeddingProvider } from '@restomatch/catalog';
-import { and, eq, invoiceLines, invoices, restaurants } from '@restomatch/db';
+import { and, eq, invoiceLines, invoices, restaurants, type Database } from '@restomatch/db';
 import {
   ClaudeVision,
   runOcrPipeline,
@@ -221,7 +221,7 @@ export function startOcrInvoiceWorker() {
  * ₪ discrepancy is ever computed from a failed read.
  */
 export async function markOcrFailed(
-  db: ReturnType<typeof createDb>,
+  db: Database,
   restaurantId: string,
   invoiceId: string,
   err: unknown,
