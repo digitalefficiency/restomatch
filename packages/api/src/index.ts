@@ -19,6 +19,7 @@ import { matchRouter } from './routers/match';
 import { mappingRouter } from './routers/mapping';
 import { productsRouter } from './routers/products';
 import { teamRouter } from './routers/team';
+import { chainRouter } from './routers/chain';
 import { leakCheckRouter } from './routers/leakCheck';
 import { growthRouter } from './routers/growth';
 
@@ -41,6 +42,7 @@ export const appRouter = router({
   match: matchRouter,
   mapping: mappingRouter,
   products: productsRouter,
+  chain: chainRouter,
   team: teamRouter,
   dsr: dsrRouter,
   growth: growthRouter,
@@ -205,7 +207,13 @@ export {
   quotePlan,
   chainPerBranchAgorot,
   CHAIN_INCLUDED_BRANCHES,
-  MAX_CHAIN_BRANCHES,
+  MAX_CHAIN_BRANCHES as MAX_PRICED_CHAIN_BRANCHES,
   type BillingCycle,
   type PlanQuote,
 } from '@restomatch/billing';
+export {
+  MAX_CHAIN_BRANCHES,
+  type ChainBranch,
+  type ChainBranchesResult,
+  type ChainOverviewResult,
+} from './routers/chain';
