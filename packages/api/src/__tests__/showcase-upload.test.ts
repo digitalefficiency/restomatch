@@ -93,4 +93,11 @@ describe('isShowcaseScanUrl (public OCR endpoint input)', () => {
     expect(isShowcaseScanUrl(`${base}walk-ins/?token=t`, SB)).toBe(false);
     expect(isShowcaseScanUrl(ok, undefined)).toBe(false);
   });
+  it('rejects tab / newline smuggling that URL parsing would turn into ../ (refuter #7)', () => {
+    const base = `${SB}/storage/v1/object/sign/invoice-scans/`;
+    expect(new URL(`${base}walk-ins/.\t./tenant-1/x.jpg`).pathname).toContain('/invoice-scans/tenant-1/');
+    expect(isShowcaseScanUrl(`${base}walk-ins/.\t./tenant-1/x.jpg?token=t`, SB)).toBe(false);
+    expect(isShowcaseScanUrl(`${base}walk-ins/.\n./tenant-1/x.jpg?token=t`, SB)).toBe(false);
+    expect(isShowcaseScanUrl(`${base}walk-ins/.\r./tenant-1/x.jpg?token=t`, SB)).toBe(false);
+  });
 });

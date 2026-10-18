@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { adaptReconciliation, type InvoiceLineRow, type PoLineRow } from '../_adapters';
+import { adaptReconciliation, keepAdjusted, type InvoiceLineRow, type PoLineRow } from '../_adapters';
 
 /** EN-5: the receiving review is calm — no false "missing" / "not ordered" alarms. */
 const po = { id: 'po', supplierId: 's', supplierName: 'ספק', expectedAt: null, status: 'sent', totalEstimated: null };
@@ -77,5 +77,68 @@ describe('adaptReconciliation — calm statuses (EN-5)', () => {
       invoiceLines: [inv({ id: 'a', productId: 'p1', qtyBilled: '4', unitPriceBilled: '20' })],
     });
     expect(result.lines.filter((l) => l.invoiceLineIndex !== null)).toHaveLength(1);
+  });
+});
+
+describe('adaptReconciliation — refuter cases (EN-5)', () => {
+  it('one ordered item billed on two invoice lines is folded: matched, no gap, no "not ordered"', () => {
+    const { result } = adaptReconciliation({
+      po,
+      poLines: [{ id: 'pl1', productId: 'p1', rawDescription: 'חזה עוף', qtyOrdered: '10', unit: 'ק״ג', unitPriceExpected: '25' }],
+      receiptLines: [],
+      invoiceLines: [
+        inv({ id: 'a', productId: 'p1', qtyBilled: '5', unitPriceBilled: '25', lineTotal: '125' }),
+        inv({ id: 'b', productId: 'p1', qtyBilled: '5', unitPriceBilled: '25', lineTotal: '125' }),
+      ],
+    });
+    expect(result.lines).toHaveLength(1);
+    expect(result.lines[0]).toMatchObject({ status: 'matched', invoiceQty: 10, deltaIls: 0 });
+    expect(result.summary.unorderedCount).toBe(0);
+    expect(result.summary.headlineDelta).toBe(0);
+  });
+
+  it('a real split shortfall still shows the true gap once', () => {
+    const { result } = adaptReconciliation({
+      po,
+      poLines: [{ id: 'pl1', productId: 'p1', rawDescription: 'חזה עוף', qtyOrdered: '10', unit: 'ק״ג', unitPriceExpected: '25' }],
+      receiptLines: [],
+      invoiceLines: [
+        inv({ id: 'a', productId: 'p1', qtyBilled: '5', unitPriceBilled: '25', lineTotal: '125' }),
+        inv({ id: 'b', productId: 'p1', qtyBilled: '3', unitPriceBilled: '25', lineTotal: '75' }),
+      ],
+    });
+    expect(result.lines).toHaveLength(1);
+    expect(result.lines[0]).toMatchObject({ status: 'qty_diff', invoiceQty: 8, deltaIls: 50 });
+    expect(result.summary.headlineDelta).toBe(50);
+  });
+
+  it('an unreadable (zero-filled) invoice line is "check by hand", never a ₪ gap', () => {
+    const { result } = adaptReconciliation({
+      po,
+      poLines: [{ id: 'pl1', productId: 'p1', rawDescription: 'עגבניות', qtyOrdered: '10', unit: 'ק״ג', unitPriceExpected: '25' }],
+      receiptLines: [],
+      invoiceLines: [
+        inv({ id: 'a', productId: 'p1', qtyBilled: '0', unitPriceBilled: '25', lineTotal: '0' }),
+        inv({ id: 'b', productId: 'p9', qtyBilled: '2', unitPriceBilled: '0', lineTotal: '0' }),
+      ],
+    });
+    expect(result.lines.map((l) => l.status)).toEqual(['pending_review', 'pending_review']);
+    expect(result.summary.headlineDelta).toBe(0);
+  });
+});
+
+describe('keepAdjusted (EN-4: "Show results" never discards what the receiver counted)', () => {
+  it('keeps hand-adjusted lines, refreshes the rest', () => {
+    const mark = (q: number, touched = false) => ({
+      poLineId: 'pl', invoiceLineIndex: 0, productId: null, productName: 'x',
+      qtyReceived: q, qtyRejected: 0, condition: 'ok' as const, touched,
+    });
+    const prev = { a: { ...mark(3, true), qtyRejected: 1, condition: 'rejected' as const }, b: mark(9, true) };
+    const next = { a: mark(10), b: mark(5), c: mark(1) };
+    const out = keepAdjusted(prev, next, new Set(['a', 'gone']));
+    expect(out.a).toMatchObject({ qtyReceived: 3, qtyRejected: 1, condition: 'rejected', touched: true });
+    expect(out.b!.qtyReceived).toBe(5); // auto-touched only — takes the new invoice default
+    expect(out.c!.qtyReceived).toBe(1);
+    expect(Object.keys(out).sort()).toEqual(['a', 'b', 'c']);
   });
 });

@@ -199,6 +199,13 @@ describe('ClaudeVision.extract — nulls the prompt allows (EN-3)', () => {
     expect(r.lines[1]!.confidence).toBeLessThanOrEqual(0.2);
   });
 
+  it('a present but malformed part is rejected, never turned into an empty invoice', async () => {
+    mockTextResponse({ ...CANNED_INVOICE, lines: 'garbage' });
+    await expect(new ClaudeVision({ apiKey: 'k', model: 'm' }).extract('https://x/inv.jpg')).rejects.toThrow();
+    mockTextResponse({ ...CANNED_INVOICE, totals: { subtotal: '1,234.00', vat: 1, total: 2 } });
+    await expect(new ClaudeVision({ apiKey: 'k', model: 'm' }).extract('https://x/inv.jpg')).rejects.toThrow();
+  });
+
   it('still throws on a non-JSON answer (no silent empty invoice)', async () => {
     createMock.mockResolvedValueOnce({ content: [{ type: 'text', text: 'sorry' }] });
     await expect(new ClaudeVision({ apiKey: 'k', model: 'm' }).extract('https://x/inv.jpg')).rejects.toThrow();

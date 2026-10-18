@@ -44,8 +44,20 @@ export async function pollInvoiceUntilRead<T extends PolledInvoice>(
   let last: T | null = null;
   for (;;) {
     if (opts.isCancelled?.()) return { outcome: 'cancelled', invoice: last };
-    last = await opts.fetch();
-    const elapsed = now() - start;
+    let elapsed: number;
+    try {
+      last = await opts.fetch();
+    } catch {
+      // A dropped request (flaky kitchen Wi-Fi) is not the end of the read:
+      // keep trying until the deadline, then report a timeout so the caller
+      // still offers background re-poll / Refresh.
+      elapsed = now() - start;
+      opts.onTick?.(elapsed);
+      if (elapsed >= maxMs) return { outcome: 'timeout', invoice: last };
+      await sleep(pollDelay(elapsed));
+      continue;
+    }
+    elapsed = now() - start;
     opts.onTick?.(elapsed);
     if (last.ocrFailed) return { outcome: 'failed', invoice: last };
     if (last.status !== 'ocr_pending') return { outcome: 'ready', invoice: last };

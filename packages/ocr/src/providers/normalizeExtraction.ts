@@ -93,19 +93,16 @@ export function normalizeExtraction(raw: unknown): unknown {
   const cleaned = stripNulls(raw);
   if (typeof cleaned !== 'object' || cleaned === null || Array.isArray(cleaned)) return cleaned;
   const inv = { ...(cleaned as Record<string, unknown>) };
-  if (typeof inv.supplier !== 'object' || inv.supplier === null) inv.supplier = {};
-  inv.lines = Array.isArray(inv.lines)
-    ? inv.lines.map(repairLine).filter((l): l is Record<string, unknown> => l !== undefined)
-    : [];
-  const totals = typeof inv.totals === 'object' && inv.totals !== null ? (inv.totals as Record<string, unknown>) : {};
-  const fixedTotals: Record<string, number> = {};
-  for (const k of ['subtotal', 'vat', 'total'] as const) {
-    const n = num(totals[k]);
-    if (n !== undefined) fixedTotals[k] = n;
+  // Only ABSENT parts are filled in. A present but malformed value (lines that
+  // aren't an array, string totals, string confidence) is left as is so the
+  // schema rejects it and the job fails visibly — never a silently empty invoice.
+  if (inv.supplier === undefined) inv.supplier = {};
+  if (inv.lines === undefined) inv.lines = [];
+  else if (Array.isArray(inv.lines)) {
+    inv.lines = inv.lines.map(repairLine).filter((l): l is Record<string, unknown> => l !== undefined);
   }
-  inv.totals = fixedTotals;
+  if (inv.totals === undefined) inv.totals = {};
   const conf = num(inv.confidence);
-  if (conf === undefined) delete inv.confidence;
-  else inv.confidence = Math.max(0, Math.min(1, conf));
+  if (conf !== undefined) inv.confidence = Math.max(0, Math.min(1, conf));
   return inv;
 }

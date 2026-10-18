@@ -11,6 +11,30 @@ function fakeClock() {
 }
 
 describe('pollInvoiceUntilRead (EN-4)', () => {
+  it('a dropped request does not end the wait — it keeps polling and finds the result', async () => {
+    let calls = 0;
+    const r = await pollInvoiceUntilRead({
+      fetch: async () => {
+        calls += 1;
+        if (calls === 2) throw new TypeError('Failed to fetch');
+        return { status: calls < 4 ? 'ocr_pending' : 'parsed' };
+      },
+      ...fakeClock(),
+    });
+    expect(r.outcome).toBe('ready');
+  });
+
+  it('a request that keeps failing ends as a timeout (background re-poll / Refresh), never a throw', async () => {
+    const r = await pollInvoiceUntilRead({
+      fetch: async () => {
+        throw new TypeError('Failed to fetch');
+      },
+      maxMs: 20_000,
+      ...fakeClock(),
+    });
+    expect(r.outcome).toBe('timeout');
+  });
+
   it('waits up to ~120 s by default — far beyond the old 30 s', async () => {
     const clock = fakeClock();
     let calls = 0;

@@ -62,6 +62,9 @@ async function encode(bitmap: ImageBitmap, edge: number, quality: number): Promi
     const canvas = new OffscreenCanvas(w, h);
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
+    // JPEG has no alpha: paint white first or a transparent PNG turns black.
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, w, h);
     ctx.drawImage(bitmap, 0, 0, w, h);
     return canvas.convertToBlob({ type: 'image/jpeg', quality });
   }
@@ -70,6 +73,8 @@ async function encode(bitmap: ImageBitmap, edge: number, quality: number): Promi
   canvas.height = h;
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, w, h);
   ctx.drawImage(bitmap, 0, 0, w, h);
   return new Promise((resolve) => canvas.toBlob((b) => resolve(b), 'image/jpeg', quality));
 }
@@ -92,7 +97,10 @@ export async function prepareScanFile(file: File): Promise<PreparedScan> {
   try {
     // 'from-image' applies the EXIF orientation, so a portrait phone photo
     // isn't sideways after re-encoding.
-    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(() =>
+      // Older Safari rejects the options bag; it already honours EXIF there.
+      createImageBitmap(file),
+    );
   } catch {
     bitmap = null;
   }

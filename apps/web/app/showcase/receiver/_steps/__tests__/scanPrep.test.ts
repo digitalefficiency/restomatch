@@ -51,6 +51,7 @@ describe('prepareScanFile (non-image / undecodable paths)', () => {
     const createImageBitmap = vi.fn(async () => ({ width: 4032, height: 3024, close: vi.fn() }));
     vi.stubGlobal('createImageBitmap', createImageBitmap);
     const drawImage = vi.fn();
+    const fillRect = vi.fn();
     vi.stubGlobal(
       'OffscreenCanvas',
       class {
@@ -59,7 +60,7 @@ describe('prepareScanFile (non-image / undecodable paths)', () => {
           public height: number,
         ) {}
         getContext() {
-          return { drawImage };
+          return { drawImage, fillRect, fillStyle: '' };
         }
         async convertToBlob() {
           return new Blob([new Uint8Array(400_000)], { type: 'image/jpeg' });
@@ -70,6 +71,7 @@ describe('prepareScanFile (non-image / undecodable paths)', () => {
     const r = await prepareScanFile(photo);
     expect(createImageBitmap).toHaveBeenCalledWith(photo, { imageOrientation: 'from-image' });
     expect(drawImage).toHaveBeenCalledWith(expect.anything(), 0, 0, 2000, 1500);
+    expect(fillRect).toHaveBeenCalledWith(0, 0, 2000, 1500); // white under a transparent PNG
     expect(r.downscaled).toBe(true);
     expect(r.file.type).toBe('image/jpeg');
     expect(r.file.size).toBeLessThanOrEqual(MAX_UPLOAD_BYTES);

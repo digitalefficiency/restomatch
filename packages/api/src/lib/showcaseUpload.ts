@@ -93,6 +93,18 @@ export function isShowcaseScanUrl(url: string, supabaseUrl: string | undefined):
   if (!supabaseUrl) return false;
   const prefix = `${supabaseUrl.replace(/\/+$/, '')}/storage/v1/object/sign/${SHOWCASE_BUCKET}/${SHOWCASE_PREFIX}/`;
   if (!url.startsWith(prefix)) return false;
+  // WHATWG URL parsing silently strips tab / CR / LF, so `.\t./` would become
+  // `../` at fetch time; any whitespace or control character is refused.
+  if (/[\s\x00-\x1f\x7f]/.test(url)) return false;
+  // Belt and braces: the path the fetch will actually request must still be
+  // under the walk-ins prefix.
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (!`${parsed.origin}${parsed.pathname}`.startsWith(prefix)) return false;
   const path = url.slice(prefix.length).split(/[?#]/)[0] ?? '';
   if (path === '') return false;
   if (/%2f|%5c|\\/i.test(path)) return false;

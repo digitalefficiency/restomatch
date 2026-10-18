@@ -21,6 +21,7 @@ import type { Translator } from '@/lib/i18n/translate';
 import type { UploadedScan } from '@/lib/supabase/client';
 import {
   adaptReconciliation,
+  keepAdjusted,
   type PoLineRow,
 } from './_adapters';
 import { receivingErrorText as errorText } from './_errors';
@@ -88,6 +89,9 @@ export function ReceivingWizard({
   const pollTokenRef = useRef(0);
   const skipWaitRef = useRef(false);
   const submittingRef = useRef(false);
+  /** Lines the receiver adjusted by hand — kept when the review is rebuilt
+   *  ("Show results" after a slow OCR read), never reset to the invoice. */
+  const adjustedKeysRef = useRef(new Set<string>());
   const [image, setImage] = useState<CapturedImage | null>(null);
   const [result, setResult] = useState<ReconciliationResult | null>(null);
   const [marks, setMarks] = useState<Record<string, LineMark>>({});
@@ -223,7 +227,9 @@ export function ReceivingWizard({
           // order now, keep checking quietly, and offer the result when ready.
           setOcrNotice('reading');
           await buildFromPoOnly(activeGrId);
-          void watchInBackground(activeGrId, reg.invoiceId, token);
+          watchInBackground(activeGrId, reg.invoiceId, token).catch(() => {
+            // Background check only — the Refresh button stays available.
+          });
         }
       } catch (err) {
         setError(errorText(err, t, locale));
@@ -254,16 +260,19 @@ export function ReceivingWizard({
       isCancelled: () => pollTokenRef.current !== token,
       sleep: (ms) => new Promise((r) => setTimeout(r, Math.max(ms, 5_000))),
     });
-    if (pollTokenRef.current !== token) return;
+    if (pollTokenRef.current !== token || submittingRef.current) return;
     if (outcome === 'ready') setOcrNotice('ready');
     else if (outcome === 'failed') setOcrNotice(invoice?.ocrFailureReason === 'quota_exceeded' ? 'quota' : 'failed');
   }
 
   /** Manual refresh from the review screen ("still reading" / "ready" banner). */
   async function refreshInvoice() {
-    if (!invoiceId || !grId) return;
+    if (!invoiceId || !grId || submittingRef.current) return;
+    const token = pollTokenRef.current;
     try {
       const inv = await utils.receiving.getInvoice.fetch({ invoiceId });
+      // Closed, retaken or unmounted while the request was in flight.
+      if (pollTokenRef.current !== token || submittingRef.current) return;
       if (inv.ocrFailed) setOcrNotice(inv.ocrFailureReason === 'quota_exceeded' ? 'quota' : 'failed');
       else if (inv.status !== 'ocr_pending') await showInvoice(grId, invoiceId);
     } catch (err) {
@@ -295,7 +304,7 @@ export function ReceivingWizard({
       labels: { unnamed: t('unnamedItem'), unordered: t('unorderedItem') },
     });
     setResult(adapted.result);
-    setMarks(adapted.initialMarks);
+    setMarks((prev) => keepAdjusted(prev, adapted.initialMarks, adjustedKeysRef.current));
     setGrLineIdByKey(adapted.grLineIdByKey);
     setStep('RECONCILIATION_REVIEW');
   }
@@ -335,6 +344,7 @@ export function ReceivingWizard({
   }
 
   function updateMark(key: string, patch: Partial<LineMark>) {
+    adjustedKeysRef.current.add(key);
     setMarks((prev) => {
       const existing = prev[key];
       if (!existing) return prev;

@@ -103,6 +103,38 @@ function deriveStatus(
   return { status: 'matched', deltaIls: 0 };
 }
 
+/**
+ * An invoice line whose qty or price reads as 0/absent was not really read
+ * (EN-3 zero-fills unreadable numbers at low confidence). It is a "check by
+ * hand" line, never a ₪ gap.
+ */
+function isUnreadable(qty: number | null, price: number | null): boolean {
+  return qty === null || qty === 0 || price === null || price === 0;
+}
+
+/** One logical line from several invoice lines for the same item: summed qty
+ *  and total; the unit price is the total over the qty (equal prices stay exact). */
+function foldInvoiceLines(group: InvoiceLineRow[]): InvoiceLineRow {
+  const first = group[0]!;
+  let qty = 0;
+  let total = 0;
+  const prices = new Set<number | null>();
+  for (const il of group) {
+    const q = num(il.qtyBilled) ?? 0;
+    const p = num(il.unitPriceBilled);
+    qty += q;
+    total += num(il.lineTotal) ?? q * (p ?? 0);
+    prices.add(p);
+  }
+  const single = prices.size === 1 ? [...prices][0]! : null;
+  return {
+    ...first,
+    qtyBilled: Math.round(qty * 1000) / 1000,
+    unitPriceBilled: single ?? (qty > 0 ? Math.round((total / qty) * 10000) / 10000 : null),
+    lineTotal: Math.round(total * 100) / 100,
+  };
+}
+
 export interface ReceivingAdaptResult {
   result: ReconciliationResult;
   /** grLineId keyed by the same lineKey() the reused steps use, so the wizard
@@ -151,10 +183,20 @@ export function adaptReconciliation(args: {
     let inv: InvoiceLineRow | undefined;
     if (pl.productId) inv = invByProduct.get(pl.productId);
     if (!inv) inv = invByDesc.get(normDesc(pl.rawDescription));
-    if (inv && !usedInvoiceIds.has(inv.id)) {
-      usedInvoiceIds.add(inv.id);
-      invForPoLine.set(pl.id, inv);
-    }
+    if (!inv || usedInvoiceIds.has(inv.id)) continue;
+    // A supplier may bill one ordered item on several invoice lines (two
+    // deliveries, a split pallet). Fold every still-unpaired line for the same
+    // product / description into one, or the halves would show as a qty gap
+    // PLUS a "not ordered" line — a false ₪ alarm (EN-5).
+    const key = normDesc(inv.rawDescription);
+    const group = invoiceLines.filter(
+      (il) =>
+        !usedInvoiceIds.has(il.id) &&
+        (il.id === inv.id ||
+          (inv.productId ? il.productId === inv.productId : !il.productId && normDesc(il.rawDescription) === key)),
+    );
+    for (const il of group) usedInvoiceIds.add(il.id);
+    invForPoLine.set(pl.id, group.length === 1 ? inv : foldInvoiceLines(group));
   }
   // EN-5 (calm UX): only claim "missing on invoice" when the comparison is
   // conclusive. With no invoice at all, or with invoice lines we could not
@@ -184,7 +226,8 @@ export function adaptReconciliation(args: {
 
     const derived = deriveStatus(poQty, invoiceQty, poPrice, invoicePrice);
     const { status, deltaIls } =
-      derived.status === 'missing_from_invoice' && !missingIsConclusive
+      (derived.status === 'missing_from_invoice' && !missingIsConclusive) ||
+      (inv && isUnreadable(invoiceQty, invoicePrice))
         ? { status: 'pending_review' as const, deltaIls: 0 }
         : derived;
 
@@ -243,7 +286,7 @@ export function adaptReconciliation(args: {
     if (usedInvoiceIds.has(il.id)) return;
     const invoiceQty = num(il.qtyBilled);
     const invoicePrice = num(il.unitPriceBilled);
-    const conclusive = Boolean(il.productId);
+    const conclusive = Boolean(il.productId) && !isUnreadable(invoiceQty, invoicePrice);
     const line: ReconciliationLine = {
       invoiceLineIndex: invoiceLineIndexCounter++,
       poLineId: null,
@@ -309,4 +352,24 @@ export function adaptReconciliation(args: {
   };
 
   return { result, grLineIdByKey, initialMarks };
+}
+
+/**
+ * Rebuild marks for a new review projection without losing what the receiver
+ * already counted: for every line they adjusted by hand, keep their quantity /
+ * rejection / condition; everything else takes the fresh defaults.
+ */
+export function keepAdjusted(
+  prev: Record<string, LineMark>,
+  next: Record<string, LineMark>,
+  adjustedKeys: ReadonlySet<string>,
+): Record<string, LineMark> {
+  const out: Record<string, LineMark> = { ...next };
+  for (const key of adjustedKeys) {
+    const p = prev[key];
+    const n = next[key];
+    if (!p || !n) continue;
+    out[key] = { ...n, qtyReceived: p.qtyReceived, qtyRejected: p.qtyRejected, condition: p.condition, touched: true };
+  }
+  return out;
 }
