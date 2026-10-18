@@ -52,7 +52,6 @@ export const en: Shape<typeof he> = {
     discrepancies: '{count} discrepancies',
     potentialLoss: 'potential loss {amount}',
     savings: 'saved {amount}',
-    inclVat: '{amount} incl. VAT',
     matchesOrderAndReceipt: 'matches the order and the delivery',
     awaitingMonthlyMatch: "waiting to be matched against this month's delivery notes",
     empty: 'No activity yet.',
