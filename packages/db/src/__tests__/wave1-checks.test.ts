@@ -5,15 +5,19 @@ import { testDbUrl } from '../test-env';
 import { WAVE1_CROSS_TENANT_CHECKS, WAVE1_PRECONDITIONS } from '../wave1Checks';
 
 /**
- * db:doctor coverage for wave 1 (0048–0057). The test DB has no wave-1 tables,
- * so this proves both halves of the contract: inert without them, and a
- * cross-tenant row is reported once a wave-1-shaped table exists.
+ * db:doctor coverage for wave 1 (0048–0057): inert on clean data, and a
+ * cross-tenant row is reported once a wave-1 table holds one. Works with or
+ * without the real 0048 applied (a scratch credit_notes is used when absent).
  */
 const url = testDbUrl();
 const sql = postgres(url, { max: 1, prepare: false, onnotice: () => undefined });
 
+// True once the real 0048 is applied on the test DB (wave 1 merged): then the
+// scratch table is not created/dropped — the real one is used instead.
+let realCreditNotes = false;
+
 afterAll(async () => {
-  await sql.unsafe('drop table if exists credit_notes');
+  if (!realCreditNotes) await sql.unsafe('drop table if exists credit_notes');
   await sql`delete from suppliers where name like 'wave1-check %'`;
   await sql`delete from restaurants where name like 'wave1-check %'`;
   await sql.end();
@@ -54,17 +58,29 @@ describe('wave-1 doctor checks', () => {
     const [a] = await sql`insert into restaurants (name) values ('wave1-check A') returning id`;
     const [b] = await sql`insert into restaurants (name) values ('wave1-check B') returning id`;
     const [supB] = await sql`insert into suppliers (restaurant_id, name) values (${b!.id}, 'wave1-check supplier B') returning id`;
-    // credit_notes as 0048 creates it (columns the checks read; FKs are single-column there too).
-    await sql.unsafe(`create table credit_notes (
-      id uuid primary key default gen_random_uuid(), restaurant_id uuid not null,
-      supplier_id uuid not null, invoice_id uuid, invoice_line_id uuid)`);
-    await sql`insert into credit_notes (restaurant_id, supplier_id) values (${a!.id}, ${supB!.id})`;
+    realCreditNotes = (await sql`select to_regclass('public.credit_notes') is not null as ok`)[0]!.ok as boolean;
+    if (realCreditNotes) {
+      // The real 0048 refuses this row (composite same-tenant FK) — plant it the
+      // way corrupt data would arrive (FK triggers off for this session only), so
+      // the doctor check is still proven to catch it.
+      await sql.begin(async (tx) => {
+        await tx`set local session_replication_role = replica`;
+        await tx`insert into credit_notes (restaurant_id, supplier_id, amount_agorot, issued_on) values (${a!.id}, ${supB!.id}, 100, '2026-10-01')`;
+      });
+    } else {
+      // credit_notes as 0048 creates it (the columns the checks read).
+      await sql.unsafe(`create table credit_notes (
+        id uuid primary key default gen_random_uuid(), restaurant_id uuid not null,
+        supplier_id uuid not null, invoice_id uuid, invoice_line_id uuid)`);
+      await sql`insert into credit_notes (restaurant_id, supplier_id) values (${a!.id}, ${supB!.id})`;
+    }
 
     const f = await integrity();
     expect(f.status).toBe('WARN');
     expect(f.detail).toContain('credit_note.supplier same tenant: 1');
 
-    await sql.unsafe('drop table credit_notes');
+    if (realCreditNotes) await sql`delete from credit_notes where restaurant_id = ${a!.id}`;
+    else await sql.unsafe('drop table credit_notes');
     expect((await integrity()).status).toBe('PASS');
   });
 

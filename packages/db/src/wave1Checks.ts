@@ -38,7 +38,10 @@ async function localesFit(c: WaveCtx): Promise<WaveResult> {
 }
 
 export const WAVE1_PRECONDITIONS: Record<string, (c: WaveCtx) => Promise<WaveResult>> = {
-  '0048_recovery': async () => ({ status: 'PASS', detail: 'new tables only (credit_notes, recovery_claims, recovery_events)' }),
+  '0048_recovery': async () => ({
+    status: 'PASS',
+    detail: 'new tables (credit_notes, recovery_claims, recovery_events) + UNIQUE(id, restaurant_id) on invoices/discrepancies and UNIQUE(id, invoice_id) on invoice_lines (id is the PK — cannot fail)',
+  }),
   '0049_monthly_reports': async () => ({ status: 'PASS', detail: 'new table only' }),
   '0050_ingest': async () => ({ status: 'PASS', detail: 'new tables + app.ingest_resolve_channel() only' }),
   '0051_invoice_source_whatsapp': async () => ({ status: 'PASS', detail: "enum ADD VALUE 'whatsapp' (IF NOT EXISTS)" }),
@@ -50,7 +53,7 @@ export const WAVE1_PRECONDITIONS: Record<string, (c: WaveCtx) => Promise<WaveRes
   '0057_recipes': async () => ({ status: 'PASS', detail: 'new tables only' }),
 };
 
-/** `child.col` must point at a row of the same restaurant (single-column FKs in 0048/0050). */
+/** `child.col` must point at a row of the same restaurant (0048 enforces it with composite FKs; 0050 with single-column FKs). */
 function sameTenant(name: string, child: string, col: string, parent: string): { name: string; needs: Array<[string, string]>; sql: string } {
   return {
     name,
