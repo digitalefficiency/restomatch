@@ -410,3 +410,32 @@ Tested on a production build (`next start`), with a test-only network preload fa
 - **Import:** `"1,250"` → ₪1250, `"1.234,56"` → skipped, a `=cmd|calc` unit → `BAD_UNIT`, >12 MB → 400 before parsing, no 5xx.
 - **07:00 sweep:** per-restaurant try/catch ✓. Run 1 queued 2 emails, **run 2 queued 0** (`notified_at` + per-alert/recipient dedupe), 0 unnotified left, 0 emails to non-members.
 - **Flags off** → `FEATURE_DISABLED`, nav hidden.
+
+### Re-verification of fixes + cross-QA of S5 integrations (#50)
+**Verification (2 layers).**
+- Layer 1: code review of each fix diff, plus direct probes of the fixed functions (`authVerdictFromHeaders`, `groundAnswer`).
+- Layer 2: #50 on a production build with a RIVAL owner, 14 runtime checks plus a client-bundle secret scan.
+
+**#43 @ 6233151 (S13)**
+| Finding | Status |
+|---|---|
+| I2 (spoofed allow-listed e-mail → auto-OCR) | ❌ **BYPASSABLE.** Auto-register now needs `authVerdict === 'pass'` from an `Authentication-Results` header carrying our authserv-id (good: zero or 2+ such headers → `none`). But `authVerdictFromHeaders` takes the first `dmarc=`/`spf=`/`dkim=` **anywhere in the header value**, so a sender who controls their envelope address forges it. Verified `pass` for `smtp.mailfrom="dmarc=pass"@evil.example`, the unquoted `smtp.mailfrom=dmarc=pass@evil.example`, and a `(… dmarc=pass)` comment, all on a domain with no SPF/DKIM (`spf=none; dkim=none; dmarc=none`). **Fix:** split the value on `;` into resinfo clauses, strip `(comments)`, and read `method=result` only at the **start** of each clause (`/^\s*(spf\|dkim\|dmarc)\s*=\s*(\w+)/`), ignoring properties. Also only configure the trusted authserv-id where the provider strips forged copies of its own header (RFC 8601 §5), since a lone forged header is otherwise trusted. |
+| I3 (offline queue survives logout) | ✅ Fixed. Items are tagged with the user id, the upload scope is restaurant+user, sign-out forms (`data-rm-logout`) wipe the queue, `/login` wipes it, and another user signing in purges foreign items. Trade-off: a receiver whose session expires before syncing loses unsent photos when the login page loads. |
+| I4 (unknown-sender storage amplifier) | ✅ Fixed. A 50 MB/channel/day review-blob quota; over quota, the metadata is kept with no blob (`quota_exceeded`). |
+
+**#42 @ 1a7a742 (S14)**
+| Finding | Status |
+|---|---|
+| L1 (link smuggling in answers) | ⚠ **Improved, still bypassable.** Now stripped/flagged: NFKC, zero-width chars, look-alike dots, `[.]`/`(dot)`, `hxxps`, punycode, Cyrillic look-alikes, bare/decimal IPs, `t.me`, `wa.me`, `mailto:`, `ftp:`, `@handles`, `%2E`. **Still passes as `grounded:true`:** phishing-favourite gTLDs missing from the allow-list (`.zip` `.mov` `.bond` `.sbs` `.cfd` `.lat` `.quest`), plus the non-clickable `e v i l . c o m` and `evil,com`. **Fix:** invert the logic, so any `label.[a-z]{2,24}` is a link unless the suffix is a known file extension (xlsx/pdf/csv…), or use the full IANA TLD list. |
+| L2 (process-local burst limit) | ✅ Fixed. The shared Redis limiter is registered at boot (`instrumentation.node.ts` → `registerAskRateLimit`), with the local window still on top (it also covers a store outage). |
+
+**#50 @ aea9f23 (S5 integrations)** — no findings.
+- **Accounting export:** owner + bookkeeper only (manager/receiver/chef 403, matching `/dashboard/exports`). The rival export contains none of MAIN's invoices. It's tRPC, with no separate file route.
+- **Rivhit CSV:** a planted supplier name `=HYPERLINK(...)` is exported as `'=HYPERLINK…` (neutralized).
+- **POS import:**
+  - 6 MB → 400 before parsing; 50,001 rows → `POS_FILE_TOO_MANY_ROWS`; binary/UTF-16 junk → 400.
+  - Windows-1255 Hebrew decodes correctly; a formula-like item is plain text.
+  - Receiver → 403. A rival import lands only in the rival, and MAIN's summary never shows it.
+- **Procurement:** `procurementProviders` never returns the vault ref (only `sample`/`live`). `loadCredentials('fixture:…')` throws in production. The Zester token sits only in a server-side header; the only error message never includes it.
+- **Client bundle:** `.next/static` has no `*_API_KEY` / `*_ACCESS_TOKEN` / vault names.
+- **Flags off:** `FEATURE_DISABLED`.
