@@ -20,7 +20,8 @@ grant select on pos_sales to restomatch_app;`);
 psql(`insert into pos_sales (restaurant_id, sold_on, item_ref, item_name, qty, net_amount) values
  ('${RID}', current_date, 'P-101', 'Entrecôte steak', 40, 5200.00),
  ('${RID}', current_date, 'P-102', 'שניצל עם צ׳יפס', 120, 6915.25),
- ('${RID}', current_date, 'P-900', 'Lemonade', 80, 1200.00);`);
+ ('${RID}', current_date, 'P-900', 'Lemonade', 80, 1200.00),
+ ('${RID}', current_date, 'P-103', 'Shakshuka', 10, 0.01);`);
 async function session(browser, role, locale) {
   const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 } });
   await ctx.addCookies([{ name: 'rm_locale', value: locale, url: BASE }, { name: 'rm_cookie_consent', value: 'necessary', url: BASE }]);
@@ -56,6 +57,8 @@ try {
       check(/130[.,]00/.test(txt), `[${locale}/${role}] steak avg price charged ₪130.00`);
       check(/\+[\s‎‏]*5[.,]8\s?%/.test(txt), `[${locale}/${role}] steak gap +5.8 pts`);
       check(txt.includes(locale === 'he' ? 'פריטים בקופה לא מקושרים' : 'POS items are not linked'), `[${locale}/${role}] unlinked POS items note`);
+      check((await s.page.locator('[data-testid="pos-unmatched"]').innerText().catch(() => '')).includes('Lemonade'), `[${locale}/${role}] unlinked item "Lemonade" listed with its sales`);
+      check(txt.includes(locale === 'he' ? 'לבדוק בקופה' : 'Check POS data'), `[${locale}/${role}] ₪0.01 shakshuka sale flagged "check POS data", not a huge gap`);
       if (role === 'owner') await s.page.screenshot({ path: `${SHOTS}/recipes-pos-${locale}.png`, fullPage: true });
       check(s.errs.length === 0, `[${locale}/${role}] zero console errors ${s.errs.slice(0, 2).join(' | ')}`);
       check(s.s5.length === 0, `[${locale}/${role}] zero 5xx ${s.s5.slice(0, 2).join(' | ')}`);
@@ -89,7 +92,7 @@ try {
   }
 } finally {
   await browser.close();
-  if (hadTable) psql(`delete from pos_sales where restaurant_id='${RID}' and item_ref in ('P-101','P-102','P-900');`);
+  if (hadTable) psql(`delete from pos_sales where restaurant_id='${RID}' and item_ref in ('P-101','P-102','P-900','P-103');`);
   else psql(`drop table pos_sales;`);
 }
 console.log(results.filter((r) => r.startsWith('FAIL')).join('\n') + '\n----');

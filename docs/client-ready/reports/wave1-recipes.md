@@ -166,3 +166,40 @@ Left as is:
 - Screenshots: `overview-card-{he,en}.png`, `overview-num10-{he,en}.png`.
 
 **Re-verified after merging 80a3934:** Layer 1 all ✅ (api 589, web 263, db 74 incl. the doctor wave-1 checks), and Layer 2 again 79/79 + 103/103.
+
+## Theoretical vs actual food cost per dish (POS) — orchestrator ask, owner decision
+
+**What it does.** A new tab, "תיאורטי מול בפועל / Theoretical vs actual", appears on `/dashboard/recipes` only when **both** the `recipes` and `integrations` flags are on. For the current or previous month, each dish shows:
+- units sold and the average price actually charged (POS net sales ÷ units);
+- the food-cost % at the **menu** price vs the food-cost % on **actual** POS net sales (discounts, comps and promotions included), and the gap between them;
+- the food cost of the plates sold.
+
+Totals cover the linked mix. POS items that aren't linked to any recipe are listed with their sales.
+
+**Data link.** I coded against S5's interface without merging S5's branch. `recipes/data.ts` `loadPosSales` runs the same aggregate as `integrations.posSummary` over `pos_sales` (S5's 0058). It reads only when the table exists **and** the app role has SELECT on it. Otherwise, and when `integrations` is off, `recipes.posVsTheory` returns `available:false` with a reason and never errors:
+- `integrationsOff`: the tab is hidden.
+- `noPosData`: a neutral empty state.
+
+**Matching POS items to dishes.**
+- By the item's ref or name against the dish's name, in this order: exact primary name, then normalized primary name, then normalized English name.
+- Normalization: NFKC, bidi marks removed, geresh/gershayim/quotes removed, maqaf/dashes unified, NBSP collapsed, lowercase.
+- Sub-recipes never match.
+
+**Money.** POS NUMERIC values are converted to agorot/qty×1000 at the boundary and handled as exact BigInt, rounded half-up once and capped like the engine. A dish with net sales ≤ 0 or an actual food cost above 200% (refunds, comps, a mis-keyed price) is shown as **"check POS data"** instead of a gap. A dish with a missing ingredient price is flagged as understated.
+
+**Security.** `posVsTheory` is a `recipesProcedure` (chef and up, recipes flag) with a COVERAGE entry. Isolation is tested: A's per-dish totals exclude B's sales of the same item on the same day.
+
+**Refuter (round 3).** One confirmed merge-breaker and three defects; all are fixed with tests.
+1. The suite inserted into `pos_sales` without `import_id`, which S5's real 0058 requires (NOT NULL). The test now builds the real 0058 shape. **Verified by applying S5's actual 0058 SQL to a scratch DB: 10/10.**
+2. A dish's own name could lose to another dish's English name. Fixed by the precedence order above.
+3. Hebrew/Unicode spelling variants didn't match. Fixed by `normName`.
+4. Outliers had no guard (₪0.01 sales ranked as a 10,000,000% gap). They are now flagged implausible and capped.
+
+Also fixed from its plausible list: the incomplete-cost flag; unlinked items are now listed, with the Hebrew copy corrected; a matched dish without a cost now stays in the unmatched list; a missing grant degrades to `null`; the unused i18n key was removed.
+
+**Verification (ae12d8d):**
+- **Layer 1:** all ✅. `turbo test` 13/13 (api 599 incl. `recipes-pos` 10, web 263), typecheck, web tsc, lint, supabase-sync check, build.
+- **Layer 2** (prod build, RLS app role, he + en):
+  - `layer2-pos.mjs` **44/44**: steak 34.9% menu vs 40.7% actual (avg ₪130.00 charged, gap +5.8 pts); ₪0.01 shakshuka → "check POS data"; Lemonade listed as unlinked; last month → neutral empty state; integrations off → tab hidden; 0 console errors / 5xx.
+  - Regression: recipes **103/103**, overview **79/79**.
+- Screenshots: `recipes-pos-{he,en}.png`.
