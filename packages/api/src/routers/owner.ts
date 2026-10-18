@@ -13,7 +13,14 @@ import {
   type SupplierScorecard,
 } from '@restomatch/charts';
 import { z } from 'zod';
-import { managerProcedure, memberProcedure, ownerProcedure, requireFeature, router } from '../trpc';
+import {
+  financeProcedure,
+  managerProcedure,
+  memberProcedure,
+  ownerProcedure,
+  requireFeature,
+  router,
+} from '../trpc';
 
 /** Deep analytics (leak detective, supplier scorecards) are a paid feature. */
 const analyticsProcedure = ownerProcedure.use(requireFeature('advanced_analytics'));
@@ -33,7 +40,9 @@ export const ownerRouter = router({
       return computeLeakHero(ctx.db, ctx.session.restaurantId, { monthOffset: input?.monthOffset });
     }),
 
-  leakBreakdown: memberProcedure
+  // Invoice-level drill-down (supplier, invoice number, line deltas) — the same
+  // roles as /dashboard/leaks; a receiver/chef sees only the aggregate hero.
+  leakBreakdown: financeProcedure
     .input(
       z
         .object({

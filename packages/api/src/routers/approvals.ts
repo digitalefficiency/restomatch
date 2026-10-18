@@ -14,7 +14,7 @@ import {
   suppliers,
   type UserRole,
 } from '@restomatch/db';
-import { authedProcedure, memberProcedure, router } from '../trpc';
+import { authedProcedure, financeProcedure, memberProcedure, router } from '../trpc';
 import { logActivity } from '../activity';
 
 const ResolutionEnum = z.enum(['accepted', 'rejected', 'escalated']);
@@ -259,7 +259,9 @@ export const approvalsRouter = router({
     }),
 
   /** Audit trail for a single discrepancy. */
-  history: memberProcedure
+  // A discrepancy's decision trail (amounts, notes, who waived what) — the same
+  // roles that can decide (owner/manager/bookkeeper), not receiver/chef.
+  history: financeProcedure
     .input(z.object({ discrepancyId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       return ctx.db
