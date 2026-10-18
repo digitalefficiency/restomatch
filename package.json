@@ -15,6 +15,7 @@
     "db:generate": "pnpm --filter @restomatch/db generate",
     "db:migrate": "pnpm --filter @restomatch/db migrate",
     "db:seed": "pnpm --filter @restomatch/db seed",
+    "demo:seed-all": "pnpm --filter @restomatch/worker exec tsx scripts/demo-seed-all.ts",
     "db:studio": "pnpm --filter @restomatch/db studio",
     "db:doctor": "pnpm --filter @restomatch/db run doctor",
     "db:supabase-sync": "pnpm --filter @restomatch/db run supabase-sync",

@@ -37,7 +37,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const active =
     memberships.find((m) => m.restaurantId === session.user.restaurantId) ?? memberships[0]!;
-  const [t, locale] = await Promise.all([getT(nav), getLocale()]);
+  const [t, locale, flags] = await Promise.all([getT(nav), getLocale(), caller.recovery.flags()]);
+  // Wave-1 flags that hide nav items when off (MASTER-PLAN §1.3).
+  const features = Object.entries(flags)
+    .filter(([, on]) => on)
+    .map(([key]) => key);
   const roleLabel = labelForRole(active.role, locale);
   // Wave-1 nav entry (contracts / price alerts): flag on + finance role; fails silent.
   const wave1Access = await getWave1Access();
@@ -76,6 +80,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <div className="flex items-center gap-3 py-3">
               <MobileNav
                 role={active.role}
+                features={features}
                 logout={logout}
                 restaurantName={active.restaurantName}
                 email={email}
@@ -115,7 +120,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               </div>
               <LocaleSwitcher className="lg:hidden" />
             </div>
-            <DesktopNav role={active.role} showChain={showChain} wave1={wave1} />
+            <DesktopNav role={active.role} showChain={showChain} features={features} wave1={wave1} />
           </div>
         </header>
         <main id="main-content" tabIndex={-1} className="mx-auto max-w-6xl px-4 py-6 focus:outline-none sm:px-6 sm:py-8">

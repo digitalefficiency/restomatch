@@ -47,6 +47,11 @@ export const ROUTE_ROLES: Record<string, UserRole[]> = {
   // and approvals.approve/reject/escalate accept bookkeeper-routed items.
   '/dashboard/approvals': ['owner', 'manager', 'bookkeeper'],
   '/dashboard/leaks': ['owner', 'manager', 'bookkeeper'],
+  // Wave 1 (S12): ₪-back tracker = finance roles (like leaks); the monthly report = owner/manager.
+  '/dashboard/recovery': ['owner', 'manager', 'bookkeeper'],
+  '/dashboard/reports': ['owner', 'manager'],
+  // Exact entry too: nav visibility (canSeeRoute) is an exact-path lookup.
+  '/dashboard/reports/monthly': ['owner', 'manager'],
   '/dashboard/suppliers': ['owner', 'manager'],
   '/dashboard/catalog': ['owner', 'manager'],
   // Product pages are part of the catalog (names grid, price history, cheapest

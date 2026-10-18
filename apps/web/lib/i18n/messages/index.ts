@@ -23,6 +23,7 @@ import { orders } from './orders';
 import { overview } from './overview';
 import { products } from './products';
 import { receiving } from './receiving';
+import { recovery } from './recovery';
 import { scans } from './scans';
 import { settings } from './settings';
 import { showcase } from './showcase';
@@ -51,6 +52,7 @@ export const ALL_NAMESPACES = [
   overview,
   products,
   receiving,
+  recovery,
   scans,
   settings,
   showcase,
@@ -59,4 +61,4 @@ export const ALL_NAMESPACES = [
   views,
 ] as const;
 
-export { common, admin, approvals, auth, catalog, chain, components, contracts, emails, accounting, invoices, landing, leaks, marketing, nav, onboarding, orders, overview, products, receiving, scans, settings, showcase, suppliers, team, views };
+export { common, admin, approvals, auth, catalog, chain, components, contracts, emails, accounting, invoices, landing, leaks, marketing, nav, onboarding, orders, overview, products, receiving, recovery, scans, settings, showcase, suppliers, team, views };

@@ -22,6 +22,8 @@ import { teamRouter } from './routers/team';
 import { chainRouter } from './routers/chain';
 import { contractsRouter } from './routers/contracts';
 import { priceAlertsRouter } from './routers/priceAlerts';
+import { recoveryRouter } from './routers/recovery';
+import { monthlyReportRouter } from './routers/monthlyReport';
 
 export const appRouter = router({
   owner: ownerRouter,
@@ -47,6 +49,8 @@ export const appRouter = router({
   dsr: dsrRouter,
   contracts: contractsRouter,
   priceAlerts: priceAlertsRouter,
+  recovery: recoveryRouter,
+  monthlyReport: monthlyReportRouter,
 });
 
 export type AppRouter = typeof appRouter;
@@ -229,3 +233,33 @@ export {
   type ChainBranchesResult,
   type ChainOverviewResult,
 } from './routers/chain';
+// Wave 1 · S12 — ₪-back tracker + monthly report.
+export { isFeatureOn, assertFeatureOn } from './lib/featureGate';
+export {
+  syncClaims,
+  listClaims,
+  summarize as summarizeRecovery,
+  computeRecoverySummary,
+  returnedInMonth,
+  transitionClaim,
+  recordCreditNote,
+  creditLineSuggestions,
+  OVERDUE_DAYS,
+  type RecoveryClaimRow,
+  type RecoverySummary,
+  type RecoverySupplierRow,
+  type CreditLineSuggestion,
+} from './recovery/service';
+export { RECOVERY_TRANSITIONS, canTransition, allocateCredit, ageingBucket } from './recovery/lifecycle';
+export { enqueueRecoveryReminders, recoveryReminderEmail } from './recovery/reminders';
+export {
+  computeMonthlyReport,
+  ensureMonthlyReport,
+  monthlyReportEmail,
+  monthlyReportWhatsApp,
+  previousMonthKey,
+  type MonthlyReportData,
+} from './reports/monthly';
+export { renderMonthlyReportPdf } from './reports/pdf';
+export { sendMonthlyReports } from './reports/send';
+export { formatIlsAgorot } from './reports/money';

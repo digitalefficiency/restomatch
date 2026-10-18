@@ -9,6 +9,8 @@ import { startBaselinesWorker } from './jobs/baselines';
 import { startDailyExpectationsWorker } from './jobs/dailyExpectations';
 import { startImportCatalogWorker } from './jobs/importCatalog';
 import { startEndOfDayReportWorker } from './jobs/endOfDayReport';
+import { startMonthlyReportWorker } from './jobs/monthlyReport';
+import { startRecoveryRemindersWorker } from './jobs/recoveryReminders';
 import { startMatchInvoiceWorker } from './jobs/matchInvoice';
 import { startOcrInvoiceWorker } from './jobs/ocrInvoice';
 import { startOrderRemindersWorker } from './jobs/orderReminders';
@@ -67,6 +69,8 @@ const workers = [
   startPriceAlertsWorker(),
   startEndOfDayReportWorker(),
   startRetentionWorker(),
+  startRecoveryRemindersWorker(),
+  startMonthlyReportWorker(),
 ];
 
 console.log(`[worker] started ${workers.length} workers`);
