@@ -184,4 +184,12 @@ export const en: Shape<typeof he> = {
   units: {
     portion: 'portion',
   },
+  overviewCard: {
+    title: 'Dishes hurt by price rises this month',
+    subtitle: 'Supplier price rises eat into your margin per plate',
+    count: '{count} dishes cost more per plate since the start of the month',
+    none: 'No dish got more expensive this month — prices are steady.',
+    perPlate: 'per plate',
+    open: 'All dishes',
+  },
 };
