@@ -18,7 +18,7 @@ export interface PosSaleRow {
 export interface PosParseIssue {
   /** 1-based line in the file (header = line 1). */
   line: number;
-  code: 'BAD_DATE' | 'BAD_QTY' | 'BAD_AMOUNT' | 'NO_ITEM';
+  code: 'BAD_DATE' | 'BAD_QTY' | 'BAD_AMOUNT' | 'NO_ITEM' | 'BAD_ROW';
 }
 
 export interface PosParseResult {

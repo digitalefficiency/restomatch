@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createDb, eq, posSales, procurementConnections, restaurants, suppliers, testDbUrl } from '@restomatch/db';
+import { createDb, eq, invoices, posSales, procurementConnections, restaurants, suppliers, testDbUrl } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
@@ -89,6 +89,12 @@ describe('accounting exports', () => {
     expect(text).toContain(A.invoiceNumber);
     expect(text).toContain('100.00\t17.00\t117.00');
     expect(text).not.toContain(B.invoiceNumber);
+  });
+
+  it('an invoice whose stored totals do not add up is skipped, never posted unbalanced', async () => {
+    await db.update(invoices).set({ totalInclVat: '118.00' }).where(eq(invoices.id, A.invoiceId)); // 100 + 17 ≠ 118
+    const out = await callerFor(A).integrations.accountingExport({ format: 'hashavshevet', ...PERIOD });
+    expect(out).toMatchObject({ rowCount: 0, skippedCount: 1 });
   });
 
   it('a saved supplier mapping and accounts flow into the file', async () => {
@@ -212,6 +218,19 @@ describe('POS sales import', () => {
     expect(again.replacedRows).toBe(3);
     const sum = await callerFor(A).integrations.posSummary({ from: '2026-10-01', to: '2026-10-31' });
     expect(sum.find((r) => r.itemRef === '101')?.netAmount).toBe('324.00');
+  });
+
+  it('a corrected file with fewer days replaces only those days (never the gaps)', async () => {
+    const days = Array.from({ length: 30 }, (_, i) => `2026-09-${String(i + 1).padStart(2, '0')},Soup,1,10.00`);
+    await callerFor(A).integrations.posImport(csv64(`date,item,qty,net\n${days.join('\n')}\n`));
+    const fix = await callerFor(A).integrations.posImport(
+      csv64('date,item,qty,net\n2026-09-01,Soup,2,20.00\n2026-09-30,Soup,2,20.00\n'),
+    );
+    expect(fix.replacedRows).toBe(2);
+    const sum = await callerFor(A).integrations.posSummary({ from: '2026-09-01', to: '2026-09-30' });
+    expect(sum[0]).toMatchObject({ days: 30, netAmount: '320.00' });
+    const history = await callerFor(A).integrations.posImports();
+    expect(history.map((h) => h.liveRows)).toEqual([2, 28]);
   });
 
   it('a file with nothing usable is BAD_REQUEST with a stable code', async () => {

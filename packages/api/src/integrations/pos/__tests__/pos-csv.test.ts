@@ -63,3 +63,45 @@ describe('POS CSV adapter', () => {
     });
   });
 });
+
+describe('POS CSV adapter — refuter regressions', () => {
+  const csv = (text: string) => ({ filename: 'r.csv', bytes: new TextEncoder().encode(text) });
+
+  it('discount / VAT / "updated" columns are never taken as net, qty or date', () => {
+    expect(detectPosColumns(['Date', 'Item', 'Qty', 'Discount Amount', 'Total'])).toMatchObject({ qty: 'Qty', net: 'Total' });
+    expect(detectPosColumns(['Date', 'Item', 'Discount', 'Count', 'Total'])).toMatchObject({ qty: 'Count', net: 'Total' });
+    expect(detectPosColumns(['תאריך', 'פריט', 'כמות', 'סכום הנחה', 'מכירות'])).toMatchObject({ net: 'מכירות' });
+    expect(detectPosColumns(['Last Updated', 'Date', 'Item', 'Qty', 'Net'])).toMatchObject({ date: 'Date' });
+  });
+
+  it('refund lines net out instead of being dropped', () => {
+    const out = csvPosProvider.parse(csv('date,item,qty,net\n2026-10-01,Burger,2,100.00\n2026-10-01,Burger,-1,-50.00\n'));
+    expect(out.rows).toEqual([{ soldOn: '2026-10-01', itemRef: 'Burger', itemName: 'Burger', qtyMilli: 1000, netAgorot: 5000 }]);
+    expect(out.issues).toEqual([]);
+    // A negative count with a positive amount is still nonsense.
+    expect(csvPosProvider.parse(csv('date,item,qty,net\n2026-10-01,X,-1,5\n')).issues).toEqual([{ line: 2, code: 'BAD_QTY' }]);
+  });
+
+  it('number formats: decimal comma, European, trailing minus, parentheses', () => {
+    expect(parseScaled('0,500', 3)).toBe(500);
+    expect(parseScaled('1.234,50', 2)).toBe(123450);
+    expect(parseScaled('1,234', 2)).toBe(123400);
+    expect(parseScaled('50.00-', 2)).toBe(-5000);
+    expect(parseScaled('(50.00)', 2)).toBe(-5000);
+  });
+
+  it('a future day (typo) and a row split by an unquoted comma are reported, not imported', () => {
+    const out = csvPosProvider.parse(csv('date,item,qty,net\n15/09/2062,X,1,10\n2026-10-01,Y,1,₪ 1,234.56\n2026-10-01,Z,1,10\n'));
+    expect(out.rows.map((r) => r.itemRef)).toEqual(['Z']);
+    expect(out.issues).toEqual([
+      { line: 2, code: 'BAD_DATE' },
+      { line: 3, code: 'BAD_ROW' },
+    ]);
+  });
+
+  it('values beyond the NUMERIC columns are line issues, not a 500', () => {
+    const out = csvPosProvider.parse(csv('date,item,qty,net\n2026-10-01,X,1000000000,10\n2026-10-01,Y,1,99999999999\n'));
+    expect(out.rows).toEqual([]);
+    expect(out.issues.map((i) => i.code)).toEqual(['BAD_QTY', 'BAD_AMOUNT']);
+  });
+});

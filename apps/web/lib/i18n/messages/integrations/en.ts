@@ -58,6 +58,7 @@ export const en: Shape<typeof he> = {
       BAD_QTY: 'invalid quantity',
       BAD_AMOUNT: 'invalid amount',
       NO_ITEM: 'missing item',
+      BAD_ROW: 'wrong number of columns (an unquoted comma?)',
     },
     fields: { date: 'date', itemRef: 'item code', itemName: 'item name', qty: 'quantity', net: 'amount' },
     errors: {
@@ -68,6 +69,7 @@ export const en: Shape<typeof he> = {
       NO_ROWS: 'The file has no valid rows to import.',
       readFailed: 'We couldn’t read the file.',
     },
+    replacedBadge: 'Replaced by a later import',
     history: 'Recent imports',
     none: 'No sales imported yet.',
     table: { item: 'Item', day: 'Day', qty: 'Qty', net: 'Net', file: 'File', period: 'Period', when: 'When' },

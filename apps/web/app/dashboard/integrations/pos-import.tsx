@@ -5,7 +5,7 @@ import { ReceiptText, Upload } from 'lucide-react';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
 import { trpc } from '@/lib/trpc/client';
-import { Badge, Button, Card, friendlyError, useSingleFlight, useToast } from '@/lib/components';
+import { Badge, Button, Card, cn, friendlyError, useSingleFlight, useToast } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatDate, formatNumber } from '@/lib/i18n/format';
 import { components } from '@/lib/i18n/messages/components';
@@ -170,10 +170,14 @@ export function PosImport() {
       ) : (
         <ul className="divide-y divide-line/60 rounded-xl border border-line text-sm">
           {imports.data!.map((imp) => (
-            <li key={imp.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2.5">
-              <span className="min-w-0 flex-1 truncate text-ink" dir="auto" title={imp.filename}>
+            <li
+              key={imp.id}
+              className={cn('flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2.5', imp.liveRows === 0 && 'opacity-60')}
+            >
+              <span className="min-w-0 basis-full truncate text-ink sm:basis-auto sm:flex-1" dir="auto" title={imp.filename}>
                 {imp.filename}
               </span>
+              {imp.liveRows === 0 ? <Badge tone="neutral">{t('pos.replacedBadge')}</Badge> : null}
               <span className="font-mono text-xs tabular-nums text-muted">
                 {day(imp.periodFrom)} – {day(imp.periodTo)}
               </span>

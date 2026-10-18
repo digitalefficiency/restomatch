@@ -232,13 +232,20 @@ export const integrationsRouter = router({
         }
         // A missing split is derived so the movement still balances to the agora.
         const vatA = vat ?? (excl !== null ? incl - excl : 0);
+        const exclA = excl ?? incl - vatA;
+        // An invoice whose stored totals don't add up (OCR / a manual edit) would
+        // post an unbalanced movement: leave it out and count it for the UI.
+        if (exclA + vatA !== incl) {
+          skipped++;
+          continue;
+        }
         invoices.push({
           invoiceNumber: r.invoiceNumber,
           invoiceDate: localIsoDate(r.invoiceDate, tz),
           supplierId: r.supplierId ?? null,
           supplierName: r.supplierName ?? '',
           supplierBusinessId: r.supplierBusinessId ?? '',
-          totalExclAgorot: excl ?? incl - vatA,
+          totalExclAgorot: exclA,
           vatAgorot: vatA,
           totalInclAgorot: incl,
         });
@@ -282,9 +289,12 @@ export const integrationsRouter = router({
         createdBy: ctx.session.userId,
       })
       .returning({ id: posSalesImports.id });
+    // Replace exactly the days this file carries — never the gaps between them
+    // (a corrected file with only the 1st and the 30th must not wipe the 2nd–29th).
+    const days = [...new Set(parsed.rows.map((r) => r.soldOn))];
     const replaced = await ctx.db
       .delete(posSales)
-      .where(and(eq(posSales.restaurantId, restaurantId), gte(posSales.soldOn, summary.from), lte(posSales.soldOn, summary.to)))
+      .where(and(eq(posSales.restaurantId, restaurantId), inArray(posSales.soldOn, days)))
       .returning({ id: posSales.id });
     for (let i = 0; i < parsed.rows.length; i += 1000) {
       await ctx.db.insert(posSales).values(
@@ -314,6 +324,8 @@ export const integrationsRouter = router({
         rowCount: posSalesImports.rowCount,
         totalNet: posSalesImports.totalNet,
         createdAt: posSalesImports.createdAt,
+        // Rows still carried by this import (0 = a later import replaced its days).
+        liveRows: sql<number>`(select count(*)::int from pos_sales ps where ps.import_id = "pos_sales_imports"."id")`,
       })
       .from(posSalesImports)
       .where(eq(posSalesImports.restaurantId, ctx.session.restaurantId))

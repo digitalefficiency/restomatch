@@ -59,6 +59,7 @@ export const he = {
       BAD_QTY: 'כמות לא תקינה',
       BAD_AMOUNT: 'סכום לא תקין',
       NO_ITEM: 'חסר פריט',
+      BAD_ROW: 'מספר עמודות שגוי בשורה (פסיק בלי מרכאות?)',
     },
     fields: { date: 'תאריך', itemRef: 'קוד פריט', itemName: 'שם פריט', qty: 'כמות', net: 'סכום' },
     errors: {
@@ -69,6 +70,7 @@ export const he = {
       NO_ROWS: 'אין בקובץ שורות תקינות לייבוא.',
       readFailed: 'לא הצלחנו לקרוא את הקובץ.',
     },
+    replacedBadge: 'הוחלף בייבוא מאוחר יותר',
     history: 'ייבואים אחרונים',
     none: 'עוד לא יובאו מכירות.',
     table: { item: 'פריט', day: 'יום', qty: 'כמות', net: 'נטו', file: 'קובץ', period: 'תקופה', when: 'מתי' },

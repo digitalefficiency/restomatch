@@ -115,6 +115,19 @@ describe('accounting formats — golden files', () => {
   });
 });
 
+describe('Rivhit CSV formula injection', () => {
+  it('text cells that would run as a formula in Excel get a leading apostrophe', () => {
+    const f = renderAccountingFile(
+      'rivhit',
+      [{ ...INVOICES[0]!, invoiceNumber: '+cmd|A-B', supplierName: '=HYPERLINK("http://evil","x")' }],
+      DEFAULT_ACCOUNTING_CONFIG,
+      PERIOD,
+    );
+    const line = new TextDecoder().decode(f.bytes.slice(3)).split('\r\n')[1]!;
+    expect(line.startsWith("01/10/2026,'+cmd|A-B,\"'=HYPERLINK(")).toBe(true);
+  });
+});
+
 describe('encodeWindows1255', () => {
   it('maps Hebrew letters, gershayim and ₪ to their Windows-1255 bytes', () => {
     expect([...encodeWindows1255('את')]).toEqual([0xe0, 0xfa]);
