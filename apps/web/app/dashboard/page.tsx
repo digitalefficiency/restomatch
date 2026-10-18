@@ -5,7 +5,7 @@ import { canSeeRoute } from '@/lib/roles';
 import { Activity, ArrowLeft, CheckCircle2, ClipboardCheck, Hourglass, ShieldCheck } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
-import { formatDate, formatNumber, formatPercent } from '@/lib/i18n/format';
+import { formatNumber, formatPercent } from '@/lib/i18n/format';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { overview } from '@/lib/i18n/messages/overview';
 import type { he as overviewHe } from '@/lib/i18n/messages/overview/he';
@@ -19,10 +19,30 @@ import {
   SectionHeader,
   entitlementCauseOf,
 } from '@/lib/components';
+import {
+  BreakdownChart,
+  DEFAULT_VIEW,
+  DeltaBadge,
+  TvMode,
+  ViewToolbar,
+  bucketLabel,
+  hasFilters,
+  isDefaultData,
+  parseView,
+  rangeLabel,
+  serializeView,
+  toViewInput,
+} from '@/lib/components/views';
+import { views as viewsNs } from '@/lib/i18n/messages/views';
 import { PaginatedActivityFeed } from './activity';
 import { displayName } from './approvals/vocab';
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const view = parseView(await searchParams);
   const caller = await createServerCaller();
   const [session, memberships] = await Promise.all([auth(), caller.onboarding.myMemberships()]);
   if (memberships.length === 0) {
@@ -34,14 +54,27 @@ export default async function DashboardPage() {
   ).role;
   const canDrill = canSeeRoute(role, '/dashboard/leaks');
   const canDecide = canSeeRoute(role, '/dashboard/approvals');
-  const [t, tl, locale] = await Promise.all([getT(overview), getT(leaksNs), getLocale()]);
+  const [t, tl, tv, locale] = await Promise.all([getT(overview), getT(leaksNs), getT(viewsNs), getLocale()]);
 
-  const [kpis, hero, lastMonth, activity] = await Promise.all([
+  // The default view (this month, no compare, no filters) is the classic hero —
+  // owner.leakHero, untouched. Any other view goes through owner.leakSummary,
+  // which returns the same shape for the chosen range/filters (+ comparison).
+  const defaultView = isDefaultData(view);
+  const viewInput = toViewInput(view);
+  const [kpis, summary, lastMonth, activity, trend, options] = await Promise.all([
     caller.owner.kpis(),
-    caller.owner.leakHero(),
-    caller.owner.leakHero({ monthOffset: -1 }),
+    defaultView
+      ? caller.owner.leakHero().then((current) => ({ current, previous: null }))
+      : caller.owner.leakSummary({ view: viewInput, compare: view.compare }),
+    defaultView ? caller.owner.leakHero({ monthOffset: -1 }) : Promise.resolve(null),
     caller.activity.feed({ limit: 8 }),
+    // The trend exposes per-day detail → finance roles only (owner.leakTrend is finance).
+    canDrill ? caller.owner.leakTrend({ view: viewInput, compare: view.compare }) : Promise.resolve(null),
+    canDrill ? caller.owner.viewOptions() : Promise.resolve(null),
   ]);
+  const hero = summary.current;
+  // A comparison period with no invoices has nothing to compare against.
+  const previous = summary.previous && summary.previous.invoiceCount > 0 ? summary.previous : null;
 
   // Leak grid is owner-only; other roles simply won't see this section. If the
   // feature is gated behind a paid plan, surface a compact upsell teaser rather
@@ -60,7 +93,19 @@ export default async function DashboardPage() {
   }
 
   const ils = (v: number) => formatIls(v, { locale });
-  const monthLabel = formatDate(hero.monthStart, locale, { month: 'long', year: 'numeric' });
+  const monthLabel = rangeLabel(view.period, hero.monthStart, hero.monthEnd, locale);
+  // Drill-down keeps the period + filters (not the display-only controls).
+  const drillQuery = serializeView({ ...DEFAULT_VIEW, period: view.period, from: view.from, to: view.to, filters: view.filters }).toString();
+  const trendRows =
+    trend?.points.map((p) => ({
+      key: p.bucketStart,
+      label: bucketLabel(trend.bucket, p.bucketStart, locale),
+      value: p.leakIls,
+      // Trend points are sparse (days/months with invoices), so a per-point
+      // comparison can't be aligned honestly; the period delta lives on the hero.
+      previous: null,
+      spend: p.spendIls,
+    })) ?? [];
   const cleanMatchHealthy = kpis.weekCleanMatchPct >= 80;
   const heatmapItems = leaks.map((l) => ({
     ...l,
@@ -83,16 +128,72 @@ export default async function DashboardPage() {
     <div>
       <SectionHeader level={1} title={t('title')} subtitle={t('subtitle')} />
 
+      <ViewToolbar
+        page="overview"
+        view={view}
+        period
+        compare
+        chart={canDrill}
+        tv
+        saved
+        filters={canDrill ? ['supplier', 'category', 'type', 'severity', 'status'] : []}
+        options={options ?? undefined}
+        exportData={
+          trend
+            ? {
+                columns: [
+                  { key: 'bucket', label: tv('trend.colBucket') },
+                  { key: 'leak', label: tv('trend.colLeak') },
+                  { key: 'spend', label: tv('trend.colSpend') },
+                ],
+                rows: trend.points.map((p) => ({ bucket: p.bucketStart.slice(0, 10), leak: p.leakIls, spend: p.spendIls })),
+              }
+            : undefined
+        }
+      />
+
+      <TvMode active={view.tv}>
+      {hasFilters(view) ? <p className="mb-3 text-xs text-subtle">{tv('filteredNote')}</p> : null}
       <LeakHero
         t={t}
         hero={hero}
         ils={ils}
         monthLabel={monthLabel}
         canDrill={canDrill}
-        lastMonthLeak={lastMonth.invoiceCount > 0 ? lastMonth.leakIls : null}
+        leakedLabel={view.period === 'this_month' ? t('hero.leakedLabel') : tv('kpis.leak')}
+        drillHref={drillQuery ? `/dashboard/leaks/breakdown?${drillQuery}` : '/dashboard/leaks/breakdown'}
+        lastMonthLeak={lastMonth && lastMonth.invoiceCount > 0 ? lastMonth.leakIls : null}
+        delta={
+          view.compare !== 'off' ? (
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+              <DeltaBadge current={hero.leakIls} previous={previous?.leakIls} compare={view.compare} showAmount />
+              {previous ? (
+                <DeltaBadge current={hero.spendIls} previous={previous.spendIls} compare={view.compare} neutral />
+              ) : null}
+            </div>
+          ) : null
+        }
         pct={(v) => formatPercent(v, locale, 1)}
         num={(v) => formatNumber(v, locale)}
       />
+
+      {trend ? (
+        <section className="mt-4 rounded-2xl border border-line bg-surface p-5 shadow-card">
+          <SectionHeader
+            title={tv('trend.title')}
+            subtitle={tv('trend.subtitle', { bucket: tv(trend.bucket === 'day' ? 'trend.day' : 'trend.month') })}
+          />
+          <BreakdownChart
+            rows={trendRows}
+            chart={view.chart}
+            density={view.density}
+            caption={tv('trend.title')}
+            keyHeader={tv('trend.colBucket')}
+            valueHeader={tv('trend.colLeak')}
+            emptyText={tv('trend.empty')}
+          />
+        </section>
+      ) : null}
 
       {/* Secondary KPIs — the decisions waiting and the match health. */}
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -114,6 +215,7 @@ export default async function DashboardPage() {
           subtitle={t('kpis.cleanHint')}
         />
       </div>
+      </TvMode>
 
       {/* Leak heatmap — the centerpiece data-viz. */}
       {leaksEntitlementBlocked ? (
@@ -176,7 +278,10 @@ function LeakHero({
   ils,
   monthLabel,
   canDrill,
+  leakedLabel,
+  drillHref,
   lastMonthLeak,
+  delta,
   pct,
   num,
 }: {
@@ -186,7 +291,11 @@ function LeakHero({
   monthLabel: string;
   /** Finance roles may open the drill-down (owner.leakBreakdown is owner/manager/bookkeeper). */
   canDrill: boolean;
+  leakedLabel: string;
+  drillHref: string;
   lastMonthLeak: number | null;
+  /** ▲/▼ against the comparison period (view controls). */
+  delta?: React.ReactNode;
   pct: (v: number) => string;
   num: (v: number) => string;
 }) {
@@ -209,7 +318,7 @@ function LeakHero({
       <div className="mt-3 grid gap-6 lg:grid-cols-[1.4fr_1fr] lg:items-end">
         <div className="min-w-0">
           <h2 id="leak-hero-label" className="text-sm font-semibold text-muted">
-            {t('hero.leakedLabel')}
+            {leakedLabel}
           </h2>
           <p
             className={`mt-1 font-mono text-5xl font-extrabold tabular-nums tracking-tight sm:text-6xl ${hasLeak ? 'text-danger' : 'text-primary'}`}
@@ -228,6 +337,7 @@ function LeakHero({
             {t('hero.target')}
             {lastMonthLeak != null ? <> · {t('hero.lastMonth', { amount: ils(lastMonthLeak) })}</> : null}
           </p>
+          {delta}
           {!hasLeak && hero.matchedInvoiceCount > 0 ? (
             <p className="mt-3 flex items-center gap-2 text-sm text-primary">
               <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -257,7 +367,7 @@ function LeakHero({
         <p className="max-w-xl text-xs text-subtle">{t('hero.calc')}</p>
         {canDrill && (hasLeak || hero.pendingLinkCount > 0) ? (
           <Link
-            href="/dashboard/leaks/breakdown"
+            href={drillHref}
             className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-danger/12 px-4 py-2 text-sm font-semibold text-danger ring-1 ring-danger/30 transition-colors hover:bg-danger/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/60"
           >
             {t('hero.drill')}

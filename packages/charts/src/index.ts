@@ -23,3 +23,21 @@ export {
   type LeakReportSupplierRow,
   type LeakReportTypeRow,
 } from './leak-report';
+export {
+  computeLeakGrouped,
+  computeLeakSummary,
+  computeLeakTrend,
+  computeViewOptions,
+  LEAK_SEVERITIES,
+  RESOLUTION_STATUSES,
+  VIEW_COMPARES,
+  VIEW_GROUPS,
+  VIEW_PERIODS,
+  type LeakGroupRow,
+  type LeakTrendPoint,
+  type ViewCompare,
+  type ViewFilters,
+  type ViewGroup,
+  type ViewPeriod,
+  type ViewSpec,
+} from './leak-views';

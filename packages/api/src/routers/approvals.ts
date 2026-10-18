@@ -5,12 +5,14 @@ import {
   auditLog,
   desc,
   discrepancies,
+  discrepancyType,
   eq,
   inArray,
   invoices,
   lt,
   matchRuns,
   products,
+  severity as severityEnum,
   suppliers,
   type UserRole,
 } from '@restomatch/db';
@@ -67,6 +69,10 @@ export const approvalsRouter = router({
           // NON-BREAKING: ISO cursor → only rows strictly older than it. Return
           // shape stays an array (desc by createdAt).
           cursor: z.string().datetime().optional(),
+          // View filters (dashboard view controls). All optional, all enumerated.
+          types: z.array(z.enum(discrepancyType.enumValues)).max(12).optional(),
+          severities: z.array(z.enum(severityEnum.enumValues)).max(3).optional(),
+          supplierIds: z.array(z.string().uuid()).max(50).optional(),
         })
         .optional(),
     )
@@ -120,6 +126,9 @@ export const approvalsRouter = router({
             inArray(discrepancies.resolutionStatus, ['open', 'escalated']),
             inArray(discrepancies.requiresRole, roles),
             cursorDate ? lt(discrepancies.createdAt, cursorDate) : undefined,
+            input?.types?.length ? inArray(discrepancies.type, input.types) : undefined,
+            input?.severities?.length ? inArray(discrepancies.severity, input.severities) : undefined,
+            input?.supplierIds?.length ? inArray(invoices.supplierId, input.supplierIds) : undefined,
           ),
         )
         .orderBy(desc(discrepancies.createdAt))
