@@ -81,6 +81,20 @@ The highest-value proposal, implemented. It produces one printable letter per su
 save as PDF) listing every line you can claim, with the total. No new money math: it is built on the
 breakdown, and each invoice is capped at its capped leak.
 
+### Round 2 asks from S5
+
+- `owner.suppliers` scorecards now return `supplierNameEn`, and the scorecard grid shows it in
+  English (one line in S5's `suppliers/list.tsx`).
+- `invoice_matched` activity:
+  - the title now names the invoice (`חשבונית {n} הותאמה`, the template S5's `activityText.ts`
+    already parses);
+  - the detail leads with the supplier;
+  - `metadata` carries `{invoiceId, invoiceNumber, supplierName(En), discrepancyCount,
+    potentialLossIls, status}`.
+- `discrepancy_approved` / `discrepancy_rejected` activity now carries `{discrepancyType,
+  savingsIls|amountIls, reason, role}`.
+- Test: `match-money.test.ts` ("structured metadata").
+
 ## Still broken / not done
 
 - **Consolidated invoices aren't actually linked.** They are now shown as pending instead of as a
@@ -93,8 +107,8 @@ breakdown, and each invoice is capped at its capped leak.
   ₪16 for 2 kg not delivered and not billed). That is a product decision baked into the canary, and I
   didn't change it. If the owner wants "leak = money paid for nothing", the canary would become ₪16
   instead of ₪32. **Proposed value, not applied.**
-- **Activity feed text** is written in Hebrew at insert time (`logActivity` titles), so it stays
-  Hebrew in English. A proper fix stores an event key plus params; the component belongs to S5.
+- **Activity feed:** my write sites now also store structured metadata (see round 2). Rows written
+  before this change, and other areas' write sites, still rely on S5's Hebrew-template parsing.
 - **Claim letter restaurant name** uses the user's first membership (fine for single-restaurant
   owners).
 - `owner.kpis` (`monthSavingsCapturedIls`) still counts auto-accepted info items. The dashboard no
@@ -154,7 +168,7 @@ breakdown, and each invoice is capped at its capped leak.
 
 ```
 DATABASE_URL_TEST=postgres://postgres:postgres@localhost:5432/restomatch_test pnpm test
-  → Tasks 12/12 successful (matching 86, charts 33, api 400, web 137, worker 9+1 skipped, db 43, …)
+  → Tasks 12/12 successful (matching 86, charts 33, api 438, web 176, worker 9+1 skipped, db 45, …) — after merging 68ed10d
 packages/api|charts: npx tsc --noEmit -p .      → 0 errors
 apps/web: npx tsc --noEmit -p .                  → 0 errors
 apps/web: pnpm build (with .env.local)          → success (incl. /dashboard/leaks/{breakdown,claims,report})
