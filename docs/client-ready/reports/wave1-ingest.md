@@ -45,9 +45,8 @@ photographed invoice:** storage under the restaurant prefix → invoice row (`oc
 | Disabled feature | Webhook returns 404 (same as an unknown token). Procedures return FORBIDDEN `FEATURE_DISABLED`. Page returns 404 and the nav is hidden. | "a disabled feature is invisible", cross-tenant "flag off", e2e prod |
 | Public paths | Only `/api/ingest/**` was added to `PUBLIC_PREFIX_PATHS`. `/dashboard/inbox` stays private and role-gated. | `publicPaths.test` S13 case |
 
-**Residual risk (owner decision).** The e-mail allow-list trusts the `From` header. A forged `From` that matches an
-allow-listed address gets OCR'd straight away. The cost is OCR spend plus an invoice that still goes through matching
-and approvals. Mitigation once live: require the provider's SPF/DKIM verdict before auto-registering. Resend exposes
+**E-mail senders are not authenticated yet.** An allow-listed `From` address only *suggests* the supplier, and every
+e-mailed document waits for approval (S4 I2). Mitigation once live: require the provider's SPF/DKIM verdict before auto-registering. Resend exposes
 it in the received e-mail, so this is a small follow-up.
 
 ## Receiver PWA — exactly what is cached
@@ -123,7 +122,7 @@ export DATABASE_URL_TEST=postgres://postgres:postgres@localhost:5432/restomatch_
 pnpm install --frozen-lockfile                                   # ok
 pnpm --filter @restomatch/db migrate                             # through 0051, clean
 # Final gate on the MERGED head (origin/claude/client-ready merged in, rls/*.sql untouched):
-pnpm exec turbo run test --concurrency=1                         # 14/14 tasks — 1268 passed, 1 skipped
+pnpm exec turbo run test --concurrency=1                         # 14/14 tasks — 1270 passed, 1 skipped
 #   ingest 21 · db 72 (incl. migration-0050 9: RLS on all 4 tables + composite same-tenant FK attack;
 #   upgrade-path + doctor: no FAIL/WARN)
 #   api 566 (incl. ingest.attack 26, cross-tenant.attack with 9 ingest COVERAGE entries) · web 251
@@ -156,7 +155,7 @@ pnpm dev &   pnpm exec tsx scripts/ingest-simulate.ts http://localhost:3000
 #  disguised HTML "invoice.pdf" → rejected (unsupported_type) · forged signature → 401
 PHASE=dev  pnpm exec tsx scripts/e2e-ingest-pwa.ts     # PASS (dev): 21 checks
 pnpm build && NODE_ENV=production pnpm start &
-PHASE=prod pnpm exec tsx scripts/e2e-ingest-pwa.ts     # PASS (prod): 140 checks
+PHASE=prod pnpm exec tsx scripts/e2e-ingest-pwa.ts     # PASS (prod): 142 checks (incl. sign-out clears the queue, he+en)
 ```
 
 Both phases were re-run on the merged head: dev 21/21, prod 140/140. **One observation:** on the first prod run
@@ -212,6 +211,25 @@ in 0021. `SET NULL` clears only the FK column (`ON DELETE SET NULL (col)`, PG15+
 test in `migration-0050.test.ts` covers this: an A row pointing at B's supplier, channel, message or invoice →
 23503; `SET NULL` keeps `restaurant_id`; a cascade stays inside the tenant. I re-ran both layers afterwards:
 gate green, dev 21/21, prod 140/140.
+
+### Cross-QA (S4, security)
+
+S4 passed the webhooks: HMAC, replay, SSRF, size, tokens, roles, cross-tenant, the race, and the SW scope. I fixed
+the three items it raised:
+
+- **I2 (medium):** the e-mail allow-list trusted `From`. An allow-listed **e-mail** sender now only *suggests* the
+  supplier. The document lands as `needs_review` with that supplier pre-filled, and nothing is registered or OCR'd
+  until a manager approves. WhatsApp numbers are authenticated by Meta, so they keep auto-registering.
+  Test: `ingest.attack` "S4 I2". When SPF/DKIM verdicts are wired in, e-mail can auto-register again.
+- **I3 (low, privacy):** the offline queue was never cleared on logout. Items now carry `userId` + `restaurantId`
+  and upload only for that exact user and restaurant. A different user signing in on the device purges other users'
+  items (`PwaSessionGuard`). Submitting any sign-out form (`data-rm-logout`) wipes the queue.
+  Tests: `offlineQueue.test` "S4 I3", and the prod e2e checks that "sign-out clears the offline photo queue" in he
+  and en.
+- **I4 (low):** a storage-cost amplifier. Stored-but-unregistered (review) documents now have a per-channel
+  **daily byte quota**, `INGEST_REVIEW_BYTES_PER_DAY` (default 200 MB). Beyond it a document is `rejected` /
+  `quota_exceeded` and not stored. Test: `ingest.attack` "S4 I4".
+- I1 (merge order): no action, per the orchestrator.
 
 ### Layer 2b: independent refuter
 
