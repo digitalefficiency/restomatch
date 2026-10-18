@@ -16,9 +16,9 @@
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Settings → API | ✅ | signed scan URLs (`/scans/[id]`) |
 | `RESEND_API_KEY` | resend.com | ✅ | magic-link login + invites + alerts |
 | `EMAIL_FROM` | your verified Resend domain | ✅ | e.g. `RestoMatch <noreply@yourdomain>` |
-| `AUTH_URL` | your prod web URL | ✅ | NextAuth callback base |
-| `AUTH_SECRET` | `openssl rand -base64 32` | ✅ | JWT signing |
-| `APP_URL` | your prod web URL | ✅ | deep links in emails |
+| `AUTH_URL` | your prod web URL | ✅ | NextAuth callback base. Its origin **overrides the request host** for sign-in callbacks — open the app/demo **only on this hostname** (a preview/alias URL loops back to `/login`). Boot WARNs when `APP_URL`'s origin differs |
+| `AUTH_SECRET` | `openssl rand -base64 32` | ✅ | JWT signing (legacy name `NEXTAUTH_SECRET` also accepted). **Boot fails without it** — otherwise every login would 500 |
+| `APP_URL` | your prod web URL | ✅ | deep links in emails. Must have the **same origin as `AUTH_URL`** (boot WARN otherwise) |
 | `REDIS_URL` | Upstash | ✅ | OCR/match/cron queue (uploads vanish without it) |
 | `AUTH_ENC_KEY` | `openssl rand -hex 32` | ✅ | encrypts TOTP secrets at rest (2FA). **Boot fails without it.** Back it up — losing it locks out every 2FA user |
 | `TRUSTED_PROXY_HOPS` | `1` on Vercel | ✅ | rate limiters read the client IP from the right of x-forwarded-for (D1.6); unset = spoofable left-most entry |
@@ -44,17 +44,38 @@
 
 
 
-## DATABASE_URL_APP — getting the restomatch_app password
+## DATABASE_URL_APP — the restomatch_app connection (new Supabase project)
 
-The `restomatch_app` role exists in prod (`rolbypassrls=false`). If you don't know
-its password, reset it in Supabase SQL and build the connection string from it:
+On the NEW project (schema deployed from git, `docs/SUPABASE-GITHUB-DEPLOY.md` §4–5) the
+migration creates `restomatch_app` **NOLOGIN and without a password** (no secret in git).
+Give it both once, in the Supabase SQL editor — generate the password locally with
+`openssl rand -hex 32` and keep it in your password manager as `APP_ROLE_PASSWORD`:
 
 ```sql
-ALTER ROLE restomatch_app WITH PASSWORD '<strong-password>';
+ALTER ROLE restomatch_app WITH LOGIN PASSWORD '<APP_ROLE_PASSWORD>';
 ```
+
+Build the URL on the **transaction pooler** (port 6543). The pooler identifies the project from
+the user name, so the user is **`restomatch_app.<project-ref>`** — copy host and ref from
+Project Settings → Database → Connection string (⚠️ confirm the exact format there):
+
 ```
-DATABASE_URL_APP=postgresql://restomatch_app:<password>@<pooler-host>:6543/postgres
+DATABASE_URL_APP=postgresql://restomatch_app.<project-ref>:<APP_ROLE_PASSWORD>@aws-0-<region>.pooler.supabase.com:6543/postgres
 ```
+
+**Prove it before setting it in Vercel** (one line — must print `restomatch_app | f`):
+
+```bash
+psql "$DATABASE_URL_APP" -Atc "select current_user, rolbypassrls from pg_roles where rolname = current_user"
+```
+
+`f` = the role cannot bypass RLS (the web boot guard refuses anything else). Then
+`DATABASE_URL=<owner direct URL> pnpm db:doctor` must show `PASS  restomatch_app … canlogin=true`.
+The app uses `prepare: false` everywhere (`createDb`), as transaction pooling requires.
+
+(Old project `cringgshiafwsszyqufo`: the role already has LOGIN — `ALTER ROLE restomatch_app WITH
+PASSWORD '…'` to rotate, or `APP_ROLE_PASSWORD=… pnpm --filter @restomatch/db provision-rls
+--print-app-url`; its pooler user is likewise `restomatch_app.<ref>`.)
 
 ## Deploy order (see docs/DEPLOY_CUTOVER.md for the full runbook)
 1. Set web env in Vercel + verify `DATABASE_URL_APP` points at `restomatch_app`.
