@@ -215,9 +215,10 @@ async function main() {
       knownInvoiceNumbers,
       expectedDeliveryDate: po.expectedDeliveryAt ?? undefined,
     };
-    knownInvoiceNumbers.add(invNumber);
-
+    // Run the engine BEFORE registering this number: `input` holds the same Set
+    // by reference, so adding first made every demo invoice its own duplicate.
     const result = runMatch(input);
+    knownInvoiceNumbers.add(invNumber);
     const [matchRun] = await db
       .insert(matchRuns)
       .values({
