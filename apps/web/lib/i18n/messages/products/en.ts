@@ -1,4 +1,51 @@
 import type { Shape } from '../../translate';
 import type { he } from './he';
 
-export const en: Shape<typeof he> = {};
+export const en: Shape<typeof he> = {
+  breadcrumb: 'Catalog',
+  title: 'Product',
+  subtitle: 'The product name feeds the matching engine and reports. Edit the name, English name, category, unit and exclusive supplier.',
+  form: {
+    title: 'Product details',
+    name: 'Product name (canonical, Hebrew)',
+    nameEn: 'English name',
+    nameEnHint: 'Shown to staff working in English (e.g. receivers). Matching and exports keep using the Hebrew name.',
+    nameEnPlaceholder: 'Cherry tomatoes',
+    category: 'Category',
+    unit: 'Default unit',
+    unitPlaceholder: 'kg / unit',
+    barcode: 'Barcode',
+    supplier: 'Exclusive supplier',
+    supplierHint: 'The product belongs to this supplier only. Empty = no exclusivity.',
+    noSupplier: '— No exclusive supplier —',
+    save: 'Save product',
+    delete: 'Delete product',
+    confirmDelete: 'Delete “{name}”? This can’t be undone.',
+    saved: 'Product saved.',
+    deleted: 'Product deleted.',
+    nameRequired: 'Product name is required.',
+    noChanges: 'Nothing to save.',
+    deleteBlocked: 'Can’t delete — the product is linked to invoices or orders. Deactivate it in the catalog instead.',
+    readOnly: 'Read-only — only owners and managers can edit products.',
+  },
+  prices: {
+    title: 'Supplier price lists',
+    supplier: 'Supplier',
+    sku: 'SKU',
+    unit: 'Unit',
+    listPrice: 'List price',
+    status: 'Status',
+    inactive: 'Inactive',
+    active: 'Active',
+    empty: 'No supplier price lists for this product.',
+    cheapest: 'Cheapest',
+  },
+  history: {
+    title: 'Prices seen on invoices',
+    date: 'Date',
+    supplier: 'Supplier',
+    unitPrice: 'Unit price',
+    empty: 'No invoice prices observed for this product yet.',
+    unknownSupplier: 'Unknown supplier',
+  },
+};

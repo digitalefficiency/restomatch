@@ -1,22 +1,16 @@
-import { TRPCError } from '@trpc/server';
 import { SectionHeader } from '@/lib/components';
+import { getT } from '@/lib/i18n/server';
+import { accounting } from '@/lib/i18n/messages/accounting';
 import { ExportsForm } from './form';
 
 export default async function ExportsPage() {
-  // Render form is client-side (downloads need user-initiated requests).
-  // Server-side, we just check role visibility — bookkeeper or owner.
+  // The form is client-side (downloads need user-initiated requests). Role
+  // visibility (owner / bookkeeper) is enforced by middleware + the procedures.
+  const t = await getT(accounting);
   return (
     <div>
-      <SectionHeader
-        title="ייצואים להנהלת חשבונות"
-        subtitle={
-          'ייצא חשבוניות שאושרו במערכת לקבצים מובנים — CSV לצרכים כלליים, או "קובץ 1000" עברית להעלאה ישירה לתוכנת ההנהח״ש.'
-        }
-      />
+      <SectionHeader level={1} title={t('title')} subtitle={t('subtitle')} />
       <ExportsForm />
     </div>
   );
 }
-
-// Keep TRPCError import for future error handling
-void TRPCError;
