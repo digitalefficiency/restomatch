@@ -37,6 +37,7 @@ describe('cron schedules', () => {
       { queue: 'order-reminders', id: 'order-reminders-09', repeat: { pattern: '0 9 * * *', tz: TZ } },
       { queue: 'supplier-delays', id: 'supplier-delays-10', repeat: { pattern: '0 10 * * *', tz: TZ } },
       { queue: 'end-of-day-report', id: 'end-of-day-report-19', repeat: { pattern: '0 19 * * *', tz: TZ } },
+      { queue: 'price-alerts', id: 'price-alerts-07', repeat: { pattern: '0 7 * * *', tz: TZ } },
       { queue: 'recovery-reminders', id: 'recovery-reminders-0830', repeat: { pattern: '30 8 * * *', tz: TZ } },
       { queue: 'monthly-report', id: 'monthly-report-1st-0745', repeat: { pattern: '45 7 1 * *', tz: TZ } },
     ]);
@@ -47,6 +48,8 @@ describe('cron schedules', () => {
   it('unregisters the new schedulers too', async () => {
     const { unregisterCronSchedules } = await import('../cron');
     await unregisterCronSchedules();
-    expect(removed).toEqual(expect.arrayContaining(['recovery-reminders-0830', 'monthly-report-1st-0745']));
+    expect(removed).toEqual(
+      expect.arrayContaining(['price-alerts-07', 'recovery-reminders-0830', 'monthly-report-1st-0745']),
+    );
   });
 });
