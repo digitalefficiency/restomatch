@@ -51,6 +51,10 @@ export const en: Shape<typeof he> = {
       bannerUploading: 'Uploading the scan…',
       bannerSaved: 'Saved · {id}',
       uploadFailed: 'Upload failed: {message}',
+      tooLarge: 'The file is too large (max {mb} MB). Take a photo of the invoice instead, or split the PDF.',
+      unsupportedType: 'Unsupported file type. Upload a photo (JPG / PNG / WEBP) or a PDF.',
+      rateLimited: 'Too many uploads. Please try again in a few minutes.',
+      network: 'No connection. Check your network and try again.',
       bannerDemo: 'Demo mode — not saved to the server',
     },
     processing: {

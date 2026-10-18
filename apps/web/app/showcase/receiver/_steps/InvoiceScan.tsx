@@ -19,10 +19,12 @@ import { localizeServerError } from '@/lib/serverErrors';
 import { receiving } from '@/lib/i18n/messages/receiving';
 import type { Translator } from '@/lib/i18n/translate';
 import {
+  ShowcaseUploadError,
   SupabaseNotConfiguredError,
   uploadInvoiceScan,
   type UploadedScan,
 } from '@/lib/supabase/client';
+import { prepareScanFile, ScanPrepError } from './scanPrep';
 import type { CapturedImage } from '../_state';
 import { StepHeader } from './SupplierSelect';
 
@@ -31,13 +33,6 @@ interface Props {
   image: CapturedImage | null;
   onCapture: (image: CapturedImage) => void;
   onBack: () => void;
-  /**
-   * Extra options for the default (anonymous showcase) uploader. The
-   * authenticated dashboard flow ignores these and injects `uploadFile` instead.
-   */
-  uploadOpts?: {
-    supplierName?: string;
-  };
   /**
    * Authenticated upload path: when provided, the file is uploaded via the
    * SERVER (scans.upload mutation) which derives the tenant + storage path from
@@ -64,7 +59,7 @@ type UploadState =
   | { phase: 'uploaded'; result: CapturedImage }
   | { phase: 'error'; message: string };
 
-export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadOpts, uploadFile, backLabel }: Props) {
+export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadFile, backLabel }: Props) {
   const t = useT(receiving);
   const locale = useLocale();
   const dir = useDir();
@@ -104,13 +99,15 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadOpts
     setPreviewUrl(localUrl);
     setFilename(file.name);
 
-    // Real upload in the background. Authenticated dashboard flow goes through
-    // the server (uploadFile); the anonymous showcase uses the walk-ins/ client.
+    // EN-2: shrink phone photos in the browser first (Vercel's 4.5 MB request
+    // limit), then upload. Authenticated flow: server `scans.upload`
+    // (uploadFile); anonymous showcase: the server /api/showcase/upload endpoint.
     setUpload({ phase: 'uploading', pct: 30 });
     try {
+      const prepared = (await prepareScanFile(file)).file;
       const uploaded = uploadFile
-        ? await uploadFile(file, newUploadId())
-        : await uploadInvoiceScan(file, { supplierName, ...uploadOpts });
+        ? await uploadFile(prepared, newUploadId())
+        : await uploadInvoiceScan(prepared, { filename: prepared.name });
       setUpload({
         phase: 'uploaded',
         result: {
@@ -130,16 +127,28 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadOpts
           result: { url: localUrl, filename: file.name },
         });
       } else {
-        // Quota / subscription / auth errors arrive coded (or in Hebrew) — show
-        // them in the receiver's language, never as raw server text.
-        setUpload({
-          phase: 'error',
-          message: t('steps.scan.uploadFailed', {
-            message: localizeServerError(err, locale, t('errors.generic')),
-          }),
-        });
+        // Coded failures are translated; quota / subscription / auth errors go
+        // through localizeServerError — never raw server text.
+        setUpload({ phase: 'error', message: uploadErrorText(err) });
       }
     }
+  }
+
+  function uploadErrorText(err: unknown): string {
+    const code =
+      err instanceof ScanPrepError || err instanceof ShowcaseUploadError ? err.code : null;
+    if (code === 'too_large') {
+      return t('steps.scan.tooLarge', {
+        mb: err instanceof ScanPrepError ? err.maxMb : 3,
+      });
+    }
+    if (code === 'unsupported_type' || code === 'type_mismatch') return t('steps.scan.unsupportedType');
+    if (code === 'too_many_requests') return t('steps.scan.rateLimited');
+    if (code === 'network') return t('steps.scan.network');
+    if (code === 'upload_failed') return t('steps.scan.uploadFailed', { message: t('errors.generic') });
+    return t('steps.scan.uploadFailed', {
+      message: localizeServerError(err, locale, t('errors.generic')),
+    });
   }
 
   function triggerFilePicker() {

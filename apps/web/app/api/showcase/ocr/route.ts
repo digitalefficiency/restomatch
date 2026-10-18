@@ -9,7 +9,7 @@
  */
 import { NextResponse } from 'next/server';
 import postgres from 'postgres';
-import { clientIpFromHeaders, isOriginAllowed } from '@restomatch/api';
+import { clientIpFromHeaders, isOriginAllowed, isShowcaseScanUrl } from '@restomatch/api';
 import { ClaudeVision } from '@restomatch/ocr';
 import { enforceOcrLimit, trustedProxyHops } from '@/lib/rateLimit';
 
@@ -109,10 +109,6 @@ async function reconcileContacts(
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
 // Private bucket → reads come as signed URLs (/object/sign/...).
-const ALLOWED_PREFIX = SUPABASE_URL
-  ? `${SUPABASE_URL}/storage/v1/object/sign/invoice-scans/`
-  : '';
-
 export async function POST(req: Request) {
   // CSRF / abuse: this is a public, expensive (Claude Vision) endpoint. Require a
   // same-origin POST so a third-party page can't drive it, then throttle per IP.
@@ -157,7 +153,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: 'invalid JSON body' }, { status: 400 });
   }
 
-  if (!ALLOWED_PREFIX || !url.startsWith(ALLOWED_PREFIX)) {
+  // SB-3: only the showcase's own walk-in uploads, never a tenant scan.
+  if (!isShowcaseScanUrl(url, SUPABASE_URL)) {
     return NextResponse.json(
       { ok: false, error: 'url must be a signed invoice-scans URL' },
       { status: 400 },

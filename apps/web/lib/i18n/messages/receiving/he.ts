@@ -52,6 +52,10 @@ export const he = {
       bannerUploading: 'מעלה את הסריקה...',
       bannerSaved: 'נשמר · {id}',
       uploadFailed: 'העלאת הסריקה נכשלה: {message}',
+      tooLarge: 'הקובץ גדול מדי (עד {mb} MB). צלמו את החשבונית כתמונה, או פצלו את ה-PDF.',
+      unsupportedType: 'סוג קובץ לא נתמך. העלו תמונה (JPG / PNG / WEBP) או PDF.',
+      rateLimited: 'יותר מדי העלאות. נסו שוב בעוד כמה דקות.',
+      network: 'אין חיבור לרשת. בדקו את החיבור ונסו שוב.',
       bannerDemo: 'מצב הדגמה — לא נשמר בשרת',
     },
     processing: {
