@@ -14,7 +14,8 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { useRef, useState } from 'react';
-import { useDir, useT } from '@/lib/i18n/client';
+import { useDir, useLocale, useT } from '@/lib/i18n/client';
+import { localizeServerError } from '@/lib/serverErrors';
 import { receiving } from '@/lib/i18n/messages/receiving';
 import type { Translator } from '@/lib/i18n/translate';
 import {
@@ -65,6 +66,7 @@ type UploadState =
 
 export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadOpts, uploadFile, backLabel }: Props) {
   const t = useT(receiving);
+  const locale = useLocale();
   const dir = useDir();
   const capturedRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -128,9 +130,13 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadOpts
           result: { url: localUrl, filename: file.name },
         });
       } else {
+        // Quota / subscription / auth errors arrive coded (or in Hebrew) — show
+        // them in the receiver's language, never as raw server text.
         setUpload({
           phase: 'error',
-          message: err instanceof Error ? err.message : String(err),
+          message: t('steps.scan.uploadFailed', {
+            message: localizeServerError(err, locale, t('errors.generic')),
+          }),
         });
       }
     }
