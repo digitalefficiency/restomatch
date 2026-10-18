@@ -23,6 +23,7 @@
     "@restomatch/crypto": "workspace:*",
     "@restomatch/db": "workspace:*",
     "@restomatch/ocr": "workspace:*",
+    "@restomatch/queue": "workspace:*",
     "@restomatch/translate": "workspace:*",
     "@restomatch/types": "workspace:*",
     "@restomatch/ui-tokens": "workspace:*",
