@@ -1,5 +1,5 @@
 import { computeLeakReport } from '@restomatch/charts';
-import { and, eq, monthlyReports, restaurants, sql, type Database } from '@restomatch/db';
+import { and, eq, isNull, monthlyReports, restaurants, sql, type Database } from '@restomatch/db';
 import { renderEmail, ilsSpan, type RenderedEmail } from '../notifications/templates';
 import { computeRecoverySummary, returnedInMonth } from '../recovery/service';
 import { formatIlsAgorot, formatPct, ilsToAgorot, type ReportLocale } from './money';
@@ -239,9 +239,12 @@ export async function ensureMonthlyReport(
     .onConflictDoUpdate({
       target: [monthlyReports.restaurantId, monthlyReports.month],
       set: { snapshot: data as unknown as Record<string, unknown>, generatedAt: sql`now()` },
+      // Re-checked at write time: a send that landed since the read wins.
+      setWhere: isNull(monthlyReports.sentAt),
     })
     .returning();
-  return { id: row!.id, data, sentAt: row!.sentAt, created: !existing };
+  if (!row) return ensureMonthlyReport(db, restaurantId, month, { ...opts, refresh: false });
+  return { id: row.id, data, sentAt: row.sentAt, created: !existing };
 }
 
 /**
