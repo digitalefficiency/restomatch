@@ -120,8 +120,7 @@ and written to `$MAGIC_LINK_FILE`.
 "worker is down" banner):
 
 ```bash
-set -a; . apps/web/.env.local; set +a
-pnpm --filter @restomatch/worker dev     # tsx watch; health on :8080/health
+pnpm dev:worker                          # loads apps/web/.env.local; tsx watch; health on :8080/health
 # prove the queues end-to-end (stub OCR → match), self-cleaning:
 pnpm --filter @restomatch/worker exec tsx scripts/smoke-queues.ts
 ```
@@ -193,6 +192,19 @@ The worker image is multi-stage (≈670 MB), runs as the non-root `node` user wi
 run on the owner's Mac (`apps/worker/scripts/start-worker.sh` + launchd plist). Step-by-step
 production rollout: `docs/GO-LIVE.md`.
 
+**Worker hosting options** (same image everywhere; build context = repo root; one instance is
+enough for the pilot — BullMQ makes extra instances safe if you scale later):
+
+| Host | Setup |
+|---|---|
+| Fly.io (config in repo) | `fly launch --no-deploy --copy-config --name restomatch-worker` → `fly secrets set DATABASE_URL=… REDIS_URL=… ANTHROPIC_API_KEY=… RESEND_API_KEY=… EMAIL_FROM=… APP_URL=…` → `fly deploy --config apps/worker/fly.toml --dockerfile apps/worker/Dockerfile .`. Set `primary_region` next to the database. |
+| Render | New → **Background Worker** → Docker, Dockerfile path `apps/worker/Dockerfile`, context `.`; add the same env vars. (Or a Web Service with health check path `/health` if you want the HTTP probe.) |
+| Railway | New service from the repo → Settings → Build: Dockerfile `apps/worker/Dockerfile`, root `/`; Variables: the same env vars; health check `/health`. |
+| Any Docker host | `docker run -d --restart=always -p 8080:8080 --env-file worker.env restomatch-worker` |
+
+Behind a TLS-intercepting proxy, build with `--secret id=ca,src=/path/ca.crt` (see the Dockerfile
+header).
+
 ## Operations
 
 - **Health:** web `GET /api/healthz`; worker `GET /health` (liveness) and `/health/ready` (Redis).
@@ -210,6 +222,8 @@ production rollout: `docs/GO-LIVE.md`.
 ## Mobile app
 
 `apps/mobile` is an Expo 52 / React Native 0.76 **prototype** (owner KPIs, approvals queue,
-receiving). It typechecks and bundles, but it has **no sign-in** — every API call it makes is
+receiving). It typechecks and bundles (`cd apps/mobile && pnpm exec expo export --platform
+android`; `pnpm --filter @restomatch/mobile start` for Expo Go, with `EXPO_PUBLIC_API_URL` pointing
+at the web app), but it has **no sign-in** — every API call it makes is
 rejected as unauthenticated — so it is not demo-able against real data. The web app is responsive
 and is the supported mobile experience today. See `docs/HANDOFF.md` → Known limitations.
