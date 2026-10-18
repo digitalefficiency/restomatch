@@ -6,6 +6,9 @@ import { getLocale, getT } from '@/lib/i18n/server';
 import { formatDate, formatNumber } from '@/lib/i18n/format';
 import { receiving } from '@/lib/i18n/messages/receiving';
 import type { Translator } from '@/lib/i18n/translate';
+import { auth } from '@/auth';
+import { enabledFeatures } from '@/lib/ingest/features';
+import { ReceiverPwa } from '@/lib/pwa/ReceiverPwa';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,14 +28,17 @@ function receiptBadge(
 
 export default async function ReceivingPage() {
   const caller = await createServerCaller();
-  const [expectations, locale, t] = await Promise.all([
+  const session = await auth();
+  const [expectations, locale, t, features] = await Promise.all([
     caller.receiving.todayExpectations(),
     getLocale(),
     getT(receiving),
+    enabledFeatures(session?.user?.restaurantId),
   ]);
 
   return (
     <div>
+      {features.includes('receiverPwa') ? <ReceiverPwa /> : null}
       <SectionHeader title={t('inbox.title')} subtitle={t('inbox.subtitle')} />
 
       {expectations.length === 0 ? (
