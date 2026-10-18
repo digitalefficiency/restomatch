@@ -100,7 +100,7 @@ export default async function MonthlyReportPage({
         </div>
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 [&>*]:min-w-0">
         <Card padding="lg">
           <h2 className="text-sm font-bold text-ink">{t('report.topSuppliers')}</h2>
           {data.topSuppliers.length === 0 ? (

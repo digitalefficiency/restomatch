@@ -78,7 +78,7 @@ export default async function RecoveryPage() {
             </p>
           ) : null}
 
-          <div className="grid gap-4 lg:grid-cols-[1fr_1.4fr]">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1.4fr] [&>*]:min-w-0">
             <Card padding="lg">
               <h2 className="text-sm font-bold text-ink">{t('tracker.ageingTitle')}</h2>
               <ul className="mt-3 space-y-2">
