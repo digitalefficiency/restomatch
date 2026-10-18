@@ -101,7 +101,7 @@ export async function LeakExplorer({ view }: { view: ViewState }) {
             value={cur.leakPct != null ? formatPercent(cur.leakPct, locale, 1) : '—'}
             tone="warn"
             icon={<Percent className="h-4 w-4" />}
-            hint={<DeltaBadge current={cur.leakPct ?? 0} previous={prev ? (prev.leakPct ?? 0) : null} compare={view.compare} bare />}
+            hint={<DeltaBadge current={cur.leakPct ?? 0} previous={prev ? (prev.leakPct ?? 0) : null} compare={view.compare} kind="ratio" bare />}
           />
           <StatCard
             label={t('kpis.spend')}
@@ -113,7 +113,7 @@ export async function LeakExplorer({ view }: { view: ViewState }) {
             label={t('kpis.invoices')}
             value={`${formatNumber(cur.invoicesWithLeak, locale)} / ${formatNumber(cur.matchedInvoiceCount, locale)}`}
             icon={<FileWarning className="h-4 w-4" />}
-            hint={<DeltaBadge current={cur.invoicesWithLeak} previous={prev?.invoicesWithLeak} compare={view.compare} bare />}
+            hint={<DeltaBadge current={cur.invoicesWithLeak} previous={prev?.invoicesWithLeak} compare={view.compare} kind="count" bare />}
           />
         </div>
 

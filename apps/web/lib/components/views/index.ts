@@ -3,7 +3,7 @@
  * pages parse it, client controls serialize it.
  */
 export * from './state';
-export { rangeLabel, bucketLabel } from './labels';
+export { rangeLabel, bucketLabel, localDay } from './labels';
 export { toCsv, downloadCsv } from './csv';
 export type { CsvColumn, CsvRow } from './csv';
 export { listSavedViews, saveView, deleteSavedView } from './savedViews';

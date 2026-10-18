@@ -30,7 +30,7 @@ afterAll(resetDb);
 // Mid-October in Asia/Jerusalem (UTC+3).
 const NOW = new Date('2026-10-15T09:00:00Z');
 const OCT = new Date('2026-10-10T08:00:00Z');
-const SEP = new Date('2026-09-20T08:00:00Z');
+const SEP = new Date('2026-09-10T08:00:00Z');
 const OCT_LAST_YEAR = new Date('2025-10-12T08:00:00Z');
 
 type D = {
@@ -166,6 +166,36 @@ describe('computeLeakSummary', () => {
     const yoy = await computeLeakSummary(db, t.restaurantId, { period: 'this_month', now: NOW }, 'yoy');
     expect(yoy.leakIls).toBe(9);
     expect(yoy.monthStart).toBe('2025-09-30T21:00:00.000Z');
+  });
+
+  it('compare covers the same to-date stretch (month-to-date vs the same days last month)', async () => {
+    const t = await demo();
+    // After the 15th of September → outside "Sep 1–15", the comparison for Oct 1–15.
+    await t.invoice({
+      supplier: 'grocer',
+      date: new Date('2026-09-25T08:00:00Z'),
+      excl: '100',
+      incl: '118',
+      d: [{ type: 'QTY_SHORT', severity: 'warn', delta: '12', product: 'veg' }],
+    });
+    const prev = await computeLeakSummary(db, t.restaurantId, { period: 'this_month', now: NOW }, 'prev');
+    expect(prev.leakIls).toBe(30); // Sep 10 only
+    expect(prev.monthEnd).toBe('2026-09-15T21:00:00.000Z'); // local Sep 16 00:00
+    // A closed period is not cut: last_month vs the month before keeps its full length.
+    const full = await computeLeakSummary(db, t.restaurantId, { period: 'last_month', now: NOW }, 'off');
+    expect(full.leakIls).toBe(42); // Sep 10 + Sep 25
+  });
+
+  it('rejects impossible calendar dates before they reach Postgres', async () => {
+    const t = await setup();
+    for (const [from, to] of [
+      ['2026-02-30', '2026-03-05'],
+      ['0000-01-01', '2026-01-01'],
+    ]) {
+      await expect(computeLeakSummary(db, t.restaurantId, { period: 'custom', from, to, now: NOW })).rejects.toThrow(
+        /from\/to/,
+      );
+    }
   });
 
   it('wider periods aggregate: quarter, ytd, last 12 months', async () => {

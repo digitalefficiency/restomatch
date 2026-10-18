@@ -475,6 +475,14 @@ describe('list/aggregate isolation (A must not see B)', () => {
       await expect(
         callerWithRole(A, role).owner.leakSummary({ view: { period: 'this_month' }, compare: 'off' }),
       ).resolves.toBeDefined();
+      // Filters slice the leak per supplier/category/type → finance detail.
+      await expect(
+        callerWithRole(A, role).owner.leakSummary({
+          view: { period: 'this_month', filters: { supplierIds: [A.supplierId] } },
+          compare: 'off',
+        }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      await expect(callerWithRole(A, role).owner.viewOptions()).rejects.toMatchObject({ code: 'FORBIDDEN' });
     }
   });
 
@@ -490,6 +498,16 @@ describe('list/aggregate isolation (A must not see B)', () => {
       // @ts-expect-error — not a known discrepancy type
       caller.owner.leakSummary({ view: { period: 'this_month', filters: { types: ['DROP TABLE'] } }, compare: 'off' }),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    // Impossible / out-of-range calendar dates never reach Postgres.
+    for (const [from, to] of [
+      ['2026-02-30', '2026-03-05'],
+      ['0000-01-01', '2026-01-01'],
+      ['2000-01-01', '2026-01-01'], // > 3 years
+    ]) {
+      await expect(
+        caller.owner.leakSummary({ view: { period: 'custom', from, to }, compare: 'off' }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    }
   });
 
   it('owner.leakReport aggregates A-scoped data only', async () => {

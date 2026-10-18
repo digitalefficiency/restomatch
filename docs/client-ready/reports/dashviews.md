@@ -112,6 +112,28 @@ The screenshot console reported only React hydration warnings about `caret-color
 Playwright's caret-hiding style during capture: they also hit a pre-existing search input and do not occur
 in a real browser.
 
+## Independent review (refuter subagent) and fixes
+
+A separate subagent that did not write the code reviewed the diff and tried to refute it. Fixed in the follow-up commit:
+
+| Severity | Finding | Fix |
+|---|---|---|
+| High | `owner.leakSummary` is member-level but accepted supplier/category/type filters, so a receiver or chef could slice the leak per supplier. `viewOptions` handed out the supplier IDs. | A filtered `leakSummary` is now FORBIDDEN for non-finance roles, and `viewOptions` is finance-only. The overview strips filters for those roles. Attack tests added. |
+| Medium | `2026-02-30`, `0000-01-01` and ranges over 3 years passed URL parsing, then Postgres threw and the page returned a 500. | Real calendar dates only (years 2000–2100), checked in `parseView`, zod and `leak-views.ts`. `parseView` applies the 3-year cap and falls back to the default view. Tests in all three layers. |
+| Medium | CSV dates were the UTC day, so local-midnight buckets showed one day early. | New `localDay()` formats in Asia/Jerusalem. Used in the overview, breakdown and approvals CSVs; tested. |
+| Medium | Comparison put a running period (this month or quarter, last 12 months, a range ending in the future) against a full previous period. | The comparison now covers the same to-date stretch, e.g. Oct 1–15 vs Sep 1–15. Closed periods are unchanged, and so is the current period, so the hero is unaffected. Tested. |
+| Low-medium | `DeltaBadge` treated percentages and counts as ₪ (flat threshold, ₪ fallback text). | New `kind: 'ils' \| 'ratio' \| 'count'` prop. |
+| Low-medium | The toolbar kept `?m=` on the breakdown page, which contradicted the chosen period. | `m` is dropped when navigating. |
+| Low | TV mode fullscreen: unhandled promise rejections; Esc in browser fullscreen left the overlay on. | Rejections are caught, and leaving fullscreen exits TV mode. |
+
+**Left as a product call:**
+- The explorer (`leakGrouped`/`leakTrend`) is not behind `advanced_analytics`; the hero-level drill-down has been on the core plan so far.
+- The line chart spaces sparse trend points by index rather than by date.
+
+**Checked and holds up:** no injection path (all values bound, period and group-by pick fixed fragments); `restaurant_id` pinned on every join; DST and month edges (local wall-clock math); CSV formula guard; saved views drop `tv`; approvals filters survive load-more.
+
+**After the fixes:** web `tsc` 0 errors, web lint 0 errors, web tests 210/210, api 504/504, charts 47/47, `next build` green.
+
 ## Follow-ups (not in this PR)
 
 - Trend comparison is shown as a period delta on the hero, not per point. Trend points are sparse (only days or months with invoices), so a per-point overlay needs a dense calendar series in SQL first.

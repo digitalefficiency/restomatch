@@ -2,7 +2,7 @@
 
 import { Minus, TrendingDown, TrendingUp } from 'lucide-react';
 import { useLocale, useT } from '@/lib/i18n/client';
-import { formatPercent } from '@/lib/i18n/format';
+import { formatNumber, formatPercent } from '@/lib/i18n/format';
 import { views } from '@/lib/i18n/messages/views';
 import { formatIls } from '@/lib/money';
 import { cn } from '../cn';
@@ -21,6 +21,7 @@ export function DeltaBadge({
   neutral = false,
   showAmount = false,
   bare = false,
+  kind = 'ils',
   className,
 }: {
   current: number;
@@ -33,6 +34,8 @@ export function DeltaBadge({
   showAmount?: boolean;
   /** Omit the "vs previous period" suffix (e.g. inside a table column). */
   bare?: boolean;
+  /** What the numbers are: ₪ (default), a ratio (leak %) or a count. */
+  kind?: 'ils' | 'ratio' | 'count';
   className?: string;
 }) {
   const t = useT(views);
@@ -47,7 +50,9 @@ export function DeltaBadge({
       </span>
     );
   }
-  const flat = Math.abs(d.diff) < 0.005;
+  const flat = Math.abs(d.diff) < (kind === 'ratio' ? 0.00005 : 0.005);
+  const abs = (v: number) =>
+    kind === 'ratio' ? formatPercent(v, locale, 1) : kind === 'count' ? formatNumber(v, locale) : formatIls(v, { locale });
   const up = d.diff > 0;
   const tone = flat || neutral ? 'text-muted' : up === upIsGood ? 'text-primary' : 'text-danger';
   const Icon = flat ? Minus : up ? TrendingUp : TrendingDown;
@@ -56,7 +61,7 @@ export function DeltaBadge({
     ? t('delta.flat')
     : pct
       ? t(up ? 'delta.up' : 'delta.down', { pct })
-      : `${up ? '+' : '−'}${formatIls(Math.abs(d.diff), { locale })}`;
+      : `${up ? '+' : '−'}${abs(Math.abs(d.diff))}`;
   return (
     <span
       className={cn('inline-flex flex-wrap items-center gap-1 text-xs font-semibold', tone, className)}
@@ -68,7 +73,7 @@ export function DeltaBadge({
       {showAmount && !flat && pct ? (
         <span className="font-mono tabular-nums" dir="ltr">
           ({up ? '+' : '−'}
-          {formatIls(Math.abs(d.diff), { locale })})
+          {abs(Math.abs(d.diff))})
         </span>
       ) : null}
       {bare ? null : <span className="font-normal text-subtle">{vs}</span>}

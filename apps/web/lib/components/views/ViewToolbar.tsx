@@ -106,6 +106,8 @@ export function ViewToolbar(props: ViewToolbarProps) {
 
   function go(next: ViewState) {
     const keep = new URLSearchParams(window.location.search);
+    // The breakdown's legacy month offset would contradict the chosen period.
+    keep.delete('m');
     const q = serializeView(next, keep).toString();
     router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
   }
@@ -135,7 +137,7 @@ export function ViewToolbar(props: ViewToolbarProps) {
   function enterTv() {
     set({ tv: true });
     try {
-      void document.documentElement.requestFullscreen?.();
+      void document.documentElement.requestFullscreen?.()?.catch(() => {});
     } catch {
       /* fullscreen not allowed — the overlay still fills the window */
     }

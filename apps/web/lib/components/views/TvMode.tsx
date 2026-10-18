@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Minimize2, RefreshCw } from 'lucide-react';
 import { useLocale, useT } from '@/lib/i18n/client';
@@ -21,15 +21,12 @@ export function TvMode({ active, children }: { active: boolean; children: React.
   const router = useRouter();
   const pathname = usePathname();
   const [updated, setUpdated] = useState<Date | null>(null);
+  const wasFullscreen = useRef(false);
 
   const exit = useCallback(() => {
     const sp = new URLSearchParams(window.location.search);
     sp.delete('tv');
-    try {
-      if (document.fullscreenElement) void document.exitFullscreen();
-    } catch {
-      /* fullscreen API unavailable */
-    }
+    if (document.fullscreenElement) void document.exitFullscreen?.()?.catch(() => {});
     const q = sp.toString();
     router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
   }, [pathname, router]);
@@ -44,10 +41,22 @@ export function TvMode({ active, children }: { active: boolean; children: React.
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') exit();
     };
+    // In browser fullscreen the first Esc only leaves fullscreen (no keydown):
+    // leaving fullscreen leaves TV mode too.
+    const onFullscreen = () => {
+      if (document.fullscreenElement) wasFullscreen.current = true;
+      else if (wasFullscreen.current) {
+        wasFullscreen.current = false;
+        exit();
+      }
+    };
+    if (document.fullscreenElement) wasFullscreen.current = true;
     window.addEventListener('keydown', onKey);
+    document.addEventListener('fullscreenchange', onFullscreen);
     return () => {
       window.clearInterval(id);
       window.removeEventListener('keydown', onKey);
+      document.removeEventListener('fullscreenchange', onFullscreen);
     };
   }, [active, exit, router]);
 

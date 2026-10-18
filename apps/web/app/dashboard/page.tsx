@@ -31,6 +31,7 @@ import {
   parseView,
   rangeLabel,
   serializeView,
+  localDay,
   toViewInput,
 } from '@/lib/components/views';
 import { views as viewsNs } from '@/lib/i18n/messages/views';
@@ -60,7 +61,8 @@ export default async function DashboardPage({
   // owner.leakHero, untouched. Any other view goes through owner.leakSummary,
   // which returns the same shape for the chosen range/filters (+ comparison).
   const defaultView = isDefaultData(view);
-  const viewInput = toViewInput(view);
+  // Filters are finance detail (the router enforces it too): other roles get the period only.
+  const viewInput = toViewInput(canDrill ? view : { ...view, filters: DEFAULT_VIEW.filters });
   const [kpis, summary, lastMonth, activity, trend, options] = await Promise.all([
     caller.owner.kpis(),
     defaultView
@@ -146,14 +148,14 @@ export default async function DashboardPage({
                   { key: 'leak', label: tv('trend.colLeak') },
                   { key: 'spend', label: tv('trend.colSpend') },
                 ],
-                rows: trend.points.map((p) => ({ bucket: p.bucketStart.slice(0, 10), leak: p.leakIls, spend: p.spendIls })),
+                rows: trend.points.map((p) => ({ bucket: localDay(p.bucketStart), leak: p.leakIls, spend: p.spendIls })),
               }
             : undefined
         }
       />
 
       <TvMode active={view.tv}>
-      {hasFilters(view) ? <p className="mb-3 text-xs text-subtle">{tv('filteredNote')}</p> : null}
+      {canDrill && hasFilters(view) ? <p className="mb-3 text-xs text-subtle">{tv('filteredNote')}</p> : null}
       <LeakHero
         t={t}
         hero={hero}

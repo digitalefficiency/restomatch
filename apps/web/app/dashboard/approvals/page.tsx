@@ -1,7 +1,7 @@
 import { CheckCircle2 } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
 import { EmptyState, SectionHeader } from '@/lib/components';
-import { ViewToolbar, hasFilters, parseView } from '@/lib/components/views';
+import { ViewToolbar, hasFilters, localDay, parseView } from '@/lib/components/views';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { approvals } from '@/lib/i18n/messages/approvals';
 import { views as viewsNs } from '@/lib/i18n/messages/views';
@@ -55,7 +55,7 @@ export default async function ApprovalsPage({
             supplier: displayName(locale, d.supplierName, d.supplierNameEn),
             invoice: d.invoiceNumber ?? '',
             amount: Number(d.deltaAmount ?? 0),
-            date: new Date(d.createdAt).toISOString().slice(0, 10),
+            date: localDay(d.createdAt),
           })),
         }}
       />

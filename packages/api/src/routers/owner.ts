@@ -24,6 +24,7 @@ import {
   type OwnerKpis,
   type SupplierScorecard,
 } from '@restomatch/charts';
+import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { discrepancyType } from '@restomatch/db';
 import {
@@ -40,6 +41,13 @@ const analyticsProcedure = ownerProcedure.use(requireFeature('advanced_analytics
 const memberAnalyticsProcedure = memberProcedure.use(requireFeature('advanced_analytics'));
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+/** A real calendar day in a sane range (rejects 2026-02-30, 0000-01-01 — Postgres would throw). */
+const realDate = (s: string) => {
+  const d = new Date(`${s}T00:00:00Z`);
+  const y = Number(s.slice(0, 4));
+  return y >= 2000 && y <= 2100 && !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+};
+const FINANCE_ROLES: ReadonlyArray<string> = ['owner', 'manager', 'bookkeeper'];
 
 /**
  * A dashboard view: period (+ custom range) and filters. Every value is
@@ -48,8 +56,8 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 export const ViewInput = z
   .object({
     period: z.enum(VIEW_PERIODS).default('this_month'),
-    from: z.string().regex(ISO_DATE).optional(),
-    to: z.string().regex(ISO_DATE).optional(),
+    from: z.string().regex(ISO_DATE).refine(realDate, 'not a calendar date').optional(),
+    to: z.string().regex(ISO_DATE).refine(realDate, 'not a calendar date').optional(),
     filters: z
       .object({
         supplierIds: z.array(z.string().uuid()).max(50).optional(),
@@ -110,6 +118,13 @@ export const ownerRouter = router({
   leakSummary: memberProcedure
     .input(z.object({ view: ViewInput, compare: CompareInput }))
     .query(async ({ ctx, input }): Promise<{ current: LeakHero; previous: LeakHero | null }> => {
+      // Any period is hero-level for every role, but filters slice the leak per
+      // supplier / category / type — finance detail, like leakGrouped.
+      const f = input.view.filters;
+      const filtered = !!f && Object.values(f).some((v) => Array.isArray(v) && v.length > 0);
+      if (filtered && !FINANCE_ROLES.includes(ctx.session.role)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'view filters are for owner/manager/bookkeeper' });
+      }
       const spec = specOf(input.view);
       const rid = ctx.session.restaurantId;
       const [current, previous] = await Promise.all([
@@ -156,7 +171,7 @@ export const ownerRouter = router({
     ),
 
   // Filter choices (this restaurant's suppliers + product categories).
-  viewOptions: memberProcedure.query(async ({ ctx }) => computeViewOptions(ctx.db, ctx.session.restaurantId)),
+  viewOptions: financeProcedure.query(async ({ ctx }) => computeViewOptions(ctx.db, ctx.session.restaurantId)),
 
   // Print-ready monthly leak report — owner/manager only (it lists supplier
   // spend and what the team waived). Core plan, like the hero it expands.
