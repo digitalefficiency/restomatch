@@ -18,7 +18,7 @@ Branch `claude/client-ready-ops-ui` · flag **`integrations`** · migration **00
 | POS sales | `packages/api/src/integrations/pos/*`, `pos_sales*` (0058) | `PosSalesProvider` interface + generic **CSV adapter**. `integrations.posPreview` / `posImport` / `posImports` / `posSummary`. |
 | UI | `/dashboard/integrations`, exports page, catalog header | Hub page (404 when the flag is off); 3 download cards on the exports page; "Integrations" button on the catalog header. Hebrew + English (`integrations` namespace). |
 
-Flag behaviour: off → every `integrations.*` procedure except `status` is `FORBIDDEN` with message `FEATURE_DISABLED:integrations`; the hub 404s; the exports page and catalog header show nothing. `FEATURES_OFF=integrations` (or `all`) wins over the per-restaurant flag (tested).
+Flag behaviour: off → every `integrations.*` procedure except `status` is `FORBIDDEN` with appCode `FEATURE_DISABLED` (`assertFeatureOn`, `lib/featureGate.ts`, identical to S11/S12's); the hub 404s; the exports page and catalog header show nothing. `FEATURES_OFF=integrations` (or `all`) wins over the per-restaurant flag (tested).
 
 ## Accounting file formats + the accountant's import steps
 

@@ -18,6 +18,7 @@ import {
 import { getAdapter, listSupportedPlatforms, type PlatformId } from '@restomatch/procurement';
 import { bookkeeperProcedure, chefProcedure, managerProcedure, memberProcedure, ownerProcedure, requireFeature, router } from '../trpc';
 import { featureEnabled } from '../lib/features';
+import { assertFeatureOn } from '../lib/featureGate';
 import { localIsoDate } from '../exports/period';
 import { fetchInvoices } from './exports';
 import {
@@ -52,11 +53,9 @@ async function loadSettings(db: import('@restomatch/db').Database, restaurantId:
   return (row?.settings ?? {}) as IntegrationSettings;
 }
 
-/** FORBIDDEN unless the restaurant has the `integrations` flag (and FEATURES_OFF doesn't kill it). */
-async function assertIntegrations(db: import('@restomatch/db').Database, restaurantId: string) {
-  if (!featureEnabled(await loadSettings(db, restaurantId), 'integrations')) {
-    throw new TRPCError({ code: 'FORBIDDEN', message: 'FEATURE_DISABLED:integrations' });
-  }
+/** FORBIDDEN / appCode FEATURE_DISABLED unless the `integrations` flag is on (FEATURES_OFF honoured). */
+function assertIntegrations(db: import('@restomatch/db').Database, restaurantId: string) {
+  return assertFeatureOn(db, restaurantId, 'integrations');
 }
 
 /** Accounting exports: bookkeeper/owner, the accounting_export plan feature, and the flag. */

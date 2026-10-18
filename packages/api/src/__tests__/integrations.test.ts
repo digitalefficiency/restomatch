@@ -52,7 +52,7 @@ describe('integrations flag', () => {
     expect(await callerFor(A).integrations.status()).toEqual({ enabled: false });
     await expect(
       callerFor(A).integrations.accountingExport({ format: 'hashavshevet', ...PERIOD }),
-    ).rejects.toMatchObject({ code: 'FORBIDDEN', message: 'FEATURE_DISABLED:integrations' });
+    ).rejects.toMatchObject({ code: 'FORBIDDEN', cause: { appCode: 'FEATURE_DISABLED', appParams: { feature: 'integrations' } } });
     await expect(callerFor(A).integrations.accountingConfig()).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await setFlag(A, true);
     expect(await callerFor(A).integrations.status()).toEqual({ enabled: true });

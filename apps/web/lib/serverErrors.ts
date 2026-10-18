@@ -34,6 +34,8 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   'auth.unauthorized': 'unauthorized',
   'auth.forbidden': 'forbidden',
   'input.invalid': 'invalidInput',
+  // Wave-1 per-restaurant flag off (the UI hides the feature; a stale tab lands here).
+  FEATURE_DISABLED: 'forbidden',
 };
 
 /**
