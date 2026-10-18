@@ -6,11 +6,15 @@ import {
   eq,
   products,
   supplierContractPrices,
+  priceAlerts,
+  restaurants,
+  sql,
   suppliers,
 } from '@restomatch/db';
-import { financeProcedure, managerProcedure, router } from '../trpc';
+import { financeProcedure, managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
 import { assertFeature } from '../lib/featureGate';
+import { featureEnabled } from '../lib/features';
 import { CatalogFileError, parseCatalogFile, type ParsedTable } from '../catalog/parse';
 import {
   autoDetectContractMapping,
@@ -89,6 +93,34 @@ function isUniqueViolation(err: unknown): boolean {
  * manager-tier. Every procedure is feature-gated and RLS-scoped.
  */
 export const contractsRouter = router({
+  /**
+   * Which wave-1 surfaces the caller may see (nav, tabs, badges) — never throws,
+   * so a flag-off tenant doesn't log a FEATURE_DISABLED error per page load.
+   * Flags are only reported to finance-tier roles (others can't use either).
+   */
+  access: memberProcedure.query(async ({ ctx }) => {
+    const rid = ctx.session.restaurantId;
+    const role = ctx.session.role;
+    const finance = role === 'owner' || role === 'manager' || role === 'bookkeeper';
+    if (!finance) return { contracts: false, priceAlerts: false, openAlerts: 0 };
+    const [r] = await ctx.db
+      .select({ settings: restaurants.settings })
+      .from(restaurants)
+      .where(eq(restaurants.id, rid))
+      .limit(1);
+    const contracts = featureEnabled(r?.settings, 'contracts');
+    const alertsOn = featureEnabled(r?.settings, 'priceAlerts');
+    let openAlerts = 0;
+    if (alertsOn) {
+      const [c] = await ctx.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(priceAlerts)
+        .where(and(eq(priceAlerts.restaurantId, rid), eq(priceAlerts.status, 'open')));
+      openAlerts = c?.n ?? 0;
+    }
+    return { contracts, priceAlerts: alertsOn, openAlerts };
+  }),
+
   /** Contract rows, optionally for one supplier, with product/supplier names. */
   list: financeProcedure
     .input(z.object({ supplierId: z.string().uuid().optional() }).strict().optional())

@@ -3,6 +3,7 @@ import { SupplierDetailsTab } from './tab-details';
 import { SupplierCatalogTab } from './tab-catalog';
 import { SupplierScheduleTab } from './tab-schedule';
 import { SupplierOrdersTab } from './tab-orders';
+import { SupplierContractTab } from './tab-contract';
 import type { SupplierTab } from './tab-bar';
 
 export const dynamic = 'force-dynamic';
@@ -25,7 +26,7 @@ export default async function SupplierDetailPage({
 }) {
   const { id } = await params;
   const { tab: rawTab } = await searchParams;
-  const tab: SupplierTab = (['details', 'catalog', 'schedule', 'orders'] as const).includes(
+  const tab: SupplierTab = (['details', 'catalog', 'schedule', 'orders', 'contract'] as const).includes(
     rawTab as SupplierTab,
   )
     ? (rawTab as SupplierTab)
@@ -36,6 +37,8 @@ export default async function SupplierDetailPage({
       return <SupplierCatalogTab supplierId={id} />;
     case 'orders':
       return <SupplierOrdersTab supplierId={id} />;
+    case 'contract':
+      return <SupplierContractTab supplierId={id} />;
     case 'schedule':
     case 'details':
     default: {

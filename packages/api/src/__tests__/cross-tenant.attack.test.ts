@@ -212,6 +212,7 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'dsr.eraseLead': 'admin-denial',
   // Wave 1 (S11): supplier contract prices + price-trend alerts — feature-gated
   // (`contracts` / `priceAlerts`); attacks + isolation in the block at the end.
+  'contracts.access': 'isolation',
   'contracts.list': 'isolation',
   'contracts.productOptions': 'attack',
   'contracts.create': 'attack',
@@ -1487,6 +1488,12 @@ describe('wave 1 (S11): contracts + priceAlerts — foreign ids and isolation', 
 
   const bContract = async () =>
     (await db.select().from(supplierContractPrices).where(eq(supplierContractPrices.id, bContractId)))[0]!;
+
+  it('contracts.access reports only the caller’s flags + open-alert count; hides flags from receivers', async () => {
+    expect(await callerFor(A).contracts.access()).toEqual({ contracts: true, priceAlerts: true, openAlerts: 0 });
+    expect(await callerFor(B).contracts.access()).toEqual({ contracts: true, priceAlerts: true, openAlerts: 1 });
+    expect(await callerWithRole(A, 'receiver').contracts.access()).toEqual({ contracts: false, priceAlerts: false, openAlerts: 0 });
+  });
 
   it('contracts.list / overContract never include B rows', async () => {
     const list = await callerFor(A).contracts.list();

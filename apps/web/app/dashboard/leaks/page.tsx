@@ -20,6 +20,7 @@ import {
   entitlementCauseOf,
 } from '@/lib/components';
 import { displayName } from '../approvals/vocab';
+import { OverContractCard } from '../contracts/over-contract';
 
 export default async function LeaksPage() {
   const caller = await createServerCaller();
@@ -69,6 +70,7 @@ export default async function LeaksPage() {
       <div>
         <SectionHeader level={1} title={t('detective.title')} />
         {leakLinks}
+        <OverContractCard variant="compact" />
         <EntitlementUpsell feature="advanced_analytics" title={t('detective.upsell')} />
       </div>
     );
@@ -79,6 +81,7 @@ export default async function LeaksPage() {
       <div>
         <SectionHeader level={1} title={t('detective.title')} />
         {leakLinks}
+        <OverContractCard variant="compact" />
         <Card padding="md" className="flex items-center gap-3 border-warn/30 bg-warn/5 text-warn">
           <ShieldAlert className="h-5 w-5 shrink-0" aria-hidden="true" />
           <span>{t('detective.roleOnly')}</span>
@@ -107,6 +110,8 @@ export default async function LeaksPage() {
         subtitle={t('detective.subtitle')}
       />
       {leakLinks}
+      {/* Wave-1: lines billed above contract (renders nothing when off / none). */}
+      <OverContractCard variant="compact" />
 
       {rows.length === 0 ? (
         <EmptyState

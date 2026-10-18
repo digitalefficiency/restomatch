@@ -20,6 +20,7 @@ import {
   entitlementCauseOf,
 } from '@/lib/components';
 import { PaginatedActivityFeed } from './activity';
+import { PriceAlertsTeaser } from './contracts/overview-card';
 import { displayName } from './approvals/vocab';
 
 export default async function DashboardPage() {
@@ -114,6 +115,9 @@ export default async function DashboardPage() {
           subtitle={t('kpis.cleanHint')}
         />
       </div>
+
+      {/* Wave-1 price alerts teaser — renders nothing when off / no open alerts. */}
+      <PriceAlertsTeaser />
 
       {/* Leak heatmap — the centerpiece data-viz. */}
       {leaksEntitlementBlocked ? (
