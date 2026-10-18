@@ -73,6 +73,13 @@ export function clip(text: string | null | undefined, max = 60): string | null {
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
+
+export type AskLocale = 'he' | 'en';
+/** The display name in the answer's language: Hebrew original, or English when available. */
+function nm(locale: AskLocale, en: string | null | undefined, ...he: Array<string | null | undefined>): string | null {
+  const heName = he.find((h) => h != null && h !== '') ?? null;
+  return clip(locale === 'en' ? (en ?? heName) : (heName ?? en ?? null));
+}
 const pct = (n: number | null) => (n == null ? null : Math.round(n * 1000) / 10);
 
 function heroData(h: LeakHero) {
@@ -89,22 +96,22 @@ function heroData(h: LeakHero) {
   };
 }
 
-export function reportData(r: LeakReport) {
+export function reportData(r: LeakReport, locale: AskLocale = 'en') {
   return {
     month: r.month,
     hero: heroData(r.hero),
     byType: r.byType.slice(0, 8).map((t) => ({ type: t.type, count: t.count, amountIls: r2(t.amountIls) })),
     bySupplier: r.bySupplier.slice(0, 8).map((s) => ({
       supplierId: s.supplierId,
-      supplier: clip(s.supplierNameEn ?? s.supplierName),
+      supplier: nm(locale, s.supplierNameEn, s.supplierName),
       invoiceCount: s.invoiceCount,
       spendIls: r2(s.spendIls),
       leakIls: r2(s.leakIls),
       leakPctOfSpend: pct(s.leakPct),
     })),
     priceIncreases: r.priceCreep.slice(0, 8).map((p) => ({
-      product: clip(p.productNameEn ?? p.productName),
-      supplier: clip(p.supplierNameEn ?? p.supplierName),
+      product: nm(locale, p.productNameEn, p.productName),
+      supplier: nm(locale, p.supplierNameEn, p.supplierName),
       beforePrice: r2(p.beforePrice),
       afterPrice: r2(p.afterPrice),
       deltaPct: pct(p.deltaPct),
@@ -121,16 +128,21 @@ export function reportData(r: LeakReport) {
 }
 
 /** Open, leak-counting discrepancy lines (what can still be claimed), biggest first. */
-export function claimableData(invoices: LeakBreakdownInvoice[]) {
+export function claimableData(invoices: LeakBreakdownInvoice[], locale: AskLocale = 'en') {
   const lines = invoices.flatMap((inv) =>
     inv.lines
-      .filter((l) => l.countsAsLeak && (l.resolutionStatus === 'open' || l.resolutionStatus === 'escalated'))
+      .filter(
+        (l) =>
+          l.countsAsLeak &&
+          (l.resolutionStatus === 'open' || l.resolutionStatus === 'escalated') &&
+          Math.abs(l.deltaAmount) >= 0.01,
+      )
       .map((l) => ({
         invoiceId: inv.invoiceId,
         invoiceNumber: clip(inv.invoiceNumber, 30),
-        supplier: clip(inv.supplierNameEn ?? inv.supplierName),
+        supplier: nm(locale, inv.supplierNameEn, inv.supplierName),
         type: l.type,
-        item: clip(l.productNameEn ?? l.lineDescriptionEn ?? l.productName ?? l.lineDescription),
+        item: nm(locale, l.productNameEn ?? l.lineDescriptionEn, l.productName, l.lineDescription),
         amountIls: r2(Math.abs(l.deltaAmount)),
       })),
   );
@@ -200,6 +212,8 @@ export interface ToolContext {
   db: Database;
   restaurantId: string;
   now?: Date;
+  /** Language of the answer (names are given in it). */
+  locale?: AskLocale;
 }
 
 /** Execute one tool. Throws on invalid input (the loop returns it as an is_error tool_result). */
@@ -225,7 +239,7 @@ export async function runTool(name: string, rawInput: unknown, ctx: ToolContext)
       const input = MonthInput.parse(rawInput ?? {});
       const month = input.month ?? monthKey(0, now);
       if (offsetOf(month, now) === null) throw new Error('month out of range (last 24 months only)');
-      const data = reportData(await computeLeakReport(ctx.db, ctx.restaurantId, month));
+      const data = reportData(await computeLeakReport(ctx.db, ctx.restaurantId, month), ctx.locale);
       const links: ScreenLink[] = [{ screen: 'report', href: `/dashboard/leaks/report?month=${month}` }];
       for (const s of data.bySupplier) {
         if (s.supplierId) links.push({ screen: 'supplier', href: `/dashboard/suppliers/${s.supplierId}` });
@@ -245,14 +259,14 @@ export async function runTool(name: string, rawInput: unknown, ctx: ToolContext)
         invoiceId: inv.invoiceId,
         invoiceNumber: clip(inv.invoiceNumber, 30),
         invoiceDate: inv.invoiceDate,
-        supplier: clip(inv.supplierNameEn ?? inv.supplierName),
+        supplier: nm(ctx.locale ?? 'en', inv.supplierNameEn, inv.supplierName),
         totalInclVatIls: r2(inv.totalInclVat),
         leakIls: r2(inv.leakIls),
         pendingLink: inv.pendingLink,
         lines: inv.lines.slice(0, 6).map((l) => ({
           type: l.type,
           status: l.resolutionStatus,
-          item: clip(l.productNameEn ?? l.lineDescriptionEn ?? l.productName ?? l.lineDescription),
+          item: nm(ctx.locale ?? 'en', l.productNameEn ?? l.lineDescriptionEn, l.productName, l.lineDescription),
           deltaIls: r2(l.deltaAmount),
           countsAsLeak: l.countsAsLeak,
         })),
@@ -272,7 +286,7 @@ export async function runTool(name: string, rawInput: unknown, ctx: ToolContext)
         computeLeakBreakdown(ctx.db, ctx.restaurantId, { monthOffset: 0, limit: 100, now }),
         computeLeakBreakdown(ctx.db, ctx.restaurantId, { monthOffset: -1, limit: 100, now }),
       ]);
-      const data = claimableData([...cur, ...prev]);
+      const data = claimableData([...cur, ...prev], ctx.locale);
       return {
         data,
         figures: figuresOf(data),

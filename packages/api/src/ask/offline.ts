@@ -40,6 +40,7 @@ export async function offlineAnswer(
   restaurantId: string,
   question: string,
   now: Date = new Date(),
+  locale: 'he' | 'en' = 'en',
 ): Promise<OfflineFacts> {
   const intent = classifyQuestion(question);
   const month = monthKey(0, now);
@@ -72,7 +73,7 @@ export async function offlineAnswer(
       const prev = { hero: { leakIls: r2(prevRaw.hero.leakIls) }, byType: prevRaw.byType, bySupplier: prevRaw.bySupplier };
       // Biggest supplier and discrepancy-type movers between the two months —
       // over the FULL lists (a supplier outside last month's top 8 is not "new").
-      const supName = (s: { supplierName: string | null; supplierNameEn: string | null }) => clip(s.supplierNameEn ?? s.supplierName);
+      const supName = (s: { supplierName: string | null; supplierNameEn: string | null }) => clip(locale === 'en' ? (s.supplierNameEn ?? s.supplierName) : (s.supplierName ?? s.supplierNameEn));
       const supDelta = new Map<string, { name: string | null; id: string | null; delta: number }>();
       for (const s of cur.bySupplier) supDelta.set(s.supplierId ?? supName(s) ?? '?', { name: supName(s), id: s.supplierId, delta: s.leakIls });
       for (const s of prev.bySupplier) {
@@ -108,7 +109,7 @@ export async function offlineAnswer(
       };
     }
     case 'priceRaise': {
-      const rep = reportData(await computeLeakReport(db, restaurantId, month));
+      const rep = reportData(await computeLeakReport(db, restaurantId, month), locale);
       const items = rep.priceIncreases.filter((p) => (p.deltaPct ?? 0) > 0).slice(0, 5);
       return {
         intent,
@@ -132,7 +133,7 @@ export async function offlineAnswer(
         computeLeakBreakdown(db, restaurantId, { monthOffset: 0, limit: 100, now }),
         computeLeakBreakdown(db, restaurantId, { monthOffset: -1, limit: 100, now }),
       ]);
-      const c = claimableData([...cur, ...prev]);
+      const c = claimableData([...cur, ...prev], locale);
       return {
         intent,
         facts: {
@@ -153,7 +154,7 @@ export async function offlineAnswer(
       };
     }
     case 'topSupplier': {
-      const rep = reportData(await computeLeakReport(db, restaurantId, month));
+      const rep = reportData(await computeLeakReport(db, restaurantId, month), locale);
       const top = [...rep.bySupplier].sort((a, b) => b.leakIls - a.leakIls)[0];
       return {
         intent,

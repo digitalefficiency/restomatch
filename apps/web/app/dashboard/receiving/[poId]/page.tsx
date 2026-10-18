@@ -42,7 +42,8 @@ export default async function ReceivingPoPage({
       caller.receiverLangs.localNames({ locale: appLocale, poId }).catch(() => null),
       new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
     ]);
-    localNames = r?.names ?? {};
+    // Plain object for the client boundary (the API builds a null-prototype map).
+    localNames = { ...(r?.names ?? {}) };
   }
 
   let po;

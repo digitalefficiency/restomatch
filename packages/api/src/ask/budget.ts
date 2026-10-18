@@ -10,7 +10,7 @@ import { and, assistantUsage, eq, sql, type Database } from '@restomatch/db';
 export const ASK_QUESTIONS_PER_DAY = 60;
 /** $3/day per restaurant (micro-USD). */
 export const ASK_COST_MICRO_USD_PER_DAY = 3_000_000;
-export const ASK_BURST_PER_MINUTE = 6;
+export const ASK_BURST_PER_MINUTE = 10;
 /** claude-opus-5-5 list price: $4 / $20 per MTok → micro-USD per token. */
 export const INPUT_MICRO_USD_PER_TOKEN = 4;
 export const OUTPUT_MICRO_USD_PER_TOKEN = 20;

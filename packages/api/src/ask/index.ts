@@ -62,7 +62,7 @@ export async function runAsk(
   if (client && reason === null) {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(now);
     try {
-      const r = await runClaude(client, question, locale, { db, restaurantId, now }, today);
+      const r = await runClaude(client, question, locale, { db, restaurantId, now, locale }, today);
       await addClaudeSpend(db, restaurantId, { claudeCalls: r.calls, inputTokens: r.inputTokens, outputTokens: r.outputTokens }, now);
       const g = groundAnswer(r.answer, r.links, r.figures);
       const linkSet = new Set(g.citations.map((c) => c.href));
@@ -85,7 +85,7 @@ export async function runAsk(
     }
   }
 
-  const off = await offlineAnswer(db, restaurantId, question, now);
+  const off = await offlineAnswer(db, restaurantId, question, now, locale);
   if (!counted) await recordUsage(db, restaurantId, { claudeCalls: 0, inputTokens: 0, outputTokens: 0 }, now);
   return {
     mode: 'offline',

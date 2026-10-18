@@ -35,8 +35,12 @@ async function session(browser: Browser, locale: string, mobile: boolean) {
     viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 },
     deviceScaleFactor: mobile ? 2 : 1,
   });
-  await ctx.addCookies([{ name: 'rm_locale', value: locale, url: BASE }]);
+  await ctx.addCookies([
+    { name: 'rm_locale', value: locale, url: BASE },
+    { name: 'rm_cookie_consent', value: 'necessary', url: BASE },
+  ]);
   const page = await ctx.newPage();
+  // Dismiss the cookie banner (first-party consent cookie) so it doesn't cover the screenshots.
   const errors: string[] = [];
   page.on('console', (m) => {
     if (m.type() === 'error') errors.push(m.text());
@@ -63,7 +67,8 @@ async function expectHtml(page: Page, lang: string, dir: string, label: string) 
 async function main() {
   const browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM_PATH });
 
-  // 1. Receiver languages: login page → receiving inbox → a PO (phone viewport).
+  // 1. Receiver languages. Login page signed out (per locale), then ONE receiver
+  //    session switching locale by cookie (per-email login rate limits).
   for (const [locale, dir] of [['ar', 'rtl'], ['ru', 'ltr'], ['th', 'ltr'], ['ti', 'ltr']] as const) {
     const { ctx, page, errors } = await session(browser, locale, true);
     const res = await page.goto(`${BASE}/login`);
@@ -72,38 +77,47 @@ async function main() {
     const loginTitle = await page.locator('h1').first().innerText();
     check(SCRIPT[locale]!.test(loginTitle), `${locale} login title in ${locale}: "${loginTitle}"`);
     await page.screenshot({ path: `${OUT}/${locale}-login.png`, fullPage: true });
-
+    check(errors.length === 0, `${locale} /login: zero console errors ${errors.length ? JSON.stringify(errors.slice(0, 3)) : ''}`);
+    await ctx.close();
+  }
+  {
+    const { ctx, page, errors } = await session(browser, 'ar', true);
     await login(page, 'receiver@kfar-hazeitim.test');
-    const inbox = await page.goto(`${BASE}/dashboard/receiving`);
-    check((inbox?.status() ?? 500) < 400, `${locale} /dashboard/receiving HTTP ${inbox?.status()}`);
-    await expectHtml(page, locale, dir, `${locale} inbox`);
-    const h1 = await page.locator('main h1, main h2').first().innerText();
-    check(SCRIPT[locale]!.test(h1), `${locale} inbox heading in ${locale}: "${h1}"`);
-    check(await page.locator('[data-testid="language-picker"]').first().isVisible(), `${locale} language picker visible`);
-    await page.screenshot({ path: `${OUT}/${locale}-receiving-inbox.png`, fullPage: true });
+    for (const [locale, dir] of [['ar', 'rtl'], ['ru', 'ltr'], ['th', 'ltr'], ['ti', 'ltr']] as const) {
+      await ctx.addCookies([{ name: 'rm_locale', value: locale, url: BASE }]);
+      const inbox = await page.goto(`${BASE}/dashboard/receiving`);
+      check((inbox?.status() ?? 500) < 400, `${locale} /dashboard/receiving HTTP ${inbox?.status()}`);
+      await expectHtml(page, locale, dir, `${locale} inbox`);
+      const h1 = await page.locator('#main-content h1, #main-content h2').first().innerText();
+      check(SCRIPT[locale]!.test(h1), `${locale} inbox heading in ${locale}: "${h1}"`);
+      check((await page.locator('[data-testid="language-picker"]:visible').count()) > 0, `${locale} language picker visible`);
+      await page.screenshot({ path: `${OUT}/${locale}-receiving-inbox.png`, fullPage: true });
 
-    const href = await page.locator('a[href^="/dashboard/receiving/"]').first().getAttribute('href');
-    if (href) {
-      const po = await page.goto(`${BASE}${href}`);
-      check((po?.status() ?? 500) < 400, `${locale} PO page HTTP ${po?.status()}`);
-      await page.waitForTimeout(800);
-      const body = await page.locator('main').innerText();
-      check(SCRIPT[locale]!.test(body), `${locale} PO page has ${locale} text`);
-      await page.screenshot({ path: `${OUT}/${locale}-receiving-po.png`, fullPage: true });
-    } else {
-      check(false, `${locale} inbox has a PO link`);
+      const href = await page.locator('a[href^="/dashboard/receiving/"]').first().getAttribute('href');
+      if (href) {
+        const po = await page.goto(`${BASE}${href}`);
+        check((po?.status() ?? 500) < 400, `${locale} PO page HTTP ${po?.status()}`);
+        await page.waitForTimeout(800);
+        const body = await page.locator('#main-content').innerText();
+        check(SCRIPT[locale]!.test(body), `${locale} PO page has ${locale} text`);
+        // Line names were localized server-side (glossary/cache) and sent to the wizard.
+        const html = await page.content();
+        const localNames = (html.match(/rawDescriptionEn\\*":\\*"[^"\\]+/g) ?? []).filter((m) => SCRIPT[locale]!.test(m));
+        check(localNames.length > 0, `${locale} PO lines carry ${locale} names (${localNames.length} found)`);
+        await page.screenshot({ path: `${OUT}/${locale}-receiving-po.png`, fullPage: true });
+      } else {
+        check(false, `${locale} inbox has a PO link`);
+      }
+      await page.goto(`${BASE}/dashboard/settings`);
+      const settingsText = await page.locator('#main-content').innerText();
+      check(/[A-Za-z]{4,}/.test(settingsText), `${locale} settings (non-receiver screen) renders (English fallback)`);
+      const askRes = await page.goto(`${BASE}/dashboard/ask`);
+      check(
+        (askRes?.status() ?? 0) === 404 || !page.url().includes('/dashboard/ask'),
+        `${locale} receiver cannot open /dashboard/ask (status ${askRes?.status()}, url ${page.url()})`,
+      );
     }
-    // A non-receiver screen falls back to English (receiver may see /dashboard/settings).
-    await page.goto(`${BASE}/dashboard/settings`);
-    const settingsText = await page.locator('main').innerText();
-    check(/[A-Za-z]{4,}/.test(settingsText), `${locale} settings (non-receiver screen) renders (English fallback)`);
-    // The assistant is invisible to a receiver.
-    const askRes = await page.goto(`${BASE}/dashboard/ask`);
-    check(
-      (askRes?.status() ?? 0) === 404 || !page.url().includes('/dashboard/ask'),
-      `${locale} receiver cannot open /dashboard/ask (status ${askRes?.status()}, url ${page.url()})`,
-    );
-    check(errors.length === 0, `${locale} receiver flow: zero console errors / 5xx ${errors.length ? JSON.stringify(errors.slice(0, 3)) : ''}`);
+    check(errors.length === 0, `receiver flow (4 locales): zero console errors / 5xx ${errors.length ? JSON.stringify(errors.slice(0, 3)) : ''}`);
     await ctx.close();
   }
 
@@ -138,6 +152,7 @@ async function main() {
     const firstSource = await page.locator('[data-testid="ask-source"]').first().getAttribute('href');
     check(Boolean(firstSource?.startsWith('/dashboard')), `${locale}/${who} source link is internal: ${firstSource}`);
     if (who === 'owner') await page.screenshot({ path: `${OUT}/ask-${locale}.png`, fullPage: true });
+    if (who === 'owner') await page.waitForTimeout(0);
     if (firstSource) {
       const s = await page.goto(`${BASE}${firstSource}`);
       check((s?.status() ?? 500) < 400, `${locale}/${who} source screen ${firstSource} HTTP ${s?.status()}`);

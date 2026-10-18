@@ -195,14 +195,14 @@ describe('ask: Claude leg (mocked)', () => {
   it('burst limit per restaurant per minute (every path, offline too)', async () => {
     const { client, create } = fakeClaude(() => final({ answer: 'ok', citations: [] }));
     __setAskClient(client);
-    for (let i = 0; i < 6; i += 1) await caller(A).ask.ask({ question: 'hello there', locale: 'en' });
+    for (let i = 0; i < 10; i += 1) await caller(A).ask.ask({ question: 'hello there', locale: 'en' });
     await expect(caller(A).ask.ask({ question: 'hello there', locale: 'en' })).rejects.toMatchObject({
       code: 'TOO_MANY_REQUESTS',
     });
-    expect(create).toHaveBeenCalledTimes(6);
+    expect(create).toHaveBeenCalledTimes(10);
     __resetAskBurst();
     __setAskClient(null);
-    for (let i = 0; i < 6; i += 1) await caller(B).ask.ask({ question: 'how much leaked', locale: 'en' });
+    for (let i = 0; i < 10; i += 1) await caller(B).ask.ask({ question: 'how much leaked', locale: 'en' });
     await expect(caller(B).ask.ask({ question: 'how much leaked', locale: 'en' })).rejects.toMatchObject({
       code: 'TOO_MANY_REQUESTS',
     });

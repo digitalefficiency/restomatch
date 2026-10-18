@@ -183,7 +183,7 @@ export function AskClient({ claude, questionsLeftToday }: { claude: boolean; que
           e.preventDefault();
           void submit(question);
         }}
-        className="sticky bottom-20 space-y-2 rounded-2xl border border-line bg-surface p-3 lg:bottom-4"
+        className="space-y-2 rounded-2xl border border-line bg-surface p-3"
       >
         <label htmlFor="ask-question" className="sr-only">
           {t('label')}
