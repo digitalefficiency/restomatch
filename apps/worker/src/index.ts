@@ -1,7 +1,7 @@
 import { initSentryFromEnv } from '@restomatch/observability';
 import { assertWorkerEnv } from './env';
 import { registerCronSchedules } from './cron';
-import { startHealthServer } from './health';
+import { startHealthServer, startRedisWatchdog } from './health';
 import { startHeartbeat } from './heartbeat';
 import { closeJobDbs } from './db';
 import { connection } from './queue';
@@ -52,6 +52,10 @@ const healthServer = startHealthServer(workers.length);
 // pilot worker runs on a laptop, so a silent stop must page the owner.
 const stopHeartbeat = startHeartbeat(connection, workers.length);
 
+// Exit (→ platform restart) when Redis stays unreachable ~2 min: a worker with no
+// Redis looks healthy on /health but processes nothing.
+const stopWatchdog = startRedisWatchdog(connection);
+
 void registerCronSchedules().catch((err) => {
   console.error('[worker] failed to register cron schedules', err);
 });
@@ -59,6 +63,7 @@ void registerCronSchedules().catch((err) => {
 const shutdown = async (signal: string) => {
   console.log(`[worker] ${signal} received, shutting down`);
   stopHeartbeat();
+  stopWatchdog();
   healthServer.close();
   await Promise.all(workers.map((w) => w.close()));
   await closeJobDbs();

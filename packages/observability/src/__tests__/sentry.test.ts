@@ -65,3 +65,16 @@ describe('initSentryFromEnv — the DSN is optional', () => {
     expect(JSON.stringify(calls.captured)).not.toContain('"p"');
   });
 });
+
+describe('scrubSentryEvent covers the free-text fields', () => {
+  it('masks emails/phones in message, exception values and breadcrumbs', async () => {
+    const { scrubSentryEvent } = await import('../sentry');
+    const out = scrubSentryEvent({
+      message: 'login failed for owner@kfar.test',
+      exception: { values: [{ type: 'Error', value: 'call 052-123-4567 or owner@kfar.test' }] },
+      breadcrumbs: [{ category: 'console', message: '[match-invoice] job=1 failed: owner@kfar.test' }],
+    });
+    expect(JSON.stringify(out)).not.toMatch(/owner@kfar\.test|052-123-4567/);
+    expect((out.exception as { values: Array<{ type: string }> }).values[0]!.type).toBe('Error');
+  });
+});

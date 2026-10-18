@@ -7,10 +7,9 @@
 #
 #   fly deploy --config apps/worker/fly.toml --dockerfile apps/worker/Dockerfile .
 #
-# First-time setup:  fly launch --no-deploy --copy-config --name restomatch-worker
-# Secrets (see docs/DEPLOY_CUTOVER.md for the full list):
-#   fly secrets set DATABASE_URL=... REDIS_URL=... ANTHROPIC_API_KEY=... \
-#                   RESEND_API_KEY=... EMAIL_FROM=... APP_URL=...
+# Always pass --dockerfile (there is no [build] section on purpose: a relative
+# dockerfile path in fly.toml resolves against this file's directory).
+# Runbook (first deploy, secrets, day 2): docs/WORKER-DEPLOY.md
 
 app = "restomatch-worker"
 # Colocate with the database. Today Supabase is ap-southeast-2 (Sydney) → "syd".
@@ -24,19 +23,18 @@ kill_signal = "SIGTERM"
 kill_timeout = "120s"
 
 [deploy]
-  # One machine: start the new one, wait for /health, then stop the old one.
+  # One machine: rolling = the machine is stopped, updated in place and started;
+  # a failing /health check fails the deploy. Jobs queue in Redis meanwhile.
   strategy = "rolling"
-
-[build]
-  dockerfile = "apps/worker/Dockerfile"
 
 [env]
   NODE_ENV = "production"
   PORT = "8080"
 
-# Internal-only health probe. The worker is NOT a public web service — it only
-# serves /health for the platform liveness check (apps/worker/src/health.ts).
-# A failed probe restarts the machine instead of letting it run dark.
+# Internal-only health probe (apps/worker/src/health.ts). Fly uses it for the
+# machine's health status and to gate deploys — it does NOT restart a machine.
+# Restarts come from the process exiting: the worker's own watchdog exits when
+# Redis stays unreachable (~2 min), and [[restart]] below brings it back.
 [checks]
   [checks.health]
     type = "http"
@@ -47,10 +45,9 @@ kill_timeout = "120s"
     timeout = "2s"
     grace_period = "20s"
 
-# Restart a crashed process automatically (in addition to the health check).
+# Restart the process whenever it exits (crash, watchdog exit, OOM).
 [[restart]]
   policy = "always"
-  retries = 10
 
 # Exactly ONE worker: there is no [http_service], so Fly never auto-stops or
 # auto-starts machines; keep the count at 1 with `fly scale count 1`. (BullMQ

@@ -7,7 +7,8 @@ services:
     runtime: docker
     dockerfilePath: ./apps/worker/Dockerfile
     dockerContext: .           # repo root (workspace packages)
-    region: frankfurt          # match the database region
+    region: frankfurt          # Render has no Sydney: use after the DB moves to the EU
+    maxShutdownDelaySeconds: 120   # SIGTERM → SIGKILL window (let OCR jobs finish)
     plan: starter
     numInstances: 1            # exactly one worker
     autoDeploy: false          # deploy deliberately, after CI is green

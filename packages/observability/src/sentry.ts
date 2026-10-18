@@ -78,6 +78,27 @@ export function scrubSentryEvent<T extends Record<string, unknown>>(event: T): T
   }
   if (e.extra) e.extra = scrubPii(e.extra);
   if (e.contexts) e.contexts = scrubPii(e.contexts);
+  // Free text that commonly carries PII: the message, exception values (error
+  // messages), and breadcrumbs (console lines, e.g. failed-job logs).
+  if (typeof e.message === 'string') e.message = redactString(e.message);
+  if (e.exception && typeof e.exception === 'object') {
+    const ex = { ...(e.exception as Record<string, unknown>) };
+    if (Array.isArray(ex.values)) {
+      ex.values = ex.values.map((v) =>
+        v && typeof v === 'object' && typeof (v as { value?: unknown }).value === 'string'
+          ? { ...(v as Record<string, unknown>), value: redactString((v as { value: string }).value) }
+          : v,
+      );
+    }
+    e.exception = ex;
+  }
+  if (e.breadcrumbs) {
+    const crumbs = Array.isArray(e.breadcrumbs)
+      ? e.breadcrumbs
+      : (e.breadcrumbs as { values?: unknown[] }).values;
+    const clean = (crumbs ?? []).map((b) => scrubPii(b));
+    e.breadcrumbs = Array.isArray(e.breadcrumbs) ? clean : { ...(e.breadcrumbs as object), values: clean };
+  }
   if (e.user && typeof e.user === 'object') {
     const u = { ...(e.user as Record<string, unknown>) };
     // Keep a stable id for grouping; drop direct identifiers.
@@ -148,9 +169,13 @@ export type SentryInitResult =
   | { enabled: false; reason: 'no-dsn' | 'sdk-missing' | 'init-failed'; detail?: string };
 
 const loadSentryNode = async (): Promise<SentrySdk> => {
-  // Non-literal specifier: the SDK is OPTIONAL (bundlers must not require it).
+  // The SDK is OPTIONAL. `webpackIgnore` keeps this a real runtime import():
+  // without it Next/webpack (this package is in transpilePackages) compiled the
+  // variable specifier into an EMPTY module context that always throws, so web
+  // Sentry could never turn on even after `pnpm add @sentry/node`. The web app
+  // also lists @sentry/node in serverExternalPackages.
   const pkg = '@sentry/node';
-  return (await import(pkg)) as SentrySdk;
+  return (await import(/* webpackIgnore: true */ pkg)) as SentrySdk;
 };
 
 /**

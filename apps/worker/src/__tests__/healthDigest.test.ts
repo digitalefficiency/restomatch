@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createDb, eq, invoices, notificationsOutbox, restaurants, testDbUrl } from '@restomatch/db';
 import {
   collectHealth,
@@ -64,9 +64,9 @@ describe('health digest', () => {
   });
 
   it('renders a subject that says whether anything needs attention', () => {
-    const clear = renderHealthDigest({ at: NOW.toISOString(), queues: [], failedLast24h: [], ocrPendingStale: { count: 0, oldestAt: null }, outboxFailedLast24h: 0 });
+    const clear = renderHealthDigest({ at: NOW.toISOString(), queues: [], failedLast24h: [], failedLast24hCount: 0, failedCountTruncated: false, ocrPendingStale: { count: 0, oldestAt: null }, outboxFailedLast24h: 0 });
     expect(clear.subject).toBe('RestoMatch health 2026-10-18: all clear');
-    const bad = renderHealthDigest({ at: NOW.toISOString(), queues: [], failedLast24h: [], ocrPendingStale: { count: 2, oldestAt: null }, outboxFailedLast24h: 0 });
+    const bad = renderHealthDigest({ at: NOW.toISOString(), queues: [], failedLast24h: [], failedLast24hCount: 0, failedCountTruncated: false, ocrPendingStale: { count: 2, oldestAt: null }, outboxFailedLast24h: 0 });
     expect(bad.subject).toMatch(/2 items need attention/);
     expect(bad.html).toContain('OCR pending &gt; 30 min: 2');
   });
@@ -90,5 +90,42 @@ describe('health digest', () => {
     await expect(runHealthDigest(db, probes, NOW)).resolves.toMatchObject({ skipped: expect.stringMatching(/no recipients/) });
     if (saved.w) process.env.WORKER_ALERT_EMAILS = saved.w;
     if (saved.p) process.env.PLATFORM_ADMIN_EMAILS = saved.p;
+  });
+
+  it('counts every failure in the window (not just the first page) and redacts PII', async () => {
+    const many = Array.from({ length: 170 }, (_, i) => ({
+      id: String(i),
+      name: 'match-invoice',
+      finishedOn: NOW.getTime() - 60_000 * (i + 1),
+      failedReason: `boom for owner@kfar.test 052-123-4567 <script>x</script>\nstack`,
+    }));
+    const pager: QueueProbe = {
+      name: 'match-invoice',
+      getJobCounts: async () => ({ failed: 170 }),
+      getFailed: async (start = 0, end = 0) => many.slice(start, end + 1),
+    };
+    const s = await collectHealth(db, [pager], NOW);
+    expect(s.failedLast24hCount).toBe(170);
+    expect(s.failedLast24h).toHaveLength(10);
+    const { text, html } = renderHealthDigest(s);
+    expect(text).toContain('Jobs failed (24 h): 170');
+    expect(text).not.toMatch(/owner@kfar\.test|052-123-4567/);
+    expect(html).not.toContain('<script>');
+  });
+
+  it('a manual (force) run does not consume the scheduled daily slot', async () => {
+    process.env.HEALTH_DIGEST_EMAILS = 'force@example.test';
+    process.env.HEALTH_DIGEST_RESTAURANT_ID = restaurantId;
+    const manual = await runHealthDigest(db, probes, NOW, { force: true });
+    const scheduled = await runHealthDigest(db, probes, NOW);
+    expect(manual).toMatchObject({ enqueued: 1 });
+    expect(scheduled).toMatchObject({ enqueued: 1 });
+  });
+
+  it('falls back to the oldest restaurant when HEALTH_DIGEST_RESTAURANT_ID is bogus', async () => {
+    process.env.HEALTH_DIGEST_EMAILS = 'fallback@example.test';
+    process.env.HEALTH_DIGEST_RESTAURANT_ID = 'not-a-uuid';
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await expect(runHealthDigest(db, probes, NOW)).resolves.toMatchObject({ enqueued: 1 });
   });
 });

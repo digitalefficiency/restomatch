@@ -10,22 +10,30 @@ managed container host. **Nothing here creates an account or deploys by itself.*
 | | Fly.io | Render | Railway |
 |---|---|---|---|
 | Config in repo | `apps/worker/fly.toml` | `render.yaml` (Blueprint) | not added (see below) |
-| Continuous health check that **restarts** a stuck process | ✅ machine HTTP check on `/health` + restart policy | ❌ background workers get no HTTP check (crash-restart only) | ⚠ health check only at deploy time |
+| Health check after deploy | ✅ machine HTTP check on `/health` (status + gates deploys; does **not** restart) | ❌ none for background workers | ⚠ only at deploy time |
+| Restart when the process exits | ✅ `[[restart]] policy = "always"` | ✅ | ✅ |
 | Region next to the DB | ✅ `syd` today, `fra` after the EU move | ✅ `frankfurt` (no Sydney) | ✅ EU / ⚠ no Sydney |
-| Graceful stop window | `kill_timeout = 120s` | ≈30 s | configurable |
+| Graceful stop window | `kill_timeout = 120s` | `maxShutdownDelaySeconds: 120` (1–300) | configurable |
 | Cost, 1 × shared-cpu, 1 GB | ≈ $6/month | Starter $7/month | usage-based ≈ $5–10 |
 
-**Fly.io is primary** because it is the only one that keeps checking `/health`
-after the deploy and restarts a hung worker, it can sit in the database's region
-both today (Sydney) and after the EU move, and it allows a long enough graceful
-stop for an in-flight OCR call. Render is the low-touch fallback (dashboard-only,
-Frankfurt). Railway was not added: no ongoing health check and no Sydney region.
+**Fly.io is primary** because it can sit in the database's region both today
+(Sydney) and after the EU move, its machine check gates every deploy and shows
+health continuously, it restarts the process whenever it exits, and it allows a
+long enough graceful stop for an in-flight OCR call. No platform restarts a
+process that is *up but useless*, so the worker does it itself: a **Redis
+watchdog** exits the process after ~2 minutes without Redis (4 failed PINGs, 30 s
+apart) and the restart policy brings it back; the heartbeat watchdog + uptime
+check U3 (docs/MONITORING.md) alert a human if it still isn't processing.
+Render is the low-touch fallback (dashboard-only, Frankfurt, no Sydney).
+Railway was not added: health checks only at deploy time and no Sydney region.
 
 ## What the image guarantees (`apps/worker/Dockerfile`)
 
 - Built from the repo root with the frozen lockfile; only the worker and its
   workspace packages are installed (~710 MB).
 - Runs as the non-root `node` user; the code in `/app` is root-owned (read-only).
+- Redis watchdog: after ~2 min without Redis the process exits (code 1) so the
+  platform restarts it — a worker without Redis would otherwise look healthy.
 - `node` is PID 1 → `SIGTERM` reaches the worker: it stops taking jobs, lets
   in-flight jobs finish, drains its Postgres pool and exits. A job cut off anyway
   is "stalled" and BullMQ runs it again — nothing is lost.
@@ -43,7 +51,7 @@ Frankfurt). Railway was not added: no ongoing health check and no Sydney region.
 | `REDIS_URL` | ✅ | Upstash **Redis** URL `rediss://default:…@…upstash.io:6379` (not the REST URL) |
 | `ANTHROPIC_API_KEY` | ✅ | invoice OCR |
 | `RESEND_API_KEY`, `EMAIL_FROM` | ✅ | outbox email |
-| `APP_URL` | ✅ | links inside emails |
+| `APP_URL` | — | public web URL; only used by the local-disk scan storage path |
 | `WORKER_ALERT_EMAILS` | — | fallback recipients for the daily digest |
 | `HEALTH_DIGEST_EMAILS` | — | daily health digest recipients (comma-separated) |
 | `HEALTH_DIGEST_RESTAURANT_ID` | — | restaurant the digest's outbox row is attributed to (default: oldest) |
@@ -62,7 +70,7 @@ fly launch --no-deploy --copy-config --config apps/worker/fly.toml --name restom
 
 # 2. Secrets (one command; values from your password manager).
 fly secrets set -a restomatch-worker \
-  DATABASE_URL=… REDIS_URL=… ANTHROPIC_API_KEY=… RESEND_API_KEY=… EMAIL_FROM=… APP_URL=… \
+  DATABASE_URL=… REDIS_URL=… ANTHROPIC_API_KEY=… RESEND_API_KEY=… EMAIL_FROM=… \
   HEALTH_DIGEST_EMAILS=… SENTRY_DSN=…
 
 # 3. STOP the Mac worker first (two workers are safe, but the Mac one is the
@@ -93,7 +101,7 @@ the dashboard's "worker is down" banner is gone (the worker heartbeat is in Redi
 | Task | Command |
 |---|---|
 | Deploy a new version | `fly deploy --config apps/worker/fly.toml --dockerfile apps/worker/Dockerfile .` (after CI is green) |
-| Roll back | `fly releases -a restomatch-worker` → `fly deploy --image <previous image ref>` |
+| Roll back | `fly releases -a restomatch-worker --image` → `fly deploy -a restomatch-worker --config apps/worker/fly.toml --image <previous image ref>` |
 | Restart | `fly machine restart -a restomatch-worker` |
 | Rotate a secret | `fly secrets set -a restomatch-worker NAME=…` (restarts the machine) |
 | Pause everything | `fly scale count 0 -a restomatch-worker` (jobs wait in Redis) |
@@ -105,8 +113,9 @@ the dashboard's "worker is down" banner is gone (the worker heartbeat is in Redi
 2. Fill the secret values (`sync: false` entries) → **Apply**. One `starter`
    background worker in Frankfurt, auto-deploy off.
 3. Deploy: Render → the service → **Manual Deploy** (after CI is green).
-4. Render restarts the container when it crashes but has no HTTP health check for
-   workers: rely on the heartbeat watchdog + uptime monitor (docs/MONITORING.md).
+4. Render restarts the container when it exits (including the worker's own Redis
+   watchdog exit) but has no HTTP health check for workers: rely on the heartbeat
+   watchdog + uptime monitor (docs/MONITORING.md).
 
 ## Local smoke of the exact image
 
