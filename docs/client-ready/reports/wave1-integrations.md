@@ -155,3 +155,18 @@ Could not refute: the role matrix, the flag-off FORBIDDEN on all 9 gated procedu
 2. **appCode `feature.disabled`:** the plan asks for appCode `FEATURE_DISABLED`. I used the message token `FEATURE_DISABLED:integrations` to avoid every wave-1 session editing S4's `APP_ERROR_CODES`. A shared `requireFlag(key)` middleware in `trpc.ts` plus one appCode would serve all wave-1 features.
 3. **Uniform-1000 encoding:** the existing C100 file is written as UTF-8. Tax software reads ISO-8859-8 / Windows-1255 + CRLF. `encodeWindows1255` now exists in `integrations/accounting/encoding.ts`, so this is a one-line fix for whoever owns that format.
 4. **Real POS APIs** (Tabit / Beecomm) behind `PosSalesProvider` once an account exists.
+
+## S1 cross-QA round (`6d947c7`)
+| # | Finding | Fix | Test |
+|---|---|---|---|
+| 1 | TSV formula injection (Hashavshevet/Priority) | shared `safeCell` (leading `'` before `= + - @`), the same guard as Rivhit; goldens unchanged | `accounting-formats.test.ts` |
+| 2 | `pos_sales.import_id` single-column FK: A could link to B's import, and B's delete cascaded into A | 0058 amended: `UNIQUE (id, restaurant_id)` + composite FK `(import_id, restaurant_id)`; supabase entries regenerated (own unreleased only) | `migration-0058.test.ts`, `pos-rls.attack.test.ts` (app role) |
+| 3 | POS parser guesses (`1.234`, qty `1,250`, `(-5)`), wrong line numbers, cashier code taken as item, gross taken as net | one parser that refuses ambiguous values; header excludes; real file line numbers | `pos-csv.test.ts` |
+| 4 | VAT-less invoice posted as VAT 0 | split with the supplier / restaurant VAT rate (integer BigInt math) and counted (`derivedVatCount`) | `integrations.test.ts` |
+| 5 | Windows-1255 `?` silent; surrogate split | `replacedChars` count + UI warning; truncation by code point | `accounting-formats.test.ts` |
+| 6 | All-rejected day keeps stale data silently | `rejectedDays` in the preview and import result, shown in the UI | `pos-csv.test.ts`, `integrations.test.ts` |
+| 7 | Flag-off tested on 2 of 9 procedures | all 9 → FORBIDDEN `FEATURE_DISABLED` (now via `assertFeatureOn`) | `integrations.test.ts` |
+
+Verification:
+- **Layer 1:** typecheck 0, lint 0 errors, `pnpm test` 13/13 (api 592, web 266, db 74), supabase-sync `--check` clean. Fresh DB: migrate → provision-rls → `doctor --strict` = 0 FAIL / 0 WARN.
+- **Layer 2:** rebuilt `next start`, Playwright 41/41 PASS (he/en × 1440/390 × every role + flag-off). The 3 files carry the CSV's 24 invoices, Σ excl. ₪28,388.97.
