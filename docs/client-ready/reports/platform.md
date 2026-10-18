@@ -137,3 +137,52 @@ pgvector and Redis 7:
 | `pnpm --filter @restomatch/db run doctor --strict` (fresh migrated DB) | 0 FAIL · 0 WARN |
 | `docker build -f apps/worker/Dockerfile .` + run + `scripts/smoke-queues.ts` | image builds on the merged tree; OCR → match processed in the container |
 | `cd apps/mobile && pnpm exec expo export --platform android` | exit 0 |
+
+---
+
+# Round 2 — whole-system QA on the release candidate
+
+Base: `claude/client-ready` @ b5334f6 → d09a57f (all sessions merged), fast-forwarded/merged into
+this branch. Node v22.22.0, pnpm 10.33.0 throughout.
+
+## Fixed in round 2
+
+| # | Problem (severity) | Fix | Test |
+|---|---|---|---|
+| R2-1 | **EN-7 / F7** (high): `packages/queue` producers used ioredis' offline queue + `maxRetriesPerRequest:null`, so a set-but-unreachable or malformed `REDIS_URL` (classically Upstash's `https://` REST URL) made `registerInvoice` hang until the function timed out | Producers: no offline queue, 3 s connect timeout, hard 3 s deadline on `add()`, coded `QueueUnavailableError` (`queue.unavailable`), `redisUrlProblem()` scheme check, throttled `error` log. `registerInvoice` keeps the invoice and returns `ocrQueued:false`; the wizard shows a he/en message and receives against the PO; `catalog.import` falls back to the inline commit. Boot: web WARNs; worker WARNs in dev, refuses to boot in prod | `packages/queue/src/__tests__/failFast.test.ts` (8: scheme, deadline, refused host ≈3 s, black-holed host ≈3 s, REST URL instant), `receiving.test.ts` (+3), `apps/worker/src/__tests__/env.test.ts` (3) |
+| R2-2 | **Outbox dedupe** (critical, found by the worker runtime smoke): `notifications_dedupe_key_unique` is a PARTIAL index; `ON CONFLICT (dedupe_key)` without its predicate raised *"no unique or exclusion constraint matching the ON CONFLICT specification"* — the **end-of-day report, order reminders, supplier-delay alerts and `orders.placeOrder` by email/WhatsApp all failed**. The existing test used a mocked DB | `DEDUPE_INDEX_PREDICATE` on the conflict target in `notifications/outbox.ts` (immutable list — sprint-approved, minimal) and `routers/orders.ts` | `outbox-dedupe.db.test.ts` — real Postgres, red before / green after |
+| R2-3 | **Worker connection leak** (critical, found by the soak): every job run called `createDb(url)`; postgres.js never closes idle connections → each run leaked its connection for the life of the process (measured: 30 `outbox-dispatch` runs → 31 open connections; outbox ticks every 60 s) | `apps/worker/src/db.ts` `jobDb(url)` — one pool per process; 11 jobs switched (one line each, incl. S2's `ocrInvoice.ts` / S3's `matchInvoice.ts`) | `apps/worker/src/__tests__/db.test.ts`; re-measured: 60 runs → 1 connection |
+| R2-4 | No CI coverage of the worker at runtime | `ci.yml` worker job: seed a throwaway DB, boot the worker with a local email sink, `scripts/smoke-all-jobs.ts` (every queue once) | ran the exact step locally on a fresh DB → OK |
+| R2-5 | `engines.node` said `>=20` | `>=22.0.0 <23` (CI/.nvmrc/Docker already 22) | — |
+| R2-6 | e2e favicon filter no longer needed (S6 added `app/icon.svg`; S4 already removed the CSP one) | filter removed | e2e 71/71 |
+
+## QA results
+
+| Area | Result |
+|---|---|
+| Clean clone → `pnpm install --frozen-lockfile` → full gate (migrate, RLS provision + completeness, `db:doctor --strict`, typecheck, lint, tests, worker tests with Redis, audit, `next build`) | see Verification — layer 1 |
+| e2e (`next dev`, own seeded DB, RLS app role) | **71/71** (auth 7, smoke 64 = 32 pages × he/en) |
+| Production build + `next start` (NODE_ENV=production, boot guards on) crawl | **126 page loads**: 5 roles × he/en logged in with the demo password, 22 dashboard/admin routes (owner) + 5 per other role, 14 public routes; **0** console errors, **0** Hebrew in English chrome, every `<html lang dir>` correct. 404 page translated (`העמוד לא נמצא` / `Page not found`). Slowest SSR: `/` 2.5 s (first hit), dashboard pages 1.0–1.5 s |
+| robots / sitemap / OG | 200; robots disallows app routes, sitemap lists the 7 marketing routes with he/en alternates; OG 1200×630 PNG + full `og:*` tags. ⚠ host is baked in **at build time** from `APP_URL` (was `localhost:3000` in a build made with the dev env) |
+| Heartbeat route | no/wrong bearer → 401; right `CRON_SECRET` → 200 `status:ok`; stale + email provider unreachable → 500 (alert flag not set → retried next tick) |
+| Worker runtime, every queue once (seeded DB, local email sink) | **13/13**: 7 scheduled jobs, outbox → sink → `sent` (4 EOD emails delivered), OCR(stub) → match chain, catalog import → `committed`, `sync-platforms` without credentials fails cleanly — after R2-2 (before: EOD report failed) |
+| Worker Docker image | builds (709 MB; was 669 MB — new `translate` package), boots as `node`, `/health` 200, OCR → match processed inside the container, `docker stop` 0.3 s |
+| 10-minute soak (production server, logged-in crawl) | **2,361 page loads, 0 failures**; web app-role connections flat at **5** the whole time; owner-role 4–5 (the 28–33 bump mid-run was the leaking worker — R2-3 — gone when it stopped); `next-server` RSS 313 MB → 766 MB in the first 2.5 min (warm-up/route caches), then +27 MB over 7.5 min → no leak signal |
+| Bundles (First Load JS, vs round 1) | shared 103 kB (=); `/dashboard/receiving/[poId]` 240 → 253 kB; `/showcase/receiver` 208 → 220 kB; `/` 197 → 198 kB; `/dashboard/suppliers/[id]` 168 → 172 kB |
+| Node | v22.22.0 everywhere (local, clean clone, Docker `node:22-slim`, CI `.nvmrc`) |
+
+## Needs another area (round 2)
+
+- **S6 — robots/sitemap/OG host:** `SITE_URL` is read at build time; make `robots.ts`/`sitemap.ts`
+  `dynamic = 'force-dynamic'` (or prefer `VERCEL_PROJECT_PRODUCTION_URL`) so a preview/staging build
+  never advertises the wrong host.
+- **S2 — receiving bundle:** `/dashboard/receiving/[poId]` grew to 253 kB; lazy-load the scan step.
+- **S2 / ops:** an invoice whose OCR enqueue failed (`ocrQueued:false`) stays `ocr_pending` forever —
+  add a "retry reading" action on the invoice page, or a worker sweep that re-enqueues
+  `ocr_pending` invoices older than N minutes (needs a `cron.ts` entry → owner review).
+- **Owner — heartbeat alert copy** still tells the owner to `launchctl kickstart` (Mac-only);
+  update once the worker moves to Fly/Docker.
+
+## Verification (2 layers)
+
+_(filled at the final commit)_
