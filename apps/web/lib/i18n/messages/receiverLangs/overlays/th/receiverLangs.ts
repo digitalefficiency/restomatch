@@ -1,16 +1,16 @@
 import type { Shape } from '../../../../translate';
 import type { he } from '../../he';
 
-/** receiverLangs — th overlay (TODO: translate from English). */
+/** receiverLangs — th overlay (Thai). */
 export const receiverLangs: Shape<typeof he> = {
   picker: {
-    label: 'Language',
-    title: 'Choose the app language',
-    hint: 'Receiver languages: Arabic, Russian, Thai, Tigrinya. Other screens show in English.',
+    label: 'ภาษา',
+    title: 'เลือกภาษาของแอป',
+    hint: 'ภาษาสำหรับผู้รับสินค้า: อาหรับ รัสเซีย ไทย ติกรินยา หน้าอื่นจะแสดงเป็นภาษาอังกฤษ',
   },
   lines: {
-    original: 'Original',
-    machine: 'Machine translation — check against the invoice',
-    untranslated: 'No translation — shown in the original language',
+    original: 'ต้นฉบับ',
+    machine: 'แปลอัตโนมัติ — ตรวจกับใบแจ้งหนี้',
+    untranslated: 'ไม่มีคำแปล — แสดงเป็นภาษาต้นฉบับ',
   },
 };

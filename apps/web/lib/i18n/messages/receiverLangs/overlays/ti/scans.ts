@@ -1,12 +1,12 @@
 import type { Shape } from '../../../../translate';
 import type { he } from '../../../scans/he';
 
-/** scans — ti overlay (TODO: translate from English). */
+/** scans — ti overlay (Tigrinya). */
 export const scans: Shape<typeof he> = {
-  scannedInvoice: 'Scanned invoice',
-  secureLink: 'Secure link',
-  pages: '{count} pages',
-  localCopy: 'Local copy (development)',
-  notLoading: "Not loading? A popup blocker or a browser without a PDF viewer may be the cause.",
-  openInTab: 'Open in a new tab',
+  scannedInvoice: 'ዝተሳእለ ፋቱራ',
+  secureLink: 'ውሑስ ሊንክ',
+  pages: '{count} ገጻት',
+  localCopy: 'ኣብ ኮምፒዩተር ዘሎ ቅዳሕ (ንምምዕባል)',
+  notLoading: 'ኣይጽዓንን ዘሎ? ፖፕ-ኣፕ ዝዓግት ወይ ፒ.ዲ.ኤፍ ክከፍት ዘይክእል ብራውዘር ምኽንያቱ ክኸውን ይኽእል።',
+  openInTab: 'ኣብ ሓድሽ ታብ ክፈቱ',
 };

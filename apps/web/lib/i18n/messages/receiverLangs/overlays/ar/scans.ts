@@ -1,12 +1,12 @@
 import type { Shape } from '../../../../translate';
 import type { he } from '../../../scans/he';
 
-/** scans — ar overlay (TODO: translate from English). */
+/** scans — ar overlay (Arabic). */
 export const scans: Shape<typeof he> = {
-  scannedInvoice: 'Scanned invoice',
-  secureLink: 'Secure link',
-  pages: '{count} pages',
-  localCopy: 'Local copy (development)',
-  notLoading: "Not loading? A popup blocker or a browser without a PDF viewer may be the cause.",
-  openInTab: 'Open in a new tab',
+  scannedInvoice: 'فاتورة ممسوحة',
+  secureLink: 'رابط آمن',
+  pages: '{count} صفحات',
+  localCopy: 'نسخة محلية (للتطوير)',
+  notLoading: 'لا يفتح؟ قد يكون السبب مانع النوافذ المنبثقة أو متصفح لا يعرض ملفات PDF.',
+  openInTab: 'افتح في علامة تبويب جديدة',
 };

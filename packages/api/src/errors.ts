@@ -31,6 +31,8 @@ export const APP_ERROR_CODES = [
   'auth.unauthorized',
   'auth.forbidden',
   'input.invalid',
+  /** Wave-1 per-restaurant feature flag is off (MASTER-PLAN §1.3). */
+  'FEATURE_DISABLED',
 ] as const;
 
 export type AppErrorCode = (typeof APP_ERROR_CODES)[number];

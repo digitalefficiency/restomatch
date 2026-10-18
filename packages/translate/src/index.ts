@@ -22,3 +22,20 @@ export {
   type Translation,
   type TranslationSource,
 } from './composite';
+export {
+  TARGET_LOCALES,
+  TARGET_LANGUAGE_NAMES,
+  TargetGlossary,
+  defaultTargetGlossary,
+  isTargetLocale,
+  type TargetLocale,
+} from './targets';
+export {
+  TargetClaudeTranslator,
+  TargetTranslator,
+  createTargetTranslator,
+  targetSystemPrompt,
+  type TargetClaudeConfig,
+  type TargetTranslation,
+  type TargetTranslatorOptions,
+} from './targetTranslator';

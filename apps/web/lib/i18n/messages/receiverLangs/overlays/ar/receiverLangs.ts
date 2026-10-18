@@ -1,16 +1,16 @@
 import type { Shape } from '../../../../translate';
 import type { he } from '../../he';
 
-/** receiverLangs — ar overlay (TODO: translate from English). */
+/** receiverLangs — ar overlay (Arabic). */
 export const receiverLangs: Shape<typeof he> = {
   picker: {
-    label: 'Language',
-    title: 'Choose the app language',
-    hint: 'Receiver languages: Arabic, Russian, Thai, Tigrinya. Other screens show in English.',
+    label: 'اللغة',
+    title: 'اختر لغة التطبيق',
+    hint: 'لغات الاستلام: العربية، الروسية، التايلاندية، التغرينية. الشاشات الأخرى تظهر بالإنجليزية.',
   },
   lines: {
-    original: 'Original',
-    machine: 'Machine translation — check against the invoice',
-    untranslated: 'No translation — shown in the original language',
+    original: 'الأصل',
+    machine: 'ترجمة آلية — قارنها بالفاتورة',
+    untranslated: 'لا توجد ترجمة — يظهر باللغة الأصلية',
   },
 };

@@ -1,3 +1,4 @@
+import { receiverLangsRouter } from './routers/receiverLangs';
 import { router } from './trpc';
 import { activityRouter } from './routers/activity';
 import { adminRouter } from './routers/admin';
@@ -41,6 +42,7 @@ export const appRouter = router({
   products: productsRouter,
   team: teamRouter,
   dsr: dsrRouter,
+  receiverLangs: receiverLangsRouter,
 });
 
 export type AppRouter = typeof appRouter;
@@ -190,3 +192,5 @@ export {
   scanIdFromLocalUrl,
   isLocalScanId,
 } from './lib/localScanStorage';
+export { localNames, renderSizeSuffix, __setReceiverTranslator } from './receiving/localize';
+export { assertFeature, isFeatureOn } from './lib/featureGate';
