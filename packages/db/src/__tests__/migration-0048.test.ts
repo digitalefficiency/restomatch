@@ -92,7 +92,7 @@ describe('0048/0049 migration shape', () => {
     await db.insert(recoveryEvents).values({ restaurantId, claimId: c!.id, toStatus: 'claimed' });
   });
 
-  it('credit notes: positive amount, invoice_line source needs a line, one note per line', async () => {
+  it('credit notes: positive amount, known source', async () => {
     await expect(
       db.insert(creditNotes).values({ restaurantId, supplierId, amountAgorot: 0, issuedOn: '2026-10-01' }),
     ).rejects.toMatchObject({ code: '23514' });
@@ -102,7 +102,7 @@ describe('0048/0049 migration shape', () => {
         supplierId,
         amountAgorot: 100,
         issuedOn: '2026-10-01',
-        source: 'invoice_line',
+        source: 'ocr' as never,
       }),
     ).rejects.toMatchObject({ code: '23514' });
     const [n] = await db

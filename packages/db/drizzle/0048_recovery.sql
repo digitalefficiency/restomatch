@@ -34,8 +34,7 @@ CREATE TABLE IF NOT EXISTS "credit_notes" (
   "created_by" uuid REFERENCES "users"("id") ON DELETE SET NULL,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL,
   CONSTRAINT "credit_notes_amount_check" CHECK ("amount_agorot" > 0),
-  CONSTRAINT "credit_notes_source_check" CHECK ("source" IN ('manual', 'invoice_line')),
-  CONSTRAINT "credit_notes_line_source_check" CHECK ("source" = 'manual' OR "invoice_line_id" IS NOT NULL)
+  CONSTRAINT "credit_notes_source_check" CHECK ("source" IN ('manual', 'invoice_line'))
 );--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "credit_notes_restaurant_idx" ON "credit_notes" ("restaurant_id", "issued_on");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "credit_notes_supplier_idx" ON "credit_notes" ("supplier_id");--> statement-breakpoint

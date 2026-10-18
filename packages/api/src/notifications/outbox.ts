@@ -1,4 +1,4 @@
-import { eq, notificationsOutbox, type Database } from '@restomatch/db';
+import { eq, notificationsOutbox, sql, type Database } from '@restomatch/db';
 import type { NotificationPayload } from './types';
 
 /**
@@ -36,7 +36,12 @@ export async function enqueueNotification(
 
   const [row] = payload.dedupeKey
     ? await insert
-        .onConflictDoNothing({ target: notificationsOutbox.dedupeKey })
+        // The unique index is PARTIAL (WHERE dedupe_key IS NOT NULL): Postgres
+        // only infers it when ON CONFLICT repeats that predicate.
+        .onConflictDoNothing({
+          target: notificationsOutbox.dedupeKey,
+          where: sql`${notificationsOutbox.dedupeKey} IS NOT NULL`,
+        })
         .returning({ id: notificationsOutbox.id })
     : await insert.returning({ id: notificationsOutbox.id });
 
