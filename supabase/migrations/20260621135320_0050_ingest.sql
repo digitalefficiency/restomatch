@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS "ingest_messages" (
 );--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "ingest_messages_replay_uq" ON "ingest_messages" ("restaurant_id", "kind", "provider_message_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "ingest_messages_restaurant_received_idx" ON "ingest_messages" ("restaurant_id", "received_at");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "ingest_messages_channel_idx" ON "ingest_messages" ("channel_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "ingest_messages_channel_idx" ON "ingest_messages" ("channel_id", "restaurant_id");--> statement-breakpoint
 -- Composite key so ingest_documents can reference an invoice OF THE SAME restaurant (as 0021 did for suppliers).
 DO $$
 BEGIN
@@ -95,15 +95,15 @@ CREATE TABLE IF NOT EXISTS "ingest_documents" (
   CONSTRAINT "ingest_documents_invoice_same_tenant_fk" FOREIGN KEY ("invoice_id", "restaurant_id")
     REFERENCES "invoices"("id", "restaurant_id") ON DELETE SET NULL ("invoice_id")
 );--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "ingest_documents_message_idx" ON "ingest_documents" ("message_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "ingest_documents_message_idx" ON "ingest_documents" ("message_id", "restaurant_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "ingest_documents_restaurant_sha_idx" ON "ingest_documents" ("restaurant_id", "sha256");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "ingest_documents_invoice_idx" ON "ingest_documents" ("invoice_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "ingest_documents_invoice_idx" ON "ingest_documents" ("invoice_id", "restaurant_id");--> statement-breakpoint
 -- Every FK indexed (db:doctor "foreign keys indexed"; see 0030). Tenant FKs are composite
 -- (x_id, restaurant_id) so no row can reference another restaurant's row (cross-QA, S1).
 CREATE INDEX IF NOT EXISTS "ingest_channels_created_by_idx" ON "ingest_channels" ("created_by");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "ingest_senders_created_by_idx" ON "ingest_senders" ("created_by");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "ingest_senders_supplier_idx" ON "ingest_senders" ("supplier_id");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "ingest_messages_supplier_idx" ON "ingest_messages" ("supplier_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "ingest_senders_supplier_idx" ON "ingest_senders" ("supplier_id", "restaurant_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "ingest_messages_supplier_idx" ON "ingest_messages" ("supplier_id", "restaurant_id");--> statement-breakpoint
 -- updated_at maintained like every other table (0031's set_updated_at()).
 DROP TRIGGER IF EXISTS "ingest_documents_set_updated_at" ON "ingest_documents";--> statement-breakpoint
 CREATE TRIGGER "ingest_documents_set_updated_at" BEFORE UPDATE ON "ingest_documents"
@@ -143,5 +143,5 @@ BEGIN
 END $$;
 
 insert into drizzle.__drizzle_migrations (hash, created_at)
-select 'f0e4fd78a578070992b1bbacd0050eb360b66bcc6dd48023be9fad5b1ddbdf53', 1782050000000
+select '68d81c1e48042722d284869fcb98702949e54c485e9a8519cee2b6e062443667', 1782050000000
 where not exists (select 1 from drizzle.__drizzle_migrations where created_at = 1782050000000);

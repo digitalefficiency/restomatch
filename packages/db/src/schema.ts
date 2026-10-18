@@ -1278,7 +1278,7 @@ export const ingestDocuments = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    index('ingest_documents_message_idx').on(t.messageId),
+    index('ingest_documents_message_idx').on(t.messageId, t.restaurantId),
     index('ingest_documents_restaurant_sha_idx').on(t.restaurantId, t.sha256),
   ],
 );
