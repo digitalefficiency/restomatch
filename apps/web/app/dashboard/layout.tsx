@@ -51,11 +51,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
       .then((b) => b.chainEnabled && b.branches.length > 1)
       .catch(() => false);
   }
-  const switcherBranches = memberships.map((m) => ({
-    restaurantId: m.restaurantId,
-    restaurantName: m.restaurantName,
-    role: m.role,
-  }));
+  // Stable order in the switcher (the membership query has none): by name, so
+  // "כפר הזיתים" comes before "כפר הזיתים — חיפה".
+  const switcherBranches = memberships
+    .map((m) => ({ restaurantId: m.restaurantId, restaurantName: m.restaurantName, role: m.role }))
+    .sort((a, b) => a.restaurantName.localeCompare(b.restaurantName, 'he') || a.restaurantId.localeCompare(b.restaurantId));
 
   async function logout() {
     'use server';
