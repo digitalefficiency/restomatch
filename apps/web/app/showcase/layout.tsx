@@ -1,8 +1,20 @@
+import type { Metadata } from 'next';
 import { ArrowLeft, FlaskConical } from 'lucide-react';
 import Link from 'next/link';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { showcase } from '@/lib/i18n/messages/showcase';
 import { getT } from '@/lib/i18n/server';
+import { metadataBase } from '../(marketing)/_components/seo';
+
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT(showcase);
+  return {
+    title: t('meta.title'),
+    description: t('meta.description'),
+    metadataBase,
+    openGraph: { title: t('meta.title'), description: t('meta.description'), url: '/showcase' },
+  };
+}
 
 export default async function ShowcaseLayout({ children }: { children: React.ReactNode }) {
   const t = await getT(showcase);
@@ -26,7 +38,7 @@ export default async function ShowcaseLayout({ children }: { children: React.Rea
             <span className="flow-accent bg-clip-text text-transparent" lang="en" dir="ltr">
               RestoMatch
             </span>
-            <span className="text-subtle text-xs font-normal">{t('layout.brandTag')}</span>
+            <span className="text-muted text-xs font-normal">{t('layout.brandTag')}</span>
           </Link>
 
           <span
@@ -66,7 +78,7 @@ export default async function ShowcaseLayout({ children }: { children: React.Rea
           </nav>
         </div>
         <div className="border-t border-line/60 bg-warn/[0.04]">
-          <p className="max-w-7xl mx-auto px-4 sm:px-6 py-1.5 text-[11px] leading-snug text-subtle">
+          <p className="max-w-7xl mx-auto px-4 sm:px-6 py-1.5 text-[11px] leading-snug text-muted">
             {t('layout.demoNote')}
           </p>
         </div>

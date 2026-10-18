@@ -260,7 +260,7 @@ function KpiCard({ kpi }: { kpi: Kpi }) {
         </div>
       </div>
 
-      <div className="text-xs uppercase tracking-wider text-subtle font-semibold mb-2">
+      <div className="text-xs uppercase tracking-wider text-muted font-semibold mb-2">
         {t(`dashboard.kpi.${kpi.id}`)}
       </div>
       <div className="font-mono text-3xl font-extrabold tabular-nums tracking-tight flex items-baseline gap-1">
@@ -404,7 +404,7 @@ function HeatTooltip({ hover }: { hover: { p: number; s: number; x: number; y: n
       }}
     >
       <div className="bg-surface-2 border border-line rounded-xl p-3 min-w-[220px] shadow-card">
-        <div className="text-xs text-subtle mb-0.5">{mockText(supplier, locale)}</div>
+        <div className="text-xs text-muted mb-0.5">{mockText(supplier, locale)}</div>
         <div className="font-semibold text-sm mb-2 text-ink">{mockText(product, locale)}</div>
         <Sparkline data={cell.series} variance={cell.variance} />
         <div className="mt-2 flex items-center justify-between text-xs">

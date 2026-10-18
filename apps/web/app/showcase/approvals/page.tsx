@@ -7,7 +7,6 @@ import {
   Check,
   ChevronDown,
   Clock,
-  Hash,
   Lock,
   MessageSquare,
   Shield,
@@ -43,7 +42,6 @@ interface AuditEntry {
   actorRole: ApproverRole;
   decision: 'approved' | 'rejected' | 'escalated' | 'auto';
   amount: number;
-  hash: string;
   note?: string;
 }
 
@@ -64,7 +62,6 @@ const RULES: Rule[] = [
         actorRole: 'auto',
         decision: 'auto',
         amount: 3200,
-        hash: '7f2a:9c4d:1e88:33bc',
         note: 'INV-4882 ‎(קצביית הכרם) זוהה כקיים מ-2026-05-12',
       },
       {
@@ -73,7 +70,6 @@ const RULES: Rule[] = [
         actorRole: 'auto',
         decision: 'auto',
         amount: 1840,
-        hash: 'a44f:bb12:00de:5567',
       },
     ],
   },
@@ -93,7 +89,6 @@ const RULES: Rule[] = [
         actorRole: 'owner',
         decision: 'approved',
         amount: 6420,
-        hash: '03ee:11ab:cc09:7d23',
         note: 'הסכמת ספק שזה משלוח חירום, אישור ידני',
       },
     ],
@@ -114,7 +109,6 @@ const RULES: Rule[] = [
         actorRole: 'owner',
         decision: 'rejected',
         amount: 240,
-        hash: 'd112:8901:4477:aa3c',
       },
       {
         timestamp: '2026-05-17 16:08:31',
@@ -122,7 +116,6 @@ const RULES: Rule[] = [
         actorRole: 'owner',
         decision: 'approved',
         amount: 180,
-        hash: '6c2b:1180:ff44:9001',
         note: 'מבצע לקראת חג',
       },
     ],
@@ -143,7 +136,6 @@ const RULES: Rule[] = [
         actorRole: 'owner',
         decision: 'rejected',
         amount: 580,
-        hash: '8a2f:3344:e0c1:7654',
         note: 'דרשנו הסבר מאבי הירקן',
       },
     ],
@@ -164,7 +156,6 @@ const RULES: Rule[] = [
         actorRole: 'manager',
         decision: 'approved',
         amount: 45,
-        hash: 'fb01:2200:cdef:0099',
       },
     ],
   },
@@ -184,7 +175,6 @@ const RULES: Rule[] = [
         actorRole: 'auto',
         decision: 'auto',
         amount: 8,
-        hash: '1234:5678:9abc:def0',
       },
     ],
   },
@@ -222,7 +212,7 @@ export default function ApprovalsShowcase() {
 
       <div className="rounded-2xl border border-line bg-surface overflow-x-auto shadow-card">
         <div className="min-w-[760px]">
-          <div className="grid grid-cols-[40px_1fr_150px_170px_90px_40px] gap-4 px-5 py-3 border-b border-line text-xs uppercase tracking-wider text-subtle font-semibold bg-surface-2">
+          <div className="grid grid-cols-[40px_1fr_150px_170px_90px_40px] gap-4 px-5 py-3 border-b border-line text-xs uppercase tracking-wider text-muted font-semibold bg-surface-2">
             <div>#</div>
             <div>{t('approvals.columns.type')}</div>
             <div>{t('approvals.columns.approver')}</div>
@@ -292,7 +282,7 @@ function RuleRow({ rule, idx }: { rule: Rule; idx: number }) {
         aria-expanded={expanded}
         className="w-full grid grid-cols-[40px_1fr_150px_170px_90px_40px] gap-4 px-5 py-4 items-center text-start transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50"
       >
-        <div className="text-xs text-subtle font-mono tabular-nums font-bold">
+        <div className="text-xs text-muted font-mono tabular-nums font-bold">
           {String(idx + 1).padStart(2, '0')}
         </div>
 
@@ -317,7 +307,7 @@ function RuleRow({ rule, idx }: { rule: Rule; idx: number }) {
 
         <div className="flex justify-end">
           <ChevronDown
-            className={`w-4 h-4 text-subtle transition-transform ${
+            className={`w-4 h-4 text-muted transition-transform ${
               expanded ? 'rotate-180' : ''
             }`}
           />
@@ -338,7 +328,7 @@ function AuditLog({ entries }: { entries: AuditEntry[] }) {
       <div className="flex items-center gap-2 mb-4 text-xs text-muted">
         <Lock className="w-3.5 h-3.5 text-primary" />
         <span className="font-semibold text-ink">{t('approvals.log.title')}</span>
-        <span className="text-subtle">·</span>
+        <span className="text-muted">·</span>
         <span>
           {entries.length === 1
             ? t('approvals.log.entryOne')
@@ -352,7 +342,7 @@ function AuditLog({ entries }: { entries: AuditEntry[] }) {
         ))}
       </div>
 
-      <div className="mt-4 pt-3 border-t border-dashed border-line flex items-center justify-between gap-4 text-[10px] text-subtle">
+      <div className="mt-4 pt-3 border-t border-dashed border-line flex items-center justify-between gap-4 text-[10px] text-muted">
         <span>{t('approvals.log.footnote')}</span>
         <span className="font-mono tabular-nums text-primary shrink-0">{t('approvals.log.verified')}</span>
       </div>
@@ -378,14 +368,14 @@ function AuditEntryRow({ entry }: { entry: AuditEntry }) {
   };
 
   return (
-    <div className="grid grid-cols-[140px_1fr_110px_90px_140px] gap-3 items-center text-xs py-2 px-3 rounded-lg bg-surface border border-line">
+    <div className="grid grid-cols-[140px_1fr_110px_90px] gap-3 items-center text-xs py-2 px-3 rounded-lg bg-surface border border-line">
       <div className="flex items-center gap-1.5 text-muted font-mono tabular-nums">
         <Clock className="w-3 h-3" />
         {entry.timestamp}
       </div>
       <div>
         <div className="flex items-center gap-2 text-ink">
-          <User className="w-3 h-3 text-subtle" />
+          <User className="w-3 h-3 text-muted" />
           <span className="font-medium">{mockText(entry.actor, locale)}</span>
           <RoleBadge role={entry.actorRole} small />
         </div>
@@ -402,13 +392,6 @@ function AuditEntryRow({ entry }: { entry: AuditEntry }) {
       </div>
       <div className="font-bold font-mono tabular-nums text-ink">
         {formatIls(entry.amount, { locale })}
-      </div>
-      <div
-        className="flex items-center gap-1.5 text-muted font-mono text-[10px] tabular-nums"
-        title={entry.hash}
-      >
-        <Hash className="w-3 h-3 shrink-0" />
-        <span className="truncate" dir="ltr">{entry.hash}</span>
       </div>
     </div>
   );

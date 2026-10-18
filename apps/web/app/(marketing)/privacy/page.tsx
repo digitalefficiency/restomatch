@@ -11,7 +11,7 @@ export async function generateMetadata(): Promise<Metadata> {
     title: t('legal.privacy.metaTitle'),
     description: t('legal.privacy.metaDescription'),
     metadataBase,
-    alternates: alternatesFor('/privacy'),
+    alternates: alternatesFor('/privacy', t.locale),
   };
 }
 
@@ -62,7 +62,7 @@ export default async function PrivacyPolicyPage() {
         <LegalClause>{t('legal.privacy.s4.c1')}</LegalClause>
         <div className="overflow-x-auto rounded-xl border border-line bg-surface">
           <table className="w-full text-start text-sm">
-            <thead className="border-b border-line bg-surface-2 font-mono text-xs uppercase tracking-wider text-subtle">
+            <thead className="border-b border-line bg-surface-2 font-mono text-xs uppercase tracking-wider text-muted">
               <tr>
                 <th className="px-4 py-2.5 text-start font-medium">{t('legal.privacy.s4.table.provider')}</th>
                 <th className="px-4 py-2.5 text-start font-medium">{t('legal.privacy.s4.table.purpose')}</th>
@@ -76,7 +76,7 @@ export default async function PrivacyPolicyPage() {
                   <td className="px-4 py-2.5 font-medium text-ink">{s.name}</td>
                   <td className="px-4 py-2.5 text-muted">{t(`legal.privacy.s4.purpose.${s.purpose}`)}</td>
                   <td className="px-4 py-2.5 text-muted">{t(`legal.privacy.s4.country.${s.country}`)}</td>
-                  <td className="px-4 py-2.5 text-subtle">{t('legal.privacy.s4.dpaStatus.inReview')}</td>
+                  <td className="px-4 py-2.5 text-muted">{t('legal.privacy.s4.dpaStatus.inReview')}</td>
                 </tr>
               ))}
             </tbody>

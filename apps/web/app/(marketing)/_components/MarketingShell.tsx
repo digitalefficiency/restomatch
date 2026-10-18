@@ -123,12 +123,12 @@ export async function MarketingShell({ children }: { children: React.ReactNode }
                 <span className="text-base font-bold tracking-tight">RestoMatch</span>
               </div>
               <p className="mt-3 text-sm leading-relaxed text-muted">{t('shell.footerTagline')}</p>
-              <p className="mt-3 text-xs text-subtle">{t('shell.madeIn')}</p>
+              <p className="mt-3 text-xs text-muted">{t('shell.madeIn')}</p>
             </div>
 
             <div className="grid grid-cols-2 gap-8 sm:grid-cols-3 sm:gap-16">
               <nav aria-label={t('shell.footerLinksLabel')} className="flex flex-col gap-2 text-sm">
-                <span className="mb-1 text-xs font-semibold uppercase text-subtle ltr:font-mono ltr:tracking-[0.18em]">
+                <span className="mb-1 text-xs font-semibold uppercase text-muted ltr:font-mono ltr:tracking-[0.18em]">
                   {t('shell.footerProduct')}
                 </span>
                 <Link href="/#how" className="text-muted hover:text-ink">
@@ -145,7 +145,7 @@ export async function MarketingShell({ children }: { children: React.ReactNode }
                 </Link>
               </nav>
               <nav aria-label={t('shell.footerCompany')} className="flex flex-col gap-2 text-sm">
-                <span className="mb-1 text-xs font-semibold uppercase text-subtle ltr:font-mono ltr:tracking-[0.18em]">
+                <span className="mb-1 text-xs font-semibold uppercase text-muted ltr:font-mono ltr:tracking-[0.18em]">
                   {t('shell.footerCompany')}
                 </span>
                 <Link href="/about" className="text-muted hover:text-ink">
@@ -159,7 +159,7 @@ export async function MarketingShell({ children }: { children: React.ReactNode }
                 </Link>
               </nav>
               <nav aria-label={t('shell.footerLegalLabel')} className="flex flex-col gap-2 text-sm">
-                <span className="mb-1 text-xs font-semibold uppercase text-subtle ltr:font-mono ltr:tracking-[0.18em]">
+                <span className="mb-1 text-xs font-semibold uppercase text-muted ltr:font-mono ltr:tracking-[0.18em]">
                   {t('shell.footerLegal')}
                 </span>
                 <Link href="/privacy" className="text-muted hover:text-ink">
@@ -175,7 +175,7 @@ export async function MarketingShell({ children }: { children: React.ReactNode }
             </div>
           </div>
 
-          <div className="mt-10 border-t border-line pt-6 font-mono text-xs tabular-nums text-subtle">
+          <div className="mt-10 border-t border-line pt-6 font-mono text-xs tabular-nums text-muted">
             {t('shell.rights', { year })}
           </div>
         </div>

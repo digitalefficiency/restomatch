@@ -158,7 +158,7 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
               <div className="text-xs text-muted flex items-center gap-2 flex-wrap">
                 <Camera className="w-3 h-3" />
                 <span>{mockText(data.capturedBy ?? 'נסרק מטלפון', locale)}</span>
-                <span className="text-subtle">·</span>
+                <span className="text-muted">·</span>
                 <span className="font-mono tabular-nums">{dateText}</span>
               </div>
             </div>
@@ -229,7 +229,7 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
           {/* Extraction sidebar */}
           <aside className="w-80 shrink-0 border-s border-line bg-surface overflow-y-auto hidden lg:block">
             <div className="px-5 py-4 border-b border-line">
-              <div className="text-xs uppercase tracking-wider text-subtle font-semibold mb-1">
+              <div className="text-xs uppercase tracking-wider text-muted font-semibold mb-1">
                 {t('scan.extracted')}
               </div>
               <div className="text-xs text-muted">
@@ -271,7 +271,7 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
             </div>
 
             <div className="border-t border-line px-5 py-4">
-              <div className="text-xs uppercase tracking-wider text-subtle font-semibold mb-3 flex items-center gap-1.5">
+              <div className="text-xs uppercase tracking-wider text-muted font-semibold mb-3 flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-primary" />
                 <span>{t('scan.lines', { count: data.lines.length })}</span>
               </div>
@@ -351,10 +351,10 @@ function ExtractedField({
   return (
     <div>
       <div className="flex items-center justify-between mb-0.5">
-        <span className="text-[10px] uppercase tracking-wider text-subtle font-semibold">
+        <span className="text-[10px] uppercase tracking-wider text-muted font-semibold">
           {label}
         </span>
-        <span className="text-[10px] font-mono tabular-nums text-subtle">
+        <span className="text-[10px] font-mono tabular-nums text-muted">
           {Math.round(confidence * 100)}%
         </span>
       </div>
