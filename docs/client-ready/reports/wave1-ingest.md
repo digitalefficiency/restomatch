@@ -45,8 +45,8 @@ photographed invoice:** storage under the restaurant prefix → invoice row (`oc
 | Disabled feature | Webhook returns 404 (same as an unknown token). Procedures return FORBIDDEN `FEATURE_DISABLED`. Page returns 404 and the nav is hidden. | "a disabled feature is invisible", cross-tenant "flag off", e2e prod |
 | Public paths | Only `/api/ingest/**` was added to `PUBLIC_PREFIX_PATHS`. `/dashboard/inbox` stays private and role-gated. | `publicPaths.test` S13 case |
 
-**E-mail senders are not authenticated yet.** An allow-listed `From` address only *suggests* the supplier, and every
-e-mailed document waits for approval (S4 I2). Mitigation once live: require the provider's SPF/DKIM verdict before auto-registering. Resend exposes
+**E-mail sender authentication.** An allow-listed `From` is trusted only together with a passing SPF/DKIM/DMARC
+verdict from our own inbound provider (S4 I2). Until the owner enables it, e-mailed documents always wait for approval. Mitigation once live: require the provider's SPF/DKIM verdict before auto-registering. Resend exposes
 it in the received e-mail, so this is a small follow-up.
 
 ## Receiver PWA — exactly what is cached
@@ -102,7 +102,11 @@ it in the received e-mail, so this is a small follow-up.
    Then redeploy.
 4. In RestoMatch, go to **Invoice inbox → E-mail → Create address** and give `inv_…@in.restomatch.co.il` to
    suppliers. Add their billing addresses to the allow-list.
-5. Check the Resend attachment endpoint before go-live:
+5. **Sender authentication (needed for e-mail auto-OCR):** enable SPF/DKIM/DMARC checking at the inbound provider
+   so it stamps `Authentication-Results` and passes the headers in the webhook. Then set `INGEST_EMAIL_AUTHSERV_ID`
+   to the provider's authserv-id: the first token of that header, e.g. `mx.resend.com`; read it from one received
+   test e-mail. Until then, allow-listed e-mail only suggests a supplier, and a manager approves each document.
+6. Check the Resend attachment endpoint before go-live:
    `ResendInboundProvider` calls `GET /emails/receiving/{email_id}/attachments/{id}`. That path follows Resend's
    inbound docs at the time of writing; it is unit-tested only with mocks.
 
@@ -122,7 +126,7 @@ export DATABASE_URL_TEST=postgres://postgres:postgres@localhost:5432/restomatch_
 pnpm install --frozen-lockfile                                   # ok
 pnpm --filter @restomatch/db migrate                             # through 0051, clean
 # Final gate on the MERGED head (origin/claude/client-ready merged in, rls/*.sql untouched):
-pnpm exec turbo run test --concurrency=1                         # 14/14 tasks — 1270 passed, 1 skipped
+pnpm exec turbo run test --concurrency=1                         # 14/14 tasks — 1274 passed, 1 skipped
 #   ingest 21 · db 72 (incl. migration-0050 9: RLS on all 4 tables + composite same-tenant FK attack;
 #   upgrade-path + doctor: no FAIL/WARN)
 #   api 566 (incl. ingest.attack 26, cross-tenant.attack with 9 ingest COVERAGE entries) · web 251
@@ -155,7 +159,7 @@ pnpm dev &   pnpm exec tsx scripts/ingest-simulate.ts http://localhost:3000
 #  disguised HTML "invoice.pdf" → rejected (unsupported_type) · forged signature → 401
 PHASE=dev  pnpm exec tsx scripts/e2e-ingest-pwa.ts     # PASS (dev): 21 checks
 pnpm build && NODE_ENV=production pnpm start &
-PHASE=prod pnpm exec tsx scripts/e2e-ingest-pwa.ts     # PASS (prod): 142 checks (incl. sign-out clears the queue, he+en)
+PHASE=prod pnpm exec tsx scripts/e2e-ingest-pwa.ts     # PASS (prod): 143 checks (incl. queue wiped on sign-out and on the session-expired redirect)
 ```
 
 Both phases were re-run on the merged head: dev 21/21, prod 140/140. **One observation:** on the first prod run
@@ -217,18 +221,29 @@ gate green, dev 21/21, prod 140/140.
 S4 passed the webhooks: HMAC, replay, SSRF, size, tokens, roles, cross-tenant, the race, and the SW scope. I fixed
 the three items it raised:
 
-- **I2 (medium):** the e-mail allow-list trusted `From`. An allow-listed **e-mail** sender now only *suggests* the
-  supplier. The document lands as `needs_review` with that supplier pre-filled, and nothing is registered or OCR'd
-  until a manager approves. WhatsApp numbers are authenticated by Meta, so they keep auto-registering.
-  Test: `ingest.attack` "S4 I2". When SPF/DKIM verdicts are wired in, e-mail can auto-register again.
-- **I3 (low, privacy):** the offline queue was never cleared on logout. Items now carry `userId` + `restaurantId`
-  and upload only for that exact user and restaurant. A different user signing in on the device purges other users'
-  items (`PwaSessionGuard`). Submitting any sign-out form (`data-rm-logout`) wipes the queue.
-  Tests: `offlineQueue.test` "S4 I3", and the prod e2e checks that "sign-out clears the offline photo queue" in he
-  and en.
-- **I4 (low):** a storage-cost amplifier. Stored-but-unregistered (review) documents now have a per-channel
-  **daily byte quota**, `INGEST_REVIEW_BYTES_PER_DAY` (default 200 MB). Beyond it a document is `rejected` /
-  `quota_exceeded` and not stored. Test: `ingest.attack` "S4 I4".
+- **I2 (medium):** the e-mail allow-list trusted `From`. Every inbound message now carries
+  `authVerdict: 'pass' | 'fail' | 'none'`. WhatsApp is always `pass`, because Meta authenticates the number.
+  E-mail gets `pass` only from an RFC 8601 `Authentication-Results` header stamped with **our** inbound provider's
+  authserv-id (`INGEST_EMAIL_AUTHSERV_ID`) and reporting `dmarc=pass` or `spf=pass` + `dkim=pass`. A header with any
+  other authserv-id (which a sender can forge) is ignored, and the stub or an unset id gives `none`.
+  - A document is auto-registered (→ OCR) only when the sender is allow-listed **and** the verdict is `pass`.
+  - Otherwise the allow-list only *suggests* the supplier: the document is `needs_review`, with no invoice and no
+    OCR.
+  - Tests in `ingest.attack`: a spoofed `From` with no header, or with a forged header, → `needs_review`, no
+    invoice; our verdict `pass` → registered. Plus unit tests for the verdict parser.
+- **I3 (low, privacy):** queued photos carry `userId` + `restaurantId` and only upload for that user and restaurant.
+  The queue is wiped:
+  - on every sign-out form (`data-rm-logout`, desktop + mobile);
+  - on any landing on `/login`, which covers sign-out and the **session-expired redirect** (`PwaQueueReset`);
+  - and other users' items are purged when a different user is signed in (`PwaSessionGuard`).
+
+  Tests: `offlineQueue.test` "S4 I3", and the prod e2e checks "sign-out clears the queue" (en) and
+  "session-expired redirect to /login clears the queue" (he).
+- **I4 (low):** a storage-cost amplifier. There is now a per-channel **daily byte quota** for stored,
+  unregistered review documents: `REVIEW_BYTES_PER_CHANNEL_PER_DAY` = 50 MB, set in one place
+  (`packages/ingest/src/limits.ts`; `INGEST_REVIEW_BYTES_PER_DAY` overrides it for ops/tests). Over the quota the
+  document is kept as **metadata only** (`needs_review`, `quota_exceeded`, no blob). The inbox shows the reason and
+  offers only Reject. Test: `ingest.attack` "S4 I4".
 - I1 (merge order): no action, per the orchestrator.
 
 ### Layer 2b: independent refuter
