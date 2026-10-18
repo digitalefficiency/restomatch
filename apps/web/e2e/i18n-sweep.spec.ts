@@ -136,7 +136,13 @@ test.describe('English-mode sweep', () => {
     const visitedByRole: Record<string, string[]> = {};
 
     for (const role of ROLES) {
-      const page = await login(browser, role);
+      let page: Page;
+      try {
+        page = await login(browser, role);
+      } catch (e) {
+        findings.push({ role, viewport: '-', path: '/login', kind: 'nav', detail: `login failed: ${(e as Error).message.slice(0, 120)}`, deferred: false });
+        continue;
+      }
       const consoleErrors: string[] = [];
       page.on('console', (m) => {
         if (m.type() === 'error' && !CONSOLE_IGNORE.some((re) => re.test(m.text()))) consoleErrors.push(m.text());
