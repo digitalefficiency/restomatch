@@ -105,9 +105,13 @@ export const scansRouter = router({
         });
       }
 
-      // Mapping row via the service client (PostgREST) — matches the live
-      // invoice_scans table whose invoice_id is opaque text. restaurant_id is
-      // the session's, satisfying the NOT NULL (A.7) + tenant RLS (0002).
+      // Mapping row via the service client (PostgREST). BEST-EFFORT: the old
+      // hand-made invoice_scans table had an opaque-text invoice_id, but a
+      // project built from the migrations has `invoice_id uuid` + FK to
+      // invoices, so a `scan-…` id is rejected there (22P02). Nothing on the
+      // upload → register → OCR path needs this row (registerInvoice gets the
+      // signed URL, and /scans/<scan-id> falls back to the storage path), so a
+      // failed insert must never fail the receiver's upload.
       const { error: insertError } = alreadyUploaded
         ? { error: null }
         : await storage.from('invoice_scans').insert({
@@ -120,12 +124,7 @@ export const scansRouter = router({
             page_count: null,
           });
       if (insertError) {
-        // Best-effort cleanup of the just-uploaded object.
-        await storage.storage.from(BUCKET).remove([storagePath]).catch(() => {});
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: `mapping insert failed: ${insertError.message}`,
-        });
+        console.warn(`[scans.upload] invoice_scans mapping skipped for ${invoiceId}: ${insertError.message}`);
       }
 
       const { data: signed } = await storage.storage

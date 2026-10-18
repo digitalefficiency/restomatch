@@ -79,6 +79,11 @@ export async function resolveUploadedScan(
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Ids minted by scans.upload (`scan-<base36>-<hex>`); nothing else is signed directly. */
+const SCAN_ID = /^scan-[a-z0-9]+-[a-f0-9]+$/;
+const SCAN_BUCKET = 'invoice-scans';
+/** extFromMime() in packages/api/src/lib/supabaseStorage.ts, most common first. */
+const SCAN_EXTS = ['jpg', 'pdf', 'png', 'webp'] as const;
 const SIGNED_PATH = /\/storage\/v1\/object\/sign\/([^/?#]+)\/([^?#]+)/;
 
 /** Re-sign a storage object for `restaurantId` (path must live under its prefix). */
@@ -130,6 +135,15 @@ export async function resolveScan(
 
   const uploaded = await resolveUploadedScan(scanId, restaurantId);
   if (uploaded) return { ...uploaded, source: 'supabase' };
+
+  // No mapping row (it is best-effort in scans.upload): the object still lives
+  // at `<restaurantId>/<scanId>.<ext>`, so sign it directly.
+  if (SCAN_ID.test(scanId)) {
+    for (const ext of SCAN_EXTS) {
+      const direct = await signTenantPath(SCAN_BUCKET, `${restaurantId}/${scanId}.${ext}`, restaurantId);
+      if (direct) return direct;
+    }
+  }
 
   const meta = await readLocalScanMeta(restaurantId, scanId);
   if (!meta) return null;
