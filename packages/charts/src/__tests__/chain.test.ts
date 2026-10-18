@@ -173,6 +173,12 @@ describe('aggregateChain', () => {
     expect(off.totals.leakIls).toBe(1192.3);
   });
 
+  it('an empty comparison period gives no delta (not ▲ the whole leak)', () => {
+    const empty = aggregateChain([a, b].map((x) => ({ ...x, previous: { leakIls: 0, spendIls: 0, leakPct: null } })));
+    expect(empty.branches.every((r) => r.leakDeltaIls === null && r.prevLeakIls === null)).toBe(true);
+    expect(empty.totals.prevLeakPct).toBeNull();
+  });
+
   it('reports the selected period bounds', () => {
     expect(out.periodStart).toBe('2026-09-30T21:00:00.000Z');
     expect(out.periodEnd).toBe('2026-10-31T22:00:00.000Z');

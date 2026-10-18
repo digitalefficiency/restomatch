@@ -209,7 +209,8 @@ describe('chain.overview', () => {
     const o = await asA().chain.overview({ compare: 'prev' });
     expect(o.compare).toBe('prev');
     expect(o.totals.prevLeakIls).toBe(0);
-    expect(o.branches.find((b) => b.restaurantId === A.restaurantId)?.leakDeltaIls).toBe(100);
+    // The previous period has no invoices: nothing to compare against → no delta (not "▲ ₪100").
+    expect(o.branches.find((b) => b.restaurantId === A.restaurantId)?.leakDeltaIls).toBeNull();
   });
 
   it('rejects malformed views and view filters', async () => {
