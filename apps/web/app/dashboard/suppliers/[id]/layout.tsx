@@ -75,7 +75,7 @@ export default async function SupplierDetailLayout({
             {supplier.sourcePlatform && <Badge tone="info">{supplier.sourcePlatform}</Badge>}
           </div>
           {name.secondary ? (
-            <p className="mt-1 text-sm text-subtle" lang="he" dir="rtl">
+            <p className="mt-1 text-sm text-subtle" lang="he">
               {name.secondary}
             </p>
           ) : null}

@@ -79,7 +79,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 <form action={logout}>
                   <button
                     type="submit"
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-xs font-semibold text-muted transition-colors hover:border-primary/40 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+                    className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-xs font-semibold text-muted transition-colors hover:border-primary/40 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
                   >
                     <LogOut className="h-3.5 w-3.5 rtl:-scale-x-100" aria-hidden="true" />
                     {t('signOut')}

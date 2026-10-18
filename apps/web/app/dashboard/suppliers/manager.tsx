@@ -198,7 +198,7 @@ function SupplierRow({
               {name.primary}
             </Link>
             {name.secondary ? (
-              <span className="text-sm text-subtle" lang="he" dir="rtl">
+              <span className="text-sm text-subtle" lang="he">
                 {name.secondary}
               </span>
             ) : null}

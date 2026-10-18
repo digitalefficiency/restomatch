@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -145,6 +146,11 @@ export function MobileNav({
   const t = useT(nav);
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  // The drawer + bottom bar are portaled to <body>: the sticky header uses
+  // backdrop-filter, which makes it the containing block for position:fixed
+  // descendants (the bottom bar rendered at the TOP of the screen).
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const closeRef = useRef<HTMLButtonElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const items = visibleItems(role);
@@ -190,7 +196,8 @@ export function MobileNav({
         <Menu className="h-5 w-5" aria-hidden="true" />
       </button>
 
-      {open ? (
+      {mounted && open
+        ? createPortal(
         <div className="fixed inset-0 z-50 lg:hidden">
           <button
             type="button"
@@ -276,10 +283,13 @@ export function MobileNav({
               </form>
             </div>
           </div>
-        </div>
-      ) : null}
+        </div>,
+            document.body,
+          )
+        : null}
 
       {/* Bottom bar — the four most-used destinations for this role + "More". */}
+      {mounted ? createPortal(
       <nav
         aria-label={t('mobileLabel')}
         className="glass fixed inset-x-0 bottom-0 z-40 border-t border-line pb-[env(safe-area-inset-bottom)] lg:hidden"
@@ -320,7 +330,9 @@ export function MobileNav({
             </button>
           </li>
         </ul>
-      </nav>
+      </nav>,
+        document.body,
+      ) : null}
     </>
   );
 }

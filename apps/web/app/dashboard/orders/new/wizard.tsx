@@ -381,7 +381,7 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
                           <>
                             <p className="truncate text-sm text-ink">{name.primary}</p>
                             {name.secondary ? (
-                              <p className="truncate text-xs text-subtle" lang="he" dir="rtl">
+                              <p className="truncate text-xs text-subtle" lang="he">
                                 {name.secondary}
                               </p>
                             ) : null}

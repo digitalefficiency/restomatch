@@ -44,7 +44,7 @@ export default async function ProductPage({ params }: { params: Promise<{ produc
         subtitle={
           <>
             {name.secondary ? (
-              <span className="mb-1 block text-base text-subtle" lang="he" dir="rtl">
+              <span className="mb-1 block text-base text-subtle" lang="he">
                 {name.secondary}
               </span>
             ) : null}

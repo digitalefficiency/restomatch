@@ -240,7 +240,7 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
                       <>
                         <span>{label.primary}</span>
                         {label.secondary ? (
-                          <span className="block text-xs text-subtle" lang="he" dir="rtl">
+                          <span className="block text-xs text-subtle" lang="he">
                             {label.secondary}
                           </span>
                         ) : null}

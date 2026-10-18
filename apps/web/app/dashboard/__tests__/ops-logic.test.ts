@@ -88,7 +88,8 @@ describe('order logic', () => {
   it('merges a repeated catalog pick into one line', () => {
     let n = 0;
     const key = () => `k${++n}`;
-    let res = addOrMerge([], { productId: 'p1', rawDescription: 'עגבניה', qty: 1 }, key);
+    type L = { key: string; productId?: string; rawDescription: string; qty: number };
+    let res = addOrMerge<L>([], { productId: 'p1', rawDescription: 'עגבניה', qty: 1 }, key);
     res = addOrMerge(res.lines, { productId: 'p1', rawDescription: 'עגבניה', qty: 1 }, key);
     expect(res.merged).toBe(true);
     expect(res.lines).toHaveLength(1);
