@@ -202,6 +202,8 @@ const PRECONDITIONS: Record<string, (c: Ctx) => Promise<PreconditionResult>> = {
   '0031_updated_at_triggers': async () => ({ status: 'PASS', detail: 'trigger function + BEFORE UPDATE triggers only' }),
 
   '0039_invitation_locale': async () => ({ status: 'PASS', detail: 'additive (nullable column, guarded CHECK)' }),
+  '0046_supplier_contract_prices': async () => ({ status: 'PASS', detail: 'new table + UNIQUE(id, restaurant_id) on products (id is the PK — cannot fail)' }),
+  '0047_price_alerts': async () => ({ status: 'PASS', detail: 'new tables only' }),
 
   '0032_integrity_checks': async (c) => {
     const bad: string[] = [];

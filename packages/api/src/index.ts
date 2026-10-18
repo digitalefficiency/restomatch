@@ -19,6 +19,8 @@ import { matchRouter } from './routers/match';
 import { mappingRouter } from './routers/mapping';
 import { productsRouter } from './routers/products';
 import { teamRouter } from './routers/team';
+import { contractsRouter } from './routers/contracts';
+import { priceAlertsRouter } from './routers/priceAlerts';
 
 export const appRouter = router({
   owner: ownerRouter,
@@ -41,6 +43,8 @@ export const appRouter = router({
   products: productsRouter,
   team: teamRouter,
   dsr: dsrRouter,
+  contracts: contractsRouter,
+  priceAlerts: priceAlertsRouter,
 });
 
 export type AppRouter = typeof appRouter;
@@ -167,6 +171,33 @@ export {
 export { canonicalizeEmail } from './email';
 export { startOfDayInTz, endOfDayInTz, addCalendarDaysInTz } from './lib/time';
 export { FEATURE_KEYS, featureEnabled, type FeatureKey } from './lib/features';
+export { assertFeature } from './lib/featureGate';
+export {
+  contractInForce,
+  contractPriceInUnit,
+  isOverContract,
+  localDateKey,
+  type ContractRow,
+} from './contracts/core';
+export { applyContractPrices, loadContractsInForce } from './contracts/load';
+export { findOverContractLines, type OverContractLine } from './contracts/overContract';
+export {
+  autoDetectContractMapping,
+  commitContractRows,
+  extractContractRows,
+  parseDateCell,
+  type ContractColumnMapping,
+  type ContractImportRow,
+} from './contracts/import';
+export { runPriceAlertSweep, loadAlertDetails, type SweepResult, type PriceAlertDetail } from './priceAlerts/sweep';
+export {
+  detectSustainedIncrease,
+  resolveThreshold,
+  cheaperOffer,
+  DEFAULT_THRESHOLD_PCT,
+  DEFAULT_WINDOW_DAYS,
+} from './priceAlerts/detect';
+export { priceAlertEmail } from './priceAlerts/email';
 export {
   APP_ERROR_CODES,
   AppErrorCause,
