@@ -16,6 +16,16 @@ export function rangeLabel(period: Period, startIso: string, endIso: string, loc
   return `${formatDate(startIso, locale, opts)}${sep}${formatDate(lastDay, locale, opts)}`;
 }
 
+/** 'YYYY-MM-DD' of the instant's calendar day in Israel time (CSV cells). */
+export function localDay(value: Date | string | number): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jerusalem',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(value));
+}
+
 /** Short bucket label for a trend point (day → "12 Oct", month → "Oct 2026"). */
 export function bucketLabel(bucket: 'day' | 'month', iso: string, locale: Locale): string {
   return bucket === 'day'

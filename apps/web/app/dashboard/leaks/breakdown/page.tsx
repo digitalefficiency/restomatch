@@ -18,6 +18,7 @@ import {
   DeltaBadge,
   ViewToolbar,
   isDefaultData,
+  localDay,
   parseView,
   rangeLabel,
   toViewInput,
@@ -97,7 +98,7 @@ export default async function LeakBreakdownPage({
           rows: rows.map((r) => ({
             supplier: displayName(locale, r.supplierName, r.supplierNameEn),
             invoice: r.invoiceNumber ?? '',
-            date: r.invoiceDate ? new Date(r.invoiceDate).toISOString().slice(0, 10) : '',
+            date: r.invoiceDate ? localDay(r.invoiceDate) : '',
             total: r.totalInclVat,
             leak: r.pendingLink ? null : r.leakIls,
             status: r.pendingLink ? t('breakdown.pendingTitle') : r.status === 'paid' ? t('breakdown.paid') : t('breakdown.unpaid'),

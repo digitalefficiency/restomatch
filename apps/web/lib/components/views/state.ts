@@ -109,8 +109,15 @@ const isIn =
 const isUuid = (x: string): x is string => UUID_RE.test(x);
 const isCategory = (x: string): x is string => x.length <= 100;
 
-const validDate = (v: string | undefined): string | undefined =>
-  v && DATE_RE.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) ? v : undefined;
+/** A real calendar day in 2000–2100 ('2026-02-30' would roll over in Date.parse). */
+const validDate = (v: string | undefined): string | undefined => {
+  if (!v || !DATE_RE.test(v)) return undefined;
+  const d = new Date(`${v}T00:00:00Z`);
+  const y = Number(v.slice(0, 4));
+  return y >= 2000 && y <= 2100 && !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v ? v : undefined;
+};
+/** Same cap as the router (3 years) so a long range falls back instead of failing. */
+const MAX_RANGE_MS = 3 * 366 * 86_400_000;
 
 /** Parse (and sanitize) a view from searchParams. */
 export function parseView(sp: ParamSource): ViewState {
@@ -119,7 +126,10 @@ export function parseView(sp: ParamSource): ViewState {
   let to = validDate(get(sp, 'to'));
   if (period === 'custom') {
     if (!from || !to) period = DEFAULT_VIEW.period;
-    else if (from > to) [from, to] = [to, from];
+    else {
+      if (from > to) [from, to] = [to, from];
+      if (Date.parse(to) - Date.parse(from) > MAX_RANGE_MS) period = DEFAULT_VIEW.period;
+    }
   }
   if (period !== 'custom') {
     from = undefined;

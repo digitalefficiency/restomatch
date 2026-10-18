@@ -8,6 +8,7 @@ import {
   toViewInput,
 } from '../state';
 import { toCsv } from '../csv';
+import { localDay } from '../labels';
 import { deleteSavedView, listSavedViews, saveView } from '../savedViews';
 
 const SUP = '11111111-2222-4333-8444-555555555555';
@@ -65,6 +66,11 @@ describe('view state ⇄ URL', () => {
       from: '2026-10-01',
       to: '2026-10-31',
     });
+    // Impossible days and out-of-range years fall back instead of crashing Postgres.
+    expect(parseView({ p: 'custom', from: '2026-02-30', to: '2026-03-05' }).period).toBe('this_month');
+    expect(parseView({ p: 'custom', from: '0000-01-01', to: '2026-01-01' }).period).toBe('this_month');
+    // Longer than the router's 3-year cap → default view, not a BAD_REQUEST page.
+    expect(parseView({ p: 'custom', from: '2000-01-01', to: '2026-01-01' }).period).toBe('this_month');
     // from/to are dropped for non-custom periods.
     expect(parseView({ p: 'ytd', from: '2026-10-01', to: '2026-10-02' }).from).toBeUndefined();
   });
@@ -99,6 +105,14 @@ describe('view state ⇄ URL', () => {
     expect(delta(80, 100)).toEqual({ diff: -20, pct: -0.2 });
     expect(delta(50, 0)).toEqual({ diff: 50, pct: null });
     expect(delta(50, null)).toBeNull();
+  });
+});
+
+describe('localDay', () => {
+  it('formats the Israel calendar day, not the UTC one', () => {
+    expect(localDay('2026-10-01T21:00:00.000Z')).toBe('2026-10-02'); // local midnight Oct 2
+    expect(localDay('2026-09-30T21:00:00.000Z')).toBe('2026-10-01');
+    expect(localDay('2026-01-15T23:30:00Z')).toBe('2026-01-16'); // winter UTC+2
   });
 });
 

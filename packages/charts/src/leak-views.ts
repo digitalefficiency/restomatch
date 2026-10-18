@@ -53,6 +53,13 @@ const n = (v: unknown): number => (v == null ? 0 : Number(v));
 const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : new Date(String(v)).toISOString());
 const ils = (v: unknown): number => Math.round(n(v) * 100) / 100;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** A real calendar day in 2000–2100 (Postgres throws on 2026-02-30 / 0000-01-01). */
+const realDate = (s: string): boolean => {
+  if (!DATE_RE.test(s)) return false;
+  const y = Number(s.slice(0, 4));
+  const d = new Date(`${s}T00:00:00Z`);
+  return y >= 2000 && y <= 2100 && !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+};
 
 /** Local [lo, hi) for a period, as expressions over `nl` (now, local wall clock). */
 function periodBounds(spec: ViewSpec): { lo: SQL; hi: SQL; step: SQL | null } {
@@ -72,7 +79,7 @@ function periodBounds(spec: ViewSpec): { lo: SQL; hi: SQL; step: SQL | null } {
         step: sql`interval '12 months'`,
       };
     case 'custom': {
-      if (!spec.from || !spec.to || !DATE_RE.test(spec.from) || !DATE_RE.test(spec.to)) {
+      if (!spec.from || !spec.to || !realDate(spec.from) || !realDate(spec.to)) {
         throw new Error('custom period needs from/to as YYYY-MM-DD');
       }
       const [a, b] = spec.from <= spec.to ? [spec.from, spec.to] : [spec.to, spec.from];
@@ -86,6 +93,10 @@ function boundsCte(restaurantId: string, spec: ViewSpec, compare: ViewCompare): 
   const now = (spec.now ?? new Date()).toISOString();
   const { lo, hi, step } = periodBounds(spec);
   // Previous period: the calendar step for calendar periods, else the same length right before.
+  // A comparison covers the same to-date stretch: a period still running (this month,
+  // quarter, 12 months, a range ending in the future) is cut at the end of today before
+  // shifting, so 3 days of October compare with Sep 1–3, not all of September.
+  const shiftedHi = compare === 'off' ? sql`b0.hi_l` : sql`LEAST(b0.hi_l, date_trunc('day', b0.nl) + interval '1 day')`;
   const shift =
     compare === 'yoy'
       ? sql`interval '1 year'`
@@ -97,10 +108,10 @@ function boundsCte(restaurantId: string, spec: ViewSpec, compare: ViewCompare): 
       SELECT COALESCE(timezone, 'Asia/Jerusalem') AS tz FROM restaurants WHERE id = ${restaurantId}
     ),
     nn AS (SELECT (${now}::timestamptz AT TIME ZONE r.tz) AS nl, r.tz FROM r),
-    b0 AS (SELECT ${lo} AS lo_l, ${hi} AS hi_l, tz FROM nn),
+    b0 AS (SELECT ${lo} AS lo_l, ${hi} AS hi_l, nl, tz FROM nn),
     b AS (
       SELECT (b0.lo_l - ${shift}) AT TIME ZONE b0.tz AS lo,
-             (b0.hi_l - ${shift}) AT TIME ZONE b0.tz AS hi,
+             (${shiftedHi} - ${shift}) AT TIME ZONE b0.tz AS hi,
              b0.tz
       FROM b0
     )`;
