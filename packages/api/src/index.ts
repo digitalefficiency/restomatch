@@ -173,7 +173,7 @@ export {
 export { canonicalizeEmail } from './email';
 export { startOfDayInTz, endOfDayInTz, addCalendarDaysInTz } from './lib/time';
 export { FEATURE_KEYS, featureEnabled, type FeatureKey } from './lib/features';
-export { assertFeature } from './lib/featureGate';
+export { isFeatureOn, assertFeatureOn } from './lib/featureGate';
 export {
   contractInForce,
   contractPriceInUnit,

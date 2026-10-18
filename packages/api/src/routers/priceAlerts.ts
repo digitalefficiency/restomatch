@@ -14,7 +14,7 @@ import {
 } from '@restomatch/db';
 import { financeProcedure, managerProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
-import { assertFeature } from '../lib/featureGate';
+import { assertFeatureOn } from '../lib/featureGate';
 import { loadAlertDetails, runPriceAlertSweep } from '../priceAlerts/sweep';
 import { DEFAULT_THRESHOLD_PCT, DEFAULT_WINDOW_DAYS } from '../priceAlerts/detect';
 
@@ -28,7 +28,7 @@ export const priceAlertsRouter = router({
     .input(z.object({ status: z.enum(['open', 'dismissed']).optional() }).strict().optional())
     .query(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
-      await assertFeature(ctx.db, rid, 'priceAlerts');
+      await assertFeatureOn(ctx.db, rid, 'priceAlerts');
       return loadAlertDetails(ctx.db, rid, undefined, { status: input?.status ?? 'open' });
     }),
 
@@ -36,7 +36,7 @@ export const priceAlertsRouter = router({
     .input(z.object({ id: z.string().uuid() }).strict())
     .mutation(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
-      await assertFeature(ctx.db, rid, 'priceAlerts');
+      await assertFeatureOn(ctx.db, rid, 'priceAlerts');
       const [row] = await ctx.db
         .update(priceAlerts)
         .set({ status: 'dismissed', dismissedAt: new Date(), dismissedBy: ctx.session.userId })
@@ -49,7 +49,7 @@ export const priceAlertsRouter = router({
   /** Re-run detection now for this restaurant (in-app only; the cron emails). */
   refresh: managerProcedure.mutation(async ({ ctx }) => {
     const rid = ctx.session.restaurantId;
-    await assertFeature(ctx.db, rid, 'priceAlerts');
+    await assertFeatureOn(ctx.db, rid, 'priceAlerts');
     const res = await runPriceAlertSweep(ctx.db, rid, { notify: false });
     return { created: res.created };
   }),
@@ -57,7 +57,7 @@ export const priceAlertsRouter = router({
   /** Threshold rules + the categories that can be targeted + the built-in default. */
   thresholds: financeProcedure.query(async ({ ctx }) => {
     const rid = ctx.session.restaurantId;
-    await assertFeature(ctx.db, rid, 'priceAlerts');
+    await assertFeatureOn(ctx.db, rid, 'priceAlerts');
     const rules = await ctx.db
       .select({
         id: priceAlertThresholds.id,
@@ -99,7 +99,7 @@ export const priceAlertsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
-      await assertFeature(ctx.db, rid, 'priceAlerts');
+      await assertFeatureOn(ctx.db, rid, 'priceAlerts');
       if (input.supplierId) await assertSupplierOwned(ctx.db, input.supplierId, rid);
       const scope = and(
         eq(priceAlertThresholds.restaurantId, rid),
@@ -132,7 +132,7 @@ export const priceAlertsRouter = router({
     .input(z.object({ id: z.string().uuid() }).strict())
     .mutation(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
-      await assertFeature(ctx.db, rid, 'priceAlerts');
+      await assertFeatureOn(ctx.db, rid, 'priceAlerts');
       const deleted = await ctx.db
         .delete(priceAlertThresholds)
         .where(and(eq(priceAlertThresholds.id, input.id), eq(priceAlertThresholds.restaurantId, rid)))
@@ -144,7 +144,7 @@ export const priceAlertsRouter = router({
   /** Open-alert count for the nav/overview badge (cheap). */
   openCount: financeProcedure.query(async ({ ctx }) => {
     const rid = ctx.session.restaurantId;
-    await assertFeature(ctx.db, rid, 'priceAlerts');
+    await assertFeatureOn(ctx.db, rid, 'priceAlerts');
     const [r] = await ctx.db
       .select({ n: sql<number>`count(*)::int` })
       .from(priceAlerts)
