@@ -1,24 +1,32 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { Pause, Play } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 
 /**
  * Hero product loop (used when heroMedia.available). The poster is the LCP
  * element and paints immediately; the video sources are attached only after
  * the page has loaded, and never for prefers-reduced-motion (poster stays).
+ * A pause/play toggle is shown while it plays (WCAG 2.2.2 — moving content).
  */
 export function HeroVideo({
   webm,
   mp4,
   poster,
   label,
+  pauseLabel,
+  playLabel,
 }: {
   webm: string;
   mp4: string;
   poster: string;
   label: string;
+  pauseLabel: string;
+  playLabel: string;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [started, setStarted] = useState(false);
 
   useEffect(() => {
     const v = ref.current;
@@ -34,6 +42,7 @@ export function HeroVideo({
         v.appendChild(s);
       }
       v.load();
+      setStarted(true);
       void v.play().catch(() => undefined);
     };
     if (document.readyState === 'complete') attach();
@@ -53,8 +62,30 @@ export function HeroVideo({
         autoPlay
         preload="none"
         aria-label={label}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
         className="aspect-[4/3] w-full object-cover"
       />
+      {started ? (
+        <button
+          type="button"
+          aria-pressed={!playing}
+          onClick={() => {
+            const v = ref.current;
+            if (!v) return;
+            if (v.paused) void v.play().catch(() => undefined);
+            else v.pause();
+          }}
+          className="absolute bottom-3 end-3 z-10 inline-flex min-h-8 items-center gap-1 rounded-md bg-bg/80 px-2 py-1 text-[11px] text-muted backdrop-blur transition-colors hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+        >
+          {playing ? (
+            <Pause className="h-3 w-3" aria-hidden="true" />
+          ) : (
+            <Play className="h-3 w-3" aria-hidden="true" />
+          )}
+          {playing ? pauseLabel : playLabel}
+        </button>
+      ) : null}
     </div>
   );
 }

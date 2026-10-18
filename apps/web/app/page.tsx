@@ -82,7 +82,9 @@ export default async function Home() {
       tone: 'text-danger',
     },
     {
-      value: t('v2.proof.breakevenValue', { pct: `${formatNumber(breakevenPct, locale, { maximumFractionDigits: 2 })}%` }),
+      value: t('v2.proof.breakevenValue', {
+        pct: `${formatNumber(breakevenPct, locale, { maximumFractionDigits: 2 })}%`,
+      }),
       label: t('v2.proof.breakevenLabel', { price: ils(proIls) }),
       tone: 'text-gold',
     },
@@ -148,7 +150,10 @@ export default async function Home() {
         <div className="relative mx-auto grid max-w-6xl items-center gap-12 px-4 pb-16 pt-12 sm:px-6 sm:pt-20 lg:grid-cols-[1.05fr_1fr] lg:gap-10 lg:pb-24 lg:pt-24">
           <div className="text-center lg:text-start">
             <p className="mb-5 inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase text-primary ltr:font-mono ltr:text-[11px] ltr:tracking-[0.18em]">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary motion-reduce:animate-none" aria-hidden="true" />
+              <span
+                className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary motion-reduce:animate-none"
+                aria-hidden="true"
+              />
               {t('hero.eyebrow')}
             </p>
             <h1
@@ -160,7 +165,9 @@ export default async function Home() {
                 {t('hero.titleB')}
               </span>
             </h1>
-            <p className="mx-auto mt-6 max-w-lg text-lg leading-relaxed text-muted lg:mx-0">{t('hero.lead')}</p>
+            <p className="mx-auto mt-6 max-w-lg text-lg leading-relaxed text-muted lg:mx-0">
+              {t('hero.lead')}
+            </p>
             <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center lg:justify-start">
               <Link href="#lead" className={btnPrimary}>
                 {t('hero.ctaPrimary')}
@@ -196,6 +203,8 @@ export default async function Home() {
               mp4={heroMedia.loop.mp4}
               poster={heroMedia.poster}
               label={t('hero.watchTitle')}
+              pauseLabel={t('v2.video.pause')}
+              playLabel={t('v2.video.play')}
             />
           ) : (
             <HeroMatch />
@@ -204,35 +213,51 @@ export default async function Home() {
       </section>
 
       {/* ───────────── 2 · HOW IT WORKS (scroll-driven reveal) ───────────── */}
-      <section id="how" className="scroll-mt-24 border-y border-line bg-surface/30" aria-labelledby="how-title">
+      <section
+        id="how"
+        className="scroll-mt-24 border-y border-line bg-surface/30"
+        aria-labelledby="how-title"
+      >
         <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
           <div className="mx-auto mb-14 max-w-2xl text-center">
             <Eyebrow>{t('how.eyebrow')}</Eyebrow>
-            <h2 id="how-title" className="text-balance text-3xl font-bold tracking-tight text-ink sm:text-4xl">
+            <h2
+              id="how-title"
+              className="text-balance text-3xl font-bold tracking-tight text-ink sm:text-4xl"
+            >
               {t('how.title')}
             </h2>
             <p className="mt-3 text-base text-muted">{t('how.lead')}</p>
           </div>
-          <ol className="relative grid grid-cols-1 gap-10 md:grid-cols-3 md:gap-6">
-            <span aria-hidden="true" className="rm-draw absolute inset-x-[16%] top-7 hidden h-px flow-stream md:block" />
-            {steps.map(({ icon: Icon, title, body }, i) => (
-              <li key={title} className="rm-step relative text-center">
-                <span className="relative mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-primary/30 bg-bg text-primary shadow-glow-primary">
-                  <Icon className="h-6 w-6" aria-hidden="true" />
-                  <span className="absolute -end-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-primary font-mono text-xs font-bold text-on-primary">
-                    {i + 1}
+          <div className="relative">
+            <span
+              aria-hidden="true"
+              className="rm-draw absolute inset-x-[16%] top-7 hidden h-px flow-stream md:block"
+            />
+            <ol className="relative grid grid-cols-1 gap-10 md:grid-cols-3 md:gap-6">
+              {steps.map(({ icon: Icon, title, body }, i) => (
+                <li key={title} className="rm-step relative text-center">
+                  <span className="relative mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-primary/30 bg-bg text-primary shadow-glow-primary">
+                    <Icon className="h-6 w-6" aria-hidden="true" />
+                    <span className="absolute -end-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-primary font-mono text-xs font-bold text-on-primary">
+                      {i + 1}
+                    </span>
                   </span>
-                </span>
-                <h3 className="mt-5 text-lg font-bold text-ink">{title}</h3>
-                <p className="mx-auto mt-2 max-w-xs text-sm leading-relaxed text-muted">{body}</p>
-              </li>
-            ))}
-          </ol>
+                  <h3 className="mt-5 text-lg font-bold text-ink">{title}</h3>
+                  <p className="mx-auto mt-2 max-w-xs text-sm leading-relaxed text-muted">{body}</p>
+                </li>
+              ))}
+            </ol>
+          </div>
         </div>
       </section>
 
       {/* ───────────── 3 · RECEIVER IN ENGLISH (Hebrew → English morph) ───────────── */}
-      <section id="features" className="scroll-mt-24 mx-auto max-w-6xl px-4 py-20 sm:px-6" aria-labelledby="receiver-title">
+      <section
+        id="features"
+        className="scroll-mt-24 mx-auto max-w-6xl px-4 py-20 sm:px-6"
+        aria-labelledby="receiver-title"
+      >
         <div className="rm-reveal relative overflow-hidden rounded-3xl border border-primary/30 bg-surface shadow-glow-primary">
           <span aria-hidden="true" className="absolute inset-x-0 top-0 h-px flow-stream" />
           <div className="relative grid gap-10 p-6 sm:p-10 lg:grid-cols-2 lg:items-center">
@@ -241,7 +266,10 @@ export default async function Home() {
                 <Languages className="h-3.5 w-3.5" aria-hidden="true" />
                 {t('v2.receiver.eyebrow')}
               </span>
-              <h2 id="receiver-title" className="mt-4 text-balance text-2xl font-bold tracking-tight text-ink sm:text-3xl">
+              <h2
+                id="receiver-title"
+                className="mt-4 text-balance text-2xl font-bold tracking-tight text-ink sm:text-3xl"
+              >
                 {t('v2.receiver.title')}
               </h2>
               <p className="mt-3 text-base leading-relaxed text-muted">{t('v2.receiver.body')}</p>
@@ -266,7 +294,14 @@ export default async function Home() {
                     className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface px-3 py-3"
                     style={{ '--i': i } as React.CSSProperties}
                   >
-                    <span className="rm-morph min-w-0 text-sm font-semibold">
+                    {/* Read once as a pair; the animated copies are visual only. */}
+                    <span className="sr-only">
+                      <span lang="he" dir="rtl">
+                        {l.he}
+                      </span>{' '}
+                      → <span lang="en">{l.en}</span>
+                    </span>
+                    <span aria-hidden="true" className="rm-morph min-w-0 text-sm font-semibold">
                       <span className="rm-morph-he text-muted" lang="he" dir="rtl">
                         {l.he}
                       </span>
@@ -288,21 +323,36 @@ export default async function Home() {
         <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
           <div className="mx-auto mb-10 max-w-2xl text-center">
             <Eyebrow tone="gold">{t('v2.proof.eyebrow')}</Eyebrow>
-            <h2 id="proof-title" className="text-balance text-3xl font-bold tracking-tight text-ink sm:text-4xl">
+            <h2
+              id="proof-title"
+              className="text-balance text-3xl font-bold tracking-tight text-ink sm:text-4xl"
+            >
               {t('v2.proof.title')}
             </h2>
           </div>
           <ul className="grid grid-cols-1 gap-4 md:grid-cols-3">
             {proof.map((p) => (
-              <li key={p.label} className="rm-reveal rounded-2xl border border-line bg-surface p-6 text-center shadow-card">
-                <p className={cn('font-mono text-3xl font-extrabold tabular-nums tracking-tight sm:text-4xl', p.tone)}>
+              <li
+                key={p.label}
+                className="rm-reveal rounded-2xl border border-line bg-surface p-6 text-center shadow-card"
+              >
+                <p
+                  className={cn(
+                    'font-mono text-3xl font-extrabold tabular-nums tracking-tight sm:text-4xl',
+                    p.tone,
+                  )}
+                >
                   {p.value}
                 </p>
-                <p className="mx-auto mt-3 max-w-xs text-sm leading-relaxed text-muted">{p.label}</p>
+                <p className="mx-auto mt-3 max-w-xs text-sm leading-relaxed text-muted">
+                  {p.label}
+                </p>
               </li>
             ))}
           </ul>
-          <p className="mx-auto mt-6 max-w-2xl text-center text-xs leading-relaxed text-muted">{t('v2.proof.note')}</p>
+          <p className="mx-auto mt-6 max-w-2xl text-center text-xs leading-relaxed text-muted">
+            {t('v2.proof.note')}
+          </p>
           <p className="mt-4 text-center">
             <Link
               href="/about#roi"
@@ -320,7 +370,10 @@ export default async function Home() {
         <div className="rm-reveal grid items-center gap-10 lg:grid-cols-[1fr_1.2fr]">
           <div>
             <Eyebrow tone="gold">{t('pricing.eyebrow')}</Eyebrow>
-            <h2 id="pricing-title" className="text-balance text-3xl font-bold tracking-tight text-ink sm:text-4xl">
+            <h2
+              id="pricing-title"
+              className="text-balance text-3xl font-bold tracking-tight text-ink sm:text-4xl"
+            >
               {t('pricing.title')}
             </h2>
             <p className="mt-4 text-base text-muted">{t('pricing.lead')}</p>
@@ -339,7 +392,9 @@ export default async function Home() {
               <span aria-hidden="true" className="absolute inset-x-0 top-0 h-px flow-stream" />
               <p className="text-sm font-semibold text-gold">{t('pricing.fromLabel').trim()}</p>
               <p className="mt-2 flex items-baseline gap-1.5">
-                <span className="font-mono text-4xl font-extrabold tabular-nums text-ink">{ils(basicIls)}</span>
+                <span className="font-mono text-4xl font-extrabold tabular-nums text-ink">
+                  {ils(basicIls)}
+                </span>
                 <span className="text-sm text-muted">{t('pricing.perMonth')}</span>
               </p>
               <p className="mt-3 text-sm leading-relaxed text-muted">{t('pricing.paidBody')}</p>
@@ -352,31 +407,43 @@ export default async function Home() {
       <FaqSection t={t} />
 
       {/* ───────────── 6 · FINAL CTA — lead form (lazy) ───────────── */}
-      <section id="lead" className="relative scroll-mt-24 overflow-hidden border-t border-line" aria-labelledby="lead-title">
-        <div aria-hidden="true" className="glow-primary-blob pointer-events-none absolute -bottom-40 start-1/2 h-96 w-[44rem] -translate-x-1/2 rounded-full blur-3xl rtl:translate-x-1/2" />
+      <section
+        id="lead"
+        className="relative scroll-mt-24 overflow-hidden border-t border-line"
+        aria-labelledby="lead-title"
+      >
+        <div
+          aria-hidden="true"
+          className="glow-primary-blob pointer-events-none absolute -bottom-40 start-1/2 h-96 w-[44rem] -translate-x-1/2 rounded-full blur-3xl rtl:translate-x-1/2"
+        />
         <div className="relative mx-auto max-w-3xl px-4 py-20 sm:px-6">
           <div className="mx-auto mb-8 max-w-xl text-center">
             <div className="mx-auto mb-4 h-0.5 w-10 rounded-full flow-stream" aria-hidden="true" />
-            <h2 id="lead-title" className="text-balance text-3xl font-bold tracking-tight text-ink sm:text-4xl">
+            <h2
+              id="lead-title"
+              className="text-balance text-3xl font-bold tracking-tight text-ink sm:text-4xl"
+            >
               {t('cta.title')}
             </h2>
             <p className="mt-3 text-base text-muted">{t('cta.lead')}</p>
           </div>
           <div className="relative overflow-hidden rounded-3xl border border-line bg-surface p-6 shadow-card sm:p-8">
             <span aria-hidden="true" className="absolute inset-x-0 top-0 h-px flow-stream" />
-            <LazyLeadForm loadingLabel={t('v2.cta.loading')} />
+            <LazyLeadForm loadingLabel={t('v2.cta.loading')} noscriptLabel={t('v2.cta.noscript')} />
           </div>
           <p className="mt-6 text-center text-sm text-muted">
             <ShieldCheck className="me-1.5 inline h-4 w-4 text-info" aria-hidden="true" />
-            {t('v2.cta.trust')}{' '}
-            ·{' '}
+            {t('v2.cta.trust')} ·{' '}
             <Link href="/about#trust" className="font-semibold text-primary hover:underline">
               {t('v2.cta.trustLink')}
             </Link>
           </p>
           <p className="mt-3 text-center text-sm text-muted">
             {t('cta.demoPrompt')}{' '}
-            <Link href="/showcase" className="inline-flex items-center gap-1 font-semibold text-primary hover:underline">
+            <Link
+              href="/showcase"
+              className="inline-flex items-center gap-1 font-semibold text-primary hover:underline"
+            >
               {t('cta.demoLink')}
               <Forward className="h-3.5 w-3.5" />
             </Link>

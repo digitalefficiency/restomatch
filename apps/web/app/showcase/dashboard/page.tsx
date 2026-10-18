@@ -18,6 +18,7 @@ import { formatNumber } from '@/lib/i18n/format';
 import { formatIls } from '@/lib/money';
 import { showcase } from '@/lib/i18n/messages/showcase';
 import { mockText } from '../_lib/mockText';
+import { SUPPLIER_PROFILES } from './suppliers/[supplierId]/_mock';
 
 interface Kpi {
   id: 'leak' | 'saved' | 'pending';
@@ -57,27 +58,47 @@ const KPIS: Kpi[] = [
 ];
 
 interface HeatCell {
+  /** Current price vs the supplier's own 60-day average (0.21 = +21%). */
   variance: number;
   series: number[];
-  basePrice: number;
 }
 
-const PRODUCTS = ['עגבניה שרי', 'מלפפון', 'חסה', 'אנטריקוט', 'סלמון', 'חזה עוף', 'לחמניות', 'בצל'];
-const SUPPLIERS = ['ירקני אבי', 'קצביית הכרם', 'דגי קובי', 'מאפיית ברנס'];
+/**
+ * The heatmap reads the SAME price history as the supplier pages: each cell is
+ * a product that supplier actually sells (empty where it doesn't), and its %
+ * is that product's `trendPct` — so Avi's cherry tomatoes show the +21% the
+ * rest of the showcase talks about, and nothing shows an impossible ±100%.
+ */
+const HEAT_SUPPLIER_IDS = ['sup-avi', 'sup-kerem', 'sup-kobi', 'sup-brans'] as const;
+const HEAT_ROWS: { productId: string; supplierId: (typeof HEAT_SUPPLIER_IDS)[number] }[] = [
+  { productId: 'prod-tomato', supplierId: 'sup-avi' },
+  { productId: 'prod-cucumber', supplierId: 'sup-avi' },
+  { productId: 'prod-pepper', supplierId: 'sup-avi' },
+  { productId: 'prod-lettuce', supplierId: 'sup-avi' },
+  { productId: 'prod-entrecote', supplierId: 'sup-kerem' },
+  { productId: 'prod-chicken-breast', supplierId: 'sup-kerem' },
+  { productId: 'prod-salmon', supplierId: 'sup-kobi' },
+  { productId: 'prod-garlic-rolls', supplierId: 'sup-brans' },
+];
 
-const HEATMAP: HeatCell[][] = PRODUCTS.map((_, pIdx) =>
-  SUPPLIERS.map((_, sIdx) => {
-    const seed = (pIdx * 37 + sIdx * 13) % 100;
-    const variance = (seed - 50) / 50;
-    const basePrice = 5 + (seed % 30);
-    const series = Array.from({ length: 12 }, (__, w) => {
-      const trend = (w / 11) * variance * basePrice * 0.4;
-      const noise = Math.sin(w * 1.7 + pIdx) * basePrice * 0.05;
-      return basePrice + trend + noise;
-    });
-    return { variance, series, basePrice };
+function productOf(supplierId: string, productId: string) {
+  const p = SUPPLIER_PROFILES[supplierId]?.topProducts.find((x) => x.productId === productId);
+  if (!p) throw new Error(`showcase heatmap: ${supplierId}/${productId} missing`);
+  return p;
+}
+
+const SUPPLIERS = HEAT_SUPPLIER_IDS.map((id) => SUPPLIER_PROFILES[id]?.metadata.name ?? id);
+const PRODUCTS = HEAT_ROWS.map((r) => productOf(r.supplierId, r.productId).name);
+const HEATMAP: (HeatCell | null)[][] = HEAT_ROWS.map((row) =>
+  HEAT_SUPPLIER_IDS.map((sid) => {
+    if (sid !== row.supplierId) return null;
+    const p = productOf(sid, row.productId);
+    return { variance: p.trendPct / 100, series: p.series };
   }),
 );
+/** ±25% fills the colour scale; real variances sit well inside it. */
+const HEAT_SCALE = 0.25;
+const heat = (variance: number) => Math.max(-1, Math.min(1, variance / HEAT_SCALE));
 
 interface FlowEvent {
   id: string;
@@ -99,15 +120,8 @@ const EVENTS: FlowEvent[] = [
     id: '2',
     time: '09:28',
     title: 'PO #1235 התקבל מלא',
-    detail: 'יוסי אישר 8 פריטים · ₪3,420',
+    detail: 'יוסי אישר 3 פריטים · ₪3,420',
     type: 'approve',
-  },
-  {
-    id: '3',
-    time: '09:14',
-    title: 'חריגת מחיר ממתינה לאישור',
-    detail: 'עגבניה שרי — עלייה 21% מעל ממוצע 60 ימים',
-    type: 'flag',
   },
   {
     id: '4',
@@ -117,10 +131,18 @@ const EVENTS: FlowEvent[] = [
     type: 'sync',
   },
   {
+    // INV-7821 closed at 08:18 with this line sent up for approval.
+    id: '3',
+    time: '08:18',
+    title: 'חריגת מחיר ממתינה לאישור',
+    detail: 'עגבניה שרי — עלייה 21% מעל ממוצע 60 ימים',
+    type: 'flag',
+  },
+  {
     id: '5',
     time: '08:05',
     title: 'PO #1234 בקבלה',
-    detail: 'ירקני אבי — 12 פריטים בתהליך',
+    detail: 'ירקני אבי — 5 פריטים בתהליך',
     type: 'flag',
   },
 ];
@@ -131,6 +153,7 @@ export default function DashboardShowcase() {
 
   useGSAP(
     () => {
+      if (reducedMotion()) return;
       gsap.from('.section-block', {
         y: 30,
         opacity: 0,
@@ -183,6 +206,11 @@ function KpiRow() {
   );
 }
 
+/** Count-ups, entrances and the radar ping are skipped for prefers-reduced-motion. */
+function reducedMotion(): boolean {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
 function KpiCard({ kpi }: { kpi: Kpi }) {
   const t = useT(showcase);
   const locale = useLocale();
@@ -192,6 +220,7 @@ function KpiCard({ kpi }: { kpi: Kpi }) {
   useGSAP(
     () => {
       if (!numberRef.current) return;
+      if (reducedMotion()) return; // the server-rendered text is already the final value
       const obj = { value: 0 };
       gsap.to(obj, {
         value: kpi.value,
@@ -269,7 +298,7 @@ function KpiCard({ kpi }: { kpi: Kpi }) {
       </div>
       <div className="font-mono text-3xl font-extrabold tabular-nums tracking-tight flex items-baseline gap-1">
         <span ref={numberRef} className={tone.number}>
-          0
+          {kpi.money ? formatIls(kpi.value, { locale }) : formatNumber(kpi.value, locale)}
         </span>
         {kpi.suffix ? <span className={`text-2xl ${tone.number} opacity-70`}>{kpi.suffix}</span> : null}
       </div>
@@ -307,17 +336,28 @@ function Heatmap() {
             </div>
             {SUPPLIERS.map((_, sIdx) => {
               const cell = HEATMAP[pIdx]?.[sIdx];
-              if (!cell) return null;
+              if (!cell) {
+                return (
+                  <div
+                    key={`${pIdx}-${sIdx}`}
+                    aria-hidden="true"
+                    className="m-0.5 flex aspect-square items-center justify-center rounded-md text-[10px] text-muted"
+                    style={{ boxShadow: 'inset 0 0 0 1px rgba(42,58,49,0.35)' }}
+                  >
+                    ·
+                  </div>
+                );
+              }
               return (
                 <button
                   key={`${pIdx}-${sIdx}`}
                   type="button"
                   className="relative aspect-square m-0.5 rounded-md transition-all hover:scale-110 hover:z-10 hover:ring-2 hover:ring-primary/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary flex items-center justify-center"
                   style={{
-                    background: cellColor(cell.variance),
+                    background: cellColor(heat(cell.variance)),
                     boxShadow:
-                      cell.variance > 0.5
-                        ? `0 0 18px ${cellColor(cell.variance, 0.5)}`
+                      heat(cell.variance) > 0.5
+                        ? `0 0 18px ${cellColor(heat(cell.variance), 0.5)}`
                         : 'inset 0 0 0 1px rgba(42,58,49,0.6)',
                   }}
                   onMouseEnter={(e) => {
@@ -333,7 +373,7 @@ function Heatmap() {
                 >
                   <span
                     className={`text-[10px] font-bold font-mono tabular-nums ${
-                      Math.abs(cell.variance) > 0.4 ? 'text-on-primary' : 'text-muted'
+                      Math.abs(heat(cell.variance)) > 0.4 ? 'text-on-primary' : 'text-muted'
                     }`}
                   >
                     {cell.variance > 0 ? '+' : ''}
@@ -473,6 +513,7 @@ function LiveFlow() {
 
   useGSAP(
     () => {
+      if (reducedMotion()) return;
       gsap.from('.flow-event', {
         x: -20,
         opacity: 0,

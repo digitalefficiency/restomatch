@@ -11,7 +11,13 @@ const LeadForm = dynamic(() => import('./LeadForm').then((m) => m.LeadForm), { s
  * viewport — or immediately when someone jumps to #lead. Keeps it out of the
  * first-load bundle of `/`.
  */
-export function LazyLeadForm({ loadingLabel }: { loadingLabel: string }) {
+export function LazyLeadForm({
+  loadingLabel,
+  noscriptLabel,
+}: {
+  loadingLabel: string;
+  noscriptLabel: string;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const [show, setShow] = useState(false);
 
@@ -41,12 +47,16 @@ export function LazyLeadForm({ loadingLabel }: { loadingLabel: string }) {
   }, []);
 
   return (
-    <div ref={ref} className="min-h-[26rem]">
+    // Reserve the mounted form's height (taller on phones) so mounting in view — e.g. on /#lead — doesn't shift the page.
+    <div ref={ref} className="min-h-[31rem] sm:min-h-[26rem]">
       {show ? (
         <LeadForm />
       ) : (
-        <p className="py-24 text-center text-sm text-muted" aria-live="polite">
+        <p className="py-24 text-center text-sm text-muted">
           {loadingLabel}
+          <noscript>
+            <span className="mt-2 block">{noscriptLabel}</span>
+          </noscript>
         </p>
       )}
     </div>

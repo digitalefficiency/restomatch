@@ -62,8 +62,11 @@ export function SupplierSelect({ selected, onSelect, onContinue }: Props) {
               ) : null}
               <div className="flex items-start justify-between mb-4">
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-xl bg-primary/12 border border-primary/25 flex items-center justify-center font-bold text-primary">
-                    {s.supplierInitials}
+                  <div
+                    aria-hidden="true"
+                    className="w-12 h-12 rounded-xl bg-primary/12 border border-primary/25 flex items-center justify-center font-bold text-primary"
+                  >
+                    {locale === 'en' && s.supplierNameEn ? initialsOf(s.supplierNameEn) : s.supplierInitials}
                   </div>
                   <div>
                     <div className="font-semibold text-ink text-base">
@@ -152,4 +155,13 @@ export function StepHeader({
       {subtitle ? <p className="text-muted max-w-2xl">{subtitle}</p> : null}
     </div>
   );
+}
+
+/** "Avi's Greengrocer" → "AG" — the avatar follows the name shown beside it. */
+function initialsOf(name: string): string {
+  return name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? '')
+    .join('');
 }

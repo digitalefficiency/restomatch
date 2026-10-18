@@ -8,3 +8,8 @@ import { formatIls } from '@/lib/money';
 export function ilsExact(value: number, locale: Locale): string {
   return formatIls(value, { locale, maximumFractionDigits: Number.isInteger(value) ? 0 : 2 });
 }
+
+/** Israeli VAT for the showcase invoices (18% since 2025-01-01). */
+export const SHOWCASE_VAT_RATE = 0.18;
+/** "18" — for "VAT 18%" labels. */
+export const SHOWCASE_VAT_PCT = Math.round(SHOWCASE_VAT_RATE * 100);

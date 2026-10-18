@@ -19,6 +19,8 @@ import { formatNumber } from '@/lib/i18n/format';
 import { showcase } from '@/lib/i18n/messages/showcase';
 import { formatIls } from '@/lib/money';
 import { mockText } from '../_lib/mockText';
+import { localDate, localTime } from '../_lib/time';
+import { INV_4882_FIRST_SEEN, MOCK_INVOICE_AUDITS, isoDaysAgo } from '../dashboard/invoices/_mock';
 
 type SeverityTier = 'auto' | 'review-manager' | 'review-owner' | 'block' | 'hard-block';
 type ApproverRole = 'auto' | 'clerk' | 'manager' | 'owner' | 'bookkeeper';
@@ -37,13 +39,24 @@ interface Rule {
 }
 
 interface AuditEntry {
-  timestamp: string;
+  timestamp: string; // ISO, relative to today
   actor: string;
   actorRole: ApproverRole;
   decision: 'approved' | 'rejected' | 'escalated' | 'auto';
   amount: number;
   note?: string;
 }
+
+/** Every log entry is "N days ago at HH:MM", so the demo never shows stale dates. */
+function stamp(daysAgo: number, hour: number, minute: number): string {
+  return isoDaysAgo(daysAgo, hour, minute);
+}
+
+const INV_4882 = MOCK_INVOICE_AUDITS.find((r) => r.invoiceNumber === 'INV-4882')!;
+const CHERRY_EXCEPTION_ILS =
+  MOCK_INVOICE_AUDITS.find((r) => r.invoiceNumber === 'INV-7821')!.lines.find(
+    (l) => l.status === 'price_higher',
+  )!.variance;
 
 const RULES: Rule[] = [
   {
@@ -57,15 +70,15 @@ const RULES: Rule[] = [
     matchesThisMonth: 3,
     auditLog: [
       {
-        timestamp: '2026-05-21 09:35:12',
+        timestamp: stamp(0, 9, 35),
         actor: 'אוטומטי',
         actorRole: 'auto',
         decision: 'auto',
-        amount: 3200,
-        note: 'INV-4882 ‎(קצביית הכרם) זוהה כקיים מ-2026-05-12',
+        amount: INV_4882.totalInvoiceIls,
+        note: `INV-4882 ‎(קצביית הכרם) זוהה כקיים מ-${localDate(INV_4882_FIRST_SEEN)}`,
       },
       {
-        timestamp: '2026-05-08 14:22:01',
+        timestamp: stamp(13, 14, 22),
         actor: 'אוטומטי',
         actorRole: 'auto',
         decision: 'auto',
@@ -84,7 +97,7 @@ const RULES: Rule[] = [
     matchesThisMonth: 1,
     auditLog: [
       {
-        timestamp: '2026-05-19 11:42:08',
+        timestamp: stamp(2, 11, 42),
         actor: 'נועה ברק',
         actorRole: 'owner',
         decision: 'approved',
@@ -104,14 +117,14 @@ const RULES: Rule[] = [
     matchesThisMonth: 4,
     auditLog: [
       {
-        timestamp: '2026-05-20 08:15:55',
+        timestamp: stamp(1, 8, 15),
         actor: 'נועה ברק',
         actorRole: 'owner',
         decision: 'rejected',
         amount: 240,
       },
       {
-        timestamp: '2026-05-17 16:08:31',
+        timestamp: stamp(4, 16, 8),
         actor: 'נועה ברק',
         actorRole: 'owner',
         decision: 'approved',
@@ -131,11 +144,12 @@ const RULES: Rule[] = [
     matchesThisMonth: 8,
     auditLog: [
       {
-        timestamp: '2026-05-21 09:14:02',
+        timestamp: stamp(0, 9, 14),
         actor: 'נועה ברק',
         actorRole: 'owner',
         decision: 'rejected',
-        amount: 580,
+        // INV-7821's cherry-tomato line (+21%) — the same ₪ the invoice page shows.
+        amount: CHERRY_EXCEPTION_ILS,
         note: 'דרשנו הסבר מאבי הירקן',
       },
     ],
@@ -151,7 +165,7 @@ const RULES: Rule[] = [
     matchesThisMonth: 23,
     auditLog: [
       {
-        timestamp: '2026-05-21 07:48:19',
+        timestamp: stamp(0, 7, 48),
         actor: 'שיינוס לוי',
         actorRole: 'manager',
         decision: 'approved',
@@ -170,7 +184,7 @@ const RULES: Rule[] = [
     matchesThisMonth: 187,
     auditLog: [
       {
-        timestamp: '2026-05-21 09:28:00',
+        timestamp: stamp(0, 9, 28),
         actor: 'אוטומטי',
         actorRole: 'auto',
         decision: 'auto',
@@ -371,7 +385,7 @@ function AuditEntryRow({ entry }: { entry: AuditEntry }) {
     <div className="grid grid-cols-[140px_1fr_110px_90px] gap-3 items-center text-xs py-2 px-3 rounded-lg bg-surface border border-line">
       <div className="flex items-center gap-1.5 text-muted font-mono tabular-nums">
         <Clock className="w-3 h-3" />
-        {entry.timestamp}
+        {localDate(entry.timestamp)} {localTime(entry.timestamp)}
       </div>
       <div>
         <div className="flex items-center gap-2 text-ink">

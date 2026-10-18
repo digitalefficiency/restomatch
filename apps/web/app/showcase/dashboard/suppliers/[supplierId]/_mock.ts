@@ -4,6 +4,9 @@
  * delivery performance, recent invoices, and an activity feed.
  */
 
+import { synthesiseLines } from '../../_components/scanDataAdapters';
+import { MOCK_INVOICE_AUDITS, type InvoiceAuditRecord } from '../../invoices/_mock';
+
 export interface SupplierMetadata {
   id: string;
   name: string;
@@ -82,6 +85,27 @@ function isoDaysAgo(days: number, hour = 9, minute = 0): string {
   d.setDate(d.getDate() - days);
   d.setHours(hour, minute, 0, 0);
   return d.toISOString();
+}
+
+/** Invoices that also have a full audit record take every figure from it. */
+function auditById(idOrNumber: string): InvoiceAuditRecord {
+  const r = MOCK_INVOICE_AUDITS.find((a) => a.id === idOrNumber || a.invoiceNumber === idOrNumber);
+  if (!r) throw new Error(`showcase: no audit record ${idOrNumber}`);
+  return r;
+}
+
+function fromAudit(id: string): SupplierInvoiceListItem {
+  const r = auditById(id);
+  return {
+    id: r.id,
+    invoiceNumber: r.invoiceNumber,
+    scannedAt: r.scannedAt,
+    totalIls: r.totalInvoiceIls,
+    approvedIls: r.totalApprovedIls,
+    status: r.status,
+    discrepanciesCount: r.discrepanciesCount,
+    savingsCapturedIls: r.savingsCapturedIls,
+  };
 }
 
 function weekly(base: number, vol: number, drift: number, seed: number): number[] {
@@ -165,16 +189,7 @@ export const SUPPLIER_PROFILES: Record<string, SupplierProfile> = {
       },
     ],
     recentInvoices: [
-      {
-        id: 'inv-7821',
-        invoiceNumber: 'INV-7821',
-        scannedAt: isoDaysAgo(0, 8, 12),
-        totalIls: 1284.5,
-        approvedIls: 1191,
-        status: 'major',
-        discrepanciesCount: 3,
-        savingsCapturedIls: 93.5,
-      },
+      fromAudit('inv-7821'),
       {
         id: 'inv-7782',
         invoiceNumber: 'INV-7782',
@@ -223,7 +238,7 @@ export const SUPPLIER_PROFILES: Record<string, SupplierProfile> = {
         type: 'invoice_closed',
         title: 'INV-7821 נסגרה',
         detail: 'יוסי תפס עליית מחיר עגבניות 21% · אישר ידנית',
-        amount: 93.5,
+        amount: auditById('inv-7821').savingsCapturedIls,
       },
       {
         id: 'a2',
@@ -251,7 +266,7 @@ export const SUPPLIER_PROFILES: Record<string, SupplierProfile> = {
         at: isoDaysAgo(4, 7, 58),
         type: 'invoice_closed',
         title: 'INV-7754 נסגרה',
-        detail: '₪64 נחסכו בעקבות התאמת כמות סלמון',
+        detail: 'נחסך בעקבות תיקון כמות פלפל אדום',
         amount: 64,
       },
       {
@@ -317,16 +332,7 @@ export const SUPPLIER_PROFILES: Record<string, SupplierProfile> = {
       },
     ],
     recentInvoices: [
-      {
-        id: 'inv-7822',
-        invoiceNumber: 'INV-4882',
-        scannedAt: isoDaysAgo(0, 9, 35),
-        totalIls: 3420,
-        approvedIls: 0,
-        status: 'blocked',
-        discrepanciesCount: 1,
-        savingsCapturedIls: 3420,
-      },
+      fromAudit('inv-7822'),
       {
         id: 'inv-7800',
         invoiceNumber: 'INV-4860',
@@ -355,7 +361,7 @@ export const SUPPLIER_PROFILES: Record<string, SupplierProfile> = {
         type: 'invoice_blocked',
         title: 'INV-4882 חסומה — חשבונית כפולה',
         detail: 'תשלום חסום אוטומטית · ממתין לבירור',
-        amount: 3420,
+        amount: auditById('inv-7822').totalInvoiceIls,
       },
       {
         id: 'a2',
@@ -438,8 +444,8 @@ export const SUPPLIER_PROFILES: Record<string, SupplierProfile> = {
         at: isoDaysAgo(0, 11, 15),
         type: 'invoice_closed',
         title: 'INV-9012 נסגרה',
-        detail: 'דנה תפסה כמות חסרה בסלמון · ₪156 נחסכו',
-        amount: 156,
+        detail: 'דנה תפסה כמות חסרה בסלמון ומחיר גבוה בדניס',
+        amount: auditById('INV-9012').savingsCapturedIls,
       },
       {
         id: 'a2',
@@ -624,9 +630,8 @@ export const SUPPLIER_PROFILES: Record<string, SupplierProfile> = {
         id: 'a2',
         at: isoDaysAgo(0, 11, 28),
         type: 'invoice_closed',
-        title: 'INV-3344 נסגרה עם 2 חריגות',
-        detail: 'יוסי תיקן 8 בקבוקים יין שלא הגיעו',
-        amount: 154,
+        title: 'INV-3344 נסגרה',
+        detail: 'פריט שלא הוזמן (תוויות מבצע, ללא עלות) · אושר',
       },
       {
         id: 'a3',
@@ -645,6 +650,23 @@ export const SUPPLIER_PROFILES: Record<string, SupplierProfile> = {
     ],
   },
 };
+
+/**
+ * An invoice that has an audit record (matched by number) takes every figure
+ * from it. Header-only invoices render a scan synthesised from the
+ * supplier's products; their list totals are re-derived from those very lines
+ * (ex-VAT, savings kept), so the row and the scan show the same ₪.
+ */
+function withSynthTotals(profile: SupplierProfile): void {
+  profile.recentInvoices = profile.recentInvoices.map((inv) => {
+    const audited = MOCK_INVOICE_AUDITS.find((a) => a.invoiceNumber === inv.invoiceNumber);
+    if (audited) return fromAudit(audited.id);
+    const lines = synthesiseLines(inv.totalIls, profile.topProducts);
+    const totalIls = Math.round(lines.reduce((s, l) => s + l.qty * l.unitPrice, 0) * 100) / 100;
+    return { ...inv, totalIls, approvedIls: Math.round((totalIls - inv.savingsCapturedIls) * 100) / 100 };
+  });
+}
+Object.values(SUPPLIER_PROFILES).forEach(withSynthTotals);
 
 export function getSupplierProfile(id: string): SupplierProfile | null {
   return SUPPLIER_PROFILES[id] ?? null;

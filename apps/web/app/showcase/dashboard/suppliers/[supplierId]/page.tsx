@@ -34,7 +34,8 @@ import { ilsExact } from '../../../_lib/money';
 import { localDayMonth, localTime } from '../../../_lib/time';
 import { mockText } from '../../../_lib/mockText';
 import { InvoiceScanViewer } from '../../_components/InvoiceScanViewer';
-import { fromSupplierInvoiceListItem } from '../../_components/scanDataAdapters';
+import { fromAuditRecord, fromSupplierInvoiceListItem } from '../../_components/scanDataAdapters';
+import { MOCK_INVOICE_AUDITS } from '../../invoices/_mock';
 import {
   getSupplierProfile,
   type ActivityEvent,
@@ -253,9 +254,11 @@ export default function SupplierDetailPage({ params }: PageProps) {
         ? (() => {
             const inv = recentInvoices.find((i) => i.id === scanInvoiceId);
             if (!inv) return null;
+            // Audited invoices render their real lines (same ₪ as the invoices page).
+            const audited = MOCK_INVOICE_AUDITS.find((a) => a.invoiceNumber === inv.invoiceNumber);
             return (
               <InvoiceScanViewer
-                data={fromSupplierInvoiceListItem(inv, profile as SupplierProfile)}
+                data={audited ? fromAuditRecord(audited) : fromSupplierInvoiceListItem(inv, profile as SupplierProfile)}
                 onClose={() => setScanInvoiceId(null)}
               />
             );

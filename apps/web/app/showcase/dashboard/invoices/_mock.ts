@@ -5,6 +5,8 @@
  * ↔ Invoice) plus the action timeline.
  */
 
+import { localDayMonth } from '../../_lib/time';
+
 export type InvoiceAuditStatus = 'clean' | 'minor' | 'major' | 'blocked';
 
 export type LineComparisonStatus =
@@ -25,7 +27,7 @@ export interface LineComparison {
   invoiceQty: number | null;
   invoiceUnitPrice: number | null;
   status: LineComparisonStatus;
-  variance: number; // financial impact in ILS (positive = loss)
+  variance: number; // ILS ex-VAT, derived: billed − approved for this line (positive = loss)
   note?: string; // why this line was flagged or adjusted
 }
 
@@ -40,6 +42,8 @@ export interface AuditTimelineEvent {
 export interface InvoiceAuditRecord {
   id: string;
   invoiceNumber: string;
+  /** The order it was received against — same numbers as the receiver demo and the feed. */
+  poNumber: string;
   supplierId: string;
   supplierName: string;
   supplierInitials: string;
@@ -71,9 +75,65 @@ function isoAt(hour: number, minute = 0): string {
   return d.toISOString();
 }
 
-export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
+/** When INV-4882's number was first filed — the duplicate check points back here. */
+export const INV_4882_FIRST_SEEN = isoDaysAgo(9, 10, 40);
+
+/** `isoAt(h, m)` N days back — every showcase date is relative to today. */
+export function isoDaysAgo(days: number, hour: number, minute = 0): string {
+  const d = new Date(today);
+  d.setDate(d.getDate() - days);
+  d.setHours(hour, minute, 0, 0);
+  return d.toISOString();
+}
+
+type RecordInput = Omit<
+  InvoiceAuditRecord,
+  | 'lines'
+  | 'discrepanciesCount'
+  | 'totalInvoiceIls'
+  | 'totalApprovedIls'
+  | 'savingsCapturedIls'
+  | 'potentialLossIls'
+> & { lines: Omit<LineComparison, 'variance'>[] };
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * Every ₪ on an audit record is DERIVED from its lines (ex-VAT, like supplier
+ * price lists), so the header tiles, the line variances, the PO comparison and
+ * the rendered scan can never disagree:
+ *   billed   = Σ invoiceQty × invoiceUnitPrice
+ *   approved = Σ receivedQty × agreed price (the PO price; an unordered item the
+ *              team accepted counts at its invoiced price)
+ *   variance = billed − approved, per line;  caught = Σ variance
+ * A blocked invoice (e.g. a duplicate) approves nothing: the whole bill is caught.
+ * discrepanciesCount = lines not `matched` (a blocked invoice counts at least 1).
+ */
+function audit(input: RecordInput): InvoiceAuditRecord {
+  const blocked = input.status === 'blocked';
+  const lines: LineComparison[] = input.lines.map((l) => {
+    const billed = (l.invoiceQty ?? 0) * (l.invoiceUnitPrice ?? 0);
+    const approved = (l.receivedQty ?? 0) * (l.poUnitPrice ?? l.invoiceUnitPrice ?? 0);
+    return { ...l, variance: blocked ? 0 : round2(billed - approved) };
+  });
+  const billed = round2(input.lines.reduce((s, l) => s + (l.invoiceQty ?? 0) * (l.invoiceUnitPrice ?? 0), 0));
+  const caught = blocked ? billed : round2(lines.reduce((s, l) => s + l.variance, 0));
+  const flagged = lines.filter((l) => l.status !== 'matched').length;
+  return {
+    ...input,
+    lines,
+    discrepanciesCount: blocked ? Math.max(1, flagged) : flagged,
+    totalInvoiceIls: billed,
+    totalApprovedIls: round2(billed - caught),
+    savingsCapturedIls: caught,
+    potentialLossIls: caught,
+  };
+}
+
+const AUTHORED: RecordInput[] = [
   {
     id: 'inv-7821',
+    poNumber: 'PO-1234',
     invoiceNumber: 'INV-7821',
     supplierId: 'sup-avi',
     rawImageUrl: '/scans/inv-7821',
@@ -84,69 +144,70 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
     approvedAt: isoAt(8, 18),
     approvedBy: 'יוסי כהן',
     status: 'major',
-    totalInvoiceIls: 1284.5,
-    totalApprovedIls: 1191.0,
-    discrepanciesCount: 3,
-    savingsCapturedIls: 93.5,
-    potentialLossIls: 93.5,
     lines: [
       {
         productName: 'עגבניה שרי',
         unit: 'ק״ג',
-        poQty: 10,
+        poQty: 20,
         poUnitPrice: 7,
-        receivedQty: 10,
-        invoiceQty: 12,
+        receivedQty: 20,
+        invoiceQty: 20,
         invoiceUnitPrice: 8.5,
         status: 'price_higher',
-        variance: 30, // (8.5-7) * 10 + (12-10)*7 caught
         note: 'מחיר עלה ב-21% מהממוצע. העובד התעקש על מחיר ההזמנה.',
       },
       {
         productName: 'מלפפון חממה',
         unit: 'ק״ג',
-        poQty: 5,
+        poQty: 15,
         poUnitPrice: 6,
-        receivedQty: 5,
-        invoiceQty: 5,
+        receivedQty: 15,
+        invoiceQty: 15,
         invoiceUnitPrice: 6,
         status: 'matched',
-        variance: 0,
       },
       {
         productName: 'פלפל אדום',
         unit: 'ק״ג',
-        poQty: 3,
+        poQty: 8,
         poUnitPrice: 12,
-        receivedQty: 2.5,
-        invoiceQty: 3,
+        receivedQty: 7.5,
+        invoiceQty: 8,
         invoiceUnitPrice: 12,
         status: 'qty_short',
-        variance: 6, // 0.5 * 12
         note: 'התקבל פחות מההזמנה. חויב על הכמות המלאה.',
       },
       {
         productName: 'חסה אייסברג',
         unit: 'יח׳',
-        poQty: 4,
+        poQty: 12,
         poUnitPrice: 7.5,
-        receivedQty: 4,
-        invoiceQty: 4,
+        receivedQty: 12,
+        invoiceQty: 12,
         invoiceUnitPrice: 7.5,
         status: 'matched',
-        variance: 0,
       },
       {
         productName: 'נענע',
         unit: 'יח׳',
         poQty: null,
         poUnitPrice: null,
-        receivedQty: 2,
-        invoiceQty: 2,
+        receivedQty: 4,
+        invoiceQty: 4,
         invoiceUnitPrice: 4.5,
         status: 'unordered',
-        variance: 9,
         note: 'הספק הוסיף פריט שלא הוזמן. העובד אישר את הקבלה.',
+      },
+      {
+        productName: 'פטרוזיליה',
+        unit: 'יח׳',
+        poQty: 2,
+        poUnitPrice: 3,
+        receivedQty: null,
+        invoiceQty: null,
+        invoiceUnitPrice: null,
+        status: 'missing_from_invoice',
+        note: 'הוזמן ולא סופק — לא חויב.',
       },
     ],
     timeline: [
@@ -167,15 +228,15 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
         at: isoAt(8, 13),
         actor: 'מערכת',
         role: 'system',
-        action: 'זיהתה 3 חריגות',
-        detail: 'מחיר גבוה, כמות חסרה, פריט לא בהזמנה',
+        action: 'זיהתה 4 חריגות',
+        detail: 'מחיר גבוה, כמות חסרה, פריט לא בהזמנה, פריט שלא סופק',
       },
       {
         at: isoAt(8, 16),
         actor: 'יוסי כהן',
         role: 'employee',
         action: 'עדכן כמות פלפל אדום',
-        detail: 'מ-3 ק״ג ל-2.5 ק״ג',
+        detail: 'מ-8 ק״ג ל-7.5 ק״ג',
       },
       {
         at: isoAt(8, 18),
@@ -188,6 +249,7 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
   },
   {
     id: 'inv-7822',
+    poNumber: 'PO-1235',
     invoiceNumber: 'INV-4882',
     supplierId: 'sup-kerem',
     rawImageUrl: '/scans/inv-7822',
@@ -198,44 +260,36 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
     approvedAt: isoAt(9, 35),
     approvedBy: 'מערכת',
     status: 'blocked',
-    totalInvoiceIls: 3420,
-    totalApprovedIls: 0,
-    discrepanciesCount: 1,
-    savingsCapturedIls: 3420,
-    potentialLossIls: 3420,
     lines: [
       {
         productName: 'אנטריקוט',
         unit: 'ק״ג',
-        poQty: 12,
+        poQty: 16,
         poUnitPrice: 145,
-        receivedQty: null,
-        invoiceQty: 12,
+        receivedQty: 16,
+        invoiceQty: 16,
         invoiceUnitPrice: 145,
         status: 'matched',
-        variance: 0,
       },
       {
         productName: 'חזה עוף',
         unit: 'ק״ג',
-        poQty: 20,
+        poQty: 18,
         poUnitPrice: 38,
-        receivedQty: null,
-        invoiceQty: 20,
+        receivedQty: 18,
+        invoiceQty: 18,
         invoiceUnitPrice: 38,
         status: 'matched',
-        variance: 0,
       },
       {
         productName: 'כבד עוף',
         unit: 'ק״ג',
-        poQty: 6,
+        poQty: 13,
         poUnitPrice: 32,
-        receivedQty: null,
-        invoiceQty: 6,
+        receivedQty: 13,
+        invoiceQty: 13,
         invoiceUnitPrice: 32,
         status: 'matched',
-        variance: 0,
       },
     ],
     timeline: [
@@ -250,7 +304,7 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
         actor: 'מערכת',
         role: 'system',
         action: 'חשבונית כפולה זוהתה',
-        detail: 'INV-4882 כבר קיימת מ-12/05',
+        detail: `INV-4882 כבר קיימת מ-${localDayMonth(INV_4882_FIRST_SEEN)}`,
       },
       {
         at: isoAt(9, 35),
@@ -263,6 +317,7 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
   },
   {
     id: 'inv-7823',
+    poNumber: 'PO-1236',
     invoiceNumber: 'INV-2210',
     supplierId: 'sup-brans',
     rawImageUrl: '/scans/inv-7823',
@@ -273,11 +328,6 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
     approvedAt: isoAt(6, 10),
     approvedBy: 'יוסי כהן',
     status: 'clean',
-    totalInvoiceIls: 240,
-    totalApprovedIls: 240,
-    discrepanciesCount: 0,
-    savingsCapturedIls: 0,
-    potentialLossIls: 0,
     lines: [
       {
         productName: 'לחמניות שום',
@@ -288,7 +338,6 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
         invoiceQty: 30,
         invoiceUnitPrice: 4,
         status: 'matched',
-        variance: 0,
       },
       {
         productName: 'לחם פרוס',
@@ -299,7 +348,6 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
         invoiceQty: 6,
         invoiceUnitPrice: 18,
         status: 'matched',
-        variance: 0,
       },
     ],
     timeline: [
@@ -326,6 +374,7 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
   },
   {
     id: 'inv-7824',
+    poNumber: 'PO-1237',
     invoiceNumber: 'INV-9012',
     supplierId: 'sup-kobi',
     rawImageUrl: '/scans/inv-7824',
@@ -336,11 +385,6 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
     approvedAt: isoAt(11, 15),
     approvedBy: 'דנה לוי',
     status: 'major',
-    totalInvoiceIls: 1850,
-    totalApprovedIls: 1694,
-    discrepanciesCount: 2,
-    savingsCapturedIls: 156,
-    potentialLossIls: 195,
     lines: [
       {
         productName: 'סלמון נורווגי',
@@ -351,7 +395,6 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
         invoiceQty: 4,
         invoiceUnitPrice: 195,
         status: 'qty_short',
-        variance: 156,
         note: 'התקבל 3.2 ק״ג בלבד. דנה תפסה — חויב על 4 ק״ג מלאים.',
       },
       {
@@ -363,7 +406,6 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
         invoiceQty: 5,
         invoiceUnitPrice: 92,
         status: 'price_higher',
-        variance: 35,
         note: 'מחיר עלה ב-8.2% מההזמנה. ממתין לבירור עם הספק.',
       },
     ],
@@ -399,6 +441,7 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
   },
   {
     id: 'inv-7825',
+    poNumber: 'PO-1238',
     invoiceNumber: 'INV-3344',
     supplierId: 'sup-shegev',
     rawImageUrl: '/scans/inv-7825',
@@ -409,11 +452,6 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
     approvedAt: isoAt(14, 25),
     approvedBy: 'יוסי כהן',
     status: 'minor',
-    totalInvoiceIls: 4280,
-    totalApprovedIls: 4280,
-    discrepanciesCount: 1,
-    savingsCapturedIls: 0,
-    potentialLossIls: 0,
     lines: [
       {
         productName: 'יין אדום קברנה',
@@ -424,7 +462,6 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
         invoiceQty: 24,
         invoiceUnitPrice: 95,
         status: 'matched',
-        variance: 0,
       },
       {
         productName: 'וודקה גריי גוס',
@@ -435,7 +472,6 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
         invoiceQty: 6,
         invoiceUnitPrice: 320,
         status: 'matched',
-        variance: 0,
       },
       {
         productName: 'תוויות מבצע',
@@ -446,7 +482,6 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
         invoiceQty: 80,
         invoiceUnitPrice: 0,
         status: 'unordered',
-        variance: 0,
         note: 'תוויות שיווק חינם מהספק. נרשם לתיעוד.',
       },
     ],
@@ -473,6 +508,8 @@ export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = [
     ],
   },
 ];
+
+export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = AUTHORED.map(audit);
 
 export function statsForToday(records: InvoiceAuditRecord[]) {
   const totalScanned = records.length;

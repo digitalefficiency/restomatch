@@ -83,13 +83,6 @@ export const en: Shape<typeof he> = {
     eyebrow: 'How it works',
     title: 'Three steps. Zero typing.',
     lead: 'From the delivery to the decision — before any money leaves.',
-    s1Title: 'Snap the invoice',
-    s1Body: 'Whoever receives the delivery photographs the invoice on their phone. No forms, no data entry.',
-    s2Title: 'It checks every line',
-    s2Body: 'RestoMatch reads the invoice and compares it with the order and the goods received — price, quantity, units, VAT and totals.',
-    s3Title: 'Approve or stop — before paying',
-    s3Body: 'Every gap is priced in shekels and routed to the right person. Approve it, reject it with a reason, or ask the supplier for a credit.',
-    step: 'Step {n}',
   },
   features: {
     eyebrow: 'What you get',
@@ -178,7 +171,7 @@ export const en: Shape<typeof he> = {
       s2Title: 'It cross-checks',
       s2Body: 'Order, delivery and invoice — line by line, 12 checks.',
       s3Title: 'The money stays yours',
-      s3Body: 'Every gap is priced in shekels and stopped before you pay — or turned into a credit request.',
+      s3Body: 'Every gap is priced in shekels and sent for approval before you pay. Tiny ones (up to 2%) pass automatically.',
     },
     receiver: {
       eyebrow: 'Receiver in English',
@@ -204,6 +197,11 @@ export const en: Shape<typeof he> = {
       trust: 'Full isolation between restaurants · Two-factor sign-in · Designed for Amendment 13',
       trustLink: 'Security & privacy',
       loading: 'Loading the form…',
+      noscript: 'Please enable JavaScript to send the form.',
+    },
+    video: {
+      pause: 'Pause video',
+      play: 'Play video',
     },
   },
   faq: {
@@ -226,7 +224,7 @@ export const en: Shape<typeof he> = {
   },
   cta: {
     title: "Let's find your leak",
-    lead: "Leave your details and we'll set up a short demo — on real invoices from your restaurant, if you like.",
+    lead: "Leave your details for a free leak check: we'll run a few real invoices from your restaurant and walk you through the result in a short demo.",
     demoPrompt: 'Want a look first?',
     demoLink: 'Open the live demo',
   },
