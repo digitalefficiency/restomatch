@@ -50,6 +50,8 @@ export const ROUTE_ROLES: Record<string, UserRole[]> = {
   '/dashboard/suppliers': ['owner', 'manager'],
   '/dashboard/catalog': ['owner', 'manager'],
   '/dashboard/orders': ['owner', 'manager'],
+  // Food cost per dish (wave 1, flag `recipes`): the chef owns the recipes.
+  '/dashboard/recipes': ['owner', 'manager', 'chef'],
   '/dashboard/exports': ['owner', 'bookkeeper'],
   // Team: owners manage the roster; managers see it read-only and may set a
   // member's app language (e.g. an English-speaking receiver).

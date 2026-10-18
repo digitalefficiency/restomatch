@@ -8,6 +8,7 @@ import { usePathname } from 'next/navigation';
 import {
   BarChart3,
   Boxes,
+  ChefHat,
   FileDown,
   Inbox,
   LayoutDashboard,
@@ -38,6 +39,7 @@ type LinkKey =
   | 'suppliers'
   | 'catalog'
   | 'orders'
+  | 'recipes'
   | 'exports'
   | 'team'
   | 'settings';
@@ -48,7 +50,12 @@ interface NavItem {
   href: string;
   icon: LucideIcon;
   group: GroupKey;
+  /** Wave-1 per-restaurant flag: the link shows only when the layout says it is on. */
+  feature?: 'recipes';
 }
+
+/** Wave-1 features enabled for the active restaurant (from the layout). */
+export type NavFeatures = Partial<Record<NonNullable<NavItem['feature']>, boolean>>;
 
 export const NAV_ITEMS: NavItem[] = [
   { key: 'overview', href: '/dashboard', icon: LayoutDashboard, group: 'operations' },
@@ -58,6 +65,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'suppliers', href: '/dashboard/suppliers', icon: Truck, group: 'purchasing' },
   { key: 'catalog', href: '/dashboard/catalog', icon: Boxes, group: 'purchasing' },
   { key: 'orders', href: '/dashboard/orders', icon: ShoppingCart, group: 'purchasing' },
+  { key: 'recipes', href: '/dashboard/recipes', icon: ChefHat, group: 'purchasing', feature: 'recipes' },
   { key: 'exports', href: '/dashboard/exports', icon: FileDown, group: 'admin' },
   { key: 'team', href: '/dashboard/team', icon: Users, group: 'admin' },
   { key: 'settings', href: '/dashboard/settings', icon: Settings, group: 'admin' },
@@ -72,8 +80,8 @@ function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-function visibleItems(role: UserRole): NavItem[] {
-  return NAV_ITEMS.filter(({ href }) => canSeeRoute(role, href));
+function visibleItems(role: UserRole, features: NavFeatures = {}): NavItem[] {
+  return NAV_ITEMS.filter(({ href, feature }) => canSeeRoute(role, href) && (!feature || features[feature] === true));
 }
 
 const focusRing =
@@ -84,10 +92,10 @@ const focusRing =
  * with hairline separators. Scrolls horizontally instead of wrapping if a
  * narrow laptop can't fit every tab.
  */
-export function DesktopNav({ role }: { role: UserRole }) {
+export function DesktopNav({ role, features }: { role: UserRole; features?: NavFeatures }) {
   const t = useT(nav);
   const pathname = usePathname();
-  const items = visibleItems(role);
+  const items = visibleItems(role, features);
   return (
     <nav aria-label={t('mainLabel')} className="hidden lg:block">
       <ul className="-mb-px flex items-stretch gap-1 overflow-x-auto text-sm [scrollbar-width:none]">
@@ -138,11 +146,13 @@ export function MobileNav({
   logout,
   restaurantName,
   email,
+  features,
 }: {
   role: UserRole;
   logout: () => Promise<void>;
   restaurantName: string;
   email: string;
+  features?: NavFeatures;
 }) {
   const t = useT(nav);
   const pathname = usePathname();
@@ -154,7 +164,7 @@ export function MobileNav({
   useEffect(() => setMounted(true), []);
   const closeRef = useRef<HTMLButtonElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const items = visibleItems(role);
+  const items = visibleItems(role, features);
   const primary = items.slice(0, 4);
 
   // Close on navigation.
