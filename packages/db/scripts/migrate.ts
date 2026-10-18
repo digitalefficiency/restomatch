@@ -1,6 +1,4 @@
-import { drizzle } from 'drizzle-orm/postgres-js';
-import { migrate } from 'drizzle-orm/postgres-js/migrator';
-import postgres from 'postgres';
+import { readJournal, runMigrator } from '../src/migrations';
 
 async function main() {
   const url = process.env.DATABASE_URL;
@@ -8,21 +6,12 @@ async function main() {
     throw new Error('DATABASE_URL is required');
   }
 
-  const sql = postgres(url, { max: 1, prepare: false });
-
-  console.log('[migrate] enabling extensions');
-  await sql.unsafe(`
-    CREATE EXTENSION IF NOT EXISTS vector;
-    CREATE EXTENSION IF NOT EXISTS pg_trgm;
-    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-  `);
-
-  console.log('[migrate] running migrations');
-  const db = drizzle(sql);
-  await migrate(db, { migrationsFolder: './drizzle' });
-
-  console.log('[migrate] done');
-  await sql.end();
+  const latest = readJournal().entries.at(-1)!;
+  console.log(`[migrate] applying pending migrations through ${latest.tag} (one transaction)`);
+  // Routine "already exists, skipping" notices are swallowed; anything else
+  // (e.g. 0032 leaving a CHECK constraint NOT VALID) is surfaced.
+  await runMigrator(url, { onNotice: (m) => console.warn(`[migrate] NOTICE: ${m}`) });
+  console.log('[migrate] done — run `pnpm db:doctor` to verify');
 }
 
 main().catch((err) => {

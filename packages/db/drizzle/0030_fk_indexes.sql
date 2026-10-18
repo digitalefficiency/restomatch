@@ -1,0 +1,65 @@
+-- 0030 — indexes for unindexed foreign keys + the restaurant-scoped hot paths.
+--
+-- Postgres does not index the referencing side of a foreign key. Two costs:
+--   1. every DELETE/UPDATE of a parent row (cascade / set null) seq-scans each
+--      unindexed child table — e.g. re-running a match deletes match_runs, which
+--      seq-scans discrepancies; deleting a PO seq-scans goods_receipts/match_runs.
+--   2. the joins the dashboard runs (discrepancies → invoice_lines/products,
+--      match_runs → invoices) and the leak/KPI SQL in packages/charts, which
+--      filters price_history by restaurant_id (+ observed_at) with NO index that
+--      starts with restaurant_id (price_history_lookup_idx starts with product_id).
+--
+-- Every index is IF NOT EXISTS and plain CREATE INDEX (the migrator runs inside a
+-- transaction, so CONCURRENTLY is not available). At pilot scale (thousands of
+-- rows) each build takes milliseconds; the SHARE lock blocks writes on that table
+-- only for that long. No precondition: an index build cannot fail on existing data.
+--
+-- Deliberately NOT indexed (low-churn audit pointers to users/plans, never
+-- filtered on): *.created_by, *.resolved_by, *.received_by, invited_by/accepted_by,
+-- billing_accounts.owner_user_id, subscriptions.plan_id, dsr_requests.requested_by,
+-- activity_events.actor_id, audit_log.user_id. `pnpm db:doctor` lists them as an
+-- accepted allowlist rather than a warning.
+--
+-- Hand-written (drizzle-kit generate is broken in this repo).
+
+-- Matching graph (cascade/set-null targets + dashboard joins)
+CREATE INDEX IF NOT EXISTS "discrepancies_match_run_idx" ON "discrepancies" USING btree ("match_run_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "discrepancies_invoice_line_idx" ON "discrepancies" USING btree ("invoice_line_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "discrepancies_product_idx" ON "discrepancies" USING btree ("product_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "discrepancies_po_line_idx" ON "discrepancies" USING btree ("po_line_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "discrepancies_gr_line_idx" ON "discrepancies" USING btree ("gr_line_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "match_runs_invoice_idx" ON "match_runs" USING btree ("invoice_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "match_runs_po_idx" ON "match_runs" USING btree ("po_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "match_runs_gr_idx" ON "match_runs" USING btree ("gr_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "goods_receipts_po_idx" ON "goods_receipts" USING btree ("po_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "gr_lines_po_line_idx" ON "gr_lines" USING btree ("po_line_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "gr_lines_product_idx" ON "gr_lines" USING btree ("product_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "po_lines_product_idx" ON "po_lines" USING btree ("product_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "invoice_lines_product_idx" ON "invoice_lines" USING btree ("product_id");--> statement-breakpoint
+
+-- Catalog
+CREATE INDEX IF NOT EXISTS "product_aliases_product_idx" ON "product_aliases" USING btree ("product_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "supplier_catalog_items_product_idx" ON "supplier_catalog_items" USING btree ("product_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "supplier_catalog_items_import_idx" ON "supplier_catalog_items" USING btree ("source_import_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "catalog_imports_supplier_idx" ON "catalog_imports" USING btree ("supplier_id");--> statement-breakpoint
+
+-- Pricing analytics (packages/charts leaks + baselines filter by restaurant_id)
+CREATE INDEX IF NOT EXISTS "price_history_restaurant_observed_idx" ON "price_history" USING btree ("restaurant_id","observed_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "price_history_supplier_idx" ON "price_history" USING btree ("supplier_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "price_history_source_invoice_idx" ON "price_history" USING btree ("source_invoice_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "price_baselines_restaurant_idx" ON "price_baselines" USING btree ("restaurant_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "price_baselines_supplier_idx" ON "price_baselines" USING btree ("supplier_id");--> statement-breakpoint
+
+-- Tenant fan-out (restaurant cascade + per-tenant lists)
+CREATE INDEX IF NOT EXISTS "memberships_restaurant_idx" ON "memberships" USING btree ("restaurant_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "notifications_outbox_restaurant_idx" ON "notifications_outbox" USING btree ("restaurant_id","created_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "audit_log_restaurant_at_idx" ON "audit_log" USING btree ("restaurant_id","at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "approval_rules_restaurant_idx" ON "approval_rules" USING btree ("restaurant_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "email_inboxes_restaurant_idx" ON "email_inboxes" USING btree ("restaurant_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "supplier_integrations_restaurant_idx" ON "supplier_integrations" USING btree ("restaurant_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "supplier_integrations_supplier_idx" ON "supplier_integrations" USING btree ("supplier_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "restaurants_billing_account_idx" ON "restaurants" USING btree ("billing_account_id");--> statement-breakpoint
+
+-- Auth.js identity (user delete cascades + adapter lookups)
+CREATE INDEX IF NOT EXISTS "accounts_user_idx" ON "accounts" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "sessions_user_idx" ON "sessions" USING btree ("user_id");
