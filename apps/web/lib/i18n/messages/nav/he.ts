@@ -18,6 +18,8 @@ export const he = {
     orders: 'הזמנות',
     exports: 'ייצוא',
     team: 'צוות',
+    chain: 'רשת',
+    branches: 'סניפים',
     settings: 'הגדרות',
   },
   groups: {

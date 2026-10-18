@@ -100,10 +100,27 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'onboarding.myMemberships': 'isolation',
   'onboarding.createRestaurant':
     'creates a brand-new tenant; takes no entity ids and reads nothing tenant-scoped',
+  // Chain / branches (S8). Exercised on the RLS-enforced app role in
+  // chain.attack.test.ts: A + B share a billing account, A also manages M and
+  // owns X on another account — A's chain is exactly its owner branches there.
+  'chain.branches':
+    'isolation — chain.attack.test.ts: lists only caller-OWNED branches on the active billing account (not B on the same account, not manager-only M, not X on another account)',
+  'chain.overview':
+    'isolation — chain.attack.test.ts: per-branch withRestaurant (RLS) sums; totals = A + A2 only, B/M/X excluded; forged session restaurantId → FORBIDDEN',
+  'chain.switchTarget':
+    'attack — chain.attack.test.ts: switching to B (no membership) or a random uuid → NOT_FOUND',
+  'chain.renameBranch':
+    'attack — chain.attack.test.ts: renaming B or manager-only M → NOT_FOUND, names unchanged',
+  'chain.addBranch':
+    'attack — chain.attack.test.ts: owner-only, plan limit enforced, copies only the source branch rows, manager / no-billing-account → FORBIDDEN',
   'owner.kpis': 'isolation',
   'owner.leakHero': 'isolation',
   'owner.leakBreakdown': 'isolation',
   'owner.leakReport': 'isolation',
+  'owner.leakSummary': 'isolation',
+  'owner.leakGrouped': 'isolation',
+  'owner.leakTrend': 'isolation',
+  'owner.viewOptions': 'isolation',
   'owner.leaks': 'isolation',
   'owner.suppliers': 'isolation',
   'receiving.todayExpectations': 'isolation',
@@ -424,6 +441,85 @@ describe('list/aggregate isolation (A must not see B)', () => {
     expect(json).not.toContain(B.invoiceId);
     expect(json).not.toContain(B.discrepancyId);
     expect(json).not.toContain(B.supplierName);
+  });
+
+  it('owner.leakSummary (views) aggregates A-scoped invoices only', async () => {
+    const caller = callerFor(A);
+    const { current } = await caller.owner.leakSummary({ view: { period: 'ytd' }, compare: 'off' });
+    expect(current.spendIls).toBe(100); // A's one ₪100 invoice, not B's
+    // A view filtered to B's supplier id sees nothing of B.
+    const foreign = await caller.owner.leakSummary({
+      view: { period: 'ytd', filters: { supplierIds: [B.supplierId] } },
+      compare: 'prev',
+    });
+    expect(foreign.current.spendIls).toBe(0);
+    expect(foreign.current.invoiceCount).toBe(0);
+  });
+
+  it('owner.leakGrouped / leakTrend exclude B rows', async () => {
+    const caller = callerFor(A);
+    const grouped = await caller.owner.leakGrouped({
+      view: { period: 'last_12m' },
+      groupBy: 'supplier',
+      compare: 'yoy',
+    });
+    const json = JSON.stringify(grouped);
+    expect(json).not.toContain(B.supplierId);
+    expect(json).not.toContain(B.supplierName);
+    const trend = await caller.owner.leakTrend({ view: { period: 'last_12m' }, compare: 'off' });
+    expect(trend.points.reduce((s, p) => s + p.spendIls, 0)).toBe(100);
+  });
+
+  it('owner.viewOptions lists only A suppliers', async () => {
+    const opts = await callerFor(A).owner.viewOptions();
+    expect(opts.suppliers.map((s) => s.id)).toContain(A.supplierId);
+    expect(opts.suppliers.map((s) => s.id)).not.toContain(B.supplierId);
+  });
+
+  it('view drill-downs stay finance-only (receiver/chef → FORBIDDEN); summary stays member-level', async () => {
+    for (const role of ['receiver', 'chef'] as const) {
+      await expect(
+        callerWithRole(A, role).owner.leakGrouped({ view: { period: 'this_month' }, groupBy: 'type', compare: 'off' }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      await expect(
+        callerWithRole(A, role).owner.leakTrend({ view: { period: 'this_month' }, compare: 'off' }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      await expect(
+        callerWithRole(A, role).owner.leakSummary({ view: { period: 'this_month' }, compare: 'off' }),
+      ).resolves.toBeDefined();
+      // Filters slice the leak per supplier/category/type → finance detail.
+      await expect(
+        callerWithRole(A, role).owner.leakSummary({
+          view: { period: 'this_month', filters: { supplierIds: [A.supplierId] } },
+          compare: 'off',
+        }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      await expect(callerWithRole(A, role).owner.viewOptions()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    }
+  });
+
+  it('view inputs are validated (custom needs dates, enums are closed, ids are uuids)', async () => {
+    const caller = callerFor(A);
+    await expect(caller.owner.leakSummary({ view: { period: 'custom' }, compare: 'off' })).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+    });
+    await expect(
+      caller.owner.leakSummary({ view: { period: 'this_month', filters: { supplierIds: ["x' OR 1=1"] } }, compare: 'off' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      // @ts-expect-error — not a known discrepancy type
+      caller.owner.leakSummary({ view: { period: 'this_month', filters: { types: ['DROP TABLE'] } }, compare: 'off' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    // Impossible / out-of-range calendar dates never reach Postgres.
+    for (const [from, to] of [
+      ['2026-02-30', '2026-03-05'],
+      ['0000-01-01', '2026-01-01'],
+      ['2000-01-01', '2026-01-01'], // > 3 years
+    ]) {
+      await expect(
+        caller.owner.leakSummary({ view: { period: 'custom', from, to }, compare: 'off' }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    }
   });
 
   it('owner.leakReport aggregates A-scoped data only', async () => {

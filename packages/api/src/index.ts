@@ -19,6 +19,7 @@ import { matchRouter } from './routers/match';
 import { mappingRouter } from './routers/mapping';
 import { productsRouter } from './routers/products';
 import { teamRouter } from './routers/team';
+import { chainRouter } from './routers/chain';
 import { recoveryRouter } from './routers/recovery';
 import { monthlyReportRouter } from './routers/monthlyReport';
 
@@ -41,6 +42,7 @@ export const appRouter = router({
   match: matchRouter,
   mapping: mappingRouter,
   products: productsRouter,
+  chain: chainRouter,
   team: teamRouter,
   dsr: dsrRouter,
   recovery: recoveryRouter,
@@ -194,6 +196,12 @@ export {
   scanIdFromLocalUrl,
   isLocalScanId,
 } from './lib/localScanStorage';
+export {
+  MAX_CHAIN_BRANCHES,
+  type ChainBranch,
+  type ChainBranchesResult,
+  type ChainOverviewResult,
+} from './routers/chain';
 // Wave 1 · S12 — ₪-back tracker + monthly report.
 export { isFeatureOn, assertFeatureOn } from './lib/featureGate';
 export {

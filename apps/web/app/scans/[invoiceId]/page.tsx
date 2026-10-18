@@ -72,18 +72,18 @@ export default async function ScanPage({ params }: PageProps) {
 
 /** Showcase fixtures are imported lazily so they stay out of the prod bundle. */
 async function loadDemoScan(invoiceId: string): Promise<ScanData | null> {
-  const [{ fromAuditRecord, fromSupplierInvoiceListItem }, { MOCK_INVOICE_AUDITS }, { SUPPLIER_PROFILES }] =
+  const [{ fromAuditRecord, fromSupplierInvoiceListItem }, { invoiceAudits }, { supplierProfiles }] =
     await Promise.all([
       import('@/app/showcase/dashboard/_components/scanDataAdapters'),
       import('@/app/showcase/dashboard/invoices/_mock'),
       import('@/app/showcase/dashboard/suppliers/[supplierId]/_mock'),
     ]);
 
-  const auditRecord = MOCK_INVOICE_AUDITS.find((r) => r.id === invoiceId);
+  const auditRecord = invoiceAudits().find((r) => r.id === invoiceId);
   if (auditRecord) {
     return fromAuditRecord(auditRecord);
   }
-  for (const profile of Object.values(SUPPLIER_PROFILES)) {
+  for (const profile of Object.values(supplierProfiles())) {
     const inv = profile.recentInvoices.find((i) => i.id === invoiceId);
     if (inv) {
       return fromSupplierInvoiceListItem(inv, profile);

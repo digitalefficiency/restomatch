@@ -17,6 +17,8 @@ export const en: Shape<typeof he> = {
     orders: 'Orders',
     exports: 'Exports',
     team: 'Team',
+    chain: 'Chain',
+    branches: 'Branches',
     settings: 'Settings',
   },
   groups: {

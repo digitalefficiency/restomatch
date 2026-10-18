@@ -12,6 +12,8 @@ import { approvals as approvalsNs } from '@/lib/i18n/messages/approvals';
 import { Card, SectionHeader } from '@/lib/components';
 import { discrepancyLabel, displayName } from '../../approvals/vocab';
 import { PrintButton } from '../claims/print-button';
+import { views as viewsNs } from '@/lib/i18n/messages/views';
+import { DeltaBadge, ViewToolbar, parseView } from '@/lib/components/views';
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 /** North Star: ≥1.5% of food spend surfaced as leak. */
@@ -36,13 +38,22 @@ function shiftMonth(month: string, delta: number): string {
  * Print-ready monthly leak report (A4). Owner/manager only. `?month=YYYY-MM`,
  * defaulting to the current month. Window.print → "Save as PDF" for a file.
  */
-export default async function LeakReportPage({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
+export default async function LeakReportPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const sp = await searchParams;
   const thisMonth = currentMonth();
-  const month = sp.month && MONTH_RE.test(sp.month) && sp.month <= thisMonth ? sp.month : thisMonth;
+  const monthParam = Array.isArray(sp.month) ? sp.month[0] : sp.month;
+  const month = monthParam && MONTH_RE.test(monthParam) && monthParam <= thisMonth ? monthParam : thisMonth;
+  // `?cmp=prev|yoy` adds ▲/▼ against the previous month or the same month last year.
+  const view = parseView(sp);
+  const compareMonth = view.compare === 'off' ? null : shiftMonth(month, view.compare === 'yoy' ? -12 : -1);
 
   const caller = await createServerCaller();
-  const [t, ta, locale] = await Promise.all([getT(leaksNs), getT(approvalsNs), getLocale()]);
+  const [t, ta, tv, locale] = await Promise.all([getT(leaksNs), getT(approvalsNs), getT(viewsNs), getLocale()]);
+  let previous: Awaited<ReturnType<typeof caller.owner.leakReport>> | null = null;
 
   let report: Awaited<ReturnType<typeof caller.owner.leakReport>>;
   const role = (
@@ -53,7 +64,10 @@ export default async function LeakReportPage({ searchParams }: { searchParams: P
     if (role !== 'owner' && role !== 'manager') {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'owner|manager only' });
     }
-    report = await caller.owner.leakReport({ month });
+    [report, previous] = await Promise.all([
+      caller.owner.leakReport({ month }),
+      compareMonth ? caller.owner.leakReport({ month: compareMonth }) : Promise.resolve(null),
+    ]);
   } catch (err) {
     if (err instanceof TRPCError && err.code === 'FORBIDDEN') {
       return (
@@ -78,6 +92,7 @@ export default async function LeakReportPage({ searchParams }: { searchParams: P
   const monthLabel = formatDate(hero.monthStart, locale, { month: 'long', year: 'numeric' });
   const typeTotal = report.byType.reduce((s, r) => s + r.amountIls, 0);
   const hasLeak = hero.leakIls > 0;
+  const cmpQ = view.compare !== 'off' ? `&cmp=${view.compare}` : '';
   const navLink =
     'inline-flex items-center gap-1 rounded-lg px-2 py-1 text-sm font-semibold text-primary hover:text-ink';
 
@@ -105,12 +120,12 @@ export default async function LeakReportPage({ searchParams }: { searchParams: P
           {t('detective.title')}
         </Link>
         <div className="flex flex-wrap items-center gap-2">
-          <Link href={`/dashboard/leaks/report?month=${shiftMonth(month, -1)}`} className={navLink}>
+          <Link href={`/dashboard/leaks/report?month=${shiftMonth(month, -1)}${cmpQ}`} className={navLink}>
             <ArrowRight className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
             {t('report.prevMonth')}
           </Link>
           {month < thisMonth ? (
-            <Link href={`/dashboard/leaks/report?month=${shiftMonth(month, 1)}`} className={navLink}>
+            <Link href={`/dashboard/leaks/report?month=${shiftMonth(month, 1)}${cmpQ}`} className={navLink}>
               {t('report.nextMonth')}
               <ArrowLeft className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
             </Link>
@@ -118,6 +133,20 @@ export default async function LeakReportPage({ searchParams }: { searchParams: P
           <PrintButton label={t('report.print')} />
         </div>
       </div>
+
+      <ViewToolbar
+        page="report"
+        view={view}
+        compare
+        exportData={{
+          columns: [
+            { key: 'type', label: tv('csv.type') },
+            { key: 'count', label: t('report.colCount') },
+            { key: 'amount', label: t('report.colAmount') },
+          ],
+          rows: report.byType.map((r) => ({ type: discrepancyLabel(ta, r.type), count: r.count, amount: r.amountIls })),
+        }}
+      />
 
       <article
         id="leak-report"
@@ -149,6 +178,12 @@ export default async function LeakReportPage({ searchParams }: { searchParams: P
               </p>
             ) : null}
             <p className="mt-1 text-xs text-subtle">{t('report.target')}</p>
+            {previous && previous.hero.invoiceCount > 0 ? (
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                <DeltaBadge current={hero.leakIls} previous={previous.hero.leakIls} compare={view.compare} showAmount />
+                <DeltaBadge current={hero.spendIls} previous={previous.hero.spendIls} compare={view.compare} neutral />
+              </div>
+            ) : null}
           </div>
           {hero.pendingLinkCount > 0 ? (
             <p className="rounded-xl border border-line bg-surface-2 px-3 py-2 text-sm text-muted">

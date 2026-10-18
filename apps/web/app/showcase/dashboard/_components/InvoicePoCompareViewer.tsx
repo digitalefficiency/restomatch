@@ -32,6 +32,7 @@ import { showcase } from '@/lib/i18n/messages/showcase';
 import { formatIls } from '@/lib/money';
 import { localDate } from '../../_lib/time';
 import { mockText } from '../../_lib/mockText';
+import { SHOWCASE_VAT_RATE } from '../../_lib/money';
 import { InvoicePaper } from './InvoicePaperShared';
 import type { ScanData } from './InvoiceScanViewer';
 
@@ -401,7 +402,7 @@ function PoPaper({
     (s, l) => s + (l.poQty ?? 0) * (l.poUnitPrice ?? 0),
     0,
   );
-  const vat = subtotal * 0.17;
+  const vat = subtotal * SHOWCASE_VAT_RATE;
   const total = subtotal + vat;
 
   return (

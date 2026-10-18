@@ -5,9 +5,10 @@ import { gsap } from 'gsap';
 import { ArrowLeft, Check, Clock, Package } from 'lucide-react';
 import { useRef } from 'react';
 import { useDir, useLocale, useT } from '@/lib/i18n/client';
-import { formatDate, formatNumber } from '@/lib/i18n/format';
+import { formatNumber } from '@/lib/i18n/format';
 import { receiving } from '@/lib/i18n/messages/receiving';
 import { formatIls } from '@/lib/money';
+import { localTime } from '../../_lib/time';
 import { MOCK_SUPPLIERS, type MockSupplierExpectation } from '../_mock';
 
 interface Props {
@@ -62,8 +63,11 @@ export function SupplierSelect({ selected, onSelect, onContinue }: Props) {
               ) : null}
               <div className="flex items-start justify-between mb-4">
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-xl bg-primary/12 border border-primary/25 flex items-center justify-center font-bold text-primary">
-                    {s.supplierInitials}
+                  <div
+                    aria-hidden="true"
+                    className="w-12 h-12 rounded-xl bg-primary/12 border border-primary/25 flex items-center justify-center font-bold text-primary"
+                  >
+                    {locale === 'en' && s.supplierNameEn ? initialsOf(s.supplierNameEn) : s.supplierInitials}
                   </div>
                   <div>
                     <div className="font-semibold text-ink text-base">
@@ -72,10 +76,7 @@ export function SupplierSelect({ selected, onSelect, onContinue }: Props) {
                     <div className="text-xs text-muted flex items-center gap-2 mt-0.5">
                       <Clock className="w-3 h-3" />
                       <span className="font-mono tabular-nums">
-                        {formatDate(s.expectedAt, locale, {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
+                        {localTime(s.expectedAt)}
                       </span>
                       <span className="text-subtle">·</span>
                       <Package className="w-3 h-3" />
@@ -152,4 +153,13 @@ export function StepHeader({
       {subtitle ? <p className="text-muted max-w-2xl">{subtitle}</p> : null}
     </div>
   );
+}
+
+/** "Avi's Greengrocer" → "AG" — the avatar follows the name shown beside it. */
+function initialsOf(name: string): string {
+  return name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? '')
+    .join('');
 }

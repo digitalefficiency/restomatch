@@ -8,6 +8,7 @@ import { admin } from './admin';
 import { approvals } from './approvals';
 import { auth } from './auth';
 import { catalog } from './catalog';
+import { chain } from './chain';
 import { components } from './components';
 import { emails } from './emails';
 import { accounting } from './accounting';
@@ -27,6 +28,7 @@ import { settings } from './settings';
 import { showcase } from './showcase';
 import { suppliers } from './suppliers';
 import { team } from './team';
+import { views } from './views';
 
 export const ALL_NAMESPACES = [
   common,
@@ -34,6 +36,7 @@ export const ALL_NAMESPACES = [
   approvals,
   auth,
   catalog,
+  chain,
   components,
   emails,
   accounting,
@@ -53,6 +56,7 @@ export const ALL_NAMESPACES = [
   showcase,
   suppliers,
   team,
+  views,
 ] as const;
 
-export { common, admin, approvals, auth, catalog, components, emails, accounting, invoices, landing, leaks, marketing, nav, onboarding, orders, overview, products, receiving, recovery, scans, settings, showcase, suppliers, team };
+export { common, admin, approvals, auth, catalog, chain, components, emails, accounting, invoices, landing, leaks, marketing, nav, onboarding, orders, overview, products, receiving, recovery, scans, settings, showcase, suppliers, team, views };
