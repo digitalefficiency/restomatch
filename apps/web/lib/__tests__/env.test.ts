@@ -162,11 +162,34 @@ describe('webEnvWarnings (F5/F6)', () => {
     expect(w).toEqual([expect.stringContaining('open the app only on that host')]);
   });
 
-  it('warns in production when neither AUTH_URL nor APP_URL is set (broken email links)', () => {
-    expect(webEnvWarnings({ NODE_ENV: 'production' } as never)).toEqual([
-      expect.stringContaining('neither AUTH_URL nor APP_URL'),
-    ]);
-    expect(webEnvWarnings({ NODE_ENV: 'production', APP_URL: 'https://app.example.com' } as never)).toEqual([]);
-    expect(webEnvWarnings({ NODE_ENV: 'development' } as never)).toEqual([]);
+  it('treats empty-string values as unset, never a parse error (dev must still boot)', () => {
+    const blanks = { AUTH_SECRET: '', NEXTAUTH_SECRET: '', SUPABASE_URL: '', NEXT_PUBLIC_SUPABASE_URL: '' };
+    expect(() => assertWebEnv({ NODE_ENV: 'development', DATABASE_URL: OWNER, ...blanks } as never)).not.toThrow();
+    expect(webEnvWarnings({ NODE_ENV: 'production', ...blanks } as never)).toEqual([]);
+  });
+});
+
+describe('assertWebEnv — empty secrets + legacy URL name', () => {
+  const prod = {
+    NODE_ENV: 'production',
+    DATABASE_URL: OWNER,
+    DATABASE_URL_APP: APP,
+    RESEND_API_KEY: 'k',
+    EMAIL_FROM: 'no-reply@example.com',
+    AUTH_URL: 'https://app.example.com',
+    AUTH_SECRET: 'test-secret',
+    REDIS_URL: 'redis://localhost:6379',
+    SUPABASE_SERVICE_ROLE_KEY: 'svc',
+    AUTH_ENC_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+  };
+
+  it('an empty AUTH_SECRET counts as missing in production', () => {
+    expect(() => assertWebEnv({ ...prod, AUTH_SECRET: '' } as never)).toThrow(/AUTH_SECRET/);
+  });
+
+  it('accepts the legacy NEXTAUTH_URL in place of AUTH_URL/APP_URL', () => {
+    const { AUTH_URL: _omit, ...rest } = prod;
+    expect(() => assertWebEnv(rest as never)).toThrow(/AUTH_URL or APP_URL/);
+    expect(() => assertWebEnv({ ...rest, NEXTAUTH_URL: 'https://app.example.com' } as never)).not.toThrow();
   });
 });

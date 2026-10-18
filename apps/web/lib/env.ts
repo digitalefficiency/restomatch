@@ -21,11 +21,11 @@ const WebEnvSchema = z.object({
   // owner DATABASE_URL (which BYPASSES RLS) when DATABASE_URL_APP is unset.
   // Rejected in production — there the non-owner app role is mandatory.
   ALLOW_OWNER_DB: z.string().optional(),
-  AUTH_SECRET: z.string().min(1).optional(),
+  AUTH_SECRET: z.string().optional(), // '' = unset (checked below), never a parse error
   // Auth.js v4 name — still honoured by next-auth v5 as a fallback.
-  NEXTAUTH_SECRET: z.string().min(1).optional(),
-  NEXT_PUBLIC_SUPABASE_URL: z.string().min(1).optional(),
-  SUPABASE_URL: z.string().min(1).optional(),
+  NEXTAUTH_SECRET: z.string().optional(), // '' = unset (checked below), never a parse error
+  NEXT_PUBLIC_SUPABASE_URL: z.string().optional(), // '' = unset (checked below), never a parse error
+  SUPABASE_URL: z.string().optional(), // '' = unset (checked below), never a parse error
   AUTH_URL: z.string().url().optional(),
   APP_URL: z.string().url().optional(),
   RESEND_API_KEY: z.string().min(1).optional(),
@@ -58,7 +58,7 @@ export function assertWebEnv(env: NodeJS.ProcessEnv = process.env): WebEnv {
     if (!v.DATABASE_URL_APP) missing.push('DATABASE_URL_APP — RLS app-role connection (RLS is inert without it)');
     if (!v.RESEND_API_KEY) missing.push('RESEND_API_KEY — magic-link login + invites');
     if (!v.EMAIL_FROM) missing.push('EMAIL_FROM — verified sender domain');
-    if (!v.AUTH_URL && !v.APP_URL) missing.push('AUTH_URL or APP_URL');
+    if (!v.AUTH_URL && !v.APP_URL && !env.NEXTAUTH_URL) missing.push('AUTH_URL or APP_URL');
     // Without it the app BOOTS and then every sign-in 500s (Auth.js
     // MissingSecret) — make it a boot failure instead (F4).
     if (!v.AUTH_SECRET && !v.NEXTAUTH_SECRET)
@@ -77,8 +77,6 @@ export function assertWebEnv(env: NodeJS.ProcessEnv = process.env): WebEnv {
     if (missing.length > 0) {
       throw new Error(`[env] missing required production secrets:\n - ${missing.join('\n - ')}`);
     }
-    // A leftover URL from another project passes a presence check but points
-    // storage/signing at the wrong backend (F5) — require the real shape.
     // The owner-DB escape hatch must never be honoured in production: tenant
     // traffic on an RLS-bypassing connection silently defeats tenant isolation.
     if (isTruthyFlag(v.ALLOW_OWNER_DB)) {
@@ -167,13 +165,6 @@ export function webEnvWarnings(env: NodeJS.ProcessEnv = process.env): string[] {
     warnings.push(
       `[env] WARNING: APP_URL origin (${app}) differs from AUTH_URL origin (${authOrigin}). ` +
         'Sign-in callbacks use AUTH_URL — open the app only on that host or login will loop.',
-    );
-  }
-  // Not a hard failure (an existing deploy may rely on the request host), but
-  // without either URL invite/alert emails carry relative, unclickable links.
-  if (env.NODE_ENV === 'production' && !env.AUTH_URL && !env.NEXTAUTH_URL && !env.APP_URL) {
-    warnings.push(
-      '[env] WARNING: neither AUTH_URL nor APP_URL is set — links in invite and alert emails will be broken. Set AUTH_URL (and APP_URL) to the production origin.',
     );
   }
   return warnings;
