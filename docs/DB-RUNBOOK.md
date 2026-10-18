@@ -10,7 +10,7 @@
 > `RLS-PROVISIONING-RUNBOOK.md`.
 
 **Where prod is:** Supabase `cringgshiafwsszyqufo`, schema at **0018**. Pending:
-**0019 → 0032** (table in §11). The web still runs on the owner connection until
+**0019 → 0039** (table in §11; 0033–0038 are unused numbers). The web still runs on the owner connection until
 `DATABASE_URL_APP` is flipped (§8).
 
 **The tools (all in `packages/db`):**
@@ -68,8 +68,8 @@ DATABASE_URL="$DATABASE_URL_DIRECT" pnpm db:doctor
 
 Good output at this stage:
 
-- `migrations › applied: 19/33 … latest applied: 0018_invitations`
-- `migrations › pending: 14 pending: 0019_storage_namespaces, …, 0032_integrity_checks` (WARN — expected)
+- `migrations › applied: 19/34 … latest applied: 0018_invitations`
+- `migrations › pending: 15 pending: 0019_storage_namespaces, …, 0039_invitation_locale` (WARN — expected)
 - `migrations › journal gaps: PASS` and **no** `database ahead of checkout`
 - `preconditions › …` — one line per pending migration. **Every FAIL here means
   `db:migrate` WILL abort** (harmlessly, atomically). Fix them in §3.
@@ -122,7 +122,7 @@ realistic 0018 fixture with every guarded edge case and proves the same sequence
 DATABASE_URL="$DATABASE_URL_DIRECT" pnpm db:migrate
 ```
 
-- Prints `applying pending migrations through 0032_integrity_checks (one transaction)`
+- Prints `applying pending migrations through 0039_invitation_locale (one transaction)`
   then `done`. A `NOTICE: 0032: … left NOT VALID` line is fine (§9).
 - **If it fails:** nothing was applied (single transaction). Run `pnpm db:doctor`, fix
   what it names, retry. No rollback needed.
@@ -185,7 +185,7 @@ cross-tenant data lines you have decided to keep.
 |---|---|---|
 | §3 repairs | rows deleted/detached as printed | restore those rows from `$DUMP` (`pg_restore -t <table> --data-only` into a scratch DB, copy back), or PITR. |
 | §5 migrate failed | **unchanged (0018)** — atomic | nothing; fix and retry. |
-| §5 applied, app misbehaves | schema at 0032 | redeploy the previous Vercel build (schema is backward compatible except the walk-in showcase insert). Schema-level undo per migration is in each file header (0029 restores the global uniques, 0031 `DROP FUNCTION public.set_updated_at() CASCADE`, 0032 `DROP CONSTRAINT`). Last resort: PITR / dump restore (loses writes since §1). |
+| §5 applied, app misbehaves | schema at 0039 | redeploy the previous Vercel build (schema is backward compatible except the walk-in showcase insert). Schema-level undo per migration is in each file header (0029 restores the global uniques, 0031 `DROP FUNCTION public.set_updated_at() CASCADE`, 0032 `DROP CONSTRAINT`). Last resort: PITR / dump restore (loses writes since §1). |
 | §6/§8 RLS role problems | web on `restomatch_app` | **instant:** set `DATABASE_URL_APP` back to the owner URL (or remove it and set `ALLOW_OWNER_DB=1` — not in production) and redeploy. Bucket privacy: `update storage.buckets set public = true where id = 'invoice-scans';` (only if scans must be readable by URL again). |
 
 ## 11. Pending production migrations — risk + precondition
@@ -205,6 +205,7 @@ cross-tenant data lines you have decided to keep.
 | 0030 fk_indexes | 33 indexes on FKs + hot paths | none — index builds, ms at pilot scale | — |
 | 0031 updated_at_triggers | DB maintains `updated_at` on 13 tables | low — triggers only; explicit writes are respected | — |
 | 0032 integrity_checks | 21 CHECKs (VAT 0–1, non-negative qty, confidence 0–1, ISO currency, period format…) | none at apply time (`NOT VALID` + guarded VALIDATE) | violators are listed by the doctor and left NOT VALID |
+| 0039 invitation_locale (S4) | `invitations.preferred_locale` (language an invitee starts in) | none — nullable column, guarded CHECK | — |
 
 ---
 
@@ -219,18 +220,51 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/restomatch_dev pnpm db:
 **Demo logins** (restaurant "כפר הזיתים"): `owner@`, `manager@`, `receiver@`, `bookkeeper@`,
 `chef@kfar-hazeitim.test` — password **`RestoMatch-Demo-2026!`** (override with
 `DEMO_PASSWORD=…` when seeding). All users are email-verified, so password login works;
-magic links still work too. `receiver@` (Somchai K.) has `preferred_locale = 'en'`.
+magic links still work too. `owner@` is also the platform admin (so `/admin` is demo-able);
+`receiver@` (Somchai K.) has `preferred_locale = 'en'`.
 
-**What the demo data shows:** 10 Israeli suppliers and 56 products with Hebrew + English
-names; 8 weeks of deliveries on each supplier's real cadence, all received, invoiced
-and run through the real matching + approvals engines; ≈2 % of month-to-date food
-spend surfaced as leak (entrecôte creeping ₪139 → ₪145 → ₪149, salmon ₪89 → ₪96, a 10 %
-jump on the beer keg and olive oil, short cherry-tomato deliveries billed in full, six
-challahs nobody ordered, the dairy still on 17 % VAT); older items resolved via credit
-notes ("savings captured"), recent ones open in the approvals queue; two consolidated
-invoices (חשבוניות ריכוז) parsed and **pending**, not alarms; **three POs due today**
-(10:00 produce, 12:30 butcher, 15:00 dairy) for a live receiving demo, plus two for the
-coming days. Re-seed the morning of a demo (seconds) so "today" is right.
+**What the demo data shows** (numbers as of a seed on 2026-10-18 — they scale with the date):
+
+| Screen | What you see |
+|---|---|
+| Overview hero | **₪572 leaked this month = 1.9 % of ₪30,802 food spend** (target 1.5 %); ₪296 caught before payment; ₪276 claimed back from suppliers; 9 of 24 matched invoices with a finding; last month 1.0 % — the leak is creeping up |
+| Approvals queue | 5 open items (entrecôte and salmon price creep, beer keg +10.6 %, a short tomato delivery billed in full); older ones resolved via credit notes |
+| Leak detective | entrecôte ₪139 → ₪149, salmon ₪89 → ₪96, draft-beer keg ₪520 → ₪575 |
+| Invoices | 90 matched (ocr'd photos), 2 **consolidated invoices (חשבוניות ריכוז) parsed and pending** — they cover this week's bakery drops and the latest dairy delivery, which have goods receipts but no per-delivery invoice, so spend is not double-counted and nothing alarms |
+| Receiving | **3 POs due today** (10:00 produce, 12:30 butcher, 15:00 dairy) with English line names for `receiver@`; 2 more for the coming days |
+| Catalog | 10 supplier price lists (56 items, מק״ט, list price, English names) as committed imports + learned aliases |
+
+The story behind the numbers: 10 fictional Israeli suppliers, 56 products in Hebrew + English,
+8 weeks of deliveries on each supplier's real cadence, all received, invoiced and run through
+the real matching + approvals + baselines engines. Re-seed the morning of the demo (≈10 s) so
+"today" is right, or the evening before with `DEMO_TODAY=<demo date>`:
+
+```bash
+DEMO_TODAY=2026-10-19 ./scripts/dev-setup.sh
+# or just the data:
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/restomatch_dev DEMO_TODAY=2026-10-19 pnpm --filter @restomatch/db seed
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/restomatch_dev DEMO_TODAY=2026-10-19 pnpm --filter @restomatch/worker exec tsx scripts/seed-demo.ts
+```
+
+`seed-demo` prints the exact hero numbers (it calls the same `computeLeakHero` the dashboard uses).
+
+**Worker online for the demo.** The dashboard shows "the processing engine is offline" whenever
+no worker heartbeat (Redis key `restomatch:worker:heartbeat`, refreshed every 60 s) exists. Start
+the worker next to `next dev` — it needs the dev DB and Redis (both started by `dev-setup.sh`):
+
+```bash
+cd apps/worker && DATABASE_URL=postgres://postgres:postgres@localhost:5432/restomatch_dev \
+  REDIS_URL=redis://localhost:6379 pnpm start
+# → "[worker] started 11 workers" ; the banner disappears on the next page load
+```
+
+Locally it uses the mock notifiers (no real WhatsApp; e-mail goes to `MAGIC_LINK_FILE` without
+`RESEND_API_KEY`). For a demo on the production deployment the worker runs on the owner's Mac via
+`apps/worker/scripts/start-worker.sh` (GO-LIVE §B) with the production env.
+
+**Local Postgres limits.** `dev-setup.sh` raises `max_connections` to 300 (override with
+`PG_MAX_CONNECTIONS`): `next dev` hot reloads plus the test suite exhaust the default 100
+("sorry, too many clients already"). It restarts Postgres once, only when the value is lower.
 
 **The seed refuses any non-local database** (it TRUNCATEs every restaurant and user):
 the host must be localhost/127.0.0.1/::1/`postgres`. For a disposable demo project

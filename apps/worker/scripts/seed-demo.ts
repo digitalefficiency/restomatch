@@ -8,8 +8,9 @@
  * The leak story is scripted, not random (≈2% of food spend, the North Star):
  *   - the butcher quietly crept entrecôte from the agreed ₪139 to ₪145, then ₪149/kg
  *   - the fish supplier bills salmon at ₪92, then ₪96, instead of the agreed ₪89
- *   - the draft-beer keg jumped 10% on the latest delivery; so did olive oil
- *   - twice the produce supplier delivered 3 kg fewer cherry tomatoes but billed in full
+ *   - the draft-beer keg jumped 10% on the latest delivery
+ *   - twice the produce supplier delivered 3 kg fewer cherry tomatoes but billed in full;
+ *     the butcher once short-delivered 2 kg of chicken breast, billed in full
  *   - the bakery slipped six challahs onto an invoice nobody ordered
  *   - the dairy still computes VAT at the old 17%
  *   - one cheaper cucumber delivery (good news, auto-accepted)
@@ -27,7 +28,7 @@ import {
   resolveApprovalThresholds,
   type ApprovalContext,
 } from '@restomatch/api';
-import { computeBaselines } from '@restomatch/charts';
+import { computeBaselines, computeLeakHero } from '@restomatch/charts';
 import {
   activityEvents,
   and,
@@ -101,24 +102,32 @@ function scenarioFor(supplierEn: string, k: number): Scenario {
     case 'HaKerem Butchery':
       // Creep: 139 → 145 → 149. The leaks page flags a latest price above the p90.
       if (k === 1) return { price: { 'Entrecôte (rib-eye)': 149 } };
-      if (k === 2) return { price: { 'Entrecôte (rib-eye)': 145 } };
+      if (k === 2) return { price: { 'Entrecôte (rib-eye)': 145 }, shortBilledInFull: { 'Chicken breast': 2 } };
+      // Last month (resolved): a lamb price slip and a short ground-beef delivery.
+      if (k === 4) return { price: { 'Lamb shoulder': 96 } };
+      if (k === 5) return { shortBilledInFull: { 'Ground beef': 2 } };
       return {};
     case 'Mediterranean Fish Co.':
       if (k === 1) return { price: { 'Salmon fillet': 96 } };
       if (k === 2) return { price: { 'Salmon fillet': 92 } };
+      if (k === 4) return { price: { Calamari: 54 } };
+      if (k === 6) return { shortBilledInFull: { 'Whole sea bream': 1.5 } };
       return {};
     case 'Steinberg Beverages':
-      return k === 1 ? { price: { 'Draft beer keg 30L': 575 } } : {};
-    case 'Fresman Spices & Oils':
-      return k === 1 ? { price: { 'Extra virgin olive oil': 37.5 } } : {};
+      if (k === 1) return { price: { 'Draft beer keg 30L': 575 } };
+      if (k === 3) return { price: { 'Cabernet red wine': 52 } };
+      if (k === 5) return { extra: { nameEn: 'Cola Zero 330ml (case of 24)', qty: 2, price: 62 } };
+      return {};
     case 'Galilee Dairies':
-      return k === 2 ? { invoiceVatRate: 0.17 } : {};
+      if (k === 2) return { invoiceVatRate: 0.17 };
+      if (k === 4) return { price: { Mozzarella: 46 } };
+      return {};
     case 'HaSharon Produce':
-      if (k === 4 || k === 10) return { shortBilledInFull: { 'Cherry tomatoes': 3 } };
+      if (k === 4 || k === 7 || k === 10 || k === 14) return { shortBilledInFull: { 'Cherry tomatoes': 3 } };
       if (k === 6) return { price: { Cucumbers: 5.6 } };
       return {};
     case "Brenner's Bakery":
-      return k === 5 ? { extra: { nameEn: 'Challah', qty: 6, price: 12 } } : {};
+      return k === 5 || k === 12 ? { extra: { nameEn: 'Challah', qty: 6, price: 12 } } : {};
     default:
       return {};
   }
@@ -196,11 +205,12 @@ async function main() {
   const invoiceSeq = new Map<string, number>();
   let made = 0;
   let openCount = 0;
-  let spendMtd = 0;
-  let surfacedMtd = 0;
-  let openMtd = 0;
-  const monthStart = new Date(todayStart);
-  monthStart.setUTCDate(1);
+  // Deliveries billed later on ONE consolidated invoice (חשבונית ריכוז): this
+  // week's bakery drops and the latest dairy delivery get a goods receipt but no
+  // per-delivery invoice — exactly how a ריכוז works, so spend is not doubled.
+  const isConsolidated = (supplierEn: string, k: number) =>
+    (supplierEn === "Brenner's Bakery" && k <= 2) || (supplierEn === 'Galilee Dairies' && k === 1);
+  const consolidatedBuckets = new Map<string, Map<string, { qty: number; price: number }>>();
 
   for (const po of pos) {
     const supplier = supplierById.get(po.supplierId)!;
@@ -236,6 +246,18 @@ async function main() {
         .returning();
       const price = sc.price?.[en] ?? Number(l.unitPriceExpected ?? 0);
       grRows.push({ poLine: l, grLineId: grl!.id, qtyReceived, qtyBilled: ordered, price });
+    }
+
+    if (isConsolidated(supplierEn, k)) {
+      const bucket = consolidatedBuckets.get(supplier.id) ?? new Map<string, { qty: number; price: number }>();
+      for (const g of grRows) {
+        if (!g.poLine.productId) continue;
+        const cur = bucket.get(g.poLine.productId) ?? { qty: 0, price: g.price };
+        cur.qty += g.qtyReceived;
+        bucket.set(g.poLine.productId, cur);
+      }
+      consolidatedBuckets.set(supplier.id, bucket);
+      continue;
     }
 
     // ── invoice (billed for what was ORDERED — that is how short deliveries leak) ──
@@ -360,10 +382,6 @@ async function main() {
         openCount += 1;
         if (d.severity === 'block') invoiceHasOpenBlock = true;
       }
-      if (receivedAt >= monthStart && d.severity !== 'info') {
-        surfacedMtd += Math.abs(d.deltaAmount);
-        if (status === 'open') openMtd += Math.abs(d.deltaAmount);
-      }
       await db.insert(discrepancies).values({
         matchRunId: matchRun!.id,
         restaurantId,
@@ -387,7 +405,6 @@ async function main() {
         createdAt: receivedAt,
       });
     }
-    if (receivedAt >= monthStart) spendMtd += subtotal;
 
     const finalStatus = invoiceHasOpenBlock ? 'disputed' : recent ? 'matched' : 'paid';
     if (finalStatus !== 'matched') {
@@ -424,36 +441,22 @@ async function main() {
   }
 
   // ── consolidated invoices (חשבוניות ריכוז): parsed, PENDING, deliberately calm ──
-  const consolidated: Array<{ supplierEn: string; number: string; items: Array<[string, number]> }> = [
-    { supplierEn: "Brenner's Bakery", number: 'BR-R-2610', items: [['Burger buns', 180], ['Pita bread', 360], ['Sourdough loaf', 30]] },
-    { supplierEn: 'Galilee Dairies', number: 'GD-R-2610', items: [['Milk 3%', 60], ['Heavy cream 38%', 20], ['Eggs L (tray of 30)', 12]] },
-  ];
-  for (const c of consolidated) {
-    const supplier = supplierRows.find((s) => s.nameEn === c.supplierEn);
-    if (!supplier) continue;
-    const lines = c.items
-      .map(([en, qty]) => ({ p: productByEn.get(en), qty }))
-      .filter((x): x is { p: NonNullable<typeof x.p>; qty: number } => Boolean(x.p));
-    const priceOf = async (productId: string) => {
-      const [row] = await db
-        .select({ price: poLines.unitPriceExpected })
-        .from(poLines)
-        .where(eq(poLines.productId, productId))
-        .limit(1);
-      return Number(row?.price ?? 0);
-    };
-    const priced = [];
-    for (const l of lines) priced.push({ ...l, price: await priceOf(l.p.id) });
-    const subtotal = r2(priced.reduce((a, l) => a + Math.round(l.qty * l.price * 100), 0) / 100);
+  let consolidatedCount = 0;
+  for (const [supplierId, bucket] of consolidatedBuckets) {
+    const supplier = supplierById.get(supplierId)!;
+    const prefix = INVOICE_PREFIX[supplier.nameEn ?? ''] ?? 'IN';
+    const items = [...bucket].map(([productId, v]) => ({ p: productById.get(productId)!, ...v }));
+    const subtotal = r2(items.reduce((a, l) => a + Math.round(l.qty * l.price * 100), 0) / 100);
     const vatAmount = r2(subtotal * vatRate);
     const at = new Date(todayStart.getTime() - 16 * 60 * 60 * 1000);
     const [inv] = await db
       .insert(invoices)
       .values({
         restaurantId,
-        supplierId: supplier.id,
-        invoiceNumber: c.number,
+        supplierId,
+        invoiceNumber: `${prefix}-R-${(invoiceSeq.get(supplierId) ?? 24100) + 1}`,
         invoiceDate: at,
+        dueDate: new Date(at.getTime() + 30 * DAY_MS),
         totalExclVat: subtotal.toFixed(2),
         vatAmount: vatAmount.toFixed(2),
         totalInclVat: r2(subtotal + vatAmount).toFixed(2),
@@ -465,7 +468,7 @@ async function main() {
       })
       .returning();
     await db.insert(invoiceLines).values(
-      priced.map((l) => ({
+      items.map((l) => ({
         invoiceId: inv!.id,
         productId: l.p.id,
         rawDescription: `ריכוז תעודות משלוח — ${l.p.canonicalName}`,
@@ -480,24 +483,26 @@ async function main() {
     await db.insert(activityEvents).values({
       restaurantId,
       eventType: 'invoice_received',
-      title: `חשבונית ריכוז ${c.number} התקבלה`,
-      detail: `${supplier.name} · ממתינה להתאמה מול תעודות המשלוח של החודש`,
+      title: `חשבונית ריכוז ${inv!.invoiceNumber} התקבלה`,
+      detail: `${supplier.name} · ממתינה להתאמה מול תעודות המשלוח של השבוע`,
       entityType: 'invoice',
       entityId: inv!.id,
       metadata: { consolidated: true },
       createdAt: at,
     });
+    consolidatedCount += 1;
   }
 
   // Price baselines (the worker's baselines job) so the leaks page has its p50/p90.
   const baselines = await computeBaselines(db, restaurantId, { windowDays: 90 });
 
-  const pct = spendMtd > 0 ? (surfacedMtd / spendMtd) * 100 : 0;
+  // Report exactly what the dashboard hero will show (packages/charts leak-hero).
+  const hero = await computeLeakHero(db, restaurantId);
   console.log(
-    `[seed-demo] matched ${made} invoices · ${openCount} open in the approvals queue · ${consolidated.length} consolidated invoices pending · ${baselines.length} baselines`,
+    `[seed-demo] matched ${made} invoices · ${openCount} open in the approvals queue · ${consolidatedCount} consolidated invoices pending · ${baselines.length} baselines`,
   );
   console.log(
-    `[seed-demo] month-to-date: spend ₪${spendMtd.toFixed(0)} · leak surfaced ₪${surfacedMtd.toFixed(0)} (${pct.toFixed(1)}%) · still open ₪${openMtd.toFixed(0)}`,
+    `[seed-demo] dashboard hero (this month): leak ₪${hero.leakIls.toFixed(0)} of ₪${hero.spendIls.toFixed(0)} spend (${((hero.leakPct ?? 0) * 100).toFixed(1)}%) · caught before payment ₪${hero.caughtBeforePaymentIls.toFixed(0)} · recovered ₪${hero.recoveredIls.toFixed(0)} · ${hero.invoicesWithLeak}/${hero.invoiceCount} invoices with a leak`,
   );
   await db.$client.end();
 }

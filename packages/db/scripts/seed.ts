@@ -20,11 +20,14 @@ import postgres from 'postgres';
 import { createDb } from '../src/client';
 import { PLAN_SEED_LIST } from '../src/plans';
 import {
+  catalogImports,
   memberships,
   plans,
   poLines,
+  productAliases,
   products,
   purchaseOrders,
+  supplierCatalogItems,
   restaurants,
   suppliers,
   userCredentials,
@@ -325,6 +328,69 @@ async function main() {
     .returning();
   const productRows = DEMO_PRODUCTS.map((spec, i) => ({ spec, row: insertedProducts[i]! }));
 
+  // Supplier price lists — written to the same tables the catalog import
+  // (packages/api/src/catalog/commit.ts) commits to: one committed
+  // catalog_imports row per supplier, its supplier_catalog_items linked to the
+  // product, and the supplier-name → product alias the OCR matcher learns from.
+  console.log('[seed] supplier price lists (catalog)');
+  const SKU_PREFIX: Record<string, string> = {
+    veg: 'SH', meat: 'HK', bakery: 'BR', fish: 'MF', dairy: 'GD',
+    spices: 'FS', drinks: 'ST', dry: 'BA', disposables: 'QD', cleaning: 'AC',
+  };
+  const skuByProductId = new Map<string, string>();
+  const priceListDate = zonedInstant(addDays(today, -60), '09:00');
+  let catalogItems = 0;
+  for (const s of SUPPLIERS) {
+    const supplier = supplierByKey.get(s.key)!;
+    const items = productRows.filter((p) => p.spec.supplier === s.key);
+    const [imp] = await db
+      .insert(catalogImports)
+      .values({
+        restaurantId: restaurant.id,
+        supplierId: supplier.id,
+        filename: `מחירון ${s.name} 2026.xlsx`,
+        status: 'committed',
+        rowCount: items.length,
+        createdItems: items.length,
+        updatedItems: 0,
+        columnMapping: { sku: 'מק״ט', name: 'תיאור פריט', unit: 'יחידה', price: 'מחיר ליחידה' },
+        createdBy: insertedUsers[0]!.id,
+        createdAt: priceListDate,
+      })
+      .returning();
+    const rows = items.map((p, j) => {
+      const sku = `${SKU_PREFIX[s.key] ?? 'XX'}-${1001 + j}`;
+      skuByProductId.set(p.row.id, sku);
+      return {
+        restaurantId: restaurant.id,
+        supplierId: supplier.id,
+        productId: p.row.id,
+        supplierSku: sku,
+        supplierNameRaw: p.spec.name,
+        unit: p.spec.unit,
+        packSize: '1',
+        listPrice: p.spec.price.toFixed(2),
+        currency: 'ILS',
+        active: true,
+        sourceImportId: imp!.id,
+        observedAt: priceListDate,
+        createdAt: priceListDate,
+        updatedAt: priceListDate,
+      };
+    });
+    await db.insert(supplierCatalogItems).values(rows);
+    await db.insert(productAliases).values(
+      rows.map((r) => ({
+        productId: r.productId,
+        supplierId: r.supplierId,
+        supplierSku: r.supplierSku,
+        supplierNameRaw: r.supplierNameRaw,
+        confidence: '1.000',
+      })),
+    );
+    catalogItems += rows.length;
+  }
+
   console.log(`[seed] purchase orders (${HISTORY_WEEKS} weeks of history, today = ${today})`);
   const owner = insertedUsers[0]!;
   const manager = insertedUsers[1]!;
@@ -369,6 +435,7 @@ async function main() {
         productId: l.p.row.id,
         rawDescription: l.p.spec.name,
         rawDescriptionEn: l.p.spec.nameEn,
+        supplierSku: skuByProductId.get(l.p.row.id) ?? null,
         qtyOrdered: l.qty.toString(),
         unit: l.p.spec.unit,
         unitPriceExpected: l.price.toFixed(2),
@@ -407,7 +474,7 @@ async function main() {
 
   console.log(`[seed] done — restaurant ${restaurant.id}`);
   console.log(`  users: ${insertedUsers.length} (password: ${process.env.DEMO_PASSWORD ? 'from DEMO_PASSWORD' : DEFAULT_DEMO_PASSWORD})`);
-  console.log(`  suppliers: ${insertedSuppliers.length} · products: ${insertedProducts.length}`);
+  console.log(`  suppliers: ${insertedSuppliers.length} · products: ${insertedProducts.length} · price-list items: ${catalogItems}`);
   console.log(`  POs: ${poCount} (${lineCount} lines) · ${todays.length} expected today (${today})`);
 
   await db.$client.end();

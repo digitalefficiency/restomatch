@@ -131,7 +131,7 @@ describe('migration chain: production-level (0018) database upgrade', () => {
     expect(pre('0027_leak_trust')?.detail).toMatch(/VAT 0\.17/);
     expect(pre('0032_integrity_checks')?.status).toBe('WARN');
     expect(pre('0032_integrity_checks')?.detail).toMatch(/gr_lines_qty_received_nonneg=1/);
-    for (const tag of ['0019_storage_namespaces', '0022_legal_compliance', '0028_english_receiving', '0029_tenant_scoped_uniques', '0030_fk_indexes', '0031_updated_at_triggers']) {
+    for (const tag of ['0019_storage_namespaces', '0022_legal_compliance', '0028_english_receiving', '0029_tenant_scoped_uniques', '0030_fk_indexes', '0031_updated_at_triggers', '0039_invitation_locale']) {
       expect(pre(tag)?.status, tag).toBe('PASS');
     }
     expect(r.ok).toBe(false);

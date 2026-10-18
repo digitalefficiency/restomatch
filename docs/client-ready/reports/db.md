@@ -181,3 +181,14 @@ on the leaks page, and 3 POs due today. Every seeded user logs in with a known p
 | `npx tsc --noEmit -p packages/db` | 0 errors |
 | `pnpm --filter @restomatch/web exec tsc --noEmit -p .` · worker + api `typecheck` | 0 errors |
 | `./scripts/dev-setup.sh` (re-run on a seeded box) | ✔, 17 s |
+
+## Follow-up round (after the merge into `claude/client-ready` @ 68ed10d)
+
+| Ask | Done | Verified |
+|---|---|---|
+| Supplier price lists so the catalog isn't empty | `seed.ts` writes 10 committed `catalog_imports` + 56 `supplier_catalog_items` (מק״ט, unit, list price, linked product → English name) + the learned `product_aliases`, i.e. the same tables `catalog/commit.ts` writes; PO lines carry the מק״ט. (S5's fixtures name other suppliers, so the lists are generated from the seeded catalog.) | `/dashboard/catalog` shows "50+ items" across all 10 suppliers with English names (Playwright) |
+| Re-verify against the merged engine (S3) — full `pnpm test` on the merged code: 12/12 tasks green | `seed-demo` now prints the **dashboard hero's own numbers** (`computeLeakHero`). Consolidated invoices now *replace* the per-delivery invoices of this week's bakery drops + the latest dairy delivery (goods receipts only), so spend is not double-counted. Added resolved September incidents so "last month" isn't ₪0. S4's `is_platform_admin` for owner@ kept. Doctor has a precondition entry for S4's 0039 | hero (browser): **₪572 = 1.9 % of ₪30,802**, caught before payment ₪296, claimed ₪276, 9/24 invoices, 5 in the approvals queue, 62.5 % clean this week; last month 1.0 % of ₪62,872; leaks page: entrecôte, salmon, beer keg |
+| `max_connections` for local runs | `dev-setup.sh` raises it to 300 (`PG_MAX_CONNECTIONS`) via `ALTER SYSTEM` + one restart per mode (service/pg_ctlcluster, brew, docker compose), only when lower | cold start after a container restart: `100 → 300 (restart)`; re-run: step skipped |
+| Worker online for the demo | Runbook "Worker online for the demo": `cd apps/worker && DATABASE_URL=… REDIS_URL=redis://localhost:6379 pnpm start` (prod demo: `start-worker.sh` on the owner's Mac) | worker started → heartbeat key present within 1 s → dashboard banner absent (Playwright) |
+
+DB-RUNBOOK updated: pending range now **0019 → 0039** (S4's 0039 in the §11 table), demo section rewritten with the per-screen numbers, worker + `max_connections` notes.
