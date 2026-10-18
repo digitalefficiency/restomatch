@@ -347,3 +347,29 @@ Tested on a production build (`next start`), with a test-only network preload fa
   - `rotateChannel` → the old token returns 404 immediately.
 - **Service worker:** precaches only the 5 public `/pwa/*` files, never intercepts API/tRPC/scans/POST, navigations are network-first with an offline fallback, `nosniff` + `no-cache`. The manifest is public.
 - **React #418 on bookkeeper/he:** not reproduced. The inbox console was clean in the prod build (I've seen #418 intermittently on other dashboard pages; see the QA round above).
+
+### Cross-QA: S14 receiver languages + AI assistant (PR #42, `claude/wave1-lang-ai` @ a04265a)
+**Verification (2 layers).**
+- Layer 1: #42's suites on a fresh DB: ask + receiver-langs + cross-tenant 136/136; packages/translate 80/80.
+- Layer 2: production build (`next start`), offline mode (no Anthropic key — zero spend), with an adversarial RIVAL owner; 23 runtime checks, he + en.
+- The prompt-injection layer was exercised directly by feeding `groundAnswer` hijacked model outputs, since the live model isn't callable without spend.
+
+| # | Sev | Finding | Fix / owner |
+|---|---|---|---|
+| L1 | low-medium | **The answer sanitizer only strips domains on a fixed TLD list.** If an injected invoice/product name steers the model, `evil.ly/…`, `secure-restomatch.dev`, `restomatch.shop/pay` and `evil[.]com` survive in the answer, and it stays `grounded: true` (verified). A non-Israeli phone number survives too (it's flagged ungrounded only because of its digits). The impact is phishing of the owner; there is no cross-tenant read and no exfiltration channel (no web/write tools). | Generic domain/obfuscation pattern (`[\w-]+(\.|\[\.\])[a-z]{2,24}`), and mark any stripped or suspicious token `grounded: false` (S14) |
+| L2 | low | The burst limit (10/min) is process-local. On Vercel it's per lambda instance, so it's not a real limit; the durable daily cap (60 questions / $3) does hold. | Use the shared Redis limiter (`enforceRateLimit`) (S14) |
+| L3 | medium (release) | Migrations 0052/0053 are dated 2026-06-21, before #44/#46's 0054–0057, so they're subject to the same skip hazard as I1 (#43). | Merge order or renumber (orchestrator) |
+| L4 | low (hygiene) | The PR modifies the committed `dump.rdb` again. | Drop it from the PR (S14) |
+
+**Verified ✅**
+- **Roles:** `ask` works for owner/manager only (bookkeeper/receiver/chef → 403, the page bounces).
+- **Isolation:** the rival owner's answer shows its own zeros, never MAIN's ₪571.5 / 2%. Tools take only month/limit from the model; the tenant comes from the session, under RLS.
+- **Input limits:** question 2–500 chars (501 → 400, 1 → 400); locale he/en only.
+- **Usage:** recorded without the question text.
+- **Injection text in a product name** (`<img onerror>` + "IGNORE ALL PREVIOUS…"): rendered as text, no script execution.
+- **Flags:**
+  - `aiAssistant` off → `FEATURE_DISABLED` 403, `status.enabled=false`, nav link hidden.
+  - `receiverLanguages` off → `setMyLocale`/`localNames` FEATURE_DISABLED, and `?lang=ar` is ignored.
+- **Direction and fonts:** `ar` → `<html lang=ar dir=rtl>` + Noto Sans Arabic; `ru`/`th`/`ti` → ltr + Thai/Ethiopic fonts; he rtl / en ltr. The ask page console is clean in he and en. An unsupported locale → 400.
+- **Translation spend:** cached per restaurant+locale, ≤80 Claude misses per call, plus an hourly budget.
+- **COVERAGE:** `ask.*` and `receiverLangs.*` are listed.
