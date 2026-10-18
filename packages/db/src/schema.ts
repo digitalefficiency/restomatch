@@ -1699,6 +1699,8 @@ export const priceAlerts = pgTable(
     status: varchar('status', { length: 16 }).$type<'open' | 'dismissed'>().notNull().default('open'),
     dismissedBy: uuid('dismissed_by').references(() => users.id, { onDelete: 'set null' }),
     dismissedAt: timestamp('dismissed_at', { withTimezone: true }),
+    /** When owners/managers were emailed (NULL = not yet; the daily sweep sends it). */
+    notifiedAt: timestamp('notified_at', { withTimezone: true }),
     dedupeKey: text('dedupe_key').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },

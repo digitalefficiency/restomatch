@@ -73,7 +73,7 @@ export async function applyContractPrices(
     const contract = contractInForce(byKey.get(`${supplierId}:${l.productId}`) ?? [], day);
     if (!contract) return l;
     const price = contractPriceInUnit(contract, l.unit);
-    if (price === null) return l;
+    if (price === null || !(price > 0)) return l; // a ≤ 0 contract is never a ceiling
     // Rule 3: the contract is a CEILING — a PO priced at or below it stands, so a
     // supplier billing the (lower) PO price never shows a false PRICE_LOWER.
     if (l.unitPriceExpected !== null && l.unitPriceExpected <= price) return l;

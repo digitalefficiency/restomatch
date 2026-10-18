@@ -14,6 +14,8 @@
 --   (product, supplier), deduped by dedupe_key (restaurant:product:supplier:last
 --   observation day) so the daily sweep never re-alerts the same observation.
 --   cheaper_* = the same product's latest price at another supplier, when lower.
+--   notified_at = when owners/managers were emailed; NULL ones are emailed by the
+--   next daily sweep (covers in-app refreshes and a failed notify).
 --   Prices are shekels NUMERIC(12,4) like price_history.unit_price.
 --
 -- RLS: enabled + per-restaurant policies at the end of this file. Additive only;
@@ -54,6 +56,7 @@ CREATE TABLE IF NOT EXISTS "price_alerts" (
   "status" varchar(16) DEFAULT 'open' NOT NULL,
   "dismissed_by" uuid REFERENCES "users"("id") ON DELETE set null,
   "dismissed_at" timestamp with time zone,
+  "notified_at" timestamp with time zone,
   "dedupe_key" text NOT NULL,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL,
   CONSTRAINT "price_alerts_product_same_tenant_fk" FOREIGN KEY ("product_id","restaurant_id")
@@ -89,5 +92,5 @@ DROP POLICY IF EXISTS "price_alerts_tenant" ON "price_alerts";--> statement-brea
 CREATE POLICY "price_alerts_tenant" ON "price_alerts" USING (restaurant_id = app.current_restaurant_id());
 
 insert into drizzle.__drizzle_migrations (hash, created_at)
-select 'f81e95a8f794c5d9af9a98bafe6301ecb7124c1d71daa4e757efa0d1ad28c1c6', 1782020000000
+select '467cb338feff0c4576a36a95631d31d937a4556fc5d304bda4613e99dda19b41', 1782020000000
 where not exists (select 1 from drizzle.__drizzle_migrations where created_at = 1782020000000);

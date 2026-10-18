@@ -18,6 +18,8 @@ import { resolveTolerances } from '@restomatch/matching';
 import { contractInForce, contractPriceInUnit, indexContracts, isOverContract, localDateKey } from './core';
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
+/** Invoice lines scanned per call (newest first); beyond it the caller is told. */
+export const SCAN_LIMIT = 5000;
 
 export interface OverContractLine {
   invoiceLineId: string;
@@ -49,7 +51,7 @@ export interface OverContractLine {
 export async function findOverContractLines(
   db: Database,
   restaurantId: string,
-  filter: { invoiceIds?: string[]; since?: Date; limit?: number } = {},
+  filter: { invoiceIds?: string[]; since?: Date; limit?: number; onTruncated?: () => void } = {},
 ): Promise<OverContractLine[]> {
   const [restaurant] = await db
     .select({ settings: restaurants.settings, timezone: restaurants.timezone })
@@ -92,8 +94,12 @@ export async function findOverContractLines(
     .innerJoin(products, eq(products.id, invoiceLines.productId))
     .where(and(...conds))
     .orderBy(desc(invoices.createdAt))
-    .limit(5000);
+    .limit(SCAN_LIMIT + 1);
   if (lines.length === 0) return [];
+  if (lines.length > SCAN_LIMIT) {
+    lines.length = SCAN_LIMIT;
+    if (filter.onTruncated) filter.onTruncated();
+  }
 
   const supplierIds = [...new Set(lines.map((l) => l.supplierId!))];
   const contracts = await db
@@ -125,7 +131,7 @@ export async function findOverContractLines(
     const contract = contractInForce(list, localDateKey(date, tz));
     if (!contract) continue;
     const contractPrice = contractPriceInUnit(contract, l.unit);
-    if (contractPrice === null) continue;
+    if (contractPrice === null || !(contractPrice > 0)) continue;
     const billed = Number(l.billed);
     if (!isOverContract(billed, contractPrice, tolerances)) continue;
     const qty = Number(l.qty);

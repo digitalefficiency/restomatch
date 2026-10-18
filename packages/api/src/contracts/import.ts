@@ -7,7 +7,7 @@ import {
   supplierContractPrices,
   type Database,
 } from '@restomatch/db';
-import { parseNumeric, type ParsedTable } from '../catalog/parse';
+import type { ParsedTable } from '../catalog/parse';
 
 /** Column mapping for a contract price-list upload. */
 export interface ContractColumnMapping {
@@ -31,15 +31,22 @@ export interface ContractImportRow {
 }
 
 /**
- * Strict price cell: digits with an optional decimal point/comma and thousands
- * separators, optional ₪. Rejects exponents ("1e3"), accounting negatives
- * ("(5)"), and anything else parseNumeric would silently reinterpret.
+ * Strict, locale-safe price cell (₪ and spaces ignored). Accepted:
+ *   "1250" · "12.5" · "1,250" / "12,345,678" (comma = thousands, groups of 3)
+ *   "1,234.50" (comma thousands + dot decimals) · "12,5" / "1,25" (comma decimal, 1–2 digits)
+ * Everything else is rejected rather than reinterpreted: exponents ("1e3"),
+ * accounting negatives ("(5)"), "1.250,5", "1,2345", signs.
  */
 export function parsePriceCell(raw: string | null): number | null {
   if (raw == null) return null;
-  const s = raw.replace(/[₪\s]/g, '');
-  if (!/^\d{1,3}(?:,\d{3})*(?:\.\d+)?$|^\d+(?:[.,]\d+)?$/.test(s)) return null;
-  return parseNumeric(s);
+  const s = raw.replace(/[₪\s\u00a0]/g, '');
+  let norm: string | null = null;
+  if (/^\d+(?:\.\d+)?$/.test(s)) norm = s;
+  else if (/^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(s)) norm = s.replace(/,/g, '');
+  else if (/^\d+,\d{1,2}$/.test(s)) norm = s.replace(',', '.');
+  if (norm === null) return null;
+  const n = Number(norm);
+  return Number.isFinite(n) ? n : null;
 }
 
 /** A unit fits varchar(32) and can't be a spreadsheet formula. */
@@ -206,7 +213,7 @@ export async function commitContractRows(
       result.skipped.push({ row: i + 2, label, reason: 'NO_PRODUCT' });
       continue;
     }
-    if (r.price == null || !(r.price >= 0) || r.price > 10_000_000) {
+    if (r.price == null || !(r.price > 0) || r.price > 10_000_000) {
       result.skipped.push({ row: i + 2, label, reason: 'NO_PRICE' });
       continue;
     }

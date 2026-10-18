@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS "supplier_contract_prices" (
     REFERENCES "suppliers"("id","restaurant_id") ON DELETE cascade,
   CONSTRAINT "supplier_contract_prices_product_same_tenant_fk" FOREIGN KEY ("product_id","restaurant_id")
     REFERENCES "products"("id","restaurant_id") ON DELETE cascade,
-  CONSTRAINT "supplier_contract_prices_price_nonneg" CHECK ("contract_price" >= 0),
+  CONSTRAINT "supplier_contract_prices_price_positive" CHECK ("contract_price" > 0),
   CONSTRAINT "supplier_contract_prices_valid_range" CHECK ("valid_to" IS NULL OR "valid_to" >= "valid_from"),
   CONSTRAINT "supplier_contract_prices_source_check" CHECK ("source" IN ('manual','import'))
 );--> statement-breakpoint
@@ -68,5 +68,5 @@ DROP POLICY IF EXISTS "supplier_contract_prices_tenant" ON "supplier_contract_pr
 CREATE POLICY "supplier_contract_prices_tenant" ON "supplier_contract_prices" USING (restaurant_id = app.current_restaurant_id());
 
 insert into drizzle.__drizzle_migrations (hash, created_at)
-select '2127a1b117448f1ab7fd3de0f24bf70e10abebe112701a5ed919ab8bc4862eff', 1782010000000
+select '7918cab58177a63140cb0d8c6ee784f78e3b56c409632ba297e7b335ef8f39b3', 1782010000000
 where not exists (select 1 from drizzle.__drizzle_migrations where created_at = 1782010000000);

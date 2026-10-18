@@ -25,7 +25,8 @@ import { findOverContractLines } from '../contracts/overContract';
 
 const MAX_ROWS = 5000;
 const DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD');
-const PRICE = z.number().finite().nonnegative().max(10_000_000);
+/** A contract price of ₪0 would turn every billed line into a leak — must be > 0. */
+const PRICE = z.number().finite().positive().max(10_000_000);
 
 const FileInput = z
   .object({
@@ -347,11 +348,14 @@ export const contractsRouter = router({
       await assertFeature(ctx.db, rid, 'contracts');
       const since = new Date(Date.now() - (input?.days ?? 90) * 86_400_000);
       // Total over EVERY line; only the newest 500 are returned for display.
-      const all = await findOverContractLines(ctx.db, rid, { since });
+      let truncated = false;
+      const all = await findOverContractLines(ctx.db, rid, { since, onTruncated: () => (truncated = true) });
       return {
         lines: all.slice(0, 500),
         totalOverAgorot: all.reduce((s, l) => s + l.overAgorot, 0),
         lineCount: all.length,
+        /** True when more invoice lines exist than one scan covers — the total is a lower bound. */
+        truncated,
       };
     }),
 });

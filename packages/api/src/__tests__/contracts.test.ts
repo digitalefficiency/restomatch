@@ -131,18 +131,47 @@ describe('price-trend detection (priceAlerts/detect.ts)', () => {
   const at = (daysAgo: number) => new Date(now.getTime() - daysAgo * 86_400_000);
   const th = { thresholdPct: 0.1, windowDays: 21 };
 
-  it('detects tomatoes +18% over 3 weeks', () => {
+  it('detects tomatoes +18% over 3 weeks (baseline = median of the earlier half)', () => {
     const r = detectSustainedIncrease(
       [
         { observedAt: at(20), unitPrice: '6.20' },
-        { observedAt: at(13), unitPrice: '6.70' },
-        { observedAt: at(6), unitPrice: '7.10' },
-        { observedAt: at(1), unitPrice: '7.316' },
+        { observedAt: at(16), unitPrice: '6.20' },
+        { observedAt: at(8), unitPrice: '7.30' },
+        { observedAt: at(4), unitPrice: '7.32' },
+        { observedAt: at(1), unitPrice: '7.34' },
       ],
       th,
       now,
     );
-    expect(r).toMatchObject({ startPrice: 6.2, endPrice: 7.316, pctChange: 0.18, observations: 4 });
+    expect(r).toMatchObject({ startPrice: 6.2, endPrice: 7.34, pctChange: 0.1806, observations: 5 });
+  });
+
+  it('a one-off promo low does not anchor a fake increase (money cross-QA F3)', () => {
+    expect(
+      detectSustainedIncrease(
+        [
+          { observedAt: at(20), unitPrice: '10.00' },
+          { observedAt: at(17), unitPrice: '9.00' }, // promo / credit line
+          { observedAt: at(14), unitPrice: '10.00' },
+          { observedAt: at(9), unitPrice: '10.20' },
+          { observedAt: at(5), unitPrice: '10.30' },
+          { observedAt: at(1), unitPrice: '10.10' },
+        ],
+        th,
+        now,
+      ),
+    ).toBeNull();
+  });
+
+  it('buckets per day in the restaurant timezone, not UTC (money cross-QA F4)', () => {
+    // 20:30Z and 21:30Z are the same UTC day but two Israeli days (23:30 / 00:30).
+    const pts = [
+      { observedAt: at(20), unitPrice: '10' },
+      { observedAt: new Date('2026-10-15T20:30:00Z'), unitPrice: '13' },
+      { observedAt: new Date('2026-10-15T21:30:00Z'), unitPrice: '13' },
+    ];
+    expect(detectSustainedIncrease(pts, th, now, 'Asia/Jerusalem')).toMatchObject({ observations: 3 });
+    expect(detectSustainedIncrease(pts, th, now, 'UTC')).toBeNull();
   });
 
   it('ignores a one-off spike, too few observations, decreases and out-of-window points', () => {
@@ -383,6 +412,10 @@ describe('contracts router', () => {
     await expect(c.contracts.update({ id, validTo: '2025-01-01' })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     await c.contracts.delete({ id });
     expect(await c.contracts.list()).toEqual([]);
+    // money cross-QA F2: a ₪0 contract is rejected at the API
+    await expect(
+      c.contracts.create({ supplierId: A.supplierId, productId: A.productId, contractPrice: 0, validFrom: '2026-01-01' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 
   it('imports a CSV: resolves by catalog SKU and by name, upserts, reports unknown products', async () => {
@@ -427,17 +460,26 @@ describe('contracts router', () => {
       'עגבניה A,kg,9,31/02/2026\n' +
       'עגבניה A,kg,1e3,1/9/2026\n' +
       'עגבניה A,kg,(5),1/9/2026\n' +
-      'עגבניה A,kg,"1,234.50",2/9/2026\n';
+      'עגבניה A,kg,0,1/9/2026\n' +
+      'עגבניה A,kg,"1,234.50",2/9/2026\n' +
+      'עגבניה A,kg,"1,250",3/9/2026\n' +
+      'עגבניה A,kg,"12,5",4/9/2026\n' +
+      'עגבניה A,kg,"1.250,5",5/9/2026\n';
     const res = await c.contracts.importCommit({
       supplierId: A.supplierId,
       file: { filename: 'c.csv', text },
       mapping: { name: 'name', unit: 'unit', price: 'price', validFrom: 'from' },
       defaultValidFrom: '2026-01-01',
     });
-    expect(res.skipped.map((x) => x.reason)).toEqual(['BAD_UNIT', 'BAD_UNIT', 'NO_DATE', 'NO_PRICE', 'NO_PRICE']);
-    expect(res).toMatchObject({ created: 1, updated: 0 });
+    expect(res.skipped.map((x) => x.reason)).toEqual(['BAD_UNIT', 'BAD_UNIT', 'NO_DATE', 'NO_PRICE', 'NO_PRICE', 'NO_PRICE', 'NO_PRICE']);
+    expect(res).toMatchObject({ created: 3, updated: 0 });
     const rows = await db.select().from(supplierContractPrices).where(eq(supplierContractPrices.restaurantId, A.restaurantId));
-    expect(rows.map((r) => [r.contractPrice, r.validFrom])).toEqual([['1234.5000', '2026-09-02']]);
+    // money cross-QA F1: "1,250" is ₪1,250 (not ₪1.25); "12,5" is ₪12.5; ₪0 is rejected (F2)
+    expect(rows.map((r) => [r.contractPrice, r.validFrom]).sort()).toEqual([
+      ['12.5000', '2026-09-04'],
+      ['1234.5000', '2026-09-02'],
+      ['1250.0000', '2026-09-03'],
+    ]);
   });
 
   it('is FORBIDDEN with appCode FEATURE_DISABLED when the flag is off (and via the kill-switch)', async () => {
@@ -475,8 +517,9 @@ describe('price-alert sweep (in-app rows + outbox email)', () => {
   const now = new Date('2026-10-18T12:00:00Z');
   const at = (d: number) => new Date(now.getTime() - d * 86_400_000);
 
+  const TREND = [6.2, 6.2, 7.3, 7.32, 7.34]; // +18% (later mean 7.32 vs baseline 6.20)
   async function seedTrend(t: Tenant, prices: number[]) {
-    const days = [20, 13, 6, 1];
+    const days = [20, 16, 8, 4, 1];
     for (let i = 0; i < prices.length; i++) {
       await db.insert(priceHistory).values({
         restaurantId: t.restaurantId,
@@ -489,7 +532,7 @@ describe('price-alert sweep (in-app rows + outbox email)', () => {
   }
 
   it('creates one alert with a cheaper-supplier suggestion, emails owners once, dedupes reruns', async () => {
-    await seedTrend(A, [6.2, 6.7, 7.1, 7.316]);
+    await seedTrend(A, TREND);
     const [other] = await db
       .insert(suppliers)
       .values({ restaurantId: A.restaurantId, name: 'ספק זול' })
@@ -505,7 +548,8 @@ describe('price-alert sweep (in-app rows + outbox email)', () => {
     const r1 = await runPriceAlertSweep(db, A.restaurantId, { now, notify: true, appBaseUrl: 'http://x' });
     expect(r1).toEqual({ skipped: false, created: 1, enqueued: 1 });
     const [alert] = await db.select().from(priceAlerts).where(eq(priceAlerts.restaurantId, A.restaurantId));
-    expect(alert).toMatchObject({ pctChange: '0.1800', startPrice: '6.2000', endPrice: '7.3160', cheaperSupplierId: other!.id, cheaperPrice: '6.4000', status: 'open' });
+    expect(alert).toMatchObject({ pctChange: '0.1806', startPrice: '6.2000', endPrice: '7.3400', cheaperSupplierId: other!.id, cheaperPrice: '6.4000', status: 'open' });
+    expect(alert!.notifiedAt).not.toBeNull();
     const mail = await db.select().from(notificationsOutbox).where(eq(notificationsOutbox.restaurantId, A.restaurantId));
     expect(mail).toHaveLength(1);
     expect(mail[0]).toMatchObject({ channel: 'email', status: 'queued', target: 'owner-A@attack.test', relatedEntityType: 'price_alert' });
@@ -529,27 +573,27 @@ describe('price-alert sweep (in-app rows + outbox email)', () => {
   });
 
   it('a dismissed (or still-open) alert is not re-raised by later observations (refuter R4)', async () => {
-    await seedTrend(A, [6.2, 6.7, 7.1, 7.316]);
+    await seedTrend(A, TREND);
     expect((await runPriceAlertSweep(db, A.restaurantId, { now, notify: true })).created).toBe(1);
     // still open: a new observation tomorrow doesn't duplicate it
     const later = new Date(now.getTime() + 86_400_000);
-    await db.insert(priceHistory).values({ restaurantId: A.restaurantId, productId: A.productId, supplierId: A.supplierId, observedAt: later, unitPrice: '7.3160' });
+    await db.insert(priceHistory).values({ restaurantId: A.restaurantId, productId: A.productId, supplierId: A.supplierId, observedAt: later, unitPrice: '7.3400' });
     expect(await runPriceAlertSweep(db, A.restaurantId, { now: later, notify: true })).toMatchObject({ created: 0, enqueued: 0 });
     // dismissed: stays quiet within its window
     const [al] = await db.select().from(priceAlerts).where(eq(priceAlerts.restaurantId, A.restaurantId));
     await caller(A, 'manager').priceAlerts.dismiss({ id: al!.id });
     const later2 = new Date(now.getTime() + 2 * 86_400_000);
-    await db.insert(priceHistory).values({ restaurantId: A.restaurantId, productId: A.productId, supplierId: A.supplierId, observedAt: later2, unitPrice: '7.3160' });
+    await db.insert(priceHistory).values({ restaurantId: A.restaurantId, productId: A.productId, supplierId: A.supplierId, observedAt: later2, unitPrice: '7.3400' });
     expect(await runPriceAlertSweep(db, A.restaurantId, { now: later2, notify: true })).toMatchObject({ created: 0, enqueued: 0 });
     expect(await db.select().from(notificationsOutbox).where(eq(notificationsOutbox.restaurantId, A.restaurantId))).toHaveLength(1);
   });
 
   it('a cheaper offer quoted per gram or per pack is converted or ignored, never compared raw (refuter R3)', async () => {
-    await seedTrend(A, [6.2, 6.7, 7.1, 7.316]);
+    await seedTrend(A, TREND);
     const [g] = await db.insert(suppliers).values({ restaurantId: A.restaurantId, name: 'ספק גרם' }).returning();
     const [pk] = await db.insert(suppliers).values({ restaurantId: A.restaurantId, name: 'ספק ארגז' }).returning();
     await db.insert(supplierCatalogItems).values([
-      // ₪0.0090/g = ₪9/kg → NOT cheaper than ₪7.316/kg
+      // ₪0.0090/g = ₪9/kg → NOT cheaper than ₪7.34/kg
       { restaurantId: A.restaurantId, supplierId: g!.id, supplierNameRaw: 'g', productId: A.productId, unit: 'g', listPrice: '0.0090' },
       // ₪5 per pack of 10 → not comparable → ignored
       { restaurantId: A.restaurantId, supplierId: pk!.id, supplierNameRaw: 'pk', productId: A.productId, unit: 'ק״ג', packSize: '10', listPrice: '5.0000' },
@@ -561,8 +605,19 @@ describe('price-alert sweep (in-app rows + outbox email)', () => {
     await db.delete(suppliers).where(inArray(suppliers.id, [g!.id, pk!.id]));
   });
 
+  it('an alert created by the in-app refresh is emailed by the next daily sweep (money cross-QA F5)', async () => {
+    await seedTrend(A, TREND);
+    expect((await caller(A, 'manager').priceAlerts.refresh()).created).toBe(1);
+    let [al] = await db.select().from(priceAlerts).where(eq(priceAlerts.restaurantId, A.restaurantId));
+    expect(al!.notifiedAt).toBeNull();
+    expect(await runPriceAlertSweep(db, A.restaurantId, { now: new Date(), notify: true })).toMatchObject({ created: 0, enqueued: 1 });
+    [al] = await db.select().from(priceAlerts).where(eq(priceAlerts.restaurantId, A.restaurantId));
+    expect(al!.notifiedAt).not.toBeNull();
+    expect(await runPriceAlertSweep(db, A.restaurantId, { now: new Date(), notify: true })).toMatchObject({ enqueued: 0 });
+  });
+
   it('respects a per-supplier threshold and the feature flag', async () => {
-    await seedTrend(A, [6.2, 6.7, 7.1, 7.316]); // +18%
+    await seedTrend(A, TREND); // +18%
     await caller(A, 'manager').priceAlerts.setThreshold({
       supplierId: A.supplierId,
       category: null,
@@ -591,7 +646,7 @@ describe('price-alert sweep (in-app rows + outbox email)', () => {
   });
 
   it('the manual refresh is tenant-scoped (B’s history never creates A’s alerts)', async () => {
-    await seedTrend(B, [6.2, 6.7, 7.1, 7.316]);
+    await seedTrend(B, TREND);
     const res = await caller(A, 'manager').priceAlerts.refresh();
     expect(res.created).toBe(0);
     expect(await db.select().from(priceAlerts)).toEqual([]);

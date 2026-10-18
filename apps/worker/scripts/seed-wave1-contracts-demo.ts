@@ -12,7 +12,7 @@
  *     contract (entrecôte ₪149 vs ₪139, salmon ₪96 vs ₪89) light up as
  *     "over contract" (asserted ≥ 2).
  *  2. A price trend: product "עגבניות" (tomatoes) at HaSharon Produce rising
- *     ₪6.20 → ₪7.32 over the last 3 weeks (+18%), and a cheaper offer for the
+ *     from ₪6.20 to ₪7.30–7.34 over the last 3 weeks (+18%), and a cheaper offer for the
  *     same product (₪6.40) at a new supplier "חקלאי העמק"; then runs the
  *     price-alert sweep (in-app only; pass --notify to also queue outbox emails).
  *  3. Prints the leak total before/after and FAILS if it moved.
@@ -55,9 +55,10 @@ const TOMATO = { name: 'עגבניות', nameEn: 'Tomatoes', unit: 'ק״ג' };
 // days ago → price: +18% over 3 weeks, staying up.
 const TREND: Array<[number, string]> = [
   [20, '6.2000'],
-  [13, '6.7000'],
-  [6, '7.1000'],
-  [1, '7.3160'],
+  [16, '6.2000'],
+  [8, '7.3000'],
+  [4, '7.3200'],
+  [1, '7.3400'],
 ];
 
 async function leakTotalAgorot(restaurantId: string): Promise<number> {

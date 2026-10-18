@@ -5,6 +5,7 @@ import {
   gt,
   inArray,
   isNotNull,
+  isNull,
   priceAlertThresholds,
   priceAlerts,
   priceHistory,
@@ -145,7 +146,7 @@ export async function runPriceAlertSweep(
   for (const s of series.values()) {
     const th = resolveThreshold(rules, s.supplierId, s.category);
     if (!th.enabled) continue;
-    const trend = detectSustainedIncrease(s.points, th, now);
+    const trend = detectSustainedIncrease(s.points, th, now, tz);
     if (!trend) continue;
     detected.push({
       restaurantId,
@@ -155,14 +156,20 @@ export async function runPriceAlertSweep(
       thresholdPct: th.thresholdPct.toFixed(4),
       startPrice: trend.startPrice.toFixed(4),
       endPrice: trend.endPrice.toFixed(4),
-      pctChange: trend.pctChange.toFixed(4),
+      // NUMERIC(8,4): clamp absurd ratios instead of failing the whole sweep.
+      pctChange: Math.min(trend.pctChange, 9999).toFixed(4),
       startAt: trend.startAt,
       endAt: trend.endAt,
       observations: trend.observations,
       dedupeKey: `${s.productId}:${s.supplierId}:${localDateKey(trend.endAt, tz)}`,
     });
   }
-  if (detected.length === 0) return { skipped: false, created: 0, enqueued: 0 };
+  const pendingOnly = async (): Promise<SweepResult> => ({
+    skipped: false,
+    created: 0,
+    enqueued: opts.notify ? await notifyPending(db, restaurantId, now, opts.appBaseUrl) : 0,
+  });
+  if (detected.length === 0) return pendingOnly();
 
   // Don't re-alert a trend the owner already sees or dismissed: skip a
   // (product, supplier) with an OPEN alert, or one DISMISSED within its window.
@@ -189,7 +196,7 @@ export async function runPriceAlertSweep(
           (e.dismissedAt != null && now.getTime() - e.dismissedAt.getTime() < d.windowDays * DAY_MS)),
     );
   const fresh = detected.filter((d) => !suppressed(d));
-  if (fresh.length === 0) return { skipped: false, created: 0, enqueued: 0 };
+  if (fresh.length === 0) return pendingOnly();
 
   // Competing offers: other suppliers' latest observed price, plus active
   // catalog list prices for the same product.
@@ -235,22 +242,32 @@ export async function runPriceAlertSweep(
     .onConflictDoNothing({ target: [priceAlerts.restaurantId, priceAlerts.dedupeKey] })
     .returning({ id: priceAlerts.id, productId: priceAlerts.productId, supplierId: priceAlerts.supplierId });
 
-  let enqueued = 0;
-  if (opts.notify && inserted.length > 0) {
-    enqueued = await notifyNewAlerts(db, restaurantId, inserted.map((r) => r.id), opts.appBaseUrl);
-  }
+  // Email every OPEN alert not yet notified — this run's and any created by an
+  // in-app refresh or a previous run whose notify failed (notified_at NULL).
+  const enqueued = opts.notify ? await notifyPending(db, restaurantId, now, opts.appBaseUrl) : 0;
   return { skipped: false, created: inserted.length, enqueued };
 }
 
-async function notifyNewAlerts(
+async function notifyPending(
   db: Database,
   restaurantId: string,
-  alertIds: string[],
+  now: Date,
   appBaseUrl?: string,
 ): Promise<number> {
+  const pending = await db
+    .select({ id: priceAlerts.id })
+    .from(priceAlerts)
+    .where(
+      and(
+        eq(priceAlerts.restaurantId, restaurantId),
+        eq(priceAlerts.status, 'open'),
+        isNull(priceAlerts.notifiedAt),
+      ),
+    );
+  if (pending.length === 0) return 0;
   const recipients = await recipientsForRestaurant(db, restaurantId);
   if (recipients.length === 0) return 0;
-  const alerts = await loadAlertDetails(db, restaurantId, alertIds);
+  const alerts = await loadAlertDetails(db, restaurantId, pending.map((p) => p.id));
   let enqueued = 0;
   for (const a of alerts) {
     const email = priceAlertEmail({
@@ -278,6 +295,8 @@ async function notifyNewAlerts(
       });
       if (!deduped) enqueued += 1;
     }
+    // Marked only after every recipient is queued (the outbox dedupes a retry).
+    await db.update(priceAlerts).set({ notifiedAt: now }).where(eq(priceAlerts.id, a.id));
   }
   return enqueued;
 }

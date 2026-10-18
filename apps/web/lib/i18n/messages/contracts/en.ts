@@ -145,6 +145,7 @@ export const en: Shape<typeof he> = {
     title: 'Over contract — last 90 days',
     subtitle: 'Invoice lines billed above the contract price in force on the invoice date.',
     total: 'Total billed over contract',
+    truncated: 'Newest lines only — the real total is at least this amount',
     lines: '{count} lines',
     caption: 'Lines billed over contract',
     colInvoice: 'Invoice',

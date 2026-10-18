@@ -31,12 +31,19 @@ export function startPriceAlertsWorker() {
 
     let created = 0;
     let enqueued = 0;
+    let failed = 0;
     for (const r of rows) {
-      const res = await runPriceAlertSweep(db, r.id, { now, notify: true, appBaseUrl: appBaseUrl() });
-      created += res.created;
-      enqueued += res.enqueued;
+      // One tenant's bad data must not abort the sweep for everyone else.
+      try {
+        const res = await runPriceAlertSweep(db, r.id, { now, notify: true, appBaseUrl: appBaseUrl() });
+        created += res.created;
+        enqueued += res.enqueued;
+      } catch (err) {
+        failed += 1;
+        console.error(`[price-alerts] restaurant=${r.id} failed`, err);
+      }
     }
-    console.log(`[price-alerts] restaurants=${rows.length} created=${created} enqueued=${enqueued}`);
-    return { created, enqueued };
+    console.log(`[price-alerts] restaurants=${rows.length} created=${created} enqueued=${enqueued} failed=${failed}`);
+    return { created, enqueued, failed };
   });
 }

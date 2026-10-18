@@ -46,17 +46,21 @@ demo tenant has `features.all = true`; `FEATURES_OFF=contracts,priceAlerts` kill
 - **Tables** (0047): `price_alert_thresholds` (scope supplier and/or category, `threshold_pct` 0–5, `window_days`
   7–120, one rule per scope incl. NULL scopes via an expression unique index) and `price_alerts` (start/end price,
   pct, window, observations, cheaper supplier + price, open/dismissed, dedupe key per last-observation day).
-- **Detection** (`priceAlerts/detect.ts`, pure): observations collapsed to one per day (two lines on one invoice are
-  one point); ≥ 3 days in the window, latest ≥ first × (1+threshold), the later half all ≥ first × (1+threshold/2)
-  (a one-off spike is not "sustained"), and the latest point in the newer half of the window (no stale alerts). A
-  (product, supplier) with an open alert, or one dismissed within its window, is not re-alerted (no repeat emails). Threshold
+- **Detection** (`priceAlerts/detect.ts`, pure): observations collapsed to one per **restaurant-local** day (two
+  lines on one invoice are one point); ≥ 3 days in the window; **baseline = median of the earlier half** (a one-off
+  promo/credit low can't anchor a fake rise); the later half's **mean ≥ baseline × (1+threshold)**, no later point
+  below baseline × (1+threshold/2) (a one-off spike is not "sustained"); latest point in the newer half of the window
+  (no stale alerts). Reported % = later mean / baseline − 1. A (product, supplier) with an open alert, or one
+  dismissed within its window, is not re-alerted. Threshold
   resolution: supplier+category > supplier > category > restaurant default > built-in (10% / 21 days).
 - **Cheaper supplier**: the same `product_id`'s latest observed price at another supplier (≤ 90 days) or an active
   catalog list price converted to the product's unit (pack prices and unconvertible units are ignored), when
   strictly lower.
-- **Delivery**: `runPriceAlertSweep` writes the in-app rows; with `notify` it enqueues one email per owner/manager
-  through `enqueueNotification` (dedupe `price-alert:<id>:<email>`). New worker job `price-alerts`, scheduled daily
-  07:00 IL. Nothing is sent locally (outbox only; dispatch is the existing worker + provider config).
+- **Delivery**: `runPriceAlertSweep` writes the in-app rows; with `notify` it emails **every open alert whose
+  `notified_at` is NULL** (this run's, ones created by the in-app refresh, or a previous failed notify) — one email per
+  owner/manager via `enqueueNotification` (dedupe `price-alert:<id>:<email>`), then stamps `notified_at`. New worker
+  job `price-alerts`, daily 07:00 IL, each restaurant in its own try/catch (one tenant can't abort the sweep).
+  Nothing is sent locally (outbox only).
 - **tRPC** `priceAlerts.*`: `list, dismiss, refresh, thresholds, setThreshold, deleteThreshold, openCount`.
 
 ### 3. UI (`apps/web`, namespace `contracts` he/en)
@@ -84,8 +88,22 @@ demo tenant has `features.all = true`; `FEATURES_OFF=contracts,priceAlerts` kill
 - Leak total before/after: **₪1,859.62 = ₪1,859.62** (the script aborts if it moves). Wired into
   `scripts/dev-setup.sh` (non-fatal).
 
+## Money cross-QA (orchestrator) — all fixed, with tests
+| # | Finding | Fix | Test |
+|---|---|---|---|
+| F1 HIGH | `"1,250"` parsed as ₪1.25 (import + form) → fake block | one locale-safe parser: `1,250`→1250, `1,234.50`→1234.5, `12,5`→12.5, ambiguous (`1.250,5`, `1,2345`, `1e3`) rejected | `contracts.test.ts` import test; `contracts-logic.test.ts` |
+| F2 HIGH | ₪0 contract → whole line a blocking leak | zod `.positive()`, form/import reject 0, `applyContractPrices`/badge skip ≤ 0, 0046 CHECK `> 0` (unreleased → amended) | router test, import test, `migration-0046.test.ts` |
+| F3 MED | one promo low anchored a fake "increase" | median-of-earlier-half baseline + later-half mean | detect test "one-off promo low" |
+| F4 | per-day buckets in UTC | restaurant-local day (`tz` passed by the sweep) | detect test "timezone" |
+| F5 | refresh-created / failed-notify alerts never emailed | `price_alerts.notified_at` (0047, unreleased → amended); sweep emails all open & un-notified | sweep test "refresh … emailed by the next daily sweep" |
+| F6 | one tenant's error aborts the 07:00 sweep; pct overflow | per-restaurant try/catch; pct clamped to NUMERIC(8,4) | — (worker) |
+| F7 | over-contract total silently capped at 5000 lines | `truncated` flag + `lineCount` in the API, warning line in the UI | — |
+| F8 | default valid-from / status used the UTC date | `todayIso()` in Asia/Jerusalem | `contracts-logic.test.ts` |
+| F9 | `outbox.ts` textual conflict with S7's fix | merged `claude/client-ready` @ 66b8eca, took S7's `DEDUPE_INDEX_PREDICATE` form — this PR no longer changes `outbox.ts` | — |
+
 ## Fixed on the way
-- **Outbox dedupe never worked against real Postgres** (`packages/api/src/notifications/outbox.ts`):
+- **Outbox dedupe never worked against real Postgres** (`packages/api/src/notifications/outbox.ts`; S7 landed the same
+  fix in `claude/client-ready` — this branch now takes S7's version, the real-DB regression test stays):
   `ON CONFLICT (dedupe_key)` cannot infer the **partial** unique index `WHERE dedupe_key IS NOT NULL`, so every
   enqueue with a `dedupeKey` (supplier-delays, order-reminders, end-of-day, …) raised *"no unique or exclusion
   constraint matching the ON CONFLICT specification"*. Only a mocked test covered it. Fix: repeat the predicate as
@@ -96,7 +114,6 @@ demo tenant has `features.all = true`; `FEATURES_OFF=contracts,priceAlerts` kill
 |---|---|---|
 | `packages/db/src/schema.ts` | +3 tables appended, `date` import | new migrations 0046–0047 |
 | `packages/db/drizzle/meta/_journal.json` | +2 entries | 0046, 0047 |
-| `packages/api/src/notifications/outbox.ts` | conflict-target `where` (5 lines) | bug above — every deduped enqueue failed |
 | `apps/worker/src/cron.ts` | +1 scheduler `price-alerts-07` (+remove) | daily trend sweep |
 | `packages/api/src/__tests__/cross-tenant.attack.test.ts` | +17 COVERAGE entries + attack/isolation block | required for new procedures (additive) |
 | `packages/api/src/__tests__/rls.attack.test.ts` | + raw RLS probes for the 3 tables | additive |
@@ -123,17 +140,17 @@ Shared files (additive): `packages/api/src/index.ts` (routers/exports), `package
 
 ## Verification (2 layers)
 
-All on the head merged with `origin/claude/client-ready` @ 39e077d (dashviews/chain/landing v2), fresh DBs rebuilt
+Final run after the money cross-QA fixes, on the head merged with `origin/claude/client-ready` @ 66b8eca; fresh DBs rebuilt
 by `./scripts/dev-setup.sh` (migrations 0000→0047, base seed, seed-demo, chain demo, this demo).
 
 **Layer 1 — full gate** (all exit 0):
 | Command | Result |
 |---|---|
 | `pnpm install --frozen-lockfile` | ok |
-| `DATABASE_URL_TEST=…/restomatch_test pnpm turbo run test --concurrency=1` | 13/13 tasks · api 576 · web 248 · db 71 · matching 86 · charts 64 · catalog 50 · ocr 44 · translate 69 · procurement 17 · crypto 12 · worker 11 (+1 skipped) · billing 5 |
+| `DATABASE_URL_TEST=…/restomatch_test pnpm turbo run test --concurrency=1` | 13/13 tasks · api 588 · web 264 · db 76 · matching 86 · charts 64 · catalog 50 · ocr 44 · translate 69 · procurement 17 · crypto 12 · queue 8 · worker 16 (+1 skipped) · billing 5 |
 | `pnpm turbo run typecheck` | 17/17 |
 | `pnpm --filter @restomatch/web exec tsc --noEmit -p .` | 0 errors |
-| `pnpm --filter @restomatch/web lint` | 0 errors (9 warnings, none in wave-1 files) |
+| `pnpm --filter @restomatch/web lint` | 0 errors (6 warnings, none in wave-1 files) |
 | `pnpm db:supabase-sync --check` | up to date (44 files) |
 | `DATABASE_URL=…/restomatch_test pnpm --filter @restomatch/db check-rls` | OK |
 | `cd apps/web && pnpm build` | ok (`/dashboard/contracts`, `/dashboard/contracts/import`) |
@@ -142,7 +159,7 @@ by `./scripts/dev-setup.sh` (migrations 0000→0047, base seed, seed-demo, chain
 **Layer 2a — production build clicked through** (`next build && next start -p 3100`, `NODE_ENV=production`,
 `DATABASE_URL_APP` = RLS app role, password login; local placeholder values for `RESEND_API_KEY` / `EMAIL_FROM` /
 `SUPABASE_SERVICE_ROLE_KEY` only to pass the boot guard — no email sent). Script: `apps/web/e2e-wave1-contracts.mjs`.
-- owner, manager (8 pages each) and bookkeeper (5 pages) × he/en: **44 page loads, all HTTP 200, `<html lang/dir>`
+- owner, manager (8 pages each) and bookkeeper (5 pages) × he/en (re-run after the cross-QA fixes): **44 page loads, all HTTP 200, `<html lang/dir>`
   he/rtl and en/ltr, 0 console errors, 0 server 5xx**; expected ₪ content present (contract ₪139, alert "18%",
   default threshold "10%"); "over contract" visible on the contracts, invoice and leaks pages.
 - receiver × he/en → redirected to `/dashboard` (no access).
@@ -151,7 +168,8 @@ by `./scripts/dev-setup.sh` (migrations 0000→0047, base seed, seed-demo, chain
 - Visual check of screenshots: Hebrew price pair was bidi-scrambled → fixed (Unicode isolates, `←` in he); English
   over-contract table showed Hebrew supplier names → fixed (`supplierNameEn`).
 
-**Layer 2b — independent refuter** (subagent that did not write the code; read-only on dev data). Confirmed 7
+**Layer 2b — independent checks**: the orchestrator's money cross-QA (table above, all fixed) and the
+**independent refuter** (subagent that did not write the code; read-only on dev data). Confirmed 7
 defects, **all fixed with regression tests** in `packages/api/src/__tests__/contracts.test.ts`:
 1. Unit-less contract applied in the line's unit (₪9/kg as ₪9/g → +₪89,900 fake leak) → unit defaults to the product
    unit; no unit anywhere ⇒ not applied.

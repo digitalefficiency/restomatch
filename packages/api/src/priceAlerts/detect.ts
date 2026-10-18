@@ -2,14 +2,15 @@
  * Price-trend alerts (wave-1 `priceAlerts`) — pure detection, no DB.
  *
  * A (product, supplier) series from price_history is a SUSTAINED increase when,
- * inside the look-back window (windowDays, ending at `now`):
- *   • there are ≥ MIN_OBSERVATIONS observations,
- *   • the latest price is ≥ first price × (1 + thresholdPct), and
- *   • it is not a one-off spike: the later half of the observations all sit at
- *     or above first × (1 + thresholdPct / 2) (the price stayed up), and
- *   • it is current: the latest observation falls in the newer half of the window.
- * Observations are first collapsed to ONE per calendar day (the day's average):
- * one invoice with two lines of the same product is one data point, not two.
+ * inside the look-back window (windowDays, ending at `now`), after collapsing
+ * observations to ONE per restaurant-local day (two lines on one invoice are
+ * one point):
+ *   • there are ≥ MIN_OBSERVATIONS days,
+ *   • baseline = MEDIAN of the earlier half (robust to a one-off promo low),
+ *   • the later half's MEAN is ≥ baseline × (1 + thresholdPct),
+ *   • no later point is below baseline × (1 + thresholdPct / 2) (it stayed up), and
+ *   • it is current: the latest point is in the newer half of the window.
+ * Reported pct = later-half mean / baseline − 1.
  * Prices are compared in integer price units (1/10000 ₪, NUMERIC(12,4) scale).
  */
 
@@ -84,16 +85,17 @@ export function detectSustainedIncrease(
   points: PricePoint[],
   threshold: Pick<ResolvedThreshold, 'thresholdPct' | 'windowDays'>,
   now: Date,
+  tz = 'Asia/Jerusalem',
 ): TrendResult | null {
   const from = now.getTime() - threshold.windowDays * DAY_MS;
   const inWindow = points
     .filter((p) => p.observedAt.getTime() > from && p.observedAt.getTime() <= now.getTime())
-    .filter((p) => Number.isFinite(Number(p.unitPrice)) && Number(p.unitPrice) > 0)
-    .sort((a, b) => a.observedAt.getTime() - b.observedAt.getTime());
-  // One point per UTC calendar day (average in price units).
+    .filter((p) => Number.isFinite(Number(p.unitPrice)) && Number(p.unitPrice) > 0);
+
+  // One point per RESTAURANT-LOCAL calendar day (the day's average, price units).
   const byDay = new Map<string, { observedAt: Date; sum: number; n: number }>();
   for (const p of inWindow) {
-    const k = p.observedAt.toISOString().slice(0, 10);
+    const k = localDay(p.observedAt, tz);
     const e = byDay.get(k) ?? { observedAt: p.observedAt, sum: 0, n: 0 };
     e.sum += units(p.unitPrice);
     e.n += 1;
@@ -101,32 +103,44 @@ export function detectSustainedIncrease(
     byDay.set(k, e);
   }
   const days = [...byDay.values()]
-    .map((e) => ({ observedAt: e.observedAt, unitPrice: Math.round(e.sum / e.n) / 10_000 }))
+    .map((e) => ({ observedAt: e.observedAt, u: Math.round(e.sum / e.n) }))
     .sort((a, b) => a.observedAt.getTime() - b.observedAt.getTime());
   if (days.length < MIN_OBSERVATIONS) return null;
 
-  const first = days[0]!;
   const last = days[days.length - 1]!;
+  // Current: the latest point is in the newer half of the window.
   if (now.getTime() - last.observedAt.getTime() > (threshold.windowDays * DAY_MS) / 2) return null;
-  const start = units(first.unitPrice);
-  const end = units(last.unitPrice);
-  if (start <= 0 || end <= start) return null;
 
-  const pct = (end - start) / start;
-  if (pct + 1e-9 < threshold.thresholdPct) return null;
-
-  const holdFloor = start * (1 + threshold.thresholdPct / 2);
-  const laterHalf = days.slice(Math.floor(days.length / 2));
-  if (laterHalf.some((p) => units(p.unitPrice) + 1e-9 < holdFloor)) return null;
+  // Robust baseline: MEDIAN of the earlier half, so one promo/credit-line low
+  // can't anchor a fake "increase"; the later half's MEAN must clear it.
+  const split = Math.floor(days.length / 2);
+  const earlier = days.slice(0, split).map((d) => d.u);
+  const later = days.slice(split).map((d) => d.u);
+  const baseline = median(earlier);
+  if (baseline <= 0) return null;
+  const laterMean = later.reduce((a, b) => a + b, 0) / later.length;
+  if (laterMean + 1e-9 < baseline * (1 + threshold.thresholdPct)) return null;
+  // Sustained: no later point fell back to (near) the baseline.
+  if (later.some((u) => u + 1e-9 < baseline * (1 + threshold.thresholdPct / 2))) return null;
 
   return {
-    startPrice: start / 10_000,
-    endPrice: end / 10_000,
-    pctChange: Math.round(pct * 10_000) / 10_000,
-    startAt: first.observedAt,
+    startPrice: Math.round(baseline) / 10_000,
+    endPrice: last.u / 10_000,
+    pctChange: Math.round((laterMean / baseline - 1) * 10_000) / 10_000,
+    startAt: days[0]!.observedAt,
     endAt: last.observedAt,
     observations: days.length,
   };
+}
+
+function median(xs: number[]): number {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
+}
+
+function localDay(d: Date, tz: string): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 }
 
 /** Lowest offer strictly below `currentPrice` among other suppliers, or null. */

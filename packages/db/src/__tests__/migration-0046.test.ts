@@ -43,8 +43,9 @@ describe('0046 migration shape', () => {
     await db.delete(supplierContractPrices).where(eq(supplierContractPrices.id, row!.id));
   });
 
-  it('enforces CHECKs: price ≥ 0, valid_to ≥ valid_from, source enum', async () => {
+  it('enforces CHECKs: price > 0 (₪0 would make every line a leak), valid_to ≥ valid_from, source enum', async () => {
     await expect(db.insert(supplierContractPrices).values({ ...base(), contractPrice: '-1' })).rejects.toMatchObject({ code: '23514' });
+    await expect(db.insert(supplierContractPrices).values({ ...base(), contractPrice: '0' })).rejects.toMatchObject({ code: '23514' });
     await expect(db.insert(supplierContractPrices).values({ ...base(), validTo: '2025-12-31' })).rejects.toMatchObject({ code: '23514' });
     await expect(
       db.insert(supplierContractPrices).values({ ...base(), source: 'bogus' as 'manual' }),

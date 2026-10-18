@@ -112,7 +112,10 @@ export async function OverContractCard({ variant = 'full' }: { variant?: 'full' 
             <p className="font-mono text-2xl font-bold tabular-nums text-warn">
               <bdi dir="ltr">{total}</bdi>
             </p>
-            <p className="text-xs text-subtle">{t('over.lines', { count: formatNumber(lines.length, locale) })}</p>
+            <p className="text-xs text-subtle">
+              {t('over.lines', { count: formatNumber(data.lineCount ?? lines.length, locale) })}
+            </p>
+            {data.truncated ? <p className="text-xs text-warn">{t('over.truncated')}</p> : null}
           </div>
         }
       />

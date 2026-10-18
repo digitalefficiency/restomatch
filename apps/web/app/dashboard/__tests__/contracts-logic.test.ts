@@ -4,6 +4,7 @@ import {
   contractStatus,
   contractWriteErrorKey,
   parsePrice,
+  todayIso,
   percentToFraction,
   periodParts,
   resolveTab,
@@ -51,9 +52,28 @@ describe('contracts screen logic', () => {
     expect(parsePrice(' 12,5 ')).toBe(12.5);
     expect(parsePrice('')).toBeNull();
     expect(parsePrice('-1')).toBeNull();
+    // money cross-QA F1: comma = thousands for groups of 3, decimal for 1–2 digits
+    expect(parsePrice('1,250')).toBe(1250);
+    expect(parsePrice('1,234.50')).toBe(1234.5);
+    expect(parsePrice('12,5')).toBe(12.5);
+    expect(parsePrice('₪ 1,250')).toBe(1250);
+    expect(parsePrice('1.250,5')).toBeNull();
+    expect(parsePrice('1,2345')).toBeNull();
+    expect(parsePrice('1e3')).toBeNull();
+    // F2: ₪0 is not a contract price
+    expect(parsePrice('0')).toBeNull();
+    expect(parsePrice('0.00')).toBeNull();
     expect(percentToFraction('18')).toBe(0.18);
     expect(percentToFraction('12.5')).toBe(0.125);
     expect(percentToFraction('0')).toBeNull();
     expect(percentToFraction('600')).toBeNull();
+  });
+});
+
+describe('todayIso (money cross-QA F8)', () => {
+  it('is the Asia/Jerusalem calendar date, not the UTC one', () => {
+    // 22:30Z on Mar 31 is already April 1st in Israel (UTC+3).
+    expect(todayIso(new Date('2026-03-31T22:30:00Z'))).toBe('2026-04-01');
+    expect(todayIso(new Date('2026-03-31T12:00:00Z'))).toBe('2026-03-31');
   });
 });

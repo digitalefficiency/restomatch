@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS "supplier_contract_prices" (
     REFERENCES "suppliers"("id","restaurant_id") ON DELETE cascade,
   CONSTRAINT "supplier_contract_prices_product_same_tenant_fk" FOREIGN KEY ("product_id","restaurant_id")
     REFERENCES "products"("id","restaurant_id") ON DELETE cascade,
-  CONSTRAINT "supplier_contract_prices_price_nonneg" CHECK ("contract_price" >= 0),
+  CONSTRAINT "supplier_contract_prices_price_positive" CHECK ("contract_price" > 0),
   CONSTRAINT "supplier_contract_prices_valid_range" CHECK ("valid_to" IS NULL OR "valid_to" >= "valid_from"),
   CONSTRAINT "supplier_contract_prices_source_check" CHECK ("source" IN ('manual','import'))
 );--> statement-breakpoint

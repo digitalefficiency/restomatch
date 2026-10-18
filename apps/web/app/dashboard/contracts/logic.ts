@@ -21,9 +21,12 @@ export function resolveTab(raw: string | undefined, visible: ContractsTab[]): Co
   return visible[0] ?? null;
 }
 
-/** Today as `YYYY-MM-DD` (date inputs + default valid-from). */
-export function todayIso(now: Date = new Date()): string {
-  return now.toISOString().slice(0, 10);
+/**
+ * Today as `YYYY-MM-DD` in the restaurant's timezone (date inputs, default
+ * valid-from, contract status) — the UTC date is yesterday before 02:00/03:00 IL.
+ */
+export function todayIso(now: Date = new Date(), timeZone = 'Asia/Jerusalem'): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
 }
 
 /** Whether a contract row is in force on `today` (all `YYYY-MM-DD`, lexically comparable). */
@@ -76,12 +79,21 @@ export function contractWriteErrorKey(err: unknown): 'duplicate' | 'range' | nul
   return null;
 }
 
-/** Parse a user-typed number ("12.5", " 7 "); null when empty/invalid/negative. */
+/**
+ * Parse a user-typed amount, locale-safe (same rules as the server import):
+ * "1250", "12.5", "1,250" → 1250, "1,234.50" → 1234.5, "12,5" → 12.5; ₪ and
+ * spaces ignored; anything ambiguous ("1.250,5", "1,2345", "1e3") → null.
+ * Null also for ≤ 0 — a ₪0 contract would make every billed line a leak.
+ */
 export function parsePrice(raw: string): number | null {
-  const t = raw.trim().replace(',', '.');
-  if (t === '') return null;
-  const n = Number(t);
-  return Number.isFinite(n) && n >= 0 ? n : null;
+  const s = raw.replace(/[₪\s\u00a0]/g, '');
+  let norm: string | null = null;
+  if (/^\d+(?:\.\d+)?$/.test(s)) norm = s;
+  else if (/^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(s)) norm = s.replace(/,/g, '');
+  else if (/^\d+,\d{1,2}$/.test(s)) norm = s.replace(',', '.');
+  if (norm === null) return null;
+  const n = Number(norm);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 /** "18" (percent, as typed) → 0.18 fraction; null outside (0, 500]. */
