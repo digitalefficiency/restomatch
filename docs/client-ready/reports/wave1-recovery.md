@@ -112,7 +112,7 @@ downloadable PDF with the month's number. The dashboard has a "preview this mont
 - **Migrations:**
   - **0048_recovery** (credit_notes, recovery_claims, recovery_events) and **0049_monthly_reports**.
   - Hand-written and additive, with journal entries and a shape test (`migration-0048.test.ts`, covering both).
-  - All four tables were added to `rls/0002`, every FK is indexed (db:doctor clean), and `pnpm db:supabase-sync`
+  - Every tenant reference is a **composite same-tenant FK** `(x_id, restaurant_id)`, and RLS + the tenant policy are enabled **inside 0048/0049** (S1 cross-QA; `rls/0002` is not edited). Every FK is indexed (db:doctor clean), and `pnpm db:supabase-sync`
     output is regenerated.
 
 ## Fixed along the way (pre-existing bug)
@@ -127,11 +127,10 @@ downloadable PDF with the month's number. The dashboard has a "preview this mont
 ## Immutable files touched (owner review)
 | File | Change | Test |
 |---|---|---|
-| `packages/api/src/notifications/outbox.ts` | ON CONFLICT predicate for the partial dedupe index (bug fix above) | `outbox-dedupe-db.test.ts` (new) + existing `outbox-dedupe.test.ts` |
+| `packages/api/src/notifications/outbox.ts` | **No longer touched.** S7's identical fix landed first (#49); this branch keeps S7's version after the merge | `outbox-dedupe-db.test.ts` (real DB) still passes on S7's fix |
 | `apps/worker/src/cron.ts` | +2 schedulers: `recovery-reminders-0830` (`30 8 * * *`), `monthly-report-1st-0745` (`45 7 1 * *`), both IL; +2 removals; log line | `apps/worker/src/__tests__/cron.test.ts` (new) pins the **whole** schedule |
 | `packages/db/src/schema.ts` | additive: 4 tables + `RECOVERY_STATUSES` (+ `bigint`/`date` imports) | `migration-0048.test.ts` |
 | `packages/db/drizzle/meta/_journal.json` | +0048, +0049 (`when` 1782030000000 / 1782040000000) | db suite |
-| `packages/db/drizzle/rls/0002_core_tenant_rls.sql` | +4 tables in the tenant list | `migration-0048.test.ts` (RLS on), attack suite |
 | `packages/api/src/__tests__/cross-tenant.attack.test.ts` | **additive**: 10 COVERAGE entries + 8 tests | itself |
 
 Shared (not immutable), all additive:
@@ -184,8 +183,38 @@ Known and accepted (refuter suspicions, not defects):
 - A claim whose discrepancy is later re-opened or rejected stays in the tracker. The owner can write it off.
 - A stored monthly snapshot is the record of what was sent. Regenerate it with `ensureMonthlyReport({refresh:true})`.
 
+## Round 3 (orchestrator + S1 cross-QA)
+
+**S1 findings, fixed:**
+1. **Cross-tenant FKs (medium).** 0048 now uses composite `(x_id, restaurant_id)` FKs for every tenant reference.
+   - Covered: supplier, invoice, discrepancy, credit note, claim.
+   - An invoice line is reached through its invoice: `(invoice_line_id, invoice_id)` → `invoice_lines` MATCH FULL.
+   - Supporting `UNIQUE (id, restaurant_id)` keys were added on invoices and discrepancies, plus `UNIQUE (id, invoice_id)` on invoice_lines.
+   - Tests:
+     - `migration-0048.test.ts`: every cross-tenant insert or update is refused with 23503; another tenant's delete cascades nothing; an invoice delete removes only the credit note derived from it.
+     - DB-level probe in `cross-tenant.attack.test.ts`.
+   - Verified first in a scratch DB: `SET NULL` on the invoice FK would break MATCH FULL mid-cascade, hence CASCADE for credit notes derived from invoice lines.
+2. **RLS in the migration.** RLS and the `<table>_tenant` policy are enabled inside 0048/0049, the same way S11/S13/S14/S17 do it. The `rls/0002` edit was reverted (the file is byte-identical to the base).
+3. **Merged `origin/claude/client-ready` (197e718).** `outbox.ts` keeps S7's fix. The `supabase/` files were regenerated with `db:supabase-sync` from the base.
+
+**New: `pnpm demo:seed-all`** (orchestrator request).
+- One guarded, idempotent command:
+
+  core seed → seed-demo → chain → recovery → recipes → contracts
+
+  Wave-1 steps are skipped when their script or table is missing. The final numbers are printed.
+- Guards: the old production project is refused, including via a decoded username, `PGUSER` or `PGHOST`. Shared Supabase pooler hosts are refused. A remote host needs a private `DEMO_PASSWORD`. A non-empty DB needs `--reset`; the not-empty check counts every table the base seed's TRUNCATE CASCADE reaches.
+- Runbook in Hebrew and English: `docs/DB-RUNBOOK.md`, "The whole demo in one command".
+- Verified:
+  - all 6 steps on a local throwaway worktree with S17 and S11 merged in;
+  - two `--reset` runs gave identical numbers;
+  - the commit cherry-picks onto bare `client-ready` and runs there, skipping what isn't merged.
+- An independent refuter found two gaps (the pooler / encoded-username bypass and the narrow not-empty check). Both are fixed with tests.
+
+**Observation, not this PR:** one layer-2 run logged React #418 (a text hydration mismatch) once for chef/he. It did not reproduce in 8 targeted runs or in the full re-run. Likely a relative-time text crossing a boundary (pre-existing activity feed).
+
 ## Verification (2 layers)
-Head: see the PR / orchestrator message. Local Postgres 16 + pgvector and Redis, set up with `./scripts/dev-setup.sh`.
+Head: see the PR / orchestrator message. **Round 3 (after the merge and the S1 fixes):** layer 1 → 13/13 test tasks (api 582 · web 264 · db 71 · worker 26 · matching 86 · charts 64 · …), typecheck 17/17, web tsc 0, lint 0, `supabase-sync --check` clean, build green; layer 2a → `LAYER2 OK` (5 roles × he/en, dev DB reseeded with `pnpm demo:seed-all -- --reset`). Local Postgres 16 + pgvector and Redis, set up with `./scripts/dev-setup.sh`.
 
 **Layer 1 — full gate**
 ```
