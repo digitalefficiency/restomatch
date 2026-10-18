@@ -116,7 +116,7 @@ export const Problem: React.FC<{ locale: Locale }> = ({ locale }) => {
 
   // pile centre: opposite side of the copy
   const isRtl = locale === 'he';
-  const pileX = vertical ? width / 2 : isRtl ? width * 0.3 : width * 0.7;
+  const pileX = vertical ? width / 2 : isRtl ? width * 0.27 : width * 0.73;
   const pileY = vertical ? height * 0.6 : height * 0.52;
 
   // exit: everything collapses into a horizontal scan line (handoff to Match)
@@ -137,7 +137,7 @@ export const Problem: React.FC<{ locale: Locale }> = ({ locale }) => {
           const p = prog(f, at, at + 26, EASE_OUT);
           const pPrev = prog(f - 1, at, at + 26, EASE_OUT);
           const speed = Math.abs(p - pPrev);
-          const rx = (random(`x${i}`) - 0.5) * (vertical ? 520 : 600);
+          const rx = (random(`x${i}`) - 0.5) * (vertical ? 520 : 520);
           const ry = (random(`y${i}`) - 0.5) * (vertical ? 760 : 360);
           const rot = (random(`r${i}`) - 0.5) * 34;
           const fromX = (random(`fx${i}`) - 0.5) * 2600;
@@ -197,16 +197,17 @@ export const Problem: React.FC<{ locale: Locale }> = ({ locale }) => {
           top: vertical ? 170 : height * 0.3,
           [isRtl ? 'right' : 'left']: vertical ? 70 : 130,
           [isRtl ? 'left' : 'right']: vertical ? 70 : undefined,
-          width: vertical ? undefined : 860,
+          width: vertical ? undefined : 800,
+          zIndex: 50,
           fontFamily: FONT.sans,
           color: C.ink,
           opacity: 1 - out,
         }}
       >
-        <RiseLine at={10} style={{ fontSize: vertical ? 74 : 72, fontWeight: 800, lineHeight: 1.1 }}>
+        <RiseLine at={10} style={{ fontSize: vertical ? 74 : 68, fontWeight: 800, lineHeight: 1.1 }}>
           {t.t1}
         </RiseLine>
-        <RiseLine at={40} style={{ fontSize: vertical ? 74 : 72, fontWeight: 800, lineHeight: 1.1, color: C.muted }}>
+        <RiseLine at={40} style={{ fontSize: vertical ? 74 : 68, fontWeight: 800, lineHeight: 1.1, color: C.muted }}>
           {t.t2}
         </RiseLine>
         <RiseLine at={80} style={{ fontSize: vertical ? 56 : 54, fontWeight: 700, lineHeight: 1.2, marginTop: 26, color: C.danger }}>
