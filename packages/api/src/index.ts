@@ -27,6 +27,8 @@ import { priceAlertsRouter } from './routers/priceAlerts';
 import { recoveryRouter } from './routers/recovery';
 import { monthlyReportRouter } from './routers/monthlyReport';
 import { ingestRouter } from './routers/ingest';
+import { leakCheckRouter } from './routers/leakCheck';
+import { growthRouter } from './routers/growth';
 
 export const appRouter = router({
   owner: ownerRouter,
@@ -57,6 +59,8 @@ export const appRouter = router({
   ingest: ingestRouter,
   receiverLangs: receiverLangsRouter,
   ask: askRouter,
+  growth: growthRouter,
+  leakCheck: leakCheckRouter,
 });
 
 export type AppRouter = typeof appRouter;
@@ -210,6 +214,7 @@ export {
   DEFAULT_WINDOW_DAYS,
 } from './priceAlerts/detect';
 export { priceAlertEmail } from './priceAlerts/email';
+export * as leakCheck from './leakCheck';
 export {
   APP_ERROR_CODES,
   AppErrorCause,
@@ -233,6 +238,20 @@ export {
   scanIdFromLocalUrl,
   isLocalScanId,
 } from './lib/localScanStorage';
+export {
+  growthPricingPublicEnabled,
+  creditReferralRedemption,
+  restaurantMonthlyPriceAgorot,
+  REFERRAL_REDEEM_WINDOW_DAYS,
+} from './routers/growth';
+export {
+  quotePlan,
+  chainPerBranchAgorot,
+  CHAIN_INCLUDED_BRANCHES,
+  MAX_CHAIN_BRANCHES as MAX_PRICED_CHAIN_BRANCHES,
+  type BillingCycle,
+  type PlanQuote,
+} from '@restomatch/billing';
 export {
   MAX_CHAIN_BRANCHES,
   type ChainBranch,

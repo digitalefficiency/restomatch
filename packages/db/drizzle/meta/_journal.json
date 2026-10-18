@@ -302,6 +302,20 @@
       "when": 1782080000000,
       "tag": "0053_ai_assistant",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1782090000000,
+      "tag": "0054_leak_check_sandbox",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1782100000000,
+      "tag": "0055_referrals",
+      "breakpoints": true
     }
   ]
 }

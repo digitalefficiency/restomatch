@@ -1,0 +1,53 @@
+/**
+ * 'growth' namespace (Hebrew — source of truth).
+ * Owner: S15 growth — chain per-branch pricing, annual billing, referrals.
+ */
+export const he = {
+  pricing: {
+    eyebrow: 'רשתות וחיוב שנתי',
+    title: 'מחיר לפי סניף, ושני חודשים מתנה בתשלום שנתי',
+    lead: 'המחירים החודשיים לא משתנים. רשת משלמת לפי מספר הסניפים, ומי שבוחר חיוב שנתי משלם על 10 חודשים במקום 12.',
+    cycleLabel: 'מחזור חיוב',
+    monthly: 'חודשי',
+    annual: 'שנתי',
+    annualBadge: 'חודשיים מתנה',
+    branchesLabel: 'מספר סניפים',
+    decrease: 'פחות סניף',
+    increase: 'עוד סניף',
+    branchesValue: '{n} סניפים',
+    branchOne: 'סניף אחד',
+    perBranch: '{price} לסניף בחודש בגודל הזה',
+    chainIncluded: 'עד {n} סניפים כלולים במחיר הרשת ({price} לסניף ב-{n} סניפים) · כל סניף נוסף {price} לחודש',
+    perMonth: 'לחודש',
+    perMonthBilledAnnually: 'לחודש, בחיוב שנתי',
+    billedAnnually: 'חיוב שנתי של {price}',
+    youSave: 'חיסכון של {price} בשנה',
+    chainName: 'רשת',
+    chainTotal: 'סה״כ לרשת עם {branches}',
+    plansNote: 'בסיס {basic} · מקצועי {pro} לחודש, או {basicAnnual} · {proAnnual} לחודש בחיוב שנתי.',
+    vatNote: 'המחירים אינם כוללים מע״מ.',
+    cta: 'לדבר על רשת',
+  },
+  referral: {
+    title: 'חבר מביא חבר',
+    body: 'שתפו את הקוד עם בעל מסעדה אחר. כשהוא מצטרף ומשלם — שניכם מקבלים חודש חינם.',
+    yourCode: 'הקוד שלכם',
+    copy: 'העתקה',
+    copied: 'הועתק',
+    stats: '{referred} הצטרפו דרככם · {credited} זוכו',
+    earned: 'זיכוי שנצבר: {amount}',
+    redeemTitle: 'קיבלתם קוד ממסעדה אחרת?',
+    redeemPlaceholder: 'הקלידו קוד הפניה',
+    redeem: 'מימוש',
+    redeemed: 'הקוד מומש. חודש חינם ייזקף לשניכם עם התשלום הראשון.',
+    redeemedCredited: 'זוכיתם בחודש חינם ({amount}).',
+    loading: 'טוען…',
+    errors: {
+      FEATURE_DISABLED: 'תוכנית ההפניות עדיין לא פעילה אצלכם.',
+      invalid: 'הקוד לא נמצא. בדקו את האותיות ונסו שוב.',
+      self: 'אי אפשר לממש את הקוד של עצמכם.',
+      already: 'כבר מומש קוד הפניה למסעדה הזו.',
+      generic: 'משהו השתבש. נסו שוב.',
+    },
+  },
+};

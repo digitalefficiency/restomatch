@@ -36,6 +36,12 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   'input.invalid': 'invalidInput',
   // Wave-1 per-restaurant flag off (the UI hides the feature; a stale tab lands here).
   FEATURE_DISABLED: 'forbidden',
+  // Wave-1 (S15) codes: generic fallbacks here; the owning screens (growth /
+  // leakCheck namespaces) show their own specific copy.
+  'leakCheck.invalidLink': 'invalidInput',
+  'growth.referralInvalid': 'invalidInput',
+  'growth.referralSelf': 'invalidInput',
+  'growth.referralAlreadyRedeemed': 'invalidInput',
 };
 
 /**

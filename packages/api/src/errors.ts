@@ -33,6 +33,10 @@ export const APP_ERROR_CODES = [
   'input.invalid',
   // Wave-1 per-restaurant feature flags (MASTER-PLAN §1.3): the feature is off.
   'FEATURE_DISABLED',
+  'leakCheck.invalidLink',
+  'growth.referralInvalid',
+  'growth.referralSelf',
+  'growth.referralAlreadyRedeemed',
 ] as const;
 
 export type AppErrorCode = (typeof APP_ERROR_CODES)[number];

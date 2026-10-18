@@ -29,6 +29,10 @@ export const PUBLIC_PREFIX_PATHS = [
   '/reset',
   '/showcase',
   '/api/showcase',
+  // Free leak check (S15 wave 1): the page 404s unless LEAK_CHECK_PUBLIC=1; each
+  // /api/leak-check route re-checks the gate, origin, rate limits and proof of work.
+  '/leak-check',
+  '/api/leak-check',
   '/api/auth',
   '/api/trpc', // auth is enforced PER PROCEDURE (publicProcedure runs anonymously) — D1.4
   '/api/healthz',
