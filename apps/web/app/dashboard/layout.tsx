@@ -5,6 +5,7 @@ import { auth, signOut } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
 import { ToastProvider } from '@/lib/components';
 import { getLocale, getT } from '@/lib/i18n/server';
+import { LanguagePicker } from '@/lib/i18n/LanguagePicker';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { nav } from '@/lib/i18n/messages/nav';
 import { labelForRole } from '@/lib/roles';
@@ -39,19 +40,34 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const active =
     memberships.find((m) => m.restaurantId === session.user.restaurantId) ?? memberships[0]!;
-  const [t, locale, flags, enabled] = await Promise.all([
+  const [t, locale, flags, enabled, receiverLangsOn] = await Promise.all([
     getT(nav),
     getLocale(),
     caller.recovery.flags(),
     enabledFeatures(active.restaurantId),
+    // Receiver languages (S14): the six-language picker replaces עב/EN when on.
+    caller.receiverLangs
+      .status()
+      .then((r) => r.enabled)
+      .catch(() => false),
   ]);
-  // Wave-1 flags that hide nav items when off (MASTER-PLAN §1.3).
+  // AI assistant (S14): owner/manager + flag on → nav item.
+  const askOn =
+    active.role === 'owner' || active.role === 'manager'
+      ? await caller.ask
+          .status()
+          .then((r) => r.enabled)
+          .catch(() => false)
+      : false;
+  // Wave-1 flags that hide nav items when off (MASTER-PLAN §1.3). `aiAssistant`
+  // comes only from the S14 role-aware check above.
   const features = [
     ...new Set<string>([
-      ...enabled,
+      ...enabled.filter((f) => f !== 'aiAssistant'),
       ...Object.entries(flags)
         .filter(([, on]) => on)
         .map(([key]) => key),
+      ...(askOn ? ['aiAssistant'] : []),
     ]),
   ];
   const roleLabel = labelForRole(active.role, locale);
@@ -119,7 +135,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               <div className="ms-auto hidden items-center gap-2 lg:flex">
                 <BranchSwitcher branches={switcherBranches} activeId={active.restaurantId} />
                 <DashboardSearch role={active.role} className="w-72" />
-                <LocaleSwitcher />
+                {receiverLangsOn ? <LanguagePicker persist /> : <LocaleSwitcher />}
                 <form action={logout} data-rm-logout="">
                   <button
                     type="submit"
@@ -130,7 +146,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
                   </button>
                 </form>
               </div>
-              <LocaleSwitcher className="lg:hidden" />
+              {receiverLangsOn ? (
+                <LanguagePicker persist className="lg:hidden" />
+              ) : (
+                <LocaleSwitcher className="lg:hidden" />
+              )}
             </div>
             <DesktopNav role={active.role} showChain={showChain} features={features} wave1={wave1} />
           </div>

@@ -288,6 +288,20 @@
       "when": 1782060000000,
       "tag": "0051_invoice_source_whatsapp",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1782070000000,
+      "tag": "0052_receiver_languages",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1782080000000,
+      "tag": "0053_ai_assistant",
+      "breakpoints": true
     }
   ]
 }

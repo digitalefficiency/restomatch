@@ -4,11 +4,13 @@ import { ArrowRight } from 'lucide-react';
 import { TRPCError } from '@trpc/server';
 import { auth } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
-import { getLocale, getT } from '@/lib/i18n/server';
+import { getAppLocale, getLocale, getT } from '@/lib/i18n/server';
+import { isReceiverLocale } from '@/lib/i18n/config';
 import { receiving } from '@/lib/i18n/messages/receiving';
 import { enabledFeatures } from '@/lib/ingest/features';
 import { ReceiverPwa } from '@/lib/pwa/ReceiverPwa';
 import { ReceivingWizard } from './wizard';
+import { localizePoLines, type LocalNames } from './_localize';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,7 +25,12 @@ export default async function ReceivingPoPage({
   const restaurantId = session?.user?.restaurantId ?? null;
   const userId = session?.user?.id ?? null;
 
-  const [locale, t, features] = await Promise.all([getLocale(), getT(receiving), enabledFeatures(restaurantId)]);
+  const [locale, appLocale, t, features] = await Promise.all([
+    getLocale(),
+    getAppLocale(),
+    getT(receiving),
+    enabledFeatures(restaurantId),
+  ]);
   const pwa = features.includes('receiverPwa');
 
   // Receiver in English: fill missing English names before the first render.
@@ -34,6 +41,18 @@ export default async function ReceivingPoPage({
       caller.receiving.ensureEnglish({ poId }).catch(() => null),
       new Promise((resolve) => setTimeout(resolve, 4000)),
     ]);
+  }
+
+  // Receiver languages (S14): Hebrew → ar/ru/th/ti names (cache → glossary →
+  // Claude within budget), same 4 s cap. Missing names keep their English.
+  let localNames: LocalNames = {};
+  if (isReceiverLocale(appLocale)) {
+    const r = await Promise.race([
+      caller.receiverLangs.localNames({ locale: appLocale, poId }).catch(() => null),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+    ]);
+    // Plain object for the client boundary (the API builds a null-prototype map).
+    localNames = { ...(r?.names ?? {}) };
   }
 
   let po;
@@ -54,7 +73,7 @@ export default async function ReceivingPoPage({
     expectedAt: po.expectedAt ? new Date(po.expectedAt).toISOString() : null,
     status: po.status,
     totalEstimated: po.totalEstimated != null ? Number(po.totalEstimated) : null,
-    lines: po.lines.map((l) => ({
+    lines: localizePoLines(po.lines.map((l) => ({
       id: l.id,
       productId: l.productId ?? null,
       rawDescription: l.rawDescription ?? null,
@@ -63,7 +82,7 @@ export default async function ReceivingPoPage({
       qtyOrdered: Number(l.qtyOrdered),
       unit: l.unit,
       unitPriceExpected: l.unitPriceExpected != null ? Number(l.unitPriceExpected) : null,
-    })),
+    })), localNames),
   };
 
   return (
@@ -77,7 +96,13 @@ export default async function ReceivingPoPage({
         {t('po.backToList')}
       </Link>
 
-      <ReceivingWizard po={poForClient} restaurantId={restaurantId} offlineQueue={pwa} userId={userId} />
+      <ReceivingWizard
+        po={poForClient}
+        restaurantId={restaurantId}
+        offlineQueue={pwa}
+        userId={userId}
+        localNames={localNames}
+      />
     </div>
   );
 }

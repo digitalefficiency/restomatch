@@ -13,6 +13,7 @@ export const en: Shape<typeof he> = {
     leaks: 'Leak detective',
     recovery: '₪ back',
     monthlyReport: 'Monthly report',
+    ask: 'Ask RestoMatch',
     suppliers: 'Suppliers',
     catalog: 'Catalog',
     contracts: 'Contracts & alerts',

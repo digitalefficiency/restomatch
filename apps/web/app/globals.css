@@ -294,3 +294,72 @@ html {
     }
   }
 }
+
+/* S14 receiver languages — self-hosted script fonts (append-only) */
+/* Noto Sans Arabic / Thai / Ethiopic (SIL OFL; OFL.txt next to each file), the
+   script-only subset of @fontsource-variable 5.3.0. unicode-range is copied from
+   that subset's CSS, so a file is only fetched when its glyphs actually appear. */
+@font-face {
+  font-family: 'Noto Sans Arabic';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/noto-sans-arabic/noto-sans-arabic-arabic-wght.woff2') format('woff2-variations'),
+    url('/fonts/noto-sans-arabic/noto-sans-arabic-arabic-wght.woff2') format('woff2');
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0897-08E1, U+08E3-08FF,
+    U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC,
+    U+102E0-102FB, U+10E60-10E7E, U+10EC2-10EC4, U+10EFC-10EFF, U+1EE00-1EE03, U+1EE05-1EE1F,
+    U+1EE21-1EE22, U+1EE24, U+1EE27, U+1EE29-1EE32, U+1EE34-1EE37, U+1EE39, U+1EE3B, U+1EE42,
+    U+1EE47, U+1EE49, U+1EE4B, U+1EE4D-1EE4F, U+1EE51-1EE52, U+1EE54, U+1EE57, U+1EE59, U+1EE5B,
+    U+1EE5D, U+1EE5F, U+1EE61-1EE62, U+1EE64, U+1EE67-1EE6A, U+1EE6C-1EE72, U+1EE74-1EE77,
+    U+1EE79-1EE7C, U+1EE7E, U+1EE80-1EE89, U+1EE8B-1EE9B, U+1EEA1-1EEA3, U+1EEA5-1EEA9,
+    U+1EEAB-1EEBB, U+1EEF0-1EEF1;
+}
+@font-face {
+  font-family: 'Noto Sans Thai';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/noto-sans-thai/noto-sans-thai-thai-wght.woff2') format('woff2-variations'),
+    url('/fonts/noto-sans-thai/noto-sans-thai-thai-wght.woff2') format('woff2');
+  unicode-range: U+02D7, U+0303, U+0331, U+0E01-0E5B, U+200C-200D, U+25CC;
+}
+@font-face {
+  font-family: 'Noto Sans Ethiopic';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/noto-sans-ethiopic/noto-sans-ethiopic-ethiopic-wght.woff2') format('woff2-variations'),
+    url('/fonts/noto-sans-ethiopic/noto-sans-ethiopic-ethiopic-wght.woff2') format('woff2');
+  unicode-range: U+030E, U+1200-1399, U+2D80-2DDE, U+AB01-AB2E, U+1E7E0-1E7E6, U+1E7E8-1E7EB,
+    U+1E7ED-1E7EE, U+1E7F0-1E7FE;
+}
+
+/* Global fallback: Arabic/Thai/Ethiopic DATA inside he/en pages. Same stack as
+   Tailwind's font-sans, with the Noto families slotted right after Heebo. They
+   must sit before Inter/system-ui/sans-serif: a generic or system font would
+   otherwise claim those glyphs first. Heebo stays first, so he/en text is
+   unchanged; a Noto file loads only when its script's glyphs appear. */
+:root body,
+:root .font-sans {
+  font-family: var(--font-heebo), 'Heebo', 'Noto Sans Arabic', 'Noto Sans Thai', 'Noto Sans Ethiopic',
+    'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+}
+
+/* Receiver locales: put the script font first; Heebo still covers Latin.
+   (ar is RTL via <html dir>; the default line-height works for Noto, so no tweak.) */
+html[lang='ar'] body,
+html[lang='ar'] .font-sans {
+  font-family: 'Noto Sans Arabic', 'Heebo', 'Inter', -apple-system, BlinkMacSystemFont, system-ui,
+    sans-serif;
+}
+html[lang='th'] body,
+html[lang='th'] .font-sans {
+  font-family: 'Noto Sans Thai', 'Heebo', 'Inter', -apple-system, BlinkMacSystemFont, system-ui,
+    sans-serif;
+}
+html[lang='ti'] body,
+html[lang='ti'] .font-sans {
+  font-family: 'Noto Sans Ethiopic', 'Heebo', 'Inter', -apple-system, BlinkMacSystemFont, system-ui,
+    sans-serif;
+}

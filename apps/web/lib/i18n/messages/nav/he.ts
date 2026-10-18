@@ -14,6 +14,7 @@ export const he = {
     leaks: 'בלש דליפות',
     recovery: '₪ חוזר',
     monthlyReport: 'דוח חודשי',
+    ask: 'שאלו את RestoMatch',
     suppliers: 'ספקים',
     catalog: 'קטלוג',
     contracts: 'חוזים והתראות',

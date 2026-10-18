@@ -12,7 +12,7 @@
 import { useCallback, useSyncExternalStore } from 'react';
 import { Languages } from 'lucide-react';
 import { unitLabel } from '@restomatch/translate/units';
-import { useLocale, useT } from '@/lib/i18n/client';
+import { useAppLocale, useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
 import { receiving } from '@/lib/i18n/messages/receiving';
 
@@ -90,6 +90,9 @@ export function ItemName({
   strike?: boolean;
 }) {
   const locale = useLocale();
+  // Receiver languages (S14): the primary name is in ar/ru/th/ti, tagged so it
+  // shapes/reads correctly (the base locale is 'en', so the layout is shared).
+  const appLocale = useAppLocale();
   const [showHebrew] = useShowHebrew();
   const strikeCls = strike ? 'line-through opacity-70' : '';
   if (locale !== 'en') return <span className={`${className} ${strikeCls}`}>{he}</span>;
@@ -103,7 +106,7 @@ export function ItemName({
   }
   return (
     <span className={`flex flex-col ${className}`}>
-      <span className={strikeCls} data-testid="item-name-en">
+      <span className={strikeCls} data-testid="item-name-en" lang={appLocale} dir="auto">
         {english}
       </span>
       {showHebrew ? (

@@ -1,3 +1,5 @@
+import { receiverLangsRouter } from './routers/receiverLangs';
+import { askRouter } from './routers/ask';
 import { router } from './trpc';
 import { activityRouter } from './routers/activity';
 import { adminRouter } from './routers/admin';
@@ -53,6 +55,8 @@ export const appRouter = router({
   recovery: recoveryRouter,
   monthlyReport: monthlyReportRouter,
   ingest: ingestRouter,
+  receiverLangs: receiverLangsRouter,
+  ask: askRouter,
 });
 
 export type AppRouter = typeof appRouter;
@@ -274,3 +278,13 @@ export {
   type IngestHttpDeps,
 } from './ingest/http';
 export { processInboundMessage, resolveIngestChannel } from './ingest/pipeline';
+export { localNames, renderSizeSuffix, __setReceiverTranslator } from './receiving/localize';
+export {
+  runAsk,
+  setAskBurstLimiter,
+  ASK_BURST_LIMIT,
+  __setAskClient,
+  __resetAskBurst,
+  type AskBurstLimiter,
+  type AskResult,
+} from './ask';

@@ -1,0 +1,33 @@
+-- 0053_ai_assistant (S14, wave 1 — flag `aiAssistant`)
+--
+-- assistant_usage — the per-restaurant, per-day budget of the "Ask RestoMatch" assistant
+-- (/dashboard/ask). One row per (restaurant, UTC day): questions asked, how many reached
+-- Claude, tokens and an estimated cost in micro-USD. The API refuses the Claude leg once the
+-- day's question or cost cap is spent (the deterministic offline answers still work). It
+-- stores NO question or answer text. Tenant table → RLS enabled here with the standard
+-- restaurant_id policy (same shape as drizzle/rls/0002_core_tenant_rls.sql).
+--
+-- Hand-written. Additive only.
+CREATE TABLE IF NOT EXISTS "assistant_usage" (
+  "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE CASCADE,
+  "day" date NOT NULL,
+  "questions" integer DEFAULT 0 NOT NULL,
+  "claude_calls" integer DEFAULT 0 NOT NULL,
+  "input_tokens" integer DEFAULT 0 NOT NULL,
+  "output_tokens" integer DEFAULT 0 NOT NULL,
+  "cost_micro_usd" bigint DEFAULT 0 NOT NULL,
+  "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT "assistant_usage_pk" PRIMARY KEY ("restaurant_id", "day"),
+  CONSTRAINT "assistant_usage_nonneg_check" CHECK (
+    "questions" >= 0 AND "claude_calls" >= 0 AND "input_tokens" >= 0
+    AND "output_tokens" >= 0 AND "cost_micro_usd" >= 0
+  )
+);--> statement-breakpoint
+ALTER TABLE "assistant_usage" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+DROP POLICY IF EXISTS "assistant_usage_tenant" ON "assistant_usage";--> statement-breakpoint
+CREATE POLICY "assistant_usage_tenant" ON "assistant_usage"
+  USING ("restaurant_id" = nullif(current_setting('app.current_restaurant_id', true), '')::uuid);--> statement-breakpoint
+-- updated_at is maintained by the shared trigger function from 0031 (db:doctor checks it).
+DROP TRIGGER IF EXISTS "assistant_usage_set_updated_at" ON "assistant_usage";--> statement-breakpoint
+CREATE TRIGGER "assistant_usage_set_updated_at" BEFORE UPDATE ON "assistant_usage"
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();

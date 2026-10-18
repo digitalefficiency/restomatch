@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers';
 import { createServerCaller } from '@/lib/trpc/server';
-import { getLocale } from '@/lib/i18n/server';
-import { LOCALE_COOKIE, isLocale } from '@/lib/i18n/config';
+import { getAppLocale } from '@/lib/i18n/server';
+import { LOCALE_COOKIE, isAppLocale, isReceiverLocale } from '@/lib/i18n/config';
 import { ApplyLocale } from './locale-sync-client';
 
 /**
@@ -13,14 +13,16 @@ import { ApplyLocale } from './locale-sync-client';
  */
 export async function LocaleSync() {
   const store = await cookies();
-  if (isLocale(store.get(LOCALE_COOKIE)?.value)) return null;
+  if (isAppLocale(store.get(LOCALE_COOKIE)?.value)) return null;
   let preferred: string | null = null;
   try {
     const caller = await createServerCaller();
     preferred = (await caller.settings.myLocale()).locale;
+    // Receiver languages (S14): adopt ar/ru/th/ti only while the flag is on.
+    if (isReceiverLocale(preferred) && !(await caller.receiverLangs.status()).enabled) preferred = 'en';
   } catch {
     return null; // never break the dashboard over a language preference
   }
-  if (!isLocale(preferred) || preferred === (await getLocale())) return null;
+  if (!isAppLocale(preferred) || preferred === (await getAppLocale())) return null;
   return <ApplyLocale locale={preferred} />;
 }

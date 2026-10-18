@@ -22,6 +22,7 @@ import {
   MoreHorizontal,
   PackageCheck,
   Settings,
+  Sparkles,
   ShoppingCart,
   Truck,
   Users,
@@ -47,6 +48,7 @@ type LinkKey =
   | 'chain'
   | 'recovery'
   | 'monthlyReport'
+  | 'ask'
   | 'suppliers'
   | 'catalog'
   | 'contracts'
@@ -91,6 +93,7 @@ export const NAV_ITEMS: NavItem[] = [
     group: 'operations',
     feature: 'monthlyReport',
   },
+  { key: 'ask', href: '/dashboard/ask', icon: Sparkles, group: 'operations', feature: 'aiAssistant' },
   { key: 'suppliers', href: '/dashboard/suppliers', icon: Truck, group: 'purchasing' },
   { key: 'catalog', href: '/dashboard/catalog', icon: Boxes, group: 'purchasing' },
   { key: 'contracts', href: '/dashboard/contracts', icon: FileSignature, group: 'purchasing', wave1: true },
@@ -251,7 +254,7 @@ export function MobileNav({
   const closeRef = useRef<HTMLButtonElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const items = visibleItems(role, showChain, features, wave1);
-  const primary = items.slice(0, 4);
+  const primary = items.filter((i) => !i.feature).slice(0, 4);
 
   // Close on navigation.
   useEffect(() => {
