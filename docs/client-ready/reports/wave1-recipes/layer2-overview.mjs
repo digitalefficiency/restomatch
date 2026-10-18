@@ -73,6 +73,27 @@ try {
   } finally {
     psql(`update restaurants set settings = $j$${before}$j$::jsonb where id='${RID}';`);
   }
+  // No active dishes → honest "no dishes yet" (never "prices are steady").
+  psql(`update recipes set active = false where restaurant_id='${RID}' and active and not is_sub_recipe;`);
+  try {
+    const s = await session(browser, 'owner', 'en');
+    await overview(s.page);
+    const card = s.page.locator('[data-testid="recipes-overview-card"]');
+    const txt = (await card.count()) ? await card.innerText() : '';
+    check(txt.includes('No dishes yet'), '[empty] card says "No dishes yet"');
+    check(!/steady/i.test(txt) && !txt.includes('Entrecôte'), '[empty] no "steady" claim, no inactive dish listed');
+    await s.ctx.close();
+  } finally {
+    psql(`update recipes set active = true where restaurant_id='${RID}' and not is_sub_recipe;`);
+  }
+  // TV mode → card not rendered.
+  {
+    const s = await session(browser, 'owner', 'he');
+    await s.page.goto(`${BASE}/dashboard?tv=1`);
+    await s.page.waitForTimeout(2500);
+    check((await s.page.locator('[data-testid="recipes-overview-card"]').count()) === 0, '[tv] card not rendered in TV mode');
+    await s.ctx.close();
+  }
   // NUM-10: no match runs in the last 7 days → "—" + "no matches yet", never 100%.
   psql(`update match_runs set run_at = run_at - interval '30 days' where restaurant_id='${RID}';`);
   try {
@@ -83,7 +104,7 @@ try {
       check(txt.includes(locale === 'he' ? 'אין התאמות עדיין השבוע' : 'No matches yet this week'), `[NUM-10 ${locale}] "no matches yet" shown`);
       check(!/100\s?%/.test(txt), `[NUM-10 ${locale}] no fake 100%`);
       check(s.consoleErrors.length === 0 && s.serverErrors.length === 0, `[NUM-10 ${locale}] zero console errors / 5xx`);
-      await s.page.screenshot({ path: `${SHOTS}/overview-num10-${locale}.png`, fullPage: false });
+      await s.page.screenshot({ path: `${SHOTS}/overview-num10-${locale}.png`, fullPage: true });
       await s.ctx.close();
     }
   } finally {
