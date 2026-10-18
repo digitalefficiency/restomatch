@@ -3,6 +3,7 @@ import { auth, signOut } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
 import { Button } from '@/lib/components';
 import { labelForRole } from '@/lib/roles';
+import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { DashboardNav } from './nav';
 import { DashboardSearch } from './search';
 import { WorkerStatusBanner } from './worker-status';
@@ -42,6 +43,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <DashboardNav role={active.role} />
           <div className="flex items-center gap-3">
             <DashboardSearch />
+            <LocaleSwitcher />
             <form action={logout}>
               <Button variant="secondary" size="sm">
                 התנתק

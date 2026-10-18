@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { dirOf, localeFromCookieHeader } from '@/lib/i18n/config';
 import './globals.css';
 
 /**
@@ -20,8 +21,12 @@ export default function GlobalError({
     console.error(error);
   }, [error]);
 
+  // No providers here (this replaces the root layout) — read the cookie directly.
+  const locale = localeFromCookieHeader(typeof document === 'undefined' ? null : document.cookie);
+  const en = locale === 'en';
+
   return (
-    <html lang="he" dir="rtl">
+    <html lang={locale} dir={dirOf(locale)}>
       <body
         style={{
           margin: 0,
@@ -64,10 +69,12 @@ export default function GlobalError({
             }}
           />
           <h1 style={{ fontSize: '1.25rem', fontWeight: 700, margin: '0 0 0.5rem', color: '#ECF5EF' }}>
-            משהו השתבש
+            {en ? 'Something went wrong' : 'משהו השתבש'}
           </h1>
           <p style={{ fontSize: '0.875rem', color: '#9DB2A6', margin: '0 0 1.5rem' }}>
-            נתקלנו בתקלה בלתי צפויה. נסו לטעון מחדש את העמוד.
+            {en
+              ? 'We hit an unexpected error. Try reloading the page.'
+              : 'נתקלנו בתקלה בלתי צפויה. נסו לטעון מחדש את העמוד.'}
           </p>
           {error.digest ? (
             <p
@@ -79,7 +86,7 @@ export default function GlobalError({
                 fontVariantNumeric: 'tabular-nums',
               }}
             >
-              קוד שגיאה: {error.digest}
+              {en ? 'Error code' : 'קוד שגיאה'}: {error.digest}
             </p>
           ) : null}
           <button
@@ -97,7 +104,7 @@ export default function GlobalError({
                 '0 0 0 1px rgba(34,211,154,0.22), 0 12px 36px -10px rgba(34,211,154,0.22)',
             }}
           >
-            נסו שוב
+            {en ? 'Try again' : 'נסו שוב'}
           </button>
         </div>
       </body>

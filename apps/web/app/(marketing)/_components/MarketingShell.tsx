@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Receipt } from 'lucide-react';
+import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 
 const navLinks = [
   { href: '/#benefits', label: 'יתרונות' },
@@ -36,12 +37,15 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
             ))}
           </nav>
 
-          <Link
-            href="/login"
-            className="inline-flex items-center gap-2 rounded-xl border border-line bg-surface-2 px-4 py-2 text-sm font-medium text-ink transition-colors hover:border-primary/40 hover:text-primary"
-          >
-            כניסה
-          </Link>
+          <div className="flex items-center gap-2">
+            <LocaleSwitcher />
+            <Link
+              href="/login"
+              className="inline-flex items-center gap-2 rounded-xl border border-line bg-surface-2 px-4 py-2 text-sm font-medium text-ink transition-colors hover:border-primary/40 hover:text-primary"
+            >
+              כניסה
+            </Link>
+          </div>
         </div>
       </header>
 

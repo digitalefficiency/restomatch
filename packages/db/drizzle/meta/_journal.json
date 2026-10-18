@@ -197,6 +197,13 @@
       "when": 1781820000000,
       "tag": "0027_leak_trust",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1781830000000,
+      "tag": "0028_english_receiving",
+      "breakpoints": true
     }
   ]
 }

@@ -2,6 +2,13 @@ import NextAuth from 'next-auth';
 import { NextResponse } from 'next/server';
 import type { UserRole } from '@restomatch/db';
 import { authConfig } from './auth.config';
+import {
+  isLocale,
+  LOCALE_COOKIE,
+  LOCALE_COOKIE_MAX_AGE_SEC,
+  LOCALE_QUERY_PARAM,
+  withLocaleCookie,
+} from './lib/i18n/config';
 import { isPublicPath } from './lib/publicPaths';
 import { allowedRolesForPath } from './lib/roles';
 import { buildCsp, cspHeaderName, generateNonce, isCspReportOnly } from './lib/securityHeaders';
@@ -90,11 +97,26 @@ export default auth((req) => {
   // Report-Only — that way the report stream isn't polluted by framework scripts
   // and only surfaces genuinely-unexpected sources before we promote to enforce.
   const requestHeaders = new Headers(req.headers);
+  // `?lang=en|he` persists the language choice (shareable English links). The
+  // REQUEST cookie is rewritten too, so this very render is already in it.
+  const langParam = req.nextUrl.searchParams.get(LOCALE_QUERY_PARAM);
+  const langOverride = isLocale(langParam) ? langParam : null;
+  if (langOverride) {
+    requestHeaders.set('cookie', withLocaleCookie(req.headers.get('cookie'), langOverride));
+  }
   requestHeaders.set('x-nonce', nonce);
   requestHeaders.set('content-security-policy', csp);
   const res = NextResponse.next({ request: { headers: requestHeaders } });
   // The RESPONSE header is Report-Only (safe default) or enforcing once promoted.
   res.headers.set(cspHeaderName(reportOnly), csp);
+  if (langOverride) {
+    res.cookies.set(LOCALE_COOKIE, langOverride, {
+      path: '/',
+      maxAge: LOCALE_COOKIE_MAX_AGE_SEC,
+      sameSite: 'lax',
+      secure: req.nextUrl.protocol === 'https:',
+    });
+  }
   return res;
 });
 

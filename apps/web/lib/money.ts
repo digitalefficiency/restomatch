@@ -1,3 +1,5 @@
+import { intlLocaleOf, type Locale } from './i18n/config';
+
 /**
  * Single source of truth for ₪ (ILS) display.
  *
@@ -7,13 +9,15 @@
  * Owned by the money-format-marshal (AGENTS.md).
  *
  * `maximumFractionDigits` defaults to 0 for clean headline ₪; pass 2 for precise
- * tables where the agora matters.
+ * tables where the agora matters. `locale` defaults to Hebrew (output unchanged);
+ * pass the active locale from `useLocale()` / `getLocale()` on English screens
+ * (`₪1,234` instead of `‏1,234 ₪`).
  */
 export function formatIls(
   value: number,
-  opts: { maximumFractionDigits?: number } = {},
+  opts: { maximumFractionDigits?: number; locale?: Locale } = {},
 ): string {
-  return new Intl.NumberFormat('he-IL', {
+  return new Intl.NumberFormat(intlLocaleOf(opts.locale ?? 'he'), {
     style: 'currency',
     currency: 'ILS',
     maximumFractionDigits: opts.maximumFractionDigits ?? 0,

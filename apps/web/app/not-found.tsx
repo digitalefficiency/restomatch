@@ -1,12 +1,15 @@
 import Link from 'next/link';
 import { Compass } from 'lucide-react';
 import { Button, Card } from '@/lib/components';
+import { common } from '@/lib/i18n/messages/common';
+import { getT } from '@/lib/i18n/server';
 
 /**
  * 404 page (Ledger style). Rendered by the root layout, so it inherits the
  * warm-paper canvas + RTL.
  */
-export default function NotFound() {
+export default async function NotFound() {
+  const t = await getT(common);
   return (
     <main className="flex min-h-screen items-center justify-center px-6 py-16">
       <Card elevated flow padding="lg" className="flex max-w-md flex-col items-center gap-4 text-center">
@@ -15,13 +18,11 @@ export default function NotFound() {
         </span>
         <div>
           <p className="font-mono text-sm font-semibold tabular-nums text-primary">404</p>
-          <h1 className="mt-1 text-xl font-bold text-ink">העמוד לא נמצא</h1>
-          <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted">
-            הכתובת שחיפשתם לא קיימת או הוסרה. בדקו את הקישור או חזרו לעמוד הראשי.
-          </p>
+          <h1 className="mt-1 text-xl font-bold text-ink">{t('notFound.title')}</h1>
+          <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted">{t('notFound.body')}</p>
         </div>
         <Link href="/dashboard">
-          <Button variant="primary">חזרה לסקירה</Button>
+          <Button variant="primary">{t('actions.backToOverview')}</Button>
         </Link>
       </Card>
     </main>

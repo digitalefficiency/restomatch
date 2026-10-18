@@ -251,6 +251,12 @@ export const memberships = pgTable(
       .notNull()
       .references(() => restaurants.id, { onDelete: 'cascade' }),
     role: userRole('role').notNull(),
+    /**
+     * UI language for this member ('he' | 'en'), set by a manager on the Team
+     * page (e.g. an English-speaking receiver). NULL = whatever the device chose
+     * via the language switcher. CHECK-constrained in migration 0028.
+     */
+    preferredLocale: varchar('preferred_locale', { length: 8 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.userId, t.restaurantId, t.role] })],
@@ -411,6 +417,8 @@ export const suppliers = pgTable(
       .notNull()
       .references(() => restaurants.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
+    /** Optional Latin-script name for English-language screens (0028). */
+    nameEn: text('name_en'),
     businessId: varchar('business_id', { length: 32 }),
     contactEmail: text('contact_email'),
     contactWhatsapp: varchar('contact_whatsapp', { length: 32 }),
@@ -512,6 +520,11 @@ export const products = pgTable(
      */
     productGroupId: uuid('product_group_id'),
     canonicalName: text('canonical_name').notNull(),
+    /**
+     * English display name (0028) for non-Hebrew-speaking staff. Display-only:
+     * matching, exports and the leak math always use canonicalName.
+     */
+    nameEn: text('name_en'),
     category: text('category'),
     defaultUnit: varchar('default_unit', { length: 32 }),
     barcodeEan: varchar('barcode_ean', { length: 32 }),
@@ -695,6 +708,8 @@ export const poLines = pgTable(
      */
     supplierSku: varchar('supplier_sku', { length: 64 }),
     rawDescription: text('raw_description'),
+    /** English rendering of rawDescription (0028) — display-only. */
+    rawDescriptionEn: text('raw_description_en'),
     qtyOrdered: numeric('qty_ordered', { precision: 12, scale: 3 }).notNull(),
     unit: varchar('unit', { length: 32 }).notNull(),
     unitPriceExpected: numeric('unit_price_expected', { precision: 12, scale: 4 }),
@@ -812,6 +827,12 @@ export const invoiceLines = pgTable(
      */
     supplierSku: varchar('supplier_sku', { length: 64 }),
     rawDescription: text('raw_description').notNull(),
+    /**
+     * English rendering of the OCR'd line (0028) so a non-Hebrew-speaking
+     * receiver can check the delivery. Display-only — the engine reads
+     * rawDescription.
+     */
+    rawDescriptionEn: text('raw_description_en'),
     qtyBilled: numeric('qty_billed', { precision: 12, scale: 3 }).notNull(),
     unit: varchar('unit', { length: 32 }).notNull(),
     unitPriceBilled: numeric('unit_price_billed', { precision: 12, scale: 4 }).notNull(),

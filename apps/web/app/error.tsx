@@ -4,6 +4,8 @@ import { useEffect } from 'react';
 import Link from 'next/link';
 import { AlertTriangle } from 'lucide-react';
 import { Button, Card } from '@/lib/components';
+import { useT } from '@/lib/i18n/client';
+import { common } from '@/lib/i18n/messages/common';
 
 /**
  * App-level client error boundary (Ledger style). Catches render/runtime errors
@@ -17,6 +19,7 @@ export default function Error({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const t = useT(common);
   useEffect(() => {
     // Surface to the console for local debugging; observability hooks elsewhere.
     console.error(error);
@@ -30,21 +33,20 @@ export default function Error({
           <AlertTriangle className="h-6 w-6" aria-hidden="true" />
         </span>
         <div>
-          <h1 className="text-xl font-bold text-ink">משהו השתבש</h1>
-          <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted">
-            נתקלנו בתקלה בלתי צפויה. אפשר לנסות שוב — אם הבעיה חוזרת, רעננו את העמוד או חזרו מאוחר
-            יותר.
-          </p>
+          <h1 className="text-xl font-bold text-ink">{t('errorPage.title')}</h1>
+          <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted">{t('errorPage.body')}</p>
           {error.digest ? (
-            <p className="mt-3 font-mono text-xs tabular-nums text-subtle">קוד שגיאה: {error.digest}</p>
+            <p className="mt-3 font-mono text-xs tabular-nums text-subtle">
+              {t('errorPage.code', { digest: error.digest })}
+            </p>
           ) : null}
         </div>
         <div className="flex flex-wrap items-center justify-center gap-3">
           <Button variant="primary" onClick={() => reset()}>
-            נסו שוב
+            {t('actions.retry')}
           </Button>
           <Link href="/dashboard">
-            <Button variant="secondary">חזרה לסקירה</Button>
+            <Button variant="secondary">{t('actions.backToOverview')}</Button>
           </Link>
         </div>
       </Card>
