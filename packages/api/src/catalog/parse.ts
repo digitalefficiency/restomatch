@@ -192,6 +192,9 @@ const FIELD_KEYWORDS: Record<keyof CatalogColumnMapping, string[]> = {
   packSize: ['אריזה', 'pack', 'packsize', 'גודל', 'qtyperpack', 'כמותבאריזה'],
 };
 
+/** Header fragments that mark a code/identifier column (never the product name). */
+const CODE_HINTS = ['קוד', 'מקט', 'sku', 'code', 'ברקוד', 'barcode'];
+
 /** Best-effort auto-mapping of sheet columns → canonical catalog fields. */
 export function autoDetectMapping(headers: string[]): CatalogColumnMapping {
   const mapping: CatalogColumnMapping = {};
@@ -210,6 +213,9 @@ export function autoDetectMapping(headers: string[]): CatalogColumnMapping {
     for (const h of headers) {
       if (taken.has(h)) continue;
       const n = norm(h);
+      // "קוד פריט" / "item code" is an identifier, not the description, even
+      // though it contains the name keyword "פריט"/"item".
+      if (field === 'name' && CODE_HINTS.some((kw) => n.includes(kw))) continue;
       if (kws.some((kw) => n.includes(kw))) {
         mapping[field] = h;
         taken.add(h);
