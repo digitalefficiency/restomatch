@@ -24,20 +24,18 @@
 
 ---
 
-> ## ⚠️ דחוף / URGENT — Data API exposure until the next merge is applied
+> ## ⚠️ Data API: keep it ON — the lockout is a migration (merged to `main` 2026-10-18 ~09:14)
 >
-> **עברית:** הגרסה הראשונה של הקבצים כבר מוזגה ל-`main` (בשעה ~08:52), ו-Supabase כנראה כבר הריץ אותה.
-> בגרסה הזו, ב-Supabase התפקידים `anon` ו-`authenticated` מקבלים גישה לכל הטבלאות, כולל `sessions`, `user_credentials` ו-`password_reset_tokens`, דרך המפתח הציבורי.
-> הקובץ החדש `20260620072002_restomatch_rls_2a5eafd1.sql` סוגר את זה.
-> **עד שהוא רץ:** ב-Supabase Dashboard → Project Settings → **Data API** → לכבות את ה-Data API, או להסיר את `public` מ-**Exposed schemas**.
-> אפשר לעשות את זה גם מיד, כי האפליקציה לא משתמשת ב-Data API.
+> **עברית:** הגרסה הראשונה של הקבצים (~08:52) השאירה ל-`anon` ול-`authenticated` גישה לכל הטבלאות דרך המפתח הציבורי.
+> הקובץ `20260620072002_restomatch_rls_2a5eafd1.sql` סוגר את זה, והוא כבר ב-`main`.
+> **אין לכבות את ה-Data API ואין להסיר את `public` מ-Exposed schemas:** השרת קורא וכותב את `invoice_scans` דרכו עם מפתח ה-service
+> (`apps/web/lib/supabase/server.ts`, `packages/api/src/routers/scans.ts`). אם כיביתם אותו — הדליקו אותו בחזרה, ובדקו שהנעילה רצה (השאילתות למטה).
 >
-> **English:** the first version of `supabase/` reached `main` at ~08:52, and Supabase has probably applied it.
-> With only those files, `anon` and `authenticated` hold Supabase's default grants on every public table — 42 tables, including `sessions`, `user_credentials` and `password_reset_tokens` (proven on the emulation).
-> Those roles are usable with the public publishable key through the Data API (PostgREST).
-> The appended `20260620072002_restomatch_rls_2a5eafd1.sql` revokes them, also for future tables.
-> **Interim mitigation — do it now, it is safe:** Supabase dashboard → Project Settings → **Data API** → disable the Data API, or remove `public` (and every app schema) from **Exposed schemas**.
-> RestoMatch never uses the Data API: data goes through Drizzle, and supabase-js is used for Storage only, which is a separate service.
+> **English:** with only the first files (~08:52), `anon` and `authenticated` held Supabase's default grants on every public table — 42 tables,
+> including `sessions`, `user_credentials` and `password_reset_tokens` — reachable with the publishable key through PostgREST.
+> `20260620072002_restomatch_rls_2a5eafd1.sql` revokes them (also for future tables) and is on `main`.
+> **Do NOT disable the Data API or remove `public` from Exposed schemas:** server code reads/writes `invoice_scans` through it with the
+> service-role key (the scan viewer and the scans.upload mapping row). The service role keeps its grants; only `anon`/`authenticated` lose theirs.
 >
 > **Verify the revoke landed** (SQL editor) once the merge deploys:
 > ```sql
@@ -68,7 +66,7 @@ Until step 4 the live site keeps using the old project, so steps 1–3 are invis
   |---|---|
   | `20260521164026_restomatch_bootstrap.sql` | `create extension if not exists vector / pg_trgm / "uuid-ossp"`, exactly as `scripts/migrate.ts` does (no explicit schema, so they resolve the way they do in today's production), plus `drizzle.__drizzle_migrations`. |
   | `<journal when, UTC>_<drizzle tag>.sql` × 34 | The drizzle SQL verbatim, plus an idempotent row in `drizzle.__drizzle_migrations` with the hash and `created_at` exactly as drizzle-orm computes them. After a git deploy, `pnpm db:migrate` is a no-op and `db:doctor` shows the schema as current. |
-  | `<tail+1s>_restomatch_rls_<hash>.sql` | `provision-rls` as a migration: core tenant RLS (rls/0002), the append-only audit log (rls/0003), and the role `restomatch_app` with **NOLOGIN and no password in git**. It applies `ensureRlsAppRole`'s grants and revokes, creates the **private `invoice-scans` bucket**, and adds the per-restaurant `storage.objects` policies (rls/0001). It also **locks the Data API out**: it revokes the default grants Supabase gives `anon`/`authenticated` on public tables and sequences, now and for future tables. Those roles are reachable with the publishable key, and RestoMatch never reads tables through PostgREST — supabase-js is used for Storage only. It is idempotent. |
+  | `<tail+1s>_restomatch_rls_<hash>.sql` | `provision-rls` as a migration: core tenant RLS (rls/0002), the append-only audit log (rls/0003), and the role `restomatch_app` with **NOLOGIN and no password in git**. It applies `ensureRlsAppRole`'s grants and revokes, creates the **private `invoice-scans` bucket**, and adds the per-restaurant `storage.objects` policies (rls/0001). It also **locks the Data API out**: it revokes the default grants Supabase gives `anon`/`authenticated` on public tables and sequences, now and for future tables. Those roles are reachable with the publishable key. The app reaches PostgREST only with the service-role key (the `invoice_scans` mapping row and the scan viewer), which keeps its grants — so keep the Data API enabled. It is idempotent. |
 - **When the RLS file is regenerated:** a new one, with a later version, is emitted whenever its content changes or a newer migration lands. Older RLS files stay in the repo, because Supabase has recorded their versions.
 - **Forgetting to regenerate fails CI.** `packages/db/src/__tests__/supabase-deploy.test.ts` fails when `supabase/` is stale, and `pnpm db:supabase-sync --check` checks the same thing locally.
 - **That test also proves the deploy** on an emulated Supabase:
