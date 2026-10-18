@@ -166,3 +166,12 @@ export {
 } from './edge';
 export { canonicalizeEmail } from './email';
 export { startOfDayInTz, endOfDayInTz, addCalendarDaysInTz } from './lib/time';
+export {
+  APP_ERROR_CODES,
+  AppErrorCause,
+  appError,
+  isAppErrorCode,
+  resolveAppError,
+  type AppErrorCode,
+  type AppErrorParams,
+} from './errors';

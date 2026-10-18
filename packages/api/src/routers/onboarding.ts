@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { TRPCError } from '@trpc/server';
 import { eq, memberships, restaurants, sql, storageNamespaces, users } from '@restomatch/db';
 import { z } from 'zod';
+import { appError } from '../errors';
 import { router, userScopedProcedure } from '../trpc';
 
 export const onboardingRouter = router({
@@ -41,10 +42,11 @@ export const onboardingRouter = router({
         .where(eq(users.id, ctx.session.userId))
         .limit(1);
       if (!user) {
-        throw new TRPCError({
-          code: 'UNAUTHORIZED',
-          message: 'החשבון שלך כבר לא קיים. התנתק והתחבר מחדש כדי להמשיך.',
-        });
+        throw appError(
+          'UNAUTHORIZED',
+          'onboarding.accountGone',
+          'החשבון שלך כבר לא קיים. התנתק והתחבר מחדש כדי להמשיך.',
+        );
       }
 
       return ctx.db.transaction(async (tx) => {
