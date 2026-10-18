@@ -17,12 +17,13 @@ import {
   useToast,
 } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
+import { originalProps } from '@/lib/i18n/original';
 import { formatDate, formatDateTime, formatNumber } from '@/lib/i18n/format';
 import { components } from '@/lib/i18n/messages/components';
 import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 import { formatIls } from '@/lib/money';
 import { OrderStatusBadge } from '../orders-table';
-import { lineLabel, parsePositive, parsePrice } from '../order-logic';
+import { lineLabel, parsePositive, parsePrice, unitKey } from '../order-logic';
 
 type OrderData = inferRouterOutputs<AppRouter>['orders']['get'];
 type Line = OrderData['lines'][number];
@@ -273,7 +274,7 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
                         className="w-20"
                       />
                     ) : (
-                      l.unit
+                      <UnitText unit={l.unit} />
                     )}
                   </td>
                   <td className="px-4 py-3 text-end font-mono tabular-nums text-ink">
@@ -362,4 +363,13 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
       </Card>
     </div>
   );
+}
+
+/** Known units are translated in English; anything else is shown as written. */
+function UnitText({ unit }: { unit: string }) {
+  const t = useT(ordersNs);
+  const locale = useLocale();
+  const key = unitKey(unit);
+  if (locale === 'he' || !key) return <span {...originalProps(unit)}>{unit}</span>;
+  return <>{t(`unitNames.${key}`)}</>;
 }

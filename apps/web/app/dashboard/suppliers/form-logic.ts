@@ -107,3 +107,19 @@ export function matchesSupplierFilter(
     (v) => !!v && v.toLowerCase().includes(q),
   );
 }
+
+/**
+ * Common Israeli payment-terms shorthands, so English screens can show them in
+ * English: "שוטף + 30" (end of month + 30 days) and "מזומן" (cash). Anything
+ * else is free text and is shown as written.
+ */
+export type PaymentTerms = { kind: 'eom'; days: number } | { kind: 'cash' };
+
+export function parsePaymentTerms(raw: string | null | undefined): PaymentTerms | null {
+  const s = raw?.trim();
+  if (!s) return null;
+  if (/^מזומן$/.test(s)) return { kind: 'cash' };
+  const m = /^שוטף(?:\s*\+\s*(\d{1,3}))?$/.exec(s);
+  if (m) return { kind: 'eom', days: m[1] ? Number(m[1]) : 0 };
+  return null;
+}

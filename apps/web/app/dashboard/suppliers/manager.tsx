@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { WithOriginal } from '@/lib/i18n/original';
 import Link from 'next/link';
 import type { DeliverySchedule } from '@restomatch/db';
 import { Pencil, Plus, Power, Search, Truck } from 'lucide-react';
@@ -25,6 +26,7 @@ import {
   DAY_KEYS,
   emptyForm,
   matchesSupplierFilter,
+  parsePaymentTerms,
   toCreateInput,
   validateSupplierForm,
   type Day,
@@ -186,6 +188,13 @@ function SupplierRow({
   const locale = useLocale();
   const name = displayName(supplier.name, supplier.nameEn, locale);
   const days = DAY_KEYS.filter((d) => supplier.deliverySchedule?.[d]?.length);
+  // English shows the common Israeli shorthands translated; free text as written.
+  const termsLabel = (raw: string): string => {
+    const p = locale === 'he' ? null : parsePaymentTerms(raw);
+    if (!p) return raw;
+    if (p.kind === 'cash') return t('manager.termsCash');
+    return p.days ? t('manager.termsEomPlus', { days: p.days }) : t('manager.termsEom');
+  };
   return (
     <Card as="article" elevated className={supplier.active ? '' : 'opacity-70'}>
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -213,7 +222,14 @@ function SupplierRow({
             {supplier.contactWhatsapp && (
               <span className="tabular-nums">{t('manager.whatsapp', { phone: supplier.contactWhatsapp })}</span>
             )}
-            {supplier.paymentTerms && <span>{t('manager.paymentTerms', { terms: supplier.paymentTerms })}</span>}
+            {supplier.paymentTerms && (
+              <span>
+                <WithOriginal
+                  text={t('manager.paymentTerms', { terms: termsLabel(supplier.paymentTerms) })}
+                  value={termsLabel(supplier.paymentTerms)}
+                />
+              </span>
+            )}
             {days.length > 0 ? (
               <span>
                 {t('manager.delivery', {

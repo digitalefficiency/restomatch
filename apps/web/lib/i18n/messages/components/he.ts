@@ -47,6 +47,9 @@ export const he = {
     discrepancies: '{count} חריגות',
     potentialLoss: 'הפסד פוטנציאלי {amount}',
     savings: 'חיסכון {amount}',
+    inclVat: '{amount} כולל מע״מ',
+    matchesOrderAndReceipt: 'תואמת להזמנה ולקבלה',
+    awaitingMonthlyMatch: 'ממתינה להתאמה מול תעודות המשלוח של החודש',
     empty: 'עוד אין פעילות להצגה.',
   },
 };

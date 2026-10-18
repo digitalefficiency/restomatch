@@ -3,6 +3,7 @@ import { buildSearchOptions } from '../searchOptions';
 import {
   emptyForm,
   matchesSupplierFilter,
+  parsePaymentTerms,
   scheduleToForm,
   toCreateInput,
   toUpdatePatch,
@@ -16,6 +17,7 @@ import {
   orderTotalIls,
   parsePositive,
   parsePrice,
+  unitKey,
 } from '../orders/order-logic';
 import { productPatch } from '../products/product-logic';
 import { presetRange, rangeError, withBom } from '../exports/range';
@@ -203,5 +205,38 @@ describe('global search options', () => {
       noInvoiceNumber: 'x',
     });
     expect(opts.map((o) => o.kind)).toEqual(['invoice']);
+  });
+});
+
+describe('order units (English display)', () => {
+  it('maps common free-text Hebrew units to a known key', () => {
+    expect(unitKey('ק״ג')).toBe('kg');
+    expect(unitKey(' ק"ג ')).toBe('kg');
+    expect(unitKey('ארגז')).toBe('box');
+    expect(unitKey('בקבוק')).toBe('bottle');
+    expect(unitKey('חבית')).toBe('barrel');
+    expect(unitKey('שישייה')).toBe('sixPack');
+    expect(unitKey('ליטר')).toBe('liter');
+    expect(unitKey('KG')).toBe('kg');
+  });
+
+  it('returns null for unknown units so the original text is shown', () => {
+    expect(unitKey('צנצנת גדולה')).toBeNull();
+    expect(unitKey('')).toBeNull();
+    expect(unitKey(null)).toBeNull();
+  });
+});
+
+describe('supplier payment terms (English display)', () => {
+  it('recognises the common Israeli shorthands', () => {
+    expect(parsePaymentTerms('שוטף + 30')).toEqual({ kind: 'eom', days: 30 });
+    expect(parsePaymentTerms(' שוטף+60 ')).toEqual({ kind: 'eom', days: 60 });
+    expect(parsePaymentTerms('שוטף')).toEqual({ kind: 'eom', days: 0 });
+    expect(parsePaymentTerms('מזומן')).toEqual({ kind: 'cash' });
+  });
+  it('leaves free text alone', () => {
+    expect(parsePaymentTerms('Net 30')).toBeNull();
+    expect(parsePaymentTerms('שוטף + 30 בהעברה')).toBeNull();
+    expect(parsePaymentTerms(null)).toBeNull();
   });
 });

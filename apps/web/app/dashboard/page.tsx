@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { auth } from '@/auth';
 import { redirect } from 'next/navigation';
 import { Activity, ArrowLeft, CheckCircle2, ClipboardCheck, Hourglass, ShieldCheck } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
@@ -40,8 +41,13 @@ export default async function DashboardPage() {
   // than hiding the section entirely.
   let leaks: Awaited<ReturnType<typeof caller.owner.leaks>> = [];
   let leaksEntitlementBlocked = false;
+  // Only owners can read the grid — don't fire a request that is certain to be
+  // FORBIDDEN (it lands in the logs / Sentry as an error for every other role).
+  const role = (
+    (await auth())?.user as { role?: string } | undefined
+  )?.role;
   try {
-    leaks = await caller.owner.leaks({ limit: 8 });
+    if (role === 'owner') leaks = await caller.owner.leaks({ limit: 8 });
   } catch (err) {
     if (entitlementCauseOf(err)) {
       leaksEntitlementBlocked = true;

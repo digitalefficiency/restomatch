@@ -87,6 +87,23 @@ export const he = {
     priceInvalid: 'המחיר אינו תקין.',
     lastLine: 'זו השורה האחרונה — אי אפשר לשלוח הזמנה ריקה. בטלו את ההזמנה במקום.',
   },
+  /** Display names for common free-text order units (see order-logic.unitKey). */
+  unitNames: {
+    kg: 'ק״ג',
+    gram: 'גרם',
+    liter: 'ליטר',
+    ml: 'מ״ל',
+    unit: 'יח׳',
+    box: 'ארגז',
+    pack: 'מארז',
+    bottle: 'בקבוק',
+    barrel: 'חבית',
+    sixPack: 'שישייה',
+    can: 'פחית',
+    bag: 'שק',
+    tray: 'מגש',
+    bunch: 'צרור',
+  },
   lineColumns: {
     description: 'תיאור',
     qty: 'כמות',

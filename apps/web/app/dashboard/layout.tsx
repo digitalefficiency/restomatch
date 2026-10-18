@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { originalProps } from '@/lib/i18n/original';
 import { LogOut } from 'lucide-react';
 import { auth, signOut } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
@@ -63,7 +64,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 email={email}
               />
               <div className="min-w-0 flex-1 lg:flex-none">
-                <p className="truncate text-lg font-bold tracking-tight text-ink">
+                <p
+                  className="truncate text-lg font-bold tracking-tight text-ink"
+                  {...originalProps(active.restaurantName)}
+                >
                   {active.restaurantName}
                 </p>
                 <p className="truncate text-xs text-subtle">

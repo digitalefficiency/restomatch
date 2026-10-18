@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { WithOriginal, originalProps } from '@/lib/i18n/original';
 import { ArrowRight, FileCheck2 } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
@@ -103,7 +104,9 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
               <div className="flex flex-col gap-1 text-sm text-muted sm:flex-row sm:justify-between print:text-black">
                 <div>
                   <p className="font-semibold text-ink print:text-black">{t('claims.to', { supplier: letter.name })}</p>
-                  <p>{t('claims.from', { restaurant })}</p>
+                  <p>
+                    <WithOriginal text={t('claims.from', { restaurant })} value={restaurant} />
+                  </p>
                 </div>
                 <p>{t('claims.date', { date: today })}</p>
               </div>
@@ -147,7 +150,9 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
               <p className="mt-3 text-sm text-muted print:text-black">
                 {t('claims.signature')}
                 <br />
-                <span className="font-semibold text-ink print:text-black">{restaurant}</span>
+                <span className="font-semibold text-ink print:text-black" {...originalProps(restaurant)}>
+                  {restaurant}
+                </span>
               </p>
             </Card>
           ))}

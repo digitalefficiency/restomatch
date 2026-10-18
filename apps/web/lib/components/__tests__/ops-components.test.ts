@@ -37,6 +37,15 @@ describe('localizeActivity', () => {
       detail: 'saved ₪1,200',
     });
     expect(localizeActivity({ eventType: 'mystery', title: 'משהו', detail: null }, 'en').title).toBe('Update');
+    expect(localizeActivity({ eventType: 'invoice_received', title: 'חשבונית התקבלה', detail: 'ירקות השרון · ₪1027 כולל מע״מ' }, 'en').detail).toBe(
+      'ירקות השרון · ₪1,027 incl. VAT',
+    );
+    expect(localizeActivity({ eventType: 'invoice_matched', title: 'x', detail: 'מאפיית ברנר · תואמת להזמנה ולקבלה' }, 'en').detail).toBe(
+      'מאפיית ברנר · matches the order and the delivery',
+    );
+    expect(
+      localizeActivity({ eventType: 'invoice_received', title: 'x', detail: 'מחלבות הגליל · ממתינה להתאמה מול תעודות המשלוח של החודש' }, 'en').detail,
+    ).toBe("מחלבות הגליל · waiting to be matched against this month's delivery notes");
     expect(localizeActivity({ eventType: 'sync_completed', title: 'Synced 3 orders', detail: null }, 'en').title).toBe(
       'Synced 3 orders',
     );

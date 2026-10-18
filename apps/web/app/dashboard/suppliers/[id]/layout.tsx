@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import { auth } from '@/auth';
 import { TRPCError } from '@trpc/server';
 import { createServerCaller } from '@/lib/trpc/server';
 import { Badge, Breadcrumbs, displayName } from '@/lib/components';
@@ -45,7 +46,11 @@ export default async function SupplierDetailLayout({
   // owner.leaks is advanced_analytics-gated — a closed gate (or any error) just
   // leaves the figure muted; we never fabricate a number.
   let leakIls: number | null = null;
+  const role = (
+    (await auth())?.user as { role?: string } | undefined
+  )?.role;
   try {
+    if (role !== 'owner') throw new Error('owner-only');
     const leaks = await caller.owner.leaks({ limit: 100 });
     const rows = leaks.filter((l) => l.supplierId === id);
     leakIls = rows.length > 0 ? rows.reduce((sum, l) => sum + l.monthExcessIls, 0) : null;
