@@ -14,7 +14,11 @@ export {
   CompositeTranslator,
   createTranslator,
   defaultGlossary,
+  CLAUDE_ERROR_BACKOFF_MS,
+  CLAUDE_MISS_TTL_MS,
+  MAX_CACHE_ENTRIES,
   type CompositeTranslatorOptions,
+  type TranslateManyOptions,
   type Translation,
   type TranslationSource,
 } from './composite';

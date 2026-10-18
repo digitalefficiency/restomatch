@@ -26,7 +26,9 @@ export function allowedScanUrlPrefix(env: NodeJS.ProcessEnv = process.env): stri
 
 export function isAllowedScanUrl(url: string, env: NodeJS.ProcessEnv = process.env): boolean {
   const prefix = allowedScanUrlPrefix(env);
-  if (!prefix) return true;
+  // Nothing to pin to (local/test without storage). Production must never fail
+  // OPEN on a missing/misnamed Supabase env var — that would re-open the SSRF.
+  if (!prefix) return env.NODE_ENV !== 'production';
   if (!url.startsWith(prefix)) return false;
   // No path tricks after the prefix (../ or an embedded scheme).
   const rest = url.slice(prefix.length);

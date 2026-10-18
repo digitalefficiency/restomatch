@@ -16,7 +16,25 @@ export interface CompositeTranslatorOptions {
   claude?: ClaudeTranslator | null;
   /** Called when the Claude leg fails; defaults to console.warn. */
   onClaudeError?: (err: unknown) => void;
+  /** Clock seam for tests (ms). */
+  now?: () => number;
 }
+
+export interface TranslateManyOptions {
+  /** false = glossary only for this call (the caller's cost budget is spent). */
+  allowClaude?: boolean;
+}
+
+/**
+ * A name Claude was asked about but did not answer is not re-sent for this
+ * long — receiving pages call ensureEnglish on every render, and without this
+ * an untranslatable line re-billed Claude on every page view (cost abuse).
+ */
+export const CLAUDE_MISS_TTL_MS = 60 * 60 * 1000;
+/** After a Claude transport/parse failure, skip those names for a while. */
+export const CLAUDE_ERROR_BACKOFF_MS = 5 * 60 * 1000;
+/** Bound the process-wide caches (texts are attacker-influenced). */
+export const MAX_CACHE_ENTRIES = 10_000;
 
 /**
  * Glossary first (instant, free, deterministic), Claude for what's left (one
@@ -31,13 +49,25 @@ export class CompositeTranslator {
   readonly glossary: GlossaryTranslator;
   private readonly claude: ClaudeTranslator | null;
   private readonly memo = new Map<string, Translation>();
+  /** text → epoch ms until which Claude is not asked about it again. */
+  private readonly claudeSkipUntil = new Map<string, number>();
   private readonly onClaudeError: (err: unknown) => void;
+  private readonly now: () => number;
 
   constructor(opts: CompositeTranslatorOptions = {}) {
     this.glossary = opts.glossary ?? defaultGlossary();
     this.claude = opts.claude ?? null;
     this.onClaudeError =
-      opts.onClaudeError ?? ((err) => console.warn('[translate] Claude leg failed — glossary only', err));
+      opts.onClaudeError ??
+      ((err) =>
+        // Message only — never the request/response object (it may echo invoice text).
+        console.warn('[translate] Claude leg failed — glossary only:', err instanceof Error ? err.message : 'error'));
+    this.now = opts.now ?? Date.now;
+  }
+
+  private remember<K, V>(map: Map<K, V>, key: K, value: V): void {
+    if (map.size >= MAX_CACHE_ENTRIES) map.clear();
+    map.set(key, value);
   }
 
   get hasClaude(): boolean {
@@ -45,7 +75,10 @@ export class CompositeTranslator {
   }
 
   /** Translate many names; the Map holds only names we could translate. */
-  async translateMany(texts: readonly (string | null | undefined)[]): Promise<Map<string, Translation>> {
+  async translateMany(
+    texts: readonly (string | null | undefined)[],
+    opts: TranslateManyOptions = {},
+  ): Promise<Map<string, Translation>> {
     const out = new Map<string, Translation>();
     const misses: string[] = [];
     for (const raw of texts) {
@@ -64,22 +97,28 @@ export class CompositeTranslator {
       const g = this.glossary.translate(text);
       if (g) {
         const t: Translation = { en: g, source: 'glossary' };
-        this.memo.set(text, t);
+        this.remember(this.memo, text, t);
         out.set(text, t);
       } else {
         misses.push(text);
       }
     }
 
-    if (misses.length > 0 && this.claude) {
+    const now = this.now();
+    const askClaude = misses.filter((m) => (this.claudeSkipUntil.get(m) ?? 0) <= now);
+    if (askClaude.length > 0 && this.claude && opts.allowClaude !== false) {
       try {
-        const answered = await this.claude.translateBatch(misses);
+        const answered = await this.claude.translateBatch(askClaude);
         for (const [he, en] of answered) {
           const t: Translation = { en, source: 'claude' };
-          this.memo.set(he, t);
+          this.remember(this.memo, he, t);
           out.set(he, t);
         }
+        for (const he of askClaude) {
+          if (!answered.has(he)) this.remember(this.claudeSkipUntil, he, now + CLAUDE_MISS_TTL_MS);
+        }
       } catch (err) {
+        for (const he of askClaude) this.remember(this.claudeSkipUntil, he, now + CLAUDE_ERROR_BACKOFF_MS);
         this.onClaudeError(err);
       }
     }

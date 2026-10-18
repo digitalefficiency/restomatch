@@ -43,3 +43,38 @@ second pass when it lands.
 ## Gate
 
 `pnpm test` → 12/12 tasks (api 455, web 182, charts 33, matching 86, db 45 …); web `tsc` 0 errors.
+
+---
+
+# Second pass — S2 "Receiver in English" (`claude/client-ready` @ 2cf22c8)
+
+| # | Severity | Where | Finding | Fixed? |
+|---|---|---|---|---|
+| S2-1 | **Medium** | `packages/translate/src/composite.ts`, `packages/api/src/receiving/english.ts` | **Unbounded paid Claude calls.** `receiving.ensureEnglish` is a `memberProcedure` and the invoice + receiving pages call it on **every render**. Names Claude did not answer (or failed on) stayed NULL and were re-sent on every call — any member (or a reload loop) could drive unlimited Claude spend; the process memo was also unbounded. | ✅ Translator remembers Claude misses for 1 h and backs off 5 min after a failure; caches capped (10k). `ensureEnglish` adds a per-restaurant budget (30 Claude-eligible calls/hour, then glossary-only — lines still render). Tests: `translate/__tests__/claude-cost-guard.test.ts`, `api/__tests__/english-cost-guard.test.ts`. |
+| S2-2 | Low | `packages/api/src/lib/scanUrls.ts` | `isAllowedScanUrl` **failed open** when no Supabase URL was configured — in production a missing/misnamed env var would re-open the worker SSRF (pre-existing, now on the S2 path). | ✅ Fails closed when `NODE_ENV=production`. Test in `scanUrls.test.ts`. |
+| S2-3 | Low | `apps/web/app/scans/[invoiceId]/file/route.ts` | Local-scan file route checked only `session.user.id`, not `twoFactorPending` (middleware redirects pending sessions, but the route shouldn't depend on it). | ✅ 404 for a 2FA-pending session. |
+| S2-4 | Info | default `onClaudeError` | Logged the raw error object (SDK errors can echo the request = invoice text). | ✅ Logs `err.message` only (test). |
+
+**Verified clean (S2):**
+- **Translator prompt injection** — invoice text goes to Claude only as JSON data (`{id, he}`), with
+  structured-output JSON schema + zod validation. Ids map back by index, unknown ids are dropped, and
+  output is capped at 300 chars. Rendered by React (escaped) and never executed. A 20 s timeout and
+  `maxRetries: 1`. No API key or text in logs.
+- **`ensureEnglish` tenant scoping** — PO/invoice re-verified against the session restaurant (foreign →
+  NOT_FOUND); products updated only where `restaurant_id` matches; `MAX_ROWS` 400. Idempotent (`… IS NULL`
+  re-checked on UPDATE).
+- **Local scan storage** — disabled when `NODE_ENV=production`, when Supabase is configured, or with
+  `LOCAL_SCAN_STORAGE=0`. The restaurant dir comes from the session (UUID-validated); scan ids match
+  `^scan-[a-z0-9]+-[a-f0-9]{8}$` (no traversal); `ext` is sanitized. MIME is allowlisted at upload
+  (pdf/jpeg/png/webp), so the served `content-type` can't be HTML; the route sends `nosniff`,
+  `no-store` and `inline`.
+- **`scans.upload` clientUploadId** — deterministic id = sha256(restaurantId:clientUploadId), so one tenant
+  cannot collide into another's scan id.
+- **`registerInvoice` advisory lock** — parameterized `hashtext(...)` key scoped by restaurant + object
+  URL; `imageUrl` pinned to the private bucket prefix; GR + supplier ownership asserted.
+- **Dev OCR stub** — `devOcrStubEnabled()` is false in production or with a real key.
+- **`/scans/<invoice uuid>`** — resolved through the restaurant-scoped `receiving.getInvoice` and
+  re-signed only under the caller's tenant prefix. A foreign UUID → 404.
+
+**Gate (S2 pass):** `pnpm test` → 13/13 tasks (api 489, web 183, translate 67, ocr 44 …); web `tsc` 0;
+`pnpm build` green.
