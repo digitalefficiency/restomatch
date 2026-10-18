@@ -47,6 +47,17 @@ interface Ctx {
   y: number;
 }
 
+/**
+ * fontkit (inside pdf-lib) runs its own script detection: a string whose first
+ * letter is Hebrew is laid out RTL and reversed WHOLESALE — digits included.
+ * So the visual-order line from ./bidi.ts is drawn as runs: pure-Hebrew runs
+ * are handed over reversed (fontkit flips them back), everything else as is.
+ */
+export function pdfRuns(visual: string): string[] {
+  const runs = visual.match(/[\u0590-\u05FF]+|[^\u0590-\u05FF]+/g) ?? [];
+  return runs.map((r) => (/[\u0590-\u05FF]/.test(r) ? [...r].reverse().join('') : r));
+}
+
 /** Draw `text` aligned to the reading start (right in Hebrew) or end of the content box. */
 function draw(
   ctx: Ctx,
@@ -55,15 +66,19 @@ function draw(
 ) {
   const font = opts.bold ? ctx.bold : ctx.regular;
   const size = opts.size ?? 11;
-  const visual = visualOrder(text, ctx.rtl ? 'rtl' : 'ltr');
-  const width = font.widthOfTextAtSize(visual, size);
+  const runs = pdfRuns(visualOrder(text, ctx.rtl ? 'rtl' : 'ltr'));
+  const widths = runs.map((r) => font.widthOfTextAtSize(r, size));
+  const width = widths.reduce((a, b) => a + b, 0);
   const atStart = (opts.at ?? 'start') === 'start';
   const inset = opts.inset ?? 0;
   const leftEdge = M + inset;
   const rightEdge = A4[0] - M - inset;
   // Start of reading = right edge in RTL, left edge in LTR.
-  const x = atStart === ctx.rtl ? rightEdge - width : leftEdge;
-  ctx.page.drawText(visual, { x, y: opts.y ?? ctx.y, size, font, color: opts.color ?? C.ink });
+  let x = atStart === ctx.rtl ? rightEdge - width : leftEdge;
+  runs.forEach((run, i) => {
+    ctx.page.drawText(run, { x, y: opts.y ?? ctx.y, size, font, color: opts.color ?? C.ink });
+    x += widths[i]!;
+  });
 }
 
 function rule(ctx: Ctx, y: number) {

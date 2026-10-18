@@ -113,3 +113,21 @@ describe('server ₪ formatting', () => {
     expect(formatIlsAgorot(123456, { locale: 'en', maximumFractionDigits: 2 })).toBe('₪1,234.56');
   });
 });
+
+describe('PDF runs vs fontkit script detection', () => {
+  it('hands fontkit only pure-Hebrew runs, pre-reversed (fontkit reverses Hebrew runs wholesale)', async () => {
+    const { pdfRuns } = await import('../reports/pdf');
+    const fontkit = (await import('@pdf-lib/fontkit')).default;
+    const { REGULAR_TTF_BASE64 } = await import('../reports/fonts/reportFont');
+    const font = fontkit.create(Buffer.from(REGULAR_TTF_BASE64, 'base64'));
+    const drawn = (text: string, dir: 'rtl' | 'ltr') =>
+      pdfRuns(visualOrder(text, dir))
+        .map((r) => font.layout(r).glyphs.map((g: { codePoints: number[] }) => String.fromCodePoint(...g.codePoints)).join(''))
+        .join('');
+    // What ends up on the page, left to right:
+    expect(drawn('דוח חודשי · אוקטובר 2026', 'rtl')).toBe('2026 רבוטקוא · ישדוח חוד');
+    expect(drawn('2.0% מהרכש', 'rtl')).toBe('שכרהמ 2.0%');
+    expect(drawn('1. Price (3)', 'ltr')).toBe('1. Price (3)');
+    expect(drawn('Top: ירקות השרון', 'ltr')).toBe('Top: ןורשה תוקרי');
+  });
+});
