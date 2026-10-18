@@ -17,6 +17,7 @@ import {
 } from '@restomatch/db';
 import { adminProcedure, router } from '../trpc';
 import { recordAudit } from '../audit';
+import { appError } from '../errors';
 import { usagePeriod } from '../entitlements';
 
 const PlanKeyEnum = z.enum(['trial', 'basic', 'pro', 'chain']);
@@ -107,7 +108,7 @@ export const adminRouter = router({
         .from(restaurants)
         .where(eq(restaurants.id, input.restaurantId))
         .limit(1);
-      if (!r) throw new TRPCError({ code: 'NOT_FOUND', message: 'restaurant not found' });
+      if (!r) throw appError('NOT_FOUND', 'admin.notFound', 'restaurant not found');
 
       let subscription: {
         planKey: string;
@@ -177,7 +178,7 @@ export const adminRouter = router({
           .where(eq(restaurants.id, input.restaurantId))
           .for('update')
           .limit(1);
-        if (!r) throw new TRPCError({ code: 'NOT_FOUND', message: 'restaurant not found' });
+        if (!r) throw appError('NOT_FOUND', 'admin.notFound', 'restaurant not found');
 
         const [plan] = await tx
           .select({ id: plans.id })
@@ -303,7 +304,7 @@ export const adminRouter = router({
           ),
         )
         .limit(1);
-      if (!current) throw new TRPCError({ code: 'NOT_FOUND', message: 'membership not found' });
+      if (!current) throw appError('NOT_FOUND', 'admin.notFound', 'membership not found');
 
       // Never strand a restaurant with zero owners — owner-gated tenant
       // operations would become permanently inaccessible with no self-service
@@ -317,10 +318,11 @@ export const adminRouter = router({
           );
         const remaining = owners.filter((o) => o.userId !== input.userId).length;
         if (remaining === 0) {
-          throw new TRPCError({
-            code: 'CONFLICT',
-            message: 'cannot demote the last owner — promote another owner first',
-          });
+          throw appError(
+            'CONFLICT',
+            'admin.lastOwner',
+            'cannot demote the last owner — promote another owner first',
+          );
         }
       }
 
