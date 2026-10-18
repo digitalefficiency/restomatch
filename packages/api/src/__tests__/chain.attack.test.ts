@@ -229,7 +229,7 @@ describe('chain.overview price disparities', () => {
   const setFlag = (on: boolean) =>
     ownerDb
       .update(restaurants)
-      .set({ settings: on ? { features: { priceDisparity: true } } : {} })
+      .set({ settings: (on ? { features: { priceDisparity: true } } : {}) as typeof restaurants.$inferInsert['settings'] })
       .where(eq(restaurants.id, A.restaurantId));
 
   it('is null while the priceDisparity feature is off', async () => {
