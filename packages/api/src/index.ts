@@ -30,6 +30,7 @@ import { monthlyReportRouter } from './routers/monthlyReport';
 import { ingestRouter } from './routers/ingest';
 import { leakCheckRouter } from './routers/leakCheck';
 import { growthRouter } from './routers/growth';
+import { integrationsRouter } from './routers/integrations';
 
 export const appRouter = router({
   owner: ownerRouter,
@@ -52,6 +53,7 @@ export const appRouter = router({
   products: productsRouter,
   recipes: recipesRouter,
   chain: chainRouter,
+  integrations: integrationsRouter,
   team: teamRouter,
   dsr: dsrRouter,
   contracts: contractsRouter,
