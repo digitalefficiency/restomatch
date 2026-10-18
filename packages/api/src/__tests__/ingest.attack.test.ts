@@ -57,7 +57,7 @@ const ownerDb = createDb(TEST_DB_URL);
 let appDb: Database;
 let A: Tenant;
 let B: Tenant;
-const tokens = { aWa: '', aEmail: '', bWa: '' };
+const tokens = { aWa: '', aEmail: '', bWa: '', bEmail: '' };
 const WA_SECRET = 'test-wa-secret';
 const NOW = 1_800_000_000;
 let waProvider: StubIngestProvider;
@@ -121,13 +121,13 @@ function waRequest(token: string, body: string, signature = signMeta(body, WA_SE
   });
 }
 
-function emailBody(opts: { id: string; to: string; from?: string; content?: string }) {
+function emailBody(opts: { id: string; to: string | string[]; from?: string; content?: string }) {
   return JSON.stringify({
     type: 'email.received',
     data: {
       email_id: opts.id,
       from: opts.from ?? 'Bills <bills@supplier-a.co.il>',
-      to: [opts.to],
+      to: Array.isArray(opts.to) ? opts.to : [opts.to],
       subject: 'Invoice',
       attachments: [
         {
@@ -188,6 +188,7 @@ beforeAll(async () => {
   tokens.aWa = await addChannel(ownerDb, A.restaurantId, 'whatsapp', 'PNID-A');
   tokens.aEmail = await addChannel(ownerDb, A.restaurantId, 'email');
   tokens.bWa = await addChannel(ownerDb, B.restaurantId, 'whatsapp');
+  tokens.bEmail = await addChannel(ownerDb, B.restaurantId, 'email');
   // A allow-lists its supplier's WhatsApp number + billing address.
   await ownerDb.insert(ingestSenders).values([
     { restaurantId: A.restaurantId, kind: 'whatsapp', sender: '972501111111', supplierId: A.supplierId },
@@ -303,8 +304,14 @@ describe('WhatsApp webhook — attacks', () => {
       const res = await handleWhatsAppWebhook(waRequest(t, body), t, deps({ config: waConfig() }));
       expect(res.status).toBe(404);
     }
-    const revoked = await addChannel(ownerDb, B.restaurantId, 'email');
-    await ownerDb.update(ingestChannels).set({ active: false }).where(eq(ingestChannels.tokenHash, hashIngestToken(revoked)));
+    const revoked = generateIngestToken('email');
+    await ownerDb.insert(ingestChannels).values({
+      restaurantId: B.restaurantId,
+      kind: 'email',
+      tokenHash: hashIngestToken(revoked),
+      tokenHint: tokenHint(revoked),
+      active: false,
+    });
     const eb = emailBody({ id: 'em_revoked', to: `${revoked}@in.test` });
     expect((await handleEmailWebhook(emailRequest(eb), deps({ config: emailConfig() }))).status).toBe(404);
   });
@@ -457,5 +464,58 @@ describe('E-mail webhook — attacks', () => {
 
   it('stub provider bytes are deterministic (same media → same stored object)', () => {
     expect(Buffer.from(stubDocumentBytes('m1')).equals(Buffer.from(stubDocumentBytes('m1')))).toBe(true);
+  });
+});
+
+describe('refuter regressions', () => {
+  it('#1 a fake <allow-listed address> in the display name does NOT pass the allow-list', async () => {
+    const res = await handleEmailWebhook(
+      emailRequest(emailBody({ id: 'em_spoof', to: `${tokens.aEmail}@in.test`, from: '"<bills@supplier-a.co.il>" <attacker@evil.example>' })),
+      deps({ config: emailConfig() }),
+    );
+    expect(res.status).toBe(200);
+    const [m] = (await messagesOf(A.restaurantId)).filter((x) => x.providerMessageId === 'em_spoof');
+    expect(m).toMatchObject({ sender: 'attacker@evil.example', senderAllowed: false, status: 'needs_review', supplierId: null });
+  });
+
+  it('#2 one e-mail CC\'d to two restaurants reaches BOTH (each under its own GUC)', async () => {
+    const res = await handleEmailWebhook(
+      emailRequest(emailBody({ id: 'em_both', to: [`${tokens.aEmail}@in.test`, `${tokens.bEmail}@in.test`] })),
+      deps({ config: emailConfig() }),
+    );
+    expect(res.status).toBe(200);
+    expect((await messagesOf(A.restaurantId)).filter((m) => m.providerMessageId === 'em_both')).toHaveLength(1);
+    const [inB] = (await messagesOf(B.restaurantId)).filter((m) => m.providerMessageId === 'em_both');
+    // A's allow-list does not leak into B.
+    expect(inB).toMatchObject({ senderAllowed: false, status: 'needs_review' });
+  });
+
+  it('#4 production config: a WhatsApp channel without a bound phone_number_id accepts nothing', async () => {
+    const cfg = { ...waConfig(), requirePhoneNumberId: true };
+    const res = await handleWhatsAppWebhook(
+      waRequest(tokens.bWa, waBody({ id: 'wamid.unbound', phoneNumberId: 'PNID-A' })),
+      tokens.bWa,
+      deps({ config: cfg }),
+    );
+    expect(((await res.json()) as { results: Array<{ outcome: string }> }).results[0]!.outcome).toBe('rejected');
+    expect((await messagesOf(B.restaurantId)).some((m) => m.providerMessageId === 'wamid.unbound')).toBe(false);
+    // A's bound channel still works with its own number.
+    const ok = await handleWhatsAppWebhook(waRequest(tokens.aWa, waBody({ id: 'wamid.bound' })), tokens.aWa, deps({ config: cfg }));
+    expect(((await ok.json()) as { results: Array<{ outcome: string }> }).results[0]!.outcome).toBe('accepted');
+  });
+
+  it('#5 a WhatsApp message without a timestamp is refused (400)', async () => {
+    const body = waBody({ id: 'wamid.nots' }).replace(/"timestamp":"\d+",/, '');
+    const res = await handleWhatsAppWebhook(waRequest(tokens.aWa, body), tokens.aWa, deps({ config: waConfig() }));
+    expect(res.status).toBe(400);
+  });
+
+  it('#3 production without live credentials stores no fake bytes (fetch_failed, no invoice)', async () => {
+    const cfg = { ...ingestConfig('whatsapp', { NODE_ENV: 'production', WHATSAPP_APP_SECRET: WA_SECRET }), requirePhoneNumberId: false };
+    const res = await handleWhatsAppWebhook(waRequest(tokens.aWa, waBody({ id: 'wamid.noprov' })), tokens.aWa, deps({ config: cfg }));
+    expect(res.status).toBe(200);
+    const [m] = (await messagesOf(A.restaurantId)).filter((x) => x.providerMessageId === 'wamid.noprov');
+    const [d] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.messageId, m!.id));
+    expect(d).toMatchObject({ status: 'failed', error: 'fetch_failed', invoiceId: null, storagePath: null });
   });
 });

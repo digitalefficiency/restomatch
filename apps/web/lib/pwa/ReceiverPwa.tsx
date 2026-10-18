@@ -48,7 +48,7 @@ html[data-pwa='installed'] body { overscroll-behavior-y: contain; }
  * uploader and the install prompt. Renders nothing visible while online with
  * an empty queue.
  */
-export function ReceiverPwa() {
+export function ReceiverPwa({ restaurantId }: { restaurantId: string }) {
   const t = useT(ingest);
   const locale = useLocale();
   const utils = trpc.useUtils();
@@ -63,11 +63,11 @@ export function ReceiverPwa() {
   const refreshCount = useCallback(async () => {
     if (!idbAvailable()) return;
     try {
-      setQueued((await idbQueueStore.list()).length);
+      setQueued((await idbQueueStore.list()).filter((i) => i.restaurantId === restaurantId).length);
     } catch {
       /* private mode without IndexedDB */
     }
-  }, []);
+  }, [restaurantId]);
 
   const upload = useCallback(
     async (item: QueuedPhoto) => {
@@ -95,7 +95,7 @@ export function ReceiverPwa() {
     running.current = true;
     setSyncing(true);
     try {
-      const r = await processQueue(idbQueueStore, upload, () => navigator.onLine);
+      const r = await processQueue(idbQueueStore, upload, () => navigator.onLine, restaurantId);
       setSyncError(r.failed.length > 0);
       setQueued(r.remaining);
     } catch {
@@ -104,7 +104,7 @@ export function ReceiverPwa() {
       running.current = false;
       setSyncing(false);
     }
-  }, [upload]);
+  }, [upload, restaurantId]);
 
   useEffect(() => {
     setOnline(navigator.onLine);

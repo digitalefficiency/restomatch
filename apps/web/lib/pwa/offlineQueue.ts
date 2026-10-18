@@ -14,6 +14,8 @@
  */
 export interface QueuedPhoto {
   clientUploadId: string;
+  /** The restaurant the photo was taken for — only uploaded while that restaurant is active. */
+  restaurantId: string;
   poId: string;
   supplierId: string;
   supplierName: string;
@@ -51,8 +53,13 @@ export async function processQueue(
   store: QueueStore,
   upload: PhotoUploader,
   isOnline: () => boolean = () => true,
+  restaurantId?: string,
 ): Promise<ProcessResult> {
-  const items = (await store.list()).sort((a, b) => a.createdAt - b.createdAt);
+  // Another restaurant's photos (shared device / restaurant switch) are never
+  // uploaded into the current one; they wait until that restaurant is active.
+  const items = (await store.list())
+    .filter((i) => !restaurantId || i.restaurantId === restaurantId)
+    .sort((a, b) => a.createdAt - b.createdAt);
   const uploaded: string[] = [];
   const failed: string[] = [];
   for (const item of items) {
@@ -72,7 +79,8 @@ export async function processQueue(
       if (isNetworkError(err)) break;
     }
   }
-  return { uploaded, failed, remaining: (await store.list()).length };
+  const left = await store.list();
+  return { uploaded, failed, remaining: left.filter((i) => !restaurantId || i.restaurantId === restaurantId).length };
 }
 
 /** fetch() rejects with a TypeError when the network is unreachable. */
@@ -136,6 +144,11 @@ export function idbAvailable(): boolean {
 
 /** Change event so every mounted banner/hook refreshes its count. */
 export const QUEUE_EVENT = 'rm-receiver-queue';
+
+/** Wipe the device queue (sign-out on a shared phone). */
+export async function clearQueue(store: QueueStore = idbQueueStore): Promise<void> {
+  for (const i of await store.list()) await store.remove(i.clientUploadId);
+}
 
 export async function enqueuePhoto(
   item: Omit<QueuedPhoto, 'createdAt' | 'attempts' | 'lastError'>,

@@ -6,8 +6,10 @@
 /** `"Supplier" <Billing@Example.co.il>` → `billing@example.co.il`; null if not an address. */
 export function normalizeEmailAddress(raw: string | null | undefined): string | null {
   if (!raw) return null;
-  const angle = /<([^<>\s]+)>/.exec(raw);
-  const candidate = (angle ? angle[1]! : raw).trim().toLowerCase();
+  // The REAL address is the LAST <...> — a display name may itself contain a
+  // fake "<bills@supplier>" to spoof the allow-list.
+  const angles = [...raw.matchAll(/<([^<>\s]+)>/g)];
+  const candidate = (angles.length ? angles[angles.length - 1]![1]! : raw).trim().toLowerCase();
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidate) && candidate.length <= 254 ? candidate : null;
 }
 

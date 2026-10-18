@@ -7,7 +7,7 @@ import {
   parseInboundEmail,
   parseIngestToken,
   parseWhatsAppWebhook,
-  tokenFromRecipients,
+  tokensFromRecipients,
   verifyMetaSignature,
   verifyStandardWebhook,
   type IngestChannelConfig,
@@ -115,11 +115,14 @@ async function runMessages(
   const results: Array<{ id: string; outcome: InboundOutcome['status'] }> = [];
   for (const m of messages) {
     // A channel bound to a WhatsApp number only accepts that number's events.
-    if (phoneNumberIdCheck && channel.phoneNumberId && m.phoneNumberId !== channel.phoneNumberId) {
+    // The Meta app secret is platform-wide, so the signature does not bind an
+    // event to a tenant — the phone_number_id does (mandatory in production).
+    const unbound = cfg.requirePhoneNumberId && !channel.phoneNumberId;
+    if (phoneNumberIdCheck && (unbound || (channel.phoneNumberId && m.phoneNumberId !== channel.phoneNumberId))) {
       results.push({ id: m.providerMessageId, outcome: 'rejected' });
       continue;
     }
-    if (m.sentAtSec !== null && now - m.sentAtSec > WHATSAPP_MAX_AGE_SEC) {
+    if (m.kind === 'whatsapp' && (m.sentAtSec === null || now - m.sentAtSec > WHATSAPP_MAX_AGE_SEC)) {
       results.push({ id: m.providerMessageId, outcome: 'rejected' });
       continue;
     }
@@ -190,7 +193,16 @@ export async function handleEmailWebhook(req: Request, deps: IngestHttpDeps): Pr
   } catch {
     return json(400, { error: 'bad_payload' });
   }
-  const token = tokenFromRecipients(email.recipients, pre.cfg.emailDomain);
-  if (!token) return json(404, { error: 'unknown_channel' });
-  return runMessages(deps, pre.cfg, hashIngestToken(token), 'email', [email], false);
+  // One e-mail CC'd to several restaurants is delivered to each of them.
+  const tokens = tokensFromRecipients(email.recipients, pre.cfg.emailDomain).slice(0, 5);
+  if (tokens.length === 0) return json(404, { error: 'unknown_channel' });
+  let last: Response = json(404, { error: 'unknown_channel' });
+  const results: unknown[] = [];
+  for (const token of tokens) {
+    const res = await runMessages(deps, pre.cfg, hashIngestToken(token), 'email', [email], false);
+    if (res.status === 429) return res;
+    if (res.status === 200) results.push(...((await res.json()) as { results: unknown[] }).results);
+    last = res;
+  }
+  return results.length > 0 ? json(200, { ok: true, results }) : last;
 }

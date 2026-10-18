@@ -43,7 +43,7 @@ const WaMedia = z.object({
 const WaMessage = z.object({
   from: z.string().min(1).max(32),
   id: z.string().min(1).max(256),
-  timestamp: z.string().regex(/^\d{1,12}$/).optional(),
+  timestamp: z.string().regex(/^\d{1,12}$/),
   type: z.string().max(32),
   image: WaMedia.optional(),
   document: WaMedia.optional(),
@@ -88,7 +88,7 @@ export function parseWhatsAppWebhook(json: unknown): InboundMessage[] {
           providerMessageId: m.id,
           sender: m.from,
           subject: media?.caption ?? m.text?.body?.slice(0, 200) ?? null,
-          sentAtSec: m.timestamp ? Number(m.timestamp) : null,
+          sentAtSec: Number(m.timestamp),
           phoneNumberId: change.value.metadata?.phone_number_id ?? null,
           attachments: media
             ? [
@@ -204,7 +204,13 @@ export function parseInboundEmail(json: unknown): InboundEmail {
  * secret capability looked up by hash — never a tenant id.
  */
 export function tokenFromRecipients(recipients: string[], domain?: string | null): string | null {
+  return tokensFromRecipients(recipients, domain)[0] ?? null;
+}
+
+/** Every distinct ingest token among the recipients (one e-mail CC'd to two restaurants reaches both). */
+export function tokensFromRecipients(recipients: string[], domain?: string | null): string[] {
   const wantDomain = domain?.trim().toLowerCase() || null;
+  const out: string[] = [];
   for (const r of recipients) {
     const addr = normalizeEmailAddress(r);
     if (!addr) continue;
@@ -214,7 +220,7 @@ export function tokenFromRecipients(recipients: string[], domain?: string | null
     if (wantDomain && host !== wantDomain) continue;
     const candidate = local.includes('+') ? local.slice(local.lastIndexOf('+') + 1) : local;
     const parsed = parseIngestToken(candidate);
-    if (parsed?.kind === 'email') return parsed.token;
+    if (parsed?.kind === 'email' && !out.includes(parsed.token)) out.push(parsed.token);
   }
-  return null;
+  return out;
 }

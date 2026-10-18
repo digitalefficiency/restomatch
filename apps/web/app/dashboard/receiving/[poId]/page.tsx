@@ -66,7 +66,7 @@ export default async function ReceivingPoPage({
 
   return (
     <div>
-      {pwa ? <ReceiverPwa /> : null}
+      {pwa && restaurantId ? <ReceiverPwa restaurantId={restaurantId} /> : null}
       <Link
         href="/dashboard/receiving"
         className="mb-4 inline-flex min-h-11 items-center gap-1.5 text-sm text-muted transition-colors hover:text-ink"

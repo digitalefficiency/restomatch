@@ -125,10 +125,19 @@ export async function registerIngestedDocument(
     invoiceId = row.id;
     job = { restaurantId: args.restaurantId, invoiceId, supplierId: args.supplierId, imageUrl };
   }
-  await tx
+  // Only a document still awaiting review can be registered (approve/reject race).
+  const moved = await tx
     .update(ingestDocuments)
     .set({ status: 'registered', invoiceId, error: null, updatedAt: new Date() })
-    .where(and(eq(ingestDocuments.id, args.documentId), eq(ingestDocuments.restaurantId, args.restaurantId)));
+    .where(
+      and(
+        eq(ingestDocuments.id, args.documentId),
+        eq(ingestDocuments.restaurantId, args.restaurantId),
+        eq(ingestDocuments.status, 'needs_review'),
+      ),
+    )
+    .returning({ id: ingestDocuments.id });
+  if (moved.length === 0) throw new Error('document is no longer awaiting review');
   return { invoiceId, job };
 }
 
@@ -164,7 +173,7 @@ async function attachmentBytes(
   return fetched.bytes;
 }
 
-function messageStatus(statuses: IngestDocumentStatus[]): IngestMessageStatus {
+export function messageStatus(statuses: IngestDocumentStatus[]): IngestMessageStatus {
   if (statuses.length === 0) return 'empty';
   if (statuses.some((s) => s === 'needs_review')) return 'needs_review';
   if (statuses.some((s) => s === 'registered' || s === 'duplicate')) return 'accepted';
@@ -297,6 +306,7 @@ export async function processInboundMessage(
         docs.push({ id: d!.id, status: 'duplicate' });
         continue;
       }
+      let docId: string | null = null;
       try {
         const stored = await storeIngestedFile({ restaurantId: channel.restaurantId, sha256, mimeType: mime, bytes });
         const [d] = await tx
@@ -310,27 +320,37 @@ export async function processInboundMessage(
             status: 'needs_review',
           })
           .returning({ id: ingestDocuments.id });
+        docId = d!.id;
         if (senderAllowed) {
           const reg = await registerIngestedDocument(tx, {
             restaurantId: channel.restaurantId,
-            documentId: d!.id,
+            documentId: docId,
             storagePath: stored.storagePath,
             kind: channel.kind,
             supplierId,
             userId: null,
           });
           if (reg.job) jobs.push(reg.job);
-          docs.push({ id: d!.id, status: 'registered' });
+          docs.push({ id: docId, status: 'registered' });
         } else {
-          docs.push({ id: d!.id, status: 'needs_review' });
+          docs.push({ id: docId, status: 'needs_review' });
         }
       } catch (err) {
         console.error('[ingest] store/register failed', err);
-        const [d] = await tx
-          .insert(ingestDocuments)
-          .values({ ...base, mimeType: mime, sizeBytes: bytes.byteLength, sha256, status: 'failed', error: 'store_failed' })
-          .returning({ id: ingestDocuments.id });
-        docs.push({ id: d!.id, status: 'failed' });
+        // One attachment = one document row: mark the existing row failed.
+        if (docId) {
+          await tx
+            .update(ingestDocuments)
+            .set({ status: 'failed', error: 'store_failed', updatedAt: new Date() })
+            .where(eq(ingestDocuments.id, docId));
+        } else {
+          const [d] = await tx
+            .insert(ingestDocuments)
+            .values({ ...base, mimeType: mime, sizeBytes: bytes.byteLength, sha256, status: 'failed', error: 'store_failed' })
+            .returning({ id: ingestDocuments.id });
+          docId = d!.id;
+        }
+        docs.push({ id: docId, status: 'failed' });
       }
     }
 

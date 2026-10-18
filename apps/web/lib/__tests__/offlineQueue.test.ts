@@ -19,6 +19,7 @@ function memStore(items: QueuedPhoto[] = []): QueueStore & { map: Map<string, Qu
 
 const photo = (id: string, createdAt: number, attempts = 0): QueuedPhoto => ({
   clientUploadId: id,
+  restaurantId: 'r1',
   poId: 'po',
   supplierId: 'sup',
   supplierName: 'ספק',
@@ -82,5 +83,14 @@ describe('receiver PWA offline queue', () => {
     expect(r.uploaded).toEqual(['good']);
     expect(r.failed).toEqual(['bad']);
     expect(r.remaining).toBe(2);
+  });
+
+  it("never uploads another restaurant's photo into the active one (shared device)", async () => {
+    const store = memStore([photo('mine', 1), { ...photo('theirs', 2), restaurantId: 'r2' }]);
+    const seen: string[] = [];
+    const r = await processQueue(store, async (i) => (seen.push(i.clientUploadId), { invoiceId: 'x' }), () => true, 'r1');
+    expect(seen).toEqual(['mine']);
+    expect(r.remaining).toBe(0);
+    expect(store.map.has('theirs')).toBe(true);
   });
 });

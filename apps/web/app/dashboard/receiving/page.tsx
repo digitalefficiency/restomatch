@@ -38,7 +38,9 @@ export default async function ReceivingPage() {
 
   return (
     <div>
-      {features.includes('receiverPwa') ? <ReceiverPwa /> : null}
+      {features.includes('receiverPwa') && session?.user?.restaurantId ? (
+        <ReceiverPwa restaurantId={session.user.restaurantId} />
+      ) : null}
       <SectionHeader title={t('inbox.title')} subtitle={t('inbox.subtitle')} />
 
       {expectations.length === 0 ? (

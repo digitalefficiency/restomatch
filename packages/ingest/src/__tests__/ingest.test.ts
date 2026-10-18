@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  tokensFromRecipients,
   AttachmentTooLargeError,
   DEV_EMAIL_WEBHOOK_SECRET,
   INGEST_LIMITS,
@@ -102,6 +103,8 @@ describe('senders', () => {
   it('normalises e-mail and phone the same way on both sides', () => {
     expect(normalizeEmailAddress('"Tnuva" <Billing@Tnuva.CO.IL>')).toBe('billing@tnuva.co.il');
     expect(normalizeEmailAddress('not an address')).toBeNull();
+    // Refuter #1: a fake <address> inside the display name must not win.
+    expect(normalizeEmailAddress('"<bills@supplier-a.co.il>" <attacker@evil.example>')).toBe('attacker@evil.example');
     expect(normalizePhone('050-123-4567')).toBe('972501234567');
     expect(normalizePhone('+972 50 123 4567')).toBe('972501234567');
     expect(normalizePhone('972501234567')).toBe('972501234567');
@@ -152,6 +155,12 @@ describe('parseWhatsAppWebhook', () => {
     expect(msgs[1]!.attachments).toEqual([]);
   });
 
+  it('rejects a message without a timestamp (no replay-window bypass)', () => {
+    const noTs = JSON.parse(JSON.stringify(payload));
+    delete noTs.entry[0].changes[0].value.messages[0].timestamp;
+    expect(() => parseWhatsAppWebhook(noTs)).toThrow();
+  });
+
   it('rejects a non-WhatsApp body', () => {
     expect(() => parseWhatsAppWebhook({ object: 'page', entry: [] })).toThrow();
   });
@@ -187,6 +196,11 @@ describe('parseInboundEmail + tokenFromRecipients', () => {
     });
     expect(e.attachments[0]!.contentBase64).toBeTruthy();
     expect(tokenFromRecipients(e.recipients)).toBe(token);
+  });
+
+  it('returns every restaurant token among the recipients', () => {
+    const t2 = 'inv_' + 'd'.repeat(32);
+    expect(tokensFromRecipients([`${token}@in.x`, `${t2}@in.x`, `${token}@in.x`])).toEqual([token, t2]);
   });
 
   it('never accepts a WhatsApp token (or garbage) as an e-mail address token', () => {
@@ -237,13 +251,24 @@ describe('providers', () => {
 });
 
 describe('ingestConfig', () => {
+  it('production never falls back to stub bytes, binds WhatsApp numbers and needs the e-mail domain', () => {
+    const wa = ingestConfig('whatsapp', { NODE_ENV: 'production', WHATSAPP_APP_SECRET: 's', WHATSAPP_VERIFY_TOKEN: 'v' });
+    expect(wa.provider.name).toBe('unavailable');
+    expect(wa.requirePhoneNumberId).toBe(true);
+    expect(ingestConfig('email', { NODE_ENV: 'production', INGEST_EMAIL_WEBHOOK_SECRET: 'whsec_eA==' }).secret).toBeNull();
+    const em = ingestConfig('email', { NODE_ENV: 'production', INGEST_EMAIL_WEBHOOK_SECRET: 'whsec_eA==', INGEST_EMAIL_DOMAIN: 'in.x.co' });
+    expect(em.secret).toBeTruthy();
+    expect(em.provider.name).toBe('unavailable');
+  });
+
   it('fails closed in production without secrets and uses the stub unless live', () => {
     const prod = ingestConfig('whatsapp', { NODE_ENV: 'production' });
     expect(prod.secret).toBeNull();
     expect(prod.verifyToken).toBeNull();
     expect(ingestConfig('email', { NODE_ENV: 'production' }).secret).toBeNull();
     expect(ingestConfig('whatsapp', { NODE_ENV: 'test' }).secret).toBeTruthy();
-    expect(ingestConfig('whatsapp', { NODE_ENV: 'production', WHATSAPP_APP_SECRET: 's', WHATSAPP_ACCESS_TOKEN: 't' }).provider.name).toBe('stub');
+    expect(ingestConfig('whatsapp', { NODE_ENV: 'production', WHATSAPP_APP_SECRET: 's', WHATSAPP_ACCESS_TOKEN: 't' }).provider.name).toBe('unavailable');
+    expect(ingestConfig('whatsapp', { NODE_ENV: 'test' }).provider.name).toBe('stub');
     expect(
       ingestConfig('whatsapp', { NODE_ENV: 'production', WHATSAPP_APP_SECRET: 's', WHATSAPP_ACCESS_TOKEN: 't', INGEST_PROVIDER: 'live' }).provider.name,
     ).toBe('meta-cloud');

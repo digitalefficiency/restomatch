@@ -2,6 +2,7 @@ import {
   MetaCloudWhatsAppProvider,
   ResendInboundProvider,
   StubIngestProvider,
+  UnavailableIngestProvider,
   type IngestProvider,
 } from './providers';
 import type { IngestKind } from './tokens';
@@ -30,6 +31,8 @@ export interface IngestChannelConfig {
   /** Inbound e-mail domain the token addresses live on (e.g. in.restomatch.co.il). */
   emailDomain: string | null;
   provider: IngestProvider;
+  /** WhatsApp: events are accepted only on a channel bound to its phone_number_id (production). */
+  requirePhoneNumberId: boolean;
 }
 
 export function ingestConfig(kind: IngestKind, env: NodeJS.ProcessEnv = process.env): IngestChannelConfig {
@@ -38,18 +41,25 @@ export function ingestConfig(kind: IngestKind, env: NodeJS.ProcessEnv = process.
   if (kind === 'whatsapp') {
     const secret = env.WHATSAPP_APP_SECRET || (prod ? null : DEV_WHATSAPP_APP_SECRET);
     const verifyToken = env.WHATSAPP_VERIFY_TOKEN || (prod ? null : DEV_WHATSAPP_VERIFY_TOKEN);
+    // Production never fetches fake bytes: no live credentials ⇒ media fetch fails.
     const provider =
       live && env.WHATSAPP_ACCESS_TOKEN
         ? new MetaCloudWhatsAppProvider(env.WHATSAPP_ACCESS_TOKEN, env.WHATSAPP_GRAPH_VERSION || 'v21.0')
-        : new StubIngestProvider('whatsapp');
-    return { kind, secret, verifyToken, emailDomain: null, provider };
+        : prod
+          ? new UnavailableIngestProvider('whatsapp')
+          : new StubIngestProvider('whatsapp');
+    return { kind, secret, verifyToken, emailDomain: null, provider, requirePhoneNumberId: prod };
   }
-  const secret = env.INGEST_EMAIL_WEBHOOK_SECRET || (prod ? null : DEV_EMAIL_WEBHOOK_SECRET);
+  const emailDomain = env.INGEST_EMAIL_DOMAIN || null;
+  // Production also needs the inbound domain, or a token on ANY domain would route.
+  const secret = prod && !emailDomain ? null : env.INGEST_EMAIL_WEBHOOK_SECRET || (prod ? null : DEV_EMAIL_WEBHOOK_SECRET);
   const provider =
     live && env.INGEST_RESEND_API_KEY
       ? new ResendInboundProvider(env.INGEST_RESEND_API_KEY)
-      : new StubIngestProvider('email');
-  return { kind, secret, verifyToken: null, emailDomain: env.INGEST_EMAIL_DOMAIN || null, provider };
+      : prod
+        ? new UnavailableIngestProvider('email')
+        : new StubIngestProvider('email');
+  return { kind, secret, verifyToken: null, emailDomain, provider, requirePhoneNumberId: false };
 }
 
 /** Public, display-only: the address/URL an owner configures (token appended). */

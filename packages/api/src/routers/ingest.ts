@@ -24,9 +24,9 @@ import {
 } from '@restomatch/ingest';
 import { appError } from '../errors';
 import { featureEnabled } from '../lib/features';
-import { enqueueIngestJobs, INGEST_FEATURE, registerIngestedDocument } from '../ingest/pipeline';
+import { enqueueIngestJobs, INGEST_FEATURE, messageStatus, registerIngestedDocument } from '../ingest/pipeline';
 import { assertSupplierOwned } from '../tenant';
-import { managerProcedure, memberProcedure, router } from '../trpc';
+import { financeProcedure, managerProcedure, router } from '../trpc';
 
 const KindEnum = z.enum(['whatsapp', 'email']);
 
@@ -67,7 +67,9 @@ async function ownDocument(db: Database, restaurantId: string, documentId: strin
     .from(ingestDocuments)
     .innerJoin(ingestMessages, eq(ingestMessages.id, ingestDocuments.messageId))
     .where(and(eq(ingestDocuments.id, documentId), eq(ingestDocuments.restaurantId, restaurantId)))
-    .limit(1);
+    .limit(1)
+    // Row lock: a concurrent approve + reject of the same document serialise.
+    .for('update', { of: ingestDocuments });
   if (!doc) throw new TRPCError({ code: 'NOT_FOUND', message: 'document not found' });
   return doc;
 }
@@ -77,14 +79,7 @@ async function refreshMessageStatus(db: Database, restaurantId: string, messageI
     .select({ status: ingestDocuments.status })
     .from(ingestDocuments)
     .where(and(eq(ingestDocuments.messageId, messageId), eq(ingestDocuments.restaurantId, restaurantId)));
-  const s = docs.map((d) => d.status);
-  const status = s.some((x) => x === 'needs_review')
-    ? 'needs_review'
-    : s.some((x) => x === 'registered' || x === 'duplicate')
-      ? 'accepted'
-      : s.length === 0
-        ? 'empty'
-        : 'rejected';
+  const status = messageStatus(docs.map((d) => d.status));
   await db
     .update(ingestMessages)
     .set({ status })
@@ -93,12 +88,12 @@ async function refreshMessageStatus(db: Database, restaurantId: string, messageI
 
 /**
  * Invoice ingestion settings + inbox (flags ingestWhatsapp / ingestEmail).
- * Reads are memberProcedure; anything that changes routing (tokens, the
+ * Reads are financeProcedure; anything that changes routing (tokens, the
  * allow-list, approving a document into OCR) is managerProcedure. Every id
  * from the client is re-checked against ctx.session.restaurantId.
  */
 export const ingestRouter = router({
-  overview: memberProcedure.query(async ({ ctx }) => {
+  overview: financeProcedure.query(async ({ ctx }) => {
     const flags = await requireIngest(ctx.db, ctx.session.restaurantId);
     const channels = await ctx.db
       .select({
@@ -171,7 +166,7 @@ export const ingestRouter = router({
     return { revoked: rows.length };
   }),
 
-  senders: memberProcedure.query(async ({ ctx }) => {
+  senders: financeProcedure.query(async ({ ctx }) => {
     await requireIngest(ctx.db, ctx.session.restaurantId);
     return ctx.db
       .select({
@@ -235,7 +230,7 @@ export const ingestRouter = router({
   }),
 
   /** Received messages with their documents, newest first. */
-  inbox: memberProcedure
+  inbox: financeProcedure
     .input(
       z
         .object({ filter: z.enum(['all', 'needs_review', 'errors']).default('all'), limit: z.number().int().min(1).max(100).default(50) })

@@ -44,8 +44,9 @@ async function main() {
   for (const kind of ['whatsapp', 'email'] as const) {
     await sql`update ingest_channels set active = false, revoked_at = now()
               where restaurant_id = ${r.id} and kind = ${kind} and active`;
-    await sql`insert into ingest_channels (restaurant_id, kind, token_hash, token_hint)
-              values (${r.id}, ${kind}, ${hashIngestToken(tokens[kind])}, ${tokenHint(tokens[kind])})`;
+    await sql`insert into ingest_channels (restaurant_id, kind, token_hash, token_hint, phone_number_id)
+              values (${r.id}, ${kind}, ${hashIngestToken(tokens[kind])}, ${tokenHint(tokens[kind])},
+                      ${kind === 'whatsapp' ? '1000000001' : null})`;
   }
   await sql`insert into ingest_senders (restaurant_id, kind, sender, supplier_id, label)
             values (${r.id}, 'whatsapp', '972501234567', ${sup?.id ?? null}, 'נהג / driver')
@@ -63,7 +64,7 @@ async function main() {
               field: 'messages',
               value: {
                 messaging_product: 'whatsapp',
-                metadata: { phone_number_id: 'DEMO' },
+                metadata: { phone_number_id: '1000000001' },
                 messages: [
                   {
                     from,

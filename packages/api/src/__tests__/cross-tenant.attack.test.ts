@@ -1535,6 +1535,20 @@ describe('ingest.*: isolation + foreign-id attacks (A → B)', () => {
     expect(aRows.some((c) => c.tokenHash === r.token)).toBe(false);
   });
 
+  it('role gate: receivers / chefs cannot read sender phones or addresses', async () => {
+    for (const role of ['receiver', 'chef'] as const) {
+      await expect(callerWithRole(A, role).ingest.inbox({ filter: 'all', limit: 10 })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      await expect(callerWithRole(A, role).ingest.senders()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    }
+  });
+
+  it('a rejected document cannot be approved afterwards (no OCR, no invoice)', async () => {
+    await callerFor(A).ingest.rejectDocument({ documentId: ids.aDoc });
+    await expect(callerFor(A).ingest.approveDocument({ documentId: ids.aDoc })).rejects.toMatchObject({ code: 'CONFLICT' });
+    const [doc] = await db.select().from(ingestDocuments).where(eq(ingestDocuments.id, ids.aDoc));
+    expect(doc).toMatchObject({ status: 'rejected', invoiceId: null });
+  });
+
   it('role gate: a receiver cannot rotate tokens or approve documents', async () => {
     await expect(callerWithRole(A, 'receiver').ingest.rotateChannel({ kind: 'email' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await expect(callerWithRole(A, 'receiver').ingest.approveDocument({ documentId: ids.aDoc })).rejects.toMatchObject({ code: 'FORBIDDEN' });

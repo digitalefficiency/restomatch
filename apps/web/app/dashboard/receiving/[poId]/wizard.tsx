@@ -157,6 +157,7 @@ export function ReceivingWizard({
       const queue = async (): Promise<UploadedScan> => {
         await enqueuePhoto({
           clientUploadId,
+          restaurantId: restaurantId!,
           poId: po.id,
           supplierId: po.supplierId,
           supplierName: po.supplierName,
@@ -165,7 +166,7 @@ export function ReceivingWizard({
         });
         return { invoiceId: `queued-${clientUploadId}`, publicUrl: '', scanRouteUrl: '', storagePath: '', mimeType: file.type };
       };
-      const canQueue = offlineQueue && idbAvailable();
+      const canQueue = offlineQueue && Boolean(restaurantId) && idbAvailable();
       if (canQueue && !navigator.onLine) return queue();
       const contentBase64 = await fileToBase64(file);
       let r;
@@ -190,7 +191,7 @@ export function ReceivingWizard({
       };
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [po.supplierName, offlineQueue],
+    [po.supplierName, offlineQueue, restaurantId],
   );
 
   const stepIndex = STEP_ORDER.indexOf(step);
@@ -213,7 +214,7 @@ export function ReceivingWizard({
       // PO-only projection so the receiver can still record quantities.
       if (!captured.publicUrl) {
         // S13: photo queued offline — say so and let the receiver keep going later.
-        if (offlineQueue && captured.invoiceId?.startsWith('queued-') && !navigator.onLine) {
+        if (offlineQueue && captured.invoiceId?.startsWith('queued-')) {
           setError(tIngest('pwa.savedOffline'));
           setStep('SCAN_INVOICE');
           capturingRef.current = false;

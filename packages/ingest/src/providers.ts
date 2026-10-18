@@ -28,6 +28,21 @@ export class AttachmentTooLargeError extends Error {
   }
 }
 
+function timeoutSignal(ms: number): AbortSignal {
+  const c = new AbortController();
+  setTimeout(() => c.abort(new Error('timeout')), ms).unref?.();
+  return c.signal;
+}
+
+/** Thrown in production when the live provider is not configured — never fake bytes. */
+export class UnavailableIngestProvider implements IngestProvider {
+  readonly name = 'unavailable';
+  constructor(readonly kind: IngestKind) {}
+  async fetchAttachment(): Promise<FetchedAttachment> {
+    throw new Error('live provider not configured');
+  }
+}
+
 /** Read a fetch Response body, aborting once it passes `max` bytes. */
 export async function readLimited(res: Response, max: number): Promise<Uint8Array> {
   const declared = Number(res.headers.get('content-length') ?? '');
@@ -110,7 +125,7 @@ export class MetaCloudWhatsAppProvider implements IngestProvider {
     const auth = { Authorization: `Bearer ${this.accessToken}` };
     const meta = await this.fetchImpl(`https://graph.facebook.com/${this.graphVersion}/${ref}`, {
       headers: auth,
-      signal: AbortSignal.timeout(15_000),
+      signal: timeoutSignal(15_000),
     });
     if (!meta.ok) throw new Error(`media lookup failed: HTTP ${meta.status}`);
     const info = (await meta.json()) as { url?: string; mime_type?: string; file_size?: number };
@@ -121,7 +136,7 @@ export class MetaCloudWhatsAppProvider implements IngestProvider {
     if (!info.url || !/^https:\/\/[a-z0-9.-]+\.(fbsbx|facebook|whatsapp)\.(com|net)\//i.test(info.url)) {
       throw new Error('unexpected media url');
     }
-    const file = await this.fetchImpl(info.url, { headers: auth, signal: AbortSignal.timeout(30_000) });
+    const file = await this.fetchImpl(info.url, { headers: auth, signal: timeoutSignal(30_000) });
     if (!file.ok) throw new Error(`media download failed: HTTP ${file.status}`);
     return { bytes: await readLimited(file, INGEST_LIMITS.attachmentBytes), mimeType: info.mime_type ?? null };
   }
@@ -145,13 +160,13 @@ export class ResendInboundProvider implements IngestProvider {
     const auth = { Authorization: `Bearer ${this.apiKey}` };
     const meta = await this.fetchImpl(
       `${this.baseUrl}/emails/receiving/${providerMessageId}/attachments/${ref}`,
-      { headers: auth, signal: AbortSignal.timeout(15_000) },
+      { headers: auth, signal: timeoutSignal(15_000) },
     );
     if (!meta.ok) throw new Error(`attachment lookup failed: HTTP ${meta.status}`);
     const info = (await meta.json()) as { download_url?: string; content_type?: string; size?: number };
     if (typeof info.size === 'number' && info.size > INGEST_LIMITS.attachmentBytes) throw new AttachmentTooLargeError();
     if (!info.download_url || !info.download_url.startsWith('https://')) throw new Error('unexpected attachment url');
-    const file = await this.fetchImpl(info.download_url, { signal: AbortSignal.timeout(30_000) });
+    const file = await this.fetchImpl(info.download_url, { signal: timeoutSignal(30_000) });
     if (!file.ok) throw new Error(`attachment download failed: HTTP ${file.status}`);
     return { bytes: await readLimited(file, INGEST_LIMITS.attachmentBytes), mimeType: info.content_type ?? null };
   }
