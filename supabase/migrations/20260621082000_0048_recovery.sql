@@ -37,8 +37,7 @@ CREATE TABLE IF NOT EXISTS "credit_notes" (
   "created_by" uuid REFERENCES "users"("id") ON DELETE SET NULL,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL,
   CONSTRAINT "credit_notes_amount_check" CHECK ("amount_agorot" > 0),
-  CONSTRAINT "credit_notes_source_check" CHECK ("source" IN ('manual', 'invoice_line')),
-  CONSTRAINT "credit_notes_line_source_check" CHECK ("source" = 'manual' OR "invoice_line_id" IS NOT NULL)
+  CONSTRAINT "credit_notes_source_check" CHECK ("source" IN ('manual', 'invoice_line'))
 );--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "credit_notes_restaurant_idx" ON "credit_notes" ("restaurant_id", "issued_on");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "credit_notes_supplier_idx" ON "credit_notes" ("supplier_id");--> statement-breakpoint
@@ -95,5 +94,5 @@ CREATE TRIGGER "recovery_claims_set_updated_at" BEFORE UPDATE ON "recovery_claim
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 insert into drizzle.__drizzle_migrations (hash, created_at)
-select '8059fde3d9d6f57d9a22ace7c638e65efae3d7e97cce326f1676ffce2041c580', 1782030000000
+select '0d9924de3d94ef73418278ca44afbc2f8943359dbf39bff49dfcbaf4e7b986dd', 1782030000000
 where not exists (select 1 from drizzle.__drizzle_migrations where created_at = 1782030000000);
