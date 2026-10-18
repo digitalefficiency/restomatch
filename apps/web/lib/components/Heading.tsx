@@ -18,7 +18,7 @@ export function Heading({
   className?: string;
 }) {
   const Tag = `h${level}` as React.ElementType;
-  return <Tag className={cn(levelStyles[level], 'text-ink')}>{children}</Tag>;
+  return <Tag className={cn(levelStyles[level], 'text-ink', className)}>{children}</Tag>;
 }
 
 /** Section title + optional subtitle + optional trailing action, with the
