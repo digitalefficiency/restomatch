@@ -6,7 +6,7 @@ import { getT } from '@/lib/i18n/server';
 
 const NAV = [
   { href: '/#how', key: 'shell.nav.how' },
-  { href: '/#features', key: 'shell.nav.features' },
+  { href: '/about#features', key: 'shell.nav.features' },
   { href: '/pricing', key: 'shell.nav.pricing' },
   { href: '/showcase', key: 'shell.nav.demo' },
   { href: '/about', key: 'shell.nav.about' },
@@ -134,7 +134,7 @@ export async function MarketingShell({ children }: { children: React.ReactNode }
                 <Link href="/#how" className="text-muted hover:text-ink">
                   {t('shell.nav.how')}
                 </Link>
-                <Link href="/#features" className="text-muted hover:text-ink">
+                <Link href="/about#features" className="text-muted hover:text-ink">
                   {t('shell.nav.features')}
                 </Link>
                 <Link href="/pricing" className="text-muted hover:text-ink">
