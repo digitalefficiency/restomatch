@@ -274,11 +274,18 @@ export const ingestRouter = router({
               status: ingestDocuments.status,
               error: ingestDocuments.error,
               invoiceId: ingestDocuments.invoiceId,
+              storagePath: ingestDocuments.storagePath,
             })
             .from(ingestDocuments)
             .where(and(eq(ingestDocuments.restaurantId, rid), inArray(ingestDocuments.messageId, ids)))
         : [];
-      return messages.map((m) => ({ ...m, documents: docs.filter((d) => d.messageId === m.id) }));
+      // Never expose storage paths — only whether a file is stored.
+      return messages.map((m) => ({
+        ...m,
+        documents: docs
+          .filter((d) => d.messageId === m.id)
+          .map(({ storagePath, ...d }) => ({ ...d, stored: storagePath !== null })),
+      }));
     }),
 
   /** Approve a document from an unknown sender: register it → OCR. Optionally allow-list the sender. */
@@ -295,9 +302,9 @@ export const ingestRouter = router({
       const doc = await ownDocument(ctx.db, rid, input.documentId);
       await requireIngest(ctx.db, rid, doc.kind);
       if (input.supplierId) await assertSupplierOwned(ctx.db, input.supplierId, rid);
-      if (doc.status !== 'needs_review' || !doc.storagePath) {
-        throw appError('CONFLICT', 'input.invalid', 'המסמך כבר טופל');
-      }
+      if (doc.status !== 'needs_review') throw appError('CONFLICT', 'input.invalid', 'המסמך כבר טופל');
+      // Over-quota documents are metadata only — nothing to read; ask the sender to resend.
+      if (!doc.storagePath) throw appError('BAD_REQUEST', 'input.invalid', 'אין קובץ שמור למסמך זה');
       const supplierId = input.supplierId ?? doc.supplierId ?? null;
       const reg = await registerIngestedDocument(ctx.db, {
         restaurantId: rid,

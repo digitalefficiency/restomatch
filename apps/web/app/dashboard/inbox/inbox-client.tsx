@@ -3,8 +3,27 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, CheckCircle2, Copy, FileText, Mail, MessageCircle, ShieldCheck, Trash2 } from 'lucide-react';
-import { Badge, Button, Card, EmptyState, Input, Select, cn, useToast, type BadgeTone } from '@/lib/components';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Copy,
+  FileText,
+  Mail,
+  MessageCircle,
+  ShieldCheck,
+  Trash2,
+} from 'lucide-react';
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  Input,
+  Select,
+  cn,
+  useToast,
+  type BadgeTone,
+} from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatDateTime, formatNumber } from '@/lib/i18n/format';
 import { originalProps } from '@/lib/i18n/original';
@@ -31,6 +50,7 @@ export interface InboxMessage {
     status: 'registered' | 'needs_review' | 'rejected' | 'failed' | 'duplicate' | 'skipped';
     error: string | null;
     invoiceId: string | null;
+    stored: boolean;
   }>;
 }
 
@@ -40,7 +60,13 @@ interface Props {
   features: Record<Kind, boolean>;
   needsReview: number;
   channels: Array<{ kind: Kind; tokenHint: string; phoneNumberId: string | null }>;
-  senders: Array<{ id: string; kind: Kind; sender: string; label: string | null; supplierName: string | null }>;
+  senders: Array<{
+    id: string;
+    kind: Kind;
+    sender: string;
+    label: string | null;
+    supplierName: string | null;
+  }>;
   suppliers: Array<{ id: string; name: string; nameEn: string | null }>;
   messages: InboxMessage[];
 }
@@ -108,7 +134,11 @@ export function InboxClient(props: Props) {
   return (
     <div className="space-y-6">
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label={t('inbox.title')}>
+      <div
+        className="flex flex-wrap items-center gap-2"
+        role="tablist"
+        aria-label={t('inbox.title')}
+      >
         {(['all', 'needs_review', 'errors'] as const).map((f) => (
           <Link
             key={f}
@@ -126,7 +156,9 @@ export function InboxClient(props: Props) {
           </Link>
         ))}
         {props.needsReview > 0 ? (
-          <Badge tone="warning">{t('inbox.needsReviewCount', { count: formatNumber(props.needsReview, locale) })}</Badge>
+          <Badge tone="warning">
+            {t('inbox.needsReviewCount', { count: formatNumber(props.needsReview, locale) })}
+          </Badge>
         ) : null}
       </div>
 
@@ -150,15 +182,23 @@ export function InboxClient(props: Props) {
                     <div className="min-w-0">
                       <p className="truncate font-semibold text-ink">
                         {t('inbox.from', { sender: '' })}
-                        <span dir="ltr" className="font-mono text-sm">{m.sender}</span>
+                        <span dir="ltr" className="font-mono text-sm">
+                          {m.sender}
+                        </span>
                       </p>
                       <p className="truncate text-sm text-muted">
-                        {m.subject ? <span {...originalProps(m.subject)}>{m.subject}</span> : t('inbox.noSubject')}
+                        {m.subject ? (
+                          <span {...originalProps(m.subject)}>{m.subject}</span>
+                        ) : (
+                          t('inbox.noSubject')
+                        )}
                       </p>
                       <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-subtle">
                         <span>{t(`kind.${m.kind}`)}</span>
                         <span aria-hidden="true">·</span>
-                        <span>{t('inbox.receivedAt', { when: formatDateTime(m.receivedAt, locale) })}</span>
+                        <span>
+                          {t('inbox.receivedAt', { when: formatDateTime(m.receivedAt, locale) })}
+                        </span>
                         {m.supplierName ? (
                           <>
                             <span aria-hidden="true">·</span>
@@ -179,7 +219,11 @@ export function InboxClient(props: Props) {
                 {m.documents.length > 0 ? (
                   <ul className="mt-3 space-y-2 border-t border-line pt-3">
                     {m.documents.map((d) => (
-                      <li key={d.id} className="flex flex-wrap items-center justify-between gap-2" data-testid="ingest-document">
+                      <li
+                        key={d.id}
+                        className="flex flex-wrap items-center justify-between gap-2"
+                        data-testid="ingest-document"
+                      >
                         <div className="flex min-w-0 items-center gap-2 text-sm">
                           <FileText className="h-4 w-4 shrink-0 text-muted" aria-hidden="true" />
                           <span className="truncate font-mono text-xs" dir="ltr">
@@ -187,7 +231,12 @@ export function InboxClient(props: Props) {
                           </span>
                           {d.sizeBytes ? (
                             <span className="text-xs text-subtle">
-                              {t('inbox.size', { kb: formatNumber(Math.max(1, Math.round(d.sizeBytes / 1024)), locale) })}
+                              {t('inbox.size', {
+                                kb: formatNumber(
+                                  Math.max(1, Math.round(d.sizeBytes / 1024)),
+                                  locale,
+                                ),
+                              })}
                             </span>
                           ) : null}
                           <Badge tone={DOC_TONE[d.status]}>{t(`documentStatus.${d.status}`)}</Badge>
@@ -209,61 +258,76 @@ export function InboxClient(props: Props) {
                           ) : null}
                           {props.canManage && d.status === 'needs_review' ? (
                             <>
-                              <Select
-                                aria-label={t('inbox.supplierLabel')}
-                                className="min-h-11 w-44"
-                                value={supplierFor[d.id] ?? ''}
-                                onChange={(e) => setSupplierFor((s) => ({ ...s, [d.id]: e.target.value }))}
-                              >
-                                <option value="">{t('inbox.supplierNone')}</option>
-                                {props.suppliers.map((s) => (
-                                  <option key={s.id} value={s.id}>
-                                    {locale === 'en' && s.nameEn ? s.nameEn : s.name}
-                                  </option>
-                                ))}
-                              </Select>
-                              <Button
-                                size="sm"
-                                className="min-h-11"
-                                disabled={approve.isPending}
-                                onClick={() =>
-                                  act(
-                                    () =>
-                                      approve.mutateAsync({
-                                        documentId: d.id,
-                                        ...(supplierFor[d.id] ? { supplierId: supplierFor[d.id] } : {}),
-                                      }),
-                                    t('inbox.approved'),
-                                  )
-                                }
-                              >
-                                {t('inbox.approve')}
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                className="min-h-11"
-                                disabled={approve.isPending}
-                                onClick={() =>
-                                  act(
-                                    () =>
-                                      approve.mutateAsync({
-                                        documentId: d.id,
-                                        allowSender: true,
-                                        ...(supplierFor[d.id] ? { supplierId: supplierFor[d.id] } : {}),
-                                      }),
-                                    t('inbox.approved'),
-                                  )
-                                }
-                              >
-                                {t('inbox.approveAndAllow')}
-                              </Button>
+                              {d.stored ? (
+                                <>
+                                  <Select
+                                    aria-label={t('inbox.supplierLabel')}
+                                    className="min-h-11 w-44"
+                                    value={supplierFor[d.id] ?? ''}
+                                    onChange={(e) =>
+                                      setSupplierFor((s) => ({ ...s, [d.id]: e.target.value }))
+                                    }
+                                  >
+                                    <option value="">{t('inbox.supplierNone')}</option>
+                                    {props.suppliers.map((s) => (
+                                      <option key={s.id} value={s.id}>
+                                        {locale === 'en' && s.nameEn ? s.nameEn : s.name}
+                                      </option>
+                                    ))}
+                                  </Select>
+                                  <Button
+                                    size="sm"
+                                    className="min-h-11"
+                                    disabled={approve.isPending}
+                                    onClick={() =>
+                                      act(
+                                        () =>
+                                          approve.mutateAsync({
+                                            documentId: d.id,
+                                            ...(supplierFor[d.id]
+                                              ? { supplierId: supplierFor[d.id] }
+                                              : {}),
+                                          }),
+                                        t('inbox.approved'),
+                                      )
+                                    }
+                                  >
+                                    {t('inbox.approve')}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    className="min-h-11"
+                                    disabled={approve.isPending}
+                                    onClick={() =>
+                                      act(
+                                        () =>
+                                          approve.mutateAsync({
+                                            documentId: d.id,
+                                            allowSender: true,
+                                            ...(supplierFor[d.id]
+                                              ? { supplierId: supplierFor[d.id] }
+                                              : {}),
+                                          }),
+                                        t('inbox.approved'),
+                                      )
+                                    }
+                                  >
+                                    {t('inbox.approveAndAllow')}
+                                  </Button>
+                                </>
+                              ) : null}
                               <Button
                                 size="sm"
                                 variant="ghost"
                                 className="min-h-11"
                                 disabled={reject.isPending}
-                                onClick={() => act(() => reject.mutateAsync({ documentId: d.id }), t('inbox.rejected'))}
+                                onClick={() =>
+                                  act(
+                                    () => reject.mutateAsync({ documentId: d.id }),
+                                    t('inbox.rejected'),
+                                  )
+                                }
                               >
                                 {t('inbox.reject')}
                               </Button>
@@ -343,13 +407,19 @@ function ChannelsCard({ canManage, channels, kinds }: Props & { kinds: Kind[] })
                       try {
                         const r = await rotate.mutateAsync({
                           kind,
-                          ...(kind === 'whatsapp' && phoneId.length >= 5 ? { phoneNumberId: phoneId } : {}),
+                          ...(kind === 'whatsapp' && phoneId.length >= 5
+                            ? { phoneNumberId: phoneId }
+                            : {}),
                         });
                         setFresh({ kind, value: (r.address ?? r.webhookUrl)! });
                         setCopied(false);
                         router.refresh();
                       } catch (err) {
-                        toast.error(t('inbox.actionFailed', { message: err instanceof Error ? err.message : '' }));
+                        toast.error(
+                          t('inbox.actionFailed', {
+                            message: err instanceof Error ? err.message : '',
+                          }),
+                        );
                       }
                     }}
                   >
@@ -372,9 +442,14 @@ function ChannelsCard({ canManage, channels, kinds }: Props & { kinds: Kind[] })
                   ) : null}
                 </div>
               ) : null}
-              {live && canManage ? <p className="mt-2 text-xs text-warn">{t('channels.rotateWarning')}</p> : null}
+              {live && canManage ? (
+                <p className="mt-2 text-xs text-warn">{t('channels.rotateWarning')}</p>
+              ) : null}
               {fresh?.kind === kind ? (
-                <div className="mt-3 rounded-lg border border-primary/30 bg-primary/8 p-3" data-testid="ingest-fresh-secret">
+                <div
+                  className="mt-3 rounded-lg border border-primary/30 bg-primary/8 p-3"
+                  data-testid="ingest-fresh-secret"
+                >
                   <p className="text-xs font-semibold text-ink">{t('channels.newSecret')}</p>
                   <div className="mt-2 flex items-center gap-2">
                     <code dir="ltr" className="min-w-0 flex-1 break-all font-mono text-xs text-ink">
@@ -389,7 +464,11 @@ function ChannelsCard({ canManage, channels, kinds }: Props & { kinds: Kind[] })
                         setCopied(true);
                       }}
                     >
-                      {copied ? <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
+                      {copied ? (
+                        <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                      ) : (
+                        <Copy className="h-4 w-4" aria-hidden="true" />
+                      )}
                       {copied ? t('channels.copied') : t('channels.copy')}
                     </Button>
                   </div>
@@ -430,7 +509,9 @@ function SendersCard({ canManage, senders, suppliers, kinds }: Props & { kinds: 
             <li key={s.id} className="flex items-center justify-between gap-2 py-2">
               <div className="flex min-w-0 items-center gap-2 text-sm">
                 <KindIcon kind={s.kind} className="h-4 w-4 shrink-0 text-muted" />
-                <span dir="ltr" className="truncate font-mono text-xs">{s.sender}</span>
+                <span dir="ltr" className="truncate font-mono text-xs">
+                  {s.sender}
+                </span>
                 {s.label ? <span className="truncate text-xs text-subtle">{s.label}</span> : null}
                 {s.supplierName ? (
                   <Badge tone="info">
@@ -478,7 +559,12 @@ function SendersCard({ canManage, senders, suppliers, kinds }: Props & { kinds: 
             }
           }}
         >
-          <Select aria-label={t('inbox.title')} className="min-h-11" value={kind} onChange={(e) => setKind(e.target.value as Kind)}>
+          <Select
+            aria-label={t('inbox.title')}
+            className="min-h-11"
+            value={kind}
+            onChange={(e) => setKind(e.target.value as Kind)}
+          >
             {kinds.map((k) => (
               <option key={k} value={k}>
                 {t(`kind.${k}`)}
@@ -501,7 +587,12 @@ function SendersCard({ canManage, senders, suppliers, kinds }: Props & { kinds: 
             value={label}
             onChange={(e) => setLabel(e.target.value)}
           />
-          <Select aria-label={t('inbox.supplierLabel')} className="min-h-11" value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+          <Select
+            aria-label={t('inbox.supplierLabel')}
+            className="min-h-11"
+            value={supplierId}
+            onChange={(e) => setSupplierId(e.target.value)}
+          >
             <option value="">{t('inbox.supplierNone')}</option>
             {suppliers.map((s) => (
               <option key={s.id} value={s.id}>

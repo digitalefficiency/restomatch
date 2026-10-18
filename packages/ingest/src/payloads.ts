@@ -29,6 +29,39 @@ export interface InboundMessage {
   /** WhatsApp: the receiving phone_number_id (checked against the channel). */
   phoneNumberId: string | null;
   attachments: InboundAttachment[];
+  /**
+   * Sender authentication (e-mail SPF/DKIM/DMARC as verified by OUR inbound
+   * provider). 'none' = no trustworthy verdict — the default; WhatsApp senders are
+   * authenticated by Meta and always carry 'pass'.
+   */
+  authVerdict: AuthVerdict;
+}
+
+export type AuthVerdict = 'pass' | 'fail' | 'none';
+
+/**
+ * RFC 8601 Authentication-Results → verdict. ONLY a header stamped with our
+ * provider's authserv-id counts (a sender can forge any other); it must report
+ * dmarc=pass, or spf=pass + dkim=pass; any fail/softfail → 'fail'.
+ */
+export function authVerdictFromHeaders(
+  headers: Array<{ name: string; value: string }>,
+  trustedAuthServId: string | null | undefined,
+): AuthVerdict {
+  if (!trustedAuthServId) return 'none';
+  const id = trustedAuthServId.trim().toLowerCase();
+  const ours = headers.filter(
+    (h) => h.name.toLowerCase() === 'authentication-results' && h.value.trim().toLowerCase().split(/[;\s]/)[0] === id,
+  );
+  if (ours.length !== 1) return 'none'; // missing or ambiguous → no trust
+  const v = ours[0]!.value.toLowerCase();
+  const res = (m: string) => new RegExp(`\\b${m}=([a-z]+)`).exec(v)?.[1] ?? null;
+  const spf = res('spf');
+  const dkim = res('dkim');
+  const dmarc = res('dmarc');
+  if ([spf, dkim, dmarc].some((r) => r === 'fail' || r === 'softfail' || r === 'permerror')) return 'fail';
+  if (dmarc === 'pass' || (spf === 'pass' && dkim === 'pass')) return 'pass';
+  return 'none';
 }
 
 /* ── WhatsApp Business Cloud API webhook ─────────────────────────────────── */
@@ -90,6 +123,7 @@ export function parseWhatsAppWebhook(json: unknown): InboundMessage[] {
           subject: media?.caption ?? m.text?.body?.slice(0, 200) ?? null,
           sentAtSec: Number(m.timestamp),
           phoneNumberId: change.value.metadata?.phone_number_id ?? null,
+          authVerdict: 'pass',
           attachments: media
             ? [
                 {
@@ -125,6 +159,7 @@ const ResendPayload = z.object({
     to: z.array(z.string().max(512)).max(50),
     cc: z.array(z.string().max(512)).max(50).optional(),
     subject: z.string().max(2000).nullish(),
+    headers: z.array(z.object({ name: z.string().max(200), value: z.string().max(8192) })).max(200).optional(),
     attachments: z.array(ResendAttachment).max(100).optional(),
   }),
 });
@@ -137,6 +172,7 @@ const PostmarkPayload = z.object({
   To: z.string().max(4096).optional(),
   OriginalRecipient: z.string().max(512).optional(),
   Subject: z.string().max(2000).optional(),
+  Headers: z.array(z.object({ Name: z.string().max(200), Value: z.string().max(8192) })).max(200).optional(),
   Attachments: z
     .array(
       z.object({
@@ -154,7 +190,7 @@ export interface InboundEmail extends InboundMessage {
   recipients: string[];
 }
 
-export function parseInboundEmail(json: unknown): InboundEmail {
+export function parseInboundEmail(json: unknown, opts: { trustedAuthServId?: string | null } = {}): InboundEmail {
   const resend = ResendPayload.safeParse(json);
   if (resend.success) {
     const d = resend.data.data;
@@ -165,6 +201,7 @@ export function parseInboundEmail(json: unknown): InboundEmail {
       subject: d.subject ?? null,
       sentAtSec: null,
       phoneNumberId: null,
+      authVerdict: authVerdictFromHeaders(d.headers ?? [], opts.trustedAuthServId),
       recipients: [...d.to, ...(d.cc ?? [])],
       attachments: (d.attachments ?? []).map((a) => ({
         filename: a.filename ?? null,
@@ -187,6 +224,10 @@ export function parseInboundEmail(json: unknown): InboundEmail {
     subject: pm.Subject ?? null,
     sentAtSec: null,
     phoneNumberId: null,
+    authVerdict: authVerdictFromHeaders(
+      (pm.Headers ?? []).map((h) => ({ name: h.Name, value: h.Value })),
+      opts.trustedAuthServId,
+    ),
     recipients,
     attachments: (pm.Attachments ?? []).map((a) => ({
       filename: a.Name ?? null,

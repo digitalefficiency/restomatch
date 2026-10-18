@@ -33,6 +33,12 @@ export interface IngestChannelConfig {
   provider: IngestProvider;
   /** WhatsApp: events are accepted only on a channel bound to its phone_number_id (production). */
   requirePhoneNumberId: boolean;
+  /**
+   * E-mail: the authserv-id our inbound provider stamps on Authentication-Results
+   * (INGEST_EMAIL_AUTHSERV_ID). Unset ⇒ no sender is ever authenticated, so
+   * allow-listed e-mail only suggests a supplier (needs review).
+   */
+  trustedAuthServId: string | null;
 }
 
 export function ingestConfig(kind: IngestKind, env: NodeJS.ProcessEnv = process.env): IngestChannelConfig {
@@ -48,7 +54,7 @@ export function ingestConfig(kind: IngestKind, env: NodeJS.ProcessEnv = process.
         : prod
           ? new UnavailableIngestProvider('whatsapp')
           : new StubIngestProvider('whatsapp');
-    return { kind, secret, verifyToken, emailDomain: null, provider, requirePhoneNumberId: prod };
+    return { kind, secret, verifyToken, emailDomain: null, provider, requirePhoneNumberId: prod, trustedAuthServId: null };
   }
   const emailDomain = env.INGEST_EMAIL_DOMAIN || null;
   // Production also needs the inbound domain, or a token on ANY domain would route.
@@ -59,7 +65,7 @@ export function ingestConfig(kind: IngestKind, env: NodeJS.ProcessEnv = process.
       : prod
         ? new UnavailableIngestProvider('email')
         : new StubIngestProvider('email');
-  return { kind, secret, verifyToken: null, emailDomain, provider, requirePhoneNumberId: false };
+  return { kind, secret, verifyToken: null, emailDomain, provider, requirePhoneNumberId: false, trustedAuthServId: env.INGEST_EMAIL_AUTHSERV_ID || null };
 }
 
 /** Public, display-only: the address/URL an owner configures (token appended). */

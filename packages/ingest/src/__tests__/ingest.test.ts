@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  authVerdictFromHeaders,
   tokensFromRecipients,
   AttachmentTooLargeError,
   DEV_EMAIL_WEBHOOK_SECRET,
@@ -272,5 +273,27 @@ describe('ingestConfig', () => {
     expect(
       ingestConfig('whatsapp', { NODE_ENV: 'production', WHATSAPP_APP_SECRET: 's', WHATSAPP_ACCESS_TOKEN: 't', INGEST_PROVIDER: 'live' }).provider.name,
     ).toBe('meta-cloud');
+  });
+});
+
+describe('authVerdictFromHeaders (S4 I2)', () => {
+  const h = (value: string) => [{ name: 'Authentication-Results', value }];
+  it('trusts ONLY our authserv-id; dmarc=pass or spf+dkim pass → pass', () => {
+    expect(authVerdictFromHeaders(h('mx.ours; spf=pass; dkim=pass; dmarc=pass'), 'mx.ours')).toBe('pass');
+    expect(authVerdictFromHeaders(h('mx.ours; dmarc=pass'), 'mx.ours')).toBe('pass');
+    expect(authVerdictFromHeaders(h('mx.ours; spf=pass; dkim=none'), 'mx.ours')).toBe('none');
+    expect(authVerdictFromHeaders(h('mx.ours; spf=fail; dkim=pass'), 'mx.ours')).toBe('fail');
+  });
+  it('a forged header, no configured id, or two of ours → none', () => {
+    expect(authVerdictFromHeaders(h('evil.example; dmarc=pass'), 'mx.ours')).toBe('none');
+    expect(authVerdictFromHeaders(h('mx.ours; dmarc=pass'), null)).toBe('none');
+    expect(authVerdictFromHeaders([...h('mx.ours; dmarc=pass'), ...h('mx.ours; dmarc=pass')], 'mx.ours')).toBe('none');
+  });
+  it('WhatsApp messages are authenticated by Meta', () => {
+    const [m] = parseWhatsAppWebhook({
+      object: 'whatsapp_business_account',
+      entry: [{ changes: [{ field: 'messages', value: { messages: [{ from: '1', id: 'w', timestamp: '1', type: 'text', text: { body: 'x' } }] } }] }],
+    });
+    expect(m!.authVerdict).toBe('pass');
   });
 });

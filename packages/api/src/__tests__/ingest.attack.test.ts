@@ -68,7 +68,8 @@ function waConfig(): IngestChannelConfig {
   return { ...ingestConfig('whatsapp', { NODE_ENV: 'test' }), secret: WA_SECRET, verifyToken: 'vt', provider: waProvider };
 }
 function emailConfig(): IngestChannelConfig {
-  return { ...ingestConfig('email', { NODE_ENV: 'test' }), emailDomain: 'in.test' };
+  // Our inbound provider stamps Authentication-Results with authserv-id mx.in.test.
+  return { ...ingestConfig('email', { NODE_ENV: 'test' }), emailDomain: 'in.test', trustedAuthServId: 'mx.in.test' };
 }
 
 let store: MemoryRateLimitStore;
@@ -121,7 +122,7 @@ function waRequest(token: string, body: string, signature = signMeta(body, WA_SE
   });
 }
 
-function emailBody(opts: { id: string; to: string | string[]; from?: string; content?: string }) {
+function emailBody(opts: { id: string; to: string | string[]; from?: string; content?: string; authResults?: string }) {
   return JSON.stringify({
     type: 'email.received',
     data: {
@@ -129,6 +130,7 @@ function emailBody(opts: { id: string; to: string | string[]; from?: string; con
       from: opts.from ?? 'Bills <bills@supplier-a.co.il>',
       to: Array.isArray(opts.to) ? opts.to : [opts.to],
       subject: 'Invoice',
+      ...(opts.authResults ? { headers: [{ name: 'Authentication-Results', value: opts.authResults }] } : {}),
       attachments: [
         {
           filename: 'inv.pdf',
@@ -395,20 +397,40 @@ describe('WhatsApp webhook — attacks', () => {
 });
 
 describe('E-mail webhook — attacks', () => {
-  it('S4 I2: an allow-listed e-mail sender only SUGGESTS the supplier — needs review, no invoice, no OCR', async () => {
-    const res = await handleEmailWebhook(emailRequest(emailBody({ id: 'em_ok', to: `${tokens.aEmail}@in.test` })), deps({ config: emailConfig() }));
-    expect(res.status).toBe(200);
-    const [m] = (await messagesOf(A.restaurantId)).filter((x) => x.providerMessageId === 'em_ok');
-    // From headers are unauthenticated: known sender + suggested supplier, but a human approves.
-    expect(m).toMatchObject({ status: 'needs_review', senderAllowed: true, supplierId: A.supplierId });
-    const [d] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.messageId, m!.id));
-    expect(d).toMatchObject({ status: 'needs_review', invoiceId: null });
-    expect(d!.storagePath!.startsWith(`${A.restaurantId}/`)).toBe(true);
+  it('S4 I2: a spoofed allow-listed From with NO trusted verdict only SUGGESTS — needs review, no invoice, no OCR', async () => {
+    // Verdict 'none' (no header) and a forged Authentication-Results from another authserv-id.
+    for (const [id, authResults] of [
+      ['em_ok', undefined],
+      ['em_forged_ar', 'evil.example; spf=pass; dkim=pass; dmarc=pass'],
+    ] as const) {
+      const res = await handleEmailWebhook(
+        emailRequest(emailBody({ id, to: `${tokens.aEmail}@in.test`, ...(authResults ? { authResults } : {}) })),
+        deps({ config: emailConfig() }),
+      );
+      expect(res.status).toBe(200);
+      const [m] = (await messagesOf(A.restaurantId)).filter((x) => x.providerMessageId === id);
+      expect(m).toMatchObject({ status: 'needs_review', senderAllowed: true, supplierId: A.supplierId });
+      const [d] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.messageId, m!.id));
+      expect(d).toMatchObject({ status: 'needs_review', invoiceId: null });
+    }
     const emailInvoices = await ownerDb
       .select()
       .from(invoices)
       .where(and(eq(invoices.restaurantId, A.restaurantId), eq(invoices.source, 'email')));
     expect(emailInvoices).toHaveLength(0);
+  });
+
+  it('S4 I2: allow-listed AND a passing verdict from OUR provider → registered (OCR)', async () => {
+    const res = await handleEmailWebhook(
+      emailRequest(emailBody({ id: 'em_pass', to: `${tokens.aEmail}@in.test`, authResults: 'mx.in.test; spf=pass smtp.mailfrom=supplier-a.co.il; dkim=pass; dmarc=pass' })),
+      deps({ config: emailConfig() }),
+    );
+    expect(res.status).toBe(200);
+    const [m] = (await messagesOf(A.restaurantId)).filter((x) => x.providerMessageId === 'em_pass');
+    expect(m).toMatchObject({ status: 'accepted', senderAllowed: true });
+    const [d] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.messageId, m!.id));
+    const [inv] = await ownerDb.select().from(invoices).where(eq(invoices.id, d!.invoiceId!));
+    expect(inv).toMatchObject({ source: 'email', status: 'ocr_pending', restaurantId: A.restaurantId });
   });
 
   it('forged signature, wrong secret and a stale (replayed later) timestamp → 401', async () => {
@@ -444,7 +466,7 @@ describe('E-mail webhook — attacks', () => {
     expect(docs[0]!.invoiceId).toBe(docs[1]!.invoiceId);
   });
 
-  it('S4 I4: review documents beyond the per-channel daily byte quota are rejected, not stored', async () => {
+  it('S4 I4: review documents beyond the per-channel daily byte quota are kept as metadata only (no blob)', async () => {
     const prev = process.env.INGEST_REVIEW_BYTES_PER_DAY;
     process.env.INGEST_REVIEW_BYTES_PER_DAY = '1';
     try {
@@ -455,7 +477,8 @@ describe('E-mail webhook — attacks', () => {
       expect(res.status).toBe(200);
       const [m] = (await messagesOf(A.restaurantId)).filter((x) => x.providerMessageId === 'em_quota');
       const [d] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.messageId, m!.id));
-      expect(d).toMatchObject({ status: 'rejected', error: 'quota_exceeded', storagePath: null, invoiceId: null });
+      // Metadata only: kept for review, but no blob stored and no OCR.
+      expect(d).toMatchObject({ status: 'needs_review', error: 'quota_exceeded', storagePath: null, invoiceId: null });
       // Allow-listed WhatsApp (auto-registered → OCR) is not subject to the review quota.
       const ok = await handleWhatsAppWebhook(waRequest(tokens.aWa, waBody({ id: 'wamid.quota-ok' })), tokens.aWa, deps({ config: waConfig() }));
       expect(((await ok.json()) as { results: Array<{ outcome: string }> }).results[0]!.outcome).toBe('accepted');

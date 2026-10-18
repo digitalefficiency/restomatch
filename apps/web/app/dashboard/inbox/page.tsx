@@ -74,6 +74,7 @@ export default async function InboxPage({
               status: d.status,
               error: d.error,
               invoiceId: d.invoiceId,
+              stored: d.stored,
             })),
           }),
         )}

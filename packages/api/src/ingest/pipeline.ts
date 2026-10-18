@@ -307,10 +307,11 @@ export async function processInboundMessage(
         docs.push({ id: d!.id, status: 'duplicate' });
         continue;
       }
-      // E-mail From headers are unauthenticated (no SPF/DKIM verdict yet), so an
-      // allow-listed e-mail sender only SUGGESTS the supplier: the document still
-      // waits for a manager. WhatsApp sender numbers are authenticated by Meta.
-      const autoRegister = senderAllowed && channel.kind === 'whatsapp';
+      // Auto-register (→ OCR) only an allow-listed AND authenticated sender:
+      // WhatsApp numbers are authenticated by Meta; an e-mail From needs a passing
+      // SPF/DKIM/DMARC verdict from our inbound provider. Otherwise the allow-list
+      // only SUGGESTS the supplier and the document waits for a manager.
+      const autoRegister = senderAllowed && message.authVerdict === 'pass';
       if (!autoRegister) {
         // Storage quota for review documents (stored without OCR) per channel per day.
         const rows = (await tx.execute(sql`
@@ -324,11 +325,12 @@ export async function processInboundMessage(
             and d.created_at > now() - interval '1 day'
         `)) as unknown as Array<{ bytes: string | number }>;
         if (Number(rows[0]?.bytes ?? 0) + bytes.byteLength > reviewBytesPerDay()) {
+          // Over quota: keep the metadata for review, but store no blob.
           const [d] = await tx
             .insert(ingestDocuments)
-            .values({ ...base, mimeType: mime, sizeBytes: bytes.byteLength, sha256, status: 'rejected', error: 'quota_exceeded' })
+            .values({ ...base, mimeType: mime, sizeBytes: bytes.byteLength, sha256, status: 'needs_review', error: 'quota_exceeded' })
             .returning({ id: ingestDocuments.id });
-          docs.push({ id: d!.id, status: 'rejected' });
+          docs.push({ id: d!.id, status: 'needs_review' });
           continue;
         }
       }

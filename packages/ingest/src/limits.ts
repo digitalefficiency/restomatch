@@ -13,14 +13,18 @@ export const INGEST_LIMITS = {
   attachmentsPerMessage: 10,
 } as const;
 
+/** Default daily cap (bytes) on stored review documents per channel — the one place it is set. */
+export const REVIEW_BYTES_PER_CHANNEL_PER_DAY = 50 * 1024 * 1024;
+
 /**
  * Daily cap on bytes stored for documents that are NOT auto-registered (review
  * inbox) per channel — unknown senders cost storage without OCR, so a flood of
- * them must not grow storage without bound. Override with INGEST_REVIEW_BYTES_PER_DAY.
+ * them must not grow storage without bound. Over the cap a document is kept as
+ * metadata only (no blob). INGEST_REVIEW_BYTES_PER_DAY overrides it (tests/ops).
  */
 export function reviewBytesPerDay(env: NodeJS.ProcessEnv = process.env): number {
   const n = Number.parseInt(env.INGEST_REVIEW_BYTES_PER_DAY ?? '', 10);
-  return Number.isFinite(n) && n > 0 ? n : 200 * 1024 * 1024;
+  return Number.isFinite(n) && n > 0 ? n : REVIEW_BYTES_PER_CHANNEL_PER_DAY;
 }
 
 export const INGEST_ALLOWED_MIME = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'] as const;

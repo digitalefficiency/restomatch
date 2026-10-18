@@ -302,13 +302,22 @@ async function mobileReceiver(browser: Browser, rid: string, locale: Locale, exp
     // so the photo must STAY queued (never lost) and the receiver sees why.
     await page.waitForTimeout(3000);
     check((await queueCount(page)) === 1, 'prod build without storage: photo stays queued (not lost) after a refused upload');
-    // S4 I3: signing out on a shared device wipes the queue.
-    await page.getByRole('button', { name: locale === 'he' ? 'פתיחת תפריט' : 'Open menu' }).click();
-    await Promise.all([
-      page.waitForURL((u) => !u.pathname.startsWith('/dashboard'), { timeout: 30_000 }),
-      page.getByRole('button', { name: locale === 'he' ? 'התנתקות' : 'Sign out' }).last().click(),
-    ]);
-    check((await queueCount(page)) === 0, 'sign-out clears the offline photo queue (shared device)');
+    // S4 I3: the queue never outlives the session on a shared device.
+    if (locale === 'he') {
+      // Session expired: no cookie → middleware redirects to /login → queue wiped.
+      await context.clearCookies();
+      await page.goto(`${BASE}/dashboard/receiving`, { waitUntil: 'networkidle' });
+      check(new URL(page.url()).pathname.startsWith('/login'), 'expired session → /login');
+      for (let i = 0; i < 20 && (await queueCount(page)) !== 0; i += 1) await page.waitForTimeout(250);
+      check((await queueCount(page)) === 0, 'session-expired redirect to /login clears the offline photo queue');
+    } else {
+      await page.getByRole('button', { name: 'Open menu' }).click();
+      await Promise.all([
+        page.waitForURL((u) => !u.pathname.startsWith('/dashboard'), { timeout: 30_000 }),
+        page.getByRole('button', { name: 'Sign out' }).last().click(),
+      ]);
+      check((await queueCount(page)) === 0, 'sign-out clears the offline photo queue (shared device)');
+    }
   }
   check(w.serverErrors.filter((e) => !/\/api\/trpc\/scans\.upload/.test(e)).length === 0, `mobile/${locale}: zero unexpected 5xx`);
   await context.close();

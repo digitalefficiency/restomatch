@@ -9,6 +9,7 @@ import { auth as authMessages } from '@/lib/i18n/messages/auth';
 import { getT } from '@/lib/i18n/server';
 import { twoFactorEnabledForEmail } from '@/lib/passwords';
 import { safeRelativePath } from '@/lib/safeRedirect';
+import { PwaQueueReset } from '@/lib/pwa/PwaQueueReset';
 
 interface PageProps {
   searchParams: Promise<{
@@ -105,6 +106,8 @@ export default async function LoginPage({ searchParams }: PageProps) {
 
   return (
     <main className="relative flex min-h-screen items-center justify-center p-6">
+      {/* S13 receiver PWA: no queued photos survive a sign-out / expired session (shared devices). */}
+      <PwaQueueReset />
       <div className="absolute end-4 top-4">
         <LocaleSwitcher />
       </div>

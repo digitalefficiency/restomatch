@@ -189,7 +189,9 @@ export async function handleEmailWebhook(req: Request, deps: IngestHttpDeps): Pr
   if (!verified.ok) return json(401, { error: verified.reason === 'stale' ? 'stale' : 'bad_signature' });
   let email: ReturnType<typeof parseInboundEmail>;
   try {
-    email = parseInboundEmail(JSON.parse(Buffer.from(pre.body).toString('utf8')));
+    email = parseInboundEmail(JSON.parse(Buffer.from(pre.body).toString('utf8')), {
+      trustedAuthServId: pre.cfg.trustedAuthServId,
+    });
   } catch {
     return json(400, { error: 'bad_payload' });
   }
