@@ -239,6 +239,20 @@
       "when": 1781940000000,
       "tag": "0039_invitation_locale",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1782090000000,
+      "tag": "0054_leak_check_sandbox",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1782100000000,
+      "tag": "0055_referrals",
+      "breakpoints": true
     }
   ]
 }

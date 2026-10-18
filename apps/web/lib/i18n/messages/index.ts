@@ -26,6 +26,8 @@ import { settings } from './settings';
 import { showcase } from './showcase';
 import { suppliers } from './suppliers';
 import { team } from './team';
+import { leakCheck } from './leakCheck';
+import { growth } from './growth';
 
 export const ALL_NAMESPACES = [
   common,
@@ -51,6 +53,8 @@ export const ALL_NAMESPACES = [
   showcase,
   suppliers,
   team,
+  leakCheck,
+  growth,
 ] as const;
 
-export { common, admin, approvals, auth, catalog, components, emails, accounting, invoices, landing, leaks, marketing, nav, onboarding, orders, overview, products, receiving, scans, settings, showcase, suppliers, team };
+export { common, admin, approvals, auth, catalog, components, emails, accounting, invoices, landing, leaks, marketing, nav, onboarding, orders, overview, products, receiving, scans, settings, showcase, suppliers, team, leakCheck, growth };

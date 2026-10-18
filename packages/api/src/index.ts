@@ -19,6 +19,8 @@ import { matchRouter } from './routers/match';
 import { mappingRouter } from './routers/mapping';
 import { productsRouter } from './routers/products';
 import { teamRouter } from './routers/team';
+import { leakCheckRouter } from './routers/leakCheck';
+import { growthRouter } from './routers/growth';
 
 export const appRouter = router({
   owner: ownerRouter,
@@ -41,6 +43,8 @@ export const appRouter = router({
   products: productsRouter,
   team: teamRouter,
   dsr: dsrRouter,
+  growth: growthRouter,
+  leakCheck: leakCheckRouter,
 });
 
 export type AppRouter = typeof appRouter;
@@ -167,6 +171,7 @@ export {
 export { canonicalizeEmail } from './email';
 export { startOfDayInTz, endOfDayInTz, addCalendarDaysInTz } from './lib/time';
 export { FEATURE_KEYS, featureEnabled, type FeatureKey } from './lib/features';
+export * as leakCheck from './leakCheck';
 export {
   APP_ERROR_CODES,
   AppErrorCause,
@@ -190,3 +195,17 @@ export {
   scanIdFromLocalUrl,
   isLocalScanId,
 } from './lib/localScanStorage';
+export {
+  growthPricingPublicEnabled,
+  creditReferralRedemption,
+  restaurantMonthlyPriceAgorot,
+  REFERRAL_REDEEM_WINDOW_DAYS,
+} from './routers/growth';
+export {
+  quotePlan,
+  chainPerBranchAgorot,
+  CHAIN_INCLUDED_BRANCHES,
+  MAX_CHAIN_BRANCHES,
+  type BillingCycle,
+  type PlanQuote,
+} from '@restomatch/billing';

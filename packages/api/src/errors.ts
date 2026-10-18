@@ -31,6 +31,11 @@ export const APP_ERROR_CODES = [
   'auth.unauthorized',
   'auth.forbidden',
   'input.invalid',
+  'FEATURE_DISABLED',
+  'leakCheck.invalidLink',
+  'growth.referralInvalid',
+  'growth.referralSelf',
+  'growth.referralAlreadyRedeemed',
 ] as const;
 
 export type AppErrorCode = (typeof APP_ERROR_CODES)[number];
