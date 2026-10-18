@@ -23,7 +23,8 @@
     "reset": "tsx scripts/reset.ts && pnpm migrate && pnpm seed",
     "studio": "drizzle-kit studio",
     "push": "drizzle-kit push",
-    "test": "vitest run"
+    "test": "vitest run",
+    "doctor": "tsx scripts/doctor.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.38.3",

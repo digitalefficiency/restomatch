@@ -259,7 +259,10 @@ export const memberships = pgTable(
     preferredLocale: varchar('preferred_locale', { length: 8 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.userId, t.restaurantId, t.role] })],
+  (t) => [
+    primaryKey({ columns: [t.userId, t.restaurantId, t.role] }),
+    index('memberships_restaurant_idx').on(t.restaurantId),
+  ],
 );
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -450,7 +453,12 @@ export const suppliers = pgTable(
   },
   (t) => [
     index('suppliers_restaurant_idx').on(t.restaurantId),
-    uniqueIndex('suppliers_external_ref_unique').on(t.sourcePlatform, t.externalRef),
+    // I5 (0029): a platform supplier id is unique per restaurant, not globally.
+    uniqueIndex('suppliers_restaurant_external_ref_unique').on(
+      t.restaurantId,
+      t.sourcePlatform,
+      t.externalRef,
+    ),
   ],
 );
 
@@ -557,6 +565,7 @@ export const productAliases = pgTable(
   (t) => [
     index('product_aliases_supplier_sku_idx').on(t.supplierId, t.supplierSku),
     index('product_aliases_lookup_idx').on(t.supplierId, t.supplierNameRaw),
+    index('product_aliases_product_idx').on(t.productId),
   ],
 );
 
@@ -608,7 +617,10 @@ export const catalogImports = pgTable(
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('catalog_imports_restaurant_idx').on(t.restaurantId, t.createdAt)],
+  (t) => [
+    index('catalog_imports_restaurant_idx').on(t.restaurantId, t.createdAt),
+    index('catalog_imports_supplier_idx').on(t.supplierId),
+  ],
 );
 
 export const supplierCatalogItems = pgTable(
@@ -645,6 +657,8 @@ export const supplierCatalogItems = pgTable(
     // rows per supplier are allowed (deduped by name/barcode in app logic),
     // while real (supplier, sku) pairs are unique. Mirrors suppliers_external_ref_unique.
     uniqueIndex('supplier_catalog_items_sku_unique').on(t.supplierId, t.supplierSku),
+    index('supplier_catalog_items_product_idx').on(t.productId),
+    index('supplier_catalog_items_import_idx').on(t.sourceImportId),
   ],
 );
 
@@ -688,7 +702,8 @@ export const purchaseOrders = pgTable(
   (t) => [
     index('po_restaurant_delivery_idx').on(t.restaurantId, t.expectedDeliveryAt),
     index('po_supplier_idx').on(t.supplierId),
-    uniqueIndex('po_source_ref_unique').on(t.sourcePlatform, t.sourceRef),
+    // I5 (0029): a platform order id is unique per restaurant, not globally.
+    uniqueIndex('po_restaurant_source_ref_unique').on(t.restaurantId, t.sourcePlatform, t.sourceRef),
   ],
 );
 
@@ -715,7 +730,7 @@ export const poLines = pgTable(
     unitPriceExpected: numeric('unit_price_expected', { precision: 12, scale: 4 }),
     notes: text('notes'),
   },
-  (t) => [index('po_lines_po_idx').on(t.poId)],
+  (t) => [index('po_lines_po_idx').on(t.poId), index('po_lines_product_idx').on(t.productId)],
 );
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -748,6 +763,7 @@ export const goodsReceipts = pgTable(
     uniqueIndex('goods_receipts_po_unique')
       .on(t.restaurantId, t.poId)
       .where(sql`po_id is not null`),
+    index('goods_receipts_po_idx').on(t.poId),
   ],
 );
 
@@ -766,7 +782,11 @@ export const grLines = pgTable(
     conditionNotes: text('condition_notes'),
     photos: jsonb('photos').$type<string[]>().notNull().default([]),
   },
-  (t) => [index('gr_lines_gr_idx').on(t.grId)],
+  (t) => [
+    index('gr_lines_gr_idx').on(t.grId),
+    index('gr_lines_po_line_idx').on(t.poLineId),
+    index('gr_lines_product_idx').on(t.productId),
+  ],
 );
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -840,7 +860,10 @@ export const invoiceLines = pgTable(
     vatRate: numeric('vat_rate', { precision: 5, scale: 4 }),
     ocrConfidenceLine: numeric('ocr_confidence_line', { precision: 4, scale: 3 }),
   },
-  (t) => [index('invoice_lines_invoice_product_idx').on(t.invoiceId, t.productId)],
+  (t) => [
+    index('invoice_lines_invoice_product_idx').on(t.invoiceId, t.productId),
+    index('invoice_lines_product_idx').on(t.productId),
+  ],
 );
 
 /**
@@ -927,7 +950,12 @@ export const matchRuns = pgTable(
       .notNull()
       .default('0'),
   },
-  (t) => [index('match_runs_restaurant_idx').on(t.restaurantId, t.runAt)],
+  (t) => [
+    index('match_runs_restaurant_idx').on(t.restaurantId, t.runAt),
+    index('match_runs_invoice_idx').on(t.invoiceId),
+    index('match_runs_po_idx').on(t.poId),
+    index('match_runs_gr_idx').on(t.grId),
+  ],
 );
 
 export const discrepancies = pgTable(
@@ -969,6 +997,11 @@ export const discrepancies = pgTable(
       t.severity,
       t.createdAt,
     ),
+    index('discrepancies_match_run_idx').on(t.matchRunId),
+    index('discrepancies_invoice_line_idx').on(t.invoiceLineId),
+    index('discrepancies_product_idx').on(t.productId),
+    index('discrepancies_po_line_idx').on(t.poLineId),
+    index('discrepancies_gr_line_idx').on(t.grLineId),
   ],
 );
 
@@ -1028,7 +1061,12 @@ export const priceHistory = pgTable(
       onDelete: 'set null',
     }),
   },
-  (t) => [index('price_history_lookup_idx').on(t.productId, t.supplierId, t.observedAt)],
+  (t) => [
+    index('price_history_lookup_idx').on(t.productId, t.supplierId, t.observedAt),
+    index('price_history_restaurant_observed_idx').on(t.restaurantId, t.observedAt),
+    index('price_history_supplier_idx').on(t.supplierId),
+    index('price_history_source_invoice_idx').on(t.sourceInvoiceId),
+  ],
 );
 
 export const priceBaselines = pgTable(
@@ -1056,6 +1094,8 @@ export const priceBaselines = pgTable(
       t.supplierId,
       t.windowDays,
     ),
+    index('price_baselines_restaurant_idx').on(t.restaurantId),
+    index('price_baselines_supplier_idx').on(t.supplierId),
   ],
 );
 
@@ -1092,7 +1132,10 @@ export const auditLog = pgTable(
     after: jsonb('after'),
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('audit_log_entity_idx').on(t.entityType, t.entityId, t.at)],
+  (t) => [
+    index('audit_log_entity_idx').on(t.entityType, t.entityId, t.at),
+    index('audit_log_restaurant_at_idx').on(t.restaurantId, t.at),
+  ],
 );
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -1200,6 +1243,7 @@ export const notificationsOutbox = pgTable(
     uniqueIndex('notifications_dedupe_key_unique')
       .on(t.dedupeKey)
       .where(sql`${t.dedupeKey} IS NOT NULL`),
+    index('notifications_outbox_restaurant_idx').on(t.restaurantId, t.createdAt),
   ],
 );
 
