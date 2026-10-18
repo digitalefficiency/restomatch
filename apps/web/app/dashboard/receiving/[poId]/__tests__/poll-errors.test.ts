@@ -76,6 +76,9 @@ describe('receivingErrorText (WIZ-ERR-1)', () => {
     expect(receivingErrorText(new Error('Internal server error'), en, 'en')).toBe(en('errors.generic'));
     expect(receivingErrorText(new TypeError('Failed to fetch'), en, 'en')).toBe(en('errors.network'));
     expect(receivingErrorText(trpcErr({}, 'Failed to fetch'), he, 'he')).toBe(he('errors.generic'));
+    // What tRPC really throws offline (QA F): the fetch TypeError rides on .cause.
+    const offline = new TRPCClientError('Failed to fetch', { cause: new TypeError('Failed to fetch') });
+    expect(receivingErrorText(offline, en, 'en')).toBe(en('errors.network'));
   });
 
   it('keeps meaningful errors: NOT_FOUND, mapped codes, coded domain errors', () => {

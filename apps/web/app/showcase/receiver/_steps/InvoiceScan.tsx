@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { useDir, useLocale, useT } from '@/lib/i18n/client';
-import { localizeServerError } from '@/lib/serverErrors';
+import { receivingErrorText } from '@/app/dashboard/receiving/[poId]/_errors';
 import { receiving } from '@/lib/i18n/messages/receiving';
 import type { Translator } from '@/lib/i18n/translate';
 import {
@@ -128,7 +128,7 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadFile
         });
       } else {
         // Coded failures are translated; quota / subscription / auth errors go
-        // through localizeServerError — never raw server text.
+        // through receivingErrorText — never raw server text.
         setUpload({ phase: 'error', message: uploadErrorText(err) });
       }
     }
@@ -146,9 +146,9 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadFile
     if (code === 'too_many_requests') return t('steps.scan.rateLimited');
     if (code === 'network') return t('steps.scan.network');
     if (code === 'upload_failed') return t('steps.scan.uploadFailed', { message: t('errors.generic') });
-    return t('steps.scan.uploadFailed', {
-      message: localizeServerError(err, locale, t('errors.generic')),
-    });
+    // Authed path (scans.upload over tRPC): offline → network message; only
+    // coded/mapped errors are shown specifically, never raw server text.
+    return t('steps.scan.uploadFailed', { message: receivingErrorText(err, t, locale) });
   }
 
   function triggerFilePicker() {
