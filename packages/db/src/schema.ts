@@ -1,6 +1,8 @@
 import { relations, sql } from 'drizzle-orm';
 import {
+  bigint,
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -1618,3 +1620,47 @@ export type Lead = typeof leads.$inferSelect;
 export type NewLead = typeof leads.$inferInsert;
 export type DsrRequest = typeof dsrRequests.$inferSelect;
 export type NewDsrRequest = typeof dsrRequests.$inferInsert;
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Wave 1 · S14 — receiver languages (0052) + AI assistant budget (0053).
+ * Both tenant tables have RLS enabled in their migration (restaurant_id policy).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** Per-restaurant, per-locale (ar|ru|th|ti) rendering of a Hebrew item/line name. Display-only. */
+export const translationCache = pgTable(
+  'translation_cache',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    locale: varchar('locale', { length: 8 }).notNull(),
+    sourceText: text('source_text').notNull(),
+    translatedText: text('translated_text').notNull(),
+    /** 'glossary' | 'claude' | 'manual' */
+    source: varchar('source', { length: 16 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('translation_cache_unique_idx').on(t.restaurantId, t.locale, t.sourceText)],
+);
+
+/** Per-restaurant, per-UTC-day usage of the "Ask RestoMatch" assistant (no question text). */
+export const assistantUsage = pgTable(
+  'assistant_usage',
+  {
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    day: date('day').notNull(),
+    questions: integer('questions').notNull().default(0),
+    claudeCalls: integer('claude_calls').notNull().default(0),
+    inputTokens: integer('input_tokens').notNull().default(0),
+    outputTokens: integer('output_tokens').notNull().default(0),
+    costMicroUsd: bigint('cost_micro_usd', { mode: 'number' }).notNull().default(0),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ name: 'assistant_usage_pk', columns: [t.restaurantId, t.day] })],
+);
+
+export type TranslationCacheRow = typeof translationCache.$inferSelect;
+export type AssistantUsageRow = typeof assistantUsage.$inferSelect;

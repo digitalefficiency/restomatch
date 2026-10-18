@@ -239,6 +239,20 @@
       "when": 1781940000000,
       "tag": "0039_invitation_locale",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1782070000000,
+      "tag": "0052_receiver_languages",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1782080000000,
+      "tag": "0053_ai_assistant",
+      "breakpoints": true
     }
   ]
 }
