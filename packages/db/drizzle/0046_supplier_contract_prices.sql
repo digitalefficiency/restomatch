@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS "supplier_contract_prices" (
 );--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "supplier_contract_prices_key" ON "supplier_contract_prices" ("supplier_id","product_id","valid_from");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "supplier_contract_prices_lookup_idx" ON "supplier_contract_prices" ("restaurant_id","supplier_id","product_id","valid_from");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "supplier_contract_prices_product_idx" ON "supplier_contract_prices" ("product_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "supplier_contract_prices_product_idx" ON "supplier_contract_prices" ("product_id","restaurant_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "supplier_contract_prices_created_by_idx" ON "supplier_contract_prices" ("created_by");
 --> statement-breakpoint
 DROP TRIGGER IF EXISTS "supplier_contract_prices_set_updated_at" ON "supplier_contract_prices";--> statement-breakpoint

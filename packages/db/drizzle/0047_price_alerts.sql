@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS "price_alert_thresholds" (
 );--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "price_alert_thresholds_scope_key" ON "price_alert_thresholds"
   ("restaurant_id", COALESCE("supplier_id", '00000000-0000-0000-0000-000000000000'::uuid), COALESCE("category", ''));--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "price_alert_thresholds_supplier_idx" ON "price_alert_thresholds" ("supplier_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "price_alert_thresholds_supplier_idx" ON "price_alert_thresholds" ("supplier_id","restaurant_id");--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "price_alerts" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE cascade,
@@ -63,9 +63,9 @@ CREATE TABLE IF NOT EXISTS "price_alerts" (
 );--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "price_alerts_dedupe_key" ON "price_alerts" ("restaurant_id","dedupe_key");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "price_alerts_restaurant_status_idx" ON "price_alerts" ("restaurant_id","status","created_at");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "price_alerts_product_idx" ON "price_alerts" ("product_id");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "price_alerts_supplier_idx" ON "price_alerts" ("supplier_id");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "price_alerts_cheaper_supplier_idx" ON "price_alerts" ("cheaper_supplier_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "price_alerts_product_idx" ON "price_alerts" ("product_id","restaurant_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "price_alerts_supplier_idx" ON "price_alerts" ("supplier_id","restaurant_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "price_alerts_cheaper_supplier_idx" ON "price_alerts" ("cheaper_supplier_id","restaurant_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "price_alerts_dismissed_by_idx" ON "price_alerts" ("dismissed_by");
 --> statement-breakpoint
 DROP TRIGGER IF EXISTS "price_alert_thresholds_set_updated_at" ON "price_alert_thresholds";--> statement-breakpoint

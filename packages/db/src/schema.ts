@@ -1651,7 +1651,7 @@ export const supplierContractPrices = pgTable(
   (t) => [
     uniqueIndex('supplier_contract_prices_key').on(t.supplierId, t.productId, t.validFrom),
     index('supplier_contract_prices_lookup_idx').on(t.restaurantId, t.supplierId, t.productId, t.validFrom),
-    index('supplier_contract_prices_product_idx').on(t.productId),
+    index('supplier_contract_prices_product_idx').on(t.productId, t.restaurantId),
     index('supplier_contract_prices_created_by_idx').on(t.createdBy),
   ],
 );
@@ -1673,7 +1673,7 @@ export const priceAlertThresholds = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('price_alert_thresholds_supplier_idx').on(t.supplierId)],
+  (t) => [index('price_alert_thresholds_supplier_idx').on(t.supplierId, t.restaurantId)],
 );
 
 /** One detected sustained price increase for a (product, supplier) (0047). */
@@ -1705,9 +1705,9 @@ export const priceAlerts = pgTable(
   (t) => [
     uniqueIndex('price_alerts_dedupe_key').on(t.restaurantId, t.dedupeKey),
     index('price_alerts_restaurant_status_idx').on(t.restaurantId, t.status, t.createdAt),
-    index('price_alerts_product_idx').on(t.productId),
-    index('price_alerts_supplier_idx').on(t.supplierId),
-    index('price_alerts_cheaper_supplier_idx').on(t.cheaperSupplierId),
+    index('price_alerts_product_idx').on(t.productId, t.restaurantId),
+    index('price_alerts_supplier_idx').on(t.supplierId, t.restaurantId),
+    index('price_alerts_cheaper_supplier_idx').on(t.cheaperSupplierId, t.restaurantId),
     index('price_alerts_dismissed_by_idx').on(t.dismissedBy),
   ],
 );
