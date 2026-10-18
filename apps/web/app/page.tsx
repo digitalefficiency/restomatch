@@ -28,7 +28,7 @@ export async function generateMetadata(): Promise<Metadata> {
     // Next's resolver collapses `/?lang=en` to the bare origin on the root
     // route, so the root's canonical + hreflang <link>s are rendered in the
     // page instead (React hoists them into <head>).
-    ...socialFor(t.locale, { title: t('meta.title'), description: t('meta.description'), url: '/' }),
+    ...socialFor(t.locale, { title: t('meta.title'), description: t('meta.description') }),
   };
 }
 
@@ -144,6 +144,8 @@ export default async function Home() {
       <link rel="alternate" hrefLang="he" href={`${SITE_URL}/`} />
       <link rel="alternate" hrefLang="en" href={`${SITE_URL}/?lang=en`} />
       <link rel="alternate" hrefLang="x-default" href={`${SITE_URL}/`} />
+      {/* og:url for the same reason (React hoists <meta> into <head>). */}
+      <meta property="og:url" content={locale === 'en' ? `${SITE_URL}/?lang=en` : `${SITE_URL}/`} />
       <script
         type="application/ld+json"
         // JSON-LD is data, not script; `<` is escaped so no string can close the tag.

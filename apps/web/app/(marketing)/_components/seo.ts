@@ -54,20 +54,23 @@ export function ogImageFor(locale: Locale) {
  */
 export function socialFor(
   locale: Locale,
-  { title, description, url }: { title: string; description: string; url?: string },
+  { title, description, path }: { title?: string; description?: string; path?: string } = {},
 ): Pick<Metadata, 'openGraph' | 'twitter'> {
   const image = ogImageFor(locale);
+  // og:url is what Facebook/LinkedIn re-scrape, so it must be this language's
+  // own URL (English lives at ?lang=en). Absolute: Next collapses `/?lang=en`.
+  const url = path === undefined ? undefined : locale === 'en' ? `${SITE_URL}${path}?lang=en` : `${SITE_URL}${path}`;
+  const text = { ...(title ? { title } : {}), ...(description ? { description } : {}) };
   return {
     openGraph: {
       type: 'website',
       siteName: 'RestoMatch',
       locale: locale === 'he' ? 'he_IL' : 'en_US',
       alternateLocale: locale === 'he' ? ['en_US'] : ['he_IL'],
-      title,
-      description,
+      ...text,
       ...(url ? { url } : {}),
       images: [image],
     },
-    twitter: { card: 'summary_large_image', title, description, images: [image] },
+    twitter: { card: 'summary_large_image', ...text, images: [image] },
   };
 }

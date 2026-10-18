@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { Cookie } from 'lucide-react';
 import { getConsentChoice, setConsentChoice, type ConsentChoice } from '@/lib/cookieConsent';
 import { useT } from '@/lib/i18n/client';
@@ -25,6 +26,7 @@ export function CookieConsent() {
   // until a choice is made, so showing it a moment later changes nothing.
   const [shown, setShown] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const pathname = usePathname();
 
   useEffect(() => {
     if (getConsentChoice() === null) setVisible(true);
@@ -36,22 +38,23 @@ export function CookieConsent() {
   useEffect(() => {
     const el = ref.current;
     if (!visible || !el) return;
+    // Re-evaluated per page (the banner lives in the root layout) and on resize.
     const clear = () => {
       const keep = document.querySelector('[data-keep-clear]');
       return !keep || keep.getBoundingClientRect().bottom <= window.innerHeight - el.offsetHeight;
     };
-    if (clear()) {
-      setShown(true);
-      return;
-    }
-    const onScroll = () => {
-      if (!clear()) return;
-      setShown(true);
-      window.removeEventListener('scroll', onScroll);
+    // Decided afresh on each page; once shown it stays (no flicker while scrolling).
+    setShown(clear());
+    const check = () => {
+      if (clear()) setShown(true);
     };
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
-  }, [visible]);
+    window.addEventListener('scroll', check, { passive: true });
+    window.addEventListener('resize', check);
+    return () => {
+      window.removeEventListener('scroll', check);
+      window.removeEventListener('resize', check);
+    };
+  }, [visible, pathname]);
 
   useEffect(() => {
     const el = ref.current;
@@ -70,6 +73,7 @@ export function CookieConsent() {
 
   function choose(choice: ConsentChoice) {
     setConsentChoice(choice);
+    setShown(false); // releases the reserved bottom padding
     setVisible(false);
   }
 

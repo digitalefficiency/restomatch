@@ -12,7 +12,7 @@ export async function generateMetadata(): Promise<Metadata> {
     title: t('meta.title'),
     description: t('meta.description'),
     metadataBase,
-    ...socialFor(t.locale, { title: t('meta.title'), description: t('meta.description'), url: '/showcase' }),
+    ...socialFor(t.locale, { title: t('meta.title'), description: t('meta.description'), path: '/showcase' }),
   };
 }
 

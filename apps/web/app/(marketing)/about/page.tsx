@@ -21,7 +21,7 @@ export async function generateMetadata(): Promise<Metadata> {
     description: t('about.metaDescription'),
     metadataBase,
     alternates: alternatesFor('/about', t.locale),
-    ...socialFor(t.locale, { title: t('about.metaTitle'), description: t('about.metaDescription'), url: '/about' }),
+    ...socialFor(t.locale, { title: t('about.metaTitle'), description: t('about.metaDescription'), path: '/about' }),
   };
 }
 

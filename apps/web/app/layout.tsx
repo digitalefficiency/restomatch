@@ -22,7 +22,8 @@ export async function generateMetadata(): Promise<Metadata> {
     title: 'RestoMatch',
     description,
     metadataBase,
-    ...socialFor(locale, { title: 'RestoMatch', description }),
+    // Image + card type only: pages without their own share text fall back to <title>.
+    ...socialFor(locale),
   };
 }
 
