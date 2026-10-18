@@ -1,5 +1,5 @@
-import { agorotToPlain, cell, CRLF, ddmmyyyy, supplierAccount } from './common';
-import { encodeWindows1255 } from './encoding';
+import { agorotToPlain, cell, CRLF, ddmmyyyy, safeCell, supplierAccount } from './common';
+import { encodeWindows1255WithReport } from './encoding';
 import type { AccountingConfig, AccountingFile, AccountingInvoice } from './types';
 
 /**
@@ -38,13 +38,13 @@ export function hashavshevetLines(invoices: AccountingInvoice[], cfg: Accounting
     [
       cell(cfg.movementType, 3),
       numericRef(inv.invoiceNumber),
-      cell(inv.invoiceNumber, 20),
+      safeCell(inv.invoiceNumber, 20),
       ddmmyyyy(inv.invoiceDate),
       ddmmyyyy(inv.invoiceDate),
-      cell(inv.supplierName, 50),
-      cell(cfg.expenseAccount, 15),
-      cell(cfg.vatInputAccount, 15),
-      cell(supplierAccount(inv, cfg), 15),
+      safeCell(inv.supplierName, 50),
+      safeCell(cfg.expenseAccount, 15),
+      safeCell(cfg.vatInputAccount, 15),
+      safeCell(supplierAccount(inv, cfg), 15),
       agorotToPlain(inv.totalExclAgorot),
       agorotToPlain(inv.vatAgorot),
       agorotToPlain(inv.totalInclAgorot),
@@ -58,11 +58,13 @@ export function hashavshevetFile(
   period: { from: string; to: string },
 ): AccountingFile {
   const lines = hashavshevetLines(invoices, cfg);
+  const { bytes, replaced } = encodeWindows1255WithReport(lines.length ? lines.join(CRLF) + CRLF : '');
   return {
     filename: `restomatch-hashavshevet-${period.from}-to-${period.to}.txt`,
     mimeType: 'text/plain; charset=windows-1255',
     encoding: 'windows-1255',
-    bytes: encodeWindows1255(lines.length ? lines.join(CRLF) + CRLF : ''),
+    bytes,
     rowCount: lines.length,
+    replacedChars: replaced,
   };
 }

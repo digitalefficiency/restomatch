@@ -58,6 +58,27 @@ describe('integrations flag', () => {
     expect(await callerFor(A).integrations.status()).toEqual({ enabled: true });
   });
 
+  it('every one of the 9 gated procedures refuses with FEATURE_DISABLED while the flag is off', async () => {
+    const c = callerFor(A);
+    const pos = csv64('date,item,qty,net\n2026-10-01,Soup,1,10\n');
+    const calls: Array<[string, () => Promise<unknown>]> = [
+      ['accountingConfig', () => c.integrations.accountingConfig()],
+      ['setAccountingConfig', () => c.integrations.setAccountingConfig({ expenseAccount: '1', vatInputAccount: '2', movementType: 'x', supplierAccounts: {} })],
+      ['accountingExport', () => c.integrations.accountingExport({ format: 'priority', ...PERIOD })],
+      ['posPreview', () => c.integrations.posPreview(pos)],
+      ['posImport', () => c.integrations.posImport(pos)],
+      ['posImports', () => c.integrations.posImports()],
+      ['posSummary', () => c.integrations.posSummary({ from: '2026-10-01', to: '2026-10-31' })],
+      ['procurementProviders', () => c.integrations.procurementProviders()],
+      ['procurementPreview', () => c.integrations.procurementPreview({ platform: 'zester' })],
+    ];
+    expect(calls).toHaveLength(9);
+    for (const [name, call] of calls) {
+      await expect(call(), name).rejects.toMatchObject({ code: 'FORBIDDEN', cause: { appCode: 'FEATURE_DISABLED' } });
+    }
+    expect(await db.select().from(posSales).where(eq(posSales.restaurantId, A.restaurantId))).toHaveLength(0);
+  });
+
   it('FEATURES_OFF kill-switch wins over the per-restaurant flag', async () => {
     await setFlag(A, true);
     process.env.FEATURES_OFF = 'integrations';
@@ -95,6 +116,14 @@ describe('accounting exports', () => {
     await db.update(invoices).set({ totalInclVat: '118.00' }).where(eq(invoices.id, A.invoiceId)); // 100 + 17 ≠ 118
     const out = await callerFor(A).integrations.accountingExport({ format: 'hashavshevet', ...PERIOD });
     expect(out).toMatchObject({ rowCount: 0, skippedCount: 1 });
+  });
+
+  it('an invoice with only the VAT-inclusive total is split with the VAT rate, not posted as VAT 0', async () => {
+    await db.update(invoices).set({ totalExclVat: null, vatAmount: null, totalInclVat: '118.00' }).where(eq(invoices.id, A.invoiceId));
+    const out = await callerFor(A).integrations.accountingExport({ format: 'hashavshevet', ...PERIOD });
+    expect(out).toMatchObject({ rowCount: 1, skippedCount: 0, derivedVatCount: 1 });
+    const row = new TextDecoder('windows-1255').decode(Buffer.from(out.base64, 'base64')).split('\t');
+    expect(row.slice(9, 12).map((x) => x.trim())).toEqual(['100.00', '18.00', '118.00']); // restaurant default 18%
   });
 
   it('a saved supplier mapping and accounts flow into the file', async () => {
@@ -233,6 +262,11 @@ describe('POS sales import', () => {
     expect(history.map((h) => h.liveRows)).toEqual([2, 28]);
   });
 
+  it('the import result names days whose every row was rejected (their old data stays)', async () => {
+    const r = await callerFor(A).integrations.posImport(csv64('date,item,qty,net\n2026-10-01,A,1,10\n2026-10-02,B,x,10\n'));
+    expect(r.rejectedDays).toEqual(['2026-10-02']);
+  });
+
   it('a file with nothing usable is BAD_REQUEST with a stable code', async () => {
     await expect(callerFor(A).integrations.posImport(posFile('pos-sales-missing-columns.csv'))).rejects.toMatchObject({
       code: 'BAD_REQUEST',
@@ -296,5 +330,17 @@ describe('POS + procurement — cross-tenant attacks', () => {
     await db.insert(procurementConnections).values({ restaurantId: B.restaurantId, platform: 'marketman', credentialsVaultRef: 'env:B_KEY' });
     const a = await callerFor(A).integrations.procurementProviders();
     expect(a.every((p) => !p.connected)).toBe(true);
+  });
+});
+
+describe('vatFromInclusive', () => {
+  it('splits exactly in integers, half-up, at any size', async () => {
+    const { vatFromInclusive } = await import('../routers/integrations');
+    expect(vatFromInclusive(11800, '0.18')).toBe(1800);
+    expect(vatFromInclusive(11700, '0.1700')).toBe(1700);
+    expect(vatFromInclusive(100, '0.18')).toBe(15); // 100/1.18 = 84.75 → 85, VAT 15
+    expect(vatFromInclusive(-11800, '0.18')).toBe(-1800); // credit note
+    expect(vatFromInclusive(999_999_999_999, '0.18')).toBe(152_542_372_881); // NUMERIC(12,2) max, no 2^53 drift
+    expect(vatFromInclusive(5000, '0')).toBe(0);
   });
 });

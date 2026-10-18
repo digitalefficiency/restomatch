@@ -128,6 +128,39 @@ describe('Rivhit CSV formula injection', () => {
   });
 });
 
+describe('formula injection guard in the TSV formats (S1 cross-QA)', () => {
+  const risky = [{ ...INVOICES[0]!, invoiceNumber: '@SUM(1)', supplierName: '=HYPERLINK("http://evil","x")' }];
+  it('Hashavshevet: text cells that would run in Excel get a leading apostrophe', () => {
+    const f = renderAccountingFile('hashavshevet', risky, DEFAULT_ACCOUNTING_CONFIG, PERIOD);
+    const row = new TextDecoder('windows-1255').decode(f.bytes).split('\t');
+    expect(row[2]).toBe("'@SUM(1)");
+    expect(row[5]!.startsWith("'=HYPERLINK(")).toBe(true);
+    expect(Array.from(row[5]!).length).toBeLessThanOrEqual(50);
+  });
+  it('Priority: same guard on header and line text', () => {
+    const f = renderAccountingFile('priority', risky, DEFAULT_ACCOUNTING_CONFIG, PERIOD);
+    const [h, l] = new TextDecoder('utf-16le').decode(f.bytes.slice(2)).split('\r\n').map((x) => x.split('\t'));
+    expect(h![2]).toBe("'@SUM(1)");
+    expect(h![4]!.startsWith("'=HYPERLINK(")).toBe(true);
+    expect(l![2]).toBe('RestoMatch @SUM(1)'); // not leading → harmless
+  });
+});
+
+describe('encoding report + truncation (S1 cross-QA)', () => {
+  it('Hashavshevet counts characters Windows-1255 cannot hold (Arabic, emoji)', () => {
+    const f = renderAccountingFile('hashavshevet', [{ ...INVOICES[0]!, supplierName: 'مخبز 😀 ספק' }], DEFAULT_ACCOUNTING_CONFIG, PERIOD);
+    expect(f.replacedChars).toBe(5); // 4 Arabic letters + 1 emoji
+    expect(renderAccountingFile('hashavshevet', INVOICES, CFG, PERIOD).replacedChars).toBe(0);
+  });
+  it('truncation never splits a surrogate pair', () => {
+    const name = 'א'.repeat(47) + '😀😀'; // 49 code points, cut to 48
+    const f = renderAccountingFile('priority', [{ ...INVOICES[0]!, supplierName: name }], DEFAULT_ACCOUNTING_CONFIG, PERIOD);
+    const header = new TextDecoder('utf-16le').decode(f.bytes.slice(2)).split('\r\n')[0]!.split('\t');
+    expect(header[4]).toBe('א'.repeat(47) + '😀');
+    expect(header[4]).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);
+  });
+});
+
 describe('encodeWindows1255', () => {
   it('maps Hebrew letters, gershayim and ₪ to their Windows-1255 bytes', () => {
     expect([...encodeWindows1255('את')]).toEqual([0xe0, 0xfa]);

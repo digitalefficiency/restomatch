@@ -55,6 +55,29 @@ describe('0058 migration shape', () => {
     ]);
   });
 
+  it('a sale can only point at an import of its OWN restaurant (composite same-tenant FK)', async () => {
+    const [other] = await db.insert(restaurants).values({ name: '0058 other', businessId: '000000580' }).returning();
+    try {
+      const [foreign] = await db
+        .insert(posSalesImports)
+        .values({ restaurantId: other!.id, provider: 'csv', filename: 'b.csv', periodFrom: '2026-10-01', periodTo: '2026-10-01' })
+        .returning();
+      await expect(
+        db.insert(posSales).values({
+          restaurantId, // A's row …
+          importId: foreign!.id, // … pointing at B's import
+          soldOn: '2026-10-05',
+          itemRef: 'X',
+          itemName: 'x',
+          qty: '1',
+          netAmount: '1',
+        }),
+      ).rejects.toMatchObject({ code: '23503' });
+    } finally {
+      await db.delete(restaurants).where(eq(restaurants.id, other!.id));
+    }
+  });
+
   it('round-trips dates as strings and money/qty as NUMERIC strings', async () => {
     const imp = await newImport();
     const [row] = await db

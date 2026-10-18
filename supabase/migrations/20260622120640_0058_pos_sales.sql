@@ -31,24 +31,32 @@ CREATE TABLE IF NOT EXISTS "pos_sales_imports" (
   "total_net" numeric(12, 2) NOT NULL DEFAULT '0',
   "created_by" uuid REFERENCES "users"("id") ON DELETE SET NULL,
   "created_at" timestamp with time zone NOT NULL DEFAULT now(),
-  CONSTRAINT "pos_sales_imports_period_check" CHECK ("period_from" <= "period_to")
+  CONSTRAINT "pos_sales_imports_period_check" CHECK ("period_from" <= "period_to"),
+  -- Target of pos_sales' composite FK: a sale can only point at an import of
+  -- its own restaurant (the 0021/0048 same-tenant pattern).
+  CONSTRAINT "pos_sales_imports_id_restaurant_key" UNIQUE ("id", "restaurant_id")
 );--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "pos_sales_imports_restaurant_idx" ON "pos_sales_imports" ("restaurant_id", "created_at");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "pos_sales_imports_created_by_idx" ON "pos_sales_imports" ("created_by");--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "pos_sales" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE CASCADE,
-  "import_id" uuid NOT NULL REFERENCES "pos_sales_imports"("id") ON DELETE CASCADE,
+  "import_id" uuid NOT NULL,
   "sold_on" date NOT NULL,
   "item_ref" varchar(64) NOT NULL,
   "item_name" text NOT NULL,
   "qty" numeric(12, 3) NOT NULL,
   "net_amount" numeric(12, 2) NOT NULL,
   "created_at" timestamp with time zone NOT NULL DEFAULT now(),
-  CONSTRAINT "pos_sales_qty_check" CHECK ("qty" >= 0)
+  CONSTRAINT "pos_sales_qty_check" CHECK ("qty" >= 0),
+  -- Same-tenant FK: (import_id, restaurant_id) must name an import of the SAME
+  -- restaurant, so tenant A can never attach rows to B's import (and B deleting
+  -- its import can never cascade into A's rows).
+  CONSTRAINT "pos_sales_import_same_tenant_fk" FOREIGN KEY ("import_id", "restaurant_id")
+    REFERENCES "pos_sales_imports"("id", "restaurant_id") ON DELETE CASCADE
 );--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "pos_sales_day_item_idx" ON "pos_sales" ("restaurant_id", "sold_on", "item_ref");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "pos_sales_import_idx" ON "pos_sales" ("import_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "pos_sales_import_idx" ON "pos_sales" ("import_id", "restaurant_id");--> statement-breakpoint
 ALTER TABLE "pos_sales_imports" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 DROP POLICY IF EXISTS "pos_sales_imports_tenant" ON "pos_sales_imports";--> statement-breakpoint
 CREATE POLICY "pos_sales_imports_tenant" ON "pos_sales_imports"
@@ -59,5 +67,5 @@ CREATE POLICY "pos_sales_tenant" ON "pos_sales"
   USING ("restaurant_id" = nullif(current_setting('app.current_restaurant_id', true), '')::uuid);
 
 insert into drizzle.__drizzle_migrations (hash, created_at)
-select '90c5b17cf823c975e33b82cc61ed2e165a77b17145a7c3b5c795dd453eb9a6bd', 1782130000000
+select 'a407e7f0bf4758bb7c020fcdb0f332a2be28762391bf4e49103c90294b035c00', 1782130000000
 where not exists (select 1 from drizzle.__drizzle_migrations where created_at = 1782130000000);

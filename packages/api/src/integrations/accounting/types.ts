@@ -49,4 +49,6 @@ export interface AccountingFile {
   bytes: Uint8Array;
   /** Invoices written (rows without a number/date/total are skipped). */
   rowCount: number;
+  /** Characters the file's encoding can't hold (written as '?'): Arabic, emoji… */
+  replacedChars: number;
 }

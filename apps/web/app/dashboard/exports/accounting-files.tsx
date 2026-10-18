@@ -50,6 +50,8 @@ export function AccountingFiles({ from, to, disabled }: { from: string; to: stri
             : t('accounting.downloaded', { count: formatNumber(data.rowCount, locale) }),
         );
         if (data.skippedCount > 0) toast.error(t('accounting.skipped', { count: formatNumber(data.skippedCount, locale) }));
+        if (data.replacedChars > 0) toast.error(t('accounting.replaced', { count: formatNumber(data.replacedChars, locale) }));
+        if (data.derivedVatCount > 0) toast.success(t('accounting.derivedVat', { count: formatNumber(data.derivedVatCount, locale) }));
       } catch (err) {
         toast.error(`${t('accounting.failed')} ${friendlyError(err, tc)}`);
       } finally {

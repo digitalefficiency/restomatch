@@ -1,5 +1,7 @@
 import { toCsv } from '../../exports/csv';
-import { agorotToPlain, cell, CRLF, ddmmyyyy, supplierAccount } from './common';
+import { agorotToPlain, CRLF, ddmmyyyy, safeCell, supplierAccount } from './common';
+
+export { safeCell };
 import { encodeUtf8Bom } from './encoding';
 import type { AccountingConfig, AccountingFile, AccountingInvoice } from './types';
 
@@ -20,16 +22,6 @@ export const RIVHIT_HEADERS = [
   'סכום כולל מע״מ',
   'כרטיס הוצאה',
 ] as const;
-
-/**
- * Spreadsheet formula injection: a cell opened in Excel that starts with
- * = + - @ (or a tab/CR) runs as a formula. Supplier names and invoice numbers
- * come from OCR / user input, so text cells get a leading apostrophe.
- */
-export function safeCell(value: string): string {
-  const v = cell(value);
-  return /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
-}
 
 export function rivhitCsv(invoices: AccountingInvoice[], cfg: AccountingConfig): string {
   const [date, num, name, biz, card, excl, vat, incl, expense] = RIVHIT_HEADERS;
@@ -59,5 +51,6 @@ export function rivhitFile(
     encoding: 'utf-8',
     bytes: encodeUtf8Bom(rivhitCsv(invoices, cfg) + CRLF),
     rowCount: invoices.length,
+    replacedChars: 0,
   };
 }
