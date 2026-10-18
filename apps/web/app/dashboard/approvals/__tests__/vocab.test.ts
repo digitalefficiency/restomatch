@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createTranslator } from '@/lib/i18n/translate';
 import { approvals } from '@/lib/i18n/messages/approvals';
 import { formatIls } from '@/lib/money';
-import { toleranceLabel } from '../vocab';
+import { canEscalate, discrepancyValue, toleranceLabel } from '../vocab';
 
 const he = createTranslator('he', approvals);
 const en = createTranslator('en', approvals);
@@ -48,5 +48,45 @@ describe('toleranceLabel', () => {
   it('unknown strings are shown as stored; empty stays empty', () => {
     expect(toleranceLabel(he, 'custom rule 7')).toBe('custom rule 7');
     expect(toleranceLabel(he, null)).toBe('');
+  });
+});
+
+describe('discrepancyValue', () => {
+  it('money types go through formatIls at a fixed 2 decimals (no raw "522.6 ⇆ 575")', () => {
+    expect(discrepancyValue('PRICE_HIGHER', '522.6000', 'en')).toBe(formatIls(522.6, { locale: 'en', maximumFractionDigits: 2 }));
+    expect(discrepancyValue('PRICE_HIGHER', '575', 'en')).toBe('₪575.00');
+    expect(discrepancyValue('PRICE_HIGHER', '522.6', 'en')).toBe('₪522.60');
+    expect(discrepancyValue('TOTAL_MISMATCH', '1180', 'he')).toBe(formatIls(1180, { locale: 'he', maximumFractionDigits: 2 }));
+  });
+  it('quantities are plain locale numbers; non-display types return null', () => {
+    expect(discrepancyValue('QTY_SHORT', '8.0000', 'en')).toBe('8');
+    expect(discrepancyValue('QTY_OVER', '12.5', 'en')).toBe('12.5');
+    expect(discrepancyValue('DATE_ANOMALY', '1792318182540', 'en')).toBeNull();
+    expect(discrepancyValue('PRICE_HIGHER', null, 'en')).toBeNull();
+  });
+});
+
+describe('canEscalate', () => {
+  it('never offers "escalate to owner" to the owner, nor on owner-routed items', () => {
+    expect(canEscalate('manager', 'owner')).toBe(false);
+    expect(canEscalate('owner', 'manager')).toBe(false);
+    expect(canEscalate('manager', 'manager')).toBe(true);
+    expect(canEscalate('bookkeeper', 'bookkeeper')).toBe(true);
+  });
+});
+
+describe('headline labels', () => {
+  it('the 30-day price-creep figures are never labelled like the monthly leak', async () => {
+    const { overview } = await import('@/lib/i18n/messages/overview');
+    const { leaks } = await import('@/lib/i18n/messages/leaks');
+    for (const locale of ['he', 'en'] as const) {
+      const o = createTranslator(locale, overview);
+      const l = createTranslator(locale, leaks);
+      const hero = o('hero.leakedLabel');
+      for (const label of [o('leaks.title'), l('detective.totalLabel')]) {
+        expect(label).not.toBe(hero);
+        expect(label).toMatch(/30/);
+      }
+    }
   });
 });
