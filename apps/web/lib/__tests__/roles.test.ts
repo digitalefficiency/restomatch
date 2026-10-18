@@ -24,6 +24,11 @@ describe('roles matrix', () => {
     expect(allowedRolesForPath('/dashboard/receiving/abc')).toContain('receiver');
   });
 
+  it('bookkeeper can open the approvals queue (duplicate invoices are routed to them)', () => {
+    expect(canSeeRoute('bookkeeper', '/dashboard/approvals')).toBe(true);
+    expect(canSeeRoute('chef', '/dashboard/approvals')).toBe(false);
+  });
+
   it('labels roles in both languages', () => {
     expect(labelForRole('receiver')).toBe('מקבל סחורה');
     expect(labelForRole('receiver', 'en')).toBe('Receiver');

@@ -77,3 +77,61 @@ describe('friendlyError', () => {
     );
   });
 });
+
+describe('localizeActivity — structured metadata (S3 writers + demo seed)', () => {
+  const he = { title: 'חשבונית HK-24108 הותאמה', detail: 'קצביית הכרם · 2 חריגות · הפסד פוטנציאלי ₪154' };
+
+  it('renders invoice_matched from metadata in English (supplier in English)', () => {
+    const out = localizeActivity(
+      {
+        eventType: 'invoice_matched',
+        ...he,
+        metadata: {
+          invoiceNumber: 'HK-24108',
+          supplierName: 'קצביית הכרם',
+          supplierNameEn: 'HaKerem Butchery',
+          discrepancyCount: 2,
+          potentialLossIls: 153.52,
+        },
+      },
+      'en',
+    );
+    expect(out.title).toBe('Invoice HK-24108 matched');
+    expect(out.detail).toBe('HaKerem Butchery · 2 discrepancies · potential loss ₪154');
+  });
+
+  it('singular discrepancy', () => {
+    const out = localizeActivity(
+      { eventType: 'invoice_matched', ...he, metadata: { invoiceNumber: 'ST-1', supplierNameEn: 'Steinberg', discrepancyCount: 1, potentialLossIls: 104.8 } },
+      'en',
+    );
+    expect(out.detail).toBe('Steinberg · 1 discrepancy · potential loss ₪105');
+  });
+
+  it('a clean match says it matches the order', () => {
+    const out = localizeActivity(
+      { eventType: 'invoice_matched', ...he, metadata: { invoiceNumber: 'X-1', supplierNameEn: 'Sharon', discrepancyCount: 0 } },
+      'en',
+    );
+    expect(out.detail).toBe('Sharon · matches the order and the goods receipt');
+  });
+
+  it('invoice_received and consolidated invoices render without Hebrew', () => {
+    const rec = localizeActivity(
+      { eventType: 'invoice_received', title: 'x', detail: 'y', metadata: { invoiceNumber: 'BR-1', supplierNameEn: 'Brenner', totalInclVatIls: 618.49 } },
+      'en',
+    );
+    expect(rec).toEqual({ title: 'Invoice BR-1 received', detail: 'Brenner · ₪618 incl. VAT' });
+    const cons = localizeActivity(
+      { eventType: 'invoice_received', title: 'x', detail: 'y', metadata: { consolidated: true, invoiceNumber: 'BR-R-1', supplierNameEn: 'Brenner' } },
+      'en',
+    );
+    expect(cons.title).toBe('Consolidated invoice BR-R-1 received');
+    expect(cons.detail).not.toMatch(/[֐-׿]/);
+  });
+
+  it('Hebrew always shows the stored text; rows without metadata fall back to parsing', () => {
+    expect(localizeActivity({ eventType: 'invoice_matched', ...he, metadata: { invoiceNumber: 'HK-24108' } }, 'he')).toEqual(he);
+    expect(localizeActivity({ eventType: 'invoice_matched', ...he, metadata: {} }, 'en').title).toBe('Invoice HK-24108 matched');
+  });
+});

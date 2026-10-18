@@ -437,7 +437,14 @@ async function main() {
         entityType: 'invoice',
         entityId: invoice!.id,
         actorId: receiverId,
-        metadata: {},
+        // Same structured shape as the real writers, so the feed renders in any locale.
+        metadata: {
+          invoiceId: invoice!.id,
+          invoiceNumber: invNumber,
+          supplierName: supplier.name,
+          supplierNameEn: supplier.nameEn ?? null,
+          totalInclVatIls: totalInclVat,
+        },
         createdAt: receivedAt,
       },
       {
@@ -449,7 +456,15 @@ async function main() {
           : `${supplier.name} · תואמת להזמנה ולקבלה`,
         entityType: 'match_run',
         entityId: matchRun!.id,
-        metadata: {},
+        metadata: {
+          invoiceId: invoice!.id,
+          invoiceNumber: invNumber,
+          supplierName: supplier.name,
+          supplierNameEn: supplier.nameEn ?? null,
+          discrepancyCount: issues,
+          potentialLossIls: issues ? result.totalDiscrepancyAmount : 0,
+          status: result.status,
+        },
         createdAt: new Date(receivedAt.getTime() + 60 * 1000),
       },
     ]);
@@ -503,7 +518,14 @@ async function main() {
       detail: `${supplier.name} · ממתינה להתאמה מול תעודות המשלוח של השבוע`,
       entityType: 'invoice',
       entityId: inv!.id,
-      metadata: { consolidated: true },
+      metadata: {
+        consolidated: true,
+        invoiceId: inv!.id,
+        invoiceNumber: inv!.invoiceNumber,
+        supplierName: supplier.name,
+        supplierNameEn: supplier.nameEn ?? null,
+        totalInclVatIls: r2(subtotal + vatAmount),
+      },
       createdAt: at,
     });
     consolidatedCount += 1;

@@ -29,6 +29,9 @@ export const activityRouter = router({
           eventType: activityEvents.eventType,
           title: activityEvents.title,
           detail: activityEvents.detail,
+          // Structured fields (invoice number, supplier, counts, ₪) so the UI can
+          // render the entry in any locale instead of parsing the Hebrew text.
+          metadata: activityEvents.metadata,
           createdAt: activityEvents.createdAt,
         })
         .from(activityEvents)
