@@ -239,8 +239,48 @@ discrepancy wipe, guarded by `to_regclass`), `packages/api/src/__tests__/fixture
 first), and S1's `wave1-checks.test.ts` (adapted earlier to the real `credit_notes`). `.gitleaksignore`: one
 reviewed false positive (a test UUID in a variable named `key`; the test now generates it).
 
+## Round 5 (S4 M1 + two refuter rounds on the S3 fixes)
+
+**S4 M1 (orchestrator):** `sendMonthlyReports` and `enqueueRecoveryReminders` run each restaurant inside its own
+try/catch. A failing restaurant (for example an invalid timezone → RangeError) is logged with its id and listed in
+`failed`, and the run continues. Restaurants are processed in a stable order. Test: a bad-timezone tenant between two
+good ones; without the fix it fails with the RangeError.
+
+**Refuter, round 1 on the S3 fixes:**
+
+| Defect (repro confirmed) | Fix | Test |
+|---|---|---|
+| A re-match deleted claims that had history: letter_sent → written_off → claimed, or letter_sent → auto write-off | A claim is releasable only if it never had a letter, acknowledgement or credit, and has no event beyond its creation and system write-offs / re-opens | "re-match refuses a claim with history …" |
+| A re-match racing the tracker sync returned a 500 (23503) | Both take one per-restaurant advisory lock | "re-match racing the tracker sync never 500s" |
+| A system re-open after the freed cap was reused claimed the invoice twice (₪217 on ₪117) | The re-open is re-capped to what is left of the invoice; if nothing is left, the claim stays written off. The claim returns to its pre-write-off status (letter_sent stays letter_sent) | "a re-opened claim is re-capped …", "a system re-open restores letter_sent" |
+| A manual write-off whose note matched the system note text was treated as a system write-off | System = that note AND no actor | "typing the system note by hand …" |
+| (suspicion) An idempotency key reused with a different payload was a silent duplicate | Now a CONFLICT | "an idempotency key reused with a different payload …" |
+| (suspicion) The refresh upsert could overwrite a report that was sent in between | `setWhere sent_at IS NULL`, then a re-read | — (code review) |
+
+**Refuter, round 2:**
+
+| Defect (repro confirmed) | Fix | Test |
+|---|---|---|
+| A human re-open (written_off → claimed) was not re-capped (₪217 held on a ₪117 invoice) | Same re-cap as the system re-open; if nothing is left → CONFLICT | "a human re-open is re-capped too …" |
+| A deadlock between a bulk transition and the tracker sync, which surfaced as 40P01 → 500 | Every claim row lock first takes the per-restaurant advisory lock, so there is one lock order everywhere | "… never deadlock" (fails with 40P01 without the fix) |
+
+What held in round 2:
+- re-match after a system write-off and a system re-open;
+- a bare human re-open blocks re-match;
+- several claims re-opening in one sync stay within the cap;
+- a re-open next to a partly credited claim;
+- idempotency on credit-line notes;
+- 8 random concurrency mixes, including the worker path: no 500 / 23503 / 40P01 and no over-cap totals.
+
+Known and accepted (documented, not fixed):
+- When a claim is already **acknowledged or disputed** and its discrepancy is later rejected, the claim stays open. The supplier conversation is under way, so the owner decides. The tracker can then show more owed than the hero's "claimed" figure.
+- Events written before this round store the caller as actor on system events. Only dev or demo data has such rows, and `demo:seed-all --reset` rebuilds them.
+- `transitionClaim` called by a script with no actor counts as "system" for the re-match release. Scripts only seed demo data.
+- System events are stamped with DB `now()`, human events with the app clock. Clock skew could reorder the two only within the same second.
+- The idempotency check compares supplier, amount, number and date (or the credit line). It does not compare the selected claims.
+
 ## Verification (2 layers)
-Head: see the PR / orchestrator message. **Round 4 (after the S3 fixes):** layer 1 → 13/13 test tasks (api 589 · web
+Head: see the PR / orchestrator message. **Round 5 (b019a4b):** layer 1 → 13/13 test tasks on 1477572 (api 597 · web 268 · db 76 · worker 30 · matching 86 · charts 64 · …); after the round-2 fixes the api suite was re-run alone, 599/599 (only `packages/api` changed); typecheck 17/17, web tsc 0, lint 0, `supabase-sync --check` clean, build green; layer 2a → `LAYER2 OK` on b019a4b (5 roles × he/en, same numbers, dev DB reseeded with `demo:seed-all -- --reset`); layer 2b → two refuter rounds (above), every confirmed defect fixed with a test that fails on the previous code. **Round 4 (after the S3 fixes):** layer 1 → 13/13 test tasks (api 589 · web
 268 · db 76 · worker 30 · …), typecheck 17/17, web tsc 0, lint 0, `supabase-sync --check` clean, build green; CI on
 aa76aef green except gitleaks (the false positive above); layer 2a → `LAYER2 OK` (5 roles × he/en; hero ₪572 · 2.0%,
 tile "cash back this month" ₪653, tracker ₪1,558 / ₪991 / ₪653 / ₪567, 0 px overflow at 390 px), dev DB reseeded
