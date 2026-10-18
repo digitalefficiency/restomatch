@@ -105,7 +105,9 @@ it in the received e-mail, so this is a small follow-up.
 5. **Sender authentication (needed for e-mail auto-OCR):** enable SPF/DKIM/DMARC checking at the inbound provider
    so it stamps `Authentication-Results` and passes the headers in the webhook. Then set `INGEST_EMAIL_AUTHSERV_ID`
    to the provider's authserv-id: the first token of that header, e.g. `mx.resend.com`; read it from one received
-   test e-mail. Until then, allow-listed e-mail only suggests a supplier, and a manager approves each document.
+   test e-mail. Confirm two things on that test e-mail: the webhook payload includes the headers, and the provider
+   strips or overrides any inbound `Authentication-Results` that already carries its own authserv-id. Only an
+   aligned `dmarc=pass` is trusted. Until then, allow-listed e-mail only suggests a supplier, and a manager approves each document.
 6. Check the Resend attachment endpoint before go-live:
    `ResendInboundProvider` calls `GET /emails/receiving/{email_id}/attachments/{id}`. That path follows Resend's
    inbound docs at the time of writing; it is unit-tested only with mocks.
@@ -126,7 +128,7 @@ export DATABASE_URL_TEST=postgres://postgres:postgres@localhost:5432/restomatch_
 pnpm install --frozen-lockfile                                   # ok
 pnpm --filter @restomatch/db migrate                             # through 0051, clean
 # Final gate on the MERGED head (origin/claude/client-ready merged in, rls/*.sql untouched):
-pnpm exec turbo run test --concurrency=1                         # 14/14 tasks — 1274 passed, 1 skipped
+pnpm exec turbo run test --concurrency=1                         # 14/14 tasks — 1276 passed, 1 skipped
 #   ingest 21 · db 72 (incl. migration-0050 9: RLS on all 4 tables + composite same-tenant FK attack;
 #   upgrade-path + doctor: no FAIL/WARN)
 #   api 566 (incl. ingest.attack 26, cross-tenant.attack with 9 ingest COVERAGE entries) · web 251
@@ -245,6 +247,29 @@ the three items it raised:
   document is kept as **metadata only** (`needs_review`, `quota_exceeded`, no blob). The inbox shows the reason and
   offers only Reject. Test: `ingest.attack` "S4 I4".
 - I1 (merge order): no action, per the orchestrator.
+
+### Refuter on the cross-QA delta (b12497f..2cbab18)
+
+It confirmed 2 defects in the e-mail verdict parser (both fixed, with tests):
+
+- **(High)** The verdict came from the first `dmarc=`/`spf=` text anywhere in the header, so an attacker-controlled
+  property or comment (`smtp.mailfrom=dmarc=pass@evil.example`, `(… dmarc=pass …)`) forged `pass`.
+- **(High)** `spf=pass` + `dkim=pass` was accepted without alignment, which can pass for the attacker's own domain.
+
+Fix: `authVerdictFromHeaders` strips RFC 5322 comments and quoted strings, splits by `;` into resinfo, and reads
+only each resinfo's **leading** `method=result`. It trusts **only `dmarc=pass`**, because DMARC is aligned with the
+From domain the allow-list keys on. Two dmarc results, or two headers with our id, give `none`.
+
+Plausible items I also fixed:
+- the review quota now counts and applies to **unknown senders only**, so a flood cannot starve allow-listed
+  suppliers;
+- `PwaSessionGuard` is always mounted;
+- a queued photo uploads only while `/api/auth/session` still reports the photo's restaurant + user, so a branch
+  switch in another tab cannot misfile it.
+
+Left as is: concurrent webhooks can overshoot the daily quota by at most N × 10 × 10 MB (READ COMMITTED read, no
+lock); the per-channel rate limit bounds N. The Resend `data.headers` field and stripping of inbound
+`Authentication-Results` must be confirmed at activation; this is listed in the owner steps.
 
 ### Layer 2b: independent refuter
 
