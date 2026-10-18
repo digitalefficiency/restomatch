@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { eq, restaurants, type RestaurantSettings } from '@restomatch/db';
+import { and, eq, memberships, restaurants, type RestaurantSettings } from '@restomatch/db';
+import { recordAudit } from '../audit';
 import { memberProcedure, ownerProcedure, router } from '../trpc';
 
 /**
@@ -181,4 +182,47 @@ export const settingsRouter = router({
       timezone: updated?.timezone ?? 'Asia/Jerusalem',
     };
   }),
+
+  /**
+   * The caller's own app language on the active restaurant (memberships.
+   * preferred_locale, 0028). NULL = no preference (device cookie / Hebrew).
+   */
+  myLocale: memberProcedure.query(async ({ ctx }) => {
+    const [row] = await ctx.db
+      .select({ locale: memberships.preferredLocale })
+      .from(memberships)
+      .where(
+        and(
+          eq(memberships.restaurantId, ctx.session.restaurantId),
+          eq(memberships.userId, ctx.session.userId),
+        ),
+      )
+      .limit(1);
+    const locale = row?.locale;
+    return { locale: locale === 'he' || locale === 'en' ? locale : null };
+  }),
+
+  /** Any member sets their OWN app language (self only — keyed by the session). */
+  setMyLocale: memberProcedure
+    .input(z.object({ locale: z.enum(['he', 'en']).nullable() }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.db
+        .update(memberships)
+        .set({ preferredLocale: input.locale })
+        .where(
+          and(
+            eq(memberships.restaurantId, ctx.session.restaurantId),
+            eq(memberships.userId, ctx.session.userId),
+          ),
+        );
+      await recordAudit(ctx.db, {
+        restaurantId: ctx.session.restaurantId,
+        userId: ctx.session.userId,
+        action: 'settings.my_locale_changed',
+        entityType: 'user',
+        entityId: ctx.session.userId,
+        after: { locale: input.locale },
+      });
+      return { locale: input.locale };
+    }),
 });

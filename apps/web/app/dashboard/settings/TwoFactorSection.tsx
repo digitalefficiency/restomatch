@@ -2,6 +2,8 @@
 
 import { useState, useTransition } from 'react';
 import { Button, Card, Field, Input } from '@/lib/components';
+import { useT } from '@/lib/i18n/client';
+import { settings } from '@/lib/i18n/messages/settings';
 import {
   confirmTwoFactorEnrollmentAction,
   disableTwoFactorAction,
@@ -28,7 +30,10 @@ interface Challenge {
  * steps and never sees the secret beyond the QR it must display.
  */
 export function TwoFactorSection({ initialEnabled, recoveryRemaining }: Props) {
+  const t = useT(settings);
   const [enabled, setEnabled] = useState(initialEnabled);
+  const [remaining, setRemaining] = useState(recoveryRemaining);
+  const [copied, setCopied] = useState(false);
   const [phase, setPhase] = useState<Phase>('idle');
   const [challenge, setChallenge] = useState<Challenge | null>(null);
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
@@ -43,7 +48,7 @@ export function TwoFactorSection({ initialEnabled, recoveryRemaining }: Props) {
         setChallenge(c);
         setPhase('enrolling');
       } catch {
-        setError('לא ניתן להתחיל הרשמה. נסו שוב.');
+        setError(t('twoFactor.startFailed'));
       }
     });
   }
@@ -54,10 +59,11 @@ export function TwoFactorSection({ initialEnabled, recoveryRemaining }: Props) {
     startTransition(async () => {
       const res = await confirmTwoFactorEnrollmentAction(code);
       if (!res.ok) {
-        setError('הקוד שגוי. ודאו שהשעה במכשיר מסונכרנת ונסו שוב.');
+        setError(t('twoFactor.wrongCode'));
         return;
       }
       setRecoveryCodes(res.recoveryCodes ?? []);
+      setRemaining(res.recoveryCodes?.length ?? 0);
       setEnabled(true);
       setPhase('showCodes');
     });
@@ -69,7 +75,7 @@ export function TwoFactorSection({ initialEnabled, recoveryRemaining }: Props) {
     startTransition(async () => {
       const res = await disableTwoFactorAction(code);
       if (!res.ok) {
-        setError('הקוד שגוי. נדרש קוד נוכחי כדי לכבות אימות דו-שלבי.');
+        setError(t('twoFactor.wrongDisableCode'));
         return;
       }
       setEnabled(false);
@@ -82,11 +88,11 @@ export function TwoFactorSection({ initialEnabled, recoveryRemaining }: Props) {
     <Card flow padding="lg" className="max-w-2xl">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h3 className="text-base font-semibold text-ink">אימות דו-שלבי (2FA)</h3>
+          <h3 className="text-base font-semibold text-ink">{t('twoFactor.title')}</h3>
           <p className="text-sm text-muted">
             {enabled
-              ? `מופעל — שכבת הגנה נוספת בכל כניסה. נותרו ${recoveryRemaining} קודי שחזור.`
-              : 'מומלץ להפעיל — נדרש קוד חד-פעמי מאפליקציית אימות בנוסף לסיסמה או לקישור.'}
+              ? t('twoFactor.enabledBody', { count: remaining })
+              : t('twoFactor.disabledBody')}
           </p>
         </div>
         <span
@@ -94,14 +100,14 @@ export function TwoFactorSection({ initialEnabled, recoveryRemaining }: Props) {
             enabled ? 'bg-success/10 text-success' : 'bg-border/40 text-muted'
           }`}
         >
-          {enabled ? 'פעיל' : 'כבוי'}
+          {enabled ? t('twoFactor.on') : t('twoFactor.off')}
         </span>
       </div>
 
       {error ? (
         <div
           role="alert"
-          className="rounded-md border-r-4 border-danger bg-danger/5 px-3 py-2 text-sm text-danger"
+          className="rounded-md border-s-4 border-danger bg-danger/5 px-3 py-2 text-sm text-danger"
         >
           {error}
         </div>
@@ -110,13 +116,13 @@ export function TwoFactorSection({ initialEnabled, recoveryRemaining }: Props) {
       {/* IDLE */}
       {phase === 'idle' && !enabled ? (
         <Button onClick={begin} disabled={pending}>
-          הפעלת אימות דו-שלבי
+          {t('twoFactor.enable')}
         </Button>
       ) : null}
 
       {phase === 'idle' && enabled ? (
         <form action={disable} className="space-y-3">
-          <Field label="כיבוי — הזינו קוד נוכחי לאישור" htmlFor="disable-code">
+          <Field label={t('twoFactor.disableLabel')} htmlFor="disable-code">
             <Input
               id="disable-code"
               name="code"
@@ -129,7 +135,7 @@ export function TwoFactorSection({ initialEnabled, recoveryRemaining }: Props) {
             />
           </Field>
           <Button type="submit" variant="secondary" disabled={pending}>
-            כיבוי אימות דו-שלבי
+            {t('twoFactor.disable')}
           </Button>
         </form>
       ) : null}
@@ -138,13 +144,12 @@ export function TwoFactorSection({ initialEnabled, recoveryRemaining }: Props) {
       {phase === 'enrolling' && challenge ? (
         <div className="space-y-4">
           <p className="text-sm text-muted">
-            סרקו את הקוד באפליקציית אימות (Google Authenticator, 1Password וכו׳), או הזינו את
-            המפתח ידנית:
+            {t('twoFactor.scanHint')}
           </p>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={challenge.qrDataUrl}
-            alt="קוד QR להרשמת אימות דו-שלבי"
+            alt={t('twoFactor.qrAlt')}
             width={200}
             height={200}
             className="rounded-md border border-border"
@@ -153,7 +158,7 @@ export function TwoFactorSection({ initialEnabled, recoveryRemaining }: Props) {
             {challenge.secret}
           </code>
           <form action={confirm} className="space-y-3">
-            <Field label="הזינו את הקוד מהאפליקציה לאישור" htmlFor="confirm-code">
+            <Field label={t('twoFactor.confirmLabel')} htmlFor="confirm-code">
               <Input
                 id="confirm-code"
                 name="code"
@@ -167,7 +172,7 @@ export function TwoFactorSection({ initialEnabled, recoveryRemaining }: Props) {
             </Field>
             <div className="flex gap-2">
               <Button type="submit" disabled={pending}>
-                אישור והפעלה
+                {t('twoFactor.confirm')}
               </Button>
               <Button
                 type="button"
@@ -179,7 +184,7 @@ export function TwoFactorSection({ initialEnabled, recoveryRemaining }: Props) {
                   setError(null);
                 }}
               >
-                ביטול
+                {t('twoFactor.cancel')}
               </Button>
             </div>
           </form>
@@ -190,22 +195,33 @@ export function TwoFactorSection({ initialEnabled, recoveryRemaining }: Props) {
       {phase === 'showCodes' ? (
         <div className="space-y-3">
           <p className="text-sm font-medium text-ink">
-            שמרו את קודי השחזור הבאים במקום בטוח — הם מוצגים פעם אחת בלבד. כל קוד תקף לשימוש יחיד
-            אם איבדתם גישה לאפליקציה.
+            {t('twoFactor.codesIntro')}
           </p>
           <ul className="grid grid-cols-2 gap-2 rounded-md bg-border/20 p-3 font-mono text-sm" dir="ltr">
             {recoveryCodes.map((c) => (
               <li key={c}>{c}</li>
             ))}
           </ul>
-          <Button
-            onClick={() => {
-              setPhase('idle');
-              setRecoveryCodes([]);
-            }}
-          >
-            שמרתי את הקודים
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                void navigator.clipboard?.writeText(recoveryCodes.join('\n'));
+                setCopied(true);
+              }}
+            >
+              {copied ? t('twoFactor.copied') : t('twoFactor.copyCodes')}
+            </Button>
+            <Button
+              onClick={() => {
+                setPhase('idle');
+                setRecoveryCodes([]);
+                setCopied(false);
+              }}
+            >
+              {t('twoFactor.savedCodes')}
+            </Button>
+          </div>
         </div>
       ) : null}
     </Card>

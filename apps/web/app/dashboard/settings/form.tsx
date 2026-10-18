@@ -6,34 +6,39 @@ import type { AppRouter } from '@restomatch/api';
 import { CheckCircle2, Lock, XCircle } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
 import { Button, Card, Field, Input } from '@/lib/components';
+import { useLocale, useT } from '@/lib/i18n/client';
+import { settings } from '@/lib/i18n/messages/settings';
+import { localizeServerError } from '@/lib/serverErrors';
 
 type Settings = inferRouterOutputs<AppRouter>['settings']['get'];
 
 /** Field descriptor: how a numeric setting maps to a UI input. */
 type FieldKind = 'percent' | 'currency' | 'fraction';
 
+type FieldKey = keyof (typeof settings.he)['matching']['fields'];
+
 interface FieldDef {
-  key: string;
-  label: string;
-  hint?: string;
+  key: FieldKey;
+  /** Message key of the hint under matching.fields, when there is one. */
+  hint?: FieldKey;
   kind: FieldKind;
 }
 
 const TOLERANCE_FIELDS: FieldDef[] = [
-  { key: 'pricePercent', label: 'סבילות מחיר (%)', kind: 'percent', hint: 'חריגת מחיר שמתחתיה לא מסומן.' },
-  { key: 'priceAbsolute', label: 'סבילות מחיר (₪)', kind: 'currency', hint: 'הפרש מחיר מוחלט שמתחתיו לא מסומן.' },
-  { key: 'qtyPercent', label: 'סבילות כמות (%)', kind: 'percent' },
-  { key: 'qtyAbsolute', label: 'סבילות כמות (יחידות)', kind: 'currency' },
-  { key: 'blockPricePercent', label: 'סף חסימת מחיר (%)', kind: 'percent', hint: 'חריגה מעל סף זה נחסמת אוטומטית.' },
+  { key: 'pricePercent', kind: 'percent', hint: 'pricePercentHint' },
+  { key: 'priceAbsolute', kind: 'currency', hint: 'priceAbsoluteHint' },
+  { key: 'qtyPercent', kind: 'percent' },
+  { key: 'qtyAbsolute', kind: 'currency' },
+  { key: 'blockPricePercent', kind: 'percent', hint: 'blockPricePercentHint' },
 ];
 
 const APPROVAL_FIELDS: FieldDef[] = [
-  { key: 'largeInvoiceWithoutPo', label: 'חשבונית גדולה ללא הזמנה (₪)', kind: 'currency' },
-  { key: 'unorderedItemSignificant', label: 'פריט לא מוזמן מהותי (₪)', kind: 'currency' },
-  { key: 'cumulativeLargeAmount', label: 'סכום מצטבר גבוה (₪)', kind: 'currency' },
-  { key: 'cumulativeLargePct', label: 'אחוז מצטבר גבוה (%)', kind: 'percent' },
-  { key: 'cumulativeMediumAmountMin', label: 'סכום מצטבר בינוני — מינ׳ (₪)', kind: 'currency' },
-  { key: 'cumulativeMediumPctMin', label: 'אחוז מצטבר בינוני — מינ׳ (%)', kind: 'percent' },
+  { key: 'largeInvoiceWithoutPo', kind: 'currency' },
+  { key: 'unorderedItemSignificant', kind: 'currency' },
+  { key: 'cumulativeLargeAmount', kind: 'currency' },
+  { key: 'cumulativeLargePct', kind: 'percent' },
+  { key: 'cumulativeMediumAmountMin', kind: 'currency' },
+  { key: 'cumulativeMediumPctMin', kind: 'percent' },
 ];
 
 // Percent fields are stored 0..1 but edited as whole percents (5 = 0.05).
@@ -52,6 +57,8 @@ function toStored(raw: string, kind: FieldKind): number | undefined {
 }
 
 export function SettingsForm({ initial, canEdit }: { initial: Settings; canEdit: boolean }) {
+  const t = useT(settings);
+  const locale = useLocale();
   // One flat string-state map keyed by field key (sections share no keys).
   const [values, setValues] = useState<Record<string, string>>(() => {
     const out: Record<string, string> = {};
@@ -71,8 +78,8 @@ export function SettingsForm({ initial, canEdit }: { initial: Settings; canEdit:
   const [status, setStatus] = useState<{ ok: boolean; message: string } | null>(null);
 
   const update = trpc.settings.update.useMutation({
-    onSuccess: () => setStatus({ ok: true, message: 'ההגדרות נשמרו.' }),
-    onError: (err) => setStatus({ ok: false, message: err.message || 'שמירת ההגדרות נכשלה.' }),
+    onSuccess: () => setStatus({ ok: true, message: t('matching.saved') }),
+    onError: (err) => setStatus({ ok: false, message: localizeServerError(err, locale, t('matching.failed')) }),
   });
 
   function set(key: string, v: string) {
@@ -113,18 +120,23 @@ export function SettingsForm({ initial, canEdit }: { initial: Settings; canEdit:
           className="flex items-center gap-3 border-warn/30 bg-warn/5 text-muted"
         >
           <Lock className="h-5 w-5 shrink-0 text-warn" aria-hidden="true" />
-          <span>תצוגה בלבד — רק לבעלי תפקיד "בעלים" יש הרשאה לעדכן את הגדרות ההתאמה.</span>
+          <span>{t('readOnly.matching')}</span>
         </Card>
       ) : null}
 
       <Card flow elevated padding="lg">
-        <h3 className="mb-1 text-lg font-bold text-ink">ספי סבילות</h3>
+        <h3 className="mb-1 text-lg font-bold text-ink">{t('matching.tolerancesTitle')}</h3>
         <p className="mb-5 text-sm text-muted">
-          אחוזים מוזנים כמספר שלם (5 = 5%). שדה ריק משאיר את הערך הקיים ללא שינוי.
+          {t('matching.tolerancesSubtitle')}
         </p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {TOLERANCE_FIELDS.map((f) => (
-            <Field key={f.key} label={f.label} htmlFor={`set-${f.key}`} hint={f.hint}>
+            <Field
+              key={f.key}
+              label={t(`matching.fields.${f.key}`)}
+              htmlFor={`set-${f.key}`}
+              hint={f.hint ? t(`matching.fields.${f.hint}`) : undefined}
+            >
               <Input
                 id={`set-${f.key}`}
                 type="number"
@@ -140,13 +152,18 @@ export function SettingsForm({ initial, canEdit }: { initial: Settings; canEdit:
       </Card>
 
       <Card flow elevated padding="lg">
-        <h3 className="mb-1 text-lg font-bold text-ink">ספי אישור</h3>
+        <h3 className="mb-1 text-lg font-bold text-ink">{t('matching.approvalsTitle')}</h3>
         <p className="mb-5 text-sm text-muted">
-          הסכומים שמכתיבים מתי חריגה מנותבת לתור האישורים לפי גודלה.
+          {t('matching.approvalsSubtitle')}
         </p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {APPROVAL_FIELDS.map((f) => (
-            <Field key={f.key} label={f.label} htmlFor={`set-${f.key}`} hint={f.hint}>
+            <Field
+              key={f.key}
+              label={t(`matching.fields.${f.key}`)}
+              htmlFor={`set-${f.key}`}
+              hint={f.hint ? t(`matching.fields.${f.hint}`) : undefined}
+            >
               <Input
                 id={`set-${f.key}`}
                 type="number"
@@ -162,11 +179,11 @@ export function SettingsForm({ initial, canEdit }: { initial: Settings; canEdit:
       </Card>
 
       <Card flow elevated padding="lg">
-        <h3 className="mb-1 text-lg font-bold text-ink">סף בדיקת OCR</h3>
+        <h3 className="mb-1 text-lg font-bold text-ink">{t('matching.ocrTitle')}</h3>
         <p className="mb-5 text-sm text-muted">
-          רמת ביטחון שמתחתיה חשבונית סרוקה נשלחת לבדיקה ידנית (5 = 5%).
+          {t('matching.ocrSubtitle')}
         </p>
-        <Field label="סף בדיקה (%)" htmlFor="set-ocr" className="max-w-xs">
+        <Field label={t('matching.ocrLabel')} htmlFor="set-ocr" className="max-w-xs">
           <Input
             id="set-ocr"
             type="number"
@@ -184,7 +201,7 @@ export function SettingsForm({ initial, canEdit }: { initial: Settings; canEdit:
       {canEdit ? (
         <div className="flex items-center gap-4">
           <Button type="submit" variant="primary" loading={update.isPending}>
-            שמור הגדרות
+            {t('matching.save')}
           </Button>
           {status ? (
             <p

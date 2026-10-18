@@ -1,8 +1,12 @@
 import { AlertCircle } from 'lucide-react';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
 import { Card } from '@/lib/components';
+import { auth as authMessages } from '@/lib/i18n/messages/auth';
+import { getLocale, getT } from '@/lib/i18n/server';
+import { localizeServerError } from '@/lib/serverErrors';
 
 interface PageProps {
   searchParams: Promise<{ token?: string }>;
@@ -23,31 +27,33 @@ export default async function InviteAcceptPage({ searchParams }: PageProps) {
     redirect(`/login?callbackUrl=${encodeURIComponent(`/invite/accept?token=${token}`)}`);
   }
 
+  const locale = await getLocale();
   let error: string | null = null;
   try {
     const caller = await createServerCaller();
     await caller.team.acceptInvite({ token });
   } catch (e) {
-    error = e instanceof Error ? e.message : 'אירעה שגיאה בקבלת ההזמנה.';
+    error = localizeServerError(e, locale, (await getT(authMessages))('invite.genericError'));
   }
 
   // redirect() must run outside the try/catch (it throws NEXT_REDIRECT).
   if (!error) redirect('/dashboard');
 
+  const t = await getT(authMessages);
   return (
     <main className="flex min-h-screen items-center justify-center p-6">
       <Card elevated flow padding="lg" className="w-full max-w-md">
         <div className="mb-2 flex items-center gap-2 text-danger">
           <AlertCircle className="h-5 w-5 shrink-0" aria-hidden="true" />
-          <h1 className="text-xl font-bold">קבלת ההזמנה נכשלה</h1>
+          <h1 className="text-xl font-bold">{t('invite.failedTitle')}</h1>
         </div>
         <p className="text-sm text-muted">{error}</p>
-        <a
+        <Link
           href="/dashboard"
           className="mt-6 inline-block text-sm font-semibold text-primary hover:underline"
         >
-          חזרה לדשבורד
-        </a>
+          {t('invite.back')}
+        </Link>
       </Card>
     </main>
   );
