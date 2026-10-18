@@ -68,6 +68,8 @@ describe('units', () => {
     ['דלי', 'bucket'],
     ['תבנית', 'tray'],
     ['חבילה', 'package'],
+    ['שישייה', 'six-pack'],
+    ['חבית', 'keg'],
   ])('%s → %s', (he, en) => {
     expect(translateUnit(he)).toBe(en);
   });

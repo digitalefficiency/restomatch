@@ -1,6 +1,7 @@
 'use client';
 
 import { useGSAP } from '@gsap/react';
+import { formatIls } from '@/lib/money';
 import { gsap } from 'gsap';
 import {
   ArrowDown,
@@ -393,7 +394,8 @@ function ComparisonCard({ line }: { line: LineComparison }) {
         <div className="mt-3 pt-3 border-t border-line flex items-center justify-between">
           <span className="text-xs text-muted">{t('detail.variance')}</span>
           <span className="text-sm font-bold font-mono tabular-nums text-danger flex items-center gap-1">
-            <ArrowUp className="w-3.5 h-3.5" />₪{line.variance.toFixed(2)}
+            <ArrowUp className="w-3.5 h-3.5" />
+            {formatIls(line.variance, { locale, maximumFractionDigits: 2 })}
           </span>
         </div>
       ) : null}

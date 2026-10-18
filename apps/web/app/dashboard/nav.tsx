@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { originalProps } from '@/lib/i18n/original';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -216,9 +217,7 @@ export function MobileNav({
             <div className="flex items-start justify-between gap-3 border-b border-line px-4 py-4">
               <div className="min-w-0">
                 <p className="truncate text-base font-bold text-ink">
-                  <span lang="he" dir="auto">
-                    {restaurantName}
-                  </span>
+                  <span {...originalProps(restaurantName)}>{restaurantName}</span>
                 </p>
                 <p className="truncate font-mono text-xs text-subtle">{email}</p>
               </div>

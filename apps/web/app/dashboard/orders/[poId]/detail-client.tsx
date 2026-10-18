@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { UnitText } from '@/lib/components/UnitText';
 import { useRouter } from 'next/navigation';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
@@ -273,7 +274,7 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
                         className="w-20"
                       />
                     ) : (
-                      l.unit
+                      <UnitText unit={l.unit} />
                     )}
                   </td>
                   <td className="px-4 py-3 text-end font-mono tabular-nums text-ink">

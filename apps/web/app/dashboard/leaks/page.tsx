@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { originalProps } from '@/lib/i18n/original';
+import { auth } from '@/auth';
 import { TRPCError } from '@trpc/server';
 import { ArrowLeft, Droplets, FileBarChart, ShieldAlert } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
@@ -24,8 +26,13 @@ export default async function LeaksPage() {
   const [t, locale] = await Promise.all([getT(leaksNs), getLocale()]);
   let leaks: Awaited<ReturnType<typeof caller.owner.leaks>> = [];
   let blocked: 'entitlement' | 'role' | null = null;
+  const role = (
+    (await auth())?.user as { role?: string } | undefined
+  )?.role;
   try {
-    leaks = await caller.owner.leaks({ limit: 50 });
+    // Owner-only procedure: answer the role case without a guaranteed-FORBIDDEN call.
+    if (role !== 'owner') blocked = 'role';
+    else leaks = await caller.owner.leaks({ limit: 50 });
   } catch (err) {
     // Distinguish a missing plan feature (→ upsell) from a role restriction
     // (→ explain the role requirement). Both arrive as FORBIDDEN.
@@ -162,7 +169,9 @@ export default async function LeaksPage() {
                   >
                     <td className="p-3">
                       <div className="font-medium text-ink">{row.productName}</div>
-                      <div className="text-xs text-subtle">{row.category ?? '—'}</div>
+                      <div className="text-xs text-subtle" {...originalProps(row.category)}>
+                        {row.category ?? '—'}
+                      </div>
                     </td>
                     <td className="p-3 text-muted">{row.supplierName}</td>
                     <td className="p-3 font-mono tabular-nums text-muted">{money(row.baselineP50)}</td>

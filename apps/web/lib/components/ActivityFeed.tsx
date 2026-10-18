@@ -4,6 +4,7 @@ import { CheckCircle2, FileCheck2, RefreshCw, Sparkles, XCircle } from 'lucide-r
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatDate } from '@/lib/i18n/format';
 import { components } from '@/lib/i18n/messages/components';
+import { originalProps } from '@/lib/i18n/original';
 import { localizeActivity } from './activityText';
 import { cn } from './cn';
 
@@ -83,7 +84,17 @@ export function ActivityFeed({ items }: { items: ActivityItem[] }) {
                   })}
                 </time>
               </div>
-              {text.detail ? <p className="truncate text-xs text-muted">{text.detail}</p> : null}
+              {text.detail ? (
+                <p className="truncate text-xs text-muted">
+                  {/* Parts left in Hebrew (supplier names, free-text reasons) are originals. */}
+                  {text.detail.split(' · ').map((part, i) => (
+                    <span key={i}>
+                      {i > 0 ? ' · ' : null}
+                      <span {...originalProps(part)}>{part}</span>
+                    </span>
+                  ))}
+                </p>
+              ) : null}
             </div>
           </li>
         );

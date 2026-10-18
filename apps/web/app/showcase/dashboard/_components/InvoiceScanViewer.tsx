@@ -284,7 +284,7 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
                     <div className="min-w-0 flex-1">
                       <div className="font-medium text-ink truncate">{mockText(line.name, locale)}</div>
                       <div className="text-[10px] text-muted font-mono tabular-nums">
-                        {line.qty} {mockText(line.unit, locale)} × ₪{line.unitPrice.toFixed(2)}
+                        {line.qty} {mockText(line.unit, locale)} × {formatIls(line.unitPrice, { locale, maximumFractionDigits: 2 })}
                       </div>
                     </div>
                     <ConfidenceDot value={line.confidence ?? data.ocrConfidence} />

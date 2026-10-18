@@ -15,6 +15,7 @@
  */
 
 import type { ScanData, ScanLine } from './InvoiceScanViewer';
+import { formatNumber } from '@/lib/i18n/format';
 
 interface InvoicePaperProps {
   data: ScanData;
@@ -249,10 +250,7 @@ export function InvoicePaper({ data }: InvoicePaperProps) {
             <div className="flex justify-between gap-3">
               <span>יתרת לקוח:</span>
               <span className="font-bold tabular-nums text-stone-900">
-                {data.customerBalanceIls.toLocaleString('he-IL', {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
+                {paperAmount(data.customerBalanceIls)}
               </span>
             </div>
             <div className="text-[10px] text-stone-400 mt-0.5">
@@ -271,10 +269,7 @@ export function InvoicePaper({ data }: InvoicePaperProps) {
             <div className="flex justify-between font-black text-[14px]">
               <span>סה״כ כולל מע״מ</span>
               <span className="tabular-nums">
-                {total.toLocaleString('he-IL', {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
+                {paperAmount(total)}
               </span>
             </div>
           </div>
@@ -380,12 +375,20 @@ function ReceivedStamp() {
 // Small helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Amounts printed on the (Hebrew) supplier paper: plain he-IL numbers with
+ * agorot, no ₪ sign — the paper is a facsimile of the original document.
+ */
+function paperAmount(n: number): string {
+  return formatNumber(n, 'he', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 function TotalRow({ label, value }: { label: string; value: number }) {
   return (
     <div className="flex justify-between">
       <span className="text-stone-700">{label}:</span>
       <span className="font-semibold tabular-nums">
-        {value.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        {paperAmount(value)}
       </span>
     </div>
   );

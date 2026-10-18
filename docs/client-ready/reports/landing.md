@@ -209,6 +209,41 @@ None from the AGENTS.md immutability list. `apps/web/app/api/trpc/[trpc]/route.t
 - **Calculator:** one `sr-only` `aria-live="polite" aria-atomic` summary ("Estimated leak: ₪2,400 a month, ₪28,800 a year.") instead of a live region around the whole card; `aria-valuetext` on both sliders (₪ amount / percent).
 - **Lead form:** empty submit → translated `role="alert"`, focus to name, `aria-invalid` + `aria-describedby`; success → focus moves to the confirmation heading (previously dropped to `<body>` when the button unmounted). Verified end-to-end; test rows deleted.
 
+## Round 3: English-mode sweep (whole app)
+
+`apps/web/e2e/i18n-sweep.spec.ts` is a Playwright regression test and runs only when `I18N_SWEEP_BASE_URL` points at the seeded demo tenant.
+- **What it does:** logs in as owner, manager, receiver, bookkeeper and chef with `rm_locale=en`. It crawls from `/dashboard`, following links 2 levels deep with 2 samples per route pattern, at 1366 and 390 px.
+- **What it fails on:**
+  - visible Hebrew, or Hebrew in a `placeholder`/`aria-label`/`title`, outside `lang="he"` originals
+  - `dir` other than `ltr`
+  - horizontal overflow
+  - console or page errors
+  - the error or 404 boundary
+- **Run it against a production build:** `next dev` runs local Postgres out of connections because it creates one DB pool per compiled route.
+
+```bash
+I18N_SWEEP_BASE_URL=http://localhost:3100 PW_CHROMIUM_PATH=/opt/pw-browsers/chromium \
+  pnpm exec playwright test e2e/i18n-sweep.spec.ts --project=chromium --no-deps --output=/tmp/pw-out
+```
+
+| Run | Pages (owner/manager/receiver/bookkeeper/chef) | Findings |
+|---|---|---|
+| Before (base `f171425`) | 26/25/7/12/4 | **445**: 415 Hebrew + 30 console. 204 outside receiving, 241 in receiving/invoices (S2, then mid-rewrite) |
+| After round-3 fixes, same base | same | **0** outside receiving |
+| After merging `2cf22c8` (S2) + `f98962c`, production build | 29/28/7/12/4 | **2** Hebrew (`שישייה` on `invoices/:id`) → fixed in the shared unit map |
+| Final (`cc5aa02`, production build) | 29/28/7/12/4 | **0 Hebrew, 0 dir, 0 overflow, 0 error pages.** 1 owner/desktop hydration error on `/dashboard/leaks/breakdown?m=-1` did not reproduce on 3 direct loads; it was transient under crawl load |
+
+**Fixes, all translation-only or minimal:**
+- **Activity feed:** detail templates from the seed and worker now render in English. Supplier names are marked as originals.
+- **Data marked `lang="he" dir="auto"`:** restaurant name in the header, mobile nav, leak report and claims letter; team member names; categories.
+  - Helper: `lib/i18n/original.tsx` (`originalProps`, `WithOriginal`).
+- **Units:** shared `UnitText` component built on S2's `@restomatch/translate` `translateUnit`, used for orders, the catalog grid and card, and product prices. I added `שישייה` to that map, with a test.
+- **Supplier payment terms:** `שוטף + N` / `מזומן` → "End of month + N days" / "Cash". Pure parser is tested.
+- **Owner-only tRPC calls:** overview, leaks, leak report and supplier detail no longer call owner-only tRPC procedures for roles that can't use them. These were handled FORBIDDENs, but they still logged as errors to the console and Sentry.
+- **Showcase:** every ₪ amount goes through `formatIls()`, including the KPI count-up and the viewers. The S3 QA item is closed.
+
+**Environment notes (local only):** I raised local Postgres `max_connections` to 300 for `next dev`, and `--no-deps` skips S7's magic-link setup project.
+
 ## Gate
 
 Re-run at the round-2 head of this branch:

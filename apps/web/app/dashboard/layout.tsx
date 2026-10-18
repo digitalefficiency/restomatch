@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { originalProps } from '@/lib/i18n/original';
 import { LogOut } from 'lucide-react';
 import { auth, signOut } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
@@ -66,9 +67,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 <p className="truncate text-lg font-bold tracking-tight text-ink">
                   {/* Tenant data (usually Hebrew) inside a possibly-English UI: mark the
                       language and isolate its direction without changing alignment. */}
-                  <span lang="he" dir="auto">
-                    {active.restaurantName}
-                  </span>
+                  <span {...originalProps(active.restaurantName)}>{active.restaurantName}</span>
                 </p>
                 <p className="truncate text-xs text-subtle">
                   <span className="font-mono tabular-nums">{email}</span>

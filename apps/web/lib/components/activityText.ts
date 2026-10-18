@@ -62,6 +62,14 @@ export function localizeActivity(
       const n = amountOf(m[1]!);
       return n == null ? part : t('activity.savings', { amount: formatIls(n, { locale }) });
     }
+    // Seed / worker detail templates (invoice received / matched / pending).
+    m = /^(₪\s*[\d,.]+)\s+כולל מע״מ$/.exec(part);
+    if (m) {
+      const n = amountOf(m[1]!);
+      return n == null ? part : t('activity.inclVat', { amount: formatIls(n, { locale }) });
+    }
+    if (part === 'תואמת להזמנה ולקבלה') return t('activity.matchesOrderAndReceipt');
+    if (part === 'ממתינה להתאמה מול תעודות המשלוח של החודש') return t('activity.awaitingMonthlyMatch');
     // Supplier names / free-text reasons stay as written.
     return part;
   });

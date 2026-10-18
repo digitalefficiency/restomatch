@@ -3,6 +3,7 @@ import { buildSearchOptions } from '../searchOptions';
 import {
   emptyForm,
   matchesSupplierFilter,
+  parsePaymentTerms,
   scheduleToForm,
   toCreateInput,
   toUpdatePatch,
@@ -221,5 +222,19 @@ describe('global search options', () => {
       noInvoiceNumber: 'x',
     });
     expect(opts.map((o) => o.kind)).toEqual(['invoice']);
+  });
+});
+
+describe('supplier payment terms (English display)', () => {
+  it('recognises the common Israeli shorthands', () => {
+    expect(parsePaymentTerms('שוטף + 30')).toEqual({ kind: 'eom', days: 30 });
+    expect(parsePaymentTerms(' שוטף+60 ')).toEqual({ kind: 'eom', days: 60 });
+    expect(parsePaymentTerms('שוטף')).toEqual({ kind: 'eom', days: 0 });
+    expect(parsePaymentTerms('מזומן')).toEqual({ kind: 'cash' });
+  });
+  it('leaves free text alone', () => {
+    expect(parsePaymentTerms('Net 30')).toBeNull();
+    expect(parsePaymentTerms('שוטף + 30 בהעברה')).toBeNull();
+    expect(parsePaymentTerms(null)).toBeNull();
   });
 });

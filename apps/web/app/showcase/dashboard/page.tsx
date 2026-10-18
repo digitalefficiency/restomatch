@@ -15,13 +15,15 @@ import {
 import { useRef, useState } from 'react';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
+import { formatIls } from '@/lib/money';
 import { showcase } from '@/lib/i18n/messages/showcase';
 import { mockText } from '../_lib/mockText';
 
 interface Kpi {
   id: 'leak' | 'saved' | 'pending';
   value: number;
-  prefix?: string;
+  /** ₪ amount — rendered through formatIls() (never a literal ₪ prefix). */
+  money?: boolean;
   suffix?: string;
   delta: number;
   tone: 'warn' | 'good' | 'neutral';
@@ -32,7 +34,7 @@ const KPIS: Kpi[] = [
   {
     id: 'leak',
     value: 4820,
-    prefix: '₪',
+    money: true,
     delta: 12,
     tone: 'warn',
     icon: <AlertCircle className="w-5 h-5" />,
@@ -40,7 +42,7 @@ const KPIS: Kpi[] = [
   {
     id: 'saved',
     value: 12340,
-    prefix: '₪',
+    money: true,
     delta: 34,
     tone: 'good',
     icon: <Wallet className="w-5 h-5" />,
@@ -197,7 +199,9 @@ function KpiCard({ kpi }: { kpi: Kpi }) {
         ease: 'power2.out',
         onUpdate: () => {
           if (numberRef.current) {
-            numberRef.current.textContent = formatNumber(Math.round(obj.value), locale);
+            numberRef.current.textContent = kpi.money
+              ? formatIls(Math.round(obj.value), { locale })
+              : formatNumber(Math.round(obj.value), locale);
           }
         },
       });
@@ -264,7 +268,6 @@ function KpiCard({ kpi }: { kpi: Kpi }) {
         {t(`dashboard.kpi.${kpi.id}`)}
       </div>
       <div className="font-mono text-3xl font-extrabold tabular-nums tracking-tight flex items-baseline gap-1">
-        {kpi.prefix ? <span className={`text-2xl ${tone.number} opacity-70`}>{kpi.prefix}</span> : null}
         <span ref={numberRef} className={tone.number}>
           0
         </span>

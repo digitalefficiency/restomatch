@@ -273,7 +273,7 @@ export function InvoicePoCompareViewer({ data, lines, invoiceScan, onClose }: Pr
                       <div className="mt-1.5 flex items-center justify-between text-[10px]">
                         <span className="text-muted">{t('compare.potentialLoss')}</span>
                         <span className="font-bold text-danger font-mono tabular-nums">
-                          ₪{line.variance.toFixed(2)}
+                          {formatIls(line.variance, { locale, maximumFractionDigits: 2 })}
                         </span>
                       </div>
                     ) : null}
@@ -508,11 +508,11 @@ function PoPaper({
                         on={line.status === 'price_higher' || line.status === 'price_lower'}
                         tone={line.status === 'price_lower' ? 'emerald' : 'red'}
                       >
-                        ₪{line.poUnitPrice?.toFixed(2)}
+                        {line.poUnitPrice != null ? money(line.poUnitPrice) : '—'}
                       </DiffMark>
                     </td>
                     <td className="px-2 py-2 tabular-nums font-semibold">
-                      ₪{lineTotal.toFixed(2)}
+                      {money(lineTotal)}
                     </td>
                   </tr>
                 );
@@ -628,6 +628,7 @@ function DiffCell({
   unit: string;
   emphasize?: boolean;
 }) {
+  const locale = useLocale();
   return (
     <div className={`rounded-lg px-2 py-1.5 ${emphasize ? 'bg-warn/8 border border-warn/25' : 'bg-surface border border-line'}`}>
       <div className="text-[9px] uppercase tracking-wider text-muted font-semibold">
@@ -641,7 +642,7 @@ function DiffCell({
         <div className="text-muted italic text-xs">{missingLabel}</div>
       )}
       {price !== null && qty !== null ? (
-        <div className="text-[9px] text-muted font-mono tabular-nums">× ₪{price.toFixed(2)}</div>
+        <div className="text-[9px] text-muted font-mono tabular-nums">× {formatIls(price, { locale, maximumFractionDigits: 2 })}</div>
       ) : null}
     </div>
   );

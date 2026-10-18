@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { WithOriginal } from '@/lib/i18n/original';
+import { auth } from '@/auth';
 import { TRPCError } from '@trpc/server';
 import { ArrowLeft, ArrowRight, ShieldAlert } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
@@ -43,7 +45,14 @@ export default async function LeakReportPage({ searchParams }: { searchParams: P
   const [t, ta, locale] = await Promise.all([getT(leaksNs), getT(approvalsNs), getLocale()]);
 
   let report: Awaited<ReturnType<typeof caller.owner.leakReport>>;
+  const role = (
+    (await auth())?.user as { role?: string } | undefined
+  )?.role;
   try {
+    // owner|manager only — skip the guaranteed-FORBIDDEN call for other roles.
+    if (role !== 'owner' && role !== 'manager') {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'owner|manager only' });
+    }
     report = await caller.owner.leakReport({ month });
   } catch (err) {
     if (err instanceof TRPCError && err.code === 'FORBIDDEN') {
@@ -117,7 +126,7 @@ export default async function LeakReportPage({ searchParams }: { searchParams: P
         <header className="flex flex-col gap-1 border-b border-line pb-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-2xl font-extrabold text-ink">{t('report.title')}</h1>
-            <p className="text-sm text-muted">{t('report.subtitle', { restaurant, month: monthLabel })}</p>
+            <p className="text-sm text-muted"><WithOriginal text={t('report.subtitle', { restaurant, month: monthLabel })} value={restaurant} /></p>
           </div>
           <p className="text-xs text-subtle">
             {t('report.generated', { date: formatDate(new Date(), locale, { dateStyle: 'medium' }) })}

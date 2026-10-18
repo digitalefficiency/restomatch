@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import { originalProps } from '@/lib/i18n/original';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
 import type { UserRole } from '@restomatch/db';
@@ -176,7 +177,7 @@ export function TeamClient({
               <li key={m.userId} className="flex flex-wrap items-center justify-between gap-3 py-3">
                 <div className="min-w-0">
                   <p className="truncate font-medium text-ink">
-                    {m.name || m.email}
+                    <span {...originalProps(m.name)}>{m.name || m.email}</span>
                     {m.userId === currentUserId ? (
                       <span className="ms-1 text-xs text-subtle">{t('members.you')}</span>
                     ) : null}
