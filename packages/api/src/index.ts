@@ -125,6 +125,7 @@ export {
 } from './notifications';
 export { logActivity, type ActivityEventInput, type ActivityEventType } from './activity';
 export { buildMatchInputForInvoice, type BuiltMatchInput } from './match/buildMatchInput';
+export { backfillPriceHistory, writePriceHistoryForInvoice } from './match/priceHistory';
 export { persistMatchRun, type PersistMatchArgs, type PersistMatchResult } from './match/persist';
 export {
   parseCatalogFile,

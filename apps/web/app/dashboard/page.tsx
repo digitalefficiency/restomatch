@@ -1,8 +1,14 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { Activity, AlertTriangle, CheckCircle2, ClipboardCheck, Wallet } from 'lucide-react';
+import { Activity, ArrowLeft, CheckCircle2, ClipboardCheck, Hourglass, ShieldCheck } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
+import { formatDate, formatNumber, formatPercent } from '@/lib/i18n/format';
+import { getLocale, getT } from '@/lib/i18n/server';
+import { overview } from '@/lib/i18n/messages/overview';
+import type { he as overviewHe } from '@/lib/i18n/messages/overview/he';
+import type { Translator } from '@/lib/i18n/translate';
+import { leaks as leaksNs } from '@/lib/i18n/messages/leaks';
 import {
   EmptyState,
   EntitlementUpsell,
@@ -12,6 +18,7 @@ import {
   entitlementCauseOf,
 } from '@/lib/components';
 import { PaginatedActivityFeed } from './activity';
+import { displayName } from './approvals/vocab';
 
 export default async function DashboardPage() {
   const caller = await createServerCaller();
@@ -19,7 +26,14 @@ export default async function DashboardPage() {
   if (memberships.length === 0) {
     redirect('/onboarding');
   }
-  const kpis = await caller.owner.kpis();
+  const [t, tl, locale] = await Promise.all([getT(overview), getT(leaksNs), getLocale()]);
+
+  const [kpis, hero, lastMonth, activity] = await Promise.all([
+    caller.owner.kpis(),
+    caller.owner.leakHero(),
+    caller.owner.leakHero({ monthOffset: -1 }),
+    caller.activity.feed({ limit: 8 }),
+  ]);
 
   // Leak grid is owner-only; other roles simply won't see this section. If the
   // feature is gated behind a paid plan, surface a compact upsell teaser rather
@@ -36,91 +50,92 @@ export default async function DashboardPage() {
     leaks = [];
   }
 
-  const activity = await caller.activity.feed({ limit: 8 });
-
+  const ils = (v: number) => formatIls(v, { locale });
+  const monthLabel = formatDate(hero.monthStart, locale, { month: 'long', year: 'numeric' });
   const cleanMatchHealthy = kpis.weekCleanMatchPct >= 80;
+  const heatmapItems = leaks.map((l) => ({
+    ...l,
+    productName: displayName(locale, l.productName, l.productNameEn),
+    supplierName: displayName(locale, l.supplierName, l.supplierNameEn),
+  }));
 
   return (
     <div>
-      <SectionHeader
-        level={1}
-        title="חדר הבקרה"
-        subtitle="תמונת מצב יומית — איפה כסף בורח, ומה דורש את ההחלטה שלך עכשיו."
+      <SectionHeader level={1} title={t('title')} subtitle={t('subtitle')} />
+
+      <LeakHero
+        t={t}
+        hero={hero}
+        ils={ils}
+        monthLabel={monthLabel}
+        lastMonthLeak={lastMonth.invoiceCount > 0 ? lastMonth.leakIls : null}
+        pct={(v) => formatPercent(v, locale, 1)}
+        num={(v) => formatNumber(v, locale)}
       />
 
-      {/* Hero KPI row — big MONO money figures. Loss in danger, savings in gold. */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {/* Secondary KPIs — the decisions waiting and the match health. */}
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Link
+          href="/dashboard/approvals"
+          className="rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+        >
+          <KpiCard
+            label={t('kpis.pending')}
+            value={formatNumber(kpis.pendingApprovalsCount, locale)}
+            tone={kpis.pendingApprovalsCount > 0 ? 'warning' : 'neutral'}
+            icon={<ClipboardCheck className="h-5 w-5" />}
+            subtitle={t('kpis.pendingHint')}
+          />
+        </Link>
         <KpiCard
-          label="הפסד פוטנציאלי החודש"
-          value={formatCurrency(kpis.monthPotentialLossIls)}
-          tone="danger"
-          icon={<AlertTriangle className="h-5 w-5" />}
-          subtitle="דיסקרפנסיות פתוחות עם חומרה בינונית ומעלה"
-        />
-        <KpiCard
-          label="חיסכון שנשמר החודש"
-          value={formatCurrency(kpis.monthSavingsCapturedIls)}
-          tone="gold"
-          icon={<Wallet className="h-5 w-5" />}
-          subtitle="כסף שמנעת לאחר אישור/דחיית הפרשים"
-        />
-        <KpiCard
-          label="ממתינות לאישור"
-          value={kpis.pendingApprovalsCount.toString()}
-          tone={kpis.pendingApprovalsCount > 0 ? 'warning' : 'neutral'}
-          icon={<ClipboardCheck className="h-5 w-5" />}
-          subtitle="חריגות בתור — מנהל/בעלים"
-        />
-        <KpiCard
-          label="התאמות נקיות השבוע"
-          value={`${kpis.weekCleanMatchPct.toFixed(1)}%`}
+          label={t('kpis.clean')}
+          value={formatPercent(kpis.weekCleanMatchPct / 100, locale, 1)}
           tone={cleanMatchHealthy ? 'accent' : 'warning'}
           icon={<CheckCircle2 className="h-5 w-5" />}
-          subtitle="ממוצע משבעת הימים האחרונים"
+          subtitle={t('kpis.cleanHint')}
         />
       </div>
 
       {/* Leak heatmap — the centerpiece data-viz. */}
       {leaksEntitlementBlocked ? (
         <div className="mt-12">
-          <SectionHeader
-            title="בלש דליפות"
-            subtitle="המוצרים שדולפים הכי הרבה כסף החודש."
-          />
-          <EntitlementUpsell
-            feature="advanced_analytics"
-            title="שדרגו כדי לפתוח את בלש הדליפות"
-            compact
-          />
+          <SectionHeader title={t('leaks.title')} subtitle={t('leaks.subtitle')} />
+          <EntitlementUpsell feature="advanced_analytics" title={t('leaks.upsell')} compact />
         </div>
       ) : leaks.length > 0 ? (
         <div className="mt-12">
           <SectionHeader
-            title="בלש דליפות"
-            subtitle="המוצרים שדולפים הכי הרבה כסף החודש."
+            title={t('leaks.title')}
+            subtitle={t('leaks.subtitle')}
             action={
               <Link
                 href="/dashboard/leaks"
-                className="rounded-lg text-sm font-semibold text-primary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+                className="inline-flex items-center gap-1 rounded-lg text-sm font-semibold text-primary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
               >
-                לכל הדליפות →
+                {t('leaks.all')}
+                <ArrowLeft className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
               </Link>
             }
           />
-          <LeakHeatmap items={leaks} max={8} />
+          <LeakHeatmap
+            items={heatmapItems}
+            max={8}
+            locale={locale}
+            labels={{ mild: tl('heatmap.mild'), severe: tl('heatmap.severe'), more: tl('heatmap.more') }}
+          />
         </div>
       ) : null}
 
       {/* Live activity feed. */}
       <div className="mt-12">
-        <SectionHeader title="פעילות אחרונה" subtitle="מה קרה במערכת לאחרונה." />
+        <SectionHeader title={t('activity.title')} subtitle={t('activity.subtitle')} />
         {activity.length > 0 ? (
           <PaginatedActivityFeed initial={activity} />
         ) : (
           <EmptyState
             icon={<Activity className="h-6 w-6" />}
-            title="עדיין אין פעילות"
-            description="ברגע שתקלוט חשבוניות ותטפל בחריגות, היומן יתחיל להתמלא כאן."
+            title={t('activity.emptyTitle')}
+            description={t('activity.emptyDescription')}
           />
         )}
       </div>
@@ -128,5 +143,127 @@ export default async function DashboardPage() {
   );
 }
 
-// Headline ₪ — clean, no agorot. Delegates to the single formatIls util.
-const formatCurrency = (value: number): string => formatIls(value);
+type Hero = Awaited<ReturnType<Awaited<ReturnType<typeof createServerCaller>>['owner']['leakHero']>>;
+type OverviewT = Translator<typeof overviewHe>;
+
+/**
+ * The 10-second story: "₪X leaked this month · Y% of spend · Z caught before
+ * payment", with one tap to the invoices behind X. Calm (not alarming) when the
+ * month is clean, and consolidated / no-PO invoices are shown as pending.
+ */
+function LeakHero({
+  t,
+  hero,
+  ils,
+  monthLabel,
+  lastMonthLeak,
+  pct,
+  num,
+}: {
+  t: OverviewT;
+  hero: Hero;
+  ils: (v: number) => string;
+  monthLabel: string;
+  lastMonthLeak: number | null;
+  pct: (v: number) => string;
+  num: (v: number) => string;
+}) {
+  const hasLeak = hero.leakIls > 0;
+  return (
+    <section
+      aria-labelledby="leak-hero-label"
+      className="relative overflow-hidden rounded-2xl border border-line bg-surface p-5 shadow-card sm:p-7"
+    >
+      <div className="absolute inset-x-0 top-0 h-px flow-stream" aria-hidden="true" />
+      <div
+        className={`pointer-events-none absolute -bottom-20 -start-16 h-64 w-64 rounded-full opacity-70 blur-3xl ${hasLeak ? 'glow-danger-blob' : 'glow-primary-blob'}`}
+        aria-hidden="true"
+      />
+
+      <p className="text-xs font-semibold uppercase tracking-wider text-subtle">
+        {t('hero.eyebrow', { month: monthLabel })}
+      </p>
+
+      <div className="mt-3 grid gap-6 lg:grid-cols-[1.4fr_1fr] lg:items-end">
+        <div className="min-w-0">
+          <h2 id="leak-hero-label" className="text-sm font-semibold text-muted">
+            {t('hero.leakedLabel')}
+          </h2>
+          <p
+            className={`mt-1 font-mono text-5xl font-extrabold tabular-nums tracking-tight sm:text-6xl ${hasLeak ? 'text-danger' : 'text-primary'}`}
+          >
+            {ils(hero.leakIls)}
+          </p>
+          <p className="mt-2 text-base font-semibold text-ink">
+            {hero.leakPct != null ? t('hero.pctOfSpend', { pct: pct(hero.leakPct) }) : t('hero.noSpend')}
+            {hero.spendIls > 0 ? (
+              <span className="ms-2 text-sm font-normal text-muted">
+                {t('hero.spendBase', { spend: ils(hero.spendIls) })}
+              </span>
+            ) : null}
+          </p>
+          <p className="mt-1 text-xs text-subtle">
+            {t('hero.target')}
+            {lastMonthLeak != null ? <> · {t('hero.lastMonth', { amount: ils(lastMonthLeak) })}</> : null}
+          </p>
+          {!hasLeak && hero.matchedInvoiceCount > 0 ? (
+            <p className="mt-3 flex items-center gap-2 text-sm text-primary">
+              <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden="true" />
+              {t('hero.clean')}
+            </p>
+          ) : null}
+        </div>
+
+        <dl className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-3 lg:grid-cols-1">
+          <HeroStat label={t('hero.caught')} value={ils(hero.caughtBeforePaymentIls)} hint={t('hero.caughtHint')} tone="gold" />
+          <HeroStat label={t('hero.recovered')} value={ils(hero.recoveredIls)} hint={t('hero.recoveredHint')} tone="primary" />
+          <HeroStat
+            label={t('hero.invoices')}
+            value={t('hero.invoicesValue', { withLeak: num(hero.invoicesWithLeak), total: num(hero.matchedInvoiceCount) })}
+          />
+        </dl>
+      </div>
+
+      {hero.pendingLinkCount > 0 ? (
+        <p className="mt-5 flex items-start gap-2 rounded-xl border border-line bg-surface-2 px-3 py-2 text-sm text-muted">
+          <Hourglass className="mt-0.5 h-4 w-4 shrink-0 text-info" aria-hidden="true" />
+          {t('hero.pending', { count: num(hero.pendingLinkCount), amount: ils(hero.pendingLinkIls) })}
+        </p>
+      ) : null}
+
+      <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="max-w-xl text-xs text-subtle">{t('hero.calc')}</p>
+        {hasLeak || hero.pendingLinkCount > 0 ? (
+          <Link
+            href="/dashboard/leaks/breakdown"
+            className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-danger/12 px-4 py-2 text-sm font-semibold text-danger ring-1 ring-danger/30 transition-colors hover:bg-danger/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/60"
+          >
+            {t('hero.drill')}
+            <ArrowLeft className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
+          </Link>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function HeroStat({
+  label,
+  value,
+  hint,
+  tone,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  tone?: 'gold' | 'primary';
+}) {
+  const color = tone === 'gold' ? 'text-gold' : tone === 'primary' ? 'text-primary' : 'text-ink';
+  return (
+    <div className="rounded-xl border border-line bg-surface-2/60 px-4 py-3">
+      <dt className="text-xs font-semibold text-subtle">{label}</dt>
+      <dd className={`mt-0.5 font-mono text-xl font-bold tabular-nums ${color}`}>{value}</dd>
+      {hint ? <dd className="mt-0.5 text-[11px] leading-snug text-muted">{hint}</dd> : null}
+    </div>
+  );
+}
