@@ -175,6 +175,12 @@ layer2() {
   step prod-start start_prod_server
   if [[ -n "$SERVER_PID" ]]; then
     step verify-prod "$ROOT/scripts/verify-prod.sh" "http://localhost:$PORT"
+    if [[ "${VERIFY_SOFTNAV:-0}" == 1 ]]; then
+      # Same-route soft navigations must commit in a production build (S3, #55).
+      step soft-nav env BASE_URL="http://localhost:$PORT" node apps/web/scripts/check-soft-nav.mjs
+    else
+      skip soft-nav "VERIFY_SOFTNAV=1 to run scripts/check-soft-nav.mjs"
+    fi
   else
     skip verify-prod "server did not start (.verify/next-start.log)"
   fi

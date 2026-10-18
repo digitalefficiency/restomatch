@@ -40,8 +40,11 @@ Output: a PASS / FAIL / SKIP table and `RESULT: PASS|FAIL`; exit code 1 on any
 FAIL. Every step's full output is in `.verify/<step>.log` (gitignored).
 
 **In CI** (`.github/workflows/ci.yml`) the same steps are split across the
-blocking `test` (incl. `supabase-sync --check`), `worker-tests`, `web` and `audit`
-jobs; layer 2 runs in the non-blocking `verify-layer2` job.
+blocking `test`, `worker-tests`, `web` and `audit` jobs. Adding `supabase-sync --check`
+to the blocking job and a non-blocking `verify-layer2` job is proposed in PR #49; `ci.yml`
+is on the AGENTS.md immutability list, so that change waits for the owner's approval.
+Until then, run `scripts/verify.sh all` locally (add `VERIFY_SOFTNAV=1` for the
+production soft-navigation check).
 
 ## Layer 2 — the running product
 
@@ -78,7 +81,7 @@ GET requests only, no login. Checks:
 | unknown path | 404, or the anonymous redirect to `/login` — never a 5xx |
 
 Exit code 1 on any failure. Run it after every production deploy, and before a
-demo. CI runs it non-blocking against a local `next start` (job *verify layer 2*).
+demo. Once the proposed CI job is approved, CI runs it non-blocking against a local `next start`.
 
 ### Proven to fail
 
