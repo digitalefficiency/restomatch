@@ -237,3 +237,22 @@ DB-RUNBOOK updated: pending range now **0019 → 0039** (S4's 0039 in the §11 t
   - `check-rls` OK;
   - attack suites **169/169**.
 - The deploy doc gained a §0 cutover order: schema → `restomatch_app` password → Vercel env → redeploy. There is no seed in migrations.
+
+### Round 4 — released files are immutable (main already carries the first supabase/)
+
+- **What happened:** the orchestrator merged my earlier `supabase/` into `main` (f98962c) at about 08:52, so `20260620072001_restomatch_rls_21814c44.sql` may already be applied on the new project. My hardening had rewritten that same version.
+- **Released files restored:** that file is back byte-identical. All 36 released files were compared with `origin/main`: identical.
+- **New version for the hardening:** the Data-API lockout ships as a **new version** `20260620072002_restomatch_rls_2a5eafd1.sql`.
+- **Append-only manifest:** `supabase/released-migrations.json` records the sha256 of every released file. The generator refuses a missing or edited released file, refuses a released drizzle file whose source changed, and only appends.
+- **Tests:**
+  - pure append against main's files;
+  - tamper and delete are refused;
+  - UPGRADE step 1, main's 36 files only: the doctor FAILs, with anon/authenticated reaching 42 tables including `sessions`, `user_credentials` and `password_reset_tokens`;
+  - step 2, the appended file: 0 FAIL.
+- **psql proofs** (`psql -1 ON_ERROR_STOP`, non-superuser, Supabase default grants emulated): upgrade (main's 36 → +1) and fresh (37) both ended with:
+  - RLS re-apply OK;
+  - `db:migrate` no-op;
+  - doctor 0 FAIL / 1 expected WARN, Data API PASS;
+  - `check-rls` OK;
+  - attack suites 169/169.
+- **Deploy doc:** the top now has an URGENT interim mitigation (disable the Data API, or remove `public` from the exposed schemas, until the revoke deploys) and SQL to verify it landed.

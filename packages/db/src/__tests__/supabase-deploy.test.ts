@@ -1,10 +1,11 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runDoctor } from '../doctor';
 import { findJournalGaps, readJournal, runMigrator } from '../migrations';
-import { planSupabaseSync, repoRoot, SUPABASE_MIGRATIONS_DIR } from '../supabaseSync';
+import { planSupabaseSync, repoRoot, SUPABASE_LOCK, SUPABASE_MIGRATIONS_DIR } from '../supabaseSync';
 import { testDbUrl } from '../test-env';
 
 /**
@@ -36,6 +37,11 @@ migratorUrl.password = 'emulated-supabase-postgres';
 const migDir = join(repoRoot(), SUPABASE_MIGRATIONS_DIR);
 const files = readdirSync(migDir).filter((f) => f.endsWith('.sql')).sort();
 const rlsFile = files.filter((f) => f.includes('_restomatch_rls_')).at(-1)!;
+/** Files main already released (Supabase may have applied them): the lock at the last release. */
+const RELEASED_ON_MAIN = 36;
+const lock = JSON.parse(readFileSync(join(repoRoot(), SUPABASE_LOCK), 'utf8')) as Record<string, string>;
+const released = files.slice(0, RELEASED_ON_MAIN);
+const appended = files.slice(RELEASED_ON_MAIN);
 let canCreate = true;
 const notices: string[] = [];
 
@@ -128,6 +134,31 @@ describe('supabase/ is generated from the drizzle journal', () => {
     expect(plan.orphans).toEqual([]);
   });
 
+  it('is append-only: every locked (released) file is untouched; regenerating is a pure append', () => {
+    const plan = planSupabaseSync();
+    for (const name of Object.keys(lock)) {
+      expect(plan.writes.has(`${SUPABASE_MIGRATIONS_DIR}/${name}`), name).toBe(false);
+    }
+    expect(Object.keys(lock).sort()).toEqual(files);
+    // the first 36 are exactly what main released at 2026-10-18 08:52 (f98962c)
+    expect(released.at(-1)).toBe('20260620072001_restomatch_rls_21814c44.sql');
+    expect(appended.every((f) => f > released.at(-1)!)).toBe(true);
+  });
+
+  it('refuses to rewrite or drop a released file', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'rm-supabase-'));
+    try {
+      cpSync(join(repoRoot(), 'supabase'), join(tmp, 'supabase'), { recursive: true });
+      const victim = join(tmp, SUPABASE_MIGRATIONS_DIR, released.at(-1)!);
+      writeFileSync(victim, `${readFileSync(victim, 'utf8')}\n-- edited`);
+      expect(() => planSupabaseSync(tmp)).toThrow(/was modified/);
+      rmSync(victim);
+      expect(() => planSupabaseSync(tmp)).toThrow(/is missing/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('has bootstrap + one file per journal entry + an RLS file, versions strictly increasing', () => {
     const journal = readJournal().entries;
     expect(files[0]).toMatch(/_restomatch_bootstrap\.sql$/);
@@ -155,9 +186,23 @@ describe('git deploy onto an emulated Supabase project', () => {
     await sql?.end();
   });
 
-  it('applies every migration file in order as the non-superuser migration role', async (ctx) => {
+  it('UPGRADE step 1 — main\'s released files apply; the Data API is still exposed (what prod has now)', async (ctx) => {
     if (!canCreate) ctx.skip();
-    for (const f of files) {
+    for (const f of released) {
+      await applyFile(sql, f).catch((err: unknown) => {
+        throw new Error(`${f}: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }
+    const [p] = await sql`select has_table_privilege('anon', 'public.plans', 'UPDATE') as a`;
+    expect(p!.a).toBe(true); // the default grants Supabase adds — closed by the appended RLS file
+    const r = await runDoctor(migratorUrl.toString());
+    expect(r.findings.find((f) => f.name === 'Supabase Data API locked out')?.status).toBe('FAIL');
+  });
+
+  it('UPGRADE step 2 — the appended files apply on top (as Supabase will on the next merge)', async (ctx) => {
+    if (!canCreate) ctx.skip();
+    expect(appended.length).toBeGreaterThan(0);
+    for (const f of appended) {
       await applyFile(sql, f).catch((err: unknown) => {
         throw new Error(`${f}: ${err instanceof Error ? err.message : String(err)}`);
       });

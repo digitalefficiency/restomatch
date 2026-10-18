@@ -10,7 +10,7 @@
 > 1. בדשבורד של Supabase → Integrations → GitHub: לוודא שתיקיית העבודה היא שורש הריפו, ושענף הייצור הוא `main`
 >    (`main` מכיל עכשיו את הקוד המלא).
 >    לכבות **Automatic branching**, כדי שלא ייווצרו מסדי תצוגה בתשלום.
-> 2. מיזוג ל-`main` → Supabase מריץ מיד 36 קבצים על מסד הייצור החדש: הכנה, 34 מיגרציות, והרשאות RLS.
+> 2. מיזוג ל-`main` → Supabase מריץ מיד את הקבצים החדשים על מסד הייצור החדש (כרגע: הכנה, 34 מיגרציות, ושני קבצי RLS — 37 בסך הכול).
 >    הקבצים כוללים נעילה של ה-Data API, כך שהמפתח הציבורי לא נותן גישה לאף טבלה. אין בקבצים נתוני דמו.
 > 3. ב-SQL Editor להריץ פעם אחת:
 >    `alter role restomatch_app with login password '<APP_ROLE_PASSWORD>';`
@@ -23,6 +23,29 @@
 > לא היה אפשר לגשת לתיעוד של Supabase מכאן, ולכן הנחות שצריך לאשר בדשבורד מסומנות ⚠️.
 
 ---
+
+> ## ⚠️ דחוף / URGENT — Data API exposure until the next merge is applied
+>
+> **עברית:** הגרסה הראשונה של הקבצים כבר מוזגה ל-`main` (בשעה ~08:52), ו-Supabase כנראה כבר הריץ אותה.
+> בגרסה הזו, ב-Supabase התפקידים `anon` ו-`authenticated` מקבלים גישה לכל הטבלאות, כולל `sessions`, `user_credentials` ו-`password_reset_tokens`, דרך המפתח הציבורי.
+> הקובץ החדש `20260620072002_restomatch_rls_2a5eafd1.sql` סוגר את זה.
+> **עד שהוא רץ:** ב-Supabase Dashboard → Project Settings → **Data API** → לכבות את ה-Data API, או להסיר את `public` מ-**Exposed schemas**.
+> אפשר לעשות את זה גם מיד, כי האפליקציה לא משתמשת ב-Data API.
+>
+> **English:** the first version of `supabase/` reached `main` at ~08:52, and Supabase has probably applied it.
+> With only those files, `anon` and `authenticated` hold Supabase's default grants on every public table — 42 tables, including `sessions`, `user_credentials` and `password_reset_tokens` (proven on the emulation).
+> Those roles are usable with the public publishable key through the Data API (PostgREST).
+> The appended `20260620072002_restomatch_rls_2a5eafd1.sql` revokes them, also for future tables.
+> **Interim mitigation — do it now, it is safe:** Supabase dashboard → Project Settings → **Data API** → disable the Data API, or remove `public` (and every app schema) from **Exposed schemas**.
+> RestoMatch never uses the Data API: data goes through Drizzle, and supabase-js is used for Storage only, which is a separate service.
+>
+> **Verify the revoke landed** (SQL editor) once the merge deploys:
+> ```sql
+> select version from supabase_migrations.schema_migrations where version = '20260620072002';       -- 1 row
+> select count(*) from information_schema.role_table_grants
+>  where table_schema = 'public' and grantee in ('anon', 'authenticated');                          -- 0
+> ```
+> Or run `DATABASE_URL=<direct> pnpm db:doctor` and look for `PASS  Supabase Data API locked out`. If the first query returns 0 rows, the integration did not deploy: check its log in the dashboard.
 
 ## 0. Cutover order (do not reorder)
 
@@ -57,6 +80,8 @@ Until step 4 the live site keeps using the old project, so steps 1–3 are invis
   - without rights on `storage.objects`, the RLS file still applies with a WARNING instead of failing the deploy.
 
   The same files were also applied with `psql -1 -v ON_ERROR_STOP=1`. After that, `check-rls` and the RLS, cross-tenant and storage attack suites passed (169/169).
+
+**Released files are immutable.** Every committed migration file is recorded with its sha256 in `supabase/released-migrations.json`. Supabase records versions, never re-runs them, and the integration fails when a remote version is missing locally. So `db:supabase-sync` only ever appends: a released file that is missing or edited is an error, and a changed RLS file is emitted as a NEW, later version. The test proves the append and the refusal, and it re-runs the deploy as an upgrade: `main`'s released files first, then the appended ones.
 
 **Adding a migration later:**
 1. Write the drizzle SQL and its journal entry, with a `when` later than everything already in `supabase/migrations`.
@@ -95,9 +120,9 @@ This pushes the same `supabase/migrations`.
 
 ## 4. First deploy — checks and the one manual step
 
-1. Merge to the production branch. In the dashboard (Database → Migrations, or the integration's deploy log), expect **36 migrations** applied without error. Or run in the SQL editor:
+1. Merge to the production branch. In the dashboard (Database → Migrations, or the integration's deploy log), expect **37 migrations** applied without error (36 from the first merge + `20260620072002_restomatch_rls_2a5eafd1`). Or run in the SQL editor:
    ```sql
-   select count(*) from supabase_migrations.schema_migrations;   -- 36
+   select count(*) from supabase_migrations.schema_migrations;   -- 37
    select count(*) from drizzle.__drizzle_migrations;            -- 34
    ```
 2. **Give the tenant role its password.** Generate it locally (`openssl rand -hex 32`), store it in your password manager, then run in the SQL editor:
