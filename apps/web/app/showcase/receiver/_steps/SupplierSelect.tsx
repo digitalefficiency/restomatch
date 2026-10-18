@@ -5,9 +5,10 @@ import { gsap } from 'gsap';
 import { ArrowLeft, Check, Clock, Package } from 'lucide-react';
 import { useRef } from 'react';
 import { useDir, useLocale, useT } from '@/lib/i18n/client';
-import { formatDate, formatNumber } from '@/lib/i18n/format';
+import { formatNumber } from '@/lib/i18n/format';
 import { receiving } from '@/lib/i18n/messages/receiving';
 import { formatIls } from '@/lib/money';
+import { localTime } from '../../_lib/time';
 import { MOCK_SUPPLIERS, type MockSupplierExpectation } from '../_mock';
 
 interface Props {
@@ -75,10 +76,7 @@ export function SupplierSelect({ selected, onSelect, onContinue }: Props) {
                     <div className="text-xs text-muted flex items-center gap-2 mt-0.5">
                       <Clock className="w-3 h-3" />
                       <span className="font-mono tabular-nums">
-                        {formatDate(s.expectedAt, locale, {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
+                        {localTime(s.expectedAt)}
                       </span>
                       <span className="text-subtle">·</span>
                       <Package className="w-3 h-3" />

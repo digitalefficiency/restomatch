@@ -18,7 +18,9 @@ import { formatNumber } from '@/lib/i18n/format';
 import { formatIls } from '@/lib/money';
 import { showcase } from '@/lib/i18n/messages/showcase';
 import { mockText } from '../_lib/mockText';
-import { SUPPLIER_PROFILES } from './suppliers/[supplierId]/_mock';
+import { supplierProfiles } from './suppliers/[supplierId]/_mock';
+import { dayMemo, invoiceAudits } from './invoices/_mock';
+import { MOCK_SUPPLIERS } from '../receiver/_mock';
 
 interface Kpi {
   id: 'leak' | 'saved' | 'pending';
@@ -82,12 +84,12 @@ const HEAT_ROWS: { productId: string; supplierId: (typeof HEAT_SUPPLIER_IDS)[num
 ];
 
 function productOf(supplierId: string, productId: string) {
-  const p = SUPPLIER_PROFILES[supplierId]?.topProducts.find((x) => x.productId === productId);
+  const p = supplierProfiles()[supplierId]?.topProducts.find((x) => x.productId === productId);
   if (!p) throw new Error(`showcase heatmap: ${supplierId}/${productId} missing`);
   return p;
 }
 
-const SUPPLIERS = HEAT_SUPPLIER_IDS.map((id) => SUPPLIER_PROFILES[id]?.metadata.name ?? id);
+const SUPPLIERS = HEAT_SUPPLIER_IDS.map((id) => supplierProfiles()[id]?.metadata.name ?? id);
 const PRODUCTS = HEAT_ROWS.map((r) => productOf(r.supplierId, r.productId).name);
 const HEATMAP: (HeatCell | null)[][] = HEAT_ROWS.map((row) =>
   HEAT_SUPPLIER_IDS.map((sid) => {
@@ -100,15 +102,17 @@ const HEATMAP: (HeatCell | null)[][] = HEAT_ROWS.map((row) =>
 const HEAT_SCALE = 0.25;
 const heat = (variance: number) => Math.max(-1, Math.min(1, variance / HEAT_SCALE));
 
-interface FlowEvent {
-  id: string;
-  time: string;
-  title: string;
-  detail: string;
-  type: 'block' | 'approve' | 'flag' | 'sync';
-}
-
-const EVENTS: FlowEvent[] = [
+/**
+ * Today's feed. Every number is read from the mocks the other screens use, so
+ * the feed can't drift: INV-4882 / PO-1235 (receiver + invoices page), the
+ * cherry-tomato trend (supplier page + heatmap), PO-1234's line count.
+ */
+const flowEvents = dayMemo((): FlowEvent[] => {
+  const kerem = MOCK_SUPPLIERS.find((x) => x.supplierId === 'sup-kerem')!;
+  const avi = MOCK_SUPPLIERS.find((x) => x.supplierId === 'sup-avi')!;
+  const inv4882 = invoiceAudits().find((r) => r.invoiceNumber === 'INV-4882')!;
+  const tomatoPct = Math.round(productOf('sup-avi', 'prod-tomato').trendPct);
+  return [
   {
     id: '1',
     time: '09:35',
@@ -119,8 +123,9 @@ const EVENTS: FlowEvent[] = [
   {
     id: '2',
     time: '09:28',
-    title: 'PO #1235 התקבל מלא',
-    detail: 'יוסי אישר 3 פריטים · ₪3,420',
+    title: 'PO-1235 התקבל מלא',
+    detail: `דנה אישרה ${kerem.totalLines} פריטים`,
+    amount: inv4882.totalInvoiceIls,
     type: 'approve',
   },
   {
@@ -135,17 +140,29 @@ const EVENTS: FlowEvent[] = [
     id: '3',
     time: '08:18',
     title: 'חריגת מחיר ממתינה לאישור',
-    detail: 'עגבניה שרי — עלייה 21% מעל ממוצע 60 ימים',
+    detail: `עגבניה שרי — עלייה ${tomatoPct}% מעל ממוצע 60 ימים`,
     type: 'flag',
   },
   {
     id: '5',
     time: '08:05',
-    title: 'PO #1234 בקבלה',
-    detail: 'ירקני אבי — 5 פריטים בתהליך',
+    title: 'PO-1234 בקבלה',
+    detail: `ירקני אבי — ${avi.totalLines} פריטים בתהליך`,
     type: 'flag',
   },
 ];
+});
+
+interface FlowEvent {
+  id: string;
+  time: string;
+  title: string;
+  detail: string;
+  type: 'block' | 'approve' | 'flag' | 'sync';
+  /** Rendered with formatIls after the detail. */
+  amount?: number;
+}
+
 
 export default function DashboardShowcase() {
   const t = useT(showcase);
@@ -543,7 +560,7 @@ function LiveFlow() {
       <div className="relative ps-2">
         <div className="absolute top-2 bottom-2 start-[14px] w-px bg-gradient-to-b from-primary/70 via-line to-transparent" />
         <div className="space-y-5">
-          {EVENTS.map((e) => (
+          {flowEvents().map((e) => (
             <FlowEventRow key={e.id} event={e} />
           ))}
         </div>
@@ -597,7 +614,10 @@ function FlowEventRow({ event }: { event: FlowEvent }) {
           </div>
         </div>
         <div className="text-sm font-medium text-ink">{mockText(event.title, locale)}</div>
-        <div className="text-xs text-muted mt-0.5">{mockText(event.detail, locale)}</div>
+        <div className="text-xs text-muted mt-0.5">
+          {mockText(event.detail, locale)}
+          {event.amount !== undefined ? <> · {formatIls(event.amount, { locale })}</> : null}
+        </div>
       </div>
     </div>
   );

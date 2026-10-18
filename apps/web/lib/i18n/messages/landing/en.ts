@@ -171,7 +171,7 @@ export const en: Shape<typeof he> = {
       s2Title: 'It cross-checks',
       s2Body: 'Order, delivery and invoice — line by line, 12 checks.',
       s3Title: 'The money stays yours',
-      s3Body: 'Every gap is priced in shekels and sent for approval before you pay. Tiny ones (up to 2%) pass automatically.',
+      s3Body: 'Every gap is priced in shekels and sent for approval before you pay. Tiny ones (under 2%) pass automatically.',
     },
     receiver: {
       eyebrow: 'Receiver in English',

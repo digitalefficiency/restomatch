@@ -68,7 +68,27 @@ export interface InvoiceAuditRecord {
   timeline: AuditTimelineEvent[];
 }
 
-const today = new Date();
+/**
+ * "Now" for the date helpers below. Every mock is rebuilt when the local date
+ * changes (see `dayMemo`), so a long-running server never serves yesterday's
+ * dates — and server and browser agree on the same day during hydration.
+ */
+let today = new Date();
+
+/** Cache `build(now)` per local calendar day. */
+export function dayMemo<T>(build: (now: Date) => T): () => T {
+  let key = '';
+  let value: T;
+  return () => {
+    const now = new Date();
+    const k = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
+    if (k !== key) {
+      key = k;
+      value = build(now);
+    }
+    return value;
+  };
+}
 function isoAt(hour: number, minute = 0): string {
   const d = new Date(today);
   d.setHours(hour, minute, 0, 0);
@@ -76,7 +96,9 @@ function isoAt(hour: number, minute = 0): string {
 }
 
 /** When INV-4882's number was first filed — the duplicate check points back here. */
-export const INV_4882_FIRST_SEEN = isoDaysAgo(9, 10, 40);
+export function inv4882FirstSeen(): string {
+  return isoDaysAgo(1, 10, 40);
+}
 
 /** `isoAt(h, m)` N days back — every showcase date is relative to today. */
 export function isoDaysAgo(days: number, hour: number, minute = 0): string {
@@ -130,7 +152,8 @@ function audit(input: RecordInput): InvoiceAuditRecord {
   };
 }
 
-const AUTHORED: RecordInput[] = [
+function authored(): RecordInput[] {
+  return [
   {
     id: 'inv-7821',
     poNumber: 'PO-1234',
@@ -215,7 +238,7 @@ const AUTHORED: RecordInput[] = [
         at: isoAt(8, 5),
         actor: 'מערכת',
         role: 'system',
-        action: 'PO #1234 הופעל לקבלה',
+        action: 'PO-1234 הופעל לקבלה',
       },
       {
         at: isoAt(8, 12),
@@ -244,6 +267,13 @@ const AUTHORED: RecordInput[] = [
         role: 'employee',
         action: 'סגר את הקבלה',
         detail: '4 סטטוסים סודרו · 1 לאישור מנהל',
+      },
+      {
+        at: isoAt(9, 14),
+        actor: 'נועה ברק',
+        role: 'owner',
+        action: 'דחתה את מחיר העגבניות',
+        detail: 'דרשנו הסבר מאבי הירקן',
       },
     ],
   },
@@ -304,7 +334,7 @@ const AUTHORED: RecordInput[] = [
         actor: 'מערכת',
         role: 'system',
         action: 'חשבונית כפולה זוהתה',
-        detail: `INV-4882 כבר קיימת מ-${localDayMonth(INV_4882_FIRST_SEEN)}`,
+        detail: `INV-4882 כבר קיימת מ-${localDayMonth(inv4882FirstSeen())}`,
       },
       {
         at: isoAt(9, 35),
@@ -447,31 +477,42 @@ const AUTHORED: RecordInput[] = [
     rawImageUrl: '/scans/inv-7825',
     supplierName: 'אלכוהול שגב',
     supplierInitials: 'אש',
-    scannedAt: isoAt(14, 22),
+    scannedAt: isoAt(11, 24),
     scannedBy: 'יוסי כהן',
-    approvedAt: isoAt(14, 25),
+    approvedAt: isoAt(11, 28),
     approvedBy: 'יוסי כהן',
     status: 'minor',
     lines: [
       {
-        productName: 'יין אדום קברנה',
-        unit: 'בק׳',
+        productName: 'יין מרלו רקנאטי',
+        unit: 'בקבוק',
         poQty: 24,
-        poUnitPrice: 95,
+        poUnitPrice: 62,
         receivedQty: 24,
         invoiceQty: 24,
+        invoiceUnitPrice: 62,
+        status: 'matched',
+      },
+      {
+        productName: 'וודקה אבסולוט 0.7ל׳',
+        unit: 'בקבוק',
+        poQty: 6,
+        poUnitPrice: 95,
+        receivedQty: 6,
+        invoiceQty: 6,
         invoiceUnitPrice: 95,
         status: 'matched',
       },
       {
-        productName: 'וודקה גריי גוס',
-        unit: 'בק׳',
-        poQty: 6,
-        poUnitPrice: 320,
-        receivedQty: 6,
-        invoiceQty: 6,
-        invoiceUnitPrice: 320,
-        status: 'matched',
+        productName: 'גולדסטאר 0.33ל׳',
+        unit: 'בקבוק',
+        poQty: 96,
+        poUnitPrice: 4.5,
+        receivedQty: 96,
+        invoiceQty: 96,
+        invoiceUnitPrice: 4.8,
+        status: 'price_higher',
+        note: 'מחיר עלה ב-6.7% מהממוצע. אושר במחיר ההזמנה עד בירור מול ההסכם.',
       },
       {
         productName: 'תוויות מבצע',
@@ -487,20 +528,20 @@ const AUTHORED: RecordInput[] = [
     ],
     timeline: [
       {
-        at: isoAt(14, 22),
+        at: isoAt(11, 24),
         actor: 'יוסי כהן',
         role: 'employee',
         action: 'צילם את החשבונית',
       },
       {
-        at: isoAt(14, 23),
+        at: isoAt(11, 25),
         actor: 'מערכת',
         role: 'system',
-        action: 'זיהתה פריט לא בהזמנה',
-        detail: 'תוויות בעלות 0 — לא נדרשת התערבות',
+        action: 'זיהתה 2 חריגות',
+        detail: 'מחיר גולדסטאר גבוה, פריט לא בהזמנה (תוויות ללא עלות)',
       },
       {
-        at: isoAt(14, 25),
+        at: isoAt(11, 28),
         actor: 'יוסי כהן',
         role: 'employee',
         action: 'אישר את הקבלה',
@@ -508,8 +549,13 @@ const AUTHORED: RecordInput[] = [
     ],
   },
 ];
+}
 
-export const MOCK_INVOICE_AUDITS: InvoiceAuditRecord[] = AUTHORED.map(audit);
+/** All audit records, built for today (rebuilt when the date changes). */
+export const invoiceAudits = dayMemo((now) => {
+  today = now;
+  return authored().map(audit);
+});
 
 export function statsForToday(records: InvoiceAuditRecord[]) {
   const totalScanned = records.length;

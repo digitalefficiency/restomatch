@@ -5,7 +5,7 @@
  */
 
 import { synthesiseLines } from '../../_components/scanDataAdapters';
-import { MOCK_INVOICE_AUDITS, type InvoiceAuditRecord } from '../../invoices/_mock';
+import { dayMemo, invoiceAudits, type InvoiceAuditRecord } from '../../invoices/_mock';
 
 export interface SupplierMetadata {
   id: string;
@@ -78,7 +78,7 @@ export interface SupplierProfile {
   activity: ActivityEvent[];
 }
 
-const today = new Date();
+let today = new Date(); // set per build by `supplierProfiles` (see dayMemo)
 
 function isoDaysAgo(days: number, hour = 9, minute = 0): string {
   const d = new Date(today);
@@ -89,7 +89,7 @@ function isoDaysAgo(days: number, hour = 9, minute = 0): string {
 
 /** Invoices that also have a full audit record take every figure from it. */
 function auditById(idOrNumber: string): InvoiceAuditRecord {
-  const r = MOCK_INVOICE_AUDITS.find((a) => a.id === idOrNumber || a.invoiceNumber === idOrNumber);
+  const r = invoiceAudits().find((a) => a.id === idOrNumber || a.invoiceNumber === idOrNumber);
   if (!r) throw new Error(`showcase: no audit record ${idOrNumber}`);
   return r;
 }
@@ -116,7 +116,8 @@ function weekly(base: number, vol: number, drift: number, seed: number): number[
   });
 }
 
-export const SUPPLIER_PROFILES: Record<string, SupplierProfile> = {
+function buildProfiles(): Record<string, SupplierProfile> {
+  return {
   'sup-avi': {
     metadata: {
       id: 'sup-avi',
@@ -237,7 +238,7 @@ export const SUPPLIER_PROFILES: Record<string, SupplierProfile> = {
         at: isoDaysAgo(0, 8, 18),
         type: 'invoice_closed',
         title: 'INV-7821 נסגרה',
-        detail: 'יוסי תפס עליית מחיר עגבניות 21% · אישר ידנית',
+        detail: 'יוסי תפס עליית מחיר עגבניות 21% · הועבר לאישור בעלים',
         amount: auditById('inv-7821').savingsCapturedIls,
       },
       {
@@ -252,7 +253,7 @@ export const SUPPLIER_PROFILES: Record<string, SupplierProfile> = {
         at: isoDaysAgo(2, 8, 5),
         type: 'invoice_closed',
         title: 'INV-7782 נסגרה',
-        detail: 'התאמה מלאה · 8 פריטים תאמו',
+        detail: 'התאמה מלאה · כל הפריטים תאמו',
       },
       {
         id: 'a4',
@@ -368,7 +369,7 @@ export const SUPPLIER_PROFILES: Record<string, SupplierProfile> = {
         at: isoDaysAgo(2, 9, 40),
         type: 'invoice_closed',
         title: 'INV-4860 נסגרה',
-        detail: 'התאמה מלאה · 11 פריטים תאמו',
+        detail: 'התאמה מלאה · כל הפריטים תאמו',
       },
     ],
   },
@@ -586,16 +587,7 @@ export const SUPPLIER_PROFILES: Record<string, SupplierProfile> = {
       },
     ],
     recentInvoices: [
-      {
-        id: 'inv-7820',
-        invoiceNumber: 'INV-3344',
-        scannedAt: isoDaysAgo(0, 11, 24),
-        totalIls: 3140,
-        approvedIls: 2986,
-        status: 'major',
-        discrepanciesCount: 2,
-        savingsCapturedIls: 154,
-      },
+      fromAudit('INV-3344'),
       {
         id: 'inv-7780',
         invoiceNumber: 'INV-3318',
@@ -620,18 +612,18 @@ export const SUPPLIER_PROFILES: Record<string, SupplierProfile> = {
     activity: [
       {
         id: 'a1',
-        at: isoDaysAgo(0, 11, 30),
+        at: isoDaysAgo(0, 11, 25),
         type: 'price_alert',
         title: 'גולדסטאר עלה ב-6.7%',
-        detail: 'מ-₪4.5 ל-₪4.8 בקבוק. בדוק מול הסכם.',
-        amount: 142,
+        detail: 'מ-4.5 ל-4.8 לבקבוק ב-INV-3344. בדוק מול הסכם.',
+        amount: auditById('INV-3344').lines.find((l) => l.status === 'price_higher')!.variance,
       },
       {
         id: 'a2',
         at: isoDaysAgo(0, 11, 28),
         type: 'invoice_closed',
         title: 'INV-3344 נסגרה',
-        detail: 'פריט שלא הוזמן (תוויות מבצע, ללא עלות) · אושר',
+        detail: 'גולדסטאר אושר במחיר ההזמנה · תוויות מבצע ללא עלות',
       },
       {
         id: 'a3',
@@ -650,6 +642,7 @@ export const SUPPLIER_PROFILES: Record<string, SupplierProfile> = {
     ],
   },
 };
+}
 
 /**
  * An invoice that has an audit record (matched by number) takes every figure
@@ -659,15 +652,21 @@ export const SUPPLIER_PROFILES: Record<string, SupplierProfile> = {
  */
 function withSynthTotals(profile: SupplierProfile): void {
   profile.recentInvoices = profile.recentInvoices.map((inv) => {
-    const audited = MOCK_INVOICE_AUDITS.find((a) => a.invoiceNumber === inv.invoiceNumber);
+    const audited = invoiceAudits().find((a) => a.invoiceNumber === inv.invoiceNumber);
     if (audited) return fromAudit(audited.id);
     const lines = synthesiseLines(inv.totalIls, profile.topProducts);
     const totalIls = Math.round(lines.reduce((s, l) => s + l.qty * l.unitPrice, 0) * 100) / 100;
     return { ...inv, totalIls, approvedIls: Math.round((totalIls - inv.savingsCapturedIls) * 100) / 100 };
   });
 }
-Object.values(SUPPLIER_PROFILES).forEach(withSynthTotals);
+/** Every supplier profile, built for today (rebuilt when the date changes). */
+export const supplierProfiles = dayMemo((now) => {
+  today = now;
+  const profiles = buildProfiles();
+  Object.values(profiles).forEach(withSynthTotals);
+  return profiles;
+});
 
 export function getSupplierProfile(id: string): SupplierProfile | null {
-  return SUPPLIER_PROFILES[id] ?? null;
+  return supplierProfiles()[id] ?? null;
 }

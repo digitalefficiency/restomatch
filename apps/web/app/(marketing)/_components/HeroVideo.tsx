@@ -69,7 +69,6 @@ export function HeroVideo({
       {started ? (
         <button
           type="button"
-          aria-pressed={!playing}
           onClick={() => {
             const v = ref.current;
             if (!v) return;

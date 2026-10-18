@@ -20,7 +20,7 @@ import { showcase } from '@/lib/i18n/messages/showcase';
 import { formatIls } from '@/lib/money';
 import { mockText } from '../_lib/mockText';
 import { localDate, localTime } from '../_lib/time';
-import { INV_4882_FIRST_SEEN, MOCK_INVOICE_AUDITS, isoDaysAgo } from '../dashboard/invoices/_mock';
+import { dayMemo, inv4882FirstSeen, invoiceAudits } from '../dashboard/invoices/_mock';
 
 type SeverityTier = 'auto' | 'review-manager' | 'review-owner' | 'block' | 'hard-block';
 type ApproverRole = 'auto' | 'clerk' | 'manager' | 'owner' | 'bookkeeper';
@@ -47,18 +47,23 @@ interface AuditEntry {
   note?: string;
 }
 
-/** Every log entry is "N days ago at HH:MM", so the demo never shows stale dates. */
-function stamp(daysAgo: number, hour: number, minute: number): string {
-  return isoDaysAgo(daysAgo, hour, minute);
-}
-
-const INV_4882 = MOCK_INVOICE_AUDITS.find((r) => r.invoiceNumber === 'INV-4882')!;
-const CHERRY_EXCEPTION_ILS =
-  MOCK_INVOICE_AUDITS.find((r) => r.invoiceNumber === 'INV-7821')!.lines.find(
-    (l) => l.status === 'price_higher',
-  )!.variance;
-
-const RULES: Rule[] = [
+/**
+ * The rules + their decision logs, built for today: every entry is "N days ago
+ * at HH:MM" and every amount comes from the invoice it refers to.
+ */
+const rules = dayMemo((now): Rule[] => {
+  const stamp = (daysAgo: number, hour: number, minute: number): string => {
+    const d = new Date(now);
+    d.setDate(d.getDate() - daysAgo);
+    d.setHours(hour, minute, 0, 0);
+    return d.toISOString();
+  };
+  const INV_4882 = invoiceAudits().find((r) => r.invoiceNumber === 'INV-4882')!;
+  // INV-7821's cherry-tomato line (+21%) — the same ₪ the invoice page shows.
+  const CHERRY_EXCEPTION_ILS = invoiceAudits()
+    .find((r) => r.invoiceNumber === 'INV-7821')!
+    .lines.find((l) => l.status === 'price_higher')!.variance;
+  return [
   {
     id: 'rule-100',
     type: 'חשבונית כפולה',
@@ -67,7 +72,7 @@ const RULES: Rule[] = [
     action: 'hard_block',
     severity: 'hard-block',
     priority: 100,
-    matchesThisMonth: 3,
+    matchesThisMonth: 2,
     auditLog: [
       {
         timestamp: stamp(0, 9, 35),
@@ -75,7 +80,7 @@ const RULES: Rule[] = [
         actorRole: 'auto',
         decision: 'auto',
         amount: INV_4882.totalInvoiceIls,
-        note: `INV-4882 ‎(קצביית הכרם) זוהה כקיים מ-${localDate(INV_4882_FIRST_SEEN)}`,
+        note: `INV-4882 ‎(קצביית הכרם) זוהה כקיים מ-${localDate(inv4882FirstSeen())}`,
       },
       {
         timestamp: stamp(13, 14, 22),
@@ -148,7 +153,6 @@ const RULES: Rule[] = [
         actor: 'נועה ברק',
         actorRole: 'owner',
         decision: 'rejected',
-        // INV-7821's cherry-tomato line (+21%) — the same ₪ the invoice page shows.
         amount: CHERRY_EXCEPTION_ILS,
         note: 'דרשנו הסבר מאבי הירקן',
       },
@@ -156,7 +160,7 @@ const RULES: Rule[] = [
   },
   {
     id: 'rule-60',
-    type: 'הפרש מחיר 2-5%',
+    type: 'הפרש מחיר 2-10%',
     description: 'חריגה בינונית — דרושה סקירה של מנהל משמרת',
     approverRole: 'manager',
     action: 'queue_review',
@@ -193,6 +197,7 @@ const RULES: Rule[] = [
     ],
   },
 ];
+});
 
 export default function ApprovalsShowcase() {
   const t = useT(showcase);
@@ -235,7 +240,7 @@ export default function ApprovalsShowcase() {
             <div />
           </div>
 
-          {RULES.map((rule, idx) => (
+          {rules().map((rule, idx) => (
             <RuleRow key={rule.id} rule={rule} idx={idx} />
           ))}
         </div>
