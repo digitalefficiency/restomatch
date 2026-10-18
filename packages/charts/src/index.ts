@@ -1,4 +1,4 @@
-export { computeOwnerKpis, emptyKpis, type OwnerKpis } from './owner-kpis';
+export { computeOwnerKpis, emptyKpis, notZeroShortTwin, type OwnerKpis } from './owner-kpis';
 export { computeLeaks, type LeakRow, type ComputeLeaksOptions } from './leaks';
 export {
   computeSupplierScorecards,

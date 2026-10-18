@@ -18,6 +18,7 @@ import {
 } from '@restomatch/db';
 import { authedProcedure, financeProcedure, memberProcedure, router } from '../trpc';
 import { logActivity } from '../activity';
+import { notZeroShortTwin } from '@restomatch/charts';
 
 const ResolutionEnum = z.enum(['accepted', 'rejected', 'escalated']);
 
@@ -124,6 +125,7 @@ export const approvalsRouter = router({
           and(
             eq(discrepancies.restaurantId, ctx.session.restaurantId),
             inArray(discrepancies.resolutionStatus, ['open', 'escalated']),
+            notZeroShortTwin(),
             inArray(discrepancies.requiresRole, roles),
             cursorDate ? lt(discrepancies.createdAt, cursorDate) : undefined,
             input?.types?.length ? inArray(discrepancies.type, input.types) : undefined,

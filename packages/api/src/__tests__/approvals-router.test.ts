@@ -154,6 +154,39 @@ describe('approvals.myQueue', () => {
     expect(queue).toEqual([]);
   });
 
+  it('hides the ₪0 QTY_SHORT twin of a short delivery billed in full', async () => {
+    const s = await seed();
+    const [zero] = await db
+      .insert(discrepancies)
+      .values({
+        matchRunId: s.matchRunId,
+        restaurantId: s.restaurantId,
+        type: 'QTY_SHORT',
+        severity: 'warn',
+        deltaAmount: '0',
+        requiresRole: 'manager',
+        resolutionStatus: 'open',
+      })
+      .returning();
+    const [real] = await db
+      .insert(discrepancies)
+      .values({
+        matchRunId: s.matchRunId,
+        restaurantId: s.restaurantId,
+        type: 'QTY_SHORT',
+        severity: 'warn',
+        deltaAmount: '16',
+        requiresRole: 'manager',
+        resolutionStatus: 'open',
+      })
+      .returning();
+    const queue = await caller({ userId: s.managerId, restaurantId: s.restaurantId, role: 'manager' }).approvals.myQueue();
+    const ids = queue.map((q) => q.id);
+    expect(ids).not.toContain(zero!.id);
+    expect(ids).toContain(real!.id);
+    expect(ids).toContain(s.discrepancyManagerId);
+  });
+
   it('respects multi-tenant isolation', async () => {
     const s = await seed();
     const [other] = await db.insert(restaurants).values({ name: 'Other' }).returning();
