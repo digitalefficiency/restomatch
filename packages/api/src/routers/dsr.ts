@@ -10,7 +10,11 @@ import {
   leads,
   memberships,
   restaurants,
+  passwordResetTokens,
   sessions,
+  sql,
+  userCredentials,
+  userRecoveryCodes,
   users,
   verificationTokens,
   type Database,
@@ -247,6 +251,29 @@ export const dsrRouter = router({
       if (user.email) {
         await conn.delete(verificationTokens).where(eq(verificationTokens.identifier, user.email));
       }
+      // Sessions are JWTs, so deleting `sessions` rows alone revokes nothing:
+      // bump token_version (every live JWT dies on its next request) and erase
+      // the credential material (argon2 hash, TOTP secret, recovery codes,
+      // reset tokens) — personal security data must not outlive the account.
+      await conn
+        .insert(userCredentials)
+        .values({ userId, tokenVersion: 1 })
+        .onConflictDoUpdate({
+          target: userCredentials.userId,
+          set: {
+            tokenVersion: sql`${userCredentials.tokenVersion} + 1`,
+            passwordHash: null,
+            passwordUpdatedAt: null,
+            totpSecretEnc: null,
+            totpEnabledAt: null,
+            totpLastStep: null,
+            twoFactorTicketHash: null,
+            twoFactorTicketExpires: null,
+            updatedAt: new Date(),
+          },
+        });
+      await conn.delete(userRecoveryCodes).where(eq(userRecoveryCodes.userId, userId));
+      await conn.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, userId));
 
       await recordDsr(conn, {
         subjectType: 'user',

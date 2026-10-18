@@ -1,5 +1,5 @@
 import { DrizzleAdapter } from '@auth/drizzle-adapter';
-import { headers } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import NextAuth, { type DefaultSession } from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
 import Nodemailer from 'next-auth/providers/nodemailer';
@@ -20,6 +20,7 @@ import { authCookieConfig, resolveUseSecureCookies } from './lib/authCookies';
 import { authDb } from './lib/authDb';
 import { isEmailConfigured, sendEmail } from './lib/email';
 import { magicLinkEmail } from './lib/emailTemplates';
+import { LOCALE_COOKIE, resolveLocale, type Locale } from './lib/i18n/config';
 import { authorizeCredentials, getSessionSecurityState } from './lib/passwords';
 import { consumeTwoFactorTicket } from './lib/totp';
 import { enforceLoginLimit, enforceMagicLinkLimit, trustedProxyHops } from './lib/rateLimit';
@@ -74,6 +75,15 @@ const adapter = DrizzleAdapter(authDb, {
   authenticatorsTable: authenticators,
 });
 
+/** The requester's UI language (rm_locale) — the magic-link email follows it. */
+async function requestLocale(): Promise<Locale> {
+  try {
+    return resolveLocale((await cookies()).get(LOCALE_COOKIE)?.value);
+  } catch {
+    return 'he'; // outside a request scope (never in practice)
+  }
+}
+
 async function sendMagicLink({
   identifier,
   url,
@@ -86,9 +96,9 @@ async function sendMagicLink({
   // stays available.
   const rl = await enforceMagicLinkLimit(identifier);
   if (!rl.allowed) {
-    throw new Error(
-      `יותר מדי בקשות התחברות לכתובת הזו. נסו שוב בעוד ${Math.ceil(rl.resetSec / 60)} דקות.`,
-    );
+    // Surfaces on /login as ?error=EmailSignin (translated there) — this text
+    // is only the server-log message.
+    throw new Error(`magic-link rate limit: retry in ${Math.ceil(rl.resetSec / 60)} min`);
   }
 
   // Dev / preview / no provider: print the link to stdout (and the e2e file
@@ -110,7 +120,7 @@ async function sendMagicLink({
     return;
   }
 
-  const { subject, html, text } = magicLinkEmail({ url });
+  const { subject, html, text } = magicLinkEmail({ url, locale: await requestLocale() });
   await sendEmail({ to: identifier, subject, html, text });
 }
 

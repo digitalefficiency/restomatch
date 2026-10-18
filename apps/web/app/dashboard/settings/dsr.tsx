@@ -4,6 +4,10 @@ import { useState } from 'react';
 import { Download, ShieldX } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
 import { Button } from '@/lib/components';
+import { useLocale, useT } from '@/lib/i18n/client';
+import { settings } from '@/lib/i18n/messages/settings';
+import { localizeServerError } from '@/lib/serverErrors';
+import { signOutAfterDeletionAction } from './dsr-actions';
 
 /**
  * Data-subject-rights self-service (E.6). Lets the signed-in user export a
@@ -11,6 +15,8 @@ import { Button } from '@/lib/components';
  * account. Both call owner-gated DSR mutations and are audited server-side.
  */
 export function DsrSection() {
+  const t = useT(settings);
+  const locale = useLocale();
   const [error, setError] = useState<string | null>(null);
   const [deleted, setDeleted] = useState(false);
 
@@ -27,15 +33,18 @@ export function DsrSection() {
       a.click();
       URL.revokeObjectURL(url);
     },
-    onError: (e) => setError(e.message),
+    onError: (e) => setError(localizeServerError(e, locale, t('dsr.failed'))),
   });
 
   const deleteMutation = trpc.dsr.deleteMyAccount.useMutation({
     onSuccess: () => {
       setError(null);
       setDeleted(true);
+      // The JWT is already revoked server-side (token_version bump); end this
+      // device's cookie too so the user isn't left on a dead session.
+      void signOutAfterDeletionAction();
     },
-    onError: (e) => setError(e.message),
+    onError: (e) => setError(localizeServerError(e, locale, t('dsr.failed'))),
   });
 
   return (
@@ -46,8 +55,8 @@ export function DsrSection() {
           loading={exportMutation.isPending}
           onClick={() => exportMutation.mutate()}
         >
-          <Download className="ml-1.5 h-4 w-4" aria-hidden="true" />
-          ייצוא הנתונים שלי
+          <Download className="me-1.5 h-4 w-4" aria-hidden="true" />
+          {t('dsr.export')}
         </Button>
         <Button
           variant="danger"
@@ -55,40 +64,37 @@ export function DsrSection() {
           disabled={deleted}
           onClick={() => {
             if (
-              window.confirm(
-                'מחיקת החשבון תהפוך את פרטי הזיהוי שלכם לאנונימיים ותנתק אתכם. להמשיך?',
-              )
+              window.confirm(t('dsr.confirmDelete'))
             ) {
               deleteMutation.mutate({ confirm: true });
             }
           }}
         >
-          <ShieldX className="ml-1.5 h-4 w-4" aria-hidden="true" />
-          מחיקת החשבון שלי
+          <ShieldX className="me-1.5 h-4 w-4" aria-hidden="true" />
+          {t('dsr.delete')}
         </Button>
       </div>
 
       {deleted ? (
         <p
           role="status"
-          className="rounded-md border-r-4 border-primary bg-primary/5 px-3 py-2 text-sm text-ink"
+          className="rounded-md border-s-4 border-primary bg-primary/5 px-3 py-2 text-sm text-ink"
         >
-          הבקשה בוצעה. פרטי הזיהוי שלכם הוסרו — מומלץ להתנתק כעת.
+          {t('dsr.deleted')}
         </p>
       ) : null}
 
       {error ? (
         <p
           role="alert"
-          className="rounded-md border-r-4 border-danger bg-danger/5 px-3 py-2 text-sm text-danger"
+          className="rounded-md border-s-4 border-danger bg-danger/5 px-3 py-2 text-sm text-danger"
         >
           {error}
         </p>
       ) : null}
 
       <p className="text-xs leading-relaxed text-subtle">
-        הייצוא כולל את פרטי החשבון, החברויות והפעילות שלכם. אם אתם הבעלים היחידים של
-        מסעדה עם חברים נוספים, יש להעביר תחילה את הבעלות לפני מחיקת החשבון.
+        {t('dsr.note')}
       </p>
     </div>
   );

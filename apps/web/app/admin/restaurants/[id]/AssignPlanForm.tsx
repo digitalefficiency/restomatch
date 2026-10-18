@@ -4,13 +4,12 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { trpc } from '@/lib/trpc/client';
 import { Button } from '@/lib/components';
+import { useLocale, useT } from '@/lib/i18n/client';
+import { admin } from '@/lib/i18n/messages/admin';
+import { localizeServerError } from '@/lib/serverErrors';
 
-const PLANS = [
-  { key: 'trial', label: 'ניסיון' },
-  { key: 'basic', label: 'בסיס' },
-  { key: 'pro', label: 'מקצועי' },
-  { key: 'chain', label: 'רשת' },
-] as const;
+const PLANS = ['trial', 'basic', 'pro', 'chain'] as const;
+type PlanKey = (typeof PLANS)[number];
 
 export function AssignPlanForm({
   restaurantId,
@@ -20,8 +19,10 @@ export function AssignPlanForm({
   currentPlan: string | null;
 }) {
   const router = useRouter();
-  const [plan, setPlan] = useState<(typeof PLANS)[number]['key']>(
-    (currentPlan as (typeof PLANS)[number]['key']) ?? 'pro',
+  const t = useT(admin);
+  const locale = useLocale();
+  const [plan, setPlan] = useState<PlanKey>(
+    PLANS.includes(currentPlan as PlanKey) ? (currentPlan as PlanKey) : 'pro',
   );
   const assign = trpc.admin.assignPlan.useMutation({
     onSuccess: () => router.refresh(),
@@ -29,18 +30,22 @@ export function AssignPlanForm({
 
   return (
     <div>
-      <label className="mb-2 block font-mono text-xs font-medium uppercase tracking-wider text-subtle">
-        שיוך תוכנית
+      <label
+        htmlFor="assign-plan"
+        className="mb-2 block font-mono text-xs font-medium uppercase tracking-wider text-subtle"
+      >
+        {t('assign.label')}
       </label>
       <div className="flex items-center gap-2">
         <select
+          id="assign-plan"
           value={plan}
-          onChange={(e) => setPlan(e.target.value as (typeof PLANS)[number]['key'])}
+          onChange={(e) => setPlan(e.target.value as PlanKey)}
           className="rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm text-ink transition-colors focus:border-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           {PLANS.map((p) => (
-            <option key={p.key} value={p.key}>
-              {p.label}
+            <option key={p} value={p}>
+              {t(`plans.${p}`)}
             </option>
           ))}
         </select>
@@ -49,13 +54,13 @@ export function AssignPlanForm({
           onClick={() => assign.mutate({ restaurantId, planKey: plan })}
           disabled={assign.isPending}
         >
-          {assign.isPending ? 'משייך…' : 'שייך'}
+          {assign.isPending ? t('assign.pending') : t('assign.submit')}
         </Button>
       </div>
       {assign.error ? (
-        <p className="mt-2 text-xs text-danger">{assign.error.message}</p>
+        <p className="mt-2 text-xs text-danger">{localizeServerError(assign.error, locale, t('generic'))}</p>
       ) : null}
-      {assign.isSuccess ? <p className="mt-2 text-xs text-primary">נשמר ✓</p> : null}
+      {assign.isSuccess ? <p className="mt-2 text-xs text-primary">{t('assign.saved')}</p> : null}
     </div>
   );
 }

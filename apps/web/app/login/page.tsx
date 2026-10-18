@@ -4,25 +4,54 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { signIn } from '@/auth';
 import { Button, Card, Field, Input } from '@/lib/components';
+import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
+import { auth as authMessages } from '@/lib/i18n/messages/auth';
+import { getT } from '@/lib/i18n/server';
+import { safeRelativePath } from '@/lib/safeRedirect';
 
 interface PageProps {
-  searchParams: Promise<{ callbackUrl?: string; error?: string; email?: string; sent?: string }>;
+  searchParams: Promise<{
+    callbackUrl?: string;
+    error?: string;
+    email?: string;
+    sent?: string;
+    reset?: string;
+    signedOut?: string;
+  }>;
 }
 
-/** Only allow same-origin relative paths as a post-login destination. */
-function safeCallback(raw: string | undefined): string {
-  if (!raw) return '/dashboard';
-  // Reject absolute URLs, protocol-relative (//host) and backslash variants.
-  if (!raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\')) return '/dashboard';
-  return raw;
+/** Auth.js / our own `?error=` codes → message keys. Unknown codes → generic. */
+function errorKey(error: string) {
+  switch (error) {
+    case 'Verification':
+      return 'login.errors.verification' as const;
+    case 'CredentialsSignin':
+      return 'login.errors.credentials' as const;
+    case 'rate':
+      return 'login.errors.rate' as const;
+    case 'EmailSignin':
+    case 'EmailSignInError':
+      return 'login.errors.emailSignin' as const;
+    default:
+      return 'login.errors.generic' as const;
+  }
 }
 
 export default async function LoginPage({ searchParams }: PageProps) {
-  const { callbackUrl, error, email: invitedEmail, sent } = await searchParams;
-  const redirectTo = safeCallback(callbackUrl);
+  const { callbackUrl, error, email: invitedEmail, sent, reset, signedOut } = await searchParams;
+  const t = await getT(authMessages);
+  // Open-redirect guard (D1.7) — the shared, unit-tested same-origin path check.
+  const redirectTo = safeRelativePath(callbackUrl);
   // When arriving from an invite link, the address is fixed (acceptInvite is
   // bound to it) — prefill + lock it so an alias/typo can't dead-end the accept.
   const lockedEmail = invitedEmail?.trim() || undefined;
+  // Keep callbackUrl (e.g. the invite token) across an error round-trip.
+  const back = (code: string) => {
+    const qs = new URLSearchParams({ error: code });
+    if (redirectTo !== '/dashboard') qs.set('callbackUrl', redirectTo);
+    if (lockedEmail) qs.set('email', lockedEmail);
+    return `/login?${qs.toString()}`;
+  };
 
   // Password login (PRIMARY). signIn() handles CSRF internally — never hand-roll
   // a POST to the callback. On bad credentials Auth.js throws CredentialsSignin;
@@ -32,72 +61,69 @@ export default async function LoginPage({ searchParams }: PageProps) {
     const email = String(formData.get('email') ?? '').trim();
     const password = String(formData.get('password') ?? '');
     const rememberMe = formData.get('rememberMe') === 'on';
-    if (!email || !password) redirect('/login?error=CredentialsSignin');
-    // The email+IP login throttle now lives INSIDE the Credentials authorize()
+    if (!email || !password) redirect(back('CredentialsSignin'));
+    // The email+IP login throttle lives INSIDE the Credentials authorize()
     // callback (auth.ts) so it is enforced on EVERY entry point — including a
-    // script POSTing straight to /api/auth/callback/credentials, which this page
-    // action can't see. Enforcing it here too would double-count the limiter and
-    // halve the ceiling for legitimate users, so it is intentionally not repeated.
-    // A throttled/wrong attempt surfaces the same uniform CredentialsSignin.
+    // script POSTing straight to /api/auth/callback/credentials. Enforcing it
+    // here too would double-count the limiter, so it is intentionally not
+    // repeated. A throttled/wrong attempt surfaces the same CredentialsSignin.
     try {
       await signIn('credentials', { email, password, rememberMe, redirectTo });
     } catch (err) {
-      if (err instanceof AuthError) redirect('/login?error=CredentialsSignin');
+      if (err instanceof AuthError) redirect(back('CredentialsSignin'));
       throw err; // re-throw the success NEXT_REDIRECT
     }
   }
 
   // Magic-link (BACKUP). Always available — every existing user (who has no
-  // password) keeps logging in this way.
+  // password) keeps logging in this way. A throttled send (sendMagicLink throws)
+  // surfaces as an AuthError → friendly message instead of the error page.
   async function magicLinkAction(formData: FormData) {
     'use server';
     const email = String(formData.get('email') ?? '').trim();
     if (!email) return;
-    // redirectTo was already validated as a same-origin relative path via
-    // safeCallback() (open-redirect guard, D1.7) — same guarded value the
-    // password action uses.
-    await signIn('nodemailer', { email, redirectTo });
+    try {
+      await signIn('nodemailer', { email, redirectTo });
+    } catch (err) {
+      if (err instanceof AuthError) redirect(back('EmailSignin'));
+      throw err; // the success NEXT_REDIRECT → /login/check-email
+    }
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center p-6">
+    <main className="relative flex min-h-screen items-center justify-center p-6">
+      <div className="absolute end-4 top-4">
+        <LocaleSwitcher />
+      </div>
       <Card elevated flow padding="lg" className="w-full max-w-md">
-        <h1 className="mb-2 text-2xl font-bold text-ink">כניסה ל-RestoMatch</h1>
-        <p className="mb-6 text-sm text-muted">התחברו עם הסיסמה שלכם, או קבלו קישור-קסם למייל.</p>
+        <h1 className="mb-2 text-2xl font-bold text-ink">{t('login.title')}</h1>
+        <p className="mb-6 text-sm text-muted">{t('login.subtitle')}</p>
 
         {error ? (
           <div
             role="alert"
-            className="mb-4 flex items-start gap-2 rounded-md border-r-4 border-danger bg-danger/5 px-3 py-2 text-sm text-danger"
+            className="mb-4 flex items-start gap-2 rounded-md border-s-4 border-danger bg-danger/5 px-3 py-2 text-sm text-danger"
           >
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-            <span>
-              {error === 'Verification'
-                ? 'הקישור פג תוקף או שכבר נעשה בו שימוש. נסו שוב.'
-                : error === 'CredentialsSignin'
-                  ? 'אימייל או סיסמה שגויים.'
-                  : error === 'rate'
-                    ? 'יותר מדי ניסיונות. נסו שוב מאוחר יותר.'
-                    : 'אירעה שגיאה בהתחברות. נסו שוב.'}
-            </span>
+            <span>{t(errorKey(error))}</span>
           </div>
         ) : null}
 
-        {sent ? (
+        {sent || reset || signedOut ? (
           <div
             role="status"
-            className="mb-4 rounded-md border-r-4 border-success bg-success/5 px-3 py-2 text-sm text-success"
+            className="mb-4 rounded-md border-s-4 border-success bg-success/5 px-3 py-2 text-sm text-success"
           >
-            שלחנו קישור התחברות למייל. בדקו את תיבת הדואר.
+            {reset ? t('login.resetDone') : signedOut ? t('login.signedOut') : t('login.sent')}
           </div>
         ) : null}
 
         {/* PRIMARY — email + password */}
         <form action={passwordAction} className="space-y-4">
           <Field
-            label="כתובת מייל"
+            label={t('login.email')}
             htmlFor="email"
-            hint={lockedEmail ? 'ההזמנה נשלחה לכתובת הזו — התחברו איתה כדי לקבל גישה.' : undefined}
+            hint={lockedEmail ? t('login.invitedHint') : undefined}
           >
             <Input
               id="email"
@@ -105,56 +131,59 @@ export default async function LoginPage({ searchParams }: PageProps) {
               type="email"
               required
               autoComplete="email"
-              placeholder="you@restaurant.co.il"
+              dir="ltr"
+              placeholder={t('login.emailPlaceholder')}
               defaultValue={lockedEmail}
               readOnly={!!lockedEmail}
             />
           </Field>
-          <Field label="סיסמה" htmlFor="password">
+          <Field label={t('login.password')} htmlFor="password">
             <Input
               id="password"
               name="password"
               type="password"
               required
               autoComplete="current-password"
+              dir="ltr"
               placeholder="••••••••"
             />
           </Field>
           <label className="flex items-center gap-2 text-sm text-muted">
             <input type="checkbox" name="rememberMe" className="h-4 w-4 accent-brand" />
-            זכור אותי במכשיר הזה
+            {t('login.rememberMe')}
           </label>
           <Button type="submit" className="w-full">
-            כניסה
+            {t('login.submit')}
           </Button>
         </form>
 
         <div className="my-5 flex items-center gap-3 text-xs text-subtle">
           <span className="h-px flex-1 bg-border" />
-          או
+          {t('login.or')}
           <span className="h-px flex-1 bg-border" />
         </div>
 
         {/* BACKUP — magic link */}
         <form action={magicLinkAction} className="space-y-3">
           <Input
-            aria-label="כתובת מייל לקישור התחברות"
+            aria-label={t('login.magicLabel')}
             name="email"
             type="email"
             required
             autoComplete="email"
-            placeholder="you@restaurant.co.il"
+            dir="ltr"
+            placeholder={t('login.emailPlaceholder')}
             defaultValue={lockedEmail}
             readOnly={!!lockedEmail}
           />
           <Button type="submit" variant="secondary" className="w-full">
-            שלחו לי קישור התחברות
+            {t('login.magicSubmit')}
           </Button>
         </form>
 
         <p className="mt-6 text-center text-xs text-subtle">
           <Link href="/reset" className="text-brand hover:underline">
-            שכחתם סיסמה?
+            {t('login.forgot')}
           </Link>
         </p>
       </Card>

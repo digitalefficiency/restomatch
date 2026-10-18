@@ -4,15 +4,13 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { trpc } from '@/lib/trpc/client';
 import { Button } from '@/lib/components';
+import { useLocale, useT } from '@/lib/i18n/client';
+import { admin } from '@/lib/i18n/messages/admin';
+import { localizeServerError } from '@/lib/serverErrors';
 
-const FEATURES = [
-  { key: 'integrations', label: 'אינטגרציות' },
-  { key: 'whatsapp_alerts', label: 'התראות וואטסאפ' },
-  { key: 'advanced_analytics', label: 'אנליטיקה מתקדמת' },
-  { key: 'accounting_export', label: 'ייצוא הנהלת חשבונות' },
-] as const;
+const FEATURES = ['integrations', 'whatsapp_alerts', 'advanced_analytics', 'accounting_export'] as const;
 
-type FeatureKey = (typeof FEATURES)[number]['key'];
+type FeatureKey = (typeof FEATURES)[number];
 
 interface Overrides {
   limits?: {
@@ -26,6 +24,8 @@ interface Overrides {
 /** Admin override of a tenant's plan limits/features. Empty number = plan default. */
 export function OverridesForm({ restaurantId, current }: { restaurantId: string; current: Overrides }) {
   const router = useRouter();
+  const t = useT(admin);
+  const locale = useLocale();
   const [invoices, setInvoices] = useState(
     current.limits?.invoicesPerMonth != null ? String(current.limits.invoicesPerMonth) : '',
   );
@@ -70,38 +70,40 @@ export function OverridesForm({ restaurantId, current }: { restaurantId: string;
   return (
     <div className="mt-5 border-t border-line pt-5">
       <label className="mb-2 block font-mono text-xs font-medium uppercase tracking-wider text-subtle">
-        הרחבות (override) — מספר ריק = ברירת מחדל של התוכנית
+        {t('overrides.label')}
       </label>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div>
-          <span className="mb-1 block text-xs text-subtle">חשבוניות/חודש</span>
+          <span className="mb-1 block text-xs text-subtle">{t('overrides.invoices')}</span>
           <input className={inputCls} inputMode="numeric" value={invoices} onChange={(e) => setInvoices(e.target.value)} />
         </div>
         <div>
-          <span className="mb-1 block text-xs text-subtle">מסעדות</span>
+          <span className="mb-1 block text-xs text-subtle">{t('overrides.restaurants')}</span>
           <input className={inputCls} inputMode="numeric" value={restaurants} onChange={(e) => setRestaurants(e.target.value)} />
         </div>
         <div>
-          <span className="mb-1 block text-xs text-subtle">מושבים/מסעדה</span>
+          <span className="mb-1 block text-xs text-subtle">{t('overrides.seats')}</span>
           <input className={inputCls} inputMode="numeric" value={seats} onChange={(e) => setSeats(e.target.value)} />
         </div>
       </div>
 
       <div className="mt-3 flex flex-wrap gap-3">
         {FEATURES.map((f) => (
-          <label key={f.key} className="flex items-center gap-1.5 text-sm text-ink">
-            <input type="checkbox" checked={features.includes(f.key)} onChange={() => toggle(f.key)} />
-            {f.label}
+          <label key={f} className="flex items-center gap-1.5 text-sm text-ink">
+            <input type="checkbox" checked={features.includes(f)} onChange={() => toggle(f)} />
+            {t(`overrides.features.${f}`)}
           </label>
         ))}
       </div>
 
       <div className="mt-4 flex items-center gap-2">
         <Button size="sm" onClick={submit} disabled={save.isPending}>
-          {save.isPending ? 'שומר…' : 'שמור הרחבות'}
+          {save.isPending ? t('overrides.saving') : t('overrides.save')}
         </Button>
-        {save.error ? <span className="text-xs text-danger">{save.error.message}</span> : null}
-        {save.isSuccess ? <span className="text-xs text-primary">נשמר ✓</span> : null}
+        {save.error ? (
+          <span className="text-xs text-danger">{localizeServerError(save.error, locale, t('generic'))}</span>
+        ) : null}
+        {save.isSuccess ? <span className="text-xs text-primary">{t('overrides.saved')}</span> : null}
       </div>
     </div>
   );
