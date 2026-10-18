@@ -35,3 +35,12 @@ describe('scan URL pinning (S4 / A.8)', () => {
     expect(isAllowedScanUrl('https://example.com/invoice.jpg', {} as NodeJS.ProcessEnv)).toBe(true);
   });
 });
+
+describe('isAllowedScanUrl without a storage prefix (security review)', () => {
+  it('fails CLOSED in production when no Supabase URL is configured', () => {
+    expect(isAllowedScanUrl('http://169.254.169.254/latest/meta-data', { NODE_ENV: 'production' })).toBe(false);
+  });
+  it('stays open only for local/test setups without storage', () => {
+    expect(isAllowedScanUrl('http://localhost:3000/scans/x/file', { NODE_ENV: 'development' })).toBe(true);
+  });
+});

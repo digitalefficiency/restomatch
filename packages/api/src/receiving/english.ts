@@ -53,6 +53,34 @@ export function __setReceivingTranslator(t: CompositeTranslator | null): void {
   defaultTranslator = t;
 }
 
+/**
+ * Cost guard: ensureEnglish is callable by every member (and pages call it on
+ * render), so cap the calls per restaurant per hour that may reach the paid
+ * Claude leg; past the cap a call is glossary-only (lines still render, in
+ * Hebrew where untranslated). Process-local — defence in depth on top of the
+ * translator's own miss cache; a shared Redis limiter is the durable version.
+ */
+export const CLAUDE_CALLS_PER_RESTAURANT_PER_HOUR = 30;
+const HOUR_MS = 60 * 60 * 1000;
+const claudeBudget = new Map<string, { windowStart: number; count: number }>();
+
+export function takeClaudeBudget(restaurantId: string, now: number = Date.now()): boolean {
+  const slot = claudeBudget.get(restaurantId);
+  if (!slot || now - slot.windowStart >= HOUR_MS) {
+    if (claudeBudget.size >= 10_000) claudeBudget.clear();
+    claudeBudget.set(restaurantId, { windowStart: now, count: 1 });
+    return true;
+  }
+  if (slot.count >= CLAUDE_CALLS_PER_RESTAURANT_PER_HOUR) return false;
+  slot.count += 1;
+  return true;
+}
+
+/** Test seam. */
+export function __resetClaudeBudget(): void {
+  claudeBudget.clear();
+}
+
 export async function fillEnglishNames(
   db: Database,
   restaurantId: string,
@@ -134,7 +162,9 @@ export async function fillEnglishNames(
   const texts = [...poLineRows, ...invLineRows].map((r) => r.text).concat(productRows.map((p) => p.name));
   if (texts.length === 0) return result;
 
-  const translated = await translator.translateMany(texts);
+  const allowClaude = translator.hasClaude ? takeClaudeBudget(restaurantId) : false;
+  result.claude = allowClaude;
+  const translated = await translator.translateMany(texts, { allowClaude });
   const enOf = (text: string): string | null => translated.get(text.trim())?.en ?? null;
 
   // Group row ids by English text → one UPDATE per distinct name.

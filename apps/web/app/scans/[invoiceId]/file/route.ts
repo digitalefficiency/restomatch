@@ -17,7 +17,11 @@ export async function GET(
   const { invoiceId } = await params;
   const session = await auth();
   const restaurantId = session?.user?.restaurantId ?? null;
-  if (!session?.user?.id || !restaurantId) return new Response('Not found', { status: 404 });
+  // A 2FA-pending session holds only the first factor — never serve tenant files
+  // to it (middleware also redirects it; this route must not depend on that).
+  if (!session?.user?.id || session.user.twoFactorPending || !restaurantId) {
+    return new Response('Not found', { status: 404 });
+  }
 
   const scan = await readLocalScan(restaurantId, invoiceId);
   if (!scan) return new Response('Not found', { status: 404 });
