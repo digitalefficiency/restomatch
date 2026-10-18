@@ -43,6 +43,8 @@ export interface ReconciliationLine {
   invoiceUnit: string | null;
   poUnitPrice: number | null;
   invoiceUnitPrice: number | null;
+  /** Line total as printed on the invoice (discounts included), when read. */
+  invoiceLineTotal?: number | null;
   status: LineStatus;
   deltaIls: number;
 }
