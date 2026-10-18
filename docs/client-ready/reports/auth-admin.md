@@ -223,3 +223,39 @@ Adversarial seed: **RIVAL**, a restaurant on the *same billing account*, owned b
 | Interplay with `/api/session/refresh` | ✅ `unstable_update({})` keeps the current branch, and also drops a removed one |
 
 Proposal (not fixed; it's in the shared auth/team code): on member removal or role change, bump a per-user membership epoch (or `token_version` for the removed user) so the 10-min window closes immediately.
+
+### Cross-QA: S15 wave-1 growth (PR #44, `claude/wave1-growth` @ eff9961)
+Tested on a production build (`next start`, NODE_ENV=production) against a local DB. OCR used the stub (`LEAK_CHECK_ALLOW_SAMPLE=1`), so there was zero Claude spend. `TRUSTED_PROXY_HOPS=1` was set, and distinct client IPs were simulated via the right-most XFF entry. #44's own suites pass: api 142/142, web 43/43.
+
+**Findings (fixes go back to S15)**
+| # | Sev | Finding | Fix |
+|---|---|---|---|
+| W1 | **medium** | The site-wide 40/h submit cap is consumed **before** the proof of work is checked (`handlers.ts`: `enforceRateLimit('all', …)` runs before `verifyPow`). Verified: 40 junk POSTs with no solved PoW (8 IPs × 5, under the per-IP limit) → the next real prospect gets `503 budget_exhausted` for the hour. The lead magnet can be shut off with zero work. | Move the global cap after `verifyPow` + the single-use check (ideally right before `runLeakCheck`) |
+| W2 | low (defence in depth) | The migrations' `REVOKE ALL ON leak_check_sessions/leak_check_ocr_usage FROM restomatch_app` and `REVOKE UPDATE, DELETE ON referral_*` are **undone by `provision-rls`'s blanket grants** (it runs after migrate). Isolation still holds via RLS default-deny (verified: 0 rows visible, INSERT rejected, UPDATE/DELETE affect 0 rows, credits can't be minted). But it's one layer, not the intended two. | Exclude/re-revoke these tables in `rls.ts`' grants (immutable → human PR), or re-assert the revoke in `provision-rls` |
+| W3 | low (hygiene) | The PR modifies the committed **`dump.rdb`** (a Redis snapshot: rate-limit/session keys). It was ruled never-commit earlier. | Drop it from the PR; `git rm --cached` + `.gitignore` |
+| W4 | low | The 7-day hard delete only runs on the next submit. With no traffic, expired rows persist (reads filter on `expires_at`, so they're never served). | Schedule `purgeExpiredLeakChecks` (already a tracked follow-up) |
+
+**Verified ✅**
+- Foreign/no Origin → 403.
+- Gate off (`LEAK_CHECK_PUBLIC` unset) → page + API 404.
+- `TRUSTED_PROXY_HOPS=0` in prod → 503 fail-closed.
+- Chunked body → 411. A real 9 MB body → 413 in 34 ms, before parsing.
+- Text named `.pdf` → 415 (magic bytes). A >4 MB file → 413. 11 files → 400. 0 files → 400. Honeypot → fake success, nothing stored.
+- PoW: replayed / forged / unsolved / expired / low-difficulty (server-signed) → 403.
+- Per-IP 5/day (6th → 429). Per-email 3/day, with `+tag` aliases counted as the same mailbox.
+- Daily OCR budget (cap 3: 2 invoices OK, the next 2 → 503).
+- Signed result links: a swapped session id, an extended exp, a bad signature or an expired link are all rejected **identically** (same page, no data). A valid link shows only its own session.
+- Tenant role cannot see sandbox rows. An expired session is hard-deleted on the next submit.
+- Lead route: tampered → 400, foreign origin → 403, the same token twice → one lead row.
+- Claim:
+  - GET changes nothing.
+  - An email mismatch → failed.
+  - A cross-origin server-action replay → rejected. A cross-origin tRPC call → 403.
+  - A matching owner → claimed to their own restaurant.
+  - Another restaurant can't re-point it.
+  - The claimed list is tenant-scoped.
+  - A tampered token → `BAD_REQUEST` with only `appCode: leakCheck.invalidLink` + a Hebrew message, no stack/SQL.
+- Referral: own code → `referralSelf`; unknown → `referralInvalid`; a second redeem → `referralAlreadyRedeemed`; a restaurant >30 days old → rejected; a shared member → self-dealing blocked; an A↔B swap → blocked; the referred side sees `pending` with no credit; a pre-credited INSERT → RLS violation; a tenant sees only its own code.
+- `publicPaths` adds only `/leak-check` and `/api/leak-check` (prefix match is segment-bounded). Every route re-checks the gate, origin, limits and PoW; the claim page itself requires a signed-in owner.
+
+Accepted / by design: a sock-puppet referral from a second mailbox is possible, but credits fill only on conversion (payment). Prospect email is unverified at submit, but claiming requires signing in with that email.
