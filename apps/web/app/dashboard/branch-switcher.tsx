@@ -74,11 +74,12 @@ export function BranchSwitcher({
     setPendingId(id);
     startTransition(async () => {
       const res = await switchBranchAction(id);
-      // On success the action redirects; we only get here on failure.
-      if (res && !res.ok) {
-        toast.error(t('switcher.failed'));
-        setPendingId(null);
+      if (res.ok) {
+        window.location.assign('/dashboard');
+        return;
       }
+      toast.error(t('switcher.failed'));
+      setPendingId(null);
     });
   }
 

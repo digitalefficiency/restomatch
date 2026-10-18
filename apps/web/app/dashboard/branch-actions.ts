@@ -25,7 +25,7 @@ function errorOf(err: unknown): BranchActionError {
   return 'generic';
 }
 
-/** Make `restaurantId` the active branch, then land on its overview. */
+/** Make `restaurantId` the active branch (the client then lands on its overview). */
 export async function switchBranchAction(restaurantId: string): Promise<BranchActionResult> {
   const session = await auth();
   if (!session?.user?.id) redirect('/login');
@@ -37,7 +37,10 @@ export async function switchBranchAction(restaurantId: string): Promise<BranchAc
   }
   await unstable_update({ activeRestaurantId: restaurantId } as unknown as Parameters<typeof unstable_update>[0]);
   revalidatePath('/dashboard', 'layout');
-  redirect('/dashboard');
+  // The caller does a full document navigation to /dashboard (see
+  // BranchSwitcher / SwitchBranchButton): a server-action redirect relies on the RSC refetch
+  // that stalled in the production build (reports/chain.md).
+  return { ok: true };
 }
 
 export async function addBranchAction(input: {

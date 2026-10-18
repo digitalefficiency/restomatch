@@ -1,7 +1,6 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
-import { useTransition } from 'react';
+import { useState } from 'react';
 import { cn, Spinner } from '@/lib/components';
 import { useT } from '@/lib/i18n/client';
 import { chain } from '@/lib/i18n/messages/chain';
@@ -20,10 +19,15 @@ export function MonthSelector({
   previousMonth: string;
 }) {
   const t = useT(chain);
-  const router = useRouter();
-  const [pending, start] = useTransition();
-  const go = (m: string) =>
-    start(() => router.push(m === currentMonth ? '/dashboard/chain' : `/dashboard/chain?month=${m}`));
+  const [pending, setPending] = useState(false);
+  // A full document navigation, not router.push: in the production build a
+  // same-route soft navigation that only changes ?month= stalled on the RSC
+  // refetch (the server answered in ~100 ms; see reports/chain.md). The page is
+  // server-rendered either way, so this costs one HTML round-trip.
+  const go = (m: string) => {
+    setPending(true);
+    window.location.assign(m === currentMonth ? '/dashboard/chain' : `/dashboard/chain?month=${m}`);
+  };
   const chip = (active: boolean) =>
     cn(
       'rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
