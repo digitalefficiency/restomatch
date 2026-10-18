@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ReceiptText, Upload } from 'lucide-react';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
@@ -22,12 +22,16 @@ export function PosImport() {
   const tc = useT(components);
   const locale = useLocale();
   const toast = useToast();
-  const once = useSingleFlight();
+  // Separate guards: picking a new file while the last import is still settling
+  // must still preview it (one shared guard silently dropped that preview).
+  const oncePreview = useSingleFlight();
+  const onceImport = useSingleFlight();
   const utils = trpc.useUtils();
   const imports = trpc.integrations.posImports.useQuery();
   const preview = trpc.integrations.posPreview.useMutation();
   const doImport = trpc.integrations.posImport.useMutation();
   const [file, setFile] = useState<{ filename: string; base64: string } | null>(null);
+  const fileRef = useRef<typeof file>(null);
   const [result, setResult] = useState<Preview | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
 
@@ -48,8 +52,9 @@ export function PosImport() {
     if (f.size > MAX_POS_FILE_BYTES) return setFileError(t('pos.errors.TOO_LARGE'));
     try {
       const picked = { filename: f.name, base64: bytesToBase64(new Uint8Array(await f.arrayBuffer())) };
+      fileRef.current = picked;
       setFile(picked);
-      once(async () => {
+      oncePreview(async () => {
         try {
           setResult(await preview.mutateAsync(picked));
         } catch {
@@ -63,13 +68,18 @@ export function PosImport() {
 
   function save() {
     if (!file) return;
-    once(async () => {
+    const submitted = file;
+    onceImport(async () => {
       try {
-        const r = await doImport.mutateAsync(file);
+        const r = await doImport.mutateAsync(submitted);
         toast.success(t('pos.imported', { count: formatNumber(r.rowCount, locale), from: day(r.from!), to: day(r.to!) }));
         if (r.replacedRows > 0) toast.success(t('pos.replaced', { count: formatNumber(r.replacedRows, locale) }));
-        setFile(null);
-        setResult(null);
+        // Only clear what was imported: a file picked meanwhile stays.
+        if (fileRef.current === submitted) {
+          fileRef.current = null;
+          setFile(null);
+          setResult(null);
+        }
         await utils.integrations.posImports.invalidate();
       } catch (e) {
         toast.error(errorText(e));
