@@ -117,6 +117,7 @@ export {
   recipientsForRestaurant,
   MANAGER_ROLES,
   type RenderedEmail,
+  type EmailLocale,
   type Recipient,
   type Notifiers,
   type Notifier,

@@ -17,6 +17,7 @@ export {
   weeklyLeakReportEmail,
   endOfDayReportEmail,
   type RenderedEmail,
+  type EmailLocale,
   type EmailLayout,
 } from './templates';
 export {
