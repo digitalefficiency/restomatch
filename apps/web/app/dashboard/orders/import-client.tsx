@@ -1,10 +1,13 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Upload } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
-import { Button } from '@/lib/components';
+import { Button, friendlyError, useToast } from '@/lib/components';
+import { useT } from '@/lib/i18n/client';
+import { components } from '@/lib/i18n/messages/components';
+import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 
 /** base64 of the raw file bytes — matches importPo's Buffer.from(base64,'base64'). */
 async function fileToBase64(file: File): Promise<string> {
@@ -19,38 +22,47 @@ async function fileToBase64(file: File): Promise<string> {
 
 /** Upload a Zestt PO PDF → parse via Claude → land an order, then open it. */
 export function ZesttImportButton() {
+  const t = useT(ordersNs);
+  const tc = useT(components);
+  const toast = useToast();
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [error, setError] = useState<string | null>(null);
 
   const importPo = trpc.orders.importPo.useMutation({
     onSuccess: (res) => {
-      setError(null);
+      toast.success(t('import.imported'));
       router.push(`/dashboard/orders/${res.poId}`);
     },
-    onError: (e) => setError(e.message || 'הייבוא נכשל.'),
+    onError: (e) =>
+      toast.error(
+        friendlyError(e, tc, {
+          PRECONDITION_FAILED: t('import.notConfigured'),
+          BAD_REQUEST: t('import.badFile'),
+        }),
+      ),
   });
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = ''; // allow re-selecting the same file
     if (!file) return;
-    setError(null);
     try {
       const base64 = await fileToBase64(file);
       importPo.mutate({ platform: 'zestt', file: { filename: file.name, base64 } });
     } catch {
-      setError('קריאת הקובץ נכשלה.');
+      toast.error(t('import.readFailed'));
     }
   }
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <>
       <input
         ref={inputRef}
         type="file"
         accept="application/pdf,image/*"
         className="hidden"
+        tabIndex={-1}
+        aria-hidden="true"
         onChange={onFile}
       />
       <Button
@@ -59,9 +71,8 @@ export function ZesttImportButton() {
         loading={importPo.isPending}
         onClick={() => inputRef.current?.click()}
       >
-        <Upload className="h-4 w-4" /> ייבוא הזמנה (Zestt PDF)
+        <Upload className="h-4 w-4" aria-hidden="true" /> {t('import.button')}
       </Button>
-      {error && <span className="max-w-xs text-end text-xs text-danger">{error}</span>}
-    </div>
+    </>
   );
 }

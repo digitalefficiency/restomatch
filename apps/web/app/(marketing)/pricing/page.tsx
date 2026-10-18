@@ -15,7 +15,7 @@ export async function generateMetadata(): Promise<Metadata> {
     title: t('pricing.metaTitle'),
     description: t('pricing.metaDescription'),
     metadataBase,
-    alternates: alternatesFor('/pricing'),
+    alternates: alternatesFor('/pricing', t.locale),
     openGraph: { title: t('pricing.metaTitle'), description: t('pricing.metaDescription'), url: '/pricing' },
   };
 }
@@ -87,7 +87,7 @@ export default async function PricingPage() {
                 <span className="font-mono text-3xl font-extrabold tabular-nums tracking-tight text-ink">
                   {priceIls === 0 ? t('pricing.free') : formatIls(priceIls, { locale })}
                 </span>
-                {priceIls > 0 ? <span className="text-sm text-subtle">{t('pricing.perMonth')}</span> : null}
+                {priceIls > 0 ? <span className="text-sm text-muted">{t('pricing.perMonth')}</span> : null}
               </div>
 
               <Link
@@ -133,7 +133,7 @@ export default async function PricingPage() {
         </div>
       </div>
 
-      <p className="mt-8 text-center text-sm text-subtle">
+      <p className="mt-8 text-center text-sm text-muted">
         {t('pricing.footnote')}{' '}
         <Link href="/#lead" className="font-medium text-primary hover:underline">
           {t('pricing.footnoteLink')}

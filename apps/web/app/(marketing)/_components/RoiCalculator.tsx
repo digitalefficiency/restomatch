@@ -37,7 +37,7 @@ export function RoiCalculator({ proPriceIls }: { proPriceIls: number }) {
             {t('roi.monthly')}
           </label>
           <div className="relative">
-            <span className="pointer-events-none absolute inset-y-0 start-3 flex items-center font-mono text-subtle">
+            <span className="pointer-events-none absolute inset-y-0 start-3 flex items-center font-mono text-muted">
               ₪
             </span>
             <input
@@ -54,6 +54,7 @@ export function RoiCalculator({ proPriceIls }: { proPriceIls: number }) {
           <input
             type="range"
             aria-label={t('roi.monthly')}
+            aria-valuetext={formatIls(monthly, { locale })}
             min={30_000}
             max={700_000}
             step={5_000}
@@ -81,7 +82,7 @@ export function RoiCalculator({ proPriceIls }: { proPriceIls: number }) {
             className="w-full cursor-pointer accent-primary"
             aria-valuetext={t('roi.leakValue', { pct: leakPct.toFixed(1) })}
           />
-          <div className="mt-1 flex justify-between font-mono text-xs tabular-nums text-subtle">
+          <div className="mt-1 flex justify-between font-mono text-xs tabular-nums text-muted">
             <span>{pct(0.5)}</span>
             <span>{pct(5, 0)}</span>
           </div>
@@ -89,7 +90,11 @@ export function RoiCalculator({ proPriceIls }: { proPriceIls: number }) {
         </div>
       </div>
 
-      <div className="flex flex-col gap-4" aria-live="polite">
+      <div className="flex flex-col gap-4">
+        {/* One concise live summary for screen readers instead of re-reading the cards. */}
+        <p className="sr-only" aria-live="polite" aria-atomic="true">
+          {t('roi.srSummary', { month: formatIls(monthlyLeak, { locale }), year: formatIls(annualLeak, { locale }) })}
+        </p>
         <div className="relative overflow-hidden rounded-2xl border border-danger/25 bg-danger/[0.08] p-5 shadow-glow-danger">
           <span aria-hidden="true" className="absolute inset-y-0 start-0 w-0.5 leak-gradient" />
           <div className="flex items-center gap-2 text-danger">
@@ -121,7 +126,7 @@ export function RoiCalculator({ proPriceIls }: { proPriceIls: number }) {
           </p>
         </div>
 
-        <p className="text-xs leading-relaxed text-subtle">{t('roi.disclaimer')}</p>
+        <p className="text-xs leading-relaxed text-muted">{t('roi.disclaimer')}</p>
       </div>
     </div>
   );

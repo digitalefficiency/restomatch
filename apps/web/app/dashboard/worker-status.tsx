@@ -1,4 +1,7 @@
+import { AlertTriangle } from 'lucide-react';
 import { getRedis } from '@/lib/redis';
+import { getT } from '@/lib/i18n/server';
+import { nav } from '@/lib/i18n/messages/nav';
 import { evaluateHeartbeat, WORKER_HEARTBEAT_KEY } from '@/lib/workerHeartbeat';
 
 /**
@@ -18,15 +21,18 @@ export async function WorkerStatusBanner() {
   }
   const status = evaluateHeartbeat(raw);
   if (status.state === 'ok') return null;
+  const t = await getT(nav);
   const minutes = status.state === 'stale' ? Math.round(status.ageMs / 60_000) : null;
   return (
     <div
       role="status"
-      className="mb-6 rounded-lg border border-warn/40 bg-warn/10 px-4 py-3 text-sm text-ink"
+      className="mb-6 flex items-start gap-3 rounded-xl border border-warn/40 bg-warn/10 px-4 py-3 text-sm text-ink"
     >
-      <strong className="font-semibold">מנוע העיבוד לא זמין כרגע.</strong>{' '}
-      חשבוניות שתעלו יישמרו ויעברו OCR והתאמה ברגע שהוא יחזור
-      {minutes !== null ? ` (פעימה אחרונה לפני ${minutes} דק׳)` : ''}. הבעלים קיבל התראה.
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warn" aria-hidden="true" />
+      <p>
+        <strong className="font-semibold">{t('worker.title')}</strong> {t('worker.body')}
+        {minutes !== null ? <> {t('worker.lastBeat', { minutes })}</> : null} {t('worker.ownerNotified')}
+      </p>
     </div>
   );
 }

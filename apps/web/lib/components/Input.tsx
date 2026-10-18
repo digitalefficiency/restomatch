@@ -14,6 +14,11 @@ export function Textarea({
   return <textarea className={cn(fieldBase, className)} {...rest} />;
 }
 
+/** Native select with the same field chrome as Input (keyboard + screen-reader friendly). */
+export function Select({ className, ...rest }: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return <select className={cn(fieldBase, 'pe-8', className)} {...rest} />;
+}
+
 /** Label + control wrapper with consistent spacing and optional hint. */
 export function Field({
   label,

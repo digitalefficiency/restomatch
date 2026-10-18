@@ -178,6 +178,9 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'team.updateMemberRole': 'attack',
   'team.removeMember': 'attack',
   'team.acceptInvite': 'attack',
+  'team.setMemberLocale': 'attack',
+  'settings.myLocale': 'isolation',
+  'settings.setMyLocale': 'attack',
   // Catalog SKU→product mapping queue (member reads / managerProcedure confirm).
   // Lists are restaurant-scoped even with a foreign supplierId filter; confirm
   // calls assertSupplierOwned before any write. See the mapping.* block below.
@@ -1164,6 +1167,28 @@ describe('products router: foreign-id attacks (A → B)', () => {
     expect(row?.canonicalName).toBe('עגבניה B');
   });
 
+  it('products.update cannot set the English name of a foreign product (B unchanged)', async () => {
+    await expect(
+      callerFor(A).products.update({ productId: B.productId, patch: { nameEn: 'HIJACK' } }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [row] = await db
+      .select({ nameEn: products.nameEn })
+      .from(products)
+      .where(eq(products.id, B.productId));
+    expect(row?.nameEn ?? null).toBeNull();
+  });
+
+  it('suppliers.update cannot set the English name of a foreign supplier (B unchanged)', async () => {
+    await expect(
+      callerFor(A).suppliers.update({ supplierId: B.supplierId, patch: { nameEn: 'HIJACK' } }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [row] = await db
+      .select({ nameEn: suppliers.nameEn })
+      .from(suppliers)
+      .where(eq(suppliers.id, B.supplierId));
+    expect(row?.nameEn ?? null).toBeNull();
+  });
+
   it('products.update rejects assigning a foreign supplier as exclusivity owner', async () => {
     // A owns the product but tries to set B's supplier as owner → NOT_FOUND.
     await expect(
@@ -1209,6 +1234,58 @@ describe('role denial: ownerProcedure team writes reject non-owner callers', () 
       expect(rows.map((r) => r.role)).toEqual(['owner']);
     });
   }
+});
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Per-member app language (client-ready S4). team.setMemberLocale takes a
+ * client-supplied member userId (managerProcedure) — a foreign one must match
+ * nothing; settings.setMyLocale / myLocale are keyed to the session only.
+ * ────────────────────────────────────────────────────────────────────────── */
+describe('member locale: foreign-id attacks + self isolation (A → B)', () => {
+  async function bOwnerLocale() {
+    const [row] = await db
+      .select({ locale: memberships.preferredLocale })
+      .from(memberships)
+      .where(
+        and(eq(memberships.restaurantId, B.restaurantId), eq(memberships.userId, B.ownerUserId)),
+      );
+    return row?.locale ?? null;
+  }
+
+  it('team.setMemberLocale rejects a foreign userId and leaves B locale untouched', async () => {
+    await callerFor(B).team.setMemberLocale({ userId: B.ownerUserId, locale: 'he' });
+    for (const role of ['owner', 'manager'] as const) {
+      await expect(
+        callerWithRole(A, role).team.setMemberLocale({ userId: B.ownerUserId, locale: 'en' }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    }
+    expect(await bOwnerLocale()).toBe('he');
+  });
+
+  it('team.setMemberLocale → FORBIDDEN for receiver/bookkeeper/chef', async () => {
+    for (const role of ['receiver', 'bookkeeper', 'chef'] as const) {
+      await expect(
+        callerWithRole(A, role).team.setMemberLocale({ userId: A.ownerUserId, locale: 'en' }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    }
+  });
+
+  it('team.setMemberLocale works on an own-tenant member and team.list reflects it', async () => {
+    await callerWithRole(A, 'manager').team.setMemberLocale({ userId: A.ownerUserId, locale: 'en' });
+    const { members } = await callerWithRole(A, 'manager').team.list();
+    expect(members.find((m) => m.userId === A.ownerUserId)?.preferredLocale).toBe('en');
+    await callerFor(A).team.setMemberLocale({ userId: A.ownerUserId, locale: null });
+  });
+
+  it('settings.setMyLocale writes only the caller membership; myLocale reads only it', async () => {
+    await callerFor(B).settings.setMyLocale({ locale: 'he' });
+    await callerFor(A).settings.setMyLocale({ locale: 'en' });
+    expect(await callerFor(A).settings.myLocale()).toEqual({ locale: 'en' });
+    expect(await callerFor(B).settings.myLocale()).toEqual({ locale: 'he' });
+    expect(await bOwnerLocale()).toBe('he');
+    await callerFor(A).settings.setMyLocale({ locale: null });
+    expect(await callerFor(A).settings.myLocale()).toEqual({ locale: null });
+  });
 });
 
 describe('role denial: mapping.confirm rejects member-tier callers', () => {

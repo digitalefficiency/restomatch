@@ -1,5 +1,52 @@
 /**
  * 'products' namespace (Hebrew — source of truth).
- * Owner: S5 operations UI — product detail.
+ * Owner: S5 operations UI — product detail / editor.
  */
-export const he = {};
+export const he = {
+  breadcrumb: 'קטלוג',
+  title: 'מוצר',
+  subtitle: 'שם המוצר מזין את מנוע ההצלבה והדוחות. עריכת השם, השם באנגלית, הקטגוריה, היחידה והספק הבלעדי.',
+  form: {
+    title: 'פרטי מוצר',
+    name: 'שם המוצר (קנוני, עברית)',
+    nameEn: 'שם באנגלית',
+    nameEnHint: 'מוצג לצוות שעובד באנגלית (למשל מקבל סחורה). ההתאמות והייצוא ממשיכים לעבוד על השם העברי.',
+    nameEnPlaceholder: 'Cherry tomatoes',
+    category: 'קטגוריה',
+    unit: 'יחידת ברירת מחדל',
+    unitPlaceholder: 'ק״ג / יח׳',
+    barcode: 'ברקוד',
+    supplier: 'ספק בלעדי',
+    supplierHint: 'המוצר משויך לספק זה בלבד. ריק = ללא בלעדיות.',
+    noSupplier: '— ללא ספק בלעדי —',
+    save: 'שמירת המוצר',
+    delete: 'מחיקת המוצר',
+    confirmDelete: 'למחוק את "{name}"? לא ניתן לשחזר.',
+    saved: 'המוצר נשמר.',
+    deleted: 'המוצר נמחק.',
+    nameRequired: 'שם המוצר הוא שדה חובה.',
+    noChanges: 'אין שינויים לשמור.',
+    deleteBlocked: 'לא ניתן למחוק — המוצר מקושר לחשבוניות או הזמנות. השביתו אותו בקטלוג במקום.',
+    readOnly: 'צפייה בלבד — רק בעלים ומנהלים יכולים לערוך מוצרים.',
+  },
+  prices: {
+    title: 'מחירוני ספקים',
+    supplier: 'ספק',
+    sku: 'מק״ט',
+    unit: 'יחידה',
+    listPrice: 'מחיר מחירון',
+    status: 'סטטוס',
+    inactive: 'לא פעיל',
+    active: 'פעיל',
+    empty: 'אין מחירוני ספק למוצר זה.',
+    cheapest: 'הזול ביותר',
+  },
+  history: {
+    title: 'מחירים שנצפו בחשבוניות',
+    date: 'תאריך',
+    supplier: 'ספק',
+    unitPrice: 'מחיר ליחידה',
+    empty: 'עוד לא נצפו מחירים בחשבוניות עבור המוצר הזה.',
+    unknownSupplier: 'ספק לא ידוע',
+  },
+};

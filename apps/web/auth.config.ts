@@ -9,6 +9,10 @@ export const authConfig = {
   pages: {
     signIn: '/login',
     verifyRequest: '/login/check-email',
+    // Auth.js errors (expired magic link = Verification, a throttled/failed
+    // magic-link send = Configuration/EmailSignin) land on the translated login
+    // page instead of the bare English /api/auth/error screen.
+    error: '/login',
   },
   // Intentionally provider-less AND jwt-callback-less: the Credentials provider
   // (argon2id) and every node-only crypto dep live ONLY in auth.ts. Keeping this

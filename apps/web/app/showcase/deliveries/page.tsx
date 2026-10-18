@@ -257,7 +257,7 @@ export default function DeliveriesPage() {
         })}
       </div>
 
-      <p className="text-xs text-subtle mt-8 max-w-2xl leading-relaxed">{t('deliveries.footnote')}</p>
+      <p className="text-xs text-muted mt-8 max-w-2xl leading-relaxed">{t('deliveries.footnote')}</p>
     </main>
   );
 }

@@ -4,10 +4,24 @@ import { useState } from 'react';
 import type { OrderSchedule, OrderWindow } from '@restomatch/types';
 import { CalendarClock, Plus, Trash2 } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
-import { Button, Card, EmptyState, Field, Input, Spinner } from '@/lib/components';
+import {
+  Button,
+  Card,
+  EmptyState,
+  Field,
+  Input,
+  Select,
+  Spinner,
+  friendlyError,
+  useToast,
+} from '@/lib/components';
+import { useT } from '@/lib/i18n/client';
+import { components } from '@/lib/i18n/messages/components';
+import { suppliers as suppliersNs } from '@/lib/i18n/messages/suppliers';
+import { DAY_KEYS } from '../form-logic';
 
-/** Weekday labels, index = JS Date#getDay (0 = Sunday … 6 = Saturday). */
-const WEEKDAYS: string[] = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+/** Weekday keys, index = JS Date#getDay (0 = Sunday … 6 = Saturday). */
+const WEEKDAYS = DAY_KEYS;
 
 type Fulfillment = OrderWindow['fulfillment'];
 
@@ -55,25 +69,32 @@ function formToSchedule(rows: WindowForm[]): OrderSchedule | null {
  * Schedule tab — a SIMPLE form (no grid/SVG): one row per order window with
  * order-day checkboxes, a cutoff time, and how the order maps to a delivery
  * (lead days or a named delivery weekday). Saves via suppliers.update so the
- * order wizard can DERIVE the expected delivery date. Empty → "הגדר ימי הזמנה".
+ * order wizard can DERIVE the expected delivery date. Empty → "set order days".
+ * Removing every window of a SAVED schedule keeps a save button so the deletion
+ * can actually be persisted (it used to fall back to the empty state, leaving
+ * the old schedule in the database).
  */
 export function SupplierScheduleTab({ supplierId }: { supplierId: string }) {
+  const t = useT(suppliersNs);
+  const tc = useT(components);
+  const toast = useToast();
   const utils = trpc.useUtils();
   const supplier = trpc.suppliers.get.useQuery({ supplierId });
   const [rows, setRows] = useState<WindowForm[] | null>(null);
-  const [saved, setSaved] = useState(false);
 
   const update = trpc.suppliers.update.useMutation({
-    onSuccess: () => {
-      setSaved(true);
+    onSuccess: (row) => {
+      toast.success(row.orderSchedule ? t('schedule.saved') : t('schedule.cleared'));
+      setRows(null);
       void utils.suppliers.get.invalidate({ supplierId });
     },
+    onError: (e) => toast.error(friendlyError(e, tc)),
   });
 
   if (supplier.isLoading) {
     return (
       <div className="flex items-center gap-2 py-8 text-muted">
-        <Spinner className="h-4 w-4" /> טוען לוח הזמנות…
+        <Spinner className="h-4 w-4" /> {t('schedule.loading')}
       </div>
     );
   }
@@ -83,10 +104,8 @@ export function SupplierScheduleTab({ supplierId }: { supplierId: string }) {
   // Hydrate the editable rows from the saved schedule once.
   const current = rows ?? scheduleToForm(s.orderSchedule);
 
-  const setRowsAnd = (next: WindowForm[]) => {
-    setSaved(false);
-    setRows(next);
-  };
+  const setRowsAnd = (next: WindowForm[]) => setRows(next);
+  const hasSaved = !!s.orderSchedule && s.orderSchedule.windows.length > 0;
   const patchRow = (key: string, patch: Partial<WindowForm>) =>
     setRowsAnd(current.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   const toggleDay = (key: string, day: number) => {
@@ -99,7 +118,6 @@ export function SupplierScheduleTab({ supplierId }: { supplierId: string }) {
   const valid = current.length > 0 && current.every((r) => r.orderDays.length > 0);
 
   function save() {
-    setSaved(false);
     update.mutate({ supplierId, patch: { orderSchedule: formToSchedule(current) } });
   }
 
@@ -108,12 +126,19 @@ export function SupplierScheduleTab({ supplierId }: { supplierId: string }) {
       <Card elevated>
         <EmptyState
           icon={<CalendarClock className="h-6 w-6" />}
-          title="לא הוגדר לוח הזמנות לספק"
-          description="הגדירו אילו ימים אפשר להזמין, עד איזו שעה, וכמה ימים לוקח המשלוח — וההזמנות יקבלו תאריך אספקה אוטומטי."
+          title={t('schedule.emptyTitle')}
+          description={hasSaved ? t('schedule.clearedPending') : t('schedule.emptyBody')}
           action={
-            <Button variant="primary" size="sm" onClick={() => setRowsAnd([newWindow()])}>
-              <Plus className="h-4 w-4" /> הגדר ימי הזמנה
-            </Button>
+            <div className="flex flex-wrap justify-center gap-2">
+              <Button variant="primary" size="sm" onClick={() => setRowsAnd([newWindow()])}>
+                <Plus className="h-4 w-4" aria-hidden="true" /> {t('schedule.define')}
+              </Button>
+              {hasSaved ? (
+                <Button variant="danger" size="sm" loading={update.isPending} onClick={save}>
+                  {t('schedule.saveCleared')}
+                </Button>
+              ) : null}
+            </div>
           }
         />
       </Card>
@@ -125,32 +150,40 @@ export function SupplierScheduleTab({ supplierId }: { supplierId: string }) {
       {current.map((row, i) => (
         <Card key={row.key} elevated flow>
           <div className="mb-4 flex items-center justify-between">
-            <h3 className="text-base font-bold text-ink">חלון הזמנה {current.length > 1 ? i + 1 : ''}</h3>
+            <h3 className="text-base font-bold text-ink">
+              {current.length > 1 ? t('schedule.windowN', { n: i + 1 }) : t('schedule.window')}
+            </h3>
             <button
               type="button"
               onClick={() => setRowsAnd(current.filter((r) => r.key !== row.key))}
-              className="text-subtle hover:text-danger"
-              aria-label="הסר חלון"
+              className="rounded p-1 text-subtle hover:text-danger focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+              aria-label={t('schedule.removeWindow')}
+              title={t('schedule.removeWindow')}
             >
-              <Trash2 className="h-4 w-4" />
+              <Trash2 className="h-4 w-4" aria-hidden="true" />
             </button>
           </div>
 
           <div className="space-y-4">
             <div>
-              <div className="mb-2 text-sm font-medium text-ink">ימי הזמנה</div>
+              <div className="mb-2 text-sm font-medium text-ink">{t('schedule.orderDays')}</div>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                {WEEKDAYS.map((label, day) => {
+                {WEEKDAYS.map((key, day) => {
                   const on = row.orderDays.includes(day);
                   return (
                     <label
                       key={day}
-                      className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+                      className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm focus-within:ring-2 focus-within:ring-primary/60 ${
                         on ? 'border-primary/40 bg-primary/5' : 'border-line'
                       }`}
                     >
-                      <input type="checkbox" checked={on} onChange={() => toggleDay(row.key, day)} />
-                      <span className="text-ink">{label}</span>
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={() => toggleDay(row.key, day)}
+                        className="h-4 w-4 accent-primary"
+                      />
+                      <span className="text-ink">{t(`days.${key}`)}</span>
                     </label>
                   );
                 })}
@@ -158,7 +191,7 @@ export function SupplierScheduleTab({ supplierId }: { supplierId: string }) {
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="שעת יעד אחרונה להזמנה" htmlFor={`cutoff-${row.key}`}>
+              <Field label={t('schedule.cutoff')} htmlFor={`cutoff-${row.key}`}>
                 <Input
                   id={`cutoff-${row.key}`}
                   type="time"
@@ -166,22 +199,21 @@ export function SupplierScheduleTab({ supplierId }: { supplierId: string }) {
                   onChange={(e) => patchRow(row.key, { cutoff: e.target.value })}
                 />
               </Field>
-              <Field label="אופן האספקה" htmlFor={`fulfill-${row.key}`}>
-                <select
+              <Field label={t('schedule.fulfillment')} htmlFor={`fulfill-${row.key}`}>
+                <Select
                   id={`fulfill-${row.key}`}
                   value={row.fulfillKind}
                   onChange={(e) =>
                     patchRow(row.key, { fulfillKind: e.target.value as Fulfillment['kind'] })
                   }
-                  className="w-full rounded-xl border border-line bg-surface-2 px-3 py-2 text-ink focus:border-primary/50 focus:outline-none"
                 >
-                  <option value="lead_days">משלוח כעבור מספר ימים</option>
-                  <option value="next_named_day">משלוח ביום קבוע בשבוע</option>
-                </select>
+                  <option value="lead_days">{t('schedule.leadDaysOption')}</option>
+                  <option value="next_named_day">{t('schedule.namedDayOption')}</option>
+                </Select>
               </Field>
 
               {row.fulfillKind === 'lead_days' ? (
-                <Field label="ימים עד אספקה (0 = באותו יום)" htmlFor={`lead-${row.key}`}>
+                <Field label={t('schedule.leadDays')} htmlFor={`lead-${row.key}`}>
                   <Input
                     id={`lead-${row.key}`}
                     type="number"
@@ -194,24 +226,23 @@ export function SupplierScheduleTab({ supplierId }: { supplierId: string }) {
                   />
                 </Field>
               ) : (
-                <Field label="יום האספקה הקבוע" htmlFor={`day-${row.key}`}>
-                  <select
+                <Field label={t('schedule.deliversOn')} htmlFor={`day-${row.key}`}>
+                  <Select
                     id={`day-${row.key}`}
                     value={row.deliversOnDay}
                     onChange={(e) => patchRow(row.key, { deliversOnDay: Number(e.target.value) })}
-                    className="w-full rounded-xl border border-line bg-surface-2 px-3 py-2 text-ink focus:border-primary/50 focus:outline-none"
                   >
-                    {WEEKDAYS.map((label, day) => (
+                    {WEEKDAYS.map((key, day) => (
                       <option key={day} value={day}>
-                        {label}
+                        {t(`days.${key}`)}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </Field>
               )}
             </div>
             {row.orderDays.length === 0 && (
-              <p className="text-xs text-warn">בחרו לפחות יום הזמנה אחד.</p>
+              <p className="text-xs text-warn">{t('schedule.pickDay')}</p>
             )}
           </div>
         </Card>
@@ -219,21 +250,19 @@ export function SupplierScheduleTab({ supplierId }: { supplierId: string }) {
 
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="primary" size="sm" loading={update.isPending} disabled={!valid} onClick={save}>
-          שמירת לוח הזמנות
+          {t('schedule.save')}
         </Button>
         <Button variant="secondary" size="sm" onClick={() => setRowsAnd([...current, newWindow()])}>
-          <Plus className="h-4 w-4" /> הוסף חלון הזמנה
+          <Plus className="h-4 w-4" aria-hidden="true" /> {t('schedule.addWindow')}
         </Button>
         <Button
           variant="ghost"
           size="sm"
           onClick={() => setRowsAnd([])}
         >
-          נקה הכל
+          {t('schedule.clearAll')}
         </Button>
       </div>
-      {update.error && <p className="text-sm text-danger">{update.error.message}</p>}
-      {saved && !update.isPending && <p className="text-sm text-primary">לוח ההזמנות נשמר.</p>}
     </div>
   );
 }
