@@ -154,13 +154,13 @@ async function invoicesSince(t: Date) {
 
 // ─── browser helpers ───────────────────────────────────────────────────────
 let browser: Browser;
-async function session(role: Role, opts: { mobile: boolean; locale: 'he' | 'en' }): Promise<{ ctx: BrowserContext; page: Page }> {
+async function session(role: Role, opts: { mobile: boolean; locale: 'he' | 'en'; consent?: boolean }): Promise<{ ctx: BrowserContext; page: Page }> {
   const ctx = await browser.newContext({
     viewport: opts.mobile ? { width: 390, height: 844 } : { width: 1366, height: 900 },
     deviceScaleFactor: opts.mobile ? 2 : 1,
   });
   await ctx.addCookies([
-    { name: 'rm_cookie_consent', value: 'necessary', url: BASE },
+    ...(opts.consent === false ? [] : [{ name: 'rm_cookie_consent', value: 'necessary', url: BASE }]),
     { name: 'rm_locale', value: opts.locale, url: BASE },
   ]);
   const page = await ctx.newPage();
@@ -243,7 +243,8 @@ async function main() {
   browser = await chromium.launch(process.env.PW_CHROMIUM_PATH ? { executablePath: process.env.PW_CHROMIUM_PATH } : {});
   const fx = await makeFixtures();
   console.log(`fixtures: big jpeg ${(fx.bigJpeg.length / 1e6).toFixed(1)} MB, huge pdf ${(fx.hugePdf.length / 1e6).toFixed(1)} MB`);
-  await workerOn();
+  // QA_NO_WORKER=1: production run (`next start`) — no worker / dev OCR stub.
+  if (process.env.QA_NO_WORKER !== '1') await workerOn();
   let enInvoiceId = '';
 
   await scenario('A', 'receiver · en · 390px — huge photo, double-tap process, English review, double-tap close', async (check) => {
@@ -481,10 +482,53 @@ async function main() {
   });
 
   await workerOff();
+  await scenario('K', 'receiver · en · 390px · no cookie consent — demo invoice → order-only review → close (S7 trip-wires)', async (check) => {
+    const { poId } = await freshPo('K');
+    const { ctx, page } = await session('receiver', { mobile: true, locale: 'en', consent: false });
+    await openWizard(page, poId);
+    const progress = page.getByTestId('wizard-progress');
+    check((await progress.getAttribute('data-filled')) === '2' && (await page.getByText('Step 2 of 5').count()) > 0, 'scan: "Step 2 of 5" with 2 of 5 bars filled');
+    await page.getByRole('button', { name: 'Use a demo invoice (no upload)' }).click();
+    await page.getByRole('button', { name: PROCESS }).click();
+    await waitReview(page);
+    check((await page.getByText(/OCR confidence/).count()) === 0, 'no "OCR confidence 100%" when no invoice was read');
+    check((await page.getByText(/Receiving against the order/).count()) > 0, '"receiving against the order" subtitle');
+    check((await missingAlarms(page)) === 0, 'no false "missing" lines');
+    check(await page.getByTestId('recon-pending-banner').isVisible(), 'calm "check by hand" banner');
+    check((await progress.getAttribute('data-filled')) === '4' && (await page.getByText('Step 4 of 5').count()) > 0, 'review: "Step 4 of 5" with 4 bars');
+    await shot(page, 'K-po-only-review-en-mobile');
+    await page.getByRole('button', { name: /Continue to quantities|All good/ }).first().click();
+    await page.getByRole('heading', { name: 'How much really arrived?' }).waitFor();
+    for (let i = 0; i < 30; i += 1) {
+      const btn = page.getByRole('button', { name: /^= order/ }).first();
+      if (!(await btn.count())) break;
+      await btn.click();
+    }
+    const cta = page.getByTestId('close-receipt');
+    await cta.scrollIntoViewIfNeeded();
+    const box = await cta.boundingBox();
+    const onTop = box
+      ? await page.evaluate(({ x, y }) => {
+          const el = document.elementFromPoint(x, y);
+          return Boolean(el?.closest('[data-testid="close-receipt"]'));
+        }, { x: box.x + box.width / 2, y: box.y + box.height / 2 })
+      : false;
+    check(onTop, 'sticky "Close receipt" CTA is not covered (cookie banner showing)');
+    await shot(page, 'K-adjust-cta-cookie-banner-en-mobile');
+    check(await cta.isEnabled(), 'every line checked → close enabled');
+    await cta.click();
+    await page.getByTestId('receipt-confirmed').waitFor({ timeout: 60_000 });
+    const verified = await page.getByTestId('receipt-confirmed').innerText();
+    check(!/0 matched, 0 checked/.test(verified) && /checked by hand/.test(verified), 'summary counts the hand-checked lines');
+    check((await progress.getAttribute('data-filled')) === '5', 'confirmed: all 5 bars');
+    await shot(page, 'K-confirmed-en-mobile');
+    await ctx.close();
+  });
+
   await browser.close();
   const pass = results.filter((r) => r.status === 'PASS').length;
-  await writeFile(join(OUT, 'receiving-qa.json'), JSON.stringify({ base: BASE, at: new Date().toISOString(), pass, total: results.length, results }, null, 2));
-  console.log(`\nQA: ${pass}/${results.length} scenarios passed → docs/client-ready/qa/receiving-qa.json`);
+  await writeFile(join(OUT, `${process.env.QA_RUN ?? 'receiving-qa'}.json`), JSON.stringify({ base: BASE, at: new Date().toISOString(), pass, total: results.length, results }, null, 2));
+  console.log(`\nQA: ${pass}/${results.length} scenarios passed → docs/client-ready/qa/${process.env.QA_RUN ?? 'receiving-qa'}.json`);
   process.exit(pass === results.length ? 0 : 1);
 }
 
