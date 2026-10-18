@@ -1220,7 +1220,8 @@ export const ingestSenders = pgTable(
       .references(() => restaurants.id, { onDelete: 'cascade' }),
     kind: varchar('kind', { length: 16 }).$type<IngestChannelKind>().notNull(),
     sender: varchar('sender', { length: 320 }).notNull(),
-    supplierId: uuid('supplier_id').references(() => suppliers.id, { onDelete: 'set null' }),
+    // Composite same-tenant FK (supplier_id, restaurant_id) → suppliers — migration 0050.
+    supplierId: uuid('supplier_id'),
     label: text('label'),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -1235,15 +1236,15 @@ export const ingestMessages = pgTable(
     restaurantId: uuid('restaurant_id')
       .notNull()
       .references(() => restaurants.id, { onDelete: 'cascade' }),
-    channelId: uuid('channel_id')
-      .notNull()
-      .references(() => ingestChannels.id, { onDelete: 'cascade' }),
+    // Composite same-tenant FK (channel_id, restaurant_id) → ingest_channels — migration 0050.
+    channelId: uuid('channel_id').notNull(),
     kind: varchar('kind', { length: 16 }).$type<IngestChannelKind>().notNull(),
     provider: varchar('provider', { length: 32 }).notNull(),
     providerMessageId: varchar('provider_message_id', { length: 256 }).notNull(),
     sender: varchar('sender', { length: 320 }).notNull(),
     senderAllowed: boolean('sender_allowed').notNull(),
-    supplierId: uuid('supplier_id').references(() => suppliers.id, { onDelete: 'set null' }),
+    // Composite same-tenant FK (supplier_id, restaurant_id) → suppliers — migration 0050.
+    supplierId: uuid('supplier_id'),
     subject: text('subject'),
     status: varchar('status', { length: 16 }).$type<IngestMessageStatus>().notNull(),
     error: text('error'),
@@ -1262,15 +1263,15 @@ export const ingestDocuments = pgTable(
     restaurantId: uuid('restaurant_id')
       .notNull()
       .references(() => restaurants.id, { onDelete: 'cascade' }),
-    messageId: uuid('message_id')
-      .notNull()
-      .references(() => ingestMessages.id, { onDelete: 'cascade' }),
+    // Composite same-tenant FK (message_id, restaurant_id) → ingest_messages — migration 0050.
+    messageId: uuid('message_id').notNull(),
     filename: text('filename'),
     mimeType: varchar('mime_type', { length: 64 }),
     sizeBytes: integer('size_bytes'),
     sha256: varchar('sha256', { length: 64 }),
     storagePath: text('storage_path'),
-    invoiceId: uuid('invoice_id').references(() => invoices.id, { onDelete: 'set null' }),
+    // Composite same-tenant FK (invoice_id, restaurant_id) → invoices — migration 0050.
+    invoiceId: uuid('invoice_id'),
     status: varchar('status', { length: 16 }).$type<IngestDocumentStatus>().notNull(),
     error: text('error'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

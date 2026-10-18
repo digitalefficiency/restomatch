@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS "ingest_channels" (
   "active" boolean DEFAULT true NOT NULL,
   "created_by" uuid REFERENCES "users"("id") ON DELETE SET NULL,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL,
-  "revoked_at" timestamp with time zone
+  "revoked_at" timestamp with time zone,
+  CONSTRAINT "ingest_channels_id_restaurant_id_key" UNIQUE ("id", "restaurant_id")
 );--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "ingest_channels_token_hash_uq" ON "ingest_channels" ("token_hash");--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "ingest_channels_active_uq" ON "ingest_channels" ("restaurant_id", "kind") WHERE "active";--> statement-breakpoint
@@ -36,49 +37,69 @@ CREATE TABLE IF NOT EXISTS "ingest_senders" (
   "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE CASCADE,
   "kind" varchar(16) NOT NULL CHECK ("kind" IN ('whatsapp', 'email')),
   "sender" varchar(320) NOT NULL,
-  "supplier_id" uuid REFERENCES "suppliers"("id") ON DELETE SET NULL,
+  "supplier_id" uuid,
   "label" text,
   "created_by" uuid REFERENCES "users"("id") ON DELETE SET NULL,
-  "created_at" timestamp with time zone DEFAULT now() NOT NULL
+  "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+  -- Same-tenant FK (as 0021): a sender can only point at its own restaurant's supplier.
+  CONSTRAINT "ingest_senders_supplier_same_tenant_fk" FOREIGN KEY ("supplier_id", "restaurant_id")
+    REFERENCES "suppliers"("id", "restaurant_id") ON DELETE SET NULL ("supplier_id")
 );--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "ingest_senders_uq" ON "ingest_senders" ("restaurant_id", "kind", "sender");--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "ingest_messages" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE CASCADE,
-  "channel_id" uuid NOT NULL REFERENCES "ingest_channels"("id") ON DELETE CASCADE,
+  "channel_id" uuid NOT NULL,
   "kind" varchar(16) NOT NULL CHECK ("kind" IN ('whatsapp', 'email')),
   "provider" varchar(32) NOT NULL,
   "provider_message_id" varchar(256) NOT NULL,
   "sender" varchar(320) NOT NULL,
   "sender_allowed" boolean NOT NULL,
-  "supplier_id" uuid REFERENCES "suppliers"("id") ON DELETE SET NULL,
+  "supplier_id" uuid,
   "subject" text,
   "status" varchar(16) NOT NULL CHECK ("status" IN ('accepted', 'needs_review', 'rejected', 'failed', 'empty')),
   "error" text,
-  "received_at" timestamp with time zone DEFAULT now() NOT NULL
+  "received_at" timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT "ingest_messages_id_restaurant_id_key" UNIQUE ("id", "restaurant_id"),
+  CONSTRAINT "ingest_messages_channel_same_tenant_fk" FOREIGN KEY ("channel_id", "restaurant_id")
+    REFERENCES "ingest_channels"("id", "restaurant_id") ON DELETE CASCADE,
+  CONSTRAINT "ingest_messages_supplier_same_tenant_fk" FOREIGN KEY ("supplier_id", "restaurant_id")
+    REFERENCES "suppliers"("id", "restaurant_id") ON DELETE SET NULL ("supplier_id")
 );--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "ingest_messages_replay_uq" ON "ingest_messages" ("restaurant_id", "kind", "provider_message_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "ingest_messages_restaurant_received_idx" ON "ingest_messages" ("restaurant_id", "received_at");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "ingest_messages_channel_idx" ON "ingest_messages" ("channel_id");--> statement-breakpoint
+-- Composite key so ingest_documents can reference an invoice OF THE SAME restaurant (as 0021 did for suppliers).
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'invoices_id_restaurant_id_key') THEN
+    ALTER TABLE "invoices" ADD CONSTRAINT "invoices_id_restaurant_id_key" UNIQUE ("id", "restaurant_id");
+  END IF;
+END $$;--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "ingest_documents" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE CASCADE,
-  "message_id" uuid NOT NULL REFERENCES "ingest_messages"("id") ON DELETE CASCADE,
+  "message_id" uuid NOT NULL,
   "filename" text,
   "mime_type" varchar(64),
   "size_bytes" integer,
   "sha256" varchar(64),
   "storage_path" text,
-  "invoice_id" uuid REFERENCES "invoices"("id") ON DELETE SET NULL,
+  "invoice_id" uuid,
   "status" varchar(16) NOT NULL CHECK ("status" IN ('registered', 'needs_review', 'rejected', 'failed', 'duplicate', 'skipped')),
   "error" text,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL,
-  "updated_at" timestamp with time zone DEFAULT now() NOT NULL
+  "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT "ingest_documents_message_same_tenant_fk" FOREIGN KEY ("message_id", "restaurant_id")
+    REFERENCES "ingest_messages"("id", "restaurant_id") ON DELETE CASCADE,
+  CONSTRAINT "ingest_documents_invoice_same_tenant_fk" FOREIGN KEY ("invoice_id", "restaurant_id")
+    REFERENCES "invoices"("id", "restaurant_id") ON DELETE SET NULL ("invoice_id")
 );--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "ingest_documents_message_idx" ON "ingest_documents" ("message_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "ingest_documents_restaurant_sha_idx" ON "ingest_documents" ("restaurant_id", "sha256");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "ingest_documents_invoice_idx" ON "ingest_documents" ("invoice_id");--> statement-breakpoint
--- Every FK indexed (db:doctor "foreign keys indexed"; see 0030).
+-- Every FK indexed (db:doctor "foreign keys indexed"; see 0030). Tenant FKs are composite
+-- (x_id, restaurant_id) so no row can reference another restaurant's row (cross-QA, S1).
 CREATE INDEX IF NOT EXISTS "ingest_channels_created_by_idx" ON "ingest_channels" ("created_by");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "ingest_senders_created_by_idx" ON "ingest_senders" ("created_by");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "ingest_senders_supplier_idx" ON "ingest_senders" ("supplier_id");--> statement-breakpoint
@@ -122,5 +143,5 @@ BEGIN
 END $$;
 
 insert into drizzle.__drizzle_migrations (hash, created_at)
-select '6387b0609733f90c8a465375ecd585f76bb0352d2650f3f99250af5ee6bb0fc2', 1782050000000
+select 'f0e4fd78a578070992b1bbacd0050eb360b66bcc6dd48023be9fad5b1ddbdf53', 1782050000000
 where not exists (select 1 from drizzle.__drizzle_migrations where created_at = 1782050000000);
