@@ -1,4 +1,5 @@
 import { receiverLangsRouter } from './routers/receiverLangs';
+import { askRouter } from './routers/ask';
 import { router } from './trpc';
 import { activityRouter } from './routers/activity';
 import { adminRouter } from './routers/admin';
@@ -43,6 +44,7 @@ export const appRouter = router({
   team: teamRouter,
   dsr: dsrRouter,
   receiverLangs: receiverLangsRouter,
+  ask: askRouter,
 });
 
 export type AppRouter = typeof appRouter;
@@ -194,3 +196,4 @@ export {
 } from './lib/localScanStorage';
 export { localNames, renderSizeSuffix, __setReceiverTranslator } from './receiving/localize';
 export { assertFeature, isFeatureOn } from './lib/featureGate';
+export { runAsk, __setAskClient, __resetAskBurst, type AskResult } from './ask';

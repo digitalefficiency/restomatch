@@ -19,6 +19,7 @@ const ROUTER_KEYS = [
   'activity',
   'admin',
   'approvals',
+  'ask',
   'catalog',
   'dsr',
   'exports',
