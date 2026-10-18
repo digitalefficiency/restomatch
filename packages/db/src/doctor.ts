@@ -292,7 +292,7 @@ const CROSS_TENANT_CHECKS: Array<{ name: string; needs: Array<[string, string]>;
   {
     name: 'invoice_scan.invoice same tenant',
     needs: [['invoice_scans', 'restaurant_id']],
-    sql: 'select count(*) from invoice_scans sc join invoices i on i.id = sc.invoice_id where sc.restaurant_id is not null and i.restaurant_id <> sc.restaurant_id',
+    sql: 'select count(*) from invoice_scans sc join invoices i on i.id::text = sc.invoice_id::text where sc.restaurant_id is not null and i.restaurant_id <> sc.restaurant_id',
   },
 ];
 
@@ -509,8 +509,12 @@ export async function runDoctor(url: string, opts: DoctorOptions = {}): Promise<
         for (const [t, col] of chk.needs) if (!(await ctx.columnExists(t, col))) ok = false;
         if (!ok) continue;
         integrityRan += 1;
-        const n = await ctx.count(chk.sql);
-        if (n > 0) integrityBad.push(`${chk.name}: ${n}`);
+        try {
+          const n = await ctx.count(chk.sql);
+          if (n > 0) integrityBad.push(`${chk.name}: ${n}`);
+        } catch (err) {
+          integrityBad.push(`${chk.name}: could not evaluate (${err instanceof Error ? err.message : String(err)})`);
+        }
       }
       add('integrity', 'cross-tenant references', integrityBad.length ? 'WARN' : 'PASS',
         integrityBad.length ? integrityBad.join(' · ') : `${integrityRan} cross-tenant consistency checks clean`);
