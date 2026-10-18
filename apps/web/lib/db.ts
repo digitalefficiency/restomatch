@@ -1,4 +1,4 @@
-import { createDb } from '@restomatch/db';
+import { createDb, type Database } from '@restomatch/db';
 import { resolveWebDbUrl } from './env';
 
 /**
@@ -13,4 +13,11 @@ import { resolveWebDbUrl } from './env';
  * The worker and migrations keep using the owner/service DATABASE_URL — their
  * cross-tenant jobs are guarded explicitly in code.
  */
-export const db = createDb(resolveWebDbUrl());
+// One pool per server process. `next dev` instantiates this module once per
+// compiled layer (RSC / SSR / route handlers) and again on every HMR reload;
+// without the globalThis memo each copy opened its own 10-connection pool and
+// the dev server hit Postgres' max_connections ("too many clients") after a few
+// dozen page loads.
+const memo = globalThis as unknown as { __restomatchWebDb?: Database };
+export const db: Database = memo.__restomatchWebDb ?? createDb(resolveWebDbUrl());
+memo.__restomatchWebDb = db;
