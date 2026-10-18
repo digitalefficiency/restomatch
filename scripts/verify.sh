@@ -5,7 +5,8 @@
 #   scripts/verify.sh layer2     # production build + `next start` + verify-prod.sh (+ e2e with VERIFY_E2E=1)
 #   scripts/verify.sh all        # both
 #
-# Needs local Postgres 16 + pgvector (DATABASE_URL, default the local test DB) and,
+# Needs local Postgres 16 + pgvector (layer 1 re-creates its own DB `restomatch_gate`,
+# layer 2 seeds `restomatch_verify`; base URL VERIFY_PG_BASE) and,
 # for the worker tests, Redis (REDIS_URL; skipped with a FAIL-free "SKIP" if unset).
 # Never touches anything remote: it refuses a non-local DATABASE_URL.
 # Per-step logs go to .verify/<step>.log (gitignored). Exit 1 if any step failed.
@@ -23,10 +24,13 @@ cd "$ROOT" || exit 2
 LOGS="$ROOT/.verify"
 mkdir -p "$LOGS"
 
-export DATABASE_URL="${DATABASE_URL:-postgres://postgres:postgres@localhost:5432/restomatch_test}"
-export DATABASE_URL_TEST="${DATABASE_URL_TEST:-$DATABASE_URL}"
+# Layer 1 runs on its own database, dropped and re-created each run (like CI's
+# fresh service container) so leftovers from earlier local runs can't fail it.
+PG_BASE="${VERIFY_PG_BASE:-postgres://postgres:postgres@localhost:5432}"
+export DATABASE_URL="${VERIFY_GATE_DATABASE_URL:-$PG_BASE/restomatch_gate}"
+export DATABASE_URL_TEST="$DATABASE_URL"
 export NEXT_TELEMETRY_DISABLED=1
-VERIFY_DB_URL="${VERIFY_DATABASE_URL:-${DATABASE_URL%/*}/restomatch_verify}"
+VERIFY_DB_URL="${VERIFY_DATABASE_URL:-$PG_BASE/restomatch_verify}"
 PORT="${VERIFY_PORT:-3310}"
 
 for u in "$DATABASE_URL" "$VERIFY_DB_URL"; do
@@ -64,8 +68,22 @@ web_env() {
     "$@"
 }
 
+fresh_gate_db() { # drop + create the layer-1 database (local only — checked above)
+  (cd packages/db && node -e '
+    const postgres = require("postgres");
+    const u = new URL(process.argv[1]); const name = u.pathname.slice(1); u.pathname = "/postgres";
+    const sql = postgres(u.toString(), { max: 1, onnotice: () => {} });
+    (async () => {
+      await sql.unsafe(`drop database if exists "${name}" with (force)`);
+      await sql.unsafe(`create database "${name}"`);
+      await sql.end();
+    })().catch((e) => { console.error(e.message); process.exit(1); });
+  ' "$DATABASE_URL")
+}
+
 layer1() {
   step install pnpm install --frozen-lockfile
+  step fresh-db fresh_gate_db
   step migrate pnpm --filter @restomatch/db migrate
   step provision-rls pnpm --filter @restomatch/db provision-rls
   step check-rls pnpm --filter @restomatch/db check-rls
@@ -85,7 +103,13 @@ layer1() {
 }
 
 SERVER_PID=""
-stop_server() { [[ -n "$SERVER_PID" ]] && kill "$SERVER_PID" 2>/dev/null && wait "$SERVER_PID" 2>/dev/null; SERVER_PID=""; }
+stop_server() { # the server runs in its own process group: stop pnpm + next-server together
+  if [[ -n "$SERVER_PID" ]]; then
+    kill -TERM -- "-$SERVER_PID" 2>/dev/null || kill "$SERVER_PID" 2>/dev/null
+    wait "$SERVER_PID" 2>/dev/null
+  fi
+  SERVER_PID=""
+}
 trap stop_server EXIT
 
 prepare_verify_db() {
@@ -99,11 +123,13 @@ prepare_verify_db() {
 start_prod_server() {
   # NODE_ENV=production keeps every boot guard on; email/storage keys are
   # placeholders (nothing is sent — no test here triggers an email).
+  set -m # own process group, so stop_server can stop the whole tree
   (cd apps/web && DATABASE_URL="$VERIFY_DB_URL" DATABASE_URL_APP="$APP_URL_DB" NODE_ENV=production \
     RESEND_API_KEY=re_verify_placeholder EMAIL_FROM=verify@example.invalid \
     SUPABASE_SERVICE_ROLE_KEY=verify-placeholder CRON_SECRET=verify-placeholder-cron-secret \
     web_env pnpm exec next start -p "$PORT") >"$LOGS/next-start.log" 2>&1 &
   SERVER_PID=$!
+  set +m
   for _ in $(seq 1 90); do
     curl -sf "http://localhost:$PORT/api/healthz" >/dev/null && return 0
     kill -0 "$SERVER_PID" 2>/dev/null || return 1
@@ -112,11 +138,15 @@ start_prod_server() {
   return 1
 }
 
+build_for_verify() { # layer 2 on its own (CI): build against the seeded verify DB
+  DATABASE_URL="$VERIFY_DB_URL" DATABASE_URL_APP="$APP_URL_DB" web_env pnpm --filter @restomatch/web build
+}
+
 layer2() {
   APP_URL_DB=""
   step verify-db prepare_verify_db
   if [[ ! -f apps/web/.next/BUILD_ID ]]; then
-    step web-build web_env pnpm --filter @restomatch/web build
+    step web-build build_for_verify
   fi
   step prod-start start_prod_server
   if [[ -n "$SERVER_PID" ]]; then
