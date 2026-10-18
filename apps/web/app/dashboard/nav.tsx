@@ -257,7 +257,11 @@ export function MobileNav({
   const closeRef = useRef<HTMLButtonElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const items = visibleItems(role, showChain, features, wave1);
-  const primary = items.filter((i) => !i.feature).slice(0, 4);
+  // Bottom bar = the role's first four visible destinations. Only the AI
+  // assistant (S14) stays drawer-only; other flag-gated items (recovery,
+  // monthly report, recipes, inbox, contracts) keep their slot as on their
+  // branches, e.g. a chef's bar is [overview, recipes, settings].
+  const primary = items.filter((i) => i.key !== 'ask').slice(0, 4);
 
   // Close on navigation.
   useEffect(() => {
