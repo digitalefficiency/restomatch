@@ -18,8 +18,9 @@ Master plan rows 15–16 (`docs/client-ready/MASTER-PLAN.md`).
 
 | Test | Proves |
 |---|---|
-| `packages/observability/src/__tests__/sentry.test.ts` (3) | DSN optional (no DSN → no SDK load, capture no-op); DSN without SDK → warn, disabled, no throw; DSN + SDK → scrubbed `beforeSend`, no tracing/PII, release + service tag |
-| `apps/worker/src/__tests__/healthDigest.test.ts` (4, real Postgres) | depths + 24 h failure window + stale-OCR (2 h counted, 5 min not) + outbox failures; subject wording; one email per recipient, deduped on the second run; clean skip with no recipients |
+| `packages/observability/src/__tests__/sentry.test.ts` (4) | DSN optional (no DSN → no SDK load, capture no-op); DSN without SDK → warn, disabled, no throw; DSN + SDK → scrubbed `beforeSend`, no tracing/PII, release + service tag; message / exception values / breadcrumbs scrubbed |
+| `apps/worker/src/__tests__/healthDigest.test.ts` (7, real Postgres) | depths + 24 h failure window + stale-OCR (2 h counted, 5 min not) + outbox failures; subject wording; one email per recipient, deduped on the second run; clean skip with no recipients; 170 failures paged + counted with PII masked; `force` sends without consuming the day's slot; a bogus `HEALTH_DIGEST_RESTAURANT_ID` falls back |
+| `apps/worker/src/__tests__/watchdog.test.ts` (2) | the Redis watchdog calls `onDead` after N consecutive failed PINGs and resets on a success |
 | `scripts/smoke-all-jobs.ts` (now includes `health-digest`; CI worker job) | the scheduled job runs in a live worker and its email reaches the provider through the outbox |
 
 ## Immutable files touched
@@ -37,7 +38,42 @@ Master plan rows 15–16 (`docs/client-ready/MASTER-PLAN.md`).
   platform-level notifications, so the digest isn't attributed to a tenant.
 - Browser-side Sentry needs `@sentry/nextjs` + a client config (not done; server side covers tRPC and
   rendering failures).
+- Web (seen during QA, not this wave's files): the rate limiter fails open on the very first login after
+  boot (ioredis "Stream isn't writeable" — offline queue disabled before the connection is ready; fails
+  *open*, so no lock-out, but the first attempt isn't counted); `/dashboard/suppliers/<non-uuid>` renders
+  the error boundary with 200 instead of `notFound()` (same fix as receiving got in round 2).
+- Worker/outbox: without `RESEND_API_KEY` the dispatcher marks email rows `sent` (dev convenience) — in
+  production the env guard refuses to boot without the key, so this only matters for staging without a key.
 
 ## Verification (2 layers)
 
-_(filled at the final commit)_
+Head `0f84ccd`.
+
+**Layer 1 — clean-clone gate** (fresh clone, `--frozen-lockfile`, local Postgres 16 + pgvector + Redis):
+install, migrate, provision-rls, check-rls, `db:doctor --strict`, typecheck (all packages), lint
+(0 errors / 6 pre-existing warnings), **1090 tests** (all packages but worker) + **26 worker tests**
+(1 pre-existing skip), `pnpm audit --prod --audit-level=high`, web production build — every step rc=0.
+
+**Layer 2 — runtime + independent refuter:**
+
+| Check | Result |
+|---|---|
+| Web prod build + `next start` with `SENTRY_DSN` and a temporary stub `@sentry/node` (removed after) | `init` called once: DSN, `environment`, `sendDefaultPii:false`, `tracesSampleRate:0`, `beforeSend` set; `service=web` tag — proves the SDK is reachable from the webpack build (refuter D2) |
+| Prod crawl (5 roles × he/en + public) on that build | **130 page loads**, 0 console errors (only the 2 intentional 404 probes flagged), lang/dir correct |
+| Worker `start` + `scripts/smoke-all-jobs.ts` (CI step, run locally) | **every check PASS** (all 12 queues + chain/duplicate/sink checks) incl. `health-digest` (1 email enqueued → dispatched → local sink) |
+| Redis killed under the running worker | watchdog logged and exited code 1 after **112 s** (4 × 30 s PINGs) — what `[[restart]]` / Render restart on (refuter D1) |
+| Worker Docker image (`apps/worker/Dockerfile`, built from the repo root) | 709 MB; boots as `node`; `/health/ready` → `{"status":"ready","redis":"up"}`; "started 12 workers"; `docker stop` (SIGTERM) → graceful shutdown, exit 0 |
+
+Refuter (independent agent, adversarial read of the wave-1 diff + docs):
+
+| # | Finding | Outcome |
+|---|---|---|
+| D1 | Docs claimed Fly health checks restart the machine; they don't | fixed: in-process Redis watchdog (exit → restart policy), fly.toml/docs corrected, live-tested |
+| D2 | Web Sentry could never load (variable `import()` → empty webpack context) | fixed: `webpackIgnore` + `serverExternalPackages`; proven with a stub SDK in a prod build |
+| D3 | Digest under-reported failed jobs (only the first page read) | fixed: pages up to 1000/queue, `+` when truncated, 10 listed, true count in the subject + test |
+| D4 | "Outbox failed (24 h)" actually counts by creation time | made honest: label + docs say "created in the last 24 h that failed" (a failed-at column needs a migration — not this wave) |
+| D5 | Sentry scrubber missed `message`, exception values, breadcrumbs (privacy) | fixed + test; failed-job reasons in the digest are redacted too |
+| D6 | An early manual run suppressed that day's digest | fixed: `{force:true}` uses its own dedupe key + test; the day key is the Asia/Jerusalem date |
+| D7 | Bad `HEALTH_DIGEST_RESTAURANT_ID` → every digest fails | fixed: validated (uuid + exists), warns, falls back to the oldest + test |
+| D8 | Small doc/code mismatches (schedule comment, backlog counting delayed jobs, Render stop window, fly `[build]`/`retries`, APP_URL "required", rollback command) | fixed |
+| D9 | `cron.ts` and `ci.yml` are on the immutability list | accepted: minimal, additive, listed above under *Immutable files touched* |
