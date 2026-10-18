@@ -16,9 +16,9 @@
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Settings → API | ✅ | signed scan URLs (`/scans/[id]`) |
 | `RESEND_API_KEY` | resend.com | ✅ | magic-link login + invites + alerts |
 | `EMAIL_FROM` | your verified Resend domain | ✅ | e.g. `RestoMatch <noreply@yourdomain>` |
-| `AUTH_URL` | your prod web URL | ✅ | NextAuth callback base |
-| `AUTH_SECRET` | `openssl rand -base64 32` | ✅ | JWT signing |
-| `APP_URL` | your prod web URL | ✅ | deep links in emails |
+| `AUTH_URL` | your prod web URL | ✅ | NextAuth callback base. Its origin **overrides the request host** for sign-in callbacks — open the app/demo **only on this hostname** (a preview/alias URL loops back to `/login`). Boot WARNs when `APP_URL`'s origin differs |
+| `AUTH_SECRET` | `openssl rand -base64 32` | ✅ | JWT signing (legacy name `NEXTAUTH_SECRET` also accepted). **Boot fails without it** — otherwise every login would 500 |
+| `APP_URL` | your prod web URL | ✅ | deep links in emails. Must have the **same origin as `AUTH_URL`** (boot WARN otherwise) |
 | `REDIS_URL` | Upstash | ✅ | OCR/match/cron queue (uploads vanish without it) |
 | `AUTH_ENC_KEY` | `openssl rand -hex 32` | ✅ | encrypts TOTP secrets at rest (2FA). **Boot fails without it.** Back it up — losing it locks out every 2FA user |
 | `TRUSTED_PROXY_HOPS` | `1` on Vercel | ✅ | rate limiters read the client IP from the right of x-forwarded-for (D1.6); unset = spoofable left-most entry |
