@@ -35,7 +35,7 @@ export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor'>> 
   },
   twoFactor: {
     title: 'التحقق بخطوتين',
-    subtitle: 'أدخل الرمز المكون من 6 أرقام من تطبيق التحقق، أو رمز استرداد لمرة واحدة.',
+    subtitle: 'أدخل الرمز المكوّن من 6 أرقام من تطبيق التحقق، أو رمز استرداد لمرة واحدة.',
     error: 'الرمز غير صحيح أو انتهت صلاحيته. حاول مرة أخرى.',
     codeLabel: 'رمز التحقق',
     submit: 'تحقق',

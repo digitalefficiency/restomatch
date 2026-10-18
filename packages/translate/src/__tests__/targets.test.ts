@@ -137,3 +137,17 @@ describe('TargetTranslator (glossary → Claude, never throws)', () => {
     expect((await tr.translateMany(['מוצר 12 יח׳'], 'ar')).size).toBe(0);
   });
 });
+
+describe('unitLabelFor (receiver languages)', () => {
+  it('word units in ar/ru/th, symbols unchanged, ti/en English, he as printed', async () => {
+    const { unitLabelFor } = await import('../units');
+    expect(unitLabelFor('ארגז', 'ar')).toBe('صندوق');
+    expect(unitLabelFor('צרור', 'ru')).toBe('пучок');
+    expect(unitLabelFor("יח'", 'th')).toBe('ชิ้น');
+    expect(unitLabelFor('ק"ג', 'ar')).toBe('kg');
+    expect(unitLabelFor('ארגז', 'ti')).toBe('case');
+    expect(unitLabelFor('ארגז', 'en')).toBe('case');
+    expect(unitLabelFor('ארגז', 'he')).toBe('ארגז');
+    expect(unitLabelFor('bunch', 'ar')).toBe('ربطة');
+  });
+});

@@ -8,7 +8,7 @@ export const nav: Shape<typeof he> = {
   skipToContent: 'انتقل إلى المحتوى',
   links: {
     overview: 'نظرة عامة',
-    receiving: 'استلام البضاعة',
+    receiving: 'الاستلام',
     approvals: 'الموافقات',
     leaks: 'كاشف الخسائر',
     ask: 'اسأل RestoMatch',
