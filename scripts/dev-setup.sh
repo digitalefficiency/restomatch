@@ -118,6 +118,29 @@ else
 fi
 wait_for_pg
 
+# `next dev` hot reloads (each keeps a postgres-js pool) + the serial test suite
+# exhaust the default 100 connections ("sorry, too many clients already").
+# max_connections needs a server restart; only done when the value is too low.
+WANT_CONN=${PG_MAX_CONNECTIONS:-300}
+HAVE_CONN=$(psql_admin -c "show max_connections")
+if (( HAVE_CONN < WANT_CONN )); then
+  log "raising Postgres max_connections ${HAVE_CONN} → ${WANT_CONN} (restart)"
+  psql_admin -c "ALTER SYSTEM SET max_connections = ${WANT_CONN};"
+  case "$PG_MODE" in
+    docker) docker compose restart postgres >/dev/null ;;
+    brew)   brew services restart "${FORMULA}" >/dev/null 2>&1 ;;
+    *)
+      if [[ $OS == Darwin ]] && have brew; then
+        brew services restart "$(brew list --formula | grep '^postgresql@' | sort -V | tail -1)" >/dev/null 2>&1 || true
+      else
+        service postgresql restart >/dev/null 2>&1 \
+          || pg_ctlcluster "$(ls /usr/lib/postgresql | sort -n | tail -1)" main restart >/dev/null 2>&1 \
+          || warn "could not restart Postgres — restart it yourself for max_connections=${WANT_CONN} to apply"
+      fi ;;
+  esac
+  wait_for_pg
+fi
+
 psql_admin -c "select 1 from pg_available_extensions where name = 'vector'" | grep -q 1 \
   || die "the pgvector extension is not installed for this PostgreSQL (apt: postgresql-16-pgvector, brew: pgvector) — or re-run with --docker"
 

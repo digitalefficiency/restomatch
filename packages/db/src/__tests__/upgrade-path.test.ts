@@ -1,7 +1,7 @@
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runDoctor, type DoctorReport } from '../doctor';
-import { readJournal, runMigrator, truncatedMigrationsFolder } from '../migrations';
+import { findJournalGaps, readJournal, runMigrator, truncatedMigrationsFolder } from '../migrations';
 import { repairAllPreconditions } from '../repairs';
 import { applyAuditImmutableRls, applyCoreTenantRls, ensureRlsAppRole } from '../rls';
 import { testDbUrl } from '../test-env';
@@ -93,6 +93,28 @@ describe('migration chain: fresh database', () => {
     expect(find(report, 'migrations', 'journal gaps')?.status).toBe('PASS');
     expect(find(report, 'migrations', 'file hashes')?.status).toBe('PASS');
   });
+
+  it('FAILs on a journal gap: an entry older than the newest applied row that was never applied', async (ctx) => {
+    // The drizzle migrator only runs entries NEWER than the newest recorded row, so a
+    // DB that applied a later session's migration first (e.g. 0039 before 0029–0032)
+    // silently skips the older ones forever. Simulate: forget 0030's tracker row.
+    if (!canCreate) ctx.skip();
+    const gap = journal.find((e) => e.tag === '0030_fk_indexes')!;
+    const sql = postgres(scratchUrl, { max: 1, prepare: false });
+    try {
+      const [row] = await sql`delete from drizzle.__drizzle_migrations where created_at = ${gap.when} returning hash, created_at`;
+      const report = await runDoctor(scratchUrl);
+      const f = find(report, 'migrations', 'journal gaps');
+      expect(f?.status).toBe('FAIL');
+      expect(f?.detail).toContain('0030_fk_indexes');
+      expect(report.pending).toEqual([]); // the migrator would NOT pick it up — that is the danger
+      expect(report.ok).toBe(false);
+      expect((await findJournalGaps(scratchUrl)).map((g) => g.tag)).toEqual(['0030_fk_indexes']); // db:migrate refuses
+      await sql`insert into drizzle.__drizzle_migrations (hash, created_at) values (${row!.hash}, ${row!.created_at})`;
+    } finally {
+      await sql.end();
+    }
+  });
 });
 
 describe('migration chain: production-level (0018) database upgrade', () => {
@@ -131,7 +153,7 @@ describe('migration chain: production-level (0018) database upgrade', () => {
     expect(pre('0027_leak_trust')?.detail).toMatch(/VAT 0\.17/);
     expect(pre('0032_integrity_checks')?.status).toBe('WARN');
     expect(pre('0032_integrity_checks')?.detail).toMatch(/gr_lines_qty_received_nonneg=1/);
-    for (const tag of ['0019_storage_namespaces', '0022_legal_compliance', '0028_english_receiving', '0029_tenant_scoped_uniques', '0030_fk_indexes', '0031_updated_at_triggers']) {
+    for (const tag of ['0019_storage_namespaces', '0022_legal_compliance', '0028_english_receiving', '0029_tenant_scoped_uniques', '0030_fk_indexes', '0031_updated_at_triggers', '0039_invitation_locale']) {
       expect(pre(tag)?.status, tag).toBe('PASS');
     }
     expect(r.ok).toBe(false);
