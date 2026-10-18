@@ -9,6 +9,14 @@
 > storage bucket stays in `PR1-storage-isolation-APPLY.md`; RLS background in
 > `RLS-PROVISIONING-RUNBOOK.md`.
 
+> **NEW (2026-10-18): production moves to a NEW, EMPTY Supabase project deployed from git.**
+> For that project follow **`docs/SUPABASE-GITHUB-DEPLOY.md`** — the schema ships as
+> `supabase/migrations` (generated from drizzle by `pnpm db:supabase-sync`) and Supabase's GitHub
+> integration applies it on merge; this runbook's §0–§10 remain the procedure for upgrading the
+> OLD project (`cringgshiafwsszyqufo`) in place, and §6 of the new doc reuses them to move its data.
+> Rule for every new migration from now on: drizzle SQL + journal entry → `pnpm db:supabase-sync`
+> → commit both (a test fails if `supabase/` is stale).
+
 **Where prod is:** Supabase `cringgshiafwsszyqufo`, schema at **0018**. Pending:
 **0019 → 0039** (table in §11; 0033–0038 are unused numbers). The web still runs on the owner connection until
 `DATABASE_URL_APP` is flipped (§8).
