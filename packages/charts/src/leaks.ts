@@ -24,7 +24,14 @@ export interface LeakRow {
   lastObservedPrice: number;
   lastObservedAt: string;
   deltaPct: number;
+  /** Projection: (latest price − p50) × the last 30 days' quantity. */
   monthExcessIls: number;
+  /**
+   * Money actually paid above the p50 in the last 30 days:
+   * Σ max(0, unit price − p50) × qty over those purchases. This is the figure
+   * to show as "leaked" — monthExcessIls re-prices old purchases at the latest price.
+   */
+  paidExcessIls: number;
   /** Recent unit-price observations (oldest → newest) for a sparkline. */
   series: number[];
 }
@@ -156,6 +163,7 @@ export async function computeLeaks(
       lastObservedAt: r.lastObservedAt.toISOString(),
       deltaPct,
       monthExcessIls: (actual - p50) * monthlyQty,
+      paidExcessIls: 0,
       series: [],
     });
   }
@@ -171,6 +179,8 @@ export async function computeLeaks(
         productId: priceHistory.productId,
         supplierId: priceHistory.supplierId,
         unitPrice: priceHistory.unitPrice,
+        qty: priceHistory.qty,
+        observedAt: priceHistory.observedAt,
       })
       .from(priceHistory)
       .where(
@@ -182,14 +192,26 @@ export async function computeLeaks(
       .orderBy(priceHistory.observedAt);
 
     const byPair = new Map<string, number[]>();
+    const recentByPair = new Map<string, Array<{ price: number; qty: number }>>();
     for (const pt of points) {
       const key = `${pt.productId}|${pt.supplierId}`;
       const arr = byPair.get(key) ?? [];
       arr.push(Number(pt.unitPrice));
       byPair.set(key, arr);
+      if (pt.observedAt >= monthlySince) {
+        const recent = recentByPair.get(key) ?? [];
+        recent.push({ price: Number(pt.unitPrice), qty: pt.qty == null ? 1 : Number(pt.qty) });
+        recentByPair.set(key, recent);
+      }
     }
     for (const leak of top) {
-      leak.series = (byPair.get(`${leak.productId}|${leak.supplierId}`) ?? []).slice(-12);
+      const key = `${leak.productId}|${leak.supplierId}`;
+      leak.series = (byPair.get(key) ?? []).slice(-12);
+      const paid = (recentByPair.get(key) ?? []).reduce(
+        (sum, o) => sum + Math.max(0, o.price - leak.baselineP50) * o.qty,
+        0,
+      );
+      leak.paidExcessIls = Math.round(paid * 100) / 100;
     }
   }
 
