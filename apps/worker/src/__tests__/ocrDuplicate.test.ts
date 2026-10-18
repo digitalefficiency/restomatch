@@ -114,7 +114,8 @@ describe('writeOcrHeader', () => {
     const first = await newInvoice();
     const second = await newInvoice();
     await writeOcrHeader(db, { restaurantId, invoiceId: first, supplierId }, header(''));
-    const out = await writeOcrHeader(db, { restaurantId, invoiceId: second, supplierId }, header('  '));
+    // Two identical '' values collided on invoices_dedupe_idx before.
+    const out = await writeOcrHeader(db, { restaurantId, invoiceId: second, supplierId }, header(''));
     expect(out.duplicateOf).toBeUndefined();
     const rows = await db.select().from(invoices).where(eq(invoices.restaurantId, restaurantId));
     expect(rows.map((r) => r.invoiceNumber)).toEqual([null, null]);

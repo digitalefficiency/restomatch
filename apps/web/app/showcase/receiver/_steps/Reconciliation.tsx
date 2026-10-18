@@ -321,7 +321,7 @@ function LineQty({
   // both directions; inside one LTR isolate with the price it drifted to the
   // far left in RTL ("× 6.43₪ 37.5 ליטר").
   return (
-    <span className="flex flex-col gap-0.5" data-testid="line-qty">
+    <span className="flex flex-col gap-0.5">
       <span className="inline-flex flex-wrap items-baseline gap-x-1.5">
         <Qty qty={qty} unit={unit} />
         {price !== null ? (
