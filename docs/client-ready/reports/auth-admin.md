@@ -283,3 +283,33 @@ Tested on a production build against a local DB with the recipes demo seed, plus
   - A formula-like name (`=HYPERLINK(…)`) is stored as plain text; there's no CSV export, and React escapes it on display. Note: neutralize leading `= + - @` if a recipe export is ever added.
 - **COVERAGE:** all 11 `recipes.*` procedures listed (attack/isolation).
 - **Error bodies:** no SQL/stack.
+
+### Proposal (needs a human-authored PR): per-user membership epoch
+Not implemented by an agent. It requires `packages/db/src/schema.ts` and `packages/db/drizzle/meta/_journal.json`, which are on the AGENTS.md immutable list (the edit was refused when attempted). Ready-to-apply design:
+
+1. **Migration `0060_membership_epoch.sql`** (journal `when` 1782150000000, then `pnpm --filter @restomatch/db supabase-sync` for the mirror):
+   ```sql
+   ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "membership_epoch" integer DEFAULT 0 NOT NULL;
+   CREATE OR REPLACE FUNCTION app.bump_membership_epoch() RETURNS trigger
+     LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+   BEGIN
+     UPDATE public.users SET membership_epoch = membership_epoch + 1 WHERE id = OLD.user_id;
+     IF TG_OP = 'UPDATE' AND NEW.user_id IS DISTINCT FROM OLD.user_id THEN
+       UPDATE public.users SET membership_epoch = membership_epoch + 1 WHERE id = NEW.user_id;
+     END IF;
+     RETURN NULL;
+   END $$;
+   REVOKE ALL ON FUNCTION app.bump_membership_epoch() FROM PUBLIC;
+   CREATE TRIGGER memberships_bump_epoch AFTER DELETE OR UPDATE OF role, restaurant_id, user_id
+     ON memberships FOR EACH ROW EXECUTE FUNCTION app.bump_membership_epoch();
+   ```
+   A trigger (not app code) covers every path: team `removeMember` / `changeRole` (delete + insert), the admin console, chain edits and restaurant cascades. `preferred_locale`-only updates don't bump.
+2. **Schema:** `users.membershipEpoch: integer('membership_epoch').notNull().default(0)`.
+3. **`apps/web/lib/passwords.ts` `getSessionSecurityState`:** select `users.membershipEpoch` (users LEFT JOIN user_credentials, so magic-link-only users are covered too).
+4. **`apps/web/auth.ts` jwt:** stamp `t.mep = sec.membershipEpoch` at sign-in. On every later request (inside the existing `!isSignIn` token_version block, same query), `if ((t.mep ?? 0) !== sec.membershipEpoch) { t.mep = sec.membershipEpoch; forceRefresh = true }` and add `forceRefresh` to `stale`. This re-reads memberships immediately (fall back to another membership or none ⇒ `memberProcedure` FORBIDDEN), without logging the user out.
+5. **Tests:**
+   - db: the trigger bumps on delete and on a role update, not on a locale update; the app role can't call the function directly.
+   - web: removing a member makes the very next tRPC call FORBIDDEN (DB-backed, like `rls.attack`).
+   - Pure unit test of the stale predicate.
+
+Cost: one extra integer column read in a query that already runs per request.
