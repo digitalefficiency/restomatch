@@ -360,10 +360,20 @@ describe('ask: prompt injection from invoice text is data, not instructions', ()
     ]) {
       expect(sanitizeAnswer(`see ${evil} now`).stripped, evil).toBe(true);
     }
+    // S4 re-verify: inverted rule — phishing gTLDs, spaced-out letters, comma-as-dot, unknown words.
+    for (const evil of [
+      'evil.zip', 'evil.mov', 'evil.bond', 'evil.sbs', 'evil.cfd', 'evil.lat', 'evil.quest',
+      'e v i l . c o m', 'evil,com', 'e v i l , c o m', 'evil,co,il', 'evil.foobar', 'Evil.Com', 'evil.Zip',
+    ]) {
+      const s = sanitizeAnswer(`Pay at ${evil} now`);
+      expect(s.stripped, evil).toBe(true);
+      expect(s.text, evil).not.toMatch(/evil|e v i l/i);
+      expect(groundAnswer({ answer: `Pay at ${evil} now`, citations: [] }, LINKS, FIG).grounded, evil).toBe(false);
+    }
     // …and ordinary prose (incl. a double space, "<5%", a missing space after a period) is NOT flagged.
     for (const ok of [
       '1.5% of spend.Next month', 'avg.price', 'report.xlsx', 'Mr. Cohen', 'U.S. dollars', '10:30:45',
-      'spend. It was high', 'הדליפה  ₪1,234.56', 'פחות מ- <5% חריגה', 'פערים.מומלץ', 'The leak rose.It came from X.',
+      'spend. It was high', 'milk,eggs and bread', 'e.g. this', 'the file.pdf', 'Total spend.The leak', 'הדליפה  ₪1,234.56', 'פחות מ- <5% חריגה', 'פערים.מומלץ', 'The leak rose.It came from X.',
     ]) {
       expect(sanitizeAnswer(ok).stripped, ok).toBe(false);
     }

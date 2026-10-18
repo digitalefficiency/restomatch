@@ -4,7 +4,9 @@
  *  - citations keep only hrefs the tools produced (internal /dashboard paths);
  *    their label is the SCREEN name (not model text) and a cited value must be
  *    a figure of the SAME unit in the tool output (₪ vs % vs count);
- *  - URLs, any label.tld (also defanged `[.]`/`(.)`/` dot `), bare IPs, user@host,
+ *  - URLs, ANY label.word (inverted: a link unless it is a file name, a number or
+ *    one of a few prose shapes — also defanged `[.]`/`(.)`/` dot `, spaced-out
+ *    "e v i l . c o m", "evil,com"), bare IPs, user@host,
  *    markdown links and phone numbers are stripped from the text — and the answer
  *    is then flagged `grounded: false` (a link in an answer is an injection signal);
  *  - every number in the prose (any unit, "40 אלף", "5k", Hebrew "שקלים"…) must
@@ -70,8 +72,11 @@ const LOOKALIKE_DOTS = /[。｡․﹒۔։·‧∙⋅・]/g;
 const DEFANG = /\s*(?:\[\s*(?:\.|dot)\s*\]|\(\s*(?:\.|dot)\s*\)|\{\s*(?:\.|dot)\s*\}|<\s*(?:\.|dot)\s*>|\s+dot\s+)\s*/gi;
 
 /**
- * Real TLDs a link in an answer could use (lower-case ASCII). An unknown ASCII
- * "tld" ("spend.Next", "avg.price", "report.xlsx") is ordinary text, not a link.
+ * Known TLDs (lower-case ASCII): the spaced ("evil . com") and comma ("evil,com")
+ * forms are only links when they end in one of these — prose has ". Next" and
+ * "milk,eggs" all the time. The tight label.word form does NOT use this list:
+ * any ASCII word after a dot is a link (inverted logic, S4 L1) unless it is
+ * a file extension or one of the prose shapes in `isProseToken`.
  */
 const TLDS = new Set(
   (
@@ -81,16 +86,41 @@ const TLDS = new Set(
     'mobi name asia tel travel gov edu mil int ch at be se no dk fi pt gr tr ro hu cz sk bg hr si rs lt lv ee ie ' +
     'is lu mt cy ae sa eg ma tn jo lb ps iq ir pk bd lk th vn ph my sg id kr tw hk mx ar cl pe ve za ng ke nz ' +
     'one blog wiki help support service services money pay bank finance cash gift sale shopping deals best ' +
-    'help app games tips network systems solutions digital media agency global center company group zone ' +
+    'app games tips network systems solutions digital media agency global center company group zone ' +
     'ink lol wtf rip gay sex porn adult casino bet poker loans cards credit ' +
+    // phishing-heavy new gTLDs (S4 re-verify)
+    'zip mov bond sbs cfd lat quest cam skin hair beauty mom dad boo foo nexus phd esq prof meme day ' +
+    'country stream download review racing date faith party science trade webcam accountant cricket ' +
+    'gdn kim men work fit surf uno cyou autos boats homes motorcycles yachts quest ' +
     'example test invalid localhost local onion internal lan home corp'
   ).split(' '),
 );
 
-/** A label.tld host: TLD from the list, punycode, or 2+ non-ASCII letters (e.g. ".ישראל", ".рф"). */
+/** File extensions a grounded answer may name ("report.xlsx"). NOT zip/mov — those are phishing gTLDs. */
+const FILE_EXTS = new Set(
+  'xlsx xls csv pdf png jpg jpeg gif webp svg heic tif tiff doc docx txt rtf json xml ppt pptx odt ods'.split(' '),
+);
+/** Words that start an English sentence: "spend.Next month", "rose.It came" (a missing space, not a host). */
+const SENTENCE_STARTERS = new Set(
+  (
+    'it its the this that these those there then next last total also and but so we you your our they he she ' +
+    'in on at for from to of most some all each every one two three please note overall however meanwhile ' +
+    'since because if when while what which why how here now finally first second third this other'
+  ).split(' '),
+);
+/** Abbreviations a "abbr.word" prose token starts with ("avg.price", "kg.unit"). */
+const ABBREVIATIONS = new Set(
+  'avg approx est max min vs incl excl qty tot ref no kg gr ml ltr pcs pc unit ea per mo yr wk hr'.split(' '),
+);
+
+/** A label.word token: punycode, or 2+ letters of any script after the last dot. */
 const HOST = /(?<![\p{L}\p{N}@-])(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?\.)+(xn--[a-z0-9-]{1,59}|\p{L}{2,24})(?![\p{L}\p{N}-])(?::\d{1,5})?(?:\/\S*)?/giu;
 /** "evil . com", "evil .com": a spaced dot before a KNOWN tld (a normal ". Next" sentence is not touched). */
 const SPACED_HOST = /(?<![\p{L}\p{N}])[\p{L}\p{N}][\p{L}\p{N}-]{0,62}\s+\.\s*([a-z]{2,24})\b|(?<![\p{L}\p{N}])[\p{L}\p{N}][\p{L}\p{N}-]{0,62}\.\s+([a-z]{2,24})\b(?!\s+[a-z])/giu;
+/** "evil,com" / "evil,co,il": a comma between labels before a KNOWN tld (detection only — "milk,eggs" is prose). */
+const COMMA_HOST = /(?<![\p{L}\p{N}@-])(?:[\p{L}\p{N}][\p{L}\p{N}-]{0,62},)+([a-z]{2,24}|xn--[a-z0-9-]{1,59})(?![\p{L}\p{N}-])(?:\/\S*)?/giu;
+/** Spaced-out single characters ("e v i l . c o m", "e v i l , c o m"): collapsed for detection only. */
+const SPACED_LETTERS = /(?<![\p{L}\p{N}])[\p{L}\p{N}](?:[ \t]*[.,][ \t]*[\p{L}\p{N}]|[ \t]+[\p{L}\p{N}])+(?![\p{L}\p{N}])/gu;
 
 const LINK_PATTERNS: RegExp[] = [
   /\b[a-z][a-z0-9+.-]{1,15}:\/\/\S+/gi, // any scheme://… (hxxp:// too)
@@ -111,12 +141,42 @@ const LINK_PATTERNS: RegExp[] = [
 /** Hebrew IDN TLDs (any other Hebrew word after a dot is just a sentence without a space). */
 const HEBREW_TLDS = new Set(['ישראל', 'קום']);
 
-function isHostMatch(tld: string): boolean {
-  const t = tld.toLowerCase();
-  if (t.startsWith('xn--') || TLDS.has(t)) return true;
+/** The non-ASCII suffix rule: Hebrew only for real Hebrew TLDs; any other script is an IDN or a homoglyph spoof. */
+function isNonAsciiTld(t: string): boolean {
   if (/^[\u0590-\u05FF]+$/.test(t)) return HEBREW_TLDS.has(t);
-  // Any other non-ASCII TLD: an IDN (".рф") or a homoglyph spoof (".cоm" with a Cyrillic о).
   return /[^\x00-\x7F]/.test(t);
+}
+
+function isKnownTld(tld: string): boolean {
+  const t = tld.toLowerCase();
+  return t.startsWith('xn--') || TLDS.has(t) || isNonAsciiTld(t);
+}
+
+/**
+ * Inverted rule for a tight label.word token: it IS a link, unless
+ *  - the suffix is a file extension ("report.xlsx"), or a Hebrew word (a sentence without a space);
+ *  - it is a 2-label ASCII token with no port/path that reads as prose:
+ *    "spend.Next" / "rose.It" (Title-case English sentence starter), or
+ *    "avg.price" / "kg.unit" (lower-case abbreviation + a word that is not a known TLD).
+ */
+function isProseToken(m: string, tld: string): boolean {
+  const t = tld.toLowerCase();
+  if (t.startsWith('xn--')) return false;
+  if (/[^\x00-\x7F]/.test(t)) return !isNonAsciiTld(t);
+  if (FILE_EXTS.has(t)) return true;
+  const labels = m.split('.');
+  if (labels.length !== 2 || /[:/]/.test(m)) return false;
+  if (/^[A-Z][a-z]+$/.test(tld) && SENTENCE_STARTERS.has(t)) return true;
+  return /^[a-z]+$/.test(labels[0]!) && /^[a-z]+$/.test(tld) && ABBREVIATIONS.has(labels[0]!) && !TLDS.has(t);
+}
+
+/** Does a (collapsed) token contain a link by the same rules as the prose? */
+function hasLink(token: string): boolean {
+  const dotted = token.replace(/,/g, '.');
+  for (const m of dotted.matchAll(new RegExp(HOST.source, HOST.flags))) {
+    if (!isProseToken(m[0], m[1]!)) return true;
+  }
+  return false;
 }
 
 /** Strip every link-like token from model prose; `stripped` says whether a LINK was removed. */
@@ -138,16 +198,25 @@ export function sanitizeAnswer(text: string): { text: string; stripped: boolean 
       return '';
     });
   }
+  // Spaced-out letters: collapse a COPY; strip the run only if the copy is a link.
+  out = out.replace(SPACED_LETTERS, (m) => {
+    const collapsed = m.replace(/[ \t]+/g, '');
+    if (!/[.,]/.test(collapsed) || !hasLink(collapsed)) return m;
+    stripped = true;
+    return '';
+  });
   out = out.replace(SPACED_HOST, (m, a?: string, b?: string) => {
-    if (!isHostMatch(a ?? b ?? '')) return m;
+    if (!isKnownTld(a ?? b ?? '')) return m;
+    stripped = true;
+    return '';
+  });
+  out = out.replace(COMMA_HOST, (m, tld: string) => {
+    if (!isKnownTld(tld)) return m;
     stripped = true;
     return '';
   });
   out = out.replace(HOST, (m, tld: string) => {
-    if (!isHostMatch(tld)) return m;
-    // "rose.It came…" (sentence without a space): a Title-case 2-label ASCII
-    // token reads as prose; real hosts in text are lower- or upper-case.
-    if (/^[A-Z][a-z]+$/.test(tld) && m.split('.').length === 2 && !/[:/]/.test(m)) return m;
+    if (isProseToken(m, tld)) return m;
     stripped = true;
     return '';
   });
