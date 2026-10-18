@@ -17,7 +17,7 @@ import { HeroVideo } from './(marketing)/_components/HeroVideo';
 import { LazyLeadForm } from './(marketing)/_components/LazyLeadForm';
 import { PromoVideoButton } from './(marketing)/_components/PromoVideoButton';
 import { Eyebrow, FaqSection, Forward, faqItems } from './(marketing)/_components/detail-sections';
-import { SITE_URL, metadataBase } from './(marketing)/_components/seo';
+import { SITE_URL, metadataBase, socialFor } from './(marketing)/_components/seo';
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getT(landing);
@@ -28,8 +28,7 @@ export async function generateMetadata(): Promise<Metadata> {
     // Next's resolver collapses `/?lang=en` to the bare origin on the root
     // route, so the root's canonical + hreflang <link>s are rendered in the
     // page instead (React hoists them into <head>).
-    openGraph: { title: t('meta.title'), description: t('meta.description'), url: '/' },
-    twitter: { title: t('meta.title'), description: t('meta.description') },
+    ...socialFor(t.locale, { title: t('meta.title'), description: t('meta.description'), url: '/' }),
   };
 }
 
@@ -180,7 +179,8 @@ export default async function Home() {
               {t('hero.lead')}
             </p>
             <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center lg:justify-start">
-              <Link href="#lead" className={btnPrimary}>
+              {/* data-keep-clear: the cookie banner never covers this CTA */}
+              <Link href="#lead" className={btnPrimary} data-keep-clear>
                 {t('hero.ctaPrimary')}
                 <Forward />
               </Link>

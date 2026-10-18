@@ -4,6 +4,7 @@ import { CookieConsent } from '@/lib/components/CookieConsent';
 import { I18nProvider } from '@/lib/i18n/client';
 import { dirOf } from '@/lib/i18n/config';
 import { getLocale } from '@/lib/i18n/server';
+import { metadataBase, socialFor } from './(marketing)/_components/seo';
 import './globals.css';
 
 // Fonts are self-hosted (public/fonts, @font-face in globals.css): Heebo for
@@ -13,12 +14,15 @@ const FONT_PRELOADS = ['/fonts/heebo/heebo-hebrew-wght.woff2', '/fonts/heebo/hee
 
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await getLocale();
+  const description =
+    locale === 'he'
+      ? 'התאמת חשבוניות, הזמנות וקבלת סחורה למסעדות'
+      : 'Invoice, order and goods-receipt matching for restaurants';
   return {
     title: 'RestoMatch',
-    description:
-      locale === 'he'
-        ? 'התאמת חשבוניות, הזמנות וקבלת סחורה למסעדות'
-        : 'Invoice, order and goods-receipt matching for restaurants',
+    description,
+    metadataBase,
+    ...socialFor(locale, { title: 'RestoMatch', description }),
   };
 }
 

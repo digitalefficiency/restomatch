@@ -77,6 +77,7 @@ export const en: Shape<typeof he> = {
   cookie: {
     label: 'Cookie consent',
     body: 'We use essential cookies to run the service securely. Non-essential cookies (such as analytics) are only enabled once you agree.',
+    short: 'Essential cookies only, unless you say otherwise.',
     link: 'Read the cookie policy',
     necessary: 'Essential only',
     all: 'Accept all',
