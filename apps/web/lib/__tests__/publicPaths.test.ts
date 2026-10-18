@@ -7,6 +7,11 @@ describe('isPublicPath (middleware allowlist)', () => {
     (p) => expect(isPublicPath(p)).toBe(true),
   );
 
+  it.each(['/opengraph-image', '/twitter-image', '/robots.txt', '/sitemap.xml', '/icon.svg'])(
+    'SEO/social asset %s is public (crawlers have no session)',
+    (p) => expect(isPublicPath(p)).toBe(true),
+  );
+
   it('password reset is public, including the emailed token link', () => {
     expect(isPublicPath('/reset')).toBe(true);
     expect(isPublicPath('/reset/')).toBe(true);
