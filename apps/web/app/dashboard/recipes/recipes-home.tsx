@@ -540,6 +540,9 @@ function PosTab({ targetBp }: { targetBp: number }) {
                     <td className="px-4 py-3 text-end">
                       {r.gapBp == null ? (
                         '—'
+                      ) : Math.abs(r.gapBp) < 5 ? (
+                        // Under 0.05 points rounds to "0%": say "≈0" in a neutral tone, not an amber "+0%".
+                        <Badge>≈0</Badge>
                       ) : (
                         <Badge tone={r.gapBp > 100 ? 'danger' : r.gapBp > 0 ? 'warning' : 'accent'}>
                           <bdi dir="ltr" className="tabular-nums">
