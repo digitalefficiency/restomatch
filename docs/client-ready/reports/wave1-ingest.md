@@ -113,7 +113,111 @@ regenerated RLS file brings the 4 tables under RLS.
 
 ## Verification (2 layers)
 
-_(filled in below with exact commands and results)_
+All runs used local, session-owned Postgres databases (`restomatch_s13_scratch` for tests, `restomatch_s13_dev` seeded
+with the demo tenant for the app) and local Redis. Nothing touched production.
+
+### Layer 1: automated gate
+
+```bash
+export DATABASE_URL_TEST=postgres://postgres:postgres@localhost:5432/restomatch_s13_scratch
+pnpm install --frozen-lockfile                                   # ok
+pnpm --filter @restomatch/db migrate                             # through 0051, clean
+pnpm exec turbo run test --concurrency=1                         # 14/14 tasks — 1152 passed, 1 skipped
+#   ingest 21 · db 65 (incl. migration-0050 6, upgrade-path + doctor: no FAIL/WARN) · api 532
+#   (incl. ingest.attack 26, cross-tenant.attack 108) · web 207 · translate 69 · ocr 44 · matching 86 (canary unchanged)
+#   catalog 50 · charts 33 · procurement 17 · crypto 12 · billing 5 · worker 11 (+1 skipped)
+pnpm exec turbo run typecheck                                    # 18/18
+pnpm --filter @restomatch/web exec tsc --noEmit -p .             # 0 errors
+pnpm --filter @restomatch/web lint                               # 0 errors (6 pre-existing warnings, none in S13 files)
+pnpm db:supabase-sync --check                                    # up to date (42 files)
+cd apps/web && pnpm build                                        # success — /api/ingest/*, /dashboard/inbox, /receiver-sw.js built
+```
+
+The db:doctor check inside `upgrade-path.test.ts` caught 4 unindexed foreign keys and a missing `updated_at`
+trigger in my first 0050. I fixed both before release. 0050 had never left this branch, so its lock entries were
+regenerated.
+
+### Layer 2a: functional, production build plus dev server
+
+The script is `apps/web/scripts/e2e-ingest-pwa.ts` (Playwright, Chromium 1194). The webhook simulator is
+`apps/web/scripts/ingest-simulate.ts`, which sends signed stub deliveries through the real routes.
+
+```bash
+# env: .env.local + DATABASE_URL(_APP)=…/restomatch_s13_dev, WHATSAPP_APP_SECRET / WHATSAPP_VERIFY_TOKEN /
+#      INGEST_EMAIL_WEBHOOK_SECRET / INGEST_EMAIL_DOMAIN = local test values; for `next start` the
+#      production boot guard also needs RESEND_API_KEY / EMAIL_FROM / SUPABASE_SERVICE_ROLE_KEY → dummy
+#      values (no Supabase URL ⇒ storage stays off), as other sessions did.
+pnpm dev &   pnpm exec tsx scripts/ingest-simulate.ts http://localhost:3000
+#  whatsapp allow-listed → 200 accepted · unknown sender → needs_review · e-mail PDF unknown → needs_review
+#  disguised HTML "invoice.pdf" → rejected (unsupported_type) · forged signature → 401
+PHASE=dev  pnpm exec tsx scripts/e2e-ingest-pwa.ts     # PASS (dev): 21 checks
+pnpm build && NODE_ENV=production pnpm start &
+PHASE=prod pnpm exec tsx scripts/e2e-ingest-pwa.ts     # PASS (prod): 140 checks
+```
+
+- **Production phase.** It covers every role × he/en, which is 10 runs (owner, manager, bookkeeper, receiver, chef):
+  - HTTP below 400 everywhere;
+  - `<html lang dir>` correct;
+  - **zero console errors and zero server 5xx**;
+  - the inbox lists messages for owner, manager and bookkeeper, with review buttons hidden for the bookkeeper;
+  - the error filter shows the translated "unsupported type";
+  - the receiver and chef do not get the inbox nav, and `/dashboard/inbox` redirects them;
+  - the receiving pages link the manifest.
+
+  Webhook HTTP checks: forged signature → 401, oversized body → 413, valid signature with an unknown token → 404,
+  anonymous `ingest.inbox` → 401. With **flags off**: the nav is hidden, `/dashboard/inbox` renders the 404 UI, and
+  there is no manifest.
+- **Mobile viewport offline test** (390×844, touch, he and en, receiver):
+  - the service worker controls `/dashboard/receiving`;
+  - `?source=pwa` turns on installed mode;
+  - the manifest is served with its scope and 3 icons;
+  - going offline shows the he/en banner;
+  - a photo is stored in IndexedDB (1 queued) and the wizard says "saved on the phone";
+  - an offline navigation gets the SW offline page;
+  - **Cache Storage holds exactly the 5 public `/pwa/*` files**.
+
+  In the production build there is no object storage locally, so the server refuses the upload. The photo then
+  **stays queued**: it is not lost.
+- **Dev phase** (local disk storage exists):
+  - the allow-listed WhatsApp photo becomes a `source=whatsapp` `ocr_pending` invoice;
+  - review documents are stored under `<restaurantId>/`;
+  - a manager approves from the inbox, and the needs-review list goes down by one;
+  - rotating the address shows the new secret once;
+  - mobile: offline photo → reconnect → `scans.upload` → `startReceipt` → `registerInvoice` → queue drained,
+    **exactly one** new invoice, and a later sync does not register it again.
+
+Playwright's offline emulation does not reach service-worker fetches in Chromium. So the offline-navigation step also
+aborts requests at the context level, and the test notes this.
+
+**Screenshots** (`docs/client-ready/screenshots/`): `ingest-inbox-{he,en}.png`, `ingest-settings-{he,en}.png`,
+`ingest-inbox-rotate-en.png`, `pwa-offline-{he,en}.png` (mobile), `pwa-offline-page-{he,en}.png`.
+
+### Layer 2b: independent refuter
+
+A separate agent, which did not write this code, tried to break the branch on its own scratch DB with
+proof-of-concept tests. It **confirmed 6 defects**, and all are fixed with regression tests (`ingest.attack`
+"refuter regressions", `ingest.test`, `offlineQueue.test`, `cross-tenant` role/race tests):
+
+1. A fake `<allowed@supplier>` in the From display name passed the allow-list. Fix: the last `<address>` wins.
+2. An e-mail CC'd to two restaurants reached only the first. Fix: every recipient token gets the message.
+3. Production fell back to the stub provider (fake bytes became an invoice), and with no domain set a token was
+   accepted on any domain. Fix: an unavailable provider, and the domain is required.
+4. A WhatsApp channel with no `phone_number_id` accepted any number's events. Fix: the binding is mandatory in
+   production.
+5. A WhatsApp message with no timestamp skipped the age check. Fix: the timestamp is required.
+6. The offline queue was not tied to a restaurant. Fix: items carry `restaurantId` and only upload while that
+   restaurant is active.
+
+I also fixed four of its "plausible" items:
+- approve/reject now takes a row lock, and registering requires `needs_review`;
+- a store failure no longer leaves a duplicate document row;
+- message status uses one shared function;
+- inbox, senders and overview are now owner/manager/bookkeeper only, so receivers and chefs can no longer read
+  sender phone numbers.
+
+It also attacked these, and they held: HMAC, the size caps, token parsing, the SECURITY DEFINER function, RLS
+coverage, foreign-id checks, storage-path confinement, no XSS sinks, the service-worker cache policy, and queue
+idempotency.
 
 ## Immutable / shared files touched
 
