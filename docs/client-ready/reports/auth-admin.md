@@ -259,3 +259,27 @@ Tested on a production build (`next start`, NODE_ENV=production) against a local
 - `publicPaths` adds only `/leak-check` and `/api/leak-check` (prefix match is segment-bounded). Every route re-checks the gate, origin, limits and PoW; the claim page itself requires a signed-in owner.
 
 Accepted / by design: a sock-puppet referral from a second mailbox is possible, but credits fill only on conversion (payment). Prospect email is unverified at submit, but claiming requires signing in with that email.
+
+### Cross-QA: S17 recipes / food cost (PR #46, `claude/wave1-recipes` @ 5993028)
+Tested on a production build against a local DB with the recipes demo seed, plus a RIVAL tenant holding a product and a sub-recipe. #46's suites (cross-tenant, rls.attack, recipes-router, recipes-cost) pass 205/205.
+
+**Finding (fix goes back to S17)**
+| # | Sev | Finding | Fix |
+|---|---|---|---|
+| R1 | low-medium | **Concurrent sub-recipe saves that would close a cycle → HTTP 500.** Reproduced 8/8: X→Y and Y→X saved at the same moment. Postgres reports `deadlock detected` on the composite-FK row locks, one save wins and the other returns a generic `INTERNAL_SERVER_ERROR`. No cycle was ever persisted, and `recipes.list` stays fast (cost is memoised and marks cycles), so there's no DoS. But the protection is **incidental** (lock ordering), not the cycle check, and the user sees a 500. | Serialize recipe-graph writes per restaurant: `pg_advisory_xact_lock(hashtext('recipes:'||restaurant_id))` at the start of `save`/`importCsv`. The cycle check then sees committed edges and returns the friendly `recipes.cycle` |
+
+**Verified ✅**
+- **Roles:** owner/manager/chef can list and edit, and the page renders. Receiver/bookkeeper get 403 on the API and bounce from the page. `setTarget` is owner/manager only (chef 403).
+- **Cross-tenant references:** blocked at every layer.
+  - API: save with another restaurant's product → `productNotFound`; with its sub-recipe → `subRecipeNotFound`. get/delete of a foreign recipe → 404, with no effect. `searchProducts` never returns another tenant's products.
+  - DB, as the app role: the composite same-tenant FK rejects a foreign `product_id`. RLS hides other tenants' recipes and rejects an INSERT into another tenant.
+- **Cycles:** A→B→A and A→A rejected on save (`recipes.cycle`). CSV P↔Q rejected with nothing written.
+- **Feature flag off:** `FEATURE_DISABLED:recipes` (403, appCode only), and `recipes.enabled` = false.
+- **products.delete guard:** deleting a product a recipe uses → friendly 409, product kept. A foreign product → 404. Deleting a sub-recipe that's in use → `recipes.inUse` 409.
+- **CSV import:**
+  - >200 KB → 400 before parsing; 2001 rows → `tooManyRows`.
+  - A decimal comma `"1,5"` → `badQuantity` (never 15).
+  - An ingredient named like another tenant's product doesn't resolve to it.
+  - A formula-like name (`=HYPERLINK(…)`) is stored as plain text; there's no CSV export, and React escapes it on display. Note: neutralize leading `= + - @` if a recipe export is ever added.
+- **COVERAGE:** all 11 `recipes.*` procedures listed (attack/isolation).
+- **Error bodies:** no SQL/stack.
