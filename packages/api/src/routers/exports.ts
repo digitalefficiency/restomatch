@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   and,
   count,
+  desc,
   discrepancies,
   eq,
   gte,
@@ -15,6 +16,7 @@ import {
   sql,
   suppliers,
 } from '@restomatch/db';
+import { alias } from 'drizzle-orm/pg-core';
 import { bookkeeperProcedure, requireFeature, router } from '../trpc';
 
 /** Bookkeeping exports require the accounting_export plan feature. */
@@ -165,24 +167,31 @@ async function fetchInvoices(
 }
 
 /**
- * Correlated subquery: the outer invoice was flagged DUPLICATE_INVOICE by a
- * match run and nobody accepted it as a genuine separate invoice. Those copies
- * stay `disputed` forever; exporting them would book the same purchase twice.
+ * Correlated subquery: the invoice's LATEST match run flagged it
+ * DUPLICATE_INVOICE and nobody waived that (approvals "Reject" = `rejected` =
+ * "not a duplicate, let it go"). Open/escalated means undecided and
+ * `accepted`/`resolved` means the duplicate was confirmed and claimed: either
+ * way the copy stays `disputed` forever and exporting it would book the same
+ * purchase twice. Only the latest run counts, so a re-match that clears the
+ * flag (e.g. after fixing a misread invoice number) brings the invoice back.
  */
 function unacceptedDuplicate(db: import('@restomatch/db').Database, restaurantId: string) {
+  const latestRun = alias(matchRuns, 'latest_run');
+  const latestRunId = db
+    .select({ id: latestRun.id })
+    .from(latestRun)
+    .where(and(eq(latestRun.invoiceId, invoices.id), eq(latestRun.restaurantId, restaurantId)))
+    .orderBy(desc(latestRun.runAt))
+    .limit(1);
   return db
     .select({ one: sql`1` })
     .from(discrepancies)
-    .innerJoin(
-      matchRuns,
-      and(eq(matchRuns.id, discrepancies.matchRunId), eq(matchRuns.restaurantId, restaurantId)),
-    )
     .where(
       and(
-        eq(matchRuns.invoiceId, invoices.id),
+        eq(discrepancies.matchRunId, sql`${latestRunId}`),
         eq(discrepancies.restaurantId, restaurantId),
         eq(discrepancies.type, 'DUPLICATE_INVOICE'),
-        ne(discrepancies.resolutionStatus, 'accepted'),
+        ne(discrepancies.resolutionStatus, 'rejected'),
       ),
     );
 }

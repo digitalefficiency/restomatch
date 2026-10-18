@@ -393,21 +393,38 @@ describe('exports: Israel-time calendar days + every checked invoice', () => {
   it('EXP-DUP-1: a flagged duplicate is not booked twice; other disputes still export', async () => {
     await setInvoice('approved', '2026-10-12T08:00:00.000Z'); // the original
     await disputedWith('DUP-OPEN', 'DUPLICATE_INVOICE', 'open');
-    await disputedWith('DUP-REJECTED', 'DUPLICATE_INVOICE', 'rejected');
+    // Approvals "Approve" = accepted = "yes, a duplicate — claim it".
+    await disputedWith('DUP-CLAIMED', 'DUPLICATE_INVOICE', 'accepted');
     await disputedWith('PRICE-DISPUTE', 'PRICE_HIGHER', 'open');
-    // Owner reviewed it and said "this is a separate invoice": it's a real purchase.
-    await disputedWith('DUP-ACCEPTED', 'DUPLICATE_INVOICE', 'accepted');
+    // Approvals "Reject" = rejected = waived: "not a duplicate", a real purchase.
+    await disputedWith('DUP-WAIVED', 'DUPLICATE_INVOICE', 'rejected');
 
     const csv = await callerFor(A).exports.invoicesCsv({ from: '2026-10-01', to: '2026-10-31' });
     expect(csv.rowCount).toBe(3);
     expect(csv.content).toContain('PRICE-DISPUTE');
-    expect(csv.content).toContain('DUP-ACCEPTED');
+    expect(csv.content).toContain('DUP-WAIVED');
     expect(csv.content).not.toContain('DUP-OPEN');
-    expect(csv.content).not.toContain('DUP-REJECTED');
+    expect(csv.content).not.toContain('DUP-CLAIMED');
 
     const u = await callerFor(A).exports.uniform1000({ from: '2026-10-01', to: '2026-10-31' });
     expect(u.rowCount).toBe(3);
     expect(u.content).not.toContain('DUP-OPEN');
+  });
+
+  it('only the latest match run counts: a re-match that clears the duplicate flag exports it', async () => {
+    const id = await disputedWith('DUP-FIXED', 'DUPLICATE_INVOICE', 'open');
+    const before = await callerFor(A).exports.invoicesCsv({ from: '2026-10-01', to: '2026-10-31' });
+    expect(before.content).not.toContain('DUP-FIXED');
+    // Manager fixed the misread number and re-ran the match: clean run, later.
+    await db.update(invoices).set({ status: 'matched' }).where(eq(invoices.id, id));
+    await db.insert(matchRuns).values({
+      restaurantId: A.restaurantId,
+      invoiceId: id,
+      overallStatus: 'clean',
+      runAt: new Date(Date.now() + 60_000),
+    });
+    const after = await callerFor(A).exports.invoicesCsv({ from: '2026-10-01', to: '2026-10-31' });
+    expect(after.content).toContain('DUP-FIXED');
   });
 
   it('counts checked invoices with no invoice date so the UI can warn', async () => {

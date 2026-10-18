@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AlertTriangle, FileDown, FileSpreadsheet, FileText } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
 import {
@@ -35,6 +35,9 @@ export function ExportsForm() {
   // Checked invoices with no invoice date in the last downloaded range: they
   // can't be placed in a period, so the file doesn't carry them.
   const [undated, setUndated] = useState<{ from: string; to: string; count: number } | null>(null);
+
+  // The count belongs to the downloaded range only; any range change clears it.
+  useEffect(() => setUndated(null), [from, to]);
 
   const utils = trpc.useUtils();
   const invalid = rangeError(from, to);
@@ -187,7 +190,7 @@ export function ExportsForm() {
         </div>
       </div>
 
-      {undated && undated.from === from && undated.to === to && undated.count > 0 ? (
+      {undated && undated.count > 0 ? (
         <p
           role="status"
           className="mt-4 flex items-start gap-2 rounded-xl border border-warn/30 bg-warn/5 p-3 text-sm text-warn"
