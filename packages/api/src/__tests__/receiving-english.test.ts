@@ -260,3 +260,25 @@ describe('local-demo OCR stub', () => {
     expect(await buildDevOcrStub(db, A.restaurantId, B.grId)).toBeNull();
   });
 });
+
+describe('EN-3 — a failed OCR is visible, never silent', () => {
+  it('getInvoice exposes ocrFailed + reason (and never the raw payload)', async () => {
+    await db
+      .update(invoices)
+      .set({
+        status: 'parsed',
+        ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'quota_exceeded' } },
+      })
+      .where(eq(invoices.id, A.invoiceId));
+    const inv = await callerFor(A).receiving.getInvoice({ invoiceId: A.invoiceId });
+    expect(inv.ocrFailed).toBe(true);
+    expect(inv.ocrFailureReason).toBe('quota_exceeded');
+    expect(inv).not.toHaveProperty('ocrPayload');
+  });
+
+  it('a normal invoice reports ocrFailed=false', async () => {
+    const inv = await callerFor(A).receiving.getInvoice({ invoiceId: A.invoiceId });
+    expect(inv.ocrFailed).toBe(false);
+    expect(inv.ocrFailureReason).toBeNull();
+  });
+});
