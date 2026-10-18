@@ -142,7 +142,7 @@ export const en: Shape<typeof he> = {
     t1Body: 'Every database row belongs to one restaurant, and row-level security (RLS) blocks cross-customer access — backed by automated attack tests on every change.',
     t2Title: 'Two-factor sign-in',
     t2Body: 'Sign in with an authenticator app (2FA), with role-based permissions: owner, manager, receiver, bookkeeper.',
-    t3Title: 'Built for Amendment 13',
+    t3Title: 'Designed for Amendment 13',
     t3Body: "A privacy policy, consent management and access/deletion requests — in line with Amendment 13 to Israel's Privacy Protection Law.",
     t4Title: 'Audit trail',
     t4Body: 'Every approval, rejection and change is recorded — who, when and why. Full transparency with suppliers and your accountant.',
