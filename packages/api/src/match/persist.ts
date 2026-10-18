@@ -4,6 +4,7 @@ import {
   eq,
   invoices,
   matchRuns,
+  suppliers,
   type Database,
   type UserRole,
 } from '@restomatch/db';
@@ -105,13 +106,38 @@ export async function persistMatchRun(
     skip: result.discrepancies.some((d) => d.type === 'DUPLICATE_INVOICE'),
   });
 
+  // Activity entry: the Hebrew sentence (rendered as-is in Hebrew, and parsed by
+  // the web's activityText templates) plus structured metadata so any locale can
+  // render it from numbers rather than text.
+  const [meta] = await db
+    .select({ invoiceNumber: invoices.invoiceNumber, supplierName: suppliers.name, supplierNameEn: suppliers.nameEn })
+    .from(invoices)
+    .leftJoin(suppliers, and(eq(suppliers.id, invoices.supplierId), eq(suppliers.restaurantId, args.restaurantId)))
+    .where(and(eq(invoices.id, args.invoiceId), eq(invoices.restaurantId, args.restaurantId)))
+    .limit(1);
+  const lossIls = Math.round(result.totalDiscrepancyAmount);
   await logActivity(db, {
     restaurantId: args.restaurantId,
     eventType: 'invoice_matched',
-    title: 'חשבונית הותאמה',
-    detail: `${result.discrepancies.length} חריגות · הפסד פוטנציאלי ₪${result.totalDiscrepancyAmount.toFixed(0)}`,
+    title: meta?.invoiceNumber ? `חשבונית ${meta.invoiceNumber} הותאמה` : 'חשבונית הותאמה',
+    detail: [
+      meta?.supplierName ?? null,
+      `${result.discrepancies.length} חריגות`,
+      `הפסד פוטנציאלי ₪${lossIls}`,
+    ]
+      .filter(Boolean)
+      .join(' · '),
     entityType: 'match_run',
     entityId: matchRun.id,
+    metadata: {
+      invoiceId: args.invoiceId,
+      invoiceNumber: meta?.invoiceNumber ?? null,
+      supplierName: meta?.supplierName ?? null,
+      supplierNameEn: meta?.supplierNameEn ?? null,
+      discrepancyCount: result.discrepancies.length,
+      potentialLossIls: result.totalDiscrepancyAmount,
+      status: result.status,
+    },
   });
 
   return {

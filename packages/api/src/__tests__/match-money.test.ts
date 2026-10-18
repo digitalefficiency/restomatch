@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  activityEvents,
   and,
   createDb,
   discrepancies,
@@ -162,5 +163,27 @@ describe('duplicate invoice detection only looks at earlier invoices', () => {
     // …and the duplicate's prices never reach price_history.
     const rows = await historyFor(A);
     expect(rows.every((r) => r.sourceInvoiceId === A.invoiceId)).toBe(true);
+  });
+});
+
+describe('invoice_matched activity carries structured metadata', () => {
+  it('title names the invoice; metadata has number, supplier, counts and ₪', async () => {
+    const A = await seedTenant(db, 'A');
+    const res = await ownerCaller(A).match.runForInvoice({ invoiceId: A.invoiceId });
+    const [ev] = await db
+      .select()
+      .from(activityEvents)
+      .where(and(eq(activityEvents.restaurantId, A.restaurantId), eq(activityEvents.entityId, res.matchRunId!)));
+    expect(ev!.eventType).toBe('invoice_matched');
+    expect(ev!.title).toBe(`חשבונית ${A.invoiceNumber} הותאמה`);
+    expect(ev!.detail).toContain(A.supplierName);
+    expect(ev!.metadata).toMatchObject({
+      invoiceId: A.invoiceId,
+      invoiceNumber: A.invoiceNumber,
+      supplierName: A.supplierName,
+      discrepancyCount: res.discrepancyCount,
+      potentialLossIls: res.totalDiscrepancyAmount,
+      status: res.status,
+    });
   });
 });

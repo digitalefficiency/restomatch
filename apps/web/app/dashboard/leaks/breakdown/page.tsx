@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowLeft, ArrowRight, ExternalLink, FileCheck2, FileText, Hourglass, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ExternalLink, FileBarChart, FileCheck2, FileText, Hourglass, ShieldCheck } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
 import { formatDate, formatPercent } from '@/lib/i18n/format';
@@ -64,6 +64,13 @@ export default async function LeakBreakdownPage({
           ) : null}
         </div>
         <nav className="flex flex-wrap items-center gap-2" aria-label={month}>
+          <Link
+            href={`/dashboard/leaks/report?month=${monthKey(hero.monthEnd)}`}
+            className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold text-primary ring-1 ring-line hover:bg-surface-2"
+          >
+            <FileBarChart className="h-4 w-4" aria-hidden="true" />
+            {t('report.open')}
+          </Link>
           {leaking.length > 0 ? (
             <Link
               href={`/dashboard/leaks/claims${monthOffset ? `?m=${monthOffset}` : ''}`}
@@ -216,4 +223,14 @@ export default async function LeakBreakdownPage({
 
 function severityTone(severity: string): BadgeTone {
   return severity === 'block' ? 'danger' : severity === 'warn' ? 'warning' : 'info';
+}
+
+/**
+ * 'YYYY-MM' of the local month that ENDS at `monthEndIso` (exclusive bound):
+ * one hour earlier is still inside the month in Israel time.
+ */
+function monthKey(monthEndIso: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit' })
+    .formatToParts(new Date(new Date(monthEndIso).getTime() - 3600_000));
+  return `${parts.find((p) => p.type === 'year')?.value}-${parts.find((p) => p.type === 'month')?.value}`;
 }

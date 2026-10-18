@@ -53,8 +53,23 @@ Playwright run (every check below passed, in the language noted):
 - **CSP still Report-Only** (`CSP_ENFORCE` unset) — intended; promote after a soak (GO-LIVE Phase 8).
 - **`TRUSTED_PROXY_HOPS` defaults to 0** (left-most XFF). Every credential surface already passes `trustedProxyHops()` (STATE.md's "S3" item is done). On Vercel the XFF is set by the edge, so impact is low; recommend `TRUSTED_PROXY_HOPS=1` in Vercel env (owner step).
 - **Magic-link limit is 3 per mailbox per 15 min** — easy to hit while rehearsing a demo. Use password login for the demo (S1 is adding seed passwords) or `redis-cli flushall` locally.
-- Server errors are mapped client-side by their Hebrew text; a stable error-code field on `TRPCError` (errorFormatter in `trpc.ts`) would be cleaner long-term.
 - Invite throttle has no automated unit test (server action needs an auth mock); verified live (21st invite in the hour → "Too many invites…").
+
+## Follow-up round — stable error codes
+
+- `packages/api/src/errors.ts`: `APP_ERROR_CODES` (22 codes), `appError(code, appCode, message, params?)`
+  and `resolveAppError(error)`. Every known domain error in team / onboarding / settings (zod
+  `params.appCode`) / dsr / admin now throws an `appError`; quota (`QuotaExceededError` → `subscription.inactive`
+  / `quota.exceeded` + `{limit}`), `ENTITLEMENT_REQUIRED:<feature>` → `entitlement.required`, role/auth →
+  `auth.forbidden` / `auth.unauthorized`, other zod → `input.invalid`. Messages are unchanged.
+- `trpc.ts` `errorFormatter` exposes `data.appCode` + `data.appParams` (null when uncoded).
+- Web `lib/serverErrors.ts` translates by `data.appCode` (HTTP) or `cause.appCode` (server caller)
+  first, through an **exhaustive** `Record<AppErrorCode, key>` (a new server code without a translation
+  is a type error); the Hebrew-text mapping stays as the fallback (and its quota mapping now carries the limit).
+- Tests: `packages/api/src/__tests__/app-error-codes.test.ts` (unit + real fetch-adapter HTTP shape),
+  `apps/web/lib/__tests__/serverErrors.test.ts` (code path, cause path, params, unknown code → fallback).
+- Entitlement/trial semantics unchanged (still a proposal above).
+- Gate: `pnpm test` 12/12 tasks (api 420, web 154, db 45, matching 86 …), web `tsc` 0, `pnpm build` green.
 
 ## Feature & improvement proposals (client value / effort)
 
@@ -102,6 +117,16 @@ cd apps/web && set -a && . ./.env.local && set +a && pnpm build → ✓ Compiled
   (one earlier attempt failed fetching Google Fonts — transient network; the retry was green)
 Playwright flow script (scratchpad, against next dev)        → every check in "Works" PASS
 ```
+
+**After merging `origin/claude/client-ready` (S1 + S3 + S6, a35f265):** `pnpm test` → 12/12 tasks, 849 tests
+(db 45 · api 412 · web 148 · matching 86 · charts 26 · …), web `tsc` 0 errors, `pnpm build` green.
+
+> ⚠️ **Migration-order pitfall for the orchestrator:** drizzle's migrator only applies journal entries
+> whose `when` is newer than the last applied one. A database that already ran a session branch with a
+> higher number (e.g. my 0039) **silently skips** later-merged lower numbers (S1's 0029–0032), and
+> `db:doctor` / the 0029–0032 shape tests then fail. Fix on such a DB: delete the high-number rows from
+> `drizzle.__drizzle_migrations` (all session migrations are idempotent) and re-run `migrate`, or
+> rebuild with `./scripts/dev-setup.sh`. Production applies them in one ordered run, so it is unaffected.
 
 Focused suites added/extended: `packages/db/src/__tests__/migration-0039.test.ts`,
 `packages/api/src/__tests__/team-locale.test.ts`, `cross-tenant.attack.test.ts` (member-locale block),

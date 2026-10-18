@@ -19,6 +19,7 @@ import {
   verificationTokens,
   type Database,
 } from '@restomatch/db';
+import { appError } from '../errors';
 import { authedProcedure, adminProcedure, router } from '../trpc';
 
 /**
@@ -220,11 +221,11 @@ export const dsrRouter = router({
           );
         const hasAnotherOwner = otherOwners.some((o) => o.userId !== userId);
         if (otherUserIds.size > 0 && !hasAnotherOwner) {
-          throw new TRPCError({
-            code: 'CONFLICT',
-            message:
-              'SOLE_OWNER_TRANSFER_REQUIRED: יש להעביר בעלות על המסעדה למשתמש אחר לפני מחיקת החשבון',
-          });
+          throw appError(
+            'CONFLICT',
+            'dsr.soleOwner',
+            'SOLE_OWNER_TRANSFER_REQUIRED: יש להעביר בעלות על המסעדה למשתמש אחר לפני מחיקת החשבון',
+          );
         }
       }
 

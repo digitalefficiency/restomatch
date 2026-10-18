@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { TRPCError } from '@trpc/server';
-import { ArrowLeft, Droplets, ShieldAlert } from 'lucide-react';
+import { ArrowLeft, Droplets, FileBarChart, ShieldAlert } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
 import { formatNumber, formatPercent } from '@/lib/i18n/format';
@@ -38,21 +38,30 @@ export default async function LeaksPage() {
     }
   }
 
-  const breakdownLink = (
-    <Link
-      href="/dashboard/leaks/breakdown"
-      className="mb-4 inline-flex max-w-full items-center gap-1 rounded-lg text-sm font-semibold text-primary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
-    >
-      {t('detective.toBreakdown')}
-      <ArrowLeft className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
-    </Link>
+  const leakLinks = (
+    <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2">
+      <Link
+        href="/dashboard/leaks/report"
+        className="inline-flex items-center gap-1.5 rounded-xl bg-gold/12 px-3 py-1.5 text-sm font-semibold text-gold ring-1 ring-gold/30 hover:bg-gold/20"
+      >
+        <FileBarChart className="h-4 w-4" aria-hidden="true" />
+        {t('report.open')}
+      </Link>
+      <Link
+        href="/dashboard/leaks/breakdown"
+        className="inline-flex max-w-full items-center gap-1 rounded-lg text-sm font-semibold text-primary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+      >
+        {t('detective.toBreakdown')}
+        <ArrowLeft className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
+      </Link>
+    </div>
   );
 
   if (blocked === 'entitlement') {
     return (
       <div>
         <SectionHeader level={1} title={t('detective.title')} />
-        {breakdownLink}
+        {leakLinks}
         <EntitlementUpsell feature="advanced_analytics" title={t('detective.upsell')} />
       </div>
     );
@@ -62,7 +71,7 @@ export default async function LeaksPage() {
     return (
       <div>
         <SectionHeader level={1} title={t('detective.title')} />
-        {breakdownLink}
+        {leakLinks}
         <Card padding="md" className="flex items-center gap-3 border-warn/30 bg-warn/5 text-warn">
           <ShieldAlert className="h-5 w-5 shrink-0" aria-hidden="true" />
           <span>{t('detective.roleOnly')}</span>
@@ -87,7 +96,7 @@ export default async function LeaksPage() {
         title={t('detective.title')}
         subtitle={t('detective.subtitle')}
       />
-      {breakdownLink}
+      {leakLinks}
 
       {rows.length === 0 ? (
         <EmptyState

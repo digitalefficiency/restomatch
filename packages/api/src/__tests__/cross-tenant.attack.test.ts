@@ -102,6 +102,7 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'owner.kpis': 'isolation',
   'owner.leakHero': 'isolation',
   'owner.leakBreakdown': 'isolation',
+  'owner.leakReport': 'isolation',
   'owner.leaks': 'isolation',
   'owner.suppliers': 'isolation',
   'receiving.todayExpectations': 'isolation',
@@ -407,6 +408,16 @@ describe('list/aggregate isolation (A must not see B)', () => {
     expect(json).not.toContain(B.invoiceId);
     expect(json).not.toContain(B.discrepancyId);
     expect(json).not.toContain(B.supplierName);
+  });
+
+  it('owner.leakReport aggregates A-scoped data only', async () => {
+    const caller = callerFor(A);
+    const now = new Date();
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const report = await caller.owner.leakReport({ month });
+    const json = JSON.stringify(report);
+    expect(json).not.toContain(B.supplierName);
+    expect(report.bySupplier.every((r) => r.supplierId !== B.supplierId)).toBe(true);
   });
 
   it('owner.leaks excludes B leak rows', async () => {
