@@ -104,11 +104,6 @@ const IGNORED: RegExp[] = [
   /Download the React DevTools/,
   // Next dev HMR socket churn when a route recompiles mid-navigation.
   /webpack-hmr|_next\/webpack-hmr|turbopack-hmr/,
-  // KNOWN, routed to S4 (docs/client-ready/reports/platform.md → "Needs another
-  // area"): lib/securityHeaders.ts ships `upgrade-insecure-requests` inside the
-  // Report-Only CSP, which Chrome logs as an error on every page. Delete this
-  // entry once the directive is emitted only with an enforced policy.
-  /'upgrade-insecure-requests' is ignored when delivered in a report-only policy/,
   // KNOWN, routed to S6: no app/icon.* / public/favicon.ico yet, so the
   // browser's implicit /favicon.ico request 404s on every page.
   /status of 404 \(Not Found\) \(http:\/\/[^)]+\/favicon\.ico\)/,

@@ -74,6 +74,14 @@ describe('buildCsp', () => {
     expect(csp).toContain(`frame-ancestors 'none'`);
     expect(csp).toContain(`form-action 'self'`);
   });
+
+  it('emits upgrade-insecure-requests only in an enforced policy (browsers error on it in Report-Only)', () => {
+    expect(csp).toContain('upgrade-insecure-requests');
+    expect(buildCsp('N', { reportOnly: false })).toContain('upgrade-insecure-requests');
+    const reportOnly = buildCsp('N', { reportOnly: true });
+    expect(reportOnly).not.toContain('upgrade-insecure-requests');
+    expect(reportOnly).toContain(`frame-ancestors 'none'`);
+  });
 });
 
 describe('CSP header naming', () => {

@@ -103,9 +103,12 @@ describe('AES-256-GCM secret envelope', () => {
   it('rejects a tampered ciphertext (GCM auth tag)', () => {
     const enc = encryptSecret('TAMPERME');
     const parts = enc.split(':');
-    // Flip the last char of the ciphertext segment.
-    const last = parts[3]!;
-    parts[3] = last.slice(0, -1) + (last.endsWith('A') ? 'B' : 'A');
+    // Flip a real ciphertext BIT. (Swapping the last base64url char was flaky:
+    // for an 8-byte ciphertext that char's low 2 bits are padding the decoder
+    // discards, so 'A'↔'B' sometimes left the bytes unchanged — ~1 run in 16.)
+    const bytes = Buffer.from(parts[3]!, 'base64url');
+    bytes[0] = bytes[0]! ^ 0x01;
+    parts[3] = bytes.toString('base64url');
     expect(() => decryptSecret(parts.join(':'))).toThrow();
   });
 });

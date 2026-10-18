@@ -64,9 +64,10 @@ export function generateNonce(): string {
  * browsers that don't understand strict-dynamic). `object-src 'none'`,
  * `base-uri 'none'` and `frame-ancestors 'none'` close clickjacking / base-tag
  * injection. `style-src 'unsafe-inline'` is required by Tailwind's
- * injected styles.
+ * injected styles. `upgrade-insecure-requests` is only part of an ENFORCED
+ * policy (pass `reportOnly`).
  */
-export function buildCsp(nonce: string): string {
+export function buildCsp(nonce: string, opts: { reportOnly?: boolean } = {}): string {
   return [
     `default-src 'self'`,
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https: 'unsafe-inline'`,
@@ -78,7 +79,9 @@ export function buildCsp(nonce: string): string {
     `base-uri 'none'`,
     `form-action 'self'`,
     `frame-ancestors 'none'`,
-    `upgrade-insecure-requests`,
+    // Browsers ignore upgrade-insecure-requests in a Report-Only policy and log a
+    // console ERROR on every page saying so — emit it only when enforcing.
+    ...(opts.reportOnly ? [] : [`upgrade-insecure-requests`]),
   ].join('; ');
 }
 

@@ -7,6 +7,7 @@ import { Button, Card, Field, Input } from '@/lib/components';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { auth as authMessages } from '@/lib/i18n/messages/auth';
 import { getT } from '@/lib/i18n/server';
+import { twoFactorEnabledForEmail } from '@/lib/passwords';
 import { safeRelativePath } from '@/lib/safeRedirect';
 
 interface PageProps {
@@ -72,11 +73,19 @@ export default async function LoginPage({ searchParams }: PageProps) {
     // here too would double-count the limiter, so it is intentionally not
     // repeated. A throttled/wrong attempt surfaces the same CredentialsSignin.
     try {
-      await signIn('credentials', { email, password, rememberMe, redirectTo });
+      // redirect:false — we pick the destination ourselves (below).
+      await signIn('credentials', { email, password, rememberMe, redirect: false });
     } catch (err) {
       if (err instanceof AuthError) redirect(back('CredentialsSignin', redirectTo, lockedEmail));
-      throw err; // re-throw the success NEXT_REDIRECT
+      throw err;
     }
+    // First factor passed. A 2FA-enrolled user goes straight to the second step
+    // (with the original destination) so the URL matches the screen; otherwise
+    // the middleware would bounce /dashboard and the bar would keep "/dashboard".
+    if (await twoFactorEnabledForEmail(email)) {
+      redirect(`/login/2fa?callbackUrl=${encodeURIComponent(redirectTo)}`);
+    }
+    redirect(redirectTo);
   }
 
   // Magic-link (BACKUP). Always available — every existing user (who has no
