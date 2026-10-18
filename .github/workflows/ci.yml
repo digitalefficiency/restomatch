@@ -104,9 +104,9 @@ jobs:
         run: pnpm --filter @restomatch/db check-rls
 
       # Read-only schema health (unindexed FKs, missing triggers/CHECKs, RLS
-      # drift …). Exit 1 on any FAIL — catches a bad migration before review.
-      - name: db:doctor (schema health, read-only)
-        run: pnpm --filter @restomatch/db run doctor
+      # drift …). --strict: WARN fails too — catches a bad migration before review.
+      - name: db:doctor --strict (schema health, read-only)
+        run: pnpm --filter @restomatch/db run doctor --strict
 
       - name: Typecheck (all packages except web)
         run: pnpm turbo run typecheck --concurrency=1 --filter='!@restomatch/web'

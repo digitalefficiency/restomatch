@@ -14,6 +14,11 @@ const config: NextConfig = {
   typescript: { ignoreBuildErrors: false },
   // Lint runs as its own step (`pnpm lint`, eslint.config.mjs), not inside build.
   eslint: { ignoreDuringBuilds: true },
+  // Next streams generateMetadata into <body> for most user agents. Crawlers and
+  // link-unfurlers listed here get blocking metadata in <head> instead, so the
+  // landing/showcase titles, descriptions and OG tags are seen (S6 SEO ask).
+  htmlLimitedBots:
+    /Googlebot|Google-InspectionTool|Bingbot|Slurp|DuckDuckBot|Baiduspider|YandexBot|Applebot|facebookexternalhit|Twitterbot|LinkedInBot|Slackbot|WhatsApp|TelegramBot|Discordbot|Pinterest/i,
   transpilePackages: [
     '@restomatch/api',
     '@restomatch/charts',
