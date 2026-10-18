@@ -18,7 +18,13 @@ import { ExternalLink, Lock } from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { auth } from '@/auth';
 import { InvoicePaper } from '@/app/showcase/dashboard/_components/InvoicePaperShared';
-import { resolveUploadedScan } from '@/lib/supabase/server';
+import { resolveScan } from '@/lib/supabase/server';
+import { createServerCaller } from '@/lib/trpc/server';
+import { getLocale, getT } from '@/lib/i18n/server';
+import { dirOf } from '@/lib/i18n/config';
+import { formatNumber } from '@/lib/i18n/format';
+import { scans } from '@/lib/i18n/messages/scans';
+import type { Translator } from '@/lib/i18n/translate';
 
 interface PageProps {
   params: Promise<{ invoiceId: string }>;
@@ -37,10 +43,19 @@ export default async function ScanPage({ params }: PageProps) {
   const session = await auth();
 
   // 1. Real uploaded scan — requires auth + tenant ownership, served signed.
+  //    Accepts a scan id OR an invoice UUID (the correction page links those).
   if (session?.user?.id) {
-    const uploaded = await resolveUploadedScan(invoiceId, session.user.restaurantId ?? null);
+    const uploaded = await resolveScan(invoiceId, session.user.restaurantId ?? null, async (id) => {
+      try {
+        const caller = await createServerCaller();
+        return (await caller.receiving.getInvoice({ invoiceId: id })).rawImageUrl ?? null;
+      } catch {
+        return null; // foreign / missing invoice → 404 below
+      }
+    });
     if (uploaded) {
-      return <UploadedScanCanvas {...uploaded} />;
+      const [locale, t] = await Promise.all([getLocale(), getT(scans)]);
+      return <UploadedScanCanvas {...uploaded} t={t} locale={locale} />;
     }
   }
 
@@ -98,18 +113,24 @@ function UploadedScanCanvas({
   mimeType,
   pageCount,
   supplierName,
+  source,
+  t,
+  locale,
 }: {
   signedUrl: string;
   mimeType: string;
   pageCount: number | null;
   supplierName: string | null;
+  source?: 'supabase' | 'local';
+  t: Translator<typeof scans.he>;
+  locale: 'he' | 'en';
 }) {
   const publicUrl = signedUrl;
   const isPdf = mimeType === 'application/pdf';
   return (
     <div
       className="flex min-h-screen w-full flex-col items-center justify-start p-4 sm:p-8"
-      dir="rtl"
+      dir={dirOf(locale)}
       style={{ background: STAGE_BG }}
     >
       {/* Secure-link badge — kept prominent: a signed, tenant-scoped document. */}
@@ -119,12 +140,14 @@ function UploadedScanCanvas({
           <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
         </span>
         <span className="truncate font-mono text-xs text-muted">
-          חשבונית סרוקה{supplierName ? ` · ${supplierName}` : ''}
+          {t('scannedInvoice')}
+          {supplierName ? ` · ${supplierName}` : ''}
+          {source === 'local' ? ` · ${t('localCopy')}` : ''}
         </span>
         <span className="me-auto inline-flex shrink-0 items-center gap-1 rounded-full bg-primary/12 px-2 py-0.5 text-[10px] font-semibold text-primary ring-1 ring-primary/25">
           <Lock className="h-2.5 w-2.5" aria-hidden="true" />
-          קישור מאובטח
-          {pageCount ? ` · ${pageCount} עמודים` : ''}
+          {t('secureLink')}
+          {pageCount ? ` · ${t('pages', { count: formatNumber(pageCount, locale) })}` : ''}
         </span>
       </div>
 
@@ -132,20 +155,20 @@ function UploadedScanCanvas({
         {isPdf ? (
           <iframe
             src={`${publicUrl}#toolbar=1&navpanes=0&view=FitH`}
-            title="חשבונית סרוקה"
+            title={t('scannedInvoice')}
             className="w-full border-0 bg-stone-100"
             style={{ height: '80vh' }}
           />
         ) : (
           <img
             src={publicUrl}
-            alt="חשבונית סרוקה"
+            alt={t('scannedInvoice')}
             className="h-auto w-full bg-stone-100"
             style={{ maxHeight: '90vh', objectFit: 'contain' }}
           />
         )}
         <div className="flex items-center justify-between gap-3 border-t border-line bg-surface-2 px-4 py-3 text-xs">
-          <span className="text-subtle">לא נטען? יכול להיות חוסם פופאפים או דפדפן ללא תוסף PDF.</span>
+          <span className="text-subtle">{t('notLoading')}</span>
           <a
             href={publicUrl}
             target="_blank"
@@ -153,7 +176,7 @@ function UploadedScanCanvas({
             className="inline-flex shrink-0 items-center gap-1 font-semibold text-primary hover:brightness-110"
           >
             <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-            פתח בטאב נפרד
+            {t('openInTab')}
           </a>
         </div>
       </div>

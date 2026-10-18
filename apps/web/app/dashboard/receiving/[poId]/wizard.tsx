@@ -14,7 +14,11 @@ import {
   type CapturedImage,
   type LineMark,
 } from '@/app/showcase/receiver/_state';
+import { TRPCClientError } from '@trpc/client';
 import { trpc } from '@/lib/trpc/client';
+import { useDir, useLocale, useT } from '@/lib/i18n/client';
+import { receiving } from '@/lib/i18n/messages/receiving';
+import type { Translator } from '@/lib/i18n/translate';
 import type { UploadedScan } from '@/lib/supabase/client';
 import {
   adaptReconciliation,
@@ -32,10 +36,21 @@ async function fileToBase64(file: File): Promise<string> {
   return btoa(binary);
 }
 
+/** Translate a tRPC / network error for the receiver (server messages are English/Hebrew dev text). */
+function errorText(err: unknown, t: Translator<typeof receiving.he>): string {
+  if (err instanceof TRPCClientError) {
+    const code = (err.data as { code?: string } | undefined)?.code;
+    if (code === 'NOT_FOUND') return t('errors.notFound');
+    if (code === 'FORBIDDEN' || code === 'UNAUTHORIZED') return t('errors.forbidden');
+  }
+  return t('errors.generic');
+}
+
 interface PoForClient {
   id: string;
   supplierId: string;
   supplierName: string;
+  supplierNameEn?: string | null;
   expectedAt: string | null;
   status: string;
   totalEstimated: number | null;
@@ -74,6 +89,12 @@ export function ReceivingWizard({
   const [grLineIdByKey, setGrLineIdByKey] = useState<Record<string, string>>({});
   const [confirmedAt, setConfirmedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [poLines, setPoLines] = useState<PoLineRow[]>(po.lines);
+  const t = useT(receiving);
+  const locale = useLocale();
+  const dir = useDir();
+  const supplierLabel = locale === 'en' && po.supplierNameEn ? po.supplierNameEn : po.supplierName;
+  const capturingRef = useRef(false);
 
   const utils = trpc.useUtils();
   const startReceipt = trpc.receiving.startReceipt.useMutation();
@@ -81,6 +102,36 @@ export function ReceivingWizard({
   const markGrLine = trpc.receiving.markGrLine.useMutation();
   const submitReceipt = trpc.receiving.submitReceipt.useMutation();
   const uploadScan = trpc.scans.upload.useMutation();
+  const ensureEnglish = trpc.receiving.ensureEnglish.useMutation();
+
+  /**
+   * Receiver in English: make sure the PO (and invoice) lines + products have
+   * English names, then refresh the PO lines. Display-only and best-effort — a
+   * failure just leaves Hebrew on screen.
+   */
+  async function ensureEnglishFor(scope: { invoiceId?: string }) {
+    if (locale !== 'en') return;
+    try {
+      const r = await ensureEnglish.mutateAsync({ poId: po.id, ...scope });
+      if (r.poLinesFilled > 0 || r.productsFilled > 0) {
+        const fresh = await utils.receiving.getPo.fetch({ poId: po.id });
+        setPoLines(
+          fresh.lines.map((l) => ({
+            id: l.id,
+            productId: l.productId ?? null,
+            rawDescription: l.rawDescription ?? null,
+            rawDescriptionEn: l.rawDescriptionEn ?? null,
+            productNameEn: l.productNameEn ?? null,
+            qtyOrdered: Number(l.qtyOrdered),
+            unit: l.unit,
+            unitPriceExpected: l.unitPriceExpected != null ? Number(l.unitPriceExpected) : null,
+          })),
+        );
+      }
+    } catch {
+      /* best effort */
+    }
+  }
 
   /**
    * Authenticated upload path (A.3): the file is uploaded by the SERVER
@@ -88,12 +139,13 @@ export function ReceivingWizard({
    * The browser sends only bytes — never a restaurant id or a storage prefix.
    */
   const authedUpload = useCallback(
-    async (file: File): Promise<UploadedScan> => {
+    async (file: File, clientUploadId: string): Promise<UploadedScan> => {
       const contentBase64 = await fileToBase64(file);
       const r = await uploadScan.mutateAsync({
         contentBase64,
         mimeType: file.type || 'application/octet-stream',
         supplierName: po.supplierName,
+        clientUploadId,
       });
       return {
         invoiceId: r.invoiceId,
@@ -121,7 +173,7 @@ export function ReceivingWizard({
         const r = await startReceipt.mutateAsync({ poId: po.id });
         setGrId(r.receiptId);
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(errorText(err, t));
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -130,6 +182,9 @@ export function ReceivingWizard({
   /** After capture: register the invoice for OCR, then poll until parsed. */
   const onCapture = useCallback(
     async (captured: CapturedImage) => {
+      // M8: ignore a second tap while the first registration is in flight.
+      if (capturingRef.current) return;
+      capturingRef.current = true;
       setImage(captured);
       setStep('PROCESSING');
       setError(null);
@@ -138,6 +193,7 @@ export function ReceivingWizard({
       // PO-only projection so the receiver can still record quantities.
       if (!captured.publicUrl) {
         await buildFromPoOnly();
+        capturingRef.current = false;
         return;
       }
 
@@ -156,16 +212,23 @@ export function ReceivingWizard({
         });
         setInvoiceId(reg.invoiceId);
 
-        const invoice = await pollInvoice(reg.invoiceId);
+        let invoice = await pollInvoice(reg.invoiceId);
+        if (invoice.status === 'ocr_pending') setError(t('errors.ocrTimeout'));
+        if (locale === 'en') {
+          await ensureEnglishFor({ invoiceId: reg.invoiceId });
+          invoice = await utils.receiving.getInvoice.fetch({ invoiceId: reg.invoiceId });
+        }
         await buildReconciliation(activeGrId, invoice);
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(errorText(err, t));
         // Degrade gracefully to a PO-only table so receiving still completes.
         await buildFromPoOnly();
+      } finally {
+        capturingRef.current = false;
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [grId, po.id, po.supplierId],
+    [grId, po.id, po.supplierId, locale],
   );
 
   /** Poll getInvoice until OCR leaves 'ocr_pending' (or a budget elapses). */
@@ -191,10 +254,11 @@ export function ReceivingWizard({
         status: po.status,
         totalEstimated: po.totalEstimated,
       },
-      poLines: po.lines,
+      poLines,
       receiptLines: receipt.lines,
       invoiceLines: invoice.lines,
       invoiceMeta: { invoiceNumber: invoice.invoiceNumber, ocrConfidence: invoice.ocrConfidence },
+      labels: { unnamed: t('unnamedItem'), unordered: t('unorderedItem') },
     });
     setResult(adapted.result);
     setMarks(adapted.initialMarks);
@@ -221,17 +285,18 @@ export function ReceivingWizard({
           status: po.status,
           totalEstimated: po.totalEstimated,
         },
-        poLines: po.lines,
+        poLines,
         receiptLines: receipt.lines,
         invoiceLines: [],
         invoiceMeta: null,
+        labels: { unnamed: t('unnamedItem'), unordered: t('unorderedItem') },
       });
       setResult(adapted.result);
       setMarks(adapted.initialMarks);
       setGrLineIdByKey(adapted.grLineIdByKey);
       setStep('RECONCILIATION_REVIEW');
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorText(err, t));
     }
   }
 
@@ -271,7 +336,7 @@ export function ReceivingWizard({
       setStep('CONFIRMED');
       await utils.receiving.todayExpectations.invalidate();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorText(err, t));
     }
   }
 
@@ -280,7 +345,7 @@ export function ReceivingWizard({
   return (
     <main className="mx-auto max-w-3xl px-1 py-2">
       {/* Progress bar (4 work steps, CONFIRMED is the terminal state). */}
-      <div className="mb-10 flex items-center gap-2" dir="rtl">
+      <div className="mb-8 flex items-center gap-2" dir={dir}>
         {STEP_ORDER.slice(0, 4).map((_, i) => {
           const filled = i <= stepIndex;
           return (
@@ -293,7 +358,7 @@ export function ReceivingWizard({
       </div>
 
       {error ? (
-        <div className="mb-4 flex items-center gap-2 rounded-xl border border-danger/30 bg-danger/8 px-4 py-3 text-sm text-danger" dir="rtl">
+        <div role="alert" className="mb-4 flex items-center gap-2 rounded-xl border border-danger/30 bg-danger/8 px-4 py-3 text-sm text-danger" dir={dir}>
           <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
           <span>{error}</span>
         </div>
@@ -301,15 +366,16 @@ export function ReceivingWizard({
 
       {step === 'SCAN_INVOICE' ? (
         <InvoiceScan
-          supplierName={po.supplierName}
+          supplierName={supplierLabel}
           image={image}
+          backLabel={t('steps.scan.back')}
           uploadFile={restaurantId ? authedUpload : undefined}
           onCapture={(img) => void onCapture(img)}
           onBack={() => history.back()}
         />
       ) : null}
 
-      {step === 'PROCESSING' ? <ProcessingPoll /> : null}
+      {step === 'PROCESSING' ? <ProcessingPoll t={t} dir={dir} /> : null}
 
       {step === 'RECONCILIATION_REVIEW' && result ? (
         <Reconciliation
@@ -334,9 +400,9 @@ export function ReceivingWizard({
             onBack={() => setStep('RECONCILIATION_REVIEW')}
           />
           {submitting ? (
-            <div className="mt-3 flex items-center justify-center gap-2 text-sm text-muted" dir="rtl">
+            <div className="mt-3 flex items-center justify-center gap-2 text-sm text-muted" dir={dir}>
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              שומר את הקבלה…
+              {t('steps.adjust.saving')}
             </div>
           ) : null}
         </>
@@ -344,8 +410,9 @@ export function ReceivingWizard({
 
       {step === 'CONFIRMED' ? (
         <Confirmed
-          supplierName={po.supplierName}
+          supplierName={supplierLabel}
           result={result}
+          resetLabel={t('steps.confirmed.backToInbox')}
           confirmedAt={confirmedAt}
           capturedImage={image}
           onReset={() => {
@@ -365,12 +432,12 @@ export function ReceivingWizard({
  * We do NOT mutate the shared showcase Processing.tsx; this is a local twin.
  */
 const PROC_STEPS = [
-  { id: 'ocr', label: 'קורא את החשבונית', icon: FileScan },
-  { id: 'catalog', label: 'מזהה מוצרים בקטלוג', icon: Package },
-  { id: 'compare', label: 'משווה להזמנה', icon: Scale },
+  { id: 'ocr', label: 'steps.processing.ocr', icon: FileScan },
+  { id: 'catalog', label: 'steps.processing.catalog', icon: Package },
+  { id: 'compare', label: 'steps.processing.compare', icon: Scale },
 ] as const;
 
-function ProcessingPoll() {
+function ProcessingPoll({ t, dir }: { t: Translator<typeof receiving.he>; dir: 'rtl' | 'ltr' }) {
   // Cycle the active indicator while the wizard polls getInvoice in the
   // background; the wizard flips the step once OCR resolves.
   const [active, setActive] = useState(0);
@@ -380,11 +447,11 @@ function ProcessingPoll() {
   }, []);
 
   return (
-    <div dir="rtl" className="mx-auto max-w-md py-6">
+    <div dir={dir} className="mx-auto max-w-md py-6">
       <StepHeader
-        eyebrow="עיבוד"
-        title="מעבד את החשבונית…"
-        subtitle="קוראים את החשבונית ומצליבים אותה מול ההזמנה. זה לוקח כמה שניות."
+        eyebrow={t('steps.processing.eyebrow')}
+        title={t('steps.processing.title')}
+        subtitle={t('steps.processing.subtitleLive')}
       />
       <div className="relative overflow-hidden rounded-2xl border border-line bg-surface p-6 shadow-card">
         <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px flow-stream" />
@@ -417,10 +484,14 @@ function ProcessingPoll() {
                 </div>
                 <div className="flex-1">
                   <div className={isActive || isDone ? 'font-medium text-ink' : 'font-medium text-subtle'}>
-                    {s.label}
+                    {t(s.label)}
                   </div>
                   <div className="mt-0.5 text-xs text-muted">
-                    {isDone ? 'הסתיים' : isActive ? 'מתבצע…' : 'ממתין'}
+                    {isDone
+                      ? t('steps.processing.done')
+                      : isActive
+                        ? t('steps.processing.running')
+                        : t('steps.processing.waiting')}
                   </div>
                 </div>
               </div>

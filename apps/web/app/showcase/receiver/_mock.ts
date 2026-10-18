@@ -6,6 +6,8 @@
 export interface MockSupplierExpectation {
   supplierId: string;
   supplierName: string;
+  /** English display name (Receiver in English demo). */
+  supplierNameEn?: string;
   supplierInitials: string;
   expectedAt: string; // ISO
   poIds: string[];
@@ -28,6 +30,8 @@ export interface ReconciliationLine {
   /** Supplier catalog number (מק״ט) from the invoice, when extracted. */
   sku?: string | null;
   productName: string;
+  /** English display name ("Receiver in English"); Hebrew stays the source. */
+  productNameEn?: string | null;
   poQty: number | null;
   poUnit: string | null;
   invoiceQty: number | null;
@@ -75,6 +79,7 @@ export const MOCK_SUPPLIERS: MockSupplierExpectation[] = [
   {
     supplierId: 'sup-avi',
     supplierName: 'ירקני אבי',
+    supplierNameEn: "Avi's Greengrocer",
     supplierInitials: 'יא',
     expectedAt: new Date(new Date().setHours(8, 0, 0, 0)).toISOString(),
     poIds: ['po-1234'],
@@ -85,6 +90,7 @@ export const MOCK_SUPPLIERS: MockSupplierExpectation[] = [
   {
     supplierId: 'sup-kerem',
     supplierName: 'קצביית הכרם',
+    supplierNameEn: "HaKerem Butchery",
     supplierInitials: 'קה',
     expectedAt: new Date(new Date().setHours(9, 30, 0, 0)).toISOString(),
     poIds: ['po-1235'],
@@ -95,6 +101,7 @@ export const MOCK_SUPPLIERS: MockSupplierExpectation[] = [
   {
     supplierId: 'sup-brans',
     supplierName: 'מאפיית ברנס',
+    supplierNameEn: "Brans Bakery",
     supplierInitials: 'מב',
     expectedAt: new Date(new Date().setHours(6, 0, 0, 0)).toISOString(),
     poIds: ['po-1236'],
@@ -105,6 +112,7 @@ export const MOCK_SUPPLIERS: MockSupplierExpectation[] = [
   {
     supplierId: 'sup-kobi',
     supplierName: 'דגי קובי',
+    supplierNameEn: "Kobi's Fish",
     supplierInitials: 'דק',
     expectedAt: new Date(new Date().setHours(11, 0, 0, 0)).toISOString(),
     poIds: ['po-1237'],
@@ -126,6 +134,7 @@ export function mockReconcile(supplierId: string): ReconciliationResult {
         poLineId: 'pl-1',
         productId: 'prod-tomato',
         productName: 'עגבניה שרי',
+        productNameEn: 'Cherry tomatoes',
         poQty: 10,
         poUnit: 'ק״ג',
         invoiceQty: 12,
@@ -140,6 +149,7 @@ export function mockReconcile(supplierId: string): ReconciliationResult {
         poLineId: 'pl-2',
         productId: 'prod-cucumber',
         productName: 'מלפפון חממה',
+        productNameEn: 'Greenhouse cucumber',
         poQty: 5,
         poUnit: 'ק״ג',
         invoiceQty: 5,
@@ -154,6 +164,7 @@ export function mockReconcile(supplierId: string): ReconciliationResult {
         poLineId: 'pl-3',
         productId: 'prod-pepper',
         productName: 'פלפל אדום',
+        productNameEn: 'Red pepper',
         poQty: 3,
         poUnit: 'ק״ג',
         invoiceQty: 2.5,
@@ -168,6 +179,7 @@ export function mockReconcile(supplierId: string): ReconciliationResult {
         poLineId: 'pl-4',
         productId: 'prod-lettuce',
         productName: 'חסה אייסברג',
+        productNameEn: 'Iceberg lettuce',
         poQty: 4,
         poUnit: 'יח׳',
         invoiceQty: 4,
@@ -182,6 +194,7 @@ export function mockReconcile(supplierId: string): ReconciliationResult {
         poLineId: null,
         productId: 'prod-mint',
         productName: 'נענע',
+        productNameEn: 'Mint',
         poQty: null,
         poUnit: null,
         invoiceQty: 2,
@@ -196,6 +209,7 @@ export function mockReconcile(supplierId: string): ReconciliationResult {
         poLineId: 'pl-5',
         productId: 'prod-parsley',
         productName: 'פטרוזיליה',
+        productNameEn: 'Parsley',
         poQty: 2,
         poUnit: 'יח׳',
         invoiceQty: null,
@@ -212,6 +226,7 @@ export function mockReconcile(supplierId: string): ReconciliationResult {
         poLineId: 'pl-10',
         productId: 'prod-entrecote',
         productName: 'אנטריקוט',
+        productNameEn: 'Entrecote',
         poQty: 12,
         poUnit: 'ק״ג',
         invoiceQty: 12,
@@ -226,6 +241,7 @@ export function mockReconcile(supplierId: string): ReconciliationResult {
         poLineId: 'pl-11',
         productId: 'prod-chicken-breast',
         productName: 'חזה עוף',
+        productNameEn: 'Chicken breast',
         poQty: 20,
         poUnit: 'ק״ג',
         invoiceQty: 18,
@@ -240,6 +256,7 @@ export function mockReconcile(supplierId: string): ReconciliationResult {
         poLineId: 'pl-12',
         productId: 'prod-chicken-liver',
         productName: 'כבד עוף',
+        productNameEn: 'Chicken liver',
         poQty: 6,
         poUnit: 'ק״ג',
         invoiceQty: 6,
@@ -256,6 +273,7 @@ export function mockReconcile(supplierId: string): ReconciliationResult {
         poLineId: 'pl-20',
         productId: 'prod-garlic-rolls',
         productName: 'לחמניות שום',
+        productNameEn: 'Garlic rolls',
         poQty: 30,
         poUnit: 'יח׳',
         invoiceQty: 30,
@@ -270,6 +288,7 @@ export function mockReconcile(supplierId: string): ReconciliationResult {
         poLineId: 'pl-21',
         productId: 'prod-sliced-bread',
         productName: 'לחם פרוס',
+        productNameEn: 'Sliced bread',
         poQty: 6,
         poUnit: 'יח׳',
         invoiceQty: 6,
@@ -286,6 +305,7 @@ export function mockReconcile(supplierId: string): ReconciliationResult {
         poLineId: 'pl-30',
         productId: 'prod-salmon',
         productName: 'סלמון נורווגי',
+        productNameEn: 'Norwegian salmon',
         poQty: 4,
         poUnit: 'ק״ג',
         invoiceQty: 4,
@@ -300,6 +320,7 @@ export function mockReconcile(supplierId: string): ReconciliationResult {
         poLineId: 'pl-31',
         productId: 'prod-denis',
         productName: 'דניס',
+        productNameEn: 'Sea bream',
         poQty: 5,
         poUnit: 'ק״ג',
         invoiceQty: 5,
@@ -341,7 +362,7 @@ function buildResult(supplierId: string, lines: ReconciliationLine[]): Reconcili
     invoiceMeta: {
       invoiceNumber: `INV-${Math.floor(1000 + Math.random() * 9000)}`,
       invoiceDate: new Date().toISOString().slice(0, 10),
-      totalInclVat: Math.round(invoiceTotal * 1.17 * 100) / 100,
+      totalInclVat: Math.round(invoiceTotal * 1.18 * 100) / 100,
       ocrConfidence: 0.94,
     },
     matchedSupplierId: supplierId,

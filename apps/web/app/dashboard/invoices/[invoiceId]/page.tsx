@@ -3,6 +3,8 @@ import { auth } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
 import { SectionHeader } from '@/lib/components';
 import { InvoiceCorrection } from './correction-client';
+import { getLocale, getT } from '@/lib/i18n/server';
+import { invoices } from '@/lib/i18n/messages/invoices';
 
 export default async function InvoiceCorrectionPage({
   params,
@@ -11,6 +13,15 @@ export default async function InvoiceCorrectionPage({
 }) {
   const { invoiceId } = await params;
   const caller = await createServerCaller();
+  const [locale, t] = await Promise.all([getLocale(), getT(invoices)]);
+
+  // Receiver in English: fill the lines' English names before rendering.
+  if (locale === 'en') {
+    await Promise.race([
+      caller.receiving.ensureEnglish({ invoiceId }).catch(() => null),
+      new Promise((resolve) => setTimeout(resolve, 4000)),
+    ]);
+  }
 
   let invoice: Awaited<ReturnType<typeof caller.receiving.getInvoice>>;
   try {
@@ -28,8 +39,8 @@ export default async function InvoiceCorrectionPage({
     <div>
       <SectionHeader
         level={1}
-        title="תיקון חשבונית"
-        subtitle="תקנו ערכים שזוהו שגוי ב-OCR (כמות / מחיר / סכום) והריצו התאמה מחדש — מספר הדליפה מחושב מהשורות האלה."
+        title={t('correction.title')}
+        subtitle={t('correction.subtitle')}
       />
       <InvoiceCorrection invoice={invoice} canEdit={canEdit} />
     </div>

@@ -10,6 +10,8 @@ import {
   type ReconciliationLine,
   type ReconciliationResult,
 } from '../_mock';
+import { useDir, useT } from '@/lib/i18n/client';
+import { receiving } from '@/lib/i18n/messages/receiving';
 import { StepHeader } from './SupplierSelect';
 
 interface Props {
@@ -22,6 +24,8 @@ interface Props {
 interface OcrLine {
   sku?: string;
   rawDescription: string;
+  /** English rendering returned by the same Claude Vision call. */
+  rawDescriptionEn?: string;
   qty: number;
   unit: string;
   unitPrice: number;
@@ -49,6 +53,7 @@ function ocrToReconciliation(
     productId: null,
     sku: l.sku ?? null,
     productName: l.rawDescription,
+    productNameEn: l.rawDescriptionEn ?? null,
     poQty: null,
     poUnit: null,
     invoiceQty: l.qty,
@@ -83,13 +88,15 @@ function ocrToReconciliation(
 }
 
 const STEPS = [
-  { id: 'ocr', label: 'קורא את החשבונית', icon: FileScan, duration: 1100 },
-  { id: 'catalog', label: 'מזהה מוצרים בקטלוג', icon: Package, duration: 900 },
-  { id: 'compare', label: 'משווה להזמנה', icon: Scale, duration: 800 },
+  { id: 'ocr', label: 'steps.processing.ocr', icon: FileScan, duration: 1100 },
+  { id: 'catalog', label: 'steps.processing.catalog', icon: Package, duration: 900 },
+  { id: 'compare', label: 'steps.processing.compare', icon: Scale, duration: 800 },
 ] as const;
 
 export function Processing({ supplierId, imageUrl, onComplete }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const t = useT(receiving);
+  const dir = useDir();
   const [currentStep, setCurrentStep] = useState(0);
   const [ocrError, setOcrError] = useState<string | null>(null);
 
@@ -144,7 +151,7 @@ export function Processing({ supplierId, imageUrl, onComplete }: Props) {
           if (data.ok && data.result && data.result.lines.length > 0) {
             onComplete(ocrToReconciliation(data.result, supplierId, data.contactAlerts));
           } else {
-            setOcrError(data.error ?? 'לא זוהו פריטים בחשבונית');
+            setOcrError(data.error ?? t('steps.processing.noItems'));
             onComplete(mockReconcile(supplierId));
           }
         } catch (err) {
@@ -166,15 +173,16 @@ export function Processing({ supplierId, imageUrl, onComplete }: Props) {
       cancelled = true;
       timers.forEach(clearTimeout);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supplierId, imageUrl, onComplete]);
   void ocrError;
 
   return (
-    <div ref={ref} dir="rtl" className="max-w-md mx-auto py-6">
+    <div ref={ref} dir={dir} className="max-w-md mx-auto py-6">
       <StepHeader
-        eyebrow="צעד 3 מתוך 5"
-        title="מעבד את החשבונית…"
-        subtitle="זה לוקח 5-15 שניות. אנחנו מזהים פריטי-שורה ומשווים אותם להזמנה."
+        eyebrow={t('steps.stepOf', { current: 3, total: 5 })}
+        title={t('steps.processing.title')}
+        subtitle={t('steps.processing.subtitle')}
       />
 
       <div className="relative overflow-hidden rounded-2xl border border-line bg-surface p-6 shadow-card">
@@ -216,10 +224,14 @@ export function Processing({ supplierId, imageUrl, onComplete }: Props) {
                       isPending ? 'text-subtle' : 'text-ink'
                     }`}
                   >
-                    {step.label}
+                    {t(step.label)}
                   </div>
                   <div className="text-xs text-muted mt-0.5">
-                    {isDone ? 'הסתיים' : isActive ? 'מתבצע…' : 'ממתין'}
+                    {isDone
+                      ? t('steps.processing.done')
+                      : isActive
+                        ? t('steps.processing.running')
+                        : t('steps.processing.waiting')}
                   </div>
                 </div>
               </div>
@@ -229,7 +241,12 @@ export function Processing({ supplierId, imageUrl, onComplete }: Props) {
 
         <div className="mt-6 pt-4 border-t border-line">
           <div className="flex items-center justify-between text-xs text-muted">
-            <span>שלב {Math.min(currentStep + 1, STEPS.length)} מתוך {STEPS.length}</span>
+            <span>
+              {t('steps.processing.progress', {
+                current: Math.min(currentStep + 1, STEPS.length),
+                total: STEPS.length,
+              })}
+            </span>
             <span className="tabular-nums font-mono">
               {Math.round((currentStep / STEPS.length) * 100)}%
             </span>

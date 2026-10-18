@@ -4,6 +4,10 @@ import { useGSAP } from '@gsap/react';
 import { gsap } from 'gsap';
 import { ArrowLeft, Check, Clock, Package } from 'lucide-react';
 import { useRef } from 'react';
+import { useDir, useLocale, useT } from '@/lib/i18n/client';
+import { formatDate, formatNumber } from '@/lib/i18n/format';
+import { receiving } from '@/lib/i18n/messages/receiving';
+import { formatIls } from '@/lib/money';
 import { MOCK_SUPPLIERS, type MockSupplierExpectation } from '../_mock';
 
 interface Props {
@@ -14,6 +18,9 @@ interface Props {
 
 export function SupplierSelect({ selected, onSelect, onContinue }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const t = useT(receiving);
+  const locale = useLocale();
+  const dir = useDir();
 
   useGSAP(
     () => {
@@ -29,11 +36,11 @@ export function SupplierSelect({ selected, onSelect, onContinue }: Props) {
   );
 
   return (
-    <div ref={ref} dir="rtl">
+    <div ref={ref} dir={dir}>
       <StepHeader
-        eyebrow="צעד 1 מתוך 5"
-        title="איזה ספק הגיע?"
-        subtitle="בחר את הספק שעומד בדלת. נטען את ההזמנה המתאימה ונשווה אליה את החשבונית."
+        eyebrow={t('steps.stepOf', { current: 1, total: 5 })}
+        title={t('steps.supplier.title')}
+        subtitle={t('steps.supplier.subtitle')}
       />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-8">
@@ -44,7 +51,7 @@ export function SupplierSelect({ selected, onSelect, onContinue }: Props) {
               key={s.supplierId}
               type="button"
               onClick={() => onSelect(s)}
-              className={`supplier-card group relative overflow-hidden text-right rounded-2xl border p-5 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
+              className={`supplier-card group relative overflow-hidden text-start rounded-2xl border p-5 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
                 isSelected
                   ? 'border-primary/50 bg-primary/8 shadow-glow-primary'
                   : 'border-line bg-surface hover:border-primary/40 shadow-card'
@@ -59,18 +66,22 @@ export function SupplierSelect({ selected, onSelect, onContinue }: Props) {
                     {s.supplierInitials}
                   </div>
                   <div>
-                    <div className="font-semibold text-ink text-base">{s.supplierName}</div>
+                    <div className="font-semibold text-ink text-base">
+                      {locale === 'en' && s.supplierNameEn ? s.supplierNameEn : s.supplierName}
+                    </div>
                     <div className="text-xs text-muted flex items-center gap-2 mt-0.5">
                       <Clock className="w-3 h-3" />
                       <span className="font-mono tabular-nums">
-                        {new Date(s.expectedAt).toLocaleTimeString('he-IL', {
+                        {formatDate(s.expectedAt, locale, {
                           hour: '2-digit',
                           minute: '2-digit',
                         })}
                       </span>
                       <span className="text-subtle">·</span>
                       <Package className="w-3 h-3" />
-                      <span className="font-mono tabular-nums">{s.totalLines} פריטים</span>
+                      <span className="font-mono tabular-nums">
+                        {t('steps.supplier.items', { count: formatNumber(s.totalLines, locale) })}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -83,13 +94,17 @@ export function SupplierSelect({ selected, onSelect, onContinue }: Props) {
               <div className="flex items-center justify-between text-xs">
                 <span className="text-muted">
                   {s.hasActiveReceipt ? (
-                    <span className="text-warn font-medium">קבלה כבר התחילה</span>
+                    <span className="text-warn font-medium">{t('steps.supplier.receiptStarted')}</span>
                   ) : (
-                    <span>צפוי {s.poIds.length === 1 ? 'PO אחד' : `${s.poIds.length} POs`}</span>
+                    <span>
+                      {s.poIds.length === 1
+                        ? t('steps.supplier.expectedOnePo')
+                        : t('steps.supplier.expectedPos', { count: s.poIds.length })}
+                    </span>
                   )}
                 </span>
                 <span className="font-semibold text-ink font-mono tabular-nums">
-                  ₪{s.totalEstimated.toLocaleString('he-IL')}
+                  {formatIls(s.totalEstimated, { locale })}
                 </span>
               </div>
             </button>
@@ -102,16 +117,16 @@ export function SupplierSelect({ selected, onSelect, onContinue }: Props) {
           type="button"
           className="text-sm text-muted hover:text-ink underline underline-offset-4 decoration-line"
         >
-          הספק לא ברשימה?
+          {t('steps.supplier.notListed')}
         </button>
         <button
           type="button"
           disabled={!selected}
           onClick={onContinue}
-          className="inline-flex items-center gap-2 bg-primary hover:brightness-110 disabled:bg-surface-2 disabled:text-subtle text-on-primary rounded-xl px-5 py-2.5 font-medium shadow-glow-primary disabled:shadow-none transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:ring-primary"
+          className="inline-flex items-center gap-2 bg-primary hover:brightness-110 disabled:bg-surface-2 disabled:text-subtle text-on-primary min-h-12 rounded-xl px-5 py-3 font-medium shadow-glow-primary disabled:shadow-none transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:ring-primary"
         >
-          המשך לסריקה
-          <ArrowLeft className="w-4 h-4" />
+          {t('steps.supplier.continue')}
+          <ArrowLeft className="w-4 h-4 ltr:-scale-x-100" aria-hidden="true" />
         </button>
       </div>
     </div>

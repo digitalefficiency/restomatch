@@ -4,9 +4,17 @@ import { useGSAP } from '@gsap/react';
 import { gsap } from 'gsap';
 import { AlertTriangle, ArrowLeft, Check, Minus, Plus, X, Zap } from 'lucide-react';
 import { useRef } from 'react';
+import { useDir, useLocale, useT } from '@/lib/i18n/client';
+import { formatPercent } from '@/lib/i18n/format';
+import { receiving } from '@/lib/i18n/messages/receiving';
+import type { Translator } from '@/lib/i18n/translate';
 import { messageTemplates, telLink, waLink } from '@/lib/messageTemplates';
-import type { LineStatus, ReconciliationResult } from '../_mock';
+import { formatIls } from '@/lib/money';
+import type { LineStatus, ReconciliationLine, ReconciliationResult } from '../_mock';
+import { HebrewToggle, ItemName, Qty } from './english';
 import { StepHeader } from './SupplierSelect';
+
+type T = Translator<typeof receiving.he>;
 
 interface Props {
   result: ReconciliationResult;
@@ -17,6 +25,9 @@ interface Props {
 
 export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRetake }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const t = useT(receiving);
+  const locale = useLocale();
+  const dir = useDir();
 
   useGSAP(
     () => {
@@ -28,7 +39,7 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
         ease: 'power3.out',
       });
       gsap.from('.recon-row', {
-        x: -12,
+        y: 8,
         opacity: 0,
         stagger: 0.03,
         duration: 0.35,
@@ -46,57 +57,45 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
       result.summary.missingCount ===
     0;
 
+  const money = (v: number) => formatIls(v, { locale, maximumFractionDigits: 2 });
+
   return (
-    <div ref={ref} dir="rtl">
+    <div ref={ref} dir={dir}>
       <StepHeader
-        eyebrow="צעד 4 מתוך 5"
-        title="תוצאת ההצלבה"
-        subtitle={`חשבונית ${result.invoiceMeta.invoiceNumber} · ביטחון OCR ${Math.round(result.invoiceMeta.ocrConfidence * 100)}%`}
+        eyebrow={t('steps.stepOf', { current: 4, total: 5 })}
+        title={t('steps.recon.title')}
+        subtitle={t('steps.recon.subtitle', {
+          number: result.invoiceMeta.invoiceNumber,
+          confidence: formatPercent(result.invoiceMeta.ocrConfidence, locale, 0),
+        })}
       />
 
       {/* KPI Header */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <KpiTile label={t('steps.recon.matched')} value={result.summary.matchedCount} icon={<Check className="w-5 h-5" />} tone="primary" />
         <KpiTile
-          label="תואם"
-          value={result.summary.matchedCount}
-          icon={<Check className="w-5 h-5" />}
-          tone="primary"
-        />
-        <KpiTile
-          label="שונה"
+          label={t('steps.recon.different')}
           value={result.summary.qtyDiffCount + result.summary.priceDiffCount}
           icon={<AlertTriangle className="w-5 h-5" />}
           tone="warn"
         />
-        <KpiTile
-          label="לא הוזמן"
-          value={result.summary.unorderedCount}
-          icon={<Plus className="w-5 h-5" />}
-          tone="danger"
-        />
-        <KpiTile
-          label="חסר בחשבונית"
-          value={result.summary.missingCount}
-          icon={<Minus className="w-5 h-5" />}
-          tone="neutral"
-        />
+        <KpiTile label={t('steps.recon.unordered')} value={result.summary.unorderedCount} icon={<Plus className="w-5 h-5" />} tone="danger" />
+        <KpiTile label={t('steps.recon.missing')} value={result.summary.missingCount} icon={<Minus className="w-5 h-5" />} tone="neutral" />
       </div>
 
       {/* Headline delta */}
       {result.summary.headlineDelta > 0 ? (
         <div className="mb-6 relative overflow-hidden rounded-2xl border border-warn/25 bg-warn/8 px-5 py-4 flex items-center gap-3">
-          <span aria-hidden className="pointer-events-none absolute inset-y-0 right-0 w-0.5 leak-gradient" />
+          <span aria-hidden className="pointer-events-none absolute inset-y-0 start-0 w-0.5 leak-gradient" />
           <Zap className="w-5 h-5 text-warn shrink-0" />
           <div className="flex-1">
             <div className="text-sm font-semibold text-ink">
-              הפסד פוטנציאלי מההפרשים:{' '}
-              <span className="font-mono tabular-nums text-danger">
-                ₪{result.summary.headlineDelta.toLocaleString('he-IL')}
-              </span>
+              {t('steps.recon.potentialLoss')}{' '}
+              <bdi dir="ltr" className="font-mono tabular-nums text-danger">
+                {money(result.summary.headlineDelta)}
+              </bdi>
             </div>
-            <div className="text-xs text-muted mt-0.5">
-              עבור להתאמת כמויות כדי לקבע מה באמת הגיע ולהגדיל את החיסכון המוקפא.
-            </div>
+            <div className="text-xs text-muted mt-0.5">{t('steps.recon.potentialLossHint')}</div>
           </div>
         </div>
       ) : null}
@@ -106,7 +105,7 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
         <div className="mb-6 space-y-3">
           {result.contactAlerts.map((a, i) => {
             const msg = messageTemplates.agentVerification({
-              supplierName: 'הספק',
+              supplierName: t('steps.recon.theSupplier'),
               role: a.role,
               name: a.name ?? undefined,
               newPhone: a.newPhone,
@@ -116,32 +115,33 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
                 <div className="flex items-start gap-3">
                   <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
                   <div className="min-w-0">
-                    <div className="font-semibold text-ink">⚠️ פרטי הסוכן השתנו</div>
+                    <div className="font-semibold text-ink">{t('steps.recon.agentChanged')}</div>
                     <div className="text-sm text-muted mt-1">
-                      {a.role}
-                      {a.name ? ` · ${a.name}` : ''}: הטלפון השתנה מ-
-                      <span className="line-through mx-1">{a.oldPhone}</span> ל-
-                      <span className="font-semibold text-ink mx-1">{a.newPhone}</span>. הישן נשמר
-                      כמספר משני.
+                      {t('steps.recon.phoneChanged', {
+                        who: `${a.role}${a.name ? ` · ${a.name}` : ''}`,
+                        old: a.oldPhone,
+                        new: a.newPhone,
+                      })}
                     </div>
                     <div className="flex flex-wrap items-center gap-2 mt-3">
-                      <span className="text-sm text-muted">אמת בוואטסאפ מול:</span>
+                      <span className="text-sm text-muted">{t('steps.recon.verifyWhatsapp')}</span>
                       {a.allNumbers.map((p) => (
                         <a
                           key={p}
                           href={waLink(p, msg)}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 bg-surface-2 border border-line text-ink rounded-xl px-3 py-1.5 text-sm font-medium hover:border-primary/40 hover:text-primary transition-all"
+                          dir="ltr"
+                          className="inline-flex min-h-11 items-center gap-1 bg-surface-2 border border-line text-ink rounded-xl px-3 py-1.5 text-sm font-medium hover:border-primary/40 hover:text-primary transition-all"
                         >
                           {p}
                         </a>
                       ))}
                       <a
                         href={telLink(a.newPhone)}
-                        className="inline-flex items-center gap-1 bg-surface-2 border border-line text-muted rounded-xl px-3 py-1.5 text-sm font-medium hover:text-ink transition-all"
+                        className="inline-flex min-h-11 items-center gap-1 bg-surface-2 border border-line text-muted rounded-xl px-3 py-1.5 text-sm font-medium hover:text-ink transition-all"
                       >
-                        התקשר
+                        {t('steps.recon.call')}
                       </a>
                     </div>
                   </div>
@@ -152,57 +152,84 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
         </div>
       ) : null}
 
-      {/* Comparison table */}
-      <div className="rounded-2xl border border-line bg-surface overflow-hidden shadow-card mb-6">
-        <table className="w-full text-sm">
+      <div className="mb-3 flex justify-end">
+        <HebrewToggle />
+      </div>
+
+      {/* Mobile: one card per line (receivers use phones). */}
+      <ul className="mb-6 space-y-2 md:hidden" data-testid="recon-cards">
+        {result.lines.map((line, i) => (
+          <li
+            key={`${line.productName}-${i}`}
+            className={`recon-row rounded-2xl border border-line p-4 ${rowTone(line.status)}`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <ItemName
+                he={line.productName}
+                en={line.productNameEn}
+                strike={line.status === 'missing_from_invoice'}
+                className="text-base font-semibold text-ink"
+              />
+              <StatusBadge status={line.status} t={t} />
+            </div>
+            <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">
+              <div>
+                <dt className="text-xs text-subtle">{t('steps.recon.ordered')}</dt>
+                <dd className="text-ink">
+                  <LineQty qty={line.poQty} unit={line.poUnit} price={line.poUnitPrice} money={money} />
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-subtle">{t('steps.recon.invoiced')}</dt>
+                <dd className="text-ink">
+                  <LineQty qty={line.invoiceQty} unit={line.invoiceUnit} price={line.invoiceUnitPrice} money={money} />
+                </dd>
+              </div>
+            </dl>
+            {line.deltaIls > 0 ? (
+              <div className="mt-2 text-sm font-semibold text-danger">
+                <bdi dir="ltr" className="font-mono tabular-nums">+{money(line.deltaIls)}</bdi>
+              </div>
+            ) : null}
+            {line.sku ? <div className="mt-1 font-mono text-xs text-subtle" dir="ltr">{line.sku}</div> : null}
+          </li>
+        ))}
+      </ul>
+
+      {/* Desktop table */}
+      <div className="hidden md:block rounded-2xl border border-line bg-surface overflow-hidden shadow-card mb-6">
+        <table className="w-full text-sm" data-testid="recon-table">
           <thead className="bg-surface-2 text-subtle text-xs uppercase tracking-wider">
             <tr>
-              <th className="text-right p-3 font-semibold">מק״ט</th>
-              <th className="text-right p-3 font-semibold">מוצר</th>
-              <th className="text-right p-3 font-semibold">בהזמנה</th>
-              <th className="text-right p-3 font-semibold">בחשבונית</th>
-              <th className="text-right p-3 font-semibold">סטטוס</th>
-              <th className="text-right p-3 font-semibold">פער ₪</th>
+              <th className="text-start p-3 font-semibold">{t('steps.recon.colSku')}</th>
+              <th className="text-start p-3 font-semibold">{t('steps.recon.colProduct')}</th>
+              <th className="text-start p-3 font-semibold">{t('steps.recon.colOrdered')}</th>
+              <th className="text-start p-3 font-semibold">{t('steps.recon.colInvoiced')}</th>
+              <th className="text-start p-3 font-semibold">{t('steps.recon.colStatus')}</th>
+              <th className="text-start p-3 font-semibold">{t('steps.recon.colDelta')}</th>
             </tr>
           </thead>
           <tbody>
             {result.lines.map((line, i) => (
-              <tr
-                key={`${line.productName}-${i}`}
-                className={`recon-row border-t border-line ${rowTone(line.status)}`}
-              >
-                <td className="p-3 font-mono tabular-nums text-subtle text-xs whitespace-nowrap">
+              <tr key={`${line.productName}-${i}`} className={`recon-row border-t border-line ${rowTone(line.status)}`}>
+                <td className="p-3 font-mono tabular-nums text-subtle text-xs whitespace-nowrap" dir="ltr">
                   {line.sku ?? '—'}
                 </td>
                 <td className="p-3 font-medium text-ink">
-                  <span className={line.status === 'missing_from_invoice' ? 'line-through opacity-70' : ''}>
-                    {line.productName}
-                  </span>
+                  <ItemName he={line.productName} en={line.productNameEn} strike={line.status === 'missing_from_invoice'} />
                 </td>
-                <td className="p-3 font-mono tabular-nums text-muted">
-                  {line.poQty !== null ? `${line.poQty} ${line.poUnit ?? ''}` : '—'}
-                  {line.poUnitPrice !== null ? (
-                    <span className="text-xs text-subtle mr-1">
-                      × ₪{line.poUnitPrice}
-                    </span>
-                  ) : null}
+                <td className="p-3 text-muted">
+                  <LineQty qty={line.poQty} unit={line.poUnit} price={line.poUnitPrice} money={money} />
                 </td>
-                <td className="p-3 font-mono tabular-nums text-muted">
-                  {line.invoiceQty !== null ? `${line.invoiceQty} ${line.invoiceUnit ?? ''}` : '—'}
-                  {line.invoiceUnitPrice !== null ? (
-                    <span className="text-xs text-subtle mr-1">
-                      × ₪{line.invoiceUnitPrice}
-                    </span>
-                  ) : null}
+                <td className="p-3 text-muted">
+                  <LineQty qty={line.invoiceQty} unit={line.invoiceUnit} price={line.invoiceUnitPrice} money={money} />
                 </td>
                 <td className="p-3">
-                  <StatusBadge status={line.status} />
+                  <StatusBadge status={line.status} t={t} />
                 </td>
                 <td className="p-3 font-mono tabular-nums">
                   {line.deltaIls > 0 ? (
-                    <span className="text-danger font-semibold">
-                      +₪{line.deltaIls.toFixed(2)}
-                    </span>
+                    <bdi dir="ltr" className="text-danger font-semibold">+{money(line.deltaIls)}</bdi>
                   ) : (
                     <span className="text-subtle">—</span>
                   )}
@@ -214,34 +241,61 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
       </div>
 
       {/* Bottom CTAs */}
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
         <button
           type="button"
           onClick={onRetake}
-          className="text-sm text-muted hover:text-ink underline underline-offset-4 decoration-line"
+          className="min-h-11 text-sm text-muted hover:text-ink underline underline-offset-4 decoration-line"
         >
-          צלם חשבונית מחדש
+          {t('steps.recon.retake')}
         </button>
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
           {allGood ? (
             <button
+              type="button"
               onClick={onQuickConfirm}
-              className="inline-flex items-center gap-2 bg-gold hover:brightness-110 text-on-primary rounded-xl px-5 py-2.5 font-medium shadow-glow-gold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:ring-gold"
+              className="inline-flex min-h-12 items-center justify-center gap-2 bg-gold hover:brightness-110 text-on-primary rounded-xl px-5 py-3 font-medium shadow-glow-gold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:ring-gold"
             >
               <Check className="w-4 h-4" strokeWidth={3} />
-              הכל תקין — אישור מהיר
+              {t('steps.recon.quickConfirm')}
             </button>
           ) : null}
           <button
+            type="button"
             onClick={onContinueAdjust}
-            className="inline-flex items-center gap-2 bg-primary hover:brightness-110 text-on-primary rounded-xl px-5 py-2.5 font-medium shadow-glow-primary transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:ring-primary"
+            data-testid="continue-adjust"
+            className="inline-flex min-h-12 items-center justify-center gap-2 bg-primary hover:brightness-110 text-on-primary rounded-xl px-5 py-3 font-medium shadow-glow-primary transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:ring-primary"
           >
-            המשך להתאמת כמויות
-            <ArrowLeft className="w-4 h-4" />
+            {t('steps.recon.continueAdjust')}
+            <ArrowLeft className="w-4 h-4 ltr:-scale-x-100" aria-hidden="true" />
           </button>
         </div>
       </div>
     </div>
+  );
+}
+
+function LineQty({
+  qty,
+  unit,
+  price,
+  money,
+}: {
+  qty: number | null;
+  unit: string | null;
+  price: number | null;
+  money: (v: number) => string;
+}) {
+  if (qty === null) return <span className="text-subtle">—</span>;
+  return (
+    <span className="inline-flex flex-wrap items-baseline gap-x-1">
+      <Qty qty={qty} unit={unit} />
+      {price !== null ? (
+        <bdi dir="ltr" className="font-mono text-xs tabular-nums text-subtle">
+          × {money(price)}
+        </bdi>
+      ) : null}
+    </span>
   );
 }
 
@@ -260,41 +314,20 @@ function rowTone(status: LineStatus): string {
   }
 }
 
-function StatusBadge({ status }: { status: LineStatus }) {
-  const map: Record<LineStatus, { label: string; tint: string; icon: React.ReactNode }> = {
-    matched: {
-      label: 'תואם',
-      tint: 'bg-primary/12 text-primary ring-1 ring-primary/25',
-      icon: <Check className="w-3 h-3" strokeWidth={3} />,
-    },
-    qty_diff: {
-      label: 'כמות שונה',
-      tint: 'bg-warn/12 text-warn ring-1 ring-warn/25',
-      icon: <AlertTriangle className="w-3 h-3" />,
-    },
-    price_diff: {
-      label: 'מחיר שונה',
-      tint: 'bg-warn/12 text-warn ring-1 ring-warn/25',
-      icon: <Zap className="w-3 h-3" />,
-    },
-    unordered: {
-      label: 'לא בהזמנה',
-      tint: 'bg-danger/12 text-danger ring-1 ring-danger/25',
-      icon: <Plus className="w-3 h-3" strokeWidth={3} />,
-    },
-    missing_from_invoice: {
-      label: 'חסר בחשבונית',
-      tint: 'bg-surface-2 text-muted ring-1 ring-line',
-      icon: <X className="w-3 h-3" strokeWidth={3} />,
-    },
-  };
-  const info = map[status];
+const STATUS_STYLE: Record<LineStatus, { tint: string; icon: React.ReactNode }> = {
+  matched: { tint: 'bg-primary/12 text-primary ring-1 ring-primary/25', icon: <Check className="w-3 h-3" strokeWidth={3} /> },
+  qty_diff: { tint: 'bg-warn/12 text-warn ring-1 ring-warn/25', icon: <AlertTriangle className="w-3 h-3" /> },
+  price_diff: { tint: 'bg-warn/12 text-warn ring-1 ring-warn/25', icon: <Zap className="w-3 h-3" /> },
+  unordered: { tint: 'bg-danger/12 text-danger ring-1 ring-danger/25', icon: <Plus className="w-3 h-3" strokeWidth={3} /> },
+  missing_from_invoice: { tint: 'bg-surface-2 text-muted ring-1 ring-line', icon: <X className="w-3 h-3" strokeWidth={3} /> },
+};
+
+export function StatusBadge({ status, t }: { status: LineStatus; t: T }) {
+  const info = STATUS_STYLE[status];
   return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${info.tint}`}
-    >
+    <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${info.tint}`}>
       {info.icon}
-      <span>{info.label}</span>
+      <span>{t(`steps.status.${status}`)}</span>
     </span>
   );
 }
@@ -316,12 +349,14 @@ function KpiTile({
     danger: { bg: 'bg-danger/8', border: 'border-danger/25', icon: 'text-danger', value: 'text-danger' },
     neutral: { bg: 'bg-surface-2', border: 'border-line', icon: 'text-muted', value: 'text-ink' },
   };
-  const t = tints[tone];
+  const tone_ = tints[tone];
   return (
-    <div className={`kpi-card rounded-2xl border ${t.border} ${t.bg} p-4`}>
-      <div className={`mb-2 ${t.icon}`}>{icon}</div>
+    <div className={`kpi-card rounded-2xl border ${tone_.border} ${tone_.bg} p-4`}>
+      <div className={`mb-2 ${tone_.icon}`}>{icon}</div>
       <div className="text-xs text-muted font-medium mb-1">{label}</div>
-      <div className={`text-2xl font-bold font-mono tabular-nums ${t.value}`}>{value}</div>
+      <div className={`text-2xl font-bold font-mono tabular-nums ${tone_.value}`}>{value}</div>
     </div>
   );
 }
+
+export type { ReconciliationLine };
