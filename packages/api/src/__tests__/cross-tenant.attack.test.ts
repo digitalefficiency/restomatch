@@ -35,7 +35,6 @@ import {
   supplierContractPrices,
   suppliers,
   users,
-  type RestaurantSettings,
 } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
