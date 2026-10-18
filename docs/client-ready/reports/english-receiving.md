@@ -132,6 +132,20 @@ eslint app/dashboard/receiving app/showcase/receiver app/api/showcase lib/supaba
   `Host` (stops browsers only); a stalled/hung OCR job with no catch path still stays `ocr_pending`
   (the wizard's 120 s + background re-poll + Refresh cover the UI side).
 
+**Merged head (after `origin/claude/client-ready@5450844`, conflicts in wizard.tsx + api index.ts resolved keeping both sides):**
+
+```
+pnpm test (alone)   → 11/13 tasks green before turbo stopped: api 553 · charts 69 · matching 86 · db 68 · catalog 50
+                      ocr 50 · translate 74 · procurement 17 · queue 8 · crypto 12 · billing 5; worker run separately 19 (+1 skipped)
+                      web 284/285 — the 1 failure is lib/__tests__/redisFailFast.test.ts "rate limiter fails OPEN within
+                      its deadline" (integration branch's test; fails alone too; this branch touches neither rateLimit nor redis)
+web tsc --noEmit    → 0 errors; worker/api/ocr tsc → 0 (worker needed a 1-line Database type fix after the jobDb merge)
+pnpm build          → success
+next start (prod)   → K (en, 390 px, S7 items) PASS · L (he, desktop, RTL order-only review) PASS
+```
+The prod check found a merge regression: the new fixed mobile bottom nav covered the wizard's sticky
+"Close receipt" footer → footer now sits above it on mobile (`82b0c1c`), K re-run green.
+
 ## QA
 
 Script: `apps/web/scripts/qa-receiving.ts` (Playwright, real login per role, fixtures generated with sharp:

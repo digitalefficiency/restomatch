@@ -1,13 +1,13 @@
 {
   "base": "http://localhost:3000",
-  "at": "2026-10-18T14:45:14.760Z",
-  "pass": 1,
+  "at": "2026-10-18T15:07:34.220Z",
+  "pass": 2,
   "total": 2,
   "results": [
     {
       "id": "K",
       "title": "receiver · en · 390px · no cookie consent — demo invoice → order-only review → close (S7 trip-wires)",
-      "status": "FAIL",
+      "status": "PASS",
       "checks": [
         "scan: \"Step 2 of 5\" with 2 of 5 bars filled",
         "observation (S6): cookie banner shown=true; \"Use a demo invoice\" COVERED by it at 390px",
@@ -15,10 +15,13 @@
         "\"receiving against the order\" subtitle",
         "no false \"missing\" lines",
         "calm \"check by hand\" banner",
-        "review: \"Step 4 of 5\" with 4 bars"
+        "review: \"Step 4 of 5\" with 4 bars",
+        "sticky \"Close receipt\" CTA is the top-most element (nothing over it)",
+        "every line checked → close enabled",
+        "summary counts the hand-checked lines",
+        "confirmed: all 5 bars"
       ],
-      "error": "check failed: sticky \"Close receipt\" CTA is the top-most element (nothing over it)",
-      "ms": 48713
+      "ms": 59379
     },
     {
       "id": "L",
@@ -31,7 +34,7 @@
         "calm pending banner",
         "progress 4/5 on review"
       ],
-      "ms": 29697
+      "ms": 28468
     }
   ]
 }
