@@ -83,6 +83,11 @@ S8 0043–0044 (1781990000000, 1781995000000) · S3 0045 (1782000000000) · S11 
 S12 0048–0049 (1782030000000, 1782040000000) · S13 0050–0051 (1782050000000, 1782060000000) · S14 0052–0053
 (1782070000000, 1782080000000) · S15 0054–0055 (1782090000000, 1782100000000) · S17 0056–0057 (1782110000000,
 1782120000000) · S5 0058 (1782130000000) · S2/S4/S7 if needed 0059–0061 (1782140000000, 1782150000000, 1782160000000).
+**RLS file rule (SB-3, 2026-10-18):** feature branches generated their `*_restomatch_rls_*.sql` from the OLD
+`rls/0001` (which still created the anon walk-ins policies). At integration the orchestrator deletes every
+UNRELEASED rls file (and its `released-migrations.json` entry — never one that is on `main`) and re-runs
+`pnpm db:supabase-sync`, so the newest RLS file always reflects the current `rls/*.sql`. Sessions: do not edit
+`rls/*.sql`; do not hand-edit generated files.
 The Supabase GitHub integration refuses a version older than the last applied one: the orchestrator renumbers
 any unreleased migration whose `when` is below the last released one before it reaches `main`.
 
