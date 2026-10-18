@@ -118,7 +118,7 @@ This pushes the same `supabase/migrations`.
 
 ## 4. First deploy — checks and the one manual step
 
-1. Merge to the production branch. In the dashboard (Database → Migrations, or the integration's deploy log), expect **39 migrations** in total (36 from the first merge, `20260620072002_…rls_2a5eafd1` = Data API lockout, then `20260620182640_0033_plans_catalog` + `20260620182641_…rls_d5c69a24` = plan catalog and SB-3 storage hardening). Or run in the SQL editor:
+1. Merge to the production branch. In the dashboard (Database → Migrations, or the integration's deploy log), expect **39 migrations** in total (36 from the first merge, `20260620072002_…rls_2a5eafd1` = Data API lockout, then `20260620182640_0033_plans_catalog` + `20260620182641_…rls_a71f80e5` = plan catalog and the bucket upload limits). Or run in the SQL editor:
    ```sql
    select count(*) from supabase_migrations.schema_migrations;   -- 39
    select count(*) from drizzle.__drizzle_migrations;            -- 35
@@ -129,8 +129,8 @@ This pushes the same `supabase/migrations`.
    ```
 3. Check that the storage policies landed:
    ```sql
-   select count(*) from pg_policies where schemaname = 'storage' and policyname like 'invoice_scans%';  -- 4 (tenant select/insert/update/delete; no walk-ins since SB-3)
-   select public, file_size_limit, allowed_mime_types from storage.buckets where id = 'invoice-scans'; -- false | 10485760 | {pdf,jpeg,png,webp}
+   select count(*) from pg_policies where schemaname = 'storage' and policyname like 'invoice_scans%';  -- 6 (4 tenant + 2 walk-ins showcase, see "SB-3" below)
+   select public, file_size_limit, allowed_mime_types from storage.buckets where id = 'invoice-scans'; -- false | 11534336 | {pdf,jpeg,png,webp,heic,heif}
    select count(*) from plans;                                                                           -- 4 (0033)
    ```
    If the first query returns 0, paste `packages/db/drizzle/rls/0001_invoice_scans_rls.sql` into the SQL editor and run it.
@@ -139,6 +139,25 @@ This pushes the same `supabase/migrations`.
    DATABASE_URL='postgresql://postgres:<pw>@db.<NEW_REF>.supabase.co:5432/postgres' pnpm db:doctor
    ```
    It should report **0 FAIL · 0 WARN**. Before step 2, the single expected WARN is the app role having no LOGIN yet.
+
+### SB-3 — anonymous showcase uploads (deferred, needs the server upload route)
+
+Two storage policies remain open to the publishable (anon) key:
+
+- `invoice_scans_walkins_select`
+- `invoice_scans_walkins_insert`
+
+They cover **only** the shared demo prefix `walk-ins/` and can never reach a `<restaurant_id>/` tenant prefix. The cost is that anyone holding the public key can list and download other visitors' showcase uploads, and can upload files of at most 11 MiB, in the allowed types only, under `walk-ins/`.
+
+The public `/showcase/receiver` still uploads with the anon key (`apps/web/lib/supabase/client.ts` → `uploadInvoiceScan`). Dropping these policies before a server-side upload route exists breaks the landing-page demo, so the drop is **not** in this release. `db:doctor` reports it as a known **WARN** (`no anonymous storage access`). It reports **FAIL** if any *other* anon or public policy appears on `storage.objects`, or if one of the 4 tenant policies is missing.
+
+To close it, ship these together in ONE PR:
+
+1. A server route (service-role upload into `walk-ins/` that returns a signed URL), with the showcase page passing `uploadFile` to `<InvoiceScan>`.
+2. Removal of the two `create policy invoice_scans_walkins_*` statements in `packages/db/drizzle/rls/0001_invoice_scans_rls.sql`. This file is immutable, so it needs a human-authored PR. Keep the `drop policy if exists` lines.
+3. `pnpm db:supabase-sync`, which emits a new appended RLS version.
+
+**If the policy count above is below 6:** the migration role was not allowed to manage `storage.objects` policies, and the deploy log only shows a WARNING (`storage.objects policies NOT applied`). Run `packages/db/drizzle/rls/0001_invoice_scans_rls.sql` in the SQL editor, then re-run `pnpm db:doctor`. Expect `tenant storage policies` = PASS.
 
 ## 5. Environment for the new project
 
@@ -225,8 +244,12 @@ DATABASE_URL="$NEW_DIRECT" pnpm db:doctor
 Only on an **empty** new project — the seed truncates every restaurant and user:
 
 ```bash
+# 1) generate the demo password ONCE, print it, and save it in your password manager
+#    (the seed never prints it back — lose it and you must re-seed)
+export DEMO_PASSWORD="$(openssl rand -base64 18)"; echo "$DEMO_PASSWORD"
+# 2) seed with it
 SEED_ALLOW_REMOTE_HOST=db.<NEW_REF>.supabase.co DATABASE_URL="$NEW_DIRECT" DEMO_TODAY=<demo date> \
-  DEMO_PASSWORD="$(openssl rand -base64 18)" pnpm --filter @restomatch/db seed
+  DEMO_PASSWORD="$DEMO_PASSWORD" pnpm --filter @restomatch/db seed
 SEED_ALLOW_REMOTE_HOST=db.<NEW_REF>.supabase.co DATABASE_URL="$NEW_DIRECT" DEMO_TODAY=<demo date> \
   pnpm --filter @restomatch/worker exec tsx scripts/seed-demo.ts
 ```

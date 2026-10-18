@@ -70,12 +70,16 @@ create policy invoice_scans_tenant_delete on storage.objects
     and (storage.foldername(name))[1] = app.current_restaurant_id()::text
   );
 
--- ── Anonymous showcase: NO anon access (SB-3, client-ready) ──────────────────
--- The old walk-ins policies let anyone holding the publishable key LIST and
--- DOWNLOAD every showcase upload under 'walk-ins/' (and upload arbitrary files).
--- The showcase now uploads through a server endpoint with the service-role key
--- (which bypasses storage RLS) and hands the browser a short-lived signed URL,
--- so no anon policy exists on this bucket at all. Dropped idempotently so a
--- database provisioned by an older version of this file is fixed on re-apply.
+-- ── Anonymous showcase: a single shared 'walk-ins/' prefix (demo data only) ──
+-- Narrow by prefix (never a tenant prefix), so the public landing-page receiver
+-- can upload/read its own demo scans with the publishable (anon) key. It can
+-- NEVER touch a '<restaurant_id>/' object because that requires the GUC above.
 drop policy if exists invoice_scans_walkins_select on storage.objects;
+create policy invoice_scans_walkins_select on storage.objects
+  for select
+  using (bucket_id = 'invoice-scans' and (storage.foldername(name))[1] = 'walk-ins');
+
 drop policy if exists invoice_scans_walkins_insert on storage.objects;
+create policy invoice_scans_walkins_insert on storage.objects
+  for insert
+  with check (bucket_id = 'invoice-scans' and (storage.foldername(name))[1] = 'walk-ins');

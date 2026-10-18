@@ -376,17 +376,21 @@ grant usage on schema public to restomatch_app;
       end $$;
 
 -- 5. Storage (Supabase): the private invoice-scans bucket the app uploads to,
---    then the per-restaurant storage.objects policies (rls/0001; no anon/walk-ins
---    access since SB-3 — the showcase uploads server-side). storage.objects
+--    then the storage.objects policies from rls/0001 (per-restaurant + the anon
+--    'walk-ins/' showcase prefix — dropping that one waits for the server-side
+--    showcase upload, see SUPABASE-GITHUB-DEPLOY.md §SB-3). storage.objects
 --    belongs to supabase_storage_admin; if the migration role may not alter it or
 --    create policies on it, this logs a WARNING instead of failing the deploy —
 --    apply rls/0001 from the SQL editor then (the doctor / verify-cutover report it).
 do $$ begin
   if to_regclass('storage.buckets') is not null then
-    -- SB-3: private, ≤10 MiB, invoice formats only (enforced by the Storage API).
+    -- SB-3: private, ≤11 MiB, invoice formats only (enforced by the Storage API).
+    -- 11 MiB sits just above scans.upload's own cap (14M base64 chars ≈ 10.5 MB)
+    -- so the app's friendly error fires first; HEIC/HEIF because the receiver
+    -- picker accepts image/* and iPhones hand over HEIC from the photo library.
     insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-    values ('invoice-scans', 'invoice-scans', false, 10485760,
-            array['application/pdf', 'image/jpeg', 'image/png', 'image/webp'])
+    values ('invoice-scans', 'invoice-scans', false, 11534336,
+            array['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'])
     on conflict (id) do update set
       public = false,
       file_size_limit = excluded.file_size_limit,
@@ -478,15 +482,19 @@ create policy invoice_scans_tenant_delete on storage.objects
     and (storage.foldername(name))[1] = app.current_restaurant_id()::text
   );
 
--- ── Anonymous showcase: NO anon access (SB-3, client-ready) ──────────────────
--- The old walk-ins policies let anyone holding the publishable key LIST and
--- DOWNLOAD every showcase upload under 'walk-ins/' (and upload arbitrary files).
--- The showcase now uploads through a server endpoint with the service-role key
--- (which bypasses storage RLS) and hands the browser a short-lived signed URL,
--- so no anon policy exists on this bucket at all. Dropped idempotently so a
--- database provisioned by an older version of this file is fixed on re-apply.
+-- ── Anonymous showcase: a single shared 'walk-ins/' prefix (demo data only) ──
+-- Narrow by prefix (never a tenant prefix), so the public landing-page receiver
+-- can upload/read its own demo scans with the publishable (anon) key. It can
+-- NEVER touch a '<restaurant_id>/' object because that requires the GUC above.
 drop policy if exists invoice_scans_walkins_select on storage.objects;
+create policy invoice_scans_walkins_select on storage.objects
+  for select
+  using (bucket_id = 'invoice-scans' and (storage.foldername(name))[1] = 'walk-ins');
+
 drop policy if exists invoice_scans_walkins_insert on storage.objects;
+create policy invoice_scans_walkins_insert on storage.objects
+  for insert
+  with check (bucket_id = 'invoice-scans' and (storage.foldername(name))[1] = 'walk-ins');
     $policies$;
   exception when insufficient_privilege then
     raise warning 'restomatch: storage.objects policies NOT applied as % (%) — run packages/db/drizzle/rls/0001_invoice_scans_rls.sql in the SQL editor', current_user, sqlerrm;
