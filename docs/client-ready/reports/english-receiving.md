@@ -77,6 +77,65 @@ screenshots: `docs/client-ready/screenshots/receiving-*.png`.
 | Raw server errors shown to receivers | The wizard now maps tRPC codes to translated messages, plus an "OCR is taking longer" note on timeout. | — |
 | Showcase VAT | Mock total used 17% → now 18% (M4). | — |
 
+
+## Round 3 (release candidate) — fixes
+
+| Issue | Problem → fix | Test |
+|---|---|---|
+| **EN-2** | Phone photos (8–12 MB) went up raw; base64 broke Vercel's 4.5 MB body limit. `scanPrep.ts` downscales in the browser (long edge 2000 px, JPEG 0.8 → ladder down to 1280/0.6) with EXIF orientation applied; JPEGs get a white background (transparent PNGs no longer turn black); older Safari falls back to `createImageBitmap(file)`. PDFs pass through; > 3 MB gets a clear "too large — photograph it or split the PDF" message, never a raw error. | `scanPrep.test.ts` (7); QA A, E |
+| **EN-3** | OCR prompt allows `null`, schema did not → job threw, invoice stuck in `ocr_pending` forever. `normalizeExtraction` strips nulls and derives an absent qty/price/total from the other two; an underivable one is 0 **at confidence 0.2**, and the pipeline now sends any line < 0.5 to **human review** (never straight to matching, where a 0 would be counted as ₪ leak). A present but malformed part (`lines:"garbage"`, string totals) is left for the schema to reject — never a silently empty invoice. The worker's final failed attempt marks the invoice terminal-failed (`ocrFailed`, reason quota/extraction), shown in the wizard and on the invoice page. | `claudeVision.test.ts`, `pipeline.test.ts` "unreadable lines", `ocrFailure.test.ts`; QA H |
+| **EN-4** | Wizard polled ~30 s then fell back silently. Now ~120 s with back-off (1/2/4 s), a "still reading…" state after 30 s with **Continue with the order**, a 10-min background re-poll that offers **Show results**, a **Refresh** button. A dropped request no longer ends the wait; "Show results" keeps the quantities the receiver already counted; a late refresh can't reopen a closed receipt. | `poll-errors.test.ts` (9), `adapters.test.ts` keepAdjusted; QA G |
+| **EN-5** | False ₪ alarms. With no invoice / unlinked OCR lines, unpaired lines are **"Check by hand"** (neutral, ₪0) — never "missing on invoice" / "not ordered". Split invoice lines for one ordered item are folded (no qty gap + phantom "not ordered"); zero-filled lines are "check by hand". | `adapters.test.ts` (9); QA G, H, K |
+| **WIZ-ERR-1** | Raw server text ("Internal server error", "Failed to fetch") reached receivers. `receivingErrorText`: coded / mapped errors are localized, offline → network message, everything else → generic. Also applied to the scan-upload error (QA F found the raw "Failed to fetch" there). | `poll-errors.test.ts`; QA F, I |
+| **EN-BUDGET-1** | The Claude translation budget was charged even when the glossary covered everything. `beforeClaude` gate runs only when names really go to Claude. | `receiving-english.test.ts` budget |
+| **EN-8** | Haiku: `thinking: {type:'disabled'}`; a `max_tokens` stop splits the chunk and retries (single item → explicit error). | translate (74) |
+| **SB-3** | Anon browser uploads to `invoice-scans/walk-ins/`. Now `POST /api/showcase/upload` (same-origin, 20/IP/h, 4 MB, magic-byte type check) uploads with the **service role** to a server-generated `walk-ins/<date>/walk-<rand>.<ext>` and returns a **10-min signed URL**; 503 `not_configured` → showcase demo mode. `/api/showcase/ocr` only accepts walk-in signed URLs (traversal, encoded separators and tab/newline smuggling refused). **Depends on S1's migration dropping `invoice_scans_walkins_select/insert` (`…_restomatch_rls_<hash>.sql`, version 20260620072003, branch `claude/client-ready-sb3`) — until that lands, anon can still list/read walk-ins. Merge both together.** | `showcase-upload.test.ts` (8); QA J; curl: cross-origin → 403, no storage → 503 |
+| **77a9ec3** | Verified, no change: direct signing only for `scan-<base36>-<hex>` ids under the caller's `<restaurantId>/`; missing objects fail; retries skip insert. | read-through |
+| **S7 trip-wires** | (1) order-only review said "OCR confidence 100%" → now "Receiving against the order — no invoice read yet"; 11 false "missing" → "check by hand". (2) summary "0 matched" → counts hand-checked lines ("0 matched, 11 checked by hand"). (3) "Step 2 of 5" with 4 bars → 5 bars matching the eyebrow. (4) cookie banner over the CTA: the wizard's sticky "Close receipt" is unobstructed, but **before consent the banner covers "Use a demo invoice" at 390 px** — S6's global fix. | `adapters.test.ts`; QA K |
+| Wizard (S7 ask) | No `startReceipt` on page view (a receipt opens on the first real action). | PR #30 |
+
+## Verification (2 layers)
+
+**Layer 1 — full gate** (head before the S7 trip-wire commit; web re-run after it):
+
+```
+pnpm test (turbo, serial, Postgres 16 + pgvector, migrated)  → 13/13 tasks, 1126 passed, 1 skipped
+  translate 74 · crypto 12 · billing 5 · db 59 · procurement 17 · ocr 50 · matching 86
+  charts 33 · catalog 50 · api 504 · worker 14 (+1 skipped) · web 222
+apps/web vitest (after 44ceaef)                               → 222 passed
+apps/web tsc --noEmit                                         → 0 errors
+eslint app/dashboard/receiving app/showcase/receiver app/api/showcase lib/supabase → clean
+```
+
+**Layer 2 — production build + click-through + independent refuter**
+
+- `pnpm build` (production) → success (only the known bullmq "critical dependency" warning).
+- `next start` (NODE_ENV=production; placeholder RESEND/EMAIL_FROM/service-role values only to satisfy the
+  prod env guard locally — no Supabase URL, so no storage, nothing sent). Playwright, 390 px, English:
+  **J** public showcase (real 11 MB photo → endpoint answers `not_configured` → demo mode → English review) PASS;
+  **K** receiver, no cookie consent, demo invoice → order-only review → adjust → close: all 4 S7 items checked
+  (11 checks) PASS. `docs/client-ready/qa/receiving-qa-prod.json`, screenshots `qa-J-*`, `qa-K-*`.
+  curl: `/api/showcase/upload` cross-origin → 403 `origin_not_allowed`; no storage → 503 `not_configured`.
+- The upload → OCR → English path needs the worker + dev OCR stub, which production disables **by design**
+  (never a stub or local storage in prod), so it is verified on the dev server (QA below).
+- **Refuter** (one independent subagent, read + targeted vitest only). It refuted 3 claims and raised 4
+  should-fixes; all fixed in `324442e` with tests:
+  1. *blocker* zero-filled OCR line went straight to matching (₪ invented) → line-confidence review gate.
+  2. malformed OCR JSON became an empty "matched" invoice → now rejected.
+  3. *blocker* split invoice lines / zero-filled lines → false ₪ on review → folded / "check by hand".
+  4. one dropped poll request ended the wait; background watch had no catch → poll tolerates blips.
+  5. "Show results" discarded counted quantities; refresh could reopen a closed receipt → kept / guarded.
+  6. *SB-3 exposure* stays open until S1's policy-drop migration merges (documented above; human-authored).
+  7. `isShowcaseScanUrl` accepted `.\t./` (URL parser strips tabs) → whitespace/control refused + parsed-path check.
+  Held: EN-2 (nits fixed: white fill, Safari fallback), EN-BUDGET-1, EN-8, WIZ-ERR-1, i18n parity.
+  Not fixed (noted): rate limit is per-instance in memory without Redis (fails open); origin check trusts
+  `Host` (stops browsers only); a stalled/hung OCR job with no catch path still stays `ocr_pending`
+  (the wizard's 120 s + background re-poll + Refresh cover the UI side).
+
+## QA
+
+QA_PLACEHOLDER
+
 ## Still broken / not done
 
 - **Supplier names in English**: `suppliers.name_en` is displayed when present but is never auto-filled.
