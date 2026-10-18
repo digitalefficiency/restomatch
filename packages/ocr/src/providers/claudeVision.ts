@@ -17,7 +17,8 @@
  * declared in package.json; install is owned by the foundation agent.
  */
 
-import { InvoiceOcrResult } from '@restomatch/types';
+import { InvoiceOcrLine, InvoiceOcrResult } from '@restomatch/types';
+import { z } from 'zod';
 import type { ImageSource, OcrProvider } from '../types';
 import {
   joinTextBlocks,
@@ -45,6 +46,23 @@ export interface ClaudeVisionConfig {
 }
 
 const DEFAULT_MODEL = 'claude-opus-4-8';
+
+/**
+ * The canonical schema plus the per-line English rendering ("Receiver in
+ * English") that the same call returns — zero extra spend. zod would strip an
+ * unknown key, so we extend rather than parse with the bare InvoiceOcrResult.
+ */
+export const InvoiceOcrResultWithEnglish = InvoiceOcrResult.extend({
+  lines: z.array(
+    InvoiceOcrLine.extend({
+      rawDescriptionEn: z
+        .string()
+        .nullable()
+        .optional()
+        .transform((v) => (v && v.trim() !== '' ? v.trim() : undefined)),
+    }),
+  ),
+});
 const DEFAULT_MAX_TOKENS = 16000;
 
 const SYSTEM_PROMPT = `אתה מומחה לקריאת חשבוניות עבריות. הוצא JSON בפורמט הבא בדיוק:
@@ -53,13 +71,14 @@ const SYSTEM_PROMPT = `אתה מומחה לקריאת חשבוניות עברי�
   "invoiceNumber": string,
   "invoiceDate": "YYYY-MM-DD",
   "allocationNumber": string | null,
-  "lines": [{ "sku": string?, "rawDescription": string, "qty": number, "unit": string, "unitPrice": number, "lineTotal": number, "vatRate": number?, "confidence": number? }],
+  "lines": [{ "sku": string?, "rawDescription": string, "rawDescriptionEn": string, "qty": number, "unit": string, "unitPrice": number, "lineTotal": number, "vatRate": number?, "confidence": number? }],
   "totals": { "subtotal": number, "vat": number, "total": number },
   "confidence": number?
 }
 
 חוקים:
 - אם שדה לא קריא — השאר ריק או null, אל תנחש.
+- "rawDescriptionEn" = תרגום קצר לאנגלית של שם הפריט, בסגנון קטלוג מכולת ("Chicken breast, fresh", "Cherry tomatoes", "Olive oil 1 L"), עבור עובד קבלת סחורה שאינו קורא עברית. שמור שמות מותגים (בתעתיק לטיני), מידות, משקלים, אחוזים וקודים בדיוק כפי שהם; נתחי בשר וסוגי דגים — במדויק. "rawDescription" נשאר בעברית המקורית.
 - "unit" בעברית כפי שמופיע (ק״ג / יח׳ / חבילה / וכו').
 - מע״מ ישראלי: בדוק שה-vat ≈ subtotal × שיעור המע״מ; אם לא, העדף את הסכומים המודפסים על החשבונית.
 - "contacts" = כל איש קשר מודפס על החשבונית: מנהל אזור / סוכן / מנהל תיק לקוח / נהג. לכל אחד role (התפקיד בעברית), name וטלפון אם מופיע. "phone" ברמת supplier = טלפון ראשי של הספק אם מופיע.
@@ -111,6 +130,6 @@ export class ClaudeVision implements OcrProvider {
     // failure we THROW so the BullMQ job retries — never silently emit a partial
     // invoice (no manufactured ₪). Model-reported confidence (top-level + per
     // line) flows through because InvoiceOcrResult preserves those fields.
-    return InvoiceOcrResult.parse(parseJsonFromText(text));
+    return InvoiceOcrResultWithEnglish.parse(parseJsonFromText(text));
   }
 }

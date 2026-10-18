@@ -17,6 +17,7 @@ const config: NextConfig = {
     '@restomatch/charts',
     '@restomatch/db',
     '@restomatch/ocr',
+    '@restomatch/translate',
     '@restomatch/types',
     '@restomatch/ui-tokens',
   ],

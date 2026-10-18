@@ -23,10 +23,14 @@ export async function runOcrPipeline(
   image: ImageSource,
   options: OcrPipelineOptions,
 ): Promise<OcrPipelineResult> {
-  const [documentAi, claude] = await Promise.all([
-    options.documentAi.extract(image),
-    options.claude.extract(image),
-  ]);
+  // M11: a single-provider deployment wires the SAME instance into both slots
+  // (Document AI not yet live). Call it once — two identical paid extractions
+  // added cost and latency but no information (the reconciler sees full
+  // agreement either way).
+  const [documentAi, claude] =
+    options.documentAi === options.claude
+      ? await options.claude.extract(image).then((r) => [r, r] as const)
+      : await Promise.all([options.documentAi.extract(image), options.claude.extract(image)]);
 
   const { result: reconciledInvoice, conflicts, confidence } = reconcile(documentAi, claude);
 

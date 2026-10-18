@@ -2,7 +2,7 @@
 
 import { useGSAP } from '@gsap/react';
 import { gsap } from 'gsap';
-import { AlertTriangle, Check, ChevronDown, Minus, Plus, X, Zap } from 'lucide-react';
+import { Check, ChevronDown, Minus, Plus } from 'lucide-react';
 import { useRef, useState } from 'react';
 import type { LineStatus, ReconciliationResult } from '../_mock';
 import {
@@ -11,7 +11,16 @@ import {
   nonMatchedLines,
   pendingMarksCount,
 } from '../_state';
+import { useDir, useLocale, useT } from '@/lib/i18n/client';
+import { formatNumber } from '@/lib/i18n/format';
+import { receiving } from '@/lib/i18n/messages/receiving';
+import type { Translator } from '@/lib/i18n/translate';
+import { formatIls } from '@/lib/money';
+import { HebrewToggle, ItemName, Qty, useUnitLabel } from './english';
+import { StatusBadge } from './Reconciliation';
 import { StepHeader } from './SupplierSelect';
+
+type T = Translator<typeof receiving.he>;
 
 interface Props {
   result: ReconciliationResult;
@@ -23,6 +32,9 @@ interface Props {
 
 export function AdjustQuantities({ result, marks, onUpdateMark, onSubmit, onBack }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const t = useT(receiving);
+  const locale = useLocale();
+  const dir = useDir();
   const [showMatched, setShowMatched] = useState(false);
   const stats = pendingMarksCount(result, marks);
   const lines = nonMatchedLines(result);
@@ -42,19 +54,27 @@ export function AdjustQuantities({ result, marks, onUpdateMark, onSubmit, onBack
   );
 
   return (
-    <div ref={ref} dir="rtl">
+    <div ref={ref} dir={dir}>
       <StepHeader
-        eyebrow="צעד 5 מתוך 5"
-        title="כמה הגיע באמת?"
-        subtitle={`${stats.pending} שורות עוד מחכות להתאמה · ${stats.total - stats.pending} כבר עודכנו · ${stats.matched} תואמות אוטומטית`}
+        eyebrow={t('steps.stepOf', { current: 5, total: 5 })}
+        title={t('steps.adjust.title')}
+        subtitle={t('steps.adjust.subtitle', {
+          pending: stats.pending,
+          done: stats.total - stats.pending,
+          matched: stats.matched,
+        })}
       />
+
+      <div className="mb-3 flex justify-end">
+        <HebrewToggle />
+      </div>
 
       {/* Matched summary collapsed */}
       {matchedLines.length > 0 ? (
         <button
           type="button"
           onClick={() => setShowMatched(!showMatched)}
-          className="adjust-card mb-4 w-full text-right rounded-2xl border border-primary/25 bg-primary/8 px-5 py-3 flex items-center justify-between hover:bg-primary/12 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+          className="adjust-card mb-4 w-full min-h-14 text-start rounded-2xl border border-primary/25 bg-primary/8 px-5 py-3 flex items-center justify-between hover:bg-primary/12 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
         >
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-primary/15 text-primary flex items-center justify-center">
@@ -62,9 +82,9 @@ export function AdjustQuantities({ result, marks, onUpdateMark, onSubmit, onBack
             </div>
             <div>
               <div className="text-sm font-semibold text-ink">
-                {matchedLines.length} שורות תואמות — אישור אוטומטי
+                {t('steps.adjust.matchedSummary', { count: matchedLines.length })}
               </div>
-              <div className="text-xs text-muted">לחץ להרחבה</div>
+              <div className="text-xs text-muted">{t('steps.adjust.tapToExpand')}</div>
             </div>
           </div>
           <ChevronDown
@@ -77,10 +97,15 @@ export function AdjustQuantities({ result, marks, onUpdateMark, onSubmit, onBack
         <div className="mb-4 rounded-xl border border-line bg-surface-2 p-3 text-sm text-ink">
           <ul className="space-y-1.5">
             {matchedLines.map((l) => (
-              <li key={l.productName} className="flex items-center justify-between">
-                <span className="font-medium">{l.productName}</span>
-                <span className="text-muted font-mono tabular-nums">
-                  {l.invoiceQty} {l.invoiceUnit} × ₪{l.invoiceUnitPrice}
+              <li key={l.productName} className="flex items-center justify-between gap-3">
+                <ItemName he={l.productName} en={l.productNameEn} className="font-medium" />
+                <span className="text-muted">
+                  <Qty qty={l.invoiceQty} unit={l.invoiceUnit} />
+                  {l.invoiceUnitPrice !== null ? (
+                    <bdi dir="ltr" className="font-mono tabular-nums">
+                      {' '}× {formatIls(l.invoiceUnitPrice, { locale, maximumFractionDigits: 2 })}
+                    </bdi>
+                  ) : null}
                 </span>
               </li>
             ))}
@@ -100,6 +125,8 @@ export function AdjustQuantities({ result, marks, onUpdateMark, onSubmit, onBack
               line={line}
               mark={mark}
               onUpdate={(patch) => onUpdateMark(key, patch)}
+              t={t}
+              locale={locale}
             />
           );
         })}
@@ -111,20 +138,21 @@ export function AdjustQuantities({ result, marks, onUpdateMark, onSubmit, onBack
           <button
             type="button"
             onClick={onBack}
-            className="text-sm text-muted hover:text-ink underline underline-offset-4 decoration-line"
+            className="min-h-11 text-sm text-muted hover:text-ink underline underline-offset-4 decoration-line"
           >
-            חזור לתוצאות
+            {t('steps.adjust.backToResults')}
           </button>
           <button
             type="button"
             onClick={onSubmit}
             disabled={stats.pending > 0}
-            className="inline-flex items-center gap-2 bg-primary hover:brightness-110 disabled:bg-surface-2 disabled:text-subtle text-on-primary rounded-xl px-5 py-3 font-medium shadow-glow-primary disabled:shadow-none transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:ring-primary"
+            data-testid="close-receipt"
+            className="inline-flex min-h-12 items-center gap-2 bg-primary hover:brightness-110 disabled:bg-surface-2 disabled:text-subtle text-on-primary rounded-xl px-5 py-3 font-medium shadow-glow-primary disabled:shadow-none transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:ring-primary"
           >
             <Check className="w-5 h-5" strokeWidth={3} />
             {stats.pending > 0
-              ? `סדר עוד ${stats.pending} שורות`
-              : 'סגור קבלה ושמור'}
+              ? t('steps.adjust.fixRemaining', { count: stats.pending })
+              : t('steps.adjust.closeAndSave')}
           </button>
         </div>
       </div>
@@ -136,10 +164,15 @@ interface AdjustCardProps {
   line: ReconciliationResult['lines'][number];
   mark: LineMark;
   onUpdate: (patch: Partial<LineMark>) => void;
+  t: T;
+  locale: 'he' | 'en';
 }
 
-function AdjustCard({ line, mark, onUpdate }: AdjustCardProps) {
+function AdjustCard({ line, mark, onUpdate, t, locale }: AdjustCardProps) {
   const accent = statusAccent(line.status);
+  const unit = useUnitLabel();
+  const qtyText = (q: number, u: string | null) =>
+    `${formatNumber(q, locale, { maximumFractionDigits: 3 })}${u ? ` ${unit(u)}` : ''}`;
 
   function setQty(value: number) {
     const safe = Math.max(0, Number(value.toFixed(2)));
@@ -154,35 +187,33 @@ function AdjustCard({ line, mark, onUpdate }: AdjustCardProps) {
     <div
       className={`adjust-card rounded-2xl border bg-surface p-4 shadow-card ${mark.touched ? 'border-line' : accent.border}`}
     >
-      <div className="flex items-start justify-between mb-3">
-        <div>
-          <div className="font-semibold text-ink">{line.productName}</div>
-          <div className="text-xs text-muted mt-1 font-mono tabular-nums">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="min-w-0">
+          <ItemName he={line.productName} en={line.productNameEn} className="text-base font-semibold text-ink" />
+          <div className="text-xs text-muted mt-1 tabular-nums">
             {line.poQty !== null ? (
-              <span>הוזמן: {line.poQty} {line.poUnit}</span>
+              <span>{t('steps.adjust.ordered', { qty: qtyText(line.poQty, line.poUnit) })}</span>
             ) : (
-              <span className="text-danger">לא בהזמנה</span>
+              <span className="text-danger">{t('steps.adjust.notOrdered')}</span>
             )}
             {line.invoiceQty !== null ? (
               <>
                 <span className="text-subtle mx-1.5">·</span>
-                <span>חויב: {line.invoiceQty} {line.invoiceUnit}</span>
+                <span>{t('steps.adjust.billed', { qty: qtyText(line.invoiceQty, line.invoiceUnit) })}</span>
               </>
             ) : null}
           </div>
         </div>
-        <span className={`shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${accent.tint}`}>
-          {accent.icon}
-          <span>{accent.label}</span>
-        </span>
+        <StatusBadge status={line.status} t={t} />
       </div>
 
       {/* Stepper */}
-      <div className="flex items-center justify-between bg-surface-2 rounded-xl p-2 mb-3">
+      <div className="flex items-center justify-between bg-surface-2 rounded-xl p-2 mb-3" dir="ltr">
         <button
           type="button"
           onClick={() => incrementQty(-1)}
-          className="w-10 h-10 rounded-lg bg-surface border border-line hover:border-primary/40 active:scale-95 transition-all flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+          aria-label={t('steps.adjust.decrease')}
+          className="w-12 h-12 rounded-lg bg-surface border border-line hover:border-primary/40 active:scale-95 transition-all flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
         >
           <Minus className="w-4 h-4 text-ink" strokeWidth={2.5} />
         </button>
@@ -192,16 +223,18 @@ function AdjustCard({ line, mark, onUpdate }: AdjustCardProps) {
             inputMode="decimal"
             value={mark.qtyReceived}
             onChange={(e) => setQty(Number(e.target.value))}
+            aria-label={t('steps.adjust.qtyLabel')}
             className="w-20 text-center text-2xl font-bold font-mono tabular-nums bg-transparent border-0 focus:outline-none text-ink"
             min={0}
             step={0.1}
           />
-          <span className="text-sm text-muted">{line.invoiceUnit ?? line.poUnit ?? ''}</span>
+          <span className="text-sm text-muted">{unit(line.invoiceUnit ?? line.poUnit ?? '')}</span>
         </div>
         <button
           type="button"
           onClick={() => incrementQty(1)}
-          className="w-10 h-10 rounded-lg bg-surface border border-line hover:border-primary/40 active:scale-95 transition-all flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+          aria-label={t('steps.adjust.increase')}
+          className="w-12 h-12 rounded-lg bg-surface border border-line hover:border-primary/40 active:scale-95 transition-all flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
         >
           <Plus className="w-4 h-4 text-ink" strokeWidth={2.5} />
         </button>
@@ -211,20 +244,20 @@ function AdjustCard({ line, mark, onUpdate }: AdjustCardProps) {
       <div className="flex flex-wrap gap-2">
         {line.poQty !== null ? (
           <Chip
-            label={`= הזמנה (${line.poQty})`}
+            label={t('steps.adjust.asOrdered', { qty: formatNumber(line.poQty, locale) })}
             onClick={() => setQty(line.poQty!)}
             active={mark.qtyReceived === line.poQty}
           />
         ) : null}
         {line.invoiceQty !== null ? (
           <Chip
-            label={`= חשבונית (${line.invoiceQty})`}
+            label={t('steps.adjust.asInvoiced', { qty: formatNumber(line.invoiceQty, locale) })}
             onClick={() => setQty(line.invoiceQty!)}
             active={mark.qtyReceived === line.invoiceQty}
           />
         ) : null}
         <Chip
-          label="חסר"
+          label={t('steps.adjust.missing')}
           onClick={() => {
             setQty(0);
             onUpdate({ condition: 'rejected', qtyRejected: line.poQty ?? 0 });
@@ -233,7 +266,7 @@ function AdjustCard({ line, mark, onUpdate }: AdjustCardProps) {
           active={mark.condition === 'rejected'}
         />
         <Chip
-          label="פגום"
+          label={t('steps.adjust.damaged')}
           onClick={() => onUpdate({ condition: 'damaged' })}
           tone="amber"
           active={mark.condition === 'damaged'}
@@ -243,7 +276,7 @@ function AdjustCard({ line, mark, onUpdate }: AdjustCardProps) {
       {mark.touched ? (
         <div className="mt-3 text-xs text-primary flex items-center gap-1">
           <Check className="w-3.5 h-3.5" strokeWidth={3} />
-          סודר
+          {t('steps.adjust.settled')}
         </div>
       ) : null}
     </div>
@@ -276,49 +309,23 @@ function Chip({
     <button
       type="button"
       onClick={onClick}
-      className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${tones[tone]}`}
+      className={`min-h-10 text-sm font-medium px-4 py-2 rounded-full border transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${tones[tone]}`}
     >
       {label}
     </button>
   );
 }
 
-function statusAccent(status: LineStatus) {
+function statusAccent(status: LineStatus): { border: string } {
   switch (status) {
     case 'qty_diff':
-      return {
-        label: 'כמות שונה',
-        tint: 'bg-warn/12 text-warn ring-1 ring-warn/25',
-        border: 'border-warn/30',
-        icon: <AlertTriangle className="w-3 h-3" />,
-      };
     case 'price_diff':
-      return {
-        label: 'מחיר שונה',
-        tint: 'bg-warn/12 text-warn ring-1 ring-warn/25',
-        border: 'border-warn/30',
-        icon: <Zap className="w-3 h-3" />,
-      };
+      return { border: 'border-warn/30' };
     case 'unordered':
-      return {
-        label: 'לא בהזמנה',
-        tint: 'bg-danger/12 text-danger ring-1 ring-danger/25',
-        border: 'border-danger/30',
-        icon: <Plus className="w-3 h-3" strokeWidth={3} />,
-      };
+      return { border: 'border-danger/30' };
     case 'missing_from_invoice':
-      return {
-        label: 'חסר בחשבונית',
-        tint: 'bg-surface-2 text-muted ring-1 ring-line',
-        border: 'border-line',
-        icon: <X className="w-3 h-3" strokeWidth={3} />,
-      };
+      return { border: 'border-line' };
     default:
-      return {
-        label: 'תואם',
-        tint: 'bg-primary/12 text-primary ring-1 ring-primary/25',
-        border: 'border-primary/30',
-        icon: <Check className="w-3 h-3" strokeWidth={3} />,
-      };
+      return { border: 'border-primary/30' };
   }
 }

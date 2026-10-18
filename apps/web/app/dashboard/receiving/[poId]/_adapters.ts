@@ -29,6 +29,9 @@ export interface PoLineRow {
   id: string;
   productId: string | null;
   rawDescription: string | null;
+  /** "Receiver in English" (po_lines.raw_description_en / products.name_en). */
+  rawDescriptionEn?: string | null;
+  productNameEn?: string | null;
   qtyOrdered: string | number;
   unit: string;
   unitPriceExpected: string | number | null;
@@ -38,6 +41,7 @@ export interface ReceiptLineRow {
   poLineId: string | null;
   productId: string | null;
   productName: string | null;
+  productNameEn?: string | null;
   rawDescription: string | null;
   orderedQty: string | number | null;
   unit: string | null;
@@ -48,6 +52,8 @@ export interface InvoiceLineRow {
   id: string;
   productId: string | null;
   rawDescription: string | null;
+  rawDescriptionEn?: string | null;
+  productNameEn?: string | null;
   qtyBilled: string | number | null;
   unit: string | null;
   unitPriceBilled: string | number | null;
@@ -109,8 +115,11 @@ export function adaptReconciliation(args: {
   receiptLines: ReceiptLineRow[];
   invoiceLines?: InvoiceLineRow[];
   invoiceMeta?: InvoiceMeta | null;
+  /** Localized fallbacks for nameless lines. */
+  labels?: { unnamed: string; unordered: string };
 }): ReceivingAdaptResult {
   const { po, poLines, receiptLines, invoiceLines = [], invoiceMeta } = args;
+  const labels = args.labels ?? { unnamed: 'פריט ללא שם', unordered: 'פריט שלא הוזמן' };
 
   // grLineId + recorded qty lookup keyed by poLineId.
   const grByPoLine = new Map<string, ReceiptLineRow>();
@@ -138,7 +147,7 @@ export function adaptReconciliation(args: {
     const gr = grByPoLine.get(pl.id);
     const poQty = num(pl.qtyOrdered);
     const poPrice = num(pl.unitPriceExpected);
-    const productName = gr?.productName ?? pl.rawDescription ?? 'פריט ללא שם';
+    const productName = gr?.productName ?? pl.rawDescription ?? labels.unnamed;
 
     let inv: InvoiceLineRow | undefined;
     if (pl.productId) inv = invByProduct.get(pl.productId);
@@ -156,6 +165,15 @@ export function adaptReconciliation(args: {
       poLineId: pl.id,
       productId: pl.productId,
       productName,
+      // English: the name shown in Hebrew is the product's canonical name when
+      // linked, so prefer the product's English, then the line's.
+      productNameEn:
+        (gr?.productName ? gr.productNameEn : null) ??
+        pl.productNameEn ??
+        pl.rawDescriptionEn ??
+        gr?.productNameEn ??
+        inv?.rawDescriptionEn ??
+        null,
       poQty,
       poUnit: pl.unit ?? null,
       invoiceQty,
@@ -198,7 +216,8 @@ export function adaptReconciliation(args: {
       invoiceLineIndex: invoiceLineIndexCounter++,
       poLineId: null,
       productId: il.productId,
-      productName: il.rawDescription ?? 'פריט שלא הוזמן',
+      productName: il.rawDescription ?? labels.unordered,
+      productNameEn: il.rawDescriptionEn ?? il.productNameEn ?? null,
       poQty: null,
       poUnit: null,
       invoiceQty,

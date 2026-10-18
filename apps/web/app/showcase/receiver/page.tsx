@@ -1,6 +1,9 @@
 'use client';
 
 import { useReducer } from 'react';
+import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
+import { useDir, useLocale, useT } from '@/lib/i18n/client';
+import { receiving } from '@/lib/i18n/messages/receiving';
 import { AdjustQuantities } from './_steps/AdjustQuantities';
 import { Confirmed } from './_steps/Confirmed';
 import { InvoiceScan } from './_steps/InvoiceScan';
@@ -21,11 +24,22 @@ const STEP_ORDER: WizardStep[] = [
 export default function ReceiverWizard() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const stepIndex = STEP_ORDER.indexOf(state.step);
+  const locale = useLocale();
+  const dir = useDir();
+  const t = useT(receiving);
+  const supplier = state.selectedSupplier;
+  const supplierLabel =
+    supplier ? (locale === 'en' && supplier.supplierNameEn ? supplier.supplierNameEn : supplier.supplierName) : '';
 
   return (
-    <main className="max-w-3xl mx-auto px-6 py-10 min-h-[calc(100dvh-72px)]">
+    <main className="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-10 min-h-[calc(100dvh-72px)]">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3" dir={dir}>
+        <p className="text-xs text-muted">{t('demo.banner')}</p>
+        <LocaleSwitcher />
+      </div>
+
       {/* Progress bar */}
-      <div className="mb-10 flex items-center gap-2" dir="rtl">
+      <div className="mb-10 flex items-center gap-2" dir={dir}>
         {STEP_ORDER.slice(0, 5).map((_, i) => {
           const isDone = i < stepIndex;
           const isCurrent = i === stepIndex;
@@ -51,7 +65,7 @@ export default function ReceiverWizard() {
 
       {state.step === 'SCAN_INVOICE' && state.selectedSupplier ? (
         <InvoiceScan
-          supplierName={state.selectedSupplier.supplierName}
+          supplierName={supplierLabel}
           image={state.image}
           onCapture={(image) => dispatch({ type: 'CAPTURE_IMAGE', image })}
           onBack={() => dispatch({ type: 'BACK' })}
@@ -89,7 +103,7 @@ export default function ReceiverWizard() {
 
       {state.step === 'CONFIRMED' ? (
         <Confirmed
-          supplierName={state.selectedSupplier?.supplierName ?? ''}
+          supplierName={supplierLabel}
           result={state.reconciliation}
           confirmedAt={state.confirmedAt}
           capturedImage={state.image}

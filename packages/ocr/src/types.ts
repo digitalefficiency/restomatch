@@ -33,6 +33,12 @@ export interface ProductCandidate {
 }
 
 export interface ResolvedInvoiceLine extends InvoiceOcrLine {
+  /**
+   * English rendering of rawDescription ("Receiver in English"). Produced by
+   * ClaudeVision in the SAME extraction call (zero extra spend); absent for
+   * providers that don't emit it. Display-only — matching uses rawDescription.
+   */
+  rawDescriptionEn?: string | null;
   productId: string | null;
   productCandidates: ProductCandidate[];
 }

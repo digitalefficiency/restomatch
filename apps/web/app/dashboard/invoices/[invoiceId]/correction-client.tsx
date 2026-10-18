@@ -9,6 +9,10 @@ import { CheckCircle2, FileText, Pencil, Play, X } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
 import { Badge, Button, Card, Field, Input, type BadgeTone } from '@/lib/components';
 import { formatIls } from '@/lib/money';
+import { useLocale, useT } from '@/lib/i18n/client';
+import { formatNumber } from '@/lib/i18n/format';
+import { invoices } from '@/lib/i18n/messages/invoices';
+import { HebrewToggle, ItemName, useUnitLabel } from '@/app/showcase/receiver/_steps/english';
 
 type Invoice = inferRouterOutputs<AppRouter>['receiving']['getInvoice'];
 type Line = Invoice['lines'][number];
@@ -27,15 +31,19 @@ function dateInput(d: Date | string | null): string {
   return Number.isNaN(dt.getTime()) ? '' : dt.toISOString().slice(0, 10);
 }
 
-const STATUS_TONE: Record<string, { label: string; tone: BadgeTone }> = {
-  clean: { label: 'נקי — אין חריגות', tone: 'accent' },
-  minor: { label: 'חריגות קלות', tone: 'warning' },
-  major: { label: 'חריגות חמורות', tone: 'danger' },
-  blocked: { label: 'נחסם', tone: 'danger' },
+const STATUS_TONE: Record<string, BadgeTone> = {
+  clean: 'accent',
+  minor: 'warning',
+  major: 'danger',
+  blocked: 'danger',
 };
 
 export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canEdit: boolean }) {
   const router = useRouter();
+  const t = useT(invoices);
+  const locale = useLocale();
+  const unit = useUnitLabel();
+  const money = (v: number) => formatIls(v, { maximumFractionDigits: 2, locale });
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [rematch, setRematch] = useState<MatchResult | null>(null);
@@ -57,18 +65,18 @@ export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canE
     router.refresh();
   };
   const onErr = (e: { message: string }) => {
-    setError(e.message || 'הפעולה נכשלה.');
+    setError(locale === 'en' ? t('correction.failed') : e.message || t('correction.failed'));
     setSaved(null);
   };
 
   const updateHeader = trpc.receiving.updateInvoiceHeader.useMutation({
-    onSuccess: () => onOk('פרטי החשבונית נשמרו.'),
+    onSuccess: () => onOk(t('correction.savedHeader')),
     onError: onErr,
   });
   const updateLine = trpc.receiving.updateInvoiceLine.useMutation({
     onSuccess: () => {
       setEditingLine(null);
-      onOk('השורה נשמרה.');
+      onOk(t('correction.savedLine'));
     },
     onError: onErr,
   });
@@ -123,13 +131,18 @@ export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canE
   }
 
   const st: { label: string; tone: BadgeTone } | null = rematch
-    ? (STATUS_TONE[rematch.status] ?? { label: rematch.status, tone: 'neutral' })
+    ? STATUS_TONE[rematch.status]
+      ? {
+          label: t(`status.${rematch.status as 'clean' | 'minor' | 'major' | 'blocked'}`),
+          tone: STATUS_TONE[rematch.status]!,
+        }
+      : { label: rematch.status, tone: 'neutral' }
     : null;
 
   return (
     <div className="space-y-6">
       {error && (
-        <div role="alert" className="rounded-md border-r-4 border-danger bg-danger/5 px-3 py-2 text-sm text-danger">
+        <div role="alert" className="rounded-md border-s-4 border-danger bg-danger/5 px-3 py-2 text-sm text-danger">
           {error}
         </div>
       )}
@@ -142,12 +155,20 @@ export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canE
       {/* Header */}
       <Card flow elevated padding="lg">
         <div className="mb-4 flex items-center justify-between gap-3">
-          <h3 className="text-lg font-bold text-ink">פרטי החשבונית</h3>
+          <div>
+            <h3 className="text-lg font-bold text-ink">{t('correction.details')}</h3>
+            {invoice.supplierName ? (
+              <p className="text-sm text-muted">
+                {t('correction.supplier')}:{' '}
+                {locale === 'en' && invoice.supplierNameEn ? invoice.supplierNameEn : invoice.supplierName}
+              </p>
+            ) : null}
+          </div>
           <div className="flex items-center gap-2">
             {invoice.rawImageUrl && (
               <Link href={`/scans/${invoice.id}`}>
                 <Button variant="ghost" size="sm">
-                  <FileText className="h-4 w-4" /> צפה בסריקה
+                  <FileText className="h-4 w-4" /> {t('correction.viewScan')}
                 </Button>
               </Link>
             )}
@@ -158,7 +179,7 @@ export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canE
                 loading={runMatch.isPending}
                 onClick={() => runMatch.mutate({ invoiceId: invoice.id })}
               >
-                <Play className="h-4 w-4" /> הרץ התאמה מחדש
+                <Play className="h-4 w-4 ltr:-scale-x-100" /> {t('correction.rerun')}
               </Button>
             )}
           </div>
@@ -168,30 +189,32 @@ export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canE
           <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-line bg-surface-2/50 px-4 py-3">
             <Badge tone={st.tone}>{st.label}</Badge>
             <span className="text-sm text-muted">
-              דליפה:{' '}
-              <span className="font-mono font-semibold text-ink">
-                {formatIls(rematch!.totalDiscrepancyAmount, { maximumFractionDigits: 2 })}
-              </span>
+              {t('correction.leak')}{' '}
+              <bdi dir="ltr" className="font-mono font-semibold text-ink">
+                {money(rematch!.totalDiscrepancyAmount)}
+              </bdi>
             </span>
-            <span className="text-sm text-muted">{rematch!.discrepancyCount} חריגות</span>
-            {!rematch!.poMatched && <Badge tone="neutral">ללא הזמנה תואמת</Badge>}
+            <span className="text-sm text-muted">
+              {t('correction.discrepancies', { count: rematch!.discrepancyCount })}
+            </span>
+            {!rematch!.poMatched && <Badge tone="neutral">{t('correction.noMatchingPo')}</Badge>}
           </div>
         )}
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Field label="מספר חשבונית" htmlFor="inv-num">
+          <Field label={t('correction.number')} htmlFor="inv-num">
             <Input id="inv-num" value={num_} onChange={(e) => setNum(e.target.value)} disabled={!canEdit} maxLength={120} />
           </Field>
-          <Field label="תאריך" htmlFor="inv-date">
+          <Field label={t('correction.date')} htmlFor="inv-date">
             <Input id="inv-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} disabled={!canEdit} />
           </Field>
-          <Field label="סכום לפני מע״מ (₪)" htmlFor="inv-excl">
+          <Field label={t('correction.exclVat')} htmlFor="inv-excl">
             <Input id="inv-excl" type="number" inputMode="decimal" step="any" min="0" value={excl} onChange={(e) => setExcl(e.target.value)} disabled={!canEdit} />
           </Field>
-          <Field label="מע״מ (₪)" htmlFor="inv-vat">
+          <Field label={t('correction.vat')} htmlFor="inv-vat">
             <Input id="inv-vat" type="number" inputMode="decimal" step="any" min="0" value={vat} onChange={(e) => setVat(e.target.value)} disabled={!canEdit} />
           </Field>
-          <Field label="סכום כולל מע״מ (₪)" htmlFor="inv-incl">
+          <Field label={t('correction.inclVat')} htmlFor="inv-incl">
             <Input id="inv-incl" type="number" inputMode="decimal" step="any" min="0" value={incl} onChange={(e) => setIncl(e.target.value)} disabled={!canEdit} />
           </Field>
         </div>
@@ -199,22 +222,27 @@ export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canE
         {canEdit && (
           <div className="mt-4">
             <Button variant="secondary" size="sm" loading={updateHeader.isPending} onClick={saveHeader}>
-              שמור פרטים
+              {t('correction.saveDetails')}
             </Button>
           </div>
         )}
       </Card>
 
       {/* Lines */}
+      {locale === 'en' ? (
+        <div className="flex justify-end">
+          <HebrewToggle />
+        </div>
+      ) : null}
       <Card elevated padding="none" className="overflow-x-auto">
-        <table className="w-full text-right text-sm">
+        <table className="w-full text-start text-sm">
           <thead>
             <tr className="border-b border-line text-xs uppercase tracking-wide text-subtle">
-              <th className="px-4 py-3 font-medium">תיאור</th>
-              <th className="px-4 py-3 font-medium">כמות</th>
-              <th className="px-4 py-3 font-medium">יחידה</th>
-              <th className="px-4 py-3 font-medium">מחיר יח׳</th>
-              <th className="px-4 py-3 font-medium">סה״כ שורה</th>
+              <th className="px-4 py-3 text-start font-medium">{t('correction.colDescription')}</th>
+              <th className="px-4 py-3 text-start font-medium">{t('correction.colQty')}</th>
+              <th className="px-4 py-3 text-start font-medium">{t('correction.colUnit')}</th>
+              <th className="px-4 py-3 text-start font-medium">{t('correction.colUnitPrice')}</th>
+              <th className="px-4 py-3 text-start font-medium">{t('correction.colLineTotal')}</th>
               {canEdit && <th className="px-4 py-3 font-medium" />}
             </tr>
           </thead>
@@ -227,31 +255,31 @@ export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canE
                     {editing ? (
                       <Input value={ld.rawDescription} onChange={(e) => setLd({ ...ld, rawDescription: e.target.value })} />
                     ) : (
-                      l.rawDescription
+                      <ItemName he={l.rawDescription} en={l.rawDescriptionEn ?? l.productNameEn} />
                     )}
                   </td>
                   <td className="px-4 py-3 font-mono tabular-nums text-muted">
                     {editing ? (
                       <Input type="number" inputMode="decimal" step="any" min="0" value={ld.qtyBilled} onChange={(e) => setLd({ ...ld, qtyBilled: e.target.value })} />
                     ) : (
-                      String(l.qtyBilled)
+                      <bdi dir="ltr">{formatNumber(Number(l.qtyBilled), locale, { maximumFractionDigits: 3 })}</bdi>
                     )}
                   </td>
                   <td className="px-4 py-3 text-muted">
-                    {editing ? <Input value={ld.unit} onChange={(e) => setLd({ ...ld, unit: e.target.value })} /> : l.unit}
+                    {editing ? <Input value={ld.unit} onChange={(e) => setLd({ ...ld, unit: e.target.value })} /> : unit(l.unit)}
                   </td>
                   <td className="px-4 py-3 font-mono tabular-nums text-ink">
                     {editing ? (
                       <Input type="number" inputMode="decimal" step="any" min="0" value={ld.unitPriceBilled} onChange={(e) => setLd({ ...ld, unitPriceBilled: e.target.value })} />
                     ) : (
-                      formatIls(Number(l.unitPriceBilled), { maximumFractionDigits: 2 })
+                      <bdi dir="ltr">{money(Number(l.unitPriceBilled))}</bdi>
                     )}
                   </td>
                   <td className="px-4 py-3 font-mono tabular-nums text-ink">
                     {editing ? (
                       <Input type="number" inputMode="decimal" step="any" min="0" value={ld.lineTotal} onChange={(e) => setLd({ ...ld, lineTotal: e.target.value })} />
                     ) : (
-                      formatIls(Number(l.lineTotal), { maximumFractionDigits: 2 })
+                      <bdi dir="ltr">{money(Number(l.lineTotal))}</bdi>
                     )}
                   </td>
                   {canEdit && (
@@ -259,14 +287,14 @@ export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canE
                       {editing ? (
                         <div className="flex items-center gap-1">
                           <Button size="sm" variant="primary" loading={updateLine.isPending} disabled={!ld.rawDescription.trim()} onClick={() => saveLine(l)}>
-                            שמור
+                            {t('correction.save')}
                           </Button>
-                          <Button size="sm" variant="ghost" onClick={() => setEditingLine(null)}>
+                          <Button size="sm" variant="ghost" aria-label={t('correction.cancel')} onClick={() => setEditingLine(null)}>
                             <X className="h-4 w-4" />
                           </Button>
                         </div>
                       ) : (
-                        <Button size="sm" variant="ghost" title="ערוך" onClick={() => startLine(l)}>
+                        <Button size="sm" variant="ghost" title={t('correction.edit')} aria-label={t('correction.edit')} onClick={() => startLine(l)}>
                           <Pencil className="h-4 w-4" />
                         </Button>
                       )}
@@ -278,7 +306,7 @@ export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canE
             {invoice.lines.length === 0 && (
               <tr>
                 <td colSpan={canEdit ? 6 : 5} className="px-4 py-6 text-center text-subtle">
-                  אין שורות בחשבונית זו.
+                  {t('correction.noLines')}
                 </td>
               </tr>
             )}
@@ -287,7 +315,7 @@ export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canE
       </Card>
 
       <p className="text-xs text-subtle">
-        אחרי תיקון שורות או סכומים — הריצו "התאמה מחדש" כדי לחשב מחדש את החריגות ואת מספר הדליפה.
+        {t('correction.rerunHint')}
       </p>
     </div>
   );

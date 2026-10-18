@@ -6,6 +6,10 @@ import { Check, ExternalLink, FileImage, Plus, Receipt, ShieldCheck } from 'luci
 import { useRef } from 'react';
 import type { ReconciliationResult } from '../_mock';
 import type { CapturedImage } from '../_state';
+import { useDir, useLocale, useT } from '@/lib/i18n/client';
+import { formatDate } from '@/lib/i18n/format';
+import { receiving } from '@/lib/i18n/messages/receiving';
+import { formatIls } from '@/lib/money';
 
 interface Props {
   supplierName: string;
@@ -13,6 +17,8 @@ interface Props {
   confirmedAt: string | null;
   capturedImage: CapturedImage | null;
   onReset: () => void;
+  /** Label of the reset button (defaults to "another receipt"). */
+  resetLabel?: string;
 }
 
 export function Confirmed({
@@ -21,8 +27,12 @@ export function Confirmed({
   confirmedAt,
   capturedImage,
   onReset,
+  resetLabel,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const t = useT(receiving);
+  const locale = useLocale();
+  const dir = useDir();
 
   useGSAP(
     () => {
@@ -44,61 +54,58 @@ export function Confirmed({
     { scope: ref },
   );
 
-  const time = confirmedAt
-    ? new Date(confirmedAt).toLocaleTimeString('he-IL', {
-        hour: '2-digit',
-        minute: '2-digit',
-      })
-    : '';
+  const time = confirmedAt ? formatDate(confirmedAt, locale, { hour: '2-digit', minute: '2-digit' }) : '';
 
   return (
-    <div ref={ref} dir="rtl" className="max-w-md mx-auto text-center py-8">
+    <div ref={ref} dir={dir} className="max-w-md mx-auto text-center py-8" data-testid="receipt-confirmed">
       <div className="confirm-check w-24 h-24 rounded-full bg-primary text-on-primary mx-auto mb-6 flex items-center justify-center shadow-glow-primary">
         <Check className="w-12 h-12" strokeWidth={3} />
       </div>
 
       <h1 className="confirm-content text-3xl font-extrabold tracking-tight text-ink mb-2">
-        הקבלה נסגרה
+        {t('steps.confirmed.title')}
       </h1>
       <p className="confirm-content text-muted mb-8">
-        תועדה ב-{time} מהספק "{supplierName}". מנוע ההתאמה מריץ עכשיו את ההצלבה הסופית.
+        {t('steps.confirmed.subtitle', { time, supplier: supplierName })}
       </p>
 
-      <div className="confirm-content relative overflow-hidden rounded-2xl border border-line bg-surface p-5 mb-6 text-right space-y-3 shadow-card">
+      <div className="confirm-content relative overflow-hidden rounded-2xl border border-line bg-surface p-5 mb-6 text-start space-y-3 shadow-card">
         <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px flow-stream" />
         <RowItem
           icon={<Receipt className="w-4 h-4" />}
-          label="חשבונית"
+          label={t('steps.confirmed.invoice')}
           value={result?.invoiceMeta.invoiceNumber ?? '—'}
         />
         <RowItem
           icon={<ShieldCheck className="w-4 h-4" />}
-          label="פריטים שאומתו"
-          value={`${result?.summary.matchedCount ?? 0} תואמים, ${
-            (result?.summary.qtyDiffCount ?? 0) +
-            (result?.summary.priceDiffCount ?? 0) +
-            (result?.summary.unorderedCount ?? 0)
-          } סודרו ידנית`}
+          label={t('steps.confirmed.verified')}
+          value={t('steps.confirmed.verifiedValue', {
+            matched: result?.summary.matchedCount ?? 0,
+            manual:
+              (result?.summary.qtyDiffCount ?? 0) +
+              (result?.summary.priceDiffCount ?? 0) +
+              (result?.summary.unorderedCount ?? 0),
+          })}
         />
         {result && result.summary.headlineDelta > 0 ? (
           <RowItem
             icon={<Plus className="w-4 h-4" />}
-            label="חיסכון פוטנציאלי שתועד"
-            value={`₪${result.summary.headlineDelta.toLocaleString('he-IL')}`}
+            label={t('steps.confirmed.savings')}
+            value={formatIls(result.summary.headlineDelta, { locale, maximumFractionDigits: 2 })}
             valueClass="text-gold font-bold font-mono tabular-nums"
           />
         ) : null}
       </div>
 
       {capturedImage?.scanRouteUrl ? (
-        <div className="confirm-content mb-4 rounded-2xl border border-primary/25 bg-primary/8 px-4 py-3 text-right">
+        <div className="confirm-content mb-4 rounded-2xl border border-primary/25 bg-primary/8 px-4 py-3 text-start">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-surface border border-primary/25 flex items-center justify-center shrink-0">
               <FileImage className="w-5 h-5 text-primary" />
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-sm font-semibold text-ink">
-                החשבונית נשמרה ב-Supabase Storage
+                {t('steps.confirmed.scanSaved')}
               </div>
               <div className="text-[11px] font-mono text-muted truncate">
                 {capturedImage.invoiceId}
@@ -113,7 +120,7 @@ export function Confirmed({
               rel="noopener noreferrer"
               className="shrink-0 inline-flex items-center gap-1 bg-primary hover:brightness-110 text-on-primary text-xs font-semibold px-3 py-2 rounded-lg shadow-glow-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:ring-primary"
             >
-              צפה בסריקה
+              {t('steps.confirmed.viewScan')}
               <ExternalLink className="w-3 h-3" />
             </a>
           </div>
@@ -123,10 +130,10 @@ export function Confirmed({
       <button
         type="button"
         onClick={onReset}
-        className="confirm-content inline-flex items-center gap-2 bg-primary hover:brightness-110 text-on-primary rounded-xl px-5 py-3 font-medium shadow-glow-primary transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:ring-primary"
+        className="confirm-content inline-flex min-h-12 items-center gap-2 bg-primary hover:brightness-110 text-on-primary rounded-xl px-5 py-3 font-medium shadow-glow-primary transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:ring-primary"
       >
         <Plus className="w-4 h-4" strokeWidth={3} />
-        קבלה נוספת
+        {resetLabel ?? t('steps.confirmed.another')}
       </button>
     </div>
   );

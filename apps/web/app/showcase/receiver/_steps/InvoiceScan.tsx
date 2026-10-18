@@ -14,6 +14,9 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { useRef, useState } from 'react';
+import { useDir, useT } from '@/lib/i18n/client';
+import { receiving } from '@/lib/i18n/messages/receiving';
+import type { Translator } from '@/lib/i18n/translate';
 import {
   SupabaseNotConfiguredError,
   uploadInvoiceScan,
@@ -41,7 +44,17 @@ interface Props {
    * anonymous showcase leaves this undefined and falls back to the walk-ins/
    * uploader above.
    */
-  uploadFile?: (file: File) => Promise<UploadedScan>;
+  uploadFile?: (file: File, clientUploadId: string) => Promise<UploadedScan>;
+  /** Label for the back link (defaults to "back to supplier"). */
+  backLabel?: string;
+}
+
+/** One id per file selection — a retried/double-submitted upload reuses it (M8). */
+function newUploadId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+  return '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, (c) =>
+    (Number(c) ^ (Math.random() * 16) >> (Number(c) / 4)).toString(16),
+  );
 }
 
 type UploadState =
@@ -50,7 +63,10 @@ type UploadState =
   | { phase: 'uploaded'; result: CapturedImage }
   | { phase: 'error'; message: string };
 
-export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadOpts, uploadFile }: Props) {
+export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadOpts, uploadFile, backLabel }: Props) {
+  const t = useT(receiving);
+  const dir = useDir();
+  const capturedRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const viewfinderRef = useRef<HTMLDivElement>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(image?.url ?? null);
@@ -91,7 +107,7 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadOpts
     setUpload({ phase: 'uploading', pct: 30 });
     try {
       const uploaded = uploadFile
-        ? await uploadFile(file)
+        ? await uploadFile(file, newUploadId())
         : await uploadInvoiceScan(file, { supplierName, ...uploadOpts });
       setUpload({
         phase: 'uploaded',
@@ -140,21 +156,25 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadOpts
 
   function confirmCapture() {
     if (upload.phase !== 'uploaded') return;
+    // M8: a double-tap must not register the same invoice twice.
+    if (capturedRef.current) return;
+    capturedRef.current = true;
     onCapture(upload.result);
   }
 
   function reset() {
+    capturedRef.current = false;
     setPreviewUrl(null);
     setFilename(null);
     setUpload({ phase: 'idle' });
   }
 
   return (
-    <div dir="rtl">
+    <div dir={dir}>
       <StepHeader
-        eyebrow="צעד 2 מתוך 5"
-        title="צלם את החשבונית"
-        subtitle={`מהספק "${supplierName}". וודא שכל פריטי השורה נראים בבירור.`}
+        eyebrow={t('steps.stepOf', { current: 2, total: 5 })}
+        title={t('steps.scan.title')}
+        subtitle={t('steps.scan.subtitle', { supplier: supplierName })}
       />
 
       <div
@@ -162,12 +182,12 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadOpts
         className="relative mb-4 mx-auto max-w-md aspect-[4/5] rounded-2xl overflow-hidden border border-line bg-surface-2 shadow-card"
       >
         {previewUrl ? (
-          <img src={previewUrl} alt="חשבונית" className="scan-element absolute inset-0 w-full h-full object-contain" />
+          <img src={previewUrl} alt={t('steps.scan.invoiceAlt')} className="scan-element absolute inset-0 w-full h-full object-contain" />
         ) : (
           <>
             <div className="absolute inset-0 flex flex-col items-center justify-center text-subtle">
               <Camera className="scan-element w-16 h-16 mb-3" />
-              <p className="scan-element text-sm">המסגרת מציינת איפה למקם את החשבונית</p>
+              <p className="scan-element text-sm">{t('steps.scan.frameHint')}</p>
             </div>
             <div className="viewfinder-corner absolute top-6 right-6 w-10 h-10 border-t-2 border-r-2 border-primary rounded-tr-lg" />
             <div className="viewfinder-corner absolute top-6 left-6 w-10 h-10 border-t-2 border-l-2 border-primary rounded-tl-lg" />
@@ -178,8 +198,8 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadOpts
 
         {/* Upload status badge overlaid on the viewfinder */}
         {upload.phase !== 'idle' ? (
-          <div className="absolute bottom-3 right-3 left-3">
-            <UploadStatusBanner state={upload} />
+          <div className="absolute bottom-3 inset-x-3">
+            <UploadStatusBanner state={upload} t={t} />
           </div>
         ) : null}
       </div>
@@ -201,34 +221,34 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadOpts
             <button
               onClick={confirmCapture}
               disabled={upload.phase !== 'uploaded'}
-              className="scan-element inline-flex items-center justify-center gap-2 bg-primary hover:brightness-110 disabled:bg-surface-2 disabled:text-subtle text-on-primary rounded-xl px-5 py-3 font-medium shadow-glow-primary disabled:shadow-none transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:ring-primary"
+              className="scan-element inline-flex items-center justify-center gap-2 bg-primary hover:brightness-110 disabled:bg-surface-2 disabled:text-subtle text-on-primary min-h-12 rounded-xl px-5 py-3 font-medium shadow-glow-primary disabled:shadow-none transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:ring-primary"
             >
-              {upload.phase === 'uploading' ? 'מעלה לשרת...' : 'עבד את החשבונית'}
-              {upload.phase === 'uploaded' ? <ArrowLeft className="w-4 h-4" /> : null}
+              {upload.phase === 'uploading' ? t('steps.scan.uploading') : t('steps.scan.process')}
+              {upload.phase === 'uploaded' ? <ArrowLeft className="w-4 h-4 ltr:-scale-x-100" aria-hidden="true" /> : null}
             </button>
             <button
               onClick={reset}
-              className="scan-element inline-flex items-center justify-center gap-2 bg-surface-2 border border-line hover:border-primary/40 hover:text-primary text-ink rounded-xl px-5 py-3 font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+              className="scan-element inline-flex items-center justify-center gap-2 bg-surface-2 border border-line hover:border-primary/40 hover:text-primary text-ink min-h-12 rounded-xl px-5 py-3 font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
             >
               <RefreshCw className="w-4 h-4" />
-              צלם מחדש
+              {t('steps.scan.retake')}
             </button>
           </>
         ) : (
           <>
             <button
               onClick={triggerFilePicker}
-              className="scan-element inline-flex items-center justify-center gap-2 bg-primary hover:brightness-110 text-on-primary rounded-xl px-5 py-3 font-medium shadow-glow-primary transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:ring-primary"
+              className="scan-element inline-flex items-center justify-center gap-2 bg-primary hover:brightness-110 text-on-primary min-h-12 rounded-xl px-5 py-3 font-medium shadow-glow-primary transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:ring-primary"
             >
               <Camera className="w-5 h-5" />
-              צלם / העלה קובץ
+              {t('steps.scan.capture')}
             </button>
             <button
               onClick={useMockImage}
-              className="scan-element inline-flex items-center justify-center gap-2 bg-surface-2 border border-line hover:border-primary/40 hover:text-primary text-ink rounded-xl px-5 py-3 font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+              className="scan-element inline-flex items-center justify-center gap-2 bg-surface-2 border border-line hover:border-primary/40 hover:text-primary text-ink min-h-12 rounded-xl px-5 py-3 font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
             >
               <ImageIcon className="w-5 h-5" />
-              השתמש בחשבונית-דמה (ללא העלאה)
+              {t('steps.scan.useDemo')}
             </button>
           </>
         )}
@@ -237,21 +257,27 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadOpts
       <button
         type="button"
         onClick={onBack}
-        className="inline-flex items-center gap-2 text-sm text-muted hover:text-ink"
+        className="inline-flex min-h-11 items-center gap-2 text-sm text-muted hover:text-ink"
       >
-        <ArrowRight className="w-4 h-4" />
-        חזור לבחירת ספק
+        <ArrowRight className="w-4 h-4 ltr:-scale-x-100" aria-hidden="true" />
+        {backLabel ?? t('steps.scan.backToSupplier')}
       </button>
     </div>
   );
 }
 
-function UploadStatusBanner({ state }: { state: UploadState }) {
+function UploadStatusBanner({
+  state,
+  t,
+}: {
+  state: UploadState;
+  t: Translator<typeof receiving.he>;
+}) {
   if (state.phase === 'uploading') {
     return (
       <div className="glass rounded-xl border border-primary/30 px-3 py-2 flex items-center gap-2 text-xs">
         <Loader2 className="w-4 h-4 text-primary animate-spin" />
-        <span className="font-medium text-ink">מעלה ל-Supabase Storage...</span>
+        <span className="font-medium text-ink">{t('steps.scan.bannerUploading')}</span>
       </div>
     );
   }
@@ -262,10 +288,7 @@ function UploadStatusBanner({ state }: { state: UploadState }) {
           <CheckCircle2 className="w-4 h-4 text-primary" />
           <div className="min-w-0 flex-1">
             <div className="font-semibold text-ink truncate">
-              נשמר ב-Supabase · {state.result.invoiceId}
-            </div>
-            <div className="text-muted truncate text-[10px] font-mono">
-              {state.result.publicUrl}
+              {t('steps.scan.bannerSaved', { id: state.result.invoiceId })}
             </div>
           </div>
         </div>
@@ -274,7 +297,7 @@ function UploadStatusBanner({ state }: { state: UploadState }) {
     return (
       <div className="glass rounded-xl border border-line px-3 py-2 flex items-center gap-2 text-xs">
         <CloudUpload className="w-4 h-4 text-subtle" />
-        <span className="text-muted">מצב הדגמה — לא נשמר בשרת</span>
+        <span className="text-muted">{t('steps.scan.bannerDemo')}</span>
       </div>
     );
   }

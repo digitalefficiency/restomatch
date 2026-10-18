@@ -9,6 +9,7 @@ import 'server-only';
  * key — which bypasses RLS — so the tenant check here is explicit and mandatory.
  */
 
+import { readLocalScanMeta, scanIdFromLocalUrl } from '@restomatch/api';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 let cached: SupabaseClient | null | undefined;
@@ -28,6 +29,8 @@ function getServiceClient(): SupabaseClient | null {
 }
 
 export interface ResolvedScan {
+  /** Where the bytes live: the private Supabase bucket or the dev-only local disk. */
+  source?: 'supabase' | 'local';
   /** Short-lived signed URL to embed in <iframe> or <img>. */
   signedUrl: string;
   mimeType: string;
@@ -72,5 +75,69 @@ export async function resolveUploadedScan(
     mimeType: (data.mime_type as string) ?? 'application/pdf',
     pageCount: (data.page_count as number | null) ?? null,
     supplierName: (data.supplier_name as string | null) ?? null,
+  };
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SIGNED_PATH = /\/storage\/v1\/object\/sign\/([^/?#]+)\/([^?#]+)/;
+
+/** Re-sign a storage object for `restaurantId` (path must live under its prefix). */
+async function signTenantPath(
+  bucket: string,
+  storagePath: string,
+  restaurantId: string,
+): Promise<ResolvedScan | null> {
+  const supabase = getServiceClient();
+  if (!supabase) return null;
+  // Tenant gate: scans.upload always writes under `<restaurantId>/`.
+  if (!storagePath.startsWith(`${restaurantId}/`) || storagePath.includes('..')) return null;
+  const { data: signed, error } = await supabase.storage
+    .from(bucket)
+    .createSignedUrl(storagePath, SIGNED_URL_TTL_SEC);
+  if (error || !signed?.signedUrl) return null;
+  const ext = storagePath.split('.').pop()?.toLowerCase();
+  const mimeType =
+    ext === 'pdf' ? 'application/pdf' : ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+  return { signedUrl: signed.signedUrl, mimeType, pageCount: null, supplierName: null, source: 'supabase' };
+}
+
+/**
+ * Resolve a scan by its scan id (`scan-…`, from scans.upload) OR by an invoice
+ * UUID (the invoice correction page links `/scans/<invoice.id>`). The invoice
+ * lookup is the caller's tenant-scoped tRPC read, so a foreign invoice is a
+ * miss. Local dev scans (no Supabase) are served by `/scans/<id>/file`.
+ */
+export async function resolveScan(
+  id: string,
+  restaurantId: string | null,
+  getInvoiceImageUrl: (invoiceId: string) => Promise<string | null>,
+): Promise<ResolvedScan | null> {
+  if (!restaurantId) return null;
+
+  let scanId = id;
+  if (UUID.test(id)) {
+    const url = await getInvoiceImageUrl(id);
+    if (!url) return null;
+    const local = scanIdFromLocalUrl(url);
+    if (local) {
+      scanId = local;
+    } else {
+      const m = SIGNED_PATH.exec(url);
+      if (!m) return null;
+      return signTenantPath(decodeURIComponent(m[1]!), decodeURIComponent(m[2]!), restaurantId);
+    }
+  }
+
+  const uploaded = await resolveUploadedScan(scanId, restaurantId);
+  if (uploaded) return { ...uploaded, source: 'supabase' };
+
+  const meta = await readLocalScanMeta(restaurantId, scanId);
+  if (!meta) return null;
+  return {
+    signedUrl: `/scans/${scanId}/file`,
+    mimeType: meta.mimeType,
+    pageCount: null,
+    supplierName: meta.supplierName,
+    source: 'local',
   };
 }
