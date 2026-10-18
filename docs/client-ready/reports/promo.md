@@ -34,12 +34,32 @@ screen comes from that seed and its dashboard (sources in `tools/promo/STORYBOAR
   and claims letters (he + en, 1440×900 @2×). It also captures the receiver flow in English on a phone
   viewport. To do that it uploads a 1×1 PNG, and the local dev OCR stub returns a real "Check result"
   reconciliation with English lines and the Hebrew originals.
+- **v2 (owner feedback):**
+  - **Caption safe-zone.** `src/layout.ts` puts captions, headlines and callouts in the right 38% (RTL;
+    the left 38% in English, a top band in the vertical cut). Devices, screenshots and camera moves render
+    inside a clip of the other zone. `scripts/check-layout.mjs` asserts the two zones are disjoint.
+  - **AE-style spotlight on the one thing each beat is about:**
+    - dashboard: the ₪572 hero;
+    - leak detective: the beer row (520 → 575 ₪, +10.6%);
+    - approvals: the blocked card with its buttons;
+    - claim letter: the total;
+    - receiver: the "Cherry tomatoes / עגבניות שרי" card on the phone;
+    - chain: the leakiest-branch row.
+
+    The outside is dimmed to about 33% with a blur and a vignette. The focus rect is lifted (+exposure,
+    accent glow, ×1.04), and a mask opens it from the centre line. The camera pushes in, holds about
+    1.5 s, and a callout chip appears in the caption zone. All ramps are 12 frames and use the same
+    easing family.
+  - **Real chain beat.** I merged `claude/client-ready` (S8 PR #38) and ran `seed:chain-demo`. The beat
+    now uses the real `/dashboard/chain` capture instead of the design mock.
 - **Honesty rules:**
   - No ROI or savings-rate claims, and no customers.
   - "Real screen · demo data" is labelled on the product beat.
   - "₪276" is shown as *claimed from suppliers* (the dashboard's label), not "recovered".
-  - The chains view is a designed card labelled "Design concept · in development". It shows relative
-    bars only, no ₪ figures and no fake screenshot.
+  - The chains view is the real chain dashboard on the chain demo seed. The base branch is unchanged at
+    572 ₪ = 2% of 28,389 ₪.
+  - The paper invoices in the problem beat are props, but their math adds up: each line total is
+    qty × price, the invoice total is the sum of the lines, and each supplier sells what it really sells.
   - The URL `restomatch.co.il` is a placeholder (`SITE` in `copy.ts`).
 
 ## Iteration (stills reviewed before rendering)
@@ -54,6 +74,15 @@ I rendered stills across the whole timeline and reviewed each one. Fixes made fr
   started for real, and the consent cookie is set.
 
 ## Found while capturing (needs another area)
+
+- **S3 / approvals:** two problems in the Hebrew approvals card, both visible in the film:
+  - it shows the raw English rule string "price: ±2% or ₪5";
+  - its "expected 522.6" disagrees with the leak detective's median of 520.00. Same product, two
+    "expected" prices on two screens.
+- **S3 / leak detective:** the tiles round to "+11%" while the table says "+10.6%".
+- **Demo hygiene:** my first receiver captures added test receipts to the **local** dev DB, and the
+  hero moved to ₪1,481. Re-running `./scripts/dev-setup.sh` restores the clean demo (₪572). Anyone who
+  clicks through the receiving demo before a live presentation should reseed afterwards.
 
 - **S2 / receiving:** in the wizard, *"Use a demo invoice (no upload)"* → *Process invoice* on a real
   PO ends in **"Matched 0 · Missing on invoice 7"**. The client-side demo invoice doesn't match the
