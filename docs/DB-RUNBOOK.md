@@ -269,6 +269,28 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/restomatch_dev DEMO_TOD
 
 `seed-demo` prints the exact hero numbers (it calls the same `computeLeakHero` the dashboard uses).
 
+**Chain demo (branches + `/dashboard/chain`).** `apps/worker/scripts/seed-chain-demo.ts`
+(`pnpm --filter @restomatch/worker seed:chain-demo`, run by `dev-setup.sh` after `seed-demo`)
+turns the demo tenant into a 3-branch chain on one billing account (plan **`chain`**, active):
+
+| Branch | This month (seed on 2026-10-18) | Story |
+|---|---|---|
+| כפר הזיתים (main) | **unchanged: ₪572 = 2.0 % of ₪28,389** | the base demo above — the script asserts these numbers did not move |
+| כפר הזיתים — חיפה | ₪339 = **0.8 %** of ₪40,934, 9 open | the clean branch: occasional small price slips |
+| כפר הזיתים — ירושלים | ₪782 = **3.1 %** of ₪25,420, 17 open | the leaky branch: frequent price bumps, short deliveries billed in full, a local butcher (בשר ההר) creeping every price |
+
+Each new branch buys from five of the main branch's suppliers (same ח.פ, so the chain dashboard
+merges them in "top suppliers") plus one local supplier, with 10 weeks of deliveries through the
+real matching + approvals + baselines engines. `owner@` is **owner** of all three branches (branch
+switcher + chain dashboard); `manager@` is also a **manager** in Jerusalem (two branches in the
+switcher, and no chain dashboard — it is owner-only). Idempotent: re-running wipes and regenerates
+only the two new branches (found by name on the billing account). Re-run it after `seed` + `seed-demo`
+(the base seed deletes every restaurant):
+
+```bash
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/restomatch_dev pnpm --filter @restomatch/worker seed:chain-demo
+```
+
 **Worker online for the demo.** The dashboard shows "the processing engine is offline" whenever
 no worker heartbeat (Redis key `restomatch:worker:heartbeat`, refreshed every 60 s) exists. Start
 the worker next to `next dev` — it needs the dev DB and Redis (both started by `dev-setup.sh`):
