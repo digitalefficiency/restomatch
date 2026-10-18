@@ -33,6 +33,7 @@ import {
   userCredentials,
   users,
   type DeliverySchedule,
+  type RestaurantSettings,
 } from '../src/schema';
 import { assertSeedTarget } from '../src/seedGuard';
 
@@ -252,7 +253,9 @@ async function main() {
       settings: {
         tolerances: { pricePercent: 0.02, priceAbsolute: 5, qtyPercent: 0.03, qtyAbsolute: 1 },
         baselineWindowDays: 90,
-      },
+        // The demo tenant shows every flagged feature (packages/api/src/lib/features.ts).
+        features: { all: true },
+      } as RestaurantSettings,
     })
     .returning();
   if (!restaurant) throw new Error('restaurant insert failed');
