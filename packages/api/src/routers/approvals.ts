@@ -166,6 +166,11 @@ export const approvalsRouter = router({
         entityType: 'discrepancy',
         entityId: input.discrepancyId,
         actorId: ctx.session.userId,
+        metadata: {
+          discrepancyType: updated.type,
+          savingsIls: updated.deltaAmount ? Number(updated.deltaAmount) : null,
+          role: ctx.session.role,
+        },
       });
       return updated;
     }),
@@ -212,6 +217,12 @@ export const approvalsRouter = router({
         entityType: 'discrepancy',
         entityId: input.discrepancyId,
         actorId: ctx.session.userId,
+        metadata: {
+          discrepancyType: updated.type,
+          amountIls: updated.deltaAmount ? Number(updated.deltaAmount) : null,
+          reason: input.reason,
+          role: ctx.session.role,
+        },
       });
       return updated;
     }),
