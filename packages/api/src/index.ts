@@ -164,3 +164,10 @@ export {
 } from './edge';
 export { canonicalizeEmail } from './email';
 export { startOfDayInTz, endOfDayInTz, addCalendarDaysInTz } from './lib/time';
+export {
+  fillEnglishNames,
+  fillCatalogEnglish,
+  receivingTranslator,
+  type FillEnglishResult,
+} from './receiving/english';
+export { devOcrStubEnabled, buildDevOcrStub } from './receiving/devOcrStub';

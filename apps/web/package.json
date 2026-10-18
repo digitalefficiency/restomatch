@@ -22,6 +22,7 @@
     "@restomatch/crypto": "workspace:*",
     "@restomatch/db": "workspace:*",
     "@restomatch/ocr": "workspace:*",
+    "@restomatch/translate": "workspace:*",
     "@restomatch/types": "workspace:*",
     "@restomatch/ui-tokens": "workspace:*",
     "@supabase/supabase-js": "^2.106.1",
