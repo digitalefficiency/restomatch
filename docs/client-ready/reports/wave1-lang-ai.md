@@ -145,6 +145,19 @@ Branch `claude/wave1-lang-ai` → draft PR #42 into `claude/client-ready`. Both 
 | Screenshots | Hebrew answers now show Hebrew product/supplier names; ₪0 lines are no longer listed as claimable; the question form no longer covers answers | layer 2 |
 | db:doctor | `assistant_usage.updated_at` gets the standard `set_updated_at` trigger (0053) | `supabase-deploy.test.ts`, `upgrade-path.test.ts` |
 
+## S4 security cross-QA (#42 @ a04265a) — fixes
+
+| Finding | Fix | Test |
+|---|---|---|
+| **L1** The answer sanitizer stripped domains only from a fixed TLD list, so `evil.ly/…`, `secure-restomatch.dev`, `restomatch.shop/pay` and `evil[.]com` survived while the answer stayed `grounded:true` | Detection runs on **normalized** prose: NFKC; invisible chars removed; look-alike dots (`。．｡․…`) mapped to `.`; defanged `[.]`/`(.)`/`{dot}`/` dot ` (any case) and spaced dots restored. It then strips any scheme, `www.`, user@host, @handle, IPv4/IPv6/hex IP, international/Israeli/toll-free/`*` numbers, and any host whose TLD is real: an allow-list of ~200, punycode, IDN (`.ישראל`, `.рф`) or a homoglyph spoof (`.cоm`). **Any removed link sets `grounded:false`.** Prose like `spend.Next`, `report.xlsx`, `Mr. Cohen`, a double space or `<5%` is not flagged. | `ask.test.ts` "S4 cross-QA L1" (the 4 strings + an IP, plus 20 obfuscations and 11 benign phrases) |
+| **L2** The 10/min burst limit was process-local (per lambda) | `setAskBurstLimiter()` (globalThis registry, safe across bundles) is registered at boot in `instrumentation.node.ts` → `lib/askRateLimit.ts` → the shared Redis `enforceRateLimit` (`rateLimit.ts` itself is untouched), keyed `ask:<restaurantId>`. The process-local window still applies on top, so a Redis outage never means "no limit". The durable daily cap is unchanged. | `ask.test.ts` "S4 cross-QA L2"; layer 2 saw the `ask:<id>:<window>` key in Redis |
+| **L4** `dump.rdb` was modified in the PR | Restored from the base; locally marked `skip-worktree` | `git diff origin/claude/client-ready -- dump.rdb` is empty |
+| **L3** The `when` order of 0052/0053 | Not renumbered (orchestrator handles it at integration) | — |
+
+The cross-QA fixes were reviewed by one independent refuter. Its round-2 findings are fixed: look-alike/spaced/IDN/zero-width domains no longer survive, whitespace-only flagging is gone, `spend.Next`-style false positives are gone, and IPv6/hex IPs/other phone formats are covered. It found nothing in L2.
+
+New untranslated-by-review strings (merged in from the base): `receiving.errors.queueUnavailable` in ar/ru/th/ti, written by me with no reviewer pass. Tigrinya especially needs a native check.
+
 ## Still open / not done
 
 - **M3 (refuter, plausible):** the Claude calls (assistant and translator) run inside the RLS member transaction, so a pooled connection is held for the duration of the call (up to 4×45 s for the assistant). It is fine at demo scale. The fix is to do the reads in the transaction, call Claude outside it, then open a short transaction for the cache and usage writes. That needs a non-transactional entry point in `trpc.ts`, which is an S4/S7 boundary.
@@ -187,7 +200,10 @@ Branch `claude/wave1-lang-ai` → draft PR #42 into `claude/client-ready`. Both 
 
 ## Verification (2 layers)
 
-### Layer 1: full gate (final head, after merging `origin/claude/client-ready`)
+### Layer 1: full gate (final head, after merging `origin/claude/client-ready` @ 80a3934)
+
+Latest run (after the S4 cross-QA fixes): turbo test 13/13 tasks, **1319 tests** (api 574, web 290, db 73…), typecheck 17/17, lint 0 errors, supabase-sync up to date, web build success; layer 2a 83/83 again on that build.
+
 
 The latest run is on the merged head: 13/13 tasks, **1271 tests** (api 563, web 271, db 68, charts 64, …), turbo typecheck 17/17, web tsc 0 errors, lint 0 errors, supabase-sync up to date (44 files), web build success.
 - **Local DB rebuild:** the merge brought in base migration 0033, which sits below the already-applied 0052/0053 (a journal gap). I rebuilt the local DBs with `pnpm --filter @restomatch/db reset`, then ran `provision-rls` and `seed-demo`.
