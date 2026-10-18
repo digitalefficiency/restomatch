@@ -253,6 +253,12 @@ export async function loadPosSales(
 ): Promise<Array<{ itemRef: string; itemName: string; qty: string; netAmount: string }> | null> {
   const [reg] = (await db.execute(sql`select to_regclass('public.pos_sales')::text as t`)) as unknown as Array<{ t: string | null }>;
   if (!reg?.t) return null;
+  // The member transaction must survive a missing grant (0058 applied before the
+  // app role's grants were refreshed): probe privilege first, never throw.
+  const [can] = (await db.execute(
+    sql`select has_table_privilege(current_user, 'public.pos_sales', 'SELECT') as ok`,
+  )) as unknown as Array<{ ok: boolean }>;
+  if (!can?.ok) return null;
   const rows = (await db.execute(sql`
     select item_ref as "itemRef", max(item_name) as "itemName",
            sum(qty)::numeric(14,3)::text as qty, sum(net_amount)::numeric(14,2)::text as "netAmount"

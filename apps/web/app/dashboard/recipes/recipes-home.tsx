@@ -532,11 +532,27 @@ function PosTab({ targetBp }: { targetBp: number }) {
                       <Link href={`/dashboard/recipes/${r.recipeId}`} className="font-medium text-ink hover:text-primary">
                         <Name name={r.name} nameEn={r.nameEn} />
                       </Link>
+                      {r.costIncomplete ? (
+                        <span className="mt-0.5 flex items-center gap-1 text-xs text-warn">
+                          <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                          {t('pos.incomplete')}
+                        </span>
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 text-end tabular-nums">{formatNumber(r.qtySold, locale)}</td>
                     <td className="px-4 py-3 text-end tabular-nums">{r.avgNetPriceAgorot == null ? '—' : ils(r.avgNetPriceAgorot, locale)}</td>
                     <td className="px-4 py-3 text-end tabular-nums text-muted">{pct(r.menuFoodCostBp, locale)}</td>
-                    <td className="px-4 py-3 text-end tabular-nums">{r.actualFoodCostBp == null ? t('pos.noSales') : pct(r.actualFoodCostBp, locale)}</td>
+                    <td className="px-4 py-3 text-end tabular-nums">
+                      {r.implausible ? (
+                        <span title={t('pos.implausibleHint')}>
+                          <Badge tone="warning">{t('pos.implausible')}</Badge>
+                        </span>
+                      ) : r.actualFoodCostBp == null ? (
+                        t('pos.noSales')
+                      ) : (
+                        pct(r.actualFoodCostBp, locale)
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-end">
                       {r.gapBp == null ? (
                         '—'
@@ -559,7 +575,17 @@ function PosTab({ targetBp }: { targetBp: number }) {
             </table>
           </Card>
           {d.unmatchedCount > 0 ? (
-            <p className="text-xs text-subtle">{t('pos.unmatched', { count: formatNumber(d.unmatchedCount, locale) })}</p>
+            <div className="text-xs text-subtle" data-testid="pos-unmatched">
+              <p>{t('pos.unmatched', { count: formatNumber(d.unmatchedCount, locale) })}</p>
+              <ul className="mt-1 flex flex-wrap gap-1.5">
+                {d.unmatched.map((u) => (
+                  <li key={u.itemRef} className="rounded-lg border border-line px-2 py-0.5">
+                    <span {...originalProps(u.itemName)}>{u.itemName}</span>{' '}
+                    <bdi dir="ltr" className="tabular-nums text-muted">{ils(u.netSalesAgorot, locale, 0)}</bdi>
+                  </li>
+                ))}
+              </ul>
+            </div>
           ) : null}
         </>
       ) : null}
