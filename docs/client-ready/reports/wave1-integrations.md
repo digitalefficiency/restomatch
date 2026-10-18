@@ -102,7 +102,47 @@ Golden files (byte-exact, CRLF, `binary` in `.gitattributes`): `packages/api/src
 - Uploads are limited to 5 MB and 50,000 lines. Account codes are restricted to `[\p{L}\p{N}._-]{1,15}`, so a tab or newline can never break a delimited record. No tenant id is ever taken from the client.
 
 ## Verification (2 layers)
-See the bottom of this file (filled in after the runs).
+
+**Layer 1 — full gate (final code):**
+- `pnpm --filter @restomatch/web lint`: 0 errors (6 pre-existing warnings).
+- `pnpm -r typecheck` and web `tsc --noEmit`: 0 errors.
+- `DATABASE_URL_TEST=… pnpm test`: **13/13 tasks** (api 573, web 254, db 68, matching 86 incl. leak-canary, procurement 24, worker 14).
+- `supabase-sync --check`: up to date.
+- `pnpm --filter @restomatch/web build`: green.
+- Fresh DB: `migrate` → `provision-rls` green, RLS on both POS tables.
+
+**Layer 2a — production build** (`next build && next start`, placeholder email/Supabase keys, nothing sent), Playwright driver:
+- **Coverage:** 4 runs (he/en × 1440/390) × roles owner / bookkeeper / manager / receiver / chef, plus flag-off. All PASS on the final build.
+- **Owner:**
+  - The hub renders 3 sections with the right `dir` and no overflow.
+  - Double-clicking Save writes the supplier card once (checked in the DB).
+  - POS preview shows ₪1,361.50 and 3 skipped lines; import → re-import replaces (4 rows → 4 rows).
+  - A bad file names the missing columns.
+  - The Zester sample preview lists both orders.
+- **Exports:** for each of the 3 packages, the file has the same 24 invoices as the CSV. Every Hashavshevet line balances to the agora, and Σ excl. VAT is ₪28,388.97, equal to the hero's ₪28,389. Priority has 48 typed records with a UTF-16LE BOM; Rivhit has 24 rows.
+- **Bookkeeper:** account codes read-only, no POS section, downloads work.
+- **Manager:** POS + procurement, no account codes, catalog button present, exports redirects.
+- **Receiver / chef:** hub redirects.
+- **Flag off on every branch:** not-found page on the hub, no package cards, no catalog button. It's a soft 404: HTTP 200 with the not-found UI, because Next streams the dashboard shell first.
+- No console, page or 5xx errors besides the expected 400 from the deliberate bad-file preview.
+
+**Layer 2b — independent refuter subagent:** 11 findings. Fixed with tests (`e11439d`):
+- **HIGH:** a POS re-import wiped the whole min..max date span. It now replaces only the file's days; future dates are a line issue.
+- **MED:** invoices whose stored totals don't add up are skipped, never posted unbalanced.
+- **MED:** Rivhit formula injection is guarded.
+- **MED:** POS column detection no longer takes discount/VAT/"updated" columns; refunds net out.
+- **LOW:** number formats (`0,500`, `1.234,50`, `50-`, `(50)`) parse; split rows are BAD_ROW.
+- **LOW:** values that would overflow NUMERIC are line issues, not a 500.
+- **LOW:** import history marks replaced imports.
+
+Also fixed from my own run: a POS preview dropped when a file was picked while the last import settled.
+
+Not fixed (low, noted):
+- US month-first dates whose days are all ≤ 12 import as day-first. The format is documented as day-first.
+- A Hashavshevet אסמכתא is empty when the invoice number has no digits; אסמכתא 2 still carries the full number.
+- Two concurrent imports of the same file create two import records (the rows are not double-counted; the UI guards double-clicks).
+
+Could not refute: the role matrix, the flag-off FORBIDDEN on all 9 gated procedures, tenant isolation (incl. RLS on the app role), exact rounding, Windows-1255/UTF-16 encoding robustness, fixture refs refused in production, and the UI in he/en at 390/1440.
 
 ## Immutable files touched (additive only)
 - `packages/api/src/__tests__/cross-tenant.attack.test.ts`: +10 COVERAGE entries (integrations.*), no assertion changed.
