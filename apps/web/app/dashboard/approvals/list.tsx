@@ -19,6 +19,7 @@ import {
   displayName,
   ruleLabel,
   severityLabel,
+  toleranceLabel,
 } from './vocab';
 
 type QueueItem = inferRouterOutputs<AppRouter>['approvals']['myQueue'][number];
@@ -315,10 +316,7 @@ function WhyFlagged({ d, t }: { d: QueueItem; t: Translator<typeof approvalsHe> 
       ) : null}
       {d.toleranceUsed ? (
         <div className="mt-0.5">
-          {t('card.threshold')}:{' '}
-          <span className="font-mono tabular-nums" dir="ltr">
-            {d.toleranceUsed}
-          </span>
+          {t('card.threshold')}: <span className="tabular-nums">{toleranceLabel(t, d.toleranceUsed)}</span>
         </div>
       ) : null}
       {routing ? (
