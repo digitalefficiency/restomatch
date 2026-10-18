@@ -68,6 +68,7 @@ const KNOWN_ERRORS = [
   'too_many_attachments',
   'rejected_by_user',
   'processing_failed',
+  'quota_exceeded',
 ] as const;
 
 function KindIcon({ kind, className }: { kind: Kind; className?: string }) {

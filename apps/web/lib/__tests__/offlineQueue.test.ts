@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_AUTO_ATTEMPTS, processQueue, type QueueStore, type QueuedPhoto } from '../pwa/offlineQueue';
+import {
+  MAX_AUTO_ATTEMPTS,
+  clearQueue,
+  processQueue,
+  purgeOtherUsers,
+  type QueueStore,
+  type QueuedPhoto,
+} from '../pwa/offlineQueue';
 
 function memStore(items: QueuedPhoto[] = []): QueueStore & { map: Map<string, QueuedPhoto> } {
   const map = new Map(items.map((i) => [i.clientUploadId, i]));
@@ -20,6 +27,7 @@ function memStore(items: QueuedPhoto[] = []): QueueStore & { map: Map<string, Qu
 const photo = (id: string, createdAt: number, attempts = 0): QueuedPhoto => ({
   clientUploadId: id,
   restaurantId: 'r1',
+  userId: 'u1',
   poId: 'po',
   supplierId: 'sup',
   supplierName: 'ספק',
@@ -88,9 +96,23 @@ describe('receiver PWA offline queue', () => {
   it("never uploads another restaurant's photo into the active one (shared device)", async () => {
     const store = memStore([photo('mine', 1), { ...photo('theirs', 2), restaurantId: 'r2' }]);
     const seen: string[] = [];
-    const r = await processQueue(store, async (i) => (seen.push(i.clientUploadId), { invoiceId: 'x' }), () => true, 'r1');
+    const r = await processQueue(store, async (i) => (seen.push(i.clientUploadId), { invoiceId: 'x' }), () => true, { restaurantId: 'r1', userId: 'u1' });
     expect(seen).toEqual(['mine']);
     expect(r.remaining).toBe(0);
     expect(store.map.has('theirs')).toBe(true);
+  });
+
+  it("S4 I3: never uploads another user's photo; sign-out clears the queue; a new user purges others", async () => {
+    const store = memStore([photo('mine', 1), { ...photo('colleague', 2), userId: 'u2' }]);
+    const seen: string[] = [];
+    await processQueue(store, async (i) => (seen.push(i.clientUploadId), { invoiceId: 'x' }), () => true, { restaurantId: 'r1', userId: 'u1' });
+    expect(seen).toEqual(['mine']);
+    expect(store.map.has('colleague')).toBe(true);
+    expect(await purgeOtherUsers('u1', store)).toBe(1);
+    expect(store.map.size).toBe(0);
+    await store.put(photo('a', 1));
+    await store.put({ ...photo('b', 2), userId: 'u3' });
+    await clearQueue(store);
+    expect(store.map.size).toBe(0);
   });
 });

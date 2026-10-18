@@ -38,8 +38,8 @@ export default async function ReceivingPage() {
 
   return (
     <div>
-      {features.includes('receiverPwa') && session?.user?.restaurantId ? (
-        <ReceiverPwa restaurantId={session.user.restaurantId} />
+      {features.includes('receiverPwa') && session?.user?.restaurantId && session.user.id ? (
+        <ReceiverPwa restaurantId={session.user.restaurantId} userId={session.user.id} />
       ) : null}
       <SectionHeader title={t('inbox.title')} subtitle={t('inbox.subtitle')} />
 

@@ -50,6 +50,7 @@ export const he = {
     too_many_attachments: 'יותר מ־10 קבצים בהודעה אחת',
     rejected_by_user: 'נדחה ידנית',
     processing_failed: 'עיבוד ההודעה נכשל',
+    quota_exceeded: 'הגעתם למכסת האחסון היומית למסמכים לבדיקה בערוץ זה',
     unknown: 'שגיאה לא ידועה',
   },
   channels: {

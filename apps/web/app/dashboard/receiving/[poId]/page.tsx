@@ -21,6 +21,7 @@ export default async function ReceivingPoPage({
   const caller = await createServerCaller();
   const session = await auth();
   const restaurantId = session?.user?.restaurantId ?? null;
+  const userId = session?.user?.id ?? null;
 
   const [locale, t, features] = await Promise.all([getLocale(), getT(receiving), enabledFeatures(restaurantId)]);
   const pwa = features.includes('receiverPwa');
@@ -66,7 +67,7 @@ export default async function ReceivingPoPage({
 
   return (
     <div>
-      {pwa && restaurantId ? <ReceiverPwa restaurantId={restaurantId} /> : null}
+      {pwa && restaurantId && userId ? <ReceiverPwa restaurantId={restaurantId} userId={userId} /> : null}
       <Link
         href="/dashboard/receiving"
         className="mb-4 inline-flex min-h-11 items-center gap-1.5 text-sm text-muted transition-colors hover:text-ink"
@@ -75,7 +76,7 @@ export default async function ReceivingPoPage({
         {t('po.backToList')}
       </Link>
 
-      <ReceivingWizard po={poForClient} restaurantId={restaurantId} offlineQueue={pwa} />
+      <ReceivingWizard po={poForClient} restaurantId={restaurantId} offlineQueue={pwa} userId={userId} />
     </div>
   );
 }

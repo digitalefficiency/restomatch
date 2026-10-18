@@ -319,7 +319,7 @@ export function MobileNav({
             </nav>
             <div className="flex items-center justify-between gap-3 border-t border-line px-4 py-3">
               <LocaleSwitcher />
-              <form action={logout}>
+              <form action={logout} data-rm-logout="">
                 <button
                   type="submit"
                   className={cn(

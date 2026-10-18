@@ -395,14 +395,20 @@ describe('WhatsApp webhook — attacks', () => {
 });
 
 describe('E-mail webhook — attacks', () => {
-  it('a signed delivery to A\'s address from an allow-listed sender registers an e-mail invoice', async () => {
+  it('S4 I2: an allow-listed e-mail sender only SUGGESTS the supplier — needs review, no invoice, no OCR', async () => {
     const res = await handleEmailWebhook(emailRequest(emailBody({ id: 'em_ok', to: `${tokens.aEmail}@in.test` })), deps({ config: emailConfig() }));
     expect(res.status).toBe(200);
     const [m] = (await messagesOf(A.restaurantId)).filter((x) => x.providerMessageId === 'em_ok');
-    expect(m).toMatchObject({ status: 'accepted', senderAllowed: true, supplierId: A.supplierId });
+    // From headers are unauthenticated: known sender + suggested supplier, but a human approves.
+    expect(m).toMatchObject({ status: 'needs_review', senderAllowed: true, supplierId: A.supplierId });
     const [d] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.messageId, m!.id));
-    const [inv] = await ownerDb.select().from(invoices).where(eq(invoices.id, d!.invoiceId!));
-    expect(inv).toMatchObject({ source: 'email', restaurantId: A.restaurantId });
+    expect(d).toMatchObject({ status: 'needs_review', invoiceId: null });
+    expect(d!.storagePath!.startsWith(`${A.restaurantId}/`)).toBe(true);
+    const emailInvoices = await ownerDb
+      .select()
+      .from(invoices)
+      .where(and(eq(invoices.restaurantId, A.restaurantId), eq(invoices.source, 'email')));
+    expect(emailInvoices).toHaveLength(0);
   });
 
   it('forged signature, wrong secret and a stale (replayed later) timestamp → 401', async () => {
@@ -424,17 +430,39 @@ describe('E-mail webhook — attacks', () => {
     expect((await messagesOf(A.restaurantId)).filter((m) => m.providerMessageId === 'em_replay')).toHaveLength(1);
   });
 
-  it('the same document re-sent in a NEW e-mail is linked as duplicate, not re-OCR\'d', async () => {
-    const content = Buffer.from('%PDF-1.4 same-bytes').toString('base64');
-    await handleEmailWebhook(emailRequest(emailBody({ id: 'em_d1', to: `${tokens.aEmail}@in.test`, content })), deps({ config: emailConfig() }));
-    await handleEmailWebhook(emailRequest(emailBody({ id: 'em_d2', to: `${tokens.aEmail}@in.test`, content })), deps({ config: emailConfig() }));
+  it('the same document re-sent in a NEW WhatsApp message is linked as duplicate, not re-OCR\'d', async () => {
+    const same = { bytes: new Uint8Array(Buffer.from('%PDF-1.4 same-bytes')), mimeType: 'application/pdf' };
+    waProvider.register('same-1', same).register('same-2', same);
+    await handleWhatsAppWebhook(waRequest(tokens.aWa, waBody({ id: 'wamid.d1', media: 'same-1' })), tokens.aWa, deps({ config: waConfig() }));
+    await handleWhatsAppWebhook(waRequest(tokens.aWa, waBody({ id: 'wamid.d2', media: 'same-2' })), tokens.aWa, deps({ config: waConfig() }));
     const docs = await ownerDb
       .select({ status: ingestDocuments.status, invoiceId: ingestDocuments.invoiceId })
       .from(ingestDocuments)
       .innerJoin(ingestMessages, eq(ingestMessages.id, ingestDocuments.messageId))
-      .where(sql`${ingestMessages.providerMessageId} in ('em_d1', 'em_d2')`);
+      .where(sql`${ingestMessages.providerMessageId} in ('wamid.d1', 'wamid.d2')`);
     expect(docs.map((d) => d.status).sort()).toEqual(['duplicate', 'registered']);
     expect(docs[0]!.invoiceId).toBe(docs[1]!.invoiceId);
+  });
+
+  it('S4 I4: review documents beyond the per-channel daily byte quota are rejected, not stored', async () => {
+    const prev = process.env.INGEST_REVIEW_BYTES_PER_DAY;
+    process.env.INGEST_REVIEW_BYTES_PER_DAY = '1';
+    try {
+      const res = await handleEmailWebhook(
+        emailRequest(emailBody({ id: 'em_quota', to: `${tokens.aEmail}@in.test`, from: 'new@unknown.test' })),
+        deps({ config: emailConfig() }),
+      );
+      expect(res.status).toBe(200);
+      const [m] = (await messagesOf(A.restaurantId)).filter((x) => x.providerMessageId === 'em_quota');
+      const [d] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.messageId, m!.id));
+      expect(d).toMatchObject({ status: 'rejected', error: 'quota_exceeded', storagePath: null, invoiceId: null });
+      // Allow-listed WhatsApp (auto-registered → OCR) is not subject to the review quota.
+      const ok = await handleWhatsAppWebhook(waRequest(tokens.aWa, waBody({ id: 'wamid.quota-ok' })), tokens.aWa, deps({ config: waConfig() }));
+      expect(((await ok.json()) as { results: Array<{ outcome: string }> }).results[0]!.outcome).toBe('accepted');
+    } finally {
+      if (prev === undefined) delete process.env.INGEST_REVIEW_BYTES_PER_DAY;
+      else process.env.INGEST_REVIEW_BYTES_PER_DAY = prev;
+    }
   });
 
   it('an address on another domain, a WhatsApp token as address, or no token → 404', async () => {

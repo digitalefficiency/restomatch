@@ -49,6 +49,7 @@ export const en: Shape<typeof he> = {
     too_many_attachments: 'More than 10 files in one message',
     rejected_by_user: 'Rejected manually',
     processing_failed: 'Processing the message failed',
+    quota_exceeded: 'Daily storage limit for review documents on this channel reached',
     unknown: 'Unknown error',
   },
   channels: {

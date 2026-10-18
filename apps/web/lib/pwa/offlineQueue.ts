@@ -16,6 +16,8 @@ export interface QueuedPhoto {
   clientUploadId: string;
   /** The restaurant the photo was taken for — only uploaded while that restaurant is active. */
   restaurantId: string;
+  /** The signed-in user who took it — never uploaded under another user (shared tablet). */
+  userId: string;
   poId: string;
   supplierId: string;
   supplierName: string;
@@ -53,12 +55,13 @@ export async function processQueue(
   store: QueueStore,
   upload: PhotoUploader,
   isOnline: () => boolean = () => true,
-  restaurantId?: string,
+  scope?: { restaurantId: string; userId: string },
 ): Promise<ProcessResult> {
-  // Another restaurant's photos (shared device / restaurant switch) are never
-  // uploaded into the current one; they wait until that restaurant is active.
+  // Another restaurant's / user's photos (shared device, restaurant switch) are
+  // never uploaded under the current session; they wait for their owner.
+  const mine = (i: QueuedPhoto) => !scope || (i.restaurantId === scope.restaurantId && i.userId === scope.userId);
   const items = (await store.list())
-    .filter((i) => !restaurantId || i.restaurantId === restaurantId)
+    .filter(mine)
     .sort((a, b) => a.createdAt - b.createdAt);
   const uploaded: string[] = [];
   const failed: string[] = [];
@@ -80,7 +83,7 @@ export async function processQueue(
     }
   }
   const left = await store.list();
-  return { uploaded, failed, remaining: left.filter((i) => !restaurantId || i.restaurantId === restaurantId).length };
+  return { uploaded, failed, remaining: left.filter(mine).length };
 }
 
 /** fetch() rejects with a TypeError when the network is unreachable. */
@@ -148,6 +151,29 @@ export const QUEUE_EVENT = 'rm-receiver-queue';
 /** Wipe the device queue (sign-out on a shared phone). */
 export async function clearQueue(store: QueueStore = idbQueueStore): Promise<void> {
   for (const i of await store.list()) await store.remove(i.clientUploadId);
+}
+
+/** Drop every item that does not belong to `userId` (a different user signed in on this device). */
+export async function purgeOtherUsers(userId: string, store: QueueStore = idbQueueStore): Promise<number> {
+  let n = 0;
+  for (const i of await store.list()) {
+    if (i.userId !== userId) {
+      await store.remove(i.clientUploadId);
+      n += 1;
+    }
+  }
+  return n;
+}
+
+/** Marks the sign-out forms; PwaSessionGuard clears the queue when one is submitted. */
+export const LOGOUT_FORM_ATTR = 'data-rm-logout';
+
+/** Only touch IndexedDB if the receiver database already exists (never create it just to check). */
+export async function queueDbExists(): Promise<boolean> {
+  if (typeof indexedDB === 'undefined') return false;
+  const list = (indexedDB as IDBFactory & { databases?: () => Promise<Array<{ name?: string }>> }).databases;
+  if (!list) return true;
+  return (await list.call(indexedDB)).some((d) => d.name === 'restomatch-receiver');
 }
 
 export async function enqueuePhoto(

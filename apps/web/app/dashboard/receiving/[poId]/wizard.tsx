@@ -84,11 +84,14 @@ export function ReceivingWizard({
   po,
   restaurantId,
   offlineQueue = false,
+  userId = null,
 }: {
   po: PoForClient;
   restaurantId: string | null;
   /** S13 receiverPwa: queue photos in IndexedDB when offline (lib/pwa/offlineQueue). */
   offlineQueue?: boolean;
+  /** Owner of queued photos — they only ever upload under this user (shared tablets). */
+  userId?: string | null;
 }) {
   const [step, setStep] = useState<Step>('SCAN_INVOICE');
   const [grId, setGrId] = useState<string | null>(null);
@@ -158,6 +161,7 @@ export function ReceivingWizard({
         await enqueuePhoto({
           clientUploadId,
           restaurantId: restaurantId!,
+          userId: userId!,
           poId: po.id,
           supplierId: po.supplierId,
           supplierName: po.supplierName,
@@ -166,7 +170,7 @@ export function ReceivingWizard({
         });
         return { invoiceId: `queued-${clientUploadId}`, publicUrl: '', scanRouteUrl: '', storagePath: '', mimeType: file.type };
       };
-      const canQueue = offlineQueue && Boolean(restaurantId) && idbAvailable();
+      const canQueue = offlineQueue && Boolean(restaurantId) && Boolean(userId) && idbAvailable();
       if (canQueue && !navigator.onLine) return queue();
       const contentBase64 = await fileToBase64(file);
       let r;
@@ -191,7 +195,7 @@ export function ReceivingWizard({
       };
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [po.supplierName, offlineQueue, restaurantId],
+    [po.supplierName, offlineQueue, restaurantId, userId],
   );
 
   const stepIndex = STEP_ORDER.indexOf(step);

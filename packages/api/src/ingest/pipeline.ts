@@ -18,6 +18,7 @@ import {
   AttachmentTooLargeError,
   INGEST_LIMITS,
   normalizeSender,
+  reviewBytesPerDay,
   sniffMime,
   type IngestKind,
   type IngestProvider,
@@ -306,6 +307,31 @@ export async function processInboundMessage(
         docs.push({ id: d!.id, status: 'duplicate' });
         continue;
       }
+      // E-mail From headers are unauthenticated (no SPF/DKIM verdict yet), so an
+      // allow-listed e-mail sender only SUGGESTS the supplier: the document still
+      // waits for a manager. WhatsApp sender numbers are authenticated by Meta.
+      const autoRegister = senderAllowed && channel.kind === 'whatsapp';
+      if (!autoRegister) {
+        // Storage quota for review documents (stored without OCR) per channel per day.
+        const rows = (await tx.execute(sql`
+          select coalesce(sum(d.size_bytes), 0)::bigint as bytes
+          from ingest_documents d
+          join ingest_messages m on m.id = d.message_id and m.restaurant_id = d.restaurant_id
+          where m.channel_id = ${channel.channelId}
+            and d.restaurant_id = ${channel.restaurantId}
+            and d.storage_path is not null
+            and d.invoice_id is null
+            and d.created_at > now() - interval '1 day'
+        `)) as unknown as Array<{ bytes: string | number }>;
+        if (Number(rows[0]?.bytes ?? 0) + bytes.byteLength > reviewBytesPerDay()) {
+          const [d] = await tx
+            .insert(ingestDocuments)
+            .values({ ...base, mimeType: mime, sizeBytes: bytes.byteLength, sha256, status: 'rejected', error: 'quota_exceeded' })
+            .returning({ id: ingestDocuments.id });
+          docs.push({ id: d!.id, status: 'rejected' });
+          continue;
+        }
+      }
       let docId: string | null = null;
       try {
         const stored = await storeIngestedFile({ restaurantId: channel.restaurantId, sha256, mimeType: mime, bytes });
@@ -321,7 +347,7 @@ export async function processInboundMessage(
           })
           .returning({ id: ingestDocuments.id });
         docId = d!.id;
-        if (senderAllowed) {
+        if (autoRegister) {
           const reg = await registerIngestedDocument(tx, {
             restaurantId: channel.restaurantId,
             documentId: docId,

@@ -48,7 +48,7 @@ html[data-pwa='installed'] body { overscroll-behavior-y: contain; }
  * uploader and the install prompt. Renders nothing visible while online with
  * an empty queue.
  */
-export function ReceiverPwa({ restaurantId }: { restaurantId: string }) {
+export function ReceiverPwa({ restaurantId, userId }: { restaurantId: string; userId: string }) {
   const t = useT(ingest);
   const locale = useLocale();
   const utils = trpc.useUtils();
@@ -63,11 +63,13 @@ export function ReceiverPwa({ restaurantId }: { restaurantId: string }) {
   const refreshCount = useCallback(async () => {
     if (!idbAvailable()) return;
     try {
-      setQueued((await idbQueueStore.list()).filter((i) => i.restaurantId === restaurantId).length);
+      setQueued(
+        (await idbQueueStore.list()).filter((i) => i.restaurantId === restaurantId && i.userId === userId).length,
+      );
     } catch {
       /* private mode without IndexedDB */
     }
-  }, [restaurantId]);
+  }, [restaurantId, userId]);
 
   const upload = useCallback(
     async (item: QueuedPhoto) => {
@@ -95,7 +97,7 @@ export function ReceiverPwa({ restaurantId }: { restaurantId: string }) {
     running.current = true;
     setSyncing(true);
     try {
-      const r = await processQueue(idbQueueStore, upload, () => navigator.onLine, restaurantId);
+      const r = await processQueue(idbQueueStore, upload, () => navigator.onLine, { restaurantId, userId });
       setSyncError(r.failed.length > 0);
       setQueued(r.remaining);
     } catch {
@@ -104,7 +106,7 @@ export function ReceiverPwa({ restaurantId }: { restaurantId: string }) {
       running.current = false;
       setSyncing(false);
     }
-  }, [upload, restaurantId]);
+  }, [upload, restaurantId, userId]);
 
   useEffect(() => {
     setOnline(navigator.onLine);

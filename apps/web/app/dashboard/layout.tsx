@@ -9,6 +9,7 @@ import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { nav } from '@/lib/i18n/messages/nav';
 import { labelForRole } from '@/lib/roles';
 import { enabledFeatures } from '@/lib/ingest/features';
+import { PwaSessionGuard } from '@/lib/pwa/PwaSessionGuard';
 import { LocaleSync } from './locale-sync';
 import { BranchSwitcher } from './branch-switcher';
 import { DesktopNav, MobileNav } from './nav';
@@ -97,7 +98,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 <BranchSwitcher branches={switcherBranches} activeId={active.restaurantId} />
                 <DashboardSearch role={active.role} className="w-72" />
                 <LocaleSwitcher />
-                <form action={logout}>
+                <form action={logout} data-rm-logout="">
                   <button
                     type="submit"
                     className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-xs font-semibold text-muted transition-colors hover:border-primary/40 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
@@ -115,6 +116,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <main id="main-content" tabIndex={-1} className="mx-auto max-w-6xl px-4 py-6 focus:outline-none sm:px-6 sm:py-8">
           <WorkerStatusBanner />
           <LocaleSync />
+          {features.includes('receiverPwa') ? <PwaSessionGuard userId={session.user.id} /> : null}
           {children}
         </main>
       </div>
