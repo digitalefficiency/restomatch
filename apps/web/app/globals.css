@@ -125,9 +125,51 @@
   }
 }
 
-/* S5 (ops-ui, client-ready sprint): `html { direction: rtl }` above wins over the
-   `dir` attribute, so English (`<html dir="ltr">`) rendered right-to-left. Honor
-   the attribute the root layout sets from the `rm_locale` cookie. */
+/* ───────────── S6 landing (append-only) ───────────── */
+
+/* `html { direction: rtl }` above would override the <html dir="ltr"> the root
+   layout sets for English — let the attribute win. */
 html[dir='ltr'] {
   direction: ltr;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* Faint ledger grid behind the hero — fades out towards the edges. */
+.rm-grid {
+  background-image: linear-gradient(rgba(42, 58, 49, 0.35) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(42, 58, 49, 0.35) 1px, transparent 1px);
+  background-size: 44px 44px;
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, #000 20%, transparent 75%);
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, #000 20%, transparent 75%);
+}
+
+/* Scroll reveal with zero JS: scroll-driven animations where supported
+   (Chromium); elsewhere — and for reduced-motion users — content is simply
+   visible. */
+@keyframes rm-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(22px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .rm-reveal {
+      animation: rm-reveal linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 55%;
+    }
+  }
 }

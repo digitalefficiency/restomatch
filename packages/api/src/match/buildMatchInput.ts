@@ -9,6 +9,7 @@ import {
   invoiceLines,
   invoices,
   isNull,
+  lt,
   lte,
   ne,
   or,
@@ -249,10 +250,18 @@ export async function buildMatchInputForInvoice(
           eq(invoices.restaurantId, restaurantId),
           eq(invoices.supplierId, inv.supplierId),
           ne(invoices.id, invoiceId),
+          // Only invoices that arrived BEFORE this one: re-matching the original
+          // after its duplicate shows up must not flag the original too (the
+          // pair would otherwise both be blocked and the total counted twice).
+          // Ties (same-batch inserts) break on id so exactly one of a pair flags.
+          or(
+            lt(invoices.createdAt, inv.createdAt),
+            and(eq(invoices.createdAt, inv.createdAt), lt(invoices.id, invoiceId)),
+          ),
         ),
       );
     knownInvoiceNumbers = new Set(
-      rows.map((r) => r.invoiceNumber).filter((n): n is string => !!n),
+      rows.map((r) => normalizeInvoiceNumber(r.invoiceNumber)).filter((n): n is string => !!n),
     );
   }
 
@@ -299,7 +308,9 @@ export async function buildMatchInputForInvoice(
 
   const input: MatchInput = {
     invoice: {
-      invoiceNumber: inv.invoiceNumber ?? '',
+      // Normalized (see normalizeInvoiceNumber) — the engine only uses it for
+      // duplicate detection + its message, and compares it to the known set.
+      invoiceNumber: normalizeInvoiceNumber(inv.invoiceNumber) ?? '',
       invoiceDate,
       supplierId: inv.supplierId ?? '',
       totalExclVat: num(inv.totalExclVat),
@@ -317,6 +328,19 @@ export async function buildMatchInputForInvoice(
   };
 
   return { input, poId: po?.id ?? null, grId };
+}
+
+/**
+ * Canonical form of an invoice number for duplicate detection. The DB already
+ * rejects an exact (supplier, invoice_number) repeat, so a real double-bill
+ * arrives with formatting differences — "INV-0012", "inv 12", "12/". Keep only
+ * letters/digits, upper-case, and drop leading zeros of each digit run.
+ */
+export function normalizeInvoiceNumber(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const compact = raw.normalize('NFKC').replace(/[^\p{L}\p{N}]/gu, '').toUpperCase();
+  const canon = compact.replace(/(^|\D)0+(?=\d)/g, '$1');
+  return canon.length > 0 ? canon : null;
 }
 
 /**

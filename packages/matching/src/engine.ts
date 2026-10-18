@@ -185,9 +185,17 @@ export function runMatch(input: MatchInput): MatchOutput {
   }
 
   // 4. Build lookup maps
+  // Several partial deliveries (GR lines) may cover one PO line: SUM their
+  // received quantities. Last-wins here under-counted what arrived and
+  // fabricated QTY_SHORT (M2). The merged record keeps the latest GR line id.
   const grByPoLineId = new Map<string, GrLineInput>();
   for (const gr of grLines) {
-    if (gr.poLineId) grByPoLineId.set(gr.poLineId, gr);
+    if (!gr.poLineId) continue;
+    const prev = grByPoLineId.get(gr.poLineId);
+    grByPoLineId.set(
+      gr.poLineId,
+      prev ? { ...gr, qtyReceived: prev.qtyReceived + gr.qtyReceived } : gr,
+    );
   }
 
   const invoiceLinesByProduct = new Map<string, InvoiceLineInput[]>();
@@ -225,10 +233,37 @@ export function runMatch(input: MatchInput): MatchOutput {
     }
     if (inv) matchedInvoiceLineIds.add(inv.id);
 
+    // Unit normalization (computed up-front so the qty checks below share it):
+    // convert when units differ but are convertible (kg↔g, l↔ml); a null
+    // factor means UNIT_MISMATCH (emitted in 5c) and the raw billed values.
+    let invQty = inv?.qtyBilled ?? 0;
+    let invPrice = inv?.unitPriceBilled ?? 0;
+    const unitFactor = inv && inv.unit !== po.unit ? unitConversionFactor(inv.unit, po.unit) : 1;
+    if (inv && unitFactor !== null) {
+      invQty = inv.qtyBilled * unitFactor;
+      invPrice = inv.unitPriceBilled / unitFactor;
+    }
+
+    // Billed-but-not-received units (5b's QTY_OVER block), when that fires.
+    let billedNotReceived = 0;
+    if (inv && gr && invQty > gr.qtyReceived) {
+      const diff = invQty - gr.qtyReceived;
+      const effectiveTol = Math.max(tolerances.qtyAbsolute, gr.qtyReceived * tolerances.qtyPercent);
+      if (diff > effectiveTol) billedNotReceived = diff;
+    }
+
     // 5a. Qty: ordered vs received
     if (gr) {
       const qtyEval = evaluateQty(po.qtyOrdered, gr.qtyReceived, po.unitPriceExpected ?? 0, tolerances);
       if (qtyEval) {
+        // Short units that the invoice ALSO bills are already counted (at the
+        // billed price) by 5b's QTY_OVER block — don't count the same missing
+        // units twice in the leak. QTY_SHORT keeps only the un-billed shortfall.
+        if (qtyEval.discrepancy.type === 'QTY_SHORT' && billedNotReceived > 0) {
+          const shortUnits = po.qtyOrdered - gr.qtyReceived;
+          const overlap = Math.min(shortUnits, billedNotReceived);
+          qtyEval.discrepancy.deltaAmount = mulIls(po.unitPriceExpected ?? 0, shortUnits - overlap);
+        }
         out.push(
           discrepancy(qtyEval.discrepancy.type, qtyEval.discrepancy.severity, {
             ...qtyEval.discrepancy,
@@ -242,54 +277,37 @@ export function runMatch(input: MatchInput): MatchOutput {
     }
 
     if (inv) {
-      // 5c. Unit handling — convert when units differ but are convertible
-      // (e.g. kg↔g, l↔ml); only flag UNIT_MISMATCH when no conversion exists.
-      // All downstream qty/price checks then use the PO-unit-normalized values.
-      let invQty = inv.qtyBilled;
-      let invPrice = inv.unitPriceBilled;
-      if (inv.unit !== po.unit) {
-        const factor = unitConversionFactor(inv.unit, po.unit);
-        if (factor === null) {
-          out.push(
-            discrepancy('UNIT_MISMATCH', 'warn', {
-              productId: po.productId,
-              poLineId: po.id,
-              invoiceLineId: inv.id,
-              expected: null,
-              actual: null,
-              deltaAmount: 0,
-              toleranceUsed: 'unit must match between PO and invoice',
-              message: `PO unit "${po.unit}" vs invoice unit "${inv.unit}"`,
-            }),
-          );
-        } else {
-          invQty = inv.qtyBilled * factor;
-          invPrice = inv.unitPriceBilled / factor;
-        }
+      // 5c. Unit mismatch — only when no conversion exists (see normalization above).
+      if (unitFactor === null) {
+        out.push(
+          discrepancy('UNIT_MISMATCH', 'warn', {
+            productId: po.productId,
+            poLineId: po.id,
+            invoiceLineId: inv.id,
+            expected: null,
+            actual: null,
+            deltaAmount: 0,
+            toleranceUsed: 'unit must match between PO and invoice',
+            message: `PO unit "${po.unit}" vs invoice unit "${inv.unit}"`,
+          }),
+        );
       }
 
       // 5b. Billed > received: block (overcharge)
-      if (gr && invQty > gr.qtyReceived) {
-        const diff = invQty - gr.qtyReceived;
-        const effectiveTol = Math.max(
-          tolerances.qtyAbsolute,
-          gr.qtyReceived * tolerances.qtyPercent,
+      if (gr && billedNotReceived > 0) {
+        out.push(
+          discrepancy('QTY_OVER', 'block', {
+            productId: po.productId,
+            poLineId: po.id,
+            grLineId: gr.id,
+            invoiceLineId: inv.id,
+            expected: gr.qtyReceived,
+            actual: invQty,
+            deltaAmount: mulIls(invPrice, billedNotReceived),
+            toleranceUsed: 'billed quantity exceeds received quantity',
+            message: 'Invoice charges for more units than were received',
+          }),
         );
-        if (diff > effectiveTol) {
-          out.push(
-            discrepancy('QTY_OVER', 'block', {
-              productId: po.productId,
-              poLineId: po.id,
-              grLineId: gr.id,
-              invoiceLineId: inv.id,
-              expected: gr.qtyReceived,
-              actual: invQty,
-              deltaAmount: mulIls(invPrice, diff),
-              toleranceUsed: 'billed quantity exceeds received quantity',
-              message: 'Invoice charges for more units than were received',
-            }),
-          );
-        }
       }
 
       // 5d. Price comparison: PO expected vs invoice billed (unit-normalized)
@@ -307,13 +325,20 @@ export function runMatch(input: MatchInput): MatchOutput {
         }
       }
 
-      // 5e. Baseline price check (when historical data is available)
+      // 5e. Baseline price check (when historical data is available).
+      // Skipped when the PO price check already fired PRICE_HIGHER on this line
+      // (the same overcharge must not be counted twice — M3) and when units
+      // can't be normalized (a per-g price vs a per-kg baseline is meaningless).
+      // Uses the unit-normalized price/qty so kg↔g invoices compare correctly.
+      const poPriceFlagged = out.some(
+        (d) => d.type === 'PRICE_HIGHER' && d.invoiceLineId === inv.id && d.poLineId === po.id,
+      );
       const baseline = po.productId ? input.baselines?.[po.productId] : undefined;
-      if (baseline) {
+      if (baseline && !poPriceFlagged && unitFactor !== null) {
         const baselineDiscrepancy = evaluateBaseline(
           po.unitPriceExpected,
-          inv.unitPriceBilled,
-          inv.qtyBilled,
+          invPrice,
+          invQty,
           baseline,
           tolerances,
         );

@@ -7,14 +7,36 @@ import {
   discrepancies,
   eq,
   inArray,
+  invoices,
   lt,
   matchRuns,
+  products,
+  suppliers,
   type UserRole,
 } from '@restomatch/db';
-import { authedProcedure, managerProcedure, memberProcedure, router } from '../trpc';
+import { authedProcedure, memberProcedure, router } from '../trpc';
 import { logActivity } from '../activity';
 
 const ResolutionEnum = z.enum(['accepted', 'rejected', 'escalated']);
+
+/**
+ * Who may decide a discrepancy at all. The approval engine routes
+ * DUPLICATE_INVOICE to the bookkeeper (the person who would pay it twice), but
+ * approve/reject/escalate used to be manager-only — so the bookkeeper got the
+ * notification and could not act, and a manager could not even see the item
+ * (role deadlock, W2). The bookkeeper may now act on bookkeeper-routed items
+ * only; `ensureCanAct` still enforces the per-discrepancy `requires_role`.
+ */
+const DECIDER_ROLES: ReadonlyArray<UserRole> = ['owner', 'manager', 'bookkeeper'];
+const deciderProcedure = memberProcedure.use(({ ctx, next }) => {
+  if (!DECIDER_ROLES.includes(ctx.session.role)) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: `Required role: ${DECIDER_ROLES.join('|')}, got: ${ctx.session.role}`,
+    });
+  }
+  return next();
+});
 
 const ApprovalQueueItemSchema = z.object({
   id: z.string().uuid(),
@@ -64,6 +86,14 @@ export const approvalsRouter = router({
           actualValue: discrepancies.actualValue,
           toleranceUsed: discrepancies.toleranceUsed,
           ruleName: discrepancies.ruleName,
+          // Stable rule id → the UI translates the routing reason (ruleName is
+          // stored in Hebrew with thresholds baked in).
+          ruleId: discrepancies.ruleId,
+          productName: products.canonicalName,
+          productNameEn: products.nameEn,
+          supplierName: suppliers.name,
+          supplierNameEn: suppliers.nameEn,
+          invoiceNumber: invoices.invoiceNumber,
           message: discrepancies.resolutionNote, // reuse field for now
           createdAt: discrepancies.createdAt,
           matchRunId: discrepancies.matchRunId,
@@ -72,6 +102,18 @@ export const approvalsRouter = router({
         })
         .from(discrepancies)
         .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+        .leftJoin(
+          products,
+          and(eq(products.id, discrepancies.productId), eq(products.restaurantId, ctx.session.restaurantId)),
+        )
+        .leftJoin(
+          invoices,
+          and(eq(invoices.id, matchRuns.invoiceId), eq(invoices.restaurantId, ctx.session.restaurantId)),
+        )
+        .leftJoin(
+          suppliers,
+          and(eq(suppliers.id, invoices.supplierId), eq(suppliers.restaurantId, ctx.session.restaurantId)),
+        )
         .where(
           and(
             eq(discrepancies.restaurantId, ctx.session.restaurantId),
@@ -85,7 +127,7 @@ export const approvalsRouter = router({
       return rows;
     }),
 
-  approve: managerProcedure
+  approve: deciderProcedure
     .input(z.object({ discrepancyId: z.string().uuid(), note: z.string().max(500).optional() }))
     .mutation(async ({ ctx, input }) => {
       await ensureCanAct(ctx, input.discrepancyId);
@@ -128,7 +170,7 @@ export const approvalsRouter = router({
       return updated;
     }),
 
-  reject: managerProcedure
+  reject: deciderProcedure
     .input(
       z.object({
         discrepancyId: z.string().uuid(),
@@ -174,7 +216,7 @@ export const approvalsRouter = router({
       return updated;
     }),
 
-  escalate: managerProcedure
+  escalate: deciderProcedure
     .input(z.object({ discrepancyId: z.string().uuid(), note: z.string().max(500).optional() }))
     .mutation(async ({ ctx, input }) => {
       await ensureCanAct(ctx, input.discrepancyId);
@@ -252,7 +294,15 @@ async function ensureCanAct(
     )
     .limit(1);
   if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'discrepancy not found' });
-  if (!row.requiredRole) return; // no required role → anyone can resolve
+  // No required role → owner/manager may resolve (not a bookkeeper, whose
+  // authority is limited to bookkeeper-routed items).
+  if (!row.requiredRole) {
+    if (ctx.session.role === 'owner' || ctx.session.role === 'manager') return;
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: `role ${ctx.session.role} cannot act on an unrouted discrepancy`,
+    });
+  }
   const allowed = expandVisibleRoles(ctx.session.role);
   if (!allowed.includes(row.requiredRole)) {
     throw new TRPCError({

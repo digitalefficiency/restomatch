@@ -148,7 +148,8 @@ export async function importPurchaseOrder(
 
   // restaurantId in the lookup is load-bearing: source_ref is only unique per
   // platform account, so two restaurants importing the same Zestt order id must
-  // not collide. (po_source_ref_unique is the DB backstop.)
+  // not collide. (po_restaurant_source_ref_unique — per restaurant since 0029 —
+  // is the DB backstop.)
   const [existing] = await db
     .select({ id: purchaseOrders.id })
     .from(purchaseOrders)
@@ -222,9 +223,9 @@ export async function importPurchaseOrder(
 /**
  * Resolve a supplier by restaurant-scoped name, or create one. A Zestt PDF has
  * no stable platform supplier id, so we key on the name within the tenant. New
- * suppliers get external_ref = `${restaurantId}::${name}` to stay unique under
- * the GLOBAL suppliers_external_ref_unique(source_platform, external_ref) index
- * without colliding across tenants.
+ * suppliers get external_ref = `${restaurantId}::${name}`. The prefix predates
+ * 0029 (when suppliers_external_ref_unique was GLOBAL); the index is now
+ * per restaurant, and the prefix is kept so existing rows keep matching.
  */
 async function resolveSupplier(
   db: Database,

@@ -6,8 +6,10 @@
  *
  * Used by:
  *   - /scans/[invoiceId] page route — the standalone "scanned document"
- *     URL referenced by invoices.raw_image_url. Loaded via iframe from
- *     the scan / compare viewers.
+ *     URL referenced by invoices.raw_image_url (tenant-private).
+ *   - the showcase scan / compare viewers, inline (the public demo can't
+ *     load /scans). It is a Hebrew supplier document in every UI locale —
+ *     callers wrap it in dir="rtl" lang="he".
  *
  * Pure render — no client hooks. Safe from server components.
  */
