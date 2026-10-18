@@ -13,6 +13,7 @@ import {
   supplierContractPrices,
   suppliers,
   testDbUrl,
+  type RestaurantSettings,
 } from '@restomatch/db';
 import { runMatch } from '@restomatch/matching';
 import { appRouter } from '../index';
@@ -214,7 +215,7 @@ function caller(t: Tenant, role: Session['role'] = 'owner') {
 async function setFeatures(t: Tenant, features: Record<string, boolean> | null) {
   await db
     .update(restaurants)
-    .set({ settings: features ? { features } : {} })
+    .set({ settings: (features ? { features } : {}) as RestaurantSettings })
     .where(eq(restaurants.id, t.restaurantId));
 }
 

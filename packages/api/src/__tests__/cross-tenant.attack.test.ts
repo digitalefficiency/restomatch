@@ -24,6 +24,7 @@ import {
   supplierCatalogItems,
   supplierContractPrices,
   suppliers,
+  type RestaurantSettings,
 } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
@@ -1441,7 +1442,7 @@ describe('wave 1 (S11): contracts + priceAlerts — foreign ids and isolation', 
 
   beforeAll(async () => {
     for (const t of [A, B]) {
-      await db.update(restaurants).set({ settings: { features: { contracts: true, priceAlerts: true } } }).where(eq(restaurants.id, t.restaurantId));
+      await db.update(restaurants).set({ settings: { features: { contracts: true, priceAlerts: true } } as RestaurantSettings }).where(eq(restaurants.id, t.restaurantId));
     }
     const mk = async (t: Tenant, price: string) => {
       const [c] = await db
@@ -1573,7 +1574,7 @@ describe('wave 1 (S11): contracts + priceAlerts — foreign ids and isolation', 
       await expect(callerFor(A).contracts.list()).rejects.toMatchObject({ code: 'FORBIDDEN' });
       await expect(callerFor(A).priceAlerts.openCount()).rejects.toMatchObject({ code: 'FORBIDDEN' });
     } finally {
-      await db.update(restaurants).set({ settings: { features: { contracts: true, priceAlerts: true } } }).where(eq(restaurants.id, A.restaurantId));
+      await db.update(restaurants).set({ settings: { features: { contracts: true, priceAlerts: true } } as RestaurantSettings }).where(eq(restaurants.id, A.restaurantId));
     }
   });
 });
