@@ -187,6 +187,7 @@ jobs:
         run: |
           E2E_DATABASE_URL="$SMOKE_DB" pnpm --filter @restomatch/db exec tsx "$GITHUB_WORKSPACE/apps/web/e2e/prepare-db.ts"
           DATABASE_URL="$SMOKE_DB" RESEND_API_KEY=re_local_sink EMAIL_FROM=ci@example.invalid PORT=8090 \
+            HEALTH_DIGEST_EMAILS=ops@example.invalid \
             NODE_OPTIONS="--import $GITHUB_WORKSPACE/apps/worker/scripts/local-email-sink.mjs" \
             pnpm --filter @restomatch/worker start > /tmp/worker.log 2>&1 &
           timeout 90 bash -c 'until curl -sf localhost:8090/health/ready >/dev/null; do sleep 1; done' || { cat /tmp/worker.log; exit 1; }
