@@ -213,3 +213,4 @@ export {
   type AskBurstLimiter,
   type AskResult,
 } from './ask';
+export { NOT_BILLING_OWNER } from './routers/chain';

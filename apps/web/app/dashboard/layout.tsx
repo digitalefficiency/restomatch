@@ -59,13 +59,21 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const email = session.user.email ?? '';
   // Branches (S8): the switcher lists every membership; the chain tab is for
   // owners who run more than one branch (the chain router re-checks in the DB).
+  // Same rule as the chain router (owner branches on the ACTIVE billing account):
+  // ask it only when the user owns more than one restaurant at all.
   const ownedCount = memberships.filter((m) => m.role === 'owner').length;
-  const showChain = active.role === 'owner' && ownedCount > 1;
-  const switcherBranches = memberships.map((m) => ({
-    restaurantId: m.restaurantId,
-    restaurantName: m.restaurantName,
-    role: m.role,
-  }));
+  let showChain = false;
+  if (active.role === 'owner' && ownedCount > 1) {
+    showChain = await caller.chain
+      .branches()
+      .then((b) => b.chainEnabled && b.branches.length > 1)
+      .catch(() => false);
+  }
+  // Stable order in the switcher (the membership query has none): by name, so
+  // "כפר הזיתים" comes before "כפר הזיתים — חיפה".
+  const switcherBranches = memberships
+    .map((m) => ({ restaurantId: m.restaurantId, restaurantName: m.restaurantName, role: m.role }))
+    .sort((a, b) => a.restaurantName.localeCompare(b.restaurantName, 'he') || a.restaurantId.localeCompare(b.restaurantId));
 
   async function logout() {
     'use server';
