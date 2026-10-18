@@ -41,9 +41,13 @@ export function ChainPricing({ chain, perBranchAgorot, includedBranches, basic, 
   const locale = useLocale();
   const ids = { cycle: useId(), branches: useId() };
   const [cycle, setCycle] = useState<'monthly' | 'annual'>('monthly');
-  const [branches, setBranches] = useState(Math.min(3, chain.length));
+  const [branches, setBranches] = useState(Math.min(includedBranches, chain.length));
   const row = chain[branches - 1] ?? chain[0]!;
   const q = cycle === 'annual' ? row.annual : row.monthly;
+  // What THIS chain pays per branch (display only, half-up to the agora) — the
+  // ₪298 list price is only reached at the included branch count, so never
+  // show it as the per-branch price of a smaller chain.
+  const effectivePerBranchAgorot = Math.round(q.perMonthDisplayAgorot / branches);
   const branchesText = branches === 1 ? t('pricing.branchOne') : t('pricing.branchesValue', { n: formatNumber(branches, locale) });
 
   return (
@@ -124,7 +128,7 @@ export function ChainPricing({ chain, perBranchAgorot, includedBranches, basic, 
             </p>
           ) : null}
           <p className="mt-3 text-sm text-muted">
-            <span data-testid="per-branch" className="font-semibold text-ink">{t('pricing.perBranch', { price: ils(perBranchAgorot, locale) })}</span>
+            <span data-testid="per-branch" className="font-semibold text-ink">{t('pricing.perBranch', { price: ils(effectivePerBranchAgorot, locale) })}</span>
             {' · '}
             {t('pricing.chainIncluded', { n: formatNumber(includedBranches, locale), price: ils(perBranchAgorot, locale) })}
           </p>
