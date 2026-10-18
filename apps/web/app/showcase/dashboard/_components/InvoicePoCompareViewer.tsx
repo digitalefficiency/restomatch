@@ -1,0 +1,802 @@
+'use client';
+
+/**
+ * Side-by-side comparison of the original Purchase Order document and the
+ * invoice scan from the supplier. Each line is highlighted with a matching
+ * coloured ring on both sides so the owner can eyeball "this is what I
+ * ordered, this is what they billed me".
+ *
+ * Both papers are rendered as styled HTML+CSS (not real PDFs) so they
+ * remain crisp at any zoom and respond to dark/light backgrounds.
+ */
+
+import { useGSAP } from '@gsap/react';
+import { gsap } from 'gsap';
+import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  Check,
+  ClipboardList,
+  Download,
+  FileText,
+  Sparkles,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocale, useT } from '@/lib/i18n/client';
+import type { Locale } from '@/lib/i18n/config';
+import { showcase } from '@/lib/i18n/messages/showcase';
+import { formatIls } from '@/lib/money';
+import { localDate } from '../../_lib/time';
+import { mockText } from '../../_lib/mockText';
+import { InvoicePaper } from './InvoicePaperShared';
+import type { ScanData } from './InvoiceScanViewer';
+
+export interface CompareLine {
+  productName: string;
+  unit: string;
+  poQty: number | null;
+  poUnitPrice: number | null;
+  invoiceQty: number | null;
+  invoiceUnitPrice: number | null;
+  status:
+    | 'matched'
+    | 'qty_short'
+    | 'qty_over'
+    | 'price_higher'
+    | 'price_lower'
+    | 'unordered'
+    | 'missing_from_invoice';
+  variance: number;
+  note?: string;
+}
+
+export interface CompareData {
+  supplierName: string;
+  supplierInitials: string;
+  supplierBusinessId: string;
+  supplierColor: string;
+  customerName: string;
+  customerBusinessId: string;
+
+  poNumber: string;
+  poIssuedAt: string;
+  poExpectedAt: string;
+  poApprovedBy: string;
+
+  invoiceNumber: string;
+  invoiceDate: string;
+  ocrConfidence: number;
+  /** Database-backed URL of the original scanned invoice (tenant-private). */
+  rawImageUrl: string;
+}
+
+interface Props {
+  data: CompareData;
+  lines: CompareLine[];
+  /**
+   * The supplier's paper, rendered inline. Preferred over `data.rawImageUrl`:
+   * /scans/[id] requires a signed-in tenant, so it can't load in the public demo.
+   */
+  invoiceScan?: ScanData;
+  onClose: () => void;
+}
+
+type LineKey = string;
+
+function lineKey(line: CompareLine, idx: number): LineKey {
+  return `${line.productName}-${idx}`;
+}
+
+export function InvoicePoCompareViewer({ data, lines, invoiceScan, onClose }: Props) {
+  const t = useT(showcase);
+  const locale = useLocale();
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const [zoom, setZoom] = useState(0.72);
+
+  // Fit the papers on small screens.
+  useEffect(() => {
+    if (window.innerWidth < 768) setZoom(Math.max(0.4, (window.innerWidth - 32) / 580));
+  }, []);
+  const [focusKey, setFocusKey] = useState<LineKey | null>(null);
+
+  useGSAP(
+    () => {
+      gsap.fromTo(overlayRef.current, { opacity: 0 }, { opacity: 1, duration: 0.2 });
+      gsap.fromTo(
+        sheetRef.current,
+        { y: 24, opacity: 0, scale: 0.98 },
+        { y: 0, opacity: 1, scale: 1, duration: 0.4, ease: 'power3.out' },
+      );
+    },
+    { dependencies: [data.invoiceNumber] },
+  );
+
+  // Body scroll lock + ESC + zoom shortcuts
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+      if (e.key === '+' || e.key === '=') setZoom((z) => Math.min(1.4, z + 0.1));
+      if (e.key === '-') setZoom((z) => Math.max(0.4, z - 0.1));
+    };
+    document.addEventListener('keydown', handler);
+    return () => {
+      document.body.style.overflow = prev;
+      document.removeEventListener('keydown', handler);
+    };
+  }, [onClose]);
+
+  const stats = useMemo(() => computeStats(lines), [lines]);
+
+  const issueLines = lines.filter((l) => l.status !== 'matched');
+
+  return (
+    <div
+      ref={overlayRef}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClose();
+      }}
+      className="fixed inset-0 z-[60] bg-black/75 backdrop-blur-md flex items-stretch justify-center p-2 sm:p-4"
+    >
+      <div
+        ref={sheetRef}
+        onClick={(e) => e.stopPropagation()}
+        className="bg-surface border border-line rounded-2xl shadow-card w-full max-w-[1400px] max-h-[96vh] flex flex-col overflow-hidden"
+      >
+        {/* Toolbar */}
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b border-line bg-surface-2">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-primary/12 border border-primary/25 flex items-center justify-center shrink-0">
+              <ClipboardList className="w-5 h-5 text-primary" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm font-bold text-ink flex items-center gap-2 flex-wrap">
+                <span>{t('compare.title')}</span>
+                <span className="font-mono tabular-nums text-muted">{data.poNumber}</span>
+                <span className="text-muted">↔</span>
+                <span className="font-mono tabular-nums text-muted">{data.invoiceNumber}</span>
+              </div>
+              <div className="text-xs text-muted flex items-center gap-2 flex-wrap">
+                <span>{mockText(data.supplierName, locale)}</span>
+                <span className="text-muted">·</span>
+                <DiffStatBadge stats={stats} />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setZoom((z) => Math.max(0.4, z - 0.1))}
+              className="w-8 h-8 rounded-lg bg-surface border border-line hover:border-primary/40 flex items-center justify-center"
+              title={t('common.zoomOut')}
+              aria-label={t('common.zoomOut')}
+            >
+              <ZoomOut className="w-4 h-4 text-muted" />
+            </button>
+            <span className="text-xs font-mono tabular-nums text-muted w-10 text-center">
+              {Math.round(zoom * 100)}%
+            </span>
+            <button
+              type="button"
+              onClick={() => setZoom((z) => Math.min(1.4, z + 0.1))}
+              className="w-8 h-8 rounded-lg bg-surface border border-line hover:border-primary/40 flex items-center justify-center"
+              title={t('common.zoomIn')}
+              aria-label={t('common.zoomIn')}
+            >
+              <ZoomIn className="w-4 h-4 text-muted" />
+            </button>
+            <div className="w-px h-6 bg-line mx-1" />
+            <button
+              type="button"
+              className="inline-flex items-center gap-1.5 px-3 h-8 rounded-lg bg-surface border border-line hover:border-primary/40 hover:text-primary text-xs font-medium text-ink"
+              title={t('compare.downloadTitle')}
+            >
+              <Download className="w-3.5 h-3.5" />
+              {t('common.download')}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-8 h-8 rounded-full bg-surface-2 hover:bg-line flex items-center justify-center"
+              title={t('common.close')}
+              aria-label={t('common.close')}
+            >
+              <X className="w-4 h-4 text-muted" />
+            </button>
+          </div>
+        </div>
+
+        {/* Body: 2 papers + diff panel */}
+        <div className="flex-1 min-h-0 flex">
+          {/* Diff panel */}
+          <aside className="w-80 shrink-0 border-e border-line bg-surface overflow-y-auto hidden xl:flex flex-col">
+            <div className="px-5 py-4 border-b border-line">
+              <div className="text-xs uppercase tracking-wider text-muted font-semibold mb-1">
+                {t('compare.analysis')}
+              </div>
+              <div className="text-xs text-muted">{t('compare.analysisHint')}</div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-3 py-3 space-y-1.5">
+              {lines.map((line, i) => {
+                const key = lineKey(line, i);
+                const accent = statusAccent(line.status);
+                const isFocus = focusKey === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setFocusKey(isFocus ? null : key)}
+                    className={`w-full text-start rounded-xl border px-3 py-2.5 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
+                      isFocus
+                        ? `${accent.borderStrong} ${accent.bgStrong}`
+                        : `border-line bg-surface-2 hover:border-primary/40`
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <span className="text-xs font-semibold text-ink truncate">
+                        {mockText(line.productName, locale)}
+                      </span>
+                      <span
+                        className={`shrink-0 inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${accent.tint}`}
+                      >
+                        {accent.icon}
+                        <span>{t(accent.labelKey)}</span>
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1 text-[11px]">
+                      <DiffCell
+                        label={t('compare.order')}
+                        missingLabel={t('compare.missing')}
+                        qty={line.poQty}
+                        price={line.poUnitPrice}
+                        unit={mockText(line.unit, locale)}
+                      />
+                      <DiffCell
+                        label={t('compare.invoice')}
+                        missingLabel={t('compare.missing')}
+                        qty={line.invoiceQty}
+                        price={line.invoiceUnitPrice}
+                        unit={mockText(line.unit, locale)}
+                        emphasize={line.status !== 'matched'}
+                      />
+                    </div>
+                    {line.variance > 0 ? (
+                      <div className="mt-1.5 flex items-center justify-between text-[10px]">
+                        <span className="text-muted">{t('compare.potentialLoss')}</span>
+                        <span className="font-bold text-danger font-mono tabular-nums">
+                          ₪{line.variance.toFixed(2)}
+                        </span>
+                      </div>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Footer summary */}
+            <div className="border-t border-line px-5 py-4 bg-surface-2 space-y-2">
+              <SummaryRow label={t('compare.totalOrdered')} value={stats.totalPoIls} tone="slate" locale={locale} />
+              <SummaryRow label={t('compare.totalBilled')} value={stats.totalInvoiceIls} tone="slate" locale={locale} />
+              <div className="border-t border-line pt-2 flex items-baseline justify-between">
+                <span className="text-xs font-semibold text-ink">{t('compare.netDiff')}</span>
+                <span
+                  className={`text-sm font-bold font-mono tabular-nums ${
+                    stats.delta > 0 ? 'text-danger' : stats.delta < 0 ? 'text-primary' : 'text-muted'
+                  }`}
+                >
+                  {stats.delta > 0 ? '+' : stats.delta < 0 ? '−' : ''}
+                  {formatIls(Math.abs(stats.delta), { locale, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+              {issueLines.length > 0 ? (
+                <div className="text-[11px] text-warn bg-warn/8 border border-warn/25 rounded-lg px-2.5 py-1.5 flex items-start gap-1.5">
+                  <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+                  <span>
+                    {t('compare.toReview', { count: issueLines.length, adjusted: stats.adjustedCount })}
+                  </span>
+                </div>
+              ) : (
+                <div className="text-[11px] text-primary bg-primary/8 border border-primary/25 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+                  <Check className="w-3 h-3" strokeWidth={3} />
+                  <span>{t('compare.allMatched')}</span>
+                </div>
+              )}
+            </div>
+          </aside>
+
+          {/* Papers canvas */}
+          <div
+            className="flex-1 overflow-auto bg-bg p-4 sm:p-8"
+            style={{
+              backgroundImage:
+                'radial-gradient(circle at 1px 1px, rgba(42,58,49,0.5) 1px, transparent 0)',
+              backgroundSize: '24px 24px',
+            }}
+          >
+            {/* CSS `zoom` (not transform) so the scroll area follows the size. */}
+            <div
+              className="mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8"
+              style={{ zoom, width: 'fit-content' }}
+            >
+              {/* PO paper — first in reading order (it came first). */}
+              <div className="order-1">
+                <PaperLabel
+                  icon={<ClipboardList className="w-4 h-4" />}
+                  label={t('compare.poLabel')}
+                  sub={t('compare.poSub', { number: data.poNumber, date: localDate(data.poIssuedAt) })}
+                  tone="blue"
+                />
+                <PoPaper data={data} lines={lines} focusKey={focusKey} locale={locale} />
+              </div>
+
+              {/* Invoice paper — the supplier's Hebrew document, rendered inline
+                  at 75% (the stored /scans/[id] URL is tenant-private). */}
+              <div className="order-2">
+                <PaperLabel
+                  icon={<FileText className="w-4 h-4" />}
+                  label={t('compare.invoiceLabel')}
+                  sub={t('compare.invoiceSub', {
+                    number: data.invoiceNumber,
+                    date: localDate(data.invoiceDate),
+                  })}
+                  tone="amber"
+                />
+                <div
+                  className="bg-surface-2 rounded-md shadow-[0_16px_44px_-16px_rgba(0,0,0,0.6)] overflow-hidden"
+                  style={{ width: 540, height: 765 }}
+                >
+                  {invoiceScan ? (
+                    <div dir="rtl" lang="he" style={{ zoom: 0.75 }}>
+                      <InvoicePaper data={invoiceScan} />
+                    </div>
+                  ) : (
+                    <iframe
+                      key={data.rawImageUrl}
+                      src={data.rawImageUrl}
+                      title={data.invoiceNumber}
+                      className="border-0"
+                      style={{ zoom: 0.75, width: 720, height: 1020 }}
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PO Paper (clean, digital, restaurant-issued)
+// ---------------------------------------------------------------------------
+
+function PoPaper({
+  data,
+  lines,
+  focusKey,
+  locale,
+}: {
+  data: CompareData;
+  lines: CompareLine[];
+  focusKey: LineKey | null;
+  locale: Locale;
+}) {
+  const t = useT(showcase);
+  const money = (v: number) => formatIls(v, { locale, maximumFractionDigits: 2 });
+  const poLines = lines
+    .map((l, i) => ({ ...l, idx: i }))
+    .filter((l) => l.poQty !== null);
+  const subtotal = poLines.reduce(
+    (s, l) => s + (l.poQty ?? 0) * (l.poUnitPrice ?? 0),
+    0,
+  );
+  const vat = subtotal * 0.17;
+  const total = subtotal + vat;
+
+  return (
+    <div
+      className="relative bg-white shadow-[0_12px_36px_-12px_rgba(15,23,42,0.18),0_2px_8px_rgba(15,23,42,0.06)] rounded-md"
+      style={{
+        width: 540,
+        minHeight: 760,
+        fontFamily: '"Heebo", system-ui, sans-serif',
+      }}
+    >
+      {/* Restaurant header band */}
+      <div className="rounded-t-md bg-gradient-to-l from-stone-900 to-teal-900 px-6 py-4 flex items-center justify-between text-white">
+        <div>
+          <div className="text-xl font-extrabold tracking-tight">{mockText(data.customerName, locale)}</div>
+          <div className="text-[11px] opacity-80 mt-0.5">
+            {t('compare.po.companyNo', { id: data.customerBusinessId })} · {t('compare.po.address')}
+          </div>
+        </div>
+        <div className="w-12 h-12 rounded-lg bg-white/15 border border-white/25 flex items-center justify-center font-bold">
+          {t('compare.po.monogram')}
+        </div>
+      </div>
+
+      <div className="px-6 pt-5 pb-8 text-stone-900">
+        {/* Title row */}
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-2xl font-bold tracking-tight text-stone-900">{t('compare.po.title')}</h2>
+          <div className="text-end text-xs space-y-0.5">
+            <div className="flex items-baseline gap-2 justify-end">
+              <span className="text-stone-500">{t('compare.po.number')}</span>
+              <span className="font-mono font-bold tabular-nums">{data.poNumber}</span>
+            </div>
+            <div className="flex items-baseline gap-2 justify-end">
+              <span className="text-stone-500">{t('compare.po.sent')}</span>
+              <span className="tabular-nums">{localDate(data.poIssuedAt)}</span>
+            </div>
+            <div className="flex items-baseline gap-2 justify-end">
+              <span className="text-stone-500">{t('compare.po.expected')}</span>
+              <span className="tabular-nums font-medium">{localDate(data.poExpectedAt)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Supplier block */}
+        <div className="bg-stone-50 rounded-lg px-4 py-2.5 mb-5 border border-stone-200/70 text-xs">
+          <div className="uppercase tracking-wider text-stone-500 font-semibold mb-1 text-[10px]">
+            {t('compare.po.to')}
+          </div>
+          <div className="font-bold text-sm">{mockText(data.supplierName, locale)}</div>
+          <div className="text-stone-500 mt-0.5">
+            {t('compare.po.companyNo', { id: data.supplierBusinessId })}
+          </div>
+        </div>
+
+        {/* Lines */}
+        <div className="overflow-hidden border border-stone-200 rounded-lg mb-5">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-stone-100/70 text-stone-700">
+                <th className="px-2 py-2 text-start font-semibold text-[10px] uppercase tracking-wider w-8">
+                  #
+                </th>
+                <th className="px-2 py-2 text-start font-semibold text-[10px] uppercase tracking-wider">
+                  {t('compare.po.item')}
+                </th>
+                <th className="px-2 py-2 text-start font-semibold text-[10px] uppercase tracking-wider tabular-nums">
+                  {t('compare.po.qty')}
+                </th>
+                <th className="px-2 py-2 text-start font-semibold text-[10px] uppercase tracking-wider tabular-nums">
+                  {t('compare.po.price')}
+                </th>
+                <th className="px-2 py-2 text-start font-semibold text-[10px] uppercase tracking-wider tabular-nums">
+                  {t('compare.po.total')}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {poLines.map((line) => {
+                const key = lineKey(line, line.idx);
+                const focused = focusKey === key;
+                const accent = statusAccent(line.status);
+                const lineTotal = (line.poQty ?? 0) * (line.poUnitPrice ?? 0);
+                return (
+                  <tr
+                    key={key}
+                    className={`border-t border-stone-100 transition-all ${
+                      focused
+                        ? `${accent.bgStrong} ring-2 ring-inset ${accent.ring}`
+                        : line.idx % 2 === 0
+                          ? 'bg-white'
+                          : 'bg-stone-50/40'
+                    }`}
+                  >
+                    <td className="px-2 py-2 text-stone-500 tabular-nums">{line.idx + 1}</td>
+                    <td className="px-2 py-2 font-medium">{mockText(line.productName, locale)}</td>
+                    <td className="px-2 py-2 tabular-nums">
+                      <DiffMark on={line.status === 'qty_short' || line.status === 'qty_over'} tone="amber">
+                        {line.poQty} {mockText(line.unit, locale)}
+                      </DiffMark>
+                    </td>
+                    <td className="px-2 py-2 tabular-nums">
+                      <DiffMark
+                        on={line.status === 'price_higher' || line.status === 'price_lower'}
+                        tone={line.status === 'price_lower' ? 'emerald' : 'red'}
+                      >
+                        ₪{line.poUnitPrice?.toFixed(2)}
+                      </DiffMark>
+                    </td>
+                    <td className="px-2 py-2 tabular-nums font-semibold">
+                      ₪{lineTotal.toFixed(2)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Totals */}
+        <div className="flex rtl:justify-start ltr:justify-end">
+          <div className="w-56 space-y-1 text-xs">
+            <PaperTotalRow label={t('compare.po.subtotal')} value={money(subtotal)} />
+            <PaperTotalRow label={t('compare.po.vat')} value={money(vat)} />
+            <div className="border-t-2 border-stone-300 my-1" />
+            <div className="flex items-baseline justify-between bg-teal-900 text-white px-3 py-2 rounded-md">
+              <span className="text-[10px] uppercase tracking-wider opacity-80">
+                {t('compare.po.orderTotal')}
+              </span>
+              <span className="font-bold tabular-nums">{money(total)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="mt-8 border-t border-dashed border-stone-300 pt-3 text-[11px] text-stone-500 flex items-end justify-between">
+          <div>
+            <div>{t('compare.po.approvedBy', { name: mockText(data.poApprovedBy, locale) })}</div>
+            <div className="mt-0.5">{t('compare.po.terms')}</div>
+          </div>
+          <div
+            className="px-3 py-1.5 rounded border-2 border-teal-700 text-teal-700 font-bold text-xs"
+            style={{ transform: 'rotate(-3deg)' }}
+          >
+            {t('compare.po.emailed')}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Subcomponents
+// ---------------------------------------------------------------------------
+
+function DiffMark({
+  children,
+  on,
+  tone,
+}: {
+  children: React.ReactNode;
+  on: boolean;
+  tone: 'red' | 'amber' | 'emerald';
+}) {
+  if (!on) return <>{children}</>;
+  const map = {
+    red: 'bg-red-100/80 text-red-700 ring-1 ring-red-300',
+    amber: 'bg-amber-100/80 text-amber-800 ring-1 ring-amber-300',
+    emerald: 'bg-emerald-100/80 text-emerald-700 ring-1 ring-emerald-300',
+  };
+  return <span className={`inline-block px-1 rounded font-semibold ${map[tone]}`}>{children}</span>;
+}
+
+function PaperLabel({
+  icon,
+  label,
+  sub,
+  tone,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  sub: string;
+  tone: 'blue' | 'amber';
+}) {
+  const map = {
+    blue: 'bg-info/12 border-info/25 text-info',
+    amber: 'bg-warn/12 border-warn/25 text-warn',
+  };
+  return (
+    <div className="flex items-center gap-2 mb-3 w-fit mx-auto">
+      <div
+        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold ${map[tone]}`}
+      >
+        {icon}
+        <span>{label}</span>
+      </div>
+      <span className="text-[11px] text-muted">{sub}</span>
+    </div>
+  );
+}
+
+function PaperTotalRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between">
+      <span className="text-stone-600">{label}</span>
+      <span className="font-medium tabular-nums">{value}</span>
+    </div>
+  );
+}
+
+function DiffCell({
+  label,
+  missingLabel,
+  qty,
+  price,
+  unit,
+  emphasize,
+}: {
+  label: string;
+  missingLabel: string;
+  qty: number | null;
+  price: number | null;
+  unit: string;
+  emphasize?: boolean;
+}) {
+  return (
+    <div className={`rounded-lg px-2 py-1.5 ${emphasize ? 'bg-warn/8 border border-warn/25' : 'bg-surface border border-line'}`}>
+      <div className="text-[9px] uppercase tracking-wider text-muted font-semibold">
+        {label}
+      </div>
+      {qty !== null ? (
+        <div className="font-bold font-mono tabular-nums text-ink">
+          {qty} <span className="text-[10px] font-normal text-muted">{unit}</span>
+        </div>
+      ) : (
+        <div className="text-muted italic text-xs">{missingLabel}</div>
+      )}
+      {price !== null && qty !== null ? (
+        <div className="text-[9px] text-muted font-mono tabular-nums">× ₪{price.toFixed(2)}</div>
+      ) : null}
+    </div>
+  );
+}
+
+function SummaryRow({
+  label,
+  value,
+  tone,
+  locale,
+}: {
+  label: string;
+  value: number;
+  tone: 'slate' | 'red' | 'emerald';
+  locale: Locale;
+}) {
+  const cls = tone === 'red' ? 'text-danger' : tone === 'emerald' ? 'text-primary' : 'text-ink';
+  return (
+    <div className="flex items-baseline justify-between">
+      <span className="text-xs text-muted">{label}</span>
+      <span className={`text-sm font-semibold font-mono tabular-nums ${cls}`}>
+        {formatIls(value, { locale, maximumFractionDigits: 2 })}
+      </span>
+    </div>
+  );
+}
+
+function DiffStatBadge({
+  stats,
+}: {
+  stats: ReturnType<typeof computeStats>;
+}) {
+  const t = useT(showcase);
+  const locale = useLocale();
+  if (stats.issueCount === 0) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full ring-1 ring-primary/25 bg-primary/12 px-2 py-0.5 text-[10px] font-semibold text-primary">
+        <Check className="w-3 h-3" strokeWidth={3} />
+        {t('compare.matchedBadge')}
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full ring-1 ring-warn/25 bg-warn/12 px-2 py-0.5 text-[10px] font-semibold text-warn">
+      <AlertTriangle className="w-3 h-3" />
+      {stats.issueCount === 1
+        ? t('common.varianceOne')
+        : t('common.varianceMany', { count: stats.issueCount })}
+      {stats.delta !== 0 ? (
+        <span className={`font-mono tabular-nums ${stats.delta > 0 ? 'text-danger' : 'text-primary'}`}>
+          · {stats.delta > 0 ? '+' : '−'}
+          {formatIls(Math.abs(stats.delta), { locale })}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Status accents + helpers
+// ---------------------------------------------------------------------------
+
+function statusAccent(status: CompareLine['status']) {
+  switch (status) {
+    case 'qty_short':
+      return {
+        labelKey: 'lineStatus.qtyShort' as const,
+        tint: 'bg-warn/12 text-warn ring-1 ring-warn/25',
+        ring: 'ring-warn/50',
+        borderStrong: 'border-warn/40',
+        bgStrong: 'bg-warn/12',
+        icon: <ArrowDown className="w-2.5 h-2.5" strokeWidth={3} />,
+      };
+    case 'qty_over':
+      return {
+        labelKey: 'lineStatus.qtyOver' as const,
+        tint: 'bg-warn/12 text-warn ring-1 ring-warn/25',
+        ring: 'ring-warn/50',
+        borderStrong: 'border-warn/40',
+        bgStrong: 'bg-warn/12',
+        icon: <ArrowUp className="w-2.5 h-2.5" strokeWidth={3} />,
+      };
+    case 'price_higher':
+      return {
+        labelKey: 'lineStatus.priceHigher' as const,
+        tint: 'bg-danger/12 text-danger ring-1 ring-danger/25',
+        ring: 'ring-danger/50',
+        borderStrong: 'border-danger/40',
+        bgStrong: 'bg-danger/12',
+        icon: <ArrowUp className="w-2.5 h-2.5" strokeWidth={3} />,
+      };
+    case 'price_lower':
+      return {
+        labelKey: 'lineStatus.priceLower' as const,
+        tint: 'bg-primary/12 text-primary ring-1 ring-primary/25',
+        ring: 'ring-primary/50',
+        borderStrong: 'border-primary/40',
+        bgStrong: 'bg-primary/12',
+        icon: <ArrowDown className="w-2.5 h-2.5" strokeWidth={3} />,
+      };
+    case 'unordered':
+      return {
+        labelKey: 'lineStatus.unordered' as const,
+        tint: 'bg-danger/12 text-danger ring-1 ring-danger/25',
+        ring: 'ring-danger/50',
+        borderStrong: 'border-danger/40',
+        bgStrong: 'bg-danger/12',
+        icon: <Sparkles className="w-2.5 h-2.5" />,
+      };
+    case 'missing_from_invoice':
+      return {
+        labelKey: 'lineStatus.missing' as const,
+        tint: 'bg-surface-2 text-muted ring-1 ring-line',
+        ring: 'ring-line',
+        borderStrong: 'border-line',
+        bgStrong: 'bg-surface-2',
+        icon: <X className="w-2.5 h-2.5" strokeWidth={3} />,
+      };
+    default:
+      return {
+        labelKey: 'lineStatus.matched' as const,
+        tint: 'bg-primary/12 text-primary ring-1 ring-primary/25',
+        ring: 'ring-primary/50',
+        borderStrong: 'border-primary/40',
+        bgStrong: 'bg-primary/12',
+        icon: <Check className="w-2.5 h-2.5" strokeWidth={3} />,
+      };
+  }
+}
+
+function computeStats(lines: CompareLine[]) {
+  let totalPoIls = 0;
+  let totalInvoiceIls = 0;
+  let issueCount = 0;
+  let adjustedCount = 0;
+
+  for (const line of lines) {
+    if (line.poQty !== null && line.poUnitPrice !== null) {
+      totalPoIls += line.poQty * line.poUnitPrice;
+    }
+    if (line.invoiceQty !== null && line.invoiceUnitPrice !== null) {
+      totalInvoiceIls += line.invoiceQty * line.invoiceUnitPrice;
+    }
+    if (line.status !== 'matched') {
+      issueCount += 1;
+      if (line.variance > 0) adjustedCount += 1;
+    }
+  }
+
+  return {
+    totalPoIls,
+    totalInvoiceIls,
+    delta: totalInvoiceIls - totalPoIls,
+    issueCount,
+    adjustedCount,
+  };
+}
+

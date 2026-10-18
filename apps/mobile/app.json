@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "RestoMatch",
+    "slug": "restomatch",
+    "version": "0.0.1",
+    "orientation": "portrait",
+    "scheme": "restomatch",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.restomatch.app"
+    },
+    "android": {
+      "package": "com.restomatch.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0a0a0a"
+      }
+    },
+    "plugins": ["expo-router"],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

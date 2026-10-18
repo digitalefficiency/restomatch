@@ -1,0 +1,244 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1779381627120,
+      "tag": "0000_romantic_betty_brant",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1779386087981,
+      "tag": "0001_dry_sentinel",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1779388003738,
+      "tag": "0002_sturdy_puck",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1780349869309,
+      "tag": "0003_material_domino",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1780461371826,
+      "tag": "0004_slim_human_fly",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1780461711527,
+      "tag": "0005_overjoyed_meteorite",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781327871427,
+      "tag": "0006_blushing_rafael_vega",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1781384344660,
+      "tag": "0007_cooing_rumiko_fujikawa",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1781470744660,
+      "tag": "0008_search_trgm_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1781560000000,
+      "tag": "0009_phase2_supplier_catalog",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1781650000000,
+      "tag": "0010_phase0_sku_bridge",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1781660000000,
+      "tag": "0011_phase1_supplier_po_vat",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1781670000000,
+      "tag": "0012_phase2_zestt_enum",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1781680000000,
+      "tag": "0013_phase2_po_customer_buyer",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1781690000000,
+      "tag": "0014_order_schedule",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1781700000000,
+      "tag": "0015_outbox_sending_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1781710000000,
+      "tag": "0016_outbox_dedupe",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1781720000000,
+      "tag": "0017_products_supplier_fk",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1781730000000,
+      "tag": "0018_invitations",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1781740000000,
+      "tag": "0019_storage_namespaces",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1781750000000,
+      "tag": "0020_invoice_scans_restaurant_not_null",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1781760000000,
+      "tag": "0021_products_supplier_same_tenant",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1781770000000,
+      "tag": "0022_legal_compliance",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1781780000000,
+      "tag": "0023_user_credentials",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1781790000000,
+      "tag": "0024_two_factor_ticket",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1781800000000,
+      "tag": "0025_totp_last_step",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1781810000000,
+      "tag": "0026_revoke_identity_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1781820000000,
+      "tag": "0027_leak_trust",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1781830000000,
+      "tag": "0028_english_receiving",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1781840000000,
+      "tag": "0029_tenant_scoped_uniques",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1781850000000,
+      "tag": "0030_fk_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1781860000000,
+      "tag": "0031_updated_at_triggers",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1781870000000,
+      "tag": "0032_integrity_checks",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1781940000000,
+      "tag": "0039_invitation_locale",
+      "breakpoints": true
+    }
+  ]
+}

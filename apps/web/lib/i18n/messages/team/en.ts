@@ -1,0 +1,56 @@
+import type { Shape } from '../../translate';
+import type { he } from './he';
+
+export const en: Shape<typeof he> = {
+  title: 'Team',
+  subtitle: 'Invite staff, set roles and app language, and manage access to the restaurant.',
+  managerNote: 'As a manager you can see the team and set each member’s app language. Invites and roles are managed by the owner.',
+  invite: {
+    title: 'Invite a team member',
+    subtitle: 'A shift manager who receives deliveries — choose “Receiver”. A worker who doesn’t read Hebrew — choose English. We email them a link to join.',
+    email: 'Email address',
+    role: 'Role',
+    language: 'App language',
+    submit: 'Send invite',
+    sent: 'Invite sent to {email}.',
+    resent: 'Invite re-sent to {email}.',
+    revoked: 'The invite was revoked.',
+    failed: 'Sending the invite failed.',
+    resendFailed: 'Re-sending failed.',
+    revokeFailed: 'Revoking the invite failed.',
+    copyLink: 'Copy link',
+    copyLinkTitle: 'Copy the invite link (no email provider configured)',
+    rateLimited: 'Too many invites sent in the last hour. Please try again later.',
+    copied: 'Copied',
+  },
+  members: {
+    title: 'Team members',
+    you: '(you)',
+    roleFor: 'Role for {email}',
+    languageFor: 'App language for {email}',
+    remove: 'Remove {email}',
+    confirmRemove: 'Remove {email} from the team? Their access to the restaurant will be blocked.',
+    roleUpdated: 'Role updated.',
+    roleFailed: 'Updating the role failed.',
+    removed: 'Member removed from the team.',
+    removeFailed: 'Removing the member failed.',
+    localeUpdated: 'App language for {email} updated.',
+    localeFailed: 'Updating the language failed.',
+    joined: 'Joined {date}',
+  },
+  language: {
+    device: 'Follow device',
+    he: 'Hebrew',
+    en: 'English',
+  },
+  pending: {
+    title: 'Pending invites',
+    validUntil: 'Valid until {date}',
+    resend: 'Resend',
+    revoke: 'Revoke',
+  },
+  empty: {
+    title: 'No team members yet',
+    description: 'Invite your first team member above.',
+  },
+};

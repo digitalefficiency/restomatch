@@ -1,0 +1,13 @@
+import { appRouter } from './src/index.ts';
+import { readFileSync } from 'node:fs';
+const reg = Object.keys(appRouter._def.procedures).sort();
+const src = readFileSync('./src/__tests__/cross-tenant.attack.test.ts','utf8');
+const start = src.indexOf('const COVERAGE');
+const end = src.indexOf('\n};', start);
+const block = src.slice(start, end);
+const declared = [...block.matchAll(/'([a-zA-Z]+\.[a-zA-Z0-9]+)':/g)].map(m=>m[1]).sort();
+const missing = reg.filter(p=>!declared.includes(p));
+const stale = declared.filter(p=>!reg.includes(p));
+console.log('registered:', reg.length, 'declared:', declared.length);
+console.log('MISSING (registered not declared):', JSON.stringify(missing));
+console.log('STALE (declared not registered):', JSON.stringify(stale));

@@ -1,0 +1,9 @@
+.env
+.env.local
+.env.*.local
+.env.deploy.local
+.git
+node_modules
+.next
+.turbo
+.gstack

@@ -1,0 +1,41 @@
+{
+  "name": "@restomatch/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@restomatch/catalog": "workspace:*",
+    "@restomatch/db": "workspace:*",
+    "@restomatch/matching": "workspace:*",
+    "@restomatch/ocr": "workspace:*",
+    "@restomatch/procurement": "workspace:*",
+    "@restomatch/queue": "workspace:*",
+    "@restomatch/translate": "workspace:*",
+    "@restomatch/types": "workspace:*",
+    "@restomatch/charts": "workspace:*",
+    "@restomatch/observability": "workspace:*",
+    "@supabase/supabase-js": "^2.106.1",
+    "@trpc/server": "^11.0.0-rc.683",
+    "@trpc/client": "^11.0.0-rc.683",
+    "drizzle-orm": "^0.38.3",
+    "exceljs": "^4.4.0",
+    "papaparse": "^5.4.1",
+    "superjson": "^2.2.2",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/papaparse": "^5.3.14",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,41 @@
+# RestoMatch async worker — BullMQ consumers + cron (OCR, 3-way matching, the ₪
+# leak figure, cadence alerts, outbox dispatch). This process is where the core
+# value runs; without it, invoice uploads succeed but nothing is ever processed.
+#
+# The build context MUST be the repo root (the worker pulls many workspace:*
+# packages). Deploy from the repo root with:
+#
+#   fly deploy --config apps/worker/fly.toml --dockerfile apps/worker/Dockerfile .
+#
+# First-time setup:  fly launch --no-deploy --copy-config --name restomatch-worker
+# Secrets (see docs/DEPLOY_CUTOVER.md for the full list):
+#   fly secrets set DATABASE_URL=... REDIS_URL=... ANTHROPIC_API_KEY=... \
+#                   RESEND_API_KEY=... EMAIL_FROM=... APP_URL=...
+
+app = "restomatch-worker"
+primary_region = "syd"  # colocate with Supabase ap-southeast-2 (Sydney)
+
+[build]
+  dockerfile = "apps/worker/Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "8080"
+
+# Internal-only health probe. The worker is NOT a public web service — it only
+# serves /health for the platform liveness check (apps/worker/src/health.ts).
+# A failed probe restarts the machine instead of letting it run dark.
+[checks]
+  [checks.health]
+    type = "http"
+    port = 8080
+    method = "get"
+    path = "/health"
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "20s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1024mb"
+  cpus = 1

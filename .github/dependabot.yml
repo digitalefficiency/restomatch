@@ -1,0 +1,49 @@
+version: 2
+
+updates:
+  # Application/library dependencies. Dependabot detects the pnpm workspace from
+  # the root pnpm-lock.yaml and proposes updates across all workspace packages.
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Jerusalem
+    open-pull-requests-limit: 10
+    versioning-strategy: increase-if-necessary
+    labels:
+      - dependencies
+    groups:
+      # Collapse low-risk minor/patch bumps into a single PR to cut review noise.
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Majors of core framework/runtime deps are coordinated manually (they
+      # need code changes); security updates still come through regardless.
+      - dependency-name: next
+        update-types: [version-update:semver-major]
+      - dependency-name: react
+        update-types: [version-update:semver-major]
+      - dependency-name: react-dom
+        update-types: [version-update:semver-major]
+
+  # GitHub Actions — keep the SHA-pinned actions current (Dependabot updates both
+  # the pinned SHA and the trailing version comment).
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Jerusalem
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions
+    groups:
+      actions:
+        patterns:
+          - "*"

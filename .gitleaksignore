@@ -1,0 +1,4 @@
+# Reviewed false positives (fingerprint = commit:file:rule:line).
+# Both are migration file names listed in a test, and this file's own first comment — no secrets.
+c3c26ac28069f5a61c9e3d8100489ff83bb79811:packages/db/src/__tests__/user-credentials.test.ts:generic-api-key:31
+bff328f848382b4bd5cd7a971f61b3ad83074620:.gitleaksignore:generic-api-key:2

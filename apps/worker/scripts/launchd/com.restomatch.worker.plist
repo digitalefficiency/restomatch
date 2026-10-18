@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- RestoMatch pilot worker — keeps the BullMQ worker alive on the owner's Mac.
+       Install (one time):
+         cp apps/worker/scripts/launchd/com.restomatch.worker.plist ~/Library/LaunchAgents/
+         sed -i '' "s|__REPO__|$HOME/restomatch|g" ~/Library/LaunchAgents/com.restomatch.worker.plist
+         launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.restomatch.worker.plist
+       Status / logs:
+         launchctl print gui/$(id -u)/com.restomatch.worker | head -20
+         tail -f ~/Library/Logs/restomatch-worker.log
+       Stop / restart:
+         launchctl bootout gui/$(id -u)/com.restomatch.worker
+         launchctl kickstart -k gui/$(id -u)/com.restomatch.worker
+       Note: launchd cannot wake a sleeping laptop. Keep the Mac awake
+       (System Settings → Energy, or `caffeinate -s`) or accept the heartbeat alert. -->
+  <key>Label</key>
+  <string>com.restomatch.worker</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__REPO__/apps/worker/scripts/start-worker.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__REPO__</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>15</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/romkoren/Library/Logs/restomatch-worker.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/romkoren/Library/Logs/restomatch-worker.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+</dict>
+</plist>
