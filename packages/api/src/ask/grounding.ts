@@ -14,6 +14,7 @@
  *    (the UI shows a "check the screens" note).
  */
 import type { ClaudeAnswer } from './claude';
+import { ALL_TLDS } from './tlds';
 import type { Figures, ScreenLink } from './tools';
 
 export interface Citation {
@@ -63,13 +64,24 @@ export function figuresIn(text: string): number[] {
 /**
  * Link detection works on a NORMALIZED copy of the prose: NFKC (full-width
  * letters/dots/brackets → ASCII), invisible characters removed (zero-width,
- * soft hyphen, bidi marks), look-alike dots mapped to ".", and defanged dots
- * ("[.]", "(.)", "{dot}", " dot ", case-insensitive) restored. The cleaned text
+ * soft hyphen, bidi marks, variation selectors, tag characters, combining marks
+ * on ASCII), look-alike dots mapped to ".", and defanged dots ("[.]", "(.)",
+ * "{dot}", " dot ", " נקודה ", "_dot_", "punkt", case-insensitive) and "(at)" restored. The cleaned text
  * the user sees is derived from that normalized copy.
  */
-const INVISIBLE = /[­͏؜ᅟᅠ឴឵᠎​-‏‪-‮⁠-⁯ㅤ﻿ﾠ]/g;
-const LOOKALIKE_DOTS = /[。｡․﹒۔։·‧∙⋅・]/g;
-const DEFANG = /\s*(?:\[\s*(?:\.|dot)\s*\]|\(\s*(?:\.|dot)\s*\)|\{\s*(?:\.|dot)\s*\}|<\s*(?:\.|dot)\s*>|\s+dot\s+)\s*/gi;
+const INVISIBLE = /[­͏؜ᅟᅠ឴឵᠋-᠏​-‏‪-‮⁠-⁯⠀ㅤ︀-️﻿ﾠ\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]|\p{Cf}/gu;
+/** Combining marks on an ASCII char ("evil.c̲om"); a combining dot above ("evil̇com", "˙") is a dot. */
+const COMBINING_DOT = /(?<=[\x21-\x7E])\s?\u0307/g;
+const ASCII_MARKS = /(?<=[\x21-\x7E])\p{M}+/gu;
+/** A dash of any kind between digits is a hyphen ("054–1234567"). */
+const DIGIT_DASH = /(?<=\d)\p{Pd}(?=\d)/gu;
+const LOOKALIKE_DOTS = /[。｡․﹒۔։·‧∙⋅・⸱⸳܁܂᛫⦁ㆍᆞᐧ་]/g;
+const DOT_WORD = '(?:\\.|,|dot|נקודה|punkt)';
+const DEFANG = new RegExp(
+  `\\s*(?:\\[\\s*${DOT_WORD}\\s*\\]|\\(\\s*${DOT_WORD}\\s*\\)|\\{\\s*${DOT_WORD}\\s*\\}|<\\s*${DOT_WORD}\\s*>|\\s+(?:dot|נקודה|punkt)\\s+|[_-]dot[_-])\\s*`,
+  'gi',
+);
+const DEFANG_AT = /\s*(?:\[\s*at\s*\]|\(\s*at\s*\)|\{\s*at\s*\})\s*/gi;
 
 /**
  * Known TLDs (lower-case ASCII): the spaced ("evil . com") and comma ("evil,com")
@@ -92,6 +104,9 @@ const TLDS = new Set(
     'zip mov bond sbs cfd lat quest cam skin hair beauty mom dad boo foo nexus phd esq prof meme day ' +
     'country stream download review racing date faith party science trade webcam accountant cricket ' +
     'gdn kim men work fit surf uno cyou autos boats homes motorcycles yachts quest ' +
+    // food / hospitality / generic gTLDs a restaurant-themed lure would use (refuter round 3)
+    'menu pizza wine beer kitchen restaurant cafe coffee bar vodka recipes catering delivery rocks ninja guru ' +
+    'plus run fish farm organic market supplies tax direct exchange express ' +
     'example test invalid localhost local onion internal lan home corp'
   ).split(' '),
 );
@@ -108,34 +123,53 @@ const SENTENCE_STARTERS = new Set(
     'since because if when while what which why how here now finally first second third this other'
   ).split(' '),
 );
-/** Abbreviations a "abbr.word" prose token starts with ("avg.price", "kg.unit"). */
+/** Abbreviations a "abbr.word" prose token starts with ("avg.price", "kg.unit", "excl.VAT"). */
 const ABBREVIATIONS = new Set(
-  'avg approx est max min vs incl excl qty tot ref no kg gr ml ltr pcs pc unit ea per mo yr wk hr'.split(' '),
+  (
+    'avg approx est max min vs incl excl qty tot ref no kg gr ml ltr pcs pc unit ea per mo yr wk hr ' +
+    'dr mr mrs ms st jan feb mar apr jun jul aug sep sept oct nov dec mon tue wed thu fri sat sun'
+  ).split(' '),
 );
+/** Comma / semicolon forms ("evil,com") only count for TLDs that are not everyday list words ("cash,credit"). */
+const COMMA_TLDS = new Set([...TLDS].filter((t) => t.length === 2 || ['com', 'net', 'org', 'info', 'biz', 'xyz', 'app', 'dev', 'online', 'site', 'shop', 'zip', 'mov'].includes(t)));
 
 /** A label.word token: punycode, or 2+ letters of any script after the last dot. */
 const HOST = /(?<![\p{L}\p{N}@-])(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?\.)+(xn--[a-z0-9-]{1,59}|\p{L}{2,24})(?![\p{L}\p{N}-])(?::\d{1,5})?(?:\/\S*)?/giu;
 /** "evil . com", "evil .com": a spaced dot before a KNOWN tld (a normal ". Next" sentence is not touched). */
-const SPACED_HOST = /(?<![\p{L}\p{N}])[\p{L}\p{N}][\p{L}\p{N}-]{0,62}\s+\.\s*([a-z]{2,24})\b|(?<![\p{L}\p{N}])[\p{L}\p{N}][\p{L}\p{N}-]{0,62}\.\s+([a-z]{2,24})\b(?!\s+[a-z])/giu;
+const SPACED_HOST = /(?<![\p{L}\p{N}])[\p{L}\p{N}][\p{L}\p{N}-]{0,62}\s+\.\s*([a-z]{2,24})\b/giu;
+/** "evil. com": only a LOWER-case known tld that ends the token ("Prices rose. Today: ₪1,200" is prose). */
+const SPACED_HOST_AFTER = /(?<![\p{L}\p{N}])[\p{L}\p{N}][\p{L}\p{N}-]{0,62}\.\s+([a-z]{2,24})(?=$|[\s/])(?!\s+[\p{L}\p{N}])/gu;
+/** "evil, com" / "evil ,com": a spaced comma before a short list of unmistakable TLDs. */
+const SPACED_COMMA_HOST = /(?<![\p{L}\p{N}])[\p{L}\p{N}][\p{L}\p{N}-]{0,62}\s*[,;]\s*(com|net|org|io|il|ru|xyz|ly|app|dev|zip|mov)(?![\p{L}\p{N}])/gu;
 /** "evil,com" / "evil,co,il": a comma between labels before a KNOWN tld (detection only — "milk,eggs" is prose). */
-const COMMA_HOST = /(?<![\p{L}\p{N}@-])(?:[\p{L}\p{N}][\p{L}\p{N}-]{0,62},)+([a-z]{2,24}|xn--[a-z0-9-]{1,59})(?![\p{L}\p{N}-])(?:\/\S*)?/giu;
+const COMMA_HOST = /(?<![\p{L}\p{N}@-])(?:[\p{L}\p{N}][\p{L}\p{N}-]{0,62}[,;])+([a-z]{2,24}|xn--[a-z0-9-]{1,59})(?![\p{L}\p{N}-])(?:\/\S*)?/giu;
 /** Spaced-out single characters ("e v i l . c o m", "e v i l , c o m"): collapsed for detection only. */
-const SPACED_LETTERS = /(?<![\p{L}\p{N}])[\p{L}\p{N}](?:[ \t]*[.,][ \t]*[\p{L}\p{N}]|[ \t]+[\p{L}\p{N}])+(?![\p{L}\p{N}])/gu;
+const SPACED_LETTERS = /(?<![\p{L}\p{N}])[\p{L}\p{N}](?:\s*[.,;]\s*[\p{L}\p{N}]|[\s-]+[\p{L}\p{N}])+(?![\p{L}\p{N}])/gu;
+/** "evil . c o m", "evil.c o m": a word, a dot, then spaced-out letters. */
+const WORD_THEN_SPACED = /(?<![\p{L}\p{N}])[\p{L}\p{N}][\p{L}\p{N}-]*\s*[.,]\s*(?:[\p{L}\p{N}]\s+)+[\p{L}\p{N}](?![\p{L}\p{N}])/gu;
 
 const LINK_PATTERNS: RegExp[] = [
   /\b[a-z][a-z0-9+.-]{1,15}:\/\/\S+/gi, // any scheme://… (hxxp:// too)
-  /\b(?:javascript|data|vbscript|mailto|tel|sms|whatsapp|ftp|file|intent|telegram|tg|viber|skype):\S*/gi,
+  /\b(?:javascript|data|vbscript|mailto|tel|sms|whatsapp|ftp|file|intent|telegram|tg|viber|skype):\S+/gi, // "Data: 3 invoices" is prose
   /\bwww\.\S+/gi,
-  /[^\s@]+@[^\s@]+\.[^\s@]+/g, // user@host / emails
-  /(?:^|(?<=\s))@[\w.]{3,}/g, // @handles (Telegram/Instagram)
-  /\[?[0-9a-f]{0,4}(?::[0-9a-f]{0,4})*::[0-9a-f:]*(?:%\w+)?\]?(?::\d+)?/gi, // IPv6 with "::"
+  /[^\s@]+@[^\s@]+\.\p{L}[^\s@]*/gu, // user@host / emails ("10@3.50" is a price)
+  /(?:^|(?<=\s))@\s*\p{L}[\w.]{1,}/gu, // @handles (Telegram/Instagram), "@ evilbot"
+  /\[[0-9a-f:.]*::[0-9a-f:.]*(?:%\w+)?\](?::\d+)?/gi, // [IPv6] with "::"
+  /(?<![\w:])(?=[0-9a-f:]*\d)(?:[0-9a-f]{1,4}:){1,7}:(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4})*)?(?![\w:])|(?<![\w:])::[0-9a-f]{1,4}\b/gi, // IPv6 "::" ("Note::" is prose)
   /\b(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}\b/gi, // full IPv6 (a "10:30:45" time is not touched)
-  /\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?(?:\/\S*)?/g, // IPv4 (+port/path)
+  /(?<![\w.-])(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?![\d.])(?::\d+)?(?:\/\S*)?/g, // IPv4 (+port/path); "INV-26.10.18.001" is not
   /\b0x[0-9a-f]{6,8}\b/gi, // hex IPv4
-  /(?:\+|\b00)\d[\d\s-]{7,16}\d\b/g, // international phone numbers
+];
+
+/** Phone forms (also checked on a collapsed "0 5 4 - 1 2 3…" copy). */
+const PHONE_PATTERNS: RegExp[] = [
+  /(?:\+|\b00(?=[1-9]))\d[\d\s-]{7,16}\d\b/g, // international phone numbers ("00012345678" is an invoice no.)
   /\b972\d{8,9}\b/g,
-  /(?:\b0\d{1,2}|\b1-?[78]00|\b1700)[\s-]?\d{3}[\s-]?\d{3,4}\b/g, // Israeli numbers / toll-free
-  /(?:^|(?<=\s))\*\d{3,5}\b/g, // *1234 short numbers
+  // Israeli numbers: a real prefix (05X / 07X / 02-04, 08-09), any separators ("(054) 123.4567");
+  // an invoice number like "01234567" has no valid prefix + length.
+  /(?<![\d.,])(?:\b0|\+?\s*972[\s().-]*)\(?(?:[57][\s().-]*\d|[23489])\)?(?:[\s().-]*\d){7}(?![\d.,])/g,
+  /\b1-?[78]00-\d{2,3}-?\d{2,4}\b/g, // toll-free 1-800 / 1700-… (with a hyphen; "Order 1700 250" is a count)
+  /(?:^|(?<=\s))\*\d{3,5}\b(?![^*\n]*\*)/g, // *1234 short numbers (not markdown "*1250 ₪*")
 ];
 
 /** Hebrew IDN TLDs (any other Hebrew word after a dot is just a sentence without a space). */
@@ -156,8 +190,10 @@ function isKnownTld(tld: string): boolean {
  * Inverted rule for a tight label.word token: it IS a link, unless
  *  - the suffix is a file extension ("report.xlsx"), or a Hebrew word (a sentence without a space);
  *  - it is a 2-label ASCII token with no port/path that reads as prose:
- *    "spend.Next" / "rose.It" (Title-case English sentence starter), or
- *    "avg.price" / "kg.unit" (lower-case abbreviation + a word that is not a known TLD).
+ *    "spend.Next" / "rose.It" (Title-case English sentence starter);
+ *    "excl.VAT" / "Coke.Zero"… a Title- or UPPER-case word that is no real TLD (full list);
+ *    "1.Tnuva" / "2.Review" (a numbered list item, Title-case);
+ *    "avg.price" / "kg.unit" (an abbreviation + a word that is no real TLD).
  */
 function isProseToken(m: string, tld: string): boolean {
   const t = tld.toLowerCase();
@@ -166,13 +202,17 @@ function isProseToken(m: string, tld: string): boolean {
   if (FILE_EXTS.has(t)) return true;
   const labels = m.split('.');
   if (labels.length !== 2 || /[:/]/.test(m)) return false;
+  const titleOrUpper = /^[A-Z][a-z]+$/.test(tld) || /^[A-Z]{2,}$/.test(tld);
   if (/^[A-Z][a-z]+$/.test(tld) && SENTENCE_STARTERS.has(t)) return true;
-  return /^[a-z]+$/.test(labels[0]!) && /^[a-z]+$/.test(tld) && ABBREVIATIONS.has(labels[0]!) && !TLDS.has(t);
+  if (/^\d{1,2}$/.test(labels[0]!) && /^[A-Z][a-z]+$/.test(tld)) return true;
+  if (titleOrUpper && !ALL_TLDS.has(t) && /^\p{L}[\p{L}\p{N}-]*$/u.test(labels[0]!)) return true;
+  return ABBREVIATIONS.has(labels[0]!.toLowerCase()) && /^[A-Za-z]+$/.test(tld) && !ALL_TLDS.has(t);
 }
 
 /** Does a (collapsed) token contain a link by the same rules as the prose? */
 function hasLink(token: string): boolean {
-  const dotted = token.replace(/,/g, '.');
+  const dotted = token.replace(/[,;]/g, '.');
+  if (PHONE_PATTERNS.some((re) => new RegExp(re.source, re.flags).test(dotted))) return true;
   for (const m of dotted.matchAll(new RegExp(HOST.source, HOST.flags))) {
     if (!isProseToken(m[0], m[1]!)) return true;
   }
@@ -189,29 +229,44 @@ export function sanitizeAnswer(text: string): { text: string; stripped: boolean 
   });
   out = out
     .normalize('NFKC')
+    .replace(COMBINING_DOT, '.')
     .replace(INVISIBLE, '')
+    .replace(ASCII_MARKS, '')
+    .replace(DIGIT_DASH, '-')
     .replace(LOOKALIKE_DOTS, '.')
-    .replace(DEFANG, '.');
-  for (const re of LINK_PATTERNS) {
+    .replace(DEFANG, '.')
+    .replace(DEFANG_AT, '@');
+  for (const re of [...LINK_PATTERNS, ...PHONE_PATTERNS]) {
     out = out.replace(re, () => {
       stripped = true;
       return '';
     });
   }
   // Spaced-out letters: collapse a COPY; strip the run only if the copy is a link.
-  out = out.replace(SPACED_LETTERS, (m) => {
-    const collapsed = m.replace(/[ \t]+/g, '');
-    if (!/[.,]/.test(collapsed) || !hasLink(collapsed)) return m;
+  for (const re of [WORD_THEN_SPACED, SPACED_LETTERS]) {
+    out = out.replace(re, (m) => {
+      const collapsed = m.replace(/[\s-]+/g, '');
+      if (!hasLink(collapsed)) return m;
+      stripped = true;
+      return '';
+    });
+  }
+  out = out.replace(SPACED_HOST, (m, tld: string) => {
+    if (!isKnownTld(tld)) return m;
     stripped = true;
     return '';
   });
-  out = out.replace(SPACED_HOST, (m, a?: string, b?: string) => {
-    if (!isKnownTld(a ?? b ?? '')) return m;
+  out = out.replace(SPACED_HOST_AFTER, (m, tld: string) => {
+    if (!TLDS.has(tld)) return m;
     stripped = true;
     return '';
   });
   out = out.replace(COMMA_HOST, (m, tld: string) => {
-    if (!isKnownTld(tld)) return m;
+    if (!(COMMA_TLDS.has(tld.toLowerCase()) || tld.toLowerCase().startsWith('xn--'))) return m;
+    stripped = true;
+    return '';
+  });
+  out = out.replace(SPACED_COMMA_HOST, () => {
     stripped = true;
     return '';
   });
