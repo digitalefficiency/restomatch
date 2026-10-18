@@ -78,10 +78,18 @@ function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-/** `showChain`: the chain tab only appears for owners who actually run more than one branch. */
+/**
+ * `showChain`: owners who run more than one branch get the Chain tab (branch
+ * management is then one click away in the branch switcher and on the chain
+ * page); single-branch owners get the Branches tab instead (open a branch /
+ * see the chain plan). One of the two, so the tab row still fits.
+ */
 function visibleItems(role: UserRole, showChain = false): NavItem[] {
   return NAV_ITEMS.filter(
-    ({ key, href }) => canSeeRoute(role, href) && (key !== 'chain' || showChain),
+    ({ key, href }) =>
+      canSeeRoute(role, href) &&
+      (key !== 'chain' || showChain) &&
+      (key !== 'branches' || !showChain),
   );
 }
 

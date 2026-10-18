@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { TRPCError } from '@trpc/server';
 import { AlertTriangle, ClipboardCheck, Network, PartyPopper, ShieldCheck, Undo2 } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
@@ -113,7 +114,10 @@ export default async function ChainPage({
         subtitle={
           <>
             {t('dashboard.subtitle')}{' '}
-            <span className="text-subtle">{t('dashboard.scopeNote', { count: formatNumber(data.branches.length, locale) })}</span>
+            <span className="text-subtle">{t('dashboard.scopeNote', { count: formatNumber(data.branches.length, locale) })}</span>{' '}
+            <Link href="/dashboard/branches" className="font-semibold text-primary hover:text-ink" data-testid="chain-manage-branches">
+              {t('switcher.manageLink')}
+            </Link>
           </>
         }
         action={
@@ -355,9 +359,9 @@ export default async function ChainPage({
                   return (
                     <tr key={s.key} className="border-b border-line/60 last:border-0">
                       <td className="px-4 py-3">
-                        <span className="font-semibold text-ink" {...originalProps(dn.primary)}>{dn.primary}</span>
+                        <span className="block font-semibold text-ink" {...originalProps(dn.primary)}>{dn.primary}</span>
                         {dn.secondary ? (
-                          <span className="ms-2 text-xs text-subtle" {...originalProps(dn.secondary)}>{dn.secondary}</span>
+                          <span className="block text-xs text-subtle" {...originalProps(dn.secondary)}>{dn.secondary}</span>
                         ) : null}
                       </td>
                       <td className="px-4 py-3">
