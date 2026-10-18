@@ -185,8 +185,19 @@ export const Receiver: React.FC<{ locale: Locale }> = ({ locale }) => {
             }}
           >
             <Phone width={PW} glare={ry / 30}>
-              <Screen src="shots/receiving-po-en.png" width={psw} opacity={1 - swap} top={psw * TOP} redact={[EMAIL]} />
-              <Screen src="shots/reconcile-en.png" width={psw} scroll={scrollU * psw} opacity={swap} top={psw * TOP} redact={[EMAIL, STUB]} />
+              <Screen src="shots/receiving-po-en.png" width={psw} top={psw * TOP} redact={[EMAIL]} />
+              {/* screen change = a clean wipe (never two screens dissolved over each other) */}
+              <Screen
+                src="shots/reconcile-en.png"
+                width={psw}
+                scroll={scrollU * psw}
+                top={psw * TOP}
+                redact={[EMAIL, STUB]}
+                clip={`inset(0 0 0 ${(1 - swap) * 100}%)`}
+              />
+              {swap > 0 && swap < 1 ? (
+                <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${(1 - swap) * 100}%`, width: 4, background: C.primary, boxShadow: `0 0 30px 8px ${C.primary}88` }} />
+              ) : null}
               {/* status bar: scrolled content passes under it, never under the island */}
               <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: psw * TOP, background: C.bg }} />
               <Spotlight
