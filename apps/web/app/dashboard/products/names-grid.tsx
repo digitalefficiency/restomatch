@@ -17,17 +17,20 @@ import {
   cn,
   displayName,
   friendlyError,
+  useSingleFlight,
   useToast,
 } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
 import { components } from '@/lib/i18n/messages/components';
 import { products as productsNs } from '@/lib/i18n/messages/products';
-import { namesBatch } from './product-logic';
+import { chunk, pendingNames, type NameEdit } from './product-logic';
 
 type ListOutput = inferRouterOutputs<AppRouter>['products']['list'];
 
 const PAGE = 100;
+/** products.setNamesEn accepts at most this many items per call. */
+const MAX_BATCH = 200;
 
 /**
  * Spreadsheet-like editor for `products.name_en`. Each English cell is an
@@ -44,7 +47,7 @@ export function NamesGrid({ initial, canEdit }: { initial: ListOutput; canEdit: 
   const [search, setSearch] = useState('');
   const [missingOnly, setMissingOnly] = useState(false);
   const [limit, setLimit] = useState(PAGE);
-  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [edits, setEdits] = useState<Record<string, NameEdit>>({});
   const inputs = useRef<Array<HTMLInputElement | null>>([]);
 
   useEffect(() => {
@@ -67,21 +70,35 @@ export function NamesGrid({ initial, canEdit }: { initial: ListOutput; canEdit: 
   const missing = trpc.products.list.useQuery({ limit: 1, missingOnly: true }, { staleTime: 0 });
 
   const rows = q.data?.rows ?? [];
-  const batch = useMemo(() => namesBatch(rows, edits), [rows, edits]);
+  const batch = useMemo(() => pendingNames(edits), [edits]);
   const dirty = batch.length;
 
   const utils = trpc.useUtils();
-  const save = trpc.products.setNamesEn.useMutation({
-    onSuccess: async (r) => {
-      toast.success(t('names.saved', { count: formatNumber(r.updated, locale) }));
-      setEdits({});
-      await utils.products.list.invalidate();
-    },
-    onError: (e) => toast.error(friendlyError(e, tc)),
-  });
+  const save = trpc.products.setNamesEn.useMutation();
+  const once = useSingleFlight();
 
   const doSave = () => {
-    if (dirty > 0 && !save.isPending) save.mutate({ items: batch });
+    if (dirty === 0) return;
+    once(async () => {
+      let updated = 0;
+      const saved = new Set<string>();
+      try {
+        for (const items of chunk(batch, MAX_BATCH)) {
+          const r = await save.mutateAsync({ items });
+          updated += r.updated;
+          for (const it of items) saved.add(it.productId);
+        }
+        toast.success(t('names.saved', { count: formatNumber(updated, locale) }));
+      } catch (e) {
+        toast.error(friendlyError(e, tc));
+      } finally {
+        // Keep whatever didn't make it, so nothing typed is lost.
+        if (saved.size > 0) {
+          setEdits((m) => Object.fromEntries(Object.entries(m).filter(([id]) => !saved.has(id))));
+          await utils.products.list.invalidate();
+        }
+      }
+    });
   };
 
   // Ctrl/⌘+S saves; warn before leaving with unsaved edits.
@@ -184,8 +201,9 @@ export function NamesGrid({ initial, canEdit }: { initial: ListOutput; canEdit: 
               <span>{t('names.supplier')}</span>
             </li>
             {rows.map((r, i) => {
-              const value = r.id in edits ? edits[r.id]! : (r.nameEn ?? '');
-              const changed = r.id in edits && value.trim() !== (r.nameEn ?? '').trim();
+              const edit = edits[r.id];
+              const value = edit ? edit.value : (r.nameEn ?? '');
+              const changed = !!edit && value.trim() !== (edit.original ?? '').trim();
               const supplier = r.supplierName ? displayName(r.supplierName, r.supplierNameEn, locale).primary : '—';
               const inputId = `name-en-${r.id}`;
               return (
@@ -213,7 +231,13 @@ export function NamesGrid({ initial, canEdit }: { initial: ListOutput; canEdit: 
                     }}
                     value={value}
                     disabled={!canEdit}
-                    onChange={(e) => setEdits((m) => ({ ...m, [r.id]: e.target.value }))}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setEdits((m) => ({
+                        ...m,
+                        [r.id]: { value: next, original: m[r.id]?.original ?? r.nameEn },
+                      }));
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === 'ArrowDown') {
                         e.preventDefault();
@@ -222,7 +246,7 @@ export function NamesGrid({ initial, canEdit }: { initial: ListOutput; canEdit: 
                         e.preventDefault();
                         focusRow(i - 1);
                       } else if (e.key === 'Escape' && r.id in edits) {
-                        setEdits(({ [r.id]: _drop, ...rest }) => rest);
+                        setEdits((m) => Object.fromEntries(Object.entries(m).filter(([id]) => id !== r.id)));
                       }
                     }}
                     placeholder={t('names.placeholder')}

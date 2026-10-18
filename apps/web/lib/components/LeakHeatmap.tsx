@@ -1,6 +1,7 @@
 import { cn } from './cn';
 import { formatIls } from '../money';
-import { intlLocaleOf, type Locale } from '../i18n/config';
+import type { Locale } from '../i18n/config';
+import { formatPercent } from '../i18n/format';
 
 export interface LeakCell {
   productName: string;
@@ -46,11 +47,8 @@ export function LeakHeatmap({
   labels?: { mild: string; severe: string; more: string };
 }) {
   const fmtIls = (v: number) => formatIls(v, { locale });
-  const pct = (v: number, digits: number) =>
-    new Intl.NumberFormat(intlLocaleOf(locale), {
-      maximumFractionDigits: digits,
-      minimumFractionDigits: digits,
-    }).format(v * 100);
+  // One formatter + precision for tiles, tooltip and the detective table (1 decimal).
+  const pct = (v: number) => formatPercent(v, locale, 1);
   const l = labels ?? { mild: 'קל', severe: 'חריג', more: 'ועוד {count} פריטים בטבלה למטה' };
   const sorted = [...items].sort((a, b) => b.monthExcessIls - a.monthExcessIls);
   const shown = sorted.slice(0, max);
@@ -76,10 +74,10 @@ export function LeakHeatmap({
                   ? `0 0 0 1px rgba(255,92,122,${0.25 + intensity * 0.35}), 0 8px 26px -8px rgba(255,92,122,${0.3 + intensity * 0.4})`
                   : undefined,
               }}
-              title={`${c.productName} · ${c.supplierName}: +${pct(c.deltaPct, 1)}% · ${fmtIls(c.monthExcessIls)}`}
+              title={`${c.productName} · ${c.supplierName}: +${pct(c.deltaPct)} · ${fmtIls(c.monthExcessIls)}`}
             >
               <div className="font-mono text-lg font-extrabold tabular-nums" dir="ltr">
-                +{pct(c.deltaPct, 0)}%
+                +{pct(c.deltaPct)}
               </div>
               <div className="mt-1 truncate text-sm font-semibold">{c.productName}</div>
               <div className="truncate text-xs opacity-80">{c.supplierName}</div>

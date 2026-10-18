@@ -30,6 +30,15 @@ export function emptyKpis(): OwnerKpis {
   };
 }
 
+/**
+ * Excludes the QTY_SHORT that the engine zeroes when the invoice bills the
+ * missing units: the money sits on its QTY_OVER sibling, so the ₪0 twin is not
+ * a decision for anyone (approvals queue, pending count).
+ */
+export function notZeroShortTwin() {
+  return sql`not (${discrepancies.type} = 'QTY_SHORT' and ${discrepancies.deltaAmount} = 0)`;
+}
+
 export interface ComputeOwnerKpisOptions {
   /** Override "now" — used in tests. */
   now?: Date;
@@ -84,7 +93,8 @@ export async function computeOwnerKpis(
       ),
     );
 
-  // 3. Pending approvals — open or escalated, any severity above info
+  // 3. Pending approvals — open or escalated, any severity above info, minus
+  //    the ₪0 QTY_SHORT twin of a short delivery billed in full (nothing to decide).
   const pending = await db
     .select({ c: count(discrepancies.id) })
     .from(discrepancies)
@@ -93,6 +103,7 @@ export async function computeOwnerKpis(
         eq(discrepancies.restaurantId, restaurantId),
         inArray(discrepancies.severity, ['warn', 'block']),
         inArray(discrepancies.resolutionStatus, ['open', 'escalated']),
+        notZeroShortTwin(),
       ),
     );
 

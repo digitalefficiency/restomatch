@@ -16,6 +16,7 @@
 
 import type { ScanData, ScanLine } from './InvoiceScanViewer';
 import { formatNumber } from '@/lib/i18n/format';
+import { SHOWCASE_VAT_PCT, SHOWCASE_VAT_RATE } from '../../_lib/money';
 
 interface InvoicePaperProps {
   data: ScanData;
@@ -23,7 +24,7 @@ interface InvoicePaperProps {
 
 export function InvoicePaper({ data }: InvoicePaperProps) {
   const subtotal = data.lines.reduce((sum, l) => sum + l.qty * l.unitPrice, 0);
-  const vat = subtotal * 0.17;
+  const vat = subtotal * SHOWCASE_VAT_RATE;
   const total = subtotal + vat;
 
   const docType = data.documentType ?? 'delivery_note';
@@ -264,7 +265,7 @@ export function InvoicePaper({ data }: InvoicePaperProps) {
         {/* Totals — left */}
         <div className="text-[12px] space-y-1 min-w-[240px]">
           <TotalRow label="סה״כ לפני מע״מ" value={subtotal} />
-          <TotalRow label="מע״מ 17%" value={vat} />
+          <TotalRow label={`מע״מ ${SHOWCASE_VAT_PCT}%`} value={vat} />
           <div style={{ borderTop: '2px solid #1f2937', marginTop: 4, paddingTop: 4 }}>
             <div className="flex justify-between font-black text-[14px]">
               <span>סה״כ כולל מע״מ</span>

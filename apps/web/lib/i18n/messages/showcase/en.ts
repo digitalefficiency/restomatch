@@ -113,7 +113,7 @@ export const en: Shape<typeof he> = {
   invoices: {
     eyebrow: 'Owner review',
     title: 'Invoices your team processed',
-    lead: 'What suppliers billed, what your team actually approved, and where the gaps were. Click an invoice for the full comparison.',
+    lead: 'What suppliers billed, what your team actually approved, and where the gaps were. Click an invoice for the full comparison. Amounts exclude VAT.',
     kpi: {
       scanned: 'Scanned today',
       withIssues: 'With variances',
@@ -148,9 +148,9 @@ export const en: Shape<typeof he> = {
     scanButton: 'Scan',
     scanButtonTitle: 'View the original invoice scan',
     tiles: {
-      billed: 'Invoiced',
-      approved: 'Approved by staff',
-      saved: 'Savings recorded',
+      billed: 'Invoiced (excl. VAT)',
+      approved: 'Approved by staff (excl. VAT)',
+      saved: 'Savings recorded (excl. VAT)',
     },
     compareCard: {
       title: 'Compare order ↔ invoice',
@@ -211,8 +211,8 @@ export const en: Shape<typeof he> = {
     invoice: 'Invoice',
     missing: 'Missing',
     potentialLoss: 'Potential loss',
-    totalOrdered: 'Total ordered',
-    totalBilled: 'Total billed',
+    totalOrdered: 'Total ordered (excl. VAT)',
+    totalBilled: 'Total billed (excl. VAT)',
     netDiff: 'Net difference',
     toReview: '{count} lines to review; your team adjusted {adjusted} of them.',
     allMatched: 'Every line matched 1:1',
@@ -235,7 +235,7 @@ export const en: Shape<typeof he> = {
       price: 'Price',
       total: 'Total',
       subtotal: 'Subtotal',
-      vat: 'VAT 17%',
+      vat: 'VAT 18%',
       orderTotal: 'Order total',
       approvedBy: 'Approved by: {name}',
       terms: 'Payment terms: EOM + 30',

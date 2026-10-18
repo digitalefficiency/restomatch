@@ -139,11 +139,11 @@ on the leaks page, and 3 POs due today. Every seeded user logs in with a known p
 
 - `packages/db/src/schema.ts`: index definitions mirroring 0029 and 0030 (the I5
   uniques renamed to per-restaurant). No column or type changes.
-- `packages/db/drizzle/meta/_journal.json`: 4 entries (0029–0032, `when` per the brief).
-- New migrations `0029`–`0032` (new files; the applied history is untouched).
+- `packages/db/drizzle/meta/_journal.json`: 4 entries (0029–0032, `when` per the brief), plus round 5's `0033_plans_catalog` (idx 34, `when` 1781980000000, after S4's 0039).
+- New migrations `0029`–`0033` (new files; the applied history is untouched).
 - `packages/db/scripts/reset.ts`: uses the shared host-based guard.
 
-`rls.ts`, the RLS SQL and the attack suites were **not** modified.
+The RLS SQL (`rls/0001`–`0003`) and the attack suites are **not** modified in the final diff. Round 5 briefly edited `rls/0001` for SB-3 and reverted it; see Round 5. `rls.ts` gained only the `rlsAppRoleGrantsSql()` extraction, which was already merged in the RC, with unchanged behaviour.
 
 ## Needs another area
 
@@ -256,3 +256,86 @@ DB-RUNBOOK updated: pending range now **0019 → 0039** (S4's 0039 in the §11 t
   - `check-rls` OK;
   - attack suites 169/169.
 - **Deploy doc:** the top now has an URGENT interim mitigation (disable the Data API, or remove `public` from the exposed schemas, until the revoke deploys) and SQL to verify it landed.
+
+### Round 5 — release-candidate QA (RC `claude/client-ready` @ d09a57f merged, no force-push)
+
+**A) Fixes**
+
+- **F8, plan catalog:** new drizzle migration `0033_plans_catalog`, generated from `PLAN_SEED` by `src/plansCatalog.ts`.
+  - It is an upsert on `plans.key`, so plan ids and the subscription foreign keys survive.
+  - Journal entry: idx 34, `when` 1781980000000, after S4's 0039.
+  - Supabase version `20260620182640`.
+  - Test `migration-0033`: the file equals `PLAN_SEED`, it is idempotent, and it gives 4 plans.
+  - `/pricing` renders the 4 plans from the DB.
+- **SB-3, storage:**
+  - Shipped: the bucket upload limits. `file_size_limit` is 11 MiB, just above `scans.upload`'s own 14M-base64 (~10.5 MB) cap, so the app's error fires first. Allowed types are pdf, jpeg, png, webp, heic and heif; HEIC/HEIF are there because the receiver picker accepts `image/*`.
+  - These ship as the new appended Supabase version `20260620182641_restomatch_rls_a71f80e5.sql`. It is the released `2a5eafd1` plus the bucket limits, nothing else.
+  - **Deferred: dropping the `walk-ins` anon policies.** The refuter proved that the public `/showcase/receiver` still uploads with the anon key (`apps/web/lib/supabase/client.ts`). No server upload route exists on any branch. Dropping the policies now breaks the landing-page demo in production.
+  - That change needs S2's service-role showcase upload route plus a human-authored edit of the immutable `rls/0001`. The deploy doc §4 "SB-3" has the exact 3-step PR.
+  - Until then, the doctor reports the walk-ins prefix as a known **WARN**.
+  - Exposure while deferred: the demo prefix only. A visitor can list other visitors' showcase uploads; no tenant data is reachable.
+- **Doctor gaps found by the refuter, closed and tested** (`supabase-deploy.test.ts`, new test "db:doctor FAILs a missing tenant storage policy, …"):
+  1. A missing tenant storage policy is now a FAIL. Before, the RLS migration's silent WARNING path went undetected.
+  2. Any other anon/public policy on `storage.objects` is now a FAIL. Before, only `walkins%` names were checked.
+  3. The Data API check now covers views, materialized views, partitioned and foreign tables, not only plain tables.
+- **F2:** `docs/ENV-PRODUCTION.md` has the `DATABASE_URL_APP` recipe (`ALTER ROLE … LOGIN PASSWORD`, pooler user `restomatch_app.<ref>`) and the one-line psql proof. Verified through PgBouncer: it returns `restomatch_app|f`.
+- **§7 DEMO_PASSWORD:** the recipe now generates the password once, prints it and exports it, then seeds. The old inline `$(openssl …)` lost the password, because the seed never prints it.
+- **§6 data move:** two real defects were found while rehearsing it and fixed in the doc.
+  - The plans unique key collides with the 0033 catalog → `truncate plans cascade` in the same transaction.
+  - 0032 NOT VALID violators fail the load → repair the listed rows and VALIDATE before the dump.
+  - Re-rehearsed: 2 restaurants, 2 users, 2 invoices, 1 GR, 4 plans, subscription→plan intact, doctor 0 FAIL.
+
+**SB-1 proposal (not implemented): `invoice_scans.invoice_id`**
+
+Today `invoice_id` is a `uuid` FK, but a scan uploaded before an invoice exists carries a client id `'scan-…'`. The code fix in 77a9ec3 stops writing those ids into the FK. The clean schema fix is a new migration that:
+
+1. adds a nullable `upload_ref text` (unique per restaurant) for the client/idempotency id;
+2. makes `invoice_id` nullable, `uuid references invoices(id) on delete set null`;
+3. backfills: rows whose id is not a uuid move into `upload_ref`, and `invoice_id` becomes null;
+4. links the scan when `registerInvoice` creates the invoice, with `update … set invoice_id = $1 where upload_ref = $2 and restaurant_id = $3`.
+
+Risks:
+
+- It touches `schema.ts` and an RLS table, so it needs a human-authored PR, a doctor precondition (count of non-uuid ids) and an attack-suite entry.
+- The backfill must run before the FK is re-validated, so it uses NOT VALID + VALIDATE as 0032 does.
+- The `/scans/[invoiceId]` viewer must keep resolving old rows by `upload_ref`.
+- About 1 day of work including tests. Not worth doing before the presentation.
+
+**Other refuter items**
+
+- **Journal `when` overrun:** 0033 at 1781980000000 is above the S4 (0040 = 1781950000000) and S5 (0041–0042) reservations in `SESSION-BRIEF.md`. If those land with their reserved values, a DB that already has 0033 sees a journal gap. `migrate.ts` and the doctor refuse it loudly, so it does not fail silently. **Ask: the orchestrator re-reserves S4/S5 above 1781980000000.**
+- **Stale walk-ins comments:** none were introduced; the RLS file is the released text. The stale "main @ b5334f6" comment in the deploy test refers to the RC base and stays as history.
+
+**B) QA**
+
+| Check | Result |
+|---|---|
+| Fresh Supabase apply on the emulation (non-superuser migrator, storage owned by `supabase_storage_admin`, default grants to anon/authenticated) | 39 files via `psql -1 ON_ERROR_STOP` and in the test suite: 0 errors. Doctor: 0 FAIL; WARN = app role without LOGIN + walk-ins (both expected) |
+| Upgrade: main's 37 released files → +2 appended | step 1 Data API PASS, plans 0; step 2 applies; `findJournalGaps` = []; `db:migrate` no-op |
+| Pure append vs `origin/main` | 37 released files byte-identical (refuter verified git blob ids); 2 new files; lock only appended |
+| Attack suites (rls, cross-tenant, storage) | full gate below; also 157/157 rls + cross-tenant through PgBouncer transaction mode |
+| Drizzle migrate on dev / test | no-op; dev doctor 0 FAIL · 0 WARN · 23 PASS |
+| Seed numbers (DEMO_TODAY 2026-10-18) | this month ₪572 = 2.0% of ₪28,389; last month ₪1,137 = 1.8% of ₪63,205; 5 open approvals; leaks: beer keg, salmon, entrecôte |
+| §6 upgrade from 0018 | rehearsed end-to-end; 2 doc defects fixed (above) |
+| §8 rollback dry-run | undo SQL applies; the doctor flags the drift (new "applied migrations intact" check); roll-forward green |
+| Pooler / `prepare:false` | every `postgres()` client uses `prepare:false`; only a transaction-scoped advisory lock; no session `SET`s; doctor + app-role proof work through PgBouncer :6432 |
+
+**Verification (2 layers)**
+
+- **Layer 1 (gate):**
+  - `pnpm test`: 13/13 turbo tasks; **1,084 passed**, 1 skipped, 0 failed. db 63, api 497 incl. the attack suites, web 197, matching 86.
+  - Replay of the CI DB steps on a fresh database (`migrate` → `provision-rls` → `check-rls` → `doctor --strict`): 0 FAIL · 0 WARN.
+  - `turbo typecheck` (non-web) 16/16; web `tsc` 0 errors; web lint 0 errors (6 warnings); `db:supabase-sync --check` up to date (41 files).
+- **Layer 2, production build:** `pnpm build` green. `next start` was run with production env guards (placeholder email/service keys, local DB and Redis).
+- **Layer 2, Playwright click-through** (Chromium, password login), all HTTP 200, no page errors, no error boundary:
+  - **owner:** `/dashboard` (hero ₪572 · 2% · last month ₪1,137), `/dashboard/approvals`, `/leaks`, `/leaks/report`, `/receiving`, `/suppliers`, `/catalog`, `/orders`, `/products`, `/team`, `/settings`, `/pricing` (4 DB plans: free / ₪349 / ₪590 / ₪1,490), `/admin`.
+  - **receiver:** `/dashboard/receiving` renders in English.
+  - `/dashboard/invoices` is 404 by design; there is only `[invoiceId]`.
+- **Layer 2, independent refuter subagent** (read-only; claims 1–8 against `origin/main`):
+  - **Held:** pure append; clean apply on Supabase-like roles; RLS idempotence; 0033 correctness; journal order.
+  - **Confirmed defects, all addressed above:**
+    - HIGH: showcase break → the SB-3 drop is deferred;
+    - MEDIUM: doctor false negatives → fixed and tested;
+    - MEDIUM: §7 password loss → fixed;
+    - LOW: `when` reservation → orchestrator ask;
+    - LOW: bucket 10 MiB vs the app's 10.5 MB cap → 11 MiB.
