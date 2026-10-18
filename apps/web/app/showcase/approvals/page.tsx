@@ -7,7 +7,6 @@ import {
   Check,
   ChevronDown,
   Clock,
-  Hash,
   Lock,
   MessageSquare,
   Shield,
@@ -43,7 +42,6 @@ interface AuditEntry {
   actorRole: ApproverRole;
   decision: 'approved' | 'rejected' | 'escalated' | 'auto';
   amount: number;
-  hash: string;
   note?: string;
 }
 
@@ -64,7 +62,6 @@ const RULES: Rule[] = [
         actorRole: 'auto',
         decision: 'auto',
         amount: 3200,
-        hash: '7f2a:9c4d:1e88:33bc',
         note: 'INV-4882 ‎(קצביית הכרם) זוהה כקיים מ-2026-05-12',
       },
       {
@@ -73,7 +70,6 @@ const RULES: Rule[] = [
         actorRole: 'auto',
         decision: 'auto',
         amount: 1840,
-        hash: 'a44f:bb12:00de:5567',
       },
     ],
   },
@@ -93,7 +89,6 @@ const RULES: Rule[] = [
         actorRole: 'owner',
         decision: 'approved',
         amount: 6420,
-        hash: '03ee:11ab:cc09:7d23',
         note: 'הסכמת ספק שזה משלוח חירום, אישור ידני',
       },
     ],
@@ -114,7 +109,6 @@ const RULES: Rule[] = [
         actorRole: 'owner',
         decision: 'rejected',
         amount: 240,
-        hash: 'd112:8901:4477:aa3c',
       },
       {
         timestamp: '2026-05-17 16:08:31',
@@ -122,7 +116,6 @@ const RULES: Rule[] = [
         actorRole: 'owner',
         decision: 'approved',
         amount: 180,
-        hash: '6c2b:1180:ff44:9001',
         note: 'מבצע לקראת חג',
       },
     ],
@@ -143,7 +136,6 @@ const RULES: Rule[] = [
         actorRole: 'owner',
         decision: 'rejected',
         amount: 580,
-        hash: '8a2f:3344:e0c1:7654',
         note: 'דרשנו הסבר מאבי הירקן',
       },
     ],
@@ -164,7 +156,6 @@ const RULES: Rule[] = [
         actorRole: 'manager',
         decision: 'approved',
         amount: 45,
-        hash: 'fb01:2200:cdef:0099',
       },
     ],
   },
@@ -184,7 +175,6 @@ const RULES: Rule[] = [
         actorRole: 'auto',
         decision: 'auto',
         amount: 8,
-        hash: '1234:5678:9abc:def0',
       },
     ],
   },
@@ -378,7 +368,7 @@ function AuditEntryRow({ entry }: { entry: AuditEntry }) {
   };
 
   return (
-    <div className="grid grid-cols-[140px_1fr_110px_90px_140px] gap-3 items-center text-xs py-2 px-3 rounded-lg bg-surface border border-line">
+    <div className="grid grid-cols-[140px_1fr_110px_90px] gap-3 items-center text-xs py-2 px-3 rounded-lg bg-surface border border-line">
       <div className="flex items-center gap-1.5 text-muted font-mono tabular-nums">
         <Clock className="w-3 h-3" />
         {entry.timestamp}
@@ -402,13 +392,6 @@ function AuditEntryRow({ entry }: { entry: AuditEntry }) {
       </div>
       <div className="font-bold font-mono tabular-nums text-ink">
         {formatIls(entry.amount, { locale })}
-      </div>
-      <div
-        className="flex items-center gap-1.5 text-muted font-mono text-[10px] tabular-nums"
-        title={entry.hash}
-      >
-        <Hash className="w-3 h-3 shrink-0" />
-        <span className="truncate" dir="ltr">{entry.hash}</span>
       </div>
     </div>
   );

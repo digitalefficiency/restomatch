@@ -369,8 +369,9 @@ export default async function Home() {
               {(
                 [
                   { rule: t('features.approvals.r1'), out: t('features.approvals.o1'), tone: 'text-danger' },
-                  { rule: t('features.approvals.r2'), out: t('features.approvals.o2'), tone: 'text-warn' },
-                  { rule: t('features.approvals.r3'), out: t('features.approvals.o3'), tone: 'text-primary' },
+                  { rule: t('features.approvals.r2'), out: t('features.approvals.o2'), tone: 'text-danger' },
+                  { rule: t('features.approvals.r3'), out: t('features.approvals.o3'), tone: 'text-warn' },
+                  { rule: t('features.approvals.r4'), out: t('features.approvals.o4'), tone: 'text-primary' },
                 ] as const
               ).map((r) => (
                 <li key={r.rule} className="flex items-center justify-between gap-3 rounded-lg border border-line bg-bg/60 px-3 py-2">

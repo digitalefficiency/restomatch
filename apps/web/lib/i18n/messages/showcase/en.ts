@@ -27,7 +27,7 @@ export const en: Shape<typeof he> = {
       receiver: {
         tag: 'Mobile · receiving staff',
         title: 'Receiving app',
-        description: 'Staff check the delivery against the order, snap the invoice and flag shortages — in about a minute, from their phone.',
+        description: 'Staff check the delivery against the order, snap the invoice and flag shortages — right from their phone.',
       },
       dashboard: {
         tag: 'Web · owner',
@@ -42,7 +42,7 @@ export const en: Shape<typeof he> = {
       deliveries: {
         tag: 'Web · shift manager',
         title: 'Delivery tracking',
-        description: 'Set a cutoff for each supplier. A late delivery triggers an alert with a one-tap call or WhatsApp to the rep.',
+        description: 'Concept preview: a cutoff time per supplier, with a one-tap call or WhatsApp to the rep when a delivery is late.',
       },
       approvals: {
         tag: 'Web · controls',
@@ -194,7 +194,7 @@ export const en: Shape<typeof he> = {
       total: 'Total incl. VAT',
     },
     lines: 'Extracted lines ({count})',
-    archived: 'The scan is kept as a tamper-proof source document with a hash signature — for your records and audits.',
+    archived: 'The original scan is kept with the invoice as its source document — for your records and audits.',
   },
 
   compare: {
@@ -313,7 +313,7 @@ export const en: Shape<typeof he> = {
     waMessage:
       "Hi {agent}, our order from {supplier} ({ordered}) was due {expected} and hasn't arrived yet. When can we expect it?",
     footnote:
-      'In the full product an automatic check runs at each cutoff against orders and delivery notes, and the alert goes to the manager by push or WhatsApp. This demo shows the screen only.',
+      'Concept preview: automatic late-delivery alerts are on the roadmap. This screen shows how they are planned to work.',
     status: {
       late: 'Late',
       arrived: 'Arrived',
@@ -324,7 +324,7 @@ export const en: Shape<typeof he> = {
   approvals: {
     eyebrow: 'Approvals before payment',
     title: 'Approval rules',
-    lead: 'Who approves what, by type and size of variance. Click a rule to see its decision log — every decision is signed, so any after-the-fact change shows up.',
+    lead: 'Who approves what, by type and size of variance. Click a rule to see its decision log — who decided, when, and why.',
     columns: {
       type: 'Variance type',
       approver: 'Approver',
@@ -340,9 +340,9 @@ export const en: Shape<typeof he> = {
     },
     log: {
       title: 'Signed decision log',
-      entryOne: '1 entry · SHA-256 hash chain',
-      entries: '{count} entries · SHA-256 hash chain',
-      footnote: '* Each decision is hashed together with the one before it, so any retroactive edit is exposed.',
+      entryOne: '1 entry',
+      entries: '{count} entries',
+      footnote: '* Every approval and rejection is written to the audit log with the person, the time and the reason.',
       verified: 'verified ✓',
     },
     decision: {
