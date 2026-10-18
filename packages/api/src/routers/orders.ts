@@ -26,6 +26,7 @@ import { assertPoOwned, assertSupplierOwned } from '../tenant';
 import { getEntitlements } from '../entitlements';
 import { importPurchaseOrder } from '../orders/importPo';
 import { estimateTotal, recomputePoTotal } from '../orders/totals';
+import { DEDUPE_INDEX_PREDICATE } from '../notifications/outbox';
 import { deriveExpectedDelivery, type DerivedDelivery } from '../lib/deriveDelivery';
 
 /** Cap on an uploaded order document, decoded — a single-page PO PDF is ~50KB. */
@@ -603,7 +604,7 @@ export const ordersRouter = router({
             relatedEntityId: input.poId,
             dedupeKey: `po:${input.poId}:placed`,
           })
-          .onConflictDoNothing({ target: notificationsOutbox.dedupeKey });
+          .onConflictDoNothing({ target: notificationsOutbox.dedupeKey, where: DEDUPE_INDEX_PREDICATE });
         sentChannel = input.channel;
       }
 

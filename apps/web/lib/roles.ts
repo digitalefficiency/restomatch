@@ -49,6 +49,9 @@ export const ROUTE_ROLES: Record<string, UserRole[]> = {
   '/dashboard/leaks': ['owner', 'manager', 'bookkeeper'],
   '/dashboard/suppliers': ['owner', 'manager'],
   '/dashboard/catalog': ['owner', 'manager'],
+  // Product pages are part of the catalog (names grid, price history, cheapest
+  // supplier); without this rule every role could open them by URL.
+  '/dashboard/products': ['owner', 'manager'],
   '/dashboard/orders': ['owner', 'manager'],
   '/dashboard/exports': ['owner', 'bookkeeper'],
   // Team: owners manage the roster; managers see it read-only and may set a
@@ -58,6 +61,10 @@ export const ROUTE_ROLES: Record<string, UserRole[]> = {
   // role; the restaurant sections inside are owner-edit / manager+bookkeeper
   // read-only / hidden for receiver + chef (see app/dashboard/settings/page.tsx).
   '/dashboard/settings': ALL_ROLES,
+  // Chain (S8): owner-level money across branches + branch management. The
+  // chain router re-checks owner membership in the DB per request.
+  '/dashboard/chain': ['owner'],
+  '/dashboard/branches': ['owner'],
 };
 
 /** Whether `role` may see `href` (exact match). Unknown routes default to visible. */

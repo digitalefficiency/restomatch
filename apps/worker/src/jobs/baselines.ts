@@ -1,6 +1,7 @@
 import { computeBaselines } from '@restomatch/charts';
-import { createDb, eq, restaurants } from '@restomatch/db';
+import { eq, restaurants } from '@restomatch/db';
 import { makeWorker } from '../queue';
+import { jobDb } from '../db';
 
 export interface BaselinesJob {
   /** When omitted, computes for ALL restaurants. */
@@ -13,7 +14,7 @@ export function startBaselinesWorker() {
   return makeWorker<BaselinesJob>('baselines', async (job) => {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error('DATABASE_URL is required');
-    const db = createDb(url);
+    const db = jobDb(url);
 
     const targets = job.data.restaurantId
       ? await db.select().from(restaurants).where(eq(restaurants.id, job.data.restaurantId))

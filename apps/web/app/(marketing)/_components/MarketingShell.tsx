@@ -3,14 +3,26 @@ import { Menu, Receipt } from 'lucide-react';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { marketing } from '@/lib/i18n/messages/marketing';
 import { getT } from '@/lib/i18n/server';
+import { AnchorScrollFix } from './AnchorScrollFix';
 
-const NAV = [
+const NAV_BASE = [
   { href: '/#how', key: 'shell.nav.how' },
-  { href: '/#features', key: 'shell.nav.features' },
+  { href: '/about#features', key: 'shell.nav.features' },
   { href: '/pricing', key: 'shell.nav.pricing' },
   { href: '/showcase', key: 'shell.nav.demo' },
   { href: '/about', key: 'shell.nav.about' },
 ] as const;
+
+/**
+ * The public free-leak-check page (S15) is env-gated: LEAK_CHECK_PUBLIC=1.
+ * Read at request time on the server, so flipping the env needs no rebuild.
+ * (Swap for `leakCheck.leakCheckPublicEnabled()` from @restomatch/api once it is on this base.)
+ */
+function leakCheckPublic(): boolean {
+  return process.env.LEAK_CHECK_PUBLIC === '1';
+}
+
+const LEAK_CHECK = { href: '/leak-check', key: 'shell.nav.leakCheck' } as const;
 
 function Logo({ small = false }: { small?: boolean }) {
   return (
@@ -35,6 +47,8 @@ function Logo({ small = false }: { small?: boolean }) {
 export async function MarketingShell({ children }: { children: React.ReactNode }) {
   const t = await getT(marketing);
   const year = new Date().getFullYear();
+  const leakCheck = leakCheckPublic();
+  const NAV = leakCheck ? [...NAV_BASE.slice(0, 3), LEAK_CHECK, ...NAV_BASE.slice(3)] : NAV_BASE;
   const link =
     'rounded-lg px-3 py-2 text-sm font-medium text-muted transition-colors hover:bg-surface-2 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60';
 
@@ -114,7 +128,8 @@ export async function MarketingShell({ children }: { children: React.ReactNode }
         {children}
       </main>
 
-      <footer className="border-t border-line bg-surface/40">
+      <AnchorScrollFix />
+      <footer className="rm-defer border-t border-line bg-surface/40">
         <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
           <div className="flex flex-col gap-10 md:flex-row md:items-start md:justify-between">
             <div className="max-w-sm">
@@ -134,12 +149,17 @@ export async function MarketingShell({ children }: { children: React.ReactNode }
                 <Link href="/#how" className="text-muted hover:text-ink">
                   {t('shell.nav.how')}
                 </Link>
-                <Link href="/#features" className="text-muted hover:text-ink">
+                <Link href="/about#features" className="text-muted hover:text-ink">
                   {t('shell.nav.features')}
                 </Link>
                 <Link href="/pricing" className="text-muted hover:text-ink">
                   {t('shell.nav.pricing')}
                 </Link>
+                {leakCheck ? (
+                  <Link href={LEAK_CHECK.href} className="text-muted hover:text-ink">
+                    {t(LEAK_CHECK.key)}
+                  </Link>
+                ) : null}
                 <Link href="/showcase" className="text-muted hover:text-ink">
                   {t('shell.nav.demo')}
                 </Link>

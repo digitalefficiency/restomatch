@@ -14,6 +14,7 @@ export const he = {
       how: 'איך זה עובד',
       features: 'יכולות',
       pricing: 'מחירים',
+      leakCheck: 'בדיקת דליפה חינם',
       demo: 'דמו חי',
       about: 'אודות',
     },

@@ -18,7 +18,8 @@ export interface OwnerKpis {
   monthPotentialLossIls: number;
   monthSavingsCapturedIls: number;
   pendingApprovalsCount: number;
-  weekCleanMatchPct: number;
+  /** null = no match runs in the last 7 days (nothing to judge — never a fake 100%). */
+  weekCleanMatchPct: number | null;
 }
 
 export function emptyKpis(): OwnerKpis {
@@ -26,8 +27,17 @@ export function emptyKpis(): OwnerKpis {
     monthPotentialLossIls: 0,
     monthSavingsCapturedIls: 0,
     pendingApprovalsCount: 0,
-    weekCleanMatchPct: 100,
+    weekCleanMatchPct: null,
   };
+}
+
+/**
+ * Excludes the QTY_SHORT that the engine zeroes when the invoice bills the
+ * missing units: the money sits on its QTY_OVER sibling, so the ₪0 twin is not
+ * a decision for anyone (approvals queue, pending count).
+ */
+export function notZeroShortTwin() {
+  return sql`not (${discrepancies.type} = 'QTY_SHORT' and ${discrepancies.deltaAmount} = 0)`;
 }
 
 export interface ComputeOwnerKpisOptions {
@@ -44,7 +54,8 @@ export interface ComputeOwnerKpisOptions {
  *    (resolved or accepted) in the current month.
  *  • pendingApprovalsCount — discrepancies awaiting decision (open or escalated).
  *  • weekCleanMatchPct — % of match_runs in the last 7 days whose
- *    overall_status was 'clean'. 100 if no runs yet.
+ *    overall_status was 'clean'. null if no runs yet (NUM-10: an empty
+ *    week used to report a misleading 100%).
  */
 export async function computeOwnerKpis(
   db: Database,
@@ -84,7 +95,8 @@ export async function computeOwnerKpis(
       ),
     );
 
-  // 3. Pending approvals — open or escalated, any severity above info
+  // 3. Pending approvals — open or escalated, any severity above info, minus
+  //    the ₪0 QTY_SHORT twin of a short delivery billed in full (nothing to decide).
   const pending = await db
     .select({ c: count(discrepancies.id) })
     .from(discrepancies)
@@ -93,6 +105,7 @@ export async function computeOwnerKpis(
         eq(discrepancies.restaurantId, restaurantId),
         inArray(discrepancies.severity, ['warn', 'block']),
         inArray(discrepancies.resolutionStatus, ['open', 'escalated']),
+        notZeroShortTwin(),
       ),
     );
 
@@ -114,13 +127,13 @@ export async function computeOwnerKpis(
 
   const total = Number(weekRuns[0]?.total ?? 0);
   const cleanCount = Number(weekRuns[0]?.clean ?? 0);
-  const weekCleanMatchPct = total === 0 ? 100 : (cleanCount / total) * 100;
+  const weekCleanMatchPct = total === 0 ? null : Math.round((cleanCount / total) * 1000) / 10;
 
   return {
     monthPotentialLossIls: Number(potentialLoss[0]?.sum ?? 0),
     monthSavingsCapturedIls: Number(savings[0]?.sum ?? 0),
     pendingApprovalsCount: Number(pending[0]?.c ?? 0),
-    weekCleanMatchPct: Math.round(weekCleanMatchPct * 10) / 10,
+    weekCleanMatchPct,
   };
 }
 

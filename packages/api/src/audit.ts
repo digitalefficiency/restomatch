@@ -47,7 +47,10 @@ export type AuditAction =
   // Approvals (already emitted by the approvals router)
   | 'discrepancy.approved'
   | 'discrepancy.rejected'
-  | 'discrepancy.escalated';
+  | 'discrepancy.escalated'
+  // Chain / branches (chain router)
+  | 'chain.branch_added'
+  | 'chain.branch_renamed';
 
 export interface AuditEntry {
   /** Tenant the action belongs to. On a tenant connection this must equal the GUC. */

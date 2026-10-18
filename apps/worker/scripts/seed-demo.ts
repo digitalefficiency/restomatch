@@ -165,7 +165,8 @@ const INVOICE_PREFIX: Record<string, string> = {
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
 async function main() {
-  const [restaurant] = await db.select().from(restaurants).limit(1);
+  // The base seed's restaurant = the oldest one (seed-chain-demo adds branches later).
+  const [restaurant] = await db.select().from(restaurants).orderBy(asc(restaurants.createdAt)).limit(1);
   if (!restaurant) throw new Error('no restaurant — run the base seed first');
   const restaurantId = restaurant.id;
 

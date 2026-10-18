@@ -164,6 +164,8 @@ export const en: Shape<typeof he> = {
     generic: 'Something went wrong. Please try again.',
     upload: 'Uploading the scan failed: {message}',
     ocrTimeout: 'Reading the invoice is taking longer than usual — you can keep receiving against the order.',
+    queueUnavailable:
+      'The invoice was saved, but automatic reading is unavailable right now — keep receiving against the order.',
     notFound: 'Record not found.',
     forbidden: "You don't have permission to do that.",
   },

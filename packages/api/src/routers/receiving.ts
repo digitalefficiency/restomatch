@@ -22,7 +22,7 @@ import {
   restaurants,
   suppliers,
 } from '@restomatch/db';
-import { enqueueOcrInvoice } from '@restomatch/queue';
+import { enqueueOcrInvoice, isQueueUnavailableError } from '@restomatch/queue';
 import type { InvoiceOcrResult } from '@restomatch/types';
 import { assertGrOwned, assertInvoiceOwned, assertSupplierOwned } from '../tenant';
 import { fillEnglishNames } from '../receiving/english';
@@ -694,10 +694,14 @@ export const receivingRouter = router({
       }
 
       // Server-authoritative enqueue of the OCR job. The queue producer no-ops
-      // (console.warn) when REDIS_URL is unset, so wrap defensively to ensure a
-      // transient enqueue failure never rolls back an already-persisted invoice.
+      // (console.warn) when REDIS_URL is unset and fails fast (≤3 s, coded
+      // 'queue.unavailable') when Redis is unreachable — so the invoice stays
+      // persisted and the client is told OCR was not queued instead of hanging
+      // until the function times out (EN-7). REDIS_URL unset (no queue at all)
+      // also reports ocrQueued:false, so the wizard doesn't poll for 30 s.
+      let ocrQueued = false;
       try {
-        await enqueueOcrInvoice({
+        ocrQueued = await enqueueOcrInvoice({
           restaurantId,
           invoiceId: invoice.id,
           supplierId: input.supplierId,
@@ -705,13 +709,15 @@ export const receivingRouter = router({
           ...(mockProviders ? { mockProviders } : {}),
         });
       } catch (err) {
+        ocrQueued = false;
         console.error(
-          `[receiving.registerInvoice] failed to enqueue ocr-invoice for invoice=${invoice.id}`,
+          `[receiving.registerInvoice] failed to enqueue ocr-invoice for invoice=${invoice.id}` +
+            (isQueueUnavailableError(err) ? ' (queue.unavailable)' : ''),
           err,
         );
       }
 
-      return { invoiceId: invoice.id, alreadyExisted: false as const };
+      return { invoiceId: invoice.id, alreadyExisted: false as const, ocrQueued };
     }),
 
   /**

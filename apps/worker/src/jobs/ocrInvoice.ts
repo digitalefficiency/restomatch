@@ -1,6 +1,6 @@
 import { fillEnglishNames, meterOcrScan } from '@restomatch/api';
 import { matchProductTopN, MockEmbeddingProvider } from '@restomatch/catalog';
-import { and, createDb, eq, invoiceLines, invoices, restaurants } from '@restomatch/db';
+import { and, eq, invoiceLines, invoices, restaurants } from '@restomatch/db';
 import {
   ClaudeVision,
   runOcrPipeline,
@@ -11,6 +11,7 @@ import {
 import { enqueueMatchInvoice } from '@restomatch/queue';
 import type { OcrInvoiceJob } from '@restomatch/types';
 import { makeWorker } from '../queue';
+import { jobDb } from '../db';
 
 export type { OcrInvoiceJob };
 
@@ -52,7 +53,7 @@ export function startOcrInvoiceWorker() {
   return makeWorker<OcrInvoiceJob>('ocr-invoice', async (job) => {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error('DATABASE_URL is required');
-    const db = createDb(url);
+    const db = jobDb(url);
 
     // Tenant guard: job payloads are not a trust boundary — verify the invoice
     // belongs to the payload's restaurant, and take supplierId from the verified

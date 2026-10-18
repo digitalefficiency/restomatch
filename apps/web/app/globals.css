@@ -223,3 +223,85 @@ html {
     }
   }
 }
+
+/* ───────────── S6 Landing v2 motion (append-only, CSS-only, reduced-motion safe) ───────────── */
+
+/* "Receiver in English": a Hebrew invoice line morphs into its English
+   rendering and back, rows staggered by --i. Reduced motion shows both. */
+.rm-morph {
+  display: grid;
+}
+.rm-morph > * {
+  grid-area: 1 / 1;
+}
+@keyframes rm-morph-out {
+  0%, 32% { opacity: 1; transform: none; filter: none; }
+  42%, 86% { opacity: 0; transform: translateY(-6px); filter: blur(2px); }
+  96%, 100% { opacity: 1; transform: none; filter: none; }
+}
+@keyframes rm-morph-in {
+  0%, 32% { opacity: 0; transform: translateY(6px); filter: blur(2px); }
+  42%, 86% { opacity: 1; transform: none; filter: none; }
+  96%, 100% { opacity: 0; transform: translateY(6px); filter: blur(2px); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .rm-morph-he {
+    animation: rm-morph-out 7s ease-in-out infinite;
+    animation-delay: calc(var(--i, 0) * 0.35s);
+  }
+  .rm-morph-en {
+    opacity: 0;
+    animation: rm-morph-in 7s ease-in-out infinite;
+    animation-delay: calc(var(--i, 0) * 0.35s);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rm-morph {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+  .rm-morph-he {
+    font-size: 0.75rem;
+    opacity: 0.75;
+  }
+}
+
+/* "How it works": steps rise in one after another as the row scrolls into
+   view, and the connector line draws itself (scroll-driven; Chromium).
+   Elsewhere / reduced motion: everything is simply visible. */
+@keyframes rm-draw {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .rm-step {
+      animation: rm-reveal linear both;
+      animation-timeline: view();
+    }
+    .rm-step:nth-child(1) { animation-range: entry 5% entry 55%; }
+    .rm-step:nth-child(2) { animation-range: entry 20% entry 70%; }
+    .rm-step:nth-child(3) { animation-range: entry 35% entry 85%; }
+    .rm-draw {
+      transform-origin: left;
+      animation: rm-draw linear both;
+      animation-timeline: view();
+      animation-range: entry 10% cover 45%;
+    }
+    [dir='rtl'] .rm-draw {
+      transform-origin: right;
+    }
+  }
+}
+
+/* ───────────── S6 landing perf: skip off-screen work until it's near ─────────────
+ * Below-the-fold landing sections and the marketing footer don't lay out or
+ * paint until they approach the viewport. That keeps first paint (and the hero
+ * poster = LCP) free of their work, and their fonts (JetBrains Mono, the ₪
+ * glyph's latin-ext subset) load when needed instead of during first render.
+ * `auto` remembers each section's real size once rendered (no scroll jumps). */
+.rm-defer {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 640px;
+}

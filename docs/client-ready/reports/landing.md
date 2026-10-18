@@ -259,3 +259,227 @@ CHROME_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npx lighthouse@12
 ```
 
 Plus the Playwright checks under *Works* and *Round 2 §3*. Helper scripts were throwaway and are not committed.
+
+---
+
+## Landing v2: short, focused, animated (round 4)
+
+The owner's brief: *"The landing page should be efficient and not overloaded with information, and you should invest in animations / videos inside it."* Nothing true was deleted. Every detail block **moved**, either to `/about` or into a collapsed accordion.
+
+### New flow of `/`
+
+| # | Section | What's on it | Motion |
+|---|---|---|---|
+| 1 | **Hero** | One ₪ headline ("How much money leaks at your back door?"), one sentence, primary CTA **"Get a free leak check"** → `#lead`. The secondary button is **"Watch 60 seconds"** when a promo video exists, and the live demo link otherwise. | Product video loop when `heroMedia.available`; otherwise the existing invoice⇄PO⇄delivery match card with the animated **₪412** counter (Pause, Play and Replay kept) |
+| 2 | **How it works** (`#how`) | 3 steps, one line each | CSS scroll-driven staggered reveal (`animation-timeline: view()`) plus a connector line that draws in. It mirrors in RTL. |
+| 3 | **Receiver in English** (`#features`) | The flagship: the invoice is in Hebrew and the receiver checks it in English | Each Hebrew invoice line morphs into its English version in a 7 s staggered loop. Each line carries `lang`/`dir`. |
+| 4 | **Proof**: one block, real numbers | ₪2,250/month = 1.5% of ₪150,000 (pilot target) · **0.39%** = Pro ₪590 ÷ ₪150,000 (break-even) · **12** checks. The block says "a target, not a promise". | Reveal |
+| 5 | **Pricing teaser** | Trial free · from ₪349 (from `PLAN_SEED`) → `/pricing` | Reveal |
+| 6 | **FAQ** | 7 questions, **collapsed** `<details>` (still in `FAQPage` JSON-LD) | — |
+| 7 | **Final CTA** (`#lead`) | Lead form (lazy), a one-line trust strip → `/about#trust`, and a demo link | — |
+
+All ₪ goes through `formatIls()`. Prices come from `PLAN_SEED`, and the proof figures are derived in code (`EXAMPLE_PURCHASING_ILS × PILOT_TARGET`, `pro ÷ purchasing`), so they cannot drift from `/pricing` or the calculator. This is the leak-economist rule: one consistent set of numbers.
+
+### What moved where (nothing deleted)
+
+| Block (v1 home) | Now |
+|---|---|
+| Facts strip | `/about` (`FactsStrip`) |
+| Problem in ₪ (4 leak types plus the ₪2,250 example) | `/about#problem` |
+| Full features (Receiver card, approvals, leak heatmap, "quiet when all is well", accounting export) | `/about#features`. Nav "Features" now points here. |
+| ROI calculator | `/about#roi`. The proof block links to it. |
+| Trust and security (RLS, 2FA, Amendment 13, audit log) | `/about#trust`. The CTA trust line links to it. |
+| FAQ | still on `/`, collapsed |
+
+These sections live in `app/(marketing)/_components/detail-sections.tsx` and were moved unchanged in substance.
+
+**Text volume:** `/` now renders **424 words (he) / 493 (en)** in `<main>`, with FAQ answers collapsed. The **590 / 711** words now on `/about` used to sit on the home page as well, so the home page carries **less than half** its v1 text. (The v1 total is estimated as v2 plus the moved words. The new v2 copy is shorter than the v1 lines it replaced.)
+
+### Video and media switch
+
+`apps/web/lib/heroMedia.ts`:
+```ts
+export const heroMedia = { available: false, loop: { webm, mp4 }, poster, promoVideo: null };
+```
+- **`available: false`** (shipped): the hero shows the animated match card. No `<video>` and no 404s for media files.
+- **`available: true`**: `HeroVideo` renders a muted, `playsInline`, `loop`, `autoPlay` video with the poster and `preload="none"`. The WebM and MP4 sources are attached only after `window.load`, and **never under `prefers-reduced-motion`**, which shows the poster only.
+- **`promoVideo: string`**: shows a "Watch 60 seconds" button that opens a native `<dialog>` with controls (`PromoVideoButton`). It is hidden while `promoVideo` is `null`. Nothing was added under `public/media/`. The media owner drops the files there and flips the flags.
+
+### Performance
+
+| Route | First Load JS before | After |
+|---|---|---|
+| `/` | **198 kB** (15.2 kB page) | **136 kB** (17.2 kB page), **−62 kB** |
+| `/about` | — | 121 kB (carries the ROI calculator now) |
+
+How:
+- `gsap` is **dynamically imported** inside `HeroMatch` (`import('gsap')` in an effect), so it is no longer in the initial chunk.
+- The lead form is `next/dynamic({ ssr:false })`, mounted by an `IntersectionObserver` (600 px ahead), or immediately when the URL hash is `#lead`. The container reserves the form's height (`min-h-[31rem]` on phones, `26rem` from `sm`), so mounting in view (e.g. landing on `/#lead`) does not shift the page.
+- The ROI calculator is off `/`.
+- The scroll animations are pure CSS, with no JS.
+
+**Lighthouse 12.8.2, mobile, simulated throttling, `next start`:**
+
+| `/` | Perf | A11y | Best-pr. | SEO | LCP | CLS |
+|---|---|---|---|---|---|---|
+| he | 82 · 95 · 91 (3 runs) | 100 | 100 | 100 | 3.7 · 2.9 · 3.3 s | 0.006 |
+| en | 95 | 100 | 100 | 100 | 2.9 s | 0.005 |
+
+**LCP is not yet under the 2.5 s target.** The LCP element is the SSR'd hero sentence: TTFB 0.46 s plus about 2.4 s of render delay. Under the 4× CPU throttle that delay is the shared React/Next bootstrap (the 103 kB shared chunk). It is not landing code: there is no render-blocking CSS, fonts are `font-display: swap`, and the hero has no entrance animation. That puts it at parity with the round-2 v1 numbers (2.6–3.0 s), while Best-practices went 96 → 100. Unthrottled Chromium LCP is 160–256 ms across all Layer-2 runs. A next lever, if needed: move the hero match card's client island behind `requestIdleCallback`, or trim the shared chunk. Both are outside this round.
+
+### Accessibility and motion
+- `prefers-reduced-motion`:
+  - the steps and reveals are shown statically
+  - the morph shows the Hebrew and English lines stacked
+  - the hero counter shows its final ₪ value
+  - no video loads
+- The promo `<dialog>` is a native dialog, so focus is trapped and Esc closes it, with a labelled close button.
+- Both the morph and the receiver card mark the originals `lang="he"`. The English sweep stays clean.
+- No console errors or hydration errors (he and en × desktop and mobile, with full motion and with reduced motion).
+
+### Screenshots
+`docs/client-ready/screenshots/`:
+- `landing2-before-{he,en}-{desktop,mobile}.png`
+- `landing2-after-{he,en}-{desktop,mobile}.png`
+- `landing2-after-about-{he,en}-{desktop,mobile}.png`
+
+They are taken from a production build with reduced motion, so every reveal is visible in a full-page capture.
+
+### Review fixes (Landing v2)
+The independent reviewer (layer 2b) found these, all now fixed:
+- **"How it works" scroll ranges:** the connector `<span>` sat inside the `<ol>`, so `.rm-step:nth-child(n)` hit the wrong items. Step 3 sat at about 50% opacity mid-screen. The connector now lives outside the list, and L2 asserts that step 3 is at opacity > 0.95 when centred.
+- **CTA promise:** the hero button says "free leak check". The form section now offers exactly that ("we'll run a few real invoices… and walk you through the result in a short demo").
+- **"Every gap stopped" was an overclaim.** It now reads "sent for approval before you pay; tiny ones (under 2%) pass automatically", matching the approval rules.
+- **Hero video:** it now has a pause/play toggle while playing (WCAG 2.2.2). The label flips; there is no `aria-pressed`.
+- **Lead form:** a `<noscript>` note; `aria-live` removed from the placeholder; taller mobile reserve.
+- **Receiver morph:** each line is read once as a Hebrew → English pair. The animated copies are `aria-hidden`.
+- Unused v1 step keys removed; report wording corrected.
+- Still open:
+  - **Promo captions:** the promo video needs he/en caption tracks when the real file lands (WCAG 1.2.2). There is no media yet, so there is nothing to caption.
+
+## Showcase numbers: NUM-2 to NUM-5 (round 4, same branch)
+
+The client will click through `/showcase`, so one invoice now carries one set of numbers on every screen. They are derived, not typed.
+
+- **NUM-2, the "Leak detective" heatmap.** It is built from the supplier profiles' own 60-day price trends:
+  - Each cell is a product that supplier actually sells; other cells are empty.
+  - Avi × cherry tomatoes = **+21%**, the same figure as the supplier page and the feed.
+  - Every other cell is within ±7%. The old −100% / +96% cells are gone.
+- **NUM-3, INV-7821.** The audit mock derives every header from the lines, ex-VAT, and the tiles say "(excl. VAT)":
+  - billed = Σ qty × price = **₪464**
+  - approved = Σ received × agreed = **₪428**
+  - caught = Σ variance = **₪36**: cherry tomatoes ₪30 (20 kg × ₪1.50) plus red pepper ₪6 (0.5 kg short)
+  - The paper scan shows the same ₪464 subtotal plus 18% VAT. The PO compare viewer's totals are labelled ex-VAT.
+  - Supplier-page rows of audited invoices take the audit figures. Their scans render the real lines, not synthesised ones.
+- **NUM-4, same event, same ₪ and date.**
+  - **INV-4882 = ₪3,420** on the invoices page, the supplier row and activity, the approvals log, the receiver PO-1235, and the feed (rendered via `formatIls`).
+  - The ₪3,420 is reachable from its own lines at the supplier's prices: 16 × 145 + 18 × 38 + 13 × 32.
+  - The cherry-tomato exception is the INV-7821 line, **₪30**, in the approvals log.
+  - **Every date is relative to today.** The mocks are rebuilt per local day (`dayMemo`), so a long-running server never shows yesterday's date or mismatches at hydration.
+  - Receiver times are read with local getters; the old timezone-pinned formatter would have differed on a UTC server.
+  - Audit records carry their PO number (PO-1234…). The receiver wizard shows the same invoice number and total as the invoices page.
+- **NUM-5, VAT 18%.** A single `SHOWCASE_VAT_RATE`, used by the paper invoice, the scan viewer, the PO compare viewer, the scan adapter, the receiver total and the labels.
+- **The second reviewer's findings, also fixed:**
+  - The receiver's Avi flow now bills 8 kg of pepper (7.5 arrived), and its headline is ₪36. The accepted unordered mint is flagged but not counted as a leak.
+  - Shegev's INV-3344 now contains Shegev's own products, at its delivery time (11:24–11:28). The Goldstar +6.7% alert's ₪ comes from that line.
+  - "8 / 11 lines matched" counts are replaced by "every item matched". The feed is now Dana's, matching the INV-4882 scan.
+  - The 5–10% gap in the approval rules is closed (2–10%).
+  - English names are aligned between the receiver and the rest of the showcase. INV-4882's first filing date respects the number order. "PO-1235" is used everywhere.
+  - The dashboard count-ups, entrances and radar respect reduced motion. The KPI values are server-rendered final (they used to render 0).
+- **Locked by `app/showcase/__tests__/numbers.test.ts` (9 tests):**
+  - headers vs lines
+  - INV-7821 / INV-4882 across screens
+  - the receiver against the invoices page (number, total, headline, English names)
+  - an English twin for every Hebrew mock string in the audits and supplier profiles
+- **Ownership:** all of it is under `app/showcase/**`, plus a 3-line import change in `app/scans/[invoiceId]/page.tsx` (S6 demo-scan fixtures, same mocks).
+
+## Verification (2 layers)
+
+All results are on the final tree.
+
+**Layer 1: automated gate (no reds).**
+
+The commands, in order:
+```bash
+pnpm install --frozen-lockfile
+DATABASE_URL_TEST=postgres://postgres:postgres@localhost:5432/restomatch_test pnpm exec turbo test --concurrency=1
+pnpm exec turbo typecheck
+cd apps/web && pnpm exec tsc --noEmit -p .
+pnpm --filter @restomatch/web lint
+cd apps/web && pnpm build
+```
+
+| Command | Result |
+|---|---|
+| `pnpm install --frozen-lockfile` | exit 0 |
+| `turbo test --concurrency=1` | **13/13 tasks**; web **206** tests (was 197; +9 showcase numbers), api 493, matching 86…; 1 skipped (worker, pre-existing) |
+| `turbo typecheck` | **17/17** |
+| web `tsc --noEmit` | **0 errors** |
+| web lint | **0 errors** (7 pre-existing warnings, untouched files) |
+| `pnpm build` (apps/web) | green; `/` First Load JS **136 kB** (was 198 kB) |
+
+**Layer 2(a): functional checks on a production build.**
+
+Setup:
+- `NODE_ENV=production next build && next start`, with placeholder `RESEND_API_KEY` / `EMAIL_FROM` / `SUPABASE_SERVICE_ROLE_KEY` and a local `AUTH_ENC_KEY` (local only).
+- Playwright (`apps/web/l2.tmp.mjs`, a throwaway script) covers he + en × desktop 1440 + mobile 390 × reduced motion on/off, which is 8 contexts per mode.
+
+Mode **heroMedia off** (as shipped): PASS. Pages covered:
+- `/`, `/pricing`, `/about`
+- `/showcase`, `/showcase/dashboard`, `/showcase/dashboard/invoices`
+- the Avi and HaKerem supplier pages
+- `/showcase/approvals`, `/showcase/receiver`, `/showcase/deliveries`
+
+Assertions:
+- **Page basics:** HTTP < 400 on every response, correct `<html lang/dir>`, and **0 console errors / 0 hydration warnings**.
+- **Animations by motion setting:**
+  - `.rm-step` and the morph animate with motion on, and are static under reduced motion.
+  - Step 3 is fully opaque when centred.
+  - The HeroMatch Pause control appears only with motion; the final ₪412 shows under reduced motion.
+- **Hero:** no `<video>` and no watch button while `available:false` / `promoVideo:null`.
+- **Lead form:**
+  - It is lazy: absent before scrolling.
+  - It submits locally (into the local dev DB) and shows the success message, in he and en.
+  - Loading `/#lead` directly mounts it.
+- **Pages:** the `/about` anchors `#problem #features #roi #trust` exist.
+- **English mode:** no Hebrew outside `lang="he"` anywhere in the pages above.
+- **Showcase numbers:**
+  - The INV-7821 drawer shows 464 / 428 / 36.
+  - The approvals log shows ₪3,420 and the ₪30 exception, with no 3,200 and no fixed May dates.
+  - The heatmap cells are `+21% +1% +7% −3% +1% −1% +3% 0%`.
+
+Mode **heroMedia on**, with a dummy local WebM/MP4/poster and a promo, built then reverted (never committed): PASS.
+- **Video:** the hero `<video>` is muted, looping, inline and playing with motion on. It has **no sources** under reduced motion.
+- **Pause toggle:** it pauses the video and its label flips.
+- **Promo dialog:** the watch button opens the `<dialog>`, focus moves inside, Esc closes it, and focus returns to the button.
+
+**Speed:**
+- **Unthrottled LCP:** 168–256 ms.
+- **Lighthouse 12.8.2 mobile (simulated):**
+
+| Locale | Perf | A11y | Best practices | SEO | LCP | CLS |
+|---|---|---|---|---|---|---|
+| he | 95 | 100 | 100 | 100 | 2.8 s | ≤ 0.006 |
+| en | 95 | 100 | 100 | 100 | 2.9 s | ≤ 0.006 |
+
+- **The LCP target (2.5 s) is still missed.** See "Performance" above: the cost is the shared framework bootstrap, not landing code.
+
+**Layer 2(b): independent refuters.** Fresh subagents that did not write the code, given the diff, the screenshots and the L2 evidence.
+- **Round 1, on `8a8d46c`: NOT REFUTED.** 3 should-fixes plus nits; all fixed (see "Review fixes").
+- **Round 2, on `14f9bc7`: REFUTED (narrowly).**
+  - NUM-2 to NUM-5 held, but it found remaining cross-screen contradictions: the receiver's Avi flow, Shegev's INV-3344, the line counts, the module-level dates, the feed literals and the toggle semantics.
+  - All are fixed above, both layers were re-run green, and the test now locks those cases too.
+
+**Not this PR's:** the Vercel preview build fails for **every** branch with `DATABASE_URL is required for the auth connection`. The Preview environment has no DB URL. This was noted on the PR.
+
+### Add-on: Free leak check link (env-gated)
+- `/leak-check` is now in the marketing header nav, the mobile menu and the footer "Product" column.
+  - Labels: he "בדיקת דליפה חינם", en "Free leak check".
+  - The link renders **only** when `LEAK_CHECK_PUBLIC=1`.
+  - The flag is read on the server at request time, in `MarketingShell`; it is not a `NEXT_PUBLIC_` variable.
+  - `leakCheck.leakCheckPublicEnabled()` doesn't exist on this base yet. Swap it in at merge, as the comment in the file says.
+- **Verification:**
+  - **L1:** all green (web 206 tests, including i18n parity; typecheck, lint and build).
+  - **L2a:** a production build with the flag off shows no link on `/`, `/pricing` or `/about` (he/en × desktop/mobile), and the full L2 "off" suite still passes. With the flag on, the link appears in the header nav, the mobile menu and the footer with the right label, and there are 0 console errors.
+  - **L2b:** an independent reviewer found NOT REFUTED.
+- **Deploy order:** this branch has no `/leak-check` page; it comes from PR #44. Turn `LEAK_CHECK_PUBLIC=1` on only after that page ships, or every marketing page links to a 404.

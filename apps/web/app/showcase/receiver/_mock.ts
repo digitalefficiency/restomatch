@@ -3,6 +3,9 @@
  * structures for real tRPC query results — the shapes stay identical.
  */
 
+import { SHOWCASE_VAT_RATE } from '../_lib/money';
+import { invoiceAudits } from '../dashboard/invoices/_mock';
+
 export interface MockSupplierExpectation {
   supplierId: string;
   supplierName: string;
@@ -11,8 +14,8 @@ export interface MockSupplierExpectation {
   supplierInitials: string;
   expectedAt: string; // ISO
   poIds: string[];
-  totalLines: number;
-  totalEstimated: number;
+  totalLines: number; // PO lines in the preset below
+  totalEstimated: number; // PO total, ex-VAT — same lines as the invoice audit mock
   hasActiveReceipt: boolean;
 }
 
@@ -85,34 +88,34 @@ export const MOCK_SUPPLIERS: MockSupplierExpectation[] = [
   {
     supplierId: 'sup-avi',
     supplierName: 'ירקני אבי',
-    supplierNameEn: "Avi's Greengrocer",
+    supplierNameEn: "Avi's Produce",
     supplierInitials: 'יא',
     expectedAt: new Date(new Date().setHours(8, 0, 0, 0)).toISOString(),
     poIds: ['po-1234'],
-    totalLines: 12,
-    totalEstimated: 1284.5,
+    totalLines: 5,
+    totalEstimated: 422,
     hasActiveReceipt: false,
   },
   {
     supplierId: 'sup-kerem',
     supplierName: 'קצביית הכרם',
-    supplierNameEn: "HaKerem Butchery",
+    supplierNameEn: 'HaKerem Butchery',
     supplierInitials: 'קה',
     expectedAt: new Date(new Date().setHours(9, 30, 0, 0)).toISOString(),
     poIds: ['po-1235'],
-    totalLines: 8,
+    totalLines: 3,
     totalEstimated: 3420,
     hasActiveReceipt: false,
   },
   {
     supplierId: 'sup-brans',
     supplierName: 'מאפיית ברנס',
-    supplierNameEn: "Brans Bakery",
+    supplierNameEn: 'Brans Bakery',
     supplierInitials: 'מב',
     expectedAt: new Date(new Date().setHours(6, 0, 0, 0)).toISOString(),
     poIds: ['po-1236'],
-    totalLines: 4,
-    totalEstimated: 240,
+    totalLines: 2,
+    totalEstimated: 228,
     hasActiveReceipt: true,
   },
   {
@@ -122,8 +125,8 @@ export const MOCK_SUPPLIERS: MockSupplierExpectation[] = [
     supplierInitials: 'דק',
     expectedAt: new Date(new Date().setHours(11, 0, 0, 0)).toISOString(),
     poIds: ['po-1237'],
-    totalLines: 6,
-    totalEstimated: 1850,
+    totalLines: 2,
+    totalEstimated: 1205,
     hasActiveReceipt: false,
   },
 ];
@@ -141,24 +144,24 @@ export function mockReconcile(supplierId: string): ReconciliationResult {
         productId: 'prod-tomato',
         productName: 'עגבניה שרי',
         productNameEn: 'Cherry tomatoes',
-        poQty: 10,
+        poQty: 20,
         poUnit: 'ק״ג',
-        invoiceQty: 12,
+        invoiceQty: 20,
         invoiceUnit: 'ק״ג',
         poUnitPrice: 7,
         invoiceUnitPrice: 8.5,
         status: 'price_diff',
-        deltaIls: (8.5 - 7) * 12,
+        deltaIls: (8.5 - 7) * 20,
       },
       {
         invoiceLineIndex: 1,
         poLineId: 'pl-2',
         productId: 'prod-cucumber',
         productName: 'מלפפון חממה',
-        productNameEn: 'Greenhouse cucumber',
-        poQty: 5,
+        productNameEn: 'Hothouse cucumbers',
+        poQty: 15,
         poUnit: 'ק״ג',
-        invoiceQty: 5,
+        invoiceQty: 15,
         invoiceUnit: 'ק״ג',
         poUnitPrice: 6,
         invoiceUnitPrice: 6,
@@ -170,15 +173,15 @@ export function mockReconcile(supplierId: string): ReconciliationResult {
         poLineId: 'pl-3',
         productId: 'prod-pepper',
         productName: 'פלפל אדום',
-        productNameEn: 'Red pepper',
-        poQty: 3,
+        productNameEn: 'Red peppers',
+        poQty: 8,
         poUnit: 'ק״ג',
-        invoiceQty: 2.5,
+        invoiceQty: 8,
         invoiceUnit: 'ק״ג',
         poUnitPrice: 12,
         invoiceUnitPrice: 12,
-        status: 'qty_diff',
-        deltaIls: (3 - 2.5) * 12,
+        status: 'qty_diff', // billed 8 kg, 7.5 kg arrived (INV-7821)
+        deltaIls: (8 - 7.5) * 12,
       },
       {
         invoiceLineIndex: 3,
@@ -186,9 +189,9 @@ export function mockReconcile(supplierId: string): ReconciliationResult {
         productId: 'prod-lettuce',
         productName: 'חסה אייסברג',
         productNameEn: 'Iceberg lettuce',
-        poQty: 4,
+        poQty: 12,
         poUnit: 'יח׳',
-        invoiceQty: 4,
+        invoiceQty: 12,
         invoiceUnit: 'יח׳',
         poUnitPrice: 7.5,
         invoiceUnitPrice: 7.5,
@@ -200,15 +203,17 @@ export function mockReconcile(supplierId: string): ReconciliationResult {
         poLineId: null,
         productId: 'prod-mint',
         productName: 'נענע',
-        productNameEn: 'Mint',
+        productNameEn: 'Fresh mint',
         poQty: null,
         poUnit: null,
-        invoiceQty: 2,
+        invoiceQty: 4,
         invoiceUnit: 'יח׳',
         poUnitPrice: null,
         invoiceUnitPrice: 4.5,
         status: 'unordered',
-        deltaIls: 2 * 4.5,
+        // Flagged for a decision, not counted as a leak: the team accepted it
+        // (INV-7821 approves it at the invoiced price).
+        deltaIls: 0,
       },
       {
         invoiceLineIndex: null,
@@ -232,10 +237,10 @@ export function mockReconcile(supplierId: string): ReconciliationResult {
         poLineId: 'pl-10',
         productId: 'prod-entrecote',
         productName: 'אנטריקוט',
-        productNameEn: 'Entrecote',
-        poQty: 12,
+        productNameEn: 'Rib-eye',
+        poQty: 16,
         poUnit: 'ק״ג',
-        invoiceQty: 12,
+        invoiceQty: 16,
         invoiceUnit: 'ק״ג',
         poUnitPrice: 145,
         invoiceUnitPrice: 145,
@@ -248,14 +253,14 @@ export function mockReconcile(supplierId: string): ReconciliationResult {
         productId: 'prod-chicken-breast',
         productName: 'חזה עוף',
         productNameEn: 'Chicken breast',
-        poQty: 20,
+        poQty: 18,
         poUnit: 'ק״ג',
         invoiceQty: 18,
         invoiceUnit: 'ק״ג',
         poUnitPrice: 38,
         invoiceUnitPrice: 38,
-        status: 'qty_diff',
-        deltaIls: (20 - 18) * 38,
+        status: 'matched',
+        deltaIls: 0,
       },
       {
         invoiceLineIndex: 2,
@@ -263,9 +268,9 @@ export function mockReconcile(supplierId: string): ReconciliationResult {
         productId: 'prod-chicken-liver',
         productName: 'כבד עוף',
         productNameEn: 'Chicken liver',
-        poQty: 6,
+        poQty: 13,
         poUnit: 'ק״ג',
-        invoiceQty: 6,
+        invoiceQty: 13,
         invoiceUnit: 'ק״ג',
         poUnitPrice: 32,
         invoiceUnitPrice: 32,
@@ -318,8 +323,8 @@ export function mockReconcile(supplierId: string): ReconciliationResult {
         invoiceUnit: 'ק״ג',
         poUnitPrice: 195,
         invoiceUnitPrice: 195,
-        status: 'qty_diff', // actually arrived 3.2 in real world
-        deltaIls: (4 - 3.2) * 195,
+        status: 'qty_diff', // billed 4 kg, 3.2 kg arrived (INV-9012)
+        deltaIls: 156, // (4 − 3.2) × ₪195, written out to avoid 155.99999…
       },
       {
         invoiceLineIndex: 1,
@@ -366,9 +371,10 @@ function buildResult(supplierId: string, lines: ReconciliationLine[]): Reconcili
   );
   return {
     invoiceMeta: {
-      invoiceNumber: `INV-${Math.floor(1000 + Math.random() * 9000)}`,
+      // The invoice audited for this PO on the invoices page (same number, same ₪).
+      invoiceNumber: invoiceForPo(supplierId) ?? '—',
       invoiceDate: new Date().toISOString().slice(0, 10),
-      totalInclVat: Math.round(invoiceTotal * 1.18 * 100) / 100,
+      totalInclVat: Math.round(invoiceTotal * (1 + SHOWCASE_VAT_RATE) * 100) / 100,
       ocrConfidence: 0.94,
     },
     matchedSupplierId: supplierId,
@@ -380,4 +386,9 @@ function buildResult(supplierId: string, lines: ReconciliationLine[]): Reconcili
       headlineDelta: Math.round(headlineDelta * 100) / 100,
     },
   };
+}
+
+function invoiceForPo(supplierId: string): string | undefined {
+  const poIds = MOCK_SUPPLIERS.find((s) => s.supplierId === supplierId)?.poIds ?? [];
+  return invoiceAudits().find((a) => poIds.includes(a.poNumber.toLowerCase()))?.invoiceNumber;
 }

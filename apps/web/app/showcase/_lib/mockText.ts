@@ -10,6 +10,17 @@ import type { Locale } from '@/lib/i18n/config';
  * All names here are fictional demo data.
  */
 const EN: Record<string, string> = {
+  'דחתה את מחיר העגבניות': 'Rejected the tomato price',
+  'מחיר עלה ב-6.7% מהממוצע. אושר במחיר ההזמנה עד בירור מול ההסכם.': 'Price 6.7% above average. Approved at the order price pending a check against the agreement.',
+  'התאמה מלאה · כל הפריטים תאמו': 'Full match · every item matched',
+  'מחיר גולדסטאר גבוה, פריט לא בהזמנה (תוויות ללא עלות)': 'Goldstar price up, item not ordered (labels, no charge)',
+  'מ-4.5 ל-4.8 לבקבוק ב-INV-3344. בדוק מול הסכם.': 'From 4.5 to 4.8 a bottle on INV-3344. Check against the agreement.',
+  'גולדסטאר אושר במחיר ההזמנה · תוויות מבצע ללא עלות': 'Goldstar approved at the order price · promo labels at no charge',
+  'פטרוזיליה': 'Parsley',
+  'הוזמן ולא סופק — לא חויב.': 'Ordered but not delivered — not billed.',
+  'נחסך בעקבות תיקון כמות פלפל אדום': 'Saved by correcting the red pepper quantity',
+  'דנה תפסה כמות חסרה בסלמון ומחיר גבוה בדניס': 'Dana caught short salmon and an over-priced sea bream',
+  'INV-3344 נסגרה': 'INV-3344 closed',
   // ── Suppliers ────────────────────────────────────────────────────────────
   'ירקני אבי': "Avi's Produce",
   'קצביית הכרם': 'HaKerem Butchery',
@@ -80,8 +91,6 @@ const EN: Record<string, string> = {
   לחמניות: 'Bread rolls',
   'לחמניות שום': 'Garlic rolls',
   'לחם פרוס': 'Sliced bread',
-  'יין אדום קברנה': 'Cabernet red wine',
-  'וודקה גריי גוס': 'Grey Goose vodka',
   'תוויות מבצע': 'Promo labels',
   'גולדסטאר 0.33ל׳': 'Goldstar beer 330ml',
   'יין מרלו רקנאטי': 'Recanati Merlot',
@@ -103,23 +112,22 @@ const EN: Record<string, string> = {
     'Free marketing labels from the supplier. Logged for the record.',
 
   // ── Invoice-audit timeline ───────────────────────────────────────────────
-  'PO #1234 הופעל לקבלה': 'PO #1234 opened for receiving',
+  'PO-1234 הופעל לקבלה': 'PO-1234 opened for receiving',
   'צילם את החשבונית': 'Photographed the invoice',
   'צילמה את החשבונית': 'Photographed the invoice',
   'OCR בביטחון 94%': 'OCR confidence 94%',
-  'זיהתה 3 חריגות': 'Found 3 variances',
+  'זיהתה 4 חריגות': 'Found 4 variances',
   'זיהתה 2 חריגות': 'Found 2 variances',
-  'זיהתה פריט לא בהזמנה': 'Found an item that was not ordered',
-  'מחיר גבוה, כמות חסרה, פריט לא בהזמנה': 'Price up, short quantity, item not ordered',
+  'מחיר גבוה, כמות חסרה, פריט לא בהזמנה, פריט שלא סופק':
+    'Price up, short quantity, item not ordered, item not delivered',
   'עדכן כמות פלפל אדום': 'Corrected red pepper quantity',
   'עדכנה כמות סלמון': 'Corrected salmon quantity',
-  'מ-3 ק״ג ל-2.5 ק״ג': 'From 3 kg to 2.5 kg',
+  'מ-8 ק״ג ל-7.5 ק״ג': 'From 8 kg to 7.5 kg',
   'מ-4 ל-3.2 ק״ג': 'From 4 to 3.2 kg',
   'סגר את הקבלה': 'Closed the receiving',
   'סגרה את הקבלה': 'Closed the receiving',
   '4 סטטוסים סודרו · 1 לאישור מנהל': '4 lines resolved · 1 sent for manager approval',
   'חשבונית כפולה זוהתה': 'Duplicate invoice detected',
-  'INV-4882 כבר קיימת מ-12/05': 'INV-4882 already on file since 12/05',
   'תשלום נחסם אוטומטית': 'Payment blocked automatically',
   'נשלחה התראה לחשב + בעלים': 'Bookkeeper and owner alerted',
   'התאמה מלאה': 'Full match',
@@ -127,7 +135,6 @@ const EN: Record<string, string> = {
   'אישר אוטומטית': 'Auto-approved',
   'כמות קצרה + מחיר גבוה': 'Short quantity + price up',
   'מחיר דניס מסומן לבירור': 'Sea bream price flagged for follow-up',
-  'תוויות בעלות 0 — לא נדרשת התערבות': 'Zero-cost labels — no action needed',
   'אישר את הקבלה': 'Approved the receiving',
 
   // ── Supplier activity feed ───────────────────────────────────────────────
@@ -138,46 +145,34 @@ const EN: Record<string, string> = {
   'INV-9012 נסגרה': 'INV-9012 closed',
   'INV-2210 נסגרה': 'INV-2210 closed',
   'INV-3287 נסגרה': 'INV-3287 closed',
-  'INV-3344 נסגרה עם 2 חריגות': 'INV-3344 closed with 2 variances',
   'INV-4882 חסומה — חשבונית כפולה': 'INV-4882 blocked — duplicate invoice',
-  'יוסי תפס עליית מחיר עגבניות 21% · אישר ידנית':
-    'Yossi caught a 21% tomato price rise · approved manually',
+  'יוסי תפס עליית מחיר עגבניות 21% · הועבר לאישור בעלים':
+    'Yossi caught a 21% tomato price rise · sent to the owner for approval',
   'עגבניה שרי — קפיצה 21%': 'Cherry tomatoes — up 21%',
   'דניס — קפיצה 8.2%': 'Sea bream — up 8.2%',
   'מעל הממוצע ההיסטורי של 60 ימים': 'Above the 60-day historical average',
-  'התאמה מלאה · 8 פריטים תאמו': 'Full match · 8 lines matched',
-  'התאמה מלאה · 11 פריטים תאמו': 'Full match · 11 lines matched',
   'דיון פתוח על מחיר פלפל': 'Open dispute on pepper price',
   'הבקשה ממתינה לחזרת ספק': 'Waiting for the supplier to respond',
-  '₪64 נחסכו בעקבות התאמת כמות סלמון': '₪64 saved after a salmon quantity correction',
   'אחור באספקה — 45 דק׳': 'Late delivery — 45 min',
   'הגיע ב-08:45 במקום 08:00 הצפוי': 'Arrived 08:45 instead of the expected 08:00',
   'תשלום חסום אוטומטית · ממתין לבירור': 'Payment blocked automatically · pending review',
-  'דנה תפסה כמות חסרה בסלמון · ₪156 נחסכו': 'Dana caught a salmon shortfall · ₪156 saved',
   'גולדסטאר עלה ב-6.7%': 'Goldstar up 6.7%',
-  'מ-₪4.5 ל-₪4.8 בקבוק. בדוק מול הסכם.': 'From ₪4.5 to ₪4.8 a bottle. Check against the agreement.',
-  'יוסי תיקן 8 בקבוקים יין שלא הגיעו': 'Yossi corrected 8 bottles of wine that never arrived',
   'מחלוקת על חוסר במשלוח': 'Dispute over a short delivery',
   'חסרו 4 בקבוקי וודקה — ממתינים לתגובת הספק':
     '4 bottles of vodka missing — waiting on the supplier',
 
   // ── Owner dashboard live feed ────────────────────────────────────────────
   'INV-4882 מקצביית הכרם — נחסמה אוטומטית': 'INV-4882 from HaKerem Butchery — blocked automatically',
-  'PO #1235 התקבל מלא': 'PO #1235 received in full',
-  'יוסי אישר 8 פריטים · ₪3,420': 'Yossi approved 8 items · ₪3,420',
+  'PO-1235 התקבל מלא': 'PO-1235 received in full',
   'חריגת מחיר ממתינה לאישור': 'Price variance awaiting approval',
-  'עגבניה שרי — עלייה 21% מעל ממוצע 60 ימים': 'Cherry tomatoes — 21% above the 60-day average',
   'סנכרון Market Man': 'MarketMan sync',
   '14 הזמנות חדשות נכנסו ל-PO queue': '14 new orders added to the PO queue',
-  'PO #1234 בקבלה': 'PO #1234 being received',
-  'ירקני אבי — 12 פריטים בתהליך': "Avi's Produce — 12 items in progress",
+  'PO-1234 בקבלה': 'PO-1234 being received',
 
   // ── Approval rules ───────────────────────────────────────────────────────
   'חשבונית כפולה': 'Duplicate invoice',
   'אותו מספר חשבונית קיים כבר במערכת לאותו ספק':
     'The same invoice number is already on file for this supplier',
-  'INV-4882 ‎(קצביית הכרם) זוהה כקיים מ-2026-05-12':
-    'INV-4882 (HaKerem Butchery) already on file since 2026-05-12',
   'חשבונית > ₪5,000 ללא PO': 'Invoice over ₪5,000 with no PO',
   'חשבונית גדולה שלא נמצאה הזמנת רכש תואמת': 'A large invoice with no matching purchase order',
   'הסכמת ספק שזה משלוח חירום, אישור ידני': 'Supplier confirmed an emergency delivery; approved manually',
@@ -188,7 +183,7 @@ const EN: Record<string, string> = {
   'הפרש מחיר > 10%': 'Price variance over 10%',
   'מחיר חויב חרג מעל סף ה-block המוגדר': 'The billed price exceeded the configured blocking threshold',
   'דרשנו הסבר מאבי הירקן': 'We asked Avi the greengrocer for an explanation',
-  'הפרש מחיר 2-5%': 'Price variance 2–5%',
+  'הפרש מחיר 2-10%': 'Price variance 2–10%',
   'חריגה בינונית — דרושה סקירה של מנהל משמרת': 'Moderate variance — needs a shift manager review',
   'הפרשים < 2%': 'Variances under 2%',
   'תנודה זניחה — אישור אוטומטי, רישום בלבד': 'Negligible movement — auto-approved, logged only',
@@ -199,8 +194,20 @@ export function mockText(value: string, locale: Locale): string;
 export function mockText(value: string | undefined, locale: Locale): string | undefined;
 export function mockText(value: string | undefined, locale: Locale): string | undefined {
   if (value === undefined || locale === 'he') return value;
-  return EN[value] ?? value;
+  const exact = EN[value];
+  if (exact !== undefined) return exact;
+  for (const [re, en] of PATTERNS) if (re.test(value)) return value.replace(re, en);
+  return value;
 }
+
+/** Mock strings built from live mock values (a date, a count, a %). */
+const PATTERNS: [RegExp, string][] = [
+  [/^INV-(\d+) כבר קיימת מ-([\d/]+)$/, 'INV-$1 already on file since $2'],
+  [/^דנה אישרה (\d+) פריטים$/, 'Dana approved $1 items'],
+  [/^ירקני אבי — (\d+) פריטים בתהליך$/, "Avi's Produce — $1 items in progress"],
+  [/^עגבניה שרי — עלייה (\d+)% מעל ממוצע 60 ימים$/, 'Cherry tomatoes — $1% above the 60-day average'],
+  [/^INV-(\d+) \u200e\(קצביית הכרם\) זוהה כקיים מ-([\d/]+)$/, 'INV-$1 (HaKerem Butchery) already on file since $2'],
+];
 
 /** Exposed for the parity check script / tests. */
 export const MOCK_TEXT_EN: Readonly<Record<string, string>> = EN;
