@@ -17,7 +17,6 @@ import {
   orderTotalIls,
   parsePositive,
   parsePrice,
-  unitKey,
 } from '../orders/order-logic';
 import { namesBatch, productPatch } from '../products/product-logic';
 import { presetRange, rangeError, withBom } from '../exports/range';
@@ -223,28 +222,6 @@ describe('global search options', () => {
       noInvoiceNumber: 'x',
     });
     expect(opts.map((o) => o.kind)).toEqual(['invoice']);
-  });
-});
-
-describe('order units (English display)', () => {
-  it('maps common free-text Hebrew units to a known key', () => {
-    expect(unitKey('ק״ג')).toBe('kg');
-    expect(unitKey(' ק"ג ')).toBe('kg');
-    expect(unitKey('ארגז')).toBe('box');
-    expect(unitKey('בקבוק')).toBe('bottle');
-    expect(unitKey('חבית')).toBe('barrel');
-    expect(unitKey('שישייה')).toBe('sixPack');
-    expect(unitKey('ליטר')).toBe('liter');
-    expect(unitKey('KG')).toBe('kg');
-    expect(unitKey('קופסה')).toBe('box');
-    expect(unitKey('חבילה')).toBe('pack');
-    expect(unitKey('תבנית')).toBe('tray');
-  });
-
-  it('returns null for unknown units so the original text is shown', () => {
-    expect(unitKey('צנצנת גדולה')).toBeNull();
-    expect(unitKey('')).toBeNull();
-    expect(unitKey(null)).toBeNull();
   });
 });
 

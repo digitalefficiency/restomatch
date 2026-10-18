@@ -81,32 +81,3 @@ export function lineTotalIls(qty: number, price: number | undefined): number {
 export function orderTotalIls(lines: Array<{ qty: number; unitPriceExpected?: number }>): number {
   return lines.reduce((sum, l) => sum + Math.round(lineTotalIls(l.qty, l.unitPriceExpected) * 100), 0) / 100;
 }
-
-/** Keys of `orders.unitNames` — the common units a free-text line may carry. */
-export type UnitKey =
-  | 'kg' | 'gram' | 'liter' | 'ml' | 'unit' | 'box' | 'pack'
-  | 'bottle' | 'barrel' | 'sixPack' | 'can' | 'bag' | 'tray' | 'bunch';
-
-const UNIT_ALIASES: Record<string, UnitKey> = {
-  'ק״ג': 'kg', 'ק"ג': 'kg', 'קג': 'kg', 'קילו': 'kg', kg: 'kg',
-  'גרם': 'gram', 'גר׳': 'gram', 'גר': 'gram', g: 'gram',
-  'ליטר': 'liter', 'ל׳': 'liter', l: 'liter',
-  'מ״ל': 'ml', 'מ"ל': 'ml', ml: 'ml',
-  'יח׳': 'unit', "יח'": 'unit', 'יחידה': 'unit', 'יחידות': 'unit', 'יח': 'unit', unit: 'unit', pcs: 'unit',
-  'ארגז': 'box', 'קרטון': 'box', 'קופסה': 'box', box: 'box',
-  'מארז': 'pack', 'חבילה': 'pack', pack: 'pack',
-  'בקבוק': 'bottle', 'בקבוקים': 'bottle',
-  'חבית': 'barrel',
-  'שישייה': 'sixPack', 'שישיה': 'sixPack',
-  'פחית': 'can', 'פחיות': 'can',
-  'שק': 'bag', 'שקית': 'bag',
-  'מגש': 'tray', 'תבנית': 'tray',
-  'צרור': 'bunch',
-};
-
-/** Normalise a free-text unit to a known key (null → show the original text). */
-export function unitKey(raw: string | null | undefined): UnitKey | null {
-  if (!raw) return null;
-  const k = raw.trim().toLowerCase().replace(/\.$/, '');
-  return UNIT_ALIASES[k] ?? null;
-}
