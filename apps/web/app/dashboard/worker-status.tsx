@@ -1,5 +1,5 @@
 import { AlertTriangle } from 'lucide-react';
-import { getRedis } from '@/lib/redis';
+import { getRedis, redisGetWithDeadline } from '@/lib/redis';
 import { getT } from '@/lib/i18n/server';
 import { nav } from '@/lib/i18n/messages/nav';
 import { evaluateHeartbeat, WORKER_HEARTBEAT_KEY } from '@/lib/workerHeartbeat';
@@ -15,7 +15,7 @@ export async function WorkerStatusBanner() {
   if (!redis) return null;
   let raw: string | null = null;
   try {
-    raw = await redis.get(WORKER_HEARTBEAT_KEY);
+    raw = await redisGetWithDeadline(redis, WORKER_HEARTBEAT_KEY);
   } catch {
     return null; // Redis hiccup: don't block the dashboard on a status banner.
   }

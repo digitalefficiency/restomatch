@@ -352,6 +352,56 @@ describe('receiving.registerInvoice', () => {
     expect(pending).toHaveLength(1);
     expect(pending[0]?.status).toBe('ocr_pending');
   });
+
+  // EN-7 / F7: a set-but-broken REDIS_URL used to hang registerInvoice until the
+  // serverless function timed out. Now the producer fails fast, the invoice is
+  // kept, and the client is told OCR was not queued.
+  it.each([
+    ['an Upstash REST URL (wrong scheme)', 'https://eu1-example.upstash.io', 500],
+    ['a Redis that refuses connections', 'redis://127.0.0.1:1', 4_500],
+  ])('with %s: answers fast with ocrQueued=false and keeps the invoice', async (_label, url, budgetMs) => {
+    const s = await seed();
+    const caller = callerFor({
+      userId: s.receiverId,
+      restaurantId: s.restaurantId,
+      role: 'receiver',
+    });
+    const { receiptId } = await caller.receiving.startReceipt({ poId: s.todayPoId });
+    const saved = process.env.REDIS_URL;
+    process.env.REDIS_URL = url;
+    try {
+      const t0 = Date.now();
+      const res = await caller.receiving.registerInvoice({
+        grId: receiptId,
+        imageUrl: 'https://example.com/redis-down.jpg',
+        supplierId: s.supplierId,
+      });
+      expect(Date.now() - t0).toBeLessThan(budgetMs);
+      expect(res).toMatchObject({ alreadyExisted: false, ocrQueued: false });
+      const [row] = await db.select().from(invoices);
+      expect(row?.id).toBe(res.invoiceId);
+      expect(row?.status).toBe('ocr_pending');
+    } finally {
+      if (saved === undefined) delete process.env.REDIS_URL;
+      else process.env.REDIS_URL = saved;
+    }
+  }, 10_000);
+
+  it('reports ocrQueued=false when no queue is configured (REDIS_URL unset)', async () => {
+    const s = await seed();
+    const caller = callerFor({
+      userId: s.receiverId,
+      restaurantId: s.restaurantId,
+      role: 'receiver',
+    });
+    const { receiptId } = await caller.receiving.startReceipt({ poId: s.todayPoId });
+    const res = await caller.receiving.registerInvoice({
+      grId: receiptId,
+      imageUrl: 'https://example.com/ok.jpg',
+      supplierId: s.supplierId,
+    });
+    expect(res).toMatchObject({ ocrQueued: false, alreadyExisted: false });
+  });
 });
 
 describe('receiving.registerInvoice — idempotency (M8) and scan-URL pinning (S4)', () => {

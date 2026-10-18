@@ -12,10 +12,11 @@ import {
   Card,
   Input,
   Select,
-  displayName,
   entitlementCauseOf,
   friendlyError,
   useToast,
+  cn,
+  useSingleFlight,
 } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatDate, formatDateTime, formatNumber } from '@/lib/i18n/format';
@@ -23,7 +24,7 @@ import { components } from '@/lib/i18n/messages/components';
 import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 import { formatIls } from '@/lib/money';
 import { OrderStatusBadge } from '../orders-table';
-import { lineLabel, parsePositive, parsePrice } from '../order-logic';
+import { lineLabel, lineTotalIls, parsePositive, parsePrice } from '../order-logic';
 
 type OrderData = inferRouterOutputs<AppRouter>['orders']['get'];
 type Line = OrderData['lines'][number];
@@ -41,6 +42,7 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
   const tc = useT(components);
   const locale = useLocale();
   const toast = useToast();
+  const once = useSingleFlight();
   const router = useRouter();
   const po = data.po!;
   const isDraft = po.status === 'draft';
@@ -119,6 +121,7 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
 
   const money = (v: number | string | null | undefined) =>
     v != null ? formatIls(Number(v), { locale, maximumFractionDigits: 2 }) : '—';
+  const wideCol = editingLine ? '' : 'hidden sm:table-cell';
   const qtyFmt = (v: string | number) => formatNumber(Number(v), locale, { maximumFractionDigits: 3 });
 
   return (
@@ -182,7 +185,7 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
                     size="sm"
                     loading={place.isPending}
                     disabled={busy || data.lines.length === 0}
-                    onClick={() => place.mutate({ poId: po.id, channel })}
+                    onClick={() => once(() => place.mutateAsync({ poId: po.id, channel }))}
                   >
                     <Send className="h-4 w-4 rtl:-scale-x-100" aria-hidden="true" /> {t('detail.send')}
                   </Button>
@@ -204,15 +207,17 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
         </div>
       </Card>
 
+      {/* Phones: qty × unit price folds under the description so the line total
+          stays on screen; editing a line restores the full (scrollable) table. */}
       <Card elevated padding="none" className="overflow-x-auto">
-        <table className="w-full min-w-[640px] text-start text-sm">
+        <table className={cn('w-full text-start text-sm', editingLine ? 'min-w-[640px]' : 'sm:min-w-[640px]')}>
           <caption className="sr-only">{t('detail.linesTitle')}</caption>
           <thead>
             <tr className="border-b border-line text-xs uppercase tracking-wide text-subtle">
               <th scope="col" className="px-4 py-3 text-start font-medium">{t('lineColumns.description')}</th>
-              <th scope="col" className="px-4 py-3 text-end font-medium">{t('lineColumns.qty')}</th>
-              <th scope="col" className="px-4 py-3 text-start font-medium">{t('lineColumns.unit')}</th>
-              <th scope="col" className="px-4 py-3 text-end font-medium">{t('lineColumns.unitPrice')}</th>
+              <th scope="col" className={cn('px-4 py-3 text-end font-medium', wideCol)}>{t('lineColumns.qty')}</th>
+              <th scope="col" className={cn('px-4 py-3 text-start font-medium', wideCol)}>{t('lineColumns.unit')}</th>
+              <th scope="col" className={cn('px-4 py-3 text-end font-medium', wideCol)}>{t('lineColumns.unitPrice')}</th>
               <th scope="col" className="px-4 py-3 text-end font-medium">{t('lineColumns.lineTotal')}</th>
               {editable && (
                 <th scope="col" className="px-4 py-3 font-medium">
@@ -226,7 +231,9 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
               const editing = editingLine === l.id;
               const label = lineLabel(l, locale);
               const lineTotal =
-                l.unitPriceExpected != null ? Number(l.qtyOrdered) * Number(l.unitPriceExpected) : null;
+                l.unitPriceExpected != null
+                  ? lineTotalIls(Number(l.qtyOrdered), Number(l.unitPriceExpected))
+                  : null;
               return (
                 <tr key={l.id} className="border-b border-line/60 align-top last:border-0 hover:bg-surface-2/60">
                   <td className="px-4 py-3 text-ink">
@@ -245,10 +252,14 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
                             {label.secondary}
                           </span>
                         ) : null}
+                        <span className="mt-1 block font-mono text-xs tabular-nums text-muted sm:hidden">
+                          {qtyFmt(l.qtyOrdered)} <UnitText unit={l.unit} />
+                          {l.unitPriceExpected != null ? <> × {money(l.unitPriceExpected)}</> : null}
+                        </span>
                       </>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-end font-mono tabular-nums text-muted">
+                  <td className={cn('px-4 py-3 text-end font-mono tabular-nums text-muted', wideCol)}>
                     {editing ? (
                       <Input
                         type="number"
@@ -264,7 +275,7 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
                       qtyFmt(l.qtyOrdered)
                     )}
                   </td>
-                  <td className="px-4 py-3 text-muted">
+                  <td className={cn('px-4 py-3 text-muted', wideCol)}>
                     {editing ? (
                       <Input
                         value={ld.unit}
@@ -277,7 +288,7 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
                       <UnitText unit={l.unit} />
                     )}
                   </td>
-                  <td className="px-4 py-3 text-end font-mono tabular-nums text-ink">
+                  <td className={cn('px-4 py-3 text-end font-mono tabular-nums text-ink', wideCol)}>
                     {editing ? (
                       <Input
                         type="number"

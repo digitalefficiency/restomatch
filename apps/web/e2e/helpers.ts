@@ -104,9 +104,6 @@ const IGNORED: RegExp[] = [
   /Download the React DevTools/,
   // Next dev HMR socket churn when a route recompiles mid-navigation.
   /webpack-hmr|_next\/webpack-hmr|turbopack-hmr/,
-  // KNOWN, routed to S6: no app/icon.* / public/favicon.ico yet, so the
-  // browser's implicit /favicon.ico request 404s on every page.
-  /status of 404 \(Not Found\) \(http:\/\/[^)]+\/favicon\.ico\)/,
 ];
 
 export function collectPageErrors(page: Page): string[] {

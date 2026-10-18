@@ -49,6 +49,9 @@ export const ROUTE_ROLES: Record<string, UserRole[]> = {
   '/dashboard/leaks': ['owner', 'manager', 'bookkeeper'],
   '/dashboard/suppliers': ['owner', 'manager'],
   '/dashboard/catalog': ['owner', 'manager'],
+  // Product pages are part of the catalog (names grid, price history, cheapest
+  // supplier); without this rule every role could open them by URL.
+  '/dashboard/products': ['owner', 'manager'],
   '/dashboard/orders': ['owner', 'manager'],
   // Food cost per dish (wave 1, flag `recipes`): the chef owns the recipes.
   '/dashboard/recipes': ['owner', 'manager', 'chef'],

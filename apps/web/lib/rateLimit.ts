@@ -8,6 +8,10 @@ import {
   type RateLimitResult,
   type RateLimitStore,
 } from '@restomatch/api';
+import { failFastRedisOptions, withDeadline } from '@restomatch/queue';
+
+/** A rate-limit check may add at most this much latency before failing open. */
+export const RATE_LIMIT_REDIS_DEADLINE_MS = 1_500;
 
 /**
  * Redis-backed fixed-window store. INCR creates the counter; EXPIRE on the
@@ -19,11 +23,19 @@ class RedisRateLimitStore implements RateLimitStore {
   constructor(private readonly redis: IORedis) {}
 
   async incr(key: string, windowSec: number): Promise<number> {
-    const count = await this.redis.incr(key);
-    if (count === 1) {
-      await this.redis.expire(key, windowSec);
-    }
-    return count;
+    // Deadline per check: a black-holed or silent Redis made login wait 30-60 s
+    // (or forever) before failing open (QA D1). enforceRateLimit fails open.
+    return withDeadline(
+      (async () => {
+        const count = await this.redis.incr(key);
+        if (count === 1) {
+          await this.redis.expire(key, windowSec);
+        }
+        return count;
+      })(),
+      RATE_LIMIT_REDIS_DEADLINE_MS,
+      () => new Error(`rate-limit redis timed out after ${RATE_LIMIT_REDIS_DEADLINE_MS}ms`),
+    );
   }
 }
 
@@ -33,7 +45,7 @@ function getStore(): RateLimitStore {
   if (store) return store;
   const url = process.env.REDIS_URL;
   if (url) {
-    const redis = new IORedis(url, { maxRetriesPerRequest: 2, lazyConnect: false });
+    const redis = new IORedis(url, failFastRedisOptions());
     redis.on('error', (err) => {
       console.warn('[rateLimit] redis error:', err.message);
     });

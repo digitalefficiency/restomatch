@@ -1,6 +1,6 @@
 import {
   and,
-  createDb,
+  type createDb,
   eq,
   poLines,
   procurementConnections,
@@ -10,6 +10,7 @@ import {
 import { getAdapter, type PlatformId } from '@restomatch/procurement';
 import type { NormalizedPurchaseOrder } from '@restomatch/types';
 import { makeWorker } from '../queue';
+import { jobDb } from '../db';
 
 export interface SyncPlatformsJob {
   restaurantId: string;
@@ -24,7 +25,7 @@ export function startSyncPlatformsWorker() {
   return makeWorker<SyncPlatformsJob>('sync-platforms', async (job) => {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error('DATABASE_URL is required');
-    const db = createDb(url);
+    const db = jobDb(url);
 
     const connectionRows = await db
       .select()
