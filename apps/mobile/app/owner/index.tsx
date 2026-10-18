@@ -34,8 +34,9 @@ export default function OwnerHome() {
           />
           <KpiCard
             label="התאמות נקיות השבוע"
-            value={`${kpis.data.weekCleanMatchPct.toFixed(0)}%`}
-            tone={kpis.data.weekCleanMatchPct >= 80 ? 'accent' : 'warn'}
+            // NUM-10: null = no match runs this week (never a fake 100%).
+            value={kpis.data.weekCleanMatchPct == null ? 'אין התאמות עדיין' : `${kpis.data.weekCleanMatchPct.toFixed(0)}%`}
+            tone={kpis.data.weekCleanMatchPct == null ? 'default' : kpis.data.weekCleanMatchPct >= 80 ? 'accent' : 'warn'}
           />
         </View>
       ) : null}
