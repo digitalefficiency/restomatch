@@ -63,7 +63,7 @@ export function generateNonce(): string {
  * CSP3 browsers (the `https:`/`'unsafe-inline'` fallbacks only matter for legacy
  * browsers that don't understand strict-dynamic). `object-src 'none'`,
  * `base-uri 'none'` and `frame-ancestors 'none'` close clickjacking / base-tag
- * injection. `style-src 'unsafe-inline'` is required by next/font + Tailwind's
+ * injection. `style-src 'unsafe-inline'` is required by Tailwind's
  * injected styles.
  */
 export function buildCsp(nonce: string): string {

@@ -11,14 +11,18 @@ name: CI
 #                   value would flip apps/web/lib/rateLimit.ts and packages/queue
 #                   to real Redis inside the API suites.
 #   worker-tests  - apps/worker suite with a job-scoped Redis service.
-#   web           - `next build` then `tsc --noEmit` for apps/web (the tsconfig
-#                   includes .next/types, which is why the build must run first).
-#                   The typecheck step is continue-on-error during a soak period:
-#                   next.config.ts documents an intermittent tRPC AppRouter
-#                   inference flake. Promote to blocking once measured clean.
-#   e2e           - Playwright (magic-link flow) against `next dev`. continue-on-
-#                   error until the spec is refreshed for password/2FA auth and
-#                   moved to a production-build server (W2, Session 7).
+#   web           - ESLint, `next build` (type-checks: ignoreBuildErrors is off)
+#                   then `tsc --noEmit` for apps/web (the tsconfig includes
+#                   .next/types, which is why the build runs first). All blocking —
+#                   the old "AppRouter inference flake" did not reproduce (client-
+#                   ready sprint, platform report) and test/appRouterShape.test.ts
+#                   now pins the inferred router keys.
+#   worker-image  - builds apps/worker/Dockerfile (the production worker image).
+#   e2e           - Playwright against `next dev` on its own restomatch_e2e DB
+#                   (playwright.config.ts seeds the demo tenant, runs the web on the
+#                   RLS app role): auth (password, TOTP 2FA, magic link) + a smoke
+#                   of every main page in he + en. Step-level continue-on-error
+#                   during a soak; promote once it has been green for a week.
 #   audit / dependency-review - supply-chain gates (Epic D3).
 #
 # Supply-chain hardening (Epic D3): actions are pinned to commit SHAs, the
@@ -98,6 +102,11 @@ jobs:
 
       - name: RLS completeness gate (every restaurant_id table has RLS enabled)
         run: pnpm --filter @restomatch/db check-rls
+
+      # Read-only schema health (unindexed FKs, missing triggers/CHECKs, RLS
+      # drift …). --strict: WARN fails too — catches a bad migration before review.
+      - name: db:doctor --strict (schema health, read-only)
+        run: pnpm --filter @restomatch/db run doctor --strict
 
       - name: Typecheck (all packages except web)
         run: pnpm turbo run typecheck --concurrency=1 --filter='!@restomatch/web'
@@ -227,14 +236,13 @@ jobs:
       - name: Bootstrap DB (static pages may query plans at build time)
         run: pnpm --filter @restomatch/db migrate
 
-      - name: next build
+      - name: ESLint (apps/web)
+        run: pnpm --filter @restomatch/web lint
+
+      - name: next build (type-checks)
         run: pnpm --filter @restomatch/web build
 
-      # Soak period: measure the documented tRPC-type inference flake before
-      # this becomes a blocking gate (then drop typescript.ignoreBuildErrors in
-      # next.config.ts).
-      - name: tsc --noEmit (apps/web; non-blocking during soak)
-        continue-on-error: true
+      - name: tsc --noEmit (apps/web)
         run: pnpm --filter @restomatch/web typecheck
 
   e2e:
@@ -250,6 +258,7 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: restomatch_test
+          # trust: the restomatch_app role the web server runs as logs in over TCP.
           POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
@@ -260,8 +269,9 @@ jobs:
           --health-retries 10
 
     env:
-      DATABASE_URL: postgres://postgres:postgres@localhost:5432/restomatch_test
-      DATABASE_URL_TEST: postgres://postgres:postgres@localhost:5432/restomatch_test
+      # playwright.config.ts creates + migrates + RLS-provisions + seeds this DB
+      # itself (e2e/prepare-db.ts) and starts `next dev` against it.
+      E2E_DATABASE_URL: postgres://postgres:postgres@localhost:5432/restomatch_e2e
       NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ci-placeholder
       NEXT_TELEMETRY_DISABLED: '1'
@@ -285,17 +295,28 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Bootstrap test DB
-        run: pnpm --filter @restomatch/db migrate
-
       - name: Install Playwright browser
         run: pnpm --filter @restomatch/web exec playwright install --with-deps chromium
 
-      # Step-level so the CHECK stays green while the spec is stale (job-level
+      # Step-level so the CHECK stays green during the soak (job-level
       # continue-on-error still reports a red check on the PR).
-      - name: Playwright (non-blocking during soak)
+      - name: Playwright — auth + he/en smoke (non-blocking during soak)
         continue-on-error: true
         run: pnpm --filter @restomatch/web test:e2e
+
+  worker-image:
+    name: worker image (docker build)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      # Same command a deploy runs (fly deploy / docker build from the repo root).
+      - name: docker build apps/worker/Dockerfile
+        run: docker build -f apps/worker/Dockerfile -t restomatch-worker:ci .
 
   audit:
     name: pnpm audit (prod, high+)
