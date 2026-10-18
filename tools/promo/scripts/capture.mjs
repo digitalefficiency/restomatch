@@ -84,6 +84,11 @@ const { ctx, page } = await session('owner@kfar-hazeitim.test', { width: 390, he
 await shot(page, '/dashboard', 'dashboard-he-phone', { full: true, wait: 2500 });
 await ctx.close();
 }
+if (ONLY === 'approvals') for (const locale of ['he', 'en']) {
+  const { ctx, page } = await session('owner@kfar-hazeitim.test', { width: 1440, height: 900 }, locale);
+  await shot(page, '/dashboard/approvals', `approvals-${locale}`, { full: true, wait: 2500 });
+  await ctx.close();
+}
 if (!ONLY || ONLY === 'chain') for (const locale of ['he', 'en']) {
   // Chain view (S8): needs `pnpm --filter @restomatch/worker seed:chain-demo` on top of the base demo.
   const { ctx, page } = await session('owner@kfar-hazeitim.test', { width: 1440, height: 900 }, locale);

@@ -168,7 +168,9 @@ export const Product: React.FC<{ locale: Locale }> = ({ locale }) => {
               const ca = prog(blf, SPOT_IN + 4, SPOT_IN + 16) * (1 - prog(blf, SPOT_OUT + 4, SPOT_OUT + 14));
               return (
                 <div key={i} style={{ position: 'absolute', top: 0, left: 0, right: 0 }}>
-                  <Eyebrow>{`0${i + 1}`}</Eyebrow>
+                  <FadeUp at={at} out={out} y={10}>
+                    <Eyebrow>{`0${i + 1}`}</Eyebrow>
+                  </FadeUp>
                   <RiseLine at={at} out={out} style={{ fontSize: 72, fontWeight: 800, lineHeight: 1.05, marginTop: 18 }}>
                     {copy[i][0]}
                   </RiseLine>

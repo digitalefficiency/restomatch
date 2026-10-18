@@ -3,7 +3,8 @@
 //   node render.mjs he | en | vertical | loop | all
 import { bundle } from '@remotion/bundler';
 import { renderMedia, renderStill, selectComposition } from '@remotion/renderer';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, renameSync, unlinkSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -46,6 +47,13 @@ async function video(id, locale, file, extra = {}) {
     },
     ...extra,
   });
+  // Delivery pass: tv-range yuv420p (the master comes out full-range yuvj420p from JPEG frames) +
+  // moov atom first — Safari / QuickTime / WhatsApp play it reliably.
+  const src = resolve(OUT, file);
+  const tmp = src.replace(/\.mp4$/, '.tmp.mp4');
+  renameSync(src, tmp);
+  execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', tmp, '-vf', 'scale=in_range=full:out_range=tv', '-c:v', 'libx264', '-profile:v', 'high', '-preset', 'slow', '-crf', String(extra.crf ?? 18), '-pix_fmt', 'yuv420p', '-color_range', 'tv', '-movflags', '+faststart', '-an', src]);
+  unlinkSync(tmp);
   console.log(`\n✓ ${file} in ${Math.round((Date.now() - t0) / 1000)}s`);
 }
 
