@@ -78,7 +78,7 @@ export const en: Shape<typeof he> = {
     breadcrumb: 'Suppliers',
     active: 'Active',
     inactive: 'Inactive',
-    leakLabel: 'Estimated monthly leak',
+    leakLabel: 'Paid above median (30 days)',
     leakNone: 'Not enough data',
     tabsLabel: 'Supplier views',
     tabs: {

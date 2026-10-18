@@ -7,6 +7,7 @@ import {
   invoices,
   lte,
   matchRuns,
+  restaurants,
   suppliers,
 } from '@restomatch/db';
 import { bookkeeperProcedure, requireFeature, router } from '../trpc';
@@ -15,6 +16,12 @@ import { bookkeeperProcedure, requireFeature, router } from '../trpc';
 const exportProcedure = bookkeeperProcedure.use(requireFeature('accounting_export'));
 import { toCsv } from '../exports/csv';
 import { toUniform1000Lines, type Uniform1000Invoice } from '../exports/uniform-1000';
+import {
+  DEFAULT_EXPORT_TZ,
+  EXPORTABLE_INVOICE_STATUSES,
+  exportPeriodBounds,
+  localIsoDate,
+} from '../exports/period';
 
 const PeriodSchema = z.object({
   from: z.string().date(),
@@ -23,16 +30,16 @@ const PeriodSchema = z.object({
 
 export const exportsRouter = router({
   /**
-   * CSV — approved/matched invoices in a period.
+   * CSV — every checked invoice in a period (see EXPORTABLE_INVOICE_STATUSES).
    * Format: invoice_number, date, supplier, totalExclVat, vat, totalInclVat, status, ocr_confidence.
    */
   invoicesCsv: exportProcedure
     .input(PeriodSchema)
     .query(async ({ ctx, input }) => {
-      const rows = await fetchInvoices(ctx.db, ctx.session.restaurantId, input.from, input.to);
+      const { rows, tz } = await fetchInvoices(ctx.db, ctx.session.restaurantId, input.from, input.to);
       const csv = toCsv(rows, [
         { header: 'מס׳ חשבונית', value: (r) => r.invoiceNumber },
-        { header: 'תאריך', value: (r) => r.invoiceDate?.toISOString().slice(0, 10) },
+        { header: 'תאריך', value: (r) => (r.invoiceDate ? localIsoDate(r.invoiceDate, tz) : null) },
         { header: 'ספק', value: (r) => r.supplierName },
         { header: 'ח.פ.', value: (r) => r.supplierBusinessId },
         { header: 'סכום ללא מע״מ', value: (r) => r.totalExclVat },
@@ -55,12 +62,12 @@ export const exportsRouter = router({
   uniform1000: exportProcedure
     .input(PeriodSchema)
     .query(async ({ ctx, input }) => {
-      const rows = await fetchInvoices(ctx.db, ctx.session.restaurantId, input.from, input.to);
+      const { rows, tz } = await fetchInvoices(ctx.db, ctx.session.restaurantId, input.from, input.to);
       const lines: Uniform1000Invoice[] = rows
         .filter((r) => r.invoiceNumber && r.invoiceDate && r.totalInclVat !== null)
         .map((r) => ({
           invoiceNumber: r.invoiceNumber!,
-          invoiceDate: (r.invoiceDate as Date).toISOString().slice(0, 10),
+          invoiceDate: localIsoDate(r.invoiceDate as Date, tz),
           supplierBusinessId: r.supplierBusinessId ?? '',
           supplierName: r.supplierName ?? '',
           totalExclVat: Number(r.totalExclVat ?? 0),
@@ -83,12 +90,15 @@ async function fetchInvoices(
   from: string,
   to: string,
 ) {
-  // Inclusive calendar-day bounds, pinned to UTC so the server's own timezone
-  // can't shift them (`setHours` used the process TZ and dropped invoices dated
-  // late on the last day when the server ran east of UTC).
-  const fromDate = new Date(`${from}T00:00:00.000Z`);
-  const toDate = new Date(`${to}T23:59:59.999Z`);
-  return db
+  // Calendar days in the restaurant's timezone, the same month the dashboard hero uses.
+  const [restaurant] = await db
+    .select({ timezone: restaurants.timezone })
+    .from(restaurants)
+    .where(eq(restaurants.id, restaurantId))
+    .limit(1);
+  const tz = restaurant?.timezone || DEFAULT_EXPORT_TZ;
+  const { start: fromDate, end: toDate } = exportPeriodBounds(from, to, tz);
+  const rows = await db
     .select({
       id: invoices.id,
       invoiceNumber: invoices.invoiceNumber,
@@ -109,11 +119,13 @@ async function fetchInvoices(
     .where(
       and(
         eq(invoices.restaurantId, restaurantId),
-        inArray(invoices.status, ['matched', 'approved', 'paid']),
+        inArray(invoices.status, [...EXPORTABLE_INVOICE_STATUSES]),
         gte(invoices.invoiceDate, fromDate),
         lte(invoices.invoiceDate, toDate),
       ),
-    );
+    )
+    .orderBy(invoices.invoiceDate);
+  return { rows, tz };
 }
 
 // Keep matchRuns import stable (referenced via JOIN in later expansions).

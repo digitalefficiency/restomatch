@@ -215,7 +215,11 @@ export function MobileNav({
           >
             <div className="flex items-start justify-between gap-3 border-b border-line px-4 py-4">
               <div className="min-w-0">
-                <p className="truncate text-base font-bold text-ink">{restaurantName}</p>
+                <p className="truncate text-base font-bold text-ink">
+                  <span lang="he" dir="auto">
+                    {restaurantName}
+                  </span>
+                </p>
                 <p className="truncate font-mono text-xs text-subtle">{email}</p>
               </div>
               <button

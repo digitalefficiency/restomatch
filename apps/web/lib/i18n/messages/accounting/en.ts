@@ -30,5 +30,5 @@ export const en: Shape<typeof he> = {
   downloaded: 'Downloaded — {count} invoices.',
   downloadedEmpty: 'No approved invoices in this range. The file downloaded empty (headers only).',
   failed: 'Download failed.',
-  note: 'Only invoices with status “matched”, “approved” or “paid” are included. Invoices with open discrepancies are left out.',
+  note: 'Every checked invoice is included: “matched”, “disputed” (flagged in the status column), “approved” and “paid”. Invoices still in OCR, and consolidated invoices waiting for their delivery notes, are left out. Dates follow Israel time.',
 };
