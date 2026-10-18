@@ -1,13 +1,14 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { preload } from 'react-dom';
 import { Camera, Check, GitCompareArrows, Languages, PlayCircle, ShieldCheck } from 'lucide-react';
 import { PLAN_SEED } from '@restomatch/db';
 import { auth } from '@/auth';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { landing } from '@/lib/i18n/messages/landing';
 import { formatNumber } from '@/lib/i18n/format';
-import { heroMedia } from '@/lib/heroMedia';
+import { heroMedia, promoVideoFor } from '@/lib/heroMedia';
 import { formatIls } from '@/lib/money';
 import { cn } from '@/lib/components/cn';
 import { MarketingShell } from './(marketing)/_components/MarketingShell';
@@ -65,6 +66,16 @@ export default async function Home() {
 
   const t = await getT(landing);
   const locale = await getLocale();
+  // The hero poster is the LCP: fetch it first, ahead of scripts and fonts.
+  if (heroMedia.available) {
+    preload(heroMedia.poster, {
+      as: 'image',
+      fetchPriority: 'high',
+      imageSrcSet: heroMedia.posterSrcSet,
+      imageSizes: heroMedia.posterSizes,
+    });
+  }
+  const promoSrc = promoVideoFor(locale);
   const ils = (n: number) => formatIls(n, { locale });
   const basicIls = PLAN_SEED.basic.priceAgorotMonthly / 100;
   const proIls = PLAN_SEED.pro.priceAgorotMonthly / 100;
@@ -149,7 +160,7 @@ export default async function Home() {
         <div aria-hidden="true" className="rm-grid pointer-events-none absolute inset-0" />
         <div className="relative mx-auto grid max-w-6xl items-center gap-12 px-4 pb-16 pt-12 sm:px-6 sm:pt-20 lg:grid-cols-[1.05fr_1fr] lg:gap-10 lg:pb-24 lg:pt-24">
           <div className="text-center lg:text-start">
-            <p className="mb-5 inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase text-primary ltr:font-mono ltr:text-[11px] ltr:tracking-[0.18em]">
+            <p className="mb-5 inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase text-primary ltr:text-[11px] ltr:tracking-[0.18em]">
               <span
                 className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary motion-reduce:animate-none"
                 aria-hidden="true"
@@ -173,9 +184,10 @@ export default async function Home() {
                 {t('hero.ctaPrimary')}
                 <Forward />
               </Link>
-              {heroMedia.promoVideo ? (
+              {promoSrc ? (
                 <PromoVideoButton
-                  src={heroMedia.promoVideo}
+                  src={promoSrc.src}
+                  poster={promoSrc.poster}
                   label={t('hero.ctaWatch')}
                   title={t('hero.watchTitle')}
                   closeLabel={t('hero.watchClose')}
@@ -202,6 +214,8 @@ export default async function Home() {
               webm={heroMedia.loop.webm}
               mp4={heroMedia.loop.mp4}
               poster={heroMedia.poster}
+              posterSrcSet={heroMedia.posterSrcSet}
+              posterSizes={heroMedia.posterSizes}
               label={t('hero.watchTitle')}
               pauseLabel={t('v2.video.pause')}
               playLabel={t('v2.video.play')}
@@ -215,7 +229,7 @@ export default async function Home() {
       {/* ───────────── 2 · HOW IT WORKS (scroll-driven reveal) ───────────── */}
       <section
         id="how"
-        className="scroll-mt-24 border-y border-line bg-surface/30"
+        className="rm-defer scroll-mt-24 border-y border-line bg-surface/30"
         aria-labelledby="how-title"
       >
         <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
@@ -239,7 +253,7 @@ export default async function Home() {
                 <li key={title} className="rm-step relative text-center">
                   <span className="relative mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-primary/30 bg-bg text-primary shadow-glow-primary">
                     <Icon className="h-6 w-6" aria-hidden="true" />
-                    <span className="absolute -end-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-primary font-mono text-xs font-bold text-on-primary">
+                    <span className="absolute -end-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-bold tabular-nums text-on-primary">
                       {i + 1}
                     </span>
                   </span>
@@ -255,7 +269,7 @@ export default async function Home() {
       {/* ───────────── 3 · RECEIVER IN ENGLISH (Hebrew → English morph) ───────────── */}
       <section
         id="features"
-        className="scroll-mt-24 mx-auto max-w-6xl px-4 py-20 sm:px-6"
+        className="rm-defer scroll-mt-24 mx-auto max-w-6xl px-4 py-20 sm:px-6"
         aria-labelledby="receiver-title"
       >
         <div className="rm-reveal relative overflow-hidden rounded-3xl border border-primary/30 bg-surface shadow-glow-primary">
@@ -319,7 +333,7 @@ export default async function Home() {
       </section>
 
       {/* ───────────── 4 · PROOF — the honest math (PLAN_SEED + formatIls) ───────────── */}
-      <section className="border-y border-line bg-surface/30" aria-labelledby="proof-title">
+      <section className="rm-defer border-y border-line bg-surface/30" aria-labelledby="proof-title">
         <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
           <div className="mx-auto mb-10 max-w-2xl text-center">
             <Eyebrow tone="gold">{t('v2.proof.eyebrow')}</Eyebrow>
@@ -366,7 +380,7 @@ export default async function Home() {
       </section>
 
       {/* ───────────── 5 · PRICING TEASER ───────────── */}
-      <section className="mx-auto max-w-6xl px-4 py-20 sm:px-6" aria-labelledby="pricing-title">
+      <section className="rm-defer mx-auto max-w-6xl px-4 py-20 sm:px-6" aria-labelledby="pricing-title">
         <div className="rm-reveal grid items-center gap-10 lg:grid-cols-[1fr_1.2fr]">
           <div>
             <Eyebrow tone="gold">{t('pricing.eyebrow')}</Eyebrow>
