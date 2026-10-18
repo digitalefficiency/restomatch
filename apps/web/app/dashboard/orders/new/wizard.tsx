@@ -30,6 +30,7 @@ import {
   displayName,
   entitlementCauseOf,
   friendlyError,
+  useSingleFlight,
 } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatDate, formatPercent } from '@/lib/i18n/format';
@@ -129,6 +130,7 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
   const warningsByProduct = new Map((guardrail.data?.warnings ?? []).map((w) => [w.productId, w]));
 
   const createDraft = trpc.orders.createDraft.useMutation();
+  const once = useSingleFlight();
   const placeOrder = trpc.orders.placeOrder.useMutation();
 
   function addLine(line: Omit<DraftLine, 'key'>) {
@@ -144,7 +146,11 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
     setLines((ls) => ls.filter((l) => l.key !== key));
   }
 
-  async function submit() {
+  function submit() {
+    once(send);
+  }
+
+  async function send() {
     try {
       let poId = draftId;
       if (!poId) {

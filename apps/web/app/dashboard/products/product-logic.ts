@@ -53,3 +53,29 @@ export function namesBatch(
   }
   return out;
 }
+
+/** A grid edit remembers the value it replaced, so it survives filtering. */
+export interface NameEdit {
+  value: string;
+  original: string | null;
+}
+
+/**
+ * Every pending English-name change, including rows the current search or
+ * filter hides. (Computed from the visible rows only, an edit made before
+ * searching was silently dropped on save.)
+ */
+export function pendingNames(
+  edits: Record<string, NameEdit>,
+): Array<{ productId: string; nameEn: string | null }> {
+  const rows = Object.entries(edits).map(([id, e]) => ({ id, nameEn: e.original }));
+  const values = Object.fromEntries(Object.entries(edits).map(([id, e]) => [id, e.value]));
+  return namesBatch(rows, values);
+}
+
+/** Split into batches of at most `size` (products.setNamesEn takes ≤ 200). */
+export function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}

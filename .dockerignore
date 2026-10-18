@@ -13,9 +13,17 @@
 **/*.tsbuildinfo
 **/.DS_Store
 *.log
-.env
-.env.*
-!.env.example
+# Secrets must never reach the image (QA D8): env files at ANY depth, the
+# worker.env the run docs use, keys and local dumps. (.npmrc stays: it is
+# tracked pnpm config with no credentials — excluding it changes the install;
+# never commit an auth token to it.)
+**/.env
+**/.env.*
+**/*.env
+!**/.env.example
+**/*.pem
+**/*.key
+**/dump.rdb
 # Apps the worker image doesn't run: keep only their manifests so the pnpm
 # workspace still matches pnpm-lock.yaml (frozen install).
 apps/web/**

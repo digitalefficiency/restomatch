@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import postgres from 'postgres';
 import { INTEGRITY_CHECKS } from './integrityChecks';
 import { migrationHash, migrationsDir, readJournal, REQUIRED_EXTENSIONS, type JournalEntry } from './migrations';
+import { WAVE1_CROSS_TENANT_CHECKS, WAVE1_PRECONDITIONS } from './wave1Checks';
 
 /**
  * `pnpm db:doctor` — a READ-ONLY health report for any RestoMatch database
@@ -126,6 +127,7 @@ interface PreconditionResult {
  * (and roll the whole batch back) on this database — repair first.
  */
 const PRECONDITIONS: Record<string, (c: Ctx) => Promise<PreconditionResult>> = {
+  ...WAVE1_PRECONDITIONS, // 0048–0057 (wave1Checks.ts)
   '0019_storage_namespaces': async () => ({ status: 'PASS', detail: 'additive (CREATE TABLE IF NOT EXISTS)' }),
 
   '0020_invoice_scans_restaurant_not_null': async (c) => {
@@ -299,6 +301,7 @@ const CROSS_TENANT_CHECKS: Array<{ name: string; needs: Array<[string, string]>;
     needs: [['invoice_scans', 'restaurant_id']],
     sql: 'select count(*) from invoice_scans sc join invoices i on i.id::text = sc.invoice_id::text where sc.restaurant_id is not null and i.restaurant_id <> sc.restaurant_id',
   },
+  ...WAVE1_CROSS_TENANT_CHECKS, // 0048/0050 single-column FKs (wave1Checks.ts)
 ];
 
 function tally(findings: DoctorFinding[]): Record<DoctorStatus, number> {

@@ -122,6 +122,7 @@ export const he = {
     leadDays: 'ימים עד אספקה (0 = באותו יום)',
     deliversOn: 'יום האספקה הקבוע',
     pickDay: 'בחרו לפחות יום הזמנה אחד.',
+    pickCutoff: 'יש להגדיר שעת סגירה להזמנה (HH:MM).',
     save: 'שמירת לוח הזמנות',
     addWindow: 'הוספת חלון הזמנה',
     clearAll: 'ניקוי הכל',
