@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { FileDown, FileSpreadsheet, FileText } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { AlertTriangle, FileDown, FileSpreadsheet, FileText } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
 import {
   Button,
@@ -32,6 +32,12 @@ export function ExportsForm() {
   const [to, setTo] = useState(initial.to);
   const [busy, setBusy] = useState<'csv' | 'uniform1000' | null>(null);
   const [gated, setGated] = useState<EntitlementCause | null>(null);
+  // Checked invoices with no invoice date in the last downloaded range: they
+  // can't be placed in a period, so the file doesn't carry them.
+  const [undated, setUndated] = useState<{ from: string; to: string; count: number } | null>(null);
+
+  // The count belongs to the downloaded range only; any range change clears it.
+  useEffect(() => setUndated(null), [from, to]);
 
   const utils = trpc.useUtils();
   const invalid = rangeError(from, to);
@@ -60,6 +66,7 @@ export function ExportsForm() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      setUndated({ from, to, count: data.undatedCount });
       toast.success(
         data.rowCount === 0 ? t('downloadedEmpty') : t('downloaded', { count: formatNumber(data.rowCount, locale) }),
       );
@@ -182,6 +189,16 @@ export function ExportsForm() {
           </Button>
         </div>
       </div>
+
+      {undated && undated.count > 0 ? (
+        <p
+          role="status"
+          className="mt-4 flex items-start gap-2 rounded-xl border border-warn/30 bg-warn/5 p-3 text-sm text-warn"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          {t('undated', { count: formatNumber(undated.count, locale) })}
+        </p>
+      ) : null}
 
       <p className="mt-6 border-t border-line pt-4 text-xs text-subtle">{t('note')}</p>
     </Card>

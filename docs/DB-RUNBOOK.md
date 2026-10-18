@@ -329,7 +329,7 @@ only: `SEED_ALLOW_REMOTE_HOST=<exact host>`. The production project is refused e
 >
 >   חלק שעדיין לא מוזג או שהמיגרציה שלו לא הוחלה — מדולג, עם הודעה.
 > - **מוחקת את כל המסעדות והמשתמשים במסד היעד.** על מסד שיש בו נתונים היא מסרבת לרוץ בלי `--reset`.
-> - על Supabase היא רצה רק כש-`SEED_ALLOW_REMOTE_HOST` שווה בדיוק לשרת של **הפרויקט החדש**. על הפרויקט הישן (`cringgshiafwsszyqufo`) היא מסרבת תמיד.
+> - על Supabase היא רצה רק מול השרת הישיר של **הפרויקט החדש** (`db.<ref>.supabase.co`), וכש-`SEED_ALLOW_REMOTE_HOST` שווה לו בדיוק. שרת pooler משותף נחסם. על הפרויקט הישן (`cringgshiafwsszyqufo`) היא מסרבת תמיד.
 > - על שרת מרוחק חובה `DEMO_PASSWORD` פרטית: לפחות 12 תווים, ולא סיסמת ברירת המחדל שמופיעה ב-git. שמרו אותה במנהל הסיסמאות.
 > - בסוף היא מדפיסה את מספרי הדמו: דליפה ו-% מהרכש, נתפס, נדרש, "₪ חוזר", מספר מנות ומחירונים.
 > - מומלץ להריץ בערב שלפני הדמו, עם `DEMO_TODAY=<תאריך הדמו>`, כדי ש"היום" יהיה נכון.
@@ -348,9 +348,9 @@ only: `SEED_ALLOW_REMOTE_HOST=<exact host>`. The production project is refused e
 Steps 3–6 are skipped with a notice when their script is not on the branch, or when their table is missing on the target (migration not applied there yet). Every step keeps the leak hero unchanged and checks it.
 
 **Guards** (`apps/worker/src/lib/demoSeedAll.ts`, unit-tested). Nothing is written unless every guard passes:
-- the seed guard: local hosts only, or `SEED_ALLOW_REMOTE_HOST=<exact host>`. **The old production project is refused, always**;
+- the seed guard: local hosts only, or `SEED_ALLOW_REMOTE_HOST=<exact host>`. **The old production project is refused, always.** That holds whether it is named in the URL, a percent-encoded username, `PGUSER` or `PGHOST`. Shared pooler hosts are refused too;
 - a remote host needs `DEMO_PASSWORD`: no default, not the public one, at least 12 characters;
-- a database that already has restaurants or users needs `--reset`;
+- a database that already has rows the base seed would wipe (restaurants, users, billing, audit log) needs `--reset`;
 - the schema must already be migrated.
 
 **Local:**
@@ -359,7 +359,7 @@ Steps 3–6 are skipped with a notice when their script is not on the branch, or
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/restomatch_dev pnpm demo:seed-all -- --reset
 ```
 
-**On the NEW Supabase demo project** (the evening before; use the DIRECT host or the session pooler, never the transaction pooler on 6543):
+**On the NEW Supabase demo project** (the evening before). Use the project's **direct** host `db.<NEW_REF>.supabase.co`. Shared pooler hosts (`*.pooler.supabase.com`) are refused, because every project in a region sits behind them:
 
 ```bash
 export DATABASE_URL='postgresql://postgres:<OWNER_PASSWORD>@db.<NEW_REF>.supabase.co:5432/postgres'
@@ -376,9 +376,9 @@ pnpm demo:seed-all                                           # on a non-empty pr
 [demo:seed-all] ✔ done
   steps: core → demo → chain → recovery → recipes → contracts
   restaurant: כפר הזיתים · branches 3 · users 5 · invoices 339
-  hero (this month): leak ₪572 = 2.0% of ₪28,389 checked spend · caught before payment ₪296 · claimed ₪276 · 9/24 invoices with a leak · 2 pending link
+  hero (this month): leak ₪572 = 2.0% of ₪28,389 checked spend · caught before payment ₪296 · claimed this month ₪276 · 9/24 invoices with a leak · 2 pending link
   last month: leak ₪1,137 = 1.8% of ₪63,205
-  ₪ back: claimed ₪1,558 · credited ₪991 · returned this month ₪653 · owed ₪567 · rate 63.6% · 10 overdue
+  ₪ back (all claims to date): claimed ₪1,558 · credited ₪991 · returned this month ₪653 · owed ₪567 · rate 63.6% · 10 overdue
   recipes: 10
   contract prices: 10
 ```

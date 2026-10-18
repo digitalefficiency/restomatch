@@ -2,6 +2,16 @@ import { eq, notificationsOutbox, sql, type Database } from '@restomatch/db';
 import type { NotificationPayload } from './types';
 
 /**
+ * notifications_dedupe_key_unique is a PARTIAL unique index (0016:
+ * `WHERE dedupe_key IS NOT NULL`). Postgres only infers a partial index as the
+ * ON CONFLICT arbiter when the statement repeats its predicate — without it
+ * every keyed insert failed with "there is no unique or exclusion constraint
+ * matching the ON CONFLICT specification" (end-of-day report, order reminders,
+ * supplier delays, placeOrder email). Exported for the other keyed writers.
+ */
+export const DEDUPE_INDEX_PREDICATE = sql`${notificationsOutbox.dedupeKey} is not null`;
+
+/**
  * Persist a notification request to notifications_outbox.
  * Real delivery happens later (worker reads queued rows + sends via real APIs).
  */
@@ -36,12 +46,7 @@ export async function enqueueNotification(
 
   const [row] = payload.dedupeKey
     ? await insert
-        // The unique index is PARTIAL (WHERE dedupe_key IS NOT NULL): Postgres
-        // only infers it when ON CONFLICT repeats that predicate.
-        .onConflictDoNothing({
-          target: notificationsOutbox.dedupeKey,
-          where: sql`${notificationsOutbox.dedupeKey} IS NOT NULL`,
-        })
+        .onConflictDoNothing({ target: notificationsOutbox.dedupeKey, where: DEDUPE_INDEX_PREDICATE })
         .returning({ id: notificationsOutbox.id })
     : await insert.returning({ id: notificationsOutbox.id });
 

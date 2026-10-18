@@ -21,6 +21,7 @@ import {
   displayName,
   friendlyError,
   useToast,
+  useSingleFlight,
 } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
@@ -77,6 +78,7 @@ export function CatalogBrowser({
   const tc = useT(components);
   const locale = useLocale();
   const toast = useToast();
+  const once = useSingleFlight();
   const [supplierId, setSupplierId] = useState<string>('');
   const [rawSearch, setRawSearch] = useState('');
   const [search, setSearch] = useState('');
@@ -183,13 +185,16 @@ export function CatalogBrowser({
     if (!newDraft.supplierNameRaw.trim()) return setRowError(t('item.descriptionRequired'));
     const price = parsePrice(newDraft.listPrice);
     if (price === 'invalid') return setRowError(t('item.priceInvalid'));
-    create.mutate({
-      supplierId: effectiveSupplierId,
-      supplierNameRaw: newDraft.supplierNameRaw.trim(),
-      ...(newDraft.supplierSku.trim() ? { supplierSku: newDraft.supplierSku.trim() } : {}),
-      ...(newDraft.unit.trim() ? { unit: newDraft.unit.trim() } : {}),
-      ...(price != null ? { listPrice: price } : {}),
-    });
+    const supplierId = effectiveSupplierId;
+    once(() =>
+      create.mutateAsync({
+        supplierId,
+        supplierNameRaw: newDraft.supplierNameRaw.trim(),
+        ...(newDraft.supplierSku.trim() ? { supplierSku: newDraft.supplierSku.trim() } : {}),
+        ...(newDraft.unit.trim() ? { unit: newDraft.unit.trim() } : {}),
+        ...(price != null ? { listPrice: price } : {}),
+      }),
+    );
   }
 
   const onRowKey = (save: () => void, cancel: () => void) => (e: React.KeyboardEvent) => {

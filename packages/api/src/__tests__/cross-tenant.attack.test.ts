@@ -17,6 +17,7 @@ import {
   poLines,
   priceBaselines,
   products,
+  creditNotes,
   recoveryClaims,
   purchaseOrders,
   restaurants,
@@ -1607,6 +1608,40 @@ describe('recovery + monthly report (A → B)', () => {
     expect(p.data.restaurantName).toBe('Resto A');
     const pdf = await callerFor(A).monthlyReport.pdf({ month, locale: 'en' });
     expect(pdf.base64.length).toBeGreaterThan(100);
+  });
+
+  it('DB level: A rows can never reference B suppliers / invoices / discrepancies / lines (composite FKs, 23503)', async () => {
+    // A B discrepancy with no claim yet (so the unique key cannot answer first).
+    const [freshB] = await db
+      .insert(discrepancies)
+      .values({ matchRunId: B.matchRunId, restaurantId: B.restaurantId, type: 'QTY_OVER', severity: 'warn', deltaAmount: '3.00' })
+      .returning();
+    const attempts = [
+      db.insert(creditNotes).values({ restaurantId: A.restaurantId, supplierId: B.supplierId, amountAgorot: 100, issuedOn: '2026-10-01' }),
+      db.insert(creditNotes).values({
+        restaurantId: A.restaurantId,
+        supplierId: A.supplierId,
+        invoiceId: B.invoiceId,
+        amountAgorot: 100,
+        issuedOn: '2026-10-01',
+      }),
+      db.insert(creditNotes).values({
+        restaurantId: A.restaurantId,
+        supplierId: A.supplierId,
+        invoiceId: A.invoiceId,
+        invoiceLineId: B.invoiceLineId,
+        amountAgorot: 100,
+        issuedOn: '2026-10-01',
+        source: 'invoice_line',
+      }),
+      db.insert(recoveryClaims).values({ restaurantId: A.restaurantId, discrepancyId: freshB!.id, amountAgorot: 1 }),
+      db.update(recoveryClaims).set({ invoiceId: B.invoiceId }).where(eq(recoveryClaims.id, aClaimId)),
+    ];
+    for (const attempt of attempts) await expect(attempt).rejects.toMatchObject({ code: '23503' });
+    await db.delete(discrepancies).where(eq(discrepancies.id, freshB!.id));
+    // B's claim is untouched and still B's.
+    const [b] = await db.select().from(recoveryClaims).where(eq(recoveryClaims.id, bClaimId));
+    expect(b!.restaurantId).toBe(B.restaurantId);
   });
 
   it('flags are per restaurant: B with the flag off is refused while A works', async () => {

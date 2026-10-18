@@ -65,9 +65,7 @@ begin
     'storage_namespaces',
     'match_runs','discrepancies','activity_events','price_history',
     'price_baselines','approval_rules','audit_log','procurement_connections',
-    'email_inboxes','supplier_integrations','notifications_outbox',
-    -- wave 1 · S12 recovery + monthly report (0048/0049)
-    'credit_notes','recovery_claims','recovery_events','monthly_reports'
+    'email_inboxes','supplier_integrations','notifications_outbox'
   ] loop
     if exists (
       select 1 from information_schema.columns

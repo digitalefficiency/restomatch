@@ -10,9 +10,9 @@
 --   monthly_reports – one row per (restaurant, month). `month` = first day of the
 --                     reported local month. `snapshot` = the computed report
 --                     (integer agorot inside). `sent_at` = when the outbox rows
---                     were enqueued (NULL = generated but not sent, e.g. preview).
+--                     were enqueued (NULL = generated but not sent yet).
 --
--- Tenant table (restaurant_id) → listed in rls/0002. Additive only.
+-- Tenant table; RLS enabled + per-restaurant policy in this file. Additive only.
 -- Hand-written (drizzle-kit generate is broken in this repo).
 CREATE TABLE IF NOT EXISTS "monthly_reports" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
@@ -23,8 +23,15 @@ CREATE TABLE IF NOT EXISTS "monthly_reports" (
   "sent_at" timestamp with time zone,
   CONSTRAINT "monthly_reports_month_first_day_check" CHECK (extract(day from "month") = 1)
 );--> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS "monthly_reports_restaurant_month_unique" ON "monthly_reports" ("restaurant_id", "month");
+CREATE UNIQUE INDEX IF NOT EXISTS "monthly_reports_restaurant_month_unique" ON "monthly_reports" ("restaurant_id", "month");--> statement-breakpoint
+CREATE SCHEMA IF NOT EXISTS app;--> statement-breakpoint
+CREATE OR REPLACE FUNCTION app.current_restaurant_id() RETURNS uuid
+  LANGUAGE sql STABLE
+  AS $$ select nullif(current_setting('app.current_restaurant_id', true), '')::uuid $$;--> statement-breakpoint
+ALTER TABLE "monthly_reports" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+DROP POLICY IF EXISTS "monthly_reports_tenant" ON "monthly_reports";--> statement-breakpoint
+CREATE POLICY "monthly_reports_tenant" ON "monthly_reports" USING (restaurant_id = app.current_restaurant_id());
 
 insert into drizzle.__drizzle_migrations (hash, created_at)
-select 'b623e219c0db93561ab502e63eced7d09ae1e1abfdfa34e401dafb241c2e83e4', 1782040000000
+select '96937d39fd7c84e9daaba7ae6ecd668f81903e8e01922fc9089e31e11299007a', 1782040000000
 where not exists (select 1 from drizzle.__drizzle_migrations where created_at = 1782040000000);

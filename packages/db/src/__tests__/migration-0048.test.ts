@@ -5,6 +5,7 @@ import {
   creditNotes,
   discrepancies,
   eq,
+  invoiceLines,
   invoices,
   matchRuns,
   monthlyReports,
@@ -122,7 +123,83 @@ describe('0048/0049 migration shape', () => {
     ).rejects.toMatchObject({ code: '23514' });
   });
 
-  it('all four tables have RLS enabled (rls/0002 list)', async () => {
+  it('composite same-tenant FKs: no reference can point at another restaurant', async () => {
+    const [other] = await db.insert(restaurants).values({ name: '0048 other', businessId: '000000049' }).returning();
+    try {
+      const [os] = await db.insert(suppliers).values({ restaurantId: other!.id, name: 'ספק זר' }).returning();
+      const [oi] = await db
+        .insert(invoices)
+        .values({ restaurantId: other!.id, supplierId: os!.id, invoiceNumber: 'X-1', source: 'manual' })
+        .returning();
+      // This tenant's credit note → other tenant's supplier / invoice: FK violation.
+      await expect(
+        db.insert(creditNotes).values({ restaurantId, supplierId: os!.id, amountAgorot: 100, issuedOn: '2026-10-01' }),
+      ).rejects.toMatchObject({ code: '23503' });
+      await expect(
+        db.insert(creditNotes).values({ restaurantId, supplierId, invoiceId: oi!.id, amountAgorot: 100, issuedOn: '2026-10-01' }),
+      ).rejects.toMatchObject({ code: '23503' });
+      // A claim → other tenant's discrepancy / supplier: FK violation.
+      const [omr] = await db.insert(matchRuns).values({ restaurantId: other!.id, invoiceId: oi!.id, overallStatus: 'minor' }).returning();
+      const [od] = await db
+        .insert(discrepancies)
+        .values({ restaurantId: other!.id, matchRunId: omr!.id, type: 'PRICE_HIGHER', severity: 'warn', deltaAmount: '1.00' })
+        .returning();
+      await expect(
+        db.insert(recoveryClaims).values({ restaurantId, discrepancyId: od!.id, amountAgorot: 1 }),
+      ).rejects.toMatchObject({ code: '23503' });
+      await expect(
+        db.update(recoveryClaims).set({ supplierId: os!.id }).where(eq(recoveryClaims.restaurantId, restaurantId)),
+      ).rejects.toMatchObject({ code: '23503' });
+      // An invoice line is reachable only through its own invoice (MATCH FULL).
+      const [ol] = await db
+        .insert(invoiceLines)
+        .values({ invoiceId: oi!.id, rawDescription: 'x', qtyBilled: '1', unit: 'unit', unitPriceBilled: '-1', lineTotal: '-1.00' })
+        .returning();
+      await expect(
+        db.insert(creditNotes).values({ restaurantId, supplierId, invoiceLineId: ol!.id, amountAgorot: 100, issuedOn: '2026-10-01', source: 'invoice_line' }),
+      ).rejects.toMatchObject({ code: '23503' });
+    } finally {
+      await db.delete(restaurants).where(eq(restaurants.id, other!.id));
+    }
+    // The other tenant's delete cascaded nothing here.
+    expect(await db.select().from(recoveryClaims).where(eq(recoveryClaims.restaurantId, restaurantId))).toHaveLength(1);
+  });
+
+  it('deleting an invoice removes a credit note derived from its credit line, keeps manual notes and clears claim links', async () => {
+    const [inv] = await db
+      .insert(invoices)
+      .values({ restaurantId, supplierId, invoiceNumber: 'S-0048-CR', source: 'manual' })
+      .returning();
+    const [line] = await db
+      .insert(invoiceLines)
+      .values({ invoiceId: inv!.id, rawDescription: 'זיכוי', qtyBilled: '1', unit: 'unit', unitPriceBilled: '-5', lineTotal: '-5.00' })
+      .returning();
+    const [derived] = await db
+      .insert(creditNotes)
+      .values({ restaurantId, supplierId, invoiceId: inv!.id, invoiceLineId: line!.id, amountAgorot: 500, issuedOn: '2026-10-02', source: 'invoice_line' })
+      .returning();
+    await db.update(recoveryClaims).set({ creditNoteId: derived!.id }).where(eq(recoveryClaims.restaurantId, restaurantId));
+    await db.delete(invoices).where(eq(invoices.id, inv!.id));
+    expect(await db.select().from(creditNotes).where(eq(creditNotes.id, derived!.id))).toEqual([]);
+    const [claim] = await db.select().from(recoveryClaims).where(eq(recoveryClaims.restaurantId, restaurantId));
+    expect(claim!.creditNoteId).toBeNull();
+    expect(claim!.restaurantId).toBe(restaurantId);
+  });
+
+  it('RLS is enabled inside the migration (with the tenant policy), not via rls/0002', async () => {
+    const rows = (await sql`
+      select tablename, policyname from pg_policies
+      where tablename in ('credit_notes','recovery_claims','recovery_events','monthly_reports') order by 1
+    `) as unknown as Array<{ tablename: string; policyname: string }>;
+    expect(rows.map((r) => r.policyname)).toEqual([
+      'credit_notes_tenant',
+      'monthly_reports_tenant',
+      'recovery_claims_tenant',
+      'recovery_events_tenant',
+    ]);
+  });
+
+  it('all four tables have RLS enabled', async () => {
     const rows = (await sql`
       select relname, relrowsecurity from pg_class
       where relname in ('credit_notes','recovery_claims','recovery_events','monthly_reports') order by relname

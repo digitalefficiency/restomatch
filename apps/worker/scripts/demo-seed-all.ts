@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url';
 import * as api from '@restomatch/api';
 import { computeLeakHero } from '@restomatch/charts';
 import { createDb, sql } from '@restomatch/db';
-import { SEED_STEPS, isRemoteHost, parseSeedAllArgs, seedAllProblems } from '../src/lib/demoSeedAll';
+import { SEED_STEPS, WIPED_TABLES, isRemoteHost, parseSeedAllArgs, seedAllProblems } from '../src/lib/demoSeedAll';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const url = process.env.DATABASE_URL;
@@ -58,9 +58,12 @@ async function main(): Promise<void> {
     `),
   )[0]!;
   if (!probe.migrated) fail(['the schema is not migrated — run `pnpm db:migrate` (+ provision-rls) first']);
-  const [{ n } = { n: 0 }] = rows(
-    await db.execute(sql`SELECT (SELECT count(*) FROM restaurants) + (SELECT count(*) FROM users) AS n`),
-  ) as Array<{ n: unknown }>;
+  // Every table the base seed's TRUNCATE … CASCADE empties (that exists here).
+  let n = 0;
+  for (const table of WIPED_TABLES) {
+    const [r] = rows(await db.execute(sql`SELECT to_regclass(${`public.${table}`}) IS NOT NULL AS ok`));
+    if (r?.ok) n += Number(rows(await db.execute(sql.raw(`SELECT count(*) AS n FROM "${table}"`)))[0]?.n ?? 0);
+  }
   const problems = seedAllProblems({ url, env: process.env, args, existingRows: Number(n) });
   if (problems.length > 0) fail(problems);
 
@@ -128,7 +131,7 @@ async function main(): Promise<void> {
   console.log(`  restaurant: ${main.name} · branches ${counts.branches} · users ${counts.users} · invoices ${counts.invoices}`);
   console.log(
     `  hero (this month): leak ${ils(hero.leakIls)} = ${pct(hero.leakPct)} of ${ils(hero.spendIls)} checked spend · ` +
-      `caught before payment ${ils(hero.caughtBeforePaymentIls)} · claimed ${ils(hero.recoveredIls)} · ` +
+      `caught before payment ${ils(hero.caughtBeforePaymentIls)} · claimed this month ${ils(hero.recoveredIls)} · ` +
       `${hero.invoicesWithLeak}/${hero.matchedInvoiceCount} invoices with a leak · ${hero.pendingLinkCount} pending link`,
   );
   console.log(`  last month: leak ${ils(last.leakIls)} = ${pct(last.leakPct)} of ${ils(last.spendIls)}`);
@@ -140,7 +143,7 @@ async function main(): Promise<void> {
     const s = await (rec.computeRecoverySummary as (d: unknown, id: string) => Promise<Sum>)(db, main.id);
     const r = await (rec.returnedInMonth as (d: unknown, id: string) => Promise<{ returnedAgorot: number }>)(db, main.id);
     console.log(
-      `  ₪ back: claimed ${ils(s.claimedAgorot / 100)} · credited ${ils(s.creditedAgorot / 100)} · ` +
+      `  ₪ back (all claims to date): claimed ${ils(s.claimedAgorot / 100)} · credited ${ils(s.creditedAgorot / 100)} · ` +
         `returned this month ${ils(r.returnedAgorot / 100)} · owed ${ils(s.outstandingAgorot / 100)} · ` +
         `rate ${pct(s.recoveryRate)} · ${s.overdueCount} overdue`,
     );

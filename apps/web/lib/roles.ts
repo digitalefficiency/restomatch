@@ -54,6 +54,9 @@ export const ROUTE_ROLES: Record<string, UserRole[]> = {
   '/dashboard/reports/monthly': ['owner', 'manager'],
   '/dashboard/suppliers': ['owner', 'manager'],
   '/dashboard/catalog': ['owner', 'manager'],
+  // Product pages are part of the catalog (names grid, price history, cheapest
+  // supplier); without this rule every role could open them by URL.
+  '/dashboard/products': ['owner', 'manager'],
   '/dashboard/orders': ['owner', 'manager'],
   '/dashboard/exports': ['owner', 'bookkeeper'],
   // Team: owners manage the roster; managers see it read-only and may set a

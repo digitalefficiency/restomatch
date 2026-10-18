@@ -1644,26 +1644,26 @@ export const creditNotes = pgTable(
     restaurantId: uuid('restaurant_id')
       .notNull()
       .references(() => restaurants.id, { onDelete: 'cascade' }),
-    supplierId: uuid('supplier_id')
-      .notNull()
-      .references(() => suppliers.id, { onDelete: 'cascade' }),
+    /** Composite same-tenant FK (supplier_id, restaurant_id) in 0048 — Drizzle mirrors the column only. */
+    supplierId: uuid('supplier_id').notNull(),
     number: varchar('number', { length: 64 }),
     amountAgorot: bigint('amount_agorot', { mode: 'number' }).notNull(),
     issuedOn: date('issued_on').notNull(),
     source: varchar('source', { length: 16 }).$type<'manual' | 'invoice_line'>().notNull().default('manual'),
-    invoiceLineId: uuid('invoice_line_id').references(() => invoiceLines.id, { onDelete: 'set null' }),
-    invoiceId: uuid('invoice_id').references(() => invoices.id, { onDelete: 'set null' }),
+    /** (invoice_line_id, invoice_id) → invoice_lines MATCH FULL; (invoice_id, restaurant_id) → invoices (0048). */
+    invoiceLineId: uuid('invoice_line_id'),
+    invoiceId: uuid('invoice_id'),
     note: text('note'),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index('credit_notes_restaurant_idx').on(t.restaurantId, t.issuedOn),
-    index('credit_notes_supplier_idx').on(t.supplierId),
-    index('credit_notes_invoice_idx').on(t.invoiceId),
+    index('credit_notes_supplier_idx').on(t.supplierId, t.restaurantId),
+    index('credit_notes_invoice_idx').on(t.invoiceId, t.restaurantId),
     index('credit_notes_created_by_idx').on(t.createdBy),
     uniqueIndex('credit_notes_invoice_line_unique')
-      .on(t.invoiceLineId)
+      .on(t.invoiceLineId, t.invoiceId)
       .where(sql`${t.invoiceLineId} IS NOT NULL`),
   ],
 );
@@ -1675,15 +1675,14 @@ export const recoveryClaims = pgTable(
     restaurantId: uuid('restaurant_id')
       .notNull()
       .references(() => restaurants.id, { onDelete: 'cascade' }),
-    discrepancyId: uuid('discrepancy_id')
-      .notNull()
-      .references(() => discrepancies.id, { onDelete: 'cascade' }),
-    supplierId: uuid('supplier_id').references(() => suppliers.id, { onDelete: 'set null' }),
-    invoiceId: uuid('invoice_id').references(() => invoices.id, { onDelete: 'set null' }),
+    // Composite same-tenant FKs (x_id, restaurant_id) in 0048 — Drizzle mirrors the columns only.
+    discrepancyId: uuid('discrepancy_id').notNull(),
+    supplierId: uuid('supplier_id'),
+    invoiceId: uuid('invoice_id'),
     status: varchar('status', { length: 16 }).$type<RecoveryStatus>().notNull().default('claimed'),
     amountAgorot: bigint('amount_agorot', { mode: 'number' }).notNull(),
     creditedAgorot: bigint('credited_agorot', { mode: 'number' }).notNull().default(0),
-    creditNoteId: uuid('credit_note_id').references(() => creditNotes.id, { onDelete: 'set null' }),
+    creditNoteId: uuid('credit_note_id'),
     claimedAt: timestamp('claimed_at', { withTimezone: true }).notNull().defaultNow(),
     letterSentAt: timestamp('letter_sent_at', { withTimezone: true }),
     acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
@@ -1698,9 +1697,10 @@ export const recoveryClaims = pgTable(
   (t) => [
     uniqueIndex('recovery_claims_discrepancy_unique').on(t.discrepancyId),
     index('recovery_claims_restaurant_status_idx').on(t.restaurantId, t.status, t.claimedAt),
-    index('recovery_claims_supplier_idx').on(t.supplierId),
-    index('recovery_claims_credit_note_idx').on(t.creditNoteId),
-    index('recovery_claims_invoice_idx').on(t.invoiceId),
+    index('recovery_claims_discrepancy_tenant_idx').on(t.discrepancyId, t.restaurantId),
+    index('recovery_claims_supplier_idx').on(t.supplierId, t.restaurantId),
+    index('recovery_claims_credit_note_idx').on(t.creditNoteId, t.restaurantId),
+    index('recovery_claims_invoice_idx').on(t.invoiceId, t.restaurantId),
     index('recovery_claims_created_by_idx').on(t.createdBy),
   ],
 );
@@ -1712,9 +1712,8 @@ export const recoveryEvents = pgTable(
     restaurantId: uuid('restaurant_id')
       .notNull()
       .references(() => restaurants.id, { onDelete: 'cascade' }),
-    claimId: uuid('claim_id')
-      .notNull()
-      .references(() => recoveryClaims.id, { onDelete: 'cascade' }),
+    /** Composite same-tenant FK (claim_id, restaurant_id) → recovery_claims in 0048. */
+    claimId: uuid('claim_id').notNull(),
     fromStatus: varchar('from_status', { length: 16 }).$type<RecoveryStatus>(),
     toStatus: varchar('to_status', { length: 16 }).$type<RecoveryStatus>().notNull(),
     amountAgorot: bigint('amount_agorot', { mode: 'number' }),
@@ -1723,7 +1722,7 @@ export const recoveryEvents = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    index('recovery_events_claim_idx').on(t.claimId, t.createdAt),
+    index('recovery_events_claim_idx').on(t.claimId, t.restaurantId, t.createdAt),
     index('recovery_events_restaurant_idx').on(t.restaurantId, t.createdAt),
     index('recovery_events_actor_idx').on(t.actorId),
   ],

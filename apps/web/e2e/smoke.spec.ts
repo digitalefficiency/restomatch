@@ -170,3 +170,23 @@ for (const locale of LOCALES) {
     }
   });
 }
+
+// QA D2: a malformed id must render the translated not-found page, never the
+// error boundary ("Something went wrong").
+for (const locale of LOCALES) {
+  test.describe(`malformed ids [${locale}]`, () => {
+    test.use({ storageState: OWNER_STATE });
+    for (const path of ['/dashboard/receiving/not-a-uuid', '/dashboard/orders/not-a-uuid', '/dashboard/invoices/not-a-uuid']) {
+      test(`${locale} ${path} → not found`, async ({ page }) => {
+        await page.context().addCookies([
+          { name: 'rm_locale', value: locale, url: test.info().project.use.baseURL ?? 'http://localhost:3100' },
+        ]);
+        await page.goto(path);
+        const notFoundTitle = locale === 'he' ? commonHe.notFound.title : commonEn.notFound.title;
+        const errorTitle = locale === 'he' ? commonHe.errorPage.title : commonEn.errorPage.title;
+        await expect(page.getByRole('heading', { name: notFoundTitle, exact: true })).toBeVisible();
+        await expect(page.getByRole('heading', { name: errorTitle, exact: true })).toHaveCount(0);
+      });
+    }
+  });
+}

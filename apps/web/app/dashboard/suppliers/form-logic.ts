@@ -1,3 +1,4 @@
+import { CutoffTime } from '@restomatch/types';
 import type { DeliverySchedule } from '@restomatch/db';
 
 /** Pure supplier-form helpers (shared by the manager + the details tab; unit-tested). */
@@ -121,5 +122,15 @@ export function parsePaymentTerms(raw: string | null | undefined): PaymentTerms 
   if (/^מזומן$/.test(s)) return { kind: 'cash' };
   const m = /^שוטף(?:\s*\+\s*(\d{1,3}))?$/.exec(s);
   if (m) return { kind: 'eom', days: m[1] ? Number(m[1]) : 0 };
+  return null;
+}
+
+/**
+ * What blocks saving one order-schedule window, or null. The time input can be
+ * cleared to '', which the server rejects with a generic "invalid fields".
+ */
+export function scheduleRowProblem(row: { orderDays: number[]; cutoff: string }): 'pickDay' | 'pickCutoff' | null {
+  if (row.orderDays.length === 0) return 'pickDay';
+  if (!CutoffTime.safeParse(row.cutoff).success) return 'pickCutoff';
   return null;
 }

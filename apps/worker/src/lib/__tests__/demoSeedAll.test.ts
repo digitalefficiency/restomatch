@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PUBLIC_DEMO_PASSWORD, SEED_STEPS, parseSeedAllArgs, seedAllProblems } from '../demoSeedAll';
+import { PUBLIC_DEMO_PASSWORD, SEED_STEPS, WIPED_TABLES, parseSeedAllArgs, seedAllProblems } from '../demoSeedAll';
 
 const LOCAL = 'postgres://postgres:postgres@localhost:5432/restomatch_dev';
 const NEW_PROJECT = 'postgresql://postgres:pw@db.newdemoref.supabase.co:5432/postgres';
@@ -53,6 +53,10 @@ describe('demo:seed-all guards', () => {
     expect(() => parseSeedAllArgs(['--force'])).toThrow(/unknown argument/);
   });
 
+  it('counts every table the base seed wipes as "not empty" (billing, audit log)', () => {
+    expect(WIPED_TABLES).toEqual(expect.arrayContaining(['restaurants', 'users', 'billing_accounts', 'audit_log']));
+  });
+
   it('runs the steps in the agreed order; only the two core steps are mandatory', () => {
     expect(SEED_STEPS.map((s) => s.key)).toEqual(['core', 'demo', 'chain', 'recovery', 'recipes', 'contracts']);
     expect(SEED_STEPS.filter((s) => !s.optional).map((s) => s.key)).toEqual(['core', 'demo']);
@@ -62,5 +66,24 @@ describe('demo:seed-all guards', () => {
       recipes: 'recipes',
       contracts: 'supplier_contract_prices',
     });
+  });
+});
+
+describe('refuter: production refusal on every connection-string form', () => {
+  const POOLER = 'aws-0-eu-central-1.pooler.supabase.com';
+  const env = { SEED_ALLOW_REMOTE_HOST: POOLER, DEMO_PASSWORD: 'abcdefghijklmn' };
+  it('refuses a percent-encoded prod ref in the username', () => {
+    const url = `postgres://postgres.%63ringgshiafwsszyqufo:x@${POOLER}:6543/postgres`;
+    expect(seedAllProblems({ url, env, args: noReset, existingRows: 0 }).join()).toMatch(/PRODUCTION/);
+  });
+  it('refuses an empty URL username with PGUSER naming the prod project', () => {
+    const url = `postgres://:x@${POOLER}:6543/postgres`;
+    expect(seedAllProblems({ url, env: { ...env, PGUSER: 'postgres.cringgshiafwsszyqufo' }, args: noReset, existingRows: 0 }).join()).toMatch(
+      /PRODUCTION/,
+    );
+  });
+  it('refuses any shared pooler host, even for another project (direct host only)', () => {
+    const url = `postgresql://postgres.newdemoref:x@${POOLER}:5432/postgres`;
+    expect(seedAllProblems({ url, env, args: noReset, existingRows: 0 }).join()).toMatch(/shared Supabase pooler/);
   });
 });
