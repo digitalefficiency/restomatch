@@ -5,7 +5,6 @@ import { Badge, Card, EmptyState, SectionHeader, displayName } from '@/lib/compo
 import { formatIls } from '@/lib/money';
 import { formatDate, formatNumber } from '@/lib/i18n/format';
 import { getLocale, getT } from '@/lib/i18n/server';
-import { originalProps } from '@/lib/i18n/original';
 import { contracts as contractsNs } from '@/lib/i18n/messages/contracts';
 import { getWave1Access } from './access';
 
@@ -68,8 +67,8 @@ export async function OverContractCard({ variant = 'full' }: { variant?: 'full' 
               <span className="min-w-0 truncate text-ink">
                 {displayName(l.productName, l.productNameEn, locale).primary}
                 <span className="text-subtle"> · </span>
-                <span className="text-muted" {...originalProps(l.supplierName)}>
-                  {l.supplierName}
+                <span className="text-muted">
+                  {displayName(l.supplierName, l.supplierNameEn, locale).primary}
                 </span>
               </span>
               <Badge
@@ -151,8 +150,8 @@ export async function OverContractCard({ variant = 'full' }: { variant?: 'full' 
                     </Link>
                   </td>
                   <td className="p-3 tabular-nums text-muted">{formatDate(l.invoiceDate, locale)}</td>
-                  <td className="p-3 text-muted" {...originalProps(l.supplierName)}>
-                    {l.supplierName}
+                  <td className="p-3 text-muted">
+                    {displayName(l.supplierName, l.supplierNameEn, locale).primary}
                   </td>
                   <td className="p-3 font-medium text-ink">
                     {displayName(l.productName, l.productNameEn, locale).primary}

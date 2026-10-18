@@ -25,6 +25,7 @@ export interface OverContractLine {
   invoiceDate: Date;
   supplierId: string;
   supplierName: string;
+  supplierNameEn: string | null;
   productId: string;
   productName: string;
   productNameEn: string | null;
@@ -76,6 +77,7 @@ export async function findOverContractLines(
       createdAt: invoices.createdAt,
       supplierId: invoices.supplierId,
       supplierName: suppliers.name,
+      supplierNameEn: suppliers.nameEn,
       productId: invoiceLines.productId,
       productName: products.canonicalName,
       productNameEn: products.nameEn,
@@ -134,6 +136,7 @@ export async function findOverContractLines(
       invoiceDate: date,
       supplierId: l.supplierId!,
       supplierName: l.supplierName,
+      supplierNameEn: l.supplierNameEn,
       productId: l.productId!,
       productName: l.productName,
       productNameEn: l.productNameEn,

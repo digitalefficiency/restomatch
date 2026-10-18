@@ -125,9 +125,12 @@ export function AlertsPanel({ canManage }: { canManage: boolean }) {
                         </span>
                       </p>
                       <p className="mt-2 font-mono text-lg font-bold tabular-nums text-danger">
-                        <bdi dir="ltr">
-                          {t('alerts.priceMove', { from: money(a.startPrice), to: money(a.endPrice) })}
-                        </bdi>
+                        {/* Each amount is bidi-isolated (FSI…PDI) so the he-IL ₪ marks can't
+                            reorder the pair; the arrow follows the reading direction. */}
+                        {t('alerts.priceMove', {
+                          from: `\u2068${money(a.startPrice)}\u2069`,
+                          to: `\u2068${money(a.endPrice)}\u2069`,
+                        })}
                       </p>
                     </div>
                     {a.status === 'dismissed' ? (

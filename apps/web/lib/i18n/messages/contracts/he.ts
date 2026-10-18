@@ -168,7 +168,7 @@ export const he = {
   },
   alerts: {
     headline: '{product} {pct} ב-{period} אצל {supplier}',
-    priceMove: '{from} → {to}',
+    priceMove: '{from} ← {to}',
     period: {
       days: '{count} ימים',
       weeks: '{count} שבועות',
