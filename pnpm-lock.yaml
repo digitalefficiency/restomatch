@@ -316,6 +316,9 @@ importers:
       '@restomatch/db':
         specifier: workspace:*
         version: link:../db
+      '@restomatch/ingest':
+        specifier: workspace:*
+        version: link:../ingest
       '@restomatch/matching':
         specifier: workspace:*
         version: link:../matching

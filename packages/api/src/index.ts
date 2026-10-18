@@ -19,6 +19,7 @@ import { matchRouter } from './routers/match';
 import { mappingRouter } from './routers/mapping';
 import { productsRouter } from './routers/products';
 import { teamRouter } from './routers/team';
+import { ingestRouter } from './routers/ingest';
 
 export const appRouter = router({
   owner: ownerRouter,
@@ -41,6 +42,7 @@ export const appRouter = router({
   products: productsRouter,
   team: teamRouter,
   dsr: dsrRouter,
+  ingest: ingestRouter,
 });
 
 export type AppRouter = typeof appRouter;
@@ -190,3 +192,12 @@ export {
   scanIdFromLocalUrl,
   isLocalScanId,
 } from './lib/localScanStorage';
+export {
+  handleEmailWebhook,
+  handleWhatsAppVerify,
+  handleWhatsAppWebhook,
+  INGEST_CHANNEL_LIMIT,
+  INGEST_IP_LIMIT,
+  type IngestHttpDeps,
+} from './ingest/http';
+export { processInboundMessage, resolveIngestChannel } from './ingest/pipeline';

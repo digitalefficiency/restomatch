@@ -10,6 +10,10 @@ import {
   eq,
   goodsReceipts,
   grLines,
+  ingestChannels,
+  ingestDocuments,
+  ingestMessages,
+  ingestSenders,
   invitations,
   invoiceLines,
   invoices,
@@ -207,6 +211,19 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'dsr.deleteMyAccount':
     'authed self-service; anonymizes ONLY the caller (ctx.session.userId) — takes no target id, cannot reach another user',
   'dsr.eraseLead': 'admin-denial',
+  // S13 invoice ingestion (WhatsApp / e-mail). Reads are restaurant-scoped;
+  // rotate/revoke act only on the session restaurant's own channel (no
+  // client-supplied tenant id); sender / document ids are re-checked. The
+  // PUBLIC webhooks have their own suite: ingest.attack.test.ts.
+  'ingest.overview': 'isolation',
+  'ingest.rotateChannel': 'isolation',
+  'ingest.revokeChannel': 'isolation',
+  'ingest.senders': 'isolation',
+  'ingest.addSender': 'attack',
+  'ingest.removeSender': 'attack',
+  'ingest.inbox': 'isolation',
+  'ingest.approveDocument': 'attack',
+  'ingest.rejectDocument': 'attack',
 };
 
 function listProcedurePaths(): string[] {
@@ -1409,4 +1426,129 @@ describe('role denial: mapping.confirm rejects member-tier callers', () => {
       expect(after).toHaveLength(before.length);
     });
   }
+});
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * S13 ingest.* — B has a channel, an allow-listed sender and a needs_review
+ * document; A must not see, approve, reject, remove or re-point any of them.
+ * ────────────────────────────────────────────────────────────────────────── */
+describe('ingest.*: isolation + foreign-id attacks (A → B)', () => {
+  const ids = { bSender: '', bDoc: '', bMsg: '', aDoc: '' };
+
+  beforeAll(async () => {
+    for (const t of [A, B]) {
+      await db
+        .update(restaurants)
+        .set({ settings: { features: { ingestWhatsapp: true, ingestEmail: true } } })
+        .where(eq(restaurants.id, t.restaurantId));
+    }
+    const seed = async (t: Tenant, tag: string) => {
+      const [ch] = await db
+        .insert(ingestChannels)
+        .values({ restaurantId: t.restaurantId, kind: 'email', tokenHash: tag.repeat(64).slice(0, 64), tokenHint: tag.repeat(4) })
+        .returning();
+      const [snd] = await db
+        .insert(ingestSenders)
+        .values({ restaurantId: t.restaurantId, kind: 'email', sender: `bills-${tag}@supplier.test`, supplierId: t.supplierId })
+        .returning();
+      const [msg] = await db
+        .insert(ingestMessages)
+        .values({
+          restaurantId: t.restaurantId,
+          channelId: ch!.id,
+          kind: 'email',
+          provider: 'stub',
+          providerMessageId: `ct-${tag}`,
+          sender: `stranger-${tag}@x.test`,
+          senderAllowed: false,
+          subject: `secret subject ${tag}`,
+          status: 'needs_review',
+        })
+        .returning();
+      const [doc] = await db
+        .insert(ingestDocuments)
+        .values({
+          restaurantId: t.restaurantId,
+          messageId: msg!.id,
+          filename: `${tag}.pdf`,
+          mimeType: 'application/pdf',
+          storagePath: `${t.restaurantId}/scan-ct${tag}-00000000.pdf`,
+          status: 'needs_review',
+        })
+        .returning();
+      return { sender: snd!.id, doc: doc!.id, msg: msg!.id };
+    };
+    const a = await seed(A, 'a');
+    const b = await seed(B, 'b');
+    ids.bSender = b.sender;
+    ids.bDoc = b.doc;
+    ids.bMsg = b.msg;
+    ids.aDoc = a.doc;
+  });
+
+  it('overview / senders / inbox list only the caller\'s rows', async () => {
+    const ov = await callerFor(A).ingest.overview();
+    expect(ov.channels.every((c) => c.tokenHint === 'aaaa')).toBe(true);
+    expect(ov).not.toHaveProperty('channels.0.tokenHash');
+    const senders = await callerFor(A).ingest.senders();
+    expect(senders.map((s) => s.sender)).toEqual(['bills-a@supplier.test']);
+    const inbox = await callerFor(A).ingest.inbox({ filter: 'all', limit: 100 });
+    expect(inbox.map((m) => m.subject)).toEqual(['secret subject a']);
+    expect(inbox.flatMap((m) => m.documents.map((d) => d.id))).toEqual([ids.aDoc]);
+  });
+
+  it('approveDocument / rejectDocument on B\'s document → NOT_FOUND, B untouched', async () => {
+    await expect(callerFor(A).ingest.approveDocument({ documentId: ids.bDoc })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(callerFor(A).ingest.rejectDocument({ documentId: ids.bDoc })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [doc] = await db.select().from(ingestDocuments).where(eq(ingestDocuments.id, ids.bDoc));
+    expect(doc).toMatchObject({ status: 'needs_review', invoiceId: null });
+  });
+
+  it('approving A\'s own document with B\'s supplierId → NOT_FOUND (no invoice created)', async () => {
+    await expect(
+      callerFor(A).ingest.approveDocument({ documentId: ids.aDoc, supplierId: B.supplierId }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [doc] = await db.select().from(ingestDocuments).where(eq(ingestDocuments.id, ids.aDoc));
+    expect(doc!.invoiceId).toBeNull();
+  });
+
+  it('addSender with B\'s supplierId → NOT_FOUND; removeSender of B\'s entry → NOT_FOUND', async () => {
+    await expect(
+      callerFor(A).ingest.addSender({ kind: 'email', sender: 'x@y.test', supplierId: B.supplierId }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(callerFor(A).ingest.removeSender({ id: ids.bSender })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [still] = await db.select().from(ingestSenders).where(eq(ingestSenders.id, ids.bSender));
+    expect(still).toBeTruthy();
+  });
+
+  it('rotate / revoke touch only the caller\'s channel', async () => {
+    const r = await callerFor(A).ingest.rotateChannel({ kind: 'email' });
+    expect(r.token).toMatch(/^inv_[0-9a-f]{32}$/);
+    await callerFor(A).ingest.revokeChannel({ kind: 'email' });
+    const bLive = await db
+      .select()
+      .from(ingestChannels)
+      .where(and(eq(ingestChannels.restaurantId, B.restaurantId), eq(ingestChannels.active, true)));
+    expect(bLive).toHaveLength(1);
+    const aRows = await db.select().from(ingestChannels).where(eq(ingestChannels.restaurantId, A.restaurantId));
+    // The stored row is a hash, never the plaintext token.
+    expect(aRows.some((c) => c.tokenHash === r.token)).toBe(false);
+  });
+
+  it('role gate: a receiver cannot rotate tokens or approve documents', async () => {
+    await expect(callerWithRole(A, 'receiver').ingest.rotateChannel({ kind: 'email' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(callerWithRole(A, 'receiver').ingest.approveDocument({ documentId: ids.aDoc })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('flag off → FORBIDDEN FEATURE_DISABLED on every procedure', async () => {
+    await db.update(restaurants).set({ settings: {} }).where(eq(restaurants.id, A.restaurantId));
+    await expect(callerFor(A).ingest.overview()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(callerFor(A).ingest.inbox({ filter: 'all', limit: 10 })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(callerFor(A).ingest.rotateChannel({ kind: 'whatsapp' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(callerFor(A).ingest.rejectDocument({ documentId: ids.aDoc })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await db
+      .update(restaurants)
+      .set({ settings: { features: { ingestWhatsapp: true, ingestEmail: true } } })
+      .where(eq(restaurants.id, A.restaurantId));
+  });
 });
