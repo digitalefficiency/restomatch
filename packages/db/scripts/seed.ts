@@ -266,7 +266,15 @@ async function main() {
   const verifiedAt = new Date();
   const insertedUsers = await db
     .insert(users)
-    .values(userSpecs.map((u) => ({ email: u.email, name: u.name, emailVerified: verifiedAt })))
+    .values(
+      userSpecs.map((u) => ({
+        email: u.email,
+        name: u.name,
+        emailVerified: verifiedAt,
+        // The demo owner doubles as the platform operator so /admin is demo-able.
+        isPlatformAdmin: u.role === 'owner',
+      })),
+    )
     .returning();
   const passwordHash = await hashPassword(password);
   await db.insert(userCredentials).values(
