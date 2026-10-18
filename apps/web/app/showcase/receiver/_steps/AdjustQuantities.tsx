@@ -28,9 +28,19 @@ interface Props {
   onUpdateMark: (key: string, patch: Partial<LineMark>) => void;
   onSubmit: () => void;
   onBack: () => void;
+  /** Tailwind `bottom-*` for the sticky footer — the dashboard lifts it above
+   *  its fixed mobile bottom nav; the showcase has none. */
+  footerBottomClass?: string;
 }
 
-export function AdjustQuantities({ result, marks, onUpdateMark, onSubmit, onBack }: Props) {
+export function AdjustQuantities({
+  result,
+  marks,
+  onUpdateMark,
+  onSubmit,
+  onBack,
+  footerBottomClass = 'bottom-0',
+}: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const t = useT(receiving);
   const locale = useLocale();
@@ -133,7 +143,7 @@ export function AdjustQuantities({ result, marks, onUpdateMark, onSubmit, onBack
       </div>
 
       {/* Footer */}
-      <div className="sticky bottom-0 pb-4 pt-4 -mx-6 px-6 bg-gradient-to-t from-bg via-bg to-transparent">
+      <div className={`sticky ${footerBottomClass} pb-4 pt-4 -mx-6 px-6 bg-gradient-to-t from-bg via-bg to-transparent`}>
         <div className="flex items-center justify-between gap-3">
           <button
             type="button"

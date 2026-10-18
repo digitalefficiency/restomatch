@@ -529,11 +529,9 @@ async function main() {
     await shot(page, 'K-po-only-review-en-mobile');
     await page.getByRole('button', { name: 'Continue to quantities' }).click();
     await page.getByRole('heading', { name: 'How much really arrived?' }).waitFor();
-    for (let i = 0; i < 30; i += 1) {
-      const btn = page.getByRole('button', { name: /^= order/ }).first();
-      if (!(await btn.count())) break;
-      await btn.click();
-    }
+    const asOrdered = page.getByRole('button', { name: /^= order/ });
+    const n = await asOrdered.count();
+    for (let i = 0; i < n; i += 1) await asOrdered.nth(i).click();
     const cta = page.getByTestId('close-receipt');
     check(await unobstructed(page, cta), 'sticky "Close receipt" CTA is the top-most element (nothing over it)');
     await shot(page, 'K-adjust-cta-en-mobile');
@@ -544,6 +542,22 @@ async function main() {
     check(!/0 matched, 0 checked/.test(verified) && /checked by hand/.test(verified), 'summary counts the hand-checked lines');
     check((await progress.getAttribute('data-filled')) === '5', 'confirmed: all 5 bars');
     await shot(page, 'K-confirmed-en-mobile');
+    await ctx.close();
+  });
+
+  await scenario('L', 'manager · he · desktop — demo invoice → order-only review in Hebrew RTL (prod check)', async (check) => {
+    const { poId } = await freshPo('L');
+    const { ctx, page } = await session('manager', { mobile: false, locale: 'he' });
+    await openWizard(page, poId);
+    check((await page.locator('html').getAttribute('dir')) === 'rtl', 'Hebrew page is RTL');
+    await page.getByRole('button', { name: 'השתמש בחשבונית-דמה (ללא העלאה)' }).click();
+    await page.getByRole('button', { name: PROCESS }).click();
+    await waitReview(page);
+    check((await page.getByText(/קליטה מול ההזמנה/).count()) > 0, 'order-only subtitle in Hebrew (no fake OCR %)');
+    check((await page.getByText(/ביטחון OCR/).count()) === 0, 'no OCR confidence shown');
+    check(await page.getByTestId('recon-pending-banner').isVisible(), 'calm pending banner');
+    check((await page.getByTestId('wizard-progress').getAttribute('data-filled')) === '4', 'progress 4/5 on review');
+    await shot(page, 'L-po-only-review-he-desktop');
     await ctx.close();
   });
 
