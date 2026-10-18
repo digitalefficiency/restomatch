@@ -164,10 +164,10 @@ pnpm build && NODE_ENV=production pnpm start &
 PHASE=prod pnpm exec tsx scripts/e2e-ingest-pwa.ts     # PASS (prod): 143 checks (incl. queue wiped on sign-out and on the session-expired redirect)
 ```
 
-Both phases were re-run on the merged head: dev 21/21, prod 140/140. **One observation:** on the first prod run
-after the merge, a React #418 hydration error was logged once during the bookkeeper/he pass (`/dashboard` →
-`/dashboard/inbox`). It did not reproduce in a targeted run of the same pages (bookkeeper + owner), nor in a full
-re-run. The inbox formats dates with the fixed `Asia/Jerusalem` timezone (`lib/i18n/format`), so it does not depend
+Both phases were re-run on the merged head: dev 21/21, prod 140/140. **One observation:** an intermittent React #418
+hydration error was logged during the bookkeeper/he pass (`/dashboard` → `/dashboard/inbox`) in 2 of about 9 post-merge
+prod runs. It never appeared for another role or locale. It did not reproduce in two targeted loops (8 navigations of the
+same pages after one login) or in the following full re-runs. The inbox formats dates with the fixed `Asia/Jerusalem` timezone (`lib/i18n/format`), so it does not depend
 on the server/client timezone. I could not tie it to S13 code, and I flag it for the orchestrator's cross-QA.
 
 - **Production phase.** It covers every role × he/en, which is 10 runs (owner, manager, bookkeeper, receiver, chef):
