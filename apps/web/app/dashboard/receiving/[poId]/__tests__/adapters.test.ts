@@ -109,6 +109,18 @@ describe('noLinePaired — "is this the right invoice?" banner', () => {
     ).toBe(false);
     expect(noLinePaired(recon([]))).toBe(false);
   });
+
+  it('not when an unlinked line shares wording with the order (same supplier, not linked yet)', () => {
+    // 'עגבניות שרי אדומות' vs ordered 'עגבניה שרי': stem 'עגבנ' / 'שרי' is shared.
+    expect(
+      noLinePaired(recon([inv({ id: 'a', rawDescription: 'עגבניות שרי אדומות', qtyBilled: '2', unitPriceBilled: '11' })])),
+    ).toBe(false);
+  });
+
+  it('carries the printed invoice line total for display', () => {
+    const lines = recon([inv({ id: 'a', productId: 'p1', qtyBilled: '4', unitPriceBilled: '20', lineTotal: '76' })]);
+    expect(lines.find((l) => l.poLineId === 'pl1')!.invoiceLineTotal).toBe(76);
+  });
 });
 
 describe('adaptReconciliation — refuter cases (EN-5)', () => {

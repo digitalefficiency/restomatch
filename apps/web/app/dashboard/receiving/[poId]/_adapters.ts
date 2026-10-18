@@ -251,6 +251,7 @@ export function adaptReconciliation(args: {
       invoiceUnit: inv?.unit ?? null,
       poUnitPrice: poPrice,
       invoiceUnitPrice: invoicePrice,
+      invoiceLineTotal: inv ? num(inv.lineTotal) : null,
       status,
       deltaIls: Math.round(deltaIls * 100) / 100,
     };
@@ -299,6 +300,7 @@ export function adaptReconciliation(args: {
       invoiceUnit: il.unit ?? null,
       poUnitPrice: null,
       invoiceUnitPrice: invoicePrice,
+      invoiceLineTotal: num(il.lineTotal),
       status: conclusive ? 'unordered' : 'pending_review',
       deltaIls: conclusive ? Math.round((invoiceQty ?? 0) * (invoicePrice ?? 0) * 100) / 100 : 0,
     };

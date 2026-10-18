@@ -193,12 +193,25 @@ export function nonMatchedLines(result: ReconciliationResult | null): Reconcilia
 
 /**
  * Not one invoice line paired with an order line, though both sides have
- * lines: almost always another supplier's invoice, or the wrong order opened.
+ * lines, and no invoice-only line even shares a word with the order (4-letter
+ * stems, so עגבניה/עגבניות meet): almost always another supplier's invoice or
+ * the wrong order opened. Shared wording means "same supplier, lines not
+ * linked yet", which stays the calm pending-review case.
  */
 export function noLinePaired(lines: ReconciliationLine[]): boolean {
-  return (
-    lines.some((l) => l.poLineId !== null) &&
-    lines.some((l) => l.poLineId === null && l.invoiceLineIndex !== null) &&
-    !lines.some((l) => l.poLineId !== null && l.invoiceLineIndex !== null)
-  );
+  const ordered = lines.filter((l) => l.poLineId !== null);
+  const invoiceOnly = lines.filter((l) => l.poLineId === null && l.invoiceLineIndex !== null);
+  if (ordered.length === 0 || invoiceOnly.length === 0) return false;
+  if (ordered.some((l) => l.invoiceLineIndex !== null)) return false;
+  const orderStems = new Set(ordered.flatMap((l) => stems(l.productName)));
+  return !invoiceOnly.some((l) => stems(l.productName).some((w) => orderStems.has(w)));
+}
+
+function stems(name: string): string[] {
+  return name
+    .replace(/[\u0591-\u05C7"'\u05F3\u05F4]/g, '')
+    .toLowerCase()
+    .split(/[^\p{L}]+/u)
+    .filter((w) => w.length >= 3)
+    .map((w) => w.slice(0, 4));
 }

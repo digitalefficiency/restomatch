@@ -121,7 +121,7 @@ export function useUnitLabel(): (unit: string | null | undefined) => string {
   return useCallback((unit) => unitLabel(unit, locale), [locale]);
 }
 
-/** "12 kg" — always LTR so the number and unit don't flip in RTL. */
+/** "12 kg" / "12 ק״ג" — isolated in the page direction, number first. */
 export function Qty({ qty, unit }: { qty: number | null; unit?: string | null }) {
   const locale = useLocale();
   const dir = useDir();

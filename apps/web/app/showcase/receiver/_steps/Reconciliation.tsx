@@ -161,9 +161,9 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
         <div
           role="status"
           data-testid="recon-mismatch-banner"
-          className="mb-6 flex items-start gap-3 rounded-2xl border border-warn/40 bg-warn/8 px-5 py-4"
+          className="mb-6 flex items-start gap-3 rounded-2xl border border-line bg-surface-2 px-5 py-4"
         >
-          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warn" aria-hidden="true" />
+          <Info className="mt-0.5 h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
           <div className="text-sm text-ink">{t('steps.recon.mismatchBanner')}</div>
         </div>
       ) : (result.summary.pendingCount ?? 0) > 0 ? (
@@ -209,7 +209,7 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
               <div>
                 <dt className="text-xs text-subtle">{t('steps.recon.invoiced')}</dt>
                 <dd className="text-ink">
-                  <LineQty qty={line.invoiceQty} unit={line.invoiceUnit} price={line.invoiceUnitPrice} money={money} />
+                  <LineQty qty={line.invoiceQty} unit={line.invoiceUnit} price={line.invoiceUnitPrice} total={line.invoiceLineTotal} money={money} />
                 </dd>
               </div>
             </dl>
@@ -249,7 +249,7 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
                   <LineQty qty={line.poQty} unit={line.poUnit} price={line.poUnitPrice} money={money} />
                 </td>
                 <td className="p-3 text-muted">
-                  <LineQty qty={line.invoiceQty} unit={line.invoiceUnit} price={line.invoiceUnitPrice} money={money} />
+                  <LineQty qty={line.invoiceQty} unit={line.invoiceUnit} price={line.invoiceUnitPrice} total={line.invoiceLineTotal} money={money} />
                 </td>
                 <td className="p-3">
                   <StatusBadge status={line.status} t={t} />
@@ -277,7 +277,7 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
           {t('steps.recon.retake')}
         </button>
         <div className="flex flex-col gap-2 sm:flex-row">
-          {allGood ? (
+          {allGood && !mismatch ? (
             <button
               type="button"
               onClick={onQuickConfirm}
@@ -306,11 +306,14 @@ function LineQty({
   qty,
   unit,
   price,
+  total,
   money,
 }: {
   qty: number | null;
   unit: string | null;
   price: number | null;
+  /** Printed line total (invoice side); else qty × price. */
+  total?: number | null;
   money: (v: number) => string;
 }) {
   if (qty === null) return <span className="text-subtle">—</span>;
@@ -318,7 +321,7 @@ function LineQty({
   // both directions; inside one LTR isolate with the price it drifted to the
   // far left in RTL ("× 6.43₪ 37.5 ליטר").
   return (
-    <span className="flex flex-col gap-0.5" data-testid="line-qty">
+    <span className="flex flex-col gap-0.5">
       <span className="inline-flex flex-wrap items-baseline gap-x-1.5">
         <Qty qty={qty} unit={unit} />
         {price !== null ? (
@@ -331,8 +334,8 @@ function LineQty({
         ) : null}
       </span>
       {price !== null ? (
-        <bdi dir="ltr" className="font-mono tabular-nums text-ink">
-          {money(lineTotalIls(qty, price))}
+        <bdi dir="ltr" className="self-start font-mono tabular-nums text-ink">
+          {money(total ?? lineTotalIls(qty, price))}
         </bdi>
       ) : null}
     </span>
