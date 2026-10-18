@@ -34,3 +34,6 @@ web-build
 drizzle/meta
 .gstack/
 .vercel
+
+# redis-server --daemonize (scripts/dev-setup.sh) writes its snapshot to the cwd
+dump.rdb
