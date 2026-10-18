@@ -59,7 +59,13 @@ There is **no schema change and no migration.**
 | Numbers are computed per branch, under that branch's RLS | `inBranch` = `withRestaurant` + user GUC | totals/rows/suppliers exclude B, M, X (app role) |
 | A client restaurant id is only used if it is in the RLS-derived set; otherwise NOT_FOUND | `switchTarget`, `renameBranch` | switching to or renaming B or M is rejected and names are unchanged |
 | Session switch accepts DB memberships only | `jwt` callback + `pickActiveMembership` | `activeRestaurant.test.ts` |
-| Add branch: owner only, on the active branch's own billing account, within the plan limit; copies only the source branch's rows | `addBranch` (GUC = source for reads, then GUC = new uuid for writes, one transaction) | limit, manager and no-billing-account cases are FORBIDDEN; copies = "ספק A" only |
+| Add branch: owner only, and only the **billing account's payer** (`billing_accounts.owner_user_id`), within the plan limit; copies only the source branch's rows | `addBranch`: GUC = source for reads, then GUC = new uuid for writes, in one transaction. The limit is re-counted inside the transaction under `pg_advisory_xact_lock(account)` | limit, manager, no-billing-account and **non-payer co-owner (B)** cases are FORBIDDEN; 3 concurrent adds with room for 2 → exactly 2 succeed; copies = "ספק A" only |
+
+An independent read-only review by the tenant-security-warden agent found **no cross-tenant read or
+write path**. It did confirm two billing/authorization gaps, and both are fixed with tests:
+
+- A co-owner on a shared account could bill new branches to the payer.
+- Concurrent `addBranch` calls could race past the limit.
 
 ## Fixed
 
@@ -69,9 +75,12 @@ There is **no schema change and no migration.**
 
 ## Not done / limitations
 
-- **The plan limit counts only RLS-visible owner branches.** A branch on the same billing account
-  that the caller is not a member of is not counted. Fixing this needs a SECURITY DEFINER count
-  function (a new migration) or a billing-side check. Proposed, not built.
+- **The plan limit counts only the restaurants on the account that the payer is a member of**
+  (RLS-visible). A branch on the account where the payer has no membership is not counted. That
+  can't happen through `addBranch`, which always makes the payer an owner; it needs an admin-made
+  branch. An exact count needs a SECURITY DEFINER function (a new migration). Proposed, not built.
+- In `next dev` on a cold compile, a transient React hydration-attribute warning appeared twice.
+  It did not reproduce on a warm server across three further runs (0 console errors).
 - Trend vs. previous month compares month-to-date with the full previous month (same as the
   overview hero).
 - `addBranch` copies settings JSON, VAT and timezone, but not the `approval_rules` rows or
@@ -109,6 +118,15 @@ There is **no schema change and no migration.**
 - **S5:** with 11 desktop tabs, the English row is near full width. Consider a "More" overflow.
 - **S7:** the e2e smoke test may want a switcher step (`data-testid="branch-switcher"`).
 
-## Gate
+## Gate (final head)
 
-(see below; filled with the final run)
+| Check | Command | Result |
+|---|---|---|
+| Migrate the test DB | `DATABASE_URL=$DATABASE_URL_TEST pnpm --filter @restomatch/db migrate` | ok |
+| Full suite | `DATABASE_URL_TEST=… pnpm test` | **13/13 tasks green**: api 517 (incl. `chain.attack` 24), web 204, charts 43 (incl. `chain` 10), db 59, matching 86 (leak canary untouched), worker 11 (+1 skipped), others green |
+| Web typecheck | `pnpm --filter @restomatch/web exec tsc --noEmit -p .` | **0 errors** |
+| Web lint | `cd apps/web && pnpm exec next lint` | **0 errors** (only warnings that were already there, none in S8 files) |
+| Production build | `cd apps/web && set -a && . ./.env.local && set +a && pnpm build` | **green**: `/dashboard/chain` and `/dashboard/branches` built |
+| Supabase sync | `pnpm db:supabase-sync --check` | up to date (39 files; no migration) |
+| Demo seed | `seed` → `seed-demo` → `seed-chain-demo`, run twice | idempotent; main branch ₪572 / 2.0 % unchanged |
+| Click-through | Playwright against `next dev`, he + en, desktop + 390 px | `docs/client-ready/screenshots/chain-*.png` (dashboard, previous month, switcher, branches, switched-into-Jerusalem, mobile + drawer, manager switcher); the manager is redirected from `/dashboard/chain` |
