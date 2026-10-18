@@ -471,3 +471,15 @@ Mode **heroMedia on**, with a dummy local WebM/MP4/poster and a promo, built the
   - All are fixed above, both layers were re-run green, and the test now locks those cases too.
 
 **Not this PR's:** the Vercel preview build fails for **every** branch with `DATABASE_URL is required for the auth connection`. The Preview environment has no DB URL. This was noted on the PR.
+
+### Add-on: Free leak check link (env-gated)
+- `/leak-check` is now in the marketing header nav, the mobile menu and the footer "Product" column.
+  - Labels: he "בדיקת דליפה חינם", en "Free leak check".
+  - The link renders **only** when `LEAK_CHECK_PUBLIC=1`.
+  - The flag is read on the server at request time, in `MarketingShell`; it is not a `NEXT_PUBLIC_` variable.
+  - `leakCheck.leakCheckPublicEnabled()` doesn't exist on this base yet. Swap it in at merge, as the comment in the file says.
+- **Verification:**
+  - **L1:** all green (web 206 tests, including i18n parity; typecheck, lint and build).
+  - **L2a:** a production build with the flag off shows no link on `/`, `/pricing` or `/about` (he/en × desktop/mobile), and the full L2 "off" suite still passes. With the flag on, the link appears in the header nav, the mobile menu and the footer with the right label, and there are 0 console errors.
+  - **L2b:** an independent reviewer found NOT REFUTED.
+- **Deploy order:** this branch has no `/leak-check` page; it comes from PR #44. Turn `LEAK_CHECK_PUBLIC=1` on only after that page ships, or every marketing page links to a 404.

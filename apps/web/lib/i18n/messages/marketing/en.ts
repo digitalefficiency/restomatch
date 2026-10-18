@@ -12,6 +12,7 @@ export const en: Shape<typeof he> = {
       how: 'How it works',
       features: 'Features',
       pricing: 'Pricing',
+      leakCheck: 'Free leak check',
       demo: 'Live demo',
       about: 'About',
     },
