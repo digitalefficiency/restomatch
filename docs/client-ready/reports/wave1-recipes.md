@@ -135,7 +135,7 @@ Re-verified after the fixes: Layer 1 full rerun, and Layer 2a 103/103.
 
 | Item | What | Test |
 |---|---|---|
-| **Merge** | `origin/claude/client-ready` merged twice: 8289ce1 first, then 197e718. Conflicts resolved by keeping both sides: nav/layout `showChain` plus the recipes flag, the api/i18n registries, the journal (0056/0057 re-appended after the base's 0033), and the supabase lock. The supabase lock was regenerated with `supabase-sync`, not by hand; the orchestrator rebuilds the RLS files at integration. `seed-recipes-demo` now targets the oldest restaurant, the same as `seed-demo`, because the chain seed adds branches. | Layer 1 + 2 below |
+| **Merge** | `origin/claude/client-ready` merged three times: 8289ce1, then 197e718, then 80a3934 (the last one brought the doctor wave-1 checks). Conflicts resolved by keeping both sides: nav/layout `showChain` plus the recipes flag, the api/i18n registries, the journal (0056/0057 re-appended after the base's 0033), and the supabase lock. The supabase lock was regenerated with `supabase-sync`, not by hand; the orchestrator rebuilds the RLS files at integration. `seed-recipes-demo` now targets the oldest restaurant, the same as `seed-demo`, because the chain seed adds branches. | Layer 1 + 2 below |
 | **R1** (S4 cross-QA) | `recipes.save` / `importCsv` first take `pg_advisory_xact_lock(hashtext('recipes:'‖restaurant_id))`. A second save that would close a cycle concurrently now waits, sees the committed edge, and gets `recipes.cycle` instead of a deadlock 500. | `recipes-router.test.ts` "concurrent cycle saves": 5 racing rounds. It **reproduced `deadlock detected` with the lock disabled** and passes with it. |
 | **NUM-10** | `OwnerKpis.weekCleanMatchPct` is now `number \| null` (**deliberate contract change**). With no match runs in 7 days it returns null instead of a fake 100%. The web overview shows "—" + "No matches yet this week" (he/en) in a neutral tone; mobile shows "אין התאמות עדיין". Rounding is now half-up on integers (old float: 23/80 → 28.7, new → 28.8); no value crosses the 80% line differently (refuter checked t ≤ 20000). | `owner-kpis.test.ts`: the empty case expects `null` |
 | **Overview card** | "Dishes hurt by price rises this month" on `/dashboard`, behind the `recipes` flag, for owner/manager/chef. It shows the top 3 active dishes with food cost before → after and +₪/plate, and links to `/dashboard/recipes`. With no dishes it says "No dishes yet". It is not rendered in TV mode, and errors are logged instead of breaking the page. | router test (`active`, `activeDishCount`); Layer 2 |
@@ -164,3 +164,5 @@ Left as is:
     - 0 console errors, 0 5xx.
   - `layer2-recipes.mjs` **103/103** (regression).
 - Screenshots: `overview-card-{he,en}.png`, `overview-num10-{he,en}.png`.
+
+**Re-verified after merging 80a3934:** Layer 1 all ✅ (api 589, web 263, db 74 incl. the doctor wave-1 checks), and Layer 2 again 79/79 + 103/103.
