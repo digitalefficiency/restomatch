@@ -13,6 +13,7 @@ import {
   recoveryClaims,
   recoveryEvents,
   restaurants,
+  sql,
   testDbUrl,
 } from '@restomatch/db';
 import { computeLeakHero } from '@restomatch/charts';
@@ -661,5 +662,52 @@ describe('refuter round 4 (S3 fixes)', () => {
     await expect(
       c.recovery.recordCreditNote({ claimIds: [cl!.id], supplierId: X.supplierId, amountAgorot: 9999, issuedOn: '2026-10-01', idempotencyKey: key }),
     ).rejects.toMatchObject({ code: 'CONFLICT' });
+  });
+
+  it('a human re-open is re-capped too; nothing left of the cap → CONFLICT', async () => {
+    const { X, c, claims } = await fresh();
+    await syncClaims(db, X.restaurantId);
+    const [cl] = await claims();
+    await c.recovery.transition({ claimIds: [cl!.id], to: 'written_off' });
+    const [extra] = await db
+      .insert(discrepancies)
+      .values({ matchRunId: X.matchRunId, restaurantId: X.restaurantId, type: 'QTY_OVER', severity: 'warn', deltaAmount: '117.00', resolutionStatus: 'accepted' })
+      .returning();
+    await syncClaims(db, X.restaurantId);
+    await expect(c.recovery.transition({ claimIds: [cl!.id], to: 'claimed' })).rejects.toMatchObject({ code: 'CONFLICT' });
+    // Free part of the cap: the re-open takes only what is left.
+    await db.update(recoveryClaims).set({ amountAgorot: 10000 }).where(eq(recoveryClaims.discrepancyId, extra!.id));
+    await c.recovery.transition({ claimIds: [cl!.id], to: 'claimed' });
+    const held = (await claims()).filter((x) => x.status !== 'written_off').reduce((a, x) => a + x.amountAgorot, 0);
+    expect(held).toBe(11700);
+  });
+
+  it('a bulk transition and the tracker sync waiting on the same claims never deadlock', async () => {
+    const { X, c, claims } = await fresh();
+    await db
+      .insert(discrepancies)
+      .values({ matchRunId: X.matchRunId, restaurantId: X.restaurantId, type: 'QTY_OVER', severity: 'warn', deltaAmount: '10.00', resolutionStatus: 'accepted' });
+    await syncClaims(db, X.restaurantId);
+    const cs = (await claims()).sort((a, b) => a.id.localeCompare(b.id));
+    const [A, C] = [cs[0]!, cs[1]!]; // A (lower id) will be re-opened by sync; C written off by it
+    const setD = (id: string, st: 'accepted' | 'rejected') =>
+      db.update(discrepancies).set({ resolutionStatus: st }).where(eq(discrepancies.id, id));
+    await setD(A.discrepancyId, 'rejected');
+    await syncClaims(db, X.restaurantId);
+    await setD(A.discrepancyId, 'accepted');
+    await setD(C.discrepancyId, 'rejected');
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    // A third transaction holds A so that the two contenders interleave deterministically.
+    const holder = db.transaction(async (tx) => {
+      await tx.execute(sql`select 1 from recovery_claims where id = ${A.id} for update`);
+      await sleep(500);
+    });
+    await sleep(100);
+    const settle = (p: Promise<unknown>) => p.then(() => 'ok', (e: { code?: string }) => String(e.code));
+    const tr = settle(c.recovery.transition({ claimIds: [A.id, C.id], to: 'written_off' }));
+    await sleep(150);
+    const sm = settle(c.recovery.summary());
+    await holder;
+    for (const o of await Promise.all([tr, sm])) expect(o).not.toBe('INTERNAL_SERVER_ERROR');
   });
 });

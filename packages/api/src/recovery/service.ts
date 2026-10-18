@@ -63,6 +63,27 @@ async function lockRecovery(db: Database, restaurantId: string): Promise<void> {
 const SYSTEM_WRITE_OFF = sql`(e.to_status = 'written_off' AND e.note = ${AUTO_WRITE_OFF_NOTE} AND e.actor_id IS NULL)`;
 
 /**
+ * What a re-opened claim may hold: what is left of its invoice's cap after the
+ * other claims that hold a share (a written-off claim with no money holds none).
+ * No invoice → no cap (`fallback`).
+ */
+async function reopenRoom(db: Database, restaurantId: string, claimId: string, invoiceId: unknown, fallback: number): Promise<number> {
+  if (invoiceId == null) return fallback;
+  const [room] = rowsOf(
+    await db.execute(sql`
+      SELECT GREATEST(0, round(COALESCE(i.total_incl_vat, 0) * 100)::bigint - COALESCE((
+        SELECT SUM(o.amount_agorot) FROM recovery_claims o
+        WHERE o.restaurant_id = ${restaurantId} AND o.invoice_id = i.id AND o.id <> ${claimId}::uuid
+          AND NOT (o.status = 'written_off' AND o.credited_agorot = 0)
+      ), 0)) AS agorot
+      FROM invoices i
+      WHERE i.restaurant_id = ${restaurantId} AND i.id = ${String(invoiceId)}::uuid
+    `),
+  );
+  return room ? int(room.agorot) : fallback;
+}
+
+/**
  * Bring claims in line with the team's current decisions, then create the
  * missing ones (idempotent: one claim per discrepancy). Returns how many were
  * created. Runs under a per-restaurant advisory lock (its own transaction, or
@@ -128,18 +149,7 @@ async function syncClaimsLocked(db: Database, restaurantId: string, actorId?: st
   );
   const reopened: Row[] = [];
   for (const r of toReopen) {
-    const [room] = rowsOf(
-      await db.execute(sql`
-        SELECT GREATEST(0, round(COALESCE(i.total_incl_vat, 0) * 100)::bigint - COALESCE((
-          SELECT SUM(o.amount_agorot) FROM recovery_claims o
-          WHERE o.restaurant_id = ${restaurantId} AND o.invoice_id = i.id AND o.id <> ${String(r.id)}::uuid
-            AND NOT (o.status = 'written_off' AND o.credited_agorot = 0)
-        ), 0)) AS agorot
-        FROM invoices i
-        WHERE i.restaurant_id = ${restaurantId} AND i.id = ${r.invoice_id == null ? null : String(r.invoice_id)}::uuid
-      `),
-    );
-    const amount = Math.min(int(r.raw_agorot), room ? int(room.agorot) : int(r.raw_agorot));
+    const amount = Math.min(int(r.raw_agorot), await reopenRoom(db, restaurantId, String(r.id), r.invoice_id, int(r.raw_agorot)));
     if (amount <= 0) continue; // the freed share was taken: stays written off
     const back = r.from_status === 'letter_sent' ? 'letter_sent' : 'claimed';
     await db.execute(sql`
@@ -502,6 +512,9 @@ async function loadOwnedClaims(db: Database, restaurantId: string, ids: string[]
     .from(recoveryClaims)
     .where(and(eq(recoveryClaims.restaurantId, restaurantId), inArray(recoveryClaims.id, ids)))
     .orderBy(recoveryClaims.id);
+  // Every claim write takes the per-restaurant lock BEFORE its row locks, as
+  // syncClaims / re-match do: one order everywhere → no deadlock (40P01).
+  if (lock) await lockRecovery(db, restaurantId);
   const rows = lock ? await q.for('update') : await q;
   if (rows.length !== new Set(ids).size) throw notFound('claim');
   return rows;
@@ -526,6 +539,22 @@ export async function transitionClaim(
   const patch: Partial<typeof recoveryClaims.$inferInsert> = { status: input.to };
   if (stamp) patch[stamp] = at;
   if (input.to === 'claimed') patch.closedAt = null;
+  if (claim.status === 'written_off' && input.to === 'claimed' && claim.creditedAgorot === 0) {
+    // A re-open takes a share of the invoice cap again: re-cap it like the
+    // system re-open does (another claim may hold the freed share by now).
+    const [d] = rowsOf(
+      await db.execute(sql`
+        SELECT round(abs(delta_amount) * 100)::bigint AS raw FROM discrepancies
+        WHERE id = ${claim.discrepancyId}::uuid AND restaurant_id = ${restaurantId}
+      `),
+    );
+    const raw = d?.raw != null ? int(d.raw) : claim.amountAgorot;
+    const amount = Math.min(raw, await reopenRoom(db, restaurantId, claim.id, claim.invoiceId, raw));
+    if (amount <= 0) {
+      throw new TRPCError({ code: 'CONFLICT', message: 'nothing is left to claim on this invoice — other claims already cover its total' });
+    }
+    patch.amountAgorot = amount;
+  }
   if (input.note != null) patch.note = input.note;
   await db
     .update(recoveryClaims)
@@ -647,6 +676,7 @@ export async function recordCreditNote(
         supplierId: creditNotes.supplierId,
         amountAgorot: creditNotes.amountAgorot,
         number: creditNotes.number,
+        issuedOn: creditNotes.issuedOn,
         invoiceLineId: creditNotes.invoiceLineId,
       })
       .from(creditNotes)
@@ -660,6 +690,7 @@ export async function recordCreditNote(
         : seen.invoiceLineId == null &&
           seen.supplierId === input.supplierId &&
           seen.amountAgorot === input.amountAgorot &&
+          seen.issuedOn === input.issuedOn &&
           seen.number === (input.number ?? null);
       if (!same) throw new TRPCError({ code: 'CONFLICT', message: 'this idempotency key was used for a different credit note' });
       return { creditNoteId: seen.id, allocatedAgorot: 0, unallocatedAgorot: 0, creditedClaimIds: [], duplicate: true };
