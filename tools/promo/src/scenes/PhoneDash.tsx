@@ -67,7 +67,7 @@ export const PhoneDash: React.FC<{ locale: Locale }> = ({ locale }) => {
       </FadeUp>
       <FadeUp at={100} out={PHONE_DASH_DURATION - 22} style={{ position: 'absolute', top: 1420, [locale === 'he' ? 'right' : 'left']: 40 }}>
         <Chip accent={C.primary} big>
-          <span>{t.chipClaim}</span>
+          <span>{t.chipClaimed}</span>
           <span style={{ color: C.primary, fontWeight: 800 }}>
             <bdi dir={locale === "he" ? "rtl" : "ltr"}>{ilsText(FACTS.claimed, locale)}</bdi>
           </span>

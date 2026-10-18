@@ -15,8 +15,8 @@ probe() { # file  w  h  fps  codec  min_s  max_s  max_bytes
   [ -f "$f" ] || { bad "$f missing"; return; }
   local v a size dur
   v=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,r_frame_rate,profile -of csv=p=0 "$f")
-  a=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$f")
-  dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$f")
+  a=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$f" | tr -d ,)
+  dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$f" | tr -d ,)
   size=$(stat -c %s "$f")
   echo "$f → [$v] ${dur}s $((size / 1024)) KB"
   [[ "$v" == "$codec,"* ]] && ok "codec $codec" || bad "codec ($v) != $codec"
@@ -36,14 +36,18 @@ probe $WEB/hero-loop.webm 1280 720 30 vp9 10 14 $((2560 * 1024))
 p=$WEB/hero-poster.jpg
 [ -f $p ] && [ "$(stat -c %s $p)" -le $((150 * 1024)) ] && ok "poster $(($(stat -c %s $p) / 1024)) KB ≤ 150 KB" || bad "poster missing or > 150 KB"
 
-echo "== hero loop seamless (SSIM first vs last frame)"
+echo "== hero loop seamless: the wrap step (last→first) must look like any ordinary frame step"
 tmp=$(mktemp -d)
+ssim() { ffmpeg -i "$1" -i "$2" -lavfi ssim -f null - 2>&1 | grep -o "All:[0-9.]*" | cut -d: -f2; }
+grab() { ffmpeg -v error -y -i "$1" -vf "select=eq(n\,$2)" -vframes 1 "$3"; }
 for f in $WEB/hero-loop.mp4 $WEB/hero-loop.webm; do
-  n=$(ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=nb_read_frames -of csv=p=0 "$f")
-  ffmpeg -v error -y -i "$f" -vf "select=eq(n\,0)" -vframes 1 "$tmp/first.png"
-  ffmpeg -v error -y -i "$f" -vf "select=eq(n\,$((n - 1)))" -vframes 1 "$tmp/last.png"
-  ssim=$(ffmpeg -i "$tmp/first.png" -i "$tmp/last.png" -lavfi ssim -f null - 2>&1 | grep -o "All:[0-9.]*" | cut -d: -f2)
-  awk -v s="$ssim" 'BEGIN{exit !(s>=0.97)}' && ok "$f SSIM(first,last)=$ssim ≥ 0.97 ($n frames)" || bad "$f SSIM(first,last)=$ssim < 0.97"
+  n=$(ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=nb_read_frames -of csv=p=0 "$f" | tr -d ,)
+  grab "$f" 0 "$tmp/a.png"; grab "$f" $((n - 1)) "$tmp/b.png"
+  grab "$f" 120 "$tmp/c.png"; grab "$f" 121 "$tmp/d.png"
+  seam=$(ssim "$tmp/a.png" "$tmp/b.png"); base=$(ssim "$tmp/c.png" "$tmp/d.png")
+  awk -v s="$seam" -v b="$base" 'BEGIN{exit !(s>=0.95 && s>=b-0.02)}' \
+    && ok "$f seam SSIM=$seam vs ordinary step SSIM=$base ($n frames)" \
+    || bad "$f seam SSIM=$seam vs ordinary step $base — visible jump at the loop point"
 done
 rm -rf "$tmp"
 
@@ -56,6 +60,9 @@ print(f'{s.mean[0]:.1f} {s.stddev[0]:.1f}')")
   mean=${stats% *}; sd=${stats#* }
   awk -v m="$mean" -v d="$sd" 'BEGIN{exit !(m>6 && d>8)}' && ok "$k mean=$mean sd=$sd" || bad "$k looks blank (mean=$mean sd=$sd)"
 done
+
+echo "== caption zone ∩ device zone = ∅ (all sizes, both locales)"
+node --experimental-strip-types scripts/check-layout.mjs 2>/dev/null && ok "layout zones disjoint" || bad "caption/device zones intersect"
 
 echo "== typecheck"
 npx tsc -p . && ok "tsc 0 errors" || bad "tsc errors"
