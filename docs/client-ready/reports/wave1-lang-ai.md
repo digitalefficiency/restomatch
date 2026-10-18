@@ -172,6 +172,23 @@ The cross-QA fixes were reviewed by one independent refuter. Its round-2 finding
 
 New untranslated-by-review strings (merged in from the base): `receiving.errors.queueUnavailable` in ar/ru/th/ti, written by me with no reviewer pass. Tigrinya especially needs a native check.
 
+## Arabic RTL on the receiver phone flow (390 px, production build)
+
+Script: `apps/web/scripts/verify-receiver-phone.ts`. For each locale it walks inbox → PO → demo invoice → reconciliation → adjust (every line settled) → close → confirmed. At each step it checks:
+- `<html lang/dir>`
+- no horizontal page scroll at 390 px
+- no clipped or off-screen button, link or chip
+- the step text is in the locale's script
+- for **ar**, `#main-content` and every Arabic item name compute `direction: rtl`
+- zero console errors and zero 5xx
+
+Result on the final build: **95/95 passed** (ar, ru, th, ti). Screenshots: `docs/client-ready/screenshots/wave1-lang-ai/phone-{ar,ru,th,ti}-{1..5}-*.png`.
+
+**Intermittent React #418 (hydration text mismatch):**
+- Where it appeared: twice across about 10 runs of `verify-wave1-lang-ai.ts`, on different pages (once on `/dashboard/ask` as the Hebrew owner, once during the receiver section).
+- Where it did not reproduce: the 390 px phone flow (95/95, no console errors), 48 targeted navigations, or the 3 runs after I added URL logging to the script.
+- Likely source: shared dashboard chrome rather than an S14 screen. Still unproven; flagged for S5/S7 cross-QA.
+
 ## Still open / not done
 
 - **M3 (refuter, plausible):** the Claude calls (assistant and translator) run inside the RLS member transaction, so a pooled connection is held for the duration of the call (up to 4×45 s for the assistant). It is fine at demo scale. The fix is to do the reads in the transaction, call Claude outside it, then open a short transaction for the cache and usage writes. That needs a non-transactional entry point in `trpc.ts`, which is an S4/S7 boundary.
