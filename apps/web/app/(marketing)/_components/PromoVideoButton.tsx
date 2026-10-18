@@ -1,37 +1,42 @@
 'use client';
 
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { PlayCircle, X } from 'lucide-react';
 
 /**
- * "Watch 60 seconds" → native <dialog> with the promo video. Rendered only
- * when heroMedia.promoVideo is set. The video element is created on open
- * (nothing is downloaded until someone asks for it) and paused on close.
+ * "Watch 60 seconds" → native <dialog> with the promo film (rendered only when
+ * there is a promo for the viewer's locale). The <video> is MOUNTED only while
+ * the dialog is open: nothing is requested until someone asks for it, and
+ * closing unmounts it, which stops the download/playback. It starts playing on
+ * open (the click is the user gesture), with sound and native controls.
  */
 export function PromoVideoButton({
   src,
+  poster,
   label,
   title,
   closeLabel,
   className,
 }: {
   src: string;
+  poster?: string;
   label: string;
   title: string;
   closeLabel: string;
   className?: string;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const video = useRef<HTMLVideoElement>(null);
+  const [open, setOpen] = useState(false);
 
   return (
     <>
       <button
         type="button"
         className={className}
+        aria-haspopup="dialog"
         onClick={() => {
+          setOpen(true);
           dialog.current?.showModal();
-          void video.current?.play().catch(() => undefined);
         }}
       >
         <PlayCircle className="h-4 w-4" aria-hidden="true" />
@@ -40,7 +45,7 @@ export function PromoVideoButton({
       <dialog
         ref={dialog}
         aria-label={title}
-        onClose={() => video.current?.pause()}
+        onClose={() => setOpen(false)}
         onClick={(e) => e.target === dialog.current && dialog.current?.close()}
         className="w-[min(92vw,960px)] rounded-2xl border border-line bg-bg p-0 text-ink shadow-card backdrop:bg-black/70"
       >
@@ -55,7 +60,19 @@ export function PromoVideoButton({
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
-        <video ref={video} src={src} controls playsInline preload="none" className="aspect-video w-full bg-black" />
+        <div className="aspect-video w-full bg-black">
+          {open ? (
+            <video
+              src={src}
+              poster={poster}
+              controls
+              autoPlay
+              playsInline
+              preload="metadata"
+              className="h-full w-full"
+            />
+          ) : null}
+        </div>
       </dialog>
     </>
   );
