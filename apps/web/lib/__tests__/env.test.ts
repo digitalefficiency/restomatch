@@ -95,13 +95,16 @@ describe('assertWebEnv — AUTH_SECRET + Supabase URL shape (F4/F5)', () => {
     expect(() => assertWebEnv({ ...rest, NEXTAUTH_SECRET: 's' } as never)).not.toThrow();
   });
 
-  it('rejects a Supabase URL that is not https://<ref>.supabase.co', () => {
+  it('warns (does not throw) on a Supabase URL that is not https://<ref>.supabase.co', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     for (const bad of ['http://abcdefghijklmnopqrst.supabase.co', 'https://old-project.example.com', 'https://abcdefghijklmnopqrst.supabase.co/storage']) {
-      expect(() => assertWebEnv({ ...prod, NEXT_PUBLIC_SUPABASE_URL: bad } as never)).toThrow(/supabase\.co/);
+      warn.mockClear();
+      expect(() => assertWebEnv({ ...prod, NEXT_PUBLIC_SUPABASE_URL: bad } as never)).not.toThrow();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('supabase.co'));
     }
-    expect(() =>
-      assertWebEnv({ ...prod, NEXT_PUBLIC_SUPABASE_URL: `https://${REF}.supabase.co` } as never),
-    ).not.toThrow();
+    warn.mockClear();
+    assertWebEnv({ ...prod, NEXT_PUBLIC_SUPABASE_URL: `https://${REF}.supabase.co` } as never);
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('does not enforce the Supabase shape outside production (local http stack)', () => {

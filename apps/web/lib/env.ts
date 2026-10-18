@@ -79,15 +79,6 @@ export function assertWebEnv(env: NodeJS.ProcessEnv = process.env): WebEnv {
     }
     // A leftover URL from another project passes a presence check but points
     // storage/signing at the wrong backend (F5) — require the real shape.
-    const badSupabase = (['NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_URL'] as const).filter(
-      (k) => v[k] !== undefined && supabaseRefFromUrl(v[k]!) === null,
-    );
-    if (badSupabase.length > 0) {
-      throw new Error(
-        `[env] ${badSupabase.join(' / ')} must look like https://<project-ref>.supabase.co ` +
-          '(no path) — check for a leftover value from another project.',
-      );
-    }
     // The owner-DB escape hatch must never be honoured in production: tenant
     // traffic on an RLS-bypassing connection silently defeats tenant isolation.
     if (isTruthyFlag(v.ALLOW_OWNER_DB)) {
@@ -144,6 +135,19 @@ function originOf(url: string | undefined): string | null {
  */
 export function webEnvWarnings(env: NodeJS.ProcessEnv = process.env): string[] {
   const warnings: string[] = [];
+  // WARN, never throw: a malformed value is a likely leftover from another
+  // project, but bricking a live deploy over it would be worse than the leftover.
+  if (env.NODE_ENV === 'production') {
+    const bad = (['NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_URL'] as const).filter(
+      (k) => env[k] !== undefined && env[k] !== '' && supabaseRefFromUrl(env[k]!) === null,
+    );
+    if (bad.length > 0) {
+      warnings.push(
+        `[env] WARNING: ${bad.join(' / ')} should look like https://<project-ref>.supabase.co ` +
+          '(no path) — check for a leftover value from another project.',
+      );
+    }
+  }
   const refs = new Map<string, string>();
   for (const k of ['NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_URL'] as const) {
     const ref = env[k] ? supabaseRefFromUrl(env[k]!) : null;
