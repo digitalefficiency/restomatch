@@ -75,6 +75,15 @@ Shared non-immutable files: `packages/api/src/lib/features.ts` (+`growth` key), 
 - Carried-over results are attached to the restaurant (`leakCheck.claimed`) but not yet shown on a dashboard card (dashboard pages belong to S3/S5) nor imported as real invoices (needs S2's ingest).
 - Referral credits are recorded, never applied to an invoice (no PSP — `NoopBillingProvider`).
 
+## Cross-QA by S4 (security) — fixes
+
+| # | Finding | Fix | Test |
+|---|---|---|---|
+| W1 (medium) | The site-wide 40/h submit cap ran **before** the proof of work, so 40 junk POSTs (8 IPs × 5) locked every real prospect out for an hour | Cap moved to just before `runLeakCheck`, after the valid single-use PoW, honeypot and per-IP / per-mailbox limits | `leakCheck.attack.test.ts` › "requests WITHOUT a solved proof of work never consume the site-wide cap" (45 unsolved POSTs → 403 each, then a real one → 200; fails on the previous order, passes now) |
+| W3 (low) | `dump.rdb` (a local Redis snapshot, already in `.gitignore`) was modified in the PR | `git rm --cached dump.rdb` — untracked, stays ignored | — |
+| W4 (low) | Expired sandbox rows were purged only on the next submit | `purgeExpiredLeakChecks(db)` is the standalone, idempotent purge (exported from `@restomatch/api` → `leakCheck`); the read path already hides expired rows and a CHECK caps retention at 7 days. **Scheduling stays a follow-up** — `apps/worker/src/cron.ts` is immutable: proposed daily job `purgeExpiredLeakChecks(ownerDb)` | `leakCheck.test.ts` › "expired sessions are purged and unreadable" (now also asserts a second run deletes 0) |
+| W2 (low) | `provision-rls` re-applies the blanket `grant … on all tables` to `restomatch_app`, undoing the REVOKEs in 0054/0055 | **Not changed** (`packages/db/src/rls.ts` is immutable). Isolation still holds: RLS is on with no policy on the sandbox tables (verified: the app role reads/writes 0 rows), and 0055's policies have no UPDATE/DELETE path. **Proposal for the owner** — append to `rlsAppRoleGrantsSql()`: `do $$ begin if to_regclass('public.leak_check_sessions') is not null then execute 'revoke all on leak_check_sessions, leak_check_ocr_usage from restomatch_app'; end if; if to_regclass('public.referral_redemptions') is not null then execute 'revoke update, delete on referral_redemptions, referral_codes from restomatch_app'; end if; end $$;` (same guarded pattern as the credential tables), so privileges and RLS both deny | existing RLS probes in `leakCheck.test.ts` / `growth.test.ts` |
+
 ## Verification (2 layers)
 
 ### Layer 1 — full gate (final head)

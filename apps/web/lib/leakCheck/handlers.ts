@@ -120,8 +120,6 @@ export async function handleSubmit(req: Request): Promise<Response> {
   const g = await guard(req, LIMITS.submitIp);
   if (typeof g !== 'string') return g;
   const ip = g;
-  const global = await enforceRateLimit('all', GLOBAL_SUBMIT_LIMIT);
-  if (!global.allowed) return fail('budget_exhausted', 503, { 'retry-after': String(global.resetSec) });
 
   const secret = secretOr503();
   if (typeof secret !== 'string') return secret;
@@ -159,6 +157,12 @@ export async function handleSubmit(req: Request): Promise<Response> {
   );
   const plEntry = form.get('priceList');
   const priceList = plEntry && typeof plEntry !== 'string' && plEntry.size > 0 ? await fileToUpload(plEntry) : null;
+
+  // Site-wide cap LAST, after a valid single-use proof of work and the per-IP /
+  // per-mailbox limits: junk requests without solved work must never consume it
+  // (else 40 cheap POSTs would lock real prospects out for an hour).
+  const global = await enforceRateLimit('all', GLOBAL_SUBMIT_LIMIT);
+  if (!global.allowed) return fail('budget_exhausted', 503, { 'retry-after': String(global.resetSec) });
 
   const apiKey = process.env.ANTHROPIC_API_KEY ?? '';
   const model = process.env.LEAK_CHECK_CLAUDE_MODEL ?? process.env.OCR_CLAUDE_MODEL;

@@ -257,6 +257,8 @@ describe('sandbox store (DB)', () => {
       set created_at = now() - interval '8 days', expires_at = now() - interval '1 day' where id = ${out.sessionId}`);
     expect(await getLeakCheckSession(db, out.sessionId)).toBeNull();
     expect(await purgeExpiredLeakChecks(db)).toBeGreaterThanOrEqual(1);
+    // Idempotent: a second run finds nothing left to delete.
+    expect(await purgeExpiredLeakChecks(db)).toBe(0);
     const rows = await db.select().from(leakCheckSessions).where(eq(leakCheckSessions.id, out.sessionId));
     expect(rows).toEqual([]);
   });

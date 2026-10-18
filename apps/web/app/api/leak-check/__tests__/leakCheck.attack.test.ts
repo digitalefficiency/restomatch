@@ -190,6 +190,15 @@ describe('leak-check public routes — attack suite', () => {
     }
   });
 
+  it('requests WITHOUT a solved proof of work never consume the site-wide cap', async () => {
+    for (let i = 0; i < GLOBAL_SUBMIT_LIMIT.limit + 5; i++) {
+      const junk = await submitForm(nextIp(), { pow: { token: 'a.16.9999999999.b', nonce: '1' } });
+      expect(junk.status).toBe(403);
+    }
+    // A real prospect still gets through.
+    expect((await submitForm(nextIp())).status).toBe(200);
+  });
+
   it('the site-wide hourly cap stops a many-IP drain of the OCR budget', async () => {
     for (let i = 0; i < GLOBAL_SUBMIT_LIMIT.limit; i++) await enforceRateLimit('all', GLOBAL_SUBMIT_LIMIT);
     expect((await submitForm(nextIp())).status).toBe(503);
