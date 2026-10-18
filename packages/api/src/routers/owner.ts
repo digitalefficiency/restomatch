@@ -1,7 +1,11 @@
 import {
+  computeLeakBreakdown,
+  computeLeakHero,
   computeLeaks,
   computeOwnerKpis,
   computeSupplierScorecards,
+  type LeakBreakdownInvoice,
+  type LeakHero,
   type LeakRow,
   type OwnerKpis,
   type SupplierScorecard,
@@ -18,6 +22,30 @@ export const ownerRouter = router({
   kpis: memberProcedure.query(async ({ ctx }): Promise<OwnerKpis> => {
     return computeOwnerKpis(ctx.db, ctx.session.restaurantId);
   }),
+
+  // The leak hero ("₪X leaked this month, Y% of spend, Z caught before payment")
+  // and its drill-down are core-plan, like the KPIs: they ARE the product.
+  leakHero: memberProcedure
+    .input(z.object({ monthOffset: z.number().int().min(-24).max(0).optional() }).optional())
+    .query(async ({ ctx, input }): Promise<LeakHero> => {
+      return computeLeakHero(ctx.db, ctx.session.restaurantId, { monthOffset: input?.monthOffset });
+    }),
+
+  leakBreakdown: memberProcedure
+    .input(
+      z
+        .object({
+          monthOffset: z.number().int().min(-24).max(0).optional(),
+          limit: z.number().int().positive().max(200).optional(),
+        })
+        .optional(),
+    )
+    .query(async ({ ctx, input }): Promise<LeakBreakdownInvoice[]> => {
+      return computeLeakBreakdown(ctx.db, ctx.session.restaurantId, {
+        monthOffset: input?.monthOffset,
+        limit: input?.limit,
+      });
+    }),
 
   leaks: analyticsProcedure
     .input(

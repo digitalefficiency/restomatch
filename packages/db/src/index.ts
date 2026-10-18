@@ -10,6 +10,7 @@ export {
 export { PLAN_SEED, PLAN_SEED_LIST, type PlanSeed } from './plans';
 export { testDbUrl, DEFAULT_TEST_DB_URL } from './test-env';
 export { runCutoverChecks, formatCheckTable, type CheckResult } from './cutoverChecks';
+export { assertSeedTarget, seedTargetProblem } from './seedGuard';
 export {
   and,
   asc,

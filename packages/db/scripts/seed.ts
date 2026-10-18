@@ -1,3 +1,22 @@
+/**
+ * Demo/dev base seed: one Israeli restaurant ("כפר הזיתים"), its team, ten
+ * suppliers, ~55 products (Hebrew + English names for "Receiver in English"),
+ * eight weeks of purchase orders on each supplier's real delivery cadence, three
+ * POs expected TODAY (ready to receive live) and two for the coming days.
+ *
+ *   DATABASE_URL=postgres://postgres:postgres@localhost:5432/restomatch_dev pnpm --filter @restomatch/db seed
+ *   … then: pnpm --filter @restomatch/worker exec tsx scripts/seed-demo.ts   (receipts, invoices, matching)
+ *
+ * Env:
+ *   DEMO_PASSWORD  password for every seeded user (default below; documented in docs/DB-RUNBOOK.md §7)
+ *   DEMO_TODAY     YYYY-MM-DD to treat as "today" (default: today in Asia/Jerusalem) —
+ *                  seed the evening before a demo with tomorrow's date
+ *
+ * ⛔ DELETES every restaurant, user and their data (TRUNCATE … CASCADE). Refuses
+ * any non-local database (src/seedGuard.ts).
+ */
+import { hashPassword } from '@restomatch/crypto';
+import postgres from 'postgres';
 import { createDb } from '../src/client';
 import { PLAN_SEED_LIST } from '../src/plans';
 import {
@@ -8,22 +27,186 @@ import {
   purchaseOrders,
   restaurants,
   suppliers,
+  userCredentials,
   users,
   type DeliverySchedule,
 } from '../src/schema';
+import { assertSeedTarget } from '../src/seedGuard';
+
+export const DEFAULT_DEMO_PASSWORD = 'RestoMatch-Demo-2026!';
+const TZ = 'Asia/Jerusalem';
+const HISTORY_WEEKS = 8;
+
+/* ── time helpers (restaurant wall clock → UTC instant) ─────────────────── */
+
+function tzOffsetMs(at: Date, tz: string): number {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
+      .formatToParts(at)
+      .map((p) => [p.type, p.value]),
+  );
+  const asUtc = Date.UTC(+parts.year!, +parts.month! - 1, +parts.day!, +parts.hour!, +parts.minute!, +parts.second!);
+  return asUtc - at.getTime();
+}
+
+/** The UTC instant of `HH:MM` on local date `ymd` (YYYY-MM-DD) in `tz`. */
+export function zonedInstant(ymd: string, hhmm: string, tz = TZ): Date {
+  const [y, m, d] = ymd.split('-').map(Number) as [number, number, number];
+  const [hh, mm] = hhmm.split(':').map(Number) as [number, number];
+  const guess = new Date(Date.UTC(y, m - 1, d, hh, mm));
+  return new Date(guess.getTime() - tzOffsetMs(guess, tz));
+}
+
+export function localYmd(at: Date, tz = TZ): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(at);
+}
+
+function addDays(ymd: string, days: number): string {
+  const [y, m, d] = ymd.split('-').map(Number) as [number, number, number];
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+
+function weekday(ymd: string): number {
+  const [y, m, d] = ymd.split('-').map(Number) as [number, number, number];
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0 = Sunday
+}
+
+/* ── catalog ─────────────────────────────────────────────────────────────── */
+
+interface SupplierSpec {
+  key: string;
+  name: string;
+  nameEn: string;
+  businessId: string;
+  contactEmail: string;
+  contactWhatsapp: string;
+  paymentTerms: string;
+  /** Delivery weekdays (0 = Sunday) and every-N-weeks cadence. */
+  days: number[];
+  everyWeeks: number;
+  time: string;
+}
+
+const SUPPLIERS: SupplierSpec[] = [
+  { key: 'veg', name: 'ירקות השרון', nameEn: 'HaSharon Produce', businessId: '514200101', contactEmail: 'orders@sharon-produce.test', contactWhatsapp: '+972521110101', paymentTerms: 'שוטף + 30', days: [0, 2, 4], everyWeeks: 1, time: '07:30' },
+  { key: 'meat', name: 'קצביית הכרם', nameEn: 'HaKerem Butchery', businessId: '514200102', contactEmail: 'office@hakerem-meat.test', contactWhatsapp: '+972521110102', paymentTerms: 'שוטף + 45', days: [1], everyWeeks: 1, time: '09:30' },
+  { key: 'bakery', name: 'מאפיית ברנר', nameEn: "Brenner's Bakery", businessId: '514200103', contactEmail: 'bakery@brenner.test', contactWhatsapp: '+972521110103', paymentTerms: 'שוטף + 30', days: [0, 2, 4], everyWeeks: 1, time: '06:00' },
+  { key: 'fish', name: 'דגי הים התיכון', nameEn: 'Mediterranean Fish Co.', businessId: '514200104', contactEmail: 'sales@medfish.test', contactWhatsapp: '+972521110104', paymentTerms: 'שוטף + 30', days: [2], everyWeeks: 1, time: '11:00' },
+  { key: 'dairy', name: 'מחלבות הגליל', nameEn: 'Galilee Dairies', businessId: '514200105', contactEmail: 'orders@galil-dairy.test', contactWhatsapp: '+972521110105', paymentTerms: 'שוטף + 60', days: [3], everyWeeks: 1, time: '10:00' },
+  { key: 'spices', name: 'תבליני פרשמן', nameEn: 'Fresman Spices & Oils', businessId: '514200106', contactEmail: 'info@fresman.test', contactWhatsapp: '+972521110106', paymentTerms: 'שוטף + 30', days: [1], everyWeeks: 2, time: '12:00' },
+  { key: 'drinks', name: 'משקאות שטיינברג', nameEn: 'Steinberg Beverages', businessId: '514200107', contactEmail: 'orders@steinberg-bev.test', contactWhatsapp: '+972521110107', paymentTerms: 'שוטף + 45', days: [3], everyWeeks: 1, time: '11:30' },
+  { key: 'dry', name: 'יבשים בן-עמי', nameEn: 'Ben-Ami Dry Goods', businessId: '514200108', contactEmail: 'office@benami.test', contactWhatsapp: '+972521110108', paymentTerms: 'שוטף + 30', days: [0], everyWeeks: 2, time: '13:00' },
+  { key: 'disposables', name: 'חד״פ מהיר', nameEn: 'Quick Disposables', businessId: '514200109', contactEmail: 'sales@quickdisp.test', contactWhatsapp: '+972521110109', paymentTerms: 'מזומן', days: [4], everyWeeks: 2, time: '15:00' },
+  { key: 'cleaning', name: 'עמית חומרי ניקוי', nameEn: 'Amit Cleaning Supplies', businessId: '514200110', contactEmail: 'amit@cleaning.test', contactWhatsapp: '+972521110110', paymentTerms: 'שוטף + 30', days: [1], everyWeeks: 4, time: '14:00' },
+];
+
+interface ProductSpec {
+  supplier: string;
+  name: string;
+  nameEn: string;
+  category: string;
+  unit: string;
+  /** Agreed list price, ₪ excl. VAT per unit. */
+  price: number;
+  /** Typical quantity per delivery. */
+  qty: number;
+}
+
+export const DEMO_PRODUCTS: ProductSpec[] = [
+  // ירקות — HaSharon Produce
+  { supplier: 'veg', name: 'עגבניות שרי', nameEn: 'Cherry tomatoes', category: 'ירקות', unit: 'ק״ג', price: 12.9, qty: 12 },
+  { supplier: 'veg', name: 'מלפפונים', nameEn: 'Cucumbers', category: 'ירקות', unit: 'ק״ג', price: 5.9, qty: 15 },
+  { supplier: 'veg', name: 'חסה ערבית', nameEn: 'Romaine lettuce', category: 'ירקות', unit: 'יח׳', price: 4.5, qty: 20 },
+  { supplier: 'veg', name: 'פטרוזיליה', nameEn: 'Parsley', category: 'ירקות', unit: 'צרור', price: 3, qty: 15 },
+  { supplier: 'veg', name: 'כוסברה', nameEn: 'Coriander', category: 'ירקות', unit: 'צרור', price: 3, qty: 10 },
+  { supplier: 'veg', name: 'בצל יבש', nameEn: 'Onions', category: 'ירקות', unit: 'ק״ג', price: 3.9, qty: 20 },
+  { supplier: 'veg', name: 'שום קלוף', nameEn: 'Peeled garlic', category: 'ירקות', unit: 'ק״ג', price: 28, qty: 2 },
+  { supplier: 'veg', name: 'לימונים', nameEn: 'Lemons', category: 'ירקות', unit: 'ק״ג', price: 7.9, qty: 8 },
+  { supplier: 'veg', name: 'תפוחי אדמה', nameEn: 'Potatoes', category: 'ירקות', unit: 'ק״ג', price: 4.2, qty: 25 },
+  { supplier: 'veg', name: 'פלפל אדום', nameEn: 'Red bell peppers', category: 'ירקות', unit: 'ק״ג', price: 9.9, qty: 8 },
+  { supplier: 'veg', name: 'חצילים', nameEn: 'Eggplants', category: 'ירקות', unit: 'ק״ג', price: 5.5, qty: 10 },
+  // בשר — HaKerem Butchery
+  { supplier: 'meat', name: 'אנטריקוט', nameEn: 'Entrecôte (rib-eye)', category: 'בשר', unit: 'ק״ג', price: 139, qty: 8 },
+  { supplier: 'meat', name: 'חזה עוף', nameEn: 'Chicken breast', category: 'בשר', unit: 'ק״ג', price: 38.9, qty: 15 },
+  { supplier: 'meat', name: 'פרגית', nameEn: 'Boneless chicken thighs', category: 'בשר', unit: 'ק״ג', price: 44.9, qty: 12 },
+  { supplier: 'meat', name: 'כתף טלה', nameEn: 'Lamb shoulder', category: 'בשר', unit: 'ק״ג', price: 89, qty: 5 },
+  { supplier: 'meat', name: 'בשר טחון', nameEn: 'Ground beef', category: 'בשר', unit: 'ק״ג', price: 59.9, qty: 10 },
+  { supplier: 'meat', name: 'נקניקיות מרגז', nameEn: 'Merguez sausages', category: 'בשר', unit: 'ק״ג', price: 64, qty: 4 },
+  // מאפים — Brenner's Bakery
+  { supplier: 'bakery', name: 'לחמניות המבורגר', nameEn: 'Burger buns', category: 'מאפים', unit: 'יח׳', price: 2.4, qty: 60 },
+  { supplier: 'bakery', name: 'פיתות', nameEn: 'Pita bread', category: 'מאפים', unit: 'יח׳', price: 0.9, qty: 120 },
+  { supplier: 'bakery', name: 'לחם מחמצת', nameEn: 'Sourdough loaf', category: 'מאפים', unit: 'יח׳', price: 16, qty: 10 },
+  { supplier: 'bakery', name: 'באגט', nameEn: 'Baguette', category: 'מאפים', unit: 'יח׳', price: 6.5, qty: 15 },
+  { supplier: 'bakery', name: 'חלה', nameEn: 'Challah', category: 'מאפים', unit: 'יח׳', price: 12, qty: 0 }, // not ordered routinely
+  // דגים — Mediterranean Fish Co.
+  { supplier: 'fish', name: 'פילה סלמון', nameEn: 'Salmon fillet', category: 'דגים', unit: 'ק״ג', price: 89, qty: 6 },
+  { supplier: 'fish', name: 'דניס שלם', nameEn: 'Whole sea bream', category: 'דגים', unit: 'ק״ג', price: 62, qty: 8 },
+  { supplier: 'fish', name: 'טונה אדומה', nameEn: 'Red tuna', category: 'דגים', unit: 'ק״ג', price: 145, qty: 2 },
+  { supplier: 'fish', name: 'קלמרי', nameEn: 'Calamari', category: 'דגים', unit: 'ק״ג', price: 49, qty: 5 },
+  // מוצרי חלב — Galilee Dairies
+  { supplier: 'dairy', name: 'מוצרלה', nameEn: 'Mozzarella', category: 'מוצרי חלב', unit: 'ק״ג', price: 42, qty: 6 },
+  { supplier: 'dairy', name: 'גבינה בולגרית', nameEn: 'Bulgarian cheese', category: 'מוצרי חלב', unit: 'ק״ג', price: 38, qty: 4 },
+  { supplier: 'dairy', name: 'שמנת מתוקה 38%', nameEn: 'Heavy cream 38%', category: 'מוצרי חלב', unit: 'ליטר', price: 16.5, qty: 10 },
+  { supplier: 'dairy', name: 'חמאה', nameEn: 'Butter', category: 'מוצרי חלב', unit: 'ק״ג', price: 46, qty: 4 },
+  { supplier: 'dairy', name: 'חלב 3%', nameEn: 'Milk 3%', category: 'מוצרי חלב', unit: 'ליטר', price: 6.4, qty: 30 },
+  { supplier: 'dairy', name: 'לבנה', nameEn: 'Labneh', category: 'מוצרי חלב', unit: 'ק״ג', price: 24, qty: 4 },
+  { supplier: 'dairy', name: 'ביצים L (תבנית 30)', nameEn: 'Eggs L (tray of 30)', category: 'מוצרי חלב', unit: 'תבנית', price: 34, qty: 6 },
+  // תבלינים ושמנים — Fresman
+  { supplier: 'spices', name: 'שמן זית כתית מעולה', nameEn: 'Extra virgin olive oil', category: 'שמנים ותבלינים', unit: 'ליטר', price: 34, qty: 10 },
+  { supplier: 'spices', name: 'שמן קנולה', nameEn: 'Canola oil', category: 'שמנים ותבלינים', unit: 'ליטר', price: 9.5, qty: 20 },
+  { supplier: 'spices', name: 'טחינה גולמית', nameEn: 'Raw tahini', category: 'שמנים ותבלינים', unit: 'ק״ג', price: 24, qty: 6 },
+  { supplier: 'spices', name: 'מלח ים גס', nameEn: 'Coarse sea salt', category: 'שמנים ותבלינים', unit: 'ק״ג', price: 6, qty: 5 },
+  { supplier: 'spices', name: 'פלפל שחור גרוס', nameEn: 'Cracked black pepper', category: 'שמנים ותבלינים', unit: 'ק״ג', price: 68, qty: 1 },
+  { supplier: 'spices', name: 'פפריקה מתוקה', nameEn: 'Sweet paprika', category: 'שמנים ותבלינים', unit: 'ק״ג', price: 42, qty: 1 },
+  { supplier: 'spices', name: 'כמון טחון', nameEn: 'Ground cumin', category: 'שמנים ותבלינים', unit: 'ק״ג', price: 48, qty: 1 },
+  { supplier: 'spices', name: 'סומק', nameEn: 'Sumac', category: 'שמנים ותבלינים', unit: 'ק״ג', price: 55, qty: 1 },
+  // משקאות — Steinberg Beverages
+  { supplier: 'drinks', name: 'קולה זירו 330 מ״ל (ארגז 24)', nameEn: 'Cola Zero 330ml (case of 24)', category: 'משקאות', unit: 'ארגז', price: 62, qty: 4 },
+  { supplier: 'drinks', name: 'מים מינרליים 1.5 ל׳ (שישייה)', nameEn: 'Mineral water 1.5L (6-pack)', category: 'משקאות', unit: 'שישייה', price: 13.5, qty: 10 },
+  { supplier: 'drinks', name: 'בירה מהחבית — חבית 30 ל׳', nameEn: 'Draft beer keg 30L', category: 'משקאות', unit: 'חבית', price: 520, qty: 2 },
+  { supplier: 'drinks', name: 'יין אדום קברנה', nameEn: 'Cabernet red wine', category: 'משקאות', unit: 'בקבוק', price: 48, qty: 12 },
+  { supplier: 'drinks', name: 'מיץ תפוזים סחוט', nameEn: 'Fresh orange juice', category: 'משקאות', unit: 'ליטר', price: 14, qty: 10 },
+  // יבשים — Ben-Ami
+  { supplier: 'dry', name: 'אורז יסמין', nameEn: 'Jasmine rice', category: 'יבשים', unit: 'ק״ג', price: 9.8, qty: 25 },
+  { supplier: 'dry', name: 'בורגול גס', nameEn: 'Coarse bulgur', category: 'יבשים', unit: 'ק״ג', price: 8.5, qty: 10 },
+  { supplier: 'dry', name: 'קמח לבן', nameEn: 'White flour', category: 'יבשים', unit: 'ק״ג', price: 4.9, qty: 25 },
+  { supplier: 'dry', name: 'סוכר לבן', nameEn: 'White sugar', category: 'יבשים', unit: 'ק״ג', price: 5.2, qty: 10 },
+  { supplier: 'dry', name: 'חומוס יבש', nameEn: 'Dried chickpeas', category: 'יבשים', unit: 'ק״ג', price: 9, qty: 15 },
+  // חד״פ — Quick Disposables
+  { supplier: 'disposables', name: 'מפיות נייר (חבילה)', nameEn: 'Paper napkins (pack)', category: 'חד״פ', unit: 'חבילה', price: 18, qty: 10 },
+  { supplier: 'disposables', name: 'קופסאות טייק-אוויי', nameEn: 'Take-away boxes (pack of 50)', category: 'חד״פ', unit: 'חבילה', price: 39, qty: 6 },
+  { supplier: 'disposables', name: 'כפפות ניטריל (קופסה)', nameEn: 'Nitrile gloves (box)', category: 'חד״פ', unit: 'קופסה', price: 28, qty: 6 },
+  // ניקיון — Amit
+  { supplier: 'cleaning', name: 'נוזל כלים 4 ל׳', nameEn: 'Dish soap 4L', category: 'ניקיון', unit: 'יח׳', price: 32, qty: 4 },
+  { supplier: 'cleaning', name: 'אקונומיקה 4 ל׳', nameEn: 'Bleach 4L', category: 'ניקיון', unit: 'יח׳', price: 18, qty: 4 },
+];
+
+/** Deterministic per-delivery quantity swing (keeps the data lively but repeatable). */
+const QTY_PATTERN = [1, 1.25, 0.8, 1, 1.15, 0.9];
+/** PO price stays within ±0.5% of the list price — inside the 2% / ₪5 tolerance. */
+const PRICE_PATTERN = [1, 1.005, 0.995, 1];
+
+function roundQty(q: number, unit: string): number {
+  return unit === 'ק״ג' || unit === 'ליטר' ? Math.max(0.5, Math.round(q * 2) / 2) : Math.max(1, Math.round(q));
+}
 
 async function main() {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL is required');
-  // This script DELETES every restaurant/user/supplier/product/PO below. It is a
-  // dev/test fixture, never a production tool (plans are repriced by migration).
-  // Same guard as reset.ts: refuse anything that is not clearly local/test.
-  if (!url.includes('localhost') && !url.includes('127.0.0.1') && !url.includes('_test')) {
-    throw new Error(
-      '[seed] refusing to run against a non-local, non-test database (it deletes all tenant data): ' +
-        url.replace(/:[^:@/]+@/, ':***@'),
-    );
-  }
+  assertSeedTarget(url, 'seed');
+  const today = process.env.DEMO_TODAY?.trim() || localYmd(new Date());
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(today)) throw new Error(`[seed] DEMO_TODAY must be YYYY-MM-DD, got ${today}`);
+  const password = process.env.DEMO_PASSWORD?.trim() || DEFAULT_DEMO_PASSWORD;
+
   const db = createDb(url);
 
   console.log('[seed] plans (idempotent upsert)');
@@ -50,14 +233,10 @@ async function main() {
       });
   }
 
-  console.log('[seed] clearing existing data');
-  await db.delete(poLines);
-  await db.delete(purchaseOrders);
-  await db.delete(products);
-  await db.delete(suppliers);
-  await db.delete(memberships);
-  await db.delete(users);
-  await db.delete(restaurants);
+  console.log('[seed] clearing every restaurant + user (TRUNCATE … CASCADE)');
+  const raw = postgres(url, { max: 1, prepare: false, onnotice: () => undefined });
+  await raw.unsafe('TRUNCATE restaurants, users RESTART IDENTITY CASCADE');
+  await raw.end();
 
   console.log('[seed] restaurant');
   const [restaurant] = await db
@@ -66,243 +245,167 @@ async function main() {
       name: 'כפר הזיתים',
       businessId: '514778123',
       vatRate: '0.18',
-      timezone: 'Asia/Jerusalem',
+      timezone: TZ,
       settings: {
-        tolerances: {
-          pricePercent: 0.02,
-          priceAbsolute: 5,
-          qtyPercent: 0.03,
-          qtyAbsolute: 1,
-        },
+        tolerances: { pricePercent: 0.02, priceAbsolute: 5, qtyPercent: 0.03, qtyAbsolute: 1 },
         baselineWindowDays: 90,
       },
     })
     .returning();
   if (!restaurant) throw new Error('restaurant insert failed');
 
-  console.log('[seed] users + memberships');
+  console.log('[seed] users (email-verified, demo password) + memberships');
   const userSpecs = [
-    { email: 'owner@kfar-hazeitim.test', name: 'רון בעלים', role: 'owner' as const },
-    { email: 'manager@kfar-hazeitim.test', name: 'שני מנהלת', role: 'manager' as const },
-    { email: 'receiver@kfar-hazeitim.test', name: 'יוסי מקבל', role: 'receiver' as const },
-    { email: 'bookkeeper@kfar-hazeitim.test', name: 'אורית חשבת', role: 'bookkeeper' as const },
-    { email: 'chef@kfar-hazeitim.test', name: 'תומר שף', role: 'chef' as const },
+    { email: 'owner@kfar-hazeitim.test', name: 'רון אלמוג', role: 'owner' as const, locale: null },
+    { email: 'manager@kfar-hazeitim.test', name: 'שני לוי', role: 'manager' as const, locale: null },
+    // The "Receiver in English" persona: a foreign worker who checks deliveries.
+    { email: 'receiver@kfar-hazeitim.test', name: 'Somchai K.', role: 'receiver' as const, locale: 'en' },
+    { email: 'bookkeeper@kfar-hazeitim.test', name: 'אורית כהן', role: 'bookkeeper' as const, locale: null },
+    { email: 'chef@kfar-hazeitim.test', name: 'תומר בן דוד', role: 'chef' as const, locale: null },
   ];
-  const insertedUsers = await db.insert(users).values(userSpecs).returning();
+  const verifiedAt = new Date();
+  const insertedUsers = await db
+    .insert(users)
+    .values(userSpecs.map((u) => ({ email: u.email, name: u.name, emailVerified: verifiedAt })))
+    .returning();
+  const passwordHash = await hashPassword(password);
+  await db.insert(userCredentials).values(
+    insertedUsers.map((u) => ({ userId: u.id, passwordHash, passwordUpdatedAt: verifiedAt })),
+  );
   await db.insert(memberships).values(
     insertedUsers.map((u, i) => ({
       userId: u.id,
       restaurantId: restaurant.id,
       role: userSpecs[i]!.role,
+      preferredLocale: userSpecs[i]!.locale,
     })),
   );
 
   console.log('[seed] suppliers');
-  const supplierSpecs: Array<{
-    name: string;
-    businessId: string;
-    deliverySchedule: DeliverySchedule;
-  }> = [
-    { name: 'ירקני אבי', businessId: '301234561', deliverySchedule: { sun: ['08:00'], tue: ['08:00'], thu: ['08:00'] } },
-    { name: 'קצביית הכרם', businessId: '301234562', deliverySchedule: { mon: ['09:30'], wed: ['09:30'] } },
-    { name: 'מאפיית ברנס', businessId: '301234563', deliverySchedule: { sun: ['06:00'], mon: ['06:00'], tue: ['06:00'], wed: ['06:00'], thu: ['06:00'], fri: ['06:00'] } },
-    { name: 'קובי דגים', businessId: '301234564', deliverySchedule: { tue: ['11:00'], thu: ['11:00'] } },
-    { name: 'יקבי גליל', businessId: '301234565', deliverySchedule: { mon: ['14:00'] } },
-    { name: 'גבינות מירון', businessId: '301234566', deliverySchedule: { wed: ['10:00'] } },
-    { name: 'תבלינים פרשמן', businessId: '301234567', deliverySchedule: { mon: ['12:00'] } },
-    { name: 'חד״פ מהיר', businessId: '301234568', deliverySchedule: { thu: ['16:00'] } },
-    { name: 'משקאות שטיינברג', businessId: '301234569', deliverySchedule: { wed: ['11:30'] } },
-    { name: 'מלון בן-עמי', businessId: '301234570', deliverySchedule: { sun: ['13:00'] } },
-  ];
+  const dayKey = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
   const insertedSuppliers = await db
     .insert(suppliers)
     .values(
-      supplierSpecs.map((s) => ({
+      SUPPLIERS.map((s) => ({
         restaurantId: restaurant.id,
         name: s.name,
+        nameEn: s.nameEn,
         businessId: s.businessId,
-        deliverySchedule: s.deliverySchedule,
+        contactEmail: s.contactEmail,
+        contactWhatsapp: s.contactWhatsapp,
+        paymentTerms: s.paymentTerms,
+        vatRate: null,
+        deliverySchedule: Object.fromEntries(s.days.map((d) => [dayKey[d], [s.time]])) as DeliverySchedule,
       })),
     )
     .returning();
+  const supplierByKey = new Map(SUPPLIERS.map((s, i) => [s.key, insertedSuppliers[i]!] as const));
 
   console.log('[seed] products');
-  const productSpecs: Array<{ name: string; category: string; unit: string }> = [
-    // ירקות
-    { name: 'עגבניה שרי', category: 'ירקות', unit: 'ק״ג' },
-    { name: 'מלפפון חממה', category: 'ירקות', unit: 'ק״ג' },
-    { name: 'חסה אייסברג', category: 'ירקות', unit: 'יח׳' },
-    { name: 'פטרוזיליה', category: 'ירקות', unit: 'צרור' },
-    { name: 'כוסברה', category: 'ירקות', unit: 'צרור' },
-    { name: 'בצל יבש', category: 'ירקות', unit: 'ק״ג' },
-    { name: 'שום קלוף', category: 'ירקות', unit: 'ק״ג' },
-    { name: 'גזר', category: 'ירקות', unit: 'ק״ג' },
-    { name: 'תפוח אדמה לבן', category: 'ירקות', unit: 'ק״ג' },
-    { name: 'פלפל אדום', category: 'ירקות', unit: 'ק״ג' },
-    // בשרים
-    { name: 'אנטריקוט אנגוס', category: 'בשרים', unit: 'ק״ג' },
-    { name: 'חזה עוף', category: 'בשרים', unit: 'ק״ג' },
-    { name: 'כתף טלה', category: 'בשרים', unit: 'ק״ג' },
-    { name: 'נקניקיות מרגז', category: 'בשרים', unit: 'ק״ג' },
-    { name: 'המבורגר 200g', category: 'בשרים', unit: 'יח׳' },
-    // לחמים
-    { name: 'לחמניית המבורגר', category: 'לחמים', unit: 'יח׳' },
-    { name: 'פיתה לבנה', category: 'לחמים', unit: 'יח׳' },
-    { name: 'לחם כפרי', category: 'לחמים', unit: 'יח׳' },
-    { name: 'באגט', category: 'לחמים', unit: 'יח׳' },
-    // דגים
-    { name: 'סלמון פילה טרי', category: 'דגים', unit: 'ק״ג' },
-    { name: 'דניס שלם', category: 'דגים', unit: 'ק״ג' },
-    { name: 'טונה אדומה', category: 'דגים', unit: 'ק״ג' },
-    // אלכוהול
-    { name: 'יין אדום קברנה', category: 'אלכוהול', unit: 'בקבוק' },
-    { name: 'בירה גולדסטאר', category: 'אלכוהול', unit: 'בקבוק' },
-    { name: 'וודקה', category: 'אלכוהול', unit: 'בקבוק' },
-    // גבינות וחלב
-    { name: 'מוצרלה', category: 'חלב', unit: 'ק״ג' },
-    { name: 'פטה', category: 'חלב', unit: 'ק״ג' },
-    { name: 'שמנת מתוקה 38%', category: 'חלב', unit: 'ליטר' },
-    { name: 'חמאה', category: 'חלב', unit: 'ק״ג' },
-    { name: 'חלב 3%', category: 'חלב', unit: 'ליטר' },
-    // תבלינים
-    { name: 'מלח ים גס', category: 'תבלינים', unit: 'ק״ג' },
-    { name: 'פלפל שחור', category: 'תבלינים', unit: 'ק״ג' },
-    { name: 'פפריקה מתוקה', category: 'תבלינים', unit: 'ק״ג' },
-    { name: 'כמון', category: 'תבלינים', unit: 'ק״ג' },
-    { name: 'אורגנו', category: 'תבלינים', unit: 'ק״ג' },
-    // שמנים ורטבים
-    { name: 'שמן זית כתית', category: 'שמנים', unit: 'ליטר' },
-    { name: 'שמן קנולה', category: 'שמנים', unit: 'ליטר' },
-    { name: 'חומץ בלסמי', category: 'שמנים', unit: 'בקבוק' },
-    { name: 'רוטב סויה', category: 'שמנים', unit: 'בקבוק' },
-    // יבשים
-    { name: 'אורז יסמין', category: 'יבשים', unit: 'ק״ג' },
-    { name: 'בורגול גס', category: 'יבשים', unit: 'ק״ג' },
-    { name: 'עדשים שחורות', category: 'יבשים', unit: 'ק״ג' },
-    { name: 'קמח לבן', category: 'יבשים', unit: 'ק״ג' },
-    { name: 'סוכר לבן', category: 'יבשים', unit: 'ק״ג' },
-    // משקאות
-    { name: 'קולה זירו', category: 'משקאות', unit: 'בקבוק' },
-    { name: 'מים מינרליים 1.5L', category: 'משקאות', unit: 'בקבוק' },
-    { name: 'מיץ תפוזים סחוט', category: 'משקאות', unit: 'ליטר' },
-    // חד״פ
-    { name: 'מפיות נייר', category: 'חד״פ', unit: 'חבילה' },
-    { name: 'כפיות פלסטיק', category: 'חד״פ', unit: 'חבילה' },
-    { name: 'קופסאות take-away', category: 'חד״פ', unit: 'חבילה' },
-  ];
-  // Product exclusivity: every product belongs to exactly one supplier (the
-  // matcher treats a populated supplier_id as a direct hint, and price
-  // baselines are keyed by (product, supplier) — a product bought from three
-  // different suppliers never accumulates the 3 samples a baseline needs).
-  const supplierForCategory: Record<string, string> = {
-    'ירקות': 'ירקני אבי',
-    'בשרים': 'קצביית הכרם',
-    'לחמים': 'מאפיית ברנס',
-    'דגים': 'קובי דגים',
-    'אלכוהול': 'יקבי גליל',
-    'חלב': 'גבינות מירון',
-    'תבלינים': 'תבלינים פרשמן',
-    'שמנים': 'תבלינים פרשמן',
-    'יבשים': 'מלון בן-עמי',
-    'משקאות': 'משקאות שטיינברג',
-    'חד״פ': 'חד״פ מהיר',
-  };
-  const supplierIdByName = new Map(insertedSuppliers.map((s) => [s.name, s.id] as const));
-  const supplierIdForCategory = (category: string): string => {
-    const id = supplierIdByName.get(supplierForCategory[category] ?? '');
-    if (!id) throw new Error(`[seed] no supplier mapped for category ${category}`);
-    return id;
-  };
   const insertedProducts = await db
     .insert(products)
     .values(
-      productSpecs.map((p) => ({
+      DEMO_PRODUCTS.map((p) => ({
         restaurantId: restaurant.id,
         canonicalName: p.name,
+        nameEn: p.nameEn,
         category: p.category,
         defaultUnit: p.unit,
-        supplierId: supplierIdForCategory(p.category),
+        supplierId: supplierByKey.get(p.supplier)!.id,
       })),
     )
     .returning();
-  const productsBySupplier = new Map<string, typeof insertedProducts>();
-  for (const product of insertedProducts) {
-    const list = productsBySupplier.get(product.supplierId!) ?? [];
-    list.push(product);
-    productsBySupplier.set(product.supplierId!, list);
-  }
-  // Stable list price per product (₪5–43.5) so price_history has a real
-  // baseline; per-PO jitter stays within ±3%.
-  const listPriceByProductId = new Map(
-    insertedProducts.map((product, idx) => [product.id, 5 + (idx % 12) * 3.5] as const),
-  );
+  const productRows = DEMO_PRODUCTS.map((spec, i) => ({ spec, row: insertedProducts[i]! }));
 
-  console.log('[seed] purchase orders');
-  // 30 POs spread across the last ~60 days: 3 per supplier, each carrying that
-  // supplier's full basket, so every product is observed 3× under its own
-  // supplier (the minimum the baselines job needs). The last three are still
-  // open ('sent'); the final one is due today so the receiving inbox has work.
-  const PO_COUNT = 30;
-  const now = new Date();
-  const poInserts: Array<{
-    poId: string;
-    lines: Array<{ productId: string; qty: number; unit: string; price: number }>;
-  }> = [];
-  for (let i = 0; i < PO_COUNT; i += 1) {
-    const supplier = insertedSuppliers[i % insertedSuppliers.length]!;
-    const basket = productsBySupplier.get(supplier.id) ?? [];
-    if (basket.length === 0) continue;
-    const expectedDeliveryAt = new Date(now.getTime() - (58 - i * 2) * 24 * 3600 * 1000);
+  console.log(`[seed] purchase orders (${HISTORY_WEEKS} weeks of history, today = ${today})`);
+  const owner = insertedUsers[0]!;
+  const manager = insertedUsers[1]!;
+  let poCount = 0;
+  let lineCount = 0;
+  const createPo = async (
+    s: SupplierSpec,
+    ymd: string,
+    time: string,
+    status: 'closed' | 'sent',
+    ordinal: number,
+  ): Promise<void> => {
+    const supplier = supplierByKey.get(s.key)!;
+    const basket = productRows.filter((p) => p.spec.supplier === s.key && p.spec.qty > 0);
+    const expectedDeliveryAt = zonedInstant(ymd, time);
+    const orderedAt = new Date(expectedDeliveryAt.getTime() - 24 * 3600 * 1000);
+    const lines = basket.map((p, j) => {
+      const qty = roundQty(p.spec.qty * QTY_PATTERN[(ordinal + j) % QTY_PATTERN.length]!, p.spec.unit);
+      const price = Math.round(p.spec.price * PRICE_PATTERN[(ordinal + j) % PRICE_PATTERN.length]! * 100) / 100;
+      return { p, qty, price };
+    });
+    const total = lines.reduce((acc, l) => acc + Math.round(l.qty * l.price * 100), 0) / 100;
     const [po] = await db
       .insert(purchaseOrders)
       .values({
         restaurantId: restaurant.id,
         supplierId: supplier.id,
         expectedDeliveryAt,
-        status: i < PO_COUNT - 3 ? 'closed' : 'sent',
+        status,
         source: 'manual',
-        totalEstimated: null,
-        createdBy: insertedUsers[0]!.id,
+        totalEstimated: total.toFixed(2),
+        createdBy: ordinal % 2 === 0 ? manager.id : owner.id,
+        sentAt: orderedAt,
+        sentChannel: s.key === 'veg' || s.key === 'bakery' ? 'whatsapp' : 'email',
+        createdAt: orderedAt,
+        updatedAt: status === 'closed' ? expectedDeliveryAt : orderedAt,
       })
       .returning();
-    if (!po) continue;
-
-    // One line per product in the supplier's basket (3–10 lines per PO).
-    const linesToInsert = basket.map((product, j) => {
-      const qty = (j + 1) * 2 + (i % 5);
-      const listPrice = listPriceByProductId.get(product.id)!;
-      const price = listPrice * (0.97 + Math.random() * 0.06);
-      return {
-        poId: po.id,
-        productId: product.id,
-        qtyOrdered: qty.toString(),
-        unit: product.defaultUnit ?? 'יח׳',
-        unitPriceExpected: price.toFixed(2),
-        rawDescription: product.canonicalName,
-      };
-    });
-    await db.insert(poLines).values(linesToInsert);
-    poInserts.push({
-      poId: po.id,
-      lines: linesToInsert.map((l) => ({
-        productId: l.productId,
-        qty: parseFloat(l.qtyOrdered),
-        unit: l.unit,
-        price: parseFloat(l.unitPriceExpected),
+    await db.insert(poLines).values(
+      lines.map((l) => ({
+        poId: po!.id,
+        productId: l.p.row.id,
+        rawDescription: l.p.spec.name,
+        rawDescriptionEn: l.p.spec.nameEn,
+        qtyOrdered: l.qty.toString(),
+        unit: l.p.spec.unit,
+        unitPriceExpected: l.price.toFixed(2),
       })),
-    });
+    );
+    poCount += 1;
+    lineCount += lines.length;
+  };
+
+  // History: every scheduled delivery day in the last HISTORY_WEEKS weeks, up to yesterday.
+  const ordinals = new Map<string, number>();
+  for (let back = HISTORY_WEEKS * 7; back >= 1; back -= 1) {
+    const ymd = addDays(today, -back);
+    const week = Math.floor(back / 7);
+    for (const s of SUPPLIERS) {
+      if (!s.days.includes(weekday(ymd)) || week % s.everyWeeks !== 0) continue;
+      const n = ordinals.get(s.key) ?? 0;
+      ordinals.set(s.key, n + 1);
+      await createPo(s, ymd, s.time, 'closed', n);
+    }
   }
 
-  console.log(`[seed] done — restaurant ${restaurant.id}`);
-  console.log(`  users: ${insertedUsers.length}`);
-  console.log(`  suppliers: ${insertedSuppliers.length}`);
-  console.log(`  products: ${insertedProducts.length}`);
-  console.log(`  POs: ${poInserts.length}`);
+  // TODAY: three open deliveries the receiver can check live (spread over the day).
+  const todays: Array<[string, string]> = [
+    ['veg', '10:00'],
+    ['meat', '12:30'],
+    ['dairy', '15:00'],
+  ];
+  for (const [key, time] of todays) {
+    const s = SUPPLIERS.find((x) => x.key === key)!;
+    await createPo(s, today, time, 'sent', (ordinals.get(key) ?? 0) + 1);
+  }
+  // Coming days: shows the orders pipeline without cluttering today's inbox.
+  await createPo(SUPPLIERS.find((x) => x.key === 'fish')!, addDays(today, 1), '11:00', 'sent', 99);
+  await createPo(SUPPLIERS.find((x) => x.key === 'drinks')!, addDays(today, 2), '11:30', 'sent', 98);
 
-  process.exit(0);
+  console.log(`[seed] done — restaurant ${restaurant.id}`);
+  console.log(`  users: ${insertedUsers.length} (password: ${process.env.DEMO_PASSWORD ? 'from DEMO_PASSWORD' : DEFAULT_DEMO_PASSWORD})`);
+  console.log(`  suppliers: ${insertedSuppliers.length} · products: ${insertedProducts.length}`);
+  console.log(`  POs: ${poCount} (${lineCount} lines) · ${todays.length} expected today (${today})`);
+
+  await db.$client.end();
 }
 
 main().catch((err) => {
-  console.error('[seed] failed', err);
+  console.error('[seed] failed', err instanceof Error ? err.message : err);
   process.exit(1);
 });

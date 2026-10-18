@@ -276,3 +276,67 @@ describe('MockWhatsAppNotifier', () => {
     expect(rows[0]?.relatedEntityId).toBe(s.discrepancyOwnerId);
   });
 });
+
+describe('approvals role deadlock (DUPLICATE_INVOICE → bookkeeper)', () => {
+  async function seedBookkeeperItem(s: Scenario) {
+    const [d] = await db
+      .insert(discrepancies)
+      .values({
+        restaurantId: s.restaurantId,
+        matchRunId: s.matchRunId,
+        type: 'DUPLICATE_INVOICE',
+        severity: 'block',
+        deltaAmount: '117',
+        requiresRole: 'bookkeeper',
+        resolutionStatus: 'open',
+      })
+      .returning();
+    return d!.id;
+  }
+  const bk = (s: Scenario) =>
+    caller({ userId: s.bookkeeperId, restaurantId: s.restaurantId, role: 'bookkeeper' });
+
+  it('the bookkeeper sees AND can reject a duplicate routed to them', async () => {
+    const s = await seed();
+    const id = await seedBookkeeperItem(s);
+    const queue = await bk(s).approvals.myQueue();
+    expect(queue.map((q) => q.id)).toEqual([id]);
+    const updated = await bk(s).approvals.reject({ discrepancyId: id, reason: 'כפולה — לא לשלם' });
+    expect(updated.resolutionStatus).toBe('rejected');
+  });
+
+  it('the bookkeeper can approve and escalate bookkeeper items', async () => {
+    const s = await seed();
+    const a = await seedBookkeeperItem(s);
+    const b = await seedBookkeeperItem(s);
+    expect((await bk(s).approvals.approve({ discrepancyId: a })).resolutionStatus).toBe('accepted');
+    const esc = await bk(s).approvals.escalate({ discrepancyId: b });
+    expect(esc.resolutionStatus).toBe('escalated');
+    expect(esc.requiresRole).toBe('owner');
+  });
+
+  it('the bookkeeper still cannot act on manager/owner items', async () => {
+    const s = await seed();
+    await expect(
+      bk(s).approvals.approve({ discrepancyId: s.discrepancyManagerId }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(
+      bk(s).approvals.reject({ discrepancyId: s.discrepancyOwnerId, reason: 'x' }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('a receiver cannot decide anything', async () => {
+    const s = await seed();
+    const [rcv] = await db.insert(users).values({ email: 'rcv@a.test' }).returning();
+    await db
+      .insert(memberships)
+      .values({ userId: rcv!.id, restaurantId: s.restaurantId, role: 'receiver' });
+    const r = appRouter.createCaller({
+      db,
+      session: { userId: rcv!.id, restaurantId: s.restaurantId, role: 'receiver' },
+    } as AppContext);
+    await expect(r.approvals.approve({ discrepancyId: s.discrepancyManagerId })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+  });
+});

@@ -206,6 +206,34 @@
       "breakpoints": true
     },
     {
+      "idx": 29,
+      "version": "7",
+      "when": 1781840000000,
+      "tag": "0029_tenant_scoped_uniques",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1781850000000,
+      "tag": "0030_fk_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1781860000000,
+      "tag": "0031_updated_at_triggers",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1781870000000,
+      "tag": "0032_integrity_checks",
+      "breakpoints": true
+    },
+    {
       "idx": 39,
       "version": "7",
       "when": 1781940000000,

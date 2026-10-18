@@ -56,3 +56,11 @@ describe('runMatch unit normalization', () => {
     expect(r.discrepancies.find((d) => d.type === 'UNIT_MISMATCH')).toBeDefined();
   });
 });
+
+describe('Hebrew geresh/gershayim units', () => {
+  it('ק״ג (gershayim) converts like kg', () => {
+    expect(unitConversionFactor('ק״ג', 'kg')).toBe(1);
+    expect(unitConversionFactor('גרם', 'ק״ג')).toBe(0.001);
+    expect(unitConversionFactor('ק"ג', 'ק״ג')).toBe(1);
+  });
+});

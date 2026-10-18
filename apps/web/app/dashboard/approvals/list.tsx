@@ -6,19 +6,38 @@ import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
 import { ArrowLeftRight, FileText, ShieldAlert } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
+import { formatIls } from '@/lib/money';
+import { formatDateTime, formatNumber } from '@/lib/i18n/format';
+import { useLocale, useT } from '@/lib/i18n/client';
+import { approvals } from '@/lib/i18n/messages/approvals';
+import type { he as approvalsHe } from '@/lib/i18n/messages/approvals/he';
+import type { Translator } from '@/lib/i18n/translate';
 import { Badge, Button, Card, LoadMore, Textarea, type BadgeTone } from '@/lib/components';
+import {
+  discrepancyExplain,
+  discrepancyLabel,
+  displayName,
+  ruleLabel,
+  severityLabel,
+} from './vocab';
 
 type QueueItem = inferRouterOutputs<AppRouter>['approvals']['myQueue'][number];
 
+// Must equal the server page size so "has more" is right on first paint.
 const PAGE = 50;
 
 export function ApprovalsList({ initial }: { initial: QueueItem[] }) {
+  const t = useT(approvals);
+  const locale = useLocale();
   const utils = trpc.useUtils();
 
   // Local list seeded from the server page; cursor pagination appends older rows.
   const [items, setItems] = useState<QueueItem[]>(initial);
   const [hasMore, setHasMore] = useState(initial.length >= PAGE);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Which row a mutation is running for (so only that row's button spins).
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   // After a decision, refetch the first page so the resolved row drops out.
   async function refreshFirstPage() {
@@ -26,9 +45,20 @@ export function ApprovalsList({ initial }: { initial: QueueItem[] }) {
     setItems(fresh);
     setHasMore(fresh.length >= PAGE);
   }
+  const onError = (err: { data?: { code?: string } | null }) =>
+    setError(err.data?.code === 'FORBIDDEN' ? t('card.forbidden') : t('card.error'));
+  const handlers = {
+    onSuccess: async () => {
+      setError(null);
+      await refreshFirstPage();
+    },
+    onError,
+    onSettled: () => setBusyId(null),
+  };
 
-  const approve = trpc.approvals.approve.useMutation({ onSuccess: refreshFirstPage });
-  const reject = trpc.approvals.reject.useMutation({ onSuccess: refreshFirstPage });
+  const approve = trpc.approvals.approve.useMutation(handlers);
+  const reject = trpc.approvals.reject.useMutation(handlers);
+  const escalate = trpc.approvals.escalate.useMutation(handlers);
 
   async function loadMore() {
     const last = items[items.length - 1];
@@ -54,40 +84,37 @@ export function ApprovalsList({ initial }: { initial: QueueItem[] }) {
     let sum = 0;
     let blk = 0;
     for (const d of items) {
-      sum += Number(d.deltaAmount ?? 0);
+      if (d.type !== 'PRICE_LOWER') sum += Math.abs(Number(d.deltaAmount ?? 0));
       if (d.severity === 'block') blk += 1;
     }
     return { atRisk: sum, blockers: blk };
   }, [items]);
 
+  const money = (v: number) => formatIls(v, { locale, maximumFractionDigits: 2 });
+
   return (
     <div className="space-y-5">
       {/* Queue summary strip — keeps the money context present while deciding. */}
-      <div className="grid grid-cols-3 gap-3">
-        <Card padding="sm" className="flex flex-col justify-center">
-          <p className="text-xs font-semibold uppercase tracking-wider text-subtle">בתור</p>
-          <p className="mt-1 font-mono text-2xl font-extrabold tabular-nums text-ink">
-            {items.length.toLocaleString('he-IL')}
-          </p>
-        </Card>
-        <Card padding="sm" className="flex flex-col justify-center">
-          <p className="text-xs font-semibold uppercase tracking-wider text-subtle">סכום בסיכון</p>
-          <p className="mt-1 font-mono text-2xl font-extrabold tabular-nums text-danger">
-            ₪{atRisk.toLocaleString('he-IL')}
-          </p>
-        </Card>
-        <Card padding="sm" className="flex flex-col justify-center">
-          <p className="text-xs font-semibold uppercase tracking-wider text-subtle">חוסמים</p>
-          <p className="mt-1 font-mono text-2xl font-extrabold tabular-nums text-danger">
-            {blockers.toLocaleString('he-IL')}
-          </p>
-        </Card>
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
+        <SummaryTile label={t('summary.inQueue')} value={formatNumber(items.length, locale)} />
+        <SummaryTile label={t('summary.atRisk')} value={formatIls(atRisk, { locale })} danger />
+        <SummaryTile label={t('summary.blockers')} value={formatNumber(blockers, locale)} danger />
       </div>
+
+      {error ? (
+        <Card padding="sm" role="alert" className="border-danger/30 bg-danger/5 text-sm text-danger">
+          {error}
+        </Card>
+      ) : null}
 
       <div className="space-y-3">
         {items.map((d) => {
           const isBlock = d.severity === 'block';
           const isRejecting = activeReject === d.id;
+          const label = discrepancyLabel(t, d.type);
+          const product = displayName(locale, d.productName, d.productNameEn);
+          const supplier = displayName(locale, d.supplierName, d.supplierNameEn);
+          const busy = busyId === d.id;
           return (
             <Card
               key={d.id}
@@ -95,7 +122,7 @@ export function ApprovalsList({ initial }: { initial: QueueItem[] }) {
               elevated
               padding="none"
               className="relative overflow-hidden"
-              aria-label={typeLabel(d.type)}
+              aria-label={label}
             >
               {/* Severity rail: leak gradient for blockers, tinted bar otherwise. */}
               <span
@@ -108,34 +135,43 @@ export function ApprovalsList({ initial }: { initial: QueueItem[] }) {
               />
 
               <div className="p-4 ps-5">
-                <header className="flex items-start justify-between gap-3">
+                <header className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <SeverityBadge severity={d.severity} />
-                      <h3 className="truncate text-base font-bold text-ink">{typeLabel(d.type)}</h3>
+                      <SeverityBadge severity={d.severity} label={severityLabel(t, d.severity)} />
+                      <h3 className="text-base font-bold text-ink">{label}</h3>
                     </div>
+                    {product || supplier ? (
+                      <p className="mt-1 text-sm text-muted">
+                        {[product, supplier].filter(Boolean).join(' · ')}
+                        {d.invoiceNumber ? (
+                          <span className="text-subtle"> · {t('card.invoice', { number: d.invoiceNumber })}</span>
+                        ) : null}
+                      </p>
+                    ) : null}
                     <p className="mt-1.5 flex items-baseline gap-1.5 text-sm text-muted">
-                      ההפסד המוערך
+                      {t('card.estimatedLoss')}
                       <span className="font-mono text-lg font-extrabold tabular-nums text-danger">
-                        ₪{Number(d.deltaAmount ?? 0).toLocaleString('he-IL')}
+                        {money(Number(d.deltaAmount ?? 0))}
                       </span>
                     </p>
                   </div>
-                  <time className="shrink-0 whitespace-nowrap font-mono text-xs tabular-nums text-subtle">
-                    {new Date(d.createdAt).toLocaleString('he-IL', {
-                      timeZone: 'Asia/Jerusalem',
-                    })}
+                  <time
+                    dateTime={new Date(d.createdAt).toISOString()}
+                    className="shrink-0 whitespace-nowrap font-mono text-xs tabular-nums text-subtle"
+                  >
+                    {formatDateTime(d.createdAt, locale)}
                   </time>
                 </header>
 
-                <WhyFlagged d={d} />
+                <WhyFlagged d={d} t={t} />
 
                 {d.invoiceId ? (
                   <Link
                     href={`/dashboard/invoices/${d.invoiceId}`}
                     className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-info hover:underline"
                   >
-                    <FileText className="h-3.5 w-3.5" aria-hidden="true" /> תקן חשבונית / OCR
+                    <FileText className="h-3.5 w-3.5" aria-hidden="true" /> {t('card.fixInvoice')}
                   </Link>
                 ) : null}
 
@@ -144,9 +180,9 @@ export function ApprovalsList({ initial }: { initial: QueueItem[] }) {
                     <Textarea
                       value={rejectReason}
                       onChange={(e) => setRejectReason(e.target.value)}
-                      placeholder="סיבת דחייה (חובה)"
+                      placeholder={t('card.rejectReason')}
                       rows={2}
-                      aria-label="סיבת דחייה"
+                      aria-label={t('card.rejectReason')}
                     />
                     <div className="flex justify-end gap-2">
                       <Button
@@ -157,14 +193,15 @@ export function ApprovalsList({ initial }: { initial: QueueItem[] }) {
                           setRejectReason('');
                         }}
                       >
-                        ביטול
+                        {t('card.cancel')}
                       </Button>
                       <Button
                         variant="danger"
                         size="sm"
-                        loading={reject.isPending}
+                        loading={busy && reject.isPending}
                         disabled={!rejectReason.trim()}
-                        onClick={() =>
+                        onClick={() => {
+                          setBusyId(d.id);
                           reject.mutate(
                             { discrepancyId: d.id, reason: rejectReason },
                             {
@@ -173,25 +210,41 @@ export function ApprovalsList({ initial }: { initial: QueueItem[] }) {
                                 setRejectReason('');
                               },
                             },
-                          )
-                        }
+                          );
+                        }}
                       >
-                        אשר דחייה
+                        {t('card.confirmReject')}
                       </Button>
                     </div>
                   </div>
                 ) : (
-                  <div className="mt-3 flex justify-end gap-2">
+                  <div className="mt-3 flex flex-wrap justify-end gap-2">
+                    {d.requiredRole !== 'owner' ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        loading={busy && escalate.isPending}
+                        onClick={() => {
+                          setBusyId(d.id);
+                          escalate.mutate({ discrepancyId: d.id });
+                        }}
+                      >
+                        {t('card.escalate')}
+                      </Button>
+                    ) : null}
                     <Button variant="danger" size="sm" onClick={() => setActiveReject(d.id)}>
-                      דחה
+                      {t('card.reject')}
                     </Button>
                     <Button
                       variant="primary"
                       size="sm"
-                      loading={approve.isPending}
-                      onClick={() => approve.mutate({ discrepancyId: d.id })}
+                      loading={busy && approve.isPending}
+                      onClick={() => {
+                        setBusyId(d.id);
+                        approve.mutate({ discrepancyId: d.id });
+                      }}
                     >
-                      אשר
+                      {t('card.approve')}
                     </Button>
                   </div>
                 )}
@@ -205,34 +258,69 @@ export function ApprovalsList({ initial }: { initial: QueueItem[] }) {
   );
 }
 
-/** "Why was this flagged?" — surfaces the decision record (expected vs actual,
- *  the tolerance breached, and the approval rule that routed it). */
-function WhyFlagged({ d }: { d: QueueItem }) {
-  const hasValues = d.expectedValue != null && d.actualValue != null;
-  if (!hasValues && !d.toleranceUsed && !d.ruleName) return null;
+function SummaryTile({ label, value, danger }: { label: string; value: string; danger?: boolean }) {
+  return (
+    <Card padding="sm" className="flex min-w-0 flex-col justify-center">
+      <p className="truncate text-xs font-semibold uppercase tracking-wider text-subtle">{label}</p>
+      <p
+        className={`mt-1 truncate font-mono text-lg font-extrabold tabular-nums sm:text-2xl ${danger ? 'text-danger' : 'text-ink'}`}
+      >
+        {value}
+      </p>
+    </Card>
+  );
+}
+
+/** "Why was this flagged?" — a plain-language explanation of the type, the
+ *  expected vs actual values, the tolerance breached, and the routing reason. */
+function WhyFlagged({ d, t }: { d: QueueItem; t: Translator<typeof approvalsHe> }) {
+  const hasValues = d.expectedValue != null && d.actualValue != null && isMeaningful(d.type);
+  const routing = ruleLabel(t, d.ruleId, d.ruleName);
   return (
     <div className="mt-3 rounded-xl border border-line bg-surface-2 px-3 py-2 text-xs text-muted">
       <div className="mb-1.5 flex items-center gap-1.5 font-semibold text-subtle">
         <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
-        למה סומן?
+        {t('card.whyFlagged')}
       </div>
+      <p>{discrepancyExplain(t, d.type)}</p>
       {hasValues ? (
-        <div className="flex items-center gap-1.5">
-          <span>צפוי</span>
-          <span className="font-mono font-semibold tabular-nums text-ink">{d.expectedValue}</span>
+        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+          <span>{t('card.expected')}</span>
+          <span className="font-mono font-semibold tabular-nums text-ink" dir="ltr">
+            {fmtValue(d.expectedValue)}
+          </span>
           <ArrowLeftRight className="h-3 w-3 text-subtle" aria-hidden="true" />
-          <span>בפועל</span>
-          <span className="font-mono font-semibold tabular-nums text-danger">{d.actualValue}</span>
+          <span>{t('card.actual')}</span>
+          <span className="font-mono font-semibold tabular-nums text-danger" dir="ltr">
+            {fmtValue(d.actualValue)}
+          </span>
         </div>
       ) : null}
       {d.toleranceUsed ? (
         <div className="mt-0.5">
-          סף: <span className="font-mono tabular-nums">{d.toleranceUsed}</span>
+          {t('card.threshold')}:{' '}
+          <span className="font-mono tabular-nums" dir="ltr">
+            {d.toleranceUsed}
+          </span>
         </div>
       ) : null}
-      {d.ruleName ? <div className="mt-0.5">ניתוב: {d.ruleName}</div> : null}
+      {routing ? (
+        <div className="mt-0.5">
+          {t('card.routing')}: {routing}
+        </div>
+      ) : null}
     </div>
   );
+}
+
+/** DATE_ANOMALY stores epoch ms in expected/actual — not useful as raw numbers. */
+const isMeaningful = (type: string) => type !== 'DATE_ANOMALY';
+
+/** Trim NUMERIC noise ("8.0000" → "8"). */
+function fmtValue(v: string | null): string {
+  if (v == null) return '';
+  const n = Number(v);
+  return Number.isFinite(n) ? String(Math.round(n * 10000) / 10000) : v;
 }
 
 /** Tinted severity rail color for non-blocker rows. */
@@ -240,27 +328,8 @@ function railTint(severity: string): string {
   return severity === 'warn' ? 'bg-warn/60' : 'bg-info/50';
 }
 
-function SeverityBadge({ severity }: { severity: string }) {
+function SeverityBadge({ severity, label }: { severity: string; label: string }) {
   const tone: BadgeTone =
     severity === 'block' ? 'danger' : severity === 'warn' ? 'warning' : 'info';
-  const label = severity === 'block' ? 'חוסם' : severity === 'warn' ? 'אזהרה' : 'מידע';
   return <Badge tone={tone}>{label}</Badge>;
-}
-
-function typeLabel(type: string): string {
-  const map: Record<string, string> = {
-    PRICE_HIGHER: 'מחיר גבוה מהמצופה',
-    PRICE_LOWER: 'מחיר נמוך מהמצופה',
-    QTY_SHORT: 'חסר בכמות שהתקבלה',
-    QTY_OVER: 'עודף / חיוב על יותר ממה שהתקבל',
-    UNORDERED_ITEM: 'פריט בחשבונית ללא הזמנה',
-    MISSING_ON_INVOICE: 'שורת הזמנה לא נמצאה בחשבונית',
-    UNIT_MISMATCH: 'אי-התאמת יחידות',
-    UNORDERED_ARRIVAL: 'חשבונית שהגיעה ללא הזמנה',
-    DUPLICATE_INVOICE: 'חשבונית כפולה',
-    DATE_ANOMALY: 'תאריך חריג',
-    VAT_MISMATCH: 'אי-התאמת מע״מ',
-    TOTAL_MISMATCH: 'סה״כ חשבונית לא תואם שורות',
-  };
-  return map[type] ?? type;
 }

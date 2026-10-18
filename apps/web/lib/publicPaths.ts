@@ -10,7 +10,18 @@
  * Amendment-13 duty-to-inform pages (/privacy, /terms, /cookies) were missing,
  * so signed-out users bounced to /login.
  */
-export const PUBLIC_EXACT_PATHS = ['/', '/pricing', '/about', '/privacy', '/terms', '/cookies'] as const;
+export const PUBLIC_EXACT_PATHS = [
+  '/',
+  '/pricing',
+  '/about',
+  '/privacy',
+  '/terms',
+  '/cookies',
+  // Generated SEO/social routes (no file extension in the URL, so the static-asset
+  // rule below doesn't catch them) — crawlers have no session.
+  '/opengraph-image',
+  '/twitter-image',
+] as const;
 
 /** Prefixes match the path itself or any sub-path (`/login`, `/login/2fa`). */
 export const PUBLIC_PREFIX_PATHS = [

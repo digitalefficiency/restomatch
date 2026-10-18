@@ -1,0 +1,145 @@
+-- 0032 — CHECK constraints for invariants the code already assumes.
+--
+-- The money/quantity columns accepted anything: a VAT rate of 18 instead of 0.18,
+-- a negative received quantity, an OCR confidence of 7, a "period" of '2026-13'.
+-- The engine and the charts assume these never happen; one bad row silently
+-- poisons a leak figure. Source of truth for the list: src/integrityChecks.ts
+-- (the doctor counts would-be violators from it; the shape test asserts this file
+-- matches it). Sign checks on invoice qty/prices/totals are deliberately ABSENT:
+-- credit notes and discount lines are legitimately negative.
+--
+-- SAFE ON REAL DATA BY CONSTRUCTION: each constraint is added NOT VALID (enforced
+-- for every new/updated row immediately; existing rows are not scanned, so the
+-- ADD can never fail), then VALIDATEd only if no existing row violates it. A
+-- violated constraint is left NOT VALID with a NOTICE instead of aborting the
+-- batch; `pnpm db:doctor` reports it (WARN, with the violator count) so the owner
+-- repairs the rows and runs `ALTER TABLE <t> VALIDATE CONSTRAINT <name>;` later.
+--
+-- PRECONDITION: none (see above). `pnpm db:doctor` lists would-be violators
+-- before you apply, so you know which constraints will stay NOT VALID.
+-- Rollback: ALTER TABLE <t> DROP CONSTRAINT IF EXISTS <name>; for each below.
+--
+-- Hand-written (drizzle-kit generate is broken in this repo).
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'restaurants_vat_rate_range') THEN
+    ALTER TABLE "restaurants" ADD CONSTRAINT "restaurants_vat_rate_range" CHECK (vat_rate >= 0 AND vat_rate <= 1) NOT VALID;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'suppliers_vat_rate_range') THEN
+    ALTER TABLE "suppliers" ADD CONSTRAINT "suppliers_vat_rate_range" CHECK (vat_rate IS NULL OR (vat_rate >= 0 AND vat_rate <= 1)) NOT VALID;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'purchase_orders_vat_rate_range') THEN
+    ALTER TABLE "purchase_orders" ADD CONSTRAINT "purchase_orders_vat_rate_range" CHECK (vat_rate IS NULL OR (vat_rate >= 0 AND vat_rate <= 1)) NOT VALID;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'invoice_lines_vat_rate_range') THEN
+    ALTER TABLE "invoice_lines" ADD CONSTRAINT "invoice_lines_vat_rate_range" CHECK (vat_rate IS NULL OR (vat_rate >= 0 AND vat_rate <= 1)) NOT VALID;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'po_lines_qty_ordered_nonneg') THEN
+    ALTER TABLE "po_lines" ADD CONSTRAINT "po_lines_qty_ordered_nonneg" CHECK (qty_ordered >= 0) NOT VALID;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'po_lines_unit_price_nonneg') THEN
+    ALTER TABLE "po_lines" ADD CONSTRAINT "po_lines_unit_price_nonneg" CHECK (unit_price_expected IS NULL OR unit_price_expected >= 0) NOT VALID;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'gr_lines_qty_received_nonneg') THEN
+    ALTER TABLE "gr_lines" ADD CONSTRAINT "gr_lines_qty_received_nonneg" CHECK (qty_received >= 0) NOT VALID;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'gr_lines_qty_rejected_nonneg') THEN
+    ALTER TABLE "gr_lines" ADD CONSTRAINT "gr_lines_qty_rejected_nonneg" CHECK (qty_rejected >= 0) NOT VALID;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'invoices_ocr_confidence_range') THEN
+    ALTER TABLE "invoices" ADD CONSTRAINT "invoices_ocr_confidence_range" CHECK (ocr_confidence IS NULL OR (ocr_confidence >= 0 AND ocr_confidence <= 1)) NOT VALID;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'invoices_currency_iso') THEN
+    ALTER TABLE "invoices" ADD CONSTRAINT "invoices_currency_iso" CHECK (currency ~ '^[A-Z]{3}$') NOT VALID;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'invoice_lines_ocr_confidence_range') THEN
+    ALTER TABLE "invoice_lines" ADD CONSTRAINT "invoice_lines_ocr_confidence_range" CHECK (ocr_confidence_line IS NULL OR (ocr_confidence_line >= 0 AND ocr_confidence_line <= 1)) NOT VALID;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'product_aliases_confidence_range') THEN
+    ALTER TABLE "product_aliases" ADD CONSTRAINT "product_aliases_confidence_range" CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1)) NOT VALID;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'supplier_catalog_items_list_price_nonneg') THEN
+    ALTER TABLE "supplier_catalog_items" ADD CONSTRAINT "supplier_catalog_items_list_price_nonneg" CHECK (list_price IS NULL OR list_price >= 0) NOT VALID;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'supplier_catalog_items_pack_size_pos') THEN
+    ALTER TABLE "supplier_catalog_items" ADD CONSTRAINT "supplier_catalog_items_pack_size_pos" CHECK (pack_size IS NULL OR pack_size > 0) NOT VALID;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'price_history_unit_price_nonneg') THEN
+    ALTER TABLE "price_history" ADD CONSTRAINT "price_history_unit_price_nonneg" CHECK (unit_price >= 0) NOT VALID;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'price_baselines_window_pos') THEN
+    ALTER TABLE "price_baselines" ADD CONSTRAINT "price_baselines_window_pos" CHECK (window_days > 0 AND sample_size >= 0) NOT VALID;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'match_runs_total_discrepancy_nonneg') THEN
+    ALTER TABLE "match_runs" ADD CONSTRAINT "match_runs_total_discrepancy_nonneg" CHECK (total_discrepancy_amount >= 0) NOT VALID;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'notifications_outbox_attempts_nonneg') THEN
+    ALTER TABLE "notifications_outbox" ADD CONSTRAINT "notifications_outbox_attempts_nonneg" CHECK (attempt_count >= 0) NOT VALID;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'usage_counters_used_nonneg') THEN
+    ALTER TABLE "usage_counters" ADD CONSTRAINT "usage_counters_used_nonneg" CHECK (used >= 0) NOT VALID;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'usage_counters_period_format') THEN
+    ALTER TABLE "usage_counters" ADD CONSTRAINT "usage_counters_period_format" CHECK (period ~ '^[0-9]{4}-(0[1-9]|1[0-2])$') NOT VALID;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'plans_price_nonneg') THEN
+    ALTER TABLE "plans" ADD CONSTRAINT "plans_price_nonneg" CHECK (price_agorot_monthly >= 0) NOT VALID;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN
+    SELECT con.conname, cls.relname
+    FROM pg_constraint con
+    JOIN pg_class cls ON cls.oid = con.conrelid
+    JOIN pg_namespace ns ON ns.oid = cls.relnamespace AND ns.nspname = 'public'
+    WHERE con.contype = 'c' AND NOT con.convalidated
+      AND con.conname IN ('restaurants_vat_rate_range', 'suppliers_vat_rate_range', 'purchase_orders_vat_rate_range', 'invoice_lines_vat_rate_range', 'po_lines_qty_ordered_nonneg', 'po_lines_unit_price_nonneg', 'gr_lines_qty_received_nonneg', 'gr_lines_qty_rejected_nonneg', 'invoices_ocr_confidence_range', 'invoices_currency_iso', 'invoice_lines_ocr_confidence_range', 'product_aliases_confidence_range', 'supplier_catalog_items_list_price_nonneg', 'supplier_catalog_items_pack_size_pos', 'price_history_unit_price_nonneg', 'price_baselines_window_pos', 'match_runs_total_discrepancy_nonneg', 'notifications_outbox_attempts_nonneg', 'usage_counters_used_nonneg', 'usage_counters_period_format', 'plans_price_nonneg')
+  LOOP
+    BEGIN
+      EXECUTE format('ALTER TABLE public.%I VALIDATE CONSTRAINT %I', r.relname, r.conname);
+    EXCEPTION WHEN check_violation THEN
+      RAISE NOTICE '0032: % on % left NOT VALID — existing rows violate it (see pnpm db:doctor)', r.conname, r.relname;
+    END;
+  END LOOP;
+END $$;

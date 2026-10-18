@@ -99,6 +99,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'onboarding.createRestaurant':
     'creates a brand-new tenant; takes no entity ids and reads nothing tenant-scoped',
   'owner.kpis': 'isolation',
+  'owner.leakHero': 'isolation',
+  'owner.leakBreakdown': 'isolation',
   'owner.leaks': 'isolation',
   'owner.suppliers': 'isolation',
   'receiving.todayExpectations': 'isolation',
@@ -382,6 +384,25 @@ describe('list/aggregate isolation (A must not see B)', () => {
   it('owner.kpis resolves from A-scoped data only', async () => {
     const caller = callerFor(A);
     await expect(caller.owner.kpis()).resolves.toBeDefined();
+  });
+
+  it('owner.leakHero aggregates A-scoped invoices only', async () => {
+    const caller = callerFor(A);
+    const hero = await caller.owner.leakHero();
+    // Each seeded tenant has one ₪100 (excl. VAT) invoice dated today: B's must
+    // not be added to A's spend.
+    expect(hero.spendIls).toBe(100);
+    expect(hero.invoiceCount).toBe(1);
+  });
+
+  it('owner.leakBreakdown excludes B invoices and lines', async () => {
+    const caller = callerFor(A);
+    const rows = await caller.owner.leakBreakdown();
+    const json = JSON.stringify(rows);
+    expect(rows.map((r) => r.invoiceId)).toContain(A.invoiceId);
+    expect(json).not.toContain(B.invoiceId);
+    expect(json).not.toContain(B.discrepancyId);
+    expect(json).not.toContain(B.supplierName);
   });
 
   it('owner.leaks excludes B leak rows', async () => {

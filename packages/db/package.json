@@ -23,13 +23,16 @@
     "reset": "tsx scripts/reset.ts && pnpm migrate && pnpm seed",
     "studio": "drizzle-kit studio",
     "push": "drizzle-kit push",
-    "test": "vitest run"
+    "test": "vitest run",
+    "doctor": "tsx scripts/doctor.ts",
+    "repair-preconditions": "tsx scripts/repair-preconditions.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.38.3",
     "postgres": "^3.4.5"
   },
   "devDependencies": {
+    "@restomatch/crypto": "workspace:*",
     "@types/node": "^22.10.5",
     "dotenv": "^16.4.7",
     "drizzle-kit": "^0.30.1",
