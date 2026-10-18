@@ -16,6 +16,7 @@ import {
   MoreHorizontal,
   PackageCheck,
   Settings,
+  Sparkles,
   ShoppingCart,
   Truck,
   Users,
@@ -35,6 +36,7 @@ type LinkKey =
   | 'receiving'
   | 'approvals'
   | 'leaks'
+  | 'ask'
   | 'suppliers'
   | 'catalog'
   | 'orders'
@@ -48,6 +50,8 @@ interface NavItem {
   href: string;
   icon: LucideIcon;
   group: GroupKey;
+  /** Wave-1 flag: the item shows only when the layout passes it in `features`. */
+  feature?: string;
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -55,6 +59,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'receiving', href: '/dashboard/receiving', icon: PackageCheck, group: 'operations' },
   { key: 'approvals', href: '/dashboard/approvals', icon: Inbox, group: 'operations' },
   { key: 'leaks', href: '/dashboard/leaks', icon: BarChart3, group: 'operations' },
+  { key: 'ask', href: '/dashboard/ask', icon: Sparkles, group: 'operations', feature: 'aiAssistant' },
   { key: 'suppliers', href: '/dashboard/suppliers', icon: Truck, group: 'purchasing' },
   { key: 'catalog', href: '/dashboard/catalog', icon: Boxes, group: 'purchasing' },
   { key: 'orders', href: '/dashboard/orders', icon: ShoppingCart, group: 'purchasing' },
@@ -72,8 +77,8 @@ function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-function visibleItems(role: UserRole): NavItem[] {
-  return NAV_ITEMS.filter(({ href }) => canSeeRoute(role, href));
+function visibleItems(role: UserRole, features: readonly string[] = []): NavItem[] {
+  return NAV_ITEMS.filter(({ href, feature }) => canSeeRoute(role, href) && (!feature || features.includes(feature)));
 }
 
 const focusRing =
@@ -84,10 +89,10 @@ const focusRing =
  * with hairline separators. Scrolls horizontally instead of wrapping if a
  * narrow laptop can't fit every tab.
  */
-export function DesktopNav({ role }: { role: UserRole }) {
+export function DesktopNav({ role, features = [] }: { role: UserRole; features?: readonly string[] }) {
   const t = useT(nav);
   const pathname = usePathname();
-  const items = visibleItems(role);
+  const items = visibleItems(role, features);
   return (
     <nav aria-label={t('mainLabel')} className="hidden lg:block">
       <ul className="-mb-px flex items-stretch gap-1 overflow-x-auto text-sm [scrollbar-width:none]">
@@ -138,11 +143,14 @@ export function MobileNav({
   logout,
   restaurantName,
   email,
+  features = [],
 }: {
   role: UserRole;
   logout: () => Promise<void>;
   restaurantName: string;
   email: string;
+  /** Wave-1 flags on for this restaurant (e.g. 'aiAssistant'). */
+  features?: readonly string[];
 }) {
   const t = useT(nav);
   const pathname = usePathname();
@@ -154,8 +162,8 @@ export function MobileNav({
   useEffect(() => setMounted(true), []);
   const closeRef = useRef<HTMLButtonElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const items = visibleItems(role);
-  const primary = items.slice(0, 4);
+  const items = visibleItems(role, features);
+  const primary = items.filter((i) => !i.feature).slice(0, 4);
 
   // Close on navigation.
   useEffect(() => {

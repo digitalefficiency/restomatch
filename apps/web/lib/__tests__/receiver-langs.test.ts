@@ -99,7 +99,7 @@ describe('fallback chain: receiver overlay → English → Hebrew → key', () =
       const key = leafPaths(ns.he as MessageTree)[0];
       if (!key) continue;
       for (const locale of RECEIVER_LOCALES) {
-        const t = createTranslator(locale, ns as never) as (k: string) => string;
+        const t = createTranslator(locale, ns as never) as unknown as (k: string) => string;
         expect(t(key)).toBe(lookup(ns.en as MessageTree, key));
       }
     }

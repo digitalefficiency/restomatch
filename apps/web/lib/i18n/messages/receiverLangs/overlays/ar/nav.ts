@@ -11,6 +11,7 @@ export const nav: Shape<typeof he> = {
     receiving: 'استلام البضاعة',
     approvals: 'الموافقات',
     leaks: 'كاشف الخسائر',
+    ask: 'اسأل RestoMatch',
     suppliers: 'الموردون',
     catalog: 'الكتالوج',
     orders: 'الطلبيات',

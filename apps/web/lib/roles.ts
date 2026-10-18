@@ -47,6 +47,8 @@ export const ROUTE_ROLES: Record<string, UserRole[]> = {
   // and approvals.approve/reject/escalate accept bookkeeper-routed items.
   '/dashboard/approvals': ['owner', 'manager', 'bookkeeper'],
   '/dashboard/leaks': ['owner', 'manager', 'bookkeeper'],
+  // AI assistant (S14, flag aiAssistant): owner + manager only.
+  '/dashboard/ask': ['owner', 'manager'],
   '/dashboard/suppliers': ['owner', 'manager'],
   '/dashboard/catalog': ['owner', 'manager'],
   '/dashboard/orders': ['owner', 'manager'],

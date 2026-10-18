@@ -45,6 +45,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
       .then((r) => r.enabled)
       .catch(() => false),
   ]);
+  // AI assistant (S14): owner/manager + flag on → nav item.
+  const askOn =
+    active.role === 'owner' || active.role === 'manager'
+      ? await caller.ask
+          .status()
+          .then((r) => r.enabled)
+          .catch(() => false)
+      : false;
+  const features = askOn ? ['aiAssistant'] : [];
   const roleLabel = labelForRole(active.role, locale);
   const email = session.user.email ?? '';
 
@@ -71,6 +80,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 logout={logout}
                 restaurantName={active.restaurantName}
                 email={email}
+                features={features}
               />
               <div className="min-w-0 flex-1 lg:flex-none">
                 <p className="truncate text-lg font-bold tracking-tight text-ink">
@@ -103,7 +113,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 <LocaleSwitcher className="lg:hidden" />
               )}
             </div>
-            <DesktopNav role={active.role} />
+            <DesktopNav role={active.role} features={features} />
           </div>
         </header>
         <main id="main-content" tabIndex={-1} className="mx-auto max-w-6xl px-4 py-6 focus:outline-none sm:px-6 sm:py-8">

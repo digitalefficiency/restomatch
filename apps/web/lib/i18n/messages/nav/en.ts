@@ -10,6 +10,7 @@ export const en: Shape<typeof he> = {
     receiving: 'Receiving',
     approvals: 'Approvals',
     leaks: 'Leak detective',
+    ask: 'Ask RestoMatch',
     suppliers: 'Suppliers',
     catalog: 'Catalog',
     orders: 'Orders',

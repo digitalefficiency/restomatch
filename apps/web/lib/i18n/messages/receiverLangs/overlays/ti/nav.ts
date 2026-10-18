@@ -11,6 +11,7 @@ export const nav: Shape<typeof he> = {
     receiving: 'ምቕባል ኣቕሓ',
     approvals: 'ምጽዳቕ',
     leaks: 'መርማሪ ክሳራ',
+    ask: 'ሕተቱ RestoMatch',
     suppliers: 'ኣቕረብቲ',
     catalog: 'ካታሎግ',
     orders: 'ትእዛዛት',
