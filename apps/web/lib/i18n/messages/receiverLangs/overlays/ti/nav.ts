@@ -17,6 +17,8 @@ export const nav: Shape<typeof he> = {
     orders: 'ትእዛዛት',
     exports: 'ምውጻእ ፋይላት',
     team: 'ጉጅለ',
+    chain: 'ሰንሰለት',
+    branches: 'ጨናፍር',
     settings: 'ቅጥዕታት',
   },
   groups: {

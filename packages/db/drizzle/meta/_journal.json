@@ -243,12 +243,19 @@
     {
       "idx": 34,
       "version": "7",
+      "when": 1781980000000,
+      "tag": "0033_plans_catalog",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
       "when": 1782070000000,
       "tag": "0052_receiver_languages",
       "breakpoints": true
     },
     {
-      "idx": 35,
+      "idx": 36,
       "version": "7",
       "when": 1782080000000,
       "tag": "0053_ai_assistant",

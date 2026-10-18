@@ -10,6 +10,7 @@ import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { nav } from '@/lib/i18n/messages/nav';
 import { labelForRole } from '@/lib/roles';
 import { LocaleSync } from './locale-sync';
+import { BranchSwitcher } from './branch-switcher';
 import { DesktopNav, MobileNav } from './nav';
 import { DashboardSearch } from './search';
 import { WorkerStatusBanner } from './worker-status';
@@ -56,6 +57,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const features = askOn ? ['aiAssistant'] : [];
   const roleLabel = labelForRole(active.role, locale);
   const email = session.user.email ?? '';
+  // Branches (S8): the switcher lists every membership; the chain tab is for
+  // owners who run more than one branch (the chain router re-checks in the DB).
+  const ownedCount = memberships.filter((m) => m.role === 'owner').length;
+  const showChain = active.role === 'owner' && ownedCount > 1;
+  const switcherBranches = memberships.map((m) => ({
+    restaurantId: m.restaurantId,
+    restaurantName: m.restaurantName,
+    role: m.role,
+  }));
 
   async function logout() {
     'use server';
@@ -80,6 +90,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 logout={logout}
                 restaurantName={active.restaurantName}
                 email={email}
+                showChain={showChain}
+                branchSwitcher={
+                  memberships.length > 1 ? (
+                    <BranchSwitcher variant="list" branches={switcherBranches} activeId={active.restaurantId} />
+                  ) : undefined
+                }
                 features={features}
               />
               <div className="min-w-0 flex-1 lg:flex-none">
@@ -95,6 +111,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 </p>
               </div>
               <div className="ms-auto hidden items-center gap-2 lg:flex">
+                <BranchSwitcher branches={switcherBranches} activeId={active.restaurantId} />
                 <DashboardSearch role={active.role} className="w-72" />
                 {receiverLangsOn ? <LanguagePicker persist /> : <LocaleSwitcher />}
                 <form action={logout}>
@@ -113,7 +130,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 <LocaleSwitcher className="lg:hidden" />
               )}
             </div>
-            <DesktopNav role={active.role} features={features} />
+            <DesktopNav role={active.role} showChain={showChain} features={features} />
           </div>
         </header>
         <main id="main-content" tabIndex={-1} className="mx-auto max-w-6xl px-4 py-6 focus:outline-none sm:px-6 sm:py-8">

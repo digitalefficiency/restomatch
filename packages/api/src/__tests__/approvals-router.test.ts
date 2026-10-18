@@ -154,6 +154,39 @@ describe('approvals.myQueue', () => {
     expect(queue).toEqual([]);
   });
 
+  it('hides the ₪0 QTY_SHORT twin of a short delivery billed in full', async () => {
+    const s = await seed();
+    const [zero] = await db
+      .insert(discrepancies)
+      .values({
+        matchRunId: s.matchRunId,
+        restaurantId: s.restaurantId,
+        type: 'QTY_SHORT',
+        severity: 'warn',
+        deltaAmount: '0',
+        requiresRole: 'manager',
+        resolutionStatus: 'open',
+      })
+      .returning();
+    const [real] = await db
+      .insert(discrepancies)
+      .values({
+        matchRunId: s.matchRunId,
+        restaurantId: s.restaurantId,
+        type: 'QTY_SHORT',
+        severity: 'warn',
+        deltaAmount: '16',
+        requiresRole: 'manager',
+        resolutionStatus: 'open',
+      })
+      .returning();
+    const queue = await caller({ userId: s.managerId, restaurantId: s.restaurantId, role: 'manager' }).approvals.myQueue();
+    const ids = queue.map((q) => q.id);
+    expect(ids).not.toContain(zero!.id);
+    expect(ids).toContain(real!.id);
+    expect(ids).toContain(s.discrepancyManagerId);
+  });
+
   it('respects multi-tenant isolation', async () => {
     const s = await seed();
     const [other] = await db.insert(restaurants).values({ name: 'Other' }).returning();
@@ -338,5 +371,23 @@ describe('approvals role deadlock (DUPLICATE_INVOICE → bookkeeper)', () => {
     await expect(r.approvals.approve({ discrepancyId: s.discrepancyManagerId })).rejects.toMatchObject({
       code: 'FORBIDDEN',
     });
+  });
+});
+
+describe('approvals.myQueue view filters', () => {
+  it('filters by discrepancy type and severity', async () => {
+    const s = await seed();
+    const owner = caller({ userId: s.ownerId, restaurantId: s.restaurantId, role: 'owner' });
+    expect((await owner.approvals.myQueue({ types: ['QTY_OVER'] })).map((q) => q.id)).toEqual([s.discrepancyManagerId]);
+    expect((await owner.approvals.myQueue({ severities: ['block'] })).map((q) => q.id)).toEqual([s.discrepancyOwnerId]);
+    expect(await owner.approvals.myQueue({ types: ['VAT_MISMATCH'] })).toEqual([]);
+  });
+
+  it('rejects unknown filter values', async () => {
+    const s = await seed();
+    const owner = caller({ userId: s.ownerId, restaurantId: s.restaurantId, role: 'owner' });
+    // @ts-expect-error — not a severity
+    await expect(owner.approvals.myQueue({ severities: ['critical'] })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(owner.approvals.myQueue({ supplierIds: ['nope'] })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 });

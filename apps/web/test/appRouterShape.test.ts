@@ -21,6 +21,7 @@ const ROUTER_KEYS = [
   'approvals',
   'ask',
   'catalog',
+  'chain',
   'dsr',
   'exports',
   'leads',

@@ -21,6 +21,7 @@ import { matchRouter } from './routers/match';
 import { mappingRouter } from './routers/mapping';
 import { productsRouter } from './routers/products';
 import { teamRouter } from './routers/team';
+import { chainRouter } from './routers/chain';
 
 export const appRouter = router({
   owner: ownerRouter,
@@ -41,6 +42,7 @@ export const appRouter = router({
   match: matchRouter,
   mapping: mappingRouter,
   products: productsRouter,
+  chain: chainRouter,
   team: teamRouter,
   dsr: dsrRouter,
   receiverLangs: receiverLangsRouter,
@@ -194,6 +196,12 @@ export {
   scanIdFromLocalUrl,
   isLocalScanId,
 } from './lib/localScanStorage';
+export {
+  MAX_CHAIN_BRANCHES,
+  type ChainBranch,
+  type ChainBranchesResult,
+  type ChainOverviewResult,
+} from './routers/chain';
 export { localNames, renderSizeSuffix, __setReceiverTranslator } from './receiving/localize';
 export { assertFeature, isFeatureOn } from './lib/featureGate';
 export { runAsk, __setAskClient, __resetAskBurst, type AskResult } from './ask';

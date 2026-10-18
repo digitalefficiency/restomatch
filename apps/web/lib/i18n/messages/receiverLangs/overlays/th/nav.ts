@@ -17,6 +17,8 @@ export const nav: Shape<typeof he> = {
     orders: 'ใบสั่งซื้อ',
     exports: 'ส่งออกข้อมูล',
     team: 'ทีม',
+    chain: 'เครือร้าน',
+    branches: 'สาขา',
     settings: 'ตั้งค่า',
   },
   groups: {

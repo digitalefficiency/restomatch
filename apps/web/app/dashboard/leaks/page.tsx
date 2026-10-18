@@ -19,9 +19,17 @@ import {
   StatCard,
   entitlementCauseOf,
 } from '@/lib/components';
+import { canSeeRoute } from '@/lib/roles';
+import { parseView } from '@/lib/components/views';
 import { displayName } from '../approvals/vocab';
+import { LeakExplorer } from './explorer';
 
-export default async function LeaksPage() {
+export default async function LeaksPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const view = parseView(await searchParams);
   const caller = await createServerCaller();
   const [t, locale] = await Promise.all([getT(leaksNs), getLocale()]);
   let leaks: Awaited<ReturnType<typeof caller.owner.leaks>> = [];
@@ -63,12 +71,18 @@ export default async function LeaksPage() {
       </Link>
     </div>
   );
+  // The explorer is for every finance role (owner/manager/bookkeeper); the
+  // detective below stays owner-only.
+  const explorer = role && canSeeRoute(role as Parameters<typeof canSeeRoute>[0], '/dashboard/leaks') ? (
+    <LeakExplorer view={view} />
+  ) : null;
 
   if (blocked === 'entitlement') {
     return (
       <div>
         <SectionHeader level={1} title={t('detective.title')} />
         {leakLinks}
+        {explorer}
         <EntitlementUpsell feature="advanced_analytics" title={t('detective.upsell')} />
       </div>
     );
@@ -79,6 +93,7 @@ export default async function LeaksPage() {
       <div>
         <SectionHeader level={1} title={t('detective.title')} />
         {leakLinks}
+        {explorer}
         <Card padding="md" className="flex items-center gap-3 border-warn/30 bg-warn/5 text-warn">
           <ShieldAlert className="h-5 w-5 shrink-0" aria-hidden="true" />
           <span>{t('detective.roleOnly')}</span>
@@ -107,6 +122,7 @@ export default async function LeaksPage() {
         subtitle={t('detective.subtitle')}
       />
       {leakLinks}
+      {explorer}
 
       {rows.length === 0 ? (
         <EmptyState

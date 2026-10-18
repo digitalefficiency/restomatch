@@ -36,8 +36,10 @@ export default async function InviteAcceptPage({ searchParams }: PageProps) {
     error = localizeServerError(e, locale, (await getT(authMessages))('invite.genericError'));
   }
 
-  // redirect() must run outside the try/catch (it throws NEXT_REDIRECT).
-  if (!error) redirect('/dashboard');
+  // redirect() must run outside the try/catch (it throws NEXT_REDIRECT). Go via
+  // the refresh handler so the cookie carries the new membership's role (this
+  // RSC cannot write cookies) and the edge role gate applies immediately.
+  if (!error) redirect('/api/session/refresh?next=%2Fdashboard');
 
   const t = await getT(authMessages);
   return (

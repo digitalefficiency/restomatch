@@ -17,6 +17,8 @@ export const nav: Shape<typeof he> = {
     orders: 'الطلبيات',
     exports: 'التصدير',
     team: 'الفريق',
+    chain: 'السلسلة',
+    branches: 'الفروع',
     settings: 'الإعدادات',
   },
   groups: {

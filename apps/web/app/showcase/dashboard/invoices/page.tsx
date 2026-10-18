@@ -24,7 +24,7 @@ import { ilsExact } from '../../_lib/money';
 import { localTime } from '../../_lib/time';
 import { mockText } from '../../_lib/mockText';
 import {
-  MOCK_INVOICE_AUDITS,
+  invoiceAudits,
   statsForToday,
   type InvoiceAuditRecord,
   type InvoiceAuditStatus,
@@ -40,18 +40,18 @@ export default function InvoiceAuditPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const stats = useMemo(() => statsForToday(MOCK_INVOICE_AUDITS), []);
+  const stats = useMemo(() => statsForToday(invoiceAudits()), []);
 
   const filtered = useMemo(() => {
-    if (filter === 'all') return MOCK_INVOICE_AUDITS;
+    if (filter === 'all') return invoiceAudits();
     if (filter === 'clean')
-      return MOCK_INVOICE_AUDITS.filter((r) => r.discrepanciesCount === 0);
+      return invoiceAudits().filter((r) => r.discrepanciesCount === 0);
     if (filter === 'blocked')
-      return MOCK_INVOICE_AUDITS.filter((r) => r.status === 'blocked');
-    return MOCK_INVOICE_AUDITS.filter((r) => r.discrepanciesCount > 0);
+      return invoiceAudits().filter((r) => r.status === 'blocked');
+    return invoiceAudits().filter((r) => r.discrepanciesCount > 0);
   }, [filter]);
 
-  const selected = MOCK_INVOICE_AUDITS.find((r) => r.id === selectedId) ?? null;
+  const selected = invoiceAudits().find((r) => r.id === selectedId) ?? null;
 
   useGSAP(
     () => {
@@ -126,27 +126,27 @@ export default function InvoiceAuditPage() {
         <FilterChip
           active={filter === 'all'}
           onClick={() => setFilter('all')}
-          label={t('invoices.filter.all', { count: MOCK_INVOICE_AUDITS.length })}
+          label={t('invoices.filter.all', { count: invoiceAudits().length })}
         />
         <FilterChip
           active={filter === 'has_issues'}
           onClick={() => setFilter('has_issues')}
           label={t('invoices.filter.issues', {
-            count: MOCK_INVOICE_AUDITS.filter((r) => r.discrepanciesCount > 0).length,
+            count: invoiceAudits().filter((r) => r.discrepanciesCount > 0).length,
           })}
         />
         <FilterChip
           active={filter === 'clean'}
           onClick={() => setFilter('clean')}
           label={t('invoices.filter.clean', {
-            count: MOCK_INVOICE_AUDITS.filter((r) => r.discrepanciesCount === 0).length,
+            count: invoiceAudits().filter((r) => r.discrepanciesCount === 0).length,
           })}
         />
         <FilterChip
           active={filter === 'blocked'}
           onClick={() => setFilter('blocked')}
           label={t('invoices.filter.blocked', {
-            count: MOCK_INVOICE_AUDITS.filter((r) => r.status === 'blocked').length,
+            count: invoiceAudits().filter((r) => r.status === 'blocked').length,
           })}
         />
       </div>
