@@ -19,6 +19,7 @@ export const he = {
     catalog: 'קטלוג',
     contracts: 'חוזים והתראות',
     orders: 'הזמנות',
+    recipes: 'עלות מנה',
     exports: 'ייצוא',
     team: 'צוות',
     chain: 'רשת',

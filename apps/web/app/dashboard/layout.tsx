@@ -40,7 +40,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const active =
     memberships.find((m) => m.restaurantId === session.user.restaurantId) ?? memberships[0]!;
-  const [t, locale, flags, enabled, receiverLangsOn] = await Promise.all([
+  const [t, locale, flags, enabled, receiverLangsOn, recipesFlag] = await Promise.all([
     getT(nav),
     getLocale(),
     caller.recovery.flags(),
@@ -50,6 +50,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
       .status()
       .then((r) => r.enabled)
       .catch(() => false),
+    // Wave-1 flag (MASTER-PLAN §1.3): a disabled feature's nav link is invisible.
+    caller.recipes.enabled().catch(() => ({ enabled: false })),
   ]);
   // AI assistant (S14): owner/manager + flag on → nav item.
   const askOn =
@@ -68,6 +70,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         .filter(([, on]) => on)
         .map(([key]) => key),
       ...(askOn ? ['aiAssistant'] : []),
+      ...(recipesFlag.enabled ? ['recipes'] : []),
     ]),
   ];
   const roleLabel = labelForRole(active.role, locale);

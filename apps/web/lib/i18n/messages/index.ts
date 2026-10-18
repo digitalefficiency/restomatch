@@ -27,6 +27,7 @@ import { receiving } from './receiving';
 import { recovery } from './recovery';
 import { receiverLangs } from './receiverLangs';
 import { ask } from './ask';
+import { recipes } from './recipes';
 import { scans } from './scans';
 import { settings } from './settings';
 import { showcase } from './showcase';
@@ -61,6 +62,7 @@ export const ALL_NAMESPACES = [
   recovery,
   receiverLangs,
   ask,
+  recipes,
   scans,
   settings,
   showcase,
@@ -71,4 +73,4 @@ export const ALL_NAMESPACES = [
   growth,
 ] as const;
 
-export { common, admin, approvals, auth, catalog, chain, components, contracts, emails, accounting, ingest, invoices, landing, leaks, marketing, nav, onboarding, orders, overview, products, receiving, recovery, receiverLangs, ask, scans, settings, showcase, suppliers, team, views, leakCheck, growth };
+export { common, admin, approvals, auth, catalog, chain, components, contracts, emails, accounting, ingest, invoices, landing, leaks, marketing, nav, onboarding, orders, overview, products, receiving, recovery, receiverLangs, ask, recipes, scans, settings, showcase, suppliers, team, views, leakCheck, growth };

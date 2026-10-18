@@ -8,6 +8,7 @@ import { usePathname } from 'next/navigation';
 import {
   BarChart3,
   Boxes,
+  ChefHat,
   FileDown,
   FileSignature,
   FileText,
@@ -53,6 +54,7 @@ type LinkKey =
   | 'catalog'
   | 'contracts'
   | 'orders'
+  | 'recipes'
   | 'exports'
   | 'team'
   | 'branches'
@@ -98,6 +100,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'catalog', href: '/dashboard/catalog', icon: Boxes, group: 'purchasing' },
   { key: 'contracts', href: '/dashboard/contracts', icon: FileSignature, group: 'purchasing', wave1: true },
   { key: 'orders', href: '/dashboard/orders', icon: ShoppingCart, group: 'purchasing' },
+  { key: 'recipes', href: '/dashboard/recipes', icon: ChefHat, group: 'purchasing', feature: 'recipes' },
   { key: 'exports', href: '/dashboard/exports', icon: FileDown, group: 'admin' },
   { key: 'team', href: '/dashboard/team', icon: Users, group: 'admin' },
   { key: 'branches', href: '/dashboard/branches', icon: Store, group: 'admin' },

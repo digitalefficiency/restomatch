@@ -1,4 +1,4 @@
-import { testDbUrl } from '@restomatch/db';
+import { testDbUrl, type RestaurantSettings } from '@restomatch/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   activityEvents,
@@ -35,6 +35,8 @@ import {
   productAliases,
   products,
   purchaseOrders,
+  recipeItems,
+  recipes,
   restaurants,
   sessions,
   sql,
@@ -556,6 +558,54 @@ describe('phase-2 catalog tables are tenant-isolated (raw probes)', () => {
         }),
       ),
     ).rejects.toThrow(/row-level security/);
+  });
+});
+
+describe('recipes / recipe_items (0057) are tenant-isolated under the app role', () => {
+  let aRecipe: string;
+  let bRecipe: string;
+
+  beforeAll(async () => {
+    const [a] = await ownerDb.insert(recipes).values({ restaurantId: A.restaurantId, name: 'rls A dish' }).returning();
+    const [b] = await ownerDb.insert(recipes).values({ restaurantId: B.restaurantId, name: 'rls B dish' }).returning();
+    aRecipe = a!.id;
+    bRecipe = b!.id;
+    await ownerDb.insert(recipeItems).values([
+      { restaurantId: A.restaurantId, recipeId: aRecipe, productId: A.productId, quantity: '1', unit: 'ק״ג' },
+      { restaurantId: B.restaurantId, recipeId: bRecipe, productId: B.productId, quantity: '1', unit: 'ק״ג' },
+    ]);
+  });
+
+  afterAll(async () => {
+    await ownerDb.delete(recipeItems);
+    await ownerDb.delete(recipes);
+    await ownerDb.update(restaurants).set({ settings: {} }).where(eq(restaurants.id, A.restaurantId));
+  });
+
+  it('GUC=A sees only tenant-A recipes and lines; no GUC sees none', async () => {
+    const [r, l] = await withRestaurant(appDb, A.restaurantId, async (tx) => [
+      await tx.select({ rid: recipes.restaurantId }).from(recipes),
+      await tx.select({ rid: recipeItems.restaurantId }).from(recipeItems),
+    ]);
+    expect(r!.map((x) => x.rid)).toEqual([A.restaurantId]);
+    expect(l!.map((x) => x.rid)).toEqual([A.restaurantId]);
+    expect(await appDb.select({ id: recipes.id }).from(recipes)).toEqual([]);
+  });
+
+  it('blocks a cross-tenant recipe INSERT and UPDATE', async () => {
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) => tx.insert(recipes).values({ restaurantId: B.restaurantId, name: 'probe' })),
+    ).rejects.toThrow(/row-level security/);
+    const updated = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx.update(recipes).set({ name: 'pwned' }).where(eq(recipes.id, bRecipe)).returning({ id: recipes.id }),
+    );
+    expect(updated).toEqual([]);
+  });
+
+  it('recipes.list works through the app role once the flag is on (grants + GUC wiring)', async () => {
+    await ownerDb.update(restaurants).set({ settings: { features: { recipes: true } } as unknown as RestaurantSettings }).where(eq(restaurants.id, A.restaurantId));
+    const res = await callerFor(A, appDb).recipes.list();
+    expect(res.recipes.map((x) => x.name)).toEqual(['rls A dish']);
   });
 });
 

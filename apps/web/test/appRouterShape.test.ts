@@ -40,6 +40,7 @@ const ROUTER_KEYS = [
   'products',
   'receiverLangs',
   'receiving',
+  'recipes',
   'recovery',
   'scans',
   'search',

@@ -18,6 +18,7 @@ export const en: Shape<typeof he> = {
     catalog: 'Catalog',
     contracts: 'Contracts & alerts',
     orders: 'Orders',
+    recipes: 'Food cost',
     exports: 'Exports',
     team: 'Team',
     chain: 'Chain',

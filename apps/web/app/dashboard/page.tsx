@@ -38,6 +38,7 @@ import {
 import { views as viewsNs } from '@/lib/i18n/messages/views';
 import { PaginatedActivityFeed } from './activity';
 import { PriceAlertsTeaser } from './contracts/overview-card';
+import { RecipesOverviewCard } from './recipes/overview-card';
 import { displayName } from './approvals/vocab';
 
 export default async function DashboardPage({
@@ -240,6 +241,12 @@ export default async function DashboardPage({
 
       {/* Wave-1 price alerts teaser — renders nothing when off / no open alerts. */}
       <PriceAlertsTeaser />
+
+      {/* Wave 1 (flag `recipes`): food cost hit by this month's price rises. */}
+      {/* Off in TV mode: the wall screen refreshes every minute and the card sits under the overlay. */}
+      {!view.tv && canSeeRoute(role, '/dashboard/recipes') ? (
+        <RecipesOverviewCard />
+      ) : null}
 
       {/* Leak heatmap — the centerpiece data-viz. */}
       {leaksEntitlementBlocked ? (
