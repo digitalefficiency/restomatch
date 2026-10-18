@@ -203,6 +203,18 @@ async function validateItems(
   }
 }
 
+/**
+ * Serialise recipe writes per restaurant for the rest of the member transaction
+ * (S4 cross-QA R1). Two concurrent saves that would together close a sub-recipe
+ * cycle (X→Y while Y→X) otherwise both pass the cycle check on uncommitted edges
+ * and one dies in a Postgres deadlock (generic 500). Holding this transaction-scoped
+ * advisory lock first, the second save waits, then sees the committed edge and gets
+ * the friendly `recipes.cycle`. Released automatically at commit/rollback.
+ */
+async function lockRecipeWrites(db: Database, restaurantId: string): Promise<void> {
+  await db.execute(sql`select pg_advisory_xact_lock(hashtext(${`recipes:${restaurantId}`}))`);
+}
+
 async function writeRecipe(
   db: Database,
   restaurantId: string,
@@ -338,6 +350,7 @@ export const recipesRouter = router({
 
   /** Create (no id) or replace (id) a recipe and all its lines. */
   save: recipesProcedure.input(recipeInput).mutation(async ({ ctx, input }) => {
+    await lockRecipeWrites(ctx.db, ctx.session.restaurantId);
     const id = await writeRecipe(ctx.db, ctx.session.restaurantId, input);
     return { id };
   }),
@@ -524,6 +537,7 @@ export const recipesRouter = router({
     .input(z.object({ csv: z.string().max(200_000), dryRun: z.boolean().default(true) }))
     .mutation(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
+      await lockRecipeWrites(ctx.db, rid);
       const parsed = parseRecipeCsv(input.csv);
       if (parsed.fatal) return { ok: false as const, errors: [parsed.fatal], recipes: [] as Array<{ name: string; lines: number; action: 'create' | 'replace' }> };
       const prodRows = await ctx.db

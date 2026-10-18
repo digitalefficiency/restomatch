@@ -303,3 +303,29 @@ describe('recipes: refuter regressions', () => {
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 });
+
+describe('recipes: concurrent cycle saves (S4 cross-QA R1)', () => {
+  it('two simultaneous saves closing X→Y / Y→X: one wins, the other gets recipes.cycle (no deadlock 500)', async () => {
+    // Each caller runs in its own member transaction on the pooled connection.
+    const mk = (name: string) =>
+      caller().recipes.save({ name, isSubRecipe: true, yieldUnit: 'ק״ג', items: [{ productId: flour, quantity: '1', unit: 'ק״ג', wastePct: 0 }] });
+    for (let round = 0; round < 5; round++) {
+      const x = (await mk(`cx${round}`)).id;
+      const y = (await mk(`cy${round}`)).id;
+      const line = (sub: string) => ({ subRecipeId: sub, quantity: '100', unit: 'גרם', wastePct: 0 });
+      const results = await Promise.allSettled([
+        caller().recipes.save({ id: x, name: `cx${round}`, isSubRecipe: true, yieldUnit: 'ק״ג', items: [line(y)] }),
+        caller().recipes.save({ id: y, name: `cy${round}`, isSubRecipe: true, yieldUnit: 'ק״ג', items: [line(x)] }),
+      ]);
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      const rejected = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+      expect(rejected.reason).toMatchObject({ code: 'BAD_REQUEST', message: 'recipes.cycle' });
+    }
+    // The data stays acyclic: every recipe still costs (no `cycle` line anywhere).
+    const list = await caller().recipes.list();
+    for (const r of list.recipes.filter((r) => r.name.startsWith('cx') || r.name.startsWith('cy'))) {
+      const d = await caller().recipes.get({ id: r.id });
+      expect(d.items.every((i) => i.status !== 'cycle')).toBe(true);
+    }
+  });
+});
