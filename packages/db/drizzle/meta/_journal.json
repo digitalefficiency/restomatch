@@ -239,6 +239,20 @@
       "when": 1781940000000,
       "tag": "0039_invitation_locale",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1782030000000,
+      "tag": "0048_recovery",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1782040000000,
+      "tag": "0049_monthly_reports",
+      "breakpoints": true
     }
   ]
 }

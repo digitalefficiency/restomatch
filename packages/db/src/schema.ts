@@ -1,6 +1,8 @@
 import { relations, sql } from 'drizzle-orm';
 import {
+  bigint,
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -1618,3 +1620,132 @@ export type Lead = typeof leads.$inferSelect;
 export type NewLead = typeof leads.$inferInsert;
 export type DsrRequest = typeof dsrRequests.$inferSelect;
 export type NewDsrRequest = typeof dsrRequests.$inferInsert;
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Wave 1 · S12 — "₪ back" recovery tracker (0048) + monthly report (0049).
+ * Money is integer agorot (bigint, mode number — far below 2^53).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export const RECOVERY_STATUSES = [
+  'claimed',
+  'letter_sent',
+  'acknowledged',
+  'credited',
+  'recovered',
+  'disputed',
+  'written_off',
+] as const;
+export type RecoveryStatus = (typeof RECOVERY_STATUSES)[number];
+
+export const creditNotes = pgTable(
+  'credit_notes',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    supplierId: uuid('supplier_id')
+      .notNull()
+      .references(() => suppliers.id, { onDelete: 'cascade' }),
+    number: varchar('number', { length: 64 }),
+    amountAgorot: bigint('amount_agorot', { mode: 'number' }).notNull(),
+    issuedOn: date('issued_on').notNull(),
+    source: varchar('source', { length: 16 }).$type<'manual' | 'invoice_line'>().notNull().default('manual'),
+    invoiceLineId: uuid('invoice_line_id').references(() => invoiceLines.id, { onDelete: 'set null' }),
+    invoiceId: uuid('invoice_id').references(() => invoices.id, { onDelete: 'set null' }),
+    note: text('note'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('credit_notes_restaurant_idx').on(t.restaurantId, t.issuedOn),
+    index('credit_notes_supplier_idx').on(t.supplierId),
+    index('credit_notes_invoice_idx').on(t.invoiceId),
+    index('credit_notes_created_by_idx').on(t.createdBy),
+    uniqueIndex('credit_notes_invoice_line_unique')
+      .on(t.invoiceLineId)
+      .where(sql`${t.invoiceLineId} IS NOT NULL`),
+  ],
+);
+
+export const recoveryClaims = pgTable(
+  'recovery_claims',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    discrepancyId: uuid('discrepancy_id')
+      .notNull()
+      .references(() => discrepancies.id, { onDelete: 'cascade' }),
+    supplierId: uuid('supplier_id').references(() => suppliers.id, { onDelete: 'set null' }),
+    invoiceId: uuid('invoice_id').references(() => invoices.id, { onDelete: 'set null' }),
+    status: varchar('status', { length: 16 }).$type<RecoveryStatus>().notNull().default('claimed'),
+    amountAgorot: bigint('amount_agorot', { mode: 'number' }).notNull(),
+    creditedAgorot: bigint('credited_agorot', { mode: 'number' }).notNull().default(0),
+    creditNoteId: uuid('credit_note_id').references(() => creditNotes.id, { onDelete: 'set null' }),
+    claimedAt: timestamp('claimed_at', { withTimezone: true }).notNull().defaultNow(),
+    letterSentAt: timestamp('letter_sent_at', { withTimezone: true }),
+    acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
+    creditedAt: timestamp('credited_at', { withTimezone: true }),
+    recoveredAt: timestamp('recovered_at', { withTimezone: true }),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    lastReminderAt: timestamp('last_reminder_at', { withTimezone: true }),
+    note: text('note'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('recovery_claims_discrepancy_unique').on(t.discrepancyId),
+    index('recovery_claims_restaurant_status_idx').on(t.restaurantId, t.status, t.claimedAt),
+    index('recovery_claims_supplier_idx').on(t.supplierId),
+    index('recovery_claims_credit_note_idx').on(t.creditNoteId),
+    index('recovery_claims_invoice_idx').on(t.invoiceId),
+    index('recovery_claims_created_by_idx').on(t.createdBy),
+  ],
+);
+
+export const recoveryEvents = pgTable(
+  'recovery_events',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    claimId: uuid('claim_id')
+      .notNull()
+      .references(() => recoveryClaims.id, { onDelete: 'cascade' }),
+    fromStatus: varchar('from_status', { length: 16 }).$type<RecoveryStatus>(),
+    toStatus: varchar('to_status', { length: 16 }).$type<RecoveryStatus>().notNull(),
+    amountAgorot: bigint('amount_agorot', { mode: 'number' }),
+    actorId: uuid('actor_id').references(() => users.id, { onDelete: 'set null' }),
+    note: text('note'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('recovery_events_claim_idx').on(t.claimId, t.createdAt),
+    index('recovery_events_restaurant_idx').on(t.restaurantId, t.createdAt),
+    index('recovery_events_actor_idx').on(t.actorId),
+  ],
+);
+
+export const monthlyReports = pgTable(
+  'monthly_reports',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    /** First day of the reported local month (YYYY-MM-01). */
+    month: date('month').notNull(),
+    snapshot: jsonb('snapshot').$type<Record<string, unknown>>().notNull(),
+    generatedAt: timestamp('generated_at', { withTimezone: true }).notNull().defaultNow(),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+  },
+  (t) => [uniqueIndex('monthly_reports_restaurant_month_unique').on(t.restaurantId, t.month)],
+);
+
+export type CreditNote = typeof creditNotes.$inferSelect;
+export type RecoveryClaim = typeof recoveryClaims.$inferSelect;
+export type RecoveryEvent = typeof recoveryEvents.$inferSelect;
+export type MonthlyReport = typeof monthlyReports.$inferSelect;

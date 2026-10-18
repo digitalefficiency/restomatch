@@ -1,0 +1,23 @@
+-- 0049_monthly_reports (S12, wave 1 — flag `monthlyReport`)
+--
+-- The monthly "one number" report, frozen when the worker generates it on the
+-- 1st of the month (so the email, the WhatsApp text and the PDF the owner
+-- downloads later all show the same figures even if invoices are edited after).
+--
+--   monthly_reports – one row per (restaurant, month). `month` = first day of the
+--                     reported local month. `snapshot` = the computed report
+--                     (integer agorot inside). `sent_at` = when the outbox rows
+--                     were enqueued (NULL = generated but not sent, e.g. preview).
+--
+-- Tenant table (restaurant_id) → listed in rls/0002. Additive only.
+-- Hand-written (drizzle-kit generate is broken in this repo).
+CREATE TABLE IF NOT EXISTS "monthly_reports" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE CASCADE,
+  "month" date NOT NULL,
+  "snapshot" jsonb NOT NULL,
+  "generated_at" timestamp with time zone DEFAULT now() NOT NULL,
+  "sent_at" timestamp with time zone,
+  CONSTRAINT "monthly_reports_month_first_day_check" CHECK (extract(day from "month") = 1)
+);--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "monthly_reports_restaurant_month_unique" ON "monthly_reports" ("restaurant_id", "month");
