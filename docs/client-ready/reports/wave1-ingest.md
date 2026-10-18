@@ -122,14 +122,17 @@ with the demo tenant for the app) and local Redis. Nothing touched production.
 export DATABASE_URL_TEST=postgres://postgres:postgres@localhost:5432/restomatch_s13_scratch
 pnpm install --frozen-lockfile                                   # ok
 pnpm --filter @restomatch/db migrate                             # through 0051, clean
-pnpm exec turbo run test --concurrency=1                         # 14/14 tasks — 1152 passed, 1 skipped
-#   ingest 21 · db 65 (incl. migration-0050 6, upgrade-path + doctor: no FAIL/WARN) · api 532
-#   (incl. ingest.attack 26, cross-tenant.attack 108) · web 207 · translate 69 · ocr 44 · matching 86 (canary unchanged)
-#   catalog 50 · charts 33 · procurement 17 · crypto 12 · billing 5 · worker 11 (+1 skipped)
+# Final gate on the MERGED head (origin/claude/client-ready merged in, rls/*.sql untouched):
+pnpm exec turbo run test --concurrency=1                         # 14/14 tasks — 1266 passed, 1 skipped
+#   ingest 21 · db 70 (incl. migration-0050 7: RLS on all 4 tables; upgrade-path + doctor: no FAIL/WARN)
+#   api 566 (incl. ingest.attack 26, cross-tenant.attack with 9 ingest COVERAGE entries) · web 251
+#   translate 69 · ocr 44 · matching 86 (canary unchanged) · charts 64 · catalog 50 · procurement 17 · crypto 12
+#   billing 5 · worker 11 (+1 skipped)
+pnpm --filter @restomatch/db check-rls                           # OK — every restaurant_id table has RLS
 pnpm exec turbo run typecheck                                    # 18/18
 pnpm --filter @restomatch/web exec tsc --noEmit -p .             # 0 errors
-pnpm --filter @restomatch/web lint                               # 0 errors (6 pre-existing warnings, none in S13 files)
-pnpm db:supabase-sync --check                                    # up to date (42 files)
+pnpm --filter @restomatch/web lint                               # 0 errors (9 warnings, none in S13 files)
+pnpm db:supabase-sync --check                                    # up to date (44 files)
 cd apps/web && pnpm build                                        # success — /api/ingest/*, /dashboard/inbox, /receiver-sw.js built
 ```
 
@@ -154,6 +157,12 @@ PHASE=dev  pnpm exec tsx scripts/e2e-ingest-pwa.ts     # PASS (dev): 21 checks
 pnpm build && NODE_ENV=production pnpm start &
 PHASE=prod pnpm exec tsx scripts/e2e-ingest-pwa.ts     # PASS (prod): 140 checks
 ```
+
+Both phases were re-run on the merged head: dev 21/21, prod 140/140. **One observation:** on the first prod run
+after the merge, a React #418 hydration error was logged once during the bookkeeper/he pass (`/dashboard` →
+`/dashboard/inbox`). It did not reproduce in a targeted run of the same pages (bookkeeper + owner), nor in a full
+re-run. The inbox formats dates with the fixed `Asia/Jerusalem` timezone (`lib/i18n/format`), so it does not depend
+on the server/client timezone. I could not tie it to S13 code, and I flag it for the orchestrator's cross-QA.
 
 - **Production phase.** It covers every role × he/en, which is 10 runs (owner, manager, bookkeeper, receiver, chef):
   - HTTP below 400 everywhere;
