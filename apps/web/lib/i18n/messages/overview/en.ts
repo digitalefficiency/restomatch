@@ -18,7 +18,7 @@ export const en: Shape<typeof he> = {
     invoices: 'Invoices with a discrepancy',
     invoicesValue: '{withLeak} of {total}',
     drill: 'What is behind this number',
-    pending: '{count} invoices ({amount}) are waiting to be linked to an order — probably consolidated invoices. They are not counted as a leak.',
+    pending: '{count} invoices ({amount}) are waiting to be linked to an order — probably consolidated invoices. They are counted in neither the leak nor the spend.',
     lastMonth: 'Last month: {amount}',
     target: 'Target: 1.5% of spend',
     clean: 'No leak this month — every matched invoice agrees with its order and goods receipt.',

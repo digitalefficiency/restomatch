@@ -14,7 +14,9 @@ import { sql, type Database } from '@restomatch/db';
  *    calmly as "waiting for a PO link", never as a false alarm).
  *  • Per invoice the leak is capped at the invoice total: you cannot lose more
  *    on an invoice than the invoice itself (stacked DUPLICATE + line findings).
- *  • Spend = Σ invoices.total_excl_vat for the month (food spend, pre-VAT).
+ *  • Spend = Σ total_excl_vat of the month's CHECKED invoices (matched to a PO),
+ *    so "% of spend" is leak ÷ the spend it was measured on. Invoices not yet
+ *    linked to a PO (unmatched / consolidated) are "pending": in neither.
  *  • Caught before payment = leak on invoices not yet marked paid.
  *  • Recovered = the part of the leak the team accepted as a claim
  *    (resolution accepted/resolved) — same cap.
@@ -33,7 +35,7 @@ export interface LeakHero {
   invoiceCount: number;
   matchedInvoiceCount: number;
   invoicesWithLeak: number;
-  /** Invoices waiting for a PO link (consolidated / unordered) — NOT in the leak. */
+  /** Invoices waiting for a PO link (unmatched / consolidated / unordered) — in neither leak nor spend. */
   pendingLinkCount: number;
   pendingLinkIls: number;
 }
@@ -71,16 +73,21 @@ function monthInvoicesCte(restaurantId: string, now: Date, offset: number) {
         inv.id,
         inv.status,
         COALESCE(inv.total_incl_vat, 0) AS total,
+        COALESCE(inv.total_excl_vat, 0) AS total_excl,
         bool_or(mr.id IS NOT NULL) AS matched,
         COALESCE(SUM(ABS(d.delta_amount)) FILTER (WHERE ${LEAK_FILTER}), 0) AS raw_leak,
         COALESCE(SUM(ABS(d.delta_amount)) FILTER (
           WHERE ${LEAK_FILTER} AND d.resolution_status IN ('accepted','resolved')
         ), 0) AS raw_recovered,
-        COALESCE(bool_or(d.type = 'UNORDERED_ARRIVAL' AND d.resolution_status IN ('open','escalated')), false) AS pending_link
+        -- Pending = no PO link yet: an UNORDERED_ARRIVAL still open, or not matched
+        -- at all (e.g. a parsed consolidated invoice waiting to be linked).
+        (NOT bool_or(mr.id IS NOT NULL))
+          OR COALESCE(bool_or(d.type = 'UNORDERED_ARRIVAL' AND d.resolution_status IN ('open','escalated')), false)
+          AS pending_link
       FROM inv
       LEFT JOIN match_runs mr ON mr.invoice_id = inv.id AND mr.restaurant_id = ${restaurantId}
       LEFT JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${restaurantId}
-      GROUP BY inv.id, inv.status, inv.total_incl_vat
+      GROUP BY inv.id, inv.status, inv.total_incl_vat, inv.total_excl_vat
     )`;
 }
 
@@ -103,7 +110,7 @@ export async function computeLeakHero(
     SELECT
       (SELECT lo FROM b) AS lo,
       (SELECT hi FROM b) AS hi,
-      (SELECT COALESCE(SUM(total_excl_vat), 0) FROM inv) AS spend,
+      COALESCE(SUM(total_excl) FILTER (WHERE NOT pending_link), 0) AS spend,
       (SELECT COUNT(*) FROM inv) AS invoice_count,
       COUNT(*) FILTER (WHERE matched) AS matched_count,
       COALESCE(SUM(LEAST(raw_leak, total)), 0) AS leak,

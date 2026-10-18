@@ -14,3 +14,12 @@ export {
   type LeakHero,
   type LeakHeroOptions,
 } from './leak-hero';
+export {
+  computeLeakReport,
+  parseReportMonth,
+  type LeakReport,
+  type LeakReportPriceCreepRow,
+  type LeakReportStatus,
+  type LeakReportSupplierRow,
+  type LeakReportTypeRow,
+} from './leak-report';
