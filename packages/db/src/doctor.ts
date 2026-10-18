@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import postgres from 'postgres';
 import { INTEGRITY_CHECKS } from './integrityChecks';
 import { migrationHash, migrationsDir, readJournal, REQUIRED_EXTENSIONS, type JournalEntry } from './migrations';
@@ -604,9 +606,40 @@ export async function runDoctor(url: string, opts: DoctorOptions = {}): Promise<
           order by 1`) as unknown as Array<{ t: string }>;
         add('constraints', 'updated_at triggers', noTrg.length ? 'WARN' : 'PASS',
           noTrg.length ? `no set_updated_at trigger on: ${noTrg.map((r) => r.t).join(', ')} (re-run 0031's DO block)` : 'every updated_at column is maintained by trigger');
+      } else if (applied.some((a) => a.tag === '0031_updated_at_triggers')) {
+        add('constraints', 'updated_at triggers', 'WARN', 'set_updated_at() is MISSING although 0031 is recorded as applied (schema drift — re-run packages/db/drizzle/0031_updated_at_triggers.sql)');
       } else {
         add('constraints', 'updated_at triggers', 'SKIP', 'set_updated_at() not installed yet (0031 pending)');
       }
+
+      // Schema drift: objects a migration created must still exist if the tracker
+      // says it is applied (catches hand-run undo SQL / partial restores).
+      const appliedTags = new Set(applied.map((a) => a.tag));
+      const expectIdx: string[] = [];
+      if (appliedTags.has('0029_tenant_scoped_uniques')) expectIdx.push('po_restaurant_source_ref_unique', 'suppliers_restaurant_external_ref_unique');
+      if (appliedTags.has('0030_fk_indexes')) {
+        try {
+          const sql0030 = readFileSync(join(dir, '0030_fk_indexes.sql'), 'utf8');
+          expectIdx.push(...[...sql0030.matchAll(/CREATE INDEX IF NOT EXISTS "([a-z_]+)"/g)].map((m) => m[1]!));
+        } catch {
+          /* file missing in this checkout — skip */
+        }
+      }
+      const haveIdx = new Set(
+        ((await tx`select indexname from pg_indexes where schemaname = 'public'`) as unknown as Array<{ indexname: string }>).map((r) => r.indexname),
+      );
+      const haveCon = new Set(
+        ((await tx`select conname from pg_constraint where connamespace = 'public'::regnamespace`) as unknown as Array<{ conname: string }>).map((r) => r.conname),
+      );
+      const missing = [
+        ...expectIdx.filter((i) => !haveIdx.has(i)).map((i) => `index ${i}`),
+        ...(appliedTags.has('0032_integrity_checks') ? INTEGRITY_CHECKS.filter((c) => !haveCon.has(c.name)).map((c) => `check ${c.name}`) : []),
+      ];
+      const legacy = ['po_source_ref_unique', 'suppliers_external_ref_unique'].filter((i) => appliedTags.has('0029_tenant_scoped_uniques') && haveIdx.has(i));
+      add('constraints', 'applied migrations intact', missing.length + legacy.length ? 'WARN' : 'PASS',
+        missing.length + legacy.length
+          ? `schema drift vs the tracker — missing: ${missing.join(', ') || '—'}${legacy.length ? `; global uniques back (I5): ${legacy.join(', ')}` : ''} (re-run the migration's SQL)`
+          : 'every object from 0029/0030/0032 present');
 
       // ── 10. Supabase storage ────────────────────────────────────────────
       const [storage] = await tx`select to_regclass('storage.buckets') is not null as e`;

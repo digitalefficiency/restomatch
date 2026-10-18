@@ -194,16 +194,29 @@ export L=postgres://postgres:postgres@localhost:5432/rm_move
 DATABASE_URL=$L pnpm --filter @restomatch/db repair-preconditions --apply
 DATABASE_URL=$L pnpm db:migrate
 DATABASE_URL=$L pnpm db:doctor
+#    The doctor must show no FAIL and no "NOT VALID" constraint. 0032 leaves a CHECK
+#    NOT VALID on the old rows that violate it, but the new project VALIDATES every CHECK,
+#    and CHECKs apply even in replica mode, so the load would abort on those rows.
+#    Fix the rows it lists, then validate, e.g.:
+#      psql "$L" -c "update gr_lines set qty_received = 0 where qty_received < 0" \
+#                -c "alter table gr_lines validate constraint gr_lines_qty_received_nonneg"
 
 # 3. Dump only public data (no schema, no drizzle/supabase trackers)
 pg_dump --data-only --schema=public --no-owner "$L" -f data.sql
 
-# 4. Load into the NEW project BEFORE any traffic (FKs/triggers off for the load)
-psql "$NEW_DIRECT" -v ON_ERROR_STOP=1 -1 -c "set session_replication_role = replica" -f data.sql
+# 4. Load into the NEW project BEFORE any traffic (FKs/triggers off for the load).
+#    Migration 0033 already put the plan catalog there; old prod's plans rows carry the
+#    ids its subscriptions point at, so replace the catalog with them (same keys) in the
+#    same transaction.
+psql "$NEW_DIRECT" -v ON_ERROR_STOP=1 -1 -c "set session_replication_role = replica" \
+  -c "truncate plans cascade" -f data.sql
 DATABASE_URL="$NEW_DIRECT" pnpm db:doctor
 ```
 
 - ⚠️ This assumes `postgres` on Supabase may set `session_replication_role`.
+- **Rehearsed locally (client-ready QA)** on an old-0018 copy holding realistic rows plus every guarded edge case: NULL-tenant scan, cross-tenant product, duplicate receipt, VAT 0.17, a negative quantity, a plan catalog and a subscription.
+  - Without the two fixes above, the load fails on `plans_key_unique` and then on `gr_lines_qty_received_nonneg`.
+  - With them, it loads, the subscription keeps its plan, VAT is 0.18, and the doctor reports 0 FAIL with 14 clean cross-tenant checks.
 - Invoice **files** live in Storage, not in the dump. Copy the `invoice-scans` objects too (Supabase dashboard or a storage-API script), or old scans will show as missing.
 - Users keep their passwords and 2FA: `user_credentials` is part of the data. Sessions survive only if `AUTH_SECRET` stays the same.
 
