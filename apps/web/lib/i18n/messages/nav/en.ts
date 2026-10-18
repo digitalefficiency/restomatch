@@ -22,13 +22,6 @@ export const en: Shape<typeof he> = {
     purchasing: 'Purchasing',
     admin: 'Admin',
   },
-  roles: {
-    owner: 'Owner',
-    manager: 'Manager',
-    receiver: 'Receiver',
-    bookkeeper: 'Bookkeeper',
-    chef: 'Chef',
-  },
   menu: {
     open: 'Open menu',
     close: 'Close menu',

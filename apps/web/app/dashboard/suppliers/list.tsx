@@ -57,7 +57,7 @@ export function SuppliersList({ initial }: { initial: Scorecard[] }) {
                   href={`/dashboard/suppliers/${s.supplierId}`}
                   className="truncate text-lg font-bold tracking-tight text-ink underline-offset-4 hover:text-primary hover:underline"
                 >
-                  {s.supplierName}
+                  {locale === 'en' && s.supplierNameEn ? s.supplierNameEn : s.supplierName}
                 </Link>
                 <p className="mt-1 text-xs tabular-nums text-subtle">
                   {t('scores.runs', { count: formatNumber(s.matchRunsCount, locale) })}

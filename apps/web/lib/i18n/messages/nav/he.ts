@@ -23,13 +23,6 @@ export const he = {
     purchasing: 'רכש',
     admin: 'ניהול',
   },
-  roles: {
-    owner: 'בעלים',
-    manager: 'מנהל/ת',
-    receiver: 'מקבל סחורה',
-    bookkeeper: 'חשב/ת',
-    chef: 'שף',
-  },
   menu: {
     open: 'פתיחת תפריט',
     close: 'סגירת תפריט',

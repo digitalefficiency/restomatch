@@ -15,6 +15,8 @@ import {
 export interface SupplierScorecard {
   supplierId: string;
   supplierName: string;
+  /** English display name (0028) — null when not translated yet. */
+  supplierNameEn: string | null;
   matchRunsCount: number;
   cleanMatchPct: number;
   avgPriceDeltaPct: number;
@@ -36,7 +38,7 @@ export async function computeSupplierScorecards(
   const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
 
   const supplierRows = await db
-    .select({ id: suppliers.id, name: suppliers.name })
+    .select({ id: suppliers.id, name: suppliers.name, nameEn: suppliers.nameEn })
     .from(suppliers)
     .where(eq(suppliers.restaurantId, restaurantId));
 
@@ -131,6 +133,7 @@ export async function computeSupplierScorecards(
     scorecards.push({
       supplierId: s.id,
       supplierName: s.name,
+      supplierNameEn: s.nameEn ?? null,
       matchRunsCount: total,
       cleanMatchPct,
       avgPriceDeltaPct,

@@ -13,8 +13,24 @@ import {
 } from '@restomatch/db';
 import type { AppContext, MemberSession } from './context';
 import { getEntitlements } from './entitlements';
+import { resolveAppError } from './errors';
 
-const t = initTRPC.context<AppContext>().create({ transformer: superjson });
+const t = initTRPC.context<AppContext>().create({
+  transformer: superjson,
+  // Expose a stable machine code (`data.appCode`, see errors.ts) so clients
+  // translate errors by code, never by matching the (Hebrew) message text.
+  errorFormatter({ shape, error }) {
+    const resolved = resolveAppError(error);
+    return {
+      ...shape,
+      data: {
+        ...shape.data,
+        appCode: resolved?.appCode ?? null,
+        appParams: resolved?.appParams ?? null,
+      },
+    };
+  },
+});
 
 /** Report procedure errors to observability (no-op until a client is registered). */
 const errorCapture = t.middleware(async ({ next, path, type }) => {

@@ -1,18 +1,16 @@
 import { redirect } from 'next/navigation';
 import { LogOut } from 'lucide-react';
-import type { UserRole } from '@restomatch/db';
 import { auth, signOut } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
 import { ToastProvider } from '@/lib/components';
-import { getT } from '@/lib/i18n/server';
+import { getLocale, getT } from '@/lib/i18n/server';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { nav } from '@/lib/i18n/messages/nav';
+import { labelForRole } from '@/lib/roles';
 import { LocaleSync } from './locale-sync';
 import { DesktopNav, MobileNav } from './nav';
 import { DashboardSearch } from './search';
 import { WorkerStatusBanner } from './worker-status';
-
-const ROLES: UserRole[] = ['owner', 'manager', 'receiver', 'bookkeeper', 'chef'];
 
 /**
  * Dashboard app shell. Sticky frosted header: restaurant + user on the start
@@ -36,8 +34,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const active =
     memberships.find((m) => m.restaurantId === session.user.restaurantId) ?? memberships[0]!;
-  const t = await getT(nav);
-  const roleLabel = ROLES.includes(active.role) ? t(`roles.${active.role}`) : active.role;
+  const [t, locale] = await Promise.all([getT(nav), getLocale()]);
+  const roleLabel = labelForRole(active.role, locale);
   const email = session.user.email ?? '';
 
   async function logout() {

@@ -62,7 +62,7 @@ const timezoneSchema = z
         return false;
       }
     },
-    { message: 'אזור זמן לא תקין' },
+    { message: 'אזור זמן לא תקין', params: { appCode: 'settings.invalidTimezone' } },
   );
 
 /** Restaurant profile patch. vatRate is a fraction (0.17 = 17%). businessId
@@ -75,7 +75,7 @@ const ProfileUpdateInput = z
     timezone: timezoneSchema.optional(),
   })
   .strict()
-  .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'אין שינויים לעדכן' });
+  .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'אין שינויים לעדכן', params: { appCode: 'settings.noChanges' } });
 
 /** Drop undefined leaf values so a partial patch never blanks an existing knob. */
 function pruneUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {

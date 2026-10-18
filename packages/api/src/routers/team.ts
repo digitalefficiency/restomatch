@@ -1,5 +1,4 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { TRPCError } from '@trpc/server';
 import {
   and,
   count,
@@ -14,6 +13,7 @@ import {
 import { z } from 'zod';
 import { canonicalizeEmail } from '../email';
 import { recordAudit } from '../audit';
+import { appError } from '../errors';
 import type { MemberContext } from '../context';
 import { managerProcedure, ownerProcedure, router, userScopedProcedure } from '../trpc';
 
@@ -139,7 +139,7 @@ export const teamRouter = router({
         .innerJoin(users, eq(users.id, memberships.userId))
         .where(eq(memberships.restaurantId, ctx.session.restaurantId));
       if (memberEmails.some((u) => canonicalizeEmail(u.email) === canon)) {
-        throw new TRPCError({ code: 'CONFLICT', message: 'המשתמש כבר חבר בצוות.' });
+        throw appError('CONFLICT', 'team.alreadyMember', 'המשתמש כבר חבר בצוות.');
       }
 
       // Guard: an existing pending invite (the partial unique index is the hard
@@ -156,7 +156,7 @@ export const teamRouter = router({
         )
         .limit(1);
       if (pending) {
-        throw new TRPCError({ code: 'CONFLICT', message: 'כבר קיימת הזמנה ממתינה לכתובת הזו.' });
+        throw appError('CONFLICT', 'team.pendingInvite', 'כבר קיימת הזמנה ממתינה לכתובת הזו.');
       }
 
       const rawToken = generateRawToken();
@@ -172,7 +172,7 @@ export const teamRouter = router({
         });
       } catch (err) {
         if (isUniqueViolation(err)) {
-          throw new TRPCError({ code: 'CONFLICT', message: 'כבר קיימת הזמנה ממתינה לכתובת הזו.' });
+          throw appError('CONFLICT', 'team.pendingInvite', 'כבר קיימת הזמנה ממתינה לכתובת הזו.');
         }
         throw err;
       }
@@ -219,9 +219,9 @@ export const teamRouter = router({
           and(eq(invitations.id, input.id), eq(invitations.restaurantId, ctx.session.restaurantId)),
         )
         .limit(1);
-      if (!inv) throw new TRPCError({ code: 'NOT_FOUND', message: 'ההזמנה לא נמצאה.' });
+      if (!inv) throw appError('NOT_FOUND', 'team.inviteNotFound', 'ההזמנה לא נמצאה.');
       if (inv.status !== 'pending') {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'אפשר לשלוח שוב רק הזמנה ממתינה.' });
+        throw appError('BAD_REQUEST', 'team.resendPendingOnly', 'אפשר לשלוח שוב רק הזמנה ממתינה.');
       }
 
       const rawToken = generateRawToken();
@@ -307,11 +307,11 @@ export const teamRouter = router({
           ),
         );
       if (current.length === 0) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'החבר לא נמצא.' });
+        throw appError('NOT_FOUND', 'team.memberNotFound', 'החבר לא נמצא.');
       }
       const wasOwner = current.some((r) => r.role === 'owner');
       if (wasOwner && input.role !== 'owner' && (await ownerCount(ctx)) <= 1) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'חייב להישאר לפחות בעלים אחד.' });
+        throw appError('BAD_REQUEST', 'team.lastOwner', 'חייב להישאר לפחות בעלים אחד.');
       }
 
       // Collapse to the single chosen role.
@@ -357,7 +357,7 @@ export const teamRouter = router({
         );
       if (roles.length === 0) return { ok: true }; // idempotent
       if (roles.some((r) => r.role === 'owner') && (await ownerCount(ctx)) <= 1) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'חייב להישאר לפחות בעלים אחד.' });
+        throw appError('BAD_REQUEST', 'team.lastOwner', 'חייב להישאר לפחות בעלים אחד.');
       }
       await ctx.db
         .delete(memberships)
@@ -393,16 +393,16 @@ export const teamRouter = router({
         .from(invitations)
         .where(eq(invitations.tokenHash, hashToken(input.token)))
         .limit(1);
-      if (!inv) throw new TRPCError({ code: 'NOT_FOUND', message: 'ההזמנה לא נמצאה.' });
+      if (!inv) throw appError('NOT_FOUND', 'team.inviteNotFound', 'ההזמנה לא נמצאה.');
       if (inv.status !== 'pending') {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'ההזמנה כבר נוצלה או בוטלה.' });
+        throw appError('BAD_REQUEST', 'team.inviteUsed', 'ההזמנה כבר נוצלה או בוטלה.');
       }
       if (inv.expiresAt.getTime() <= Date.now()) {
         await adminDb
           .update(invitations)
           .set({ status: 'expired', updatedAt: new Date() })
           .where(eq(invitations.id, inv.id));
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'תוקף ההזמנה פג.' });
+        throw appError('BAD_REQUEST', 'team.inviteExpired', 'תוקף ההזמנה פג.');
       }
 
       const [user] = await adminDb
@@ -410,13 +410,14 @@ export const teamRouter = router({
         .from(users)
         .where(eq(users.id, ctx.session.userId))
         .limit(1);
-      if (!user) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'המשתמש לא נמצא.' });
+      if (!user) throw appError('UNAUTHORIZED', 'team.userNotFound', 'המשתמש לא נמצא.');
       // Anti-hijack: the invite is bound to the address it was sent to.
       if (canonicalizeEmail(user.email) !== canonicalizeEmail(inv.email)) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'ההזמנה נשלחה לכתובת מייל אחרת. התחברו עם הכתובת שאליה נשלחה ההזמנה.',
-        });
+        throw appError(
+          'FORBIDDEN',
+          'team.inviteWrongEmail',
+          'ההזמנה נשלחה לכתובת מייל אחרת. התחברו עם הכתובת שאליה נשלחה ההזמנה.',
+        );
       }
 
       // Role from the invitation only — never from client input. Single-use:
@@ -480,7 +481,7 @@ export const teamRouter = router({
         )
         .returning({ userId: memberships.userId });
       if (updated.length === 0) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'החבר לא נמצא.' });
+        throw appError('NOT_FOUND', 'team.memberNotFound', 'החבר לא נמצא.');
       }
       await recordAudit(ctx.db, {
         restaurantId: ctx.session.restaurantId,
