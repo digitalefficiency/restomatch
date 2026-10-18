@@ -35,7 +35,7 @@ export async function LeakExplorer({ view }: { view: ViewState }) {
     caller.owner.viewOptions(),
   ]);
   const cur = summary.current;
-  const prev = summary.previous;
+  const prev = summary.previous && summary.previous.invoiceCount > 0 ? summary.previous : null;
   const ils = (v: number) => formatIls(v, { locale });
 
   const labelOf = (key: string, label: string | null, labelEn: string | null) => {

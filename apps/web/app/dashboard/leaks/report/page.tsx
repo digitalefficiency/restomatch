@@ -178,7 +178,7 @@ export default async function LeakReportPage({
               </p>
             ) : null}
             <p className="mt-1 text-xs text-subtle">{t('report.target')}</p>
-            {previous ? (
+            {previous && previous.hero.invoiceCount > 0 ? (
               <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
                 <DeltaBadge current={hero.leakIls} previous={previous.hero.leakIls} compare={view.compare} showAmount />
                 <DeltaBadge current={hero.spendIls} previous={previous.hero.spendIls} compare={view.compare} neutral />

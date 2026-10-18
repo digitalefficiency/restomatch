@@ -73,6 +73,8 @@ export default async function DashboardPage({
     canDrill ? caller.owner.viewOptions() : Promise.resolve(null),
   ]);
   const hero = summary.current;
+  // A comparison period with no invoices has nothing to compare against.
+  const previous = summary.previous && summary.previous.invoiceCount > 0 ? summary.previous : null;
 
   // Leak grid is owner-only; other roles simply won't see this section. If the
   // feature is gated behind a paid plan, surface a compact upsell teaser rather
@@ -95,11 +97,13 @@ export default async function DashboardPage({
   // Drill-down keeps the period + filters (not the display-only controls).
   const drillQuery = serializeView({ ...DEFAULT_VIEW, period: view.period, from: view.from, to: view.to, filters: view.filters }).toString();
   const trendRows =
-    trend?.points.map((p, i) => ({
+    trend?.points.map((p) => ({
       key: p.bucketStart,
       label: bucketLabel(trend.bucket, p.bucketStart, locale),
       value: p.leakIls,
-      previous: trend.previous ? (trend.previous[i]?.leakIls ?? 0) : null,
+      // Trend points are sparse (days/months with invoices), so a per-point
+      // comparison can't be aligned honestly; the period delta lives on the hero.
+      previous: null,
       spend: p.spendIls,
     })) ?? [];
   const cleanMatchHealthy = kpis.weekCleanMatchPct >= 80;
@@ -156,13 +160,16 @@ export default async function DashboardPage({
         ils={ils}
         monthLabel={monthLabel}
         canDrill={canDrill}
+        leakedLabel={view.period === 'this_month' ? t('hero.leakedLabel') : tv('kpis.leak')}
         drillHref={drillQuery ? `/dashboard/leaks/breakdown?${drillQuery}` : '/dashboard/leaks/breakdown'}
         lastMonthLeak={lastMonth && lastMonth.invoiceCount > 0 ? lastMonth.leakIls : null}
         delta={
-          summary.previous ? (
+          view.compare !== 'off' ? (
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-              <DeltaBadge current={hero.leakIls} previous={summary.previous.leakIls} compare={view.compare} showAmount />
-              <DeltaBadge current={hero.spendIls} previous={summary.previous.spendIls} compare={view.compare} neutral />
+              <DeltaBadge current={hero.leakIls} previous={previous?.leakIls} compare={view.compare} showAmount />
+              {previous ? (
+                <DeltaBadge current={hero.spendIls} previous={previous.spendIls} compare={view.compare} neutral />
+              ) : null}
             </div>
           ) : null
         }
@@ -178,9 +185,8 @@ export default async function DashboardPage({
           />
           <BreakdownChart
             rows={trendRows}
-            chart={view.chart === 'bar' ? 'line' : view.chart}
+            chart={view.chart}
             density={view.density}
-            compare={view.compare}
             caption={tv('trend.title')}
             keyHeader={tv('trend.colBucket')}
             valueHeader={tv('trend.colLeak')}
@@ -272,6 +278,7 @@ function LeakHero({
   ils,
   monthLabel,
   canDrill,
+  leakedLabel,
   drillHref,
   lastMonthLeak,
   delta,
@@ -284,6 +291,7 @@ function LeakHero({
   monthLabel: string;
   /** Finance roles may open the drill-down (owner.leakBreakdown is owner/manager/bookkeeper). */
   canDrill: boolean;
+  leakedLabel: string;
   drillHref: string;
   lastMonthLeak: number | null;
   /** ▲/▼ against the comparison period (view controls). */
@@ -310,7 +318,7 @@ function LeakHero({
       <div className="mt-3 grid gap-6 lg:grid-cols-[1.4fr_1fr] lg:items-end">
         <div className="min-w-0">
           <h2 id="leak-hero-label" className="text-sm font-semibold text-muted">
-            {t('hero.leakedLabel')}
+            {leakedLabel}
           </h2>
           <p
             className={`mt-1 font-mono text-5xl font-extrabold tabular-nums tracking-tight sm:text-6xl ${hasLeak ? 'text-danger' : 'text-primary'}`}

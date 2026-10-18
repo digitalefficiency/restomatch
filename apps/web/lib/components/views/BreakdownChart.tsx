@@ -159,8 +159,8 @@ function LineFace({
   ils: (v: number) => string;
   compare: Compare;
 }) {
-  const W = 640;
-  const H = 200;
+  const W = 900;
+  const H = 220;
   const PAD = 24;
   const n = rows.length;
   const x = (i: number) => (n === 1 ? W / 2 : PAD + (i * (W - 2 * PAD)) / (n - 1));
@@ -175,7 +175,7 @@ function LineFace({
     <figure>
       <figcaption className="sr-only">{caption}</figcaption>
       {/* The SVG is direction-neutral; in RTL we mirror it so time runs right → left. */}
-      <svg viewBox={`0 0 ${W} ${H + 18}`} className="h-auto w-full rtl:-scale-x-100" role="img" aria-label={caption}>
+      <svg viewBox={`0 0 ${W} ${H + 18}`} className="h-auto max-h-72 w-full rtl:-scale-x-100" role="img" aria-label={caption}>
         <line x1={PAD} x2={W - PAD} y1={H - PAD} y2={H - PAD} className="stroke-line" strokeWidth="1" />
         {showPrev ? (
           <path d={path(prev)} fill="none" className="stroke-muted" strokeOpacity="0.5" strokeWidth="1.5" strokeDasharray="4 4" />
