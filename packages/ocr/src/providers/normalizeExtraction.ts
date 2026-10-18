@@ -83,8 +83,11 @@ function repairLine(line: unknown): Record<string, unknown> | undefined {
   if (repaired) l.confidence = Math.min(c ?? LOW_CONFIDENCE, LOW_CONFIDENCE);
   else if (c === undefined) delete l.confidence;
   else l.confidence = Math.max(0, Math.min(1, c));
-  const vat = num(l.vatRate);
-  if (vat === undefined) delete l.vatRate;
+  // vat_rate is NUMERIC(5,4) (a fraction, 0.18). Models sometimes answer in
+  // percent (18), which overflows the column and fails the whole OCR job.
+  let vat = num(l.vatRate);
+  if (vat !== undefined && vat > 1 && vat <= 100) vat = round(vat / 100, 4);
+  if (vat === undefined || vat < 0 || vat >= 1) delete l.vatRate;
   else l.vatRate = vat;
   return l;
 }
