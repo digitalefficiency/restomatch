@@ -124,3 +124,10 @@
     -webkit-backdrop-filter: saturate(140%) blur(14px);
   }
 }
+
+/* S2 (english-receiving): the base `html { direction: rtl }` above overrode the
+   locale's <html dir="ltr">, so every English page rendered right-to-left.
+   Follow the dir attribute set by the root layout. */
+html[dir='ltr'] {
+  direction: ltr;
+}

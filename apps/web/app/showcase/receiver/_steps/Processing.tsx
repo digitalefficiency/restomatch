@@ -113,10 +113,15 @@ export function Processing({ supplierId, imageUrl, onComplete }: Props) {
     { scope: ref },
   );
 
-  const startedRef = useRef(false);
+  // The parent re-renders with a fresh onComplete each time; keep the latest in
+  // a ref so the effect below runs once per (supplier, image) — and survives
+  // React StrictMode's mount → cleanup → re-mount (a run-once guard ref made
+  // the re-mount a no-op after the cleanup had cancelled every timer, so the
+  // demo hung at 0% in development).
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+
   useEffect(() => {
-    if (startedRef.current) return; // run once per mount (parent re-renders new onComplete)
-    startedRef.current = true;
     let cancelled = false;
     const timers: ReturnType<typeof setTimeout>[] = [];
 
@@ -149,22 +154,22 @@ export function Processing({ supplierId, imageUrl, onComplete }: Props) {
           if (cancelled) return;
           setCurrentStep(STEPS.length);
           if (data.ok && data.result && data.result.lines.length > 0) {
-            onComplete(ocrToReconciliation(data.result, supplierId, data.contactAlerts));
+            onCompleteRef.current(ocrToReconciliation(data.result, supplierId, data.contactAlerts));
           } else {
             setOcrError(data.error ?? t('steps.processing.noItems'));
-            onComplete(mockReconcile(supplierId));
+            onCompleteRef.current(mockReconcile(supplierId));
           }
         } catch (err) {
           if (cancelled) return;
           setOcrError(err instanceof Error ? err.message : String(err));
-          onComplete(mockReconcile(supplierId));
+          onCompleteRef.current(mockReconcile(supplierId));
         }
       })();
     } else {
       // No uploaded file (demo image) — keep the mock flow.
       timers.push(
         setTimeout(() => {
-          if (!cancelled) onComplete(mockReconcile(supplierId));
+          if (!cancelled) onCompleteRef.current(mockReconcile(supplierId));
         }, accumulated + 400),
       );
     }
@@ -174,7 +179,7 @@ export function Processing({ supplierId, imageUrl, onComplete }: Props) {
       timers.forEach(clearTimeout);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supplierId, imageUrl, onComplete]);
+  }, [supplierId, imageUrl]);
   void ocrError;
 
   return (
