@@ -25,7 +25,12 @@ function migrationSql(): string {
       .join('\n');
   // 0023 creates the three identity tables; 0024 adds the 2FA ticket columns.
   // (Renumbered from 0019/0020 during the security-stack consolidation merge.)
-  const body = `${read('0023_user_credentials')}\n${read('0024_two_factor_ticket')}`;
+  // The later migrations that touch these tables (0025 totp_last_step, 0026
+  // revokes, 0031 updated_at trigger) are re-applied too, so dropping them here
+  // leaves the SHARED test DB at the latest shape for every suite that follows.
+  const body = ['0023_user_credentials', '0024_two_factor_ticket', '0025_totp_last_step', '0026_revoke_identity_tables', '0031_updated_at_triggers']
+    .map(read)
+    .join('\n');
   return `DROP TABLE IF EXISTS user_recovery_codes, password_reset_tokens, user_credentials CASCADE;\n${body}`;
 }
 

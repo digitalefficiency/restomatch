@@ -6,14 +6,21 @@ import {
   Camera,
   Check,
   Download,
-  ExternalLink,
   FileText,
+  Languages,
   Sparkles,
   X,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocale, useT } from '@/lib/i18n/client';
+import { formatPercent } from '@/lib/i18n/format';
+import { showcase } from '@/lib/i18n/messages/showcase';
+import { formatIls } from '@/lib/money';
+import { localDate } from '../../_lib/time';
+import { mockText } from '../../_lib/mockText';
+import { InvoicePaper } from './InvoicePaperShared';
 
 export interface ScanLine {
   name: string;
@@ -56,10 +63,9 @@ export interface ScanData {
   /** Optional notes scrawled on the scan (e.g. driver signature). */
   driverSignature?: string;
   /**
-   * URL of the original scan as stored in the database / object storage.
-   * The viewer loads this via <iframe> so the rendered document is fetched
-   * from the server, mirroring production where it would be a JPG/PDF
-   * served from S3.
+   * URL of the original scan as stored in the database / object storage
+   * (/scans/[invoiceId]). That route is tenant-private (auth required), so the
+   * public showcase renders the paper inline instead of loading this URL.
    */
   rawImageUrl: string;
 }
@@ -70,6 +76,8 @@ interface Props {
 }
 
 export function InvoiceScanViewer({ data, onClose }: Props) {
+  const t = useT(showcase);
+  const locale = useLocale();
   const overlayRef = useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
@@ -86,6 +94,11 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
     { dependencies: [data.invoiceNumber] },
   );
 
+  // Fit the 720px paper on small screens.
+  useEffect(() => {
+    if (window.innerWidth < 768) setZoom(Math.max(0.4, (window.innerWidth - 48) / 760));
+  }, []);
+
   // Body scroll lock
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -100,7 +113,7 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
       if (e.key === '+' || e.key === '=') setZoom((z) => Math.min(1.6, z + 0.1));
-      if (e.key === '-') setZoom((z) => Math.max(0.6, z - 0.1));
+      if (e.key === '-') setZoom((z) => Math.max(0.4, z - 0.1));
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
@@ -113,11 +126,7 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
   const vat = subtotal * 0.17;
   const total = subtotal + vat;
 
-  const dateText = new Date(data.invoiceDate).toLocaleDateString('he-IL', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  });
+  const dateText = localDate(data.invoiceDate);
 
   return (
     <div
@@ -126,8 +135,7 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
         e.stopPropagation();
         onClose();
       }}
-      className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-md flex items-center justify-center p-4 sm:p-8"
-      dir="rtl"
+      className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-md flex items-center justify-center p-2 sm:p-8"
     >
       <div
         ref={sheetRef}
@@ -135,7 +143,7 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
         className="bg-surface border border-line rounded-3xl shadow-card max-w-6xl w-full max-h-[92vh] overflow-hidden flex flex-col"
       >
         {/* Viewer toolbar */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-line bg-surface-2">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b border-line bg-surface-2">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-10 h-10 rounded-xl bg-primary/12 border border-primary/25 flex items-center justify-center shrink-0">
               <FileText className="w-5 h-5 text-primary" />
@@ -143,13 +151,13 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm font-bold text-ink truncate">
-                  סריקת חשבונית {data.invoiceNumber}
+                  {t('scan.title', { number: data.invoiceNumber })}
                 </span>
                 <ConfidenceBadge value={data.ocrConfidence} />
               </div>
               <div className="text-xs text-muted flex items-center gap-2 flex-wrap">
                 <Camera className="w-3 h-3" />
-                <span>{data.capturedBy ?? 'נסרק מטלפון'}</span>
+                <span>{mockText(data.capturedBy ?? 'נסרק מטלפון', locale)}</span>
                 <span className="text-subtle">·</span>
                 <span className="font-mono tabular-nums">{dateText}</span>
               </div>
@@ -159,9 +167,10 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
           <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
-              onClick={() => setZoom((z) => Math.max(0.6, z - 0.1))}
+              onClick={() => setZoom((z) => Math.max(0.4, z - 0.1))}
               className="w-8 h-8 rounded-lg bg-surface border border-line hover:border-primary/40 flex items-center justify-center"
-              title="הקטן"
+              title={t('common.zoomOut')}
+              aria-label={t('common.zoomOut')}
             >
               <ZoomOut className="w-4 h-4 text-muted" />
             </button>
@@ -172,34 +181,26 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
               type="button"
               onClick={() => setZoom((z) => Math.min(1.6, z + 0.1))}
               className="w-8 h-8 rounded-lg bg-surface border border-line hover:border-primary/40 flex items-center justify-center"
-              title="הגדל"
+              title={t('common.zoomIn')}
+              aria-label={t('common.zoomIn')}
             >
               <ZoomIn className="w-4 h-4 text-muted" />
             </button>
             <div className="w-px h-6 bg-line mx-1" />
-            <a
-              href={data.rawImageUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 px-3 h-8 rounded-lg bg-surface border border-line hover:border-primary/40 hover:text-primary text-xs font-medium text-ink"
-              title="פתח את הסריקה בטאב חדש"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-              פתח בנפרד
-            </a>
             <button
               type="button"
               className="inline-flex items-center gap-1.5 px-3 h-8 rounded-lg bg-surface border border-line hover:border-primary/40 hover:text-primary text-xs font-medium text-ink"
-              title="הורד את הסריקה המקורית"
+              title={t('scan.downloadTitle')}
             >
               <Download className="w-3.5 h-3.5" />
-              הורד
+              {t('common.download')}
             </button>
             <button
               type="button"
               onClick={onClose}
               className="w-8 h-8 rounded-full bg-surface-2 hover:bg-line flex items-center justify-center"
-              title="סגור"
+              title={t('common.close')}
+              aria-label={t('common.close')}
             >
               <X className="w-4 h-4 text-muted" />
             </button>
@@ -208,57 +209,61 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
 
         {/* Body: scan canvas + extraction panel */}
         <div className="flex-1 flex min-h-0 overflow-hidden">
-          {/* Scan canvas — iframe loads the actual document from the URL stored
-              in invoices.raw_image_url (simulated via /scans/[id] page route) */}
-          <div className="flex-1 relative overflow-hidden bg-bg">
-            {/* URL bar — reinforces "this is loaded from storage" */}
-            <div className="absolute top-3 left-3 right-3 z-10 flex items-center gap-2 glass border border-line rounded-full px-3 py-1.5 pointer-events-none">
-              <div className="w-2 h-2 rounded-full bg-primary" />
-              <span className="text-[11px] font-mono text-muted truncate">
-                {typeof window !== 'undefined' ? window.location.origin : ''}
-                {data.rawImageUrl}
-              </span>
-              <span className="text-[10px] text-subtle mr-auto shrink-0">
-                נטען מהשרת
-              </span>
+          {/* Scan canvas — the supplier's paper, rendered inline. (The stored
+              /scans/[id] URL is tenant-private, so the public demo can't
+              iframe it.) The paper is a Hebrew Israeli supplier document in
+              every locale: that's what the receiver actually photographs. */}
+          <div className="flex-1 relative overflow-auto bg-bg">
+            <div className="sticky top-3 z-10 mx-3 mt-3 flex items-center gap-2 glass border border-line rounded-full px-3 py-1.5 pointer-events-none w-fit max-w-[calc(100%-1.5rem)]">
+              <Languages className="w-3.5 h-3.5 text-primary shrink-0" aria-hidden="true" />
+              <span className="text-[11px] text-muted truncate">{t('scan.original')}</span>
             </div>
-
-            <iframe
-              key={data.rawImageUrl}
-              src={data.rawImageUrl}
-              title={`סריקת חשבונית ${data.invoiceNumber}`}
-              className="w-full h-full border-0 bg-bg"
-              style={{
-                transform: `scale(${zoom})`,
-                transformOrigin: 'top center',
-              }}
-            />
+            <div className="w-max mx-auto px-4 pb-8 pt-4">
+              {/* CSS `zoom` (not transform) so the scroll area follows the size. */}
+              <div dir="rtl" lang="he" style={{ zoom }}>
+                <InvoicePaper data={data} />
+              </div>
+            </div>
           </div>
 
           {/* Extraction sidebar */}
-          <aside className="w-80 shrink-0 border-r border-line bg-surface overflow-y-auto hidden lg:block">
+          <aside className="w-80 shrink-0 border-s border-line bg-surface overflow-y-auto hidden lg:block">
             <div className="px-5 py-4 border-b border-line">
               <div className="text-xs uppercase tracking-wider text-subtle font-semibold mb-1">
-                שדות שחולצו
+                {t('scan.extracted')}
               </div>
               <div className="text-xs text-muted">
-                ה-OCR זיהה את השדות הבאים. ביטחון כללי{' '}
-                <span className="font-bold text-ink font-mono tabular-nums">
-                  {Math.round(data.ocrConfidence * 100)}%
-                </span>
-                .
+                {t('scan.extractedBody', { pct: formatPercent(data.ocrConfidence, locale, 0) })}
               </div>
             </div>
 
             <div className="px-5 py-4 space-y-3">
-              <ExtractedField label="ספק" value={data.supplierName} confidence={0.99} />
-              <ExtractedField label="ח.פ. ספק" value={data.supplierBusinessId} confidence={0.97} mono />
-              <ExtractedField label="מס׳ חשבונית" value={data.invoiceNumber} confidence={0.98} mono />
-              <ExtractedField label="תאריך" value={dateText} confidence={0.94} mono />
-              <ExtractedField label="לקוח" value={data.customerName} confidence={0.91} />
               <ExtractedField
-                label="סה״כ כולל מע״מ"
-                value={`₪${total.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                label={t('scan.fields.supplier')}
+                value={mockText(data.supplierName, locale)}
+                confidence={0.99}
+              />
+              <ExtractedField
+                label={t('scan.fields.supplierId')}
+                value={data.supplierBusinessId}
+                confidence={0.97}
+                mono
+              />
+              <ExtractedField
+                label={t('scan.fields.invoiceNumber')}
+                value={data.invoiceNumber}
+                confidence={0.98}
+                mono
+              />
+              <ExtractedField label={t('scan.fields.date')} value={dateText} confidence={0.94} mono />
+              <ExtractedField
+                label={t('scan.fields.customer')}
+                value={mockText(data.customerName, locale)}
+                confidence={0.91}
+              />
+              <ExtractedField
+                label={t('scan.fields.total')}
+                value={formatIls(total, { locale, maximumFractionDigits: 2 })}
                 confidence={0.99}
                 mono
                 emphasize
@@ -268,7 +273,7 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
             <div className="border-t border-line px-5 py-4">
               <div className="text-xs uppercase tracking-wider text-subtle font-semibold mb-3 flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-primary" />
-                <span>שורות שחולצו ({data.lines.length})</span>
+                <span>{t('scan.lines', { count: data.lines.length })}</span>
               </div>
               <ul className="space-y-2">
                 {data.lines.map((line, i) => (
@@ -277,9 +282,9 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
                     className="flex items-center justify-between gap-2 text-xs px-2.5 py-2 rounded-lg bg-surface-2 border border-line"
                   >
                     <div className="min-w-0 flex-1">
-                      <div className="font-medium text-ink truncate">{line.name}</div>
+                      <div className="font-medium text-ink truncate">{mockText(line.name, locale)}</div>
                       <div className="text-[10px] text-muted font-mono tabular-nums">
-                        {line.qty} {line.unit} × ₪{line.unitPrice.toFixed(2)}
+                        {line.qty} {mockText(line.unit, locale)} × ₪{line.unitPrice.toFixed(2)}
                       </div>
                     </div>
                     <ConfidenceDot value={line.confidence ?? data.ocrConfidence} />
@@ -291,9 +296,7 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
             <div className="border-t border-line px-5 py-4">
               <div className="rounded-xl bg-primary/8 border border-primary/25 px-3 py-2.5 text-xs text-ink flex items-start gap-2">
                 <Check className="w-3.5 h-3.5 shrink-0 mt-0.5 text-primary" strokeWidth={3} />
-                <div>
-                  הסריקה נשמרה כמסמך-מקור immutable עם hash. עומדת בדרישות תיעוד של רשות המסים.
-                </div>
+                <div>{t('scan.archived')}</div>
               </div>
             </div>
           </aside>

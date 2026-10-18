@@ -186,7 +186,8 @@ async function syncOrders(
     // restaurantId in the lookup is load-bearing: external ids are only unique
     // per platform account, so two restaurants syncing the same platform can
     // collide on (sourcePlatform, sourceRef) — without this filter one
-    // restaurant's sync overwrites the other's PO and replaces its lines.
+    // restaurant's sync overwrites the other's PO and replaces its lines. The DB
+    // backstop po_restaurant_source_ref_unique is per restaurant since 0029 (I5).
     const existing = await db
       .select({ id: purchaseOrders.id })
       .from(purchaseOrders)

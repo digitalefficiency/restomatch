@@ -14,6 +14,9 @@
 
 import { AlertTriangle, CheckCircle2, Clock, Phone, MessageCircle, Truck } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { useLocale, useT } from '@/lib/i18n/client';
+import { showcase } from '@/lib/i18n/messages/showcase';
+import { mockText } from '../_lib/mockText';
 
 interface Delivery {
   id: string;
@@ -21,8 +24,8 @@ interface Delivery {
   agentName: string;
   agentPhone: string; // primary, Israeli format, e.g. 050-8994012
   secondaryPhone?: string; // demoted-but-kept previous number
-  orderedOn: string; // human label
-  expectedLabel: string; // human label, e.g. "היום"
+  orderedDay: 'today' | 'yesterday';
+  orderedTime: string; // "HH:MM"
   cutoff: string; // "HH:MM" — editable
   arrived: boolean;
 }
@@ -38,6 +41,8 @@ function toIntl(phone: string): string {
 }
 
 export default function DeliveriesPage() {
+  const t = useT(showcase);
+  const locale = useLocale();
   // Seed cutoffs relative to "now" so the demo always shows one late + one
   // pending regardless of view time. Computed once on mount.
   const [now, setNow] = useState<Date | null>(null);
@@ -45,10 +50,10 @@ export default function DeliveriesPage() {
   const [handled, setHandled] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    const t = new Date();
-    setNow(t);
-    const past = new Date(t.getTime() - 90 * 60_000); // 90 min ago → LATE
-    const future = new Date(t.getTime() + 150 * 60_000); // in 2.5h → pending
+    const start = new Date();
+    setNow(start);
+    const past = new Date(start.getTime() - 90 * 60_000); // 90 min ago → LATE
+    const future = new Date(start.getTime() + 150 * 60_000); // in 2.5h → pending
     setDeliveries([
       {
         id: 'd1',
@@ -56,8 +61,8 @@ export default function DeliveriesPage() {
         agentName: 'דני לוי',
         agentPhone: '052-7341288',
         secondaryPhone: '050-7341288', // demo: a kept-secondary number (previous agent line)
-        orderedOn: 'אתמול 16:40',
-        expectedLabel: 'היום',
+        orderedDay: 'yesterday',
+        orderedTime: '16:40',
         cutoff: hhmm(past),
         arrived: false,
       },
@@ -66,8 +71,8 @@ export default function DeliveriesPage() {
         supplierName: 'פאנדנגו איסוף ומחזור',
         agentName: 'שי כרמי',
         agentPhone: '050-8994012',
-        orderedOn: 'היום 08:15',
-        expectedLabel: 'היום',
+        orderedDay: 'today',
+        orderedTime: '08:15',
         cutoff: hhmm(future),
         arrived: false,
       },
@@ -76,8 +81,8 @@ export default function DeliveriesPage() {
         supplierName: 'קצביית הכרם',
         agentName: 'מאיר אזולאי',
         agentPhone: '054-6620913',
-        orderedOn: 'אתמול 11:00',
-        expectedLabel: 'היום',
+        orderedDay: 'yesterday',
+        orderedTime: '11:00',
         cutoff: '09:00',
         arrived: true,
       },
@@ -101,21 +106,22 @@ export default function DeliveriesPage() {
   );
 
   return (
-    <div dir="rtl" className="max-w-4xl mx-auto px-6 py-8">
+    <main className="max-w-4xl mx-auto px-4 sm:px-6 py-10">
+      <div className="mb-2 h-0.5 w-12 rounded-full flow-stream" aria-hidden="true" />
       <div className="flex items-center gap-3 mb-1">
         <Truck className="w-6 h-6 text-primary" />
-        <h1 className="text-2xl font-bold text-ink">מעקב אספקות</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-ink">{t('deliveries.title')}</h1>
       </div>
-      <p className="text-muted text-sm mb-6">
-        הגדר שעת-יעד לכל ספק. אם הסחורה לא הגיעה עד השעה — קופצת התראה עם פעולות מיידיות.
-      </p>
+      <p className="text-muted text-sm mb-6 max-w-2xl">{t('deliveries.lead')}</p>
 
       {lateCount > 0 ? (
         <div className="mb-6 rounded-2xl border border-danger/40 bg-danger/8 p-4 flex items-center gap-3">
           <AlertTriangle className="w-6 h-6 text-danger shrink-0" />
           <div>
-            <div className="font-semibold text-ink">{lateCount} אספקות באיחור</div>
-            <div className="text-sm text-muted">סחורה שאמורה הייתה להגיע ועברה שעת היעד — נדרשת פעולה.</div>
+            <div className="font-semibold text-ink">
+              {lateCount === 1 ? t('deliveries.lateOne') : t('deliveries.lateMany', { count: lateCount })}
+            </div>
+            <div className="text-sm text-muted">{t('deliveries.lateBody')}</div>
           </div>
         </div>
       ) : null}
@@ -124,8 +130,19 @@ export default function DeliveriesPage() {
         {deliveries.map((d) => {
           const status = statusOf(d);
           const intl = toIntl(d.agentPhone);
+          const supplierName = mockText(d.supplierName, locale);
+          const agentName = mockText(d.agentName, locale);
+          const orderedOn = t(d.orderedDay === 'today' ? 'deliveries.todayAt' : 'deliveries.yesterdayAt', {
+            time: d.orderedTime,
+          });
+          const expected = t('deliveries.today');
           const waText = encodeURIComponent(
-            `שלום ${d.agentName}, ההזמנה מ"${d.supplierName}" (${d.orderedOn}) שאמורה הייתה להגיע ${d.expectedLabel} טרם הגיעה. מתי היא תגיע?`,
+            t('deliveries.waMessage', {
+              agent: agentName,
+              supplier: supplierName,
+              ordered: orderedOn,
+              expected,
+            }),
           );
           return (
             <div
@@ -141,17 +158,22 @@ export default function DeliveriesPage() {
               <div className="flex items-start justify-between gap-4 flex-wrap">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="font-semibold text-ink">{d.supplierName}</span>
+                    <span className="font-semibold text-ink">{supplierName}</span>
                     <StatusBadge status={status} />
                   </div>
                   <div className="text-sm text-muted mt-1">
-                    סוכן: {d.agentName} · {d.agentPhone} · הוזמן {d.orderedOn} · צפי: {d.expectedLabel}
+                    {t('deliveries.meta', {
+                      agent: agentName,
+                      phone: d.agentPhone,
+                      ordered: orderedOn,
+                      expected,
+                    })}
                   </div>
                 </div>
 
                 <label className="flex items-center gap-2 text-sm text-muted shrink-0">
                   <Clock className="w-4 h-4" />
-                  שעת יעד
+                  {t('deliveries.cutoff')}
                   <input
                     type="time"
                     value={d.cutoff}
@@ -168,7 +190,7 @@ export default function DeliveriesPage() {
               {status === 'late' && !handled[d.id] ? (
                 <div className="mt-4 pt-4 border-t border-danger/20">
                   <div className="text-sm font-medium text-danger mb-3">
-                    ⚠️ לא הגיעה עד {d.cutoff}. צעדים אפשריים:
+                    ⚠️ {t('deliveries.notArrived', { time: d.cutoff })}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <a
@@ -176,12 +198,12 @@ export default function DeliveriesPage() {
                       className="inline-flex items-center gap-2 bg-primary text-on-primary rounded-xl px-4 py-2 text-sm font-medium hover:brightness-110 shadow-glow-primary transition-all"
                     >
                       <Phone className="w-4 h-4" />
-                      התקשר לסוכן
+                      {t('deliveries.call')}
                     </a>
                     {d.secondaryPhone ? (
                       <>
                         <span className="inline-flex items-center gap-1.5 text-sm text-muted px-1">
-                          <MessageCircle className="w-4 h-4" /> שלח WhatsApp ל:
+                          <MessageCircle className="w-4 h-4" /> {t('deliveries.whatsappTo')}
                         </span>
                         <a
                           href={`https://wa.me/${intl}?text=${waText}`}
@@ -189,7 +211,7 @@ export default function DeliveriesPage() {
                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-1 bg-surface-2 border border-line text-ink rounded-xl px-3 py-2 text-sm font-medium hover:border-primary/40 hover:text-primary transition-all"
                         >
-                          ראשי · {d.agentPhone}
+                          {t('deliveries.primary')} · <span dir="ltr">{d.agentPhone}</span>
                         </a>
                         <a
                           href={`https://wa.me/${toIntl(d.secondaryPhone)}?text=${waText}`}
@@ -197,7 +219,7 @@ export default function DeliveriesPage() {
                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-1 bg-surface-2 border border-line text-ink rounded-xl px-3 py-2 text-sm font-medium hover:border-primary/40 hover:text-primary transition-all"
                         >
-                          משני · {d.secondaryPhone}
+                          {t('deliveries.secondary')} · <span dir="ltr">{d.secondaryPhone}</span>
                         </a>
                         <button
                           onClick={() => {
@@ -206,7 +228,7 @@ export default function DeliveriesPage() {
                           }}
                           className="inline-flex items-center gap-1 bg-surface-2 border border-line text-ink rounded-xl px-3 py-2 text-sm font-medium hover:border-primary/40 hover:text-primary transition-all"
                         >
-                          שניהם
+                          {t('deliveries.both')}
                         </button>
                       </>
                     ) : (
@@ -217,7 +239,7 @@ export default function DeliveriesPage() {
                         className="inline-flex items-center gap-2 bg-surface-2 border border-line text-ink rounded-xl px-4 py-2 text-sm font-medium hover:border-primary/40 hover:text-primary transition-all"
                       >
                         <MessageCircle className="w-4 h-4" />
-                        שלח WhatsApp
+                        {t('deliveries.whatsapp')}
                       </a>
                     )}
                     <button
@@ -225,7 +247,7 @@ export default function DeliveriesPage() {
                       className="inline-flex items-center gap-2 bg-surface-2 border border-line text-muted rounded-xl px-4 py-2 text-sm font-medium hover:text-ink transition-all"
                     >
                       <CheckCircle2 className="w-4 h-4" />
-                      סמן כטופל
+                      {t('deliveries.markHandled')}
                     </button>
                   </div>
                 </div>
@@ -235,30 +257,28 @@ export default function DeliveriesPage() {
         })}
       </div>
 
-      <p className="text-xs text-subtle mt-8">
-        בפרודקשן: Vercel Cron מריץ בדיקה בשעת-היעד מול ההזמנות וקולט תעודות משלוח; התראה נכתבת
-        ל-notifications_outbox ונשלחת למנהל (push/WhatsApp). כאן מודגם ה-UX בצד-לקוח.
-      </p>
-    </div>
+      <p className="text-xs text-subtle mt-8 max-w-2xl leading-relaxed">{t('deliveries.footnote')}</p>
+    </main>
   );
 }
 
 function StatusBadge({ status }: { status: 'arrived' | 'pending' | 'late' }) {
+  const t = useT(showcase);
   if (status === 'late')
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-danger/15 text-danger text-xs font-semibold px-2 py-0.5">
-        <AlertTriangle className="w-3 h-3" /> באיחור
+        <AlertTriangle className="w-3 h-3" /> {t('deliveries.status.late')}
       </span>
     );
   if (status === 'arrived')
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 text-primary text-xs font-semibold px-2 py-0.5">
-        <CheckCircle2 className="w-3 h-3" /> הגיעה
+        <CheckCircle2 className="w-3 h-3" /> {t('deliveries.status.arrived')}
       </span>
     );
   return (
     <span className="inline-flex items-center gap-1 rounded-full bg-surface-2 text-muted text-xs font-semibold px-2 py-0.5">
-      <Clock className="w-3 h-3" /> ממתינה
+      <Clock className="w-3 h-3" /> {t('deliveries.status.pending')}
     </span>
   );
 }

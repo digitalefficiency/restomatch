@@ -1,11 +1,25 @@
 /**
  * Demo-flow generator: turns the static seed (restaurant + POs) into a fully
- * MATCHED dataset so the live dashboard shows real KPIs, a leaks heatmap, and a
- * populated approvals queue — without needing Redis/OCR. It runs the REAL
- * matching engine + approvals engine (the same code the worker uses), so every
- * discrepancy and routing decision is authentic.
+ * MATCHED dataset so the live dashboard shows real KPIs, a leaks page and a
+ * calm, believable approvals queue — without Redis/OCR. It runs the REAL
+ * matching engine + approvals engine + baselines job (the code the worker
+ * uses), so every discrepancy and routing decision is authentic.
+ *
+ * The leak story is scripted, not random (≈2% of food spend, the North Star):
+ *   - the butcher quietly crept entrecôte from the agreed ₪139 to ₪145, then ₪149/kg
+ *   - the fish supplier bills salmon at ₪92, then ₪96, instead of the agreed ₪89
+ *   - the draft-beer keg jumped 10% on the latest delivery; so did olive oil
+ *   - twice the produce supplier delivered 3 kg fewer cherry tomatoes but billed in full
+ *   - the bakery slipped six challahs onto an invoice nobody ordered
+ *   - the dairy still computes VAT at the old 17%
+ *   - one cheaper cucumber delivery (good news, auto-accepted)
+ *   - two consolidated invoices (חשבוניות ריכוז) are parsed and PENDING — calm, not alarms
+ * Discrepancies older than ten days are resolved (credit note received → "savings
+ * captured"); recent ones are open in the approvals queue. Today's POs (from the
+ * base seed) are left untouched so the receiver can check them live.
  *
  * Run: DATABASE_URL=... pnpm --filter @restomatch/worker exec tsx scripts/seed-demo.ts
+ * Refuses any non-local database (it deletes the restaurant's receipts/invoices).
  */
 import {
   buildRules,
@@ -13,23 +27,31 @@ import {
   resolveApprovalThresholds,
   type ApprovalContext,
 } from '@restomatch/api';
+import { computeBaselines } from '@restomatch/charts';
 import {
   activityEvents,
   and,
   asc,
+  assertSeedTarget,
   createDb,
   discrepancies,
   eq,
   goodsReceipts,
   grLines,
+  inArray,
   invoiceLines,
   invoices,
+  lt,
   matchRuns,
+  memberships,
   poLines,
+  priceBaselines,
   priceHistory,
+  products,
   purchaseOrders,
   restaurants,
   suppliers,
+  users,
   type UserRole,
 } from '@restomatch/db';
 import {
@@ -41,71 +63,166 @@ import {
 
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error('DATABASE_URL is required');
+assertSeedTarget(url, 'seed-demo');
 const db = createDb(url);
 
-// Deterministic pseudo-random so re-runs are stable-ish (no Math.random ban here).
-let seed = 1337;
-const rand = () => {
-  seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-  return seed / 0x7fffffff;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const OPEN_WINDOW_DAYS = 10;
+
+/** Start of "today" on the restaurant's wall clock (DEMO_TODAY overrides, like the base seed). */
+function startOfLocalDay(tz: string): Date {
+  const ymd =
+    process.env.DEMO_TODAY?.trim() ||
+    new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const [y, m, d] = ymd.split('-').map(Number) as [number, number, number];
+  const guess = new Date(Date.UTC(y, m - 1, d));
+  const local = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+  }).formatToParts(guess);
+  const p = Object.fromEntries(local.map((x) => [x.type, x.value]));
+  const offset = Date.UTC(+p.year!, +p.month! - 1, +p.day!, +p.hour!, +p.minute!) - guess.getTime();
+  return new Date(guess.getTime() - offset);
+}
+
+/** What happens on the k-th most recent delivery (k = 1 is the latest) of a supplier. */
+interface Scenario {
+  /** product nameEn → billed unit price */
+  price?: Record<string, number>;
+  /** product nameEn → kg/units missing from the delivery (but billed in full) */
+  shortBilledInFull?: Record<string, number>;
+  /** a line on the invoice that was never ordered */
+  extra?: { nameEn: string; qty: number; price: number };
+  /** VAT rate the supplier used on the invoice (default: the restaurant's) */
+  invoiceVatRate?: number;
+}
+
+function scenarioFor(supplierEn: string, k: number): Scenario {
+  switch (supplierEn) {
+    case 'HaKerem Butchery':
+      // Creep: 139 → 145 → 149. The leaks page flags a latest price above the p90.
+      if (k === 1) return { price: { 'Entrecôte (rib-eye)': 149 } };
+      if (k === 2) return { price: { 'Entrecôte (rib-eye)': 145 } };
+      return {};
+    case 'Mediterranean Fish Co.':
+      if (k === 1) return { price: { 'Salmon fillet': 96 } };
+      if (k === 2) return { price: { 'Salmon fillet': 92 } };
+      return {};
+    case 'Steinberg Beverages':
+      return k === 1 ? { price: { 'Draft beer keg 30L': 575 } } : {};
+    case 'Fresman Spices & Oils':
+      return k === 1 ? { price: { 'Extra virgin olive oil': 37.5 } } : {};
+    case 'Galilee Dairies':
+      return k === 2 ? { invoiceVatRate: 0.17 } : {};
+    case 'HaSharon Produce':
+      if (k === 4 || k === 10) return { shortBilledInFull: { 'Cherry tomatoes': 3 } };
+      if (k === 6) return { price: { Cucumbers: 5.6 } };
+      return {};
+    case "Brenner's Bakery":
+      return k === 5 ? { extra: { nameEn: 'Challah', qty: 6, price: 12 } } : {};
+    default:
+      return {};
+  }
+}
+
+const INVOICE_PREFIX: Record<string, string> = {
+  'HaSharon Produce': 'SH',
+  'HaKerem Butchery': 'HK',
+  "Brenner's Bakery": 'BR',
+  'Mediterranean Fish Co.': 'MF',
+  'Galilee Dairies': 'GD',
+  'Fresman Spices & Oils': 'FS',
+  'Steinberg Beverages': 'ST',
+  'Ben-Ami Dry Goods': 'BA',
+  'Quick Disposables': 'QD',
+  'Amit Cleaning Supplies': 'AC',
 };
-const pick = <T>(arr: T[]): T => arr[Math.floor(rand() * arr.length)]!;
+
+const r2 = (n: number) => Math.round(n * 100) / 100;
 
 async function main() {
   const [restaurant] = await db.select().from(restaurants).limit(1);
   if (!restaurant) throw new Error('no restaurant — run the base seed first');
   const restaurantId = restaurant.id;
 
-  // Clean any prior demo-flow rows (idempotent re-run).
+  // Clean any prior demo-flow rows for this restaurant (idempotent re-run).
+  const invIds = (await db.select({ id: invoices.id }).from(invoices).where(eq(invoices.restaurantId, restaurantId))).map((r) => r.id);
+  const grIds = (await db.select({ id: goodsReceipts.id }).from(goodsReceipts).where(eq(goodsReceipts.restaurantId, restaurantId))).map((r) => r.id);
   await db.delete(discrepancies).where(eq(discrepancies.restaurantId, restaurantId));
   await db.delete(matchRuns).where(eq(matchRuns.restaurantId, restaurantId));
-  await db.delete(invoiceLines);
-  await db.delete(invoices).where(eq(invoices.restaurantId, restaurantId));
-  await db.delete(grLines);
-  await db.delete(goodsReceipts).where(eq(goodsReceipts.restaurantId, restaurantId));
+  if (invIds.length) await db.delete(invoiceLines).where(inArray(invoiceLines.invoiceId, invIds));
   await db.delete(priceHistory).where(eq(priceHistory.restaurantId, restaurantId));
+  await db.delete(priceBaselines).where(eq(priceBaselines.restaurantId, restaurantId));
+  await db.delete(invoices).where(eq(invoices.restaurantId, restaurantId));
+  if (grIds.length) await db.delete(grLines).where(inArray(grLines.grId, grIds));
+  await db.delete(goodsReceipts).where(eq(goodsReceipts.restaurantId, restaurantId));
   await db.delete(activityEvents).where(eq(activityEvents.restaurantId, restaurantId));
 
   const tolerances = resolveTolerances(restaurant.settings?.tolerances);
   const rules = buildRules(resolveApprovalThresholds(restaurant.settings?.approvalThresholds));
   const vatRate = Number(restaurant.vatRate ?? '0.18');
+  const todayStart = startOfLocalDay(restaurant.timezone ?? 'Asia/Jerusalem');
+  const openSince = new Date(todayStart.getTime() - OPEN_WINDOW_DAYS * DAY_MS);
 
+  const team = await db
+    .select({ id: users.id, role: memberships.role })
+    .from(memberships)
+    .innerJoin(users, eq(users.id, memberships.userId))
+    .where(eq(memberships.restaurantId, restaurantId));
+  const userFor = (role: UserRole) => team.find((t) => t.role === role)?.id ?? team[0]?.id ?? null;
+  const receiverId = userFor('receiver');
+  const managerId = userFor('manager');
+
+  const supplierRows = await db.select().from(suppliers).where(eq(suppliers.restaurantId, restaurantId));
+  const supplierById = new Map(supplierRows.map((s) => [s.id, s] as const));
+  const productRows = await db.select().from(products).where(eq(products.restaurantId, restaurantId));
+  const productById = new Map(productRows.map((p) => [p.id, p] as const));
+  const productByEn = new Map(productRows.map((p) => [p.nameEn ?? '', p] as const));
+
+  // Delivered history only: POs expected before the start of today. Today's and
+  // future POs stay open for the live receiving demo.
   const pos = await db
     .select()
     .from(purchaseOrders)
-    .where(eq(purchaseOrders.restaurantId, restaurantId))
+    .where(and(eq(purchaseOrders.restaurantId, restaurantId), lt(purchaseOrders.expectedDeliveryAt, todayStart)))
     .orderBy(asc(purchaseOrders.expectedDeliveryAt));
 
-  const knownInvoiceNumbers = new Set<string>();
+  // k = 1 for each supplier's most recent delivery.
+  const recencyById = new Map<string, number>();
+  const perSupplier = new Map<string, string[]>();
+  for (const po of pos) perSupplier.set(po.supplierId, [...(perSupplier.get(po.supplierId) ?? []), po.id]);
+  for (const ids of perSupplier.values()) ids.forEach((id, i) => recencyById.set(id, ids.length - i));
+
+  const knownBySupplier = new Map<string, Set<string>>();
+  const invoiceSeq = new Map<string, number>();
   let made = 0;
-  let openDiscrepancies = 0;
+  let openCount = 0;
+  let spendMtd = 0;
+  let surfacedMtd = 0;
+  let openMtd = 0;
+  const monthStart = new Date(todayStart);
+  monthStart.setUTCDate(1);
 
-  for (let i = 0; i < pos.length; i++) {
-    const po = pos[i]!;
-    const lines = await db
-      .select()
-      .from(poLines)
-      .where(eq(poLines.poId, po.id))
-      .orderBy(asc(poLines.id));
+  for (const po of pos) {
+    const supplier = supplierById.get(po.supplierId)!;
+    const supplierEn = supplier.nameEn ?? supplier.name;
+    const k = recencyById.get(po.id)!;
+    const sc = scenarioFor(supplierEn, k);
+    const lines = await db.select().from(poLines).where(eq(poLines.poId, po.id)).orderBy(asc(poLines.id));
     if (lines.length === 0) continue;
+    const expected = po.expectedDeliveryAt ?? new Date();
+    const receivedAt = new Date(expected.getTime() + 20 * 60 * 1000);
 
-    const receivedAt = new Date(po.expectedDeliveryAt ?? new Date());
-    const [supplier] = await db
-      .select({ name: suppliers.name })
-      .from(suppliers)
-      .where(eq(suppliers.id, po.supplierId))
-      .limit(1);
-
-    // Goods receipt — most lines arrive in full, ~1 in 4 short.
+    // ── goods receipt ──────────────────────────────────────────────────
     const [gr] = await db
       .insert(goodsReceipts)
-      .values({ restaurantId, poId: po.id, receivedAt, status: 'completed' })
+      .values({ restaurantId, poId: po.id, receivedAt, receivedBy: receiverId, status: 'completed', createdAt: receivedAt, updatedAt: receivedAt })
       .returning();
-    const grLineRows = [];
+    const grRows: Array<{ poLine: (typeof lines)[number]; grLineId: string; qtyReceived: number; qtyBilled: number; price: number }> = [];
     for (const l of lines) {
       const ordered = Number(l.qtyOrdered);
-      const short = rand() < 0.25;
-      const qtyReceived = short ? Math.max(0, Math.round(ordered * (0.7 + rand() * 0.2))) : ordered;
+      const en = productById.get(l.productId ?? '')?.nameEn ?? '';
+      const missing = sc.shortBilledInFull?.[en] ?? 0;
+      const qtyReceived = Math.max(0, ordered - missing);
       const [grl] = await db
         .insert(grLines)
         .values({
@@ -114,71 +231,76 @@ async function main() {
           productId: l.productId,
           qtyReceived: qtyReceived.toString(),
           qtyRejected: '0',
+          conditionNotes: missing > 0 ? `חסרים ${missing} ${l.unit} בקבלה` : null,
         })
         .returning();
-      grLineRows.push({ poLine: l, grl: grl!, qtyReceived });
+      const price = sc.price?.[en] ?? Number(l.unitPriceExpected ?? 0);
+      grRows.push({ poLine: l, grLineId: grl!.id, qtyReceived, qtyBilled: ordered, price });
     }
 
-    // Invoice — ~1 in 3 lines billed above the PO price.
-    const invNumber = `2026-${String(1000 + i)}`;
-    let subtotal = 0;
+    // ── invoice (billed for what was ORDERED — that is how short deliveries leak) ──
+    const prefix = INVOICE_PREFIX[supplierEn] ?? 'IN';
+    const seq = (invoiceSeq.get(supplier.id) ?? 24100) + 1;
+    invoiceSeq.set(supplier.id, seq);
+    const invNumber = `${prefix}-${seq}`;
     const invLineInputs: InvoiceLineInput[] = [];
-    const invoiceLineValues = [];
-    for (const { poLine, grl, qtyReceived } of grLineRows) {
-      const basePrice = Number(poLine.unitPriceExpected ?? 0);
-      const bumped = rand() < 0.33;
-      const unitPrice = bumped ? Math.round(basePrice * (1.05 + rand() * 0.12) * 100) / 100 : basePrice;
-      const qtyBilled = qtyReceived; // billed for what arrived
-      const lineTotal = Math.round(unitPrice * qtyBilled * 100) / 100;
-      subtotal += lineTotal;
-      const invLineId = crypto.randomUUID();
-      invLineInputs.push({
-        id: invLineId,
-        productId: poLine.productId,
-        qtyBilled,
-        unit: poLine.unit,
-        unitPriceBilled: unitPrice,
-        lineTotal,
+    const invLineValues: Array<typeof invoiceLines.$inferInsert> = [];
+    const addLine = (productId: string | null, he: string, en: string | null, qty: number, unit: string, price: number) => {
+      const id = crypto.randomUUID();
+      const lineTotal = r2(qty * price);
+      invLineInputs.push({ id, productId, qtyBilled: qty, unit, unitPriceBilled: price, lineTotal });
+      invLineValues.push({
+        id,
+        invoiceId: '', // filled below
+        productId,
+        rawDescription: he,
+        rawDescriptionEn: en,
+        qtyBilled: qty.toString(),
+        unit,
+        unitPriceBilled: price.toFixed(2),
+        lineTotal: lineTotal.toFixed(2),
+        vatRate: (sc.invoiceVatRate ?? vatRate).toString(),
       });
-      invoiceLineValues.push({
-        id: invLineId,
-        productId: poLine.productId,
-        rawDescription: poLine.rawDescription,
-        qtyBilled: qtyBilled.toString(),
-        unit: poLine.unit,
-        unitPriceBilled: unitPrice.toString(),
-        lineTotal: lineTotal.toString(),
-        vatRate: vatRate.toString(),
-      });
+    };
+    for (const g of grRows) {
+      const p = productById.get(g.poLine.productId ?? '');
+      addLine(g.poLine.productId, g.poLine.rawDescription ?? p?.canonicalName ?? '', g.poLine.rawDescriptionEn ?? p?.nameEn ?? null, g.qtyBilled, g.poLine.unit, g.price);
     }
-    const vatAmount = Math.round(subtotal * vatRate * 100) / 100;
-    const totalInclVat = Math.round((subtotal + vatAmount) * 100) / 100;
+    if (sc.extra) {
+      const p = productByEn.get(sc.extra.nameEn);
+      addLine(p?.id ?? null, p?.canonicalName ?? sc.extra.nameEn, sc.extra.nameEn, sc.extra.qty, p?.defaultUnit ?? 'יח׳', sc.extra.price);
+    }
+    const subtotal = r2(invLineInputs.reduce((a, l) => a + Math.round(l.lineTotal * 100), 0) / 100);
+    const vatAmount = r2(subtotal * (sc.invoiceVatRate ?? vatRate));
+    const totalInclVat = r2(subtotal + vatAmount);
 
     const [invoice] = await db
       .insert(invoices)
       .values({
         restaurantId,
-        supplierId: po.supplierId,
+        supplierId: supplier.id,
         invoiceNumber: invNumber,
         invoiceDate: receivedAt,
+        dueDate: new Date(receivedAt.getTime() + 30 * DAY_MS),
         totalExclVat: subtotal.toFixed(2),
         vatAmount: vatAmount.toFixed(2),
         totalInclVat: totalInclVat.toFixed(2),
         status: 'matched',
         source: 'photo',
+        ocrConfidence: '0.970',
+        createdBy: receiverId,
+        createdAt: receivedAt,
+        updatedAt: receivedAt,
       })
       .returning();
-    await db.insert(invoiceLines).values(
-      invoiceLineValues.map((v) => ({ ...v, invoiceId: invoice!.id })),
-    );
+    await db.insert(invoiceLines).values(invLineValues.map((v) => ({ ...v, invoiceId: invoice!.id })));
 
-    // Price history (for leak quantification + sparklines).
-    for (const v of invoiceLineValues) {
+    for (const v of invLineValues) {
       if (!v.productId) continue;
       await db.insert(priceHistory).values({
         restaurantId,
         productId: v.productId,
-        supplierId: po.supplierId,
+        supplierId: supplier.id,
         observedAt: receivedAt,
         unitPrice: v.unitPriceBilled,
         qty: v.qtyBilled,
@@ -186,16 +308,10 @@ async function main() {
       });
     }
 
-    // Run the REAL engine.
+    // ── the REAL engine ────────────────────────────────────────────────
+    const known = knownBySupplier.get(supplier.id) ?? new Set<string>();
     const input: MatchInput = {
-      invoice: {
-        invoiceNumber: invNumber,
-        invoiceDate: receivedAt,
-        supplierId: po.supplierId,
-        totalExclVat: subtotal,
-        vatAmount,
-        totalInclVat,
-      },
+      invoice: { invoiceNumber: invNumber, invoiceDate: receivedAt, supplierId: supplier.id, totalExclVat: subtotal, vatAmount, totalInclVat },
       poLines: lines.map((l) => ({
         id: l.id,
         productId: l.productId,
@@ -203,22 +319,21 @@ async function main() {
         unit: l.unit,
         unitPriceExpected: l.unitPriceExpected ? Number(l.unitPriceExpected) : null,
       })),
-      grLines: grLineRows.map(({ poLine, grl, qtyReceived }) => ({
-        id: grl.id,
-        poLineId: poLine.id,
-        productId: poLine.productId,
-        qtyReceived,
-      })),
+      grLines: grRows.map((g) => ({ id: g.grLineId, poLineId: g.poLine.id, productId: g.poLine.productId, qtyReceived: g.qtyReceived })),
       invoiceLines: invLineInputs,
       vatRate,
       tolerances,
-      knownInvoiceNumbers,
+      // A COPY: the engine must see only the numbers known BEFORE this invoice.
+      // (The old generator added the number to the same Set before runMatch, so
+      // every invoice flagged itself as DUPLICATE_INVOICE — 100% "leak".)
+      knownInvoiceNumbers: new Set(known),
       expectedDeliveryDate: po.expectedDeliveryAt ?? undefined,
     };
-    // Run the engine BEFORE registering this number: `input` holds the same Set
-    // by reference, so adding first made every demo invoice its own duplicate.
     const result = runMatch(input);
-    knownInvoiceNumbers.add(invNumber);
+    known.add(invNumber);
+    knownBySupplier.set(supplier.id, known);
+
+    const recent = receivedAt >= openSince;
     const [matchRun] = await db
       .insert(matchRuns)
       .values({
@@ -232,20 +347,23 @@ async function main() {
       })
       .returning();
 
-    const rolesNotified = new Set<UserRole>();
+    let invoiceHasOpenBlock = false;
     for (const d of result.discrepancies) {
       const ctx: ApprovalContext = {
         discrepancy: { type: d.type, severity: d.severity, deltaAmount: d.deltaAmount },
-        matchRun: {
-          totalDiscrepancyAmount: result.totalDiscrepancyAmount,
-          totalInvoiceAmount: totalInclVat,
-          poExists: true,
-        },
+        matchRun: { totalDiscrepancyAmount: result.totalDiscrepancyAmount, totalInvoiceAmount: totalInclVat, poExists: true },
       };
       const decision = evaluateApproval(ctx, rules);
-      const status = decision.action === 'auto_approve' ? 'accepted' : 'open';
-      if (status === 'open') openDiscrepancies++;
-      if (decision.requiredRole && status === 'open') rolesNotified.add(decision.requiredRole);
+      const auto = decision.action === 'auto_approve';
+      const status = auto ? 'accepted' : recent ? 'open' : 'resolved';
+      if (status === 'open') {
+        openCount += 1;
+        if (d.severity === 'block') invoiceHasOpenBlock = true;
+      }
+      if (receivedAt >= monthStart && d.severity !== 'info') {
+        surfacedMtd += Math.abs(d.deltaAmount);
+        if (status === 'open') openMtd += Math.abs(d.deltaAmount);
+      }
       await db.insert(discrepancies).values({
         matchRunId: matchRun!.id,
         restaurantId,
@@ -263,24 +381,123 @@ async function main() {
         ruleId: decision.ruleId,
         ruleName: decision.ruleName,
         resolutionStatus: status,
+        resolvedBy: status === 'resolved' ? managerId : null,
+        resolvedAt: status === 'resolved' ? new Date(receivedAt.getTime() + 2 * DAY_MS) : null,
+        resolutionNote: status === 'resolved' ? 'זיכוי התקבל מהספק' : null,
+        createdAt: receivedAt,
       });
     }
+    if (receivedAt >= monthStart) spendMtd += subtotal;
 
-    await db.insert(activityEvents).values({
-      restaurantId,
-      eventType: 'invoice_matched',
-      title: `חשבונית ${invNumber} הותאמה`,
-      detail: `${supplier?.name ?? 'ספק'} · ${result.discrepancies.length} חריגות · הפסד פוטנציאלי ₪${result.totalDiscrepancyAmount.toFixed(0)}`,
-      entityType: 'match_run',
-      entityId: matchRun!.id,
-      metadata: {},
-    });
+    const finalStatus = invoiceHasOpenBlock ? 'disputed' : recent ? 'matched' : 'paid';
+    if (finalStatus !== 'matched') {
+      await db.update(invoices).set({ status: finalStatus, updatedAt: receivedAt }).where(eq(invoices.id, invoice!.id));
+    }
 
-    made++;
+    const issues = result.discrepancies.filter((d) => d.severity !== 'info').length;
+    await db.insert(activityEvents).values([
+      {
+        restaurantId,
+        eventType: 'invoice_received',
+        title: `חשבונית ${invNumber} התקבלה`,
+        detail: `${supplier.name} · ₪${totalInclVat.toFixed(0)} כולל מע״מ`,
+        entityType: 'invoice',
+        entityId: invoice!.id,
+        actorId: receiverId,
+        metadata: {},
+        createdAt: receivedAt,
+      },
+      {
+        restaurantId,
+        eventType: 'invoice_matched',
+        title: `חשבונית ${invNumber} הותאמה`,
+        detail: issues
+          ? `${supplier.name} · ${issues} חריגות · ₪${result.totalDiscrepancyAmount.toFixed(0)} בבדיקה`
+          : `${supplier.name} · תואמת להזמנה ולקבלה`,
+        entityType: 'match_run',
+        entityId: matchRun!.id,
+        metadata: {},
+        createdAt: new Date(receivedAt.getTime() + 60 * 1000),
+      },
+    ]);
+    made += 1;
   }
 
+  // ── consolidated invoices (חשבוניות ריכוז): parsed, PENDING, deliberately calm ──
+  const consolidated: Array<{ supplierEn: string; number: string; items: Array<[string, number]> }> = [
+    { supplierEn: "Brenner's Bakery", number: 'BR-R-2610', items: [['Burger buns', 180], ['Pita bread', 360], ['Sourdough loaf', 30]] },
+    { supplierEn: 'Galilee Dairies', number: 'GD-R-2610', items: [['Milk 3%', 60], ['Heavy cream 38%', 20], ['Eggs L (tray of 30)', 12]] },
+  ];
+  for (const c of consolidated) {
+    const supplier = supplierRows.find((s) => s.nameEn === c.supplierEn);
+    if (!supplier) continue;
+    const lines = c.items
+      .map(([en, qty]) => ({ p: productByEn.get(en), qty }))
+      .filter((x): x is { p: NonNullable<typeof x.p>; qty: number } => Boolean(x.p));
+    const priceOf = async (productId: string) => {
+      const [row] = await db
+        .select({ price: poLines.unitPriceExpected })
+        .from(poLines)
+        .where(eq(poLines.productId, productId))
+        .limit(1);
+      return Number(row?.price ?? 0);
+    };
+    const priced = [];
+    for (const l of lines) priced.push({ ...l, price: await priceOf(l.p.id) });
+    const subtotal = r2(priced.reduce((a, l) => a + Math.round(l.qty * l.price * 100), 0) / 100);
+    const vatAmount = r2(subtotal * vatRate);
+    const at = new Date(todayStart.getTime() - 16 * 60 * 60 * 1000);
+    const [inv] = await db
+      .insert(invoices)
+      .values({
+        restaurantId,
+        supplierId: supplier.id,
+        invoiceNumber: c.number,
+        invoiceDate: at,
+        totalExclVat: subtotal.toFixed(2),
+        vatAmount: vatAmount.toFixed(2),
+        totalInclVat: r2(subtotal + vatAmount).toFixed(2),
+        status: 'parsed',
+        source: 'email',
+        ocrConfidence: '0.940',
+        createdAt: at,
+        updatedAt: at,
+      })
+      .returning();
+    await db.insert(invoiceLines).values(
+      priced.map((l) => ({
+        invoiceId: inv!.id,
+        productId: l.p.id,
+        rawDescription: `ריכוז תעודות משלוח — ${l.p.canonicalName}`,
+        rawDescriptionEn: `Consolidated delivery notes — ${l.p.nameEn}`,
+        qtyBilled: l.qty.toString(),
+        unit: l.p.defaultUnit ?? 'יח׳',
+        unitPriceBilled: l.price.toFixed(2),
+        lineTotal: r2(l.qty * l.price).toFixed(2),
+        vatRate: vatRate.toString(),
+      })),
+    );
+    await db.insert(activityEvents).values({
+      restaurantId,
+      eventType: 'invoice_received',
+      title: `חשבונית ריכוז ${c.number} התקבלה`,
+      detail: `${supplier.name} · ממתינה להתאמה מול תעודות המשלוח של החודש`,
+      entityType: 'invoice',
+      entityId: inv!.id,
+      metadata: { consolidated: true },
+      createdAt: at,
+    });
+  }
+
+  // Price baselines (the worker's baselines job) so the leaks page has its p50/p90.
+  const baselines = await computeBaselines(db, restaurantId, { windowDays: 90 });
+
+  const pct = spendMtd > 0 ? (surfacedMtd / spendMtd) * 100 : 0;
   console.log(
-    `[seed-demo] matched ${made} invoices · ${openDiscrepancies} open discrepancies in the approvals queue`,
+    `[seed-demo] matched ${made} invoices · ${openCount} open in the approvals queue · ${consolidated.length} consolidated invoices pending · ${baselines.length} baselines`,
+  );
+  console.log(
+    `[seed-demo] month-to-date: spend ₪${spendMtd.toFixed(0)} · leak surfaced ₪${surfacedMtd.toFixed(0)} (${pct.toFixed(1)}%) · still open ₪${openMtd.toFixed(0)}`,
   );
   await db.$client.end();
 }
