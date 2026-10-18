@@ -110,7 +110,10 @@ export function ReceivingWizard({
   const registerInvoice = trpc.receiving.registerInvoice.useMutation();
   const markGrLine = trpc.receiving.markGrLine.useMutation();
   const submitReceipt = trpc.receiving.submitReceipt.useMutation();
-  const uploadScan = trpc.scans.upload.useMutation();
+  // networkMode 'always': React Query's default ('online') PAUSES a mutation
+  // while the device is offline — the receiver saw "Uploading…" spin forever.
+  // Fail fast instead so the network message (and Retake) shows.
+  const uploadScan = trpc.scans.upload.useMutation({ networkMode: 'always' });
   const ensureEnglish = trpc.receiving.ensureEnglish.useMutation();
 
   /**

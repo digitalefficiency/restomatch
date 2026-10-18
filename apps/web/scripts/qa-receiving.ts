@@ -115,15 +115,16 @@ async function freshPo(tag: string): Promise<{ poId: string; names: string[] }> 
   const [r] = await db.select().from(restaurants).where(eq(restaurants.name, 'כפר הזיתים')).limit(1);
   if (!r) throw new Error('seeded restaurant not found — run ./scripts/dev-setup.sh');
   restaurantId = r.id;
-  const prods = await db
-    .select()
-    .from(products)
-    .where(
-      and(
-        eq(products.restaurantId, r.id),
-        inArray(products.canonicalName, ['חזה עוף', 'עגבניה שרי', 'מלפפון חממה', 'שמן זית כתית']),
-      ),
-    );
+  // Prefer these names; the demo seed changes over time, so top up to 4 lines
+  // from the rest of the tenant's catalog (Hebrew names only).
+  const PREFERRED = ['חזה עוף', 'עגבניה שרי', 'מלפפון חממה', 'שמן זית כתית'];
+  const all = await db.select().from(products).where(eq(products.restaurantId, r.id));
+  const hebrew = all.filter((p) => /[\u0590-\u05FF]/.test(p.canonicalName));
+  const prods = [
+    ...PREFERRED.map((n) => hebrew.find((p) => p.canonicalName === n)).filter((p): p is (typeof all)[number] => Boolean(p)),
+    ...hebrew.filter((p) => !PREFERRED.includes(p.canonicalName)).sort((a, b) => a.canonicalName.localeCompare(b.canonicalName)),
+  ].slice(0, 4);
+  if (prods.length < 4) throw new Error(`seeded catalog has only ${prods.length} Hebrew products`);
   const [sup] = await db.select().from(suppliers).where(eq(suppliers.restaurantId, r.id)).limit(1);
   const when = new Date();
   when.setHours(Math.min(when.getHours() + 1, 23), 0, 0, 0);
@@ -302,7 +303,7 @@ async function main() {
     const [gr] = await db.select().from(goodsReceipts).where(eq(goodsReceipts.poId, poId));
     check(gr?.status === 'completed' || gr?.status === 'partial', `receipt closed once (${gr?.status})`);
     const lines = await db.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, enInvoiceId));
-    check(lines.length === 4 && lines.every((l) => l.rawDescriptionEn), 'invoice lines have English persisted');
+    check(lines.length === names.length && lines.every((l) => l.rawDescriptionEn), `invoice lines have English persisted (${lines.filter((l) => l.rawDescriptionEn).length}/${lines.length})`);
     // Discrepancies: the dev stub bills line 1 ~8% over the agreed price.
     let runs: unknown[] = [];
     for (let i = 0; i < 20 && runs.length === 0; i += 1) {
@@ -466,19 +467,16 @@ async function main() {
     await ctx.close();
   });
 
-  await scenario('I', 'chef · en — no receiving rights: translated error, never raw server text', async (check) => {
+  await scenario('I', 'chef · en — no receiving rights: the wizard is not reachable, no raw server text', async (check) => {
     const { poId } = await freshPo('I');
     const { ctx, page } = await session('chef', { mobile: false, locale: 'en' });
-    await openWizard(page, poId);
-    await pick(page, 'chef.png', 'image/png', fx.smallPng);
-    await waitUploaded(page);
-    await page.getByRole('button', { name: PROCESS }).click();
-    const alert = page.getByRole('alert').first();
-    await alert.waitFor();
-    const txt = await alert.innerText();
-    check(!/Required role|TRPC|Internal server error/i.test(txt), `translated error ("${txt.trim()}")`);
-    check(!/[֐-׿]/.test(txt), 'no Hebrew in the English error');
-    await shot(page, 'I-chef-forbidden-en');
+    await page.goto(`${BASE}/dashboard/receiving/${poId}`);
+    await page.waitForLoadState('networkidle').catch(() => {});
+    check(!/\/dashboard\/receiving\//.test(page.url()), `chef is redirected away from the receiving wizard (${new URL(page.url()).pathname})`);
+    check((await page.locator('input[type="file"]').count()) === 0, 'no upload control for a chef');
+    const body = await page.locator('body').innerText();
+    check(!/Required role|TRPC|Internal server error/i.test(body), 'no raw server/role error text');
+    await shot(page, 'I-chef-no-receiving-en');
     await ctx.close();
   });
 
