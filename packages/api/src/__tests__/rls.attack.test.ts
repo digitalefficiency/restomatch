@@ -1,4 +1,4 @@
-import { testDbUrl } from '@restomatch/db';
+import { testDbUrl, type RestaurantSettings } from '@restomatch/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   activityEvents,
@@ -600,7 +600,7 @@ describe('recipes / recipe_items (0057) are tenant-isolated under the app role',
   });
 
   it('recipes.list works through the app role once the flag is on (grants + GUC wiring)', async () => {
-    await ownerDb.update(restaurants).set({ settings: { features: { recipes: true } } }).where(eq(restaurants.id, A.restaurantId));
+    await ownerDb.update(restaurants).set({ settings: { features: { recipes: true } } as unknown as RestaurantSettings }).where(eq(restaurants.id, A.restaurantId));
     const res = await callerFor(A, appDb).recipes.list();
     expect(res.recipes.map((x) => x.name)).toEqual(['rls A dish']);
   });

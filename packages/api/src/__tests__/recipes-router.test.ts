@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createDb, eq, priceHistory, products, restaurants, testDbUrl } from '@restomatch/db';
+import { createDb, eq, priceHistory, products, restaurants, testDbUrl, type RestaurantSettings } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { startOfMonthInTz } from '../routers/recipes';
@@ -22,7 +22,7 @@ function caller(role: Session['role'] = 'owner', tenant: Tenant = T) {
 }
 
 async function setFeatures(restaurantId: string, features: Record<string, boolean> | null) {
-  await db.update(restaurants).set({ settings: features ? { features } : {} }).where(eq(restaurants.id, restaurantId));
+  await db.update(restaurants).set({ settings: (features ? { features } : {}) as unknown as RestaurantSettings }).where(eq(restaurants.id, restaurantId));
 }
 
 const DAY = 86_400_000;

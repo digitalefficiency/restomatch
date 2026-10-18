@@ -1,4 +1,4 @@
-import { testDbUrl } from '@restomatch/db';
+import { testDbUrl, type RestaurantSettings } from '@restomatch/db';
 import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -1434,7 +1434,7 @@ describe('recipes.* (wave 1 food cost) — foreign ids rejected, lists isolated'
   let recipeB: string;
   let subB: string;
   const on = (rid: string) =>
-    db.update(restaurants).set({ settings: { features: { recipes: true } } }).where(eq(restaurants.id, rid));
+    db.update(restaurants).set({ settings: { features: { recipes: true } } as unknown as RestaurantSettings }).where(eq(restaurants.id, rid));
 
   beforeAll(async () => {
     await on(A.restaurantId);
