@@ -280,6 +280,20 @@ export async function getSessionSecurityState(userId: string): Promise<SessionSe
   };
 }
 
+/**
+ * Whether the account behind this login email has 2FA enrolled. Call ONLY after
+ * a successful first factor (it would otherwise reveal enrolment state) — the
+ * /login password action uses it to send the browser straight to /login/2fa so
+ * the address bar shows the real step (not /dashboard behind a middleware hop).
+ */
+export async function twoFactorEnabledForEmail(rawEmail: string): Promise<boolean> {
+  const email = normalizeLoginEmail(rawEmail);
+  if (!email) return false;
+  const [user] = await authDb.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
+  if (!user) return false;
+  return (await getSessionSecurityState(user.id)).twoFactorEnabled;
+}
+
 /* ── Password mutations (B.4) ────────────────────────────────────────────── */
 
 /** Upsert a user's password hash. Does NOT bump tokenVersion (first set-up). */

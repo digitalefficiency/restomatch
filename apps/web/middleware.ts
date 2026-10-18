@@ -95,8 +95,8 @@ export default auth((req) => {
   if (isApi) return NextResponse.next();
 
   const nonce = generateNonce();
-  const csp = buildCsp(nonce);
   const reportOnly = isCspReportOnly();
+  const csp = buildCsp(nonce, { reportOnly });
   // Forward the nonce + CSP on the REQUEST under the enforcing header name so
   // Next.js stamps the nonce onto its own bootstrap scripts EVEN while we ship
   // Report-Only — that way the report stream isn't polluted by framework scripts
