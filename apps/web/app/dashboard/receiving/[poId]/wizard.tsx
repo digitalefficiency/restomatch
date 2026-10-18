@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Check, FileScan, Loader2, Package, Scale } from 'lucide-react';
+import { AlertTriangle, Check, FileScan, Info, Loader2, Package, RefreshCw, Scale } from 'lucide-react';
 
 import { AdjustQuantities } from '@/app/showcase/receiver/_steps/AdjustQuantities';
 import { Confirmed } from '@/app/showcase/receiver/_steps/Confirmed';
@@ -14,18 +14,25 @@ import {
   type CapturedImage,
   type LineMark,
 } from '@/app/showcase/receiver/_state';
-import { TRPCClientError } from '@trpc/client';
 import { trpc } from '@/lib/trpc/client';
 import { useDir, useLocale, useT } from '@/lib/i18n/client';
 import { receiving } from '@/lib/i18n/messages/receiving';
 import type { Translator } from '@/lib/i18n/translate';
-import type { Locale } from '@/lib/i18n/config';
-import { localizeServerError } from '@/lib/serverErrors';
 import type { UploadedScan } from '@/lib/supabase/client';
 import {
   adaptReconciliation,
   type PoLineRow,
 } from './_adapters';
+import { receivingErrorText as errorText } from './_errors';
+import { pollInvoiceUntilRead } from './_poll';
+
+/** How long to keep checking in the background after the receiver moved on. */
+const BACKGROUND_POLL_MS = 10 * 60_000;
+/** After this long on the processing screen, offer "continue with the order". */
+const STILL_READING_AFTER_MS = 30_000;
+
+/** Why the review was built without (fresh) invoice lines. */
+type OcrNotice = null | 'reading' | 'failed' | 'quota' | 'ready';
 
 /** Encode a File to base64 (chunked to avoid call-stack limits on large files). */
 async function fileToBase64(file: File): Promise<string> {
@@ -36,19 +43,6 @@ async function fileToBase64(file: File): Promise<string> {
     binary += String.fromCharCode(...buf.subarray(i, i + CHUNK));
   }
   return btoa(binary);
-}
-
-/**
- * Translate a tRPC / network error for the receiver. Coded domain errors
- * (quota exceeded, inactive subscription, forbidden…) go through the shared
- * localizeServerError; NOT_FOUND gets the receiving-specific wording.
- */
-function errorText(err: unknown, t: Translator<typeof receiving.he>, locale: Locale): string {
-  if (err instanceof TRPCClientError) {
-    const code = (err.data as { code?: string } | undefined)?.code;
-    if (code === 'NOT_FOUND') return t('errors.notFound');
-  }
-  return localizeServerError(err, locale, t('errors.generic'));
 }
 
 interface PoForClient {
@@ -87,7 +81,13 @@ export function ReceivingWizard({
 }) {
   const [step, setStep] = useState<Step>('SCAN_INVOICE');
   const [grId, setGrId] = useState<string | null>(null);
-  const [, setInvoiceId] = useState<string | null>(null);
+  const [invoiceId, setInvoiceId] = useState<string | null>(null);
+  const [ocrNotice, setOcrNotice] = useState<OcrNotice>(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  /** Bumped on retake / skip / unmount — cancels any in-flight poll. */
+  const pollTokenRef = useRef(0);
+  const skipWaitRef = useRef(false);
+  const submittingRef = useRef(false);
   const [image, setImage] = useState<CapturedImage | null>(null);
   const [result, setResult] = useState<ReconciliationResult | null>(null);
   const [marks, setMarks] = useState<Record<string, LineMark>>({});
@@ -184,7 +184,7 @@ export function ReceivingWizard({
       // Without an uploaded public URL we cannot register/OCR — fall back to a
       // PO-only projection so the receiver can still record quantities.
       if (!captured.publicUrl) {
-        await buildFromPoOnly();
+        await buildFromPoOnly(grId);
         capturingRef.current = false;
         return;
       }
@@ -204,17 +204,31 @@ export function ReceivingWizard({
         });
         setInvoiceId(reg.invoiceId);
 
-        let invoice = await pollInvoice(reg.invoiceId);
-        if (invoice.status === 'ocr_pending') setError(t('errors.ocrTimeout'));
-        if (locale === 'en') {
-          await ensureEnglishFor({ invoiceId: reg.invoiceId });
-          invoice = await utils.receiving.getInvoice.fetch({ invoiceId: reg.invoiceId });
+        const token = ++pollTokenRef.current;
+        skipWaitRef.current = false;
+        setElapsedMs(0);
+        const { outcome, invoice } = await pollInvoiceUntilRead({
+          fetch: () => utils.receiving.getInvoice.fetch({ invoiceId: reg.invoiceId }),
+          onTick: setElapsedMs,
+          isCancelled: () => pollTokenRef.current !== token || skipWaitRef.current,
+        });
+        if (pollTokenRef.current !== token) return; // retaken meanwhile
+        if (outcome === 'ready' && invoice) {
+          await showInvoice(activeGrId, reg.invoiceId);
+        } else if (outcome === 'failed') {
+          setOcrNotice(invoice?.ocrFailureReason === 'quota_exceeded' ? 'quota' : 'failed');
+          await buildFromPoOnly(activeGrId);
+        } else {
+          // Timed out (or the receiver chose not to wait): receive against the
+          // order now, keep checking quietly, and offer the result when ready.
+          setOcrNotice('reading');
+          await buildFromPoOnly(activeGrId);
+          void watchInBackground(activeGrId, reg.invoiceId, token);
         }
-        await buildReconciliation(activeGrId, invoice);
       } catch (err) {
         setError(errorText(err, t, locale));
         // Degrade gracefully to a PO-only table so receiving still completes.
-        await buildFromPoOnly();
+        await buildFromPoOnly(grId);
       } finally {
         capturingRef.current = false;
       }
@@ -223,19 +237,47 @@ export function ReceivingWizard({
     [grId, po.id, po.supplierId, locale],
   );
 
-  /** Poll getInvoice until OCR leaves 'ocr_pending' (or a budget elapses). */
-  async function pollInvoice(id: string) {
-    const MAX_ATTEMPTS = 30; // ~30s at 1s cadence
-    for (let i = 0; i < MAX_ATTEMPTS; i += 1) {
-      const inv = await utils.receiving.getInvoice.fetch({ invoiceId: id });
-      if (inv.status !== 'ocr_pending') return inv;
-      await new Promise((res) => setTimeout(res, 1000));
-    }
-    // Timed out — return the latest snapshot (may still have no lines yet).
-    return utils.receiving.getInvoice.fetch({ invoiceId: id });
+  /** OCR finished: (English names if needed) → build the review from it. */
+  async function showInvoice(activeGrId: string, id: string) {
+    if (locale === 'en') await ensureEnglishFor({ invoiceId: id });
+    const invoice = await utils.receiving.getInvoice.fetch({ invoiceId: id });
+    setOcrNotice(null);
+    setError(null);
+    await buildReconciliation(activeGrId, invoice);
   }
 
-  async function buildReconciliation(activeGrId: string, invoice: Awaited<ReturnType<typeof pollInvoice>>) {
+  /** Keep checking after the receiver moved on; flag the result when it lands. */
+  async function watchInBackground(activeGrId: string, id: string, token: number) {
+    const { outcome, invoice } = await pollInvoiceUntilRead({
+      fetch: () => utils.receiving.getInvoice.fetch({ invoiceId: id }),
+      maxMs: BACKGROUND_POLL_MS,
+      isCancelled: () => pollTokenRef.current !== token,
+      sleep: (ms) => new Promise((r) => setTimeout(r, Math.max(ms, 5_000))),
+    });
+    if (pollTokenRef.current !== token) return;
+    if (outcome === 'ready') setOcrNotice('ready');
+    else if (outcome === 'failed') setOcrNotice(invoice?.ocrFailureReason === 'quota_exceeded' ? 'quota' : 'failed');
+  }
+
+  /** Manual refresh from the review screen ("still reading" / "ready" banner). */
+  async function refreshInvoice() {
+    if (!invoiceId || !grId) return;
+    try {
+      const inv = await utils.receiving.getInvoice.fetch({ invoiceId });
+      if (inv.ocrFailed) setOcrNotice(inv.ocrFailureReason === 'quota_exceeded' ? 'quota' : 'failed');
+      else if (inv.status !== 'ocr_pending') await showInvoice(grId, invoiceId);
+    } catch (err) {
+      setError(errorText(err, t, locale));
+    }
+  }
+
+  // Cancel polling on unmount.
+  useEffect(() => () => {
+    pollTokenRef.current += 1;
+  }, []);
+
+  type InvoiceSnapshot = Awaited<ReturnType<typeof utils.receiving.getInvoice.fetch>>;
+  async function buildReconciliation(activeGrId: string, invoice: InvoiceSnapshot) {
     const receipt = await utils.receiving.getReceipt.fetch({ grId: activeGrId });
     const adapted = adaptReconciliation({
       po: {
@@ -259,9 +301,9 @@ export function ReceivingWizard({
   }
 
   /** No invoice (or OCR failed): project the PO + receipt lines alone. */
-  async function buildFromPoOnly() {
+  async function buildFromPoOnly(knownGrId: string | null) {
     try {
-      let activeGrId = grId;
+      let activeGrId = knownGrId ?? grId;
       if (!activeGrId) {
         const r = await startReceipt.mutateAsync({ poId: po.id });
         activeGrId = r.receiptId;
@@ -303,7 +345,11 @@ export function ReceivingWizard({
   /** Persist every touched line via markGrLine, then close the receipt. */
   async function submit() {
     if (!grId || !result) return;
+    // Double-tap on "close receipt" must not submit twice.
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setError(null);
+    pollTokenRef.current += 1; // stop background OCR polling
     try {
       // Persist marks that map to a real gr_line.
       for (const line of result.lines) {
@@ -329,6 +375,8 @@ export function ReceivingWizard({
       await utils.receiving.todayExpectations.invalidate();
     } catch (err) {
       setError(errorText(err, t, locale));
+    } finally {
+      submittingRef.current = false;
     }
   }
 
@@ -367,7 +415,20 @@ export function ReceivingWizard({
         />
       ) : null}
 
-      {step === 'PROCESSING' ? <ProcessingPoll t={t} dir={dir} /> : null}
+      {step === 'PROCESSING' ? (
+        <ProcessingPoll
+          t={t}
+          dir={dir}
+          stillReading={elapsedMs >= STILL_READING_AFTER_MS}
+          onSkip={() => {
+            skipWaitRef.current = true;
+          }}
+        />
+      ) : null}
+
+      {ocrNotice && (step === 'RECONCILIATION_REVIEW' || step === 'ADJUST_QUANTITIES') ? (
+        <OcrNoticeBanner notice={ocrNotice} t={t} dir={dir} onRefresh={() => void refreshInvoice()} />
+      ) : null}
 
       {step === 'RECONCILIATION_REVIEW' && result ? (
         <Reconciliation
@@ -375,6 +436,9 @@ export function ReceivingWizard({
           onQuickConfirm={() => void submit()}
           onContinueAdjust={() => setStep('ADJUST_QUANTITIES')}
           onRetake={() => {
+            pollTokenRef.current += 1; // drop the old scan's pending result
+            setOcrNotice(null);
+            setInvoiceId(null);
             setImage(null);
             setResult(null);
             setStep('SCAN_INVOICE');
@@ -429,7 +493,63 @@ const PROC_STEPS = [
   { id: 'compare', label: 'steps.processing.compare', icon: Scale },
 ] as const;
 
-function ProcessingPoll({ t, dir }: { t: Translator<typeof receiving.he>; dir: 'rtl' | 'ltr' }) {
+/** Banner on the review screens about the invoice read (EN-3 / EN-4). Calm tone. */
+function OcrNoticeBanner({
+  notice,
+  t,
+  dir,
+  onRefresh,
+}: {
+  notice: Exclude<OcrNotice, null>;
+  t: Translator<typeof receiving.he>;
+  dir: 'rtl' | 'ltr';
+  onRefresh: () => void;
+}) {
+  const text =
+    notice === 'reading'
+      ? t('errors.ocrTimeout')
+      : notice === 'ready'
+        ? t('steps.processing.readyLater')
+        : notice === 'quota'
+          ? t('errors.ocrQuota')
+          : t('errors.ocrFailed');
+  const canRefresh = notice === 'reading' || notice === 'ready';
+  return (
+    <div
+      role="status"
+      data-testid={`ocr-notice-${notice}`}
+      dir={dir}
+      className={`mb-4 flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3 text-sm ${
+        notice === 'ready' ? 'border-primary/30 bg-primary/8 text-ink' : 'border-line bg-surface-2 text-ink'
+      }`}
+    >
+      <Info className="h-4 w-4 shrink-0 text-muted" aria-hidden="true" />
+      <span className="flex-1">{text}</span>
+      {canRefresh ? (
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-line bg-surface px-4 py-2 font-medium text-ink hover:border-primary/40"
+        >
+          <RefreshCw className="h-4 w-4" aria-hidden="true" />
+          {notice === 'ready' ? t('steps.processing.showResults') : t('steps.processing.refresh')}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function ProcessingPoll({
+  t,
+  dir,
+  stillReading,
+  onSkip,
+}: {
+  t: Translator<typeof receiving.he>;
+  dir: 'rtl' | 'ltr';
+  stillReading: boolean;
+  onSkip: () => void;
+}) {
   // Cycle the active indicator while the wizard polls getInvoice in the
   // background; the wizard flips the step once OCR resolves.
   const [active, setActive] = useState(0);
@@ -442,8 +562,8 @@ function ProcessingPoll({ t, dir }: { t: Translator<typeof receiving.he>; dir: '
     <div dir={dir} className="mx-auto max-w-md py-6">
       <StepHeader
         eyebrow={t('steps.processing.eyebrow')}
-        title={t('steps.processing.title')}
-        subtitle={t('steps.processing.subtitleLive')}
+        title={stillReading ? t('steps.processing.stillReadingTitle') : t('steps.processing.title')}
+        subtitle={stillReading ? t('steps.processing.stillReading') : t('steps.processing.subtitleLive')}
       />
       <div className="relative overflow-hidden rounded-2xl border border-line bg-surface p-6 shadow-card">
         <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px flow-stream" />
@@ -491,6 +611,16 @@ function ProcessingPoll({ t, dir }: { t: Translator<typeof receiving.he>; dir: '
           })}
         </div>
       </div>
+      {stillReading ? (
+        <button
+          type="button"
+          onClick={onSkip}
+          data-testid="skip-ocr-wait"
+          className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-line bg-surface-2 px-5 py-3 font-medium text-ink hover:border-primary/40"
+        >
+          {t('steps.processing.continueWithOrder')}
+        </button>
+      ) : null}
     </div>
   );
 }

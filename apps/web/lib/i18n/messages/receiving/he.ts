@@ -71,6 +71,12 @@ export const he = {
       running: 'מתבצע…',
       waiting: 'ממתין',
       progress: 'שלב {current} מתוך {total}',
+      stillReadingTitle: 'עדיין קוראים את החשבונית…',
+      stillReading: 'זה לוקח יותר מהרגיל (עד כ-2 דקות). אפשר לחכות, או להמשיך לקלוט מול ההזמנה — נציג את תוצאות החשבונית כשיהיו מוכנות.',
+      continueWithOrder: 'המשך לקלוט מול ההזמנה',
+      readyLater: 'החשבונית נקראה. הציגו את התוצאות כדי להצליב אותה מול מה שהגיע.',
+      showResults: 'הצג תוצאות',
+      refresh: 'רענן',
       noItems: 'לא זוהו פריטים בחשבונית',
     },
     recon: {
@@ -96,6 +102,7 @@ export const he = {
       ordered: 'הוזמן',
       invoiced: 'חויב',
       retake: 'צלם חשבונית מחדש',
+      pendingBanner: '{count} שורות לא הוצלבו אוטומטית — בדקו אותן מול החשבונית. זו לא חריגה, רק בדיקה.',
       quickConfirm: 'הכל תקין — אישור מהיר',
       continueAdjust: 'המשך להתאמת כמויות',
     },
@@ -105,6 +112,7 @@ export const he = {
       price_diff: 'מחיר שונה',
       unordered: 'לא בהזמנה',
       missing_from_invoice: 'חסר בחשבונית',
+      pending_review: 'לבדיקה ידנית',
     },
     adjust: {
       title: 'כמה הגיע באמת?',
@@ -150,6 +158,9 @@ export const he = {
   unnamedItem: 'פריט ללא שם',
   unorderedItem: 'פריט שלא הוזמן',
   errors: {
+    ocrFailed: 'לא הצלחנו לקרוא את החשבונית. אפשר להמשיך לקלוט מול ההזמנה, או לצלם שוב.',
+    ocrQuota: 'מכסת סריקות החשבוניות לחודש הסתיימה. אפשר להמשיך לקלוט מול ההזמנה.',
+    network: 'אין חיבור לרשת. בדקו את החיבור ונסו שוב.',
     generic: 'משהו השתבש. נסו שוב.',
     upload: 'העלאת הסריקה נכשלה: {message}',
     ocrTimeout: 'קריאת החשבונית לוקחת יותר מהרגיל — אפשר להמשיך לקלוט מול ההזמנה.',

@@ -70,6 +70,12 @@ export const en: Shape<typeof he> = {
       running: 'Working…',
       waiting: 'Waiting',
       progress: 'Step {current} of {total}',
+      stillReadingTitle: 'Still reading the invoice…',
+      stillReading: "This is taking longer than usual (up to ~2 minutes). You can wait, or keep receiving against the order — we'll show the invoice results when they're ready.",
+      continueWithOrder: 'Continue with the order',
+      readyLater: 'The invoice has been read. Show the results to check it against what arrived.',
+      showResults: 'Show results',
+      refresh: 'Refresh',
       noItems: 'No items were found on the invoice',
     },
     recon: {
@@ -95,6 +101,7 @@ export const en: Shape<typeof he> = {
       ordered: 'Ordered',
       invoiced: 'Invoiced',
       retake: 'Retake the invoice',
+      pendingBanner: '{count} lines were not matched automatically — check them against the invoice. This is not a discrepancy, just a check.',
       quickConfirm: 'All good — quick confirm',
       continueAdjust: 'Continue to quantities',
     },
@@ -104,6 +111,7 @@ export const en: Shape<typeof he> = {
       price_diff: 'Price differs',
       unordered: 'Not ordered',
       missing_from_invoice: 'Missing on invoice',
+      pending_review: 'Check by hand',
     },
     adjust: {
       title: 'How much really arrived?',
@@ -149,6 +157,9 @@ export const en: Shape<typeof he> = {
   unnamedItem: 'Unnamed item',
   unorderedItem: 'Item not on the order',
   errors: {
+    ocrFailed: "We couldn't read the invoice. You can keep receiving against the order, or retake the photo.",
+    ocrQuota: "This month's invoice-scan quota is used up. You can keep receiving against the order.",
+    network: 'No connection. Check your network and try again.',
     generic: 'Something went wrong. Please try again.',
     upload: 'Uploading the scan failed: {message}',
     ocrTimeout: 'Reading the invoice is taking longer than usual — you can keep receiving against the order.',

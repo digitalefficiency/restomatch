@@ -64,6 +64,16 @@ export interface InvoiceMeta {
   ocrConfidence: string | number | null;
 }
 
+/** Description key for pairing: no quote marks / niqqud, collapsed spaces. */
+function normDesc(v: string | null | undefined): string {
+  return (v ?? '')
+    .replace(/[\u0591-\u05C7]/g, '')
+    .replace(/["'\u05F3\u05F4\u2018\u2019\u201C\u201D]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
 function num(v: string | number | null | undefined): number | null {
   if (v === null || v === undefined || v === '') return null;
   const n = typeof v === 'number' ? v : Number(v);
@@ -105,9 +115,8 @@ export interface ReceivingAdaptResult {
 
 /**
  * Build the reconciliation projection. `invoiceLines` may be empty (before OCR /
- * before an invoice is registered) — in that case we project the PO lines alone
- * so the table still renders the order, all as `matched` placeholders driven by
- * the receipt's recorded qty.
+ * when OCR failed or timed out) — then every PO line is "pending review" (the
+ * receiver confirms what arrived), never "missing on invoice".
  */
 export function adaptReconciliation(args: {
   po: PoHeader;
@@ -127,14 +136,33 @@ export function adaptReconciliation(args: {
     if (r.poLineId) grByPoLine.set(r.poLineId, r);
   }
 
-  // Best-effort invoice line lookup by productId, then by raw description.
+  // Best-effort invoice line lookup by productId, then by (normalized) raw
+  // description. Each invoice line pairs with at most one PO line.
   const invByProduct = new Map<string, InvoiceLineRow>();
   const invByDesc = new Map<string, InvoiceLineRow>();
   for (const il of invoiceLines) {
-    if (il.productId) invByProduct.set(il.productId, il);
-    if (il.rawDescription) invByDesc.set(il.rawDescription.trim(), il);
+    if (il.productId && !invByProduct.has(il.productId)) invByProduct.set(il.productId, il);
+    const d = normDesc(il.rawDescription);
+    if (d && !invByDesc.has(d)) invByDesc.set(d, il);
   }
   const usedInvoiceIds = new Set<string>();
+  const invForPoLine = new Map<string, InvoiceLineRow>();
+  for (const pl of poLines) {
+    let inv: InvoiceLineRow | undefined;
+    if (pl.productId) inv = invByProduct.get(pl.productId);
+    if (!inv) inv = invByDesc.get(normDesc(pl.rawDescription));
+    if (inv && !usedInvoiceIds.has(inv.id)) {
+      usedInvoiceIds.add(inv.id);
+      invForPoLine.set(pl.id, inv);
+    }
+  }
+  // EN-5 (calm UX): only claim "missing on invoice" when the comparison is
+  // conclusive. With no invoice at all, or with invoice lines we could not
+  // link to a product, an unpaired PO line is "pending review", not a leak.
+  const hasUnlinkedInvoiceLines = invoiceLines.some(
+    (il) => !usedInvoiceIds.has(il.id) && !il.productId,
+  );
+  const missingIsConclusive = invoiceLines.length > 0 && !hasUnlinkedInvoiceLines;
 
   const lines: ReconciliationLine[] = [];
   const grLineIdByKey: Record<string, string> = {};
@@ -149,16 +177,16 @@ export function adaptReconciliation(args: {
     const poPrice = num(pl.unitPriceExpected);
     const productName = gr?.productName ?? pl.rawDescription ?? labels.unnamed;
 
-    let inv: InvoiceLineRow | undefined;
-    if (pl.productId) inv = invByProduct.get(pl.productId);
-    if (!inv && pl.rawDescription) inv = invByDesc.get(pl.rawDescription.trim());
-    if (inv) usedInvoiceIds.add(inv.id);
-
+    const inv = invForPoLine.get(pl.id);
     const invoiceQty = inv ? num(inv.qtyBilled) : null;
     const invoicePrice = inv ? num(inv.unitPriceBilled) : null;
     const invoiceLineIndex = inv ? invoiceLineIndexCounter++ : null;
 
-    const { status, deltaIls } = deriveStatus(poQty, invoiceQty, poPrice, invoicePrice);
+    const derived = deriveStatus(poQty, invoiceQty, poPrice, invoicePrice);
+    const { status, deltaIls } =
+      derived.status === 'missing_from_invoice' && !missingIsConclusive
+        ? { status: 'pending_review' as const, deltaIls: 0 }
+        : derived;
 
     const line: ReconciliationLine = {
       invoiceLineIndex,
@@ -207,11 +235,15 @@ export function adaptReconciliation(args: {
     };
   });
 
-  // 2. Invoice lines that never matched a PO line → unordered arrivals.
+  // 2. Invoice lines that never matched a PO line. A line linked to a known
+  // product that isn't on the order is a real "not ordered" arrival; a line we
+  // simply couldn't link (OCR text vs catalog) is "pending review" — no ₪
+  // alarm until a human or the matching engine confirms it (EN-5).
   invoiceLines.forEach((il) => {
     if (usedInvoiceIds.has(il.id)) return;
     const invoiceQty = num(il.qtyBilled);
     const invoicePrice = num(il.unitPriceBilled);
+    const conclusive = Boolean(il.productId);
     const line: ReconciliationLine = {
       invoiceLineIndex: invoiceLineIndexCounter++,
       poLineId: null,
@@ -224,8 +256,8 @@ export function adaptReconciliation(args: {
       invoiceUnit: il.unit ?? null,
       poUnitPrice: null,
       invoiceUnitPrice: invoicePrice,
-      status: 'unordered',
-      deltaIls: Math.round((invoiceQty ?? 0) * (invoicePrice ?? 0) * 100) / 100,
+      status: conclusive ? 'unordered' : 'pending_review',
+      deltaIls: conclusive ? Math.round((invoiceQty ?? 0) * (invoicePrice ?? 0) * 100) / 100 : 0,
     };
     lines.push(line);
     const key = lineKey(line);
@@ -248,6 +280,7 @@ export function adaptReconciliation(args: {
     priceDiffCount: 0,
     unorderedCount: 0,
     missingCount: 0,
+    pendingCount: 0,
     overallConfidence: num(invoiceMeta?.ocrConfidence) ?? 1,
     headlineDelta: 0,
   };
@@ -257,6 +290,7 @@ export function adaptReconciliation(args: {
     if (l.status === 'price_diff') summary.priceDiffCount += 1;
     if (l.status === 'unordered') summary.unorderedCount += 1;
     if (l.status === 'missing_from_invoice') summary.missingCount += 1;
+    if (l.status === 'pending_review') summary.pendingCount += 1;
     summary.headlineDelta += l.deltaIls;
   }
   summary.headlineDelta = Math.round(summary.headlineDelta * 100) / 100;

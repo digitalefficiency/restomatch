@@ -21,7 +21,9 @@ export type LineStatus =
   | 'qty_diff'
   | 'price_diff'
   | 'unordered'
-  | 'missing_from_invoice';
+  | 'missing_from_invoice'
+  /** Neutral: not compared yet / couldn't be paired automatically (calm UX). */
+  | 'pending_review';
 
 export interface ReconciliationLine {
   invoiceLineIndex: number | null;
@@ -70,6 +72,8 @@ export interface ReconciliationResult {
     priceDiffCount: number;
     unorderedCount: number;
     missingCount: number;
+    /** Lines waiting for a manual check (never counted as a leak). */
+    pendingCount?: number;
     overallConfidence: number;
     headlineDelta: number;
   };
