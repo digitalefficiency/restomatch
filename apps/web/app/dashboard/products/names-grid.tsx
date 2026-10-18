@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { originalProps } from '@/lib/i18n/original';
 import Link from 'next/link';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
@@ -234,7 +235,12 @@ export function NamesGrid({ initial, canEdit }: { initial: ListOutput; canEdit: 
                   <span className="truncate text-xs text-muted md:text-sm">
                     <span className="md:hidden">{t('names.supplier')}: </span>
                     {supplier}
-                    {r.category ? <span className="text-subtle"> · {r.category}</span> : null}
+                    {r.category ? (
+                      <span className="text-subtle">
+                        {' · '}
+                        <span {...originalProps(r.category)}>{r.category}</span>
+                      </span>
+                    ) : null}
                   </span>
                 </li>
               );

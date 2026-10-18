@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { UnitText } from '@/lib/components/UnitText';
 import Link from 'next/link';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
@@ -502,7 +503,7 @@ export function CatalogBrowser({
                           maxLength={32}
                         />
                       ) : (
-                        (it.unit ?? '—')
+                        <UnitText unit={it.unit} />
                       )}
                     </td>
                     <td className="px-4 py-3 text-end font-mono tabular-nums text-ink">
@@ -755,7 +756,9 @@ function MobileCards({
                   <dt className="text-subtle">{t('card.sku')}</dt>
                   <dd className="text-end font-mono text-muted">{it.supplierSku ?? '—'}</dd>
                   <dt className="text-subtle">{t('card.unit')}</dt>
-                  <dd className="text-end text-muted">{it.unit ?? '—'}</dd>
+                  <dd className="text-end text-muted">
+                    <UnitText unit={it.unit} />
+                  </dd>
                 </dl>
                 {canEdit ? (
                   <div className="mt-3 flex items-center justify-end gap-1 border-t border-line pt-2">

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { UnitText } from '@/lib/components/UnitText';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { inferRouterOutputs } from '@trpc/server';
@@ -222,7 +223,9 @@ export function ProductEditor({
                     </Link>
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-subtle">{it.supplierSku ?? '—'}</td>
-                  <td className="px-4 py-3 text-muted">{it.unit ?? '—'}</td>
+                  <td className="px-4 py-3 text-muted">
+                    <UnitText unit={it.unit} />
+                  </td>
                   <td className="px-4 py-3 text-end font-mono tabular-nums text-ink">
                     {money(it.listPrice)}
                     {cheapest != null && Number(it.listPrice) === cheapest ? (

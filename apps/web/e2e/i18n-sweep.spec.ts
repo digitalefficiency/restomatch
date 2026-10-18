@@ -103,11 +103,21 @@ async function hebrewLeaks(page: Page): Promise<string[]> {
       if (!visible(el)) continue;
       out.push(`text: ${text.trim().slice(0, 80)}`);
     }
+    // Attributes can't carry a lang island, so an English label that names a
+    // record ("Edit item: אורז יסמין") is fine when that name is shown on the
+    // page as a lang="he" original. Only Hebrew LEFT after removing those
+    // originals counts as an untranslated label.
+    const originals = [...document.querySelectorAll('[lang="he"]')]
+      .map((e) => (e.textContent ?? '').trim())
+      .filter((s) => s && re.test(s))
+      .sort((a, b) => b.length - a.length);
     for (const el of document.querySelectorAll('[placeholder], [aria-label], [title]')) {
       if (el.closest('[lang="he"]')) continue;
       for (const attr of ['placeholder', 'aria-label', 'title']) {
         const v = el.getAttribute(attr);
-        if (v && re.test(v)) out.push(`${attr}: ${v.slice(0, 80)}`);
+        if (!v || !re.test(v)) continue;
+        const rest = originals.reduce((acc, o) => acc.split(o).join(''), v);
+        if (re.test(rest)) out.push(`${attr}: ${v.slice(0, 80)}`);
       }
     }
     return [...new Set(out)];

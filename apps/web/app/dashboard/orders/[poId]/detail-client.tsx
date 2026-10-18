@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { UnitText } from '@/lib/components/UnitText';
 import { useRouter } from 'next/navigation';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
@@ -17,13 +18,12 @@ import {
   useToast,
 } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
-import { originalProps } from '@/lib/i18n/original';
 import { formatDate, formatDateTime, formatNumber } from '@/lib/i18n/format';
 import { components } from '@/lib/i18n/messages/components';
 import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 import { formatIls } from '@/lib/money';
 import { OrderStatusBadge } from '../orders-table';
-import { lineLabel, parsePositive, parsePrice, unitKey } from '../order-logic';
+import { lineLabel, parsePositive, parsePrice } from '../order-logic';
 
 type OrderData = inferRouterOutputs<AppRouter>['orders']['get'];
 type Line = OrderData['lines'][number];
@@ -365,11 +365,3 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
   );
 }
 
-/** Known units are translated in English; anything else is shown as written. */
-function UnitText({ unit }: { unit: string }) {
-  const t = useT(ordersNs);
-  const locale = useLocale();
-  const key = unitKey(unit);
-  if (locale === 'he' || !key) return <span {...originalProps(unit)}>{unit}</span>;
-  return <>{t(`unitNames.${key}`)}</>;
-}

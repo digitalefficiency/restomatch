@@ -93,14 +93,14 @@ const UNIT_ALIASES: Record<string, UnitKey> = {
   'ליטר': 'liter', 'ל׳': 'liter', l: 'liter',
   'מ״ל': 'ml', 'מ"ל': 'ml', ml: 'ml',
   'יח׳': 'unit', "יח'": 'unit', 'יחידה': 'unit', 'יחידות': 'unit', 'יח': 'unit', unit: 'unit', pcs: 'unit',
-  'ארגז': 'box', 'קרטון': 'box', box: 'box',
-  'מארז': 'pack', pack: 'pack',
+  'ארגז': 'box', 'קרטון': 'box', 'קופסה': 'box', box: 'box',
+  'מארז': 'pack', 'חבילה': 'pack', pack: 'pack',
   'בקבוק': 'bottle', 'בקבוקים': 'bottle',
   'חבית': 'barrel',
   'שישייה': 'sixPack', 'שישיה': 'sixPack',
   'פחית': 'can', 'פחיות': 'can',
   'שק': 'bag', 'שקית': 'bag',
-  'מגש': 'tray',
+  'מגש': 'tray', 'תבנית': 'tray',
   'צרור': 'bunch',
 };
 

@@ -236,6 +236,9 @@ describe('order units (English display)', () => {
     expect(unitKey('שישייה')).toBe('sixPack');
     expect(unitKey('ליטר')).toBe('liter');
     expect(unitKey('KG')).toBe('kg');
+    expect(unitKey('קופסה')).toBe('box');
+    expect(unitKey('חבילה')).toBe('pack');
+    expect(unitKey('תבנית')).toBe('tray');
   });
 
   it('returns null for unknown units so the original text is shown', () => {
