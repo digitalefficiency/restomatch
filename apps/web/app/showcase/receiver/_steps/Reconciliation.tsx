@@ -4,6 +4,7 @@ import { useGSAP } from '@gsap/react';
 import { gsap } from 'gsap';
 import { AlertTriangle, ArrowLeft, Check, Clock, Info, Minus, Plus, X, Zap } from 'lucide-react';
 import { useRef } from 'react';
+import { lineTotalIls } from '@/app/dashboard/orders/order-logic';
 import { useDir, useLocale, useT } from '@/lib/i18n/client';
 import { formatPercent } from '@/lib/i18n/format';
 import { receiving } from '@/lib/i18n/messages/receiving';
@@ -11,6 +12,7 @@ import type { Translator } from '@/lib/i18n/translate';
 import { messageTemplates, telLink, waLink } from '@/lib/messageTemplates';
 import { formatIls } from '@/lib/money';
 import type { LineStatus, ReconciliationLine, ReconciliationResult } from '../_mock';
+import { noLinePaired } from '../_state';
 import { HebrewToggle, ItemName, Qty } from './english';
 import { StepHeader } from './SupplierSelect';
 
@@ -58,6 +60,9 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
     0;
 
   const money = (v: number) => formatIls(v, { locale, maximumFractionDigits: 2 });
+
+  // Say "wrong invoice?" instead of listing every line as "pending review".
+  const mismatch = noLinePaired(result.lines);
 
   return (
     <div ref={ref} dir={dir}>
@@ -152,7 +157,16 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
         </div>
       ) : null}
 
-      {(result.summary.pendingCount ?? 0) > 0 ? (
+      {mismatch ? (
+        <div
+          role="status"
+          data-testid="recon-mismatch-banner"
+          className="mb-6 flex items-start gap-3 rounded-2xl border border-warn/40 bg-warn/8 px-5 py-4"
+        >
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warn" aria-hidden="true" />
+          <div className="text-sm text-ink">{t('steps.recon.mismatchBanner')}</div>
+        </div>
+      ) : (result.summary.pendingCount ?? 0) > 0 ? (
         <div
           role="status"
           data-testid="recon-pending-banner"
@@ -300,12 +314,25 @@ function LineQty({
   money: (v: number) => string;
 }) {
   if (qty === null) return <span className="text-subtle">—</span>;
+  // The × sits between its own isolates so it reads "37.5 ליטר × ₪6.43" in
+  // both directions; inside one LTR isolate with the price it drifted to the
+  // far left in RTL ("× 6.43₪ 37.5 ליטר").
   return (
-    <span className="inline-flex flex-wrap items-baseline gap-x-1">
-      <Qty qty={qty} unit={unit} />
+    <span className="flex flex-col gap-0.5" data-testid="line-qty">
+      <span className="inline-flex flex-wrap items-baseline gap-x-1.5">
+        <Qty qty={qty} unit={unit} />
+        {price !== null ? (
+          <>
+            <span className="text-xs text-subtle">×</span>
+            <bdi dir="ltr" className="font-mono text-xs tabular-nums text-subtle">
+              {money(price)}
+            </bdi>
+          </>
+        ) : null}
+      </span>
       {price !== null ? (
-        <bdi dir="ltr" className="font-mono text-xs tabular-nums text-subtle">
-          × {money(price)}
+        <bdi dir="ltr" className="font-mono tabular-nums text-ink">
+          {money(lineTotalIls(qty, price))}
         </bdi>
       ) : null}
     </span>

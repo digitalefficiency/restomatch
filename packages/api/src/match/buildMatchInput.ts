@@ -90,11 +90,21 @@ export async function buildMatchInputForInvoice(
       totalExclVat: invoices.totalExclVat,
       vatAmount: invoices.vatAmount,
       totalInclVat: invoices.totalInclVat,
+      ocrPayload: invoices.ocrPayload,
     })
     .from(invoices)
     .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
     .limit(1);
   if (!inv) return null;
+  // A scan whose number another invoice of this supplier already holds is
+  // stored WITHOUT it (invoices_dedupe_idx; the worker's writeOcrHeader) and
+  // keeps the number in ocr_payload.raw.duplicateOf. Match on that number so
+  // the engine still raises DUPLICATE_INVOICE (block) on the copy.
+  const heldDuplicateNumber = (
+    inv.ocrPayload?.raw as { duplicateOf?: { invoiceNumber?: unknown } } | null | undefined
+  )?.duplicateOf?.invoiceNumber;
+  const invoiceNumber =
+    inv.invoiceNumber ?? (typeof heldDuplicateNumber === 'string' ? heldDuplicateNumber : null);
 
   const invLineRows = await db
     .select({
@@ -310,7 +320,7 @@ export async function buildMatchInputForInvoice(
     invoice: {
       // Normalized (see normalizeInvoiceNumber) — the engine only uses it for
       // duplicate detection + its message, and compares it to the known set.
-      invoiceNumber: normalizeInvoiceNumber(inv.invoiceNumber) ?? '',
+      invoiceNumber: normalizeInvoiceNumber(invoiceNumber) ?? '',
       invoiceDate,
       supplierId: inv.supplierId ?? '',
       totalExclVat: num(inv.totalExclVat),
