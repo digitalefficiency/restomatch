@@ -132,7 +132,7 @@ export function HeroMatch() {
                   data-doc
                   className="flex min-w-0 items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-2 py-1 text-[11px] font-semibold text-primary sm:text-xs"
                 >
-                  <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <Icon className="hidden h-3.5 w-3.5 shrink-0 sm:block" aria-hidden="true" />
                   <span className="truncate">{d.label}</span>
                   <Check className="h-3 w-3 shrink-0" aria-hidden="true" />
                 </span>
@@ -177,14 +177,14 @@ export function HeroMatch() {
                   data-row
                   className="relative grid grid-cols-[minmax(0,1.6fr)_repeat(3,minmax(0,1fr))_auto] items-center gap-x-2 rounded-xl px-2 py-2.5 text-xs sm:text-sm"
                 >
-                  <span className="truncate font-medium text-ink">{t(`visual.${r.key}`)}</span>
-                  <span className={cn('text-center font-mono tabular-nums', r.ordered === null ? 'text-danger' : 'text-muted')}>
+                  <span className="font-medium leading-tight text-ink">{t(`visual.${r.key}`)}</span>
+                  <span className={cn('text-center font-mono text-[11px] tabular-nums sm:text-sm', r.ordered === null ? 'text-danger' : 'text-muted')}>
                     {qty(r.ordered)}
                   </span>
-                  <span className={cn('text-center font-mono tabular-nums', r.status === 'short' ? 'text-danger' : 'text-muted')}>
+                  <span className={cn('text-center font-mono text-[11px] tabular-nums sm:text-sm', r.status === 'short' ? 'text-danger' : 'text-muted')}>
                     {qty(r.received)}
                   </span>
-                  <span className="text-center font-mono tabular-nums text-muted">{qty(r.invoiced)}</span>
+                  <span className="text-center font-mono text-[11px] tabular-nums text-muted sm:text-sm">{qty(r.invoiced)}</span>
                   <span
                     data-status={i}
                     className={cn(

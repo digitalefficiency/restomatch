@@ -186,7 +186,7 @@ export function LeadForm() {
         <span>{MARKETING_CONSENT_TEXT}</span>
       </label>
 
-      <Button type="submit" className="w-full" loading={create.isPending}>
+      <Button type="submit" className="h-12 w-full text-base" loading={create.isPending}>
         {t('lead.submit')}
       </Button>
       <p className="text-center text-xs text-subtle">
