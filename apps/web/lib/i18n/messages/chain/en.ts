@@ -10,6 +10,7 @@ export const en: Shape<typeof he> = {
     chainLink: 'Chain dashboard',
     manageLink: 'Manage branches',
     failed: 'You cannot switch to this branch.',
+    viaOwned: 'Switches to:',
   },
   dashboard: {
     title: 'Chain dashboard',
