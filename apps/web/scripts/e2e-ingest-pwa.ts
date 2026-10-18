@@ -90,7 +90,7 @@ async function restaurantId(): Promise<string> {
 
 async function openPoId(rid: string): Promise<string> {
   const [po] = await sql<{ id: string }[]>`
-    select id from purchase_orders where restaurant_id = ${rid} and status in ('sent','confirmed','partially_received')
+    select id from purchase_orders where restaurant_id = ${rid} and status in ('sent','confirmed')
     order by expected_delivery_at nulls last limit 1`;
   return po!.id;
 }
@@ -204,6 +204,7 @@ async function mobileReceiver(browser: Browser, rid: string, locale: Locale, exp
   console.log(`\n[${PHASE}] mobile receiver offline queue / ${locale}`);
   const poId = await openPoId(rid);
   const context = await browser.newContext({
+    serviceWorkers: 'allow',
     viewport: { width: 390, height: 844 },
     deviceScaleFactor: 2,
     isMobile: true,
@@ -231,23 +232,7 @@ async function mobileReceiver(browser: Browser, rid: string, locale: Locale, exp
     `offline banner in ${locale}`,
   );
   await page.locator('input[type="file"]').setInputFiles({ name: 'invoice.png', mimeType: 'image/png', buffer: PNG });
-  await page.waitForFunction(
-    () =>
-      new Promise<boolean>((res) => {
-        const req = indexedDB.open('restomatch-receiver', 1);
-        req.onsuccess = () => {
-          try {
-            const c = req.result.transaction('photos', 'readonly').objectStore('photos').count();
-            c.onsuccess = () => res(c.result > 0);
-          } catch {
-            res(false);
-          }
-        };
-        req.onerror = () => res(false);
-      }),
-    undefined,
-    { timeout: 15_000 },
-  );
+  for (let i = 0; i < 30 && (await queueCount(page)) < 1; i += 1) await page.waitForTimeout(500);
   check((await queueCount(page)) === 1, 'offline photo stored in IndexedDB (1 queued)');
   await page.getByRole('button', { name: locale === 'he' ? /עבד את החשבונית/ : /Process invoice/ }).click();
   const saved = locale === 'he' ? 'התמונה נשמרה בטלפון' : 'Photo saved on the phone';
@@ -257,8 +242,13 @@ async function mobileReceiver(browser: Browser, rid: string, locale: Locale, exp
   await page.screenshot({ path: join(SHOTS, `pwa-offline-${locale}.png`), fullPage: false });
 
   // Offline navigation inside the scope → the SW's static offline page (never cached HTML).
+  // setOffline() does not reach the service worker's own fetches in Chromium, so
+  // also abort network requests at the context level (that does cover the SW).
+  const offlineRoute = (route: import('@playwright/test').Route) => route.abort('internetdisconnected');
+  await context.route(`${BASE}/dashboard/**`, offlineRoute);
   await page.goto(`${BASE}/dashboard/receiving`).catch(() => null);
-  const offlineText = await page.locator('body').innerText();
+  const offlineText = await page.locator('body').innerText().catch(() => '');
+  if (!/You are offline/.test(offlineText)) console.log('    [debug] url', page.url(), JSON.stringify(offlineText.slice(0, 300)));
   check(/אין חיבור לאינטרנט/.test(offlineText) && /You are offline/.test(offlineText), 'offline navigation → SW offline page (he + en)');
   await page.screenshot({ path: join(SHOTS, `pwa-offline-page-${locale}.png`), fullPage: false });
   const cached = await page.evaluate(async () => {
@@ -273,22 +263,19 @@ async function mobileReceiver(browser: Browser, rid: string, locale: Locale, exp
     `Cache Storage holds ONLY the public PWA files: ${cached.join(', ')}`,
   );
 
+  console.log('    [debug] queued before reconnect:', await queueCount(page).catch((e) => String(e)));
+  page.on('console', (m) => { if (!m.text().includes('Report Only')) console.log('    [browser]', m.type(), m.text().slice(0, 300)); });
+  page.on('response', (r) => { if (r.url().includes('/api/trpc/')) console.log('    [trpc]', r.status(), new URL(r.url()).pathname); });
+  await context.unroute(`${BASE}/dashboard/**`, offlineRoute);
   await context.setOffline(false);
   await page.goto(`${BASE}/dashboard/receiving/${poId}`, { waitUntil: 'networkidle' });
   if (expectDrain) {
-    await page.waitForFunction(
-      () =>
-        new Promise<boolean>((res) => {
-          const req = indexedDB.open('restomatch-receiver', 1);
-          req.onsuccess = () => {
-            const c = req.result.transaction('photos', 'readonly').objectStore('photos').count();
-            c.onsuccess = () => res(c.result === 0);
-          };
-        }),
-      undefined,
-      { timeout: 60_000, polling: 1000 },
-    );
-    check(true, 'back online → queue drained (0 left)');
+    let left = await queueCount(page);
+    for (let i = 0; i < 60 && left !== 0; i += 1) {
+      await page.waitForTimeout(1000);
+      left = await queueCount(page);
+    }
+    check(left === 0, `back online → queue drained (${left} left)`);
     const after = Number((await sql`select count(*)::int as n from invoices where restaurant_id = ${rid}`)[0]!.n);
     check(after === invoicesBefore + 1, `exactly ONE invoice registered from the queued photo (${invoicesBefore} → ${after})`);
     await page.reload({ waitUntil: 'networkidle' });
@@ -323,8 +310,11 @@ async function devApprove(browser: Browser, rid: string) {
   const before = await page.getByTestId('ingest-document').count();
   await page.getByRole('button', { name: 'Approve and read' }).first().click();
   await page.getByText('The document was sent for reading').waitFor({ timeout: 20_000 });
-  await page.waitForLoadState('networkidle');
-  const after = await page.getByTestId('ingest-document').count();
+  let after = before;
+  for (let i = 0; i < 40 && after === before; i += 1) {
+    await page.waitForTimeout(500);
+    after = await page.getByTestId('ingest-document').count();
+  }
   check(after === before - 1, `approve: needs-review list ${before} → ${after}`);
   await page.goto(`${BASE}/dashboard/inbox`, { waitUntil: 'networkidle' });
   await page.getByRole('button', { name: 'Create address' }).first().click().catch(() => null);
