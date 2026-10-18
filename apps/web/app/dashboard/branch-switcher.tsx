@@ -73,7 +73,7 @@ export function BranchSwitcher({
     }
     setPendingId(id);
     startTransition(async () => {
-      const res = await switchBranchAction(id);
+      const res = await switchBranchAction(id).catch(() => ({ ok: false as const }));
       if (res.ok) {
         window.location.assign('/dashboard');
         return;

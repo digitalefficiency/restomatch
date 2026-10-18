@@ -41,6 +41,10 @@ describe('supplierMergeKey', () => {
     expect(a).toBe(supplierMergeKey('דגי הים בע״מ', null));
     expect(supplierMergeKey('Sea Fish Ltd.', null)).toBe(supplierMergeKey('sea fish', null));
   });
+  it('strips בע"מ only as a whole word (not inside "בעמק")', () => {
+    expect(supplierMergeKey('ירקות בעמק', null)).toBe('name:ירקות בעמק');
+    expect(supplierMergeKey('ירקות בעמק', null)).not.toBe(supplierMergeKey('ירקות ק', null));
+  });
   it('returns null when nothing is usable', () => {
     expect(supplierMergeKey(null, null)).toBeNull();
     expect(supplierMergeKey(' "" ', '12')).toBeNull();

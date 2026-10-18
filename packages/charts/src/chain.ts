@@ -167,7 +167,7 @@ export function supplierMergeKey(name: string | null, businessId: string | null)
   const norm = name
     .normalize('NFKC')
     .toLowerCase()
-    .replace(/בע["״']?מ/g, ' ')
+    .replace(/(^|\s)בע["״']?מ(?=\s|$)/g, ' ')
     .replace(/\b(ltd|inc|llc)\b\.?/g, ' ')
     .replace(/["'״׳`.,()\-–—_/\\]/g, ' ')
     .replace(/\s+/g, ' ')

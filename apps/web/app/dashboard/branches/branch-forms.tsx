@@ -41,7 +41,7 @@ export function RenameBranch({ restaurantId, name }: { restaurantId: string; nam
       onSubmit={(e) => {
         e.preventDefault();
         start(async () => {
-          const res = await renameBranchAction(restaurantId, value.trim());
+          const res = await renameBranchAction(restaurantId, value.trim()).catch(() => ({ ok: false as const, error: 'generic' as const }));
           if (res.ok) {
             // Local state, not router.refresh(): a same-route RSC refetch stalled
             // in the production build (reports/chain.md).
@@ -94,7 +94,9 @@ export function AddBranchForm({ currentBranch }: { currentBranch: string }) {
         onSubmit={(e) => {
           e.preventDefault();
           start(async () => {
-            const res = await addBranchAction({ name: name.trim(), copySuppliers, copyCatalog, copySettings });
+            const res = await addBranchAction({ name: name.trim(), copySuppliers, copyCatalog, copySettings }).catch(
+              () => ({ ok: false as const, error: 'generic' as const }),
+            );
             if (res.ok) {
               // A full navigation re-renders the list server-side (a router.refresh()
               // same-route RSC refetch stalled in the production build).

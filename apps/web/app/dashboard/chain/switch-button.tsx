@@ -31,7 +31,7 @@ export function SwitchBranchButton({
       data-testid={testId}
       onClick={() =>
         start(async () => {
-          const res = await switchBranchAction(restaurantId);
+          const res = await switchBranchAction(restaurantId).catch(() => ({ ok: false as const }));
           if (res.ok) window.location.assign('/dashboard');
           else toast.error(t('switcher.failed'));
         })

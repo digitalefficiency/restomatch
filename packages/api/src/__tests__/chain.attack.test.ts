@@ -256,6 +256,25 @@ describe('chain.overview price disparities', () => {
   });
 });
 
+describe('chain.overview price disparities exclude billing errors', () => {
+  it('an A2 line the engine flagged as PRICE_HIGHER is a leak, not a price gap', async () => {
+    await ownerDb
+      .update(restaurants)
+      .set({ settings: { features: { priceDisparity: true } } as typeof restaurants.$inferInsert['settings'] })
+      .where(eq(restaurants.id, A.restaurantId));
+    await ownerDb.update(discrepancies).set({ invoiceLineId: A2.invoiceLineId }).where(eq(discrepancies.id, A2.discrepancyId));
+    try {
+      expect((await asA().chain.overview()).priceDisparities).toEqual([]);
+    } finally {
+      await ownerDb.update(discrepancies).set({ invoiceLineId: null }).where(eq(discrepancies.id, A2.discrepancyId));
+      await ownerDb
+        .update(restaurants)
+        .set({ settings: {} as typeof restaurants.$inferInsert['settings'] })
+        .where(eq(restaurants.id, A.restaurantId));
+    }
+  });
+});
+
 describe('chain.switchTarget', () => {
   it('rejects a branch the caller is not a member of (B), and a random id', async () => {
     await expect(asA().chain.switchTarget({ restaurantId: B.restaurantId })).rejects.toMatchObject({

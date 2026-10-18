@@ -404,7 +404,7 @@ export default async function ChainPage({
                           {d.lines.map((l) => {
                             const bn = nameOf.get(l.restaurantId) ?? '';
                             return (
-                              <tr key={`${l.invoiceId}-${l.unitPrice}-${l.qty}`} className="border-t border-line/50">
+                              <tr key={l.invoiceLineId} className="border-t border-line/50">
                                 <td className="py-1.5 text-ink"><span {...originalProps(bn)}>{bn}</span></td>
                                 <td className="py-1.5 font-mono text-muted">{l.invoiceNumber}</td>
                                 <td className="py-1.5 text-muted">{formatDate(l.invoiceDate, locale, { dateStyle: 'medium' })}</td>

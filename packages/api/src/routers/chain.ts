@@ -262,7 +262,11 @@ export const chainRouter = router({
 
       const nowMonth = currentMonth();
       const month = input?.month && input.month <= nowMonth ? input.month : nowMonth;
-      const branches = scope.branches.slice(0, MAX_CHAIN_BRANCHES);
+      // The active branch always makes the cut; the rest alphabetically.
+      const branches = [
+        scope.active,
+        ...scope.branches.filter((b) => b.restaurantId !== scope.active.restaurantId),
+      ].slice(0, MAX_CHAIN_BRANCHES);
       const perBranch = await mapLimit(branches, BRANCH_CONCURRENCY, (b) =>
         inBranch(ctx.db, ctx.session.userId, b.restaurantId, async (tx) => {
           const snapshot = await computeBranchSnapshot(tx, b.restaurantId, b.name, { month, trendMonths: 6 });
