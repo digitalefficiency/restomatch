@@ -22,6 +22,10 @@ const WebEnvSchema = z.object({
   // Rejected in production — there the non-owner app role is mandatory.
   ALLOW_OWNER_DB: z.string().optional(),
   AUTH_SECRET: z.string().min(1).optional(),
+  // Auth.js v4 name — still honoured by next-auth v5 as a fallback.
+  NEXTAUTH_SECRET: z.string().min(1).optional(),
+  NEXT_PUBLIC_SUPABASE_URL: z.string().min(1).optional(),
+  SUPABASE_URL: z.string().min(1).optional(),
   AUTH_URL: z.string().url().optional(),
   APP_URL: z.string().url().optional(),
   RESEND_API_KEY: z.string().min(1).optional(),
@@ -55,6 +59,10 @@ export function assertWebEnv(env: NodeJS.ProcessEnv = process.env): WebEnv {
     if (!v.RESEND_API_KEY) missing.push('RESEND_API_KEY — magic-link login + invites');
     if (!v.EMAIL_FROM) missing.push('EMAIL_FROM — verified sender domain');
     if (!v.AUTH_URL && !v.APP_URL) missing.push('AUTH_URL or APP_URL');
+    // Without it the app BOOTS and then every sign-in 500s (Auth.js
+    // MissingSecret) — make it a boot failure instead (F4).
+    if (!v.AUTH_SECRET && !v.NEXTAUTH_SECRET)
+      missing.push('AUTH_SECRET (or NEXTAUTH_SECRET) — signs the session JWT; every login fails without it');
     if (!v.REDIS_URL) missing.push('REDIS_URL — OCR/match/cron queue (uploads vanish without it)');
     if (!v.SUPABASE_SERVICE_ROLE_KEY) missing.push('SUPABASE_SERVICE_ROLE_KEY — signed scan URLs');
     // AUTH_ENC_KEY encrypts the TOTP secret at rest (Epic C). Required in prod so
@@ -69,6 +77,17 @@ export function assertWebEnv(env: NodeJS.ProcessEnv = process.env): WebEnv {
     if (missing.length > 0) {
       throw new Error(`[env] missing required production secrets:\n - ${missing.join('\n - ')}`);
     }
+    // A leftover URL from another project passes a presence check but points
+    // storage/signing at the wrong backend (F5) — require the real shape.
+    const badSupabase = (['NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_URL'] as const).filter(
+      (k) => v[k] !== undefined && supabaseRefFromUrl(v[k]!) === null,
+    );
+    if (badSupabase.length > 0) {
+      throw new Error(
+        `[env] ${badSupabase.join(' / ')} must look like https://<project-ref>.supabase.co ` +
+          '(no path) — check for a leftover value from another project.',
+      );
+    }
     // The owner-DB escape hatch must never be honoured in production: tenant
     // traffic on an RLS-bypassing connection silently defeats tenant isolation.
     if (isTruthyFlag(v.ALLOW_OWNER_DB)) {
@@ -78,7 +97,75 @@ export function assertWebEnv(env: NodeJS.ProcessEnv = process.env): WebEnv {
       );
     }
   }
+  for (const warning of webEnvWarnings(env)) console.warn(warning);
   return v;
+}
+
+/** Supabase project ref of an API URL (`https://<ref>.supabase.co`), or null. */
+export function supabaseRefFromUrl(url: string): string | null {
+  const m = /^https:\/\/([a-z0-9]{20})\.supabase\.co\/?$/.exec(url.trim());
+  return m ? m[1]! : null;
+}
+
+/**
+ * Supabase project ref of a Postgres URL, or null when it isn't a Supabase DB:
+ * pooler users are `<role>.<ref>` (…pooler.supabase.com), direct hosts are
+ * `db.<ref>.supabase.co`.
+ */
+export function supabaseRefFromDbUrl(url: string): string | null {
+  try {
+    const u = new URL(url);
+    const host = /^db\.([a-z0-9]{20})\.supabase\.co$/.exec(u.hostname);
+    if (host) return host[1]!;
+    if (!u.hostname.endsWith('.supabase.com') && !u.hostname.endsWith('.supabase.co')) return null;
+    const user = /\.([a-z0-9]{20})$/.exec(decodeURIComponent(u.username));
+    return user ? user[1]! : null;
+  } catch {
+    return null;
+  }
+}
+
+function originOf(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Non-fatal configuration smells, logged at boot (assertWebEnv). Messages name
+ * project refs / origins only — never credentials or full connection strings.
+ *  - F5: the DB URLs and the Supabase API URL belong to different projects
+ *    (a leftover from the old project — scans/signing hit the wrong backend).
+ *  - F6: APP_URL and AUTH_URL have different origins — Auth.js builds callback
+ *    URLs from AUTH_URL, so opening the app on the other host loops on login.
+ */
+export function webEnvWarnings(env: NodeJS.ProcessEnv = process.env): string[] {
+  const warnings: string[] = [];
+  const refs = new Map<string, string>();
+  for (const k of ['NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_URL'] as const) {
+    const ref = env[k] ? supabaseRefFromUrl(env[k]!) : null;
+    if (ref) refs.set(k, ref);
+  }
+  for (const k of ['DATABASE_URL', 'DATABASE_URL_APP', 'DATABASE_URL_DIRECT'] as const) {
+    const ref = env[k] ? supabaseRefFromDbUrl(env[k]!) : null;
+    if (ref) refs.set(k, ref);
+  }
+  if (new Set(refs.values()).size > 1) {
+    const list = [...refs].map(([k, ref]) => `${k}=${ref}`).join(', ');
+    warnings.push(`[env] WARNING: Supabase project refs differ (${list}) — one of them is probably a leftover from another project.`);
+  }
+  const app = originOf(env.APP_URL);
+  const authOrigin = originOf(env.AUTH_URL);
+  if (app && authOrigin && app !== authOrigin) {
+    warnings.push(
+      `[env] WARNING: APP_URL origin (${app}) differs from AUTH_URL origin (${authOrigin}). ` +
+        'Sign-in callbacks use AUTH_URL — open the app only on that host or login will loop.',
+    );
+  }
+  return warnings;
 }
 
 function isTruthyFlag(value: string | undefined): boolean {
