@@ -123,8 +123,9 @@ export DATABASE_URL_TEST=postgres://postgres:postgres@localhost:5432/restomatch_
 pnpm install --frozen-lockfile                                   # ok
 pnpm --filter @restomatch/db migrate                             # through 0051, clean
 # Final gate on the MERGED head (origin/claude/client-ready merged in, rls/*.sql untouched):
-pnpm exec turbo run test --concurrency=1                         # 14/14 tasks — 1266 passed, 1 skipped
-#   ingest 21 · db 70 (incl. migration-0050 7: RLS on all 4 tables; upgrade-path + doctor: no FAIL/WARN)
+pnpm exec turbo run test --concurrency=1                         # 14/14 tasks — 1268 passed, 1 skipped
+#   ingest 21 · db 72 (incl. migration-0050 9: RLS on all 4 tables + composite same-tenant FK attack;
+#   upgrade-path + doctor: no FAIL/WARN)
 #   api 566 (incl. ingest.attack 26, cross-tenant.attack with 9 ingest COVERAGE entries) · web 251
 #   translate 69 · ocr 44 · matching 86 (canary unchanged) · charts 64 · catalog 50 · procurement 17 · crypto 12
 #   billing 5 · worker 11 (+1 skipped)
@@ -200,6 +201,17 @@ aborts requests at the context level, and the test notes this.
 
 **Screenshots** (`docs/client-ready/screenshots/`): `ingest-inbox-{he,en}.png`, `ingest-settings-{he,en}.png`,
 `ingest-inbox-rotate-en.png`, `pwa-offline-{he,en}.png` (mobile), `pwa-offline-page-{he,en}.png`.
+
+### Cross-QA (S1, DB): composite tenant FKs
+
+S1 found that 0050 used single-column FKs, so a row could reference another restaurant's supplier, channel, message
+or invoice; a probe confirmed the cross-tenant insert. 0050 was unreleased, so I amended it in place. Every tenant FK
+is now composite: `(supplier_id | channel_id | message_id | invoice_id, restaurant_id)` → `(id, restaurant_id)`, as
+in 0021. `SET NULL` clears only the FK column (`ON DELETE SET NULL (col)`, PG15+). `invoices` gains an additive
+`UNIQUE (id, restaurant_id)`, and the FK indexes match the composite keys (db:doctor is clean). The DB-level attack
+test in `migration-0050.test.ts` covers this: an A row pointing at B's supplier, channel, message or invoice →
+23503; `SET NULL` keeps `restaurant_id`; a cascade stays inside the tenant. I re-ran both layers afterwards:
+gate green, dev 21/21, prod 140/140.
 
 ### Layer 2b: independent refuter
 
