@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { PDFDocument } from 'pdf-lib';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -467,7 +468,7 @@ describe('money cross-QA (S3) regressions', () => {
   it('MEDIUM 5: a credit-note number is recorded once per supplier; an idempotency key replays', async () => {
     const c = caller();
     const [claim] = await c.recovery.list();
-    const key = '7f6b0c8e-6a59-4c1f-9d1f-2b8a5d1e0c11';
+    const key = randomUUID();
     const first = await c.recovery.recordCreditNote({ claimIds: [claim!.id], supplierId: T.supplierId, number: 'CN-9', amountAgorot: 1000, issuedOn: '2026-10-05', idempotencyKey: key });
     const again = await c.recovery.recordCreditNote({ claimIds: [claim!.id], supplierId: T.supplierId, number: 'CN-9', amountAgorot: 1000, issuedOn: '2026-10-05', idempotencyKey: key });
     expect(again).toMatchObject({ creditNoteId: first.creditNoteId, duplicate: true });

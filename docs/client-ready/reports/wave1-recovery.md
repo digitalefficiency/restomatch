@@ -180,8 +180,10 @@ Shared (not immutable), all additive:
 Known and accepted (refuter suspicions, not defects):
 - A top-up overwrites `credit_note_id`, so the tracker shows the latest note number. The full trail stays in
   `recovery_events` and `credit_notes`.
-- A claim whose discrepancy is later re-opened or rejected stays in the tracker. The owner can write it off.
-- A stored monthly snapshot is the record of what was sent. Regenerate it with `ensureMonthlyReport({refresh:true})`.
+- ~~A claim whose discrepancy is later re-opened or rejected stays in the tracker.~~ Superseded in Round 4: it is now
+  written off automatically (and re-opened if the discrepancy is accepted again).
+- A stored monthly snapshot is the record of what was sent. `ensureMonthlyReport({refresh:true})` regenerates an
+  unsent snapshot only; a sent one is never rewritten (Round 4).
 
 ## Round 3 (orchestrator + S1 cross-QA)
 
@@ -213,8 +215,36 @@ Known and accepted (refuter suspicions, not defects):
 
 **Observation, not this PR:** one layer-2 run logged React #418 (a text hydration mismatch) once for chef/he. It did not reproduce in 8 targeted runs or in the full re-run. Likely a relative-time text crossing a boundary (pre-existing activity feed).
 
+## Round 4 (S3 money cross-QA)
+
+| # | S3 finding | Fix | Regression test (`recovery.test.ts` unless noted) |
+|---|---|---|---|
+| 1 | **BLOCKER** — re-matching an invoice cascaded from `discrepancies` and wiped its claims (letters, credits, history) | The claim → discrepancy FK is now `ON DELETE NO ACTION`. `match.run` first calls `releaseClaimsForRematch`: bare `claimed` claims (and system write-offs with ₪0 credited) are released; any claim with progress makes the re-match a `CONFLICT` with a clear message instead of deleting money history | "re-match vs claims: refuses while money is in flight, and releases bare claims" — fails without the fix |
+| 2 | **BLOCKER** — the monthly report's "claimed" was the raw Σ of claims, not capped per invoice | "Claimed" = the hero's own capped figure; top issues come from per-invoice capped SQL (their sum equals the hero leak) | "BLOCKER 2: monthly \"claimed\" and top issues use the per-invoice cap" |
+| 3 | **HIGH** — a claim stayed open after its discrepancy was rejected, and kept eating the invoice cap | `syncClaims` writes off untouched (`claimed`/`letter_sent`) claims whose discrepancy is no longer accepted (event note `auto: discrepancy no longer accepted`), re-opens only those on re-accept (a manual write-off stays), and excludes zero-credit write-offs from the cap | "HIGH 3: … writes its untouched claim off (auto), re-accepting re-opens it" (incl. the freed cap) |
+| 5 | MEDIUM — duplicate credit notes | Partial unique `(restaurant_id, supplier_id, number)`, plus a client `idempotency_key` (unique). A replay returns `{duplicate:true}`; the same number without the key → `CONFLICT`; 23505 is mapped to `CONFLICT` | "MEDIUM 5: a credit-note number is recorded once per supplier; an idempotency key replays" |
+| 6 | MEDIUM — VAT basis undefined; a note was spread over every open claim of the supplier | **Basis: before VAT** (the engine's `totalExclVat`), stated in the 0048 header and on the form. A note is allocated only to the claims the user ticks (oldest first) | "MEDIUM 6: a credit note is applied only to the selected claims" |
+| 7 | MEDIUM — "returned" tile was ambiguous | Relabelled **"חזר החודש / Cash back this month"** with the hint "money returned this month, for invoices of any month" | layer 2 |
+| L | LOW: overdue off-by-one; ageing in UTC; rate; `MAX_CLAIMS` truncating summaries; outstanding not month-scoped in the snapshot; `refresh` overwriting a sent snapshot; RLS test order; `formatIls` parity | Overdue badge = the reminder rule (`findOverdue`); ageing in Asia/Jerusalem calendar days; summaries read every claim (`limit: null`); snapshot "still owed" is for this month's invoices (labelled so); a sent snapshot is never rewritten; RLS tests self-order; `money-parity.test.ts` pins the server twin to the web `formatIls` | tests: "LOW: a sent snapshot is never rewritten, even with refresh", "LOW: the overdue badge and the reminder job agree at the 14-day boundary", `money-parity.test.ts`; ageing / rate / no-truncation are covered by the existing `summarize` unit test and layer 2, not a new test |
+
+**Item 4 — proposal only (immutable `packages/matching/src/engine.ts`, not edited).** A supplier credit line on an
+invoice (negative `lineTotal`) has no PO line, so step 6 emits it as `UNORDERED_ITEM` with a negative `deltaAmount`,
+and the leak (`Σ |deltaAmount|`) counts the refund as a leak. Proposed human PR: in step 6, skip invoice lines with
+`lineTotal < 0` (they are credits; the tracker's credit-line suggestion already consumes them), and add a canary case
+with a credit line asserting the leak does not move. Owner: matching-engine-guardian, human-authored.
+
+**Other files touched this round** (not immutable): `packages/api/src/routers/match.ts` (S3's router: +1 call),
+`apps/worker/scripts/seed-demo.ts` and `seed-chain-demo.ts` (delete the restaurant's recovery rows before their
+discrepancy wipe, guarded by `to_regclass`), `packages/api/src/__tests__/fixtures.ts` (`resetDb` clears recovery rows
+first), and S1's `wave1-checks.test.ts` (adapted earlier to the real `credit_notes`). `.gitleaksignore`: one
+reviewed false positive (a test UUID in a variable named `key`; the test now generates it).
+
 ## Verification (2 layers)
-Head: see the PR / orchestrator message. **Round 3 (after the merge and the S1 fixes):** layer 1 → 13/13 test tasks (api 582 · web 264 · db 71 · worker 26 · matching 86 · charts 64 · …), typecheck 17/17, web tsc 0, lint 0, `supabase-sync --check` clean, build green; layer 2a → `LAYER2 OK` (5 roles × he/en, dev DB reseeded with `pnpm demo:seed-all -- --reset`). Local Postgres 16 + pgvector and Redis, set up with `./scripts/dev-setup.sh`.
+Head: see the PR / orchestrator message. **Round 4 (after the S3 fixes):** layer 1 → 13/13 test tasks (api 589 · web
+268 · db 76 · worker 30 · …), typecheck 17/17, web tsc 0, lint 0, `supabase-sync --check` clean, build green; CI on
+aa76aef green except gitleaks (the false positive above); layer 2a → `LAYER2 OK` (5 roles × he/en; hero ₪572 · 2.0%,
+tile "cash back this month" ₪653, tracker ₪1,558 / ₪991 / ₪653 / ₪567, 0 px overflow at 390 px), dev DB reseeded
+with `pnpm demo:seed-all -- --reset`; layer 2b → refuter round on the S3 fixes (see below). **Round 3 (after the merge and the S1 fixes):** layer 1 → 13/13 test tasks (api 582 · web 264 · db 71 · worker 26 · matching 86 · charts 64 · …), typecheck 17/17, web tsc 0, lint 0, `supabase-sync --check` clean, build green; layer 2a → `LAYER2 OK` (5 roles × he/en, dev DB reseeded with `pnpm demo:seed-all -- --reset`). Local Postgres 16 + pgvector and Redis, set up with `./scripts/dev-setup.sh`.
 
 **Layer 1 — full gate**
 ```
