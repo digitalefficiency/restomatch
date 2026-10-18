@@ -7,7 +7,7 @@ import { assertSupplierOwned } from '../tenant';
 /**
  * Canonical-product management. Products are otherwise created only by import /
  * OCR / mapping; this router is the in-app path to rename (canonicalName drives
- * the matcher + reports), recategorize, fix the unit/barcode, set the exclusive
+ * the matcher + reports), set the English display name (name_en), recategorize, fix the unit/barcode, set the exclusive
  * owning supplier (products.supplier_id), or delete a junk product.
  */
 export const productsRouter = router({
@@ -20,6 +20,8 @@ export const productsRouter = router({
         patch: z
           .object({
             canonicalName: z.string().trim().min(1).max(200).optional(),
+            /** English display name ("Receiver in English", 0028). Empty/null clears it. */
+            nameEn: z.string().trim().max(200).nullable().optional(),
             category: z.string().trim().max(100).nullable().optional(),
             defaultUnit: z.string().trim().max(32).nullable().optional(),
             barcodeEan: z.string().trim().max(32).nullable().optional(),
@@ -40,6 +42,7 @@ export const productsRouter = router({
       }
       const set: Partial<typeof products.$inferInsert> = { updatedAt: new Date() };
       if (p.canonicalName !== undefined) set.canonicalName = p.canonicalName;
+      if (p.nameEn !== undefined) set.nameEn = p.nameEn?.trim() || null;
       if (p.category !== undefined) set.category = p.category?.trim() || null;
       if (p.defaultUnit !== undefined) set.defaultUnit = p.defaultUnit?.trim() || null;
       if (p.barcodeEan !== undefined) set.barcodeEan = p.barcodeEan?.trim() || null;

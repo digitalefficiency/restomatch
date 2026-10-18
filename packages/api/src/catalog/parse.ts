@@ -22,6 +22,23 @@ const MAX_XLSX_BYTES = 10 * 1024 * 1024;
  * large ones). The browser only reads the file to base64/text and posts it.
  */
 
+/**
+ * A user-fixable problem with an uploaded catalog file. `code` is stable so the
+ * UI can show a localized explanation (the tRPC layer forwards it as
+ * `CATALOG_FILE_<code>` in a BAD_REQUEST message).
+ */
+export type CatalogFileErrorCode = 'TOO_LARGE' | 'LEGACY_XLS' | 'UNREADABLE' | 'EMPTY' | 'TOO_MANY_ROWS';
+
+export class CatalogFileError extends Error {
+  constructor(
+    readonly code: CatalogFileErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'CatalogFileError';
+  }
+}
+
 export interface ParsedTable {
   headers: string[];
   rows: Array<Record<string, string>>;
@@ -84,12 +101,27 @@ function cellToString(cell: Cell): string {
 async function parseXlsx(buf: Buffer): Promise<ParsedTable> {
   // Size guard BEFORE parse — never decompress an oversized untrusted upload.
   if (buf.byteLength > MAX_XLSX_BYTES) {
-    throw new Error(`קובץ גדול מדי (${buf.byteLength} bytes, מקסימום ${MAX_XLSX_BYTES})`);
+    throw new CatalogFileError(
+      'TOO_LARGE',
+      `קובץ גדול מדי (${buf.byteLength} bytes, מקסימום ${MAX_XLSX_BYTES})`,
+    );
+  }
+  // Legacy binary Excel (.xls, OLE2 "D0 CF 11 E0") — exceljs reads only .xlsx.
+  if (buf.byteLength >= 4 && buf.readUInt32BE(0) === 0xd0cf11e0) {
+    throw new CatalogFileError('LEGACY_XLS', 'קובץ Excel ישן (.xls) — שמרו אותו כ-.xlsx או כ-CSV');
+  }
+  // .xlsx is a zip container ("PK"); anything else can't be a workbook.
+  if (buf.byteLength < 4 || buf[0] !== 0x50 || buf[1] !== 0x4b) {
+    throw new CatalogFileError('UNREADABLE', 'הקובץ אינו גיליון Excel תקין');
   }
   const wb = new Workbook();
-  // Cast bridges the generic-`Buffer` friction between @types/node and exceljs's
-  // bundled typings (Buffer<ArrayBufferLike> vs Buffer<ArrayBuffer>).
-  await wb.xlsx.load(buf as unknown as Parameters<typeof wb.xlsx.load>[0]);
+  try {
+    // Cast bridges the generic-`Buffer` friction between @types/node and exceljs's
+    // bundled typings (Buffer<ArrayBufferLike> vs Buffer<ArrayBuffer>).
+    await wb.xlsx.load(buf as unknown as Parameters<typeof wb.xlsx.load>[0]);
+  } catch {
+    throw new CatalogFileError('UNREADABLE', 'לא ניתן לקרוא את קובץ ה-Excel');
+  }
   const sheet = wb.worksheets[0];
   if (!sheet || sheet.actualRowCount === 0) return { headers: [], rows: [] };
 
@@ -118,18 +150,28 @@ async function parseXlsx(buf: Buffer): Promise<ParsedTable> {
   return { headers: headers.filter(Boolean), rows };
 }
 
-/** Parse an uploaded catalog file into a header + row table. */
+/**
+ * Parse an uploaded catalog file into a header + row table. Throws
+ * `CatalogFileError` for files the user has to fix (legacy .xls, corrupt
+ * workbook, no header row) so the UI can say exactly what to do.
+ */
 export async function parseCatalogFile(file: CatalogFileInput): Promise<ParsedTable> {
   const ext = file.filename.toLowerCase().split('.').pop() ?? '';
+  let table: ParsedTable;
   if (ext === 'csv' || (file.text != null && !file.base64)) {
     const text =
       file.text ?? (file.base64 ? Buffer.from(file.base64, 'base64').toString('utf8') : '');
-    return parseCsv(text);
+    table = parseCsv(text);
+  } else {
+    const buf = file.base64
+      ? Buffer.from(file.base64, 'base64')
+      : Buffer.from(file.text ?? '', 'utf8');
+    table = await parseXlsx(buf);
   }
-  const buf = file.base64
-    ? Buffer.from(file.base64, 'base64')
-    : Buffer.from(file.text ?? '', 'utf8');
-  return parseXlsx(buf);
+  if (table.headers.length === 0) {
+    throw new CatalogFileError('EMPTY', 'לא נמצאה שורת כותרות בקובץ');
+  }
+  return table;
 }
 
 /** Normalize a header for keyword matching (lowercase, strip quotes/gershayim/spaces). */

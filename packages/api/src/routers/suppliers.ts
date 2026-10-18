@@ -34,6 +34,8 @@ const DeliveryScheduleSchema = z
 const SupplierCreate = z
   .object({
     name: z.string().trim().min(1).max(200),
+    /** Optional Latin-script name for English-speaking staff (0028, display only). */
+    nameEn: z.string().trim().max(200).optional(),
     businessId: z.string().trim().max(32).optional(),
     contactEmail: z.string().trim().email().max(200).optional(),
     contactWhatsapp: z.string().trim().max(32).optional(),
@@ -48,6 +50,7 @@ const SupplierCreate = z
 const SupplierPatch = z
   .object({
     name: z.string().trim().min(1).max(200).optional(),
+    nameEn: z.string().trim().max(200).nullish(),
     businessId: z.string().trim().max(32).nullish(),
     contactEmail: z.string().trim().email().max(200).nullish(),
     contactWhatsapp: z.string().trim().max(32).nullish(),
@@ -93,6 +96,7 @@ export const suppliersRouter = router({
         .values({
           restaurantId: ctx.session.restaurantId,
           name: input.name,
+          nameEn: input.nameEn || null,
           businessId: input.businessId ?? null,
           contactEmail: input.contactEmail ?? null,
           contactWhatsapp: input.contactWhatsapp ?? null,
@@ -111,6 +115,7 @@ export const suppliersRouter = router({
       const set: Partial<typeof suppliers.$inferInsert> = { updatedAt: new Date() };
       const { patch } = input;
       if (patch.name !== undefined) set.name = patch.name;
+      if (patch.nameEn !== undefined) set.nameEn = patch.nameEn || null;
       if (patch.businessId !== undefined) set.businessId = patch.businessId;
       if (patch.contactEmail !== undefined) set.contactEmail = patch.contactEmail;
       if (patch.contactWhatsapp !== undefined) set.contactWhatsapp = patch.contactWhatsapp;

@@ -1132,6 +1132,28 @@ describe('products router: foreign-id attacks (A → B)', () => {
     expect(row?.canonicalName).toBe('עגבניה B');
   });
 
+  it('products.update cannot set the English name of a foreign product (B unchanged)', async () => {
+    await expect(
+      callerFor(A).products.update({ productId: B.productId, patch: { nameEn: 'HIJACK' } }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [row] = await db
+      .select({ nameEn: products.nameEn })
+      .from(products)
+      .where(eq(products.id, B.productId));
+    expect(row?.nameEn ?? null).toBeNull();
+  });
+
+  it('suppliers.update cannot set the English name of a foreign supplier (B unchanged)', async () => {
+    await expect(
+      callerFor(A).suppliers.update({ supplierId: B.supplierId, patch: { nameEn: 'HIJACK' } }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [row] = await db
+      .select({ nameEn: suppliers.nameEn })
+      .from(suppliers)
+      .where(eq(suppliers.id, B.supplierId));
+    expect(row?.nameEn ?? null).toBeNull();
+  });
+
   it('products.update rejects assigning a foreign supplier as exclusivity owner', async () => {
     // A owns the product but tries to set B's supplier as owner → NOT_FOUND.
     await expect(
