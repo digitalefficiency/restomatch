@@ -4,26 +4,23 @@ import { COPY, Locale } from '../copy';
 import { C, EASE_IN, EASE_OUT, FONT, lerp, prog } from '../theme';
 import { RiseLine } from '../components/primitives';
 
-// Line items on the paper invoices — real product names from the seeded catalog.
-const ITEMS = [
-  ['עגבניה שרי', '9.5', '10.00'],
-  ['חזה עוף', '30', '21.60'],
-  ['בירה מהחבית — חבית 30 ל׳', '2', '575.00'],
-  ['פילה סלמון', '6', '96.00'],
-  ['שמן זית כתית', '5', '25.00'],
-  ['מוצרלה', '6', '42.21'],
-  ['מלפפון חממה', '3', '15.00'],
-  ['אנטריקוט', '4', '149.00'],
-  ['חמאה', '4', '46.00'],
+// Paper invoice props: each supplier sells what it really sells (seeded catalog names),
+// every line total = qty × price, and the total is the sum of the lines.
+type Row = [string, number, number]; // item, qty, unit price
+const INVOICES: { supplier: string; rows: Row[] }[] = [
+  { supplier: 'ירקות השרון', rows: [['עגבניות שרי', 15, 14], ['מלפפונים', 12, 5.87], ['חסה ערבית', 20, 4.5], ['כוסברה', 10, 3.01]] },
+  { supplier: 'דגי הים התיכון', rows: [['פילה סלמון', 6, 96]] },
+  { supplier: 'משקאות שטיינברג', rows: [['בירה מהחבית — חבית 30 ל׳', 2, 575]] },
+  { supplier: 'מחלבות הגליל', rows: [['מוצרלה', 6, 42.21], ['חמאה', 4, 46], ['חלב 3%', 37.5, 6.43], ['גבינה בולגרית', 4.5, 37.81]] },
+  { supplier: 'קצביית הכרם', rows: [['אנטריקוט', 4, 149], ['חזה עוף', 30, 21.6]] },
 ];
+const CARD_INVOICE = [0, 1, 2, 3, 4, 0, 1, 3, 4]; // card i → invoice
+const money = (n: number) => `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₪`;
+const lineTotal = (r: Row) => Math.round(r[1] * r[2] * 100) / 100;
 
-const Paper: React.FC<{ i: number; supplier: string; w: number; labels: (typeof COPY)['he']['problem'] }> = ({
-  i,
-  supplier,
-  w,
-  labels,
-}) => {
-  const rows = [0, 1, 2, 3].map((k) => ITEMS[(i * 2 + k) % ITEMS.length]);
+const Paper: React.FC<{ i: number; w: number; labels: (typeof COPY)['he']['problem'] }> = ({ i, w, labels }) => {
+  const inv = INVOICES[CARD_INVOICE[i]];
+  const total = inv.rows.reduce((acc, r) => acc + lineTotal(r), 0);
   const s = w / 420;
   return (
     <div
@@ -40,34 +37,28 @@ const Paper: React.FC<{ i: number; supplier: string; w: number; labels: (typeof 
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <div style={{ fontWeight: 800, fontSize: 26 * s }}>{supplier}</div>
+        <div style={{ fontWeight: 800, fontSize: 26 * s }}>{inv.supplier}</div>
         <div style={{ fontSize: 15 * s, opacity: 0.6, fontFamily: FONT.mono }}>{`#${24100 + i * 7}`}</div>
       </div>
       <div style={{ fontSize: 16 * s, opacity: 0.65, marginTop: 4 * s }}>{labels.invoice}</div>
       <div style={{ height: 2 * s, background: C.paperInk, opacity: 0.8, margin: `${14 * s}px 0 ${8 * s}px` }} />
       <div style={{ display: 'flex', fontSize: 13 * s, opacity: 0.55, fontWeight: 600 }}>
         <div style={{ flex: 1 }}>{labels.item}</div>
-        <div style={{ width: 60 * s }}>{labels.qty}</div>
-        <div style={{ width: 80 * s, textAlign: 'left' }}>{labels.price}</div>
+        <div style={{ width: 48 * s }}>{labels.qty}</div>
+        <div style={{ width: 64 * s }}>{labels.price}</div>
+        <div style={{ width: 84 * s, textAlign: 'left' }}>{labels.total}</div>
       </div>
-      {rows.map((r, k) => (
-        <div
-          key={k}
-          style={{
-            display: 'flex',
-            fontSize: 17 * s,
-            padding: `${7 * s}px 0`,
-            borderBottom: `1px dashed rgba(34,38,31,0.25)`,
-          }}
-        >
-          <div style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden' }}>{r[0]}</div>
-          <div style={{ width: 60 * s, fontFamily: FONT.mono }}>{r[1]}</div>
-          <div style={{ width: 80 * s, textAlign: 'left', fontFamily: FONT.mono }}>{r[2]}</div>
+      {inv.rows.map((r, k) => (
+        <div key={k} style={{ display: 'flex', fontSize: 16 * s, padding: `${7 * s}px 0`, borderBottom: '1px dashed rgba(34,38,31,0.25)' }}>
+          <div style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r[0]}</div>
+          <div style={{ width: 48 * s, fontFamily: FONT.mono }}>{r[1]}</div>
+          <div style={{ width: 64 * s, fontFamily: FONT.mono }}>{r[2].toFixed(2)}</div>
+          <div style={{ width: 84 * s, textAlign: 'left', fontFamily: FONT.mono }}>{lineTotal(r).toFixed(2)}</div>
         </div>
       ))}
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12 * s, fontWeight: 800, fontSize: 19 * s }}>
         <div>{labels.total}</div>
-        <div style={{ fontFamily: FONT.mono }}>{`₪${(1180 + i * 377).toLocaleString('en-US')}.00`}</div>
+        <bdi dir="rtl" style={{ fontFamily: FONT.mono }}>{money(total)}</bdi>
       </div>
     </div>
   );
@@ -167,7 +158,7 @@ export const Problem: React.FC<{ locale: Locale }> = ({ locale }) => {
               }}
             >
               <div style={{ position: 'relative' }}>
-                <Paper i={i} supplier={tHe.suppliers[i % tHe.suppliers.length]} w={paperW} labels={tHe} />
+                <Paper i={i} w={paperW} labels={tHe} />
                 {stamp ? <Stamp text={stamp.text} at={stamp.at} dir={dir} /> : null}
               </div>
             </div>

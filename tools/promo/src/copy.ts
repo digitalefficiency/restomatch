@@ -9,13 +9,14 @@ export type Locale = 'he' | 'en';
 export const FACTS = {
   leak: 572, // "דלף החודש" — owner.leakHero
   spend: 28389, // pre-VAT checked spend this month
-  leakPct: '2.0%', // 572 / 28,389 = 2.01%
+  leakPct: '2%', // 572 / 28,389 = 2.01% — the app's hero shows "2%"
   caught: 296, // "נתפס לפני תשלום" — leak on unpaid invoices
   claimed: 276, // "נדרש מהספקים" — accepted to claim back
   flagged: 9, // invoices with a leak
   checked: 24, // checked invoices (dashboard "9 מתוך 24")
   beerFrom: 520, // leak detective: beer keg baseline ₪520.00
   beerTo: 575, // last price ₪575.00 (+10.6%)
+  chainLeakPct: '3.1%', // /dashboard/chain: worst branch (Jerusalem) — seed:chain-demo
   pilotTarget: '1.5%', // North Star / pilot target (docs/ICP.md, AGENTS.md)
 };
 export type Facts = typeof FACTS;
@@ -88,10 +89,9 @@ const he = {
   },
   chains: {
     title: 'רשתות וסניפים',
-    sub: 'כל הסניפים במסך אחד — איפה הכסף דולף.',
-    concept: 'קונספט עיצובי · בפיתוח',
-    branches: ['סניף מרכז', 'סניף צפון', 'סניף דרום', 'סניף שרון'],
-    col: 'דליפה מהרכש',
+    sub: 'כל הסניפים במסך אחד — איפה הכסף דולף, ואיפה אותו מוצר עולה יותר.',
+    chipWorst: 'הסניף הכי דולף: ירושלים',
+    chipGap: 'פערי מחיר בין סניפים',
   },
   value: {
     eyebrow: 'מסעדת ההדגמה · אוקטובר 2026',
@@ -167,10 +167,9 @@ const en: typeof he = {
   },
   chains: {
     title: 'Chains & branches',
-    sub: 'Every branch on one screen — see where money leaks.',
-    concept: 'Design concept · in development',
-    branches: ['Central', 'North', 'South', 'Sharon'],
-    col: 'Leak of spend',
+    sub: 'Every branch on one screen — where money leaks, and where the same product costs more.',
+    chipWorst: 'Leakiest branch: Jerusalem',
+    chipGap: 'Price gaps between branches',
   },
   value: {
     eyebrow: 'Demo restaurant · October 2026',

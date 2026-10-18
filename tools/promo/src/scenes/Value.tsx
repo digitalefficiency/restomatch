@@ -56,8 +56,8 @@ export const Value: React.FC<{ locale: Locale; duration?: number }> = ({ locale,
                         position: 'relative',
                       }}
                     >
-                      <CountUp value={s.value} at={at} dur={40} locale={locale} />
-                      <LightSweep at={at + 44} dur={26} opacity={0.4} />
+                      <CountUp value={s.value} at={at} dur={72 - i * 16} locale={locale} />
+                      <LightSweep at={84} dur={26} opacity={0.4} />
                     </div>
                     <div style={{ height: 3, width: 120, margin: '14px auto', background: s.color, opacity: 0.6, borderRadius: 3 }} />
                     <div style={{ fontSize: 28, color: C.subtle }}>{s.note}</div>

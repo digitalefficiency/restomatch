@@ -186,7 +186,7 @@ export const LightSweep: React.FC<{ at: number; dur?: number; opacity?: number; 
         position: 'absolute',
         inset: 0,
         pointerEvents: 'none',
-        mixBlendMode: 'overlay',
+        mixBlendMode: 'color-dodge',
         background: `linear-gradient(105deg, transparent ${x - width}%, rgba(255,255,255,${opacity}) ${x}%, transparent ${x + width}%)`,
       }}
     />

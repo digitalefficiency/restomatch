@@ -144,6 +144,8 @@ export const Receiver: React.FC<{ locale: Locale }> = ({ locale }) => {
       <Phone width={PW} glare={ry / 30}>
         <Screen src="shots/receiving-po-en.png" width={psw} opacity={1 - swap} top={psw * 0.11} redact={[EMAIL]} />
         <Screen src="shots/reconcile-en.png" width={psw} scroll={scroll} opacity={swap} top={psw * 0.11} redact={[EMAIL, STUB]} />
+        {/* status bar: scrolled content passes under it, never under the island */}
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: psw * 0.11, background: C.bg }} />
       </Phone>
     </div>
   );

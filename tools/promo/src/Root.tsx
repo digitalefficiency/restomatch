@@ -32,10 +32,10 @@ export const TIMELINE: Beat[] = [
   { from: 0, d: 180, el: (l) => <Hook locale={l} /> },
   { from: 172, d: 206, el: (l) => <Problem locale={l} /> },
   { from: 372, d: 78, el: (l) => <Match locale={l} /> },
-  { from: 444, d: PRODUCT_DURATION, el: (l) => <Product locale={l} /> },
+  { from: 440, d: PRODUCT_DURATION, el: (l) => <Product locale={l} /> },
   { from: 992, d: RECEIVER_DURATION, el: (l) => <Receiver locale={l} /> },
   { from: 1214, d: CHAINS_DURATION, el: (l) => <Chains locale={l} /> },
-  { from: 1316, d: VALUE_DURATION, el: (l) => <Value locale={l} /> },
+  { from: 1214 + CHAINS_DURATION - 8, d: 1646 - (1214 + CHAINS_DURATION - 8), el: (l) => <Value locale={l} duration={1646 - (1214 + CHAINS_DURATION - 8)} /> },
   { from: 1638, d: 162, el: (l) => <Cta locale={l} /> },
 ];
 export const PROMO_FRAMES = 1800;

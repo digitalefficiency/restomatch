@@ -39,7 +39,14 @@ export const PhoneDash: React.FC<{ locale: Locale }> = ({ locale }) => {
         }}
       >
         <Phone width={PW} glare={ry / 30}>
-          <Screen src={`shots/dashboard-${locale}-phone.png`} width={sw} scroll={scroll} />
+          <Screen
+            src={`shots/dashboard-${locale}-phone.png`}
+            width={sw}
+            scroll={scroll}
+            top={sw * 0.11}
+            redact={[{ y: 0.105, h: 0.04, x: 0.16, w: 0.62 }]}
+          />
+          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: sw * 0.11, background: C.bg }} />
         </Phone>
       </div>
       <FadeUp at={60} out={PHONE_DASH_DURATION - 22} style={{ position: 'absolute', top: 700, [locale === 'he' ? 'right' : 'left']: 40 }}>

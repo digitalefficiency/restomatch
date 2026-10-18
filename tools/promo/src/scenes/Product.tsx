@@ -65,7 +65,7 @@ export const Product: React.FC<{ locale: Locale }> = ({ locale }) => {
   const cam = { zoom: L(a.zoom, b.zoom), ux: L(a.ux, b.ux), uy: L(a.uy, b.uy), scroll: L(a.scroll, b.scroll), rx: L(a.rx, b.rx), ry: L(a.ry, b.ry) };
 
   // where the focus point should land on stage (zoom 1 → laptop centred on its side)
-  const restX = width / 2 + side * 330;
+  const restX = width / 2 + side * 380;
   const restY = height / 2 + 30;
   const zt = Math.min(1, Math.max(0, (cam.zoom - 1) / 1.1)); // 0 at rest → 1 when zoomed
   const targetX = restX + (width / 2 + side * 120 - restX) * zt;
@@ -102,13 +102,17 @@ export const Product: React.FC<{ locale: Locale }> = ({ locale }) => {
     amount: focusAmt,
   };
 
+  // blur the demo login e-mail in the app header ("owner@kfar-hazeitim.test")
+  const redact = [isRtl ? { y: 0.027, h: 0.013, x: 0.72, w: 0.21 } : { y: 0.027, h: 0.013, x: 0.075, w: 0.21 }];
+
   const screenContent = (
     <>
-      {si > 0 ? <Screen src={shots[si - 1]} width={sw} scroll={si === 3 ? 0 : 0} /> : null}
+      {si > 0 ? <Screen src={shots[si - 1]} width={sw} redact={redact} /> : null}
       <Screen
         src={shots[si]}
         width={sw}
         scroll={scrollPx}
+        redact={redact}
         focus={focus}
         clip={si > 0 ? (isRtl ? `inset(0 0 0 ${(1 - wipe) * 100}%)` : `inset(0 ${(1 - wipe) * 100}% 0 0)`) : undefined}
       />
@@ -158,8 +162,8 @@ export const Product: React.FC<{ locale: Locale }> = ({ locale }) => {
       {/* scrim behind the copy */}
       <AbsoluteFill
         style={{
-          background: `linear-gradient(${isRtl ? 270 : 90}deg, rgba(8,16,12,0.92) 0%, rgba(8,16,12,0.75) 26%, transparent 46%)`,
-          opacity: 0.35 + 0.65 * zt,
+          background: `linear-gradient(${isRtl ? 270 : 90}deg, rgba(8,16,12,0.96) 0%, rgba(8,16,12,0.9) 30%, rgba(8,16,12,0.55) 40%, transparent 50%)`,
+          opacity: 0.75 + 0.25 * zt,
         }}
       />
 

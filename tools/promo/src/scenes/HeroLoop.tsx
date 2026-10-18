@@ -50,7 +50,7 @@ export const HeroLoop: React.FC<{ locale: Locale }> = ({ locale }) => {
       <AbsoluteFill style={{ perspective: 1800, alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ transform: `translateY(${y + 20}px) rotateX(${rx}deg) rotateY(${ry}deg)`, transformStyle: 'preserve-3d' }}>
           <Laptop width={W} glare={ry / 12}>
-            <Screen src={`shots/dashboard-${locale}-full.png`} width={sw} scroll={scroll} focus={focus} />
+            <Screen src={`shots/dashboard-${locale}-full.png`} width={sw} scroll={scroll} focus={focus} redact={[isRtl ? { y: 0.027, h: 0.013, x: 0.72, w: 0.21 } : { y: 0.027, h: 0.013, x: 0.075, w: 0.21 }]} />
             {beamOn ? (
               <div
                 style={{
