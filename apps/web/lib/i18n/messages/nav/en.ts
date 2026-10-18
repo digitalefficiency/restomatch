@@ -12,6 +12,7 @@ export const en: Shape<typeof he> = {
     leaks: 'Leak detective',
     suppliers: 'Suppliers',
     catalog: 'Catalog',
+    contracts: 'Contracts & alerts',
     orders: 'Orders',
     exports: 'Exports',
     team: 'Team',
