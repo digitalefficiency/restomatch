@@ -108,8 +108,8 @@ it in the received e-mail, so this is a small follow-up.
    inbound docs at the time of writing; it is unit-tested only with mocks.
 
 **Flags:** `restaurants.settings.features.{ingestWhatsapp,ingestEmail,receiverPwa} = true` per restaurant.
-Kill-switch: `FEATURES_OFF=ingestWhatsapp,ingestEmail,receiverPwa`. Migrations 0050–0051 must be applied, and the
-regenerated RLS file brings the 4 tables under RLS.
+Kill-switch: `FEATURES_OFF=ingestWhatsapp,ingestEmail,receiverPwa`. Migrations 0050–0051 must be applied; 0050
+puts the 4 tables under RLS on its own. Grants come from the existing blanket grant plus default privileges.
 
 ## Verification (2 layers)
 
@@ -221,8 +221,10 @@ idempotency.
 
 ## Immutable / shared files touched
 
-- `packages/db/drizzle/rls/0002_core_tenant_rls.sql`: **added** the 4 ingest tables to the per-restaurant policy
-  list. Without this, `check-rls` fails CI.
+- `packages/db/drizzle/rls/*.sql`: **not touched** (MASTER-PLAN §4). Migration 0050 itself enables RLS on its 4
+  tables with rls/0002's exact policy shape (`<table>_tenant USING (restaurant_id = app.current_restaurant_id())`).
+  It re-declares `app.current_restaurant_id()` with rls/0002's identical body, so a fresh migrate works before
+  provision-rls runs. `check-rls` passes, and the shape test asserts RLS and the policy on all 4 tables.
 - `packages/db/src/schema.ts`: additive; 4 tables, plus `whatsapp` added to the `invoiceSource` enum.
 - `packages/db/drizzle/meta/_journal.json`: 2 entries.
 - `supabase/released-migrations.json`: append-only, written by `pnpm db:supabase-sync`.
