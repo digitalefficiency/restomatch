@@ -1213,7 +1213,10 @@ export const posSalesImports = pgTable(
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('pos_sales_imports_restaurant_idx').on(t.restaurantId, t.createdAt)],
+  (t) => [
+    index('pos_sales_imports_restaurant_idx').on(t.restaurantId, t.createdAt),
+    index('pos_sales_imports_created_by_idx').on(t.createdBy),
+  ],
 );
 
 export const posSales = pgTable(

@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS "pos_sales_imports" (
   CONSTRAINT "pos_sales_imports_period_check" CHECK ("period_from" <= "period_to")
 );--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "pos_sales_imports_restaurant_idx" ON "pos_sales_imports" ("restaurant_id", "created_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "pos_sales_imports_created_by_idx" ON "pos_sales_imports" ("created_by");--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "pos_sales" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE CASCADE,
@@ -58,5 +59,5 @@ CREATE POLICY "pos_sales_tenant" ON "pos_sales"
   USING ("restaurant_id" = nullif(current_setting('app.current_restaurant_id', true), '')::uuid);
 
 insert into drizzle.__drizzle_migrations (hash, created_at)
-select '7fed08d1e9f6e8328de638fdef59eb9de343305ad44b2a08c4650f893494ab60', 1782130000000
+select '90c5b17cf823c975e33b82cc61ed2e165a77b17145a7c3b5c795dd453eb9a6bd', 1782130000000
 where not exists (select 1 from drizzle.__drizzle_migrations where created_at = 1782130000000);

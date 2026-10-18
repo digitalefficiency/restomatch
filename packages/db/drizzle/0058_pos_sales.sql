@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS "pos_sales_imports" (
   CONSTRAINT "pos_sales_imports_period_check" CHECK ("period_from" <= "period_to")
 );--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "pos_sales_imports_restaurant_idx" ON "pos_sales_imports" ("restaurant_id", "created_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "pos_sales_imports_created_by_idx" ON "pos_sales_imports" ("created_by");--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "pos_sales" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE CASCADE,
