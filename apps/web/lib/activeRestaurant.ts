@@ -7,7 +7,8 @@
  *    The update payload can be hand-crafted by the browser (POST to the session
  *    endpoint), so it is never trusted on its own.
  *  • Otherwise keep the current active restaurant while its membership exists,
- *    else fall back to any membership (or none).
+ *    else fall back to the FIRST row — the caller passes rows oldest-first, so a
+ *    fresh login lands in the user's main branch (or none).
  */
 export function pickActiveMembership<T extends { restaurantId: string }>(
   rows: readonly T[],
