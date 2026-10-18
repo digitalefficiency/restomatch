@@ -239,6 +239,20 @@
       "when": 1781940000000,
       "tag": "0039_invitation_locale",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1782110000000,
+      "tag": "0056_recipes_prereqs",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1782120000000,
+      "tag": "0057_recipes",
+      "breakpoints": true
     }
   ]
 }

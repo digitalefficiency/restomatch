@@ -1,0 +1,88 @@
+-- 0057_recipes (S17 wave 1 — food cost per dish, flag `recipes`)
+--
+-- recipes       a dish on the menu, or a sub-recipe (sauce, dough, stock) that
+--               other recipes use. yield_qty/yield_unit = what one batch makes
+--               (a dish: 1 מנה; a sauce: e.g. 2 ק״ג). The menu price is stored in
+--               integer AGOROT (money rule: integer agorot at the boundary) with a
+--               flag for whether it includes VAT (Israeli menu prices normally do).
+-- recipe_items  one ingredient line: EITHER a product (bought, priced from
+--               price_history) OR a sub-recipe — never both. quantity is the NET
+--               amount on the plate in `unit`; waste_pct is the trim/peel/cooking
+--               loss, so the bought amount is quantity / (1 − waste_pct/100).
+--               units_per_product_unit bridges units that do not convert by
+--               dimension (a tray of 30 eggs, a bunch of parsley ≈ 100 g).
+--
+-- Tenant safety: both tables carry restaurant_id and every reference is a
+-- SAME-TENANT composite FK, so the DB itself rejects a line pointing at another
+-- restaurant's product or recipe. RLS is enabled HERE (not via the immutable
+-- drizzle/rls/0002 list): the same `<table>_tenant` policy 0002's loop creates,
+-- `restaurant_id = app.current_restaurant_id()`. The app.* GUC reader is created
+-- with the byte-identical definition 0002 uses (CREATE OR REPLACE, so applying
+-- 0002 before or after this file is a no-op either way) — the migration is
+-- self-contained on a fresh DB and 0002's completeness invariant stays green.
+-- Products/sub-recipes in use cannot be deleted (RESTRICT); deleting a recipe
+-- deletes its own lines (CASCADE).
+--
+-- Additive only, idempotent. Rollback: DROP TABLE recipe_items; DROP TABLE recipes;
+CREATE TABLE IF NOT EXISTS "recipes" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE cascade,
+  "name" text NOT NULL,
+  "name_en" text,
+  "category" text,
+  "is_sub_recipe" boolean DEFAULT false NOT NULL,
+  "yield_qty" numeric(12, 4) DEFAULT '1' NOT NULL,
+  "yield_unit" varchar(32) DEFAULT 'מנה' NOT NULL,
+  "menu_price_agorot" integer,
+  "menu_price_includes_vat" boolean DEFAULT true NOT NULL,
+  "active" boolean DEFAULT true NOT NULL,
+  "notes" text,
+  "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+  "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT "recipes_id_restaurant_id_key" UNIQUE ("id", "restaurant_id"),
+  CONSTRAINT "recipes_name_nonempty_check" CHECK (btrim("name") <> ''),
+  CONSTRAINT "recipes_yield_positive_check" CHECK ("yield_qty" > 0),
+  CONSTRAINT "recipes_menu_price_check" CHECK ("menu_price_agorot" IS NULL OR "menu_price_agorot" >= 0)
+);--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "recipes_restaurant_name_idx" ON "recipes" USING btree ("restaurant_id", "name");--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "recipe_items" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE cascade,
+  "recipe_id" uuid NOT NULL,
+  "product_id" uuid,
+  "sub_recipe_id" uuid,
+  "quantity" numeric(12, 4) NOT NULL,
+  "unit" varchar(32) NOT NULL,
+  "waste_pct" numeric(5, 2) DEFAULT '0' NOT NULL,
+  "units_per_product_unit" numeric(12, 4),
+  "sort_order" integer DEFAULT 0 NOT NULL,
+  "note" text,
+  "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT "recipe_items_recipe_same_tenant_fk" FOREIGN KEY ("recipe_id", "restaurant_id")
+    REFERENCES "public"."recipes"("id", "restaurant_id") ON DELETE cascade,
+  CONSTRAINT "recipe_items_product_same_tenant_fk" FOREIGN KEY ("product_id", "restaurant_id")
+    REFERENCES "public"."products"("id", "restaurant_id") ON DELETE restrict,
+  CONSTRAINT "recipe_items_sub_recipe_same_tenant_fk" FOREIGN KEY ("sub_recipe_id", "restaurant_id")
+    REFERENCES "public"."recipes"("id", "restaurant_id") ON DELETE restrict,
+  CONSTRAINT "recipe_items_one_source_check" CHECK (("product_id" IS NULL) <> ("sub_recipe_id" IS NULL)),
+  CONSTRAINT "recipe_items_not_self_check" CHECK ("sub_recipe_id" IS NULL OR "sub_recipe_id" <> "recipe_id"),
+  CONSTRAINT "recipe_items_quantity_positive_check" CHECK ("quantity" > 0),
+  CONSTRAINT "recipe_items_waste_range_check" CHECK ("waste_pct" >= 0 AND "waste_pct" < 100),
+  CONSTRAINT "recipe_items_units_per_check" CHECK ("units_per_product_unit" IS NULL OR "units_per_product_unit" > 0)
+);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "recipe_items_recipe_idx" ON "recipe_items" USING btree ("recipe_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "recipe_items_product_idx" ON "recipe_items" USING btree ("product_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "recipe_items_sub_recipe_idx" ON "recipe_items" USING btree ("sub_recipe_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "recipe_items_restaurant_idx" ON "recipe_items" USING btree ("restaurant_id");--> statement-breakpoint
+DROP TRIGGER IF EXISTS "recipes_set_updated_at" ON "recipes";--> statement-breakpoint
+CREATE TRIGGER "recipes_set_updated_at" BEFORE UPDATE ON "recipes" FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();--> statement-breakpoint
+CREATE SCHEMA IF NOT EXISTS app;--> statement-breakpoint
+CREATE OR REPLACE FUNCTION app.current_restaurant_id() RETURNS uuid
+  LANGUAGE sql STABLE
+  AS $$ select nullif(current_setting('app.current_restaurant_id', true), '')::uuid $$;--> statement-breakpoint
+ALTER TABLE "recipes" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+DROP POLICY IF EXISTS "recipes_tenant" ON "recipes";--> statement-breakpoint
+CREATE POLICY "recipes_tenant" ON "recipes" USING ("restaurant_id" = app.current_restaurant_id());--> statement-breakpoint
+ALTER TABLE "recipe_items" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+DROP POLICY IF EXISTS "recipe_items_tenant" ON "recipe_items";--> statement-breakpoint
+CREATE POLICY "recipe_items_tenant" ON "recipe_items" USING ("restaurant_id" = app.current_restaurant_id());
