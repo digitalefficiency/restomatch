@@ -1,4 +1,5 @@
 import { CheckCircle2 } from 'lucide-react';
+import { auth } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
 import { EmptyState, SectionHeader } from '@/lib/components';
 import { ViewToolbar, hasFilters, localDay, parseView } from '@/lib/components/views';
@@ -22,10 +23,15 @@ export default async function ApprovalsPage({
   };
   const caller = await createServerCaller();
   const [t, tv, locale] = await Promise.all([getT(approvals), getT(viewsNs), getLocale()]);
-  const [queue, options] = await Promise.all([
+  const [queue, options, session, memberships] = await Promise.all([
     caller.approvals.myQueue({ limit: 50, ...filters }),
     caller.owner.viewOptions(),
+    auth(),
+    caller.onboarding.myMemberships(),
   ]);
+  // The active membership's role (same lookup as the overview).
+  const viewerRole =
+    (memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0])?.role ?? null;
 
   return (
     <div>
@@ -73,6 +79,7 @@ export default async function ApprovalsPage({
           initial={queue}
           filters={filters}
           density={view.density}
+          viewerRole={viewerRole}
         />
       )}
     </div>

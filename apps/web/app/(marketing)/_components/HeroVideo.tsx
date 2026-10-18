@@ -64,7 +64,7 @@ export function HeroVideo({
         aria-label={label}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
-        className="aspect-[4/3] w-full object-cover"
+        className="aspect-video w-full object-cover"
       />
       {started ? (
         <button
@@ -75,7 +75,7 @@ export function HeroVideo({
             if (v.paused) void v.play().catch(() => undefined);
             else v.pause();
           }}
-          className="absolute bottom-3 end-3 z-10 inline-flex min-h-8 items-center gap-1 rounded-md bg-bg/80 px-2 py-1 text-[11px] text-muted backdrop-blur transition-colors hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+          className="absolute left-3 top-3 z-10 inline-flex min-h-8 items-center gap-1 rounded-md bg-bg/80 px-2 py-1 text-[11px] text-muted backdrop-blur transition-colors hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
         >
           {playing ? (
             <Pause className="h-3 w-3" aria-hidden="true" />

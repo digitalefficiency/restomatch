@@ -14,19 +14,10 @@ import {
   endOfDayReportEmail,
   recipientsForRestaurant,
 } from '@restomatch/api';
-import {
-  and,
-  count,
-  createDb,
-  discrepancies,
-  eq,
-  gte,
-  inArray,
-  restaurants,
-  sql,
-} from '@restomatch/db';
+import { and, count, discrepancies, eq, gte, inArray, restaurants, sql } from '@restomatch/db';
 import { makeWorker } from '../queue';
 import { appBaseUrl, formatIlsAmount, formatIlDate, startOfIlDay } from '../lib/notifyHelpers';
+import { jobDb } from '../db';
 
 export interface EndOfDayReportJob {
   /** When omitted, runs for ALL restaurants. */
@@ -42,7 +33,7 @@ export function startEndOfDayReportWorker() {
   return makeWorker<EndOfDayReportJob>('end-of-day-report', async (job) => {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error('DATABASE_URL is required');
-    const db = createDb(url);
+    const db = jobDb(url);
 
     const now = job.data.forDate ? new Date(job.data.forDate) : new Date();
     const startToday = startOfIlDay(now);

@@ -11,9 +11,9 @@ export const en: Shape<typeof he> = {
     emptyTitle: 'No active price leaks',
     emptyDescription:
       'A baseline needs at least 3 price observations per product and supplier. Keep receiving invoices and leaks will surface.',
-    totalLabel: 'Paid above median (30 days)',
-    totalHint: 'Σ (price − median price) × quantity over the purchases of the last 30 days',
-    hotspots: 'Active leak hotspots',
+    totalLabel: 'Price creep: paid above the usual price (30 days)',
+    totalHint: 'Σ (price − median price) × quantity over the last 30 days. A price-trend measure, separate from the monthly leak.',
+    hotspots: 'Price-creep hotspots',
     hotspotsHint: 'Product × supplier pairs above the limit',
     worst: 'Largest jump',
     worstHint: 'The sharpest rise against the median price',
