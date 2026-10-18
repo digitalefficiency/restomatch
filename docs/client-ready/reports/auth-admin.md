@@ -373,3 +373,40 @@ Tested on a production build (`next start`), with a test-only network preload fa
 - **Direction and fonts:** `ar` → `<html lang=ar dir=rtl>` + Noto Sans Arabic; `ru`/`th`/`ti` → ltr + Thai/Ethiopic fonts; he rtl / en ltr. The ask page console is clean in he and en. An unsupported locale → 400.
 - **Translation spend:** cached per restaurant+locale, ≤80 Claude misses per call, plus an hourly budget.
 - **COVERAGE:** `ask.*` and `receiverLangs.*` are listed.
+
+### Cross-QA: S12 ₪-back tracker + monthly report (PR #45 @ a2e8007) and S11 contracts + price alerts (PR #48 @ 51ca875)
+**Verification (2 layers).**
+- Layer 1, each PR's suites on a fresh DB: #45 recovery + lifecycle + cross-tenant + rls.attack 201/201 and the seed-guard unit tests 12/12; #48 cross-tenant + rls.attack 174/174.
+- Layer 2, production builds (`next start`) with a RIVAL owner/tenant: #45 19 runtime checks plus a direct send-loop run; #48 20 runtime checks plus a direct 07:00-sweep run (×2).
+- No real sends: the outbox only (no worker dispatch), and WhatsApp is the mock.
+
+**#45 findings**
+| # | Sev | Finding | Fix / owner |
+|---|---|---|---|
+| M1 | low-medium | **`sendMonthlyReports` has no per-restaurant try/catch.** One tenant with bad data (verified: an invalid timezone → `RangeError`) makes the **whole run throw**, so every restaurant after it in the loop gets no report. #48's price-alert job does this correctly. | Wrap each restaurant like `jobs/priceAlerts.ts` (count `failed`, keep going) (S12) |
+| M2 | info (governance) | Both #45 and #48 modify **immutable** `apps/worker/src/cron.ts` and `packages/api/src/notifications/outbox.ts` (S7's outbox fix). | Human review/sign-off per AGENTS.md (orchestrator) |
+| M3 | medium (release) | Migrations 0046–0049 are dated before 0050–0057: the same skip hazard. All of wave 1 must merge/apply in numeric order. | Orchestrator |
+| M4 | low | `demo:seed-all` blocks only the OLD production ref. If a new production project exists, add its ref to `PRODUCTION_DB_MARKERS`. | S12 |
+
+**#45 verified ✅**
+- **Roles:** recovery is owner/manager/bookkeeper (receiver/chef 403, page bounces); the monthly report is owner/manager.
+- **Rival tenant:** never sees MAIN claims; transition/history on a MAIN claim → 404; a correctly shaped credit note on a MAIN claim → 404, nothing credited, no row.
+- **Integer agorot:** fractional/negative → 400; over-credit is **capped at the claim amount** (3852 → credited 3852, the rest reported unallocated); an illegal transition → 409.
+- **PDF:** per-tenant (different bytes), `application/pdf`; unauthenticated → 307 to login.
+- **Monthly send:** run 1 → 3 emails + 2 WhatsApp (mock); **run 2 → 0** (sent_at + dedupe keys); emails only to owner/manager members; no real send.
+- **Flags off** → `FEATURE_DISABLED`, nav hidden.
+- **Migrations:** 0048/0049 have composite same-tenant FKs on every reference and RLS enabled in-file.
+- **`demo:seed-all` guards:**
+  - the old prod ref is refused, even percent-encoded or only in `PGUSER`;
+  - a shared pooler is refused;
+  - a remote host is refused without `SEED_ALLOW_REMOTE_HOST`;
+  - a remote target needs a `DEMO_PASSWORD` that's set, not the public default, and ≥12 chars;
+  - a non-empty DB is refused without `--reset`.
+  - `?host=` in the URL is **not** a bypass: postgres-js still connects to the URL host and forwards `host` as a startup GUC, which Postgres rejects (42704).
+
+**#48 verified ✅**
+- **Roles:** contracts/alerts read for owner/manager/bookkeeper, write for owner/manager; receiver/chef 403.
+- **Rival tenant:** a RIVAL supplier/product on create → 404, including own supplier + RIVAL product; update/delete of a RIVAL contract → 404, untouched; importPreview into a RIVAL supplier → 404; dismissing a foreign alert → 404.
+- **Import:** `"1,250"` → ₪1250, `"1.234,56"` → skipped, a `=cmd|calc` unit → `BAD_UNIT`, >12 MB → 400 before parsing, no 5xx.
+- **07:00 sweep:** per-restaurant try/catch ✓. Run 1 queued 2 emails, **run 2 queued 0** (`notified_at` + per-alert/recipient dedupe), 0 unnotified left, 0 emails to non-members.
+- **Flags off** → `FEATURE_DISABLED`, nav hidden.
