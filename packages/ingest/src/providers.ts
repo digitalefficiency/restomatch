@@ -30,7 +30,7 @@ export class AttachmentTooLargeError extends Error {
 
 function timeoutSignal(ms: number): AbortSignal {
   const c = new AbortController();
-  setTimeout(() => c.abort(new Error('timeout')), ms).unref?.();
+  setTimeout(() => c.abort(), ms).unref?.();
   return c.signal;
 }
 
