@@ -508,6 +508,24 @@ export async function runDoctor(url: string, opts: DoctorOptions = {}): Promise<
         if (exec?.ok === false) add('app role', 'execute app.*', 'FAIL', `${appRole} cannot execute app.current_restaurant_id() — every RLS query will error`);
       }
 
+      // Supabase Data API roles (anon/authenticated) must not reach any table:
+      // they are usable with the public publishable key through PostgREST.
+      const apiRoles = (await tx`select rolname from pg_roles where rolname in ('anon', 'authenticated')`).map((r) => String(r.rolname));
+      if (apiRoles.length > 0) {
+        const exposed = (await tx`
+          select distinct c.relname as t from pg_class c
+          join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+          cross join unnest(${apiRoles}::text[]) as r(role)
+          where c.relkind = 'r' and (has_table_privilege(r.role, c.oid, 'SELECT')
+             or has_table_privilege(r.role, c.oid, 'INSERT') or has_table_privilege(r.role, c.oid, 'UPDATE')
+             or has_table_privilege(r.role, c.oid, 'DELETE'))
+          order by 1`) as unknown as Array<{ t: string }>;
+        add('app role', 'Supabase Data API locked out', exposed.length ? 'FAIL' : 'PASS',
+          exposed.length
+            ? `${apiRoles.join('/')} can reach ${exposed.length} public table(s) via the publishable key: ${exposed.map((e) => e.t).join(', ')} — apply the latest supabase/migrations RLS file`
+            : `${apiRoles.join('/')} have no table privileges in public`);
+      }
+
       // ── 7. Cross-tenant integrity ───────────────────────────────────────
       const integrityBad: string[] = [];
       let integrityRan = 0;

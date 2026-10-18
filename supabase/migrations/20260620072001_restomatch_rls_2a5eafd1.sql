@@ -490,3 +490,23 @@ create policy invoice_scans_walkins_insert on storage.objects
     raise warning 'restomatch: storage.objects policies NOT applied as % (%) — run packages/db/drizzle/rls/0001_invoice_scans_rls.sql in the SQL editor', current_user, sqlerrm;
   end;
 end $restomatch_storage$;
+
+-- 6. Lock the Supabase Data API out of the schema. Supabase grants ALL on new
+--    public tables/sequences to anon + authenticated by default privileges, and
+--    those roles are reachable with the PUBLIC publishable key through PostgREST.
+--    RestoMatch never reads tables through the Data API (supabase-js is used for
+--    Storage only; all data goes through Drizzle), so they get nothing — otherwise
+--    every table without RLS (plans, dsr_requests, the Auth.js identity tables)
+--    would be readable/writable by anyone holding the publishable key.
+do $$
+declare r text;
+begin
+  foreach r in array array['anon', 'authenticated'] loop
+    if exists (select 1 from pg_roles where rolname = r) then
+      execute format('revoke all on all tables in schema public from %I', r);
+      execute format('revoke all on all sequences in schema public from %I', r);
+      execute format('alter default privileges in schema public revoke all on tables from %I', r);
+      execute format('alter default privileges in schema public revoke all on sequences from %I', r);
+    end if;
+  end loop;
+end $$;

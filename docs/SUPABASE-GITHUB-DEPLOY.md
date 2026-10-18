@@ -7,10 +7,11 @@
 > מריצה כל קובץ חדש כשממזגים לענף הייצור שהוגדר בה.
 >
 > מה עושים, לפי הסדר:
-> 1. בדשבורד של Supabase → Integrations → GitHub: לוודא שתיקיית העבודה היא שורש הריפו, ושענף הייצור הוא הענף שמכיל את הקוד.
->    שימו לב: `main` בגיטהאב הוא היסטוריה ריקה ולא קשורה.
+> 1. בדשבורד של Supabase → Integrations → GitHub: לוודא שתיקיית העבודה היא שורש הריפו, ושענף הייצור הוא `main`
+>    (`main` מכיל עכשיו את הקוד המלא).
 >    לכבות **Automatic branching**, כדי שלא ייווצרו מסדי תצוגה בתשלום.
-> 2. למזג. האינטגרציה מריצה 36 קבצים: הכנה, 34 מיגרציות, והרשאות RLS.
+> 2. מיזוג ל-`main` → Supabase מריץ מיד 36 קבצים על מסד הייצור החדש: הכנה, 34 מיגרציות, והרשאות RLS.
+>    הקבצים כוללים נעילה של ה-Data API, כך שהמפתח הציבורי לא נותן גישה לאף טבלה. אין בקבצים נתוני דמו.
 > 3. ב-SQL Editor להריץ פעם אחת:
 >    `alter role restomatch_app with login password '<APP_ROLE_PASSWORD>';`
 > 4. להריץ `pnpm db:doctor` מול הפרויקט החדש. התוצאה הצפויה: 0 FAIL ו-0 WARN.
@@ -18,10 +19,19 @@
 > 6. אופציונלי: להעביר נתונים מהפרויקט הישן (§6), או לזרוע את נתוני הדמו לפרזנטציה (§7) — רק על מסד ריק.
 >
 > נבדק מקומית על "Supabase מדומה": משתמש מיגרציה לא-superuser, סכמת storage בבעלות תפקיד נפרד, והתפקידים anon / authenticated / service_role.
-> כל הקבצים רצו נקי. מערכת המיגרציות של Drizzle רואה את המסד כמעודכן. `db:doctor` החזיר 0 FAIL, ו-159 מבחני תקיפת RLS עברו.
+> כל הקבצים רצו נקי. מערכת המיגרציות של Drizzle רואה את המסד כמעודכן. `db:doctor` החזיר 0 FAIL, ו-169 מבחני תקיפת RLS עברו.
 > לא היה אפשר לגשת לתיעוד של Supabase מכאן, ולכן הנחות שצריך לאשר בדשבורד מסומנות ⚠️.
 
 ---
+
+## 0. Cutover order (do not reorder)
+
+1. **Supabase applies the schema.** Merging `supabase/` into the integration's production branch (`main`) deploys it to the NEW project at once.
+2. **Owner sets the `restomatch_app` password** in the SQL editor (§4.2), checks the storage policies (§4.3) and runs `pnpm db:doctor` (§4.4).
+3. **Owner sets Vercel Production env** to the new project (§5): the DB URLs, Supabase keys and `APP_ROLE_PASSWORD`, plus `AUTH_ENC_KEY`, `AUTH_SECRET` and the rest of `docs/ENV-PRODUCTION.md`. Also update the worker env.
+4. **Redeploy** the Vercel production deployment and smoke-test.
+
+Until step 4 the live site keeps using the old project, so steps 1–3 are invisible to users. Data move (§6) or demo seeding (§7) — never both — goes between steps 2 and 3. Both are explicit manual steps; `supabase/migrations` contains schema only, no data.
 
 ## 1. How it works
 
@@ -35,7 +45,7 @@
   |---|---|
   | `20260521164026_restomatch_bootstrap.sql` | `create extension if not exists vector / pg_trgm / "uuid-ossp"`, exactly as `scripts/migrate.ts` does (no explicit schema, so they resolve the way they do in today's production), plus `drizzle.__drizzle_migrations`. |
   | `<journal when, UTC>_<drizzle tag>.sql` × 34 | The drizzle SQL verbatim, plus an idempotent row in `drizzle.__drizzle_migrations` with the hash and `created_at` exactly as drizzle-orm computes them. After a git deploy, `pnpm db:migrate` is a no-op and `db:doctor` shows the schema as current. |
-  | `<tail+1s>_restomatch_rls_<hash>.sql` | `provision-rls` as a migration: core tenant RLS (rls/0002), the append-only audit log (rls/0003), and the role `restomatch_app` with **NOLOGIN and no password in git**. It applies `ensureRlsAppRole`'s grants and revokes, creates the **private `invoice-scans` bucket**, and adds the per-restaurant `storage.objects` policies (rls/0001). It is idempotent. |
+  | `<tail+1s>_restomatch_rls_<hash>.sql` | `provision-rls` as a migration: core tenant RLS (rls/0002), the append-only audit log (rls/0003), and the role `restomatch_app` with **NOLOGIN and no password in git**. It applies `ensureRlsAppRole`'s grants and revokes, creates the **private `invoice-scans` bucket**, and adds the per-restaurant `storage.objects` policies (rls/0001). It also **locks the Data API out**: it revokes the default grants Supabase gives `anon`/`authenticated` on public tables and sequences, now and for future tables. Those roles are reachable with the publishable key, and RestoMatch never reads tables through PostgREST — supabase-js is used for Storage only. It is idempotent. |
 - **When the RLS file is regenerated:** a new one, with a later version, is emitted whenever its content changes or a newer migration lands. Older RLS files stay in the repo, because Supabase has recorded their versions.
 - **Forgetting to regenerate fails CI.** `packages/db/src/__tests__/supabase-deploy.test.ts` fails when `supabase/` is stale, and `pnpm db:supabase-sync --check` checks the same thing locally.
 - **That test also proves the deploy** on an emulated Supabase:
@@ -46,7 +56,7 @@
   - re-applying the RLS file is a no-op;
   - without rights on `storage.objects`, the RLS file still applies with a WARNING instead of failing the deploy.
 
-  The same files were also applied with `psql -1 -v ON_ERROR_STOP=1`. After that, `check-rls` and the RLS, cross-tenant and storage attack suites passed (159/159).
+  The same files were also applied with `psql -1 -v ON_ERROR_STOP=1`. After that, `check-rls` and the RLS, cross-tenant and storage attack suites passed (169/169).
 
 **Adding a migration later:**
 1. Write the drizzle SQL and its journal entry, with a `when` later than everything already in `supabase/migrations`.
@@ -66,14 +76,12 @@ The generator refuses a migration that would be older than an already-deployed v
 3. **Who runs the migrations:** the integration runs each file as `postgres`, which on Supabase is not a superuser but has CREATEROLE and owns `public`. That is what the emulation used.
 4. **Extensions:** `vector` and `pg_trgm` are installable with plain `create extension`. `uuid-ossp` is usually pre-installed in `extensions`, so that statement is a no-op.
 5. **Storage policies:** `postgres` can insert into `storage.buckets` and create policies on `storage.objects`. If not, the RLS migration logs `storage.objects policies NOT applied` and continues; then run `packages/db/drizzle/rls/0001_invoice_scans_rls.sql` in the SQL editor (§4).
-6. **Pooler user format:** pooled connections use `<role>.<project-ref>` as the user name, e.g. `restomatch_app.abcd1234`. Copy the exact string from Project Settings → Database → Connection string.
+6. **Data API defaults:** new tables in `public` are granted to `anon`/`authenticated` by default privileges (the RLS migration revokes them, and `db:doctor` FAILs if they come back). If you ever need the Data API, expose a dedicated schema instead.
+7. **Pooler user format:** pooled connections use `<role>.<project-ref>` as the user name, e.g. `restomatch_app.abcd1234`. Copy the exact string from Project Settings → Database → Connection string.
 
-## 3. Pick the production branch
+## 3. Production branch
 
-`main` on GitHub is an **unrelated placeholder history**. Merging into it won't contain the code. Choose one option:
-
-- **A (fastest, for tomorrow):** set the integration's production branch to the branch that holds the code — `claude/client-ready` now, `release/security-hardening` after the stack merges. Every later merge into that branch deploys new migrations.
-- **B (clean):** make the real code the default branch first (rename or force-replace `main` with the code branch, or change the repo's default branch), then point the integration at it.
+`main` on GitHub now holds the full codebase (`main` == `claude/client-ready`, a regular merge), so the integration's production branch is **`main`**. **Merging into `main` deploys new migrations to the production database immediately.** Treat every merge that touches `supabase/` as a production schema change: run the doctor locally first, and take a backup once the project holds real data.
 
 Fallback without the integration, from a laptop with the Supabase CLI:
 

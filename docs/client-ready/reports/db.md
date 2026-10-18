@@ -223,3 +223,17 @@ DB-RUNBOOK updated: pending range now **0019 → 0039** (S4's 0039 in the §11 t
 
   ⚠️ Assumptions not verifiable from here (Supabase docs unreachable) are marked in §2. DB-RUNBOOK points to it.
 - Immutable file touched: `packages/db/src/rls.ts` — the grants block moved verbatim into exported `rlsAppRoleGrantsSql()` (used by `ensureRlsAppRole` and the generator); behaviour unchanged, attack suites green.
+- **Hardening before `main` (= Supabase production):**
+  - **Data API lockout:** the RLS file revokes Supabase's default `anon`/`authenticated` grants on public tables and sequences, including future tables via default privileges. Without it, tables without RLS (`plans`, `dsr_requests`, the Auth.js identity tables) would have been readable or writable with the public publishable key. The app uses supabase-js for Storage only.
+  - `db:doctor` FAILs if those roles can reach any public table.
+  - The emulation now mimics Supabase's default grants.
+  - Dropped the uncertain `[db.migrations]` key from `config.toml`.
+  - The RLS file was regenerated as a single `…_restomatch_rls_2a5eafd1.sql`; the earlier one was never deployed and was removed.
+- **Mandatory proof re-run on the final files:**
+  - all 36/36 applied as a non-superuser with `psql -1 ON_ERROR_STOP`;
+  - RLS re-apply OK;
+  - `db:migrate` no-op;
+  - `db:doctor` 0 FAIL / 1 expected WARN (no LOGIN yet), Data API PASS;
+  - `check-rls` OK;
+  - attack suites **169/169**.
+- The deploy doc gained a §0 cutover order: schema → `restomatch_app` password → Vercel env → redeploy. There is no seed in migrations.

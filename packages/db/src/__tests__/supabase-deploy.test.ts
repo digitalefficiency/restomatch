@@ -101,6 +101,11 @@ beforeAll(async () => {
       grant select on storage.objects to ${MIGRATOR};
       -- Supabase lets the dashboard/SQL-editor role manage storage policies.
       grant supabase_storage_admin to ${MIGRATOR};
+      -- Supabase's default privileges: every table the migration role creates in
+      -- public is granted to the Data API roles (reachable with the publishable key).
+      grant usage on schema public to anon, authenticated, service_role;
+      alter default privileges for role ${MIGRATOR} in schema public grant all on tables to anon, authenticated, service_role;
+      alter default privileges for role ${MIGRATOR} in schema public grant all on sequences to anon, authenticated, service_role;
     `);
   } finally {
     await sup.end();
@@ -184,6 +189,21 @@ describe('git deploy onto an emulated Supabase project', () => {
       where c.relkind = 'r' and not c.relrowsecurity
         and exists (select 1 from pg_attribute a where a.attrelid = c.oid and a.attname = 'restaurant_id')`;
     expect(unprotected!.n).toBe(0);
+  });
+
+  it('locks the Supabase Data API roles out of every public table (despite default privileges)', async (ctx) => {
+    if (!canCreate) ctx.skip();
+    const [exposed] = await sql`
+      select count(*)::int as n from pg_class c join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+      cross join (values ('anon'), ('authenticated')) r(role)
+      where c.relkind = 'r' and (has_table_privilege(r.role, c.oid, 'SELECT') or has_table_privilege(r.role, c.oid, 'INSERT')
+        or has_table_privilege(r.role, c.oid, 'UPDATE') or has_table_privilege(r.role, c.oid, 'DELETE'))`;
+    expect(exposed!.n).toBe(0);
+    // A table created LATER (a future migration) is not re-granted to them either.
+    await sql.unsafe('create table public.zz_future_probe (id int)');
+    const [p] = await sql`select has_table_privilege('anon', 'public.zz_future_probe', 'SELECT') as a`;
+    expect(p!.a).toBe(false);
+    await sql.unsafe('drop table public.zz_future_probe');
   });
 
   it('db:doctor: no FAIL; the only WARN before go-live is the app role having no LOGIN yet', async (ctx) => {
