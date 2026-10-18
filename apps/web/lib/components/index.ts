@@ -6,7 +6,7 @@ export { Badge } from './Badge';
 export type { BadgeTone } from './Badge';
 export { KpiCard } from './KpiCard';
 export type { KpiTone } from './KpiCard';
-export { Input, Textarea, Field } from './Input';
+export { Input, Textarea, Field, Select } from './Input';
 export { Spinner } from './Spinner';
 export { EmptyState } from './EmptyState';
 export { FlowBar } from './FlowBar';
@@ -19,11 +19,11 @@ export { ActivityFeed } from './ActivityFeed';
 export type { ActivityItem } from './ActivityFeed';
 export { Sparkline } from './Sparkline';
 export { Skeleton } from './Skeleton';
-export {
-  EntitlementUpsell,
-  ErrorNotice,
-  entitlementCauseOf,
-  featureLabel,
-} from './EntitlementUpsell';
-export type { EntitlementCause } from './EntitlementUpsell';
+export { EntitlementUpsell, ErrorNotice } from './EntitlementUpsell';
+export { entitlementCauseOf, featureLabel } from './entitlement';
+export type { EntitlementCause } from './entitlement';
 export { LoadMore } from './LoadMore';
+export { ToastProvider, useToast } from './Toast';
+export { Breadcrumbs } from './Breadcrumbs';
+export { friendlyError, trpcErrorCode } from './errors';
+export { displayName } from './displayName';

@@ -8,7 +8,9 @@ import { memberProcedure, router } from '../trpc';
  * (suppliers.name, products.canonical_name, invoices.invoice_number). Ranking
  * uses similarity() so transposed/typo'd queries still surface; an ILIKE
  * substring fallback catches short exact-substring hits trigram ranks low.
- * Always restaurant-scoped via ctx.session.restaurantId.
+ * Always restaurant-scoped via ctx.session.restaurantId. English names
+ * (`name_en`, migration 0028) are matched by substring and returned so the UI
+ * can show them in the English locale.
  */
 const PER_KIND = 5;
 
@@ -22,26 +24,30 @@ export const searchRouter = router({
 
       const [supplierRows, productRows, invoiceRows] = await Promise.all([
         ctx.db
-          .select({ id: suppliers.id, name: suppliers.name })
+          .select({ id: suppliers.id, name: suppliers.name, nameEn: suppliers.nameEn })
           .from(suppliers)
           .where(
             and(
               eq(suppliers.restaurantId, rid),
-              sql`(${suppliers.name} % ${q} OR ${suppliers.name} ILIKE ${like})`,
+              sql`(${suppliers.name} % ${q} OR ${suppliers.name} ILIKE ${like} OR ${suppliers.nameEn} ILIKE ${like})`,
             ),
           )
-          .orderBy(sql`similarity(${suppliers.name}, ${q}) DESC`)
+          .orderBy(
+            sql`greatest(similarity(${suppliers.name}, ${q}), similarity(coalesce(${suppliers.nameEn}, ''), ${q})) DESC`,
+          )
           .limit(PER_KIND),
         ctx.db
-          .select({ id: products.id, canonicalName: products.canonicalName })
+          .select({ id: products.id, canonicalName: products.canonicalName, nameEn: products.nameEn })
           .from(products)
           .where(
             and(
               eq(products.restaurantId, rid),
-              sql`(${products.canonicalName} % ${q} OR ${products.canonicalName} ILIKE ${like})`,
+              sql`(${products.canonicalName} % ${q} OR ${products.canonicalName} ILIKE ${like} OR ${products.nameEn} ILIKE ${like})`,
             ),
           )
-          .orderBy(sql`similarity(${products.canonicalName}, ${q}) DESC`)
+          .orderBy(
+            sql`greatest(similarity(${products.canonicalName}, ${q}), similarity(coalesce(${products.nameEn}, ''), ${q})) DESC`,
+          )
           .limit(PER_KIND),
         ctx.db
           .select({ id: invoices.id, invoiceNumber: invoices.invoiceNumber })

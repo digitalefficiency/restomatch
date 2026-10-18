@@ -124,3 +124,10 @@
     -webkit-backdrop-filter: saturate(140%) blur(14px);
   }
 }
+
+/* S5 (ops-ui, client-ready sprint): `html { direction: rtl }` above wins over the
+   `dir` attribute, so English (`<html dir="ltr">`) rendered right-to-left. Honor
+   the attribute the root layout sets from the `rm_locale` cookie. */
+html[dir='ltr'] {
+  direction: ltr;
+}
