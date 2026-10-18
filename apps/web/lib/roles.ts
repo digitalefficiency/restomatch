@@ -50,6 +50,9 @@ export const ROUTE_ROLES: Record<string, UserRole[]> = {
   '/dashboard/suppliers': ['owner', 'manager'],
   '/dashboard/catalog': ['owner', 'manager'],
   '/dashboard/orders': ['owner', 'manager'],
+  // Wave-1 contracts + price alerts: finance tier, same as the contracts/priceAlerts
+  // routers (financeProcedure). The nav entry is additionally feature-flag gated.
+  '/dashboard/contracts': ['owner', 'manager', 'bookkeeper'],
   '/dashboard/exports': ['owner', 'bookkeeper'],
   // Team: owners manage the roster; managers see it read-only and may set a
   // member's app language (e.g. an English-speaking receiver).
