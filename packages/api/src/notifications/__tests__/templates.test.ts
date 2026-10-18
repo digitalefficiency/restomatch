@@ -122,3 +122,43 @@ describe('email templates', () => {
     expect(html).toContain('אין זיכויים פתוחים');
   });
 });
+
+describe('auth email templates — English (client-ready S4)', () => {
+  it('magicLinkEmail(locale=en) is an LTR English document with the link', () => {
+    const e = magicLinkEmail({ url: 'https://app.test/m?t=1', locale: 'en' });
+    expect(e.subject).toBe('Your RestoMatch sign-in link');
+    expect(e.html).toContain('dir="ltr"');
+    expect(e.html).toContain('lang="en"');
+    expect(e.html).toContain('https://app.test/m?t=1');
+    expect(e.html).not.toMatch(/[֐-׿]/);
+    expect(e.text).toContain('https://app.test/m?t=1');
+  });
+
+  it('passwordResetEmail(locale=en) has no Hebrew left', async () => {
+    const { passwordResetEmail } = await import('../templates');
+    const e = passwordResetEmail({ url: 'https://app.test/reset?token=x', locale: 'en' });
+    expect(e.subject).toMatch(/Reset/);
+    expect(e.html).not.toMatch(/[֐-׿]/);
+  });
+
+  it('inviteEmail(locale=en) escapes names and keeps the Hebrew restaurant name as data', () => {
+    const e = inviteEmail({
+      url: 'https://app.test/login?x=1',
+      restaurantName: 'כפר הזיתים',
+      roleLabel: 'Receiver',
+      inviterName: '<b>Dana</b>',
+      locale: 'en',
+    });
+    expect(e.subject).toContain('כפר הזיתים');
+    expect(e.html).toContain('dir="ltr"');
+    expect(e.html).toContain('&lt;b&gt;Dana&lt;/b&gt;');
+    expect(e.html).not.toContain('<b>Dana</b>');
+  });
+
+  it('Hebrew invite preview is escaped exactly once', () => {
+    const e = inviteEmail({ url: 'u', restaurantName: 'R', roleLabel: 'r', inviterName: 'A&B' });
+    expect(e.html).toContain('A&amp;B הזמין/ה אותך');
+    expect(e.html).not.toContain('&amp;amp;');
+    expect(e.html).toContain('dir="rtl"');
+  });
+});

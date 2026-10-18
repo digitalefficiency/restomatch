@@ -4,6 +4,7 @@ import { createServerCaller } from '@/lib/trpc/server';
 import { Button } from '@/lib/components';
 import { labelForRole } from '@/lib/roles';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
+import { LocaleSync } from './locale-sync';
 import { DashboardNav } from './nav';
 import { DashboardSearch } from './search';
 import { WorkerStatusBanner } from './worker-status';
@@ -54,6 +55,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       </header>
       <div className="mx-auto max-w-6xl px-6 py-8">
         <WorkerStatusBanner />
+        <LocaleSync />
         {children}
       </div>
     </main>

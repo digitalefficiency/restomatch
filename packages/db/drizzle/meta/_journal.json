@@ -232,6 +232,13 @@
       "when": 1781870000000,
       "tag": "0032_integrity_checks",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1781940000000,
+      "tag": "0039_invitation_locale",
+      "breakpoints": true
     }
   ]
 }
