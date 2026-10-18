@@ -113,7 +113,7 @@ Branch `claude/wave1-lang-ai` → draft PR #42 into `claude/client-ready`. Both 
 
 ## Uncertain translations (please have a native speaker check)
 
-- **Tigrinya (most important):**
+- **Tigrinya (most important):** nav `ሰንሰለት`/`ጨናፍር` (chain/branches, added at merge time without review);
   - UI wording: `ደጊምኩም ፈትኑ` ("try again"); `ቅጥዕታት` vs `ምድላዋት` (Settings); language names ending in Amharic-style `-ኛ`; loanwords `ፋቱራ`, `ሊንክ`, `ኣካውንት`.
   - Glossary items: `ቡሮ` (butter), `ፉንጊ` (mushrooms), `ርጉእ` (yogurt), eggplant (`ባደንጃን` vs `ሜላንዛና`), bell pepper (`ፐፐሮኒ`?), chicken thigh `ሰለፍ`, black pepper, bleach (`ክሎሪን` vs `ቫርኪና`).
   - Cucumber, green pepper, merguez, sourdough and red wine are deliberately left empty, so they fall back to English.
@@ -187,7 +187,13 @@ Branch `claude/wave1-lang-ai` → draft PR #42 into `claude/client-ready`. Both 
 
 ## Verification (2 layers)
 
-### Layer 1: full gate (final head)
+### Layer 1: full gate (final head, after merging `origin/claude/client-ready`)
+
+The latest run is on the merged head: 13/13 tasks, **1271 tests** (api 563, web 271, db 68, charts 64, …), turbo typecheck 17/17, web tsc 0 errors, lint 0 errors, supabase-sync up to date (44 files), web build success.
+- **Local DB rebuild:** the merge brought in base migration 0033, which sits below the already-applied 0052/0053 (a journal gap). I rebuilt the local DBs with `pnpm --filter @restomatch/db reset`, then ran `provision-rls` and `seed-demo`.
+- **One transient failure:** the first test run on the fresh test DB failed `cutover-checks` ("2 invoice_scans* policies") before `provision-rls` had run. It passed on every run after that.
+
+The block below is the earlier pre-merge run, kept for reference:
 
 ```
 pnpm install                                         → lockfile +3 lines (@anthropic-ai/sdk in packages/api)
@@ -210,8 +216,10 @@ apps/web: pnpm build                                 → success (/dashboard/ask
 
 ```
 BASE_URL=http://localhost:3100 PW_CHROMIUM_PATH=/opt/pw-browsers/chromium \
-  pnpm exec tsx apps/web/scripts/verify-wave1-lang-ai.ts   → 83 passed, 0 failed
+  pnpm exec tsx apps/web/scripts/verify-wave1-lang-ai.ts   → 83 passed, 0 failed (re-run on the merged head: 83/0)
 ```
+
+The post-merge build caught a merge-resolution error in `globals.css` (an unclosed block). It is fixed: the file now equals the base plus the append-only S14 block (+69/−0).
 
 - **Login page (ar/ru/th/ti), signed out:** HTTP 200; `<html lang dir>` = ar/rtl, ru/ltr, th/ltr, ti/ltr; title in the native script; zero console errors.
 - **Receiver session (phone viewport), all 4 locales:**
