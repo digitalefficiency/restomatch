@@ -37,8 +37,8 @@ migratorUrl.password = 'emulated-supabase-postgres';
 const migDir = join(repoRoot(), SUPABASE_MIGRATIONS_DIR);
 const files = readdirSync(migDir).filter((f) => f.endsWith('.sql')).sort();
 const rlsFile = files.filter((f) => f.includes('_restomatch_rls_')).at(-1)!;
-/** Files main already released (Supabase may have applied them): the lock at the last release. */
-const RELEASED_ON_MAIN = 36;
+/** Files main already released (Supabase may have applied them) — main @ b5334f6. */
+const RELEASED_ON_MAIN = 37;
 const lock = JSON.parse(readFileSync(join(repoRoot(), SUPABASE_LOCK), 'utf8')) as Record<string, string>;
 const released = files.slice(0, RELEASED_ON_MAIN);
 const appended = files.slice(RELEASED_ON_MAIN);
@@ -140,8 +140,9 @@ describe('supabase/ is generated from the drizzle journal', () => {
       expect(plan.writes.has(`${SUPABASE_MIGRATIONS_DIR}/${name}`), name).toBe(false);
     }
     expect(Object.keys(lock).sort()).toEqual(files);
-    // the first 36 are exactly what main released at 2026-10-18 08:52 (f98962c)
-    expect(released.at(-1)).toBe('20260620072001_restomatch_rls_21814c44.sql');
+    // the first 37 are exactly what main carries (b5334f6): 36 from f98962c + the Data API lockout
+    expect(released.at(-2)).toBe('20260620072001_restomatch_rls_21814c44.sql');
+    expect(released.at(-1)).toBe('20260620072002_restomatch_rls_2a5eafd1.sql');
     expect(appended.every((f) => f > released.at(-1)!)).toBe(true);
   });
 
@@ -186,17 +187,19 @@ describe('git deploy onto an emulated Supabase project', () => {
     await sql?.end();
   });
 
-  it('UPGRADE step 1 — main\'s released files apply; the Data API is still exposed (what prod has now)', async (ctx) => {
+  it('UPGRADE step 1 — main\'s released files apply; walk-ins still anon-readable, no plans (what prod has now)', async (ctx) => {
     if (!canCreate) ctx.skip();
     for (const f of released) {
       await applyFile(sql, f).catch((err: unknown) => {
         throw new Error(`${f}: ${err instanceof Error ? err.message : String(err)}`);
       });
     }
-    const [p] = await sql`select has_table_privilege('anon', 'public.plans', 'UPDATE') as a`;
-    expect(p!.a).toBe(true); // the default grants Supabase adds — closed by the appended RLS file
     const r = await runDoctor(migratorUrl.toString());
-    expect(r.findings.find((f) => f.name === 'Supabase Data API locked out')?.status).toBe('FAIL');
+    expect(r.findings.find((f) => f.name === 'Supabase Data API locked out')?.status).toBe('PASS');
+    // SB-3: main still has the anon walk-ins storage policies — closed by the appended RLS file
+    expect(r.findings.find((f) => f.name === 'no anonymous storage access')?.status).toBe('FAIL');
+    const [plans] = await sql`select count(*)::int as n from plans`;
+    expect(plans!.n).toBe(0); // F8: no catalog before 0033
   });
 
   it('UPGRADE step 2 — the appended files apply on top (as Supabase will on the next merge)', async (ctx) => {
@@ -227,8 +230,13 @@ describe('git deploy onto an emulated Supabase project', () => {
     expect(role).toMatchObject({ rolcanlogin: false, rolbypassrls: false, rolsuper: false });
     const [bucket] = await sql`select public from storage.buckets where id = 'invoice-scans'`;
     expect(bucket!.public).toBe(false);
-    const [pol] = await sql`select count(*)::int as n from pg_policies where schemaname = 'storage' and policyname like 'invoice_scans%'`;
-    expect(pol!.n).toBeGreaterThanOrEqual(6);
+    const pols = (await sql`select policyname from pg_policies where schemaname = 'storage' and policyname like 'invoice_scans%' order by 1`).map((r) => r.policyname);
+    expect(pols).toEqual(['invoice_scans_tenant_delete', 'invoice_scans_tenant_insert', 'invoice_scans_tenant_select', 'invoice_scans_tenant_update']);
+    const [lim] = await sql`select file_size_limit, allowed_mime_types from storage.buckets where id = 'invoice-scans'`;
+    expect(Number(lim!.file_size_limit)).toBe(10 * 1024 * 1024);
+    expect(lim!.allowed_mime_types).toEqual(['application/pdf', 'image/jpeg', 'image/png', 'image/webp']);
+    const [plans] = await sql`select count(*)::int as n from plans`;
+    expect(plans!.n).toBe(4);
     const [unprotected] = await sql`
       select count(*)::int as n from pg_class c join pg_namespace s on s.oid = c.relnamespace and s.nspname = 'public'
       where c.relkind = 'r' and not c.relrowsecurity

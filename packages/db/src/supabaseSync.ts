@@ -136,15 +136,21 @@ ${rls('0003_audit_immutable.sql')}
 ${rlsAppRoleGrantsSql().trim()}
 
 -- 5. Storage (Supabase): the private invoice-scans bucket the app uploads to,
---    then the per-restaurant storage.objects policies (rls/0001). storage.objects
+--    then the per-restaurant storage.objects policies (rls/0001; no anon/walk-ins
+--    access since SB-3 — the showcase uploads server-side). storage.objects
 --    belongs to supabase_storage_admin; if the migration role may not alter it or
 --    create policies on it, this logs a WARNING instead of failing the deploy —
 --    apply rls/0001 from the SQL editor then (the doctor / verify-cutover report it).
 do $$ begin
   if to_regclass('storage.buckets') is not null then
-    insert into storage.buckets (id, name, public)
-    values ('invoice-scans', 'invoice-scans', false)
-    on conflict (id) do update set public = false;
+    -- SB-3: private, ≤10 MiB, invoice formats only (enforced by the Storage API).
+    insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+    values ('invoice-scans', 'invoice-scans', false, 10485760,
+            array['application/pdf', 'image/jpeg', 'image/png', 'image/webp'])
+    on conflict (id) do update set
+      public = false,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
   end if;
 end $$;
 

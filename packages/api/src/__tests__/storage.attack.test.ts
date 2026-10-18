@@ -184,6 +184,20 @@ describe('storage.objects per-restaurant isolation (A.2)', () => {
     expect(rows).toHaveLength(0);
   });
 
+  it('SB-3: with NO restaurant GUC (the anon showcase case) walk-ins/ is neither readable nor writable', async () => {
+    const rows = (await appDb.execute(
+      sql`select name from storage.objects where bucket_id = ${BUCKET} and (storage.foldername(name))[1] = 'walk-ins'`,
+    )) as unknown as Array<{ name: string }>;
+    expect(rows).toHaveLength(0);
+    await expect(
+      appDb.execute(sql`insert into storage.objects (bucket_id, name) values (${BUCKET}, 'walk-ins/anon-upload.pdf')`),
+    ).rejects.toThrow(/row-level security/);
+    const pol = (await ownerDb.execute(
+      sql`select policyname from pg_policies where schemaname = 'storage' and policyname like 'invoice_scans_walkins%'`,
+    )) as unknown as unknown[];
+    expect(pol).toHaveLength(0);
+  });
+
   it('GUC=B cannot INSERT an object under tenant A\'s prefix (WITH CHECK)', async () => {
     await expect(
       withRestaurant(appDb, B.restaurantId, (tx) =>

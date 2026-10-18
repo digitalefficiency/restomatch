@@ -201,6 +201,7 @@ const PRECONDITIONS: Record<string, (c: Ctx) => Promise<PreconditionResult>> = {
   '0030_fk_indexes': async () => ({ status: 'PASS', detail: 'CREATE INDEX IF NOT EXISTS only' }),
   '0031_updated_at_triggers': async () => ({ status: 'PASS', detail: 'trigger function + BEFORE UPDATE triggers only' }),
 
+  '0033_plans_catalog': async () => ({ status: 'PASS', detail: 'upsert of the plan catalog (PLAN_SEED) — re-prices existing plans to PLAN_SEED' }),
   '0039_invitation_locale': async () => ({ status: 'PASS', detail: 'additive (nullable column, guarded CHECK)' }),
 
   '0032_integrity_checks': async (c) => {
@@ -613,6 +614,23 @@ export async function runDoctor(url: string, opts: DoctorOptions = {}): Promise<
         const b = await tx`select public from storage.buckets where id = 'invoice-scans'`;
         if (!b.length) add('storage', 'invoice-scans bucket', 'WARN', 'bucket missing');
         else add('storage', 'invoice-scans bucket', b[0]!.public ? 'FAIL' : 'PASS', b[0]!.public ? 'bucket is PUBLIC — invoice scans readable by URL (apply rls/0001)' : 'private');
+        // SB-3: no anonymous access to showcase uploads; upload limits on the bucket.
+        const anonPol = (await tx`
+          select policyname from pg_policies
+          where schemaname = 'storage' and tablename = 'objects' and policyname like 'invoice_scans_walkins%'`) as unknown as Array<{ policyname: string }>;
+        add('storage', 'no anonymous storage access', anonPol.length ? 'FAIL' : 'PASS',
+          anonPol.length
+            ? `${anonPol.map((p) => p.policyname).join(', ')} let anyone with the publishable key list/download/upload walk-ins/ — apply the latest supabase/migrations RLS file (or rls/0001)`
+            : 'no walk-ins/anon policies on storage.objects');
+        const [hasLimits] = await tx`
+          select count(*)::int as n from information_schema.columns
+          where table_schema = 'storage' and table_name = 'buckets' and column_name in ('file_size_limit', 'allowed_mime_types')`;
+        if (b.length && hasLimits!.n === 2) {
+          const [lim] = await tx`select file_size_limit, allowed_mime_types from storage.buckets where id = 'invoice-scans'`;
+          const ok = lim!.file_size_limit != null && lim!.allowed_mime_types != null;
+          add('storage', 'invoice-scans upload limits', ok ? 'PASS' : 'WARN',
+            ok ? `≤${Math.round(Number(lim!.file_size_limit) / 1048576)} MiB · ${(lim!.allowed_mime_types as string[]).join(', ')}` : 'no file_size_limit / allowed_mime_types on the bucket (apply the latest RLS migration)');
+        }
       } else {
         add('storage', 'invoice-scans bucket', 'SKIP', 'no storage schema (not Supabase)');
       }

@@ -44,17 +44,38 @@
 
 
 
-## DATABASE_URL_APP — getting the restomatch_app password
+## DATABASE_URL_APP — the restomatch_app connection (new Supabase project)
 
-The `restomatch_app` role exists in prod (`rolbypassrls=false`). If you don't know
-its password, reset it in Supabase SQL and build the connection string from it:
+On the NEW project (schema deployed from git, `docs/SUPABASE-GITHUB-DEPLOY.md` §4–5) the
+migration creates `restomatch_app` **NOLOGIN and without a password** (no secret in git).
+Give it both once, in the Supabase SQL editor — generate the password locally with
+`openssl rand -hex 32` and keep it in your password manager as `APP_ROLE_PASSWORD`:
 
 ```sql
-ALTER ROLE restomatch_app WITH PASSWORD '<strong-password>';
+ALTER ROLE restomatch_app WITH LOGIN PASSWORD '<APP_ROLE_PASSWORD>';
 ```
+
+Build the URL on the **transaction pooler** (port 6543). The pooler identifies the project from
+the user name, so the user is **`restomatch_app.<project-ref>`** — copy host and ref from
+Project Settings → Database → Connection string (⚠️ confirm the exact format there):
+
 ```
-DATABASE_URL_APP=postgresql://restomatch_app:<password>@<pooler-host>:6543/postgres
+DATABASE_URL_APP=postgresql://restomatch_app.<project-ref>:<APP_ROLE_PASSWORD>@aws-0-<region>.pooler.supabase.com:6543/postgres
 ```
+
+**Prove it before setting it in Vercel** (one line — must print `restomatch_app | f`):
+
+```bash
+psql "$DATABASE_URL_APP" -Atc "select current_user, rolbypassrls from pg_roles where rolname = current_user"
+```
+
+`f` = the role cannot bypass RLS (the web boot guard refuses anything else). Then
+`DATABASE_URL=<owner direct URL> pnpm db:doctor` must show `PASS  restomatch_app … canlogin=true`.
+The app uses `prepare: false` everywhere (`createDb`), as transaction pooling requires.
+
+(Old project `cringgshiafwsszyqufo`: the role already has LOGIN — `ALTER ROLE restomatch_app WITH
+PASSWORD '…'` to rotate, or `APP_ROLE_PASSWORD=… pnpm --filter @restomatch/db provision-rls
+--print-app-url`; its pooler user is likewise `restomatch_app.<ref>`.)
 
 ## Deploy order (see docs/DEPLOY_CUTOVER.md for the full runbook)
 1. Set web env in Vercel + verify `DATABASE_URL_APP` points at `restomatch_app`.

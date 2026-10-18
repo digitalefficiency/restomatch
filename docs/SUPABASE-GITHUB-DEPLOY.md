@@ -10,7 +10,7 @@
 > 1. בדשבורד של Supabase → Integrations → GitHub: לוודא שתיקיית העבודה היא שורש הריפו, ושענף הייצור הוא `main`
 >    (`main` מכיל עכשיו את הקוד המלא).
 >    לכבות **Automatic branching**, כדי שלא ייווצרו מסדי תצוגה בתשלום.
-> 2. מיזוג ל-`main` → Supabase מריץ מיד את הקבצים החדשים על מסד הייצור החדש (כרגע: הכנה, 34 מיגרציות, ושני קבצי RLS — 37 בסך הכול).
+> 2. מיזוג ל-`main` → Supabase מריץ מיד את הקבצים החדשים על מסד הייצור החדש (כרגע 39 קבצים: הכנה, 35 מיגרציות של Drizzle ו-3 קבצי RLS).
 >    הקבצים כוללים נעילה של ה-Data API, כך שהמפתח הציבורי לא נותן גישה לאף טבלה. אין בקבצים נתוני דמו.
 > 3. ב-SQL Editor להריץ פעם אחת:
 >    `alter role restomatch_app with login password '<APP_ROLE_PASSWORD>';`
@@ -65,7 +65,7 @@ Until step 4 the live site keeps using the old project, so steps 1–3 are invis
   | File | What it does |
   |---|---|
   | `20260521164026_restomatch_bootstrap.sql` | `create extension if not exists vector / pg_trgm / "uuid-ossp"`, exactly as `scripts/migrate.ts` does (no explicit schema, so they resolve the way they do in today's production), plus `drizzle.__drizzle_migrations`. |
-  | `<journal when, UTC>_<drizzle tag>.sql` × 34 | The drizzle SQL verbatim, plus an idempotent row in `drizzle.__drizzle_migrations` with the hash and `created_at` exactly as drizzle-orm computes them. After a git deploy, `pnpm db:migrate` is a no-op and `db:doctor` shows the schema as current. |
+  | `<journal when, UTC>_<drizzle tag>.sql` × 35 | The drizzle SQL verbatim, plus an idempotent row in `drizzle.__drizzle_migrations` with the hash and `created_at` exactly as drizzle-orm computes them. After a git deploy, `pnpm db:migrate` is a no-op and `db:doctor` shows the schema as current. |
   | `<tail+1s>_restomatch_rls_<hash>.sql` | `provision-rls` as a migration: core tenant RLS (rls/0002), the append-only audit log (rls/0003), and the role `restomatch_app` with **NOLOGIN and no password in git**. It applies `ensureRlsAppRole`'s grants and revokes, creates the **private `invoice-scans` bucket**, and adds the per-restaurant `storage.objects` policies (rls/0001). It also **locks the Data API out**: it revokes the default grants Supabase gives `anon`/`authenticated` on public tables and sequences, now and for future tables. Those roles are reachable with the publishable key. The app reaches PostgREST only with the service-role key (the `invoice_scans` mapping row and the scan viewer), which keeps its grants — so keep the Data API enabled. It is idempotent. |
 - **When the RLS file is regenerated:** a new one, with a later version, is emitted whenever its content changes or a newer migration lands. Older RLS files stay in the repo, because Supabase has recorded their versions.
 - **Forgetting to regenerate fails CI.** `packages/db/src/__tests__/supabase-deploy.test.ts` fails when `supabase/` is stale, and `pnpm db:supabase-sync --check` checks the same thing locally.
@@ -118,10 +118,10 @@ This pushes the same `supabase/migrations`.
 
 ## 4. First deploy — checks and the one manual step
 
-1. Merge to the production branch. In the dashboard (Database → Migrations, or the integration's deploy log), expect **37 migrations** applied without error (36 from the first merge + `20260620072002_restomatch_rls_2a5eafd1`). Or run in the SQL editor:
+1. Merge to the production branch. In the dashboard (Database → Migrations, or the integration's deploy log), expect **39 migrations** in total (36 from the first merge, `20260620072002_…rls_2a5eafd1` = Data API lockout, then `20260620182640_0033_plans_catalog` + `20260620182641_…rls_d5c69a24` = plan catalog and SB-3 storage hardening). Or run in the SQL editor:
    ```sql
-   select count(*) from supabase_migrations.schema_migrations;   -- 37
-   select count(*) from drizzle.__drizzle_migrations;            -- 34
+   select count(*) from supabase_migrations.schema_migrations;   -- 39
+   select count(*) from drizzle.__drizzle_migrations;            -- 35
    ```
 2. **Give the tenant role its password.** Generate it locally (`openssl rand -hex 32`), store it in your password manager, then run in the SQL editor:
    ```sql
@@ -129,8 +129,9 @@ This pushes the same `supabase/migrations`.
    ```
 3. Check that the storage policies landed:
    ```sql
-   select count(*) from pg_policies where schemaname = 'storage' and policyname like 'invoice_scans%';  -- 6
-   select public from storage.buckets where id = 'invoice-scans';                                       -- false
+   select count(*) from pg_policies where schemaname = 'storage' and policyname like 'invoice_scans%';  -- 4 (tenant select/insert/update/delete; no walk-ins since SB-3)
+   select public, file_size_limit, allowed_mime_types from storage.buckets where id = 'invoice-scans'; -- false | 10485760 | {pdf,jpeg,png,webp}
+   select count(*) from plans;                                                                           -- 4 (0033)
    ```
    If the first query returns 0, paste `packages/db/drizzle/rls/0001_invoice_scans_rls.sql` into the SQL editor and run it.
 4. Run the doctor from the repo. It is read-only.
@@ -152,6 +153,16 @@ This pushes the same `supabase/migrations`.
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Project Settings → API keys → publishable key |
 | `SUPABASE_SERVICE_ROLE_KEY` | secret (service-role) key — server only |
 | `APP_ROLE_PASSWORD` | the password from §4.2 |
+
+**Prove `DATABASE_URL_APP` before saving it** — must print `restomatch_app|f` (cannot bypass RLS):
+
+```bash
+psql "$DATABASE_URL_APP" -Atc "select current_user, rolbypassrls from pg_roles where rolname = current_user"
+```
+
+All app connections use `prepare: false` (`createDb`, the doctor, the scripts), so the transaction
+pooler is safe. Tenant scoping uses transaction-local `set_config(…, true)` inside one transaction,
+which works on the transaction pooler too.
 
 Also set everything else from `docs/ENV-PRODUCTION.md` — keep the current values where they exist:
 - `AUTH_SECRET` (changing it logs everyone out), `AUTH_URL`, `APP_URL`, `AUTH_ENC_KEY`;
@@ -202,11 +213,12 @@ Only on an **empty** new project — the seed truncates every restaurant and use
 
 ```bash
 SEED_ALLOW_REMOTE_HOST=db.<NEW_REF>.supabase.co DATABASE_URL="$NEW_DIRECT" DEMO_TODAY=<demo date> \
-  pnpm --filter @restomatch/db seed
+  DEMO_PASSWORD="$(openssl rand -base64 18)" pnpm --filter @restomatch/db seed
 SEED_ALLOW_REMOTE_HOST=db.<NEW_REF>.supabase.co DATABASE_URL="$NEW_DIRECT" DEMO_TODAY=<demo date> \
   pnpm --filter @restomatch/worker exec tsx scripts/seed-demo.ts
 ```
 
+- **Always set `DEMO_PASSWORD` on a real project.** The default (`RestoMatch-Demo-2026!`) is public in this repo, so anyone could log in as the demo owner, who is also the platform admin. Keep the value you set and share it only with the presenter.
 - Logins and expected numbers: `docs/DB-RUNBOOK.md` → "Local development & demo data".
 - The guard refuses the old production project even with the opt-in.
 - Do **not** combine this with §6.
