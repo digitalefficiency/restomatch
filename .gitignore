@@ -37,3 +37,7 @@ drizzle/meta
 
 # redis-server --daemonize (scripts/dev-setup.sh) writes its snapshot to the cwd
 dump.rdb
+
+# Playwright output (apps/web/e2e)
+test-results/
+playwright-report/
