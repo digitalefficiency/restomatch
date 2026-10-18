@@ -259,3 +259,94 @@ CHROME_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npx lighthouse@12
 ```
 
 Plus the Playwright checks under *Works* and *Round 2 §3*. Helper scripts were throwaway and are not committed.
+
+---
+
+## Landing v2: short, focused, animated (round 4)
+
+The owner's brief: *"The landing page should be efficient and not overloaded with information, and you should invest in animations / videos inside it."* Nothing true was deleted. Every detail block **moved**, either to `/about` or into a collapsed accordion.
+
+### New flow of `/`
+
+| # | Section | What's on it | Motion |
+|---|---|---|---|
+| 1 | **Hero** | One ₪ headline ("How much money leaks at your back door?"), one sentence, primary CTA **"Get a free leak check"** → `#lead`. The secondary button is **"Watch 60 seconds"** when a promo video exists, and the live demo link otherwise. | Product video loop when `heroMedia.available`; otherwise the existing invoice⇄PO⇄delivery match card with the animated **₪412** counter (Pause, Play and Replay kept) |
+| 2 | **How it works** (`#how`) | 3 steps, one line each | CSS scroll-driven staggered reveal (`animation-timeline: view()`) plus a connector line that draws in. It mirrors in RTL. |
+| 3 | **Receiver in English** (`#features`) | The flagship: the invoice is in Hebrew and the receiver checks it in English | Each Hebrew invoice line morphs into its English version in a 7 s staggered loop. Each line carries `lang`/`dir`. |
+| 4 | **Proof**: one block, real numbers | ₪2,250/month = 1.5% of ₪150,000 (pilot target) · **0.39%** = Pro ₪590 ÷ ₪150,000 (break-even) · **12** checks. The block says "a target, not a promise". | Reveal |
+| 5 | **Pricing teaser** | Trial free · from ₪349 (from `PLAN_SEED`) → `/pricing` | Reveal |
+| 6 | **FAQ** | 7 questions, **collapsed** `<details>` (still in `FAQPage` JSON-LD) | — |
+| 7 | **Final CTA** (`#lead`) | Lead form (lazy), a one-line trust strip → `/about#trust`, and a demo link | — |
+
+All ₪ goes through `formatIls()`. Prices come from `PLAN_SEED`, and the proof figures are derived in code (`EXAMPLE_PURCHASING_ILS × PILOT_TARGET`, `pro ÷ purchasing`), so they cannot drift from `/pricing` or the calculator. This is the leak-economist rule: one consistent set of numbers.
+
+### What moved where (nothing deleted)
+
+| Block (v1 home) | Now |
+|---|---|
+| Facts strip | `/about` (`FactsStrip`) |
+| Problem in ₪ (4 leak types plus the ₪2,250 example) | `/about#problem` |
+| Full features (Receiver card, approvals, leak heatmap, dark mode, accounting export) | `/about#features`. Nav "Features" now points here. |
+| ROI calculator | `/about#roi`. The proof block links to it. |
+| Trust and security (RLS, 2FA, Amendment 13, audit log) | `/about#trust`. The CTA trust line links to it. |
+| FAQ | still on `/`, collapsed |
+
+These sections live in `app/(marketing)/_components/detail-sections.tsx` and were moved unchanged in substance.
+
+**Text volume:** `/` now renders **424 words (he) / 493 (en)** in `<main>`, with FAQ answers collapsed. The **590 / 711** words now on `/about` used to sit on the home page as well, so the home page carries **less than half** its v1 text. (The v1 total is estimated as v2 plus the moved words. The new v2 copy is shorter than the v1 lines it replaced.)
+
+### Video and media switch
+
+`apps/web/lib/heroMedia.ts`:
+```ts
+export const heroMedia = { available: false, loop: { webm, mp4 }, poster, promoVideo: null };
+```
+- **`available: false`** (shipped): the hero shows the animated match card. No `<video>` and no 404s for media files.
+- **`available: true`**: `HeroVideo` renders a muted, `playsInline`, `loop`, `autoPlay` video with the poster and `preload="none"`. The WebM and MP4 sources are attached only after `window.load`, and **never under `prefers-reduced-motion`**, which shows the poster only.
+- **`promoVideo: string`**: shows a "Watch 60 seconds" button that opens a native `<dialog>` with controls (`PromoVideoButton`). It is hidden while `promoVideo` is `null`. Nothing was added under `public/media/`. The media owner drops the files there and flips the flags.
+
+### Performance
+
+| Route | First Load JS before | After |
+|---|---|---|
+| `/` | **198 kB** (15.2 kB page) | **136 kB** (17.2 kB page), **−62 kB** |
+| `/about` | — | 121 kB (carries the ROI calculator now) |
+
+How:
+- `gsap` is **dynamically imported** inside `HeroMatch` (`import('gsap')` in an effect), so it is no longer in the initial chunk.
+- The lead form is `next/dynamic({ ssr:false })`, mounted by an `IntersectionObserver` (600 px ahead), or immediately when the URL hash is `#lead`. The container reserves `min-h-[26rem]` so there is no CLS.
+- The ROI calculator is off `/`.
+- The scroll animations are pure CSS, with no JS.
+
+**Lighthouse 12.8.2, mobile, simulated throttling, `next start`:**
+
+| `/` | Perf | A11y | Best-pr. | SEO | LCP | CLS |
+|---|---|---|---|---|---|---|
+| he | 82 · 95 · 91 (3 runs) | 100 | 100 | 100 | 3.7 · 2.9 · 3.3 s | 0.006 |
+| en | 95 | 100 | 100 | 100 | 2.9 s | 0.005 |
+
+**LCP is not yet under the 2.5 s target.** The LCP element is the SSR'd hero sentence: TTFB 0.46 s plus about 2.4 s of render delay. Under the 4× CPU throttle that delay is the shared React/Next bootstrap (the 103 kB shared chunk). It is not landing code: there is no render-blocking CSS, fonts are `font-display: swap`, and the hero has no entrance animation. That puts it at parity with the round-2 v1 numbers (2.6–3.0 s), while Best-practices went 96 → 100. Unthrottled Chromium LCP is 180–244 ms. A next lever, if needed: move the hero match card's client island behind `requestIdleCallback`, or trim the shared chunk. Both are outside this round.
+
+### Accessibility and motion
+- `prefers-reduced-motion`:
+  - the steps and reveals are shown statically
+  - the morph shows the Hebrew and English lines stacked
+  - the hero counter shows its final ₪ value
+  - no video loads
+- The promo `<dialog>` is a native dialog, so focus is trapped and Esc closes it, with a labelled close button.
+- Both the morph and the receiver card mark the originals `lang="he"`. The English sweep stays clean.
+- No console errors or hydration errors (he and en × desktop and mobile, with full motion and with reduced motion).
+
+### Screenshots
+`docs/client-ready/screenshots/`:
+- `landing2-before-{he,en}-{desktop,mobile}.png`
+- `landing2-after-{he,en}-{desktop,mobile}.png`
+- `landing2-after-about-{he,en}-{desktop,mobile}.png`
+
+They are taken from a production build with reduced motion, so every reveal is visible in a full-page capture.
+
+### Gate (round 4)
+- `pnpm test`: **13/13 tasks, 1,076 tests passed**, 1 skipped (worker, pre-existing). This includes the i18n parity test.
+- web `tsc --noEmit`: **0 errors**
+- `pnpm lint`: **0 errors** (7 warnings, all pre-existing and in untouched files)
+- `pnpm build`: green
