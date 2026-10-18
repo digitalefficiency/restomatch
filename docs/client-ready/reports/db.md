@@ -192,3 +192,8 @@ on the leaks page, and 3 POs due today. Every seeded user logs in with a known p
 | Worker online for the demo | Runbook "Worker online for the demo": `cd apps/worker && DATABASE_URL=… REDIS_URL=redis://localhost:6379 pnpm start` (prod demo: `start-worker.sh` on the owner's Mac) | worker started → heartbeat key present within 1 s → dashboard banner absent (Playwright) |
 
 DB-RUNBOOK updated: pending range now **0019 → 0039** (S4's 0039 in the §11 table), demo section rewritten with the per-screen numbers, worker + `max_connections` notes.
+
+### Follow-up round 2 (base at the S3 round-2 merge)
+
+- **Last month is believable:** a different set of resolved September incidents → hero/monthly report for last month **₪1,137 = 1.8 % of ₪63,205** (20 of 52 invoices); this month **₪572 = 2.0 % of ₪28,389** checked spend (S3 now excludes the never-matched ריכוז invoices). Leaks page unchanged (entrecôte, salmon, beer keg).
+- **Journal gaps:** `db:doctor` already FAILs on "entries older than the newest applied row but not applied"; now also **`db:migrate` refuses to run** while a gap exists (`findJournalGaps` in `src/migrations.ts`) instead of letting drizzle skip them silently. Test: `upgrade-path.test.ts` "FAILs on a journal gap" (forgets 0030's tracker row → doctor FAIL naming 0030, `pending` empty, migrate refuses). Runbook §9 explains the cause and the repair.

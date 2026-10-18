@@ -106,16 +106,20 @@ function scenarioFor(supplierEn: string, k: number): Scenario {
       // Last month (resolved): a lamb price slip and a short ground-beef delivery.
       if (k === 4) return { price: { 'Lamb shoulder': 96 } };
       if (k === 5) return { shortBilledInFull: { 'Ground beef': 2 } };
+      if (k === 6) return { price: { 'Boneless chicken thighs': 49.9 } };
+      if (k === 8) return { price: { 'Lamb shoulder': 96 } };
       return {};
     case 'Mediterranean Fish Co.':
       if (k === 1) return { price: { 'Salmon fillet': 96 } };
       if (k === 2) return { price: { 'Salmon fillet': 92 } };
       if (k === 4) return { price: { Calamari: 54 } };
+      if (k === 5) return { price: { 'Red tuna': 159 } };
       if (k === 6) return { shortBilledInFull: { 'Whole sea bream': 1.5 } };
       return {};
     case 'Steinberg Beverages':
       if (k === 1) return { price: { 'Draft beer keg 30L': 575 } };
       if (k === 3) return { price: { 'Cabernet red wine': 52 } };
+      if (k === 4) return { price: { 'Fresh orange juice': 16 }, shortBilledInFull: { 'Mineral water 1.5L (6-pack)': 2 } };
       if (k === 5) return { extra: { nameEn: 'Cola Zero 330ml (case of 24)', qty: 2, price: 62 } };
       return {};
     case 'Galilee Dairies':
@@ -123,11 +127,23 @@ function scenarioFor(supplierEn: string, k: number): Scenario {
       if (k === 4) return { price: { Mozzarella: 46 } };
       return {};
     case 'HaSharon Produce':
-      if (k === 4 || k === 7 || k === 10 || k === 14) return { shortBilledInFull: { 'Cherry tomatoes': 3 } };
+      if (k === 4 || k === 7 || k === 10 || k === 14 || k === 22) return { shortBilledInFull: { 'Cherry tomatoes': 3 } };
       if (k === 6) return { price: { Cucumbers: 5.6 } };
+      if (k === 12) return { price: { 'Red bell peppers': 11.9 } };
+      if (k === 16) return { shortBilledInFull: { Lemons: 2 } };
       return {};
     case "Brenner's Bakery":
-      return k === 5 || k === 12 ? { extra: { nameEn: 'Challah', qty: 6, price: 12 } } : {};
+      if (k === 5 || k === 12 || k === 22) return { extra: { nameEn: 'Challah', qty: 6, price: 12 } };
+      if (k === 9) return { shortBilledInFull: { 'Sourdough loaf': 2 } };
+      return {};
+    case 'Fresman Spices & Oils':
+      return k === 2 ? { price: { 'Extra virgin olive oil': 37.5 }, shortBilledInFull: { 'Raw tahini': 2 } } : {};
+    case 'Ben-Ami Dry Goods':
+      if (k === 2) return { shortBilledInFull: { 'Jasmine rice': 5 } };
+      if (k === 3) return { price: { 'Dried chickpeas': 10.5 } };
+      return {};
+    case 'Quick Disposables':
+      return k === 3 ? { extra: { nameEn: 'Take-away boxes (pack of 50)', qty: 4, price: 39 } } : {};
     default:
       return {};
   }

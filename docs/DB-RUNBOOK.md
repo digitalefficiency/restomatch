@@ -70,7 +70,7 @@ Good output at this stage:
 
 - `migrations › applied: 19/34 … latest applied: 0018_invitations`
 - `migrations › pending: 15 pending: 0019_storage_namespaces, …, 0039_invitation_locale` (WARN — expected)
-- `migrations › journal gaps: PASS` and **no** `database ahead of checkout`
+- `migrations › journal gaps: PASS` and **no** `database ahead of checkout` (see §9 if either FAILs)
 - `preconditions › …` — one line per pending migration. **Every FAIL here means
   `db:migrate` WILL abort** (harmlessly, atomically). Fix them in §3.
 - `rls`, `app role` — should already PASS on prod (RLS on 38 tables, role exists). If
@@ -178,6 +178,18 @@ cross-tenant data lines you have decided to keep.
   Until then new/updated rows are still checked (an UPDATE of a violating row fails —
   repair it first).
 - Run `pnpm db:doctor` after every future migration; it is safe at any time.
+- **Journal gaps (why the doctor FAILs on them).** The drizzle migrator only applies journal
+  entries whose `when` is *newer than the newest row* in `drizzle.__drizzle_migrations`. If a
+  database ever applies a later-numbered migration first (e.g. a branch's 0039 before 0029–0032 —
+  easy on a shared local DB during parallel work), the older ones are skipped **silently and
+  forever**. `db:doctor` reports them as `journal gaps: FAIL`, and `db:migrate` now refuses to run
+  while a gap exists. Fix: on a local DB, `pnpm --filter @restomatch/db reset` (drops and
+  re-creates; then re-seed). On a real DB: apply each skipped file's SQL by hand in journal order
+  (`psql -v ON_ERROR_STOP=1 -1 -f packages/db/drizzle/<tag>.sql`), then record it —
+  `insert into drizzle.__drizzle_migrations (hash, created_at) values ('<sha256 of the file>', <when from _journal.json>);`
+  (`shasum -a 256 packages/db/drizzle/<tag>.sql`) — and re-run the doctor.
+- **Database ahead of checkout: FAIL** means the DB has migrations newer than this code — you are
+  about to deploy an older build. Check out the branch that matches.
 
 ## 10. Rollback plan (by stage)
 
@@ -227,7 +239,8 @@ magic links still work too. `owner@` is also the platform admin (so `/admin` is 
 
 | Screen | What you see |
 |---|---|
-| Overview hero | **₪572 leaked this month = 1.9 % of ₪30,802 food spend** (target 1.5 %); ₪296 caught before payment; ₪276 claimed back from suppliers; 9 of 24 matched invoices with a finding; last month 1.0 % — the leak is creeping up |
+| Overview hero | **₪572 leaked this month = 2.0 % of ₪28,389 checked food spend** (target 1.5 %; the two pending ריכוז invoices are not in the denominator); ₪296 caught before payment; ₪276 claimed back from suppliers; 9 of 24 matched invoices with a finding |
+| Last month (hero comparison + monthly leak report) | **₪1,137 = 1.8 % of ₪63,205**, 20 of 52 invoices — different items: lamb, chicken thighs, calamari, red tuna, wine, orange juice, peppers, chickpeas, olive oil, short deliveries (tomatoes, lemons, sourdough, rice, tahini, mineral water, sea bream, ground beef), unordered challah / cola / take-away boxes; all resolved. (August is partial — history starts 8 weeks back.) |
 | Approvals queue | 5 open items (entrecôte and salmon price creep, beer keg +10.6 %, a short tomato delivery billed in full); older ones resolved via credit notes |
 | Leak detective | entrecôte ₪139 → ₪149, salmon ₪89 → ₪96, draft-beer keg ₪520 → ₪575 |
 | Invoices | 90 matched (ocr'd photos), 2 **consolidated invoices (חשבוניות ריכוז) parsed and pending** — they cover this week's bakery drops and the latest dairy delivery, which have goods receipts but no per-delivery invoice, so spend is not double-counted and nothing alarms |
