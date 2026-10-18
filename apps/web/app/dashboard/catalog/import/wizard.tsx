@@ -131,6 +131,7 @@ export function ImportWizard({ initialSupplierId }: { initialSupplierId: string 
       setResult(res);
       setStep('DONE');
       void utils.catalog.items.invalidate();
+      void utils.catalog.imports.invalidate();
       if (!res.queued) toast.success(t('import.doneTitle', { count: formatNumber(res.rowCount, locale) }));
     } catch {
       // Rendered below from commitImport.error.

@@ -5,6 +5,7 @@ import { Card, EmptyState, LinkButton } from '@/lib/components';
 import { getT } from '@/lib/i18n/server';
 import { suppliers as suppliersNs } from '@/lib/i18n/messages/suppliers';
 import { CatalogBrowser } from '../../catalog/browser';
+import { ImportHistory } from '../../catalog/import-history';
 
 /**
  * Catalog tab — the supplier's price list, scoped via CatalogBrowser's
@@ -29,6 +30,7 @@ export async function SupplierCatalogTab({ supplierId }: { supplierId: string })
 
   if (initial.length === 0) {
     return (
+      <div className="space-y-6">
       <Card elevated>
         <EmptyState
           icon={<Boxes className="h-6 w-6" />}
@@ -41,17 +43,20 @@ export async function SupplierCatalogTab({ supplierId }: { supplierId: string })
           }
         />
       </Card>
+      <ImportHistory supplierId={supplierId} />
+      </div>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div className="flex justify-end">
         <LinkButton href={importHref} size="sm" variant="secondary">
           <Upload className="h-4 w-4" aria-hidden="true" /> {t('catalogTab.import')}
         </LinkButton>
       </div>
       <CatalogBrowser suppliers={suppliers} initial={initial} lockedSupplierId={supplierId} canEdit={canEdit} />
+      <ImportHistory supplierId={supplierId} />
     </div>
   );
 }

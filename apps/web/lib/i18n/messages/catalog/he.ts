@@ -7,6 +7,7 @@ export const he = {
   subtitle:
     'חיפוש אחד לרוחב כל הספקים — מצאו כל מוצר מכל מחירון במקום אחד, הבסיס לבניית הזמנות ולהצלבת חשבוניות.',
   importButton: 'ייבוא מחירון (Excel/CSV)',
+  namesButton: 'שמות באנגלית',
   mappingButton: 'מיפוי מק״טים',
   browser: {
     supplier: 'ספק',
@@ -58,6 +59,24 @@ export const he = {
     duplicateSku: 'כבר קיים פריט עם המק״ט הזה אצל הספק.',
     priceInvalid: 'המחיר אינו תקין.',
     descriptionRequired: 'תיאור הספק הוא שדה חובה.',
+  },
+  history: {
+    title: 'היסטוריית ייבוא',
+    empty: 'עוד לא יובאו מחירונים לספק הזה.',
+    file: 'קובץ',
+    date: 'תאריך',
+    status: 'סטטוס',
+    rows: 'שורות',
+    created: 'חדשים',
+    updated: 'עודכנו',
+    statuses: { pending: 'בעיבוד', mapped: 'מופה', committed: 'הושלם', failed: 'נכשל' },
+    failedHint: 'הייבוא נכשל: {error}',
+  },
+  card: {
+    price: 'מחיר',
+    sku: 'מק״ט',
+    unit: 'יחידה',
+    product: 'מוצר',
   },
   nameEn: {
     add: 'הוספת שם באנגלית',
