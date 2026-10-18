@@ -41,14 +41,20 @@ export default async function SupplierDetailLayout({
     throw err;
   }
 
-  // Real-leak ₪ for this supplier: sum monthExcessIls across its leak rows.
+  // Real-leak ₪ for this supplier: what was actually PAID above the 90-day
+  // median over the last 30 days (paidExcessIls) — the same basis as the leaks
+  // page. monthExcessIls is a projection that re-prices past purchases at the
+  // latest price and overstated this header (₪328 vs ₪144 paid for HaKerem).
   // owner.leaks is advanced_analytics-gated — a closed gate (or any error) just
   // leaves the figure muted; we never fabricate a number.
   let leakIls: number | null = null;
   try {
     const leaks = await caller.owner.leaks({ limit: 100 });
     const rows = leaks.filter((l) => l.supplierId === id);
-    leakIls = rows.length > 0 ? rows.reduce((sum, l) => sum + l.monthExcessIls, 0) : null;
+    leakIls =
+      rows.length > 0
+        ? rows.reduce((agorot, l) => agorot + Math.round(l.paidExcessIls * 100), 0) / 100
+        : null;
   } catch {
     leakIls = null;
   }

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import type { Supplier } from '@restomatch/db';
 import { trpc } from '@/lib/trpc/client';
 import { ErrorNotice, Spinner, friendlyError, useToast } from '@/lib/components';
 import { useT } from '@/lib/i18n/client';
@@ -16,13 +17,13 @@ import { scheduleToForm, toUpdatePatch } from '../form-logic';
  * edited with one code path. Saves via suppliers.update; cleared fields are
  * sent as null so they really clear.
  */
-export function SupplierDetailsTab({ supplierId }: { supplierId: string }) {
+export function SupplierDetailsTab({ supplierId, initial }: { supplierId: string; initial?: Supplier }) {
   const t = useT(suppliersNs);
   const tc = useT(components);
   const toast = useToast();
   const router = useRouter();
   const utils = trpc.useUtils();
-  const supplier = trpc.suppliers.get.useQuery({ supplierId });
+  const supplier = trpc.suppliers.get.useQuery({ supplierId }, { initialData: initial });
   // Bumped after a successful save so the form re-hydrates from the saved row.
   const [formKey, setFormKey] = useState(0);
 

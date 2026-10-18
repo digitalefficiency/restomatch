@@ -298,7 +298,7 @@ describe('catalog import: user-fixable file errors are BAD_REQUEST with a stable
   });
 });
 
-describe('exports: the "to" day is inclusive regardless of server timezone', () => {
+describe('exports: Israel-time calendar days + every checked invoice', () => {
   beforeAll(async () => {
     await resetDb(db);
     A = await seedTenant(db, 'A');
@@ -307,14 +307,40 @@ describe('exports: the "to" day is inclusive regardless of server timezone', () 
     await resetDb(db);
   });
 
-  it('includes an invoice dated late on the last day', async () => {
+  async function setInvoice(status: 'approved' | 'disputed' | 'parsed', at: string) {
     await db
       .update(invoices)
-      .set({ status: 'approved', invoiceDate: new Date('2026-10-31T22:30:00.000Z') })
+      .set({ status, invoiceDate: new Date(at) })
       .where(eq(invoices.id, A.invoiceId));
+  }
+
+  it('includes an invoice late on the last day (22:30 Israel time)', async () => {
+    await setInvoice('approved', '2026-10-31T20:30:00.000Z'); // 31 Oct 22:30 IST (UTC+2)
     const out = await callerFor(A).exports.invoicesCsv({ from: '2026-10-01', to: '2026-10-31' });
     expect(out.rowCount).toBe(1);
-    const none = await callerFor(A).exports.invoicesCsv({ from: '2026-11-01', to: '2026-11-30' });
+  });
+
+  it('an invoice at 00:30 Israel time on the 1st belongs to that month (was: previous month in UTC)', async () => {
+    await setInvoice('approved', '2026-09-30T21:30:00.000Z'); // 1 Oct 00:30 IDT (UTC+3)
+    const oct = await callerFor(A).exports.invoicesCsv({ from: '2026-10-01', to: '2026-10-31' });
+    const sep = await callerFor(A).exports.invoicesCsv({ from: '2026-09-01', to: '2026-09-30' });
+    expect(oct.rowCount).toBe(1);
+    expect(sep.rowCount).toBe(0);
+    // The printed date is the Israel calendar day too.
+    expect(oct.content).toContain('2026-10-01');
+    expect(oct.content).not.toContain('2026-09-30');
+  });
+
+  it('includes disputed invoices (real purchases) but not unverified ones', async () => {
+    await setInvoice('disputed', '2026-10-10T08:00:00.000Z');
+    const out = await callerFor(A).exports.invoicesCsv({ from: '2026-10-01', to: '2026-10-31' });
+    expect(out.rowCount).toBe(1);
+    expect(out.content).toContain('disputed');
+    const u = await callerFor(A).exports.uniform1000({ from: '2026-10-01', to: '2026-10-31' });
+    expect(u.rowCount).toBe(1);
+
+    await setInvoice('parsed', '2026-10-10T08:00:00.000Z');
+    const none = await callerFor(A).exports.invoicesCsv({ from: '2026-10-01', to: '2026-10-31' });
     expect(none.rowCount).toBe(0);
   });
 });
