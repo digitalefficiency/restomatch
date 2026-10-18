@@ -215,6 +215,14 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'products.list': 'isolation',
   'products.setNamesEn': 'attack',
   'products.delete': 'attack',
+  // Wave-1 integrations (flag `integrations`), exercised in integrations.test.ts.
+  'integrations.status': 'isolation — integrations.test.ts: reads only the caller restaurant flag (A on does not enable B)',
+  'integrations.accountingConfig':
+    'isolation — integrations.test.ts: lists only the caller restaurant suppliers; FORBIDDEN while the flag is off',
+  'integrations.setAccountingConfig':
+    'attack — integrations.test.ts: a foreign supplier id in supplierAccounts → NOT_FOUND, nothing saved; owner-only',
+  'integrations.accountingExport':
+    "isolation — integrations.test.ts: A's file never carries B's invoices, suppliers or mapping; bookkeeper/owner + flag only",
   // Data-subject-rights (E.6). Not tenant-scoped: export/delete act ONLY on the
   // caller's own identity (keyed to ctx.session.userId — no client-supplied
   // target, so a member can never reach another user); eraseLead operates on the

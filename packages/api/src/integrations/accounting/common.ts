@@ -1,0 +1,44 @@
+import type { AccountingConfig, AccountingInvoice } from './types';
+
+/** NUMERIC(12,2) string (Drizzle) → integer agorot, exact (no float math). */
+export function numericToAgorot(value: string | number | null | undefined): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const s = String(value).trim();
+  const m = /^(-)?(\d+)(?:\.(\d{1,}))?$/.exec(s);
+  if (!m) return null;
+  const frac = (m[3] ?? '').padEnd(3, '0');
+  // Half-up on the third decimal, in case a NUMERIC(12,4) value is passed.
+  let agorot = Number(m[2]) * 100 + Number(frac.slice(0, 2)) + (Number(frac[2]) >= 5 ? 1 : 0);
+  if (m[1]) agorot = -agorot;
+  return agorot;
+}
+
+/** Integer agorot → `1234.50` (dot decimal, no grouping): what import files expect. */
+export function agorotToPlain(agorot: number): string {
+  const sign = agorot < 0 ? '-' : '';
+  const a = Math.abs(agorot);
+  return `${sign}${Math.floor(a / 100)}.${String(a % 100).padStart(2, '0')}`;
+}
+
+/** `YYYY-MM-DD` → `DD/MM/YYYY` (or `DD/MM/YY`). */
+export function ddmmyyyy(isoDate: string, shortYear = false): string {
+  const [y, m, d] = isoDate.split('-');
+  return `${d}/${m}/${shortYear ? y!.slice(2) : y}`;
+}
+
+/** Supplier card code: explicit mapping → company id digits → a stable fallback. */
+export function supplierAccount(inv: AccountingInvoice, cfg: AccountingConfig): string {
+  const mapped = inv.supplierId ? cfg.supplierAccounts[inv.supplierId]?.trim() : undefined;
+  if (mapped) return mapped;
+  const digits = inv.supplierBusinessId.replace(/\D/g, '');
+  if (digits) return digits;
+  return inv.supplierId ? `S${inv.supplierId.replace(/-/g, '').slice(0, 8).toUpperCase()}` : 'SUPPLIER';
+}
+
+/** Tabs/newlines inside a value would break a delimited record. */
+export function cell(value: string, max?: number): string {
+  const clean = value.replace(/[\t\r\n]+/g, ' ').trim();
+  return max ? clean.slice(0, max) : clean;
+}
+
+export const CRLF = '\r\n';

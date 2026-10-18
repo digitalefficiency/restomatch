@@ -103,7 +103,7 @@ export const exportsRouter = router({
     }),
 });
 
-async function fetchInvoices(
+export async function fetchInvoices(
   db: import('@restomatch/db').Database,
   restaurantId: string,
   from: string,
@@ -121,6 +121,7 @@ async function fetchInvoices(
   const rows = await db
     .select({
       id: invoices.id,
+      supplierId: invoices.supplierId,
       invoiceNumber: invoices.invoiceNumber,
       invoiceDate: invoices.invoiceDate,
       supplierName: suppliers.name,

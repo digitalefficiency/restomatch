@@ -260,11 +260,17 @@ async function syncOrders(
  * or via the job's credentialsOverride. Vault integration comes later
  * (M9 polish) — for now `credentialsVaultRef` is just a key into env.
  */
-function loadCredentials(vaultRef: string): Record<string, unknown> {
+export function loadCredentials(vaultRef: string, env: NodeJS.ProcessEnv = process.env): Record<string, unknown> {
+  // "fixture:<anything>" = the platform's recorded offline fixture (demo tenant,
+  // local QA). Never in production: it would sync synthetic orders into a real tenant.
+  if (vaultRef.startsWith('fixture:')) {
+    if (env.NODE_ENV === 'production') throw new Error('fixture procurement connections are disabled in production');
+    return { mode: 'fixture' };
+  }
   // Convention: vaultRef = "env:VAR_NAME" returns {apiKey: process.env[VAR_NAME]}
   if (vaultRef.startsWith('env:')) {
     const varName = vaultRef.slice(4);
-    const apiKey = process.env[varName];
+    const apiKey = env[varName];
     if (!apiKey) {
       throw new Error(`Credentials env var ${varName} is not set`);
     }

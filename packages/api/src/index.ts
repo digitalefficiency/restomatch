@@ -20,6 +20,7 @@ import { mappingRouter } from './routers/mapping';
 import { productsRouter } from './routers/products';
 import { teamRouter } from './routers/team';
 import { chainRouter } from './routers/chain';
+import { integrationsRouter } from './routers/integrations';
 
 export const appRouter = router({
   owner: ownerRouter,
@@ -41,6 +42,7 @@ export const appRouter = router({
   mapping: mappingRouter,
   products: productsRouter,
   chain: chainRouter,
+  integrations: integrationsRouter,
   team: teamRouter,
   dsr: dsrRouter,
 });
