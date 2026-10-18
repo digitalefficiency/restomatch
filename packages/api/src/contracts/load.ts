@@ -6,6 +6,8 @@ import {
   isNull,
   lte,
   or,
+  products,
+  sql,
   supplierContractPrices,
   type Database,
 } from '@restomatch/db';
@@ -29,12 +31,14 @@ export async function loadContractsInForce(
       id: supplierContractPrices.id,
       supplierId: supplierContractPrices.supplierId,
       productId: supplierContractPrices.productId,
-      unit: supplierContractPrices.unit,
+      // A contract without its own unit is quoted in the product's default unit.
+      unit: sql<string | null>`coalesce(${supplierContractPrices.unit}, ${products.defaultUnit})`,
       contractPrice: supplierContractPrices.contractPrice,
       validFrom: supplierContractPrices.validFrom,
       validTo: supplierContractPrices.validTo,
     })
     .from(supplierContractPrices)
+    .innerJoin(products, eq(products.id, supplierContractPrices.productId))
     .where(
       and(
         eq(supplierContractPrices.restaurantId, restaurantId),
@@ -70,6 +74,9 @@ export async function applyContractPrices(
     if (!contract) return l;
     const price = contractPriceInUnit(contract, l.unit);
     if (price === null) return l;
+    // Rule 3: the contract is a CEILING — a PO priced at or below it stands, so a
+    // supplier billing the (lower) PO price never shows a false PRICE_LOWER.
+    if (l.unitPriceExpected !== null && l.unitPriceExpected <= price) return l;
     applied += 1;
     return { ...l, unitPriceExpected: price };
   });

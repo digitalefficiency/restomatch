@@ -9,13 +9,16 @@ import { unitConversionFactor } from '@restomatch/matching';
  *     (restaurant-local calendar dates, inclusive; validTo null = open-ended).
  *  2. The contract IN FORCE on the invoice's local date is the covering row with
  *     the LATEST validFrom (a renegotiated price supersedes the old one).
- *  3. Contract beats PO: when both exist, the contract price is the expected
- *     unit price fed to the engine (buildMatchInput), so an over-contract line is
- *     a PRICE_HIGHER whose expected value is the contract price. The engine's
- *     own tolerances still apply — no engine change.
- *  4. Units: the contract price is converted to the line's unit with the same
- *     kg↔g / l↔ml table the engine uses; an unconvertible unit means the
- *     contract does not apply to that line (never guess).
+ *  3. Contract beats PO as a CEILING: when both exist and the PO price is above
+ *     the contract (or missing), the contract price is the expected unit price
+ *     fed to the engine (buildMatchInput), so an over-contract line is a
+ *     PRICE_HIGHER whose expected value is the contract price. A PO priced at or
+ *     below the contract stands (billing the lower PO price must never turn into
+ *     a PRICE_LOWER "leak"). The engine's own tolerances apply — no engine change.
+ *  4. Units: a contract without its own unit is quoted in the product's default
+ *     unit (resolved by the loaders). The price is converted to the line's unit
+ *     with the engine's kg↔g / l↔ml table; an unknown or unconvertible unit means
+ *     the contract does not apply to that line (never guess).
  *  5. "Over contract" (the UI badge) = billed unit price above the contract
  *     price by more than the restaurant's price tolerance — exactly when the
  *     engine would emit PRICE_HIGHER against it.
@@ -61,7 +64,8 @@ export function contractInForce<T extends ContractRow>(rows: T[], day: string): 
 export function contractPriceInUnit(contract: ContractRow, lineUnit: string): number | null {
   const price = Number(contract.contractPrice);
   if (!Number.isFinite(price)) return null;
-  if (!contract.unit || sameUnit(contract.unit, lineUnit)) return price;
+  if (!contract.unit) return null; // no unit anywhere → can't compare safely
+  if (sameUnit(contract.unit, lineUnit)) return price;
   // qty_line = qty_contract × factor ⇒ price_line = price_contract / factor.
   const factor = unitConversionFactor(contract.unit, lineUnit);
   if (factor === null || factor === 0) return null;

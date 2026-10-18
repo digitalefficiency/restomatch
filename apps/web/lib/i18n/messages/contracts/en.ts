@@ -126,6 +126,7 @@ export const en: Shape<typeof he> = {
       NO_PRICE: 'missing a valid price',
       NO_DATE: 'missing a start date',
       BAD_RANGE: 'end date is before the start date',
+      BAD_UNIT: 'invalid unit (too long or a formula)',
     },
     viewContracts: 'Go to contract prices',
     viewSupplier: 'Go to the supplier',

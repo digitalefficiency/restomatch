@@ -9,6 +9,7 @@ import {
   isNotNull,
   products,
   restaurants,
+  sql,
   supplierContractPrices,
   suppliers,
   type Database,
@@ -100,12 +101,13 @@ export async function findOverContractLines(
       id: supplierContractPrices.id,
       supplierId: supplierContractPrices.supplierId,
       productId: supplierContractPrices.productId,
-      unit: supplierContractPrices.unit,
+      unit: sql<string | null>`coalesce(${supplierContractPrices.unit}, ${products.defaultUnit})`,
       contractPrice: supplierContractPrices.contractPrice,
       validFrom: supplierContractPrices.validFrom,
       validTo: supplierContractPrices.validTo,
     })
     .from(supplierContractPrices)
+    .innerJoin(products, eq(products.id, supplierContractPrices.productId))
     .where(
       and(
         eq(supplierContractPrices.restaurantId, restaurantId),

@@ -14,6 +14,7 @@ import {
   suppliers,
   type Database,
 } from '@restomatch/db';
+import { unitConversionFactor } from '@restomatch/matching';
 import { featureEnabled } from '../lib/features';
 import { enqueueNotification } from '../notifications/outbox';
 import { recipientsForRestaurant } from '../notifications/recipients';
@@ -29,6 +30,28 @@ import {
 import { priceAlertEmail } from './email';
 
 const DAY_MS = 86_400_000;
+
+/**
+ * A catalog list price expressed per the product's default unit (the unit
+ * price_history is normalized to), or null when it can't be compared safely:
+ * a pack price (pack_size > 1), or a unit that doesn't convert.
+ */
+function catalogUnitPrice(c: {
+  listPrice: string | null;
+  unit: string | null;
+  packSize: string | null;
+  productUnit: string | null;
+}): number | null {
+  const price = Number(c.listPrice);
+  if (!Number.isFinite(price) || price <= 0) return null;
+  if (c.packSize != null && Number(c.packSize) !== 1) return null;
+  // No unit on either side = quoted in the product's own unit.
+  if (!c.unit || !c.productUnit) return price;
+  const n = (u: string) => u.trim().toLowerCase().replace(/["'.\s\u05F3\u05F4]/g, '');
+  if (n(c.unit) === n(c.productUnit)) return price;
+  const f = unitConversionFactor(c.unit, c.productUnit);
+  return f ? Math.round((price / f) * 10_000) / 10_000 : null;
+}
 /** How far back a competing supplier's latest price still counts as an offer. */
 const OFFER_MAX_AGE_DAYS = 90;
 const DEFAULT_TZ = 'Asia/Jerusalem';
@@ -141,16 +164,47 @@ export async function runPriceAlertSweep(
   }
   if (detected.length === 0) return { skipped: false, created: 0, enqueued: 0 };
 
+  // Don't re-alert a trend the owner already sees or dismissed: skip a
+  // (product, supplier) with an OPEN alert, or one DISMISSED within its window.
+  const existing = await db
+    .select({
+      productId: priceAlerts.productId,
+      supplierId: priceAlerts.supplierId,
+      status: priceAlerts.status,
+      dismissedAt: priceAlerts.dismissedAt,
+    })
+    .from(priceAlerts)
+    .where(
+      and(
+        eq(priceAlerts.restaurantId, restaurantId),
+        inArray(priceAlerts.productId, [...new Set(detected.map((d) => d.productId))]),
+      ),
+    );
+  const suppressed = (d: (typeof detected)[number]) =>
+    existing.some(
+      (e) =>
+        e.productId === d.productId &&
+        e.supplierId === d.supplierId &&
+        (e.status === 'open' ||
+          (e.dismissedAt != null && now.getTime() - e.dismissedAt.getTime() < d.windowDays * DAY_MS)),
+    );
+  const fresh = detected.filter((d) => !suppressed(d));
+  if (fresh.length === 0) return { skipped: false, created: 0, enqueued: 0 };
+
   // Competing offers: other suppliers' latest observed price, plus active
   // catalog list prices for the same product.
-  const productIds = [...new Set(detected.map((d) => d.productId))];
+  const productIds = [...new Set(fresh.map((d) => d.productId))];
   const catalog = await db
     .select({
       productId: supplierCatalogItems.productId,
       supplierId: supplierCatalogItems.supplierId,
       listPrice: supplierCatalogItems.listPrice,
+      unit: supplierCatalogItems.unit,
+      packSize: supplierCatalogItems.packSize,
+      productUnit: products.defaultUnit,
     })
     .from(supplierCatalogItems)
+    .innerJoin(products, eq(products.id, supplierCatalogItems.productId))
     .where(
       and(
         eq(supplierCatalogItems.restaurantId, restaurantId),
@@ -160,12 +214,13 @@ export async function runPriceAlertSweep(
       ),
     );
   const offerCutoff = now.getTime() - OFFER_MAX_AGE_DAYS * DAY_MS;
-  for (const d of detected) {
+  for (const d of fresh) {
     const offers = [
       ...(latest.get(d.productId) ?? []).filter((o) => o.at >= offerCutoff),
       ...catalog
         .filter((c) => c.productId === d.productId)
-        .map((c) => ({ supplierId: c.supplierId, price: Number(c.listPrice) })),
+        .map((c) => ({ supplierId: c.supplierId, price: catalogUnitPrice(c) }))
+        .filter((o): o is { supplierId: string; price: number } => o.price !== null),
     ].filter((o) => o.supplierId !== d.supplierId);
     const best = cheaperOffer(Number(d.endPrice), offers);
     if (best) {
@@ -176,7 +231,7 @@ export async function runPriceAlertSweep(
 
   const inserted = await db
     .insert(priceAlerts)
-    .values(detected)
+    .values(fresh)
     .onConflictDoNothing({ target: [priceAlerts.restaurantId, priceAlerts.dedupeKey] })
     .returning({ id: priceAlerts.id, productId: priceAlerts.productId, supplierId: priceAlerts.supplierId });
 

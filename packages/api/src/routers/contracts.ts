@@ -346,10 +346,12 @@ export const contractsRouter = router({
       const rid = ctx.session.restaurantId;
       await assertFeature(ctx.db, rid, 'contracts');
       const since = new Date(Date.now() - (input?.days ?? 90) * 86_400_000);
-      const lines = await findOverContractLines(ctx.db, rid, { since, limit: 500 });
+      // Total over EVERY line; only the newest 500 are returned for display.
+      const all = await findOverContractLines(ctx.db, rid, { since });
       return {
-        lines,
-        totalOverAgorot: lines.reduce((s, l) => s + l.overAgorot, 0),
+        lines: all.slice(0, 500),
+        totalOverAgorot: all.reduce((s, l) => s + l.overAgorot, 0),
+        lineCount: all.length,
       };
     }),
 });

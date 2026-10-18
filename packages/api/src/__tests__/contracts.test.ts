@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createDb,
   eq,
+  inArray,
   notificationsOutbox,
   poLines,
   priceAlerts,
@@ -62,7 +63,9 @@ describe('contract rules (contracts/core.ts)', () => {
   it('converts kg↔g like the engine and refuses unconvertible units', () => {
     expect(contractPriceInUnit(row({ unit: 'ק״ג', contractPrice: '40' }), 'kg')).toBe(40);
     expect(contractPriceInUnit(row({ unit: 'kg', contractPrice: '40' }), 'g')).toBe(0.04);
-    expect(contractPriceInUnit(row({ unit: null, contractPrice: '7.5' }), 'יח׳')).toBe(7.5);
+    // No unit anywhere (contract nor product) → never applied (loaders coalesce the product unit).
+    expect(contractPriceInUnit(row({ unit: null, contractPrice: '7.5' }), 'יח׳')).toBeNull();
+    expect(contractPriceInUnit(row({ unit: 'יח׳', contractPrice: '7.5' }), 'יח׳')).toBe(7.5);
     expect(contractPriceInUnit(row({ unit: 'kg', contractPrice: '40' }), 'ליטר')).toBeNull();
   });
 
@@ -181,6 +184,31 @@ describe('price-trend detection (priceAlerts/detect.ts)', () => {
     ).toBeNull();
   });
 
+  it('collapses same-day observations (one invoice, two lines) and ignores a stale trend (refuter R5)', () => {
+    expect(
+      detectSustainedIncrease(
+        [
+          { observedAt: at(20), unitPrice: '10' },
+          { observedAt: at(1), unitPrice: '13' },
+          { observedAt: new Date(at(1).getTime() + 60_000), unitPrice: '13' },
+        ],
+        th,
+        now,
+      ),
+    ).toBeNull();
+    expect(
+      detectSustainedIncrease(
+        [
+          { observedAt: at(20), unitPrice: '10' },
+          { observedAt: at(19), unitPrice: '13' },
+          { observedAt: at(18), unitPrice: '13' },
+        ],
+        th,
+        now,
+      ),
+    ).toBeNull();
+  });
+
   it('resolves the most specific threshold rule', () => {
     const rules = [
       { supplierId: null, category: null, thresholdPct: 0.2, windowDays: 30, enabled: true },
@@ -243,7 +271,7 @@ afterAll(async () => {
   await resetDb(db);
 });
 
-async function addContract(t: Tenant, price: string, validFrom = '2020-01-01', validTo: string | null = null) {
+async function addContract(t: Tenant, price: string, validFrom = '2020-01-01', validTo: string | null = null, unit: string | null = null) {
   await db.insert(supplierContractPrices).values({
     restaurantId: t.restaurantId,
     supplierId: t.supplierId,
@@ -251,6 +279,7 @@ async function addContract(t: Tenant, price: string, validFrom = '2020-01-01', v
     contractPrice: price,
     validFrom,
     validTo,
+    unit,
   });
 }
 
@@ -263,37 +292,58 @@ describe('buildMatchInput feeds the contract price to the engine (contract beats
     expect(priceHigher(runMatch(built!.input))[0]).toMatchObject({ expected: 8.5, actual: 10, deltaAmount: 15 });
   });
 
-  it('a contract in force replaces the PO price: PRICE_HIGHER expected = contract', async () => {
-    await addContract(A, '9.0000');
+  it('a contract below the PO price replaces it: PRICE_HIGHER expected = contract', async () => {
+    await addContract(A, '8.0000', '2020-01-01', null, 'kg');
     const built = await buildMatchInputForInvoice(db, A.restaurantId, A.invoiceId);
-    expect(built!.input.poLines[0]!.unitPriceExpected).toBe(9);
-    expect(priceHigher(runMatch(built!.input))[0]).toMatchObject({ expected: 9, actual: 10, deltaAmount: 10 });
+    expect(built!.input.poLines[0]!.unitPriceExpected).toBe(8);
+    expect(priceHigher(runMatch(built!.input))[0]).toMatchObject({ expected: 8, actual: 10, deltaAmount: 20 });
+  });
+
+  it('a contract ABOVE the PO price is a ceiling only: the PO stands, no false PRICE_LOWER leak (refuter R2)', async () => {
+    const before = runMatch((await buildMatchInputForInvoice(db, A.restaurantId, A.invoiceId))!.input);
+    await addContract(A, '12.0000', '2020-01-01', null, 'kg');
+    const built = await buildMatchInputForInvoice(db, A.restaurantId, A.invoiceId);
+    expect(built!.input.poLines[0]!.unitPriceExpected).toBe(8.5);
+    const out = runMatch(built!.input);
+    expect(out.discrepancies.some((d) => d.type === 'PRICE_LOWER')).toBe(false);
+    expect(out.totalDiscrepancyAmount).toBe(before.totalDiscrepancyAmount);
+  });
+
+  it('a unit-less contract is quoted in the product default unit and converted (₪9/ק״ג on a per-g line → ₪0.009) (refuter R1)', async () => {
+    await addContract(A, '8.0000'); // no unit → product default ק״ג
+    await db.update(poLines).set({ unit: 'g', unitPriceExpected: '0.0085' }).where(eq(poLines.id, A.poLineId));
+    try {
+      const built = await buildMatchInputForInvoice(db, A.restaurantId, A.invoiceId);
+      expect(built!.input.poLines[0]!.unitPriceExpected).toBe(0.008);
+    } finally {
+      await db.update(poLines).set({ unit: 'kg', unitPriceExpected: '8.5' }).where(eq(poLines.id, A.poLineId));
+    }
   });
 
   it('a contract outside its validity window, for another tenant, or with the flag off is ignored', async () => {
-    await addContract(A, '9.0000', '2000-01-01', '2000-12-31');
+    await addContract(A, '8.0000', '2000-01-01', '2000-12-31');
     await addContract(B, '1.0000');
     let built = await buildMatchInputForInvoice(db, A.restaurantId, A.invoiceId);
     expect(built!.input.poLines[0]!.unitPriceExpected).toBe(8.5);
 
     await db.delete(supplierContractPrices);
-    await addContract(A, '9.0000');
+    await addContract(A, '8.0000');
     await setFeatures(A, { all: true, contracts: false });
     built = await buildMatchInputForInvoice(db, A.restaurantId, A.invoiceId);
     expect(built!.input.poLines[0]!.unitPriceExpected).toBe(8.5);
   });
 
-  it('a contract in another unit is converted (₪9000/ton is not a unit we know → ignored; ₪0.009/g → ₪9/kg)', async () => {
+  it('a contract in another unit is converted (₪0.008/g → ₪8/kg)', async () => {
     await db.insert(supplierContractPrices).values({
       restaurantId: A.restaurantId,
       supplierId: A.supplierId,
       productId: A.productId,
-      contractPrice: '0.0090',
+      contractPrice: '0.0080',
       unit: 'g',
       validFrom: '2020-01-01',
     });
     const built = await buildMatchInputForInvoice(db, A.restaurantId, A.invoiceId);
-    expect(built!.input.poLines[0]!.unitPriceExpected).toBe(9);
+    expect(built!.input.poLines[0]!.unitPriceExpected).toBe(8);
   });
 });
 
@@ -365,6 +415,29 @@ describe('contracts router', () => {
     });
     expect(again).toMatchObject({ created: 0, updated: 2 });
     await db.delete(supplierCatalogItems).where(eq(supplierCatalogItems.restaurantId, A.restaurantId));
+  });
+
+  it('import reports — never guesses — bad cells: long/formula unit, impossible date, 1e3, (5) (refuter R6/R7)', async () => {
+    const c = caller(A, 'manager');
+    const long = 'x'.repeat(40);
+    const text =
+      'name,unit,price,from\n' +
+      `עגבניה A,${long},9,1/9/2026\n` +
+      'עגבניה A,"=HYPERLINK(""http://e"")",9,1/9/2026\n' +
+      'עגבניה A,kg,9,31/02/2026\n' +
+      'עגבניה A,kg,1e3,1/9/2026\n' +
+      'עגבניה A,kg,(5),1/9/2026\n' +
+      'עגבניה A,kg,"1,234.50",2/9/2026\n';
+    const res = await c.contracts.importCommit({
+      supplierId: A.supplierId,
+      file: { filename: 'c.csv', text },
+      mapping: { name: 'name', unit: 'unit', price: 'price', validFrom: 'from' },
+      defaultValidFrom: '2026-01-01',
+    });
+    expect(res.skipped.map((x) => x.reason)).toEqual(['BAD_UNIT', 'BAD_UNIT', 'NO_DATE', 'NO_PRICE', 'NO_PRICE']);
+    expect(res).toMatchObject({ created: 1, updated: 0 });
+    const rows = await db.select().from(supplierContractPrices).where(eq(supplierContractPrices.restaurantId, A.restaurantId));
+    expect(rows.map((r) => [r.contractPrice, r.validFrom])).toEqual([['1234.5000', '2026-09-02']]);
   });
 
   it('is FORBIDDEN with appCode FEATURE_DISABLED when the flag is off (and via the kill-switch)', async () => {
@@ -453,6 +526,39 @@ describe('price-alert sweep (in-app rows + outbox email)', () => {
 
     await db.delete(supplierCatalogItems).where(eq(supplierCatalogItems.restaurantId, A.restaurantId));
     await db.delete(suppliers).where(eq(suppliers.id, other!.id));
+  });
+
+  it('a dismissed (or still-open) alert is not re-raised by later observations (refuter R4)', async () => {
+    await seedTrend(A, [6.2, 6.7, 7.1, 7.316]);
+    expect((await runPriceAlertSweep(db, A.restaurantId, { now, notify: true })).created).toBe(1);
+    // still open: a new observation tomorrow doesn't duplicate it
+    const later = new Date(now.getTime() + 86_400_000);
+    await db.insert(priceHistory).values({ restaurantId: A.restaurantId, productId: A.productId, supplierId: A.supplierId, observedAt: later, unitPrice: '7.3160' });
+    expect(await runPriceAlertSweep(db, A.restaurantId, { now: later, notify: true })).toMatchObject({ created: 0, enqueued: 0 });
+    // dismissed: stays quiet within its window
+    const [al] = await db.select().from(priceAlerts).where(eq(priceAlerts.restaurantId, A.restaurantId));
+    await caller(A, 'manager').priceAlerts.dismiss({ id: al!.id });
+    const later2 = new Date(now.getTime() + 2 * 86_400_000);
+    await db.insert(priceHistory).values({ restaurantId: A.restaurantId, productId: A.productId, supplierId: A.supplierId, observedAt: later2, unitPrice: '7.3160' });
+    expect(await runPriceAlertSweep(db, A.restaurantId, { now: later2, notify: true })).toMatchObject({ created: 0, enqueued: 0 });
+    expect(await db.select().from(notificationsOutbox).where(eq(notificationsOutbox.restaurantId, A.restaurantId))).toHaveLength(1);
+  });
+
+  it('a cheaper offer quoted per gram or per pack is converted or ignored, never compared raw (refuter R3)', async () => {
+    await seedTrend(A, [6.2, 6.7, 7.1, 7.316]);
+    const [g] = await db.insert(suppliers).values({ restaurantId: A.restaurantId, name: 'ספק גרם' }).returning();
+    const [pk] = await db.insert(suppliers).values({ restaurantId: A.restaurantId, name: 'ספק ארגז' }).returning();
+    await db.insert(supplierCatalogItems).values([
+      // ₪0.0090/g = ₪9/kg → NOT cheaper than ₪7.316/kg
+      { restaurantId: A.restaurantId, supplierId: g!.id, supplierNameRaw: 'g', productId: A.productId, unit: 'g', listPrice: '0.0090' },
+      // ₪5 per pack of 10 → not comparable → ignored
+      { restaurantId: A.restaurantId, supplierId: pk!.id, supplierNameRaw: 'pk', productId: A.productId, unit: 'ק״ג', packSize: '10', listPrice: '5.0000' },
+    ]);
+    await runPriceAlertSweep(db, A.restaurantId, { now });
+    const [al] = await db.select().from(priceAlerts).where(eq(priceAlerts.restaurantId, A.restaurantId));
+    expect(al).toMatchObject({ cheaperSupplierId: null, cheaperPrice: null });
+    await db.delete(supplierCatalogItems).where(eq(supplierCatalogItems.restaurantId, A.restaurantId));
+    await db.delete(suppliers).where(inArray(suppliers.id, [g!.id, pk!.id]));
   });
 
   it('respects a per-supplier threshold and the feature flag', async () => {

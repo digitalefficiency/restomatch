@@ -26,7 +26,24 @@ export interface ContractImportRow {
   price: number | null;
   validFrom: string | null;
   validTo: string | null;
+  /** A cell was present but unusable — the row is reported, never guessed. */
+  invalid?: 'NO_PRICE' | 'NO_DATE' | 'BAD_UNIT';
 }
+
+/**
+ * Strict price cell: digits with an optional decimal point/comma and thousands
+ * separators, optional ₪. Rejects exponents ("1e3"), accounting negatives
+ * ("(5)"), and anything else parseNumeric would silently reinterpret.
+ */
+export function parsePriceCell(raw: string | null): number | null {
+  if (raw == null) return null;
+  const s = raw.replace(/[₪\s]/g, '');
+  if (!/^\d{1,3}(?:,\d{3})*(?:\.\d+)?$|^\d+(?:[.,]\d+)?$/.test(s)) return null;
+  return parseNumeric(s);
+}
+
+/** A unit fits varchar(32) and can't be a spreadsheet formula. */
+const UNIT_OK = (u: string): boolean => u.length <= 32 && !/^[=+\-@]/.test(u);
 
 const norm = (h: string): string =>
   h.toLowerCase().replace(/["'״׳`_\-]/g, '').replace(/\s+/g, '').trim();
@@ -104,14 +121,22 @@ export function extractContractRows(table: ParsedTable, mapping: ContractColumnM
     const sku = get(row, mapping.sku);
     const name = get(row, mapping.name);
     if (!sku && !name) continue;
-    out.push({
-      supplierSku: sku,
-      name,
-      unit: get(row, mapping.unit),
-      price: parseNumeric(get(row, mapping.price)),
-      validFrom: parseDateCell(get(row, mapping.validFrom)),
-      validTo: parseDateCell(get(row, mapping.validTo)),
-    });
+    const unit = get(row, mapping.unit);
+    const rawPrice = get(row, mapping.price);
+    const rawFrom = get(row, mapping.validFrom);
+    const rawTo = get(row, mapping.validTo);
+    const price = parsePriceCell(rawPrice);
+    const validFrom = parseDateCell(rawFrom);
+    const validTo = parseDateCell(rawTo);
+    const invalid =
+      unit != null && !UNIT_OK(unit)
+        ? ('BAD_UNIT' as const)
+        : rawPrice != null && price == null
+          ? ('NO_PRICE' as const)
+          : (rawFrom != null && validFrom == null) || (rawTo != null && validTo == null)
+            ? ('NO_DATE' as const)
+            : undefined;
+    out.push({ supplierSku: sku, name, unit, price, validFrom, validTo, ...(invalid ? { invalid } : {}) });
   }
   return out;
 }
@@ -120,7 +145,7 @@ export interface ContractCommitResult {
   created: number;
   updated: number;
   /** Rows that could not be applied, with a stable reason code for the UI. */
-  skipped: Array<{ row: number; label: string; reason: 'NO_PRODUCT' | 'NO_PRICE' | 'NO_DATE' | 'BAD_RANGE' }>;
+  skipped: Array<{ row: number; label: string; reason: 'NO_PRODUCT' | 'NO_PRICE' | 'NO_DATE' | 'BAD_RANGE' | 'BAD_UNIT' }>;
 }
 
 /**
@@ -169,6 +194,10 @@ export async function commitContractRows(
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i]!;
     const label = r.name ?? r.supplierSku ?? `#${i + 1}`;
+    if (r.invalid) {
+      result.skipped.push({ row: i + 2, label, reason: r.invalid });
+      continue;
+    }
     const productId =
       (r.supplierSku && bySku.get(r.supplierSku)) ||
       (r.name && (prodByName.get(key(r.name)) ?? byCatName.get(key(r.name)))) ||

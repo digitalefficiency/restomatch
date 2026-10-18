@@ -6,7 +6,10 @@
  *   • there are ≥ MIN_OBSERVATIONS observations,
  *   • the latest price is ≥ first price × (1 + thresholdPct), and
  *   • it is not a one-off spike: the later half of the observations all sit at
- *     or above first × (1 + thresholdPct / 2) (the price stayed up).
+ *     or above first × (1 + thresholdPct / 2) (the price stayed up), and
+ *   • it is current: the latest observation falls in the newer half of the window.
+ * Observations are first collapsed to ONE per calendar day (the day's average):
+ * one invoice with two lines of the same product is one data point, not two.
  * Prices are compared in integer price units (1/10000 ₪, NUMERIC(12,4) scale).
  */
 
@@ -87,10 +90,24 @@ export function detectSustainedIncrease(
     .filter((p) => p.observedAt.getTime() > from && p.observedAt.getTime() <= now.getTime())
     .filter((p) => Number.isFinite(Number(p.unitPrice)) && Number(p.unitPrice) > 0)
     .sort((a, b) => a.observedAt.getTime() - b.observedAt.getTime());
-  if (inWindow.length < MIN_OBSERVATIONS) return null;
+  // One point per UTC calendar day (average in price units).
+  const byDay = new Map<string, { observedAt: Date; sum: number; n: number }>();
+  for (const p of inWindow) {
+    const k = p.observedAt.toISOString().slice(0, 10);
+    const e = byDay.get(k) ?? { observedAt: p.observedAt, sum: 0, n: 0 };
+    e.sum += units(p.unitPrice);
+    e.n += 1;
+    if (p.observedAt > e.observedAt) e.observedAt = p.observedAt;
+    byDay.set(k, e);
+  }
+  const days = [...byDay.values()]
+    .map((e) => ({ observedAt: e.observedAt, unitPrice: Math.round(e.sum / e.n) / 10_000 }))
+    .sort((a, b) => a.observedAt.getTime() - b.observedAt.getTime());
+  if (days.length < MIN_OBSERVATIONS) return null;
 
-  const first = inWindow[0]!;
-  const last = inWindow[inWindow.length - 1]!;
+  const first = days[0]!;
+  const last = days[days.length - 1]!;
+  if (now.getTime() - last.observedAt.getTime() > (threshold.windowDays * DAY_MS) / 2) return null;
   const start = units(first.unitPrice);
   const end = units(last.unitPrice);
   if (start <= 0 || end <= start) return null;
@@ -99,7 +116,7 @@ export function detectSustainedIncrease(
   if (pct + 1e-9 < threshold.thresholdPct) return null;
 
   const holdFloor = start * (1 + threshold.thresholdPct / 2);
-  const laterHalf = inWindow.slice(Math.floor(inWindow.length / 2));
+  const laterHalf = days.slice(Math.floor(days.length / 2));
   if (laterHalf.some((p) => units(p.unitPrice) + 1e-9 < holdFloor)) return null;
 
   return {
@@ -108,7 +125,7 @@ export function detectSustainedIncrease(
     pctChange: Math.round(pct * 10_000) / 10_000,
     startAt: first.observedAt,
     endAt: last.observedAt,
-    observations: inWindow.length,
+    observations: days.length,
   };
 }
 
