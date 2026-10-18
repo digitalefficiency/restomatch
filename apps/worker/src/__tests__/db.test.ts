@@ -10,3 +10,12 @@ describe('jobDb', () => {
     expect(jobDbPoolCount()).toBe(1);
   });
 });
+
+describe('closeJobDbs', () => {
+  it('drains and forgets every pool', async () => {
+    const { closeJobDbs, jobDb: get, jobDbPoolCount: n } = await import('../db');
+    get('postgres://u:p@localhost:5432/never_connected_2');
+    await closeJobDbs();
+    expect(n()).toBe(0);
+  });
+});

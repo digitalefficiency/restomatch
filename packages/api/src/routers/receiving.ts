@@ -690,10 +690,11 @@ export const receivingRouter = router({
       // (console.warn) when REDIS_URL is unset and fails fast (≤3 s, coded
       // 'queue.unavailable') when Redis is unreachable — so the invoice stays
       // persisted and the client is told OCR was not queued instead of hanging
-      // until the function times out (EN-7).
-      let ocrQueued = true;
+      // until the function times out (EN-7). REDIS_URL unset (no queue at all)
+      // also reports ocrQueued:false, so the wizard doesn't poll for 30 s.
+      let ocrQueued = false;
       try {
-        await enqueueOcrInvoice({
+        ocrQueued = await enqueueOcrInvoice({
           restaurantId,
           invoiceId: invoice.id,
           supplierId: input.supplierId,

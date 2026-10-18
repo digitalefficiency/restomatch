@@ -125,6 +125,16 @@ async function main() {
   const [impAfter] = await d.select({ status: catalogImports.status, created: catalogImports.createdItems, err: catalogImports.error }).from(catalogImports).where(eq(catalogImports.id, imp!.id));
   outcomes.push({ step: 'import-catalog row state', ok: impAfter?.status === 'committed', detail: JSON.stringify(impAfter), ms: 0 });
 
+  // 4b) A late duplicate of the same import (timed-out producer, QA D7) must be a no-op.
+  const dupQ = new Queue('import-catalog', { connection });
+  const dupEv = new QueueEvents('import-catalog', { connection: connection.duplicate() });
+  await dupEv.waitUntilReady();
+  const dup = await dupQ.add('import-catalog', { restaurantId: r.id, supplierId: sup!.id, importId: imp!.id, file: { filename: 'smoke.csv', text: 'sku,name,unit,price\nSMK-1,QA tomato,kg,9.90\n' }, mapping }, { attempts: 1 });
+  const dupRes = (await dup.waitUntilFinished(dupEv, TIMEOUT_MS).catch((e: unknown) => ({ error: String(e) }))) as { skipped?: string };
+  outcomes.push({ step: 'import-catalog duplicate is skipped', ok: dupRes?.skipped === 'already committed', detail: JSON.stringify(dupRes), ms: 0 });
+  await dupEv.close();
+  await dupQ.close();
+
   // 5) sync-platforms without credentials must fail cleanly (no hang, no crash).
   await runJob('sync-platforms', { restaurantId: r.id, platform: 'marketman' }, 'failed');
 

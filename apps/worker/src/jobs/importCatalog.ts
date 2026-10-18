@@ -24,7 +24,7 @@ export function startImportCatalogWorker() {
 
     // Tenant guard: the import row must belong to the payload's restaurant.
     const [imp] = await db
-      .select({ id: catalogImports.id })
+      .select({ id: catalogImports.id, status: catalogImports.status })
       .from(catalogImports)
       .where(and(eq(catalogImports.id, importId), eq(catalogImports.restaurantId, restaurantId)))
       .limit(1);
@@ -32,6 +32,12 @@ export function startImportCatalogWorker() {
       throw new Error(
         `[import-catalog] import=${importId} not found in restaurant=${restaurantId} — refusing to process`,
       );
+    }
+
+    // A producer that timed out (Redis slow, QA D7) falls back to committing the
+    // import inline, but BullMQ may still land the job later — never commit twice.
+    if (imp.status === 'committed') {
+      return { importId, skipped: 'already committed' as const };
     }
 
     try {

@@ -387,7 +387,7 @@ describe('receiving.registerInvoice', () => {
     }
   }, 10_000);
 
-  it('reports ocrQueued=true when the enqueue is accepted (REDIS_URL unset → dev no-op)', async () => {
+  it('reports ocrQueued=false when no queue is configured (REDIS_URL unset)', async () => {
     const s = await seed();
     const caller = callerFor({
       userId: s.receiverId,
@@ -400,7 +400,7 @@ describe('receiving.registerInvoice', () => {
       imageUrl: 'https://example.com/ok.jpg',
       supplierId: s.supplierId,
     });
-    expect(res).toMatchObject({ ocrQueued: true });
+    expect(res).toMatchObject({ ocrQueued: false, alreadyExisted: false });
   });
 });
 

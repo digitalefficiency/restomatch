@@ -60,16 +60,41 @@ export function redisUrlProblem(url: string | undefined): string | null {
   return null;
 }
 
-function producerConnection(url: string): IORedis {
-  return new IORedis(url, {
+/**
+ * ioredis options for any client used INSIDE a web request (producers, rate
+ * limiter, heartbeat reads): no offline queue, short connect timeout, capped
+ * background reconnect. Pair every command with {@link withDeadline} — a socket
+ * that connects but never answers is not covered by connectTimeout.
+ */
+export function failFastRedisOptions() {
+  return {
     // Commands issued while disconnected reject immediately instead of queueing.
     enableOfflineQueue: false,
     maxRetriesPerRequest: 1,
     connectTimeout: ENQUEUE_TIMEOUT_MS,
     // Keep reconnecting in the background (capped back-off) so a later request
     // succeeds once Redis is back; requests themselves never wait on it.
-    retryStrategy: (times) => Math.min(times * 200, 2_000),
-  });
+    retryStrategy: (times: number) => Math.min(times * 200, 2_000),
+  };
+}
+
+/** Reject with `onTimeout()` if `p` has not settled within `ms`. */
+export async function withDeadline<T>(p: Promise<T>, ms: number, onTimeout: () => Error): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      p,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(onTimeout()), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function producerConnection(url: string): IORedis {
+  return new IORedis(url, failFastRedisOptions());
 }
 
 /**
@@ -148,20 +173,22 @@ function getOcrInvoiceQueue(): Queue<OcrInvoiceJob> | null {
 }
 
 /**
- * Enqueue an 'ocr-invoice' job for the worker to consume. No-ops (with a
+ * Enqueue an 'ocr-invoice' job for the worker to consume. Returns false (no-op,
  * console.warn) when REDIS_URL is unset, so callers in environments without
  * Redis degrade gracefully. Throws QueueUnavailableError within
- * ENQUEUE_TIMEOUT_MS when REDIS_URL is set but unusable or unreachable.
+ * ENQUEUE_TIMEOUT_MS when REDIS_URL is set but unusable or unreachable. (A
+ * timed-out add may still land later: consumers must be idempotent.)
  */
-export async function enqueueOcrInvoice(payload: OcrInvoiceJob): Promise<void> {
+export async function enqueueOcrInvoice(payload: OcrInvoiceJob): Promise<boolean> {
   const queue = getOcrInvoiceQueue();
   if (!queue) {
     console.warn(
       `[queue] REDIS_URL unset — skipping enqueue of ocr-invoice for invoice=${payload.invoiceId}`,
     );
-    return;
+    return false;
   }
   await addWithDeadline(queue, OCR_INVOICE_QUEUE, payload);
+  return true;
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
