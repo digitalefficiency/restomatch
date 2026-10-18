@@ -2,8 +2,10 @@ import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createDb,
+  discrepancies,
   eq,
   invoices,
+  matchRuns,
   poLines,
   products,
   purchaseOrders,
@@ -342,6 +344,97 @@ describe('exports: Israel-time calendar days + every checked invoice', () => {
     await setInvoice('parsed', '2026-10-10T08:00:00.000Z');
     const none = await callerFor(A).exports.invoicesCsv({ from: '2026-10-01', to: '2026-10-31' });
     expect(none.rowCount).toBe(0);
+  });
+
+  /** A disputed invoice whose match run carries one discrepancy of `type`. */
+  async function disputedWith(
+    invoiceNumber: string,
+    type: 'DUPLICATE_INVOICE' | 'PRICE_HIGHER',
+    resolutionStatus: 'open' | 'accepted' | 'rejected' = 'open',
+    invoiceDate: Date | null = new Date('2026-10-12T08:00:00.000Z'),
+  ) {
+    const [inv] = await db
+      .insert(invoices)
+      .values({
+        restaurantId: A.restaurantId,
+        supplierId: A.supplierId,
+        invoiceNumber,
+        invoiceDate,
+        createdAt: new Date('2026-10-12T08:00:00.000Z'),
+        totalExclVat: '100.00',
+        vatAmount: '18.00',
+        totalInclVat: '118.00',
+        status: 'disputed',
+        source: 'photo',
+        createdBy: A.ownerUserId,
+      })
+      .returning({ id: invoices.id });
+    const [mr] = await db
+      .insert(matchRuns)
+      .values({
+        restaurantId: A.restaurantId,
+        invoiceId: inv!.id,
+        overallStatus: 'major',
+        totalDiscrepancyAmount: '118.00',
+      })
+      .returning({ id: matchRuns.id });
+    await db.insert(discrepancies).values({
+      restaurantId: A.restaurantId,
+      matchRunId: mr!.id,
+      type,
+      severity: 'block',
+      deltaAmount: '118.00',
+      requiresRole: 'owner',
+      resolutionStatus,
+    });
+    return inv!.id;
+  }
+
+  it('EXP-DUP-1: a flagged duplicate is not booked twice; other disputes still export', async () => {
+    await setInvoice('approved', '2026-10-12T08:00:00.000Z'); // the original
+    await disputedWith('DUP-OPEN', 'DUPLICATE_INVOICE', 'open');
+    // Approvals "Approve" = accepted = "yes, a duplicate — claim it".
+    await disputedWith('DUP-CLAIMED', 'DUPLICATE_INVOICE', 'accepted');
+    await disputedWith('PRICE-DISPUTE', 'PRICE_HIGHER', 'open');
+    // Approvals "Reject" = rejected = waived: "not a duplicate", a real purchase.
+    await disputedWith('DUP-WAIVED', 'DUPLICATE_INVOICE', 'rejected');
+
+    const csv = await callerFor(A).exports.invoicesCsv({ from: '2026-10-01', to: '2026-10-31' });
+    expect(csv.rowCount).toBe(3);
+    expect(csv.content).toContain('PRICE-DISPUTE');
+    expect(csv.content).toContain('DUP-WAIVED');
+    expect(csv.content).not.toContain('DUP-OPEN');
+    expect(csv.content).not.toContain('DUP-CLAIMED');
+
+    const u = await callerFor(A).exports.uniform1000({ from: '2026-10-01', to: '2026-10-31' });
+    expect(u.rowCount).toBe(3);
+    expect(u.content).not.toContain('DUP-OPEN');
+  });
+
+  it('only the latest match run counts: a re-match that clears the duplicate flag exports it', async () => {
+    const id = await disputedWith('DUP-FIXED', 'DUPLICATE_INVOICE', 'open');
+    const before = await callerFor(A).exports.invoicesCsv({ from: '2026-10-01', to: '2026-10-31' });
+    expect(before.content).not.toContain('DUP-FIXED');
+    // Manager fixed the misread number and re-ran the match: clean run, later.
+    await db.update(invoices).set({ status: 'matched' }).where(eq(invoices.id, id));
+    await db.insert(matchRuns).values({
+      restaurantId: A.restaurantId,
+      invoiceId: id,
+      overallStatus: 'clean',
+      runAt: new Date(Date.now() + 60_000),
+    });
+    const after = await callerFor(A).exports.invoicesCsv({ from: '2026-10-01', to: '2026-10-31' });
+    expect(after.content).toContain('DUP-FIXED');
+  });
+
+  it('counts checked invoices with no invoice date so the UI can warn', async () => {
+    await disputedWith('NO-DATE', 'PRICE_HIGHER', 'open', null);
+    await disputedWith('NO-DATE-DUP', 'DUPLICATE_INVOICE', 'open', null);
+    const csv = await callerFor(A).exports.invoicesCsv({ from: '2026-10-01', to: '2026-10-31' });
+    expect(csv.content).not.toContain('NO-DATE');
+    expect(csv.undatedCount).toBe(1); // the duplicate copy isn't counted either
+    const sep = await callerFor(A).exports.invoicesCsv({ from: '2026-09-01', to: '2026-09-30' });
+    expect(sep.undatedCount).toBe(0);
   });
 });
 

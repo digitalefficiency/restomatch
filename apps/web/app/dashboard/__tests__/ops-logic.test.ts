@@ -8,6 +8,7 @@ import {
   toCreateInput,
   toUpdatePatch,
   validateSupplierForm,
+  scheduleRowProblem,
 } from '../suppliers/form-logic';
 import {
   addOrMerge,
@@ -18,7 +19,7 @@ import {
   parsePositive,
   parsePrice,
 } from '../orders/order-logic';
-import { namesBatch, productPatch } from '../products/product-logic';
+import { chunk, namesBatch, pendingNames, productPatch } from '../products/product-logic';
 import { presetRange, rangeError, withBom } from '../exports/range';
 import { catalogErrorKey, decodeCsvBytes, sampleCatalogCsv } from '../catalog/import/file-logic';
 
@@ -150,6 +151,24 @@ describe('bulk English names batch', () => {
     ]);
     expect(namesBatch(rows, { a: '   ' })).toEqual([]);
   });
+
+  it('pendingNames keeps edits to rows the current search hides (regression: lost on save)', () => {
+    const edits = {
+      bleach: { value: 'Bleach 4L', original: null }, // edited, then the user searched "באגט"
+      baguette: { value: 'Baguette ', original: 'Baguete' },
+      same: { value: 'Feta', original: 'Feta' },
+    };
+    expect(pendingNames(edits)).toEqual([
+      { productId: 'bleach', nameEn: 'Bleach 4L' },
+      { productId: 'baguette', nameEn: 'Baguette' },
+    ]);
+  });
+
+  it('chunk splits a big save into ≤200-item batches', () => {
+    const items = Array.from({ length: 450 }, (_, i) => i);
+    expect(chunk(items, 200).map((c) => c.length)).toEqual([200, 200, 50]);
+    expect(chunk([], 200)).toEqual([]);
+  });
 });
 
 describe('export range', () => {
@@ -236,5 +255,13 @@ describe('supplier payment terms (English display)', () => {
     expect(parsePaymentTerms('Net 30')).toBeNull();
     expect(parsePaymentTerms('שוטף + 30 בהעברה')).toBeNull();
     expect(parsePaymentTerms(null)).toBeNull();
+  });
+});
+
+describe('supplier order schedule', () => {
+  it('a cleared cutoff blocks save with its own message (was: generic "invalid fields")', () => {
+    expect(scheduleRowProblem({ orderDays: [0], cutoff: '12:00' })).toBeNull();
+    expect(scheduleRowProblem({ orderDays: [0], cutoff: '' })).toBe('pickCutoff');
+    expect(scheduleRowProblem({ orderDays: [], cutoff: '12:00' })).toBe('pickDay');
   });
 });
