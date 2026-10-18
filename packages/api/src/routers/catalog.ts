@@ -14,7 +14,7 @@ import {
   type Database,
 } from '@restomatch/db';
 import { MockEmbeddingProvider } from '@restomatch/catalog';
-import { enqueueCatalogImport } from '@restomatch/queue';
+import { enqueueCatalogImport, isQueueUnavailableError } from '@restomatch/queue';
 import { managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
 import {
@@ -263,12 +263,17 @@ export const catalogRouter = router({
 
       // Large files → background worker (when a queue is available).
       if (rows.length > INLINE_ROW_LIMIT) {
+        // Redis down/misconfigured → commit inline rather than fail the import.
         const queued = await enqueueCatalogImport({
           restaurantId,
           supplierId: input.supplierId,
           importId: imp.id,
           file: input.file,
           mapping: input.mapping,
+        }).catch((err: unknown) => {
+          if (!isQueueUnavailableError(err)) throw err;
+          console.warn(`[catalog.import] ${err.message} — committing import=${imp.id} inline`);
+          return false;
         });
         if (queued) {
           return {

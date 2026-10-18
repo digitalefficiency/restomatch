@@ -176,6 +176,22 @@ jobs:
       - name: Worker suite
         run: pnpm --filter @restomatch/worker test
 
+      # Every queue once against a RUNNING worker on a seeded throwaway DB:
+      # the 7 scheduled jobs, OCR(stub) → match, catalog import, outbox email →
+      # local sink → 'sent', sync-platforms failing cleanly. Catches what unit
+      # tests with mocked DBs cannot (e.g. the partial-index ON CONFLICT bug).
+      - name: Worker runtime smoke (every queue, seeded DB)
+        env:
+          SMOKE_DB: postgres://postgres:postgres@localhost:5432/restomatch_smoke
+          EMAIL_SINK_FILE: /tmp/email-sink.jsonl
+        run: |
+          E2E_DATABASE_URL="$SMOKE_DB" pnpm --filter @restomatch/db exec tsx "$GITHUB_WORKSPACE/apps/web/e2e/prepare-db.ts"
+          DATABASE_URL="$SMOKE_DB" RESEND_API_KEY=re_local_sink EMAIL_FROM=ci@example.invalid PORT=8090 \
+            NODE_OPTIONS="--import $GITHUB_WORKSPACE/apps/worker/scripts/local-email-sink.mjs" \
+            pnpm --filter @restomatch/worker start > /tmp/worker.log 2>&1 &
+          timeout 90 bash -c 'until curl -sf localhost:8090/health/ready >/dev/null; do sleep 1; done' || { cat /tmp/worker.log; exit 1; }
+          DATABASE_URL="$SMOKE_DB" pnpm --filter @restomatch/worker exec tsx scripts/smoke-all-jobs.ts || { cat /tmp/worker.log; exit 1; }
+
   web:
     name: web build + typecheck
     runs-on: ubuntu-latest

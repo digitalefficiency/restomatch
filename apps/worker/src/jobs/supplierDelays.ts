@@ -16,7 +16,6 @@ import {
   and,
   asc,
   count,
-  createDb,
   eq,
   inArray,
   isNotNull,
@@ -28,6 +27,7 @@ import {
 } from '@restomatch/db';
 import { makeWorker } from '../queue';
 import { appBaseUrl, formatIlDate, startOfIlDay } from '../lib/notifyHelpers';
+import { jobDb } from '../db';
 
 export interface SupplierDelaysJob {
   /** When omitted, sweeps ALL restaurants. */
@@ -42,7 +42,7 @@ export function startSupplierDelaysWorker() {
   return makeWorker<SupplierDelaysJob>('supplier-delays', async (job) => {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error('DATABASE_URL is required');
-    const db = createDb(url);
+    const db = jobDb(url);
 
     const now = job.data.forDate ? new Date(job.data.forDate) : new Date();
     const startToday = startOfIlDay(now);
