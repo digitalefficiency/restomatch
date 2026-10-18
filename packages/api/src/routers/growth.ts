@@ -201,6 +201,29 @@ export const growthRouter = router({
       if (referrerId === restaurantId) {
         throw appError('BAD_REQUEST', 'growth.referralSelf', 'אי אפשר לממש את קוד ההפניה של עצמך');
       }
+      // Anti-abuse: the same people on both sides (an owner opening a second
+      // restaurant to refer themselves) and A↔B swaps between two new
+      // restaurants are not referrals. Membership overlap is checked on the owner
+      // connection (read-only; RLS hides the other tenant's memberships).
+      const overlap = (await (ctx.adminDb ?? ctx.db).execute(sql`
+        select 1 from memberships a join memberships b on b.user_id = a.user_id
+        where a.restaurant_id = ${restaurantId} and b.restaurant_id = ${referrerId} limit 1`)) as unknown as unknown[];
+      if (overlap.length > 0) {
+        throw appError('BAD_REQUEST', 'growth.referralSelf', 'אי אפשר לממש קוד הפניה של מסעדה שאתם חברים בה');
+      }
+      const [mutual] = await ctx.db
+        .select({ id: referralRedemptions.id })
+        .from(referralRedemptions)
+        .where(
+          and(
+            eq(referralRedemptions.referrerRestaurantId, restaurantId),
+            eq(referralRedemptions.referredRestaurantId, referrerId),
+          ),
+        )
+        .limit(1);
+      if (mutual) {
+        throw appError('BAD_REQUEST', 'growth.referralSelf', 'אי אפשר להפנות הדדית');
+      }
       const inserted = await ctx.db
         .insert(referralRedemptions)
         .values({ code, referrerRestaurantId: referrerId, referredRestaurantId: restaurantId })

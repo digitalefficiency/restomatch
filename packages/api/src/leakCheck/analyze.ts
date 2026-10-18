@@ -5,10 +5,9 @@
  * receipt, over a prospect's sample of up to 10 invoices (plus, optionally,
  * their price list):
  *
- *   duplicate_invoice  same supplier + same invoice number (a re-sent bill)
  *   vat_overcharge     VAT billed above 18% of the subtotal
  *   line_arithmetic    printed line total above unit price × quantity
- *   total_arithmetic   printed subtotal above Σ lines, or total above subtotal + VAT
+ *   total_arithmetic   printed total above subtotal + VAT
  *   price_creep        a product billed above the price the SAME supplier billed
  *                      for it on an earlier invoice in the sample
  *   above_price_list   a product billed above the prospect's own price list
@@ -18,8 +17,16 @@
  *   - only OVERCHARGES count toward the leak — an error in the restaurant's
  *     favour is shown, never added;
  *   - the same file uploaded twice is ignored (a prospect's mistake, not a
- *     supplier's), and a duplicate invoice is excluded from every other check
- *     so one bill is never counted twice;
+ *     supplier's);
+ *   - a re-sent invoice (same supplier + number) is NOT counted: it is money at
+ *     risk only if both copies get paid, and two photos of one paper invoice
+ *     look exactly the same. It is shown as a "possible duplicate" note with
+ *     its amount, and excluded from every other check so one bill is never
+ *     analysed twice;
+ *   - a subtotal above Σ lines is a note, not a leak (delivery fees and
+ *     surcharges are often printed outside the line table);
+ *   - lines with a negative quantity / price / total (returns, credits) are
+ *     skipped — OCR often drops the minus sign;
  *   - a line gets at most ONE price finding (the price list wins over creep);
  *   - small rounding noise (≤ ₪1) is never a finding.
  *
@@ -67,7 +74,6 @@ export interface PriceListEntry {
 }
 
 export type LeakFindingKind =
-  | 'duplicate_invoice'
   | 'vat_overcharge'
   | 'line_arithmetic'
   | 'total_arithmetic'
@@ -84,17 +90,17 @@ export interface LeakFinding {
   /** What it should have been and what was billed, integer agorot or price units. */
   expectedAgorot: number;
   actualAgorot: number;
-  /** For duplicate/creep: the earlier invoice (and line) it is compared to. */
+  /** For creep: the earlier invoice (and line) it is compared to. */
   refInvoiceIndex?: number;
   refLineIndex?: number;
   /** total_arithmetic: which printed figure is off. */
-  field?: 'subtotal' | 'total';
+  field?: 'total';
   /** price findings: quantity the per-unit delta is multiplied by. */
   qty?: number;
 }
 
 export interface LeakNote {
-  kind: 'same_file_twice' | 'undercharge';
+  kind: 'same_file_twice' | 'undercharge' | 'possible_duplicate' | 'subtotal_mismatch';
   invoiceIndex: number;
   refInvoiceIndex?: number;
   lineIndex?: number | null;
@@ -212,18 +218,12 @@ export function analyzeLeakCheck(
     const key = `${supplierKey(inv)}#${number}`;
     const first = byNumber.get(key);
     if (first) {
-      const total = toAgorot(inv.total ?? 0);
-      if (total > 0) {
-        findings.push({
-          kind: 'duplicate_invoice',
-          invoiceIndex: inv.index,
-          lineIndex: null,
-          amountAgorot: total,
-          expectedAgorot: 0,
-          actualAgorot: total,
-          refInvoiceIndex: first.index,
-        });
-      }
+      notes.push({
+        kind: 'possible_duplicate',
+        invoiceIndex: inv.index,
+        refInvoiceIndex: first.index,
+        amountAgorot: toAgorot(inv.total ?? inv.subtotal ?? 0),
+      });
       excluded.add(inv.index);
       continue;
     }
@@ -236,6 +236,7 @@ export function analyzeLeakCheck(
   for (const inv of analysed) {
     let printedLinesAgorot = 0;
     inv.lines.forEach((line, lineIndex) => {
+      if (line.qty < 0 || line.unitPrice < 0 || line.lineTotal < 0) return;
       const expected = lineAmountAgorot(line.unitPrice, line.qty);
       const actual = toAgorot(line.lineTotal);
       printedLinesAgorot += actual;
@@ -258,15 +259,7 @@ export function analyzeLeakCheck(
       const subtotal = toAgorot(inv.subtotal);
       const delta = subtotal - printedLinesAgorot;
       if (delta > ARITHMETIC_TOLERANCE_AGOROT) {
-        findings.push({
-          kind: 'total_arithmetic',
-          field: 'subtotal',
-          invoiceIndex: inv.index,
-          lineIndex: null,
-          amountAgorot: delta,
-          expectedAgorot: printedLinesAgorot,
-          actualAgorot: subtotal,
-        });
+        notes.push({ kind: 'subtotal_mismatch', invoiceIndex: inv.index, amountAgorot: delta });
       }
     }
 
@@ -309,7 +302,7 @@ export function analyzeLeakCheck(
   for (const inv of [...analysed].sort(chronological)) {
     const sk = supplierKey(inv);
     inv.lines.forEach((line, lineIndex) => {
-      if (!(line.qty > 0) || !(line.unitPrice > 0)) return;
+      if (!(line.qty > 0) || !(line.unitPrice > 0) || line.lineTotal < 0) return;
       const billed = lineAmountAgorot(line.unitPrice, line.qty);
 
       const listed = priceList.length ? findListPrice(line, priceList) : null;

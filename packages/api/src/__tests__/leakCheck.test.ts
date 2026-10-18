@@ -55,21 +55,38 @@ describe('analyzeLeakCheck — every number traceable, agorot-exact', () => {
     expect(creep).toMatchObject({ refInvoiceIndex: 0, refLineIndex: 0, expectedAgorot: 13000, actualAgorot: 14400, qty: 20 });
   });
 
-  it('a re-sent invoice (same supplier + number) is one duplicate and is excluded from every other check', () => {
+  it('a re-sent invoice (same supplier + number) is a "possible duplicate" note — never added to the leak', () => {
     const r = analyzeLeakCheck(sampleInvoices(5));
-    const dup = r.findings.find((f) => f.kind === 'duplicate_invoice')!;
-    expect(dup).toMatchObject({ invoiceIndex: 4, refInvoiceIndex: 2, amountAgorot: 46656 });
-    // The duplicate's own VAT overcharge is NOT counted a second time.
+    expect(r.findings.some((f) => (f.kind as string) === 'duplicate_invoice')).toBe(false);
+    expect(r.notes).toContainEqual({ kind: 'possible_duplicate', invoiceIndex: 4, refInvoiceIndex: 2, amountAgorot: 46656 });
+    // Excluded from every other check: its VAT overcharge is not counted again.
     expect(r.findings.filter((f) => f.kind === 'vat_overcharge')).toHaveLength(1);
-    expect(r.leakAgorot).toBe(3778 + 46656);
+    expect(r.leakAgorot).toBe(3778);
+    expect(r.spendAgorot).toBe(153894);
     expect(r.analysedInvoices).toBe(4);
+  });
+
+  it('two photos of one paper invoice never report the whole invoice as leak', () => {
+    const [a] = sampleInvoices(1);
+    const r = analyzeLeakCheck([a!, { ...a!, index: 1, fileHash: 'other-photo' }]);
+    expect(r.leakAgorot).toBe(0);
+    expect(r.notes[0]).toMatchObject({ kind: 'possible_duplicate' });
+  });
+
+  it('returns / credit lines (negative values) are skipped, not flagged', () => {
+    const inv: LeakCheckInvoice = {
+      index: 0, fileName: 'a', fileHash: 'h', supplierName: 'X', supplierBusinessId: null,
+      invoiceNumber: '1', invoiceDate: null, subtotal: null, vat: null, total: null,
+      lines: [{ description: 'return', qty: -10, unit: 'kg', unitPrice: 10, lineTotal: 100 }],
+    };
+    expect(analyzeLeakCheck([inv]).findings).toEqual([]);
   });
 
   it('the same FILE uploaded twice is a note, never a leak', () => {
     const inv = sampleInvoices(3);
     inv.push({ ...inv[2]!, index: 3, fileHash: inv[2]!.fileHash });
     const r = analyzeLeakCheck(inv);
-    expect(r.findings.some((f) => f.kind === 'duplicate_invoice')).toBe(false);
+    expect(r.findings.some((f) => (f.kind as string) === 'duplicate_invoice')).toBe(false);
     expect(r.notes).toContainEqual({ kind: 'same_file_twice', invoiceIndex: 3, refInvoiceIndex: 2 });
   });
 
@@ -108,17 +125,15 @@ describe('analyzeLeakCheck — every number traceable, agorot-exact', () => {
     expect(r.notes).toContainEqual({ kind: 'undercharge', invoiceIndex: 0, lineIndex: 1, amountAgorot: 950 });
   });
 
-  it('flags a subtotal above Σ lines and a total above subtotal + VAT', () => {
+  it('flags a total above subtotal + VAT; a subtotal above Σ lines (fees) is only a note', () => {
     const inv: LeakCheckInvoice = {
       index: 0, fileName: 'a', fileHash: 'h', supplierName: 'X', supplierBusinessId: null,
       invoiceNumber: '1', invoiceDate: null, subtotal: 110, vat: 19.8, total: 140,
       lines: [{ description: 'a', qty: 1, unit: 'kg', unitPrice: 100, lineTotal: 100 }],
     };
     const r = analyzeLeakCheck([inv]);
-    expect(r.findings.map((f) => [f.kind, f.field, f.amountAgorot])).toEqual([
-      ['total_arithmetic', 'total', 1020],
-      ['total_arithmetic', 'subtotal', 1000],
-    ]);
+    expect(r.findings.map((f) => [f.kind, f.field, f.amountAgorot])).toEqual([['total_arithmetic', 'total', 1020]]);
+    expect(r.notes).toContainEqual({ kind: 'subtotal_mismatch', invoiceIndex: 0, amountAgorot: 1000 });
   });
 
   it('price creep compares the same supplier only', () => {

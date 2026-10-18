@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createDb, eq, leads, leakCheckOcrUsage, leakCheckSessions, testDbUrl } from '@restomatch/db';
 import { leakCheck as lc } from '@restomatch/api';
-import { handleChallenge, handleLead, handleSubmit } from '@/lib/leakCheck/handlers';
+import { GLOBAL_SUBMIT_LIMIT, handleChallenge, handleLead, handleSubmit } from '@/lib/leakCheck/handlers';
+import { enforceRateLimit } from '@/lib/rateLimit';
 
 /**
  * LEAK-CHECK PUBLIC-ROUTE ATTACK SUITE (S15 wave 1).
@@ -25,6 +26,19 @@ function post(path: string, body: BodyInit | null, ip: string, headers: Record<s
   });
 }
 
+/** Serialize like a browser does: multipart bytes WITH a content-length. */
+async function postForm(path: string, fd: FormData, ip: string) {
+  const r = new Response(fd);
+  const buf = await r.arrayBuffer();
+  return post(path, buf, ip, {
+    'content-type': r.headers.get('content-type')!,
+    'content-length': String(buf.byteLength),
+  });
+}
+
+const postJson = (path: string, json: string, ip: string) =>
+  post(path, json, ip, { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(json)) });
+
 async function solvedChallenge(ip: string) {
   const res = await handleChallenge(post('/api/leak-check/challenge', null, ip));
   expect(res.status).toBe(200);
@@ -45,7 +59,7 @@ async function submitForm(
   fd.set('powNonce', pow.nonce);
   if (opts.honeypot) fd.set('website', opts.honeypot);
   for (const f of opts.files ?? [pdfFile('a'), pdfFile('b')]) fd.append('invoices', f);
-  return handleSubmit(post('/api/leak-check/submit', fd, ip));
+  return handleSubmit(await postForm('/api/leak-check/submit', fd, ip));
 }
 
 beforeAll(async () => {
@@ -71,7 +85,7 @@ describe('leak-check public routes — attack suite', () => {
       const ip = nextIp();
       expect((await handleChallenge(post('/api/leak-check/challenge', null, ip))).status).toBe(404);
       expect((await handleSubmit(post('/api/leak-check/submit', new FormData(), ip))).status).toBe(404);
-      expect((await handleLead(post('/api/leak-check/lead', '{}', ip))).status).toBe(404);
+      expect((await handleLead(postJson('/api/leak-check/lead', '{}', ip))).status).toBe(404);
       delete process.env.FEATURES_OFF;
     }
   });
@@ -140,13 +154,13 @@ describe('leak-check public routes — attack suite', () => {
 
   it('book-a-demo: forged links are refused; a valid link creates ONE lead, never more', async () => {
     const ip = nextIp();
-    const forged = await handleLead(post('/api/leak-check/lead', JSON.stringify({ token: 'x.y.z' }), ip));
+    const forged = await handleLead(postJson('/api/leak-check/lead', JSON.stringify({ token: 'x.y.z' }), ip));
     expect(forged.status).toBe(400);
     const email = `lead${ipSeq}@test.local`;
     const res = await submitForm(nextIp(), { email });
     const { token } = (await res.json()) as { token: string };
     for (let i = 0; i < 2; i++) {
-      const r = await handleLead(post('/api/leak-check/lead', JSON.stringify({ token, phone: '050-0000000' }), ip));
+      const r = await handleLead(postJson('/api/leak-check/lead', JSON.stringify({ token, phone: '050-0000000' }), ip));
       expect(r.status).toBe(200);
     }
     const rows = await db.select().from(leads).where(eq(leads.email, email));
@@ -159,4 +173,26 @@ describe('leak-check public routes — attack suite', () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(Object.keys(body).sort()).toEqual(['ok', 'token']);
   });
+  it('a chunked body without content-length is refused before parsing (411)', async () => {
+    const res = await handleSubmit(post('/api/leak-check/submit', new FormData(), nextIp()));
+    expect(res.status).toBe(411);
+  });
+
+  it('production fails CLOSED when the proxy depth is undeclared (spoofable X-Forwarded-For)', async () => {
+    const env = process.env as Record<string, string | undefined>;
+    const prev = env.NODE_ENV;
+    env.NODE_ENV = 'production';
+    delete env.TRUSTED_PROXY_HOPS;
+    try {
+      expect((await handleChallenge(post('/api/leak-check/challenge', null, nextIp()))).status).toBe(503);
+    } finally {
+      env.NODE_ENV = prev;
+    }
+  });
+
+  it('the site-wide hourly cap stops a many-IP drain of the OCR budget', async () => {
+    for (let i = 0; i < GLOBAL_SUBMIT_LIMIT.limit; i++) await enforceRateLimit('all', GLOBAL_SUBMIT_LIMIT);
+    expect((await submitForm(nextIp())).status).toBe(503);
+  });
+
 });

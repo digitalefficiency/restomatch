@@ -28,6 +28,13 @@ export const LIMITS = {
   lead: { limit: 10, windowSec: 60 * 60, prefix: 'lc-lead' },
 } as const;
 
+/**
+ * Site-wide cap on submissions per hour, independent of who asks: even an
+ * attacker with many real IPs can drain at most one hour's slice of the daily
+ * OCR budget before real prospects get through again.
+ */
+export const GLOBAL_SUBMIT_LIMIT = { limit: 40, windowSec: 60 * 60, prefix: 'lc-submit-global' } as const;
+
 const json = (body: unknown, status = 200, headers?: Record<string, string>) =>
   NextResponse.json(body, { status, headers: { 'cache-control': 'no-store', ...headers } });
 
@@ -37,6 +44,13 @@ const fail = (error: string, status: number, headers?: Record<string, string>) =
 /** Shared preamble. Returns a Response to short-circuit, or the client IP. */
 async function guard(req: Request, limit: (typeof LIMITS)[keyof typeof LIMITS]): Promise<Response | string> {
   if (!lc.leakCheckPublicEnabled()) return fail('not_found', 404);
+  // Per-IP limits are meaningless on a spoofable left-most X-Forwarded-For.
+  // In production this spend surface fails CLOSED until the proxy depth is
+  // declared (TRUSTED_PROXY_HOPS=1 on Vercel).
+  if (process.env.NODE_ENV === 'production' && trustedProxyHops() === 0) {
+    console.error('[leak-check] TRUSTED_PROXY_HOPS is not set — refusing (per-IP limits would be spoofable)');
+    return fail('unavailable', 503);
+  }
   if (
     req.method !== 'POST' ||
     !isOriginAllowed({
@@ -95,13 +109,19 @@ export async function handleSubmit(req: Request): Promise<Response> {
   if (!lc.leakCheckPublicEnabled()) return fail('not_found', 404);
   // Size cap BEFORE parsing — a missing/lying content-length is caught again
   // by the per-file and total checks in validateUploads.
-  const declared = Number(req.headers.get('content-length') ?? '0');
+  // A chunked body (no content-length) would be buffered whole by formData():
+  // browsers always send a length for FormData, so require one.
+  const lengthHeader = req.headers.get('content-length');
+  if (lengthHeader === null) return fail('length_required', 411);
+  const declared = Number(lengthHeader);
   if (!Number.isFinite(declared) || declared > lc.MAX_BODY_BYTES + 64 * 1024) {
     return fail('body_too_large', 413);
   }
   const g = await guard(req, LIMITS.submitIp);
   if (typeof g !== 'string') return g;
   const ip = g;
+  const global = await enforceRateLimit('all', GLOBAL_SUBMIT_LIMIT);
+  if (!global.allowed) return fail('budget_exhausted', 503, { 'retry-after': String(global.resetSec) });
 
   const secret = secretOr503();
   if (typeof secret !== 'string') return secret;
@@ -167,8 +187,9 @@ export async function handleSubmit(req: Request): Promise<Response> {
 }
 
 export async function handleLead(req: Request): Promise<Response> {
-  const declared = Number(req.headers.get('content-length') ?? '0');
-  if (Number.isFinite(declared) && declared > 4096) return fail('body_too_large', 413);
+  const lengthHeader = req.headers.get('content-length');
+  if (lengthHeader === null) return fail('length_required', 411);
+  if (!(Number(lengthHeader) <= 4096)) return fail('body_too_large', 413);
   const g = await guard(req, LIMITS.lead);
   if (typeof g !== 'string') return g;
   const secret = secretOr503();

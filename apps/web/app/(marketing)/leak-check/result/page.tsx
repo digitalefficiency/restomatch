@@ -57,20 +57,12 @@ export default async function LeakCheckResultPage({ searchParams }: { searchPara
     const line = f.lineIndex !== null ? inv(f.invoiceIndex)?.lines[f.lineIndex] : undefined;
     const desc = line?.description ?? '';
     switch (f.kind) {
-      case 'duplicate_invoice': {
-        const i = inv(f.invoiceIndex);
-        return t('result.kinds.duplicate_invoice', {
-          number: i?.invoiceNumber ?? '',
-          supplier: i?.supplierName ?? '',
-          ref: (f.refInvoiceIndex ?? 0) + 1,
-        });
-      }
       case 'vat_overcharge':
         return t('result.kinds.vat_overcharge', { actual: ils(f.actualAgorot), expected: ils(f.expectedAgorot) });
       case 'line_arithmetic':
         return t('result.kinds.line_arithmetic', { desc, actual: ils(f.actualAgorot), expected: ils(f.expectedAgorot) });
       case 'total_arithmetic':
-        return t(f.field === 'total' ? 'result.kinds.total_arithmetic_total' : 'result.kinds.total_arithmetic_subtotal', {
+        return t('result.kinds.total_arithmetic_total', {
           actual: ils(f.actualAgorot),
           expected: ils(f.expectedAgorot),
         });
@@ -189,11 +181,21 @@ export default async function LeakCheckResultPage({ searchParams }: { searchPara
               <li key={i}>
                 {n.kind === 'same_file_twice'
                   ? t('result.notes.same_file_twice', { n: n.invoiceIndex + 1, ref: (n.refInvoiceIndex ?? 0) + 1 })
-                  : t('result.notes.undercharge', {
-                      n: n.invoiceIndex + 1,
-                      line: (n.lineIndex ?? 0) + 1,
-                      amount: ils(n.amountAgorot ?? 0),
-                    })}
+                  : n.kind === 'possible_duplicate'
+                    ? t('result.notes.possible_duplicate', {
+                        n: n.invoiceIndex + 1,
+                        ref: (n.refInvoiceIndex ?? 0) + 1,
+                        number: inv(n.invoiceIndex)?.invoiceNumber ?? '',
+                        supplier: inv(n.invoiceIndex)?.supplierName ?? '',
+                        amount: ils(n.amountAgorot ?? 0),
+                      })
+                    : n.kind === 'subtotal_mismatch'
+                      ? t('result.notes.subtotal_mismatch', { n: n.invoiceIndex + 1, amount: ils(n.amountAgorot ?? 0) })
+                      : t('result.notes.undercharge', {
+                          n: n.invoiceIndex + 1,
+                          line: (n.lineIndex ?? 0) + 1,
+                          amount: ils(n.amountAgorot ?? 0),
+                        })}
               </li>
             ))}
             {report.ocrFailures > 0 ? <li>{t('result.notes.ocrFailures', { n: report.ocrFailures })}</li> : null}

@@ -21,6 +21,7 @@ import {
   restaurants,
   supplierCatalogItems,
   suppliers,
+  users,
 } from '@restomatch/db';
 import type { RestaurantSettings } from '@restomatch/db';
 import { appRouter } from '../index';
@@ -1498,6 +1499,7 @@ describe('leakCheck.* sandbox carry-over isolation', () => {
   const SECRET = 'cross-tenant-leak-check-secret-0123456789';
   let tokenB = '';
   let tokenFree = '';
+  let tokenStranger = '';
 
   beforeAll(async () => {
     process.env.LEAK_CHECK_SECRET = SECRET;
@@ -1510,9 +1512,13 @@ describe('leakCheck.* sandbox carry-over isolation', () => {
     const { runLeakCheck } = await import('../leakCheck');
     const pdf = (n: number) => ({ name: `inv-${n}.pdf`, bytes: Buffer.from(`%PDF-1.4 cross-tenant sample ${n}`) });
     const deps = { mode: 'stub' as const, secret: SECRET, dailyOcrBudget: 10_000 };
-    const req = { email: 'prospect@test.local', locale: 'he' as const, ip: '203.0.113.9' };
-    tokenB = (await runLeakCheck(db, { ...req, invoices: [pdf(1), pdf(2)] }, deps)).token;
-    tokenFree = (await runLeakCheck(db, { ...req, invoices: [pdf(3)] }, deps)).token;
+    const emailOf = async (t: Tenant) =>
+      (await db.select({ email: users.email }).from(users).where(eq(users.id, t.ownerUserId)))[0]!.email!;
+    const [emailA, emailB] = [await emailOf(A), await emailOf(B)];
+    const req = { locale: 'he' as const, ip: '203.0.113.9' };
+    tokenB = (await runLeakCheck(db, { ...req, email: emailB, invoices: [pdf(1), pdf(2)] }, deps)).token;
+    tokenFree = (await runLeakCheck(db, { ...req, email: emailA, invoices: [pdf(3)] }, deps)).token;
+    tokenStranger = (await runLeakCheck(db, { ...req, email: 'stranger@test.local', invoices: [pdf(4)] }, deps)).token;
   });
 
   it('leakCheck.claim rejects a forged / tampered link', async () => {
@@ -1521,6 +1527,10 @@ describe('leakCheck.* sandbox carry-over isolation', () => {
     await expect(
       callerFor(A).leakCheck.claim({ token: '00000000-0000-4000-8000-000000000000.9999999999.x' }),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('leakCheck.claim refuses a valid link run with someone else’s email (a leaked link is not enough)', async () => {
+    await expect(callerFor(A).leakCheck.claim({ token: tokenStranger })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 
   it('leakCheck.claim never re-points a session another restaurant claimed', async () => {

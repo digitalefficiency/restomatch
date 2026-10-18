@@ -47,7 +47,7 @@ export function ChainPricing({ chain, perBranchAgorot, includedBranches, basic, 
   // What THIS chain pays per branch (display only, half-up to the agora) — the
   // ₪298 list price is only reached at the included branch count, so never
   // show it as the per-branch price of a smaller chain.
-  const effectivePerBranchAgorot = Math.round(q.perMonthDisplayAgorot / branches);
+  const effectivePerBranchAgorot = Math.round(q.chargeAgorot / ((cycle === 'annual' ? 12 : 1) * branches));
   const branchesText = branches === 1 ? t('pricing.branchOne') : t('pricing.branchesValue', { n: formatNumber(branches, locale) });
 
   return (

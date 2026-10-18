@@ -10,7 +10,8 @@
  *   #1017 onions    line   printed 44.00 vs 10 × 4.00 = ₪4.00
  *   #5502 VAT       77.76 vs 18% × 388.80 = 69.98 → ₪7.78
  *   #5530 cream     creep  12 L × (15.90 − 14.90) = ₪12.00
- *   → ₪37.78. The 5th file is a re-sent #5502 → duplicate ₪466.56.
+ *   → ₪37.78. The 5th file is a re-sent #5502 → a "possible duplicate" note
+ *   (₪466.56 at risk if paid twice) — never added to the leak.
  */
 import type { InvoiceOcrResult, NormalizedPurchaseOrder } from '@restomatch/types';
 

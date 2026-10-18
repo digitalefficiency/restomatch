@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { eq, restaurants, type Database } from '@restomatch/db';
+import { eq, restaurants, users, type Database } from '@restomatch/db';
 import { appError } from '../errors';
 import { featureEnabled } from '../lib/features';
 import {
@@ -39,7 +39,14 @@ export const leakCheckRouter = router({
       if (!sessionId) {
         throw appError('BAD_REQUEST', 'leakCheck.invalidLink', 'הקישור לבדיקת הדליפה פג תוקף או אינו תקין');
       }
-      const ok = await claimLeakCheck(ctx.adminDb ?? ctx.db, sessionId, ctx.session.restaurantId);
+      const [me] = await ctx.db
+        .select({ email: users.email })
+        .from(users)
+        .where(eq(users.id, ctx.session.userId))
+        .limit(1);
+      const ok = me?.email
+        ? await claimLeakCheck(ctx.adminDb ?? ctx.db, sessionId, ctx.session.restaurantId, me.email)
+        : false;
       if (!ok) {
         throw appError('BAD_REQUEST', 'leakCheck.invalidLink', 'הקישור לבדיקת הדליפה פג תוקף או אינו תקין');
       }

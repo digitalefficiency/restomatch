@@ -5,6 +5,7 @@ import {
   createDb,
   ensureRlsAppRole,
   eq,
+  memberships,
   PLAN_SEED,
   referralCodes,
   referralRedemptions,
@@ -253,5 +254,34 @@ describe('RLS backstop (raw SQL as restomatch_app)', () => {
       tx.execute(sql`select app.resolve_referral_code(${codeRowA!.code}) as id`),
     )) as unknown as Array<{ id: string }>;
     expect(res[0]?.id).toBe(A.restaurantId);
+  });
+});
+
+describe('referral anti-abuse (refuter findings)', () => {
+  it('an owner cannot refer their own second restaurant, and two restaurants cannot refer each other', async () => {
+    const D = await seedTenant(ownerDb, 'AbuseD');
+    const E = await seedTenant(ownerDb, 'AbuseE');
+    const F = await seedTenant(ownerDb, 'AbuseF');
+    const G = await seedTenant(ownerDb, 'AbuseG');
+    for (const t of [D, E, F, G]) await enableGrowth(t);
+
+    // D's owner opens a second restaurant (E) and tries to redeem D's code there.
+    await ownerDb.insert(memberships).values({ userId: D.ownerUserId, restaurantId: E.restaurantId, role: 'owner' });
+    const { code: codeD } = await callerFor(D).growth.myReferral();
+    const asDOwnerInE = appRouter.createCaller({
+      db: ownerDb,
+      session: { userId: D.ownerUserId, restaurantId: E.restaurantId, role: 'owner' },
+    });
+    await expect(asDOwnerInE.growth.redeemReferral({ code: codeD })).rejects.toMatchObject({
+      cause: { appCode: 'growth.referralSelf' },
+    });
+
+    // F redeems G's code; G may not then redeem F's (an A↔B swap).
+    const { code: codeG } = await callerFor(G).growth.myReferral();
+    const { code: codeF } = await callerFor(F).growth.myReferral();
+    await expect(callerFor(F).growth.redeemReferral({ code: codeG })).resolves.toMatchObject({ ok: true });
+    await expect(callerFor(G).growth.redeemReferral({ code: codeF })).rejects.toMatchObject({
+      cause: { appCode: 'growth.referralSelf' },
+    });
   });
 });

@@ -317,13 +317,16 @@ export async function markLeadRequested(
 
 /**
  * Attach a sandbox session to the restaurant that signed up from it ("start a
- * trial with the data carried over"). First claim wins; a session already
- * claimed by another restaurant is never re-pointed.
+ * trial with the data carried over"). Only a user signed in with the email the
+ * check was run with may claim it (a leaked link is not enough), first claim
+ * wins, and a session claimed by another restaurant is never re-pointed.
  */
 export async function claimLeakCheck(
   db: Database,
   sessionId: string,
   restaurantId: string,
+  /** The signed-in user's email: only the prospect who ran the check may claim it. */
+  userEmail: string,
 ): Promise<boolean> {
   const rows = await db
     .update(leakCheckSessions)
@@ -332,6 +335,7 @@ export async function claimLeakCheck(
       and(
         eq(leakCheckSessions.id, sessionId),
         gt(leakCheckSessions.expiresAt, new Date()),
+        sql`lower(${leakCheckSessions.email}) = lower(${userEmail})`,
         sql`(${leakCheckSessions.claimedRestaurantId} is null or ${leakCheckSessions.claimedRestaurantId} = ${restaurantId})`,
       ),
     )
