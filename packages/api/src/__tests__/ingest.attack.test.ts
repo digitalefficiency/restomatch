@@ -479,6 +479,16 @@ describe('E-mail webhook — attacks', () => {
       const [d] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.messageId, m!.id));
       // Metadata only: kept for review, but no blob stored and no OCR.
       expect(d).toMatchObject({ status: 'needs_review', error: 'quota_exceeded', storagePath: null, invoiceId: null });
+      // An allow-listed sender (here: unauthenticated e-mail → needs review) is NOT starved by the quota.
+      const allowed = await handleEmailWebhook(
+        emailRequest(emailBody({ id: 'em_quota_allowed', to: `${tokens.aEmail}@in.test` })),
+        deps({ config: emailConfig() }),
+      );
+      expect(allowed.status).toBe(200);
+      const [ma] = (await messagesOf(A.restaurantId)).filter((x) => x.providerMessageId === 'em_quota_allowed');
+      const [da] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.messageId, ma!.id));
+      expect(da).toMatchObject({ status: 'needs_review', error: null });
+      expect(da!.storagePath).not.toBeNull();
       // Allow-listed WhatsApp (auto-registered → OCR) is not subject to the review quota.
       const ok = await handleWhatsAppWebhook(waRequest(tokens.aWa, waBody({ id: 'wamid.quota-ok' })), tokens.aWa, deps({ config: waConfig() }));
       expect(((await ok.json()) as { results: Array<{ outcome: string }> }).results[0]!.outcome).toBe('accepted');

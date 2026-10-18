@@ -39,10 +39,33 @@ export interface InboundMessage {
 
 export type AuthVerdict = 'pass' | 'fail' | 'none';
 
+/** Remove RFC 5322 comments `( … )` (nested) and quoted strings — attacker-controlled free text. */
+function stripCommentsAndQuotes(v: string): string {
+  let out = '';
+  let depth = 0;
+  let quoted = false;
+  for (let i = 0; i < v.length; i++) {
+    const c = v[i]!;
+    if (c === '\\') {
+      i++; // escaped char inside a comment/quote never counts
+      continue;
+    }
+    if (!quoted && c === '(') depth++;
+    else if (!quoted && c === ')' && depth > 0) depth--;
+    else if (depth === 0 && c === '"') quoted = !quoted;
+    else if (depth === 0 && !quoted) out += c;
+  }
+  return out;
+}
+
 /**
  * RFC 8601 Authentication-Results → verdict. ONLY a header stamped with our
- * provider's authserv-id counts (a sender can forge any other); it must report
- * dmarc=pass, or spf=pass + dkim=pass; any fail/softfail → 'fail'.
+ * provider's authserv-id counts (a sender can forge any other). The value is
+ * parsed per `;`-separated resinfo with comments and quoted strings removed,
+ * and only each resinfo's LEADING `method=result` is read — never a property
+ * value like `smtp.mailfrom=dmarc=pass@evil.example`. Only `dmarc=pass` is
+ * trusted: DMARC is, by definition, aligned with the From domain the allow-list
+ * keys on (SPF/DKIM alone may pass for the attacker's own domain).
  */
 export function authVerdictFromHeaders(
   headers: Array<{ name: string; value: string }>,
@@ -50,17 +73,19 @@ export function authVerdictFromHeaders(
 ): AuthVerdict {
   if (!trustedAuthServId) return 'none';
   const id = trustedAuthServId.trim().toLowerCase();
-  const ours = headers.filter(
-    (h) => h.name.toLowerCase() === 'authentication-results' && h.value.trim().toLowerCase().split(/[;\s]/)[0] === id,
-  );
+  const ours = headers
+    .filter((h) => h.name.toLowerCase() === 'authentication-results')
+    .map((h) => stripCommentsAndQuotes(h.value.toLowerCase()).split(';').map((p) => p.trim()))
+    .filter((parts) => parts[0]!.split(/\s+/)[0] === id);
   if (ours.length !== 1) return 'none'; // missing or ambiguous → no trust
-  const v = ours[0]!.value.toLowerCase();
-  const res = (m: string) => new RegExp(`\\b${m}=([a-z]+)`).exec(v)?.[1] ?? null;
-  const spf = res('spf');
-  const dkim = res('dkim');
-  const dmarc = res('dmarc');
-  if ([spf, dkim, dmarc].some((r) => r === 'fail' || r === 'softfail' || r === 'permerror')) return 'fail';
-  if (dmarc === 'pass' || (spf === 'pass' && dkim === 'pass')) return 'pass';
+  const dmarc = ours[0]!
+    .slice(1)
+    .map((r) => /^([a-z0-9-]+)\s*=\s*([a-z]+)(?:\s|$)/.exec(r))
+    .filter((m): m is RegExpExecArray => m !== null && m[1] === 'dmarc')
+    .map((m) => m[2]!);
+  if (dmarc.length !== 1) return 'none';
+  if (dmarc[0] === 'pass') return 'pass';
+  if (dmarc[0] === 'fail' || dmarc[0] === 'permerror') return 'fail';
   return 'none';
 }
 
