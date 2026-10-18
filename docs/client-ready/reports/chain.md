@@ -226,4 +226,27 @@ toolbar changes).
 
 The server log showed 0 errors and no 5xx in every pass.
 
-**Layer 2(b):** an independent refuter (fresh agent, diff plus this evidence). See below.
+**Layer 2(b), independent refuter** (fresh agent, diff plus evidence): it found no isolation,
+authorization or double-counting hole.
+
+Confirmed and **fixed** in `15d3f11`:
+1. Labels still said "this month" after the panels started following the period. The copy is now
+   period-neutral (he + en).
+2. An empty comparison period showed "▲ the whole leak" per branch next to a "—" KPI. It now shows
+   no delta. A unit test and an attack test cover this.
+
+Also fixed: the heatmap no longer runs into future months.
+
+Minor findings, documented and not fixed:
+- About half of toolbar changes end up as a full reload through the fallback. The content always
+  matches a fresh load.
+- The fallback also fires for a soft navigation that is slow (> 1.2 s) but would have worked.
+- The heatmap uses the Asia/Jerusalem timezone rather than each branch's own.
+- The switcher puts the main branch first only because of name order.
+- The Layer-2 `waitForURL` checks can't tell a soft navigation from the fallback.
+
+**Final pass on `15d3f11`** (production build, fresh seed):
+- Layer 1 green: 13/13 tests (charts 69, api 533, web 246), typecheck 17/17, tsc 0, lint 0,
+  supabase-sync up to date.
+- Layer 2 **134/134** (`reports/chain-layer2-final.log`), with 0 console errors and 0 server errors.
+- Toolbar period changes went **6/6 on `/dashboard` and on `/dashboard/chain`, in he and in en**.

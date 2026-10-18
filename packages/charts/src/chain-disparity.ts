@@ -15,7 +15,7 @@ import { supplierMergeKey } from './chain';
  *   • same supplier = same business id (ח.פ) digits, else the same normalized name;
  *   • same product = the same supplier SKU (`sku`), else the same normalized
  *     product name AND the same unit (`name`);
- *   • a row needs ≥ 2 branches, a spread ≥ 3 % and ≥ ₪5 of monthly impact;
+ *   • a row needs ≥ 2 branches, a spread ≥ 3 % and ≥ ₪5 of impact in the period;
  *   • lines the engine flagged as a price error (PRICE_HIGHER/LOWER warn/block)
  *     are excluded — those are billing mistakes already in the leak figure.
  * Prices are compared as Σ line total ÷ Σ qty (agorot-exact sums).

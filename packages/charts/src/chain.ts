@@ -149,7 +149,10 @@ export async function computeBranchSnapshot(
     `),
   ]);
 
-  const endMonth = monthOfPeriodEnd(current.monthEnd);
+  // The heatmap ends with the period's last month, but never in the future.
+  const periodEndMonth = monthOfPeriodEnd(current.monthEnd);
+  const nowMonth = monthOfPeriodEnd(new Date((spec.now ?? new Date()).getTime() + 1).toISOString());
+  const endMonth = periodEndMonth < nowMonth ? periodEndMonth : nowMonth;
   const trend: BranchMonthPoint[] = [];
   for (let i = trendMonths - 1; i >= 0; i -= 1) {
     const m = shiftMonth(endMonth, -i);
@@ -289,11 +292,15 @@ export function aggregateChain(
     prevSpend += ag(s.previous?.spendIls ?? 0);
   }
 
+  // A comparison period with no checked spend and no leak has nothing to compare
+  // against: no delta (not "▲ the whole leak"), same as the KPI's null %.
+  const comparable = (p: BranchPeriodTotals | null): p is BranchPeriodTotals =>
+    p !== null && (p.spendIls > 0 || p.leakIls > 0);
   const ranked = [...snapshots].sort(
     (a, b) => b.leakIls - a.leakIls || (b.leakPct ?? 0) - (a.leakPct ?? 0) || a.name.localeCompare(b.name),
   );
   const branches: ChainBranchRow[] = ranked.map((s, i) => {
-    const p = s.previous;
+    const p = comparable(s.previous) ? s.previous : null;
     return {
       ...s,
       rank: i + 1,
