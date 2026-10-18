@@ -43,6 +43,18 @@ describe('0058 migration shape', () => {
     ]);
   });
 
+  it('enables row security with a per-restaurant tenant policy on both tables', async () => {
+    const rows = (await sql`
+      select c.relname, c.relrowsecurity, p.polname
+      from pg_class c left join pg_policy p on p.polrelid = c.oid
+      where c.relname in ('pos_sales', 'pos_sales_imports') order by c.relname
+    `) as unknown as Array<{ relname: string; relrowsecurity: boolean; polname: string }>;
+    expect(rows).toEqual([
+      { relname: 'pos_sales', relrowsecurity: true, polname: 'pos_sales_tenant' },
+      { relname: 'pos_sales_imports', relrowsecurity: true, polname: 'pos_sales_imports_tenant' },
+    ]);
+  });
+
   it('round-trips dates as strings and money/qty as NUMERIC strings', async () => {
     const imp = await newImport();
     const [row] = await db

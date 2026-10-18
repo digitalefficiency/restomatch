@@ -11,8 +11,12 @@
 --                    same day is never counted twice.
 -- Money is NUMERIC(12,2) shekels like the rest of the matching domain; qty is
 -- NUMERIC(12,3) (portions can be fractional, e.g. 0.5 kg by weight).
--- Both tables carry restaurant_id, so rls/0002 gives them the per-restaurant
--- tenant policy automatically (no RLS file change).
+-- Tenant isolation: rls/0002's allowlist is closed to wave-1 sessions, so this
+-- migration enables RLS and creates the same per-restaurant policy itself. The
+-- policy inlines the body of app.current_restaurant_id() (that function is
+-- created by rls/0002, which runs AFTER migrations on a fresh database), so it
+-- is identical in effect and needs nothing that doesn't exist yet. The app
+-- role's blanket table grants (src/rls.ts) cover the new tables.
 CREATE TABLE IF NOT EXISTS "pos_sales_imports" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE CASCADE,
@@ -40,4 +44,12 @@ CREATE TABLE IF NOT EXISTS "pos_sales" (
   CONSTRAINT "pos_sales_qty_check" CHECK ("qty" >= 0)
 );--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "pos_sales_day_item_idx" ON "pos_sales" ("restaurant_id", "sold_on", "item_ref");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "pos_sales_import_idx" ON "pos_sales" ("import_id");
+CREATE INDEX IF NOT EXISTS "pos_sales_import_idx" ON "pos_sales" ("import_id");--> statement-breakpoint
+ALTER TABLE "pos_sales_imports" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+DROP POLICY IF EXISTS "pos_sales_imports_tenant" ON "pos_sales_imports";--> statement-breakpoint
+CREATE POLICY "pos_sales_imports_tenant" ON "pos_sales_imports"
+  USING ("restaurant_id" = nullif(current_setting('app.current_restaurant_id', true), '')::uuid);--> statement-breakpoint
+ALTER TABLE "pos_sales" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+DROP POLICY IF EXISTS "pos_sales_tenant" ON "pos_sales";--> statement-breakpoint
+CREATE POLICY "pos_sales_tenant" ON "pos_sales"
+  USING ("restaurant_id" = nullif(current_setting('app.current_restaurant_id', true), '')::uuid);
