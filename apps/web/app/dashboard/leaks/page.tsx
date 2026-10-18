@@ -1,7 +1,11 @@
+import Link from 'next/link';
 import { TRPCError } from '@trpc/server';
-import { Droplets, ShieldAlert } from 'lucide-react';
+import { ArrowLeft, Droplets, ShieldAlert } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
+import { formatNumber, formatPercent } from '@/lib/i18n/format';
+import { getLocale, getT } from '@/lib/i18n/server';
+import { leaks as leaksNs } from '@/lib/i18n/messages/leaks';
 import {
   Badge,
   Card,
@@ -13,9 +17,11 @@ import {
   StatCard,
   entitlementCauseOf,
 } from '@/lib/components';
+import { displayName } from '../approvals/vocab';
 
 export default async function LeaksPage() {
   const caller = await createServerCaller();
+  const [t, locale] = await Promise.all([getT(leaksNs), getLocale()]);
   let leaks: Awaited<ReturnType<typeof caller.owner.leaks>> = [];
   let blocked: 'entitlement' | 'role' | null = null;
   try {
@@ -32,11 +38,21 @@ export default async function LeaksPage() {
     }
   }
 
+  const breakdownLink = (
+    <Link
+      href="/dashboard/leaks/breakdown"
+      className="inline-flex items-center gap-1 rounded-lg text-sm font-semibold text-primary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+    >
+      {t('detective.toBreakdown')}
+      <ArrowLeft className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
+    </Link>
+  );
+
   if (blocked === 'entitlement') {
     return (
       <div>
-        <SectionHeader level={1} title="בלש הדליפות" />
-        <EntitlementUpsell feature="advanced_analytics" title="שדרגו את המנוי כדי לפתוח את בלש הדליפות" />
+        <SectionHeader level={1} title={t('detective.title')} action={breakdownLink} />
+        <EntitlementUpsell feature="advanced_analytics" title={t('detective.upsell')} />
       </div>
     );
   }
@@ -44,80 +60,88 @@ export default async function LeaksPage() {
   if (blocked === 'role') {
     return (
       <div>
-        <SectionHeader level={1} title="בלש הדליפות" />
-        <Card
-          padding="md"
-          className="flex items-center gap-3 border-warn/30 bg-warn/5 text-warn"
-        >
+        <SectionHeader level={1} title={t('detective.title')} action={breakdownLink} />
+        <Card padding="md" className="flex items-center gap-3 border-warn/30 bg-warn/5 text-warn">
           <ShieldAlert className="h-5 w-5 shrink-0" aria-hidden="true" />
-          <span>רק לבעלי תפקיד "בעלים" יש גישה לבלש הדליפות.</span>
+          <span>{t('detective.roleOnly')}</span>
         </Card>
       </div>
     );
   }
 
-  const totalExcess = leaks.reduce((sum, r) => sum + r.monthExcessIls, 0);
-  const worst = leaks.reduce((m, r) => Math.max(m, r.deltaPct), 0);
+  const rows = leaks.map((l) => ({
+    ...l,
+    productName: displayName(locale, l.productName, l.productNameEn),
+    supplierName: displayName(locale, l.supplierName, l.supplierNameEn),
+  }));
+  const totalExcess = rows.reduce((sum, r) => sum + r.monthExcessIls, 0);
+  const worst = rows.reduce((m, r) => Math.max(m, r.deltaPct), 0);
+  const money = (v: number) => formatIls(v, { locale, maximumFractionDigits: 2 });
 
   return (
     <div>
       <SectionHeader
         level={1}
-        title="בלש הדליפות"
-        subtitle="מוצרים שבהם המחיר האחרון חורג מהגבול ה-90 ההיסטורי."
+        title={t('detective.title')}
+        subtitle={t('detective.subtitle')}
+        action={breakdownLink}
       />
 
-      {leaks.length === 0 ? (
+      {rows.length === 0 ? (
         <EmptyState
           icon={<Droplets className="h-6 w-6" />}
-          title="לא נמצאו דליפות פעילות"
-          description="נדרשים לפחות 3 דגימות מחיר לכל ספק לפני שה-baseline מחושב. המשך לקלוט חשבוניות והדליפות יתחילו לצוף."
+          title={t('detective.emptyTitle')}
+          description={t('detective.emptyDescription')}
         />
       ) : (
         <div className="space-y-8">
           {/* At-a-glance totals — money leaking this month, in danger. */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <StatCard
-              label="סה״כ דליפה החודש"
-              value={formatCurrency(totalExcess)}
+              label={t('detective.totalLabel')}
+              value={formatIls(totalExcess, { locale })}
               tone="danger"
               icon={<Droplets className="h-4 w-4" />}
-              hint="עודף מצטבר מעל ה-baseline על כל המוצרים"
+              hint={t('detective.totalHint')}
             />
             <StatCard
-              label="מוקדי דליפה פעילים"
-              value={leaks.length.toString()}
+              label={t('detective.hotspots')}
+              value={formatNumber(rows.length, locale)}
               tone="warn"
-              hint="צמדי מוצר×ספק שחורגים מהגבול"
+              hint={t('detective.hotspotsHint')}
             />
             <StatCard
-              label="החריגה הגבוהה ביותר"
-              value={`+${(worst * 100).toFixed(0)}%`}
+              label={t('detective.worst')}
+              value={<span dir="ltr">+{formatPercent(worst, locale, 0)}</span>}
               tone="danger"
-              hint="הקפיצה החדה ביותר מול ה-baseline"
+              hint={t('detective.worstHint')}
             />
           </div>
 
           {/* The signature glowing heatmap. */}
-          <LeakHeatmap items={leaks} />
+          <LeakHeatmap
+            items={rows}
+            locale={locale}
+            labels={{ mild: t('heatmap.mild'), severe: t('heatmap.severe'), more: t('heatmap.more') }}
+          />
 
-          {/* Full breakdown table. */}
-          <Card elevated padding="none" flow className="overflow-hidden">
-            <table className="w-full text-sm">
-              <caption className="sr-only">דליפות מחיר לפי מוצר וספק</caption>
+          {/* Full breakdown table — scrolls horizontally on phones. */}
+          <Card elevated padding="none" flow className="overflow-x-auto">
+            <table className="w-full min-w-[640px] text-sm">
+              <caption className="sr-only">{t('detective.caption')}</caption>
               <thead className="border-b border-line bg-surface-2 text-xs uppercase tracking-wider text-subtle">
                 <tr>
-                  <th scope="col" className="p-3 text-start font-semibold">מוצר</th>
-                  <th scope="col" className="p-3 text-start font-semibold">ספק</th>
-                  <th scope="col" className="p-3 text-start font-semibold">מחיר ממוצע</th>
-                  <th scope="col" className="p-3 text-start font-semibold">מחיר אחרון</th>
-                  <th scope="col" className="p-3 text-start font-semibold">שינוי</th>
-                  <th scope="col" className="p-3 text-start font-semibold">מגמה</th>
-                  <th scope="col" className="p-3 text-start font-semibold">הפסד צפוי</th>
+                  <th scope="col" className="p-3 text-start font-semibold">{t('detective.colProduct')}</th>
+                  <th scope="col" className="p-3 text-start font-semibold">{t('detective.colSupplier')}</th>
+                  <th scope="col" className="p-3 text-start font-semibold">{t('detective.colMedian')}</th>
+                  <th scope="col" className="p-3 text-start font-semibold">{t('detective.colLast')}</th>
+                  <th scope="col" className="p-3 text-start font-semibold">{t('detective.colChange')}</th>
+                  <th scope="col" className="p-3 text-start font-semibold">{t('detective.colTrend')}</th>
+                  <th scope="col" className="p-3 text-start font-semibold">{t('detective.colExcess')}</th>
                 </tr>
               </thead>
               <tbody>
-                {leaks.map((row) => (
+                {rows.map((row) => (
                   <tr
                     key={`${row.productId}-${row.supplierId}`}
                     className="border-t border-line transition-colors hover:bg-surface-2/60"
@@ -127,18 +151,18 @@ export default async function LeaksPage() {
                       <div className="text-xs text-subtle">{row.category ?? '—'}</div>
                     </td>
                     <td className="p-3 text-muted">{row.supplierName}</td>
-                    <td className="p-3 font-mono tabular-nums text-muted">{formatCurrency(row.baselineP50)}</td>
-                    <td className="p-3 font-mono tabular-nums text-ink">{formatCurrency(row.lastObservedPrice)}</td>
+                    <td className="p-3 font-mono tabular-nums text-muted">{money(row.baselineP50)}</td>
+                    <td className="p-3 font-mono tabular-nums text-ink">{money(row.lastObservedPrice)}</td>
                     <td className="p-3">
                       <Badge tone={row.deltaPct >= 0.1 ? 'danger' : 'warning'}>
-                        +{(row.deltaPct * 100).toFixed(1)}%
+                        <span dir="ltr">+{formatPercent(row.deltaPct, locale, 1)}</span>
                       </Badge>
                     </td>
                     <td className="p-3">
                       <Sparkline data={row.series} />
                     </td>
                     <td className="p-3 font-mono font-semibold tabular-nums text-danger">
-                      {formatCurrency(row.monthExcessIls)}
+                      {money(row.monthExcessIls)}
                     </td>
                   </tr>
                 ))}
@@ -150,6 +174,3 @@ export default async function LeaksPage() {
     </div>
   );
 }
-
-// Precise ₪ — the leak table shows the agora. Delegates to the single formatIls util.
-const formatCurrency = (value: number): string => formatIls(value, { maximumFractionDigits: 2 });

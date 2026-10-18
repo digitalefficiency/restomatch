@@ -13,9 +13,12 @@ import {
 export interface LeakRow {
   productId: string;
   productName: string;
+  /** English display name (0028) — null when not translated yet. */
+  productNameEn: string | null;
   category: string | null;
   supplierId: string;
   supplierName: string;
+  supplierNameEn: string | null;
   baselineP50: number;
   baselineP90: number;
   lastObservedPrice: number;
@@ -85,9 +88,11 @@ export async function computeLeaks(
     .select({
       productId: products.id,
       productName: products.canonicalName,
+      productNameEn: products.nameEn,
       category: products.category,
       supplierId: suppliers.id,
       supplierName: suppliers.name,
+      supplierNameEn: suppliers.nameEn,
       baselineP50: priceBaselines.p50,
       baselineP90: priceBaselines.p90,
       lastObservedPrice: priceHistory.unitPrice,
@@ -140,9 +145,11 @@ export async function computeLeaks(
     leaks.push({
       productId: r.productId,
       productName: r.productName,
+      productNameEn: r.productNameEn ?? null,
       category: r.category,
       supplierId: r.supplierId,
       supplierName: r.supplierName,
+      supplierNameEn: r.supplierNameEn ?? null,
       baselineP50: p50,
       baselineP90: p90,
       lastObservedPrice: actual,

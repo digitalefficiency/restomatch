@@ -1,5 +1,64 @@
 /**
  * 'leaks' namespace (Hebrew — source of truth).
- * Owner: S3 money engine — leaks page.
+ * Owner: S3 money engine — leaks page + the leak drill-down.
  */
-export const he = {};
+export const he = {
+  loading: 'טוען',
+  detective: {
+    title: 'בלש הדליפות',
+    subtitle: 'מוצרים שבהם המחיר האחרון חורג מהאחוזון ה-90 ההיסטורי של אותו ספק.',
+    upsell: 'שדרגו את המנוי כדי לפתוח את בלש הדליפות',
+    roleOnly: 'רק לבעלי תפקיד "בעלים" יש גישה לבלש הדליפות.',
+    emptyTitle: 'לא נמצאו דליפות מחיר פעילות',
+    emptyDescription:
+      'נדרשות לפחות 3 תצפיות מחיר לכל מוצר וספק לפני שמחושב קו בסיס. המשיכו לקלוט חשבוניות והדליפות יתחילו לצוף.',
+    totalLabel: 'עודף מחיר משוער לחודש',
+    totalHint: 'העודף מעל המחיר החציוני × הכמות שנקנתה ב-30 הימים האחרונים',
+    hotspots: 'מוקדי דליפה פעילים',
+    hotspotsHint: 'צמדי מוצר × ספק שחורגים מהגבול',
+    worst: 'החריגה הגבוהה ביותר',
+    worstHint: 'הקפיצה החדה ביותר מול המחיר החציוני',
+    caption: 'דליפות מחיר לפי מוצר וספק',
+    colProduct: 'מוצר',
+    colSupplier: 'ספק',
+    colMedian: 'מחיר חציוני',
+    colLast: 'מחיר אחרון',
+    colChange: 'שינוי',
+    colTrend: 'מגמה',
+    colExcess: 'עודף לחודש',
+    toBreakdown: 'החשבוניות שמאחורי הדליפה החודשית',
+  },
+  heatmap: {
+    mild: 'קל',
+    severe: 'חריג',
+    more: 'ועוד {count} פריטים בטבלה למטה',
+  },
+  breakdown: {
+    title: 'מה מאחורי מספר הדליפה',
+    subtitle: 'כל חשבונית שתרמה לדליפה של {month}, מהגדולה לקטנה, עם השורות שגרמו לה.',
+    back: 'חזרה לחדר הבקרה',
+    prevMonth: 'חודש קודם',
+    nextMonth: 'חודש הבא',
+    thisMonth: 'החודש',
+    total: 'סה״כ דליפה',
+    ofSpend: '{pct} מההוצאה',
+    emptyTitle: 'אין דליפה בחודש הזה',
+    emptyDescription: 'כל החשבוניות שהותאמו בחודש זה תואמות להזמנות ולקבלות.',
+    invoice: 'חשבונית {number}',
+    noNumber: 'ללא מספר',
+    invoiceTotal: 'סה״כ חשבונית {amount}',
+    leak: 'דליפה',
+    paid: 'שולמה',
+    unpaid: 'טרם שולמה',
+    pendingTitle: 'ממתינות לשיוך להזמנה',
+    pendingHint: 'לא נמצאה הזמנה תואמת — לרוב חשבונית ריכוז. לא נספר כדליפה עד שיוך.',
+    notCounted: 'לא נספר',
+    open: 'פתח חשבונית',
+    capped: 'מוגבל לסכום החשבונית',
+    colLine: 'שורה',
+    colType: 'סוג',
+    colStatus: 'סטטוס',
+    colAmount: 'סכום',
+    decide: 'לתור האישורים',
+  },
+};

@@ -124,3 +124,10 @@
     -webkit-backdrop-filter: saturate(140%) blur(14px);
   }
 }
+
+/* i18n (S3, client-ready): the base `html { direction: rtl }` above overrides the
+   <html dir> attribute set by the root layout, so English rendered right-to-left.
+   Let the attribute win when the locale is LTR. */
+html[dir='ltr'] {
+  direction: ltr;
+}

@@ -7,8 +7,11 @@ import {
   discrepancies,
   eq,
   inArray,
+  invoices,
   lt,
   matchRuns,
+  products,
+  suppliers,
   type UserRole,
 } from '@restomatch/db';
 import { authedProcedure, memberProcedure, router } from '../trpc';
@@ -83,6 +86,14 @@ export const approvalsRouter = router({
           actualValue: discrepancies.actualValue,
           toleranceUsed: discrepancies.toleranceUsed,
           ruleName: discrepancies.ruleName,
+          // Stable rule id → the UI translates the routing reason (ruleName is
+          // stored in Hebrew with thresholds baked in).
+          ruleId: discrepancies.ruleId,
+          productName: products.canonicalName,
+          productNameEn: products.nameEn,
+          supplierName: suppliers.name,
+          supplierNameEn: suppliers.nameEn,
+          invoiceNumber: invoices.invoiceNumber,
           message: discrepancies.resolutionNote, // reuse field for now
           createdAt: discrepancies.createdAt,
           matchRunId: discrepancies.matchRunId,
@@ -91,6 +102,18 @@ export const approvalsRouter = router({
         })
         .from(discrepancies)
         .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+        .leftJoin(
+          products,
+          and(eq(products.id, discrepancies.productId), eq(products.restaurantId, ctx.session.restaurantId)),
+        )
+        .leftJoin(
+          invoices,
+          and(eq(invoices.id, matchRuns.invoiceId), eq(invoices.restaurantId, ctx.session.restaurantId)),
+        )
+        .leftJoin(
+          suppliers,
+          and(eq(suppliers.id, invoices.supplierId), eq(suppliers.restaurantId, ctx.session.restaurantId)),
+        )
         .where(
           and(
             eq(discrepancies.restaurantId, ctx.session.restaurantId),
