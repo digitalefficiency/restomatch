@@ -17,6 +17,8 @@ export const he = {
     recipes: 'עלות מנה',
     exports: 'ייצוא',
     team: 'צוות',
+    chain: 'רשת',
+    branches: 'סניפים',
     settings: 'הגדרות',
   },
   groups: {

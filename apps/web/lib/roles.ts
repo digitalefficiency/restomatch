@@ -60,6 +60,10 @@ export const ROUTE_ROLES: Record<string, UserRole[]> = {
   // role; the restaurant sections inside are owner-edit / manager+bookkeeper
   // read-only / hidden for receiver + chef (see app/dashboard/settings/page.tsx).
   '/dashboard/settings': ALL_ROLES,
+  // Chain (S8): owner-level money across branches + branch management. The
+  // chain router re-checks owner membership in the DB per request.
+  '/dashboard/chain': ['owner'],
+  '/dashboard/branches': ['owner'],
 };
 
 /** Whether `role` may see `href` (exact match). Unknown routes default to visible. */

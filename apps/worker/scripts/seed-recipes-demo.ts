@@ -15,6 +15,7 @@
  */
 import {
   and,
+  asc,
   assertSeedTarget,
   createDb,
   eq,
@@ -188,7 +189,8 @@ const DEMO: DemoRecipe[] = [
 ];
 
 async function main() {
-  const [restaurant] = await db.select().from(restaurants).limit(1);
+  // Same tenant as seed-demo.ts (the oldest restaurant — the chain seed adds branches after it).
+  const [restaurant] = await db.select().from(restaurants).orderBy(asc(restaurants.createdAt)).limit(1);
   if (!restaurant) throw new Error('no restaurant — run the base seed first');
   const rid = restaurant.id;
 

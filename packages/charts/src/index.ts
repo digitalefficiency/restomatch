@@ -1,4 +1,4 @@
-export { computeOwnerKpis, emptyKpis, type OwnerKpis } from './owner-kpis';
+export { computeOwnerKpis, emptyKpis, notZeroShortTwin, type OwnerKpis } from './owner-kpis';
 export { computeLeaks, type LeakRow, type ComputeLeaksOptions } from './leaks';
 export {
   computeSupplierScorecards,
@@ -23,3 +23,46 @@ export {
   type LeakReportSupplierRow,
   type LeakReportTypeRow,
 } from './leak-report';
+export {
+  computeLeakGrouped,
+  computeLeakSummary,
+  computeLeakTrend,
+  computeViewOptions,
+  LEAK_SEVERITIES,
+  RESOLUTION_STATUSES,
+  VIEW_COMPARES,
+  VIEW_GROUPS,
+  VIEW_PERIODS,
+  type LeakGroupRow,
+  type LeakTrendPoint,
+  type ViewCompare,
+  type ViewFilters,
+  type ViewGroup,
+  type ViewPeriod,
+  type ViewSpec,
+} from './leak-views';
+export {
+  aggregateChain,
+  computeBranchSnapshot,
+  shiftMonth,
+  supplierMergeKey,
+  type BranchMonthPoint,
+  type BranchSnapshot,
+  type BranchSupplierRow,
+  type ChainBranchRow,
+  type ChainOverview,
+  type ChainSupplierRow,
+  type ChainTotals,
+} from './chain';
+export {
+  computeBranchPriceLines,
+  computePriceDisparities,
+  DISPARITY_MIN_IMPACT_ILS,
+  DISPARITY_MIN_PCT,
+  type BranchPriceLine,
+  type BranchPriceLines,
+  type DisparityBranchPrice,
+  type DisparityLine,
+  type DisparityMatchMethod,
+  type PriceDisparityRow,
+} from './chain-disparity';

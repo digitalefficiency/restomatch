@@ -17,6 +17,7 @@ import {
 } from '@restomatch/db';
 import { authConfig } from './auth.config';
 import { authCookieConfig, resolveUseSecureCookies } from './lib/authCookies';
+import { pickActiveMembership, requestedRestaurantOf } from './lib/activeRestaurant';
 import { authDb } from './lib/authDb';
 import { isEmailConfigured, sendEmail } from './lib/email';
 import { magicLinkEmail } from './lib/emailTemplates';
@@ -276,12 +277,13 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
           .from(memberships)
           .where(eq(memberships.userId, userId));
 
-        // Keep the active restaurant if its membership still exists (and pick
-        // up any role change); otherwise fall back to any membership, else none.
-        const active = t.restaurantId
-          ? rows.find((m) => m.restaurantId === t.restaurantId)
-          : undefined;
-        const chosen = active ?? rows[0];
+        // A branch-switch update (unstable_update({ activeRestaurantId })) is
+        // honoured ONLY if it is one of these DB memberships — the update body
+        // is client-controllable. Otherwise keep the active restaurant if its
+        // membership still exists (and pick up any role change); otherwise fall
+        // back to any membership, else none.
+        const requested = trigger === 'update' ? requestedRestaurantOf(session) : undefined;
+        const chosen = pickActiveMembership(rows, t.restaurantId, requested);
         if (chosen) {
           t.restaurantId = chosen.restaurantId;
           t.role = chosen.role;

@@ -37,6 +37,21 @@ describe('db:doctor', () => {
     });
   });
 
+  it('flags schema drift: an object of an applied migration is missing', async () => {
+    // The doctor reads in its own session, so the drop is committed briefly and restored below.
+    await sql`drop index if exists invoice_lines_product_idx`;
+    try {
+      const r = await runDoctor(url);
+      const f = r.findings.find((x) => x.name === 'applied migrations intact');
+      expect(f?.status).toBe('WARN');
+      expect(f?.detail).toContain('invoice_lines_product_idx');
+    } finally {
+      await sql`create index if not exists invoice_lines_product_idx on invoice_lines using btree (product_id)`;
+    }
+    const again = await runDoctor(url);
+    expect(again.findings.find((x) => x.name === 'applied migrations intact')?.status).toBe('PASS');
+  });
+
   it('redacts the password and prints a PASS/WARN/FAIL summary', async () => {
     expect(redactUrl('postgres://u:s3cret@h:5432/db')).toBe('postgres://u:***@h:5432/db');
     const r = await runDoctor(url);
