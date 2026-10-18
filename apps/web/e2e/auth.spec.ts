@@ -111,6 +111,6 @@ test.describe('magic link (backup) + onboarding', () => {
     await form.locator('input#name').fill('מסעדת E2E');
     await form.locator('button[type="submit"]').click();
     await expect(page).toHaveURL(/\/dashboard/);
-    await expect(page.locator('header h1')).toHaveText('מסעדת E2E');
+    await expect(page.getByRole('banner')).toContainText('מסעדת E2E');
   });
 });

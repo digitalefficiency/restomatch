@@ -123,13 +123,18 @@ async function visit(page: Page, locale: Locale, path: string, authed: boolean) 
   expect(errors, `${path} console/page errors`).toEqual([]);
 }
 
-/** Visible text of the chrome only — Hebrew here in English mode is a translation gap. */
+/**
+ * Visible text of the chrome only — Hebrew here in English mode is a translation
+ * gap. Elements explicitly marked with another `lang` (the locale switcher's
+ * "עב" button) are intentional and skipped.
+ */
 async function chromeText(page: Page, selector: string): Promise<string[]> {
   return page
     .locator(selector)
     .evaluateAll((els) =>
       els
         .filter((el) => (el as HTMLElement).offsetParent !== null)
+        .filter((el) => (el.closest('[lang]')?.getAttribute('lang') ?? '') === document.documentElement.lang)
         .map((el) => (el as HTMLElement).innerText.trim())
         .filter(Boolean),
     );
