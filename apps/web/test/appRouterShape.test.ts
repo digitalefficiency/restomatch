@@ -23,6 +23,7 @@ const ROUTER_KEYS = [
   'chain',
   'dsr',
   'exports',
+  'integrations',
   'leads',
   'mapping',
   'match',
