@@ -12,7 +12,8 @@ email, or needs a real key.
 - Node 22, pnpm 10.33 (`corepack enable`).
 - Postgres 16 + pgvector on `localhost:5432` (user/password `postgres`), Redis on
   `localhost:6379` for the worker tests. `scripts/dev-setup.sh` sets both up.
-- `scripts/verify.sh` refuses any non-local database.
+- `scripts/verify.sh` refuses any non-local database. Layer 1 drops and re-creates its own
+  database `restomatch_gate` each run (like CI's fresh container); layer 2 seeds `restomatch_verify`.
 
 ## Layer 1 — the full gate
 
@@ -39,7 +40,11 @@ Output: a PASS / FAIL / SKIP table and `RESULT: PASS|FAIL`; exit code 1 on any
 FAIL. Every step's full output is in `.verify/<step>.log` (gitignored).
 
 **In CI** (`.github/workflows/ci.yml`) the same steps are split across the
-blocking `test`, `worker-tests` and `web` jobs.
+blocking `test`, `worker-tests`, `web` and `audit` jobs. Adding `supabase-sync --check`
+to the blocking job and a non-blocking `verify-layer2` job is proposed in PR #49; `ci.yml`
+is on the AGENTS.md immutability list, so that change waits for the owner's approval.
+Until then, run `scripts/verify.sh all` locally (add `VERIFY_SOFTNAV=1` for the
+production soft-navigation check).
 
 ## Layer 2 — the running product
 
@@ -80,9 +85,13 @@ demo. CI runs it non-blocking against a local `next start` (job *verify layer 2*
 
 ### Proven to fail
 
-Each check was shown to catch a real break (a proxy in front of a good server):
-`/pricing` → 500, hero mp4 → 404, Hebrew landing served `dir="ltr"`, origin down —
-each gave `FAIL` and exit 1.
+Each layer was shown to catch a real break, and to pass again once it was reverted:
+
+| Mutation | Result |
+|---|---|
+| a failing vitest + a hand-edited `supabase/migrations` file | layer 1: `test` FAIL, `supabase-sync` FAIL, `RESULT: FAIL`, exit 1 |
+| hero mp4 removed from `apps/web/public/media` | layer 2: `verify-prod` FAIL (`asset /media/hero-loop.mp4 404`), exit 1 |
+| via a proxy in front of a good server: `/pricing` → 500 · hero mp4 → 404 · Hebrew landing served `dir="ltr"` · origin down | `verify-prod.sh`: the matching row FAILs, exit 1 |
 
 ### When something fails
 
