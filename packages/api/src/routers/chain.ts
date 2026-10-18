@@ -8,6 +8,7 @@ import {
 } from '@restomatch/charts';
 import {
   and,
+  billingAccounts,
   eq,
   memberships,
   products,
@@ -158,9 +159,10 @@ interface Gate {
   /** Max branches on the account (null = unlimited). */
   branchLimit: number | null;
   canAddBranch: boolean;
+  isBillingOwner: boolean;
 }
 
-function gateOf(ent: Entitlements, branchCount: number): Gate {
+function gateOf(ent: Entitlements, branchCount: number, isPayer: boolean): Gate {
   const branchLimit = ent.limits.restaurants;
   return {
     entitlements: ent,
@@ -169,15 +171,25 @@ function gateOf(ent: Entitlements, branchCount: number): Gate {
     canAddBranch:
       ent.active &&
       ent.billingAccountId !== null &&
+      isPayer &&
       (branchLimit === null || branchCount < branchLimit),
+    isBillingOwner: isPayer,
   };
 }
 
 async function gateFor(ctx: AuthedContext, scope: ChainScope): Promise<Gate> {
-  const ent = await inBranch(ctx.db, ctx.session.userId, scope.active.restaurantId, (tx) =>
-    getEntitlements(tx, scope.active.restaurantId),
-  );
-  return gateOf(ent, scope.branches.length);
+  const { ent, payer } = await inBranch(ctx.db, ctx.session.userId, scope.active.restaurantId, async (tx) => {
+    const e = await getEntitlements(tx, scope.active.restaurantId);
+    const [acct] = e.billingAccountId
+      ? await tx
+          .select({ ownerUserId: billingAccounts.ownerUserId })
+          .from(billingAccounts)
+          .where(eq(billingAccounts.id, e.billingAccountId))
+          .limit(1)
+      : [];
+    return { ent: e, payer: acct?.ownerUserId ?? null };
+  });
+  return gateOf(ent, scope.branches.length, payer === ctx.session.userId);
 }
 
 export interface ChainBranchesResult {
@@ -188,6 +200,8 @@ export interface ChainBranchesResult {
   chainEnabled: boolean;
   branchLimit: number | null;
   canAddBranch: boolean;
+  /** The caller pays for this billing account (only the payer may add branches). */
+  isBillingOwner: boolean;
 }
 
 export interface ChainOverviewResult extends ChainOverview {
@@ -214,6 +228,7 @@ export const chainRouter = router({
       chainEnabled: gate.chainEnabled,
       branchLimit: gate.branchLimit,
       canAddBranch: gate.canAddBranch,
+      isBillingOwner: gate.isBillingOwner,
     };
   }),
 
@@ -300,6 +315,18 @@ export const chainRouter = router({
       if (!gate.canAddBranch) throw chainRequired(gate.entitlements.planKey);
       const billingAccountId = scope.active.billingAccountId;
       if (!billingAccountId) throw chainRequired(gate.entitlements.planKey);
+      // Only the billing account's payer may open (= be billed for) a branch —
+      // a co-owner of one restaurant on someone else's account may not.
+      const [account] = await inBranch(ctx.db, ctx.session.userId, scope.active.restaurantId, (tx) =>
+        tx
+          .select({ ownerUserId: billingAccounts.ownerUserId })
+          .from(billingAccounts)
+          .where(eq(billingAccounts.id, billingAccountId))
+          .limit(1),
+      );
+      if (!account || account.ownerUserId !== ctx.session.userId) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'only the billing account owner can add branches' });
+      }
 
       const sourceId = scope.active.restaurantId;
       const userId = ctx.session.userId;
@@ -329,6 +356,17 @@ export const chainRouter = router({
           .limit(1);
         if (!source || source.billingAccountId !== billingAccountId) {
           throw new TRPCError({ code: 'NOT_FOUND', message: 'source branch not found' });
+        }
+        // Serialize concurrent addBranch calls on this account, then re-check the
+        // limit inside the transaction (every restaurant on the account the
+        // caller is a member of, any role — the RLS-visible set).
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'chain-add:' + billingAccountId}))`);
+        const [{ n: onAccount } = { n: 0 }] = await tx
+          .select({ n: sql<number>`count(*)::int` })
+          .from(restaurants)
+          .where(eq(restaurants.billingAccountId, billingAccountId));
+        if (gate.branchLimit !== null && onAccount >= gate.branchLimit) {
+          throw chainRequired(gate.entitlements.planKey);
         }
         const srcSuppliers = copySuppliers
           ? await tx

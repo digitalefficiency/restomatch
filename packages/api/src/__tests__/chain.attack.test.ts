@@ -5,6 +5,7 @@ import {
   applyAuditImmutableRls,
   applyAuthCredentialTables,
   applyCoreTenantRls,
+  billingAccounts,
   createDb,
   discrepancies,
   ensureRlsAppRole,
@@ -75,6 +76,8 @@ beforeAll(async () => {
   X = await seedTenant(ownerDb, 'X');
 
   acct = await attachSubscription(ownerDb, A.restaurantId, { planKey: 'chain', status: 'active' });
+  // userA pays for ACCT.
+  await ownerDb.update(billingAccounts).set({ ownerUserId: A.ownerUserId }).where(eq(billingAccounts.id, acct));
   for (const t of [A2, M, B]) {
     await ownerDb.update(restaurants).set({ billingAccountId: acct }).where(eq(restaurants.id, t.restaurantId));
   }
@@ -133,6 +136,7 @@ describe('chain.branches', () => {
   it('B (same billing account, no shared membership) sees only its own branch', async () => {
     const res = await caller(B.ownerUserId, B.restaurantId).chain.branches();
     expect(res.branches.map((b) => b.restaurantId)).toEqual([B.restaurantId]);
+    expect(res.canAddBranch).toBe(false); // not the payer of the shared account
   });
 
   it('is FORBIDDEN from a manager-only active branch', async () => {
@@ -287,6 +291,37 @@ describe('chain.addBranch', () => {
         message: 'ENTITLEMENT_REQUIRED:chain',
       });
       expect((await asA().chain.branches()).canAddBranch).toBe(false);
+    } finally {
+      await ownerDb.update(subscriptions).set({ overrides: {} }).where(eq(subscriptions.billingAccountId, acct));
+    }
+  });
+
+  it("B's owner (same account, not the payer) cannot bill a new branch to A's account", async () => {
+    await expect(caller(B.ownerUserId, B.restaurantId).chain.addBranch({ name: 'free ride' })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+    const rows = await ownerDb.select({ id: restaurants.id }).from(restaurants).where(eq(restaurants.name, 'free ride'));
+    expect(rows).toEqual([]);
+  });
+
+  it('the in-transaction recount blocks concurrent adds past the limit', async () => {
+    // userA is a member of 4 restaurants on ACCT (A, A2, M, the branch added above): room for exactly 2.
+    await ownerDb
+      .update(subscriptions)
+      .set({ overrides: { limits: { restaurants: 6 } } })
+      .where(eq(subscriptions.billingAccountId, acct));
+    try {
+      const results = await Promise.allSettled(
+        ['race 1', 'race 2', 'race 3'].map((name) => asA().chain.addBranch({ name })),
+      );
+      const ok = results.filter((r) => r.status === 'fulfilled').length;
+      const visible = await ownerDb
+        .select({ id: restaurants.id })
+        .from(restaurants)
+        .innerJoin(memberships, eq(memberships.restaurantId, restaurants.id))
+        .where(and(eq(restaurants.billingAccountId, acct), eq(memberships.userId, A.ownerUserId)));
+      expect(visible.length).toBeLessThanOrEqual(6);
+      expect(ok).toBe(2);
     } finally {
       await ownerDb.update(subscriptions).set({ overrides: {} }).where(eq(subscriptions.billingAccountId, acct));
     }

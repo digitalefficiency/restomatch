@@ -112,6 +112,7 @@ export const en: Shape<typeof he> = {
       createdCopied: 'Copied {suppliers} suppliers and {products} products.',
       goThere: 'Go to the new branch',
     },
+    notPayer: 'Only the billing account owner can open new branches on this account.',
     limitReached: 'You have reached the number of branches on your plan. Upgrade or contact us to add one.',
     upsell: 'Opening more branches is part of the Chain plan',
     noBilling: 'To open another branch, this branch needs a billing account. Upgrade to the Chain plan.',

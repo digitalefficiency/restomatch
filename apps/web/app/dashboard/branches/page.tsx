@@ -85,7 +85,7 @@ export default async function BranchesPage() {
           </>
         ) : (
           <Card padding="md" className="border-warn/30 bg-warn/5 text-sm text-ink">
-            {t('branches.limitReached')}
+            {data.isBillingOwner ? t('branches.limitReached') : t('branches.notPayer')}
           </Card>
         )}
       </div>
