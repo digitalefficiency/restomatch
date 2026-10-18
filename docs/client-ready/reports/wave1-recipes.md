@@ -203,3 +203,5 @@ Also fixed from its plausible list: the incomplete-cost flag; unlinked items are
   - `layer2-pos.mjs` **44/44**: steak 34.9% menu vs 40.7% actual (avg ₪130.00 charged, gap +5.8 pts); ₪0.01 shakshuka → "check POS data"; Lemonade listed as unlinked; last month → neutral empty state; integrations off → tab hidden; 0 console errors / 5xx.
   - Regression: recipes **103/103**, overview **79/79**.
 - Screenshots: `recipes-pos-{he,en}.png`.
+
+**Re-verified after merging client-ready 807a865** (head after this commit): Layer 1 all ✅ (api 601, web 263, db 74); Layer 2 POS 44/44, recipes 103/103, overview 79/79.
