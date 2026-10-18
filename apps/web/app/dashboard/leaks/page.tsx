@@ -41,7 +41,7 @@ export default async function LeaksPage() {
   const breakdownLink = (
     <Link
       href="/dashboard/leaks/breakdown"
-      className="inline-flex items-center gap-1 rounded-lg text-sm font-semibold text-primary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+      className="mb-4 inline-flex max-w-full items-center gap-1 rounded-lg text-sm font-semibold text-primary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
     >
       {t('detective.toBreakdown')}
       <ArrowLeft className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
@@ -51,7 +51,8 @@ export default async function LeaksPage() {
   if (blocked === 'entitlement') {
     return (
       <div>
-        <SectionHeader level={1} title={t('detective.title')} action={breakdownLink} />
+        <SectionHeader level={1} title={t('detective.title')} />
+        {breakdownLink}
         <EntitlementUpsell feature="advanced_analytics" title={t('detective.upsell')} />
       </div>
     );
@@ -60,7 +61,8 @@ export default async function LeaksPage() {
   if (blocked === 'role') {
     return (
       <div>
-        <SectionHeader level={1} title={t('detective.title')} action={breakdownLink} />
+        <SectionHeader level={1} title={t('detective.title')} />
+        {breakdownLink}
         <Card padding="md" className="flex items-center gap-3 border-warn/30 bg-warn/5 text-warn">
           <ShieldAlert className="h-5 w-5 shrink-0" aria-hidden="true" />
           <span>{t('detective.roleOnly')}</span>
@@ -84,8 +86,8 @@ export default async function LeaksPage() {
         level={1}
         title={t('detective.title')}
         subtitle={t('detective.subtitle')}
-        action={breakdownLink}
       />
+      {breakdownLink}
 
       {rows.length === 0 ? (
         <EmptyState
