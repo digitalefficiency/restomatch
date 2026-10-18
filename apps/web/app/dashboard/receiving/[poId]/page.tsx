@@ -36,7 +36,8 @@ export default async function ReceivingPoPage({
   try {
     po = await caller.receiving.getPo({ poId });
   } catch (err) {
-    if (err instanceof TRPCError && err.code === 'NOT_FOUND') notFound();
+    // A malformed id fails zod (BAD_REQUEST) — that is a missing page, not a crash.
+    if (err instanceof TRPCError && (err.code === 'NOT_FOUND' || err.code === 'BAD_REQUEST')) notFound();
     throw err;
   }
 

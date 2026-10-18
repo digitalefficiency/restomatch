@@ -19,7 +19,7 @@ import {
 import { useT } from '@/lib/i18n/client';
 import { components } from '@/lib/i18n/messages/components';
 import { suppliers as suppliersNs } from '@/lib/i18n/messages/suppliers';
-import { DAY_KEYS } from '../form-logic';
+import { DAY_KEYS, scheduleRowProblem } from '../form-logic';
 
 /** Weekday keys, index = JS Date#getDay (0 = Sunday … 6 = Saturday). */
 const WEEKDAYS = DAY_KEYS;
@@ -116,7 +116,7 @@ export function SupplierScheduleTab({ supplierId, initial }: { supplierId: strin
     patchRow(key, { orderDays: has ? row.orderDays.filter((d) => d !== day) : [...row.orderDays, day] });
   };
 
-  const valid = current.length > 0 && current.every((r) => r.orderDays.length > 0);
+  const valid = current.length > 0 && current.every((r) => scheduleRowProblem(r) === null);
 
   function save() {
     update.mutate({ supplierId, patch: { orderSchedule: formToSchedule(current) } });
@@ -242,9 +242,9 @@ export function SupplierScheduleTab({ supplierId, initial }: { supplierId: strin
                 </Field>
               )}
             </div>
-            {row.orderDays.length === 0 && (
-              <p className="text-xs text-warn">{t('schedule.pickDay')}</p>
-            )}
+            {scheduleRowProblem(row) ? (
+              <p className="text-xs text-warn">{t(`schedule.${scheduleRowProblem(row)!}`)}</p>
+            ) : null}
           </div>
         </Card>
       ))}

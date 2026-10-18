@@ -3,6 +3,7 @@ import { assertWorkerEnv } from './env';
 import { registerCronSchedules } from './cron';
 import { startHealthServer } from './health';
 import { startHeartbeat } from './heartbeat';
+import { closeJobDbs } from './db';
 import { connection } from './queue';
 import { startBaselinesWorker } from './jobs/baselines';
 import { startDailyExpectationsWorker } from './jobs/dailyExpectations';
@@ -86,6 +87,7 @@ const shutdown = async (signal: string) => {
   stopHeartbeat();
   healthServer.close();
   await Promise.all(workers.map((w) => w.close()));
+  await closeJobDbs();
   process.exit(0);
 };
 
