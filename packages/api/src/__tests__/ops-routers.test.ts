@@ -128,6 +128,15 @@ describe('orders: totals follow line edits; cancel guard', () => {
     });
   });
 
+  it('placeOrder refuses a draft whose lines were all deleted', async () => {
+    const { poId, lines } = await draftWithTwoLines();
+    for (const l of lines) await callerFor(A).orders.deleteOrderLine({ lineId: l.id });
+    expect(await totalOf(poId)).toBeNull();
+    await expect(callerFor(A).orders.placeOrder({ poId, channel: 'none' })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+    });
+  });
+
   it('orders.get exposes English product + supplier names', async () => {
     await db.update(products).set({ nameEn: 'Tomatoes' }).where(eq(products.id, A.productId));
     await db.update(suppliers).set({ nameEn: 'Supplier A' }).where(eq(suppliers.id, A.supplierId));

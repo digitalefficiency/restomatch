@@ -555,6 +555,10 @@ export const ordersRouter = router({
         })
         .from(poLines)
         .where(eq(poLines.poId, input.poId));
+      // An empty order would reach the supplier as a blank document.
+      if (lines.length === 0) {
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'אי אפשר לשלוח הזמנה בלי שורות' });
+      }
 
       let sentChannel: 'email' | 'whatsapp' | null = null;
       if (input.channel !== 'none') {
