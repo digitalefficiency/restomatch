@@ -77,7 +77,7 @@ export function SupplierManager() {
     onSettled: () => setTogglingId(null),
   });
 
-  const suppliers = (list.data ?? []) as Supplier[];
+  const suppliers = useMemo(() => (list.data ?? []) as Supplier[], [list.data]);
   const visible = useMemo(
     () => suppliers.filter((s) => matchesSupplierFilter(s, filter)),
     [suppliers, filter],
