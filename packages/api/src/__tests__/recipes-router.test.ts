@@ -157,6 +157,9 @@ describe('recipes: costing', () => {
     expect(row.costDeltaAgorot).toBe(127);
     expect(row.driver).toMatchObject({ kind: 'product', name: 'חזה עוף', priceBefore: '38.9000', priceNow: '43.5680', deltaAgorot: 127 });
     expect(res.rows.find((r) => r.recipeId === batter)).toBeUndefined();
+    // The overview card counts menu dishes only and tells "no recipes yet" from "steady".
+    expect(row.active).toBe(true);
+    expect(res.activeDishCount).toBeGreaterThan(0);
   });
 
   it('rejects a duplicate name, a cycle, a dish used as a sub-recipe, and an unbridged unit mismatch', async () => {

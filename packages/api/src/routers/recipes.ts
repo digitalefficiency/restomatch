@@ -459,7 +459,7 @@ export const recipesRouter = router({
     const productIds = [...all.prices.keys()];
     const before = await latestPrices(ctx.db, rid, { before: since, productIds });
     // A product first bought this month has no "before": its first price this month is the baseline.
-    const firstThisMonth = await earliestPricesFrom(ctx.db, rid, since);
+    const firstThisMonth = await earliestPricesFrom(ctx.db, rid, since, productIds);
     for (const [pid, p] of firstThisMonth) if (!before.has(pid) && all.prices.has(pid)) before.set(pid, p);
     const beforeCosts = costRecipes(all.costInput, before, ctx.rc.vatBp);
     const diffs = diffCosts(all.costInput, beforeCosts, all.costs);
@@ -469,6 +469,8 @@ export const recipesRouter = router({
     return {
       since,
       targetBp: ctx.rc.targetBp,
+      /** Active dishes on the menu (0 ⇒ "no recipes yet", never "prices are steady"). */
+      activeDishCount: all.rows.filter((r) => r.active && !r.isSubRecipe).length,
       rows: diffs.map((d) => {
         const r = byId.get(d.recipeId)!;
         // The "why": the line whose cost moved most.
@@ -488,6 +490,7 @@ export const recipesRouter = router({
           name: r.name,
           nameEn: r.nameEn,
           isSubRecipe: r.isSubRecipe,
+          active: r.active,
           beforeCostAgorot: d.before.portionCostAgorot,
           afterCostAgorot: d.after.portionCostAgorot,
           beforeFoodCostBp: d.before.foodCostBp,

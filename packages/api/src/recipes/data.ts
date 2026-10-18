@@ -191,7 +191,9 @@ export async function earliestPricesFrom(
   db: Database,
   restaurantId: string,
   from: Date,
+  productIds?: string[],
 ): Promise<Map<string, PriceWithDate>> {
+  if (productIds && productIds.length === 0) return new Map();
   const rows = await db
     .selectDistinctOn([priceHistory.productId], {
       productId: priceHistory.productId,
@@ -201,7 +203,13 @@ export async function earliestPricesFrom(
     })
     .from(priceHistory)
     .innerJoin(products, and(eq(products.id, priceHistory.productId), eq(products.restaurantId, restaurantId)))
-    .where(and(eq(priceHistory.restaurantId, restaurantId), gte(priceHistory.observedAt, from)))
+    .where(
+      and(
+        eq(priceHistory.restaurantId, restaurantId),
+        gte(priceHistory.observedAt, from),
+        ...(productIds ? [inArray(priceHistory.productId, productIds)] : []),
+      ),
+    )
     .orderBy(priceHistory.productId, asc(priceHistory.observedAt));
   return new Map(rows.map((r) => [r.productId, { unitPrice: r.unitPrice, unit: r.unit, observedAt: r.observedAt }]));
 }

@@ -222,7 +222,10 @@ export default async function DashboardPage({
       </TvMode>
 
       {/* Wave 1 (flag `recipes`): food cost hit by this month's price rises. */}
-      {canSeeRoute(role, '/dashboard/recipes') ? <RecipesOverviewCard /> : null}
+      {/* Off in TV mode: the wall screen refreshes every minute and the card sits under the overlay. */}
+      {!view.tv && canSeeRoute(role, '/dashboard/recipes') ? (
+        <RecipesOverviewCard />
+      ) : null}
 
       {/* Leak heatmap — the centerpiece data-viz. */}
       {leaksEntitlementBlocked ? (
