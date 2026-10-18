@@ -182,7 +182,7 @@ beforeAll(async () => {
   for (const t of [A, B]) {
     await ownerDb
       .update(restaurants)
-      .set({ settings: { features: { ingestWhatsapp: true, ingestEmail: true } } })
+      .set({ settings: { features: { ingestWhatsapp: true, ingestEmail: true } } as never })
       .where(eq(restaurants.id, t.restaurantId));
   }
   tokens.aWa = await addChannel(ownerDb, A.restaurantId, 'whatsapp', 'PNID-A');
@@ -342,7 +342,7 @@ describe('WhatsApp webhook — attacks', () => {
   it('a disabled feature is invisible (404) and stores nothing', async () => {
     await ownerDb
       .update(restaurants)
-      .set({ settings: { features: { ingestWhatsapp: false, ingestEmail: true } } })
+      .set({ settings: { features: { ingestWhatsapp: false, ingestEmail: true } } as never })
       .where(eq(restaurants.id, B.restaurantId));
     const res = await handleWhatsAppWebhook(
       waRequest(tokens.bWa, waBody({ id: 'wamid.disabled', phoneNumberId: 'PNID-B' })),
@@ -353,7 +353,7 @@ describe('WhatsApp webhook — attacks', () => {
     expect((await messagesOf(B.restaurantId)).some((m) => m.providerMessageId === 'wamid.disabled')).toBe(false);
     await ownerDb
       .update(restaurants)
-      .set({ settings: { features: { ingestWhatsapp: true, ingestEmail: true } } })
+      .set({ settings: { features: { ingestWhatsapp: true, ingestEmail: true } } as never })
       .where(eq(restaurants.id, B.restaurantId));
   });
 

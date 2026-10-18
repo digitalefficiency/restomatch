@@ -143,6 +143,9 @@ importers:
       '@restomatch/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@restomatch/ingest':
+        specifier: workspace:*
+        version: link:../../packages/ingest
       '@restomatch/ocr':
         specifier: workspace:*
         version: link:../../packages/ocr

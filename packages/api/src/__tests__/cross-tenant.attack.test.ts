@@ -1439,7 +1439,7 @@ describe('ingest.*: isolation + foreign-id attacks (A → B)', () => {
     for (const t of [A, B]) {
       await db
         .update(restaurants)
-        .set({ settings: { features: { ingestWhatsapp: true, ingestEmail: true } } })
+        .set({ settings: { features: { ingestWhatsapp: true, ingestEmail: true } } as never })
         .where(eq(restaurants.id, t.restaurantId));
     }
     const seed = async (t: Tenant, tag: string) => {
@@ -1548,7 +1548,7 @@ describe('ingest.*: isolation + foreign-id attacks (A → B)', () => {
     await expect(callerFor(A).ingest.rejectDocument({ documentId: ids.aDoc })).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await db
       .update(restaurants)
-      .set({ settings: { features: { ingestWhatsapp: true, ingestEmail: true } } })
+      .set({ settings: { features: { ingestWhatsapp: true, ingestEmail: true } } as never })
       .where(eq(restaurants.id, A.restaurantId));
   });
 });
