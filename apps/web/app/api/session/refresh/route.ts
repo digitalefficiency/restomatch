@@ -1,5 +1,4 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { auth, unstable_update } from '@/auth';
 import { safeRelativePath } from '@/lib/safeRedirect';
 
 /**
@@ -10,9 +9,17 @@ import { safeRelativePath } from '@/lib/safeRedirect';
  * middleware skips null roles. Routing the post-accept redirect through this
  * handler triggers the jwt `update` path (membership re-query) so the very next
  * page is role-gated at the edge too. Reads only the caller's own membership.
+ *
+ * `@/auth` is imported lazily: a static route module is evaluated at build time
+ * ("collecting page data"), and the auth DB connection throws without
+ * DATABASE_URL — which the Vercel build environment does not have.
  */
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const next = safeRelativePath(req.nextUrl.searchParams.get('next'));
+  const { auth, unstable_update } = await import('@/auth');
   const session = await auth();
   if (session?.user?.id) await unstable_update({});
   const url = req.nextUrl.clone();
