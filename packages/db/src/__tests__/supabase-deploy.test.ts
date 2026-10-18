@@ -37,8 +37,8 @@ migratorUrl.password = 'emulated-supabase-postgres';
 const migDir = join(repoRoot(), SUPABASE_MIGRATIONS_DIR);
 const files = readdirSync(migDir).filter((f) => f.endsWith('.sql')).sort();
 const rlsFile = files.filter((f) => f.includes('_restomatch_rls_')).at(-1)!;
-/** Files main already released (Supabase may have applied them): the lock at the last release. */
-const RELEASED_ON_MAIN = 36;
+/** Files main already released (Supabase may have applied them) — main @ b5334f6. */
+const RELEASED_ON_MAIN = 37;
 const lock = JSON.parse(readFileSync(join(repoRoot(), SUPABASE_LOCK), 'utf8')) as Record<string, string>;
 const released = files.slice(0, RELEASED_ON_MAIN);
 const appended = files.slice(RELEASED_ON_MAIN);
@@ -140,8 +140,9 @@ describe('supabase/ is generated from the drizzle journal', () => {
       expect(plan.writes.has(`${SUPABASE_MIGRATIONS_DIR}/${name}`), name).toBe(false);
     }
     expect(Object.keys(lock).sort()).toEqual(files);
-    // the first 36 are exactly what main released at 2026-10-18 08:52 (f98962c)
-    expect(released.at(-1)).toBe('20260620072001_restomatch_rls_21814c44.sql');
+    // the first 37 are exactly what main carries (b5334f6): 36 from f98962c + the Data API lockout
+    expect(released.at(-2)).toBe('20260620072001_restomatch_rls_21814c44.sql');
+    expect(released.at(-1)).toBe('20260620072002_restomatch_rls_2a5eafd1.sql');
     expect(appended.every((f) => f > released.at(-1)!)).toBe(true);
   });
 
@@ -186,17 +187,20 @@ describe('git deploy onto an emulated Supabase project', () => {
     await sql?.end();
   });
 
-  it('UPGRADE step 1 — main\'s released files apply; the Data API is still exposed (what prod has now)', async (ctx) => {
+  it('UPGRADE step 1 — main\'s released files apply; walk-ins showcase prefix anon, no plans (what prod has now)', async (ctx) => {
     if (!canCreate) ctx.skip();
     for (const f of released) {
       await applyFile(sql, f).catch((err: unknown) => {
         throw new Error(`${f}: ${err instanceof Error ? err.message : String(err)}`);
       });
     }
-    const [p] = await sql`select has_table_privilege('anon', 'public.plans', 'UPDATE') as a`;
-    expect(p!.a).toBe(true); // the default grants Supabase adds — closed by the appended RLS file
     const r = await runDoctor(migratorUrl.toString());
-    expect(r.findings.find((f) => f.name === 'Supabase Data API locked out')?.status).toBe('FAIL');
+    expect(r.findings.find((f) => f.name === 'Supabase Data API locked out')?.status).toBe('PASS');
+    expect(r.findings.find((f) => f.name === 'tenant storage policies')?.status).toBe('PASS');
+    // SB-3: the anon walk-ins showcase policies stay until the server-side upload ships — a known WARN
+    expect(r.findings.find((f) => f.name === 'no anonymous storage access')?.status).toBe('WARN');
+    const [plans] = await sql`select count(*)::int as n from plans`;
+    expect(plans!.n).toBe(0); // F8: no catalog before 0033
   });
 
   it('UPGRADE step 2 — the appended files apply on top (as Supabase will on the next merge)', async (ctx) => {
@@ -227,8 +231,16 @@ describe('git deploy onto an emulated Supabase project', () => {
     expect(role).toMatchObject({ rolcanlogin: false, rolbypassrls: false, rolsuper: false });
     const [bucket] = await sql`select public from storage.buckets where id = 'invoice-scans'`;
     expect(bucket!.public).toBe(false);
-    const [pol] = await sql`select count(*)::int as n from pg_policies where schemaname = 'storage' and policyname like 'invoice_scans%'`;
-    expect(pol!.n).toBeGreaterThanOrEqual(6);
+    const pols = (await sql`select policyname from pg_policies where schemaname = 'storage' and policyname like 'invoice_scans%' order by 1`).map((r) => r.policyname);
+    expect(pols).toEqual([
+      'invoice_scans_tenant_delete', 'invoice_scans_tenant_insert', 'invoice_scans_tenant_select', 'invoice_scans_tenant_update',
+      'invoice_scans_walkins_insert', 'invoice_scans_walkins_select',
+    ]);
+    const [lim] = await sql`select file_size_limit, allowed_mime_types from storage.buckets where id = 'invoice-scans'`;
+    expect(Number(lim!.file_size_limit)).toBe(11 * 1024 * 1024);
+    expect(lim!.allowed_mime_types).toEqual(['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
+    const [plans] = await sql`select count(*)::int as n from plans`;
+    expect(plans!.n).toBe(4);
     const [unprotected] = await sql`
       select count(*)::int as n from pg_class c join pg_namespace s on s.oid = c.relnamespace and s.nspname = 'public'
       where c.relkind = 'r' and not c.relrowsecurity
@@ -251,13 +263,13 @@ describe('git deploy onto an emulated Supabase project', () => {
     await sql.unsafe('drop table public.zz_future_probe');
   });
 
-  it('db:doctor: no FAIL; the only WARN before go-live is the app role having no LOGIN yet', async (ctx) => {
+  it('db:doctor: no FAIL; the only WARNs before go-live are the app role having no LOGIN yet and the walk-ins showcase prefix', async (ctx) => {
     if (!canCreate) ctx.skip();
     const r = await runDoctor(migratorUrl.toString());
     expect(r.findings.filter((f) => f.status === 'FAIL')).toEqual([]);
     expect(r.pending).toEqual([]);
     const warns = r.findings.filter((f) => f.status === 'WARN').map((f) => f.name);
-    expect(warns).toEqual(['restomatch_app']);
+    expect(warns).toEqual(['restomatch_app', 'no anonymous storage access']);
   });
 
   it('the RLS file is idempotent (re-applying it changes nothing)', async (ctx) => {
@@ -269,11 +281,29 @@ describe('git deploy onto an emulated Supabase project', () => {
     expect(await snapshot()).toBe(before);
   });
 
-  it('after the owner sets the password (ALTER ROLE … LOGIN PASSWORD), the doctor is clean', async (ctx) => {
+  it('after the owner sets the password (ALTER ROLE … LOGIN PASSWORD), the doctor is clean but for the walk-ins WARN', async (ctx) => {
     if (!canCreate) ctx.skip();
     await sql.unsafe(`alter role restomatch_app with login password 'set-by-the-owner-in-the-sql-editor-0123'`);
     const r = await runDoctor(migratorUrl.toString());
-    expect(r.findings.filter((f) => f.status === 'FAIL' || f.status === 'WARN')).toEqual([]);
+    expect(r.findings.filter((f) => f.status === 'FAIL' || f.status === 'WARN').map((f) => f.name)).toEqual(['no anonymous storage access']);
+  });
+
+  it('db:doctor FAILs a missing tenant storage policy, a stray anon storage policy and an anon-granted view', async (ctx) => {
+    if (!canCreate) ctx.skip();
+    const status = async (name: string) => (await runDoctor(migratorUrl.toString())).findings.find((f) => f.name === name)?.status;
+    await sql.unsafe('drop policy invoice_scans_tenant_select on storage.objects');
+    expect(await status('tenant storage policies')).toBe('FAIL');
+    await sql.unsafe(`create policy sneaky_anon on storage.objects for select to anon using (true)`);
+    expect(await status('no anonymous storage access')).toBe('FAIL');
+    await sql.unsafe('create view public.zz_probe_view as select 1 as x');
+    await sql.unsafe('grant select on public.zz_probe_view to anon');
+    expect(await status('Supabase Data API locked out')).toBe('FAIL');
+    await sql.unsafe('drop view public.zz_probe_view');
+    await sql.unsafe('drop policy sneaky_anon on storage.objects');
+    await applyFile(sql, rlsFile); // restores the tenant policy (idempotent)
+    expect(await status('tenant storage policies')).toBe('PASS');
+    expect(await status('no anonymous storage access')).toBe('WARN');
+    expect(await status('Supabase Data API locked out')).toBe('PASS');
   });
 
   it('without rights on storage.objects the RLS file still applies (WARNING, deploy not blocked)', async (ctx) => {

@@ -16,8 +16,8 @@
 --
 -- Same-tenant: composite FKs (supplier_id, restaurant_id) → suppliers and
 -- (product_id, restaurant_id) → products, so a row can never point at another
--- tenant's supplier/product (RLS-independent). RLS: added to the tenant list in
--- drizzle/rls/0002_core_tenant_rls.sql. Additive only; rollback = DROP TABLE.
+-- tenant's supplier/product (RLS-independent). RLS: enabled + per-restaurant policy at the
+-- end of this file. Additive only; rollback = DROP TABLE.
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'products_id_restaurant_id_key') THEN
     ALTER TABLE "products" ADD CONSTRAINT "products_id_restaurant_id_key" UNIQUE ("id","restaurant_id");
@@ -51,4 +51,15 @@ CREATE INDEX IF NOT EXISTS "supplier_contract_prices_product_idx" ON "supplier_c
 CREATE INDEX IF NOT EXISTS "supplier_contract_prices_created_by_idx" ON "supplier_contract_prices" ("created_by");
 --> statement-breakpoint
 DROP TRIGGER IF EXISTS "supplier_contract_prices_set_updated_at" ON "supplier_contract_prices";--> statement-breakpoint
-CREATE TRIGGER "supplier_contract_prices_set_updated_at" BEFORE UPDATE ON "supplier_contract_prices" FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+CREATE TRIGGER "supplier_contract_prices_set_updated_at" BEFORE UPDATE ON "supplier_contract_prices" FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();--> statement-breakpoint
+-- Tenant RLS lives in this migration (not in drizzle/rls/0002, which the
+-- integrator regenerates): same shape as 0002's per-restaurant policy. The
+-- helper is created exactly as rls/0002 defines it (idempotent) so a database
+-- migrated before provision-rls still gets working policies.
+CREATE SCHEMA IF NOT EXISTS app;--> statement-breakpoint
+CREATE OR REPLACE FUNCTION app.current_restaurant_id() RETURNS uuid
+  LANGUAGE sql STABLE
+  AS $$ select nullif(current_setting('app.current_restaurant_id', true), '')::uuid $$;--> statement-breakpoint
+ALTER TABLE "supplier_contract_prices" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+DROP POLICY IF EXISTS "supplier_contract_prices_tenant" ON "supplier_contract_prices";--> statement-breakpoint
+CREATE POLICY "supplier_contract_prices_tenant" ON "supplier_contract_prices" USING (restaurant_id = app.current_restaurant_id());

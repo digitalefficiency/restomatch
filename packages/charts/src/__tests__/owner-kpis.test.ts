@@ -99,6 +99,22 @@ describe('computeOwnerKpis', () => {
     expect(kpis.pendingApprovalsCount).toBe(2);
   });
 
+  it('does not count the ₪0 QTY_SHORT twin of a short delivery billed in full as pending', async () => {
+    const restaurantId = await seedRestaurant();
+    const [mr] = await db
+      .insert(matchRuns)
+      .values({ restaurantId, overallStatus: 'major', totalDiscrepancyAmount: '38.70' })
+      .returning();
+    await db.insert(discrepancies).values([
+      { matchRunId: mr!.id, restaurantId, type: 'QTY_OVER', severity: 'block', resolutionStatus: 'open', deltaAmount: '38.70' },
+      { matchRunId: mr!.id, restaurantId, type: 'QTY_SHORT', severity: 'warn', resolutionStatus: 'open', deltaAmount: '0' },
+      { matchRunId: mr!.id, restaurantId, type: 'QTY_SHORT', severity: 'warn', resolutionStatus: 'open', deltaAmount: '16' },
+    ]);
+    const kpis = await computeOwnerKpis(db, restaurantId);
+    expect(kpis.pendingApprovalsCount).toBe(2);
+    expect(kpis.monthPotentialLossIls).toBeCloseTo(54.7, 2);
+  });
+
   it('sums resolved discrepancies into savingsCaptured', async () => {
     const restaurantId = await seedRestaurant();
     const [mr] = await db

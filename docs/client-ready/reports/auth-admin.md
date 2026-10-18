@@ -135,3 +135,91 @@ auth emails, single escape), `apps/web/lib/__tests__/roles.test.ts`, `apps/web/l
 
 Screenshots: `docs/client-ready/screenshots/auth-{login,reset,2fa,onboarding,set-password,settings-owner,settings-receiver,team,admin,admin-restaurant,admin-leads}-{he,en}.png`
 (not every page in both languages: 2FA is he only, receiver settings is en only).
+
+---
+
+## Round: F4/F5/F6 + full auth/roles/security QA on the RC (b5334f6)
+
+Priority per the final-review triage: F4 is a hard boot failure; F5/F6 are **WARN-level** only.
+
+### Fixed
+| # | Sev | What | Where | Test |
+|---|---|---|---|---|
+| F4 | med | Prod boot fails without `AUTH_SECRET` (or `NEXTAUTH_SECRET`, which Auth.js v5 also reads); an empty value counts as missing | `apps/web/lib/env.ts` | `env.test.ts` |
+| F5 | low | WARN (never throw) when `NEXT_PUBLIC_SUPABASE_URL`/`SUPABASE_URL` is not `https://<ref>.supabase.co`, and when the DB URLs' ref differs from the Supabase URL's ref (logs `KEY=ref` only, never hosts/passwords) | `env.ts` `webEnvWarnings` | `env.test.ts` |
+| F6 | low | WARN when the `APP_URL` and `AUTH_URL` origins differ; ENV doc: open the demo **only on `AUTH_URL`** (AUTH rows only) | `env.ts`, `docs/ENV-PRODUCTION.md` | `env.test.ts` |
+| Q1 | **med** | **Invitee session kept `role=null` in its cookie for its whole life**, because the session was minted before the membership existed and an RSC can't rewrite cookies. So the middleware role gate never applied to a new invitee; only page/procedure guards did. Invite accept now redirects through `/api/session/refresh` (`unstable_update` → membership re-query, same-origin `next` only). Verified on the prod build: the cookie carries `role=chef` and `/dashboard/suppliers` gets an HTTP bounce. | `app/api/session/refresh/route.ts`, `app/invite/accept/page.tsx` | `route.test.ts` (refresh, open-redirect, signed-out) |
+| Q2 | med | Regression in this round's own schema: `AUTH_SECRET=''` / `SUPABASE_URL=''` was a zod parse error that would brick **dev** boot too. Now `''` = unset. `NEXTAUTH_URL` satisfies the URL requirement. | `env.ts` | `env.test.ts` |
+
+### QA (production build: `next start`, NODE_ENV=production, local Postgres/Redis only)
+Harness: a scratchpad-only `--require` preload swapped `api.resend.com` for a local JSON sink and logged any non-localhost egress. **Zero real emails sent; zero external requests.** The production email code was not changed (the E2E sink stays a proposal). Separate DB `restomatch_qa` (prepared like `e2e/prepare-db.ts`).
+
+| Area | Result |
+|---|---|
+| Password login: wrong password / unknown email → same `CredentialsSignin` | ✅ |
+| Session cookie httpOnly + SameSite=Lax; remember-me 30d, otherwise 1d | ✅ |
+| Logout → dashboard needs login again | ✅ (4/4 isolated; one suite flake was the harness navigating before the action finished) |
+| Revocation (`token_version` bump) → next request goes to /login | ✅ |
+| Session expiry (server-signed JWTs with an old `loginAt`): 25h not-remembered → out; 25h remembered → in; 31d → out | ✅ |
+| Magic link: sent to the sink, logs in, single-use (`?error=Verification` on reuse) | ✅ |
+| 2FA: enrol (wrong code rejected, 10 recovery codes, persisted) → pending session gated → TOTP keeps the callbackUrl → recovery code works → reused recovery code rejected → disable with a current code | ✅ |
+| Invite: email in English for an `en` invite (only the tenant name is Hebrew), link has `lang=en` + callbackUrl, invitee login/magic link in English, accept → role chef + locale en, English UI, team page blocked | ✅ |
+| Team: owner changes a role; manager is read-only but sets a member's language → that member sees English | ✅ |
+| Admin: allowlisted owner sees /admin, restaurant detail and leads; every other role gets 404 | ✅ |
+| Role × page matrix: 5 roles × 25 routes (all /dashboard pages + /scans + /admin) | ✅ No 5xx anywhere; every route outside ROUTE_ROLES bounces to /dashboard |
+| Rate limits: login (Redis 10/15min per email + 30/IP, uniform error; DB lockout after 5 blocks even the right password); magic link (3/15min, 4th → friendly message, only 3 mails); invite (21st/hour → "too many invites", no mail) | ✅ |
+| CSP: `Content-Security-Policy-Report-Only` (nonce) on public pages; **0 CSP violations** on 12 public pages × he/en and on all dashboard pages × 5 roles | ✅ |
+| `?lang=`: en → cookie + LTR; persists; invalid value ignored; he → RTL | ✅ |
+| Boot guard (with `.env.local` moved aside, since `next start` loads it): each of AUTH_SECRET, DATABASE_URL_APP, RESEND_API_KEY, EMAIL_FROM, REDIS_URL, SUPABASE_SERVICE_ROLE_KEY, AUTH_ENC_KEY missing → every route 500 with a `[env] missing required production secrets` log naming it. AUTH_URL **or** APP_URL alone is enough (by design) | ✅ |
+
+### Findings not fixed (proposals / other areas)
+- **Least privilege (medium, needs a product call):** `/dashboard/invoices/[id]` and `/dashboard/products(/[id])` render for **chef and receiver**. They are backed by `memberProcedure` (`receiving.getInvoice`, `products.list`, `catalog.productDetail`), which return invoice totals and VAT, billed unit prices and price history. Writes are manager-only. Receivers need invoice detail for receiving; chef arguably doesn't need prices. Proposal: a `receiverProcedure` tier or price redaction for chef, plus ROUTE_ROLES entries. Not changed on demo eve because it changes role semantics.
+- **Low:** calling `team.invite`/`team.resendInvite` directly over `/api/trpc` skips the 20/h limit, which lives in the server action. No email goes out on that path (email is sent only by the action), but it allows unlimited invitation and audit rows. Fix: `PER_PROCEDURE_LIMITS` in the immutable `app/api/trpc/[trpc]/route.ts` → needs a human PR.
+- **Low:** any role can call `receiving.ensureEnglish`, which may trigger paid translation (already capped/cached from the S2 pass). A tier tightening could go with the item above.
+- **Low (log noise):** a non-admin hitting /admin gets a correct 404, but the page's parallel `adminProcedure` call logs `⨯ TRPCError: platform admin only`.
+- **Needs another area:** an intermittent React hydration error #418 in the prod build, seen once on `/dashboard/catalog/import` and once on `/dashboard/leaks/report` (plus `parentNode` null). It's not tied to one page, so it's likely a shared component. The page recovers.
+
+### Verification (2 layers)
+- **Layer 1, full gate:** `pnpm test` (turbo, all packages), web `tsc --noEmit`, web lint (0 errors), `next build`. Results under "Gate (this round)".
+- **Layer 2:** (a) the production build + Playwright click-through above: 47 auth checks, 125-cell role matrix, 4 expiry checks, 24 public-page loads, boot-guard matrix. (b) An **independent refuter subagent** attacked each claim. It confirmed F4 (Auth.js reads `NEXTAUTH_SECRET`) and the rate limits, and refuted / added: the null-role invitee cookie (→ Q1 fixed), the empty-string regression (→ Q2 fixed), the unreachable "neither URL" warning (removed), the chef/receiver price visibility and the direct-tRPC invite path (→ proposals above).
+
+### Gate (this round, final head)
+- `pnpm test`: 13/13 turbo tasks; **1,102 passed**, 1 skipped (worker); web 212 (was 207 + 5 new).
+- web `tsc --noEmit`: clean. Web lint: 0 errors (9 pre-existing-style warnings). `next build`: ✅ (includes `/api/session/refresh`).
+
+### Immutable files touched
+None. (`cross-tenant` COVERAGE untouched: no new tRPC procedure.)
+
+### Cross-QA: S8 chain / branch switcher (PR #38, `claude/client-ready-chain` @ 6fb058a)
+I built the branch as a production build and ran it against a chain-demo seed: the owner has 3 branches, and the manager was set up as manager on the main branch and chef on Jerusalem. The checks used forged requests via Playwright `request`.
+
+| Check | Result |
+|---|---|
+| Forged `POST /api/auth/session {activeRestaurantId: <branch I'm not a member of>}` | ✅ ignored (stays on the current branch and role) |
+| `chain.switchTarget(<foreign>)` | ✅ 404 "branch not found" |
+| `chain.overview` / `renameBranch` / `addBranch` as a non-owner | ✅ 403 |
+| Manager → `/dashboard/chain` | ✅ bounced |
+| Switch to an own branch where the role is lower (manager → chef) | ✅ the session is re-issued with **that branch's role**; the edge gate uses it (`/dashboard/suppliers` → HTTP bounce); manager-tier writes → 403 |
+| `token_version` bump after a switch | ✅ next request → /login |
+| Owner switches to Haifa | ✅ session `owner@Haifa`, `/dashboard/chain` 200, header shows the branch |
+| Garbage `activeRestaurantId` | ✅ ignored |
+| #38's `chain.attack` + `cross-tenant` + `rls.attack` suites | ✅ 183/183; `activeRestaurant.test.ts` 6/6 |
+
+Code review: the requested branch is honoured only if it is in the DB memberships (`pickActiveMembership`). It runs after the `token_version` check, and the 2FA gate still clears only via the server-verified ticket. Cross-branch reads run in each branch's own `withRestaurant` RLS transaction, and `addBranch` checks the billing-account payer and takes an advisory lock. **No findings.** One note for merging with this PR: `/api/session/refresh` calls `unstable_update({})`, which carries no `activeRestaurantId`, so it keeps the current branch.
+
+#### Cross-QA #38, second pass (orchestrator's list; chain head 6fb058a ⊇ 8bd32da)
+Adversarial seed: **RIVAL**, a restaurant on the *same billing account*, owned by chef@. The chain owner is only a *manager* there. The price-disparity flag is on.
+
+| Check | Result |
+|---|---|
+| `chain.overview` / `chain.branches` as owner | ✅ only the caller's **owner** branches; RIVAL is absent even though it shares the billing account |
+| Price-disparity panel | ✅ rows come only from own branches (each read under its own `withRestaurant` RLS) |
+| Owner switches to RIVAL (manager there) | ✅ role becomes manager; `chain.overview` 403, `renameBranch(RIVAL)` rejected |
+| CSRF: captured real `switchBranchAction` POST, replayed with `Origin: https://evil.example` | ✅ rejected (500, Next's server-action origin check), session unchanged. A same-origin replay works (control) |
+| `addBranch` ×6 in parallel (limit 5, 4 existing) | ✅ exactly 1 succeeds, 5 get 403. The advisory lock holds |
+| `addBranch` by a co-owner who is not the payer | ✅ 403. ⚠ low (UX): the error is `ENTITLEMENT_REQUIRED:chain`, so a non-payer sees an upsell, not "only the payer can add branches" |
+| Membership removed while active on that branch | ⚠ **pre-existing design, not #38:** tenant data is still served until the 10-min membership re-check (`MEMBERSHIP_REVALIDATE_MS`), because RLS trusts the JWT's restaurant id. Any session update (a switch, `/api/session/refresh`) drops it immediately, and switching back is refused |
+| Stale JWT carrying an old active restaurant | ✅ re-validated off that restaurant once the cache stamp is older than 10 min. A JWT with a fresh stamp is trusted for that window, which needs `AUTH_SECRET` to forge, so it isn't an attacker capability |
+| Interplay with `/api/session/refresh` | ✅ `unstable_update({})` keeps the current branch, and also drops a removed one |
+
+Proposal (not fixed; it's in the shared auth/team code): on member removal or role change, bump a per-user membership epoch (or `token_version` for the removed user) so the 10-min window closes immediately.

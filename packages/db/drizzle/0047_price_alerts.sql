@@ -13,7 +13,7 @@
 --   cheaper_* = the same product's latest price at another supplier, when lower.
 --   Prices are shekels NUMERIC(12,4) like price_history.unit_price.
 --
--- RLS: both tables added to drizzle/rls/0002_core_tenant_rls.sql. Additive only;
+-- RLS: enabled + per-restaurant policies at the end of this file. Additive only;
 -- rollback = DROP TABLE price_alerts, price_alert_thresholds.
 CREATE TABLE IF NOT EXISTS "price_alert_thresholds" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
@@ -69,4 +69,18 @@ CREATE INDEX IF NOT EXISTS "price_alerts_cheaper_supplier_idx" ON "price_alerts"
 CREATE INDEX IF NOT EXISTS "price_alerts_dismissed_by_idx" ON "price_alerts" ("dismissed_by");
 --> statement-breakpoint
 DROP TRIGGER IF EXISTS "price_alert_thresholds_set_updated_at" ON "price_alert_thresholds";--> statement-breakpoint
-CREATE TRIGGER "price_alert_thresholds_set_updated_at" BEFORE UPDATE ON "price_alert_thresholds" FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+CREATE TRIGGER "price_alert_thresholds_set_updated_at" BEFORE UPDATE ON "price_alert_thresholds" FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();--> statement-breakpoint
+-- Tenant RLS lives in this migration (not in drizzle/rls/0002, which the
+-- integrator regenerates): same shape as 0002's per-restaurant policy. The
+-- helper is created exactly as rls/0002 defines it (idempotent) so a database
+-- migrated before provision-rls still gets working policies.
+CREATE SCHEMA IF NOT EXISTS app;--> statement-breakpoint
+CREATE OR REPLACE FUNCTION app.current_restaurant_id() RETURNS uuid
+  LANGUAGE sql STABLE
+  AS $$ select nullif(current_setting('app.current_restaurant_id', true), '')::uuid $$;--> statement-breakpoint
+ALTER TABLE "price_alert_thresholds" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+DROP POLICY IF EXISTS "price_alert_thresholds_tenant" ON "price_alert_thresholds";--> statement-breakpoint
+CREATE POLICY "price_alert_thresholds_tenant" ON "price_alert_thresholds" USING (restaurant_id = app.current_restaurant_id());--> statement-breakpoint
+ALTER TABLE "price_alerts" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+DROP POLICY IF EXISTS "price_alerts_tenant" ON "price_alerts";--> statement-breakpoint
+CREATE POLICY "price_alerts_tenant" ON "price_alerts" USING (restaurant_id = app.current_restaurant_id());

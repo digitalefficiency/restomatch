@@ -1,15 +1,12 @@
 'use client';
 
-import { useRef, useState } from 'react';
-import { gsap } from 'gsap';
-import { useGSAP } from '@gsap/react';
+import { useEffect, useRef, useState } from 'react';
 import { Check, ClipboardList, FileText, PackageCheck, Pause, Play, RotateCcw, TriangleAlert } from 'lucide-react';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { landing } from '@/lib/i18n/messages/landing';
 import { formatIls } from '@/lib/money';
 import { cn } from '@/lib/components/cn';
 
-gsap.registerPlugin(useGSAP);
 
 type Status = 'ok' | 'price' | 'short' | 'unordered';
 
@@ -55,16 +52,21 @@ export function HeroMatch() {
   const t = useT(landing);
   const locale = useLocale();
   const root = useRef<HTMLDivElement>(null);
-  const tl = useRef<gsap.core.Timeline | null>(null);
+  const tl = useRef<ReturnType<typeof import('gsap').gsap.timeline> | null>(null);
   // WCAG 2.2.2: the loop runs > 5 s, so it must be pausable. `animating` also
   // hides the controls when the timeline never starts (reduced motion / no JS).
   const [animating, setAnimating] = useState(false);
   const [paused, setPaused] = useState(false);
 
-  useGSAP(
-    () => {
-      const mm = gsap.matchMedia();
-      mm.add('(prefers-reduced-motion: no-preference)', () => {
+  // GSAP is loaded lazily (dynamic import after mount) so it isn't part of the
+  // landing page's first-load JS; SSR already shows the final frame.
+  useEffect(() => {
+    let mm: ReturnType<typeof import('gsap').gsap.matchMedia> | null = null;
+    let cancelled = false;
+    void import('gsap').then(({ gsap }) => {
+      if (cancelled || !root.current) return;
+      mm = gsap.matchMedia();
+      mm!.add('(prefers-reduced-motion: no-preference)', () => {
         const q = gsap.utils.selector(root);
         const total = q('[data-total]')[0] as HTMLElement | undefined;
         const counter = { v: 0 };
@@ -108,10 +110,12 @@ export function HeroMatch() {
           setAnimating(false);
         };
       });
-      return () => mm.revert();
-    },
-    { scope: root, dependencies: [locale] },
-  );
+    });
+    return () => {
+      cancelled = true;
+      mm?.revert();
+    };
+  }, [locale]);
 
   const docs = [
     { icon: ClipboardList, label: t('visual.docPo') },

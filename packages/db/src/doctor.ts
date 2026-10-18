@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import postgres from 'postgres';
 import { INTEGRITY_CHECKS } from './integrityChecks';
 import { migrationHash, migrationsDir, readJournal, REQUIRED_EXTENSIONS, type JournalEntry } from './migrations';
@@ -201,6 +203,7 @@ const PRECONDITIONS: Record<string, (c: Ctx) => Promise<PreconditionResult>> = {
   '0030_fk_indexes': async () => ({ status: 'PASS', detail: 'CREATE INDEX IF NOT EXISTS only' }),
   '0031_updated_at_triggers': async () => ({ status: 'PASS', detail: 'trigger function + BEFORE UPDATE triggers only' }),
 
+  '0033_plans_catalog': async () => ({ status: 'PASS', detail: 'upsert of the plan catalog (PLAN_SEED) — re-prices existing plans to PLAN_SEED' }),
   '0039_invitation_locale': async () => ({ status: 'PASS', detail: 'additive (nullable column, guarded CHECK)' }),
   '0046_supplier_contract_prices': async () => ({ status: 'PASS', detail: 'new table + UNIQUE(id, restaurant_id) on products (id is the PK — cannot fail)' }),
   '0047_price_alerts': async () => ({ status: 'PASS', detail: 'new tables only' }),
@@ -518,13 +521,13 @@ export async function runDoctor(url: string, opts: DoctorOptions = {}): Promise<
           select distinct c.relname as t from pg_class c
           join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
           cross join unnest(${apiRoles}::text[]) as r(role)
-          where c.relkind = 'r' and (has_table_privilege(r.role, c.oid, 'SELECT')
+          where c.relkind in ('r', 'p', 'v', 'm', 'f') and (has_table_privilege(r.role, c.oid, 'SELECT')
              or has_table_privilege(r.role, c.oid, 'INSERT') or has_table_privilege(r.role, c.oid, 'UPDATE')
              or has_table_privilege(r.role, c.oid, 'DELETE'))
           order by 1`) as unknown as Array<{ t: string }>;
         add('app role', 'Supabase Data API locked out', exposed.length ? 'FAIL' : 'PASS',
           exposed.length
-            ? `${apiRoles.join('/')} can reach ${exposed.length} public table(s) via the publishable key: ${exposed.map((e) => e.t).join(', ')} — apply the latest supabase/migrations RLS file`
+            ? `${apiRoles.join('/')} can reach ${exposed.length} public relation(s) via the publishable key: ${exposed.map((e) => e.t).join(', ')} — apply the latest supabase/migrations RLS file`
             : `${apiRoles.join('/')} have no table privileges in public`);
       }
 
@@ -605,9 +608,40 @@ export async function runDoctor(url: string, opts: DoctorOptions = {}): Promise<
           order by 1`) as unknown as Array<{ t: string }>;
         add('constraints', 'updated_at triggers', noTrg.length ? 'WARN' : 'PASS',
           noTrg.length ? `no set_updated_at trigger on: ${noTrg.map((r) => r.t).join(', ')} (re-run 0031's DO block)` : 'every updated_at column is maintained by trigger');
+      } else if (applied.some((a) => a.tag === '0031_updated_at_triggers')) {
+        add('constraints', 'updated_at triggers', 'WARN', 'set_updated_at() is MISSING although 0031 is recorded as applied (schema drift — re-run packages/db/drizzle/0031_updated_at_triggers.sql)');
       } else {
         add('constraints', 'updated_at triggers', 'SKIP', 'set_updated_at() not installed yet (0031 pending)');
       }
+
+      // Schema drift: objects a migration created must still exist if the tracker
+      // says it is applied (catches hand-run undo SQL / partial restores).
+      const appliedTags = new Set(applied.map((a) => a.tag));
+      const expectIdx: string[] = [];
+      if (appliedTags.has('0029_tenant_scoped_uniques')) expectIdx.push('po_restaurant_source_ref_unique', 'suppliers_restaurant_external_ref_unique');
+      if (appliedTags.has('0030_fk_indexes')) {
+        try {
+          const sql0030 = readFileSync(join(dir, '0030_fk_indexes.sql'), 'utf8');
+          expectIdx.push(...[...sql0030.matchAll(/CREATE INDEX IF NOT EXISTS "([a-z_]+)"/g)].map((m) => m[1]!));
+        } catch {
+          /* file missing in this checkout — skip */
+        }
+      }
+      const haveIdx = new Set(
+        ((await tx`select indexname from pg_indexes where schemaname = 'public'`) as unknown as Array<{ indexname: string }>).map((r) => r.indexname),
+      );
+      const haveCon = new Set(
+        ((await tx`select conname from pg_constraint where connamespace = 'public'::regnamespace`) as unknown as Array<{ conname: string }>).map((r) => r.conname),
+      );
+      const missing = [
+        ...expectIdx.filter((i) => !haveIdx.has(i)).map((i) => `index ${i}`),
+        ...(appliedTags.has('0032_integrity_checks') ? INTEGRITY_CHECKS.filter((c) => !haveCon.has(c.name)).map((c) => `check ${c.name}`) : []),
+      ];
+      const legacy = ['po_source_ref_unique', 'suppliers_external_ref_unique'].filter((i) => appliedTags.has('0029_tenant_scoped_uniques') && haveIdx.has(i));
+      add('constraints', 'applied migrations intact', missing.length + legacy.length ? 'WARN' : 'PASS',
+        missing.length + legacy.length
+          ? `schema drift vs the tracker — missing: ${missing.join(', ') || '—'}${legacy.length ? `; global uniques back (I5): ${legacy.join(', ')}` : ''} (re-run the migration's SQL)`
+          : 'every object from 0029/0030/0032 present');
 
       // ── 10. Supabase storage ────────────────────────────────────────────
       const [storage] = await tx`select to_regclass('storage.buckets') is not null as e`;
@@ -615,6 +649,38 @@ export async function runDoctor(url: string, opts: DoctorOptions = {}): Promise<
         const b = await tx`select public from storage.buckets where id = 'invoice-scans'`;
         if (!b.length) add('storage', 'invoice-scans bucket', 'WARN', 'bucket missing');
         else add('storage', 'invoice-scans bucket', b[0]!.public ? 'FAIL' : 'PASS', b[0]!.public ? 'bucket is PUBLIC — invoice scans readable by URL (apply rls/0001)' : 'private');
+        // rls/0001: the four per-restaurant policies must exist (the Supabase RLS
+        // migration only WARNs when it may not create them), and nothing else may
+        // open storage.objects to the publishable key. The walk-ins showcase
+        // policies are known and WARN until the server-side showcase upload lands
+        // (SB-3, docs/SUPABASE-GITHUB-DEPLOY.md).
+        const pols = (await tx`
+          select policyname, roles::text[] as roles from pg_policies
+          where schemaname = 'storage' and tablename = 'objects'`) as unknown as Array<{ policyname: string; roles: string[] }>;
+        const tenantPol = ['select', 'insert', 'update', 'delete'].map((op) => `invoice_scans_tenant_${op}`);
+        const missingPol = tenantPol.filter((n) => !pols.some((p) => p.policyname === n));
+        add('storage', 'tenant storage policies', missingPol.length ? 'FAIL' : 'PASS',
+          missingPol.length
+            ? `missing ${missingPol.join(', ')} — invoice scans are unreadable/unwritable for tenants (apply packages/db/drizzle/rls/0001_invoice_scans_rls.sql in the SQL editor)`
+            : '4 per-restaurant policies on storage.objects');
+        const walkins = pols.filter((p) => p.policyname.startsWith('invoice_scans_walkins'));
+        const stray = pols.filter((p) => !tenantPol.includes(p.policyname) && !p.policyname.startsWith('invoice_scans_walkins'));
+        const strayAnon = stray.filter((p) => p.roles.includes('anon') || p.roles.includes('public'));
+        add('storage', 'no anonymous storage access', strayAnon.length ? 'FAIL' : walkins.length ? 'WARN' : 'PASS',
+          strayAnon.length
+            ? `unexpected storage.objects policies open to anon/public: ${strayAnon.map((p) => p.policyname).join(', ')} — drop them`
+            : walkins.length
+              ? `${walkins.map((p) => p.policyname).join(', ')}: anyone with the publishable key can list/upload walk-ins/ (showcase demo prefix only — never a tenant prefix). Drop once the server-side showcase upload ships (SB-3)`
+              : 'no anon policies on storage.objects');
+        const [hasLimits] = await tx`
+          select count(*)::int as n from information_schema.columns
+          where table_schema = 'storage' and table_name = 'buckets' and column_name in ('file_size_limit', 'allowed_mime_types')`;
+        if (b.length && hasLimits!.n === 2) {
+          const [lim] = await tx`select file_size_limit, allowed_mime_types from storage.buckets where id = 'invoice-scans'`;
+          const ok = lim!.file_size_limit != null && lim!.allowed_mime_types != null;
+          add('storage', 'invoice-scans upload limits', ok ? 'PASS' : 'WARN',
+            ok ? `≤${Math.round(Number(lim!.file_size_limit) / 1048576)} MiB · ${(lim!.allowed_mime_types as string[]).join(', ')}` : 'no file_size_limit / allowed_mime_types on the bucket (apply the latest RLS migration)');
+        }
       } else {
         add('storage', 'invoice-scans bucket', 'SKIP', 'no storage schema (not Supabase)');
       }

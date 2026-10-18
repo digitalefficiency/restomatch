@@ -65,9 +65,7 @@ begin
     'storage_namespaces',
     'match_runs','discrepancies','activity_events','price_history',
     'price_baselines','approval_rules','audit_log','procurement_connections',
-    'email_inboxes','supplier_integrations','notifications_outbox',
-    -- wave 1 (S11, migrations 0046–0047)
-    'supplier_contract_prices','price_alert_thresholds','price_alerts'
+    'email_inboxes','supplier_integrations','notifications_outbox'
   ] loop
     if exists (
       select 1 from information_schema.columns
@@ -378,15 +376,25 @@ grant usage on schema public to restomatch_app;
       end $$;
 
 -- 5. Storage (Supabase): the private invoice-scans bucket the app uploads to,
---    then the per-restaurant storage.objects policies (rls/0001). storage.objects
+--    then the storage.objects policies from rls/0001 (per-restaurant + the anon
+--    'walk-ins/' showcase prefix — dropping that one waits for the server-side
+--    showcase upload, see SUPABASE-GITHUB-DEPLOY.md §SB-3). storage.objects
 --    belongs to supabase_storage_admin; if the migration role may not alter it or
 --    create policies on it, this logs a WARNING instead of failing the deploy —
 --    apply rls/0001 from the SQL editor then (the doctor / verify-cutover report it).
 do $$ begin
   if to_regclass('storage.buckets') is not null then
-    insert into storage.buckets (id, name, public)
-    values ('invoice-scans', 'invoice-scans', false)
-    on conflict (id) do update set public = false;
+    -- SB-3: private, ≤11 MiB, invoice formats only (enforced by the Storage API).
+    -- 11 MiB sits just above scans.upload's own cap (14M base64 chars ≈ 10.5 MB)
+    -- so the app's friendly error fires first; HEIC/HEIF because the receiver
+    -- picker accepts image/* and iPhones hand over HEIC from the photo library.
+    insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+    values ('invoice-scans', 'invoice-scans', false, 11534336,
+            array['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'])
+    on conflict (id) do update set
+      public = false,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
   end if;
 end $$;
 

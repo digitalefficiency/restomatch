@@ -14,6 +14,8 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  Network,
+  Store,
   MoreHorizontal,
   PackageCheck,
   Settings,
@@ -37,12 +39,14 @@ type LinkKey =
   | 'receiving'
   | 'approvals'
   | 'leaks'
+  | 'chain'
   | 'suppliers'
   | 'catalog'
   | 'contracts'
   | 'orders'
   | 'exports'
   | 'team'
+  | 'branches'
   | 'settings';
 type GroupKey = 'operations' | 'purchasing' | 'admin';
 
@@ -60,12 +64,14 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'receiving', href: '/dashboard/receiving', icon: PackageCheck, group: 'operations' },
   { key: 'approvals', href: '/dashboard/approvals', icon: Inbox, group: 'operations' },
   { key: 'leaks', href: '/dashboard/leaks', icon: BarChart3, group: 'operations' },
+  { key: 'chain', href: '/dashboard/chain', icon: Network, group: 'operations' },
   { key: 'suppliers', href: '/dashboard/suppliers', icon: Truck, group: 'purchasing' },
   { key: 'catalog', href: '/dashboard/catalog', icon: Boxes, group: 'purchasing' },
   { key: 'contracts', href: '/dashboard/contracts', icon: FileSignature, group: 'purchasing', wave1: true },
   { key: 'orders', href: '/dashboard/orders', icon: ShoppingCart, group: 'purchasing' },
   { key: 'exports', href: '/dashboard/exports', icon: FileDown, group: 'admin' },
   { key: 'team', href: '/dashboard/team', icon: Users, group: 'admin' },
+  { key: 'branches', href: '/dashboard/branches', icon: Store, group: 'admin' },
   { key: 'settings', href: '/dashboard/settings', icon: Settings, group: 'admin' },
 ];
 
@@ -84,8 +90,20 @@ export interface Wave1Nav {
   badge: number;
 }
 
-function visibleItems(role: UserRole, wave1?: Wave1Nav): NavItem[] {
-  return NAV_ITEMS.filter(({ href, wave1: gated }) => canSeeRoute(role, href) && (!gated || wave1?.visible === true));
+/**
+ * `showChain`: owners who run more than one branch get the Chain tab (branch
+ * management is then one click away in the branch switcher and on the chain
+ * page); single-branch owners get the Branches tab instead (open a branch /
+ * see the chain plan). One of the two, so the tab row still fits.
+ */
+function visibleItems(role: UserRole, showChain = false, wave1?: Wave1Nav): NavItem[] {
+  return NAV_ITEMS.filter(
+    ({ key, href, wave1: gated }) =>
+      canSeeRoute(role, href) &&
+      (key !== 'chain' || showChain) &&
+      (key !== 'branches' || !showChain) &&
+      (!gated || wave1?.visible === true),
+  );
 }
 
 /** Small open-alert count pill next to the contracts entry. */
@@ -107,10 +125,10 @@ const focusRing =
  * with hairline separators. Scrolls horizontally instead of wrapping if a
  * narrow laptop can't fit every tab.
  */
-export function DesktopNav({ role, wave1 }: { role: UserRole; wave1?: Wave1Nav }) {
+export function DesktopNav({ role, showChain = false, wave1 }: { role: UserRole; showChain?: boolean; wave1?: Wave1Nav }) {
   const t = useT(nav);
   const pathname = usePathname();
-  const items = visibleItems(role, wave1);
+  const items = visibleItems(role, showChain, wave1);
   return (
     <nav aria-label={t('mainLabel')} className="hidden lg:block">
       <ul className="-mb-px flex items-stretch gap-1 overflow-x-auto text-sm [scrollbar-width:none]">
@@ -162,12 +180,17 @@ export function MobileNav({
   logout,
   restaurantName,
   email,
+  showChain = false,
+  branchSwitcher,
   wave1,
 }: {
   role: UserRole;
   logout: () => Promise<void>;
   restaurantName: string;
   email: string;
+  showChain?: boolean;
+  /** The branch switcher (list variant), for users with more than one membership. */
+  branchSwitcher?: React.ReactNode;
   wave1?: Wave1Nav;
 }) {
   const t = useT(nav);
@@ -180,7 +203,7 @@ export function MobileNav({
   useEffect(() => setMounted(true), []);
   const closeRef = useRef<HTMLButtonElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const items = visibleItems(role, wave1);
+  const items = visibleItems(role, showChain, wave1);
   const primary = items.slice(0, 4);
 
   // Close on navigation.
@@ -260,6 +283,7 @@ export function MobileNav({
             <div className="border-b border-line px-4 py-3">
               <DashboardSearch role={role} />
             </div>
+            {branchSwitcher ? <div className="border-b border-line px-2 py-3">{branchSwitcher}</div> : null}
             <nav aria-label={t('mainLabel')} className="flex-1 overflow-y-auto px-2 py-3">
               {GROUPS.map((g) => {
                 const groupItems = items.filter((i) => i.group === g);
