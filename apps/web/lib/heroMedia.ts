@@ -8,7 +8,7 @@
  * the modal. Paths are root-relative so they work behind any origin.
  */
 export const heroMedia = {
-  available: false,
+  available: true,
   loop: {
     webm: '/media/hero-loop.webm',
     mp4: '/media/hero-loop.mp4',
