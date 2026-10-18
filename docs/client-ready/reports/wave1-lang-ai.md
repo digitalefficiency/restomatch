@@ -111,6 +111,20 @@ Branch `claude/wave1-lang-ai` → draft PR #42 into `claude/client-ready`. Both 
   - `ask.status`, `ask.ask`
 - A new describe block covers foreign-id and isolation cases A → B: foreign PO/invoice ids are `NOT_FOUND`, B's member can't be changed, an `ask` answer never contains B's ids or invoice numbers, and the flag is read only for the session restaurant.
 
+## Receiver-language quality pass (orchestrator ask, after S4 cross-QA)
+
+Each language got one more reviewer pass. Every string was checked against its he/en source for meaning and for length, since it must fit buttons on a 390 px phone:
+
+| Language | Strings changed | Flagged for a native speaker | Notes |
+|---|---|---|---|
+| Arabic (ar) | 11 | 14 | terms unified: invoice فاتورة, order طلبية, delivery توصيلة |
+| Russian (ru) | 17 | 13 | shorter buttons; delivery notes renamed "документы поставок" so they no longer clash with "накладная" |
+| Thai (th) | 18 | 17 | invoice term switched to the everyday **บิล** (34 places) |
+| Tigrinya (ti) | 7 | 53 high-priority (P1) + 56 other (P2) | buttons shortened; Amharic words replaced; the gender of ፋቱራ made consistent |
+
+- **Unit words:** word units now show in the receiver's language for ar/ru/th (for example "17 ربطة", "ящик", "ลัง"). Symbols such as kg, g, L and ml are unchanged. Tigrinya stays English until a native review. The code is `unitLabelFor` in `packages/translate/src/units.ts`.
+- **Native-speaker review lists:** the full per-language lists (every change, plus every string to confirm) are in **`docs/client-ready/reports/wave1-lang-ai-native-review.md`**.
+
 ## Uncertain translations (please have a native speaker check)
 
 - **Tigrinya (most important):** nav `ሰንሰለት`/`ጨናፍር` (chain/branches, added at merge time without review);
