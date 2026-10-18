@@ -14,6 +14,10 @@ export async function registerNode(): Promise<void> {
   // DATABASE_URL_APP/RESEND/REDIS/etc.) instead of booting and degrading silently.
   assertWebEnv();
 
+  // S14: the assistant's burst limit uses the shared (Redis) rate-limit store.
+  const { registerAskRateLimit } = await import('./lib/askRateLimit');
+  registerAskRateLimit();
+
   // Tenant-boundary boot guards (Epic 0.1/0.3). Only meaningful when we are
   // actually serving tenant traffic on the app role: in production the role is
   // mandatory; in dev we still run the guard when DATABASE_URL_APP is set (to

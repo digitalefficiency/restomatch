@@ -5,7 +5,7 @@
  */
 import type { Database } from '@restomatch/db';
 import { TRPCError } from '@trpc/server';
-import { addClaudeSpend, recordUsage, reserveQuestion, takeBurst } from './budget';
+import { addClaudeSpend, allowAskBurst, recordUsage, reserveQuestion } from './budget';
 import { anthropicAskClient, AskRunError, runClaude, type AskClientLike } from './claude';
 import { groundAnswer, type Citation } from './grounding';
 import { offlineAnswer, type CannedIntent } from './offline';
@@ -49,7 +49,7 @@ export async function runAsk(
   const now = opts.now ?? new Date();
   const client = askClient(opts.env ?? process.env);
   // Burst limit on every path (offline answers run DB aggregates too).
-  if (!takeBurst(restaurantId, now.getTime())) {
+  if (!(await allowAskBurst(restaurantId, now.getTime()))) {
     throw new TRPCError({ code: 'TOO_MANY_REQUESTS', message: 'יותר מדי שאלות בדקה. נסו שוב בעוד רגע.' });
   }
   let reason: OfflineReason | null = null;
@@ -101,7 +101,15 @@ export async function runAsk(
 
 export { AskRunError } from './claude';
 export { CANNED_INTENTS, classifyQuestion, type CannedIntent } from './offline';
-export { ASK_COST_MICRO_USD_PER_DAY, ASK_QUESTIONS_PER_DAY, usageToday, __resetAskBurst } from './budget';
+export {
+  ASK_BURST_LIMIT,
+  ASK_COST_MICRO_USD_PER_DAY,
+  ASK_QUESTIONS_PER_DAY,
+  setAskBurstLimiter,
+  usageToday,
+  __resetAskBurst,
+  type AskBurstLimiter,
+} from './budget';
 export { askSystemPrompt, ASK_MODEL, type AskClientLike } from './claude';
 export { groundAnswer, figuresIn } from './grounding';
 export { clip, monthKey, runTool, TOOL_DEFINITIONS } from './tools';

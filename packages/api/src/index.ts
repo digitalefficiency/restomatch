@@ -204,4 +204,12 @@ export {
 } from './routers/chain';
 export { localNames, renderSizeSuffix, __setReceiverTranslator } from './receiving/localize';
 export { assertFeature, isFeatureOn } from './lib/featureGate';
-export { runAsk, __setAskClient, __resetAskBurst, type AskResult } from './ask';
+export {
+  runAsk,
+  setAskBurstLimiter,
+  ASK_BURST_LIMIT,
+  __setAskClient,
+  __resetAskBurst,
+  type AskBurstLimiter,
+  type AskResult,
+} from './ask';

@@ -30,6 +30,39 @@ export function takeBurst(restaurantId: string, now: number = Date.now()): boole
   return true;
 }
 
+/**
+ * Shared (cross-instance) burst limiter, injected by the web app at boot
+ * (Redis `enforceRateLimit`). Kept on globalThis so every server bundle of this
+ * package in the process sees the same registration. The process-local window
+ * above still applies on top (it also covers a shared-store outage, where
+ * `enforceRateLimit` fails open).
+ */
+export type AskBurstLimiter = (restaurantId: string) => Promise<boolean>;
+const LIMITER_KEY = Symbol.for('restomatch.askBurstLimiter');
+type LimiterHolder = { [LIMITER_KEY]?: AskBurstLimiter | null };
+
+export function setAskBurstLimiter(fn: AskBurstLimiter | null): void {
+  (globalThis as LimiterHolder)[LIMITER_KEY] = fn;
+}
+
+/** Both the shared limiter (when registered) and the process-local window must allow. */
+export async function allowAskBurst(restaurantId: string, now: number = Date.now()): Promise<boolean> {
+  const shared = (globalThis as LimiterHolder)[LIMITER_KEY];
+  if (shared) {
+    let ok = true;
+    try {
+      ok = await shared(restaurantId);
+    } catch {
+      ok = true; // store outage → the local window below still applies
+    }
+    if (!ok) return false;
+  }
+  return takeBurst(restaurantId, now);
+}
+
+/** The shared limiter's policy (10 questions / minute / restaurant). */
+export const ASK_BURST_LIMIT = { limit: ASK_BURST_PER_MINUTE, windowSec: 60, prefix: 'ask' } as const;
+
 /** Test seam. */
 export function __resetAskBurst(): void {
   burst.clear();

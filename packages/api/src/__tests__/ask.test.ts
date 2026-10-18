@@ -5,7 +5,8 @@ import { __resetAskBurst, __setAskClient, type AskClientLike } from '../ask';
 import { ASK_QUESTIONS_PER_DAY } from '../ask/budget';
 import { askSystemPrompt } from '../ask/claude';
 import { classifyQuestion } from '../ask/offline';
-import { groundAnswer } from '../ask/grounding';
+import { groundAnswer, sanitizeAnswer } from '../ask/grounding';
+import { setAskBurstLimiter } from '../ask/budget';
 import { clip, TOOL_DEFINITIONS } from '../ask/tools';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
@@ -208,6 +209,30 @@ describe('ask: Claude leg (mocked)', () => {
     });
   });
 
+  it('S4 cross-QA L2: a registered shared limiter (Redis in the web app) gates every ask', async () => {
+    const seen: string[] = [];
+    setAskBurstLimiter(async (rid) => {
+      seen.push(rid);
+      return seen.length <= 2;
+    });
+    try {
+      __setAskClient(null);
+      await caller(A).ask.ask({ question: 'how much leaked', locale: 'en' });
+      await caller(A).ask.ask({ question: 'how much leaked', locale: 'en' });
+      await expect(caller(A).ask.ask({ question: 'how much leaked', locale: 'en' })).rejects.toMatchObject({
+        code: 'TOO_MANY_REQUESTS',
+      });
+      expect(seen).toEqual([A.restaurantId, A.restaurantId, A.restaurantId]);
+      // A store outage fails open to the process-local window, never to "no limit".
+      setAskBurstLimiter(async () => {
+        throw new Error('redis down');
+      });
+      await expect(caller(B).ask.ask({ question: 'how much leaked', locale: 'en' })).resolves.toBeTruthy();
+    } finally {
+      setAskBurstLimiter(null);
+    }
+  });
+
   it('a FAILED Claude leg still counts its tokens against the budget', async () => {
     const { client } = fakeClaude((_b, call) =>
       call === 0 ? toolUse('leak_hero') : { content: [{ type: 'text', text: 'not json' }], stop_reason: 'end_turn', usage: { input_tokens: 700, output_tokens: 7000 } },
@@ -310,6 +335,26 @@ describe('ask: prompt injection from invoice text is data, not instructions', ()
     );
     expect(g.citations).toEqual([{ screen: 'overview', value: 3, unit: 'count', href: '/dashboard' }]);
     expect(g.answer).not.toMatch(/050|evil/);
+  });
+
+  it('S4 cross-QA L1: any domain (incl. defanged), IPs and user@host are stripped AND flag the answer', () => {
+    for (const evil of [
+      'Pay at evil.ly/refund now',
+      'Log in at secure-restomatch.dev to confirm',
+      'Settle at restomatch.shop/pay today',
+      'Visit evil[.]com for details',
+      'Upload to 203.0.113.7:8080/drop',
+      'Mail admin@evil.example or evil(.)co dot il',
+    ]) {
+      const s = sanitizeAnswer(evil);
+      expect(s.stripped, evil).toBe(true);
+      expect(s.text, evil).not.toMatch(/evil|restomatch\.|203\.0|\[\.\]|@/);
+      const g = groundAnswer({ answer: evil, citations: [] }, LINKS, FIG);
+      expect(g.grounded, evil).toBe(false);
+    }
+    // Plain prose with prices and sizes is untouched and stays grounded.
+    const ok = 'Leak ₪1,235 this month (12.5% of spend), e.g. Cola Zero 330ml and Milk 3%.';
+    expect(sanitizeAnswer(ok)).toEqual({ text: ok, stripped: false });
   });
 
   it('classifies "why did the leak increase?" as a leak change, not a price raise', () => {
