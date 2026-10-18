@@ -8,9 +8,12 @@ unchanged, and `/dashboard` now opens on one hero: **"₪X leaked this month · 
 ₪Z caught before payment"**. One tap goes from that number to the invoices and lines behind it, and
 from there to a printable credit-request letter per supplier. Everything works in Hebrew and English.
 
-Demo tenant after the fixes (October 2026): **₪381 leaked, 5.3% of ₪7,240 spend**, 6 of 9 invoices
-flagged. Previous month: ₪1,179 (6.7%). Before the seed fix, every invoice's whole total was counted
-on top of these numbers.
+Demo tenant on S1's new seed (October 2026): **₪490 leaked, 1.6% of ₪30,837 checked spend**,
+₪331 caught before payment, ₪159 claimed back, 9 of 27 checked invoices flagged, and 2 consolidated
+invoices (₪2,775) shown calmly as pending. These figures agree across the dashboard, the drill-down,
+the monthly report and the approvals queue. (The seed's own log line says 1.7% of ₪28,870 because it
+counts by receipt date; the hero counts by invoice date and only checked spend. The leak amount is
+the same.)
 
 ## Works (verified)
 
@@ -56,11 +59,41 @@ The rules are designed so an owner believes the number:
 - **Claimed:** discrepancies the team accepted to claim back.
 - **Breakdown:** the invoices sum exactly to the hero (tested). Includes a month switcher.
 
+### New: print-ready monthly leak report (`/dashboard/leaks/report?month=YYYY-MM`)
+
+Requested by the orchestrator in round 2. Owner/manager only (`owner.leakReport`, `managerProcedure`).
+In he + en, linked from the leaks page and the drill-down. Contents:
+- the headline ₪ and % of spend;
+- what happened to the money: caught before payment, still open, credit requested (lines and
+  supplier count), waived;
+- breakdown by discrepancy type, with share bars;
+- breakdown by supplier (spend, leak, %, highlighted at 1.5% or more);
+- top price-creep items: this month's average against the 90-day median before it, with the ₪ excess.
+
+A4 print CSS: window.print or "Save as PDF" prints only the sheet, on white. The supplier rows sum
+exactly to the hero (tested). SQL is in `packages/charts/src/leak-report.ts`, tested in
+`leak-report.test.ts` (6 tests); there is an isolation test in the attack suite. Sample PDFs:
+`docs/client-ready/screenshots/dashboard-leaks-report-{he,en}.pdf`.
+
 ### New: supplier credit-request letters (`/dashboard/leaks/claims`)
 
 The highest-value proposal, implemented. It produces one printable letter per supplier (print or
 save as PDF) listing every line you can claim, with the total. No new money math: it is built on the
 breakdown, and each invoice is capped at its capped leak.
+
+### Round 2 asks from S5
+
+- `owner.suppliers` scorecards now return `supplierNameEn`, and the scorecard grid shows it in
+  English (one line in S5's `suppliers/list.tsx`).
+- `invoice_matched` activity:
+  - the title now names the invoice (`חשבונית {n} הותאמה`, the template S5's `activityText.ts`
+    already parses);
+  - the detail leads with the supplier;
+  - `metadata` carries `{invoiceId, invoiceNumber, supplierName(En), discrepancyCount,
+    potentialLossIls, status}`.
+- `discrepancy_approved` / `discrepancy_rejected` activity now carries `{discrepancyType,
+  savingsIls|amountIls, reason, role}`.
+- Test: `match-money.test.ts` ("structured metadata").
 
 ## Still broken / not done
 
@@ -74,8 +107,8 @@ breakdown, and each invoice is capped at its capped leak.
   ₪16 for 2 kg not delivered and not billed). That is a product decision baked into the canary, and I
   didn't change it. If the owner wants "leak = money paid for nothing", the canary would become ₪16
   instead of ₪32. **Proposed value, not applied.**
-- **Activity feed text** is written in Hebrew at insert time (`logActivity` titles), so it stays
-  Hebrew in English. A proper fix stores an event key plus params; the component belongs to S5.
+- **Activity feed:** my write sites now also store structured metadata (see round 2). Rows written
+  before this change, and other areas' write sites, still rely on S5's Hebrew-template parsing.
 - **Claim letter restaurant name** uses the user's first membership (fine for single-restaurant
   owners).
 - `owner.kpis` (`monthSavingsCapturedIls`) still counts auto-accepted info items. The dashboard no
@@ -84,9 +117,8 @@ breakdown, and each invoice is capped at its capped leak.
 ## Feature and improvement proposals (ranked by client value ÷ effort)
 
 1. **Credit-request letters** — *done* (S).
-2. **Monthly leak report email/PDF** to the owner on the 1st: the hero, the top 5 invoices and the
-   claim letters attached. The data is all in `leakHero`/`leakBreakdown`; needs a cron job (S7/S4
-   own cron and email). **M, ~1 day.**
+2. **Monthly leak report** — *done* as a print-ready page/PDF. Next step: email it to the owner on
+   the 1st with the claim letters attached. Needs a cron job plus an email template (S7/S4). **S, ~½ day.**
 3. **Consolidated-invoice linking:** suggest the POs inside a חשבונית ריכוז by supplier and date
    range, then one-click link and re-match. Removes the last false-alarm path. **M–L, 2–3 days.**
 4. **Supplier price-creep alert:** "Sharon Produce raised tomatoes 3 times in 60 days, +14%." The
@@ -105,7 +137,7 @@ breakdown, and each invoice is capped at its capped leak.
   **Canary unchanged and green.**
 - `packages/matching/src/units.ts` — normalizer strips ׳ ״ (one regex).
 - `packages/api/src/__tests__/cross-tenant.attack.test.ts` — **additive**: COVERAGE entries plus
-  isolation tests for `owner.leakHero` and `owner.leakBreakdown`. No assertion removed.
+  isolation tests for `owner.leakHero`, `owner.leakBreakdown` and `owner.leakReport`. No assertion removed.
 - `packages/api/src/routers/approvals.ts` *(not on the list, but it is the approvals trust
   surface)* — role gate widened to include the bookkeeper. Per-item `requires_role` is still
   enforced, and unrouted items are tightened to owner/manager.
@@ -114,7 +146,10 @@ breakdown, and each invoice is capped at its capped leak.
 
 ## Needs another area
 
-- **S1 (seed/db):** I made a 1-line fix in `apps/worker/scripts/seed-demo.ts` (register the
+- **S1 (seed/db):** the new seed's previous month shows only ₪39 of leak against ₪490 this month.
+  That's fine for "this month", but the "last month: ₪39" comparison in the hero looks odd in a demo.
+  Consider seeding a September closer to 1.5%.
+- **S1 (seed/db, round 1):** I made a 1-line fix in `apps/worker/scripts/seed-demo.ts` (register the
   invoice number after `runMatch`). Please keep it when merging. Also:
   - call `computeBaselines` at the end of the seed, or run `packages/api/scripts/backfill-price-history.ts`,
     so the leak detective is populated in the demo;
@@ -129,16 +164,13 @@ breakdown, and each invoice is capped at its capped leak.
 - **S2 (scans):** `invoice_lines.raw_description_en` is shown in the breakdown when the product
   isn't mapped.
 
-## Gate
+## Gate (round 2, merged with claude/client-ready @ a35f265 + new seed)
 
 ```
 DATABASE_URL_TEST=postgres://postgres:postgres@localhost:5432/restomatch_test pnpm test
-  → Tasks 12/12 successful (matching 86, charts 26, api 399, web 132, worker 9+1 skipped, …)
-packages/matching: npx vitest run              → 86 passed (new tests fail 7/9 on the old engine)
+  → Tasks 12/12 successful (matching 86, charts 33, api 438, web 176, worker 9+1 skipped, db 45, …) — after merging 68ed10d
 packages/api|charts: npx tsc --noEmit -p .      → 0 errors
 apps/web: npx tsc --noEmit -p .                  → 0 errors
-apps/web: npx vitest run lib/__tests__/i18n.test.ts → 31 passed
-apps/web: pnpm build (with .env.local)          → success (all routes compiled)
-apps/web: npx vitest run                         → 132 passed (after final UI edits)
-Playwright screenshots (he/en × desktop/390px)   → 20 shots, 0px horizontal page overflow
+apps/web: pnpm build (with .env.local)          → success (incl. /dashboard/leaks/{breakdown,claims,report})
+Playwright (he/en × desktop/390px, 6 pages)      → 24 screenshots, 0px horizontal page overflow; A4 report PDFs he+en
 ```

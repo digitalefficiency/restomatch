@@ -1,17 +1,19 @@
 import {
   computeLeakBreakdown,
+  computeLeakReport,
   computeLeakHero,
   computeLeaks,
   computeOwnerKpis,
   computeSupplierScorecards,
   type LeakBreakdownInvoice,
   type LeakHero,
+  type LeakReport,
   type LeakRow,
   type OwnerKpis,
   type SupplierScorecard,
 } from '@restomatch/charts';
 import { z } from 'zod';
-import { memberProcedure, ownerProcedure, requireFeature, router } from '../trpc';
+import { managerProcedure, memberProcedure, ownerProcedure, requireFeature, router } from '../trpc';
 
 /** Deep analytics (leak detective, supplier scorecards) are a paid feature. */
 const analyticsProcedure = ownerProcedure.use(requireFeature('advanced_analytics'));
@@ -45,6 +47,14 @@ export const ownerRouter = router({
         monthOffset: input?.monthOffset,
         limit: input?.limit,
       });
+    }),
+
+  // Print-ready monthly leak report — owner/manager only (it lists supplier
+  // spend and what the team waived). Core plan, like the hero it expands.
+  leakReport: managerProcedure
+    .input(z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/) }))
+    .query(async ({ ctx, input }): Promise<LeakReport> => {
+      return computeLeakReport(ctx.db, ctx.session.restaurantId, input.month);
     }),
 
   leaks: analyticsProcedure

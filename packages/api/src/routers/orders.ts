@@ -12,6 +12,7 @@ import {
   or,
   poLines,
   priceBaselines,
+  products,
   purchaseOrders,
   restaurants,
   suppliers,
@@ -24,6 +25,7 @@ import { managerProcedure, memberProcedure, requireFeature, router } from '../tr
 import { assertPoOwned, assertSupplierOwned } from '../tenant';
 import { getEntitlements } from '../entitlements';
 import { importPurchaseOrder } from '../orders/importPo';
+import { estimateTotal, recomputePoTotal } from '../orders/totals';
 import { deriveExpectedDelivery, type DerivedDelivery } from '../lib/deriveDelivery';
 
 /** Cap on an uploaded order document, decoded — a single-page PO PDF is ~50KB. */
@@ -158,19 +160,6 @@ async function baselineWindow(db: Database, restaurantId: string): Promise<numbe
   return r?.settings?.baselineWindowDays ?? DEFAULT_BASELINE_WINDOW_DAYS;
 }
 
-function lineTotalsEstimated(
-  lines: Array<{ qty: number; unitPriceExpected?: number }>,
-): string | null {
-  let total = 0;
-  let any = false;
-  for (const l of lines) {
-    if (typeof l.unitPriceExpected === 'number') {
-      total += l.qty * l.unitPriceExpected;
-      any = true;
-    }
-  }
-  return any ? total.toFixed(2) : null;
-}
 
 export const ordersRouter = router({
   /** Purchase orders for the restaurant, with supplier name + line count. */
@@ -197,6 +186,7 @@ export const ordersRouter = router({
           id: purchaseOrders.id,
           supplierId: purchaseOrders.supplierId,
           supplierName: suppliers.name,
+          supplierNameEn: suppliers.nameEn,
           status: purchaseOrders.status,
           expectedDeliveryAt: purchaseOrders.expectedDeliveryAt,
           totalEstimated: purchaseOrders.totalEstimated,
@@ -208,7 +198,7 @@ export const ordersRouter = router({
         .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
         .leftJoin(poLines, eq(poLines.poId, purchaseOrders.id))
         .where(and(...conds))
-        .groupBy(purchaseOrders.id, suppliers.name)
+        .groupBy(purchaseOrders.id, suppliers.name, suppliers.nameEn)
         .orderBy(desc(purchaseOrders.createdAt))
         .limit(input?.limit ?? 50)
         .offset(input?.offset ?? 0);
@@ -226,17 +216,36 @@ export const ordersRouter = router({
         .limit(1);
       const [supplier] = po
         ? await ctx.db
-            .select({ name: suppliers.name })
+            .select({ name: suppliers.name, nameEn: suppliers.nameEn })
             .from(suppliers)
             .where(eq(suppliers.id, po.supplierId))
             .limit(1)
         : [];
-      const lines = await ctx.db
+      const rawLines = await ctx.db
         .select()
         .from(poLines)
         .where(eq(poLines.poId, input.poId))
         .orderBy(asc(poLines.id));
-      return { po, lines, supplierName: supplier?.name ?? null };
+      // English product names for the "Receiver in English" display (0028).
+      const productIds = [...new Set(rawLines.map((l) => l.productId).filter((id): id is string => !!id))];
+      const nameEnById = new Map<string, string | null>();
+      if (productIds.length > 0) {
+        const rows = await ctx.db
+          .select({ id: products.id, nameEn: products.nameEn, canonicalName: products.canonicalName })
+          .from(products)
+          .where(and(eq(products.restaurantId, restaurantId), inArray(products.id, productIds)));
+        for (const r of rows) nameEnById.set(r.id, r.nameEn);
+      }
+      const lines = rawLines.map((l) => ({
+        ...l,
+        productNameEn: l.productId ? (nameEnById.get(l.productId) ?? null) : null,
+      }));
+      return {
+        po,
+        lines,
+        supplierName: supplier?.name ?? null,
+        supplierNameEn: supplier?.nameEn ?? null,
+      };
     }),
 
   createDraft: managerProcedure
@@ -302,7 +311,7 @@ export const ordersRouter = router({
         return { ...l, unitPriceExpected };
       });
 
-      const totalEstimated = lineTotalsEstimated(
+      const totalEstimated = estimateTotal(
         resolvedLines.map((l) => ({
           qty: l.qty,
           unitPriceExpected: l.unitPriceExpected == null ? undefined : Number(l.unitPriceExpected),
@@ -417,6 +426,16 @@ export const ordersRouter = router({
     .mutation(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
       await assertPoOwned(ctx.db, input.poId, restaurantId);
+      const [current] = await ctx.db
+        .select({ status: purchaseOrders.status })
+        .from(purchaseOrders)
+        .where(eq(purchaseOrders.id, input.poId))
+        .limit(1);
+      // A received (closed) order is history — cancelling it would orphan its
+      // goods receipt and invoice match. Cancelling twice is a no-op error.
+      if (current && (current.status === 'closed' || current.status === 'cancelled')) {
+        throw new TRPCError({ code: 'CONFLICT', message: 'לא ניתן לבטל הזמנה שנסגרה או בוטלה' });
+      }
       await ctx.db
         .update(purchaseOrders)
         .set({ status: 'cancelled', updatedAt: new Date() })
@@ -450,7 +469,7 @@ export const ordersRouter = router({
     .mutation(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
       const [owned] = await ctx.db
-        .select({ status: purchaseOrders.status })
+        .select({ status: purchaseOrders.status, poId: purchaseOrders.id })
         .from(poLines)
         .innerJoin(
           purchaseOrders,
@@ -470,7 +489,9 @@ export const ordersRouter = router({
       if (p.unitPriceExpected !== undefined)
         set.unitPriceExpected = p.unitPriceExpected == null ? null : String(p.unitPriceExpected);
       await ctx.db.update(poLines).set(set).where(eq(poLines.id, input.lineId));
-      return { ok: true };
+      // Keep the header's estimated total in step with the edited line.
+      const totalEstimated = await recomputePoTotal(ctx.db, owned.poId);
+      return { ok: true, totalEstimated };
     }),
 
   /** Remove a line from a DRAFT order. */
@@ -479,7 +500,7 @@ export const ordersRouter = router({
     .mutation(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
       const [owned] = await ctx.db
-        .select({ status: purchaseOrders.status })
+        .select({ status: purchaseOrders.status, poId: purchaseOrders.id })
         .from(poLines)
         .innerJoin(
           purchaseOrders,
@@ -492,7 +513,8 @@ export const ordersRouter = router({
         throw new TRPCError({ code: 'CONFLICT', message: 'רק שורות בטיוטה ניתנות למחיקה' });
       }
       await ctx.db.delete(poLines).where(eq(poLines.id, input.lineId));
-      return { ok: true };
+      const totalEstimated = await recomputePoTotal(ctx.db, owned.poId);
+      return { ok: true, totalEstimated };
     }),
 
   /** Place a draft PO: transition draft → sent, enqueue an order document to the outbox. */
@@ -533,6 +555,10 @@ export const ordersRouter = router({
         })
         .from(poLines)
         .where(eq(poLines.poId, input.poId));
+      // An empty order would reach the supplier as a blank document.
+      if (lines.length === 0) {
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'אי אפשר לשלוח הזמנה בלי שורות' });
+      }
 
       let sentChannel: 'email' | 'whatsapp' | null = null;
       if (input.channel !== 'none') {

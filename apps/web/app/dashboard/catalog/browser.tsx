@@ -1,13 +1,32 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
-import { Boxes, Pencil, Plus, Power, Search, Trash2, X } from 'lucide-react';
+import { Boxes, Check, Languages, Pencil, Plus, Power, Search, Trash2, X } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
-import { Badge, Button, Card, EmptyState, Input, Spinner } from '@/lib/components';
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  ErrorNotice,
+  Input,
+  LoadMore,
+  Select,
+  Spinner,
+  cn,
+  displayName,
+  friendlyError,
+  useToast,
+} from '@/lib/components';
+import { useLocale, useT } from '@/lib/i18n/client';
+import { formatNumber } from '@/lib/i18n/format';
+import { catalog as catalogNs } from '@/lib/i18n/messages/catalog';
+import { components } from '@/lib/i18n/messages/components';
 import { formatIls } from '@/lib/money';
+import { parsePrice } from '../orders/order-logic';
 
 type Outputs = inferRouterOutputs<AppRouter>;
 type CatalogItem = Outputs['catalog']['items'][number];
@@ -30,16 +49,11 @@ function draftFrom(it: CatalogItem): Draft {
     supplierNameRaw: it.supplierNameRaw,
     supplierSku: it.supplierSku ?? '',
     unit: it.unit ?? '',
-    listPrice: it.listPrice != null ? String(it.listPrice) : '',
+    listPrice: it.listPrice != null ? String(Number(it.listPrice)) : '',
   };
 }
 
-function priceToNumber(raw: string): number | null {
-  const t = raw.trim();
-  if (t === '') return null;
-  const n = Number(t);
-  return Number.isFinite(n) ? n : null;
-}
+const th = 'px-4 py-3 font-medium text-start';
 
 export function CatalogBrowser({
   suppliers,
@@ -58,7 +72,12 @@ export function CatalogBrowser({
   /** Owner/manager → show inline add / edit / delete / activate controls. */
   canEdit?: boolean;
 }) {
+  const t = useT(catalogNs);
+  const tc = useT(components);
+  const locale = useLocale();
+  const toast = useToast();
   const [supplierId, setSupplierId] = useState<string>('');
+  const [rawSearch, setRawSearch] = useState('');
   const [search, setSearch] = useState('');
   const [limit, setLimit] = useState(PAGE);
   const [showInactive, setShowInactive] = useState(false);
@@ -67,49 +86,71 @@ export function CatalogBrowser({
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [creating, setCreating] = useState(false);
   const [newDraft, setNewDraft] = useState<Draft>(EMPTY_DRAFT);
-  const [error, setError] = useState<string | null>(null);
+  const [rowError, setRowError] = useState<string | null>(null);
+
+  // Debounce typing → query (one request per pause, not per keystroke).
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearch(rawSearch.trim());
+      setLimit(PAGE);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [rawSearch]);
 
   const locked = !!lockedSupplierId;
   const effectiveSupplierId = lockedSupplierId ?? (supplierId || undefined);
+  const filtered = !!search || showInactive || (!locked && !!supplierId);
 
   const q = trpc.catalog.items.useQuery(
     {
       supplierId: effectiveSupplierId,
-      search: search.trim() || undefined,
+      search: search || undefined,
       limit,
       includeInactive: showInactive || undefined,
     },
     {
       // `initial` is the active-only first page → only reuse it for that exact view.
-      initialData:
-        !search.trim() && limit === PAGE && !showInactive && (locked || !supplierId)
-          ? initial
-          : undefined,
+      initialData: !search && limit === PAGE && !showInactive && (locked || !supplierId) ? initial : undefined,
+      placeholderData: (prev) => prev,
     },
   );
 
   const refresh = () => void q.refetch();
-  const onError = (e: { message: string }) => setError(e.message || 'הפעולה נכשלה.');
+  const errMsg = (e: unknown) => friendlyError(e, tc, { CONFLICT: t('item.duplicateSku') });
 
   const update = trpc.catalog.updateItem.useMutation({
     onSuccess: () => {
       setEditingId(null);
-      setError(null);
+      setRowError(null);
+      toast.success(t('item.updated'));
       refresh();
     },
-    onError,
+    onError: (e) => setRowError(errMsg(e)),
   });
   const create = trpc.catalog.createItem.useMutation({
     onSuccess: () => {
       setCreating(false);
       setNewDraft(EMPTY_DRAFT);
-      setError(null);
+      setRowError(null);
+      toast.success(t('item.created'));
       refresh();
     },
-    onError,
+    onError: (e) => setRowError(errMsg(e)),
   });
-  const remove = trpc.catalog.deleteItem.useMutation({ onSuccess: refresh, onError });
-  const toggle = trpc.catalog.setItemActive.useMutation({ onSuccess: refresh, onError });
+  const remove = trpc.catalog.deleteItem.useMutation({
+    onSuccess: () => {
+      toast.success(t('item.deleted'));
+      refresh();
+    },
+    onError: (e) => toast.error(errMsg(e)),
+  });
+  const toggle = trpc.catalog.setItemActive.useMutation({
+    onSuccess: (_r, vars) => {
+      toast.success(vars.active ? t('item.activated') : t('item.deactivated'));
+      refresh();
+    },
+    onError: (e) => toast.error(errMsg(e)),
+  });
 
   const items = q.data ?? [];
   const hasMore = items.length >= limit;
@@ -118,24 +159,29 @@ export function CatalogBrowser({
   function startEdit(it: CatalogItem) {
     setEditingId(it.id);
     setDraft(draftFrom(it));
-    setError(null);
+    setRowError(null);
   }
 
   function saveEdit(it: CatalogItem) {
+    if (!draft.supplierNameRaw.trim()) return setRowError(t('item.descriptionRequired'));
+    const price = parsePrice(draft.listPrice);
+    if (price === 'invalid') return setRowError(t('item.priceInvalid'));
     update.mutate({
       itemId: it.id,
       patch: {
         supplierNameRaw: draft.supplierNameRaw.trim(),
         supplierSku: draft.supplierSku.trim() || null,
         unit: draft.unit.trim() || null,
-        listPrice: priceToNumber(draft.listPrice),
+        listPrice: price,
       },
     });
   }
 
   function submitCreate() {
     if (!effectiveSupplierId) return;
-    const price = priceToNumber(newDraft.listPrice);
+    if (!newDraft.supplierNameRaw.trim()) return setRowError(t('item.descriptionRequired'));
+    const price = parsePrice(newDraft.listPrice);
+    if (price === 'invalid') return setRowError(t('item.priceInvalid'));
     create.mutate({
       supplierId: effectiveSupplierId,
       supplierNameRaw: newDraft.supplierNameRaw.trim(),
@@ -145,18 +191,29 @@ export function CatalogBrowser({
     });
   }
 
-  // Columns: [supplier?] desc, product, sku, unit, price, actions
-  const colCount = (locked ? 0 : 1) + 5 + (canEdit ? 1 : 0);
+  const onRowKey = (save: () => void, cancel: () => void) => (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      save();
+    } else if (e.key === 'Escape') {
+      cancel();
+    }
+  };
+
+  // Columns: [supplier?] desc, product, english, sku, unit, price, [actions]
+  const colCount = (locked ? 0 : 1) + 6 + (canEdit ? 1 : 0);
+  const money = (v: string | null) =>
+    v != null ? formatIls(Number(v), { locale, maximumFractionDigits: 2 }) : '—';
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
         {!locked && (
-          <div className="min-w-[12rem]">
+          <div className="w-full sm:w-auto sm:min-w-[12rem]">
             <label className="mb-1.5 block text-sm font-medium text-muted" htmlFor="cat-supplier">
-              ספק
+              {t('browser.supplier')}
             </label>
-            <select
+            <Select
               id="cat-supplier"
               value={supplierId}
               onChange={(e) => {
@@ -164,37 +221,32 @@ export function CatalogBrowser({
                 setLimit(PAGE);
                 setCreating(false);
               }}
-              className="w-full rounded-xl border border-line bg-surface-2 px-3 py-2 text-ink focus:border-primary/50 focus:outline-none"
             >
-              <option value="">כל הספקים</option>
+              <option value="">{t('browser.allSuppliers')}</option>
               {suppliers.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.name}
+                  {displayName(s.name, s.nameEn, locale).primary}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
         )}
-        <div className="relative min-w-[16rem] flex-1">
+        <div className="relative min-w-[14rem] flex-1">
           <label className="mb-1.5 block text-sm font-medium text-muted" htmlFor="cat-search">
-            חיפוש
+            {t('browser.search')}
           </label>
-          <Search
-            className="pointer-events-none absolute bottom-2.5 right-3 h-4 w-4 text-subtle"
-            aria-hidden
-          />
+          <Search className="pointer-events-none absolute bottom-3 start-3 h-4 w-4 text-subtle" aria-hidden="true" />
           <Input
             id="cat-search"
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setLimit(PAGE);
-            }}
-            placeholder="שם מוצר / מק״ט"
-            className="pr-9"
+            type="search"
+            value={rawSearch}
+            onChange={(e) => setRawSearch(e.target.value)}
+            placeholder={t('browser.searchPlaceholder')}
+            className="ps-9"
+            autoComplete="off"
           />
         </div>
-        <label className="flex items-center gap-1.5 pb-2 text-sm text-muted">
+        <label className="flex items-center gap-1.5 pb-2.5 text-sm text-muted">
           <input
             type="checkbox"
             checked={showInactive}
@@ -202,85 +254,125 @@ export function CatalogBrowser({
               setShowInactive(e.target.checked);
               setLimit(PAGE);
             }}
+            className="h-4 w-4 accent-primary"
           />
-          הצג לא פעילים
+          {t('browser.showInactive')}
         </label>
         {canEdit && effectiveSupplierId && (
           <Button
             variant="secondary"
             size="sm"
+            className="mb-1"
             onClick={() => {
               setCreating((c) => !c);
               setNewDraft(EMPTY_DRAFT);
-              setError(null);
+              setRowError(null);
             }}
           >
-            <Plus className="h-4 w-4" /> הוסף פריט
+            <Plus className="h-4 w-4" aria-hidden="true" /> {t('browser.addItem')}
           </Button>
         )}
       </div>
 
-      {canEdit && !effectiveSupplierId && (
-        <p className="text-xs text-subtle">בחרו ספק כדי להוסיף פריט קטלוג חדש.</p>
-      )}
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-subtle">
+        <span className="tabular-nums" aria-live="polite">
+          {q.isSuccess
+            ? hasMore
+              ? t('browser.countMore', { count: formatNumber(items.length, locale) })
+              : t('browser.count', { count: formatNumber(items.length, locale) })
+            : ''}
+        </span>
+        {canEdit && !effectiveSupplierId && <span>{t('browser.pickSupplierToAdd')}</span>}
+      </div>
 
-      {error && (
-        <div
-          role="alert"
-          className="rounded-md border-r-4 border-danger bg-danger/5 px-3 py-2 text-sm text-danger"
-        >
-          {error}
+      {rowError && (
+        <div role="alert" className="rounded-md border-s-4 border-danger bg-danger/5 px-3 py-2 text-sm text-danger">
+          {rowError}
         </div>
       )}
 
       {q.isLoading ? (
         <div className="flex items-center gap-2 py-8 text-muted">
-          <Spinner className="h-4 w-4" /> טוען קטלוג…
+          <Spinner className="h-4 w-4" /> {t('browser.loading')}
         </div>
+      ) : q.isError ? (
+        <ErrorNotice message={t('browser.error')} />
       ) : items.length === 0 && !creating ? (
         <EmptyState
           icon={<Boxes className="h-6 w-6" />}
-          title="הקטלוג ריק"
-          description="ייבאו מחירון ספק מקובץ Excel/CSV, או הוסיפו פריט ידנית."
+          title={filtered ? t('browser.noResultsTitle') : t('browser.emptyTitle')}
+          description={filtered ? t('browser.noResultsBody') : t('browser.emptyBody')}
+          action={
+            filtered ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setRawSearch('');
+                  setSearch('');
+                  setShowInactive(false);
+                  if (!locked) setSupplierId('');
+                }}
+              >
+                {t('browser.clearFilters')}
+              </Button>
+            ) : undefined
+          }
         />
       ) : (
-        <Card elevated padding="none" className="overflow-x-auto">
-          <table className="w-full text-right text-sm">
+        <Card elevated padding="none" className={cn('overflow-x-auto transition-opacity', q.isFetching && 'opacity-80')}>
+          <table className="w-full min-w-[760px] text-start text-sm">
             <thead>
               <tr className="border-b border-line text-xs uppercase tracking-wide text-subtle">
-                {!locked && <th className="px-4 py-3 font-medium">ספק</th>}
-                <th className="px-4 py-3 font-medium">תיאור הספק</th>
-                <th className="px-4 py-3 font-medium">מוצר</th>
-                <th className="px-4 py-3 font-medium">מק״ט</th>
-                <th className="px-4 py-3 font-medium">יחידה</th>
-                <th className="px-4 py-3 font-medium">מחיר מחירון</th>
-                {canEdit && <th className="px-4 py-3 font-medium" />}
+                {!locked && <th scope="col" className={th}>{t('columns.supplier')}</th>}
+                <th scope="col" className={th}>{t('columns.supplierDescription')}</th>
+                <th scope="col" className={th}>{t('columns.product')}</th>
+                <th scope="col" className={th}>{t('columns.nameEn')}</th>
+                <th scope="col" className={th}>{t('columns.sku')}</th>
+                <th scope="col" className={th}>{t('columns.unit')}</th>
+                <th scope="col" className={cn(th, 'text-end')}>{t('columns.listPrice')}</th>
+                {canEdit && (
+                  <th scope="col" className={th}>
+                    <span className="sr-only">{t('columns.actions')}</span>
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody>
               {creating && (
                 <tr className="border-b border-line/60 bg-surface-2/40">
-                  {!locked && <td className="px-4 py-2 text-subtle">חדש</td>}
+                  {!locked && <td className="px-4 py-2 text-subtle">{t('browser.new')}</td>}
                   <td className="px-4 py-2">
                     <Input
                       value={newDraft.supplierNameRaw}
                       onChange={(e) => setNewDraft({ ...newDraft, supplierNameRaw: e.target.value })}
-                      placeholder="תיאור הספק *"
+                      onKeyDown={onRowKey(submitCreate, () => setCreating(false))}
+                      placeholder={t('item.descriptionPlaceholder')}
+                      aria-label={t('columns.supplierDescription')}
+                      maxLength={400}
+                      autoFocus
                     />
                   </td>
+                  <td className="px-4 py-2 text-subtle">—</td>
                   <td className="px-4 py-2 text-subtle">—</td>
                   <td className="px-4 py-2">
                     <Input
                       value={newDraft.supplierSku}
                       onChange={(e) => setNewDraft({ ...newDraft, supplierSku: e.target.value })}
-                      placeholder="מק״ט"
+                      onKeyDown={onRowKey(submitCreate, () => setCreating(false))}
+                      placeholder={t('item.skuPlaceholder')}
+                      aria-label={t('columns.sku')}
+                      maxLength={64}
                     />
                   </td>
                   <td className="px-4 py-2">
                     <Input
                       value={newDraft.unit}
                       onChange={(e) => setNewDraft({ ...newDraft, unit: e.target.value })}
-                      placeholder="יח׳"
+                      onKeyDown={onRowKey(submitCreate, () => setCreating(false))}
+                      placeholder={t('item.unitPlaceholder')}
+                      aria-label={t('columns.unit')}
+                      maxLength={32}
                     />
                   </td>
                   <td className="px-4 py-2">
@@ -291,22 +383,25 @@ export function CatalogBrowser({
                       min="0"
                       value={newDraft.listPrice}
                       onChange={(e) => setNewDraft({ ...newDraft, listPrice: e.target.value })}
+                      onKeyDown={onRowKey(submitCreate, () => setCreating(false))}
                       placeholder="₪"
+                      aria-label={t('columns.listPrice')}
+                      className="text-end"
                     />
                   </td>
                   <td className="px-4 py-2">
                     <div className="flex items-center gap-1">
+                      <Button size="sm" variant="primary" loading={create.isPending} onClick={submitCreate}>
+                        {t('item.save')}
+                      </Button>
                       <Button
                         size="sm"
-                        variant="primary"
-                        loading={create.isPending}
-                        disabled={!newDraft.supplierNameRaw.trim()}
-                        onClick={submitCreate}
+                        variant="ghost"
+                        onClick={() => setCreating(false)}
+                        aria-label={t('item.cancel')}
+                        title={t('item.cancel')}
                       >
-                        שמור
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => setCreating(false)}>
-                        <X className="h-4 w-4" />
+                        <X className="h-4 w-4" aria-hidden="true" />
                       </Button>
                     </div>
                   </td>
@@ -315,27 +410,34 @@ export function CatalogBrowser({
 
               {items.map((it) => {
                 const editing = editingId === it.id;
+                const cancelEdit = () => setEditingId(null);
                 return (
-                  <tr
-                    key={it.id}
-                    className="border-b border-line/60 last:border-0 hover:bg-surface-2/60"
-                  >
-                    {!locked && <td className="px-4 py-3 text-muted">{it.supplierName}</td>}
+                  <tr key={it.id} className="border-b border-line/60 last:border-0 hover:bg-surface-2/60">
+                    {!locked && (
+                      <td className="px-4 py-3 text-muted">
+                        {displayName(it.supplierName, it.supplierNameEn, locale).primary}
+                      </td>
+                    )}
                     <td className="px-4 py-3 text-ink">
                       {editing ? (
                         <Input
                           value={draft.supplierNameRaw}
                           onChange={(e) => setDraft({ ...draft, supplierNameRaw: e.target.value })}
+                          onKeyDown={onRowKey(() => saveEdit(it), cancelEdit)}
+                          aria-label={t('columns.supplierDescription')}
+                          maxLength={400}
+                          autoFocus
                         />
                       ) : (
-                        it.supplierNameRaw
+                        <span lang="he">{it.supplierNameRaw}</span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-muted">
                       {it.productId ? (
                         <Link
                           href={`/dashboard/products/${it.productId}`}
-                          className="text-primary hover:underline"
+                          className="rounded text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+                          lang="he"
                         >
                           {it.canonicalName ?? '—'}
                         </Link>
@@ -343,11 +445,22 @@ export function CatalogBrowser({
                         (it.canonicalName ?? '—')
                       )}
                     </td>
+                    <td className="px-4 py-3">
+                      <EnglishNameCell
+                        productId={it.productId}
+                        value={it.productNameEn}
+                        canEdit={canEdit}
+                        onSaved={refresh}
+                      />
+                    </td>
                     <td className="px-4 py-3 font-mono text-xs text-subtle">
                       {editing ? (
                         <Input
                           value={draft.supplierSku}
                           onChange={(e) => setDraft({ ...draft, supplierSku: e.target.value })}
+                          onKeyDown={onRowKey(() => saveEdit(it), cancelEdit)}
+                          aria-label={t('columns.sku')}
+                          maxLength={64}
                         />
                       ) : (
                         (it.supplierSku ?? '—')
@@ -358,12 +471,15 @@ export function CatalogBrowser({
                         <Input
                           value={draft.unit}
                           onChange={(e) => setDraft({ ...draft, unit: e.target.value })}
+                          onKeyDown={onRowKey(() => saveEdit(it), cancelEdit)}
+                          aria-label={t('columns.unit')}
+                          maxLength={32}
                         />
                       ) : (
                         (it.unit ?? '—')
                       )}
                     </td>
-                    <td className="px-4 py-3 font-mono tabular-nums text-ink">
+                    <td className="px-4 py-3 text-end font-mono tabular-nums text-ink">
                       {editing ? (
                         <Input
                           type="number"
@@ -372,63 +488,68 @@ export function CatalogBrowser({
                           min="0"
                           value={draft.listPrice}
                           onChange={(e) => setDraft({ ...draft, listPrice: e.target.value })}
+                          onKeyDown={onRowKey(() => saveEdit(it), cancelEdit)}
+                          aria-label={t('columns.listPrice')}
+                          className="text-end"
                         />
-                      ) : it.listPrice != null ? (
-                        formatIls(Number(it.listPrice), { maximumFractionDigits: 2 })
                       ) : (
-                        '—'
+                        money(it.listPrice)
                       )}
                     </td>
                     {canEdit && (
                       <td className="px-4 py-3">
                         {editing ? (
                           <div className="flex items-center gap-1">
+                            <Button size="sm" variant="primary" loading={update.isPending} onClick={() => saveEdit(it)}>
+                              {t('item.save')}
+                            </Button>
                             <Button
                               size="sm"
-                              variant="primary"
-                              loading={update.isPending}
-                              disabled={!draft.supplierNameRaw.trim()}
-                              onClick={() => saveEdit(it)}
+                              variant="ghost"
+                              onClick={cancelEdit}
+                              aria-label={t('item.cancel')}
+                              title={t('item.cancel')}
                             >
-                              שמור
-                            </Button>
-                            <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>
-                              <X className="h-4 w-4" />
+                              <X className="h-4 w-4" aria-hidden="true" />
                             </Button>
                           </div>
                         ) : (
-                          <div className="flex items-center gap-1">
-                            {!it.active && <Badge tone="neutral">לא פעיל</Badge>}
+                          <div className="flex items-center justify-end gap-1">
+                            {!it.active && <Badge tone="neutral">{t('item.inactive')}</Badge>}
                             <Button
                               size="sm"
                               variant="ghost"
-                              title="ערוך"
+                              title={t('item.edit')}
+                              aria-label={`${t('item.edit')}: ${it.supplierNameRaw}`}
                               disabled={busy}
                               onClick={() => startEdit(it)}
                             >
-                              <Pencil className="h-4 w-4" />
+                              <Pencil className="h-4 w-4" aria-hidden="true" />
                             </Button>
                             <Button
                               size="sm"
                               variant="ghost"
-                              title={it.active ? 'השבת' : 'הפעל'}
+                              title={it.active ? t('item.deactivate') : t('item.activate')}
+                              aria-label={`${it.active ? t('item.deactivate') : t('item.activate')}: ${it.supplierNameRaw}`}
+                              aria-pressed={!it.active}
                               disabled={busy}
                               onClick={() => toggle.mutate({ itemId: it.id, active: !it.active })}
                             >
-                              <Power className={`h-4 w-4 ${it.active ? '' : 'text-subtle'}`} />
+                              <Power className={`h-4 w-4 ${it.active ? '' : 'text-subtle'}`} aria-hidden="true" />
                             </Button>
                             <Button
                               size="sm"
                               variant="ghost"
-                              title="מחק"
+                              title={t('item.delete')}
+                              aria-label={`${t('item.delete')}: ${it.supplierNameRaw}`}
                               disabled={busy}
                               onClick={() => {
-                                if (confirm(`למחוק את "${it.supplierNameRaw}" מהקטלוג?`)) {
+                                if (confirm(t('item.confirmDelete', { name: it.supplierNameRaw }))) {
                                   remove.mutate({ itemId: it.id });
                                 }
                               }}
                             >
-                              <Trash2 className="h-4 w-4 text-danger" />
+                              <Trash2 className="h-4 w-4 text-danger" aria-hidden="true" />
                             </Button>
                           </div>
                         )}
@@ -441,7 +562,7 @@ export function CatalogBrowser({
               {items.length === 0 && creating && (
                 <tr>
                   <td colSpan={colCount} className="px-4 py-3 text-center text-subtle">
-                    מוסיפים את הפריט הראשון…
+                    {t('browser.firstItem')}
                   </td>
                 </tr>
               )}
@@ -450,18 +571,110 @@ export function CatalogBrowser({
         </Card>
       )}
 
-      {hasMore && (
-        <div className="flex justify-center">
-          <Button
-            variant="secondary"
-            size="sm"
-            loading={q.isFetching}
-            onClick={() => setLimit((l) => l + PAGE)}
-          >
-            טען עוד
-          </Button>
-        </div>
-      )}
+      <LoadMore onClick={() => setLimit((l) => l + PAGE)} loading={q.isFetching} hasMore={hasMore && !q.isLoading} />
+    </div>
+  );
+}
+
+/**
+ * Inline editor for the linked product's English name ("Receiver in English").
+ * Click (or the + button) → input; Enter saves, Escape cancels. Saves through
+ * the tenant-guarded `products.update` (manager+).
+ */
+function EnglishNameCell({
+  productId,
+  value,
+  canEdit,
+  onSaved,
+}: {
+  productId: string | null;
+  value: string | null;
+  canEdit: boolean;
+  onSaved: () => void;
+}) {
+  const t = useT(catalogNs);
+  const tc = useT(components);
+  const toast = useToast();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value ?? '');
+  const save = trpc.products.update.useMutation({
+    onSuccess: (_r, vars) => {
+      setEditing(false);
+      toast.success(vars.patch.nameEn ? t('nameEn.saved') : t('nameEn.cleared'));
+      onSaved();
+    },
+    onError: (e) => toast.error(friendlyError(e, tc)),
+  });
+
+  if (!productId) return <span className="text-xs text-subtle" title={t('nameEn.noProduct')}>—</span>;
+
+  if (!canEdit) {
+    return value ? <span dir="ltr" lang="en" className="text-ink">{value}</span> : <span className="text-subtle">—</span>;
+  }
+
+  if (!editing) {
+    return value ? (
+      <button
+        type="button"
+        onClick={() => {
+          setDraft(value);
+          setEditing(true);
+        }}
+        className="group inline-flex items-center gap-1.5 rounded text-start text-ink hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+        aria-label={`${t('nameEn.edit')}: ${value}`}
+      >
+        <span dir="ltr" lang="en">
+          {value}
+        </span>
+        <Pencil className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" aria-hidden="true" />
+      </button>
+    ) : (
+      <button
+        type="button"
+        onClick={() => {
+          setDraft('');
+          setEditing(true);
+        }}
+        className="inline-flex items-center gap-1 rounded text-xs text-subtle hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+      >
+        <Languages className="h-3.5 w-3.5" aria-hidden="true" /> {t('nameEn.add')}
+      </button>
+    );
+  }
+
+  const commit = () => {
+    const next = draft.trim();
+    if (next === (value ?? '')) return setEditing(false);
+    save.mutate({ productId, patch: { nameEn: next || null } });
+  };
+
+  return (
+    <div className="flex items-center gap-1">
+      <Input
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            commit();
+          } else if (e.key === 'Escape') {
+            setEditing(false);
+          }
+        }}
+        placeholder={t('nameEn.placeholder')}
+        aria-label={t('nameEn.edit')}
+        maxLength={200}
+        dir="ltr"
+        lang="en"
+        autoFocus
+        className="min-w-[9rem] py-1 text-sm"
+      />
+      <Button size="sm" variant="primary" loading={save.isPending} onClick={commit} aria-label={t('nameEn.save')} title={t('nameEn.save')}>
+        <Check className="h-4 w-4" aria-hidden="true" />
+      </Button>
+      <Button size="sm" variant="ghost" onClick={() => setEditing(false)} aria-label={t('nameEn.cancel')} title={t('nameEn.cancel')}>
+        <X className="h-4 w-4" aria-hidden="true" />
+      </Button>
     </div>
   );
 }

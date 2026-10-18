@@ -118,7 +118,7 @@ export function InvoiceDetail({ record, onClose }: Props) {
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap mb-1">
                 <h2 className="text-xl font-bold text-ink">{mockText(record.supplierName, locale)}</h2>
-                <span className="text-xs text-subtle font-mono">·</span>
+                <span className="text-xs text-muted font-mono">·</span>
                 <span className="text-xs text-muted font-mono tabular-nums">{record.invoiceNumber}</span>
               </div>
               <div className="flex items-center gap-3 text-xs text-muted flex-wrap">
@@ -429,7 +429,7 @@ function ComparisonColumn({
 
   return (
     <div className={`rounded-xl border px-3 py-2 ${bg}`}>
-      <div className="text-[10px] uppercase tracking-wider text-subtle font-semibold mb-1">
+      <div className="text-[10px] uppercase tracking-wider text-muted font-semibold mb-1">
         {label}
       </div>
       {qty !== null ? (
@@ -437,7 +437,7 @@ function ComparisonColumn({
           {qty} <span className="text-xs font-normal text-muted">{unit}</span>
         </div>
       ) : (
-        <div className="text-sm text-subtle italic">—</div>
+        <div className="text-sm text-muted italic">—</div>
       )}
       {price !== null && qty !== null ? (
         <div className="text-[10px] text-muted mt-0.5 font-mono tabular-nums">
@@ -459,7 +459,7 @@ function CompactMatchedRow({ line }: { line: LineComparison }) {
       <span className="text-xs text-muted font-mono tabular-nums shrink-0">
         {line.invoiceQty} {mockText(line.unit, locale)}
         {line.invoiceUnitPrice !== null ? (
-          <span className="text-subtle"> · ₪{(line.invoiceQty! * line.invoiceUnitPrice).toFixed(2)}</span>
+          <span className="text-muted"> · ₪{(line.invoiceQty! * line.invoiceUnitPrice).toFixed(2)}</span>
         ) : null}
       </span>
     </div>
@@ -515,7 +515,7 @@ function Section({
     <div>
       <h3 className="text-sm font-semibold text-ink uppercase tracking-wider mb-3 flex items-center gap-2">
         <span>{title}</span>
-        {collapsible ? <ChevronDown className="w-4 h-4 text-subtle" /> : null}
+        {collapsible ? <ChevronDown className="w-4 h-4 text-muted" /> : null}
       </h3>
       {children}
     </div>
@@ -540,7 +540,7 @@ function SummaryTile({
   return (
     <div className="rounded-xl border border-line bg-surface-2 p-3">
       <div className="text-xs text-muted font-medium flex items-center gap-1.5 mb-1">
-        <span className="text-subtle">{icon}</span>
+        <span className="text-muted">{icon}</span>
         <span>{label}</span>
       </div>
       <div className={`text-lg font-bold font-mono tabular-nums ${map[tone]}`}>{value}</div>

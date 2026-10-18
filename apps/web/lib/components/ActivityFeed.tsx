@@ -1,4 +1,10 @@
+'use client';
+
 import { CheckCircle2, FileCheck2, RefreshCw, Sparkles, XCircle } from 'lucide-react';
+import { useLocale, useT } from '@/lib/i18n/client';
+import { formatDate } from '@/lib/i18n/format';
+import { components } from '@/lib/i18n/messages/components';
+import { localizeActivity } from './activityText';
 import { cn } from './cn';
 
 export interface ActivityItem {
@@ -36,18 +42,13 @@ const META: Record<string, { icon: React.ReactNode; tone: string }> = {
   },
 };
 
-function whenLabel(d: Date | string): string {
-  const date = typeof d === 'string' ? new Date(d) : d;
-  return date.toLocaleString('he-IL', {
-    day: '2-digit',
-    month: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-/** Recent-activity timeline (server-safe). */
+/** Recent-activity timeline (localized titles + Israel-time timestamps). */
 export function ActivityFeed({ items }: { items: ActivityItem[] }) {
+  const locale = useLocale();
+  const t = useT(components);
+  if (items.length === 0) {
+    return <p className="py-4 text-center text-sm text-subtle">{t('activity.empty')}</p>;
+  }
   return (
     <ul className="space-y-3">
       {items.map((e) => {
@@ -55,9 +56,11 @@ export function ActivityFeed({ items }: { items: ActivityItem[] }) {
           icon: <FileCheck2 className="h-4 w-4" />,
           tone: 'text-muted bg-surface-2 ring-line',
         };
+        const text = localizeActivity(e, locale);
         return (
           <li key={e.id} className="flex items-start gap-3">
             <span
+              aria-hidden="true"
               className={cn(
                 'mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ring-1',
                 m.tone,
@@ -67,12 +70,20 @@ export function ActivityFeed({ items }: { items: ActivityItem[] }) {
             </span>
             <div className="min-w-0 flex-1">
               <div className="flex items-center justify-between gap-2">
-                <p className="truncate text-sm font-medium text-ink">{e.title}</p>
-                <time className="shrink-0 font-mono text-xs tabular-nums text-subtle">
-                  {whenLabel(e.createdAt)}
+                <p className="truncate text-sm font-medium text-ink">{text.title}</p>
+                <time
+                  dateTime={new Date(e.createdAt).toISOString()}
+                  className="shrink-0 font-mono text-xs tabular-nums text-subtle"
+                >
+                  {formatDate(e.createdAt, locale, {
+                    day: '2-digit',
+                    month: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
                 </time>
               </div>
-              {e.detail ? <p className="truncate text-xs text-muted">{e.detail}</p> : null}
+              {text.detail ? <p className="truncate text-xs text-muted">{text.detail}</p> : null}
             </div>
           </li>
         );

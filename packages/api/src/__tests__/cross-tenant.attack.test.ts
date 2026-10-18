@@ -101,6 +101,7 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'owner.kpis': 'isolation',
   'owner.leakHero': 'isolation',
   'owner.leakBreakdown': 'isolation',
+  'owner.leakReport': 'isolation',
   'owner.leaks': 'isolation',
   'owner.suppliers': 'isolation',
   'receiving.todayExpectations': 'isolation',
@@ -403,6 +404,16 @@ describe('list/aggregate isolation (A must not see B)', () => {
     expect(json).not.toContain(B.invoiceId);
     expect(json).not.toContain(B.discrepancyId);
     expect(json).not.toContain(B.supplierName);
+  });
+
+  it('owner.leakReport aggregates A-scoped data only', async () => {
+    const caller = callerFor(A);
+    const now = new Date();
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const report = await caller.owner.leakReport({ month });
+    const json = JSON.stringify(report);
+    expect(json).not.toContain(B.supplierName);
+    expect(report.bySupplier.every((r) => r.supplierId !== B.supplierId)).toBe(true);
   });
 
   it('owner.leaks excludes B leak rows', async () => {
@@ -1154,6 +1165,28 @@ describe('products router: foreign-id attacks (A → B)', () => {
       .from(products)
       .where(eq(products.id, B.productId));
     expect(row?.canonicalName).toBe('עגבניה B');
+  });
+
+  it('products.update cannot set the English name of a foreign product (B unchanged)', async () => {
+    await expect(
+      callerFor(A).products.update({ productId: B.productId, patch: { nameEn: 'HIJACK' } }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [row] = await db
+      .select({ nameEn: products.nameEn })
+      .from(products)
+      .where(eq(products.id, B.productId));
+    expect(row?.nameEn ?? null).toBeNull();
+  });
+
+  it('suppliers.update cannot set the English name of a foreign supplier (B unchanged)', async () => {
+    await expect(
+      callerFor(A).suppliers.update({ supplierId: B.supplierId, patch: { nameEn: 'HIJACK' } }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [row] = await db
+      .select({ nameEn: suppliers.nameEn })
+      .from(suppliers)
+      .where(eq(suppliers.id, B.supplierId));
+    expect(row?.nameEn ?? null).toBeNull();
   });
 
   it('products.update rejects assigning a foreign supplier as exclusivity owner', async () => {

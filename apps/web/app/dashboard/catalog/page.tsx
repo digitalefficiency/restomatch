@@ -1,17 +1,19 @@
-import Link from 'next/link';
-import { Upload } from 'lucide-react';
+import { Link2, Upload } from 'lucide-react';
 import { auth } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
-import { Button, SectionHeader } from '@/lib/components';
+import { LinkButton, SectionHeader } from '@/lib/components';
+import { getT } from '@/lib/i18n/server';
+import { catalog as catalogNs } from '@/lib/i18n/messages/catalog';
 import { CatalogBrowser } from './browser';
 
 export default async function CatalogPage() {
   const caller = await createServerCaller();
-  const [suppliers, initial, memberships, session] = await Promise.all([
+  const [suppliers, initial, memberships, session, t] = await Promise.all([
     caller.suppliers.list({}),
     caller.catalog.items({ limit: 50 }),
     caller.onboarding.myMemberships(),
     auth(),
+    getT(catalogNs),
   ]);
 
   // catalog mutations are managerProcedure (owner/manager) — gate the inline
@@ -22,18 +24,24 @@ export default async function CatalogPage() {
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <SectionHeader
-          level={1}
-          title="חיפוש מאוחד בקטלוג"
-          subtitle="חיפוש אחד לרוחב כל הספקים — מצאו כל מוצר מכל מחירון במקום אחד, הבסיס לבניית הזמנות ולהצלבת חשבוניות."
-        />
-        <Link href="/dashboard/catalog/import">
-          <Button variant="primary" size="sm">
-            <Upload className="h-4 w-4" /> ייבוא קטלוג (Excel/CSV)
-          </Button>
-        </Link>
-      </div>
+      <SectionHeader
+        level={1}
+        title={t('title')}
+        subtitle={t('subtitle')}
+        className="flex-wrap"
+        action={
+          canEdit ? (
+            <div className="flex flex-wrap gap-2">
+              <LinkButton href="/dashboard/catalog/mapping" size="sm" variant="secondary">
+                <Link2 className="h-4 w-4" aria-hidden="true" /> {t('mappingButton')}
+              </LinkButton>
+              <LinkButton href="/dashboard/catalog/import" size="sm">
+                <Upload className="h-4 w-4" aria-hidden="true" /> {t('importButton')}
+              </LinkButton>
+            </div>
+          ) : undefined
+        }
+      />
       <CatalogBrowser suppliers={suppliers} initial={initial} canEdit={canEdit} />
     </div>
   );

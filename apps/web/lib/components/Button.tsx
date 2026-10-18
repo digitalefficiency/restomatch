@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { cn } from './cn';
 import { Spinner } from './Spinner';
 
@@ -61,5 +62,31 @@ export function Button({
       {loading ? <Spinner className="h-3.5 w-3.5" /> : null}
       {children}
     </button>
+  );
+}
+
+/**
+ * A navigation link styled as a Button. Use instead of `<Link><Button/></Link>`
+ * (a button nested in a link is two interactive elements — invalid HTML and a
+ * double tab stop for keyboard users).
+ */
+export function LinkButton({
+  href,
+  variant = 'primary',
+  size = 'md',
+  className,
+  children,
+  ...rest
+}: {
+  href: string;
+  variant?: Variant;
+  size?: Size;
+  className?: string;
+  children: React.ReactNode;
+} & Omit<React.AnchorHTMLAttributes<HTMLAnchorElement>, 'href'>) {
+  return (
+    <Link href={href} className={cn(base, variants[variant], sizes[size], className)} {...rest}>
+      {children}
+    </Link>
   );
 }

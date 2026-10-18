@@ -170,6 +170,24 @@ describe('computeLeakHero', () => {
     expect(hero.pendingLinkIls).toBe(5900);
   });
 
+  it('an unmatched invoice (e.g. parsed consolidated) is pending and kept out of the spend', async () => {
+    const { restaurantId, invoice } = await setup();
+    await invoice({
+      date: THIS_MONTH,
+      exclVat: '1000',
+      inclVat: '1180',
+      d: [{ type: 'PRICE_HIGHER', severity: 'warn', delta: '15' }],
+    });
+    await invoice({ date: THIS_MONTH, exclVat: '2000', inclVat: '2360', matched: false });
+    const hero = await computeLeakHero(db, restaurantId, { now: NOW });
+    expect(hero.spendIls).toBe(1000);
+    expect(hero.leakPct).toBeCloseTo(0.015, 10);
+    expect(hero.pendingLinkCount).toBe(1);
+    expect(hero.pendingLinkIls).toBe(2360);
+    expect(hero.invoiceCount).toBe(2);
+    expect(hero.matchedInvoiceCount).toBe(1);
+  });
+
   it('caught-before-payment excludes paid invoices; recovered = accepted claims', async () => {
     const { restaurantId, invoice } = await setup();
     await invoice({

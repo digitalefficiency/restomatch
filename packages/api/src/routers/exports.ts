@@ -83,9 +83,11 @@ async function fetchInvoices(
   from: string,
   to: string,
 ) {
-  const fromDate = new Date(from);
-  const toDate = new Date(to);
-  toDate.setHours(23, 59, 59, 999);
+  // Inclusive calendar-day bounds, pinned to UTC so the server's own timezone
+  // can't shift them (`setHours` used the process TZ and dropped invoices dated
+  // late on the last day when the server ran east of UTC).
+  const fromDate = new Date(`${from}T00:00:00.000Z`);
+  const toDate = new Date(`${to}T23:59:59.999Z`);
   return db
     .select({
       id: invoices.id,
