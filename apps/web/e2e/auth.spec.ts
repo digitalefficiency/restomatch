@@ -53,15 +53,21 @@ test.describe('two-factor (TOTP)', () => {
     await form.locator('input[name="email"]').fill('e2e-2fa@restomatch.test');
     await form.locator('input[name="password"]').fill(PASSWORD);
     await form.locator('button[type="submit"]').click();
-    await expect(page).toHaveURL(/\/login\/2fa/);
+    // The 2FA screen renders, but after the password server action the address
+    // bar can keep the action's redirect target (/dashboard) — a Next quirk when
+    // middleware redirects the RSC fetch (reported to S4). Assert on the form.
+    await expect(page.locator('input[name="code"]')).toBeVisible();
 
     // The pending session must not reach the app before the second factor.
     await page.goto('/dashboard');
     await expect(page).toHaveURL(/\/login\/2fa/);
+    await expect(page.locator('input[name="code"]')).toBeVisible();
 
     await page.locator('input[name="code"]').fill(authenticator.generate(secret));
     await page.locator('form', { has: page.locator('input[name="code"]') }).locator('button[type="submit"]').first().click();
     await expect(page).toHaveURL(/\/dashboard/);
+    await expect(page.locator('input[name="code"]')).toHaveCount(0);
+    await expect(page.locator('header')).toContainText('e2e-2fa@restomatch.test');
   });
 
   test('wrong code keeps the gate closed', async ({ page }) => {
@@ -70,9 +76,16 @@ test.describe('two-factor (TOTP)', () => {
     await form.locator('input[name="email"]').fill('e2e-2fa@restomatch.test');
     await form.locator('input[name="password"]').fill(PASSWORD);
     await form.locator('button[type="submit"]').click();
-    await expect(page).toHaveURL(/\/login\/2fa/);
+    // The 2FA screen renders, but after the password server action the address
+    // bar can keep the action's redirect target (/dashboard) — a Next quirk when
+    // middleware redirects the RSC fetch (reported to S4). Assert on the form.
+    await expect(page.locator('input[name="code"]')).toBeVisible();
     await page.locator('input[name="code"]').fill('000000');
     await page.locator('form', { has: page.locator('input[name="code"]') }).locator('button[type="submit"]').first().click();
+    await expect(page).toHaveURL(/\/login\/2fa\?error=/);
+    await expect(page.getByRole('alert')).toBeVisible();
+    // Still gated: the app is unreachable without the second factor.
+    await page.goto('/dashboard/approvals');
     await expect(page).toHaveURL(/\/login\/2fa/);
   });
 });
@@ -94,8 +107,9 @@ test.describe('magic link (backup) + onboarding', () => {
   test('new user: magic link → onboarding → own restaurant dashboard', async ({ page }) => {
     await loginViaMagicLink(page, email, '/dashboard');
     await expect(page).toHaveURL(/\/onboarding/);
-    await page.locator('input[name="name"], input#name, input[name="restaurantName"]').first().fill('מסעדת E2E');
-    await page.locator('form button[type="submit"]').first().click();
+    const form = page.locator('form', { has: page.locator('input#name') });
+    await form.locator('input#name').fill('מסעדת E2E');
+    await form.locator('button[type="submit"]').click();
     await expect(page).toHaveURL(/\/dashboard/);
     await expect(page.locator('header h1')).toHaveText('מסעדת E2E');
   });
