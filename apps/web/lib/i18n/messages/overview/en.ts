@@ -28,6 +28,7 @@ export const en: Shape<typeof he> = {
     pending: 'Waiting for approval',
     pendingHint: 'Discrepancies in the queue — owner, manager, bookkeeping',
     clean: 'Clean matches this week',
+    cleanNone: 'No matches yet this week',
     cleanHint: 'Average of the last seven days',
   },
   leaks: {
