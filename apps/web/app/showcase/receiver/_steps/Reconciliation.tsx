@@ -64,7 +64,7 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
       <StepHeader
         eyebrow={t('steps.stepOf', { current: 4, total: 5 })}
         title={t('steps.recon.title')}
-        subtitle={t('steps.recon.subtitle', {
+        subtitle={result.invoiceMeta.noInvoice ? t('steps.recon.subtitleNoInvoice') : t('steps.recon.subtitle', {
           number: result.invoiceMeta.invoiceNumber,
           confidence: formatPercent(result.invoiceMeta.ocrConfidence, locale, 0),
         })}

@@ -344,6 +344,7 @@ export function adaptReconciliation(args: {
       invoiceDate: '',
       totalInclVat: 0,
       ocrConfidence: num(invoiceMeta?.ocrConfidence) ?? 1,
+      noInvoice: invoiceLines.length === 0,
     },
     matchedSupplierId: po.supplierId,
     matchedPoIds: [po.id],

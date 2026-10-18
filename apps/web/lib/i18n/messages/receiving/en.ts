@@ -81,6 +81,7 @@ export const en: Shape<typeof he> = {
     recon: {
       title: 'Check result',
       subtitle: 'Invoice {number} · OCR confidence {confidence}',
+      subtitleNoInvoice: 'Receiving against the order — no invoice read yet. Mark what actually arrived.',
       matched: 'Matched',
       different: 'Different',
       unordered: 'Not ordered',

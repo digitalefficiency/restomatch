@@ -59,6 +59,8 @@ export interface ReconciliationResult {
     invoiceDate: string;
     totalInclVat: number;
     ocrConfidence: number;
+    /** No invoice was read (PO-only review): there is no OCR confidence to show. */
+    noInvoice?: boolean;
   };
   /** Supplier-contact change alerts (e.g. agent phone changed since last invoice). */
   contactAlerts?: ContactChangeAlert[];

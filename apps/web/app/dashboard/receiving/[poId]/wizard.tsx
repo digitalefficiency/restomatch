@@ -394,10 +394,12 @@ export function ReceivingWizard({
 
   return (
     <main className="mx-auto max-w-3xl px-1 py-2">
-      {/* Progress bar (4 work steps, CONFIRMED is the terminal state). */}
-      <div className="mb-8 flex items-center gap-2" dir={dir}>
-        {STEP_ORDER.slice(0, 4).map((_, i) => {
-          const filled = i <= stepIndex;
+      {/* Progress bar: the same 5 steps as the "Step N of 5" eyebrows. Step 1
+          (supplier) is already done — the PO names it — so the bar is always
+          one segment ahead of STEP_ORDER. */}
+      <div className="mb-8 flex items-center gap-2" dir={dir} data-testid="wizard-progress" data-filled={Math.min(stepIndex + 2, 5)}>
+        {[0, 1, 2, 3, 4].map((i) => {
+          const filled = i <= stepIndex + 1;
           return (
             <div
               key={i}

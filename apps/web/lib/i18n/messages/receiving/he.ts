@@ -82,6 +82,7 @@ export const he = {
     recon: {
       title: 'תוצאת ההצלבה',
       subtitle: 'חשבונית {number} · ביטחון OCR {confidence}',
+      subtitleNoInvoice: 'קליטה מול ההזמנה — חשבונית עוד לא נקראה. סמנו מה באמת הגיע.',
       matched: 'תואם',
       different: 'שונה',
       unordered: 'לא הוזמן',

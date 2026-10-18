@@ -25,6 +25,8 @@ describe('adaptReconciliation — calm statuses (EN-5)', () => {
     expect(result.summary.missingCount).toBe(0);
     expect(result.summary.pendingCount).toBe(2);
     expect(result.summary.headlineDelta).toBe(0);
+    // S7: no "OCR confidence 100%" on a review that read no invoice.
+    expect(result.invoiceMeta.noInvoice).toBe(true);
   });
 
   it('OCR lines not linked to a product are pending review (no "not ordered", no loss)', () => {
