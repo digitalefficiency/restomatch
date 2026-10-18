@@ -37,7 +37,7 @@ export const nav: Shape<typeof he> = {
     searching: 'ይድለ ኣሎ…',
     noResults: 'ውጽኢት የለን',
     minChars: 'እንተወሓደ 2 ፊደላት ጽሓፉ',
-    error: 'ምድላይ ኣይሰለጠን። በጃኹም እንደገና ፈትኑ።',
+    error: 'ምድላይ ኣይሰለጠን። በጃኹም ደጊምኩም ፈትኑ።',
     hint: 'ቀስትታት ንምንቅስቓስ · Enter ንምኽፋት · Esc ንምዕጻው',
     groups: {
       suppliers: 'ኣቕረብቲ',

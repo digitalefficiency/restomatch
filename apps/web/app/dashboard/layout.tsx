@@ -5,6 +5,7 @@ import { auth, signOut } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
 import { ToastProvider } from '@/lib/components';
 import { getLocale, getT } from '@/lib/i18n/server';
+import { LanguagePicker } from '@/lib/i18n/LanguagePicker';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { nav } from '@/lib/i18n/messages/nav';
 import { labelForRole } from '@/lib/roles';
@@ -35,7 +36,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const active =
     memberships.find((m) => m.restaurantId === session.user.restaurantId) ?? memberships[0]!;
-  const [t, locale] = await Promise.all([getT(nav), getLocale()]);
+  const [t, locale, receiverLangsOn] = await Promise.all([
+    getT(nav),
+    getLocale(),
+    // Receiver languages (S14): the six-language picker replaces עב/EN when on.
+    caller.receiverLangs
+      .status()
+      .then((r) => r.enabled)
+      .catch(() => false),
+  ]);
   const roleLabel = labelForRole(active.role, locale);
   const email = session.user.email ?? '';
 
@@ -77,7 +86,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               </div>
               <div className="ms-auto hidden items-center gap-2 lg:flex">
                 <DashboardSearch role={active.role} className="w-72" />
-                <LocaleSwitcher />
+                {receiverLangsOn ? <LanguagePicker persist /> : <LocaleSwitcher />}
                 <form action={logout}>
                   <button
                     type="submit"
@@ -88,7 +97,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
                   </button>
                 </form>
               </div>
-              <LocaleSwitcher className="lg:hidden" />
+              {receiverLangsOn ? (
+                <LanguagePicker persist className="lg:hidden" />
+              ) : (
+                <LocaleSwitcher className="lg:hidden" />
+              )}
             </div>
             <DesktopNav role={active.role} />
           </div>

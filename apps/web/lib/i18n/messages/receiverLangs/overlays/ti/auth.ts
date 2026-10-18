@@ -9,7 +9,7 @@ export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor'>> 
     email: 'ኣድራሻ ኢመይል',
     emailPlaceholder: 'you@restaurant.com',
     password: 'መሕለፊ ቃል',
-    rememberMe: 'ኣብዚ መሳርሒ ዘክረኒ',
+    rememberMe: 'ኣብዚ መሳርሒ ዘክሩኒ',
     submit: 'እተዉ',
     or: 'ወይ',
     magicLabel: 'ኣድራሻ ኢመይል ንሊንክ ምእታው',
@@ -20,11 +20,11 @@ export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor'>> 
     resetDone: 'መሕለፊ ቃልኩም ተቐይሩ፡ ካብ ኩሎም መሳርሒታት ድማ ወጺእኩም። ብሓድሽ መሕለፊ ቃልኩም እተዉ።',
     signedOut: 'ወጺእኩም ኣለኹም።',
     errors: {
-      verification: 'እዚ ሊንክ ግዜኡ ሓሊፉ ወይ ድሮ ተጠቒምኩምሉ። በጃኹም እንደገና ፈትኑ።',
+      verification: 'እዚ ሊንክ ግዜኡ ሓሊፉ ወይ ድሮ ተጠቒምኩምሉ። በጃኹም ደጊምኩም ፈትኑ።',
       credentials: 'ጌጋ ኢመይል ወይ መሕለፊ ቃል።',
       rate: 'ብዙሕ ፈተነታት። በጃኹም ጸኒሕኩም ፈትኑ።',
-      emailSignin: 'ናይ ምእታው ሊንክ ክንሰድድ ኣይከኣልናን። ብዙሕ ሕቶታት ተላኢኹ ክኸውን ይኽእል — ድሕሪ ቁሩብ ደቓይቕ እንደገና ፈትኑ።',
-      generic: 'ኣብ ምእታው ገለ ጌጋ ተፈጢሩ። በጃኹም እንደገና ፈትኑ።',
+      emailSignin: 'ናይ ምእታው ሊንክ ክንሰድድ ኣይከኣልናን። ብዙሕ ሕቶታት ተላኢኹ ክኸውን ይኽእል — ድሕሪ ቁሩብ ደቓይቕ ደጊምኩም ፈትኑ።',
+      generic: 'ኣብ ምእታው ገለ ጌጋ ተፈጢሩ። በጃኹም ደጊምኩም ፈትኑ።',
     },
   },
   checkEmail: {
@@ -36,7 +36,7 @@ export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor'>> 
   twoFactor: {
     title: 'ብኽልተ ስጉምቲ ምርግጋጽ',
     subtitle: 'ካብ ኣፕሊኬሽን ምርግጋጽኩም ዝመጸ 6 ኣሃዝ ዘለዎ ኮድ፡ ወይ ሓንሳብ ጥራይ ዝሰርሕ ኮድ ምምላስ ኣእትዉ።',
-    error: 'እቲ ኮድ ጌጋ እዩ ወይ ግዜኡ ሓሊፉ። በጃኹም እንደገና ፈትኑ።',
+    error: 'እቲ ኮድ ጌጋ እዩ ወይ ግዜኡ ሓሊፉ። በጃኹም ደጊምኩም ፈትኑ።',
     codeLabel: 'ኮድ ምርግጋጽ',
     submit: 'ኣረጋግጹ',
     switchAccount: 'ብካልእ ኣካውንት እተዉ',

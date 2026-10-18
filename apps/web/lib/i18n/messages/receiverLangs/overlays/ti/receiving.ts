@@ -6,7 +6,7 @@ export const receiving: Shape<typeof he> = {
   inbox: {
     title: 'ምቕባል ኣቕሓ',
     subtitle:
-      'ሎሚ ዝጽበዩ ትእዛዛት። ስእሊ ፋቱራ ንምልዓል፡ ምስ ትእዛዝ ንምንጽጻርን ብሓቂ ዝመጸ ንምምዝጋብን ኣቕራቢ ምረጹ።',
+      'ሎሚ ክበጽሑ ዘለዎም ትእዛዛት። ስእሊ ፋቱራ ንምልዓል፡ ምስ ትእዛዝ ንምንጽጻርን ብሓቂ ዝመጸ ንምምዝጋብን ኣቕራቢ ምረጹ።',
     emptyTitle: 'ሎሚ ዝተመደበ ኣቕርቦት የለን',
     emptyDescription:
       'ሎሚ ክበጽሑ ዘለዎም ትእዛዛት ኣብዚ ይርኣዩ። ኣቕራቢ ምስ መጸ፡ ምቕባል ጀምሩ፡ ቁጠባ ንምሕላው ድማ ዝኾነ ፍልልይ መዝግቡ።',
@@ -44,7 +44,7 @@ export const receiving: Shape<typeof he> = {
       frameHint: 'ፋቱራ ኣብ ውሽጢ እቲ ሳጹን ኣእትዉ',
       uploading: 'ይለኣኽ ኣሎ…',
       process: 'ፋቱራ ስደዱ',
-      retake: 'እንደገና ስእሊ ኣልዕሉ',
+      retake: 'ደጊምኩም ስእሊ ኣልዕሉ',
       capture: 'ስእሊ ኣልዕሉ / ፋይል ስደዱ',
       useDemo: 'ናይ ፈተነ ፋቱራ ተጠቐሙ (ብዘይ ምልኣኽ)',
       backToSupplier: 'ናብ ኣቕራቢ ተመለሱ',
@@ -91,7 +91,7 @@ export const receiving: Shape<typeof he> = {
       colDelta: 'ፍልልይ ₪',
       ordered: 'ዝተኣዘዘ',
       invoiced: 'ኣብ ፋቱራ',
-      retake: 'ፋቱራ እንደገና ስእሊ ኣልዕሉ',
+      retake: 'ደጊምኩም ስእሊ ፋቱራ ኣልዕሉ',
       quickConfirm: 'ኩሉ ጽቡቕ እዩ — ቀልጢፍኩም ኣረጋግጹ',
       continueAdjust: 'ናብ ብዝሒ ቀጽሉ',
     },
@@ -146,7 +146,7 @@ export const receiving: Shape<typeof he> = {
   unnamedItem: 'ስም ዘይብሉ ኣቕሓ',
   unorderedItem: 'ኣብ ትእዛዝ ዘየለ ኣቕሓ',
   errors: {
-    generic: 'ገለ ጌጋ ተፈጢሩ። በጃኹም እንደገና ፈትኑ።',
+    generic: 'ገለ ጌጋ ተፈጢሩ። በጃኹም ደጊምኩም ፈትኑ።',
     upload: 'ምልኣኽ ስእሊ ኣይሰለጠን: {message}',
     ocrTimeout: 'ምንባብ ፋቱራ ካብ ልሙድ ንላዕሊ ይጸንሕ ኣሎ — ምስ ትእዛዝ ብምንጽጻር ምቕባል ክትቕጽሉ ትኽእሉ ኢኹም።',
     notFound: 'መዝገብ ኣይተረኽበን።',

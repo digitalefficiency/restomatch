@@ -31,6 +31,7 @@ const ROUTER_KEYS = [
   'plans',
   'products',
   'receiving',
+  'receiverLangs',
   'scans',
   'search',
   'settings',

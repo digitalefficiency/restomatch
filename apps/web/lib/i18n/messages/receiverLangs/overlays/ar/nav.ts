@@ -31,7 +31,7 @@ export const nav: Shape<typeof he> = {
   },
   signOut: 'تسجيل الخروج',
   search: {
-    placeholder: 'ابحث عن موردين، منتجات، فواتير…',
+    placeholder: 'ابحث عن موردين أو منتجات أو فواتير…',
     shortPlaceholder: 'بحث…',
     label: 'بحث عام',
     searching: 'جارٍ البحث…',
@@ -48,7 +48,7 @@ export const nav: Shape<typeof he> = {
   },
   worker: {
     title: 'نظام المعالجة غير متاح الآن.',
-    body: 'الفواتير التي ترفعها محفوظة، وستتم قراءتها ومطابقتها عند عودة النظام.',
+    body: 'ستُحفظ الفواتير التي ترفعها، وستتم قراءتها ومطابقتها عند عودة النظام.',
     lastBeat: 'آخر إشارة قبل {minutes} دقيقة.',
     ownerNotified: 'تم إبلاغ صاحب المطعم.',
   },

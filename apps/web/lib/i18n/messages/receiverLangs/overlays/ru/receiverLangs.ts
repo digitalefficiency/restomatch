@@ -10,7 +10,7 @@ export const receiverLangs: Shape<typeof he> = {
   },
   lines: {
     original: 'Оригинал',
-    machine: 'Машинный перевод — сверьте с накладной',
+    machine: 'Машинный перевод — проверьте по накладной',
     untranslated: 'Нет перевода — показано на языке оригинала',
   },
 };

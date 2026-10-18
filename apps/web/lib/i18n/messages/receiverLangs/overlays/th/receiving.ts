@@ -9,11 +9,11 @@ export const receiving: Shape<typeof he> = {
       'ใบสั่งซื้อที่จะมาส่งวันนี้ เลือกผู้จำหน่ายเพื่อถ่ายรูปใบแจ้งหนี้ ตรวจกับใบสั่งซื้อ และบันทึกของที่มาส่งจริง',
     emptyTitle: 'วันนี้ไม่มีของมาส่ง',
     emptyDescription:
-      'ใบสั่งซื้อที่ต้องส่งวันนี้จะแสดงที่นี่ เมื่อผู้จำหน่ายมาถึง ให้เปิดการรับสินค้าและบันทึกส่วนที่ไม่ตรงกัน เพื่อเก็บเงินที่ประหยัดได้',
+      'ใบสั่งซื้อที่ต้องส่งวันนี้จะแสดงที่นี่ เมื่อผู้จำหน่ายมาถึง ให้เริ่มรับสินค้าและบันทึกส่วนที่ไม่ตรงกัน เพื่อเก็บเงินที่ประหยัดได้',
     receiveFrom: 'รับสินค้าจาก {supplier}',
     items: '{count} รายการ',
     noDeliveryDate: 'ไม่มีวันส่ง',
-    continueReceipt: 'ทำการรับสินค้าที่เปิดไว้ต่อ',
+    continueReceipt: 'รับสินค้าที่ค้างไว้ต่อ',
     openReceipt: 'เริ่มรับสินค้าใหม่',
     receiveGoods: 'รับสินค้า',
     badge: {
@@ -71,7 +71,7 @@ export const receiving: Shape<typeof he> = {
     },
     recon: {
       title: 'ผลการตรวจ',
-      subtitle: 'ใบแจ้งหนี้ {number} · ความมั่นใจ OCR {confidence}',
+      subtitle: 'ใบแจ้งหนี้ {number} · ความมั่นใจในการอ่าน {confidence}',
       matched: 'ตรงกัน',
       different: 'ไม่ตรงกัน',
       unordered: 'ไม่ได้สั่ง',
@@ -120,7 +120,7 @@ export const receiving: Shape<typeof he> = {
       settled: 'ตรวจแล้ว',
       backToResults: 'กลับไปที่ผลการตรวจ',
       fixRemaining: 'ตรวจอีก {count} รายการ',
-      closeAndSave: 'ปิดและบันทึก',
+      closeAndSave: 'ปิดการรับสินค้าและบันทึก',
       saving: 'กำลังบันทึก…',
     },
     confirmed: {
@@ -132,7 +132,7 @@ export const receiving: Shape<typeof he> = {
       savings: 'เงินที่อาจประหยัดได้ (บันทึกแล้ว)',
       scanSaved: 'บันทึกรูปใบแจ้งหนี้แล้ว',
       viewScan: 'ดูรูปสแกน',
-      another: 'รับสินค้าอีกครั้ง',
+      another: 'รับสินค้ารายการใหม่',
       backToInbox: 'กลับไปที่รายการส่งของ',
     },
   },

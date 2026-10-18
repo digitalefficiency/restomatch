@@ -3,7 +3,7 @@ import type { he } from '../../../scans/he';
 
 /** scans — ar overlay (Arabic). */
 export const scans: Shape<typeof he> = {
-  scannedInvoice: 'فاتورة ممسوحة',
+  scannedInvoice: 'فاتورة ممسوحة ضوئيًا',
   secureLink: 'رابط آمن',
   pages: '{count} صفحات',
   localCopy: 'نسخة محلية (للتطوير)',
