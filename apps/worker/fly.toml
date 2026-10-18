@@ -13,7 +13,19 @@
 #                   RESEND_API_KEY=... EMAIL_FROM=... APP_URL=...
 
 app = "restomatch-worker"
-primary_region = "syd"  # colocate with Supabase ap-southeast-2 (Sydney)
+# Colocate with the database. Today Supabase is ap-southeast-2 (Sydney) → "syd".
+# After the EU move (docs/HANDOFF.md §4) switch to "fra" (Frankfurt).
+primary_region = "syd"
+
+# Graceful shutdown: the worker traps SIGTERM, stops taking jobs, lets in-flight
+# jobs finish (BullMQ Worker.close), drains its Postgres pool, then exits.
+# A job cut off anyway is "stalled" and re-run by BullMQ — nothing is lost.
+kill_signal = "SIGTERM"
+kill_timeout = "120s"
+
+[deploy]
+  # One machine: start the new one, wait for /health, then stop the old one.
+  strategy = "rolling"
 
 [build]
   dockerfile = "apps/worker/Dockerfile"
@@ -35,6 +47,14 @@ primary_region = "syd"  # colocate with Supabase ap-southeast-2 (Sydney)
     timeout = "2s"
     grace_period = "20s"
 
+# Restart a crashed process automatically (in addition to the health check).
+[[restart]]
+  policy = "always"
+  retries = 10
+
+# Exactly ONE worker: there is no [http_service], so Fly never auto-stops or
+# auto-starts machines; keep the count at 1 with `fly scale count 1`. (BullMQ
+# makes >1 safe if you ever need throughput; cron schedulers are idempotent.)
 [[vm]]
   size = "shared-cpu-1x"
   memory = "1024mb"
