@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { preload } from 'react-dom';
 import { TrpcProvider } from '@/lib/trpc/client';
 import { CookieConsent } from '@/lib/components/CookieConsent';
+import { RouteProgress } from '@/lib/components/RouteProgress';
 import { I18nProvider } from '@/lib/i18n/client';
 import { dirOf } from '@/lib/i18n/config';
 import { getLocale } from '@/lib/i18n/server';
@@ -36,6 +37,7 @@ export default async function RootLayout(props: { children: React.ReactNode }) {
         <I18nProvider locale={locale}>
           <TrpcProvider>{props.children}</TrpcProvider>
           <CookieConsent />
+          <RouteProgress />
         </I18nProvider>
       </body>
     </html>
