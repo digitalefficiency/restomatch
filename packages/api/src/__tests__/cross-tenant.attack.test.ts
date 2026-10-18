@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   and,
   catalogImports,
+  inArray,
   createDb,
   discrepancies,
   eq,
@@ -115,6 +116,10 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'receiving.updateInvoiceHeader': 'attack',
   'receiving.updateInvoiceLine': 'attack',
   'receiving.pendingInvoices': 'isolation',
+  // S2 "Receiver in English": writes ONLY display columns, but still takes a
+  // client-supplied poId / invoiceId — a foreign id must be NOT_FOUND and B's
+  // po_lines / invoice_lines / products must stay untranslated.
+  'receiving.ensureEnglish': 'attack',
   'scans.upload':
     'memberProcedure write keyed to ctx.session.restaurantId; takes NO client-supplied tenant id or storage prefix (PR1/A.3 — the tenant + object path are derived server-side from the session), so it cannot target another tenant. The actual byte upload + service-role mapping insert are Supabase-network-bound and verified by storage.attack.test (membership gate) + against real Supabase; role denial is implicit in memberProcedure.',
   'admin.listRestaurants': 'admin-denial',
@@ -146,6 +151,7 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'catalog.createItem': 'attack',
   'catalog.updateItem': 'attack',
   'catalog.deleteItem': 'attack',
+  'catalog.imports': 'isolation',
   'orders.list': 'isolation',
   'orders.get': 'attack',
   'orders.createDraft': 'attack',
@@ -189,6 +195,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'mapping.confirm': 'attack',
   // Canonical product management (rename / recategorize / exclusivity / delete).
   'products.update': 'attack',
+  'products.list': 'isolation',
+  'products.setNamesEn': 'attack',
   'products.delete': 'attack',
   // Data-subject-rights (E.6). Not tenant-scoped: export/delete act ONLY on the
   // caller's own identity (keyed to ctx.session.userId — no client-supplied
@@ -855,6 +863,35 @@ describe('match router + receiving detail reads: foreign id attacks (A → B)', 
   });
 });
 
+describe('receiving.ensureEnglish: foreign id attacks (A → B)', () => {
+  it('rejects a foreign poId and writes no English into B rows', async () => {
+    await expect(callerFor(A).receiving.ensureEnglish({ poId: B.poId })).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+    const [line] = await db
+      .select({ en: poLines.rawDescriptionEn })
+      .from(poLines)
+      .where(eq(poLines.id, B.poLineId));
+    expect(line?.en ?? null).toBeNull();
+    const [product] = await db
+      .select({ en: products.nameEn })
+      .from(products)
+      .where(eq(products.id, B.productId));
+    expect(product?.en ?? null).toBeNull();
+  });
+
+  it('rejects a foreign invoiceId (even paired with A\'s own poId) and leaves B untouched', async () => {
+    await expect(
+      callerFor(A).receiving.ensureEnglish({ poId: A.poId, invoiceId: B.invoiceId }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [line] = await db
+      .select({ en: invoiceLines.rawDescriptionEn })
+      .from(invoiceLines)
+      .where(eq(invoiceLines.id, B.invoiceLineId));
+    expect(line?.en ?? null).toBeNull();
+  });
+});
+
 describe('platform-admin procedures reject a non-admin tenant user', () => {
   // A is a normal restaurant owner, not a platform admin, and no
   // PLATFORM_ADMIN_EMAILS allowlist is set in tests.
@@ -1189,6 +1226,40 @@ describe('products router: foreign-id attacks (A → B)', () => {
     expect(row?.nameEn ?? null).toBeNull();
   });
 
+  it('products.list returns only the caller restaurant products', async () => {
+    const out = await callerFor(A).products.list();
+    expect(out.rows.map((r) => r.id)).toContain(A.productId);
+    expect(out.rows.map((r) => r.id)).not.toContain(B.productId);
+  });
+
+  it('products.setNamesEn rejects a batch containing a foreign product and writes nothing', async () => {
+    await expect(
+      callerFor(A).products.setNamesEn({
+        items: [
+          { productId: A.productId, nameEn: 'Mine' },
+          { productId: B.productId, nameEn: 'HIJACK' },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const rows = await db
+      .select({ id: products.id, nameEn: products.nameEn })
+      .from(products)
+      .where(inArray(products.id, [A.productId, B.productId]));
+    for (const r of rows) expect(r.nameEn ?? null).toBeNull();
+  });
+
+  it('catalog.imports excludes B import history', async () => {
+    await db.insert(catalogImports).values({
+      restaurantId: B.restaurantId,
+      supplierId: B.supplierId,
+      filename: 'b-secret.xlsx',
+    });
+    const all = await callerFor(A).catalog.imports();
+    expect(all.map((i) => i.filename)).not.toContain('b-secret.xlsx');
+    const foreign = await callerFor(A).catalog.imports({ supplierId: B.supplierId });
+    expect(foreign).toHaveLength(0);
+  });
+
   it('products.update rejects assigning a foreign supplier as exclusivity owner', async () => {
     // A owns the product but tries to set B's supplier as owner → NOT_FOUND.
     await expect(
@@ -1285,6 +1356,33 @@ describe('member locale: foreign-id attacks + self isolation (A → B)', () => {
     expect(await bOwnerLocale()).toBe('he');
     await callerFor(A).settings.setMyLocale({ locale: null });
     expect(await callerFor(A).settings.myLocale()).toEqual({ locale: null });
+  });
+});
+
+describe('role denial: finance-only reads (leakBreakdown, approvals.history) — security review', () => {
+  // The invoice-level drill-down (supplier, invoice number, line deltas) is the
+  // /dashboard/leaks data; receiver/chef see only the aggregate leak hero.
+  for (const role of ['receiver', 'chef'] as const) {
+    it(`owner.leakBreakdown → FORBIDDEN for ${role}`, async () => {
+      await expect(callerWithRole(A, role).owner.leakBreakdown()).rejects.toMatchObject({
+        code: 'FORBIDDEN',
+      });
+    });
+  }
+  it('owner.leakBreakdown stays available to bookkeeper (claims page) and manager', async () => {
+    for (const role of ['bookkeeper', 'manager'] as const) {
+      await expect(callerWithRole(A, role).owner.leakBreakdown()).resolves.toBeDefined();
+    }
+  });
+  it('approvals.history → FORBIDDEN for receiver/chef', async () => {
+    for (const role of ['receiver', 'chef'] as const) {
+      await expect(
+        callerWithRole(A, role).approvals.history({ discrepancyId: A.discrepancyId }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    }
+  });
+  it('owner.leakHero (aggregate) stays readable by every member', async () => {
+    await expect(callerWithRole(A, 'receiver').owner.leakHero()).resolves.toBeDefined();
   });
 });
 

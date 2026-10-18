@@ -1,4 +1,4 @@
-import { meterOcrScan } from '@restomatch/api';
+import { fillEnglishNames, meterOcrScan } from '@restomatch/api';
 import { matchProductTopN, MockEmbeddingProvider } from '@restomatch/catalog';
 import { and, createDb, eq, invoiceLines, invoices, restaurants } from '@restomatch/db';
 import {
@@ -33,9 +33,9 @@ function buildProviders(job: OcrInvoiceJob): { documentAi: OcrProvider; claude: 
   }
 
   // Claude-only pilot: Google Document AI is not yet wired. We hand the SAME
-  // ClaudeVision instance to BOTH provider slots. The reconciler treats two
-  // identical extractions as full agreement (no conflicts → high confidence),
-  // which is the intended single-provider behaviour for the pilot.
+  // ClaudeVision instance to BOTH provider slots. M11: runOcrPipeline detects
+  // the shared instance and calls it ONCE (was two paid Opus calls per scan);
+  // the reconciler then sees full agreement (no conflicts → high confidence).
   //
   // PR1/A.1: the scan bucket is PRIVATE, so the invoice URL is a signed/expiring
   // URL. fetchBytes makes the worker fetch the bytes itself and send base64 —
@@ -144,6 +144,8 @@ export function startOcrInvoiceWorker() {
           productId: line.productId,
           supplierSku: line.sku ?? null,
           rawDescription: line.rawDescription,
+          // "Receiver in English": Claude Vision returns it in the same call.
+          rawDescriptionEn: line.rawDescriptionEn ?? null,
           qtyBilled: line.qty.toString(),
           unit: line.unit,
           unitPriceBilled: line.unitPrice.toString(),
@@ -152,6 +154,15 @@ export function startOcrInvoiceWorker() {
           ocrConfidenceLine: line.confidence?.toString() ?? null,
         })),
       );
+    }
+
+    // Fill any English the extraction didn't carry (stub / Document AI lines)
+    // plus the linked products' name_en — glossary first, Claude only when
+    // keyed. Display-only; a failure here must never fail the OCR job.
+    try {
+      await fillEnglishNames(db, job.data.restaurantId, { invoiceId: job.data.invoiceId });
+    } catch (err) {
+      console.warn(`[ocr-invoice] English fill failed for invoice=${job.data.invoiceId}`, err);
     }
 
     console.log(

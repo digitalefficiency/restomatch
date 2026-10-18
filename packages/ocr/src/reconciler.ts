@@ -240,9 +240,13 @@ function reconcileLine(
       conflicts,
     ) ?? null;
 
+  // English rendering: only Claude emits it; prefer it, fall back to Document AI.
+  const rawDescriptionEn = englishOf(claudeLine) ?? englishOf(docLine);
+
   return {
     sku,
     rawDescription,
+    ...(rawDescriptionEn ? { rawDescriptionEn } : {}),
     qty,
     unit,
     unitPrice,
@@ -293,4 +297,10 @@ function bigrams(s: string): Set<string> {
     out.add(norm.slice(i, i + 2));
   }
   return out;
+}
+
+/** The optional English rendering a provider may attach to a line. */
+function englishOf(line: InvoiceOcrLine): string | null {
+  const en = (line as InvoiceOcrLine & { rawDescriptionEn?: unknown }).rawDescriptionEn;
+  return typeof en === 'string' && en.trim() !== '' ? en.trim() : null;
 }

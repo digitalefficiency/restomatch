@@ -1,12 +1,18 @@
 import { TRPCError } from '@trpc/server';
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { createDb, testDbUrl } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext } from '../context';
 import { QuotaExceededError } from '../entitlements';
-import { APP_ERROR_CODES, appError, resolveAppError } from '../errors';
+import {
+  APP_ERROR_CODES,
+  appError,
+  GENERIC_INTERNAL_MESSAGE,
+  publicErrorMessage,
+  resolveAppError,
+} from '../errors';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 
 /**
@@ -115,5 +121,66 @@ describe('errorFormatter over HTTP (the shape real clients see)', () => {
     const uncoded = await call('team.list', {});
     expect(uncoded.error?.json.data.code).toBe('METHOD_NOT_SUPPORTED');
     expect(uncoded.error?.json.data.appCode).toBeNull();
+  });
+});
+
+/* Security review (client-ready): no raw internal error text in production. */
+describe('publicErrorMessage / production masking', () => {
+  const leaky = 'duplicate key value violates unique constraint "users_email_key" — SELECT * FROM users';
+
+  it('masks an uncoded INTERNAL_SERVER_ERROR in production only', () => {
+    const err = new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: leaky });
+    expect(publicErrorMessage(err, null, true)).toBe(GENERIC_INTERNAL_MESSAGE);
+    expect(publicErrorMessage(err, null, false)).toBe(leaky);
+  });
+
+  it('keeps deliberate messages (other codes, or coded internal errors like quota)', () => {
+    const bad = appError('BAD_REQUEST', 'team.lastOwner', 'חייב להישאר לפחות בעלים אחד.');
+    expect(publicErrorMessage(bad, resolveAppError(bad), true)).toBe('חייב להישאר לפחות בעלים אחד.');
+    const quota = new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'המנוי אינו פעיל — נדרש חידוש',
+      cause: new QuotaExceededError('המנוי אינו פעיל — נדרש חידוש', 'ocr_scans', 0),
+    });
+    expect(publicErrorMessage(quota, resolveAppError(quota), true)).toBe('המנוי אינו פעיל — נדרש חידוש');
+  });
+
+  describe('over HTTP', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    async function callWithBrokenDb() {
+      // A driver failure thrown from inside a resolver (plans.list reads ctx.db).
+      const brokenDb = new Proxy(
+        {},
+        {
+          get() {
+            throw new Error(leaky);
+          },
+        },
+      ) as unknown as AppContext['db'];
+      const res = await fetchRequestHandler({
+        endpoint: '/api/trpc',
+        router: appRouter,
+        createContext: () => ({ db: brokenDb, session: null }) as unknown as AppContext,
+        req: new Request('http://test/api/trpc/plans.list', { method: 'GET' }),
+      });
+      return (await res.json()) as { error: { json: { message: string; data: Record<string, unknown> } } };
+    }
+
+    it('production: generic message, no stack, no SQL', async () => {
+      vi.stubEnv('NODE_ENV', 'production');
+      const body = await callWithBrokenDb();
+      expect(body.error.json.message).toBe(GENERIC_INTERNAL_MESSAGE);
+      expect(JSON.stringify(body)).not.toContain('users_email_key');
+      expect(body.error.json.data.code).toBe('INTERNAL_SERVER_ERROR');
+    });
+
+    it('development: the raw message is kept for debugging', async () => {
+      vi.stubEnv('NODE_ENV', 'development');
+      const body = await callWithBrokenDb();
+      expect(body.error.json.message).toContain('users_email_key');
+    });
   });
 });

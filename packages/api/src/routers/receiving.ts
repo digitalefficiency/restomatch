@@ -10,7 +10,10 @@ import {
   grLines,
   gte,
   inArray,
+  isNull,
   invoiceLines,
+  or,
+  sql,
   invoices,
   lte,
   poLines,
@@ -20,18 +23,27 @@ import {
   suppliers,
 } from '@restomatch/db';
 import { enqueueOcrInvoice } from '@restomatch/queue';
+import type { InvoiceOcrResult } from '@restomatch/types';
 import { assertGrOwned, assertInvoiceOwned, assertSupplierOwned } from '../tenant';
+import { fillEnglishNames } from '../receiving/english';
+import { devOcrStubEnabled, buildDevOcrStub } from '../receiving/devOcrStub';
 import { isAllowedScanUrl } from '../lib/scanUrls';
 import { endOfDayInTz, startOfDayInTz } from '../lib/time';
 import { managerProcedure, memberProcedure, receiverProcedure, router } from '../trpc';
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
+/** R5: undated open POs this recent still show in the receiving inbox. */
+const UNDATED_LOOKBACK_DAYS = 14;
 
 const TodayExpectationSchema = z.object({
   poId: z.string().uuid(),
   supplierId: z.string().uuid(),
   supplierName: z.string(),
+  /** ISO delivery time; for an undated PO this is its sent/created time. */
   expectedAt: z.string(),
+  /** R5: false when the PO has no expected_delivery_at (still listed). */
+  hasDeliveryDate: z.boolean(),
+  supplierNameEn: z.string().nullable(),
   lineCount: z.number().int().nonnegative(),
   status: z.string(),
   receiptId: z.string().uuid().nullable(),
@@ -65,7 +77,10 @@ export const receivingRouter = router({
         poId: purchaseOrders.id,
         supplierId: purchaseOrders.supplierId,
         supplierName: suppliers.name,
+        supplierNameEn: suppliers.nameEn,
         expectedAt: purchaseOrders.expectedDeliveryAt,
+        sentAt: purchaseOrders.sentAt,
+        createdAt: purchaseOrders.createdAt,
         status: purchaseOrders.status,
         receiptId: goodsReceipts.id,
         receiptStatus: goodsReceipts.status,
@@ -82,12 +97,29 @@ export const receivingRouter = router({
       .where(
         and(
           eq(purchaseOrders.restaurantId, ctx.session.restaurantId),
-          gte(purchaseOrders.expectedDeliveryAt, startOfDay),
-          lte(purchaseOrders.expectedDeliveryAt, endOfDay),
           inArray(purchaseOrders.status, ['sent', 'confirmed', 'partial']),
+          // R5: a PO without a delivery date used to be invisible here — the
+          // receiver could never open it. Show recent undated open POs too.
+          or(
+            and(
+              gte(purchaseOrders.expectedDeliveryAt, startOfDay),
+              lte(purchaseOrders.expectedDeliveryAt, endOfDay),
+            ),
+            and(
+              isNull(purchaseOrders.expectedDeliveryAt),
+              gte(
+                purchaseOrders.createdAt,
+                new Date(startOfDay.getTime() - UNDATED_LOOKBACK_DAYS * 86_400_000),
+              ),
+            ),
+          ),
         ),
       )
-      .orderBy(asc(purchaseOrders.expectedDeliveryAt));
+      // Dated deliveries first (by time), then undated (newest first).
+      .orderBy(
+        sql`${purchaseOrders.expectedDeliveryAt} asc nulls last`,
+        desc(purchaseOrders.createdAt),
+      );
 
     const poIds = rows.map((r) => r.poId);
     const lineCountMap = new Map<string, number>();
@@ -104,7 +136,9 @@ export const receivingRouter = router({
       poId: r.poId,
       supplierId: r.supplierId,
       supplierName: r.supplierName,
-      expectedAt: r.expectedAt?.toISOString() ?? new Date().toISOString(),
+      supplierNameEn: r.supplierNameEn ?? null,
+      expectedAt: (r.expectedAt ?? r.sentAt ?? r.createdAt).toISOString(),
+      hasDeliveryDate: r.expectedAt !== null,
       lineCount: lineCountMap.get(r.poId) ?? 0,
       status: r.status,
       receiptId: r.receiptId ?? null,
@@ -123,6 +157,7 @@ export const receivingRouter = router({
           id: purchaseOrders.id,
           supplierId: purchaseOrders.supplierId,
           supplierName: suppliers.name,
+          supplierNameEn: suppliers.nameEn,
           expectedAt: purchaseOrders.expectedDeliveryAt,
           status: purchaseOrders.status,
           totalEstimated: purchaseOrders.totalEstimated,
@@ -144,12 +179,21 @@ export const receivingRouter = router({
         .limit(1);
       if (!po) throw new TRPCError({ code: 'NOT_FOUND', message: 'PO not found' });
 
-      const lines = await ctx.db
-        .select()
+      const rows = await ctx.db
+        .select({ line: poLines, productNameEn: products.nameEn })
         .from(poLines)
+        .leftJoin(
+          products,
+          and(eq(products.id, poLines.productId), eq(products.restaurantId, ctx.session.restaurantId)),
+        )
         .where(eq(poLines.poId, input.poId))
         .orderBy(asc(poLines.id));
 
+      // English display name: the line's own translation, else the product's.
+      const lines = rows.map((r) => ({
+        ...r.line,
+        productNameEn: r.productNameEn ?? null,
+      }));
       return { ...po, lines };
     }),
 
@@ -199,7 +243,9 @@ export const receivingRouter = router({
           poLineId: grLines.poLineId,
           productId: grLines.productId,
           productName: products.canonicalName,
+          productNameEn: products.nameEn,
           rawDescription: poLines.rawDescription,
+          rawDescriptionEn: poLines.rawDescriptionEn,
           orderedQty: poLines.qtyOrdered,
           unit: poLines.unit,
           qtyReceived: grLines.qtyReceived,
@@ -220,6 +266,7 @@ export const receivingRouter = router({
           ...l,
           // Surface a human label even when no catalog product is linked.
           productName: l.productName ?? l.rawDescription ?? null,
+          productNameEn: l.productNameEn ?? l.rawDescriptionEn ?? null,
         })),
       };
     }),
@@ -256,11 +303,23 @@ export const receivingRouter = router({
         .limit(1);
       if (!invoice) throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
 
+      const [supplier] = invoice.supplierId
+        ? await ctx.db
+            .select({ name: suppliers.name, nameEn: suppliers.nameEn })
+            .from(suppliers)
+            .where(
+              and(eq(suppliers.id, invoice.supplierId), eq(suppliers.restaurantId, ctx.session.restaurantId)),
+            )
+            .limit(1)
+        : [];
+
       const lines = await ctx.db
         .select({
           id: invoiceLines.id,
           productId: invoiceLines.productId,
           rawDescription: invoiceLines.rawDescription,
+          rawDescriptionEn: invoiceLines.rawDescriptionEn,
+          productNameEn: products.nameEn,
           qtyBilled: invoiceLines.qtyBilled,
           unit: invoiceLines.unit,
           unitPriceBilled: invoiceLines.unitPriceBilled,
@@ -269,10 +328,19 @@ export const receivingRouter = router({
           ocrConfidenceLine: invoiceLines.ocrConfidenceLine,
         })
         .from(invoiceLines)
+        .leftJoin(
+          products,
+          and(eq(products.id, invoiceLines.productId), eq(products.restaurantId, ctx.session.restaurantId)),
+        )
         .where(eq(invoiceLines.invoiceId, invoice.id))
         .orderBy(asc(invoiceLines.id));
 
-      return { ...invoice, lines };
+      return {
+        ...invoice,
+        supplierName: supplier?.name ?? null,
+        supplierNameEn: supplier?.nameEn ?? null,
+        lines,
+      };
     }),
 
   /**
@@ -357,7 +425,12 @@ export const receivingRouter = router({
 
       const p = input.patch;
       const set: Partial<typeof invoiceLines.$inferInsert> = {};
-      if (p.rawDescription !== undefined) set.rawDescription = p.rawDescription;
+      if (p.rawDescription !== undefined) {
+        set.rawDescription = p.rawDescription;
+        // The English rendering described the OLD text — clear it so the next
+        // ensureEnglish call re-translates the corrected description.
+        set.rawDescriptionEn = null;
+      }
       if (p.qtyBilled !== undefined) set.qtyBilled = String(p.qtyBilled);
       if (p.unit !== undefined) set.unit = p.unit;
       if (p.unitPriceBilled !== undefined) set.unitPriceBilled = String(p.unitPriceBilled);
@@ -561,45 +634,68 @@ export const receivingRouter = router({
       await assertGrOwned(ctx.db, input.grId, ctx.session.restaurantId);
       await assertSupplierOwned(ctx.db, input.supplierId, ctx.session.restaurantId);
 
-      // M8: idempotent on (restaurant, image URL). A double-tap / client retry
-      // used to create a second invoice row AND a second OCR job (double spend),
-      // which the matcher then flagged as a false DUPLICATE_INVOICE.
-      const [existing] = await ctx.db
-        .select({ id: invoices.id })
-        .from(invoices)
-        .where(
-          and(
-            eq(invoices.restaurantId, ctx.session.restaurantId),
-            eq(invoices.rawImageUrl, input.imageUrl),
-          ),
-        )
-        .limit(1);
-      if (existing) {
-        return { invoiceId: existing.id, alreadyExisted: true as const };
-      }
+      const restaurantId = ctx.session.restaurantId;
+      // M8: idempotent on (restaurant, scanned object). A double-tap / client
+      // retry used to create a second invoice row AND a second OCR job (double
+      // spend), which the matcher then flagged as a false DUPLICATE_INVOICE.
+      // The key is the URL WITHOUT its query string: re-signing the same object
+      // yields a new token but is still the same scan. The check+insert runs
+      // under a per-(restaurant, object) advisory lock so two concurrent taps
+      // can't both miss the existing row.
+      const objectUrl = input.imageUrl.split('?')[0]!;
+      const outcome = await ctx.db.transaction(async (tx) => {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtext(${`register-invoice:${restaurantId}:${objectUrl}`}))`,
+        );
+        const [existing] = await tx
+          .select({ id: invoices.id })
+          .from(invoices)
+          .where(
+            and(
+              eq(invoices.restaurantId, restaurantId),
+              sql`split_part(${invoices.rawImageUrl}, '?', 1) = ${objectUrl}`,
+            ),
+          )
+          .limit(1);
+        if (existing) return { invoiceId: existing.id, created: false as const };
 
-      const [invoice] = await ctx.db
-        .insert(invoices)
-        .values({
-          restaurantId: ctx.session.restaurantId,
-          supplierId: input.supplierId,
-          rawImageUrl: input.imageUrl,
-          status: 'ocr_pending',
-          source: 'photo',
-          createdBy: ctx.session.userId,
-        })
-        .returning();
-      if (!invoice) throw new Error('failed to register invoice');
+        const [row] = await tx
+          .insert(invoices)
+          .values({
+            restaurantId,
+            supplierId: input.supplierId,
+            rawImageUrl: input.imageUrl,
+            status: 'ocr_pending',
+            source: 'photo',
+            createdBy: ctx.session.userId,
+          })
+          .returning({ id: invoices.id });
+        if (!row) throw new Error('failed to register invoice');
+        return { invoiceId: row.id, created: true as const };
+      });
+      if (!outcome.created) {
+        return { invoiceId: outcome.invoiceId, alreadyExisted: true as const };
+      }
+      const invoice = { id: outcome.invoiceId };
+
+      // Local demo (no ANTHROPIC_API_KEY, never in production): a deterministic
+      // extraction from the receipt's PO rides the worker's mockProviders path.
+      let mockProviders: { docAi: InvoiceOcrResult; claude: InvoiceOcrResult } | undefined;
+      if (devOcrStubEnabled()) {
+        const stub = await buildDevOcrStub(ctx.db, restaurantId, input.grId);
+        if (stub) mockProviders = { docAi: stub, claude: stub };
+      }
 
       // Server-authoritative enqueue of the OCR job. The queue producer no-ops
       // (console.warn) when REDIS_URL is unset, so wrap defensively to ensure a
       // transient enqueue failure never rolls back an already-persisted invoice.
       try {
         await enqueueOcrInvoice({
-          restaurantId: ctx.session.restaurantId,
+          restaurantId,
           invoiceId: invoice.id,
           supplierId: input.supplierId,
           imageUrl: input.imageUrl,
+          ...(mockProviders ? { mockProviders } : {}),
         });
       } catch (err) {
         console.error(
@@ -609,6 +705,31 @@ export const receivingRouter = router({
       }
 
       return { invoiceId: invoice.id, alreadyExisted: false as const };
+    }),
+
+  /**
+   * "Receiver in English": fill missing English names for one PO and/or one
+   * invoice — po_lines.raw_description_en, invoice_lines.raw_description_en and
+   * the linked products.name_en. The wizard calls it when the UI locale is
+   * English. Glossary first (instant, offline), Claude for the rest when
+   * ANTHROPIC_API_KEY is set. Idempotent (only NULL columns are written);
+   * tenant-guarded (PO / invoice / products must belong to the session's
+   * restaurant — foreign ids are NOT_FOUND). Display-only: the ₪ math never
+   * reads these columns.
+   */
+  ensureEnglish: memberProcedure
+    .input(
+      z
+        .object({
+          poId: z.string().uuid().optional(),
+          invoiceId: z.string().uuid().optional(),
+        })
+        .refine((v) => Boolean(v.poId) || Boolean(v.invoiceId), {
+          message: 'poId or invoiceId is required',
+        }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      return fillEnglishNames(ctx.db, ctx.session.restaurantId, input);
     }),
 
   /**

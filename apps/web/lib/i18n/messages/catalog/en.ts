@@ -6,6 +6,7 @@ export const en: Shape<typeof he> = {
   subtitle:
     'One search across every supplier — find any product in any price list in one place; the basis for building orders and cross-checking invoices.',
   importButton: 'Import price list (Excel/CSV)',
+  namesButton: 'English names',
   mappingButton: 'SKU mapping',
   browser: {
     supplier: 'Supplier',
@@ -57,6 +58,24 @@ export const en: Shape<typeof he> = {
     duplicateSku: 'This supplier already has an item with that SKU.',
     priceInvalid: 'That price isn’t valid.',
     descriptionRequired: 'Supplier description is required.',
+  },
+  history: {
+    title: 'Import history',
+    empty: 'No price lists imported for this supplier yet.',
+    file: 'File',
+    date: 'Date',
+    status: 'Status',
+    rows: 'Rows',
+    created: 'New',
+    updated: 'Updated',
+    statuses: { pending: 'Processing', mapped: 'Mapped', committed: 'Done', failed: 'Failed' },
+    failedHint: 'Import failed: {error}',
+  },
+  card: {
+    price: 'Price',
+    sku: 'SKU',
+    unit: 'Unit',
+    product: 'Product',
   },
   nameEn: {
     add: 'Add English name',
