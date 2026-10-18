@@ -206,3 +206,20 @@ I built the branch as a production build and ran it against a chain-demo seed: t
 | #38's `chain.attack` + `cross-tenant` + `rls.attack` suites | ✅ 183/183; `activeRestaurant.test.ts` 6/6 |
 
 Code review: the requested branch is honoured only if it is in the DB memberships (`pickActiveMembership`). It runs after the `token_version` check, and the 2FA gate still clears only via the server-verified ticket. Cross-branch reads run in each branch's own `withRestaurant` RLS transaction, and `addBranch` checks the billing-account payer and takes an advisory lock. **No findings.** One note for merging with this PR: `/api/session/refresh` calls `unstable_update({})`, which carries no `activeRestaurantId`, so it keeps the current branch.
+
+#### Cross-QA #38, second pass (orchestrator's list; chain head 6fb058a ⊇ 8bd32da)
+Adversarial seed: **RIVAL**, a restaurant on the *same billing account*, owned by chef@. The chain owner is only a *manager* there. The price-disparity flag is on.
+
+| Check | Result |
+|---|---|
+| `chain.overview` / `chain.branches` as owner | ✅ only the caller's **owner** branches; RIVAL is absent even though it shares the billing account |
+| Price-disparity panel | ✅ rows come only from own branches (each read under its own `withRestaurant` RLS) |
+| Owner switches to RIVAL (manager there) | ✅ role becomes manager; `chain.overview` 403, `renameBranch(RIVAL)` rejected |
+| CSRF: captured real `switchBranchAction` POST, replayed with `Origin: https://evil.example` | ✅ rejected (500, Next's server-action origin check), session unchanged. A same-origin replay works (control) |
+| `addBranch` ×6 in parallel (limit 5, 4 existing) | ✅ exactly 1 succeeds, 5 get 403. The advisory lock holds |
+| `addBranch` by a co-owner who is not the payer | ✅ 403. ⚠ low (UX): the error is `ENTITLEMENT_REQUIRED:chain`, so a non-payer sees an upsell, not "only the payer can add branches" |
+| Membership removed while active on that branch | ⚠ **pre-existing design, not #38:** tenant data is still served until the 10-min membership re-check (`MEMBERSHIP_REVALIDATE_MS`), because RLS trusts the JWT's restaurant id. Any session update (a switch, `/api/session/refresh`) drops it immediately, and switching back is refused |
+| Stale JWT carrying an old active restaurant | ✅ re-validated off that restaurant once the cache stamp is older than 10 min. A JWT with a fresh stamp is trusted for that window, which needs `AUTH_SECRET` to forge, so it isn't an attacker capability |
+| Interplay with `/api/session/refresh` | ✅ `unstable_update({})` keeps the current branch, and also drops a removed one |
+
+Proposal (not fixed; it's in the shared auth/team code): on member removal or role change, bump a per-user membership epoch (or `token_version` for the removed user) so the 10-min window closes immediately.
