@@ -7,15 +7,23 @@ import { FadeUp, RiseLine } from '../components/primitives';
 
 export const RECEIVER_DURATION = 230;
 
+// Strips to blur on the phone captures (units of image width): the demo e-mail line, and the
+// local dev-OCR-stub line ("Invoice DEV-… · OCR confidence 100%") — not what a customer sees.
+const EMAIL = { y: 0.105, h: 0.04, x: 0.16, w: 0.62 };
+const STUB = { y: 0.715, h: 0.05, x: 0.03, w: 0.94 };
+
 /** One invoice line that is scanned and re-typeset from Hebrew into English. */
 const MorphLine: React.FC<{ i: number; at: number; w: number }> = ({ i, at, w }) => {
   const f = useCurrentFrame();
   const l = LINES[i];
-  const p = prog(f, at, at + 26, EASE_IN_OUT); // beam progress across the line (right → left)
+  // phase 1: the beam sweeps right→left and wipes the Hebrew away behind it;
+  // phase 2: only after the line is empty, the English rises in. Never both at once.
+  const p = prog(f, at, at + 22, EASE_IN_OUT);
   const appear = prog(f, 8 + i * 5, 26 + i * 5);
-  const flagColor = l.flag === 'price' ? C.gold : l.flag === 'qty' ? C.gold : C.primary;
-  const beamX = (1 - p) * w; // from the right edge (where Hebrew starts) to the left
-  const done = prog(f, at + 18, at + 30);
+  const flagColor = l.flag ? C.gold : C.primary;
+  const beamX = (1 - p) * w;
+  const en = prog(f, at + 24, at + 38);
+  const done = en;
   return (
     <div
       style={{
@@ -32,7 +40,7 @@ const MorphLine: React.FC<{ i: number; at: number; w: number }> = ({ i, at, w })
           position: 'absolute',
           inset: 0,
           borderRadius: 18,
-          background: lerp(0, 1, done) > 0.5 ? C.surface : 'rgba(244,241,232,0.06)',
+          background: done > 0.5 ? C.surface : 'rgba(244,241,232,0.06)',
           border: `1.5px solid ${done > 0.5 ? flagColor + '66' : 'rgba(244,241,232,0.18)'}`,
         }}
       />
@@ -47,6 +55,7 @@ const MorphLine: React.FC<{ i: number; at: number; w: number }> = ({ i, at, w })
           alignItems: 'center',
           justifyContent: 'space-between',
           clipPath: `inset(0 ${w - beamX}px 0 0)`,
+          opacity: p < 1 ? 1 : 0,
           fontFamily: FONT.sans,
           color: C.paper,
           fontSize: 36,
@@ -69,7 +78,9 @@ const MorphLine: React.FC<{ i: number; at: number; w: number }> = ({ i, at, w })
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          clipPath: `inset(0 0 0 ${beamX}px)`,
+          opacity: en,
+          transform: `translateY(${(1 - en) * 18}px)`,
+          filter: `blur(${(1 - en) * 6}px)`,
           fontFamily: FONT.sans,
           color: C.ink,
         }}
@@ -131,8 +142,8 @@ export const Receiver: React.FC<{ locale: Locale }> = ({ locale }) => {
       }}
     >
       <Phone width={PW} glare={ry / 30}>
-        <Screen src="shots/receiving-po-en.png" width={psw} opacity={1 - swap} />
-        <Screen src="shots/reconcile-en.png" width={psw} scroll={scroll} opacity={swap} />
+        <Screen src="shots/receiving-po-en.png" width={psw} opacity={1 - swap} top={psw * 0.11} redact={[EMAIL]} />
+        <Screen src="shots/reconcile-en.png" width={psw} scroll={scroll} opacity={swap} top={psw * 0.11} redact={[EMAIL, STUB]} />
       </Phone>
     </div>
   );

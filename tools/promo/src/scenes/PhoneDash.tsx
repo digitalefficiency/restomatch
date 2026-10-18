@@ -1,9 +1,9 @@
 import React from 'react';
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
-import { COPY, FACTS, Locale } from '../copy';
+import { COPY, FACTS, ilsText, Locale } from '../copy';
 import { C, EASE_IN, EASE_IN_OUT, FONT, lerp, prog } from '../theme';
 import { Phone, phoneScreen, Screen } from '../components/Devices';
-import { Chip, CountUp, FadeUp, RiseLine } from '../components/primitives';
+import { Chip, FadeUp, RiseLine } from '../components/primitives';
 
 export const PHONE_DASH_DURATION = 220;
 
@@ -46,7 +46,7 @@ export const PhoneDash: React.FC<{ locale: Locale }> = ({ locale }) => {
         <Chip accent={C.danger} big>
           <span>{t.chipLeak}</span>
           <span style={{ color: C.danger, fontWeight: 800 }}>
-            <CountUp value={FACTS.leak} at={60} dur={30} />
+            <bdi dir={locale === "he" ? "rtl" : "ltr"}>{ilsText(FACTS.leak, locale)}</bdi>
           </span>
         </Chip>
       </FadeUp>
@@ -54,7 +54,7 @@ export const PhoneDash: React.FC<{ locale: Locale }> = ({ locale }) => {
         <Chip accent={C.gold} big>
           <span>{t.chipCaught}</span>
           <span style={{ color: C.gold, fontWeight: 800 }}>
-            <CountUp value={FACTS.caught} at={80} dur={24} />
+            <bdi dir={locale === "he" ? "rtl" : "ltr"}>{ilsText(FACTS.caught, locale)}</bdi>
           </span>
         </Chip>
       </FadeUp>
@@ -62,7 +62,7 @@ export const PhoneDash: React.FC<{ locale: Locale }> = ({ locale }) => {
         <Chip accent={C.primary} big>
           <span>{t.chipClaim}</span>
           <span style={{ color: C.primary, fontWeight: 800 }}>
-            <CountUp value={FACTS.claimed} at={100} dur={24} />
+            <bdi dir={locale === "he" ? "rtl" : "ltr"}>{ilsText(FACTS.claimed, locale)}</bdi>
           </span>
         </Chip>
       </FadeUp>

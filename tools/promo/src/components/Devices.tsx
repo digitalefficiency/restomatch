@@ -13,19 +13,36 @@ export const Screen: React.FC<{
   focus?: { x: number; y: number; r: number; amount: number }; // x,y in rendered px of the visible window
   opacity?: number;
   clip?: string; // CSS clip-path for wipes
-}> = ({ src, width, scroll = 0, focus, opacity = 1, clip }) => {
+  top?: number; // px safe-area inset (phone status bar / dynamic island)
+  redact?: { y: number; h: number; x?: number; w?: number }[]; // strips (units of image width) to blur, e.g. a dev stub id
+}> = ({ src, width, scroll = 0, focus, opacity = 1, clip, top = 0, redact = [] }) => {
   const img = (
-    <Img
-      src={staticFile(src)}
-      style={{ width, display: 'block', transform: `translateY(${-scroll}px)` }}
-    />
+    <div style={{ position: 'relative', transform: `translateY(${top - scroll}px)` }}>
+      <Img src={staticFile(src)} style={{ width, display: 'block' }} />
+      {redact.map((r, i) => (
+        <div
+          key={i}
+          style={{
+            position: 'absolute',
+            top: r.y * width,
+            height: r.h * width,
+            left: (r.x ?? 0) * width,
+            width: (r.w ?? 1) * width,
+            backdropFilter: 'blur(5px)',
+            WebkitBackdropFilter: 'blur(5px)',
+            background: 'rgba(14,21,18,0.35)',
+            borderRadius: 6,
+          }}
+        />
+      ))}
+    </div>
   );
   const a = focus?.amount ?? 0;
   const mask = focus
     ? `radial-gradient(ellipse ${focus.r}px ${focus.r * 0.62}px at ${focus.x}px ${focus.y}px, transparent 0%, transparent 55%, black 100%)`
     : undefined;
   return (
-    <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', opacity, clipPath: clip }}>
+    <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', opacity, clipPath: clip, background: '#0E1512' }}>
       {img}
       {focus && a > 0.01 ? (
         <div

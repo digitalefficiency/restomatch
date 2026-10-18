@@ -1,9 +1,9 @@
 import React from 'react';
 import { AbsoluteFill, interpolate, useCurrentFrame, useVideoConfig } from 'remotion';
-import { COPY, FACTS, Locale } from '../copy';
+import { COPY, FACTS, ilsText, Locale } from '../copy';
 import { C, EASE_IN, EASE_IN_OUT, FONT, prog } from '../theme';
 import { Laptop, laptopScreen, Screen } from '../components/Devices';
-import { Chip, CountUp, Eyebrow, FadeUp, LightSweep, RiseLine } from '../components/primitives';
+import { Chip, Eyebrow, FadeUp, LightSweep, RiseLine } from '../components/primitives';
 
 // Keyframed virtual camera. u = units of screenshot width (x and y), so the
 // same numbers work at any laptop size. Values come from the captured shots.
@@ -218,7 +218,7 @@ export const Product: React.FC<{ locale: Locale }> = ({ locale }) => {
           <Chip accent={C.danger} big>
             <span>{t.chipLeak}</span>
             <span style={{ color: C.danger, fontWeight: 800 }}>
-              <CountUp value={FACTS.leak} at={118} dur={30} />
+              <bdi dir={locale === "he" ? "rtl" : "ltr"}>{ilsText(FACTS.leak, locale)}</bdi>
             </span>
           </Chip>
         </FadeUp>
@@ -232,14 +232,14 @@ export const Product: React.FC<{ locale: Locale }> = ({ locale }) => {
           <Chip accent={C.gold}>
             <span>{t.chipCaught}</span>
             <span style={{ color: C.gold, fontWeight: 800 }}>
-              <CountUp value={FACTS.caught} at={138} dur={24} />
+              <bdi dir={locale === "he" ? "rtl" : "ltr"}>{ilsText(FACTS.caught, locale)}</bdi>
             </span>
           </Chip>
         </FadeUp>
         {/* heatmap */}
         <FadeUp at={272} out={302} style={{ position: 'absolute', top: 120, [isRtl ? 'right' : 'left']: -40 }}>
           <Chip accent={C.danger} big>
-            <bdi dir={dir}>{t.chipBeer}</bdi>
+            <bdi dir={dir}>{t.chipBeer.replace('{from}', ilsText(FACTS.beerFrom, locale)).replace('{to}', ilsText(FACTS.beerTo, locale))}</bdi>
           </Chip>
         </FadeUp>
         {/* approvals */}
@@ -253,7 +253,7 @@ export const Product: React.FC<{ locale: Locale }> = ({ locale }) => {
           <Chip accent={C.primary} big>
             <span>{t.chipClaim}</span>
             <span style={{ color: C.primary, fontWeight: 800 }}>
-              <CountUp value={FACTS.claimed} at={482} dur={24} />
+              <bdi dir={locale === "he" ? "rtl" : "ltr"}>{ilsText(FACTS.claimed, locale)}</bdi>
             </span>
           </Chip>
         </FadeUp>

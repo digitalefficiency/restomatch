@@ -152,22 +152,20 @@ export const ReelNumber: React.FC<{
   );
 };
 
-/** Smooth count-up for secondary numbers. */
-export const CountUp: React.FC<{ value: number; at: number; dur?: number; prefix?: string; suffix?: string }> = ({
+/** Smooth count-up for ₪ numbers, formatted like the app (he "572 ₪", en "₪572"). Lands exactly on `value`. */
+export const CountUp: React.FC<{ value: number; at: number; dur?: number; locale: 'he' | 'en' }> = ({
   value,
   at,
   dur = 36,
-  prefix = '₪',
-  suffix = '',
+  locale,
 }) => {
   const f = useCurrentFrame();
   const v = Math.round(value * prog(f, at, at + dur));
-  return (
-    <bdi dir="ltr" style={{ fontVariantNumeric: 'tabular-nums' }}>
-      {prefix}
-      {v.toLocaleString('en-US')}
-      {suffix}
-    </bdi>
+  const txt = v.toLocaleString('en-US');
+  return locale === 'he' ? (
+    <bdi dir="rtl" style={{ fontVariantNumeric: 'tabular-nums' }}>{`${txt} ₪`}</bdi>
+  ) : (
+    <bdi dir="ltr" style={{ fontVariantNumeric: 'tabular-nums' }}>{`₪${txt}`}</bdi>
   );
 };
 

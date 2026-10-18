@@ -1,6 +1,6 @@
 import React from 'react';
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
-import { COPY, FACTS, Locale } from '../copy';
+import { COPY, FACTS, ilsText, Locale } from '../copy';
 import { C, FONT } from '../theme';
 import { Background } from '../components/Background';
 import { Laptop, laptopScreen, Screen } from '../components/Devices';
@@ -72,13 +72,13 @@ export const HeroLoop: React.FC<{ locale: Locale }> = ({ locale }) => {
         <div style={{ position: 'absolute', top: 70, [isRtl ? 'right' : 'left']: 60, ...chip(0) }}>
           <Chip accent={C.danger}>
             <span>{t.product.chipLeak}</span>
-            <bdi dir="ltr" style={{ color: C.danger, fontWeight: 800 }}>{`₪${FACTS.leak}`}</bdi>
+            <bdi dir={isRtl ? 'rtl' : 'ltr'} style={{ color: C.danger, fontWeight: 800 }}>{ilsText(FACTS.leak, locale)}</bdi>
           </Chip>
         </div>
         <div style={{ position: 'absolute', top: height * 0.5, [isRtl ? 'left' : 'right']: 40, ...chip(1) }}>
           <Chip accent={C.gold}>
             <span>{t.product.chipCaught}</span>
-            <bdi dir="ltr" style={{ color: C.gold, fontWeight: 800 }}>{`₪${FACTS.caught}`}</bdi>
+            <bdi dir={isRtl ? 'rtl' : 'ltr'} style={{ color: C.gold, fontWeight: 800 }}>{ilsText(FACTS.caught, locale)}</bdi>
           </Chip>
         </div>
         <div style={{ position: 'absolute', bottom: 70, [isRtl ? 'right' : 'left']: 90, ...chip(2) }}>

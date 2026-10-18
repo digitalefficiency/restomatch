@@ -15,10 +15,12 @@ const chromiumOptions = { gl: 'swangle' };
 mkdirSync(resolve(OUT, 'frames'), { recursive: true });
 
 const [mode = 'all', a, b] = process.argv.slice(2);
+// FACTS='{"leak":572,"spend":28389,...}' overrides the demo numbers (see src/copy.ts FACTS)
+const facts = process.env.FACTS ? JSON.parse(process.env.FACTS) : undefined;
 const serveUrl = await bundle({ entryPoint: resolve(ROOT, 'src/index.ts'), publicDir: resolve(ROOT, 'public') });
 
 async function comp(id, locale) {
-  return selectComposition({ serveUrl, id, inputProps: { locale }, browserExecutable, chromiumOptions });
+  return selectComposition({ serveUrl, id, inputProps: { locale, facts }, browserExecutable, chromiumOptions });
 }
 
 async function video(id, locale, file, extra = {}) {
@@ -29,7 +31,7 @@ async function video(id, locale, file, extra = {}) {
     serveUrl,
     codec: 'h264',
     outputLocation: resolve(OUT, file),
-    inputProps: { locale },
+    inputProps: { locale, facts },
     browserExecutable,
     chromiumOptions,
     crf: 18,
@@ -54,7 +56,7 @@ if (mode === 'stills') {
   const composition = await comp(id, locale);
   for (const frame of frames) {
     const output = resolve(OUT, 'frames', `${id}-${locale}-${String(frame).padStart(4, '0')}.png`);
-    await renderStill({ composition, serveUrl, frame, output, inputProps: { locale }, browserExecutable, chromiumOptions });
+    await renderStill({ composition, serveUrl, frame, output, inputProps: { locale, facts }, browserExecutable, chromiumOptions });
     console.log('✓', output);
   }
 } else {

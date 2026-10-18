@@ -1,6 +1,6 @@
 import React from 'react';
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
-import { COPY, FACTS, Locale } from '../copy';
+import { COPY, FACTS, ilsText, Locale } from '../copy';
 import { C, EASE_IN, FONT, prog } from '../theme';
 import { CountUp, FadeUp, LightSweep, RiseLine } from '../components/primitives';
 
@@ -19,7 +19,7 @@ export const Value: React.FC<{ locale: Locale; duration?: number }> = ({ locale,
   const exit = prog(f, duration - 16, duration, EASE_IN);
 
   const stats = [
-    { label: t.leak, value: FACTS.leak, note: t.leakNote, color: C.danger },
+    { label: t.leak, value: FACTS.leak, note: `${FACTS.leakPct} ${t.leakNote.replace('{spend}', ilsText(FACTS.spend, locale))}`, color: C.danger },
     { label: t.caught, value: FACTS.caught, note: t.caughtNote, color: C.gold },
     { label: t.claimed, value: FACTS.claimed, note: t.claimedNote, color: C.primary },
   ];
@@ -56,7 +56,7 @@ export const Value: React.FC<{ locale: Locale; duration?: number }> = ({ locale,
                         position: 'relative',
                       }}
                     >
-                      <CountUp value={s.value} at={at} dur={40} />
+                      <CountUp value={s.value} at={at} dur={40} locale={locale} />
                       <LightSweep at={at + 44} dur={26} opacity={0.4} />
                     </div>
                     <div style={{ height: 3, width: 120, margin: '14px auto', background: s.color, opacity: 0.6, borderRadius: 3 }} />

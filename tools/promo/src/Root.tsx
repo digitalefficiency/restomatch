@@ -1,7 +1,7 @@
 import React from 'react';
 import { AbsoluteFill, Composition, Sequence, interpolate, useCurrentFrame } from 'remotion';
 import { loadFonts } from './fonts';
-import { Locale } from './copy';
+import { applyFacts, Facts, Locale } from './copy';
 import { Background } from './components/Background';
 import { Hook } from './scenes/Hook';
 import { Problem } from './scenes/Problem';
@@ -16,7 +16,7 @@ import { PhoneDash, PHONE_DASH_DURATION } from './scenes/PhoneDash';
 
 loadFonts();
 
-type Props = { locale: Locale };
+type Props = { locale: Locale; facts?: Partial<Facts> };
 
 /** Crossfade wrapper: every scene fades in/out over 8 frames on top of its own motion. */
 const Shell: React.FC<{ d: number; children: React.ReactNode }> = ({ d, children }) => {
@@ -61,8 +61,19 @@ const Film: React.FC<Props & { beats: Beat[] }> = ({ locale, beats }) => (
   </AbsoluteFill>
 );
 
-const Promo: React.FC<Props> = ({ locale }) => <Film locale={locale} beats={TIMELINE} />;
-const PromoVertical: React.FC<Props> = ({ locale }) => <Film locale={locale} beats={VERTICAL} />;
+// `facts` input prop overrides the demo numbers (copy.ts FACTS) for a re-render after a seed change.
+const Promo: React.FC<Props> = ({ locale, facts }) => {
+  applyFacts(facts);
+  return <Film locale={locale} beats={TIMELINE} />;
+};
+const PromoVertical: React.FC<Props> = ({ locale, facts }) => {
+  applyFacts(facts);
+  return <Film locale={locale} beats={VERTICAL} />;
+};
+const Loop: React.FC<Props> = ({ locale, facts }) => {
+  applyFacts(facts);
+  return <HeroLoop locale={locale} />;
+};
 
 export const Root: React.FC = () => (
   <>
@@ -76,6 +87,6 @@ export const Root: React.FC = () => (
       height={1920}
       defaultProps={{ locale: 'he' as Locale }}
     />
-    <Composition id="HeroLoop" component={HeroLoop} durationInFrames={HERO_LOOP_FRAMES} fps={30} width={1280} height={720} defaultProps={{ locale: 'he' as Locale }} />
+    <Composition id="HeroLoop" component={Loop} durationInFrames={HERO_LOOP_FRAMES} fps={30} width={1280} height={720} defaultProps={{ locale: 'he' as Locale }} />
   </>
 );

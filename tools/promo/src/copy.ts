@@ -17,7 +17,19 @@ export const FACTS = {
   beerFrom: 520, // leak detective: beer keg baseline ₪520.00
   beerTo: 575, // last price ₪575.00 (+10.6%)
   pilotTarget: '1.5%', // North Star / pilot target (docs/ICP.md, AGENTS.md)
-} as const;
+};
+export type Facts = typeof FACTS;
+
+/** Override demo numbers at render time (input prop `facts`) — e.g. after the seed changes. */
+export const applyFacts = (over?: Partial<Facts>) => {
+  if (over) Object.assign(FACTS, over);
+};
+
+/** ₪ amount exactly as the app's formatIls renders it: he-IL "572 ₪" (RTL), en "₪572". */
+export const ilsText = (n: number, locale: Locale, decimals = 0) => {
+  const v = n.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  return locale === 'he' ? `${v} ₪` : `₪${v}`;
+};
 
 export const SITE = 'restomatch.co.il'; // placeholder — final domain TBD (canonical = APP_URL)
 
@@ -57,7 +69,7 @@ const he = {
     chipCaught: 'נתפס לפני תשלום',
     heatTitle: 'בלש הדליפות',
     heatSub: 'איפה המחיר מזחל, ומי מקצר משלוחים.',
-    chipBeer: 'בירה מהחבית: ₪520 ← ₪575',
+    chipBeer: 'בירה מהחבית: {from} ← {to}',
     apprTitle: 'עוצרים לפני התשלום',
     apprSub: 'כל פער מגיע לאדם הנכון — מאשרים, דוחים, או דורשים זיכוי.',
     chipAppr: '5 ממתינות לאישור',
@@ -84,7 +96,7 @@ const he = {
   value: {
     eyebrow: 'מסעדת ההדגמה · אוקטובר 2026',
     leak: 'דלף החודש',
-    leakNote: `${FACTS.leakPct} מתוך ₪28,389 רכש`,
+    leakNote: 'מתוך {spend} רכש',
     caught: 'נתפס לפני תשלום',
     caughtNote: 'על חשבוניות שעוד לא שולמו',
     claimed: 'נדרש מהספקים',
@@ -136,7 +148,7 @@ const en: typeof he = {
     chipCaught: 'Caught before payment',
     heatTitle: 'Leak detective',
     heatSub: 'Where prices creep, and who short-delivers.',
-    chipBeer: 'Draft beer keg: ₪520 → ₪575',
+    chipBeer: 'Draft beer keg: {from} → {to}',
     apprTitle: 'Stop it before you pay',
     apprSub: 'Every gap goes to the right person — approve, reject, or claim a credit.',
     chipAppr: '5 waiting for approval',
@@ -163,7 +175,7 @@ const en: typeof he = {
   value: {
     eyebrow: 'Demo restaurant · October 2026',
     leak: 'Leaked this month',
-    leakNote: `${FACTS.leakPct} of ₪28,389 food spend`,
+    leakNote: 'of {spend} food spend',
     caught: 'Caught before payment',
     caughtNote: 'on invoices not yet paid',
     claimed: 'Claimed from suppliers',
