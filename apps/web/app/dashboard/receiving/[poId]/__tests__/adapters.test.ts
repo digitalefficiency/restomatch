@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { noLinePaired } from '@/app/showcase/receiver/_state';
+import { noLinePaired, reconSections } from '@/app/showcase/receiver/_state';
 import { adaptReconciliation, keepAdjusted, type InvoiceLineRow, type PoLineRow } from '../_adapters';
 
 /** EN-5: the receiving review is calm — no false "missing" / "not ordered" alarms. */
@@ -120,6 +120,44 @@ describe('noLinePaired — "is this the right invoice?" banner', () => {
   it('carries the printed invoice line total for display', () => {
     const lines = recon([inv({ id: 'a', productId: 'p1', qtyBilled: '4', unitPriceBilled: '20', lineTotal: '76' })]);
     expect(lines.find((l) => l.poLineId === 'pl1')!.invoiceLineTotal).toBe(76);
+  });
+});
+
+describe('reconSections — order vs invoice, side by side', () => {
+  const recon = (invoiceLines: InvoiceLineRow[]) =>
+    adaptReconciliation({ po, poLines, receiptLines: [], invoiceLines }).result.lines;
+
+  it('splits into both / invoice only / order only, with what each side comes to', () => {
+    const sections = reconSections(
+      recon([
+        inv({ id: 'a', productId: 'p1', qtyBilled: '4', unitPriceBilled: '21', lineTotal: '84' }),
+        inv({ id: 'b', rawDescription: 'שמיר', qtyBilled: '1', unitPriceBilled: '2', lineTotal: '2' }),
+        inv({ id: 'c', rawDescription: 'פטרוזיליה', qtyBilled: '3', unitPriceBilled: '1.5', lineTotal: '4.5' }),
+      ]),
+    )!;
+    expect(sections.map((s) => [s.key, s.items.length])).toEqual([
+      ['both', 1],
+      ['invoiceOnly', 2],
+      ['orderOnly', 1],
+    ]);
+    expect(sections.find((s) => s.key === 'invoiceOnly')!.totalIls).toBe(6.5);
+    // pl2 ordered 2 × ₪10.
+    expect(sections.find((s) => s.key === 'orderOnly')!.totalIls).toBe(20);
+    expect(sections.find((s) => s.key === 'both')!.totalIls).toBeNull();
+  });
+
+  it('keeps every line exactly once, and drops empty sections', () => {
+    const lines = recon([
+      inv({ id: 'a', productId: 'p1', qtyBilled: '4', unitPriceBilled: '20' }),
+      inv({ id: 'b', productId: 'p2', qtyBilled: '2', unitPriceBilled: '10' }),
+    ]);
+    const sections = reconSections(lines)!;
+    expect(sections.map((s) => s.key)).toEqual(['both']);
+    expect(sections.flatMap((s) => s.items.map((i) => i.index)).sort()).toEqual(lines.map((_, i) => i));
+  });
+
+  it('no sections when no invoice line was read (order-only receiving)', () => {
+    expect(reconSections(recon([]))).toBeNull();
   });
 });
 

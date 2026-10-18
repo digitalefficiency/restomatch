@@ -5,6 +5,7 @@
  * retake path back to SCAN_INVOICE.
  */
 
+import { lineTotalIls } from '@/app/dashboard/orders/order-logic';
 import type { MockSupplierExpectation, ReconciliationLine, ReconciliationResult } from './_mock';
 
 export type WizardStep =
@@ -214,4 +215,51 @@ function stems(name: string): string[] {
     .split(/[^\p{L}]+/u)
     .filter((w) => w.length >= 3)
     .map((w) => w.slice(0, 4));
+}
+
+export type ReconSectionKey = 'both' | 'invoiceOnly' | 'orderOnly';
+export interface ReconSection {
+  key: ReconSectionKey;
+  /** Lines with their index in the flat list (stable React keys). */
+  items: Array<{ line: ReconciliationLine; index: number }>;
+  /** What the section's lines come to: billed (invoice only) or ordered (order only). */
+  totalIls: number | null;
+}
+
+/**
+ * The review split into what is on both the order and the invoice, on the
+ * invoice only, and on the order only, so the receiver sees what the supplier
+ * billed apart from what was ordered. Null when no invoice line was read
+ * (order-only receiving): every line would land in "order only".
+ */
+export function reconSections(lines: ReconciliationLine[]): ReconSection[] | null {
+  if (!lines.some((l) => l.invoiceLineIndex !== null)) return null;
+  const both: ReconSection['items'] = [];
+  const invoiceOnly: ReconSection['items'] = [];
+  const orderOnly: ReconSection['items'] = [];
+  lines.forEach((line, index) => {
+    if (line.poLineId === null) invoiceOnly.push({ line, index });
+    else if (line.invoiceLineIndex === null) orderOnly.push({ line, index });
+    else both.push({ line, index });
+  });
+  // Summed in integer agorot.
+  const sum = (items: ReconSection['items'], total: (l: ReconciliationLine) => number) =>
+    items.reduce((acc, { line }) => acc + Math.round(total(line) * 100), 0) / 100;
+  const sections: ReconSection[] = [
+    { key: 'both', items: both, totalIls: null },
+    {
+      key: 'invoiceOnly',
+      items: invoiceOnly,
+      totalIls: sum(
+        invoiceOnly,
+        (l) => l.invoiceLineTotal ?? lineTotalIls(l.invoiceQty ?? 0, l.invoiceUnitPrice ?? undefined),
+      ),
+    },
+    {
+      key: 'orderOnly',
+      items: orderOnly,
+      totalIls: sum(orderOnly, (l) => lineTotalIls(l.poQty ?? 0, l.poUnitPrice ?? undefined)),
+    },
+  ];
+  return sections.filter((s) => s.items.length > 0);
 }

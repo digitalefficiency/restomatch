@@ -106,6 +106,9 @@ export const he = {
       pendingBanner: '{count} שורות לא הוצלבו אוטומטית — בדקו אותן מול החשבונית. זו לא חריגה, רק בדיקה.',
       mismatchBanner:
         'אף שורה בחשבונית לא הותאמה לשורות ההזמנה. אם זו חשבונית של ספק אחר, פתחו את ההזמנה הנכונה או צלמו שוב; אם זה הספק הנכון, עברו על השורות ידנית.',
+      sectionBoth: 'בהזמנה ובחשבונית · {count}',
+      sectionInvoiceOnly: 'רק בחשבונית · {count}',
+      sectionOrderOnly: 'רק בהזמנה · {count}',
       quickConfirm: 'הכל תקין — אישור מהיר',
       continueAdjust: 'המשך להתאמת כמויות',
     },
