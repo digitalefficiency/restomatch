@@ -23,3 +23,16 @@ export {
   type LeakReportSupplierRow,
   type LeakReportTypeRow,
 } from './leak-report';
+export {
+  aggregateChain,
+  computeBranchSnapshot,
+  shiftMonth,
+  supplierMergeKey,
+  type BranchMonthPoint,
+  type BranchSnapshot,
+  type BranchSupplierRow,
+  type ChainBranchRow,
+  type ChainOverview,
+  type ChainSupplierRow,
+  type ChainTotals,
+} from './chain';
