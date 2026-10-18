@@ -53,6 +53,8 @@ production soft-navigation check).
 ```bash
 scripts/verify.sh layer2                    # build (if needed) + next start + smoke
 VERIFY_E2E=1 scripts/verify.sh layer2       # … plus the Playwright suite (logged in, 5 roles × he/en)
+VERIFY_SOFTNAV=1 scripts/verify.sh layer2   # … plus scripts/check-soft-nav.mjs (dashboard view controls)
+# Playwright's own browser missing? point it at one: PW_CHROMIUM_PATH=/path/to/chromium
 scripts/verify.sh all                       # layer 1 then layer 2
 ```
 

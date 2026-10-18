@@ -124,3 +124,8 @@ worker-test, web-lint, web-build, web-tsc, audit).
 
 The e2e run also turned up a locator flake in `e2e/auth.spec.ts`: Next's dev route announcer also has
 `role="alert"`. The locator now excludes it; the assertion is unchanged.
+
+**Merged with `claude/client-ready` @ 5417bf1** (the base had taken 05a2cf4's `verify.sh` and added the
+opt-in `VERIFY_SOFTNAV` step; kept both): `scripts/verify.sh all` with `VERIFY_E2E=1` — layer 1 14/14
+PASS, layer 2 verify-prod 20/20, Playwright 77/77; `VERIFY_SOFTNAV=1` — soft-nav 6/6 on every view,
+he + en. The `ci.yml` part stays a proposal for the owner (immutable), as the base's VERIFICATION.md says.
