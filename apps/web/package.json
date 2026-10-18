@@ -22,6 +22,7 @@
     "@restomatch/charts": "workspace:*",
     "@restomatch/crypto": "workspace:*",
     "@restomatch/db": "workspace:*",
+    "@restomatch/ingest": "workspace:*",
     "@restomatch/ocr": "workspace:*",
     "@restomatch/queue": "workspace:*",
     "@restomatch/translate": "workspace:*",

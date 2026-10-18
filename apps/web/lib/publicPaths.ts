@@ -34,6 +34,10 @@ export const PUBLIC_PREFIX_PATHS = [
   '/api/healthz',
   '/api/cron', // Vercel Cron; each route verifies CRON_SECRET itself
   '/api/inbound', // reserved for the Wave-3 inbox webhook (signature-verified per route)
+  // S13 invoice ingestion webhooks (WhatsApp / inbound e-mail). Each route verifies
+  // the provider HMAC, rate-limits, caps sizes and resolves the tenant ONLY from a
+  // hashed secret token — see packages/api/src/ingest/http.ts + ingest.attack.test.ts.
+  '/api/ingest',
   '/_next',
 ] as const;
 

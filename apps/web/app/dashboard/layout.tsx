@@ -8,6 +8,8 @@ import { getLocale, getT } from '@/lib/i18n/server';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { nav } from '@/lib/i18n/messages/nav';
 import { labelForRole } from '@/lib/roles';
+import { enabledFeatures } from '@/lib/ingest/features';
+import { PwaSessionGuard } from '@/lib/pwa/PwaSessionGuard';
 import { LocaleSync } from './locale-sync';
 import { BranchSwitcher } from './branch-switcher';
 import { DesktopNav, MobileNav } from './nav';
@@ -37,11 +39,21 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const active =
     memberships.find((m) => m.restaurantId === session.user.restaurantId) ?? memberships[0]!;
-  const [t, locale, flags] = await Promise.all([getT(nav), getLocale(), caller.recovery.flags()]);
+  const [t, locale, flags, enabled] = await Promise.all([
+    getT(nav),
+    getLocale(),
+    caller.recovery.flags(),
+    enabledFeatures(active.restaurantId),
+  ]);
   // Wave-1 flags that hide nav items when off (MASTER-PLAN §1.3).
-  const features = Object.entries(flags)
-    .filter(([, on]) => on)
-    .map(([key]) => key);
+  const features = [
+    ...new Set<string>([
+      ...enabled,
+      ...Object.entries(flags)
+        .filter(([, on]) => on)
+        .map(([key]) => key),
+    ]),
+  ];
   const roleLabel = labelForRole(active.role, locale);
   // Wave-1 nav entry (contracts / price alerts): flag on + finance role; fails silent.
   const wave1Access = await getWave1Access();
@@ -108,7 +120,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 <BranchSwitcher branches={switcherBranches} activeId={active.restaurantId} />
                 <DashboardSearch role={active.role} className="w-72" />
                 <LocaleSwitcher />
-                <form action={logout}>
+                <form action={logout} data-rm-logout="">
                   <button
                     type="submit"
                     className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-xs font-semibold text-muted transition-colors hover:border-primary/40 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
@@ -126,6 +138,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <main id="main-content" tabIndex={-1} className="mx-auto max-w-6xl px-4 py-6 focus:outline-none sm:px-6 sm:py-8">
           <WorkerStatusBanner />
           <LocaleSync />
+          {features.includes('receiverPwa') ? <PwaSessionGuard userId={session.user.id} /> : null}
           {children}
         </main>
       </div>

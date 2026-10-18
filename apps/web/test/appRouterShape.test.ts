@@ -24,6 +24,7 @@ const ROUTER_KEYS = [
   'contracts',
   'dsr',
   'exports',
+  'ingest',
   'leads',
   'mapping',
   'match',

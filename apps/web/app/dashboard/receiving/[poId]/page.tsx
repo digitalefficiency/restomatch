@@ -6,6 +6,8 @@ import { auth } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { receiving } from '@/lib/i18n/messages/receiving';
+import { enabledFeatures } from '@/lib/ingest/features';
+import { ReceiverPwa } from '@/lib/pwa/ReceiverPwa';
 import { ReceivingWizard } from './wizard';
 
 export const dynamic = 'force-dynamic';
@@ -19,8 +21,10 @@ export default async function ReceivingPoPage({
   const caller = await createServerCaller();
   const session = await auth();
   const restaurantId = session?.user?.restaurantId ?? null;
+  const userId = session?.user?.id ?? null;
 
-  const [locale, t] = await Promise.all([getLocale(), getT(receiving)]);
+  const [locale, t, features] = await Promise.all([getLocale(), getT(receiving), enabledFeatures(restaurantId)]);
+  const pwa = features.includes('receiverPwa');
 
   // Receiver in English: fill missing English names before the first render.
   // Glossary is instant; the Claude leg (when keyed) is capped so a slow call
@@ -64,6 +68,7 @@ export default async function ReceivingPoPage({
 
   return (
     <div>
+      {pwa && restaurantId && userId ? <ReceiverPwa restaurantId={restaurantId} userId={userId} /> : null}
       <Link
         href="/dashboard/receiving"
         className="mb-4 inline-flex min-h-11 items-center gap-1.5 text-sm text-muted transition-colors hover:text-ink"
@@ -72,7 +77,7 @@ export default async function ReceivingPoPage({
         {t('po.backToList')}
       </Link>
 
-      <ReceivingWizard po={poForClient} restaurantId={restaurantId} />
+      <ReceivingWizard po={poForClient} restaurantId={restaurantId} offlineQueue={pwa} userId={userId} />
     </div>
   );
 }

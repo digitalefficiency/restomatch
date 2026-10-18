@@ -24,6 +24,7 @@ import { contractsRouter } from './routers/contracts';
 import { priceAlertsRouter } from './routers/priceAlerts';
 import { recoveryRouter } from './routers/recovery';
 import { monthlyReportRouter } from './routers/monthlyReport';
+import { ingestRouter } from './routers/ingest';
 
 export const appRouter = router({
   owner: ownerRouter,
@@ -51,6 +52,7 @@ export const appRouter = router({
   priceAlerts: priceAlertsRouter,
   recovery: recoveryRouter,
   monthlyReport: monthlyReportRouter,
+  ingest: ingestRouter,
 });
 
 export type AppRouter = typeof appRouter;
@@ -263,3 +265,12 @@ export {
 export { renderMonthlyReportPdf } from './reports/pdf';
 export { sendMonthlyReports } from './reports/send';
 export { formatIlsAgorot } from './reports/money';
+export {
+  handleEmailWebhook,
+  handleWhatsAppVerify,
+  handleWhatsAppWebhook,
+  INGEST_CHANNEL_LIMIT,
+  INGEST_IP_LIMIT,
+  type IngestHttpDeps,
+} from './ingest/http';
+export { processInboundMessage, resolveIngestChannel } from './ingest/pipeline';

@@ -274,6 +274,20 @@
       "when": 1782040000000,
       "tag": "0049_monthly_reports",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1782050000000,
+      "tag": "0050_ingest",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1782060000000,
+      "tag": "0051_invoice_source_whatsapp",
+      "breakpoints": true
     }
   ]
 }

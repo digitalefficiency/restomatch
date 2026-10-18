@@ -15,6 +15,7 @@ import {
   Inbox,
   LayoutDashboard,
   LogOut,
+  Mail,
   Menu,
   Network,
   Store,
@@ -28,6 +29,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { UserRole } from '@restomatch/db';
+import type { FeatureKey } from '@restomatch/api';
 import { cn } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
@@ -40,6 +42,7 @@ type LinkKey =
   | 'overview'
   | 'receiving'
   | 'approvals'
+  | 'inbox'
   | 'leaks'
   | 'chain'
   | 'recovery'
@@ -63,12 +66,21 @@ interface NavItem {
   wave1?: boolean;
   /** Wave-1 per-restaurant flag: the item is hidden unless the flag is on. */
   feature?: string;
+  /** Wave-1 flag(s): the item shows only when one of them is enabled. */
+  features?: FeatureKey[];
 }
 
 export const NAV_ITEMS: NavItem[] = [
   { key: 'overview', href: '/dashboard', icon: LayoutDashboard, group: 'operations' },
   { key: 'receiving', href: '/dashboard/receiving', icon: PackageCheck, group: 'operations' },
   { key: 'approvals', href: '/dashboard/approvals', icon: Inbox, group: 'operations' },
+  {
+    key: 'inbox',
+    href: '/dashboard/inbox',
+    icon: Mail,
+    group: 'operations',
+    features: ['ingestWhatsapp', 'ingestEmail'],
+  },
   { key: 'leaks', href: '/dashboard/leaks', icon: BarChart3, group: 'operations' },
   { key: 'chain', href: '/dashboard/chain', icon: Network, group: 'operations' },
   { key: 'recovery', href: '/dashboard/recovery', icon: HandCoins, group: 'operations', feature: 'recovery' },
@@ -109,7 +121,8 @@ export interface Wave1Nav {
  * management is then one click away in the branch switcher and on the chain
  * page); single-branch owners get the Branches tab instead (open a branch /
  * see the chain plan). One of the two, so the tab row still fits.
- * `features`: wave-1 per-restaurant flags; an item with `feature` is hidden unless it is on.
+ * `features`: wave-1 per-restaurant flags; an item with `feature` is hidden unless it is on,
+ * an item with `features` shows only when one of them is on.
  */
 function visibleItems(
   role: UserRole,
@@ -118,11 +131,12 @@ function visibleItems(
   wave1?: Wave1Nav,
 ): NavItem[] {
   return NAV_ITEMS.filter(
-    ({ key, href, feature, wave1: gated }) =>
+    ({ key, href, feature, features: anyOf, wave1: gated }) =>
       canSeeRoute(role, href) &&
       (key !== 'chain' || showChain) &&
       (key !== 'branches' || !showChain) &&
       (!feature || features.includes(feature)) &&
+      (!anyOf || anyOf.some((f) => features.includes(f))) &&
       (!gated || wave1?.visible === true),
   );
 }
@@ -356,7 +370,7 @@ export function MobileNav({
             </nav>
             <div className="flex items-center justify-between gap-3 border-t border-line px-4 py-3">
               <LocaleSwitcher />
-              <form action={logout}>
+              <form action={logout} data-rm-logout="">
                 <button
                   type="submit"
                   className={cn(
