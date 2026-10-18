@@ -21,7 +21,7 @@ import {
 } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
-import { chainScopeOf, currentMonth, type MembershipRow } from '../routers/chain';
+import { chainScopeOf, NOT_BILLING_OWNER, type MembershipRow } from '../routers/chain';
 import { attachSubscription, resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
 
 /**
@@ -167,7 +167,9 @@ describe('chain.overview', () => {
     expect(o.totals.pendingApprovals).toBe(2);
     expect(o.heatmap).toHaveLength(2);
     expect(o.months).toHaveLength(6);
-    expect(o.month).toBe(currentMonth());
+    expect(o.periodStart).not.toBeNull();
+    expect(o.compare).toBe('off');
+    expect(o.totals.prevLeakIls).toBeNull();
     // Per-branch numbers are each branch's own.
     expect(o.branches.find((b) => b.restaurantId === A.restaurantId)?.leakIls).toBe(100);
     expect(o.branches.find((b) => b.restaurantId === A2.restaurantId)?.leakIls).toBe(40);
@@ -191,16 +193,33 @@ describe('chain.overview', () => {
     expect(o.totals.leakIls).toBe(3);
   });
 
-  it('a past month is reported with zero leak; a future month clamps to the current month', async () => {
-    const past = await asA().chain.overview({ month: '2020-01' });
-    expect(past.month).toBe('2020-01');
+  it('follows the shared view period: a past custom range is empty, last_month has its own bounds', async () => {
+    const past = await asA().chain.overview({ view: { period: 'custom', from: '2020-01-01', to: '2020-01-31' } });
     expect(past.totals.leakIls).toBe(0);
-    const future = await asA().chain.overview({ month: '2999-12' });
-    expect(future.month).toBe(currentMonth());
+    expect(past.totals.spendIls).toBe(0);
+    const thisMonth = await asA().chain.overview();
+    const last = await asA().chain.overview({ view: { period: 'last_month' } });
+    expect(last.periodEnd).toBe(thisMonth.periodStart);
+    // last_12m includes this month's invoices.
+    const year = await asA().chain.overview({ view: { period: 'last_12m' } });
+    expect(year.totals.leakIls).toBe(140);
   });
 
-  it('rejects a malformed month', async () => {
-    await expect(asA().chain.overview({ month: "2026-10'; --" })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  it('compare=prev returns the comparison totals and a per-branch delta', async () => {
+    const o = await asA().chain.overview({ compare: 'prev' });
+    expect(o.compare).toBe('prev');
+    expect(o.totals.prevLeakIls).toBe(0);
+    expect(o.branches.find((b) => b.restaurantId === A.restaurantId)?.leakDeltaIls).toBe(100);
+  });
+
+  it('rejects malformed views and view filters', async () => {
+    await expect(
+      asA().chain.overview({ view: { period: 'custom', from: "2026-10-01'; --", to: '2026-10-31' } }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(asA().chain.overview({ view: { period: 'custom' } })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      asA().chain.overview({ view: { period: 'this_month', filters: { supplierIds: [B.supplierId] } } as never }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 
   it('a single-branch tenant on a non-chain plan gets ENTITLEMENT_REQUIRED:chain', async () => {
@@ -252,6 +271,25 @@ describe('chain.overview price disparities', () => {
       expect(JSON.stringify(rows)).not.toContain(B.invoiceId);
     } finally {
       await setFlag(false);
+    }
+  });
+});
+
+describe('chain.overview price disparities exclude billing errors', () => {
+  it('an A2 line the engine flagged as PRICE_HIGHER is a leak, not a price gap', async () => {
+    await ownerDb
+      .update(restaurants)
+      .set({ settings: { features: { priceDisparity: true } } as typeof restaurants.$inferInsert['settings'] })
+      .where(eq(restaurants.id, A.restaurantId));
+    await ownerDb.update(discrepancies).set({ invoiceLineId: A2.invoiceLineId }).where(eq(discrepancies.id, A2.discrepancyId));
+    try {
+      expect((await asA().chain.overview()).priceDisparities).toEqual([]);
+    } finally {
+      await ownerDb.update(discrepancies).set({ invoiceLineId: null }).where(eq(discrepancies.id, A2.discrepancyId));
+      await ownerDb
+        .update(restaurants)
+        .set({ settings: {} as typeof restaurants.$inferInsert['settings'] })
+        .where(eq(restaurants.id, A.restaurantId));
     }
   });
 });
@@ -344,6 +382,7 @@ describe('chain.addBranch', () => {
   it("B's owner (same account, not the payer) cannot bill a new branch to A's account", async () => {
     await expect(caller(B.ownerUserId, B.restaurantId).chain.addBranch({ name: 'free ride' })).rejects.toMatchObject({
       code: 'FORBIDDEN',
+      message: NOT_BILLING_OWNER,
     });
     const rows = await ownerDb.select({ id: restaurants.id }).from(restaurants).where(eq(restaurants.name, 'free ride'));
     expect(rows).toEqual([]);

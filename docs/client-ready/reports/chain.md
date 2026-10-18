@@ -130,3 +130,100 @@ write path**. It did confirm two billing/authorization gaps, and both are fixed 
 | Supabase sync | `pnpm db:supabase-sync --check` | up to date (39 files; no migration) |
 | Demo seed | `seed` → `seed-demo` → `seed-chain-demo`, run twice | idempotent; main branch ₪572 / 2.0 % unchanged |
 | Click-through | Playwright against `next dev`, he + en, desktop + 390 px | `docs/client-ready/screenshots/chain-*.png` (dashboard, previous month, switcher, branches, switched-into-Jerusalem, mobile + drawer, manager switcher); the manager is redirected from `/dashboard/chain` |
+
+---
+
+# Follow-up rounds (after PR #38 merged)
+
+Branch `claude/client-ready-chain`, restarted from `claude/client-ready` @ 8289ce1. The two
+commits that were pushed after the merge (`efe7657` and `a48d672`) were rebased onto it.
+
+## What changed
+
+| Area | Change | Tests |
+|---|---|---|
+| **Price disparity across branches** (flag `priceDisparity`) | The same supplier (by ח.פ) and the same product (by SKU, else by name and unit) at different average prices across branches. Shown only for a gap ≥ 3 % and ≥ ₪5/month. Impact = (price − the chain's best price) × qty. Each row drills into its invoice lines and shows the match method. **Lines the engine already flagged as a price error are excluded**: those are leak, not a branch price, and the refuter caught them showing up as fake gaps. Seeded: Jerusalem pays +12 % for tomatoes and +7 % for salmon; Haifa pays +6 % for entrecôte. | `chain-disparity.test.ts` (6); `chain.attack` (B's prices are never compared; a flagged line is excluded) |
+| **Shared view controls** | `/dashboard/chain` now uses S3's `ViewToolbar` (period, custom range, compare, saved views, ranking CSV) in place of the local month selector. `chain.overview({ view, compare })` uses its own `ChainViewInput`, which is strict and rejects filters. Each branch still runs in its own `withRestaurant` transaction (`computeLeakSummary`, plus the per-supplier and open-count SQL over `viewInvoicesSql`). **The disparity panel follows the selected range.** The KPIs and the ranking show the comparison when `cmp` ≠ off. The heatmap highlights the months in the period. | `chain.test.ts` (compare on/off, bounds, `monthOfPeriodEnd`); `chain.attack` (custom/last_month/last_12m, compare=prev, malformed view, filters rejected) |
+| **Non-payer `addBranch`** (S4 UX note) | A co-owner on someone else's billing account now gets `NOT_BILLING_OWNER` **before** the plan gate. The UI says "only the account payer can open new branches" (he + en) on the branches page and in the action error, never the plan upsell. | `chain.attack` (stable message); Layer 2 (he + en UI) |
+| **Feature flags** | The chain view is shown when the plan rule passes **or** `featureEnabled('chain')`; the disparity panel needs `featureEnabled('priceDisparity')`. | `chain.attack` |
+| **Production navigation** | Branch switch, add branch and rename use document navigations or local state. **Shared `ViewToolbar` fallback (S3's file):** if a soft `router.replace` hasn't committed within 1.2 s, it calls `location.assign`. See "Platform bug". | Layer 2; stall rate measured before and after |
+| **Review fixes** | A fresh login lands in the **oldest** membership (it used to be any row). The switcher order is stable (main branch first). The Chain tab follows the router's rule. The active branch always stays inside the 25-branch cap. `בע"מ` is stripped only as a whole word. Drill-down rows are keyed by line id. A thrown action no longer leaves a spinner. | unit + Layer 2 |
+
+## Platform bug (reported to the orchestrator)
+
+**Symptom:** in `next build` + `next start` (Next 15.5.25), a same-route soft navigation that only
+changes search params frequently never commits. The URL and the controlled `<select>` revert.
+
+**Measured over 6 tries each with Playwright:**
+
+| Page | No delay | 1.5 s pause first |
+|---|---|---|
+| `/dashboard` (S3's overview) | 4/6 stalled | 2/6 stalled |
+| `/dashboard/chain` | 6/6 stalled | 5/6 stalled |
+
+**Ruled out:**
+- The server: the RSC GET returns 200 `text/x-component` in under 130 ms, and a replay with the browser's exact headers completes.
+- Prefetch: aborting every prefetch changes nothing.
+- `AbortController` / `pagehide`: never fired.
+- Console and page errors: none at the moment of the stall.
+
+**What happens:** the body is dropped (`net::ERR_ABORTED`) about 100 ms after the headers arrive.
+React or Next abandons the transition.
+
+**With the toolbar fallback:** 0/6 stalls on both pages. The root cause is still open and needs S7 /
+an upgrade.
+
+## Verification (2 layers), final head
+
+**Layer 1** (all green):
+
+| Command | Result |
+|---|---|
+| `pnpm install --frozen-lockfile` | 0 |
+| `DATABASE_URL=$DATABASE_URL_TEST pnpm --filter @restomatch/db migrate` | 0 |
+| `pnpm exec turbo test --concurrency=1` | **13/13**: api 533, web 246, charts 68, db 63, matching 86 (canary untouched), worker 11 (+1 skipped), others green |
+| `pnpm exec turbo typecheck` | **17/17** |
+| `pnpm --filter @restomatch/web exec tsc --noEmit -p .` | **0 errors** |
+| `cd apps/web && pnpm exec next lint` | **0 errors** |
+| `pnpm --filter @restomatch/db run supabase-sync --check` | up to date (41 files; this branch adds no migration) |
+| `pnpm build` (apps/web) | green |
+
+**Demo seed on the merged base:** `seed` → `seed-demo` → `seed-chain-demo` keeps the main branch
+**unchanged at ₪572 = 2.0 % of ₪28,389** (asserted by the script). Haifa is 0.8 % and Jerusalem 3.1 %.
+
+**Layer 2(a):** production build (`next build && next start`, `NODE_ENV=production`) on a freshly
+migrated and seeded DB.
+- The app role is in `DATABASE_URL_APP`, with placeholder `RESEND_API_KEY` / `EMAIL_FROM` /
+  `SUPABASE_SERVICE_ROLE_KEY`, and the demo password login.
+- Playwright runs every chain flow in he **and** en for owner, manager, receiver, bookkeeper and
+  chef. It asserts:
+  - HTTP < 400, `<html lang/dir>`, the main hero ₪572 / 2 %, chain ₪1,69x, worst branch Jerusalem 3.1 %;
+  - disparity impacts **131 / 125 / 33** this month and **251 / 247 / 48** last month (the panel follows the period);
+  - compare=prev shows the deltas;
+  - the switch both ways shows ₪782 and then ₪572, with a stable switcher order;
+  - add and rename persist;
+  - the non-payer message in he and en with no upsell;
+  - the manager, receiver, bookkeeper and chef get no Chain/Branches tab and are redirected;
+  - the mobile drawer works with no horizontal scroll;
+  - a forged session POST is ignored (same `restaurantId`, header unchanged).
+
+| Pass | Result | Log |
+|---|---|---|
+| 1 | **128/128** | `reports/chain-layer2-pass1.log` |
+| 2 | 127/128 | `reports/chain-layer2-pass2.log` |
+| 3 | 127/128 | `reports/chain-layer2-pass3.log` |
+
+**The one failure in passes 2 and 3:** an intermittent **React #418 hydration error**, followed by
+`parentNode` errors. It appeared once per pass, on a page reached by a document navigation
+(`/dashboard` after the manager's branch switch; `/dashboard/chain?p=last_month&cmp=prev` after
+toolbar changes).
+- It did not reproduce in about 100 targeted production loads (36 toolbar sequences instrumented
+  with per-document ids) or in about 70 `next dev` loads.
+- Working hypothesis, not proven: the old document is torn down while React is committing a late
+  soft navigation.
+- No functional impact was observed: every number and flow assertion passed in those same passes.
+- **Not fixed. Open.** It goes away together with the platform bug above.
+
+The server log showed 0 errors and no 5xx in every pass.
+
+**Layer 2(b):** an independent refuter (fresh agent, diff plus this evidence). See below.
