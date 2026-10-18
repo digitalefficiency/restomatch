@@ -313,3 +313,37 @@ Not implemented by an agent. It requires `packages/db/src/schema.ts` and `packag
    - Pure unit test of the stale predicate.
 
 Cost: one extra integer column read in a query that already runs per request.
+
+### Cross-QA: S13 ingest webhooks + receiver PWA (PR #43, `claude/wave1-ingest` @ b12497f)
+Tested on a production build (`next start`), with a test-only network preload faking Supabase Storage and Meta Graph/CDN in-process (zero real egress; anything else is blocked and logged). `INGEST_PROVIDER=live`, real HMAC secrets, `TRUSTED_PROXY_HOPS=1`. #43's suites: ingest.attack + cross-tenant 139/139 (on a fresh DB), packages/ingest 21/21, web 38/38. 48 runtime checks.
+
+**Findings**
+| # | Sev | Finding | Fix / owner |
+|---|---|---|---|
+| I1 | **medium (release)** | **Migration ordering hazard.** #43's `0050_ingest`/`0051` have a lower journal `when` (2026-06-21) than #44's 0054/0055 and #46's 0056/0057 (2026-06-22). Drizzle's migrator only applies entries newer than the last applied one, so if #44/#46 reach a DB first, **0050/0051 are silently skipped** (reproduced: my test DB had 0054–0057 → `ingest_channels` didn't exist). Supabase's path may also reject the out-of-order versions. | Merge #43 before #44/#46, or renumber 0050/0051 above 0057 (orchestrator/S13) |
+| I2 | medium (known) | **The e-mail allow-list trusts the From header.** A spoofed allow-listed From with a valid recipient token auto-registers an invoice and enqueues OCR (verified: the doc goes `registered` with an invoice). It's bounded by the secret recipient address + 60/min per channel. | SPF/DKIM verdict from the inbound provider before trusting a sender (S13's follow-up). Until then, treat allow-listed e-mail as "suggest", not "auto" |
+| I3 | low (privacy) | **The offline photo queue (IndexedDB `restomatch-receiver`) is never cleared on logout.** `clearQueue` exists but has no caller. On a shared tablet, invoice photos stay readable in the browser after logout, and later upload under whoever next opens the same restaurant (another restaurant's photos are held back — that part works). | Call `clearQueue()` (or tag items with the user id) on logout (S13) |
+| I4 | low | Unknown-sender attachments are stored (no OCR) up to 10 × 10 MB per message at 60 msgs/min per channel. That's a storage-cost amplifier for anyone holding the address. | A per-channel daily byte quota (S13) |
+
+**Verified ✅**
+- **WhatsApp:**
+  - Signature: missing or over different bytes → 401. A valid signature with an unknown token → 404 (the token is resolved only via the hashed-token SECURITY DEFINER lookup).
+  - Accept and replay: a valid event → stored under the token's restaurant only; an exact replay → `duplicate`.
+  - Binding: an event for another `phone_number_id` → rejected; a RIVAL token carrying MAIN's phone id → rejected, nothing stored for either; an 8-day-old event → rejected.
+  - Size: 300 KB → 413 before the signature check; chunked 400 KB → 413 while streaming.
+  - Rate limit: 60/min per channel → 429.
+  - Verify handshake: a wrong verify token → 403; a valid one echoes the challenge as text/plain; an XSS challenge → 403.
+  - **SSRF:** when Graph returns `http://169.254.169.254/…`, `https://evil.example/…`, `https://lookaside.fbsbx.com.attacker.io/…` or `https://facebook.com@evil.example/…`, all are refused and never fetched.
+- **E-mail:**
+  - Signature: no headers / wrong secret → 401; a timestamp 10 min old → 401 `stale`; a replay → `duplicate`.
+  - Unknown sender → stored as `needs_review`, no invoice, no OCR.
+  - HTML disguised as PDF → `rejected unsupported_type`. 21 MB → 413.
+  - An unknown token or a token on a foreign domain → 404.
+- Flags off → 404, identical to an unknown token.
+- **Inbox:**
+  - The page renders for owner/manager/bookkeeper and bounces receiver/chef. Bookkeeper can't approve or rotate (403); receiver can't read (403).
+  - Approving another restaurant's document → 404, untouched; RIVAL docs never listed.
+  - **approve ∥ reject race → exactly one 200, the other 409** (the row lock holds; no 500).
+  - `rotateChannel` → the old token returns 404 immediately.
+- **Service worker:** precaches only the 5 public `/pwa/*` files, never intercepts API/tRPC/scans/POST, navigations are network-first with an offline fallback, `nosniff` + `no-cache`. The manifest is public.
+- **React #418 on bookkeeper/he:** not reproduced. The inbox console was clean in the prod build (I've seen #418 intermittently on other dashboard pages; see the QA round above).
