@@ -113,3 +113,24 @@ GHSA-89xv-2m56-2m9x, GHSA-p9j2-gv94-2wf4), `next-auth` 5.0.0-beta.25 → ≥beta
 `@auth/core` → ≥0.41.3 (GHSA-7rqj-j65f-68wh critical, GHSA-8fpg-xm3f-6cx3 critical,
 GHSA-xmf8-cvqr-rfgj), `sharp` → ≥0.35.0 (GHSA-f88m-g3jw-g9cj), `postcss` → ≥8.5.18
 (GHSA-6g55-p6wh-862q, GHSA-r28c-9q8g-f849). The audit job stays red until that PR lands.
+
+## 2026-10-18 refresh (client-ready sprint)
+
+New high advisories published after the 2026-09-08 freeze turned the gate red. Fixed rather than
+ignored wherever a patched release exists:
+
+| Package | Fix | Path |
+|---|---|---|
+| nodemailer | `apps/web` → `^10.1.2` (GHSA-v53p-9fqp-m79j, GHSA-r7g4-qg5f-qqm2, GHSA-2x7j-588g-ccc2). `@auth/core`'s optional peer range says `^7 \|\| ^8`; the provider only calls `createTransport`, which v10 keeps, and RestoMatch overrides `sendVerificationRequest` anyway (Resend / dev log). Magic-link login re-verified end-to-end. | apps/web |
+| sharp | override `^0.35.5` (GHSA-wq5f-xc86-pv6w) | apps/web › next |
+| @xmldom/xmldom, brace-expansion, compression, fast-uri, js-yaml, source-map-js, undici | semver-scoped `pnpm.overrides` to the patched release **within the same major** | apps/mobile › expo / react-native tooling |
+
+Newly **baselined** (no patched release exists; Expo CLI dev tooling only, never shipped in the
+web/worker runtime):
+
+| GHSA | Package | Sev | Why acceptable |
+|---|---|---|---|
+| GHSA-vfj7-8cjw-p6xm | braces ≤3.0.3 | high | `apps/mobile › expo › @expo/cli › fast-glob › micromatch` — glob expansion of developer-controlled patterns at build time. |
+| GHSA-86w9-cpqp-85rv | node-forge ≤1.4.0 | high | `apps/mobile › expo › @expo/cli` — local dev-server certificate tooling; no signature verification of untrusted input in production. |
+
+Result: `pnpm audit --prod --audit-level=high` → 0 unignored high/critical (117 → 35 total findings).
