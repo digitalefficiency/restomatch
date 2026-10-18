@@ -1,8 +1,9 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { memberProcedure, router } from '../trpc';
 import { extFromMime, getServiceStorageClient } from '../lib/supabaseStorage';
+import { localScanStorageEnabled, localScanUrl, saveLocalScan } from '../lib/localScanStorage';
 
 const BUCKET = 'invoice-scans';
 const SIGNED_URL_TTL_SEC = 60 * 30; // 30 minutes — enough for immediate OCR.
@@ -38,6 +39,12 @@ export const scansRouter = router({
         contentBase64: z.string().min(1).max(MAX_BASE64_LEN),
         mimeType: z.string().min(1).max(255),
         supplierName: z.string().max(255).optional(),
+        /**
+         * M8: client-generated id for THIS file selection. A double-tap / retry
+         * re-sends the same id and gets the same scan back (no second object,
+         * no second mapping row, same URL → registerInvoice dedupes too).
+         */
+        clientUploadId: z.string().uuid().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -48,26 +55,50 @@ export const scansRouter = router({
         });
       }
 
+      // Tenant + path are SERVER-derived from the authenticated session.
+      const restaurantId = ctx.session.restaurantId;
+      const invoiceId = input.clientUploadId
+        ? deterministicScanId(restaurantId, input.clientUploadId)
+        : `scan-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+      const ext = extFromMime(input.mimeType);
+      const storagePath = `${restaurantId}/${invoiceId}.${ext}`;
+
       const storage = getServiceStorageClient();
       if (!storage) {
+        // Local demo (never production): keep the flow working without Supabase.
+        if (localScanStorageEnabled()) {
+          await saveLocalScan({
+            restaurantId,
+            scanId: invoiceId,
+            ext,
+            mimeType: input.mimeType,
+            bytes: Buffer.from(input.contentBase64, 'base64'),
+            supplierName: input.supplierName ?? null,
+          });
+          return {
+            invoiceId,
+            scanRouteUrl: `/scans/${invoiceId}`,
+            storagePath,
+            mimeType: input.mimeType,
+            signedUrl: localScanUrl(invoiceId),
+          };
+        }
         throw new TRPCError({
           code: 'PRECONDITION_FAILED',
           message: 'Storage not configured (SUPABASE_SERVICE_ROLE_KEY missing)',
         });
       }
 
-      // Tenant + path are SERVER-derived from the authenticated session.
-      const restaurantId = ctx.session.restaurantId;
-      const invoiceId = `scan-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
-      const ext = extFromMime(input.mimeType);
-      const storagePath = `${restaurantId}/${invoiceId}.${ext}`;
-
       const bytes = Buffer.from(input.contentBase64, 'base64');
 
       const { error: uploadError } = await storage.storage
         .from(BUCKET)
         .upload(storagePath, bytes, { contentType: input.mimeType, upsert: false });
-      if (uploadError) {
+      const alreadyUploaded =
+        uploadError !== null &&
+        input.clientUploadId !== undefined &&
+        /exist|duplicate|409/i.test(`${uploadError.message} ${(uploadError as { statusCode?: string }).statusCode ?? ''}`);
+      if (uploadError && !alreadyUploaded) {
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
           message: `upload failed: ${uploadError.message}`,
@@ -77,15 +108,17 @@ export const scansRouter = router({
       // Mapping row via the service client (PostgREST) — matches the live
       // invoice_scans table whose invoice_id is opaque text. restaurant_id is
       // the session's, satisfying the NOT NULL (A.7) + tenant RLS (0002).
-      const { error: insertError } = await storage.from('invoice_scans').insert({
-        invoice_id: invoiceId,
-        bucket: BUCKET,
-        storage_path: storagePath,
-        mime_type: input.mimeType,
-        supplier_name: input.supplierName ?? null,
-        restaurant_id: restaurantId,
-        page_count: null,
-      });
+      const { error: insertError } = alreadyUploaded
+        ? { error: null }
+        : await storage.from('invoice_scans').insert({
+            invoice_id: invoiceId,
+            bucket: BUCKET,
+            storage_path: storagePath,
+            mime_type: input.mimeType,
+            supplier_name: input.supplierName ?? null,
+            restaurant_id: restaurantId,
+            page_count: null,
+          });
       if (insertError) {
         // Best-effort cleanup of the just-uploaded object.
         await storage.storage.from(BUCKET).remove([storagePath]).catch(() => {});
@@ -109,3 +142,9 @@ export const scansRouter = router({
       };
     }),
 });
+
+/** Same tenant + same client upload id → same scan id (M8 idempotency). */
+export function deterministicScanId(restaurantId: string, clientUploadId: string): string {
+  const h = createHash('sha256').update(`${restaurantId}:${clientUploadId}`).digest('hex');
+  return `scan-${h.slice(0, 12)}-${h.slice(12, 20)}`;
+}

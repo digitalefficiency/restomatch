@@ -112,6 +112,10 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'receiving.updateInvoiceHeader': 'attack',
   'receiving.updateInvoiceLine': 'attack',
   'receiving.pendingInvoices': 'isolation',
+  // S2 "Receiver in English": writes ONLY display columns, but still takes a
+  // client-supplied poId / invoiceId — a foreign id must be NOT_FOUND and B's
+  // po_lines / invoice_lines / products must stay untranslated.
+  'receiving.ensureEnglish': 'attack',
   'scans.upload':
     'memberProcedure write keyed to ctx.session.restaurantId; takes NO client-supplied tenant id or storage prefix (PR1/A.3 — the tenant + object path are derived server-side from the session), so it cannot target another tenant. The actual byte upload + service-role mapping insert are Supabase-network-bound and verified by storage.attack.test (membership gate) + against real Supabase; role denial is implicit in memberProcedure.',
   'admin.listRestaurants': 'admin-denial',
@@ -817,6 +821,35 @@ describe('match router + receiving detail reads: foreign id attacks (A → B)', 
       .where(eq(invoiceLines.id, B.invoiceLineId));
     expect(row?.qtyBilled).toBe('10.000'); // B's seeded line, untouched
     expect(row?.unitPriceBilled).toBe('10.0000');
+  });
+});
+
+describe('receiving.ensureEnglish: foreign id attacks (A → B)', () => {
+  it('rejects a foreign poId and writes no English into B rows', async () => {
+    await expect(callerFor(A).receiving.ensureEnglish({ poId: B.poId })).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+    const [line] = await db
+      .select({ en: poLines.rawDescriptionEn })
+      .from(poLines)
+      .where(eq(poLines.id, B.poLineId));
+    expect(line?.en ?? null).toBeNull();
+    const [product] = await db
+      .select({ en: products.nameEn })
+      .from(products)
+      .where(eq(products.id, B.productId));
+    expect(product?.en ?? null).toBeNull();
+  });
+
+  it('rejects a foreign invoiceId (even paired with A\'s own poId) and leaves B untouched', async () => {
+    await expect(
+      callerFor(A).receiving.ensureEnglish({ poId: A.poId, invoiceId: B.invoiceId }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [line] = await db
+      .select({ en: invoiceLines.rawDescriptionEn })
+      .from(invoiceLines)
+      .where(eq(invoiceLines.id, B.invoiceLineId));
+    expect(line?.en ?? null).toBeNull();
   });
 });
 
