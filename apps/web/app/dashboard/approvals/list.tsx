@@ -17,6 +17,8 @@ import {
   discrepancyExplain,
   discrepancyLabel,
   displayName,
+  canEscalate,
+  discrepancyValue,
   ruleLabel,
   severityLabel,
   toleranceLabel,
@@ -38,10 +40,13 @@ export function ApprovalsList({
   initial,
   filters = {},
   density = 'comfortable',
+  viewerRole = null,
 }: {
   initial: QueueItem[];
   filters?: QueueFilters;
   density?: 'comfortable' | 'compact';
+  /** The signed-in member's role (hides "escalate to owner" for the owner). */
+  viewerRole?: string | null;
 }) {
   const compact = density === 'compact';
   const t = useT(approvals);
@@ -237,7 +242,7 @@ export function ApprovalsList({
                   </div>
                 ) : (
                   <div className="mt-3 flex flex-wrap justify-end gap-2">
-                    {d.requiredRole !== 'owner' ? (
+                    {canEscalate(d.requiredRole, viewerRole) ? (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -292,7 +297,9 @@ function SummaryTile({ label, value, danger }: { label: string; value: string; d
 /** "Why was this flagged?" — a plain-language explanation of the type, the
  *  expected vs actual values, the tolerance breached, and the routing reason. */
 function WhyFlagged({ d, t }: { d: QueueItem; t: Translator<typeof approvalsHe> }) {
-  const hasValues = d.expectedValue != null && d.actualValue != null && isMeaningful(d.type);
+  const expected = discrepancyValue(d.type, d.expectedValue, t.locale);
+  const actual = discrepancyValue(d.type, d.actualValue, t.locale);
+  const hasValues = expected != null && actual != null;
   const routing = ruleLabel(t, d.ruleId, d.ruleName);
   return (
     <div className="mt-3 rounded-xl border border-line bg-surface-2 px-3 py-2 text-xs text-muted">
@@ -305,12 +312,12 @@ function WhyFlagged({ d, t }: { d: QueueItem; t: Translator<typeof approvalsHe> 
         <div className="mt-1 flex flex-wrap items-center gap-1.5">
           <span>{t('card.expected')}</span>
           <span className="font-mono font-semibold tabular-nums text-ink" dir="ltr">
-            {fmtValue(d.expectedValue)}
+            {expected}
           </span>
           <ArrowLeftRight className="h-3 w-3 text-subtle" aria-hidden="true" />
           <span>{t('card.actual')}</span>
           <span className="font-mono font-semibold tabular-nums text-danger" dir="ltr">
-            {fmtValue(d.actualValue)}
+            {actual}
           </span>
         </div>
       ) : null}
@@ -326,16 +333,6 @@ function WhyFlagged({ d, t }: { d: QueueItem; t: Translator<typeof approvalsHe> 
       ) : null}
     </div>
   );
-}
-
-/** DATE_ANOMALY stores epoch ms in expected/actual — not useful as raw numbers. */
-const isMeaningful = (type: string) => type !== 'DATE_ANOMALY';
-
-/** Trim NUMERIC noise ("8.0000" → "8"). */
-function fmtValue(v: string | null): string {
-  if (v == null) return '';
-  const n = Number(v);
-  return Number.isFinite(n) ? String(Math.round(n * 10000) / 10000) : v;
 }
 
 /** Tinted severity rail color for non-blocker rows. */

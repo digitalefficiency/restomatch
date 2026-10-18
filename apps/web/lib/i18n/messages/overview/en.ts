@@ -31,8 +31,8 @@ export const en: Shape<typeof he> = {
     cleanHint: 'Average of the last seven days',
   },
   leaks: {
-    title: 'Leak detective',
-    subtitle: 'Products whose price jumped above their history.',
+    title: 'Price creep · last 30 days',
+    subtitle: "Products you paid above their usual price for. A separate, rolling measure — not part of this month's leak above.",
     all: 'All leaks',
     upsell: 'Upgrade to unlock the leak detective',
   },
