@@ -1,4 +1,4 @@
-import { Link2, Upload } from 'lucide-react';
+import { Languages, Link2, Upload } from 'lucide-react';
 import { auth } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
 import { LinkButton, SectionHeader } from '@/lib/components';
@@ -32,6 +32,9 @@ export default async function CatalogPage() {
         action={
           canEdit ? (
             <div className="flex flex-wrap gap-2">
+              <LinkButton href="/dashboard/products" size="sm" variant="secondary">
+                <Languages className="h-4 w-4" aria-hidden="true" /> {t('namesButton')}
+              </LinkButton>
               <LinkButton href="/dashboard/catalog/mapping" size="sm" variant="secondary">
                 <Link2 className="h-4 w-4" aria-hidden="true" /> {t('mappingButton')}
               </LinkButton>

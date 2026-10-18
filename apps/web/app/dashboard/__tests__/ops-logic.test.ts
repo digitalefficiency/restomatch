@@ -17,7 +17,7 @@ import {
   parsePositive,
   parsePrice,
 } from '../orders/order-logic';
-import { productPatch } from '../products/product-logic';
+import { namesBatch, productPatch } from '../products/product-logic';
 import { presetRange, rangeError, withBom } from '../exports/range';
 import { catalogErrorKey, decodeCsvBytes, sampleCatalogCsv } from '../catalog/import/file-logic';
 
@@ -130,6 +130,24 @@ describe('product patch', () => {
       supplierId: 's1',
       defaultUnit: null,
     });
+  });
+});
+
+describe('bulk English names batch', () => {
+  const rows = [
+    { id: 'a', nameEn: null },
+    { id: 'b', nameEn: 'Butter' },
+    { id: 'c', nameEn: 'Feta' },
+  ];
+  it('sends only real changes; blanks clear; reverted edits are dropped', () => {
+    expect(namesBatch(rows, {})).toEqual([]);
+    expect(
+      namesBatch(rows, { a: ' Tomato ', b: '', c: 'Feta ' }),
+    ).toEqual([
+      { productId: 'a', nameEn: 'Tomato' },
+      { productId: 'b', nameEn: null },
+    ]);
+    expect(namesBatch(rows, { a: '   ' })).toEqual([]);
   });
 });
 

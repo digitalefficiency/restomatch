@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   and,
   catalogImports,
+  inArray,
   createDb,
   discrepancies,
   eq,
@@ -146,6 +147,7 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'catalog.createItem': 'attack',
   'catalog.updateItem': 'attack',
   'catalog.deleteItem': 'attack',
+  'catalog.imports': 'isolation',
   'orders.list': 'isolation',
   'orders.get': 'attack',
   'orders.createDraft': 'attack',
@@ -189,6 +191,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'mapping.confirm': 'attack',
   // Canonical product management (rename / recategorize / exclusivity / delete).
   'products.update': 'attack',
+  'products.list': 'isolation',
+  'products.setNamesEn': 'attack',
   'products.delete': 'attack',
   // Data-subject-rights (E.6). Not tenant-scoped: export/delete act ONLY on the
   // caller's own identity (keyed to ctx.session.userId — no client-supplied
@@ -1187,6 +1191,40 @@ describe('products router: foreign-id attacks (A → B)', () => {
       .from(suppliers)
       .where(eq(suppliers.id, B.supplierId));
     expect(row?.nameEn ?? null).toBeNull();
+  });
+
+  it('products.list returns only the caller restaurant products', async () => {
+    const out = await callerFor(A).products.list();
+    expect(out.rows.map((r) => r.id)).toContain(A.productId);
+    expect(out.rows.map((r) => r.id)).not.toContain(B.productId);
+  });
+
+  it('products.setNamesEn rejects a batch containing a foreign product and writes nothing', async () => {
+    await expect(
+      callerFor(A).products.setNamesEn({
+        items: [
+          { productId: A.productId, nameEn: 'Mine' },
+          { productId: B.productId, nameEn: 'HIJACK' },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const rows = await db
+      .select({ id: products.id, nameEn: products.nameEn })
+      .from(products)
+      .where(inArray(products.id, [A.productId, B.productId]));
+    for (const r of rows) expect(r.nameEn ?? null).toBeNull();
+  });
+
+  it('catalog.imports excludes B import history', async () => {
+    await db.insert(catalogImports).values({
+      restaurantId: B.restaurantId,
+      supplierId: B.supplierId,
+      filename: 'b-secret.xlsx',
+    });
+    const all = await callerFor(A).catalog.imports();
+    expect(all.map((i) => i.filename)).not.toContain('b-secret.xlsx');
+    const foreign = await callerFor(A).catalog.imports({ supplierId: B.supplierId });
+    expect(foreign).toHaveLength(0);
   });
 
   it('products.update rejects assigning a foreign supplier as exclusivity owner', async () => {

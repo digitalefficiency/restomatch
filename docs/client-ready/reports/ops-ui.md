@@ -82,10 +82,26 @@ Also checked by hand in he and en:
 - Number columns are end-aligned with `tabular-nums`. Orders show as stacked cards on phones.
 - `ActivityFeed`: timestamps are in Israel time; English rebuilds the stored Hebrew templates ("Invoice 2026-1000 matched · 9 discrepancies · potential loss ₪3,571").
 
+## Follow-up round (orchestrator request)
+
+1. **Catalog card layout on phones.** Below `md`, every catalog item is a card: description, supplier, price, product link, an inline English-name editor, SKU and unit, plus edit/toggle/delete. There is no sideways scrolling, and adding/editing items works the same as in the desktop table. The shared `SectionHeader` now stacks its actions under the title on phones, so wide button rows wrap instead of overflowing. Screenshots: `ops-catalog-{he,en}-mobile.png`.
+2. **Bulk "English names" grid** (`/dashboard/products`, linked from the catalog header "English names" button). It is a spreadsheet-like editor:
+   - one English input per product;
+   - Enter / ↓ moves to the next row, ↑ to the previous one, Esc reverts a cell;
+   - Ctrl/⌘+S saves; unsaved cells are highlighted, with a sticky "Save N changes" bar and a warning before leaving the page;
+   - a "missing only" filter, search in Hebrew or English, and an overall progress bar.
+
+   Saves go through the new `products.setNamesEn`. It is all-or-nothing: every product id must belong to the caller's restaurant, otherwise it returns NOT_FOUND and writes nothing. It is manager-only, rejects duplicate ids, and accepts at most 200 rows. Reads use the new `products.list`. I verified it end-to-end in English: of 8 missing names I typed 2 with Enter navigation and saved with Ctrl+S; the progress went from 56/64 to 58/64. Screenshots: `ops-products-names-{he,en}[-mobile].png`.
+3. **Import history** on the supplier catalog tab, from `catalog_imports` via the new `catalog.imports`. It lists file, time, status, rows / new / updated, and the error for failed imports. It refreshes every 5 s while an import is still processing. Screenshots: `ops-suppliers-detail-tab-catalog-{he,en}.png`.
+
+Tests:
+- `ops-routers.test.ts` (+4): list filters, batch save/trim/clear, manager-only + duplicate ids, import history order + counts.
+- `cross-tenant.attack.test.ts` (+3; COVERAGE adds `catalog.imports` isolation, `products.list` isolation, `products.setNamesEn` attack). A mixed batch with a foreign product writes nothing.
+- `ops-logic.test.ts` (+1): `namesBatch`.
+
 ## Still broken / not done
 
 - **The worker banner shows locally** because no worker is running. In the demo, start the worker (`apps/worker`) or it will say the engine is offline. This is S7's area.
-- **Catalog tables scroll sideways on phones** (`min-w` + `overflow-x-auto`). Orders use cards. A card layout for the catalog is a follow-up.
 - **The seed has no catalog items and no `name_en`.** For screenshots I imported the fixtures through the UI and set 17 English names in the **dev DB only**. See "Needs another area".
 - The `activity.feed` cursor is `createdAt` only, so rows that share a timestamp could be skipped. That never happens in practice; a `(createdAt, id)` cursor would fix it.
 - Prettier/eslint were not run on web, because web lint is not in the v1 gate (AGENTS.md).
@@ -95,8 +111,9 @@ Also checked by hand in he and en:
 1. **Seed English names + a demo catalog** (high / S, S1): make "Receiver in English" visible without manual setup.
 2. **Auto-suggest `name_en`** via the S2 translate package, as a "Suggest" button in the catalog's English-name cell (high / S).
 3. **Order from the leak view** (high / M): a "re-order from cheapest supplier" action that uses the product page's cheapest badge.
-4. **Catalog card layout on mobile + bulk "edit English names" grid** (medium / M).
-5. **Import history** (`catalog_imports` already stores status/errors): a list on the supplier catalog tab (medium / S).
+4. ~~Catalog card layout on mobile + bulk English-names grid~~ (done in the follow-up round).
+5. ~~Import history~~ (done in the follow-up round).
+6. **"Suggest translations" in the English-names grid** via the S2 translate package (high / S).
 
 ## Immutable files touched
 
@@ -124,4 +141,5 @@ after merging origin/claude/client-ready e7ae653 (+S4) → Tasks 12/12 successfu
 pnpm --filter @restomatch/web exec tsc --noEmit -p .  → 0 errors
 cd apps/web && set -a && . ./.env.local && set +a && pnpm build → green (only pre-existing bullmq / jose dependency warnings)
 Playwright e2e (scratchpad driver, real UI) → 8/8 PASS
+follow-up round: pnpm test 12/12 (api 443, web 177); tsc 0; pnpm build green; English-names grid e2e (Enter navigation + Ctrl+S, 56→58 of 64) PASS
 ```

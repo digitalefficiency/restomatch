@@ -37,13 +37,19 @@ export function SectionHeader({
   className?: string;
 }) {
   return (
-    <div className={cn('mb-6 flex items-start justify-between gap-4', className)}>
-      <div>
+    <div
+      className={cn(
+        'mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4',
+        className,
+      )}
+    >
+      <div className="min-w-0">
         <div className="mb-2 h-0.5 w-10 rounded-full flow-stream" aria-hidden="true" />
         <Heading level={level}>{title}</Heading>
         {subtitle ? <p className="mt-1 text-sm text-muted">{subtitle}</p> : null}
       </div>
-      {action ? <div className="shrink-0">{action}</div> : null}
+      {/* Stacks under the title on phones so wide action rows never scroll sideways. */}
+      {action ? <div className="sm:shrink-0">{action}</div> : null}
     </div>
   );
 }
