@@ -10,7 +10,9 @@ import {
   discrepancies,
   ensureRlsAppRole,
   eq,
+  invoiceLines,
   memberships,
+  products,
   restaurants,
   subscriptions,
   suppliers,
@@ -208,6 +210,49 @@ describe('chain.overview', () => {
       code: 'FORBIDDEN',
       message: 'ENTITLEMENT_REQUIRED:chain',
     });
+  });
+});
+
+describe('chain.overview price disparities', () => {
+  // The same supplier (ח.פ of A's supplier) + product "עגבניה A" at ₪10 in A, ₪11 in A2 and ₪30 in B.
+  // B shares the billing account but is not A's: its ₪30 must never appear.
+  beforeAll(async () => {
+    for (const [t, price] of [[A2, '11.00'], [B, '30.00']] as const) {
+      await ownerDb.update(products).set({ canonicalName: 'עגבניה A' }).where(eq(products.id, t.productId));
+      await ownerDb.update(suppliers).set({ businessId: '512345671' }).where(eq(suppliers.id, t.supplierId));
+      await ownerDb
+        .update(invoiceLines)
+        .set({ unitPriceBilled: price, lineTotal: (Number(price) * 10).toFixed(2) })
+        .where(eq(invoiceLines.id, t.invoiceLineId));
+    }
+  });
+  const setFlag = (on: boolean) =>
+    ownerDb
+      .update(restaurants)
+      .set({ settings: on ? { features: { priceDisparity: true } } : {} })
+      .where(eq(restaurants.id, A.restaurantId));
+
+  it('is null while the priceDisparity feature is off', async () => {
+    await setFlag(false);
+    expect((await asA().chain.overview()).priceDisparities).toBeNull();
+  });
+
+  it("compares only the caller's chain branches (A ₪10 vs A2 ₪11) — never B's ₪30", async () => {
+    await setFlag(true);
+    try {
+      const rows = (await asA().chain.overview()).priceDisparities!;
+      expect(rows).toHaveLength(1);
+      const r = rows[0]!;
+      expect(r.method).toBe('name');
+      expect(r.branches.map((b) => b.restaurantId).sort()).toEqual([A.restaurantId, A2.restaurantId].sort());
+      expect(r.cheapest).toMatchObject({ restaurantId: A.restaurantId, avgPrice: 10 });
+      expect(r.priciest).toMatchObject({ restaurantId: A2.restaurantId, avgPrice: 11 });
+      expect(r.impactIls).toBe(10);
+      expect(r.lines.every((l) => l.restaurantId !== B.restaurantId)).toBe(true);
+      expect(JSON.stringify(rows)).not.toContain(B.invoiceId);
+    } finally {
+      await setFlag(false);
+    }
   });
 });
 

@@ -42,6 +42,9 @@ export interface BranchSnapshot {
   name: string;
   /** 'YYYY-MM' of the reported month. */
   month: string;
+  /** Branch-local month bounds (UTC ISO), [monthStart, monthEnd). */
+  monthStart: string;
+  monthEnd: string;
   leakIls: number;
   spendIls: number;
   leakPct: number | null;
@@ -122,6 +125,8 @@ export async function computeBranchSnapshot(
     restaurantId,
     name,
     month: options.month,
+    monthStart: report.hero.monthStart,
+    monthEnd: report.hero.monthEnd,
     leakIls: report.hero.leakIls,
     spendIls: report.hero.spendIls,
     leakPct: report.hero.leakPct,

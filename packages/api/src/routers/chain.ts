@@ -3,8 +3,11 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import {
   aggregateChain,
+  computeBranchPriceLines,
   computeBranchSnapshot,
+  computePriceDisparities,
   type ChainOverview,
+  type PriceDisparityRow,
 } from '@restomatch/charts';
 import {
   and,
@@ -25,6 +28,7 @@ import {
 import { recordAudit } from '../audit';
 import type { AuthedContext } from '../context';
 import { getEntitlements, type Entitlements } from '../entitlements';
+import { featureEnabled } from '../lib/features';
 import { authedProcedure, router } from '../trpc';
 
 /**
@@ -160,13 +164,22 @@ interface Gate {
   branchLimit: number | null;
   canAddBranch: boolean;
   isBillingOwner: boolean;
+  /** Per-restaurant feature flag (settings.features.priceDisparity) of the active branch. */
+  priceDisparity: boolean;
 }
 
-function gateOf(ent: Entitlements, branchCount: number, isPayer: boolean): Gate {
+function gateOf(
+  ent: Entitlements,
+  branchCount: number,
+  isPayer: boolean,
+  settings: unknown,
+): Gate {
   const branchLimit = ent.limits.restaurants;
   return {
     entitlements: ent,
-    chainEnabled: (ent.active && ent.planKey === 'chain') || branchCount > 1,
+    chainEnabled:
+      (ent.active && ent.planKey === 'chain') || branchCount > 1 || featureEnabled(settings, 'chain'),
+    priceDisparity: featureEnabled(settings, 'priceDisparity'),
     branchLimit,
     canAddBranch:
       ent.active &&
@@ -178,7 +191,7 @@ function gateOf(ent: Entitlements, branchCount: number, isPayer: boolean): Gate 
 }
 
 async function gateFor(ctx: AuthedContext, scope: ChainScope): Promise<Gate> {
-  const { ent, payer } = await inBranch(ctx.db, ctx.session.userId, scope.active.restaurantId, async (tx) => {
+  const { ent, payer, settings } = await inBranch(ctx.db, ctx.session.userId, scope.active.restaurantId, async (tx) => {
     const e = await getEntitlements(tx, scope.active.restaurantId);
     const [acct] = e.billingAccountId
       ? await tx
@@ -187,9 +200,14 @@ async function gateFor(ctx: AuthedContext, scope: ChainScope): Promise<Gate> {
           .where(eq(billingAccounts.id, e.billingAccountId))
           .limit(1)
       : [];
-    return { ent: e, payer: acct?.ownerUserId ?? null };
+    const [r] = await tx
+      .select({ settings: restaurants.settings })
+      .from(restaurants)
+      .where(eq(restaurants.id, scope.active.restaurantId))
+      .limit(1);
+    return { ent: e, payer: acct?.ownerUserId ?? null, settings: r?.settings ?? {} };
   });
-  return gateOf(ent, scope.branches.length, payer === ctx.session.userId);
+  return gateOf(ent, scope.branches.length, payer === ctx.session.userId, settings);
 }
 
 export interface ChainBranchesResult {
@@ -209,6 +227,8 @@ export interface ChainOverviewResult extends ChainOverview {
   /** True when the chain had more than MAX_CHAIN_BRANCHES owner branches. */
   truncated: boolean;
   currentMonth: string;
+  /** Same supplier + product at different prices across branches; null when the feature is off. */
+  priceDisparities: PriceDisparityRow[] | null;
 }
 
 export const chainRouter = router({
@@ -243,16 +263,25 @@ export const chainRouter = router({
       const nowMonth = currentMonth();
       const month = input?.month && input.month <= nowMonth ? input.month : nowMonth;
       const branches = scope.branches.slice(0, MAX_CHAIN_BRANCHES);
-      const snapshots = await mapLimit(branches, BRANCH_CONCURRENCY, (b) =>
-        inBranch(ctx.db, ctx.session.userId, b.restaurantId, (tx) =>
-          computeBranchSnapshot(tx, b.restaurantId, b.name, { month, trendMonths: 6 }),
-        ),
+      const perBranch = await mapLimit(branches, BRANCH_CONCURRENCY, (b) =>
+        inBranch(ctx.db, ctx.session.userId, b.restaurantId, async (tx) => {
+          const snapshot = await computeBranchSnapshot(tx, b.restaurantId, b.name, { month, trendMonths: 6 });
+          const prices = gate.priceDisparity
+            ? await computeBranchPriceLines(tx, b.restaurantId, b.name, snapshot)
+            : null;
+          return { snapshot, prices };
+        }),
       );
+      const priceLines = perBranch.flatMap((p) => (p.prices ? [p.prices] : []));
       return {
-        ...aggregateChain(snapshots, { month }),
+        ...aggregateChain(
+          perBranch.map((p) => p.snapshot),
+          { month },
+        ),
         activeRestaurantId: scope.active.restaurantId,
         truncated: scope.branches.length > MAX_CHAIN_BRANCHES,
         currentMonth: nowMonth,
+        priceDisparities: gate.priceDisparity ? computePriceDisparities(priceLines, { limit: 10 }) : null,
       };
     }),
 

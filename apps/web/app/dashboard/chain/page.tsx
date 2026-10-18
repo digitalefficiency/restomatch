@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { TRPCError } from '@trpc/server';
-import { AlertTriangle, ClipboardCheck, Network, PartyPopper, ShieldCheck, Undo2 } from 'lucide-react';
+import { AlertTriangle, ClipboardCheck, Network, PartyPopper, Scale, ShieldCheck, Undo2 } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
 import { formatDate, formatNumber, formatPercent } from '@/lib/i18n/format';
@@ -335,6 +335,95 @@ export default async function ChainPage({
           </div>
         </Card>
       </section>
+
+      {/* Price disparity across branches (feature flag: priceDisparity). */}
+      {data.priceDisparities ? (
+        <section className="mt-10" data-testid="chain-disparity">
+          <SectionHeader title={t('dashboard.disparity.title')} subtitle={t('dashboard.disparity.subtitle')} />
+          {data.priceDisparities.length === 0 ? (
+            <EmptyState icon={<Scale className="h-6 w-6" />} title={t('dashboard.disparity.empty')} />
+          ) : (
+            <Card padding="none" className="divide-y divide-line/60">
+              {data.priceDisparities.map((d) => {
+                const sup = displayName(d.supplierName, d.supplierNameEn, locale);
+                const prod = displayName(d.productName, d.productNameEn, locale);
+                const per = (v: number) =>
+                  t('dashboard.disparity.perUnit', { price: formatIls(v, { locale, maximumFractionDigits: 2 }), unit: d.unit });
+                return (
+                  <details key={d.key} className="group" data-testid="chain-disparity-row">
+                    <summary className="grid cursor-pointer list-none grid-cols-1 gap-3 px-5 py-4 hover:bg-surface-2/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 md:grid-cols-[minmax(0,2fr)_minmax(0,1.4fr)_minmax(0,1.4fr)_auto_auto] md:items-center">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-ink">
+                          <span {...originalProps(prod.primary)}>{prod.primary}</span>
+                          <Badge tone={d.method === 'sku' ? 'accent' : 'info'} className="ms-2 align-middle">
+                            {t(`dashboard.disparity.method.${d.method}`)}
+                          </Badge>
+                        </p>
+                        <p className="text-xs text-subtle">
+                          <span {...originalProps(sup.primary)}>{sup.primary}</span>
+                          {prod.secondary ? (
+                            <>
+                              {' · '}
+                              <span {...originalProps(prod.secondary)}>{prod.secondary}</span>
+                            </>
+                          ) : null}
+                        </p>
+                      </div>
+                      <div className="text-sm">
+                        <p className="text-xs uppercase tracking-wider text-subtle">{t('dashboard.disparity.cheapest')}</p>
+                        <p className="truncate text-ink" {...originalProps(d.cheapest.name)}>{d.cheapest.name}</p>
+                        <p className="font-mono text-xs tabular-nums text-primary">{per(d.cheapest.avgPrice)}</p>
+                      </div>
+                      <div className="text-sm">
+                        <p className="text-xs uppercase tracking-wider text-subtle">{t('dashboard.disparity.priciest')}</p>
+                        <p className="truncate text-ink" {...originalProps(d.priciest.name)}>{d.priciest.name}</p>
+                        <p className="font-mono text-xs tabular-nums text-danger">{per(d.priciest.avgPrice)}</p>
+                      </div>
+                      <div className="text-sm md:text-end">
+                        <p className="text-xs uppercase tracking-wider text-subtle">{t('dashboard.disparity.delta')}</p>
+                        <p className="font-mono font-semibold tabular-nums text-warn">+{formatPercent(d.deltaPct, locale, 1)}</p>
+                      </div>
+                      <div className="text-sm md:text-end">
+                        <p className="text-xs uppercase tracking-wider text-subtle">{t('dashboard.disparity.impact')}</p>
+                        <p className="font-mono text-base font-bold tabular-nums text-danger" data-testid="chain-disparity-impact">{ils(d.impactIls)}</p>
+                      </div>
+                    </summary>
+                    <div className="overflow-x-auto bg-surface-2/40 px-5 pb-4 pt-1">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-subtle">{t('dashboard.disparity.drill')}</p>
+                      <table className="w-full min-w-[32rem] text-xs" data-testid="chain-disparity-lines">
+                        <thead>
+                          <tr className="text-subtle">
+                            <th scope="col" className="py-1 text-start font-semibold">{t('dashboard.disparity.drillBranch')}</th>
+                            <th scope="col" className="py-1 text-start font-semibold">{t('dashboard.disparity.drillInvoice')}</th>
+                            <th scope="col" className="py-1 text-start font-semibold">{t('dashboard.disparity.drillDate')}</th>
+                            <th scope="col" className="py-1 text-end font-semibold">{t('dashboard.disparity.drillQty')}</th>
+                            <th scope="col" className="py-1 text-end font-semibold">{t('dashboard.disparity.drillPrice')}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {d.lines.map((l) => {
+                            const bn = nameOf.get(l.restaurantId) ?? '';
+                            return (
+                              <tr key={`${l.invoiceId}-${l.unitPrice}-${l.qty}`} className="border-t border-line/50">
+                                <td className="py-1.5 text-ink"><span {...originalProps(bn)}>{bn}</span></td>
+                                <td className="py-1.5 font-mono text-muted">{l.invoiceNumber}</td>
+                                <td className="py-1.5 text-muted">{formatDate(l.invoiceDate, locale, { dateStyle: 'medium' })}</td>
+                                <td className="py-1.5 text-end font-mono tabular-nums text-muted">{formatNumber(l.qty, locale)}</td>
+                                <td className="py-1.5 text-end font-mono tabular-nums text-ink">{formatIls(l.unitPrice, { locale, maximumFractionDigits: 2 })}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </details>
+                );
+              })}
+            </Card>
+          )}
+          <p className="mt-2 text-xs text-subtle">{t('dashboard.disparity.note')}</p>
+        </section>
+      ) : null}
 
       {/* Top suppliers across branches. */}
       <section className="mt-10">

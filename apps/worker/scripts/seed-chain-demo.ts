@@ -132,6 +132,17 @@ const BRANCHES: BranchSpec[] = [
   },
 ];
 
+/**
+ * Price-disparity story: the same supplier's price list for THIS branch is
+ * higher than for the main branch (a contract difference, not a billing
+ * error — the PO carries the same price, so no discrepancy fires; only the
+ * chain dashboard's cross-branch comparison can surface it).
+ */
+const LIST_PRICE_FACTOR: Record<string, Record<string, number>> = {
+  jerusalem: { 'Cherry tomatoes': 1.12, 'Salmon fillet': 1.07 },
+  haifa: { 'Entrecôte (rib-eye)': 1.06 },
+};
+
 /** Price bump / short delivery knobs per profile (tuned for the % targets above). */
 const KNOBS: Record<Profile, { bumpP: number; bump: [number, number]; shortP: number; short: number; localBump: number }> = {
   clean: { bumpP: 0.22, bump: [0.06, 0.1], shortP: 0.04, short: 0.15, localBump: 0 },
@@ -238,6 +249,7 @@ async function main() {
   const mainProducts = await db.select().from(products).where(eq(products.restaurantId, mainR.id));
   const mainItems = await db.select().from(supplierCatalogItems).where(eq(supplierCatalogItems.restaurantId, mainR.id));
   const priceOf = new Map(mainItems.map((i) => [i.productId ?? '', Number(i.listPrice ?? 0)]));
+  const skuOf = new Map(mainItems.map((i) => [i.productId ?? '', i.supplierSku]));
 
   const tolerances = resolveTolerances(mainR.settings?.tolerances);
   const rules = buildRules(resolveApprovalThresholds(mainR.settings?.approvalThresholds));
@@ -290,7 +302,7 @@ async function main() {
         .returning();
       const prods: Prod[] = [];
       for (const p of mainProducts.filter((x) => x.supplierId === src.id).slice(0, 5)) {
-        const price = priceOf.get(p.id) || 10;
+        const price = Math.round((priceOf.get(p.id) || 10) * (LIST_PRICE_FACTOR[spec.key]?.[p.nameEn ?? ''] ?? 1) * 100) / 100;
         const [np] = await db
           .insert(products)
           .values({ restaurantId: rid, supplierId: s!.id, canonicalName: p.canonicalName, nameEn: p.nameEn, category: p.category, defaultUnit: p.defaultUnit })
@@ -299,6 +311,8 @@ async function main() {
           restaurantId: rid,
           supplierId: s!.id,
           productId: np!.id,
+          // Same supplier SKU as the main branch → a confident cross-branch match.
+          supplierSku: skuOf.get(p.id) ?? null,
           supplierNameRaw: p.canonicalName,
           unit: p.defaultUnit,
           listPrice: price.toFixed(4),

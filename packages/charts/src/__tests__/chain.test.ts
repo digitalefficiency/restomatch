@@ -4,6 +4,8 @@ import { aggregateChain, shiftMonth, supplierMergeKey, type BranchSnapshot } fro
 function snap(over: Partial<BranchSnapshot> & { restaurantId: string; name: string }): BranchSnapshot {
   return {
     month: '2026-10',
+    monthStart: '2026-09-30T21:00:00.000Z',
+    monthEnd: '2026-10-31T22:00:00.000Z',
     leakIls: 0,
     spendIls: 0,
     leakPct: null,

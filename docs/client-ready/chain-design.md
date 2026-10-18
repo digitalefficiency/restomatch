@@ -58,3 +58,14 @@ flag beyond that; the chain plan allows 5).
 Same supplier = same digits-only business id; else the same normalized name (NFKC, lower-case,
 quotes/punctuation and the `בע"מ` / `ltd` suffix stripped, whitespace collapsed). Only rows each
 branch could read under its own RLS scope participate.
+
+## Price disparity across branches (feature flag `priceDisparity`)
+
+Same supplier (ח.פ digits, else normalized name) + same product (supplier SKU, else normalized
+name **and** unit) bought by ≥ 2 chain branches in the month at different average prices
+(Σ line total ÷ Σ qty). Shown only when the gap is ≥ 3 % and the monthly impact
+(Σ (branch price − chain-best price) × branch qty) is ≥ ₪5. Each branch's lines are read inside its
+own `withRestaurant` transaction (`computeBranchPriceLines`); the comparison is pure
+(`computePriceDisparities`, `packages/charts/src/chain-disparity.ts`). The match method is labelled
+(`sku` / `name`). Gating: the chain view needs the plan rule **or** `featureEnabled(settings,'chain')`;
+the disparity panel needs `featureEnabled(activeBranch.settings,'priceDisparity')`.
