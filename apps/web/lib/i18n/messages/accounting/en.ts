@@ -28,7 +28,8 @@ export const en: Shape<typeof he> = {
     button: 'Download uniform file',
   },
   downloaded: 'Downloaded — {count} invoices.',
-  downloadedEmpty: 'No approved invoices in this range. The file downloaded empty (headers only).',
+  downloadedEmpty: 'No checked invoices in this range. The file downloaded empty (headers only).',
+  undated: '{count} checked invoices from this range have no invoice date, so they aren’t in the file. Add the date on the invoice page and download again.',
   failed: 'Download failed.',
-  note: 'Every checked invoice is included: “matched”, “disputed” (flagged in the status column), “approved” and “paid”. Invoices still in OCR, and consolidated invoices waiting for their delivery notes, are left out. Dates follow Israel time.',
+  note: 'Every checked invoice is included: “matched”, “disputed” (flagged in the status column), “approved” and “paid”. Invoices still in OCR, and consolidated invoices waiting for their delivery notes, are left out, as is a copy flagged as a duplicate invoice (unless someone approved it as a separate invoice). Dates follow Israel time.',
 };

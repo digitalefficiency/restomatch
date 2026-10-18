@@ -1,13 +1,18 @@
 import { z } from 'zod';
 import {
   and,
+  count,
+  discrepancies,
   eq,
   gte,
   inArray,
   invoices,
+  isNull,
   lte,
   matchRuns,
+  ne,
   restaurants,
+  sql,
   suppliers,
 } from '@restomatch/db';
 import { bookkeeperProcedure, requireFeature, router } from '../trpc';
@@ -36,7 +41,12 @@ export const exportsRouter = router({
   invoicesCsv: exportProcedure
     .input(PeriodSchema)
     .query(async ({ ctx, input }) => {
-      const { rows, tz } = await fetchInvoices(ctx.db, ctx.session.restaurantId, input.from, input.to);
+      const { rows, tz, undatedCount } = await fetchInvoices(
+        ctx.db,
+        ctx.session.restaurantId,
+        input.from,
+        input.to,
+      );
       const csv = toCsv(rows, [
         { header: 'מס׳ חשבונית', value: (r) => r.invoiceNumber },
         { header: 'תאריך', value: (r) => (r.invoiceDate ? localIsoDate(r.invoiceDate, tz) : null) },
@@ -52,6 +62,7 @@ export const exportsRouter = router({
         filename: `restomatch-invoices-${input.from}-to-${input.to}.csv`,
         content: csv,
         rowCount: rows.length,
+        undatedCount,
       };
     }),
 
@@ -62,7 +73,12 @@ export const exportsRouter = router({
   uniform1000: exportProcedure
     .input(PeriodSchema)
     .query(async ({ ctx, input }) => {
-      const { rows, tz } = await fetchInvoices(ctx.db, ctx.session.restaurantId, input.from, input.to);
+      const { rows, tz, undatedCount } = await fetchInvoices(
+        ctx.db,
+        ctx.session.restaurantId,
+        input.from,
+        input.to,
+      );
       const lines: Uniform1000Invoice[] = rows
         .filter((r) => r.invoiceNumber && r.invoiceDate && r.totalInclVat !== null)
         .map((r) => ({
@@ -80,6 +96,7 @@ export const exportsRouter = router({
         filename: `restomatch-1000-${input.from}-to-${input.to}.txt`,
         content,
         rowCount: lines.length,
+        undatedCount,
       };
     }),
 });
@@ -98,6 +115,7 @@ async function fetchInvoices(
     .limit(1);
   const tz = restaurant?.timezone || DEFAULT_EXPORT_TZ;
   const { start: fromDate, end: toDate } = exportPeriodBounds(from, to, tz);
+  const notDuplicate = sql`not exists ${unacceptedDuplicate(db, restaurantId)}`;
   const rows = await db
     .select({
       id: invoices.id,
@@ -122,11 +140,49 @@ async function fetchInvoices(
         inArray(invoices.status, [...EXPORTABLE_INVOICE_STATUSES]),
         gte(invoices.invoiceDate, fromDate),
         lte(invoices.invoiceDate, toDate),
+        notDuplicate,
       ),
     )
     .orderBy(invoices.invoiceDate);
-  return { rows, tz };
+
+  // Checked invoices with no invoice date (OCR missed it) can't be placed in a
+  // period, so no export carries them. Count the ones created in this period so
+  // the UI can warn the bookkeeper instead of silently dropping them.
+  const [undated] = await db
+    .select({ n: count() })
+    .from(invoices)
+    .where(
+      and(
+        eq(invoices.restaurantId, restaurantId),
+        inArray(invoices.status, [...EXPORTABLE_INVOICE_STATUSES]),
+        isNull(invoices.invoiceDate),
+        gte(invoices.createdAt, fromDate),
+        lte(invoices.createdAt, toDate),
+        notDuplicate,
+      ),
+    );
+  return { rows, tz, undatedCount: Number(undated?.n ?? 0) };
 }
 
-// Keep matchRuns import stable (referenced via JOIN in later expansions).
-void matchRuns;
+/**
+ * Correlated subquery: the outer invoice was flagged DUPLICATE_INVOICE by a
+ * match run and nobody accepted it as a genuine separate invoice. Those copies
+ * stay `disputed` forever; exporting them would book the same purchase twice.
+ */
+function unacceptedDuplicate(db: import('@restomatch/db').Database, restaurantId: string) {
+  return db
+    .select({ one: sql`1` })
+    .from(discrepancies)
+    .innerJoin(
+      matchRuns,
+      and(eq(matchRuns.id, discrepancies.matchRunId), eq(matchRuns.restaurantId, restaurantId)),
+    )
+    .where(
+      and(
+        eq(matchRuns.invoiceId, invoices.id),
+        eq(discrepancies.restaurantId, restaurantId),
+        eq(discrepancies.type, 'DUPLICATE_INVOICE'),
+        ne(discrepancies.resolutionStatus, 'accepted'),
+      ),
+    );
+}
