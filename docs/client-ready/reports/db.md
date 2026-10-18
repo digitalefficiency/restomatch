@@ -197,3 +197,29 @@ DB-RUNBOOK updated: pending range now **0019 → 0039** (S4's 0039 in the §11 t
 
 - **Last month is believable:** a different set of resolved September incidents → hero/monthly report for last month **₪1,137 = 1.8 % of ₪63,205** (20 of 52 invoices); this month **₪572 = 2.0 % of ₪28,389** checked spend (S3 now excludes the never-matched ריכוז invoices). Leaks page unchanged (entrecôte, salmon, beer keg).
 - **Journal gaps:** `db:doctor` already FAILs on "entries older than the newest applied row but not applied"; now also **`db:migrate` refuses to run** while a gap exists (`findJournalGaps` in `src/migrations.ts`) instead of letting drizzle skip them silently. Test: `upgrade-path.test.ts` "FAILs on a journal gap" (forgets 0030's tracker row → doctor FAIL naming 0030, `pending` empty, migrate refuses). Runbook §9 explains the cause and the repair.
+
+### Round 3 — schema delivery to the NEW Supabase project via GitHub
+
+- **`pnpm db:supabase-sync`** (`packages/db/src/supabaseSync.ts`, `scripts/supabase-sync.ts`, `--check`): generates `supabase/config.toml` (project_id `restomatch`, PG 17, seed off) and `supabase/migrations/`:
+  - a bootstrap (extensions exactly as `migrate.ts` + drizzle tracker);
+  - 34 drizzle migrations verbatim + an idempotent tracker row each (drizzle-orm's hash / `created_at`);
+  - an idempotent `restomatch_rls_<hash>` file = provision-rls (rls/0002 + 0003, `restomatch_app` NOLOGIN without password, the grants via the new shared `rlsAppRoleGrantsSql()` in `rls.ts`, the private `invoice-scans` bucket, rls/0001 storage policies wrapped so a privilege error warns instead of blocking the deploy). It is re-emitted with a later version whenever its content or the journal tail changes; earlier ones are kept. The generator refuses a new migration older than an already-deployed version.
+- **Proof on an emulated Supabase** (non-superuser CREATEROLE migration role, `storage` owned by `supabase_storage_admin`, anon/authenticated/service_role, uuid-ossp in `extensions`):
+  - all 36 files applied with `psql -1 -v ON_ERROR_STOP=1`;
+  - re-applying the RLS file is a no-op;
+  - `db:migrate` is a no-op, and `db:doctor` reports 0 FAIL with the 1 expected WARN (role has no LOGIN yet), then 0 WARN after `ALTER ROLE … LOGIN PASSWORD`;
+  - `check-rls` is OK, and the RLS + cross-tenant + storage attack suites pass **159/159** against it.
+
+  The same flow is a CI test (`supabase-deploy.test.ts`, 9 tests). It also fails when `supabase/` is stale, and it shows the storage block degrades to a WARNING without rights on `storage.objects`.
+- `db:doctor`: an app role without LOGIN is now WARN (not FAIL); bypass/superuser stay FAIL.
+- Docs: **`docs/SUPABASE-GITHUB-DEPLOY.md`** (Hebrew summary on top) covers:
+  - integration settings to verify, including turning automatic branching off to avoid paid preview DBs;
+  - the `main`-is-a-placeholder branch decision;
+  - the one manual SQL step (`alter role restomatch_app with login password …`);
+  - Vercel and worker env;
+  - doctor;
+  - optional data move (upgrade a local copy of old prod, then a data-only load) and the optional demo seed;
+  - rollback.
+
+  ⚠️ Assumptions not verifiable from here (Supabase docs unreachable) are marked in §2. DB-RUNBOOK points to it.
+- Immutable file touched: `packages/db/src/rls.ts` — the grants block moved verbatim into exported `rlsAppRoleGrantsSql()` (used by `ensureRlsAppRole` and the generator); behaviour unchanged, attack suites green.

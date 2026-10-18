@@ -176,21 +176,14 @@ export function resolveAppRolePassword(
   );
 }
 
-export async function ensureRlsAppRole(
-  adminConnectionString: string,
-  opts: EnsureRlsAppRoleOptions = {},
-): Promise<string> {
-  const password = resolveAppRolePassword(adminConnectionString, opts.password);
-  const client = postgres(adminConnectionString, { max: 1, prepare: false });
-  try {
-    await client.unsafe(`
-      do $$ begin
-        if not exists (select 1 from pg_roles where rolname = '${RLS_APP_ROLE}') then
-          create role ${RLS_APP_ROLE} login;
-        end if;
-      end $$;
-      -- Always (re)set the password so a re-provision ROTATES the secret (S1).
-      alter role ${RLS_APP_ROLE} with login password '${password}';
+/**
+ * The grants/revokes that define what the non-owner tenant role may touch.
+ * Shared by ensureRlsAppRole (local/CI/prod provisioning) and the Supabase
+ * migration generator (src/supabaseSync.ts) so both paths grant exactly the
+ * same privileges. Requires the role and the `app` schema to exist.
+ */
+export function rlsAppRoleGrantsSql(): string {
+  return `
       grant usage on schema public to ${RLS_APP_ROLE};
       grant usage on schema app to ${RLS_APP_ROLE};
       grant select, insert, update, delete on all tables in schema public to ${RLS_APP_ROLE};
@@ -243,6 +236,25 @@ export async function ensureRlsAppRole(
           execute 'revoke all on user_recovery_codes from ${RLS_APP_ROLE}';
         end if;
       end $$;
+`;
+}
+
+export async function ensureRlsAppRole(
+  adminConnectionString: string,
+  opts: EnsureRlsAppRoleOptions = {},
+): Promise<string> {
+  const password = resolveAppRolePassword(adminConnectionString, opts.password);
+  const client = postgres(adminConnectionString, { max: 1, prepare: false });
+  try {
+    await client.unsafe(`
+      do $$ begin
+        if not exists (select 1 from pg_roles where rolname = '${RLS_APP_ROLE}') then
+          create role ${RLS_APP_ROLE} login;
+        end if;
+      end $$;
+      -- Always (re)set the password so a re-provision ROTATES the secret (S1).
+      alter role ${RLS_APP_ROLE} with login password '${password}';
+      ${rlsAppRoleGrantsSql()}
     `);
   } finally {
     await client.end();

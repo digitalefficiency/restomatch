@@ -25,7 +25,8 @@
     "push": "drizzle-kit push",
     "test": "vitest run",
     "doctor": "tsx scripts/doctor.ts",
-    "repair-preconditions": "tsx scripts/repair-preconditions.ts"
+    "repair-preconditions": "tsx scripts/repair-preconditions.ts",
+    "supabase-sync": "tsx scripts/supabase-sync.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.38.3",
