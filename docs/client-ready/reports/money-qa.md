@@ -87,6 +87,26 @@ accounting CSV.
 8. **Data, not code:** supplier payment terms are seeded in Hebrew ("30 + שוטף") and appear in
    English UIs.
 
+## Follow-up round (on 2cf22c8)
+
+- **Dashboard fetches only what the role may see.** `owner.leaks` (owner-only) is called only for
+  owners, so receiver and chef no longer log FORBIDDEN. The hero still shows for every role. The
+  drill-down link appears only for finance roles (owner/manager/bookkeeper, the roles allowed on
+  `owner.leakBreakdown`). The pending-approvals card links only for roles that can open the queue.
+  Verified as receiver: 0 FORBIDDEN in the server log.
+- **Bookkeeper can open `/dashboard/approvals`** (`apps/web/lib/roles.ts`, S4's file, one line plus
+  a test). The round-1 API fix let the bookkeeper decide duplicate invoices, but the route gate still
+  bounced them from the page.
+- **Activity feed in English for seeded rows:**
+  - `seed-demo.ts` now writes the same structured metadata as the real writers;
+  - `activity.feed` returns `metadata`;
+  - `localizeActivity` (S5's `activityText.ts`) builds English from metadata, falling back to the
+    Hebrew-template parsing for older rows;
+  - new strings in the `components` namespace, including a singular "1 discrepancy".
+  - Tests in `lib/components/__tests__/ops-components.test.ts`.
+- `packages/db/scripts/seed.ts` writes no activity rows, so it needed no change.
+- Gate on this head: `pnpm test` 13/13 (api 486, web 189), web `tsc` 0, build green.
+
 ## Format consistency (my screens)
 
 - Headline/hero figures use whole shekels; line items and tables use agorot. Everything goes

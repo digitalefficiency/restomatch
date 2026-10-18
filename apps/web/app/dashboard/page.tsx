@@ -1,5 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { auth } from '@/auth';
+import { canSeeRoute } from '@/lib/roles';
 import { Activity, ArrowLeft, CheckCircle2, ClipboardCheck, Hourglass, ShieldCheck } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
@@ -22,10 +24,16 @@ import { displayName } from './approvals/vocab';
 
 export default async function DashboardPage() {
   const caller = await createServerCaller();
-  const memberships = await caller.onboarding.myMemberships();
+  const [session, memberships] = await Promise.all([auth(), caller.onboarding.myMemberships()]);
   if (memberships.length === 0) {
     redirect('/onboarding');
   }
+  // Fetch only what the active role may see (the hero is for every role).
+  const role = (
+    memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0]!
+  ).role;
+  const canDrill = canSeeRoute(role, '/dashboard/leaks');
+  const canDecide = canSeeRoute(role, '/dashboard/approvals');
   const [t, tl, locale] = await Promise.all([getT(overview), getT(leaksNs), getLocale()]);
 
   const [kpis, hero, lastMonth, activity] = await Promise.all([
@@ -41,7 +49,8 @@ export default async function DashboardPage() {
   let leaks: Awaited<ReturnType<typeof caller.owner.leaks>> = [];
   let leaksEntitlementBlocked = false;
   try {
-    leaks = await caller.owner.leaks({ limit: 8 });
+    // owner.leaks is owner-only: don't call it (and log FORBIDDEN) for other roles.
+    if (role === 'owner') leaks = await caller.owner.leaks({ limit: 8 });
   } catch (err) {
     if (entitlementCauseOf(err)) {
       leaksEntitlementBlocked = true;
@@ -60,6 +69,16 @@ export default async function DashboardPage() {
     monthExcessIls: l.paidExcessIls,
   }));
 
+  const pendingCard = (
+    <KpiCard
+      label={t('kpis.pending')}
+      value={formatNumber(kpis.pendingApprovalsCount, locale)}
+      tone={kpis.pendingApprovalsCount > 0 ? 'warning' : 'neutral'}
+      icon={<ClipboardCheck className="h-5 w-5" />}
+      subtitle={t('kpis.pendingHint')}
+    />
+  );
+
   return (
     <div>
       <SectionHeader level={1} title={t('title')} subtitle={t('subtitle')} />
@@ -69,6 +88,7 @@ export default async function DashboardPage() {
         hero={hero}
         ils={ils}
         monthLabel={monthLabel}
+        canDrill={canDrill}
         lastMonthLeak={lastMonth.invoiceCount > 0 ? lastMonth.leakIls : null}
         pct={(v) => formatPercent(v, locale, 1)}
         num={(v) => formatNumber(v, locale)}
@@ -76,18 +96,16 @@ export default async function DashboardPage() {
 
       {/* Secondary KPIs — the decisions waiting and the match health. */}
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Link
-          href="/dashboard/approvals"
-          className="rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
-        >
-          <KpiCard
-            label={t('kpis.pending')}
-            value={formatNumber(kpis.pendingApprovalsCount, locale)}
-            tone={kpis.pendingApprovalsCount > 0 ? 'warning' : 'neutral'}
-            icon={<ClipboardCheck className="h-5 w-5" />}
-            subtitle={t('kpis.pendingHint')}
-          />
-        </Link>
+        {canDecide ? (
+          <Link
+            href="/dashboard/approvals"
+            className="rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+          >
+            {pendingCard}
+          </Link>
+        ) : (
+          pendingCard
+        )}
         <KpiCard
           label={t('kpis.clean')}
           value={formatPercent(kpis.weekCleanMatchPct / 100, locale, 1)}
@@ -157,6 +175,7 @@ function LeakHero({
   hero,
   ils,
   monthLabel,
+  canDrill,
   lastMonthLeak,
   pct,
   num,
@@ -165,6 +184,8 @@ function LeakHero({
   hero: Hero;
   ils: (v: number) => string;
   monthLabel: string;
+  /** Finance roles may open the drill-down (owner.leakBreakdown is owner/manager/bookkeeper). */
+  canDrill: boolean;
   lastMonthLeak: number | null;
   pct: (v: number) => string;
   num: (v: number) => string;
@@ -234,7 +255,7 @@ function LeakHero({
 
       <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="max-w-xl text-xs text-subtle">{t('hero.calc')}</p>
-        {hasLeak || hero.pendingLinkCount > 0 ? (
+        {canDrill && (hasLeak || hero.pendingLinkCount > 0) ? (
           <Link
             href="/dashboard/leaks/breakdown"
             className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-danger/12 px-4 py-2 text-sm font-semibold text-danger ring-1 ring-danger/30 transition-colors hover:bg-danger/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/60"

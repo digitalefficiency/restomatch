@@ -43,7 +43,9 @@ export function labelForRole(role: string, locale: Locale = 'he'): string {
 export const ROUTE_ROLES: Record<string, UserRole[]> = {
   '/dashboard': ALL_ROLES,
   '/dashboard/receiving': ['owner', 'manager', 'receiver'],
-  '/dashboard/approvals': ['owner', 'manager'],
+  // Bookkeeper included: duplicate invoices are routed to them (approvals engine),
+  // and approvals.approve/reject/escalate accept bookkeeper-routed items.
+  '/dashboard/approvals': ['owner', 'manager', 'bookkeeper'],
   '/dashboard/leaks': ['owner', 'manager', 'bookkeeper'],
   '/dashboard/suppliers': ['owner', 'manager'],
   '/dashboard/catalog': ['owner', 'manager'],
