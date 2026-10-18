@@ -10,6 +10,7 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { nav } from '@/lib/i18n/messages/nav';
 import { canSeeRoute } from '@/lib/roles';
 import { buildSearchOptions, type SearchOption } from './searchOptions';
+import { startRouteProgress } from '@/lib/components/routeProgressState';
 
 /**
  * Global search box. Debounces input, queries `search.global` (min 2 chars),
@@ -76,6 +77,7 @@ export function DashboardSearch({ role, className }: { role: UserRole; className
     setRaw('');
     setQuery('');
     inputRef.current?.blur();
+    startRouteProgress(opt.href);
     router.push(opt.href);
   }
 
