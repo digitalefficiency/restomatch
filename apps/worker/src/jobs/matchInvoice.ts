@@ -11,10 +11,11 @@ import {
   recordUsage,
   resolveApprovalThresholds,
 } from '@restomatch/api';
-import { and, createDb, eq, invoices, matchRuns, restaurants, suppliers } from '@restomatch/db';
+import { and, eq, invoices, matchRuns, restaurants, suppliers } from '@restomatch/db';
 import { runMatch, type MatchOutput } from '@restomatch/matching';
 import { makeWorker } from '../queue';
 import { appBaseUrl } from '../lib/notifyHelpers';
+import { jobDb } from '../db';
 
 /**
  * The producer sends only identifiers; the worker discovers the PO/GR and
@@ -38,7 +39,7 @@ export function startMatchInvoiceWorker() {
   return makeWorker<MatchInvoiceJob>('match-invoice', async (job): Promise<MatchOutput> => {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error('DATABASE_URL is required');
-    const db = createDb(url);
+    const db = jobDb(url);
     const { restaurantId, invoiceId } = job.data;
 
     // Tenant guard: job payloads are not a trust boundary — verify the invoice

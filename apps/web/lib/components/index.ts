@@ -27,3 +27,4 @@ export { ToastProvider, useToast } from './Toast';
 export { Breadcrumbs } from './Breadcrumbs';
 export { friendlyError, trpcErrorCode } from './errors';
 export { displayName } from './displayName';
+export { createSingleFlight, useSingleFlight } from './singleFlight';

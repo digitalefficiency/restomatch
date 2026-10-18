@@ -24,8 +24,9 @@ import {
   WhatsAppCloudNotifier,
   type NotificationPayload,
 } from '@restomatch/api';
-import { createDb, eq, notificationsOutbox, sql } from '@restomatch/db';
+import { eq, notificationsOutbox, sql } from '@restomatch/db';
 import { makeWorker } from '../queue';
+import { jobDb } from '../db';
 
 export interface OutboxDispatchJob {
   /** Process up to this many queued rows per tick. */
@@ -52,7 +53,7 @@ export function startOutboxDispatchWorker() {
   return makeWorker<OutboxDispatchJob>('outbox-dispatch', async (job) => {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error('DATABASE_URL is required');
-    const db = createDb(url);
+    const db = jobDb(url);
 
     const batchSize = job.data.batchSize ?? 50;
 

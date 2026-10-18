@@ -18,6 +18,7 @@ import {
   displayName,
   friendlyError,
   useToast,
+  useSingleFlight,
 } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { components } from '@/lib/i18n/messages/components';
@@ -56,6 +57,7 @@ export function SupplierManager() {
   const t = useT(suppliersNs);
   const tc = useT(components);
   const toast = useToast();
+  const once = useSingleFlight();
   const utils = trpc.useUtils();
   const list = trpc.suppliers.list.useQuery({ includeInactive: true });
   const [creating, setCreating] = useState(false);
@@ -138,7 +140,7 @@ export function SupplierManager() {
           submitting={create.isPending}
           error={create.error ? friendlyError(create.error, tc) : null}
           onCancel={() => setCreating(false)}
-          onSubmit={(form) => create.mutate(toCreateInput(form))}
+          onSubmit={(form) => once(() => create.mutateAsync(toCreateInput(form)))}
         />
       )}
 

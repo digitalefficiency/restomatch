@@ -1,15 +1,22 @@
 import { z } from 'zod';
 import {
   and,
+  count,
+  desc,
+  discrepancies,
   eq,
   gte,
   inArray,
   invoices,
+  isNull,
   lte,
   matchRuns,
+  ne,
   restaurants,
+  sql,
   suppliers,
 } from '@restomatch/db';
+import { alias } from 'drizzle-orm/pg-core';
 import { bookkeeperProcedure, requireFeature, router } from '../trpc';
 
 /** Bookkeeping exports require the accounting_export plan feature. */
@@ -36,7 +43,12 @@ export const exportsRouter = router({
   invoicesCsv: exportProcedure
     .input(PeriodSchema)
     .query(async ({ ctx, input }) => {
-      const { rows, tz } = await fetchInvoices(ctx.db, ctx.session.restaurantId, input.from, input.to);
+      const { rows, tz, undatedCount } = await fetchInvoices(
+        ctx.db,
+        ctx.session.restaurantId,
+        input.from,
+        input.to,
+      );
       const csv = toCsv(rows, [
         { header: 'מס׳ חשבונית', value: (r) => r.invoiceNumber },
         { header: 'תאריך', value: (r) => (r.invoiceDate ? localIsoDate(r.invoiceDate, tz) : null) },
@@ -52,6 +64,7 @@ export const exportsRouter = router({
         filename: `restomatch-invoices-${input.from}-to-${input.to}.csv`,
         content: csv,
         rowCount: rows.length,
+        undatedCount,
       };
     }),
 
@@ -62,7 +75,12 @@ export const exportsRouter = router({
   uniform1000: exportProcedure
     .input(PeriodSchema)
     .query(async ({ ctx, input }) => {
-      const { rows, tz } = await fetchInvoices(ctx.db, ctx.session.restaurantId, input.from, input.to);
+      const { rows, tz, undatedCount } = await fetchInvoices(
+        ctx.db,
+        ctx.session.restaurantId,
+        input.from,
+        input.to,
+      );
       const lines: Uniform1000Invoice[] = rows
         .filter((r) => r.invoiceNumber && r.invoiceDate && r.totalInclVat !== null)
         .map((r) => ({
@@ -80,6 +98,7 @@ export const exportsRouter = router({
         filename: `restomatch-1000-${input.from}-to-${input.to}.txt`,
         content,
         rowCount: lines.length,
+        undatedCount,
       };
     }),
 });
@@ -98,6 +117,7 @@ async function fetchInvoices(
     .limit(1);
   const tz = restaurant?.timezone || DEFAULT_EXPORT_TZ;
   const { start: fromDate, end: toDate } = exportPeriodBounds(from, to, tz);
+  const notDuplicate = sql`not exists ${unacceptedDuplicate(db, restaurantId)}`;
   const rows = await db
     .select({
       id: invoices.id,
@@ -122,11 +142,56 @@ async function fetchInvoices(
         inArray(invoices.status, [...EXPORTABLE_INVOICE_STATUSES]),
         gte(invoices.invoiceDate, fromDate),
         lte(invoices.invoiceDate, toDate),
+        notDuplicate,
       ),
     )
     .orderBy(invoices.invoiceDate);
-  return { rows, tz };
+
+  // Checked invoices with no invoice date (OCR missed it) can't be placed in a
+  // period, so no export carries them. Count the ones created in this period so
+  // the UI can warn the bookkeeper instead of silently dropping them.
+  const [undated] = await db
+    .select({ n: count() })
+    .from(invoices)
+    .where(
+      and(
+        eq(invoices.restaurantId, restaurantId),
+        inArray(invoices.status, [...EXPORTABLE_INVOICE_STATUSES]),
+        isNull(invoices.invoiceDate),
+        gte(invoices.createdAt, fromDate),
+        lte(invoices.createdAt, toDate),
+        notDuplicate,
+      ),
+    );
+  return { rows, tz, undatedCount: Number(undated?.n ?? 0) };
 }
 
-// Keep matchRuns import stable (referenced via JOIN in later expansions).
-void matchRuns;
+/**
+ * Correlated subquery: the invoice's LATEST match run flagged it
+ * DUPLICATE_INVOICE and nobody waived that (approvals "Reject" = `rejected` =
+ * "not a duplicate, let it go"). Open/escalated means undecided and
+ * `accepted`/`resolved` means the duplicate was confirmed and claimed: either
+ * way the copy stays `disputed` forever and exporting it would book the same
+ * purchase twice. Only the latest run counts, so a re-match that clears the
+ * flag (e.g. after fixing a misread invoice number) brings the invoice back.
+ */
+function unacceptedDuplicate(db: import('@restomatch/db').Database, restaurantId: string) {
+  const latestRun = alias(matchRuns, 'latest_run');
+  const latestRunId = db
+    .select({ id: latestRun.id })
+    .from(latestRun)
+    .where(and(eq(latestRun.invoiceId, invoices.id), eq(latestRun.restaurantId, restaurantId)))
+    .orderBy(desc(latestRun.runAt))
+    .limit(1);
+  return db
+    .select({ one: sql`1` })
+    .from(discrepancies)
+    .where(
+      and(
+        eq(discrepancies.matchRunId, sql`${latestRunId}`),
+        eq(discrepancies.restaurantId, restaurantId),
+        eq(discrepancies.type, 'DUPLICATE_INVOICE'),
+        ne(discrepancies.resolutionStatus, 'rejected'),
+      ),
+    );
+}

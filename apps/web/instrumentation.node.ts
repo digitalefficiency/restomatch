@@ -14,6 +14,15 @@ export async function registerNode(): Promise<void> {
   // DATABASE_URL_APP/RESEND/REDIS/etc.) instead of booting and degrading silently.
   assertWebEnv();
 
+  // A malformed REDIS_URL (classically Upstash's https:// REST URL) is a WARN,
+  // not a boot failure: the site still serves, and every enqueue fails fast
+  // with 'queue.unavailable' instead of hanging the request (EN-7).
+  const { redisUrlProblem } = await import('@restomatch/queue');
+  const redisProblem = redisUrlProblem(process.env.REDIS_URL);
+  if (redisProblem) {
+    console.warn(`[boot] ${redisProblem} — OCR/import jobs will not be queued until it is fixed`);
+  }
+
   // S14: the assistant's burst limit uses the shared (Redis) rate-limit store.
   const { registerAskRateLimit } = await import('./lib/askRateLimit');
   registerAskRateLimit();

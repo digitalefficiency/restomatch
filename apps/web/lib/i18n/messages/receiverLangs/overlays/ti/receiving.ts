@@ -149,6 +149,7 @@ export const receiving: Shape<typeof he> = {
     generic: 'ገለ ጌጋ ተፈጢሩ። በጃኹም ደጊምኩም ፈትኑ።',
     upload: 'ምልኣኽ ስእሊ ኣይሰለጠን: {message}',
     ocrTimeout: 'ምንባብ ፋቱራ ካብ ልሙድ ንላዕሊ ይጸንሕ ኣሎ — ምስ ትእዛዝ ብምንጽጻር ምቕባል ክትቕጽሉ ትኽእሉ ኢኹም።',
+    queueUnavailable: 'ፋቱራ ተዓቂባ ኣላ፡ ግን ኣውቶማቲክ ንባብ ሕጂ የለን — ምስ ትእዛዝ ኣነጻጺርኩም ምቕባል ቀጽሉ።',
     notFound: 'መዝገብ ኣይተረኽበን።',
     forbidden: 'ነዚ ንምግባር ፍቓድ የብልኩምን።',
   },
