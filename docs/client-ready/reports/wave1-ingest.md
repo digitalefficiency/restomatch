@@ -258,7 +258,10 @@ It confirmed 2 defects in the e-mail verdict parser (both fixed, with tests):
 
 Fix: `authVerdictFromHeaders` strips RFC 5322 comments and quoted strings, splits by `;` into resinfo, and reads
 only each resinfo's **leading** `method=result`. It trusts **only `dmarc=pass`**, because DMARC is aligned with the
-From domain the allow-list keys on. Two dmarc results, or two headers with our id, give `none`.
+From domain the allow-list keys on. Only the **topmost** `Authentication-Results` carrying our authserv-id counts
+(our provider prepends it), so lower or injected copies are ignored; two dmarc results give `none`. S4's re-check
+strings are covered by tests: quoted and unquoted `"dmarc=pass"@evil` envelopes, nested comments, quoted-pair
+escapes, multiple headers, and mixed case.
 
 Plausible items I also fixed:
 - the review quota now counts and applies to **unknown senders only**, so a flood cannot starve allow-listed

@@ -73,12 +73,16 @@ export function authVerdictFromHeaders(
 ): AuthVerdict {
   if (!trustedAuthServId) return 'none';
   const id = trustedAuthServId.trim().toLowerCase();
-  const ours = headers
+  // Headers are in message order (topmost first). Our provider prepends its own
+  // Authentication-Results, so only the TOPMOST one carrying our authserv-id is
+  // trusted; lower copies (e.g. injected by the sender) are ignored. The provider
+  // must strip/rename inbound copies of its id (owner activation step).
+  const top = headers
     .filter((h) => h.name.toLowerCase() === 'authentication-results')
     .map((h) => stripCommentsAndQuotes(h.value.toLowerCase()).split(';').map((p) => p.trim()))
-    .filter((parts) => parts[0]!.split(/\s+/)[0] === id);
-  if (ours.length !== 1) return 'none'; // missing or ambiguous → no trust
-  const dmarc = ours[0]!
+    .find((parts) => parts[0]!.split(/\s+/)[0] === id);
+  if (!top) return 'none';
+  const dmarc = top
     .slice(1)
     .map((r) => /^([a-z0-9-]+)\s*=\s*([a-z]+)(?:\s|$)/.exec(r))
     .filter((m): m is RegExpExecArray => m !== null && m[1] === 'dmarc')

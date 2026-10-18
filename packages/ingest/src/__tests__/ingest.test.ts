@@ -302,11 +302,28 @@ describe('authVerdictFromHeaders (S4 I2)', () => {
       expect(authVerdictFromHeaders(h(v), 'mx.ours')).not.toBe('pass');
     }
   });
-  it('a forged header, no configured id, two of ours, or two dmarc results → none', () => {
+  it('S4 strings: a quoted or unquoted "dmarc=pass" envelope address, nested comments, quoted-pairs, case mix', () => {
+    for (const v of [
+      'mx.ours; spf=none smtp.mailfrom="dmarc=pass"@evil.example; dkim=none',
+      'mx.ours; spf=none smtp.mailfrom=dmarc=pass@evil.example; dkim=none',
+      'mx.ours; spf=none (sender said dmarc=pass) smtp.mailfrom=evil.example; dkim=none',
+      'mx.ours; spf=none (a (nested (dmarc=pass)) comment) smtp.mailfrom=evil.example',
+      'mx.ours; spf=none (escaped \\) dmarc=pass) smtp.mailfrom=evil.example',
+      'mx.ours; spf=none smtp.mailfrom="x\\" ; dmarc=pass"@evil.example',
+      'MX.OURS; SPF=None smtp.mailfrom="DMARC=Pass"@Evil.Example',
+    ]) {
+      expect(authVerdictFromHeaders(h(v), 'mx.ours')).toBe('none');
+    }
+    expect(authVerdictFromHeaders(h('MX.OURS; DMARC=Pass header.from=S.CO.IL'), 'mx.ours')).toBe('pass');
+  });
+  it('multiple headers: only the TOPMOST with our authserv-id counts; foreign ids and lower copies are ignored', () => {
+    const top = { name: 'Authentication-Results', value: 'mx.ours; dmarc=fail header.from=s.co.il' };
+    const injected = { name: 'Authentication-Results', value: 'mx.ours; dmarc=pass' };
+    expect(authVerdictFromHeaders([top, injected], 'mx.ours')).toBe('fail');
+    expect(authVerdictFromHeaders([{ name: 'X-Other', value: 'x' }, ...h('mx.ours; dmarc=pass'), top], 'mx.ours')).toBe('pass');
     expect(authVerdictFromHeaders(h('evil.example; dmarc=pass'), 'mx.ours')).toBe('none');
     expect(authVerdictFromHeaders(h('mx.ours.evil; dmarc=pass'), 'mx.ours')).toBe('none');
     expect(authVerdictFromHeaders(h('mx.ours; dmarc=pass'), null)).toBe('none');
-    expect(authVerdictFromHeaders([...h('mx.ours; dmarc=pass'), ...h('mx.ours; dmarc=pass')], 'mx.ours')).toBe('none');
     expect(authVerdictFromHeaders(h('mx.ours; dmarc=fail; dmarc=pass'), 'mx.ours')).toBe('none');
   });
   it('WhatsApp messages are authenticated by Meta', () => {
