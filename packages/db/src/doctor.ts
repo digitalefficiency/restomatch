@@ -649,9 +649,10 @@ export async function runDoctor(url: string, opts: DoctorOptions = {}): Promise<
         else add('storage', 'invoice-scans bucket', b[0]!.public ? 'FAIL' : 'PASS', b[0]!.public ? 'bucket is PUBLIC — invoice scans readable by URL (apply rls/0001)' : 'private');
         // rls/0001: the four per-restaurant policies must exist (the Supabase RLS
         // migration only WARNs when it may not create them), and nothing else may
-        // open storage.objects to the publishable key. The walk-ins showcase
-        // policies are known and WARN until the server-side showcase upload lands
-        // (SB-3, docs/SUPABASE-GITHUB-DEPLOY.md).
+        // open storage.objects to the publishable key. SB-3 closed: the former anon
+        // walk-ins showcase policies are a FAIL (the showcase uploads server-side
+        // via POST /api/showcase/upload); rls/0001 and the latest Supabase RLS
+        // migration drop them (docs/SUPABASE-GITHUB-DEPLOY.md §SB-3).
         const pols = (await tx`
           select policyname, roles::text[] as roles from pg_policies
           where schemaname = 'storage' and tablename = 'objects'`) as unknown as Array<{ policyname: string; roles: string[] }>;
@@ -664,12 +665,16 @@ export async function runDoctor(url: string, opts: DoctorOptions = {}): Promise<
         const walkins = pols.filter((p) => p.policyname.startsWith('invoice_scans_walkins'));
         const stray = pols.filter((p) => !tenantPol.includes(p.policyname) && !p.policyname.startsWith('invoice_scans_walkins'));
         const strayAnon = stray.filter((p) => p.roles.includes('anon') || p.roles.includes('public'));
-        add('storage', 'no anonymous storage access', strayAnon.length ? 'FAIL' : walkins.length ? 'WARN' : 'PASS',
-          strayAnon.length
-            ? `unexpected storage.objects policies open to anon/public: ${strayAnon.map((p) => p.policyname).join(', ')} — drop them`
-            : walkins.length
-              ? `${walkins.map((p) => p.policyname).join(', ')}: anyone with the publishable key can list/upload walk-ins/ (showcase demo prefix only — never a tenant prefix). Drop once the server-side showcase upload ships (SB-3)`
-              : 'no anon policies on storage.objects');
+        const anonOpen = [
+          ...(walkins.length
+            ? [`${walkins.map((p) => p.policyname).join(', ')}: anyone with the publishable key can list, download and upload invoice-scans/walk-ins/ (SB-3) — re-apply packages/db/drizzle/rls/0001_invoice_scans_rls.sql in the SQL editor / deploy the latest supabase rls migration (supabase/migrations/*_restomatch_rls_*.sql), both drop them`]
+            : []),
+          ...(strayAnon.length
+            ? [`unexpected storage.objects policies open to anon/public: ${strayAnon.map((p) => p.policyname).join(', ')} — drop them`]
+            : []),
+        ];
+        add('storage', 'no anonymous storage access', anonOpen.length ? 'FAIL' : 'PASS',
+          anonOpen.length ? anonOpen.join('; ') : 'no anon policies on storage.objects');
         const [hasLimits] = await tx`
           select count(*)::int as n from information_schema.columns
           where table_schema = 'storage' and table_name = 'buckets' and column_name in ('file_size_limit', 'allowed_mime_types')`;
