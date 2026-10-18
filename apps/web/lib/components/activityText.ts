@@ -28,11 +28,16 @@ function amountOf(raw: string): number | null {
 }
 
 export function localizeActivity(
-  item: { eventType: string; title: string; detail: string | null },
+  item: { eventType: string; title: string; detail: string | null; metadata?: unknown },
   locale: Locale,
 ): { title: string; detail: string | null } {
   if (locale === 'he') return { title: item.title, detail: item.detail };
   const t = createTranslator(locale, components);
+
+  // Preferred path: structured metadata written by the match/approval writers and
+  // the demo seed. Falls through to the Hebrew-template parsing for older rows.
+  const fromMeta = fromMetadata(item.eventType, item.metadata, locale, t);
+  if (fromMeta) return fromMeta;
 
   const type: KnownType | 'other' = (KNOWN_TYPES as readonly string[]).includes(item.eventType)
     ? (item.eventType as KnownType)
@@ -61,4 +66,61 @@ export function localizeActivity(
     return part;
   });
   return { title, detail: out.join(' · ') };
+}
+
+type ActivityMeta = {
+  invoiceNumber?: unknown;
+  supplierName?: unknown;
+  supplierNameEn?: unknown;
+  discrepancyCount?: unknown;
+  potentialLossIls?: unknown;
+  totalInclVatIls?: unknown;
+  consolidated?: unknown;
+};
+
+function fromMetadata(
+  eventType: string,
+  metadata: unknown,
+  locale: Locale,
+  t: ReturnType<typeof createTranslator<typeof components.he>>,
+): { title: string; detail: string | null } | null {
+  if (!metadata || typeof metadata !== 'object') return null;
+  const m = metadata as ActivityMeta;
+  if (typeof m.invoiceNumber !== 'string' || !m.invoiceNumber) return null;
+  const number = m.invoiceNumber;
+  const supplier =
+    typeof m.supplierNameEn === 'string' && m.supplierNameEn
+      ? m.supplierNameEn
+      : typeof m.supplierName === 'string'
+        ? m.supplierName
+        : null;
+  const ils = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? formatIls(v, { locale }) : null);
+
+  if (eventType === 'invoice_received') {
+    const title = m.consolidated
+      ? t('activity.consolidatedReceivedNumbered', { number })
+      : t('activity.invoiceReceivedNumbered', { number });
+    const total = ils(m.totalInclVatIls);
+    const second = m.consolidated
+      ? t('activity.awaitingDeliveryNotes')
+      : total
+        ? t('activity.inclVat', { amount: total })
+        : null;
+    return { title, detail: [supplier, second].filter(Boolean).join(' · ') || null };
+  }
+  if (eventType === 'invoice_matched') {
+    const title = t('activity.invoiceMatchedNumbered', { number });
+    const count = typeof m.discrepancyCount === 'number' ? m.discrepancyCount : null;
+    const loss = ils(m.potentialLossIls);
+    const parts =
+      count === 0
+        ? [supplier, t('activity.matchesOrder')]
+        : [
+            supplier,
+            count === 1 ? t('activity.discrepancyOne') : count != null ? t('activity.discrepancies', { count }) : null,
+            loss ? t('activity.potentialLoss', { amount: loss }) : null,
+          ];
+    return { title, detail: parts.filter(Boolean).join(' · ') || null };
+  }
+  return null;
 }

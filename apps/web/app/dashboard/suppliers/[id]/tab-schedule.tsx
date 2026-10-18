@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { OrderSchedule, OrderWindow } from '@restomatch/types';
 import { CalendarClock, Plus, Trash2 } from 'lucide-react';
+import type { Supplier } from '@restomatch/db';
 import { trpc } from '@/lib/trpc/client';
 import {
   Button,
@@ -74,12 +75,12 @@ function formToSchedule(rows: WindowForm[]): OrderSchedule | null {
  * can actually be persisted (it used to fall back to the empty state, leaving
  * the old schedule in the database).
  */
-export function SupplierScheduleTab({ supplierId }: { supplierId: string }) {
+export function SupplierScheduleTab({ supplierId, initial }: { supplierId: string; initial?: Supplier }) {
   const t = useT(suppliersNs);
   const tc = useT(components);
   const toast = useToast();
   const utils = trpc.useUtils();
-  const supplier = trpc.suppliers.get.useQuery({ supplierId });
+  const supplier = trpc.suppliers.get.useQuery({ supplierId }, { initialData: initial });
   const [rows, setRows] = useState<WindowForm[] | null>(null);
 
   const update = trpc.suppliers.update.useMutation({

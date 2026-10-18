@@ -51,6 +51,7 @@ export const he = {
       back: 'חזרה',
       bannerUploading: 'מעלה את הסריקה...',
       bannerSaved: 'נשמר · {id}',
+      uploadFailed: 'העלאת הסריקה נכשלה: {message}',
       bannerDemo: 'מצב הדגמה — לא נשמר בשרת',
     },
     processing: {

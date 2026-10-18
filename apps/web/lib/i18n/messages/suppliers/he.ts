@@ -80,7 +80,7 @@ export const he = {
     breadcrumb: 'ספקים',
     active: 'פעיל',
     inactive: 'לא פעיל',
-    leakLabel: 'דליפה חודשית מוערכת',
+    leakLabel: 'שולם מעל המחיר החציוני (30 יום)',
     leakNone: 'אין מספיק נתונים',
     tabsLabel: 'תצוגת ספק',
     tabs: {

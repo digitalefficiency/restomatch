@@ -50,6 +50,7 @@ export const en: Shape<typeof he> = {
       back: 'Back',
       bannerUploading: 'Uploading the scan…',
       bannerSaved: 'Saved · {id}',
+      uploadFailed: 'Upload failed: {message}',
       bannerDemo: 'Demo mode — not saved to the server',
     },
     processing: {

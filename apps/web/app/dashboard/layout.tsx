@@ -64,7 +64,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
               />
               <div className="min-w-0 flex-1 lg:flex-none">
                 <p className="truncate text-lg font-bold tracking-tight text-ink">
-                  {active.restaurantName}
+                  {/* Tenant data (usually Hebrew) inside a possibly-English UI: mark the
+                      language and isolate its direction without changing alignment. */}
+                  <span lang="he" dir="auto">
+                    {active.restaurantName}
+                  </span>
                 </p>
                 <p className="truncate text-xs text-subtle">
                   <span className="font-mono tabular-nums">{email}</span>

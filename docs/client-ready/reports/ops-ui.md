@@ -99,6 +99,23 @@ Tests:
 - `cross-tenant.attack.test.ts` (+3; COVERAGE adds `catalog.imports` isolation, `products.list` isolation, `products.setNamesEn` attack). A mixed batch with a foreign product writes nothing.
 - `ops-logic.test.ts` (+1): `namesBatch`.
 
+## Round 3 (S3 money QA + S6 English sweep)
+
+1. **Supplier header leak matched the dashboard's basis.** It used `monthExcessIls`, a projection that re-prices past purchases at the latest price: HaKerem showed ₪328. It now sums `paidExcessIls`, what was actually paid above the 90-day median in 30 days. That gives ₪144, matching the leaks page's ₪144.15. The label is now "Paid above median (30 days)" / "שולם מעל המחיר החציוני (30 יום)". Sum is in integer agorot. File: `suppliers/[id]/layout.tsx`.
+2. **Accounting export: which invoices, and which day.**
+   - Decision (`packages/api/src/exports/period.ts`, `EXPORTABLE_INVOICE_STATUSES`): every checked invoice, which means `matched`, `disputed`, `approved` and `paid`.
+     - Disputed invoices are real purchases and tax documents; the status column flags them.
+     - `ocr_pending` / `parsed` stay out: unverified, or consolidated invoices waiting for delivery notes.
+   - Day bounds and the printed invoice date now use the restaurant's timezone (default Asia/Jerusalem) via `startOfDayInTz`/`endOfDayInTz`. It used UTC, which moved invoices dated 00:00–03:00 IL on the 1st into the previous month.
+   - The note on the exports page now states the rule in he/en.
+   - Tests: `ops-routers.test.ts` (22:30 IL on the last day included; 00:30 IL on the 1st belongs to that month with the IL date printed; disputed included in CSV + 1000; parsed excluded).
+3. **Supplier Details tab stuck on "Loading supplier…".**
+   - I couldn't reproduce it locally: direct loads, tab switches and coming from the list all rendered.
+   - The likely cause is the first client tRPC call stalling while the dev server compiles.
+   - Hardened anyway: the server page passes the supplier it already loads as `initialData` to the Details and Schedule tabs. They render immediately, with no client round trip before the form appears. Verified in he and en.
+4. **Restaurant name in the header / mobile drawer** is wrapped in `<span lang="he" dir="auto">`. It is tenant data, usually Hebrew, shown inside the English UI. It is isolated without changing the header's alignment.
+5. **appCode mapping (not done; not cheap within my boundary).** Mapping my routers' errors to stable codes would mean adding new entries to S4's `APP_ERROR_CODES` list in `packages/api/src/errors.ts`. My screens already localize by tRPC code (`friendlyError`) and by the `CATALOG_FILE_<code>` token. Proposal for S4: add `catalog.duplicateSku`, `catalog.file.*`, `orders.notDraft`, `orders.cannotCancel`, `orders.noLines`, `orders.noContact` and `products.linked`. I'd then switch the overrides to `data.appCode`.
+
 ## Still broken / not done
 
 - **The worker banner shows locally** because no worker is running. In the demo, start the worker (`apps/worker`) or it will say the engine is offline. This is S7's area.
@@ -141,5 +158,6 @@ after merging origin/claude/client-ready e7ae653 (+S4) → Tasks 12/12 successfu
 pnpm --filter @restomatch/web exec tsc --noEmit -p .  → 0 errors
 cd apps/web && set -a && . ./.env.local && set +a && pnpm build → green (only pre-existing bullmq / jose dependency warnings)
 Playwright e2e (scratchpad driver, real UI) → 8/8 PASS
+round 3: pnpm test 13/13 (api 488, web 183); tsc 0; pnpm build green (one retry: Google Fonts fetch timed out); he/en checks of supplier header (₪144 = leaks page), details tab, restaurant-name markup
 follow-up round: pnpm test 12/12 (api 443, web 177); tsc 0; pnpm build green; English-names grid e2e (Enter navigation + Ctrl+S, 56→58 of 64) PASS
 ```
