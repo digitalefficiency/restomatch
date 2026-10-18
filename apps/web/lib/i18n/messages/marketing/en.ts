@@ -70,6 +70,7 @@ export const en: Shape<typeof he> = {
     breakevenBody: 'The Pro plan ({price}/month) pays for itself if it catches {pct} of your purchasing.',
     breakevenRatio: "That's just {ratio} of the leak you estimated.",
     breakevenOver: "At this estimate the leak is below the subscription price — you may already run a tight ship, and we'll tell you so honestly.",
+    srSummary: 'Estimated leak: {month} a month, {year} a year.',
     disclaimer: "Illustrative calculator only. We don't promise savings — your real number shows up after two weeks of scanning.",
   },
   cookie: {

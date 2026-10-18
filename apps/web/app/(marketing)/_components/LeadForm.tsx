@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { CheckCircle2 } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
@@ -27,6 +27,8 @@ export function LeadForm() {
   const [marketingConsent, setMarketingConsent] = useState(false);
   const [hp, setHp] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [nameInvalid, setNameInvalid] = useState(false);
+  const successRef = useRef<HTMLHeadingElement>(null);
 
   const create = trpc.leads.create.useMutation({
     onSuccess: () => {
@@ -41,6 +43,12 @@ export function LeadForm() {
     },
   });
 
+  // The submit button unmounts on success — move focus to the confirmation so
+  // keyboard / screen-reader users aren't dropped at the top of the page.
+  useEffect(() => {
+    if (create.isSuccess) successRef.current?.focus();
+  }, [create.isSuccess]);
+
   if (create.isSuccess) {
     return (
       <div
@@ -50,7 +58,9 @@ export function LeadForm() {
         <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/15 text-primary ring-1 ring-primary/25">
           <CheckCircle2 className="h-6 w-6" aria-hidden="true" />
         </span>
-        <h3 className="text-lg font-bold text-ink">{t('lead.successTitle')}</h3>
+        <h3 ref={successRef} tabIndex={-1} className="text-lg font-bold text-ink focus:outline-none">
+          {t('lead.successTitle')}
+        </h3>
         <p className="max-w-sm text-sm text-muted">{t('lead.successBody')}</p>
       </div>
     );
@@ -61,7 +71,9 @@ export function LeadForm() {
       onSubmit={(e) => {
         e.preventDefault();
         setError(null);
+        setNameInvalid(false);
         if (!name.trim()) {
+          setNameInvalid(true);
           setError(t('lead.errorName'));
           document.getElementById('lead-name')?.focus();
           return;
@@ -106,6 +118,8 @@ export function LeadForm() {
             onChange={(e) => setName(e.target.value)}
             placeholder={t('lead.namePlaceholder')}
             autoComplete="name"
+            aria-invalid={nameInvalid || undefined}
+            aria-describedby={nameInvalid ? 'lead-error' : undefined}
           />
         </Field>
 
@@ -138,7 +152,7 @@ export function LeadForm() {
         <Field
           htmlFor="lead-procurement"
           label={t('lead.procurement')}
-          hint={t('lead.procurementHint')}
+          hint={<span className="text-muted">{t('lead.procurementHint')}</span>}
         >
           <Input
             className="h-12"
@@ -167,6 +181,7 @@ export function LeadForm() {
 
       {error ? (
         <div
+          id="lead-error"
           role="alert"
           className="rounded-md border-s-4 border-danger bg-danger/5 px-3 py-2 text-sm text-danger"
         >
@@ -189,9 +204,9 @@ export function LeadForm() {
       <Button type="submit" className="h-12 w-full text-base" loading={create.isPending}>
         {t('lead.submit')}
       </Button>
-      <p className="text-center text-xs text-subtle">
+      <p className="text-center text-xs text-muted">
         {t('lead.privacyNoteA')}{' '}
-        <Link href="/privacy" className="underline hover:text-muted">
+        <Link href="/privacy" className="underline hover:text-ink">
           {t('lead.privacyLink')}
         </Link>
         .

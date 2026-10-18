@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import {
   ArrowLeft,
@@ -9,6 +10,7 @@ import {
 } from 'lucide-react';
 import { showcase } from '@/lib/i18n/messages/showcase';
 import { getT } from '@/lib/i18n/server';
+import { alternatesFor, metadataBase } from '../(marketing)/_components/seo';
 
 type CardId = 'receiver' | 'dashboard' | 'invoices' | 'deliveries' | 'approvals';
 
@@ -19,6 +21,16 @@ const CARDS: { id: CardId; href: string; icon: React.ReactNode }[] = [
   { id: 'deliveries', href: '/showcase/deliveries', icon: <Truck className="w-5 h-5" /> },
   { id: 'approvals', href: '/showcase/approvals', icon: <ShieldCheck className="w-5 h-5" /> },
 ];
+
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT(showcase);
+  return {
+    title: t('meta.title'),
+    description: t('meta.description'),
+    metadataBase,
+    alternates: alternatesFor('/showcase', t.locale),
+  };
+}
 
 export default async function ShowcaseIndex() {
   const t = await getT(showcase);
@@ -98,7 +110,7 @@ function ShowcaseCard({
         <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-primary/12 text-primary ring-1 ring-primary/25 group-hover:bg-primary/20 transition-colors">
           {icon}
         </div>
-        <span className="text-[10px] uppercase tracking-[0.15em] text-subtle font-semibold font-mono tabular-nums">
+        <span className="text-[10px] uppercase tracking-[0.15em] text-muted font-semibold font-mono tabular-nums">
           {index}
         </span>
       </div>
@@ -112,7 +124,7 @@ function ShowcaseCard({
           {openLabel}
         </span>
         <ArrowLeft
-          className="w-4 h-4 text-subtle group-hover:text-primary transition-all ltr:rotate-180 rtl:group-hover:-translate-x-1 ltr:group-hover:translate-x-1"
+          className="w-4 h-4 text-muted group-hover:text-primary transition-all ltr:rotate-180 rtl:group-hover:-translate-x-1 ltr:group-hover:translate-x-1"
           aria-hidden="true"
         />
       </div>

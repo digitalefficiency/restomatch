@@ -41,9 +41,9 @@ Branch `claude/client-ready-landing` → draft PR into `claude/client-ready`.
 ## Section-by-section outline (`app/page.tsx`)
 
 1. **Hero** — eyebrow "Order · Delivery · Invoice"; H1 "כמה כסף דולף לך בקבלת סחורה?" / "How much
-   money leaks at your back door?"; lead; CTAs **Book a 20-minute demo** (→ `#lead`) and **Try the
+   money leaks at your back door?"; lead; CTAs **Book a short demo** (→ `#lead`) and **Try the
    live demo** (→ `/showcase`); trust notes (free trial plan · no credit card · Hebrew & English);
-   animated matching visual landing on ₪412 (illustrative).
+   animated matching visual landing on ₪412 (illustrative), with Pause/Replay controls.
 2. **Facts strip** (replaces fake logos).
 3. **The problem in ₪** — four leak types with worked ₪ examples (price creep ₪3,900/yr, short
    delivery ₪178, unordered ₪159, double invoice) + "on ₪150k/month, 1.5% is ₪2,250 a month"
@@ -156,17 +156,71 @@ None from the AGENTS.md immutability list. `apps/web/app/api/trpc/[trpc]/route.t
 - **Root layout (unowned):** consider `metadataBase` + `title.template` in `app/layout.tsx`; each
   S6 page sets `metadataBase` itself for now.
 
+
+## Round 2 (orchestrator follow-up)
+
+### 1. Claims audit — every factual claim vs the code
+
+| Claim (landing / pricing / about / showcase) | Source checked | Verdict → action |
+|---|---|---|
+| "Free trial plan", trial = all features, 100 invoices, 1 restaurant, 5 seats | `PLAN_SEED.trial` | ✅ true |
+| "No credit card" | `packages/billing` — provider `noop`, no card collected anywhere | ✅ true |
+| "From ₪349 / month + VAT", Pro ₪590, Group ₪1,490, limits per plan | `PLAN_SEED` (pricing page reads the `plans` table, falls back to the seed) | ✅ true |
+| "12 automatic discrepancy checks" | `DiscrepancyType` union = 12 | ✅ true |
+| "Hebrew & English" | i18n namespaces + parity test | ✅ true |
+| "Two-factor sign-in" | `lib/totp.ts`, `/login/2fa`, settings `TwoFactorSection` — **opt-in** | ⚠️ → "Optional sign-in with an authenticator app (2FA)" |
+| RLS tenant isolation + automated attack tests | `rls.ts`, `0002_core_tenant_rls.sql`, `*.attack.test.ts` in CI | ✅ true |
+| Amendment 13: privacy policy, consents, access/deletion | legal pages (drafts), cookie + marketing consent, `dsr.exportMyData` / `deleteMyAccount` | ⚠️ → "designed around", cites self-service export/deletion |
+| "Every approval, rejection **and change** is recorded" | `auditLog` writes in `approvals.approve/reject` only | ⚠️ → scoped to approvals/rejections (reason on reject) |
+| Approvals: "price jump, invoice over a limit, **new supplier**" | `approvals/engine.ts` default rules | ❌ no new-supplier rule → copy + mini-UI now mirror the real rules: duplicate → blocked, > ₪5,000 without PO → owner, ₪50–300 cumulative → manager, ≤2% → auto-approved; thresholds per restaurant |
+| FAQ "no POs? RestoMatch **learns baselines** and warns" | `engine.ts` — no PO ⇒ `UNORDERED_ARRIVAL` (block); baselines are per PO line | ❌ → "an invoice with no order is flagged for approval; add orders (manual or file import) and the full 3-way match kicks in" |
+| "Partial receipts and **consolidated invoices** wait patiently" | no consolidated-invoice handling in the base yet (S3 in flight) | ❌ → "matching deliveries pass silently; minor gaps (≤2%) auto-approved" |
+| "Cancel anytime" / "no commitment" / "you won't pay for what doesn't work" | no terms clause, no billing | ❌ removed; FAQ now "free trial, no card, you decide after you've seen your number" |
+| "20-minute demo" | sales promise, not code | ⚠️ → "short demo" |
+| Showcase: "SHA-256 hash chain", "every decision is signed", "tamper-proof scan with hash signature" | `audit_log` has no hash columns; scans not hashed | ❌ removed (strings + hash column in the approvals log) |
+| Showcase: late-delivery alerts by push/WhatsApp | no late-delivery job | ❌ → labelled "Concept preview … on the roadmap" |
+| Showcase: "in about a minute" | unmeasured | ❌ removed |
+| "Receiver in English" flagship | migration 0028 + S2 branch (not yet in the base when audited) | ⚠️ stays — owner's flagship, delivered by S2; re-check after S2 merges |
+
+### 2. Lighthouse (mobile, `next build && next start`, Lighthouse 12.8.2, simulated throttling)
+
+| Page | Perf | A11y | Best-pr. | SEO | LCP | CLS |
+|---|---|---|---|---|---|---|
+| `/` he — before → after | 94 → **96** | 96 → **100** | 96 → 96 | 100 → **100** | 2.8 → 2.6 s | 0.006 |
+| `/` en | 90 → **93** | 96 → **100** | 96 → 96 | 92 → **100** | 3.5 → 3.0 s | 0.003 |
+| `/pricing` he | 95 → 94 | 96 → **100** | 96 → 96 | 100 → 100 | 2.9 → 3.0 s | 0 |
+| `/pricing` en | 95 → 94 | 96 → **100** | 96 → 96 | 92 → **100** | 2.8 → 3.0 s | 0 |
+| `/showcase` he | 96 → 95 | 96 → **100** | 96 → 96 | 91 → 91 | 2.6 → 2.8 s | 0 |
+| `/showcase` en | 95 → 96 | 96 → **100** | 96 → 96 | 91 → 91 | 2.9 → 2.6 s | 0 |
+
+(±2 on Performance between runs is Lighthouse noise.) Fixes:
+- **Contrast:** `text-subtle` (#6B8478) is 4.14:1 on `surface` and 3.7:1 on `surface-2` — fails AA for small text. All text uses in S6 files → `text-muted` (#9DB2A6, ≥ 6.6:1); the shared token is unchanged.
+- **Canonical:** English pages pointed `rel=canonical` at the Hebrew URL (Lighthouse "invalid canonical"); now self-referencing per locale (`?lang=en`). Root canonical/hreflang rendered as `<link>`s (Next collapses `/?lang=en`).
+- **Showcase metadata:** title + description per locale (layout) and canonical/hreflang on the index.
+- **CLS from the hero:** 0.003–0.006 — the animation only changes opacity/transform inside a fixed-size card.
+- **Fonts:** the two `public/fonts/Heebo-*.ttf` are read only by `/opengraph-image` (statically prerendered at build) — no page requests them (verified in the Lighthouse network log: only the `next/font` woff2 subsets load).
+- **Remaining, not S6's:** Best-Practices 96 everywhere = console message "CSP directive `upgrade-insecure-requests` is ignored in a report-only policy" (S4: drop that directive from the Report-Only header). `/showcase` SEO 91 = Lighthouse "no meta description": the tag *is* emitted, but Next 15 streams metadata into `<body>` on that route and Lighthouse only reads `<head>` (S7: `htmlLimitedBots` in `next.config.ts` if wanted). LCP ≈ 2.6–3.0 s is the hero lead paragraph (render delay = main-thread JS, not network); next lever is lazy-loading the lead form / gsap.
+
+### 3. Keyboard + screen-reader pass (Playwright-scripted, en)
+
+- **Tab order:** skip link → logo → nav → language → sign-in → CTA → hero CTAs → hero controls → receiver demo link → calculator → legal links → pricing … (logical, no traps).
+- **Hero animation:** added a **Pause/Play** toggle (`aria-pressed`) next to Replay (WCAG 2.2.2 — the loop runs > 5 s); verified the counter freezes when paused. Controls render only when the timeline actually runs (hidden for reduced motion / no JS). The `role="img"` label now states the outcome ("…3 discrepancies… ₪412 caught before payment").
+- **FAQ:** native `<details>/<summary>` — Enter/Space toggle verified; visible focus ring.
+- **Calculator:** one `sr-only` `aria-live="polite" aria-atomic` summary ("Estimated leak: ₪2,400 a month, ₪28,800 a year.") instead of a live region around the whole card; `aria-valuetext` on both sliders (₪ amount / percent).
+- **Lead form:** empty submit → translated `role="alert"`, focus to name, `aria-invalid` + `aria-describedby`; success → focus moves to the confirmation heading (previously dropped to `<body>` when the button unmounted). Verified end-to-end; test rows deleted.
+
 ## Gate
 
-Run at the final commit of this branch:
+Re-run at the round-2 head of this branch:
 
 ```bash
 cd apps/web && pnpm exec tsc --noEmit -p .          # exit 0, 0 errors
 DATABASE_URL_TEST=postgres://postgres:postgres@localhost:5432/restomatch_test pnpm test
-#   Tasks: 12 successful, 12 total — 766 tests passed (web: 137, incl. i18n parity for
-#   landing / marketing / showcase and the new publicPaths case), 1 skipped (worker, pre-existing)
-cd apps/web && set -a && . ./.env.local && set +a && pnpm build   # exit 0; / = 13.8 kB, 191 kB first load
+#   Tasks: 12 successful, 12 total — 766 tests passed (web incl. i18n parity + publicPaths), 1 skipped (worker, pre-existing)
+cd apps/web && set -a && . ./.env.local && set +a && pnpm build   # exit 0
+# Lighthouse (mobile): next start with dummy RESEND_API_KEY / EMAIL_FROM / SUPABASE_SERVICE_ROLE_KEY
+#   (the instrumentation hook refuses to boot without them; nothing on these pages uses them)
+CHROME_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npx lighthouse@12 <url> --form-factor=mobile
 ```
 
-Plus the Playwright checks described under *Works* (screenshots, animation timeline, lead form in
-he + en). Helper scripts were throwaway and are not committed.
+Plus the Playwright checks under *Works* and *Round 2 §3*. Helper scripts were throwaway and are not committed.

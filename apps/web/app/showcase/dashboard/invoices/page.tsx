@@ -201,7 +201,7 @@ function KpiCard({
           {icon}
         </div>
       </div>
-      <div className="text-xs uppercase tracking-wider text-subtle font-semibold mb-1">
+      <div className="text-xs uppercase tracking-wider text-muted font-semibold mb-1">
         {label}
       </div>
       <div className={`font-mono text-3xl font-extrabold tabular-nums mb-1 ${t.value}`}>{value}</div>
@@ -285,9 +285,9 @@ function InvoiceRow({
               className="group inline-flex items-center gap-1 font-semibold text-ink text-base hover:text-primary transition-colors"
             >
               <span>{supplierName}</span>
-              <ArrowUpRight className="w-3.5 h-3.5 text-subtle group-hover:text-primary transition-colors rtl:-scale-x-100" />
+              <ArrowUpRight className="w-3.5 h-3.5 text-muted group-hover:text-primary transition-colors rtl:-scale-x-100" />
             </Link>
-            <span className="text-xs text-subtle font-mono">·</span>
+            <span className="text-xs text-muted font-mono">·</span>
             <span className="text-xs text-muted font-mono tabular-nums">{record.invoiceNumber}</span>
             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusInfo.tint} ms-2`}>
               {t(statusInfo.labelKey)}
@@ -326,7 +326,7 @@ function InvoiceRow({
           </div>
         </div>
         <div className="text-end shrink-0">
-          <div className="text-[10px] text-subtle uppercase tracking-wider font-semibold">
+          <div className="text-[10px] text-muted uppercase tracking-wider font-semibold">
             {t('invoices.row.billed')}
           </div>
           <div className="font-mono font-bold tabular-nums text-ink">
@@ -350,7 +350,7 @@ function InvoiceRow({
           ) : null}
         </div>
         <ChevronDown
-          className={`w-5 h-5 text-subtle transition-transform shrink-0 ${
+          className={`w-5 h-5 text-muted transition-transform shrink-0 ${
             isExpanded ? 'rotate-180' : ''
           }`}
         />

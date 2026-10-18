@@ -20,7 +20,6 @@ export const en: Shape<typeof he> = {
     note3: 'Hebrew & English',
   },
   visual: {
-    label: 'Demo: an invoice matched against its purchase order and goods receipt',
     docPo: 'Order',
     docGr: 'Received',
     docInv: 'Invoice',
@@ -44,6 +43,10 @@ export const en: Shape<typeof he> = {
     totalLabel: 'Caught before payment',
     totalSub: '3 discrepancies · awaiting owner approval',
     illustrative: 'Illustrative example',
+    labelFull:
+      'Illustrative example: invoice 4471 checked against the order and the goods received. Cherry tomatoes match; chicken breast — price went up; olive oil — 2 tins short; mozzarella — never ordered. {amount} caught before payment.',
+    pause: 'Pause animation',
+    play: 'Play animation',
     replay: 'Replay',
   },
   facts: {

@@ -88,7 +88,7 @@ export default function SupplierDetailPage({ params }: PageProps) {
           <ArrowLeft className="w-3.5 h-3.5 rtl:rotate-180" aria-hidden="true" />
           {t('supplier.breadcrumb')}
         </Link>
-        <span className="text-subtle">/</span>
+        <span className="text-muted">/</span>
         <span className="text-ink font-medium">{name}</span>
       </div>
 
@@ -146,7 +146,7 @@ export default function SupplierDetailPage({ params }: PageProps) {
 
         {/* Right: action panel */}
         <div className="rounded-2xl border border-line bg-surface p-6 shadow-card flex flex-col gap-3">
-          <h2 className="text-xs uppercase tracking-wider text-subtle font-semibold mb-1">
+          <h2 className="text-xs uppercase tracking-wider text-muted font-semibold mb-1">
             {t('supplier.actions.title')}
           </h2>
           <ActionButton
@@ -279,7 +279,7 @@ function ContactRow({
   return (
     <div>
       <div className="text-xs text-muted mb-0.5 flex items-center gap-1.5">
-        <span className="text-subtle">{icon}</span>
+        <span className="text-muted">{icon}</span>
         <span>{label}</span>
       </div>
       <div className="text-sm font-medium text-ink truncate" dir={ltr ? 'ltr' : undefined}>
@@ -372,7 +372,7 @@ function KpiCard({
       <div className={`w-10 h-10 rounded-xl ring-1 flex items-center justify-center mb-3 ${t.icon}`}>
         {icon}
       </div>
-      <div className="text-xs uppercase tracking-wider text-subtle font-semibold mb-1">
+      <div className="text-xs uppercase tracking-wider text-muted font-semibold mb-1">
         {label}
       </div>
       <div className={`font-mono text-2xl font-extrabold tabular-nums mb-1 ${t.value}`}>{value}</div>
@@ -433,7 +433,7 @@ function PriceTrendCard({ product }: { product: PriceTrendProduct }) {
 
       <div className="mt-3 pt-3 border-t border-line flex items-baseline justify-between">
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-subtle font-semibold">
+          <div className="text-[10px] uppercase tracking-wider text-muted font-semibold">
             {t('supplier.prices.latest')}
           </div>
           <div className="text-lg font-bold font-mono tabular-nums text-ink">
@@ -441,7 +441,7 @@ function PriceTrendCard({ product }: { product: PriceTrendProduct }) {
           </div>
         </div>
         <div className="text-end">
-          <div className="text-[10px] uppercase tracking-wider text-subtle font-semibold">
+          <div className="text-[10px] uppercase tracking-wider text-muted font-semibold">
             {t('supplier.prices.avg60')}
           </div>
           <div className="text-sm font-semibold font-mono tabular-nums text-muted">

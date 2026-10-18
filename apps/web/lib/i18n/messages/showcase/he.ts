@@ -5,6 +5,11 @@
  * app/showcase/_lib/mockText.ts, not here.
  */
 export const he = {
+  meta: {
+    title: 'דמו חי · RestoMatch',
+    description:
+      'הדמו החי של RestoMatch: אפליקציית הקבלה, לוח הבעלים, ביקורת חשבוניות ואישורים לפני תשלום — על נתונים של מסעדה בדויה.',
+  },
   layout: {
     brandTag: 'הדגמה',
     navLabel: 'מסכי ההדגמה',

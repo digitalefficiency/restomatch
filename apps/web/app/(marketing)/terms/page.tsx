@@ -10,7 +10,7 @@ export async function generateMetadata(): Promise<Metadata> {
     title: t('legal.terms.metaTitle'),
     description: t('legal.terms.metaDescription'),
     metadataBase,
-    alternates: alternatesFor('/terms'),
+    alternates: alternatesFor('/terms', t.locale),
   };
 }
 

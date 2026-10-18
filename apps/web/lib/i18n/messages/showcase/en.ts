@@ -2,6 +2,11 @@ import type { Shape } from '../../translate';
 import type { he } from './he';
 
 export const en: Shape<typeof he> = {
+  meta: {
+    title: 'Live demo · RestoMatch',
+    description:
+      'The RestoMatch live demo: the receiving app, the owner control center, invoice audit and approvals before payment — on data from a fictional restaurant.',
+  },
   layout: {
     brandTag: 'Demo',
     navLabel: 'Demo screens',
