@@ -73,9 +73,10 @@ CREATE TABLE IF NOT EXISTS "recipe_items" (
   CONSTRAINT "recipe_items_waste_range_check" CHECK ("waste_pct" >= 0 AND "waste_pct" < 100),
   CONSTRAINT "recipe_items_units_per_check" CHECK ("units_per_product_unit" IS NULL OR "units_per_product_unit" > 0)
 );--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "recipe_items_recipe_idx" ON "recipe_items" USING btree ("recipe_id");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "recipe_items_product_idx" ON "recipe_items" USING btree ("product_id");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "recipe_items_sub_recipe_idx" ON "recipe_items" USING btree ("sub_recipe_id");--> statement-breakpoint
+-- Each composite FK gets a matching index (db:doctor "foreign keys indexed").
+CREATE INDEX IF NOT EXISTS "recipe_items_recipe_idx" ON "recipe_items" USING btree ("recipe_id", "restaurant_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "recipe_items_product_idx" ON "recipe_items" USING btree ("product_id", "restaurant_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "recipe_items_sub_recipe_idx" ON "recipe_items" USING btree ("sub_recipe_id", "restaurant_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "recipe_items_restaurant_idx" ON "recipe_items" USING btree ("restaurant_id");--> statement-breakpoint
 DROP TRIGGER IF EXISTS "recipes_set_updated_at" ON "recipes";--> statement-breakpoint
 CREATE TRIGGER "recipes_set_updated_at" BEFORE UPDATE ON "recipes" FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();--> statement-breakpoint
@@ -91,5 +92,5 @@ DROP POLICY IF EXISTS "recipe_items_tenant" ON "recipe_items";--> statement-brea
 CREATE POLICY "recipe_items_tenant" ON "recipe_items" USING ("restaurant_id" = app.current_restaurant_id());
 
 insert into drizzle.__drizzle_migrations (hash, created_at)
-select '98b850e4f9a9f1532f97806daf1d8f37b27725f913fafa0bdcbc20a54139e3a0', 1782120000000
+select '7e91afc4c5094df54043af4aeec9e8271ac32767d1d4e581d28c0069433765ad', 1782120000000
 where not exists (select 1 from drizzle.__drizzle_migrations where created_at = 1782120000000);

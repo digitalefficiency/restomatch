@@ -1157,9 +1157,9 @@ export const recipeItems = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    index('recipe_items_recipe_idx').on(t.recipeId),
-    index('recipe_items_product_idx').on(t.productId),
-    index('recipe_items_sub_recipe_idx').on(t.subRecipeId),
+    index('recipe_items_recipe_idx').on(t.recipeId, t.restaurantId),
+    index('recipe_items_product_idx').on(t.productId, t.restaurantId),
+    index('recipe_items_sub_recipe_idx').on(t.subRecipeId, t.restaurantId),
     index('recipe_items_restaurant_idx').on(t.restaurantId),
   ],
 );
