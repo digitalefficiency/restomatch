@@ -38,6 +38,8 @@ import { takeClaudeBudget } from './english';
 
 const MAX_ROWS = 400;
 const MAX_TEXT = 400;
+/** At most one Claude batch per call (the hourly budget unit = one batch). */
+const MAX_CLAUDE_MISSES = 80;
 
 /** "4 ל׳" → "4 L", "(שישייה)" → "(six-pack)", "3%" → "3%" (English glossary + unit map). */
 export function renderSizeSuffix(suffix: string): string | null {
@@ -130,7 +132,8 @@ export async function localNames(
     for (const r of rows) add(r.name);
   }
 
-  const result: LocalNamesResult = { locale, names: {}, untranslated: 0, cached: 0, claude: false };
+  // Null-prototype map: a line literally named "constructor" must not hit Object.prototype.
+  const result: LocalNamesResult = { locale, names: Object.create(null) as Record<string, string>, untranslated: 0, cached: 0, claude: false };
   if (texts.size === 0) return result;
   const all = [...texts];
 
@@ -147,11 +150,20 @@ export async function localNames(
   for (const r of cachedRows) result.names[r.source] = r.text;
   result.cached = cachedRows.length;
 
-  const misses = all.filter((t) => result.names[t] === undefined);
+  const misses = all.filter((t) => !Object.hasOwn(result.names, t));
   if (misses.length > 0) {
     const allowClaude = translator.hasClaude ? takeClaudeBudget(restaurantId) : false;
-    result.claude = allowClaude;
-    const translated = await translator.translateMany(misses, locale, { allowClaude });
+    // Glossary for every miss; Claude for at most one batch of the rest per call.
+    const glossaryOnly = await translator.translateMany(misses, locale, { allowClaude: false, scope: restaurantId });
+    const claudeAsk = misses.filter((m) => !glossaryOnly.has(m)).slice(0, MAX_CLAUDE_MISSES);
+    const translated =
+      allowClaude && claudeAsk.length > 0
+        ? new Map([
+            ...glossaryOnly,
+            ...(await translator.translateMany(claudeAsk, locale, { allowClaude: true, scope: restaurantId })),
+          ])
+        : glossaryOnly;
+    result.claude = allowClaude && claudeAsk.length > 0;
     const fresh: Array<typeof translationCache.$inferInsert> = [];
     for (const he of misses) {
       const t = translated.get(he);

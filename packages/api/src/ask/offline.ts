@@ -15,8 +15,9 @@ export type CannedIntent = (typeof CANNED_INTENTS)[number];
 /** Keyword rules (he + en). First match wins; order = most specific first. */
 const RULES: Array<[CannedIntent, RegExp]> = [
   ['claimWeek', /(claim|credit|תבוע|לתבוע|תביע|זיכוי|לדרוש|החזר)/i],
+  // "why…" or "the leak … went up / changed" — before priceRaise ("increase").
+  ['leakChange', /(why|למה|מדוע)|((leak|דליפ|דלף).*(went up|go up|increas|chang|rise|rose|עלת|עלה|השתנ|גדל))/i],
   ['priceRaise', /(rais|price|increas|expensive|העלה|העלו|התייקר|מחיר|יקר)/i],
-  ['leakChange', /(why|went up|go up|increase|changed|למה|מדוע|עלתה|עלה|השתנ|גדל)/i],
   ['topSupplier', /(which supplier|worst|most|biggest|top|איזה ספק|הכי|הגדול)/i],
   ['leakTotal', /(how much|leak|total|כמה|דליפ|דלף|הפסד)/i],
 ];
@@ -63,16 +64,20 @@ export async function offlineAnswer(
       };
     }
     case 'leakChange': {
-      const [cur, prev] = await Promise.all([
-        computeLeakReport(db, restaurantId, month).then(reportData),
-        computeLeakReport(db, restaurantId, prevMonth).then(reportData),
+      const [curRaw, prevRaw] = await Promise.all([
+        computeLeakReport(db, restaurantId, month),
+        computeLeakReport(db, restaurantId, prevMonth),
       ]);
-      // Biggest supplier and discrepancy-type movers between the two months.
+      const cur = { hero: { leakIls: r2(curRaw.hero.leakIls) }, byType: curRaw.byType, bySupplier: curRaw.bySupplier };
+      const prev = { hero: { leakIls: r2(prevRaw.hero.leakIls) }, byType: prevRaw.byType, bySupplier: prevRaw.bySupplier };
+      // Biggest supplier and discrepancy-type movers between the two months —
+      // over the FULL lists (a supplier outside last month's top 8 is not "new").
+      const supName = (s: { supplierName: string | null; supplierNameEn: string | null }) => clip(s.supplierNameEn ?? s.supplierName);
       const supDelta = new Map<string, { name: string | null; id: string | null; delta: number }>();
-      for (const s of cur.bySupplier) supDelta.set(s.supplierId ?? s.supplier ?? '?', { name: s.supplier, id: s.supplierId, delta: s.leakIls });
+      for (const s of cur.bySupplier) supDelta.set(s.supplierId ?? supName(s) ?? '?', { name: supName(s), id: s.supplierId, delta: s.leakIls });
       for (const s of prev.bySupplier) {
-        const k = s.supplierId ?? s.supplier ?? '?';
-        const e = supDelta.get(k) ?? { name: s.supplier, id: s.supplierId, delta: 0 };
+        const k = s.supplierId ?? supName(s) ?? '?';
+        const e = supDelta.get(k) ?? { name: supName(s), id: s.supplierId, delta: 0 };
         e.delta -= s.leakIls;
         supDelta.set(k, e);
       }

@@ -13,10 +13,12 @@
  * The SDK is imported lazily so tests run without network; tests inject `client`.
  */
 import { z } from 'zod';
-import { runTool, TOOL_DEFINITIONS, type ScreenLink, type ToolContext } from './tools';
+import { runTool, TOOL_DEFINITIONS, type Figures, type ScreenLink, type ToolContext } from './tools';
 
 export const ASK_MODEL = 'claude-opus-5-5';
-const MAX_TURNS = 5;
+const MAX_TURNS = 4;
+/** Per-response output cap (thinking + answer); bounds a question's worst-case cost. */
+const MAX_TOKENS = 8000;
 const TIMEOUT_MS = 45_000;
 
 export function askSystemPrompt(locale: 'he' | 'en', today: string): string {
@@ -95,11 +97,22 @@ export function anthropicAskClient(apiKey: string): AskClientLike {
   };
 }
 
+/** A failed Claude leg still reports what it spent (so the budget counts it). */
+export class AskRunError extends Error {
+  constructor(
+    message: string,
+    readonly usage: { calls: number; inputTokens: number; outputTokens: number },
+  ) {
+    super(message);
+    this.name = 'AskRunError';
+  }
+}
+
 export interface ClaudeRunResult {
   answer: ClaudeAnswer;
-  /** Union of every tool output's links / numbers (the grounding allow-lists). */
+  /** Union of every tool output's links / figures (the grounding allow-lists). */
   links: ScreenLink[];
-  numbers: number[];
+  figures: Figures;
   toolsUsed: string[];
   calls: number;
   inputTokens: number;
@@ -117,16 +130,22 @@ export async function runClaude(
     { role: 'user', content: question },
   ];
   const links: ScreenLink[] = [];
-  const numbers: number[] = [];
+  const figures: Figures = { ils: [], pct: [], count: [] };
   const toolsUsed: string[] = [];
   let inputTokens = 0;
   let outputTokens = 0;
+  let calls = 0;
+  const fail = (err: unknown): never => {
+    throw new AskRunError(err instanceof Error ? err.message : 'assistant failed', { calls, inputTokens, outputTokens });
+  };
 
+  try {
   for (let turn = 0; turn < MAX_TURNS; turn += 1) {
+    calls += 1;
     const res = await client.create(
       {
         model: ASK_MODEL,
-        max_tokens: 16000,
+        max_tokens: MAX_TOKENS,
         // Thinking is always on for claude-opus-5-5 (omitting = adaptive); effort set explicitly.
         output_config: {
           effort: 'medium',
@@ -155,7 +174,9 @@ export async function runClaude(
           try {
             const out = await runTool(String(b.name), b.input, ctx);
             links.push(...out.links);
-            numbers.push(...out.numbers);
+            figures.ils.push(...out.figures.ils);
+            figures.pct.push(...out.figures.pct);
+            figures.count.push(...out.figures.count);
             return {
               type: 'tool_result',
               tool_use_id: b.id,
@@ -181,7 +202,10 @@ export async function runClaude(
       .map((b) => b.text)
       .join('');
     const answer = AnswerSchema.parse(JSON.parse(text));
-    return { answer, links, numbers, toolsUsed, calls: turn + 1, inputTokens, outputTokens };
+    return { answer, links, figures, toolsUsed, calls, inputTokens, outputTokens };
   }
   throw new Error('assistant used too many tool turns');
+  } catch (err) {
+    return fail(err);
+  }
 }

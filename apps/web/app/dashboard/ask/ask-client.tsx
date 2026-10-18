@@ -18,6 +18,8 @@ const SUGGESTIONS = ['leakChange', 'priceRaise', 'claimWeek', 'leakTotal', 'topS
 
 type T = Translator<typeof askNs.he>;
 type Turn = { id: number; question: string; result: AskResult | null; error: boolean };
+// The offline facts bag is shaped per intent server-side (ask/offline.ts); read it loosely here.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Facts = Record<string, any>;
 
 function typeLabel(t: T, type: unknown): string {
@@ -217,7 +219,7 @@ function AnswerBody({ result, t, locale }: { result: AskResult; t: T; locale: Lo
   const lines = result.mode === 'claude' ? [result.answer ?? ''] : offlineLines(result, t, locale);
   const seen = new Set<string>();
   const sources = result.mode === 'claude'
-    ? result.citations.map((c) => ({ href: c.href, label: c.label, value: citationValue(c, locale) }))
+    ? result.citations.map((c) => ({ href: c.href, label: t(`screens.${c.screen}`), value: citationValue(c, locale) }))
     : result.links.map((l) => ({ href: l.href, label: t(`screens.${l.screen}`), value: null as string | null }));
   return (
     <div className="space-y-3 text-sm leading-relaxed text-ink">

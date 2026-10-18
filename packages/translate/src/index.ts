@@ -34,6 +34,7 @@ export {
   TargetClaudeTranslator,
   TargetTranslator,
   createTargetTranslator,
+  keepsNumbers,
   targetSystemPrompt,
   type TargetClaudeConfig,
   type TargetTranslation,

@@ -122,14 +122,23 @@ export class TargetClaudeTranslator {
       for (const item of parsed.items) {
         const source = chunk[item.id];
         const value = item.text.trim();
-        // A translation must not be empty, absurdly long, or still Hebrew.
-        if (source !== undefined && value !== '' && value.length <= 300 && !hasHebrew(value)) {
+        // A translation must not be empty, absurdly long, still Hebrew, or lose a
+        // number of the source (sizes/counts/codes) — a batch line that tries to
+        // steer another line's output usually fails this.
+        if (source !== undefined && value !== '' && value.length <= 300 && !hasHebrew(value) && keepsNumbers(source, value)) {
           out.set(source, value);
         }
       }
     }
     return out;
   }
+}
+
+/** Every digit run of the source appears in the translation. */
+export function keepsNumbers(source: string, translated: string): boolean {
+  const digits = (t: string) => t.match(/\d+(?:[.,]\d+)?/g) ?? [];
+  const out = new Set(digits(translated).map((d) => d.replace(',', '.')));
+  return digits(source).every((d) => out.has(d.replace(',', '.')));
 }
 
 export interface TargetTranslation {
@@ -178,12 +187,19 @@ export class TargetTranslator {
     map.set(key, value);
   }
 
-  /** Translate Hebrew names into `locale`; the Map holds only names we could translate. */
+  /**
+   * Translate Hebrew names into `locale`; the Map holds only names we could
+   * translate. Only GLOSSARY results are memoized process-wide (deterministic,
+   * tenant-neutral). Claude results are NOT: one tenant's batch must never
+   * decide another tenant's rendering (the API persists them per restaurant).
+   * `scope` (the restaurant id) keys the Claude miss/backoff cache.
+   */
   async translateMany(
     texts: readonly (string | null | undefined)[],
     locale: TargetLocale,
-    opts: { allowClaude?: boolean } = {},
+    opts: { allowClaude?: boolean; scope?: string } = {},
   ): Promise<Map<string, TargetTranslation>> {
+    const scope = opts.scope ?? '';
     const out = new Map<string, TargetTranslation>();
     const misses: string[] = [];
     for (const raw of texts) {
@@ -206,20 +222,17 @@ export class TargetTranslator {
       }
     }
     const now = this.now();
-    const ask = misses.filter((m) => (this.skipUntil.get(`${locale}\u0000${m}`) ?? 0) <= now);
+    const skipKey = (m: string) => `${scope}\u0000${locale}\u0000${m}`;
+    const ask = misses.filter((m) => (this.skipUntil.get(skipKey(m)) ?? 0) <= now);
     if (ask.length > 0 && this.claude && opts.allowClaude !== false) {
       try {
         const answered = await this.claude.translateBatch(ask, locale);
-        for (const [he, value] of answered) {
-          const t: TargetTranslation = { text: value, source: 'claude' };
-          this.remember(this.memo, `${locale}\u0000${he}`, t);
-          out.set(he, t);
-        }
+        for (const [he, value] of answered) out.set(he, { text: value, source: 'claude' });
         for (const he of ask) {
-          if (!answered.has(he)) this.remember(this.skipUntil, `${locale}\u0000${he}`, now + CLAUDE_MISS_TTL_MS);
+          if (!answered.has(he)) this.remember(this.skipUntil, skipKey(he), now + CLAUDE_MISS_TTL_MS);
         }
       } catch (err) {
-        for (const he of ask) this.remember(this.skipUntil, `${locale}\u0000${he}`, now + CLAUDE_ERROR_BACKOFF_MS);
+        for (const he of ask) this.remember(this.skipUntil, skipKey(he), now + CLAUDE_ERROR_BACKOFF_MS);
         this.onClaudeError(err);
       }
     }

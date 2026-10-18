@@ -903,7 +903,7 @@ describe('S14 receiverLangs + ask: foreign ids and isolation (A → B)', () => {
   async function flagsOn(t: Tenant) {
     await db
       .update(restaurants)
-      .set({ settings: { features: { receiverLanguages: true, aiAssistant: true } } })
+      .set({ settings: { features: { receiverLanguages: true, aiAssistant: true } } as never })
       .where(eq(restaurants.id, t.restaurantId));
   }
   async function flagsOff(t: Tenant) {

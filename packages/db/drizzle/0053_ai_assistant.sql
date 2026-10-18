@@ -26,4 +26,8 @@ CREATE TABLE IF NOT EXISTS "assistant_usage" (
 ALTER TABLE "assistant_usage" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 DROP POLICY IF EXISTS "assistant_usage_tenant" ON "assistant_usage";--> statement-breakpoint
 CREATE POLICY "assistant_usage_tenant" ON "assistant_usage"
-  USING ("restaurant_id" = nullif(current_setting('app.current_restaurant_id', true), '')::uuid);
+  USING ("restaurant_id" = nullif(current_setting('app.current_restaurant_id', true), '')::uuid);--> statement-breakpoint
+-- updated_at is maintained by the shared trigger function from 0031 (db:doctor checks it).
+DROP TRIGGER IF EXISTS "assistant_usage_set_updated_at" ON "assistant_usage";--> statement-breakpoint
+CREATE TRIGGER "assistant_usage_set_updated_at" BEFORE UPDATE ON "assistant_usage"
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();

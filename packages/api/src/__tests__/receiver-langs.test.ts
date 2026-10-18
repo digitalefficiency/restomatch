@@ -49,8 +49,8 @@ afterAll(() => __setReceiverTranslator(null));
 beforeEach(async () => {
   __resetClaudeBudget();
   __setReceiverTranslator(new TargetTranslator());
-  await db.update(restaurants).set({ settings: { features: { receiverLanguages: true } } }).where(eq(restaurants.id, A.restaurantId));
-  await db.update(restaurants).set({ settings: { features: { receiverLanguages: true } } }).where(eq(restaurants.id, B.restaurantId));
+  await db.update(restaurants).set({ settings: { features: { receiverLanguages: true } } as never }).where(eq(restaurants.id, A.restaurantId));
+  await db.update(restaurants).set({ settings: { features: { receiverLanguages: true } } as never }).where(eq(restaurants.id, B.restaurantId));
   await db.delete(translationCache);
 });
 

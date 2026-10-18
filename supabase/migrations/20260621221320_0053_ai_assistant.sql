@@ -29,8 +29,12 @@ CREATE TABLE IF NOT EXISTS "assistant_usage" (
 ALTER TABLE "assistant_usage" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 DROP POLICY IF EXISTS "assistant_usage_tenant" ON "assistant_usage";--> statement-breakpoint
 CREATE POLICY "assistant_usage_tenant" ON "assistant_usage"
-  USING ("restaurant_id" = nullif(current_setting('app.current_restaurant_id', true), '')::uuid);
+  USING ("restaurant_id" = nullif(current_setting('app.current_restaurant_id', true), '')::uuid);--> statement-breakpoint
+-- updated_at is maintained by the shared trigger function from 0031 (db:doctor checks it).
+DROP TRIGGER IF EXISTS "assistant_usage_set_updated_at" ON "assistant_usage";--> statement-breakpoint
+CREATE TRIGGER "assistant_usage_set_updated_at" BEFORE UPDATE ON "assistant_usage"
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 insert into drizzle.__drizzle_migrations (hash, created_at)
-select '4d978a378cca9146d7f33fff046ca22a4d8a60a09a0eb0e706da60d9ab13ce27', 1782080000000
+select '59860da7ad8a0357c1c96e68d6114cef26f03cb1ada4b446585374922860a6f2', 1782080000000
 where not exists (select 1 from drizzle.__drizzle_migrations where created_at = 1782080000000);

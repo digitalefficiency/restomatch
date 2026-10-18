@@ -25,7 +25,7 @@ function caller(t: Tenant, role: Session['role'] = 'owner') {
 }
 
 async function setFeatures(t: Tenant, features: Record<string, boolean>) {
-  await db.update(restaurants).set({ settings: { features } }).where(eq(restaurants.id, t.restaurantId));
+  await db.update(restaurants).set({ settings: { features } as never }).where(eq(restaurants.id, t.restaurantId));
 }
 
 type Body = Record<string, any>;
@@ -164,7 +164,7 @@ describe('ask: Claude leg (mocked)', () => {
     expect(toolResult.type).toBe('tool_result');
     expect(JSON.parse(toolResult.content).data.leakIls).toBe(100);
     expect(r).toMatchObject({ mode: 'claude', grounded: true });
-    expect(r.citations).toEqual([{ label: 'Leak this month', value: 100, unit: 'ils', href: '/dashboard' }]);
+    expect(r.citations).toEqual([{ screen: 'overview', value: 100, unit: 'ils', href: '/dashboard' }]);
     const [u] = await db.select().from(assistantUsage).where(eq(assistantUsage.restaurantId, A.restaurantId));
     expect(u).toMatchObject({ questions: 1, claudeCalls: 2, inputTokens: 2500, outputTokens: 300 });
     expect(u!.costMicroUsd).toBe(2500 * 4 + 300 * 20);
@@ -192,11 +192,41 @@ describe('ask: Claude leg (mocked)', () => {
     expect((await caller(A).ask.status()).questionsLeftToday).toBe(0);
   });
 
-  it('burst limit per restaurant per minute', async () => {
+  it('burst limit per restaurant per minute (every path, offline too)', async () => {
     const { client, create } = fakeClaude(() => final({ answer: 'ok', citations: [] }));
     __setAskClient(client);
-    for (let i = 0; i < 8; i += 1) await caller(A).ask.ask({ question: 'hello there', locale: 'en' });
+    for (let i = 0; i < 6; i += 1) await caller(A).ask.ask({ question: 'hello there', locale: 'en' });
+    await expect(caller(A).ask.ask({ question: 'hello there', locale: 'en' })).rejects.toMatchObject({
+      code: 'TOO_MANY_REQUESTS',
+    });
     expect(create).toHaveBeenCalledTimes(6);
+    __resetAskBurst();
+    __setAskClient(null);
+    for (let i = 0; i < 6; i += 1) await caller(B).ask.ask({ question: 'how much leaked', locale: 'en' });
+    await expect(caller(B).ask.ask({ question: 'how much leaked', locale: 'en' })).rejects.toMatchObject({
+      code: 'TOO_MANY_REQUESTS',
+    });
+  });
+
+  it('a FAILED Claude leg still counts its tokens against the budget', async () => {
+    const { client } = fakeClaude((_b, call) =>
+      call === 0 ? toolUse('leak_hero') : { content: [{ type: 'text', text: 'not json' }], stop_reason: 'end_turn', usage: { input_tokens: 700, output_tokens: 7000 } },
+    );
+    __setAskClient(client);
+    const r = await caller(A).ask.ask({ question: 'How much leaked this month?', locale: 'en' });
+    expect(r).toMatchObject({ mode: 'offline', reason: 'error' });
+    const [u] = await db.select().from(assistantUsage).where(eq(assistantUsage.restaurantId, A.restaurantId));
+    expect(u).toMatchObject({ questions: 1, claudeCalls: 2, inputTokens: 1700, outputTokens: 7100 });
+    expect(u!.costMicroUsd).toBe(1700 * 4 + 7100 * 20);
+  });
+
+  it('over the COST cap → offline (reservation is atomic in the upsert)', async () => {
+    await db.insert(assistantUsage).values({ restaurantId: A.restaurantId, day: new Date().toISOString().slice(0, 10), questions: 1, costMicroUsd: 3_000_000 });
+    const { client, create } = fakeClaude(() => final({ answer: 'x', citations: [] }));
+    __setAskClient(client);
+    const r = await caller(A).ask.ask({ question: 'How much leaked this month?', locale: 'en' });
+    expect(r.reason).toBe('budget');
+    expect(create).not.toHaveBeenCalled();
   });
 });
 
@@ -248,16 +278,43 @@ describe('ask: prompt injection from invoice text is data, not instructions', ()
     expect(r.answer).not.toMatch(/evil|https?:/);
     expect(r.citations.map((c) => c.href)).toEqual(['/dashboard']);
     expect(r.citations.map((c) => c.value)).toEqual([100]);
+    // Labels are screen keys, never model text.
+    expect(JSON.stringify(r.citations)).not.toContain('evil');
     expect(r.grounded).toBe(false); // "₪7,777" is not in the tool output
   });
 
-  it('groundAnswer: numbers that appear in tool output are grounded (rounded ₪ ok)', () => {
+  const FIG = { ils: [1234.6, 40000], pct: [12.5], count: [3] };
+  const LINKS = [{ screen: 'overview' as const, href: '/dashboard' }];
+
+  it('groundAnswer: numbers that appear in tool output are grounded (rounded ₪ ok, dates/years skipped)', () => {
+    expect(groundAnswer({ answer: 'Leak ₪1,235 in 2026-10 (12.5% of spend), 3 invoices, 40 אלף ₪.', citations: [] }, LINKS, FIG).grounded).toBe(true);
+  });
+
+  it('groundAnswer: Hebrew-word / k-scaled / bare made-up figures are flagged', () => {
+    for (const text of ['הדליפה היא 99,999 שקלים', 'הדליפה היא 70 אלף ₪', 'about 5k NIS', 'leak is 777']) {
+      expect(groundAnswer({ answer: text, citations: [] }, LINKS, FIG).grounded, text).toBe(false);
+    }
+  });
+
+  it('groundAnswer: a cited value must match a figure of the SAME unit; domains and phones stripped', () => {
     const g = groundAnswer(
-      { answer: 'Leak ₪1,235 this month (12.5% of spend).', citations: [] },
-      [{ screen: 'overview', href: '/dashboard' }],
-      [1234.6, 12.5],
+      {
+        answer: 'Refund owed, call 050-123-4567 or visit evil.example/refund',
+        citations: [
+          { label: 'Refund owed — call', value: 3, unit: 'ils', href: '/dashboard' },
+          { label: 'x', value: 3, unit: 'count', href: '/dashboard' },
+        ],
+      },
+      LINKS,
+      FIG,
     );
-    expect(g.grounded).toBe(true);
+    expect(g.citations).toEqual([{ screen: 'overview', value: 3, unit: 'count', href: '/dashboard' }]);
+    expect(g.answer).not.toMatch(/050|evil/);
+  });
+
+  it('classifies "why did the leak increase?" as a leak change, not a price raise', () => {
+    expect(classifyQuestion('Why did the leak increase?')).toBe('leakChange');
+    expect(classifyQuestion('the leak increased, which supplier?')).toBe('leakChange');
   });
 });
 

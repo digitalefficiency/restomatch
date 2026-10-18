@@ -4,8 +4,9 @@
  * one question in assistant_usage (no text stored).
  */
 import type { Database } from '@restomatch/db';
-import { claudeAllowed, recordUsage, takeBurst, usageToday } from './budget';
-import { anthropicAskClient, runClaude, type AskClientLike } from './claude';
+import { TRPCError } from '@trpc/server';
+import { addClaudeSpend, recordUsage, reserveQuestion, takeBurst } from './budget';
+import { anthropicAskClient, AskRunError, runClaude, type AskClientLike } from './claude';
 import { groundAnswer, type Citation } from './grounding';
 import { offlineAnswer, type CannedIntent } from './offline';
 import type { ScreenLink } from './tools';
@@ -47,19 +48,23 @@ export async function runAsk(
 ): Promise<AskResult> {
   const now = opts.now ?? new Date();
   const client = askClient(opts.env ?? process.env);
-  let reason: OfflineReason | null = null;
-
-  if (!client) reason = 'noKey';
-  else if (!takeBurst(restaurantId, now.getTime()) || !claudeAllowed(await usageToday(db, restaurantId, now))) {
-    reason = 'budget';
+  // Burst limit on every path (offline answers run DB aggregates too).
+  if (!takeBurst(restaurantId, now.getTime())) {
+    throw new TRPCError({ code: 'TOO_MANY_REQUESTS', message: 'יותר מדי שאלות בדקה. נסו שוב בעוד רגע.' });
   }
+  let reason: OfflineReason | null = null;
+  // Reserve the question atomically BEFORE any spend (counts it when allowed).
+  let counted = false;
+  if (!client) reason = 'noKey';
+  else if (!(await reserveQuestion(db, restaurantId, now))) reason = 'budget';
+  else counted = true;
 
   if (client && reason === null) {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(now);
     try {
       const r = await runClaude(client, question, locale, { db, restaurantId, now }, today);
-      await recordUsage(db, restaurantId, { claudeCalls: r.calls, inputTokens: r.inputTokens, outputTokens: r.outputTokens }, now);
-      const g = groundAnswer(r.answer, r.links, r.numbers);
+      await addClaudeSpend(db, restaurantId, { claudeCalls: r.calls, inputTokens: r.inputTokens, outputTokens: r.outputTokens }, now);
+      const g = groundAnswer(r.answer, r.links, r.figures);
       const linkSet = new Set(g.citations.map((c) => c.href));
       return {
         mode: 'claude',
@@ -72,6 +77,8 @@ export async function runAsk(
         reason: null,
       };
     } catch (err) {
+      // A failed leg was still billed: count what it spent.
+      if (err instanceof AskRunError) await addClaudeSpend(db, restaurantId, { claudeCalls: err.usage.calls, inputTokens: err.usage.inputTokens, outputTokens: err.usage.outputTokens }, now);
       // Message only — never the request/response (they hold restaurant data).
       console.warn('[ask] Claude leg failed — offline answer:', err instanceof Error ? err.message : 'error');
       reason = 'error';
@@ -79,7 +86,7 @@ export async function runAsk(
   }
 
   const off = await offlineAnswer(db, restaurantId, question, now);
-  await recordUsage(db, restaurantId, { claudeCalls: 0, inputTokens: 0, outputTokens: 0 }, now);
+  if (!counted) await recordUsage(db, restaurantId, { claudeCalls: 0, inputTokens: 0, outputTokens: 0 }, now);
   return {
     mode: 'offline',
     answer: null,
@@ -92,6 +99,7 @@ export async function runAsk(
   };
 }
 
+export { AskRunError } from './claude';
 export { CANNED_INTENTS, classifyQuestion, type CannedIntent } from './offline';
 export { ASK_COST_MICRO_USD_PER_DAY, ASK_QUESTIONS_PER_DAY, usageToday, __resetAskBurst } from './budget';
 export { askSystemPrompt, ASK_MODEL, type AskClientLike } from './claude';

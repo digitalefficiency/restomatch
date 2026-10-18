@@ -32,11 +32,18 @@ export interface ScreenLink {
   screen: 'overview' | 'leaks' | 'report' | 'breakdown' | 'claims' | 'invoice' | 'supplier';
 }
 
+/** The figures in a tool result, by unit (from the field name: …Ils/…Price → ₪, …Pct → %). */
+export interface Figures {
+  ils: number[];
+  pct: number[];
+  count: number[];
+}
+
 export interface ToolOutput {
   data: unknown;
   links: ScreenLink[];
-  /** Every ₪ / % figure in `data` (for the grounding check). */
-  numbers: number[];
+  /** Every number in `data`, by unit (for the grounding check). */
+  figures: Figures;
 }
 
 /** 'YYYY-MM' of `offset` months from now in Israel time. */
@@ -131,10 +138,16 @@ export function claimableData(invoices: LeakBreakdownInvoice[]) {
   return { totalIls: r2(lines.reduce((s, l) => s + l.amountIls, 0)), count: lines.length, lines: lines.slice(0, 15) };
 }
 
-function numbersIn(value: unknown, out: number[] = []): number[] {
-  if (typeof value === 'number' && Number.isFinite(value)) out.push(value);
-  else if (Array.isArray(value)) for (const v of value) numbersIn(v, out);
-  else if (value && typeof value === 'object') for (const v of Object.values(value)) numbersIn(v, out);
+export function figuresOf(value: unknown, key = '', out: Figures = { ils: [], pct: [], count: [] }): Figures {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    if (/(Ils|Price)$/.test(key)) out.ils.push(value);
+    else if (/Pct$/i.test(key)) out.pct.push(value);
+    else out.count.push(value);
+  } else if (typeof value === 'string') {
+    // Digits inside names ("Bleach 4 L", "INV-1042") may be quoted in prose.
+    for (const d of value.match(/\d+(?:\.\d+)?/g) ?? []) out.count.push(Number(d));
+  } else if (Array.isArray(value)) for (const v of value) figuresOf(v, key, out);
+  else if (value && typeof value === 'object') for (const [k, v] of Object.entries(value)) figuresOf(v, k, out);
   return out;
 }
 
@@ -201,7 +214,7 @@ export async function runTool(name: string, rawInput: unknown, ctx: ToolContext)
       const data = heroData(hero);
       return {
         data,
-        numbers: numbersIn(data),
+        figures: figuresOf(data),
         links: [
           { screen: 'overview', href: '/dashboard' },
           { screen: 'breakdown', href: `/dashboard/leaks/breakdown?m=${offset}` },
@@ -217,7 +230,7 @@ export async function runTool(name: string, rawInput: unknown, ctx: ToolContext)
       for (const s of data.bySupplier) {
         if (s.supplierId) links.push({ screen: 'supplier', href: `/dashboard/suppliers/${s.supplierId}` });
       }
-      return { data, numbers: numbersIn(data), links };
+      return { data, figures: figuresOf(data), links };
     }
     case 'leak_breakdown': {
       const input = BreakdownInput.parse(rawInput ?? {});
@@ -246,7 +259,7 @@ export async function runTool(name: string, rawInput: unknown, ctx: ToolContext)
       }));
       return {
         data,
-        numbers: numbersIn(data),
+        figures: figuresOf(data),
         links: [
           { screen: 'breakdown', href: `/dashboard/leaks/breakdown?m=${offset}` },
           ...data.map((d) => ({ screen: 'invoice' as const, href: `/dashboard/invoices/${d.invoiceId}` })),
@@ -262,7 +275,7 @@ export async function runTool(name: string, rawInput: unknown, ctx: ToolContext)
       const data = claimableData([...cur, ...prev]);
       return {
         data,
-        numbers: numbersIn(data),
+        figures: figuresOf(data),
         links: [
           { screen: 'claims', href: '/dashboard/leaks/claims' },
           { screen: 'leaks', href: '/dashboard/leaks' },

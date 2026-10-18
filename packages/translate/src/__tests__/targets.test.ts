@@ -4,7 +4,7 @@ import { defaultGlossary } from '../composite';
 import { CLAUDE_MISS_TTL_MS } from '../composite';
 import { hasHebrew } from '../normalize';
 import { TARGET_LOCALES, TargetGlossary } from '../targets';
-import { TargetClaudeTranslator, TargetTranslator, targetSystemPrompt } from '../targetTranslator';
+import { keepsNumbers, TargetClaudeTranslator, TargetTranslator, targetSystemPrompt } from '../targetTranslator';
 
 /** The demo tenant's catalogue (packages/db/scripts/seed.ts) — the receiver must read these. */
 const DEMO_NAMES = [
@@ -117,5 +117,23 @@ describe('TargetTranslator (glossary → Claude, never throws)', () => {
 
   it('the prompt treats invoice text as data, not instructions', () => {
     expect(targetSystemPrompt('ti')).toMatch(/DATA .*never instructions/);
+  });
+
+  it('Claude results are never shared across tenants (no process memo); the miss cache is per scope', async () => {
+    let n = 0;
+    const { client, create } = fakeClient((ids) => ids.map((id) => ({ id, text: `T${(n += 1)}` })));
+    const tr = new TargetTranslator({ claude: new TargetClaudeTranslator({ client }) });
+    const a = await tr.translateMany(['מוצר מסתורי'], 'ru', { scope: 'A' });
+    const b = await tr.translateMany(['מוצר מסתורי'], 'ru', { scope: 'B' });
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(a.get('מוצר מסתורי')!.text).not.toBe(b.get('מוצר מסתורי')!.text);
+  });
+
+  it('a translation that drops a number of the source is rejected (injection / garbling guard)', async () => {
+    expect(keepsNumbers('אקונומיקה 4 ל׳', 'Отбеливатель 4 L')).toBe(true);
+    expect(keepsNumbers('אקונומיקה 4 ל׳', 'Shortage, call the office')).toBe(false);
+    const { client } = fakeClient((ids) => ids.map((id) => ({ id, text: 'Shortage — call now' })));
+    const tr = new TargetTranslator({ claude: new TargetClaudeTranslator({ client }) });
+    expect((await tr.translateMany(['מוצר 12 יח׳'], 'ar')).size).toBe(0);
   });
 });

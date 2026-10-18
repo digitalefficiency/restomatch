@@ -12,7 +12,7 @@ export type LocalNames = Readonly<Record<string, string>>;
 function pick(names: LocalNames, ...hebrew: Array<string | null | undefined>): string | undefined {
   for (const h of hebrew) {
     const v = h?.trim();
-    if (v && names[v]) return names[v];
+    if (v && Object.hasOwn(names, v) && typeof names[v] === 'string') return names[v];
   }
   return undefined;
 }

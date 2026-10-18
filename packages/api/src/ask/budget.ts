@@ -66,7 +66,46 @@ export function estimateCostMicroUsd(inputTokens: number, outputTokens: number):
   return inputTokens * INPUT_MICRO_USD_PER_TOKEN + outputTokens * OUTPUT_MICRO_USD_PER_TOKEN;
 }
 
-/** Atomically add one question (and its Claude usage, if any) to today's row. */
+/**
+ * Atomically count one question against today's caps BEFORE calling Claude:
+ * the upsert only increments while both caps hold, and the row lock makes
+ * concurrent asks of one restaurant serialize on it (no check-then-act race).
+ * Returns false (nothing counted) when the day is spent.
+ */
+export async function reserveQuestion(db: Database, restaurantId: string, now: Date = new Date()): Promise<boolean> {
+  const rows = await db
+    .insert(assistantUsage)
+    .values({ restaurantId, day: utcDay(now), questions: 1 })
+    .onConflictDoUpdate({
+      target: [assistantUsage.restaurantId, assistantUsage.day],
+      set: { questions: sql`${assistantUsage.questions} + 1`, updatedAt: sql`now()` },
+      setWhere: sql`${assistantUsage.questions} < ${ASK_QUESTIONS_PER_DAY} and ${assistantUsage.costMicroUsd} < ${ASK_COST_MICRO_USD_PER_DAY}`,
+    })
+    .returning({ questions: assistantUsage.questions });
+  return rows.length > 0;
+}
+
+/** Add a reserved question's Claude spend (also on failure — tokens were billed). */
+export async function addClaudeSpend(
+  db: Database,
+  restaurantId: string,
+  add: { claudeCalls: number; inputTokens: number; outputTokens: number },
+  now: Date = new Date(),
+): Promise<void> {
+  const cost = estimateCostMicroUsd(add.inputTokens, add.outputTokens);
+  await db
+    .update(assistantUsage)
+    .set({
+      claudeCalls: sql`${assistantUsage.claudeCalls} + ${add.claudeCalls}`,
+      inputTokens: sql`${assistantUsage.inputTokens} + ${add.inputTokens}`,
+      outputTokens: sql`${assistantUsage.outputTokens} + ${add.outputTokens}`,
+      costMicroUsd: sql`${assistantUsage.costMicroUsd} + ${cost}`,
+      updatedAt: sql`now()`,
+    })
+    .where(and(eq(assistantUsage.restaurantId, restaurantId), eq(assistantUsage.day, utcDay(now))));
+}
+
+/** Count one question (no caps; offline answers and over-budget questions). */
 export async function recordUsage(
   db: Database,
   restaurantId: string,
