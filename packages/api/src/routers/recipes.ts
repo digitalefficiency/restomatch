@@ -31,6 +31,7 @@ import {
   assertRecipesEnabled,
   earliestPricesFrom,
   latestPrices,
+  loadPosSales,
   loadProducts,
   loadRecipes,
   loadRestaurant,
@@ -40,6 +41,7 @@ import {
   type RecipeRow,
 } from '../recipes/data';
 import { parseRecipeCsv, type CsvRecipe } from '../recipes/csv';
+import { posVsTheory } from '../recipes/pos';
 
 /**
  * Food cost per dish (wave 1, flag `recipes`). Owner / manager / chef read and
@@ -513,6 +515,41 @@ export const recipesRouter = router({
       }),
     };
   }),
+
+  /**
+   * Theoretical vs actual food cost per dish from POS sales (needs the
+   * `integrations` flag too). `month`: the restaurant's current or previous
+   * calendar month. Never FORBIDDEN for a missing integrations flag or POS
+   * table — it answers `available: false` with the reason, so the recipes page
+   * shows a neutral empty state.
+   */
+  posVsTheory: recipesProcedure
+    .input(z.object({ month: z.enum(['current', 'previous']).default('current') }).optional())
+    .query(async ({ ctx, input }) => {
+      const rid = ctx.session.restaurantId;
+      const thisMonth = startOfMonthInTz(new Date(), ctx.rc.timezone);
+      const start = input?.month === 'previous' ? startOfMonthInTz(new Date(thisMonth.getTime() - 86_400_000), ctx.rc.timezone) : thisMonth;
+      const end = input?.month === 'previous' ? new Date(thisMonth.getTime() - 1) : new Date();
+      const ymd = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: ctx.rc.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+      const period = { from: ymd(start), to: ymd(end) };
+      const empty = { ...period, rows: [], totals: { netSalesAgorot: 0, theoreticalCostAgorot: 0, foodCostBp: null }, unmatched: [], unmatchedCount: 0 };
+      if (!featureEnabled(ctx.rc.settings, 'integrations')) return { available: false as const, reason: 'integrationsOff' as const, ...empty };
+      const sales = await loadPosSales(ctx.db, rid, period.from, period.to);
+      if (!sales || sales.length === 0) return { available: false as const, reason: 'noPosData' as const, ...empty };
+      const all = await loadAll(ctx.db, rid, ctx.rc.vatBp);
+      const res = posVsTheory(sales, all.rows, all.costs);
+      const byId = new Map(all.rows.map((r) => [r.id, r] as const));
+      return {
+        available: true as const,
+        reason: null,
+        ...period,
+        targetBp: ctx.rc.targetBp,
+        rows: res.rows.map((r) => ({ ...r, name: byId.get(r.recipeId)!.name, nameEn: byId.get(r.recipeId)!.nameEn })),
+        totals: res.totals,
+        unmatched: res.unmatched.slice(0, 10),
+        unmatchedCount: res.unmatched.length,
+      };
+    }),
 
   /** Restaurant-wide food-cost target (%), drives the red/amber/green light. Manager+. */
   setTarget: recipesManagerProcedure
