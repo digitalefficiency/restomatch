@@ -9,7 +9,7 @@ import { originalProps, WithOriginal } from '@/lib/i18n/original';
 import { addBranchAction, renameBranchAction, type BranchActionError } from '../branch-actions';
 import { SwitchBranchButton } from '../chain/switch-button';
 
-type ErrorKey = `errors.${'notFound' | 'forbidden' | 'limit' | 'nameInvalid' | 'generic'}`;
+type ErrorKey = `errors.${BranchActionError}`;
 const errKey = (e: BranchActionError): ErrorKey => `errors.${e}`;
 
 export function RenameBranch({ restaurantId, name }: { restaurantId: string; name: string }) {

@@ -1,6 +1,7 @@
 'use server';
 
 import { TRPCError } from '@trpc/server';
+import { NOT_BILLING_OWNER } from '@restomatch/api';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { auth, unstable_update } from '@/auth';
@@ -13,14 +14,17 @@ import { createServerCaller } from '@/lib/trpc/server';
  * (lib/activeRestaurant.ts) against the DB memberships.
  */
 
-export type BranchActionError = 'notFound' | 'forbidden' | 'limit' | 'nameInvalid' | 'generic';
+export type BranchActionError = 'notFound' | 'forbidden' | 'notPayer' | 'limit' | 'nameInvalid' | 'generic';
 export type BranchActionResult<T = object> = ({ ok: true } & T) | { ok: false; error: BranchActionError };
 
 function errorOf(err: unknown): BranchActionError {
   if (err instanceof TRPCError) {
     if (err.code === 'NOT_FOUND') return 'notFound';
     if (err.code === 'BAD_REQUEST') return 'nameInvalid';
-    if (err.code === 'FORBIDDEN') return err.message.startsWith('ENTITLEMENT_REQUIRED') ? 'limit' : 'forbidden';
+    if (err.code === 'FORBIDDEN') {
+      if (err.message === NOT_BILLING_OWNER) return 'notPayer';
+      return err.message.startsWith('ENTITLEMENT_REQUIRED') ? 'limit' : 'forbidden';
+    }
   }
   return 'generic';
 }

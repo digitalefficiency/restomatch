@@ -19,17 +19,17 @@ import {
   displayName,
   entitlementCauseOf,
 } from '@/lib/components';
-import { MonthSelector } from './month-selector';
+import { ViewToolbar, parseView, rangeLabel } from '@/lib/components/views';
 import { SwitchBranchButton } from './switch-button';
 
 type Overview = Awaited<ReturnType<Awaited<ReturnType<typeof createServerCaller>>['chain']['overview']>>;
 
-const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
-
-function prevMonthOf(month: string): string {
-  const [y, m] = month.split('-').map(Number) as [number, number];
-  const idx = y * 12 + (m - 1) - 1;
-  return `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, '0')}`;
+/** 'YYYY-MM' of an instant in Israel time (heatmap columns are local months). */
+function ymOf(value: string | Date): string {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit' }).formatToParts(
+    new Date(value),
+  );
+  return `${parts.find((p) => p.type === 'year')!.value}-${parts.find((p) => p.type === 'month')!.value}`;
 }
 
 function monthLabel(month: string, locale: Locale, style: 'long' | 'short' = 'long'): string {
@@ -54,7 +54,7 @@ function heatClass(pct: number | null, leak: number): string {
 export default async function ChainPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const [caller, t, locale, sp] = await Promise.all([
     createServerCaller(),
@@ -62,12 +62,16 @@ export default async function ChainPage({
     getLocale(),
     searchParams,
   ]);
-  const requested = sp.month && MONTH_RE.test(sp.month) ? sp.month : undefined;
+  // The shared view controls (period / custom range / compare) — the URL is the source of truth.
+  const view = parseView(sp);
 
   let data: Overview | null = null;
   let blocked: 'entitlement' | 'role' | null = null;
   try {
-    data = await caller.chain.overview(requested ? { month: requested } : undefined);
+    data = await caller.chain.overview({
+      view: { period: view.period, ...(view.period === 'custom' ? { from: view.from, to: view.to } : {}) },
+      compare: view.compare,
+    });
   } catch (err) {
     if (entitlementCauseOf(err)) blocked = 'entitlement';
     else if (err instanceof TRPCError && err.code === 'FORBIDDEN') blocked = 'role';
@@ -103,8 +107,19 @@ export default async function ChainPage({
     data.heatmap.reduce((acc, row) => acc + (row.cells.find((c) => c.month === m)?.leakIls ?? 0), 0),
   );
   const noData = totals.spendIls === 0 && totals.leakIls === 0;
+  const compared = data.compare !== 'off';
   const leakDeltaPct =
-    totals.prevLeakIls > 0 ? Math.round(((totals.leakIls - totals.prevLeakIls) / totals.prevLeakIls) * 100) : undefined;
+    totals.prevLeakIls !== null && totals.prevLeakIls > 0
+      ? Math.round(((totals.leakIls - totals.prevLeakIls) / totals.prevLeakIls) * 100)
+      : undefined;
+  const periodLabel = data.periodStart && data.periodEnd ? rangeLabel(view.period, data.periodStart, data.periodEnd, locale) : '';
+  // Heatmap columns inside the selected period are highlighted.
+  const inPeriod = new Set<string>();
+  if (data.periodStart && data.periodEnd) {
+    const first = ymOf(data.periodStart);
+    const last = ymOf(new Date(new Date(data.periodEnd).getTime() - 1));
+    for (const m of data.months) if (m >= first && m <= last) inPeriod.add(m);
+  }
 
   return (
     <div>
@@ -120,16 +135,40 @@ export default async function ChainPage({
             </Link>
           </>
         }
-        action={
-          <MonthSelector month={data.month} currentMonth={data.currentMonth} previousMonth={prevMonthOf(data.currentMonth)} />
-        }
+      />
+      <ViewToolbar
+        page="chain"
+        view={view}
+        period
+        compare
+        saved
+        exportData={{
+          columns: [
+            { key: 'rank', label: t('dashboard.ranking.rank') },
+            { key: 'branch', label: t('dashboard.ranking.branch') },
+            { key: 'leak', label: t('dashboard.ranking.leak') },
+            { key: 'leakPct', label: t('dashboard.ranking.leakPct') },
+            { key: 'spend', label: t('dashboard.ranking.spend') },
+            { key: 'open', label: t('dashboard.ranking.open') },
+            ...(compared ? [{ key: 'delta', label: t('dashboard.ranking.trend') }] : []),
+          ],
+          rows: data.branches.map((b) => ({
+            rank: b.rank,
+            branch: b.name,
+            leak: b.leakIls,
+            leakPct: b.leakPct === null ? null : Math.round(b.leakPct * 10000) / 100,
+            spend: b.spendIls,
+            open: b.openDiscrepancies,
+            delta: b.leakDeltaIls,
+          })),
+        }}
       />
       {data.truncated ? (
         <p className="mb-4 text-xs text-warn">{t('dashboard.truncated', { count: formatNumber(data.branches.length, locale) })}</p>
       ) : null}
 
       <p className="mb-3 font-mono text-xs uppercase tracking-wider text-subtle" data-testid="chain-month-label">
-        {monthLabel(data.month, locale)}
+        {periodLabel}
       </p>
 
       {/* KPI row — the chain's ₪ story. */}
@@ -149,9 +188,13 @@ export default async function ChainPage({
           value={<span data-testid="chain-leak-pct">{totals.leakPct === null ? '—' : formatPercent(totals.leakPct, locale, 1)}</span>}
           tone={totals.leakPct !== null && totals.leakPct >= 0.015 ? 'warning' : 'neutral'}
           icon={<Network className="h-5 w-5" />}
-          subtitle={t('dashboard.kpis.vsPrev', {
-            value: totals.prevLeakPct === null ? '—' : formatPercent(totals.prevLeakPct, locale, 1),
-          })}
+          subtitle={
+            compared
+              ? t('dashboard.kpis.vsPrev', {
+                  value: totals.prevLeakPct === null ? '—' : formatPercent(totals.prevLeakPct, locale, 1),
+                })
+              : t('dashboard.kpis.leakOf', { spend: ils(totals.spendIls) })
+          }
         />
         <KpiCard
           label={t('dashboard.kpis.caught')}
@@ -235,7 +278,7 @@ export default async function ChainPage({
                 <th scope="col" className="px-4 py-3 text-end font-semibold">{t('dashboard.ranking.leakPct')}</th>
                 <th scope="col" className="px-4 py-3 text-end font-semibold">{t('dashboard.ranking.spend')}</th>
                 <th scope="col" className="px-4 py-3 text-end font-semibold">{t('dashboard.ranking.open')}</th>
-                <th scope="col" className="px-4 py-3 text-end font-semibold">{t('dashboard.ranking.trend')}</th>
+                {compared ? <th scope="col" className="px-4 py-3 text-end font-semibold">{t('dashboard.ranking.trend')}</th> : null}
                 <th scope="col" className="px-4 py-3"><span className="sr-only">{t('dashboard.ranking.action')}</span></th>
               </tr>
             </thead>
@@ -256,15 +299,19 @@ export default async function ChainPage({
                     <td className="px-4 py-3 text-end font-mono tabular-nums text-muted">{pct(b.leakPct)}</td>
                     <td className="px-4 py-3 text-end font-mono tabular-nums text-muted">{ils(b.spendIls)}</td>
                     <td className="px-4 py-3 text-end font-mono tabular-nums text-muted">{formatNumber(b.openDiscrepancies, locale)}</td>
-                    <td className="px-4 py-3 text-end font-mono text-xs tabular-nums">
-                      {b.leakDeltaIls === 0 ? (
-                        <span className="text-subtle">{t('dashboard.ranking.flat')}</span>
-                      ) : (
-                        <span className={b.leakDeltaIls > 0 ? 'text-danger' : 'text-primary'}>
-                          {b.leakDeltaIls > 0 ? '▲' : '▼'} {ils(Math.abs(b.leakDeltaIls))}
-                        </span>
-                      )}
-                    </td>
+                    {compared ? (
+                      <td className="px-4 py-3 text-end font-mono text-xs tabular-nums" data-testid="chain-branch-delta">
+                        {b.leakDeltaIls === null ? (
+                          <span className="text-subtle">—</span>
+                        ) : b.leakDeltaIls === 0 ? (
+                          <span className="text-subtle">{t('dashboard.ranking.flat')}</span>
+                        ) : (
+                          <span className={b.leakDeltaIls > 0 ? 'text-danger' : 'text-primary'}>
+                            {b.leakDeltaIls > 0 ? '▲' : '▼'} {ils(Math.abs(b.leakDeltaIls))}
+                          </span>
+                        )}
+                      </td>
+                    ) : null}
                     <td className="px-4 py-3 text-end">
                       {isActive ? null : (
                         <SwitchBranchButton restaurantId={b.restaurantId} label={t('dashboard.ranking.switchTo')} variant="ghost" testId="chain-switch" />
@@ -289,7 +336,7 @@ export default async function ChainPage({
                   <span className="sr-only">{t('dashboard.ranking.branch')}</span>
                 </th>
                 {data.months.map((m) => (
-                  <th key={m} scope="col" className={cn('px-2 py-1 text-center font-mono font-semibold', m === data.month ? 'text-primary' : 'text-subtle')}>
+                  <th key={m} scope="col" className={cn('px-2 py-1 text-center font-mono font-semibold', inPeriod.has(m) ? 'text-primary' : 'text-subtle')}>
                     {monthLabel(m, locale, 'short')}
                   </th>
                 ))}
@@ -315,7 +362,7 @@ export default async function ChainPage({
                         className={cn(
                           'rounded-lg px-2 py-2.5 text-center font-mono tabular-nums',
                           heatClass(c.leakPct, c.leakIls),
-                          c.month === data.month && 'ring-1 ring-primary/40',
+                          inPeriod.has(c.month) && 'ring-1 ring-primary/40',
                         )}
                       >
                         {c.spendIls === 0 && c.leakIls === 0 ? t('dashboard.heatmap.empty') : pct(c.leakPct)}

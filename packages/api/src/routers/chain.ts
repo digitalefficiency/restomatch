@@ -6,6 +6,8 @@ import {
   computeBranchPriceLines,
   computeBranchSnapshot,
   computePriceDisparities,
+  VIEW_COMPARES,
+  VIEW_PERIODS,
   type ChainOverview,
   type PriceDisparityRow,
 } from '@restomatch/charts';
@@ -54,7 +56,32 @@ export const MAX_CHAIN_BRANCHES = 25;
 /** Branch transactions in flight at once (the web pool has max 10 connections). */
 const BRANCH_CONCURRENCY = 3;
 
-const MONTH = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+/** A real calendar day in 2000–2100 (Postgres throws on 2026-02-30). */
+const realDate = (v: string) => {
+  const y = Number(v.slice(0, 4));
+  const d = new Date(`${v}T00:00:00Z`);
+  return y >= 2000 && y <= 2100 && !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
+};
+/**
+ * The shared dashboard view (apps/web/lib/components/views): period + custom
+ * range + compare. Chain numbers are whole-branch, so view filters are not
+ * accepted here (a supplier id is per-branch anyway).
+ */
+const ChainViewInput = z
+  .object({
+    period: z.enum(VIEW_PERIODS).default('this_month'),
+    from: z.string().regex(ISO_DATE).refine(realDate, 'not a calendar date').optional(),
+    to: z.string().regex(ISO_DATE).refine(realDate, 'not a calendar date').optional(),
+  })
+  .strict()
+  .refine((v) => v.period !== 'custom' || (!!v.from && !!v.to), { message: 'custom period needs from and to' })
+  .refine((v) => !v.from || !v.to || Math.abs(Date.parse(v.to) - Date.parse(v.from)) <= 3 * 366 * 86_400_000, {
+    message: 'custom range is limited to 3 years',
+  });
+
+/** Stable message of the "only the billing account's payer may add branches" refusal. */
+export const NOT_BILLING_OWNER = 'NOT_BILLING_OWNER';
 const BRANCH_NAME = z.string().trim().min(2).max(120);
 
 export interface MembershipRow {
@@ -139,14 +166,6 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
   return out;
 }
 
-/** Current 'YYYY-MM' in a timezone. */
-export function currentMonth(timezone = 'Asia/Jerusalem', now: Date = new Date()): string {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit' })
-    .formatToParts(now);
-  const y = parts.find((p) => p.type === 'year')?.value ?? String(now.getUTCFullYear());
-  const m = parts.find((p) => p.type === 'month')?.value ?? '01';
-  return `${y}-${m}`;
-}
 
 function chainRequired(planKey: string | null): TRPCError {
   return new TRPCError({
@@ -226,7 +245,8 @@ export interface ChainOverviewResult extends ChainOverview {
   activeRestaurantId: string;
   /** True when the chain had more than MAX_CHAIN_BRANCHES owner branches. */
   truncated: boolean;
-  currentMonth: string;
+  /** The comparison actually applied (the shared view control). */
+  compare: (typeof VIEW_COMPARES)[number];
   /** Same supplier + product at different prices across branches; null when the feature is off. */
   priceDisparities: PriceDisparityRow[] | null;
 }
@@ -254,14 +274,21 @@ export const chainRouter = router({
 
   /** The chain dashboard: per-branch numbers computed under each branch's RLS. */
   overview: authedProcedure
-    .input(z.object({ month: MONTH.optional() }).optional())
+    .input(
+      z
+        .object({
+          view: ChainViewInput.optional(),
+          compare: z.enum(VIEW_COMPARES).default('off'),
+        })
+        .optional(),
+    )
     .query(async ({ ctx, input }): Promise<ChainOverviewResult> => {
       const scope = await resolveScope(ctx);
       const gate = await gateFor(ctx, scope);
       if (!gate.chainEnabled) throw chainRequired(gate.entitlements.planKey);
 
-      const nowMonth = currentMonth();
-      const month = input?.month && input.month <= nowMonth ? input.month : nowMonth;
+      const spec = input?.view ?? { period: 'this_month' as const };
+      const compare = input?.compare ?? 'off';
       // The active branch always makes the cut; the rest alphabetically.
       const branches = [
         scope.active,
@@ -269,22 +296,23 @@ export const chainRouter = router({
       ].slice(0, MAX_CHAIN_BRANCHES);
       const perBranch = await mapLimit(branches, BRANCH_CONCURRENCY, (b) =>
         inBranch(ctx.db, ctx.session.userId, b.restaurantId, async (tx) => {
-          const snapshot = await computeBranchSnapshot(tx, b.restaurantId, b.name, { month, trendMonths: 6 });
+          const snapshot = await computeBranchSnapshot(tx, b.restaurantId, b.name, { spec, compare, trendMonths: 6 });
+          // The disparity panel follows the selected period (the branch's own bounds).
           const prices = gate.priceDisparity
-            ? await computeBranchPriceLines(tx, b.restaurantId, b.name, snapshot)
+            ? await computeBranchPriceLines(tx, b.restaurantId, b.name, {
+                monthStart: snapshot.periodStart,
+                monthEnd: snapshot.periodEnd,
+              })
             : null;
           return { snapshot, prices };
         }),
       );
       const priceLines = perBranch.flatMap((p) => (p.prices ? [p.prices] : []));
       return {
-        ...aggregateChain(
-          perBranch.map((p) => p.snapshot),
-          { month },
-        ),
+        ...aggregateChain(perBranch.map((p) => p.snapshot)),
         activeRestaurantId: scope.active.restaurantId,
         truncated: scope.branches.length > MAX_CHAIN_BRANCHES,
-        currentMonth: nowMonth,
+        compare,
         priceDisparities: gate.priceDisparity ? computePriceDisparities(priceLines, { limit: 10 }) : null,
       };
     }),
@@ -345,6 +373,11 @@ export const chainRouter = router({
     .mutation(async ({ ctx, input }) => {
       const scope = await resolveScope(ctx);
       const gate = await gateFor(ctx, scope);
+      // A co-owner on someone else's account is refused as such (a clear "only the
+      // account payer" message), BEFORE the plan gate that would show an upsell.
+      if (gate.entitlements.billingAccountId !== null && !gate.isBillingOwner) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: NOT_BILLING_OWNER });
+      }
       if (!gate.canAddBranch) throw chainRequired(gate.entitlements.planKey);
       const billingAccountId = scope.active.billingAccountId;
       if (!billingAccountId) throw chainRequired(gate.entitlements.planKey);
@@ -358,7 +391,9 @@ export const chainRouter = router({
           .limit(1),
       );
       if (!account || account.ownerUserId !== ctx.session.userId) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'only the billing account owner can add branches' });
+        // Stable message (not an ENTITLEMENT_REQUIRED cause): the web shows "only the
+        // account payer can add branches", not a plan upsell.
+        throw new TRPCError({ code: 'FORBIDDEN', message: NOT_BILLING_OWNER });
       }
 
       const sourceId = scope.active.restaurantId;

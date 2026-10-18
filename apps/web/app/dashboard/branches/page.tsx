@@ -92,6 +92,11 @@ export default async function BranchesPage({
       <div className="mt-8">
         {data.canAddBranch ? (
           <AddBranchForm currentBranch={active.name} />
+        ) : data.hasBillingAccount && !data.isBillingOwner ? (
+          // A co-owner on someone else's account: say who can add a branch — never a plan upsell.
+          <Card padding="md" className="border-info/30 bg-info/5 text-sm text-ink" data-testid="branches-not-payer">
+            {t('branches.notPayer')}
+          </Card>
         ) : !data.hasBillingAccount || data.planKey !== 'chain' ? (
           <>
             <EntitlementUpsell feature="chain" title={t('branches.upsell')} />
@@ -101,7 +106,7 @@ export default async function BranchesPage({
           </>
         ) : (
           <Card padding="md" className="border-warn/30 bg-warn/5 text-sm text-ink">
-            {data.isBillingOwner ? t('branches.limitReached') : t('branches.notPayer')}
+            {t('branches.limitReached')}
           </Card>
         )}
       </div>
