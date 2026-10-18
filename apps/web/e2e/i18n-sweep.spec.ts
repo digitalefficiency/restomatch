@@ -21,8 +21,9 @@ import { en as commonEn } from '../lib/i18n/messages/common/en';
  * Needs the SEEDED demo tenant (./scripts/dev-setup.sh), so it is opt-in:
  *   I18N_SWEEP_BASE_URL=http://localhost:3000 \
  *     pnpm exec playwright test e2e/i18n-sweep.spec.ts
- * Paths owned by the receiving rewrite (S2) are reported but only fail the run
- * with I18N_SWEEP_STRICT=1. A JSON report lands in test-results/i18n-sweep.json.
+ * Paths listed in I18N_SWEEP_DEFER are reported but only fail the run with
+ * I18N_SWEEP_STRICT=1. A JSON report lands in test-results/i18n-sweep.json
+ * (run with --output=<dir> to keep Playwright artifacts out of the tree).
  */
 const BASE = process.env.I18N_SWEEP_BASE_URL;
 const PASSWORD = process.env.I18N_SWEEP_PASSWORD ?? 'RestoMatch-Demo-2026!';
@@ -35,8 +36,14 @@ const VIEWPORTS = [
   { name: 'mobile', width: 390, height: 844 },
 ] as const;
 
-/** Areas being rewritten in another session — listed, not failed (unless STRICT). */
-const DEFERRED = [/^\/dashboard\/receiving/, /^\/dashboard\/invoices/, /^\/scans/, /^\/showcase\/receiver/];
+/**
+ * Areas temporarily owned by an in-flight rewrite — listed, not failed (unless
+ * STRICT). Comma-separated path regexes, e.g. I18N_SWEEP_DEFER='^/dashboard/receiving'.
+ */
+const DEFERRED = (process.env.I18N_SWEEP_DEFER ?? '')
+  .split(',')
+  .filter(Boolean)
+  .map((r) => new RegExp(r));
 /** Never crawl: side effects, downloads, auth plumbing. */
 const SKIP = [/^\/api\//, /logout|signout|sign-out/i, /\/download/, /\.(csv|txt|pdf|xlsx|zip)$/i];
 /** Console noise that is not an app defect (CSP Report-Only notice, dev HMR). */
