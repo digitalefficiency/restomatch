@@ -158,4 +158,12 @@ describe('webEnvWarnings (F5/F6)', () => {
     const w = webEnvWarnings({ APP_URL: 'https://demo.example.com', AUTH_URL: 'https://app.example.com' } as never);
     expect(w).toEqual([expect.stringContaining('open the app only on that host')]);
   });
+
+  it('warns in production when neither AUTH_URL nor APP_URL is set (broken email links)', () => {
+    expect(webEnvWarnings({ NODE_ENV: 'production' } as never)).toEqual([
+      expect.stringContaining('neither AUTH_URL nor APP_URL'),
+    ]);
+    expect(webEnvWarnings({ NODE_ENV: 'production', APP_URL: 'https://app.example.com' } as never)).toEqual([]);
+    expect(webEnvWarnings({ NODE_ENV: 'development' } as never)).toEqual([]);
+  });
 });

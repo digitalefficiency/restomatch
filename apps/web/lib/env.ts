@@ -165,6 +165,13 @@ export function webEnvWarnings(env: NodeJS.ProcessEnv = process.env): string[] {
         'Sign-in callbacks use AUTH_URL — open the app only on that host or login will loop.',
     );
   }
+  // Not a hard failure (an existing deploy may rely on the request host), but
+  // without either URL invite/alert emails carry relative, unclickable links.
+  if (env.NODE_ENV === 'production' && !env.AUTH_URL && !env.NEXTAUTH_URL && !env.APP_URL) {
+    warnings.push(
+      '[env] WARNING: neither AUTH_URL nor APP_URL is set — links in invite and alert emails will be broken. Set AUTH_URL (and APP_URL) to the production origin.',
+    );
+  }
   return warnings;
 }
 
