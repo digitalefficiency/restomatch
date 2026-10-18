@@ -352,6 +352,21 @@ describe('ask: prompt injection from invoice text is data, not instructions', ()
       const g = groundAnswer({ answer: evil, citations: [] }, LINKS, FIG);
       expect(g.grounded, evil).toBe(false);
     }
+    // Refuter round 2: obfuscated / look-alike / IDN / numeric link forms.
+    for (const evil of [
+      'evil。com', 'evil．com', 'evil . com', 'evil\n.com', 'example.ישראל', 'пример.рф', 'evil.cоm',
+      'ｅｖｉｌ．ｃｏｍ', 'evil\u200B.com', 'evil.\u00ADcom', 'evil Dot com', 'telegram: @evilbot', 'hxxp://evil',
+      '[::1]', 'fe80::1', '0x7f000001', '972501234567', '1-800-123-456', '*1234', '+1 415 555 1234',
+    ]) {
+      expect(sanitizeAnswer(`see ${evil} now`).stripped, evil).toBe(true);
+    }
+    // …and ordinary prose (incl. a double space, "<5%", a missing space after a period) is NOT flagged.
+    for (const ok of [
+      '1.5% of spend.Next month', 'avg.price', 'report.xlsx', 'Mr. Cohen', 'U.S. dollars', '10:30:45',
+      'spend. It was high', 'הדליפה  ₪1,234.56', 'פחות מ- <5% חריגה', 'פערים.מומלץ', 'The leak rose.It came from X.',
+    ]) {
+      expect(sanitizeAnswer(ok).stripped, ok).toBe(false);
+    }
     // Plain prose with prices and sizes is untouched and stays grounded.
     const ok = 'Leak ₪1,235 this month (12.5% of spend), e.g. Cola Zero 330ml and Milk 3%.';
     expect(sanitizeAnswer(ok)).toEqual({ text: ok, stripped: false });

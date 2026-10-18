@@ -58,36 +58,101 @@ export function figuresIn(text: string): number[] {
   return out;
 }
 
-/** Defanged dots: "evil[.]com", "evil(.)com", "evil{.}com", "evil [dot] com", "evil dot com". */
-const DEFANG = /\s*(?:\[\s*(?:\.|dot)\s*\]|\(\s*(?:\.|dot)\s*\)|\{\s*(?:\.|dot)\s*\}|\s(?:dot|DOT)\s)\s*/g;
-const LINKISH: RegExp[] = [
-  /\[([^\]]*)\]\([^)]*\)/g, // markdown link → keep its text (handled first, separately)
-  /\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, // any scheme://…
-  /\b(?:javascript|data|vbscript|mailto|tel|sms|whatsapp):\S+/gi,
+/**
+ * Link detection works on a NORMALIZED copy of the prose: NFKC (full-width
+ * letters/dots/brackets → ASCII), invisible characters removed (zero-width,
+ * soft hyphen, bidi marks), look-alike dots mapped to ".", and defanged dots
+ * ("[.]", "(.)", "{dot}", " dot ", case-insensitive) restored. The cleaned text
+ * the user sees is derived from that normalized copy.
+ */
+const INVISIBLE = /[­͏؜ᅟᅠ឴឵᠎​-‏‪-‮⁠-⁯ㅤ﻿ﾠ]/g;
+const LOOKALIKE_DOTS = /[。｡․﹒۔։·‧∙⋅・]/g;
+const DEFANG = /\s*(?:\[\s*(?:\.|dot)\s*\]|\(\s*(?:\.|dot)\s*\)|\{\s*(?:\.|dot)\s*\}|<\s*(?:\.|dot)\s*>|\s+dot\s+)\s*/gi;
+
+/**
+ * Real TLDs a link in an answer could use (lower-case ASCII). An unknown ASCII
+ * "tld" ("spend.Next", "avg.price", "report.xlsx") is ordinary text, not a link.
+ */
+const TLDS = new Set(
+  (
+    'com net org info biz io co il me ru ai app dev shop ly to tv cc xyz online site link store tech top club pro ' +
+    'live click page us uk de fr eu cn in br jp au ca es it nl pl ua by kz su tk ml ga cf gq ws fm gg im vip win ' +
+    'bid men loan work today life world news email cloud host website space fun icu cyou buzz monster rest bar ' +
+    'mobi name asia tel travel gov edu mil int ch at be se no dk fi pt gr tr ro hu cz sk bg hr si rs lt lv ee ie ' +
+    'is lu mt cy ae sa eg ma tn jo lb ps iq ir pk bd lk th vn ph my sg id kr tw hk mx ar cl pe ve za ng ke nz ' +
+    'one blog wiki help support service services money pay bank finance cash gift sale shopping deals best ' +
+    'help app games tips network systems solutions digital media agency global center company group zone ' +
+    'ink lol wtf rip gay sex porn adult casino bet poker loans cards credit ' +
+    'example test invalid localhost local onion internal lan home corp'
+  ).split(' '),
+);
+
+/** A label.tld host: TLD from the list, punycode, or 2+ non-ASCII letters (e.g. ".ישראל", ".рф"). */
+const HOST = /(?<![\p{L}\p{N}@-])(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?\.)+(xn--[a-z0-9-]{1,59}|\p{L}{2,24})(?![\p{L}\p{N}-])(?::\d{1,5})?(?:\/\S*)?/giu;
+/** "evil . com", "evil .com": a spaced dot before a KNOWN tld (a normal ". Next" sentence is not touched). */
+const SPACED_HOST = /(?<![\p{L}\p{N}])[\p{L}\p{N}][\p{L}\p{N}-]{0,62}\s+\.\s*([a-z]{2,24})\b|(?<![\p{L}\p{N}])[\p{L}\p{N}][\p{L}\p{N}-]{0,62}\.\s+([a-z]{2,24})\b(?!\s+[a-z])/giu;
+
+const LINK_PATTERNS: RegExp[] = [
+  /\b[a-z][a-z0-9+.-]{1,15}:\/\/\S+/gi, // any scheme://… (hxxp:// too)
+  /\b(?:javascript|data|vbscript|mailto|tel|sms|whatsapp|ftp|file|intent|telegram|tg|viber|skype):\S*/gi,
   /\bwww\.\S+/gi,
-  /[^\s@]+@[^\s@]+/g, // user@host / emails
-  /\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?(?:\/\S*)?/g, // bare IPv4 (+port/path)
-  // any label.tld (2+ letter TLD, punycode included), with optional :port / path
-  /\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})\b(?::\d+)?(?:\/\S*)?/gi,
-  /(?:\+972|\b0)[\s-]?\d{1,2}[\s-]?\d{3}[\s-]?\d{4}\b/g, // Israeli phone numbers
+  /[^\s@]+@[^\s@]+\.[^\s@]+/g, // user@host / emails
+  /(?:^|(?<=\s))@[\w.]{3,}/g, // @handles (Telegram/Instagram)
+  /\[?[0-9a-f]{0,4}(?::[0-9a-f]{0,4})*::[0-9a-f:]*(?:%\w+)?\]?(?::\d+)?/gi, // IPv6 with "::"
+  /\b(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}\b/gi, // full IPv6 (a "10:30:45" time is not touched)
+  /\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?(?:\/\S*)?/g, // IPv4 (+port/path)
+  /\b0x[0-9a-f]{6,8}\b/gi, // hex IPv4
+  /(?:\+|\b00)\d[\d\s-]{7,16}\d\b/g, // international phone numbers
+  /\b972\d{8,9}\b/g,
+  /(?:\b0\d{1,2}|\b1-?[78]00|\b1700)[\s-]?\d{3}[\s-]?\d{3,4}\b/g, // Israeli numbers / toll-free
+  /(?:^|(?<=\s))\*\d{3,5}\b/g, // *1234 short numbers
 ];
 
-/** Strip every link-like token from model prose; `stripped` says whether anything was removed. */
+/** Hebrew IDN TLDs (any other Hebrew word after a dot is just a sentence without a space). */
+const HEBREW_TLDS = new Set(['ישראל', 'קום']);
+
+function isHostMatch(tld: string): boolean {
+  const t = tld.toLowerCase();
+  if (t.startsWith('xn--') || TLDS.has(t)) return true;
+  if (/^[\u0590-\u05FF]+$/.test(t)) return HEBREW_TLDS.has(t);
+  // Any other non-ASCII TLD: an IDN (".рф") or a homoglyph spoof (".cоm" with a Cyrillic о).
+  return /[^\x00-\x7F]/.test(t);
+}
+
+/** Strip every link-like token from model prose; `stripped` says whether a LINK was removed. */
 export function sanitizeAnswer(text: string): { text: string; stripped: boolean } {
-  let out = text.replace(LINKISH[0]!, '$1');
-  let stripped = out !== text;
-  const undefanged = out.replace(DEFANG, '.');
-  if (undefanged !== out) {
+  let stripped = false;
+  // Markdown links keep their visible text but count as a link.
+  let out = text.replace(/\[([^\]]*)\]\(([^)]*)\)/g, (_m, label: string) => {
     stripped = true;
-    out = undefanged;
+    return label;
+  });
+  out = out
+    .normalize('NFKC')
+    .replace(INVISIBLE, '')
+    .replace(LOOKALIKE_DOTS, '.')
+    .replace(DEFANG, '.');
+  for (const re of LINK_PATTERNS) {
+    out = out.replace(re, () => {
+      stripped = true;
+      return '';
+    });
   }
-  for (const re of LINKISH.slice(1)) {
-    const next = out.replace(re, '');
-    if (next !== out) stripped = true;
-    out = next;
-  }
-  const cleaned = out.replace(/[<>]/g, '').replace(/[ \t]{2,}/g, ' ').trim();
-  return { text: cleaned, stripped: stripped || cleaned.length !== out.trim().length };
+  out = out.replace(SPACED_HOST, (m, a?: string, b?: string) => {
+    if (!isHostMatch(a ?? b ?? '')) return m;
+    stripped = true;
+    return '';
+  });
+  out = out.replace(HOST, (m, tld: string) => {
+    if (!isHostMatch(tld)) return m;
+    // "rose.It came…" (sentence without a space): a Title-case 2-label ASCII
+    // token reads as prose; real hosts in text are lower- or upper-case.
+    if (/^[A-Z][a-z]+$/.test(tld) && m.split('.').length === 2 && !/[:/]/.test(m)) return m;
+    stripped = true;
+    return '';
+  });
+  // Tidy the gaps left by removals (does not by itself flag the answer).
+  return { text: out.replace(/[ \t]{2,}/g, ' ').replace(/ +([.,;:!?])/g, '$1').trim(), stripped };
 }
 
 export function groundAnswer(raw: ClaudeAnswer, links: readonly ScreenLink[], figures: Figures): GroundedAnswer {
