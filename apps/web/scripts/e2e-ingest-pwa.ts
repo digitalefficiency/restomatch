@@ -75,6 +75,11 @@ async function login(context: BrowserContext, role: Role, locale: Locale): Promi
   return page;
 }
 
+async function dismissCookies(page: Page) {
+  const btn = page.getByRole('button', { name: /^(רק חיוניות|Essential only)$/ });
+  if (await btn.count()) await btn.first().click().catch(() => null);
+}
+
 async function expectPage(page: Page, path: string, locale: Locale) {
   const res = await page.goto(`${BASE}${path}`, { waitUntil: 'networkidle', timeout: 180_000 });
   check(res && res.status() < 400, `${path} [${locale}] HTTP ${res?.status()}`);
@@ -135,7 +140,10 @@ async function prodRolesAndLocales(browser: Browser) {
         const manage = await page.getByRole('button', { name: locale === 'he' ? 'דחייה' : 'Reject' }).count();
         check(role === 'bookkeeper' ? manage === 0 : manage > 0, `${role}: review buttons ${role === 'bookkeeper' ? 'hidden (read-only)' : 'shown'}`);
         if (role === 'owner') {
-          await page.screenshot({ path: join(SHOTS, `ingest-inbox-${locale}.png`), fullPage: true });
+          await dismissCookies(page);
+          await page.screenshot({ path: join(SHOTS, `ingest-inbox-${locale}.png`) });
+          await page.locator('[data-testid="ingest-channels"]').scrollIntoViewIfNeeded();
+          await page.screenshot({ path: join(SHOTS, `ingest-settings-${locale}.png`) });
           await page.goto(`${BASE}/dashboard/inbox?filter=errors`, { waitUntil: 'networkidle' });
           const err = locale === 'he' ? 'סוג קובץ לא נתמך' : 'Unsupported file type';
           check(await page.getByText(err).first().isVisible(), `owner: error filter shows "${err}"`);
@@ -190,8 +198,14 @@ async function prodFlagOff(browser: Browser, rid: string) {
     const page = await login(context, 'owner', 'he');
     await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
     check((await page.locator('a[href="/dashboard/inbox"]').count()) === 0, 'flag off: inbox nav hidden');
-    const res = await page.goto(`${BASE}/dashboard/inbox`);
-    check(res?.status() === 404, `flag off: /dashboard/inbox → ${res?.status()}`);
+    // notFound() after the dashboard layout started streaming keeps HTTP 200
+    // (Next.js) but renders the 404 UI with noindex — assert what the user sees.
+    const res = await page.goto(`${BASE}/dashboard/inbox`, { waitUntil: 'networkidle' });
+    const notFoundUi =
+      (await page.getByTestId('ingest-messages').count()) === 0 &&
+      (await page.getByTestId('ingest-channels').count()) === 0 &&
+      (await page.getByText('404', { exact: true }).count()) > 0;
+    check(notFoundUi && (res?.status() ?? 500) < 500, `flag off: /dashboard/inbox renders the 404 page (HTTP ${res?.status()}), no inbox data`);
     await page.goto(`${BASE}/dashboard/receiving`, { waitUntil: 'networkidle' });
     check((await page.locator('link[rel="manifest"]').count()) === 0, 'flag off: no PWA manifest on receiving');
     await context.close();
@@ -239,6 +253,8 @@ async function mobileReceiver(browser: Browser, rid: string, locale: Locale, exp
   await page.getByText(saved).first().waitFor({ timeout: 10_000 });
   check(true, `wizard tells the receiver the photo is saved offline ("${saved}")`);
   await page.getByTestId('pwa-queue-count').waitFor({ timeout: 10_000 }).catch(() => null);
+  await dismissCookies(page);
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: join(SHOTS, `pwa-offline-${locale}.png`), fullPage: false });
 
   // Offline navigation inside the scope → the SW's static offline page (never cached HTML).
