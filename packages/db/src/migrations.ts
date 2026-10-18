@@ -91,3 +91,23 @@ export async function runMigrator(url: string, opts: RunMigratorOptions = {}): P
     await sql.end();
   }
 }
+
+/**
+ * Journal entries the migrator will NEVER apply: older (`when`) than the newest
+ * recorded row but not recorded themselves. Happens when a database applied a
+ * later-numbered migration first (e.g. another branch's 0039 before 0029–0032).
+ * Empty on a fresh database (no tracker yet).
+ */
+export async function findJournalGaps(url: string, dir: string = migrationsDir()): Promise<JournalEntry[]> {
+  const sql = postgres(url, { max: 1, prepare: false, onnotice: () => undefined });
+  try {
+    const [t] = await sql`select to_regclass('drizzle.__drizzle_migrations') is not null as e`;
+    if (!t?.e) return [];
+    const rows = await sql`select created_at from drizzle.__drizzle_migrations`;
+    const applied = new Set(rows.map((r) => Number(r.created_at)));
+    const newest = Math.max(0, ...applied);
+    return readJournal(dir).entries.filter((e) => e.when <= newest && !applied.has(e.when));
+  } finally {
+    await sql.end();
+  }
+}

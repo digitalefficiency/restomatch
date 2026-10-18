@@ -318,3 +318,82 @@ describe('exports: the "to" day is inclusive regardless of server timezone', () 
     expect(none.rowCount).toBe(0);
   });
 });
+
+describe('bulk English names + import history (follow-up)', () => {
+  beforeEach(async () => {
+    await resetDb(db);
+    A = await seedTenant(db, 'A');
+  });
+  afterAll(async () => {
+    await resetDb(db);
+  });
+
+  async function addProduct(name: string, nameEn: string | null = null) {
+    const [p] = await db
+      .insert(products)
+      .values({ restaurantId: A.restaurantId, canonicalName: name, nameEn })
+      .returning({ id: products.id });
+    return p!.id;
+  }
+
+  it('products.list filters missing English names and searches both languages', async () => {
+    await addProduct('מלפפון', 'Cucumber');
+    await addProduct('בצל', '  ');
+    const all = await callerFor(A).products.list();
+    expect(all.total).toBe(3);
+    const missing = await callerFor(A).products.list({ missingOnly: true });
+    expect(missing.rows.map((r) => r.canonicalName).sort()).toEqual(['בצל', 'עגבניה A'].sort());
+    expect(missing.total).toBe(2);
+    const en = await callerFor(A).products.list({ search: 'cucu' });
+    expect(en.rows.map((r) => r.canonicalName)).toEqual(['מלפפון']);
+  });
+
+  it('products.setNamesEn saves a batch, trims, and clears blanks', async () => {
+    const cucumber = await addProduct('מלפפון', 'Old');
+    const res = await callerFor(A).products.setNamesEn({
+      items: [
+        { productId: A.productId, nameEn: '  Tomato ' },
+        { productId: cucumber, nameEn: '' },
+      ],
+    });
+    expect(res.updated).toBe(2);
+    const rows = await db
+      .select({ id: products.id, nameEn: products.nameEn })
+      .from(products)
+      .where(eq(products.restaurantId, A.restaurantId));
+    const byId = new Map(rows.map((r) => [r.id, r.nameEn]));
+    expect(byId.get(A.productId)).toBe('Tomato');
+    expect(byId.get(cucumber)).toBeNull();
+  });
+
+  it('products.setNamesEn is manager-only and rejects duplicate ids', async () => {
+    await expect(
+      callerFor(A, 'receiver').products.setNamesEn({ items: [{ productId: A.productId, nameEn: 'x' }] }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(
+      callerFor(A).products.setNamesEn({
+        items: [
+          { productId: A.productId, nameEn: 'x' },
+          { productId: A.productId, nameEn: 'y' },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('catalog.imports lists a supplier’s imports newest first, incl. failures', async () => {
+    const caller = callerFor(A);
+    await caller.catalog.commitImport({
+      supplierId: A.supplierId,
+      file: { filename: 'first.csv', text: 'תיאור,מחיר\nעגבניה,5\n' },
+      mapping: { name: 'תיאור', price: 'מחיר' },
+    });
+    await caller.catalog.commitImport({
+      supplierId: A.supplierId,
+      file: { filename: 'second.csv', text: 'תיאור,מחיר\nמלפפון,4\nבצל,3\n' },
+      mapping: { name: 'תיאור', price: 'מחיר' },
+    });
+    const list = await caller.catalog.imports({ supplierId: A.supplierId });
+    expect(list.map((i) => i.filename)).toEqual(['second.csv', 'first.csv']);
+    expect(list[0]).toMatchObject({ status: 'committed', rowCount: 2, createdItems: 2 });
+  });
+});

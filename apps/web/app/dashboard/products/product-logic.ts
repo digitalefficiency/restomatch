@@ -34,3 +34,22 @@ export function productPatch(initial: ProductFormState, form: ProductFormState):
   if (form.supplierId !== initial.supplierId) patch.supplierId = form.supplierId || null;
   return Object.keys(patch).length > 0 ? patch : null;
 }
+
+/**
+ * Bulk English-names grid: turn the edited cells into a `products.setNamesEn`
+ * batch — only cells whose trimmed value differs from what's stored, blanks
+ * meaning "clear". Untouched or reverted cells are left out.
+ */
+export function namesBatch(
+  rows: Array<{ id: string; nameEn: string | null }>,
+  edits: Record<string, string>,
+): Array<{ productId: string; nameEn: string | null }> {
+  const out: Array<{ productId: string; nameEn: string | null }> = [];
+  for (const r of rows) {
+    if (!(r.id in edits)) continue;
+    const next = edits[r.id]!.trim();
+    if (next === (r.nameEn ?? '').trim()) continue;
+    out.push({ productId: r.id, nameEn: next || null });
+  }
+  return out;
+}

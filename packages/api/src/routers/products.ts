@@ -1,7 +1,20 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { and, eq, invoiceLines, poLines, products } from '@restomatch/db';
-import { managerProcedure, router } from '../trpc';
+import {
+  and,
+  asc,
+  count,
+  eq,
+  inArray,
+  invoiceLines,
+  isNull,
+  or,
+  poLines,
+  products,
+  sql,
+  suppliers,
+} from '@restomatch/db';
+import { managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
 
 /**
@@ -10,7 +23,105 @@ import { assertSupplierOwned } from '../tenant';
  * the matcher + reports), set the English display name (name_en), recategorize, fix the unit/barcode, set the exclusive
  * owning supplier (products.supplier_id), or delete a junk product.
  */
+/** Max rows one bulk English-name save may touch (one screen of the grid). */
+const MAX_BULK = 200;
+
 export const productsRouter = router({
+  /**
+   * Products for the bulk English-names grid: Hebrew name, current name_en,
+   * category and exclusive supplier. `missingOnly` narrows to products without
+   * an English name; `search` matches Hebrew or English. Restaurant-scoped.
+   */
+  list: memberProcedure
+    .input(
+      z
+        .object({
+          search: z.string().trim().max(100).optional(),
+          missingOnly: z.boolean().optional(),
+          limit: z.number().int().min(1).max(MAX_BULK).default(100),
+          offset: z.number().int().min(0).default(0),
+        })
+        .optional(),
+    )
+    .query(async ({ ctx, input }) => {
+      const rid = ctx.session.restaurantId;
+      const conds = [eq(products.restaurantId, rid)];
+      if (input?.missingOnly) {
+        conds.push(or(isNull(products.nameEn), sql`btrim(${products.nameEn}) = ''`)!);
+      }
+      if (input?.search) {
+        const like = `%${input.search}%`;
+        conds.push(sql`(${products.canonicalName} ILIKE ${like} OR ${products.nameEn} ILIKE ${like})`);
+      }
+      const where = and(...conds);
+      const [rows, [total]] = await Promise.all([
+        ctx.db
+          .select({
+            id: products.id,
+            canonicalName: products.canonicalName,
+            nameEn: products.nameEn,
+            category: products.category,
+            defaultUnit: products.defaultUnit,
+            supplierName: suppliers.name,
+            supplierNameEn: suppliers.nameEn,
+          })
+          .from(products)
+          .leftJoin(
+            suppliers,
+            and(eq(suppliers.id, products.supplierId), eq(suppliers.restaurantId, rid)),
+          )
+          .where(where)
+          .orderBy(asc(products.canonicalName))
+          .limit(input?.limit ?? 100)
+          .offset(input?.offset ?? 0),
+        ctx.db.select({ n: count() }).from(products).where(where),
+      ]);
+      return { rows, total: total?.n ?? 0 };
+    }),
+
+  /**
+   * Bulk-set English display names (the "English names" grid). All-or-nothing:
+   * every productId must belong to the caller's restaurant, otherwise NOT_FOUND
+   * and nothing is written (the procedure runs in the member transaction).
+   * Empty/blank → clears the name. Returns how many rows changed.
+   */
+  setNamesEn: managerProcedure
+    .input(
+      z.object({
+        items: z
+          .array(
+            z.object({
+              productId: z.string().uuid(),
+              nameEn: z.string().trim().max(200).nullable(),
+            }),
+          )
+          .min(1)
+          .max(MAX_BULK)
+          .refine((xs) => new Set(xs.map((x) => x.productId)).size === xs.length, {
+            message: 'duplicate productId',
+          }),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const rid = ctx.session.restaurantId;
+      const ids = input.items.map((i) => i.productId);
+      const owned = await ctx.db
+        .select({ id: products.id })
+        .from(products)
+        .where(and(eq(products.restaurantId, rid), inArray(products.id, ids)));
+      if (owned.length !== ids.length) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'product not found' });
+      }
+      const now = new Date();
+      for (const item of input.items) {
+        await ctx.db
+          .update(products)
+          .set({ nameEn: item.nameEn?.trim() || null, updatedAt: now })
+          .where(and(eq(products.id, item.productId), eq(products.restaurantId, rid)));
+      }
+      return { updated: input.items.length };
+    }),
+
   /** Edit a product. Setting supplierId assigns the exclusive owning supplier
    *  (must be a same-tenant supplier — the FK alone does not enforce tenancy). */
   update: managerProcedure

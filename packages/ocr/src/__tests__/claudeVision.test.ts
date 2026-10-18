@@ -128,3 +128,32 @@ describe('ClaudeVision.extract — mapping', () => {
     await expect(provider.extract('https://example.com/invoice.jpg')).rejects.toThrow();
   });
 });
+
+describe('ClaudeVision.extract — English rendering (Receiver in English)', () => {
+  beforeEach(() => {
+    createMock.mockReset();
+  });
+
+  it('asks for rawDescriptionEn in the same call and keeps it on each line', async () => {
+    mockTextResponse({
+      ...CANNED_INVOICE,
+      lines: [
+        { ...CANNED_INVOICE.lines[0], rawDescriptionEn: 'Cherry tomatoes' },
+        { ...CANNED_INVOICE.lines[1], rawDescriptionEn: '  ' },
+      ],
+    });
+    const result = await new ClaudeVision({ apiKey: 'k', model: 'm' }).extract('https://x/inv.jpg');
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(String(createMock.mock.calls[0]![0].system)).toContain('rawDescriptionEn');
+    const lines = result.lines as Array<{ rawDescriptionEn?: string }>;
+    expect(lines[0]!.rawDescriptionEn).toBe('Cherry tomatoes');
+    expect(lines[1]!.rawDescriptionEn).toBeUndefined();
+    expect(result.lines[0]!.rawDescription).toBe('עגבניה שרי');
+  });
+
+  it('still parses older responses without the English field', async () => {
+    mockTextResponse(CANNED_INVOICE);
+    const result = await new ClaudeVision({ apiKey: 'k', model: 'm' }).extract('https://x/inv.jpg');
+    expect((result.lines[0] as { rawDescriptionEn?: string }).rawDescriptionEn).toBeUndefined();
+  });
+});

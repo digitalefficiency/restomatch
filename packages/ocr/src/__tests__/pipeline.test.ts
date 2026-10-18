@@ -172,3 +172,43 @@ describe('runOcrPipeline — missing lines edge case', () => {
     expect(result.reconciled.lines.some((l) => l.rawDescription === 'בצל יבש')).toBe(true);
   });
 });
+
+describe('runOcrPipeline — M11 single provider in both slots', () => {
+  it('calls a provider ONCE when the same instance fills both slots', async () => {
+    const provider = new StubOcrProvider('claude_vision', AGREEMENT_PERFECT.claude);
+    const spy = vi.spyOn(provider, 'extract');
+    const result = await runOcrPipeline('https://example.com/inv.jpg', {
+      documentAi: provider,
+      claude: provider,
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(result.conflicts).toHaveLength(0);
+    expect(result.confidence).toBe(1);
+  });
+
+  it('still calls both when they are distinct providers', async () => {
+    const a = new StubOcrProvider('document_ai', AGREEMENT_PERFECT.claude);
+    const b = new StubOcrProvider('claude_vision', AGREEMENT_PERFECT.claude);
+    const sa = vi.spyOn(a, 'extract');
+    const sb = vi.spyOn(b, 'extract');
+    await runOcrPipeline('x', { documentAi: a, claude: b });
+    expect(sa).toHaveBeenCalledTimes(1);
+    expect(sb).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('runOcrPipeline — English rendering', () => {
+  it('carries rawDescriptionEn from the Claude extraction onto reconciled lines', async () => {
+    const withEn = {
+      ...AGREEMENT_PERFECT.claude,
+      lines: AGREEMENT_PERFECT.claude.lines.map((l, i) => ({ ...l, rawDescriptionEn: `English ${i}` })),
+    };
+    const result = await runOcrPipeline('x', {
+      documentAi: new StubOcrProvider('document_ai', AGREEMENT_PERFECT.claude),
+      claude: new StubOcrProvider('claude_vision', withEn),
+    });
+    expect(result.reconciled.lines.map((l) => l.rawDescriptionEn)).toEqual(
+      AGREEMENT_PERFECT.claude.lines.map((_, i) => `English ${i}`),
+    );
+  });
+});

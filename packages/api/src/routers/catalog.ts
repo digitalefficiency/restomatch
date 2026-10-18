@@ -297,6 +297,44 @@ export const catalogRouter = router({
       return { importId: imp.id, queued: false, rowCount: rows.length, ...result };
     }),
 
+  /**
+   * Import history (catalog_imports) — newest first, optionally for one
+   * supplier. Restaurant-scoped; a foreign supplierId simply yields nothing.
+   */
+  imports: memberProcedure
+    .input(
+      z
+        .object({
+          supplierId: z.string().uuid().optional(),
+          limit: z.number().int().min(1).max(50).default(10),
+        })
+        .optional(),
+    )
+    .query(async ({ ctx, input }) => {
+      const rid = ctx.session.restaurantId;
+      return ctx.db
+        .select({
+          id: catalogImports.id,
+          supplierId: catalogImports.supplierId,
+          filename: catalogImports.filename,
+          status: catalogImports.status,
+          rowCount: catalogImports.rowCount,
+          createdItems: catalogImports.createdItems,
+          updatedItems: catalogImports.updatedItems,
+          error: catalogImports.error,
+          createdAt: catalogImports.createdAt,
+        })
+        .from(catalogImports)
+        .where(
+          and(
+            eq(catalogImports.restaurantId, rid),
+            input?.supplierId ? eq(catalogImports.supplierId, input.supplierId) : undefined,
+          ),
+        )
+        .orderBy(desc(catalogImports.createdAt))
+        .limit(input?.limit ?? 10);
+    }),
+
   /** Toggle a catalog item active/inactive. */
   setItemActive: managerProcedure
     .input(z.object({ itemId: z.string().uuid(), active: z.boolean() }))

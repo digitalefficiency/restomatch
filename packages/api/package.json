@@ -20,6 +20,7 @@
     "@restomatch/ocr": "workspace:*",
     "@restomatch/procurement": "workspace:*",
     "@restomatch/queue": "workspace:*",
+    "@restomatch/translate": "workspace:*",
     "@restomatch/types": "workspace:*",
     "@restomatch/charts": "workspace:*",
     "@restomatch/observability": "workspace:*",

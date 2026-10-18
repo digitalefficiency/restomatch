@@ -91,6 +91,9 @@ export default async function LeaksPage() {
     ...l,
     productName: displayName(locale, l.productName, l.productNameEn),
     supplierName: displayName(locale, l.supplierName, l.supplierNameEn),
+    // Tiles, totals and the table show money actually paid above the median in
+    // the last 30 days (not the latest-price projection).
+    monthExcessIls: l.paidExcessIls,
   }));
   const totalExcess = rows.reduce((sum, r) => sum + r.monthExcessIls, 0);
   const worst = rows.reduce((m, r) => Math.max(m, r.deltaPct), 0);

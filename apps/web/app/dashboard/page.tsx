@@ -63,6 +63,7 @@ export default async function DashboardPage() {
     ...l,
     productName: displayName(locale, l.productName, l.productNameEn),
     supplierName: displayName(locale, l.supplierName, l.supplierNameEn),
+    monthExcessIls: l.paidExcessIls,
   }));
 
   return (
