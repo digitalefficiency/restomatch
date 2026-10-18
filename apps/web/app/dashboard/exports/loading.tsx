@@ -1,8 +1,11 @@
 import { Skeleton } from '@/lib/components';
+import { getT } from '@/lib/i18n/server';
+import { nav } from '@/lib/i18n/messages/nav';
 
-export default function Loading() {
+export default async function Loading() {
+  const t = await getT(nav);
   return (
-    <div role="status" aria-label="טוען">
+    <div role="status" aria-label={t('loading')}>
       <div className="mb-6 space-y-2">
         <Skeleton className="h-8 w-56" />
         <Skeleton className="h-4 w-80" />

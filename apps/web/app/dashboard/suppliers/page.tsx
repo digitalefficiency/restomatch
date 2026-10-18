@@ -6,14 +6,22 @@ import {
   SectionHeader,
   entitlementCauseOf,
 } from '@/lib/components';
+import { getT } from '@/lib/i18n/server';
+import { suppliers as suppliersNs } from '@/lib/i18n/messages/suppliers';
 import { SuppliersList } from './list';
 import { SuppliersTabs } from './tabs';
 import { SupplierManager } from './manager';
 
 const PAGE = 9;
 
-export default async function SuppliersPage() {
+export default async function SuppliersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ view?: string }>;
+}) {
   const caller = await createServerCaller();
+  const t = await getT(suppliersNs);
+  const { view } = await searchParams;
 
   // Scorecards are advanced_analytics-gated; render the upsell in that tab
   // instead of failing the whole page (management stays available to everyone).
@@ -24,8 +32,8 @@ export default async function SuppliersPage() {
       scorecards.length === 0 ? (
         <EmptyState
           icon={<Truck className="h-6 w-6" />}
-          title="אין עדיין נתוני ספקים"
-          description="הדוח מתבסס על השוואות (match runs) מהזמן האחרון. ברגע שייכנסו קבלות וחשבוניות, הספקים יופיעו כאן."
+          title={t('scores.emptyTitle')}
+          description={t('scores.emptyBody')}
         />
       ) : (
         <SuppliersList initial={scorecards} />
@@ -38,12 +46,12 @@ export default async function SuppliersPage() {
 
   return (
     <div>
-      <SectionHeader
-        level={1}
-        title="ספקים"
-        subtitle="הקמת ספקים, פרטי קשר ותנאי תשלום — והדירוג שמראה מי מוסיף עלויות סמויות."
+      <SectionHeader level={1} title={t('title')} subtitle={t('subtitle')} />
+      <SuppliersTabs
+        initialTab={view === 'scores' ? 'scores' : 'manage'}
+        management={<SupplierManager />}
+        scorecards={scorecardsNode}
       />
-      <SuppliersTabs management={<SupplierManager />} scorecards={scorecardsNode} />
     </div>
   );
 }

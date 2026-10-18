@@ -100,6 +100,8 @@ export const adminRouter = router({
         .select({
           id: restaurants.id,
           name: restaurants.name,
+          businessId: restaurants.businessId,
+          createdAt: restaurants.createdAt,
           billingAccountId: restaurants.billingAccountId,
         })
         .from(restaurants)
@@ -129,7 +131,13 @@ export const adminRouter = router({
       }
 
       const members = await ctx.db
-        .select({ userId: memberships.userId, role: memberships.role, email: users.email })
+        .select({
+          userId: memberships.userId,
+          role: memberships.role,
+          email: users.email,
+          name: users.name,
+          preferredLocale: memberships.preferredLocale,
+        })
         .from(memberships)
         .innerJoin(users, eq(users.id, memberships.userId))
         .where(eq(memberships.restaurantId, input.restaurantId));

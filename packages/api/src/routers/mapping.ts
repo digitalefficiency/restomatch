@@ -116,12 +116,12 @@ export const mappingRouter = router({
       const rid = ctx.session.restaurantId;
       const like = `%${input.q}%`;
       return ctx.db
-        .select({ id: products.id, canonicalName: products.canonicalName })
+        .select({ id: products.id, canonicalName: products.canonicalName, nameEn: products.nameEn })
         .from(products)
         .where(
           and(
             eq(products.restaurantId, rid),
-            sql`(${products.canonicalName} % ${input.q} OR ${products.canonicalName} ILIKE ${like})`,
+            sql`(${products.canonicalName} % ${input.q} OR ${products.canonicalName} ILIKE ${like} OR ${products.nameEn} ILIKE ${like})`,
           ),
         )
         .orderBy(sql`similarity(${products.canonicalName}, ${input.q}) DESC`)

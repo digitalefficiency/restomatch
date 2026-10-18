@@ -17,7 +17,13 @@ import { MockEmbeddingProvider } from '@restomatch/catalog';
 import { enqueueCatalogImport } from '@restomatch/queue';
 import { managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
-import { autoDetectMapping, extractCatalogRows, parseCatalogFile } from '../catalog/parse';
+import {
+  autoDetectMapping,
+  CatalogFileError,
+  extractCatalogRows,
+  parseCatalogFile,
+  type ParsedTable,
+} from '../catalog/parse';
 import { commitCatalogRows } from '../catalog/commit';
 
 /** Above this row count a commit is handed to the import-catalog worker. */
@@ -68,6 +74,34 @@ const MappingSchema = z
 
 const embedder = new MockEmbeddingProvider(1536);
 
+/**
+ * Parse + size-check an upload, turning user-fixable file problems into a
+ * BAD_REQUEST whose message starts with a stable `CATALOG_FILE_<code>` token
+ * (the import screen maps it to a localized explanation). Previously these
+ * surfaced as 500s with an exceljs stack message.
+ */
+async function parseUpload(file: z.infer<typeof FileInput>): Promise<ParsedTable> {
+  try {
+    const table = await parseCatalogFile(file);
+    if (table.rows.length > MAX_ROWS) {
+      throw new CatalogFileError(
+        'TOO_MANY_ROWS',
+        `קובץ גדול מדי (${table.rows.length} שורות, מקסימום ${MAX_ROWS})`,
+      );
+    }
+    return table;
+  } catch (err) {
+    if (err instanceof CatalogFileError) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `CATALOG_FILE_${err.code}: ${err.message}`,
+        cause: err,
+      });
+    }
+    throw err;
+  }
+}
+
 export const catalogRouter = router({
   /** Priced catalog (supplier_catalog_items) joined to products + suppliers. */
   items: memberProcedure
@@ -90,7 +124,7 @@ export const catalogRouter = router({
       if (input?.search) {
         const like = `%${input.search}%`;
         conds.push(
-          sql`(${supplierCatalogItems.supplierNameRaw} ILIKE ${like} OR ${supplierCatalogItems.supplierSku} ILIKE ${like} OR ${products.canonicalName} ILIKE ${like})`,
+          sql`(${supplierCatalogItems.supplierNameRaw} ILIKE ${like} OR ${supplierCatalogItems.supplierSku} ILIKE ${like} OR ${products.canonicalName} ILIKE ${like} OR ${products.nameEn} ILIKE ${like})`,
         );
       }
       return ctx.db
@@ -98,8 +132,10 @@ export const catalogRouter = router({
           id: supplierCatalogItems.id,
           supplierId: supplierCatalogItems.supplierId,
           supplierName: suppliers.name,
+          supplierNameEn: suppliers.nameEn,
           productId: supplierCatalogItems.productId,
           canonicalName: products.canonicalName,
+          productNameEn: products.nameEn,
           supplierNameRaw: supplierCatalogItems.supplierNameRaw,
           supplierSku: supplierCatalogItems.supplierSku,
           unit: supplierCatalogItems.unit,
@@ -130,6 +166,7 @@ export const catalogRouter = router({
           supplierId: products.supplierId,
           productGroupId: products.productGroupId,
           canonicalName: products.canonicalName,
+          nameEn: products.nameEn,
           category: products.category,
           defaultUnit: products.defaultUnit,
           barcodeEan: products.barcodeEan,
@@ -145,6 +182,7 @@ export const catalogRouter = router({
           id: supplierCatalogItems.id,
           supplierId: supplierCatalogItems.supplierId,
           supplierName: suppliers.name,
+          supplierNameEn: suppliers.nameEn,
           supplierSku: supplierCatalogItems.supplierSku,
           unit: supplierCatalogItems.unit,
           listPrice: supplierCatalogItems.listPrice,
@@ -182,10 +220,7 @@ export const catalogRouter = router({
     .input(z.object({ supplierId: z.string().uuid(), file: FileInput }))
     .mutation(async ({ ctx, input }) => {
       await assertSupplierOwned(ctx.db, input.supplierId, ctx.session.restaurantId);
-      const table = await parseCatalogFile(input.file);
-      if (table.rows.length > MAX_ROWS) {
-        throw new Error(`קובץ גדול מדי (${table.rows.length} שורות, מקסימום ${MAX_ROWS})`);
-      }
+      const table = await parseUpload(input.file);
       return {
         headers: table.headers,
         sample: table.rows.slice(0, 20),
@@ -200,11 +235,17 @@ export const catalogRouter = router({
     .mutation(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
       await assertSupplierOwned(ctx.db, input.supplierId, restaurantId);
-      const table = await parseCatalogFile(input.file);
-      if (table.rows.length > MAX_ROWS) {
-        throw new Error(`קובץ גדול מדי (${table.rows.length} שורות, מקסימום ${MAX_ROWS})`);
+      if (!input.mapping.name) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'CATALOG_MAPPING_NAME: חובה למפות עמודת שם/תיאור' });
       }
+      const table = await parseUpload(input.file);
       const rows = extractCatalogRows(table, input.mapping);
+      if (rows.length === 0) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'CATALOG_FILE_NO_ROWS: אין שורות עם שם מוצר בעמודה שנבחרה',
+        });
+      }
 
       const [imp] = await ctx.db
         .insert(catalogImports)

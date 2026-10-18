@@ -6,3 +6,11 @@ export {
   type ComputeSupplierScorecardsOptions,
 } from './suppliers';
 export { computeBaselines, type BaselineRow, type ComputeBaselinesOptions } from './baselines';
+export {
+  computeLeakBreakdown,
+  computeLeakHero,
+  type LeakBreakdownInvoice,
+  type LeakBreakdownLine,
+  type LeakHero,
+  type LeakHeroOptions,
+} from './leak-hero';

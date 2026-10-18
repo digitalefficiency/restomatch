@@ -42,6 +42,8 @@ export type AuditAction =
   | 'team.invite_accepted'
   | 'team.member_role_changed'
   | 'team.member_removed'
+  | 'team.member_locale_changed'
+  | 'settings.my_locale_changed'
   // Approvals (already emitted by the approvals router)
   | 'discrepancy.approved'
   | 'discrepancy.rejected'

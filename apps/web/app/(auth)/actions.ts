@@ -7,6 +7,7 @@ import { signOut } from '@/auth';
 import { requireFullSession } from '@/lib/authGuards';
 import { isEmailConfigured, sendEmail } from '@/lib/email';
 import { passwordResetEmail } from '@/lib/emailTemplates';
+import { getLocale } from '@/lib/i18n/server';
 import { passwordPolicyError } from '@/lib/passwordPolicy';
 import {
   bumpTokenVersion,
@@ -46,7 +47,8 @@ export async function requestPasswordResetAction(formData: FormData): Promise<vo
   const result = await requestPasswordReset(email);
   if (result) {
     const url = `${await baseUrl()}/reset?token=${encodeURIComponent(result.rawToken)}`;
-    const { subject, html, text } = passwordResetEmail({ url });
+    // The email follows the language the reset was requested in (rm_locale).
+    const { subject, html, text } = passwordResetEmail({ url, locale: await getLocale() });
     if (isEmailConfigured()) {
       await sendEmail({ to: email, subject, html, text });
     } else {
@@ -94,7 +96,8 @@ export async function setPasswordAction(formData: FormData): Promise<void> {
   const policy = passwordPolicyError(password);
   if (policy) redirect('/set-password?error=policy');
   await setUserPassword(userId, password);
-  redirect('/dashboard?password=set');
+  // Land back on the page with a success banner (the dashboard showed nothing).
+  redirect('/set-password?changed=1');
 }
 
 /**

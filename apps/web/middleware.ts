@@ -66,6 +66,11 @@ export default auth((req) => {
     const url = req.nextUrl.clone();
     url.pathname = '/login/2fa';
     url.search = '';
+    // Keep where the user was going (e.g. /invite/accept?token=…) — re-validated
+    // by safeRelativePath on the 2FA page/action, so no open redirect.
+    if (!isApi && path !== '/' && path !== '/dashboard') {
+      url.searchParams.set('callbackUrl', req.nextUrl.pathname + req.nextUrl.search);
+    }
     return NextResponse.redirect(url);
   }
 

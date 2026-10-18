@@ -50,6 +50,17 @@ describe('autoDetectMapping (Hebrew headers)', () => {
       barcode: 'ברקוד',
     });
   });
+  it('does not take an item-code column ("קוד פריט") as the product name', () => {
+    expect(autoDetectMapping(['קוד פריט', 'שם מוצר', "יח' מידה", 'מחיר'])).toMatchObject({
+      sku: 'קוד פריט',
+      name: 'שם מוצר',
+      price: 'מחיר',
+    });
+    expect(autoDetectMapping(['Item code', 'Item description', 'Price'])).toMatchObject({
+      sku: 'Item code',
+      name: 'Item description',
+    });
+  });
   it('does not assign the same header to two fields', () => {
     const mapping = autoDetectMapping(['שם המוצר', 'מחיר ליחידה']);
     const used = Object.values(mapping);

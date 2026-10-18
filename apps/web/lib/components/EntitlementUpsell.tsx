@@ -1,60 +1,19 @@
+'use client';
+
 import Link from 'next/link';
 import { Lock, ShieldAlert } from 'lucide-react';
+import { useLocale, useT } from '@/lib/i18n/client';
+import { components } from '@/lib/i18n/messages/components';
 import { Button } from './Button';
 import { Card } from './Card';
+import { featureLabel, type EntitlementCause } from './entitlement';
 
-/**
- * The cause attached to an ENTITLEMENT_REQUIRED TRPCError (see
- * `requireFeature` in @restomatch/api): `{ code, feature, planKey }`.
- * superjson preserves the cause object across the wire.
- */
-export interface EntitlementCause {
-  code: 'ENTITLEMENT_REQUIRED';
-  feature: string;
-  planKey?: string | null;
-}
-
-const FEATURE_LABELS: Record<string, string> = {
-  advanced_analytics: 'אנליטיקה מתקדמת',
-  accounting_export: 'ייצוא להנהלת חשבונות',
-  whatsapp_alerts: 'התראות וואטסאפ',
-  integrations: 'אינטגרציות',
-};
-
-/**
- * Detects whether a thrown/serialized error carries the ENTITLEMENT_REQUIRED
- * cause. Works for both server-side `TRPCError` (with `.cause`) and the
- * client-side `TRPCClientError` (which exposes the cause under `data` /
- * `shape.data` after superjson round-trips). Returns the typed cause or null.
- */
-export function entitlementCauseOf(err: unknown): EntitlementCause | null {
-  if (!err || typeof err !== 'object') return null;
-  // Direct TRPCError.cause (server caller path).
-  const direct = (err as { cause?: unknown }).cause;
-  if (isEntitlementCause(direct)) return direct;
-  // Some serialized shapes nest it under data.cause.
-  const data = (err as { data?: { cause?: unknown } }).data;
-  if (data && isEntitlementCause(data.cause)) return data.cause;
-  return null;
-}
-
-function isEntitlementCause(c: unknown): c is EntitlementCause {
-  return (
-    !!c &&
-    typeof c === 'object' &&
-    (c as { code?: unknown }).code === 'ENTITLEMENT_REQUIRED' &&
-    typeof (c as { feature?: unknown }).feature === 'string'
-  );
-}
-
-/** Hebrew label for a feature key, falling back to the raw key. */
-export function featureLabel(feature: string): string {
-  return FEATURE_LABELS[feature] ?? feature;
-}
+export { entitlementCauseOf, featureLabel } from './entitlement';
+export type { EntitlementCause } from './entitlement';
 
 /**
  * Upsell card shown when a feature is gated behind a paid plan. Pass either the
- * raw `feature` key or the full `cause`. Renders a Hebrew CTA linking to
+ * raw `feature` key or the full `cause`. Renders a localized CTA linking to
  * `/pricing`. The `compact` variant is for inline teasers (e.g. the overview).
  */
 export function EntitlementUpsell({
@@ -70,8 +29,10 @@ export function EntitlementUpsell({
   compact?: boolean;
   className?: string;
 }) {
+  const t = useT(components);
+  const locale = useLocale();
   const key = cause?.feature ?? feature ?? '';
-  const label = featureLabel(key);
+  const label = featureLabel(key, locale);
 
   if (compact) {
     return (
@@ -85,15 +46,15 @@ export function EntitlementUpsell({
             <Lock className="h-4 w-4" aria-hidden="true" />
           </span>
           <div>
-            <p className="text-sm font-semibold text-ink">{title ?? `שדרגו כדי לפתוח את ${label}`}</p>
-            <p className="mt-0.5 text-xs text-muted">
-              התכונה הזו זמינה במסלולים בתשלום.
+            <p className="text-sm font-semibold text-ink">
+              {title ?? t('entitlement.compactTitle', { feature: label })}
             </p>
+            <p className="mt-0.5 text-xs text-muted">{t('entitlement.compactBody')}</p>
           </div>
         </div>
         <Link href="/pricing" className="shrink-0">
           <Button variant="primary" size="sm">
-            צפו במסלולים
+            {t('entitlement.compactCta')}
           </Button>
         </Link>
       </Card>
@@ -111,14 +72,14 @@ export function EntitlementUpsell({
       </span>
       <div>
         <h3 className="text-lg font-bold text-ink">
-          {title ?? `שדרגו את המנוי כדי לפתוח את ${label}`}
+          {title ?? t('entitlement.title', { feature: label })}
         </h3>
         <p className="mx-auto mt-1.5 max-w-md text-sm text-muted">
-          {label} זמינה במסלולים בתשלום. שדרגו את החשבון כדי לקבל גישה מלאה.
+          {t('entitlement.body', { feature: label })}
         </p>
       </div>
       <Link href="/pricing">
-        <Button variant="primary">צפו במסלולים ושדרגו</Button>
+        <Button variant="primary">{t('entitlement.cta')}</Button>
       </Link>
     </Card>
   );
@@ -129,7 +90,7 @@ export function EntitlementUpsell({
  * branch when an error is NOT ENTITLEMENT_REQUIRED.
  */
 export function ErrorNotice({
-  title = 'משהו השתבש',
+  title,
   message,
   className,
 }: {
@@ -137,14 +98,16 @@ export function ErrorNotice({
   message?: React.ReactNode;
   className?: string;
 }) {
+  const t = useT(components);
   return (
     <Card
       padding="md"
+      role="alert"
       className={`flex items-center gap-3 border-danger/30 bg-danger/5 text-danger ${className ?? ''}`}
     >
       <ShieldAlert className="h-5 w-5 shrink-0" aria-hidden="true" />
       <div>
-        <p className="font-medium">{title}</p>
+        <p className="font-medium">{title ?? t('errorNotice.title')}</p>
         {message ? <p className="mt-0.5 text-sm text-danger/80">{message}</p> : null}
       </div>
     </Card>

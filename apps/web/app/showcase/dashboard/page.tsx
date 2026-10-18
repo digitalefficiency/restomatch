@@ -13,9 +13,13 @@ import {
   Wallet,
 } from 'lucide-react';
 import { useRef, useState } from 'react';
+import { useLocale, useT } from '@/lib/i18n/client';
+import { formatNumber } from '@/lib/i18n/format';
+import { showcase } from '@/lib/i18n/messages/showcase';
+import { mockText } from '../_lib/mockText';
 
 interface Kpi {
-  label: string;
+  id: 'leak' | 'saved' | 'pending';
   value: number;
   prefix?: string;
   suffix?: string;
@@ -26,7 +30,7 @@ interface Kpi {
 
 const KPIS: Kpi[] = [
   {
-    label: 'הפסד פוטנציאלי החודש',
+    id: 'leak',
     value: 4820,
     prefix: '₪',
     delta: 12,
@@ -34,7 +38,7 @@ const KPIS: Kpi[] = [
     icon: <AlertCircle className="w-5 h-5" />,
   },
   {
-    label: 'חיסכון שנשמר',
+    id: 'saved',
     value: 12340,
     prefix: '₪',
     delta: 34,
@@ -42,7 +46,7 @@ const KPIS: Kpi[] = [
     icon: <Wallet className="w-5 h-5" />,
   },
   {
-    label: 'ממתינות לאישור',
+    id: 'pending',
     value: 7,
     delta: -2,
     tone: 'neutral',
@@ -120,6 +124,7 @@ const EVENTS: FlowEvent[] = [
 ];
 
 export default function DashboardShowcase() {
+  const t = useT(showcase);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useGSAP(
@@ -136,16 +141,16 @@ export default function DashboardShowcase() {
   );
 
   return (
-    <main ref={containerRef} className="max-w-7xl mx-auto px-6 py-12 space-y-12" dir="rtl">
+    <main ref={containerRef} className="max-w-7xl mx-auto px-4 sm:px-6 py-12 space-y-12">
       <div className="section-block">
         <div className="mb-2 h-0.5 w-12 rounded-full flow-stream" aria-hidden="true" />
-        <p className="text-xs uppercase tracking-[0.2em] text-primary font-semibold mb-2">
-          Control Center
+        <p className="text-xs uppercase ltr:tracking-[0.2em] rtl:text-sm text-primary font-semibold mb-2">
+          {t('dashboard.eyebrow')}
         </p>
-        <h1 className="text-4xl font-extrabold tracking-tight mb-2 text-ink">לוח הבעלים</h1>
-        <p className="text-muted">
-          תמונה לייב של המסעדה — איפה כסף בורח, מי ספק מדויק, מה דורש את ההחלטה שלך עכשיו.
-        </p>
+        <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-2 text-ink">
+          {t('dashboard.title')}
+        </h1>
+        <p className="text-muted max-w-2xl">{t('dashboard.lead')}</p>
       </div>
 
       <div className="section-block">
@@ -154,11 +159,11 @@ export default function DashboardShowcase() {
 
       <div className="section-block grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
-          <SectionHeader title="בלש הדליפות" subtitle="סטיית מחיר אחרון מול ממוצע היסטורי" />
+          <SectionHeader title={t('dashboard.heatmap.title')} subtitle={t('dashboard.heatmap.subtitle')} />
           <Heatmap />
         </div>
         <div>
-          <SectionHeader title="Live Flow" subtitle="אירועים בזמן אמת" />
+          <SectionHeader title={t('dashboard.flow.title')} subtitle={t('dashboard.flow.subtitle')} />
           <LiveFlow />
         </div>
       </div>
@@ -170,13 +175,15 @@ function KpiRow() {
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
       {KPIS.map((k) => (
-        <KpiCard key={k.label} kpi={k} />
+        <KpiCard key={k.id} kpi={k} />
       ))}
     </div>
   );
 }
 
 function KpiCard({ kpi }: { kpi: Kpi }) {
+  const t = useT(showcase);
+  const locale = useLocale();
   const cardRef = useRef<HTMLDivElement>(null);
   const numberRef = useRef<HTMLSpanElement>(null);
 
@@ -190,7 +197,7 @@ function KpiCard({ kpi }: { kpi: Kpi }) {
         ease: 'power2.out',
         onUpdate: () => {
           if (numberRef.current) {
-            numberRef.current.textContent = Math.round(obj.value).toLocaleString('he-IL');
+            numberRef.current.textContent = formatNumber(Math.round(obj.value), locale);
           }
         },
       });
@@ -215,7 +222,7 @@ function KpiCard({ kpi }: { kpi: Kpi }) {
       number: 'text-ink',
     },
   } as const;
-  const t = tones[kpi.tone];
+  const tone = tones[kpi.tone];
 
   const deltaPositive = kpi.delta >= 0;
   // good metric: up = green; warn metric (loss): up = danger; neutral (queue): up = danger.
@@ -236,7 +243,7 @@ function KpiCard({ kpi }: { kpi: Kpi }) {
       <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px flow-stream" />
       <div className="flex items-start justify-between mb-4">
         <div
-          className={`w-10 h-10 rounded-xl flex items-center justify-center ring-1 ${t.icon}`}
+          className={`w-10 h-10 rounded-xl flex items-center justify-center ring-1 ${tone.icon}`}
         >
           {kpi.icon}
         </div>
@@ -253,44 +260,47 @@ function KpiCard({ kpi }: { kpi: Kpi }) {
         </div>
       </div>
 
-      <div className="text-xs uppercase tracking-wider text-subtle font-semibold mb-2">
-        {kpi.label}
+      <div className="text-xs uppercase tracking-wider text-muted font-semibold mb-2">
+        {t(`dashboard.kpi.${kpi.id}`)}
       </div>
       <div className="font-mono text-3xl font-extrabold tabular-nums tracking-tight flex items-baseline gap-1">
-        {kpi.prefix ? <span className={`text-2xl ${t.number} opacity-70`}>{kpi.prefix}</span> : null}
-        <span ref={numberRef} className={t.number}>
+        {kpi.prefix ? <span className={`text-2xl ${tone.number} opacity-70`}>{kpi.prefix}</span> : null}
+        <span ref={numberRef} className={tone.number}>
           0
         </span>
-        {kpi.suffix ? <span className={`text-2xl ${t.number} opacity-70`}>{kpi.suffix}</span> : null}
+        {kpi.suffix ? <span className={`text-2xl ${tone.number} opacity-70`}>{kpi.suffix}</span> : null}
       </div>
 
       <div
-        className={`pointer-events-none absolute -bottom-12 -left-12 w-48 h-48 rounded-full blur-2xl opacity-70 ${t.glow}`}
+        className={`pointer-events-none absolute -bottom-12 -start-12 w-48 h-48 rounded-full blur-2xl opacity-70 ${tone.glow}`}
       />
     </div>
   );
 }
 
 function Heatmap() {
+  const t = useT(showcase);
+  const locale = useLocale();
   const [hover, setHover] = useState<{ p: number; s: number; x: number; y: number } | null>(null);
 
   return (
-    <div className="relative rounded-2xl border border-line bg-surface p-6 shadow-card">
+    <div className="relative rounded-2xl border border-line bg-surface p-4 sm:p-6 shadow-card">
+      <div className="overflow-x-auto">
       <div
-        className="grid gap-0.5"
-        style={{ gridTemplateColumns: `120px repeat(${SUPPLIERS.length}, 1fr)` }}
+        className="grid gap-0.5 min-w-[420px]"
+        style={{ gridTemplateColumns: `minmax(96px, 130px) repeat(${SUPPLIERS.length}, 1fr)` }}
       >
         <div />
         {SUPPLIERS.map((s) => (
           <div key={s} className="text-xs text-muted font-medium text-center pb-3 px-1">
-            {s}
+            {mockText(s, locale)}
           </div>
         ))}
 
         {PRODUCTS.map((product, pIdx) => (
           <div key={product} className="contents">
-            <div className="text-sm font-medium text-ink pr-3 py-1 flex items-center">
-              {product}
+            <div className="text-sm font-medium text-ink pe-3 py-1 flex items-center">
+              {mockText(product, locale)}
             </div>
             {SUPPLIERS.map((_, sIdx) => {
               const cell = HEATMAP[pIdx]?.[sIdx];
@@ -332,19 +342,20 @@ function Heatmap() {
           </div>
         ))}
       </div>
+      </div>
 
-      <div className="mt-6 pt-4 border-t border-line flex items-center justify-center gap-6 text-xs text-muted">
+      <div className="mt-6 pt-4 border-t border-line flex items-center justify-center flex-wrap gap-x-6 gap-y-2 text-xs text-muted">
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-sm" style={{ background: cellColor(-0.7) }} />
-          <span>זול מהממוצע</span>
+          <span>{t('dashboard.heatmap.below')}</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-sm" style={{ background: cellColor(0) }} />
-          <span>בממוצע</span>
+          <span>{t('dashboard.heatmap.average')}</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-sm" style={{ background: cellColor(0.7) }} />
-          <span>חריגה מעלה</span>
+          <span>{t('dashboard.heatmap.above')}</span>
         </div>
       </div>
 
@@ -376,6 +387,8 @@ function cellColor(variance: number, alpha = 1): string {
 }
 
 function HeatTooltip({ hover }: { hover: { p: number; s: number; x: number; y: number } }) {
+  const t = useT(showcase);
+  const locale = useLocale();
   const cell = HEATMAP[hover.p]?.[hover.s];
   if (!cell) return null;
   const product = PRODUCTS[hover.p];
@@ -391,11 +404,11 @@ function HeatTooltip({ hover }: { hover: { p: number; s: number; x: number; y: n
       }}
     >
       <div className="bg-surface-2 border border-line rounded-xl p-3 min-w-[220px] shadow-card">
-        <div className="text-xs text-subtle mb-0.5">{supplier}</div>
-        <div className="font-semibold text-sm mb-2 text-ink">{product}</div>
+        <div className="text-xs text-muted mb-0.5">{mockText(supplier, locale)}</div>
+        <div className="font-semibold text-sm mb-2 text-ink">{mockText(product, locale)}</div>
         <Sparkline data={cell.series} variance={cell.variance} />
         <div className="mt-2 flex items-center justify-between text-xs">
-          <span className="text-muted">12 שבועות אחרונים</span>
+          <span className="text-muted">{t('dashboard.heatmap.range')}</span>
           <span
             className={`font-bold font-mono tabular-nums ${
               cell.variance > 0 ? 'text-danger' : 'text-primary'
@@ -483,8 +496,8 @@ function LiveFlow() {
       ref={containerRef}
       className="relative rounded-2xl border border-line bg-surface p-6 overflow-hidden shadow-card"
     >
-      <div className="relative pr-2">
-        <div className="absolute top-2 bottom-2 right-[14px] w-px bg-gradient-to-b from-primary/70 via-line to-transparent" />
+      <div className="relative ps-2">
+        <div className="absolute top-2 bottom-2 start-[14px] w-px bg-gradient-to-b from-primary/70 via-line to-transparent" />
         <div className="space-y-5">
           {EVENTS.map((e) => (
             <FlowEventRow key={e.id} event={e} />
@@ -496,6 +509,7 @@ function LiveFlow() {
 }
 
 function FlowEventRow({ event }: { event: FlowEvent }) {
+  const locale = useLocale();
   const colorMap = {
     block: {
       dot: 'bg-danger',
@@ -538,8 +552,8 @@ function FlowEventRow({ event }: { event: FlowEvent }) {
             <span className="font-mono tabular-nums">{event.time}</span>
           </div>
         </div>
-        <div className="text-sm font-medium text-ink">{event.title}</div>
-        <div className="text-xs text-muted mt-0.5">{event.detail}</div>
+        <div className="text-sm font-medium text-ink">{mockText(event.title, locale)}</div>
+        <div className="text-xs text-muted mt-0.5">{mockText(event.detail, locale)}</div>
       </div>
     </div>
   );

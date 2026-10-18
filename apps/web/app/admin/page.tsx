@@ -1,40 +1,57 @@
 import Link from 'next/link';
 import { createServerCaller } from '@/lib/trpc/server';
+import { formatDate, formatNumber } from '@/lib/i18n/format';
+import { admin } from '@/lib/i18n/messages/admin';
+import { getLocale, getT } from '@/lib/i18n/server';
+import type { MessageKey } from '@/lib/i18n/translate';
 
-const PLAN_LABEL: Record<string, string> = {
-  trial: 'ניסיון',
-  basic: 'בסיס',
-  pro: 'מקצועי',
-  chain: 'רשת',
-};
-const STATUS_LABEL: Record<string, string> = {
-  trialing: 'ניסיון',
-  active: 'פעיל',
-  past_due: 'חוב פתוח',
-  canceled: 'בוטל',
-};
+type AdminKey = MessageKey<typeof admin.he>;
 
 export default async function AdminRestaurantsPage() {
   const caller = await createServerCaller();
-  const restaurants = await caller.admin.listRestaurants();
+  const [restaurants, t, locale] = await Promise.all([
+    caller.admin.listRestaurants(),
+    getT(admin),
+    getLocale(),
+  ]);
+  const plan = (key: string) => t(`plans.${key}` as AdminKey);
+  const status = (key: string) => t(`statuses.${key}` as AdminKey);
+
+  const kpis = [
+    { label: t('list.kpiTotal'), value: restaurants.length },
+    { label: t('list.kpiPaying'), value: restaurants.filter((r) => !r.implicit && r.status === 'active').length },
+    { label: t('list.kpiImplicit'), value: restaurants.filter((r) => r.implicit).length },
+    { label: t('list.kpiMembers'), value: restaurants.reduce((sum, r) => sum + r.members, 0) },
+  ];
 
   return (
     <div>
-      <h1 className="mb-1 text-2xl font-bold text-ink">מסעדות</h1>
+      <h1 className="mb-1 text-2xl font-bold text-ink">{t('list.title')}</h1>
       <p className="mb-6 text-sm text-muted">
-        <span className="font-mono tabular-nums">{restaurants.length}</span> מסעדות במערכת
+        {t('list.count', { count: formatNumber(restaurants.length, locale) })}
       </p>
 
-      <div className="overflow-hidden rounded-xl border border-line bg-surface shadow-card">
-        <table className="w-full text-right text-sm">
+      <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
+        {kpis.map((k) => (
+          <div key={k.label} className="rounded-xl border border-line bg-surface p-4 shadow-card">
+            <p className="text-xs text-subtle">{k.label}</p>
+            <p className="mt-1 font-mono text-2xl font-bold tabular-nums text-ink">
+              {formatNumber(k.value, locale)}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-card">
+        <table className="w-full text-start text-sm">
           <thead className="border-b border-line bg-surface-2 font-mono text-xs uppercase tracking-wider text-subtle">
             <tr>
-              <th className="px-4 py-3 font-medium">מסעדה</th>
-              <th className="px-4 py-3 font-medium">תוכנית</th>
-              <th className="px-4 py-3 font-medium">סטטוס</th>
-              <th className="px-4 py-3 font-medium">סריקות החודש</th>
-              <th className="px-4 py-3 font-medium">משתמשים</th>
-              <th className="px-4 py-3 font-medium">נוצרה</th>
+              <th className="px-4 py-3 text-start font-medium">{t('list.colRestaurant')}</th>
+              <th className="px-4 py-3 text-start font-medium">{t('list.colPlan')}</th>
+              <th className="px-4 py-3 text-start font-medium">{t('list.colStatus')}</th>
+              <th className="px-4 py-3 text-start font-medium">{t('list.colScans')}</th>
+              <th className="px-4 py-3 text-start font-medium">{t('list.colMembers')}</th>
+              <th className="px-4 py-3 text-start font-medium">{t('list.colCreated')}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
@@ -49,21 +66,31 @@ export default async function AdminRestaurantsPage() {
                   </Link>
                 </td>
                 <td className="px-4 py-3 text-muted">
-                  {PLAN_LABEL[r.planKey] ?? r.planKey}
-                  {r.implicit ? <span className="mr-1 text-xs text-subtle">(משתמע)</span> : null}
+                  {plan(r.planKey)}
+                  {r.implicit ? <span className="ms-1 text-xs text-subtle">{t('list.implicit')}</span> : null}
                 </td>
-                <td className="px-4 py-3 text-muted">{STATUS_LABEL[r.status] ?? r.status}</td>
-                <td className="px-4 py-3 font-mono tabular-nums text-ink">{r.ocrScansThisMonth}</td>
-                <td className="px-4 py-3 font-mono tabular-nums text-ink">{r.members}</td>
+                <td className="px-4 py-3 text-muted">
+                  {status(r.status)}
+                  {r.trialEndsAt ? (
+                    <span className="block text-xs text-subtle">
+                      {t('list.trialEnds', { date: formatDate(r.trialEndsAt, locale) })}
+                    </span>
+                  ) : null}
+                </td>
+                <td className="px-4 py-3 font-mono tabular-nums text-ink">
+                  {formatNumber(r.ocrScansThisMonth, locale)}
+                </td>
+                <td className="px-4 py-3 font-mono tabular-nums text-ink">{formatNumber(r.members, locale)}</td>
                 <td className="px-4 py-3 font-mono tabular-nums text-subtle">
-                  {new Date(r.createdAt).toLocaleDateString('he-IL')}
+                  {formatDate(r.createdAt, locale)}
                 </td>
               </tr>
             ))}
             {restaurants.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-subtle">
-                  אין מסעדות עדיין
+                <td colSpan={6} className="px-4 py-10 text-center text-subtle">
+                  <p className="font-medium text-muted">{t('list.empty')}</p>
+                  <p className="mt-1 text-xs">{t('list.emptyHint')}</p>
                 </td>
               </tr>
             ) : null}

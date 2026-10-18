@@ -2,4 +2,62 @@
  * 'nav' namespace (Hebrew — source of truth).
  * Owner: S5 operations UI — dashboard layout, nav, search, activity feed, worker banner.
  */
-export const he = {};
+export const he = {
+  mainLabel: 'ניווט ראשי',
+  mobileLabel: 'ניווט מהיר',
+  skipToContent: 'דילוג לתוכן',
+  links: {
+    overview: 'סקירה',
+    receiving: 'קליטת סחורה',
+    approvals: 'תור אישורים',
+    leaks: 'בלש דליפות',
+    suppliers: 'ספקים',
+    catalog: 'קטלוג',
+    orders: 'הזמנות',
+    exports: 'ייצוא',
+    team: 'צוות',
+    settings: 'הגדרות',
+  },
+  groups: {
+    operations: 'תפעול',
+    purchasing: 'רכש',
+    admin: 'ניהול',
+  },
+  roles: {
+    owner: 'בעלים',
+    manager: 'מנהל/ת',
+    receiver: 'מקבל סחורה',
+    bookkeeper: 'חשב/ת',
+    chef: 'שף',
+  },
+  menu: {
+    open: 'פתיחת תפריט',
+    close: 'סגירת תפריט',
+    more: 'עוד',
+    account: 'חשבון',
+  },
+  signOut: 'התנתקות',
+  search: {
+    placeholder: 'חיפוש ספקים, מוצרים, חשבוניות…',
+    shortPlaceholder: 'חיפוש…',
+    label: 'חיפוש כללי',
+    searching: 'מחפש…',
+    noResults: 'לא נמצאו תוצאות',
+    minChars: 'הקלידו לפחות 2 תווים',
+    error: 'החיפוש נכשל. נסו שוב.',
+    hint: 'חצים לניווט · Enter לפתיחה · Esc לסגירה',
+    groups: {
+      suppliers: 'ספקים',
+      products: 'מוצרים',
+      invoices: 'חשבוניות',
+    },
+    noInvoiceNumber: 'ללא מספר',
+  },
+  worker: {
+    title: 'מנוע העיבוד לא זמין כרגע.',
+    body: 'חשבוניות שתעלו יישמרו ויעברו OCR והתאמה ברגע שהוא יחזור.',
+    lastBeat: 'פעימה אחרונה לפני {minutes} דק׳.',
+    ownerNotified: 'הבעלים קיבל התראה.',
+  },
+  loading: 'טוען',
+};

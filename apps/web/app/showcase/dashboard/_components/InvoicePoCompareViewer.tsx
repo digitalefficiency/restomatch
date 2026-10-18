@@ -26,6 +26,14 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocale, useT } from '@/lib/i18n/client';
+import type { Locale } from '@/lib/i18n/config';
+import { showcase } from '@/lib/i18n/messages/showcase';
+import { formatIls } from '@/lib/money';
+import { localDate } from '../../_lib/time';
+import { mockText } from '../../_lib/mockText';
+import { InvoicePaper } from './InvoicePaperShared';
+import type { ScanData } from './InvoiceScanViewer';
 
 export interface CompareLine {
   productName: string;
@@ -62,13 +70,18 @@ export interface CompareData {
   invoiceNumber: string;
   invoiceDate: string;
   ocrConfidence: number;
-  /** Database-backed URL of the original scanned invoice (loaded via iframe). */
+  /** Database-backed URL of the original scanned invoice (tenant-private). */
   rawImageUrl: string;
 }
 
 interface Props {
   data: CompareData;
   lines: CompareLine[];
+  /**
+   * The supplier's paper, rendered inline. Preferred over `data.rawImageUrl`:
+   * /scans/[id] requires a signed-in tenant, so it can't load in the public demo.
+   */
+  invoiceScan?: ScanData;
   onClose: () => void;
 }
 
@@ -78,10 +91,17 @@ function lineKey(line: CompareLine, idx: number): LineKey {
   return `${line.productName}-${idx}`;
 }
 
-export function InvoicePoCompareViewer({ data, lines, onClose }: Props) {
+export function InvoicePoCompareViewer({ data, lines, invoiceScan, onClose }: Props) {
+  const t = useT(showcase);
+  const locale = useLocale();
   const overlayRef = useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(0.72);
+
+  // Fit the papers on small screens.
+  useEffect(() => {
+    if (window.innerWidth < 768) setZoom(Math.max(0.4, (window.innerWidth - 32) / 580));
+  }, []);
   const [focusKey, setFocusKey] = useState<LineKey | null>(null);
 
   useGSAP(
@@ -103,7 +123,7 @@ export function InvoicePoCompareViewer({ data, lines, onClose }: Props) {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
       if (e.key === '+' || e.key === '=') setZoom((z) => Math.min(1.4, z + 0.1));
-      if (e.key === '-') setZoom((z) => Math.max(0.5, z - 0.1));
+      if (e.key === '-') setZoom((z) => Math.max(0.4, z - 0.1));
     };
     document.addEventListener('keydown', handler);
     return () => {
@@ -124,7 +144,6 @@ export function InvoicePoCompareViewer({ data, lines, onClose }: Props) {
         onClose();
       }}
       className="fixed inset-0 z-[60] bg-black/75 backdrop-blur-md flex items-stretch justify-center p-2 sm:p-4"
-      dir="rtl"
     >
       <div
         ref={sheetRef}
@@ -132,21 +151,21 @@ export function InvoicePoCompareViewer({ data, lines, onClose }: Props) {
         className="bg-surface border border-line rounded-2xl shadow-card w-full max-w-[1400px] max-h-[96vh] flex flex-col overflow-hidden"
       >
         {/* Toolbar */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-line bg-surface-2">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b border-line bg-surface-2">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-10 h-10 rounded-xl bg-primary/12 border border-primary/25 flex items-center justify-center shrink-0">
               <ClipboardList className="w-5 h-5 text-primary" />
             </div>
             <div className="min-w-0">
               <div className="text-sm font-bold text-ink flex items-center gap-2 flex-wrap">
-                <span>השוואה צד-לצד:</span>
+                <span>{t('compare.title')}</span>
                 <span className="font-mono tabular-nums text-muted">{data.poNumber}</span>
-                <span className="text-subtle">↔</span>
+                <span className="text-muted">↔</span>
                 <span className="font-mono tabular-nums text-muted">{data.invoiceNumber}</span>
               </div>
               <div className="text-xs text-muted flex items-center gap-2 flex-wrap">
-                <span>{data.supplierName}</span>
-                <span className="text-subtle">·</span>
+                <span>{mockText(data.supplierName, locale)}</span>
+                <span className="text-muted">·</span>
                 <DiffStatBadge stats={stats} />
               </div>
             </div>
@@ -155,9 +174,10 @@ export function InvoicePoCompareViewer({ data, lines, onClose }: Props) {
           <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
-              onClick={() => setZoom((z) => Math.max(0.5, z - 0.1))}
+              onClick={() => setZoom((z) => Math.max(0.4, z - 0.1))}
               className="w-8 h-8 rounded-lg bg-surface border border-line hover:border-primary/40 flex items-center justify-center"
-              title="הקטן"
+              title={t('common.zoomOut')}
+              aria-label={t('common.zoomOut')}
             >
               <ZoomOut className="w-4 h-4 text-muted" />
             </button>
@@ -168,7 +188,8 @@ export function InvoicePoCompareViewer({ data, lines, onClose }: Props) {
               type="button"
               onClick={() => setZoom((z) => Math.min(1.4, z + 0.1))}
               className="w-8 h-8 rounded-lg bg-surface border border-line hover:border-primary/40 flex items-center justify-center"
-              title="הגדל"
+              title={t('common.zoomIn')}
+              aria-label={t('common.zoomIn')}
             >
               <ZoomIn className="w-4 h-4 text-muted" />
             </button>
@@ -176,16 +197,17 @@ export function InvoicePoCompareViewer({ data, lines, onClose }: Props) {
             <button
               type="button"
               className="inline-flex items-center gap-1.5 px-3 h-8 rounded-lg bg-surface border border-line hover:border-primary/40 hover:text-primary text-xs font-medium text-ink"
-              title="הורד את שני המסמכים"
+              title={t('compare.downloadTitle')}
             >
               <Download className="w-3.5 h-3.5" />
-              הורד
+              {t('common.download')}
             </button>
             <button
               type="button"
               onClick={onClose}
               className="w-8 h-8 rounded-full bg-surface-2 hover:bg-line flex items-center justify-center"
-              title="סגור"
+              title={t('common.close')}
+              aria-label={t('common.close')}
             >
               <X className="w-4 h-4 text-muted" />
             </button>
@@ -195,14 +217,12 @@ export function InvoicePoCompareViewer({ data, lines, onClose }: Props) {
         {/* Body: 2 papers + diff panel */}
         <div className="flex-1 min-h-0 flex">
           {/* Diff panel */}
-          <aside className="w-80 shrink-0 border-l border-line bg-surface overflow-y-auto hidden xl:flex flex-col">
+          <aside className="w-80 shrink-0 border-e border-line bg-surface overflow-y-auto hidden xl:flex flex-col">
             <div className="px-5 py-4 border-b border-line">
-              <div className="text-xs uppercase tracking-wider text-subtle font-semibold mb-1">
-                ניתוח שורות
+              <div className="text-xs uppercase tracking-wider text-muted font-semibold mb-1">
+                {t('compare.analysis')}
               </div>
-              <div className="text-xs text-muted">
-                לחץ על שורה כדי להבליט אותה בשני המסמכים.
-              </div>
+              <div className="text-xs text-muted">{t('compare.analysisHint')}</div>
             </div>
 
             <div className="flex-1 overflow-y-auto px-3 py-3 space-y-1.5">
@@ -215,7 +235,7 @@ export function InvoicePoCompareViewer({ data, lines, onClose }: Props) {
                     key={key}
                     type="button"
                     onClick={() => setFocusKey(isFocus ? null : key)}
-                    className={`w-full text-right rounded-xl border px-3 py-2.5 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
+                    className={`w-full text-start rounded-xl border px-3 py-2.5 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
                       isFocus
                         ? `${accent.borderStrong} ${accent.bgStrong}`
                         : `border-line bg-surface-2 hover:border-primary/40`
@@ -223,33 +243,35 @@ export function InvoicePoCompareViewer({ data, lines, onClose }: Props) {
                   >
                     <div className="flex items-center justify-between gap-2 mb-1">
                       <span className="text-xs font-semibold text-ink truncate">
-                        {line.productName}
+                        {mockText(line.productName, locale)}
                       </span>
                       <span
                         className={`shrink-0 inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${accent.tint}`}
                       >
                         {accent.icon}
-                        <span>{accent.label}</span>
+                        <span>{t(accent.labelKey)}</span>
                       </span>
                     </div>
                     <div className="grid grid-cols-2 gap-1 text-[11px]">
                       <DiffCell
-                        label="הזמנה"
+                        label={t('compare.order')}
+                        missingLabel={t('compare.missing')}
                         qty={line.poQty}
                         price={line.poUnitPrice}
-                        unit={line.unit}
+                        unit={mockText(line.unit, locale)}
                       />
                       <DiffCell
-                        label="חשבונית"
+                        label={t('compare.invoice')}
+                        missingLabel={t('compare.missing')}
                         qty={line.invoiceQty}
                         price={line.invoiceUnitPrice}
-                        unit={line.unit}
+                        unit={mockText(line.unit, locale)}
                         emphasize={line.status !== 'matched'}
                       />
                     </div>
                     {line.variance > 0 ? (
                       <div className="mt-1.5 flex items-center justify-between text-[10px]">
-                        <span className="text-muted">הפסד פוטנציאלי</span>
+                        <span className="text-muted">{t('compare.potentialLoss')}</span>
                         <span className="font-bold text-danger font-mono tabular-nums">
                           ₪{line.variance.toFixed(2)}
                         </span>
@@ -262,29 +284,30 @@ export function InvoicePoCompareViewer({ data, lines, onClose }: Props) {
 
             {/* Footer summary */}
             <div className="border-t border-line px-5 py-4 bg-surface-2 space-y-2">
-              <SummaryRow label="סה״כ הוזמן" value={stats.totalPoIls} tone="slate" />
-              <SummaryRow label="סה״כ חויב" value={stats.totalInvoiceIls} tone="slate" />
+              <SummaryRow label={t('compare.totalOrdered')} value={stats.totalPoIls} tone="slate" locale={locale} />
+              <SummaryRow label={t('compare.totalBilled')} value={stats.totalInvoiceIls} tone="slate" locale={locale} />
               <div className="border-t border-line pt-2 flex items-baseline justify-between">
-                <span className="text-xs font-semibold text-ink">פער כללי</span>
+                <span className="text-xs font-semibold text-ink">{t('compare.netDiff')}</span>
                 <span
                   className={`text-sm font-bold font-mono tabular-nums ${
                     stats.delta > 0 ? 'text-danger' : stats.delta < 0 ? 'text-primary' : 'text-muted'
                   }`}
                 >
-                  {stats.delta > 0 ? '+' : ''}₪{Math.abs(stats.delta).toFixed(2)}
+                  {stats.delta > 0 ? '+' : stats.delta < 0 ? '−' : ''}
+                  {formatIls(Math.abs(stats.delta), { locale, maximumFractionDigits: 2 })}
                 </span>
               </div>
               {issueLines.length > 0 ? (
                 <div className="text-[11px] text-warn bg-warn/8 border border-warn/25 rounded-lg px-2.5 py-1.5 flex items-start gap-1.5">
                   <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
                   <span>
-                    {issueLines.length} שורות לבדיקה. הצוות עדכן {stats.adjustedCount} מהן.
+                    {t('compare.toReview', { count: issueLines.length, adjusted: stats.adjustedCount })}
                   </span>
                 </div>
               ) : (
                 <div className="text-[11px] text-primary bg-primary/8 border border-primary/25 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
                   <Check className="w-3 h-3" strokeWidth={3} />
-                  <span>כל השורות תאמו 1:1</span>
+                  <span>{t('compare.allMatched')}</span>
                 </div>
               )}
             </div>
@@ -299,54 +322,51 @@ export function InvoicePoCompareViewer({ data, lines, onClose }: Props) {
               backgroundSize: '24px 24px',
             }}
           >
+            {/* CSS `zoom` (not transform) so the scroll area follows the size. */}
             <div
-              className="mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8 transition-transform duration-200"
-              style={{
-                transform: `scale(${zoom})`,
-                transformOrigin: 'top center',
-                width: 'fit-content',
-              }}
+              className="mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8"
+              style={{ zoom, width: 'fit-content' }}
             >
-              {/* PO paper - right side in RTL flow (came first) */}
+              {/* PO paper — first in reading order (it came first). */}
               <div className="order-1">
                 <PaperLabel
                   icon={<ClipboardList className="w-4 h-4" />}
-                  label="ההזמנה שיצאה מהמסעדה"
-                  sub={`${data.poNumber} · נשלחה ${formatDate(data.poIssuedAt)}`}
+                  label={t('compare.poLabel')}
+                  sub={t('compare.poSub', { number: data.poNumber, date: localDate(data.poIssuedAt) })}
                   tone="blue"
                 />
-                <PoPaper data={data} lines={lines} focusKey={focusKey} />
+                <PoPaper data={data} lines={lines} focusKey={focusKey} locale={locale} />
               </div>
 
-              {/* Invoice paper - left side in RTL flow (came second).
-                  Loaded via iframe from /scans/[invoiceId] so the document
-                  is fetched from the database/storage URL rather than
-                  rendered inline. The focusKey-based ring highlight is
-                  not available across the iframe boundary; sidebar focus
-                  still drives the PO side. */}
+              {/* Invoice paper — the supplier's Hebrew document, rendered inline
+                  at 75% (the stored /scans/[id] URL is tenant-private). */}
               <div className="order-2">
                 <PaperLabel
                   icon={<FileText className="w-4 h-4" />}
-                  label="החשבונית שהגיעה מהספק"
-                  sub={`${data.invoiceNumber} · נסרקה ${formatDate(data.invoiceDate)}`}
+                  label={t('compare.invoiceLabel')}
+                  sub={t('compare.invoiceSub', {
+                    number: data.invoiceNumber,
+                    date: localDate(data.invoiceDate),
+                  })}
                   tone="amber"
                 />
                 <div
                   className="bg-surface-2 rounded-md shadow-[0_16px_44px_-16px_rgba(0,0,0,0.6)] overflow-hidden"
-                  style={{ width: 540, height: 760 }}
+                  style={{ width: 540, height: 765 }}
                 >
-                  <iframe
-                    key={data.rawImageUrl}
-                    src={data.rawImageUrl}
-                    title={`סריקת חשבונית ${data.invoiceNumber}`}
-                    className="w-full h-full border-0"
-                    style={{
-                      transform: 'scale(0.75)',
-                      transformOrigin: 'top center',
-                      width: '720px',
-                      height: '1020px',
-                    }}
-                  />
+                  {invoiceScan ? (
+                    <div dir="rtl" lang="he" style={{ zoom: 0.75 }}>
+                      <InvoicePaper data={invoiceScan} />
+                    </div>
+                  ) : (
+                    <iframe
+                      key={data.rawImageUrl}
+                      src={data.rawImageUrl}
+                      title={data.invoiceNumber}
+                      className="border-0"
+                      style={{ zoom: 0.75, width: 720, height: 1020 }}
+                    />
+                  )}
                 </div>
               </div>
             </div>
@@ -365,11 +385,15 @@ function PoPaper({
   data,
   lines,
   focusKey,
+  locale,
 }: {
   data: CompareData;
   lines: CompareLine[];
   focusKey: LineKey | null;
+  locale: Locale;
 }) {
+  const t = useT(showcase);
+  const money = (v: number) => formatIls(v, { locale, maximumFractionDigits: 2 });
   const poLines = lines
     .map((l, i) => ({ ...l, idx: i }))
     .filter((l) => l.poQty !== null);
@@ -392,32 +416,32 @@ function PoPaper({
       {/* Restaurant header band */}
       <div className="rounded-t-md bg-gradient-to-l from-stone-900 to-teal-900 px-6 py-4 flex items-center justify-between text-white">
         <div>
-          <div className="text-xl font-extrabold tracking-tight">{data.customerName}</div>
+          <div className="text-xl font-extrabold tracking-tight">{mockText(data.customerName, locale)}</div>
           <div className="text-[11px] opacity-80 mt-0.5">
-            ח.פ. {data.customerBusinessId} · רחוב סוקולוב 24, רמת השרון
+            {t('compare.po.companyNo', { id: data.customerBusinessId })} · {t('compare.po.address')}
           </div>
         </div>
         <div className="w-12 h-12 rounded-lg bg-white/15 border border-white/25 flex items-center justify-center font-bold">
-          ש.ז.
+          {t('compare.po.monogram')}
         </div>
       </div>
 
       <div className="px-6 pt-5 pb-8 text-stone-900">
         {/* Title row */}
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-2xl font-bold tracking-tight text-stone-900">הזמנת רכש</h2>
-          <div className="text-left text-xs space-y-0.5">
+          <h2 className="text-2xl font-bold tracking-tight text-stone-900">{t('compare.po.title')}</h2>
+          <div className="text-end text-xs space-y-0.5">
             <div className="flex items-baseline gap-2 justify-end">
-              <span className="text-stone-500">מס׳ הזמנה:</span>
+              <span className="text-stone-500">{t('compare.po.number')}</span>
               <span className="font-mono font-bold tabular-nums">{data.poNumber}</span>
             </div>
             <div className="flex items-baseline gap-2 justify-end">
-              <span className="text-stone-500">נשלחה:</span>
-              <span className="tabular-nums">{formatDate(data.poIssuedAt)}</span>
+              <span className="text-stone-500">{t('compare.po.sent')}</span>
+              <span className="tabular-nums">{localDate(data.poIssuedAt)}</span>
             </div>
             <div className="flex items-baseline gap-2 justify-end">
-              <span className="text-stone-500">מועד אספקה צפוי:</span>
-              <span className="tabular-nums font-medium">{formatDate(data.poExpectedAt)}</span>
+              <span className="text-stone-500">{t('compare.po.expected')}</span>
+              <span className="tabular-nums font-medium">{localDate(data.poExpectedAt)}</span>
             </div>
           </div>
         </div>
@@ -425,10 +449,12 @@ function PoPaper({
         {/* Supplier block */}
         <div className="bg-stone-50 rounded-lg px-4 py-2.5 mb-5 border border-stone-200/70 text-xs">
           <div className="uppercase tracking-wider text-stone-500 font-semibold mb-1 text-[10px]">
-            לכבוד
+            {t('compare.po.to')}
           </div>
-          <div className="font-bold text-sm">{data.supplierName}</div>
-          <div className="text-stone-500 mt-0.5">ח.פ. {data.supplierBusinessId}</div>
+          <div className="font-bold text-sm">{mockText(data.supplierName, locale)}</div>
+          <div className="text-stone-500 mt-0.5">
+            {t('compare.po.companyNo', { id: data.supplierBusinessId })}
+          </div>
         </div>
 
         {/* Lines */}
@@ -436,20 +462,20 @@ function PoPaper({
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-stone-100/70 text-stone-700">
-                <th className="px-2 py-2 text-right font-semibold text-[10px] uppercase tracking-wider w-8">
+                <th className="px-2 py-2 text-start font-semibold text-[10px] uppercase tracking-wider w-8">
                   #
                 </th>
-                <th className="px-2 py-2 text-right font-semibold text-[10px] uppercase tracking-wider">
-                  פריט
+                <th className="px-2 py-2 text-start font-semibold text-[10px] uppercase tracking-wider">
+                  {t('compare.po.item')}
                 </th>
-                <th className="px-2 py-2 text-right font-semibold text-[10px] uppercase tracking-wider tabular-nums">
-                  כמות
+                <th className="px-2 py-2 text-start font-semibold text-[10px] uppercase tracking-wider tabular-nums">
+                  {t('compare.po.qty')}
                 </th>
-                <th className="px-2 py-2 text-right font-semibold text-[10px] uppercase tracking-wider tabular-nums">
-                  מחיר
+                <th className="px-2 py-2 text-start font-semibold text-[10px] uppercase tracking-wider tabular-nums">
+                  {t('compare.po.price')}
                 </th>
-                <th className="px-2 py-2 text-right font-semibold text-[10px] uppercase tracking-wider tabular-nums">
-                  סה״כ
+                <th className="px-2 py-2 text-start font-semibold text-[10px] uppercase tracking-wider tabular-nums">
+                  {t('compare.po.total')}
                 </th>
               </tr>
             </thead>
@@ -471,10 +497,10 @@ function PoPaper({
                     }`}
                   >
                     <td className="px-2 py-2 text-stone-500 tabular-nums">{line.idx + 1}</td>
-                    <td className="px-2 py-2 font-medium">{line.productName}</td>
+                    <td className="px-2 py-2 font-medium">{mockText(line.productName, locale)}</td>
                     <td className="px-2 py-2 tabular-nums">
                       <DiffMark on={line.status === 'qty_short' || line.status === 'qty_over'} tone="amber">
-                        {line.poQty} {line.unit}
+                        {line.poQty} {mockText(line.unit, locale)}
                       </DiffMark>
                     </td>
                     <td className="px-2 py-2 tabular-nums">
@@ -496,16 +522,16 @@ function PoPaper({
         </div>
 
         {/* Totals */}
-        <div className="flex justify-start">
+        <div className="flex rtl:justify-start ltr:justify-end">
           <div className="w-56 space-y-1 text-xs">
-            <PaperTotalRow label="סכום ביניים" value={subtotal} />
-            <PaperTotalRow label="מע״מ 17%" value={vat} />
+            <PaperTotalRow label={t('compare.po.subtotal')} value={money(subtotal)} />
+            <PaperTotalRow label={t('compare.po.vat')} value={money(vat)} />
             <div className="border-t-2 border-stone-300 my-1" />
             <div className="flex items-baseline justify-between bg-teal-900 text-white px-3 py-2 rounded-md">
-              <span className="text-[10px] uppercase tracking-wider opacity-80">סה״כ הזמנה</span>
-              <span className="font-bold tabular-nums">
-                ₪{total.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              <span className="text-[10px] uppercase tracking-wider opacity-80">
+                {t('compare.po.orderTotal')}
               </span>
+              <span className="font-bold tabular-nums">{money(total)}</span>
             </div>
           </div>
         </div>
@@ -513,14 +539,14 @@ function PoPaper({
         {/* Footer */}
         <div className="mt-8 border-t border-dashed border-stone-300 pt-3 text-[11px] text-stone-500 flex items-end justify-between">
           <div>
-            <div>אושר ע״י: {data.poApprovedBy}</div>
-            <div className="mt-0.5">תנאי תשלום: שוטף +30</div>
+            <div>{t('compare.po.approvedBy', { name: mockText(data.poApprovedBy, locale) })}</div>
+            <div className="mt-0.5">{t('compare.po.terms')}</div>
           </div>
           <div
             className="px-3 py-1.5 rounded border-2 border-teal-700 text-teal-700 font-bold text-xs"
             style={{ transform: 'rotate(-3deg)' }}
           >
-            ✓ נשלח בדוא״ל
+            {t('compare.po.emailed')}
           </div>
         </div>
       </div>
@@ -578,25 +604,25 @@ function PaperLabel({
   );
 }
 
-function PaperTotalRow({ label, value }: { label: string; value: number }) {
+function PaperTotalRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline justify-between">
       <span className="text-stone-600">{label}</span>
-      <span className="font-medium tabular-nums">
-        ₪{value.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-      </span>
+      <span className="font-medium tabular-nums">{value}</span>
     </div>
   );
 }
 
 function DiffCell({
   label,
+  missingLabel,
   qty,
   price,
   unit,
   emphasize,
 }: {
   label: string;
+  missingLabel: string;
   qty: number | null;
   price: number | null;
   unit: string;
@@ -604,7 +630,7 @@ function DiffCell({
 }) {
   return (
     <div className={`rounded-lg px-2 py-1.5 ${emphasize ? 'bg-warn/8 border border-warn/25' : 'bg-surface border border-line'}`}>
-      <div className="text-[9px] uppercase tracking-wider text-subtle font-semibold">
+      <div className="text-[9px] uppercase tracking-wider text-muted font-semibold">
         {label}
       </div>
       {qty !== null ? (
@@ -612,7 +638,7 @@ function DiffCell({
           {qty} <span className="text-[10px] font-normal text-muted">{unit}</span>
         </div>
       ) : (
-        <div className="text-subtle italic text-xs">חסר</div>
+        <div className="text-muted italic text-xs">{missingLabel}</div>
       )}
       {price !== null && qty !== null ? (
         <div className="text-[9px] text-muted font-mono tabular-nums">× ₪{price.toFixed(2)}</div>
@@ -625,17 +651,19 @@ function SummaryRow({
   label,
   value,
   tone,
+  locale,
 }: {
   label: string;
   value: number;
   tone: 'slate' | 'red' | 'emerald';
+  locale: Locale;
 }) {
   const cls = tone === 'red' ? 'text-danger' : tone === 'emerald' ? 'text-primary' : 'text-ink';
   return (
     <div className="flex items-baseline justify-between">
       <span className="text-xs text-muted">{label}</span>
       <span className={`text-sm font-semibold font-mono tabular-nums ${cls}`}>
-        ₪{value.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        {formatIls(value, { locale, maximumFractionDigits: 2 })}
       </span>
     </div>
   );
@@ -646,21 +674,26 @@ function DiffStatBadge({
 }: {
   stats: ReturnType<typeof computeStats>;
 }) {
+  const t = useT(showcase);
+  const locale = useLocale();
   if (stats.issueCount === 0) {
     return (
       <span className="inline-flex items-center gap-1 rounded-full ring-1 ring-primary/25 bg-primary/12 px-2 py-0.5 text-[10px] font-semibold text-primary">
         <Check className="w-3 h-3" strokeWidth={3} />
-        תאמו 1:1
+        {t('compare.matchedBadge')}
       </span>
     );
   }
   return (
     <span className="inline-flex items-center gap-1 rounded-full ring-1 ring-warn/25 bg-warn/12 px-2 py-0.5 text-[10px] font-semibold text-warn">
       <AlertTriangle className="w-3 h-3" />
-      {stats.issueCount} חריגות
+      {stats.issueCount === 1
+        ? t('common.varianceOne')
+        : t('common.varianceMany', { count: stats.issueCount })}
       {stats.delta !== 0 ? (
         <span className={`font-mono tabular-nums ${stats.delta > 0 ? 'text-danger' : 'text-primary'}`}>
-          · {stats.delta > 0 ? '+' : ''}₪{Math.abs(stats.delta).toFixed(0)}
+          · {stats.delta > 0 ? '+' : '−'}
+          {formatIls(Math.abs(stats.delta), { locale })}
         </span>
       ) : null}
     </span>
@@ -675,7 +708,7 @@ function statusAccent(status: CompareLine['status']) {
   switch (status) {
     case 'qty_short':
       return {
-        label: 'התקבל פחות',
+        labelKey: 'lineStatus.qtyShort' as const,
         tint: 'bg-warn/12 text-warn ring-1 ring-warn/25',
         ring: 'ring-warn/50',
         borderStrong: 'border-warn/40',
@@ -684,7 +717,7 @@ function statusAccent(status: CompareLine['status']) {
       };
     case 'qty_over':
       return {
-        label: 'התקבל יותר',
+        labelKey: 'lineStatus.qtyOver' as const,
         tint: 'bg-warn/12 text-warn ring-1 ring-warn/25',
         ring: 'ring-warn/50',
         borderStrong: 'border-warn/40',
@@ -693,7 +726,7 @@ function statusAccent(status: CompareLine['status']) {
       };
     case 'price_higher':
       return {
-        label: 'מחיר עלה',
+        labelKey: 'lineStatus.priceHigher' as const,
         tint: 'bg-danger/12 text-danger ring-1 ring-danger/25',
         ring: 'ring-danger/50',
         borderStrong: 'border-danger/40',
@@ -702,7 +735,7 @@ function statusAccent(status: CompareLine['status']) {
       };
     case 'price_lower':
       return {
-        label: 'מחיר ירד',
+        labelKey: 'lineStatus.priceLower' as const,
         tint: 'bg-primary/12 text-primary ring-1 ring-primary/25',
         ring: 'ring-primary/50',
         borderStrong: 'border-primary/40',
@@ -711,7 +744,7 @@ function statusAccent(status: CompareLine['status']) {
       };
     case 'unordered':
       return {
-        label: 'לא הוזמן',
+        labelKey: 'lineStatus.unordered' as const,
         tint: 'bg-danger/12 text-danger ring-1 ring-danger/25',
         ring: 'ring-danger/50',
         borderStrong: 'border-danger/40',
@@ -720,7 +753,7 @@ function statusAccent(status: CompareLine['status']) {
       };
     case 'missing_from_invoice':
       return {
-        label: 'חסר בחשבונית',
+        labelKey: 'lineStatus.missing' as const,
         tint: 'bg-surface-2 text-muted ring-1 ring-line',
         ring: 'ring-line',
         borderStrong: 'border-line',
@@ -729,7 +762,7 @@ function statusAccent(status: CompareLine['status']) {
       };
     default:
       return {
-        label: 'תואם',
+        labelKey: 'lineStatus.matched' as const,
         tint: 'bg-primary/12 text-primary ring-1 ring-primary/25',
         ring: 'ring-primary/50',
         borderStrong: 'border-primary/40',
@@ -767,10 +800,3 @@ function computeStats(lines: CompareLine[]) {
   };
 }
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('he-IL', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  });
-}

@@ -294,6 +294,8 @@ export const invitations = pgTable(
     acceptedByUserId: uuid('accepted_by_user_id').references(() => users.id, {
       onDelete: 'set null',
     }),
+    /** Invitee's app language ('he' | 'en', NULL = default); copied to the membership on accept (0039). */
+    preferredLocale: varchar('preferred_locale', { length: 8 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

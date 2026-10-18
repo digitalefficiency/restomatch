@@ -15,12 +15,18 @@ import { z } from 'zod';
 import { canonicalizeEmail } from '../email';
 import { recordAudit } from '../audit';
 import type { MemberContext } from '../context';
-import { ownerProcedure, router, userScopedProcedure } from '../trpc';
+import { managerProcedure, ownerProcedure, router, userScopedProcedure } from '../trpc';
 
 /** Invite link validity. */
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const roleSchema = z.enum(['owner', 'manager', 'receiver', 'bookkeeper', 'chef']);
+/** App UI language of a member / invitee (memberships/invitations.preferred_locale). */
+const localeSchema = z.enum(['he', 'en']);
+type AppLocale = z.infer<typeof localeSchema>;
+function asLocale(v: string | null | undefined): AppLocale | null {
+  return v === 'he' || v === 'en' ? v : null;
+}
 
 /** Cryptographically-random invite token; only its sha256 hash is stored. */
 function generateRawToken(): string {
@@ -53,14 +59,19 @@ async function ownerCount(ctx: MemberContext): Promise<number> {
 }
 
 export const teamRouter = router({
-  /** Members (memberships ⋈ users) + pending invites for the caller's restaurant. */
-  list: ownerProcedure.query(async ({ ctx }) => {
+  /**
+   * Members (memberships ⋈ users) + pending invites for the caller's restaurant.
+   * Owner + manager: a manager sees the roster (and may set a member's app
+   * language via setMemberLocale) but every roster WRITE stays owner-only.
+   */
+  list: managerProcedure.query(async ({ ctx }) => {
     const adminDb = ctx.adminDb ?? ctx.db;
     // Memberships are visible under the tenant RLS policy.
     const memberRows = await ctx.db
       .select({
         userId: memberships.userId,
         role: memberships.role,
+        preferredLocale: memberships.preferredLocale,
         createdAt: memberships.createdAt,
       })
       .from(memberships)
@@ -82,6 +93,7 @@ export const teamRouter = router({
       role: m.role,
       email: byId.get(m.userId)?.email ?? '',
       name: byId.get(m.userId)?.name ?? null,
+      preferredLocale: asLocale(m.preferredLocale),
       createdAt: m.createdAt,
     }));
 
@@ -91,6 +103,7 @@ export const teamRouter = router({
         email: invitations.email,
         role: invitations.role,
         invitedByUserId: invitations.invitedByUserId,
+        preferredLocale: invitations.preferredLocale,
         expiresAt: invitations.expiresAt,
         createdAt: invitations.createdAt,
       })
@@ -113,7 +126,7 @@ export const teamRouter = router({
    * a tx). The raw token is never returned to the browser beyond this owner.
    */
   invite: ownerProcedure
-    .input(z.object({ email: z.string().email(), role: roleSchema }))
+    .input(z.object({ email: z.string().email(), role: roleSchema, locale: localeSchema.optional() }))
     .mutation(async ({ ctx, input }) => {
       const adminDb = ctx.adminDb ?? ctx.db;
       const email = normalizeEmail(input.email);
@@ -154,6 +167,7 @@ export const teamRouter = router({
           role: input.role,
           tokenHash: hashToken(rawToken),
           invitedByUserId: ctx.session.userId,
+          preferredLocale: input.locale ?? null,
           expiresAt: new Date(Date.now() + INVITE_TTL_MS),
         });
       } catch (err) {
@@ -169,7 +183,7 @@ export const teamRouter = router({
         userId: ctx.session.userId,
         action: 'team.member_invited',
         entityType: 'invitation',
-        after: { email, role: input.role },
+        after: { email, role: input.role, locale: input.locale ?? null },
       });
 
       const [restaurant] = await ctx.db
@@ -187,6 +201,7 @@ export const teamRouter = router({
         rawToken,
         email,
         role: input.role,
+        locale: input.locale ?? null,
         restaurantName: restaurant?.name ?? '',
         inviterName: inviter?.name ?? null,
       };
@@ -243,6 +258,7 @@ export const teamRouter = router({
         rawToken,
         email: inv.email,
         role: inv.role,
+        locale: asLocale(inv.preferredLocale),
         restaurantName: restaurant?.name ?? '',
         inviterName: inviter?.name ?? null,
       };
@@ -282,7 +298,7 @@ export const teamRouter = router({
     .input(z.object({ userId: z.string().uuid(), role: roleSchema }))
     .mutation(async ({ ctx, input }) => {
       const current = await ctx.db
-        .select({ role: memberships.role })
+        .select({ role: memberships.role, preferredLocale: memberships.preferredLocale })
         .from(memberships)
         .where(
           and(
@@ -311,6 +327,8 @@ export const teamRouter = router({
         userId: input.userId,
         restaurantId: ctx.session.restaurantId,
         role: input.role,
+        // Keep the member's app language across the delete/re-insert.
+        preferredLocale: current.find((r) => r.preferredLocale)?.preferredLocale ?? null,
       });
       await recordAudit(ctx.db, {
         restaurantId: ctx.session.restaurantId,
@@ -406,7 +424,13 @@ export const teamRouter = router({
       await adminDb.transaction(async (tx) => {
         await tx
           .insert(memberships)
-          .values({ userId: ctx.session.userId, restaurantId: inv.restaurantId, role: inv.role })
+          .values({
+            userId: ctx.session.userId,
+            restaurantId: inv.restaurantId,
+            role: inv.role,
+            // The inviter's language choice becomes the member's app language.
+            preferredLocale: asLocale(inv.preferredLocale),
+          })
           .onConflictDoNothing();
         await tx
           .update(invitations)
@@ -429,6 +453,43 @@ export const teamRouter = router({
         });
       });
 
-      return { restaurantId: inv.restaurantId, role: inv.role };
+      return {
+        restaurantId: inv.restaurantId,
+        role: inv.role,
+        preferredLocale: asLocale(inv.preferredLocale),
+      };
+    }),
+
+  /**
+   * Set a member's app language ('he' | 'en', or null = follow the device).
+   * Owner + manager (e.g. a manager onboarding an English-speaking receiver).
+   * Tenant-guarded: the update is scoped to the caller's restaurant, so a foreign
+   * userId matches nothing and is a NOT_FOUND.
+   */
+  setMemberLocale: managerProcedure
+    .input(z.object({ userId: z.string().uuid(), locale: localeSchema.nullable() }))
+    .mutation(async ({ ctx, input }) => {
+      const updated = await ctx.db
+        .update(memberships)
+        .set({ preferredLocale: input.locale })
+        .where(
+          and(
+            eq(memberships.restaurantId, ctx.session.restaurantId),
+            eq(memberships.userId, input.userId),
+          ),
+        )
+        .returning({ userId: memberships.userId });
+      if (updated.length === 0) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'החבר לא נמצא.' });
+      }
+      await recordAudit(ctx.db, {
+        restaurantId: ctx.session.restaurantId,
+        userId: ctx.session.userId,
+        action: 'team.member_locale_changed',
+        entityType: 'user',
+        entityId: input.userId,
+        after: { locale: input.locale },
+      });
+      return { ok: true, locale: input.locale };
     }),
 });

@@ -19,6 +19,9 @@
  *   - No external assets — everything self-contained for deliverability.
  */
 
+/** Email language. Hebrew (RTL) is the default; English renders LTR. */
+export type EmailLocale = 'he' | 'en';
+
 export interface RenderedEmail {
   subject: string;
   html: string;
@@ -68,11 +71,16 @@ export interface EmailLayout {
    * and exempt from the marketing opt-out requirement.
    */
   unsubscribeUrl?: string;
+  /** Language/direction of the frame (default Hebrew RTL). */
+  locale?: EmailLocale;
 }
 
 /** Brand frame shared by every email. Builders supply only the inner body. */
 export function renderEmail(layout: EmailLayout): string {
   const accent = layout.accent ?? COLORS.primary;
+  const en = layout.locale === 'en';
+  const dir = en ? 'ltr' : 'rtl';
+  const align = en ? 'left' : 'right';
   const cta = layout.cta
     ? `<tr><td style="padding:8px 0 4px">
          <a href="${escapeHtml(layout.cta.url)}"
@@ -84,39 +92,43 @@ export function renderEmail(layout: EmailLayout): string {
     : '';
 
   return `<!doctype html>
-<html dir="rtl" lang="he">
+<html dir="${dir}" lang="${en ? 'en' : 'he'}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light only"></head>
 <body style="margin:0;padding:0;background:${COLORS.bg};font-family:${FONT}">
   <div style="display:none;max-height:0;overflow:hidden;opacity:0">${escapeHtml(layout.preview)}</div>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${COLORS.bg};padding:28px 12px">
     <tr><td align="center">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" dir="rtl"
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" dir="${dir}"
              style="max-width:560px;background:${COLORS.card};border-radius:16px;overflow:hidden;
                     box-shadow:0 8px 28px rgba(0,0,0,.28)">
         <tr><td style="padding:22px 28px 0">
           <span style="font-size:18px;font-weight:800;color:${COLORS.ink}">RestoMatch</span>
-          <span style="font-size:13px;color:${COLORS.muted}">· מוקד הבקרה של הכסף</span>
+          <span style="font-size:13px;color:${COLORS.muted}">· ${en ? 'Command center for your money' : 'מוקד הבקרה של הכסף'}</span>
         </td></tr>
         <tr><td style="padding:14px 28px 0">
           <div style="height:3px;width:44px;background:${accent};border-radius:2px"></div>
-          <h1 style="margin:14px 0 4px;font-size:21px;line-height:1.35;color:${COLORS.ink};text-align:right">
+          <h1 style="margin:14px 0 4px;font-size:21px;line-height:1.35;color:${COLORS.ink};text-align:${align}">
             ${escapeHtml(layout.heading)}
           </h1>
         </td></tr>
-        <tr><td style="padding:6px 28px 4px;color:${COLORS.ink};font-size:15px;line-height:1.7;text-align:right">
+        <tr><td style="padding:6px 28px 4px;color:${COLORS.ink};font-size:15px;line-height:1.7;text-align:${align}">
           ${layout.bodyHtml}
         </td></tr>
-        ${cta ? `<tr><td style="padding:8px 28px 4px" align="right"><table role="presentation"><tr><td>${cta}</td></tr></table></td></tr>` : ''}
+        ${cta ? `<tr><td style="padding:8px 28px 4px" align="${align}"><table role="presentation"><tr><td>${cta}</td></tr></table></td></tr>` : ''}
         <tr><td style="padding:22px 28px 24px">
           <div style="border-top:1px solid ${COLORS.line};margin-top:8px;padding-top:14px;
-                      color:${COLORS.muted};font-size:12px;line-height:1.6;text-align:right">
-            הודעה זו נשלחה אוטומטית מ-RestoMatch. אם אינך מזהה אותה, אפשר להתעלם.
+                      color:${COLORS.muted};font-size:12px;line-height:1.6;text-align:${align}">
+            ${
+              en
+                ? 'This message was sent automatically by RestoMatch. If you don’t recognise it, you can ignore it.'
+                : 'הודעה זו נשלחה אוטומטית מ-RestoMatch. אם אינך מזהה אותה, אפשר להתעלם.'
+            }
             ${
               layout.unsubscribeUrl
                 ? `<br><a href="${escapeHtml(layout.unsubscribeUrl)}"
                        style="color:${COLORS.muted};text-decoration:underline">
-                     להסרה מרשימת הדיוור — לחצו כאן
+                     ${en ? 'Unsubscribe from this mailing list' : 'להסרה מרשימת הדיוור — לחצו כאן'}
                    </a>`
                 : ''
             }
@@ -144,7 +156,22 @@ function callout(html: string, tone: 'gold' | 'danger'): string {
 
 /* ─────────────────────────── magic link ─────────────────────────── */
 
-export function magicLinkEmail(args: { url: string }): RenderedEmail {
+export function magicLinkEmail(args: { url: string; locale?: EmailLocale }): RenderedEmail {
+  if (args.locale === 'en') {
+    return {
+      subject: 'Your RestoMatch sign-in link',
+      html: renderEmail({
+        locale: 'en',
+        preview: 'One click and you’re in — the link is valid for 24 hours.',
+        heading: 'Sign in to RestoMatch',
+        bodyHtml: `
+      <p style="margin:0 0 10px">Hi, you asked to sign in to your account. Click the button to get in — no password needed.</p>
+      <p style="margin:0;color:${COLORS.muted};font-size:13px">The link is valid for 24 hours and can be used once.</p>`,
+        cta: { label: 'Sign in', url: args.url },
+      }),
+      text: `Sign in to RestoMatch\n\nTo sign in, open this link (valid for 24 hours, single use):\n${args.url}\n\nIf you didn't ask to sign in, you can ignore this message.`,
+    };
+  }
   const subject = 'הקישור שלך להתחברות ל-RestoMatch';
   const html = renderEmail({
     preview: 'לחיצה אחת ואתה בפנים — הקישור תקף ל-24 שעות.',
@@ -160,7 +187,22 @@ export function magicLinkEmail(args: { url: string }): RenderedEmail {
 
 /* ─────────────────────────── password reset ─────────────────────── */
 
-export function passwordResetEmail(args: { url: string }): RenderedEmail {
+export function passwordResetEmail(args: { url: string; locale?: EmailLocale }): RenderedEmail {
+  if (args.locale === 'en') {
+    return {
+      subject: 'Reset your RestoMatch password',
+      html: renderEmail({
+        locale: 'en',
+        preview: 'Your password reset link — valid for one hour.',
+        heading: 'Reset your password',
+        bodyHtml: `
+      <p style="margin:0 0 10px">We received a request to reset your account password. Click the button to choose a new one.</p>
+      <p style="margin:0;color:${COLORS.muted};font-size:13px">The link is valid for one hour and can be used once. If you didn't ask for a reset, ignore this message — your current password stays as it is.</p>`,
+        cta: { label: 'Choose a new password', url: args.url },
+      }),
+      text: `Reset your RestoMatch password\n\nTo choose a new password, open this link (valid for one hour, single use):\n${args.url}\n\nIf you didn't ask for a reset, you can ignore this message.`,
+    };
+  }
   const subject = 'איפוס הסיסמה שלך ב-RestoMatch';
   const html = renderEmail({
     preview: 'קישור לאיפוס הסיסמה — תקף לשעה אחת.',
@@ -181,11 +223,32 @@ export function inviteEmail(args: {
   restaurantName: string;
   roleLabel: string;
   inviterName?: string | null;
+  /** Invitee's language (chosen by the inviter). Default Hebrew. */
+  locale?: EmailLocale;
 }): RenderedEmail {
+  if (args.locale === 'en') {
+    const who = args.inviterName ? `${args.inviterName} invited you` : 'You’ve been invited';
+    return {
+      subject: `You're invited to join ${args.restaurantName} on RestoMatch`,
+      html: renderEmail({
+        locale: 'en',
+        preview: `${who} to join the ${args.restaurantName} team.`,
+        heading: 'You’re invited to the team',
+        bodyHtml: `
+      <p style="margin:0 0 8px">${escapeHtml(who)} to join the team at <strong>${escapeHtml(args.restaurantName)}</strong>
+        as <strong>${escapeHtml(args.roleLabel)}</strong>.</p>
+      <p style="margin:0;color:${COLORS.muted};font-size:13px">The link is valid for 7 days. RestoMatch will open in English for you.</p>`,
+        cta: { label: 'Join the team', url: args.url },
+      }),
+      text: `You're invited to join ${args.restaurantName} on RestoMatch (role: ${args.roleLabel}).\n\nJoin via this link (valid for 7 days):\n${args.url}`,
+    };
+  }
   const subject = `הוזמנת לצוות של ${args.restaurantName} ב-RestoMatch`;
-  const inviter = args.inviterName ? `${escapeHtml(args.inviterName)} הזמין/ה אותך` : 'הוזמנת';
+  const inviterPlain = args.inviterName ? `${args.inviterName} הזמין/ה אותך` : 'הוזמנת';
+  const inviter = escapeHtml(inviterPlain);
   const html = renderEmail({
-    preview: `${inviter} להצטרף לצוות של ${args.restaurantName}.`,
+    // renderEmail escapes the preview itself — pass the plain text (no double escape).
+    preview: `${inviterPlain} להצטרף לצוות של ${args.restaurantName}.`,
     heading: 'הוזמנת לצוות',
     bodyHtml: `
       <p style="margin:0 0 8px">${inviter} להצטרף לצוות של <strong>${escapeHtml(args.restaurantName)}</strong>
