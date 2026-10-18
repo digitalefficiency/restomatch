@@ -173,6 +173,8 @@ if [[ $SEED == 1 ]]; then
   log "seeding demo data into restomatch_dev${DEMO_TODAY:+ (today = ${DEMO_TODAY})}"
   DATABASE_URL="${PG_URL_BASE}/restomatch_dev" pnpm --filter @restomatch/db seed | tail -3
   DATABASE_URL="${PG_URL_BASE}/restomatch_dev" pnpm --filter @restomatch/worker exec tsx scripts/seed-demo.ts | tail -2
+  # wave 1 · S12: recovery states on the claimed demo items (idempotent; the hero is unchanged)
+  DATABASE_URL="${PG_URL_BASE}/restomatch_dev" pnpm --filter @restomatch/worker exec tsx scripts/seed-recovery-demo.ts | tail -1
 fi
 
 # ── 5. apps/web/.env.local ──────────────────────────────────────────────────

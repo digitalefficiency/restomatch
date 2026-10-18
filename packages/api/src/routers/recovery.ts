@@ -6,6 +6,7 @@ import {
   computeRecoverySummary,
   creditLineSuggestions,
   listClaims,
+  lockClaims,
   MAX_CLAIMS,
   recordCreditNote,
   returnedInMonth,
@@ -75,7 +76,8 @@ export const recoveryRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const out = [];
-      for (const claimId of input.claimIds) {
+      const ids = await lockClaims(ctx.db, ctx.session.restaurantId, input.claimIds);
+      for (const claimId of ids) {
         out.push(
           await transitionClaim(ctx.db, ctx.session.restaurantId, {
             claimId,

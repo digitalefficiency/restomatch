@@ -379,3 +379,29 @@ describe('refuter regressions', () => {
     expect(text.endsWith(url)).toBe(true);
   });
 });
+
+describe('bulk transitions', () => {
+  it('two bulk calls naming the same claims in opposite order do not deadlock', async () => {
+    const [extra] = await db
+      .insert(discrepancies)
+      .values({ matchRunId: T.matchRunId, restaurantId: T.restaurantId, type: 'QTY_OVER', severity: 'warn', deltaAmount: '5.00', resolutionStatus: 'accepted' })
+      .returning();
+    try {
+      const list = await caller().recovery.list();
+      const [a, b] = list.map((x) => x.id);
+      for (let round = 0; round < 4; round++) {
+        await db.update(recoveryClaims).set({ status: 'claimed' }).where(eq(recoveryClaims.restaurantId, T.restaurantId));
+        const mk = () => appRouter.createCaller({ db, session: { userId: T.ownerUserId, restaurantId: T.restaurantId, role: 'owner' } });
+        const res = await Promise.allSettled([
+          mk().recovery.transition({ claimIds: [a!, b!], to: 'letter_sent' }),
+          mk().recovery.transition({ claimIds: [b!, a!], to: 'disputed' }),
+        ]);
+        for (const r of res) {
+          if (r.status === 'rejected') expect((r.reason as { code?: string }).code).toBe('CONFLICT');
+        }
+      }
+    } finally {
+      await db.delete(discrepancies).where(eq(discrepancies.id, extra!.id));
+    }
+  });
+});

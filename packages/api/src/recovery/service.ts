@@ -611,6 +611,17 @@ export async function recordCreditNote(
   };
 }
 
+/**
+ * Lock every claim a bulk call touches up front, in id order, so two bulk
+ * calls naming the same claims in a different order cannot deadlock (40P01).
+ * Returns the sorted, de-duplicated ids.
+ */
+export async function lockClaims(db: Database, restaurantId: string, claimIds: string[]): Promise<string[]> {
+  const ids = [...new Set(claimIds)].sort();
+  await loadOwnedClaims(db, restaurantId, ids, true);
+  return ids;
+}
+
 /** Lifecycle history of one claim (oldest first). */
 export async function claimHistory(db: Database, restaurantId: string, claimId: string) {
   await loadOwnedClaims(db, restaurantId, [claimId]);
