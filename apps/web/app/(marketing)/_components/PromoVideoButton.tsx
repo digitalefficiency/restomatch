@@ -4,11 +4,13 @@ import { useRef, useState } from 'react';
 import { PlayCircle, X } from 'lucide-react';
 
 /**
- * "Watch 60 seconds" → native <dialog> with the promo film (rendered only when
- * there is a promo for the viewer's locale). The <video> is MOUNTED only while
- * the dialog is open: nothing is requested until someone asks for it, and
- * closing unmounts it, which stops the download/playback. It starts playing on
- * open (the click is the user gesture), with sound and native controls.
+ * "Watch 60 seconds" → native modal <dialog> with the promo film (rendered only
+ * when there is a promo). The <video> is MOUNTED only while the dialog is open:
+ * nothing is requested until someone asks for it, and closing (Esc, ✕, or a
+ * backdrop click) unmounts it, stopping download and playback. showModal()
+ * makes the rest of the page inert (focus stays in the dialog) and returns
+ * focus to the button on close. No autoplay — the viewer presses play (native
+ * controls), so there is never unexpected sound or motion.
  */
 export function PromoVideoButton({
   src,
@@ -66,7 +68,6 @@ export function PromoVideoButton({
               src={src}
               poster={poster}
               controls
-              autoPlay
               playsInline
               preload="metadata"
               className="h-full w-full"

@@ -186,8 +186,8 @@ export default async function Home() {
               </Link>
               {promoSrc ? (
                 <PromoVideoButton
-                  src={promoSrc}
-                  poster={heroMedia.poster}
+                  src={promoSrc.src}
+                  poster={promoSrc.poster}
                   label={t('hero.ctaWatch')}
                   title={t('hero.watchTitle')}
                   closeLabel={t('hero.watchClose')}
