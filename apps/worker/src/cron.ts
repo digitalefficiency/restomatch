@@ -10,12 +10,15 @@
  *                          connected procurement platform
  *   • outbox-dispatch    — every 60 seconds: pick up queued notifications
  *                          and dispatch via real provider clients
+ *   • ocr-sweep          — every 5 minutes: re-enqueue invoices stuck in
+ *                          ocr_pending (once each)
  */
 import { makeQueue } from './queue';
 import type { BaselinesJob } from './jobs/baselines';
 import type { DailyExpectationsJob } from './jobs/dailyExpectations';
 import type { EndOfDayReportJob } from './jobs/endOfDayReport';
 import type { HealthDigestJob } from './jobs/healthDigest';
+import type { OcrSweepJob } from './jobs/ocrSweep';
 import type { OrderRemindersJob } from './jobs/orderReminders';
 import type { OutboxDispatchJob } from './jobs/outboxDispatch';
 import type { RetentionJob } from './jobs/retention';
@@ -29,6 +32,7 @@ const supplierDelaysQueue = makeQueue<SupplierDelaysJob>('supplier-delays');
 const endOfDayReportQueue = makeQueue<EndOfDayReportJob>('end-of-day-report');
 const retentionQueue = makeQueue<RetentionJob>('retention');
 const healthDigestQueue = makeQueue<HealthDigestJob>('health-digest');
+const ocrSweepQueue = makeQueue<OcrSweepJob>('ocr-sweep');
 
 const TZ = 'Asia/Jerusalem';
 
@@ -78,8 +82,6 @@ export async function registerCronSchedules(): Promise<void> {
     { name: 'end-of-day-report', data: {} },
   );
 
-  // Retention purge — every day 03:30 IL. Opt-in via RETENTION_CRON_ENABLED; even
-  // when scheduled it dry-runs unless RETENTION_PURGE_ENABLED=1 (see retention.ts).
   // Wave 1 monitoring: daily ops digest (queue depths, failed jobs, stale OCR,
   // outbox failures) → outbox email. Additive; no other schedule changed.
   await healthDigestQueue.upsertJobScheduler(
@@ -88,6 +90,15 @@ export async function registerCronSchedules(): Promise<void> {
     { name: 'health-digest', data: {} },
   );
 
+  // Wave 1: re-enqueue invoices stuck in ocr_pending (once each; see ocrSweep.ts).
+  await ocrSweepQueue.upsertJobScheduler(
+    'ocr-sweep-5m',
+    { every: 5 * 60_000 },
+    { name: 'ocr-sweep', data: {} },
+  );
+
+  // Retention purge — every day 03:30 IL. Opt-in via RETENTION_CRON_ENABLED; even
+  // when scheduled it dry-runs unless RETENTION_PURGE_ENABLED=1 (see retention.ts).
   if (RETENTION_CRON_ENABLED) {
     await retentionQueue.upsertJobScheduler(
       'retention-0330',
@@ -98,7 +109,8 @@ export async function registerCronSchedules(): Promise<void> {
 
   console.log(
     '[cron] registered: daily-expectations(06:00), baselines(02:00), outbox-dispatch(60s), ' +
-      'order-reminders(09:00), supplier-delays(10:00), end-of-day-report(19:00), health-digest(06:45)' +
+      'order-reminders(09:00), supplier-delays(10:00), end-of-day-report(19:00), health-digest(06:45), ' +
+      'ocr-sweep(5m)' +
       (RETENTION_CRON_ENABLED ? ', retention(03:30)' : ''),
   );
 }
@@ -111,5 +123,6 @@ export async function unregisterCronSchedules(): Promise<void> {
   await supplierDelaysQueue.removeJobScheduler('supplier-delays-10');
   await endOfDayReportQueue.removeJobScheduler('end-of-day-report-19');
   await healthDigestQueue.removeJobScheduler('health-digest-0645');
+  await ocrSweepQueue.removeJobScheduler('ocr-sweep-5m');
   await retentionQueue.removeJobScheduler('retention-0330');
 }

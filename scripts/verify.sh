@@ -32,10 +32,18 @@ export DATABASE_URL_TEST="$DATABASE_URL"
 export NEXT_TELEMETRY_DISABLED=1
 VERIFY_DB_URL="${VERIFY_DATABASE_URL:-$PG_BASE/restomatch_verify}"
 PORT="${VERIFY_PORT:-3310}"
+VERIFY_REDIS_URL="${VERIFY_REDIS_URL:-redis://localhost:6379}"
 
-for u in "$DATABASE_URL" "$VERIFY_DB_URL"; do
+for f in apps/web/.env.local apps/web/.env.production apps/web/.env.production.local; do
+  if [[ -f "$f" ]] && grep -qE '^[[:space:]]*(export[[:space:]]+)?(ANTHROPIC_API_KEY|SENTRY_DSN)=.+' "$f"; then
+    echo "verify.sh: $f sets ANTHROPIC_API_KEY or SENTRY_DSN — a verify build would use it. Move it out first." >&2
+    exit 2
+  fi
+done
+
+for u in "$DATABASE_URL" "$VERIFY_DB_URL" "$VERIFY_REDIS_URL"; do
   host="$(node -e 'try{console.log(new URL(process.argv[1]).hostname)}catch{console.log("?")}' "$u")"
-  if [[ "$host" != localhost && "$host" != 127.0.0.1 && "$host" != "::1" ]]; then
+  if [[ "$host" != localhost && "$host" != 127.0.0.1 && "$host" != "[::1]" && "$host" != "::1" ]]; then
     echo "verify.sh: refusing non-local database host '$host' (local Postgres only)" >&2
     exit 2
   fi
@@ -43,6 +51,7 @@ done
 
 ROWS=()
 FAILED=0
+BUILT_THIS_RUN=0
 step() { # name cmd… — runs cmd, logs to .verify/name.log, records PASS/FAIL + duration
   local name="$1"
   shift
@@ -58,8 +67,14 @@ step() { # name cmd… — runs cmd, logs to .verify/name.log, records PASS/FAIL
 skip() { ROWS+=("$(printf 'SKIP  %-24s       %s' "$1" "$2")"); }
 
 # Build-time env: the same placeholders CI uses (no real keys anywhere).
+# External services are pinned for every verify build/server. Next also reads
+# apps/web/.env*.local, but process env wins: REDIS_URL is forced to a LOCAL Redis
+# (VERIFY_REDIS_URL), and the paid/outbound keys are removed (env -u); the
+# preflight below refuses to run if a local env file would supply them instead.
 web_env() {
-  env DATABASE_URL_APP="${DATABASE_URL_APP:-$DATABASE_URL}" \
+  env -u ANTHROPIC_API_KEY -u SENTRY_DSN \
+    DATABASE_URL_APP="${DATABASE_URL_APP:-$DATABASE_URL}" \
+    REDIS_URL="$VERIFY_REDIS_URL" \
     AUTH_SECRET=verify-only-secret-not-production-0123456789 \
     AUTH_ENC_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
     AUTH_URL="http://localhost:$PORT" APP_URL="http://localhost:$PORT" \
@@ -81,6 +96,8 @@ fresh_gate_db() { # drop + create the layer-1 database (local only — checked a
   ' "$DATABASE_URL")
 }
 
+# --force: never replay cached results — the DB-backed suites must run against
+# the fresh database every time (CI has no cache either).
 layer1() {
   step install pnpm install --frozen-lockfile
   step fresh-db fresh_gate_db
@@ -89,15 +106,16 @@ layer1() {
   step check-rls pnpm --filter @restomatch/db check-rls
   step db-doctor pnpm --filter @restomatch/db run doctor --strict
   step supabase-sync pnpm --filter @restomatch/db run supabase-sync --check
-  step typecheck pnpm turbo run typecheck --concurrency=1 --filter='!@restomatch/web'
-  step test env -u REDIS_URL pnpm turbo run test --concurrency=1 --filter='!@restomatch/worker'
+  step typecheck pnpm turbo run typecheck --force --concurrency=1 --filter='!@restomatch/web'
+  step test env -u REDIS_URL pnpm turbo run test --force --concurrency=1 --filter='!@restomatch/worker'
   if [[ -n "${REDIS_URL:-}" ]]; then
     step worker-test pnpm --filter @restomatch/worker test
   else
     skip worker-test "set REDIS_URL=redis://localhost:6379 to run"
   fi
   step web-lint pnpm --filter @restomatch/web lint
-  step web-build web_env pnpm --filter @restomatch/web build
+  BUILT_THIS_RUN=1
+  step web-build build_layer1
   step web-tsc pnpm --filter @restomatch/web typecheck # after build: needs .next/types
   step audit pnpm audit --prod --audit-level=high
 }
@@ -132,10 +150,15 @@ start_prod_server() {
   set +m
   for _ in $(seq 1 90); do
     curl -sf "http://localhost:$PORT/api/healthz" >/dev/null && return 0
-    kill -0 "$SERVER_PID" 2>/dev/null || return 1
+    kill -0 "$SERVER_PID" 2>/dev/null || break
     sleep 1
   done
+  stop_server # did not come up: clean up, and let layer2 skip the smoke
   return 1
+}
+
+build_layer1() { # never inherit a DATABASE_URL_APP from the caller's shell
+  DATABASE_URL_APP="$DATABASE_URL" web_env pnpm --filter @restomatch/web build
 }
 
 build_for_verify() { # layer 2 on its own (CI): build against the seeded verify DB
@@ -145,7 +168,8 @@ build_for_verify() { # layer 2 on its own (CI): build against the seeded verify 
 layer2() {
   APP_URL_DB=""
   step verify-db prepare_verify_db
-  if [[ ! -f apps/web/.next/BUILD_ID ]]; then
+  # Never smoke-test a stale build: rebuild unless layer 1 just built this tree.
+  if [[ "$BUILT_THIS_RUN" != 1 ]]; then
     step web-build build_for_verify
   fi
   step prod-start start_prod_server

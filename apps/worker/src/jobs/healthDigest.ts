@@ -54,6 +54,7 @@ export const DIGEST_QUEUES = [
   'retention',
   'sync-platforms',
   'health-digest',
+  'ocr-sweep',
 ] as const;
 
 export const OCR_STALE_AFTER_MS = 30 * 60_000;

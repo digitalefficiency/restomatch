@@ -88,7 +88,7 @@ fly scale count 1 -a restomatch-worker
 
 ```bash
 fly status -a restomatch-worker          # 1 machine, check "health" passing
-fly logs -a restomatch-worker            # "[worker] started 12 workers" + "[cron] registered: …"
+fly logs -a restomatch-worker            # "[worker] started 13 workers" + "[cron] registered: …"
 fly ssh console -a restomatch-worker -C "node -e \"fetch('http://127.0.0.1:8080/health/ready').then(r=>r.text()).then(console.log)\""
 ```
 

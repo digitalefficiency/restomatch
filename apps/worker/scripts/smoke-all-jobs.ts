@@ -76,7 +76,7 @@ async function main() {
   if (!r) throw new Error('[smoke-all] no restaurant — seed the DB first');
 
   // 1) Scheduled jobs, exactly as the schedulers enqueue them.
-  for (const q of ['daily-expectations', 'baselines', 'order-reminders', 'supplier-delays', 'end-of-day-report', 'retention', 'health-digest']) {
+  for (const q of ['daily-expectations', 'baselines', 'order-reminders', 'supplier-delays', 'end-of-day-report', 'retention', 'health-digest', 'ocr-sweep']) {
     await runJob(q, {});
   }
 

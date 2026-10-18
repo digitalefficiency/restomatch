@@ -12,6 +12,7 @@ import { startEndOfDayReportWorker } from './jobs/endOfDayReport';
 import { startHealthDigestWorker } from './jobs/healthDigest';
 import { startMatchInvoiceWorker } from './jobs/matchInvoice';
 import { startOcrInvoiceWorker } from './jobs/ocrInvoice';
+import { startOcrSweepWorker } from './jobs/ocrSweep';
 import { startOrderRemindersWorker } from './jobs/orderReminders';
 import { startOutboxDispatchWorker } from './jobs/outboxDispatch';
 import { startRetentionWorker } from './jobs/retention';
@@ -41,6 +42,7 @@ const workers = [
   startEndOfDayReportWorker(),
   startRetentionWorker(),
   startHealthDigestWorker(),
+  startOcrSweepWorker(),
 ];
 
 console.log(`[worker] started ${workers.length} workers`);

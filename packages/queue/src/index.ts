@@ -93,6 +93,44 @@ export async function withDeadline<T>(p: Promise<T>, ms: number, onTimeout: () =
   }
 }
 
+/** The slice of an ioredis client {@link whenReady} needs. */
+export interface ReadyAware {
+  status: string;
+  once(event: 'ready', listener: () => void): unknown;
+}
+
+const readyWaits = new WeakMap<ReadyAware, Promise<void>>();
+const everReady = new WeakSet<ReadyAware>();
+
+/**
+ * Resolves once a NEW client has connected. With `enableOfflineQueue: false` a
+ * command sent while the first connection is still coming up fails immediately
+ * ("Stream isn't writeable"), so on a cold serverless instance the very first
+ * requests failed. Await this INSIDE the caller's {@link withDeadline}: a slow
+ * first connect waits at most the deadline. Once a client has been ready, it
+ * resolves at once even while reconnecting — an outage stays fail-fast instead
+ * of adding the deadline to every request. One 'ready' listener per client.
+ */
+export function whenReady(redis: ReadyAware): Promise<void> {
+  if (redis.status === 'ready') {
+    everReady.add(redis);
+    return Promise.resolve();
+  }
+  if (everReady.has(redis)) return Promise.resolve();
+  let wait = readyWaits.get(redis);
+  if (!wait) {
+    wait = new Promise<void>((resolve) => {
+      redis.once('ready', () => {
+        everReady.add(redis);
+        readyWaits.delete(redis);
+        resolve();
+      });
+    });
+    readyWaits.set(redis, wait);
+  }
+  return wait;
+}
+
 function producerConnection(url: string): IORedis {
   return new IORedis(url, failFastRedisOptions());
 }

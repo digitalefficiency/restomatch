@@ -98,6 +98,24 @@ up the day's scheduled digest. (`{}` behaves like the scheduled run.) A bad
 `HEALTH_DIGEST_RESTAURANT_ID` logs a warning and falls back to the oldest
 restaurant instead of failing.
 
+## 3b. OCR retry sweep
+
+Worker job `ocr-sweep` (`apps/worker/src/jobs/ocrSweep.ts`), every 5 minutes. An
+invoice whose OCR job never ran (enqueue timed out while Redis was down, a lost
+job, every attempt failed) stays `ocr_pending`. The sweep re-enqueues it **once**:
+
+- only invoices created **10–25 minutes ago** with a scan URL — the scan's signed
+  URL lives 30 minutes, and the worker can't re-sign it (no storage credentials),
+  so older ones are left to a human (the digest lists OCR pending > 30 min);
+- only invoices with **no** `ocr-invoice` job on record: a waiting/active/delayed
+  one is a backlog, and a failed/completed one already ran and was metered (a quota
+  or bad-image failure would only fail again) — those show up in the digest;
+- only `http(s)` scan URLs (never stub/smoke rows), and not at all above 1,000
+  pending OCR jobs;
+- one automatic retry per invoice (Redis marker `ocr-sweep:retried:<id>`, 7 days,
+  plus jobId `ocr-sweep-<id>`), at most 50 per sweep;
+- does nothing without `ANTHROPIC_API_KEY` (a retry could only fail).
+
 ## 4. Where alerts go
 
 | Signal | Recipient | Channel |

@@ -1,6 +1,10 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { authenticator } from 'otplib';
 import { e2eSql, ensurePasswordUser, loginViaMagicLink } from './helpers';
+
+/** The form's error alert — not Next's (empty) route announcer, which also has role="alert". */
+const formAlert = (page: Page) =>
+  page.locator('[role="alert"]:not(#__next-route-announcer__)');
 
 /**
  * Auth flows as they exist after the security stack (password primary, TOTP
@@ -31,7 +35,7 @@ test.describe('password login', () => {
     await form.locator('input[name="password"]').fill('definitely-wrong');
     await form.locator('button[type="submit"]').click();
     await expect(page).toHaveURL(/\/login\?error=CredentialsSignin/);
-    await expect(page.getByRole('alert')).toBeVisible();
+    await expect(formAlert(page)).toBeVisible();
   });
 
   test('unauthenticated dashboard visit → /login', async ({ page }) => {
@@ -83,7 +87,7 @@ test.describe('two-factor (TOTP)', () => {
     await page.locator('input[name="code"]').fill('000000');
     await page.locator('form', { has: page.locator('input[name="code"]') }).locator('button[type="submit"]').first().click();
     await expect(page).toHaveURL(/\/login\/2fa\?error=/);
-    await expect(page.getByRole('alert')).toBeVisible();
+    await expect(formAlert(page)).toBeVisible();
     // Still gated: the app is unreachable without the second factor.
     await page.goto('/dashboard/approvals');
     await expect(page).toHaveURL(/\/login\/2fa/);
