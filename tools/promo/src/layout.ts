@@ -8,20 +8,32 @@ export type Zones = { caption: Rect; device: Rect };
 
 export const GUTTER = 48;
 
+/** 90% title-safe box (5% margin each side): every text box must stay inside it. */
+export const SAFE = 0.05;
+export const safeBox = (width: number, height: number): Rect => ({
+  x: Math.round(width * SAFE),
+  y: Math.round(height * SAFE),
+  w: Math.round(width * (1 - 2 * SAFE)),
+  h: Math.round(height * (1 - 2 * SAFE)),
+});
+
+export const inside = (a: Rect, b: Rect) => a.x >= b.x && a.y >= b.y && a.x + a.w <= b.x + b.w && a.y + a.h <= b.y + b.h;
+
 export function zones(width: number, height: number, locale: 'he' | 'en'): Zones {
   if (height > width) {
     // vertical: captions in a top band, device below
     const capH = Math.round(height * 0.3);
+    const m = Math.round(width * SAFE);
     return {
-      caption: { x: 70, y: 90, w: width - 140, h: capH - 90 },
+      caption: { x: m, y: Math.round(height * SAFE), w: width - 2 * m, h: capH - Math.round(height * SAFE) },
       device: { x: 0, y: capH + GUTTER, w: width, h: height - capH - GUTTER },
     };
   }
   // landscape: captions take ~38% on the reading-start side (right in RTL, left in LTR)
   const capW = Math.round(width * 0.38);
-  const margin = 80;
+  const margin = Math.round(width * SAFE); // title-safe
   const captionX = locale === 'he' ? width - capW : margin;
-  const caption = { x: captionX, y: 0, w: capW - margin, h: height };
+  const caption = { x: captionX, y: Math.round(height * SAFE), w: capW - margin, h: Math.round(height * (1 - 2 * SAFE)) };
   const device =
     locale === 'he'
       ? { x: 0, y: 0, w: width - capW - GUTTER, h: height }

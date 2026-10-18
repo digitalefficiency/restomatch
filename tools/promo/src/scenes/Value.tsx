@@ -3,6 +3,7 @@ import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
 import { COPY, FACTS, ilsText, Locale } from '../copy';
 import { C, EASE_IN, FONT, prog } from '../theme';
 import { CountUp, FadeUp, RiseLine } from '../components/primitives';
+import { safeBox } from '../layout';
 
 export const VALUE_DURATION = 330;
 
@@ -14,6 +15,7 @@ export const Value: React.FC<{ locale: Locale; duration?: number }> = ({ locale,
   const isRtl = locale === 'he';
   const dir = isRtl ? 'rtl' : 'ltr';
   const vertical = height > width;
+  const safe = safeBox(width, height); // title-safe: the step row wraps inside it
   const split = Math.round(duration * 0.55); // numbers → routine
   const exitNums = prog(f, split - 14, split, EASE_IN);
   const exit = prog(f, duration - 16, duration, EASE_IN);
@@ -70,10 +72,10 @@ export const Value: React.FC<{ locale: Locale; duration?: number }> = ({ locale,
 
       {f >= split - 4 ? (
         <AbsoluteFill style={{ alignItems: 'center', justifyContent: 'center' }}>
-          <RiseLine at={split} style={{ fontSize: vertical ? 84 : 96, fontWeight: 800, textAlign: 'center', padding: '0 60px' }}>
+          <RiseLine at={split} style={{ fontSize: vertical ? 84 : 96, fontWeight: 800, textAlign: 'center', maxWidth: safe.w }}>
             {t.calm}
           </RiseLine>
-          <div style={{ display: 'flex', flexDirection: vertical ? 'column' : 'row', gap: vertical ? 26 : 34, marginTop: 64, alignItems: 'center' }}>
+          <div style={{ display: 'flex', flexDirection: vertical ? 'column' : 'row', flexWrap: 'wrap', justifyContent: 'center', gap: vertical ? 26 : 30, rowGap: 22, marginTop: 64, alignItems: 'center', maxWidth: safe.w }}>
             {t.steps.map((s, i) => (
               <FadeUp key={i} at={split + 16 + i * 8}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
@@ -95,9 +97,9 @@ export const Value: React.FC<{ locale: Locale; duration?: number }> = ({ locale,
                   >
                     {i + 1}
                   </div>
-                  <div style={{ fontSize: 42, fontWeight: 600, color: C.ink }}>{s}</div>
+                  <div style={{ fontSize: 36, fontWeight: 600, color: C.ink, whiteSpace: 'nowrap' }}>{s}</div>
                   {!vertical && i < 2 ? (
-                    <div style={{ width: 60, height: 2, background: C.line, marginInlineStart: 16 }} />
+                    <div style={{ width: 36, height: 2, background: C.line, marginInlineStart: 12 }} />
                   ) : null}
                 </div>
               </FadeUp>
