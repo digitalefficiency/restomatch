@@ -15,11 +15,14 @@ import {
   invoices,
   memberships,
   poLines,
+  priceAlertThresholds,
+  priceAlerts,
   priceBaselines,
   products,
   purchaseOrders,
   restaurants,
   supplierCatalogItems,
+  supplierContractPrices,
   suppliers,
 } from '@restomatch/db';
 import { appRouter } from '../index';
@@ -207,6 +210,24 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'dsr.deleteMyAccount':
     'authed self-service; anonymizes ONLY the caller (ctx.session.userId) — takes no target id, cannot reach another user',
   'dsr.eraseLead': 'admin-denial',
+  // Wave 1 (S11): supplier contract prices + price-trend alerts — feature-gated
+  // (`contracts` / `priceAlerts`); attacks + isolation in the block at the end.
+  'contracts.list': 'isolation',
+  'contracts.productOptions': 'attack',
+  'contracts.create': 'attack',
+  'contracts.update': 'attack',
+  'contracts.delete': 'attack',
+  'contracts.importPreview': 'attack',
+  'contracts.importCommit': 'attack',
+  'contracts.overContractForInvoice': 'attack',
+  'contracts.overContract': 'isolation',
+  'priceAlerts.list': 'isolation',
+  'priceAlerts.dismiss': 'attack',
+  'priceAlerts.refresh': 'isolation',
+  'priceAlerts.thresholds': 'isolation',
+  'priceAlerts.setThreshold': 'attack',
+  'priceAlerts.deleteThreshold': 'attack',
+  'priceAlerts.openCount': 'isolation',
 };
 
 function listProcedurePaths(): string[] {
@@ -1409,4 +1430,143 @@ describe('role denial: mapping.confirm rejects member-tier callers', () => {
       expect(after).toHaveLength(before.length);
     });
   }
+});
+
+describe('wave 1 (S11): contracts + priceAlerts — foreign ids and isolation', () => {
+  let bContractId: string;
+  let bAlertId: string;
+  let bThresholdId: string;
+  let aContractId: string;
+
+  beforeAll(async () => {
+    for (const t of [A, B]) {
+      await db.update(restaurants).set({ settings: { features: { contracts: true, priceAlerts: true } } }).where(eq(restaurants.id, t.restaurantId));
+    }
+    const mk = async (t: Tenant, price: string) => {
+      const [c] = await db
+        .insert(supplierContractPrices)
+        .values({ restaurantId: t.restaurantId, supplierId: t.supplierId, productId: t.productId, contractPrice: price, validFrom: '2020-01-01' })
+        .returning();
+      return c!.id;
+    };
+    aContractId = await mk(A, '9.0000');
+    bContractId = await mk(B, '1.0000'); // B's invoice line (₪10) is far over B's contract
+    const [alert] = await db
+      .insert(priceAlerts)
+      .values({
+        restaurantId: B.restaurantId,
+        productId: B.productId,
+        supplierId: B.supplierId,
+        windowDays: 21,
+        thresholdPct: '0.1000',
+        startPrice: '6.0000',
+        endPrice: '7.0000',
+        pctChange: '0.1667',
+        startAt: new Date(Date.now() - 20 * 86_400_000),
+        endAt: new Date(),
+        observations: 4,
+        dedupeKey: 'b-alert',
+      })
+      .returning();
+    bAlertId = alert!.id;
+    const [th] = await db
+      .insert(priceAlertThresholds)
+      .values({ restaurantId: B.restaurantId, supplierId: B.supplierId, thresholdPct: '0.0500', windowDays: 14 })
+      .returning();
+    bThresholdId = th!.id;
+  });
+
+  afterAll(async () => {
+    await db.delete(supplierContractPrices);
+    await db.delete(priceAlerts);
+    await db.delete(priceAlertThresholds);
+    for (const t of [A, B]) {
+      await db.update(restaurants).set({ settings: {} }).where(eq(restaurants.id, t.restaurantId));
+    }
+  });
+
+  const bContract = async () =>
+    (await db.select().from(supplierContractPrices).where(eq(supplierContractPrices.id, bContractId)))[0]!;
+
+  it('contracts.list / overContract never include B rows', async () => {
+    const list = await callerFor(A).contracts.list();
+    expect(list.map((r) => r.id)).toEqual([aContractId]);
+    const over = await callerFor(A).contracts.overContract();
+    expect(over.lines.every((l) => l.invoiceId === A.invoiceId)).toBe(true);
+    expect(over.lines.some((l) => l.contractId === bContractId)).toBe(false);
+  });
+
+  it('contracts.overContractForInvoice on B’s invoice returns nothing', async () => {
+    expect(await callerFor(A).contracts.overContractForInvoice({ invoiceId: B.invoiceId })).toEqual([]);
+    // sanity: B sees its own over-contract line
+    expect(await callerFor(B).contracts.overContractForInvoice({ invoiceId: B.invoiceId })).toHaveLength(1);
+  });
+
+  it('contracts.productOptions / importPreview / importCommit reject B’s supplier', async () => {
+    await expect(callerFor(A).contracts.productOptions({ supplierId: B.supplierId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const file = { filename: 'c.csv', text: 'name,price\nעגבניה B,0.5\n' };
+    await expect(callerFor(A).contracts.importPreview({ supplierId: B.supplierId, file })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(
+      callerFor(A).contracts.importCommit({ supplierId: B.supplierId, file, mapping: { name: 'name', price: 'price' }, defaultValidFrom: '2026-01-01' }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect((await bContract()).contractPrice).toBe('1.0000');
+  });
+
+  it('contracts.importCommit on A’s supplier never resolves a B product by name', async () => {
+    const res = await callerFor(A).contracts.importCommit({
+      supplierId: A.supplierId,
+      file: { filename: 'c.csv', text: 'name,price\nעגבניה B,0.5\n' },
+      mapping: { name: 'name', price: 'price' },
+      defaultValidFrom: '2026-02-02',
+    });
+    expect(res).toMatchObject({ created: 0, updated: 0 });
+    expect(res.skipped[0]!.reason).toBe('NO_PRODUCT');
+  });
+
+  it('contracts.create rejects B’s supplier and B’s product', async () => {
+    await expect(
+      callerFor(A).contracts.create({ supplierId: B.supplierId, productId: A.productId, contractPrice: 1, validFrom: '2026-03-03' }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(
+      callerFor(A).contracts.create({ supplierId: A.supplierId, productId: B.productId, contractPrice: 1, validFrom: '2026-03-03' }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('contracts.update / delete reject B’s contract id and leave it untouched', async () => {
+    await expect(callerFor(A).contracts.update({ id: bContractId, contractPrice: 999 })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(callerFor(A).contracts.delete({ id: bContractId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect((await bContract()).contractPrice).toBe('1.0000');
+  });
+
+  it('priceAlerts.list / openCount / thresholds / refresh exclude B', async () => {
+    expect(await callerFor(A).priceAlerts.list()).toEqual([]);
+    expect(await callerFor(A).priceAlerts.openCount()).toEqual({ count: 0 });
+    expect((await callerFor(A).priceAlerts.thresholds()).rules).toEqual([]);
+    await callerFor(A).priceAlerts.refresh();
+    const aAlerts = await db.select().from(priceAlerts).where(eq(priceAlerts.restaurantId, A.restaurantId));
+    expect(aAlerts).toEqual([]);
+    expect(await callerFor(B).priceAlerts.openCount()).toEqual({ count: 1 });
+  });
+
+  it('priceAlerts.dismiss / deleteThreshold reject B ids; setThreshold rejects B’s supplier', async () => {
+    await expect(callerFor(A).priceAlerts.dismiss({ id: bAlertId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(callerFor(A).priceAlerts.deleteThreshold({ id: bThresholdId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(
+      callerFor(A).priceAlerts.setThreshold({ supplierId: B.supplierId, category: null, thresholdPct: 0.5, windowDays: 30, enabled: true }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [alert] = await db.select().from(priceAlerts).where(eq(priceAlerts.id, bAlertId));
+    expect(alert!.status).toBe('open');
+    const [th] = await db.select().from(priceAlertThresholds).where(eq(priceAlertThresholds.id, bThresholdId));
+    expect(th!.thresholdPct).toBe('0.0500');
+  });
+
+  it('every wave-1 procedure is FORBIDDEN (FEATURE_DISABLED) for a tenant with the flags off', async () => {
+    await db.update(restaurants).set({ settings: {} }).where(eq(restaurants.id, A.restaurantId));
+    try {
+      await expect(callerFor(A).contracts.list()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      await expect(callerFor(A).priceAlerts.openCount()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    } finally {
+      await db.update(restaurants).set({ settings: { features: { contracts: true, priceAlerts: true } } }).where(eq(restaurants.id, A.restaurantId));
+    }
+  });
 });
