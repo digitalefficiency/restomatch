@@ -3,6 +3,7 @@ import { localizeActivity } from '../activityText';
 import { displayName } from '../displayName';
 import { entitlementCauseOf, featureLabel } from '../entitlement';
 import { friendlyError, trpcErrorCode } from '../errors';
+import { createSingleFlight } from '../singleFlight';
 import { createTranslator } from '../../i18n/translate';
 import { components } from '../../i18n/messages/components';
 
@@ -142,5 +143,43 @@ describe('localizeActivity — structured metadata (S3 writers + demo seed)', ()
   it('Hebrew always shows the stored text; rows without metadata fall back to parsing', () => {
     expect(localizeActivity({ eventType: 'invoice_matched', ...he, metadata: { invoiceNumber: 'HK-24108' } }, 'he')).toEqual(he);
     expect(localizeActivity({ eventType: 'invoice_matched', ...he, metadata: {} }, 'en').title).toBe('Invoice HK-24108 matched');
+  });
+});
+
+describe('createSingleFlight (double-submit guard)', () => {
+  it('drops a second call while the first is in flight, then allows the next', async () => {
+    const run = createSingleFlight();
+    let calls = 0;
+    let resolve!: () => void;
+    const fn = () => {
+      calls++;
+      return new Promise<void>((r) => (resolve = r));
+    };
+    expect(run(fn)).toBe(true);
+    expect(run(fn)).toBe(false); // the double-click's second click
+    expect(calls).toBe(1);
+    resolve();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(run(fn)).toBe(true);
+    expect(calls).toBe(2);
+  });
+
+  it('releases after a rejection (errors are shown from the mutation state)', async () => {
+    const run = createSingleFlight();
+    run(() => Promise.reject(new Error('CONFLICT')));
+    await new Promise((r) => setTimeout(r, 0));
+    let ran = false;
+    run(async () => {
+      ran = true;
+    });
+    expect(ran).toBe(true);
+  });
+
+  it('releases when the callback throws synchronously', () => {
+    const run = createSingleFlight();
+    run(() => {
+      throw new Error('boom');
+    });
+    expect(run(async () => {})).toBe(true);
   });
 });

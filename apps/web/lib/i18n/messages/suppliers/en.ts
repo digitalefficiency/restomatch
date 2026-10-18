@@ -120,6 +120,7 @@ export const en: Shape<typeof he> = {
     leadDays: 'Days until delivery (0 = same day)',
     deliversOn: 'Fixed delivery day',
     pickDay: 'Pick at least one order day.',
+    pickCutoff: 'Set a cutoff time (HH:MM).',
     save: 'Save order schedule',
     addWindow: 'Add order window',
     clearAll: 'Clear all',

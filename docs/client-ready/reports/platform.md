@@ -137,3 +137,99 @@ pgvector and Redis 7:
 | `pnpm --filter @restomatch/db run doctor --strict` (fresh migrated DB) | 0 FAIL · 0 WARN |
 | `docker build -f apps/worker/Dockerfile .` + run + `scripts/smoke-queues.ts` | image builds on the merged tree; OCR → match processed in the container |
 | `cd apps/mobile && pnpm exec expo export --platform android` | exit 0 |
+
+---
+
+# Round 2 — whole-system QA on the release candidate
+
+Base: `claude/client-ready` @ b5334f6 → d09a57f (all sessions merged), fast-forwarded/merged into
+this branch. Node v22.22.0, pnpm 10.33.0 throughout.
+
+## Fixed in round 2
+
+| # | Problem (severity) | Fix | Test |
+|---|---|---|---|
+| R2-1 | **EN-7 / F7** (high): `packages/queue` producers used ioredis' offline queue + `maxRetriesPerRequest:null`, so a set-but-unreachable or malformed `REDIS_URL` (classically Upstash's `https://` REST URL) made `registerInvoice` hang until the function timed out | Producers: no offline queue, 3 s connect timeout, hard 3 s deadline on `add()`, coded `QueueUnavailableError` (`queue.unavailable`), `redisUrlProblem()` scheme check, throttled `error` log. `registerInvoice` keeps the invoice and returns `ocrQueued:false`; the wizard shows a he/en message and receives against the PO; `catalog.import` falls back to the inline commit. Boot: web WARNs; worker WARNs in dev, refuses to boot in prod | `packages/queue/src/__tests__/failFast.test.ts` (8: scheme, deadline, refused host ≈3 s, black-holed host ≈3 s, REST URL instant), `receiving.test.ts` (+3), `apps/worker/src/__tests__/env.test.ts` (3) |
+| R2-2 | **Outbox dedupe** (critical, found by the worker runtime smoke): `notifications_dedupe_key_unique` is a PARTIAL index; `ON CONFLICT (dedupe_key)` without its predicate raised *"no unique or exclusion constraint matching the ON CONFLICT specification"* — the **end-of-day report, order reminders, supplier-delay alerts and `orders.placeOrder` by email/WhatsApp all failed**. The existing test used a mocked DB | `DEDUPE_INDEX_PREDICATE` on the conflict target in `notifications/outbox.ts` (immutable list — sprint-approved, minimal) and `routers/orders.ts` | `outbox-dedupe.db.test.ts` — real Postgres, red before / green after |
+| R2-3 | **Worker connection leak** (critical, found by the soak): every job run called `createDb(url)`; postgres.js never closes idle connections → each run leaked its connection for the life of the process (measured: 30 `outbox-dispatch` runs → 31 open connections; outbox ticks every 60 s) | `apps/worker/src/db.ts` `jobDb(url)` — one pool per process; 11 jobs switched (one line each, incl. S2's `ocrInvoice.ts` / S3's `matchInvoice.ts`) | `apps/worker/src/__tests__/db.test.ts`; re-measured: 60 runs → 1 connection |
+| R2-4 | No CI coverage of the worker at runtime | `ci.yml` worker job: seed a throwaway DB, boot the worker with a local email sink, `scripts/smoke-all-jobs.ts` (every queue once) | ran the exact step locally on a fresh DB → OK |
+| R2-5 | `engines.node` said `>=20` | `>=22.0.0 <23` (CI/.nvmrc/Docker already 22) | — |
+| R2-6 | e2e favicon filter no longer needed (S6 added `app/icon.svg`; S4 already removed the CSP one) | filter removed | e2e 71/71 |
+| R2-7 | **Request-path Redis could stall login and every dashboard render** (high — refuter D1): `lib/redis.ts` and `lib/rateLimit.ts` used the default offline queue; a black-holed Redis made a rate-limit check wait 30 s, a silent one forever; the dashboard worker banner awaited a Redis GET with no Suspense | both clients use `failFastRedisOptions()` + a 1.5 s `withDeadline` per call (rate limiter still fails OPEN); `getRedis()` ignores a wrong-scheme URL. `rateLimit.ts` is on the immutable list — minimal change, flagged | `lib/__tests__/redisFailFast.test.ts` (3) — red (15 s timeouts) before, green after |
+| R2-8 | Timed-out catalog enqueue could be committed twice (refuter D7: `Promise.race` doesn't cancel `queue.add`; the router falls back inline, BullMQ lands the job later) | worker `import-catalog` returns `skipped: 'already committed'` for a committed import | `smoke-all-jobs.ts` step "duplicate is skipped" |
+| R2-9 | Unset `REDIS_URL` reported `ocrQueued:true` and the wizard polled 30 s (refuter D10) | `enqueueOcrInvoice` returns `false` with no queue → `ocrQueued:false` | `receiving.test.ts` |
+| R2-10 | `/dashboard/receiving/<malformed id>` showed the error boundary (refuter D2) | `BAD_REQUEST` from zod → `notFound()` | e2e `malformed ids` (receiving/orders/invoices × he/en, 6) |
+| R2-11 | Docker hygiene (refuter D8/D9): `.env` only ignored at the root, sources writable by the app user | `.dockerignore` drops `**/.env*`, `**/*.env`, keys, dumps; build fails if an env file reaches the context; runtime `/app` root-owned (node can't write it). Note: the tracked `.npmrc` must stay in the context — excluding it changed the install and bloated the image to 1.79 GB (caught, reverted) | image 709 MB, `touch` in `/app` → EACCES, boots + OCR→match OK |
+| R2-12 | Worker shutdown left pools open | `closeJobDbs()` on SIGTERM/SIGINT | `db.test.ts` |
+
+## QA results
+
+| Area | Result |
+|---|---|
+| Clean clone → `pnpm install --frozen-lockfile` → full gate (migrate, RLS provision + completeness, `db:doctor --strict`, typecheck, lint, tests, worker tests with Redis, audit, `next build`) | see Verification — layer 1 |
+| e2e (`next dev`, own seeded DB, RLS app role) | **71/71** (auth 7, smoke 64 = 32 pages × he/en) |
+| Production build + `next start` (NODE_ENV=production, boot guards on) crawl | **126 page loads**: 5 roles × he/en logged in with the demo password, 22 dashboard/admin routes (owner) + 5 per other role, 14 public routes; **0** console errors, **0** Hebrew in English chrome, every `<html lang dir>` correct. 404 page translated (`העמוד לא נמצא` / `Page not found`). Slowest SSR: `/` 2.5 s (first hit), dashboard pages 1.0–1.5 s |
+| robots / sitemap / OG | 200; robots disallows app routes, sitemap lists the 7 marketing routes with he/en alternates; OG 1200×630 PNG + full `og:*` tags. ⚠ host is baked in **at build time** from `APP_URL` (was `localhost:3000` in a build made with the dev env) |
+| Heartbeat route | no/wrong bearer → 401; right `CRON_SECRET` → 200 `status:ok`; stale + email provider unreachable → 500 (alert flag not set → retried next tick) |
+| Worker runtime, every queue once (seeded DB, local email sink) | **13/13**: 7 scheduled jobs, outbox → sink → `sent` (4 EOD emails delivered), OCR(stub) → match chain, catalog import → `committed`, `sync-platforms` without credentials fails cleanly — after R2-2 (before: EOD report failed) |
+| Worker Docker image | builds (709 MB; was 669 MB — new `translate` package), boots as `node`, `/health` 200, OCR → match processed inside the container, `docker stop` 0.3 s |
+| 10-minute soak (production server, logged-in crawl) | **2,361 page loads, 0 failures**; web app-role connections flat at **5** the whole time; owner-role 4–5 (the 28–33 bump mid-run was the leaking worker — R2-3 — gone when it stopped); `next-server` RSS 313 MB → 766 MB in the first 2.5 min (warm-up/route caches), then +27 MB over 7.5 min → no leak signal |
+| Bundles (First Load JS, vs round 1) | shared 103 kB (=); `/dashboard/receiving/[poId]` 240 → 253 kB; `/showcase/receiver` 208 → 220 kB; `/` 197 → 198 kB; `/dashboard/suppliers/[id]` 168 → 172 kB |
+| Node | v22.22.0 everywhere (local, clean clone, Docker `node:22-slim`, CI `.nvmrc`) |
+
+## Needs another area (round 2)
+
+- **S6 — robots/sitemap/OG host:** `SITE_URL` is read at build time; make `robots.ts`/`sitemap.ts`
+  `dynamic = 'force-dynamic'` (or prefer `VERCEL_PROJECT_PRODUCTION_URL`) so a preview/staging build
+  never advertises the wrong host.
+- **S2 — receiving bundle:** `/dashboard/receiving/[poId]` grew to 253 kB; lazy-load the scan step.
+- **S2 / ops:** an invoice whose OCR enqueue failed (`ocrQueued:false`) stays `ocr_pending` forever —
+  add a "retry reading" action on the invoice page, or a worker sweep that re-enqueues
+  `ocr_pending` invoices older than N minutes (needs a `cron.ts` entry → owner review).
+- **Owner — heartbeat alert copy** still tells the owner to `launchctl kickstart` (Mac-only);
+  update once the worker moves to Fly/Docker.
+- **S2 — demo trip-wires (refuter, high for the demo):** "Use a demo invoice" on a real PO lands on
+  the PO-only fallback with *OCR confidence 100%* and every line as "missing on invoice" (11 false
+  alarms, `wizard.tsx:186`); the closed-receipt summary says "0 matched, 0 checked by hand" and "the
+  matching engine is now running" while the banner says it is unavailable; the step counter says
+  "STEP 2 OF 5" over a 4-segment bar; the cookie banner covers "Continue to quantities" at 1366×900.
+- **S3 — approvals/leaks polish (refuter):** a "Short delivery" card shows a red *Estimated loss
+  ₪0.00*; "Escalate to owner" is offered to the owner; "Expected 522.6 ⇆ Actual 575" bypasses
+  `formatIls`; no toast after approve/reject; the three headline figures (leaks ₪357 / dashboard ₪490
+  / approvals at-risk ₪331) differ with no explanation; Hebrew category subtitles under English
+  product names on the leak table.
+- **S2/S4 — soft 404s:** `/dashboard/{orders,invoices,suppliers,products}/<bad id>` render the
+  translated not-found page with HTTP 200 (streamed after the layout); harmless for users, fix if
+  monitoring keys on status.
+- **S6 — OG:** the OG image is English-only while `og:title` is Hebrew; `twitter:card` should be
+  `summary_large_image`; robots `Host:` should not carry a scheme.
+
+## Verification (2 layers)
+
+**Layer 1 — full gate from a clean clone** (`scratchpad/clean-gate.sh <sha>`: fresh `git clone`,
+`pnpm install --frozen-lockfile`, migrate, `provision-rls`, `check-rls`, `db:doctor --strict`,
+`turbo typecheck`, `pnpm lint`, all package tests, worker tests with Redis, `pnpm audit --prod
+--audit-level=high`, `next build`):
+
+| SHA | Result |
+|---|---|
+| e08ee3c (EN-7) | 11/11 steps rc=0 |
+| 8a53a9a (+ outbox, worker pools, CI smoke, base d09a57f) | 11/11 rc=0 · 1,083 tests + worker 16 · typecheck 17/17 · lint 0 errors |
+| bbcbef4 (+ refuter fixes) | 11/11 rc=0 · **1,086 tests + worker 17** · lint 0 errors (6 warnings) · build green |
+| c339a64 (final; `.dockerignore` only) | covered by bbcbef4 + image rebuild below |
+
+**Layer 2 — production build + click-through, plus an independent refuter.**
+- Production `next start` (NODE_ENV=production, boot guards on) at c339a64: **130 page loads**, 5
+  roles × he/en via password login, 0 console errors, 0 Hebrew in English chrome, correct
+  `lang/dir` everywhere, malformed ids → translated not-found.
+- 10-minute soak: 2,361 loads, 0 failures, web connections flat (see QA).
+- Worker image c339a64: 709 MB, boots read-only as `node`, OCR → match processed; all-jobs smoke
+  13/13 (+ duplicate-import skip).
+- e2e on dev: 71/71 (pre-refuter) + the 6 new malformed-id tests.
+- **Independent refuter** (separate agent, read-only, ~16 min, 58 tool calls) re-verified claims
+  1–7: CONFIRMED the outbox fix (rendered SQL + rolled-back insert pair; no other partial-index
+  conflict target in the repo), the worker pool fix (no per-call pools left in worker/api/web), the
+  EN-7 producers (≈3 s rejection for silent / refused / black-holed / NXDOMAIN / TLS-mismatch hosts,
+  1 ms for https://) and the he/en demo path for all 5 roles; REFUTED "no other hang paths" (→ R2-7),
+  "never double-processed" (→ R2-8), "404 everywhere" (→ R2-10), and found D8/D9 (→ R2-11), D10
+  (→ R2-9). Remaining refuter findings outside S7 are listed under *Needs another area*.

@@ -18,7 +18,6 @@ import {
   suppliers,
   testDbUrl,
   type Database,
-  type RestaurantSettings,
 } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
@@ -230,7 +229,7 @@ describe('chain.overview price disparities', () => {
   const setFlag = (on: boolean) =>
     ownerDb
       .update(restaurants)
-      .set({ settings: (on ? { features: { priceDisparity: true } } : {}) as RestaurantSettings })
+      .set({ settings: (on ? { features: { priceDisparity: true } } : {}) as typeof restaurants.$inferInsert['settings'] })
       .where(eq(restaurants.id, A.restaurantId));
 
   it('is null while the priceDisparity feature is off', async () => {

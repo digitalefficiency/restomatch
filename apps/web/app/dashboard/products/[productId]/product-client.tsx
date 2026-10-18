@@ -201,12 +201,12 @@ export function ProductEditor({
           {t('prices.title')}
         </h2>
         <Card elevated padding="none" className="overflow-x-auto">
-          <table className="w-full min-w-[520px] text-start text-sm">
+          <table className="w-full text-start text-sm sm:min-w-[520px]">
             <thead>
               <tr className="border-b border-line text-xs uppercase tracking-wide text-subtle">
                 <th scope="col" className="px-4 py-3 text-start font-medium">{t('prices.supplier')}</th>
-                <th scope="col" className="px-4 py-3 text-start font-medium">{t('prices.sku')}</th>
-                <th scope="col" className="px-4 py-3 text-start font-medium">{t('prices.unit')}</th>
+                <th scope="col" className="hidden px-4 py-3 text-start font-medium sm:table-cell">{t('prices.sku')}</th>
+                <th scope="col" className="hidden px-4 py-3 text-start font-medium sm:table-cell">{t('prices.unit')}</th>
                 <th scope="col" className="px-4 py-3 text-end font-medium">{t('prices.listPrice')}</th>
                 <th scope="col" className="px-4 py-3 text-start font-medium">{t('prices.status')}</th>
               </tr>
@@ -221,9 +221,14 @@ export function ProductEditor({
                     >
                       {supplierName(it.supplierId, it.supplierName, it.supplierNameEn)}
                     </Link>
+                    {/* Phones: SKU + unit fold under the supplier so the price stays on screen. */}
+                    <span className="mt-0.5 block text-xs text-subtle sm:hidden">
+                      {it.supplierSku ? <span className="font-mono">{it.supplierSku} · </span> : null}
+                      <UnitText unit={it.unit} />
+                    </span>
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-subtle">{it.supplierSku ?? '—'}</td>
-                  <td className="px-4 py-3 text-muted">
+                  <td className="hidden px-4 py-3 font-mono text-xs text-subtle sm:table-cell">{it.supplierSku ?? '—'}</td>
+                  <td className="hidden px-4 py-3 text-muted sm:table-cell">
                     <UnitText unit={it.unit} />
                   </td>
                   <td className="px-4 py-3 text-end font-mono tabular-nums text-ink">
@@ -261,7 +266,7 @@ export function ProductEditor({
           {detail.history.length === 0 ? (
             <p className="px-4 py-6 text-center text-sm text-subtle">{t('history.empty')}</p>
           ) : (
-            <table className="w-full min-w-[420px] text-start text-sm">
+            <table className="w-full text-start text-sm sm:min-w-[420px]">
               <thead>
                 <tr className="border-b border-line text-xs uppercase tracking-wide text-subtle">
                   <th scope="col" className="px-4 py-3 text-start font-medium">{t('history.date')}</th>

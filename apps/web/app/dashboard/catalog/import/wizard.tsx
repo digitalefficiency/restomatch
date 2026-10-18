@@ -18,6 +18,7 @@ import {
   displayName,
   friendlyError,
   useToast,
+  useSingleFlight,
 } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber, formatPercent } from '@/lib/i18n/format';
@@ -68,6 +69,7 @@ export function ImportWizard({ initialSupplierId }: { initialSupplierId: string 
   const tc = useT(components);
   const locale = useLocale();
   const toast = useToast();
+  const once = useSingleFlight();
   const [step, setStep] = useState<Step>(initialSupplierId ? 'UPLOAD' : 'SUPPLIER');
   const [supplierId, setSupplierId] = useState(initialSupplierId);
   const [file, setFile] = useState<FileInput | null>(null);
@@ -124,7 +126,11 @@ export function ImportWizard({ initialSupplierId }: { initialSupplierId: string 
     }
   }
 
-  async function handleCommit() {
+  function handleCommit() {
+    once(commit);
+  }
+
+  async function commit() {
     if (!file || !supplierId) return;
     try {
       const res = await commitImport.mutateAsync({ supplierId, file, mapping });

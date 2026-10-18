@@ -116,7 +116,93 @@ Tests:
 4. **Restaurant name in the header / mobile drawer** is wrapped in `<span lang="he" dir="auto">`. It is tenant data, usually Hebrew, shown inside the English UI. It is isolated without changing the header's alignment.
 5. **appCode mapping (not done; not cheap within my boundary).** Mapping my routers' errors to stable codes would mean adding new entries to S4's `APP_ERROR_CODES` list in `packages/api/src/errors.ts`. My screens already localize by tRPC code (`friendlyError`) and by the `CATALOG_FILE_<code>` token. Proposal for S4: add `catalog.duplicateSku`, `catalog.file.*`, `orders.notDraft`, `orders.cannotCancel`, `orders.noLines`, `orders.noContact` and `products.linked`. I'd then switch the overrides to `data.appCode`.
 
+## Round 4: EXP-DUP-1 + full ops QA on the release candidate (b5334f6)
+
+### Fixed (problem → fix → test)
+
+1. **EXP-DUP-1: a flagged duplicate was booked twice in the accounting exports.**
+   - **Problem:** since 3b70d7a the CSV and the uniform-1000 file include `disputed` invoices. The second copy that the engine flags DUPLICATE_INVOICE stays `disputed` forever, so it was exported next to the original.
+   - **Fix:** `packages/api/src/routers/exports.ts` `unacceptedDuplicate()`. Exclude an invoice whose **latest** match run has a DUPLICATE_INVOICE discrepancy that is not `rejected`. The restaurant is pinned on both `match_runs` and `discrepancies`.
+   - **Semantics:** in approvals, Approve = `accepted` = "Claimed", meaning the duplicate is confirmed. Reject = `rejected` = "Waived", meaning it's not a duplicate.
+     - My first cut excluded "not accepted". The independent refuter caught that this is backwards: approving a duplicate exported it, and waiving one dropped a real invoice.
+     - The brief's wording ("not resolved as accepted") has the same inversion.
+   - **Why the latest run only:** a re-match that clears the flag, for example after a misread invoice number is fixed, brings the invoice back. Earlier runs are never closed.
+   - **Tests** (`ops-routers.test.ts`):
+     - Open and claimed duplicates are excluded from CSV and 1000.
+     - A waived duplicate and a normal `PRICE_HIGHER` dispute are included.
+     - A clean re-match after a duplicate flag puts the invoice back into the export.
+2. **Undated checked invoices were silently missing from every export.**
+   - **Fix:** both export procedures return `undatedCount`, the number of checked invoices created in the period with a NULL `invoice_date`. Duplicates are not counted.
+   - The exports page shows a warning that the file doesn't carry them and the date can be added on the invoice page. Any change to the range clears the warning.
+   - **Test:** `ops-routers.test.ts`.
+3. **Double-click created duplicates.**
+   - **Observed on the production build:** 2 suppliers, and 2 *sent* POs from the wizard. Both clicks fire before `isPending` disables the button.
+   - **Fix:** `lib/components/singleFlight.ts` (`useSingleFlight`) drops re-entrant submits while one is in flight. Applied to supplier create, catalog item create, catalog import commit, wizard send and PO-detail send.
+   - **Tests:** `ops-components.test.ts` (3 cases), plus the Playwright dblclick checks below.
+4. **`/dashboard/products` had no route rule.** Receiver, bookkeeper and chef could open product pages (prices, names grid) by URL.
+   - **Fix:** `ROUTE_ROLES['/dashboard/products'] = owner, manager`, the same as the catalog.
+   - **Test:** `roles.test.ts`.
+5. **Phones (390px) hid the ₪ columns.**
+   - On the PO detail, unit price and line total sat behind a horizontal scroll inside the card. Same for the list price on the product page.
+   - **Fix:** secondary columns fold under the name on phones. Editing a line restores the full table.
+   - PO line totals now use the agorot-rounded `lineTotalIls`.
+   - **Test:** Playwright asserts that no PO-lines table is clipped at 390px.
+6. **English-names grid lost edits.**
+   - An edit made before searching or filtering was dropped on save, because pending edits came from the visible rows only.
+   - Edits now carry their original value. Saves go out in batches of at most 200 (the procedure's cap), and anything not saved is kept.
+   - **Tests:** `ops-logic.test.ts` (`pendingNames`, `chunk`).
+7. **Supplier schedule:** a cleared cutoff time got through to a generic "invalid fields" error. It is now validated in the client with its own message (`scheduleRowProblem`, tested).
+8. **Copy:** "1 changes" / "1 checked invoices" plurals reworded, since there's no plural support in i18n.
+
+### QA (production build, `next start`, local DB only)
+
+- **Sweep:** 5 roles × he/en × 1440/390 × 19 ops routes = 380 page loads. Covered: suppliers list, scores, new and 4 detail tabs; catalog, import and mapping; products and product detail; orders list, new, import and detail (sent and closed); exports.
+  - Owner and manager: every page 200, `dir` correct, no horizontal page overflow, no stuck "Loading…", no 5xx.
+  - Receiver, bookkeeper, chef: redirected from every area they can't see, products included now. The bookkeeper reaches exports, and the manager doesn't.
+  - **React #418 (hydration), also seen once by S4 on /dashboard/catalog/import.** I saw it once on /dashboard/catalog (manager, en, 390), during a sweep right after QA data was created.
+    - **Not reproduced** in 360 further production loads, covering he/en, 390/1440, the catalog, import (with and without `?supplierId`), mapping, products, suppliers, orders and exports, with seed data and with imported catalogs. Also clean under `next dev`, which logs nesting and hydration diffs.
+    - **Audited and ruled out:**
+      - Render-time `Date`, `Math.random`, `window`/`document`/`localStorage` reads: none in these client trees.
+      - Dates: all go through `formatDate`, which uses a fixed `Asia/Jerusalem` timezone.
+      - QueryClient: created per mount.
+      - CookieConsent and the mobile drawer/bottom bar: decide after mount.
+      - LocaleSync: works in an effect.
+      - Worker banner: server-only.
+    - No speculative fix shipped. S6's opt-in `e2e/i18n-sweep.spec.ts` already fails on any page or console error, so it catches a recurrence.
+    - **Lead if it recurs:** grab the dev-mode diff. Note that running `next dev` against the same `apps/web/.next` overwrites a production build: I hit this, and it broke the prod server until a rebuild.
+- **Flows**, owner, run in he/en × 1440/390, all PASS on the final build:
+  - Create a supplier with a 120+ character Hebrew name, double-clicking Save: exactly one row, no overflow.
+  - Details save, checked in the DB.
+  - Import XLSX (12 rows, double-click) and Windows-1255 CSV (6 rows, auto-mapped).
+  - `.xls` and headerless CSV rejected with guidance.
+  - Names grid bulk save, double-click: 2 rows saved.
+  - Wizard send, double-click: exactly 1 PO.
+  - Draft line edit: DB total = Σ agorot-rounded lines; cancel works.
+  - Global search by English name navigates.
+  - CSV + uniform-1000 for the month.
+- **Exports vs the hero (this month):**
+  - CSV: 24 rows (12 paid, 10 matched, 2 disputed).
+  - Σ excl. VAT ₪28,388.97 = the hero's ₪28,389 spend. Σ incl. VAT ₪33,486.34.
+  - Every row passes VAT = 18% (or 17% for older rows) and excl + VAT = incl to the agora.
+  - Uniform-1000: 24 C100 lines, each exactly 136 characters.
+- **Independent refuter subagent** (≈60 min on the same build): found the inverted `accepted` semantics, the stale-run exclusion, grid edits lost on filter, the stale warning and plurals, and the empty cutoff. All fixed above.
+  - **Could not refute:** tenant pinning of the export subquery; disputed invoices still exported; layout in he/en at 390/1440 including long Hebrew names; catalog import error paths; the products route gate.
+- The demo DB was reset with `dev-setup.sh` afterwards: hero ₪572 / ₪28,389, no QA rows left.
+
+### Verification (2 layers)
+
+- **Layer 1, full gate:** see "Gate" (round 4 line).
+- **Layer 2:**
+  - `pnpm --filter @restomatch/web build` and `next start` (placeholder email/Supabase keys, nothing sent).
+  - Playwright sweep and flow drivers (`executablePath /opt/pw-browsers/chromium`).
+  - An independent refuter subagent. Its findings were fixed, then the build was redone and the flows re-run: 4/4 runs green.
+
 ## Still broken / not done
+
+- **Round 4 notes, not fixed:**
+  - **Uniform-1000 encoding:** records are 136 *characters* but written as UTF-8. Byte-oriented tax-software readers expect ISO-8859-8 / Windows-1255 and CRLF, so Hebrew names would shift columns. This predates the change; it's the export format owner's call.
+  - **CSV status column:** the Hebrew CSV prints raw `paid/matched/disputed`.
+  - **Products data access:** `products.list` / `search.global` are member-readable over tRPC. The new restriction is route-level, matching how the catalog is gated.
 
 - **The worker banner shows locally** because no worker is running. In the demo, start the worker (`apps/worker`) or it will say the engine is offline. This is S7's area.
 - **The seed has no catalog items and no `name_en`.** For screenshots I imported the fixtures through the UI and set 17 English names in the **dev DB only**. See "Needs another area".
@@ -159,5 +245,6 @@ pnpm --filter @restomatch/web exec tsc --noEmit -p .  → 0 errors
 cd apps/web && set -a && . ./.env.local && set +a && pnpm build → green (only pre-existing bullmq / jose dependency warnings)
 Playwright e2e (scratchpad driver, real UI) → 8/8 PASS
 round 3: pnpm test 13/13 (api 488, web 183); tsc 0; pnpm build green (one retry: Google Fonts fetch timed out); he/en checks of supplier header (₪144 = leaks page), details tab, restaurant-name markup
+round 4 (final code): web lint 0 errors (3 pre-existing warnings, none in S5 files); pnpm -r typecheck 0 errors; pnpm test Tasks 13/13 (api 496, web 204, matching 86 incl. leak-canary); pnpm build green; Playwright flows 4/4 green on the rebuilt next start
 follow-up round: pnpm test 12/12 (api 443, web 177); tsc 0; pnpm build green; English-names grid e2e (Enter navigation + Ctrl+S, 56→58 of 64) PASS
 ```
