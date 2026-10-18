@@ -109,7 +109,7 @@ Also checked by hand in he and en:
 - **S3:**
   - `owner.suppliers` scorecards don't return `nameEn`, so the scorecards tab shows Hebrew supplier names in English.
   - `logActivity` titles are stored as Hebrew sentences. I localize the known templates client-side (`lib/components/activityText.ts`); storing `metadata` (invoice number, counts, ₪) and rendering it would be cleaner.
-- **S4:** `lib/roles.ts` `labelForRole` is Hebrew-only. The dashboard header uses my own `nav.roles.*` keys for now.
+- **S4:** done in the merge. The header now uses `labelForRole(role, locale)` and keeps `<LocaleSync />`; sign-out is translated (`nav.signOut`).
 - **S7:** the full `pnpm test` hits "too many clients already" when a `next dev` server and Playwright sessions share the local Postgres (default max_connections=100). Run the suite with the dev server stopped, or raise `max_connections` in `dev-setup.sh`.
 
 ## Gate
@@ -120,6 +120,7 @@ pnpm --filter @restomatch/api exec vitest run src/__tests__/cross-tenant.attack.
 pnpm --filter @restomatch/web exec vitest run app/dashboard/__tests__/ops-logic.test.ts lib/components/__tests__/ops-components.test.ts lib/__tests__/i18n.test.ts → 59 passed
 DATABASE_URL_TEST=… pnpm test   (dev server stopped) → Tasks 12/12 successful (api 410, web 160, matching 76 incl. leak-canary, …)
 after merging origin/claude/client-ready (S1+S3+S6, migrations 0029–0032 applied) → Tasks 12/12 successful (api 423, web 165, matching 86, db 43)
+after merging origin/claude/client-ready e7ae653 (+S4) → Tasks 12/12 successful (api 436, web 176, db 45); tsc 0; pnpm build green
 pnpm --filter @restomatch/web exec tsc --noEmit -p .  → 0 errors
 cd apps/web && set -a && . ./.env.local && set +a && pnpm build → green (only pre-existing bullmq / jose dependency warnings)
 Playwright e2e (scratchpad driver, real UI) → 8/8 PASS
