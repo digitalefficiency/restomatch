@@ -5,6 +5,7 @@ import { C, FONT } from '../theme';
 import { Background } from '../components/Background';
 import { Laptop, laptopScreen, Screen } from '../components/Devices';
 import { Chip } from '../components/primitives';
+import { zones } from '../layout';
 
 export const HERO_LOOP_FRAMES = 360; // 12 s @ 30 fps
 
@@ -24,7 +25,8 @@ export const HeroLoop: React.FC<{ locale: Locale }> = ({ locale }) => {
   const c = Math.cos(tau * ph);
   const isRtl = locale === 'he';
 
-  const W = 820;
+  const { device, caption } = zones(width, height, locale);
+  const W = Math.round(device.w * 0.88);
   const { w: sw } = laptopScreen(W);
   // gentle scroll down and back (periodic)
   const scroll = ((1 - c) / 2) * 0.16 * sw;
@@ -47,8 +49,20 @@ export const HeroLoop: React.FC<{ locale: Locale }> = ({ locale }) => {
   return (
     <AbsoluteFill style={{ background: C.bgDeep }}>
       <Background period={HERO_LOOP_FRAMES} intensity={0.9} />
-      <AbsoluteFill style={{ perspective: 1800, alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ transform: `translateY(${y + 20}px) rotateX(${rx}deg) rotateY(${ry}deg)`, transformStyle: 'preserve-3d' }}>
+      <div
+        style={{
+          position: 'absolute',
+          left: device.x,
+          top: device.y,
+          width: device.w,
+          height: device.h,
+          perspective: 1800,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <div style={{ transform: `translateY(${y + 10}px) rotateX(${rx}deg) rotateY(${ry}deg)`, transformStyle: 'preserve-3d' }}>
           <Laptop width={W} glare={ry / 12}>
             <Screen src={`shots/dashboard-${locale}-full.png`} width={sw} scroll={scroll} focus={focus} redact={[isRtl ? { y: 0.027, h: 0.013, x: 0.72, w: 0.21 } : { y: 0.027, h: 0.013, x: 0.075, w: 0.21 }]} />
             {beamOn ? (
@@ -67,26 +81,44 @@ export const HeroLoop: React.FC<{ locale: Locale }> = ({ locale }) => {
             ) : null}
           </Laptop>
         </div>
-      </AbsoluteFill>
-      <div dir={isRtl ? 'rtl' : 'ltr'} style={{ position: 'absolute', inset: 0, fontFamily: FONT.sans }}>
-        <div style={{ position: 'absolute', top: 70, [isRtl ? 'right' : 'left']: 60, ...chip(0) }}>
-          <Chip accent={C.danger}>
+      </div>
+      {/* callouts live in the caption zone only — never over the device (layout.ts) */}
+      <div
+        dir={isRtl ? 'rtl' : 'ltr'}
+        style={{
+          position: 'absolute',
+          left: caption.x,
+          top: caption.y,
+          width: caption.w,
+          height: caption.h,
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'flex-start',
+          gap: 26,
+          fontFamily: FONT.sans,
+        }}
+      >
+        <div style={chip(0)}>
+          <Chip accent={C.danger} style={{ fontSize: 24 }}>
             <span>{t.product.chipLeak}</span>
             <bdi dir={isRtl ? 'rtl' : 'ltr'} style={{ color: C.danger, fontWeight: 800 }}>{ilsText(FACTS.leak, locale)}</bdi>
           </Chip>
         </div>
-        <div style={{ position: 'absolute', top: height * 0.5, [isRtl ? 'left' : 'right']: 40, ...chip(1) }}>
-          <Chip accent={C.gold}>
-            <span>{t.product.chipCaught}</span>
-            <bdi dir={isRtl ? 'rtl' : 'ltr'} style={{ color: C.gold, fontWeight: 800 }}>{ilsText(FACTS.caught, locale)}</bdi>
-          </Chip>
-        </div>
-        <div style={{ position: 'absolute', bottom: 70, [isRtl ? 'right' : 'left']: 90, ...chip(2) }}>
-          <Chip accent={C.primary}>
+        <div style={chip(1)}>
+          <Chip accent={C.primary} style={{ fontSize: 24 }}>
             <bdi dir="ltr" style={{ fontWeight: 800 }}>{FACTS.leakPct}</bdi>
             <span>{t.product.chipPct}</span>
           </Chip>
         </div>
+        <div style={chip(2)}>
+          <Chip accent={C.gold} style={{ fontSize: 24 }}>
+            <span>{t.product.chipCaught}</span>
+            <bdi dir={isRtl ? 'rtl' : 'ltr'} style={{ color: C.gold, fontWeight: 800 }}>{ilsText(FACTS.caught, locale)}</bdi>
+          </Chip>
+        </div>
+      </div>
+      <div dir={isRtl ? 'rtl' : 'ltr'} style={{ position: 'absolute', inset: 0, fontFamily: FONT.sans, pointerEvents: 'none' }}>
         <div
           style={{
             position: 'absolute',

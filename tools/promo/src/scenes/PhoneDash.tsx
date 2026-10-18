@@ -2,77 +2,98 @@ import React from 'react';
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
 import { COPY, FACTS, ilsText, Locale } from '../copy';
 import { C, EASE_IN, EASE_IN_OUT, FONT, lerp, prog } from '../theme';
+import { zones } from '../layout';
 import { Phone, phoneScreen, Screen } from '../components/Devices';
-import { Chip, FadeUp, RiseLine } from '../components/primitives';
+import { CaptionZone, Callout, DeviceZone, Spotlight } from '../components/Stage';
+import { FadeUp, RiseLine } from '../components/primitives';
 
 export const PHONE_DASH_DURATION = 220;
 
-/** Vertical cut: the owner's dashboard on a phone, real screenshot, with callouts. */
+// Leak hero card on the phone capture (units of the 390-px screen width).
+const HERO = { x0: 0.07, y0: 0.64, x1: 0.93, y1: 1.05 };
+const TOP = 0.11;
+
+/** Vertical cut: the owner's dashboard on a phone (real capture), spotlight on the ₪ hero. */
 export const PhoneDash: React.FC<{ locale: Locale }> = ({ locale }) => {
   const f = useCurrentFrame();
-  const { width } = useVideoConfig();
+  const { width, height } = useVideoConfig();
   const t = COPY[locale].product;
-  const dir = locale === 'he' ? 'rtl' : 'ltr';
-  const PW = 640;
-  const { w: sw } = phoneScreen(PW);
+  const { device } = zones(width, height, locale);
+  const d = locale === 'he' ? 'rtl' : 'ltr';
+  const PW = 560;
+  const { w: sw, h: sh } = phoneScreen(PW);
   const enter = prog(f, 0, 36);
   const exit = prog(f, PHONE_DASH_DURATION - 20, PHONE_DASH_DURATION, EASE_IN);
-  const scroll = lerp(0, 0.55, prog(f, 40, 200, EASE_IN_OUT)) * sw;
-  const ry = lerp(25, 6, enter) + Math.sin(f / 30) * 2;
+  const spot = prog(f, 60, 72) * (1 - prog(f, 180, 192));
+  const pin = prog(f, 40, 68, EASE_IN_OUT);
+  const ry = lerp(20, 4, enter) * (1 - pin);
+  const rect = { x: HERO.x0 * sw, y: (HERO.y0 + TOP) * sw, w: (HERO.x1 - HERO.x0) * sw, h: (HERO.y1 - HERO.y0) * sw };
+  const phoneX = device.w / 2 - PW / 2;
+  const phoneY = 40;
+  const frame = Math.round(PW * 0.04);
+  const cx = phoneX + frame + rect.x + rect.w / 2;
+  const cy = phoneY + frame + rect.y + rect.h / 2;
+  const zoom = 1 + 0.35 * pin;
+
   return (
-    <AbsoluteFill style={{ perspective: 1800, alignItems: 'center' }}>
-      <div dir={dir} style={{ position: 'absolute', top: 120, left: 80, right: 80, fontFamily: FONT.sans, color: C.ink, textAlign: 'center' }}>
-        <RiseLine at={6} out={PHONE_DASH_DURATION - 20} style={{ fontSize: 78, fontWeight: 800 }}>
-          {t.heroTitle}
-        </RiseLine>
-        <FadeUp at={16} out={PHONE_DASH_DURATION - 20}>
-          <div style={{ fontSize: 36, color: C.muted, marginTop: 12 }}>{t.heroSub}</div>
-        </FadeUp>
-      </div>
-      <div
-        style={{
-          position: 'absolute',
-          top: 420,
-          left: width / 2 - PW / 2,
-          transform: `translateY(${(1 - enter) * 700 - exit * 60}px) rotateY(${ry}deg) rotateX(${lerp(30, 4, enter)}deg)`,
-          opacity: 1 - exit,
-        }}
-      >
-        <Phone width={PW} glare={ry / 30}>
-          <Screen
-            src={`shots/dashboard-${locale}-phone.png`}
-            width={sw}
-            scroll={scroll}
-            top={sw * 0.11}
-            redact={[{ y: 0.105, h: 0.04, x: 0.16, w: 0.62 }]}
-          />
-          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: sw * 0.11, background: C.bg }} />
-        </Phone>
-      </div>
-      <FadeUp at={60} out={PHONE_DASH_DURATION - 22} style={{ position: 'absolute', top: 700, [locale === 'he' ? 'right' : 'left']: 40 }}>
-        <Chip accent={C.danger} big>
-          <span>{t.chipLeak}</span>
-          <span style={{ color: C.danger, fontWeight: 800 }}>
-            <bdi dir={locale === "he" ? "rtl" : "ltr"}>{ilsText(FACTS.leak, locale)}</bdi>
-          </span>
-        </Chip>
-      </FadeUp>
-      <FadeUp at={80} out={PHONE_DASH_DURATION - 22} style={{ position: 'absolute', top: 1060, [locale === 'he' ? 'left' : 'right']: 40 }}>
-        <Chip accent={C.gold} big>
-          <span>{t.chipCaught}</span>
-          <span style={{ color: C.gold, fontWeight: 800 }}>
-            <bdi dir={locale === "he" ? "rtl" : "ltr"}>{ilsText(FACTS.caught, locale)}</bdi>
-          </span>
-        </Chip>
-      </FadeUp>
-      <FadeUp at={100} out={PHONE_DASH_DURATION - 22} style={{ position: 'absolute', top: 1420, [locale === 'he' ? 'right' : 'left']: 40 }}>
-        <Chip accent={C.primary} big>
-          <span>{t.chipClaimed}</span>
-          <span style={{ color: C.primary, fontWeight: 800 }}>
-            <bdi dir={locale === "he" ? "rtl" : "ltr"}>{ilsText(FACTS.claimed, locale)}</bdi>
-          </span>
-        </Chip>
-      </FadeUp>
+    <AbsoluteFill style={{ opacity: 1 - exit }}>
+      <DeviceZone locale={locale} perspective={1800}>
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            transform: `translate(${(device.w / 2 - cx) * pin}px, ${(device.h * 0.4 - cy) * pin}px) scale(${zoom})`,
+            transformOrigin: `${cx}px ${cy}px`,
+          }}
+        >
+          <div
+            style={{
+              position: 'absolute',
+              left: phoneX,
+              top: phoneY,
+              transform: `translateY(${(1 - enter) * 700}px) rotateY(${ry}deg) rotateX(${lerp(26, 0, enter)}deg)`,
+              opacity: enter,
+            }}
+          >
+            <Phone width={PW} glare={ry / 30}>
+              <Screen src={`shots/dashboard-he-phone.png`} width={sw} top={sw * TOP} redact={[{ y: 0.105, h: 0.04, x: 0.16, w: 0.62 }]} />
+              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: sw * TOP, background: C.bg }} />
+              <Spotlight rect={rect} a={spot} src="shots/dashboard-he-phone.png" imgWidth={sw} imgTop={TOP * sw} screenW={sw} screenH={sh} accent={C.danger} />
+            </Phone>
+          </div>
+        </div>
+      </DeviceZone>
+      <CaptionZone locale={locale} justify="flex-start">
+        <div style={{ fontFamily: FONT.sans, color: C.ink }}>
+          <RiseLine at={6} style={{ fontSize: 76, fontWeight: 800 }}>
+            {t.heroTitle}
+          </RiseLine>
+          <FadeUp at={16}>
+            <div style={{ fontSize: 36, color: C.muted, marginTop: 10 }}>{t.heroSub}</div>
+          </FadeUp>
+          <Callout locale={locale} a={prog(f, 66, 78)} accent={C.danger}>
+            <span>{t.chipLeak}</span>
+            <bdi dir={d} style={{ color: C.danger }}>{ilsText(FACTS.leak, locale)}</bdi>
+            <span style={{ color: C.muted, fontWeight: 500 }}>
+              · <bdi dir="ltr">{FACTS.leakPct}</bdi> {t.chipPct}
+            </span>
+          </Callout>
+          <div style={{ display: 'flex', gap: 18, marginTop: 6, flexWrap: 'wrap' }}>
+            <FadeUp at={92}>
+              <Callout locale={locale} a={1} accent={C.gold}>
+                <span>{t.chipCaught}</span>
+                <bdi dir={d} style={{ color: C.gold }}>{ilsText(FACTS.caught, locale)}</bdi>
+              </Callout>
+            </FadeUp>
+            <FadeUp at={108}>
+              <Callout locale={locale} a={1} accent={C.primary}>
+                <span>{t.chipClaimed}</span>
+                <bdi dir={d} style={{ color: C.primary }}>{ilsText(FACTS.claimed, locale)}</bdi>
+              </Callout>
+            </FadeUp>
+          </div>
+        </div>
+      </CaptionZone>
     </AbsoluteFill>
   );
 };
