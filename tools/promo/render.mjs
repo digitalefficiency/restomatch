@@ -39,8 +39,8 @@ async function video(id, locale, file, extra = {}) {
     jpegQuality: 95,
     concurrency: Number(process.env.CONCURRENCY ?? 3),
     muted: true,
-    onProgress: ({ progress }) => {
-      if (Math.round(progress * 100) % 10 === 0) process.stdout.write(`\r${file} ${Math.round(progress * 100)}%   `);
+    onProgress: ({ renderedFrames, encodedFrames }) => {
+      if (renderedFrames % 150 === 0) console.log(`${file}: rendered ${renderedFrames}, encoded ${encodedFrames}`);
     },
     ...extra,
   });
