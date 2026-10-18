@@ -99,6 +99,19 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'onboarding.myMemberships': 'isolation',
   'onboarding.createRestaurant':
     'creates a brand-new tenant; takes no entity ids and reads nothing tenant-scoped',
+  // Chain / branches (S8). Exercised on the RLS-enforced app role in
+  // chain.attack.test.ts: A + B share a billing account, A also manages M and
+  // owns X on another account — A's chain is exactly its owner branches there.
+  'chain.branches':
+    'isolation — chain.attack.test.ts: lists only caller-OWNED branches on the active billing account (not B on the same account, not manager-only M, not X on another account)',
+  'chain.overview':
+    'isolation — chain.attack.test.ts: per-branch withRestaurant (RLS) sums; totals = A + A2 only, B/M/X excluded; forged session restaurantId → FORBIDDEN',
+  'chain.switchTarget':
+    'attack — chain.attack.test.ts: switching to B (no membership) or a random uuid → NOT_FOUND',
+  'chain.renameBranch':
+    'attack — chain.attack.test.ts: renaming B or manager-only M → NOT_FOUND, names unchanged',
+  'chain.addBranch':
+    'attack — chain.attack.test.ts: owner-only, plan limit enforced, copies only the source branch rows, manager / no-billing-account → FORBIDDEN',
   'owner.kpis': 'isolation',
   'owner.leakHero': 'isolation',
   'owner.leakBreakdown': 'isolation',

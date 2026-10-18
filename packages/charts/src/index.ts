@@ -41,3 +41,28 @@ export {
   type ViewPeriod,
   type ViewSpec,
 } from './leak-views';
+export {
+  aggregateChain,
+  computeBranchSnapshot,
+  shiftMonth,
+  supplierMergeKey,
+  type BranchMonthPoint,
+  type BranchSnapshot,
+  type BranchSupplierRow,
+  type ChainBranchRow,
+  type ChainOverview,
+  type ChainSupplierRow,
+  type ChainTotals,
+} from './chain';
+export {
+  computeBranchPriceLines,
+  computePriceDisparities,
+  DISPARITY_MIN_IMPACT_ILS,
+  DISPARITY_MIN_PCT,
+  type BranchPriceLine,
+  type BranchPriceLines,
+  type DisparityBranchPrice,
+  type DisparityLine,
+  type DisparityMatchMethod,
+  type PriceDisparityRow,
+} from './chain-disparity';
