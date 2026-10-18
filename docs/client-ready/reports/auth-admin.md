@@ -189,3 +189,20 @@ Harness: a scratchpad-only `--require` preload swapped `api.resend.com` for a lo
 
 ### Immutable files touched
 None. (`cross-tenant` COVERAGE untouched: no new tRPC procedure.)
+
+### Cross-QA: S8 chain / branch switcher (PR #38, `claude/client-ready-chain` @ 6fb058a)
+I built the branch as a production build and ran it against a chain-demo seed: the owner has 3 branches, and the manager was set up as manager on the main branch and chef on Jerusalem. The checks used forged requests via Playwright `request`.
+
+| Check | Result |
+|---|---|
+| Forged `POST /api/auth/session {activeRestaurantId: <branch I'm not a member of>}` | ✅ ignored (stays on the current branch and role) |
+| `chain.switchTarget(<foreign>)` | ✅ 404 "branch not found" |
+| `chain.overview` / `renameBranch` / `addBranch` as a non-owner | ✅ 403 |
+| Manager → `/dashboard/chain` | ✅ bounced |
+| Switch to an own branch where the role is lower (manager → chef) | ✅ the session is re-issued with **that branch's role**; the edge gate uses it (`/dashboard/suppliers` → HTTP bounce); manager-tier writes → 403 |
+| `token_version` bump after a switch | ✅ next request → /login |
+| Owner switches to Haifa | ✅ session `owner@Haifa`, `/dashboard/chain` 200, header shows the branch |
+| Garbage `activeRestaurantId` | ✅ ignored |
+| #38's `chain.attack` + `cross-tenant` + `rls.attack` suites | ✅ 183/183; `activeRestaurant.test.ts` 6/6 |
+
+Code review: the requested branch is honoured only if it is in the DB memberships (`pickActiveMembership`). It runs after the `token_version` check, and the 2FA gate still clears only via the server-verified ticket. Cross-branch reads run in each branch's own `withRestaurant` RLS transaction, and `addBranch` checks the billing-account payer and takes an advisory lock. **No findings.** One note for merging with this PR: `/api/session/refresh` calls `unstable_update({})`, which carries no `activeRestaurantId`, so it keeps the current branch.
