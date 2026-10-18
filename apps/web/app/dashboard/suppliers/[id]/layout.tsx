@@ -1,9 +1,10 @@
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ChevronLeft } from 'lucide-react';
 import { TRPCError } from '@trpc/server';
 import { createServerCaller } from '@/lib/trpc/server';
-import { Badge } from '@/lib/components';
+import { Badge, Breadcrumbs, displayName } from '@/lib/components';
+import { components } from '@/lib/i18n/messages/components';
+import { suppliers as suppliersNs } from '@/lib/i18n/messages/suppliers';
+import { getLocale, getT } from '@/lib/i18n/server';
 import { formatIls } from '@/lib/money';
 import { SupplierTabBar } from './tab-bar';
 
@@ -11,9 +12,9 @@ export const dynamic = 'force-dynamic';
 
 /**
  * Supplier-as-hub shell. Loads the supplier (404 via notFound() when missing —
- * ownership is enforced server-side in suppliers.get), renders the RTL
- * breadcrumb + header (name, active badge, real-leak ₪ figure), and the URL-
- * driven tab bar. The four tab panels render as `children` per ?tab=.
+ * ownership is enforced server-side in suppliers.get), renders the breadcrumb +
+ * header (name, active badge, real-leak ₪ figure), and the URL-driven tab bar.
+ * The four tab panels render as `children` per ?tab=.
  *
  * The ₪ leak figure is the supplier's real month-excess from owner.leaks
  * (advanced_analytics-gated). When the gate is closed or there's not enough
@@ -28,6 +29,7 @@ export default async function SupplierDetailLayout({
 }) {
   const { id } = await params;
   const caller = await createServerCaller();
+  const [t, tc, locale] = await Promise.all([getT(suppliersNs), getT(components), getLocale()]);
 
   let supplier;
   try {
@@ -51,37 +53,41 @@ export default async function SupplierDetailLayout({
     leakIls = null;
   }
 
+  const name = displayName(supplier.name, supplier.nameEn, locale);
+
   return (
     <div className="space-y-6">
-      <nav aria-label="פירורי לחם" className="flex items-center gap-1 text-sm text-muted">
-        <Link href="/dashboard/suppliers" className="hover:text-ink">
-          ספקים
-        </Link>
-        <ChevronLeft className="h-4 w-4 text-subtle" aria-hidden />
-        <span className="truncate font-medium text-ink">{supplier.name}</span>
-      </nav>
+      <Breadcrumbs
+        label={tc('breadcrumbs.label')}
+        items={[{ label: t('detail.breadcrumb'), href: '/dashboard/suppliers' }, { label: name.primary }]}
+      />
 
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="mb-2 h-0.5 w-10 rounded-full flow-stream" aria-hidden="true" />
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="truncate text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">
-              {supplier.name}
+              {name.primary}
             </h1>
             <Badge tone={supplier.active ? 'accent' : 'neutral'}>
-              {supplier.active ? 'פעיל' : 'לא פעיל'}
+              {supplier.active ? t('detail.active') : t('detail.inactive')}
             </Badge>
             {supplier.sourcePlatform && <Badge tone="info">{supplier.sourcePlatform}</Badge>}
           </div>
+          {name.secondary ? (
+            <p className="mt-1 text-sm text-subtle" lang="he" dir="rtl">
+              {name.secondary}
+            </p>
+          ) : null}
         </div>
-        <div className="shrink-0 text-left">
-          <p className="text-xs text-subtle">דליפה חודשית מוערכת</p>
+        <div className="shrink-0 text-end">
+          <p className="text-xs text-subtle">{t('detail.leakLabel')}</p>
           {leakIls != null ? (
             <p className="font-mono text-2xl font-bold tabular-nums text-warn">
-              {formatIls(leakIls)}
+              {formatIls(leakIls, { locale })}
             </p>
           ) : (
-            <p className="text-sm text-subtle">אין מספיק נתונים</p>
+            <p className="text-sm text-subtle">{t('detail.leakNone')}</p>
           )}
         </div>
       </header>

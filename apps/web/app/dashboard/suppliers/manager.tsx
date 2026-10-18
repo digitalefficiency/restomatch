@@ -1,11 +1,35 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { DeliverySchedule } from '@restomatch/db';
-import { Pencil, Plus, Power, Truck } from 'lucide-react';
+import { Pencil, Plus, Power, Search, Truck } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
-import { Badge, Button, Card, EmptyState, Field, Input, Spinner } from '@/lib/components';
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  ErrorNotice,
+  Field,
+  Input,
+  Spinner,
+  displayName,
+  friendlyError,
+  useToast,
+} from '@/lib/components';
+import { useLocale, useT } from '@/lib/i18n/client';
+import { components } from '@/lib/i18n/messages/components';
+import { suppliers as suppliersNs } from '@/lib/i18n/messages/suppliers';
+import {
+  DAY_KEYS,
+  emptyForm,
+  matchesSupplierFilter,
+  toCreateInput,
+  validateSupplierForm,
+  type Day,
+  type FormState,
+} from './form-logic';
 
 /**
  * Locally-declared row shape (the fields this manager uses). Avoids deriving
@@ -15,6 +39,7 @@ import { Badge, Button, Card, EmptyState, Field, Input, Spinner } from '@/lib/co
 interface Supplier {
   id: string;
   name: string;
+  nameEn: string | null;
   businessId: string | null;
   contactEmail: string | null;
   contactWhatsapp: string | null;
@@ -24,128 +49,125 @@ interface Supplier {
   sourcePlatform: string | null;
 }
 
-type Day = 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat';
-export const DAYS: { key: Day; label: string }[] = [
-  { key: 'sun', label: 'ראשון' },
-  { key: 'mon', label: 'שני' },
-  { key: 'tue', label: 'שלישי' },
-  { key: 'wed', label: 'רביעי' },
-  { key: 'thu', label: 'חמישי' },
-  { key: 'fri', label: 'שישי' },
-  { key: 'sat', label: 'שבת' },
-];
-
-export interface FormState {
-  name: string;
-  businessId: string;
-  contactEmail: string;
-  contactWhatsapp: string;
-  paymentTerms: string;
-  /** day → expected delivery / cutoff time "HH:MM" (absent = no delivery that day) */
-  schedule: Partial<Record<Day, string>>;
-}
-
-const emptyForm: FormState = {
-  name: '',
-  businessId: '',
-  contactEmail: '',
-  contactWhatsapp: '',
-  paymentTerms: '',
-  schedule: {},
-};
-
-/** Stored {day:["HH:MM"]} → form {day:"HH:MM"} (first time per day). */
-export function scheduleToForm(s: DeliverySchedule | null): Partial<Record<Day, string>> {
-  const out: Partial<Record<Day, string>> = {};
-  if (!s) return out;
-  for (const d of DAYS) {
-    const arr = s[d.key];
-    if (arr && arr.length > 0 && arr[0]) out[d.key] = arr[0];
-  }
-  return out;
-}
-
-export function toPatch(form: FormState) {
-  const deliverySchedule: Partial<Record<Day, string[]>> = {};
-  let hasSchedule = false;
-  for (const d of DAYS) {
-    const t = form.schedule[d.key]?.trim();
-    if (t) {
-      deliverySchedule[d.key] = [t];
-      hasSchedule = true;
-    }
-  }
-  // Empty optional fields → undefined (omit), not null: SupplierCreate validates
-  // these as optional strings and rejects null; SupplierPatch leaves them untouched.
-  return {
-    name: form.name.trim(),
-    businessId: form.businessId.trim() || undefined,
-    contactEmail: form.contactEmail.trim() || undefined,
-    contactWhatsapp: form.contactWhatsapp.trim() || undefined,
-    paymentTerms: form.paymentTerms.trim() || undefined,
-    ...(hasSchedule ? { deliverySchedule } : {}),
-  };
-}
-
-/** Supplier setup CRUD — list, create, inline-edit, soft-deactivate. */
+/** Supplier setup CRUD — list, filter, create, soft-deactivate. */
 export function SupplierManager() {
+  const t = useT(suppliersNs);
+  const tc = useT(components);
+  const toast = useToast();
   const utils = trpc.useUtils();
   const list = trpc.suppliers.list.useQuery({ includeInactive: true });
   const [creating, setCreating] = useState(false);
+  const [filter, setFilter] = useState('');
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const invalidate = () => utils.suppliers.list.invalidate();
-  const create = trpc.suppliers.create.useMutation({ onSuccess: () => { setCreating(false); void invalidate(); } });
-  const setActive = trpc.suppliers.setActive.useMutation({ onSuccess: () => void invalidate() });
+  const create = trpc.suppliers.create.useMutation({
+    onSuccess: (row) => {
+      setCreating(false);
+      toast.success(t('manager.created', { name: row.name }));
+      void invalidate();
+    },
+  });
+  const setActive = trpc.suppliers.setActive.useMutation({
+    onSuccess: (row) => {
+      toast.success(t(row.active ? 'manager.activated' : 'manager.deactivated', { name: row.name }));
+      void invalidate();
+    },
+    onError: (e) => toast.error(friendlyError(e, tc)),
+    onSettled: () => setTogglingId(null),
+  });
+
+  const suppliers = (list.data ?? []) as Supplier[];
+  const visible = useMemo(
+    () => suppliers.filter((s) => matchesSupplierFilter(s, filter)),
+    [suppliers, filter],
+  );
 
   if (list.isLoading) {
     return (
       <div className="flex items-center gap-2 py-8 text-muted">
-        <Spinner className="h-4 w-4" /> טוען ספקים…
+        <Spinner className="h-4 w-4" /> {t('manager.loading')}
       </div>
     );
   }
+  if (list.isError) {
+    return <ErrorNotice message={t('manager.loadError')} />;
+  }
 
-  const suppliers = (list.data ?? []) as Supplier[];
+  const activeCount = suppliers.filter((s) => s.active).length;
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-muted">{suppliers.length} ספקים</p>
-        {!creating && (
-          <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
-            <Plus className="h-4 w-4" /> ספק חדש
-          </Button>
-        )}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm tabular-nums text-muted">
+          {activeCount === suppliers.length
+            ? t('manager.count', { count: suppliers.length })
+            : t('manager.countActive', { active: activeCount, count: suppliers.length })}
+        </p>
+        <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
+          {suppliers.length > 5 ? (
+            <div className="relative w-full sm:w-64">
+              <Search
+                className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-subtle"
+                aria-hidden="true"
+              />
+              <Input
+                type="search"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder={t('manager.filterPlaceholder')}
+                aria-label={t('manager.filterLabel')}
+                className="ps-9 text-sm"
+              />
+            </div>
+          ) : null}
+          {!creating && (
+            <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
+              <Plus className="h-4 w-4" aria-hidden="true" /> {t('manager.add')}
+            </Button>
+          )}
+        </div>
       </div>
 
       {creating && (
         <SupplierForm
-          title="ספק חדש"
+          title={t('form.newTitle')}
           initial={emptyForm}
           submitting={create.isPending}
-          error={create.error?.message ?? null}
+          error={create.error ? friendlyError(create.error, tc) : null}
           onCancel={() => setCreating(false)}
-          onSubmit={(form) => create.mutate(toPatch(form))}
+          onSubmit={(form) => create.mutate(toCreateInput(form))}
         />
       )}
 
       {suppliers.length === 0 && !creating ? (
         <EmptyState
           icon={<Truck className="h-6 w-6" />}
-          title="אין עדיין ספקים"
-          description="הוסיפו את הספקים שאתם מזמינים מהם — אחר כך תוכלו לטעון את הקטלוג שלהם ולבצע הזמנות."
+          title={t('manager.emptyTitle')}
+          description={t('manager.emptyBody')}
+          action={
+            <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
+              <Plus className="h-4 w-4" aria-hidden="true" /> {t('manager.add')}
+            </Button>
+          }
         />
+      ) : visible.length === 0 && suppliers.length > 0 ? (
+        <p className="py-6 text-center text-sm text-subtle">{t('manager.noMatch')}</p>
       ) : (
-        <div className="space-y-3">
-          {suppliers.map((s) => (
-            <SupplierRow
-              key={s.id}
-              supplier={s}
-              onToggleActive={() => setActive.mutate({ supplierId: s.id, active: !s.active })}
-              toggling={setActive.isPending}
-            />
+        <ul className="space-y-3">
+          {visible.map((s) => (
+            <li key={s.id}>
+              <SupplierRow
+                supplier={s}
+                onToggleActive={() => {
+                  setTogglingId(s.id);
+                  setActive.mutate({ supplierId: s.id, active: !s.active });
+                }}
+                toggling={togglingId === s.id}
+              />
+            </li>
           ))}
-        </div>
+        </ul>
       )}
     </div>
   );
@@ -160,44 +182,59 @@ function SupplierRow({
   onToggleActive: () => void;
   toggling: boolean;
 }) {
+  const t = useT(suppliersNs);
+  const locale = useLocale();
+  const name = displayName(supplier.name, supplier.nameEn, locale);
+  const days = DAY_KEYS.filter((d) => supplier.deliverySchedule?.[d]?.length);
   return (
-    <Card as="article" elevated className={supplier.active ? '' : 'opacity-60'}>
+    <Card as="article" elevated className={supplier.active ? '' : 'opacity-70'}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Link
               href={`/dashboard/suppliers/${supplier.id}`}
-              className="truncate text-base font-bold text-ink underline-offset-4 hover:text-primary hover:underline"
+              className="truncate rounded text-base font-bold text-ink underline-offset-4 hover:text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
             >
-              {supplier.name}
+              {name.primary}
             </Link>
-            {!supplier.active && <Badge tone="neutral">לא פעיל</Badge>}
-            {supplier.sourcePlatform && <Badge tone="info">{supplier.sourcePlatform}</Badge>}
-          </div>
-          <dl className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-xs text-subtle">
-            {supplier.businessId && <span>ח.פ. {supplier.businessId}</span>}
-            {supplier.contactEmail && <span>{supplier.contactEmail}</span>}
-            {supplier.contactWhatsapp && <span>וואטסאפ {supplier.contactWhatsapp}</span>}
-            {supplier.paymentTerms && <span>תנאי תשלום: {supplier.paymentTerms}</span>}
-            {supplier.deliverySchedule &&
-            DAYS.some((d) => supplier.deliverySchedule?.[d.key]?.length) ? (
-              <span>
-                אספקה:{' '}
-                {DAYS.filter((d) => supplier.deliverySchedule?.[d.key]?.length)
-                  .map((d) => `${d.label} ${supplier.deliverySchedule![d.key]![0]}`)
-                  .join(' · ')}
+            {name.secondary ? (
+              <span className="text-sm text-subtle" lang="he" dir="rtl">
+                {name.secondary}
               </span>
             ) : null}
-          </dl>
+            {!supplier.active && <Badge tone="neutral">{t('manager.inactive')}</Badge>}
+            {supplier.sourcePlatform && <Badge tone="info">{supplier.sourcePlatform}</Badge>}
+          </div>
+          <p className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-xs text-subtle">
+            {supplier.businessId && (
+              <span className="tabular-nums">{t('manager.businessId', { id: supplier.businessId })}</span>
+            )}
+            {supplier.contactEmail && <span dir="ltr">{supplier.contactEmail}</span>}
+            {supplier.contactWhatsapp && (
+              <span className="tabular-nums">{t('manager.whatsapp', { phone: supplier.contactWhatsapp })}</span>
+            )}
+            {supplier.paymentTerms && <span>{t('manager.paymentTerms', { terms: supplier.paymentTerms })}</span>}
+            {days.length > 0 ? (
+              <span>
+                {t('manager.delivery', {
+                  days: days
+                    .map((d) => `${t(`days.${d}`)} ${supplier.deliverySchedule![d]![0]}`)
+                    .join(' · '),
+                })}
+              </span>
+            ) : null}
+          </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Link href={`/dashboard/suppliers/${supplier.id}`}>
-            <Button variant="secondary" size="sm">
-              <Pencil className="h-3.5 w-3.5" /> עריכה
-            </Button>
+          <Link
+            href={`/dashboard/suppliers/${supplier.id}`}
+            className="inline-flex items-center gap-2 rounded-xl border border-line bg-surface-2 px-3 py-1.5 text-xs font-semibold text-ink transition-all hover:border-primary/40 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+          >
+            <Pencil className="h-3.5 w-3.5" aria-hidden="true" /> {t('manager.edit')}
           </Link>
           <Button variant="ghost" size="sm" loading={toggling} onClick={onToggleActive}>
-            <Power className="h-3.5 w-3.5" /> {supplier.active ? 'השבת' : 'הפעל'}
+            <Power className="h-3.5 w-3.5" aria-hidden="true" />
+            {supplier.active ? t('manager.deactivate') : t('manager.activate')}
           </Button>
         </div>
       </div>
@@ -205,6 +242,7 @@ function SupplierRow({
   );
 }
 
+/** Canonical supplier form — used for "new supplier" and the details tab. */
 export function SupplierForm({
   title,
   initial,
@@ -212,6 +250,7 @@ export function SupplierForm({
   error,
   onCancel,
   onSubmit,
+  cancelLabel,
 }: {
   title: string;
   initial: FormState;
@@ -219,10 +258,15 @@ export function SupplierForm({
   error: string | null;
   onCancel: () => void;
   onSubmit: (form: FormState) => void;
+  cancelLabel?: string;
 }) {
+  const t = useT(suppliersNs);
   const [form, setForm] = useState<FormState>(initial);
-  const set = (k: Exclude<keyof FormState, 'schedule'>) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setForm((f) => ({ ...f, [k]: e.target.value }));
+  const [touched, setTouched] = useState(false);
+  const errors = validateSupplierForm(form);
+  const set =
+    (k: Exclude<keyof FormState, 'schedule'>) => (e: React.ChangeEvent<HTMLInputElement>) =>
+      setForm((f) => ({ ...f, [k]: e.target.value }));
   const toggleDay = (day: Day) => () =>
     setForm((f) => {
       const next = { ...f.schedule };
@@ -232,72 +276,153 @@ export function SupplierForm({
     });
   const setDayTime = (day: Day) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, schedule: { ...f.schedule, [day]: e.target.value } }));
+  const showErr = (k: 'nameRequired' | 'emailInvalid') => touched && errors.includes(k);
 
   return (
-    <Card as="form" elevated flow
-      onSubmit={(e: React.FormEvent) => {
+    <form
+      noValidate
+      onSubmit={(e) => {
         e.preventDefault();
-        if (form.name.trim()) onSubmit(form);
+        setTouched(true);
+        if (errors.length === 0) onSubmit(form);
       }}
     >
+    <Card elevated flow>
       <h3 className="mb-4 text-base font-bold text-ink">{title}</h3>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field label="שם ספק" htmlFor="sup-name">
-          <Input id="sup-name" value={form.name} onChange={set('name')} required placeholder="תנובה" />
+        <Field label={t('form.name')} htmlFor="sup-name">
+          <Input
+            id="sup-name"
+            value={form.name}
+            onChange={set('name')}
+            required
+            maxLength={200}
+            placeholder={t('form.namePlaceholder')}
+            aria-invalid={showErr('nameRequired') || undefined}
+          />
+          {showErr('nameRequired') ? (
+            <p className="mt-1 text-xs text-danger">{t('form.nameRequired')}</p>
+          ) : null}
         </Field>
-        <Field label="ח.פ. / עוסק" htmlFor="sup-biz">
-          <Input id="sup-biz" value={form.businessId} onChange={set('businessId')} placeholder="514...." />
+        <Field label={t('form.nameEn')} htmlFor="sup-name-en" hint={t('form.nameEnHint')}>
+          <Input
+            id="sup-name-en"
+            value={form.nameEn}
+            onChange={set('nameEn')}
+            maxLength={200}
+            dir="ltr"
+            lang="en"
+            placeholder={t('form.nameEnPlaceholder')}
+            aria-describedby="sup-name-en-hint"
+          />
         </Field>
-        <Field label="אימייל" htmlFor="sup-email">
-          <Input id="sup-email" type="email" value={form.contactEmail} onChange={set('contactEmail')} placeholder="orders@supplier.co.il" />
+        <Field label={t('form.businessId')} htmlFor="sup-biz">
+          <Input
+            id="sup-biz"
+            value={form.businessId}
+            onChange={set('businessId')}
+            maxLength={32}
+            inputMode="numeric"
+            dir="ltr"
+            placeholder="514…"
+          />
         </Field>
-        <Field label="וואטסאפ" htmlFor="sup-wa">
-          <Input id="sup-wa" value={form.contactWhatsapp} onChange={set('contactWhatsapp')} placeholder="+9725..." />
+        <Field label={t('form.email')} htmlFor="sup-email">
+          <Input
+            id="sup-email"
+            type="email"
+            value={form.contactEmail}
+            onChange={set('contactEmail')}
+            maxLength={200}
+            dir="ltr"
+            placeholder="orders@supplier.co.il"
+            aria-invalid={showErr('emailInvalid') || undefined}
+          />
+          {showErr('emailInvalid') ? (
+            <p className="mt-1 text-xs text-danger">{t('form.emailInvalid')}</p>
+          ) : null}
         </Field>
-        <Field label="תנאי תשלום" htmlFor="sup-terms" className="sm:col-span-2">
-          <Input id="sup-terms" value={form.paymentTerms} onChange={set('paymentTerms')} placeholder="שוטף + 30" />
+        <Field label={t('form.whatsapp')} htmlFor="sup-wa">
+          <Input
+            id="sup-wa"
+            type="tel"
+            value={form.contactWhatsapp}
+            onChange={set('contactWhatsapp')}
+            maxLength={32}
+            dir="ltr"
+            placeholder="+9725…"
+          />
         </Field>
-        <div className="sm:col-span-2">
-          <div className="mb-2 text-sm font-medium text-ink">לוח אספקה — ימים ושעת יעד</div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {DAYS.map((d) => {
-              const active = form.schedule[d.key] !== undefined;
+        <Field label={t('form.paymentTerms')} htmlFor="sup-terms">
+          <Input
+            id="sup-terms"
+            value={form.paymentTerms}
+            onChange={set('paymentTerms')}
+            maxLength={500}
+            placeholder={t('form.paymentTermsPlaceholder')}
+          />
+        </Field>
+        <fieldset className="sm:col-span-2">
+          <legend className="mb-2 text-sm font-medium text-ink">{t('form.deliveryTitle')}</legend>
+          <div className="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2 sm:grid-cols-4">
+            {DAY_KEYS.map((d) => {
+              const active = form.schedule[d] !== undefined;
               return (
-                <label
-                  key={d.key}
+                <div
+                  key={d}
                   className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
                     active ? 'border-primary/40 bg-primary/5' : 'border-line'
                   }`}
                 >
-                  <input type="checkbox" checked={active} onChange={toggleDay(d.key)} />
-                  <span className="w-12 text-ink">{d.label}</span>
+                  <input
+                    id={`sup-day-${d}`}
+                    type="checkbox"
+                    checked={active}
+                    onChange={toggleDay(d)}
+                    className="h-4 w-4 accent-primary"
+                  />
+                  <label htmlFor={`sup-day-${d}`} className="min-w-0 flex-1 truncate text-ink">
+                    {t(`days.${d}`)}
+                  </label>
                   {active ? (
                     <input
                       type="time"
-                      value={form.schedule[d.key] ?? ''}
-                      onChange={setDayTime(d.key)}
-                      className="ms-auto rounded border border-line bg-surface-2 px-1.5 py-0.5 text-ink tabular-nums"
+                      value={form.schedule[d] ?? ''}
+                      onChange={setDayTime(d)}
+                      aria-label={t(`days.${d}`)}
+                      className="rounded border border-line bg-surface-2 px-1.5 py-0.5 text-ink tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
                     />
                   ) : null}
-                </label>
+                </div>
               );
             })}
           </div>
-          <p className="mt-2 text-xs text-subtle">
-            שעת היעד = עד מתי הסחורה אמורה להגיע. אם השעה תעבור ולא נקלטה תעודת קבלה — תופיע התראת
-            איחור.
-          </p>
-        </div>
+          <p className="mt-2 text-xs text-subtle">{t('form.deliveryHint')}</p>
+        </fieldset>
       </div>
-      {error && <p className="mt-3 text-sm text-danger">{error}</p>}
+      {error && (
+        <p role="alert" className="mt-3 text-sm text-danger">
+          {error}
+        </p>
+      )}
       <div className="mt-4 flex items-center gap-2">
-        <Button type="submit" variant="primary" size="sm" loading={submitting} disabled={!form.name.trim()}>
-          שמירה
+        <Button type="submit" variant="primary" size="sm" loading={submitting}>
+          {t('form.save')}
         </Button>
-        <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
-          ביטול
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            setForm(initial);
+            setTouched(false);
+            onCancel();
+          }}
+        >
+          {cancelLabel ?? t('form.cancel')}
         </Button>
       </div>
     </Card>
+    </form>
   );
 }

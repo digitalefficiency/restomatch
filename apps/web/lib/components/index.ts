@@ -1,7 +1,7 @@
 export { cn } from './cn';
 export { Card } from './Card';
 export { Heading, SectionHeader } from './Heading';
-export { Button } from './Button';
+export { Button, LinkButton } from './Button';
 export { Badge } from './Badge';
 export type { BadgeTone } from './Badge';
 export { KpiCard } from './KpiCard';
