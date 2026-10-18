@@ -96,3 +96,24 @@ export function resolveAppError(error: TRPCError): { appCode: AppErrorCode; appP
   if (error.code === 'FORBIDDEN') return { appCode: 'auth.forbidden' };
   return null;
 }
+
+/** Generic text shown instead of an unexpected server error's raw message. */
+export const GENERIC_INTERNAL_MESSAGE = 'Internal server error';
+
+/**
+ * The message a client may see. In production an INTERNAL_SERVER_ERROR without
+ * a stable appCode is an unexpected failure (driver/DB/bug) whose raw text can
+ * reveal schema, constraint names or SQL — replace it with a generic string.
+ * Deliberate errors (any other code, or a coded one) keep their message. Dev
+ * keeps everything for debugging.
+ */
+export function publicErrorMessage(
+  error: TRPCError,
+  resolved: { appCode: AppErrorCode } | null,
+  isProduction: boolean,
+): string {
+  if (isProduction && error.code === 'INTERNAL_SERVER_ERROR' && !resolved) {
+    return GENERIC_INTERNAL_MESSAGE;
+  }
+  return error.message;
+}

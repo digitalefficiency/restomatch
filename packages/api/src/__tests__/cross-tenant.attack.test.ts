@@ -1288,6 +1288,33 @@ describe('member locale: foreign-id attacks + self isolation (A → B)', () => {
   });
 });
 
+describe('role denial: finance-only reads (leakBreakdown, approvals.history) — security review', () => {
+  // The invoice-level drill-down (supplier, invoice number, line deltas) is the
+  // /dashboard/leaks data; receiver/chef see only the aggregate leak hero.
+  for (const role of ['receiver', 'chef'] as const) {
+    it(`owner.leakBreakdown → FORBIDDEN for ${role}`, async () => {
+      await expect(callerWithRole(A, role).owner.leakBreakdown()).rejects.toMatchObject({
+        code: 'FORBIDDEN',
+      });
+    });
+  }
+  it('owner.leakBreakdown stays available to bookkeeper (claims page) and manager', async () => {
+    for (const role of ['bookkeeper', 'manager'] as const) {
+      await expect(callerWithRole(A, role).owner.leakBreakdown()).resolves.toBeDefined();
+    }
+  });
+  it('approvals.history → FORBIDDEN for receiver/chef', async () => {
+    for (const role of ['receiver', 'chef'] as const) {
+      await expect(
+        callerWithRole(A, role).approvals.history({ discrepancyId: A.discrepancyId }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    }
+  });
+  it('owner.leakHero (aggregate) stays readable by every member', async () => {
+    await expect(callerWithRole(A, 'receiver').owner.leakHero()).resolves.toBeDefined();
+  });
+});
+
 describe('role denial: mapping.confirm rejects member-tier callers', () => {
   const denied = ['receiver', 'chef'] as const;
   for (const role of denied) {

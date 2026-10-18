@@ -13,7 +13,7 @@ import {
 } from '@restomatch/db';
 import type { AppContext, MemberSession } from './context';
 import { getEntitlements } from './entitlements';
-import { resolveAppError } from './errors';
+import { publicErrorMessage, resolveAppError } from './errors';
 
 const t = initTRPC.context<AppContext>().create({
   transformer: superjson,
@@ -21,10 +21,17 @@ const t = initTRPC.context<AppContext>().create({
   // translate errors by code, never by matching the (Hebrew) message text.
   errorFormatter({ shape, error }) {
     const resolved = resolveAppError(error);
+    const isProduction = process.env.NODE_ENV === 'production';
+    // Defence in depth: never ship a stack trace in production, whatever isDev
+    // tRPC computed at init.
+    const { stack: _stack, ...data } = shape.data;
     return {
       ...shape,
+      // Production never echoes an unexpected error's raw text (Postgres errors
+      // carry constraint/column names and SQL fragments) — see errors.ts.
+      message: publicErrorMessage(error, resolved, isProduction),
       data: {
-        ...shape.data,
+        ...(isProduction ? data : shape.data),
         appCode: resolved?.appCode ?? null,
         appParams: resolved?.appParams ?? null,
       },
@@ -141,6 +148,8 @@ export const managerProcedure = requireRoles(['owner', 'manager']);
 export const receiverProcedure = requireRoles(['owner', 'manager', 'receiver']);
 export const bookkeeperProcedure = requireRoles(['owner', 'bookkeeper']);
 export const chefProcedure = requireRoles(['owner', 'manager', 'chef']);
+/** Invoice-level money detail (leak drill-down, claims) — matches /dashboard/leaks. */
+export const financeProcedure = requireRoles(['owner', 'manager', 'bookkeeper']);
 
 /**
  * Platform-admin procedure for the internal ops console. Cross-tenant BY
