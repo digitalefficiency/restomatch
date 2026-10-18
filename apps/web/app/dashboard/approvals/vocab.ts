@@ -75,3 +75,30 @@ export function toleranceLabel(t: T, raw: string | null | undefined): string {
   };
   return fixed[raw] ? t(fixed[raw]) : raw;
 }
+
+/** Engine expected/actual by type: ₪ amounts (unit prices, totals, VAT) or quantities. */
+const MONEY_VALUE_TYPES = new Set(['PRICE_HIGHER', 'PRICE_LOWER', 'TOTAL_MISMATCH', 'VAT_MISMATCH']);
+const QTY_VALUE_TYPES = new Set(['QTY_SHORT', 'QTY_OVER', 'MISSING_ON_INVOICE', 'UNORDERED_ITEM']);
+
+/**
+ * Display an engine expected/actual value (NUMERIC string): ₪ through formatIls
+ * at a fixed 2 decimals for the money types (so "522.6 ⇆ 575" reads
+ * "₪522.60 ⇆ ₪575.00"), locale digits for quantities, and null for types whose
+ * stored values are not meant for display (DATE_ANOMALY epoch ms, unknown types).
+ */
+export function discrepancyValue(type: string, raw: string | null | undefined, locale: Locale): string | null {
+  if (raw == null) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  if (MONEY_VALUE_TYPES.has(type)) return formatIls(n, { locale, maximumFractionDigits: 2 });
+  if (QTY_VALUE_TYPES.has(type)) return formatNumber(n, locale, { maximumFractionDigits: 3 });
+  return null;
+}
+
+/**
+ * "Escalate to owner" only makes sense for a non-owner deciding an item that is
+ * not already owner-routed; the owner never sees it.
+ */
+export function canEscalate(requiredRole: string | null | undefined, viewerRole: string | null | undefined): boolean {
+  return viewerRole !== 'owner' && requiredRole !== 'owner';
+}
