@@ -1654,6 +1654,8 @@ export const creditNotes = pgTable(
     invoiceLineId: uuid('invoice_line_id'),
     invoiceId: uuid('invoice_id'),
     note: text('note'),
+    /** Client idempotency key: a double-submitted form records the note once. */
+    idempotencyKey: uuid('idempotency_key'),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1665,6 +1667,12 @@ export const creditNotes = pgTable(
     uniqueIndex('credit_notes_invoice_line_unique')
       .on(t.invoiceLineId, t.invoiceId)
       .where(sql`${t.invoiceLineId} IS NOT NULL`),
+    uniqueIndex('credit_notes_supplier_number_unique')
+      .on(t.restaurantId, t.supplierId, t.number)
+      .where(sql`${t.number} IS NOT NULL`),
+    uniqueIndex('credit_notes_idempotency_unique')
+      .on(t.restaurantId, t.idempotencyKey)
+      .where(sql`${t.idempotencyKey} IS NOT NULL`),
   ],
 );
 

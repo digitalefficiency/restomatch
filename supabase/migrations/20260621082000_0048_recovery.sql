@@ -29,6 +29,18 @@
 -- an invoice's credit line is removed with that invoice (CASCADE; SET NULL would
 -- break MATCH FULL mid-cascade); manual notes (both NULL) are unaffected.
 -- Optional references use ON DELETE SET NULL (column) so restaurant_id stays.
+-- A claim's discrepancy is ON DELETE NO ACTION: money history must never vanish
+-- because a discrepancy row is deleted (e.g. a re-match). The re-match path
+-- releases bare `claimed` rows first and refuses while money is in flight
+-- (packages/api/src/recovery/service.ts releaseClaimsForRematch). NO ACTION (not
+-- RESTRICT) is checked at statement end, so deleting a whole restaurant — which
+-- cascades to both tables — still works.
+--
+-- Money basis: every amount here is on the SAME basis as the engine's deltas and
+-- the leak hero — invoice line money BEFORE VAT. A supplier credit note is
+-- recorded before VAT too (an invoice credit line's line_total already is).
+-- Duplicates: one credit-note number per supplier, and an optional client
+-- idempotency key so a double-submitted form records the note once.
 --
 -- RLS: enabled + per-restaurant policy at the end of this file (not in
 -- drizzle/rls/0002), so the tables are protected from the moment they exist.
@@ -57,6 +69,7 @@ CREATE TABLE IF NOT EXISTS "credit_notes" (
   "invoice_line_id" uuid,
   "invoice_id" uuid,
   "note" text,
+  "idempotency_key" uuid,
   "created_by" uuid REFERENCES "users"("id") ON DELETE SET NULL,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL,
   CONSTRAINT "credit_notes_id_restaurant_id_key" UNIQUE ("id","restaurant_id"),
@@ -74,6 +87,8 @@ CREATE INDEX IF NOT EXISTS "credit_notes_supplier_idx" ON "credit_notes" ("suppl
 CREATE INDEX IF NOT EXISTS "credit_notes_invoice_idx" ON "credit_notes" ("invoice_id", "restaurant_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "credit_notes_created_by_idx" ON "credit_notes" ("created_by");--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "credit_notes_invoice_line_unique" ON "credit_notes" ("invoice_line_id", "invoice_id") WHERE "invoice_line_id" IS NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "credit_notes_supplier_number_unique" ON "credit_notes" ("restaurant_id", "supplier_id", "number") WHERE "number" IS NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "credit_notes_idempotency_unique" ON "credit_notes" ("restaurant_id", "idempotency_key") WHERE "idempotency_key" IS NOT NULL;--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "recovery_claims" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE CASCADE,
@@ -96,7 +111,7 @@ CREATE TABLE IF NOT EXISTS "recovery_claims" (
   "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
   CONSTRAINT "recovery_claims_id_restaurant_id_key" UNIQUE ("id","restaurant_id"),
   CONSTRAINT "recovery_claims_discrepancy_same_tenant_fk" FOREIGN KEY ("discrepancy_id","restaurant_id")
-    REFERENCES "discrepancies"("id","restaurant_id") ON DELETE CASCADE,
+    REFERENCES "discrepancies"("id","restaurant_id") ON DELETE NO ACTION,
   CONSTRAINT "recovery_claims_supplier_same_tenant_fk" FOREIGN KEY ("supplier_id","restaurant_id")
     REFERENCES "suppliers"("id","restaurant_id") ON DELETE SET NULL ("supplier_id"),
   CONSTRAINT "recovery_claims_invoice_same_tenant_fk" FOREIGN KEY ("invoice_id","restaurant_id")
@@ -153,5 +168,5 @@ DROP POLICY IF EXISTS "recovery_events_tenant" ON "recovery_events";--> statemen
 CREATE POLICY "recovery_events_tenant" ON "recovery_events" USING (restaurant_id = app.current_restaurant_id());
 
 insert into drizzle.__drizzle_migrations (hash, created_at)
-select '017f1ff8c2bd4e2693a8ae0836050e38452e2223bb60413159cc6dbe313753c8', 1782030000000
+select 'cb8e31443a3d7450bde08ea62ecf1970f21507f4b7689c4d5f1ae0c826cbcf77', 1782030000000
 where not exists (select 1 from drizzle.__drizzle_migrations where created_at = 1782030000000);
