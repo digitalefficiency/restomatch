@@ -19,6 +19,8 @@ import { trpc } from '@/lib/trpc/client';
 import { useDir, useLocale, useT } from '@/lib/i18n/client';
 import { receiving } from '@/lib/i18n/messages/receiving';
 import type { Translator } from '@/lib/i18n/translate';
+import type { Locale } from '@/lib/i18n/config';
+import { localizeServerError } from '@/lib/serverErrors';
 import type { UploadedScan } from '@/lib/supabase/client';
 import {
   adaptReconciliation,
@@ -36,14 +38,17 @@ async function fileToBase64(file: File): Promise<string> {
   return btoa(binary);
 }
 
-/** Translate a tRPC / network error for the receiver (server messages are English/Hebrew dev text). */
-function errorText(err: unknown, t: Translator<typeof receiving.he>): string {
+/**
+ * Translate a tRPC / network error for the receiver. Coded domain errors
+ * (quota exceeded, inactive subscription, forbidden…) go through the shared
+ * localizeServerError; NOT_FOUND gets the receiving-specific wording.
+ */
+function errorText(err: unknown, t: Translator<typeof receiving.he>, locale: Locale): string {
   if (err instanceof TRPCClientError) {
     const code = (err.data as { code?: string } | undefined)?.code;
     if (code === 'NOT_FOUND') return t('errors.notFound');
-    if (code === 'FORBIDDEN' || code === 'UNAUTHORIZED') return t('errors.forbidden');
   }
-  return t('errors.generic');
+  return localizeServerError(err, locale, t('errors.generic'));
 }
 
 interface PoForClient {
@@ -173,7 +178,7 @@ export function ReceivingWizard({
         const r = await startReceipt.mutateAsync({ poId: po.id });
         setGrId(r.receiptId);
       } catch (err) {
-        setError(errorText(err, t));
+        setError(errorText(err, t, locale));
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -220,7 +225,7 @@ export function ReceivingWizard({
         }
         await buildReconciliation(activeGrId, invoice);
       } catch (err) {
-        setError(errorText(err, t));
+        setError(errorText(err, t, locale));
         // Degrade gracefully to a PO-only table so receiving still completes.
         await buildFromPoOnly();
       } finally {
@@ -296,7 +301,7 @@ export function ReceivingWizard({
       setGrLineIdByKey(adapted.grLineIdByKey);
       setStep('RECONCILIATION_REVIEW');
     } catch (err) {
-      setError(errorText(err, t));
+      setError(errorText(err, t, locale));
     }
   }
 
@@ -336,7 +341,7 @@ export function ReceivingWizard({
       setStep('CONFIRMED');
       await utils.receiving.todayExpectations.invalidate();
     } catch (err) {
-      setError(errorText(err, t));
+      setError(errorText(err, t, locale));
     }
   }
 
