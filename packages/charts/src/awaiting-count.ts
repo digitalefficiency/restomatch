@@ -9,24 +9,24 @@ type SQL = ReturnType<typeof sql>;
  * invoice (receiving.registerInvoice), counts, and submits. Until the submit the
  * scan has no match run on purpose: matching against an empty count would read
  * every line as short. invoices has no receipt column — the scan's own receipt
- * travels only in its OCR job (payload.grId) — so "this scan belongs to a receipt
- * still being counted" is derived the same way everywhere:
+ * travels only in its OCR job (payload.grId). Two rules follow:
  *
- *   a photo scan (source 'photo') whose supplier has a goods receipt still
- *   `pending` that was opened in the SCAN_RECEIPT_LOOKBACK_HOURS before the scan
- *   was registered (the wizard opens the receipt first, then photographs).
+ * 1. A job that LOST its receipt (an OCR sweep retry of a lost enqueue) infers it
+ *    (receiptsBeingCountedForScan): a photo scan (source 'photo') whose supplier
+ *    has a goods receipt still `pending` that was opened in the
+ *    SCAN_RECEIPT_LOOKBACK_HOURS before the scan was registered (the wizard opens
+ *    the receipt first, then photographs). The OCR job (apps/worker
+ *    ocrInvoice.ts) does not auto-match such a scan while that receipt is open —
+ *    the receipt's submit matches it (invoicesWaitingOnReceipt).
  *
- * The OCR job (apps/worker ocrInvoice.ts) uses it for a receipt-less photo scan
- * (an OCR sweep retry of a lost enqueue): no auto-match while such a receipt is
- * open — that receipt's submit matches it (invoicesWaitingOnReceipt).
- *
- * Whenever the OCR job HOLDS a scan's match for a receipt's count (the job's own
- * grId, or the receipts above), it records those receipts on the invoice:
- * ocr_payload.raw.heldForReceipts (next to raw.duplicateOf). The leak hero, the
- * view summary, the breakdown and the pay run call an invoice "waiting for the
- * count" (scanAwaitingCountSql) while it has no match run and one of those
- * receipts is still pending — not "waiting to be linked to an order — probably a
- * consolidated invoice". Neither leak nor spend either way (no run).
+ * 2. Whenever the OCR job HOLDS a scan's match for a receipt's count (the job's
+ *    own grId, or the receipts of rule 1), it records those receipts on the
+ *    invoice: ocr_payload.raw.heldForReceipts (next to raw.duplicateOf). The leak
+ *    hero, the view summary, the breakdown and the pay run call an invoice
+ *    "waiting for the count" (scanAwaitingCountSql) while it has no match run and
+ *    one of those receipts is still pending — not "waiting to be linked to an
+ *    order — probably a consolidated invoice". Neither leak nor spend either way
+ *    (no run). An unmatched invoice with no hold on record is never inferred.
  */
 export const HELD_FOR_RECEIPTS_KEY = 'heldForReceipts';
 export const SCAN_RECEIPT_LOOKBACK_HOURS = 24;
