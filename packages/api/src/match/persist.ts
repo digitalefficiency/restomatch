@@ -5,6 +5,7 @@ import {
   inArray,
   invoices,
   isNotNull,
+  ne,
   matchRuns,
   suppliers,
   type Database,
@@ -219,11 +220,21 @@ export async function persistMatchRun(
     }
   }
 
+  // A re-match never moves an invoice back out of `approved` / `paid` — those
+  // are people's (payment) decisions. Re-matching a paid invoice used to reset it
+  // to `matched`, so its leak reappeared as "caught before payment".
   const finalInvoiceStatus = result.status === 'blocked' ? 'disputed' : 'matched';
   await db
     .update(invoices)
     .set({ status: finalInvoiceStatus })
-    .where(and(eq(invoices.id, args.invoiceId), eq(invoices.restaurantId, args.restaurantId)));
+    .where(
+      and(
+        eq(invoices.id, args.invoiceId),
+        eq(invoices.restaurantId, args.restaurantId),
+        ne(invoices.status, 'approved'),
+        ne(invoices.status, 'paid'),
+      ),
+    );
 
   // Feed the leak detective / price baselines (M1). Idempotent per invoice; a
   // duplicate invoice is not written (it would double-weight its prices).

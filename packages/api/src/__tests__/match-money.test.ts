@@ -413,6 +413,22 @@ describe('a re-match after the PO is closed (demo: "התאמה מחדש" on a se
     expect(run!.grId).not.toBeNull();
   });
 
+  it('a re-match keeps a paid (or approved) invoice paid — caught-before-payment does not jump', async () => {
+    const A = await seedTenant(db, 'A');
+    const caller = ownerCaller(A);
+    for (const status of ['paid', 'approved'] as const) {
+      await db.update(invoices).set({ status }).where(eq(invoices.id, A.invoiceId));
+      await caller.match.runForInvoice({ invoiceId: A.invoiceId });
+      const [inv] = await db.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, A.invoiceId));
+      expect(inv!.status).toBe(status);
+    }
+    // An invoice still in review is (re)classified as before.
+    await db.update(invoices).set({ status: 'parsed' }).where(eq(invoices.id, A.invoiceId));
+    const res = await caller.match.runForInvoice({ invoiceId: A.invoiceId });
+    const [inv] = await db.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, A.invoiceId));
+    expect(inv!.status).toBe(res.status === 'blocked' ? 'disputed' : 'matched');
+  });
+
   it('a first match still only considers open POs (a closed PO is not picked up by discovery)', async () => {
     const A = await seedTenant(db, 'A');
     await db.delete(matchRuns).where(eq(matchRuns.invoiceId, A.invoiceId)); // never matched before
