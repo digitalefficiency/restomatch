@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-// Process-local limiter store for the test (no Redis) — set before the import
+// Process-local limiter store for the test (no external store) — set before the import
 // so rateLimit.ts picks the memory store.
 delete process.env.REDIS_URL;
 delete process.env.TRUSTED_PROXY_HOPS;

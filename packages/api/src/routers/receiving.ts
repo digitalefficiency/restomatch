@@ -32,7 +32,7 @@ import { isAllowedScanUrl } from '../lib/scanUrls';
 import { isInvoiceNumberTaken, readDuplicateOf, withoutDuplicateOf } from '../lib/invoiceDedupe';
 import { appError } from '../errors';
 import { endOfDayInTz, startOfDayInTz } from '../lib/time';
-import { managerProcedure, memberProcedure, receiverProcedure, router } from '../trpc';
+import { invoiceReaderProcedure, managerProcedure, memberProcedure, receiverProcedure, router } from '../trpc';
 import { isFeatureOn } from '../lib/featureGate';
 import { dockPriceContext } from '../dockPriceContext/service';
 
@@ -281,7 +281,7 @@ export const receivingRouter = router({
    * invoice number, and parsed invoice lines. Tenant scoped on
    * invoices.restaurantId.
    */
-  getInvoice: memberProcedure
+  getInvoice: invoiceReaderProcedure
     .input(z.object({ invoiceId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       const [invoice] = await ctx.db
@@ -783,7 +783,7 @@ export const receivingRouter = router({
    * restaurant — foreign ids are NOT_FOUND). Display-only: the ₪ math never
    * reads these columns.
    */
-  ensureEnglish: memberProcedure
+  ensureEnglish: invoiceReaderProcedure
     .input(
       z
         .object({
@@ -834,7 +834,7 @@ export const receivingRouter = router({
    * `invoiceId` it only reports whether the flag is on, so the page can decide
    * to render the hint at all; with the flag off it is always `{ enabled: false }`.
    */
-  priceContext: memberProcedure
+  priceContext: invoiceReaderProcedure
     .input(z.object({ invoiceId: z.string().uuid().optional() }))
     .query(async ({ ctx, input }) => {
       const enabled = await isFeatureOn(ctx.db, ctx.session.restaurantId, 'dockPriceContext');

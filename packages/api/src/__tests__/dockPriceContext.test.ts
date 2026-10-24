@@ -145,6 +145,12 @@ describe('receiving.priceContext (flag dockPriceContext)', () => {
     expect(r.lines.map((l) => l.invoiceLineId)).toEqual([A.invoiceLineId]);
   });
 
+  it('a chef cannot read invoice prices (same roles as receiving.getInvoice)', async () => {
+    await expect(caller(A, 'chef').receiving.priceContext({ invoiceId: A.invoiceId })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+  });
+
   it("tenant A asking for B's invoice gets nothing", async () => {
     await seedHistory(B, [[5, '8.00'], [20, '8.00'], [40, '8.00']]);
     expect(await caller(A).receiving.priceContext({ invoiceId: B.invoiceId })).toEqual({ enabled: true, lines: [] });
