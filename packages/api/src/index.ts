@@ -22,6 +22,7 @@ import { teamRouter } from './routers/team';
 import { chainRouter } from './routers/chain';
 import { recoveryRouter } from './routers/recovery';
 import { monthlyReportRouter } from './routers/monthlyReport';
+import { payRunRouter } from './routers/payRun';
 
 export const appRouter = router({
   owner: ownerRouter,
@@ -43,6 +44,7 @@ export const appRouter = router({
   mapping: mappingRouter,
   products: productsRouter,
   chain: chainRouter,
+  payRun: payRunRouter,
   team: teamRouter,
   dsr: dsrRouter,
   recovery: recoveryRouter,
@@ -242,3 +244,5 @@ export {
 export { renderMonthlyReportPdf } from './reports/pdf';
 export { sendMonthlyReports } from './reports/send';
 export { formatIlsAgorot } from './reports/money';
+export { CLAIMABLE_STATUSES, claimableLines, sumClaims, vatBasisOf, type ClaimLine, type VatBasis } from './lib/claims';
+export type { PayRunInvoice, PayRunResult, PayRunStatus, PayRunSupplier, PayRunClaim } from './routers/payRun';

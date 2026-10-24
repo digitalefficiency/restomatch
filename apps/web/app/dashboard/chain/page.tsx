@@ -118,6 +118,9 @@ export default async function ChainPage({
   // Display only: whole-₪ rows (= each branch's own dashboard) and totals printed as their sum.
   const leakShown = wholeShekelRows(data.branches.map((b) => b.leakIls));
   const spendShown = wholeShekelRows(data.branches.map((b) => b.spendIls));
+  // Same rule for the caught / claimed split: Σ of each branch's own (dashboard) rounding.
+  const caughtShown = wholeShekelRows(data.branches.map((b) => b.caughtBeforePaymentIls));
+  const claimedShown = wholeShekelRows(data.branches.map((b) => b.claimedIls));
   const rowLeak = leakShown.rows;
   const rowSpend = spendShown.rows;
   const ils = (v: number) => formatIls(v, { locale });
@@ -225,14 +228,14 @@ export default async function ChainPage({
         />
         <KpiCard
           label={t('dashboard.kpis.caught')}
-          value={ils(totals.caughtBeforePaymentIls)}
+          value={<span data-testid="chain-caught">{ils(caughtShown.total)}</span>}
           tone="gold"
           icon={<ShieldCheck className="h-5 w-5" />}
           subtitle={
             <>
               {t('dashboard.kpis.caughtHint')}
               <span className="block">
-                {t('dashboard.kpis.claimed')}: <span className="font-mono tabular-nums">{ils(totals.claimedIls)}</span>
+                {t('dashboard.kpis.claimed')}: <span className="font-mono tabular-nums" data-testid="chain-claimed">{ils(claimedShown.total)}</span>
               </span>
             </>
           }
