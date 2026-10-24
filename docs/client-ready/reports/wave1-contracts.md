@@ -112,6 +112,39 @@ demo tenant has `features.all = true`; `FEATURES_OFF=contracts,priceAlerts` kill
   `rls.attack` (the whole public flow as `restomatch_app`; GUC=B sees/writes none of A's), and the real route handler
   (`app/api/supplier-confirm/[token]/__tests__/route.test.ts`: 200/400/404/409/410/413/403, flag off).
 
+### 6. Dock price context (`dockPriceContext`): "your usual price" while the driver is still there
+- **What the receiver sees.** On a review line whose invoice price is above the order price, a muted sub-line appears:
+  "המחיר הרגיל שלך: ₪5.90 (90 יום) · +8%". The invoice page shows the same line under PRICE_HIGHER lines, next to the
+  "over contract" badge. MarketMan, xtraCHEF and MarginEdge raise price changes only after processing.
+- **Data.** `receiving.priceContext({ invoiceId? })` is a read-only member procedure.
+  - Without `invoiceId` it only reports whether the flag is on (the page probe).
+  - With an invoice, the usual price is the **p50** of `price_history` for this restaurant, this supplier and this
+    product over the **90 days before the invoice**. The invoice's own rows are excluded.
+  - It needs **≥ 3 observations**; with fewer, the line gets nothing.
+  - The median is converted to the line's unit with the same factor `writePriceHistoryForInvoice` used.
+    Unconvertible units get nothing.
+  - The % is display-only. It feeds no leak, discrepancy or approval math.
+  - No cross-supplier hint: on the demo seed each product has a single supplier.
+- **Demo (DEMO_TODAY=2026-10-25).**
+  - Dock: every HaSharon produce item has 24 observations, so the stub's +8% line shows "₪5.90 · +8%".
+  - Invoice page: MF-24108 salmon shows ₪96 vs a usual ₪89 (+7.9%, 7 observations). HK-24108 entrecôte and
+    ST-24108 beer behave the same way.
+- **Flag off.** The page probe returns `enabled: false`. The wizard sends no query and the review renders as before.
+  The invoice badges are unchanged.
+- **Wizard footprint (S2's files).** About 6 lines in `wizard.tsx`, an optional `lineExtra` render prop on
+  `Reconciliation`, and the flag probe in `page.tsx`. The logic lives in the new `[poId]/dock-price-context.tsx` and
+  `receiving/dock-price-hint.tsx`.
+- **Tests.**
+  - `dockPriceContext.test.ts` (9): the p50, the window and own-invoice exclusion, the minimum sample count, g↔kg and
+    unconvertible units, the PRICE_HIGHER mark, tenant isolation, flag off and the probe, the receiver role.
+  - `cross-tenant.attack`: +1 COVERAGE entry and an isolation test (B's history never becomes A's usual price).
+- **QA.** `apps/web/scripts/qa-dock-price.ts` runs the dev server with the OCR stub and a real worker.
+  - Dock: he/en × 1366/390 shows exactly one hint with +8% and 90 days.
+  - Invoice page: he/en × 1366/390 shows +7.9%.
+  - Flag off: no hint.
+  - No overflow and no 5xx anywhere.
+  - Screenshots: `docs/client-ready/screenshots/dock-price-*.png`.
+
 ## Money cross-QA (orchestrator) — all fixed, with tests
 | # | Finding | Fix | Test |
 |---|---|---|---|

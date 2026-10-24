@@ -31,10 +31,11 @@ export function DockPriceHint({ data }: { data: DockPriceHintData }) {
       data-testid="dock-price-hint"
       title={t('title', { days: DOCK_PRICE_DAYS, count: data.samples })}
     >
-      {t('usual', {
-        price: formatIls(data.usualUnitPrice, { locale, maximumFractionDigits: 2 }),
-        days: DOCK_PRICE_DAYS,
-      })}
+      {t('usual')}{' '}
+      <bdi dir="ltr" className="font-mono tabular-nums">
+        {formatIls(data.usualUnitPrice, { locale, maximumFractionDigits: 2 })}
+      </bdi>{' '}
+      {t('window', { days: DOCK_PRICE_DAYS })}
       {Math.abs(pct) >= MIN_SHOWN_PCT ? (
         <>
           {' · '}
