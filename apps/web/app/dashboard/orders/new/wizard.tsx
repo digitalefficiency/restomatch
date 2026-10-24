@@ -497,7 +497,9 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
                 >
                   <span className="min-w-0 flex-1 truncate text-sm text-ink">{name.primary}</span>
                   <span className="text-xs tabular-nums text-muted">
-                    {l.qty} {l.unit}
+                    <bdi>
+                      {l.qty} {l.unit}
+                    </bdi>
                     {l.unitPriceExpected !== undefined ? (
                       <>
                         {' × '}
