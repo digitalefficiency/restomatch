@@ -11,11 +11,24 @@ import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 import { OrdersTable, type OrderStatus } from './orders-table';
 
 type Order = inferRouterOutputs<AppRouter>['orders']['list'][number];
-type StatusFilter = 'all' | OrderStatus;
+type StatusFilter = 'all' | OrderStatus | 'received';
 
 const PAGE = 50;
 
-const FILTERS: StatusFilter[] = ['all', 'draft', 'sent', 'partial', 'closed', 'cancelled'];
+const FILTERS: StatusFilter[] = ['all', 'draft', 'sent', 'partial', 'received', 'closed', 'cancelled'];
+
+/**
+ * Open orders filter by their goods receipt (orders.list `delivery`): "sent" = not received
+ * yet, "partial" / "received" from the latest receipt. The stored PO status never moves on
+ * receipt, so a status filter alone would never find a delivered order.
+ */
+function queryOf(f: StatusFilter): { status?: OrderStatus; delivery?: 'awaiting' | 'partial' | 'received' } {
+  if (f === 'all') return {};
+  if (f === 'sent') return { delivery: 'awaiting' };
+  if (f === 'partial') return { delivery: 'partial' };
+  if (f === 'received') return { delivery: 'received' };
+  return { status: f };
+}
 
 export function OrdersList({ initial, canEdit }: { initial: Order[]; canEdit: boolean }) {
   const t = useT(ordersNs);
@@ -23,7 +36,7 @@ export function OrdersList({ initial, canEdit }: { initial: Order[]; canEdit: bo
   const [limit, setLimit] = useState(PAGE);
 
   const q = trpc.orders.list.useQuery(
-    { status: status === 'all' ? undefined : status, limit },
+    { ...queryOf(status), limit },
     {
       initialData: status === 'all' && limit === PAGE ? initial : undefined,
       placeholderData: (prev) => prev,

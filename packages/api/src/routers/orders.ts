@@ -15,6 +15,7 @@ import {
   products,
   purchaseOrders,
   restaurants,
+  sql,
   suppliers,
   supplierCatalogItems,
   type Database,
@@ -162,6 +163,23 @@ async function baselineWindow(db: Database, restaurantId: string): Promise<numbe
 }
 
 
+/**
+ * The PO's delivery state comes from its latest goods receipt, not from
+ * purchase_orders.status: receiving never moves a PO out of 'sent' (and must
+ * not — buildMatchInput only discovers sent/confirmed/partial POs, so an
+ * invoice arriving after the delivery still finds its order). Display only.
+ * The outer column is spelled out: Drizzle leaves `${purchaseOrders.id}`
+ * unqualified in a single-table select, where it would bind to g.id.
+ */
+function latestReceiptStatus(restaurantId: string) {
+  return sql<'pending' | 'partial' | 'completed' | 'rejected' | null>`(
+    SELECT g.status::text FROM goods_receipts g
+    WHERE g.po_id = "purchase_orders"."id" AND g.restaurant_id = ${restaurantId}
+    ORDER BY g.received_at DESC, g.created_at DESC LIMIT 1
+  )`;
+}
+const OPEN_PO_STATUSES = ['sent', 'confirmed', 'partial'] as const;
+
 export const ordersRouter = router({
   /** Purchase orders for the restaurant, with supplier name + line count. */
   list: memberProcedure
@@ -172,6 +190,8 @@ export const ordersRouter = router({
             .enum(['draft', 'sent', 'confirmed', 'partial', 'closed', 'cancelled'])
             .optional(),
           supplierId: z.string().uuid().optional(),
+          /** Open POs by their goods receipt: not yet received / partially / fully received. */
+          delivery: z.enum(['awaiting', 'partial', 'received']).optional(),
           limit: z.number().int().min(1).max(100).default(50),
           offset: z.number().int().min(0).default(0),
         })
@@ -182,6 +202,13 @@ export const ordersRouter = router({
       const conds = [eq(purchaseOrders.restaurantId, restaurantId)];
       if (input?.status) conds.push(eq(purchaseOrders.status, input.status));
       if (input?.supplierId) conds.push(eq(purchaseOrders.supplierId, input.supplierId));
+      const receipt = latestReceiptStatus(restaurantId);
+      if (input?.delivery) {
+        conds.push(inArray(purchaseOrders.status, [...OPEN_PO_STATUSES]));
+        if (input.delivery === 'received') conds.push(sql`${receipt} = 'completed'`);
+        else if (input.delivery === 'partial') conds.push(sql`${receipt} = 'partial'`);
+        else conds.push(sql`COALESCE(${receipt}, 'pending') NOT IN ('completed', 'partial')`);
+      }
       return ctx.db
         .select({
           id: purchaseOrders.id,
@@ -194,6 +221,7 @@ export const ordersRouter = router({
           sentAt: purchaseOrders.sentAt,
           createdAt: purchaseOrders.createdAt,
           lineCount: count(poLines.id),
+          receiptStatus: receipt,
         })
         .from(purchaseOrders)
         .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
@@ -215,6 +243,13 @@ export const ordersRouter = router({
         .from(purchaseOrders)
         .where(eq(purchaseOrders.id, input.poId))
         .limit(1);
+      const [receipt] = po
+        ? await ctx.db
+            .select({ status: latestReceiptStatus(restaurantId) })
+            .from(purchaseOrders)
+            .where(eq(purchaseOrders.id, input.poId))
+            .limit(1)
+        : [];
       const [supplier] = po
         ? await ctx.db
             .select({ name: suppliers.name, nameEn: suppliers.nameEn })
@@ -246,6 +281,7 @@ export const ordersRouter = router({
         lines,
         supplierName: supplier?.name ?? null,
         supplierNameEn: supplier?.nameEn ?? null,
+        receiptStatus: receipt?.status ?? null,
       };
     }),
 

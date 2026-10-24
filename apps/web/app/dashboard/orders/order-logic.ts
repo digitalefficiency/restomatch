@@ -81,3 +81,21 @@ export function lineTotalIls(qty: number, price: number | undefined): number {
 export function orderTotalIls(lines: Array<{ qty: number; unitPriceExpected?: number }>): number {
   return lines.reduce((sum, l) => sum + Math.round(lineTotalIls(l.qty, l.unitPriceExpected) * 100), 0) / 100;
 }
+
+export type PoStatus = 'draft' | 'sent' | 'confirmed' | 'partial' | 'closed' | 'cancelled';
+export type ReceiptStatus = 'pending' | 'partial' | 'completed' | 'rejected' | null;
+/** What the order screens show: the stored PO status, or the goods receipt's state for an open PO. */
+export type DisplayOrderStatus = PoStatus | 'received';
+
+/**
+ * An open PO (sent / confirmed / partial) shows its delivery state from the latest goods
+ * receipt: a completed receipt reads "received", a partial one "partially received".
+ * Receiving never changes the stored PO status (invoice matching still needs to find the PO),
+ * so without this a delivered order kept reading "sent".
+ */
+export function deliveryStatusOf(status: PoStatus, receipt: ReceiptStatus | undefined): DisplayOrderStatus {
+  if (status !== 'sent' && status !== 'confirmed' && status !== 'partial') return status;
+  if (receipt === 'completed') return 'received';
+  if (receipt === 'partial') return 'partial';
+  return status;
+}

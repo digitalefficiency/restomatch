@@ -11,6 +11,7 @@ import { matchProductTopN } from '@restomatch/catalog';
 import {
   createDb,
   discrepancies,
+  eq,
   goodsReceipts,
   grLines,
   invoiceLines,
@@ -31,6 +32,7 @@ import { runMatch, type MatchInput } from '@restomatch/matching';
 import { runOcrPipeline, StubOcrProvider } from '@restomatch/ocr';
 import type { InvoiceOcrResult } from '@restomatch/types';
 import { appRouter } from '../index';
+import { buildMatchInputForInvoice } from '../match/buildMatchInput';
 import type { AppContext } from '../context';
 
 const TEST_DB_URL =
@@ -310,6 +312,48 @@ describe('E2E — full receiving flow', () => {
     await caller.receiving.markGrLine({ grLineId: myLine.id, qtyReceived: 10 });
     const submitted = await caller.receiving.submitReceipt({ grId: receiptId });
     expect(submitted.status).toBe('completed');
+
+    // The orders screens read the delivery from the receipt; the stored PO status stays 'sent'
+    // so an invoice arriving later (e.g. by email the next day) still discovers this PO.
+    const listed = (await caller.orders.list()).find((o) => o.id === po!.id)!;
+    expect(listed).toMatchObject({ status: 'sent', receiptStatus: 'completed' });
+    expect((await caller.orders.get({ poId: po!.id })).receiptStatus).toBe('completed');
+    expect((await caller.orders.list({ delivery: 'received' })).map((o) => o.id)).toContain(po!.id);
+    expect((await caller.orders.list({ delivery: 'awaiting' })).map((o) => o.id)).not.toContain(po!.id);
+    expect((await caller.orders.list({ delivery: 'partial' })).map((o) => o.id)).not.toContain(po!.id);
+    // A partial receipt reads "partially received" and is found by that filter.
+    await db.update(goodsReceipts).set({ status: 'partial' }).where(eq(goodsReceipts.id, receiptId));
+    expect((await caller.orders.get({ poId: po!.id })).receiptStatus).toBe('partial');
+    expect((await caller.orders.list({ delivery: 'partial' })).map((o) => o.id)).toContain(po!.id);
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, receiptId));
+    const tomorrow = new Date(today.getTime() + 86_400_000);
+    const [lateInvoice] = await db
+      .insert(invoices)
+      .values({
+        restaurantId: restaurant!.id,
+        supplierId: supplier!.id,
+        invoiceNumber: 'INV-E2E-LATE',
+        invoiceDate: tomorrow,
+        totalExclVat: '80.00',
+        vatAmount: '13.60',
+        totalInclVat: '93.60',
+        status: 'parsed',
+        source: 'email',
+      })
+      .returning();
+    await db.insert(invoiceLines).values({
+      invoiceId: lateInvoice!.id,
+      productId: tomatoProduct2!.id,
+      rawDescription: 'עגבניה שרי',
+      qtyBilled: '10',
+      unit: 'ק״ג',
+      unitPriceBilled: '8',
+      lineTotal: '80',
+    });
+    const built = await buildMatchInputForInvoice(db, restaurant!.id, lateInvoice!.id);
+    expect(built?.poId).toBe(po!.id);
+    await db.delete(invoiceLines).where(eq(invoiceLines.invoiceId, lateInvoice!.id));
+    await db.delete(invoices).where(eq(invoices.id, lateInvoice!.id));
 
     // Clean invoice (matches PO exactly)
     const poLinesRows = await db.select().from(poLines);
