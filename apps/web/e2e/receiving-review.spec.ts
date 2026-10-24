@@ -113,7 +113,11 @@ async function expectEachOnce(page: Page, names: string[]) {
 const REVIEW = { name: 'תוצאת ההצלבה' };
 
 test.beforeEach(async ({ page }) => {
-  await page.context().addCookies([{ name: 'rm_locale', value: 'he', url: test.info().project.use.baseURL! }]);
+  const url = test.info().project.use.baseURL!;
+  await page.context().addCookies([
+    { name: 'rm_locale', value: 'he', url },
+    { name: 'rm_cookie_consent', value: 'necessary', url }, // the banner overlays the wizard's buttons
+  ]);
 });
 
 test('desktop review: every line once, order+invoice / invoice-only / order-only sections', async ({ page }) => {
