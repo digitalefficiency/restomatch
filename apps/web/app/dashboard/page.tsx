@@ -394,8 +394,10 @@ function LeakHero({
           ) : null}
         </div>
 
+        {/* With the 4th tile (recovery) a single lg column grows taller than the ₪ column and, with
+            lg:items-end, pushes the leak figure below a 768px fold: lay the four out 2×2 instead. */}
         <dl
-          className={`grid grid-cols-1 gap-3 lg:grid-cols-1 ${returned ? 'min-[420px]:grid-cols-2' : 'min-[420px]:grid-cols-3'}`}
+          className={`grid grid-cols-1 gap-3 ${returned ? 'min-[420px]:grid-cols-2 lg:grid-cols-2' : 'min-[420px]:grid-cols-3 lg:grid-cols-1'}`}
         >
           <HeroStat label={t('hero.caught')} value={ils(hero.caughtBeforePaymentIls)} hint={t('hero.caughtHint')} tone="gold" />
           <HeroStat label={t('hero.recovered')} value={ils(hero.recoveredIls)} hint={t('hero.recoveredHint')} tone="primary" />

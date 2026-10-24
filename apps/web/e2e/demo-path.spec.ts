@@ -443,6 +443,12 @@ test('B · owner: hero ₪, leak detective, approvals, claims, report, chain, br
     await expect(page.getByText(m.nav.worker.title), 'worker-offline banner on the demo dashboard').toHaveCount(0);
     const hero = page.locator('section[aria-labelledby="leak-hero-label"]');
     await expect(hero.locator('#leak-hero-label')).toHaveText(m.overview.hero.leakedLabel);
+    // The one number sits above the fold (1366×768 and 390×844): no extra hero tile may push it down.
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const leakBox = await hero.locator('p.font-mono').first().boundingBox();
+    const fold = page.viewportSize()!.height;
+    expect(leakBox, 'hero ₪ is rendered').not.toBeNull();
+    expect(leakBox!.y + leakBox!.height, `hero ₪ bottom vs the ${fold}px fold`).toBeLessThanOrEqual(fold);
     const heroText = await hero.innerText();
     n.leak = num(await hero.locator('p.font-mono').first().innerText());
     n.pct = num(/(\d+(?:\.\d+)?)\s*%/.exec(heroText.replace(BIDI, ''))![1]!);
