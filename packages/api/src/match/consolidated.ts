@@ -75,6 +75,13 @@ export interface DeliveryNoteData {
   poRef: string | null;
   receivedAt: Date;
   lines: DeliveryNoteLineData[];
+  /** Another invoice already bills this note (lists its number, or its match run used it). */
+  alreadyBilledOn?: OtherInvoice | null;
+}
+
+export interface OtherInvoice {
+  invoiceId: string;
+  invoiceNumber: string | null;
 }
 
 export type DeliveryNoteStatus = 'covered' | 'partly' | 'not_billed';
@@ -90,6 +97,8 @@ export interface ProposalDeliveryNote {
   /** Σ|Δ| of the findings on this note's lines that count as leak (itemized notes only, else 0). */
   deltaIls: number;
   status: DeliveryNoteStatus;
+  /** Billed twice: the other invoice that already bills this note. */
+  alreadyBilledOn: OtherInvoice | null;
 }
 
 export type ProposalProductStatus = 'ok' | 'difference' | 'not_billed' | 'not_received';
@@ -117,6 +126,8 @@ export interface ProposalFinding {
   productId: string | null;
   /** The delivery note the finding is on, when the invoice itemizes it. */
   deliveryNoteNumber: string | null;
+  /** Billed twice: the note is already billed on this other invoice. */
+  alreadyBilledOn: OtherInvoice | null;
   expected: number | null;
   actual: number | null;
   deltaAmount: number;
@@ -251,13 +262,26 @@ export function buildConsolidatedProposal(args: {
   const notes = [...args.notes].sort((a, b) => a.receivedAt.getTime() - b.receivedAt.getTime());
   const noteNumbers = new Set(notes.map((n) => n.number).filter((x): x is string => !!x));
   const lineNotes = args.invoiceLineNotes ?? new Map<string, string>();
-  // An invoice line's bucket: the note it names (when that note is a candidate), else the pool.
-  const bucketOfLine = (id: string) => {
-    const n = lineNotes.get(id);
-    return n && noteNumbers.has(n) ? n : POOL;
+  const invKey = (il: InvoiceLineInput) =>
+    productKey({ productId: il.productId, supplierSku: il.supplierSku ?? null, poLineId: il.id, unit: il.unit });
+  // Itemized per note × PRODUCT: an invoice line names a note, and is paired with
+  // that note's line of its product — when the note has one; otherwise (or when it
+  // names no candidate note) it bills the pool. A note's line is itemized only when
+  // some invoice line names that note for that product, so a ריכוז that itemizes the
+  // milk but bills the month's eggs in one line pairs each correctly.
+  const noteProducts = new Set(notes.flatMap((n) => (n.number ? n.lines.map((l) => `${n.number}|${productKey(l)}`) : [])));
+  const bucketOfLine = (il: InvoiceLineInput) => {
+    const n = lineNotes.get(il.id);
+    return n && noteNumbers.has(n) && noteProducts.has(`${n}|${invKey(il)}`) ? n : POOL;
   };
-  const itemized = new Set(args.base.invoiceLines.map((l) => bucketOfLine(l.id)).filter((b) => b !== POOL));
-  const bucketOfNote = (n: DeliveryNoteData) => (n.number && itemized.has(n.number) ? n.number : POOL);
+  const itemizedPairs = new Set(
+    args.base.invoiceLines.flatMap((il) => {
+      const b = bucketOfLine(il);
+      return b === POOL ? [] : [`${b}|${invKey(il)}`];
+    }),
+  );
+  const bucketOfNoteLine = (n: DeliveryNoteData, l: DeliveryNoteLineData) =>
+    n.number && itemizedPairs.has(`${n.number}|${productKey(l)}`) ? n.number : POOL;
 
   // ── Fold the notes' lines per bucket × product into one PO line + one received line. ──
   type Group = {
@@ -292,14 +316,13 @@ export function buildConsolidatedProposal(args: {
     };
   };
   for (const n of notes) {
-    const bucket = bucketOfNote(n);
     for (const l of n.lines) {
-      const { gk, key, qty, p4 } = placeLine(bucket, l);
+      const { gk, key, qty, p4 } = placeLine(bucketOfNoteLine(n, l), l);
       const g =
         groups.get(gk) ??
         ({
           key,
-          bucket,
+          bucket: bucketOfNoteLine(n, l),
           productId: l.productId,
           supplierSku: l.supplierSku,
           name: l.name,
@@ -325,7 +348,7 @@ export function buildConsolidatedProposal(args: {
   // ── The invoice side, per bucket × product (normally one line each already). ──
   const lineGroups = new Map<string, InvoiceLineInput>();
   for (const il of args.base.invoiceLines) {
-    const gk = `${bucketOfLine(il.id)}|${productKey({ productId: il.productId, supplierSku: il.supplierSku ?? null, poLineId: il.id, unit: il.unit })}`;
+    const gk = `${bucketOfLine(il)}|${invKey(il)}`;
     const prev = lineGroups.get(gk);
     if (!prev) {
       lineGroups.set(gk, il);
@@ -418,17 +441,47 @@ export function buildConsolidatedProposal(args: {
       toleranceUsed: 'pooled ריכוז: billed amount vs Σ received × PO price (agorot)',
     } as Discrepancy);
   }
+  // Billed twice: a note this invoice bills that another invoice already bills —
+  // the whole amount billed for it here is the difference (before VAT), on that
+  // note, naming the other invoice; the note's own line findings are folded into it.
+  const twiceNotes = new Map(notes.filter((n) => n.number && n.alreadyBilledOn).map((n) => [n.number!, n]));
+  type TwiceFinding = Discrepancy & { alreadyBilledOn: OtherInvoice; noteNumber: string };
+  const twiceFindings: TwiceFinding[] = [];
+  for (const [number, n] of twiceNotes) {
+    const itemizedAg = [...lineGroups.entries()]
+      .filter(([gk]) => gk.startsWith(`${number}|`))
+      .reduce((sum, [, l]) => sum + ag(l.lineTotal), 0);
+    const valueAg = n.lines.reduce((sum, l) => sum + (l.poPrice == null ? 0 : Math.round((p4Of(l.poPrice) * l.qtyReceived) / 100)), 0);
+    const billedAg = itemizedAg > 0 ? itemizedAg : valueAg;
+    if (billedAg <= 0) continue;
+    twiceFindings.push({
+      type: 'QTY_OVER',
+      severity: 'block',
+      productId: null,
+      poLineId: null,
+      grLineId: null,
+      invoiceLineId: null,
+      expected: 0,
+      actual: ils(billedAg),
+      deltaAmount: ils(billedAg),
+      toleranceUsed: 'ריכוז: a delivery note already billed on another invoice',
+      alreadyBilledOn: n.alreadyBilledOn!,
+      noteNumber: number,
+    } as TwiceFinding);
+  }
+  const noteOf = (d: Discrepancy) =>
+    (d.poLineId ? noteOfPoLine.get(d.poLineId) : undefined) ?? (d.invoiceLineId ? noteOfInvoiceLine.get(d.invoiceLineId) : undefined);
   const engineFindings = result.discrepancies.filter(
-    (d) => !((d.type === 'PRICE_HIGHER' || d.type === 'PRICE_LOWER') && d.poLineId && pooledPoLines.has(d.poLineId)),
+    (d) =>
+      !((d.type === 'PRICE_HIGHER' || d.type === 'PRICE_LOWER') && d.poLineId && pooledPoLines.has(d.poLineId)) &&
+      !twiceNotes.has(noteOf(d) ?? ''),
   );
-  const findings: ProposalFinding[] = [...engineFindings, ...pooledFindings].map((d) => ({
+  const findings: ProposalFinding[] = [...engineFindings, ...pooledFindings, ...twiceFindings].map((d) => ({
     type: d.type,
     severity: d.severity,
     productId: d.productId,
-    deliveryNoteNumber:
-      (d.poLineId ? noteOfPoLine.get(d.poLineId) : undefined) ??
-      (d.invoiceLineId ? noteOfInvoiceLine.get(d.invoiceLineId) : undefined) ??
-      null,
+    deliveryNoteNumber: (d as Partial<TwiceFinding>).noteNumber ?? noteOf(d) ?? null,
+    alreadyBilledOn: (d as Partial<TwiceFinding>).alreadyBilledOn ?? null,
     expected: d.expected,
     actual: d.actual,
     deltaAmount: d.deltaAmount,
@@ -502,11 +555,13 @@ export function buildConsolidatedProposal(args: {
   // Billed qty left per bucket × product, in the invoice line's own unit.
   const left = new Map([...lineGroups].map(([gk, l]) => [gk, l.qtyBilled]));
   const deliveryNotes: ProposalDeliveryNote[] = notes.map((n) => {
-    const bucket = bucketOfNote(n);
     let need = 0;
     let got = 0;
     let valueAg = 0;
+    let itemizedNote = false;
     for (const l of n.lines) {
+      const bucket = bucketOfNoteLine(n, l);
+      if (bucket !== POOL) itemizedNote = true;
       const gk = `${bucket}|${productKey(l)}`;
       const il = lineGroups.get(gk);
       // Billed units → this note line's unit (kg↔g, l↔ml); unconvertible units never cover it.
@@ -526,8 +581,9 @@ export function buildConsolidatedProposal(args: {
       poRef: n.poRef,
       receivedAt: n.receivedAt.toISOString(),
       receivedValueIls: ils(valueAg),
-      deltaIls: ils(bucket === POOL ? 0 : (leakByNote.get(bucket) ?? 0)),
+      deltaIls: ils((itemizedNote || n.alreadyBilledOn) && n.number ? (leakByNote.get(n.number) ?? 0) : 0),
       status,
+      alreadyBilledOn: n.alreadyBilledOn ?? null,
     };
   });
 
@@ -622,6 +678,35 @@ export function periodOfInvoice(at: Date, raw: ConsolidatedRaw | null, tz: strin
   return { start: p.start, end: p.end };
 }
 
+/** An invoice dated in its month's first days may bill the month before. */
+export const EARLY_MONTH_DAYS = 5;
+/** Slack around a stated period when looking a listed note number up. */
+export const LISTED_NOTE_SLACK_DAYS = 7;
+
+/**
+ * Pure: the periods a consolidated invoice may bill. Its stated period when it has
+ * one; else its month ± CONSOLIDATED_EDGE_DAYS — and, when it is dated in the
+ * month's first EARLY_MONTH_DAYS days (the 1st-of-the-month ריכוז for last month),
+ * the previous month too. The caller keeps the better fit.
+ */
+export function candidatePeriods(at: Date, raw: ConsolidatedRaw | null, tz: string = DEFAULT_TZ): Array<{ start: Date; end: Date }> {
+  const own = periodOfInvoice(at, raw, tz);
+  if (raw?.periodStart && raw.periodEnd) return [own];
+  const day = Number(new Intl.DateTimeFormat('en-CA', { timeZone: tz, day: 'numeric' }).format(at));
+  if (day > EARLY_MONTH_DAYS) return [own];
+  const prev = consolidatedPeriod(addCalendarDaysInTz(at, -day, tz), tz);
+  return [own, { start: prev.start, end: prev.end }];
+}
+
+/** Pure: the proposal that fits its invoice better — the smaller |invoice − notes|, then more notes, then the first. */
+export function betterFit(a: ConsolidatedProposal, b: ConsolidatedProposal): ConsolidatedProposal {
+  const da = Math.abs(a.totals.differenceIls);
+  const db = Math.abs(b.totals.differenceIls);
+  if (b.deliveryNotes.length > 0 && (a.deliveryNotes.length === 0 || db < da)) return b;
+  if (db === da && b.deliveryNotes.length > a.deliveryNotes.length) return b;
+  return a;
+}
+
 /** The delivery-note number on a goods receipt (`ת.מ. <n>` in its notes). */
 const noteNumberSql = sql<string | null>`substring(${goodsReceipts.notes} from 'ת\\.\\s?מ\\.?\\s*([0-9]+)')`;
 
@@ -640,18 +725,18 @@ const coveredByOther = (restaurantId: string, invoiceId: string | null) => sql`E
 type LoadedNote = DeliveryNoteData & { coveredByInvoiceId: string | null };
 
 /**
- * Load a supplier's delivery notes with their lines (PO price, names): those
- * received in [from, to), or — with `numbers` — those carrying one of these
- * delivery-note numbers, whenever received.
+ * Load a supplier's delivery notes with their lines (PO price, names) received in
+ * [from, to) — with `numbers`, only those carrying one of these delivery-note
+ * numbers (a supplier's numbering wraps over years: the window keeps it local).
  */
 async function loadDeliveryNotes(
   db: Database,
   restaurantId: string,
   supplierId: string,
-  scope: { from: Date; to: Date } | { numbers: string[] },
+  scope: { from: Date; to: Date; numbers?: string[] },
   opts: { excludeCoveredExcept?: string | null; onlyUncovered?: boolean } = {},
 ): Promise<LoadedNote[]> {
-  if ('numbers' in scope && scope.numbers.length === 0) return [];
+  if (scope.numbers && scope.numbers.length === 0) return [];
   const grs = await db
     .select({
       id: goodsReceipts.id,
@@ -677,12 +762,9 @@ async function loadDeliveryNotes(
       and(
         eq(goodsReceipts.restaurantId, restaurantId),
         eq(purchaseOrders.supplierId, supplierId),
-        ...('numbers' in scope
-          ? [inArray(noteNumberSql, scope.numbers)]
-          : [
-              sql`${goodsReceipts.receivedAt} >= ${scope.from.toISOString()}::timestamptz`,
-              sql`${goodsReceipts.receivedAt} < ${scope.to.toISOString()}::timestamptz`,
-            ]),
+        ...(scope.numbers ? [inArray(noteNumberSql, scope.numbers)] : []),
+        sql`${goodsReceipts.receivedAt} >= ${scope.from.toISOString()}::timestamptz`,
+        sql`${goodsReceipts.receivedAt} < ${scope.to.toISOString()}::timestamptz`,
         sql`${goodsReceipts.status} <> 'rejected'`,
         ...(opts.onlyUncovered ? [sql`NOT ${coveredByOther(restaurantId, opts.excludeCoveredExcept ?? null)}`] : []),
       ),
@@ -783,7 +865,14 @@ async function consolidatedInvoicesOf(db: Database, restaurantId: string, suppli
     .orderBy(asc(invoices.createdAt));
   return rows.map((r) => {
     const raw = readConsolidatedRaw(r.ocrPayload)!;
-    return { id: r.id, number: r.number, status: r.status, raw, period: periodOfInvoice(r.invoiceDate ?? r.createdAt, raw, tz) };
+    return {
+      id: r.id,
+      number: r.number,
+      status: r.status,
+      createdAt: r.createdAt,
+      raw,
+      period: periodOfInvoice(r.invoiceDate ?? r.createdAt, raw, tz),
+    };
   });
 }
 
@@ -830,23 +919,8 @@ export async function consolidatedProposal(
   if (!built) return null;
 
   const tz = await timezoneOf(db, restaurantId);
-  const period = periodOfInvoice(inv.invoiceDate ?? inv.createdAt, raw, tz);
-  let notes: LoadedNote[];
-  if (raw && raw.deliveryNoteNumbers.length > 0) {
-    notes = await loadDeliveryNotes(db, restaurantId, inv.supplierId, { numbers: raw.deliveryNoteNumbers });
-  } else {
-    const listedElsewhere = new Set(
-      (await consolidatedInvoicesOf(db, restaurantId, inv.supplierId, tz))
-        .filter((c) => c.id !== invoiceId)
-        .flatMap((c) => c.raw.deliveryNoteNumbers),
-    );
-    notes = (
-      await loadDeliveryNotes(db, restaurantId, inv.supplierId, { from: period.start, to: period.end }, {
-        excludeCoveredExcept: invoiceId,
-        onlyUncovered: true,
-      })
-    ).filter((n) => !n.number || !listedElsewhere.has(n.number));
-  }
+  const at = inv.invoiceDate ?? inv.createdAt;
+  const others = (await consolidatedInvoicesOf(db, restaurantId, inv.supplierId, tz)).filter((c) => c.id !== invoiceId);
 
   // Which delivery note each invoice line bills (`ת.מ. <n>` / `DN <n>` in its description).
   const lineRows = await db
@@ -871,17 +945,73 @@ export async function consolidatedProposal(
       .where(and(eq(products.restaurantId, restaurantId), inArray(products.id, invoiceProductIds)));
     for (const r of rows) productNames.set(r.id, { name: r.name, nameEn: r.nameEn ?? null });
   }
-  return buildConsolidatedProposal({
-    invoiceId,
-    supplierId: inv.supplierId,
-    invoiceStatus: inv.status,
-    periodStart: period.start,
-    periodEnd: period.end,
-    base: built.input,
-    notes,
-    invoiceLineNotes,
-    productNames,
-  });
+  const build = (period: { start: Date; end: Date }, notes: DeliveryNoteData[]) =>
+    buildConsolidatedProposal({
+      invoiceId,
+      supplierId: inv.supplierId,
+      invoiceStatus: inv.status,
+      periodStart: period.start,
+      periodEnd: period.end,
+      base: built.input,
+      notes,
+      invoiceLineNotes,
+      productNames,
+    });
+
+  if (raw.deliveryNoteNumbers.length > 0) {
+    // The notes it lists, looked up around its period — and flagged when another
+    // invoice already bills them (lists the number, or its match run used the note).
+    const period = periodOfInvoice(at, raw, tz);
+    const listedBy = new Map<string, OtherInvoice>();
+    // Only an EARLIER invoice already bills a note — the later copy is the one billed twice.
+    for (const c of others.filter((o) => o.createdAt < inv.createdAt || (+o.createdAt === +inv.createdAt && o.id < invoiceId))) {
+      for (const n of c.raw.deliveryNoteNumbers) if (!listedBy.has(n)) listedBy.set(n, { invoiceId: c.id, invoiceNumber: c.number });
+    }
+    const loaded = await loadDeliveryNotes(
+      db,
+      restaurantId,
+      inv.supplierId,
+      {
+        numbers: raw.deliveryNoteNumbers,
+        from: addCalendarDaysInTz(period.start, -LISTED_NOTE_SLACK_DAYS, tz),
+        to: addCalendarDaysInTz(period.end, LISTED_NOTE_SLACK_DAYS, tz),
+      },
+      { excludeCoveredExcept: invoiceId },
+    );
+    const coveringIds = [...new Set(loaded.map((n) => n.coveredByInvoiceId).filter((x): x is string => !!x))];
+    const numberOf = new Map<string, string | null>();
+    if (coveringIds.length > 0) {
+      const rows = await db
+        .select({ id: invoices.id, number: invoices.invoiceNumber })
+        .from(invoices)
+        .where(and(eq(invoices.restaurantId, restaurantId), inArray(invoices.id, coveringIds)));
+      for (const r of rows) numberOf.set(r.id, r.number);
+    }
+    const notes = loaded.map((n) => ({
+      ...n,
+      alreadyBilledOn:
+        (n.number ? listedBy.get(n.number) : undefined) ??
+        (n.coveredByInvoiceId ? { invoiceId: n.coveredByInvoiceId, invoiceNumber: numberOf.get(n.coveredByInvoiceId) ?? null } : null),
+    }));
+    return build(period, notes);
+  }
+
+  // No list: the supplier's notes in its period that no other invoice covers (by a
+  // match run, or by listing them) — for an early-month invoice without a stated
+  // period, its own month and the one before, whichever fits better.
+  const listedElsewhere = new Set(others.flatMap((c) => c.raw.deliveryNoteNumbers));
+  let best: ConsolidatedProposal | null = null;
+  for (const period of candidatePeriods(at, raw, tz)) {
+    const notes = (
+      await loadDeliveryNotes(db, restaurantId, inv.supplierId, { from: period.start, to: period.end }, {
+        excludeCoveredExcept: invoiceId,
+        onlyUncovered: true,
+      })
+    ).filter((n) => !n.number || !listedElsewhere.has(n.number));
+    const p = build(period, notes);
+    best = best ? betterFit(best, p) : p;
+  }
+  return best;
 }
 
 export type DeliveryNoteCoverageState = 'covered' | 'in_consolidated' | 'not_invoiced';

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_TOLERANCES, type InvoiceLineInput, type MatchInput } from '@restomatch/matching';
 import {
+  betterFit,
   buildConsolidatedProposal,
+  candidatePeriods,
   consolidatedPeriod,
   countsAsLeak,
   deliveryNoteNumberIn,
@@ -313,6 +315,82 @@ describe('buildConsolidatedProposal — #95 review (P0)', () => {
     expect(p.deliveryNotes[0]).toMatchObject({ status: 'covered', receivedValueIls: 20 });
     expect(p.products[0]).toMatchObject({ qtyReceived: 2, qtyBilled: 2, status: 'ok' });
     expect(p.status).toBe('matched');
+  });
+});
+
+describe('buildConsolidatedProposal — #95 review (P1)', () => {
+  it('billed twice: a listed note another invoice already bills → its whole amount here, naming that invoice', () => {
+    const notes = [
+      note('gr-a', 5, [noteLine(CHALLAH, 10, 5)], '9001'),
+      { ...note('gr-b', 9, [noteLine(CHALLAH, 4, 5)], '9002'), alreadyBilledOn: { invoiceId: 'inv-0', invoiceNumber: 'BR-R-24100' } },
+    ];
+    const a = invLine(CHALLAH, 10, 5);
+    const b = invLine(CHALLAH, 4, 5);
+    const p = buildConsolidatedProposal({
+      invoiceId: 'inv-1',
+      supplierId: 's',
+      periodStart: new Date('2026-09-27T21:00:00Z'),
+      periodEnd: new Date('2026-11-02T22:00:00Z'),
+      base: base([a, b]),
+      notes,
+      invoiceLineNotes: new Map([
+        [a.id, '9001'],
+        [b.id, '9002'],
+      ]),
+    });
+    expect(p.findings.map((f) => [f.type, f.deltaAmount, f.deliveryNoteNumber, f.alreadyBilledOn?.invoiceNumber, f.countsAsLeak])).toEqual([
+      ['QTY_OVER', 20, '9002', 'BR-R-24100', true],
+    ]);
+    expect(p.totals.leakIls).toBe(20);
+    expect(p.deliveryNotes.find((n) => n.number === '9002')).toMatchObject({ deltaIls: 20, alreadyBilledOn: { invoiceNumber: 'BR-R-24100' } });
+    expect(p.status).toBe('differences');
+  });
+
+  it('an invoice dated in the first days of a month without a stated period may bill the month before', () => {
+    const oct1 = new Date('2026-10-01T08:00:00Z');
+    const ps = candidatePeriods(oct1, { periodStart: null, periodEnd: null, deliveryNoteNumbers: [] });
+    expect(ps.map((x) => x.start.toISOString())).toEqual([
+      consolidatedPeriod(oct1).start.toISOString(),
+      consolidatedPeriod(new Date('2026-09-15T08:00:00Z')).start.toISOString(),
+    ]);
+    expect(candidatePeriods(new Date('2026-10-15T08:00:00Z'), null)).toHaveLength(1);
+    expect(
+      candidatePeriods(oct1, { periodStart: '2026-09-01', periodEnd: '2026-09-30', deliveryNoteNumbers: [] }),
+    ).toHaveLength(1);
+  });
+
+  it('betterFit keeps the proposal closer to its invoice', () => {
+    const october = propose([invLine(CHALLAH, 15, 5)], [note('gr-o', 2, [noteLine(CHALLAH, 2, 5)])]);
+    const september = propose([invLine(CHALLAH, 15, 5)], [note('gr-s1', 5, [noteLine(CHALLAH, 10, 5)]), note('gr-s2', 9, [noteLine(CHALLAH, 5, 5)])]);
+    expect(betterFit(october, september)).toBe(september);
+    expect(betterFit(september, october)).toBe(september);
+  });
+
+  it('partly itemized: milk per note, the eggs as one line for the month → paired per note × product', () => {
+    const MILK = 'p-milk';
+    const EGGS = 'p-eggs';
+    const QTY = [24, 30, 18, 24];
+    const notes = QTY.map((q, i) => note(`gr-${i}`, 3 + i * 3, [noteLine(MILK, q, 6.4), noteLine(EGGS, 2, 34)], String(61036 + i)));
+    const lines: InvoiceLineInput[] = [];
+    const lineNotes = new Map<string, string>();
+    QTY.forEach((q, i) => {
+      const l = invLine(MILK, q, i === 0 ? 7.9 : 6.4);
+      lines.push(l);
+      lineNotes.set(l.id, String(61036 + i));
+    });
+    lines.push(invLine(EGGS, 8, 34)); // names no note
+    const p = buildConsolidatedProposal({
+      invoiceId: 'inv-mix',
+      supplierId: 's',
+      periodStart: new Date('2026-08-31T21:00:00Z'),
+      periodEnd: new Date('2026-09-30T21:00:00Z'),
+      base: base(lines),
+      notes,
+      invoiceLineNotes: lineNotes,
+    });
+    expect(p.findings.map((f) => [f.type, f.deltaAmount, f.deliveryNoteNumber])).toEqual([['PRICE_HIGHER', 36, '61036']]);
+    expect(p.totals.leakIls).toBe(36);
+    expect(p.deliveryNotes.every((n) => n.status === 'covered')).toBe(true);
   });
 });
 

@@ -230,6 +230,44 @@ describe('consolidated.proposal — isolation (RLS app role)', () => {
     expect(await caller(A, 'bookkeeper').consolidated.proposal({ invoiceId: consolidatedId })).not.toBeNull();
   });
 
+  it('billed twice: a later ריכוז listing a note an earlier one lists is flagged, naming it — the earlier one is not', async () => {
+    const [later] = await ownerDb
+      .insert(invoices)
+      .values({
+        restaurantId: A.restaurantId,
+        supplierId: A.supplierId,
+        invoiceNumber: 'A-M-2',
+        invoiceDate: new Date(),
+        totalExclVat: '36.00',
+        vatAmount: '6.48',
+        totalInclVat: '42.48',
+        status: 'parsed',
+        source: 'email',
+        ocrPayload: { provider: 'reconciled', raw: { kind: 'consolidated', deliveryNotes: [{ number: '9001' }] } } as (typeof invoices.$inferInsert)['ocrPayload'],
+      })
+      .returning();
+    await ownerDb.insert(invoiceLines).values({
+      invoiceId: later!.id,
+      productId: A.productId,
+      rawDescription: 'ת.מ. 9001 · מוצר',
+      qtyBilled: '4',
+      unit: 'kg',
+      unitPriceBilled: '9.00',
+      lineTotal: '36.00',
+    });
+    try {
+      const p = await caller(A).consolidated.proposal({ invoiceId: later!.id });
+      expect(p!.findings.filter((f) => f.countsAsLeak).map((f) => [f.type, f.deltaAmount, f.deliveryNoteNumber, f.alreadyBilledOn?.invoiceNumber])).toEqual([
+        ['QTY_OVER', 36, '9001', 'A-M-1'],
+      ]);
+      // The earlier ריכוז keeps its own finding only.
+      const first = await caller(A).consolidated.proposal({ invoiceId: itemizedId });
+      expect(first!.findings.every((f) => f.alreadyBilledOn === null)).toBe(true);
+    } finally {
+      await ownerDb.delete(invoices).where(eq(invoices.id, later!.id));
+    }
+  });
+
   it('an ordinary matched invoice (its own PO) gets no proposal', async () => {
     expect(await caller(A).consolidated.proposal({ invoiceId: A.invoiceId })).toBeNull();
   });
