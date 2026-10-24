@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "seed:chain-demo": "tsx scripts/seed-chain-demo.ts",
-    "reseed:demo": "tsx scripts/reseed-demo.ts"
+    "reseed:demo": "tsx scripts/reseed-demo.ts",
+    "check:demo": "tsx scripts/check-demo.ts"
   },
   "dependencies": {
     "@restomatch/api": "workspace:*",

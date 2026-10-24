@@ -80,6 +80,12 @@ export const en: Shape<typeof he> = {
     closing: 'Thank you for taking care of this. Feel free to contact us with any question.',
     signature: 'Kind regards,',
     note: 'Includes open and claimed discrepancies on invoices not yet paid. Waived discrepancies are excluded.',
+    basis: {
+      excl: 'before VAT',
+      incl: 'incl. VAT',
+      vat: 'VAT amount',
+    },
+    mixedBasis: 'This total mixes lines on different VAT bases — each line shows its basis.',
   },
   report: {
     open: 'Monthly leak report',

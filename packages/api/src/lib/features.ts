@@ -25,6 +25,7 @@ export const FEATURE_KEYS = [
   'leakCheck',
   'recipes',
   'integrations',
+  'payRun',
   'orderPricesOut',
   'supplierLeakCard',
   'supplierLedger',
