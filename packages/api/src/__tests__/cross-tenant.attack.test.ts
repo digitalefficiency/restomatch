@@ -21,7 +21,9 @@ import {
   restaurants,
   supplierCatalogItems,
   suppliers,
+  users,
 } from '@restomatch/db';
+import type { RestaurantSettings } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
@@ -226,6 +228,18 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'dsr.deleteMyAccount':
     'authed self-service; anonymizes ONLY the caller (ctx.session.userId) — takes no target id, cannot reach another user',
   'dsr.eraseLead': 'admin-denial',
+  // Growth (wave 1, S15 — flag `growth`). pricing is a pure public quote over
+  // the plan catalog (no tenant data, no ids); the referral procedures are
+  // tenant-scoped — see the growth.* block at the end of this file.
+  'growth.pricing':
+    'public pure quote over the plans catalog + @restomatch/billing math; takes no ids and reads no tenant-scoped table',
+  'growth.myReferral': 'isolation',
+  'growth.redeemReferral': 'attack',
+  'growth.referralStats': 'isolation',
+  // Free leak check (wave 1, S15 — flag `leakCheck`): the tenant side of
+  // "start a trial with your data carried over" — see the leakCheck.* block.
+  'leakCheck.claim': 'attack',
+  'leakCheck.claimed': 'isolation',
 };
 
 function listProcedurePaths(): string[] {
@@ -1507,4 +1521,142 @@ describe('role denial: mapping.confirm rejects member-tier callers', () => {
       expect(after).toHaveLength(before.length);
     });
   }
+});
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * growth.* (S15): referral codes + redemptions. A code is MEANT to be shared,
+ * so the attack surface is: reading another tenant's code/redemptions, minting
+ * a redemption for someone else, self-referral, and double redemption.
+ * ────────────────────────────────────────────────────────────────────────── */
+describe('growth.* referral isolation', () => {
+  let codeA: string;
+  let codeB: string;
+
+  beforeAll(async () => {
+    for (const t of [A, B]) {
+      await db
+        .update(restaurants)
+        .set({ settings: { features: { growth: true } } as unknown as RestaurantSettings })
+        .where(eq(restaurants.id, t.restaurantId));
+    }
+    codeB = (await callerFor(B).growth.myReferral()).code;
+    codeA = (await callerFor(A).growth.myReferral()).code;
+  });
+
+  afterAll(async () => {
+    for (const t of [A, B]) {
+      await db.update(restaurants).set({ settings: {} }).where(eq(restaurants.id, t.restaurantId));
+    }
+  });
+
+  it('growth.myReferral returns the caller’s own, stable code — never the other tenant’s', async () => {
+    expect(codeA).not.toBe(codeB);
+    expect((await callerFor(A).growth.myReferral()).code).toBe(codeA);
+    expect((await callerFor(B).growth.myReferral()).code).toBe(codeB);
+  });
+
+  it('growth.redeemReferral rejects self-referral', async () => {
+    await expect(callerFor(A).growth.redeemReferral({ code: codeA })).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+    });
+  });
+
+  it('growth.redeemReferral rejects an unknown code', async () => {
+    await expect(callerFor(A).growth.redeemReferral({ code: 'ZZZZZZZZ' })).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+    });
+  });
+
+  it('growth.redeemReferral records a pending redemption for the CALLER only, once', async () => {
+    await expect(callerFor(A).growth.redeemReferral({ code: codeB.toLowerCase() })).resolves.toEqual({
+      ok: true,
+      status: 'pending',
+    });
+    await expect(callerFor(A).growth.redeemReferral({ code: codeB })).rejects.toMatchObject({
+      code: 'CONFLICT',
+    });
+    // B has not been made the referred side of anything.
+    const bStats = await callerFor(B).growth.referralStats();
+    expect(bStats.redeemed).toBeNull();
+    expect(bStats).toMatchObject({ referred: 1, pending: 1, credited: 0, earnedAgorot: 0 });
+  });
+
+  it('growth.referralStats excludes the other tenant’s referrals', async () => {
+    const aStats = await callerFor(A).growth.referralStats();
+    expect(aStats).toMatchObject({ referred: 0, pending: 0, credited: 0, earnedAgorot: 0 });
+    expect(aStats.redeemed).toEqual({ status: 'pending', creditAgorot: null });
+  });
+});
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * leakCheck.* — the sandbox session is reached only through a signed link the
+ * prospect holds; the claiming restaurant comes from the session, a claimed
+ * session is never re-pointed, and claimed() lists only the caller's own.
+ * ────────────────────────────────────────────────────────────────────────── */
+describe('leakCheck.* sandbox carry-over isolation', () => {
+  const SECRET = 'cross-tenant-leak-check-secret-0123456789';
+  let tokenB = '';
+  let tokenFree = '';
+  let tokenStranger = '';
+
+  beforeAll(async () => {
+    process.env.LEAK_CHECK_SECRET = SECRET;
+    for (const t of [A, B]) {
+      await db
+        .update(restaurants)
+        .set({ settings: { features: { leakCheck: true } } as unknown as RestaurantSettings })
+        .where(eq(restaurants.id, t.restaurantId));
+    }
+    const { runLeakCheck } = await import('../leakCheck');
+    const pdf = (n: number) => ({ name: `inv-${n}.pdf`, bytes: Buffer.from(`%PDF-1.4 cross-tenant sample ${n}`) });
+    const deps = { mode: 'stub' as const, secret: SECRET, dailyOcrBudget: 10_000 };
+    const emailOf = async (t: Tenant) =>
+      (await db.select({ email: users.email }).from(users).where(eq(users.id, t.ownerUserId)))[0]!.email!;
+    const [emailA, emailB] = [await emailOf(A), await emailOf(B)];
+    const req = { locale: 'he' as const, ip: '203.0.113.9' };
+    tokenB = (await runLeakCheck(db, { ...req, email: emailB, invoices: [pdf(1), pdf(2)] }, deps)).token;
+    tokenFree = (await runLeakCheck(db, { ...req, email: emailA, invoices: [pdf(3)] }, deps)).token;
+    tokenStranger = (await runLeakCheck(db, { ...req, email: 'stranger@test.local', invoices: [pdf(4)] }, deps)).token;
+  });
+
+  it('leakCheck.claim rejects a forged / tampered link', async () => {
+    const tampered = tokenFree.slice(0, -2) + (tokenFree.endsWith('AA') ? 'BB' : 'AA');
+    await expect(callerFor(A).leakCheck.claim({ token: tampered })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      callerFor(A).leakCheck.claim({ token: '00000000-0000-4000-8000-000000000000.9999999999.x' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('leakCheck.claim refuses a valid link run with someone else’s email (a leaked link is not enough)', async () => {
+    await expect(callerFor(A).leakCheck.claim({ token: tokenStranger })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('leakCheck.claim never re-points a session another restaurant claimed', async () => {
+    await expect(callerFor(B).leakCheck.claim({ token: tokenB })).resolves.toEqual({ ok: true });
+    await expect(callerFor(A).leakCheck.claim({ token: tokenB })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    const bRows = await callerFor(B).leakCheck.claimed();
+    expect(bRows).toHaveLength(1);
+  });
+
+  it('leakCheck.claimed lists only the caller’s own sessions', async () => {
+    const aRows = await callerFor(A).leakCheck.claimed();
+    expect(aRows).toEqual([]);
+    await expect(callerFor(A).leakCheck.claim({ token: tokenFree })).resolves.toEqual({ ok: true });
+    const after = await callerFor(A).leakCheck.claimed();
+    expect(after).toHaveLength(1);
+    const bRows = await callerFor(B).leakCheck.claimed();
+    expect(bRows.map((r) => r.id)).not.toContain(after[0]!.id);
+  });
+
+  it('leakCheck.* is FORBIDDEN (FEATURE_DISABLED) when the flag is off', async () => {
+    await db.update(restaurants).set({ settings: {} }).where(eq(restaurants.id, A.restaurantId));
+    await expect(callerFor(A).leakCheck.claimed()).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+      cause: { appCode: 'FEATURE_DISABLED' },
+    });
+    await db
+      .update(restaurants)
+      .set({ settings: { features: { leakCheck: true } } as unknown as RestaurantSettings })
+      .where(eq(restaurants.id, A.restaurantId));
+  });
 });

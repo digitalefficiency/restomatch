@@ -1,6 +1,8 @@
 import { relations, sql } from 'drizzle-orm';
 import {
+  bigint,
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -1618,3 +1620,92 @@ export type Lead = typeof leads.$inferSelect;
 export type NewLead = typeof leads.$inferInsert;
 export type DsrRequest = typeof dsrRequests.$inferSelect;
 export type NewDsrRequest = typeof dsrRequests.$inferInsert;
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Leak-check sandbox (0054, S15 wave 1 — flag `leakCheck`)
+ *
+ * The public free "leak check" lead magnet. NOT tenant data: RLS is enabled
+ * with no policies (the tenant app role sees zero rows); only the public route
+ * handlers touch it, on the owner connection, keyed by a signed short-lived
+ * link. File bytes are never stored — only the extraction — and every row
+ * expires after 7 days.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export const leakCheckSessions = pgTable(
+  'leak_check_sessions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    email: varchar('email', { length: 320 }).notNull(),
+    name: varchar('name', { length: 200 }),
+    locale: varchar('locale', { length: 8 }).notNull().default('he'),
+    ipHash: varchar('ip_hash', { length: 64 }).notNull(),
+    ocrMode: varchar('ocr_mode', { length: 16 }).notNull(),
+    invoiceCount: integer('invoice_count').notNull(),
+    hasPriceList: boolean('has_price_list').notNull().default(false),
+    invoices: jsonb('invoices').notNull().default(sql`'[]'::jsonb`),
+    findings: jsonb('findings').notNull().default(sql`'[]'::jsonb`),
+    leakAgorot: bigint('leak_agorot', { mode: 'number' }).notNull().default(0),
+    spendAgorot: bigint('spend_agorot', { mode: 'number' }).notNull().default(0),
+    claimedRestaurantId: uuid('claimed_restaurant_id').references(() => restaurants.id, {
+      onDelete: 'set null',
+    }),
+    claimedAt: timestamp('claimed_at', { withTimezone: true }),
+    leadRequestedAt: timestamp('lead_requested_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true })
+      .notNull()
+      .default(sql`(now() + interval '7 days')`),
+  },
+  (t) => [index('leak_check_sessions_expires_at_idx').on(t.expiresAt)],
+);
+
+export const leakCheckOcrUsage = pgTable('leak_check_ocr_usage', {
+  day: date('day').primaryKey(),
+  calls: integer('calls').notNull().default(0),
+});
+
+export type LeakCheckSession = typeof leakCheckSessions.$inferSelect;
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Referral program (migration 0055, S15 growth — flag `growth`).
+ * RLS lives in the migration itself: a tenant sees only its own code, and a
+ * redemption is visible to both its referrer and its referred restaurant.
+ * Credits are agorot, recorded only (no payment provider yet).
+ * ────────────────────────────────────────────────────────────────────────── */
+export const referralCodes = pgTable(
+  'referral_codes',
+  {
+    restaurantId: uuid('restaurant_id')
+      .primaryKey()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    code: varchar('code', { length: 16 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('referral_codes_code_idx').on(t.code)],
+);
+
+export const referralRedemptions = pgTable(
+  'referral_redemptions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    code: varchar('code', { length: 16 }).notNull(),
+    referrerRestaurantId: uuid('referrer_restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    referredRestaurantId: uuid('referred_restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    status: varchar('status', { length: 16 }).$type<'pending' | 'credited'>().notNull().default('pending'),
+    creditAgorotReferrer: integer('credit_agorot_referrer'),
+    creditAgorotReferred: integer('credit_agorot_referred'),
+    creditedAt: timestamp('credited_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('referral_redemptions_referred_idx').on(t.referredRestaurantId),
+    index('referral_redemptions_referrer_idx').on(t.referrerRestaurantId),
+  ],
+);
+
+export type ReferralCode = typeof referralCodes.$inferSelect;
+export type ReferralRedemption = typeof referralRedemptions.$inferSelect;

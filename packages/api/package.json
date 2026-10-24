@@ -14,6 +14,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@restomatch/billing": "workspace:*",
     "@restomatch/catalog": "workspace:*",
     "@restomatch/db": "workspace:*",
     "@restomatch/matching": "workspace:*",

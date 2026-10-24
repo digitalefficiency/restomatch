@@ -23,6 +23,7 @@ export const FEATURE_KEYS = [
   'receiverLanguages',
   'aiAssistant',
   'leakCheck',
+  'growth',
   'recipes',
   'integrations',
 ] as const;

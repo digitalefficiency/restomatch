@@ -246,6 +246,20 @@
       "when": 1781980000000,
       "tag": "0033_plans_catalog",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1782090000000,
+      "tag": "0054_leak_check_sandbox",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1782100000000,
+      "tag": "0055_referrals",
+      "breakpoints": true
     }
   ]
 }
