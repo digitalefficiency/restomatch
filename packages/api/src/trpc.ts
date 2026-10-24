@@ -148,6 +148,8 @@ export const managerProcedure = requireRoles(['owner', 'manager']);
 export const receiverProcedure = requireRoles(['owner', 'manager', 'receiver']);
 export const bookkeeperProcedure = requireRoles(['owner', 'bookkeeper']);
 export const chefProcedure = requireRoles(['owner', 'manager', 'chef']);
+/** One supplier invoice (lines, prices, image) — matches /dashboard/invoices (no chef). */
+export const invoiceReaderProcedure = requireRoles(['owner', 'manager', 'receiver', 'bookkeeper']);
 /** Invoice-level money detail (leak drill-down, claims) — matches /dashboard/leaks. */
 export const financeProcedure = requireRoles(['owner', 'manager', 'bookkeeper']);
 

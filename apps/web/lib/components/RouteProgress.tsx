@@ -105,7 +105,7 @@ export function RouteProgress() {
   return (
     <div aria-hidden="true" data-route-progress={state.phase} className="pointer-events-none fixed inset-x-0 top-0 z-[80] h-0.5">
       <div
-        className={`h-full w-full origin-left bg-primary shadow-[0_0_6px_rgba(34,211,154,0.7)] rtl:origin-right ${PHASE_CLASS[state.phase]}`}
+        className={`h-full w-full origin-left bg-primary rtl:origin-right ${PHASE_CLASS[state.phase]}`}
       />
     </div>
   );

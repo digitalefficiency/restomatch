@@ -261,6 +261,9 @@ async function main() {
     const supplierEn = supplier.nameEn ?? supplier.name;
     const k = recencyById.get(po.id)!;
     const sc = scenarioFor(supplierEn, scenarioK(po.supplierId, k));
+    // The rate the engine expects (buildMatchInput: PO → supplier → restaurant): fresh
+    // produce suppliers are VAT 0, so their invoices carry no VAT.
+    const supplierVat = supplier.vatRate != null ? Number(supplier.vatRate) : vatRate;
     const lines = await db.select().from(poLines).where(eq(poLines.poId, po.id)).orderBy(asc(poLines.id));
     if (lines.length === 0) continue;
     const expected = po.expectedDeliveryAt ?? new Date();
@@ -325,7 +328,7 @@ async function main() {
         unit,
         unitPriceBilled: price.toFixed(2),
         lineTotal: lineTotal.toFixed(2),
-        vatRate: (sc.invoiceVatRate ?? vatRate).toString(),
+        vatRate: (sc.invoiceVatRate ?? supplierVat).toString(),
       });
     };
     for (const g of grRows) {
@@ -337,7 +340,7 @@ async function main() {
       addLine(p?.id ?? null, p?.canonicalName ?? sc.extra.nameEn, sc.extra.nameEn, sc.extra.qty, p?.defaultUnit ?? 'יח׳', sc.extra.price);
     }
     const subtotal = r2(invLineInputs.reduce((a, l) => a + Math.round(l.lineTotal * 100), 0) / 100);
-    const vatAmount = r2(subtotal * (sc.invoiceVatRate ?? vatRate));
+    const vatAmount = r2(subtotal * (sc.invoiceVatRate ?? supplierVat));
     const totalInclVat = r2(subtotal + vatAmount);
 
     const [invoice] = await db
@@ -387,7 +390,7 @@ async function main() {
       })),
       grLines: grRows.map((g) => ({ id: g.grLineId, poLineId: g.poLine.id, productId: g.poLine.productId, qtyReceived: g.qtyReceived })),
       invoiceLines: invLineInputs,
-      vatRate,
+      vatRate: supplierVat,
       tolerances,
       // A COPY: the engine must see only the numbers known BEFORE this invoice.
       // (The old generator added the number to the same Set before runMatch, so
@@ -506,7 +509,8 @@ async function main() {
     const prefix = INVOICE_PREFIX[supplier.nameEn ?? ''] ?? 'IN';
     const items = [...bucket].map(([productId, v]) => ({ p: productById.get(productId)!, ...v }));
     const subtotal = r2(items.reduce((a, l) => a + Math.round(l.qty * l.price * 100), 0) / 100);
-    const vatAmount = r2(subtotal * vatRate);
+    const consolidatedVat = supplier.vatRate != null ? Number(supplier.vatRate) : vatRate;
+    const vatAmount = r2(subtotal * consolidatedVat);
     const at = new Date(todayStart.getTime() - 16 * 60 * 60 * 1000);
     const [inv] = await db
       .insert(invoices)
@@ -536,7 +540,7 @@ async function main() {
         unit: l.p.defaultUnit ?? 'יח׳',
         unitPriceBilled: l.price.toFixed(2),
         lineTotal: r2(l.qty * l.price).toFixed(2),
-        vatRate: vatRate.toString(),
+        vatRate: consolidatedVat.toString(),
       })),
     );
     await db.insert(activityEvents).values({

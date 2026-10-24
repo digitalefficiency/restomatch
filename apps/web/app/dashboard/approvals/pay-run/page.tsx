@@ -13,8 +13,15 @@ import { PayRunExport } from './export-button';
 
 type PayRunStatus = 'pay' | 'hold' | 'claim';
 
-/** T3 calm for "can pay", T2 act-now for "hold", money-back gold for a credit to ask for. */
-const TONE: Record<PayRunStatus, BadgeTone> = { pay: 'accent', hold: 'warning', claim: 'gold' };
+/**
+ * Emphasis tiers (AGENTS.md): "can pay" is T3 (calm green); "hold — awaiting a decision" and
+ * "ask for a credit" are T2 (solid badge + ₪ + one CTA); "waiting for a PO link" is T4 (neutral).
+ */
+function toneOf(inv: { status: PayRunStatus; pendingLink: boolean; duplicate: boolean }): BadgeTone {
+  if (inv.status === 'pay') return 'accent';
+  if (inv.status === 'claim') return 'danger-solid';
+  return inv.pendingLink && !inv.duplicate ? 'neutral' : 'warning-solid';
+}
 
 /**
  * Pay run (flag payRun): this / last month's checked invoices not marked as
@@ -222,7 +229,7 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
                       </div>
                       <div className="flex shrink-0 flex-col items-start gap-1.5 sm:items-end">
                         <span data-testid="payrun-status">
-                          <Badge tone={TONE[inv.status]}>{statusLabel(inv)}</Badge>
+                          <Badge tone={toneOf(inv)}>{statusLabel(inv)}</Badge>
                         </span>
                         {inv.status === 'claim' ? (
                           <span className="text-xs text-subtle">{creditBasis(inv.claims)}</span>
