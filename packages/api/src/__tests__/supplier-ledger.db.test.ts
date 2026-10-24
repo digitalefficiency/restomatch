@@ -77,10 +77,23 @@ describe('suppliers.ledger', () => {
     expect(l.detail[m.month]!.notes[0]).toMatchObject({ state: 'not_invoiced', invoiceId: null });
   });
 
-  it('a pending invoice of the same period holds the note as a consolidated proposal', async () => {
+  it('an ordinary invoice waiting for a PO link does not cover a note', async () => {
     await flagOn(A);
     await db.delete(matchRuns).where(eq(matchRuns.id, A.matchRunId));
     await db.update(invoices).set({ status: 'parsed' }).where(eq(invoices.id, A.invoiceId));
+    const l = await callerFor(A).suppliers.ledger({ supplierId: A.supplierId });
+    const m = l.months[0]!;
+    expect(l.detail[m.month]!.notes[0]).toMatchObject({ state: 'not_invoiced', invoiceId: null });
+    expect(m.uninvoicedNotes.count).toBe(1);
+  });
+
+  it('a pending consolidated invoice of the same period holds the note as a proposal', async () => {
+    await flagOn(A);
+    await db.delete(matchRuns).where(eq(matchRuns.id, A.matchRunId));
+    await db
+      .update(invoices)
+      .set({ status: 'parsed', ocrPayload: { provider: 'reconciled', raw: { kind: 'consolidated' } } })
+      .where(eq(invoices.id, A.invoiceId));
     const l = await callerFor(A).suppliers.ledger({ supplierId: A.supplierId });
     const m = l.months[0]!;
     expect(l.detail[m.month]!.notes[0]).toMatchObject({ state: 'in_consolidated', invoiceId: A.invoiceId });
