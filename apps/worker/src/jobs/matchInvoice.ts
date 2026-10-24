@@ -33,6 +33,12 @@ export interface MatchInvoiceJob {
    * Without it the job stays idempotent (an already-matched invoice is skipped).
    */
   rematch?: boolean;
+  /**
+   * The PO of the receipt the invoice was scanned on (receiving.submitReceipt).
+   * It wins over a PO an earlier run discovered: the receiver counted THIS
+   * order. Still subject to the assembler's same-supplier / ±window checks.
+   */
+  poId?: string;
 }
 
 const CLEAN: MatchOutput = { status: 'clean', totalDiscrepancyAmount: 0, discrepancies: [] };
@@ -87,10 +93,10 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
   }
 
   // Discover the PO + assemble the 3-way MatchInput (tolerances/vat/baselines
-  // resolved from the restaurant inside the assembler). A re-match stays on the
-  // PO it was matched against.
+  // resolved from the restaurant inside the assembler). The receipt's PO first,
+  // else a re-match stays on the PO it was matched against.
   const built = await buildMatchInputForInvoice(db, restaurantId, invoiceId, {
-    pinnedPoId: priorRun?.poId ?? null,
+    pinnedPoId: data.poId ?? priorRun?.poId ?? null,
   });
   if (!built) return { result: CLEAN, persisted: null, replaced: false, skipped: 'no_lines' };
 
