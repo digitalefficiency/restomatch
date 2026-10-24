@@ -42,6 +42,22 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
       </Card>
     );
   }
+  if (q.isError) {
+    return (
+      <Card padding="md" data-testid="food-cost-period">
+        <h2 className="flex items-center gap-2 text-base font-semibold text-ink">
+          <Calculator className="h-4 w-4 text-muted" aria-hidden="true" />
+          {t('period.title')}
+        </h2>
+        <p className="mt-1 text-sm text-muted" role="alert">
+          {friendlyError(q.error, tc)}
+        </p>
+        <Button size="sm" variant="secondary" className="touch-target mt-2" onClick={() => void q.refetch()}>
+          {t('count.retry')}
+        </Button>
+      </Card>
+    );
+  }
   const p = q.data;
   if (!p) return null;
 
@@ -67,7 +83,7 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
           inputMode="decimal"
           autoComplete="off"
           dir="ltr"
-          className="mt-1"
+          className="mt-1 text-base"
           value={sales}
           aria-invalid={salesError ? true : undefined}
           aria-describedby={salesError ? 'period-sales-error' : undefined}
@@ -154,14 +170,25 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
           </span>
         ) : null}
       </div>
-      <p className="mt-1 text-xs text-muted">
+      <p className="mt-1 text-xs text-muted" data-testid="food-cost-formula">
         {t('period.formula', {
-          opening: ils(p.opening.valueAgorot, locale, 0),
-          purchases: ils(p.purchases.purchasesAgorot, locale, 0),
-          credits: ils(p.purchases.creditsAgorot, locale, 0),
-          closing: ils(p.closing.valueAgorot, locale, 0),
+          opening: ils(p.opening.valueAgorot, locale),
+          purchases: ils(p.purchases.purchasesAgorot, locale),
+          credits: ils(p.purchases.creditsAgorot, locale),
+          closing: ils(p.closing.valueAgorot, locale),
+          total: ils(p.actualAgorot, locale),
         })}
       </p>
+      {!p.coverageComplete ? (
+        <p className="mt-1 text-xs text-muted" data-testid="food-cost-coverage">
+          {t('period.coverageCaveat', {
+            parts: [p.opening, p.closing]
+              .filter((e) => !e.coverage.complete)
+              .map((e) => t('period.coveragePart', { date: dayText(e.countDate, locale), counted: e.coverage.counted - e.coverage.unpriced, lines: e.coverage.lines }))
+              .join(' · '),
+          })}
+        </p>
+      ) : null}
       {p.purchases.creditsToReceiveAgorot > 0 ? (
         <p className="mt-1 text-xs text-muted" data-testid="credits-to-receive">
           {t('period.creditsToReceive', { value: ils(p.purchases.creditsToReceiveAgorot, locale, 0) })}
@@ -172,8 +199,10 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
           {t('period.purchasesNote', {
             count: p.purchases.invoiceCount,
             nonFood: ils(p.purchases.nonFoodAgorot, locale, 0),
+            beverages: ils(p.purchases.beverageAgorot, locale, 0),
             dups: ils(p.purchases.duplicatesAgorot, locale, 0),
           })}
+          {p.purchases.missingTotalCount > 0 ? <> {t('period.missingTotal', { count: p.purchases.missingTotalCount })}</> : null}
           {p.purchases.accruedNotes > 0 || p.purchases.reversedAgorot > 0 ? (
             <>
               {' '}

@@ -93,6 +93,31 @@ export function isFood(category: string | null): boolean {
   return !NON_FOOD_RE.test(category ?? '');
 }
 
+/**
+ * Beverages (משקאות, wine, beer…): counted (on the bar shelf) but not FOOD
+ * cost — the % is of food sales, so their purchases, credits and stock stay out.
+ */
+export const BEVERAGE_PATTERN = '(משקא|יין|בירה|drink|beverage|wine|beer)';
+const BEVERAGE_RE = new RegExp(BEVERAGE_PATTERN, 'i');
+
+/** Does a counted line belong in food cost? Food category, not a beverage, not on the bar shelf. */
+export function isFoodCost(category: string | null, storageArea: string): boolean {
+  return isFood(category) && !BEVERAGE_RE.test(category ?? '') && storageArea !== 'bar';
+}
+
+/** Goods-line overcharges: the findings a supplier credits. Never VAT, price-lower or missing-on-invoice. */
+export const CREDIT_TYPES = ['PRICE_HIGHER', 'QTY_OVER', 'UNORDERED_ITEM', 'QTY_SHORT'] as const;
+
+/** A count's FOOD value and coverage (bar / beverage / non-food lines left out), from its lines. */
+export function foodValueOf(lines: Array<{ category: string | null; storageArea: string; qty: string | null; valueAgorot: number | string | null }>) {
+  const food = lines.filter((l) => isFoodCost(l.category, l.storageArea));
+  const counted = food.filter((l) => l.qty != null);
+  return {
+    valueAgorot: counted.reduce((a, l) => a + Number(l.valueAgorot ?? 0), 0),
+    coverage: { lines: food.length, counted: counted.length, unpriced: counted.filter((l) => l.valueAgorot == null).length },
+  };
+}
+
 /** Products bought in the `days` before local date `ymd` (food only), for a new count. */
 export async function recentlyBoughtProducts(
   db: Database,
@@ -187,10 +212,18 @@ export interface Purchases {
   invoicesAgorot: number;
   /** Non-food lines (disposables, cleaning) taken out (agorot). */
   nonFoodAgorot: number;
+  /** Beverage lines taken out: not food cost (agorot). */
+  beverageAgorot: number;
+  /** Invoices with no ex-VAT total and no incl − VAT to fall back on: counted as ₪0, shown as an FYI. */
+  missingTotalCount: number;
   /** Live duplicate copies left out — their goods are on the original (agorot, count). */
   duplicatesAgorot: number;
   duplicateCount: number;
-  /** "זיכויים שהתקבלו": claims on food lines whose credit was RECEIVED (resolved), capped per invoice (agorot). */
+  /**
+   * "זיכויים שהתקבלו": goods-line overcharge claims (CREDIT_TYPES, Δ ≠ 0) on food
+   * lines whose credit was RECEIVED (resolved) in the period — dated by
+   * resolved_at — capped at the invoice's food value (agorot).
+   */
   creditsAgorot: number;
   /** "זיכוי לקבל": claims accepted but the credit not received yet — shown, never subtracted (agorot). */
   creditsToReceiveAgorot: number;
@@ -207,16 +240,18 @@ const agorot = (v: unknown) => Math.round(Number(v ?? 0) * 100);
  * Food purchases ex-VAT for local dates (fromYmd, toYmd] — the period AFTER the
  * opening count up to and including the closing count — on RECEIPT dates
  * ("לפי תאריכי קבלה"): the month closes on goods that arrived, because the
- * consolidated invoice (חשבונית מרכזת) for a month's delivery notes arrives the
+ * consolidated invoice (חשבונית הריכוז) for a month's delivery notes arrives the
  * month after.
  *
  * Rules shared with the leak engine (@restomatch/charts): an invoice carrying
  * a LIVE duplicate finding is a second bill for goods already counted on the
  * original, so it is left out (a duplicate the bookkeeper rejected — "not a
  * duplicate" — is a normal purchase again). Invoices still waiting for a PO
- * link ARE purchases: the goods arrived. Credits: only claims whose credit was
- * RECEIVED (resolution 'resolved') reduce the food cost; accepted claims
- * ('accepted' — the credit to ask for) are shown as "זיכוי לקבל" only.
+ * link ARE purchases: the goods arrived. A credit note (negative total) lowers
+ * purchases. Non-food and beverage lines are out (not food cost). Credits: only
+ * goods-line overcharges (CREDIT_TYPES) whose credit was RECEIVED (resolved) in
+ * the period reduce the food cost; accepted claims (the credit to ask for) are
+ * shown as "זיכוי לקבל" only.
  */
 export async function purchasesInPeriod(
   db: Database,
@@ -225,58 +260,90 @@ export async function purchasesInPeriod(
   fromYmd: string,
   toYmd: string,
 ): Promise<Purchases> {
-  const claimOnFood = (statuses: SQL) => sql`coalesce((
+  const localDate = (ts: SQL) => sql`(${ts} at time zone ${tz})::date`;
+  const inWindow = (d: SQL) => sql`(${d} > ${fromYmd}::date and ${d} <= ${toYmd}::date)`;
+  const types = sql.join(CREDIT_TYPES.map((t) => sql`${t}`), sql`, `);
+  // Claims a supplier credits, on lines that are food cost (non-food and beverage lines are already out).
+  const claims = (status: string, windowed: boolean) => sql`coalesce((
           select sum(abs(d.delta_amount)) from match_runs mr
           join discrepancies d on d.match_run_id = mr.id and d.restaurant_id = ${restaurantId}
           left join invoice_lines dl on dl.id = d.invoice_line_id
           left join products dp on dp.id = coalesce(dl.product_id, d.product_id) and dp.restaurant_id = ${restaurantId}
           where mr.invoice_id = i.id and mr.restaurant_id = ${restaurantId}
-            and ${LEAK_FILTER} and d.resolution_status in (${statuses})
-            -- a claim on a non-food line: that line is already out of food purchases
+            and ${LEAK_FILTER} and d.resolution_status = ${status}
+            and d.type::text in (${types}) and coalesce(d.delta_amount, 0) <> 0
             and not (coalesce(dp.category, '') ~* ${NON_FOOD_PATTERN})
+            and not (coalesce(dp.category, '') ~* ${BEVERAGE_PATTERN})
+            ${windowed ? sql`and ${inWindow(localDate(sql`coalesce(d.resolved_at, i.invoice_date, i.created_at)`))}` : sql``}
+        ), 0)`;
+  const lines = (where: SQL) => sql`coalesce((
+          select sum(l.line_total) from invoice_lines l
+          join products p on p.id = l.product_id and p.restaurant_id = ${restaurantId}
+          where l.invoice_id = i.id and ${where}
         ), 0)`;
   const [r] = (await db.execute(sql`
     with inv as (
       select
         i.id,
-        coalesce(i.total_excl_vat, 0) as total_excl,
+        ${inWindow(localDate(sql`coalesce(i.invoice_date, i.created_at)`))} as in_period,
+        -- no ex-VAT total (an OCR miss): incl − VAT
+        coalesce(i.total_excl_vat, i.total_incl_vat - i.vat_amount) as excl,
         exists (
           select 1 from match_runs mr
           join discrepancies d on d.match_run_id = mr.id and d.restaurant_id = ${restaurantId}
           where mr.invoice_id = i.id and mr.restaurant_id = ${restaurantId} and ${LIVE_DUPLICATE}
         ) as dup,
-        coalesce((
-          select sum(l.line_total) from invoice_lines l
-          join products p on p.id = l.product_id and p.restaurant_id = ${restaurantId}
-          where l.invoice_id = i.id and coalesce(p.category, '') ~* ${NON_FOOD_PATTERN}
-        ), 0) as non_food,
-        ${claimOnFood(sql`'resolved'`)} as received,
-        ${claimOnFood(sql`'accepted'`)} as to_receive
+        ${lines(sql`coalesce(p.category, '') ~* ${NON_FOOD_PATTERN}`)} as non_food,
+        ${lines(sql`coalesce(p.category, '') ~* ${BEVERAGE_PATTERN} and not (coalesce(p.category, '') ~* ${NON_FOOD_PATTERN})`)} as bev,
+        ${claims('resolved', true)} as received,
+        ${claims('accepted', false)} as to_receive
       from invoices i
       where i.restaurant_id = ${restaurantId}
-        and (coalesce(i.invoice_date, i.created_at) at time zone ${tz})::date > ${fromYmd}::date
-        and (coalesce(i.invoice_date, i.created_at) at time zone ${tz})::date <= ${toYmd}::date
     ),
-    capped as (
-      select *, greatest(total_excl - least(non_food, total_excl), 0) as food from inv where not dup
-    )
+    t as (select *, coalesce(excl, 0) as total from inv where not dup),
+    -- Lines out of food cost are capped at the invoice total, with its sign (a credit note's lines are negative).
+    nf as (
+      select *, case when total >= 0 then least(greatest(non_food, 0), total) else greatest(least(non_food, 0), total) end as nf_c from t
+    ),
+    f as (
+      select *,
+        case when total >= 0 then least(greatest(bev, 0), total - nf_c) else greatest(least(bev, 0), total - nf_c) end as bev_c
+      from nf
+    ),
+    food as (select *, total - nf_c - bev_c as food from f)
     select
-      (select count(*) from capped)::int as n,
-      (select coalesce(sum(total_excl), 0) from capped)::numeric(14,2)::text as total,
-      (select coalesce(sum(least(non_food, total_excl)), 0) from capped)::numeric(14,2)::text as non_food,
-      (select count(*) from inv where dup)::int as dup_n,
-      (select coalesce(sum(total_excl), 0) from inv where dup)::numeric(14,2)::text as dup_total,
-      (select coalesce(sum(least(received, food)), 0) from capped)::numeric(14,2)::text as received,
-      (select coalesce(sum(least(to_receive, greatest(food - least(received, food), 0))), 0) from capped)::numeric(14,2)::text as to_receive
-  `)) as unknown as Array<{ n: number; total: string; non_food: string; dup_n: number; dup_total: string; received: string; to_receive: string }>;
+      (select count(*) from food where in_period)::int as n,
+      (select coalesce(sum(total), 0) from food where in_period)::numeric(14,2)::text as total,
+      (select coalesce(sum(nf_c), 0) from food where in_period)::numeric(14,2)::text as non_food,
+      (select coalesce(sum(bev_c), 0) from food where in_period)::numeric(14,2)::text as bev,
+      (select count(*) from food where in_period and excl is null)::int as missing_n,
+      (select count(*) from inv where dup and in_period)::int as dup_n,
+      (select coalesce(sum(excl), 0) from inv where dup and in_period)::numeric(14,2)::text as dup_total,
+      -- a credit can't exceed what the invoice's food cost was (a credit note has none to credit)
+      (select coalesce(sum(least(received, greatest(food, 0))), 0) from food)::numeric(14,2)::text as received,
+      (select coalesce(sum(least(to_receive, greatest(food, 0))), 0) from food where in_period)::numeric(14,2)::text as to_receive
+  `)) as unknown as Array<{
+    n: number;
+    total: string;
+    non_food: string;
+    bev: string;
+    missing_n: number;
+    dup_n: number;
+    dup_total: string;
+    received: string;
+    to_receive: string;
+  }>;
   const invoicesAgorot = agorot(r?.total);
   const nonFoodAgorot = agorot(r?.non_food);
+  const beverageAgorot = agorot(r?.bev);
   const notes = await deliveryNoteAccruals(db, restaurantId, tz, fromYmd, toYmd);
   return {
-    purchasesAgorot: invoicesAgorot - nonFoodAgorot + notes.accruedAgorot - notes.reversedAgorot,
+    purchasesAgorot: invoicesAgorot - nonFoodAgorot - beverageAgorot + notes.accruedAgorot - notes.reversedAgorot,
     invoiceCount: Number(r?.n ?? 0),
     invoicesAgorot,
     nonFoodAgorot,
+    beverageAgorot,
+    missingTotalCount: Number(r?.missing_n ?? 0),
     duplicatesAgorot: agorot(r?.dup_total),
     duplicateCount: Number(r?.dup_n ?? 0),
     creditsAgorot: agorot(r?.received),
@@ -313,7 +380,7 @@ export async function deliveryNoteAccruals(
         (gr.received_at at time zone ${tz})::date as d,
         ${norm(sql`substring(gr.notes from '^ת\\.מ\\.\\s*(\\S+)')`)} as dn,
         coalesce(sum((gl.qty_received - coalesce(gl.qty_rejected, 0)) * pl.unit_price_expected)
-          filter (where not (coalesce(p.category, '') ~* ${NON_FOOD_PATTERN})), 0) as val
+          filter (where not (coalesce(p.category, '') ~* ${NON_FOOD_PATTERN}) and not (coalesce(p.category, '') ~* ${BEVERAGE_PATTERN})), 0) as val
       from goods_receipts gr
       join purchase_orders po on po.id = gr.po_id and po.restaurant_id = ${restaurantId}
       join gr_lines gl on gl.gr_id = gr.id

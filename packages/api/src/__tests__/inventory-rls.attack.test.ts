@@ -9,6 +9,7 @@ import {
   inventoryCountLines,
   inventoryCounts,
   priceHistory,
+  products,
   restaurants,
   testDbUrl,
   withRestaurant,
@@ -109,5 +110,35 @@ describe('inventory_counts / inventory_count_lines (0070) are tenant-isolated un
     const done = await callerFor(A, appDb).inventory.complete({ countId: d.id });
     expect(done.totalValueAgorot).toBe(600);
     await expect(callerFor(A, appDb).inventory.get({ countId: bCount })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+});
+
+describe('inventory router: a foreign count id or product never reaches another tenant (app role)', () => {
+  let aDraft: string;
+  beforeAll(async () => {
+    await ownerDb.update(restaurants).set({ settings: { features: { inventoryCount: true } } as unknown as RestaurantSettings }).where(eq(restaurants.id, B.restaurantId));
+    const cur = await callerFor(A, appDb).inventory.current();
+    aDraft = cur?.id ?? (await callerFor(A, appDb).inventory.start()).id;
+  });
+
+  it("saveLines / complete on A's draft from B → NOT_FOUND, and A's draft is untouched", async () => {
+    await expect(callerFor(B, appDb).inventory.saveLines({ countId: aDraft, lines: [{ productId: B.productId, qty: '9' }] })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(callerFor(B, appDb).inventory.complete({ countId: aDraft, acceptUncounted: true })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [row] = await ownerDb.select().from(inventoryCounts).where(eq(inventoryCounts.id, aDraft));
+    expect(row).toMatchObject({ restaurantId: A.restaurantId, status: 'draft' });
+    const lines = await ownerDb.select().from(inventoryCountLines).where(eq(inventoryCountLines.countId, aDraft));
+    expect(lines.every((l) => l.restaurantId === A.restaurantId && l.productId !== B.productId)).toBe(true);
+  });
+
+  it("searchProducts from B never returns A's product, even by its exact name", async () => {
+    const [aProduct] = await ownerDb.select({ name: products.canonicalName }).from(products).where(eq(products.id, A.productId));
+    const found = await callerFor(B, appDb).inventory.searchProducts({ q: aProduct!.name });
+    expect(found.map((p) => p.id)).not.toContain(A.productId);
+  });
+
+  it("period for A's closed count from B → notFound; B's own period never includes A's counts", async () => {
+    expect(await callerFor(B, appDb).inventory.period({ closingId: aCount })).toEqual({ available: false, reason: 'notFound' });
+    const own = await callerFor(B, appDb).inventory.period();
+    expect(JSON.stringify(own)).not.toContain(aCount);
   });
 });

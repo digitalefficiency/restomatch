@@ -12,6 +12,7 @@ import {
   completedCounts,
   defaultArea,
   endOfLocalDate,
+  foodValueOf,
   isFood,
   loadCount,
   loadDraft,
@@ -56,6 +57,16 @@ const SALES = z
 
 /** Theoretical cost is compared only when recipes cover at least this share of sales. */
 export const THEORY_MIN_COVERAGE_BP = 9000;
+
+/** Below this share of food lines counted and priced, an end is "incomplete": a calm caveat, never an alarm. */
+export const COUNT_MIN_COVERAGE_BP = 9500;
+
+/** A completed count's FOOD value (no bar / beverages / non-food) and its coverage. */
+async function foodEnd(db: Database, restaurantId: string, c: { id: string; countDate: string }) {
+  const { valueAgorot, coverage } = foodValueOf(await loadLines(db, restaurantId, c.id));
+  const covered = coverage.lines === 0 ? 10_000 : Math.floor(((coverage.counted - coverage.unpriced) * 10_000) / coverage.lines);
+  return { id: c.id, countDate: c.countDate, valueAgorot, coverage: { ...coverage, bp: covered, complete: covered >= COUNT_MIN_COVERAGE_BP } };
+}
 
 /** Serialises writes to one restaurant's counts (autosave vs finish). */
 async function lockCounts(db: Database, restaurantId: string) {
@@ -163,7 +174,7 @@ async function periodFor(db: Database, restaurantId: string, rc: Awaited<ReturnT
     return {
       available: false as const,
       reason: 'needOpening' as const,
-      closing: { id: closing.id, countDate: closing.countDate, valueAgorot: Number(closing.totalValueAgorot ?? 0) },
+      closing: await foodEnd(db, restaurantId, closing),
       purchaseFoodCost: {
         from: monthStartOf(closing.countDate),
         to: closing.countDate,
@@ -209,13 +220,23 @@ async function periodFor(db: Database, restaurantId: string, rc: Awaited<ReturnT
     salesAgorot = Math.round(Number(closing.foodSalesExVat) * 100);
     salesSource = 'manual';
   }
-  const openingAgorot = Number(opening.totalValueAgorot ?? 0);
-  const closingAgorot = Number(closing.totalValueAgorot ?? 0);
-  const result = actualFoodCost({ openingAgorot, purchasesAgorot: purchases.purchasesAgorot, creditsAgorot: purchases.creditsAgorot, closingAgorot, salesAgorot, theoreticalAgorot });
+  const openEnd = await foodEnd(db, restaurantId, opening);
+  const closeEnd = await foodEnd(db, restaurantId, closing);
+  // An end with uncounted / unpriced food lines understates stock: the % is shown with a caveat, and no variance alarm.
+  const coverageComplete = openEnd.coverage.complete && closeEnd.coverage.complete;
+  const result = actualFoodCost({
+    openingAgorot: openEnd.valueAgorot,
+    purchasesAgorot: purchases.purchasesAgorot,
+    creditsAgorot: purchases.creditsAgorot,
+    closingAgorot: closeEnd.valueAgorot,
+    salesAgorot,
+    theoreticalAgorot: coverageComplete ? theoreticalAgorot : null,
+  });
   return {
     available: true as const,
-    opening: { id: opening.id, countDate: opening.countDate, valueAgorot: openingAgorot },
-    closing: { id: closing.id, countDate: closing.countDate, valueAgorot: closingAgorot },
+    opening: openEnd,
+    closing: closeEnd,
+    coverageComplete,
     purchases,
     salesAgorot,
     salesSource,
@@ -381,6 +402,11 @@ export const inventoryRouter = router({
       const prices = await pricesWithSourceAsOf(ctx.db, rid, c.countDate, ctx.rc.timezone, lines.map((l) => l.productId));
       const sum = valueCount(lines.map((l) => ({ productId: l.productId, qty: l.qty, unit: l.unit })), prices);
       if (sum.counted === 0) throw new TRPCError({ code: 'BAD_REQUEST', message: 'nothing counted' });
+      // Periods run closed count → closed count: a count on or before the latest closed one would split a closed period.
+      const [last] = await completedCounts(ctx.db, rid, 1);
+      if (last && c.countDate <= last.countDate) {
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: `NOT_AFTER_LAST:${last.countDate}` });
+      }
       const uncounted = lines.filter((l) => l.qty == null);
       if (uncounted.length > 0 && !input.acceptUncounted) {
         throw new TRPCError({ code: 'PRECONDITION_FAILED', message: `UNCOUNTED:${uncounted.length}` });

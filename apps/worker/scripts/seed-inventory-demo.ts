@@ -1,8 +1,9 @@
 /**
  * Demo inventory counts for "כפר הזיתים" (flag `inventoryCount`): a completed
  * opening count on 2026-09-30 and a completed closing count on 2026-10-24, so
- * the demo shows October's ACTUAL food cost (opening + purchases − closing) as
- * a % of food sales.
+ * the demo shows October's ACTUAL food cost (opening + purchases − credits
+ * received − closing; food only — the bar shelf and beverages are counted but
+ * left out) as a % of food sales.
  *
  * Goes through the real inventory router (start → saveLines → complete) as the
  * demo owner, so the snapshot values are exactly what the app would compute.
@@ -161,10 +162,11 @@ async function main() {
     console.log(
       `[seed-inventory-demo] October actual food cost: ${ils(p.opening.valueAgorot)} + purchases ${ils(p.purchases.purchasesAgorot)} − credits ${ils(p.purchases.creditsAgorot)} − ${ils(p.closing.valueAgorot)} = ${ils(p.actualAgorot)}` +
         ` = ${p.actualBp == null ? '—' : (p.actualBp / 100).toFixed(1)}% of food sales ${p.salesAgorot == null ? '—' : ils(p.salesAgorot)} (${p.salesSource ?? 'none'})` +
-        (p.varianceAgorot == null ? '' : ` · unexplained usage ${ils(p.varianceAgorot)}`),
+        (p.varianceAgorot == null ? '' : ` · unexplained usage ${ils(p.varianceAgorot)}`) +
+        ` · food stock only (bar / beverages out) · coverage ${p.opening.coverage.counted}/${p.opening.coverage.lines} → ${p.closing.coverage.counted}/${p.closing.coverage.lines}`,
     );
     console.log(
-      `[seed-inventory-demo] purchases: ${p.purchases.invoiceCount} invoices ${ils(p.purchases.invoicesAgorot)} − non-food ${ils(p.purchases.nonFoodAgorot)}` +
+      `[seed-inventory-demo] purchases: ${p.purchases.invoiceCount} invoices ${ils(p.purchases.invoicesAgorot)} − non-food ${ils(p.purchases.nonFoodAgorot)} − beverages ${ils(p.purchases.beverageAgorot)}` +
         ` + ${p.purchases.accruedNotes} delivery notes received, not billed yet ${ils(p.purchases.accruedAgorot)} − earlier notes billed now ${ils(p.purchases.reversedAgorot)}` +
         ` (receipt dates) · credit to receive ${ils(p.purchases.creditsToReceiveAgorot)} (shown, not subtracted)`,
     );

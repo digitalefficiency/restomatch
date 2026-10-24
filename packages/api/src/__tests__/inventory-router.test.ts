@@ -173,8 +173,9 @@ describe('inventory: count → autosave → finish', () => {
     const p = await caller(A).inventory.period();
     expect(p).toMatchObject({
       available: true,
-      opening: { id: opening, valueAgorot: 110_000 },
-      closing: { id: closing, valueAgorot: 65_600 },
+      // Food values: the milk moved to the bar shelf is not food cost (₪100 / ₪50 out).
+      opening: { id: opening, valueAgorot: 100_000 },
+      closing: { id: closing, valueAgorot: 60_600 },
       purchases: {
         invoiceCount: 2,
         invoicesAgorot: 300_000,
@@ -188,9 +189,9 @@ describe('inventory: count → autosave → finish', () => {
       salesAgorot: 1_000_000,
       salesSource: 'manual',
       theoreticalAgorot: null,
-      // 1,100 + 2,850 − 40 credits − 656 = 3,254 → 32.54% of ₪10,000
-      actualAgorot: 325_400,
-      actualBp: 3254,
+      // 1,000 + 2,850 − 40 credits − 606 = 3,204 → 32.04% of ₪10,000
+      actualAgorot: 320_400,
+      actualBp: 3204,
       varianceAlert: false,
     });
     expect((await caller(A).inventory.history()).map((h) => [h.id, h.totalValueAgorot, h.counted, h.unpriced])).toEqual([

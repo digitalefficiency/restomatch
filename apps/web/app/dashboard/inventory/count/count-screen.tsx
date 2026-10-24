@@ -11,13 +11,22 @@ import { components } from '@/lib/i18n/messages/components';
 import { inventory as inventoryNs } from '@/lib/i18n/messages/inventory';
 import { originalProps } from '@/lib/i18n/original';
 import { ils, priceText } from '../../recipes/recipe-ui';
-import { AREAS, dayText, normalizeQty, qtyText, type Area } from '../inventory-ui';
+import { AREAS, dayText, mergeRetry, normalizeQty, pendingStore, qtyText, type Area, type LineEdit } from '../inventory-ui';
 
 type Draft = NonNullable<inferRouterOutputs<AppRouter>['inventory']['current']>;
 type Done = inferRouterOutputs<AppRouter>['inventory']['complete'];
-type Edit = { qty?: string | null; storageArea?: Area };
+type Edit = LineEdit;
 
 const SAVE_DELAY_MS = 700;
+
+/** localStorage when the browser allows it (private mode / blocked storage → null). */
+function browserStorage(): Storage | null {
+  try {
+    return typeof window === 'undefined' ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+}
 
 function localName(he: string, en: string | null, locale: string) {
   const text = locale === 'en' && en ? en : he;
@@ -49,6 +58,20 @@ export function CountScreen() {
       </div>
     );
   }
+  if (current.isError) {
+    return (
+      <EmptyState
+        icon={<CircleAlert className="h-6 w-6" />}
+        title={t('count.loadError')}
+        description={friendlyError(current.error, tc)}
+        action={
+          <Button variant="secondary" onClick={() => void current.refetch()} className="touch-target">
+            {t('count.retry')}
+          </Button>
+        }
+      />
+    );
+  }
   if (!current.data) {
     return (
       <EmptyState
@@ -63,7 +86,7 @@ export function CountScreen() {
       />
     );
   }
-  return <CountForm draft={current.data} onDone={setDone} />;
+  return <CountForm key={current.data.id} draft={current.data} onDone={setDone} />;
 }
 
 function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void }) {
@@ -88,7 +111,15 @@ function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void 
   // an older quantity can never land after a newer one, and Finish only runs
   // once every keystroke is on the server.
   const inFlight = useRef<Promise<boolean>>(Promise.resolve(true));
-  const stopped = useRef(false);
+  // `gone`: the server says the draft was finished / discarded elsewhere — stop for good.
+  // `mounted`: no retry timer is scheduled behind a screen that was left.
+  const gone = useRef(false);
+  const mounted = useRef(false);
+  // Unsaved edits are mirrored in localStorage per count, so a reload or a dead tab loses nothing.
+  const store = useMemo(() => pendingStore(draft.id, browserStorage()), [draft.id]);
+  // The batch on the wire stays in storage until the server has it.
+  const sending = useRef<Record<string, Edit>>({});
+  const persist = useCallback(() => store.write(mergeRetry(sending.current, pending.current)), [store]);
   const flush = useCallback((): Promise<boolean> => {
     if (timer.current) {
       clearTimeout(timer.current);
@@ -97,46 +128,62 @@ function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void 
     const run = inFlight.current.then(async () => {
       const batch = pending.current;
       const ids = Object.keys(batch);
-      if (ids.length === 0 || stopped.current) return ids.length === 0;
+      if (ids.length === 0 || gone.current) return ids.length === 0;
       pending.current = {};
+      sending.current = batch;
       setSaveState('saving');
       try {
         await save.mutateAsync({ countId: draft.id, lines: ids.map((productId) => ({ productId, ...batch[productId] })) });
+        sending.current = {};
+        persist();
         setSaveState('saved');
         void utils.inventory.current.invalidate();
         return true;
       } catch (e) {
-        // Keep the unsaved edits (newer keystrokes win).
-        pending.current = { ...batch, ...pending.current };
+        // Keep the unsaved edits under any newer ones, field by field.
+        sending.current = {};
+        pending.current = mergeRetry(batch, pending.current);
         setSaveState('error');
         const code = (e as { data?: { code?: string } }).data?.code;
         if (code === 'CONFLICT' || code === 'NOT_FOUND') {
           // Finished or discarded elsewhere (another phone/tab): stop, don't loop.
-          stopped.current = true;
+          gone.current = true;
+          store.write({});
           toast.error(friendlyError(e, tc));
           void utils.inventory.invalidate();
-        } else if (!stopped.current) {
-          timer.current = setTimeout(() => void flush(), 3000);
+        } else {
+          persist();
+          if (mounted.current) timer.current = setTimeout(() => void flush(), 3000);
         }
         return false;
       }
     });
     inFlight.current = run;
     return run;
-  }, [draft.id, save, utils, toast, tc]);
+  }, [draft.id, save, utils, toast, tc, store, persist]);
 
-  // Leaving the screen: no timer keeps firing behind it. (Reset on mount —
-  // Strict Mode mounts, unmounts and re-mounts in development.)
+  // Mount: replay edits a previous visit didn't get to save. Unmount (leaving
+  // the screen): save what is queued now, and no timer keeps firing behind it.
+  // Strict Mode mounts, unmounts and re-mounts in development: both are idempotent.
+  const flushRef = useRef(flush);
+  flushRef.current = flush;
   useEffect(() => {
-    stopped.current = false;
+    mounted.current = true;
+    const saved = store.read();
+    if (Object.keys(saved).length > 0) {
+      pending.current = mergeRetry(saved, pending.current);
+      setEdits((prev) => mergeRetry(saved, prev));
+      void flushRef.current();
+    }
     return () => {
-      stopped.current = true;
-      if (timer.current) clearTimeout(timer.current);
+      mounted.current = false;
+      void flushRef.current();
     };
-  }, []);
+  }, [store]);
 
   const queue = (productId: string, e: Edit) => {
     pending.current[productId] = { ...pending.current[productId], ...e };
+    persist();
     setEdits((prev) => ({ ...prev, [productId]: { ...prev[productId], ...e } }));
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => void flush(), SAVE_DELAY_MS);
@@ -173,19 +220,35 @@ function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void 
   });
   const complete = trpc.inventory.complete.useMutation({
     onSuccess: (d) => {
+      gone.current = true;
+      pending.current = {};
+      store.write({});
       void utils.inventory.invalidate();
       onDone(d);
     },
-    onError: (e) => toast.error(friendlyError(e, tc)),
+    onError: (e) => {
+      const last = /^NOT_AFTER_LAST:(\d{4}-\d{2}-\d{2})$/.exec(e.message);
+      toast.error(last ? t('count.notAfterLast', { date: dayText(last[1]!, locale) }) : friendlyError(e, tc));
+    },
   });
   const discard = trpc.inventory.discard.useMutation({
-    onSuccess: () => void utils.inventory.invalidate(),
+    onSuccess: () => {
+      gone.current = true;
+      pending.current = {};
+      store.write({});
+      void utils.inventory.invalidate();
+    },
     onError: (e) => toast.error(friendlyError(e, tc)),
   });
 
   const onQty = (productId: string, raw: string) => {
     setInputs((p) => ({ ...p, [productId]: raw }));
     const v = normalizeQty(raw);
+    // "2," is still being typed: no red flash, nothing queued yet.
+    if (v === undefined) {
+      setInvalid((p) => ({ ...p, [productId]: false }));
+      return;
+    }
     if (v === null) {
       setInvalid((p) => ({ ...p, [productId]: true }));
       return;
@@ -218,7 +281,7 @@ function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void 
           <Input
             id="count-date"
             type="date"
-            className="mt-1 w-44"
+            className="mt-1 w-44 text-base"
             min="2000-01-01"
             max={today}
             defaultValue={draft.countDate}
@@ -256,7 +319,7 @@ function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void 
                           id={`area-sel-${l.productId}`}
                           value={l.storageArea}
                           onChange={(e) => queue(l.productId, { storageArea: e.target.value as Area })}
-                          className="rounded-lg border border-line-strong bg-surface px-2 py-0.5 text-xs text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+                          className="rounded-lg border border-line-strong bg-surface px-2 py-0.5 text-base text-muted md:text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
                         >
                           {AREAS.map((a) => (
                             <option key={a} value={a}>
@@ -291,7 +354,7 @@ function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void 
                         autoComplete="off"
                         dir="ltr"
                         className={cn(
-                          'w-20 rounded-xl border bg-surface px-2 py-2 text-end tabular-nums text-ink placeholder-subtle focus:border-primary/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
+                          'w-20 rounded-xl border bg-surface px-2 py-2 text-end text-base tabular-nums text-ink placeholder-subtle focus:border-primary/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
                           bad ? 'border-danger' : 'border-line-strong',
                         )}
                         value={text}
@@ -327,7 +390,7 @@ function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void 
       </div>
 
       {/* Finish: one primary action, pinned to the bottom of the phone screen. */}
-      <div className="fixed inset-x-0 bottom-16 z-20 border-t border-line bg-surface/95 p-3 backdrop-blur md:bottom-0">
+      <div className="fixed inset-x-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom)+var(--consent-h,0px))] z-20 border-t border-line bg-surface/95 p-3 backdrop-blur lg:bottom-[var(--consent-h,0px)]">
         <div className="mx-auto max-w-3xl">
           <div className="mb-2" data-testid="count-progress">
             <div className="flex items-center justify-between gap-2 text-xs">
@@ -429,7 +492,7 @@ function AddProduct({ countId, existing, beforeAdd }: { countId: string; existin
         <Input
           aria-label={t('count.addTitle')}
           placeholder={t('count.addPlaceholder')}
-          className="ps-9"
+          className="ps-9 text-base"
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />

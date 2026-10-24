@@ -67,9 +67,9 @@ export default async function InventoryCountDetailPage({ params }: { params: Pro
                     ) : null}
                   </span>
                   <span className="flex items-center gap-3 tabular-nums text-muted">
-                    <bdi dir="ltr">
-                      {qtyText(l.qty)} {l.unit}
-                    </bdi>
+                    <span>
+                      <bdi dir="ltr">{qtyText(l.qty)}</bdi> {l.unit}
+                    </span>
                     {l.status === 'ok' ? (
                       <>
                         <span className="hidden sm:inline">

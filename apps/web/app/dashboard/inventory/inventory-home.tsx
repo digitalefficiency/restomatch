@@ -42,6 +42,10 @@ export function InventoryHome() {
         </div>
         {current.isLoading ? (
           <Spinner />
+        ) : current.isError ? (
+          <Button variant="secondary" className="touch-target" onClick={() => void current.refetch()}>
+            {t('count.retry')}
+          </Button>
         ) : draft ? (
           <LinkButton href="/dashboard/inventory/count" className="touch-target">
             {t('home.continue')}
@@ -61,6 +65,10 @@ export function InventoryHome() {
         </h2>
         {history.isLoading ? (
           <Spinner />
+        ) : history.isError ? (
+          <p className="text-sm text-muted" role="alert">
+            {friendlyError(history.error, tc)}
+          </p>
         ) : (history.data ?? []).length === 0 ? (
           <p className="text-sm text-muted">{t('home.historyEmpty')}</p>
         ) : (
