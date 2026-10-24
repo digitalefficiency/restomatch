@@ -10,6 +10,7 @@ import { approvals as approvalsNs } from '@/lib/i18n/messages/approvals';
 import { Badge, Card, EmptyState, KpiCard, LinkButton, SectionHeader, cn, type BadgeTone } from '@/lib/components';
 import { discrepancyLabel, displayName } from '../vocab';
 import { PayRunExport } from './export-button';
+import { localMonth, localYmd } from './dates';
 
 type PayRunStatus = 'pay' | 'hold' | 'claim';
 
@@ -39,7 +40,7 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
   const back = (
     <Link
       href="/dashboard/approvals"
-      className="mb-3 -ms-2 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-sm font-semibold text-muted hover:text-ink"
+      className="mb-3 -ms-2 inline-flex min-h-11 items-center gap-1 rounded-lg px-2 py-1 text-sm font-semibold text-muted hover:text-ink sm:min-h-0"
     >
       <ArrowRight className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
       {ta('title')}
@@ -72,9 +73,6 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
   const isLink = (i: { pendingLink: boolean; duplicate: boolean }) => i.pendingLink && !i.duplicate;
   const count = (st: PayRunStatus) =>
     data.suppliers.reduce((n, s) => n + s.invoices.filter((i) => i.status === st && !isLink(i)).length, 0);
-  /** The invoice's local (Asia/Jerusalem) calendar day, as the page shows it. */
-  const localYmd = (iso: string) =>
-    new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
   /** The credit's VAT basis: one basis, or "mixed" (never silently summed as one). */
   const creditBasis = (claims: Array<{ resolutionStatus: string; basis: 'excl' | 'incl' | 'vat' }>) => {
     const bases = new Set(claims.filter((c) => c.resolutionStatus === 'accepted').map((c) => c.basis));
@@ -117,7 +115,7 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
           data.totals.invoices > 0 ? (
             <PayRunExport
               label={t('csv.button')}
-              filename={t('csv.file', { month: (data.monthStart ?? '').slice(0, 7) })}
+              filename={t('csv.file', { month: data.monthStart ? localMonth(data.monthStart) : '' })}
               columns={csvColumns}
               rows={csvRows}
             />
@@ -136,7 +134,7 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
             aria-current={m === monthOffset ? 'page' : undefined}
             data-testid={`payrun-month-${m === 0 ? 'this' : 'last'}`}
             className={cn(
-              'rounded-lg px-3 py-1.5 font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
+              'inline-flex min-h-11 items-center rounded-lg px-3 py-1.5 font-semibold transition-colors sm:min-h-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
               m === monthOffset ? 'bg-surface text-ink shadow-card' : 'text-muted hover:text-ink',
             )}
           >
@@ -211,7 +209,7 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
                       key={inv.invoiceId}
                       className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between sm:px-5"
                       data-testid="payrun-invoice"
-                      data-status={inv.status}
+                      data-status={isLink(inv) ? 'link' : inv.status}
                     >
                       <div className="min-w-0">
                         <p className="text-sm">
@@ -258,11 +256,11 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
                           <span className="text-xs text-muted">{t('table.pending', { amount: ils(inv.pendingIls) })}</span>
                         ) : null}
                         {inv.status === 'hold' && !inv.pendingLink ? (
-                          <LinkButton href="/dashboard/approvals" size="sm" variant="primary">
+                          <LinkButton href="/dashboard/approvals" size="sm" variant="primary" className="min-h-11 sm:min-h-0">
                             {t('table.toApprovals')}
                           </LinkButton>
                         ) : inv.status === 'claim' ? (
-                          <LinkButton href={`/dashboard/leaks/claims${monthOffset ? '?m=-1' : ''}`} size="sm" variant="secondary">
+                          <LinkButton href={`/dashboard/leaks/claims${monthOffset ? '?m=-1' : ''}`} size="sm" variant="secondary" className="min-h-11 sm:min-h-0">
                             <FileText className="h-4 w-4" aria-hidden="true" />
                             {t('letters')}
                           </LinkButton>

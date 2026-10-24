@@ -10,6 +10,7 @@ import {
   invoices,
   matchRuns,
   restaurants,
+  sql,
   testDbUrl,
   type Database,
 } from '@restomatch/db';
@@ -191,6 +192,39 @@ describe('payRun.month', () => {
       expect(JSON.stringify(r)).not.toContain(B.invoiceId);
     } finally {
       await ownerDb.delete(invoices).where(eq(invoices.id, extra!.id));
+    }
+  });
+
+  it('past the 200-row breakdown window an accepted claim is still a credit, never "can pay"', async () => {
+    // 205 PAID invoices with bigger leaks fill the breakdown window ahead of A's invoice.
+    await ownerDb.execute(sql`
+      WITH inv AS (
+        INSERT INTO invoices (restaurant_id, supplier_id, invoice_number, invoice_date, total_excl_vat, vat_amount, total_incl_vat, status, source)
+        SELECT ${A.restaurantId}, ${A.supplierId}, 'PAID-WIN-' || g, now(), 5000, 850, 5850, 'paid', 'photo'
+        FROM generate_series(1, 205) g
+        RETURNING id
+      ), mr AS (
+        INSERT INTO match_runs (restaurant_id, po_id, gr_id, invoice_id, overall_status, total_discrepancy_amount)
+        SELECT ${A.restaurantId}, ${A.poId}, ${A.grId}, inv.id, 'major', 1000 FROM inv
+        RETURNING id
+      )
+      INSERT INTO discrepancies (match_run_id, restaurant_id, type, severity, delta_amount, requires_role, resolution_status)
+      SELECT mr.id, ${A.restaurantId}, 'PRICE_HIGHER', 'warn', 1000, 'manager', 'resolved' FROM mr
+    `);
+    await ownerDb.update(discrepancies).set({ resolutionStatus: 'accepted' }).where(eq(discrepancies.id, A.discrepancyId));
+    try {
+      const r = await asA().payRun.month();
+      const inv = r.suppliers.flatMap((x) => x.invoices).find((i) => i.invoiceId === A.invoiceId)!;
+      expect(inv).toMatchObject({ status: 'claim', creditIls: 100 });
+      expect(r.totals.creditIls).toBe(100);
+      expect(r.totals.invoices).toBe(1); // paid ones never listed
+    } finally {
+      await ownerDb.update(discrepancies).set({ resolutionStatus: 'open' }).where(eq(discrepancies.id, A.discrepancyId));
+      await ownerDb.execute(sql`
+        DELETE FROM discrepancies WHERE match_run_id IN (
+          SELECT mr.id FROM match_runs mr JOIN invoices i ON i.id = mr.invoice_id WHERE i.invoice_number LIKE 'PAID-WIN-%')`);
+      await ownerDb.execute(sql`DELETE FROM match_runs WHERE invoice_id IN (SELECT id FROM invoices WHERE invoice_number LIKE 'PAID-WIN-%')`);
+      await ownerDb.execute(sql`DELETE FROM invoices WHERE invoice_number LIKE 'PAID-WIN-%'`);
     }
   });
 

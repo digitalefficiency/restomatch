@@ -179,6 +179,16 @@ export const payRunRouter = router({
                    AND d.severity IN ('warn','block') AND d.resolution_status IN ('open','escalated')
                    AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL') AND ABS(d.delta_amount) > 0
                ) AS has_open,
+               -- …and accepted real findings still ask for a credit (Σ |Δ|, capped at the
+               -- invoice total like the hero's per-invoice cap), never "can pay".
+               (
+                 SELECT LEAST(COALESCE(SUM(ABS(d.delta_amount)), 0), COALESCE(i.total_incl_vat, 0))
+                 FROM match_runs mr3
+                 JOIN discrepancies d ON d.match_run_id = mr3.id AND d.restaurant_id = ${rid}
+                 WHERE mr3.invoice_id = i.id AND mr3.restaurant_id = ${rid}
+                   AND d.severity IN ('warn','block') AND d.resolution_status = 'accepted'
+                   AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL','DUPLICATE_INVOICE') AND ABS(d.delta_amount) > 0
+               ) AS accepted_ils,
                EXISTS (SELECT 1 FROM match_runs mr WHERE mr.invoice_id = i.id AND mr.restaurant_id = ${rid}) AS matched
         FROM invoices i
         LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${rid}
@@ -200,6 +210,10 @@ export const payRunRouter = router({
         // Past the breakdown's 200-row window (known limit, not reached by the demo): an open
         // real finding still holds the invoice; an unmatched one waits for its link.
         if (!b && row.has_open === true) s.status = 'hold';
+        if (!b && Number(row.accepted_ils ?? 0) > 0) {
+          s.creditIls = Math.round(Number(row.accepted_ils) * 100) / 100;
+          if (s.status === 'pay') s.status = 'claim';
+        }
         const pendingLink = (b?.pendingLink ?? false) || row.matched !== true;
         if (pendingLink) s.status = 'hold';
         const inv: PayRunInvoice = {

@@ -14,7 +14,7 @@ export const he = {
   status: {
     pay: 'ניתן לשלם',
     hold: 'להשהות — ממתין להחלטה',
-    holdLink: 'להשהות — ממתינה לשיוך להזמנה',
+    holdLink: 'ממתינה לשיוך להזמנה',
     holdDuplicate: 'להשהות — עותק כפול, לא לשלם',
     claim: 'לבקש זיכוי {amount}',
   },
@@ -54,7 +54,8 @@ export const he = {
   },
   csv: {
     button: 'ייצוא CSV להנהלת חשבונות',
-    file: 'ריצת-תשלומים-{month}',
+    // ASCII on purpose: some browsers / accounting tools mangle non-Latin file names.
+    file: 'pay-run-{month}',
     supplier: 'ספק',
     invoice: 'מספר חשבונית',
     date: 'תאריך',

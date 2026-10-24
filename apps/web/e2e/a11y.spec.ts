@@ -30,6 +30,7 @@ const DASHBOARD_PAGES = [
   '/dashboard',
   '/dashboard/leaks',
   '/dashboard/approvals',
+  '/dashboard/approvals/pay-run',
   '/dashboard/chain',
   '/dashboard/receiving',
   '/dashboard/receiving/:openPo',
