@@ -579,7 +579,7 @@ test('C · receiver: HaSharon Produce → photo → OCR → review → adjust �
     const table = page.getByTestId('recon-table');
     // Exactly ONE rendering of the review: cards on a phone, the table on desktop
     // (main@145023c rendered both on desktop — the double list fixed by #67).
-    await expect(cards.or(table).first()).toBeVisible();
+    await expect(cards.or(table).filter({ visible: true }).first()).toBeVisible();
     const shown = [await cards.isVisible(), await table.isVisible()].filter(Boolean).length;
     expect(shown, 'exactly one of recon-cards / recon-table visible (double list, see #67)').toBe(1);
     if (!isPhone(info)) await expect(table, 'desktop review shows the table').toBeVisible();
@@ -588,7 +588,7 @@ test('C · receiver: HaSharon Produce → photo → OCR → review → adjust �
     await expect(view.getByTestId('recon-section-both')).toBeVisible();
     await expect(page.getByTestId('recon-mismatch-banner'), 'right supplier → no "nothing matched" banner').toHaveCount(0);
     if (L === 'en') {
-      await expect(page.getByTestId('item-name-en').first()).toBeVisible();
+      await expect(view.getByTestId('item-name-en').first()).toBeVisible();
       await expect(view).toContainText('Cherry tomatoes');
     }
     // Every "qty unit × ₪price  ₪total" triple must multiply out (to the agora).
