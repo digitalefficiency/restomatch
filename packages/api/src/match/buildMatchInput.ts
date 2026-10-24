@@ -68,6 +68,8 @@ interface PoCandidate {
   vatRate: string | null;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Assemble a {@link MatchInput} for an invoice by discovering the purchase order
  * it should be checked against. This is the missing link that turns the engine
@@ -93,11 +95,32 @@ export async function buildMatchInputForInvoice(
       totalExclVat: invoices.totalExclVat,
       vatAmount: invoices.vatAmount,
       totalInclVat: invoices.totalInclVat,
+      ocrPayload: invoices.ocrPayload,
     })
     .from(invoices)
     .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
     .limit(1);
   if (!inv) return null;
+  // A scan whose number another invoice of this supplier already holds is
+  // stored WITHOUT it (invoices_dedupe_idx; the worker's writeOcrHeader) and
+  // keeps the number in ocr_payload.raw.duplicateOf. Match on that number so
+  // the engine still raises DUPLICATE_INVOICE (block) on the copy.
+  const heldDuplicate = (
+    inv.ocrPayload?.raw as
+      | { duplicateOf?: { invoiceId?: unknown; invoiceNumber?: unknown } }
+      | null
+      | undefined
+  )?.duplicateOf;
+  const heldDuplicateNumber = heldDuplicate?.invoiceNumber;
+  const invoiceNumber =
+    inv.invoiceNumber ?? (typeof heldDuplicateNumber === 'string' ? heldDuplicateNumber : null);
+  // The invoice that holds the number counts as known even when this copy's
+  // row is older (OCR jobs can finish out of order). The holder never sees the
+  // copy's number (its invoice_number is NULL), so the original stays unflagged.
+  const heldDuplicateOfId =
+    typeof heldDuplicate?.invoiceId === 'string' && UUID_RE.test(heldDuplicate.invoiceId)
+      ? heldDuplicate.invoiceId
+      : null;
 
   const invLineRows = await db
     .select({
@@ -274,6 +297,7 @@ export async function buildMatchInputForInvoice(
           or(
             lt(invoices.createdAt, inv.createdAt),
             and(eq(invoices.createdAt, inv.createdAt), lt(invoices.id, invoiceId)),
+            ...(heldDuplicateOfId ? [eq(invoices.id, heldDuplicateOfId)] : []),
           ),
         ),
       );
@@ -327,7 +351,7 @@ export async function buildMatchInputForInvoice(
     invoice: {
       // Normalized (see normalizeInvoiceNumber) — the engine only uses it for
       // duplicate detection + its message, and compares it to the known set.
-      invoiceNumber: normalizeInvoiceNumber(inv.invoiceNumber) ?? '',
+      invoiceNumber: normalizeInvoiceNumber(invoiceNumber) ?? '',
       invoiceDate,
       supplierId: inv.supplierId ?? '',
       totalExclVat: num(inv.totalExclVat),

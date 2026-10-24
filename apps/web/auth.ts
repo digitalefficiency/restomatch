@@ -7,6 +7,7 @@ import { clientIpFromHeaders } from '@restomatch/api';
 import {
   accounts,
   and,
+  asc,
   authenticators,
   eq,
   memberships,
@@ -275,7 +276,11 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         const rows = await authDb
           .select()
           .from(memberships)
-          .where(eq(memberships.userId, userId));
+          .where(eq(memberships.userId, userId))
+          // Deterministic fallback: a user with several branches lands in their
+          // OLDEST membership (the main branch), never in whichever row Postgres
+          // happens to return first.
+          .orderBy(asc(memberships.createdAt), asc(memberships.restaurantId));
 
         // A branch-switch update (unstable_update({ activeRestaurantId })) is
         // honoured ONLY if it is one of these DB memberships — the update body

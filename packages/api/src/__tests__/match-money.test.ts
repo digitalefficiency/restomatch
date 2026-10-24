@@ -166,6 +166,108 @@ describe('duplicate invoice detection only looks at earlier invoices', () => {
   });
 });
 
+describe('a re-scan held without its number is still a duplicate', () => {
+  it('flags DUPLICATE_INVOICE from ocr_payload.raw.duplicateOf (invoices_dedupe_idx copy)', async () => {
+    const A = await seedTenant(db, 'A');
+    const [orig] = await db.select().from(invoices).where(eq(invoices.id, A.invoiceId));
+    // What the worker's writeOcrHeader stores when the read number is taken:
+    // no invoice_number, the number kept in the payload, held as 'parsed'.
+    const [copy] = await db
+      .insert(invoices)
+      .values({
+        restaurantId: A.restaurantId,
+        supplierId: A.supplierId,
+        invoiceNumber: null,
+        invoiceDate: orig!.invoiceDate,
+        totalExclVat: '100.00',
+        vatAmount: '17.00',
+        totalInclVat: '117.00',
+        status: 'parsed',
+        source: 'photo',
+        ocrPayload: {
+          provider: 'reconciled',
+          raw: { duplicateOf: { invoiceId: A.invoiceId, invoiceNumber: A.invoiceNumber } },
+        },
+        createdAt: new Date(orig!.createdAt.getTime() + 60_000),
+      })
+      .returning();
+    await db.insert(invoiceLines).values({
+      invoiceId: copy!.id,
+      productId: A.productId,
+      rawDescription: 'rescan',
+      qtyBilled: '10',
+      unit: 'kg',
+      unitPriceBilled: '10.00',
+      lineTotal: '100.00',
+    });
+
+    const caller = ownerCaller(A);
+    await caller.match.runForInvoice({ invoiceId: copy!.id });
+    await caller.match.runForInvoice({ invoiceId: A.invoiceId });
+
+    const dupTypesFor = async (invoiceId: string) =>
+      (
+        await db
+          .select({ type: discrepancies.type })
+          .from(discrepancies)
+          .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+          .where(and(eq(matchRuns.invoiceId, invoiceId), eq(discrepancies.type, 'DUPLICATE_INVOICE')))
+      ).length;
+    expect(await dupTypesFor(copy!.id)).toBe(1);
+    expect(await dupTypesFor(A.invoiceId)).toBe(0);
+  });
+});
+
+describe('a held copy older than the invoice holding its number', () => {
+  it('is still flagged (OCR jobs can finish out of order); the holder is not', async () => {
+    const A = await seedTenant(db, 'A');
+    const [orig] = await db.select().from(invoices).where(eq(invoices.id, A.invoiceId));
+    const [copy] = await db
+      .insert(invoices)
+      .values({
+        restaurantId: A.restaurantId,
+        supplierId: A.supplierId,
+        invoiceNumber: null,
+        invoiceDate: orig!.invoiceDate,
+        totalExclVat: '100.00',
+        vatAmount: '17.00',
+        totalInclVat: '117.00',
+        status: 'parsed',
+        source: 'photo',
+        ocrPayload: {
+          provider: 'reconciled',
+          raw: { duplicateOf: { invoiceId: A.invoiceId, invoiceNumber: A.invoiceNumber } },
+        },
+        createdAt: new Date(orig!.createdAt.getTime() - 60_000),
+      })
+      .returning();
+    await db.insert(invoiceLines).values({
+      invoiceId: copy!.id,
+      productId: A.productId,
+      rawDescription: 'rescan',
+      qtyBilled: '10',
+      unit: 'kg',
+      unitPriceBilled: '10.00',
+      lineTotal: '100.00',
+    });
+
+    const caller = ownerCaller(A);
+    await caller.match.runForInvoice({ invoiceId: copy!.id });
+    await caller.match.runForInvoice({ invoiceId: A.invoiceId });
+
+    const dupTypesFor = async (invoiceId: string) =>
+      (
+        await db
+          .select({ type: discrepancies.type })
+          .from(discrepancies)
+          .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+          .where(and(eq(matchRuns.invoiceId, invoiceId), eq(discrepancies.type, 'DUPLICATE_INVOICE')))
+      ).length;
+    expect(await dupTypesFor(copy!.id)).toBe(1);
+    expect(await dupTypesFor(A.invoiceId)).toBe(0);
+  });
+});
+
 describe('invoice_matched activity carries structured metadata', () => {
   it('title names the invoice; metadata has number, supplier, counts and ₪', async () => {
     const A = await seedTenant(db, 'A');

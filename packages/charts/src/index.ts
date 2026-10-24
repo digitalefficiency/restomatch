@@ -44,9 +44,11 @@ export {
 export {
   aggregateChain,
   computeBranchSnapshot,
+  monthOfPeriodEnd,
   shiftMonth,
   supplierMergeKey,
   type BranchMonthPoint,
+  type BranchPeriodTotals,
   type BranchSnapshot,
   type BranchSupplierRow,
   type ChainBranchRow,
