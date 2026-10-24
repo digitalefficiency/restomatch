@@ -88,6 +88,13 @@ afterAll(async () => {
  * other       → explicit justification for why no test is required
  * ────────────────────────────────────────────────────────────────────────── */
 const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
+  // S14 wave 1 — receiver languages + AI assistant (flag-gated).
+  'receiverLangs.status': 'isolation',
+  'receiverLangs.localNames': 'attack',
+  'receiverLangs.setMyLocale': 'isolation',
+  'receiverLangs.setMemberLocale': 'attack',
+  'ask.status': 'isolation',
+  'ask.ask': 'isolation',
   'activity.feed': 'isolation',
   'approvals.myQueue': 'isolation',
   'approvals.approve': 'attack',
@@ -987,6 +994,73 @@ describe('receiving.ensureEnglish: foreign id attacks (A → B)', () => {
       .from(invoiceLines)
       .where(eq(invoiceLines.id, B.invoiceLineId));
     expect(line?.en ?? null).toBeNull();
+  });
+});
+
+describe('S14 receiverLangs + ask: foreign ids and isolation (A → B)', () => {
+  async function flagsOn(t: Tenant) {
+    await db
+      .update(restaurants)
+      .set({ settings: { features: { receiverLanguages: true, aiAssistant: true } } as never })
+      .where(eq(restaurants.id, t.restaurantId));
+  }
+  async function flagsOff(t: Tenant) {
+    await db.update(restaurants).set({ settings: {} }).where(eq(restaurants.id, t.restaurantId));
+  }
+
+  it('receiverLangs.status reads only the session restaurant flag', async () => {
+    await flagsOn(B);
+    await flagsOff(A);
+    expect((await callerFor(A).receiverLangs.status()).enabled).toBe(false);
+    expect((await callerFor(B).receiverLangs.status()).enabled).toBe(true);
+    await flagsOff(B);
+  });
+
+  it('receiverLangs.localNames rejects a foreign poId / invoiceId', async () => {
+    await flagsOn(A);
+    await expect(callerFor(A).receiverLangs.localNames({ locale: 'ar', poId: B.poId })).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+    await expect(
+      callerFor(A).receiverLangs.localNames({ locale: 'ru', poId: A.poId, invoiceId: B.invoiceId }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await flagsOff(A);
+  });
+
+  it("receiverLangs.setMemberLocale cannot change B's member; setMyLocale touches only my membership", async () => {
+    await flagsOn(A);
+    await expect(
+      callerFor(A).receiverLangs.setMemberLocale({ userId: B.ownerUserId, locale: 'th' }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await callerFor(A).receiverLangs.setMyLocale({ locale: 'ti' });
+    const [bm] = await db
+      .select({ l: memberships.preferredLocale })
+      .from(memberships)
+      .where(eq(memberships.restaurantId, B.restaurantId));
+    expect(bm?.l ?? null).not.toBe('ti');
+    await callerFor(A).receiverLangs.setMyLocale({ locale: null });
+    await flagsOff(A);
+  });
+
+  it("ask.ask (offline) and ask.status never expose B's data", async () => {
+    const { __setAskClient } = await import('../ask');
+    __setAskClient(null);
+    try {
+      await flagsOn(A);
+      const r = await callerFor(A).ask.ask({ question: 'What should I claim this week?', locale: 'en' });
+      const s = JSON.stringify(r);
+      expect(s).not.toContain(B.invoiceId);
+      expect(s).not.toContain(B.restaurantId);
+      expect(s).not.toContain(B.invoiceNumber);
+      expect((await callerFor(A).ask.status()).enabled).toBe(true);
+      expect((await callerFor(B).ask.status()).enabled).toBe(false);
+      await expect(callerFor(B).ask.ask({ question: 'how much leaked?', locale: 'en' })).rejects.toMatchObject({
+        code: 'FORBIDDEN',
+      });
+    } finally {
+      __setAskClient(undefined);
+      await flagsOff(A);
+    }
   });
 });
 

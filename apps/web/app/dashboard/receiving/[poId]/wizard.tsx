@@ -15,15 +15,17 @@ import {
   type LineMark,
 } from '@/app/showcase/receiver/_state';
 import { trpc } from '@/lib/trpc/client';
-import { useDir, useLocale, useT } from '@/lib/i18n/client';
+import { useAppLocale, useDir, useLocale, useT } from '@/lib/i18n/client';
 import { receiving } from '@/lib/i18n/messages/receiving';
 import type { Translator } from '@/lib/i18n/translate';
+import { isReceiverLocale } from '@/lib/i18n/config';
 import type { UploadedScan } from '@/lib/supabase/client';
 import {
   adaptReconciliation,
   keepAdjusted,
   type PoLineRow,
 } from './_adapters';
+import { localizeInvoiceLines, localizePoLines, localizeReceiptLines, type LocalNames } from './_localize';
 import { receivingErrorText as errorText } from './_errors';
 import { pollInvoiceUntilRead } from './_poll';
 
@@ -76,9 +78,12 @@ const STEP_ORDER: Step[] = [
 export function ReceivingWizard({
   po,
   restaurantId,
+  localNames,
 }: {
   po: PoForClient;
   restaurantId: string | null;
+  /** Receiver languages (S14): Hebrew → ar/ru/th/ti, fetched by the page. */
+  localNames?: LocalNames;
 }) {
   const [step, setStep] = useState<Step>('SCAN_INVOICE');
   const [grId, setGrId] = useState<string | null>(null);
@@ -103,6 +108,11 @@ export function ReceivingWizard({
   const [poLines, setPoLines] = useState<PoLineRow[]>(po.lines);
   const t = useT(receiving);
   const locale = useLocale();
+  const appLocale = useAppLocale();
+  const receiverLocale = isReceiverLocale(appLocale) ? appLocale : null;
+  // Receiver languages (S14): Hebrew → ar/ru/th/ti names for this PO/invoice.
+  const localNamesRef = useRef<LocalNames>(localNames ?? {});
+  const localNamesMut = trpc.receiverLangs.localNames.useMutation();
   const dir = useDir();
   const supplierLabel = locale === 'en' && po.supplierNameEn ? po.supplierNameEn : po.supplierName;
   const capturingRef = useRef(false);
@@ -123,6 +133,17 @@ export function ReceivingWizard({
    * English names, then refresh the PO lines. Display-only and best-effort — a
    * failure just leaves Hebrew on screen.
    */
+  /** Receiver languages: fetch (DB-cached) local names; best effort. */
+  async function refreshLocalNames(scope: { invoiceId?: string }) {
+    if (!receiverLocale) return;
+    try {
+      const r = await localNamesMut.mutateAsync({ locale: receiverLocale, poId: po.id, ...scope });
+      localNamesRef.current = { ...localNamesRef.current, ...r.names };
+    } catch {
+      /* best effort — English (then Hebrew) stays on screen */
+    }
+  }
+
   async function ensureEnglishFor(scope: { invoiceId?: string }) {
     if (locale !== 'en') return;
     try {
@@ -130,7 +151,7 @@ export function ReceivingWizard({
       if (r.poLinesFilled > 0 || r.productsFilled > 0) {
         const fresh = await utils.receiving.getPo.fetch({ poId: po.id });
         setPoLines(
-          fresh.lines.map((l) => ({
+          localizePoLines(fresh.lines.map((l) => ({
             id: l.id,
             productId: l.productId ?? null,
             rawDescription: l.rawDescription ?? null,
@@ -139,7 +160,7 @@ export function ReceivingWizard({
             qtyOrdered: Number(l.qtyOrdered),
             unit: l.unit,
             unitPriceExpected: l.unitPriceExpected != null ? Number(l.unitPriceExpected) : null,
-          })),
+          })), localNamesRef.current),
         );
       }
     } catch {
@@ -260,6 +281,7 @@ export function ReceivingWizard({
   async function showInvoice(activeGrId: string, id: string) {
     if (locale === 'en') await ensureEnglishFor({ invoiceId: id });
     const invoice = await utils.receiving.getInvoice.fetch({ invoiceId: id });
+    await refreshLocalNames({ invoiceId: id });
     setOcrNotice(null);
     setError(null);
     await buildReconciliation(activeGrId, invoice);
@@ -310,9 +332,9 @@ export function ReceivingWizard({
         status: po.status,
         totalEstimated: po.totalEstimated,
       },
-      poLines,
-      receiptLines: receipt.lines,
-      invoiceLines: invoice.lines,
+      poLines: localizePoLines(poLines, localNamesRef.current),
+      receiptLines: localizeReceiptLines(receipt.lines, localNamesRef.current),
+      invoiceLines: localizeInvoiceLines(invoice.lines, localNamesRef.current),
       invoiceMeta: { invoiceNumber: invoice.invoiceNumber, ocrConfidence: invoice.ocrConfidence },
       labels: { unnamed: t('unnamedItem'), unordered: t('unorderedItem') },
     });
@@ -342,8 +364,8 @@ export function ReceivingWizard({
           status: po.status,
           totalEstimated: po.totalEstimated,
         },
-        poLines,
-        receiptLines: receipt.lines,
+        poLines: localizePoLines(poLines, localNamesRef.current),
+        receiptLines: localizeReceiptLines(receipt.lines, localNamesRef.current),
         invoiceLines: [],
         invoiceMeta: null,
         labels: { unnamed: t('unnamedItem'), unordered: t('unorderedItem') },

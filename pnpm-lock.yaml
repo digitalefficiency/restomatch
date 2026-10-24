@@ -310,6 +310,9 @@ importers:
 
   packages/api:
     dependencies:
+      '@anthropic-ai/sdk':
+        specifier: ^0.69.0
+        version: 0.69.0(zod@3.25.76)
       '@restomatch/catalog':
         specifier: workspace:*
         version: link:../catalog

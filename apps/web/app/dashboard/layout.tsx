@@ -5,6 +5,7 @@ import { auth, signOut } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
 import { ToastProvider } from '@/lib/components';
 import { getLocale, getT } from '@/lib/i18n/server';
+import { PersistingLanguagePicker } from '@/lib/i18n/PersistingLanguagePicker';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { nav } from '@/lib/i18n/messages/nav';
 import { labelForRole } from '@/lib/roles';
@@ -37,7 +38,24 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const active =
     memberships.find((m) => m.restaurantId === session.user.restaurantId) ?? memberships[0]!;
-  const [t, locale] = await Promise.all([getT(nav), getLocale()]);
+  const [t, locale, receiverLangsOn] = await Promise.all([
+    getT(nav),
+    getLocale(),
+    // Receiver languages (S14): the six-language picker replaces עב/EN when on.
+    caller.receiverLangs
+      .status()
+      .then((r) => r.enabled)
+      .catch(() => false),
+  ]);
+  // AI assistant (S14): owner/manager + flag on → nav item.
+  const askOn =
+    active.role === 'owner' || active.role === 'manager'
+      ? await caller.ask
+          .status()
+          .then((r) => r.enabled)
+          .catch(() => false)
+      : false;
+  const features = askOn ? ['aiAssistant'] : [];
   const roleLabel = labelForRole(active.role, locale);
   const email = session.user.email ?? '';
   // Branches (S8): the switcher lists every membership; the chain tab is for
@@ -93,6 +111,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                       />
                     ) : undefined
                   }
+                  features={features}
                 />
                 <div className="min-w-0 flex-1 lg:flex-none">
                   <p className="truncate text-lg font-bold tracking-tight text-ink">
@@ -109,7 +128,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 <div className="ms-auto hidden items-center gap-2 lg:flex">
                   <BranchSwitcher branches={switcherBranches} activeId={active.restaurantId} />
                   <DashboardSearch role={active.role} className="w-72" />
-                  <LocaleSwitcher />
+                  {receiverLangsOn ? <PersistingLanguagePicker /> : <LocaleSwitcher />}
                   <form action={logout}>
                     <button
                       type="submit"
@@ -120,9 +139,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
                     </button>
                   </form>
                 </div>
-                <LocaleSwitcher className="lg:hidden" />
+                {receiverLangsOn ? (
+                  <PersistingLanguagePicker className="lg:hidden" />
+                ) : (
+                  <LocaleSwitcher className="lg:hidden" />
+                )}
               </div>
-              <DesktopNav role={active.role} showChain={showChain} />
+              <DesktopNav role={active.role} showChain={showChain} features={features} />
             </div>
           </header>
           <main

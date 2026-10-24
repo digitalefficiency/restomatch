@@ -11,6 +11,7 @@ export const he = {
     receiving: 'קליטת סחורה',
     approvals: 'תור אישורים',
     leaks: 'בלש דליפות',
+    ask: 'שאלו את RestoMatch',
     suppliers: 'ספקים',
     catalog: 'קטלוג',
     orders: 'הזמנות',
