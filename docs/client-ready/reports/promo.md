@@ -94,10 +94,26 @@ I rendered stills across the whole timeline and reviewed each one. Fixes made fr
   times will see "CredentialsSignin" with no hint. Proposed fix: a clearer "too many attempts — try
   again in N minutes" message.
 
+## Light version (2026-10-24)
+
+The owner decided that the whole product goes light (#77), so the film follows:
+- **Stage:** soft light stage, silver laptop and phone, the app's own light screens. Accents use the light
+  product's AA tokens (primary `#066B4A`, danger `#B80F2A`, gold `#8A5300`).
+- **Spotlight:** on a light stage, dimming the outside reads as a grey cast. The outside is now blurred and
+  washed toward the stage colour (a light fog), and the lifted card gets a soft accent shadow instead of a
+  glow.
+- **No hand-measured rects any more.** `scripts/capture.mjs` measures every spotlight rect and every e-mail
+  redaction from the live DOM while it captures (`src/rects.generated.json`), and reads the receiver's
+  invoice lines off the real reconciliation (`src/receiver.generated.json`). A re-theme or a layout change
+  is one command: `BASE_URL=… RECEIVER_PO=<uuid> tools/promo/scripts/rebuild.sh`.
+- Same numbers as the dark cut: the fresh `DEMO_TODAY=2026-10-25` seed (after #79's VAT-0 produce) still
+  gives ₪760 = 1.8% of ₪42,263, ₪296 caught, ₪464 claimed, 13 of 35 invoices; chain Jerusalem ₪975 · 2.9%.
+- The dark stage is still one flag away (`STAGE=dark`).
+
 ## Immutable files touched
 
-None. Nothing under `apps/web` was changed except the three new media files S6 asked for
-(`apps/web/public/media/hero-loop.{mp4,webm}`, `hero-poster.jpg`).
+None. Outside `tools/promo`, only `apps/web/public/media/*` (the rendered deliverables) and, in #81, the
+landing's per-locale media selection (`apps/web/lib/heroMedia.ts`) plus S9's pause-chip size.
 
 ## Gate
 

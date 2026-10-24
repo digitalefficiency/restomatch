@@ -8,12 +8,16 @@ outside `apps/*` / `packages/*`, so `pnpm install` at the root never touches it)
 src/
   Root.tsx          compositions + the beat timeline (TIMELINE / VERTICAL)
   copy.ts           every on-screen string (he + en), demo FACTS, invoice LINES, SITE url
-  theme.ts          ui-tokens colours, fonts, the one easing family
+  theme.ts          stage palettes (LIGHT default, DARK via STAGE=dark), fonts, the one easing family
   fonts.ts          self-hosted Heebo + JetBrains Mono (copied from apps/web/public/fonts)
-  components/       Background (ledger room), Devices (laptop / phone / Screen with focus-pull), primitives
+  components/       Background (stage), Devices (laptop / phone / Screen with focus-pull), primitives
   scenes/           Hook, Problem, Match, Product, Receiver, Chains, Value, Cta, PhoneDash, HeroLoop
 public/shots/       REAL screenshots of the app (seeded demo), 2× DPR
-scripts/capture.mjs re-captures public/shots from a locally running app
+scripts/capture.mjs re-captures public/shots from a locally running app, and measures every spotlight
+                    rect / e-mail redaction from the live DOM → src/rects.generated.json (receiver
+                    invoice lines → src/receiver.generated.json), so a re-theme needs no hand edits
+scripts/rebuild.sh  ONE command: capture → checks → render all cuts → encode web media → commit
+scripts/encode-web.sh  web deliverables in apps/web/public/media from the masters in out/
 render.mjs          renders stills / videos with the preinstalled Chromium
 out/                deliverables (MP4s, key frames); out/frames/ is scratch (git-ignored)
 STORYBOARD.md       beats, timings, copy, sources of every number
@@ -28,6 +32,8 @@ node render.mjs he          # out/restomatch-promo-he.mp4       (1920×1080, 60 
 node render.mjs en          # out/restomatch-promo-en.mp4
 node render.mjs vertical    # out/restomatch-promo-he-vertical.mp4 (1080×1920)
 node render.mjs loop        # out/hero-loop-master.mp4  → see "Hero loop" below
+node render.mjs loop-en     # out/hero-loop-en-master.mp4
+STAGE=dark node render.mjs he   # the original dark stage (default is light)
 node render.mjs stills he 150,600,1100   # check frames → out/frames/*.png
 npm run studio              # interactive preview/scrubbing (Remotion Studio)
 ```

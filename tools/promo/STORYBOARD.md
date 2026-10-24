@@ -9,9 +9,14 @@ the right 38% of the frame in Hebrew (left in English; a top band in the vertica
 screenshots and every camera move live only in the **device zone**, rendered inside a clip of that rect,
 so the two can never overlap (`src/layout.ts`; `scripts/check-layout.mjs` asserts ∅ intersection).
 
+**Stage (owner, 2026-10-24): LIGHT**, matching the product. A soft light stage (`#F6F8F7`), a silver
+laptop and phone, the app's light screens, and a light-fog spotlight (outside blurred + washed toward the
+stage colour instead of dimmed). `STAGE=dark node render.mjs …` still renders the original dark stage.
+
 Motion language: one easing family (expo-out `bezier(.16,1,.3,1)` for entrances, `bezier(.65,0,.35,1)`
-for camera moves), three accents from `packages/ui-tokens` — primary `#22D39A` (product / positive),
-danger `#FF5C7A` (leak), gold `#E0B341` (caught / new). Heebo + JetBrains Mono, the app's own files.
+for camera moves), three accents matching the light product's AA tokens — primary `#066B4A` (product /
+positive), danger `#B80F2A` (leak), gold `#8A5300` (caught / new); dark stage: `#22D39A` / `#FF5C7A` /
+`#E0B341`. Heebo + JetBrains Mono, the app's own files.
 
 ## Beats
 
