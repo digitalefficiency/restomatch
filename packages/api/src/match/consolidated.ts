@@ -128,6 +128,12 @@ export interface ProposalFinding {
   deliveryNoteNumber: string | null;
   /** Billed twice: the note is already billed on this other invoice. */
   alreadyBilledOn: OtherInvoice | null;
+  /** What the line is, for the panel / the supplier letter ("חלב 3% · 24 ליטר"). */
+  productName: string | null;
+  productNameEn: string | null;
+  unit: string | null;
+  /** The billed qty of the finding's invoice line (null when it has none). */
+  qty: number | null;
   expected: number | null;
   actual: number | null;
   deltaAmount: number;
@@ -476,7 +482,17 @@ export function buildConsolidatedProposal(args: {
       !((d.type === 'PRICE_HIGHER' || d.type === 'PRICE_LOWER') && d.poLineId && pooledPoLines.has(d.poLineId)) &&
       !twiceNotes.has(noteOf(d) ?? ''),
   );
+  const lineById = new Map([...lineGroups.values()].map((l) => [l.id, l]));
+  const nameOf = (productId: string | null) => {
+    if (!productId) return null;
+    const g = [...groups.values()].find((x) => x.productId === productId);
+    return g ? { name: g.name, nameEn: g.nameEn } : (args.productNames?.get(productId) ?? null);
+  };
   const findings: ProposalFinding[] = [...engineFindings, ...pooledFindings, ...twiceFindings].map((d) => ({
+    productName: nameOf(d.productId)?.name ?? null,
+    productNameEn: nameOf(d.productId)?.nameEn ?? null,
+    unit: (d.invoiceLineId ? lineById.get(d.invoiceLineId)?.unit : undefined) ?? null,
+    qty: (d.invoiceLineId ? lineById.get(d.invoiceLineId)?.qtyBilled : undefined) ?? null,
     type: d.type,
     severity: d.severity,
     productId: d.productId,

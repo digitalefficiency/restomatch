@@ -4,7 +4,7 @@ import type { he } from './he';
 export const en: Shape<typeof he> = {
   title: 'Cross-match with delivery notes',
   subtitle: "The consolidated invoice against the supplier's delivery notes for {period}",
-  proposal: 'Cross-match proposal — awaiting approval',
+  proposal: 'For review — not yet linked',
   proposalNote: 'Read-only: the invoice is still waiting to be linked and is counted in neither the leak nor the spend.',
   reference: 'Cross-match for reference',
   referenceNote: 'Read-only: this invoice has already been handled — the cross-match is shown for reference.',
@@ -18,6 +18,18 @@ export const en: Shape<typeof he> = {
     noneBody: "Deliveries from the supplier in the invoice's month will be cross-matched here.",
   },
   print: 'Print the cross-match for the supplier',
+  letter: {
+    to: 'To {supplier}',
+    subject: 'Consolidated invoice {number} · period {period}',
+    intro: 'Cross-matching the consolidated invoice against the delivery notes found:',
+    ask: 'Please credit {amount} + VAT.',
+  },
+  finding: {
+    price: '{name} · {qty} {unit} · billed {billed} instead of {po} = {delta}',
+    twice: 'already billed on invoice {other} = {delta}',
+    other: '{name} = {delta}',
+    note: 'DN {number}',
+  },
   totals: {
     notes: 'Delivery notes total (order prices)',
     invoice: 'Invoice total before VAT',

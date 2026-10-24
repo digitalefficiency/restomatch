@@ -52,8 +52,17 @@ export default async function InvoiceCorrectionPage({
         title={t('correction.title')}
         subtitle={t('correction.subtitle')}
       />
+      {/* A ריכוז: its cross-match first — that is the job on this page — then the correction form. */}
+      {proposal ? (
+        <ConsolidatedPanel
+          proposal={proposal}
+          t={tc}
+          locale={locale}
+          supplierName={invoice.supplierName}
+          invoiceNumber={invoice.invoiceNumber}
+        />
+      ) : null}
       <InvoiceCorrection invoice={invoice} canEdit={canEdit} />
-      {proposal ? <ConsolidatedPanel proposal={proposal} t={tc} locale={locale} /> : null}
     </div>
   );
 }

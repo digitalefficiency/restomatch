@@ -10,6 +10,7 @@ import type { Locale } from '@/lib/i18n/config';
 import type { Translator } from '@/lib/i18n/translate';
 import type { he as consolidatedHe } from '@/lib/i18n/messages/consolidated/he';
 import { formatIls } from '@/lib/money';
+import { translateUnit } from '@restomatch/translate/units';
 import { PrintButton } from '../../leaks/claims/print-button';
 
 type T = Translator<typeof consolidatedHe>;
@@ -27,17 +28,33 @@ const PRODUCT_TONE: Record<ConsolidatedProposal['products'][number]['status'], B
   not_billed: 'neutral',
 };
 
+type Finding = ConsolidatedProposal['findings'][number];
+
 /**
  * "הצלבה מול תעודות משלוח" — the read-only cross-match of a consolidated invoice
  * against the supplier's delivery notes. Tiers: the proposal itself is T4 (calm,
  * neutral — it is not counted yet); differences are T2 (solid badge + ₪ + one
- * primary action); a clean match is T3 (calm green).
+ * primary action, which prints only this panel as a letter to the supplier); a
+ * clean match is T3 (calm green).
  */
-export function ConsolidatedPanel({ proposal, t, locale }: { proposal: ConsolidatedProposal; t: T; locale: Locale }) {
+export function ConsolidatedPanel({
+  proposal,
+  t,
+  locale,
+  supplierName,
+  invoiceNumber,
+}: {
+  proposal: ConsolidatedProposal;
+  t: T;
+  locale: Locale;
+  supplierName: string | null;
+  invoiceNumber: string | null;
+}) {
   // Agorot: a cross-match is about small differences (₪0.86 must not read as ₪1).
   const ils = (v: number) => formatIls(v, { locale, maximumFractionDigits: 2 });
   const num = (v: number) => formatNumber(v, locale, { maximumFractionDigits: 3 });
   const day = (iso: string) => formatDate(iso, locale, { day: 'numeric', month: 'short' });
+  const unitText = (u: string | null) => (!u ? '' : locale === 'he' ? u : (translateUnit(u) ?? u));
   const period = `${formatDate(proposal.periodStart, locale, { day: 'numeric', month: 'short' })} – ${formatDate(
     new Date(new Date(proposal.periodEnd).getTime() - 1).toISOString(),
     locale,
@@ -48,13 +65,55 @@ export function ConsolidatedPanel({ proposal, t, locale }: { proposal: Consolida
   // A ריכוז already matched / approved / paid: the same cross-match, for reference.
   const settled = SETTLED.has(proposal.invoiceStatus);
   const noteDeltas = proposal.deliveryNotes.some((n) => n.deltaIls > 0);
+  const leaking = proposal.findings.filter((f) => f.countsAsLeak);
+  /** The finding as the owner (and the supplier) reads it: "חלב 3% · 24 ליטר · חויב ₪7.90 במקום ₪6.40 = ₪36.00". */
+  const findingText = (f: Finding) => {
+    const name = f.productName ? displayName(f.productName, f.productNameEn, locale).primary : t('products.unnamed');
+    if (f.alreadyBilledOn) return t('finding.twice', { other: f.alreadyBilledOn.invoiceNumber ?? '—', delta: ils(f.deltaAmount) });
+    if ((f.type === 'PRICE_HIGHER' || f.type === 'PRICE_LOWER') && f.qty != null && f.actual != null && f.expected != null) {
+      return t('finding.price', {
+        name,
+        qty: num(f.qty),
+        unit: unitText(f.unit),
+        billed: ils(f.actual),
+        po: ils(f.expected),
+        delta: ils(f.deltaAmount),
+      });
+    }
+    return t('finding.other', { name, delta: ils(f.deltaAmount) });
+  };
+  const findingsOf = (number: string | null) => (number ? leaking.filter((f) => f.deliveryNoteNumber === number) : []);
+  const signed = (v: number) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${ils(Math.abs(v))}`;
 
   return (
-    <section className="mt-10 min-w-0 max-w-full print:mt-0" aria-label={t('title')} data-testid="consolidated-panel">
+    <section
+      className="mt-10 min-w-0 max-w-full print:mt-0"
+      aria-label={t('title')}
+      data-testid="consolidated-panel"
+      data-print-root="xmatch"
+    >
+      {proposal.status === 'differences' ? (
+        // Print only: the letter header for the supplier.
+        <div className="mb-6 hidden space-y-1 text-sm text-ink print:block" data-testid="xmatch-letter">
+          <p className="font-semibold">{t('letter.to', { supplier: supplierName ?? '—' })}</p>
+          <p>{t('letter.subject', { number: invoiceNumber ?? '—', period })}</p>
+          <p className="pt-2">{t('letter.intro')}</p>
+          <ul className="list-disc ps-5">
+            {leaking.map((f, i) => (
+              <li key={i}>
+                {f.deliveryNoteNumber ? `${t('finding.note', { number: f.deliveryNoteNumber })} · ` : ''}
+                {findingText(f)}
+              </li>
+            ))}
+          </ul>
+          <p className="pt-2 font-semibold">{t('letter.ask', { amount: ils(totals.leakIls) })}</p>
+        </div>
+      ) : null}
+
       <SectionHeader title={t('title')} subtitle={t('subtitle', { period })} />
 
       {/* T4: a proposal, not counted yet — calm and neutral. */}
-      <p className="mb-4 flex flex-wrap items-center gap-2 text-sm text-muted">
+      <p className="mb-4 flex flex-wrap items-center gap-2 text-sm text-muted print:hidden">
         <Badge tone="neutral" icon={<ClipboardList className="h-3.5 w-3.5" aria-hidden="true" />}>
           {t(settled ? 'reference' : 'proposal')}
         </Badge>
@@ -63,7 +122,7 @@ export function ConsolidatedPanel({ proposal, t, locale }: { proposal: Consolida
 
       {proposal.status === 'differences' ? (
         // T2: act now — solid badge + ₪ + ONE primary action.
-        <Card padding="md" className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" data-testid="xmatch-differences">
+        <Card padding="md" className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between print:hidden" data-testid="xmatch-differences">
           <div>
             <Badge tone="danger-solid">{t('status.differences')}</Badge>
             <p className="mt-2 font-mono text-2xl font-extrabold tabular-nums text-danger">
@@ -77,7 +136,7 @@ export function ConsolidatedPanel({ proposal, t, locale }: { proposal: Consolida
             </p>
           </div>
           <div className="print:hidden">
-            <PrintButton label={t('print')} primary />
+            <PrintButton label={t('print')} primary scope="xmatch" />
           </div>
         </Card>
       ) : proposal.status === 'matched' ? (
@@ -105,22 +164,46 @@ export function ConsolidatedPanel({ proposal, t, locale }: { proposal: Consolida
             {[
               [t('totals.notes'), ils(totals.deliveryNotesIls)],
               [t('totals.invoice'), ils(totals.invoiceSubtotalIls)],
-              [t('totals.difference'), `${totals.differenceIls > 0 ? '+' : totals.differenceIls < 0 ? '−' : ''}${ils(Math.abs(totals.differenceIls))}`],
+              [t('totals.difference'), signed(totals.differenceIls)],
             ].map(([label, value]) => (
               <div key={label} className="rounded-xl border border-line bg-surface-2 px-4 py-3">
                 <dt className="text-xs text-muted">{label}</dt>
-                <dd className="mt-1 font-mono text-lg font-semibold tabular-nums text-ink" dir="ltr">
-                  {/* bdi keeps a leading +/− with its ₪ amount in RTL. */}
-                  <bdi dir="ltr" className="whitespace-nowrap">
-                    {value}
-                  </bdi>
+                <dd className="mt-1 font-mono text-lg font-semibold tabular-nums text-ink">
+                  {/* bdi keeps a leading +/− with its ₪ amount (formatIls carries its own direction marks). */}
+                  <bdi className="whitespace-nowrap">{value}</bdi>
                 </dd>
               </div>
             ))}
           </dl>
 
           <h3 className="mb-2 text-sm font-semibold text-ink">{t('notes.title')}</h3>
-          <div className="relative mb-6 max-w-full overflow-x-auto rounded-xl border border-line" tabIndex={0} role="region" aria-label={t('notes.title')}>
+          {/* Phone: one card per note, so the Δ and the state are never clipped. */}
+          <ul className="mb-6 space-y-2 sm:hidden" data-testid="xmatch-note-cards">
+            {proposal.deliveryNotes.map((n) => (
+              <li key={n.grId} className="rounded-xl border border-line bg-surface px-3 py-2 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-mono text-xs text-ink">{n.number ?? '—'}</span>
+                  <span className="text-xs text-muted">{day(n.receivedAt)}</span>
+                  <Badge tone={NOTE_TONE[n.status]}>{t(`notes.${n.status}`)}</Badge>
+                </div>
+                <div className="mt-1 flex items-center justify-between gap-2">
+                  <span className="font-mono tabular-nums text-ink">{ils(n.receivedValueIls)}</span>
+                  {n.deltaIls > 0 ? <span className="font-mono font-semibold tabular-nums text-danger">{ils(n.deltaIls)}</span> : null}
+                </div>
+                {findingsOf(n.number).map((f, i) => (
+                  <p key={i} className="mt-1 text-xs text-danger">
+                    {findingText(f)}
+                  </p>
+                ))}
+              </li>
+            ))}
+          </ul>
+          <div
+            className="relative mb-6 hidden max-w-full overflow-x-auto rounded-xl border border-line sm:block"
+            tabIndex={0}
+            role="region"
+            aria-label={t('notes.title')}
+          >
             <table className="w-full min-w-[28rem] text-sm" data-testid="xmatch-notes">
               <thead className="bg-surface-2 text-xs text-muted">
                 <tr>
@@ -133,22 +216,35 @@ export function ConsolidatedPanel({ proposal, t, locale }: { proposal: Consolida
                 </tr>
               </thead>
               <tbody>
-                {proposal.deliveryNotes.map((n) => (
-                  <tr key={n.grId} className="border-t border-line">
-                    <td className={`${cell} font-mono text-xs text-ink`}>{n.number ?? '—'}</td>
-                    <td className={`${cell} text-ink`}>{day(n.receivedAt)}</td>
-                    <td className={`${cell} font-mono text-xs text-muted`}>{n.poRef ?? t('notes.noRef')}</td>
-                    <td className={`${cell} text-end font-mono tabular-nums text-ink`}>{ils(n.receivedValueIls)}</td>
-                    {noteDeltas ? (
-                      <td className={`${cell} text-end font-mono tabular-nums ${n.deltaIls > 0 ? 'font-semibold text-danger' : 'text-muted'}`}>
-                        {n.deltaIls > 0 ? ils(n.deltaIls) : '—'}
+                {proposal.deliveryNotes.flatMap((n) => {
+                  const rows = [
+                    <tr key={n.grId} className="border-t border-line">
+                      <td className={`${cell} font-mono text-xs text-ink`}>{n.number ?? '—'}</td>
+                      <td className={`${cell} text-ink`}>{day(n.receivedAt)}</td>
+                      <td className={`${cell} font-mono text-xs text-muted`}>{n.poRef ?? t('notes.noRef')}</td>
+                      <td className={`${cell} text-end font-mono tabular-nums text-ink`}>{ils(n.receivedValueIls)}</td>
+                      {noteDeltas ? (
+                        <td className={`${cell} text-end font-mono tabular-nums ${n.deltaIls > 0 ? 'font-semibold text-danger' : 'text-muted'}`}>
+                          {n.deltaIls > 0 ? ils(n.deltaIls) : '—'}
+                        </td>
+                      ) : null}
+                      <td className={`${cell} text-end`}>
+                        <Badge tone={NOTE_TONE[n.status]}>{t(`notes.${n.status}`)}</Badge>
                       </td>
-                    ) : null}
-                    <td className={`${cell} text-end`}>
-                      <Badge tone={NOTE_TONE[n.status]}>{t(`notes.${n.status}`)}</Badge>
-                    </td>
-                  </tr>
-                ))}
+                    </tr>,
+                  ];
+                  const fs = findingsOf(n.number);
+                  if (fs.length > 0) {
+                    rows.push(
+                      <tr key={`${n.grId}-f`} data-testid="xmatch-note-finding">
+                        <td colSpan={noteDeltas ? 6 : 5} className="px-3 pb-2 text-xs text-danger">
+                          {fs.map((f) => findingText(f)).join(' · ')}
+                        </td>
+                      </tr>,
+                    );
+                  }
+                  return rows;
+                })}
               </tbody>
             </table>
           </div>

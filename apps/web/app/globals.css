@@ -374,3 +374,19 @@ html {
     }
   }
 }
+
+/* A scoped print (PrintButton `scope`): only the matching data-print-root prints. */
+@media print {
+  html[data-print-scope] body * {
+    visibility: hidden;
+  }
+  html[data-print-scope="xmatch"] [data-print-root="xmatch"],
+  html[data-print-scope="xmatch"] [data-print-root="xmatch"] * {
+    visibility: visible;
+  }
+  html[data-print-scope="xmatch"] [data-print-root="xmatch"] {
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+  }
+}

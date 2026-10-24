@@ -60,18 +60,35 @@ for (const [lang, viewport] of [
     const panel = page.getByTestId('consolidated-panel');
     await expect(panel).toBeVisible();
     // T4: a proposal, not counted yet.
-    await expect(panel).toContainText(lang === 'he' ? 'הצעת הצלבה — ממתינה לאישור' : 'Cross-match proposal — awaiting approval');
+    await expect(panel).toContainText(lang === 'he' ? 'לעיון — טרם שויכה' : 'For review — not yet linked');
     // T2: the one overcharge — solid badge + ₪36 + one action.
     const diff = page.getByTestId('xmatch-differences');
     await expect(diff).toBeVisible();
     await expect(diff).toContainText('36');
-    const notes = page.getByTestId('xmatch-notes');
-    expect(await notes.locator('tbody tr').count()).toBeGreaterThan(1);
-    await expect(notes).toContainText(lang === 'he' ? 'כלולה' : 'Included');
-    // The difference sits on its delivery note (the one row with a ₪ difference).
-    const flagged = notes.locator('tbody tr').filter({ has: page.locator('td.text-danger') });
-    await expect(flagged).toHaveCount(1);
-    await expect(flagged).toContainText('36');
+    // The notes: stacked cards on a phone, a table on desktop; the difference sits
+    // on its note (DN 61036), with the actual finding under it.
+    if (viewport.width < 640) {
+      const cards = page.getByTestId('xmatch-note-cards').locator('li');
+      expect(await cards.count()).toBeGreaterThan(1);
+      const flagged = cards.filter({ hasText: '61036' });
+      await expect(flagged).toContainText('36');
+      await expect(flagged).toContainText(lang === 'he' ? 'חויב' : 'billed');
+    } else {
+      const notes = page.getByTestId('xmatch-notes');
+      expect(await notes.locator('tbody tr').count()).toBeGreaterThan(1);
+      await expect(notes).toContainText(lang === 'he' ? 'כלולה' : 'Included');
+      const flagged = notes.locator('tbody tr').filter({ has: page.locator('td.text-danger.font-mono') });
+      await expect(flagged).toHaveCount(1);
+      await expect(flagged).toContainText('36');
+      await expect(page.getByTestId('xmatch-note-finding')).toContainText(lang === 'he' ? 'חויב' : 'billed');
+      // Printed, the panel is a letter to the supplier: who, which invoice, the ask.
+      await page.emulateMedia({ media: 'print' });
+      const letter = page.getByTestId('xmatch-letter');
+      await expect(letter).toBeVisible();
+      await expect(letter).toContainText('61036');
+      await expect(letter).toContainText(lang === 'he' ? 'נא לזכות' : 'Please credit');
+      await page.emulateMedia({ media: 'screen' });
+    }
     expect(await page.getByTestId('xmatch-products').locator('tbody tr').count()).toBeGreaterThan(0);
     // Units go through the shared translator: English reads "(litre)", never "(ליטר)".
     if (lang === 'en') await expect(page.getByTestId('xmatch-products')).not.toContainText('ליטר');
