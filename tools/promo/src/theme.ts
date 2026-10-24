@@ -19,6 +19,19 @@ export const C = {
   paperInk: '#22261F',
 } as const;
 
+/** Light stage — mirrors the light ui-tokens (PR #77) for assets that sit on the light landing. */
+export const LIGHT = {
+  bg: '#F6F8F7',
+  bgDeep: '#EAF0EC',
+  surface: '#FFFFFF',
+  line: '#D3DDD7',
+  ink: '#0F1F17',
+  muted: '#4A5D53',
+  primary: '#066B4A',
+  gold: '#8A5300',
+  danger: '#B80F2A',
+} as const;
+
 export const FONT = {
   sans: '"Heebo", system-ui, sans-serif',
   mono: '"JetBrains Mono", "Heebo", monospace',

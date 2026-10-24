@@ -66,7 +66,9 @@ export const Laptop: React.FC<{
   width: number;
   glare?: number; // -1..1 position of the glass reflection
   children: React.ReactNode;
-}> = ({ width, glare = 0, children }) => {
+  finish?: 'dark' | 'silver'; // silver = aluminium body for a light stage (glass bezel stays black)
+}> = ({ width, glare = 0, children, finish = 'dark' }) => {
+  const silver = finish === 'silver';
   const bezel = Math.round(width * 0.016);
   const screenW = width - bezel * 2;
   const screenH = Math.round(screenW * 0.625);
@@ -79,8 +81,10 @@ export const Laptop: React.FC<{
           width,
           height: lidH,
           borderRadius: width * 0.022,
-          background: 'linear-gradient(180deg, #1d2421 0%, #0b0f0d 100%)',
-          boxShadow: `0 0 0 2px #2c3631, 0 0 0 3px #0a0d0c, 0 60px 120px rgba(0,0,0,0.6), 0 0 120px ${C.primary}14`,
+          background: silver ? '#0d0f0e' : 'linear-gradient(180deg, #1d2421 0%, #0b0f0d 100%)',
+          boxShadow: silver
+            ? '0 0 0 3px #cfd6d2, 0 0 0 4px #aab4ae, 0 50px 100px rgba(15,31,23,0.22)'
+            : `0 0 0 2px #2c3631, 0 0 0 3px #0a0d0c, 0 60px 120px rgba(0,0,0,0.6), 0 0 120px ${C.primary}14`,
           padding: bezel,
           boxSizing: 'border-box',
           position: 'relative',
@@ -129,8 +133,10 @@ export const Laptop: React.FC<{
           height: width * 0.022,
           marginTop: -2,
           borderRadius: `2px 2px ${width * 0.02}px ${width * 0.02}px`,
-          background: 'linear-gradient(180deg, #3a443f 0%, #1b211e 45%, #0d110f 100%)',
-          boxShadow: '0 30px 60px rgba(0,0,0,0.55)',
+          background: silver
+            ? 'linear-gradient(180deg, #eef1ef 0%, #cfd6d2 45%, #a9b2ad 100%)'
+            : 'linear-gradient(180deg, #3a443f 0%, #1b211e 45%, #0d110f 100%)',
+          boxShadow: silver ? '0 24px 50px rgba(15,31,23,0.18)' : '0 30px 60px rgba(0,0,0,0.55)',
         }}
       >
         <div
@@ -142,7 +148,7 @@ export const Laptop: React.FC<{
             height: width * 0.008,
             transform: 'translateX(-50%)',
             borderRadius: `0 0 ${width * 0.01}px ${width * 0.01}px`,
-            background: '#0d110f',
+            background: silver ? '#9aa39e' : '#0d110f',
           }}
         />
       </div>

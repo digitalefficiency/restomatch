@@ -1,22 +1,26 @@
 import React from 'react';
 import { AbsoluteFill, random, useCurrentFrame, useVideoConfig } from 'remotion';
-import { C } from '../theme';
+import { C, LIGHT } from '../theme';
 
 /**
  * The "ledger room": deep green-ink canvas, a perspective ledger grid drifting
  * toward camera, two slow light pools (money-green + gold) and dust particles.
  * Every motion here is periodic in `period` frames so it can loop seamlessly.
  */
-export const Background: React.FC<{ period?: number; tint?: 'green' | 'danger'; intensity?: number }> = ({
+export const Background: React.FC<{ period?: number; tint?: 'green' | 'danger'; intensity?: number; light?: boolean }> = ({
   period = 360,
   tint = 'green',
   intensity = 1,
+  light = false,
 }) => {
+  const P = light
+    ? { bg: LIGHT.bg, bgDeep: LIGHT.bgDeep, line: LIGHT.line, primary: LIGHT.primary, gold: LIGHT.gold, vignette: 'rgba(15,31,23,0.10)' }
+    : { bg: C.bg, bgDeep: C.bgDeep, line: C.line, primary: C.primary, gold: C.gold, vignette: 'rgba(0,0,0,0.55)' };
   const frame = useCurrentFrame();
   const { width, height } = useVideoConfig();
   const ph = (frame % period) / period; // 0..1 loop phase
   const tau = Math.PI * 2;
-  const glow = tint === 'danger' ? 'rgba(255,92,122,0.20)' : 'rgba(34,211,154,0.17)';
+  const glow = light ? 'rgba(6,107,74,0.10)' : tint === 'danger' ? 'rgba(255,92,122,0.20)' : 'rgba(34,211,154,0.17)';
 
   const g1x = 30 + 8 * Math.sin(tau * ph);
   const g1y = 30 + 6 * Math.cos(tau * ph);
@@ -40,10 +44,10 @@ export const Background: React.FC<{ period?: number; tint?: 'green' | 'danger'; 
   const off = ph * cell;
 
   return (
-    <AbsoluteFill style={{ background: C.bgDeep, overflow: 'hidden' }}>
+    <AbsoluteFill style={{ background: P.bgDeep, overflow: 'hidden' }}>
       <AbsoluteFill
         style={{
-          background: `radial-gradient(ellipse 70% 60% at 50% 45%, ${C.bg} 0%, ${C.bgDeep} 70%)`,
+          background: `radial-gradient(ellipse 70% 60% at 50% 45%, ${P.bg} 0%, ${P.bgDeep} 70%)`,
         }}
       />
       {/* perspective ledger floor */}
@@ -57,7 +61,7 @@ export const Background: React.FC<{ period?: number; tint?: 'green' | 'danger'; 
             height: '120%',
             transform: 'rotateX(72deg)',
             transformOrigin: '50% 0%',
-            backgroundImage: `linear-gradient(${C.line} 1px, transparent 1px), linear-gradient(90deg, ${C.line} 1px, transparent 1px)`,
+            backgroundImage: `linear-gradient(${P.line} 1px, transparent 1px), linear-gradient(90deg, ${P.line} 1px, transparent 1px)`,
             backgroundSize: `${cell}px ${cell}px`,
             backgroundPosition: `0px ${off}px`,
             opacity: 0.55 * intensity,
@@ -82,15 +86,15 @@ export const Background: React.FC<{ period?: number; tint?: 'green' | 'danger'; 
             width: p.size,
             height: p.size,
             borderRadius: '50%',
-            background: i % 5 === 0 ? C.gold : C.primary,
+            background: i % 5 === 0 ? P.gold : P.primary,
             opacity: p.tw * 0.55 * intensity,
-            boxShadow: `0 0 ${p.size * 4}px ${i % 5 === 0 ? C.gold : C.primary}`,
+            boxShadow: `0 0 ${p.size * 4}px ${i % 5 === 0 ? P.gold : P.primary}`,
           }}
         />
       ))}
       {/* vignette */}
       <AbsoluteFill
-        style={{ background: 'radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.55) 100%)' }}
+        style={{ background: `radial-gradient(ellipse at center, transparent 55%, ${P.vignette} 100%)` }}
       />
     </AbsoluteFill>
   );

@@ -16,7 +16,7 @@ import { PhoneDash, PHONE_DASH_DURATION } from './scenes/PhoneDash';
 
 loadFonts();
 
-type Props = { locale: Locale; facts?: Partial<Facts> };
+type Props = { locale: Locale; facts?: Partial<Facts>; light?: boolean };
 
 /** Crossfade wrapper: every scene fades in/out over 8 frames on top of its own motion. */
 const Shell: React.FC<{ d: number; children: React.ReactNode }> = ({ d, children }) => {
@@ -73,9 +73,9 @@ const PromoVertical: React.FC<Props> = ({ locale, facts }) => {
   applyFacts(facts);
   return <Film locale={locale} beats={VERTICAL} />;
 };
-const Loop: React.FC<Props> = ({ locale, facts }) => {
+const Loop: React.FC<Props> = ({ locale, facts, light }) => {
   applyFacts(facts);
-  return <HeroLoop locale={locale} />;
+  return <HeroLoop locale={locale} light={light ?? true} />;
 };
 
 export const Root: React.FC = () => (

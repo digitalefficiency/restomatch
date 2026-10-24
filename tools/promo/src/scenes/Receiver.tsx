@@ -3,6 +3,7 @@ import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
 import { COPY, LINES, Locale } from '../copy';
 import { C, EASE_IN, EASE_IN_OUT, FONT, lerp, prog } from '../theme';
 import { zones } from '../layout';
+import { rectFor, type U } from '../rects';
 import { CaptionZone, Callout, DeviceZone, Spotlight } from '../components/Stage';
 import { Phone, phoneScreen, Screen } from '../components/Devices';
 import { FadeUp, RiseLine } from '../components/primitives';
@@ -11,8 +12,9 @@ export const RECEIVER_DURATION = 250;
 
 // Strips to blur on the phone captures (units of image width): the demo e-mail line, and the
 // local dev-OCR-stub line ("Invoice DEV-… · OCR confidence 100%") — not what a customer sees.
-const EMAIL = { y: 0.105, h: 0.04, x: 0.16, w: 0.62 };
-const STUB = { y: 0.715, h: 0.05, x: 0.03, w: 0.94 };
+const toStrip = (u: U, pad = 0.01) => ({ x: u[0] - pad, y: u[1] - pad, w: u[2] - u[0] + 2 * pad, h: u[3] - u[1] + 2 * pad });
+const EMAIL = toStrip(rectFor('receiving-po-en', 'email', [0.17, 0.105, 0.67, 0.145]));
+const STUB = toStrip(rectFor('reconcile-en', 'stub', [0.03, 0.715, 0.97, 0.765]));
 
 /** One invoice line that is scanned and re-typeset from Hebrew into English. */
 const MorphLine: React.FC<{ i: number; at: number; w: number }> = ({ i, at, w }) => {
@@ -117,9 +119,11 @@ const MorphLine: React.FC<{ i: number; at: number; w: number }> = ({ i, at, w })
 };
 
 // Cherry-tomatoes card on the real English reconciliation (units of the 390-px screen width).
-const CARD = { x0: 0.054, y0: 1.965, x1: 0.946, y1: 2.35 };
+const [cx0, cy0, cx1, cy1] = rectFor('reconcile-en', 'card', [0.054, 1.965, 0.946, 2.35]);
+const CARD = { x0: cx0, y0: cy0, x1: cx1, y1: cy1 };
 const TOP = 0.11; // status-bar inset
-const SCROLL = 1.19; // brings the card to mid-screen
+const SCREEN_H = 844 / 390; // phone screen height in units of its width
+const SCROLL = Math.max(0, (CARD.y0 + CARD.y1) / 2 + TOP - SCREEN_H / 2); // brings the card to mid-screen
 
 export const Receiver: React.FC<{ locale: Locale }> = ({ locale }) => {
   const f = useCurrentFrame();
@@ -262,9 +266,9 @@ export const Receiver: React.FC<{ locale: Locale }> = ({ locale }) => {
             <div style={{ fontSize: 30, color: C.muted, marginTop: 20, lineHeight: 1.4 }}>{t.sub}</div>
           </FadeUp>
           <Callout locale={locale} a={ca} accent={C.primary}>
-            <bdi dir="rtl" style={{ color: C.muted, fontWeight: 500 }}>עגבניות שרי</bdi>
+            <bdi dir="rtl" style={{ color: C.muted, fontWeight: 500 }}>{LINES[0].he}</bdi>
             <span style={{ color: C.muted }}>{isRtl ? '←' : '→'}</span>
-            <bdi dir="ltr">Cherry tomatoes</bdi>
+            <bdi dir="ltr">{LINES[0].en}</bdi>
           </Callout>
         </div>
       </CaptionZone>

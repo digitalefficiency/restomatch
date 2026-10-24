@@ -199,8 +199,9 @@ export const Chip: React.FC<{
   children: React.ReactNode;
   accent?: string;
   big?: boolean;
+  light?: boolean; // white card chip for the light stage
   style?: React.CSSProperties;
-}> = ({ children, accent = C.primary, big, style }) => (
+}> = ({ children, accent = C.primary, big, light, style }) => (
   <div
     style={{
       display: 'inline-flex',
@@ -208,11 +209,13 @@ export const Chip: React.FC<{
       gap: big ? 18 : 12,
       padding: big ? '18px 30px' : '12px 22px',
       borderRadius: 999,
-      background: 'rgba(14,21,18,0.78)',
-      border: `1.5px solid ${accent}55`,
-      boxShadow: `0 0 0 1px rgba(0,0,0,0.3), 0 18px 50px rgba(0,0,0,0.45), 0 0 40px ${accent}22`,
-      backdropFilter: 'blur(14px)',
-      color: C.ink,
+      background: light ? '#FFFFFF' : 'rgba(14,21,18,0.78)',
+      border: `1.5px solid ${accent}${light ? '66' : '55'}`,
+      boxShadow: light
+        ? '0 1px 2px rgba(15,31,23,0.08), 0 14px 36px rgba(15,31,23,0.12)'
+        : `0 0 0 1px rgba(0,0,0,0.3), 0 18px 50px rgba(0,0,0,0.45), 0 0 40px ${accent}22`,
+      backdropFilter: light ? undefined : 'blur(14px)',
+      color: light ? '#0F1F17' : C.ink,
       fontFamily: FONT.sans,
       fontSize: big ? 34 : 26,
       fontWeight: 600,

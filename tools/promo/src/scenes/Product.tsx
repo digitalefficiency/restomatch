@@ -6,6 +6,7 @@ import { zones } from '../layout';
 import { Laptop, laptopScreen, Screen } from '../components/Devices';
 import { CaptionZone, Callout, DeviceZone, Spotlight } from '../components/Stage';
 import { Eyebrow, FadeUp, RiseLine } from '../components/primitives';
+import { autoScroll, emailStrip, rectFor } from '../rects';
 
 // Focus rects (units of screenshot width; x0,y0,x1,y1) measured on the captures in public/shots.
 type U = [number, number, number, number];
@@ -19,7 +20,7 @@ const FOCUS: Record<Locale, Record<'hero' | 'beer' | 'appr' | 'claim', U>> = {
 // spotlight opens 22→34 (12 f), holds to 80 (≈1.5 s), closes 80→92, camera pulls back 86→112.
 const BEATS = [
   { key: 'dashboard', from: 0, focus: 'hero', push: 56, accent: C.danger },
-  { key: 'leaks', from: 172, focus: 'beer', push: 192, accent: C.danger, scroll: { he: 0.56, en: 0.6 } },
+  { key: 'leaks', from: 172, focus: 'beer', push: 192, accent: C.danger },
   { key: 'approvals', from: 290, focus: 'appr', push: 310, accent: C.gold },
   { key: 'claims', from: 408, focus: 'claim', push: 428, accent: C.primary },
 ] as const;
@@ -49,9 +50,11 @@ export const Product: React.FC<{ locale: Locale }> = ({ locale }) => {
   });
   const beat = BEATS[bi];
   const lf = f - beat.push;
-  const u = FOCUS[locale][beat.focus];
+  const shotName = (k: string) => (k === 'dashboard' ? `dashboard-${locale}-full` : `${k}-${locale}`);
+  const focusOf = (b: (typeof BEATS)[number]) => rectFor(shotName(b.key), b.focus, FOCUS[locale][b.focus]);
+  const u = focusOf(beat);
   // some focus rows sit below the first viewport: scroll the page there before the push-in
-  const scrollOf = (b: (typeof BEATS)[number]) => ('scroll' in b ? b.scroll[locale] : 0);
+  const scrollOf = (b: (typeof BEATS)[number]) => autoScroll(focusOf(b));
   const scrollU = scrollOf(beat) * prog(lf, -16, 0, EASE_IN_OUT);
   const rect = { x: u[0] * sw, y: (u[1] - scrollU) * sw, w: (u[2] - u[0]) * sw, h: (u[3] - u[1]) * sw };
 
@@ -73,7 +76,8 @@ export const Product: React.FC<{ locale: Locale }> = ({ locale }) => {
 
   const shot = (k: string) => (k === 'dashboard' ? `shots/dashboard-${locale}-full.png` : `shots/${k}-${locale}.png`);
   const wipe = bi > 0 ? prog(f, beat.from, beat.from + 16, EASE_IN_OUT) : 1;
-  const redact = [isRtl ? { y: 0.027, h: 0.013, x: 0.72, w: 0.21 } : { y: 0.027, h: 0.013, x: 0.075, w: 0.21 }];
+  const fallbackStrip = isRtl ? { y: 0.027, h: 0.013, x: 0.72, w: 0.21 } : { y: 0.027, h: 0.013, x: 0.075, w: 0.21 };
+  const redactFor = (k: string) => [emailStrip(shotName(k), fallbackStrip)];
   const d = isRtl ? 'rtl' : 'ltr';
 
   const callouts: Record<string, React.ReactNode> = {
@@ -129,12 +133,12 @@ export const Product: React.FC<{ locale: Locale }> = ({ locale }) => {
           }}
         >
           <Laptop width={W} glare={ry / 20}>
-            {bi > 0 ? <Screen src={shot(BEATS[bi - 1].key)} width={sw} scroll={scrollOf(BEATS[bi - 1]) * sw} redact={redact} /> : null}
+            {bi > 0 ? <Screen src={shot(BEATS[bi - 1].key)} width={sw} scroll={scrollOf(BEATS[bi - 1]) * sw} redact={redactFor(BEATS[bi - 1].key)} /> : null}
             <Screen
               src={shot(beat.key)}
               width={sw}
               scroll={scrollU * sw}
-              redact={redact}
+              redact={redactFor(beat.key)}
               clip={bi > 0 ? (isRtl ? `inset(0 0 0 ${(1 - wipe) * 100}%)` : `inset(0 ${(1 - wipe) * 100}% 0 0)`) : undefined}
             />
             {bi > 0 && wipe < 1 ? (
