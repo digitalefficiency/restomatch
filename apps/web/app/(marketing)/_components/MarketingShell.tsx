@@ -50,7 +50,7 @@ export async function MarketingShell({ children }: { children: React.ReactNode }
   const leakCheck = leakCheckPublic();
   const NAV = leakCheck ? [...NAV_BASE.slice(0, 3), LEAK_CHECK, ...NAV_BASE.slice(3)] : NAV_BASE;
   const link =
-    'rounded-lg px-3 py-2 text-sm font-medium text-muted transition-colors hover:bg-surface-2 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60';
+    'touch-target flex items-center rounded-lg px-3 py-2 text-sm font-medium text-muted transition-colors hover:bg-surface-2 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60';
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -64,7 +64,7 @@ export async function MarketingShell({ children }: { children: React.ReactNode }
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4">
           <Link
             href="/"
-            className="flex items-center gap-2.5 rounded-xl text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+            className="touch-target flex items-center gap-2.5 rounded-xl text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
             aria-label={t('shell.homeLabel')}
           >
             <Logo />
@@ -114,7 +114,7 @@ export async function MarketingShell({ children }: { children: React.ReactNode }
                 </Link>
                 <Link
                   href="/#lead"
-                  className="mt-1 rounded-xl bg-primary px-3 py-2.5 text-center text-sm font-semibold text-on-primary"
+                  className="touch-target mt-1 flex items-center justify-center rounded-xl bg-primary px-3 py-2.5 text-center text-sm font-semibold text-on-primary"
                 >
                   {t('shell.cta')}
                 </Link>
@@ -146,21 +146,21 @@ export async function MarketingShell({ children }: { children: React.ReactNode }
                 <span className="mb-1 text-xs font-semibold uppercase text-muted ltr:font-mono ltr:tracking-[0.18em]">
                   {t('shell.footerProduct')}
                 </span>
-                <Link href="/#how" className="text-muted hover:text-ink">
+                <Link href="/#how" className="touch-target inline-flex items-center text-muted hover:text-ink">
                   {t('shell.nav.how')}
                 </Link>
-                <Link href="/about#features" className="text-muted hover:text-ink">
+                <Link href="/about#features" className="touch-target inline-flex items-center text-muted hover:text-ink">
                   {t('shell.nav.features')}
                 </Link>
-                <Link href="/pricing" className="text-muted hover:text-ink">
+                <Link href="/pricing" className="touch-target inline-flex items-center text-muted hover:text-ink">
                   {t('shell.nav.pricing')}
                 </Link>
                 {leakCheck ? (
-                  <Link href={LEAK_CHECK.href} className="text-muted hover:text-ink">
+                  <Link href={LEAK_CHECK.href} className="touch-target inline-flex items-center text-muted hover:text-ink">
                     {t(LEAK_CHECK.key)}
                   </Link>
                 ) : null}
-                <Link href="/showcase" className="text-muted hover:text-ink">
+                <Link href="/showcase" className="touch-target inline-flex items-center text-muted hover:text-ink">
                   {t('shell.nav.demo')}
                 </Link>
               </nav>
@@ -168,13 +168,13 @@ export async function MarketingShell({ children }: { children: React.ReactNode }
                 <span className="mb-1 text-xs font-semibold uppercase text-muted ltr:font-mono ltr:tracking-[0.18em]">
                   {t('shell.footerCompany')}
                 </span>
-                <Link href="/about" className="text-muted hover:text-ink">
+                <Link href="/about" className="touch-target inline-flex items-center text-muted hover:text-ink">
                   {t('shell.nav.about')}
                 </Link>
-                <Link href="/#lead" className="text-muted hover:text-ink">
+                <Link href="/#lead" className="touch-target inline-flex items-center text-muted hover:text-ink">
                   {t('shell.contact')}
                 </Link>
-                <Link href="/login" className="text-muted hover:text-ink">
+                <Link href="/login" className="touch-target inline-flex items-center text-muted hover:text-ink">
                   {t('shell.loginFull')}
                 </Link>
               </nav>
@@ -182,13 +182,13 @@ export async function MarketingShell({ children }: { children: React.ReactNode }
                 <span className="mb-1 text-xs font-semibold uppercase text-muted ltr:font-mono ltr:tracking-[0.18em]">
                   {t('shell.footerLegal')}
                 </span>
-                <Link href="/privacy" className="text-muted hover:text-ink">
+                <Link href="/privacy" className="touch-target inline-flex items-center text-muted hover:text-ink">
                   {t('shell.privacy')}
                 </Link>
-                <Link href="/terms" className="text-muted hover:text-ink">
+                <Link href="/terms" className="touch-target inline-flex items-center text-muted hover:text-ink">
                   {t('shell.terms')}
                 </Link>
-                <Link href="/cookies" className="text-muted hover:text-ink">
+                <Link href="/cookies" className="touch-target inline-flex items-center text-muted hover:text-ink">
                   {t('shell.cookies')}
                 </Link>
               </nav>
