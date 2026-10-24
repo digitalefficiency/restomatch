@@ -37,6 +37,8 @@ type D = {
   severity: 'info' | 'warn' | 'block';
   delta: string;
   status?: 'open' | 'accepted' | 'rejected' | 'escalated' | 'resolved';
+  /** Invoice-level finding (DUPLICATE_INVOICE, TOTAL_MISMATCH, VAT_MISMATCH): no invoice line. */
+  invoiceLevel?: boolean;
 };
 
 async function setup() {
@@ -100,7 +102,7 @@ async function setup() {
         severity: d.severity,
         deltaAmount: d.delta,
         productId: p!.id,
-        invoiceLineId: line!.id,
+        invoiceLineId: d.invoiceLevel ? null : line!.id,
         resolutionStatus: d.status ?? 'open',
       });
     }
@@ -281,5 +283,48 @@ describe('computeLeakBreakdown', () => {
     // The breakdown sums to the hero.
     const hero = await computeLeakHero(db, restaurantId, { now: NOW });
     expect(rows.reduce((s, r) => s + r.leakIls, 0)).toBe(hero.leakIls);
+  });
+});
+
+describe('leak proof sheet basis (flag leakProof: hero + breakdown only)', () => {
+  it('breakdown leaks sum to the hero to the agora, counts are ordered, findings carry their invoice line', async () => {
+    const { restaurantId, invoice } = await setup();
+    const a = await invoice({
+      date: THIS_MONTH,
+      exclVat: '200',
+      inclVat: '236',
+      d: [
+        { type: 'PRICE_HIGHER', severity: 'warn', delta: '12.34' },
+        { type: 'DUPLICATE_INVOICE', severity: 'block', delta: '0.01', invoiceLevel: true },
+      ],
+    });
+    await invoice({ date: THIS_MONTH, exclVat: '100', inclVat: '118', d: [{ type: 'QTY_SHORT', severity: 'block', delta: '-7.65' }] });
+    await invoice({ date: THIS_MONTH, exclVat: '50', inclVat: '59' }); // matched, clean
+    await invoice({ date: THIS_MONTH, exclVat: '900', inclVat: '1062', matched: false }); // pending, unmatched
+    // Pending-link (no PO) AND a ₪1.00 VAT finding: pending invoices still count toward the leak.
+    const pendingWithLeak = await invoice({
+      date: THIS_MONTH,
+      exclVat: '50',
+      inclVat: '59',
+      d: [
+        { type: 'UNORDERED_ARRIVAL', severity: 'block', delta: '59' },
+        { type: 'VAT_MISMATCH', severity: 'warn', delta: '1', invoiceLevel: true },
+      ],
+    });
+
+    const hero = await computeLeakHero(db, restaurantId, { now: NOW });
+    const rows = await computeLeakBreakdown(db, restaurantId, { now: NOW, limit: 200 });
+    const agorot = (v: number) => Math.round(v * 100);
+    // Σ over ALL breakdown rows (pending ones included) == hero leak, to the agora.
+    expect(rows.length).toBeLessThan(200);
+    expect(rows.reduce((s, r) => s + agorot(r.leakIls), 0)).toBe(agorot(hero.leakIls));
+    expect(agorot(hero.leakIls)).toBe(2100); // 12.34 + 0.01 + 7.65 + 1.00 (pending invoice)
+    expect(rows.find((r) => r.invoiceId === pendingWithLeak)).toMatchObject({ pendingLink: true, leakIls: 1 });
+    expect(hero.invoicesWithLeak).toBeLessThanOrEqual(hero.matchedInvoiceCount);
+    expect(hero.matchedInvoiceCount).toBeLessThanOrEqual(hero.invoiceCount);
+    expect(hero.pendingLinkCount).toBe(2);
+    const lines = rows.find((r) => r.invoiceId === a)!.lines;
+    expect(lines.find((l) => l.type === 'PRICE_HIGHER')!.invoiceLineId).toEqual(expect.any(String));
+    expect(lines.find((l) => l.type === 'DUPLICATE_INVOICE')!.invoiceLineId).toBeNull();
   });
 });

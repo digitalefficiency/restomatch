@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { canSeeRoute } from '@/lib/roles';
-import { Activity, ArrowLeft, CheckCircle2, ClipboardCheck, FileText, Hourglass, Mail, ShieldCheck } from 'lucide-react';
+import { Activity, ArrowLeft, CheckCircle2, ClipboardCheck, FileText, Hourglass, Mail, ShieldCheck, Sigma } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
 import { formatNumber, formatPercent } from '@/lib/i18n/format';
@@ -11,6 +11,7 @@ import { overview } from '@/lib/i18n/messages/overview';
 import type { he as overviewHe } from '@/lib/i18n/messages/overview/he';
 import type { Translator } from '@/lib/i18n/translate';
 import { leaks as leaksNs } from '@/lib/i18n/messages/leaks';
+import { leakProof as leakProofNs } from '@/lib/i18n/messages/leakProof';
 import { recovery as recoveryNs } from '@/lib/i18n/messages/recovery';
 import {
   EmptyState,
@@ -77,6 +78,7 @@ export default async function DashboardPage({
     caller.recovery.flags(),
     getT(recoveryNs),
   ]);
+  const tp = await getT(leakProofNs);
   const hero = summary.current;
   // A comparison period with no invoices has nothing to compare against.
   const previous = summary.previous && summary.previous.invoiceCount > 0 ? summary.previous : null;
@@ -85,6 +87,8 @@ export default async function DashboardPage({
   const returned = flags.recovery ? await caller.recovery.returnedThisMonth() : null;
   const canPreviewReport = flags.monthlyReport && canSeeRoute(role, '/dashboard/reports');
   const canPreviewDigest = flags.monthlyDigestPreview && canSeeRoute(role, '/dashboard/reports/digest');
+  // "How did we get to ₪X?" proves THIS month's hero → only on the default view.
+  const canProve = flags.leakProof && defaultView && canSeeRoute(role, '/dashboard/leaks/proof');
 
   // Leak grid is owner-only; other roles simply won't see this section. If the
   // feature is gated behind a paid plan, surface a compact upsell teaser rather
@@ -198,6 +202,7 @@ export default async function DashboardPage({
         }
         reportLink={canPreviewReport ? tr('report.preview') : undefined}
         digestLink={canPreviewDigest ? tr('digest.title') : undefined}
+        proofLink={canProve ? tp('button', { amount: formatIls(summary.current.leakIls, { locale }) }) : undefined}
       />
 
       {trend ? (
@@ -310,6 +315,7 @@ function LeakHero({
   returned,
   reportLink,
   digestLink,
+  proofLink,
 }: {
   t: OverviewT;
   hero: Hero;
@@ -330,6 +336,8 @@ function LeakHero({
   reportLink?: string;
   /** Flag `monthlyDigestPreview`: link to the in-app preview of the monthly email. */
   digestLink?: string;
+  /** Flag `leakProof`: label of the link to the proof sheet behind the number. */
+  proofLink?: string;
 }) {
   const hasLeak = hero.leakIls > 0;
   return (
@@ -427,6 +435,16 @@ function LeakHero({
           >
             <Mail className="h-4 w-4" aria-hidden="true" />
             {digestLink}
+          </Link>
+        ) : null}
+        {proofLink ? (
+          <Link
+            href="/dashboard/leaks/proof"
+            data-testid="hero-proof"
+            className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl border border-line bg-surface-2 px-4 py-2 text-sm font-semibold text-ink transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+          >
+            <Sigma className="h-4 w-4" aria-hidden="true" />
+            {proofLink}
           </Link>
         ) : null}
         {canDrill && (hasLeak || hero.pendingLinkCount > 0) ? (

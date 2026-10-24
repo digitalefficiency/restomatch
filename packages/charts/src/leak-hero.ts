@@ -155,6 +155,8 @@ export interface LeakBreakdownLine {
   productNameEn: string | null;
   lineDescription: string | null;
   lineDescriptionEn: string | null;
+  /** The invoice line the finding is on; null for invoice-level findings (DUPLICATE_INVOICE, TOTAL_MISMATCH, VAT_MISMATCH…). */
+  invoiceLineId: string | null;
 }
 
 export interface LeakBreakdownInvoice {
@@ -209,7 +211,7 @@ export async function computeLeakBreakdown(
   const ids = invRows.map((r) => String(r.id));
   const lineRes = await db.execute(sql`
     SELECT
-      mr.invoice_id, d.id, d.type, d.severity, d.resolution_status, d.delta_amount,
+      mr.invoice_id, d.id, d.type, d.severity, d.resolution_status, d.delta_amount, d.invoice_line_id,
       d.expected_value, d.actual_value,
       (${counts}) AS counts,
       p.canonical_name AS product_name, p.name_en AS product_name_en,
@@ -239,6 +241,7 @@ export async function computeLeakBreakdown(
       productNameEn: (l.product_name_en as string | null) ?? null,
       lineDescription: (l.line_desc as string | null) ?? null,
       lineDescriptionEn: (l.line_desc_en as string | null) ?? null,
+      invoiceLineId: l.invoice_line_id == null ? null : String(l.invoice_line_id),
     });
     linesByInvoice.set(key, list);
   }
