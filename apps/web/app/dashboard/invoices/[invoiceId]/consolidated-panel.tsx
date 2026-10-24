@@ -4,6 +4,7 @@ import { Badge, type BadgeTone } from '@/lib/components/Badge';
 import { Card } from '@/lib/components/Card';
 import { SectionHeader } from '@/lib/components';
 import { displayName } from '@/lib/components/displayName';
+import { UnitText } from '@/lib/components/UnitText';
 import { formatDate, formatNumber } from '@/lib/i18n/format';
 import type { Locale } from '@/lib/i18n/config';
 import type { Translator } from '@/lib/i18n/translate';
@@ -102,7 +103,10 @@ export function ConsolidatedPanel({ proposal, t, locale }: { proposal: Consolida
               <div key={label} className="rounded-xl border border-line bg-surface-2 px-4 py-3">
                 <dt className="text-xs text-muted">{label}</dt>
                 <dd className="mt-1 font-mono text-lg font-semibold tabular-nums text-ink" dir="ltr">
-                  {value}
+                  {/* bdi keeps a leading +/− with its ₪ amount in RTL. */}
+                  <bdi dir="ltr" className="whitespace-nowrap">
+                    {value}
+                  </bdi>
                 </dd>
               </div>
             ))}
@@ -169,7 +173,11 @@ export function ConsolidatedPanel({ proposal, t, locale }: { proposal: Consolida
                     <tr key={p.key} className="border-t border-line">
                       <td className={`${cell} font-medium text-ink`}>
                         {name}
-                        {p.unit ? <span className="ms-1 text-xs text-subtle">({p.unit})</span> : null}
+                        {p.unit ? (
+                          <span className="ms-1 text-xs text-subtle">
+                            (<UnitText unit={p.unit} />)
+                          </span>
+                        ) : null}
                       </td>
                       <td className={`${cell} text-end font-mono tabular-nums text-ink`}>{num(p.qtyReceived)}</td>
                       <td className={`${cell} text-end font-mono tabular-nums text-ink`}>{num(p.qtyBilled)}</td>

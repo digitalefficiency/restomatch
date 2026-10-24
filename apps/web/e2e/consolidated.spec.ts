@@ -73,6 +73,8 @@ for (const [lang, viewport] of [
     await expect(flagged).toHaveCount(1);
     await expect(flagged).toContainText('36');
     expect(await page.getByTestId('xmatch-products').locator('tbody tr').count()).toBeGreaterThan(0);
+    // Units go through the shared translator: English reads "(litre)", never "(ליטר)".
+    if (lang === 'en') await expect(page.getByTestId('xmatch-products')).not.toContainText('ליטר');
 
     // No sideways page scroll on a phone (the tables scroll inside their own region).
     const scrollW = await page.evaluate(() => document.documentElement.scrollWidth);
