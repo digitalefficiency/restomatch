@@ -15,8 +15,9 @@
  * this month" shows it, and with the `dishPriceAlert` flag it raises a dish price alert.
  */
 import {
+  DEMO_MAIN_BUSINESS_ID,
+  DEMO_MAIN_NAME,
   and,
-  asc,
   assertSeedTarget,
   createDb,
   eq,
@@ -192,9 +193,18 @@ const DEMO: DemoRecipe[] = [
 ];
 
 async function main() {
-  // Same tenant as seed-demo.ts (the oldest restaurant — the chain seed adds branches after it).
-  const [restaurant] = await db.select().from(restaurants).orderBy(asc(restaurants.createdAt)).limit(1);
-  if (!restaurant) throw new Error('no restaurant — run the base seed first');
+  // The demo restaurant ONLY — never "the oldest restaurant" (on a shared DB
+  // that is a real tenant). reseed-demo passes DEMO_RESTAURANT_ID; otherwise the
+  // main demo tenant by its business id + name (findDemoTenants' identity).
+  const only = process.env.DEMO_RESTAURANT_ID;
+  const [restaurant] = only
+    ? await db.select().from(restaurants).where(eq(restaurants.id, only)).limit(1)
+    : await db
+        .select()
+        .from(restaurants)
+        .where(and(eq(restaurants.businessId, DEMO_MAIN_BUSINESS_ID), eq(restaurants.name, DEMO_MAIN_NAME)))
+        .limit(1);
+  if (!restaurant) throw new Error('no demo restaurant — run the base seed first');
   const rid = restaurant.id;
 
   const productRows = await db.select().from(products).where(eq(products.restaurantId, rid));
