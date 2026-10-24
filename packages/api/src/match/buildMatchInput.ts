@@ -11,6 +11,7 @@ import {
   isNull,
   lt,
   lte,
+  matchRuns,
   ne,
   or,
   poLines,
@@ -296,6 +297,7 @@ export async function buildMatchInputForInvoice(
       unit: p.unit,
       unitPriceExpected: p.unitPriceExpected == null ? null : Number(p.unitPriceExpected),
     }));
+    poLineInputs = await withoutLinesBilledElsewhere(db, restaurantId, invoiceId, po.id, poLineInputs, invoiceLineInputs);
 
     const grs = await db
       .select({ id: goodsReceipts.id })
@@ -432,6 +434,42 @@ export async function buildMatchInputForInvoice(
   };
 
   return { input, poId: po?.id ?? null, grId };
+}
+
+/**
+ * One order, several invoices ("receive the rest": a partial delivery billed on
+ * one invoice, the rest delivered and billed on another — one receipt per PO).
+ * Each invoice is matched against the whole PO, so a PO line that ANOTHER
+ * invoice of this order bills, and this one doesn't, would read as
+ * MISSING_ON_INVOICE (warn, the line's full value) on this one — a false leak of
+ * the part already billed. Such lines are left out of this invoice's match.
+ *
+ * A line this invoice bills always stays (so its qty / price checks run), and a
+ * line no invoice of the order bills stays MISSING. Pairing mirrors the engine:
+ * by product, or by supplier SKU for a line with no product. "Another invoice of
+ * this order" = one with a match run on this PO (a sibling not matched yet is
+ * picked up on its own run: the receipt submit enqueues the never-matched first).
+ *
+ * Known limit (post-demo, api layer): billing the same units on two invoices is
+ * not caught here — each is checked against the cumulative receipt on its own.
+ */
+async function withoutLinesBilledElsewhere(
+  db: Database,
+  restaurantId: string,
+  invoiceId: string,
+  poId: string,
+  po: PoLineInput[],
+  own: InvoiceLineInput[],
+): Promise<PoLineInput[]> {
+  const others = await db
+    .selectDistinct({ productId: invoiceLines.productId, supplierSku: invoiceLines.supplierSku })
+    .from(invoiceLines)
+    .innerJoin(matchRuns, eq(matchRuns.invoiceId, invoiceLines.invoiceId))
+    .where(and(eq(matchRuns.restaurantId, restaurantId), eq(matchRuns.poId, poId), ne(matchRuns.invoiceId, invoiceId)));
+  if (others.length === 0) return po;
+  const billedBy = (lines: Array<{ productId: string | null; supplierSku: string | null }>, l: PoLineInput) =>
+    lines.some((x) => (l.productId ? x.productId === l.productId : !!l.supplierSku && x.supplierSku === l.supplierSku));
+  return po.filter((l) => billedBy(own, l) || !billedBy(others, l));
 }
 
 /**

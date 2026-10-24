@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   and,
   asc,
@@ -252,5 +252,155 @@ describe('match-invoice job', () => {
     expect(types).not.toContain('QTY_SHORT');
     expect(types).not.toContain('QTY_OVER');
     expect(await hero()).toBe(before);
+  });
+});
+
+/**
+ * "Receive the rest": a partial receipt is reopened for the second delivery of
+ * the same order (one receipt per PO). The count is cumulative, and the second
+ * close re-matches EVERY invoice on the receipt — the first invoice's shortfall
+ * has since arrived, so keeping its old run would overstate the leak.
+ */
+describe('receive the rest — two deliveries, two invoices, one receipt', () => {
+  // One receipt per PO: start from none (an earlier case may leave its own).
+  beforeEach(async () => {
+    const left = await db.select({ id: goodsReceipts.id }).from(goodsReceipts).where(eq(goodsReceipts.poId, poId));
+    if (left.length === 0) return;
+    const ids = left.map((g) => g.id);
+    const runs = await db.select({ invoiceId: matchRuns.invoiceId }).from(matchRuns).where(inArray(matchRuns.grId, ids));
+    const invs = runs.map((r) => r.invoiceId).filter((x): x is string => !!x);
+    if (invs.length) await cleanup(ids[0]!, invs);
+    await db.delete(goodsReceipts).where(inArray(goodsReceipts.id, ids));
+  });
+
+  async function invoiceFor(grId: string, tag: string, billed: Array<{ l: (typeof lines)[number]; qty: number; price?: number }>) {
+    const total = billed.reduce((s, b) => s + Math.round(b.qty * (b.price ?? b.l.price) * 100), 0) / 100;
+    const [inv] = await db
+      .insert(invoices)
+      .values({
+        restaurantId,
+        supplierId,
+        status: 'matched',
+        source: 'photo',
+        rawImageUrl: `https://x/${grId}-${tag}.jpg`,
+        invoiceNumber: `RM-${grId.slice(0, 8)}-${tag}`,
+        invoiceDate: NOW,
+        totalExclVat: total.toFixed(2),
+        vatAmount: '0.00',
+        totalInclVat: total.toFixed(2),
+      })
+      .returning();
+    await db.insert(invoiceLines).values(
+      billed.map((b) => ({
+        invoiceId: inv!.id,
+        productId: b.l.productId,
+        rawDescription: b.l.desc ?? '—',
+        qtyBilled: String(b.qty),
+        unit: b.l.unit,
+        unitPriceBilled: String(b.price ?? b.l.price),
+        lineTotal: (Math.round(b.qty * (b.price ?? b.l.price) * 100) / 100).toFixed(2),
+      })),
+    );
+    return inv!.id;
+  }
+
+  /** Delivery 1: everything but half of the first line; invoice 1 bills what came. */
+  async function firstDelivery() {
+    const [gr] = await db.insert(goodsReceipts).values({ restaurantId, poId, status: 'pending' }).returning();
+    const grId = gr!.id;
+    const short = lines[0]!;
+    const half = Math.floor(short.qty / 2);
+    const grLineIds = await db
+      .insert(grLines)
+      .values(lines.map((l) => ({ grId, poLineId: l.id, productId: l.productId, qtyReceived: String(l === short ? half : l.qty) })))
+      .returning({ id: grLines.id, poLineId: grLines.poLineId });
+    const inv1 = await invoiceFor(grId, '1', lines.map((l) => ({ l, qty: l === short ? half : l.qty })));
+    await db.update(goodsReceipts).set({ status: 'partial' }).where(eq(goodsReceipts.id, grId));
+    expect((await matchInvoiceForJob(db, { restaurantId, invoiceId: inv1, rematch: true, poId })).persisted).not.toBeNull();
+    return { grId, inv1, short, half, grLineIds };
+  }
+
+  /** Reopen, count the rest (cumulative = ordered), invoice 2 bills the rest, close + re-match both. */
+  async function secondDelivery(
+    d: Awaited<ReturnType<typeof firstDelivery>>,
+    inv2Price?: number,
+  ) {
+    await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, d.grId));
+    const g = d.grLineIds.find((x) => x.poLineId === d.short.id)!;
+    await db.update(grLines).set({ qtyReceived: String(d.short.qty) }).where(eq(grLines.id, g.id));
+    const inv2 = await invoiceFor(d.grId, '2', [{ l: d.short, qty: d.short.qty - d.half, price: inv2Price }]);
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, d.grId));
+    const r1 = await matchInvoiceForJob(db, { restaurantId, invoiceId: d.inv1, rematch: true, poId });
+    const r2 = await matchInvoiceForJob(db, { restaurantId, invoiceId: inv2, rematch: true, poId });
+    return { inv2, r1, r2 };
+  }
+
+  async function cleanup(grId: string, ids: string[]) {
+    await db.delete(matchRuns).where(inArray(matchRuns.invoiceId, ids));
+    await db.delete(invoices).where(inArray(invoices.id, ids));
+    await db.delete(goodsReceipts).where(eq(goodsReceipts.id, grId));
+  }
+
+  it('the second close clears the first shortfall; the hero is back to "= order" (no false MISSING on the rest)', async () => {
+    const before = await hero();
+    const d = await firstDelivery();
+    // First close: the half still on its way is a shortfall.
+    expect(await typesOf(d.inv1)).toEqual(['QTY_SHORT']);
+    expect(await hero()).toBeGreaterThan(before);
+
+    const s = await secondDelivery(d);
+    try {
+      expect(s.r1.replaced).toBe(true); // invoice 1 re-matched against the full count
+      expect(s.r2.persisted).not.toBeNull();
+      // (2) the first delivery's shortfall is gone…
+      expect(await typesOf(d.inv1)).toEqual([]);
+      // …and invoice 2 (the rest only) is not "missing" the lines invoice 1 billed.
+      expect(await typesOf(s.inv2)).toEqual([]);
+      // (1) hero = findings of both invoices against the final count = none.
+      expect(await hero()).toBe(before);
+    } finally {
+      await cleanup(d.grId, [d.inv1, s.inv2]);
+    }
+  });
+
+  it('(3) an over-price on invoice 2 moves the hero by exactly that finding', async () => {
+    const before = await hero();
+    const d = await firstDelivery();
+    const over = Math.round(d.short.price * 1.5 * 100) / 100;
+    const s = await secondDelivery(d, over);
+    try {
+      expect(await typesOf(d.inv1)).toEqual([]);
+      const rows = await db
+        .select({ type: discrepancies.type, delta: discrepancies.deltaAmount })
+        .from(discrepancies)
+        .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+        .where(eq(matchRuns.invoiceId, s.inv2));
+      expect(rows.map((r) => r.type)).toContain('PRICE_HIGHER');
+      const expected = Math.round((d.short.qty - d.half) * (over - d.short.price) * 100);
+      expect(Math.round(rows.reduce((t, r) => t + Math.abs(Number(r.delta)), 0) * 100)).toBe(expected);
+      expect((await hero()) - before).toBe(expected);
+    } finally {
+      await cleanup(d.grId, [d.inv1, s.inv2]);
+    }
+  });
+
+  it('(4)+(5) invoice 1 approved after the first close: never re-matched ("settled") — its old run stays', async () => {
+    const before = await hero();
+    const d = await firstDelivery();
+    const atFirstClose = await hero();
+    await db.update(invoices).set({ status: 'approved' }).where(eq(invoices.id, d.inv1));
+    const s = await secondDelivery(d);
+    try {
+      expect(s.r1.skipped).toBe('settled');
+      expect(await typesOf(s.inv2)).toEqual([]);
+      // KNOWN LIMIT (PR body): the signed-off run keeps its first-close
+      // QTY_SHORT, so the hero still counts the shortfall that has since
+      // arrived. Pinned so a fix (charts / api, not the engine) shows up here.
+      expect(await typesOf(d.inv1)).toEqual(['QTY_SHORT']);
+      expect(await hero()).toBe(atFirstClose);
+      expect(atFirstClose).toBeGreaterThan(before);
+    } finally {
+      await cleanup(d.grId, [d.inv1, s.inv2]);
+    }
   });
 });
