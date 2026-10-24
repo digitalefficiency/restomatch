@@ -17,6 +17,8 @@ import {
   poLines,
   priceBaselines,
   products,
+  creditNotes,
+  recoveryClaims,
   purchaseOrders,
   restaurants,
   supplierCatalogItems,
@@ -229,6 +231,18 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'dsr.deleteMyAccount':
     'authed self-service; anonymizes ONLY the caller (ctx.session.userId) — takes no target id, cannot reach another user',
   'dsr.eraseLead': 'admin-denial',
+  // Wave 1 · S12 — ₪-back tracker (flag `recovery`) + monthly report (flag `monthlyReport`).
+  'recovery.flags': 'isolation',
+  'recovery.summary': 'isolation',
+  'recovery.list': 'isolation',
+  'recovery.history': 'attack',
+  'recovery.transition': 'attack',
+  'recovery.recordCreditNote': 'attack',
+  'recovery.creditLineSuggestions': 'isolation',
+  'recovery.returnedThisMonth': 'isolation',
+  'monthlyReport.preview': 'isolation',
+  'monthlyReport.pdf': 'isolation',
+  'monthlyReport.digest': 'isolation',
 };
 
 function listProcedurePaths(): string[] {
@@ -1510,4 +1524,150 @@ describe('role denial: mapping.confirm rejects member-tier callers', () => {
       expect(after).toHaveLength(before.length);
     });
   }
+});
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Wave 1 · S12 — ₪-back tracker + monthly report. Both tenants have the flags
+ * on and one accepted (claimed) discrepancy each; A must never see, move or
+ * credit B's claims, nor use B's supplier / invoice line for a credit note.
+ * ────────────────────────────────────────────────────────────────────────── */
+describe('recovery + monthly report (A → B)', () => {
+  let bClaimId: string;
+  let aClaimId: string;
+
+  beforeAll(async () => {
+    for (const t of [A, B]) {
+      await db.update(restaurants).set({ settings: { features: { all: true } } as never }).where(eq(restaurants.id, t.restaurantId));
+      await db.update(discrepancies).set({ resolutionStatus: 'accepted' }).where(eq(discrepancies.id, t.discrepancyId));
+    }
+    aClaimId = (await callerFor(A).recovery.list())[0]!.id;
+    bClaimId = (await callerFor(B).recovery.list())[0]!.id;
+  });
+
+  it('recovery.list / summary / returnedThisMonth aggregate A-scoped claims only', async () => {
+    const caller = callerFor(A);
+    const list = await caller.recovery.list();
+    expect(list.map((c) => c.id)).toEqual([aClaimId]);
+    expect(JSON.stringify(list)).not.toContain(B.supplierName);
+    const { summary } = await caller.recovery.summary();
+    expect(summary.claimCount).toBe(1);
+    expect(summary.bySupplier.every((s) => s.supplierId !== B.supplierId)).toBe(true);
+    // B's claim recovered → A's returned stays 0.
+    await db.update(recoveryClaims).set({ status: 'recovered', creditedAgorot: 500, recoveredAt: new Date() }).where(eq(recoveryClaims.id, bClaimId));
+    expect((await caller.recovery.returnedThisMonth()).returnedAgorot).toBe(0);
+    await db.update(recoveryClaims).set({ status: 'claimed', creditedAgorot: 0, recoveredAt: null }).where(eq(recoveryClaims.id, bClaimId));
+  });
+
+  it('recovery.list ignores a foreign supplierId filter (returns nothing of B)', async () => {
+    expect(await callerFor(A).recovery.list({ supplierId: B.supplierId })).toEqual([]);
+  });
+
+  it('recovery.history rejects a foreign claimId', async () => {
+    await expect(callerFor(A).recovery.history({ claimId: bClaimId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('recovery.transition rejects a foreign claimId and leaves B untouched', async () => {
+    await expect(
+      callerFor(A).recovery.transition({ claimIds: [aClaimId, bClaimId], to: 'written_off' }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [b] = await db.select().from(recoveryClaims).where(eq(recoveryClaims.id, bClaimId));
+    expect(b!.status).toBe('claimed');
+  });
+
+  it('recovery.recordCreditNote rejects B claims, B supplier and B invoice lines', async () => {
+    const caller = callerFor(A);
+    await expect(
+      caller.recovery.recordCreditNote({ claimIds: [bClaimId], supplierId: A.supplierId, amountAgorot: 100, issuedOn: '2026-10-01' }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(
+      caller.recovery.recordCreditNote({ claimIds: [aClaimId], supplierId: B.supplierId, amountAgorot: 100, issuedOn: '2026-10-01' }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await db.update(invoiceLines).set({ lineTotal: '-5.00' }).where(eq(invoiceLines.id, B.invoiceLineId));
+    try {
+      await expect(
+        caller.recovery.recordCreditNote({ claimIds: [aClaimId], invoiceLineId: B.invoiceLineId }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    } finally {
+      await db.update(invoiceLines).set({ lineTotal: '100.00' }).where(eq(invoiceLines.id, B.invoiceLineId));
+    }
+    const [b] = await db.select().from(recoveryClaims).where(eq(recoveryClaims.id, bClaimId));
+    expect(b!.creditedAgorot).toBe(0);
+  });
+
+  it('recovery.creditLineSuggestions never offers B credit lines', async () => {
+    await db.update(invoiceLines).set({ lineTotal: '-5.00' }).where(eq(invoiceLines.id, B.invoiceLineId));
+    try {
+      const rows = await callerFor(A).recovery.creditLineSuggestions({ supplierId: B.supplierId });
+      expect(rows).toEqual([]);
+      expect(JSON.stringify(await callerFor(A).recovery.creditLineSuggestions())).not.toContain(B.invoiceLineId);
+    } finally {
+      await db.update(invoiceLines).set({ lineTotal: '100.00' }).where(eq(invoiceLines.id, B.invoiceLineId));
+    }
+  });
+
+  it('monthlyReport.preview / pdf aggregate A-scoped data only', async () => {
+    const now = new Date();
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const p = await callerFor(A).monthlyReport.preview({ month, locale: 'he' });
+    const json = JSON.stringify(p);
+    expect(json).not.toContain(B.supplierName);
+    expect(p.data.restaurantName).toBe('Resto A');
+    const pdf = await callerFor(A).monthlyReport.pdf({ month, locale: 'en' });
+    expect(pdf.base64.length).toBeGreaterThan(100);
+  });
+
+  it('monthlyReport.digest shows A-scoped data and A recipients only', async () => {
+    const d = await callerFor(A).monthlyReport.digest({ locale: 'en' });
+    const json = JSON.stringify(d);
+    expect(json).not.toContain(B.supplierName);
+    expect(d.data.restaurantName).toBe('Resto A');
+    expect(d.to.every((e) => !e.includes('-B@'))).toBe(true);
+  });
+
+  it('DB level: A rows can never reference B suppliers / invoices / discrepancies / lines (composite FKs, 23503)', async () => {
+    // A B discrepancy with no claim yet (so the unique key cannot answer first).
+    const [freshB] = await db
+      .insert(discrepancies)
+      .values({ matchRunId: B.matchRunId, restaurantId: B.restaurantId, type: 'QTY_OVER', severity: 'warn', deltaAmount: '3.00' })
+      .returning();
+    const attempts = [
+      db.insert(creditNotes).values({ restaurantId: A.restaurantId, supplierId: B.supplierId, amountAgorot: 100, issuedOn: '2026-10-01' }),
+      db.insert(creditNotes).values({
+        restaurantId: A.restaurantId,
+        supplierId: A.supplierId,
+        invoiceId: B.invoiceId,
+        amountAgorot: 100,
+        issuedOn: '2026-10-01',
+      }),
+      db.insert(creditNotes).values({
+        restaurantId: A.restaurantId,
+        supplierId: A.supplierId,
+        invoiceId: A.invoiceId,
+        invoiceLineId: B.invoiceLineId,
+        amountAgorot: 100,
+        issuedOn: '2026-10-01',
+        source: 'invoice_line',
+      }),
+      db.insert(recoveryClaims).values({ restaurantId: A.restaurantId, discrepancyId: freshB!.id, amountAgorot: 1 }),
+      db.update(recoveryClaims).set({ invoiceId: B.invoiceId }).where(eq(recoveryClaims.id, aClaimId)),
+    ];
+    for (const attempt of attempts) await expect(attempt).rejects.toMatchObject({ code: '23503' });
+    await db.delete(discrepancies).where(eq(discrepancies.id, freshB!.id));
+    // B's claim is untouched and still B's.
+    const [b] = await db.select().from(recoveryClaims).where(eq(recoveryClaims.id, bClaimId));
+    expect(b!.restaurantId).toBe(B.restaurantId);
+  });
+
+  it('flags are per restaurant: B with the flag off is refused while A works', async () => {
+    await db.update(restaurants).set({ settings: {} as never }).where(eq(restaurants.id, B.restaurantId));
+    try {
+      expect(await callerFor(B).recovery.flags()).toEqual({ recovery: false, monthlyReport: false, monthlyDigestPreview: false, leakProof: false });
+      expect(await callerFor(A).recovery.flags()).toEqual({ recovery: true, monthlyReport: true, monthlyDigestPreview: true, leakProof: true });
+      await expect(callerFor(B).recovery.summary()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      await expect(callerFor(B).monthlyReport.digest()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      await expect(callerFor(A).recovery.summary()).resolves.toBeDefined();
+    } finally {
+      await db.update(restaurants).set({ settings: { features: { all: true } } as never }).where(eq(restaurants.id, B.restaurantId));
+    }
+  });
 });

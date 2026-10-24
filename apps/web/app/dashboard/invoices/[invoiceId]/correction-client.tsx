@@ -307,7 +307,12 @@ export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canE
             {invoice.lines.map((l) => {
               const editing = editingLine === l.id;
               return (
-                <tr key={l.id} className="border-b border-line/60 last:border-0 hover:bg-surface-2/60">
+                <tr
+                  key={l.id}
+                  // Deep-link target (#line-<id>) from the leak proof sheet: highlighted when targeted.
+                  id={`line-${l.id}`}
+                  className="scroll-mt-28 border-b border-line/60 last:border-0 hover:bg-surface-2/60 target:bg-surface-2 target:ring-2 target:ring-inset target:ring-primary/50"
+                >
                   <td className="px-4 py-3 text-ink">
                     {editing ? (
                       <Input value={ld.rawDescription} onChange={(e) => setLd({ ...ld, rawDescription: e.target.value })} />

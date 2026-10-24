@@ -17,6 +17,8 @@ export const FEATURE_KEYS = [
   'priceAlerts',
   'recovery',
   'monthlyReport',
+  // In-app preview of the monthly email (S12, demo 2026-10-25). Read-only: no send.
+  'monthlyDigestPreview',
   'ingestWhatsapp',
   'ingestEmail',
   'receiverPwa',
@@ -26,6 +28,8 @@ export const FEATURE_KEYS = [
   'recipes',
   'integrations',
   'payRun',
+  // "How did we get to ₪X?" proof sheet under the dashboard hero (S12). Read-only, no new ₪ math.
+  'leakProof',
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];

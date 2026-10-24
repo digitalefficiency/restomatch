@@ -11,6 +11,8 @@ export const he = {
     receiving: 'קליטת סחורה',
     approvals: 'תור אישורים',
     leaks: 'בלש דליפות',
+    recovery: '₪ חוזר',
+    monthlyReport: 'דוח חודשי',
     suppliers: 'ספקים',
     catalog: 'קטלוג',
     orders: 'הזמנות',

@@ -10,11 +10,17 @@
  *                          connected procurement platform
  *   • outbox-dispatch    — every 60 seconds: pick up queued notifications
  *                          and dispatch via real provider clients
+ *   • recovery-reminders — every day at 08:30 IL: chase overdue credit
+ *                          requests (flag `recovery`, wave 1)
+ *   • monthly-report     — 1st of the month at 07:45 IL: last month's
+ *                          "one number" report (flag `monthlyReport`, wave 1)
  */
 import { makeQueue } from './queue';
 import type { BaselinesJob } from './jobs/baselines';
 import type { DailyExpectationsJob } from './jobs/dailyExpectations';
 import type { EndOfDayReportJob } from './jobs/endOfDayReport';
+import type { MonthlyReportJob } from './jobs/monthlyReport';
+import type { RecoveryRemindersJob } from './jobs/recoveryReminders';
 import type { OrderRemindersJob } from './jobs/orderReminders';
 import type { OutboxDispatchJob } from './jobs/outboxDispatch';
 import type { RetentionJob } from './jobs/retention';
@@ -27,6 +33,8 @@ const orderRemindersQueue = makeQueue<OrderRemindersJob>('order-reminders');
 const supplierDelaysQueue = makeQueue<SupplierDelaysJob>('supplier-delays');
 const endOfDayReportQueue = makeQueue<EndOfDayReportJob>('end-of-day-report');
 const retentionQueue = makeQueue<RetentionJob>('retention');
+const recoveryRemindersQueue = makeQueue<RecoveryRemindersJob>('recovery-reminders');
+const monthlyReportQueue = makeQueue<MonthlyReportJob>('monthly-report');
 
 const TZ = 'Asia/Jerusalem';
 
@@ -76,6 +84,21 @@ export async function registerCronSchedules(): Promise<void> {
     { name: 'end-of-day-report', data: {} },
   );
 
+  // Wave 1 (S12). Both jobs are no-ops for restaurants without their flag.
+  // Recovery reminders — every day 08:30 IL: chase overdue credit requests
+  await recoveryRemindersQueue.upsertJobScheduler(
+    'recovery-reminders-0830',
+    { pattern: '30 8 * * *', tz: TZ },
+    { name: 'recovery-reminders', data: {} },
+  );
+
+  // Monthly report — 1st of the month 07:45 IL: last month's one-number report
+  await monthlyReportQueue.upsertJobScheduler(
+    'monthly-report-1st-0745',
+    { pattern: '45 7 1 * *', tz: TZ },
+    { name: 'monthly-report', data: {} },
+  );
+
   // Retention purge — every day 03:30 IL. Opt-in via RETENTION_CRON_ENABLED; even
   // when scheduled it dry-runs unless RETENTION_PURGE_ENABLED=1 (see retention.ts).
   if (RETENTION_CRON_ENABLED) {
@@ -88,7 +111,8 @@ export async function registerCronSchedules(): Promise<void> {
 
   console.log(
     '[cron] registered: daily-expectations(06:00), baselines(02:00), outbox-dispatch(60s), ' +
-      'order-reminders(09:00), supplier-delays(10:00), end-of-day-report(19:00)' +
+      'order-reminders(09:00), supplier-delays(10:00), end-of-day-report(19:00), ' +
+      'recovery-reminders(08:30), monthly-report(1st 07:45)' +
       (RETENTION_CRON_ENABLED ? ', retention(03:30)' : ''),
   );
 }
@@ -101,4 +125,6 @@ export async function unregisterCronSchedules(): Promise<void> {
   await supplierDelaysQueue.removeJobScheduler('supplier-delays-10');
   await endOfDayReportQueue.removeJobScheduler('end-of-day-report-19');
   await retentionQueue.removeJobScheduler('retention-0330');
+  await recoveryRemindersQueue.removeJobScheduler('recovery-reminders-0830');
+  await monthlyReportQueue.removeJobScheduler('monthly-report-1st-0745');
 }

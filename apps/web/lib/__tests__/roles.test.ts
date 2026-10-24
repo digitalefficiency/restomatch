@@ -58,3 +58,15 @@ describe('roles matrix', () => {
     expect(labelForRole('unknown', 'en')).toBe('unknown');
   });
 });
+
+describe('wave 1 · S12 routes (₪-back tracker, monthly report)', () => {
+  it('nav visibility (exact path) and middleware gating (prefix) agree', () => {
+    for (const role of ['owner', 'manager', 'bookkeeper', 'receiver', 'chef'] as const) {
+      const finance = ['owner', 'manager', 'bookkeeper'].includes(role);
+      const managers = ['owner', 'manager'].includes(role);
+      expect(canSeeRoute(role, '/dashboard/recovery')).toBe(finance);
+      expect(canSeeRoute(role, '/dashboard/reports/monthly')).toBe(managers);
+      expect(allowedRolesForPath('/dashboard/reports/monthly/pdf')?.includes(role)).toBe(managers);
+    }
+  });
+});

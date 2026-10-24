@@ -9,6 +9,8 @@ import {
   BarChart3,
   Boxes,
   FileDown,
+  FileText,
+  HandCoins,
   Inbox,
   LayoutDashboard,
   LogOut,
@@ -38,6 +40,8 @@ type LinkKey =
   | 'approvals'
   | 'leaks'
   | 'chain'
+  | 'recovery'
+  | 'monthlyReport'
   | 'suppliers'
   | 'catalog'
   | 'orders'
@@ -52,6 +56,8 @@ interface NavItem {
   href: string;
   icon: LucideIcon;
   group: GroupKey;
+  /** Wave-1 per-restaurant flag: the item is hidden unless the flag is on. */
+  feature?: string;
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -60,6 +66,14 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'approvals', href: '/dashboard/approvals', icon: Inbox, group: 'operations' },
   { key: 'leaks', href: '/dashboard/leaks', icon: BarChart3, group: 'operations' },
   { key: 'chain', href: '/dashboard/chain', icon: Network, group: 'operations' },
+  { key: 'recovery', href: '/dashboard/recovery', icon: HandCoins, group: 'operations', feature: 'recovery' },
+  {
+    key: 'monthlyReport',
+    href: '/dashboard/reports/monthly',
+    icon: FileText,
+    group: 'operations',
+    feature: 'monthlyReport',
+  },
   { key: 'suppliers', href: '/dashboard/suppliers', icon: Truck, group: 'purchasing' },
   { key: 'catalog', href: '/dashboard/catalog', icon: Boxes, group: 'purchasing' },
   { key: 'orders', href: '/dashboard/orders', icon: ShoppingCart, group: 'purchasing' },
@@ -83,13 +97,15 @@ function isActive(pathname: string, href: string): boolean {
  * management is then one click away in the branch switcher and on the chain
  * page); single-branch owners get the Branches tab instead (open a branch /
  * see the chain plan). One of the two, so the tab row still fits.
+ * `features`: wave-1 per-restaurant flags; an item with `feature` is hidden unless it is on.
  */
-function visibleItems(role: UserRole, showChain = false): NavItem[] {
+function visibleItems(role: UserRole, showChain = false, features: readonly string[] = []): NavItem[] {
   return NAV_ITEMS.filter(
-    ({ key, href }) =>
+    ({ key, href, feature }) =>
       canSeeRoute(role, href) &&
       (key !== 'chain' || showChain) &&
-      (key !== 'branches' || !showChain),
+      (key !== 'branches' || !showChain) &&
+      (!feature || features.includes(feature)),
   );
 }
 
@@ -101,10 +117,18 @@ const focusRing =
  * with hairline separators. Scrolls horizontally instead of wrapping if a
  * narrow laptop can't fit every tab.
  */
-export function DesktopNav({ role, showChain = false }: { role: UserRole; showChain?: boolean }) {
+export function DesktopNav({
+  role,
+  showChain = false,
+  features,
+}: {
+  role: UserRole;
+  showChain?: boolean;
+  features?: readonly string[];
+}) {
   const t = useT(nav);
   const pathname = usePathname();
-  const items = visibleItems(role, showChain);
+  const items = visibleItems(role, showChain, features);
   return (
     <nav aria-label={t('mainLabel')} className="hidden lg:block">
       <ul className="-mb-px flex items-stretch gap-1 overflow-x-auto text-sm [scrollbar-width:none]">
@@ -152,6 +176,7 @@ export function DesktopNav({ role, showChain = false }: { role: UserRole; showCh
  */
 export function MobileNav({
   role,
+  features,
   logout,
   restaurantName,
   email,
@@ -159,6 +184,7 @@ export function MobileNav({
   branchSwitcher,
 }: {
   role: UserRole;
+  features?: readonly string[];
   logout: () => Promise<void>;
   restaurantName: string;
   email: string;
@@ -176,7 +202,7 @@ export function MobileNav({
   useEffect(() => setMounted(true), []);
   const closeRef = useRef<HTMLButtonElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const items = visibleItems(role, showChain);
+  const items = visibleItems(role, showChain, features);
   const primary = items.slice(0, 4);
 
   // Close on navigation.
