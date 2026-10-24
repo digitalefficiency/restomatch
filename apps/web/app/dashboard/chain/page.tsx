@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { TRPCError } from '@trpc/server';
-import { AlertTriangle, ClipboardCheck, Network, PartyPopper, Scale, ShieldCheck, Undo2 } from 'lucide-react';
+import { AlertTriangle, ClipboardCheck, Network, PartyPopper, Radar, Scale, ShieldCheck, Undo2 } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
 import { formatDate, formatNumber, formatPercent } from '@/lib/i18n/format';
@@ -8,6 +8,9 @@ import { getLocale, getT } from '@/lib/i18n/server';
 import { originalProps } from '@/lib/i18n/original';
 import type { Locale } from '@/lib/i18n/config';
 import { chain } from '@/lib/i18n/messages/chain';
+import { approvals } from '@/lib/i18n/messages/approvals';
+import type { he as approvalsHe } from '@/lib/i18n/messages/approvals/he';
+import type { MessageKey } from '@/lib/i18n/translate';
 import {
   Badge,
   Card,
@@ -23,6 +26,9 @@ import { ViewToolbar, parseView, rangeLabel } from '@/lib/components/views';
 import { SwitchBranchButton } from './switch-button';
 
 type Overview = Awaited<ReturnType<Awaited<ReturnType<typeof createServerCaller>>['chain']['overview']>>;
+type Alerts = Awaited<ReturnType<Awaited<ReturnType<typeof createServerCaller>>['chain']['alerts']>>;
+/** Same floor as the router's ALERT_MIN_LEAK_ILS (copy only). */
+const ALERT_MIN_LEAK_ILS = 50;
 
 /** 'YYYY-MM' of an instant in Israel time (heatmap columns are local months). */
 function ymOf(value: string | Date): string {
@@ -59,9 +65,10 @@ export default async function ChainPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [caller, t, locale, sp] = await Promise.all([
+  const [caller, t, ta, locale, sp] = await Promise.all([
     createServerCaller(),
     getT(chain),
+    getT(approvals),
     getLocale(),
     searchParams,
   ]);
@@ -70,6 +77,9 @@ export default async function ChainPage({
 
   let data: Overview | null = null;
   let blocked: 'entitlement' | 'role' | null = null;
+  // chainAlerts (flag): the weekly card; `enabled: false` when the flag is off.
+  // It never blocks the page — an error just hides the card.
+  const alertsP: Promise<Alerts | null> = caller.chain.alerts().catch(() => null);
   try {
     data = await caller.chain.overview({
       view: { period: view.period, ...(view.period === 'custom' ? { from: view.from, to: view.to } : {}) },
@@ -101,7 +111,10 @@ export default async function ChainPage({
     );
   }
 
+  const alerts = await alertsP;
   const ils = (v: number) => formatIls(v, { locale });
+  const typeLabel = (v: string) => ta(`types.${v}.label` as MessageKey<typeof approvalsHe>);
+  const shortDay = (ymd: string) => formatDate(`${ymd}T12:00:00Z`, locale, { day: 'numeric', month: 'short' });
   const pct = (v: number | null) => (v === null ? t('dashboard.ranking.noSpend') : formatPercent(v, locale, 1));
   const { totals } = data;
   const worst = data.branches.find((b) => b.restaurantId === data.worstBranchId) ?? null;
@@ -264,6 +277,71 @@ export default async function ChainPage({
           <SwitchBranchButton restaurantId={worst.restaurantId} label={t('dashboard.worst.cta')} variant="danger" testId="chain-worst-switch" />
         ) : null}
       </Card>
+
+      {/* chainAlerts (flag): the branch to look at this week + each branch's main leak driver. */}
+      {alerts?.enabled ? (
+        <Card elevated padding="md" className="mt-6" data-testid="chain-alerts">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-danger/12 text-danger ring-1 ring-danger/25">
+                <Radar className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-wider text-subtle">{t('dashboard.alerts.title')}</p>
+                <p className="text-xs text-subtle" data-testid="chain-alerts-window">
+                  {alerts.from && alerts.to ? t('dashboard.alerts.window', { from: shortDay(alerts.from), to: shortDay(alerts.to) }) : null}
+                </p>
+                {alerts.focus ? (
+                  <div className="mt-1" data-testid="chain-alerts-focus">
+                    <p className="text-base text-ink">
+                      <span className="font-bold" {...originalProps(alerts.focus.name)}>{alerts.focus.name}</span>
+                      <span className="text-muted">
+                        {' · '}
+                        {t('dashboard.alerts.body', { leak: ils(alerts.focus.leakIls), pct: pct(alerts.focus.leakPct) })}
+                      </span>
+                    </p>
+                    {alerts.focus.topDriver ? (
+                      <p className="mt-0.5 text-sm text-danger" data-testid="chain-alerts-driver">
+                        {t('dashboard.alerts.driver', {
+                          type: typeLabel(alerts.focus.topDriver.type),
+                          amount: ils(alerts.focus.topDriver.leakIls),
+                        })}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="mt-1 text-base text-ink" data-testid="chain-alerts-calm">
+                    {t('dashboard.alerts.calm', { min: ils(ALERT_MIN_LEAK_ILS) })}
+                  </p>
+                )}
+              </div>
+            </div>
+            {alerts.focus && alerts.focus.restaurantId !== data.activeRestaurantId ? (
+              <SwitchBranchButton restaurantId={alerts.focus.restaurantId} label={t('dashboard.alerts.cta')} variant="secondary" testId="chain-alerts-switch" />
+            ) : null}
+          </div>
+          {alerts.branches.length > 1 ? (
+            <div className="mt-4 border-t border-line pt-3">
+              <p className="mb-2 text-xs font-semibold text-subtle">{t('dashboard.alerts.byBranch')}</p>
+              <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {alerts.branches.map((b) => (
+                  <li key={b.restaurantId} className="rounded-lg border border-line/60 bg-surface-2/40 px-3 py-2 text-sm" data-testid="chain-alerts-branch">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="truncate font-semibold text-ink" {...originalProps(b.name)}>{b.name}</span>
+                      <span className={cn('shrink-0 font-mono tabular-nums', b.leakIls > 0 ? 'text-danger' : 'text-subtle')}>{ils(b.leakIls)}</span>
+                    </div>
+                    <p className="mt-0.5 text-xs text-muted">
+                      {b.topDriver
+                        ? `${typeLabel(b.topDriver.type)} · ${ils(b.topDriver.leakIls)}`
+                        : t('dashboard.alerts.noLeak')}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </Card>
+      ) : null}
 
       {noData ? (
         <EmptyState className="mt-8" title={t('dashboard.empty.title')} description={t('dashboard.empty.body')} />

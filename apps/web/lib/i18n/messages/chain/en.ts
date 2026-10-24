@@ -29,6 +29,16 @@ export const en: Shape<typeof he> = {
       pending: 'Awaiting approval',
       pendingHint: 'Items in every branch approval queue',
     },
+    alerts: {
+      title: 'Branch to look at this week',
+      window: 'Last 7 days · {from}–{to}',
+      body: '{leak} leaked · {pct} of spend',
+      driver: 'Main driver: {type} · {amount}',
+      calm: 'A calm week: no branch leaked more than {min} in the last 7 days.',
+      byBranch: 'Main driver per branch',
+      noLeak: 'No leak this week',
+      cta: 'Go to branch',
+    },
     worst: {
       title: 'Leakiest branch in the period',
       body: '{leak} leaked · {pct} of spend · {open} open items',
