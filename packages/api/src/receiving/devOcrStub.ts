@@ -9,7 +9,7 @@
  * NEVER active in production (NODE_ENV === 'production'), never when a real key
  * is configured, and switchable off with OCR_DEV_STUB=0.
  */
-import { and, asc, eq, goodsReceipts, poLines, suppliers, purchaseOrders, type Database } from '@restomatch/db';
+import { and, asc, eq, goodsReceipts, poLines, restaurants, suppliers, purchaseOrders, type Database } from '@restomatch/db';
 import type { InvoiceOcrResult } from '@restomatch/types';
 
 export function devOcrStubEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -19,6 +19,12 @@ export function devOcrStubEnabled(env: NodeJS.ProcessEnv = process.env): boolean
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** First configured rate (numeric string) wins — PO, supplier, restaurant — else 18%. */
+export function stubVatRate(...rates: Array<string | null | undefined>): number {
+  for (const r of rates) if (r != null) return Number(r);
+  return 0.18;
+}
 
 /**
  * Build the stub invoice for the PO behind `grId`. Deterministic, with two
@@ -32,10 +38,17 @@ export async function buildDevOcrStub(
   grId: string,
 ): Promise<InvoiceOcrResult | null> {
   const [gr] = await db
-    .select({ poId: goodsReceipts.poId, supplierName: suppliers.name })
+    .select({
+      poId: goodsReceipts.poId,
+      supplierName: suppliers.name,
+      poVat: purchaseOrders.vatRate,
+      supplierVat: suppliers.vatRate,
+      restaurantVat: restaurants.vatRate,
+    })
     .from(goodsReceipts)
     .innerJoin(purchaseOrders, eq(purchaseOrders.id, goodsReceipts.poId))
     .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
+    .innerJoin(restaurants, eq(restaurants.id, goodsReceipts.restaurantId))
     .where(and(eq(goodsReceipts.id, grId), eq(goodsReceipts.restaurantId, restaurantId)))
     .limit(1);
   if (!gr?.poId) return null;
@@ -52,6 +65,10 @@ export async function buildDevOcrStub(
     .where(eq(poLines.poId, gr.poId))
     .orderBy(asc(poLines.id));
   if (rows.length === 0) return null;
+  // Bill VAT at the rate the matcher expects (PO → supplier → restaurant → 18%,
+  // as buildMatchInputForInvoice), so a 0%-VAT produce supplier gets no false
+  // VAT_MISMATCH from the stub — the only deviations are the two below.
+  const vatRate = stubVatRate(gr.poVat, gr.supplierVat, gr.restaurantVat);
 
   const lines = rows.map((r, i) => {
     const ordered = Number(r.qty);
@@ -65,12 +82,12 @@ export async function buildDevOcrStub(
       unit: r.unit,
       unitPrice,
       lineTotal: round2(qty * unitPrice),
-      vatRate: 0.18,
+      vatRate,
       confidence: 0.97,
     };
   });
   const subtotal = round2(lines.reduce((s, l) => s + l.lineTotal, 0));
-  const vat = round2(subtotal * 0.18);
+  const vat = round2(subtotal * vatRate);
   return {
     supplier: { name: gr.supplierName },
     invoiceNumber: `DEV-${Date.now().toString(36).toUpperCase()}`,

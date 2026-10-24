@@ -10,23 +10,31 @@ import {
   grLines,
   gte,
   inArray,
+  isNotNull,
   isNull,
   invoiceLines,
   or,
   sql,
   invoices,
   lte,
+  matchRuns,
   ne,
   poLines,
   products,
   purchaseOrders,
   restaurants,
   suppliers,
+  type Database,
 } from '@restomatch/db';
-import { enqueueOcrInvoice, isQueueUnavailableError } from '@restomatch/queue';
+import { enqueueMatchInvoice, enqueueOcrInvoice, isQueueUnavailableError } from '@restomatch/queue';
 import type { InvoiceOcrResult } from '@restomatch/types';
 import { assertGrOwned, assertSupplierOwned } from '../tenant';
 import { fillEnglishNames } from '../receiving/english';
+import {
+  invoicesWaitingOnReceipt,
+  lockReceipt,
+  scannedInvoicesForReceipt,
+} from '../receiving/matchTriggers';
 import { devOcrStubEnabled, buildDevOcrStub } from '../receiving/devOcrStub';
 import { isAllowedScanUrl } from '../lib/scanUrls';
 import { isInvoiceNumberTaken, readDuplicateOf, withoutDuplicateOf } from '../lib/invoiceDedupe';
@@ -628,10 +636,18 @@ export const receivingRouter = router({
    */
   submitReceipt: receiverProcedure
     .input(
-      z.object({ grId: z.string().uuid(), signatureUrl: z.string().url().max(2048).optional() }),
+      z.object({
+        grId: z.string().uuid(),
+        signatureUrl: z.string().url().max(2048).optional(),
+        /** The invoice(s) scanned on this receipt (the wizard's registerInvoice ids). */
+        invoiceIds: z.array(z.string().uuid()).max(10).optional(),
+      }),
     )
     .mutation(async ({ ctx, input }) => {
       await assertGrOwned(ctx.db, input.grId, ctx.session.restaurantId);
+      // Held to commit: an OCR job deciding whether this receipt is still open
+      // waits for us (receiving/matchTriggers).
+      await lockReceipt(ctx.db, input.grId);
 
       const rows = await ctx.db
         .select({
@@ -664,6 +680,7 @@ export const receivingRouter = router({
         )
         .returning();
       if (!receipt) throw new TRPCError({ code: 'NOT_FOUND', message: 'GR not found' });
+      await rematchAfterCount(ctx.db, ctx.session.restaurantId, receipt, input.invoiceIds ?? []);
       return receipt;
     }),
 
@@ -757,6 +774,7 @@ export const receivingRouter = router({
           invoiceId: invoice.id,
           supplierId: input.supplierId,
           imageUrl: input.imageUrl,
+          grId: input.grId,
           ...(mockProviders ? { mockProviders } : {}),
         });
       } catch (err) {
@@ -827,3 +845,64 @@ export const receivingRouter = router({
       .orderBy(desc(invoices.createdAt));
   }),
 });
+
+/**
+ * The count is in: (re-)match the receipt's invoices so the engine sees what was
+ * actually received, against the receipt's own PO. The invoices are the ones the wizard scanned on this
+ * receipt (tenant-checked here) plus any already matched against it — e.g. a
+ * run made before the count, when every line still read as short. The worker
+ * replaces such a run (keeping people's decisions) and skips an invoice still in
+ * OCR (the OCR job matches it when it lands). A queue failure never fails the
+ * submit: the receipt is saved; match.runForInvoice can re-run it on demand.
+ */
+async function rematchAfterCount(
+  db: Database,
+  restaurantId: string,
+  receipt: { id: string; poId: string | null },
+  scanned: string[],
+): Promise<void> {
+  const grId = receipt.id;
+  // The invoices to match against the count: the ones waiting on this receipt
+  // (server-side — the wizard's in-memory id is lost on a reload or a retake),
+  // the scans the wizard names (narrowed: no unrelated or signed-off invoice),
+  // and any matched against this receipt before the count (that run read every
+  // line as short). Best-effort in a savepoint: a lookup failure must never fail
+  // the submit (match.runForInvoice can re-run it).
+  let ids: Set<string>;
+  try {
+    ids = await db.transaction(async (sp) => {
+      const tx = sp as unknown as Database;
+      const out = new Set<string>(await invoicesWaitingOnReceipt(tx, restaurantId, grId));
+      for (const id of await scannedInvoicesForReceipt(tx, restaurantId, receipt, scanned)) out.add(id);
+      const ran = await tx
+        .selectDistinct({ id: matchRuns.invoiceId })
+        .from(matchRuns)
+        .where(and(eq(matchRuns.restaurantId, restaurantId), eq(matchRuns.grId, grId), isNotNull(matchRuns.invoiceId)));
+      for (const r of ran) if (r.id) out.add(r.id);
+      return out;
+    });
+  } catch (err) {
+    console.error(`[receiving.submitReceipt] could not look up the invoices of gr=${grId}`, err);
+    return;
+  }
+  for (const invoiceId of ids) {
+    // A variable, not an object literal: compiles whether or not the queue's job
+    // type (S7's Postgres queue, #49) declares the optional fields yet.
+    const job: Parameters<typeof enqueueMatchInvoice>[0] & { rematch?: boolean; poId?: string } = {
+      restaurantId,
+      invoiceId,
+      rematch: true,
+      // Matched against the order that was counted, not a discovered one.
+      ...(receipt.poId ? { poId: receipt.poId } : {}),
+    };
+    try {
+      await enqueueMatchInvoice(job);
+    } catch (err) {
+      console.error(
+        `[receiving.submitReceipt] failed to enqueue the re-match for invoice=${invoiceId}` +
+          (isQueueUnavailableError(err) ? ' (queue.unavailable)' : ''),
+        err,
+      );
+    }
+  }
+}
