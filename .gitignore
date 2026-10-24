@@ -41,3 +41,6 @@ dump.rdb
 # Playwright output (apps/web/e2e)
 test-results/
 playwright-report/
+
+# scripts/verify.sh step logs
+.verify/

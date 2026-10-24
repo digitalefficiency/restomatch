@@ -138,3 +138,53 @@ A separate subagent that did not write the code reviewed the diff and tried to r
 
 - Trend comparison is shown as a period delta on the hero, not per point. Trend points are sparse (only days or months with invoices), so a per-point overlay needs a dense calendar series in SQL first.
 - The approvals `info` severity is not offered as a filter. The view model's severities are the leak-relevant `warn` and `block`.
+
+## Production soft-navigation stall: root cause and fix (PR #55)
+
+**Symptom.** In `next build && next start` (Next 15.5.25), same-route navigations that change only search params often never committed: the view-control period/compare/group selects, the breakdown `?m=`, the chain period. The URL and the select reverted. `next dev` does not reproduce it.
+
+**Root cause.** The route-level `loading.tsx` Suspense boundaries, `app/dashboard/loading.tsx` and `app/dashboard/leaks/loading.tsx`.
+- On a same-route navigation the boundary is already revealed, so React holds the old UI until the new page content resolves.
+- On the slower pages (overview, leaks pages, chain) it never resolved: on the FiberRoot, the transition lanes stayed pending and suspended and were never pinged.
+- The RSC body was dropped (`net::ERR_ABORTED`, with no JS `abort()` or `cancel()`), and the navigation was abandoned.
+- Cross-route navigations commit, because the boundary remounts and shows its fallback. So do fast pages such as approvals.
+
+**Ruled out by experiment** (each one a separate production build):
+- ViewToolbar: a plain `window.next.router.replace` stalls too.
+- Async `loading` components: a sync version still stalls.
+- gzip: `compress: false` still stalls.
+- Response GC: retaining every RSC response still stalls.
+- The server stream: curl with the browser's exact headers gets the full payload every time.
+
+**Fix.**
+- Delete the two `loading.tsx` files. Trade-off: no route skeleton on cross-route navigation into those pages.
+- Remove S8's `window.location.assign` stopgap from `ViewToolbar.tsx`. With the root cause gone it never fires, and on slow networks it would turn a legitimate navigation into a full reload.
+
+**Verification (2 layers).**
+1. Gate:
+
+   | Check | Result |
+   |---|---|
+   | Web `tsc` | 0 errors |
+   | Web `eslint .` | 0 errors |
+   | Web tests | 260/260 |
+   | `next build` | green |
+
+2. Production build plus `pnpm --filter @restomatch/web test:prod-softnav` (new `scripts/check-soft-nav.mjs`, `BASE_URL=<next start>`):
+   - It logs in with a password.
+   - In he and en, it changes the overview period, chain period, breakdown period, breakdown `?m=` and explorer group-by, 6 times each.
+   - A round fails if the URL doesn't commit, if it reverts, or if the document reloads (a per-document marker), so a full-reload fallback can't mask a stall.
+
+   | Build | Result |
+   |---|---|
+   | Fixed | 10/10 PASS, 6/6 each, 0 page errors |
+   | Base (`loading.tsx` + stopgap restored) | FAIL: overview 4/6, chain 0/6, breakdown 0/6, `?m=` 4/6, group-by 3/6. The stopgap's full reloads are counted, and React #418 plus a `parentNode` TypeError are logged. |
+
+   The intermittent #418 seen in QA probably belongs to the same bug: it appears on the base build and not on the fixed one, though I haven't proven a direct link.
+   - Chain needs the chain feature. The current seed gives the demo tenant `features.all`; older local DBs need a re-seed.
+
+**Approvals "expected ₪522.60" vs leaks "median ₪520.00" for the same beer line.** They are two different baselines, both correct:
+- The approvals card's *expected* is the agreed unit price on the purchase order (`po.unitPriceExpected`, the contract price the engine matches against).
+- The leaks detective's *median* is the 90-day median of prices actually paid on invoices (`price_history` p50, the historical baseline).
+
+Nothing to reconcile in the math. The labels already say "expected" and "median price".

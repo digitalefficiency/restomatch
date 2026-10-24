@@ -158,10 +158,11 @@ describe('computeOwnerKpis', () => {
     expect(kpis.weekCleanMatchPct).toBe(75);
   });
 
-  it('weekCleanMatchPct=100 when no match_runs (clean slate)', async () => {
+  // NUM-10 (deliberate contract change): no runs ⇒ null ("no matches yet"), not 100%.
+  it('weekCleanMatchPct=null when no match_runs (nothing to judge yet)', async () => {
     const restaurantId = await seedRestaurant();
     const kpis = await computeOwnerKpis(db, restaurantId);
-    expect(kpis.weekCleanMatchPct).toBe(100);
+    expect(kpis.weekCleanMatchPct).toBeNull();
   });
 
   it('respects restaurant scoping', async () => {

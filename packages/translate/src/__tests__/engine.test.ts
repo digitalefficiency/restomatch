@@ -272,3 +272,64 @@ describe('CompositeTranslator', () => {
     expect(await c.translateOne('מלח')).toEqual({ en: 'Salt', source: 'glossary' });
   });
 });
+
+describe('ClaudeTranslator — EN-8 (thinking off, truncation is retryable)', () => {
+  it('sends thinking: disabled', async () => {
+    const client = fakeClient((items) => ({ items: items.map((i) => ({ id: i.id, en: 'x' })) }));
+    await new ClaudeTranslator({ client }).translateBatch(['א']);
+    expect(client.calls[0]!.thinking).toEqual({ type: 'disabled' });
+  });
+
+  it('splits a batch that hit max_tokens and retries the halves', async () => {
+    const calls: number[] = [];
+    const client: MessagesClientLike = {
+      messages: {
+        async create(body) {
+          const content = (body.messages as Array<{ content: string }>)[0]!.content;
+          const items = JSON.parse(content.slice(content.indexOf('['))) as Array<{ id: number; he: string }>;
+          calls.push(items.length);
+          if (items.length > 2) return { content: [{ type: 'text', text: '{"items":[{"id":0,' }], stop_reason: 'max_tokens' };
+          return {
+            content: [{ type: 'text', text: JSON.stringify({ items: items.map((i) => ({ id: i.id, en: `EN ${i.he}` })) }) }],
+            stop_reason: 'end_turn',
+          };
+        },
+      },
+    };
+    const out = await new ClaudeTranslator({ client }).translateBatch(['a', 'b', 'c', 'd']);
+    expect(calls).toEqual([4, 2, 2]);
+    expect([...out.values()]).toEqual(['EN a', 'EN b', 'EN c', 'EN d']);
+  });
+
+  it('a single name that still truncates throws (composite backs off, retries later)', async () => {
+    const client: MessagesClientLike = {
+      messages: { create: async () => ({ content: [], stop_reason: 'max_tokens' }) },
+    };
+    await expect(new ClaudeTranslator({ client }).translateBatch(['a'])).rejects.toThrow(/max_tokens/);
+  });
+});
+
+describe('CompositeTranslator — EN-BUDGET-1 (beforeClaude gate)', () => {
+  it('is NOT called when the glossary covers everything', async () => {
+    const gate = vi.fn(() => true);
+    const client = fakeClient(() => ({ items: [] }));
+    const c = new CompositeTranslator({ glossary: g, claude: new ClaudeTranslator({ client }) });
+    await c.translateMany(['חלב', 'מלח', 'Coke'], { beforeClaude: gate });
+    expect(gate).not.toHaveBeenCalled();
+    expect(client.calls).toHaveLength(0);
+  });
+
+  it('is called once when names go to Claude; false keeps it glossary-only', async () => {
+    const client = fakeClient((items) => ({ items: items.map((i) => ({ id: i.id, en: 'x' })) }));
+    const c = new CompositeTranslator({ glossary: g, claude: new ClaudeTranslator({ client }) });
+    const deny = vi.fn(() => false);
+    const out = await c.translateMany(['שמשון', 'חלב'], { beforeClaude: deny });
+    expect(deny).toHaveBeenCalledTimes(1);
+    expect(client.calls).toHaveLength(0);
+    expect(out.has('שמשון')).toBe(false);
+    const allow = vi.fn(() => true);
+    await c.translateMany(['שמשון'], { beforeClaude: allow });
+    expect(allow).toHaveBeenCalledTimes(1);
+    expect(client.calls).toHaveLength(1);
+  });
+});

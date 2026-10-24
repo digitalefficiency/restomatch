@@ -23,6 +23,13 @@ export interface CompositeTranslatorOptions {
 export interface TranslateManyOptions {
   /** false = glossary only for this call (the caller's cost budget is spent). */
   allowClaude?: boolean;
+  /**
+   * Cost gate, called ONLY when at least one name is actually about to be sent
+   * to Claude (after glossary hits, memo hits and back-off skips). Return false
+   * to stay glossary-only. Lets callers charge a budget per real Claude call
+   * instead of per request (EN-BUDGET-1).
+   */
+  beforeClaude?: () => boolean;
 }
 
 /**
@@ -106,7 +113,12 @@ export class CompositeTranslator {
 
     const now = this.now();
     const askClaude = misses.filter((m) => (this.claudeSkipUntil.get(m) ?? 0) <= now);
-    if (askClaude.length > 0 && this.claude && opts.allowClaude !== false) {
+    if (
+      askClaude.length > 0 &&
+      this.claude &&
+      opts.allowClaude !== false &&
+      (opts.beforeClaude?.() ?? true)
+    ) {
       try {
         const answered = await this.claude.translateBatch(askClaude);
         for (const [he, en] of answered) {

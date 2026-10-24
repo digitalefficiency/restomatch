@@ -212,3 +212,28 @@ describe('runOcrPipeline — English rendering', () => {
     );
   });
 });
+
+describe('runOcrPipeline — unreadable lines (EN-3)', () => {
+  it('a zero-filled low-confidence line sends the invoice to human review, never straight to matching', async () => {
+    const claude = {
+      ...AGREEMENT_PERFECT.claude,
+      lines: [
+        ...AGREEMENT_PERFECT.claude.lines,
+        { rawDescription: 'עגבניות', sku: 'T1', qty: 0, unit: '', unitPrice: 25, lineTotal: 0, confidence: 0.2 } as InvoiceOcrLine,
+      ],
+    };
+    const p = new StubOcrProvider('claude_vision', claude);
+    const result = await runOcrPipeline('test-image', { documentAi: p, claude: p });
+    expect(result.confidence).toBe(1);
+    expect(result.needsHumanReview).toBe(true);
+  });
+
+  it('ordinary line confidence (0.8) does not force review', async () => {
+    const claude = {
+      ...AGREEMENT_PERFECT.claude,
+      lines: AGREEMENT_PERFECT.claude.lines.map((l) => ({ ...l, confidence: 0.8 })),
+    };
+    const p = new StubOcrProvider('claude_vision', claude);
+    expect((await runOcrPipeline('test-image', { documentAi: p, claude: p })).needsHumanReview).toBe(false);
+  });
+});

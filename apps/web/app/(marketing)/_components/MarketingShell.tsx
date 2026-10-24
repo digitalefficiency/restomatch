@@ -3,6 +3,7 @@ import { Menu, Receipt } from 'lucide-react';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { marketing } from '@/lib/i18n/messages/marketing';
 import { getT } from '@/lib/i18n/server';
+import { AnchorScrollFix } from './AnchorScrollFix';
 
 const NAV_BASE = [
   { href: '/#how', key: 'shell.nav.how' },
@@ -127,7 +128,8 @@ export async function MarketingShell({ children }: { children: React.ReactNode }
         {children}
       </main>
 
-      <footer className="border-t border-line bg-surface/40">
+      <AnchorScrollFix />
+      <footer className="rm-defer border-t border-line bg-surface/40">
         <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
           <div className="flex flex-col gap-10 md:flex-row md:items-start md:justify-between">
             <div className="max-w-sm">
