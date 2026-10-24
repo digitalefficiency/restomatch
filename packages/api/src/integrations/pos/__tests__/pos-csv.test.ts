@@ -138,6 +138,19 @@ describe('POS CSV adapter — S1 cross-QA', () => {
     expect(() => csvPosProvider.parse(csv('Date,Item,Qty,Gross Total\n2026-10-01,Soup,1,11.80\n'))).toThrow(PosFileError);
   });
 
+  it('an explicit net-of-VAT header wins over a bare total, even though it mentions VAT (money review)', () => {
+    expect(detectPosColumns(['תאריך', 'שם פריט', 'כמות', 'סה"כ לפני מע"מ'])).toMatchObject({ net: 'סה"כ לפני מע"מ' });
+    expect(detectPosColumns(['תאריך', 'שם פריט', 'כמות', 'סה"כ', 'סה"כ לפני מע"מ'])).toMatchObject({ net: 'סה"כ לפני מע"מ' });
+    expect(detectPosColumns(['תאריך', 'שם פריט', 'כמות', 'סה"כ כולל מע"מ', 'סה"כ לא כולל מע"מ'])).toMatchObject({ net: 'סה"כ לא כולל מע"מ' });
+    expect(detectPosColumns(['Date', 'Item', 'Qty', 'Net (excl. VAT)', 'Total'])).toMatchObject({ net: 'Net (excl. VAT)' });
+    expect(detectPosColumns(['Date', 'Item', 'Qty', 'Sales excl VAT', 'Sales incl VAT'])).toMatchObject({ net: 'Sales excl VAT' });
+    // Still refused: VAT-inclusive, gross, unit prices and VAT amounts.
+    expect(detectPosColumns(['Date', 'Item', 'Qty', 'Sales incl VAT'])).toMatchObject({ net: null });
+    expect(detectPosColumns(['Date', 'Item', 'Qty', 'VAT', 'Gross'])).toMatchObject({ net: null });
+    expect(detectPosColumns(['Date', 'Item', 'Qty', 'Net Tax'])).toMatchObject({ net: null });
+    expect(detectPosColumns(['תאריך', 'פריט', 'כמות', 'מחיר לפני מע"מ'])).toMatchObject({ net: null });
+  });
+
   it('line numbers are the file lines, across blank lines and quoted multi-line cells', () => {
     const text = 'date,item,qty,net\n\n2026-10-01,"Soup\nof the day",1,10\n\n2026-10-01,Bad,x,10\n2026-13-01,Y,1,1\n';
     const out = csvPosProvider.parse(csv(text));

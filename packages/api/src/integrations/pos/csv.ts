@@ -49,13 +49,31 @@ const EXCLUDE: Partial<Record<keyof typeof KEYWORDS, string[]>> = {
 
 type Field = keyof typeof KEYWORDS;
 
+/**
+ * Headers that SAY they are net of VAT ("סה״כ לפני מע״מ", "ללא מע״מ",
+ * "Net (excl. VAT)", "Sales excl VAT"). They mention VAT, so the generic
+ * VAT/"incl" exclusions above must not refuse them — and when one exists it
+ * beats a bare "סה״כ" / "Total" (usually incl. VAT, ~15% too high).
+ */
+const EX_VAT = ['לפנימעמ', 'ללאמעמ', 'לאכולל', 'excl', 'exvat', 'beforevat', 'withoutvat', 'pretax', 'beforetax'];
+const NET_EXPLICIT = ['מכירותנטו', 'נטו', 'netsales', 'net', ...EX_VAT];
+const NET_VAT_WORDS = new Set(['מעמ', 'vat', 'tax', 'מס', 'כולל']);
+/** Says "before / without VAT" — only then may it mention VAT ("Net Tax" stays refused). */
+const isExVat = (h: string) => EX_VAT.some((k) => norm(h).includes(k));
+const isExplicitNet = (h: string) => NET_EXPLICIT.some((k) => norm(h).includes(k));
+
 export function detectPosColumns(headers: string[]): PosParseResult['columns'] {
   const used = new Set<string>();
   const out = { date: null, itemRef: null, itemName: null, qty: null, net: null } as PosParseResult['columns'];
-  const allowed = (field: Field, h: string) => !(EXCLUDE[field] ?? []).some((x) => norm(h).includes(x));
+  const allowed = (field: Field, h: string) => {
+    let ex = EXCLUDE[field] ?? [];
+    if (field === 'net' && isExVat(h)) ex = ex.filter((x) => !NET_VAT_WORDS.has(x));
+    return !ex.some((x) => norm(h).includes(x));
+  };
   // Codes before names: "קוד פריט" must not be taken as the item name.
   for (const field of ['date', 'itemRef', 'qty', 'net', 'itemName'] as Field[]) {
-    const free = headers.filter((h) => !used.has(h) && allowed(field, h));
+    let free = headers.filter((h) => !used.has(h) && allowed(field, h));
+    if (field === 'net' && free.some(isExplicitNet)) free = free.filter(isExplicitNet);
     // An exact header ("Qty", "כמות") beats a substring match ("Discount Count").
     const pick =
       KEYWORDS[field].map((kw) => free.find((h) => norm(h) === kw)).find(Boolean) ??
