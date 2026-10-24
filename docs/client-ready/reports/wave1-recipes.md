@@ -277,3 +277,20 @@ and found:
 4. A rise that comes through a sub-recipe does not alert. This is by design: a sub-recipe has no single supplier.
 5. With the flag off, `recipes.changes` gains one supplier lookup plus an additive `driver.supplier`/`riser` field, and the client
    fires `priceAlerts`, which returns `enabled:false`. The visible behaviour is unchanged.
+
+## Light theme sweep (2026-10-24, after #77)
+
+Wave-1 recipes screens on the light base. Tokens only, with no hex and no new colours; `globals.css` and `tailwind.config.ts` untouched.
+Emphasis tiers applied:
+- **T2: a dish that crossed its food-cost target.** It gets a solid `danger-solid` badge ("Crossed the 30% food-cost target"). The details are in ink/muted, and the supplier's +% is in `warn`. Editor banner: `border-danger/35 bg-danger/8`.
+- **Warning, not alarm: a rising cost per plate.** This covers the "dishes hurt" card ₪/plate, the changes tab and the impact tab margin drop. They moved from `danger` to `warn`, so a +₪0.02 rise no longer reads like a leak. Red stays only for the crossing badge, a negative margin, and blocking CSV-import errors.
+- **Green for good news:** cost or margin improvements stay `primary`.
+
+**axe-core 4.14 (WCAG 2.0/2.1 A+AA): 0 violation nodes on 32 scans.** The scans cover he/en × 1366/390 on these screens:
+- the overview card;
+- every recipes tab (dishes, what changed, what if, POS, CSV);
+- the steak editor;
+- the new-dish screen.
+
+0 console errors (`axe-recipes.mjs`). The existing suites still pass: recipes 133/133, overview 97/97, POS 44/44, phone 44/44.
+Screenshots: `wave1-recipes/light-*.png`.

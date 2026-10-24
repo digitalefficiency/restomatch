@@ -208,7 +208,7 @@ export const en: Shape<typeof he> = {
     emptyNoMatch: 'There are POS sales, but no item is linked to a dish yet. Make sure the dish name matches the POS item name.',
   },
   alert: {
-    title: 'Crossed the food-cost target:',
+    title: 'Crossed the food-cost target',
     target: 'target {target}',
     crossed: 'Crossed the {target} food-cost target',
     perPlate: 'per plate',
