@@ -34,7 +34,7 @@ import { DEDUPE_INDEX_PREDICATE } from '../notifications/outbox';
 import { supplierMessageState, type SupplierMessageState } from '../notifications/delivery';
 import { deriveExpectedDelivery, type DerivedDelivery } from '../lib/deriveDelivery';
 import { addCalendarDaysInTz, localDateKeyInTz, startOfDayInTz, startOfLocalDateInTz } from '../lib/time';
-import { poRefOf, renderOrderDocument } from '../orders/document';
+import { poRefOf, renderSupplierMessage } from '../orders/supplierMessage';
 
 /** Cap on an uploaded order document, decoded — a single-page PO PDF is ~50KB. */
 const MAX_PO_DOC_BYTES = 8 * 1024 * 1024;
@@ -234,7 +234,7 @@ function deliveryFromLocalDate(dateKey: string, nowUtc: Date, tz: string): Date 
  * tenant: restaurant name + business id, the placing manager as contact, and
  * product names for lines saved with a productId only.
  */
-async function buildOrderDocument(
+async function buildSupplierMessage(
   db: Database,
   restaurantId: string,
   userId: string,
@@ -264,7 +264,7 @@ async function buildOrderDocument(
       .where(and(eq(products.restaurantId, restaurantId), inArray(products.id, ids)));
     for (const r of rows) nameById.set(r.id, r.name);
   }
-  return renderOrderDocument({
+  return renderSupplierMessage({
     poRef: o.poId ? poRefOf(o.poId) : null,
     supplierName: o.supplierName,
     restaurant: { name: restaurant?.name ?? '', businessId: restaurant?.businessId ?? null },
@@ -604,7 +604,7 @@ export const ordersRouter = router({
           .from(poLines)
           .where(eq(poLines.poId, input.poId))
           .orderBy(...PO_LINE_ORDER);
-        return buildOrderDocument(ctx.db, restaurantId, ctx.session.userId, {
+        return buildSupplierMessage(ctx.db, restaurantId, ctx.session.userId, {
           poId: input.poId,
           supplierName: supplier?.name ?? 'ספק',
           expectedDeliveryAt: po.expectedDeliveryAt,
@@ -618,7 +618,7 @@ export const ordersRouter = router({
         .where(eq(suppliers.id, input.supplierId))
         .limit(1);
       const tz = await restaurantTz(ctx.db, restaurantId);
-      return buildOrderDocument(ctx.db, restaurantId, ctx.session.userId, {
+      return buildSupplierMessage(ctx.db, restaurantId, ctx.session.userId, {
         supplierName: supplier?.name ?? 'ספק',
         expectedDeliveryAt: input.expectedDeliveryDate ? startOfLocalDateInTz(input.expectedDeliveryDate, tz) : null,
         lines: input.lines.map((l) => ({
@@ -847,7 +847,7 @@ export const ordersRouter = router({
           });
         }
         // The same text orders.documentPreview showed the manager.
-        const doc = await buildOrderDocument(ctx.db, restaurantId, ctx.session.userId, {
+        const doc = await buildSupplierMessage(ctx.db, restaurantId, ctx.session.userId, {
           poId: input.poId,
           supplierName: supplier?.name ?? 'ספק',
           expectedDeliveryAt: po.expectedDeliveryAt,

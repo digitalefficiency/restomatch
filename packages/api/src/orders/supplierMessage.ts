@@ -1,10 +1,15 @@
 /**
- * The order document a supplier receives (email / WhatsApp body). Pure: the
- * caller loads the rows; placeOrder enqueues exactly this text and
+ * The DEFAULT supplier order message (flag `orderPricesOut` off): the email /
+ * WhatsApp body a supplier receives. With `orderPricesOut` on, S5's
+ * orders/document/ builds the priced email/WhatsApp/PDF instead; placeOrder
+ * picks that one when the flag is on and this one otherwise.
+ *
+ * Pure: (loaded PO + restaurant + contact) → { subject, body }. The caller
+ * loads the rows; placeOrder enqueues exactly this text and
  * orders.documentPreview shows exactly this text before sending.
  */
 
-export interface OrderDocumentInput {
+export interface SupplierMessageInput {
   /** Short reference the supplier can quote back (PO id prefix), when the PO exists. */
   poRef?: string | null;
   supplierName: string;
@@ -23,7 +28,7 @@ export function formatOrderQty(qty: string | number): string {
   return new Intl.NumberFormat('he-IL', { maximumFractionDigits: 3 }).format(n);
 }
 
-export function renderOrderDocument(d: OrderDocumentInput): { subject: string; body: string } {
+export function renderSupplierMessage(d: SupplierMessageInput): { subject: string; body: string } {
   const subject = `הזמנה חדשה — ${d.restaurant.name}`;
   const from = d.restaurant.businessId
     ? `מאת: ${d.restaurant.name} (ח.פ. ${d.restaurant.businessId})`
