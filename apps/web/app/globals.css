@@ -345,8 +345,11 @@ html {
     [role='tab'] {
       min-width: 44px;
     }
-    /* Stand-alone links styled as pills / "see all" actions opt in. */
-    .touch-target {
+    /* Stand-alone links styled as pills / "see all" actions opt in. The
+       dashboard leak hero's drill-down CTA is matched by its section (its
+       className belongs to the light-theme restyle). */
+    .touch-target,
+    section[aria-labelledby='leak-hero-label'] a {
       min-height: 44px;
     }
     /* A checkbox/radio inside its <label>: the whole label is the target. */
