@@ -31,7 +31,7 @@ const LIGHT_STAGE: typeof DARK = {
   subtle: '#6B7C73',
   primary: '#066B4A',
   onPrimary: '#FFFFFF',
-  gold: '#8A5300',
+  gold: '#755C00',
   danger: '#B80F2A',
   paper: '#FFFFFF',
   paperInk: '#22261F',
@@ -55,7 +55,7 @@ export const LIGHT = {
   ink: '#0F1F17',
   muted: '#4A5D53',
   primary: '#066B4A',
-  gold: '#8A5300',
+  gold: '#755C00',
   danger: '#B80F2A',
 } as const;
 

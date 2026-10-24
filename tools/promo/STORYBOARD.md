@@ -15,7 +15,7 @@ stage colour instead of dimmed). `STAGE=dark node render.mjs …` still renders 
 
 Motion language: one easing family (expo-out `bezier(.16,1,.3,1)` for entrances, `bezier(.65,0,.35,1)`
 for camera moves), three accents matching the light product's AA tokens — primary `#066B4A` (product /
-positive), danger `#B80F2A` (leak), gold `#8A5300` (caught / new); dark stage: `#22D39A` / `#FF5C7A` /
+positive), danger `#B80F2A` (leak), gold `#755C00` (caught / new); dark stage: `#22D39A` / `#FF5C7A` /
 `#E0B341`. Heebo + JetBrains Mono, the app's own files.
 
 ## Beats
@@ -49,7 +49,7 @@ with `DEMO_TODAY=2026-10-25`), month **October 2026**, and appear on the real sc
 | 1.8% of ₪42,263 | same hero ("1.8% מההוצאה על סחורה · מתוך ₪42,263 לפני מע״מ"); 760 / 42,263 = 1.80% |
 | ₪296 caught before payment | hero card "נתפס לפני תשלום"; seed log "caught before payment ₪296" |
 | ₪464 claimed from suppliers | hero card "נדרש מהספקים" (accepted to claim back). Shown as *claimed*, not "recovered" |
-| Chain: leakiest branch ירושלים 975 ₪ = 2.9%, חיפה 355 ₪ = 0.6% (chain 2,089 ₪ = 1.5% of 137,059 ₪) | `/dashboard/chain` capture `public/shots/chain-he.png` after `pnpm --filter @restomatch/worker seed:chain-demo` (same `DEMO_TODAY`; base branch unchanged at ₪760) |
+| Chain: leakiest branch ירושלים 975 ₪ = 2.9%, חיפה 355 ₪ = 0.6% (chain 2,090 ₪ = 1.5% of 137,059 ₪) | `/dashboard/chain` capture `public/shots/chain-he.png` after `pnpm --filter @restomatch/worker seed:chain-demo` (same `DEMO_TODAY`; base branch unchanged at ₪760) |
 | 104.80 ₪ (approvals card / claim total) | `/dashboard/approvals` first card "ההפסד המוערך 104.80 ₪" (beer keg, Steinberg, invoice ST-24108) and `/dashboard/leaks/claims` "סה״כ לזיכוי 104.80 ₪" |
 | 13 of 35 invoices flagged | hero card "חשבוניות עם חריגה 13 מתוך 35" (not used on screen beyond the real UI) |
 | Beer keg ₪520 → ₪575 (+10.6%) | `/dashboard/leaks` table row "בירה מהחבית — חבית 30 ל׳", median ₪520.00 / latest ₪575.00 / +10.6% |

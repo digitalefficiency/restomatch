@@ -98,7 +98,7 @@ I rendered stills across the whole timeline and reviewed each one. Fixes made fr
 
 The owner decided that the whole product goes light (#77), so the film follows:
 - **Stage:** soft light stage, silver laptop and phone, the app's own light screens. Accents use the light
-  product's AA tokens (primary `#066B4A`, danger `#B80F2A`, gold `#8A5300`).
+  product's AA tokens (primary `#066B4A`, danger `#B80F2A`, gold `#755C00`).
 - **Spotlight:** on a light stage, dimming the outside reads as a grey cast. The outside is now blurred and
   washed toward the stage colour (a light fog) with a faint vignette. The lifted card keeps the same
   accent outline and glow as the dark cut.
