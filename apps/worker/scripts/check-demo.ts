@@ -7,6 +7,7 @@
  *
  * Read-only. Exit 1 with the list of broken invariants.
  */
+import { consolidatedProposal } from '@restomatch/api';
 import { computeLeakHero } from '@restomatch/charts';
 import { createDb, DEMO_MAIN_BUSINESS_ID, findDemoTenants } from '@restomatch/db';
 import postgres from 'postgres';
@@ -119,7 +120,7 @@ export async function checkDemo(url: string, today: string): Promise<DemoCheck> 
     //     none is matched (all stay pendingLink, so the hero never counts them), and the
     //     only overcharge across them is the one seed-demo plants.
     const cons = (await sql`
-      select i.id, i.invoice_number, i.status, i.ocr_payload->'raw'->'deliveryNotes' as dns,
+      select i.id, i.restaurant_id, i.invoice_number, i.status, i.ocr_payload->'raw'->'deliveryNotes' as dns,
         (select count(*)::int from match_runs m where m.invoice_id = i.id) as runs,
         (select count(*)::int from jsonb_array_elements(i.ocr_payload->'raw'->'deliveryNotes') dn
           join goods_receipts g on g.restaurant_id = i.restaurant_id and g.notes = 'ת.מ. ' || (dn->>'number')
@@ -133,7 +134,7 @@ export async function checkDemo(url: string, today: string): Promise<DemoCheck> 
       from invoices i
       where i.restaurant_id in ${sql(rids)} and i.ocr_payload->'raw'->>'kind' = 'consolidated'
       order by i.invoice_date
-    `) as unknown as Array<{ invoice_number: string; status: string; dns: Array<{ number: string }> | null; runs: number; covered: number; overcharge: string }>;
+    `) as unknown as Array<{ id: string; restaurant_id: string; invoice_number: string; status: string; dns: Array<{ number: string }> | null; runs: number; covered: number; overcharge: string }>;
     facts.push(`consolidated: ${cons.map((c) => `${c.invoice_number} ${c.status} ${c.covered}/${c.dns?.length ?? 0} notes${Number(c.overcharge) > 0 ? ` · overcharge ₪${Number(c.overcharge).toFixed(2)}` : ''}`).join(', ') || 'none'}`);
     if (cons.length < 2) problems.push(`expected ≥2 consolidated invoices, found ${cons.length}`);
     for (const c of cons) {
@@ -146,6 +147,30 @@ export async function checkDemo(url: string, today: string): Promise<DemoCheck> 
     if (overcharge !== EXPECTED_CONSOLIDATED_OVERCHARGE_ILS) {
       problems.push(`consolidated overcharge ₪${overcharge.toFixed(2)} ≠ the seeded ₪${EXPECTED_CONSOLIDATED_OVERCHARGE_ILS.toFixed(2)} (excl. VAT)`);
     }
+
+    // 3d. The cross-match (הצלבה) itself reproduces it: exactly one consolidated invoice
+    //     with differences — one PRICE_HIGHER of ₪36.00 on one delivery note, claimed
+    //     ₪36.00 + VAT — and every other one matched.
+    const xdb = createDb(url);
+    const xmatch: string[] = [];
+    const withDifferences: string[] = [];
+    for (const c of cons) {
+      const p = await consolidatedProposal(xdb, c.restaurant_id, c.id);
+      if (!p) {
+        problems.push(`${c.invoice_number}: no cross-match proposal`);
+        continue;
+      }
+      const leaking = p.findings.filter((f) => f.countsAsLeak);
+      xmatch.push(`${c.invoice_number} ${p.status}${leaking.length ? ` · ${leaking.map((f) => `${f.type} ₪${f.deltaAmount.toFixed(2)}${f.deliveryNoteNumber ? ` on ת.מ. ${f.deliveryNoteNumber}` : ''}`).join(', ')}` : ''}`);
+      if (p.status === 'matched') continue;
+      withDifferences.push(c.invoice_number);
+      const one = leaking.length === 1 && leaking[0]!.type === 'PRICE_HIGHER' && leaking[0]!.deltaAmount === EXPECTED_CONSOLIDATED_OVERCHARGE_ILS && !!leaking[0]!.deliveryNoteNumber;
+      if (!one || p.claim.exclIls !== EXPECTED_CONSOLIDATED_OVERCHARGE_ILS || p.claim.inclIls !== 0) {
+        problems.push(`${c.invoice_number}: cross-match ${p.status} — expected one PRICE_HIGHER ₪${EXPECTED_CONSOLIDATED_OVERCHARGE_ILS.toFixed(2)} on one note, claim ₪${EXPECTED_CONSOLIDATED_OVERCHARGE_ILS.toFixed(2)} + VAT`);
+      }
+    }
+    facts.push(`cross-match: ${xmatch.join(', ') || 'none'}`);
+    if (withDifferences.length !== 1) problems.push(`cross-match: ${withDifferences.length} consolidated invoice(s) with differences (${withDifferences.join(', ')}) — expected exactly 1`);
 
     // 3e. VAT at risk: invoices above ₪5,000 excl. VAT without an allocation number in
     //     the last 6 months (the input-VAT deduction window). Exactly the one seeded

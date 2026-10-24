@@ -15,6 +15,7 @@ import {
   type Database,
 } from '@restomatch/db';
 import {
+  resolveTolerances,
   runMatch,
   unitConversionFactor,
   type Discrepancy,
@@ -346,6 +347,8 @@ export function buildConsolidatedProposal(args: {
     qtyReceived: number;
     pricedQty: number;
     pricedP4: number; // Σ qty × price, in price units (1/100 agora) · qty — no agora rounding of the price
+    /** The priced quantities at each price (price units), for the pooled bounds. */
+    priced: Array<{ qty: number; p4: number }>;
   };
   const groups = new Map<string, Group>();
   /** A note line's group key and its qty / price in the group's unit (kg↔g, l↔ml; else its own group). */
@@ -382,11 +385,13 @@ export function buildConsolidatedProposal(args: {
           qtyReceived: 0,
           pricedQty: 0,
           pricedP4: 0,
+          priced: [],
         } satisfies Group);
       g.qtyReceived += qty;
       if (p4 != null) {
         g.pricedQty += qty;
         g.pricedP4 += p4 * qty;
+        g.priced.push({ qty, p4 });
       }
       groups.set(gk, g);
     }
@@ -463,13 +468,32 @@ export function buildConsolidatedProposal(args: {
     [...lineGroups.entries()].filter(([gk]) => !gk.startsWith(`${POOL}|`)).map(([gk, l]) => [l.id, gk.slice(0, gk.indexOf('|'))]),
   );
   // A pooled product is billed as one month's total against many notes: compare
-  // AMOUNTS (billed Σ line totals vs Σ received × PO price, in agorot) instead of the
-  // engine's per-unit price check, whose 2% / ₪5 tolerance on a monthly AVERAGE
-  // price would hide (or invent) a difference. Units billed beyond what was
-  // received stay the engine's QTY_OVER (at the billed price) — not counted twice.
-  // When the month's amounts say the product was NOT billed above what was delivered,
-  // that decides: no QTY_OVER / price finding on it (32 @ ₪6.00 = 30 @ ₪6.40 = ₪192).
-  // Only products the amount check could compare replace the engine's price finding.
+  // AMOUNTS (billed Σ line totals vs what was received, in agorot) instead of the
+  // engine's per-unit price check on a monthly AVERAGE price. Units billed beyond
+  // what was received stay the engine's QTY_OVER (at the billed price) — not counted
+  // twice. When the month's amounts say the product was NOT billed above what was
+  // delivered, that decides: no QTY_OVER / price finding on it (32 @ ₪6.00 = 30 @ ₪6.40).
+  //
+  // The pool never invents ₪: which of its notes a pooled line bills is unknown, so
+  // the billed q units are compared with the MOST they could be worth (the dearest
+  // q units received) for a higher price, and the LEAST (the cheapest) for a lower
+  // one — a cheaper note the line may not bill (an edge-day note, another week)
+  // never lowers the price expected. A product with any unpriced quantity gets no
+  // pooled price finding at all (its price is unknown), and the difference must
+  // clear the restaurant's price tolerance, per unit, as the engine's does.
+  const tolerances = resolveTolerances(args.base.tolerances);
+  /** Σ price × qty (price units · qty) of the first q units, dearest or cheapest first. */
+  const boundP4 = (priced: Group['priced'], q: number, dearest: boolean) => {
+    let left = q;
+    let total = 0;
+    for (const s of [...priced].sort((a, b) => (dearest ? b.p4 - a.p4 : a.p4 - b.p4))) {
+      const take = Math.min(left, s.qty);
+      total += take * s.p4;
+      left -= take;
+      if (left <= 0) break;
+    }
+    return total;
+  };
   const pooled = paired.filter(([, g]) => g.bucket === POOL);
   const pooledPoLines = new Set<string>(); // compared: the amount check replaces the engine's PRICE_*
   const notAboveDelivered = new Set<string>(); // billed ≤ delivered: no QTY_OVER / PRICE_* at all
@@ -477,31 +501,39 @@ export function buildConsolidatedProposal(args: {
   for (const [gk, g] of pooled) {
     const il = lineGroups.get(gk)!;
     const factor = convFactor(il.unit, g.unit);
-    const avgP4 = g.pricedQty > 0 ? g.pricedP4 / g.pricedQty : null;
-    if (factor == null || avgP4 == null) continue;
+    if (factor == null || g.pricedQty <= 0) continue;
     const billedQty = il.qtyBilled * factor;
     const q = Math.min(billedQty, g.qtyReceived);
     if (q <= 0 || billedQty <= 0) continue;
     pooledPoLines.add(g.poLineId);
-    if (g.pricedQty >= g.qtyReceived && ag(il.lineTotal) <= Math.round(g.pricedP4 / 100)) {
+    // An unpriced delivered quantity: the price of what is billed is unknown.
+    if (g.pricedQty < g.qtyReceived) continue;
+    if (ag(il.lineTotal) <= Math.round(g.pricedP4 / 100)) {
       notAboveDelivered.add(g.poLineId);
       continue;
     }
     const billedOnQAg = Math.round((ag(il.lineTotal) * q) / billedQty);
-    const expectedAg = Math.round((q * avgP4) / 100);
+    const highAg = Math.round(boundP4(g.priced, q, true) / 100);
+    const lowAg = Math.round(boundP4(g.priced, q, false) / 100);
+    const expectedAg = billedOnQAg > highAg ? highAg : billedOnQAg < lowAg ? lowAg : null;
+    if (expectedAg == null) continue;
     const deltaAg = billedOnQAg - expectedAg;
-    if (deltaAg === 0) continue;
+    // The engine's price tolerance, on the per-unit prices (evaluatePrice's rule).
+    const expectedUnit = expectedAg / 100 / q;
+    const unitDiff = Math.abs(deltaAg) / 100 / q;
+    const pct = expectedUnit > 0 ? unitDiff / expectedUnit : 1;
+    if (pct <= tolerances.pricePercent && unitDiff <= tolerances.priceAbsolute) continue;
     pooledFindings.push({
       type: deltaAg > 0 ? 'PRICE_HIGHER' : 'PRICE_LOWER',
-      severity: deltaAg > 0 ? 'warn' : 'info',
+      severity: deltaAg < 0 ? 'info' : pct >= tolerances.blockPricePercent ? 'block' : 'warn',
       productId: g.productId,
       poLineId: g.poLineId,
       grLineId: g.grLineId,
       invoiceLineId: il.id,
-      expected: Math.round(avgP4) / 10_000,
+      expected: Math.round(expectedAg * 100 / q) / 10_000,
       actual: Math.round((billedOnQAg / q) * 100) / 10_000,
       deltaAmount: ils(Math.abs(deltaAg)),
-      toleranceUsed: 'pooled ריכוז: billed amount vs Σ received × PO price (agorot)',
+      toleranceUsed: `pooled ריכוז: billed amount vs the received units' bound (agorot); price ±${tolerances.pricePercent * 100}% or ₪${tolerances.priceAbsolute}`,
     } as Discrepancy);
   }
   // Billed twice: a note this invoice bills that another invoice already bills —

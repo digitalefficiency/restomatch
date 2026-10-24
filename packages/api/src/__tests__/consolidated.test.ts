@@ -290,14 +290,19 @@ describe('buildConsolidatedProposal — #95 review (P0)', () => {
     expect(p.status).toBe('matched');
   });
 
-  it('pooled notes compare AMOUNTS: 1.6% over a monthly average is still ₪3.00 billed above the notes', () => {
-    // Three un-numbered drops of 10 at ₪6.40, billed as one line of 30 at ₪6.50 —
-    // under the engine's 2% per-unit tolerance, but ₪3.00 more than delivered.
-    const notes = [1, 2, 3].map((i) => note(`gr-p${i}`, i * 5, [noteLine(CHALLAH, 10, 6.4)]));
-    const p = propose([invLine(CHALLAH, 30, 6.5)], notes);
-    expect(p.findings.filter((f) => f.countsAsLeak).map((f) => [f.type, f.deltaAmount])).toEqual([['PRICE_HIGHER', 3]]);
-    expect(p.totals).toMatchObject({ differenceIls: 3, leakIls: 3 });
-    expect(p.status).toBe('differences');
+  it('pooled notes compare AMOUNTS, with the price tolerance an itemized line gets (#119 P7c)', () => {
+    // Three un-numbered drops of 10 at ₪6.40, billed as one line of 30. At ₪6.50
+    // (1.6%) it is within the engine's 2% per-unit tolerance — as the same line on
+    // one note would be — so nothing; at ₪6.60 (3.1%) it is ₪6.00 billed above the notes.
+    const notes = () => [1, 2, 3].map((i) => note(`gr-p${i}`, i * 5, [noteLine(CHALLAH, 10, 6.4)]));
+    const within = propose([invLine(CHALLAH, 30, 6.5)], notes());
+    expect(within.findings.filter((f) => f.countsAsLeak)).toEqual([]);
+    const over = propose([invLine(CHALLAH, 30, 6.6)], notes());
+    expect(over.findings.filter((f) => f.countsAsLeak).map((f) => [f.type, f.deltaAmount, f.expected, f.actual])).toEqual([
+      ['PRICE_HIGHER', 6, 6.4, 6.6],
+    ]);
+    expect(over.totals).toMatchObject({ differenceIls: 6, leakIls: 6 });
+    expect(over.status).toBe('differences');
   });
 
   it('never "matched" while the invoice bills more than the notes are worth', () => {
@@ -439,8 +444,12 @@ describe('buildConsolidatedProposal — #95 review (P2)', () => {
 
   it('(b) pooled and billed above the notes: the extra units and the price on the rest add up to the difference', () => {
     const notes = [1, 2, 3].map((i) => note(`gr-r${i}`, i * 5, [noteLine(CHALLAH, 10, 6.4)]));
-    const p = propose([invLine(CHALLAH, 32, 6.5)], notes); // ₪208 vs ₪192
-    expect(p.totals).toMatchObject({ differenceIls: 16, leakIls: 16 });
+    const p = propose([invLine(CHALLAH, 32, 6.6)], notes); // ₪211.20 vs ₪192
+    // 2 extra units at ₪6.60 (₪13.20) + ₪0.20 over on the 30 delivered (₪6.00).
+    expect(p.totals).toMatchObject({ differenceIls: 19.2, leakIls: 19.2 });
+    // Within the price tolerance only the extra units are the difference.
+    const q = propose([invLine(CHALLAH, 32, 6.5)], [1, 2, 3].map((i) => note(`gr-s${i}`, i * 5, [noteLine(CHALLAH, 10, 6.4)])));
+    expect(q.findings.filter((f) => f.countsAsLeak).map((f) => [f.type, f.deltaAmount])).toEqual([['QTY_OVER', 13]]);
   });
 });
 
@@ -581,6 +590,52 @@ describe('buildConsolidatedProposal — #116 verification (P5)', () => {
     expect(p.findings.filter((f) => f.countsAsLeak)).toEqual([]);
     expect(p.claim).toEqual({ exclIls: 0, inclIls: 0 });
     expect(p.deliveryNotes.every((d) => d.status === 'covered')).toBe(true);
+  });
+});
+
+describe('buildConsolidatedProposal — #119 verification (P7): the pool never invents ₪', () => {
+  const MILK = 'p-milk';
+  const milk = (qty: number, price: number | null) => noteLine(MILK, qty, price as number, { name: 'חלב 3%', nameEn: 'Milk 3%' });
+  const pool = (billed: { qty: number; price: number }, notes: DeliveryNoteData[]) =>
+    buildConsolidatedProposal({
+      invoiceId: 'inv-p7',
+      supplierId: 'sup-1',
+      periodStart: new Date('2026-09-27T21:00:00Z'),
+      periodEnd: new Date('2026-11-03T22:00:00Z'),
+      base: { ...base([invLine(MILK, billed.qty, billed.price)]), tolerances: DEFAULT_TOLERANCES },
+      notes,
+    });
+  const leaks = (p: ReturnType<typeof pool>) => p.findings.filter((f) => f.countsAsLeak).map((f) => [f.type, f.deltaAmount, f.expected]);
+
+  it('(a) a cheaper note the line may not bill (an edge-day note) never lowers the price expected', () => {
+    // 15 billed at ₪9 against 10 @ ₪6.40 (Oct 5) + an edge-day 10 @ ₪6.00 (Nov 1):
+    // at most the dearest 15 units — 10 @ 6.40 + 5 @ 6.00 = ₪94 — were billed.
+    const p = pool({ qty: 15, price: 9 }, [note('gr-a', 5, [milk(10, 6.4)]), note('gr-edge', 32, [milk(10, 6)])]);
+    expect(leaks(p)).toEqual([['PRICE_HIGHER', 41, 6.2667]]);
+  });
+
+  it('(a) billed at the dearest note\'s price for that note\'s quantity → nothing', () => {
+    const p = pool({ qty: 10, price: 6.4 }, [note('gr-a', 5, [milk(10, 6.4)]), note('gr-edge', 32, [milk(15, 6)])]);
+    expect(leaks(p)).toEqual([]);
+    expect(p.status).toBe('matched');
+  });
+
+  it('(b) an unpriced delivered quantity: no pooled price finding (the guard never drops out into a lower average)', () => {
+    // S2' pooled: 10 @ 6.40 billed; the pool also holds 10 @ 6.00 and 5 with no PO price.
+    const p = pool({ qty: 10, price: 6.4 }, [
+      note('gr-a', 5, [milk(10, 6.4)]),
+      note('gr-90', 32, [milk(10, 6)]),
+      note('gr-91', 33, [milk(5, null)]),
+    ]);
+    expect(leaks(p)).toEqual([]);
+    // Even a price far above every priced note is not a pooled ₪ finding while part of the pool is unpriced.
+    const high = pool({ qty: 10, price: 20 }, [note('gr-a', 5, [milk(10, 6.4)]), note('gr-91', 33, [milk(5, null)])]);
+    expect(high.findings.filter((f) => f.type === 'PRICE_HIGHER')).toEqual([]);
+  });
+
+  it('(b) units billed beyond what was delivered stay the QTY_OVER they are, priced or not', () => {
+    const p = pool({ qty: 20, price: 6.4 }, [note('gr-a', 5, [milk(10, 6.4)]), note('gr-91', 9, [milk(5, null)])]);
+    expect(leaks(p).map((l) => l.slice(0, 2))).toEqual([['QTY_OVER', 32]]);
   });
 });
 

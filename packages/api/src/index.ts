@@ -51,6 +51,7 @@ export const appRouter = router({
 
 export type AppRouter = typeof appRouter;
 export type { ConsolidatedProposal, DeliveryNoteCoverage } from './match/consolidated';
+export { consolidatedProposal } from './match/consolidated';
 export type {
   AppContext,
   AuthedContext,
