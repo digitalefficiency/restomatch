@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import postgres from 'postgres';
 import { INTEGRITY_CHECKS } from './integrityChecks';
 import { migrationHash, migrationsDir, readJournal, REQUIRED_EXTENSIONS, type JournalEntry } from './migrations';
-import { WAVE1_CROSS_TENANT_CHECKS, WAVE1_PRECONDITIONS } from './wave1Checks';
+import { WAVE1_CROSS_TENANT_CHECKS, WAVE1_PRECONDITIONS, wave1CompositeFkFinding } from './wave1Checks';
 
 /**
  * `pnpm db:doctor` — a READ-ONLY health report for any RestoMatch database
@@ -551,6 +551,8 @@ export async function runDoctor(url: string, opts: DoctorOptions = {}): Promise<
       }
       add('integrity', 'cross-tenant references', integrityBad.length ? 'WARN' : 'PASS',
         integrityBad.length ? integrityBad.join(' · ') : `${integrityRan} cross-tenant consistency checks clean`);
+      const fks = await wave1CompositeFkFinding(ctx); // wave 1 only (null otherwise)
+      if (fks) add('integrity', 'same-tenant FKs (wave 1)', fks.status, fks.detail);
       const ownerless = await ctx.count(
         "select count(*) from restaurants r where not exists (select 1 from memberships m where m.restaurant_id = r.id and m.role = 'owner')",
       );
