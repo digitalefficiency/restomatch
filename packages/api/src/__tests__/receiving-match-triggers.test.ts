@@ -81,6 +81,7 @@ async function invoice(
     supplierId?: string;
     /** The receipt the OCR job stamped (raw.scanGrId); unstamped = legacy / email row. */
     scanGrId?: string;
+    source?: 'photo' | 'email' | 'platform' | 'manual';
   } = {},
 ) {
   const [inv] = await db
@@ -89,7 +90,7 @@ async function invoice(
       restaurantId: s.restaurantId,
       supplierId: opts.supplierId ?? s.supplierId,
       status: opts.status ?? 'matched',
-      source: 'photo',
+      source: opts.source ?? 'photo',
       ...(opts.duplicate ? { ocrPayload: { raw: { duplicateOf: { invoiceNumber: '1' } } } as never } : {}),
       ...(opts.scanGrId ? { ocrPayload: { raw: { scanGrId: opts.scanGrId } } as never } : {}),
     })
@@ -549,4 +550,52 @@ describe('registerInvoice refuses an invoice of another supplier on this receipt
     ).rejects.toThrow("supplierId must be the receipt's order supplier");
     expect(await db.select().from(invoices).where(eq(invoices.restaurantId, s.restaurantId))).toEqual([]);
   });
+});
+
+describe('rule 1 by source: emailed / platform / manual invoices are unstamped by design', () => {
+  it('an emailed invoice for a PO whose receipt was open, with a closed same-supplier receipt 3 days earlier, is claimed by its receipt’s submit', async () => {
+    const s = await seed(); // PO2 now + GR2 open
+    const earlier = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    const [po0] = await db
+      .insert(purchaseOrders)
+      .values({ restaurantId: s.restaurantId, supplierId: s.supplierId, expectedDeliveryAt: earlier, status: 'sent', source: 'manual' })
+      .returning();
+    const [pl0] = await db
+      .insert(poLines)
+      .values({ poId: po0!.id, rawDescription: 'עגבניה', qtyOrdered: '10', unit: 'kg', unitPriceExpected: '8' })
+      .returning();
+    const [gr0] = await db.insert(goodsReceipts).values({ restaurantId: s.restaurantId, poId: po0!.id, status: 'completed' }).returning();
+    await db.insert(grLines).values({ grId: gr0!.id, poLineId: pl0!.id, qtyReceived: '10' });
+
+    const emailed = await invoice(s, { source: 'email' });
+    await callerFor(s).receiving.submitReceipt({ grId: s.grId });
+    expect(sentIds()).toEqual([emailed]);
+  });
+
+  for (const source of ['email', 'platform', 'manual'] as const) {
+    it(`a ${source} invoice is still skipped when it is ambiguous with an OPEN same-supplier sibling`, async () => {
+      const s = await seed();
+      await openSiblingReceipt(s);
+      const inv = await invoice(s, { source });
+      await callerFor(s).receiving.submitReceipt({ grId: s.grId });
+      expect(sentIds()).not.toContain(inv);
+    });
+  }
+
+  // A same-day closed sibling wins the pinned tie (unlike one 3 days earlier, where
+  // the nearer day wins), so this is where the source decides.
+  for (const [source, claimed] of [
+    ['email', true],
+    ['platform', true],
+    ['manual', true],
+    ['photo', false],
+  ] as const) {
+    it(`same-day CLOSED sibling, ${source}: ${claimed ? 'claimed by its open receipt' : 'skipped (unstamped photo = deploy skew)'}`, async () => {
+      const s = await seed();
+      await openSiblingReceipt(s, { qtyOrdered: '10', qtyReceived: '10', status: 'completed' });
+      const inv = await invoice(s, { source });
+      await callerFor(s).receiving.submitReceipt({ grId: s.grId });
+      expect(sentIds()).toEqual(claimed ? [inv] : []);
+    });
+  }
 });

@@ -113,13 +113,21 @@ const SIBLING_WINDOW_MS = 2 * PO_MATCH_WINDOW_DAYS * 24 * 60 * 60 * 1000;
  * prefers a same-supplier sibling PO that already has a receipt), and then:
  *  - a stamped scan (readScanGrId) belongs to exactly the receipt it was taken
  *    on — no guess;
- *  - an unstamped one (email / upload, or OCR'd by a worker from before the
- *    stamp) must NOT also pair with any other receipt of the same supplier in
- *    the window — open OR closed. Two orders of one supplier on the same day
- *    both win the same-day tie when pinned, so the scan would otherwise be
- *    claimed by whichever receipt is submitted first (or, once the other is
- *    closed, by the later one) and matched against the wrong count. An
- *    ambiguous scan is left for a manager's match.runForInvoice, never guessed.
+ *  - an unstamped one must NOT also pair with another receipt of the same
+ *    supplier. Two orders of one supplier on the same day both win the
+ *    same-day tie when pinned, so the scan would otherwise be claimed by
+ *    whichever receipt is submitted first and matched against the wrong count.
+ *    An ambiguous scan is left for a manager's match.runForInvoice, never
+ *    guessed. Which siblings count depends on the source:
+ *      · a wizard photo ('photo') is stamped by the OCR job, so an unstamped
+ *        one was OCR'd by a worker from before the stamp (deploy skew): ANY
+ *        sibling receipt in the window, open OR closed, makes it ambiguous —
+ *        once the other receipt is closed it would otherwise be claimed by the
+ *        later one;
+ *      · email / platform / manual invoices are unstamped by design, and a
+ *        supplier delivering 2–3×/week always has a recent closed receipt:
+ *        only a still-OPEN sibling makes them ambiguous, or they would never
+ *        be auto-claimed (a silently missing ₪).
  */
 async function pairsWithReceipt(
   tx: Database,
@@ -128,7 +136,7 @@ async function pairsWithReceipt(
   receipt: { id: string; poId: string | null },
 ): Promise<boolean> {
   const [inv] = await tx
-    .select({ supplierId: invoices.supplierId, ocrPayload: invoices.ocrPayload })
+    .select({ supplierId: invoices.supplierId, source: invoices.source, ocrPayload: invoices.ocrPayload })
     .from(invoices)
     .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
     .limit(1);
@@ -162,6 +170,7 @@ async function pairsWithReceipt(
         eq(goodsReceipts.restaurantId, restaurantId),
         eq(purchaseOrders.supplierId, inv.supplierId),
         sql`${goodsReceipts.id} <> ${receipt.id}`,
+        inv.source === 'photo' ? undefined : eq(goodsReceipts.status, 'pending'),
         near,
       ),
     );
