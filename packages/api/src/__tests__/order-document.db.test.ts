@@ -27,7 +27,7 @@ function callerFor(tenant: Tenant, role: Session['role'] = 'owner') {
 }
 
 async function setFeatures(features: Record<string, boolean>, extra: Record<string, unknown> = {}) {
-  await db.update(restaurants).set({ settings: { features, ...extra } }).where(eq(restaurants.id, A.restaurantId));
+  await db.update(restaurants).set({ settings: { features, ...extra } } as never).where(eq(restaurants.id, A.restaurantId));
 }
 
 async function draft() {

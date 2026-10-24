@@ -871,7 +871,7 @@ describe('orders router: foreign id attacks + list isolation (A → B)', () => {
       .where(eq(restaurants.id, A.restaurantId));
     await db
       .update(restaurants)
-      .set({ settings: { ...(prev?.settings ?? {}), features: { orderPricesOut: true } } })
+      .set({ settings: { ...(prev?.settings ?? {}), features: { orderPricesOut: true } } } as never)
       .where(eq(restaurants.id, A.restaurantId));
     try {
       await expect(callerFor(A).orders.documentPreview({ poId: B.poId })).rejects.toMatchObject({ code: 'NOT_FOUND' });

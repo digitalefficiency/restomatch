@@ -1,4 +1,4 @@
-import type { OrderDocument, OrderDocumentExtension, OrderDocumentLine } from './types';
+import type { OrderDocument, OrderDocumentExtension, OrderDocumentExtensionContext, OrderDocumentLine } from './types';
 
 /** NUMERIC string (≤ 4 decimals) → integer units of 10^-scale, half-up, exact. */
 export function decimalToScaled(value: string | number | null | undefined, scale: number): number | null {
@@ -42,7 +42,8 @@ export interface BuildOrderDocumentInput {
     unit: string;
     unitPriceExpected: string | null;
   }>;
-  extensions?: OrderDocumentExtension[];
+  /** Extra lines appended after the totals (see `applyOrderDocumentExtensions`). */
+  extraLines?: string[];
 }
 
 function localDate(d: Date, tz: string): string {
@@ -74,8 +75,21 @@ export function buildOrderDocument(input: BuildOrderDocumentInput): OrderDocumen
     hasUnpricedLines: lines.some((l) => l.lineTotalAgorot === null),
     showPrices: input.showPrices,
     notes: input.notes?.trim() || null,
-    extraLines: [],
+    extraLines: (input.extraLines ?? []).filter((s) => s.trim() !== ''),
   };
-  for (const ext of input.extensions ?? []) doc.extraLines.push(...ext(doc).filter((s) => s.trim() !== ''));
   return doc;
+}
+
+/** Run the extensions in order and append their non-empty lines to `doc.extraLines`. */
+export async function applyOrderDocumentExtensions(
+  doc: OrderDocument,
+  extensions: readonly OrderDocumentExtension[],
+  ctx: OrderDocumentExtensionContext,
+): Promise<OrderDocument> {
+  const extraLines = [...doc.extraLines];
+  for (const ext of extensions) {
+    const lines = await ext(doc, ctx);
+    extraLines.push(...lines.filter((s) => s.trim() !== ''));
+  }
+  return { ...doc, extraLines };
 }

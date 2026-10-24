@@ -1,5 +1,5 @@
 import { eq, poLines, purchaseOrders, restaurants, sql, suppliers, type Database } from '@restomatch/db';
-import { buildOrderDocument } from './build';
+import { applyOrderDocumentExtensions, buildOrderDocument } from './build';
 import type { OrderDocument, OrderDocumentExtension, OrderDocumentSettings } from './types';
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
@@ -24,7 +24,12 @@ export async function loadOrderDocument(
   db: Database,
   restaurantId: string,
   poId: string,
-  opts: { placedAt?: Date; extensions?: OrderDocumentExtension[] } = {},
+  opts: {
+    mode: 'send' | 'preview';
+    userId: string | null;
+    placedAt?: Date;
+    extensions?: readonly OrderDocumentExtension[];
+  },
 ): Promise<LoadedOrderDocument | null> {
   const [po] = await db
     .select({
@@ -77,10 +82,16 @@ export async function loadOrderDocument(
     notes: po.notes,
     showPrices: orderDocumentSettingsOf(restaurant?.settings).showPrices,
     lines,
-    extensions: opts.extensions,
+  });
+  const withExtras = await applyOrderDocumentExtensions(doc, opts.extensions ?? [], {
+    db,
+    restaurantId,
+    poId,
+    userId: opts.userId,
+    mode: opts.mode,
   });
   return {
-    doc,
+    doc: withExtras,
     supplier: { name: supplierName, email: supplier?.email ?? null, whatsapp: supplier?.whatsapp ?? null },
   };
 }

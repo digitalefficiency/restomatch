@@ -599,8 +599,17 @@ export const ordersRouter = router({
         let payload: Record<string, unknown> | undefined;
         const pricesOut = await isFeatureOn(ctx.db, restaurantId, 'orderPricesOut');
         if (pricesOut) {
+          // Extensions (e.g. the supplier-confirmation link) need the PO already
+          // `sent`; same transaction, so any later failure rolls this back.
+          const placedAt = new Date();
+          await ctx.db
+            .update(purchaseOrders)
+            .set({ status: 'sent', sentAt: placedAt, sentChannel: input.channel, updatedAt: placedAt })
+            .where(eq(purchaseOrders.id, input.poId));
           const loaded = await loadOrderDocument(ctx.db, restaurantId, input.poId, {
-            placedAt: new Date(),
+            mode: 'send',
+            userId: ctx.session.userId ?? null,
+            placedAt,
             extensions: ORDER_DOCUMENT_EXTENSIONS,
           });
           if (!loaded) throw new TRPCError({ code: 'NOT_FOUND', message: 'purchase order not found' });
@@ -693,6 +702,8 @@ export const ordersRouter = router({
       await assertFeatureOn(ctx.db, restaurantId, 'orderPricesOut');
       await assertPoOwned(ctx.db, input.poId, restaurantId);
       const loaded = await loadOrderDocument(ctx.db, restaurantId, input.poId, {
+        mode: 'preview',
+        userId: ctx.session.userId ?? null,
         extensions: ORDER_DOCUMENT_EXTENSIONS,
       });
       if (!loaded) throw new TRPCError({ code: 'NOT_FOUND', message: 'purchase order not found' });

@@ -1,6 +1,7 @@
 import { PDFDocument } from 'pdf-lib';
 import { describe, expect, it } from 'vitest';
 import {
+  applyOrderDocumentExtensions,
   buildOrderDocument,
   decimalToScaled,
   ilsFromAgorot,
@@ -90,8 +91,20 @@ describe('text renderers', () => {
     }
   });
 
-  it('extensions append lines to every rendering (S11 hook)', async () => {
-    const doc = buildOrderDocument({ ...base, extensions: [(d) => [`אישור: https://x.test/c/${d.orderRef}`]] });
+  it('extensions append lines to every rendering (S11 hook), async and with context', async () => {
+    const seen: string[] = [];
+    const doc = await applyOrderDocumentExtensions(
+      buildOrderDocument(base),
+      [
+        async (d, ctx) => {
+          seen.push(`${ctx.mode}:${ctx.poId}`);
+          return [`אישור: https://x.test/c/${d.orderRef}`];
+        },
+        () => ['  '],
+      ],
+      { db: {} as never, restaurantId: 'r', poId: base.poId, userId: null, mode: 'send' },
+    );
+    expect(seen).toEqual([`send:${base.poId}`]);
     expect(doc.extraLines).toEqual(['אישור: https://x.test/c/1A2B3C4D']);
     expect(renderOrderEmailText(doc)).toContain('אישור: https://x.test/c/1A2B3C4D');
     expect(renderOrderWhatsappText(doc)).toContain('אישור: https://x.test/c/1A2B3C4D');

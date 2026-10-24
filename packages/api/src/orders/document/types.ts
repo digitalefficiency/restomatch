@@ -1,3 +1,5 @@
+import type { Database } from '@restomatch/db';
+
 /**
  * The order document a supplier receives (wave-1 flag `orderPricesOut`).
  *
@@ -39,12 +41,27 @@ export interface OrderDocument {
   extraLines: string[];
 }
 
+/** What an extension knows about the send it contributes to. */
+export interface OrderDocumentExtensionContext {
+  /** The member transaction (tenant GUC set). */
+  db: Database;
+  restaurantId: string;
+  poId: string;
+  userId: string | null;
+  /** 'send' = placeOrder, once per send (the PO is already `sent`); 'preview' = the PO page. */
+  mode: 'send' | 'preview';
+}
+
 /**
  * Extension point: given the built document, return extra lines to append
- * (text and PDF). Must be pure and synchronous; register in `index.ts`
- * `ORDER_DOCUMENT_EXTENSIONS` or pass per call.
+ * after the totals (email text, WhatsApp text and PDF). May be async (e.g. to
+ * mint a link — only in mode 'send'). Register in `index.ts`
+ * `ORDER_DOCUMENT_EXTENSIONS`.
  */
-export type OrderDocumentExtension = (doc: Readonly<OrderDocument>) => string[];
+export type OrderDocumentExtension = (
+  doc: Readonly<OrderDocument>,
+  ctx: OrderDocumentExtensionContext,
+) => string[] | Promise<string[]>;
 
 /** restaurants.settings.orderDocument (absent = defaults). */
 export interface OrderDocumentSettings {
