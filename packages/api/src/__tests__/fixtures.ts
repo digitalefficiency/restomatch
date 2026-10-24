@@ -22,6 +22,8 @@ import {
   procurementConnections,
   productAliases,
   products,
+  inventoryCountLines,
+  inventoryCounts,
   recipeItems,
   recipes,
   purchaseOrders,
@@ -74,6 +76,9 @@ export async function resetDb(db: Database): Promise<void> {
   await db.delete(poLines);
   await db.delete(purchaseOrders);
   await db.delete(productAliases);
+  // inventory_count_lines → products is ON DELETE RESTRICT (0070): counts go first.
+  await db.delete(inventoryCountLines);
+  await db.delete(inventoryCounts);
   // recipe_items → products is ON DELETE RESTRICT (0057): recipes go first.
   await db.delete(recipeItems);
   await db.delete(recipes);

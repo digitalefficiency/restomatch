@@ -27,6 +27,8 @@ export const FEATURE_KEYS = [
   // S17: alert on a dish whose food cost crossed the target because a supplier raised a price.
   'dishPriceAlert',
   'integrations',
+  // S17: inventory counting (ספירת מלאי) → actual food cost per period.
+  'inventoryCount',
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];

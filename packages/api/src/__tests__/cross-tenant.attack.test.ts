@@ -247,6 +247,17 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'recipes.importCsv': 'attack',
   'recipes.priceAlerts': "isolation — recipes-alerts.test.ts: B (same dish, flat price) gets no alert and never A's; reads only the caller's recipes/price_history/suppliers",
   'recipes.posVsTheory': "isolation — recipes-pos.test.ts: A's per-dish POS totals exclude B's sales of the same item/day (pos_sales is RLS-scoped, query filters restaurant_id)",
+  'inventory.enabled': 'isolation',
+  'inventory.current': "isolation — inventory-router.test.ts: B's current() is null while A has counts",
+  'inventory.start': "isolation — inventory-router.test.ts: B's new count lists only B's products, never A's",
+  'inventory.saveLines': "attack — inventory-router.test.ts: A's count id from B → NOT_FOUND; B adding A's product to B's draft → BAD_REQUEST; inventory-rls.attack.test.ts: cross-tenant line INSERT blocked by RLS + composite FK",
+  'inventory.searchProducts': 'isolation',
+  'inventory.setMeta': "attack — inventory-router.test.ts: B setting sales on A's count → NOT_FOUND",
+  'inventory.complete': "attack — inventory-rls.attack.test.ts: completes through the app role; values only the caller's lines/prices",
+  'inventory.discard': "attack — inventory-router.test.ts: B discarding A's count → NOT_FOUND",
+  'inventory.get': "attack — inventory-router.test.ts + inventory-rls.attack.test.ts: a foreign count id → NOT_FOUND",
+  'inventory.history': "isolation — inventory-router.test.ts: B's history is empty while A has two counts",
+  'inventory.period': "isolation — inventory-router.test.ts: A's purchases exclude B's ₪99,999 invoice on the same day; B's period is noCounts",
 };
 
 function listProcedurePaths(): string[] {
