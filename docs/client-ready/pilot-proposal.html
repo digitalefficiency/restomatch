@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>הצעת פיילוט · RestoMatch</title>
+<!--
+  Print leave-behind for the client meeting (S15). One A4 page, RTL.
+  Colors: packages/ui-tokens "Command Center for Money", adapted for paper —
+  the dark canvas (#0E1512) is used only for the header band and the hero
+  number; body text is green-ink on white so it prints cheaply and legibly.
+  Every number is traced in docs/client-ready/PILOT-PROPOSAL.md → מקורות.
+  ₪ follows formatIls() conventions for he-IL (Intl he-IL currency, ₪ after the
+  number with RLM), pre-rendered here because this is a static page.
+-->
+<style>
+  :root {
+    --bg: #0E1512; --surface: #16201B; --line: #2A3A31;
+    --ink: #0E1512; --muted: #3F5A4C; --paper-line: #D6E2DB;
+    --primary: #22D39A; --primary-ink: #0B7A57; --gold: #B8860B; --danger: #D93556;
+  }
+  @page { size: A4; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #fff; }
+  body {
+    font-family: "Heebo", "Assistant", "Arial Hebrew", Arial, sans-serif;
+    color: var(--ink); font-size: 9.6pt; line-height: 1.38;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .page { width: 210mm; height: 297mm; padding: 10mm 12mm 9mm; overflow: hidden; display: flex; flex-direction: column; gap: 3.2mm; }
+  header { background: var(--bg); color: #ECF5EF; border-radius: 4mm; padding: 5mm 6mm; display: flex; justify-content: space-between; align-items: center; gap: 6mm; }
+  header .brand { font-weight: 800; font-size: 13pt; letter-spacing: .2px; }
+  header .brand span { color: var(--primary); }
+  header h1 { margin: 1mm 0 0; font-size: 18pt; line-height: 1.15; }
+  header p { margin: 1mm 0 0; color: #9DB2A6; font-size: 9.2pt; }
+  .hero { text-align: center; min-width: 52mm; border-inline-start: 1px solid var(--line); padding-inline-start: 6mm; }
+  .hero .num { font-size: 26pt; font-weight: 800; color: var(--primary); line-height: 1; font-variant-numeric: tabular-nums; }
+  .hero .sub { font-size: 8.6pt; color: #9DB2A6; margin-top: 1.5mm; }
+  .hero .tag { display: inline-block; margin-top: 1.5mm; font-size: 7.4pt; color: #E0B341; border: 1px solid rgba(224,179,65,.5); border-radius: 99px; padding: .3mm 2.2mm; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3.2mm; }
+  section { border: 1px solid var(--paper-line); border-radius: 3mm; padding: 3mm 3.6mm; }
+  h2 { margin: 0 0 1.6mm; font-size: 10.8pt; display: flex; gap: 2mm; align-items: baseline; }
+  h2 .n { color: var(--primary-ink); font-variant-numeric: tabular-nums; }
+  p { margin: 0 0 1.4mm; }
+  ul, ol { margin: 0; padding-inline-start: 4.5mm; }
+  li { margin: .5mm 0; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: start; padding: .9mm 1.2mm; border-bottom: 1px solid var(--paper-line); vertical-align: top; }
+  th { font-size: 8.2pt; color: var(--muted); font-weight: 600; }
+  td.num, th.num { text-align: end; white-space: nowrap; }
+  .week b { color: var(--primary-ink); }
+  .criterion { background: #ECFAF4; border-color: #9FE3C9; }
+  .criterion strong { color: var(--primary-ink); }
+  .note { font-size: 7.9pt; color: var(--muted); }
+  .leak { color: var(--danger); font-weight: 700; }
+  .gold { color: var(--gold); font-weight: 700; }
+  .wide { grid-column: 1 / -1; }
+  footer { margin-top: auto; display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 6mm; align-items: end; padding-top: 2mm; }
+  .sig { border-bottom: 1px solid var(--ink); height: 9mm; }
+  .sig-label { font-size: 8pt; color: var(--muted); margin-top: 1mm; }
+  .steps { font-size: 9pt; }
+</style>
+</head>
+<body>
+<main class="page" data-testid="page">
+  <header>
+    <div>
+      <div class="brand">Resto<span>Match</span></div>
+      <h1>הצעת פיילוט — 30 יום</h1>
+      <p>בודקים כל משלוח מול ההזמנה ותעודת המשלוח, ועוצרים את הכסף לפני שהוא יוצא.</p>
+    </div>
+    <div class="hero" aria-label="דוגמת דליפה מנתוני הדגמה">
+      <div class="num">‏572 ‏₪</div>
+      <div class="sub">2.0% מתוך ‏28,389 ‏₪ רכש שנבדק החודש</div>
+      <div class="tag">נתוני הדגמה · מסעדה בדיונית</div>
+    </div>
+  </header>
+
+  <div class="grid">
+    <section>
+      <h2><span class="n">1</span>המספר האחד: כמה כסף דלף</h2>
+      <p><strong>דליפה</strong> = כסף שחויבתם עליו ולא הייתם צריכים: מחיר מעל המוסכם, כמות שלא הגיעה, פריט שלא הוזמן, חשבונית כפולה, מע״מ שגוי.</p>
+      <p>המערכת משווה <strong>הזמנה ↔ קבלה ↔ חשבונית</strong> ומסכמת את הפערים בשקלים — כל שקל מקושר לשורה בחשבונית.</p>
+      <p class="note">הדוגמה למעלה היא מנתוני ההדגמה, לא תוצאה של מסעדה אמיתית.</p>
+    </section>
+
+    <section class="week">
+      <h2><span class="n">2</span>מה נעשה ב-30 יום</h2>
+      <ol>
+        <li><b>שבוע 1 —</b> הקמה: ספקים, קטלוג, משתמשים; טלפון אחד לרציף.</li>
+        <li><b>שבוע 2 —</b> כל משלוח נסרק; החשבוניות הראשונות נבדקות מול ההזמנה.</li>
+        <li><b>שבוע 3 —</b> אישורים לפני תשלום: פערים מעל הסף נעצרים לבדיקה.</li>
+        <li><b>שבוע 4 —</b> המספר החודשי הראשון בשקלים ובאחוז, ומכתבי דרישה לספקים.</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2><span class="n">3</span>מה אנחנו צריכים מכם</h2>
+      <ul>
+        <li>רשימת ספקים (שם, ח.פ., איש קשר).</li>
+        <li>חודש אחד של חשבוניות והזמנות (צילום / PDF / ייצוא).</li>
+        <li>טלפון אחד למקבל הסחורה (עברית או אנגלית).</li>
+      </ul>
+    </section>
+
+    <section class="criterion">
+      <h2><span class="n">4</span>מדד הצלחה</h2>
+      <p>אם בסוף הפיילוט לא הצגנו <strong>לפחות 1.5% מהרכש כדליפה</strong> — אתם לא ממשיכים, בלי התחייבות.</p>
+    </section>
+
+    <section class="wide">
+      <h2><span class="n">5</span>מחירים — לחודש, לפני מע״מ</h2>
+      <table>
+        <thead>
+          <tr><th>תוכנית</th><th class="num">חודשי</th><th class="num">בחיוב שנתי, לחודש</th><th>כולל</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>ניסיון</td><td class="num">חינם</td><td class="num">—</td><td>כל היכולות, עד 100 חשבוניות בחודש, מסעדה אחת</td></tr>
+          <tr><td>בסיס</td><td class="num">‏349 ‏₪</td><td class="num">‏290.83 ‏₪</td><td>התאמה תלת-כיוונית, עד 150 חשבוניות, מסעדה אחת</td></tr>
+          <tr><td><strong>מקצועי</strong></td><td class="num"><strong>‏590 ‏₪</strong></td><td class="num">‏491.67 ‏₪</td><td>+ התראות WhatsApp, אנליטיקה, ייצוא להנה״ח, אינטגרציות; עד 400 חשבוניות</td></tr>
+          <tr><td>רשת</td><td class="num">‏1,490 ‏₪</td><td class="num">‏1,241.67 ‏₪</td><td>עד 5 סניפים ו-1,500 חשבוניות, השוואה בין סניפים. <strong>לפי סניף: ‏298 ‏₪</strong> לסניף בחמישה סניפים; כל סניף נוסף ‏298 ‏₪</td></tr>
+        </tbody>
+      </table>
+      <p class="note" style="margin-top:1.2mm">חיוב שנתי = 10 חודשים במקום 12. תמחור לפי סניף, חיוב שנתי והפניות — הצעה שממתינה לאישור סופי.</p>
+    </section>
+
+    <section>
+      <h2><span class="n">6</span>החזר השקעה — רכש של ‏100,000 ‏₪ בחודש</h2>
+      <table>
+        <tbody>
+          <tr><td>יעד הפיילוט: 1.5% מוצג כדליפה</td><td class="num leak">‏1,500 ‏₪</td></tr>
+          <tr><td>תוכנית מקצועי</td><td class="num">‏590 ‏₪</td></tr>
+          <tr><td>נקודת איזון (הדליפה שצריך למצוא)</td><td class="num gold">0.59%</td></tr>
+        </tbody>
+      </table>
+      <p class="note" style="margin-top:1.2mm">המחשה של היעד, לא הבטחה. "מוצג כדליפה" אינו "הוחזר" — ההחזר תלוי בספק ובמכתבי הדרישה.</p>
+    </section>
+
+    <section>
+      <h2><span class="n">7</span>אבטחת מידע</h2>
+      <ul>
+        <li><strong>הפרדה בין לקוחות</strong> במסד הנתונים (<bdi dir="ltr" style="white-space:nowrap">Row-Level Security</bdi>), שנבדקת אוטומטית בכל שינוי קוד.</li>
+        <li>סיסמה + אימות דו-שלבי, והרשאות לפי תפקיד.</li>
+        <li>יומן פעולות שלא ניתן לערוך.</li>
+        <li>תיקון 13: מדיניות פרטיות, בקשות עיון ומחיקה. המסמכים המשפטיים באימות עו״ד.</li>
+      </ul>
+    </section>
+  </div>
+
+  <footer>
+    <div class="steps">
+      <h2 style="margin-bottom:1mm"><span class="n">8</span>הצעדים הבאים</h2>
+      <ol>
+        <li>מאשרים פיילוט ותאריך התחלה.</li>
+        <li>שולחים רשימת ספקים + חודש חשבוניות.</li>
+        <li>יום הפעלה ברציף (הדרכה של 30 דקות).</li>
+      </ol>
+    </div>
+    <div><div class="sig"></div><div class="sig-label">חתימה ושם המסעדה</div></div>
+    <div><div class="sig"></div><div class="sig-label">תאריך</div></div>
+  </footer>
+</main>
+</body>
+</html>
