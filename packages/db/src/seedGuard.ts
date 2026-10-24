@@ -34,6 +34,32 @@ export function seedTargetProblem(url: string, env: NodeJS.ProcessEnv = process.
   return `refusing: ${host} is not a local database (set SEED_ALLOW_REMOTE_HOST=${host} only for a disposable demo DB)`;
 }
 
+/** True for a local Postgres (the dev/test boxes) — the only place a FULL wipe is allowed. */
+export function isLocalDbUrl(url: string): boolean {
+  try {
+    return LOCAL_DB_HOSTS.has(new URL(url).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The Supabase project ref a URL points at: the `<ref>` of a pooler user
+ * `postgres.<ref>` (session/transaction pooler hosts are shared by every project
+ * in a region), else of a direct host `db.<ref>.supabase.co`. null otherwise.
+ */
+export function supabaseProjectRef(url: string): string | null {
+  try {
+    const u = new URL(url);
+    const user = decodeURIComponent(u.username);
+    const fromUser = /^[a-z_]+\.([a-z0-9]{20})$/i.exec(user)?.[1];
+    if (fromUser) return fromUser.toLowerCase();
+    return /^db\.([a-z0-9]{20})\.supabase\.co$/i.exec(u.hostname)?.[1]?.toLowerCase() ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** Throws unless `url` is a database the destructive dev tools may wipe. */
 export function assertSeedTarget(url: string, tool: string, env: NodeJS.ProcessEnv = process.env): void {
   const problem = seedTargetProblem(url, env);

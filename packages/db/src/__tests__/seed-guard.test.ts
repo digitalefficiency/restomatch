@@ -49,4 +49,20 @@ describe('seed guard (destructive dev tools refuse non-local databases)', () => 
       expect(`${res.stdout}${res.stderr}`, script).toMatch(/refusing: db\.example\.supabase\.co is not a local database/);
     }
   }, 120_000);
+
+  it('scripts/seed.ts refuses a FULL wipe on a remote host even with the host opt-in (only SEED_SCOPE=demo runs there)', () => {
+    const res = spawnSync('npx', ['tsx', 'scripts/seed.ts'], {
+      cwd: pkgRoot,
+      env: {
+        ...process.env,
+        DATABASE_URL: 'postgresql://postgres:pw@db.demo1234.supabase.co:5432/postgres',
+        SEED_ALLOW_REMOTE_HOST: 'db.demo1234.supabase.co',
+        SEED_SCOPE: '',
+      },
+      encoding: 'utf8',
+      timeout: 60_000,
+    });
+    expect(res.status).not.toBe(0);
+    expect(`${res.stdout}${res.stderr}`).toMatch(/refusing a FULL wipe/);
+  }, 120_000);
 });
