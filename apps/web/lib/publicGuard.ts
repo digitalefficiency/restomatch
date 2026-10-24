@@ -16,8 +16,9 @@
  * the bytes actually read, so a chunked body or a lying Content-Length can't get
  * past it the way a header-only check lets it.
  *
- * Rate limiting goes through the existing `enforceRateLimit` (Redis, fails open
- * on an outage like every other limiter) — this file never touches the store.
+ * Rate limiting goes through the existing `enforceRateLimit` — this file never
+ * touches the store. It fails open if the store is down, like every other
+ * limiter. Callers run on `runtime = 'nodejs'`: the rate-limit store is Postgres.
  */
 import { NextResponse } from 'next/server';
 import type { ZodType } from 'zod';
