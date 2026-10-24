@@ -280,7 +280,7 @@ turns the demo tenant into a 3-branch chain on one billing account (plan **`chai
 | כפר הזיתים — חיפה | ₪355 = **0.6 %** of ₪61,740, 6 open on screen (log: 9) | the clean branch: occasional small price slips |
 | כפר הזיתים — ירושלים | ₪975 = **2.9 %** of ₪33,056, 15 open on screen (log: 17) | the leaky branch: frequent price bumps, short deliveries billed in full, a local butcher (בשר ההר) creeping every price |
 
-Chain dashboard on 2026-10-25: **₪2,090 = 1.5 % of ₪137,059** checked spend, ₪819 caught before payment, ₪1,270 claimed, 25 open; leakiest branch Jerusalem; "branch to check this week" (19–25 Oct): Jerusalem ₪343 · 3.8 %. Last month (`?p=last_month`): ₪1,892 of ₪186,576 (1 %); heatmap September for the main branch 1.5 %.
+Chain dashboard on 2026-10-25: **₪2,090 = 1.5 % of ₪137,059** checked spend, ₪819 caught before payment, ₪1,271 claimed (caught + claimed = the chain leak), 25 open; leakiest branch Jerusalem; "branch to check this week" (19–25 Oct): Jerusalem ₪343 · 3.8 %. Last month (`?p=last_month`): ₪1,892 of ₪186,576 (1 %); heatmap September for the main branch 1.5 %.
 
 Each new branch buys from five of the main branch's suppliers (same ח.פ, so the chain dashboard
 merges them in "top suppliers") plus one local supplier, with 10 weeks of deliveries through the
