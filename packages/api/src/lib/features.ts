@@ -26,6 +26,7 @@ export const FEATURE_KEYS = [
   'recipes',
   'integrations',
   'payRun',
+  'dockSlip',
   'consolidatedMatch',
 ] as const;
 
