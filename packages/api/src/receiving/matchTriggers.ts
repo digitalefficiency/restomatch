@@ -58,9 +58,53 @@ export async function receiptStillOpen(tx: Database, restaurantId: string, grId:
 }
 
 /**
- * Does the matcher pair this invoice with THIS receipt when the receipt's own PO
- * is pinned? (Pinning matters: discovery alone prefers a same-supplier sibling
- * PO that already has a receipt.)
+ * The receipt a scan was taken on, as the OCR job stamped it into
+ * `ocr_payload.raw.scanGrId` (from the job's grId, tenant-checked). Null for an
+ * unstamped scan: email / upload, or a row from before the stamp.
+ */
+export function readScanGrId(ocrPayload: unknown): string | null {
+  const raw = (ocrPayload as { raw?: unknown } | null | undefined)?.raw;
+  if (typeof raw !== 'object' || raw === null) return null;
+  const id = (raw as { scanGrId?: unknown }).scanGrId;
+  return typeof id === 'string' && id.length > 0 ? id : null;
+}
+
+/** The OCR result with the scan's receipt stamped in (unchanged without one). */
+export function withScanGrId<T extends object>(raw: T, scanGrId: string | undefined): T | (T & { scanGrId: string }) {
+  return scanGrId ? { ...raw, scanGrId } : raw;
+}
+
+/**
+ * The grId to stamp on a scan: the job's grId only when that receipt is this
+ * restaurant's (a forged / foreign id stamps nothing, and the scan falls back
+ * to the pairing rule below).
+ */
+export async function scanReceiptToStamp(
+  db: Database,
+  restaurantId: string,
+  grId: string | undefined,
+): Promise<string | undefined> {
+  if (!grId) return undefined;
+  const [gr] = await db
+    .select({ id: goodsReceipts.id })
+    .from(goodsReceipts)
+    .where(and(eq(goodsReceipts.id, grId), eq(goodsReceipts.restaurantId, restaurantId)))
+    .limit(1);
+  return gr?.id;
+}
+
+/**
+ * Does this invoice belong to THIS receipt? The matcher must pair it with the
+ * receipt when the receipt's own PO is pinned (pinning matters: discovery alone
+ * prefers a same-supplier sibling PO that already has a receipt), and then:
+ *  - a stamped scan (readScanGrId) belongs to exactly the receipt it was taken
+ *    on — no guess;
+ *  - an unstamped one must NOT also pair with another still-open receipt of the
+ *    same supplier. Two orders of one supplier on the same day both win the
+ *    same-day tie when pinned, so the scan would otherwise be claimed by
+ *    whichever receipt is submitted first and matched against the wrong count.
+ *    An ambiguous scan is left for a manager's match.runForInvoice, never
+ *    guessed.
  */
 async function pairsWithReceipt(
   tx: Database,
@@ -68,8 +112,36 @@ async function pairsWithReceipt(
   invoiceId: string,
   receipt: { id: string; poId: string | null },
 ): Promise<boolean> {
+  const [inv] = await tx
+    .select({ supplierId: invoices.supplierId, ocrPayload: invoices.ocrPayload })
+    .from(invoices)
+    .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
+    .limit(1);
+  if (!inv) return false;
+  const stamped = readScanGrId(inv.ocrPayload);
+  if (stamped !== null && stamped !== receipt.id) return false; // another receipt's scan
+
   const built = await buildMatchInputForInvoice(tx, restaurantId, invoiceId, { pinnedPoId: receipt.poId });
-  return built?.grId === receipt.id;
+  if (built?.grId !== receipt.id) return false;
+  if (stamped !== null || !inv.supplierId) return true;
+
+  const openSiblings = await tx
+    .select({ id: goodsReceipts.id, poId: goodsReceipts.poId })
+    .from(goodsReceipts)
+    .innerJoin(purchaseOrders, eq(purchaseOrders.id, goodsReceipts.poId))
+    .where(
+      and(
+        eq(goodsReceipts.restaurantId, restaurantId),
+        eq(goodsReceipts.status, 'pending'),
+        eq(purchaseOrders.supplierId, inv.supplierId),
+        sql`${goodsReceipts.id} <> ${receipt.id}`,
+      ),
+    );
+  for (const sibling of openSiblings) {
+    const other = await buildMatchInputForInvoice(tx, restaurantId, invoiceId, { pinnedPoId: sibling.poId });
+    if (other?.grId === sibling.id) return false; // ambiguous: it would also be that open receipt's scan
+  }
+  return true;
 }
 
 /** How far back submitReceipt looks for invoices of the receipt's supplier. */
