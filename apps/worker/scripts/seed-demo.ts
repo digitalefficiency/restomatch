@@ -463,7 +463,7 @@ async function main() {
 
     const issues = result.discrepancies.filter((d) => d.severity !== 'info').length;
     // The same feed story as the real match writer (the hero's leak rule).
-    const feed = matchActivitySummary(feedFindings, totalInclVat);
+    const feed = matchActivitySummary(feedFindings, totalInclVat, { poMatched: true });
     await db.insert(activityEvents).values([
       {
         restaurantId,
@@ -500,6 +500,8 @@ async function main() {
           leakCount: feed.leakCount,
           leakIls: feed.leakIls,
           pendingLink: feed.pendingLink,
+          poMatched: feed.poMatched,
+          reviewCount: feed.reviewCount,
           status: result.status,
         },
         createdAt: new Date(receivedAt.getTime() + 60 * 1000),

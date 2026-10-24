@@ -55,6 +55,9 @@ export const en: Shape<typeof he> = {
     matchesOrderAndReceipt: 'matches the order and the delivery',
     awaitingMonthlyMatch: "waiting to be matched against this month's delivery notes",
     awaitingPoLink: 'waiting to be linked to an order',
+    noPoLinked: 'no order linked',
+    toReviewOne: '1 finding to review',
+    toReview: '{count} findings to review',
     empty: 'No activity yet.',
   },
 };

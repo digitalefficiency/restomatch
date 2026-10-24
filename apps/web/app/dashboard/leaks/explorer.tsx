@@ -53,7 +53,8 @@ export async function LeakExplorer({ view }: { view: ViewState }) {
     label: labelOf(r.key, r.label, r.labelEn),
     value: r.leakIls,
     count: r.count,
-    previous: grouped.previous ? (prevByKey.get(r.key) ?? 0) : null,
+    // An empty comparison period (no checked invoices) has no base: neutral "—", never a red ▲ +₪X.
+    previous: grouped.previous && prev ? (prevByKey.get(r.key) ?? 0) : null,
   }));
   const linesTotal = grouped.rows.reduce((s, r) => s + r.leakIls, 0);
   const groupName = t(`groups.${view.group}`);

@@ -49,6 +49,8 @@ export function DeltaBadge({
   const vs = compare === 'yoy' ? t('delta.yoy') : t('delta.prev');
   const v = deltaView(current, previous, { thinBase, kind });
   if (v.kind === 'none') {
+    // In a table cell (bare) a quiet dash; standalone, say why there is no change.
+    if (bare) return <span className={cn('text-xs text-subtle', className)}>—</span>;
     return (
       <span className={cn('inline-flex items-center gap-1 text-xs text-subtle', className)}>
         {t('delta.noBase')}

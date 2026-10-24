@@ -127,6 +127,28 @@ describe('localizeActivity — structured metadata (S3 writers + demo seed)', ()
     expect(one.detail).toBe('Sharon · 1 discrepancy · potential loss ₪105');
   });
 
+  it('metadata with poMatched: worded from the findings (no PO + loss, to review, no order linked)', () => {
+    const base = { invoiceNumber: 'X-1', supplierNameEn: 'Sharon', discrepancyCount: 2, potentialLossIls: 1285 };
+    const pendingLoss = localizeActivity(
+      { eventType: 'invoice_matched', ...he, metadata: { ...base, poMatched: false, pendingLink: true, leakCount: 1, leakIls: 12.6, reviewCount: 0 } },
+      'en',
+    );
+    expect(pendingLoss.detail).toBe('Sharon · waiting to be linked to an order · 1 discrepancy · potential loss ₪13');
+    const review = localizeActivity(
+      { eventType: 'invoice_matched', ...he, metadata: { ...base, poMatched: true, pendingLink: false, leakCount: 0, leakIls: 0, reviewCount: 2 } },
+      'en',
+    );
+    expect(review.detail).toBe('Sharon · 2 findings to review');
+    const noPo = localizeActivity(
+      { eventType: 'invoice_matched', ...he, metadata: { ...base, poMatched: false, pendingLink: false, leakCount: 0, leakIls: 0, reviewCount: 0 } },
+      'en',
+    );
+    expect(noPo.detail).toBe('Sharon · no order linked');
+    expect(localizeActivity({ eventType: 'invoice_matched', title: 'x', detail: 'ירקות השרון · חריגה אחת לבדיקה' }, 'en').detail).toBe(
+      'ירקות השרון · 1 finding to review',
+    );
+  });
+
   it('singular discrepancy', () => {
     const out = localizeActivity(
       { eventType: 'invoice_matched', ...he, metadata: { invoiceNumber: 'ST-1', supplierNameEn: 'Steinberg', discrepancyCount: 1, potentialLossIls: 104.8 } },

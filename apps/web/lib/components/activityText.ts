@@ -52,6 +52,12 @@ export function localizeActivity(
   const out = parts.map((part) => {
     if (part === 'חריגה אחת') return t('activity.discrepancyOne');
     if (part === 'ממתינה לשיוך להזמנה') return t('activity.awaitingPoLink');
+    if (part === 'ללא הזמנה מקושרת') return t('activity.noPoLinked');
+    if (part === 'חריגה אחת לבדיקה') return t('activity.toReviewOne');
+    {
+      const r = /^(\d+)\s+חריגות לבדיקה$/.exec(part);
+      if (r) return t('activity.toReview', { count: r[1]! });
+    }
     let m = /^(\d+)\s+חריגות$/.exec(part);
     if (m) return t('activity.discrepancies', { count: m[1]! });
     m = /^הפסד פוטנציאלי\s+(.+)$/.exec(part);
@@ -88,6 +94,8 @@ type ActivityMeta = {
   leakCount?: unknown;
   leakIls?: unknown;
   pendingLink?: unknown;
+  poMatched?: unknown;
+  reviewCount?: unknown;
   totalInclVatIls?: unknown;
   consolidated?: unknown;
 };
@@ -124,6 +132,23 @@ function fromMetadata(
   }
   if (eventType === 'invoice_matched') {
     const title = t('activity.invoiceMatchedNumbered', { number });
+    if (typeof m.poMatched === 'boolean') {
+      // Worded from the findings (packages/api matchActivitySummary): PO state, loss, then what is left to review.
+      const leakCount = typeof m.leakCount === 'number' ? m.leakCount : 0;
+      const review = typeof m.reviewCount === 'number' ? m.reviewCount : 0;
+      const lossText = ils(m.leakIls);
+      const parts: Array<string | null> = [supplier];
+      if (!m.poMatched) parts.push(m.pendingLink === true ? t('activity.awaitingPoLink') : t('activity.noPoLinked'));
+      if (leakCount > 0) {
+        parts.push(leakCount === 1 ? t('activity.discrepancyOne') : t('activity.discrepancies', { count: leakCount }));
+        if (lossText) parts.push(t('activity.potentialLoss', { amount: lossText }));
+      } else if (review > 0) {
+        parts.push(review === 1 ? t('activity.toReviewOne') : t('activity.toReview', { count: review }));
+      } else if (m.poMatched) {
+        parts.push(t('activity.matchesOrder'));
+      }
+      return { title, detail: parts.filter(Boolean).join(' · ') || null };
+    }
     // No PO yet: calm "waiting for a PO link", like the hero — never a loss figure.
     if (m.pendingLink === true) return { title, detail: [supplier, t('activity.awaitingPoLink')].filter(Boolean).join(' · ') };
     const hasLeak = typeof m.leakCount === 'number';

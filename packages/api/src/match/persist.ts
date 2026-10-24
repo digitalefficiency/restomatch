@@ -240,7 +240,9 @@ export async function loadPriorDecisions(
 export function matchActivitySummary(
   findings: { type: string; severity: string; deltaAmount: number; resolutionStatus: string }[],
   invoiceTotalInclVat: number,
-): { detail: string; leakCount: number; leakIls: number; pendingLink: boolean } {
+  /** Was the invoice checked against a PO? (persist: input.poLines.length > 0). */
+  opts: { poMatched?: boolean } = {},
+): { detail: string; leakCount: number; leakIls: number; pendingLink: boolean; poMatched: boolean; reviewCount: number } {
   const pendingLink = findings.some(
     (f) => f.type === 'UNORDERED_ARRIVAL' && (f.resolutionStatus === 'open' || f.resolutionStatus === 'escalated'),
   );
@@ -254,12 +256,29 @@ export function matchActivitySummary(
   );
   const raw = leaking.reduce((sum, f) => sum + Math.round(Math.abs(f.deltaAmount) * 100), 0) / 100;
   const leakIls = Math.min(raw, Math.max(invoiceTotalInclVat, 0));
-  const detail = pendingLink
-    ? 'ממתינה לשיוך להזמנה'
-    : leaking.length === 0
-      ? 'תואמת להזמנה ולקבלה'
-      : `${leaking.length === 1 ? 'חריגה אחת' : `${leaking.length} חריגות`} · הפסד פוטנציאלי ₪${Math.round(leakIls).toLocaleString('he-IL')}`;
-  return { detail, leakCount: leaking.length, leakIls, pendingLink };
+  const poMatched = opts.poMatched ?? !findings.some((f) => f.type === 'UNORDERED_ARRIVAL');
+  // Findings still waiting for a person that are not a loss (e.g. a date anomaly,
+  // an under-charge to confirm): "to review", not "matches".
+  const reviewCount = findings.filter(
+    (f) =>
+      (f.severity === 'warn' || f.severity === 'block') &&
+      (f.resolutionStatus === 'open' || f.resolutionStatus === 'escalated') &&
+      f.type !== 'UNORDERED_ARRIVAL' &&
+      !leaking.includes(f),
+  ).length;
+  // Worded from the actual findings: the PO state first, then the loss, then
+  // anything left to check — "matches" only when there was a PO and nothing is open.
+  const parts: string[] = [];
+  if (!poMatched) parts.push(pendingLink ? 'ממתינה לשיוך להזמנה' : 'ללא הזמנה מקושרת');
+  if (leaking.length > 0) {
+    parts.push(leaking.length === 1 ? 'חריגה אחת' : `${leaking.length} חריגות`);
+    parts.push(`הפסד פוטנציאלי ₪${Math.round(leakIls).toLocaleString('he-IL')}`);
+  } else if (reviewCount > 0) {
+    parts.push(reviewCount === 1 ? 'חריגה אחת לבדיקה' : `${reviewCount} חריגות לבדיקה`);
+  } else if (poMatched) {
+    parts.push('תואמת להזמנה ולקבלה');
+  }
+  return { detail: parts.join(' · '), leakCount: leaking.length, leakIls, pendingLink, poMatched, reviewCount };
 }
 
 export interface PersistMatchResult {
@@ -403,7 +422,7 @@ export async function persistMatchRun(
     .leftJoin(suppliers, and(eq(suppliers.id, invoices.supplierId), eq(suppliers.restaurantId, args.restaurantId)))
     .where(and(eq(invoices.id, args.invoiceId), eq(invoices.restaurantId, args.restaurantId)))
     .limit(1);
-  const feed = matchActivitySummary(feedFindings, totalInvoiceAmount);
+  const feed = matchActivitySummary(feedFindings, totalInvoiceAmount, { poMatched: input.poLines.length > 0 });
   await logActivity(db, {
     restaurantId: args.restaurantId,
     eventType: 'invoice_matched',
@@ -423,6 +442,8 @@ export async function persistMatchRun(
       leakCount: feed.leakCount,
       leakIls: feed.leakIls,
       pendingLink: feed.pendingLink,
+      poMatched: feed.poMatched,
+      reviewCount: feed.reviewCount,
       // What a duplicate matched, so a re-match can tell "same duplicate" (keep the decision) from a new one.
       ...(result.discrepancies.some((d) => d.type === 'DUPLICATE_INVOICE') ? { duplicateKey: duplicateKeyOf(input) } : {}),
       status: result.status,

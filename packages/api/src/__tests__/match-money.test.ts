@@ -494,14 +494,34 @@ describe('the feed tells the hero’s story (matchActivitySummary)', () => {
   const f = (type: string, severity: string, deltaAmount: number, resolutionStatus = 'open') => ({ type, severity, deltaAmount, resolutionStatus });
 
   it('a clean match is calm — never "0 חריגות · ₪0"', () => {
-    expect(matchActivitySummary([], 117)).toEqual({ detail: 'תואמת להזמנה ולקבלה', leakCount: 0, leakIls: 0, pendingLink: false });
-    // Only inside-tolerance info + an under-charge: still nothing leaked.
-    expect(matchActivitySummary([f('QTY_SHORT', 'info', 4), f('PRICE_LOWER', 'warn', 12)], 117).detail).toBe('תואמת להזמנה ולקבלה');
+    expect(matchActivitySummary([], 117, { poMatched: true })).toEqual({
+      detail: 'תואמת להזמנה ולקבלה',
+      leakCount: 0,
+      leakIls: 0,
+      pendingLink: false,
+      poMatched: true,
+      reviewCount: 0,
+    });
+    // Inside-tolerance info + an AUTO-ACCEPTED under-charge: nothing leaked, nothing open.
+    expect(matchActivitySummary([f('QTY_SHORT', 'info', 4), f('PRICE_LOWER', 'warn', 12, 'accepted')], 117, { poMatched: true }).detail).toBe(
+      'תואמת להזמנה ולקבלה',
+    );
+  });
+
+  it('"matches" only with a PO and nothing open; an open non-loss finding reads "to review"', () => {
+    expect(matchActivitySummary([f('PRICE_LOWER', 'warn', 12)], 117, { poMatched: true }).detail).toBe('חריגה אחת לבדיקה');
+    expect(matchActivitySummary([f('DATE_ANOMALY', 'warn', 0), f('PRICE_LOWER', 'warn', 3)], 117, { poMatched: true }).detail).toBe('2 חריגות לבדיקה');
+    // No PO and nothing pending (the no-PO finding was decided): say so, never "matches".
+    expect(matchActivitySummary([f('UNORDERED_ARRIVAL', 'block', 117, 'accepted')], 117, { poMatched: false }).detail).toBe('ללא הזמנה מקושרת');
   });
 
   it('no PO yet → pending, calm — not "הפסד פוטנציאלי ₪1,273"', () => {
-    const s = matchActivitySummary([f('UNORDERED_ARRIVAL', 'warn', 1273)], 1273);
-    expect(s).toEqual({ detail: 'ממתינה לשיוך להזמנה', leakCount: 0, leakIls: 0, pendingLink: true });
+    const s = matchActivitySummary([f('UNORDERED_ARRIVAL', 'warn', 1273)], 1273, { poMatched: false });
+    expect(s).toEqual({ detail: 'ממתינה לשיוך להזמנה', leakCount: 0, leakIls: 0, pendingLink: true, poMatched: false, reviewCount: 0 });
+    // …but a no-PO invoice whose duplicate / VAT / total finding counts as leak says so.
+    expect(matchActivitySummary([f('UNORDERED_ARRIVAL', 'block', 1273), f('VAT_MISMATCH', 'warn', 12.6)], 1273, { poMatched: false }).detail).toBe(
+      'ממתינה לשיוך להזמנה · חריגה אחת · הפסד פוטנציאלי ₪13',
+    );
   });
 
   it('singular / plural, grouped ₪, capped at the invoice total like the hero', () => {
@@ -522,10 +542,9 @@ describe('the feed tells the hero’s story (matchActivitySummary)', () => {
     const res = await ownerCaller(A).match.runForInvoice({ invoiceId: A.invoiceId });
     expect(res.poMatched).toBe(false);
     const [ev] = await db.select().from(activityEvents).where(eq(activityEvents.entityId, res.matchRunId!));
-    expect(ev!.detail).toBe(`${A.supplierName} · ממתינה לשיוך להזמנה`);
-    // A small VAT finding can still count (the hero counts it too); the story is "pending".
-    expect(ev!.metadata).toMatchObject({ pendingLink: true });
-    expect(ev!.detail).not.toContain('הפסד פוטנציאלי');
+    // Pending a PO link, plus the small VAT finding that counts as leak (the hero counts it too).
+    expect(ev!.detail).toBe(`${A.supplierName} · ממתינה לשיוך להזמנה · חריגה אחת · הפסד פוטנציאלי ₪1`);
+    expect(ev!.metadata).toMatchObject({ pendingLink: true, poMatched: false, leakCount: 1, leakIls: 1 });
   });
 });
 

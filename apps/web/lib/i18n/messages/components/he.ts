@@ -56,6 +56,9 @@ export const he = {
     matchesOrderAndReceipt: 'תואמת להזמנה ולקבלה',
     awaitingMonthlyMatch: 'ממתינה להתאמה מול תעודות המשלוח של החודש',
     awaitingPoLink: 'ממתינה לשיוך להזמנה',
+    noPoLinked: 'ללא הזמנה מקושרת',
+    toReviewOne: 'חריגה אחת לבדיקה',
+    toReview: '{count} חריגות לבדיקה',
     empty: 'עוד אין פעילות להצגה.',
   },
 };
