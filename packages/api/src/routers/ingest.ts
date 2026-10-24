@@ -126,7 +126,7 @@ export const ingestRouter = router({
     .mutation(async ({ ctx, input }) => {
       await requireIngest(ctx.db, ctx.session.restaurantId, input.kind);
       const token = generateIngestToken(input.kind);
-      await ctx.db
+      const previous = await ctx.db
         .update(ingestChannels)
         .set({ active: false, revokedAt: new Date() })
         .where(
@@ -135,13 +135,17 @@ export const ingestRouter = router({
             eq(ingestChannels.kind, input.kind),
             eq(ingestChannels.active, true),
           ),
-        );
+        )
+        .returning({ phoneNumberId: ingestChannels.phoneNumberId });
       await ctx.db.insert(ingestChannels).values({
         restaurantId: ctx.session.restaurantId,
         kind: input.kind,
         tokenHash: hashIngestToken(token),
         tokenHint: tokenHint(token),
-        phoneNumberId: input.phoneNumberId ?? null,
+        // A rotation replaces the secret, not the WhatsApp number: keep the
+        // binding unless a new one is given (an unbound channel rejects every
+        // message in production).
+        phoneNumberId: input.phoneNumberId ?? previous[0]?.phoneNumberId ?? null,
         createdBy: ctx.session.userId,
       });
       return {

@@ -673,3 +673,23 @@ describe('publicGuard path (web routes pass the guarded raw body)', () => {
     expect(big.status).toBe(413);
   });
 });
+
+describe('rotateChannel keeps the WhatsApp number binding (regression)', () => {
+  it('a rotation without a new phoneNumberId carries the old binding; the new token works, the old one 404s', async () => {
+    const caller = appRouter.createCaller({
+      db: appDb,
+      session: { userId: A.ownerUserId, restaurantId: A.restaurantId, role: 'owner' },
+    });
+    const r = await caller.ingest.rotateChannel({ kind: 'whatsapp' });
+    const [active] = await ownerDb
+      .select()
+      .from(ingestChannels)
+      .where(and(eq(ingestChannels.restaurantId, A.restaurantId), eq(ingestChannels.kind, 'whatsapp'), eq(ingestChannels.active, true)));
+    expect(active?.phoneNumberId).toBe('PNID-A');
+    const fresh = await handleWhatsAppWebhook(waRequest(r.token, waBody({ id: 'wamid.rotated.1' })), r.token, deps({ config: { ...waConfig(), requirePhoneNumberId: true } }));
+    expect(((await fresh.json()) as { results: Array<{ outcome: string }> }).results[0]?.outcome).toBe('accepted');
+    const old = await handleWhatsAppWebhook(waRequest(tokens.aWa, waBody({ id: 'wamid.rotated.2' })), tokens.aWa, deps({ config: waConfig() }));
+    expect(old.status).toBe(404);
+    tokens.aWa = r.token;
+  });
+});
