@@ -10,6 +10,7 @@ import { trpc } from '@/lib/trpc/client';
 import {
   Button,
   Card,
+  ConfirmDialog,
   Input,
   Select,
   entitlementCauseOf,
@@ -24,6 +25,7 @@ import { components } from '@/lib/i18n/messages/components';
 import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 import { formatIls } from '@/lib/money';
 import { OrderStatusBadge } from '../orders-table';
+import { OrderDocumentPreview } from '../order-document-preview';
 import { lineLabel, lineTotalIls, parsePositive, parsePrice } from '../order-logic';
 
 type OrderData = inferRouterOutputs<AppRouter>['orders']['get'];
@@ -50,7 +52,20 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
   const canCancel = po.status !== 'cancelled' && po.status !== 'closed' && data.receiptStatus == null;
   const editable = canEdit && isDraft;
 
-  const [channel, setChannel] = useState<Channel>('none');
+  // Default to what the supplier can actually receive (as the wizard does) —
+  // "don't send" is never the silent default next to the primary Send button.
+  const suppliers = trpc.suppliers.list.useQuery({}, { enabled: editable });
+  const supplier = suppliers.data?.find((s) => s.id === po.supplierId);
+  const defaultChannel: Channel = supplier?.contactEmail
+    ? 'email'
+    : supplier?.contactWhatsapp
+      ? 'whatsapp'
+      : 'none';
+  const [pickedChannel, setChannel] = useState<Channel | null>(null);
+  const channel = pickedChannel ?? defaultChannel;
+  const [asking, setAsking] = useState<
+    null | { kind: 'cancel' } | { kind: 'deleteLine'; lineId: string; name: string }
+  >(null);
   const [editingLine, setEditingLine] = useState<string | null>(null);
   const [lineError, setLineError] = useState<string | null>(null);
   const [ld, setLd] = useState<LineDraft>({ rawDescription: '', qtyOrdered: '', unit: '', unitPriceExpected: '' });
@@ -76,7 +91,14 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
   };
   const onErr = (e: unknown) => toast.error(errorFor(e));
 
-  const cancel = trpc.orders.cancelOrder.useMutation({ onSuccess: () => done(t('detail.cancelled')), onError: onErr });
+  const asked = (then: () => void) => () => {
+    setAsking(null);
+    then();
+  };
+  const cancel = trpc.orders.cancelOrder.useMutation({
+    onSuccess: asked(() => done(t('detail.cancelled'))),
+    onError: (e) => asked(() => onErr(e))(),
+  });
   const place = trpc.orders.placeOrder.useMutation({
     onSuccess: (r) => done(r.sentChannel ? t('detail.placed') : t('detail.placedNoChannel')),
     onError: (e) => toast.error(errorFor(e, true)),
@@ -88,7 +110,10 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
     },
     onError: onErr,
   });
-  const delLine = trpc.orders.deleteOrderLine.useMutation({ onSuccess: () => done(t('detail.lineDeleted')), onError: onErr });
+  const delLine = trpc.orders.deleteOrderLine.useMutation({
+    onSuccess: asked(() => done(t('detail.lineDeleted'))),
+    onError: (e) => asked(() => onErr(e))(),
+  });
 
   const busy = cancel.isPending || place.isPending || updateLine.isPending || delLine.isPending;
 
@@ -128,11 +153,11 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
   return (
     <div className="space-y-6">
       <Card flow elevated padding="lg">
+        <div className="mb-3">
+          <OrderStatusBadge status={po.status} receiptStatus={data.receiptStatus} />
+        </div>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm sm:grid-cols-4">
-            <div className="col-span-2 sm:col-span-4">
-              <OrderStatusBadge status={po.status} receiptStatus={data.receiptStatus} />
-            </div>
             <div>
               <dt className="text-xs text-subtle">{t('detail.created')}</dt>
               <dd className="tabular-nums text-ink">{formatDateTime(po.createdAt, locale)}</dd>
@@ -181,12 +206,13 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
                   <Select
                     value={channel}
                     onChange={(e) => setChannel(e.target.value as Channel)}
-                    className="w-auto text-sm"
+                    fullWidth={false}
+                    className="w-auto max-w-full text-sm"
                     aria-label={t('detail.channelLabel')}
                   >
-                    <option value="none">{t('detail.channels.none')}</option>
                     <option value="email">{t('detail.channels.email')}</option>
                     <option value="whatsapp">{t('detail.channels.whatsapp')}</option>
+                    <option value="none">{t('detail.channels.none')}</option>
                   </Select>
                   <Button
                     variant="primary"
@@ -195,7 +221,8 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
                     disabled={busy || data.lines.length === 0}
                     onClick={() => once(() => place.mutateAsync({ poId: po.id, channel }))}
                   >
-                    <Send className="h-4 w-4 rtl:-scale-x-100" aria-hidden="true" /> {t('detail.send')}
+                    <Send className="h-4 w-4 rtl:-scale-x-100" aria-hidden="true" />{' '}
+                    {channel === 'none' ? t('detail.markSent') : t('detail.send')}
                   </Button>
                 </>
               )}
@@ -204,9 +231,7 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
                 size="sm"
                 disabled={busy}
                 loading={cancel.isPending}
-                onClick={() => {
-                  if (confirm(t('detail.confirmCancel'))) cancel.mutate({ poId: po.id });
-                }}
+                onClick={() => setAsking({ kind: 'cancel' })}
               >
                 <Ban className="h-4 w-4 text-danger" aria-hidden="true" /> {t('detail.cancel')}
               </Button>
@@ -214,6 +239,12 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
           )}
         </div>
       </Card>
+
+      {editable && channel !== 'none' && data.lines.length > 0 && (
+        <Card elevated padding="lg">
+          <OrderDocumentPreview input={{ poId: po.id }} />
+        </Card>
+      )}
 
       {/* Phones: qty × unit price folds under the description so the line total
           stays on screen; editing a line restores the full (scrollable) table. */}
@@ -355,11 +386,7 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
                             aria-label={`${t('detail.deleteLine')}: ${label.primary}`}
                             title={data.lines.length === 1 ? t('detail.lastLine') : t('detail.deleteLine')}
                             disabled={busy || data.lines.length === 1}
-                            onClick={() => {
-                              if (confirm(t('detail.confirmDeleteLine', { name: label.primary }))) {
-                                delLine.mutate({ lineId: l.id });
-                              }
-                            }}
+                            onClick={() => setAsking({ kind: 'deleteLine', lineId: l.id, name: label.primary })}
                           >
                             <Trash2 className="h-4 w-4 text-danger" aria-hidden="true" />
                           </Button>
@@ -380,6 +407,26 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
           </tbody>
         </table>
       </Card>
+
+      <ConfirmDialog
+        open={asking?.kind === 'cancel'}
+        title={t('detail.confirmCancel')}
+        body={po.sentAt ? <p className="font-medium text-ink">{t('detail.cancelSentWarning')}</p> : null}
+        confirmLabel={t('detail.cancel')}
+        cancelLabel={t('detail.keepOrder')}
+        loading={cancel.isPending}
+        onConfirm={() => cancel.mutate({ poId: po.id })}
+        onClose={() => setAsking(null)}
+      />
+      <ConfirmDialog
+        open={asking?.kind === 'deleteLine'}
+        title={asking?.kind === 'deleteLine' ? t('detail.confirmDeleteLine', { name: asking.name }) : ''}
+        confirmLabel={t('detail.deleteLine')}
+        cancelLabel={t('detail.keepLine')}
+        loading={delLine.isPending}
+        onConfirm={() => asking?.kind === 'deleteLine' && delLine.mutate({ lineId: asking.lineId })}
+        onClose={() => setAsking(null)}
+      />
     </div>
   );
 }
