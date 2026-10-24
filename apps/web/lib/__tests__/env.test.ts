@@ -232,3 +232,90 @@ describe('Redis is gone (0061)', () => {
     expect(webEnvWarnings({ NODE_ENV: 'production' } as never).some((w) => /REDIS/.test(w))).toBe(false);
   });
 });
+
+describe('DATABASE_URL_APP malformed in production → derived from DATABASE_URL + APP_ROLE_PASSWORD', () => {
+  const REF = 'rutbnmvkwirqtixvuhdq';
+  const POOLER = `postgresql://postgres.${REF}:owner-secret@aws-0-ap-northeast-1.pooler.supabase.com:6543/postgres`;
+  const APP_PW = 'a'.repeat(64);
+  const prodEnv = (over: Record<string, string | undefined>) =>
+    ({ NODE_ENV: 'production', DATABASE_URL: POOLER, APP_ROLE_PASSWORD: APP_PW, ...over }) as never;
+
+  it('derives restomatch_app.<ref> on the owner host, never the owner password', async () => {
+    const { resolveWebDbUrl } = await import('../env');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    for (const bad of [
+      `DATABASE_URL_APP=postgresql://restomatch_app.${REF}:x@h:6543/postgres`,
+      'just-a-password',
+      `postgresql://restomatch_app.${REF}:<${APP_PW}>@aws-0-ap-northeast-1.pooler.supabase.com:6543/postgres x`,
+      undefined,
+    ]) {
+      const url = new URL(resolveWebDbUrl(prodEnv({ DATABASE_URL_APP: bad })));
+      expect(url.username).toBe(`restomatch_app.${REF}`);
+      expect(decodeURIComponent(url.password)).toBe(APP_PW);
+      expect(url.host).toBe('aws-0-ap-northeast-1.pooler.supabase.com:6543');
+      expect(url.pathname).toBe('/postgres');
+      expect(url.toString()).not.toContain('owner-secret');
+    }
+    // The warning says why, without the value.
+    for (const [msg] of warn.mock.calls) expect(String(msg)).not.toContain('just-a-password');
+    warn.mockRestore();
+  });
+
+  it('keeps a valid DATABASE_URL_APP as is', async () => {
+    const { resolveWebDbUrl } = await import('../env');
+    const good = `postgresql://restomatch_app.${REF}:pw@aws-0-ap-northeast-1.pooler.supabase.com:6543/postgres`;
+    expect(resolveWebDbUrl(prodEnv({ DATABASE_URL_APP: good }))).toBe(good);
+  });
+
+  it('URL-encodes a password with special characters so postgres.js round-trips it', async () => {
+    const { deriveAppRoleUrl } = await import('../env');
+    const pw = 'p@ss:w/rd?#%x';
+    const u = new URL(deriveAppRoleUrl(prodEnv({ APP_ROLE_PASSWORD: pw }))!);
+    expect(decodeURIComponent(u.password)).toBe(pw);
+  });
+
+  it('uses plain restomatch_app on a direct (non-Supavisor) owner URL', async () => {
+    const { deriveAppRoleUrl } = await import('../env');
+    const u = new URL(deriveAppRoleUrl(prodEnv({ DATABASE_URL: 'postgres://postgres:pw@db.example.com:5432/postgres' }))!);
+    expect(u.username).toBe('restomatch_app');
+  });
+
+  it('without APP_ROLE_PASSWORD a malformed value fails loudly — naming the problem, not the value', async () => {
+    const { resolveWebDbUrl } = await import('../env');
+    const bad = 'DATABASE_URL_APP=postgresql://u:secretpw@h/db';
+    expect(() => resolveWebDbUrl(prodEnv({ APP_ROLE_PASSWORD: undefined, DATABASE_URL_APP: bad }))).toThrow(/starts with "NAME="/);
+    try {
+      resolveWebDbUrl(prodEnv({ APP_ROLE_PASSWORD: undefined, DATABASE_URL_APP: bad }));
+    } catch (e) {
+      expect(String(e)).not.toContain('secretpw');
+    }
+    // …but never breaks `next build` (the boot guard refuses at runtime instead).
+    const { BUILD_PHASE_DB_PLACEHOLDER } = await import('../env');
+    expect(
+      resolveWebDbUrl(prodEnv({ APP_ROLE_PASSWORD: undefined, DATABASE_URL_APP: bad, NEXT_PHASE: 'phase-production-build' })),
+    ).toBe(BUILD_PHASE_DB_PLACEHOLDER);
+  });
+
+  it('assertWebEnv accepts a derivable app role and names the problem otherwise', async () => {
+    const { assertWebEnv } = await import('../env');
+    const base = {
+      RESEND_API_KEY: 'k',
+      EMAIL_FROM: 'no-reply@example.com',
+      AUTH_URL: 'https://app.example.com',
+      AUTH_SECRET: 's'.repeat(32),
+      SUPABASE_SERVICE_ROLE_KEY: 'k',
+      AUTH_ENC_KEY: 'a'.repeat(64),
+    };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(() => assertWebEnv(prodEnv({ ...base, DATABASE_URL_APP: 'just-a-password' }))).not.toThrow(/DATABASE_URL_APP/);
+    expect(() => assertWebEnv(prodEnv({ ...base, DATABASE_URL_APP: 'just-a-password', APP_ROLE_PASSWORD: undefined }))).toThrow(
+      /DATABASE_URL_APP — it does not start with postgresql:\/\//,
+    );
+    warn.mockRestore();
+  });
+
+  it('outside production the old behaviour is unchanged', async () => {
+    const { resolveWebDbUrl } = await import('../env');
+    expect(resolveWebDbUrl({ NODE_ENV: 'test', DATABASE_URL: POOLER, APP_ROLE_PASSWORD: APP_PW } as never)).toBe(POOLER);
+  });
+});
