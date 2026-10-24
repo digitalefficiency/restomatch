@@ -30,14 +30,24 @@ export function signOutCookieOptions(secure: boolean) {
   };
 }
 
+/** Clock-skew allowance before a tombstone counts as "from the future". */
+export const SIGNOUT_FUTURE_SKEW_MS = 60_000;
+
 /**
  * True when the token predates this browser's last sign-out. A token without
  * loginAt (pre-B.5) counts as oldest. A missing / malformed tombstone never
- * rejects anything.
+ * rejects anything — nor does one dated in the future (we only ever write
+ * "now"): a forged far-future rm_so (cookie tossing, a hostile extension)
+ * would otherwise reject every new sign-in on this browser for 30 days.
  */
-export function issuedBeforeSignOut(loginAtMs: number | undefined, tombstone: string | undefined): boolean {
+export function issuedBeforeSignOut(
+  loginAtMs: number | undefined,
+  tombstone: string | undefined,
+  nowMs: number = Date.now(),
+): boolean {
   if (!tombstone) return false;
   const signedOutAt = Number(tombstone);
   if (!Number.isFinite(signedOutAt) || signedOutAt <= 0) return false;
+  if (signedOutAt > nowMs + SIGNOUT_FUTURE_SKEW_MS) return false;
   return (loginAtMs ?? 0) <= signedOutAt;
 }
