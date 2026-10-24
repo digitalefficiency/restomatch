@@ -55,6 +55,10 @@ export const DIGEST_QUEUES = [
   'sync-platforms',
   'health-digest',
   'ocr-sweep',
+  // Wave 1 (flag-gated jobs; a no-op tenant still shows queue depth/failures).
+  'price-alerts',
+  'recovery-reminders',
+  'monthly-report',
 ] as const;
 
 export const OCR_STALE_AFTER_MS = 30 * 60_000;

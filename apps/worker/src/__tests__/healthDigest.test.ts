@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createDb, eq, invoices, notificationsOutbox, restaurants, testDbUrl } from '@restomatch/db';
 import {
+  DIGEST_QUEUES,
   collectHealth,
   digestRecipients,
   issueCount,
@@ -127,5 +128,23 @@ describe('health digest', () => {
     process.env.HEALTH_DIGEST_RESTAURANT_ID = 'not-a-uuid';
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     await expect(runHealthDigest(db, probes, NOW)).resolves.toMatchObject({ enqueued: 1 });
+  });
+});
+
+// The digest must watch every queue a worker consumes — the wave-1 jobs
+// (price-alerts / recovery-reminders / monthly-report) were missing from it.
+describe('DIGEST_QUEUES', () => {
+  it('covers every queue a job module starts a worker for', async () => {
+    const { readdirSync, readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const dir = fileURLToPath(new URL('../jobs/', import.meta.url));
+    const consumed = new Set<string>();
+    for (const f of readdirSync(dir).filter((x) => x.endsWith('.ts'))) {
+      for (const m of readFileSync(join(dir, f), 'utf8').matchAll(/makeWorker<[^>]*>\(\s*'([^']+)'/g)) consumed.add(m[1]!);
+    }
+    expect(consumed.size).toBeGreaterThan(10);
+    const missing = [...consumed].filter((q) => !(DIGEST_QUEUES as readonly string[]).includes(q));
+    expect(missing).toEqual([]);
   });
 });
