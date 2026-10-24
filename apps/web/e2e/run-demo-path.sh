@@ -114,6 +114,11 @@ sleep 5 # first worker heartbeat
 log "serving: prod :$PROD_PORT · stub :$STUB_PORT · worker"
 
 # ── 4. run ───────────────────────────────────────────────────────────────────
+# Each run signs in ~13 times from 127.0.0.1; the Redis-backed login limiter
+# (30/IP/15 min) would lock back-to-back runs out. Clear its LOCAL counters only.
+if [[ "$REDIS" =~ ^redis://(localhost|127\.0\.0\.1)(:|/|$) ]] && command -v redis-cli >/dev/null; then
+  redis-cli -u "$REDIS" --scan --pattern 'login:*' | while read -r k; do redis-cli -u "$REDIS" del "$k" >/dev/null; done
+fi
 cd "$WEB" || exit 2
 rm -f test-results/demo-path/demo-path-numbers.json
 DEMO_BASE_URL="http://localhost:$PROD_PORT" DEMO_STUB_URL="http://localhost:$STUB_PORT" DEMO_DATABASE_URL="$DB_URL" \

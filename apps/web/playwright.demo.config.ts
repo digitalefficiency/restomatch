@@ -55,6 +55,8 @@ export default defineConfig({
     // A blocked click fails in 20 s with the culprit named, not after the 3-min test timeout.
     actionTimeout: 20_000,
     launchOptions: { executablePath: chromiumPath() },
+    // The presenter's laptop and the receiver's phone are in Israel; the server (Vercel) runs in UTC.
+    timezoneId: 'Asia/Jerusalem',
   },
   // The receiver legs CONFIRM a delivery — that adds a matched invoice and moves
   // the owner's ₪ — so they run after every owner/landing/bookkeeper leg.
