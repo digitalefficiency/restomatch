@@ -128,6 +128,12 @@ export {
 } from './notifications';
 export { logActivity, type ActivityEventInput, type ActivityEventType } from './activity';
 export { buildMatchInputForInvoice, type BuiltMatchInput } from './match/buildMatchInput';
+export {
+  invoicesWaitingOnReceipt,
+  lockReceipt,
+  receiptForInvoice,
+  receiptStillOpenForInvoice,
+} from './receiving/matchTriggers';
 export { backfillPriceHistory, writePriceHistoryForInvoice } from './match/priceHistory';
 export { matchActivitySummary, persistMatchRun, type PersistMatchArgs, type PersistMatchResult } from './match/persist';
 export {

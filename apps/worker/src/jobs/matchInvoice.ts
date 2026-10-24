@@ -53,6 +53,15 @@ export function startMatchInvoiceWorker() {
       );
     }
 
+    // Still being read: its lines aren't there yet. The OCR job enqueues the
+    // match itself once it has persisted them (and the receipt is closed), so a
+    // match that raced ahead of OCR (e.g. submitReceipt) is a no-op, not an
+    // empty run.
+    if (isStillInOcr(invoice)) {
+      console.log(`[match-invoice] invoice=${invoiceId} is still in OCR — skipping; the OCR job will match it`);
+      return { status: 'clean', totalDiscrepancyAmount: 0, discrepancies: [] };
+    }
+
     // Idempotency: if this invoice was already matched, skip — avoids duplicate
     // match_runs / discrepancies when a job is retried.
     const existingRun = await db
@@ -168,4 +177,13 @@ export function startMatchInvoiceWorker() {
 
     return result;
   });
+}
+
+/**
+ * An invoice still being read has no lines yet. Its OCR job enqueues the match
+ * itself once they're persisted (and its receipt is closed), so a match that
+ * raced ahead of OCR — e.g. from submitReceipt — must be a no-op, not an empty run.
+ */
+export function isStillInOcr(invoice: { status: string }): boolean {
+  return invoice.status === 'ocr_pending';
 }

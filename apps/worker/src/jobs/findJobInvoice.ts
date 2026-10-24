@@ -22,10 +22,10 @@ export async function findJobInvoice(
   restaurantId: string,
   invoiceId: string,
   delaysMs: readonly number[] = INVOICE_COMMIT_GRACE_MS,
-): Promise<{ id: string; supplierId: string | null } | null> {
+): Promise<{ id: string; supplierId: string | null; status: string } | null> {
   for (let attempt = 0; ; attempt++) {
     const [row] = await db
-      .select({ id: invoices.id, supplierId: invoices.supplierId })
+      .select({ id: invoices.id, supplierId: invoices.supplierId, status: invoices.status })
       .from(invoices)
       .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
       .limit(1);

@@ -1,4 +1,4 @@
-import { fillEnglishNames, meterOcrScan } from '@restomatch/api';
+import { fillEnglishNames, meterOcrScan, receiptStillOpenForInvoice } from '@restomatch/api';
 import { matchProductTopN, MockEmbeddingProvider } from '@restomatch/catalog';
 import { and, eq, invoiceLines, invoices, ne, restaurants, type Database } from '@restomatch/db';
 import {
@@ -179,7 +179,9 @@ export function startOcrInvoiceWorker() {
       // auto-proceed. Low-confidence (parsed / needs-review) invoices wait for a
       // human to confirm product matches first (match.runForInvoice on demand).
       // A queue failure must never break the OCR persistence above.
-      if (!needsHumanReview) {
+      // …but not while the invoice's goods receipt is still being counted (see
+      // shouldAutoMatch); submitReceipt matches it once the receipt is closed.
+      if (await shouldAutoMatch(db, job.data.restaurantId, job.data.invoiceId, needsHumanReview)) {
         try {
           await enqueueMatchInvoice({
             restaurantId: job.data.restaurantId,
@@ -338,4 +340,36 @@ export async function markOcrFailed(
         eq(invoices.status, 'ocr_pending'),
       ),
     );
+}
+
+/**
+ * Whether the OCR job should chain into the 3-way match right away.
+ *
+ * Not when OCR needs a human (low confidence / held duplicate), and not while
+ * the invoice's goods receipt is still being counted: the receiving wizard
+ * registers the photo BEFORE counting, and matching against an empty receipt
+ * reads "received 0" on every line — a false leak of the whole invoice.
+ * submitReceipt matches it once the receipt is closed. Invoices with no receipt
+ * (email / WhatsApp / upload) match now. If the check itself fails, match now
+ * (the previous behaviour) rather than never.
+ */
+export async function shouldAutoMatch(
+  db: Database,
+  restaurantId: string,
+  invoiceId: string,
+  needsHumanReview: boolean,
+): Promise<boolean> {
+  if (needsHumanReview) return false;
+  try {
+    const open = await db.transaction((tx) =>
+      receiptStillOpenForInvoice(tx as unknown as Database, restaurantId, invoiceId),
+    );
+    if (open) {
+      console.log(`[ocr-invoice] invoice=${invoiceId} waits for its receipt to be submitted before matching`);
+      return false;
+    }
+  } catch (err) {
+    console.warn(`[ocr-invoice] receipt check failed for invoice=${invoiceId} — matching now`, err);
+  }
+  return true;
 }

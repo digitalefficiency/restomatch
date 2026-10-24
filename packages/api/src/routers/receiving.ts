@@ -23,10 +23,11 @@ import {
   restaurants,
   suppliers,
 } from '@restomatch/db';
-import { enqueueOcrInvoice, isQueueUnavailableError } from '@restomatch/queue';
+import { enqueueMatchInvoice, enqueueOcrInvoice, isQueueUnavailableError } from '@restomatch/queue';
 import type { InvoiceOcrResult } from '@restomatch/types';
 import { assertGrOwned, assertSupplierOwned } from '../tenant';
 import { fillEnglishNames } from '../receiving/english';
+import { invoicesWaitingOnReceipt, lockReceipt } from '../receiving/matchTriggers';
 import { devOcrStubEnabled, buildDevOcrStub } from '../receiving/devOcrStub';
 import { isAllowedScanUrl } from '../lib/scanUrls';
 import { isInvoiceNumberTaken, readDuplicateOf, withoutDuplicateOf } from '../lib/invoiceDedupe';
@@ -632,6 +633,9 @@ export const receivingRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await assertGrOwned(ctx.db, input.grId, ctx.session.restaurantId);
+      // Held to commit: an OCR job deciding whether this receipt is still open
+      // waits for us (receiving/matchTriggers).
+      await lockReceipt(ctx.db, input.grId);
 
       const rows = await ctx.db
         .select({
@@ -664,6 +668,25 @@ export const receivingRouter = router({
         )
         .returning();
       if (!receipt) throw new TRPCError({ code: 'NOT_FOUND', message: 'GR not found' });
+
+      // The invoice photo is registered before counting, so its OCR job left
+      // the match to us: match it now, against the counted lines. Best-effort —
+      // a lookup or queue failure must never fail the submit (savepoint keeps a
+      // SQL error from aborting the receipt's transaction).
+      try {
+        const waiting = await ctx.db.transaction((sp) =>
+          invoicesWaitingOnReceipt(sp as unknown as typeof ctx.db, ctx.session.restaurantId, input.grId),
+        );
+        for (const invoiceId of waiting) {
+          try {
+            await enqueueMatchInvoice({ restaurantId: ctx.session.restaurantId, invoiceId });
+          } catch (err) {
+            console.warn(`[receiving.submitReceipt] failed to enqueue match for invoice=${invoiceId}`, err);
+          }
+        }
+      } catch (err) {
+        console.warn(`[receiving.submitReceipt] could not look up invoices for gr=${input.grId}`, err);
+      }
       return receipt;
     }),
 

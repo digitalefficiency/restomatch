@@ -48,7 +48,7 @@ describe('findJobInvoice', () => {
     const late = new Promise((r) => setTimeout(r, 300)).then(() => insertInvoice(t, id));
     const found = await findJobInvoice(db, t.restaurantId, id);
     await late;
-    expect(found).toEqual({ id, supplierId: t.supplierId });
+    expect(found).toEqual({ id, supplierId: t.supplierId, status: 'ocr_pending' });
   });
 
   it('waits for an UNCOMMITTED row on another connection (the real request transaction)', async () => {
@@ -73,7 +73,7 @@ describe('findJobInvoice', () => {
     setTimeout(release, 300);
     await request;
     // …and found once it commits, within the backoff.
-    expect(await lookup).toEqual({ id, supplierId: t.supplierId });
+    expect(await lookup).toEqual({ id, supplierId: t.supplierId, status: 'ocr_pending' });
   });
 
   it("still refuses another restaurant's invoice", async () => {
