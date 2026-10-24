@@ -6,6 +6,8 @@ import { getLocale, getT } from '@/lib/i18n/server';
 import { components } from '@/lib/i18n/messages/components';
 import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 import { OrderDetail } from './detail-client';
+import { SupplierDocumentPreview } from '../supplier-document';
+import { SupplierConfirmCard } from './supplier-confirm-card';
 
 export default async function OrderDetailPage({ params }: { params: Promise<{ poId: string }> }) {
   const { poId } = await params;
@@ -20,7 +22,11 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ po
   }
   if (!data.po) notFound();
 
-  const [memberships, session] = await Promise.all([caller.onboarding.myMemberships(), auth()]);
+  const [memberships, session, docSettings] = await Promise.all([
+    caller.onboarding.myMemberships(),
+    auth(),
+    caller.orders.documentSettings(),
+  ]);
   const active =
     memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0];
   const canEdit = active?.role === 'owner' || active?.role === 'manager';
@@ -44,7 +50,26 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ po
         title={title}
         subtitle={data.po?.status === 'draft' ? t('detail.subtitle') : undefined}
       />
-      <OrderDetail data={data} canEdit={canEdit} />
+      <OrderDetail data={data} canEdit={canEdit} pricedDocument={docSettings.enabled} />
+      {canEdit && docSettings.enabled && data.lines.length > 0 ? (
+        <div className="mt-6">
+          {/* Keyed on the order's content so an edited line re-fetches the preview. */}
+          <SupplierDocumentPreview
+            key={[
+              data.po.status,
+              ...data.lines.map((l) => `${l.id}:${l.qtyOrdered}:${l.unit}:${l.unitPriceExpected}:${l.rawDescription}`),
+            ].join('|')}
+            poId={data.po.id}
+          />
+        </div>
+      ) : null}
+      {/* Wave-1 `supplierConfirm`: renders nothing when the flag is off. */}
+      <SupplierConfirmCard
+        poId={data.po.id}
+        status={data.po.status}
+        canEdit={canEdit}
+        restaurantName={active?.restaurantName ?? ''}
+      />
     </div>
   );
 }

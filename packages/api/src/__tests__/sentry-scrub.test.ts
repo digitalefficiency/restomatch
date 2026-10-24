@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { scrubPii, scrubSentryEvent, redactString } from '@restomatch/observability';
+import { scrubPii, scrubSentryEvent, redactString, redactUrl } from '@restomatch/observability';
 
 describe('Sentry PII scrub (E.9)', () => {
   it('redactString masks email and phone substrings', () => {
@@ -57,5 +57,26 @@ describe('Sentry PII scrub (E.9)', () => {
     expect(user.id).toBe('user-1'); // kept for grouping
     expect(user.email).toBeUndefined();
     expect(user.ip_address).toBeUndefined();
+  });
+
+  it('masks capability secrets carried in URLs (ingest tokens, signed links, reset/invite tokens)', () => {
+    const wa = '/api/ingest/whatsapp/wa_0123456789abcdef0123456789abcdef';
+    expect(redactString(wa)).toBe('/api/ingest/whatsapp/[redacted-token]');
+    expect(scrubPii({ path: wa })).toEqual({ path: '/api/ingest/whatsapp/[redacted-token]' });
+    expect(redactString('to inv_0123456789abcdef0123456789abcdef@in.example')).not.toContain('0123456789abcdef');
+    expect(scrubPii({ path: '/reset?token=9f8e7d6c5b4a' })).toEqual({ path: '/reset?token=[redacted]' });
+    const link = '/leak-check/result?t=1b4e28ba-2fa1-11d2-883f-0016d3cca427.1793000000.Zm9vYmFyYmF6cXV4cXV1eA';
+    expect(redactString(link)).not.toContain('Zm9vYmFy');
+    expect(redactString('1b4e28ba-2fa1-11d2-883f-0016d3cca427.1793000000.Zm9vYmFyYmF6cXV4cXV1eA')).toBe('[redacted-link]');
+    expect(redactUrl('/invite/accept?token=abc#x')).toBe('/invite/accept');
+
+    const out = scrubSentryEvent({
+      request: { url: `https://app.test${wa}?t=secret-1`, query_string: 't=secret-1&page=2' },
+      extra: { path: '/leak-check/result?t=1b4e28ba-2fa1-11d2-883f-0016d3cca427.1793000000.Zm9vYmFyYmF6cXV4cXV1eA' },
+    });
+    const req = out.request as Record<string, unknown>;
+    expect(req.url).toBe('https://app.test/api/ingest/whatsapp/[redacted-token]');
+    expect(req.query_string).toBe('t=[redacted]&page=2');
+    expect(JSON.stringify(out.extra)).not.toContain('Zm9vYmFy');
   });
 });

@@ -81,6 +81,12 @@ export const en: Shape<typeof he> = {
     closing: 'Thank you for taking care of this. Feel free to contact us with any question.',
     signature: 'Kind regards,',
     note: 'Includes open and claimed discrepancies on invoices not yet paid. Waived discrepancies are excluded.',
+    trackerTitle: 'Tracked claims awaiting a letter',
+    trackerNote:
+      '{count} discrepancies ({amount}) recorded as claims in the ₪-back tracker with no letter sent yet — paid invoices included. Once sent, use "Mark letter sent" in the tracker.',
+    trackerSubject: 'Re: Credit request for invoice discrepancies',
+    trackerTotal: 'Total claimed',
+    monthTitle: 'Before payment — unpaid invoices of {month}',
     basis: {
       excl: 'before VAT',
       incl: 'incl. VAT',

@@ -246,6 +246,118 @@
       "when": 1781980000000,
       "tag": "0033_plans_catalog",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1782010000000,
+      "tag": "0046_supplier_contract_prices",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1782020000000,
+      "tag": "0047_price_alerts",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1782030000000,
+      "tag": "0048_recovery",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1782040000000,
+      "tag": "0049_monthly_reports",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1782050000000,
+      "tag": "0050_ingest",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1782060000000,
+      "tag": "0051_invoice_source_whatsapp",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1782070000000,
+      "tag": "0052_receiver_languages",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1782080000000,
+      "tag": "0053_ai_assistant",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1782090000000,
+      "tag": "0054_leak_check_sandbox",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1782100000000,
+      "tag": "0055_referrals",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1782110000000,
+      "tag": "0056_recipes_prereqs",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1782120000000,
+      "tag": "0057_recipes",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1782130000000,
+      "tag": "0058_pos_sales",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1782160000000,
+      "tag": "0061_postgres_queue",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1782170000000,
+      "tag": "0062_supplier_confirm",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1782180000000,
+      "tag": "0063_dsr_requests_rls",
+      "breakpoints": true
     }
   ]
 }

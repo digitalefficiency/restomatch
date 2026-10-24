@@ -7,6 +7,7 @@ import { getLocale, getT } from '@/lib/i18n/server';
 import { formatNumber } from '@/lib/i18n/format';
 import { marketing } from '@/lib/i18n/messages/marketing';
 import { formatIls } from '@/lib/money';
+import { ChainPricingSection } from '@/lib/growth/ChainPricingSection';
 import { alternatesFor, metadataBase, socialFor } from '../_components/seo';
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -122,6 +123,9 @@ export default async function PricingPage() {
           );
         })}
       </div>
+
+      {/* Wave-1 S15 (`growth`): renders only when GROWTH_PRICING_PUBLIC=1. */}
+      <ChainPricingSection plans={plans} />
 
       <div className="mx-auto mt-12 flex max-w-3xl items-start gap-4 rounded-2xl border border-gold/25 bg-gold/[0.06] p-6">
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gold/15 text-gold">

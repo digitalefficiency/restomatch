@@ -1,5 +1,7 @@
-import { defineMessages } from '../../translate';
+import { defineMessages, withReceiverLocales } from '../../translate';
+import { componentsOverlays } from '../receiverLangs/overlays/components';
 import { en } from './en';
 import { he } from './he';
 
-export const components = defineMessages('components', he, en);
+// Receiver languages (ar/ru/th/ti, S14): complete overlays, see receiverLangs/overlays.
+export const components = withReceiverLocales(defineMessages('components', he, en), componentsOverlays);

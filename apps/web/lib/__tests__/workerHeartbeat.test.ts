@@ -19,6 +19,13 @@ describe('evaluateHeartbeat', () => {
     if (s.state === 'stale') expect(s.ageMs).toBe(11 * 60_000);
   });
 
+  it('the down threshold is 5 minutes (60 s beats: ~5 missed beats)', () => {
+    expect(evaluateHeartbeat(JSON.stringify({ at: '2026-09-08T09:56:00Z' }), NOW).state).toBe('ok'); // 4 min
+    const s = evaluateHeartbeat(JSON.stringify({ at: '2026-09-08T09:54:00Z' }), NOW); // 6 min
+    expect(s.state).toBe('stale');
+    expect(isWorkerDown(s)).toBe(true);
+  });
+
   it('reports missing when the key is absent (TTL expired or never written)', () => {
     expect(evaluateHeartbeat(null, NOW).state).toBe('missing');
     expect(evaluateHeartbeat('', NOW).state).toBe('missing');

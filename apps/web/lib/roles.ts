@@ -46,14 +46,37 @@ export const ROUTE_ROLES: Record<string, UserRole[]> = {
   // Bookkeeper included: duplicate invoices are routed to them (approvals engine),
   // and approvals.approve/reject/escalate accept bookkeeper-routed items.
   '/dashboard/approvals': ['owner', 'manager', 'bookkeeper'],
+  // S13 invoice inbox (WhatsApp / e-mail ingestion): managers act, bookkeepers read.
+  '/dashboard/inbox': ['owner', 'manager', 'bookkeeper'],
   '/dashboard/leaks': ['owner', 'manager', 'bookkeeper'],
+  // S12 leakProof: the proof sheet lists invoice-level detail (like the breakdown).
+  '/dashboard/leaks/proof': ['owner', 'manager', 'bookkeeper'],
+  // Wave 1 (S12): ₪-back tracker = finance roles (like leaks); the monthly report = owner/manager.
+  '/dashboard/recovery': ['owner', 'manager', 'bookkeeper'],
+  '/dashboard/reports': ['owner', 'manager'],
+  // Exact entry too: nav visibility (canSeeRoute) is an exact-path lookup.
+  '/dashboard/reports/monthly': ['owner', 'manager'],
+  // AI assistant (S14, flag aiAssistant): owner + manager only.
+  '/dashboard/ask': ['owner', 'manager'],
+  '/dashboard/reports/digest': ['owner', 'manager'],
   '/dashboard/suppliers': ['owner', 'manager'],
+  // Supplier ledger grid (flag supplierLedger): every invoice reader, incl. the
+  // bookkeeper's CSV — never the chef. Mirrors suppliers.ledgerGrid.
+  '/dashboard/suppliers/ledger': ['owner', 'manager', 'receiver', 'bookkeeper'],
   '/dashboard/catalog': ['owner', 'manager'],
   // Product pages are part of the catalog (names grid, price history, cheapest
   // supplier); without this rule every role could open them by URL.
   '/dashboard/products': ['owner', 'manager'],
   '/dashboard/orders': ['owner', 'manager'],
+  // Wave-1 contracts + price alerts: finance tier, same as the contracts/priceAlerts
+  // routers (financeProcedure). The nav entry is additionally feature-flag gated.
+  '/dashboard/contracts': ['owner', 'manager', 'bookkeeper'],
+  // Food cost per dish (wave 1, flag `recipes`): the chef owns the recipes.
+  '/dashboard/recipes': ['owner', 'manager', 'chef'],
   '/dashboard/exports': ['owner', 'bookkeeper'],
+  // Wave-1 integrations hub (flag-gated in the page): accounting codes for
+  // owner + bookkeeper, POS sales + procurement for owner + manager.
+  '/dashboard/integrations': ['owner', 'manager', 'bookkeeper'],
   // One supplier invoice (prices, lines, image): opened from receiving, approvals
   // and the leak drill-down — never the chef. Mirrors receiving.getInvoice.
   '/dashboard/invoices': ['owner', 'manager', 'receiver', 'bookkeeper'],

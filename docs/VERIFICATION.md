@@ -10,15 +10,16 @@ email, or needs a real key.
 ## Prerequisites (local)
 
 - Node 22, pnpm 10.33 (`corepack enable`).
-- Postgres 16 + pgvector on `localhost:5432` (user/password `postgres`), Redis on
-  `localhost:6379` for the worker tests. `scripts/dev-setup.sh` sets both up.
+- Postgres 16 + pgvector on `localhost:5432` (user/password `postgres`) —
+  `scripts/dev-setup.sh` sets it up. No Redis: the job queue, rate limits and the
+  worker heartbeat are in Postgres (0061), so the worker tests need only the database.
 - `scripts/verify.sh` refuses any non-local database. Layer 1 drops and re-creates its own
   database `restomatch_gate` each run (like CI's fresh container); layer 2 seeds `restomatch_verify`.
 
 ## Layer 1 — the full gate
 
 ```bash
-REDIS_URL=redis://localhost:6379 scripts/verify.sh            # ≈ 8 min
+scripts/verify.sh            # ≈ 8 min
 ```
 
 | Step | Command it runs | Fails when |
@@ -28,9 +29,9 @@ REDIS_URL=redis://localhost:6379 scripts/verify.sh            # ≈ 8 min
 | provision-rls / check-rls | `… provision-rls`, `… check-rls` | a `restaurant_id` table without RLS |
 | db-doctor | `… run doctor --strict` | unindexed FK, missing trigger, RLS drift (WARN fails too) |
 | supabase-sync | `… run supabase-sync --check` | `supabase/migrations` stale vs `packages/db/drizzle` |
-| typecheck | `pnpm turbo run typecheck --concurrency=1 --filter='!@restomatch/web'` | type error in a package |
-| test | `pnpm turbo run test --concurrency=1 --filter='!@restomatch/worker'` | any test, incl. RLS attack suites + leak canary |
-| worker-test | `pnpm --filter @restomatch/worker test` (needs `REDIS_URL`; otherwise SKIP) | worker/queue regression |
+| typecheck | `pnpm turbo run typecheck --force --concurrency=1 --filter='!@restomatch/web'` | type error in a package |
+| test | `pnpm turbo run test --force --concurrency=1 --filter='!@restomatch/worker'` | any test, incl. RLS attack suites + leak canary |
+| worker-test | `pnpm --filter @restomatch/worker test` | worker/queue regression |
 | web-lint | `pnpm --filter @restomatch/web lint` | any ESLint **error** |
 | web-build | `pnpm --filter @restomatch/web build` | build or type error in the web app |
 | web-tsc | `pnpm --filter @restomatch/web typecheck` | type error (runs after the build: needs `.next/types`) |
@@ -53,6 +54,8 @@ production soft-navigation check).
 ```bash
 scripts/verify.sh layer2                    # build (if needed) + next start + smoke
 VERIFY_E2E=1 scripts/verify.sh layer2       # … plus the Playwright suite (logged in, 5 roles × he/en)
+VERIFY_SOFTNAV=1 scripts/verify.sh layer2   # … plus scripts/check-soft-nav.mjs (dashboard view controls)
+# Playwright's own browser missing? point it at one: PW_CHROMIUM_PATH=/path/to/chromium
 scripts/verify.sh all                       # layer 1 then layer 2
 ```
 
@@ -77,11 +80,11 @@ GET requests only, no login. Checks:
 | landing he / en | 200, `<html lang="he" dir="rtl">` / `<html lang="en" dir="ltr">` |
 | hero media | every `/media/*` file the landing references answers 200/206 with a video/image type |
 | `/login` | 200 and renders "RestoMatch" |
-| 12 public paths | `/ /pricing /about /privacy /terms /cookies /login /reset /showcase /robots.txt /sitemap.xml /icon.svg` → 2xx/3xx |
+| 12 public paths | `/ /pricing /about /privacy /terms /cookies /login /reset /showcase /robots.txt /sitemap.xml /icon.svg` → 2xx (a redirect means a public page went private) |
 | unknown path | 404, or the anonymous redirect to `/login` — never a 5xx |
 
 Exit code 1 on any failure. Run it after every production deploy, and before a
-demo. CI runs it non-blocking against a local `next start` (job *verify layer 2*).
+demo. Once the proposed CI job is approved, CI runs it non-blocking against a local `next start`.
 
 ### Proven to fail
 
@@ -116,14 +119,15 @@ Each layer was shown to catch a real break, and to pass again once it was revert
 ## דרישות מקומיות
 
 - Node 22,‏ pnpm 10.33.
-- Postgres 16 + pgvector על `localhost:5432`, ו-Redis על `localhost:6379` לבדיקות ה-worker
-  (`scripts/dev-setup.sh` מקים את שניהם).
+- Postgres 16 + pgvector על `localhost:5432` (`scripts/dev-setup.sh` מקים אותו).
+  אין Redis: תור המשימות, ה-rate limit ופעימת ה-worker נמצאים ב-Postgres ‏(0061),
+  כך שבדיקות ה-worker צריכות רק את מסד הנתונים.
 - `scripts/verify.sh` מסרב לעבוד מול מסד נתונים שאינו מקומי.
 
 ## שכבה 1 — השער המלא
 
 ```bash
-REDIS_URL=redis://localhost:6379 scripts/verify.sh
+scripts/verify.sh
 ```
 
 מריץ: התקנה עם lockfile קפוא, מיגרציות, הקמת RLS ובדיקת שלמות RLS, ‏`db:doctor --strict`,

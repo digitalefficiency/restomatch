@@ -197,6 +197,33 @@ Tests:
   - Playwright sweep and flow drivers (`executablePath /opt/pw-browsers/chromium`).
   - An independent refuter subagent. Its findings were fixed, then the build was redone and the flows re-run: 4/4 runs green.
 
+## Round 5: flag `orderPricesOut` + ops QA at DEMO_TODAY=2026-10-25
+
+**Feature (flag `orderPricesOut`; off = today's "item — quantity" text, byte for byte).**
+- Module `packages/api/src/orders/document`:
+  - `build.ts`: integer-agorot money; `qty × price` is rounded half-up once.
+  - `text.ts`: email and compact WhatsApp texts.
+  - `pdf.ts`: RTL Hebrew PDF with Heebo embedded. Bidi uses visual reordering; Hebrew glyphs are drawn one at a time because fontkit reverses Hebrew-first runs.
+  - `load.ts`: SKU falls back to the supplier catalog number for the line's product.
+- placeOrder:
+  - email: text body + `order-XXXXXXXX.pdf` in `payload.__attachments`;
+  - WhatsApp: the compact priced text.
+- Settings: `orders.documentSettings` / `setDocumentSettings` (hide prices, default show; owner/manager; atomic `jsonb_set`). Toggle on `/dashboard/orders`.
+- Preview: `orders.documentPreview` and the "What the supplier receives" card on the PO page (email / WhatsApp text and a PDF download).
+- Extension hook: `ORDER_DOCUMENT_EXTENSIONS` — `(doc, ctx{db, restaurantId, poId, userId, mode}) => string[] | Promise<string[]>`.
+  - With the flag on, placeOrder marks the PO `sent` before building the document (same transaction).
+  - S11's `supplierConfirmDocumentExtension` is registered with one line at integration.
+- Delivery: the worker's `outboxDispatch.ts` and the Resend sender pass attachments through. `outbox.ts` and `cron.ts` are untouched.
+
+**QA on `next start`, demo DB seeded with DEMO_TODAY=2026-10-25.**
+- **New UI:** owner, manager and receiver × he/en × 1366/390, 12/12 OK, 0 console errors, no horizontal scroll.
+- **Sweep:** suppliers (list, details, catalog, schedule, orders tabs), catalog, products, orders list/detail/new, exports, integrations; owner × he/en × desktop/mobile and receiver on mobile: 56 screens, 0 console errors.
+- **Functional:**
+  - New-order wizard → send by email (he/390, en/1366): the outbox row carries SKUs, agreed prices, the agorot total and the PDF.
+  - All 5 exports download in he and en: CSV, uniform 1000, Hashavshevet, Priority, Rivhit.
+- **Fixed:** on phones, the wizard's "send via" option `אימייל (orders@…)` rendered bidi-scrambled with the bracket cut off. The address is now wrapped in Unicode isolates (`ltrIsolate`), with a test.
+- **Sent to the orchestrator (seed, not S5):** `packages/db/scripts/seed.ts:476` seeds the drinks PO for today+2 with `createdAt = delivery − 24h`, so the orders list shows "created 26/10" when DEMO_TODAY is 25/10.
+
 ## Still broken / not done
 
 - **Round 4 notes, not fixed:**

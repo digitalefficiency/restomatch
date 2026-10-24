@@ -4,11 +4,14 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { signIn } from '@/auth';
 import { Button, Card, Field, Input } from '@/lib/components';
+import { featureEnabled } from '@restomatch/api';
+import { LanguagePicker } from '@/lib/i18n/LanguagePicker';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { auth as authMessages } from '@/lib/i18n/messages/auth';
 import { getT } from '@/lib/i18n/server';
 import { twoFactorEnabledForEmail } from '@/lib/passwords';
 import { safeRelativePath } from '@/lib/safeRedirect';
+import { PwaQueueReset } from '@/lib/pwa/PwaQueueReset';
 
 interface PageProps {
   searchParams: Promise<{
@@ -105,8 +108,16 @@ export default async function LoginPage({ searchParams }: PageProps) {
 
   return (
     <main className="relative flex min-h-screen items-center justify-center p-6 pb-[calc(1.5rem+var(--consent-h,0px))]">
+      {/* S13 receiver PWA: no queued photos survive a sign-out / expired session (shared devices). */}
+      <PwaQueueReset />
       <div className="absolute end-4 top-4">
-        <LocaleSwitcher />
+        {/* Receiver languages (S14): a receiver picks ar/ru/th/ti before signing in
+            (only the FEATURES_OFF kill-switch applies — no restaurant yet). */}
+        {featureEnabled({ features: { receiverLanguages: true } }, 'receiverLanguages') ? (
+          <LanguagePicker />
+        ) : (
+          <LocaleSwitcher />
+        )}
       </div>
       <Card elevated flow padding="lg" className="w-full max-w-md">
         <h1 className="mb-2 text-2xl font-bold text-ink">{t('login.title')}</h1>

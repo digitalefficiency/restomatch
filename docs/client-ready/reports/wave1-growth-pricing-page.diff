@@ -1,0 +1,22 @@
+diff --git a/apps/web/app/(marketing)/pricing/page.tsx b/apps/web/app/(marketing)/pricing/page.tsx
+index b2599c5..eda8476 100644
+--- a/apps/web/app/(marketing)/pricing/page.tsx
++++ b/apps/web/app/(marketing)/pricing/page.tsx
+@@ -7,6 +7,7 @@ import { getLocale, getT } from '@/lib/i18n/server';
+ import { formatNumber } from '@/lib/i18n/format';
+ import { marketing } from '@/lib/i18n/messages/marketing';
+ import { formatIls } from '@/lib/money';
++import { ChainPricingSection } from '@/lib/growth/ChainPricingSection';
+ import { alternatesFor, metadataBase } from '../_components/seo';
+ 
+ export async function generateMetadata(): Promise<Metadata> {
+@@ -123,6 +124,9 @@ export default async function PricingPage() {
+         })}
+       </div>
+ 
++      {/* Wave-1 S15 (`growth`): renders only when GROWTH_PRICING_PUBLIC=1. */}
++      <ChainPricingSection plans={plans} />
++
+       <div className="mx-auto mt-12 flex max-w-3xl items-start gap-4 rounded-2xl border border-gold/25 bg-gold/[0.06] p-6">
+         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gold/15 text-gold">
+           <Scale className="h-5 w-5" aria-hidden="true" />

@@ -2,6 +2,15 @@ import type { Locale } from '@/lib/i18n/config';
 
 /** Pure order-screen helpers (unit-tested in app/dashboard/__tests__). */
 
+/**
+ * Wrap an LTR value (email, phone) in Unicode isolates (LRI … PDI) so it keeps
+ * its own direction inside Hebrew text — e.g. a native <option> label, where
+ * markup can't set `dir` and the bidi algorithm otherwise scrambles the brackets.
+ */
+export function ltrIsolate(value: string): string {
+  return `\u2066${value}\u2069`;
+}
+
 /** Strict positive number from a text input ('' / 0 / negative / NaN → null). */
 export function parsePositive(raw: string): number | null {
   const t = raw.trim().replace(',', '.');

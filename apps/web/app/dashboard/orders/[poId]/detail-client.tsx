@@ -39,7 +39,16 @@ interface LineDraft {
   unitPriceExpected: string;
 }
 
-export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boolean }) {
+export function OrderDetail({
+  data,
+  canEdit,
+  pricedDocument = false,
+}: {
+  data: OrderData;
+  canEdit: boolean;
+  /** Flag `orderPricesOut`: placeOrder sends the priced document, previewed by the page instead. */
+  pricedDocument?: boolean;
+}) {
   const t = useT(ordersNs);
   const tc = useT(components);
   const locale = useLocale();
@@ -240,7 +249,7 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
         </div>
       </Card>
 
-      {editable && channel !== 'none' && data.lines.length > 0 && (
+      {editable && !pricedDocument && channel !== 'none' && data.lines.length > 0 && (
         <Card elevated padding="lg">
           <OrderDocumentPreview input={{ poId: po.id }} />
         </Card>

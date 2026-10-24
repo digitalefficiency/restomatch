@@ -2,6 +2,12 @@ import type { Database } from '@restomatch/db';
 
 export type NotificationChannel = 'whatsapp' | 'push' | 'email';
 
+export interface EmailAttachment {
+  filename: string;
+  contentBase64: string;
+  contentType?: string;
+}
+
 export interface NotificationPayload {
   restaurantId: string;
   channel: NotificationChannel;
@@ -14,6 +20,11 @@ export interface NotificationPayload {
    * the outbox `payload` jsonb under `__html` so no schema change is needed.
    */
   html?: string;
+  /**
+   * Optional file attachments (email only), base64-encoded. Stored in the
+   * outbox `payload` jsonb under `__attachments` (no schema change).
+   */
+  attachments?: EmailAttachment[];
   payload?: Record<string, unknown>;
   relatedEntityType?: string;
   relatedEntityId?: string;

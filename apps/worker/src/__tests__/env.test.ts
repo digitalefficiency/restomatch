@@ -9,26 +9,25 @@ const PROD = {
   EMAIL_FROM: 'a@b.c',
 };
 
-describe('assertWorkerEnv — REDIS_URL scheme (EN-7)', () => {
+describe('assertWorkerEnv — Postgres-only (0061, no Redis)', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it('refuses to boot in production on an Upstash REST URL', () => {
-    expect(() => assertWorkerEnv({ ...PROD, REDIS_URL: 'https://eu1-x.upstash.io' })).toThrow(
-      /Upstash REST URL/,
-    );
+  it('boots in production without any REDIS_URL', () => {
+    expect(assertWorkerEnv(PROD).DATABASE_URL).toBe(PROD.DATABASE_URL);
   });
 
-  it('boots in production on a rediss:// URL', () => {
-    expect(assertWorkerEnv({ ...PROD, REDIS_URL: 'rediss://default:pw@eu1-x.upstash.io:6379' }).REDIS_URL).toMatch(
-      /^rediss:/,
-    );
+  it('still refuses to boot without DATABASE_URL (the job queue lives there)', () => {
+    expect(() => assertWorkerEnv({ ...PROD, DATABASE_URL: '' })).toThrow(/DATABASE_URL is required/);
   });
 
-  it('only warns outside production', () => {
+  it('still requires the OCR + email secrets in production', () => {
+    const { ANTHROPIC_API_KEY: _a, RESEND_API_KEY: _r, ...rest } = PROD;
+    expect(() => assertWorkerEnv(rest)).toThrow(/ANTHROPIC_API_KEY[\s\S]*RESEND_API_KEY/);
+  });
+
+  it('warns once about a leftover REDIS_URL instead of using it', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(() =>
-      assertWorkerEnv({ NODE_ENV: 'development', DATABASE_URL: 'postgres://x', REDIS_URL: 'http://localhost:6379' }),
-    ).not.toThrow();
-    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/redis:\/\/ or rediss:\/\//));
+    expect(() => assertWorkerEnv({ ...PROD, REDIS_URL: 'rediss://x:6379' })).not.toThrow();
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/REDIS_URL is set but no longer used/));
   });
 });

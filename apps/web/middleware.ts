@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import type { UserRole } from '@restomatch/db';
 import { authConfig } from './auth.config';
 import {
-  isLocale,
+  isAppLocale,
   LOCALE_COOKIE,
   LOCALE_COOKIE_MAX_AGE_SEC,
   LOCALE_QUERY_PARAM,
@@ -102,10 +102,10 @@ export default auth((req) => {
   // Report-Only — that way the report stream isn't polluted by framework scripts
   // and only surfaces genuinely-unexpected sources before we promote to enforce.
   const requestHeaders = new Headers(req.headers);
-  // `?lang=en|he` persists the language choice (shareable English links). The
+  // `?lang=<locale>` persists the language choice (shareable English links; receiver locales are gated by getAppLocale). The
   // REQUEST cookie is rewritten too, so this very render is already in it.
   const langParam = req.nextUrl.searchParams.get(LOCALE_QUERY_PARAM);
-  const langOverride = isLocale(langParam) ? langParam : null;
+  const langOverride = isAppLocale(langParam) ? langParam : null;
   if (langOverride) {
     requestHeaders.set('cookie', withLocaleCookie(req.headers.get('cookie'), langOverride));
   }

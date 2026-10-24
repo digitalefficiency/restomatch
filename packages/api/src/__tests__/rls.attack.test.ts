@@ -1,4 +1,4 @@
-import { testDbUrl } from '@restomatch/db';
+import { testDbUrl, type RestaurantSettings } from '@restomatch/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   activityEvents,
@@ -27,16 +27,23 @@ import {
   passwordResetTokens,
   plans,
   poLines,
+  priceAlertThresholds,
+  priceAlerts,
   priceBaselines,
   priceHistory,
   procurementConnections,
   productAliases,
   products,
   purchaseOrders,
+  recipeItems,
+  recipes,
   restaurants,
   sessions,
   sql,
   subscriptions,
+  supplierConfirmLinks,
+  supplierContractPrices,
+  supplierResponses,
   supplierIntegrations,
   suppliers,
   usageCounters,
@@ -48,6 +55,7 @@ import {
   type Database,
 } from '@restomatch/db';
 import { appRouter } from '../index';
+import { createSupplierLink, loadSupplierOrder, resolveSupplierToken, submitSupplierAnswer } from '../supplierConfirm/service';
 import { meterOcrScan } from '../entitlements';
 import type { AppContext, Session } from '../context';
 import { attachSubscription, resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
@@ -556,6 +564,54 @@ describe('phase-2 catalog tables are tenant-isolated (raw probes)', () => {
   });
 });
 
+describe('recipes / recipe_items (0057) are tenant-isolated under the app role', () => {
+  let aRecipe: string;
+  let bRecipe: string;
+
+  beforeAll(async () => {
+    const [a] = await ownerDb.insert(recipes).values({ restaurantId: A.restaurantId, name: 'rls A dish' }).returning();
+    const [b] = await ownerDb.insert(recipes).values({ restaurantId: B.restaurantId, name: 'rls B dish' }).returning();
+    aRecipe = a!.id;
+    bRecipe = b!.id;
+    await ownerDb.insert(recipeItems).values([
+      { restaurantId: A.restaurantId, recipeId: aRecipe, productId: A.productId, quantity: '1', unit: 'ק״ג' },
+      { restaurantId: B.restaurantId, recipeId: bRecipe, productId: B.productId, quantity: '1', unit: 'ק״ג' },
+    ]);
+  });
+
+  afterAll(async () => {
+    await ownerDb.delete(recipeItems);
+    await ownerDb.delete(recipes);
+    await ownerDb.update(restaurants).set({ settings: {} }).where(eq(restaurants.id, A.restaurantId));
+  });
+
+  it('GUC=A sees only tenant-A recipes and lines; no GUC sees none', async () => {
+    const [r, l] = await withRestaurant(appDb, A.restaurantId, async (tx) => [
+      await tx.select({ rid: recipes.restaurantId }).from(recipes),
+      await tx.select({ rid: recipeItems.restaurantId }).from(recipeItems),
+    ]);
+    expect(r!.map((x) => x.rid)).toEqual([A.restaurantId]);
+    expect(l!.map((x) => x.rid)).toEqual([A.restaurantId]);
+    expect(await appDb.select({ id: recipes.id }).from(recipes)).toEqual([]);
+  });
+
+  it('blocks a cross-tenant recipe INSERT and UPDATE', async () => {
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) => tx.insert(recipes).values({ restaurantId: B.restaurantId, name: 'probe' })),
+    ).rejects.toThrow(/row-level security/);
+    const updated = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx.update(recipes).set({ name: 'pwned' }).where(eq(recipes.id, bRecipe)).returning({ id: recipes.id }),
+    );
+    expect(updated).toEqual([]);
+  });
+
+  it('recipes.list works through the app role once the flag is on (grants + GUC wiring)', async () => {
+    await ownerDb.update(restaurants).set({ settings: { features: { recipes: true } } as unknown as RestaurantSettings }).where(eq(restaurants.id, A.restaurantId));
+    const res = await callerFor(A, appDb).recipes.list();
+    expect(res.recipes.map((x) => x.name)).toEqual(['rls A dish']);
+  });
+});
+
 // Epic 0.4 — audit_log is append-only (immutable, tamper-evident). The tenant
 // app role may INSERT + SELECT its own rows but never mutate/erase them.
 describe('audit_log is append-only under the RLS-enforced role', () => {
@@ -644,5 +700,111 @@ describe('products.supplier_id cannot cross tenants (composite FK)', () => {
       .returning({ id: products.id });
     expect(p?.id).toBeTruthy();
     if (p) await ownerDb.delete(products).where(eq(products.id, p.id));
+  });
+});
+
+describe('wave 1 (S11) tables: supplier_contract_prices / price_alert_thresholds / price_alerts (raw RLS)', () => {
+  beforeAll(async () => {
+    for (const t of [A, B]) {
+      await ownerDb.insert(supplierContractPrices).values({
+        restaurantId: t.restaurantId,
+        supplierId: t.supplierId,
+        productId: t.productId,
+        contractPrice: '9.0000',
+        validFrom: '2026-01-01',
+      });
+      await ownerDb.insert(priceAlertThresholds).values({ restaurantId: t.restaurantId, thresholdPct: '0.1000' });
+      await ownerDb.insert(priceAlerts).values({
+        restaurantId: t.restaurantId,
+        productId: t.productId,
+        supplierId: t.supplierId,
+        windowDays: 21,
+        thresholdPct: '0.1000',
+        startPrice: '6',
+        endPrice: '7',
+        pctChange: '0.1667',
+        startAt: new Date('2026-09-27'),
+        endAt: new Date('2026-10-17'),
+        observations: 4,
+        dedupeKey: `rls-${t.restaurantId}`,
+      });
+    }
+  });
+
+  afterAll(async () => {
+    await ownerDb.delete(supplierContractPrices);
+    await ownerDb.delete(priceAlertThresholds);
+    await ownerDb.delete(priceAlerts);
+  });
+
+  it('GUC=A sees only tenant-A rows in all three tables', async () => {
+    const [c, th, al] = await withRestaurant(appDb, A.restaurantId, async (tx) => [
+      await tx.select({ rid: supplierContractPrices.restaurantId }).from(supplierContractPrices),
+      await tx.select({ rid: priceAlertThresholds.restaurantId }).from(priceAlertThresholds),
+      await tx.select({ rid: priceAlerts.restaurantId }).from(priceAlerts),
+    ]);
+    for (const rows of [c, th, al]) {
+      expect(rows).toEqual([{ rid: A.restaurantId }]);
+    }
+  });
+
+  it('blocks a cross-tenant INSERT and leaves B rows untouched by UPDATE', async () => {
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) =>
+        tx.insert(priceAlertThresholds).values({ restaurantId: B.restaurantId, category: 'x', thresholdPct: '0.5' }),
+      ),
+    ).rejects.toThrow(/row-level security/);
+    const updated = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx
+        .update(supplierContractPrices)
+        .set({ contractPrice: '0.0100' })
+        .where(eq(supplierContractPrices.restaurantId, B.restaurantId))
+        .returning({ id: supplierContractPrices.id }),
+    );
+    expect(updated).toHaveLength(0);
+  });
+});
+
+describe('wave 1 (S11) supplier portal under the RLS app role', () => {
+  beforeAll(async () => {
+    for (const t of [A, B]) {
+      await ownerDb.update(restaurants).set({ settings: { features: { supplierConfirm: true } } as never }).where(eq(restaurants.id, t.restaurantId));
+      await ownerDb.update(purchaseOrders).set({ status: 'sent' }).where(eq(purchaseOrders.id, t.poId));
+    }
+  });
+  afterAll(async () => {
+    await ownerDb.delete(supplierResponses);
+    await ownerDb.delete(supplierConfirmLinks);
+    for (const t of [A, B]) await ownerDb.update(restaurants).set({ settings: {} }).where(eq(restaurants.id, t.restaurantId));
+  });
+
+  it('the public flow works end-to-end as restomatch_app (resolve on owner, read/write under the link tenant)', async () => {
+    const link = await withRestaurant(appDb, A.restaurantId, (tx) => createSupplierLink(tx, A.restaurantId, A.poId));
+    const resolved = await resolveSupplierToken(ownerDb, link!.token);
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    const view = await withRestaurant(appDb, resolved.link.restaurantId, (tx) => loadSupplierOrder(tx, resolved.link));
+    expect(view!.lines.map((l) => l.id)).toEqual([A.poLineId]);
+    const res = await withRestaurant(appDb, resolved.link.restaurantId, (tx) =>
+      submitSupplierAnswer(tx, resolved.link, { lines: [{ poLineId: A.poLineId, qtyAvailable: 4 }] }),
+    );
+    expect(res).toEqual({ ok: true, status: 'changes' });
+  });
+
+  it('GUC=B sees none of A’s links/responses; a forged cross-tenant link object reads nothing', async () => {
+    const [links, resps] = await withRestaurant(appDb, B.restaurantId, async (tx) => [
+      await tx.select({ rid: supplierConfirmLinks.restaurantId }).from(supplierConfirmLinks),
+      await tx.select({ rid: supplierResponses.restaurantId }).from(supplierResponses),
+    ]);
+    expect(links.every((r) => r.rid === B.restaurantId)).toBe(true);
+    expect(resps.every((r) => r.rid === B.restaurantId)).toBe(true);
+    const forged = { linkId: '00000000-0000-0000-0000-000000000000', restaurantId: A.restaurantId, poId: A.poId, expiresAt: new Date() };
+    // Under B's tenant GUC, even a link object naming A's order can't read or write it.
+    expect(await withRestaurant(appDb, B.restaurantId, (tx) => loadSupplierOrder(tx, forged))).toBeNull();
+    await expect(
+      withRestaurant(appDb, B.restaurantId, (tx) =>
+        tx.insert(supplierResponses).values({ restaurantId: A.restaurantId, poId: A.poId, linkId: forged.linkId, status: 'confirmed' }),
+      ),
+    ).rejects.toThrow();
   });
 });

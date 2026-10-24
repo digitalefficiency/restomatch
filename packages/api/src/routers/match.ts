@@ -1,5 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
+import { releaseClaimsForRematch } from '../recovery/service';
 import { and, desc, eq, invoices, matchRuns, restaurants } from '@restomatch/db';
 import { runMatch, type MatchStatus } from '@restomatch/matching';
 import { managerProcedure, router } from '../trpc';
@@ -69,9 +70,12 @@ export const matchRouter = router({
         };
       }
 
-      // Re-match: drop any prior run for this invoice (discrepancies cascade) —
-      // but first keep the people's decisions, re-applied below to findings that
-      // still exist (a rejected "not a duplicate" must not come back open).
+      // Re-match: drop any prior run for this invoice (discrepancies cascade).
+      // Claims on those discrepancies are money history: release bare ones,
+      // refuse while any is in progress (₪-back tracker, wave 1) — before any work.
+      await releaseClaimsForRematch(ctx.db, restaurantId, input.invoiceId);
+      // Keep the people's decisions, re-applied below to findings that still
+      // exist (a rejected "not a duplicate" must not come back open).
       const priorDecisions = await loadPriorDecisions(ctx.db, restaurantId, input.invoiceId);
       await ctx.db
         .delete(matchRuns)

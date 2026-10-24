@@ -195,6 +195,34 @@ describe('payRun.month', () => {
     }
   });
 
+  it('a receiving scan the OCR held for its count is "waiting for the count" — on hold, never "waiting to be linked" (#94)', async () => {
+    // A's receipt (A.grId) is still being counted; the OCR job recorded it when it held the match.
+    const [scan] = await ownerDb
+      .insert(invoices)
+      .values({
+        restaurantId: A.restaurantId,
+        supplierId: A.supplierId,
+        invoiceNumber: 'INV-PA-SCAN',
+        invoiceDate: new Date(),
+        totalExclVat: '50.00',
+        vatAmount: '8.50',
+        totalInclVat: '58.50',
+        status: 'matched',
+        source: 'photo',
+        ocrPayload: { provider: 'reconciled', raw: { heldForReceipts: [A.grId] } },
+      })
+      .returning();
+    try {
+      const r = await asA().payRun.month();
+      const row = r.suppliers.flatMap((x) => x.invoices).find((i) => i.invoiceId === scan!.id)!;
+      expect(row).toMatchObject({ status: 'hold', pendingLink: false, awaitingCount: true, claims: [], creditIls: 0, pendingIls: 0 });
+      expect(r.totals).toMatchObject({ linkIls: 0, linkCount: 0, holdIls: 175.5, payIls: 0 });
+      expect(JSON.stringify(r)).not.toContain(B.invoiceId);
+    } finally {
+      await ownerDb.delete(invoices).where(eq(invoices.id, scan!.id));
+    }
+  });
+
   it('past the 200-row breakdown window an accepted claim is still a credit, never "can pay"', async () => {
     // 205 PAID invoices with bigger leaks fill the breakdown window ahead of A's invoice.
     await ownerDb.execute(sql`

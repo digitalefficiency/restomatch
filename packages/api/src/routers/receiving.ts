@@ -46,6 +46,8 @@ import { endOfDayInTz, startOfDayInTz } from '../lib/time';
 import { claimableLines } from '../lib/claims';
 import { featureEnabled } from '../lib/features';
 import { invoiceReaderProcedure, managerProcedure, memberProcedure, receiverProcedure, router } from '../trpc';
+import { isFeatureOn } from '../lib/featureGate';
+import { dockPriceContext } from '../dockPriceContext/service';
 import { readConsolidatedRaw } from '../match/consolidated';
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
@@ -943,11 +945,11 @@ export const receivingRouter = router({
         if (stub) mockProviders = { docAi: stub, claude: stub };
       }
 
-      // Server-authoritative enqueue of the OCR job. The queue producer no-ops
-      // (console.warn) when REDIS_URL is unset and fails fast (≤3 s, coded
-      // 'queue.unavailable') when Redis is unreachable — so the invoice stays
-      // persisted and the client is told OCR was not queued instead of hanging
-      // until the function times out (EN-7). REDIS_URL unset (no queue at all)
+      // Server-authoritative enqueue of the OCR job (Postgres job_queue). The
+      // producer no-ops (console.warn) without a queue database and fails fast
+      // (≤3 s, coded 'queue.unavailable') when the database is unreachable — so
+      // the invoice stays persisted and the client is told OCR was not queued
+      // instead of hanging until the function times out (EN-7). No queue at all
       // also reports ocrQueued:false, so the wizard doesn't poll for 30 s.
       let ocrQueued = false;
       try {
@@ -1026,6 +1028,19 @@ export const receivingRouter = router({
       )
       .orderBy(desc(invoices.createdAt));
   }),
+  /**
+   * Flag `dockPriceContext`: "your usual price" (90-day p50 from this
+   * supplier) per mapped invoice line. Read-only and display-only. Without
+   * `invoiceId` it only reports whether the flag is on, so the page can decide
+   * to render the hint at all; with the flag off it is always `{ enabled: false }`.
+   */
+  priceContext: invoiceReaderProcedure
+    .input(z.object({ invoiceId: z.string().uuid().optional() }))
+    .query(async ({ ctx, input }) => {
+      const enabled = await isFeatureOn(ctx.db, ctx.session.restaurantId, 'dockPriceContext');
+      if (!enabled || !input.invoiceId) return { enabled, lines: [] };
+      return { enabled, lines: await dockPriceContext(ctx.db, ctx.session.restaurantId, input.invoiceId) };
+    }),
 });
 
 /**

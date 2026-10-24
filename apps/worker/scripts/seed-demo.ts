@@ -54,6 +54,7 @@ import {
   products,
   purchaseOrders,
   restaurants,
+  sql,
   suppliers,
   users,
   type UserRole,
@@ -197,6 +198,15 @@ async function main() {
   // Clean any prior demo-flow rows for this restaurant (idempotent re-run).
   const invIds = (await db.select({ id: invoices.id }).from(invoices).where(eq(invoices.restaurantId, restaurantId))).map((r) => r.id);
   const grIds = (await db.select({ id: goodsReceipts.id }).from(goodsReceipts).where(eq(goodsReceipts.restaurantId, restaurantId))).map((r) => r.id);
+  // Recovery claims hold money history and block discrepancy deletes (0048, NO ACTION):
+  // a demo re-seed starts the ₪-back tracker over (seed-recovery-demo restages it).
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF to_regclass('public.recovery_claims') IS NOT NULL THEN
+        DELETE FROM recovery_claims WHERE restaurant_id = '${sql.raw(restaurantId)}';
+        DELETE FROM credit_notes WHERE restaurant_id = '${sql.raw(restaurantId)}';
+      END IF;
+    END $$`);
   await db.delete(discrepancies).where(eq(discrepancies.restaurantId, restaurantId));
   await db.delete(matchRuns).where(eq(matchRuns.restaurantId, restaurantId));
   if (invIds.length) await db.delete(invoiceLines).where(inArray(invoiceLines.invoiceId, invIds));

@@ -40,6 +40,7 @@ import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 import { formatIls } from '@/lib/money';
 import { OrderDocumentPreview } from '../order-document-preview';
 import { addOrMerge, lineTotalIls, linesValid, orderTotalIls } from '../order-logic';
+import { OverContractNote, useOrderContractPrices } from './contract-price';
 
 type Outputs = inferRouterOutputs<AppRouter>;
 type Channel = 'email' | 'whatsapp' | 'none';
@@ -101,6 +102,8 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
     { supplierId, search: search || undefined, limit: search ? 20 : 8 },
     { enabled: step === 'BUILD' && !!supplierId, placeholderData: (prev) => prev },
   );
+  // Flag `contracts`: contract prices for what's on screen (no-op when off).
+  const contractPrice = useOrderContractPrices(supplierId, [...(catalog.data ?? []), ...lines]);
 
   // Cadence: derive the delivery date for the manager to CONFIRM (never silent).
   const delivery = trpc.orders.previewDelivery.useQuery(
@@ -108,6 +111,9 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
     { enabled: !!supplierId, retry: false },
   );
   const deliveryDay = deliveryDate || delivery.data?.defaultDate || '';
+  // Flag `orderPricesOut`: placeOrder sends the priced document (previewed on the
+  // draft's page), not orders.supplierMessagePreview's text — show it only when off.
+  const docSettings = trpc.orders.documentSettings.useQuery(undefined, { retry: false });
 
   // Default channel follows what the supplier can actually receive.
   const defaultChannel: Channel = supplier?.contactEmail
@@ -337,6 +343,8 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
                 <ul>
                   {(catalog.data ?? []).map((it) => {
                     const name = displayName(it.supplierNameRaw, it.productNameEn, locale);
+                    const unit = it.unit ?? (locale === 'en' ? 'unit' : 'יח׳');
+                    const listPrice = contractPrice(it.productId, unit) ?? (it.listPrice != null ? Number(it.listPrice) : undefined);
                     return (
                       <li key={it.id} className="border-b border-line/60 last:border-0">
                         <button
@@ -348,8 +356,8 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
                               rawDescription: it.supplierNameRaw,
                               nameEn: it.productNameEn,
                               qty: 1,
-                              unit: it.unit ?? (locale === 'en' ? 'unit' : 'יח׳'),
-                              unitPriceExpected: it.listPrice != null ? Number(it.listPrice) : undefined,
+                              unit,
+                              unitPriceExpected: listPrice,
                             })
                           }
                           className="flex w-full items-center justify-between gap-3 px-3 py-2 text-start text-sm hover:bg-surface-2 focus:bg-surface-2 focus:outline-none"
@@ -363,7 +371,7 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
                             ) : null}
                           </span>
                           <span className="flex shrink-0 items-center gap-1 font-mono text-xs tabular-nums text-muted">
-                            {it.listPrice != null ? money(Number(it.listPrice)) : '—'}
+                            {listPrice !== undefined ? money(listPrice) : '—'}
                             {it.unit ? (
                               <span className="font-sans">
                                 / <UnitText unit={it.unit} />
@@ -429,6 +437,8 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
                             className="text-sm"
                           />
                         )}
+                        {/* Over-contract note under the name: the grid's fixed columns stay intact. */}
+                        <OverContractNote price={l.unitPriceExpected} contract={contractPrice(l.productId, l.unit)} />
                       </div>
                       <label className="order-3 min-w-0 text-xs text-subtle sm:order-none">
                         {t('wizard.qty')}
@@ -520,7 +530,7 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
                   key={l.key}
                   className="flex items-start justify-between gap-3 border-b border-line/60 pb-2 last:border-0"
                 >
-                  {/* The price badge sits under the name so it never squeezes it (phone). */}
+                  {/* The price badges sit under the name so they never squeeze it (phone). */}
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm text-ink">{name.primary}</p>
                     {w && (
@@ -536,10 +546,17 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
                             })}
                       </Badge>
                     )}
+                    <OverContractNote price={l.unitPriceExpected} contract={contractPrice(l.productId, l.unit)} />
                   </div>
                   <span className="shrink-0 whitespace-nowrap text-xs tabular-nums text-muted">
                     <bdi>{formatNumber(l.qty, locale, { maximumFractionDigits: 3 })}</bdi>{' '}
                     <UnitText unit={l.unit} />
+                    {l.unitPriceExpected !== undefined ? (
+                      <>
+                        {' × '}
+                        <bdi dir="ltr">{money(l.unitPriceExpected)}</bdi>
+                      </>
+                    ) : null}
                   </span>
                   <span className="w-24 shrink-0 text-end font-mono text-sm tabular-nums text-ink">
                     {l.unitPriceExpected == null
@@ -573,7 +590,7 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
 
           <div className="mt-5 space-y-3 border-t border-line pt-4">
             {/* What the supplier will receive — only when something is actually sent. */}
-            {effectiveChannel !== 'none' && supplierId && valid && (
+            {effectiveChannel !== 'none' && supplierId && valid && docSettings.data?.enabled === false && (
               <OrderDocumentPreview
                 input={{
                   supplierId,
