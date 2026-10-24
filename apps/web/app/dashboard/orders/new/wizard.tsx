@@ -38,6 +38,7 @@ import { formatDate, formatNumber, formatPercent } from '@/lib/i18n/format';
 import { components } from '@/lib/i18n/messages/components';
 import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 import { formatIls } from '@/lib/money';
+import { OrderDocumentPreview } from '../order-document-preview';
 import { addOrMerge, lineTotalIls, linesValid, orderTotalIls } from '../order-logic';
 
 type Outputs = inferRouterOutputs<AppRouter>;
@@ -569,6 +570,21 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
           {guardrailGated && <p className="mt-3 text-xs text-subtle">{t('wizard.guardrailGated')}</p>}
 
           <div className="mt-5 space-y-3 border-t border-line pt-4">
+            {/* What the supplier will receive — only when something is actually sent. */}
+            {effectiveChannel !== 'none' && supplierId && valid && (
+              <OrderDocumentPreview
+                input={{
+                  supplierId,
+                  expectedDeliveryDate: deliveryDay || undefined,
+                  lines: lines.map((l) => ({
+                    productId: l.productId ?? undefined,
+                    rawDescription: l.rawDescription || undefined,
+                    qty: l.qty,
+                    unit: l.unit,
+                  })),
+                }}
+              />
+            )}
             {/* Short options (they never clip at 390 px); the destination shows under the field. */}
             <Field
               label={t('wizard.channel')}

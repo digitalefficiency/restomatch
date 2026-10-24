@@ -25,6 +25,7 @@ import { components } from '@/lib/i18n/messages/components';
 import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 import { formatIls } from '@/lib/money';
 import { OrderStatusBadge } from '../orders-table';
+import { OrderDocumentPreview } from '../order-document-preview';
 import { lineLabel, lineTotalIls, parsePositive, parsePrice } from '../order-logic';
 
 type OrderData = inferRouterOutputs<AppRouter>['orders']['get'];
@@ -238,6 +239,12 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
           )}
         </div>
       </Card>
+
+      {editable && channel !== 'none' && data.lines.length > 0 && (
+        <Card elevated padding="lg">
+          <OrderDocumentPreview input={{ poId: po.id }} />
+        </Card>
+      )}
 
       {/* Phones: qty × unit price folds under the description so the line total
           stays on screen; editing a line restores the full (scrollable) table. */}
