@@ -36,6 +36,7 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   'input.invalid': 'invalidInput',
   // Wave-1 flag off (S14): the screen is hidden; a stray call reads as forbidden.
   FEATURE_DISABLED: 'forbidden',
+  'invoice.numberTaken': 'invoiceNumberTaken',
 };
 
 /**

@@ -15,6 +15,7 @@
  *   PW_CHROMIUM_PATH=/opt/pw-browsers/chromium pnpm exec tsx scripts/qa-receiving.ts [scenario…]
  */
 import { spawn, type ChildProcess } from 'node:child_process';
+import { openSync } from 'node:fs';
 import { mkdir, readdir, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -65,7 +66,10 @@ async function workerOn(): Promise<void> {
   worker = spawn('pnpm', ['--filter', '@restomatch/worker', 'start'], {
     cwd: ROOT,
     env: { ...process.env, DATABASE_URL: DB_URL },
-    stdio: 'ignore',
+    // QA_WORKER_LOG=<file>: keep the worker's output for debugging.
+    stdio: process.env.QA_WORKER_LOG
+      ? ['ignore', openSync(process.env.QA_WORKER_LOG, 'a'), openSync(process.env.QA_WORKER_LOG, 'a')]
+      : 'ignore',
     detached: true,
   });
   await new Promise((r) => setTimeout(r, 8000));
@@ -560,6 +564,108 @@ async function main() {
     await shot(page, 'L-po-only-review-he-desktop');
     await ctx.close();
   });
+
+  // ── Demo path (DEMO-PACK 11:45): HaSharon Produce, real worker + dev OCR stub.
+  // Seed first: DEMO_TODAY=2026-10-25 ./scripts/dev-setup.sh. Each combo works on
+  // a clone of the seeded HaSharon PO so the demo PO itself stays untouched.
+  async function cloneHaSharon(tag: string): Promise<{ poId: string; names: string[]; namesEn: string[] }> {
+    const [sup] = await db.select().from(suppliers).where(eq(suppliers.nameEn, 'HaSharon Produce')).limit(1);
+    if (!sup) throw new Error('HaSharon Produce not seeded');
+    restaurantId = sup.restaurantId;
+    const [src] = await db
+      .select()
+      .from(purchaseOrders)
+      .where(and(eq(purchaseOrders.supplierId, sup.id), eq(purchaseOrders.status, 'sent')))
+      .orderBy(desc(purchaseOrders.expectedDeliveryAt))
+      .limit(1);
+    if (!src) throw new Error('no open HaSharon PO — re-seed');
+    const srcLines = await db.select().from(poLines).where(eq(poLines.poId, src.id));
+    const { id: _id, createdAt: _c, updatedAt: _u, ...poCopy } = src as typeof src & { createdAt?: unknown; updatedAt?: unknown };
+    const [po] = await db.insert(purchaseOrders).values({ ...poCopy, notes: `qa-demo-${tag}` }).returning();
+    await db.insert(poLines).values(
+      srcLines.map(({ id: _l, poId: _p, ...l }) => ({ ...l, poId: po!.id })),
+    );
+    return {
+      poId: po!.id,
+      names: srcLines.map((l) => l.rawDescription ?? ''),
+      namesEn: srcLines.map((l) => l.rawDescriptionEn ?? '').filter(Boolean),
+    };
+  }
+
+  async function visibleCount(loc: ReturnType<Page['locator']>): Promise<number> {
+    let n = 0;
+    for (const el of await loc.all()) if (await el.isVisible()) n += 1;
+    return n;
+  }
+
+  const DEMO_COMBOS: Array<{ id: string; role: Role; locale: 'he' | 'en'; mobile: boolean }> = [
+    { id: 'DEMO-en-phone', role: 'receiver', locale: 'en', mobile: true },
+    { id: 'DEMO-he-desktop', role: 'manager', locale: 'he', mobile: false },
+    { id: 'DEMO-en-desktop', role: 'owner', locale: 'en', mobile: false },
+    { id: 'DEMO-he-phone', role: 'receiver', locale: 'he', mobile: true },
+  ];
+  for (const combo of DEMO_COMBOS) {
+    const he = combo.locale === 'he';
+    await scenario(combo.id, `${combo.role} · ${combo.locale} · ${combo.mobile ? '390px' : 'desktop'} — HaSharon Produce: inbox → photo → OCR → review → close`, async (check) => {
+      const { ctx, page } = await session(combo.role, { mobile: combo.mobile, locale: combo.locale });
+      const errors: string[] = [];
+      page.on('pageerror', (e) => errors.push(e.message));
+      page.on('console', (m) => {
+        if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push(m.text());
+      });
+      // The inbox lists the server's "today": only checkable when the seed's
+      // DEMO_TODAY is today (Asia/Jerusalem); the wizard path below is date-free.
+      const todayIl = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date());
+      if (!process.env.DEMO_TODAY || process.env.DEMO_TODAY === todayIl) {
+        await page.goto(`${BASE}/dashboard/receiving`);
+        await page.getByText(he ? /ירקות השרון/ : /HaSharon Produce/).first().waitFor();
+        check(true, 'inbox lists HaSharon Produce');
+      } else {
+        check(true, `inbox check skipped: seeded for ${process.env.DEMO_TODAY}, server today is ${todayIl}`);
+      }
+      const demo = await cloneHaSharon(combo.id);
+      await openWizard(page, demo.poId);
+      await pick(page, 'IMG_hasharon.jpg', 'image/jpeg', fx.bigJpeg);
+      await waitUploaded(page);
+      await page.getByRole('button', { name: PROCESS }).click();
+      await waitReview(page);
+      // Every PO line exactly once (no duplicated cards/rows on any width).
+      for (const n of demo.names) {
+        const c = await visibleCount(page.getByText(n, { exact: true }));
+        check(c === 1, `"${n}" shown once (got ${c})`);
+      }
+      if (!he) {
+        await page.getByTestId('item-name-en').filter({ hasText: 'Cherry tomatoes' }).locator('visible=true').first().waitFor();
+        check(true, 'English names (Cherry tomatoes) with the Hebrew original');
+      }
+      const both = await visibleCount(page.getByTestId('recon-section-both'));
+      check(both === 1, `one "on both" section (got ${both})`);
+      check((await page.getByTestId('recon-mismatch-banner').count()) === 0, 'no mismatch banner');
+      check((await visibleCount(page.getByRole('alert').filter({ hasText: /\S/ }))) === 0, 'no error alert'); // (Next's route announcer is role=alert)
+      await shot(page, `${combo.id}-review`);
+      await page.getByTestId('continue-adjust').click();
+      for (let pass = 0; pass < 3; pass += 1) {
+        for (const c of await page.locator('.adjust-card').all()) {
+          if (!(await c.isVisible())) continue;
+          const btn = c.getByRole('button', { name: he ? /^= חשבונית/ : /^= invoice/ });
+          const alt = c.getByRole('button', { name: he ? /^= הזמנה/ : /^= order/ });
+          if (await btn.isVisible().catch(() => false)) await btn.click();
+          else if (await alt.isVisible().catch(() => false)) await alt.click();
+        }
+        if (await page.getByTestId('close-receipt').isEnabled()) break;
+      }
+      const cta = page.getByTestId('close-receipt');
+      check(await unobstructed(page, cta), '"Close receipt" is not covered');
+      await shot(page, `${combo.id}-adjust`);
+      await cta.click();
+      await page.getByTestId('receipt-confirmed').waitFor({ timeout: 60_000 });
+      await shot(page, `${combo.id}-confirmed`);
+      const [gr] = await db.select().from(goodsReceipts).where(eq(goodsReceipts.poId, demo.poId));
+      check(gr?.status === 'completed' || gr?.status === 'partial', `receipt closed (${gr?.status})`);
+      check(errors.length === 0, `no console/page errors${errors.length ? `: ${errors[0]}` : ''}`);
+      await ctx.close();
+    });
+  }
 
   await browser.close();
   const pass = results.filter((r) => r.status === 'PASS').length;
