@@ -72,9 +72,11 @@ const shutdown = async (signal: string) => {
   console.log(`[worker] ${signal} received, shutting down`);
   stopHeartbeat();
   stopWatchdog();
-  stopRuntime();
   healthServer.close();
+  // Drain first: lock renewal (in the runtime) must keep running while the
+  // in-flight jobs finish, or a long job looks stalled to the next worker.
   await Promise.all(workers.map((w) => w.close()));
+  stopRuntime();
   await closeJobDbs();
   await closeQueueSql();
   process.exit(0);

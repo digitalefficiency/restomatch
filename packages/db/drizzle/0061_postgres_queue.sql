@@ -16,10 +16,13 @@
 -- auth connection, the queue producer). The tenant app role gets nothing:
 --   * job_queue carries restaurant_id, so it has RLS ENABLED (check-rls) with a
 --     SELECT-own-tenant policy only — writes are denied to restomatch_app;
---   * the others have no tenant column; the REVOKE below removes the app role's
---     access. NOTE: packages/db/src/rls.ts (provision-rls) grants DML on ALL public
---     tables, so re-running provision-rls re-grants them — see the PR for the
---     proposed one-line exclusion in rls.ts (immutable; owner decision).
+--   * the others have no tenant column. The REVOKE below removes the app role's
+--     access, but packages/db/src/rls.ts (provision-rls, and the Supabase RLS
+--     snapshot that runs right after this migration) grants DML on ALL public
+--     tables again. So they ALSO get RLS ENABLED with a deny-all policy: whatever
+--     the grants say, restomatch_app reads and writes no row. The owner role
+--     bypasses RLS (it owns the tables; RLS is not FORCEd). The one-line exclusion
+--     in rls.ts is proposed in the PR (immutable; owner decision).
 --
 -- No precondition. Rollback: DROP TABLE job_queue, worker_heartbeats,
 -- rate_limit_counters, ops_kv;
@@ -33,6 +36,9 @@ CREATE TABLE IF NOT EXISTS "job_queue" (
   "status" text NOT NULL DEFAULT 'queued',
   "attempts" integer NOT NULL DEFAULT 0,
   "max_attempts" integer NOT NULL DEFAULT 1,
+  -- Times the job was taken back from a dead worker (BullMQ maxStalledCount = 1:
+  -- a stall does not use up an attempt, but a job that kills its worker twice fails).
+  "stalled_count" integer NOT NULL DEFAULT 0,
   "run_at" timestamptz NOT NULL DEFAULT now(),
   "locked_at" timestamptz,
   "locked_by" text,
@@ -88,6 +94,17 @@ CREATE TABLE IF NOT EXISTS "ops_kv" (
   "value" jsonb NOT NULL,
   "expires_at" timestamptz
 );--> statement-breakpoint
+
+-- Deny-all for the tenant role on the three tables without a tenant column (see the header).
+ALTER TABLE "worker_heartbeats" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+DROP POLICY IF EXISTS "worker_heartbeats_no_tenant_access" ON "worker_heartbeats";--> statement-breakpoint
+CREATE POLICY "worker_heartbeats_no_tenant_access" ON "worker_heartbeats" FOR ALL USING (false) WITH CHECK (false);--> statement-breakpoint
+ALTER TABLE "rate_limit_counters" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+DROP POLICY IF EXISTS "rate_limit_counters_no_tenant_access" ON "rate_limit_counters";--> statement-breakpoint
+CREATE POLICY "rate_limit_counters_no_tenant_access" ON "rate_limit_counters" FOR ALL USING (false) WITH CHECK (false);--> statement-breakpoint
+ALTER TABLE "ops_kv" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+DROP POLICY IF EXISTS "ops_kv_no_tenant_access" ON "ops_kv";--> statement-breakpoint
+CREATE POLICY "ops_kv_no_tenant_access" ON "ops_kv" FOR ALL USING (false) WITH CHECK (false);--> statement-breakpoint
 
 DO $$
 BEGIN

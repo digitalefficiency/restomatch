@@ -22,7 +22,8 @@
     "@restomatch/procurement": "workspace:*",
     "@restomatch/queue": "workspace:*",
     "@restomatch/translate": "workspace:*",
-    "@restomatch/types": "workspace:*"
+    "@restomatch/types": "workspace:*",
+    "cron-parser": "4.9.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

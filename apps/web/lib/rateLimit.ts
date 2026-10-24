@@ -12,6 +12,13 @@ import { withDeadline } from '@restomatch/queue';
 
 /** A rate-limit check may add at most this much latency before failing open. */
 export const RATE_LIMIT_DEADLINE_MS = 1_500;
+/**
+ * The FIRST check of a process also opens the connection (TCP + TLS + SCRAM to
+ * the pooler, ~1 s cross-region): that gets its own, longer budget so a cold
+ * serverless instance enforces its first logins instead of failing open (the hole
+ * S15 found in the old Redis store). Waited for at most once per process.
+ */
+export const RATE_LIMIT_CONNECT_DEADLINE_MS = 5_000;
 
 /**
  * Postgres fixed-window store (0061 rate_limit_counters; was Redis INCR). One
@@ -23,9 +30,26 @@ export const RATE_LIMIT_DEADLINE_MS = 1_500;
  * exists, and the tenant app role has no access to this table.
  */
 export class PostgresRateLimitStore implements RateLimitStore {
+  private warm: Promise<void> | null = null;
+
   constructor(private readonly db: { execute: (q: ReturnType<typeof dsql>) => Promise<unknown> }) {}
 
+  /** Open the connection once, outside the per-check deadline. Concurrent first calls share it. */
+  private connect(): Promise<void> {
+    this.warm ??= withDeadline(
+      this.db.execute(dsql`select 1`).then(() => undefined),
+      RATE_LIMIT_CONNECT_DEADLINE_MS,
+      () => new Error(`rate-limit store: no connection within ${RATE_LIMIT_CONNECT_DEADLINE_MS}ms`),
+    ).catch((err: unknown) => {
+      // Only the first check pays this wait. After that a dead database costs
+      // each check the normal 1.5 s deadline, not 5 s.
+      console.warn('[rateLimit] connection warm-up failed:', err instanceof Error ? err.message : err);
+    });
+    return this.warm;
+  }
+
   async incr(key: string, windowSec: number): Promise<number> {
+    await this.connect();
     // Deadline per check: a black-holed database must not make login wait
     // (QA D1). enforceRateLimit fails open.
     return withDeadline(

@@ -49,22 +49,24 @@ export function queueDbUrl(env: NodeJS.ProcessEnv = process.env): string | null 
   return url && url.length > 0 ? url : null;
 }
 
-// One small pool per process and URL (web: one per serverless instance; the
-// worker shares it for claims). globalThis so `next dev` reloads don't leak pools.
+// One small, lazy pool per process, URL and size. Web: max 1 per serverless
+// instance (many instances share the Supabase pooler); the worker asks for a few
+// more for its claim loops. globalThis so `next dev` reloads don't leak pools.
 const memo = globalThis as unknown as { __restomatchQueueSql?: Map<string, Sql> };
 
-export function queueSql(url: string): Sql {
+export function queueSql(url: string, max = 1): Sql {
   memo.__restomatchQueueSql ??= new Map();
-  let sql = memo.__restomatchQueueSql.get(url);
+  const key = `${max}|${url}`;
+  let sql = memo.__restomatchQueueSql.get(key);
   if (!sql) {
     sql = postgres(url, {
-      max: 3,
+      max,
       prepare: false, // Supabase pooler (transaction mode)
       idle_timeout: 20,
       connect_timeout: 5,
       onnotice: () => {},
     });
-    memo.__restomatchQueueSql.set(url, sql);
+    memo.__restomatchQueueSql.set(key, sql);
   }
   return sql;
 }
@@ -202,18 +204,31 @@ export async function renewLocks(sql: Sql, ids: string[], workerId: string): Pro
      WHERE id = ANY(${ids}::bigint[]) AND locked_by = ${workerId} AND status = 'active'`;
 }
 
+/** Times a job may be taken back from a dead worker before it fails (BullMQ maxStalledCount). */
+export const MAX_STALLED = 1;
+
 /**
- * Active jobs whose lock is older than `staleMs` belong to a dead worker: back
- * to queued while attempts remain, else failed. Returns the counts.
+ * Active jobs whose lock is older than `staleMs` belong to a dead worker. As in
+ * BullMQ, a stall does not use up an attempt: the job is queued again (the claim's
+ * attempt is given back) up to MAX_STALLED times, then failed. `excludeIds` are
+ * the caller's own in-flight jobs — alive by definition, even if their lock
+ * renewal lagged (laptop sleep, DB blip). Returns the counts.
  */
-export async function recoverStalled(sql: Sql, staleMs: number): Promise<{ requeued: number; failed: number }> {
+export async function recoverStalled(
+  sql: Sql,
+  staleMs: number,
+  excludeIds: string[] = [],
+): Promise<{ requeued: number; failed: number }> {
   const rows = await sql<Array<{ status: JobStatus }>>`
     UPDATE job_queue
-       SET status = CASE WHEN attempts < max_attempts THEN 'queued' ELSE 'failed' END,
-           finished_at = CASE WHEN attempts < max_attempts THEN NULL ELSE now() END,
+       SET status = CASE WHEN stalled_count < ${MAX_STALLED} THEN 'queued' ELSE 'failed' END,
+           finished_at = CASE WHEN stalled_count < ${MAX_STALLED} THEN NULL ELSE now() END,
+           attempts = CASE WHEN stalled_count < ${MAX_STALLED} THEN greatest(attempts - 1, 0) ELSE attempts END,
+           stalled_count = stalled_count + 1,
            last_error = 'stalled: worker lost its lock (crashed or killed)',
            locked_at = NULL, locked_by = NULL
      WHERE status = 'active' AND locked_at < now() - ${staleMs} * interval '1 millisecond'
+       AND NOT (id = ANY(${excludeIds}::bigint[]))
     RETURNING status`;
   return {
     requeued: rows.filter((r) => r.status === 'queued').length,
@@ -267,11 +282,71 @@ export async function failedJobs(
   }));
 }
 
-/** Delete finished jobs older than `olderThanMs` (done + failed). */
+/** BullMQ-style job states a caller can list. */
+export type ListState = 'waiting' | 'active' | 'delayed' | 'failed' | 'completed';
+
+export interface ListedJob<T = unknown> {
+  id: string;
+  name: string;
+  data: T;
+  attemptsMade: number;
+  timestamp: number;
+  finishedOn?: number;
+  failedReason?: string;
+  returnvalue: unknown;
+}
+
+/** Jobs of a queue in the given states, newest first (rows start..end inclusive). */
+export async function listJobs<T = unknown>(
+  sql: Sql,
+  queue: string,
+  states: ListState[],
+  start = 0,
+  end = 99,
+): Promise<Array<ListedJob<T>>> {
+  const want = new Set(states);
+  const rows = await sql<RawRow[]>`
+    SELECT * FROM job_queue
+     WHERE queue = ${queue}
+       AND (
+         (${want.has('waiting')} AND status = 'queued' AND run_at <= now())
+         OR (${want.has('delayed')} AND status = 'queued' AND run_at > now())
+         OR (${want.has('active')} AND status = 'active')
+         OR (${want.has('failed')} AND status = 'failed')
+         OR (${want.has('completed')} AND status = 'done')
+       )
+     ORDER BY created_at DESC, id DESC
+     OFFSET ${start} LIMIT ${Math.max(0, end - start + 1)}`;
+  return rows.map((r) => {
+    const j = toJob<T>(r);
+    return {
+      id: j.id,
+      name: queue,
+      data: j.payload,
+      attemptsMade: j.attempts,
+      timestamp: j.createdAt.getTime(),
+      finishedOn: j.finishedAt ? j.finishedAt.getTime() : undefined,
+      failedReason: j.lastError ?? undefined,
+      returnvalue: j.result,
+    };
+  });
+}
+
+/** Cron-slot rows are history for missed-slot catch-up: keep them longer than a month. */
+export const KEEP_CRON_HISTORY_MS = 40 * 24 * 3600_000;
+
+/**
+ * Delete finished jobs older than `olderThanMs` (done + failed). Schedule slots
+ * (dedupe_key 'cron:…') are kept KEEP_CRON_HISTORY_MS so a monthly job still
+ * knows it has run before.
+ */
 export async function pruneJobs(sql: Sql, olderThanMs: number): Promise<number> {
   const rows = await sql`
     DELETE FROM job_queue
-     WHERE status IN ('done', 'failed') AND finished_at < now() - ${olderThanMs} * interval '1 millisecond'
+     WHERE status IN ('done', 'failed')
+       AND finished_at < now() - ${olderThanMs} * interval '1 millisecond'
+       AND (dedupe_key IS NULL OR NOT starts_with(dedupe_key, 'cron:')
+            OR finished_at < now() - ${Math.max(olderThanMs, KEEP_CRON_HISTORY_MS)} * interval '1 millisecond')
     RETURNING 1`;
   return rows.length;
 }

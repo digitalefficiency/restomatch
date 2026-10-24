@@ -74,16 +74,63 @@ describe('enforceRateLimit on Postgres', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const rl = await import('../rateLimit');
-      const t0 = Date.now();
-      const res = await rl.enforceRateLimit('qa@example.test', rl.MAGIC_LINK_LIMIT);
+      // The first check of the process also waits for the connection (once).
+      let t0 = Date.now();
+      let res = await rl.enforceRateLimit('qa@example.test', rl.MAGIC_LINK_LIMIT);
+      expect(res.allowed).toBe(true);
+      expect(Date.now() - t0).toBeLessThan(rl.RATE_LIMIT_CONNECT_DEADLINE_MS + rl.RATE_LIMIT_DEADLINE_MS + 1_500);
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/failing open/), expect.anything());
+      // Every later check fails open within the normal deadline.
+      t0 = Date.now();
+      res = await rl.enforceRateLimit('qa@example.test', rl.MAGIC_LINK_LIMIT);
       expect(res.allowed).toBe(true);
       expect(Date.now() - t0).toBeLessThan(rl.RATE_LIMIT_DEADLINE_MS + 1_500);
-      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/failing open/), expect.anything());
     } finally {
       process.env.DATABASE_URL = prev;
       memo.__restomatchAuthDb = prevPool;
       warn.mockRestore();
       vi.resetModules();
     }
-  }, 15_000);
+  }, 20_000);
+
+  it('cold start: the FIRST check of a fresh process is enforced, not failed open (S15)', async () => {
+    vi.resetModules();
+    const memo = globalThis as unknown as { __restomatchAuthDb?: unknown };
+    const prevPool = memo.__restomatchAuthDb;
+    delete memo.__restomatchAuthDb; // a brand-new pool: the first query also connects
+    const prev = process.env.DATABASE_URL;
+    process.env.DATABASE_URL = URL;
+    const warn = vi.spyOn(console, 'warn');
+    try {
+      const rl = await import('../rateLimit');
+      const opts = { limit: 1, windowSec: 60, prefix: `${PREFIX}:cold` };
+      expect(await rl.enforceRateLimit('first@x.test', opts)).toMatchObject({ allowed: true, count: 1 });
+      expect(await rl.enforceRateLimit('first@x.test', opts)).toMatchObject({ allowed: false, count: 2 });
+      expect(warn).not.toHaveBeenCalledWith(expect.stringMatching(/failing open/), expect.anything());
+    } finally {
+      process.env.DATABASE_URL = prev;
+      memo.__restomatchAuthDb = prevPool;
+      warn.mockRestore();
+      vi.resetModules();
+    }
+  });
+
+  it('connection setup slower than the 1.5 s check deadline does not make the first check fail open', async () => {
+    const { PostgresRateLimitStore, RATE_LIMIT_DEADLINE_MS } = await import('../rateLimit');
+    const real = createDb(URL);
+    let first = true;
+    const slowToConnect = {
+      execute: async (q: Parameters<typeof real.execute>[0]) => {
+        if (first) {
+          first = false;
+          await new Promise((r) => setTimeout(r, RATE_LIMIT_DEADLINE_MS + 500)); // e.g. TLS to a far pooler
+        }
+        return real.execute(q);
+      },
+    };
+    const store = new PostgresRateLimitStore(slowToConnect as never);
+    const opts = { limit: 1, windowSec: 60, prefix: `${PREFIX}:slow` };
+    expect(await checkRateLimit(store, 'slow@x.test', opts)).toMatchObject({ allowed: true, count: 1 });
+    expect(await checkRateLimit(store, 'slow@x.test', opts)).toMatchObject({ allowed: false });
+  }, 10_000);
 });

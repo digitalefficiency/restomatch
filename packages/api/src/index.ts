@@ -197,6 +197,7 @@ export {
   uploadShowcaseScan,
   validateShowcaseFile,
   isShowcaseScanUrl,
+  showcaseScanFetchUrl,
   SHOWCASE_MAX_BYTES,
   type ShowcaseUploadResult,
   type ShowcaseUploadError,

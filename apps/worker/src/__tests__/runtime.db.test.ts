@@ -2,13 +2,14 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { testDbUrl } from '@restomatch/db';
 import { claimJob, insertJob, queueCounts, queueSql } from '@restomatch/queue';
 import {
+  assertPattern,
   dueSlot,
   makeQueue,
   makeWorker,
-  parseDailyPattern,
   resetSchedulesForTests,
   runMaintenance,
   tickSchedules,
+  type WorkerJob,
 } from '../queue';
 
 /** The Postgres job runtime that replaced BullMQ (real database). */
@@ -73,24 +74,56 @@ describe('makeWorker', () => {
 });
 
 describe('schedules', () => {
-  it('every-N slots are floor(now / N)', () => {
-    expect(dueSlot({ every: 60_000 }, new Date('2026-10-24T06:00:42Z'))).toBe(Date.parse('2026-10-24T06:00:00Z'));
+  const tz = 'Asia/Jerusalem';
+  const at = (pattern: string, iso: string, z = tz) => dueSlot({ pattern, tz: z }, new Date(iso));
+
+  it('every-N slots are floor(now / N) and are never a catch-up', () => {
+    expect(dueSlot({ every: 60_000 }, new Date('2026-10-24T06:00:42Z'))).toEqual({
+      at: Date.parse('2026-10-24T06:00:00Z'),
+      label: '2026-10-24T06:00:00.000Z',
+      catchUp: false,
+    });
   });
 
-  it('daily slots are local time in the zone, due for 2 h after the slot', () => {
-    const tz = 'Asia/Jerusalem'; // UTC+3 in October (IDT)
-    const slot = Date.parse('2026-10-24T03:45:00Z'); // 06:45 local
-    expect(dueSlot({ pattern: '45 6 * * *', tz }, new Date('2026-10-24T03:44:59Z'))).toBeNull();
-    expect(dueSlot({ pattern: '45 6 * * *', tz }, new Date('2026-10-24T03:45:00Z'))).toBe(slot);
-    expect(dueSlot({ pattern: '45 6 * * *', tz }, new Date('2026-10-24T05:44:00Z'))).toBe(slot);
-    expect(dueSlot({ pattern: '45 6 * * *', tz }, new Date('2026-10-24T05:46:00Z'))).toBeNull();
+  it('daily slots are local time in the zone; on time at the slot, a catch-up after it, gone after 6 h', () => {
+    const slot = Date.parse('2026-10-24T03:45:00Z'); // 06:45 IDT (UTC+3)
+    expect(at('45 6 * * *', '2026-10-24T03:44:59Z')?.at).not.toBe(slot); // still yesterday's
+    expect(at('45 6 * * *', '2026-10-24T03:45:00Z')).toEqual({ at: slot, label: '2026-10-24T06:45', catchUp: false });
+    expect(at('45 6 * * *', '2026-10-24T05:44:00Z')).toMatchObject({ at: slot, catchUp: true });
+    expect(at('45 6 * * *', '2026-10-24T09:44:00Z')).toMatchObject({ at: slot, catchUp: true });
+    expect(at('45 6 * * *', '2026-10-24T09:46:00Z')).toBeNull();
     // Winter (IST, UTC+2): the same wall clock is an hour later in UTC.
-    expect(dueSlot({ pattern: '0 6 * * *', tz }, new Date('2026-12-01T04:30:00Z'))).toBe(Date.parse('2026-12-01T04:00:00Z'));
+    expect(at('0 6 * * *', '2026-12-01T04:00:30Z')).toMatchObject({ at: Date.parse('2026-12-01T04:00:00Z'), catchUp: false });
   });
 
-  it('rejects patterns it cannot run (at registration, not at 06:00)', async () => {
-    expect(() => parseDailyPattern('*/5 * * * *')).toThrow(/unsupported pattern/);
-    await expect(makeQueue(Q).upsertJobScheduler('bad', { pattern: '0 6 * * 1' }, { name: 'x', data: {} })).rejects.toThrow();
+  it('DST fall-back day in Israel, 2026-10-25 (02:00 IDT → 01:00 IST): every cron.ts slot is right', () => {
+    // 02:00 exists once (IST) → 00:00Z; 03:30 → 01:30Z; 06:00 → 04:00Z; 19:00 → 17:00Z.
+    expect(at('0 2 * * *', '2026-10-25T00:00:10Z')).toMatchObject({ at: Date.parse('2026-10-25T00:00:00Z'), label: '2026-10-25T02:00' });
+    expect(at('30 3 * * *', '2026-10-25T01:30:10Z')).toMatchObject({ at: Date.parse('2026-10-25T01:30:00Z') });
+    expect(at('0 6 * * *', '2026-10-25T04:00:10Z')).toMatchObject({ at: Date.parse('2026-10-25T04:00:00Z'), catchUp: false });
+    expect(at('0 19 * * *', '2026-10-25T17:00:10Z')).toMatchObject({ at: Date.parse('2026-10-25T17:00:00Z') });
+    // The day before is still IDT (UTC+3).
+    expect(at('0 6 * * *', '2026-10-24T03:00:10Z')).toMatchObject({ at: Date.parse('2026-10-24T03:00:00Z') });
+    // The repeated hour (01:xx twice) collapses to ONE wall-clock label → one dedupe key.
+    expect(at('30 1 * * *', '2026-10-24T22:30:10Z')?.label).toBe('2026-10-25T01:30');
+    expect(at('30 1 * * *', '2026-10-24T23:30:10Z')?.label).toBe('2026-10-25T01:30');
+  });
+
+  it('monthly slots (S12 "45 7 1 * *") are caught up for 3 days', () => {
+    const first = Date.parse('2026-11-01T05:45:00Z'); // 07:45 IST
+    expect(at('45 7 1 * *', '2026-11-01T05:45:05Z')).toMatchObject({ at: first, catchUp: false });
+    expect(at('45 7 1 * *', '2026-11-03T12:00:00Z')).toMatchObject({ at: first, catchUp: true });
+    expect(at('45 7 1 * *', '2026-11-04T06:00:00Z')).toBeNull();
+  });
+
+  it('accepts every pattern the wave-1 schedule uses and rejects bad ones at registration', async () => {
+    for (const p of ['0 6 * * *', '0 2 * * *', '0 9 * * *', '0 10 * * *', '0 19 * * *', '0 7 * * *', '30 8 * * *', '45 7 1 * *', '45 6 * * *', '30 3 * * *']) {
+      expect(() => assertPattern(p, tz)).not.toThrow();
+    }
+    expect(() => assertPattern('0 6 * *', tz)).toThrow(/5 fields/);
+    expect(() => assertPattern('61 6 * * *', tz)).toThrow();
+    await expect(makeQueue(Q).upsertJobScheduler('bad', { pattern: '0 25 * * *', tz }, { name: 'x', data: {} })).rejects.toThrow();
+    await expect(makeQueue(Q).upsertJobScheduler('bad', { every: 0 }, { name: 'x', data: {} })).rejects.toThrow();
   });
 
   it('a slot becomes exactly one job, even when two workers tick it', async () => {
@@ -107,6 +140,70 @@ describe('schedules', () => {
     expect(await tickSchedules(sql, new Date('2026-10-24T06:01:05Z'))).toEqual([`${Q}-every`]);
     expect((await queueCounts(sql, Q)).waiting).toBe(2);
   });
+
+  it('cron pattern + tz: on-time slot fires once; a missed slot is caught up when the worker wakes', async () => {
+    const id = `${Q}-daily`;
+    const q = makeQueue(Q);
+    await q.upsertJobScheduler(id, { pattern: '0 6 * * *', tz }, { name: 'x', data: { from: 'cron' } });
+    // Day 1, on time.
+    expect(await tickSchedules(sql, new Date('2026-10-24T03:00:05Z'))).toEqual([id]);
+    expect(await tickSchedules(sql, new Date('2026-10-24T03:00:15Z'))).toEqual([]);
+    // Day 2 (DST day): the Mac slept through 06:00 and wakes at 09:30 local → caught up once.
+    resetSchedulesForTests();
+    await q.upsertJobScheduler(id, { pattern: '0 6 * * *', tz }, { name: 'x', data: { from: 'cron' } });
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    expect(await tickSchedules(sql, new Date('2026-10-25T07:30:00Z'))).toEqual([id]);
+    expect(await tickSchedules(sql, new Date('2026-10-25T07:31:00Z'))).toEqual([]);
+    const keys = await sql<Array<{ dedupe_key: string }>>`SELECT dedupe_key FROM job_queue WHERE queue = ${Q} ORDER BY id`;
+    expect(keys.map((k) => k.dedupe_key)).toEqual([`cron:${id}:2026-10-24T06:00`, `cron:${id}:2026-10-25T06:00`]);
+  });
+
+  it("the first tick of a schedule on a fresh database does not replay a slot BullMQ already ran (cutover)", async () => {
+    const id = `${Q}-cutover`;
+    await makeQueue(Q).upsertJobScheduler(id, { pattern: '0 6 * * *', tz }, { name: 'x', data: {} });
+    // Deployed at 08:00 local; 06:00 already ran on the old worker.
+    expect(await tickSchedules(sql, new Date('2026-10-24T05:00:00Z'))).toEqual([]);
+    const rows = await sql<Array<{ status: string; result: { skipped?: string } }>>`SELECT status, result FROM job_queue WHERE queue = ${Q}`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: 'done', result: { skipped: expect.any(String) } });
+    // The next day's slot runs normally.
+    expect(await tickSchedules(sql, new Date('2026-10-25T04:00:05Z'))).toEqual([id]);
+  });
+});
+
+describe('BullMQ-shaped surface (wave-1 job modules)', () => {
+  it('a processor sees attemptsMade (before this run) and opts.attempts, like BullMQ', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const seen: Array<Pick<WorkerJob<unknown>, 'attemptsMade' | 'opts'>> = [];
+    const w = makeWorker(Q, async (job) => {
+      seen.push({ attemptsMade: job.attemptsMade, opts: job.opts });
+      throw new Error('again');
+    }, { pollMs: 50, sql });
+    await insertJob(sql, Q, {}, { maxAttempts: 2 });
+    await until(async () => (await queueCounts(sql, Q)).delayed === 1);
+    await sql`UPDATE job_queue SET run_at = now() WHERE queue = ${Q}`;
+    await until(async () => (await queueCounts(sql, Q)).failed === 1);
+    await w.close();
+    expect(seen).toEqual([
+      { attemptsMade: 0, opts: { attempts: 2 } },
+      { attemptsMade: 1, opts: { attempts: 2 } }, // the last attempt: (attemptsMade + 1) >= attempts
+    ]);
+  });
+
+  it('getJobs / getFailed / getJobCounts', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const q = makeQueue<{ n: number }>(Q);
+    await insertJob(sql, Q, { n: 1 });
+    await insertJob(sql, Q, { n: 2 }, { runAt: new Date(Date.now() + 3600_000) });
+    const failed = await insertJob(sql, Q, { n: 3 });
+    await sql`UPDATE job_queue SET status = 'failed', last_error = 'x', finished_at = now() WHERE id = ${failed!.id}`;
+    const waiting = await q.getJobs(['waiting']);
+    expect(waiting.map((j) => j.data.n)).toEqual([1]);
+    expect((await q.getJobs(['waiting', 'delayed'])).map((j) => j.data.n).sort()).toEqual([1, 2]);
+    expect((await q.getJobs('failed'))[0]).toMatchObject({ data: { n: 3 }, failedReason: 'x' });
+    expect(await q.getFailed()).toHaveLength(1);
+    expect(await q.getJobCounts('waiting', 'delayed', 'failed')).toMatchObject({ waiting: 1, delayed: 1, failed: 1, completed: 0 });
+  });
 });
 
 describe('maintenance', () => {
@@ -117,5 +214,43 @@ describe('maintenance', () => {
     await sql`UPDATE job_queue SET locked_at = now() - interval '5 minutes' WHERE id = ${j!.id}`;
     await runMaintenance(sql);
     expect(await queueCounts(sql, Q)).toMatchObject({ waiting: 1, active: 0 });
+  });
+
+  it('a stall does not use up the only attempt (BullMQ maxStalledCount = 1); a second stall fails the job', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await insertJob(sql, Q, {}); // max_attempts 1, like ocr-invoice
+    const stall = async () => {
+      const j = await claimJob(sql, Q, 'dead-worker');
+      await sql`UPDATE job_queue SET locked_at = now() - interval '5 minutes' WHERE id = ${j!.id}`;
+      await runMaintenance(sql);
+    };
+    await stall();
+    expect(await queueCounts(sql, Q)).toMatchObject({ waiting: 1, failed: 0 });
+    const [row] = await sql<Array<{ attempts: number; stalled_count: number }>>`SELECT attempts, stalled_count FROM job_queue WHERE queue = ${Q}`;
+    expect(row).toEqual({ attempts: 0, stalled_count: 1 });
+    await stall();
+    expect(await queueCounts(sql, Q)).toMatchObject({ waiting: 0, failed: 1 });
+  });
+
+  it("never takes back this process's own in-flight job, even if its lock looks stale (laptop sleep)", async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let runs = 0;
+    const w = makeWorker(Q, async () => {
+      runs += 1;
+      await gate;
+    }, { pollMs: 50, sql });
+    await insertJob(sql, Q, {});
+    await until(async () => (await queueCounts(sql, Q)).active === 1);
+    await sql`UPDATE job_queue SET locked_at = now() - interval '5 minutes' WHERE queue = ${Q}`;
+    await runMaintenance(sql);
+    expect(await queueCounts(sql, Q)).toMatchObject({ active: 1, waiting: 0 });
+    const [row] = await sql<Array<{ fresh: boolean }>>`SELECT locked_at > now() - interval '10 seconds' AS fresh FROM job_queue WHERE queue = ${Q}`;
+    expect(row?.fresh).toBe(true); // renewed first
+    release();
+    await w.close();
+    expect(runs).toBe(1);
+    expect((await queueCounts(sql, Q)).done).toBe(1);
   });
 });

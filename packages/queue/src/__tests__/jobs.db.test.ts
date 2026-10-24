@@ -83,7 +83,26 @@ describe('job_queue lifecycle', () => {
     expect(await recoverStalled(sql, 2 * 60_000)).toEqual({ requeued: 1, failed: 0 });
     const again = await claimJob<{ stale: boolean }>(sql, Q, 'w2');
     expect(again?.payload.stale).toBe(true);
-    expect(again?.attempts).toBe(2);
+    // A stall gives the claim's attempt back (BullMQ: stalled ≠ failed attempt).
+    expect(again?.attempts).toBe(1);
+  });
+
+  it('never recovers the ids a live worker says are its own in-flight jobs', async () => {
+    await insertJob(sql, Q, {});
+    const mine = await claimJob(sql, Q, 'me');
+    await sql`UPDATE job_queue SET locked_at = now() - interval '10 minutes' WHERE id = ${mine!.id}`;
+    expect(await recoverStalled(sql, 2 * 60_000, [mine!.id])).toEqual({ requeued: 0, failed: 0 });
+    expect(await recoverStalled(sql, 2 * 60_000)).toEqual({ requeued: 1, failed: 0 });
+  });
+
+  it('keeps finished cron-slot rows (catch-up history) for 40 days', async () => {
+    await insertJob(sql, Q, {}, { dedupeKey: 'cron:x:2026-09-01T07:45' });
+    await insertJob(sql, Q, {}, { dedupeKey: 'plain' });
+    await sql`UPDATE job_queue SET status = 'done', finished_at = now() - interval '10 days' WHERE queue = ${Q}`;
+    expect(await pruneJobs(sql, 7 * 24 * 3600_000)).toBe(1);
+    expect((await sql`SELECT dedupe_key FROM job_queue WHERE queue = ${Q}`).map((r) => r.dedupe_key)).toEqual(['cron:x:2026-09-01T07:45']);
+    await sql`UPDATE job_queue SET finished_at = now() - interval '41 days' WHERE queue = ${Q}`;
+    expect(await pruneJobs(sql, 7 * 24 * 3600_000)).toBe(1);
   });
 
   it('prunes finished jobs older than the cutoff only', async () => {

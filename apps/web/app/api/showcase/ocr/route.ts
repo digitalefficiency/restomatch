@@ -9,7 +9,7 @@
  */
 import { NextResponse } from 'next/server';
 import postgres from 'postgres';
-import { clientIpFromHeaders, isOriginAllowed, isShowcaseScanUrl } from '@restomatch/api';
+import { clientIpFromHeaders, isOriginAllowed, showcaseScanFetchUrl } from '@restomatch/api';
 import { ClaudeVision } from '@restomatch/ocr';
 import { enforceOcrLimit, trustedProxyHops } from '@/lib/rateLimit';
 
@@ -153,8 +153,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: 'invalid JSON body' }, { status: 400 });
   }
 
-  // SB-3: only the showcase's own walk-in uploads, never a tenant scan.
-  if (!isShowcaseScanUrl(url, SUPABASE_URL)) {
+  // SB-3: only the showcase's own walk-in uploads, never a tenant scan. The
+  // fetched URL is rebuilt from our own Supabase prefix (never the request's host).
+  const scanUrl = showcaseScanFetchUrl(url, SUPABASE_URL);
+  if (!scanUrl) {
     return NextResponse.json(
       { ok: false, error: 'url must be a signed invoice-scans URL' },
       { status: 400 },
@@ -168,7 +170,7 @@ export async function POST(req: Request) {
       // Private bucket: fetch the bytes server-side, never hand Anthropic the URL.
       fetchBytes: true,
     });
-    const result = await provider.extract(url);
+    const result = await provider.extract(scanUrl);
     // Persist supplier contacts + detect agent phone changes (best-effort:
     // never fail the OCR response on a contact-store hiccup). Gated OFF in prod
     // (PERSIST_CONTACTS) — see note above.
