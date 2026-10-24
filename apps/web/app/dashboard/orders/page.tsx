@@ -18,6 +18,9 @@ export default async function OrdersPage() {
   const active =
     memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0];
   const canEdit = active?.role === 'owner' || active?.role === 'manager';
+  // Same credential gate as orders.importPo — without it the button could only
+  // answer with a "not configured" error, so don't offer it.
+  const ocrReady = Boolean(process.env.ANTHROPIC_API_KEY);
 
   return (
     <div>
@@ -29,7 +32,7 @@ export default async function OrdersPage() {
         action={
           canEdit ? (
             <div className="flex flex-wrap items-start gap-2">
-              <ZesttImportButton />
+              {ocrReady ? <ZesttImportButton /> : null}
               <LinkButton href="/dashboard/orders/new" size="sm">
                 <Plus className="h-4 w-4" aria-hidden="true" /> {t('newOrder')}
               </LinkButton>

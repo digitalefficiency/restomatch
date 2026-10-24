@@ -74,7 +74,7 @@ for (const vp of VIEWPORTS) {
 
         await page.locator('#ord-channel').selectOption('none');
         await page.getByRole('button', { name: m.wizard.submit }).click();
-        await expect(page.getByRole('status').filter({ hasText: m.wizard.sentTitle })).toBeVisible({ timeout: 30_000 });
+        await expect(page.getByRole('status').filter({ hasText: m.wizard.markedTitle })).toBeVisible({ timeout: 30_000 });
         const href = await page.getByRole('link', { name: m.wizard.viewOrder }).getAttribute('href');
         const poId = href!.split('/').pop()!;
 
