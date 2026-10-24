@@ -13,8 +13,15 @@ import { PayRunExport } from './export-button';
 
 type PayRunStatus = 'pay' | 'hold' | 'claim';
 
-/** T3 calm for "can pay", T2 act-now for "hold", money-back gold for a credit to ask for. */
-const TONE: Record<PayRunStatus, BadgeTone> = { pay: 'accent', hold: 'warning', claim: 'gold' };
+/**
+ * Emphasis tiers (AGENTS.md): "can pay" is T3 (calm green); "hold — awaiting a decision" and
+ * "ask for a credit" are T2 (solid badge + ₪ + one CTA); "waiting for a PO link" is T4 (neutral).
+ */
+function toneOf(inv: { status: PayRunStatus; pendingLink: boolean; duplicate: boolean }): BadgeTone {
+  if (inv.status === 'pay') return 'accent';
+  if (inv.status === 'claim') return 'danger-solid';
+  return inv.pendingLink && !inv.duplicate ? 'neutral' : 'warning-solid';
+}
 
 /**
  * Pay run (flag payRun): this / last month's checked invoices not marked as
@@ -62,8 +69,12 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
         : inv.status === 'hold' && inv.pendingLink
           ? t('status.holdLink')
           : t(`status.${inv.status}`);
+  const isLink = (i: { pendingLink: boolean; duplicate: boolean }) => i.pendingLink && !i.duplicate;
   const count = (st: PayRunStatus) =>
-    data.suppliers.reduce((n, s) => n + s.invoices.filter((i) => i.status === st).length, 0);
+    data.suppliers.reduce((n, s) => n + s.invoices.filter((i) => i.status === st && !isLink(i)).length, 0);
+  /** The invoice's local (Asia/Jerusalem) calendar day, as the page shows it. */
+  const localYmd = (iso: string) =>
+    new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
   /** The credit's VAT basis: one basis, or "mixed" (never silently summed as one). */
   const creditBasis = (claims: Array<{ resolutionStatus: string; basis: 'excl' | 'incl' | 'vat' }>) => {
     const bases = new Set(claims.filter((c) => c.resolutionStatus === 'accepted').map((c) => c.basis));
@@ -85,7 +96,7 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
     s.invoices.map((inv) => ({
       supplier: supplierLabel(s),
       invoice: inv.invoiceNumber ?? '',
-      date: inv.invoiceDate.slice(0, 10),
+      date: localYmd(inv.invoiceDate),
       total: inv.totalInclVat.toFixed(2),
       status: statusLabel(inv),
       credit: inv.creditIls ? inv.creditIls.toFixed(2) : '',
@@ -147,7 +158,16 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
           value={<span data-testid="payrun-hold">{ils(data.totals.holdIls)}</span>}
           tone={data.totals.holdIls > 0 ? 'warning' : 'neutral'}
           icon={<PauseCircle className="h-5 w-5" />}
-          subtitle={t('kpis.holdHint', { count: formatNumber(count('hold'), locale) })}
+          subtitle={
+            <>
+              {t('kpis.holdHint', { count: formatNumber(count('hold'), locale) })}
+              {data.totals.pendingIls > 0 ? (
+                <span className="block" data-testid="payrun-hold-pending">
+                  {t('kpis.holdPending', { amount: ils(data.totals.pendingIls) })}
+                </span>
+              ) : null}
+            </>
+          }
         />
         <KpiCard
           label={t('kpis.credit')}
@@ -157,6 +177,12 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
           subtitle={t('kpis.creditHint')}
         />
       </div>
+
+      {data.totals.linkCount > 0 ? (
+        <p className="mt-3 text-sm text-muted" data-testid="payrun-link-note">
+          {t('kpis.link', { count: formatNumber(data.totals.linkCount, locale), amount: ils(data.totals.linkIls) })}
+        </p>
+      ) : null}
 
       {data.suppliers.length === 0 ? (
         <EmptyState className="mt-8" icon={<ReceiptText className="h-6 w-6" />} title={t('empty', { month })} />
@@ -176,6 +202,7 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
                     {s.holdIls > 0 ? <Badge tone="warning">{t('supplier.hold', { amount: ils(s.holdIls) })}</Badge> : null}
                     {s.claimIls > 0 ? <Badge tone="gold">{t('supplier.claim', { amount: ils(s.claimIls) })}</Badge> : null}
                     {s.creditIls > 0 ? <Badge tone="gold">{t('supplier.credit', { amount: ils(s.creditIls) })}</Badge> : null}
+                    {s.linkIls > 0 ? <Badge tone="neutral">{t('supplier.link', { amount: ils(s.linkIls) })}</Badge> : null}
                   </div>
                 </div>
                 <ul className="divide-y divide-line/60">
@@ -222,7 +249,7 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
                       </div>
                       <div className="flex shrink-0 flex-col items-start gap-1.5 sm:items-end">
                         <span data-testid="payrun-status">
-                          <Badge tone={TONE[inv.status]}>{statusLabel(inv)}</Badge>
+                          <Badge tone={toneOf(inv)}>{statusLabel(inv)}</Badge>
                         </span>
                         {inv.status === 'claim' ? (
                           <span className="text-xs text-subtle">{creditBasis(inv.claims)}</span>

@@ -70,6 +70,8 @@ export interface PayRunSupplier {
   creditIls: number;
   /** Σ open/escalated claimable ₪. */
   pendingIls: number;
+  /** Σ totals incl. VAT of invoices waiting for their PO link (T4; not in pay / hold). */
+  linkIls: number;
 }
 
 export interface PayRunResult {
@@ -77,14 +79,24 @@ export interface PayRunResult {
   monthStart: string | null;
   monthEnd: string | null;
   suppliers: PayRunSupplier[];
-  totals: { invoices: number; payIls: number; holdIls: number; claimIls: number; creditIls: number; pendingIls: number };
+  totals: {
+    invoices: number;
+    payIls: number;
+    holdIls: number;
+    claimIls: number;
+    creditIls: number;
+    pendingIls: number;
+    /** Invoices waiting for their PO link (T4), and their totals incl. VAT. */
+    linkIls: number;
+    linkCount: number;
+  };
 }
 
 const OPEN = new Set(['open', 'escalated']);
 const CLAIMABLE_DUP = new Set(['open', 'escalated', 'accepted']);
 const ag = (v: number) => Math.round(v * 100);
 const ils = (a: number) => a / 100;
-const EMPTY_TOTALS = { invoices: 0, payIls: 0, holdIls: 0, claimIls: 0, creditIls: 0, pendingIls: 0 };
+const EMPTY_TOTALS = { invoices: 0, payIls: 0, holdIls: 0, claimIls: 0, creditIls: 0, pendingIls: 0, linkIls: 0, linkCount: 0 };
 
 type Row = Record<string, unknown>;
 const rowsOf = (res: unknown): Row[] => (Array.isArray(res) ? (res as Row[]) : ((res as { rows?: Row[] }).rows ?? []));
@@ -120,8 +132,13 @@ export function payRunStatusOf(b: LeakBreakdownInvoice | null): {
   const rest = claims.filter((c) => !isDup(c));
   const pendingIls = sumClaims(rest.filter((c) => OPEN.has(c.resolutionStatus)));
   const creditIls = sumClaims(rest.filter((c) => c.resolutionStatus === 'accepted'));
-  // Any open / escalated leak finding holds the invoice, even one whose ₪ the cap already used up.
-  const waiting = duplicate || b.pendingLink || b.lines.some((l) => l.countsAsLeak && OPEN.has(l.resolutionStatus));
+  // An open / escalated leak finding holds the invoice, even one whose ₪ the cap already used up —
+  // but, like the claimable rule, only a real one: a ₪0 line (the engine's QTY_SHORT "twin" of a
+  // billed QTY_OVER) or a non-leak line never keeps an invoice on hold.
+  const waiting =
+    duplicate ||
+    b.pendingLink ||
+    b.lines.some((l) => l.countsAsLeak && OPEN.has(l.resolutionStatus) && Math.abs(l.deltaAmount) > 0);
   const status: PayRunStatus = waiting ? 'hold' : creditIls > 0 ? 'claim' : 'pay';
   return { status, duplicate, duplicateIls, claims, pendingIls, creditIls };
 }
@@ -147,7 +164,8 @@ export const payRunRouter = router({
       const breakdown = await computeLeakBreakdown(ctx.db, rid, { monthOffset, limit: 200 });
       const byInvoice = new Map(breakdown.map((b) => [b.invoiceId, b]));
 
-      // The month's checked (matched) invoices not marked paid — same date rule as the hero.
+      // The month's invoices not marked paid (matched, or read but waiting for a PO link) — same
+      // date rule as the hero.
       const res = await ctx.db.execute(sql`
         SELECT i.id, i.invoice_number, COALESCE(i.invoice_date, i.created_at) AS at,
                COALESCE(i.total_incl_vat, 0) AS total_incl, COALESCE(i.total_excl_vat, 0) AS total_excl,
@@ -159,15 +177,18 @@ export const payRunRouter = router({
                  JOIN discrepancies d ON d.match_run_id = mr2.id AND d.restaurant_id = ${rid}
                  WHERE mr2.invoice_id = i.id AND mr2.restaurant_id = ${rid}
                    AND d.severity IN ('warn','block') AND d.resolution_status IN ('open','escalated')
-                   AND d.type <> 'PRICE_LOWER'
-               ) AS has_open
+                   AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL') AND ABS(d.delta_amount) > 0
+               ) AS has_open,
+               EXISTS (SELECT 1 FROM match_runs mr WHERE mr.invoice_id = i.id AND mr.restaurant_id = ${rid}) AS matched
         FROM invoices i
         LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${rid}
         WHERE i.restaurant_id = ${rid}
           AND i.status <> 'paid'
           AND COALESCE(i.invoice_date, i.created_at) >= ${hero.monthStart}::timestamptz
           AND COALESCE(i.invoice_date, i.created_at) < ${hero.monthEnd}::timestamptz
-          AND EXISTS (SELECT 1 FROM match_runs mr WHERE mr.invoice_id = i.id AND mr.restaurant_id = ${rid})
+          -- Checked invoices, plus the read-but-unmatched ones (consolidated invoices waiting
+          -- for their PO link, shown as T4 "waiting to be linked"); not invoices still in OCR.
+          AND i.status <> 'ocr_pending'
         ORDER BY at DESC, i.invoice_number
       `);
 
@@ -176,13 +197,17 @@ export const payRunRouter = router({
         const id = String(row.id);
         const b = byInvoice.get(id) ?? null;
         const s = payRunStatusOf(b);
+        // Past the breakdown's 200-row window (known limit, not reached by the demo): an open
+        // real finding still holds the invoice; an unmatched one waits for its link.
         if (!b && row.has_open === true) s.status = 'hold';
+        const pendingLink = (b?.pendingLink ?? false) || row.matched !== true;
+        if (pendingLink) s.status = 'hold';
         const inv: PayRunInvoice = {
           invoiceId: id,
           invoiceNumber: row.invoice_number == null ? null : String(row.invoice_number),
           invoiceDate: iso(row.at),
           status: s.status,
-          pendingLink: b?.pendingLink ?? false,
+          pendingLink,
           duplicate: s.duplicate,
           duplicateIls: s.duplicateIls,
           totalInclVat: Number(row.total_incl),
@@ -204,20 +229,24 @@ export const payRunRouter = router({
             claimIls: 0,
             creditIls: 0,
             pendingIls: 0,
-            a: { pay: 0, hold: 0, claim: 0, credit: 0, pending: 0 },
+            linkIls: 0,
+            a: { pay: 0, hold: 0, claim: 0, credit: 0, pending: 0, link: 0 },
           };
           groups.set(key, g);
         }
         g.invoices.push(inv);
-        g.a[inv.status]! += ag(inv.totalInclVat);
+        // Waiting for a PO link is T4: its total is reported on its own, never as pay or hold ₪.
+        if (inv.pendingLink && !inv.duplicate) g.a.link! += ag(inv.totalInclVat);
+        else g.a[inv.status]! += ag(inv.totalInclVat);
         g.a.credit! += ag(inv.creditIls);
         g.a.pending! += ag(inv.pendingIls);
       }
 
-      const t = { pay: 0, hold: 0, claim: 0, credit: 0, pending: 0, invoices: 0 };
+      const t = { pay: 0, hold: 0, claim: 0, credit: 0, pending: 0, link: 0, invoices: 0, linkCount: 0 };
       const suppliers: PayRunSupplier[] = [...groups.values()].map(({ a, ...g }) => {
-        for (const k of ['pay', 'hold', 'claim', 'credit', 'pending'] as const) t[k] += a[k]!;
+        for (const k of ['pay', 'hold', 'claim', 'credit', 'pending', 'link'] as const) t[k] += a[k]!;
         t.invoices += g.invoices.length;
+        t.linkCount += g.invoices.filter((i) => i.pendingLink && !i.duplicate).length;
         return {
           ...g,
           payIls: ils(a.pay!),
@@ -225,6 +254,7 @@ export const payRunRouter = router({
           claimIls: ils(a.claim!),
           creditIls: ils(a.credit!),
           pendingIls: ils(a.pending!),
+          linkIls: ils(a.link!),
         };
       });
       // Suppliers needing action first (held ₪, then credits), then the payable ones.
@@ -247,6 +277,8 @@ export const payRunRouter = router({
           claimIls: ils(t.claim),
           creditIls: ils(t.credit),
           pendingIls: ils(t.pending),
+          linkIls: ils(t.link),
+          linkCount: t.linkCount,
         },
       };
     }),
