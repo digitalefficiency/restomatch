@@ -87,6 +87,7 @@ export function DockSlip({
   // Nothing to dispute: no flagged line, no engine finding, no duplicate.
   if (q.isLoading || !data || !needsSlip(slipLines, dup)) return null;
   const note = slipNote(data.engine, !!invoiceId, gaveUp);
+  const engineReady = data.engine.ready;
 
   const money = (v: number) => formatIls(v, { locale, maximumFractionDigits: 2 });
   const qty = (v: number | null, u: string | null) =>
@@ -101,7 +102,7 @@ export function DockSlip({
 
   function issueTexts(l: SlipLine): string[] {
     const out = l.issues.map((i) =>
-      t(`dockSlip.issue.${issueMessageKey(i, data.engine.ready)}`, {
+      t(`dockSlip.issue.${issueMessageKey(i, engineReady)}`, {
         ordered: qty(l.ordered, l.unit),
         received: qty(l.received, l.unit),
         rejected: qty(l.rejected, l.unit),
