@@ -1,6 +1,6 @@
 import React from 'react';
 import { AbsoluteFill, random, useCurrentFrame, useVideoConfig } from 'remotion';
-import { C, LIGHT } from '../theme';
+import { C, LIGHT, isLight } from '../theme';
 
 /**
  * The "ledger room": deep green-ink canvas, a perspective ledger grid drifting
@@ -11,11 +11,11 @@ export const Background: React.FC<{ period?: number; tint?: 'green' | 'danger'; 
   period = 360,
   tint = 'green',
   intensity = 1,
-  light = false,
+  light = isLight(),
 }) => {
   const P = light
     ? { bg: LIGHT.bg, bgDeep: LIGHT.bgDeep, line: LIGHT.line, primary: LIGHT.primary, gold: LIGHT.gold, vignette: 'rgba(15,31,23,0.10)' }
-    : { bg: C.bg, bgDeep: C.bgDeep, line: C.line, primary: C.primary, gold: C.gold, vignette: 'rgba(0,0,0,0.55)' };
+    : { bg: '#0E1512', bgDeep: '#08100C', line: '#2A3A31', primary: '#22D39A', gold: '#E0B341', vignette: 'rgba(0,0,0,0.55)' };
   const frame = useCurrentFrame();
   const { width, height } = useVideoConfig();
   const ph = (frame % period) / period; // 0..1 loop phase

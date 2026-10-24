@@ -1,7 +1,7 @@
 import React from 'react';
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
 import { COPY, LINES, Locale } from '../copy';
-import { C, EASE_IN, EASE_IN_OUT, FONT, lerp, prog } from '../theme';
+import { C, EASE_IN, EASE_IN_OUT, FONT, isLight, lerp, prog } from '../theme';
 import { zones } from '../layout';
 import { rectFor, type U } from '../rects';
 import { CaptionZone, Callout, DeviceZone, Spotlight } from '../components/Stage';
@@ -45,8 +45,8 @@ const MorphLine: React.FC<{ i: number; at: number; w: number }> = ({ i, at, w })
           position: 'absolute',
           inset: 0,
           borderRadius: 18,
-          background: done > 0.5 ? C.surface : 'rgba(244,241,232,0.06)',
-          border: `1.5px solid ${done > 0.5 ? flagColor + '66' : 'rgba(244,241,232,0.18)'}`,
+          background: done > 0.5 ? C.surface : isLight() ? '#FFFDF7' : 'rgba(244,241,232,0.06)',
+          border: `1.5px solid ${done > 0.5 ? flagColor + '66' : isLight() ? C.line : 'rgba(244,241,232,0.18)'}`,
         }}
       />
       {/* Hebrew (paper) — visible left of the beam */}
@@ -62,7 +62,7 @@ const MorphLine: React.FC<{ i: number; at: number; w: number }> = ({ i, at, w })
           clipPath: `inset(0 ${w - beamX}px 0 0)`,
           opacity: p < 1 ? 1 : 0,
           fontFamily: FONT.sans,
-          color: C.paper,
+          color: isLight() ? C.paperInk : C.paper,
           fontSize: 36 * k,
           fontWeight: 600,
           filter: `blur(${p * 2}px)`,

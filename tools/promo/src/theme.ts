@@ -1,8 +1,9 @@
 import { Easing, interpolate } from 'remotion';
 
-// Mirrors packages/ui-tokens/src/index.ts — the dark "command center for money".
-// Three accents only: primary (money-green), danger (leak), gold (recovered).
-export const C = {
+// The film's palette. Three accents only: primary (money-green), danger (leak), gold (recovered).
+// `C` is the ACTIVE stage palette — setStage() switches it between the light identity (default,
+// packages/ui-tokens after PR #77) and the original dark "command center" (DARK).
+export const DARK = {
   bg: '#0E1512',
   bgDeep: '#08100C',
   surface: '#16201B',
@@ -17,7 +18,33 @@ export const C = {
   danger: '#FF5C7A',
   paper: '#F4F1E8',
   paperInk: '#22261F',
-} as const;
+};
+
+const LIGHT_STAGE: typeof DARK = {
+  bg: '#F6F8F7',
+  bgDeep: '#E9EFEB',
+  surface: '#FFFFFF',
+  surface2: '#EEF3F0',
+  line: '#D3DDD7',
+  ink: '#0F1F17',
+  muted: '#4A5D53',
+  subtle: '#6B7C73',
+  primary: '#066B4A',
+  onPrimary: '#FFFFFF',
+  gold: '#8A5300',
+  danger: '#B80F2A',
+  paper: '#FFFFFF',
+  paperInk: '#22261F',
+};
+
+export const C: typeof DARK = { ...LIGHT_STAGE };
+let lightStage = true;
+/** Pick the stage before rendering (called from the compositions with their `light` prop). */
+export const setStage = (light: boolean) => {
+  lightStage = light;
+  Object.assign(C, light ? LIGHT_STAGE : DARK);
+};
+export const isLight = () => lightStage;
 
 /** Light stage — mirrors the light ui-tokens (PR #77) for assets that sit on the light landing. */
 export const LIGHT = {

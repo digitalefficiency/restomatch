@@ -1,6 +1,6 @@
 import React from 'react';
 import { Img, staticFile } from 'remotion';
-import { C } from '../theme';
+import { C, isLight } from '../theme';
 
 /**
  * A real screenshot inside a device screen: scroll (px of screen width units),
@@ -30,7 +30,7 @@ export const Screen: React.FC<{
             width: (r.w ?? 1) * width,
             backdropFilter: 'blur(5px)',
             WebkitBackdropFilter: 'blur(5px)',
-            background: 'rgba(14,21,18,0.35)',
+            background: isLight() ? 'rgba(246,248,247,0.45)' : 'rgba(14,21,18,0.35)',
             borderRadius: 6,
           }}
         />
@@ -42,7 +42,7 @@ export const Screen: React.FC<{
     ? `radial-gradient(ellipse ${focus.r}px ${focus.r * 0.62}px at ${focus.x}px ${focus.y}px, transparent 0%, transparent 55%, black 100%)`
     : undefined;
   return (
-    <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', opacity, clipPath: clip, background: '#0E1512' }}>
+    <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', opacity, clipPath: clip, background: C.bg }}>
       {img}
       {focus && a > 0.01 ? (
         <div
@@ -67,7 +67,7 @@ export const Laptop: React.FC<{
   glare?: number; // -1..1 position of the glass reflection
   children: React.ReactNode;
   finish?: 'dark' | 'silver'; // silver = aluminium body for a light stage (glass bezel stays black)
-}> = ({ width, glare = 0, children, finish = 'dark' }) => {
+}> = ({ width, glare = 0, children, finish = isLight() ? 'silver' : 'dark' }) => {
   const silver = finish === 'silver';
   const bezel = Math.round(width * 0.016);
   const screenW = width - bezel * 2;
@@ -179,8 +179,12 @@ export const Phone: React.FC<{ width: number; children: React.ReactNode; glare?:
         borderRadius: width * 0.16,
         padding: frame,
         boxSizing: 'border-box',
-        background: 'linear-gradient(145deg, #4a554f 0%, #1a201d 30%, #0b0e0c 60%, #3b4540 100%)',
-        boxShadow: `0 0 0 2px #0a0d0c, 0 70px 140px rgba(0,0,0,0.65), 0 0 120px ${C.primary}18`,
+        background: isLight()
+          ? 'linear-gradient(145deg, #f2f4f3 0%, #c9d0cc 30%, #aeb7b2 60%, #e3e7e5 100%)'
+          : 'linear-gradient(145deg, #4a554f 0%, #1a201d 30%, #0b0e0c 60%, #3b4540 100%)',
+        boxShadow: isLight()
+          ? '0 0 0 1px #9aa39e, 0 50px 110px rgba(15,31,23,0.25)'
+          : `0 0 0 2px #0a0d0c, 0 70px 140px rgba(0,0,0,0.65), 0 0 120px ${C.primary}18`,
         position: 'relative',
       }}
     >

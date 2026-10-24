@@ -1,6 +1,6 @@
 import React from 'react';
 import { interpolate, useCurrentFrame } from 'remotion';
-import { C, EASE_IN, FONT, prog } from '../theme';
+import { C, EASE_IN, FONT, isLight, prog } from '../theme';
 
 /** Masked line reveal: the line rises out of a slot with a slight blur → sharp. */
 export const RiseLine: React.FC<{
@@ -201,7 +201,7 @@ export const Chip: React.FC<{
   big?: boolean;
   light?: boolean; // white card chip for the light stage
   style?: React.CSSProperties;
-}> = ({ children, accent = C.primary, big, light, style }) => (
+}> = ({ children, accent = C.primary, big, light = isLight(), style }) => (
   <div
     style={{
       display: 'inline-flex',

@@ -50,12 +50,17 @@ function resolveSpec(spec) {
   }
   if (spec.type === 'union') return union(spec.parts.map(resolveSpec));
   if (spec.type === 'inCard') {
-    // first card that contains the anchor text; union of the listed text lines inside it
-    let card = leaf(spec.anchor, 'includes');
+    // the card (cardSel, or the first anchor-text ancestor) holding every cardHas text; union of the listed text lines inside it
+    const ownT = (e) => norm([...e.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join(' '));
+    let card = spec.cardSel
+      ? [...document.querySelectorAll(spec.cardSel)].find((c) => c.offsetParent !== null && spec.cardHas.every((t) => c.innerText.includes(t)))
+      : [...document.querySelectorAll('body *')].find((e) => e.offsetParent !== null && spec.anchor.some((t) => ownT(e).includes(t)));
     while (card && !spec.cardHas.every((t) => card.innerText.includes(t))) card = card.parentElement;
     if (!card) return null;
-    const inside = [...card.querySelectorAll('*')].filter((e) => e.children.length === 0 && e.offsetParent !== null);
-    const pick = (texts, mode) => inside.find((e) => texts.some((t) => (mode === 'starts' ? norm(e.textContent).startsWith(t) : mode === 'includes' ? norm(e.textContent).includes(t) : norm(e.textContent) === t)));
+    // match on an element's OWN text (a label element may hold the value in a child span)
+    const own = (e) => norm([...e.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join(' '));
+    const inside = [...card.querySelectorAll('*')].filter((e) => e.offsetParent !== null && own(e));
+    const pick = (texts, mode) => inside.find((e) => texts.some((t) => (mode === 'starts' ? own(e).startsWith(t) : mode === 'includes' ? own(e).includes(t) : own(e) === t)));
     return union(spec.lines.map(([texts, mode, n]) => { const e = pick(texts, mode); return e ? box(up(e, n ?? 0)) : null; }));
   }
   return null;
@@ -87,8 +92,8 @@ const SPECS_BASE = {
     { beer: { type: 'rowCells', rowText: ['Draft beer keg'], cells: [0, 4] } },
   ),
   approvals: L(
-    { appr: { type: 'inCard', anchor: ['ST-24108'], cardHas: ['ST-24108', 'ההפסד המוערך'], lines: [[['מחיר גבוה מהמצופה']], [['ST-24108'], 'includes'], [['ההפסד המוערך'], 'starts', 1]] } },
-    { appr: { type: 'inCard', anchor: ['ST-24108'], cardHas: ['ST-24108', 'Estimated loss'], lines: [[['Price above expected']], [['ST-24108'], 'includes'], [['Estimated loss'], 'starts', 1]] } },
+    { appr: { type: 'inCard', cardSel: 'article', cardHas: ['ST-24108', 'מחיר גבוה מהמצופה'], lines: [[['מחיר גבוה מהמצופה']], [['ההפסד המוערך'], 'starts', 0]] } },
+    { appr: { type: 'inCard', cardSel: 'article', cardHas: ['ST-24108', 'Price above expected'], lines: [[['Price above expected']], [['Estimated loss'], 'starts', 0]] } },
   ),
   claims: L(
     { claim: { type: 'union', parts: [{ type: 'rowCells', rowText: ['ST-24108'], cells: [2, 3] }, { type: 'leaf', text: ['סה״כ לזיכוי'], mode: 'starts', up: 1 }] } },

@@ -19,10 +19,10 @@ const FOCUS: Record<Locale, Record<'hero' | 'beer' | 'appr' | 'claim', U>> = {
 // One beat per screen. Within a beat (relative to `push`): camera push 0→28,
 // spotlight opens 22→34 (12 f), holds to 80 (≈1.5 s), closes 80→92, camera pulls back 86→112.
 const BEATS = [
-  { key: 'dashboard', from: 0, focus: 'hero', push: 56, accent: C.danger },
-  { key: 'leaks', from: 172, focus: 'beer', push: 192, accent: C.danger },
-  { key: 'approvals', from: 290, focus: 'appr', push: 310, accent: C.gold },
-  { key: 'claims', from: 408, focus: 'claim', push: 428, accent: C.primary },
+  { key: 'dashboard', from: 0, focus: 'hero', push: 56, accent: 'danger' as const },
+  { key: 'leaks', from: 172, focus: 'beer', push: 192, accent: 'danger' as const },
+  { key: 'approvals', from: 290, focus: 'appr', push: 310, accent: 'gold' as const },
+  { key: 'claims', from: 408, focus: 'claim', push: 428, accent: 'primary' as const },
 ] as const;
 const PUSH = 28;
 const SPOT_IN = 22;
@@ -154,7 +154,7 @@ export const Product: React.FC<{ locale: Locale }> = ({ locale }) => {
                 }}
               />
             ) : null}
-            <Spotlight rect={rect} a={spot} src={shot(beat.key)} imgWidth={sw} imgTop={-scrollU * sw} screenW={sw} screenH={sh} accent={beat.accent} />
+            <Spotlight rect={rect} a={spot} src={shot(beat.key)} imgWidth={sw} imgTop={-scrollU * sw} screenW={sw} screenH={sh} accent={C[beat.accent]} />
           </Laptop>
         </div>
       </DeviceZone>
@@ -185,7 +185,7 @@ export const Product: React.FC<{ locale: Locale }> = ({ locale }) => {
                   <FadeUp at={at + 10} out={out}>
                     <div style={{ fontSize: 32, color: C.muted, marginTop: 20, lineHeight: 1.35 }}>{copy[i][1]}</div>
                   </FadeUp>
-                  <Callout locale={locale} a={ca} accent={b.accent}>
+                  <Callout locale={locale} a={ca} accent={C[b.accent]}>
                     {callouts[b.key]}
                   </Callout>
                 </div>
