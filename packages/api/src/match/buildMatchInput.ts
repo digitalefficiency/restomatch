@@ -102,7 +102,8 @@ export async function buildMatchInputForInvoice(
   db: Database,
   restaurantId: string,
   invoiceId: string,
-  options: { pinnedPoId?: string | null } = {},
+  /** skipPoDiscovery: build the invoice side only (lines, VAT, baselines, known numbers) — the consolidated cross-match adds its own multi-PO lines. */
+  options: { pinnedPoId?: string | null; skipPoDiscovery?: boolean } = {},
 ): Promise<BuiltMatchInput | null> {
   const [inv] = await db
     .select({
@@ -195,7 +196,7 @@ export async function buildMatchInputForInvoice(
   const lo = startOfDayInTz(addCalendarDaysInTz(invoiceDate, -PO_MATCH_WINDOW_DAYS, tz), tz);
   const hi = endOfDayInTz(addCalendarDaysInTz(invoiceDate, PO_MATCH_WINDOW_DAYS, tz), tz);
   const inWindow = (at: Date | null) => at == null || (at >= lo && at <= hi);
-  if (inv.supplierId) {
+  if (inv.supplierId && !options.skipPoDiscovery) {
     const candidates: PoCandidate[] = [];
     // A re-match's pinned PO is ONE MORE candidate, never a short-circuit: it
     // skips the status filter (by then it is usually closed / received, which
