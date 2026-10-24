@@ -1,11 +1,12 @@
 import React from 'react';
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
 import { COPY, FACTS, ilsText, Locale } from '../copy';
-import { C, FONT } from '../theme';
+import { C, FONT, LIGHT } from '../theme';
 import { Background } from '../components/Background';
 import { Laptop, laptopScreen, Screen } from '../components/Devices';
 import { Chip } from '../components/primitives';
 import { zones } from '../layout';
+import { emailStrip } from '../rects';
 
 export const HERO_LOOP_FRAMES = 360; // 12 s @ 30 fps
 
@@ -15,7 +16,9 @@ export const HERO_LOOP_FRAMES = 360; // 12 s @ 30 fps
  * phase (sin/cos of 2π·t, or a window strictly inside the loop), so frame 360
  * equals frame 0 → seamless when the <video> loops.
  */
-export const HeroLoop: React.FC<{ locale: Locale }> = ({ locale }) => {
+export const HeroLoop: React.FC<{ locale: Locale; light?: boolean }> = ({ locale, light = true }) => {
+  // light stage (default) sits on the light landing; dark stage = the original command-center look
+  const K = light ? LIGHT : C;
   const f = useCurrentFrame();
   const { width, height } = useVideoConfig();
   const t = COPY[locale];
@@ -47,8 +50,8 @@ export const HeroLoop: React.FC<{ locale: Locale }> = ({ locale }) => {
   const focus = { x: (isRtl ? 0.8 : 0.2) * sw, y: (isRtl ? 0.385 : 0.34) * sw - scroll, r: 300, amount: 0 };
 
   return (
-    <AbsoluteFill style={{ background: C.bgDeep }}>
-      <Background period={HERO_LOOP_FRAMES} intensity={0.9} />
+    <AbsoluteFill style={{ background: K.bgDeep }}>
+      <Background period={HERO_LOOP_FRAMES} intensity={light ? 0.7 : 0.9} light={light} />
       <div
         style={{
           position: 'absolute',
@@ -63,8 +66,8 @@ export const HeroLoop: React.FC<{ locale: Locale }> = ({ locale }) => {
         }}
       >
         <div style={{ transform: `translateY(${y + 10}px) rotateX(${rx}deg) rotateY(${ry}deg)`, transformStyle: 'preserve-3d' }}>
-          <Laptop width={W} glare={ry / 12}>
-            <Screen src={`shots/dashboard-${locale}-full.png`} width={sw} scroll={scroll} focus={focus} redact={[isRtl ? { y: 0.027, h: 0.013, x: 0.72, w: 0.21 } : { y: 0.027, h: 0.013, x: 0.075, w: 0.21 }]} />
+          <Laptop width={W} glare={ry / 12} finish={light ? 'silver' : 'dark'}>
+            <Screen src={`shots/dashboard-${locale}-full.png`} width={sw} scroll={scroll} focus={focus} redact={[emailStrip(`dashboard-${locale}-full`, isRtl ? { y: 0.027, h: 0.013, x: 0.72, w: 0.21 } : { y: 0.027, h: 0.013, x: 0.075, w: 0.21 })]} />
             {beamOn ? (
               <div
                 style={{
@@ -73,8 +76,8 @@ export const HeroLoop: React.FC<{ locale: Locale }> = ({ locale }) => {
                   right: 0,
                   top: `${beamT * 100}%`,
                   height: 3,
-                  background: `linear-gradient(90deg, transparent, ${C.primary}, transparent)`,
-                  boxShadow: `0 0 30px 6px ${C.primary}66`,
+                  background: `linear-gradient(90deg, transparent, ${K.primary}, transparent)`,
+                  boxShadow: `0 0 30px 6px ${K.primary}66`,
                   opacity: Math.sin(Math.PI * beamT),
                 }}
               />
@@ -100,21 +103,21 @@ export const HeroLoop: React.FC<{ locale: Locale }> = ({ locale }) => {
         }}
       >
         <div style={chip(0)}>
-          <Chip accent={C.danger} style={{ fontSize: 24 }}>
+          <Chip accent={K.danger} light={light} style={{ fontSize: 24 }}>
             <span>{t.product.chipLeak}</span>
-            <bdi dir={isRtl ? 'rtl' : 'ltr'} style={{ color: C.danger, fontWeight: 800 }}>{ilsText(FACTS.leak, locale)}</bdi>
+            <bdi dir={isRtl ? 'rtl' : 'ltr'} style={{ color: K.danger, fontWeight: 800 }}>{ilsText(FACTS.leak, locale)}</bdi>
           </Chip>
         </div>
         <div style={chip(1)}>
-          <Chip accent={C.primary} style={{ fontSize: 24 }}>
+          <Chip accent={K.primary} light={light} style={{ fontSize: 24 }}>
             <bdi dir="ltr" style={{ fontWeight: 800 }}>{FACTS.leakPct}</bdi>
             <span>{t.product.chipPct}</span>
           </Chip>
         </div>
         <div style={chip(2)}>
-          <Chip accent={C.gold} style={{ fontSize: 24 }}>
+          <Chip accent={K.gold} light={light} style={{ fontSize: 24 }}>
             <span>{t.product.chipCaught}</span>
-            <bdi dir={isRtl ? 'rtl' : 'ltr'} style={{ color: C.gold, fontWeight: 800 }}>{ilsText(FACTS.caught, locale)}</bdi>
+            <bdi dir={isRtl ? 'rtl' : 'ltr'} style={{ color: K.gold, fontWeight: 800 }}>{ilsText(FACTS.caught, locale)}</bdi>
           </Chip>
         </div>
       </div>
@@ -125,7 +128,7 @@ export const HeroLoop: React.FC<{ locale: Locale }> = ({ locale }) => {
             bottom: 18,
             [isRtl ? 'left' : 'right']: 24,
             fontSize: 15,
-            color: C.subtle,
+            color: light ? LIGHT.muted : C.subtle,
             letterSpacing: '0.04em',
           }}
         >

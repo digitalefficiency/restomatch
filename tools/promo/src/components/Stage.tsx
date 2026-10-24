@@ -1,6 +1,6 @@
 import React from 'react';
 import { Img, staticFile, useVideoConfig } from 'remotion';
-import { C } from '../theme';
+import { C, isLight } from '../theme';
 import { Rect, zones } from '../layout';
 
 /** Device zone: everything inside is clipped to the zone (feathered on the caption side). */
@@ -94,8 +94,11 @@ export const Spotlight: React.FC<{
           position: 'absolute',
           inset: 0,
           clipPath: `path(evenodd, '${hole}')`,
-          backdropFilter: `blur(${3 * a}px) brightness(${1 - 0.67 * a})`,
-          WebkitBackdropFilter: `blur(${3 * a}px) brightness(${1 - 0.67 * a})`,
+          // dark stage: dim to ~33%. Light stage: a pale fog (blur + desaturate + light wash), so the
+          // rest of the screen recedes without turning muddy grey and the lifted rect carries the contrast
+          backdropFilter: isLight() ? `blur(${4 * a}px) saturate(${1 - 0.7 * a})` : `blur(${3 * a}px) brightness(${1 - 0.67 * a})`,
+          WebkitBackdropFilter: isLight() ? `blur(${4 * a}px) saturate(${1 - 0.7 * a})` : `blur(${3 * a}px) brightness(${1 - 0.67 * a})`,
+          background: isLight() ? `rgba(226,233,229,${0.62 * a})` : undefined,
         }}
       />
       <div
@@ -103,7 +106,7 @@ export const Spotlight: React.FC<{
           position: 'absolute',
           inset: 0,
           pointerEvents: 'none',
-          background: `radial-gradient(ellipse ${Math.max(r.w, 200) * 0.9}px ${Math.max(r.h, 120) * 1.6}px at ${cx}px ${cy}px, transparent 40%, rgba(0,0,0,${0.55 * a}) 100%)`,
+          background: `radial-gradient(ellipse ${Math.max(r.w, 200) * 0.9}px ${Math.max(r.h, 120) * 1.6}px at ${cx}px ${cy}px, transparent 40%, ${isLight() ? `rgba(15,31,23,${0.12 * a})` : `rgba(0,0,0,${0.55 * a})`} 100%)`,
         }}
       />
       <div
@@ -177,7 +180,7 @@ export const Callout: React.FC<{ locale: 'he' | 'en'; a: number; accent?: string
           gap: 14,
           padding: '16px 26px',
           borderRadius: 16,
-          background: 'rgba(14,21,18,0.85)',
+          background: isLight() ? '#FFFFFF' : 'rgba(14,21,18,0.85)',
           border: `1.5px solid ${accent}88`,
           boxShadow: `0 0 40px ${accent}22`,
           fontSize: 29,
