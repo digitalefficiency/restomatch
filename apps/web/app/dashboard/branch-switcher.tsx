@@ -177,6 +177,7 @@ export function BranchSwitcher({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={menuId}
+        aria-label={t('switcher.label')}
         data-testid="branch-switcher"
         className={cn(
           'inline-flex max-w-[16rem] items-center gap-1.5 rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-xs font-semibold text-ink transition-colors hover:border-primary/40',
@@ -184,9 +185,6 @@ export function BranchSwitcher({
         )}
       >
         {isPending ? <Spinner className="h-3.5 w-3.5" /> : <Store className="h-3.5 w-3.5 text-primary" aria-hidden="true" />}
-        {/* Named by its content (label, then the visible branch name): an aria-label
-            would hide the visible name from speech users (WCAG 2.5.3). */}
-        <span className="sr-only">{t('switcher.label')}: </span>
         <span className="truncate">
           <span {...originalProps(active.restaurantName)}>{active.restaurantName}</span>
         </span>
