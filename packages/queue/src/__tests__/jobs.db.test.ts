@@ -5,6 +5,8 @@ import {
   claimJob,
   completeJob,
   enqueue,
+  enqueueMatchInvoice,
+  MATCH_INVOICE_QUEUE,
   failJob,
   failedJobs,
   insertJob,
@@ -137,6 +139,30 @@ describe('job_queue lifecycle', () => {
       expect(row).toMatchObject({ restaurant_id: r!.id, payload: { invoiceId: 'x' } });
       await sql`DELETE FROM restaurants WHERE id = ${r!.id}`;
     } finally {
+      if (prev === undefined) delete process.env.QUEUE_DATABASE_URL;
+      else process.env.QUEUE_DATABASE_URL = prev;
+    }
+  });
+});
+
+describe('producer payloads reach the worker unchanged', () => {
+  it('enqueueMatchInvoice carries rematch + poId (and the max_attempts of match-invoice)', async () => {
+    const prev = process.env.QUEUE_DATABASE_URL;
+    process.env.QUEUE_DATABASE_URL = URL;
+    const [r] = await sql<Array<{ id: string }>>`INSERT INTO restaurants (name) VALUES ('queue test') RETURNING id`;
+    try {
+      const payload = { restaurantId: r!.id, invoiceId: 'inv-1', rematch: true, poId: 'po-7' };
+      expect(await enqueueMatchInvoice(payload)).toBe(true);
+      const job = await claimJob<typeof payload>(sql, MATCH_INVOICE_QUEUE, 'w-test');
+      expect(job?.payload).toEqual(payload); // what the worker's processor gets as job.data
+      expect(job?.restaurantId).toBe(r!.id);
+      expect(job?.maxAttempts).toBe(3);
+      // The minimal producer shape still works (both fields optional).
+      expect(await enqueueMatchInvoice({ restaurantId: r!.id, invoiceId: 'inv-2' })).toBe(true);
+      const plain = await claimJob(sql, MATCH_INVOICE_QUEUE, 'w-test');
+      expect(plain?.payload).toEqual({ restaurantId: r!.id, invoiceId: 'inv-2' });
+    } finally {
+      await sql`DELETE FROM restaurants WHERE id = ${r!.id}`; // cascades its job rows
       if (prev === undefined) delete process.env.QUEUE_DATABASE_URL;
       else process.env.QUEUE_DATABASE_URL = prev;
     }
