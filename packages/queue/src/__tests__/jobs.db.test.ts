@@ -6,7 +6,9 @@ import {
   completeJob,
   enqueue,
   enqueueMatchInvoice,
+  enqueueOcrInvoice,
   MATCH_INVOICE_QUEUE,
+  OCR_INVOICE_QUEUE,
   failJob,
   failedJobs,
   insertJob,
@@ -161,6 +163,29 @@ describe('producer payloads reach the worker unchanged', () => {
       expect(await enqueueMatchInvoice({ restaurantId: r!.id, invoiceId: 'inv-2' })).toBe(true);
       const plain = await claimJob(sql, MATCH_INVOICE_QUEUE, 'w-test');
       expect(plain?.payload).toEqual({ restaurantId: r!.id, invoiceId: 'inv-2' });
+    } finally {
+      await sql`DELETE FROM restaurants WHERE id = ${r!.id}`; // cascades its job rows
+      if (prev === undefined) delete process.env.QUEUE_DATABASE_URL;
+      else process.env.QUEUE_DATABASE_URL = prev;
+    }
+  });
+
+  it('enqueueOcrInvoice carries grId (#94: the OCR job holds its match while that receipt is counted)', async () => {
+    const prev = process.env.QUEUE_DATABASE_URL;
+    process.env.QUEUE_DATABASE_URL = URL;
+    const [r] = await sql<Array<{ id: string }>>`INSERT INTO restaurants (name) VALUES ('queue test') RETURNING id`;
+    try {
+      const payload = { restaurantId: r!.id, invoiceId: 'inv-ocr', supplierId: null, imageUrl: 'https://x.test/a.jpg', grId: 'gr-3' };
+      expect(await enqueueOcrInvoice(payload)).toBe(true);
+      const job = await claimJob<typeof payload>(sql, OCR_INVOICE_QUEUE, 'w-test');
+      expect(job?.payload).toEqual(payload); // job.data.grId reaches ocrAutoMatchDecision
+      expect(job?.restaurantId).toBe(r!.id);
+      // A scan with no receipt (e-mail / WhatsApp ingest) has no grId and matches at once.
+      const { grId: _omit, ...noReceipt } = payload;
+      expect(await enqueueOcrInvoice(noReceipt)).toBe(true);
+      const plain = await claimJob<Record<string, unknown>>(sql, OCR_INVOICE_QUEUE, 'w-test');
+      expect(plain?.payload).toEqual(noReceipt);
+      expect(plain?.payload).not.toHaveProperty('grId');
     } finally {
       await sql`DELETE FROM restaurants WHERE id = ${r!.id}`; // cascades its job rows
       if (prev === undefined) delete process.env.QUEUE_DATABASE_URL;
