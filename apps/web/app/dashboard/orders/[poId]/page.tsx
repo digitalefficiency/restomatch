@@ -50,7 +50,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ po
         title={title}
         subtitle={data.po?.status === 'draft' ? t('detail.subtitle') : undefined}
       />
-      <OrderDetail data={data} canEdit={canEdit} />
+      <OrderDetail data={data} canEdit={canEdit} pricedDocument={docSettings.enabled} />
       {canEdit && docSettings.enabled && data.lines.length > 0 ? (
         <div className="mt-6">
           {/* Keyed on the order's content so an edited line re-fetches the preview. */}

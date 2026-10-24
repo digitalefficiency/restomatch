@@ -111,6 +111,9 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
     { enabled: !!supplierId, retry: false },
   );
   const deliveryDay = deliveryDate || delivery.data?.defaultDate || '';
+  // Flag `orderPricesOut`: placeOrder sends the priced document (previewed on the
+  // draft's page), not orders.supplierMessagePreview's text — show it only when off.
+  const docSettings = trpc.orders.documentSettings.useQuery(undefined, { retry: false });
 
   // Default channel follows what the supplier can actually receive.
   const defaultChannel: Channel = supplier?.contactEmail
@@ -587,7 +590,7 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
 
           <div className="mt-5 space-y-3 border-t border-line pt-4">
             {/* What the supplier will receive — only when something is actually sent. */}
-            {effectiveChannel !== 'none' && supplierId && valid && (
+            {effectiveChannel !== 'none' && supplierId && valid && docSettings.data?.enabled === false && (
               <OrderDocumentPreview
                 input={{
                   supplierId,
