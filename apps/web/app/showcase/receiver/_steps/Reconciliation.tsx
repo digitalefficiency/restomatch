@@ -23,9 +23,11 @@ interface Props {
   onQuickConfirm: () => void;
   onContinueAdjust: () => void;
   onRetake: () => void;
+  /** Optional per-line sub-line (flag `dockPriceContext`: "your usual price"). */
+  lineExtra?: (line: ReconciliationLine) => React.ReactNode;
 }
 
-export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRetake }: Props) {
+export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRetake, lineExtra }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const t = useT(receiving);
   const locale = useLocale();
@@ -98,6 +100,7 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
           <bdi dir="ltr" className="font-mono tabular-nums">+{money(line.deltaIls)}</bdi>
         </div>
       ) : null}
+      {lineExtra?.(line)}
       {line.sku ? <div className="mt-1 font-mono text-xs text-subtle" dir="ltr">{line.sku}</div> : null}
     </li>
   );
@@ -109,6 +112,7 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
       </td>
       <td className="p-3 font-medium text-ink">
         <ItemName he={line.productName} en={line.productNameEn} strike={line.status === 'missing_from_invoice'} />
+        {lineExtra?.(line)}
       </td>
       <td className="p-3 text-muted">
         <LineQty qty={line.poQty} unit={line.poUnit} price={line.poUnitPrice} money={money} />

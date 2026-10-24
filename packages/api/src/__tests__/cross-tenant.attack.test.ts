@@ -18,6 +18,7 @@ import {
   priceAlertThresholds,
   priceAlerts,
   priceBaselines,
+  priceHistory,
   products,
   purchaseOrders,
   restaurants,
@@ -253,6 +254,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   // Wave 1 (S11): supplier confirmation portal (flag `supplierConfirm`).
   'supplierConfirm.createLink': 'attack',
   'supplierConfirm.responses': 'attack',
+  // S11: dock price context (flag `dockPriceContext`).
+  'receiving.priceContext': 'attack',
 };
 
 function listProcedurePaths(): string[] {
@@ -421,6 +424,27 @@ describe('list/aggregate isolation (A must not see B)', () => {
     const poIds = expectations.map((e) => e.poId);
     expect(poIds).toContain(A.poId);
     expect(poIds).not.toContain(B.poId);
+  });
+
+  it("receiving.priceContext: A asking for B's invoice gets no lines and never reads B's price history", async () => {
+    await db
+      .update(restaurants)
+      .set({ settings: { features: { dockPriceContext: true } } as RestaurantSettings })
+      .where(inArray(restaurants.id, [A.restaurantId, B.restaurantId]));
+    const observedAt = new Date(Date.now() - 5 * 86_400_000);
+    await db.insert(priceHistory).values(
+      [B, B, B].map((t) => ({ restaurantId: t.restaurantId, productId: t.productId, supplierId: t.supplierId, observedAt, unitPrice: '1.0000' })),
+    );
+    try {
+      const foreign = await callerFor(A).receiving.priceContext({ invoiceId: B.invoiceId });
+      expect(foreign).toEqual({ enabled: true, lines: [] });
+      const own = await callerFor(A).receiving.priceContext({ invoiceId: A.invoiceId });
+      expect(own.lines).toEqual([]); // B's history must not become A's "usual price"
+      const bOwn = await callerFor(B).receiving.priceContext({ invoiceId: B.invoiceId });
+      expect(bOwn.lines.map((l) => l.invoiceLineId)).toEqual([B.invoiceLineId]);
+    } finally {
+      await db.delete(priceHistory).where(inArray(priceHistory.restaurantId, [A.restaurantId, B.restaurantId]));
+    }
   });
 
   it('receiving.pendingInvoices excludes B invoices', async () => {

@@ -12,6 +12,7 @@ import { chain } from './chain';
 import { components } from './components';
 import { contracts } from './contracts';
 import { supplierConfirm } from './supplierConfirm';
+import { dockPrice } from './dockPrice';
 import { emails } from './emails';
 import { accounting } from './accounting';
 import { invoices } from './invoices';
@@ -41,6 +42,7 @@ export const ALL_NAMESPACES = [
   components,
   contracts,
   supplierConfirm,
+  dockPrice,
   emails,
   accounting,
   invoices,
@@ -61,4 +63,4 @@ export const ALL_NAMESPACES = [
   views,
 ] as const;
 
-export { common, admin, approvals, auth, catalog, chain, components, contracts, emails, accounting, invoices, landing, leaks, marketing, nav, onboarding, orders, overview, products, receiving, scans, settings, showcase, suppliers, supplierConfirm, team, views };
+export { common, admin, approvals, auth, catalog, chain, components, contracts, emails, accounting, invoices, landing, leaks, marketing, nav, onboarding, orders, overview, products, receiving, scans, settings, showcase, suppliers, supplierConfirm, dockPrice, team, views };

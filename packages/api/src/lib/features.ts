@@ -26,6 +26,7 @@ export const FEATURE_KEYS = [
   'recipes',
   'integrations',
   'supplierConfirm',
+  'dockPriceContext',
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
