@@ -12,7 +12,7 @@
 - לא נוגע באף מסעדה אחרת.
 - הסקריפט סופר את השורות של כל השאר לפני ואחרי, ונכשל אם משהו השתנה.
 
-> ⚠️ **לפני הכל: גיבוי.** ב-Supabase: Database → Backups. ודא שיש גיבוי מהיום, או הפעל Point-in-Time Recovery. בלי גיבוי — לא מריצים.
+> ⚠️ **לפני הכל: גיבוי.** בתוכנית החינמית של Supabase אין גיבויים אוטומטיים. לכן מגבים בעצמך מהמק, בסעיף 3א. בלי קובץ גיבוי תקין לא מריצים.
 
 ---
 
@@ -55,6 +55,58 @@ export DEMO_PASSWORD="$(openssl rand -base64 18)"; echo "$DEMO_PASSWORD"   # ←
 **למה שלושה מזהים?** ה-host של ה-pooler משותף לכל הפרויקטים באזור. הסקריפט רץ רק אם גם ה-host וגם ה-project ref תואמים. כך אי אפשר לזרוע בטעות לפרויקט אחר.
 
 **`/admin` בדמו:** כברירת מחדל, משתמש הדמו `owner@` **לא** מקבל הרשאת מנהל פלטפורמה בפרודקשן. `/admin` מציג את כל המסעדות, כולל לקוחות אמיתיים. אם חייבים להציג את `/admin`, אפשר להוסיף `export DEMO_PLATFORM_ADMIN=1`. אחרי ההצגה מריצים שוב בלעדיו.
+
+## 3א. גיבוי (חובה, כ-1 דקה)
+
+**חד-פעמי:** כלי Postgres למק, בגרסה 17 ומעלה (חייבת להיות חדשה לפחות כמו השרת):
+
+```bash
+brew install libpq && brew link --force libpq
+pg_dump --version      # 17.x ומעלה
+```
+
+**גיבוי:** באותו טרמינל, אחרי סעיף 3 (`DATABASE_URL` מוגדר):
+
+```bash
+mkdir -p ~/restomatch-backups
+export BACKUP="$HOME/restomatch-backups/prod-$(date +%Y%m%d-%H%M).dump"
+pg_dump "$DATABASE_URL" --format=custom --no-owner \
+  --schema=public --schema=app --schema=drizzle --schema=supabase_migrations \
+  --file "$BACKUP"
+echo "$BACKUP"
+```
+
+**לבדוק שהקובץ לא ריק:** שלוש בדיקות, כולן חייבות לעבור.
+
+```bash
+ls -lh "$BACKUP"                                   # מאות KB לפחות. 0 או כמה KB = משהו נכשל
+pg_restore --list "$BACKUP" | grep -c "TABLE DATA"  # מעל 40
+pg_restore --list "$BACKUP" | grep "TABLE DATA public restaurants"   # שורה אחת
+```
+
+- אם `pg_dump` נתקע או נכשל (למשל `timeout` בזמן תקלה אצל Supabase): **לא ממשיכים**. מחכים שהתקלה תיגמר ומנסים שוב.
+- הגיבוי כולל את כל הנתונים, הטבלאות, ההרשאות וההיסטוריה של המיגרציות.
+- הוא **לא** כולל קבצי סריקות (Storage). איפוס הדמו לא נוגע בהם.
+
+**שחזור (רק אם משהו השתבש באמת).** מחזיר את כל הנתונים לרגע הגיבוי:
+
+```bash
+# 1) רשימת שחזור בלי "DROP SCHEMA" (את הסכמה עצמה לא מוחקים)
+pg_restore --list "$BACKUP" | grep -vE " SCHEMA - | COMMENT - SCHEMA " > ~/restomatch-backups/restore.list
+# 2) שחזור בטרנזקציה אחת: אם משהו נכשל, לא משתנה כלום
+pg_restore --clean --if-exists --no-owner --single-transaction --exit-on-error \
+  -L ~/restomatch-backups/restore.list -d "$DATABASE_URL" "$BACKUP"
+# 3) החזרת הרשאות ה-RLS לתפקיד האפליקציה (חובה אחרי שחזור)
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f "$(ls supabase/migrations/*_restomatch_rls_*.sql | sort | tail -1)"
+# 4) בדיקה
+pnpm db:doctor        # 0 FAIL
+```
+
+נבדק מקומית על עותק:
+- גיבוי של 43 טבלאות.
+- מחיקה מכוונת של מסעדה וחשבוניות.
+- שחזור: חזרו 4 מסעדות, 339 חשבוניות, כל המשתמשים והמיגרציות.
+- אחרי שלב 3: `db:doctor` מחזיר 0 FAIL.
 
 ## 4. הרצת בדיקה (dry-run): לא משנה כלום
 
@@ -104,7 +156,7 @@ pnpm db:doctor        # צריך: 0 FAIL
 
 הסקריפט לא נוגע במסעדות אחרות, ולכן חזרה אחורה נוגעת רק לדמו:
 - **הכי פשוט:** להריץ שוב את סעיף 5.
-- **אם משהו אחר נפגע** (הסקריפט היה נכשל עם `NON-demo row counts changed`): לשחזר מהגיבוי שעשית בהתחלה (ראו האזהרה בראש המסמך) דרך Database → Backups → Restore. שחזור מחזיר את כל הפרויקט לנקודת הגיבוי.
+- **אם משהו אחר נפגע** (הסקריפט היה נכשל עם `NON-demo row counts changed`): לשחזר מקובץ הגיבוי של סעיף 3א, לפי פקודות השחזור שם. השחזור מחזיר את כל הנתונים לרגע הגיבוי.
 
 ## מה לעולם לא עושים
 
