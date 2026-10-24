@@ -21,6 +21,7 @@ import {
   costLight,
   costRecipes,
   diffCosts,
+  parseScaled,
   RecipeCycleError,
   simulatePriceChange,
   unitsCompatible,
@@ -338,6 +339,23 @@ async function computeChanges(db: Database, rid: string, rc: RestaurantCostConte
         const priceNow = it?.productId ? all.prices.get(it.productId)?.unitPrice ?? null : null;
         const supplierId = it?.productId ? all.prices.get(it.productId)?.supplierId ?? null : null;
         const supplier = supplierId ? supplierInfo.get(supplierId) ?? null : null;
+        // The alert's "why" (dishPriceAlert): the biggest cost rise on a product
+        // line whose paid price went up at the same supplier as at the start of
+        // the month — never a supplier switch, a recipe edit or a price drop.
+        let riser: { itemId: string; productId: string; deltaAgorot: number } | null = null;
+        for (const l of d.after.lines) {
+          const pid = itemsById.get(l.itemId)?.productId;
+          if (!pid) continue;
+          const b0 = before.get(pid);
+          const n0 = all.prices.get(pid);
+          if (!b0 || !n0 || b0.supplierId !== n0.supplierId) continue;
+          if (parseScaled(n0.unitPrice, 4) <= parseScaled(b0.unitPrice, 4)) continue;
+          const delta = l.costAgorot - (d.before.lines.find((x) => x.itemId === l.itemId)?.costAgorot ?? 0);
+          if (delta > 0 && (!riser || delta > riser.deltaAgorot)) riser = { itemId: l.itemId, productId: pid, deltaAgorot: delta };
+        }
+        const riserProd = riser ? productInfo.get(riser.productId) : undefined;
+        const riserSupplierId = riser ? all.prices.get(riser.productId)!.supplierId : null;
+        const riserSupplier = riserSupplierId ? supplierInfo.get(riserSupplierId) ?? null : null;
         return {
           recipeId: r.id,
           name: r.name,
@@ -362,6 +380,17 @@ async function computeChanges(db: Database, rid: string, rc: RestaurantCostConte
                 priceNow,
                 /** Who charged today's price (the latest paid price's supplier). */
                 supplier: supplier ? { id: supplierId!, name: supplier.name, nameEn: supplier.nameEn } : null,
+              }
+            : null,
+          riser: riser
+            ? {
+                name: riserProd?.name ?? '',
+                nameEn: riserProd?.nameEn ?? null,
+                unit: riserProd?.unit ?? null,
+                deltaAgorot: riser.deltaAgorot,
+                priceBefore: before.get(riser.productId)!.unitPrice,
+                priceNow: all.prices.get(riser.productId)!.unitPrice,
+                supplier: riserSupplier ? { id: riserSupplierId!, name: riserSupplier.name, nameEn: riserSupplier.nameEn } : null,
               }
             : null,
         };

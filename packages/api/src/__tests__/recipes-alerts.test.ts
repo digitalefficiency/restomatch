@@ -11,7 +11,7 @@ import { resetDb, seedTenant, type Tenant } from './fixtures';
 const row = (over: Partial<ChangeRowLike> = {}): ChangeRowLike => ({
   recipeId: 'r', name: 'סטייק', nameEn: 'Steak', isSubRecipe: false, active: true,
   beforeFoodCostBp: 2900, afterFoodCostBp: 3100, costDeltaAgorot: 340,
-  driver: { kind: 'product', name: 'אנטריקוט', nameEn: 'Entrecôte', unit: 'ק״ג', deltaAgorot: 340, priceBefore: '139.0000', priceNow: '149.0000', supplier: { id: 's', name: 'קצביית הכרם', nameEn: 'HaKerem' } },
+  riser: { name: 'אנטריקוט', nameEn: 'Entrecôte', unit: 'ק״ג', deltaAgorot: 340, priceBefore: '139.0000', priceNow: '149.0000', supplier: { id: 's', name: 'קצביית הכרם', nameEn: 'HaKerem' } },
   ...over,
 });
 
@@ -35,9 +35,9 @@ describe('dishPriceAlerts (pure rule)', () => {
     expect(dishPriceAlerts([row({ isSubRecipe: true })], 3000)).toEqual([]);
     expect(dishPriceAlerts([row({ active: false })], 3000)).toEqual([]);
     expect(dishPriceAlerts([row({ beforeFoodCostBp: null })], 3000)).toEqual([]);
-    expect(dishPriceAlerts([row({ driver: { ...row().driver!, kind: 'subRecipe' } })], 3000)).toEqual([]);
-    expect(dishPriceAlerts([row({ driver: { ...row().driver!, priceNow: '139.0000' } })], 3000)).toEqual([]); // recipe edit, not a price rise
-    expect(dishPriceAlerts([row({ driver: null })], 3000)).toEqual([]);
+    expect(dishPriceAlerts([row({ riser: { ...row().riser!, priceNow: '139.0000' } })], 3000)).toEqual([]); // recipe edit, not a price rise
+    expect(dishPriceAlerts([row({ riser: { ...row().riser!, deltaAgorot: 0 } })], 3000)).toEqual([]);
+    expect(dishPriceAlerts([row({ riser: null })], 3000)).toEqual([]); // no same-supplier rise (switch, sub-recipe, edit)
   });
 
   it('orders by ₪ per plate, biggest first', () => {
@@ -121,5 +121,52 @@ describe('recipes.priceAlerts', () => {
   it('recipes.changes now names the supplier of the driving price (additive field)', async () => {
     const ch = await caller(A).recipes.changes();
     expect(ch.rows[0]!.driver).toMatchObject({ kind: 'product', supplier: { id: A.supplierId } });
+  });
+});
+
+describe('recipes.priceAlerts — the "why" must be a same-supplier price rise (refuter cases)', () => {
+  const monthStart = () => startOfMonthInTz(new Date(), 'Asia/Jerusalem');
+  const product = async (t: Tenant, name: string) =>
+    (await db.insert(products).values({ restaurantId: t.restaurantId, canonicalName: name, defaultUnit: 'ק״ג' }).returning())[0]!;
+
+  it('a switch to a pricier supplier is NOT "a supplier raised a price" — no alert', async () => {
+    const C = await seedTenant(db, 'CL');
+    await setFlags(C.restaurantId, { recipes: true, dishPriceAlert: true });
+    const [other] = await db.insert(suppliers).values({ restaurantId: C.restaurantId, name: 'ספק אחר', businessId: '519999991' }).returning();
+    const p = await product(C, 'אנטריקוט');
+    const m = monthStart().getTime();
+    await db.insert(priceHistory).values([
+      { restaurantId: C.restaurantId, productId: p.id, supplierId: C.supplierId, observedAt: new Date(m - 5 * DAY), unitPrice: '139.0000' },
+      { restaurantId: C.restaurantId, productId: p.id, supplierId: C.supplierId, observedAt: new Date(m + 60_000), unitPrice: '139.0000' },
+      // First delivery ever from another supplier, at a higher price: nobody RAISED a price.
+      { restaurantId: C.restaurantId, productId: p.id, supplierId: other!.id, observedAt: new Date(m + 120_000), unitPrice: '149.0000' },
+    ]);
+    await caller(C).recipes.save({ name: 'סטייק', menuPriceAgorot: 19900, items: [{ productId: p.id, quantity: '300', unit: 'גרם', wastePct: 12 }] });
+    const ch = await caller(C).recipes.changes();
+    expect(ch.rows[0]!.afterFoodCostBp! > 3000 && ch.rows[0]!.beforeFoodCostBp! <= 3000).toBe(true); // it did cross
+    expect((await caller(C).recipes.priceAlerts()).alerts).toEqual([]);
+  });
+
+  it('alerts on the biggest RISE even when the biggest-moving line is a price drop', async () => {
+    const D = await seedTenant(db, 'DL');
+    await setFlags(D.restaurantId, { recipes: true, dishPriceAlert: true });
+    const m = monthStart().getTime();
+    const [x, y, z] = [await product(D, 'x'), await product(D, 'y'), await product(D, 'z')];
+    const ph = (pid: string, at: number, price: string) => ({ restaurantId: D.restaurantId, productId: pid, supplierId: D.supplierId, observedAt: new Date(at), unitPrice: price });
+    await db.insert(priceHistory).values([
+      ph(x.id, m - 5 * DAY, '10.0000'), ph(x.id, m + 60_000, '13.0000'),
+      ph(y.id, m - 5 * DAY, '10.0000'), ph(y.id, m + 60_000, '14.0000'),
+      ph(z.id, m - 5 * DAY, '10.0000'), ph(z.id, m + 60_000, '5.0000'),
+    ]);
+    // 1 kg each: before 30.00 → after 32.00. Menu ₪100 net (VAT excluded): 30.00% → 32.00%.
+    await caller(D).recipes.save({
+      name: 'מנה', menuPriceAgorot: 10000, menuPriceIncludesVat: false,
+      items: [x, y, z].map((p) => ({ productId: p.id, quantity: '1', unit: 'ק״ג', wastePct: 0 })),
+    });
+    const ch = await caller(D).recipes.changes();
+    expect(ch.rows[0]!.driver).toMatchObject({ name: 'z' }); // the "why" on the changes tab is still the biggest move
+    const res = await caller(D).recipes.priceAlerts();
+    expect(res.alerts).toHaveLength(1);
+    expect(res.alerts[0]).toMatchObject({ beforeFoodCostBp: 3000, afterFoodCostBp: 3200, costDeltaAgorot: 200, product: { name: 'y', priceBefore: '10.0000', priceNow: '14.0000' }, supplier: { id: D.supplierId } });
   });
 });

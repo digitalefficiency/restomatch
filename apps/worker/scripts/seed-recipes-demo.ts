@@ -77,7 +77,7 @@ const DEMO: DemoRecipe[] = [
     name: 'סטייק אנטריקוט',
     nameEn: 'Entrecôte steak',
     category: 'עיקריות',
-    // ₪199: 29.5% (under the 30% target) at the start of the month → 31.4% at today's
+    // ₪199: 29.3% (under the 30% target) at the start of the month → 31.4% at today's
     // ₪149/kg entrecôte — it crosses the target, so the dishPriceAlert demo fires
     // (HaKerem Butchery raised the price).
     menu: 199,

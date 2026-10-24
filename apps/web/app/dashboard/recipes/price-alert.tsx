@@ -4,6 +4,7 @@ import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
 import { TrendingUp } from 'lucide-react';
 import { cn } from '@/lib/components';
+import { formatPercent } from '@/lib/i18n/format';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { recipes as recipesNs } from '@/lib/i18n/messages/recipes';
 import { originalProps } from '@/lib/i18n/original';
@@ -42,6 +43,9 @@ export function PriceAlertLine({ alert: a, targetBp, compact = false, causeOnly 
   const t = useT(recipesNs);
   const locale = useLocale();
   const changeText = `${pct(a.product.priceChangeBp, locale)}`;
+  // A just-over crossing (30.00% → 30.04%) must not read "30% → 30%": add a decimal.
+  const onePlace = new Set([pct(a.beforeFoodCostBp, locale), pct(a.afterFoodCostBp, locale), pct(targetBp, locale)]).size === 3;
+  const fc = (bp: number) => (onePlace ? pct(bp, locale) : formatPercent(bp / 10_000, locale, 2));
   return (
     <div
       role={compact ? undefined : 'alert'}
@@ -59,7 +63,7 @@ export function PriceAlertLine({ alert: a, targetBp, compact = false, causeOnly 
         ) : (
           <>
             <span>{t('alert.title')}</span>
-            <Arrow from={pct(a.beforeFoodCostBp, locale)} to={pct(a.afterFoodCostBp, locale)} />
+            <Arrow from={fc(a.beforeFoodCostBp)} to={fc(a.afterFoodCostBp)} />
             <span className="font-normal text-muted">({t('alert.target', { target: pct(targetBp, locale) })})</span>
             <span>
               · <bdi dir="ltr" className="tabular-nums">+{ils(a.costDeltaAgorot, locale)}</bdi> {t('alert.perPlate')}

@@ -245,36 +245,44 @@ function DishesTab({
               </tr>
             </thead>
             <tbody>
-              {dishes.map((r) => (
-                <tr key={r.id} className="border-b border-line/60 last:border-0 hover:bg-surface-2/50">
-                  <td className="px-4 py-3">
-                    <Link href={`/dashboard/recipes/${r.id}`} className="font-medium text-ink hover:text-primary">
-                      <Name name={r.name} nameEn={r.nameEn} />
-                    </Link>
-                    <div className="mt-0.5 flex flex-wrap gap-1.5 text-xs text-subtle">
-                      {r.category ? <span {...originalProps(r.category)}>{r.category}</span> : null}
-                      {!r.active ? <Badge>{t('list.inactive')}</Badge> : null}
-                      {!r.complete ? (
-                        <span className="inline-flex items-center gap-1 text-warn">
-                          <AlertTriangle className="h-3 w-3" aria-hidden="true" />
-                          {t('list.incomplete')}
-                        </span>
-                      ) : null}
-                    </div>
-                    {alerts && alertById.has(r.id) ? (
-                      <PriceAlertLine alert={alertById.get(r.id)!} targetBp={alerts.targetBp} compact />
-                    ) : null}
-                  </td>
-                  <td className="px-4 py-3 text-end tabular-nums">{ils(r.portionCostAgorot, locale)}</td>
-                  <td className="px-4 py-3 text-end tabular-nums text-muted">{ils(r.menuPriceAgorot, locale)}</td>
-                  <td className="px-4 py-3 text-end">
-                    <LightBadge light={r.light} bp={r.foodCostBp} />
-                  </td>
-                  <td className={cn('px-4 py-3 text-end font-semibold tabular-nums', (r.grossMarginAgorot ?? 0) < 0 && 'text-danger')}>
-                    {ils(r.grossMarginAgorot, locale)}
-                  </td>
-                </tr>
-              ))}
+              {dishes.flatMap((r) => {
+                const alert = alerts ? alertById.get(r.id) : undefined;
+                return [
+                  <tr key={r.id} className={cn('hover:bg-surface-2/50', alert ? '' : 'border-b border-line/60 last:border-0')}>
+                    <td className="px-4 py-3">
+                      <Link href={`/dashboard/recipes/${r.id}`} className="font-medium text-ink hover:text-primary">
+                        <Name name={r.name} nameEn={r.nameEn} />
+                      </Link>
+                      <div className="mt-0.5 flex flex-wrap gap-1.5 text-xs text-subtle">
+                        {r.category ? <span {...originalProps(r.category)}>{r.category}</span> : null}
+                        {!r.active ? <Badge>{t('list.inactive')}</Badge> : null}
+                        {!r.complete ? (
+                          <span className="inline-flex items-center gap-1 text-warn">
+                            <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                            {t('list.incomplete')}
+                          </span>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-end tabular-nums">{ils(r.portionCostAgorot, locale)}</td>
+                    <td className="px-4 py-3 text-end tabular-nums text-muted">{ils(r.menuPriceAgorot, locale)}</td>
+                    <td className="px-4 py-3 text-end">
+                      <LightBadge light={r.light} bp={r.foodCostBp} />
+                    </td>
+                    <td className={cn('px-4 py-3 text-end font-semibold tabular-nums', (r.grossMarginAgorot ?? 0) < 0 && 'text-danger')}>
+                      {ils(r.grossMarginAgorot, locale)}
+                    </td>
+                  </tr>,
+                  alert && alerts ? (
+                    // Full-width row: the name column is too narrow on a phone.
+                    <tr key={`${r.id}-alert`} className="border-b border-line/60 last:border-0">
+                      <td colSpan={5} className="px-4 pb-3 pt-0">
+                        <PriceAlertLine alert={alert} targetBp={alerts.targetBp} compact className="sticky start-4 mt-0 max-w-[calc(100vw-4rem)]" />
+                      </td>
+                    </tr>
+                  ) : null,
+                ];
+              })}
             </tbody>
           </table>
         </Card>

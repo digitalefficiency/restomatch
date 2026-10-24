@@ -8,8 +8,10 @@ import { parseScaled, roundHalfUp } from './cost';
  *   - it is an active dish on the menu (not a sub-recipe) with a menu price;
  *   - its food cost was at or under the target at the start of the month and
  *     is above it now (it CROSSED the target this month);
- *   - its cost per plate went up, and the line that moved it most is a product
- *     whose PAID unit price rose (not a recipe edit, not a sub-recipe).
+ *   - its cost per plate went up, and some product line's PAID unit price rose
+ *     at the SAME supplier it was bought from at the start of the month (the
+ *     `riser`: the biggest such rise; a switch to a pricier supplier, a recipe
+ *     edit or a sub-recipe is not "a supplier raised a price").
  * Ordered by the ₪ per plate, biggest first.
  */
 
@@ -22,8 +24,8 @@ export interface ChangeRowLike {
   beforeFoodCostBp: number | null;
   afterFoodCostBp: number | null;
   costDeltaAgorot: number;
-  driver: {
-    kind: 'product' | 'subRecipe';
+  /** Biggest same-supplier paid-price rise on a product line (see computeChanges). */
+  riser: {
     name: string;
     nameEn: string | null;
     unit: string | null;
@@ -63,8 +65,8 @@ export function dishPriceAlerts(rows: readonly ChangeRowLike[], targetBp: number
     if (r.beforeFoodCostBp == null || r.afterFoodCostBp == null) continue;
     if (!(r.beforeFoodCostBp <= targetBp && r.afterFoodCostBp > targetBp)) continue;
     if (r.costDeltaAgorot <= 0) continue;
-    const d = r.driver;
-    if (!d || d.kind !== 'product' || d.deltaAgorot <= 0 || !d.priceBefore || !d.priceNow) continue;
+    const d = r.riser;
+    if (!d || d.deltaAgorot <= 0 || !d.priceBefore || !d.priceNow) continue;
     const before = parseScaled(d.priceBefore, 4); // ₪ × 10^4
     const now = parseScaled(d.priceNow, 4);
     if (now <= before || before <= 0n) continue;
