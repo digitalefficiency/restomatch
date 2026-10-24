@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
 import { sendEmail } from '@/lib/email';
-import { getRedis } from '@/lib/redis';
-import { evaluateHeartbeat, isWorkerDown, WORKER_HEARTBEAT_KEY } from '@/lib/workerHeartbeat';
+import { clearAlerted, getAlerted, readHeartbeatRaw, setAlerted } from '@/lib/workerHeartbeatStore';
+import { evaluateHeartbeat, isWorkerDown } from '@/lib/workerHeartbeat';
 
 /**
  * Worker watchdog (plan v2, Wave 0). Vercel Cron calls this every 5 minutes
- * (apps/web/vercel.json). It reads the heartbeat the worker writes to Redis and
+ * (apps/web/vercel.json). It reads the heartbeat the worker writes to Postgres
+ * (worker_heartbeats, 0061) and
  * emails the owner when the worker is down — the pilot worker runs on a laptop,
  * so "it silently stopped" must be impossible.
  *
@@ -13,14 +14,13 @@ import { evaluateHeartbeat, isWorkerDown, WORKER_HEARTBEAT_KEY } from '@/lib/wor
  * in the project env. Without the header (or with a wrong one) → 401. In
  * development with no CRON_SECRET configured the check is skipped.
  *
- * Alert dedupe: one email per outage — an `alerted` marker with a 6h TTL is set
+ * Alert dedupe: one email per outage — an `alerted` marker (ops_kv) with a 6h expiry is set
  * after the first alert and cleared when the worker is seen healthy again (a
  * recovery email is sent then).
  */
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const ALERTED_KEY = 'restomatch:worker:alerted';
 const ALERT_TTL_SEC = 6 * 60 * 60;
 
 function authorized(req: Request): boolean {
@@ -41,15 +41,10 @@ export async function GET(req: Request) {
   if (!authorized(req)) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
-  const redis = getRedis();
-  if (!redis) {
-    return NextResponse.json({ status: 'unknown', reason: 'REDIS_URL not configured' }, { status: 200 });
-  }
-
-  const raw = await redis.get(WORKER_HEARTBEAT_KEY);
+  const raw = await readHeartbeatRaw();
   const status = evaluateHeartbeat(raw);
   const down = isWorkerDown(status);
-  const alreadyAlerted = (await redis.get(ALERTED_KEY)) === '1';
+  const alreadyAlerted = await getAlerted();
   const to = alertRecipients();
   let emailed: 'down' | 'recovered' | null = null;
 
@@ -69,9 +64,9 @@ export async function GET(req: Request) {
       });
       emailed = 'down';
     }
-    await redis.set(ALERTED_KEY, '1', 'EX', ALERT_TTL_SEC);
+    await setAlerted(ALERT_TTL_SEC);
   } else if (!down && alreadyAlerted) {
-    await redis.del(ALERTED_KEY);
+    await clearAlerted();
     if (to.length > 0) {
       await sendEmail({
         to: to.join(','),

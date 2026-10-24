@@ -1,40 +1,21 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDb, eq, invoices, restaurants, testDbUrl } from '@restomatch/db';
-import type { OcrInvoiceJob } from '@restomatch/types';
-import IORedis from 'ioredis';
-import { redisRetryMarker, runOcrSweep, type OcrSweepQueue, type RetryMarker } from '../jobs/ocrSweep';
+import { insertJob, queueSql } from '@restomatch/queue';
+import { runOcrSweep } from '../jobs/ocrSweep';
 
 const db = createDb(testDbUrl());
+const sql = queueSql(testDbUrl());
 const NOW = new Date('2026-10-18T09:00:00.000Z');
 const minutesAgo = (m: number) => new Date(NOW.getTime() - m * 60_000);
 let restaurantId = '';
 const ids: Record<string, string> = {};
-
-function fakeQueue(pendingInvoiceIds: string[] = [], pendingCount = pendingInvoiceIds.length, finishedInvoiceIds: string[] = []) {
-  const added: Array<{ data: OcrInvoiceJob; jobId?: string }> = [];
-  const q: OcrSweepQueue & { added: typeof added } = {
-    added,
-    getJobCounts: async () => ({ waiting: pendingCount }),
-    getJobs: async (types) =>
-      (types.includes('failed') ? finishedInvoiceIds : pendingInvoiceIds).map((invoiceId) => ({ data: { invoiceId } })),
-    add: async (_name, data, opts) => {
-      added.push({ data, jobId: opts?.jobId });
-      return {};
-    },
-  };
-  return q;
-}
-
-/** In-memory stand-in for the Redis SET NX marker. */
-function memoryMarker(): RetryMarker {
-  const seen = new Set<string>();
-  return {
-    claim: async (id) => (seen.has(id) ? false : (seen.add(id), true)),
-    release: async (id) => void seen.delete(id),
-  };
-}
-
 const mine = (list: string[]) => list.filter((id) => Object.values(ids).includes(id));
+
+async function jobsFor(invoiceId: string) {
+  return sql<Array<{ dedupe_key: string | null; payload: Record<string, unknown>; restaurant_id: string }>>`
+    SELECT dedupe_key, payload, restaurant_id FROM job_queue
+     WHERE queue = 'ocr-invoice' AND payload->>'invoiceId' = ${invoiceId}`;
+}
 
 beforeAll(async () => {
   const [r] = await db.insert(restaurants).values({ name: 'OCR sweep QA' }).returning({ id: restaurants.id });
@@ -46,8 +27,9 @@ beforeAll(async () => {
     ['noImage', 'ocr_pending', 15, null],
     ['done', 'matched', 15, 'https://x.example/scan-done.jpg'],
     ['queued', 'ocr_pending', 12, 'https://x.example/scan-queued.jpg'],
-    ['failedBefore', 'ocr_pending', 14, 'https://x.example/scan-failed.jpg'], // its job failed (e.g. quota)
-    ['smoke', 'ocr_pending', 16, 'smoke://all'], // stub/mock-provider row
+    ['failedBefore', 'ocr_pending', 14, 'https://x.example/scan-failed.jpg'],
+    ['smoke', 'ocr_pending', 16, 'smoke://all'],
+    ['race', 'ocr_pending', 13, 'https://x.example/scan-race.jpg'],
   ] as const;
   for (const [key, status, age, url] of rows) {
     const [inv] = await db
@@ -56,74 +38,43 @@ beforeAll(async () => {
       .returning({ id: invoices.id });
     ids[key] = inv!.id;
   }
+  // A backlog job (still queued) and a job that already ran and failed (e.g. quota).
+  await insertJob(sql, 'ocr-invoice', { restaurantId, invoiceId: ids.queued });
+  await insertJob(sql, 'ocr-invoice', { restaurantId, invoiceId: ids.failedBefore });
+  await sql`UPDATE job_queue SET status = 'failed', finished_at = now() WHERE payload->>'invoiceId' = ${ids.failedBefore!}`;
 });
 afterAll(async () => {
+  await sql`DELETE FROM job_queue WHERE restaurant_id = ${restaurantId}`;
   await db.delete(invoices).where(eq(invoices.restaurantId, restaurantId));
   await db.delete(restaurants).where(eq(restaurants.id, restaurantId));
 });
 
-describe('ocr-pending retry sweep', () => {
-  it('re-enqueues only stale, unqueued pending invoices whose scan URL is still valid', async () => {
-    const q = fakeQueue([ids.queued!], 1, [ids.failedBefore!]);
-    const res = await runOcrSweep(db, q, memoryMarker(), NOW);
-    expect(mine(res.requeued)).toEqual([ids.stale]);
-    const reason = (id: string) => res.skipped.find((s) => s.invoiceId === id)?.reason;
-    expect(reason(ids.queued!)).toBe('queued');
-    expect(reason(ids.failedBefore!)).toBe('already-ran');
-    expect(reason(ids.smoke!)).toBe('not-http');
-    const job = q.added.find((a) => a.data.invoiceId === ids.stale)!;
-    expect(job.data).toEqual({
-      restaurantId,
-      invoiceId: ids.stale,
-      supplierId: null,
-      imageUrl: 'https://x.example/scan-stale.jpg',
+describe('ocr-pending retry sweep (Postgres queue)', () => {
+  it('re-enqueues only stale, never-run, http(s) invoices whose scan URL is still valid', async () => {
+    const res = await runOcrSweep(sql, NOW);
+    expect(mine(res.requeued).sort()).toEqual([ids.race, ids.stale].sort());
+    const [job] = await jobsFor(ids.stale!);
+    expect(job).toMatchObject({
+      dedupe_key: `ocr-sweep-${ids.stale}`,
+      restaurant_id: restaurantId,
+      payload: { restaurantId, invoiceId: ids.stale, supplierId: null, imageUrl: 'https://x.example/scan-stale.jpg' },
     });
-    expect(job.jobId).toBe(`ocr-sweep-${ids.stale}`);
+    for (const k of ['fresh', 'expired', 'noImage', 'done', 'smoke']) expect(await jobsFor(ids[k]!)).toHaveLength(0);
+    expect(await jobsFor(ids.queued!)).toHaveLength(1); // the backlog job only
+    expect(await jobsFor(ids.failedBefore!)).toHaveLength(1); // not retried: it already ran
   });
 
-  it('is idempotent: a second sweep does not enqueue the same invoice again', async () => {
-    const marker = memoryMarker();
-    const q = fakeQueue();
-    await runOcrSweep(db, q, marker, NOW);
-    const second = await runOcrSweep(db, q, marker, new Date(NOW.getTime() + 5 * 60_000));
+  it('is idempotent: the retry job itself counts as "on record"', async () => {
+    const second = await runOcrSweep(sql, new Date(NOW.getTime() + 5 * 60_000));
     expect(mine(second.requeued)).toEqual([]);
-    expect(second.skipped.some((s) => s.invoiceId === ids.stale && s.reason === 'already-retried')).toBe(true);
-    expect(q.added.filter((a) => a.data.invoiceId === ids.stale)).toHaveLength(1);
+    expect(await jobsFor(ids.stale!)).toHaveLength(1);
   });
 
-  it('releases the marker when the enqueue fails, so the next sweep retries', async () => {
-    const marker = memoryMarker();
-    const broken = { ...fakeQueue(), add: async () => Promise.reject(new Error('redis down')) };
-    await expect(runOcrSweep(db, broken, marker, NOW)).rejects.toThrow('redis down');
-    // The oldest eligible invoice (`stale`) hit the failing add; its marker was released.
-    const res = await runOcrSweep(db, fakeQueue(), marker, NOW);
-    expect(res.requeued).toContain(ids.stale);
-  });
-
-  it('does nothing while the ocr-invoice backlog is too large to dedupe', async () => {
-    const q = fakeQueue([], 5_000);
-    const res = await runOcrSweep(db, q, memoryMarker(), NOW);
-    expect(res.requeued).toEqual([]);
-    expect(res.note).toMatch(/backlog/);
-    expect(q.added).toHaveLength(0);
-  });
-});
-
-describe.skipIf(!process.env.REDIS_URL)('redis retry marker', () => {
-  it('claims an invoice once, with a TTL', async () => {
-    const redis = new IORedis(process.env.REDIS_URL!);
-    try {
-      const id = `test-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const marker = redisRetryMarker(redis);
-      expect(await marker.claim(id)).toBe(true);
-      expect(await marker.claim(id)).toBe(false);
-      const ttl = await redis.ttl(`ocr-sweep:retried:${id}`);
-      expect(ttl).toBeGreaterThan(6 * 24 * 3600);
-      await marker.release(id);
-      expect(await marker.claim(id)).toBe(true);
-      await marker.release(id);
-    } finally {
-      redis.disconnect();
-    }
+  it('two sweeps racing on the same invoice enqueue it once (dedupe key)', async () => {
+    await sql`DELETE FROM job_queue WHERE payload->>'invoiceId' = ${ids.race!}`;
+    const [a, b] = await Promise.all([runOcrSweep(sql, NOW), runOcrSweep(sql, NOW)]);
+    const won = [...a.requeued, ...b.requeued].filter((id) => id === ids.race);
+    expect(won).toHaveLength(1);
+    expect(await jobsFor(ids.race!)).toHaveLength(1);
   });
 });

@@ -1,0 +1,83 @@
+import { createServer, type Server } from 'node:net';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import postgres from 'postgres';
+import { createDb } from '@restomatch/db';
+import { checkRateLimit } from '@restomatch/api';
+
+/**
+ * Rate limiting on Postgres (0061 rate_limit_counters; Redis is gone). Same
+ * contract as before: global fixed-window counts, the same limits, and FAIL OPEN
+ * within RATE_LIMIT_DEADLINE_MS when the store does not answer.
+ */
+const URL = process.env.DATABASE_URL ?? 'postgres://postgres:postgres@localhost:5432/restomatch_test';
+const raw = postgres(URL, { max: 1, prepare: false, onnotice: () => {} });
+const PREFIX = `rl-test-${process.pid}`;
+
+let silent: Server;
+let silentPort = 0;
+beforeAll(async () => {
+  silent = createServer(() => {});
+  await new Promise<void>((r) => silent.listen(0, '127.0.0.1', () => r()));
+  silentPort = (silent.address() as { port: number }).port;
+});
+afterAll(async () => {
+  silent.close();
+  await raw`DELETE FROM rate_limit_counters WHERE key LIKE ${`${PREFIX}%`}`;
+  await raw.end();
+});
+
+describe('PostgresRateLimitStore', () => {
+  it('counts per key and window, and sets an expiry for pruning', async () => {
+    const { PostgresRateLimitStore } = await import('../rateLimit');
+    const store = new PostgresRateLimitStore(createDb(URL));
+    expect(await store.incr(`${PREFIX}:a`, 60)).toBe(1);
+    expect(await store.incr(`${PREFIX}:a`, 60)).toBe(2);
+    expect(await store.incr(`${PREFIX}:b`, 60)).toBe(1);
+    const [row] = await raw<Array<{ count: number; ttl: number }>>`
+      SELECT count, extract(epoch FROM expires_at - now())::int AS ttl FROM rate_limit_counters WHERE key = ${`${PREFIX}:a`}`;
+    expect(row!.count).toBe(2);
+    expect(row!.ttl).toBeGreaterThan(50);
+    expect(row!.ttl).toBeLessThanOrEqual(60);
+  });
+
+  it('login lockout stays as strict: the limit+1-th attempt in a window is blocked', async () => {
+    const { PostgresRateLimitStore, LOGIN_EMAIL_LIMIT } = await import('../rateLimit');
+    const store = new PostgresRateLimitStore(createDb(URL));
+    const opts = { ...LOGIN_EMAIL_LIMIT, prefix: `${PREFIX}:login` };
+    let last = await checkRateLimit(store, 'owner@x.test', opts);
+    for (let i = 1; i < LOGIN_EMAIL_LIMIT.limit; i++) last = await checkRateLimit(store, 'owner@x.test', opts);
+    expect(last).toMatchObject({ allowed: true, count: LOGIN_EMAIL_LIMIT.limit, remaining: 0 });
+    expect(await checkRateLimit(store, 'owner@x.test', opts)).toMatchObject({ allowed: false });
+    // A different account is unaffected.
+    expect(await checkRateLimit(store, 'other@x.test', opts)).toMatchObject({ allowed: true, count: 1 });
+  });
+
+  it('two instances (two pools) share one global counter', async () => {
+    const { PostgresRateLimitStore } = await import('../rateLimit');
+    const a = new PostgresRateLimitStore(createDb(URL));
+    const b = new PostgresRateLimitStore(createDb(URL));
+    const counts = await Promise.all(Array.from({ length: 20 }, (_, i) => (i % 2 ? a : b).incr(`${PREFIX}:shared`, 60)));
+    expect([...counts].sort((x, y) => x - y)).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
+  });
+});
+
+describe('enforceRateLimit on Postgres', () => {
+  it('fails OPEN within the deadline when the database never answers', async () => {
+    vi.resetModules();
+    const prev = process.env.DATABASE_URL;
+    process.env.DATABASE_URL = `postgres://u:p@127.0.0.1:${silentPort}/db`;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const rl = await import('../rateLimit');
+      const t0 = Date.now();
+      const res = await rl.enforceRateLimit('qa@example.test', rl.MAGIC_LINK_LIMIT);
+      expect(res.allowed).toBe(true);
+      expect(Date.now() - t0).toBeLessThan(rl.RATE_LIMIT_DEADLINE_MS + 1_500);
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/failing open/), expect.anything());
+    } finally {
+      process.env.DATABASE_URL = prev;
+      warn.mockRestore();
+      vi.resetModules();
+    }
+  }, 15_000);
+});

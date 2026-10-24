@@ -246,6 +246,13 @@
       "when": 1781980000000,
       "tag": "0033_plans_catalog",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1782160000000,
+      "tag": "0061_postgres_queue",
+      "breakpoints": true
     }
   ]
 }

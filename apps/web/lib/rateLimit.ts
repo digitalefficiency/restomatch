@@ -1,5 +1,5 @@
 import 'server-only';
-import IORedis from 'ioredis';
+import { sql as dsql } from '@restomatch/db';
 import {
   canonicalizeEmail,
   checkRateLimit,
@@ -8,53 +8,50 @@ import {
   type RateLimitResult,
   type RateLimitStore,
 } from '@restomatch/api';
-import { failFastRedisOptions, whenReady, withDeadline } from '@restomatch/queue';
+import { withDeadline } from '@restomatch/queue';
 
 /** A rate-limit check may add at most this much latency before failing open. */
-export const RATE_LIMIT_REDIS_DEADLINE_MS = 1_500;
+export const RATE_LIMIT_DEADLINE_MS = 1_500;
 
 /**
- * Redis-backed fixed-window store. INCR creates the counter; EXPIRE on the
- * first increment gives it a TTL so it self-cleans. Multiple serverless
- * instances share one Redis, so the limit is global (unlike the in-memory
- * fallback).
+ * Postgres fixed-window store (0061 rate_limit_counters; was Redis INCR). One
+ * upsert both creates and increments the window's counter and returns the new
+ * count; `expires_at` lets the worker prune old windows. All serverless instances
+ * share the database, so the limit is global (unlike the in-memory fallback).
+ *
+ * Runs on the AUTH (owner) connection: limits are checked before any session
+ * exists, and the tenant app role has no access to this table.
  */
-class RedisRateLimitStore implements RateLimitStore {
-  constructor(private readonly redis: IORedis) {}
+export class PostgresRateLimitStore implements RateLimitStore {
+  constructor(private readonly db: { execute: (q: ReturnType<typeof dsql>) => Promise<unknown> }) {}
 
   async incr(key: string, windowSec: number): Promise<number> {
-    // Deadline per check: a black-holed or silent Redis made login wait 30-60 s
-    // (or forever) before failing open (QA D1). enforceRateLimit fails open.
+    // Deadline per check: a black-holed database must not make login wait
+    // (QA D1). enforceRateLimit fails open.
     return withDeadline(
       (async () => {
-        // Cold start: wait for the connection (within the deadline) so the first
-        // attempts on a fresh instance are counted instead of failing open.
-        await whenReady(this.redis);
-        const count = await this.redis.incr(key);
-        if (count === 1) {
-          await this.redis.expire(key, windowSec);
-        }
-        return count;
+        const rows = (await this.db.execute(dsql`
+          INSERT INTO rate_limit_counters (key, count, expires_at)
+          VALUES (${key}, 1, now() + ${windowSec} * interval '1 second')
+          ON CONFLICT (key) DO UPDATE SET count = rate_limit_counters.count + 1
+          RETURNING count`)) as unknown as Array<{ count: number }>;
+        return Number(rows[0]?.count ?? 0);
       })(),
-      RATE_LIMIT_REDIS_DEADLINE_MS,
-      () => new Error(`rate-limit redis timed out after ${RATE_LIMIT_REDIS_DEADLINE_MS}ms`),
+      RATE_LIMIT_DEADLINE_MS,
+      () => new Error(`rate-limit store timed out after ${RATE_LIMIT_DEADLINE_MS}ms`),
     );
   }
 }
 
 let store: RateLimitStore | undefined;
 
-function getStore(): RateLimitStore {
+async function getStore(): Promise<RateLimitStore> {
   if (store) return store;
-  const url = process.env.REDIS_URL;
-  if (url) {
-    const redis = new IORedis(url, failFastRedisOptions());
-    redis.on('error', (err) => {
-      console.warn('[rateLimit] redis error:', err.message);
-    });
-    store = new RedisRateLimitStore(redis);
+  if (process.env.DATABASE_URL || process.env.DATABASE_URL_APP) {
+    const { authDb } = await import('./authDb');
+    store = new PostgresRateLimitStore(authDb);
   } else {
-    // No Redis configured (local dev / tests): process-local counter.
+    // No database configured (unit tests / bare local dev): process-local counter.
     store = new MemoryRateLimitStore();
   }
   return store;
@@ -69,7 +66,7 @@ export async function enforceRateLimit(
   opts: RateLimitOptions,
 ): Promise<RateLimitResult> {
   try {
-    return await checkRateLimit(getStore(), identifier, opts);
+    return await checkRateLimit(await getStore(), identifier, opts);
   } catch (err) {
     console.warn(
       `[rateLimit] store error for ${opts.prefix ?? 'rl'} — failing open:`,

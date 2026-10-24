@@ -40,7 +40,6 @@ describe('assertWebEnv — production hardening', () => {
     EMAIL_FROM: 'no-reply@example.com',
     AUTH_URL: 'https://app.example.com',
     AUTH_SECRET: 'test-secret',
-    REDIS_URL: 'redis://localhost:6379',
     SUPABASE_SERVICE_ROLE_KEY: 'svc',
     // Required in production by Epic B/C (B.6) — AES-256-GCM key for the TOTP secret.
     AUTH_ENC_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
@@ -79,7 +78,6 @@ describe('assertWebEnv — AUTH_SECRET + Supabase URL shape (F4/F5)', () => {
     EMAIL_FROM: 'no-reply@example.com',
     AUTH_URL: 'https://app.example.com',
     AUTH_SECRET: 'test-secret',
-    REDIS_URL: 'redis://localhost:6379',
     SUPABASE_SERVICE_ROLE_KEY: 'svc',
     AUTH_ENC_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
   };
@@ -178,7 +176,6 @@ describe('assertWebEnv — empty secrets + legacy URL name', () => {
     EMAIL_FROM: 'no-reply@example.com',
     AUTH_URL: 'https://app.example.com',
     AUTH_SECRET: 'test-secret',
-    REDIS_URL: 'redis://localhost:6379',
     SUPABASE_SERVICE_ROLE_KEY: 'svc',
     AUTH_ENC_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
   };
@@ -223,5 +220,15 @@ describe('build-phase DB placeholder (Vercel Preview builds without database env
     expect(() =>
       assertWebEnv({ NODE_ENV: 'production', NEXT_PHASE: 'phase-production-build', DATABASE_URL: 'postgres://a/b' }),
     ).toThrow(/missing required production secrets[\s\S]*DATABASE_URL_APP/);
+  });
+});
+
+describe('Redis is gone (0061)', () => {
+  it('production boots without REDIS_URL; a leftover one only warns', async () => {
+    const { webEnvWarnings } = await import('../env');
+    expect(webEnvWarnings({ NODE_ENV: 'production', REDIS_URL: 'rediss://x:6379' } as never)).toEqual(
+      expect.arrayContaining([expect.stringMatching(/REDIS_URL is set but no longer used/)]),
+    );
+    expect(webEnvWarnings({ NODE_ENV: 'production' } as never).some((w) => /REDIS/.test(w))).toBe(false);
   });
 });

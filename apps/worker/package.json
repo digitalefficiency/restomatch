@@ -22,9 +22,7 @@
     "@restomatch/procurement": "workspace:*",
     "@restomatch/queue": "workspace:*",
     "@restomatch/translate": "workspace:*",
-    "@restomatch/types": "workspace:*",
-    "bullmq": "^5.34.5",
-    "ioredis": "^5.4.2"
+    "@restomatch/types": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

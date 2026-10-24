@@ -1,4 +1,4 @@
-# RestoMatch async worker — BullMQ consumers + cron (OCR, 3-way matching, the ₪
+# RestoMatch async worker — Postgres job-queue consumers + cron (OCR, 3-way matching, the ₪
 # leak figure, cadence alerts, outbox dispatch). This process is where the core
 # value runs; without it, invoice uploads succeed but nothing is ever processed.
 #
@@ -17,14 +17,14 @@ app = "restomatch-worker"
 primary_region = "syd"
 
 # Graceful shutdown: the worker traps SIGTERM, stops taking jobs, lets in-flight
-# jobs finish (BullMQ Worker.close), drains its Postgres pool, then exits.
-# A job cut off anyway is "stalled" and re-run by BullMQ — nothing is lost.
+# jobs finish (graceful drain), drains its Postgres pools, then exits.
+# A job cut off anyway is "stalled" (its lock expires) and re-run — nothing is lost.
 kill_signal = "SIGTERM"
 kill_timeout = "120s"
 
 [deploy]
   # One machine: rolling = the machine is stopped, updated in place and started;
-  # a failing /health check fails the deploy. Jobs queue in Redis meanwhile.
+  # a failing /health check fails the deploy. Jobs queue in Postgres meanwhile.
   strategy = "rolling"
 
 [env]
@@ -34,7 +34,7 @@ kill_timeout = "120s"
 # Internal-only health probe (apps/worker/src/health.ts). Fly uses it for the
 # machine's health status and to gate deploys — it does NOT restart a machine.
 # Restarts come from the process exiting: the worker's own watchdog exits when
-# Redis stays unreachable (~2 min), and [[restart]] below brings it back.
+# the database stays unreachable (~2 min), and [[restart]] below brings it back.
 [checks]
   [checks.health]
     type = "http"
@@ -50,8 +50,8 @@ kill_timeout = "120s"
   policy = "always"
 
 # Exactly ONE worker: there is no [http_service], so Fly never auto-stops or
-# auto-starts machines; keep the count at 1 with `fly scale count 1`. (BullMQ
-# makes >1 safe if you ever need throughput; cron schedulers are idempotent.)
+# auto-starts machines; keep the count at 1 with `fly scale count 1`. (SKIP LOCKED
+# claims make >1 safe if you ever need throughput; cron slots are deduplicated.)
 [[vm]]
   size = "shared-cpu-1x"
   memory = "1024mb"

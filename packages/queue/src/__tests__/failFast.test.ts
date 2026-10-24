@@ -1,125 +1,70 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createServer, type Server } from 'node:net';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
-  addWithDeadline,
+  closeQueueSql,
+  enqueueOcrInvoice,
   isQueueUnavailableError,
   QUEUE_UNAVAILABLE,
   QueueUnavailableError,
-  redisUrlProblem,
+  withDeadline,
+  enqueue,
 } from '../index';
 
-const PAYLOAD = { restaurantId: 'r', invoiceId: 'i', supplierId: null, imageUrl: 'x' };
+/**
+ * EN-7 / F7 on Postgres: an enqueue inside a web request must fail FAST with a
+ * coded error when the queue database is unreachable — never hang the request.
+ */
+const PAYLOAD = { restaurantId: '00000000-0000-4000-8000-000000000001', invoiceId: 'i', supplierId: null, imageUrl: 'x' };
 
-describe('redisUrlProblem', () => {
-  it('accepts redis:// and rediss:// and unset', () => {
-    expect(redisUrlProblem(undefined)).toBeNull();
-    expect(redisUrlProblem('redis://localhost:6379')).toBeNull();
-    expect(redisUrlProblem('rediss://default:pw@eu1-x.upstash.io:6379')).toBeNull();
-  });
+let silent: Server;
+let silentPort = 0;
+const saved = { q: process.env.QUEUE_DATABASE_URL, d: process.env.DATABASE_URL };
 
-  it('flags the Upstash REST URL and other schemes', () => {
-    expect(redisUrlProblem('https://eu1-x.upstash.io')).toMatch(/Upstash REST URL/);
-    expect(redisUrlProblem('postgres://localhost:5432/db')).toMatch(/redis:\/\/ or rediss:\/\//);
-    expect(redisUrlProblem('not a url')).toMatch(/not a valid URL/);
+beforeAll(async () => {
+  silent = createServer(() => {
+    /* accept and never answer: a black-holed database */
   });
+  await new Promise<void>((r) => silent.listen(0, '127.0.0.1', () => r()));
+  silentPort = (silent.address() as { port: number }).port;
+});
+afterEach(async () => {
+  await closeQueueSql();
+  if (saved.q === undefined) delete process.env.QUEUE_DATABASE_URL;
+  else process.env.QUEUE_DATABASE_URL = saved.q;
+  if (saved.d === undefined) delete process.env.DATABASE_URL;
+  else process.env.DATABASE_URL = saved.d;
+});
+afterAll(() => {
+  silent.close();
 });
 
-describe('addWithDeadline', () => {
-  it('rejects with a coded QueueUnavailableError when Redis never answers', async () => {
-    const hang = { name: 'ocr-invoice', add: () => new Promise<never>(() => {}) };
+describe('enqueue fails fast (EN-7)', () => {
+  it('rejects with a coded QueueUnavailableError when the database never answers', async () => {
+    process.env.QUEUE_DATABASE_URL = `postgres://u:p@127.0.0.1:${silentPort}/db`;
     const t0 = Date.now();
-    const err = await addWithDeadline(hang, 'ocr-invoice', PAYLOAD, 50).catch((e: unknown) => e);
-    expect(Date.now() - t0).toBeLessThan(1_000);
+    const err = await enqueue('ocr-invoice', PAYLOAD, {}, 200).catch((e: unknown) => e);
+    expect(Date.now() - t0).toBeLessThan(2_000);
     expect(err).toBeInstanceOf(QueueUnavailableError);
     expect((err as QueueUnavailableError).code).toBe(QUEUE_UNAVAILABLE);
     expect(isQueueUnavailableError(err)).toBe(true);
   });
 
-  it('wraps a rejected add() into the same coded error', async () => {
-    const broken = { name: 'match-invoice', add: () => Promise.reject(new Error('Stream isn\'t writeable')) };
-    await expect(addWithDeadline(broken, 'match-invoice', PAYLOAD, 1_000)).rejects.toMatchObject({
-      code: QUEUE_UNAVAILABLE,
-      queue: 'match-invoice',
-    });
+  it('wraps a refused connection into the same coded error', async () => {
+    process.env.QUEUE_DATABASE_URL = 'postgres://u:p@127.0.0.1:1/db';
+    await expect(enqueueOcrInvoice(PAYLOAD)).rejects.toMatchObject({ code: QUEUE_UNAVAILABLE, queue: 'ocr-invoice' });
   });
 
-  it('resolves when add() succeeds', async () => {
-    const ok = { name: 'q', add: vi.fn().mockResolvedValue({ id: '1' }) };
-    await expect(addWithDeadline(ok, 'q', PAYLOAD)).resolves.toBeUndefined();
-    expect(ok.add).toHaveBeenCalledWith('q', PAYLOAD);
+  it('returns false (no-op) when no queue database is configured', async () => {
+    delete process.env.QUEUE_DATABASE_URL;
+    delete process.env.DATABASE_URL;
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await expect(enqueueOcrInvoice(PAYLOAD)).resolves.toBe(false);
   });
 });
 
-describe('enqueue* with a bad REDIS_URL (real ioredis, no Redis needed)', () => {
-  const original = process.env.REDIS_URL;
-  afterEach(() => {
-    process.env.REDIS_URL = original;
-    vi.resetModules();
-  });
-
-  async function freshQueueModule(url: string) {
-    process.env.REDIS_URL = url;
-    vi.resetModules();
-    return import('../index');
-  }
-
-  it('fails immediately on an Upstash REST URL instead of hanging', async () => {
-    const q = await freshQueueModule('https://eu1-example.upstash.io');
-    const t0 = Date.now();
-    await expect(q.enqueueOcrInvoice(PAYLOAD)).rejects.toMatchObject({ code: QUEUE_UNAVAILABLE });
-    expect(Date.now() - t0).toBeLessThan(500);
-  });
-
-  it('fails within the deadline when Redis refuses connections', async () => {
-    const q = await freshQueueModule('redis://127.0.0.1:1');
-    const t0 = Date.now();
-    await expect(q.enqueueMatchInvoice({ restaurantId: 'r', invoiceId: 'i' })).rejects.toMatchObject({
-      code: QUEUE_UNAVAILABLE,
-    });
-    expect(Date.now() - t0).toBeLessThan(q.ENQUEUE_TIMEOUT_MS + 1_000);
-  });
-
-  it('fails within the deadline when the host black-holes packets', async () => {
-    // TEST-NET-1 (RFC 5737): never routed, so TCP connect just hangs.
-    const q = await freshQueueModule('redis://192.0.2.1:6379');
-    const t0 = Date.now();
-    await expect(
-      q.enqueueCatalogImport({
-        restaurantId: 'r',
-        supplierId: 's',
-        importId: 'imp',
-        file: { filename: 'a.csv', text: 'a' },
-        mapping: {},
-      }),
-    ).rejects.toMatchObject({ code: QUEUE_UNAVAILABLE });
-    expect(Date.now() - t0).toBeLessThan(q.ENQUEUE_TIMEOUT_MS + 1_000);
-  }, 10_000);
-});
-
-describe('whenReady', () => {
-  it('resolves at once when ready, else on the first ready event with one shared listener', async () => {
-    const { EventEmitter } = await import('node:events');
-    const { whenReady } = await import('../index');
-    const ready = Object.assign(new EventEmitter(), { status: 'ready' });
-    await expect(whenReady(ready)).resolves.toBeUndefined();
-
-    const cold = Object.assign(new EventEmitter(), { status: 'connecting' });
-    const waits = [whenReady(cold), whenReady(cold), whenReady(cold)];
-    expect(cold.listenerCount('ready')).toBe(1);
-    let settled = false;
-    void Promise.all(waits).then(() => (settled = true));
-    await new Promise((r) => setTimeout(r, 10));
-    expect(settled).toBe(false);
-    cold.status = 'ready';
-    cold.emit('ready');
-    await Promise.all(waits);
-    expect(cold.listenerCount('ready')).toBe(0);
-
-    // After it has been ready once, an outage stays fail-fast: no waiting.
-    cold.status = 'reconnecting';
-    let resolved = false;
-    void whenReady(cold).then(() => (resolved = true));
-    await Promise.resolve();
-    expect(resolved).toBe(true);
-    expect(cold.listenerCount('ready')).toBe(0);
+describe('withDeadline', () => {
+  it('rejects with the given error after the deadline and resolves otherwise', async () => {
+    await expect(withDeadline(new Promise(() => {}), 20, () => new Error('late'))).rejects.toThrow('late');
+    await expect(withDeadline(Promise.resolve(7), 1_000, () => new Error('late'))).resolves.toBe(7);
   });
 });

@@ -1,9 +1,10 @@
 /**
  * Worker runtime smoke test (local only): proves a RUNNING worker consumes the
- * OCR → match chain end-to-end against local Postgres + Redis with stub OCR.
+ * OCR → match chain end-to-end against local Postgres (the job queue, 0061)
+ * with stub OCR. No Redis.
  *
- *   1. start the worker:   DATABASE_URL=… REDIS_URL=… pnpm --filter @restomatch/worker start
- *   2. in another shell:   DATABASE_URL=… REDIS_URL=… pnpm --filter @restomatch/worker exec tsx scripts/smoke-queues.ts
+ *   1. start the worker:   DATABASE_URL=… pnpm --filter @restomatch/worker start
+ *   2. in another shell:   DATABASE_URL=… pnpm --filter @restomatch/worker exec tsx scripts/smoke-queues.ts
  *
  * It clones one already-matched demo invoice (same restaurant + supplier) into a
  * fresh `ocr_pending` invoice, enqueues an `ocr-invoice` job whose mockProviders
@@ -14,24 +15,20 @@
  * Refuses to run against anything but localhost — it inserts rows.
  */
 import { and, createDb, desc, eq, invoiceLines, invoices, matchRuns } from '@restomatch/db';
-import { MATCH_INVOICE_QUEUE, OCR_INVOICE_QUEUE } from '@restomatch/queue';
+import { getJob, insertJob, OCR_INVOICE_QUEUE, queueSql } from '@restomatch/queue';
 import type { InvoiceOcrResult, OcrInvoiceJob } from '@restomatch/types';
-import { Queue, QueueEvents } from 'bullmq';
-import IORedis from 'ioredis';
 
 const DATABASE_URL = process.env.DATABASE_URL ?? '';
-const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const TIMEOUT_MS = Number(process.env.SMOKE_TIMEOUT_MS ?? 60_000);
 
 function assertLocal(url: string, name: string): void {
-  if (!/@(localhost|127\.0\.0\.1)[:/]|^redis:\/\/(localhost|127\.0\.0\.1)/.test(url)) {
+  if (!/@(localhost|127\.0\.0\.1)[:/]/.test(url)) {
     throw new Error(`[smoke] ${name} must point at localhost (got ${url.replace(/:[^:@/]*@/, ':***@')})`);
   }
 }
 
 async function main(): Promise<void> {
   assertLocal(DATABASE_URL, 'DATABASE_URL');
-  assertLocal(REDIS_URL, 'REDIS_URL');
   const db = createDb(DATABASE_URL);
 
   const [source] = await db
@@ -78,21 +75,28 @@ async function main(): Promise<void> {
   if (!created) throw new Error('[smoke] insert failed');
   console.log(`[smoke] cloned invoice ${source.id} → ${created.id} (${lines.length} lines)`);
 
-  const connection = new IORedis(REDIS_URL, { maxRetriesPerRequest: null });
-  const ocrQueue = new Queue<OcrInvoiceJob>(OCR_INVOICE_QUEUE, { connection });
-  const ocrEvents = new QueueEvents(OCR_INVOICE_QUEUE, { connection: connection.duplicate() });
-  const matchEvents = new QueueEvents(MATCH_INVOICE_QUEUE, { connection: connection.duplicate() });
-  await Promise.all([ocrEvents.waitUntilReady(), matchEvents.waitUntilReady()]);
-
-  const job = await ocrQueue.add(OCR_INVOICE_QUEUE, {
+  const sql = queueSql(DATABASE_URL);
+  const payload: OcrInvoiceJob = {
     restaurantId: source.restaurantId,
     invoiceId: created.id,
     supplierId: source.supplierId,
     imageUrl: 'smoke://fixture',
     mockProviders: { docAi: ocr, claude: ocr },
-  });
+  };
+  const job = await insertJob(sql, OCR_INVOICE_QUEUE, payload, { restaurantId: source.restaurantId });
+  if (!job) throw new Error('[smoke] enqueue failed');
   const t0 = Date.now();
-  const ocrResult = await job.waitUntilFinished(ocrEvents, TIMEOUT_MS);
+  let ocrResult: unknown = null;
+  for (;;) {
+    const row = await getJob(sql, job.id);
+    if (row?.status === 'done') {
+      ocrResult = row.result;
+      break;
+    }
+    if (row?.status === 'failed') throw new Error(`[smoke] ocr-invoice failed: ${row.lastError}`);
+    if (Date.now() - t0 > TIMEOUT_MS) throw new Error(`[smoke] ocr-invoice not finished within ${TIMEOUT_MS}ms — is the worker running?`);
+    await new Promise((r) => setTimeout(r, 200));
+  }
   console.log(`[smoke] ocr-invoice done in ${Date.now() - t0}ms →`, ocrResult);
 
   // The match job is chained by the worker; poll for its match_run row.
@@ -121,8 +125,7 @@ async function main(): Promise<void> {
     console.log(`[smoke] cleaned up ${created.id} (SMOKE_KEEP=1 to keep it)`);
   }
 
-  await Promise.all([ocrEvents.close(), matchEvents.close(), ocrQueue.close()]);
-  connection.disconnect();
+  await sql.end({ timeout: 5 });
   process.exit(0);
 }
 
