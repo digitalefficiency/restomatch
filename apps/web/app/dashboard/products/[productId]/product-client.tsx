@@ -25,6 +25,7 @@ import { components } from '@/lib/i18n/messages/components';
 import { products as productsNs } from '@/lib/i18n/messages/products';
 import { formatIls } from '@/lib/money';
 import { productPatch, type ProductFormState } from '../product-logic';
+import { startRouteProgress } from '@/lib/components/routeProgressState';
 
 type Outputs = inferRouterOutputs<AppRouter>;
 type Detail = NonNullable<Outputs['catalog']['productDetail']>;
@@ -69,6 +70,7 @@ export function ProductEditor({
   const del = trpc.products.delete.useMutation({
     onSuccess: () => {
       toast.success(t('form.deleted'));
+      startRouteProgress('/dashboard/catalog');
       router.push('/dashboard/catalog');
     },
     onError: (e) => setError(friendlyError(e, tc, { CONFLICT: t('form.deleteBlocked') })),

@@ -192,6 +192,15 @@ export {
   scanIdFromLocalUrl,
   isLocalScanId,
 } from './lib/localScanStorage';
+export { getServiceStorageClient } from './lib/supabaseStorage';
+export {
+  uploadShowcaseScan,
+  validateShowcaseFile,
+  isShowcaseScanUrl,
+  SHOWCASE_MAX_BYTES,
+  type ShowcaseUploadResult,
+  type ShowcaseUploadError,
+} from './lib/showcaseUpload';
 export {
   MAX_CHAIN_BRANCHES,
   type ChainBranch,

@@ -152,6 +152,20 @@ export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canE
         </p>
       )}
 
+      {invoice.ocrFailed || invoice.status === 'ocr_pending' ? (
+        <div
+          role="status"
+          data-testid={invoice.ocrFailed ? 'invoice-ocr-failed' : 'invoice-ocr-pending'}
+          className="rounded-md border-s-4 border-line bg-surface-2 px-3 py-2 text-sm text-ink"
+        >
+          {invoice.ocrFailed
+            ? invoice.ocrFailureReason === 'quota_exceeded'
+              ? t('correction.ocrQuota')
+              : t('correction.ocrFailed')
+            : t('correction.ocrPending')}
+        </div>
+      ) : null}
+
       {/* Header */}
       <Card flow elevated padding="lg">
         <div className="mb-4 flex items-center justify-between gap-3">

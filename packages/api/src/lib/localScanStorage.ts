@@ -22,7 +22,7 @@ const SCAN_ID = /^scan-[a-z0-9]+-[a-f0-9]{8}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function supabaseStorageConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
-  return Boolean((env.NEXT_PUBLIC_SUPABASE_URL ?? env.SUPABASE_URL) && env.SUPABASE_SERVICE_ROLE_KEY);
+  return Boolean((env.NEXT_PUBLIC_SUPABASE_URL ?? env.SUPABASE_URL) && (env.SUPABASE_SERVICE_ROLE_KEY ?? env.SUPABASE_SECRET_KEY));
 }
 
 export function localScanStorageEnabled(env: NodeJS.ProcessEnv = process.env): boolean {

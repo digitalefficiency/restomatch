@@ -114,6 +114,10 @@ export class ClaudeTranslator {
       {
         model: this.model,
         max_tokens: Math.min(16000, 400 + chunk.length * 60),
+        // EN-8: Haiku 5.5 thinks adaptively by default; for short lookups that
+        // only burns the small output budget and can truncate the JSON.
+        // Disabling is accepted at Haiku's default (medium) effort.
+        thinking: { type: 'disabled' },
         system: TRANSLATE_SYSTEM_PROMPT,
         output_config: { format: { type: 'json_schema', schema: JSON_SCHEMA } },
         messages: [
@@ -125,6 +129,20 @@ export class ClaudeTranslator {
       },
       { timeout: this.config.timeoutMs ?? DEFAULT_TIMEOUT_MS },
     );
+    if (response.stop_reason === 'max_tokens') {
+      // Truncated JSON is a retryable miss, not a parse error: split the batch
+      // and retry the halves; a single name that still overflows throws, which
+      // the composite treats as a short back-off (retried later).
+      if (chunk.length > 1) {
+        const mid = Math.ceil(chunk.length / 2);
+        const [a, b] = await Promise.all([
+          this.translateChunk(chunk.slice(0, mid)),
+          this.translateChunk(chunk.slice(mid)),
+        ]);
+        return new Map([...a, ...b]);
+      }
+      throw new Error('translation truncated (max_tokens)');
+    }
     if (response.stop_reason === 'refusal') {
       throw new Error('translation refused');
     }

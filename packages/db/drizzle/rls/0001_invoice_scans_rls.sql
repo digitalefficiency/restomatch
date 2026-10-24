@@ -11,9 +11,9 @@
 -- layer: bucket privacy + storage.objects per-restaurant path-prefix isolation.
 --
 -- Tenancy key at the storage layer: the FIRST folder segment of the object name
--- is the owning restaurant id, e.g. '<restaurant_id>/<scan-id>.pdf'. The
--- anonymous showcase keeps a single shared 'walk-ins/' prefix (demo data, no
--- tenant). app.current_restaurant_id() is set per-transaction by the app
+-- is the owning restaurant id, e.g. '<restaurant_id>/<scan-id>.pdf'. There is
+-- NO anonymous prefix (SB-3): the public showcase uploads server-side (service
+-- role, POST /api/showcase/upload). app.current_restaurant_id() is set per-transaction by the app
 -- (packages/api/src/trpc.ts memberProcedure → withRestaurant); it is NULL for
 -- connections that never set it, so those see nothing tenant-scoped.
 --
@@ -70,16 +70,9 @@ create policy invoice_scans_tenant_delete on storage.objects
     and (storage.foldername(name))[1] = app.current_restaurant_id()::text
   );
 
--- ── Anonymous showcase: a single shared 'walk-ins/' prefix (demo data only) ──
--- Narrow by prefix (never a tenant prefix), so the public landing-page receiver
--- can upload/read its own demo scans with the publishable (anon) key. It can
--- NEVER touch a '<restaurant_id>/' object because that requires the GUC above.
+-- ── SB-3: no anonymous storage access ──
+-- The former anon 'walk-ins/' showcase policies are dropped (the showcase now
+-- uploads via the service role). Kept as drops so re-applying this file on an
+-- existing project removes them.
 drop policy if exists invoice_scans_walkins_select on storage.objects;
-create policy invoice_scans_walkins_select on storage.objects
-  for select
-  using (bucket_id = 'invoice-scans' and (storage.foldername(name))[1] = 'walk-ins');
-
 drop policy if exists invoice_scans_walkins_insert on storage.objects;
-create policy invoice_scans_walkins_insert on storage.objects
-  for insert
-  with check (bucket_id = 'invoice-scans' and (storage.foldername(name))[1] = 'walk-ins');

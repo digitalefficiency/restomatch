@@ -292,6 +292,7 @@ export const receivingRouter = router({
           supplierId: invoices.supplierId,
           rawImageUrl: invoices.rawImageUrl,
           createdAt: invoices.createdAt,
+          ocrPayload: invoices.ocrPayload,
         })
         .from(invoices)
         .where(
@@ -335,8 +336,14 @@ export const receivingRouter = router({
         .where(eq(invoiceLines.invoiceId, invoice.id))
         .orderBy(asc(invoiceLines.id));
 
+      // EN-3: the worker marks a final OCR failure in ocr_payload.raw; expose
+      // only the flag + reason (never the raw extraction payload).
+      const { ocrPayload, ...invoiceFields } = invoice;
+      const failure = (ocrPayload?.raw ?? null) as { ocrFailed?: boolean; reason?: string } | null;
       return {
-        ...invoice,
+        ...invoiceFields,
+        ocrFailed: failure?.ocrFailed === true,
+        ocrFailureReason: failure?.ocrFailed === true ? (failure.reason ?? 'extraction_failed') : null,
         supplierName: supplier?.name ?? null,
         supplierNameEn: supplier?.nameEn ?? null,
         lines,
