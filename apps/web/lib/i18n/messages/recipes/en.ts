@@ -207,6 +207,14 @@ export const en: Shape<typeof he> = {
     emptyNoData: 'No POS sales for this period yet. Once a sales file is imported on the Integrations screen, the actual food cost per dish shows here.',
     emptyNoMatch: 'There are POS sales, but no item is linked to a dish yet. Make sure the dish name matches the POS item name.',
   },
+  alert: {
+    title: 'Crossed the food-cost target:',
+    target: 'target {target}',
+    crossed: 'Crossed the {target} food-cost target',
+    perPlate: 'per plate',
+    supplier: 'from',
+    banner: 'This dish crossed the food-cost target this month because a supplier raised a price.',
+  },
   overviewCard: {
     title: 'Dishes hurt by price rises this month',
     subtitle: 'Supplier price rises eat into your margin per plate',

@@ -52,10 +52,10 @@ try {
       await s.page.waitForSelector('[data-testid="pos-table"]', { timeout: 20000 }).catch(() => {});
       const txt = await s.page.locator('main').innerText();
       check(txt.includes(locale === 'he' ? 'סטייק אנטריקוט' : 'Entrecôte steak'), `[${locale}/${role}] steak row`);
-      // steak: 5289 × 40 = ₪2,115.60 cost; sales ₪5,200 → 40.7% actual vs 34.9% menu, avg ₪130.00
-      check(/40[.,]7\s?%/.test(txt) && /34[.,]9\s?%/.test(txt), `[${locale}/${role}] steak 34.9% menu vs 40.7% actual`);
+      // steak: 5289 × 40 = ₪2,115.60 cost; sales ₪5,200 → 40.7% actual vs 31.4% menu, avg ₪130.00
+      check(/40[.,]7\s?%/.test(txt) && /31[.,]4\s?%/.test(txt), `[${locale}/${role}] steak 31.4% menu vs 40.7% actual`);
       check(/130[.,]00/.test(txt), `[${locale}/${role}] steak avg price charged ₪130.00`);
-      check(/\+[\s‎‏]*5[.,]8\s?%/.test(txt), `[${locale}/${role}] steak gap +5.8 pts`);
+      check(/\+[\s‎‏]*9[.,]3\s?%/.test(txt), `[${locale}/${role}] steak gap +9.3 pts`);
       check(txt.includes(locale === 'he' ? 'פריטים בקופה לא מקושרים' : 'POS items are not linked'), `[${locale}/${role}] unlinked POS items note`);
       check((await s.page.locator('[data-testid="pos-unmatched"]').innerText().catch(() => '')).includes('Lemonade'), `[${locale}/${role}] unlinked item "Lemonade" listed with its sales`);
       check(txt.includes(locale === 'he' ? 'לבדוק בקופה' : 'Check POS data'), `[${locale}/${role}] ₪0.01 shakshuka sale flagged "check POS data", not a huge gap`);

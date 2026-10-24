@@ -15,7 +15,8 @@ const check = (ok, msg) => {
   results.push(`${ok ? 'PASS' : 'FAIL'} ${msg}`);
   if (!ok) failures++;
 };
-const psql = (q) => execSync(`psql ${DB} -At -c "${q.replace(/"/g, '\\"')}"`).toString().trim();
+// SQL goes on stdin: no shell quoting to get wrong.
+const psql = (q) => execSync(`psql ${DB} -At`, { input: q }).toString().trim();
 
 async function session(browser, role, locale) {
   const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 } });
@@ -63,16 +64,25 @@ try {
       const body = await page.locator('main').innerText();
       const steak = locale === 'he' ? 'סטייק אנטריקוט' : 'Entrecôte steak';
       check(body.includes(steak), `[${locale}/${role}] steak row listed`);
-      check(body.includes('34.9%') || body.includes('34.9‎%') || /34[.,]9\s?%/.test(body), `[${locale}/${role}] steak food cost 34.9% shown`);
-      check(/98[.,]80/.test(body), `[${locale}/${role}] steak margin ₪98.80 shown`);
+      check(/31[.,]4\s?%/.test(body), `[${locale}/${role}] steak food cost 31.4% shown`);
+      check(/115[.,]75/.test(body), `[${locale}/${role}] steak margin ₪115.75 shown`);
+      // dishPriceAlert: the steak crossed 30% because HaKerem raised the entrecôte.
+      const alerts = page.locator('[data-testid="dish-price-alert"]');
+      await alerts.first().waitFor({ timeout: 15000 }).catch(() => {});
+      check((await alerts.count()) === 1, `[${locale}/${role}] exactly one dish price alert (${await alerts.count()})`);
+      const al = (await alerts.count()) ? await alerts.first().innerText() : '';
+      check(/29[.,]3\s?%/.test(al) && /31[.,]4\s?%/.test(al), `[${locale}/${role}] alert 29.3% → 31.4%`);
+      check(/\+[\s\u200e\u200f]*₪?[\s\u200e\u200f]*3[.,]41/.test(al), `[${locale}/${role}] alert +₪3.41 per plate`);
+      check(/139[.,]00/.test(al) && /149[.,]00/.test(al) && /7[.,]2\s?%/.test(al), `[${locale}/${role}] alert entrecôte ₪139.00 → ₪149.00 (+7.2%)`);
+      check(al.includes(locale === 'he' ? 'קצביית הכרם' : 'HaKerem Butchery'), `[${locale}/${role}] alert names the supplier`);
       if (role === 'owner') await page.screenshot({ path: `${SHOTS}/recipes-list-${locale}.png`, fullPage: true });
 
       // What changed this month
       await page.getByRole('tab', { name: locale === 'he' ? 'מה השתנה החודש' : 'What changed this month' }).click();
       await page.waitForSelector('text=' + (locale === 'he' ? 'אנטריקוט' : 'Entrecôte'), { timeout: 15000 });
       const changes = await page.locator('main').innerText();
-      check(/\+[\s\u200e\u200f]*₪?[\s\u200e\u200f]*3[.,]10/.test(changes), `[${locale}/${role}] changes: steak +₪3.10 per plate`);
-      check(/139[.,]70/.test(changes) && /149[.,]00/.test(changes), `[${locale}/${role}] changes: why = entrecôte ₪139.70 → ₪149.00`);
+      check(/\+[\s\u200e\u200f]*₪?[\s\u200e\u200f]*3[.,]41/.test(changes), `[${locale}/${role}] changes: steak +₪3.41 per plate`);
+      check(/139[.,]00/.test(changes) && /149[.,]00/.test(changes), `[${locale}/${role}] changes: why = entrecôte ₪139.00 → ₪149.00`);
       if (role === 'owner') await page.screenshot({ path: `${SHOTS}/recipes-changes-${locale}.png`, fullPage: true });
 
       // Price impact: chicken +12%
@@ -139,7 +149,8 @@ try {
     const s = await session(browser, 'owner', 'he');
     check((await s.page.locator('header a[href="/dashboard/recipes"]').count()) === 0, `[flag off] nav link hidden`);
     const r = await s.page.goto(`${BASE}/dashboard/recipes`);
-    const offBody = await s.page.locator('body').innerText();
+    await s.page.waitForTimeout(1500);
+    const offBody = await s.page.locator("body").innerText();
     // Streaming RSC (dashboard/loading.tsx) commits 200 before notFound(); the page must still be the 404 UI with no recipe data.
     check(!offBody.includes('סטייק אנטריקוט') && /404|לא נמצא|not found/i.test(offBody), `[flag off] /dashboard/recipes renders not-found (HTTP ${r?.status()})`);
     const api = await s.page.request.get(`${BASE}/api/trpc/recipes.list`);

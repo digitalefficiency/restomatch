@@ -21,6 +21,7 @@ import {
   costLight,
   costRecipes,
   diffCosts,
+  parseScaled,
   RecipeCycleError,
   simulatePriceChange,
   unitsCompatible,
@@ -34,14 +35,17 @@ import {
   loadPosSales,
   loadProducts,
   loadRecipes,
+  loadSuppliers,
   loadRestaurant,
   toCostRecipes,
   type ItemRow,
   type PriceWithDate,
   type RecipeRow,
+  type RestaurantCostContext,
 } from '../recipes/data';
 import { parseRecipeCsv, type CsvRecipe } from '../recipes/csv';
 import { posVsTheory } from '../recipes/pos';
+import { dishPriceAlerts } from '../recipes/alerts';
 
 /**
  * Food cost per dish (wave 1, flag `recipes`). Owner / manager / chef read and
@@ -298,6 +302,106 @@ async function writeRecipe(
   return id!;
 }
 
+/**
+ * "What changed this month": each recipe costed at the prices in force at the
+ * start of the restaurant's calendar month vs now, with the ingredient that
+ * moved it most (the "why") and the supplier who charged today's price.
+ * Shared by recipes.changes, recipes.priceAlerts and the overview card.
+ */
+async function computeChanges(db: Database, rid: string, rc: RestaurantCostContext) {
+    const all = await loadAll(db, rid, rc.vatBp);
+    const since = startOfMonthInTz(new Date(), rc.timezone);
+    const productIds = [...all.prices.keys()];
+    const before = await latestPrices(db, rid, { before: since, productIds });
+    // A product first bought this month has no "before": its first price this month is the baseline.
+    const firstThisMonth = await earliestPricesFrom(db, rid, since, productIds);
+    for (const [pid, p] of firstThisMonth) if (!before.has(pid) && all.prices.has(pid)) before.set(pid, p);
+    const beforeCosts = costRecipes(all.costInput, before, rc.vatBp);
+    const diffs = diffCosts(all.costInput, beforeCosts, all.costs);
+    const byId = new Map(all.rows.map((r) => [r.id, r] as const));
+    const itemsById = new Map(all.items.map((i) => [i.id, i] as const));
+    const productInfo = await loadProducts(db, rid, productIds);
+    const supplierInfo = await loadSuppliers(db, rid, [...new Set([...all.prices.values()].map((p) => p.supplierId))]);
+    return {
+      since,
+      targetBp: rc.targetBp,
+      /** Active dishes on the menu (0 ⇒ "no recipes yet", never "prices are steady"). */
+      activeDishCount: all.rows.filter((r) => r.active && !r.isSubRecipe).length,
+      rows: diffs.map((d) => {
+        const r = byId.get(d.recipeId)!;
+        // The "why": the line whose cost moved most.
+        let driver: { itemId: string; deltaAgorot: number } | null = null;
+        for (const l of d.after.lines) {
+          const b = d.before.lines.find((x) => x.itemId === l.itemId);
+          const delta = l.costAgorot - (b?.costAgorot ?? 0);
+          if (!driver || Math.abs(delta) > Math.abs(driver.deltaAgorot)) driver = { itemId: l.itemId, deltaAgorot: delta };
+        }
+        const it = driver ? itemsById.get(driver.itemId) : undefined;
+        const prod = it?.productId ? productInfo.get(it.productId) : undefined;
+        const sub = it?.subRecipeId ? byId.get(it.subRecipeId) : undefined;
+        const priceBefore = it?.productId ? before.get(it.productId)?.unitPrice ?? null : null;
+        const priceNow = it?.productId ? all.prices.get(it.productId)?.unitPrice ?? null : null;
+        const supplierId = it?.productId ? all.prices.get(it.productId)?.supplierId ?? null : null;
+        const supplier = supplierId ? supplierInfo.get(supplierId) ?? null : null;
+        // The alert's "why" (dishPriceAlert): the biggest cost rise on a product
+        // line whose paid price went up at the same supplier as at the start of
+        // the month — never a supplier switch, a recipe edit or a price drop.
+        let riser: { itemId: string; productId: string; deltaAgorot: number } | null = null;
+        for (const l of d.after.lines) {
+          const pid = itemsById.get(l.itemId)?.productId;
+          if (!pid) continue;
+          const b0 = before.get(pid);
+          const n0 = all.prices.get(pid);
+          if (!b0 || !n0 || b0.supplierId !== n0.supplierId) continue;
+          if (parseScaled(n0.unitPrice, 4) <= parseScaled(b0.unitPrice, 4)) continue;
+          const delta = l.costAgorot - (d.before.lines.find((x) => x.itemId === l.itemId)?.costAgorot ?? 0);
+          if (delta > 0 && (!riser || delta > riser.deltaAgorot)) riser = { itemId: l.itemId, productId: pid, deltaAgorot: delta };
+        }
+        const riserProd = riser ? productInfo.get(riser.productId) : undefined;
+        const riserSupplierId = riser ? all.prices.get(riser.productId)!.supplierId : null;
+        const riserSupplier = riserSupplierId ? supplierInfo.get(riserSupplierId) ?? null : null;
+        return {
+          recipeId: r.id,
+          name: r.name,
+          nameEn: r.nameEn,
+          isSubRecipe: r.isSubRecipe,
+          active: r.active,
+          beforeCostAgorot: d.before.portionCostAgorot,
+          afterCostAgorot: d.after.portionCostAgorot,
+          beforeFoodCostBp: d.before.foodCostBp,
+          afterFoodCostBp: d.after.foodCostBp,
+          costDeltaAgorot: d.portionCostDeltaAgorot,
+          marginDeltaAgorot: d.marginDeltaAgorot,
+          afterLight: r.isSubRecipe ? ('none' as const) : costLight(d.after.foodCostBp, rc.targetBp),
+          driver: driver && it
+            ? {
+                kind: it.productId ? ('product' as const) : ('subRecipe' as const),
+                name: prod?.name ?? sub?.name ?? '',
+                nameEn: prod?.nameEn ?? sub?.nameEn ?? null,
+                unit: prod?.unit ?? (it.productId ? all.prices.get(it.productId)?.unit : null) ?? null,
+                deltaAgorot: driver.deltaAgorot,
+                priceBefore,
+                priceNow,
+                /** Who charged today's price (the latest paid price's supplier). */
+                supplier: supplier ? { id: supplierId!, name: supplier.name, nameEn: supplier.nameEn } : null,
+              }
+            : null,
+          riser: riser
+            ? {
+                name: riserProd?.name ?? '',
+                nameEn: riserProd?.nameEn ?? null,
+                unit: riserProd?.unit ?? all.prices.get(riser.productId)?.unit ?? null,
+                deltaAgorot: riser.deltaAgorot,
+                priceBefore: before.get(riser.productId)!.unitPrice,
+                priceNow: all.prices.get(riser.productId)!.unitPrice,
+                supplier: riserSupplier ? { id: riserSupplierId!, name: riserSupplier.name, nameEn: riserSupplier.nameEn } : null,
+              }
+            : null,
+        };
+      }),
+    };
+}
+
 export const recipesRouter = router({
   /** Whether the `recipes` feature is on for the caller's restaurant (drives the nav). Never FORBIDDEN. */
   enabled: memberProcedure.query(async ({ ctx }) => {
@@ -459,66 +563,19 @@ export const recipesRouter = router({
    * start of the restaurant's calendar month vs now, sorted by the biggest move,
    * with the ingredient that moved it most (the "why").
    */
-  changes: recipesProcedure.query(async ({ ctx }) => {
-    const rid = ctx.session.restaurantId;
-    const all = await loadAll(ctx.db, rid, ctx.rc.vatBp);
-    const since = startOfMonthInTz(new Date(), ctx.rc.timezone);
-    const productIds = [...all.prices.keys()];
-    const before = await latestPrices(ctx.db, rid, { before: since, productIds });
-    // A product first bought this month has no "before": its first price this month is the baseline.
-    const firstThisMonth = await earliestPricesFrom(ctx.db, rid, since, productIds);
-    for (const [pid, p] of firstThisMonth) if (!before.has(pid) && all.prices.has(pid)) before.set(pid, p);
-    const beforeCosts = costRecipes(all.costInput, before, ctx.rc.vatBp);
-    const diffs = diffCosts(all.costInput, beforeCosts, all.costs);
-    const byId = new Map(all.rows.map((r) => [r.id, r] as const));
-    const itemsById = new Map(all.items.map((i) => [i.id, i] as const));
-    const productInfo = await loadProducts(ctx.db, rid, productIds);
-    return {
-      since,
-      targetBp: ctx.rc.targetBp,
-      /** Active dishes on the menu (0 ⇒ "no recipes yet", never "prices are steady"). */
-      activeDishCount: all.rows.filter((r) => r.active && !r.isSubRecipe).length,
-      rows: diffs.map((d) => {
-        const r = byId.get(d.recipeId)!;
-        // The "why": the line whose cost moved most.
-        let driver: { itemId: string; deltaAgorot: number } | null = null;
-        for (const l of d.after.lines) {
-          const b = d.before.lines.find((x) => x.itemId === l.itemId);
-          const delta = l.costAgorot - (b?.costAgorot ?? 0);
-          if (!driver || Math.abs(delta) > Math.abs(driver.deltaAgorot)) driver = { itemId: l.itemId, deltaAgorot: delta };
-        }
-        const it = driver ? itemsById.get(driver.itemId) : undefined;
-        const prod = it?.productId ? productInfo.get(it.productId) : undefined;
-        const sub = it?.subRecipeId ? byId.get(it.subRecipeId) : undefined;
-        const priceBefore = it?.productId ? before.get(it.productId)?.unitPrice ?? null : null;
-        const priceNow = it?.productId ? all.prices.get(it.productId)?.unitPrice ?? null : null;
-        return {
-          recipeId: r.id,
-          name: r.name,
-          nameEn: r.nameEn,
-          isSubRecipe: r.isSubRecipe,
-          active: r.active,
-          beforeCostAgorot: d.before.portionCostAgorot,
-          afterCostAgorot: d.after.portionCostAgorot,
-          beforeFoodCostBp: d.before.foodCostBp,
-          afterFoodCostBp: d.after.foodCostBp,
-          costDeltaAgorot: d.portionCostDeltaAgorot,
-          marginDeltaAgorot: d.marginDeltaAgorot,
-          afterLight: r.isSubRecipe ? ('none' as const) : costLight(d.after.foodCostBp, ctx.rc.targetBp),
-          driver: driver && it
-            ? {
-                kind: it.productId ? ('product' as const) : ('subRecipe' as const),
-                name: prod?.name ?? sub?.name ?? '',
-                nameEn: prod?.nameEn ?? sub?.nameEn ?? null,
-                unit: prod?.unit ?? (it.productId ? all.prices.get(it.productId)?.unit : null) ?? null,
-                deltaAgorot: driver.deltaAgorot,
-                priceBefore,
-                priceNow,
-              }
-            : null,
-        };
-      }),
-    };
+  changes: recipesProcedure.query(({ ctx }) => computeChanges(ctx.db, ctx.session.restaurantId, ctx.rc)),
+
+  /**
+   * Dish price alerts (flag `dishPriceAlert`, on top of `recipes`): dishes whose
+   * food cost was at or under the restaurant target at the start of the month
+   * and is above it now, because an ingredient's PAID price rose — with the ₪
+   * per plate, the ingredient's price move and the supplier who charged it.
+   * With the flag off: `{ enabled: false, alerts: [] }` — never an error.
+   */
+  priceAlerts: recipesProcedure.query(async ({ ctx }) => {
+    if (!featureEnabled(ctx.rc.settings, 'dishPriceAlert')) return { enabled: false as const, targetBp: ctx.rc.targetBp, alerts: [] };
+    const ch = await computeChanges(ctx.db, ctx.session.restaurantId, ctx.rc);
+    return { enabled: true as const, targetBp: ch.targetBp, alerts: dishPriceAlerts(ch.rows, ch.targetBp) };
   }),
 
   /**

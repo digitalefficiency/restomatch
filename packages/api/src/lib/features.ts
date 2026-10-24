@@ -27,6 +27,8 @@ export const FEATURE_KEYS = [
   'leakCheck',
   'growth',
   'recipes',
+  // S17: alert on a dish whose food cost crossed the target because a supplier raised a price.
+  'dishPriceAlert',
   'integrations',
   'orderPricesOut',
   'supplierConfirm',

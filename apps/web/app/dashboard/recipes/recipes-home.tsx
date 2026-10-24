@@ -30,6 +30,7 @@ import { components } from '@/lib/i18n/messages/components';
 import { recipes as recipesNs } from '@/lib/i18n/messages/recipes';
 import { originalProps } from '@/lib/i18n/original';
 import { LIGHT_TONE, ils, ilsDelta, pct, priceText, type Light } from './recipe-ui';
+import { PriceAlertLine } from './price-alert';
 
 type ListOutput = inferRouterOutputs<AppRouter>['recipes']['list'];
 type Tab = 'dishes' | 'changes' | 'impact' | 'import' | 'pos';
@@ -42,6 +43,8 @@ export function RecipesHome({ initial, canSetTarget }: { initial: ListOutput; ca
   // The POS tab exists only when the `integrations` flag is on as well.
   const posProbe = trpc.recipes.posVsTheory.useQuery({ month: 'current' }, { staleTime: 60_000 });
   const showPos = !!posProbe.data && posProbe.data.reason !== 'integrationsOff';
+  // Dish price alerts (flag `dishPriceAlert`): `enabled: false` ⇒ nothing changes.
+  const alertsQ = trpc.recipes.priceAlerts.useQuery(undefined, { staleTime: 60_000 });
   const tabs: Tab[] = showPos ? ['dishes', 'changes', 'impact', 'pos', 'import'] : ['dishes', 'changes', 'impact', 'import'];
 
   return (
@@ -68,7 +71,7 @@ export function RecipesHome({ initial, canSetTarget }: { initial: ListOutput; ca
         ))}
       </div>
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
-        {tab === 'dishes' ? <DishesTab data={data} /> : null}
+        {tab === 'dishes' ? <DishesTab data={data} alerts={alertsQ.data?.enabled ? alertsQ.data : null} /> : null}
         {tab === 'changes' ? <ChangesTab /> : null}
         {tab === 'impact' ? <ImpactTab /> : null}
         {tab === 'import' ? <ImportTab onDone={() => setTab('dishes')} /> : null}
@@ -200,7 +203,14 @@ function Arrow({ from, to }: { from: string; to: string }) {
   );
 }
 
-function DishesTab({ data }: { data: ListOutput }) {
+function DishesTab({
+  data,
+  alerts,
+}: {
+  data: ListOutput;
+  alerts: { targetBp: number; alerts: Array<import('./price-alert').DishPriceAlert> } | null;
+}) {
+  const alertById = new Map((alerts?.alerts ?? []).map((a) => [a.recipeId, a] as const));
   const t = useT(recipesNs);
   const locale = useLocale();
   const [q, setQ] = useState('');
@@ -240,33 +250,44 @@ function DishesTab({ data }: { data: ListOutput }) {
               </tr>
             </thead>
             <tbody>
-              {dishes.map((r) => (
-                <tr key={r.id} className="border-b border-line/60 last:border-0 hover:bg-surface-2/50">
-                  <td className="px-4 py-3">
-                    <Link href={`/dashboard/recipes/${r.id}`} className="font-medium text-ink hover:text-primary">
-                      <Name name={r.name} nameEn={r.nameEn} />
-                    </Link>
-                    <div className="mt-0.5 flex flex-wrap gap-1.5 text-xs text-subtle">
-                      {r.category ? <span {...originalProps(r.category)}>{r.category}</span> : null}
-                      {!r.active ? <Badge>{t('list.inactive')}</Badge> : null}
-                      {!r.complete ? (
-                        <span className="inline-flex items-center gap-1 text-warn">
-                          <AlertTriangle className="h-3 w-3" aria-hidden="true" />
-                          {t('list.incomplete')}
-                        </span>
-                      ) : null}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-end tabular-nums">{ils(r.portionCostAgorot, locale)}</td>
-                  <td className="px-4 py-3 text-end tabular-nums text-muted">{ils(r.menuPriceAgorot, locale)}</td>
-                  <td className="px-4 py-3 text-end">
-                    <LightBadge light={r.light} bp={r.foodCostBp} />
-                  </td>
-                  <td className={cn('px-4 py-3 text-end font-semibold tabular-nums', (r.grossMarginAgorot ?? 0) < 0 && 'text-danger')}>
-                    {ils(r.grossMarginAgorot, locale)}
-                  </td>
-                </tr>
-              ))}
+              {dishes.flatMap((r) => {
+                const alert = alerts ? alertById.get(r.id) : undefined;
+                return [
+                  <tr key={r.id} className={cn('hover:bg-surface-2/50', alert ? '' : 'border-b border-line/60 last:border-0')}>
+                    <td className="px-4 py-3">
+                      <Link href={`/dashboard/recipes/${r.id}`} className="font-medium text-ink hover:text-primary">
+                        <Name name={r.name} nameEn={r.nameEn} />
+                      </Link>
+                      <div className="mt-0.5 flex flex-wrap gap-1.5 text-xs text-subtle">
+                        {r.category ? <span {...originalProps(r.category)}>{r.category}</span> : null}
+                        {!r.active ? <Badge>{t('list.inactive')}</Badge> : null}
+                        {!r.complete ? (
+                          <span className="inline-flex items-center gap-1 text-warn">
+                            <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                            {t('list.incomplete')}
+                          </span>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-end tabular-nums">{ils(r.portionCostAgorot, locale)}</td>
+                    <td className="px-4 py-3 text-end tabular-nums text-muted">{ils(r.menuPriceAgorot, locale)}</td>
+                    <td className="px-4 py-3 text-end">
+                      <LightBadge light={r.light} bp={r.foodCostBp} />
+                    </td>
+                    <td className={cn('px-4 py-3 text-end font-semibold tabular-nums', (r.grossMarginAgorot ?? 0) < 0 && 'text-danger')}>
+                      {ils(r.grossMarginAgorot, locale)}
+                    </td>
+                  </tr>,
+                  alert && alerts ? (
+                    // Full-width row: the name column is too narrow on a phone.
+                    <tr key={`${r.id}-alert`} className="border-b border-line/60 last:border-0">
+                      <td colSpan={5} className="px-4 pb-3 pt-0">
+                        <PriceAlertLine alert={alert} targetBp={alerts.targetBp} compact className="sticky start-4 mt-0 max-w-[calc(100vw-4rem)]" />
+                      </td>
+                    </tr>
+                  ) : null,
+                ];
+              })}
             </tbody>
           </table>
         </Card>
