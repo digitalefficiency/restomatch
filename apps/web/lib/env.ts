@@ -188,6 +188,22 @@ function isTruthyFlag(value: string | undefined): boolean {
  * NODE_ENV=test). Otherwise an unset DATABASE_URL_APP is a LOUD boot failure
  * rather than a silent owner fallback.
  */
+/**
+ * `next build` imports every route module to collect page data, and the DB
+ * modules (lib/db.ts, lib/authDb.ts) resolve their URL at import. A build
+ * without database env (a Vercel Preview with no DATABASE_URL) died there, even
+ * though no query runs at build time. ONLY in the build phase, with the URL
+ * missing, those modules get this placeholder instead: postgres.js connects
+ * lazily, so it is never dialled unless a page really queries during the build
+ * (then the build fails loudly, as it should). Runtime is unchanged — the boot
+ * guard (assertWebEnv, instrumentation) still refuses to serve without the URLs.
+ */
+export const BUILD_PHASE_DB_PLACEHOLDER = 'postgres://build:build@build-phase-placeholder.invalid:5432/none';
+
+export function isNextBuildPhase(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.NEXT_PHASE === 'phase-production-build';
+}
+
 export function resolveWebDbUrl(env: NodeJS.ProcessEnv = process.env): string {
   const appUrl = env.DATABASE_URL_APP;
   if (appUrl && appUrl.length > 0) return appUrl;
@@ -195,6 +211,8 @@ export function resolveWebDbUrl(env: NodeJS.ProcessEnv = process.env): string {
   const ownerFallbackAllowed =
     (env.NODE_ENV ?? 'development') === 'test' || isTruthyFlag(env.ALLOW_OWNER_DB);
   if (ownerFallbackAllowed && env.DATABASE_URL) return env.DATABASE_URL;
+
+  if (isNextBuildPhase(env)) return BUILD_PHASE_DB_PLACEHOLDER;
 
   throw new Error(
     '[env] DATABASE_URL_APP is required: the web app must serve tenant traffic on the non-owner ' +
