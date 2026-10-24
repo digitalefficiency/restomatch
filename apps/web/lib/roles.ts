@@ -56,6 +56,7 @@ export const ROUTE_ROLES: Record<string, UserRole[]> = {
   '/dashboard/reports/monthly': ['owner', 'manager'],
   // AI assistant (S14, flag aiAssistant): owner + manager only.
   '/dashboard/ask': ['owner', 'manager'],
+  '/dashboard/reports/digest': ['owner', 'manager'],
   '/dashboard/suppliers': ['owner', 'manager'],
   '/dashboard/catalog': ['owner', 'manager'],
   // Product pages are part of the catalog (names grid, price history, cheapest

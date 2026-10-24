@@ -349,6 +349,7 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'supplierConfirm.responses': 'attack',
   // S11: dock price context (flag `dockPriceContext`).
   'receiving.priceContext': 'attack',
+  'monthlyReport.digest': 'isolation',
 };
 
 function listProcedurePaths(): string[] {
@@ -1971,6 +1972,14 @@ describe('recovery + monthly report (A → B)', () => {
     expect(pdf.base64.length).toBeGreaterThan(100);
   });
 
+  it('monthlyReport.digest shows A-scoped data and A recipients only', async () => {
+    const d = await callerFor(A).monthlyReport.digest({ locale: 'en' });
+    const json = JSON.stringify(d);
+    expect(json).not.toContain(B.supplierName);
+    expect(d.data.restaurantName).toBe('Resto A');
+    expect(d.to.every((e) => !e.includes('-B@'))).toBe(true);
+  });
+
   it('DB level: A rows can never reference B suppliers / invoices / discrepancies / lines (composite FKs, 23503)', async () => {
     // A B discrepancy with no claim yet (so the unique key cannot answer first).
     const [freshB] = await db
@@ -2008,9 +2017,10 @@ describe('recovery + monthly report (A → B)', () => {
   it('flags are per restaurant: B with the flag off is refused while A works', async () => {
     await db.update(restaurants).set({ settings: {} as never }).where(eq(restaurants.id, B.restaurantId));
     try {
-      expect(await callerFor(B).recovery.flags()).toEqual({ recovery: false, monthlyReport: false });
-      expect(await callerFor(A).recovery.flags()).toEqual({ recovery: true, monthlyReport: true });
+      expect(await callerFor(B).recovery.flags()).toEqual({ recovery: false, monthlyReport: false, monthlyDigestPreview: false });
+      expect(await callerFor(A).recovery.flags()).toEqual({ recovery: true, monthlyReport: true, monthlyDigestPreview: true });
       await expect(callerFor(B).recovery.summary()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      await expect(callerFor(B).monthlyReport.digest()).rejects.toMatchObject({ code: 'FORBIDDEN' });
       await expect(callerFor(A).recovery.summary()).resolves.toBeDefined();
     } finally {
       await db.update(restaurants).set({ settings: { features: { all: true } } as never }).where(eq(restaurants.id, B.restaurantId));
