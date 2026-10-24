@@ -13,7 +13,7 @@ import {
 } from '@restomatch/db';
 import { financeProcedure, managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
-import { assertFeature } from '../lib/featureGate';
+import { assertFeatureOn } from '../lib/featureGate';
 import { featureEnabled } from '../lib/features';
 import { CatalogFileError, parseCatalogFile, type ParsedTable } from '../catalog/parse';
 import {
@@ -127,7 +127,7 @@ export const contractsRouter = router({
     .input(z.object({ supplierId: z.string().uuid().optional() }).strict().optional())
     .query(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
-      await assertFeature(ctx.db, rid, 'contracts');
+      await assertFeatureOn(ctx.db, rid, 'contracts');
       const conds = [eq(supplierContractPrices.restaurantId, rid)];
       if (input?.supplierId) conds.push(eq(supplierContractPrices.supplierId, input.supplierId));
       return ctx.db
@@ -161,7 +161,7 @@ export const contractsRouter = router({
     .input(z.object({ supplierId: z.string().uuid() }).strict())
     .query(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
-      await assertFeature(ctx.db, rid, 'contracts');
+      await assertFeatureOn(ctx.db, rid, 'contracts');
       await assertSupplierOwned(ctx.db, input.supplierId, rid);
       const rows = await ctx.db
         .select({
@@ -197,7 +197,7 @@ export const contractsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
-      await assertFeature(ctx.db, rid, 'contracts');
+      await assertFeatureOn(ctx.db, rid, 'contracts');
       await assertSupplierOwned(ctx.db, input.supplierId, rid);
       await assertProductOwned(ctx.db, input.productId, rid);
       try {
@@ -240,7 +240,7 @@ export const contractsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
-      await assertFeature(ctx.db, rid, 'contracts');
+      await assertFeatureOn(ctx.db, rid, 'contracts');
       const existing = await assertContractOwned(ctx.db, input.id, rid);
       const validFrom = input.validFrom ?? existing.validFrom;
       const validTo = input.validTo === undefined ? existing.validTo : input.validTo;
@@ -271,7 +271,7 @@ export const contractsRouter = router({
     .input(z.object({ id: z.string().uuid() }).strict())
     .mutation(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
-      await assertFeature(ctx.db, rid, 'contracts');
+      await assertFeatureOn(ctx.db, rid, 'contracts');
       await assertContractOwned(ctx.db, input.id, rid);
       await ctx.db
         .delete(supplierContractPrices)
@@ -284,7 +284,7 @@ export const contractsRouter = router({
     .input(z.object({ supplierId: z.string().uuid(), file: FileInput }).strict())
     .mutation(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
-      await assertFeature(ctx.db, rid, 'contracts');
+      await assertFeatureOn(ctx.db, rid, 'contracts');
       await assertSupplierOwned(ctx.db, input.supplierId, rid);
       const table = await parseUpload(input.file);
       return {
@@ -310,7 +310,7 @@ export const contractsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
-      await assertFeature(ctx.db, rid, 'contracts');
+      await assertFeatureOn(ctx.db, rid, 'contracts');
       await assertSupplierOwned(ctx.db, input.supplierId, rid);
       if ((!input.mapping.name && !input.mapping.sku) || !input.mapping.price) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'CONTRACT_MAPPING: חובה למפות עמודת מחיר ועמודת שם או מק״ט' });
@@ -335,7 +335,7 @@ export const contractsRouter = router({
     .input(z.object({ invoiceId: z.string().uuid() }).strict())
     .query(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
-      await assertFeature(ctx.db, rid, 'contracts');
+      await assertFeatureOn(ctx.db, rid, 'contracts');
       // Restaurant-scoped by construction: a foreign invoice id yields [].
       return findOverContractLines(ctx.db, rid, { invoiceIds: [input.invoiceId] });
     }),
@@ -345,7 +345,7 @@ export const contractsRouter = router({
     .input(z.object({ days: z.number().int().min(1).max(366).default(90) }).strict().optional())
     .query(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
-      await assertFeature(ctx.db, rid, 'contracts');
+      await assertFeatureOn(ctx.db, rid, 'contracts');
       const since = new Date(Date.now() - (input?.days ?? 90) * 86_400_000);
       // Total over EVERY line; only the newest 500 are returned for display.
       let truncated = false;

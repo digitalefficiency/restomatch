@@ -31,7 +31,6 @@ export const APP_ERROR_CODES = [
   'auth.unauthorized',
   'auth.forbidden',
   'input.invalid',
-  // Wave-1 per-restaurant feature flags (MASTER-PLAN §1.3): the feature is off.
   'FEATURE_DISABLED',
   'leakCheck.invalidLink',
   'growth.referralInvalid',
