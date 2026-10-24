@@ -25,6 +25,7 @@
 import {
   buildRules,
   evaluateApproval,
+  matchActivitySummary,
   resolveApprovalThresholds,
   type ApprovalContext,
 } from '@restomatch/api';
@@ -429,6 +430,7 @@ async function main() {
       .returning();
 
     let invoiceHasOpenBlock = false;
+    const feedFindings: Parameters<typeof matchActivitySummary>[0] = [];
     for (const d of result.discrepancies) {
       const ctx: ApprovalContext = {
         discrepancy: { type: d.type, severity: d.severity, deltaAmount: d.deltaAmount },
@@ -437,6 +439,7 @@ async function main() {
       const decision = evaluateApproval(ctx, rules);
       const auto = decision.action === 'auto_approve';
       const status = auto ? 'accepted' : recent ? 'open' : 'resolved';
+      feedFindings.push({ type: d.type, severity: d.severity, deltaAmount: d.deltaAmount, resolutionStatus: status });
       if (status === 'open') {
         openCount += 1;
         if (d.severity === 'block') invoiceHasOpenBlock = true;
@@ -471,12 +474,14 @@ async function main() {
     }
 
     const issues = result.discrepancies.filter((d) => d.severity !== 'info').length;
+    // The same feed story as the real match writer (the hero's leak rule).
+    const feed = matchActivitySummary(feedFindings, totalInclVat, { poMatched: true });
     await db.insert(activityEvents).values([
       {
         restaurantId,
         eventType: 'invoice_received',
         title: `חשבונית ${invNumber} התקבלה`,
-        detail: `${supplier.name} · ₪${totalInclVat.toFixed(0)} כולל מע״מ`,
+        detail: `${supplier.name} · ₪${Math.round(totalInclVat).toLocaleString('he-IL')} כולל מע״מ`,
         entityType: 'invoice',
         entityId: invoice!.id,
         actorId: receiverId,
@@ -494,9 +499,7 @@ async function main() {
         restaurantId,
         eventType: 'invoice_matched',
         title: `חשבונית ${invNumber} הותאמה`,
-        detail: issues
-          ? `${supplier.name} · ${issues} חריגות · ₪${result.totalDiscrepancyAmount.toFixed(0)} בבדיקה`
-          : `${supplier.name} · תואמת להזמנה ולקבלה`,
+        detail: `${supplier.name} · ${feed.detail}`,
         entityType: 'match_run',
         entityId: matchRun!.id,
         metadata: {
@@ -506,6 +509,11 @@ async function main() {
           supplierNameEn: supplier.nameEn ?? null,
           discrepancyCount: issues,
           potentialLossIls: issues ? result.totalDiscrepancyAmount : 0,
+          leakCount: feed.leakCount,
+          leakIls: feed.leakIls,
+          pendingLink: feed.pendingLink,
+          poMatched: feed.poMatched,
+          reviewCount: feed.reviewCount,
           status: result.status,
         },
         createdAt: new Date(receivedAt.getTime() + 60 * 1000),

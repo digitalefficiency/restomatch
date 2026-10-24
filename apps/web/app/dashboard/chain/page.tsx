@@ -132,8 +132,9 @@ export default async function ChainPage({
   );
   const noData = totals.spendIls === 0 && totals.leakIls === 0;
   const compared = data.compare !== 'off';
+  // No % against a comparison period with almost no data (totals.thinBase): calm, never a false alarm.
   const leakDeltaPct =
-    totals.prevLeakIls !== null && totals.prevLeakIls > 0
+    totals.prevLeakIls !== null && totals.prevLeakIls > 0 && !totals.thinBase
       ? Math.round(((totals.leakIls - totals.prevLeakIls) / totals.prevLeakIls) * 100)
       : undefined;
   const periodLabel = data.periodStart && data.periodEnd ? rangeLabel(view.period, data.periodStart, data.periodEnd, locale) : '';
@@ -403,9 +404,16 @@ export default async function ChainPage({
                         ) : b.leakDeltaIls === 0 ? (
                           <span className="text-subtle">{t('dashboard.ranking.flat')}</span>
                         ) : (
-                          <span className={b.leakDeltaIls > 0 ? 'text-danger' : 'text-primary'}>
-                            {b.leakDeltaIls > 0 ? '▲' : '▼'} {ils(Math.abs(b.leakDeltaIls))}
-                          </span>
+                          b.thinBase ? (
+                            <span className="text-muted" title={t('dashboard.ranking.thinBase')} data-delta="thin">
+                              {b.leakDeltaIls > 0 ? '+' : '−'}
+                              {ils(Math.abs(b.leakDeltaIls))}
+                            </span>
+                          ) : (
+                            <span className={b.leakDeltaIls > 0 ? 'text-danger' : 'text-primary'}>
+                              {b.leakDeltaIls > 0 ? '▲' : '▼'} {ils(Math.abs(b.leakDeltaIls))}
+                            </span>
+                          )
                         )}
                       </td>
                     ) : null}

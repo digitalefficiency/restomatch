@@ -69,6 +69,7 @@ export const en: Shape<typeof he> = {
     down: 'Down {pct}',
     flat: 'No change',
     noBase: 'No comparison data',
+    thinBase: 'too little data in that period for a %',
   },
   kpis: {
     leak: 'Leak in period',

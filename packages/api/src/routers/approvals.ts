@@ -18,6 +18,7 @@ import {
 } from '@restomatch/db';
 import { authedProcedure, financeProcedure, memberProcedure, router } from '../trpc';
 import { logActivity } from '../activity';
+import { canActOn, expandVisibleRoles } from '../lib/roles';
 import { notZeroShortTwin } from '@restomatch/charts';
 
 const ResolutionEnum = z.enum(['accepted', 'rejected', 'escalated']);
@@ -289,20 +290,6 @@ export const approvalsRouter = router({
     }),
 });
 
-function expandVisibleRoles(role: UserRole): UserRole[] {
-  // Owner sees everyone's queue; manager sees manager+; bookkeeper sees bookkeeper.
-  switch (role) {
-    case 'owner':
-      return ['owner', 'manager', 'bookkeeper'];
-    case 'manager':
-      return ['manager'];
-    case 'bookkeeper':
-      return ['bookkeeper'];
-    default:
-      return [role];
-  }
-}
-
 async function ensureCanAct(
   ctx: { db: Parameters<typeof eq>[0] extends never ? never : import('@restomatch/db').Database; session: { restaurantId: string; role: UserRole } },
   discrepancyId: string,
@@ -321,14 +308,13 @@ async function ensureCanAct(
   // No required role → owner/manager may resolve (not a bookkeeper, whose
   // authority is limited to bookkeeper-routed items).
   if (!row.requiredRole) {
-    if (ctx.session.role === 'owner' || ctx.session.role === 'manager') return;
+    if (canActOn(ctx.session.role, null)) return;
     throw new TRPCError({
       code: 'FORBIDDEN',
       message: `role ${ctx.session.role} cannot act on an unrouted discrepancy`,
     });
   }
-  const allowed = expandVisibleRoles(ctx.session.role);
-  if (!allowed.includes(row.requiredRole)) {
+  if (!canActOn(ctx.session.role, row.requiredRole)) {
     throw new TRPCError({
       code: 'FORBIDDEN',
       message: `role ${ctx.session.role} cannot act on discrepancy requiring ${row.requiredRole}`,

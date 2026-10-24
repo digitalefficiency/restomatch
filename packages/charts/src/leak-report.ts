@@ -1,5 +1,6 @@
 import { sql, type Database } from '@restomatch/db';
 import { computeLeakHero, type LeakHero } from './leak-hero';
+import { LEAK_FILTER, LIVE_DUPLICATE, originalChecked } from './leak-views';
 
 /**
  * The monthly leak report — the one-page, print-ready story an owner can hand
@@ -82,7 +83,6 @@ const n = (v: unknown): number => (v == null ? 0 : Number(v));
 const ils = (v: unknown): number => Math.round(n(v) * 100) / 100;
 const str = (v: unknown): string | null => (v == null ? null : String(v));
 
-const LEAK_FILTER = sql`d.severity IN ('warn','block') AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL')`;
 const MONTH_RE = /^(\d{4})-(0[1-9]|1[0-2])$/;
 
 /** Parse 'YYYY-MM'; throws on anything else (callers validate first). */
@@ -130,7 +130,10 @@ export async function computeLeakReport(
         EXISTS (SELECT 1 FROM match_runs mr WHERE mr.invoice_id = inv.id AND mr.restaurant_id = ${restaurantId}) AS matched,
         COALESCE((SELECT SUM(l.amt) FROM lines l WHERE l.invoice_id = inv.id AND l.counts), 0) AS raw_leak,
         EXISTS (SELECT 1 FROM lines l WHERE l.invoice_id = inv.id AND l.type = 'UNORDERED_ARRIVAL'
-                AND l.resolution_status IN ('open','escalated')) AS no_po
+                AND l.resolution_status IN ('open','escalated')) AS no_po,
+        EXISTS (SELECT 1 FROM match_runs mr JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${restaurantId}
+                WHERE mr.invoice_id = inv.id AND mr.restaurant_id = ${restaurantId} AND ${LIVE_DUPLICATE})
+          AND ${originalChecked(restaurantId, sql`inv.id`)} AS dup_copy
       FROM inv
     )`;
 
@@ -145,7 +148,7 @@ export async function computeLeakReport(
       WITH ${monthInv}
       SELECT per.supplier_id, s.name, s.name_en,
         COUNT(*) FILTER (WHERE per.matched AND NOT per.no_po) AS invoice_count,
-        COALESCE(SUM(per.total_excl) FILTER (WHERE per.matched AND NOT per.no_po), 0) AS spend,
+        COALESCE(SUM(per.total_excl) FILTER (WHERE per.matched AND NOT per.no_po AND NOT per.dup_copy), 0) AS spend,
         COALESCE(SUM(LEAST(per.raw_leak, per.total)), 0) AS leak
       FROM per
       LEFT JOIN suppliers s ON s.id = per.supplier_id AND s.restaurant_id = ${restaurantId}
