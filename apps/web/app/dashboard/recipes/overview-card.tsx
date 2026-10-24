@@ -59,7 +59,7 @@ export async function RecipesOverviewCard() {
         </div>
         <Link
           href="/dashboard/recipes"
-          className="inline-flex items-center gap-1 rounded-lg text-sm font-semibold text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+          className="touch-target inline-flex items-center gap-1 rounded-lg text-sm font-semibold text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
         >
           {t('overviewCard.open')}
           <ArrowLeft className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
@@ -69,7 +69,7 @@ export async function RecipesOverviewCard() {
         <ul className="mt-4 divide-y divide-line">
           {top.map((r) => (
             <li key={r.recipeId} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm">
-              <Link href={`/dashboard/recipes/${r.recipeId}`} className="font-medium text-ink hover:text-primary">
+              <Link href={`/dashboard/recipes/${r.recipeId}`} className="touch-target inline-flex items-center font-medium text-ink hover:text-primary">
                 {locale === 'en' && r.nameEn ? r.nameEn : <span {...originalProps(r.name)}>{r.name}</span>}
               </Link>
               <span className="flex items-center gap-4 text-muted">

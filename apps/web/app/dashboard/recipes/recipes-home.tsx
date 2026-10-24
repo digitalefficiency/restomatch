@@ -220,11 +220,11 @@ function DishesTab({
           <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-subtle" aria-hidden="true" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('list.search')} aria-label={t('list.search')} className="ps-9" />
         </div>
-        <LinkButton href="/dashboard/recipes/new" size="sm">
+        <LinkButton href="/dashboard/recipes/new" size="sm" className="touch-target">
           <Plus className="h-4 w-4" aria-hidden="true" />
           {t('list.newDish')}
         </LinkButton>
-        <LinkButton href="/dashboard/recipes/new?sub=1" size="sm" variant="secondary">
+        <LinkButton href="/dashboard/recipes/new?sub=1" size="sm" variant="secondary" className="touch-target">
           <Plus className="h-4 w-4" aria-hidden="true" />
           {t('list.newSub')}
         </LinkButton>
@@ -250,7 +250,7 @@ function DishesTab({
                 return [
                   <tr key={r.id} className={cn('hover:bg-surface-2/50', alert ? '' : 'border-b border-line/60 last:border-0')}>
                     <td className="px-4 py-3">
-                      <Link href={`/dashboard/recipes/${r.id}`} className="font-medium text-ink hover:text-primary">
+                      <Link href={`/dashboard/recipes/${r.id}`} className="touch-target inline-flex items-center font-medium text-ink hover:text-primary">
                         <Name name={r.name} nameEn={r.nameEn} />
                       </Link>
                       <div className="mt-0.5 flex flex-wrap gap-1.5 text-xs text-subtle">
@@ -550,7 +550,7 @@ function PosTab({ targetBp }: { targetBp: number }) {
                 {d.rows.map((r) => (
                   <tr key={r.recipeId} className="border-b border-line/60 last:border-0">
                     <td className="px-4 py-3">
-                      <Link href={`/dashboard/recipes/${r.recipeId}`} className="font-medium text-ink hover:text-primary">
+                      <Link href={`/dashboard/recipes/${r.recipeId}`} className="touch-target inline-flex items-center font-medium text-ink hover:text-primary">
                         <Name name={r.name} nameEn={r.nameEn} />
                       </Link>
                       {r.costIncomplete ? (
