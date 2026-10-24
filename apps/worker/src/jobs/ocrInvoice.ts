@@ -1,6 +1,6 @@
 import { fillEnglishNames, meterOcrScan } from '@restomatch/api';
 import { matchProductTopN, MockEmbeddingProvider } from '@restomatch/catalog';
-import { and, eq, invoiceLines, invoices, ne, restaurants, type Database } from '@restomatch/db';
+import { and, eq, goodsReceipts, invoiceLines, invoices, ne, restaurants, type Database } from '@restomatch/db';
 import {
   ClaudeVision,
   runOcrPipeline,
@@ -179,7 +179,7 @@ export function startOcrInvoiceWorker() {
       // auto-proceed. Low-confidence (parsed / needs-review) invoices wait for a
       // human to confirm product matches first (match.runForInvoice on demand).
       // A queue failure must never break the OCR persistence above.
-      if (!needsHumanReview) {
+      if (!needsHumanReview && (await ocrMayAutoMatch(db, job.data.restaurantId, job.data.grId))) {
         try {
           await enqueueMatchInvoice({
             restaurantId: job.data.restaurantId,
@@ -338,4 +338,26 @@ export async function markOcrFailed(
         eq(invoices.status, 'ocr_pending'),
       ),
     );
+}
+
+/**
+ * May the OCR job chain into the match right away? Not while the scan's goods
+ * receipt is still being counted (status 'pending'): its gr_lines are empty, so
+ * the engine would read every line as short AND over-billed and the leak hero
+ * would jump by the whole invoice. receiving.submitReceipt enqueues the match
+ * once the count is in. Scans with no receipt (email / WhatsApp / upload) and
+ * receipts already submitted match at once.
+ */
+export async function ocrMayAutoMatch(
+  db: Database,
+  restaurantId: string,
+  grId: string | undefined,
+): Promise<boolean> {
+  if (!grId) return true;
+  const [gr] = await db
+    .select({ status: goodsReceipts.status })
+    .from(goodsReceipts)
+    .where(and(eq(goodsReceipts.id, grId), eq(goodsReceipts.restaurantId, restaurantId)))
+    .limit(1);
+  return gr?.status !== 'pending';
 }

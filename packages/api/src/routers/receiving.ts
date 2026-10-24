@@ -10,20 +10,23 @@ import {
   grLines,
   gte,
   inArray,
+  isNotNull,
   isNull,
   invoiceLines,
   or,
   sql,
   invoices,
   lte,
+  matchRuns,
   ne,
   poLines,
   products,
   purchaseOrders,
   restaurants,
   suppliers,
+  type Database,
 } from '@restomatch/db';
-import { enqueueOcrInvoice, isQueueUnavailableError } from '@restomatch/queue';
+import { enqueueMatchInvoice, enqueueOcrInvoice, isQueueUnavailableError } from '@restomatch/queue';
 import type { InvoiceOcrResult } from '@restomatch/types';
 import { assertGrOwned, assertSupplierOwned } from '../tenant';
 import { fillEnglishNames } from '../receiving/english';
@@ -628,7 +631,12 @@ export const receivingRouter = router({
    */
   submitReceipt: receiverProcedure
     .input(
-      z.object({ grId: z.string().uuid(), signatureUrl: z.string().url().max(2048).optional() }),
+      z.object({
+        grId: z.string().uuid(),
+        signatureUrl: z.string().url().max(2048).optional(),
+        /** The invoice(s) scanned on this receipt (the wizard's registerInvoice ids). */
+        invoiceIds: z.array(z.string().uuid()).max(10).optional(),
+      }),
     )
     .mutation(async ({ ctx, input }) => {
       await assertGrOwned(ctx.db, input.grId, ctx.session.restaurantId);
@@ -664,6 +672,7 @@ export const receivingRouter = router({
         )
         .returning();
       if (!receipt) throw new TRPCError({ code: 'NOT_FOUND', message: 'GR not found' });
+      await rematchAfterCount(ctx.db, ctx.session.restaurantId, input.grId, input.invoiceIds ?? []);
       return receipt;
     }),
 
@@ -757,6 +766,7 @@ export const receivingRouter = router({
           invoiceId: invoice.id,
           supplierId: input.supplierId,
           imageUrl: input.imageUrl,
+          grId: input.grId,
           ...(mockProviders ? { mockProviders } : {}),
         });
       } catch (err) {
@@ -827,3 +837,44 @@ export const receivingRouter = router({
       .orderBy(desc(invoices.createdAt));
   }),
 });
+
+/**
+ * The count is in: (re-)match the receipt's invoices so the engine sees what was
+ * actually received. The invoices are the ones the wizard scanned on this
+ * receipt (tenant-checked here) plus any already matched against it — e.g. a
+ * run made before the count, when every line still read as short. The worker
+ * replaces such a run (keeping people's decisions) and skips an invoice still in
+ * OCR (the OCR job matches it when it lands). A queue failure never fails the
+ * submit: the receipt is saved; match.runForInvoice can re-run it on demand.
+ */
+async function rematchAfterCount(
+  db: Database,
+  restaurantId: string,
+  grId: string,
+  scanned: string[],
+): Promise<void> {
+  const ids = new Set<string>();
+  if (scanned.length > 0) {
+    const own = await db
+      .select({ id: invoices.id })
+      .from(invoices)
+      .where(and(eq(invoices.restaurantId, restaurantId), inArray(invoices.id, scanned)));
+    for (const r of own) ids.add(r.id);
+  }
+  const ran = await db
+    .selectDistinct({ id: matchRuns.invoiceId })
+    .from(matchRuns)
+    .where(and(eq(matchRuns.restaurantId, restaurantId), eq(matchRuns.grId, grId), isNotNull(matchRuns.invoiceId)));
+  for (const r of ran) if (r.id) ids.add(r.id);
+  for (const invoiceId of ids) {
+    try {
+      await enqueueMatchInvoice({ restaurantId, invoiceId, rematch: true });
+    } catch (err) {
+      console.error(
+        `[receiving.submitReceipt] failed to enqueue the re-match for invoice=${invoiceId}` +
+          (isQueueUnavailableError(err) ? ' (queue.unavailable)' : ''),
+        err,
+      );
+    }
+  }
+}
