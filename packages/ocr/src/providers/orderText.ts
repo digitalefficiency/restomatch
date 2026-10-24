@@ -84,6 +84,11 @@ const QTY_FIRST = new RegExp(String.raw`^${NUM}\s*(?:${UNIT})?\s*(?:x|×|\*)?\s*
 const NAME_FIRST = new RegExp(String.raw`^(.+?)\s*[-–:]?\s*(?:x|×|\*)?\s*${NUM}\s*(?:${UNIT})?$`, 'iu');
 const SUPPLIER_RE = /^(?:ספק|לכבוד|אל|supplier|to)\s*[:\-–]\s*(.+)$/iu;
 const BULLET_RE = /^\s*(?:[-•*·▪●]|\d{1,2}[.)])\s+/u;
+/** Header / reference lines whose number is not a quantity ("הזמנה מספר 4521", "טל׳ 050…"). */
+const NOT_ITEM_RE =
+  /^(?:הזמנה|הזמנת|מספר|מס['׳]?|טל['׳]?|טלפון|נייד|ח\.?פ|ע\.?מ|ת\.?ז|תאריך|כתובת|סניף|שעה|order|ref|no\.?|number|tel|phone|mobile|date|address|invoice|#)(?![\p{L}])/iu;
+/** Largest quantity a restaurant order line plausibly carries (anything above is a code or a number). */
+const MAX_LINE_QTY = 100_000;
 
 const toNum = (s: string) => Number(s.replace(',', '.'));
 
@@ -135,8 +140,10 @@ export function parseOrderLine(raw: string): OrderTextLine | null {
       unit = n[3] ?? null;
     }
   }
-  if (qty == null || !Number.isFinite(qty) || qty <= 0 || !name) return null;
+  if (qty == null || !Number.isFinite(qty) || qty <= 0 || qty > MAX_LINE_QTY || !name) return null;
   const productName = cleanName(name);
+  // A digit glued to the quantity's left ("he-1366-1792…", "מק״ט 45-12") makes it a code.
+  if (/[\d][-–/]$/u.test(name.trimEnd()) || NOT_ITEM_RE.test(productName)) return null;
   // A name with no letters ("10 - 12") is not an item.
   if (!/\p{L}/u.test(productName) || productName.length > 200) return null;
   if (unitPrice != null && !(Number.isFinite(unitPrice) && unitPrice >= 0)) unitPrice = null;
@@ -153,7 +160,7 @@ export function parseOrderTextDeterministic(text: string): OrderTextExtraction {
       continue;
     }
     const l = parseOrderLine(raw);
-    if (l) lines.push(l);
+    if (l && OrderTextLine.safeParse(l).success) lines.push(l);
     if (lines.length >= ORDER_TEXT_MAX_LINES) break;
   }
   return { supplierName, lines };

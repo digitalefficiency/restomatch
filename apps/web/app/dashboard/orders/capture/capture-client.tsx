@@ -130,13 +130,13 @@ export function CaptureClient({ initialText }: { initialText: string }) {
                 const price = l.unitPriceExpected != null ? Number(l.unitPriceExpected) : null;
                 return (
                   <li key={l.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3">
-                    <span className="min-w-0 flex-1 font-semibold text-ink" {...originalProps(name)}>
+                    <span className="w-full min-w-0 break-words font-semibold text-ink sm:w-auto sm:flex-1" {...originalProps(name)}>
                       {name}
                     </span>
-                    <span className="tabular-nums text-ink">
+                    <span className="whitespace-nowrap tabular-nums text-ink">
                       {formatNumber(Number(l.qtyOrdered), locale)} <UnitText unit={l.unit} />
                     </span>
-                    <span className="w-24 text-end tabular-nums text-muted">
+                    <span className="ms-auto whitespace-nowrap text-end tabular-nums text-muted sm:ms-0 sm:w-24">
                       {price != null ? formatIls(price, { locale, maximumFractionDigits: 2 }) : t('orderCapture.noPrice')}
                     </span>
                     <Badge tone={l.productId ? 'accent' : 'neutral'}>

@@ -44,7 +44,7 @@ describe('order text parser (deterministic)', () => {
   });
 
   it('ignores greetings, times, phone numbers and lines without an item', () => {
-    for (const s of ['שלום', 'תודה!', 'עד 10:30', '050-1234567', '10 - 12', 'משלוח 25/10', '', '   ']) {
+    for (const s of ['שלום', 'תודה!', 'עד 10:30', '050-1234567', '10 - 12', 'משלוח 25/10', 'הזמנה מספר 4521', "מס' הזמנה 778", 'Order #1234', 'טלפון 0501234567', 'בדיקה he-1366-1792823093043', 'קוד 9999999', '', '   ']) {
       expect(parseOrderLine(s), s).toBeNull();
     }
   });
