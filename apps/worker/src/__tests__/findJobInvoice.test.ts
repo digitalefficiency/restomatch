@@ -51,6 +51,31 @@ describe('findJobInvoice', () => {
     expect(found).toEqual({ id, supplierId: t.supplierId });
   });
 
+  it('waits for an UNCOMMITTED row on another connection (the real request transaction)', async () => {
+    const t = await newTenant('open transaction');
+    const writer = createDb(testDbUrl()); // the web request's own connection
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let id = '';
+    const request = writer.transaction(async (tx) => {
+      const [inv] = await tx
+        .insert(invoices)
+        .values({ restaurantId: t.restaurantId, supplierId: t.supplierId, status: 'ocr_pending', source: 'photo', rawImageUrl: 'https://x/r.jpg' })
+        .returning();
+      id = inv!.id;
+      await held; // registerInvoice has enqueued the job; COMMIT comes later
+    });
+    while (!id) await new Promise((r) => setTimeout(r, 10));
+    // Invisible to the worker's connection while the transaction is open…
+    const [early] = await db.select({ id: invoices.id }).from(invoices).where(eq(invoices.id, id));
+    expect(early).toBeUndefined();
+    const lookup = findJobInvoice(db, t.restaurantId, id, [100, 200, 400, 800]);
+    setTimeout(release, 300);
+    await request;
+    // …and found once it commits, within the backoff.
+    expect(await lookup).toEqual({ id, supplierId: t.supplierId });
+  });
+
   it("still refuses another restaurant's invoice", async () => {
     const a = await newTenant('tenant A');
     const b = await newTenant('tenant B');
