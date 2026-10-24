@@ -672,7 +672,7 @@ export const receivingRouter = router({
         )
         .returning();
       if (!receipt) throw new TRPCError({ code: 'NOT_FOUND', message: 'GR not found' });
-      await rematchAfterCount(ctx.db, ctx.session.restaurantId, input.grId, input.invoiceIds ?? []);
+      await rematchAfterCount(ctx.db, ctx.session.restaurantId, receipt, input.invoiceIds ?? []);
       return receipt;
     }),
 
@@ -840,7 +840,7 @@ export const receivingRouter = router({
 
 /**
  * The count is in: (re-)match the receipt's invoices so the engine sees what was
- * actually received. The invoices are the ones the wizard scanned on this
+ * actually received, against the receipt's own PO. The invoices are the ones the wizard scanned on this
  * receipt (tenant-checked here) plus any already matched against it — e.g. a
  * run made before the count, when every line still read as short. The worker
  * replaces such a run (keeping people's decisions) and skips an invoice still in
@@ -850,9 +850,10 @@ export const receivingRouter = router({
 async function rematchAfterCount(
   db: Database,
   restaurantId: string,
-  grId: string,
+  receipt: { id: string; poId: string | null },
   scanned: string[],
 ): Promise<void> {
+  const grId = receipt.id;
   const ids = new Set<string>();
   if (scanned.length > 0) {
     const own = await db
@@ -868,7 +869,13 @@ async function rematchAfterCount(
   for (const r of ran) if (r.id) ids.add(r.id);
   for (const invoiceId of ids) {
     try {
-      await enqueueMatchInvoice({ restaurantId, invoiceId, rematch: true });
+      await enqueueMatchInvoice({
+        restaurantId,
+        invoiceId,
+        rematch: true,
+        // Matched against the order that was counted, not a discovered one.
+        ...(receipt.poId ? { poId: receipt.poId } : {}),
+      });
     } catch (err) {
       console.error(
         `[receiving.submitReceipt] failed to enqueue the re-match for invoice=${invoiceId}` +

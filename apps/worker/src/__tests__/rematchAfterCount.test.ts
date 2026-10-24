@@ -203,6 +203,30 @@ describe('match-invoice job', () => {
     await db.delete(goodsReceipts).where(eq(goodsReceipts.id, grId));
   });
 
+  it("the re-match is pinned to the receipt's PO, even when another open PO is a nearer fit", async () => {
+    const before = await hero();
+    const { grId, invoiceId, grLineIds } = await receiptWithInvoice();
+    // A decoy order from the same supplier, due at 00:30 on the invoice's local day:
+    // discovery ranks by day and then takes the earliest — the decoy.
+    const [decoy] = await db
+      .insert(purchaseOrders)
+      .values({ restaurantId, supplierId, status: 'sent', source: 'manual', expectedDeliveryAt: new Date('2026-10-24T21:30:00Z'), notes: 'decoy' })
+      .returning();
+    try {
+      await countAsOrderedAndSubmit(grId, grLineIds);
+      const out = await matchInvoiceForJob(db, { restaurantId, invoiceId, rematch: true, poId });
+      expect(out.persisted).not.toBeNull();
+      const [run] = await db.select({ poId: matchRuns.poId, grId: matchRuns.grId }).from(matchRuns).where(eq(matchRuns.invoiceId, invoiceId));
+      expect(run).toEqual({ poId, grId });
+      expect(await hero()).toBe(before);
+    } finally {
+      await db.delete(matchRuns).where(eq(matchRuns.invoiceId, invoiceId));
+      await db.delete(invoices).where(eq(invoices.id, invoiceId));
+      await db.delete(goodsReceipts).where(eq(goodsReceipts.id, grId));
+      await db.delete(purchaseOrders).where(eq(purchaseOrders.id, decoy!.id));
+    }
+  });
+
   it('a run made before the count is replaced by the re-match — the hero comes back', async () => {
     const before = await hero();
     const { grId, invoiceId, grLineIds } = await receiptWithInvoice();
