@@ -271,23 +271,28 @@ export function claimableIls(
 
 /** Bidi / direction marks an RTL invoice may carry between tokens. */
 const BIDI_MARKS = /[‎‏‪-‮⁦-⁩]/g;
-/** A delivery-note prefix: `ת.מ.` / `ת.מ:` / `תעודת משלוח (מס׳)` / `DN`, with `#` / `:` after it. */
-const NOTE_PREFIX = String.raw`(?:תעודת\s+משלוח|ת\.\s?מ\.?|\bDN\.?)\s*(?:מס(?:פר|['׳])?\s*)?[.:#]*\s*`;
-const FIRST_NOTE = new RegExp(`${NOTE_PREFIX}(\\d+)`, 'i');
-/** After a note number: a separator, an optional repeated prefix, and the next number. */
+/** A delivery-note prefix: `ת.מ.` / `ת.מ:` / `תעודת משלוח (מס׳)` / `תעודות משלוח` / `DN`, with `#` / `:` after it. */
+const NOTE_PREFIX = String.raw`(?:תעודו?ת\s+משלוח|ת\.\s?מ\.?|\bDN\.?)\s*(?:מס(?:פר|['׳])?\s*)?[.:#]*\s*`;
+const NOTE_REF = new RegExp(`${NOTE_PREFIX}(\\d+)`, 'gi');
+/** After a number: a separator (or just whitespace), an optional repeated prefix, the next number. */
 const NEXT_TOKEN = new RegExp(
-  String.raw`^\s*(?:(?<range>[-–—]|עד|to)|(?<list>[,،;/+&]|and|ו-?))\s*(?:${NOTE_PREFIX})?(?<n>\d+)(?<date>[./]\d{1,2}[./]\d{2,4})?`,
+  String.raw`^(?<sp>\s*)(?:(?<range>[-–—]|עד|to)|(?<list>[,،;/+&·|]|and|וגם|ו-?))?\s*(?<pre>${NOTE_PREFIX})?(?<n>\d+)(?<tail>[./-](?<t2>\d{1,2})(?!\d))?`,
   'i',
 );
+/** `24/10`, `03.10.26`, `2026-10-24`: a day (or a year) then a month — a date, not a note. */
+const isDate = (n: string, month: string | undefined) =>
+  month != null && Number(month) >= 1 && Number(month) <= 12 && ((Number(n) >= 1 && Number(n) <= 31) || /^(?:19|20)\d\d$/.test(n));
 
 /**
  * The single delivery note a ריכוז line bills, read against the period's candidate
  * note numbers — or null, when it bills several (a list / range: the pool) or none
  * this cross-match knows. A number after a separator is a NOTE when it is a candidate
  * — as written, or completed as a suffix of the first (`61036/37` → 61037) — and
- * otherwise a quantity (`ת.מ. 61036 + 2 יח׳`, `+ 1500 גרם`), the line staying on its
- * note. A range (`61036-61043`, `61036-43`, `61036 עד ת.מ. 61043`) covering candidate
- * notes is the pool; a dash before a date (`61036 - 03/10/26`) is not a range.
+ * otherwise a quantity, amount, code or date (`+ 2 יח׳`, `+ 1,500 גרם`, `/ 7290000066318`,
+ * `, 24/10`), the line staying on its note. A range (`61036-43`, `61036 עד ת.מ. 61043`)
+ * spanning candidate notes is the pool; any other candidate note named on the line
+ * (`ת.מ. 61036 + 2 יח׳, ת.מ. 61037`) makes it a list too. When in doubt, the pool — it
+ * never invents ₪ (see the pooled amount check).
  */
 export function deliveryNoteNumberIn(
   text: string | null | undefined,
@@ -296,21 +301,37 @@ export function deliveryNoteNumberIn(
   if (!text) return null;
   const known = candidates instanceof Set ? (candidates as ReadonlySet<string>) : new Set(candidates as readonly string[]);
   const t = text.replace(BIDI_MARKS, '').replace(/＋/g, '+').replace(/&amp;/gi, '&');
-  const first = FIRST_NOTE.exec(t);
+  const refs = [...t.matchAll(NOTE_REF)];
+  const first = refs[0];
   if (!first) return null;
   const n1 = first[1]!;
-  const complete = (n: string) => (n.length >= n1.length ? n : n1.slice(0, n1.length - n.length) + n);
-  const next = NEXT_TOKEN.exec(t.slice(first.index + first[0].length));
-  if (next?.groups && !next.groups.date) {
-    const n2 = complete(next.groups.n!);
-    if (next.groups.range) {
-      // A range: the pool, when it spans candidate notes after the first.
+  /** A following number as a note number of the first's shape (leading zeros, suffix completion). */
+  const asNote = (n: string) =>
+    n.length > n1.length ? n.replace(/^0+/, '').padStart(n1.length, '0') : n1.slice(0, n1.length - n.length) + n;
+  const otherNote = (n: string) => n !== n1 && known.has(n);
+  /** A following number names another note: as written, or in the first's shape. */
+  const namesNote = (n: string) => otherNote(n) || otherNote(asNote(n));
+  // Another candidate note named with its own prefix anywhere on the line → a list.
+  if (refs.slice(1).some((r) => namesNote(r[1]!))) return null;
+  // The chain right after the first number: `+ 2 + 61037`, `, 37, 38`, `61036 61037`.
+  let rest = t.slice(first.index! + first[0].length);
+  for (let i = 0; i < 12; i++) {
+    const m = NEXT_TOKEN.exec(rest);
+    const g = m?.groups;
+    if (!m || !g) break;
+    const separated = !!(g.range || g.list || g.pre);
+    if (!separated && !g.sp) break;
+    if (isDate(g.n!, g.t2)) break; // a date ends the chain
+    const n2 = asNote(g.n!);
+    if (g.range) {
       const lo = Number(n1);
       const hi = Number(n2);
       if (hi > lo && [...known].some((k) => k.length === n1.length && Number(k) > lo && Number(k) <= hi)) return null;
-    } else if (n2 !== n1 && known.has(n2)) {
-      return null; // a list of notes: the pool
+      break;
     }
+    if (namesNote(g.n!)) return null;
+    if (!separated) break; // whitespace then a non-note number: description
+    rest = rest.slice(m[0].length);
   }
   return known.has(n1) ? n1 : null;
 }

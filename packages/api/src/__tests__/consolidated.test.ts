@@ -14,6 +14,7 @@ import {
   type DeliveryNoteData,
   type DeliveryNoteLineData,
 } from '../match/consolidated';
+import { VERIFIER_CANDIDATES, VERIFIER_TABLE_1, VERIFIER_TABLE_2 } from './fixtures/consolidatedLines';
 
 /**
  * Pure cross-match (הצלבה) of a consolidated invoice against delivery notes —
@@ -703,6 +704,18 @@ describe('deliveryNoteNumberIn(text, candidates) — post-#119 redesign: read ag
   });
 });
 
+describe("deliveryNoteNumberIn — the #119 verifier's tables (101 + 34 lines)", () => {
+  it.each([...VERIFIER_TABLE_1, ...VERIFIER_TABLE_2])('%j → %j', (text, expected) => {
+    expect(deliveryNoteNumberIn(text, VERIFIER_CANDIDATES)).toBe(expected);
+  });
+  it('table 2 conditionals: a pinned / listed number only when it is a candidate', () => {
+    expect(deliveryNoteNumberIn('ת.מ. 2025/26', new Set(['2025']))).toBe('2025');
+    expect(deliveryNoteNumberIn('ת.מ. 61036 + 6103', new Set(['61036']))).toBe('61036');
+    expect(deliveryNoteNumberIn('ת.מ. 61036 + 6103', new Set(['61036', '6103']))).toBeNull(); // 6103 is a note too
+    expect(deliveryNoteNumberIn('ת.מ. 61036 + 0061037', new Set(['61036']))).toBe('61036');
+  });
+});
+
 describe('buildConsolidatedProposal — every ₪ repro of the #119 verifies (S1–S4, A, B), through the parser', () => {
   const MILK = 'p-milk';
   const milk = (qty: number, price: number | null) => noteLine(MILK, qty, price as number, { name: 'חלב 3%', nameEn: 'Milk 3%' });
@@ -752,9 +765,23 @@ describe('buildConsolidatedProposal — every ₪ repro of the #119 verifies (S1
     expect(leaks(run('ת.מ. 61036 + 2 יח׳ בונוס · חלב 3%', { qty: 10, price: 6.4 }, notes))).toEqual([['QTY_OVER', 64, '61036']]);
   });
 
+  it("(B) a short note number + a quantity: 'ת.מ. 512 + 12 יח׳ בונוס' stays on 512 → ₪0, scaled too", () => {
+    const d = 'ת.מ. 512 + 12 יח׳ בונוס · חלב 3%';
+    const notes = [note('gr-512', 5, [milk(10, 6.4)], '512'), note('gr-590', 32, [milk(10, 6)], '590'), note('gr-591', 33, [milk(5, null)], '591')];
+    expect(leaks(run(d, { qty: 10, price: 6.4 }, notes))).toEqual([]);
+    const big = [note('gr-512', 5, [milk(120, 6.4)], '512'), note('gr-590', 32, [milk(120, 5.2)], '590')];
+    expect(leaks(run(d, { qty: 120, price: 6.4 }, big))).toEqual([]);
+  });
+
+  it("main's own: 'עד ת.מ.' range over 3 notes → ₪0 (main ₪128); a dash before a date in the S2' setup → ₪0 (main ₪2)", () => {
+    const three = [61036, 61037, 61038].map((n, i) => note(`gr-${n}`, 5 + i * 3, [milk(10, 6.4)], String(n)));
+    expect(leaks(run('ת.מ. 61036 עד ת.מ. 61038', { qty: 30, price: 6.4 }, three))).toEqual([]);
+    expect(leaks(run('ת.מ. 61036 - 03/10/26 · חלב 3%', { qty: 10, price: 6.4 }, s2Notes()))).toEqual([]);
+  });
+
   it('(A) and ranges: a list / range line over the notes it bills, exactly → ₪0', () => {
     const two = () => [note('gr-36', 5, [milk(10, 6.4)], '61036'), note('gr-37', 8, [milk(10, 6.4)], '61037')];
-    for (const d of ['ת.מ. 61036/37', 'ת.מ. 61036 ו-37', 'ת.מ. 61036,7', 'ת.מ. 61036 + ת.מ. 61037']) {
+    for (const d of ['ת.מ. 61036/37 · חלב 3%', 'ת.מ. 61036/37', 'ת.מ. 61036 ו-37', 'ת.מ. 61036,7', 'ת.מ. 61036 + ת.מ. 61037']) {
       expect([d, leaks(run(d, { qty: 20, price: 6.4 }, two()))]).toEqual([d, []]);
     }
     const three = () => [...two(), note('gr-38', 11, [milk(10, 6.4)], '61038')];
