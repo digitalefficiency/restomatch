@@ -114,7 +114,7 @@ export interface CostRecipe {
 export interface ProductPrice {
   /** NUMERIC(12,4) shekels per `unit` (ex-VAT, price_history). */
   unitPrice: string;
-  /** The unit the price is per (the product's default unit); null = same as the line. */
+  /** The unit the price is per (default unit, else the billed unit); null = unknown → only a manual bridge costs it. */
   unit: string | null;
 }
 
@@ -286,7 +286,9 @@ export function costRecipes(
 
     const price = it.productId ? prices.get(it.productId) : undefined;
     if (!price) return { ...base, status: 'missingPrice', cost: 0n };
-    const conv = bridge(it, price.unit ?? it.unit);
+    // An unknown price unit is never assumed to be the line's unit (a per-kg
+    // price costed per gram is 1000× off): only a manual bridge can cost it.
+    const conv = price.unit ? bridge(it, price.unit) : manualBridge(it);
     if (!conv) return { ...base, status: 'unitMismatch', cost: 0n };
     const p = parseScaled(price.unitPrice, 4);
     const [cn, cd] = conv;
@@ -296,15 +298,20 @@ export function costRecipes(
     return { ...base, status: 'ok', cost: roundHalfUp(n, d) };
   };
 
-  /** Factor from the line's unit into `target`, via units.ts or the manual bridge. */
-  const bridge = (it: CostItem, target: string): [bigint, bigint] | null => {
-    const direct = unitFactorRational(it.unit, target);
-    if (direct) return direct;
+  /** The manual bridge alone: "unitsPerProductUnit line units per one priced unit". */
+  const manualBridge = (it: CostItem): [bigint, bigint] | null => {
     if (it.unitsPerProductUnit) {
       const u = parseScaled(it.unitsPerProductUnit, 4);
       if (u > 0n) return [BP, u]; // qty_target = qty / unitsPer
     }
     return null;
+  };
+
+  /** Factor from the line's unit into `target`, via units.ts or the manual bridge. */
+  const bridge = (it: CostItem, target: string): [bigint, bigint] | null => {
+    const direct = unitFactorRational(it.unit, target);
+    if (direct) return direct;
+    return manualBridge(it);
   };
 
   for (const r of recipes) costOf(r);

@@ -6,6 +6,7 @@ import {
   eq,
   gte,
   inArray,
+  invoiceLines,
   lt,
   priceHistory,
   products,
@@ -155,8 +156,26 @@ export interface PriceWithDate extends ProductPrice {
 }
 
 /**
+ * The unit a price_history row is per. writePriceHistoryForInvoice normalizes
+ * to products.default_unit when the product has one; when it has none
+ * (e.g. products created on the OCR mapping "new product" path) the billed
+ * price is stored unchanged — per the unit of the invoice line it came from.
+ * Costing that price as "per the recipe line's unit" was 1000× off for a
+ * recipe in grams against a per-kg invoice, so the billed unit is recovered
+ * from the source line; with neither, the unit stays null (unknown) and the
+ * cost engine refuses to guess (`unitMismatch` unless a manual bridge is set).
+ */
+const priceUnitSql = sql<string | null>`coalesce(${products.defaultUnit}, (
+  select il.unit from ${invoiceLines} il
+  where il.invoice_id = ${priceHistory.sourceInvoiceId}
+    and il.product_id = ${priceHistory.productId}
+  order by (il.unit_price_billed = ${priceHistory.unitPrice}) desc, il.id
+  limit 1
+))`;
+
+/**
  * The latest ACTUALLY PAID unit price per product (price_history, ex-VAT, per
- * the product's default unit), optionally as of an instant (`before`, exclusive).
+ * `unit` — see priceUnitSql), optionally as of an instant (`before`, exclusive).
  *
  * Contract prices (the `contracts` feature, S11) would be preferred here once
  * they exist; this function is the single seam to add that source — nothing in
@@ -178,7 +197,7 @@ export async function latestPrices(
       productId: priceHistory.productId,
       unitPrice: priceHistory.unitPrice,
       observedAt: priceHistory.observedAt,
-      unit: products.defaultUnit,
+      unit: priceUnitSql,
     })
     .from(priceHistory)
     .innerJoin(products, and(eq(products.id, priceHistory.productId), eq(products.restaurantId, restaurantId)))
@@ -200,7 +219,7 @@ export async function earliestPricesFrom(
       productId: priceHistory.productId,
       unitPrice: priceHistory.unitPrice,
       observedAt: priceHistory.observedAt,
-      unit: products.defaultUnit,
+      unit: priceUnitSql,
     })
     .from(priceHistory)
     .innerJoin(products, and(eq(products.id, priceHistory.productId), eq(products.restaurantId, restaurantId)))
