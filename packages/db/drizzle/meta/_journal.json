@@ -351,6 +351,13 @@
       "when": 1782170000000,
       "tag": "0062_supplier_confirm",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1782180000000,
+      "tag": "0063_dsr_requests_rls",
+      "breakpoints": true
     }
   ]
 }
