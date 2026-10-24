@@ -434,7 +434,7 @@ async function main() {
         restaurantId,
         eventType: 'invoice_received',
         title: `חשבונית ${invNumber} התקבלה`,
-        detail: `${supplier.name} · ₪${totalInclVat.toFixed(0)} כולל מע״מ`,
+        detail: `${supplier.name} · ₪${Math.round(totalInclVat).toLocaleString('he-IL')} כולל מע״מ`,
         entityType: 'invoice',
         entityId: invoice!.id,
         actorId: receiverId,
@@ -453,7 +453,7 @@ async function main() {
         eventType: 'invoice_matched',
         title: `חשבונית ${invNumber} הותאמה`,
         detail: issues
-          ? `${supplier.name} · ${issues} חריגות · ₪${result.totalDiscrepancyAmount.toFixed(0)} בבדיקה`
+          ? `${supplier.name} · ${issues === 1 ? 'חריגה אחת' : `${issues} חריגות`} · הפסד פוטנציאלי ₪${Math.round(result.totalDiscrepancyAmount).toLocaleString('he-IL')}`
           : `${supplier.name} · תואמת להזמנה ולקבלה`,
         entityType: 'match_run',
         entityId: matchRun!.id,

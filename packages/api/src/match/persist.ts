@@ -122,8 +122,8 @@ export async function persistMatchRun(
     title: meta?.invoiceNumber ? `חשבונית ${meta.invoiceNumber} הותאמה` : 'חשבונית הותאמה',
     detail: [
       meta?.supplierName ?? null,
-      `${result.discrepancies.length} חריגות`,
-      `הפסד פוטנציאלי ₪${lossIls}`,
+      result.discrepancies.length === 1 ? 'חריגה אחת' : `${result.discrepancies.length} חריגות`,
+      `הפסד פוטנציאלי ₪${lossIls.toLocaleString('he-IL')}`,
     ]
       .filter(Boolean)
       .join(' · '),
