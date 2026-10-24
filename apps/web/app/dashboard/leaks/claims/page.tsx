@@ -10,9 +10,7 @@ import { approvals as approvalsNs } from '@/lib/i18n/messages/approvals';
 import { Card, EmptyState, SectionHeader } from '@/lib/components';
 import { discrepancyLabel, displayName } from '../../approvals/vocab';
 import { PrintButton } from './print-button';
-
-/** A line is claimable when it counts as leak, is still open/claimed, and the invoice is unpaid. */
-const CLAIMABLE = new Set(['open', 'escalated', 'accepted']);
+import { claimableLines, sumClaims, type VatBasis } from '@restomatch/api';
 
 /**
  * Supplier credit-request letters (מכתבי דרישת זיכוי): turns the month's leak
@@ -38,23 +36,19 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
   const restaurant = memberships[0]?.restaurantName ?? '';
   const ils = (v: number) => formatIls(v, { locale, maximumFractionDigits: 2 });
 
-  // Group claimable lines by supplier.
+  // Group claimable lines by supplier. The claimable rule (₪, capped per invoice) is shared
+  // with the pay run: @restomatch/api claimableLines.
   const bySupplier = new Map<
     string,
-    { name: string; lines: Array<{ invoice: string; item: string; issue: string; amount: number }> }
+    { name: string; lines: Array<{ invoice: string; item: string; issue: string; amount: number; basis: VatBasis }> }
   >();
   for (const inv of rows) {
-    if (inv.pendingLink || inv.status === 'paid') continue;
+    const claimable = claimableLines(inv);
+    if (claimable.length === 0) continue;
     const name = displayName(locale, inv.supplierName, inv.supplierNameEn) || '—';
     const key = inv.supplierName ?? name;
     const group = bySupplier.get(key) ?? { name, lines: [] };
-    let invClaimed = 0;
-    for (const l of inv.lines) {
-      if (!l.countsAsLeak || !CLAIMABLE.has(l.resolutionStatus)) continue;
-      // Never claim more on an invoice than its capped leak.
-      const amount = Math.min(Math.abs(l.deltaAmount), Math.max(0, inv.leakIls - invClaimed));
-      if (amount <= 0) continue;
-      invClaimed += amount;
+    for (const { line: l, amount, basis } of claimable) {
       group.lines.push({
         invoice: inv.invoiceNumber ?? '—',
         item:
@@ -62,12 +56,13 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
           displayName(locale, l.lineDescription, l.lineDescriptionEn),
         issue: discrepancyLabel(ta, l.type),
         amount,
+        basis,
       });
     }
-    if (group.lines.length > 0) bySupplier.set(key, group);
+    bySupplier.set(key, group);
   }
   const letters = [...bySupplier.values()]
-    .map((g) => ({ ...g, total: Math.round(g.lines.reduce((s, l) => s + l.amount, 0) * 100) / 100 }))
+    .map((g) => ({ ...g, total: sumClaims(g.lines), mixed: new Set(g.lines.map((l) => l.basis)).size > 1 }))
     .sort((a, b) => b.total - a.total);
 
   return (
@@ -129,7 +124,10 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
                         <td className="py-2 pe-3 font-mono tabular-nums text-muted print:text-black">{l.invoice}</td>
                         <td className="py-2 pe-3 text-ink print:text-black">{l.item || '—'}</td>
                         <td className="py-2 pe-3 text-muted print:text-black">{l.issue}</td>
-                        <td className="py-2 text-end font-mono tabular-nums text-ink print:text-black">{ils(l.amount)}</td>
+                        <td className="py-2 text-end font-mono tabular-nums text-ink print:text-black">
+                          {ils(l.amount)}
+                          <span className="block font-sans text-[11px] text-subtle print:text-black">{t(`claims.basis.${l.basis}`)}</span>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -146,6 +144,7 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
                 </table>
               </div>
 
+              {letter.mixed ? <p className="mt-2 text-xs text-subtle print:text-black">{t('claims.mixedBasis')}</p> : null}
               <p className="mt-4 text-sm text-muted print:text-black">{t('claims.closing')}</p>
               <p className="mt-3 text-sm text-muted print:text-black">
                 {t('claims.signature')}
