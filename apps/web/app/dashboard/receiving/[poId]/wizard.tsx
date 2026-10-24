@@ -1,10 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import dynamic from 'next/dynamic';
 import { AlertTriangle, Check, FileScan, Info, Loader2, Package, RefreshCw, Scale } from 'lucide-react';
 
+import { AdjustQuantities } from '@/app/showcase/receiver/_steps/AdjustQuantities';
+import { Confirmed } from '@/app/showcase/receiver/_steps/Confirmed';
 import { InvoiceScan } from '@/app/showcase/receiver/_steps/InvoiceScan';
+import { Reconciliation } from '@/app/showcase/receiver/_steps/Reconciliation';
 import { StepHeader } from '@/app/showcase/receiver/_steps/SupplierSelect';
 import type { ReconciliationResult } from '@/app/showcase/receiver/_mock';
 import {
@@ -24,15 +26,6 @@ import {
 } from './_adapters';
 import { receivingErrorText as errorText } from './_errors';
 import { pollInvoiceUntilRead } from './_poll';
-
-// The steps after the scan load in their own chunk (smaller first load on the
-// receiver's phone); the wizard warms them on mount, long before OCR finishes.
-const loadReconciliation = () => import('@/app/showcase/receiver/_steps/Reconciliation');
-const loadAdjustQuantities = () => import('@/app/showcase/receiver/_steps/AdjustQuantities');
-const loadConfirmed = () => import('@/app/showcase/receiver/_steps/Confirmed');
-const Reconciliation = dynamic(() => loadReconciliation().then((m) => m.Reconciliation));
-const AdjustQuantities = dynamic(() => loadAdjustQuantities().then((m) => m.AdjustQuantities));
-const Confirmed = dynamic(() => loadConfirmed().then((m) => m.Confirmed));
 
 /** How long to keep checking in the background after the receiver moved on. */
 const BACKGROUND_POLL_MS = 10 * 60_000;
@@ -88,11 +81,6 @@ export function ReceivingWizard({
   restaurantId: string | null;
 }) {
   const [step, setStep] = useState<Step>('SCAN_INVOICE');
-  useEffect(() => {
-    void loadReconciliation();
-    void loadAdjustQuantities();
-    void loadConfirmed();
-  }, []);
   const [grId, setGrId] = useState<string | null>(null);
   const [invoiceId, setInvoiceId] = useState<string | null>(null);
   const [ocrNotice, setOcrNotice] = useState<OcrNotice>(null);
