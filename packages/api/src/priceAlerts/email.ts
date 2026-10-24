@@ -1,7 +1,11 @@
+import { formatIlsAgorot } from '../reports/money';
+
 /**
  * Price-trend alert email (Hebrew, RTL). Self-contained so the shared
  * notification templates (owned by the auth/emails area) stay untouched.
- * ₪ is rendered with 2 decimals in the he-IL style the other emails use.
+ * ₪ goes through formatIlsAgorot (the server twin of the web's formatIls, pinned
+ * by money-parity.test.ts) with 2 decimals — the same "‏6.20 ‏₪" the in-app
+ * price-alerts panel prints for the same alert.
  */
 export interface PriceAlertEmail {
   subject: string;
@@ -12,8 +16,8 @@ export interface PriceAlertEmail {
 const esc = (s: string): string =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
-const ils = (n: number): string =>
-  `₪${n.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+/** Unit prices arrive in shekels (NUMERIC-derived); agorot at the boundary, format at display. */
+const ils = (n: number): string => formatIlsAgorot(Math.round(n * 100), { maximumFractionDigits: 2 });
 
 export function priceAlertEmail(args: {
   productName: string;
