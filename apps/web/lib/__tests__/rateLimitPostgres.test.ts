@@ -64,6 +64,11 @@ describe('PostgresRateLimitStore', () => {
 describe('enforceRateLimit on Postgres', () => {
   it('fails OPEN within the deadline when the database never answers', async () => {
     vi.resetModules();
+    // lib/authDb memoizes its pool on globalThis (survives resetModules): drop
+    // any pool an earlier test created so this one dials the black hole.
+    const memo = globalThis as unknown as { __restomatchAuthDb?: unknown };
+    const prevPool = memo.__restomatchAuthDb;
+    delete memo.__restomatchAuthDb;
     const prev = process.env.DATABASE_URL;
     process.env.DATABASE_URL = `postgres://u:p@127.0.0.1:${silentPort}/db`;
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -76,6 +81,7 @@ describe('enforceRateLimit on Postgres', () => {
       expect(warn).toHaveBeenCalledWith(expect.stringMatching(/failing open/), expect.anything());
     } finally {
       process.env.DATABASE_URL = prev;
+      memo.__restomatchAuthDb = prevPool;
       warn.mockRestore();
       vi.resetModules();
     }

@@ -54,7 +54,7 @@ export async function GET(req: Request) {
         status.state === 'stale'
           ? `הפעימה האחרונה לפני ${Math.round(status.ageMs / 60_000)} דקות (${status.doc.host ?? 'unknown host'}, pid ${status.doc.pid ?? '?'})`
           : status.state === 'missing'
-            ? 'לא נמצאה פעימה ב-Redis (ה-worker לא רץ או Redis לא זמין)'
+            ? 'לא נמצאה פעימה במסד הנתונים (ה-worker לא רץ או שאינו מגיע למסד)'
             : 'פעימה לא תקינה';
       await sendEmail({
         to: to.join(','),

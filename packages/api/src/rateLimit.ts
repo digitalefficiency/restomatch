@@ -2,8 +2,8 @@
  * Store-agnostic fixed-window rate limiting.
  *
  * The window is bucketed by floor(now / windowSec): every key gets one counter
- * per window, incremented atomically, with a TTL so it self-expires. A Redis
- * INCR+EXPIRE store is the production backing (apps/web/lib/rateLimit.ts); the
+ * per window, incremented atomically, with an expiry so it can be pruned. A
+ * Postgres upsert store is the production backing (apps/web/lib/rateLimit.ts); the
  * in-memory store here backs tests and single-process dev.
  */
 

@@ -39,7 +39,6 @@ production values.
 | `AUTH_URL` / `APP_URL` | real | the stable staging URL (`…-git-staging-….vercel.app`); per-PR URLs can't sign in (callback host) |
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | **real** (staging) | staging project URL + publishable key |
 | `SUPABASE_SERVICE_ROLE_KEY` (or `SUPABASE_SECRET_KEY`) | **real** (staging) | staging secret key (signed scan URLs) |
-| `REDIS_URL` | real | a second Upstash DB (`rediss://…`), never the production one |
 | `RESEND_API_KEY` | placeholder OK | `re_preview_placeholder` boots; magic links then fail to send — use password login, or a Resend key restricted to the team's addresses |
 | `EMAIL_FROM` | placeholder OK | `preview@example.invalid` |
 | `CRON_SECRET` | placeholder OK | any random string (Vercel Cron doesn't run on previews) |
@@ -49,6 +48,10 @@ production values.
 The boot guard requires exactly the "real" rows plus `RESEND_API_KEY`,
 `EMAIL_FROM` and an `AUTH_URL`/`APP_URL`; anything missing gives a readable
 `[env] missing required production secrets` in the function log.
+
+`REDIS_URL` is no longer needed: the job queue, rate limits and the worker heartbeat
+live in the staging database (migration 0061). If a Preview env still has one, delete
+it — a leftover value only logs a warning.
 
 ## Not proposed
 

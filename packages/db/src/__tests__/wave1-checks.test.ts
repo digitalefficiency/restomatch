@@ -22,7 +22,7 @@ afterAll(async () => {
 const integrity = async () => (await runDoctor(url)).findings.find((f) => f.name === 'cross-tenant references')!;
 
 describe('wave-1 doctor checks', () => {
-  it('registers a precondition for every wave-1 migration from 0048 to 0057', () => {
+  it('registers a precondition for every wave-1 migration (0048–0057, 0061)', () => {
     expect(Object.keys(WAVE1_PRECONDITIONS)).toEqual([
       '0048_recovery',
       '0049_monthly_reports',
@@ -34,6 +34,7 @@ describe('wave-1 doctor checks', () => {
       '0055_referrals',
       '0056_recipes_prereqs',
       '0057_recipes',
+      '0061_postgres_queue',
     ]);
   });
 

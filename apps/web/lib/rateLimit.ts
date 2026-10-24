@@ -58,7 +58,7 @@ async function getStore(): Promise<RateLimitStore> {
 }
 
 /**
- * Enforce a rate limit. Fails OPEN on infra errors (a Redis outage must not
+ * Enforce a rate limit. Fails OPEN on infra errors (a rate-limit store outage must not
  * lock everyone out of login) — the failure is logged so it is visible.
  */
 export async function enforceRateLimit(
@@ -106,7 +106,7 @@ export function trustedProxyHops(env: NodeJS.ProcessEnv = process.env): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-/** Throttle the public OCR endpoint per client IP. Fails open on a Redis outage. */
+/** Throttle the public OCR endpoint per client IP. Fails open on a rate-limit store outage. */
 export async function enforceOcrLimit(ip: string): Promise<RateLimitResult> {
   return enforceRateLimit(ip, SHOWCASE_OCR_LIMIT);
 }
@@ -136,8 +136,8 @@ export const TOO_MANY_ATTEMPTS_HE = 'יותר מדי ניסיונות. נסו ש
  * multiply the limit per account; the IP key bounds one source spraying many
  * accounts. Allowed only when BOTH pass — the more restrictive (already-blocked)
  * result is returned so the caller can surface ONE uniform message. Each limiter
- * fails OPEN on a Redis outage; the durable ceiling is the DB lockout backstop
- * (independent of Redis), checked in authorize() and the TOTP path.
+ * fails OPEN on a rate-limit store outage; the durable ceiling is the DB lockout backstop
+ * (independent of the rate-limit store), checked in authorize() and the TOTP path.
  */
 export async function enforceEmailAndIpLimit(
   email: string,
@@ -196,9 +196,9 @@ export const LOGIN_IP_LIMIT: RateLimitOptions = {
 };
 
 /**
- * Throttle password-login attempts on email AND IP (C.2). This is the Redis
+ * Throttle password-login attempts on email AND IP (C.2). This is the rate-limit
  * front line; the DB lockout backstop in authorizeCredentials is the durable
- * floor that holds even when Redis fails open.
+ * floor that holds even when the store fails open.
  */
 export async function enforceLoginLimit(email: string, ip: string): Promise<RateLimitResult> {
   return enforceEmailAndIpLimit(email, ip, LOGIN_EMAIL_LIMIT, LOGIN_IP_LIMIT);
@@ -221,7 +221,7 @@ export const TWO_FACTOR_IP_LIMIT: RateLimitOptions = {
 /**
  * Throttle second-factor (TOTP + recovery) verification attempts on email AND
  * IP (C.2). Pairs with the DB lockout backstop in verifySecondFactor so a brute
- * force is bounded even during a Redis outage.
+ * force is bounded even during a rate-limit store outage.
  */
 export async function enforceTwoFactorLimit(email: string, ip: string): Promise<RateLimitResult> {
   return enforceEmailAndIpLimit(email, ip, TWO_FACTOR_EMAIL_LIMIT, TWO_FACTOR_IP_LIMIT);

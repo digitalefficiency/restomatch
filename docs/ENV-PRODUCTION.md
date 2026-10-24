@@ -19,7 +19,7 @@
 | `AUTH_URL` | your prod web URL | ✅ | NextAuth callback base. Its origin **overrides the request host** for sign-in callbacks — open the app/demo **only on this hostname** (a preview/alias URL loops back to `/login`). Boot WARNs when `APP_URL`'s origin differs |
 | `AUTH_SECRET` | `openssl rand -base64 32` | ✅ | JWT signing (legacy name `NEXTAUTH_SECRET` also accepted). **Boot fails without it** — otherwise every login would 500 |
 | `APP_URL` | your prod web URL | ✅ | deep links in emails. Must have the **same origin as `AUTH_URL`** (boot WARN otherwise) |
-| `REDIS_URL` | Upstash | ✅ | OCR/match/cron queue (uploads vanish without it) |
+| `QUEUE_DATABASE_URL` | Supabase, owner | — | optional separate connection for the job queue (`job_queue`); defaults to `DATABASE_URL` |
 | `AUTH_ENC_KEY` | `openssl rand -hex 32` | ✅ | encrypts TOTP secrets at rest (2FA). **Boot fails without it.** Back it up — losing it locks out every 2FA user |
 | `TRUSTED_PROXY_HOPS` | `1` on Vercel | ✅ | rate limiters read the client IP from the right of x-forwarded-for (D1.6); unset = spoofable left-most entry |
 | `CRON_SECRET` | `openssl rand -hex 32` | ✅ | Vercel Cron → `/api/cron/worker-heartbeat` bearer token |
@@ -31,7 +31,7 @@
 | Variable | Source | Required (prod) | Notes |
 |---|---|:---:|---|
 | `DATABASE_URL` | Supabase pooled, owner | ✅ | worker runs cross-tenant on the owner connection by design |
-| `REDIS_URL` | Upstash | ✅ | BullMQ — no jobs run without it |
+| `QUEUE_DATABASE_URL` | Supabase, owner | — | optional separate connection for the job queue; defaults to `DATABASE_URL` |
 | `ANTHROPIC_API_KEY` | console.anthropic.com | ✅ | invoice OCR / Zestt PO parsing |
 | `RESEND_API_KEY` | resend.com | ✅ | outbox email dispatch |
 | `EMAIL_FROM` | verified Resend domain | ✅ | sender (factory falls back to this when `RESEND_FROM` unset) |
@@ -42,7 +42,11 @@
 | `APP_BASE_URL` | prod web URL | — | deep links in emails when set (else `AUTH_URL`) |
 | `SENTRY_DSN` | sentry.io | — | optional (`pnpm add @sentry/node`) |
 
-
+**No Redis.** The job queue, cron schedules, rate limits and the worker heartbeat live in
+Postgres (migration 0061: `job_queue`, `rate_limit_counters`, `worker_heartbeats`, `ops_kv`),
+on the existing `DATABASE_URL`. `REDIS_URL` is no longer used by web or worker: a leftover
+value only logs a boot warning. Remove it from the worker env; on Vercel delete it a week
+after the cutover (the pre-0061 version still needs it for a rollback — `docs/REDIS-REMOVAL.md`).
 
 ## DATABASE_URL_APP — the restomatch_app connection (new Supabase project)
 
