@@ -68,6 +68,8 @@ const db = createDb(url);
 const DAY_MS = 24 * 60 * 60 * 1000;
 const OPEN_WINDOW_DAYS = 10;
 const HISTORY_DAYS = 70;
+/** History reaches back to the 1st of the month this many months before today's (like the base seed). */
+const FULL_HISTORY_MONTHS = 3;
 const OWNER_EMAIL = 'owner@kfar-hazeitim.test';
 const MANAGER_EMAIL = 'manager@kfar-hazeitim.test';
 const CHAIN_ACCOUNT_NAME = 'כפר הזיתים — רשת';
@@ -257,9 +259,16 @@ async function main() {
   const tz = mainR.timezone ?? 'Asia/Jerusalem';
   const todayStart = startOfLocalDay(tz);
   const openSince = new Date(todayStart.getTime() - OPEN_WINDOW_DAYS * DAY_MS);
+  // Days back to the 1st of the month FULL_HISTORY_MONTHS before today's (wall clock).
+  const [ty, tm, td] = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' })
+    .format(new Date(todayStart.getTime() + 12 * 60 * 60 * 1000))
+    .split('-')
+    .map(Number) as [number, number, number];
+  const fullDays = Math.max(HISTORY_DAYS, Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(ty, tm - 1 - FULL_HISTORY_MONTHS, 1)) / DAY_MS));
 
   for (const spec of BRANCHES) {
     const rand = mulberry32(spec.seed);
+    const randOld = mulberry32(spec.seed ^ 0x5eed5eed);
     const knobs = KNOBS[spec.profile];
 
     // ── the branch restaurant (found by name on the account → idempotent) ──
@@ -353,24 +362,41 @@ async function main() {
       const cadence = 3 + (si % 2); // every 3–4 days
       const known = new Set<string>();
       let seq = 31000 + si * 1000;
-      for (let day = HISTORY_DAYS - (si % cadence); day >= 1; day -= cadence) {
+      // Older full months (before HISTORY_DAYS) come first, from their OWN random
+      // stream and invoice range: the last HISTORY_DAYS consume `rand` exactly as
+      // before, so the quoted branch figures don't move.
+      let seqOld = 31000 + si * 1000 + 500;
+      const days: Array<{ day: number; old: boolean }> = [];
+      for (let d = HISTORY_DAYS - (si % cadence) + cadence; d <= fullDays; d += cadence) days.unshift({ day: d, old: true });
+      for (let d = HISTORY_DAYS - (si % cadence); d >= 1; d -= cadence) days.push({ day: d, old: false });
+      for (const { day, old } of days) {
+        const rnd = old ? randOld : rand;
         const expected = new Date(todayStart.getTime() - day * DAY_MS + (8 + (si % 4)) * 60 * 60 * 1000);
         const receivedAt = new Date(expected.getTime() + 25 * 60 * 1000);
         const lines = sp.products.map((p) => ({
           ...p,
-          qty: p.unit === 'ק״ג' ? 2 + Math.round(rand() * 4) : 3 + Math.round(rand() * 7),
+          qty: p.unit === 'ק״ג' ? 2 + Math.round(rnd() * 4) : 3 + Math.round(rnd() * 7),
         }));
 
         // Scenario for this delivery.
-        const bumpIdx = rand() < knobs.bumpP ? Math.floor(rand() * lines.length) : -1;
-        const bumpPct = knobs.bump[0] + rand() * (knobs.bump[1] - knobs.bump[0]);
-        const shortIdx = rand() < knobs.shortP ? Math.floor(rand() * lines.length) : -1;
+        const bumpIdx = rnd() < knobs.bumpP ? Math.floor(rnd() * lines.length) : -1;
+        const bumpPct = knobs.bump[0] + rnd() * (knobs.bump[1] - knobs.bump[0]);
+        const shortIdx = rnd() < knobs.shortP ? Math.floor(rnd() * lines.length) : -1;
         // The leaky branch's local butcher creeps every price once it starts (last ~5 weeks).
         const creep = sp.local && knobs.localBump > 0 && day <= 35 ? knobs.localBump * (1 - day / 50) : 0;
 
         const [po] = await db
           .insert(purchaseOrders)
-          .values({ restaurantId: rid, supplierId: sp.id, expectedDeliveryAt: expected, status: 'closed', source: 'manual', createdAt: new Date(expected.getTime() - DAY_MS) })
+          .values({
+            restaurantId: rid,
+            supplierId: sp.id,
+            expectedDeliveryAt: expected,
+            status: 'closed',
+            source: 'manual',
+            // Like the base seed: Σ qty × agreed price, so the branch's orders table has totals.
+            totalEstimated: (lines.reduce((sum, l) => sum + Math.round(l.qty * l.price * 100), 0) / 100).toFixed(2),
+            createdAt: new Date(expected.getTime() - DAY_MS),
+          })
           .returning();
         const poRows = [];
         for (const l of lines) {
@@ -394,7 +420,7 @@ async function main() {
           grRows.push({ id: grl!.id, qtyReceived: l.qty - missing });
         }
 
-        const invNumber = `${sp.prefix}-${(seq += 1)}`;
+        const invNumber = old ? `${sp.prefix}-${(seqOld += 1)}` : `${sp.prefix}-${(seq += 1)}`;
         const invLineInputs: InvoiceLineInput[] = [];
         const invLineValues: Array<typeof invoiceLines.$inferInsert> = [];
         for (const [i, l] of lines.entries()) {

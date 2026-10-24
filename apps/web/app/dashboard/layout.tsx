@@ -13,6 +13,7 @@ import { BranchSwitcher } from './branch-switcher';
 import { DesktopNav, MobileNav } from './nav';
 import { DashboardSearch } from './search';
 import { WorkerStatusBanner } from './worker-status';
+import { ConsentClearance } from './consent-clearance';
 import { TrpcProvider } from '@/lib/trpc/client';
 import { enabledFeatures } from '@/lib/ingest/features';
 import { PwaSessionGuard } from '@/lib/pwa/PwaSessionGuard';
@@ -74,7 +75,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
         >
           {t('skipToContent')}
         </a>
-        <div className="min-h-screen pb-20 lg:pb-0">
+        <ConsentClearance />
+        {/* Bottom padding: the mobile bottom nav, plus the cookie banner while it is shown. */}
+        <div className="min-h-screen pb-[calc(5rem+var(--consent-h,0px))] lg:pb-[var(--consent-h,0px)]">
           <header className="glass sticky top-0 z-40 border-b border-line">
             <span aria-hidden="true" className="absolute inset-x-0 top-0 h-px flow-stream" />
             <div className="mx-auto max-w-6xl px-4 sm:px-6">

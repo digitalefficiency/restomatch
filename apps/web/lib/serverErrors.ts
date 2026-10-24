@@ -36,6 +36,7 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   'input.invalid': 'invalidInput',
   // Wave-1 flag off: a disabled feature reads as plain "not allowed".
   FEATURE_DISABLED: 'forbidden',
+  'invoice.numberTaken': 'invoiceNumberTaken',
 };
 
 /**

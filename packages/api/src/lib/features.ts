@@ -12,6 +12,7 @@ export const FEATURE_KEYS = [
   'chain',
   'dashViews',
   'priceDisparity',
+  'chainAlerts',
   'contracts',
   'priceAlerts',
   'recovery',
