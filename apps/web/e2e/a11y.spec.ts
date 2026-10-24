@@ -191,3 +191,60 @@ test.describe('a11y receiving wizard steps (phone, English)', () => {
     await check('adjust');
   });
 });
+
+/**
+ * Multi-branch owner: the dashboard header grows a branch switcher, which the
+ * single-branch e2e seed never renders (axe once missed its
+ * label-content-name-mismatch). Attach a second branch on a shared billing
+ * account for this block only, then restore the seed — workers: 1, not parallel.
+ */
+test.describe('a11y multi-branch owner (branch switcher)', () => {
+  const SECOND_BRANCH = `${DEMO_RESTAURANT_NAME} — סניף בדיקה`;
+  let billingAccountId = '';
+  let secondBranchId = '';
+
+  test.beforeAll(async () => {
+    const sql = e2eSql();
+    try {
+      const [main] = await sql<{ id: string; ownerId: string; billing: string | null }[]>`
+        select r.id, m.user_id as "ownerId", r.billing_account_id as billing
+        from restaurants r join memberships m on m.restaurant_id = r.id and m.role = 'owner'
+        where r.name = ${DEMO_RESTAURANT_NAME} limit 1`;
+      if (!main) throw new Error('seed has no demo restaurant/owner');
+      if (main.billing) throw new Error('demo restaurant already on a billing account — update this setup');
+      const [acct] = await sql<{ id: string }[]>`
+        insert into billing_accounts (name, owner_user_id) values ('e2e multi-branch', ${main.ownerId}) returning id`;
+      billingAccountId = acct!.id;
+      await sql`update restaurants set billing_account_id = ${billingAccountId} where id = ${main.id}`;
+      const [second] = await sql<{ id: string }[]>`
+        insert into restaurants (name, billing_account_id) values (${SECOND_BRANCH}, ${billingAccountId}) returning id`;
+      secondBranchId = second!.id;
+      await sql`insert into memberships (user_id, restaurant_id, role) values (${main.ownerId}, ${secondBranchId}, 'owner')`;
+    } finally {
+      await sql.end();
+    }
+  });
+
+  test.afterAll(async () => {
+    const sql = e2eSql();
+    try {
+      if (secondBranchId) await sql`delete from restaurants where id = ${secondBranchId}`;
+      if (billingAccountId) {
+        await sql`update restaurants set billing_account_id = null where billing_account_id = ${billingAccountId}`;
+        await sql`delete from billing_accounts where id = ${billingAccountId}`;
+      }
+    } finally {
+      await sql.end();
+    }
+  });
+
+  // The header trigger renders from `lg` up (phones get the list inside the menu drawer).
+  test.use({ viewport: { width: 1280, height: 800 }, storageState: OWNER_STATE });
+  for (const locale of LOCALES) {
+    test(`${locale} desktop /dashboard with the branch switcher`, async ({ page }) => {
+      await open(page, locale, '/dashboard');
+      await expect(page.getByTestId('branch-switcher')).toBeVisible();
+      expect(await axeViolations(page), '/dashboard (multi-branch) axe').toEqual([]);
+    });
+  }
+});
