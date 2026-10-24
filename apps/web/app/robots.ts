@@ -1,8 +1,12 @@
 import type { MetadataRoute } from 'next';
-import { SITE_URL } from './(marketing)/_components/seo';
+import { siteUrl } from './(marketing)/_components/seo';
+
+// Read APP_URL per request: the production domain is right without a rebuild.
+export const dynamic = 'force-dynamic';
 
 /** Marketing + demo are crawlable; the app, auth and API surfaces are not. */
 export default function robots(): MetadataRoute.Robots {
+  const SITE_URL = siteUrl();
   return {
     rules: [
       {

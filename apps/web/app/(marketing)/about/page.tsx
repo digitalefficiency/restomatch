@@ -12,7 +12,7 @@ import {
   RoiSection,
   TrustSection,
 } from '../_components/detail-sections';
-import { alternatesFor, metadataBase } from '../_components/seo';
+import { alternatesFor, metadataBase, socialFor } from '../_components/seo';
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getT(marketing);
@@ -21,11 +21,7 @@ export async function generateMetadata(): Promise<Metadata> {
     description: t('about.metaDescription'),
     metadataBase,
     alternates: alternatesFor('/about', t.locale),
-    openGraph: {
-      title: t('about.metaTitle'),
-      description: t('about.metaDescription'),
-      url: '/about',
-    },
+    ...socialFor(t.locale, { title: t('about.metaTitle'), description: t('about.metaDescription'), path: '/about' }),
   };
 }
 
