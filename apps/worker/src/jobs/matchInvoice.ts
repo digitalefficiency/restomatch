@@ -7,6 +7,7 @@ import {
   createWhatsAppNotifier,
   getEntitlements,
   loadPriorDecisions,
+  receiptStillOpen,
   persistMatchRun,
   recipientsForRestaurant,
   recordUsage,
@@ -50,7 +51,7 @@ export interface MatchJobOutcome {
   /** True when this run replaced an earlier run of the same invoice. */
   replaced: boolean;
   /** Why nothing ran (logs/tests). */
-  skipped?: 'ocr_pending' | 'already_matched' | 'awaiting_review' | 'no_lines' | 'settled';
+  skipped?: 'ocr_pending' | 'already_matched' | 'awaiting_review' | 'no_lines' | 'settled' | 'po_rejected' | 'receipt_open';
 }
 
 /**
@@ -104,6 +105,22 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
     pinnedPoId: data.poId ?? priorRun?.poId ?? null,
   });
   if (!built) return { result: CLEAN, persisted: null, replaced: false, skipped: 'no_lines' };
+  // The payload is not a trust boundary. A job's poId names the order that was
+  // counted for this invoice: if the matcher wouldn't pair the invoice with it
+  // (other supplier, outside the window, a sibling PO preferred), don't fall back
+  // to some other order — skip.
+  if (data.poId && built.poId !== data.poId) {
+    console.warn(`[match-invoice] invoice=${invoiceId} does not pair with the job's po=${data.poId} — skipping`);
+    return { result: CLEAN, persisted: null, replaced: false, skipped: 'po_rejected' };
+  }
+  // Never match against a receipt that is still being counted (every line would
+  // read "received 0"). Takes the receipt lock, so the job a submit enqueues
+  // waits for that submit to commit.
+  if (built.grId) {
+    const grId = built.grId;
+    const open = await db.transaction((tx) => receiptStillOpen(tx as unknown as Database, restaurantId, grId));
+    if (open) return { result: CLEAN, persisted: null, replaced: false, skipped: 'receipt_open' };
+  }
 
   // Per-restaurant approval-routing thresholds (settings.approvalThresholds).
   const [restaurant] = await db

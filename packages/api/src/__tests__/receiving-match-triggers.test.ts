@@ -213,3 +213,47 @@ describe('F4 attack: a receiver cannot re-match a paid invoice, or one bound to 
     expect(sent).toEqual([scan]);
   });
 });
+
+describe('verifier MAJOR: a scan held on another (open) receipt cannot be named via this receipt', () => {
+  it('HaKerem scan held on its pending receipt; closing a Galilee receipt with invoiceIds=[it] enqueues nothing', async () => {
+    const s = await seed(); // HaSharon receipt — open, its scan held
+    const held = await invoice(s);
+    // A second supplier with its own counted receipt (the one being submitted).
+    const [gal] = await db.insert(suppliers).values({ restaurantId: s.restaurantId, name: 'Galilee' }).returning();
+    const [galPo] = await db
+      .insert(purchaseOrders)
+      .values({ restaurantId: s.restaurantId, supplierId: gal!.id, expectedDeliveryAt: new Date(), status: 'sent', source: 'manual' })
+      .returning();
+    const [galGr] = await db.insert(goodsReceipts).values({ restaurantId: s.restaurantId, poId: galPo!.id, status: 'pending' }).returning();
+
+    await callerFor(s).receiving.submitReceipt({ grId: galGr!.id, invoiceIds: [held] });
+    expect(enqueueMatchInvoice.mock.calls.map((c) => c[0].invoiceId)).not.toContain(held);
+    expect(await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, held))).toEqual([]);
+  });
+});
+
+describe('verifier MINOR 2: a same-supplier sibling PO with a receipt does not hide the waiting scan', () => {
+  it('PO1 counted earlier today + PO2 being counted now: the scan on PO2 is found (no invoiceIds) and pinned to PO2', async () => {
+    const s = await seed(); // PO2 + its pending receipt (s.grId)
+    const [gr2] = await db.select().from(goodsReceipts).where(eq(goodsReceipts.id, s.grId));
+    const morning = new Date();
+    morning.setHours(Math.max(0, morning.getHours() - 3));
+    const [po1] = await db
+      .insert(purchaseOrders)
+      .values({ restaurantId: s.restaurantId, supplierId: s.supplierId, expectedDeliveryAt: morning, status: 'sent', source: 'manual' })
+      .returning();
+    const [pl1] = await db
+      .insert(poLines)
+      .values({ poId: po1!.id, rawDescription: 'עגבניה', qtyOrdered: '10', unit: 'kg', unitPriceExpected: '8' })
+      .returning();
+    const [gr1] = await db.insert(goodsReceipts).values({ restaurantId: s.restaurantId, poId: po1!.id, status: 'completed' }).returning();
+    await db.insert(grLines).values({ grId: gr1!.id, poLineId: pl1!.id, qtyReceived: '10' });
+
+    const scan = await invoice(s);
+    expect(await invoicesWaitingOnReceipt(db, s.restaurantId, s.grId)).toEqual([scan]);
+    await callerFor(s).receiving.submitReceipt({ grId: s.grId });
+    expect(enqueueMatchInvoice).toHaveBeenCalledWith(
+      expect.objectContaining({ invoiceId: scan, rematch: true, poId: gr2!.poId }),
+    );
+  });
+});

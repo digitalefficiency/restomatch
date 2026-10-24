@@ -873,7 +873,7 @@ async function rematchAfterCount(
     ids = await db.transaction(async (sp) => {
       const tx = sp as unknown as Database;
       const out = new Set<string>(await invoicesWaitingOnReceipt(tx, restaurantId, grId));
-      for (const id of await scannedInvoicesForReceipt(tx, restaurantId, grId, scanned)) out.add(id);
+      for (const id of await scannedInvoicesForReceipt(tx, restaurantId, receipt, scanned)) out.add(id);
       const ran = await tx
         .selectDistinct({ id: matchRuns.invoiceId })
         .from(matchRuns)

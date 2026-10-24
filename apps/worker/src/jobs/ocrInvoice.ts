@@ -1,4 +1,4 @@
-import { fillEnglishNames, meterOcrScan, receiptStillOpen } from '@restomatch/api';
+import { fillEnglishNames, meterOcrScan, receiptState } from '@restomatch/api';
 import { matchProductTopN, MockEmbeddingProvider } from '@restomatch/catalog';
 import { and, eq, invoiceLines, invoices, ne, restaurants, type Database } from '@restomatch/db';
 import {
@@ -179,12 +179,18 @@ export function startOcrInvoiceWorker() {
       // auto-proceed. Low-confidence (parsed / needs-review) invoices wait for a
       // human to confirm product matches first (match.runForInvoice on demand).
       // A queue failure must never break the OCR persistence above.
-      if (!needsHumanReview && (await ocrMayAutoMatch(db, job.data.restaurantId, job.data.grId))) {
+      const decision = needsHumanReview
+        ? { match: false }
+        : await ocrAutoMatchDecision(db, job.data.restaurantId, job.data.grId);
+      if (decision.match) {
         try {
-          await enqueueMatchInvoice({
+          // A variable, not a literal: compiles on either queue job shape (#49).
+          const matchJob: Parameters<typeof enqueueMatchInvoice>[0] & { poId?: string } = {
             restaurantId: job.data.restaurantId,
             invoiceId: job.data.invoiceId,
-          });
+            ...(decision.poId ? { poId: decision.poId } : {}),
+          };
+          await enqueueMatchInvoice(matchJob);
         } catch (err) {
           console.warn(
             `[ocr-invoice] failed to enqueue match for invoice=${job.data.invoiceId}`,
@@ -348,18 +354,28 @@ export async function markOcrFailed(
  * once the count is in. Scans with no receipt (email / WhatsApp / upload) and
  * receipts already submitted match at once.
  */
+export async function ocrAutoMatchDecision(
+  db: Database,
+  restaurantId: string,
+  grId: string | undefined,
+): Promise<{ match: boolean; poId?: string }> {
+  if (!grId) return { match: true };
+  try {
+    // Takes the receipt lock: a submit in flight is waited for (receiving/matchTriggers).
+    const state = await db.transaction((tx) => receiptState(tx as unknown as Database, restaurantId, grId));
+    // Matched against the order that was counted, not a discovered sibling.
+    return state.open ? { match: false } : { match: true, ...(state.poId ? { poId: state.poId } : {}) };
+  } catch (err) {
+    console.warn(`[ocr-invoice] receipt check failed for gr=${grId} — matching now`, err);
+    return { match: true };
+  }
+}
+
+/** Whether the OCR job may match right away (see ocrAutoMatchDecision). */
 export async function ocrMayAutoMatch(
   db: Database,
   restaurantId: string,
   grId: string | undefined,
 ): Promise<boolean> {
-  if (!grId) return true;
-  try {
-    // Takes the receipt lock: a submit in flight is waited for (receiving/matchTriggers).
-    const open = await db.transaction((tx) => receiptStillOpen(tx as unknown as Database, restaurantId, grId));
-    return !open;
-  } catch (err) {
-    console.warn(`[ocr-invoice] receipt check failed for gr=${grId} — matching now`, err);
-    return true;
-  }
+  return (await ocrAutoMatchDecision(db, restaurantId, grId)).match;
 }

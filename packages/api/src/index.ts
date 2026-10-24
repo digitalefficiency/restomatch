@@ -133,6 +133,7 @@ export { buildMatchInputForInvoice, type BuiltMatchInput } from './match/buildMa
 export {
   invoicesWaitingOnReceipt,
   lockReceipt,
+  receiptState,
   receiptStillOpen,
   scannedInvoicesForReceipt,
 } from './receiving/matchTriggers';
