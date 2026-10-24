@@ -113,7 +113,7 @@ export interface ProposalProduct {
   qtyBilled: number;
   /** Received-qty-weighted PO price; null when no delivery note has the product. */
   poPrice: number | null;
-  /** Billed unit price (qty-weighted over the invoice's lines of the product). */
+  /** Billed unit price (qty-weighted over the invoice's lines of the product), scale 4. */
   billedPrice: number | null;
   /** Σ|Δ| of this product's findings that count as leak (same rule as the hero). */
   deltaIls: number;
@@ -165,6 +165,14 @@ export interface ConsolidatedProposal {
 
 const ag = (v: number) => Math.round(v * 100);
 const ils = (a: number) => a / 100;
+/** Count units written many ways (יח׳ / יחידה / pcs …) are one unit. */
+const COUNT_UNITS = new Set(['יח', 'יחידה', 'יחידות', 'unit', 'units', 'pc', 'pcs', 'ea', 'each']);
+const unitKey = (u: string) => {
+  const n = u.trim().toLowerCase().replace(/["'.\s\u05F3\u05F4]/g, '');
+  return COUNT_UNITS.has(n) ? 'unit' : n;
+};
+/** qty_to = qty_from × factor — 1 for the same unit (aliases included), kg↔g / l↔ml, else null. */
+const convFactor = (from: string, to: string) => (unitKey(from) === unitKey(to) ? 1 : unitConversionFactor(from, to));
 /** A unit price at scale 4 (NUMERIC(12,4)) → integer price units (1/100 agora). */
 const p4Of = (price: number) => Math.round(price * 10_000);
 
@@ -174,12 +182,19 @@ const p4Of = (price: number) => Math.round(price * 10_000);
  * is under-billing, not a leak (it may be on next month's invoice), and a finding
  * whose Δ is not positive never counts.
  */
-export function countsAsLeak(d: Pick<Discrepancy, 'type' | 'severity' | 'deltaAmount'>): boolean {
+export function countsAsLeak(
+  d: Pick<Discrepancy, 'type' | 'severity' | 'deltaAmount'> & { expected?: number | null; actual?: number | null },
+): boolean {
+  // The header checks carry |Δ|: for a ריכוז only charging MORE counts — a subtotal
+  // above its lines (TOTAL_MISMATCH: actual subtotal > expected Σ lines), VAT above
+  // what the subtotal implies (VAT_MISMATCH: actual > expected). Under-billing is not.
+  const above = d.expected == null || d.actual == null || d.actual > d.expected;
   return (
     (d.severity === 'warn' || d.severity === 'block') &&
     d.type !== 'PRICE_LOWER' &&
     d.type !== 'UNORDERED_ARRIVAL' &&
     d.type !== 'MISSING_ON_INVOICE' &&
+    ((d.type !== 'TOTAL_MISMATCH' && d.type !== 'VAT_MISMATCH') || above) &&
     d.deltaAmount > 0
   );
 }
@@ -309,7 +324,7 @@ export function buildConsolidatedProposal(args: {
   const placeLine = (bucket: string, l: DeliveryNoteLineData) => {
     const key = productKey(l);
     const base = groups.get(`${bucket}|${key}`);
-    const factor = !base || base.unit === l.unit ? 1 : unitConversionFactor(l.unit, base.unit);
+    const factor = !base ? 1 : convFactor(l.unit, base.unit);
     if (factor == null) {
       const k = `${key}|u:${l.unit}`;
       return { gk: `${bucket}|${k}`, key: k, qty: l.qtyReceived, p4: l.poPrice == null ? null : p4Of(l.poPrice) };
@@ -384,13 +399,18 @@ export function buildConsolidatedProposal(args: {
     ...[...lineGroups.entries()].filter(([gk]) => !pairedKeys.has(gk)).map(([, l]) => l),
   ];
 
+  const pairedLineOf = new Map(paired.map(([gk, g]) => [g, lineGroups.get(gk)!]));
   const poLineInputs: PoLineInput[] = orderedGroups.map((g) => ({
     id: g.poLineId,
     productId: g.productId,
     supplierSku: g.supplierSku,
     // The delivery notes are the reference for a ריכוז: what was delivered is what may be billed.
     qtyOrdered: g.qtyReceived,
-    unit: g.unit,
+    // The same unit spelled another way (יח׳ / יחידה) is the invoice line's unit for the engine.
+    unit: (() => {
+      const il = pairedLineOf.get(g);
+      return il && unitKey(il.unit) === unitKey(g.unit) ? il.unit : g.unit;
+    })(),
     unitPriceExpected: priceOf(g.pricedP4, g.pricedQty),
   }));
   const grLineInputs: GrLineInput[] = orderedGroups.map((g) => ({
@@ -419,17 +439,26 @@ export function buildConsolidatedProposal(args: {
   // engine's per-unit price check, whose 2% / ₪5 tolerance on a monthly AVERAGE
   // price would hide (or invent) a difference. Units billed beyond what was
   // received stay the engine's QTY_OVER (at the billed price) — not counted twice.
+  // When the month's amounts say the product was NOT billed above what was delivered,
+  // that decides: no QTY_OVER / price finding on it (32 @ ₪6.00 = 30 @ ₪6.40 = ₪192).
+  // Only products the amount check could compare replace the engine's price finding.
   const pooled = paired.filter(([, g]) => g.bucket === POOL);
-  const pooledPoLines = new Set(pooled.map(([, g]) => g.poLineId));
+  const pooledPoLines = new Set<string>(); // compared: the amount check replaces the engine's PRICE_*
+  const notAboveDelivered = new Set<string>(); // billed ≤ delivered: no QTY_OVER / PRICE_* at all
   const pooledFindings: Discrepancy[] = [];
   for (const [gk, g] of pooled) {
     const il = lineGroups.get(gk)!;
-    const factor = il.unit === g.unit ? 1 : unitConversionFactor(il.unit, g.unit);
+    const factor = convFactor(il.unit, g.unit);
     const avgP4 = g.pricedQty > 0 ? g.pricedP4 / g.pricedQty : null;
     if (factor == null || avgP4 == null) continue;
     const billedQty = il.qtyBilled * factor;
     const q = Math.min(billedQty, g.qtyReceived);
     if (q <= 0 || billedQty <= 0) continue;
+    pooledPoLines.add(g.poLineId);
+    if (g.pricedQty >= g.qtyReceived && ag(il.lineTotal) <= Math.round(g.pricedP4 / 100)) {
+      notAboveDelivered.add(g.poLineId);
+      continue;
+    }
     const billedOnQAg = Math.round((ag(il.lineTotal) * q) / billedQty);
     const expectedAg = Math.round((q * avgP4) / 100);
     const deltaAg = billedOnQAg - expectedAg;
@@ -480,6 +509,7 @@ export function buildConsolidatedProposal(args: {
   const engineFindings = result.discrepancies.filter(
     (d) =>
       !((d.type === 'PRICE_HIGHER' || d.type === 'PRICE_LOWER') && d.poLineId && pooledPoLines.has(d.poLineId)) &&
+      !(d.type === 'QTY_OVER' && d.poLineId && notAboveDelivered.has(d.poLineId)) &&
       !twiceNotes.has(noteOf(d) ?? ''),
   );
   const lineById = new Map([...lineGroups.values()].map((l) => [l.id, l]));
@@ -510,7 +540,7 @@ export function buildConsolidatedProposal(args: {
   for (const g of groups.values()) {
     const a = received.get(g.key);
     // Buckets of one product share its first unit (kg↔g, l↔ml convert; others are their own key).
-    const f = a && a.unit !== g.unit ? (unitConversionFactor(g.unit, a.unit) ?? 1) : 1;
+    const f = a ? (convFactor(g.unit, a.unit) ?? 1) : 1;
     const agg = a ?? { productId: g.productId, name: g.name, nameEn: g.nameEn, unit: g.unit, qty: 0, pricedQty: 0, pricedP4: 0 };
     agg.qty += g.qtyReceived * f;
     agg.pricedQty += g.pricedQty * f;
@@ -521,7 +551,7 @@ export function buildConsolidatedProposal(args: {
   for (const [gk, il] of lineGroups) {
     const key = gk.slice(gk.indexOf('|') + 1);
     const unit = received.get(key)?.unit ?? il.unit;
-    const f = il.unit === unit ? 1 : (unitConversionFactor(il.unit, unit) ?? 1);
+    const f = convFactor(il.unit, unit) ?? 1;
     const b = billed.get(key) ?? { qty: 0, totalAg: 0, productId: il.productId, unit };
     b.qty += il.qtyBilled * f;
     b.totalAg += ag(il.lineTotal);
@@ -558,7 +588,8 @@ export function buildConsolidatedProposal(args: {
       qtyReceived: g?.qty ?? 0,
       qtyBilled: b?.qty ?? 0,
       poPrice: g ? priceOf(g.pricedP4, g.pricedQty) : null,
-      billedPrice: b && b.qty > 0 ? Math.round(b.totalAg / b.qty) / 100 : null,
+      // Scale 4, like the PO price: ₪238.50 / 100 = ₪2.385 (not ₪2.39).
+      billedPrice: b && b.qty > 0 ? Math.round((b.totalAg * 100) / b.qty) / 10_000 : null,
       deltaIls: ils(deltaAg),
       status,
     };
@@ -581,7 +612,7 @@ export function buildConsolidatedProposal(args: {
       const gk = `${bucket}|${productKey(l)}`;
       const il = lineGroups.get(gk);
       // Billed units → this note line's unit (kg↔g, l↔ml); unconvertible units never cover it.
-      const f = !il ? 0 : il.unit === l.unit ? 1 : (unitConversionFactor(il.unit, l.unit) ?? 0);
+      const f = !il ? 0 : (convFactor(il.unit, l.unit) ?? 0);
       const avail = (left.get(gk) ?? 0) * f;
       const take = Math.min(avail, l.qtyReceived);
       if (f > 0) left.set(gk, (left.get(gk) ?? 0) - take / f);

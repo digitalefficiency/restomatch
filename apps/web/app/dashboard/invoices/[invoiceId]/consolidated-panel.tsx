@@ -52,6 +52,8 @@ export function ConsolidatedPanel({
 }) {
   // Agorot: a cross-match is about small differences (₪0.86 must not read as ₪1).
   const ils = (v: number) => formatIls(v, { locale, maximumFractionDigits: 2 });
+  // Unit prices keep their 4 decimals (₪2.385, ₪0.0459) — never rounded to the agora.
+  const price = (v: number) => formatIls(v, { locale, maximumFractionDigits: 4 });
   const num = (v: number) => formatNumber(v, locale, { maximumFractionDigits: 3 });
   const day = (iso: string) => formatDate(iso, locale, { day: 'numeric', month: 'short' });
   const unitText = (u: string | null) => (!u ? '' : locale === 'he' ? u : (translateUnit(u) ?? u));
@@ -75,8 +77,8 @@ export function ConsolidatedPanel({
         name,
         qty: num(f.qty),
         unit: unitText(f.unit),
-        billed: ils(f.actual),
-        po: ils(f.expected),
+        billed: price(f.actual),
+        po: price(f.expected),
         delta: ils(f.deltaAmount),
       });
     }
@@ -284,8 +286,8 @@ export function ConsolidatedPanel({
                       </td>
                       <td className={`${cell} text-end font-mono tabular-nums text-ink`}>{num(p.qtyReceived)}</td>
                       <td className={`${cell} text-end font-mono tabular-nums text-ink`}>{num(p.qtyBilled)}</td>
-                      <td className={`${cell} text-end font-mono tabular-nums text-muted`}>{p.poPrice != null ? ils(p.poPrice) : '—'}</td>
-                      <td className={`${cell} text-end font-mono tabular-nums text-muted`}>{p.billedPrice != null ? ils(p.billedPrice) : '—'}</td>
+                      <td className={`${cell} text-end font-mono tabular-nums text-muted`}>{p.poPrice != null ? price(p.poPrice) : '—'}</td>
+                      <td className={`${cell} text-end font-mono tabular-nums text-muted`}>{p.billedPrice != null ? price(p.billedPrice) : '—'}</td>
                       <td className={`${cell} text-end font-mono tabular-nums ${p.deltaIls > 0 ? 'font-semibold text-danger' : 'text-muted'}`}>
                         {p.deltaIls > 0 ? ils(p.deltaIls) : '—'}
                       </td>

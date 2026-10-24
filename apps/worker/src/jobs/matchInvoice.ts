@@ -69,7 +69,7 @@ export function startMatchInvoiceWorker() {
     // resolved from the restaurant inside the assembler).
     const built = await buildMatchInputForInvoice(db, restaurantId, invoiceId);
     if (!built) {
-      console.warn(`[match-invoice] invoice=${invoiceId} has no lines to match — skipping`);
+      console.warn(`[match-invoice] invoice=${invoiceId} has nothing to PO-match (no lines, or a consolidated invoice) — skipping`);
       return { status: 'clean', totalDiscrepancyAmount: 0, discrepancies: [] };
     }
 

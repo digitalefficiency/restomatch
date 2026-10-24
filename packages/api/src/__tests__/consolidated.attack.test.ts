@@ -19,6 +19,7 @@ import {
   type Database,
 } from '@restomatch/db';
 import { appRouter } from '../index';
+import { buildMatchInputForInvoice } from '../match/buildMatchInput';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
 
@@ -223,6 +224,13 @@ describe('consolidated.proposal — isolation (RLS app role)', () => {
     const runs = await ownerDb.execute(`select count(*)::int as c from match_runs where invoice_id = '${itemizedId}'`);
     const rows = (Array.isArray(runs) ? runs : (runs as { rows: { c: number }[] }).rows) as { c: number }[];
     expect(rows[0]!.c).toBe(0);
+  });
+
+  it('no path PO-matches a ריכוז: buildMatchInputForInvoice (the worker job, receipts) builds nothing for it', async () => {
+    // Owner connection: the guard, not RLS, must be what returns nothing.
+    expect(await buildMatchInputForInvoice(ownerDb, A.restaurantId, itemizedId)).toBeNull();
+    // The cross-match itself still gets the invoice side.
+    expect(await buildMatchInputForInvoice(ownerDb, A.restaurantId, itemizedId, { skipPoDiscovery: true })).not.toBeNull();
   });
 
   it('the proposal (₪ deltas) is for finance roles: a receiver is refused, a bookkeeper reads it', async () => {

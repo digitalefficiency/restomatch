@@ -283,6 +283,7 @@ describe('buildConsolidatedProposal — #95 review (P0)', () => {
     });
     expect(p.deliveryNotes[0]!.receivedValueIls).toBe(238.5);
     expect(p.products[0]!.poPrice).toBe(2.385);
+    expect(p.products[0]!.billedPrice).toBe(2.385); // (P2 f) not rounded to the agora
     expect(p.totals).toMatchObject({ differenceIls: 0, leakIls: 0 });
     expect(p.status).toBe('matched');
   });
@@ -391,6 +392,53 @@ describe('buildConsolidatedProposal — #95 review (P1)', () => {
     expect(p.findings.map((f) => [f.type, f.deltaAmount, f.deliveryNoteNumber])).toEqual([['PRICE_HIGHER', 36, '61036']]);
     expect(p.totals.leakIls).toBe(36);
     expect(p.deliveryNotes.every((n) => n.status === 'covered')).toBe(true);
+  });
+});
+
+describe('buildConsolidatedProposal — #95 review (P2)', () => {
+  it('(d) the same unit spelled two ways (יח׳ / יחידה) still compares: 100 @ ₪3.00 vs 2×50 @ ₪2.50 → ₪50.00', () => {
+    const notes = [1, 2].map((i) => note(`gr-u${i}`, i * 5, [noteLine(CHALLAH, 50, 2.5, { unit: 'יחידה' })]));
+    const p = propose([{ ...invLine(CHALLAH, 100, 3), unit: 'יח׳' }], notes);
+    expect(p.findings.filter((f) => f.countsAsLeak).map((f) => [f.type, f.deltaAmount])).toEqual([['PRICE_HIGHER', 50]]);
+    expect(p.totals.leakIls).toBe(50);
+    expect(p.deliveryNotes.every((n) => n.status === 'covered')).toBe(true);
+    expect(p.findings.some((f) => f.type === 'UNIT_MISMATCH')).toBe(false);
+  });
+
+  it('(d) a pooled line the amount check cannot compare keeps the engine’s own price finding', () => {
+    // kg on the notes, "ארגז" (a case) on the invoice: not convertible.
+    const notes = [note('gr-c', 5, [noteLine(CHALLAH, 10, 5, { unit: 'kg' })])];
+    const p = propose([{ ...invLine(CHALLAH, 10, 7), unit: 'ארגז' }], notes);
+    expect(p.findings.some((f) => f.type === 'PRICE_HIGHER' && f.countsAsLeak)).toBe(true);
+  });
+
+  it('(a) under-billing through the header checks is not leak (subtotal below its lines, VAT below expected)', () => {
+    expect(countsAsLeak({ type: 'TOTAL_MISMATCH', severity: 'block', deltaAmount: 4, expected: 64, actual: 60 })).toBe(false);
+    expect(countsAsLeak({ type: 'TOTAL_MISMATCH', severity: 'block', deltaAmount: 4, expected: 60, actual: 64 })).toBe(true);
+    expect(countsAsLeak({ type: 'VAT_MISMATCH', severity: 'warn', deltaAmount: 2, expected: 11.52, actual: 9.52 })).toBe(false);
+    expect(countsAsLeak({ type: 'VAT_MISMATCH', severity: 'warn', deltaAmount: 2, expected: 9.52, actual: 11.52 })).toBe(true);
+    const notes = [note('gr-h', 5, [noteLine(CHALLAH, 10, 6.4)])];
+    const b = base([invLine(CHALLAH, 10, 6.4)]);
+    b.invoice.totalExclVat = 60; // subtotal BELOW its lines
+    b.invoice.vatAmount = 10.8;
+    b.invoice.totalInclVat = 70.8;
+    const p = buildConsolidatedProposal({ invoiceId: 'i', supplierId: 's', periodStart: new Date(), periodEnd: new Date(), base: b, notes });
+    expect(p.findings.some((f) => f.type === 'TOTAL_MISMATCH')).toBe(true);
+    expect(p.totals.leakIls).toBe(0);
+  });
+
+  it('(b) pooled: 32 @ ₪6.00 vs 30 @ ₪6.40 is the same ₪192 — no QTY_OVER, no leak, matched', () => {
+    const notes = [1, 2, 3].map((i) => note(`gr-q${i}`, i * 5, [noteLine(CHALLAH, 10, 6.4)]));
+    const p = propose([invLine(CHALLAH, 32, 6)], notes);
+    expect(p.findings.filter((f) => f.countsAsLeak)).toEqual([]);
+    expect(p.totals).toMatchObject({ leakIls: 0, differenceIls: 0 });
+    expect(p.status).toBe('matched');
+  });
+
+  it('(b) pooled and billed above the notes: the extra units and the price on the rest add up to the difference', () => {
+    const notes = [1, 2, 3].map((i) => note(`gr-r${i}`, i * 5, [noteLine(CHALLAH, 10, 6.4)]));
+    const p = propose([invLine(CHALLAH, 32, 6.5)], notes); // ₪208 vs ₪192
+    expect(p.totals).toMatchObject({ differenceIls: 16, leakIls: 16 });
   });
 });
 

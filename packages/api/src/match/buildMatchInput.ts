@@ -122,6 +122,14 @@ export async function buildMatchInputForInvoice(
     .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
     .limit(1);
   if (!inv) return null;
+  // A consolidated invoice (חשבונית ריכוז, ocr_payload.raw.kind 'consolidated') is never
+  // PO-matched, by any path (the worker's match-invoice job, a re-match, a receipt):
+  // it has no PO of its own, so discovery could only mark it UNORDERED_ARRIVAL or
+  // pin it to one delivery's PO. It is cross-matched against its delivery notes
+  // (match/consolidated.ts), which asks for the invoice side only (skipPoDiscovery).
+  if (!options.skipPoDiscovery && (inv.ocrPayload?.raw as { kind?: unknown } | null | undefined)?.kind === 'consolidated') {
+    return null;
+  }
   // A scan whose number another invoice of this supplier already holds is
   // stored WITHOUT it (invoices_dedupe_idx; the worker's writeOcrHeader) and
   // keeps the number in ocr_payload.raw.duplicateOf. Match on that number so
