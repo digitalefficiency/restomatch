@@ -152,10 +152,11 @@ pnpm --filter @restomatch/worker check:demo && pnpm db:doctor
 
 ```
 [check-demo]   hero: ₪760 of ₪42263 (1.8%)
-[check-demo]   last month ₪1059 of ₪63301 (1.7%) · month before ₪1042 of ₪62028 (1.7%)
+[check-demo]   last month ₪1059 of ₪69541 (1.5%) · month before ₪1042 of ₪62028 (1.7%)
 [check-demo]   today 2026-10-25: HaSharon Produce (11 lines, sent), HaKerem Butchery (6 lines, sent), Galilee Dairies (7 lines, sent)
 [check-demo]   produce VAT: HaSharon Produce 0%, HaSharon Produce 0%, Carmel Greens 0%, HaSharon Produce 0% · VAT_MISMATCH on produce: 0
 [check-demo]   consolidated: GD-M-202605 paid 9/9 notes, GD-M-202606 paid 8/8 notes, GD-M-202607 paid 9/9 notes, GD-M-202608 paid 9/9 notes, GD-M-202609 parsed 8/8 notes · overcharge ₪36.00, BR-R-24123 parsed 2/2 notes
+[check-demo]   VAT at risk (no allocation number, > ₪5,000): MF-24950 · ₪1123.20
 [check-demo]   approvals queue (main): 5 open
 [check-demo]   כפר הזיתים — חיפה: 203 invoices · leak ₪355 of ₪61740 (0.6%)
 [check-demo]   כפר הזיתים — ירושלים: 203 invoices · leak ₪975 of ₪33056 (2.9%)
@@ -179,7 +180,8 @@ pnpm --filter @restomatch/worker check:demo && pnpm db:doctor
 | מחלבות הגליל: תעודות משלוח וחשבונית מרכזת | חשבונית מרכזת לספטמבר GD-M-202609 על 8 תעודות משלוח, ממתינה. בתעודה 61036 חלב חויב ‏7.90 ₪ במקום ‏6.40 ₪: **‏36 ₪** לפני מע״מ. באוקטובר 8 תעודות שעוד לא חויבו (החשבונית בסוף החודש). מאי–אוגוסט: חשבוניות מרכזות ששולמו |
 | קבלת סחורה היום (25/10) | **ירקות השרון 10:00** (11 שורות, פתוחה, להדגמה חיה), קצביית הכרם 12:30, מחלבות הגליל 15:00 |
 | ירקות (ירקות השרון, Carmel Greens) | מע״מ 0% (פטור), בלי ממצאי מע״מ |
-| חודשים קודמים | אוגוסט ₪1,042 מתוך ₪62,028 · ספטמבר ₪1,059 מתוך ₪63,301 (שניהם 1.7%) |
+| חודשים קודמים | אוגוסט ₪1,042 מתוך ₪62,028 (1.7%) · ספטמבר ₪1,059 מתוך ₪69,541 (1.5%) |
+| מע״מ בסיכון | חשבונית אחת: הדגים הים-תיכוניים MF-24950 מ-28/9, ‏6,240 ₪ לפני מע״מ, בלי מספר הקצאה: **‏1,123.20 ₪** מע״מ בסיכון |
 | סניף חיפה | ₪355 מתוך ₪61,740 (0.6%) |
 | סניף ירושלים | ₪975 מתוך ₪33,056 (2.9%) |
 
