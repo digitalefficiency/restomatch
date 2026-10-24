@@ -9,6 +9,7 @@ import {
   loadPriorDecisions,
   receiptStillOpen,
   persistMatchRun,
+  rematchHoldReason,
   recipientsForRestaurant,
   recordUsage,
   resolveApprovalThresholds,
@@ -86,16 +87,12 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
   if (priorRun && !data.rematch) {
     return { result: CLEAN, persisted: null, replaced: false, skipped: 'already_matched' };
   }
-  // A person already signed this invoice off: a receipt submit never rewrites
-  // its match (only match.runForInvoice, a manager action, may).
-  if (priorRun && data.rematch && (inv.status === 'approved' || inv.status === 'paid')) {
-    return { result: CLEAN, persisted: null, replaced: false, skipped: 'settled' };
-  }
-  if (!priorRun && data.rematch) {
-    const raw = inv.ocrPayload?.raw as { duplicateOf?: unknown } | null | undefined;
-    if (inv.status !== 'matched' || raw?.duplicateOf !== undefined) {
-      return { result: CLEAN, persisted: null, replaced: false, skipped: 'awaiting_review' };
-    }
+  // A person already signed this invoice off (a receipt submit never rewrites
+  // its match — only match.runForInvoice, a manager action, may), or the OCR
+  // held a never-matched invoice for a human. Shared with the dock slip.
+  if (data.rematch) {
+    const hold = rematchHoldReason(inv, Boolean(priorRun));
+    if (hold) return { result: CLEAN, persisted: null, replaced: false, skipped: hold };
   }
 
   // Discover the PO + assemble the 3-way MatchInput (tolerances/vat/baselines

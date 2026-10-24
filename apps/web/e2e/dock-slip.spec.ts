@@ -96,7 +96,7 @@ async function writeOcrWithDifferences(invoiceId: string, f: Fixture) {
       await sql`insert into invoice_lines (invoice_id, product_id, raw_description, qty_billed, unit, unit_price_billed, line_total, ocr_confidence_line)
                 values (${invoiceId}, ${l.p.productId}, ${l.p.name}, ${l.qty}, 'ק״ג', ${l.price}, ${Math.round(l.qty * l.price * 100) / 100}, 0.97)`;
     }
-    await sql`update invoices set status = 'parsed', ocr_confidence = 0.96, invoice_number = ${`DS-${invoiceId.slice(0, 6)}`}, total_incl_vat = 999 where id = ${invoiceId}`;
+    await sql`update invoices set status = 'matched', ocr_confidence = 0.96, invoice_number = ${`DS-${invoiceId.slice(0, 6)}`}, total_incl_vat = 999 where id = ${invoiceId}`;
   } finally {
     await sql.end();
   }
@@ -173,12 +173,12 @@ test('390 px: quantities on the review; the engine ₪ only after the receipt is
   await expect(review.getByTestId('dock-slip-computing')).toHaveCount(0);
   await expect(review.getByTestId('dock-slip-amount')).toHaveCount(0);
   await expect(review.getByTestId('dock-slip-total')).toHaveCount(0);
-  await expect(review.getByText(/מחיר: בהזמנה/)).toBeVisible();
+  // The over-price line names no price yet: no ₪ anywhere before the engine.
+  await expect(review.getByText('המחיר בחשבונית גבוה מההזמנה')).toBeVisible();
+  expect(await review.innerText()).not.toContain('₪');
   const reviewText = (await review.getByTestId('dock-slip-copy').getAttribute('data-slip-text'))!;
   expect(reviewText).toContain('תעודת חריגה');
-  // Prices are quoted, but no "— ₪ at stake" per line and no total to claim.
-  expect(reviewText).not.toMatch(/—\s*[\d₪]/);
-  expect(reviewText).not.toContain('לדרישת זיכוי');
+  expect(reviewText).not.toContain('₪'); // the WhatsApp text too
   const href = await review.getByTestId('dock-slip-whatsapp').getAttribute('href');
   expect(href).toMatch(/^https:\/\/wa\.me\//);
   expect(decodeURIComponent(href!.split('text=')[1]!)).toContain(f.supplierName);
@@ -216,4 +216,48 @@ test('390 px: quantities on the review; the engine ₪ only after the receipt is
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(390);
   await page.screenshot({ path: test.info().outputPath('dock-slip-confirmed-390.png'), fullPage: true });
+});
+
+test('390 px: a count "= order" with an engine-only finding (VAT) still gets a slip after the close', async ({ page }) => {
+  test.setTimeout(180_000);
+  const f = await fixture();
+  await setDockSlip(f.restaurantId, true);
+  const invoiceId = await scanAndProcess(page, f.poId);
+  // Play the OCR worker: every line exactly as ordered.
+  const sql = e2eSql();
+  try {
+    for (const l of f.lines) {
+      await sql`insert into invoice_lines (invoice_id, product_id, raw_description, qty_billed, unit, unit_price_billed, line_total, ocr_confidence_line)
+                values (${invoiceId}, ${l.productId}, ${l.name}, ${l.qty}, 'ק״ג', ${l.price}, ${Math.round(l.qty * l.price * 100) / 100}, 0.97)`;
+    }
+    await sql`update invoices set status = 'matched', ocr_confidence = 0.96, invoice_number = ${`DV-${invoiceId.slice(0, 6)}`}, total_incl_vat = 999 where id = ${invoiceId}`;
+  } finally {
+    await sql.end();
+  }
+  await expect(page.getByRole('heading', { name: 'תוצאת ההצלבה' })).toBeVisible({ timeout: 60_000 });
+  // Nothing differs on the count: no slip button on the review.
+  await expect(page.getByTestId('open-dock-slip')).toHaveCount(0);
+  await page.getByTestId('continue-adjust').click();
+  await page.getByTestId('close-receipt').click();
+  await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId('dock-slip')).toHaveCount(0);
+
+  // Play the worker's post-count re-match: one invoice-level VAT finding.
+  const sql2 = e2eSql();
+  try {
+    const [gr] = await sql2<{ id: string }[]>`select id from goods_receipts where po_id = ${f.poId} limit 1`;
+    const [run] = await sql2<{ id: string }[]>`
+      insert into match_runs (restaurant_id, po_id, gr_id, invoice_id, overall_status, run_at)
+      values (${f.restaurantId}, ${f.poId}, ${gr!.id}, ${invoiceId}, 'minor', now() + interval '1 second') returning id`;
+    await sql2`insert into discrepancies (match_run_id, restaurant_id, type, severity, expected_value, actual_value, delta_amount)
+               values (${run!.id}, ${f.restaurantId}, 'VAT_MISMATCH', 'warn', 0, 12.5, 12.5)`;
+  } finally {
+    await sql2.end();
+  }
+  const slip = page.getByTestId('dock-slip');
+  await expect(slip).toBeVisible({ timeout: 30_000 });
+  await expect(slip.getByTestId('dock-slip-amount')).toHaveCount(1);
+  expect(Number((await slip.getByTestId('dock-slip-total').innerText()).replace(/[^\d.]/g, ''))).toBe(12.5);
+  const text = (await slip.getByTestId('dock-slip-copy').getAttribute('data-slip-text'))!;
+  expect(text).not.toMatch(/•\s*:/); // an invoice-level line has no empty name prefix
 });

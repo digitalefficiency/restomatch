@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ReconciliationLine } from '@/app/showcase/receiver/_mock';
 import { lineKey, type LineMark } from '@/app/showcase/receiver/_state';
-import { buildSlipLines, lineIssues, needsSlip, slipBullet, sumIls, type EngineSlipLine } from '../_dockSlip';
+import { buildSlipLines, issueMessageKey, lineIssues, needsSlip, slipBullet, slipNote, sumIls, type EngineSlipLine } from '../_dockSlip';
 
 const line = (o: Partial<ReconciliationLine>): ReconciliationLine => ({
   invoiceLineIndex: 0,
@@ -109,5 +109,41 @@ describe('dock slip — shared text', () => {
   });
   it('no engine ₪ → no amount', () => {
     expect(slipBullet('מלפפון', ['חסר 1'], null)).toBe('• מלפפון: חסר 1');
+  });
+});
+
+describe('dock slip — no ₪ before the engine', () => {
+  it('an over-price line quotes no price until the post-count run is in', () => {
+    expect(issueMessageKey('overPrice', false)).toBe('overPriceNoAmount');
+    expect(issueMessageKey('overPrice', true)).toBe('overPrice');
+    expect(issueMessageKey('short', false)).toBe('short');
+  });
+});
+
+describe('dock slip — status note', () => {
+  const e = (o: Partial<{ receiptClosed: boolean; ready: boolean; holdReason: string | null }>) => ({
+    receiptClosed: true,
+    ready: false,
+    holdReason: null,
+    ...o,
+  });
+  it('receipt open → "after close"; ready or no invoice → nothing', () => {
+    expect(slipNote(e({ receiptClosed: false }), true, false)).toBe('afterClose');
+    expect(slipNote(e({ ready: true }), true, false)).toBeNull();
+    expect(slipNote(e({}), false, false)).toBeNull();
+  });
+  it('a held re-match says so at once — no spinner, no "will follow"', () => {
+    expect(slipNote(e({ holdReason: 'awaiting_review' }), true, false)).toBe('held');
+    expect(slipNote(e({ holdReason: 'settled' }), true, true)).toBe('held');
+  });
+  it('otherwise the spinner, then the calm "slow" note', () => {
+    expect(slipNote(e({}), true, false)).toBe('computing');
+    expect(slipNote(e({}), true, true)).toBe('slow');
+  });
+  it('engine findings alone (VAT / total / duplicate) are enough for a slip', () => {
+    const lines = buildSlipLines([], {}, [
+      { discrepancyId: 'v', type: 'VAT_MISMATCH', poLineId: null, productId: null, productName: null, productNameEn: null, lineDescription: null, lineDescriptionEn: null, expected: null, actual: null, amountIls: 12.5 },
+    ]);
+    expect(needsSlip(lines, null)).toBe(true);
   });
 });

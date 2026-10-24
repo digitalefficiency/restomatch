@@ -35,6 +35,7 @@ import { fillEnglishNames } from '../receiving/english';
 import {
   invoicesWaitingOnReceipt,
   lockReceipt,
+  rematchHoldReason,
   scannedInvoicesForReceipt,
 } from '../receiving/matchTriggers';
 import { devOcrStubEnabled, buildDevOcrStub } from '../receiving/devOcrStub';
@@ -340,12 +341,14 @@ export const receivingRouter = router({
       // name rather than a name that would vanish in production.
       let receiverName: string | null = null;
       if (gr.receivedBy && gr.receivedBy === ctx.session.userId) {
+        // Display name only — never the login e-mail: this line goes into the
+        // WhatsApp text sent to the supplier. No name → no line.
         const [me] = await ctx.db
-          .select({ name: users.name, email: users.email })
+          .select({ name: users.name })
           .from(users)
           .where(eq(users.id, ctx.session.userId))
           .limit(1);
-        receiverName = me?.name ?? me?.email ?? null;
+        receiverName = me?.name?.trim() || null;
       }
       // ₪ only from a match run made AFTER the count: a run from before the
       // receipt was closed saw gr_lines empty (every line "short") and must
@@ -358,6 +361,12 @@ export const receivingRouter = router({
         receiptClosed: boolean;
         /** A match run for this receipt from after it closed exists — the ₪ below is final. */
         ready: boolean;
+        /**
+         * Receipt closed but no post-count run will come on its own (the re-match
+         * is held — rematchHoldReason): the slip says why at once instead of
+         * waiting. null while a run may still land.
+         */
+        holdReason: 'settled' | 'awaiting_review' | null;
         totalIls: number;
         lines: Array<{
           discrepancyId: string;
@@ -373,11 +382,11 @@ export const receivingRouter = router({
           actual: number | null;
           amountIls: number;
         }>;
-      } = { receiptClosed, ready: false, totalIls: 0, lines: [] };
+      } = { receiptClosed, ready: false, holdReason: null, totalIls: 0, lines: [] };
 
       if (input.invoiceId) {
         const [inv] = await ctx.db
-          .select({ id: invoices.id, number: invoices.invoiceNumber, ocrPayload: invoices.ocrPayload })
+          .select({ id: invoices.id, number: invoices.invoiceNumber, status: invoices.status, ocrPayload: invoices.ocrPayload })
           .from(invoices)
           .where(and(eq(invoices.id, input.invoiceId), eq(invoices.restaurantId, restaurantId)))
           .limit(1);
@@ -398,6 +407,14 @@ export const receivingRouter = router({
               )
           : [];
         const ready = Number(runs) > 0;
+        let holdReason: 'settled' | 'awaiting_review' | null = null;
+        if (receiptClosed && !ready) {
+          const [{ any } = { any: 0 }] = await ctx.db
+            .select({ any: count() })
+            .from(matchRuns)
+            .where(and(eq(matchRuns.invoiceId, inv.id), eq(matchRuns.restaurantId, restaurantId)));
+          holdReason = rematchHoldReason(inv, Number(any) > 0);
+        }
         const leak = ready ? await computeInvoiceLeak(ctx.db, restaurantId, inv.id) : null;
         const claim = leak ? claimableLines(leak) : [];
         const lines = claim.map(({ line, amount }) => ({
@@ -417,7 +434,7 @@ export const receivingRouter = router({
         }));
         // Summed in agorot so the total is exact.
         const totalIls = lines.reduce((acc, l) => acc + Math.round(l.amountIls * 100), 0) / 100;
-        engine = { receiptClosed, ready, totalIls, lines };
+        engine = { receiptClosed, ready, holdReason, totalIls, lines };
       }
 
       return {
@@ -824,7 +841,9 @@ export const receivingRouter = router({
         .set({
           status: newStatus,
           signatureUrl: input.signatureUrl ?? null,
-          updatedAt: new Date(),
+          // DB clock, like match_runs.run_at: the dock slip compares the two (a
+          // skewed API clock must not make the post-count run look older).
+          updatedAt: sql`now()`,
         })
         .where(
           and(

@@ -136,3 +136,26 @@ export function needsSlip(slipLines: SlipLine[], duplicateNumber: string | null)
 export function slipBullet(name: string, issues: string[], amount: string | null): string {
   return `• ${name ? `${name}: ` : ''}${issues.join('; ')}${amount !== null ? ` — ${amount}` : ''}`;
 }
+
+/**
+ * The message key of one issue. Until the engine's post-count run is in, the
+ * slip (and its WhatsApp text) carries NO ₪ at all — not even unit prices: an
+ * over-price line just says the invoice price is above the order.
+ */
+export function issueMessageKey(issue: SlipIssue, engineReady: boolean): string {
+  return issue === 'overPrice' && !engineReady ? 'overPriceNoAmount' : issue;
+}
+
+export type SlipNote = 'afterClose' | 'held' | 'computing' | 'slow' | null;
+
+/** Which status note the slip shows under its lines (null: the ₪ is in, or no invoice). */
+export function slipNote(
+  engine: { receiptClosed: boolean; ready: boolean; holdReason: string | null },
+  hasInvoice: boolean,
+  gaveUp: boolean,
+): SlipNote {
+  if (!hasInvoice || engine.ready) return null;
+  if (!engine.receiptClosed) return 'afterClose';
+  if (engine.holdReason) return 'held'; // no run will come on its own — say so now, no spinner
+  return gaveUp ? 'slow' : 'computing';
+}

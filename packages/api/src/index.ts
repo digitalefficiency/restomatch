@@ -135,6 +135,7 @@ export {
   lockReceipt,
   receiptState,
   receiptStillOpen,
+  rematchHoldReason,
   scannedInvoicesForReceipt,
 } from './receiving/matchTriggers';
 export { backfillPriceHistory, writePriceHistoryForInvoice } from './match/priceHistory';
