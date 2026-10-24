@@ -55,6 +55,7 @@ export const he = {
     savings: 'חיסכון {amount}',
     matchesOrderAndReceipt: 'תואמת להזמנה ולקבלה',
     awaitingMonthlyMatch: 'ממתינה להתאמה מול תעודות המשלוח של החודש',
+    awaitingPoLink: 'ממתינה לשיוך להזמנה',
     empty: 'עוד אין פעילות להצגה.',
   },
 };

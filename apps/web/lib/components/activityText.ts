@@ -50,6 +50,8 @@ export function localizeActivity(
   if (!item.detail) return { title, detail: null };
   const parts = item.detail.split('·').map((p) => p.trim());
   const out = parts.map((part) => {
+    if (part === 'חריגה אחת') return t('activity.discrepancyOne');
+    if (part === 'ממתינה לשיוך להזמנה') return t('activity.awaitingPoLink');
     let m = /^(\d+)\s+חריגות$/.exec(part);
     if (m) return t('activity.discrepancies', { count: m[1]! });
     m = /^הפסד פוטנציאלי\s+(.+)$/.exec(part);
@@ -82,6 +84,10 @@ type ActivityMeta = {
   supplierNameEn?: unknown;
   discrepancyCount?: unknown;
   potentialLossIls?: unknown;
+  /** The hero's leak rule (packages/api matchActivitySummary) — preferred over the engine totals. */
+  leakCount?: unknown;
+  leakIls?: unknown;
+  pendingLink?: unknown;
   totalInclVatIls?: unknown;
   consolidated?: unknown;
 };
@@ -118,8 +124,11 @@ function fromMetadata(
   }
   if (eventType === 'invoice_matched') {
     const title = t('activity.invoiceMatchedNumbered', { number });
-    const count = typeof m.discrepancyCount === 'number' ? m.discrepancyCount : null;
-    const loss = ils(m.potentialLossIls);
+    // No PO yet: calm "waiting for a PO link", like the hero — never a loss figure.
+    if (m.pendingLink === true) return { title, detail: [supplier, t('activity.awaitingPoLink')].filter(Boolean).join(' · ') };
+    const hasLeak = typeof m.leakCount === 'number';
+    const count = hasLeak ? (m.leakCount as number) : typeof m.discrepancyCount === 'number' ? m.discrepancyCount : null;
+    const loss = ils(hasLeak ? m.leakIls : m.potentialLossIls);
     const parts =
       count === 0
         ? [supplier, t('activity.matchesOrder')]

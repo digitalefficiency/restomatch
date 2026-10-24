@@ -98,6 +98,40 @@ export async function loadPriorDecisions(
   return out;
 }
 
+/**
+ * The feed's story for a match, on the SAME rule as the dashboard hero
+ * (packages/charts LEAK_FILTER + per-invoice cap): leak = Σ|delta| of warn/block
+ * findings, not PRICE_LOWER (an under-charge), not UNORDERED_ARRIVAL (no PO yet
+ * — "pending", calm) and not a duplicate a person rejected; capped at the
+ * invoice total. So a no-PO invoice reads "ממתינה לשיוך להזמנה", not "הפסד
+ * פוטנציאלי ₪1,273" while the hero calls it pending; a clean match reads "תואמת
+ * להזמנה ולקבלה", never "0 חריגות · ₪0". Shared by persistMatchRun and the seed.
+ */
+export function matchActivitySummary(
+  findings: { type: string; severity: string; deltaAmount: number; resolutionStatus: string }[],
+  invoiceTotalInclVat: number,
+): { detail: string; leakCount: number; leakIls: number; pendingLink: boolean } {
+  const pendingLink = findings.some(
+    (f) => f.type === 'UNORDERED_ARRIVAL' && (f.resolutionStatus === 'open' || f.resolutionStatus === 'escalated'),
+  );
+  const leaking = findings.filter(
+    (f) =>
+      (f.severity === 'warn' || f.severity === 'block') &&
+      f.type !== 'PRICE_LOWER' &&
+      f.type !== 'UNORDERED_ARRIVAL' &&
+      !(f.type === 'DUPLICATE_INVOICE' && f.resolutionStatus === 'rejected') &&
+      Math.abs(f.deltaAmount) > 0,
+  );
+  const raw = leaking.reduce((sum, f) => sum + Math.round(Math.abs(f.deltaAmount) * 100), 0) / 100;
+  const leakIls = Math.min(raw, Math.max(invoiceTotalInclVat, 0));
+  const detail = pendingLink
+    ? 'ממתינה לשיוך להזמנה'
+    : leaking.length === 0
+      ? 'תואמת להזמנה ולקבלה'
+      : `${leaking.length === 1 ? 'חריגה אחת' : `${leaking.length} חריגות`} · הפסד פוטנציאלי ₪${Math.round(leakIls).toLocaleString('he-IL')}`;
+  return { detail, leakCount: leaking.length, leakIls, pendingLink };
+}
+
 export interface PersistMatchResult {
   matchRunId: string;
   /** Roles that an open (non-auto-approved) discrepancy routed to — the worker
@@ -136,6 +170,7 @@ export async function persistMatchRun(
 
   const totalInvoiceAmount = input.invoice.totalInclVat;
   const rolesNeedingNotification = new Set<UserRole>();
+  const feedFindings: Parameters<typeof matchActivitySummary>[0] = [];
 
   for (const d of result.discrepancies) {
     const ctx: ApprovalContext = {
@@ -172,6 +207,13 @@ export async function persistMatchRun(
       resolutionNote: prior?.resolutionNote ?? null,
     });
 
+    feedFindings.push({
+      type: d.type,
+      severity: d.severity,
+      deltaAmount: d.deltaAmount,
+      resolutionStatus: prior?.resolutionStatus ?? initialStatus,
+    });
+
     if (!prior && decision.requiredRole && decision.action !== 'auto_approve') {
       rolesNeedingNotification.add(decision.requiredRole);
     }
@@ -198,18 +240,12 @@ export async function persistMatchRun(
     .leftJoin(suppliers, and(eq(suppliers.id, invoices.supplierId), eq(suppliers.restaurantId, args.restaurantId)))
     .where(and(eq(invoices.id, args.invoiceId), eq(invoices.restaurantId, args.restaurantId)))
     .limit(1);
-  const lossIls = Math.round(result.totalDiscrepancyAmount);
+  const feed = matchActivitySummary(feedFindings, totalInvoiceAmount);
   await logActivity(db, {
     restaurantId: args.restaurantId,
     eventType: 'invoice_matched',
     title: meta?.invoiceNumber ? `חשבונית ${meta.invoiceNumber} הותאמה` : 'חשבונית הותאמה',
-    detail: [
-      meta?.supplierName ?? null,
-      result.discrepancies.length === 1 ? 'חריגה אחת' : `${result.discrepancies.length} חריגות`,
-      `הפסד פוטנציאלי ₪${lossIls.toLocaleString('he-IL')}`,
-    ]
-      .filter(Boolean)
-      .join(' · '),
+    detail: [meta?.supplierName ?? null, feed.detail].filter(Boolean).join(' · '),
     entityType: 'match_run',
     entityId: matchRun.id,
     metadata: {
@@ -217,8 +253,13 @@ export async function persistMatchRun(
       invoiceNumber: meta?.invoiceNumber ?? null,
       supplierName: meta?.supplierName ?? null,
       supplierNameEn: meta?.supplierNameEn ?? null,
+      // Engine totals (all findings) — kept for consumers of the raw numbers.
       discrepancyCount: result.discrepancies.length,
       potentialLossIls: result.totalDiscrepancyAmount,
+      // What the feed tells: the hero's leak rule (matchActivitySummary).
+      leakCount: feed.leakCount,
+      leakIls: feed.leakIls,
+      pendingLink: feed.pendingLink,
       status: result.status,
     },
   });

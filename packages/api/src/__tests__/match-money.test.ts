@@ -16,6 +16,7 @@ import { appRouter } from '../index';
 import type { AppContext } from '../context';
 import { normalizeInvoiceNumber } from '../match/buildMatchInput';
 import { backfillPriceHistory, writePriceHistoryForInvoice } from '../match/priceHistory';
+import { matchActivitySummary } from '../match/persist';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
 
 /**
@@ -418,5 +419,44 @@ describe('a re-match after the PO is closed (demo: "התאמה מחדש" on a se
     await db.update(purchaseOrders).set({ status: 'closed' }).where(eq(purchaseOrders.id, A.poId));
     const res = await ownerCaller(A).match.runForInvoice({ invoiceId: A.invoiceId });
     expect(res.poMatched).toBe(false);
+  });
+});
+
+describe('the feed tells the hero’s story (matchActivitySummary)', () => {
+  const f = (type: string, severity: string, deltaAmount: number, resolutionStatus = 'open') => ({ type, severity, deltaAmount, resolutionStatus });
+
+  it('a clean match is calm — never "0 חריגות · ₪0"', () => {
+    expect(matchActivitySummary([], 117)).toEqual({ detail: 'תואמת להזמנה ולקבלה', leakCount: 0, leakIls: 0, pendingLink: false });
+    // Only inside-tolerance info + an under-charge: still nothing leaked.
+    expect(matchActivitySummary([f('QTY_SHORT', 'info', 4), f('PRICE_LOWER', 'warn', 12)], 117).detail).toBe('תואמת להזמנה ולקבלה');
+  });
+
+  it('no PO yet → pending, calm — not "הפסד פוטנציאלי ₪1,273"', () => {
+    const s = matchActivitySummary([f('UNORDERED_ARRIVAL', 'warn', 1273)], 1273);
+    expect(s).toEqual({ detail: 'ממתינה לשיוך להזמנה', leakCount: 0, leakIls: 0, pendingLink: true });
+  });
+
+  it('singular / plural, grouped ₪, capped at the invoice total like the hero', () => {
+    expect(matchActivitySummary([f('PRICE_HIGHER', 'block', 104.8)], 2787.92).detail).toBe('חריגה אחת · הפסד פוטנציאלי ₪105');
+    const two = matchActivitySummary([f('DUPLICATE_INVOICE', 'block', 1180), f('PRICE_HIGHER', 'block', 400)], 1180);
+    expect(two).toMatchObject({ leakCount: 2, leakIls: 1180 });
+    expect(two.detail).toBe('2 חריגות · הפסד פוטנציאלי ₪1,180');
+  });
+
+  it('a duplicate rejected as "not a duplicate" is not a loss', () => {
+    expect(matchActivitySummary([f('DUPLICATE_INVOICE', 'block', 118, 'rejected')], 118).detail).toBe('תואמת להזמנה ולקבלה');
+  });
+
+  it('persisted: an invoice with no PO reads "pending", with no loss figure', async () => {
+    const A = await seedTenant(db, 'A');
+    await db.delete(matchRuns).where(eq(matchRuns.invoiceId, A.invoiceId));
+    await db.update(purchaseOrders).set({ status: 'cancelled' }).where(eq(purchaseOrders.id, A.poId));
+    const res = await ownerCaller(A).match.runForInvoice({ invoiceId: A.invoiceId });
+    expect(res.poMatched).toBe(false);
+    const [ev] = await db.select().from(activityEvents).where(eq(activityEvents.entityId, res.matchRunId!));
+    expect(ev!.detail).toBe(`${A.supplierName} · ממתינה לשיוך להזמנה`);
+    // A small VAT finding can still count (the hero counts it too); the story is "pending".
+    expect(ev!.metadata).toMatchObject({ pendingLink: true });
+    expect(ev!.detail).not.toContain('הפסד פוטנציאלי');
   });
 });
