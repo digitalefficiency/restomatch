@@ -76,3 +76,39 @@ export function unitLabel(unit: string | null | undefined, locale: 'he' | 'en'):
   if (locale === 'he') return unit;
   return translateUnit(unit) ?? unit;
 }
+
+/**
+ * Receiver languages (S14): word units in ar/ru/th, keyed by the English label
+ * above. Symbols (kg, g, L, ml, mg, t, m, cm) stay as they are — they read the
+ * same in every script. Tigrinya falls back to English until a native review.
+ */
+const RECEIVER_UNIT_WORDS: Record<'ar' | 'ru' | 'th', Record<string, string>> = {
+  ar: {
+    unit: 'وحدة', case: 'صندوق', carton: 'كرتونة', pack: 'عبوة', sack: 'كيس كبير', bag: 'كيس', bottle: 'زجاجة',
+    can: 'علبة', jar: 'مرطبان', bucket: 'دلو', tray: 'صينية', package: 'رزمة', box: 'علبة', roll: 'لفة',
+    bunch: 'ربطة', head: 'رأس', dozen: 'دزينة', pair: 'زوج', container: 'حاوية', jerrycan: 'جالون', keg: 'برميل',
+    'six-pack': 'ست عبوات', pallet: 'منصة', portion: 'حصة', slice: 'شريحة', loaf: 'رغيف', sleeve: 'غلاف',
+  },
+  ru: {
+    unit: 'шт.', case: 'ящик', carton: 'коробка', pack: 'упак.', sack: 'мешок', bag: 'пакет', bottle: 'бут.',
+    can: 'банка', jar: 'банка', bucket: 'ведро', tray: 'лоток', package: 'упак.', box: 'коробка', roll: 'рулон',
+    bunch: 'пучок', head: 'кочан', dozen: 'дюжина', pair: 'пара', container: 'контейнер', jerrycan: 'канистра',
+    keg: 'кега', 'six-pack': 'упак. 6 шт.', pallet: 'поддон', portion: 'порция', slice: 'ломтик', loaf: 'буханка',
+    sleeve: 'рукав',
+  },
+  th: {
+    unit: 'ชิ้น', case: 'ลัง', carton: 'กล่อง', pack: 'แพ็ก', sack: 'กระสอบ', bag: 'ถุง', bottle: 'ขวด', can: 'กระป๋อง',
+    jar: 'โหล', bucket: 'ถัง', tray: 'ถาด', package: 'ห่อ', box: 'กล่อง', roll: 'ม้วน', bunch: 'กำ', head: 'หัว',
+    dozen: 'โหล', pair: 'คู่', container: 'ภาชนะ', jerrycan: 'แกลลอน', keg: 'ถังเบียร์', 'six-pack': 'แพ็ก 6',
+    pallet: 'พาเลท', portion: 'ที่', slice: 'แผ่น', loaf: 'ก้อน', sleeve: 'แถว',
+  },
+};
+
+/** Unit label for any UI locale: he → as printed; en/ti → English; ar/ru/th → local word (symbols unchanged). */
+export function unitLabelFor(unit: string | null | undefined, locale: string): string {
+  if (unit == null) return '';
+  if (locale === 'he') return unit;
+  const en = translateUnit(unit) ?? unit;
+  const words = (RECEIVER_UNIT_WORDS as Record<string, Record<string, string>>)[locale];
+  return words?.[en] ?? en;
+}

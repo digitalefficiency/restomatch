@@ -24,8 +24,10 @@ import {
   purchaseOrders,
   restaurants,
   suppliers,
+  users,
   type Database,
 } from '@restomatch/db';
+import { computeInvoiceLeak } from '@restomatch/charts';
 import { enqueueMatchInvoice, enqueueOcrInvoice, isQueueUnavailableError } from '@restomatch/queue';
 import type { InvoiceOcrResult } from '@restomatch/types';
 import { assertGrOwned, assertSupplierOwned } from '../tenant';
@@ -33,6 +35,7 @@ import { fillEnglishNames } from '../receiving/english';
 import {
   invoicesWaitingOnReceipt,
   lockReceipt,
+  rematchHoldReason,
   scannedInvoicesForReceipt,
 } from '../receiving/matchTriggers';
 import { devOcrStubEnabled, buildDevOcrStub } from '../receiving/devOcrStub';
@@ -40,7 +43,12 @@ import { isAllowedScanUrl } from '../lib/scanUrls';
 import { isInvoiceNumberTaken, readDuplicateOf, withoutDuplicateOf } from '../lib/invoiceDedupe';
 import { appError } from '../errors';
 import { endOfDayInTz, startOfDayInTz } from '../lib/time';
+import { claimableLines } from '../lib/claims';
+import { featureEnabled } from '../lib/features';
 import { invoiceReaderProcedure, managerProcedure, memberProcedure, receiverProcedure, router } from '../trpc';
+import { isFeatureOn } from '../lib/featureGate';
+import { dockPriceContext } from '../dockPriceContext/service';
+import { readConsolidatedRaw } from '../match/consolidated';
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
 /** R5: undated open POs this recent still show in the receiving inbox. */
@@ -205,7 +213,12 @@ export const receivingRouter = router({
         ...r.line,
         productNameEn: r.productNameEn ?? null,
       }));
-      return { ...po, lines };
+      const [rest] = await ctx.db
+        .select({ settings: restaurants.settings })
+        .from(restaurants)
+        .where(eq(restaurants.id, ctx.session.restaurantId))
+        .limit(1);
+      return { ...po, lines, features: { dockSlip: featureEnabled(rest?.settings, 'dockSlip') } };
     }),
 
   /**
@@ -283,6 +296,167 @@ export const receivingRouter = router({
     }),
 
   /**
+   * Dock dispute slip (flag `dockSlip`): the header of a receipt plus the ENGINE's
+   * ₪ per discrepancy for its invoice — the persisted discrepancies, allocated
+   * exactly like the supplier claims letters (claimableLines), never the
+   * wizard's client-side estimates. Read-only; tenant-scoped on the receipt and
+   * the invoice. `ready` is false until the receipt is closed AND a match run for
+   * it ran at/after the close (submitReceipt's re-match) — before that, no ₪.
+   */
+  dockSlip: invoiceReaderProcedure
+    .input(z.object({ grId: z.string().uuid(), invoiceId: z.string().uuid().nullish() }))
+    .query(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      const [rest] = await ctx.db
+        .select({ settings: restaurants.settings })
+        .from(restaurants)
+        .where(eq(restaurants.id, restaurantId))
+        .limit(1);
+      if (!featureEnabled(rest?.settings, 'dockSlip')) return { enabled: false as const };
+
+      const [gr] = await ctx.db
+        .select({
+          grId: goodsReceipts.id,
+          status: goodsReceipts.status,
+          closedAt: goodsReceipts.updatedAt,
+          receivedAt: goodsReceipts.receivedAt,
+          receivedBy: goodsReceipts.receivedBy,
+          poId: purchaseOrders.id,
+          poRef: purchaseOrders.sourceRef,
+          supplierName: suppliers.name,
+          supplierNameEn: suppliers.nameEn,
+          supplierWhatsapp: suppliers.contactWhatsapp,
+        })
+        .from(goodsReceipts)
+        .leftJoin(
+          purchaseOrders,
+          and(eq(purchaseOrders.id, goodsReceipts.poId), eq(purchaseOrders.restaurantId, restaurantId)),
+        )
+        .leftJoin(
+          suppliers,
+          and(eq(suppliers.id, purchaseOrders.supplierId), eq(suppliers.restaurantId, restaurantId)),
+        )
+        .where(and(eq(goodsReceipts.id, input.grId), eq(goodsReceipts.restaurantId, restaurantId)))
+        .limit(1);
+      if (!gr) throw new TRPCError({ code: 'NOT_FOUND', message: 'Receipt not found' });
+      // The receiver's name: users is self-only under RLS, so it is read only when
+      // the viewer IS the receiver (the person at the dock). Anyone else gets no
+      // name rather than a name that would vanish in production.
+      let receiverName: string | null = null;
+      if (gr.receivedBy && gr.receivedBy === ctx.session.userId) {
+        // Display name only — never the login e-mail: this line goes into the
+        // WhatsApp text sent to the supplier. No name → no line.
+        const [me] = await ctx.db
+          .select({ name: users.name })
+          .from(users)
+          .where(eq(users.id, ctx.session.userId))
+          .limit(1);
+        receiverName = me?.name?.trim() || null;
+      }
+      // ₪ only from a match run made AFTER the count: a run from before the
+      // receipt was closed saw gr_lines empty (every line "short") and must
+      // never reach the slip or its WhatsApp text.
+      const receiptClosed = gr.status === 'completed' || gr.status === 'partial';
+
+      let invoice: { id: string; number: string | null; duplicateOfNumber: string | null } | null = null;
+      let engine: {
+        /** The count is in (receipt submitted). Before that the slip shows quantities only. */
+        receiptClosed: boolean;
+        /** A match run for this receipt from after it closed exists — the ₪ below is final. */
+        ready: boolean;
+        /**
+         * Receipt closed but no post-count run will come on its own (the re-match
+         * is held — rematchHoldReason): the slip says why at once instead of
+         * waiting. null while a run may still land.
+         */
+        holdReason: 'settled' | 'awaiting_review' | null;
+        totalIls: number;
+        lines: Array<{
+          discrepancyId: string;
+          type: string;
+          poLineId: string | null;
+          invoiceLineId: string | null;
+          productId: string | null;
+          productName: string | null;
+          productNameEn: string | null;
+          lineDescription: string | null;
+          lineDescriptionEn: string | null;
+          expected: number | null;
+          actual: number | null;
+          amountIls: number;
+        }>;
+      } = { receiptClosed, ready: false, holdReason: null, totalIls: 0, lines: [] };
+
+      if (input.invoiceId) {
+        const [inv] = await ctx.db
+          .select({ id: invoices.id, number: invoices.invoiceNumber, status: invoices.status, ocrPayload: invoices.ocrPayload })
+          .from(invoices)
+          .where(and(eq(invoices.id, input.invoiceId), eq(invoices.restaurantId, restaurantId)))
+          .limit(1);
+        if (!inv) throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
+        invoice = { id: inv.id, number: inv.number, duplicateOfNumber: readDuplicateOf(inv.ocrPayload)?.invoiceNumber ?? null };
+
+        const [{ runs } = { runs: 0 }] = receiptClosed
+          ? await ctx.db
+              .select({ runs: count() })
+              .from(matchRuns)
+              .where(
+                and(
+                  eq(matchRuns.invoiceId, inv.id),
+                  eq(matchRuns.restaurantId, restaurantId),
+                  eq(matchRuns.grId, gr.grId),
+                  gte(matchRuns.runAt, gr.closedAt),
+                ),
+              )
+          : [];
+        const ready = Number(runs) > 0;
+        let holdReason: 'settled' | 'awaiting_review' | null = null;
+        if (receiptClosed && !ready) {
+          const [{ any } = { any: 0 }] = await ctx.db
+            .select({ any: count() })
+            .from(matchRuns)
+            .where(and(eq(matchRuns.invoiceId, inv.id), eq(matchRuns.restaurantId, restaurantId)));
+          holdReason = rematchHoldReason(inv, Number(any) > 0);
+        }
+        const leak = ready ? await computeInvoiceLeak(ctx.db, restaurantId, inv.id) : null;
+        const claim = leak ? claimableLines(leak) : [];
+        const lines = claim.map(({ line, amount }) => ({
+          discrepancyId: line.discrepancyId,
+          type: line.type,
+          poLineId: line.poLineId,
+          invoiceLineId: line.invoiceLineId,
+          productId: line.productId,
+          productName: line.productName,
+          productNameEn: line.productNameEn,
+          lineDescription: line.lineDescription,
+          lineDescriptionEn: line.lineDescriptionEn,
+          expected: line.expected,
+          actual: line.actual,
+          // The letters' amount, to the agora (the letters print each line rounded).
+          amountIls: Math.round(amount * 100) / 100,
+        }));
+        // Summed in agorot so the total is exact.
+        const totalIls = lines.reduce((acc, l) => acc + Math.round(l.amountIls * 100), 0) / 100;
+        engine = { receiptClosed, ready, holdReason, totalIls, lines };
+      }
+
+      return {
+        enabled: true as const,
+        header: {
+          supplierName: gr.supplierName,
+          supplierNameEn: gr.supplierNameEn,
+          supplierWhatsapp: gr.supplierWhatsapp,
+          poId: gr.poId,
+          poRef: gr.poRef,
+          receivedAt: gr.receivedAt,
+          receiverName,
+        },
+        invoice,
+        engine,
+      };
+    }),
+
+  /**
    * Invoice detail for the receiving / review screen: OCR status + confidence,
    * invoice number, and parsed invoice lines. Tenant scoped on
    * invoices.restaurantId.
@@ -355,6 +529,8 @@ export const receivingRouter = router({
         ...invoiceFields,
         ocrFailed: failure?.ocrFailed === true,
         ocrFailureReason: failure?.ocrFailed === true ? (failure.reason ?? 'extraction_failed') : null,
+        // A חשבונית ריכוז: cross-matched against its delivery notes, never re-matched to a PO.
+        consolidated: readConsolidatedRaw(ocrPayload) !== null,
         // The scanned number already belongs to another invoice of this
         // supplier (worker writeOcrHeader). Only the number is exposed — never
         // the other invoice's id or payload.
@@ -526,6 +702,8 @@ export const receivingRouter = router({
         return { receiptId: existing[0].id, alreadyExisted: true as const };
       }
 
+      // Row lock shared with orders.cancelOrder: a receipt never starts on an
+      // order that is being (or was) cancelled.
       const po = await ctx.db
         .select()
         .from(purchaseOrders)
@@ -535,8 +713,12 @@ export const receivingRouter = router({
             eq(purchaseOrders.restaurantId, ctx.session.restaurantId),
           ),
         )
-        .limit(1);
+        .limit(1)
+        .for('update');
       if (!po[0]) throw new TRPCError({ code: 'NOT_FOUND', message: 'PO not found' });
+      if (po[0].status === 'cancelled' || po[0].status === 'closed') {
+        throw new TRPCError({ code: 'CONFLICT', message: 'ההזמנה בוטלה או נסגרה — אי אפשר לפתוח עליה קבלה' });
+      }
 
       const lines = await ctx.db.select().from(poLines).where(eq(poLines.poId, input.poId));
 
@@ -670,7 +852,9 @@ export const receivingRouter = router({
         .set({
           status: newStatus,
           signatureUrl: input.signatureUrl ?? null,
-          updatedAt: new Date(),
+          // DB clock, like match_runs.run_at: the dock slip compares the two (a
+          // skewed API clock must not make the post-count run look older).
+          updatedAt: sql`now()`,
         })
         .where(
           and(
@@ -761,11 +945,11 @@ export const receivingRouter = router({
         if (stub) mockProviders = { docAi: stub, claude: stub };
       }
 
-      // Server-authoritative enqueue of the OCR job. The queue producer no-ops
-      // (console.warn) when REDIS_URL is unset and fails fast (≤3 s, coded
-      // 'queue.unavailable') when Redis is unreachable — so the invoice stays
-      // persisted and the client is told OCR was not queued instead of hanging
-      // until the function times out (EN-7). REDIS_URL unset (no queue at all)
+      // Server-authoritative enqueue of the OCR job (Postgres job_queue). The
+      // producer no-ops (console.warn) without a queue database and fails fast
+      // (≤3 s, coded 'queue.unavailable') when the database is unreachable — so
+      // the invoice stays persisted and the client is told OCR was not queued
+      // instead of hanging until the function times out (EN-7). No queue at all
       // also reports ocrQueued:false, so the wizard doesn't poll for 30 s.
       let ocrQueued = false;
       try {
@@ -844,6 +1028,19 @@ export const receivingRouter = router({
       )
       .orderBy(desc(invoices.createdAt));
   }),
+  /**
+   * Flag `dockPriceContext`: "your usual price" (90-day p50 from this
+   * supplier) per mapped invoice line. Read-only and display-only. Without
+   * `invoiceId` it only reports whether the flag is on, so the page can decide
+   * to render the hint at all; with the flag off it is always `{ enabled: false }`.
+   */
+  priceContext: invoiceReaderProcedure
+    .input(z.object({ invoiceId: z.string().uuid().optional() }))
+    .query(async ({ ctx, input }) => {
+      const enabled = await isFeatureOn(ctx.db, ctx.session.restaurantId, 'dockPriceContext');
+      if (!enabled || !input.invoiceId) return { enabled, lines: [] };
+      return { enabled, lines: await dockPriceContext(ctx.db, ctx.session.restaurantId, input.invoiceId) };
+    }),
 });
 
 /**

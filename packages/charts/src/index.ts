@@ -9,6 +9,13 @@ export {
 export { LEAK_FILTER, LIVE_DUPLICATE } from './leak-views';
 export { computeBaselines, type BaselineRow, type ComputeBaselinesOptions } from './baselines';
 export {
+  HELD_FOR_RECEIPTS_KEY,
+  receiptsBeingCountedForScan,
+  scanAwaitingCountSql,
+  SCAN_RECEIPT_LOOKBACK_HOURS,
+} from './awaiting-count';
+export {
+  computeInvoiceLeak,
   computeLeakBreakdown,
   computeLeakHero,
   type LeakBreakdownInvoice,

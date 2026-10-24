@@ -6,6 +6,7 @@ import {
   count,
   desc,
   eq,
+  goodsReceipts,
   inArray,
   isNull,
   notificationsOutbox,
@@ -15,19 +16,39 @@ import {
   products,
   purchaseOrders,
   restaurants,
+  sql,
   suppliers,
   supplierCatalogItems,
+  users,
   type Database,
 } from '@restomatch/db';
-import { ClaudePoParser } from '@restomatch/ocr';
+import { featureEnabled } from '../lib/features';
+import { resolveTolerances } from '@restomatch/matching';
+import { ClaudePoParser, ORDER_TEXT_MAX_CHARS, orderTextParserFromEnv } from '@restomatch/ocr';
 import { ZesttAdapter } from '@restomatch/procurement';
 import { managerProcedure, memberProcedure, requireFeature, router } from '../trpc';
+import { contractPricesForOrder, orderPriceKey } from '../contracts/orderPrices';
 import { assertPoOwned, assertSupplierOwned } from '../tenant';
 import { getEntitlements } from '../entitlements';
 import { importPurchaseOrder } from '../orders/importPo';
-import { estimateTotal, recomputePoTotal } from '../orders/totals';
+import { captureOrderDraft } from '../orders/captureOrder';
+import { appError } from '../errors';
+import { estimateTotal, qty3, recomputePoTotal } from '../orders/totals';
 import { DEDUPE_INDEX_PREDICATE } from '../notifications/outbox';
+import { supplierMessageState, type SupplierMessageState } from '../notifications/delivery';
 import { deriveExpectedDelivery, type DerivedDelivery } from '../lib/deriveDelivery';
+import { assertFeatureOn, isFeatureOn } from '../lib/featureGate';
+import {
+  loadOrderDocument,
+  ORDER_DOCUMENT_EXTENSIONS,
+  orderDocumentSettingsOf,
+  orderPdfFilename,
+  renderOrderEmailText,
+  renderOrderPdf,
+  renderOrderWhatsappText,
+} from '../orders/document';
+import { addCalendarDaysInTz, localDateKeyInTz, startOfDayInTz, startOfLocalDateInTz } from '../lib/time';
+import { poRefOf, renderSupplierMessage } from '../orders/supplierMessage';
 
 /** Cap on an uploaded order document, decoded — a single-page PO PDF is ~50KB. */
 const MAX_PO_DOC_BYTES = 8 * 1024 * 1024;
@@ -35,8 +56,29 @@ const MAX_PO_DOC_BYTES = 8 * 1024 * 1024;
 const DEFAULT_BASELINE_WINDOW_DAYS = 90;
 /** Fallback timezone for date formatting when a restaurant has none set. */
 const DEFAULT_TZ = 'Asia/Jerusalem';
-/** % over the 90-day median at which we surface an "elevated price" warning. */
+/**
+ * % over the 90-day median below which the guardrail stays quiet. The bar is
+ * max(5%, the restaurant's matching price tolerance): a bump the matcher would
+ * never flag on the invoice is not a warning at order time either.
+ */
 const ELEVATED_PCT = 0.05;
+
+/** The guardrail's minimum % over median for this restaurant. */
+export function guardrailThreshold(pricePercent: number | null | undefined): number {
+  return Math.max(ELEVATED_PCT, resolveTolerances({ pricePercent: pricePercent ?? undefined }).pricePercent);
+}
+
+/** 'high' = above p90 AND over the threshold; 'elevated' = over the threshold only. */
+export function guardrailLevel(
+  unitPrice: number,
+  b: { p50: number; p90: number },
+  threshold: number,
+): 'high' | 'elevated' | null {
+  if (b.p50 <= 0) return null;
+  const pctOverMedian = (unitPrice - b.p50) / b.p50;
+  if (pctOverMedian <= threshold) return null;
+  return unitPrice > b.p90 ? 'high' : 'elevated';
+}
 
 const LineInput = z
   .object({
@@ -72,6 +114,7 @@ async function computeGuardrail(
   supplierId: string,
   lines: Array<{ productId?: string; unitPriceExpected?: number }>,
   windowDays: number,
+  threshold: number = ELEVATED_PCT,
 ): Promise<GuardrailWarning[]> {
   const priced = lines.filter(
     (l): l is { productId: string; unitPriceExpected: number } =>
@@ -107,12 +150,10 @@ async function computeGuardrail(
   for (const l of priced) {
     const b = baselineByProduct.get(l.productId);
     if (!b || b.p50 <= 0) continue;
+    const level = guardrailLevel(l.unitPriceExpected, b, threshold);
+    if (!level) continue;
     const pctOverMedian = (l.unitPriceExpected - b.p50) / b.p50;
-    if (l.unitPriceExpected > b.p90) {
-      warnings.push({ productId: l.productId, unitPrice: l.unitPriceExpected, p50: b.p50, p90: b.p90, pctOverMedian, level: 'high' });
-    } else if (pctOverMedian > ELEVATED_PCT) {
-      warnings.push({ productId: l.productId, unitPrice: l.unitPriceExpected, p50: b.p50, p90: b.p90, pctOverMedian, level: 'elevated' });
-    }
+    warnings.push({ productId: l.productId, unitPrice: l.unitPriceExpected, p50: b.p50, p90: b.p90, pctOverMedian, level });
   }
   return warnings;
 }
@@ -152,15 +193,136 @@ async function deriveForSupplier(
   return deriveExpectedDelivery(supplier.orderSchedule, nowUtc, tz);
 }
 
-async function baselineWindow(db: Database, restaurantId: string): Promise<number> {
+async function guardrailSettings(db: Database, restaurantId: string): Promise<{ windowDays: number; threshold: number }> {
   const [r] = await db
     .select({ settings: restaurants.settings })
     .from(restaurants)
     .where(eq(restaurants.id, restaurantId))
     .limit(1);
-  return r?.settings?.baselineWindowDays ?? DEFAULT_BASELINE_WINDOW_DAYS;
+  return {
+    windowDays: r?.settings?.baselineWindowDays ?? DEFAULT_BASELINE_WINDOW_DAYS,
+    threshold: guardrailThreshold(r?.settings?.tolerances?.pricePercent),
+  };
 }
 
+/** A restaurant-local calendar date, 'YYYY-MM-DD'. */
+const LocalDate = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD')
+  .refine((s) => {
+    // A real calendar date: 2026-02-31 must not roll over to March 3.
+    const d = new Date(`${s}T00:00:00Z`);
+    return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+  }, 'תאריך לא קיים');
+
+async function restaurantTz(db: Database, restaurantId: string): Promise<string> {
+  const [r] = await db
+    .select({ timezone: restaurants.timezone })
+    .from(restaurants)
+    .where(eq(restaurants.id, restaurantId))
+    .limit(1);
+  return r?.timezone ?? DEFAULT_TZ;
+}
+
+/** Fri/Sat — no deliveries (same rule as deriveExpectedDelivery). */
+const NO_DELIVERY_WEEKDAYS = new Set(['Fri', 'Sat']);
+
+/**
+ * The date the wizard pre-fills when the supplier has no order schedule:
+ * tomorrow in the restaurant's timezone, rolled past Fri/Sat.
+ */
+function defaultDeliveryDate(nowUtc: Date, tz: string): string {
+  let day = addCalendarDaysInTz(startOfDayInTz(nowUtc, tz), 1, tz);
+  for (let i = 0; i < 3; i++) {
+    const midday = new Date(day.getTime() + 12 * 60 * 60 * 1000);
+    const wd = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' }).format(midday);
+    if (!NO_DELIVERY_WEEKDAYS.has(wd)) break;
+    day = addCalendarDaysInTz(day, 1, tz);
+  }
+  return localDateKeyInTz(day, tz);
+}
+
+/** A picked delivery date must not be in the past (restaurant-local). */
+function deliveryFromLocalDate(dateKey: string, nowUtc: Date, tz: string): Date {
+  if (dateKey < localDateKeyInTz(nowUtc, tz)) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: 'תאריך האספקה כבר עבר' });
+  }
+  return startOfLocalDateInTz(dateKey, tz);
+}
+
+/**
+ * Everything the supplier-facing document needs, loaded under the caller's
+ * tenant: restaurant name + business id, the placing manager as contact, and
+ * product names for lines saved with a productId only.
+ */
+async function buildSupplierMessage(
+  db: Database,
+  restaurantId: string,
+  userId: string,
+  o: {
+    poId?: string;
+    supplierName: string;
+    expectedDeliveryAt: Date | null;
+    lines: Array<{ productId: string | null; rawDescription: string | null; qtyOrdered: string | number; unit: string }>;
+  },
+): Promise<{ subject: string; body: string }> {
+  const [restaurant] = await db
+    .select({ name: restaurants.name, businessId: restaurants.businessId, timezone: restaurants.timezone })
+    .from(restaurants)
+    .where(eq(restaurants.id, restaurantId))
+    .limit(1);
+  const [contact] = await db
+    .select({ name: users.name, phone: users.phone, email: users.email })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  const ids = [...new Set(o.lines.filter((l) => !l.rawDescription?.trim() && l.productId).map((l) => l.productId!))];
+  const nameById = new Map<string, string>();
+  if (ids.length > 0) {
+    const rows = await db
+      .select({ id: products.id, name: products.canonicalName })
+      .from(products)
+      .where(and(eq(products.restaurantId, restaurantId), inArray(products.id, ids)));
+    for (const r of rows) nameById.set(r.id, r.name);
+  }
+  return renderSupplierMessage({
+    poRef: o.poId ? poRefOf(o.poId) : null,
+    supplierName: o.supplierName,
+    restaurant: { name: restaurant?.name ?? '', businessId: restaurant?.businessId ?? null },
+    contact: contact ?? null,
+    expectedDeliveryAt: o.expectedDeliveryAt,
+    lines: o.lines.map((l) => ({
+      name: l.rawDescription?.trim() || (l.productId ? (nameById.get(l.productId) ?? null) : null),
+      qtyOrdered: l.qtyOrdered,
+      unit: l.unit,
+    })),
+    tz: restaurant?.timezone ?? DEFAULT_TZ,
+  });
+}
+
+
+/**
+ * The PO's delivery state comes from its latest goods receipt, not from
+ * purchase_orders.status: receiving never moves a PO out of 'sent' (and must
+ * not — buildMatchInput only discovers sent/confirmed/partial POs, so an
+ * invoice arriving after the delivery still finds its order). Display only.
+ * The outer column is spelled out: Drizzle leaves `${purchaseOrders.id}`
+ * unqualified in a single-table select, where it would bind to g.id.
+ */
+function latestReceiptStatus(restaurantId: string) {
+  return sql<'pending' | 'partial' | 'completed' | 'rejected' | null>`(
+    SELECT g.status::text FROM goods_receipts g
+    WHERE g.po_id = "purchase_orders"."id" AND g.restaurant_id = ${restaurantId}
+    ORDER BY g.received_at DESC, g.created_at DESC LIMIT 1
+  )`;
+}
+const OPEN_PO_STATUSES = ['sent', 'confirmed', 'partial'] as const;
+/**
+ * One stable line order for the detail page and the supplier document.
+ * po_lines has no insertion column (adding one is a schema change), so lines
+ * read by description, then id — never by the random UUID alone.
+ */
+const PO_LINE_ORDER = [sql`${poLines.rawDescription} ASC NULLS LAST`, asc(poLines.id)] as const;
 
 export const ordersRouter = router({
   /** Purchase orders for the restaurant, with supplier name + line count. */
@@ -172,6 +334,8 @@ export const ordersRouter = router({
             .enum(['draft', 'sent', 'confirmed', 'partial', 'closed', 'cancelled'])
             .optional(),
           supplierId: z.string().uuid().optional(),
+          /** Open POs by their goods receipt: not yet received / partially / fully received. */
+          delivery: z.enum(['awaiting', 'partial', 'received']).optional(),
           limit: z.number().int().min(1).max(100).default(50),
           offset: z.number().int().min(0).default(0),
         })
@@ -182,6 +346,13 @@ export const ordersRouter = router({
       const conds = [eq(purchaseOrders.restaurantId, restaurantId)];
       if (input?.status) conds.push(eq(purchaseOrders.status, input.status));
       if (input?.supplierId) conds.push(eq(purchaseOrders.supplierId, input.supplierId));
+      const receipt = latestReceiptStatus(restaurantId);
+      if (input?.delivery) {
+        conds.push(inArray(purchaseOrders.status, [...OPEN_PO_STATUSES]));
+        if (input.delivery === 'received') conds.push(sql`${receipt} = 'completed'`);
+        else if (input.delivery === 'partial') conds.push(sql`${receipt} = 'partial'`);
+        else conds.push(sql`COALESCE(${receipt}, 'pending') NOT IN ('completed', 'partial')`);
+      }
       return ctx.db
         .select({
           id: purchaseOrders.id,
@@ -194,13 +365,14 @@ export const ordersRouter = router({
           sentAt: purchaseOrders.sentAt,
           createdAt: purchaseOrders.createdAt,
           lineCount: count(poLines.id),
+          receiptStatus: receipt,
         })
         .from(purchaseOrders)
         .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
         .leftJoin(poLines, eq(poLines.poId, purchaseOrders.id))
         .where(and(...conds))
         .groupBy(purchaseOrders.id, suppliers.name, suppliers.nameEn)
-        .orderBy(desc(purchaseOrders.createdAt))
+        .orderBy(desc(purchaseOrders.createdAt), desc(purchaseOrders.id)) // unique: offset pages never repeat/skip
         .limit(input?.limit ?? 50)
         .offset(input?.offset ?? 0);
     }),
@@ -215,6 +387,13 @@ export const ordersRouter = router({
         .from(purchaseOrders)
         .where(eq(purchaseOrders.id, input.poId))
         .limit(1);
+      const [receipt] = po
+        ? await ctx.db
+            .select({ status: latestReceiptStatus(restaurantId) })
+            .from(purchaseOrders)
+            .where(eq(purchaseOrders.id, input.poId))
+            .limit(1)
+        : [];
       const [supplier] = po
         ? await ctx.db
             .select({ name: suppliers.name, nameEn: suppliers.nameEn })
@@ -226,7 +405,7 @@ export const ordersRouter = router({
         .select()
         .from(poLines)
         .where(eq(poLines.poId, input.poId))
-        .orderBy(asc(poLines.id));
+        .orderBy(...PO_LINE_ORDER);
       // English product names for the "Receiver in English" display (0028).
       const productIds = [...new Set(rawLines.map((l) => l.productId).filter((id): id is string => !!id))];
       const nameEnById = new Map<string, string | null>();
@@ -241,11 +420,27 @@ export const ordersRouter = router({
         ...l,
         productNameEn: l.productId ? (nameEnById.get(l.productId) ?? null) : null,
       }));
+      // What actually happened to the order message — not just the channel picked.
+      const [msg] = await ctx.db
+        .select({ status: notificationsOutbox.status, lastError: notificationsOutbox.lastError, channel: notificationsOutbox.channel })
+        .from(notificationsOutbox)
+        .where(
+          and(
+            eq(notificationsOutbox.restaurantId, restaurantId),
+            eq(notificationsOutbox.relatedEntityType, 'purchase_order'),
+            eq(notificationsOutbox.relatedEntityId, input.poId),
+          ),
+        )
+        .orderBy(desc(notificationsOutbox.createdAt))
+        .limit(1);
+      const supplierMessage: SupplierMessageState | null = msg ? supplierMessageState(msg) : null;
       return {
+        supplierMessage,
         po,
         lines,
         supplierName: supplier?.name ?? null,
         supplierNameEn: supplier?.nameEn ?? null,
+        receiptStatus: receipt?.status ?? null,
       };
     }),
 
@@ -254,6 +449,8 @@ export const ordersRouter = router({
       z.object({
         supplierId: z.string().uuid(),
         expectedDeliveryAt: z.date().optional(),
+        /** The date the manager picked in the wizard, restaurant-local. */
+        expectedDeliveryDate: LocalDate.optional(),
         notes: z.string().trim().max(2000).optional(),
         lines: z.array(LineInput).min(1).max(500),
       }),
@@ -261,6 +458,9 @@ export const ordersRouter = router({
     .mutation(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
       await assertSupplierOwned(ctx.db, input.supplierId, restaurantId);
+      const pickedDelivery = input.expectedDeliveryDate
+        ? deliveryFromLocalDate(input.expectedDeliveryDate, new Date(), await restaurantTz(ctx.db, restaurantId))
+        : (input.expectedDeliveryAt ?? null);
 
       // Cadence: when the manager didn't pick a date, DERIVE it from the
       // supplier's order schedule (NEW POs only — this is createDraft). If the
@@ -268,9 +468,9 @@ export const ordersRouter = router({
       // and we surface it so the UI can explain the roll rather than silently
       // shifting the date. A supplier with no schedule → derivation is null and
       // expectedDeliveryAt stays whatever the manual entry provided (or null).
-      let expectedDeliveryAt: Date | null = input.expectedDeliveryAt ?? null;
+      let expectedDeliveryAt: Date | null = pickedDelivery;
       let derivation: DeliveryDerivation | null = null;
-      if (!input.expectedDeliveryAt) {
+      if (!pickedDelivery) {
         const derived = await deriveForSupplier(ctx.db, restaurantId, input.supplierId, new Date());
         if (derived) {
           expectedDeliveryAt = derived.expectedDeliveryAt;
@@ -304,11 +504,27 @@ export const ordersRouter = router({
         }
       }
 
+      // Flag `contracts`: a contract price in force today (in the line's unit)
+      // wins over the catalog list price for lines left unpriced.
+      const unpriced = input.lines.filter(
+        (l): l is typeof l & { productId: string } => l.unitPriceExpected == null && !!l.productId,
+      );
+      const contractByKey =
+        unpriced.length > 0 && (await isFeatureOn(ctx.db, restaurantId, 'contracts'))
+          ? await contractPricesForOrder(ctx.db, restaurantId, input.supplierId, unpriced)
+          : new Map<string, number>();
+
       const resolvedLines = input.lines.map((l) => {
+        const fromContract =
+          l.unitPriceExpected == null && l.productId ? contractByKey.get(orderPriceKey(l.productId, l.unit)) : undefined;
         const fromCatalog =
           l.unitPriceExpected == null && l.productId ? priceByProduct.get(l.productId) : undefined;
         const unitPriceExpected =
-          l.unitPriceExpected != null ? l.unitPriceExpected.toString() : (fromCatalog ?? null);
+          l.unitPriceExpected != null
+            ? l.unitPriceExpected.toString()
+            : fromContract !== undefined
+              ? fromContract.toString()
+              : (fromCatalog ?? null);
         return { ...l, unitPriceExpected };
       });
 
@@ -339,7 +555,7 @@ export const ordersRouter = router({
           poId: po.id,
           productId: l.productId ?? null,
           rawDescription: l.rawDescription ?? null,
-          qtyOrdered: l.qty.toString(),
+          qtyOrdered: qty3(l.qty).toString(),
           unit: l.unit,
           unitPriceExpected: l.unitPriceExpected,
         })),
@@ -356,17 +572,104 @@ export const ordersRouter = router({
    */
   previewDelivery: memberProcedure
     .input(z.object({ supplierId: z.string().uuid() }))
-    .query(async ({ ctx, input }): Promise<DeliveryDerivation | null> => {
+    .query(
+      async ({ ctx, input }): Promise<{ derived: DeliveryDerivation | null; defaultDate: string; today: string }> => {
+        const restaurantId = ctx.session.restaurantId;
+        await assertSupplierOwned(ctx.db, input.supplierId, restaurantId);
+        const now = new Date();
+        const tz = await restaurantTz(ctx.db, restaurantId);
+        const derived = await deriveForSupplier(ctx.db, restaurantId, input.supplierId, now);
+        return {
+          derived: derived
+            ? {
+                expectedDeliveryAt: derived.expectedDeliveryAt.toISOString(),
+                nextOrderCutoffAt: derived.nextOrderCutoffAt.toISOString(),
+                missedCutoff: derived.missedCutoff,
+                windowUsed: derived.windowUsed,
+              }
+            : null,
+          /** What the wizard's date input starts at: the schedule's date, else tomorrow. */
+          defaultDate: derived ? localDateKeyInTz(derived.expectedDeliveryAt, tz) : defaultDeliveryDate(now, tz),
+          today: localDateKeyInTz(now, tz),
+        };
+      },
+    ),
+
+  /**
+   * Exactly what the supplier will receive, before it is sent: for a saved
+   * draft (poId) or for the wizard's unsaved lines. Read-only — nothing queued.
+   */
+  supplierMessagePreview: memberProcedure
+    .input(
+      z.union([
+        z.object({ poId: z.string().uuid() }).strict(),
+        z
+          .object({
+            supplierId: z.string().uuid(),
+            expectedDeliveryDate: LocalDate.optional(),
+            lines: z
+              .array(
+                z.object({
+                  productId: z.string().uuid().optional(),
+                  rawDescription: z.string().trim().max(400).optional(),
+                  qty: z.number().nonnegative().max(1_000_000),
+                  unit: z.string().trim().min(1).max(32),
+                }),
+              )
+              .max(500),
+          })
+          .strict(),
+      ]),
+    )
+    .query(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
+      if ('poId' in input) {
+        await assertPoOwned(ctx.db, input.poId, restaurantId);
+        const [po] = await ctx.db
+          .select({
+            supplierId: purchaseOrders.supplierId,
+            expectedDeliveryAt: purchaseOrders.expectedDeliveryAt,
+            createdBy: purchaseOrders.createdBy,
+          })
+          .from(purchaseOrders)
+          .where(eq(purchaseOrders.id, input.poId))
+          .limit(1);
+        if (!po) throw new TRPCError({ code: 'NOT_FOUND', message: 'purchase order not found' });
+        const [supplier] = await ctx.db
+          .select({ name: suppliers.name })
+          .from(suppliers)
+          .where(eq(suppliers.id, po.supplierId))
+          .limit(1);
+        const lines = await ctx.db
+          .select({ productId: poLines.productId, rawDescription: poLines.rawDescription, qtyOrdered: poLines.qtyOrdered, unit: poLines.unit })
+          .from(poLines)
+          .where(eq(poLines.poId, input.poId))
+          .orderBy(...PO_LINE_ORDER);
+        // The contact is the order's creator — the same one placeOrder prints.
+        return buildSupplierMessage(ctx.db, restaurantId, po.createdBy ?? ctx.session.userId, {
+          poId: input.poId,
+          supplierName: supplier?.name ?? 'ספק',
+          expectedDeliveryAt: po.expectedDeliveryAt,
+          lines,
+        });
+      }
       await assertSupplierOwned(ctx.db, input.supplierId, restaurantId);
-      const derived = await deriveForSupplier(ctx.db, restaurantId, input.supplierId, new Date());
-      if (!derived) return null;
-      return {
-        expectedDeliveryAt: derived.expectedDeliveryAt.toISOString(),
-        nextOrderCutoffAt: derived.nextOrderCutoffAt.toISOString(),
-        missedCutoff: derived.missedCutoff,
-        windowUsed: derived.windowUsed,
-      };
+      const [supplier] = await ctx.db
+        .select({ name: suppliers.name })
+        .from(suppliers)
+        .where(eq(suppliers.id, input.supplierId))
+        .limit(1);
+      const tz = await restaurantTz(ctx.db, restaurantId);
+      return buildSupplierMessage(ctx.db, restaurantId, ctx.session.userId, {
+        supplierName: supplier?.name ?? 'ספק',
+        expectedDeliveryAt: input.expectedDeliveryDate ? startOfLocalDateInTz(input.expectedDeliveryDate, tz) : null,
+        lines: input.lines.map((l) => ({
+          productId: l.productId ?? null,
+          rawDescription: l.rawDescription ?? null,
+          qtyOrdered: l.qty,
+          unit: l.unit,
+        })),
+      });
     }),
 
   /**
@@ -422,25 +725,68 @@ export const ordersRouter = router({
       return result;
     }),
 
+  /**
+   * Order capture (flag `orderCapture`): the order message the owner already
+   * sent the supplier (WhatsApp / e-mail, pasted or shared) → a DRAFT PO with
+   * the supplier and catalog lines matched. `needs_supplier` asks the owner to
+   * pick one (pass it back as supplierId). Confirm = placeOrder {channel:'none'}.
+   */
+  captureFromText: managerProcedure
+    .input(
+      z.object({
+        text: z.string().trim().min(1).max(ORDER_TEXT_MAX_CHARS),
+        supplierId: z.string().uuid().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      const [r] = await ctx.db
+        .select({ settings: restaurants.settings })
+        .from(restaurants)
+        .where(eq(restaurants.id, restaurantId))
+        .limit(1);
+      if (!featureEnabled(r?.settings, 'orderCapture')) {
+        throw appError('FORBIDDEN', 'FEATURE_DISABLED', 'הפיצ׳ר אינו פעיל עבור המסעדה');
+      }
+      return captureOrderDraft(ctx.db, {
+        restaurantId,
+        text: input.text,
+        supplierId: input.supplierId ?? null,
+        parser: orderTextParserFromEnv(),
+        source: 'manual',
+        createdBy: ctx.session.userId,
+      });
+    }),
+
   cancelOrder: managerProcedure
     .input(z.object({ poId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
       await assertPoOwned(ctx.db, input.poId, restaurantId);
-      const [current] = await ctx.db
-        .select({ status: purchaseOrders.status })
-        .from(purchaseOrders)
-        .where(eq(purchaseOrders.id, input.poId))
-        .limit(1);
-      // A received (closed) order is history — cancelling it would orphan its
-      // goods receipt and invoice match. Cancelling twice is a no-op error.
-      if (current && (current.status === 'closed' || current.status === 'cancelled')) {
-        throw new TRPCError({ code: 'CONFLICT', message: 'לא ניתן לבטל הזמנה שנסגרה או בוטלה' });
-      }
-      await ctx.db
+      // Lock the PO first: receiving.startReceipt takes the same row lock, so a
+      // cancel and a receipt start serialize. The UPDATE below is a NEW statement
+      // (fresh READ COMMITTED snapshot), so it sees a receipt committed while we
+      // waited — a cancelled PO can never end up with a goods receipt.
+      await ctx.db.execute(
+        sql`SELECT 1 FROM purchase_orders WHERE id = ${input.poId} AND restaurant_id = ${restaurantId} FOR UPDATE`,
+      );
+      // A closed / cancelled order is history, and so is a received one: its
+      // status stays 'sent' after receiving, so the receipt itself decides.
+      const cancelled = await ctx.db
         .update(purchaseOrders)
         .set({ status: 'cancelled', updatedAt: new Date() })
-        .where(and(eq(purchaseOrders.id, input.poId), eq(purchaseOrders.restaurantId, restaurantId)));
+        .where(
+          and(
+            eq(purchaseOrders.id, input.poId),
+            eq(purchaseOrders.restaurantId, restaurantId),
+            sql`${purchaseOrders.status} NOT IN ('closed', 'cancelled')`,
+            sql`NOT EXISTS (SELECT 1 FROM goods_receipts g WHERE g.po_id = ${input.poId} AND g.restaurant_id = ${restaurantId})`,
+          ),
+        )
+        .returning({ id: purchaseOrders.id });
+      if (cancelled.length === 0) {
+        throw new TRPCError({ code: 'CONFLICT', message: 'לא ניתן לבטל הזמנה שנסגרה, בוטלה או שכבר התחילה קבלה עליה' });
+      }
       return { ok: true };
     }),
 
@@ -485,7 +831,7 @@ export const ordersRouter = router({
       const p = input.patch;
       const set: Partial<typeof poLines.$inferInsert> = {};
       if (p.rawDescription !== undefined) set.rawDescription = p.rawDescription;
-      if (p.qtyOrdered !== undefined) set.qtyOrdered = String(p.qtyOrdered);
+      if (p.qtyOrdered !== undefined) set.qtyOrdered = String(qty3(p.qtyOrdered));
       if (p.unit !== undefined) set.unit = p.unit;
       if (p.unitPriceExpected !== undefined)
         set.unitPriceExpected = p.unitPriceExpected == null ? null : String(p.unitPriceExpected);
@@ -526,7 +872,13 @@ export const ordersRouter = router({
       await assertPoOwned(ctx.db, input.poId, restaurantId);
 
       const [po] = await ctx.db
-        .select({ id: purchaseOrders.id, status: purchaseOrders.status, supplierId: purchaseOrders.supplierId, expectedDeliveryAt: purchaseOrders.expectedDeliveryAt })
+        .select({
+          id: purchaseOrders.id,
+          status: purchaseOrders.status,
+          supplierId: purchaseOrders.supplierId,
+          expectedDeliveryAt: purchaseOrders.expectedDeliveryAt,
+          createdBy: purchaseOrders.createdBy,
+        })
         .from(purchaseOrders)
         .where(eq(purchaseOrders.id, input.poId))
         .limit(1);
@@ -540,22 +892,16 @@ export const ordersRouter = router({
         .from(suppliers)
         .where(eq(suppliers.id, po.supplierId))
         .limit(1);
-      // The delivery date printed on the supplier-facing doc must be formatted
-      // in the restaurant's wall-clock timezone, not the server's.
-      const [restaurant] = await ctx.db
-        .select({ timezone: restaurants.timezone })
-        .from(restaurants)
-        .where(eq(restaurants.id, restaurantId))
-        .limit(1);
-      const tz = restaurant?.timezone ?? DEFAULT_TZ;
       const lines = await ctx.db
         .select({
+          productId: poLines.productId,
           rawDescription: poLines.rawDescription,
           qtyOrdered: poLines.qtyOrdered,
           unit: poLines.unit,
         })
         .from(poLines)
-        .where(eq(poLines.poId, input.poId));
+        .where(eq(poLines.poId, input.poId))
+        .orderBy(...PO_LINE_ORDER);
       // An empty order would reach the supplier as a blank document.
       if (lines.length === 0) {
         throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'אי אפשר לשלוח הזמנה בלי שורות' });
@@ -581,7 +927,53 @@ export const ordersRouter = router({
             message: `לספק אין ${input.channel === 'email' ? 'אימייל' : 'וואטסאפ'} מוגדר`,
           });
         }
-        const body = renderOrderDocument(supplier?.name ?? 'ספק', po.expectedDeliveryAt, lines, tz);
+        // Flag `orderPricesOut`: SKU + agreed prices + totals, and a PDF on email.
+        // Flag off → #100's supplier message (orders.supplierMessagePreview).
+        let subject = `הזמנה חדשה — ${supplier?.name ?? ''}`.trim();
+        let body: string;
+        let payload: Record<string, unknown> | undefined;
+        const pricesOut = await isFeatureOn(ctx.db, restaurantId, 'orderPricesOut');
+        if (pricesOut) {
+          // Extensions (e.g. the supplier-confirmation link) need the PO already
+          // `sent`; same transaction, so any later failure rolls this back.
+          const placedAt = new Date();
+          await ctx.db
+            .update(purchaseOrders)
+            .set({ status: 'sent', sentAt: placedAt, sentChannel: input.channel, updatedAt: placedAt })
+            .where(eq(purchaseOrders.id, input.poId));
+          const loaded = await loadOrderDocument(ctx.db, restaurantId, input.poId, {
+            mode: 'send',
+            userId: ctx.session.userId ?? null,
+            placedAt,
+            extensions: ORDER_DOCUMENT_EXTENSIONS,
+          });
+          if (!loaded) throw new TRPCError({ code: 'NOT_FOUND', message: 'purchase order not found' });
+          if (input.channel === 'email') {
+            body = renderOrderEmailText(loaded.doc);
+            const pdf = await renderOrderPdf(loaded.doc);
+            payload = {
+              __attachments: [
+                {
+                  filename: orderPdfFilename(loaded.doc),
+                  contentBase64: Buffer.from(pdf).toString('base64'),
+                  contentType: 'application/pdf',
+                },
+              ],
+            };
+          } else {
+            body = renderOrderWhatsappText(loaded.doc);
+          }
+        } else {
+          // Flag off: the same text orders.supplierMessagePreview showed the manager (#100).
+          const doc = await buildSupplierMessage(ctx.db, restaurantId, po.createdBy ?? ctx.session.userId, {
+            poId: input.poId,
+            supplierName: supplier?.name ?? 'ספק',
+            expectedDeliveryAt: po.expectedDeliveryAt,
+            lines,
+          });
+          subject = doc.subject;
+          body = doc.body;
+        }
         // Decouple from the (churning) notifier module: write to the outbox the
         // outboxDispatch worker already drains.
         //
@@ -597,8 +989,9 @@ export const ordersRouter = router({
             restaurantId,
             channel: input.channel,
             target,
-            subject: `הזמנה חדשה — ${supplier?.name ?? ''}`.trim(),
+            subject,
             body,
+            ...(payload ? { payload } : {}),
             status: 'queued',
             relatedEntityType: 'purchase_order',
             relatedEntityId: input.poId,
@@ -615,6 +1008,60 @@ export const ordersRouter = router({
       return { ok: true, sentChannel };
     }),
 
+  /** Order-document settings (flag `orderPricesOut`). `enabled` false → the UI hides the controls. */
+  documentSettings: memberProcedure.query(async ({ ctx }) => {
+    const restaurantId = ctx.session.restaurantId;
+    const [row] = await ctx.db
+      .select({ settings: restaurants.settings })
+      .from(restaurants)
+      .where(eq(restaurants.id, restaurantId))
+      .limit(1);
+    return { enabled: featureEnabled(row?.settings, 'orderPricesOut'), ...orderDocumentSettingsOf(row?.settings) };
+  }),
+
+  /** Show or hide prices on what the supplier receives (owner / manager). */
+  setDocumentSettings: managerProcedure
+    .input(z.object({ showPrices: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      await assertFeatureOn(ctx.db, restaurantId, 'orderPricesOut');
+      // jsonb_set in one statement: no read-modify-write race with other settings writers.
+      await ctx.db
+        .update(restaurants)
+        .set({
+          settings: sql`jsonb_set(coalesce(${restaurants.settings}, '{}'::jsonb), '{orderDocument}',
+            coalesce(${restaurants.settings} -> 'orderDocument', '{}'::jsonb) || ${JSON.stringify({ showPrices: input.showPrices })}::jsonb)`,
+          updatedAt: new Date(),
+        })
+        .where(eq(restaurants.id, restaurantId));
+      return { showPrices: input.showPrices };
+    }),
+
+  /** What the supplier receives for this PO: email text, WhatsApp text and the PDF (base64). */
+  documentPreview: managerProcedure
+    .input(z.object({ poId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      await assertFeatureOn(ctx.db, restaurantId, 'orderPricesOut');
+      await assertPoOwned(ctx.db, input.poId, restaurantId);
+      const loaded = await loadOrderDocument(ctx.db, restaurantId, input.poId, {
+        mode: 'preview',
+        userId: ctx.session.userId ?? null,
+        extensions: ORDER_DOCUMENT_EXTENSIONS,
+      });
+      if (!loaded) throw new TRPCError({ code: 'NOT_FOUND', message: 'purchase order not found' });
+      const pdf = await renderOrderPdf(loaded.doc);
+      return {
+        emailText: renderOrderEmailText(loaded.doc),
+        whatsappText: renderOrderWhatsappText(loaded.doc),
+        pdfBase64: Buffer.from(pdf).toString('base64'),
+        filename: orderPdfFilename(loaded.doc),
+        showPrices: loaded.doc.showPrices,
+        totalAgorot: loaded.doc.totalAgorot,
+        hasUnpricedLines: loaded.doc.hasUnpricedLines,
+      };
+    }),
+
   /** Order-time leak guardrail preview (advanced_analytics). */
   guardrail: memberProcedure
     .use(requireFeature('advanced_analytics'))
@@ -629,25 +1076,8 @@ export const ordersRouter = router({
     .query(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
       await assertSupplierOwned(ctx.db, input.supplierId, restaurantId);
-      const windowDays = await baselineWindow(ctx.db, restaurantId);
-      const warnings = await computeGuardrail(ctx.db, restaurantId, input.supplierId, input.lines, windowDays);
+      const { windowDays, threshold } = await guardrailSettings(ctx.db, restaurantId);
+      const warnings = await computeGuardrail(ctx.db, restaurantId, input.supplierId, input.lines, windowDays, threshold);
       return { warnings };
     }),
 });
-
-/** Render a Hebrew order document for the outbox body. */
-function renderOrderDocument(
-  supplierName: string,
-  expectedDeliveryAt: Date | null,
-  lines: Array<{ rawDescription: string | null; qtyOrdered: string; unit: string }>,
-  tz: string = DEFAULT_TZ,
-): string {
-  const header = `הזמנה לספק ${supplierName}`;
-  const delivery = expectedDeliveryAt
-    ? `אספקה מבוקשת: ${expectedDeliveryAt.toLocaleDateString('he-IL', { timeZone: tz })}`
-    : '';
-  const items = lines
-    .map((l) => `• ${l.rawDescription ?? 'פריט'} — ${l.qtyOrdered} ${l.unit}`)
-    .join('\n');
-  return [header, delivery, '', items].filter(Boolean).join('\n');
-}

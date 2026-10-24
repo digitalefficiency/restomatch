@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { canSeeRoute } from '@/lib/roles';
-import { Activity, ArrowLeft, CheckCircle2, ClipboardCheck, Hourglass, ShieldCheck } from 'lucide-react';
+import { Activity, ArrowLeft, CheckCircle2, ClipboardCheck, FileText, Hourglass, Mail, ShieldCheck, Sigma } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
 import { formatNumber, formatPercent } from '@/lib/i18n/format';
@@ -11,6 +11,8 @@ import { overview } from '@/lib/i18n/messages/overview';
 import type { he as overviewHe } from '@/lib/i18n/messages/overview/he';
 import type { Translator } from '@/lib/i18n/translate';
 import { leaks as leaksNs } from '@/lib/i18n/messages/leaks';
+import { leakProof as leakProofNs } from '@/lib/i18n/messages/leakProof';
+import { recovery as recoveryNs } from '@/lib/i18n/messages/recovery';
 import {
   EmptyState,
   EntitlementUpsell,
@@ -37,7 +39,10 @@ import {
 } from '@/lib/components/views';
 import { views as viewsNs } from '@/lib/i18n/messages/views';
 import { PaginatedActivityFeed } from './activity';
+import { PriceAlertsTeaser } from './contracts/overview-card';
 import { RecipesOverviewCard } from './recipes/overview-card';
+import { VatAtRiskCard } from './vat-at-risk';
+import { enabledFeatures } from '@/lib/ingest/features';
 import { displayName } from './approvals/vocab';
 
 export default async function DashboardPage({
@@ -52,9 +57,14 @@ export default async function DashboardPage({
     redirect('/onboarding');
   }
   // Fetch only what the active role may see (the hero is for every role).
-  const role = (
-    memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0]!
-  ).role;
+  const activeMembership = memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0]!;
+  const role = activeMembership.role;
+  // VAT at risk (flag vatAtRisk): finance roles; a separate card, never part of the leak.
+  const vatRisk =
+    (role === 'owner' || role === 'manager' || role === 'bookkeeper') &&
+    (await enabledFeatures(activeMembership.restaurantId)).includes('vatAtRisk')
+      ? await caller.owner.vatAtRisk({ period: 'open' }).catch(() => null)
+      : null;
   const canDrill = canSeeRoute(role, '/dashboard/leaks');
   const canDecide = canSeeRoute(role, '/dashboard/approvals');
   const [t, tl, tv, locale] = await Promise.all([getT(overview), getT(leaksNs), getT(viewsNs), getLocale()]);
@@ -65,7 +75,7 @@ export default async function DashboardPage({
   const defaultView = isDefaultData(view);
   // Filters are finance detail (the router enforces it too): other roles get the period only.
   const viewInput = toViewInput(canDrill ? view : { ...view, filters: DEFAULT_VIEW.filters });
-  const [kpis, summary, lastMonth, activity, trend, options] = await Promise.all([
+  const [kpis, summary, lastMonth, activity, trend, options, flags, tr] = await Promise.all([
     caller.owner.kpis(),
     defaultView
       ? caller.owner.leakHero().then((current) => ({ current, previous: null }))
@@ -75,10 +85,20 @@ export default async function DashboardPage({
     // The trend exposes per-day detail → finance roles only (owner.leakTrend is finance).
     canDrill ? caller.owner.leakTrend({ view: viewInput, compare: view.compare }) : Promise.resolve(null),
     canDrill ? caller.owner.viewOptions() : Promise.resolve(null),
+    caller.recovery.flags(),
+    getT(recoveryNs),
   ]);
+  const tp = await getT(leakProofNs);
   const hero = summary.current;
   // A comparison period with no invoices has nothing to compare against.
   const previous = summary.previous && summary.previous.invoiceCount > 0 ? summary.previous : null;
+  // Wave 1 (flags `recovery` / `monthlyReport`): "₪ actually returned this month"
+  // joins the hero, and a link previews the monthly report.
+  const returned = flags.recovery ? await caller.recovery.returnedThisMonth() : null;
+  const canPreviewReport = flags.monthlyReport && canSeeRoute(role, '/dashboard/reports');
+  const canPreviewDigest = flags.monthlyDigestPreview && canSeeRoute(role, '/dashboard/reports/digest');
+  // "How did we get to ₪X?" proves THIS month's hero → only on the default view.
+  const canProve = flags.leakProof && defaultView && canSeeRoute(role, '/dashboard/leaks/proof');
   // A comparison period with almost no data gets a calm ₪ difference, not a % alarm.
   const thinBase = previous ? isThinBase(hero.spendIls, previous.spendIls) : false;
 
@@ -192,7 +212,29 @@ export default async function DashboardPage({
         }
         pct={(v) => formatPercent(v, locale, 1)}
         num={(v) => formatNumber(v, locale)}
+        returned={
+          returned
+            ? {
+                label: tr('hero.returnedTile'),
+                value: ils(returned.returnedAgorot / 100),
+                hint: tr('hero.returnedHint'),
+                href: canSeeRoute(role, '/dashboard/recovery') ? '/dashboard/recovery' : undefined,
+              }
+            : undefined
+        }
+        reportLink={canPreviewReport ? tr('report.preview') : undefined}
+        digestLink={canPreviewDigest ? tr('digest.title') : undefined}
+        proofLink={canProve ? tp('button', { amount: formatIls(summary.current.leakIls, { locale }) }) : undefined}
       />
+
+      {vatRisk && vatRisk.currentThresholdIls != null ? (
+        <VatAtRiskCard
+          rows={vatRisk.rows}
+          total={vatRisk.totalVatAtRisk}
+          thresholdIls={vatRisk.currentThresholdIls}
+          restaurantName={activeMembership.restaurantName}
+        />
+      ) : null}
 
       {trend ? (
         <section className="mt-4 rounded-2xl border border-line bg-surface p-5 shadow-card">
@@ -234,6 +276,9 @@ export default async function DashboardPage({
         />
       </div>
       </TvMode>
+
+      {/* Wave-1 price alerts teaser — renders nothing when off / no open alerts. */}
+      <PriceAlertsTeaser />
 
       {/* Wave 1 (flag `recipes`): food cost hit by this month's price rises. */}
       {/* Off in TV mode: the wall screen refreshes every minute and the card sits under the overlay. */}
@@ -308,6 +353,10 @@ function LeakHero({
   delta,
   pct,
   num,
+  returned,
+  reportLink,
+  digestLink,
+  proofLink,
 }: {
   t: OverviewT;
   hero: Hero;
@@ -322,6 +371,14 @@ function LeakHero({
   delta?: React.ReactNode;
   pct: (v: number) => string;
   num: (v: number) => string;
+  /** Flag `recovery`: "₪ actually returned this month" tile. */
+  returned?: { label: string; value: string; hint?: string; href?: string };
+  /** Flag `monthlyReport`: label of the "preview this month's report" link. */
+  reportLink?: string;
+  /** Flag `monthlyDigestPreview`: link to the in-app preview of the monthly email. */
+  digestLink?: string;
+  /** Flag `leakProof`: label of the link to the proof sheet behind the number. */
+  proofLink?: string;
 }) {
   const hasLeak = hero.leakIls > 0;
   return (
@@ -375,13 +432,27 @@ function LeakHero({
           ) : null}
         </div>
 
-        <dl className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-3 lg:grid-cols-1">
+        {/* With the 4th tile (recovery) a single lg column grows taller than the ₪ column and, with
+            lg:items-end, pushes the leak figure below a 768px fold: lay the four out 2×2 instead. */}
+        <dl
+          className={`grid grid-cols-1 gap-3 ${returned ? 'min-[420px]:grid-cols-2 lg:grid-cols-2' : 'min-[420px]:grid-cols-3 lg:grid-cols-1'}`}
+        >
           <HeroStat label={t('hero.caught')} value={ils(hero.caughtBeforePaymentIls)} hint={t('hero.caughtHint')} tone="gold" />
           <HeroStat label={t('hero.recovered')} value={ils(hero.recoveredIls)} hint={t('hero.recoveredHint')} tone="primary" />
           <HeroStat
             label={t('hero.invoices')}
             value={t('hero.invoicesValue', { withLeak: num(hero.invoicesWithLeak), total: num(hero.matchedInvoiceCount) })}
           />
+          {returned ? (
+            <HeroStat
+              label={returned.label}
+              value={returned.value}
+              hint={returned.hint}
+              tone="gold"
+              href={returned.href}
+              testId="hero-returned"
+            />
+          ) : null}
         </dl>
       </div>
 
@@ -391,9 +462,49 @@ function LeakHero({
           {t('hero.pending', { count: num(hero.pendingLinkCount), amount: ils(hero.pendingLinkIls) })}
         </p>
       ) : null}
+      {hero.awaitingCountCount > 0 ? (
+        // A receiving scan waiting for its count (#94): bound to its order, not a consolidated invoice.
+        <p
+          data-testid="hero-awaiting-count"
+          className="mt-3 flex items-start gap-2 rounded-xl border border-line bg-surface-2 px-3 py-2 text-sm text-muted"
+        >
+          <Hourglass className="mt-0.5 h-4 w-4 shrink-0 text-info" aria-hidden="true" />
+          {t('hero.awaitingCount', { count: num(hero.awaitingCountCount), amount: ils(hero.awaitingCountIls) })}
+        </p>
+      ) : null}
 
       <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="max-w-xl text-xs text-subtle">{t('hero.calc')}</p>
+        {reportLink ? (
+          <Link
+            href="/dashboard/reports/monthly"
+            data-testid="hero-report-preview"
+            className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl border border-line bg-surface-2 px-4 py-2 text-sm font-semibold text-ink transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+          >
+            <FileText className="h-4 w-4" aria-hidden="true" />
+            {reportLink}
+          </Link>
+        ) : null}
+        {digestLink ? (
+          <Link
+            href="/dashboard/reports/digest"
+            data-testid="hero-digest-preview"
+            className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl border border-line bg-surface-2 px-4 py-2 text-sm font-semibold text-ink transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+          >
+            <Mail className="h-4 w-4" aria-hidden="true" />
+            {digestLink}
+          </Link>
+        ) : null}
+        {proofLink ? (
+          <Link
+            href="/dashboard/leaks/proof"
+            data-testid="hero-proof"
+            className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl border border-line bg-surface-2 px-4 py-2 text-sm font-semibold text-ink transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+          >
+            <Sigma className="h-4 w-4" aria-hidden="true" />
+            {proofLink}
+          </Link>
+        ) : null}
         {canDrill && (hasLeak || hero.pendingLinkCount > 0) ? (
           <Link
             href={drillHref}
@@ -418,17 +529,30 @@ function HeroStat({
   value,
   hint,
   tone,
+  href,
+  testId,
 }: {
   label: string;
   value: string;
   hint?: string;
   tone?: 'gold' | 'primary';
+  /** Optional drill-down (the value becomes a link). */
+  href?: string;
+  testId?: string;
 }) {
   const color = tone === 'gold' ? 'text-gold' : tone === 'primary' ? 'text-primary' : 'text-ink';
   return (
-    <div className="rounded-xl border border-line bg-surface-2/60 px-4 py-3">
+    <div className="rounded-xl border border-line bg-surface-2/60 px-4 py-3" data-testid={testId}>
       <dt className="text-xs font-semibold text-subtle">{label}</dt>
-      <dd className={`mt-0.5 font-mono text-xl font-bold tabular-nums ${color}`}>{value}</dd>
+      <dd className={`mt-0.5 font-mono text-xl font-bold tabular-nums ${color}`}>
+        {href ? (
+          <Link href={href} className="hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/60">
+            {value}
+          </Link>
+        ) : (
+          value
+        )}
+      </dd>
       {hint ? <dd className="mt-0.5 text-[11px] leading-snug text-muted">{hint}</dd> : null}
     </div>
   );

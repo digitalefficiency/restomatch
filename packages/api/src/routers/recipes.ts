@@ -173,10 +173,14 @@ async function validateItems(
   if (productIds.length) {
     const owned = await loadProducts(db, restaurantId, productIds);
     if (owned.size !== productIds.length) fail('NOT_FOUND', 'productNotFound');
+    // No default unit → the unit the latest paid price is per (the billed unit).
+    // Still unknown → nothing to check against yet (costed as missingPrice /
+    // unitMismatch, never as if the price were per the line's unit).
+    const priced = await latestPrices(db, restaurantId, { productIds });
     for (const it of items) {
       if (!it.productId) continue;
-      const unit = owned.get(it.productId)!.unit ?? it.unit;
-      if (!unitsCompatible(it.unit, unit) && !it.unitsPerProductUnit) fail('BAD_REQUEST', 'unitMismatch');
+      const unit = owned.get(it.productId)!.unit ?? priced.get(it.productId)?.unit ?? null;
+      if (unit && !unitsCompatible(it.unit, unit) && !it.unitsPerProductUnit) fail('BAD_REQUEST', 'unitMismatch');
     }
   }
   if (subIds.length) {
@@ -374,7 +378,7 @@ async function computeChanges(db: Database, rid: string, rc: RestaurantCostConte
                 kind: it.productId ? ('product' as const) : ('subRecipe' as const),
                 name: prod?.name ?? sub?.name ?? '',
                 nameEn: prod?.nameEn ?? sub?.nameEn ?? null,
-                unit: prod?.unit ?? null,
+                unit: prod?.unit ?? (it.productId ? all.prices.get(it.productId)?.unit : null) ?? null,
                 deltaAgorot: driver.deltaAgorot,
                 priceBefore,
                 priceNow,
@@ -386,7 +390,7 @@ async function computeChanges(db: Database, rid: string, rc: RestaurantCostConte
             ? {
                 name: riserProd?.name ?? '',
                 nameEn: riserProd?.nameEn ?? null,
-                unit: riserProd?.unit ?? null,
+                unit: riserProd?.unit ?? all.prices.get(riser.productId)?.unit ?? null,
                 deltaAgorot: riser.deltaAgorot,
                 priceBefore: before.get(riser.productId)!.unitPrice,
                 priceNow: all.prices.get(riser.productId)!.unitPrice,
@@ -439,7 +443,7 @@ export const recipesRouter = router({
           subRecipeId: it.subRecipeId,
           name: p?.name ?? sub?.name ?? '',
           nameEn: p?.nameEn ?? sub?.nameEn ?? null,
-          sourceUnit: p?.unit ?? sub?.yieldUnit ?? null,
+          sourceUnit: (p ? (p.unit ?? price?.unit) : sub?.yieldUnit) ?? null,
           quantity: it.quantity,
           unit: it.unit,
           wastePct: it.wastePct,
@@ -498,6 +502,7 @@ export const recipesRouter = router({
       const prices = await latestPrices(ctx.db, rid, { productIds: rows.map((r) => r.id) });
       return rows.map((r) => ({
         ...r,
+        unit: r.unit ?? prices.get(r.id)?.unit ?? null,
         unitPrice: prices.get(r.id)?.unitPrice ?? null,
         priceObservedAt: prices.get(r.id)?.observedAt ?? null,
       }));
@@ -531,7 +536,7 @@ export const recipesRouter = router({
       const rows = simulatePriceChange(all.costInput, all.prices, ctx.rc.vatBp, input.productId, changeBp);
       const byId = new Map(all.rows.map((r) => [r.id, r] as const));
       return {
-        product: { ...p, unitPrice: all.prices.get(p.id)?.unitPrice ?? null },
+        product: { ...p, unit: p.unit ?? all.prices.get(p.id)?.unit ?? null, unitPrice: all.prices.get(p.id)?.unitPrice ?? null },
         changeBp,
         targetBp: ctx.rc.targetBp,
         rows: rows.map((row) => {

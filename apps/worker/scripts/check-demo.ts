@@ -101,12 +101,14 @@ export async function checkDemo(url: string, today: string): Promise<DemoCheck> 
     for (const f of future) if (f.n > 0) problems.push(`${f.n} demo row(s) with ${f.col} after ${today} (future date on screen)`);
 
     // 3c. Fresh produce is VAT-exempt: produce suppliers are VAT 0 (so a real "פטור
-    //     ממע״מ" invoice matches) and never carry a VAT_MISMATCH.
+    //     ממע״מ" invoice matches) and never carry a VAT_MISMATCH. Every produce supplier
+    //     any demo seed creates: seed.ts, seed-chain-demo.ts, seed-wave1-contracts-demo.ts.
+    const PRODUCE_SUPPLIERS = ['HaSharon Produce', 'Carmel Greens', 'HaEmek Farmers'];
     const produce = (await sql`
       select s.name, s.name_en, s.vat_rate,
         (select count(*)::int from discrepancies d join match_runs m on m.id = d.match_run_id join invoices i on i.id = m.invoice_id
           where i.supplier_id = s.id and d.type = 'VAT_MISMATCH') as vat_findings
-      from suppliers s where s.restaurant_id in ${sql(rids)} and s.name_en in ('HaSharon Produce', 'Carmel Greens')
+      from suppliers s where s.restaurant_id in ${sql(rids)} and s.name_en in ${sql(PRODUCE_SUPPLIERS)}
     `) as unknown as Array<{ name: string; name_en: string; vat_rate: string | null; vat_findings: number }>;
     facts.push(`produce VAT: ${produce.map((p) => `${p.name_en} ${p.vat_rate == null ? 'unset' : `${Number(p.vat_rate) * 100}%`}`).join(', ') || 'no produce suppliers'} · VAT_MISMATCH on produce: ${produce.reduce((n, p) => n + p.vat_findings, 0)}`);
     for (const p of produce) {

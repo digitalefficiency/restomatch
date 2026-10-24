@@ -34,6 +34,7 @@ import type { AuthedContext } from '../context';
 import { getEntitlements, type Entitlements } from '../entitlements';
 import { featureEnabled } from '../lib/features';
 import { authedProcedure, router } from '../trpc';
+import { hasNoControlChars, NO_CONTROL_CHARS_MESSAGE } from '../lib/text';
 
 /**
  * Chain ("רשת") + branches (סניפים). See docs/client-ready/chain-design.md.
@@ -84,7 +85,7 @@ const ChainViewInput = z
 
 /** Stable message of the "only the billing account's payer may add branches" refusal. */
 export const NOT_BILLING_OWNER = 'NOT_BILLING_OWNER';
-const BRANCH_NAME = z.string().trim().min(2).max(120);
+const BRANCH_NAME = z.string().trim().min(2).max(120).refine(hasNoControlChars, NO_CONTROL_CHARS_MESSAGE);
 
 export interface MembershipRow {
   restaurantId: string;

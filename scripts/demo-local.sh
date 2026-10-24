@@ -7,8 +7,8 @@
 #
 # What "start" does, in order:
 #   1. Postgres 16 + pgvector on localhost:5432 — an already-running one, else
-#      Docker (docker-compose.yml), else Homebrew postgresql@16 + pgvector;
-#      Redis on localhost:6379 the same way (the worker's job queue);
+#      Docker (docker-compose.yml), else Homebrew postgresql@16 + pgvector
+#      (the worker's job queue lives in the same database — 0061, no Redis);
 #   2. (re)creates the database restomatch_demo_local and seeds it exactly like
 #      the production demo reseed, with DEMO_TODAY=2026-10-25: migrate,
 #      provision-rls, seed, seed-demo, seed:chain-demo (+ any other seed:*-demo);
@@ -27,7 +27,6 @@ WEB="$ROOT/apps/web"
 DB_NAME="${DEMO_DB_NAME:-restomatch_demo_local}"
 PG_BASE="${DEMO_PG_BASE:-postgres://postgres:postgres@localhost:5432}"
 DB_URL="$PG_BASE/$DB_NAME"
-REDIS_URL_LOCAL="${DEMO_REDIS_URL:-redis://localhost:6379}"
 PORT="${DEMO_PORT:-3000}"
 WORKER_PORT="${DEMO_WORKER_PORT:-8787}"
 export DEMO_TODAY="${DEMO_TODAY:-2026-10-25}"
@@ -82,7 +81,7 @@ stop_all # a previous run's web/worker would hold the ports and the DB
 log "installing dependencies (pnpm install)"
 pnpm install --frozen-lockfile >"$STATE/install.log" 2>&1 || die "pnpm install failed — see $STATE/install.log"
 
-# ── 1. Postgres + Redis ──────────────────────────────────────────────────────
+# ── 1. Postgres ──────────────────────────────────────────────────────────────
 # Node + the repo's postgres driver: works whatever psql is (or isn't) installed.
 pg_q() { # <url> <sql> → prints the first column of the first row, exit 1 on error
   (cd "$ROOT/packages/db" && node -e '
@@ -103,7 +102,7 @@ if pg_ok; then
 elif docker_ok; then
   PG_MODE=docker
   log "Postgres: starting Docker (pgvector/pgvector:pg16) — first time downloads the image"
-  docker compose up -d postgres redis >"$STATE/docker.log" 2>&1 || die "docker compose up failed — see $STATE/docker.log"
+  docker compose up -d postgres >"$STATE/docker.log" 2>&1 || die "docker compose up failed — see $STATE/docker.log"
   wait_pg || die "Postgres (Docker) did not answer on localhost:5432 within 60 s"
 elif [ "$OS" = Darwin ] && have brew; then
   PG_MODE=brew
@@ -128,24 +127,6 @@ else
 fi
 [ "$(pg_q "$PG_BASE/postgres" "select count(*) from pg_available_extensions where name = 'vector'")" = "1" ] \
   || die "this Postgres has no pgvector extension (brew install pgvector, or quit it and use Docker)"
-
-redis_ok() { (cd "$ROOT/packages/queue" && node -e '
-  const Redis = require("ioredis");
-  const r = new Redis(process.argv[1], { lazyConnect: true, connectTimeout: 2000, maxRetriesPerRequest: 0, retryStrategy: () => null });
-  r.connect().then(() => r.ping()).then(() => { r.disconnect(); process.exit(0); }).catch(() => process.exit(1));
-' "$REDIS_URL_LOCAL") >/dev/null 2>&1; }
-if redis_ok; then
-  log "Redis: using the one on localhost:6379"
-elif docker_ok; then
-  docker compose up -d redis >>"$STATE/docker.log" 2>&1 || true
-elif have redis-server; then
-  redis-server --daemonize yes --save "" >/dev/null
-elif [ "$OS" = Darwin ] && have brew; then
-  log "Redis: installing with Homebrew (one time)"
-  brew install redis >>"$STATE/brew.log" 2>&1 && brew services start redis >/dev/null 2>&1 || true
-fi
-for _ in $(seq 1 20); do redis_ok && break; sleep 1; done
-redis_ok || die "Redis is not answering on localhost:6379 (Docker: docker compose up -d redis · Homebrew: brew install redis && brew services start redis)"
 
 # ── 2. database + demo data ──────────────────────────────────────────────────
 log "database: (re)creating $DB_NAME and seeding the demo (DEMO_TODAY=$DEMO_TODAY, ~1 min)"
@@ -184,7 +165,7 @@ SHA="$(git rev-parse HEAD 2>/dev/null || echo unknown)-$(git diff HEAD -- apps p
 if [ ! -f "$WEB/.next/BUILD_ID" ] || [ "$(cat "$STATE/build.sha" 2>/dev/null)" != "$SHA" ] || [ "${DEMO_REBUILD:-0}" = 1 ]; then
   log "building the web app (3–6 min the first time; skipped next time if the code is unchanged)"
   (cd "$WEB" && env DATABASE_URL="$DB_URL" DATABASE_URL_APP="$APP_DB_URL" AUTH_SECRET="$AUTH_SECRET" AUTH_ENC_KEY="$AUTH_ENC_KEY" \
-    AUTH_URL="http://localhost:$PORT" APP_URL="http://localhost:$PORT" REDIS_URL="$REDIS_URL_LOCAL" \
+    AUTH_URL="http://localhost:$PORT" APP_URL="http://localhost:$PORT" \
     NEXT_PUBLIC_SUPABASE_URL=https://local-demo-placeholder.supabase.co NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=local-demo-placeholder \
     NEXT_TELEMETRY_DISABLED=1 pnpm exec next build) >"$STATE/build.log" 2>&1 || die "build failed — see $STATE/build.log"
   echo "$SHA" >"$STATE/build.sha"
@@ -206,7 +187,7 @@ start_bg() { # name, then the command
   echo $! >"$STATE/$name.pgid"
   set +m
 }
-COMMON_ENV="DATABASE_URL=$DB_URL DATABASE_URL_APP=$APP_DB_URL REDIS_URL=$REDIS_URL_LOCAL NODE_ENV=development LOCAL_SCAN_DIR=$SCANS NEXT_TELEMETRY_DISABLED=1"
+COMMON_ENV="DATABASE_URL=$DB_URL DATABASE_URL_APP=$APP_DB_URL NODE_ENV=development LOCAL_SCAN_DIR=$SCANS NEXT_TELEMETRY_DISABLED=1"
 start_bg web bash -c "cd '$WEB' && exec env $COMMON_ENV AUTH_SECRET=$AUTH_SECRET AUTH_ENC_KEY=$AUTH_ENC_KEY \
   AUTH_URL=http://localhost:$PORT APP_URL=http://localhost:$PORT pnpm exec next start -p $PORT"
 start_bg worker bash -c "cd '$ROOT/apps/worker' && exec env $COMMON_ENV PORT=$WORKER_PORT pnpm start"

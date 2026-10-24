@@ -1,4 +1,4 @@
-# RestoMatch worker image (BullMQ consumers + cron + /health).
+# RestoMatch worker image (Postgres job-queue consumers + cron + /health).
 #
 # Build context MUST be the repo root (the worker depends on many workspace:*
 # packages that resolve through the root pnpm workspace + lockfile):

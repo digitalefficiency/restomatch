@@ -17,6 +17,7 @@
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { extFromMime } from './supabaseStorage';
+import { stripTrailingSlashes } from './urls';
 
 export const SHOWCASE_BUCKET = 'invoice-scans';
 export const SHOWCASE_PREFIX = 'walk-ins';
@@ -91,7 +92,7 @@ export async function uploadShowcaseScan(
  */
 export function isShowcaseScanUrl(url: string, supabaseUrl: string | undefined): boolean {
   if (!supabaseUrl) return false;
-  const prefix = `${supabaseUrl.replace(/\/+$/, '')}/storage/v1/object/sign/${SHOWCASE_BUCKET}/${SHOWCASE_PREFIX}/`;
+  const prefix = `${stripTrailingSlashes(supabaseUrl)}/storage/v1/object/sign/${SHOWCASE_BUCKET}/${SHOWCASE_PREFIX}/`;
   if (!url.startsWith(prefix)) return false;
   // WHATWG URL parsing silently strips tab / CR / LF, so `.\t./` would become
   // `../` at fetch time; any whitespace or control character is refused.
@@ -109,4 +110,16 @@ export function isShowcaseScanUrl(url: string, supabaseUrl: string | undefined):
   if (path === '') return false;
   if (/%2f|%5c|\\/i.test(path)) return false;
   return !path.split('/').some((seg) => /^(\.|%2e){1,2}$/i.test(seg));
+}
+
+/**
+ * The URL the public OCR endpoint actually fetches: rebuilt from the
+ * server-configured Supabase prefix plus the validated remainder, so the host
+ * and path prefix never come from the request (SSRF). null when `url` is not a
+ * showcase scan URL (isShowcaseScanUrl).
+ */
+export function showcaseScanFetchUrl(url: string, supabaseUrl: string | undefined): string | null {
+  if (!supabaseUrl || !isShowcaseScanUrl(url, supabaseUrl)) return null;
+  const prefix = `${stripTrailingSlashes(supabaseUrl)}/storage/v1/object/sign/${SHOWCASE_BUCKET}/${SHOWCASE_PREFIX}/`;
+  return `${prefix}${url.slice(prefix.length)}`;
 }

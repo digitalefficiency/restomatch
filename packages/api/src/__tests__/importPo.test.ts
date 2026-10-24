@@ -1,6 +1,6 @@
 import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { and, createDb, eq, poLines, productAliases, purchaseOrders } from '@restomatch/db';
+import { and, createDb, eq, goodsReceipts, poLines, productAliases, purchaseOrders } from '@restomatch/db';
 import type { NormalizedPurchaseOrder } from '@restomatch/types';
 import { importPurchaseOrder } from '../orders/importPo';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
@@ -139,5 +139,59 @@ describe('importPurchaseOrder', () => {
     });
     expect(res.status).toBe('draft');
     expect(res.checksum.linesSumOk).toBe(false);
+  });
+});
+
+describe('importPurchaseOrder — re-import safety (orders audit P2)', () => {
+  const imp = (over: Partial<NormalizedPurchaseOrder> = {}) =>
+    importPurchaseOrder(db, { restaurantId: t.restaurantId, normalized: makeNormalized(over), createdBy: t.ownerUserId });
+
+  it('keeps line ids for unchanged lines, inserts new ones, removes dropped ones', async () => {
+    const first = await imp();
+    const before = await db.select().from(poLines).where(eq(poLines.poId, first.poId));
+    const keepId = before.find((l) => l.supplierSku === '300099')!.id;
+    await imp({
+      lines: [
+        { sku: '300099', rawDescription: 'טיבון עגלה אנגוס טרי', qty: 14, unit: 'יח׳', unitPrice: 84, lineTotal: 1176 },
+        { sku: '555', rawDescription: 'כבד עוף', qty: 2, unit: 'ק״ג', unitPrice: 20, lineTotal: 40 },
+      ],
+      totalEstimated: 1216,
+      metadata: { vatRate: 0.18, totalInclVat: Math.round(1216 * 1.18 * 100) / 100 },
+    });
+    const after = await db.select().from(poLines).where(eq(poLines.poId, first.poId));
+    expect(after.map((l) => l.supplierSku).sort()).toEqual(['300099', '555']);
+    const kept = after.find((l) => l.supplierSku === '300099')!;
+    expect(kept.id).toBe(keepId);
+    expect(Number(kept.qtyOrdered)).toBe(14);
+  });
+
+  it('refuses to re-import an order that was cancelled (never un-cancels it) or received against', async () => {
+    const first = await imp();
+    await db.update(purchaseOrders).set({ status: 'cancelled' }).where(eq(purchaseOrders.id, first.poId));
+    await expect(imp()).rejects.toMatchObject({ code: 'CONFLICT' });
+    const [po] = await db.select({ status: purchaseOrders.status }).from(purchaseOrders).where(eq(purchaseOrders.id, first.poId));
+    expect(po?.status).toBe('cancelled');
+
+    await db.update(purchaseOrders).set({ status: 'sent' }).where(eq(purchaseOrders.id, first.poId));
+    await db.insert(goodsReceipts).values({ restaurantId: t.restaurantId, poId: first.poId, status: 'pending' });
+    await expect(imp()).rejects.toMatchObject({ code: 'CONFLICT' });
+  });
+
+  it('a negative (misread) quantity is a BAD_REQUEST, not a 500', async () => {
+    await expect(
+      imp({ lines: [{ sku: '1', rawDescription: 'בצל', qty: -3, unit: 'ק״ג', unitPrice: 4, lineTotal: -12 }] }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('quantities are stored and totalled at 3 decimals', async () => {
+    const res = await imp({
+      externalId: 'q3',
+      lines: [{ sku: '9', rawDescription: 'גבינה', qty: 1.23456, unit: 'ק״ג', unitPrice: 100 }],
+      totalEstimated: 123.46,
+      metadata: {},
+    });
+    const [line] = await db.select().from(poLines).where(eq(poLines.poId, res.poId));
+    expect(line?.qtyOrdered).toBe('1.235');
+    expect(res.checksum.computedExclVat).toBe(123.5); // 1.235 × 100, as stored
   });
 });

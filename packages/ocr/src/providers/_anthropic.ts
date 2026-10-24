@@ -41,8 +41,25 @@ export function mediaTypeFromUrl(url: string): MediaType {
   return 'image/jpeg';
 }
 
+/**
+ * Cap on downloading a scan ourselves (private bucket → base64). Without it a
+ * storage host that accepts the connection and never answers held the OCR job
+ * (and its worker slot) until BullMQ's stall detection; a signed URL that
+ * expires mid-wait fails anyway. Override with OCR_FETCH_TIMEOUT_MS.
+ */
+export const DOCUMENT_FETCH_TIMEOUT_MS = 20_000;
+
+export function documentFetchTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const n = Number.parseInt(env.OCR_FETCH_TIMEOUT_MS ?? '', 10);
+  return Number.isFinite(n) && n > 0 ? n : DOCUMENT_FETCH_TIMEOUT_MS;
+}
+
 /** Resolve the ImageSource into either a URL or base64 bytes + media type. */
-export async function resolveImage(image: ImageSource, fetchBytes: boolean): Promise<ImagePayload> {
+export async function resolveImage(
+  image: ImageSource,
+  fetchBytes: boolean,
+  timeoutMs: number = documentFetchTimeoutMs(),
+): Promise<ImagePayload> {
   // Buffer → always base64 (with magic-byte detection).
   if (Buffer.isBuffer(image)) {
     return { url: null, data: image.toString('base64'), mediaType: detectImageMime(image) };
@@ -60,14 +77,29 @@ export async function resolveImage(image: ImageSource, fetchBytes: boolean): Pro
     if (!fetchBytes) {
       return { url: asUrl, data: null, mediaType };
     }
-    // Private bucket: fetch the bytes ourselves and send base64.
-    const res = await fetch(asUrl);
-    if (!res.ok) {
-      throw new Error(
-        `Anthropic: failed to fetch document (${res.status}) from ${asUrl.slice(0, 80)}`,
-      );
+    // Private bucket: fetch the bytes ourselves and send base64. The timeout
+    // covers the headers AND the body (the signal also aborts arrayBuffer()).
+    // AbortController + timer rather than AbortSignal.timeout(): the mobile
+    // app type-checks this package against a lib without the static helper.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    let buf: Buffer;
+    try {
+      const res = await fetch(asUrl, { signal: ctrl.signal });
+      if (!res.ok) {
+        throw new Error(
+          `Anthropic: failed to fetch document (${res.status}) from ${asUrl.slice(0, 80)}`,
+        );
+      }
+      buf = Buffer.from(await res.arrayBuffer());
+    } catch (err) {
+      if (ctrl.signal.aborted) {
+        throw new Error(`Anthropic: fetching the document timed out after ${timeoutMs}ms (${asUrl.slice(0, 80)})`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
     }
-    const buf = Buffer.from(await res.arrayBuffer());
     return { url: null, data: buf.toString('base64'), mediaType: detectImageMime(buf) };
   }
 

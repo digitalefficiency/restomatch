@@ -1,0 +1,32 @@
+[
+  {
+    "en": "Romaine lettuce",
+    "he": "חסה ערבית",
+    "qty": "",
+    "unit": "",
+    "price": "",
+    "flag": "price"
+  },
+  {
+    "en": "Red bell peppers",
+    "he": "פלפל אדום",
+    "qty": "",
+    "unit": "",
+    "price": "",
+    "flag": "qty"
+  },
+  {
+    "en": "Coriander",
+    "he": "כוסברה",
+    "qty": "",
+    "unit": "",
+    "price": ""
+  },
+  {
+    "en": "Cherry tomatoes",
+    "he": "עגבניות שרי",
+    "qty": "",
+    "unit": "",
+    "price": ""
+  }
+]

@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   date,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -12,6 +13,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
   varchar,
@@ -68,7 +70,8 @@ export const invoiceStatus = pgEnum('invoice_status', [
   'paid',
 ]);
 
-export const invoiceSource = pgEnum('invoice_source', ['photo', 'email', 'platform', 'manual']);
+// 'whatsapp' — migration 0051 (S13 ingest).
+export const invoiceSource = pgEnum('invoice_source', ['photo', 'email', 'platform', 'manual', 'whatsapp']);
 
 export const matchStatus = pgEnum('match_status', ['clean', 'minor', 'major', 'blocked']);
 
@@ -1312,6 +1315,113 @@ export const emailInboxes = pgTable('email_inboxes', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * Invoice ingestion from WhatsApp / e-mail (migration 0050, S13 wave 1).
+ * The webhook finds its restaurant ONLY via the hashed per-restaurant token
+ * (app.ingest_resolve_channel); nothing in a payload names a tenant.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export type IngestChannelKind = 'whatsapp' | 'email';
+export type IngestMessageStatus = 'accepted' | 'needs_review' | 'rejected' | 'failed' | 'empty';
+export type IngestDocumentStatus =
+  | 'registered'
+  | 'needs_review'
+  | 'rejected'
+  | 'failed'
+  | 'duplicate'
+  | 'skipped';
+
+export const ingestChannels = pgTable(
+  'ingest_channels',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    kind: varchar('kind', { length: 16 }).$type<IngestChannelKind>().notNull(),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    tokenHint: varchar('token_hint', { length: 8 }).notNull(),
+    phoneNumberId: varchar('phone_number_id', { length: 64 }),
+    active: boolean('active').notNull().default(true),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (t) => [uniqueIndex('ingest_channels_token_hash_uq').on(t.tokenHash)],
+);
+
+export const ingestSenders = pgTable(
+  'ingest_senders',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    kind: varchar('kind', { length: 16 }).$type<IngestChannelKind>().notNull(),
+    sender: varchar('sender', { length: 320 }).notNull(),
+    // Composite same-tenant FK (supplier_id, restaurant_id) → suppliers — migration 0050.
+    supplierId: uuid('supplier_id'),
+    label: text('label'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('ingest_senders_uq').on(t.restaurantId, t.kind, t.sender)],
+);
+
+export const ingestMessages = pgTable(
+  'ingest_messages',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    // Composite same-tenant FK (channel_id, restaurant_id) → ingest_channels — migration 0050.
+    channelId: uuid('channel_id').notNull(),
+    kind: varchar('kind', { length: 16 }).$type<IngestChannelKind>().notNull(),
+    provider: varchar('provider', { length: 32 }).notNull(),
+    providerMessageId: varchar('provider_message_id', { length: 256 }).notNull(),
+    sender: varchar('sender', { length: 320 }).notNull(),
+    senderAllowed: boolean('sender_allowed').notNull(),
+    // Composite same-tenant FK (supplier_id, restaurant_id) → suppliers — migration 0050.
+    supplierId: uuid('supplier_id'),
+    subject: text('subject'),
+    status: varchar('status', { length: 16 }).$type<IngestMessageStatus>().notNull(),
+    error: text('error'),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('ingest_messages_replay_uq').on(t.restaurantId, t.kind, t.providerMessageId),
+    index('ingest_messages_restaurant_received_idx').on(t.restaurantId, t.receivedAt),
+  ],
+);
+
+export const ingestDocuments = pgTable(
+  'ingest_documents',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    // Composite same-tenant FK (message_id, restaurant_id) → ingest_messages — migration 0050.
+    messageId: uuid('message_id').notNull(),
+    filename: text('filename'),
+    mimeType: varchar('mime_type', { length: 64 }),
+    sizeBytes: integer('size_bytes'),
+    sha256: varchar('sha256', { length: 64 }),
+    storagePath: text('storage_path'),
+    // Composite same-tenant FK (invoice_id, restaurant_id) → invoices — migration 0050.
+    invoiceId: uuid('invoice_id'),
+    status: varchar('status', { length: 16 }).$type<IngestDocumentStatus>().notNull(),
+    error: text('error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('ingest_documents_message_idx').on(t.messageId, t.restaurantId),
+    index('ingest_documents_restaurant_sha_idx').on(t.restaurantId, t.sha256),
+  ],
+);
+
 export const supplierIntegrations = pgTable('supplier_integrations', {
   id: uuid('id').defaultRandom().primaryKey(),
   restaurantId: uuid('restaurant_id')
@@ -1326,6 +1436,62 @@ export const supplierIntegrations = pgTable('supplier_integrations', {
   syncCursor: text('sync_cursor'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * POS sales import (0058, wave-1 `integrations`) — what was sold, per day and
+ * POS item. The hook food-cost-per-dish reads. Re-import replaces the days a
+ * file covers (one row per restaurant · day · item).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export const posSalesImports = pgTable(
+  'pos_sales_imports',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    provider: varchar('provider', { length: 32 }).notNull(),
+    filename: text('filename').notNull(),
+    periodFrom: date('period_from', { mode: 'string' }).notNull(),
+    periodTo: date('period_to', { mode: 'string' }).notNull(),
+    rowCount: integer('row_count').notNull().default(0),
+    totalNet: numeric('total_net', { precision: 12, scale: 2 }).notNull().default('0'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('pos_sales_imports_restaurant_idx').on(t.restaurantId, t.createdAt),
+    index('pos_sales_imports_created_by_idx').on(t.createdBy),
+    unique('pos_sales_imports_id_restaurant_key').on(t.id, t.restaurantId),
+  ],
+);
+
+export const posSales = pgTable(
+  'pos_sales',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    // Same-tenant composite FK (import_id, restaurant_id) → pos_sales_imports(id, restaurant_id).
+    importId: uuid('import_id').notNull(),
+    soldOn: date('sold_on', { mode: 'string' }).notNull(),
+    itemRef: varchar('item_ref', { length: 64 }).notNull(),
+    itemName: text('item_name').notNull(),
+    qty: numeric('qty', { precision: 12, scale: 3 }).notNull(),
+    netAmount: numeric('net_amount', { precision: 12, scale: 2 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('pos_sales_day_item_idx').on(t.restaurantId, t.soldOn, t.itemRef),
+    index('pos_sales_import_idx').on(t.importId, t.restaurantId),
+    foreignKey({
+      name: 'pos_sales_import_same_tenant_fk',
+      columns: [t.importId, t.restaurantId],
+      foreignColumns: [posSalesImports.id, posSalesImports.restaurantId],
+    }).onDelete('cascade'),
+  ],
+);
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Notifications outbox
@@ -1755,3 +1921,434 @@ export type Lead = typeof leads.$inferSelect;
 export type NewLead = typeof leads.$inferInsert;
 export type DsrRequest = typeof dsrRequests.$inferSelect;
 export type NewDsrRequest = typeof dsrRequests.$inferInsert;
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Wave 1 (S11): supplier contract prices + price-trend alerts (0046–0047).
+ * supplier/product references are COMPOSITE same-tenant FKs in the SQL
+ * ((x_id, restaurant_id) → x(id, restaurant_id)); Drizzle only mirrors columns.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** Agreed price for one product from one supplier on a date range (0046). */
+export const supplierContractPrices = pgTable(
+  'supplier_contract_prices',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    supplierId: uuid('supplier_id').notNull(),
+    productId: uuid('product_id').notNull(),
+    /** Unit the price is quoted in; NULL = the PO/invoice line's own unit. */
+    unit: varchar('unit', { length: 32 }),
+    contractPrice: numeric('contract_price', { precision: 12, scale: 4 }).notNull(),
+    /** Restaurant-local calendar dates, inclusive; validTo NULL = open-ended. */
+    validFrom: date('valid_from', { mode: 'string' }).notNull(),
+    validTo: date('valid_to', { mode: 'string' }),
+    source: varchar('source', { length: 16 }).$type<'manual' | 'import'>().notNull().default('manual'),
+    note: text('note'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('supplier_contract_prices_key').on(t.supplierId, t.productId, t.validFrom),
+    index('supplier_contract_prices_lookup_idx').on(t.restaurantId, t.supplierId, t.productId, t.validFrom),
+    index('supplier_contract_prices_product_idx').on(t.productId, t.restaurantId),
+    index('supplier_contract_prices_created_by_idx').on(t.createdBy),
+  ],
+);
+
+/** When a sustained increase becomes an alert, per supplier and/or category (0047). */
+export const priceAlertThresholds = pgTable(
+  'price_alert_thresholds',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    supplierId: uuid('supplier_id'),
+    category: text('category'),
+    /** Fraction: 0.10 = +10%. */
+    thresholdPct: numeric('threshold_pct', { precision: 6, scale: 4 }).notNull(),
+    windowDays: integer('window_days').notNull().default(21),
+    enabled: boolean('enabled').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('price_alert_thresholds_supplier_idx').on(t.supplierId, t.restaurantId)],
+);
+
+/** One detected sustained price increase for a (product, supplier) (0047). */
+export const priceAlerts = pgTable(
+  'price_alerts',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    productId: uuid('product_id').notNull(),
+    supplierId: uuid('supplier_id').notNull(),
+    windowDays: integer('window_days').notNull(),
+    thresholdPct: numeric('threshold_pct', { precision: 6, scale: 4 }).notNull(),
+    startPrice: numeric('start_price', { precision: 12, scale: 4 }).notNull(),
+    endPrice: numeric('end_price', { precision: 12, scale: 4 }).notNull(),
+    pctChange: numeric('pct_change', { precision: 8, scale: 4 }).notNull(),
+    startAt: timestamp('start_at', { withTimezone: true }).notNull(),
+    endAt: timestamp('end_at', { withTimezone: true }).notNull(),
+    observations: integer('observations').notNull(),
+    cheaperSupplierId: uuid('cheaper_supplier_id'),
+    cheaperPrice: numeric('cheaper_price', { precision: 12, scale: 4 }),
+    status: varchar('status', { length: 16 }).$type<'open' | 'dismissed'>().notNull().default('open'),
+    dismissedBy: uuid('dismissed_by').references(() => users.id, { onDelete: 'set null' }),
+    dismissedAt: timestamp('dismissed_at', { withTimezone: true }),
+    /** When owners/managers were emailed (NULL = not yet; the daily sweep sends it). */
+    notifiedAt: timestamp('notified_at', { withTimezone: true }),
+    dedupeKey: text('dedupe_key').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('price_alerts_dedupe_key').on(t.restaurantId, t.dedupeKey),
+    index('price_alerts_restaurant_status_idx').on(t.restaurantId, t.status, t.createdAt),
+    index('price_alerts_product_idx').on(t.productId, t.restaurantId),
+    index('price_alerts_supplier_idx').on(t.supplierId, t.restaurantId),
+    index('price_alerts_cheaper_supplier_idx').on(t.cheaperSupplierId, t.restaurantId),
+    index('price_alerts_dismissed_by_idx').on(t.dismissedBy),
+  ],
+);
+
+export type SupplierContractPrice = typeof supplierContractPrices.$inferSelect;
+export type PriceAlertThreshold = typeof priceAlertThresholds.$inferSelect;
+export type PriceAlert = typeof priceAlerts.$inferSelect;
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Wave 1 (S11): supplier confirmation portal (0062, flag `supplierConfirm`).
+ * po references are COMPOSITE same-tenant FKs in the SQL.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** One magic link per sent order; only the SHA-256 of the token is stored. */
+export const supplierConfirmLinks = pgTable(
+  'supplier_confirm_links',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    poId: uuid('po_id').notNull(),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('supplier_confirm_links_token_hash_key').on(t.tokenHash),
+    index('supplier_confirm_links_po_idx').on(t.poId, t.restaurantId),
+    index('supplier_confirm_links_restaurant_idx').on(t.restaurantId, t.createdAt),
+    index('supplier_confirm_links_created_by_idx').on(t.createdBy),
+  ],
+);
+
+/** A supplier's per-line answer. Never written onto the PO itself. */
+export interface SupplierResponseLine {
+  poLineId: string;
+  /** Units the supplier can deliver (≤ ordered = shortage); null = as ordered. */
+  qtyAvailable: number | null;
+  /** Proposed unit price in shekels; null = the agreed price stands. */
+  proposedUnitPrice: number | null;
+}
+
+export const supplierResponses = pgTable(
+  'supplier_responses',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    poId: uuid('po_id').notNull(),
+    linkId: uuid('link_id')
+      .notNull()
+      .references(() => supplierConfirmLinks.id, { onDelete: 'cascade' }),
+    status: varchar('status', { length: 16 }).$type<'confirmed' | 'changes'>().notNull(),
+    lines: jsonb('lines').$type<SupplierResponseLine[]>().notNull().default([]),
+    note: text('note'),
+    submittedAt: timestamp('submitted_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('supplier_responses_po_key').on(t.poId),
+    index('supplier_responses_po_idx').on(t.poId, t.restaurantId),
+    index('supplier_responses_link_idx').on(t.linkId),
+    index('supplier_responses_restaurant_idx').on(t.restaurantId, t.submittedAt),
+  ],
+);
+
+export type SupplierConfirmLink = typeof supplierConfirmLinks.$inferSelect;
+export type SupplierResponse = typeof supplierResponses.$inferSelect;
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Wave 1 · S12 — "₪ back" recovery tracker (0048) + monthly report (0049).
+ * Money is integer agorot (bigint, mode number — far below 2^53).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export const RECOVERY_STATUSES = [
+  'claimed',
+  'letter_sent',
+  'acknowledged',
+  'credited',
+  'recovered',
+  'disputed',
+  'written_off',
+] as const;
+export type RecoveryStatus = (typeof RECOVERY_STATUSES)[number];
+
+export const creditNotes = pgTable(
+  'credit_notes',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    /** Composite same-tenant FK (supplier_id, restaurant_id) in 0048 — Drizzle mirrors the column only. */
+    supplierId: uuid('supplier_id').notNull(),
+    number: varchar('number', { length: 64 }),
+    amountAgorot: bigint('amount_agorot', { mode: 'number' }).notNull(),
+    issuedOn: date('issued_on').notNull(),
+    source: varchar('source', { length: 16 }).$type<'manual' | 'invoice_line'>().notNull().default('manual'),
+    /** (invoice_line_id, invoice_id) → invoice_lines MATCH FULL; (invoice_id, restaurant_id) → invoices (0048). */
+    invoiceLineId: uuid('invoice_line_id'),
+    invoiceId: uuid('invoice_id'),
+    note: text('note'),
+    /** Client idempotency key: a double-submitted form records the note once. */
+    idempotencyKey: uuid('idempotency_key'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('credit_notes_restaurant_idx').on(t.restaurantId, t.issuedOn),
+    index('credit_notes_supplier_idx').on(t.supplierId, t.restaurantId),
+    index('credit_notes_invoice_idx').on(t.invoiceId, t.restaurantId),
+    index('credit_notes_created_by_idx').on(t.createdBy),
+    uniqueIndex('credit_notes_invoice_line_unique')
+      .on(t.invoiceLineId, t.invoiceId)
+      .where(sql`${t.invoiceLineId} IS NOT NULL`),
+    uniqueIndex('credit_notes_supplier_number_unique')
+      .on(t.restaurantId, t.supplierId, t.number)
+      .where(sql`${t.number} IS NOT NULL`),
+    uniqueIndex('credit_notes_idempotency_unique')
+      .on(t.restaurantId, t.idempotencyKey)
+      .where(sql`${t.idempotencyKey} IS NOT NULL`),
+  ],
+);
+
+export const recoveryClaims = pgTable(
+  'recovery_claims',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    // Composite same-tenant FKs (x_id, restaurant_id) in 0048 — Drizzle mirrors the columns only.
+    discrepancyId: uuid('discrepancy_id').notNull(),
+    supplierId: uuid('supplier_id'),
+    invoiceId: uuid('invoice_id'),
+    status: varchar('status', { length: 16 }).$type<RecoveryStatus>().notNull().default('claimed'),
+    amountAgorot: bigint('amount_agorot', { mode: 'number' }).notNull(),
+    creditedAgorot: bigint('credited_agorot', { mode: 'number' }).notNull().default(0),
+    creditNoteId: uuid('credit_note_id'),
+    claimedAt: timestamp('claimed_at', { withTimezone: true }).notNull().defaultNow(),
+    letterSentAt: timestamp('letter_sent_at', { withTimezone: true }),
+    acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
+    creditedAt: timestamp('credited_at', { withTimezone: true }),
+    recoveredAt: timestamp('recovered_at', { withTimezone: true }),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    lastReminderAt: timestamp('last_reminder_at', { withTimezone: true }),
+    note: text('note'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('recovery_claims_discrepancy_unique').on(t.discrepancyId),
+    index('recovery_claims_restaurant_status_idx').on(t.restaurantId, t.status, t.claimedAt),
+    index('recovery_claims_discrepancy_tenant_idx').on(t.discrepancyId, t.restaurantId),
+    index('recovery_claims_supplier_idx').on(t.supplierId, t.restaurantId),
+    index('recovery_claims_credit_note_idx').on(t.creditNoteId, t.restaurantId),
+    index('recovery_claims_invoice_idx').on(t.invoiceId, t.restaurantId),
+    index('recovery_claims_created_by_idx').on(t.createdBy),
+  ],
+);
+
+export const recoveryEvents = pgTable(
+  'recovery_events',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    /** Composite same-tenant FK (claim_id, restaurant_id) → recovery_claims in 0048. */
+    claimId: uuid('claim_id').notNull(),
+    fromStatus: varchar('from_status', { length: 16 }).$type<RecoveryStatus>(),
+    toStatus: varchar('to_status', { length: 16 }).$type<RecoveryStatus>().notNull(),
+    amountAgorot: bigint('amount_agorot', { mode: 'number' }),
+    actorId: uuid('actor_id').references(() => users.id, { onDelete: 'set null' }),
+    note: text('note'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('recovery_events_claim_idx').on(t.claimId, t.restaurantId, t.createdAt),
+    index('recovery_events_restaurant_idx').on(t.restaurantId, t.createdAt),
+    index('recovery_events_actor_idx').on(t.actorId),
+  ],
+);
+
+export const monthlyReports = pgTable(
+  'monthly_reports',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    /** First day of the reported local month (YYYY-MM-01). */
+    month: date('month').notNull(),
+    snapshot: jsonb('snapshot').$type<Record<string, unknown>>().notNull(),
+    generatedAt: timestamp('generated_at', { withTimezone: true }).notNull().defaultNow(),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+  },
+  (t) => [uniqueIndex('monthly_reports_restaurant_month_unique').on(t.restaurantId, t.month)],
+);
+
+export type CreditNote = typeof creditNotes.$inferSelect;
+export type RecoveryClaim = typeof recoveryClaims.$inferSelect;
+export type RecoveryEvent = typeof recoveryEvents.$inferSelect;
+export type MonthlyReport = typeof monthlyReports.$inferSelect;
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Wave 1 · S14 — receiver languages (0052) + AI assistant budget (0053).
+ * Both tenant tables have RLS enabled in their migration (restaurant_id policy).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** Per-restaurant, per-locale (ar|ru|th|ti) rendering of a Hebrew item/line name. Display-only. */
+export const translationCache = pgTable(
+  'translation_cache',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    locale: varchar('locale', { length: 8 }).notNull(),
+    sourceText: text('source_text').notNull(),
+    translatedText: text('translated_text').notNull(),
+    /** 'glossary' | 'claude' | 'manual' */
+    source: varchar('source', { length: 16 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('translation_cache_unique_idx').on(t.restaurantId, t.locale, t.sourceText)],
+);
+
+/** Per-restaurant, per-UTC-day usage of the "Ask RestoMatch" assistant (no question text). */
+export const assistantUsage = pgTable(
+  'assistant_usage',
+  {
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    day: date('day').notNull(),
+    questions: integer('questions').notNull().default(0),
+    claudeCalls: integer('claude_calls').notNull().default(0),
+    inputTokens: integer('input_tokens').notNull().default(0),
+    outputTokens: integer('output_tokens').notNull().default(0),
+    costMicroUsd: bigint('cost_micro_usd', { mode: 'number' }).notNull().default(0),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ name: 'assistant_usage_pk', columns: [t.restaurantId, t.day] })],
+);
+
+export type TranslationCacheRow = typeof translationCache.$inferSelect;
+export type AssistantUsageRow = typeof assistantUsage.$inferSelect;
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Leak-check sandbox (0054, S15 wave 1 — flag `leakCheck`)
+ *
+ * The public free "leak check" lead magnet. NOT tenant data: RLS is enabled
+ * with no policies (the tenant app role sees zero rows); only the public route
+ * handlers touch it, on the owner connection, keyed by a signed short-lived
+ * link. File bytes are never stored — only the extraction — and every row
+ * expires after 7 days.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export const leakCheckSessions = pgTable(
+  'leak_check_sessions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    email: varchar('email', { length: 320 }).notNull(),
+    name: varchar('name', { length: 200 }),
+    locale: varchar('locale', { length: 8 }).notNull().default('he'),
+    ipHash: varchar('ip_hash', { length: 64 }).notNull(),
+    ocrMode: varchar('ocr_mode', { length: 16 }).notNull(),
+    invoiceCount: integer('invoice_count').notNull(),
+    hasPriceList: boolean('has_price_list').notNull().default(false),
+    invoices: jsonb('invoices').notNull().default(sql`'[]'::jsonb`),
+    findings: jsonb('findings').notNull().default(sql`'[]'::jsonb`),
+    leakAgorot: bigint('leak_agorot', { mode: 'number' }).notNull().default(0),
+    spendAgorot: bigint('spend_agorot', { mode: 'number' }).notNull().default(0),
+    claimedRestaurantId: uuid('claimed_restaurant_id').references(() => restaurants.id, {
+      onDelete: 'set null',
+    }),
+    claimedAt: timestamp('claimed_at', { withTimezone: true }),
+    leadRequestedAt: timestamp('lead_requested_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true })
+      .notNull()
+      .default(sql`(now() + interval '7 days')`),
+  },
+  (t) => [index('leak_check_sessions_expires_at_idx').on(t.expiresAt)],
+);
+
+export const leakCheckOcrUsage = pgTable('leak_check_ocr_usage', {
+  day: date('day').primaryKey(),
+  calls: integer('calls').notNull().default(0),
+});
+
+export type LeakCheckSession = typeof leakCheckSessions.$inferSelect;
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Referral program (migration 0055, S15 growth — flag `growth`).
+ * RLS lives in the migration itself: a tenant sees only its own code, and a
+ * redemption is visible to both its referrer and its referred restaurant.
+ * Credits are agorot, recorded only (no payment provider yet).
+ * ────────────────────────────────────────────────────────────────────────── */
+export const referralCodes = pgTable(
+  'referral_codes',
+  {
+    restaurantId: uuid('restaurant_id')
+      .primaryKey()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    code: varchar('code', { length: 16 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('referral_codes_code_idx').on(t.code)],
+);
+
+export const referralRedemptions = pgTable(
+  'referral_redemptions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    code: varchar('code', { length: 16 }).notNull(),
+    referrerRestaurantId: uuid('referrer_restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    referredRestaurantId: uuid('referred_restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    status: varchar('status', { length: 16 }).$type<'pending' | 'credited'>().notNull().default('pending'),
+    creditAgorotReferrer: integer('credit_agorot_referrer'),
+    creditAgorotReferred: integer('credit_agorot_referred'),
+    creditedAt: timestamp('credited_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('referral_redemptions_referred_idx').on(t.referredRestaurantId),
+    index('referral_redemptions_referrer_idx').on(t.referrerRestaurantId),
+  ],
+);
+
+export type ReferralCode = typeof referralCodes.$inferSelect;
+export type ReferralRedemption = typeof referralRedemptions.$inferSelect;

@@ -30,6 +30,9 @@ import {
   type PoLineInput,
 } from '@restomatch/matching';
 import { addCalendarDaysInTz, endOfDayInTz, startOfDayInTz } from '../lib/time';
+import { featureEnabled } from '../lib/features';
+import { applyContractPrices } from '../contracts/load';
+import { localDateKey } from '../contracts/core';
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
 
@@ -91,8 +94,9 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * `pinnedPoId` (a re-match): the PO the invoice was already matched against. It
  * is used whatever its status — by then it is usually `received`/`closed`, which
  * discovery skips, and re-matching against "no PO" would flag the whole invoice
- * as UNORDERED_ARRIVAL. It is one more discovery candidate (a received PO
- * beats an undelivered one, then the nearest day wins, ties to it), dropped when gone, cancelled, of another supplier, or outside the
+ * as UNORDERED_ARRIVAL. It is one more discovery candidate (nearest day wins —
+ * received first for a photo, and a received pin is never displaced by an
+ * undelivered PO — ties to it), dropped when gone, cancelled, of another supplier, or outside the
  * ±PO_MATCH_WINDOW_DAYS window around the invoice date — so after a corrected
  * date or supplier the invoice is free to move to the right PO, and a re-match
  * picks what a fresh match would.
@@ -101,7 +105,8 @@ export async function buildMatchInputForInvoice(
   db: Database,
   restaurantId: string,
   invoiceId: string,
-  options: { pinnedPoId?: string | null } = {},
+  /** skipPoDiscovery: build the invoice side only (lines, VAT, baselines, known numbers) — the consolidated cross-match adds its own multi-PO lines. */
+  options: { pinnedPoId?: string | null; skipPoDiscovery?: boolean } = {},
 ): Promise<BuiltMatchInput | null> {
   const [inv] = await db
     .select({
@@ -114,11 +119,20 @@ export async function buildMatchInputForInvoice(
       vatAmount: invoices.vatAmount,
       totalInclVat: invoices.totalInclVat,
       ocrPayload: invoices.ocrPayload,
+      source: invoices.source,
     })
     .from(invoices)
     .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
     .limit(1);
   if (!inv) return null;
+  // A consolidated invoice (חשבונית ריכוז, ocr_payload.raw.kind 'consolidated') is never
+  // PO-matched, by any path (the worker's match-invoice job, a re-match, a receipt):
+  // it has no PO of its own, so discovery could only mark it UNORDERED_ARRIVAL or
+  // pin it to one delivery's PO. It is cross-matched against its delivery notes
+  // (match/consolidated.ts), which asks for the invoice side only (skipPoDiscovery).
+  if (!options.skipPoDiscovery && (inv.ocrPayload?.raw as { kind?: unknown } | null | undefined)?.kind === 'consolidated') {
+    return null;
+  }
   // A scan whose number another invoice of this supplier already holds is
   // stored WITHOUT it (invoices_dedupe_idx; the worker's writeOcrHeader) and
   // keeps the number in ocr_payload.raw.duplicateOf. Match on that number so
@@ -193,16 +207,13 @@ export async function buildMatchInputForInvoice(
   const lo = startOfDayInTz(addCalendarDaysInTz(invoiceDate, -PO_MATCH_WINDOW_DAYS, tz), tz);
   const hi = endOfDayInTz(addCalendarDaysInTz(invoiceDate, PO_MATCH_WINDOW_DAYS, tz), tz);
   const inWindow = (at: Date | null) => at == null || (at >= lo && at <= hi);
-  if (inv.supplierId) {
+  if (inv.supplierId && !options.skipPoDiscovery) {
     const candidates: PoCandidate[] = [];
     // A re-match's pinned PO is ONE MORE candidate, never a short-circuit: it
     // skips the status filter (by then it is usually closed / received, which
     // discovery skips) but is dropped when cancelled, from another supplier or
     // out of the window. Listed first, so a tie goes to it (pickNearest keeps the
-    // first of equals). pickNearest ranks a RECEIVED PO (it has a goods receipt)
-    // above an undelivered one, then the nearest local day — so the next standing
-    // order, placed but not yet delivered, never takes an invoice from the PO its
-    // goods were received against (on a re-match or a fresh match alike).
+    // first of equals). How candidates rank depends on the invoice's source — below.
     if (options.pinnedPoId) {
       const [pinned] = await db
         .select({
@@ -251,7 +262,18 @@ export async function buildMatchInputForInvoice(
       )
       .orderBy(asc(purchaseOrders.expectedDeliveryAt));
     for (const c of open) if (!candidates.some((x) => x.id === c.id)) candidates.push(c);
-    po = pickNearest(candidates, invoiceDate, tz);
+    // A photo is taken in the receiving wizard, so its own PO has a receipt — rank
+    // received first. An emailed / platform / manual invoice often arrives before
+    // the goods (Thursday's invoice emailed Thursday morning), so it goes by the
+    // nearest day — except that a pinned PO with a receipt is never displaced by one
+    // without (the next standing order must not take a received invoice away).
+    const pinned = options.pinnedPoId ? candidates.find((c) => c.id === options.pinnedPoId) : undefined;
+    po =
+      inv.source === 'photo'
+        ? pickNearest(candidates, invoiceDate, tz, { receivedFirst: true })
+        : pickNearest(pinned?.received ? candidates.filter((c) => c.received) : candidates, invoiceDate, tz, {
+            receivedFirst: false,
+          });
   }
 
   let poLineInputs: PoLineInput[] = [];
@@ -302,6 +324,20 @@ export async function buildMatchInputForInvoice(
         qtyReceived: num(g.qtyReceived),
       }));
     }
+  }
+
+  // ── Contract prices (wave-1 `contracts`): the contract in force on the
+  //    invoice's LOCAL date beats the PO price as the expected unit price, so an
+  //    over-contract line is a PRICE_HIGHER against the contract. Feature-gated;
+  //    off ⇒ byte-identical input to before. See contracts/core.ts for the rule.
+  if (inv.supplierId && poLineInputs.length > 0 && featureEnabled(restaurant?.settings, 'contracts')) {
+    ({ poLines: poLineInputs } = await applyContractPrices(
+      db,
+      restaurantId,
+      inv.supplierId,
+      poLineInputs,
+      localDateKey(invoiceDate, tz),
+    ));
   }
 
   // ── Tolerances, vat rate, baseline window (restaurant loaded above). ──
@@ -429,17 +465,19 @@ export function normalizeInvoiceNumber(raw: string | null | undefined): string |
 }
 
 /**
- * Pick the PO whose goods were received (it has a goods receipt) over one not yet
- * delivered; among equals, the one whose expectedDeliveryAt falls on the LOCAL calendar day closest
+ * Pick the PO whose expectedDeliveryAt falls on the LOCAL calendar day closest
  * to the invoice's local day (nulls last). Comparing whole local days — rather
  * than raw ms — means a PO due "the same day" as the invoice wins regardless of
  * the time-of-day the timestamps happen to carry, and the result doesn't drift
- * by the UTC offset near midnight.
+ * by the UTC offset near midnight. With `receivedFirst`, a PO whose goods were
+ * received (it has a goods receipt) beats one not yet delivered before the day
+ * counts. A tie keeps the earlier candidate (the pin is listed first).
  */
 function pickNearest(
   candidates: PoCandidate[],
   invoiceDate: Date,
   tz: string,
+  opts: { receivedFirst: boolean },
 ): PoCandidate | null {
   if (candidates.length === 0) return null;
   const invDayStart = startOfDayInTz(invoiceDate, tz);
@@ -447,8 +485,10 @@ function pickNearest(
   let bestDelta = dayDelta(best.expectedDeliveryAt, invDayStart, tz);
   for (const c of candidates.slice(1)) {
     const d = dayDelta(c.expectedDeliveryAt, invDayStart, tz);
-    // Received beats undelivered; then the nearer day; a tie keeps the earlier (the pin).
-    if ((c.received && !best.received) || (c.received === best.received && d < bestDelta)) {
+    const better = opts.receivedFirst
+      ? (c.received && !best.received) || (c.received === best.received && d < bestDelta)
+      : d < bestDelta;
+    if (better) {
       best = c;
       bestDelta = d;
     }

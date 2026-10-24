@@ -1,9 +1,12 @@
+import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { and, desc, eq, matchRuns, restaurants } from '@restomatch/db';
+import { releaseClaimsForRematch } from '../recovery/service';
+import { and, desc, eq, invoices, matchRuns, restaurants } from '@restomatch/db';
 import { runMatch, type MatchStatus } from '@restomatch/matching';
 import { managerProcedure, router } from '../trpc';
 import { assertInvoiceOwned } from '../tenant';
 import { buildMatchInputForInvoice } from '../match/buildMatchInput';
+import { readConsolidatedRaw } from '../match/consolidated';
 import { loadPriorDecisions, persistMatchRun } from '../match/persist';
 import { buildRules, resolveApprovalThresholds } from '../approvals/engine';
 
@@ -31,6 +34,21 @@ export const matchRouter = router({
       const { restaurantId } = ctx.session;
       await assertInvoiceOwned(ctx.db, input.invoiceId, restaurantId);
 
+      // A consolidated invoice (חשבונית ריכוז) has no PO of its own: a PO match would
+      // only mark the whole invoice UNORDERED_ARRIVAL. It is cross-matched against
+      // its delivery notes on the invoice page (read-only) instead.
+      const [kind] = await ctx.db
+        .select({ ocrPayload: invoices.ocrPayload })
+        .from(invoices)
+        .where(and(eq(invoices.id, input.invoiceId), eq(invoices.restaurantId, restaurantId)))
+        .limit(1);
+      if (readConsolidatedRaw(kind?.ocrPayload)) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: 'A consolidated invoice is cross-matched against its delivery notes, not re-matched to a PO.',
+        });
+      }
+
       // A re-match checks against the PO the invoice was already matched to, even
       // once that PO is received/closed (discovery only looks at open POs).
       const [priorRun] = await ctx.db
@@ -52,9 +70,12 @@ export const matchRouter = router({
         };
       }
 
-      // Re-match: drop any prior run for this invoice (discrepancies cascade) —
-      // but first keep the people's decisions, re-applied below to findings that
-      // still exist (a rejected "not a duplicate" must not come back open).
+      // Re-match: drop any prior run for this invoice (discrepancies cascade).
+      // Claims on those discrepancies are money history: release bare ones,
+      // refuse while any is in progress (₪-back tracker, wave 1) — before any work.
+      await releaseClaimsForRematch(ctx.db, restaurantId, input.invoiceId);
+      // Keep the people's decisions, re-applied below to findings that still
+      // exist (a rejected "not a duplicate" must not come back open).
       const priorDecisions = await loadPriorDecisions(ctx.db, restaurantId, input.invoiceId);
       await ctx.db
         .delete(matchRuns)

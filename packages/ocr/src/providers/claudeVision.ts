@@ -44,7 +44,18 @@ export interface ClaudeVisionConfig {
    * sources. Defaults to false (let Anthropic fetch public URLs).
    */
   fetchBytes?: boolean;
+  /**
+   * Optional `output_config.effort`. Falls back to OCR_CLAUDE_EFFORT; unset =
+   * not sent (the model's own default). Lower effort is the main latency lever
+   * on the current models — see docs/OCR-MODEL-BENCHMARK.md.
+   */
+  effort?: OcrEffort;
+  /** Called with the API usage of each call (benchmark cost accounting). */
+  onUsage?: (usage: { input_tokens?: number; output_tokens?: number }) => void;
 }
+
+export type OcrEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+const EFFORTS: readonly OcrEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 const DEFAULT_MODEL = 'claude-opus-4-8';
 
@@ -99,6 +110,11 @@ export class ClaudeVision implements OcrProvider {
     return this.config.model ?? process.env.OCR_CLAUDE_MODEL ?? DEFAULT_MODEL;
   }
 
+  private get effort(): OcrEffort | undefined {
+    const e = this.config.effort ?? process.env.OCR_CLAUDE_EFFORT;
+    return EFFORTS.includes(e as OcrEffort) ? (e as OcrEffort) : undefined;
+  }
+
   async extract(image: ImageSource): Promise<InvoiceOcrResult> {
     // LAZY import: keeps the package typecheck/test green when the SDK isn't
     // fetched in the sandbox. Typed loosely (any) on purpose.
@@ -113,6 +129,7 @@ export class ClaudeVision implements OcrProvider {
     const response = await client.messages.create({
       model: this.model,
       max_tokens: this.config.maxTokens ?? DEFAULT_MAX_TOKENS,
+      ...(this.effort ? { output_config: { effort: this.effort } } : {}),
       system: SYSTEM_PROMPT,
       messages: [
         {
@@ -125,6 +142,7 @@ export class ClaudeVision implements OcrProvider {
       ],
     });
 
+    this.config.onUsage?.(response.usage ?? {});
     const text = joinTextBlocks(response.content);
 
     // Parse, then validate against the canonical schema. On any parse/validation

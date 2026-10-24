@@ -1,50 +1,30 @@
-import IORedis from 'ioredis';
 import { afterAll, describe, expect, it, vi } from 'vitest';
-import {
-  buildHeartbeat,
-  HEARTBEAT_KEY,
-  HEARTBEAT_TTL_SEC,
-  startHeartbeat,
-  writeHeartbeat,
-} from '../heartbeat';
+import { testDbUrl } from '@restomatch/db';
+import { queueSql, type Sql } from '@restomatch/queue';
+import { buildHeartbeat, startHeartbeat, writeHeartbeat } from '../heartbeat';
 
-describe('worker heartbeat (pure)', () => {
-  it('writes a JSON document with an EX ttl under the well-known key', async () => {
-    const set = vi.fn().mockResolvedValue('OK');
-    const doc = buildHeartbeat(11, new Date('2026-09-08T08:00:00Z'), new Date('2026-09-08T08:01:00Z'));
-    await writeHeartbeat({ set } as unknown as IORedis, doc);
-    expect(set).toHaveBeenCalledTimes(1);
-    const [key, payload, mode, ttl] = set.mock.calls[0] as [string, string, string, number];
-    expect(key).toBe(HEARTBEAT_KEY);
-    expect(mode).toBe('EX');
-    expect(ttl).toBe(HEARTBEAT_TTL_SEC);
-    const parsed = JSON.parse(payload) as { at: string; workers: number; startedAt: string };
-    expect(parsed.at).toBe('2026-09-08T08:01:00.000Z');
-    expect(parsed.workers).toBe(11);
-    expect(parsed.startedAt).toBe('2026-09-08T08:00:00.000Z');
-  });
-
+describe('worker heartbeat (timers)', () => {
   it('beats immediately, then on the interval, and stops cleanly', async () => {
     vi.useFakeTimers();
     try {
-      const set = vi.fn().mockResolvedValue('OK');
-      const stop = startHeartbeat({ set } as unknown as IORedis, 3, 1_000);
-      expect(set).toHaveBeenCalledTimes(1);
+      const sql = vi.fn().mockResolvedValue([]) as unknown as Sql;
+      const stop = startHeartbeat(sql, 'w', 3, 1_000);
+      expect(sql).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(2_500);
-      expect(set).toHaveBeenCalledTimes(3);
+      expect(sql).toHaveBeenCalledTimes(3);
       stop();
       await vi.advanceTimersByTimeAsync(5_000);
-      expect(set).toHaveBeenCalledTimes(3);
+      expect(sql).toHaveBeenCalledTimes(3);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('survives a failing Redis write (logs, does not throw)', async () => {
+  it('survives a failing write (logs, does not throw)', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      const set = vi.fn().mockRejectedValue(new Error('ECONNRESET'));
-      const stop = startHeartbeat({ set } as unknown as IORedis, 1, 60_000);
+      const sql = vi.fn().mockRejectedValue(new Error('ECONNRESET')) as unknown as Sql;
+      const stop = startHeartbeat(sql, 'w', 1, 60_000);
       await Promise.resolve();
       await Promise.resolve();
       stop();
@@ -55,24 +35,22 @@ describe('worker heartbeat (pure)', () => {
   });
 });
 
-// Real round trip — only where a Redis service exists (CI worker-tests job).
-const REDIS_URL = process.env.REDIS_URL;
-describe.skipIf(!REDIS_URL)('worker heartbeat (redis round trip)', () => {
-  const redis = REDIS_URL ? new IORedis(REDIS_URL, { maxRetriesPerRequest: 1 }) : null;
+describe('worker heartbeat (Postgres round trip)', () => {
+  const sql = queueSql(testDbUrl());
   afterAll(async () => {
-    if (redis) {
-      await redis.del(HEARTBEAT_KEY);
-      await redis.quit();
-    }
+    await sql`DELETE FROM worker_heartbeats WHERE worker_id LIKE 'test-hb-%'`;
   });
 
-  it('is readable back with a TTL', async () => {
-    await writeHeartbeat(redis!, buildHeartbeat(2, new Date()));
-    const raw = await redis!.get(HEARTBEAT_KEY);
-    expect(raw).toBeTruthy();
-    expect(JSON.parse(raw!).workers).toBe(2);
-    const ttl = await redis!.ttl(HEARTBEAT_KEY);
-    expect(ttl).toBeGreaterThan(0);
-    expect(ttl).toBeLessThanOrEqual(HEARTBEAT_TTL_SEC);
+  it('upserts one row per worker id and keeps the latest beat', async () => {
+    const id = `test-hb-${process.pid}`;
+    const started = new Date('2026-10-24T06:00:00Z');
+    await writeHeartbeat(sql, id, buildHeartbeat(13, started, new Date('2026-10-24T06:01:00Z')));
+    await writeHeartbeat(sql, id, buildHeartbeat(13, started, new Date('2026-10-24T06:02:00Z')));
+    const rows = await sql<Array<{ workers: number; beat_at: Date; started_at: Date }>>`
+      SELECT workers, beat_at, started_at FROM worker_heartbeats WHERE worker_id = ${id}`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.workers).toBe(13);
+    expect(rows[0]!.beat_at.toISOString()).toBe('2026-10-24T06:02:00.000Z');
+    expect(rows[0]!.started_at.toISOString()).toBe('2026-10-24T06:00:00.000Z');
   });
 });

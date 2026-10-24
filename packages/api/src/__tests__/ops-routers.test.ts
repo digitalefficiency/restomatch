@@ -5,16 +5,22 @@ import {
   discrepancies,
   eq,
   invoices,
+  goodsReceipts,
   matchRuns,
+  memberships,
+  notificationsOutbox,
   poLines,
   products,
   purchaseOrders,
   supplierCatalogItems,
+  restaurants,
   suppliers,
+  users,
 } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { estimateTotal } from '../orders/totals';
+import { guardrailLevel, guardrailThreshold } from '../routers/orders';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 
 /**
@@ -53,6 +59,26 @@ describe('estimateTotal (agorot-exact)', () => {
         { qty: 4, unitPriceExpected: null },
       ]),
     ).toBe('25.00');
+  });
+});
+
+describe('order guardrail levels', () => {
+  const flat = { p50: 10, p90: 10.05 }; // flat history: p90 a hair above the median
+  it('a 1% bump above a flat p90 is not a warning (was a red "high")', () => {
+    expect(guardrailLevel(10.1, flat, guardrailThreshold(undefined))).toBeNull();
+  });
+  it('high = above p90 AND over max(5%, price tolerance); elevated = over the bar only', () => {
+    const t = guardrailThreshold(undefined);
+    expect(t).toBe(0.05);
+    expect(guardrailLevel(10.6, flat, t)).toBe('high');
+    expect(guardrailLevel(10.6, { p50: 10, p90: 12 }, t)).toBe('elevated');
+    expect(guardrailLevel(10.4, { p50: 10, p90: 12 }, t)).toBeNull();
+  });
+  it('a looser restaurant price tolerance raises the bar', () => {
+    const t = guardrailThreshold(0.08);
+    expect(t).toBe(0.08);
+    expect(guardrailLevel(10.6, flat, t)).toBeNull();
+    expect(guardrailLevel(10.9, flat, t)).toBe('high');
   });
 });
 
@@ -128,6 +154,209 @@ describe('orders: totals follow line edits; cancel guard', () => {
     await expect(callerFor(A).orders.cancelOrder({ poId })).rejects.toMatchObject({
       code: 'CONFLICT',
     });
+  });
+
+  it('cancelOrder refuses an order that already has a goods receipt (status still sent)', async () => {
+    // seedTenant gives A.poId status 'sent' and a goods receipt.
+    await expect(callerFor(A).orders.cancelOrder({ poId: A.poId })).rejects.toMatchObject({ code: 'CONFLICT' });
+    const [po] = await db.select({ status: purchaseOrders.status }).from(purchaseOrders).where(eq(purchaseOrders.id, A.poId));
+    expect(po?.status).toBe('sent');
+  });
+
+  it('createDraft stores a picked delivery date as local midnight in the restaurant zone', async () => {
+    const { defaultDate, today } = await callerFor(A).orders.previewDelivery({ supplierId: A.supplierId });
+    expect(defaultDate > today).toBe(true);
+    const { poId } = await callerFor(A).orders.createDraft({
+      supplierId: A.supplierId,
+      expectedDeliveryDate: '2099-03-02',
+      lines: [{ rawDescription: 'עגבניות', qty: 2, unit: 'ק״ג' }],
+    });
+    const [po] = await db
+      .select({ at: purchaseOrders.expectedDeliveryAt })
+      .from(purchaseOrders)
+      .where(eq(purchaseOrders.id, poId));
+    expect(po?.at?.toISOString()).toBe('2099-03-01T22:00:00.000Z'); // 00:00 IST (+02:00)
+    await expect(
+      callerFor(A).orders.createDraft({
+        supplierId: A.supplierId,
+        expectedDeliveryDate: '2020-01-01',
+        lines: [{ rawDescription: 'x', qty: 1, unit: 'ק״ג' }],
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('the supplier document names the restaurant, the contact, the date, product names and clean quantities — and the preview is exactly what is sent', async () => {
+    await db.update(suppliers).set({ contactEmail: 'orders@supplier.test' }).where(eq(suppliers.id, A.supplierId));
+    const { poId } = await callerFor(A).orders.createDraft({
+      supplierId: A.supplierId,
+      expectedDeliveryDate: '2099-03-02',
+      lines: [
+        { productId: A.productId, qty: 15, unit: 'ק״ג' },
+        { rawDescription: 'בצל', qty: 2.5, unit: 'ק״ג' },
+      ],
+    });
+    const preview = await callerFor(A).orders.supplierMessagePreview({ poId });
+    expect(preview.body).toContain('Resto A');
+    expect(preview.body).toContain('Owner A');
+    expect(preview.body).toContain('owner-A@attack.test');
+    expect(preview.body).toMatch(/אספקה מבוקשת: .*2099/);
+    expect(preview.body).toContain('• עגבניה A — 15 ק״ג'); // product name, not "פריט"; not "15.000"
+    expect(preview.body).toContain('• בצל — 2.5 ק״ג');
+    expect(preview.body).not.toMatch(/\d\.\d*0 /);
+
+    await callerFor(A).orders.placeOrder({ poId, channel: 'email' });
+    const [row] = await db
+      .select({ subject: notificationsOutbox.subject, body: notificationsOutbox.body })
+      .from(notificationsOutbox)
+      .where(eq(notificationsOutbox.relatedEntityId, poId));
+    expect(row).toEqual({ subject: preview.subject, body: preview.body });
+
+    // The wizard's unsaved lines render the same way (no PO ref yet).
+    const unsaved = await callerFor(A).orders.supplierMessagePreview({
+      supplierId: A.supplierId,
+      expectedDeliveryDate: '2099-03-02',
+      lines: [{ productId: A.productId, qty: 15, unit: 'ק״ג' }],
+    });
+    expect(unsaved.body).toContain('• עגבניה A — 15 ק״ג');
+    expect(unsaved.body).not.toContain('מס׳ הזמנה');
+  });
+
+  it('orders.get reports what happened to the supplier message, not just the channel picked', async () => {
+    const saved = process.env.RESEND_API_KEY;
+    delete process.env.RESEND_API_KEY;
+    try {
+      await db.update(suppliers).set({ contactEmail: 'orders@supplier.test' }).where(eq(suppliers.id, A.supplierId));
+      const { poId } = await callerFor(A).orders.createDraft({
+        supplierId: A.supplierId,
+        lines: [{ rawDescription: 'בצל', qty: 1, unit: 'ק״ג' }],
+      });
+      expect((await callerFor(A).orders.get({ poId })).supplierMessage).toBeNull();
+      await callerFor(A).orders.placeOrder({ poId, channel: 'email' });
+      // Queued with no email provider: it will never leave — say so.
+      expect((await callerFor(A).orders.get({ poId })).supplierMessage).toBe('not_configured');
+      // What the dispatcher writes when it finds no provider.
+      await db
+        .update(notificationsOutbox)
+        .set({ status: 'failed', lastError: 'skipped_no_provider' })
+        .where(eq(notificationsOutbox.relatedEntityId, poId));
+      expect((await callerFor(A).orders.get({ poId })).supplierMessage).toBe('not_configured');
+      await db
+        .update(notificationsOutbox)
+        .set({ status: 'failed', lastError: 'smtp 550' })
+        .where(eq(notificationsOutbox.relatedEntityId, poId));
+      expect((await callerFor(A).orders.get({ poId })).supplierMessage).toBe('failed');
+      await db
+        .update(notificationsOutbox)
+        .set({ status: 'sent', lastError: null })
+        .where(eq(notificationsOutbox.relatedEntityId, poId));
+      expect((await callerFor(A).orders.get({ poId })).supplierMessage).toBe('sent');
+    } finally {
+      if (saved !== undefined) process.env.RESEND_API_KEY = saved;
+    }
+  });
+
+  it('startReceipt refuses a cancelled or closed order (no receipt on a cancelled PO)', async () => {
+    const { poId } = await draftWithTwoLines();
+    await callerFor(A).orders.cancelOrder({ poId });
+    await expect(callerFor(A).receiving.startReceipt({ poId })).rejects.toMatchObject({ code: 'CONFLICT' });
+    const grs = await db.select({ id: goodsReceipts.id }).from(goodsReceipts).where(eq(goodsReceipts.poId, poId));
+    expect(grs).toHaveLength(0);
+  });
+
+  it('cancel and receipt-start at the same time never leave a cancelled PO with a goods receipt', async () => {
+    for (let i = 0; i < 12; i++) {
+      const { poId } = await draftWithTwoLines();
+      await db.update(purchaseOrders).set({ status: 'sent' }).where(eq(purchaseOrders.id, poId));
+      await Promise.allSettled([
+        callerFor(A).orders.cancelOrder({ poId }),
+        callerFor(A).receiving.startReceipt({ poId }),
+      ]);
+      const [po] = await db.select({ status: purchaseOrders.status }).from(purchaseOrders).where(eq(purchaseOrders.id, poId));
+      const grs = await db.select({ id: goodsReceipts.id }).from(goodsReceipts).where(eq(goodsReceipts.poId, poId));
+      expect(po?.status === 'cancelled' && grs.length > 0, `round ${i}: cancelled with ${grs.length} receipt(s)`).toBe(false);
+    }
+  });
+
+  it('orders.list offset pages never repeat or skip orders that share created_at', async () => {
+    const at = new Date('2026-10-20T08:00:00Z');
+    const rows = Array.from({ length: 23 }, () => ({
+      restaurantId: A.restaurantId,
+      supplierId: A.supplierId,
+      status: 'draft' as const,
+      source: 'manual' as const,
+      createdAt: at,
+    }));
+    await db.insert(purchaseOrders).values(rows);
+    const all = await callerFor(A).orders.list({ status: 'draft', limit: 100 });
+    const paged: string[] = [];
+    for (let offset = 0; offset < all.length; offset += 5) {
+      const page = await callerFor(A).orders.list({ status: 'draft', limit: 5, offset });
+      paged.push(...page.map((o) => o.id));
+    }
+    expect(new Set(paged).size).toBe(all.length);
+    expect(paged).toEqual(all.map((o) => o.id));
+  });
+
+  it('a delivery date that does not exist (2026-02-31) is refused, not rolled over', async () => {
+    await expect(
+      callerFor(A).orders.createDraft({
+        supplierId: A.supplierId,
+        expectedDeliveryDate: '2099-02-31',
+        lines: [{ rawDescription: 'x', qty: 1, unit: 'ק״ג' }],
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('quantities are stored at 3 dp on create and on edit, and the total uses the stored quantity', async () => {
+    const { poId } = await callerFor(A).orders.createDraft({
+      supplierId: A.supplierId,
+      lines: [{ rawDescription: 'גבינה', qty: 1.23456, unit: 'ק״ג', unitPriceExpected: 100 }],
+    });
+    const [line] = await db.select().from(poLines).where(eq(poLines.poId, poId));
+    expect(line?.qtyOrdered).toBe('1.235');
+    expect(await totalOf(poId)).toBe('123.50');
+    await callerFor(A).orders.updateOrderLine({ lineId: line!.id, patch: { qtyOrdered: 2.00049 } });
+    const [edited] = await db.select().from(poLines).where(eq(poLines.poId, poId));
+    expect(edited?.qtyOrdered).toBe('2.000');
+  });
+
+  it('the preview contact is the order creator, exactly as placeOrder sends it — not whoever opens the preview', async () => {
+    const [mgr] = await db
+      .insert(users)
+      .values({ email: 'mgr-A@attack.test', name: 'Manager A', emailVerified: new Date() })
+      .returning();
+    await db.insert(memberships).values({ userId: mgr!.id, restaurantId: A.restaurantId, role: 'manager' });
+    const asMgr = appRouter.createCaller({ db, session: { userId: mgr!.id, restaurantId: A.restaurantId, role: 'manager' } });
+    await db.update(suppliers).set({ contactEmail: 'orders@supplier.test' }).where(eq(suppliers.id, A.supplierId));
+    const { poId } = await callerFor(A).orders.createDraft({
+      supplierId: A.supplierId,
+      lines: [{ rawDescription: 'בצל', qty: 1, unit: 'ק״ג' }],
+    });
+    const preview = await asMgr.orders.supplierMessagePreview({ poId });
+    expect(preview.body).toContain('Owner A');
+    expect(preview.body).not.toContain('Manager A');
+    await asMgr.orders.placeOrder({ poId, channel: 'email' });
+    const [row] = await db.select({ body: notificationsOutbox.body }).from(notificationsOutbox).where(eq(notificationsOutbox.relatedEntityId, poId));
+    expect(row?.body).toBe(preview.body);
+    expect(preview.body).toContain('סה״כ פריט אחד');
+  });
+
+  it('the email subject is one line even if a stored name carries CR/LF; name inputs refuse control characters', async () => {
+    await db.update(restaurants).set({ name: 'Resto\r\nBcc: x@evil.test' }).where(eq(restaurants.id, A.restaurantId));
+    const preview = await callerFor(A).orders.supplierMessagePreview({
+      supplierId: A.supplierId,
+      lines: [{ rawDescription: 'בצל', qty: 1, unit: 'ק״ג' }],
+    });
+    expect(preview.subject).not.toMatch(/[\r\n\t]/);
+    await expect(callerFor(A).settings.updateProfile({ name: 'Resto\nX' })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('a document without a delivery date says so instead of dropping the line', async () => {
+    const preview = await callerFor(A).orders.supplierMessagePreview({
+      supplierId: A.supplierId,
+      lines: [{ rawDescription: 'בצל', qty: 1, unit: 'ק״ג' }],
+    });
+    expect(preview.body).toContain('אספקה מבוקשת: לתיאום מול המסעדה');
   });
 
   it('placeOrder refuses a draft whose lines were all deleted', async () => {

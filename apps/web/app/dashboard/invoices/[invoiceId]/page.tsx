@@ -1,10 +1,19 @@
 import { notFound } from 'next/navigation';
 import { auth } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
-import { SectionHeader } from '@/lib/components';
+import { FileWarning } from 'lucide-react';
+import { Badge, SectionHeader } from '@/lib/components';
+import { formatDate } from '@/lib/i18n/format';
+import { vat } from '@/lib/i18n/messages/vat';
+import { enabledFeatures } from '@/lib/ingest/features';
+import { formatIls } from '@/lib/money';
 import { InvoiceCorrection } from './correction-client';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { invoices } from '@/lib/i18n/messages/invoices';
+import { overContractBadgesForInvoice } from '../../contracts/over-contract';
+import { dockPriceNotesForInvoice, mergeLineBadges } from './dock-price-notes';
+import { consolidated as consolidatedNs } from '@/lib/i18n/messages/consolidated';
+import { ConsolidatedPanel } from './consolidated-panel';
 
 export default async function InvoiceCorrectionPage({
   params,
@@ -30,10 +39,28 @@ export default async function InvoiceCorrectionPage({
     notFound();
   }
 
-  const [memberships, session] = await Promise.all([caller.onboarding.myMemberships(), auth()]);
+  const [memberships, session, overContract, dockPrice, tc] = await Promise.all([
+    caller.onboarding.myMemberships(),
+    auth(),
+    // Wave-1 "over contract" line badges — {} when the flag/role is off (fail silent).
+    overContractBadgesForInvoice(invoiceId),
+    // Flag `dockPriceContext`: "your usual price" under PRICE_HIGHER lines ({} when off).
+    dockPriceNotesForInvoice(invoiceId),
+    getT(consolidatedNs),
+  ]);
   const active =
     memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0];
   const canEdit = active?.role === 'owner' || active?.role === 'manager';
+  // VAT at risk (flag vatAtRisk): this invoice is above the allocation threshold with no valid number.
+  const vatRow =
+    active && active.role !== 'chef' && (await enabledFeatures(active.restaurantId)).includes('vatAtRisk')
+      ? ((await caller.owner.vatAtRisk({ period: 'all', invoiceId }).catch(() => null))?.rows[0] ?? null)
+      : null;
+  const tv = vatRow ? await getT(vat) : null;
+  // Consolidated invoice ↔ delivery notes (flag consolidatedMatch; read-only; null
+  // otherwise). It shows ₪ differences — finance roles only, never a receiver.
+  const finance = active?.role === 'owner' || active?.role === 'manager' || active?.role === 'bookkeeper';
+  const proposal = finance ? await caller.consolidated.proposal({ invoiceId }).catch(() => null) : null;
 
   return (
     <div>
@@ -42,7 +69,35 @@ export default async function InvoiceCorrectionPage({
         title={t('correction.title')}
         subtitle={t('correction.subtitle')}
       />
-      <InvoiceCorrection invoice={invoice} canEdit={canEdit} />
+      {vatRow && tv ? (
+        <div
+          role="note"
+          data-testid="invoice-vat-at-risk"
+          className="mb-4 flex flex-wrap items-start gap-3 rounded-2xl border border-warn/40 bg-surface p-4 shadow-card"
+        >
+          <FileWarning className="mt-0.5 h-5 w-5 shrink-0 text-warn" aria-hidden="true" />
+          <div className="min-w-0 flex-1">
+            <Badge tone="warning-solid">{tv('invoice.badge', { amount: formatIls(vatRow.vatAtRisk, { locale }) })}</Badge>
+            <p className="mt-2 text-sm text-ink">{vatRow.allocationNumber ? tv('invoice.invalid') : tv('invoice.missing')}</p>
+            <p className="mt-0.5 text-xs text-muted">
+              {vatRow.daysLeft >= 0
+                ? tv('invoice.deadline', { date: formatDate(vatRow.deductionDeadline, locale) })
+                : tv('invoice.closed', { date: formatDate(vatRow.deductionDeadline, locale) })}
+            </p>
+          </div>
+        </div>
+      ) : null}
+      {/* A ריכוז: its cross-match first — that is the job on this page — then the correction form. */}
+      {proposal ? (
+        <ConsolidatedPanel
+          proposal={proposal}
+          t={tc}
+          locale={locale}
+          supplierName={invoice.supplierName}
+          invoiceNumber={invoice.invoiceNumber}
+        />
+      ) : null}
+      <InvoiceCorrection invoice={invoice} canEdit={canEdit} lineBadges={mergeLineBadges(overContract, dockPrice)} />
     </div>
   );
 }

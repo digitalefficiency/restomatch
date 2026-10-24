@@ -106,6 +106,29 @@ export function startOfDayInTz(refUtc: Date, tz: string): Date {
 }
 
 /**
+ * UTC instant of the local wall-clock time `hour:minute` (in `tz`) on the local
+ * day that CONTAINS `refUtc`. DST-safe: resolves the wall clock through the
+ * zone's offset AT that time, so on a 25h fall-back or 23h spring-forward day
+ * "14:00" is still 14:00 local (never local midnight + a fixed 14h).
+ */
+export function atLocalTimeInTz(refUtc: Date, tz: string, hour: number, minute: number): Date {
+  const lp = getLocalParts(refUtc, tz);
+  return utcFromLocalFields(tz, lp.year, lp.month, lp.day, hour, minute, 0, 0);
+}
+
+/** 'YYYY-MM-DD' of the local day (in `tz`) that CONTAINS `refUtc`. */
+export function localDateKeyInTz(refUtc: Date, tz: string): string {
+  const lp = getLocalParts(refUtc, tz);
+  return `${lp.year}-${String(lp.month).padStart(2, '0')}-${String(lp.day).padStart(2, '0')}`;
+}
+
+/** UTC instant of local 00:00 in `tz` on the calendar date 'YYYY-MM-DD'. */
+export function startOfLocalDateInTz(dateKey: string, tz: string): Date {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  return utcFromLocalFields(tz, y!, m!, d!, 0, 0, 0, 0);
+}
+
+/**
  * UTC instant of the END of the local day (23:59:59.999 wall clock in `tz`)
  * that CONTAINS `refUtc`.
  */

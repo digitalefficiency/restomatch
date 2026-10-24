@@ -8,6 +8,7 @@ import {
   deleteDemoTenants,
   demoTenantRowCounts,
   findDemoTenants,
+  nonDemoFingerprint,
 } from '../demoTenants';
 import { isLocalDbUrl, supabaseProjectRef } from '../seedGuard';
 import { testDbUrl } from '../test-env';
@@ -21,7 +22,10 @@ const sql = postgres(testDbUrl(), { max: 1, prepare: false, onnotice: () => unde
 const REAL = '7e57e57e-0000-4000-8000-000000000001';
 const REAL_USER = '7e57e57e-0000-4000-8000-000000000002';
 
+const FP_JOB = 'demo-tenants-test:fingerprint';
+
 async function clean() {
+  await sql`delete from job_queue where starts_with(dedupe_key, ${FP_JOB})`;
   await sql`delete from restaurants where business_id = ${DEMO_MAIN_BUSINESS_ID} or name in ${sql([DEMO_MAIN_NAME, ...DEMO_BRANCH_NAMES])} or id = ${REAL}`;
   await sql`delete from billing_accounts where name = 'demo-test chain'`;
   await sql`delete from users where lower(email) like ${'%@' + DEMO_EMAIL_DOMAIN} or id = ${REAL_USER}`;
@@ -121,6 +125,40 @@ describe('demo tenants (production reseed scope)', () => {
     const t = await findDemoTenants(sql);
     expect(t.restaurants).toEqual([]);
     expect((await deleteDemoTenants(sql)).removed).toEqual({});
+  });
+});
+
+describe('non-demo fingerprint (reseed:demo step 6: "other tenants unchanged")', () => {
+  const fingerprint = async () => {
+    const t = await findDemoTenants(sql);
+    return nonDemoFingerprint(sql, t.restaurants.map((r) => r.id), t.userIds);
+  };
+  /** What a running worker writes on its own while the reseed runs (cron.ts). */
+  const workerTick = async () => {
+    // outbox-dispatch every 60 s and ocr-sweep every 5 min: restaurant_id NULL.
+    await sql`insert into job_queue (queue, payload, dedupe_key) values ('outbox-dispatch', '{}'::jsonb, ${`${FP_JOB}:outbox`})`;
+    await sql`insert into job_queue (queue, payload, dedupe_key) values ('ocr-sweep', '{}'::jsonb, ${`${FP_JOB}:sweep`})`;
+    // A sweep retry of a real tenant's stuck scan carries that tenant's id.
+    await sql`insert into job_queue (queue, payload, restaurant_id, dedupe_key) values ('ocr-invoice', '{}'::jsonb, ${REAL}, ${`${FP_JOB}:ocr`})`;
+  };
+
+  it("a worker's queue rows between the before and after fingerprints are no difference (the worker runs all the time)", async () => {
+    await seedWorld();
+    const before = await fingerprint();
+    await workerTick();
+    expect(await fingerprint()).toEqual(before);
+    // And the other way round: the worker pruning finished jobs during the run.
+    await sql`delete from job_queue where starts_with(dedupe_key, ${FP_JOB})`;
+    expect(await fingerprint()).toEqual(before);
+  });
+
+  it('still catches real data of another tenant changing during the run', async () => {
+    await seedWorld();
+    const before = await fingerprint();
+    await sql`insert into suppliers (restaurant_id, name) values (${REAL}, 'added during the run')`;
+    const after = await fingerprint();
+    expect(after.suppliers).toBe(before.suppliers! + 1);
+    expect(Object.keys(after).filter((k) => after[k] !== before[k])).toEqual(['suppliers']);
   });
 });
 

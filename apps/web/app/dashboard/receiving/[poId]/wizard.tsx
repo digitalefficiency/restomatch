@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Check, FileScan, Info, Loader2, Package, RefreshCw, Scale } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, Check, FileScan, FileWarning, Info, Loader2, Package, RefreshCw, Scale } from 'lucide-react';
 
 import { AdjustQuantities } from '@/app/showcase/receiver/_steps/AdjustQuantities';
 import { Confirmed } from '@/app/showcase/receiver/_steps/Confirmed';
@@ -15,17 +15,24 @@ import {
   type LineMark,
 } from '@/app/showcase/receiver/_state';
 import { trpc } from '@/lib/trpc/client';
-import { useDir, useLocale, useT } from '@/lib/i18n/client';
+import { useDockPriceLineExtra } from './dock-price-context';
+import { useAppLocale, useDir, useLocale, useT } from '@/lib/i18n/client';
 import { receiving } from '@/lib/i18n/messages/receiving';
 import type { Translator } from '@/lib/i18n/translate';
+import { isReceiverLocale } from '@/lib/i18n/config';
 import type { UploadedScan } from '@/lib/supabase/client';
+import { ingest } from '@/lib/i18n/messages/ingest';
+import { SYNCED_EVENT, enqueuePhoto, idbAvailable, isNetworkError, type SyncedPhotoDetail } from '@/lib/pwa/offlineQueue';
 import {
   adaptReconciliation,
   keepAdjusted,
   type PoLineRow,
 } from './_adapters';
+import { localizeInvoiceLines, localizePoLines, localizeReceiptLines, type LocalNames } from './_localize';
 import { receivingErrorText as errorText } from './_errors';
 import { pollInvoiceUntilRead } from './_poll';
+import { buildSlipLines, needsSlip } from './_dockSlip';
+import { DockSlip } from './dock-slip';
 
 /** How long to keep checking in the background after the receiver moved on. */
 const BACKGROUND_POLL_MS = 10 * 60_000;
@@ -55,6 +62,8 @@ interface PoForClient {
   status: string;
   totalEstimated: number | null;
   lines: PoLineRow[];
+  /** Per-restaurant feature flags the wizard reads (receiving.getPo). */
+  features?: { dockSlip?: boolean };
 }
 
 // Authenticated flow skips the SELECT_SUPPLIER step (supplier comes from the PO).
@@ -76,9 +85,21 @@ const STEP_ORDER: Step[] = [
 export function ReceivingWizard({
   po,
   restaurantId,
+  offlineQueue = false,
+  userId = null,
+  localNames,
+  dockPriceContext = false,
 }: {
   po: PoForClient;
   restaurantId: string | null;
+  /** S13 receiverPwa: queue photos in IndexedDB when offline (lib/pwa/offlineQueue). */
+  offlineQueue?: boolean;
+  /** Owner of queued photos — they only ever upload under this user (shared tablets). */
+  userId?: string | null;
+  /** Receiver languages (S14): Hebrew → ar/ru/th/ti, fetched by the page. */
+  localNames?: LocalNames;
+  /** Flag `dockPriceContext` (resolved on the server page). */
+  dockPriceContext?: boolean;
 }) {
   const [step, setStep] = useState<Step>('SCAN_INVOICE');
   const [grId, setGrId] = useState<string | null>(null);
@@ -86,6 +107,9 @@ export function ReceivingWizard({
   const [ocrNotice, setOcrNotice] = useState<OcrNotice>(null);
   /** The scanned number is already on another invoice of this supplier. */
   const [duplicateNumber, setDuplicateNumber] = useState<string | null>(null);
+  /** Flag dockSlip: off → the wizard is exactly as before. */
+  const dockSlipOn = po.features?.dockSlip === true;
+  const [showSlip, setShowSlip] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
   /** Bumped on retake / skip / unmount — cancels any in-flight poll. */
   const pollTokenRef = useRef(0);
@@ -102,11 +126,23 @@ export function ReceivingWizard({
   const [error, setError] = useState<string | null>(null);
   const [poLines, setPoLines] = useState<PoLineRow[]>(po.lines);
   const t = useT(receiving);
+  const tIngest = useT(ingest);
   const locale = useLocale();
+  const appLocale = useAppLocale();
+  const receiverLocale = isReceiverLocale(appLocale) ? appLocale : null;
+  // Receiver languages (S14): Hebrew → ar/ru/th/ti names for this PO/invoice.
+  const localNamesRef = useRef<LocalNames>(localNames ?? {});
+  const localNamesMut = trpc.receiverLangs.localNames.useMutation();
   const dir = useDir();
   const supplierLabel = locale === 'en' && po.supplierNameEn ? po.supplierNameEn : po.supplierName;
+  // Is there anything to dispute? (short / rejected / over-priced / unordered / duplicate)
+  const slipNeeded = useMemo(
+    () => dockSlipOn && !!result && needsSlip(buildSlipLines(result.lines, marks, []), duplicateNumber),
+    [dockSlipOn, result, marks, duplicateNumber],
+  );
   const capturingRef = useRef(false);
 
+  const dockPriceLineExtra = useDockPriceLineExtra(dockPriceContext && step === 'RECONCILIATION_REVIEW', invoiceId);
   const utils = trpc.useUtils();
   const startReceipt = trpc.receiving.startReceipt.useMutation();
   const registerInvoice = trpc.receiving.registerInvoice.useMutation();
@@ -123,6 +159,17 @@ export function ReceivingWizard({
    * English names, then refresh the PO lines. Display-only and best-effort — a
    * failure just leaves Hebrew on screen.
    */
+  /** Receiver languages: fetch (DB-cached) local names; best effort. */
+  async function refreshLocalNames(scope: { invoiceId?: string }) {
+    if (!receiverLocale) return;
+    try {
+      const r = await localNamesMut.mutateAsync({ locale: receiverLocale, poId: po.id, ...scope });
+      localNamesRef.current = { ...localNamesRef.current, ...r.names };
+    } catch {
+      /* best effort — English (then Hebrew) stays on screen */
+    }
+  }
+
   async function ensureEnglishFor(scope: { invoiceId?: string }) {
     if (locale !== 'en') return;
     try {
@@ -130,7 +177,7 @@ export function ReceivingWizard({
       if (r.poLinesFilled > 0 || r.productsFilled > 0) {
         const fresh = await utils.receiving.getPo.fetch({ poId: po.id });
         setPoLines(
-          fresh.lines.map((l) => ({
+          localizePoLines(fresh.lines.map((l) => ({
             id: l.id,
             productId: l.productId ?? null,
             rawDescription: l.rawDescription ?? null,
@@ -139,7 +186,7 @@ export function ReceivingWizard({
             qtyOrdered: Number(l.qtyOrdered),
             unit: l.unit,
             unitPriceExpected: l.unitPriceExpected != null ? Number(l.unitPriceExpected) : null,
-          })),
+          })), localNamesRef.current),
         );
       }
     } catch {
@@ -154,13 +201,37 @@ export function ReceivingWizard({
    */
   const authedUpload = useCallback(
     async (file: File, clientUploadId: string): Promise<UploadedScan> => {
+      // S13 receiverPwa: offline (or the network drops mid-upload) → keep the
+      // photo in IndexedDB under the SAME clientUploadId; the PWA shell uploads
+      // it when back online (idempotent, M8). An empty publicUrl = queued.
+      const queue = async (): Promise<UploadedScan> => {
+        await enqueuePhoto({
+          clientUploadId,
+          restaurantId: restaurantId!,
+          userId: userId!,
+          poId: po.id,
+          supplierId: po.supplierId,
+          supplierName: po.supplierName,
+          mimeType: file.type || 'image/jpeg',
+          blob: file,
+        });
+        return { invoiceId: `queued-${clientUploadId}`, publicUrl: '', scanRouteUrl: '', storagePath: '', mimeType: file.type };
+      };
+      const canQueue = offlineQueue && Boolean(restaurantId) && Boolean(userId) && idbAvailable();
+      if (canQueue && !navigator.onLine) return queue();
       const contentBase64 = await fileToBase64(file);
-      const r = await uploadScan.mutateAsync({
-        contentBase64,
-        mimeType: file.type || 'application/octet-stream',
-        supplierName: po.supplierName,
-        clientUploadId,
-      });
+      let r;
+      try {
+        r = await uploadScan.mutateAsync({
+          contentBase64,
+          mimeType: file.type || 'application/octet-stream',
+          supplierName: po.supplierName,
+          clientUploadId,
+        });
+      } catch (err) {
+        if (canQueue && isNetworkError(err)) return queue();
+        throw err;
+      }
       return {
         invoiceId: r.invoiceId,
         // Short-lived signed URL for the immediate OCR/register step.
@@ -171,7 +242,7 @@ export function ReceivingWizard({
       };
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [po.supplierName],
+    [po.supplierName, offlineQueue, restaurantId, userId],
   );
 
   const stepIndex = STEP_ORDER.indexOf(step);
@@ -193,6 +264,13 @@ export function ReceivingWizard({
       // Without an uploaded public URL we cannot register/OCR — fall back to a
       // PO-only projection so the receiver can still record quantities.
       if (!captured.publicUrl) {
+        // S13: photo queued offline — say so and let the receiver keep going later.
+        if (offlineQueue && captured.invoiceId?.startsWith('queued-')) {
+          setError(tIngest('pwa.savedOffline'));
+          setStep('SCAN_INVOICE');
+          capturingRef.current = false;
+          return;
+        }
         await buildFromPoOnly(grId);
         capturingRef.current = false;
         return;
@@ -213,7 +291,7 @@ export function ReceivingWizard({
         });
         setInvoiceId(reg.invoiceId);
 
-        // Redis/worker unreachable: the invoice is saved but OCR was not queued —
+        // Queue database unreachable: the invoice is saved but OCR was not queued —
         // say so and receive against the order instead of polling.
         if ('ocrQueued' in reg && reg.ocrQueued === false) {
           setError(t('errors.queueUnavailable'));
@@ -221,29 +299,7 @@ export function ReceivingWizard({
           return;
         }
 
-        const token = ++pollTokenRef.current;
-        skipWaitRef.current = false;
-        setElapsedMs(0);
-        const { outcome, invoice } = await pollInvoiceUntilRead({
-          fetch: () => utils.receiving.getInvoice.fetch({ invoiceId: reg.invoiceId }),
-          onTick: setElapsedMs,
-          isCancelled: () => pollTokenRef.current !== token || skipWaitRef.current,
-        });
-        if (pollTokenRef.current !== token) return; // retaken meanwhile
-        if (outcome === 'ready' && invoice) {
-          await showInvoice(activeGrId, reg.invoiceId);
-        } else if (outcome === 'failed') {
-          setOcrNotice(invoice?.ocrFailureReason === 'quota_exceeded' ? 'quota' : 'failed');
-          await buildFromPoOnly(activeGrId);
-        } else {
-          // Timed out (or the receiver chose not to wait): receive against the
-          // order now, keep checking quietly, and offer the result when ready.
-          setOcrNotice('reading');
-          await buildFromPoOnly(activeGrId);
-          watchInBackground(activeGrId, reg.invoiceId, token).catch(() => {
-            // Background check only — the Refresh button stays available.
-          });
-        }
+        await pollAndShow(activeGrId, reg.invoiceId);
       } catch (err) {
         setError(errorText(err, t, locale));
         // Degrade gracefully to a PO-only table so receiving still completes.
@@ -253,13 +309,72 @@ export function ReceivingWizard({
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [grId, po.id, po.supplierId, locale],
+    [grId, po.id, po.supplierId, locale, offlineQueue],
   );
+
+  /** A registered invoice: poll until OCR read it, then the review (or the PO-only fallback). */
+  async function pollAndShow(activeGrId: string, id: string) {
+    const token = ++pollTokenRef.current;
+    skipWaitRef.current = false;
+    setElapsedMs(0);
+    const { outcome, invoice } = await pollInvoiceUntilRead({
+      fetch: () => utils.receiving.getInvoice.fetch({ invoiceId: id }),
+      onTick: setElapsedMs,
+      isCancelled: () => pollTokenRef.current !== token || skipWaitRef.current,
+    });
+    if (pollTokenRef.current !== token) return; // retaken meanwhile
+    if (outcome === 'ready' && invoice) {
+      await showInvoice(activeGrId, id);
+    } else if (outcome === 'failed') {
+      setOcrNotice(invoice?.ocrFailureReason === 'quota_exceeded' ? 'quota' : 'failed');
+      await buildFromPoOnly(activeGrId);
+    } else {
+      // Timed out (or the receiver chose not to wait): receive against the
+      // order now, keep checking quietly, and offer the result when ready.
+      setOcrNotice('reading');
+      await buildFromPoOnly(activeGrId);
+      watchInBackground(activeGrId, id, token).catch(() => {
+        // Background check only — the Refresh button stays available.
+      });
+    }
+  }
+
+  // S13: a photo captured offline was uploaded + registered by the PWA shell
+  // (ReceiverPwa) once back online. Resume from it — without this the wizard
+  // kept the stale "saved on the phone" alert forever and a Retake uploaded a
+  // second copy of the same paper (second invoice row, second OCR charge).
+  useEffect(() => {
+    if (!offlineQueue) return;
+    const onSynced = (e: Event) => {
+      const d = (e as CustomEvent<SyncedPhotoDetail>).detail;
+      if (!d || d.poId !== po.id || !image || image.invoiceId !== `queued-${d.clientUploadId}`) return;
+      if (capturingRef.current) return;
+      capturingRef.current = true;
+      setImage({ ...image, invoiceId: d.invoiceId });
+      setGrId(d.grId);
+      setInvoiceId(d.invoiceId);
+      setError(null);
+      setStep('PROCESSING');
+      pollAndShow(d.grId, d.invoiceId)
+        .catch(async (err) => {
+          setError(errorText(err, t, locale));
+          await buildFromPoOnly(d.grId);
+        })
+        .finally(() => {
+          capturingRef.current = false;
+        });
+    };
+    window.addEventListener(SYNCED_EVENT, onSynced);
+    return () => window.removeEventListener(SYNCED_EVENT, onSynced);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offlineQueue, po.id, image, locale]);
 
   /** OCR finished: (English names if needed) → build the review from it. */
   async function showInvoice(activeGrId: string, id: string) {
     if (locale === 'en') await ensureEnglishFor({ invoiceId: id });
     const invoice = await utils.receiving.getInvoice.fetch({ invoiceId: id });
+    // Receiver languages (S14): local names for the invoice lines (best effort).
+    await refreshLocalNames({ invoiceId: id });
     setOcrNotice(null);
     setError(null);
     await buildReconciliation(activeGrId, invoice);
@@ -310,9 +425,9 @@ export function ReceivingWizard({
         status: po.status,
         totalEstimated: po.totalEstimated,
       },
-      poLines,
-      receiptLines: receipt.lines,
-      invoiceLines: invoice.lines,
+      poLines: localizePoLines(poLines, localNamesRef.current),
+      receiptLines: localizeReceiptLines(receipt.lines, localNamesRef.current),
+      invoiceLines: localizeInvoiceLines(invoice.lines, localNamesRef.current),
       invoiceMeta: { invoiceNumber: invoice.invoiceNumber, ocrConfidence: invoice.ocrConfidence },
       labels: { unnamed: t('unnamedItem'), unordered: t('unorderedItem') },
     });
@@ -342,8 +457,8 @@ export function ReceivingWizard({
           status: po.status,
           totalEstimated: po.totalEstimated,
         },
-        poLines,
-        receiptLines: receipt.lines,
+        poLines: localizePoLines(poLines, localNamesRef.current),
+        receiptLines: localizeReceiptLines(receipt.lines, localNamesRef.current),
         invoiceLines: [],
         invoiceMeta: null,
         labels: { unnamed: t('unnamedItem'), unordered: t('unorderedItem') },
@@ -476,6 +591,7 @@ export function ReceivingWizard({
       {step === 'RECONCILIATION_REVIEW' && result ? (
         <Reconciliation
           result={result}
+          lineExtra={dockPriceLineExtra}
           onQuickConfirm={() => void submit()}
           onContinueAdjust={() => setStep('ADJUST_QUANTITIES')}
           onRetake={() => {
@@ -488,6 +604,32 @@ export function ReceivingWizard({
             setStep('SCAN_INVOICE');
           }}
         />
+      ) : null}
+
+      {/* Dock dispute slip (flag dockSlip): a secondary action on the review. */}
+      {step === 'RECONCILIATION_REVIEW' && result && dockSlipOn && grId && slipNeeded ? (
+        <div className="mt-4" dir={dir}>
+          {showSlip ? (
+            <DockSlip
+              grId={grId}
+              invoiceId={invoiceId}
+              lines={result.lines}
+              marks={marks}
+              duplicateNumber={duplicateNumber}
+              fallbackSupplierName={supplierLabel}
+            />
+          ) : (
+            <button
+              type="button"
+              data-testid="open-dock-slip"
+              onClick={() => setShowSlip(true)}
+              className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-danger/40 bg-surface px-4 py-2 text-sm font-medium text-danger"
+            >
+              <FileWarning className="h-4 w-4" aria-hidden="true" />
+              {t('dockSlip.open')}
+            </button>
+          )}
+        </div>
       ) : null}
 
       {step === 'ADJUST_QUANTITIES' && result ? (
@@ -522,6 +664,20 @@ export function ReceivingWizard({
             window.location.href = '/dashboard/receiving';
           }}
         />
+      ) : null}
+      {/* After the close the engine may add findings the count didn't show (VAT,
+          total, duplicate): the slip decides itself whether there is anything to say. */}
+      {step === 'CONFIRMED' && result && dockSlipOn && grId ? (
+        <div className="mx-auto max-w-md">
+          <DockSlip
+            grId={grId}
+            invoiceId={invoiceId}
+            lines={result.lines}
+            marks={marks}
+            duplicateNumber={duplicateNumber}
+            fallbackSupplierName={supplierLabel}
+          />
+        </div>
       ) : null}
     </div>
   );

@@ -306,10 +306,10 @@ export type SecondFactorStatus = 'ok' | 'invalid' | 'locked' | 'not_enrolled';
 
 /**
  * Verify a second factor for a 2FA-enrolled user: a 6-digit TOTP token (±1
- * step) OR a one-time recovery code. Enforces the durable, Redis-independent
+ * step) OR a one-time recovery code. Enforces the durable, store-independent
  * lockout backstop (C.2) on the SAME failedLoginCount / lockedUntil columns as
  * the password login — so a brute force on the TOTP step also locks the account
- * even if the Redis limiter is failing open. Returns a coarse status; the caller
+ * even if the rate limiter is failing open. Returns a coarse status; the caller
  * surfaces a single uniform message that never reveals the lock state.
  */
 export async function verifySecondFactor(

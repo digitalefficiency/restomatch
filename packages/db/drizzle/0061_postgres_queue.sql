@@ -1,0 +1,115 @@
+-- 0061 — Postgres replaces Redis (owner decision 2026-10-24: "drop redis change
+-- all to supabase"). New tables only; nothing existing is altered.
+--
+--   job_queue          — the work queue (was BullMQ). Producers INSERT (packages/queue),
+--                        the worker claims with FOR UPDATE SKIP LOCKED.
+--                        Cron slots are deduplicated here too: a scheduled run is a
+--                        row with dedupe_key 'cron:<job>:<slot>', and the partial
+--                        unique index below admits exactly one per slot, however many
+--                        workers race for it.
+--   worker_heartbeats  — one row per worker process (was the Redis heartbeat key).
+--   rate_limit_counters— fixed-window login/magic-link/reset counters (was Redis INCR).
+--   ops_kv             — tiny key/value with expiry for ops flags (the worker-down
+--                        alert marker of /api/cron/worker-heartbeat).
+--
+-- Access: all four are used ONLY on the owner/service connection (worker, the web's
+-- auth connection, the queue producer). The tenant app role gets nothing:
+--   * job_queue carries restaurant_id, so it has RLS ENABLED (check-rls) with a
+--     SELECT-own-tenant policy only — writes are denied to restomatch_app;
+--   * the others have no tenant column. The REVOKE below removes the app role's
+--     access, but packages/db/src/rls.ts (provision-rls, and the Supabase RLS
+--     snapshot that runs right after this migration) grants DML on ALL public
+--     tables again. So they ALSO get RLS ENABLED with a deny-all policy: whatever
+--     the grants say, restomatch_app reads and writes no row. The owner role
+--     bypasses RLS (it owns the tables; RLS is not FORCEd). The one-line exclusion
+--     in rls.ts is proposed in the PR (immutable; owner decision).
+--
+-- No precondition. Rollback: DROP TABLE job_queue, worker_heartbeats,
+-- rate_limit_counters, ops_kv;
+--
+-- Hand-written (drizzle-kit generate is broken in this repo).
+CREATE TABLE IF NOT EXISTS "job_queue" (
+  "id" bigserial PRIMARY KEY,
+  "queue" text NOT NULL,
+  "payload" jsonb NOT NULL DEFAULT '{}'::jsonb,
+  "restaurant_id" uuid REFERENCES "restaurants"("id") ON DELETE CASCADE,
+  "status" text NOT NULL DEFAULT 'queued',
+  "attempts" integer NOT NULL DEFAULT 0,
+  "max_attempts" integer NOT NULL DEFAULT 1,
+  -- Times the job was taken back from a dead worker (BullMQ maxStalledCount = 1:
+  -- a stall does not use up an attempt, but a job that kills its worker twice fails).
+  "stalled_count" integer NOT NULL DEFAULT 0,
+  "run_at" timestamptz NOT NULL DEFAULT now(),
+  "locked_at" timestamptz,
+  "locked_by" text,
+  "last_error" text,
+  "result" jsonb,
+  "dedupe_key" text,
+  "finished_at" timestamptz,
+  "created_at" timestamptz NOT NULL DEFAULT now(),
+  "updated_at" timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT "job_queue_status_check" CHECK ("status" IN ('queued', 'active', 'done', 'failed')),
+  CONSTRAINT "job_queue_attempts_check" CHECK ("attempts" >= 0 AND "max_attempts" >= 1)
+);--> statement-breakpoint
+-- The claim query: next runnable job of one queue.
+CREATE INDEX IF NOT EXISTS "job_queue_claim_idx" ON "job_queue" ("queue", "status", "run_at");--> statement-breakpoint
+-- Stall recovery scans active rows by lock age.
+CREATE INDEX IF NOT EXISTS "job_queue_active_locked_idx" ON "job_queue" ("locked_at") WHERE "status" = 'active';--> statement-breakpoint
+-- FK index (db:doctor "foreign keys indexed").
+CREATE INDEX IF NOT EXISTS "job_queue_restaurant_idx" ON "job_queue" ("restaurant_id");--> statement-breakpoint
+-- One job per (queue, dedupe_key). Producers must repeat the predicate in
+-- ON CONFLICT ("queue", "dedupe_key") WHERE "dedupe_key" IS NOT NULL.
+CREATE UNIQUE INDEX IF NOT EXISTS "job_queue_dedupe_key_unique" ON "job_queue" ("queue", "dedupe_key") WHERE "dedupe_key" IS NOT NULL;--> statement-breakpoint
+ALTER TABLE "job_queue" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+-- Tenant read of its own jobs only (no INSERT/UPDATE/DELETE policy → writes are
+-- denied to the app role even if provision-rls re-grants DML). The expression is
+-- app.current_restaurant_id() inlined, so this migration does not depend on the
+-- RLS bootstrap having run first.
+DROP POLICY IF EXISTS "job_queue_tenant_select" ON "job_queue";--> statement-breakpoint
+CREATE POLICY "job_queue_tenant_select" ON "job_queue" FOR SELECT
+  USING ("restaurant_id" = nullif(current_setting('app.current_restaurant_id', true), '')::uuid);--> statement-breakpoint
+DROP TRIGGER IF EXISTS "job_queue_set_updated_at" ON "job_queue";--> statement-breakpoint
+CREATE TRIGGER "job_queue_set_updated_at" BEFORE UPDATE ON "job_queue"
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();--> statement-breakpoint
+
+CREATE TABLE IF NOT EXISTS "worker_heartbeats" (
+  "worker_id" text PRIMARY KEY,
+  "host" text NOT NULL,
+  "pid" integer NOT NULL,
+  "workers" integer NOT NULL,
+  "started_at" timestamptz NOT NULL,
+  "beat_at" timestamptz NOT NULL DEFAULT now()
+);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "worker_heartbeats_beat_at_idx" ON "worker_heartbeats" ("beat_at");--> statement-breakpoint
+
+CREATE TABLE IF NOT EXISTS "rate_limit_counters" (
+  "key" text PRIMARY KEY,
+  "count" integer NOT NULL DEFAULT 0,
+  "expires_at" timestamptz NOT NULL
+);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "rate_limit_counters_expires_idx" ON "rate_limit_counters" ("expires_at");--> statement-breakpoint
+
+CREATE TABLE IF NOT EXISTS "ops_kv" (
+  "key" text PRIMARY KEY,
+  "value" jsonb NOT NULL,
+  "expires_at" timestamptz
+);--> statement-breakpoint
+
+-- Deny-all for the tenant role on the three tables without a tenant column (see the header).
+ALTER TABLE "worker_heartbeats" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+DROP POLICY IF EXISTS "worker_heartbeats_no_tenant_access" ON "worker_heartbeats";--> statement-breakpoint
+CREATE POLICY "worker_heartbeats_no_tenant_access" ON "worker_heartbeats" FOR ALL USING (false) WITH CHECK (false);--> statement-breakpoint
+ALTER TABLE "rate_limit_counters" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+DROP POLICY IF EXISTS "rate_limit_counters_no_tenant_access" ON "rate_limit_counters";--> statement-breakpoint
+CREATE POLICY "rate_limit_counters_no_tenant_access" ON "rate_limit_counters" FOR ALL USING (false) WITH CHECK (false);--> statement-breakpoint
+ALTER TABLE "ops_kv" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+DROP POLICY IF EXISTS "ops_kv_no_tenant_access" ON "ops_kv";--> statement-breakpoint
+CREATE POLICY "ops_kv_no_tenant_access" ON "ops_kv" FOR ALL USING (false) WITH CHECK (false);--> statement-breakpoint
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'restomatch_app') THEN
+    EXECUTE 'REVOKE ALL ON "job_queue", "worker_heartbeats", "rate_limit_counters", "ops_kv" FROM restomatch_app';
+    EXECUTE 'REVOKE ALL ON SEQUENCE "job_queue_id_seq" FROM restomatch_app';
+  END IF;
+END $$;

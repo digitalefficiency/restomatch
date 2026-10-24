@@ -1,4 +1,4 @@
-# RestoMatch async worker — BullMQ consumers + cron (OCR, 3-way matching, the ₪
+# RestoMatch async worker — Postgres job-queue consumers + cron (OCR, 3-way matching, the ₪
 # leak figure, cadence alerts, outbox dispatch). This process is where the core
 # value runs; without it, invoice uploads succeed but nothing is ever processed.
 #
@@ -7,24 +7,34 @@
 #
 #   fly deploy --config apps/worker/fly.toml --dockerfile apps/worker/Dockerfile .
 #
-# First-time setup:  fly launch --no-deploy --copy-config --name restomatch-worker
-# Secrets (see docs/DEPLOY_CUTOVER.md for the full list):
-#   fly secrets set DATABASE_URL=... REDIS_URL=... ANTHROPIC_API_KEY=... \
-#                   RESEND_API_KEY=... EMAIL_FROM=... APP_URL=...
+# Always pass --dockerfile (there is no [build] section on purpose: a relative
+# dockerfile path in fly.toml resolves against this file's directory).
+# Runbook (first deploy, secrets, day 2): docs/WORKER-DEPLOY.md
 
 app = "restomatch-worker"
-primary_region = "syd"  # colocate with Supabase ap-southeast-2 (Sydney)
+# Colocate with the database. Today Supabase is ap-southeast-2 (Sydney) → "syd".
+# After the EU move (docs/HANDOFF.md §4) switch to "fra" (Frankfurt).
+primary_region = "syd"
 
-[build]
-  dockerfile = "apps/worker/Dockerfile"
+# Graceful shutdown: the worker traps SIGTERM, stops taking jobs, lets in-flight
+# jobs finish (graceful drain), drains its Postgres pools, then exits.
+# A job cut off anyway is "stalled" (its lock expires) and re-run — nothing is lost.
+kill_signal = "SIGTERM"
+kill_timeout = "120s"
+
+[deploy]
+  # One machine: rolling = the machine is stopped, updated in place and started;
+  # a failing /health check fails the deploy. Jobs queue in Postgres meanwhile.
+  strategy = "rolling"
 
 [env]
   NODE_ENV = "production"
   PORT = "8080"
 
-# Internal-only health probe. The worker is NOT a public web service — it only
-# serves /health for the platform liveness check (apps/worker/src/health.ts).
-# A failed probe restarts the machine instead of letting it run dark.
+# Internal-only health probe (apps/worker/src/health.ts). Fly uses it for the
+# machine's health status and to gate deploys — it does NOT restart a machine.
+# Restarts come from the process exiting: the worker's own watchdog exits when
+# the database stays unreachable (~2 min), and [[restart]] below brings it back.
 [checks]
   [checks.health]
     type = "http"
@@ -35,6 +45,13 @@ primary_region = "syd"  # colocate with Supabase ap-southeast-2 (Sydney)
     timeout = "2s"
     grace_period = "20s"
 
+# Restart the process whenever it exits (crash, watchdog exit, OOM).
+[[restart]]
+  policy = "always"
+
+# Exactly ONE worker: there is no [http_service], so Fly never auto-stops or
+# auto-starts machines; keep the count at 1 with `fly scale count 1`. (SKIP LOCKED
+# claims make >1 safe if you ever need throughput; cron slots are deduplicated.)
 [[vm]]
   size = "shared-cpu-1x"
   memory = "1024mb"

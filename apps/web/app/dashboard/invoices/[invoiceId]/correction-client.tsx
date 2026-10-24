@@ -39,7 +39,19 @@ const STATUS_TONE: Record<string, BadgeTone> = {
   blocked: 'danger',
 };
 
-export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canEdit: boolean }) {
+export function InvoiceCorrection({
+  invoice,
+  canEdit,
+  lineBadges,
+}: {
+  invoice: Invoice;
+  canEdit: boolean;
+  /** Optional server-rendered per-line badges (e.g. wave-1 "over contract"), keyed by line id. */
+  lineBadges?: Record<string, React.ReactNode>;
+}) {
+  // A consolidated invoice (חשבונית ריכוז) has no PO to re-match against — it is
+  // cross-matched against its delivery notes below; the server refuses it too.
+  const consolidated = invoice.consolidated;
   const router = useRouter();
   const t = useT(invoices);
   const locale = useLocale();
@@ -229,7 +241,7 @@ export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canE
                 </Button>
               </Link>
             )}
-            {canEdit && (
+            {canEdit && !consolidated && (
               <Button
                 variant="primary"
                 size="sm"
@@ -307,13 +319,19 @@ export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canE
             {invoice.lines.map((l) => {
               const editing = editingLine === l.id;
               return (
-                <tr key={l.id} className="border-b border-line/60 last:border-0 hover:bg-surface-2/60">
+                <tr
+                  key={l.id}
+                  // Deep-link target (#line-<id>) from the leak proof sheet: highlighted when targeted.
+                  id={`line-${l.id}`}
+                  className="scroll-mt-28 border-b border-line/60 last:border-0 hover:bg-surface-2/60 target:bg-surface-2 target:ring-2 target:ring-inset target:ring-primary/50"
+                >
                   <td className="px-4 py-3 text-ink">
                     {editing ? (
                       <Input value={ld.rawDescription} onChange={(e) => setLd({ ...ld, rawDescription: e.target.value })} />
                     ) : (
                       <ItemName he={l.rawDescription} en={l.rawDescriptionEn ?? l.productNameEn} />
                     )}
+                    {!editing && lineBadges?.[l.id] ? lineBadges[l.id] : null}
                   </td>
                   <td className="px-4 py-3 font-mono tabular-nums text-muted">
                     {editing ? (
@@ -371,9 +389,7 @@ export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canE
         </table>
       </Card>
 
-      <p className="text-xs text-subtle">
-        {t('correction.rerunHint')}
-      </p>
+      {!consolidated && <p className="text-xs text-subtle">{t('correction.rerunHint')}</p>}
     </div>
   );
 }

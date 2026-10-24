@@ -182,6 +182,20 @@ describe('unit conversions (units.ts + count/portion synonyms)', () => {
     expect(noBridge.complete).toBe(false);
   });
 
+  it('never assumes an unknown price unit is the line unit (200 g against a per-kg price of unknown unit)', () => {
+    // Regression: a product with no default unit had its price costed "per gram"
+    // → 600 000 agorot (₪6 000) for 200 g at ₪30/kg, marked ok/complete.
+    const p = prices({ x: { unitPrice: '30.0000', unit: null } });
+    const r = costOne(dish('a', [line('l', 'x', '200', 'גרם')]), p);
+    expect(r.lines[0]!.status).toBe('unitMismatch');
+    expect(r.batchCostAgorot).toBe(0);
+    expect(r.complete).toBe(false);
+    // A manual bridge ("1000 g per priced unit") is the only way to cost it.
+    const bridged = costOne(dish('b', [line('l', 'x', '200', 'גרם', '0', { unitsPerProductUnit: '1000' })]), p);
+    expect(bridged.lines[0]!.status).toBe('ok');
+    expect(bridged.batchCostAgorot).toBe(600); // 200/1000 × ₪30 = ₪6.00
+  });
+
   it('flags a product with no paid price instead of costing it at zero silently', () => {
     const r = costOne(dish('a', [line('l', 'nope', '1', 'ק״ג')]), prices({}));
     expect(r.lines[0]!.status).toBe('missingPrice');

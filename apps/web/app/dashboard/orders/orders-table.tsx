@@ -7,22 +7,27 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { formatDate, formatNumber } from '@/lib/i18n/format';
 import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 import { formatIls } from '@/lib/money';
+import { deliveryStatusOf, type DisplayOrderStatus, type ReceiptStatus } from './order-logic';
 
 export type OrderStatus = 'draft' | 'sent' | 'confirmed' | 'partial' | 'closed' | 'cancelled';
+export type { DisplayOrderStatus } from './order-logic';
 
 export interface OrderRow {
   id: string;
   supplierName: string;
   supplierNameEn?: string | null;
   status: OrderStatus;
+  /** Latest goods receipt of the PO (orders.list); drives "received" / "partially received". */
+  receiptStatus?: ReceiptStatus;
   createdAt: Date | string;
   expectedDeliveryAt: Date | string | null;
   lineCount: number;
   totalEstimated: string | null;
 }
 
-export const STATUS_TONE: Record<OrderStatus, BadgeTone> = {
+export const STATUS_TONE: Record<DisplayOrderStatus, BadgeTone> = {
   draft: 'neutral',
+  received: 'accent',
   sent: 'info',
   confirmed: 'accent',
   partial: 'warning',
@@ -30,9 +35,14 @@ export const STATUS_TONE: Record<OrderStatus, BadgeTone> = {
   cancelled: 'danger',
 };
 
-export function OrderStatusBadge({ status }: { status: OrderStatus }) {
+export function OrderStatusBadge({ status, receiptStatus }: { status: OrderStatus; receiptStatus?: ReceiptStatus }) {
+  const shown = deliveryStatusOf(status, receiptStatus);
   const t = useT(ordersNs);
-  return <Badge tone={STATUS_TONE[status] ?? 'neutral'}>{t(`status.${status}`)}</Badge>;
+  return (
+    <span data-testid="order-status" data-status={shown}>
+      <Badge tone={STATUS_TONE[shown] ?? 'neutral'}>{t(`status.${shown}`)}</Badge>
+    </span>
+  );
 }
 
 const SHORT_DATE: Intl.DateTimeFormatOptions = { day: '2-digit', month: '2-digit', year: 'numeric' };
@@ -83,7 +93,7 @@ export function OrdersTable({ orders, hideSupplier = false }: { orders: OrderRow
                   </td>
                 )}
                 <td className="px-4 py-3">
-                  <OrderStatusBadge status={o.status} />
+                  <OrderStatusBadge status={o.status} receiptStatus={o.receiptStatus} />
                 </td>
                 <td className="px-4 py-3 tabular-nums text-muted">{date(o.expectedDeliveryAt)}</td>
                 <td className="px-4 py-3 text-end tabular-nums text-muted">{formatNumber(o.lineCount, locale)}</td>
@@ -109,7 +119,7 @@ export function OrdersTable({ orders, hideSupplier = false }: { orders: OrderRow
                   <span className="shrink-0 font-mono text-sm tabular-nums text-ink">{total(o.totalEstimated)}</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
-                  <OrderStatusBadge status={o.status} />
+                  <OrderStatusBadge status={o.status} receiptStatus={o.receiptStatus} />
                   {!hideSupplier && <span className="tabular-nums">{date(o.createdAt)}</span>}
                   <span className="tabular-nums">
                     {t('columns.expectedDelivery')}: {date(o.expectedDeliveryAt)}

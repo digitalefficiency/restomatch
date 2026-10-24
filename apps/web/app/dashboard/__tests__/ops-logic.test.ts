@@ -15,10 +15,12 @@ import {
   lineLabel,
   lineTotalIls,
   linesValid,
+  ltrIsolate,
   orderTotalIls,
   parsePositive,
   parsePrice,
 } from '../orders/order-logic';
+import { deliveryStatusOf } from '../orders/order-logic';
 import { chunk, namesBatch, pendingNames, productPatch } from '../products/product-logic';
 import { presetRange, rangeError, withBom } from '../exports/range';
 import { catalogErrorKey, decodeCsvBytes, sampleCatalogCsv } from '../catalog/import/file-logic';
@@ -263,5 +265,32 @@ describe('supplier order schedule', () => {
     expect(scheduleRowProblem({ orderDays: [0], cutoff: '12:00' })).toBeNull();
     expect(scheduleRowProblem({ orderDays: [0], cutoff: '' })).toBe('pickCutoff');
     expect(scheduleRowProblem({ orderDays: [], cutoff: '12:00' })).toBe('pickDay');
+  });
+});
+
+describe('ltrIsolate (channel <option> labels)', () => {
+  it('wraps the value in LRI … PDI so Hebrew labels keep the address intact', () => {
+    expect(ltrIsolate('orders@sharon-produce.test')).toBe('\u2066orders@sharon-produce.test\u2069');
+    expect(`אימייל (${ltrIsolate('a@b.test')})`).toBe('אימייל (\u2066a@b.test\u2069)');
+  });
+});
+
+describe('deliveryStatusOf (orders list / detail badge)', () => {
+  it('an open PO shows its goods receipt: completed → received, partial → partially received', () => {
+    expect(deliveryStatusOf('sent', 'completed')).toBe('received');
+    expect(deliveryStatusOf('confirmed', 'completed')).toBe('received');
+    expect(deliveryStatusOf('sent', 'partial')).toBe('partial');
+    expect(deliveryStatusOf('partial', 'completed')).toBe('received');
+  });
+  it('no receipt yet (or pending / rejected) keeps the stored status', () => {
+    expect(deliveryStatusOf('sent', null)).toBe('sent');
+    expect(deliveryStatusOf('sent', undefined)).toBe('sent');
+    expect(deliveryStatusOf('sent', 'pending')).toBe('sent');
+    expect(deliveryStatusOf('confirmed', 'rejected')).toBe('confirmed');
+  });
+  it('draft, closed and cancelled are never overridden', () => {
+    expect(deliveryStatusOf('draft', 'completed')).toBe('draft');
+    expect(deliveryStatusOf('closed', 'completed')).toBe('closed');
+    expect(deliveryStatusOf('cancelled', 'partial')).toBe('cancelled');
   });
 });

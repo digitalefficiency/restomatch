@@ -36,6 +36,16 @@ const browser = await chromium.launch(
 const page = await (await browser.newContext()).newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
+// Production React reports a hydration mismatch (#418/#423/#425) through
+// console.error, not as a page error — collect those too; any one fails the run.
+const HYDRATION = /Minified React error #(418|423|425)|Hydration failed|hydrat/i;
+const hydration = [];
+page.on('console', (m) => {
+  if (m.type() === 'error' && HYDRATION.test(m.text())) hydration.push(`${page.url()} ${m.text().slice(0, 200)}`);
+});
+page.on('pageerror', (e) => {
+  if (HYDRATION.test(String(e))) hydration.push(`${page.url()} ${String(e).slice(0, 200)}`);
+});
 
 await page.goto(`${BASE}/login`, { waitUntil: 'networkidle' });
 const form = page.locator('form:has(input[type=password])');
@@ -112,4 +122,5 @@ for (const lang of LANGS) {
 }
 if (errors.length) console.log('page errors:', errors.slice(0, 3));
 await browser.close();
-process.exit(results.every(Boolean) ? 0 : 1);
+if (hydration.length) console.log(`FAIL hydration errors (${hydration.length}):`, hydration.slice(0, 3));
+process.exit(results.every(Boolean) && hydration.length === 0 ? 0 : 1);

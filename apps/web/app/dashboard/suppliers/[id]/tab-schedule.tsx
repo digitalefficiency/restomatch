@@ -3,7 +3,10 @@
 import { useState } from 'react';
 import type { OrderSchedule, OrderWindow } from '@restomatch/types';
 import { CalendarClock, Plus, Trash2 } from 'lucide-react';
-import type { Supplier } from '@restomatch/db';
+import type { inferRouterOutputs } from '@trpc/server';
+import type { AppRouter } from '@restomatch/api';
+
+type SupplierWithFlags = inferRouterOutputs<AppRouter>['suppliers']['get'];
 import { trpc } from '@/lib/trpc/client';
 import {
   Button,
@@ -75,7 +78,7 @@ function formToSchedule(rows: WindowForm[]): OrderSchedule | null {
  * can actually be persisted (it used to fall back to the empty state, leaving
  * the old schedule in the database).
  */
-export function SupplierScheduleTab({ supplierId, initial }: { supplierId: string; initial?: Supplier }) {
+export function SupplierScheduleTab({ supplierId, initial }: { supplierId: string; initial?: SupplierWithFlags }) {
   const t = useT(suppliersNs);
   const tc = useT(components);
   const toast = useToast();

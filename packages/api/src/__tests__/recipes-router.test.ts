@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createDb, eq, priceHistory, products, restaurants, testDbUrl, type RestaurantSettings } from '@restomatch/db';
+import { createDb, eq, invoiceLines, priceHistory, products, restaurants, testDbUrl, type RestaurantSettings } from '@restomatch/db';
+import { writePriceHistoryForInvoice } from '../match/priceHistory';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { startOfMonthInTz } from '../routers/recipes';
@@ -189,6 +190,35 @@ describe('recipes: costing', () => {
     expect(r.complete).toBe(false);
     const d = await caller().recipes.get({ id });
     expect(d.items[0]!.status).toBe('missingPrice');
+    await caller().recipes.delete({ id });
+  });
+
+  it('a product with no default unit is costed per its BILLED unit, never per the line unit', async () => {
+    // Regression: products from the OCR mapping "new product" path have no
+    // default unit, so price_history keeps the billed ₪/kg unchanged. A recipe
+    // line of 150 g used to be costed 150 × ₪10 = ₪1 500 (complete, "ok").
+    const [p] = await db.insert(products).values({ restaurantId: T.restaurantId, canonicalName: 'שום', nameEn: 'Garlic' }).returning();
+    await db.insert(invoiceLines).values({
+      invoiceId: T.invoiceId,
+      productId: p!.id,
+      rawDescription: 'שום קלוף',
+      qtyBilled: '10',
+      unit: 'ק״ג',
+      unitPriceBilled: '10.0000',
+      lineTotal: '100.00',
+    });
+    await writePriceHistoryForInvoice(db, T.restaurantId, T.invoiceId);
+    const [hit] = await caller('chef').recipes.searchProducts({ search: 'garlic' });
+    expect(hit).toMatchObject({ id: p!.id, unitPrice: '10.0000', unit: 'ק״ג' });
+
+    const { id } = await caller().recipes.save({ name: 'רוטב שום', items: [{ productId: p!.id, quantity: '150', unit: 'גרם', wastePct: 0 }] });
+    const d = await caller().recipes.get({ id });
+    expect(d.items[0]).toMatchObject({ status: 'ok', sourceUnit: 'ק״ג' });
+    expect(d.recipe.portionCostAgorot).toBe(150); // 0.15 kg × ₪10 = ₪1.50
+    // A unit that does not convert to the billed kg needs the manual bridge.
+    await expect(
+      caller().recipes.save({ name: 'רוטב שום 2', items: [{ productId: p!.id, quantity: '2', unit: 'יח׳', wastePct: 0 }] }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'recipes.unitMismatch' });
     await caller().recipes.delete({ id });
   });
 

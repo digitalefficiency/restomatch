@@ -33,6 +33,22 @@ describe('isPublicPath (middleware allowlist)', () => {
     (p) => expect(isPublicPath(p)).toBe(false),
   );
 
+  it('S13: exactly the two ingest webhooks are public — not a lookalike prefix, not the dashboard inbox', () => {
+    expect(isPublicPath('/api/ingest/email')).toBe(true);
+    expect(isPublicPath('/api/ingest/whatsapp/wa_0123456789abcdef0123456789abcdef')).toBe(true);
+    expect(isPublicPath('/api/ingestion')).toBe(false);
+    expect(isPublicPath('/api/ingest-admin')).toBe(false);
+    expect(isPublicPath('/dashboard/inbox')).toBe(false);
+  });
+
+  it('the free leak check (page + its API) is public; look-alike paths are not', () => {
+    for (const p of ['/leak-check', '/leak-check/result', '/leak-check/claim', '/api/leak-check/submit']) {
+      expect(isPublicPath(p)).toBe(true);
+    }
+    expect(isPublicPath('/leak-checker')).toBe(false);
+    expect(isPublicPath('/api/leak-checks')).toBe(false);
+  });
+
   it('prefix matching respects path boundaries', () => {
     expect(isPublicPath('/resetting-things')).toBe(false);
     expect(isPublicPath('/loginx')).toBe(false);
