@@ -105,7 +105,7 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'chain.branches':
     'isolation — chain.attack.test.ts: lists only caller-OWNED branches on the active billing account (not B on the same account, not manager-only M, not X on another account)',
   'consolidated.proposal':
-    'isolation — consolidated.attack.test.ts: RLS app role; A sees only its own uncovered notes of that supplier (not B, not another supplier, not a note covered by another invoice); foreign/unknown invoiceId rejected; chef FORBIDDEN; read-only',
+    'isolation — consolidated.attack.test.ts: RLS app role; A sees only its own uncovered notes of that supplier (not B, not another supplier, not a note covered by another invoice); foreign/unknown invoiceId rejected; finance roles only (receiver + chef FORBIDDEN); only a consolidated invoice gets one; read-only',
   'consolidated.coverage':
     "isolation — consolidated.attack.test.ts: RLS app role; B's receipts never listed, B's supplierId from A's session → []; chef FORBIDDEN; flag off → []",
   'chain.overview':

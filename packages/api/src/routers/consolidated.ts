@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { eq, restaurants } from '@restomatch/db';
-import { invoiceReaderProcedure, router } from '../trpc';
+import { financeProcedure, invoiceReaderProcedure, router } from '../trpc';
 import { assertInvoiceOwned } from '../tenant';
 import { featureEnabled } from '../lib/features';
 import {
@@ -13,8 +13,8 @@ import {
 /**
  * Consolidated invoice ↔ delivery notes cross-match (flag `consolidatedMatch`).
  * READ-ONLY: proposals only — nothing is written, the invoice stays pending and
- * no hero / report / letter / chain figure changes. Invoice readers (owner,
- * manager, receiver, bookkeeper — not the chef, like the invoice page).
+ * no hero / report / letter / chain figure changes. The proposal (₪ deltas) is for
+ * finance roles; coverage for invoice readers (not the chef, like the invoice page).
  */
 async function enabled(db: Parameters<typeof consolidatedProposal>[0], restaurantId: string): Promise<boolean> {
   const [r] = await db
@@ -26,8 +26,12 @@ async function enabled(db: Parameters<typeof consolidatedProposal>[0], restauran
 }
 
 export const consolidatedRouter = router({
-  /** The cross-match proposal for one (consolidated) invoice; null when the flag is off or nothing to match. */
-  proposal: invoiceReaderProcedure
+  /**
+   * The cross-match proposal for one consolidated invoice; null when the flag is off
+   * or it is not a ריכוז. Finance roles only (owner, manager, bookkeeper): it shows
+   * ₪ differences, which a receiver does not see.
+   */
+  proposal: financeProcedure
     .input(z.object({ invoiceId: z.string().uuid() }))
     .query(async ({ ctx, input }): Promise<ConsolidatedProposal | null> => {
       const { restaurantId } = ctx.session;

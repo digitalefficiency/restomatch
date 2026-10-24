@@ -3,6 +3,7 @@ import { DEFAULT_TOLERANCES, type InvoiceLineInput, type MatchInput } from '@res
 import {
   buildConsolidatedProposal,
   consolidatedPeriod,
+  countsAsLeak,
   deliveryNoteNumberIn,
   periodOfInvoice,
   readConsolidatedRaw,
@@ -219,6 +220,99 @@ describe('buildConsolidatedProposal — an itemized ריכוז (one line per del
     // pooled milk line are ordered after every paired one, so they still pair: billed as delivered.
     expect(p.status).toBe('matched');
     expect(p.findings.filter((f) => f.countsAsLeak)).toEqual([]);
+  });
+});
+
+describe('buildConsolidatedProposal — #95 review (P0)', () => {
+  const MILK = 'p-milk';
+  const EGGS = 'p-eggs';
+  const QTY = [24, 30, 18, 24, 30, 24, 24, 30];
+  const itemized = (opts: { overcharge?: boolean; dropNote?: number; under?: boolean } = {}) => {
+    const notes = QTY.map((q, i) => note(`gr-${i}`, 3 + i * 3, [noteLine(MILK, q, 6.4), noteLine(EGGS, 2, 34)], String(61036 + i)));
+    const lines: InvoiceLineInput[] = [];
+    const lineNotes = new Map<string, string>();
+    QTY.forEach((q, i) => {
+      if (opts.dropNote === i) return;
+      const price = opts.overcharge && i === 0 ? 7.9 : opts.under && i === 1 ? 6.0 : 6.4;
+      for (const l of [invLine(MILK, q, price), invLine(EGGS, 2, 34)]) {
+        lines.push(l);
+        lineNotes.set(l.id, String(61036 + i));
+      }
+    });
+    return buildConsolidatedProposal({
+      invoiceId: 'inv-gd',
+      supplierId: 'sup-gd',
+      periodStart: new Date('2026-08-31T21:00:00Z'),
+      periodEnd: new Date('2026-09-30T21:00:00Z'),
+      base: base(lines),
+      notes,
+      invoiceLineNotes: lineNotes,
+    });
+  };
+
+  it('a delivered note the invoice does not bill is under-billing, not leak — the ₪36 stays ₪36', () => {
+    const p = itemized({ overcharge: true, dropNote: 7 });
+    expect(p.totals.leakIls).toBe(36);
+    expect(p.findings.filter((f) => f.countsAsLeak).map((f) => [f.type, f.deltaAmount, f.deliveryNoteNumber])).toEqual([
+      ['PRICE_HIGHER', 36, '61036'],
+    ]);
+    expect(p.findings.some((f) => f.type === 'MISSING_ON_INVOICE' && !f.countsAsLeak)).toBe(true);
+    expect(p.deliveryNotes.find((n) => n.number === '61043')).toMatchObject({ status: 'not_billed', deltaIls: 0 });
+    expect(p.totals.differenceIls).toBeLessThan(0); // billed less than delivered overall
+  });
+
+  it('a note billed BELOW its PO price is never leak (negative Δ)', () => {
+    const p = itemized({ under: true });
+    expect(p.findings.filter((f) => f.countsAsLeak)).toEqual([]);
+    expect(p.totals.leakIls).toBe(0);
+    // Whatever the type: a Δ that is not positive never counts.
+    expect(countsAsLeak({ type: 'TOTAL_MISMATCH', severity: 'block', deltaAmount: -5 })).toBe(false);
+    expect(countsAsLeak({ type: 'MISSING_ON_INVOICE', severity: 'block', deltaAmount: 64 })).toBe(false);
+  });
+
+  it('PO prices keep 4 decimals through the fold (₪2.385 × 100 = ₪238.50, not ₪238.00)', () => {
+    const p = buildConsolidatedProposal({
+      invoiceId: 'inv-4',
+      supplierId: 'sup',
+      periodStart: new Date('2026-09-27T21:00:00Z'),
+      periodEnd: new Date('2026-11-02T22:00:00Z'),
+      base: base([{ id: 'il-4', productId: CHALLAH, qtyBilled: 100, unit: 'יח׳', unitPriceBilled: 2.385, lineTotal: 238.5 }]),
+      notes: [note('gr-4', 5, [noteLine(CHALLAH, 100, 2.385)])],
+    });
+    expect(p.deliveryNotes[0]!.receivedValueIls).toBe(238.5);
+    expect(p.products[0]!.poPrice).toBe(2.385);
+    expect(p.totals).toMatchObject({ differenceIls: 0, leakIls: 0 });
+    expect(p.status).toBe('matched');
+  });
+
+  it('pooled notes compare AMOUNTS: 1.6% over a monthly average is still ₪3.00 billed above the notes', () => {
+    // Three un-numbered drops of 10 at ₪6.40, billed as one line of 30 at ₪6.50 —
+    // under the engine's 2% per-unit tolerance, but ₪3.00 more than delivered.
+    const notes = [1, 2, 3].map((i) => note(`gr-p${i}`, i * 5, [noteLine(CHALLAH, 10, 6.4)]));
+    const p = propose([invLine(CHALLAH, 30, 6.5)], notes);
+    expect(p.findings.filter((f) => f.countsAsLeak).map((f) => [f.type, f.deltaAmount])).toEqual([['PRICE_HIGHER', 3]]);
+    expect(p.totals).toMatchObject({ differenceIls: 3, leakIls: 3 });
+    expect(p.status).toBe('differences');
+  });
+
+  it('never "matched" while the invoice bills more than the notes are worth', () => {
+    const notes = [note('gr-x', 5, [noteLine(CHALLAH, 10, 6.4)])];
+    // ₪0.01 over on the subtotal (no line-level finding can explain it).
+    const b = base([invLine(CHALLAH, 10, 6.4)]);
+    b.invoice.totalExclVat = 64.01;
+    const p = buildConsolidatedProposal({ invoiceId: 'i', supplierId: 's', periodStart: new Date(), periodEnd: new Date(), base: b, notes });
+    expect(p.totals.differenceIls).toBe(0.01);
+    expect(p.status).toBe('differences');
+  });
+
+  it('units convert through the fold and the per-note allocation (note in kg, invoice in g)', () => {
+    const p = propose(
+      [{ id: 'il-g', productId: CHALLAH, qtyBilled: 2000, unit: 'g', unitPriceBilled: 0.01, lineTotal: 20 }],
+      [note('gr-kg', 5, [noteLine(CHALLAH, 2, 10, { unit: 'kg' })])],
+    );
+    expect(p.deliveryNotes[0]).toMatchObject({ status: 'covered', receivedValueIls: 20 });
+    expect(p.products[0]).toMatchObject({ qtyReceived: 2, qtyBilled: 2, status: 'ok' });
+    expect(p.status).toBe('matched');
   });
 });
 

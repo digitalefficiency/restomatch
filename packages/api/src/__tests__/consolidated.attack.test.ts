@@ -144,6 +144,8 @@ beforeAll(async () => {
       totalInclVat: '150.45',
       status: 'parsed',
       source: 'email',
+      // A ריכוז that lists no notes: its notes are the supplier's uncovered ones in its month.
+      ocrPayload: { provider: 'reconciled', raw: { kind: 'consolidated' } } as (typeof invoices.$inferInsert)['ocrPayload'],
     })
     .returning();
   consolidatedId = inv!.id;
@@ -185,6 +187,47 @@ describe('consolidated.proposal — isolation (RLS app role)', () => {
       ['PRICE_HIGHER', 2, '9001'],
     ]);
     expect(p!.totals).toMatchObject({ leakIls: 2, deliveryNotesIls: 85, invoiceSubtotalIls: 87 });
+  });
+
+  it('an ordinary invoice waiting for its PO link (no consolidated payload) gets no proposal', async () => {
+    // #95 review P0: it used to be cross-matched against the whole month's notes —
+    // "differences" with invented MISSING_ON_INVOICE.
+    const [plain] = await ownerDb
+      .insert(invoices)
+      .values({
+        restaurantId: A.restaurantId,
+        supplierId: A.supplierId,
+        invoiceNumber: 'A-77001',
+        invoiceDate: new Date(),
+        totalExclVat: '68.34',
+        vatAmount: '12.30',
+        totalInclVat: '80.64',
+        status: 'parsed',
+        source: 'email',
+      })
+      .returning();
+    await ownerDb.insert(invoiceLines).values({
+      invoiceId: plain!.id,
+      productId: A.productId,
+      rawDescription: 'ביצים',
+      qtyBilled: '2',
+      unit: 'kg',
+      unitPriceBilled: '34.17',
+      lineTotal: '68.34',
+    });
+    expect(await caller(A).consolidated.proposal({ invoiceId: plain!.id })).toBeNull();
+  });
+
+  it('a ריכוז cannot be re-matched to a PO (it would turn into a red UNORDERED_ARRIVAL blocker)', async () => {
+    await expect(caller(A, 'manager').match.runForInvoice({ invoiceId: itemizedId })).rejects.toThrow(/PRECONDITION_FAILED|consolidated/i);
+    const runs = await ownerDb.execute(`select count(*)::int as c from match_runs where invoice_id = '${itemizedId}'`);
+    const rows = (Array.isArray(runs) ? runs : (runs as { rows: { c: number }[] }).rows) as { c: number }[];
+    expect(rows[0]!.c).toBe(0);
+  });
+
+  it('the proposal (₪ deltas) is for finance roles: a receiver is refused, a bookkeeper reads it', async () => {
+    await expect(caller(A, 'receiver').consolidated.proposal({ invoiceId: consolidatedId })).rejects.toThrow(/FORBIDDEN|role/i);
+    expect(await caller(A, 'bookkeeper').consolidated.proposal({ invoiceId: consolidatedId })).not.toBeNull();
   });
 
   it('an ordinary matched invoice (its own PO) gets no proposal', async () => {

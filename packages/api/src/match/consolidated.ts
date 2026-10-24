@@ -16,6 +16,7 @@ import {
 } from '@restomatch/db';
 import {
   runMatch,
+  unitConversionFactor,
   type Discrepancy,
   type GrLineInput,
   type InvoiceLineInput,
@@ -147,14 +148,22 @@ export interface ConsolidatedProposal {
 
 const ag = (v: number) => Math.round(v * 100);
 const ils = (a: number) => a / 100;
+/** A unit price at scale 4 (NUMERIC(12,4)) → integer price units (1/100 agora). */
+const p4Of = (price: number) => Math.round(price * 10_000);
 
-/** The hero's LEAK_FILTER (packages/charts) for an in-memory finding. */
+/**
+ * The hero's LEAK_FILTER (packages/charts) for an in-memory finding — narrowed for
+ * a ריכוז: a delivered note or line the invoice does not bill (MISSING_ON_INVOICE)
+ * is under-billing, not a leak (it may be on next month's invoice), and a finding
+ * whose Δ is not positive never counts.
+ */
 export function countsAsLeak(d: Pick<Discrepancy, 'type' | 'severity' | 'deltaAmount'>): boolean {
   return (
     (d.severity === 'warn' || d.severity === 'block') &&
     d.type !== 'PRICE_LOWER' &&
     d.type !== 'UNORDERED_ARRIVAL' &&
-    Math.abs(d.deltaAmount) > 0
+    d.type !== 'MISSING_ON_INVOICE' &&
+    d.deltaAmount > 0
   );
 }
 
@@ -263,14 +272,29 @@ export function buildConsolidatedProposal(args: {
     grLineId: string;
     qtyReceived: number;
     pricedQty: number;
-    pricedAg: number; // Σ qty × price, in agorot·qty
+    pricedP4: number; // Σ qty × price, in price units (1/100 agora) · qty — no agora rounding of the price
   };
   const groups = new Map<string, Group>();
+  /** A note line's group key and its qty / price in the group's unit (kg↔g, l↔ml; else its own group). */
+  const placeLine = (bucket: string, l: DeliveryNoteLineData) => {
+    const key = productKey(l);
+    const base = groups.get(`${bucket}|${key}`);
+    const factor = !base || base.unit === l.unit ? 1 : unitConversionFactor(l.unit, base.unit);
+    if (factor == null) {
+      const k = `${key}|u:${l.unit}`;
+      return { gk: `${bucket}|${k}`, key: k, qty: l.qtyReceived, p4: l.poPrice == null ? null : p4Of(l.poPrice) };
+    }
+    return {
+      gk: `${bucket}|${key}`,
+      key,
+      qty: l.qtyReceived * factor,
+      p4: l.poPrice == null ? null : p4Of(l.poPrice) / factor,
+    };
+  };
   for (const n of notes) {
     const bucket = bucketOfNote(n);
     for (const l of n.lines) {
-      const key = productKey(l);
-      const gk = `${bucket}|${key}`;
+      const { gk, key, qty, p4 } = placeLine(bucket, l);
       const g =
         groups.get(gk) ??
         ({
@@ -285,17 +309,18 @@ export function buildConsolidatedProposal(args: {
           grLineId: l.grLineId,
           qtyReceived: 0,
           pricedQty: 0,
-          pricedAg: 0,
+          pricedP4: 0,
         } satisfies Group);
-      g.qtyReceived += l.qtyReceived;
-      if (l.poPrice != null) {
-        g.pricedQty += l.qtyReceived;
-        g.pricedAg += ag(l.poPrice) * l.qtyReceived;
+      g.qtyReceived += qty;
+      if (p4 != null) {
+        g.pricedQty += qty;
+        g.pricedP4 += p4 * qty;
       }
       groups.set(gk, g);
     }
   }
-  const priceOf = (pricedAg: number, pricedQty: number) => (pricedQty > 0 ? Math.round(pricedAg / pricedQty) / 100 : null);
+  /** The received-qty-weighted PO price, at scale 4 (₪ with 4 decimals). */
+  const priceOf = (pricedP4: number, pricedQty: number) => (pricedQty > 0 ? Math.round(pricedP4 / pricedQty) / 10_000 : null);
 
   // ── The invoice side, per bucket × product (normally one line each already). ──
   const lineGroups = new Map<string, InvoiceLineInput>();
@@ -337,7 +362,7 @@ export function buildConsolidatedProposal(args: {
     // The delivery notes are the reference for a ריכוז: what was delivered is what may be billed.
     qtyOrdered: g.qtyReceived,
     unit: g.unit,
-    unitPriceExpected: priceOf(g.pricedAg, g.pricedQty),
+    unitPriceExpected: priceOf(g.pricedP4, g.pricedQty),
   }));
   const grLineInputs: GrLineInput[] = orderedGroups.map((g) => ({
     id: g.grLineId,
@@ -360,7 +385,43 @@ export function buildConsolidatedProposal(args: {
   const noteOfInvoiceLine = new Map(
     [...lineGroups.entries()].filter(([gk]) => !gk.startsWith(`${POOL}|`)).map(([gk, l]) => [l.id, gk.slice(0, gk.indexOf('|'))]),
   );
-  const findings: ProposalFinding[] = result.discrepancies.map((d) => ({
+  // A pooled product is billed as one month's total against many notes: compare
+  // AMOUNTS (billed Σ line totals vs Σ received × PO price, in agorot) instead of the
+  // engine's per-unit price check, whose 2% / ₪5 tolerance on a monthly AVERAGE
+  // price would hide (or invent) a difference. Units billed beyond what was
+  // received stay the engine's QTY_OVER (at the billed price) — not counted twice.
+  const pooled = paired.filter(([, g]) => g.bucket === POOL);
+  const pooledPoLines = new Set(pooled.map(([, g]) => g.poLineId));
+  const pooledFindings: Discrepancy[] = [];
+  for (const [gk, g] of pooled) {
+    const il = lineGroups.get(gk)!;
+    const factor = il.unit === g.unit ? 1 : unitConversionFactor(il.unit, g.unit);
+    const avgP4 = g.pricedQty > 0 ? g.pricedP4 / g.pricedQty : null;
+    if (factor == null || avgP4 == null) continue;
+    const billedQty = il.qtyBilled * factor;
+    const q = Math.min(billedQty, g.qtyReceived);
+    if (q <= 0 || billedQty <= 0) continue;
+    const billedOnQAg = Math.round((ag(il.lineTotal) * q) / billedQty);
+    const expectedAg = Math.round((q * avgP4) / 100);
+    const deltaAg = billedOnQAg - expectedAg;
+    if (deltaAg === 0) continue;
+    pooledFindings.push({
+      type: deltaAg > 0 ? 'PRICE_HIGHER' : 'PRICE_LOWER',
+      severity: deltaAg > 0 ? 'warn' : 'info',
+      productId: g.productId,
+      poLineId: g.poLineId,
+      grLineId: g.grLineId,
+      invoiceLineId: il.id,
+      expected: Math.round(avgP4) / 10_000,
+      actual: Math.round((billedOnQAg / q) * 100) / 10_000,
+      deltaAmount: ils(Math.abs(deltaAg)),
+      toleranceUsed: 'pooled ריכוז: billed amount vs Σ received × PO price (agorot)',
+    } as Discrepancy);
+  }
+  const engineFindings = result.discrepancies.filter(
+    (d) => !((d.type === 'PRICE_HIGHER' || d.type === 'PRICE_LOWER') && d.poLineId && pooledPoLines.has(d.poLineId)),
+  );
+  const findings: ProposalFinding[] = [...engineFindings, ...pooledFindings].map((d) => ({
     type: d.type,
     severity: d.severity,
     productId: d.productId,
@@ -375,20 +436,25 @@ export function buildConsolidatedProposal(args: {
   }));
 
   // ── Per product (over all buckets): received vs billed, PO vs billed price, Δ₪. ──
-  type Agg = { productId: string | null; name: string | null; nameEn: string | null; unit: string; qty: number; pricedQty: number; pricedAg: number };
+  type Agg = { productId: string | null; name: string | null; nameEn: string | null; unit: string; qty: number; pricedQty: number; pricedP4: number };
   const received = new Map<string, Agg>();
   for (const g of groups.values()) {
-    const a = received.get(g.key) ?? { productId: g.productId, name: g.name, nameEn: g.nameEn, unit: g.unit, qty: 0, pricedQty: 0, pricedAg: 0 };
-    a.qty += g.qtyReceived;
-    a.pricedQty += g.pricedQty;
-    a.pricedAg += g.pricedAg;
-    received.set(g.key, a);
+    const a = received.get(g.key);
+    // Buckets of one product share its first unit (kg↔g, l↔ml convert; others are their own key).
+    const f = a && a.unit !== g.unit ? (unitConversionFactor(g.unit, a.unit) ?? 1) : 1;
+    const agg = a ?? { productId: g.productId, name: g.name, nameEn: g.nameEn, unit: g.unit, qty: 0, pricedQty: 0, pricedP4: 0 };
+    agg.qty += g.qtyReceived * f;
+    agg.pricedQty += g.pricedQty * f;
+    agg.pricedP4 += g.pricedP4;
+    received.set(g.key, agg);
   }
   const billed = new Map<string, { qty: number; totalAg: number; productId: string | null; unit: string }>();
   for (const [gk, il] of lineGroups) {
     const key = gk.slice(gk.indexOf('|') + 1);
-    const b = billed.get(key) ?? { qty: 0, totalAg: 0, productId: il.productId, unit: il.unit };
-    b.qty += il.qtyBilled;
+    const unit = received.get(key)?.unit ?? il.unit;
+    const f = il.unit === unit ? 1 : (unitConversionFactor(il.unit, unit) ?? 1);
+    const b = billed.get(key) ?? { qty: 0, totalAg: 0, productId: il.productId, unit };
+    b.qty += il.qtyBilled * f;
     b.totalAg += ag(il.lineTotal);
     billed.set(key, b);
   }
@@ -422,7 +488,7 @@ export function buildConsolidatedProposal(args: {
       unit: g?.unit ?? b?.unit ?? '',
       qtyReceived: g?.qty ?? 0,
       qtyBilled: b?.qty ?? 0,
-      poPrice: g ? priceOf(g.pricedAg, g.pricedQty) : null,
+      poPrice: g ? priceOf(g.pricedP4, g.pricedQty) : null,
       billedPrice: b && b.qty > 0 ? Math.round(b.totalAg / b.qty) / 100 : null,
       deltaIls: ils(deltaAg),
       status,
@@ -433,6 +499,7 @@ export function buildConsolidatedProposal(args: {
 
   // ── Per delivery note: an itemized note is covered by its own lines; the pool's
   //    billed qty is allocated over the pooled notes, oldest first. ──
+  // Billed qty left per bucket × product, in the invoice line's own unit.
   const left = new Map([...lineGroups].map(([gk, l]) => [gk, l.qtyBilled]));
   const deliveryNotes: ProposalDeliveryNote[] = notes.map((n) => {
     const bucket = bucketOfNote(n);
@@ -441,12 +508,15 @@ export function buildConsolidatedProposal(args: {
     let valueAg = 0;
     for (const l of n.lines) {
       const gk = `${bucket}|${productKey(l)}`;
-      const avail = left.get(gk) ?? 0;
+      const il = lineGroups.get(gk);
+      // Billed units → this note line's unit (kg↔g, l↔ml); unconvertible units never cover it.
+      const f = !il ? 0 : il.unit === l.unit ? 1 : (unitConversionFactor(il.unit, l.unit) ?? 0);
+      const avail = (left.get(gk) ?? 0) * f;
       const take = Math.min(avail, l.qtyReceived);
-      left.set(gk, avail - take);
+      if (f > 0) left.set(gk, (left.get(gk) ?? 0) - take / f);
       need += l.qtyReceived;
       got += take;
-      if (l.poPrice != null) valueAg += Math.round(ag(l.poPrice) * l.qtyReceived);
+      if (l.poPrice != null) valueAg += Math.round((p4Of(l.poPrice) * l.qtyReceived) / 100);
     }
     const status: DeliveryNoteStatus = need <= 0 || got >= need - 1e-9 ? 'covered' : got > 0 ? 'partly' : 'not_billed';
     return {
@@ -481,7 +551,8 @@ export function buildConsolidatedProposal(args: {
       leakIls: ils(leakAg),
       invoiceTotalInclVat: args.base.invoice.totalInclVat,
     },
-    status: notes.length === 0 ? 'no_delivery_notes' : leakAg > 0 ? 'differences' : 'matched',
+    // Never "matched" while the invoice bills more than the notes are worth at PO prices.
+    status: notes.length === 0 ? 'no_delivery_notes' : leakAg > 0 || subtotalAg > deliveryNotesAg ? 'differences' : 'matched',
   };
 }
 
@@ -727,9 +798,10 @@ async function timezoneOf(db: Database, restaurantId: string) {
 
 /**
  * The cross-match proposal for a consolidated invoice. Null when the invoice
- * doesn't exist (in this restaurant), has no supplier or no lines, or is neither a
- * consolidated invoice (payload kind 'consolidated') nor waiting for a PO link (an
- * ordinary matched invoice has its own PO).
+ * doesn't exist (in this restaurant), has no supplier or no lines, or is not a
+ * consolidated invoice (payload kind 'consolidated'). An ordinary invoice waiting
+ * for its PO link gets none: against a whole month's notes it would only invent
+ * findings.
  *
  * The delivery notes: the ones the invoice lists by number, when it lists them;
  * else the supplier's notes in its period that no other invoice covers (by a match
@@ -747,14 +819,13 @@ export async function consolidatedProposal(
       invoiceDate: invoices.invoiceDate,
       createdAt: invoices.createdAt,
       ocrPayload: invoices.ocrPayload,
-      waiting: sql<boolean>`${waitingForPoLink(restaurantId)}`,
     })
     .from(invoices)
     .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
     .limit(1);
   if (!inv?.supplierId) return null;
   const raw = readConsolidatedRaw(inv.ocrPayload);
-  if (!raw && !inv.waiting) return null;
+  if (!raw) return null;
   const built = await buildMatchInputForInvoice(db, restaurantId, invoiceId, { skipPoDiscovery: true });
   if (!built) return null;
 
@@ -894,7 +965,7 @@ export async function deliveryNoteCoverage(
   }
 
   return notes.map((n) => {
-    const valueAg = n.lines.reduce((s, l) => s + (l.poPrice == null ? 0 : Math.round(ag(l.poPrice) * l.qtyReceived)), 0);
+    const valueAg = n.lines.reduce((s, l) => s + (l.poPrice == null ? 0 : Math.round((p4Of(l.poPrice) * l.qtyReceived) / 100)), 0);
     const base = {
       grId: n.grId,
       poId: n.poId,

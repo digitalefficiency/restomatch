@@ -32,16 +32,18 @@ export default async function InvoiceCorrectionPage({
     notFound();
   }
 
-  const [memberships, session, proposal, tc] = await Promise.all([
+  const [memberships, session, tc] = await Promise.all([
     caller.onboarding.myMemberships(),
     auth(),
-    // Consolidated invoice ↔ delivery notes (flag consolidatedMatch; read-only; null otherwise).
-    caller.consolidated.proposal({ invoiceId }).catch(() => null),
     getT(consolidatedNs),
   ]);
   const active =
     memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0];
   const canEdit = active?.role === 'owner' || active?.role === 'manager';
+  // Consolidated invoice ↔ delivery notes (flag consolidatedMatch; read-only; null
+  // otherwise). It shows ₪ differences — finance roles only, never a receiver.
+  const finance = active?.role === 'owner' || active?.role === 'manager' || active?.role === 'bookkeeper';
+  const proposal = finance ? await caller.consolidated.proposal({ invoiceId }).catch(() => null) : null;
 
   return (
     <div>

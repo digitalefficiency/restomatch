@@ -66,8 +66,15 @@ export function ConsolidatedPanel({ proposal, t, locale }: { proposal: Consolida
         <Card padding="md" className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" data-testid="xmatch-differences">
           <div>
             <Badge tone="danger-solid">{t('status.differences')}</Badge>
-            <p className="mt-2 font-mono text-2xl font-extrabold tabular-nums text-danger">{ils(totals.leakIls)}</p>
-            <p className="text-sm text-muted">{t('status.differencesBody', { amount: ils(Math.max(totals.differenceIls, 0)) })}</p>
+            <p className="mt-2 font-mono text-2xl font-extrabold tabular-nums text-danger">
+              {ils(totals.leakIls > 0 ? totals.leakIls : Math.max(totals.differenceIls, 0))}
+            </p>
+            {/* The copy follows the sign: "billed more than delivered" only when it is. */}
+            <p className="text-sm text-muted">
+              {totals.differenceIls > 0
+                ? t('status.differencesBody', { amount: ils(totals.differenceIls) })
+                : t('status.differencesBodyLines')}
+            </p>
           </div>
           <div className="print:hidden">
             <PrintButton label={t('print')} primary />
