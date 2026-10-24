@@ -32,7 +32,7 @@ import { isAllowedScanUrl } from '../lib/scanUrls';
 import { isInvoiceNumberTaken, readDuplicateOf, withoutDuplicateOf } from '../lib/invoiceDedupe';
 import { appError } from '../errors';
 import { endOfDayInTz, startOfDayInTz } from '../lib/time';
-import { managerProcedure, memberProcedure, receiverProcedure, router } from '../trpc';
+import { invoiceReaderProcedure, managerProcedure, memberProcedure, receiverProcedure, router } from '../trpc';
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
 /** R5: undated open POs this recent still show in the receiving inbox. */
@@ -279,7 +279,7 @@ export const receivingRouter = router({
    * invoice number, and parsed invoice lines. Tenant scoped on
    * invoices.restaurantId.
    */
-  getInvoice: memberProcedure
+  getInvoice: invoiceReaderProcedure
     .input(z.object({ invoiceId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       const [invoice] = await ctx.db
@@ -781,7 +781,7 @@ export const receivingRouter = router({
    * restaurant — foreign ids are NOT_FOUND). Display-only: the ₪ math never
    * reads these columns.
    */
-  ensureEnglish: memberProcedure
+  ensureEnglish: invoiceReaderProcedure
     .input(
       z
         .object({

@@ -12,18 +12,19 @@ export interface LeakCell {
 }
 
 /**
- * Interpolate dark surface → neon danger by leak intensity (~5%..50%+ over
- * baseline). Returns a background, a text color tuned for contrast, the raw
- * intensity, and a glow strength for hot cells.
+ * Interpolate a pale danger tint → deep danger by leak intensity (~5%..50%+ over
+ * baseline). Returns a background, a text color that stays WCAG AA (≥4.5:1) on
+ * it, and the raw intensity. The ramp skips the band where neither ink nor
+ * white text would reach 4.5:1: ink up to t=0.55, white from t=0.68.
  */
 function leakColor(deltaPct: number): { bg: string; text: string; intensity: number } {
   const intensity = Math.max(0.12, Math.min(1, (deltaPct - 0.05) / 0.45));
-  // surface-2 #1C2A23 (28,42,35) → danger #FF5C7A (255,92,122)
-  const r = Math.round(28 + (255 - 28) * intensity);
-  const g = Math.round(42 + (92 - 42) * intensity);
-  const b = Math.round(35 + (122 - 35) * intensity);
-  // Keep ink readable on dim cells; switch to dark ink on the hottest fills.
-  const text = intensity > 0.62 ? '#07120D' : '#ECF5EF';
+  const t = intensity <= 0.55 ? intensity : 0.68 + ((intensity - 0.55) / 0.45) * 0.32;
+  // #FDECEE (253,236,238) → #8C0A20 (140,10,32)
+  const r = Math.round(253 + (140 - 253) * t);
+  const g = Math.round(236 + (10 - 236) * t);
+  const b = Math.round(238 + (32 - 238) * t);
+  const text = t <= 0.55 ? '#0F1F17' : '#FFFFFF';
   return { bg: `rgb(${r}, ${g}, ${b})`, text, intensity };
 }
 
@@ -31,7 +32,7 @@ function leakColor(deltaPct: number): { bg: string; text: string; intensity: num
 /**
  * Leak heatmap — the signature data-viz. Each tile is a leaking (product,
  * supplier) pair, colored by how far the last price exceeds its baseline, with
- * a danger glow that intensifies with the leak, sorted by monthly money lost.
+ * a danger shadow that intensifies with the leak, sorted by monthly money lost.
  * Server-safe (no hooks).
  */
 export function LeakHeatmap({
@@ -71,7 +72,7 @@ export function LeakHeatmap({
                 background: bg,
                 color: text,
                 boxShadow: hot
-                  ? `0 0 0 1px rgba(255,92,122,${0.25 + intensity * 0.35}), 0 8px 26px -8px rgba(255,92,122,${0.3 + intensity * 0.4})`
+                  ? `0 0 0 1px rgba(140,10,32,${0.2 + intensity * 0.3}), 0 8px 22px -12px rgba(140,10,32,${0.25 + intensity * 0.25})`
                   : undefined,
               }}
               title={`${c.productName} · ${c.supplierName}: +${pct(c.deltaPct)} · ${fmtIls(c.monthExcessIls)}`}
@@ -93,7 +94,7 @@ export function LeakHeatmap({
           <span>{l.mild}</span>
           <span
             className="h-3 w-24 rounded-full ring-1 ring-line rtl:-scale-x-100"
-            style={{ background: 'linear-gradient(90deg, #1C2A23, #FF5C7A)' }}
+            style={{ background: 'linear-gradient(90deg, #FDECEE, #8C0A20)' }}
             aria-hidden="true"
           />
           <span>{l.severe}</span>

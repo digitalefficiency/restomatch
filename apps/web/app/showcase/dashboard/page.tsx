@@ -359,7 +359,7 @@ function Heatmap() {
                     key={`${pIdx}-${sIdx}`}
                     aria-hidden="true"
                     className="m-0.5 flex aspect-square items-center justify-center rounded-md text-[10px] text-muted"
-                    style={{ boxShadow: 'inset 0 0 0 1px rgba(42,58,49,0.35)' }}
+                    style={{ boxShadow: 'inset 0 0 0 1px rgba(15,31,23,0.08)' }}
                   >
                     ·
                   </div>
@@ -374,8 +374,8 @@ function Heatmap() {
                     background: cellColor(heat(cell.variance)),
                     boxShadow:
                       heat(cell.variance) > 0.5
-                        ? `0 0 18px ${cellColor(heat(cell.variance), 0.5)}`
-                        : 'inset 0 0 0 1px rgba(42,58,49,0.6)',
+                        ? `0 4px 14px -6px ${cellColor(heat(cell.variance), 0.9)}`
+                        : 'inset 0 0 0 1px rgba(15,31,23,0.1)',
                   }}
                   onMouseEnter={(e) => {
                     const rect = e.currentTarget.getBoundingClientRect();
@@ -390,7 +390,7 @@ function Heatmap() {
                 >
                   <span
                     className={`text-[10px] font-bold font-mono tabular-nums ${
-                      Math.abs(heat(cell.variance)) > 0.4 ? 'text-on-primary' : 'text-muted'
+                      Math.abs(heat(cell.variance)) > 0.4 ? 'text-ink' : 'text-muted'
                     }`}
                   >
                     {cell.variance > 0 ? '+' : ''}
@@ -425,24 +425,18 @@ function Heatmap() {
 }
 
 function cellColor(variance: number, alpha = 1): string {
-  // -1 = money-green (cheap), 0 = raised surface, +1 = neon danger (expensive).
-  // Base = surface-2 #1C2A23 = rgb(28,42,35).
-  const baseR = 28;
-  const baseG = 42;
-  const baseB = 35;
-  if (variance <= 0) {
-    const t = Math.abs(variance);
-    // surface-2 → primary #22D39A = rgb(34,211,154)
-    const r = Math.round(baseR + (34 - baseR) * t);
-    const g = Math.round(baseG + (211 - baseG) * t);
-    const b = Math.round(baseB + (154 - baseB) * t);
-    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-  }
-  const t = variance;
-  // surface-2 → danger #FF5C7A = rgb(255,92,122)
-  const r = Math.round(baseR + (255 - baseR) * t);
-  const g = Math.round(baseG + (92 - baseG) * t);
-  const b = Math.round(baseB + (122 - baseB) * t);
+  // -1 = money-green (cheap), 0 = raised surface, +1 = danger (expensive).
+  // Base = surface-2 #EEF3F0. The ramp stops at 55% of the way to the deep
+  // tone so the ink label keeps ≥4.5:1 on every cell.
+  const baseR = 238;
+  const baseG = 243;
+  const baseB = 240;
+  const t = Math.min(1, Math.abs(variance)) * 0.55;
+  // → primary #066B4A (6,107,74) or deep danger #8C0A20 (140,10,32)
+  const [tr, tg, tb] = variance <= 0 ? [6, 107, 74] : [140, 10, 32];
+  const r = Math.round(baseR + (tr - baseR) * t);
+  const g = Math.round(baseG + (tg - baseG) * t);
+  const b = Math.round(baseB + (tb - baseB) * t);
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
@@ -498,9 +492,9 @@ function Sparkline({ data, variance }: { data: number[]; variance: number }) {
     .map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`)
     .join(' ');
   // Rising price = leak (danger), falling = money-green.
-  const stroke = variance > 0 ? '#FF5C7A' : '#22D39A';
-  const fillStart = variance > 0 ? 'rgba(255,92,122,0.22)' : 'rgba(34,211,154,0.22)';
-  const fillEnd = variance > 0 ? 'rgba(255,92,122,0)' : 'rgba(34,211,154,0)';
+  const stroke = variance > 0 ? '#B80F2A' : '#066B4A';
+  const fillStart = variance > 0 ? 'rgba(184,15,42,0.16)' : 'rgba(6,107,74,0.16)';
+  const fillEnd = variance > 0 ? 'rgba(184,15,42,0)' : 'rgba(6,107,74,0)';
   const gradId = `g-${variance > 0 ? 'r' : 'g'}`;
 
   return (
