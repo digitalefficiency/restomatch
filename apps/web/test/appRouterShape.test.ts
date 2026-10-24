@@ -37,6 +37,7 @@ const ROUTER_KEYS = [
   'scans',
   'search',
   'settings',
+  'supplierConfirm',
   'suppliers',
   'team',
 ] as const satisfies readonly RouterKey[];

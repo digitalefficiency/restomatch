@@ -29,17 +29,28 @@ import {
   eq,
   invoices,
   matchRuns,
+  asc,
   poLines,
   priceAlerts,
+  purchaseOrders,
   priceHistory,
   products,
   restaurants,
   sql,
   supplierCatalogItems,
+  supplierConfirmLinks,
+  supplierResponses,
   supplierContractPrices,
   suppliers,
 } from '@restomatch/db';
-import { findOverContractLines, runPriceAlertSweep } from '@restomatch/api';
+import {
+  createSupplierLink,
+  findOverContractLines,
+  resolveSupplierToken,
+  runPriceAlertSweep,
+  submitSupplierAnswer,
+  supplierLinkUrl,
+} from '@restomatch/api';
 
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error('DATABASE_URL is required');
@@ -214,6 +225,52 @@ async function seedTrend(restaurantId: string) {
   return { ...sweep, open: open?.n ?? 0 };
 }
 
+/**
+ * Supplier portal demo (flag `supplierConfirm`): of the restaurant's SENT orders,
+ * the earliest gets a supplier answer (a shortage on its first line + a price
+ * proposal on its second) so the order page shows differences; the next one
+ * gets a fresh 72h link printed for the live walkthrough. Idempotent: earlier
+ * unanswered demo links are replaced; an existing answer is kept.
+ */
+async function seedSupplierConfirm(restaurantId: string) {
+  const sent = await db
+    .select({ id: purchaseOrders.id })
+    .from(purchaseOrders)
+    .where(and(eq(purchaseOrders.restaurantId, restaurantId), eq(purchaseOrders.status, 'sent')))
+    .orderBy(asc(purchaseOrders.expectedDeliveryAt), asc(purchaseOrders.id))
+    .limit(2);
+  if (sent.length < 2) return { answered: false, url: null as string | null };
+  const [answeredPo, livePo] = [sent[0]!.id, sent[1]!.id];
+
+  const [existing] = await db.select({ id: supplierResponses.id }).from(supplierResponses).where(eq(supplierResponses.poId, answeredPo)).limit(1);
+  if (!existing) {
+    const lines = await db
+      .select({ id: poLines.id, qty: poLines.qtyOrdered, price: poLines.unitPriceExpected })
+      .from(poLines)
+      .where(eq(poLines.poId, answeredPo))
+      .orderBy(asc(poLines.id))
+      .limit(2);
+    const link = await createSupplierLink(db, restaurantId, answeredPo);
+    const resolved = link ? await resolveSupplierToken(db, link.token) : null;
+    if (resolved?.ok && lines.length > 0) {
+      const answer = [
+        { poLineId: lines[0]!.id, qtyAvailable: Math.max(0, Math.floor(Number(lines[0]!.qty) * 0.6)) },
+        ...(lines[1] && lines[1].price != null
+          ? [{ poLineId: lines[1].id, proposedUnitPrice: Math.round(Number(lines[1].price) * 1.08 * 100) / 100 }]
+          : []),
+      ];
+      await submitSupplierAnswer(db, resolved.link, { lines: answer, note: 'חלק מהסחורה יגיע מחר בבוקר' });
+    }
+  }
+
+  // Replace earlier unanswered demo links for the live order, then mint one.
+  await db.delete(supplierConfirmLinks).where(eq(supplierConfirmLinks.poId, livePo));
+  await db.delete(supplierResponses).where(eq(supplierResponses.poId, livePo));
+  const live = await createSupplierLink(db, restaurantId, livePo);
+  const base = process.env.APP_URL ?? process.env.AUTH_URL ?? 'http://localhost:3000';
+  return { answered: true, url: live ? supplierLinkUrl(base, live.token) : null };
+}
+
 async function main() {
   const [named] = await db.select().from(restaurants).where(eq(restaurants.name, 'כפר הזיתים')).limit(1);
   const restaurant = named ?? (await db.select().from(restaurants).limit(1))[0];
@@ -224,12 +281,14 @@ async function main() {
   const contracts = await seedContracts(rid);
   const over = await findOverContractLines(db, rid);
   const sweep = await seedTrend(rid);
+  const portal = await seedSupplierConfirm(rid);
   const after = await leakTotalAgorot(rid);
 
   console.log(`[wave1-demo] contracts kept=${contracts} over-contract lines=${over.length} alerts created=${sweep.created} open=${sweep.open}`);
   for (const l of over) {
     console.log(`  over contract: ${l.supplierName} · ${l.productName} billed ₪${l.billedUnitPrice} vs contract ₪${l.contractUnitPrice} (+₪${(l.overAgorot / 100).toFixed(2)})`);
   }
+  console.log(`[wave1-demo] supplier portal: answered order seeded=${portal.answered} · live link: ${portal.url ?? '(no sent order)'}`);
   console.log(`[wave1-demo] leak total before=₪${(before / 100).toFixed(2)} after=₪${(after / 100).toFixed(2)}`);
   if (before !== after) throw new Error('hero numbers moved — aborting (this script must be additive)');
   if (over.length < 2) throw new Error(`expected ≥ 2 over-contract lines, got ${over.length}`);
