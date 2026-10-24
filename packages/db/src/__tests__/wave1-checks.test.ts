@@ -23,12 +23,33 @@ afterAll(async () => {
   await sql.end();
 });
 
-const ctx = {
-  tableExists: async (t: string) => (await sql`select to_regclass(${'public.' + t}) is not null as e`)[0]!.e as boolean,
+type Q = Pick<postgres.Sql, 'unsafe'>;
+/** The doctor's check context on a connection (or an open transaction). */
+const ctxOf = (q: Q) => ({
+  tableExists: async (t: string) => (await q.unsafe('select to_regclass($1) is not null as e', ['public.' + t]))[0]!.e as boolean,
   columnExists: async (t: string, c: string) =>
-    (await sql`select 1 from information_schema.columns where table_schema = 'public' and table_name = ${t} and column_name = ${c}`).length > 0,
-  count: async (q: string) => Number((await sql.unsafe(q))[0]!.count),
-};
+    (
+      await q.unsafe(
+        "select 1 from information_schema.columns where table_schema = 'public' and table_name = $1 and column_name = $2",
+        [t, c],
+      )
+    ).length > 0,
+  count: async (query: string) => Number((await q.unsafe(query))[0]!.count),
+});
+const ctx = ctxOf(sql);
+
+/** Run `fn` in a transaction that is always rolled back (DDL included). */
+const ROLLBACK = new Error('wave1-checks: rollback');
+async function inRolledBackTx(fn: (tx: Q) => Promise<void>): Promise<void> {
+  await sql
+    .begin(async (tx) => {
+      await fn(tx);
+      throw ROLLBACK;
+    })
+    .catch((e: unknown) => {
+      if (e !== ROLLBACK) throw e;
+    });
+}
 
 const integrity = async () => (await runDoctor(url)).findings.find((f) => f.name === 'cross-tenant references')!;
 
@@ -57,8 +78,19 @@ describe('wave-1 doctor checks', () => {
     expect((await WAVE1_PRECONDITIONS['0052_receiver_languages']!(ctx)).status).toBe('PASS');
     expect((await WAVE1_PRECONDITIONS['0048_recovery']!(ctx)).status).toBe('PASS');
     expect((await WAVE1_PRECONDITIONS['0050_ingest']!(ctx)).status).toBe('PASS');
-    expect(await wave1CompositeFkFinding(ctx)).toBeNull();
-    expect((await runDoctor(url)).findings.find((f) => f.name === 'same-tenant FKs (wave 1)')).toBeUndefined();
+    const fkCheck = (await runDoctor(url)).findings.find((f) => f.name === 'same-tenant FKs (wave 1)');
+    if (await ctx.tableExists('credit_notes')) {
+      // Integrated tree (the real 0048/0050 applied): the composite-FK check runs
+      // and reports every one of them in place — never a false WARN.
+      expect(await wave1CompositeFkFinding(ctx)).toEqual({
+        status: 'PASS',
+        detail: `${WAVE1_COMPOSITE_FKS.length} same-tenant composite FKs in place`,
+      });
+      expect(fkCheck?.status).toBe('PASS');
+    } else {
+      expect(await wave1CompositeFkFinding(ctx)).toBeNull();
+      expect(fkCheck).toBeUndefined();
+    }
   });
 
   it('reports a wave-1 row that points at another restaurant\'s supplier', async () => {
@@ -92,30 +124,43 @@ describe('wave-1 doctor checks', () => {
   });
 
   it('0048/0050 FAIL when a same-named supporting key has other columns (their composite FKs would abort)', async () => {
-    // Free the name if the RC already carries the real key (it does once 0048/0050 merge).
-    const [had] = await sql`select pg_get_constraintdef(oid) as d from pg_constraint where conname = 'invoices_id_restaurant_id_key'`;
-    if (had) await sql.unsafe('alter table invoices drop constraint invoices_id_restaurant_id_key');
-    await sql.unsafe('alter table invoices add constraint invoices_id_restaurant_id_key unique (id)');
-    try {
-      const r48 = await WAVE1_PRECONDITIONS['0048_recovery']!(ctx);
+    // In a rolled-back transaction: once 0048/0050 are applied the real key exists
+    // and their composite FKs depend on it, so freeing the name needs CASCADE —
+    // the rollback restores the key and every FK exactly as they were.
+    await inRolledBackTx(async (tx) => {
+      const c = ctxOf(tx);
+      await tx.unsafe('alter table invoices drop constraint if exists invoices_id_restaurant_id_key cascade');
+      await tx.unsafe('alter table invoices add constraint invoices_id_restaurant_id_key unique (id)');
+      const r48 = await WAVE1_PRECONDITIONS['0048_recovery']!(c);
       expect(r48.status).toBe('FAIL');
       expect(r48.detail).toContain('invoices_id_restaurant_id_key exists but is not UNIQUE (id, restaurant_id) on invoices');
-      expect((await WAVE1_PRECONDITIONS['0050_ingest']!(ctx)).status).toBe('FAIL');
-    } finally {
-      await sql.unsafe('alter table invoices drop constraint invoices_id_restaurant_id_key');
-    }
-    await sql.unsafe('alter table invoices add constraint invoices_id_restaurant_id_key unique (id, restaurant_id)');
-    try {
-      expect((await WAVE1_PRECONDITIONS['0048_recovery']!(ctx)).status).toBe('PASS');
-    } finally {
-      if (!had) await sql.unsafe('alter table invoices drop constraint invoices_id_restaurant_id_key');
-    }
+      expect((await WAVE1_PRECONDITIONS['0050_ingest']!(c)).status).toBe('FAIL');
+      await tx.unsafe('alter table invoices drop constraint invoices_id_restaurant_id_key');
+      await tx.unsafe('alter table invoices add constraint invoices_id_restaurant_id_key unique (id, restaurant_id)');
+      expect((await WAVE1_PRECONDITIONS['0048_recovery']!(c)).status).toBe('PASS');
+    });
   });
 
   it('flags a wave-1 table that lacks its same-tenant composite FKs (an earlier single-column draft)', async () => {
-    await sql.unsafe(`create table credit_notes (
-      id uuid primary key default gen_random_uuid(), restaurant_id uuid not null,
-      supplier_id uuid not null, invoice_id uuid, invoice_line_id uuid)`);
+    // With the real 0048 applied, turn credit_notes into the earlier draft by
+    // dropping its composite FKs (definitions saved, re-added in `finally`);
+    // without it, a scratch table of that draft's shape is used.
+    const real = await ctx.tableExists('credit_notes');
+    const saved: Array<{ name: string; def: string }> = [];
+    if (real) {
+      for (const fk of WAVE1_COMPOSITE_FKS.filter((x) => x.table === 'credit_notes')) {
+        const [r] = await sql`select pg_get_constraintdef(oid) as def from pg_constraint
+          where conname = ${fk.name} and conrelid = 'public.credit_notes'::regclass`;
+        if (!r) continue;
+        saved.push({ name: fk.name, def: r.def as string });
+        await sql.unsafe(`alter table credit_notes drop constraint ${fk.name}`);
+      }
+      expect(saved).toHaveLength(WAVE1_COMPOSITE_FKS.filter((x) => x.table === 'credit_notes').length);
+    } else {
+      await sql.unsafe(`create table credit_notes (
+        id uuid primary key default gen_random_uuid(), restaurant_id uuid not null,
+        supplier_id uuid not null, invoice_id uuid, invoice_line_id uuid)`);
+    }
     try {
       const f = await wave1CompositeFkFinding(ctx);
       expect(f?.status).toBe('WARN');
@@ -123,8 +168,10 @@ describe('wave-1 doctor checks', () => {
       const d = (await runDoctor(url)).findings.find((x) => x.name === 'same-tenant FKs (wave 1)');
       expect(d?.status).toBe('WARN');
     } finally {
-      await sql.unsafe('drop table credit_notes');
+      if (real) for (const s of saved) await sql.unsafe(`alter table credit_notes add constraint ${s.name} ${s.def}`);
+      else await sql.unsafe('drop table credit_notes');
     }
+    if (real) expect((await wave1CompositeFkFinding(ctx))?.status).toBe('PASS');
   });
 
   it('every cross-tenant check reads the child FK column and the child restaurant_id', () => {
