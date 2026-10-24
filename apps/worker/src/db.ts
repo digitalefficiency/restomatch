@@ -9,7 +9,10 @@ import { createDb, type Database } from '@restomatch/db';
  * long-running worker grew until Postgres / the Supabase pooler refused new
  * connections. Jobs now share this pool (createDb caps it at 10).
  */
-const pools = new Map<string, Database>();
+// On globalThis: inside the web app (serverless runner) Next can load this module
+// once per bundle — the cron route and the after() kick must share one pool.
+const memo = globalThis as unknown as { __restomatchJobDbs?: Map<string, Database> };
+const pools = (memo.__restomatchJobDbs ??= new Map<string, Database>());
 
 /** Idle connections of the worker's pools close after 5 min (web: 20 s). */
 export const WORKER_IDLE_TIMEOUT_SEC = 300;
