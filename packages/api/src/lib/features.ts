@@ -39,6 +39,8 @@ export const FEATURE_KEYS = [
   // "How did we get to ₪X?" proof sheet under the dashboard hero (S12). Read-only, no new ₪ math.
   'leakProof',
   'vatAtRisk',
+  'supplierLeakCard',
+  'supplierLedger',
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];

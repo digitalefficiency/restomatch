@@ -352,5 +352,7 @@ export {
   type AskResult,
 } from './ask';
 export { NOT_BILLING_OWNER } from './routers/chain';
+
+export * from './ledger';
 export { CLAIMABLE_STATUSES, claimableLines, sumClaims, vatBasisOf, type ClaimLine, type VatBasis } from './lib/claims';
 export type { PayRunInvoice, PayRunResult, PayRunStatus, PayRunSupplier, PayRunClaim } from './routers/payRun';

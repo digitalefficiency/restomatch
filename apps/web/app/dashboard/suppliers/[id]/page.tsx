@@ -4,6 +4,8 @@ import { SupplierCatalogTab } from './tab-catalog';
 import { SupplierScheduleTab } from './tab-schedule';
 import { SupplierOrdersTab } from './tab-orders';
 import { SupplierContractTab } from './tab-contract';
+import { SupplierLeakTab } from './tab-leak';
+import { SupplierLedgerTab } from './tab-ledger';
 import type { SupplierTab } from './tab-bar';
 
 export const dynamic = 'force-dynamic';
@@ -26,13 +28,33 @@ export default async function SupplierDetailPage({
 }) {
   const { id } = await params;
   const { tab: rawTab } = await searchParams;
-  const tab: SupplierTab = (['details', 'catalog', 'schedule', 'orders', 'contract'] as const).includes(
+  const tab: SupplierTab = (['details', 'catalog', 'schedule', 'orders', 'contract', 'leak', 'ledger'] as const).includes(
     rawTab as SupplierTab,
   )
     ? (rawTab as SupplierTab)
     : 'details';
 
   switch (tab) {
+    case 'leak': {
+      // Flag `supplierLeakCard`; with the flag off ?tab=leak falls back to details.
+      const caller = await createServerCaller();
+      const initial = await caller.suppliers.get({ supplierId: id });
+      return initial.leakCardEnabled ? (
+        <SupplierLeakTab supplierId={id} />
+      ) : (
+        <SupplierDetailsTab supplierId={id} initial={initial} />
+      );
+    }
+    case 'ledger': {
+      // Flag `supplierLedger`; with the flag off ?tab=ledger falls back to details.
+      const caller = await createServerCaller();
+      const initial = await caller.suppliers.get({ supplierId: id });
+      return initial.ledgerEnabled ? (
+        <SupplierLedgerTab supplierId={id} />
+      ) : (
+        <SupplierDetailsTab supplierId={id} initial={initial} />
+      );
+    }
     case 'catalog':
       return <SupplierCatalogTab supplierId={id} />;
     case 'orders':

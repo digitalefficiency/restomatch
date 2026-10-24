@@ -60,6 +60,9 @@ export const ROUTE_ROLES: Record<string, UserRole[]> = {
   '/dashboard/ask': ['owner', 'manager'],
   '/dashboard/reports/digest': ['owner', 'manager'],
   '/dashboard/suppliers': ['owner', 'manager'],
+  // Supplier ledger grid (flag supplierLedger): every invoice reader, incl. the
+  // bookkeeper's CSV — never the chef. Mirrors suppliers.ledgerGrid.
+  '/dashboard/suppliers/ledger': ['owner', 'manager', 'receiver', 'bookkeeper'],
   '/dashboard/catalog': ['owner', 'manager'],
   // Product pages are part of the catalog (names grid, price history, cheapest
   // supplier); without this rule every role could open them by URL.

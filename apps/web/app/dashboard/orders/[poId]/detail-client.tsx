@@ -128,10 +128,9 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
     <div className="space-y-6">
       <Card flow elevated padding="lg">
         <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="space-y-3">
+          <OrderStatusBadge status={po.status} />
           <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm sm:grid-cols-4">
-            <div className="col-span-2 sm:col-span-4">
-              <OrderStatusBadge status={po.status} />
-            </div>
             <div>
               <dt className="text-xs text-subtle">{t('detail.created')}</dt>
               <dd className="tabular-nums text-ink">{formatDateTime(po.createdAt, locale)}</dd>
@@ -165,6 +164,7 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
               </div>
             ) : null}
           </dl>
+          </div>
 
           {canEdit && canCancel && (
             <div className="flex flex-wrap items-center gap-2">
