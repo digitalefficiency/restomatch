@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { cronAuthorized } from '@/lib/cronAuth';
 import { JOBS_BUDGET_MS, JOBS_HEARTBEAT_HOST } from '@/lib/cronJobs';
+import { loadJobRunner } from '@/lib/jobKick';
 
 /**
  * The job runner — production needs no separate worker process (no Mac, no
@@ -18,6 +19,11 @@ import { JOBS_BUDGET_MS, JOBS_HEARTBEAT_HOST } from '@/lib/cronJobs';
  * process may still run next to this (claims are SKIP LOCKED + serialized per
  * queue and tenant).
  *
+ * Database: the jobs use the owner URL in DATABASE_URL — loadJobRunner puts the
+ * repaired owner URL there first (DATABASE_URL as pasted, else the Supabase
+ * integration's POSTGRES_URL), as boot does, so a DATABASE_URL beyond repair
+ * does not stop the runner.
+ *
  * Auth: exactly like /api/cron/worker-heartbeat — `Authorization: Bearer
  * $CRON_SECRET` (Vercel sends it when CRON_SECRET is set), else 401; outside
  * production with no CRON_SECRET the check is skipped.
@@ -31,7 +37,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
   try {
-    const { runServerlessTick } = await import('@restomatch/worker/serverless');
+    const { runServerlessTick } = await loadJobRunner();
     const r = await runServerlessTick({ budgetMs: JOBS_BUDGET_MS, heartbeatHost: JOBS_HEARTBEAT_HOST });
     return NextResponse.json(
       {

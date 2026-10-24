@@ -1,4 +1,5 @@
 import 'server-only';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { after } from 'next/server';
 import { setEnqueueListener } from '@restomatch/queue';
 
@@ -22,20 +23,67 @@ import { setEnqueueListener } from '@restomatch/queue';
 /** Queues a user is waiting on. Scheduled work (outbox, reports) stays on the cron minute. */
 export const KICK_QUEUES: ReadonlySet<string> = new Set(['ocr-invoice', 'match-invoice', 'import-catalog']);
 
-/** Claims stop after this long; a job already running finishes (OCR ≈ 10–40 s). */
+/**
+ * Claims stop this long after the enqueue that started the kick; a job already
+ * running finishes (OCR ≈ 10–40 s). Sized for a route on the platform default
+ * maxDuration (300 s on Vercel with Fluid compute — the tRPC route): request +
+ * 50 s of claims + one job stays far inside it. A route with a shorter
+ * maxDuration declares it with withKickBudget().
+ */
 export const KICK_BUDGET_MS = 50_000;
 
-/** A kick older than this is presumed dead (instance frozen/killed) and no longer absorbs new kicks. */
-const KICK_STALE_MS = KICK_BUDGET_MS + 30_000;
+/**
+ * Time a claimed job may still need (a Claude Vision read is ≈ 10–40 s). Inside
+ * withKickBudget the kick claims only while this much is left before the route's
+ * maxDuration — after() time counts toward it, and a job cut off mid-run waits
+ * for stall recovery and can be dead-lettered as 'stalled'.
+ */
+export const JOB_HEADROOM_MS = 45_000;
+
+/** A live kick with less claim time left than this does not absorb a new enqueue: a fresh kick is started. */
+const ABSORB_MIN_MS = 10_000;
 
 type Schedule = (task: () => Promise<void>) => void;
 type Runner = (opts: { budgetMs: number; queues: string[] }) => Promise<{ ran: number; stoppedBy: string }>;
 
 /** One live kick per queue per process; a second enqueue meanwhile asks it to look again. */
-const active = new Map<string, { again: boolean; since: number }>();
+const active = new Map<string, { again: boolean; deadline: number }>();
+
+/** The invocation's hard end (route maxDuration), per request. globalThis: Next may load this module twice. */
+const holder = globalThis as unknown as { __restomatchKickBudget?: AsyncLocalStorage<{ endsAt: number }> };
+const routeBudgets = (holder.__restomatchKickBudget ??= new AsyncLocalStorage<{ endsAt: number }>());
+
+/**
+ * Run a route handler whose `maxDuration` is short (the 60 s ingest webhooks):
+ * a kick started inside it claims only until `maxDuration − JOB_HEADROOM_MS`
+ * after the request began, and not at all when that has passed — the job then
+ * stays queued for /api/cron/jobs (within a minute).
+ */
+export function withKickBudget<T>(maxDurationSec: number, fn: () => T, now: () => number = Date.now): T {
+  return routeBudgets.run({ endsAt: now() + maxDurationSec * 1000 }, fn);
+}
+
+/** When a kick started at `t` must stop claiming (route budget, if declared, else KICK_BUDGET_MS). */
+export function kickClaimDeadline(t: number): number {
+  const route = routeBudgets.getStore();
+  const own = t + KICK_BUDGET_MS;
+  return route ? Math.min(own, route.endsAt - JOB_HEADROOM_MS) : own;
+}
+
+/**
+ * The serverless runner, for the kick and /api/cron/jobs. The jobs read the owner
+ * URL from DATABASE_URL themselves (queueDbUrl, jobDb): put the repaired owner URL
+ * there first — boot does it too (instrumentation.node.ts); this keeps a runner
+ * correct even when it is loaded without that boot step. Idempotent.
+ */
+export async function loadJobRunner(): Promise<typeof import('@restomatch/worker/serverless')> {
+  const { applyRepairedDbEnv } = await import('./env');
+  applyRepairedDbEnv();
+  return import('@restomatch/worker/serverless');
+}
 
 async function loadRunner(): Promise<Runner> {
-  return (await import('@restomatch/worker/serverless')).runQueuedJobs;
+  return (await loadJobRunner()).runQueuedJobs;
 }
 
 /**
@@ -50,15 +98,19 @@ export function kickQueue(
   now: () => number = Date.now,
 ): boolean {
   if (!KICK_QUEUES.has(queue)) return false;
+  // The deadline is fixed now, inside the request: time the response still takes
+  // before after() starts counts against it.
+  const t = now();
+  const deadline = kickClaimDeadline(t);
+  if (deadline <= t) return false; // no room left in this invocation — the cron route runs it
   const live = active.get(queue);
-  if (live && now() - live.since < KICK_STALE_MS) {
+  if (live && live.deadline - t >= ABSORB_MIN_MS) {
     live.again = true;
     return true;
   }
-  const state = { again: false, since: now() };
+  const state = { again: false, deadline };
   try {
     schedule(async () => {
-      const deadline = now() + KICK_BUDGET_MS;
       try {
         const runQueuedJobs = await runner();
         do {

@@ -28,6 +28,8 @@ const { tick } = vi.hoisted(() => ({
 }));
 vi.mock('@restomatch/worker/serverless', () => ({ runServerlessTick: tick }));
 
+import { queueDbUrl } from '@restomatch/queue';
+import { ownerDbUrl } from '@/lib/env';
 import * as route from '../route';
 
 const SECRET = 'test-cron-secret-0123456789';
@@ -96,6 +98,25 @@ describe('/api/cron/jobs auth', () => {
       ms: 2,
     });
     expect((await call(`Bearer ${SECRET}`)).status).toBe(500);
+  });
+});
+
+describe('/api/cron/jobs database URL', () => {
+  it('a DATABASE_URL beyond repair: the runner gets the repaired owner URL (POSTGRES_URL), not the raw value', async () => {
+    // Production on 2026-10-24: DATABASE_URL unusable, the Supabase integration's POSTGRES_URL fine.
+    const owner = process.env.DATABASE_URL_TEST ?? 'postgres://postgres:postgres@localhost:5432/restomatch_test';
+    vi.stubEnv('DATABASE_URL', 'just-a-password');
+    vi.stubEnv('POSTGRES_URL', owner);
+    vi.stubEnv('QUEUE_DATABASE_URL', '');
+    let seen: { db?: string; queue: string | null } | null = null;
+    tick.mockImplementationOnce(async () => {
+      seen = { db: process.env.DATABASE_URL, queue: queueDbUrl() };
+      return { ok: true, maintenance: 'ok', scheduled: [], jobs: { ran: 0, done: 0, retried: 0, failed: 0, byQueue: {}, stoppedBy: 'empty', ms: 1 }, ms: 1 };
+    });
+    expect((await call(`Bearer ${SECRET}`)).status).toBe(200);
+    const repaired = ownerDbUrl({ POSTGRES_URL: owner } as unknown as NodeJS.ProcessEnv);
+    expect(repaired).toBeTruthy();
+    expect(seen).toEqual({ db: repaired, queue: repaired });
   });
 });
 
