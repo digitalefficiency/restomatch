@@ -9,6 +9,7 @@ import {
   BarChart3,
   Boxes,
   ChefHat,
+  ClipboardList,
   FileDown,
   Inbox,
   LayoutDashboard,
@@ -43,6 +44,7 @@ type LinkKey =
   | 'catalog'
   | 'orders'
   | 'recipes'
+  | 'inventory'
   | 'exports'
   | 'team'
   | 'branches'
@@ -55,7 +57,7 @@ interface NavItem {
   icon: LucideIcon;
   group: GroupKey;
   /** Wave-1 per-restaurant flag: the link shows only when the layout says it is on. */
-  feature?: 'recipes';
+  feature?: 'recipes' | 'inventoryCount';
 }
 
 /** Wave-1 features enabled for the active restaurant (from the layout). */
@@ -71,6 +73,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'catalog', href: '/dashboard/catalog', icon: Boxes, group: 'purchasing' },
   { key: 'orders', href: '/dashboard/orders', icon: ShoppingCart, group: 'purchasing' },
   { key: 'recipes', href: '/dashboard/recipes', icon: ChefHat, group: 'purchasing', feature: 'recipes' },
+  { key: 'inventory', href: '/dashboard/inventory', icon: ClipboardList, group: 'purchasing', feature: 'inventoryCount' },
   { key: 'exports', href: '/dashboard/exports', icon: FileDown, group: 'admin' },
   { key: 'team', href: '/dashboard/team', icon: Users, group: 'admin' },
   { key: 'branches', href: '/dashboard/branches', icon: Store, group: 'admin' },

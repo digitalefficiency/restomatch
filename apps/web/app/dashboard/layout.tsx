@@ -37,13 +37,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const active =
     memberships.find((m) => m.restaurantId === session.user.restaurantId) ?? memberships[0]!;
-  const [t, locale, recipesFlag] = await Promise.all([
+  const [t, locale, recipesFlag, inventoryFlag] = await Promise.all([
     getT(nav),
     getLocale(),
     // Wave-1 flag (MASTER-PLAN §1.3): a disabled feature's nav link is invisible.
     caller.recipes.enabled().catch(() => ({ enabled: false })),
+    caller.inventory.enabled().catch(() => ({ enabled: false })),
   ]);
-  const features = { recipes: recipesFlag.enabled };
+  const features = { recipes: recipesFlag.enabled, inventoryCount: inventoryFlag.enabled };
   const roleLabel = labelForRole(active.role, locale);
   const email = session.user.email ?? '';
   // Branches (S8): the switcher lists every membership; the chain tab is for

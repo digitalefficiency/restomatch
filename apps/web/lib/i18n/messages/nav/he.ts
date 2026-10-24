@@ -15,6 +15,7 @@ export const he = {
     catalog: 'קטלוג',
     orders: 'הזמנות',
     recipes: 'עלות מנה',
+    inventory: 'ספירת מלאי',
     exports: 'ייצוא',
     team: 'צוות',
     chain: 'רשת',
