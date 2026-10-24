@@ -16,6 +16,7 @@ import {
   sql,
   invoices,
   lte,
+  ne,
   poLines,
   products,
   purchaseOrders,
@@ -24,12 +25,14 @@ import {
 } from '@restomatch/db';
 import { enqueueOcrInvoice, isQueueUnavailableError } from '@restomatch/queue';
 import type { InvoiceOcrResult } from '@restomatch/types';
-import { assertGrOwned, assertInvoiceOwned, assertSupplierOwned } from '../tenant';
+import { assertGrOwned, assertSupplierOwned } from '../tenant';
 import { fillEnglishNames } from '../receiving/english';
 import { devOcrStubEnabled, buildDevOcrStub } from '../receiving/devOcrStub';
 import { isAllowedScanUrl } from '../lib/scanUrls';
+import { isInvoiceNumberTaken, readDuplicateOf, withoutDuplicateOf } from '../lib/invoiceDedupe';
+import { appError } from '../errors';
 import { endOfDayInTz, startOfDayInTz } from '../lib/time';
-import { managerProcedure, memberProcedure, receiverProcedure, router } from '../trpc';
+import { invoiceReaderProcedure, managerProcedure, memberProcedure, receiverProcedure, router } from '../trpc';
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
 /** R5: undated open POs this recent still show in the receiving inbox. */
@@ -276,7 +279,7 @@ export const receivingRouter = router({
    * invoice number, and parsed invoice lines. Tenant scoped on
    * invoices.restaurantId.
    */
-  getInvoice: memberProcedure
+  getInvoice: invoiceReaderProcedure
     .input(z.object({ invoiceId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       const [invoice] = await ctx.db
@@ -344,6 +347,13 @@ export const receivingRouter = router({
         ...invoiceFields,
         ocrFailed: failure?.ocrFailed === true,
         ocrFailureReason: failure?.ocrFailed === true ? (failure.reason ?? 'extraction_failed') : null,
+        // The scanned number already belongs to another invoice of this
+        // supplier (worker writeOcrHeader). Only the number is exposed — never
+        // the other invoice's id or payload.
+        duplicateOf: (() => {
+          const d = readDuplicateOf(ocrPayload);
+          return d ? { invoiceNumber: d.invoiceNumber } : null;
+        })(),
         supplierName: supplier?.name ?? null,
         supplierNameEn: supplier?.nameEn ?? null,
         lines,
@@ -376,20 +386,61 @@ export const receivingRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
-      await assertInvoiceOwned(ctx.db, input.invoiceId, restaurantId);
+      const [current] = await ctx.db
+        .select({ supplierId: invoices.supplierId, ocrPayload: invoices.ocrPayload })
+        .from(invoices)
+        .where(and(eq(invoices.id, input.invoiceId), eq(invoices.restaurantId, restaurantId)))
+        .limit(1);
+      if (!current) throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
       const p = input.patch;
       const set: Partial<typeof invoices.$inferInsert> = { updatedAt: new Date() };
       if (p.invoiceNumber !== undefined) set.invoiceNumber = p.invoiceNumber?.trim() || null;
+      // A real number that saves cleanly settles a "possible duplicate" read;
+      // null keeps the marker (the correction form sends null on every save).
+      if (set.invoiceNumber && readDuplicateOf(current.ocrPayload)) {
+        set.ocrPayload = withoutDuplicateOf(current.ocrPayload);
+      }
       if (p.invoiceDate !== undefined) set.invoiceDate = p.invoiceDate;
       if (p.totalExclVat !== undefined)
         set.totalExclVat = p.totalExclVat == null ? null : String(p.totalExclVat);
       if (p.vatAmount !== undefined) set.vatAmount = p.vatAmount == null ? null : String(p.vatAmount);
       if (p.totalInclVat !== undefined)
         set.totalInclVat = p.totalInclVat == null ? null : String(p.totalInclVat);
-      await ctx.db
-        .update(invoices)
-        .set(set)
-        .where(and(eq(invoices.id, input.invoiceId), eq(invoices.restaurantId, restaurantId)));
+      try {
+        // Savepoint: procedures may already run inside a transaction (RLS), and
+        // a unique violation aborts it — the holder lookup below would then
+        // fail too. Rolling back only this update keeps the request usable.
+        await ctx.db.transaction(async (tx) => {
+          await tx
+            .update(invoices)
+            .set(set)
+            .where(and(eq(invoices.id, input.invoiceId), eq(invoices.restaurantId, restaurantId)));
+        });
+      } catch (err) {
+        if (!set.invoiceNumber || !isInvoiceNumberTaken(err)) throw err;
+        const number = set.invoiceNumber;
+        const [holder] = current.supplierId
+          ? await ctx.db
+              .select({ id: invoices.id, invoiceDate: invoices.invoiceDate })
+              .from(invoices)
+              .where(
+                and(
+                  eq(invoices.restaurantId, restaurantId),
+                  eq(invoices.supplierId, current.supplierId),
+                  eq(invoices.invoiceNumber, number),
+                  ne(invoices.id, input.invoiceId),
+                ),
+              )
+              .limit(1)
+          : [];
+        const holderDate = holder?.invoiceDate ? holder.invoiceDate.toISOString().slice(0, 10) : '—';
+        throw appError(
+          'CONFLICT',
+          'invoice.numberTaken',
+          `מספר החשבונית ${number} כבר קיים בחשבונית אחרת של הספק (מתאריך ${holderDate})`,
+          { invoiceNumber: number, holderDate, holderInvoiceId: holder?.id ?? '' },
+        );
+      }
       return { ok: true };
     }),
 
@@ -730,7 +781,7 @@ export const receivingRouter = router({
    * restaurant — foreign ids are NOT_FOUND). Display-only: the ₪ math never
    * reads these columns.
    */
-  ensureEnglish: memberProcedure
+  ensureEnglish: invoiceReaderProcedure
     .input(
       z
         .object({

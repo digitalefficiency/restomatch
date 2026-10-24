@@ -10,6 +10,7 @@ import { landing } from '@/lib/i18n/messages/landing';
 import { formatNumber } from '@/lib/i18n/format';
 import { heroLoopFor, heroMedia, promoVideoFor } from '@/lib/heroMedia';
 import { formatIls } from '@/lib/money';
+import { landingFlag } from '@/lib/landingFlags';
 import { cn } from '@/lib/components/cn';
 import { MarketingShell } from './(marketing)/_components/MarketingShell';
 import { HeroMatch } from './(marketing)/_components/HeroMatch';
@@ -17,7 +18,8 @@ import { HeroVideo } from './(marketing)/_components/HeroVideo';
 import { LazyLeadForm } from './(marketing)/_components/LazyLeadForm';
 import { PromoVideoButton } from './(marketing)/_components/PromoVideoButton';
 import { Eyebrow, FaqSection, Forward, faqItems } from './(marketing)/_components/detail-sections';
-import { SITE_URL, metadataBase } from './(marketing)/_components/seo';
+import { OrdersStory } from './(marketing)/_components/OrdersStory';
+import { SITE_URL, metadataBase, socialFor } from './(marketing)/_components/seo';
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getT(landing);
@@ -28,8 +30,7 @@ export async function generateMetadata(): Promise<Metadata> {
     // Next's resolver collapses `/?lang=en` to the bare origin on the root
     // route, so the root's canonical + hreflang <link>s are rendered in the
     // page instead (React hoists them into <head>).
-    openGraph: { title: t('meta.title'), description: t('meta.description'), url: '/' },
-    twitter: { title: t('meta.title'), description: t('meta.description') },
+    ...socialFor(t.locale, { title: t('meta.title'), description: t('meta.description') }),
   };
 }
 
@@ -146,6 +147,8 @@ export default async function Home() {
       <link rel="alternate" hrefLang="he" href={`${SITE_URL}/`} />
       <link rel="alternate" hrefLang="en" href={`${SITE_URL}/?lang=en`} />
       <link rel="alternate" hrefLang="x-default" href={`${SITE_URL}/`} />
+      {/* og:url for the same reason (React hoists <meta> into <head>). */}
+      <meta property="og:url" content={locale === 'en' ? `${SITE_URL}/?lang=en` : `${SITE_URL}/`} />
       <script
         type="application/ld+json"
         // JSON-LD is data, not script; `<` is escaped so no string can close the tag.
@@ -181,7 +184,8 @@ export default async function Home() {
               {t('hero.lead')}
             </p>
             <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center lg:justify-start">
-              <Link href="#lead" className={btnPrimary}>
+              {/* data-keep-clear: the cookie banner never covers this CTA */}
+              <Link href="#lead" className={btnPrimary} data-keep-clear>
                 {t('hero.ctaPrimary')}
                 <Forward />
               </Link>
@@ -290,7 +294,7 @@ export default async function Home() {
               <p className="mt-3 text-base leading-relaxed text-muted">{t('v2.receiver.body')}</p>
               <Link
                 href="/showcase/receiver"
-                className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+                className="touch-target mt-6 inline-flex items-center gap-2 text-sm font-semibold text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
               >
                 {t('v2.receiver.cta')}
                 <Forward />
@@ -333,6 +337,9 @@ export default async function Home() {
         </div>
       </section>
 
+      {/* ───────────── 3b · ORDER → DOCK → ₪ (flag landingOrdersStory; off = no section) ───────────── */}
+      {landingFlag('landingOrdersStory') && <OrdersStory t={t} locale={locale} />}
+
       {/* ───────────── 4 · PROOF — the honest math (PLAN_SEED + formatIls) ───────────── */}
       <section className="rm-defer border-y border-line bg-surface/30" aria-labelledby="proof-title">
         <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
@@ -371,7 +378,7 @@ export default async function Home() {
           <p className="mt-4 text-center">
             <Link
               href="/about#roi"
-              className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+              className="touch-target inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
             >
               {t('v2.proof.more')}
               <Forward className="h-3.5 w-3.5" />
@@ -457,7 +464,7 @@ export default async function Home() {
             {t('cta.demoPrompt')}{' '}
             <Link
               href="/showcase"
-              className="inline-flex items-center gap-1 font-semibold text-primary hover:underline"
+              className="touch-target inline-flex items-center gap-1 font-semibold text-primary hover:underline"
             >
               {t('cta.demoLink')}
               <Forward className="h-3.5 w-3.5" />

@@ -226,7 +226,7 @@ export function MobileNav({
             type="button"
             tabIndex={-1}
             aria-hidden="true"
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            className="absolute inset-0 bg-ink/30 backdrop-blur-sm"
             onClick={() => setOpen(false)}
           />
           <div
@@ -318,7 +318,8 @@ export function MobileNav({
       {mounted ? createPortal(
       <nav
         aria-label={t('mobileLabel')}
-        className="glass fixed inset-x-0 bottom-0 z-40 border-t border-line pb-[env(safe-area-inset-bottom)] lg:hidden"
+        // Lifted above the cookie banner while it is shown (ConsentClearance).
+        className="glass fixed inset-x-0 bottom-[var(--consent-h,0px)] z-40 border-t border-line pb-[env(safe-area-inset-bottom)] lg:hidden"
       >
         <ul className="mx-auto flex max-w-lg items-stretch justify-around">
           {primary.map(({ key, href, icon: Icon }) => {
