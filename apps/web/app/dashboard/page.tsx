@@ -37,6 +37,7 @@ import {
 } from '@/lib/components/views';
 import { views as viewsNs } from '@/lib/i18n/messages/views';
 import { PaginatedActivityFeed } from './activity';
+import { RecipesOverviewCard } from './recipes/overview-card';
 import { displayName } from './approvals/vocab';
 
 export default async function DashboardPage({
@@ -233,6 +234,12 @@ export default async function DashboardPage({
         />
       </div>
       </TvMode>
+
+      {/* Wave 1 (flag `recipes`): food cost hit by this month's price rises. */}
+      {/* Off in TV mode: the wall screen refreshes every minute and the card sits under the overlay. */}
+      {!view.tv && canSeeRoute(role, '/dashboard/recipes') ? (
+        <RecipesOverviewCard />
+      ) : null}
 
       {/* Leak heatmap — the centerpiece data-viz. */}
       {leaksEntitlementBlocked ? (

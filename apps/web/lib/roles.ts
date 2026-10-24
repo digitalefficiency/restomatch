@@ -53,6 +53,8 @@ export const ROUTE_ROLES: Record<string, UserRole[]> = {
   // supplier); without this rule every role could open them by URL.
   '/dashboard/products': ['owner', 'manager'],
   '/dashboard/orders': ['owner', 'manager'],
+  // Food cost per dish (wave 1, flag `recipes`): the chef owns the recipes.
+  '/dashboard/recipes': ['owner', 'manager', 'chef'],
   '/dashboard/exports': ['owner', 'bookkeeper'],
   // One supplier invoice (prices, lines, image): opened from receiving, approvals
   // and the leak drill-down — never the chef. Mirrors receiving.getInvoice.

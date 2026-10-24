@@ -1102,6 +1102,69 @@ export const priceBaselines = pgTable(
 );
 
 /* ──────────────────────────────────────────────────────────────────────────
+ * Recipes — food cost per dish (wave 1, flag `recipes`; migrations 0056–0057)
+ *
+ * The same-tenant composite FKs (recipe_items → recipes / products, both on
+ * (id, restaurant_id)) and the CHECKs live in 0057_recipes.sql; Drizzle only
+ * mirrors the columns. Money is integer agorot (menuPriceAgorot).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export const recipes = pgTable(
+  'recipes',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    nameEn: text('name_en'),
+    category: text('category'),
+    /** A sauce / dough / stock used inside other recipes (not sold on its own). */
+    isSubRecipe: boolean('is_sub_recipe').notNull().default(false),
+    /** What one batch makes: a dish = 1 מנה; a sauce e.g. 2 ק״ג. */
+    yieldQty: numeric('yield_qty', { precision: 12, scale: 4 }).notNull().default('1'),
+    yieldUnit: varchar('yield_unit', { length: 32 }).notNull().default('מנה'),
+    menuPriceAgorot: integer('menu_price_agorot'),
+    menuPriceIncludesVat: boolean('menu_price_includes_vat').notNull().default(true),
+    active: boolean('active').notNull().default(true),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('recipes_restaurant_name_idx').on(t.restaurantId, t.name)],
+);
+
+export const recipeItems = pgTable(
+  'recipe_items',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    recipeId: uuid('recipe_id').notNull(),
+    /** Exactly one of productId / subRecipeId is set (CHECK in 0057). */
+    productId: uuid('product_id'),
+    subRecipeId: uuid('sub_recipe_id'),
+    /** NET quantity on the plate, in `unit`. */
+    quantity: numeric('quantity', { precision: 12, scale: 4 }).notNull(),
+    unit: varchar('unit', { length: 32 }).notNull(),
+    /** Trim/peel/cooking loss: bought = quantity / (1 − wastePct/100). */
+    wastePct: numeric('waste_pct', { precision: 5, scale: 2 }).notNull().default('0'),
+    /** How many `unit` are in one product unit when the units don't convert (tray = 30 eggs). */
+    unitsPerProductUnit: numeric('units_per_product_unit', { precision: 12, scale: 4 }),
+    sortOrder: integer('sort_order').notNull().default(0),
+    note: text('note'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('recipe_items_recipe_idx').on(t.recipeId, t.restaurantId),
+    index('recipe_items_product_idx').on(t.productId, t.restaurantId),
+    index('recipe_items_sub_recipe_idx').on(t.subRecipeId, t.restaurantId),
+    index('recipe_items_restaurant_idx').on(t.restaurantId),
+  ],
+);
+
+/* ──────────────────────────────────────────────────────────────────────────
  * Approvals + audit
  * ────────────────────────────────────────────────────────────────────────── */
 
