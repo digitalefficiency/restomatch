@@ -45,7 +45,7 @@ export function Eyebrow({ children, tone = 'primary' }: { children: React.ReactN
   return (
     <p
       className={cn(
-        'mb-3 text-xs font-semibold uppercase tracking-[0.2em] ltr:font-mono rtl:text-sm rtl:tracking-normal',
+        'mb-3 text-xs font-semibold uppercase tracking-[0.2em] rtl:text-sm rtl:tracking-normal',
         tone === 'primary' && 'text-primary',
         tone === 'danger' && 'text-danger',
         tone === 'gold' && 'text-gold',
