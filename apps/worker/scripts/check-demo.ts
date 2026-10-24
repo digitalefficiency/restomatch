@@ -10,6 +10,7 @@
 import { computeLeakHero } from '@restomatch/charts';
 import { createDb, DEMO_MAIN_BUSINESS_ID, findDemoTenants } from '@restomatch/db';
 import postgres from 'postgres';
+import { DEMO_EXTRA_STEPS } from '../src/lib/demoExtras';
 
 /**
  * The one deliberate discrepancy across the demo's consolidated invoices (seed-demo's
@@ -41,17 +42,17 @@ export async function checkDemo(url: string, today: string): Promise<DemoCheck> 
 
     // 1. The hero: the North Star band.
     const h = await computeLeakHero(createDb(url), main.id);
-    facts.push(`hero: ₪${Math.round(h.leakIls)} of ₪${Math.round(h.spendIls)} (${(h.leakPct * 100).toFixed(1)}%)`);
-    if (!(h.leakPct >= 0.015 && h.leakPct <= 0.03)) problems.push(`hero leak ${(h.leakPct * 100).toFixed(2)}% is outside the 1.5–3% demo band`);
+    facts.push(`hero: ₪${Math.round(h.leakIls)} of ₪${Math.round(h.spendIls)} (${((h.leakPct ?? 0) * 100).toFixed(1)}%)`);
+    if (!((h.leakPct ?? 0) >= 0.015 && (h.leakPct ?? 0) <= 0.03)) problems.push(`hero leak ${((h.leakPct ?? 0) * 100).toFixed(2)}% is outside the 1.5–3% demo band`);
 
     // 1b. Month compares (last month vs the month before): both months fully seeded,
     //     comparable spend and a believable leak — a thin base reads as "+2,926%".
     const now = new Date(`${today}T12:00:00+03:00`);
     const prev = await computeLeakHero(createDb(url), main.id, { now, monthOffset: -1 });
     const prev2 = await computeLeakHero(createDb(url), main.id, { now, monthOffset: -2 });
-    facts.push(`last month ₪${Math.round(prev.leakIls)} of ₪${Math.round(prev.spendIls)} (${(prev.leakPct * 100).toFixed(1)}%) · month before ₪${Math.round(prev2.leakIls)} of ₪${Math.round(prev2.spendIls)} (${(prev2.leakPct * 100).toFixed(1)}%)`);
+    facts.push(`last month ₪${Math.round(prev.leakIls)} of ₪${Math.round(prev.spendIls)} (${((prev.leakPct ?? 0) * 100).toFixed(1)}%) · month before ₪${Math.round(prev2.leakIls)} of ₪${Math.round(prev2.spendIls)} (${((prev2.leakPct ?? 0) * 100).toFixed(1)}%)`);
     for (const [label, m] of [['last month', prev], ['the month before', prev2]] as const) {
-      if (!(m.leakPct >= 0.01 && m.leakPct <= 0.03)) problems.push(`${label}: leak ${(m.leakPct * 100).toFixed(2)}% is outside 1–3%`);
+      if (!((m.leakPct ?? 0) >= 0.01 && (m.leakPct ?? 0) <= 0.03)) problems.push(`${label}: leak ${((m.leakPct ?? 0) * 100).toFixed(2)}% is outside 1–3%`);
     }
     if (!(prev2.spendIls > 0 && Math.abs(prev.spendIls / prev2.spendIls - 1) <= 0.25)) {
       problems.push(`last month's spend ₪${Math.round(prev.spendIls)} vs the month before ₪${Math.round(prev2.spendIls)} — not comparable (thin history?)`);
@@ -171,8 +172,17 @@ export async function checkDemo(url: string, today: string): Promise<DemoCheck> 
     for (const r of t.restaurants.filter((x) => x.id !== main.id)) {
       const [inv] = await sql`select count(*)::int as n from invoices where restaurant_id = ${r.id}`;
       const bh = await computeLeakHero(createDb(url), r.id, { now });
-      facts.push(`${r.name}: ${inv!.n} invoices · leak ₪${Math.round(bh.leakIls)} of ₪${Math.round(bh.spendIls)} (${(bh.leakPct * 100).toFixed(1)}%)`);
+      facts.push(`${r.name}: ${inv!.n} invoices · leak ₪${Math.round(bh.leakIls)} of ₪${Math.round(bh.spendIls)} (${((bh.leakPct ?? 0) * 100).toFixed(1)}%)`);
       if (inv!.n < 1) problems.push(`branch ${r.name} has no invoices`);
+    }
+
+    // 6. Feature datasets (src/lib/demoExtras.ts): each migrated feature has its demo data.
+    for (const step of DEMO_EXTRA_STEPS) {
+      const [t] = await sql`select to_regclass(${`public.${step.requiresTable}`}) is not null as ok`;
+      if (!t!.ok) continue;
+      const r = await step.check(sql, rids, main.id);
+      facts.push(...r.facts);
+      problems.push(...r.problems);
     }
   } finally {
     await sql.end({ timeout: 5 });
