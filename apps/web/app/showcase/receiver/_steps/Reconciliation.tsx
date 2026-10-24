@@ -3,7 +3,7 @@
 import { useGSAP } from '@gsap/react';
 import { gsap } from 'gsap';
 import { AlertTriangle, ArrowLeft, Check, Clock, Info, Minus, Plus, X, Zap } from 'lucide-react';
-import { useRef, type ReactNode } from 'react';
+import { useRef } from 'react';
 import { lineTotalIls } from '@/app/dashboard/orders/order-logic';
 import { useDir, useLocale, useT } from '@/lib/i18n/client';
 import { formatPercent } from '@/lib/i18n/format';
@@ -24,7 +24,7 @@ interface Props {
   onContinueAdjust: () => void;
   onRetake: () => void;
   /** Optional per-line sub-line (flag `dockPriceContext`: "your usual price"). */
-  lineExtra?: (line: ReconciliationLine) => ReactNode;
+  lineExtra?: (line: ReconciliationLine) => React.ReactNode;
 }
 
 export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRetake, lineExtra }: Props) {

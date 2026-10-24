@@ -1,6 +1,5 @@
 'use client';
 
-import type { ReactNode } from 'react';
 import { trpc } from '@/lib/trpc/client';
 import type { ReconciliationLine } from '@/app/showcase/receiver/_mock';
 import { DockPriceHint } from '../dock-price-hint';
@@ -14,7 +13,7 @@ import { DockPriceHint } from '../dock-price-hint';
 export function useDockPriceLineExtra(
   enabled: boolean,
   invoiceId: string | null,
-): ((line: ReconciliationLine) => ReactNode) | undefined {
+): ((line: ReconciliationLine) => React.ReactNode) | undefined {
   const q = trpc.receiving.priceContext.useQuery(
     { invoiceId: invoiceId ?? undefined },
     { enabled: enabled && !!invoiceId, staleTime: 60_000, retry: false },
