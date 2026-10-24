@@ -8,7 +8,7 @@ Branch `claude/client-ready-auth-admin`, PR #56 into `main`.
 |---|---|
 | db7bc63 | **`apps/web/lib/publicGuard.ts`**: one front door for public route handlers that need no login (S11 supplier link, S13 webhooks, S15 leak check). 14 tests. |
 | 2fe9d4c | **Authz: the chef could open supplier invoices.** Fixed in the route rule and the API. |
-| d8877c9 | **Sign-out could leave the user signed in.** Sign-out now revokes the session server-side. 3 tests. |
+| ~~d8877c9~~ | **Sign-out could leave the user signed in.** The Redis-backed fix was **reverted in df9b968** (Redis is being removed). It returns on Postgres (migration 0060) in a separate PR after #56 merges. |
 
 ### publicGuard
 
@@ -38,7 +38,7 @@ Notes:
 
 The route rule and the new `invoiceReaderProcedure` now allow owner, manager, receiver and bookkeeper. The receiver's receiving wizard keeps working, and `/scans/:id` is a 404 for the chef.
 
-### Sign-out revocation
+### Sign-out revocation (reverted in df9b968; returns on Postgres)
 
 **Symptom.** On a production build, 2 of 8 sign-outs (in both he and en) left the user in: `/dashboard/leaks` still rendered.
 
