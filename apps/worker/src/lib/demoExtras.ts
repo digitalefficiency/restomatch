@@ -28,6 +28,10 @@ export interface DemoExtraStep {
   check: (sql: postgres.Sql, rids: string[], mainId: string, url: string) => Promise<{ facts: string[]; problems: string[] }>;
 }
 
+/** S12's seeded ₪-back claims on the main demo restaurant (DEMO_TODAY 2026-10-25). */
+export const EXPECTED_RECOVERY = { claims: 74, claimedAgorot: 367_210 };
+/** S11's contract prices (HaKerem 6 + Mediterranean Fish 4) and the one open tomato alert. */
+export const EXPECTED_CONTRACTS = { prices: 10, alerts: 1 };
 /** October's actual food cost on the demo (S17): ₪41,135.36 of ₪136,400 food sales. */
 export const EXPECTED_ACTUAL_FOOD_COST_PCT = '30.2';
 
@@ -42,10 +46,14 @@ export const DEMO_EXTRA_STEPS: DemoExtraStep[] = [
     async check(sql, _rids, mainId) {
       const claims = await count(sql`select count(*)::int as n from recovery_claims where restaurant_id = ${mainId}`);
       const staged = await count(sql`select count(*)::int as n from recovery_claims where restaurant_id = ${mainId} and status <> 'claimed'`);
+      const claimedAgorot = await count(sql`select coalesce(sum(amount_agorot), 0)::bigint as n from recovery_claims where restaurant_id = ${mainId}`);
       const problems: string[] = [];
       if (claims === 0) problems.push('recovery: the main demo restaurant has no recovery claims (₪-back tracker empty)');
       else if (staged === 0) problems.push('recovery: claims exist but none is staged past "claimed" (seed-recovery-demo did not run)');
-      return { facts: [`recovery: ${claims} claims, ${staged} staged`], problems };
+      if (claims !== EXPECTED_RECOVERY.claims || claimedAgorot !== EXPECTED_RECOVERY.claimedAgorot) {
+        problems.push(`recovery: ${claims} claims / ₪${(claimedAgorot / 100).toFixed(2)} claimed, expected ${EXPECTED_RECOVERY.claims} / ₪${(EXPECTED_RECOVERY.claimedAgorot / 100).toFixed(2)}`);
+      }
+      return { facts: [`recovery: ${claims} claims (₪${(claimedAgorot / 100).toFixed(2)}), ${staged} staged`], problems };
     },
   },
   {
@@ -100,8 +108,8 @@ export const DEMO_EXTRA_STEPS: DemoExtraStep[] = [
       const prices = await count(sql`select count(*)::int as n from supplier_contract_prices where restaurant_id = ${mainId}`);
       const alerts = await count(sql`select count(*)::int as n from price_alerts where restaurant_id = ${mainId}`);
       const problems: string[] = [];
-      if (prices === 0) problems.push('contracts: no contract prices on the main demo restaurant (contracts page / over-contract card empty)');
-      if (alerts === 0) problems.push('contracts: no price alerts on the main demo restaurant (price-alert tab empty)');
+      if (prices !== EXPECTED_CONTRACTS.prices) problems.push(`contracts: ${prices} contract prices on the main demo restaurant, expected ${EXPECTED_CONTRACTS.prices} (contracts page / over-contract card)`);
+      if (alerts !== EXPECTED_CONTRACTS.alerts) problems.push(`contracts: ${alerts} price alerts on the main demo restaurant, expected ${EXPECTED_CONTRACTS.alerts} (price-alert tab)`);
       return { facts: [`contracts: ${prices} contract prices, ${alerts} price alerts`], problems };
     },
   },
