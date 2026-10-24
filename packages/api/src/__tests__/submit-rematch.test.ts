@@ -15,10 +15,11 @@ import { appRouter } from '../index';
 import type { AppContext } from '../context';
 import { resetDb } from './fixtures';
 
-const enqueueMatchInvoice = vi.fn(async (_payload: { restaurantId: string; invoiceId: string; rematch?: boolean }) => true);
+type Payload = { restaurantId: string; invoiceId: string; rematch?: boolean; poId?: string };
+const enqueueMatchInvoice = vi.fn(async (_payload: Payload) => true);
 vi.mock('@restomatch/queue', async (orig) => ({
   ...(await orig<typeof import('@restomatch/queue')>()),
-  enqueueMatchInvoice: (p: { restaurantId: string; invoiceId: string; rematch?: boolean }) => enqueueMatchInvoice(p),
+  enqueueMatchInvoice: (p: Payload) => enqueueMatchInvoice(p),
 }));
 
 /**
@@ -78,6 +79,8 @@ describe('receiving.submitReceipt re-matches against the count', () => {
     const calls = enqueueMatchInvoice.mock.calls.map(([p]) => p);
     expect(calls.map((c) => c.invoiceId).sort()).toEqual([scanned, earlier].sort());
     expect(calls.every((c) => c.rematch === true && c.restaurantId === A.restaurantId)).toBe(true);
+    // Matched against the receipt's own order, not a discovered one.
+    expect(calls.every((c) => c.poId === A.poId)).toBe(true);
   });
 
   it('a queue failure does not fail the submit', async () => {
