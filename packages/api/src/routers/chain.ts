@@ -5,6 +5,8 @@ import {
   aggregateChain,
   computeBranchPriceLines,
   computeBranchSnapshot,
+  computeLeakGrouped,
+  computeLeakSummary,
   computePriceDisparities,
   VIEW_COMPARES,
   VIEW_PERIODS,
@@ -185,6 +187,8 @@ interface Gate {
   isBillingOwner: boolean;
   /** Per-restaurant feature flag (settings.features.priceDisparity) of the active branch. */
   priceDisparity: boolean;
+  /** Per-restaurant feature flag (settings.features.chainAlerts) of the active branch. */
+  chainAlerts: boolean;
 }
 
 function gateOf(
@@ -199,6 +203,7 @@ function gateOf(
     chainEnabled:
       (ent.active && ent.planKey === 'chain') || branchCount > 1 || featureEnabled(settings, 'chain'),
     priceDisparity: featureEnabled(settings, 'priceDisparity'),
+    chainAlerts: featureEnabled(settings, 'chainAlerts'),
     branchLimit,
     canAddBranch:
       ent.active &&
@@ -249,6 +254,54 @@ export interface ChainOverviewResult extends ChainOverview {
   compare: (typeof VIEW_COMPARES)[number];
   /** Same supplier + product at different prices across branches; null when the feature is off. */
   priceDisparities: PriceDisparityRow[] | null;
+}
+
+/** A branch only becomes "the one to look at" with at least this much leak in the week. */
+export const ALERT_MIN_LEAK_ILS = 50;
+/** Days in the alerts window, ending today (local). */
+const ALERT_DAYS = 7;
+
+/** 'YYYY-MM-DD' of `d` on the Israel wall clock (the custom view bounds are local dates). */
+function localYmd(d: Date): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+}
+
+/** The alerts window: the last 7 local days, today included. */
+export function alertWeek(now: Date): { from: string; to: string } {
+  const to = localYmd(now);
+  const from = new Date(`${to}T12:00:00Z`);
+  from.setUTCDate(from.getUTCDate() - (ALERT_DAYS - 1));
+  return { from: from.toISOString().slice(0, 10), to };
+}
+
+export interface ChainAlertBranch {
+  restaurantId: string;
+  name: string;
+  leakIls: number;
+  spendIls: number;
+  leakPct: number | null;
+  /** The discrepancy type with the most leak ₪ in the window (null = no leak). */
+  topDriver: { type: string; leakIls: number; count: number } | null;
+}
+
+export interface ChainAlertsResult {
+  /** False when the chainAlerts flag is off for the active branch (nothing else is computed). */
+  enabled: boolean;
+  from: string | null;
+  to: string | null;
+  /** The branch to look at this week: most leak ₪ (≥ ALERT_MIN_LEAK_ILS); null = all calm. */
+  focus: ChainAlertBranch | null;
+  /** Every branch, most leak ₪ first. */
+  branches: ChainAlertBranch[];
+}
+
+/** Pure: rank branches and pick the focus branch. */
+export function pickAlertFocus(branches: ChainAlertBranch[]): { focus: ChainAlertBranch | null; branches: ChainAlertBranch[] } {
+  const ranked = [...branches].sort(
+    (a, b) => b.leakIls - a.leakIls || (b.leakPct ?? 0) - (a.leakPct ?? 0) || a.name.localeCompare(b.name, 'he'),
+  );
+  const top = ranked[0];
+  return { focus: top && top.leakIls >= ALERT_MIN_LEAK_ILS ? top : null, branches: ranked };
 }
 
 export const chainRouter = router({
@@ -316,6 +369,42 @@ export const chainRouter = router({
         priceDisparities: gate.priceDisparity ? computePriceDisparities(priceLines, { limit: 10 }) : null,
       };
     }),
+
+  /**
+   * chainAlerts (flag): "the branch to look at this week" + each branch's main
+   * leak driver (discrepancy type + ₪), last 7 local days. Existing charts SQL
+   * only (computeLeakSummary / computeLeakGrouped by type), per branch under its
+   * own RLS — same scope and plan gate as `overview`.
+   */
+  alerts: authedProcedure.query(async ({ ctx }): Promise<ChainAlertsResult> => {
+    const scope = await resolveScope(ctx);
+    const gate = await gateFor(ctx, scope);
+    if (!gate.chainEnabled) throw chainRequired(gate.entitlements.planKey);
+    if (!gate.chainAlerts) return { enabled: false, from: null, to: null, focus: null, branches: [] };
+
+    const { from, to } = alertWeek(new Date());
+    const spec = { period: 'custom' as const, from, to };
+    const branches = [
+      scope.active,
+      ...scope.branches.filter((b) => b.restaurantId !== scope.active.restaurantId),
+    ].slice(0, MAX_CHAIN_BRANCHES);
+    const rows = await mapLimit(branches, BRANCH_CONCURRENCY, (b) =>
+      inBranch(ctx.db, ctx.session.userId, b.restaurantId, async (tx): Promise<ChainAlertBranch> => {
+        const summary = await computeLeakSummary(tx, b.restaurantId, spec);
+        const byType = await computeLeakGrouped(tx, b.restaurantId, spec, 'type', 'off', 1);
+        const top = byType.find((r) => r.key && r.leakIls > 0);
+        return {
+          restaurantId: b.restaurantId,
+          name: b.name,
+          leakIls: summary.leakIls,
+          spendIls: summary.spendIls,
+          leakPct: summary.leakPct,
+          topDriver: top && summary.leakIls > 0 ? { type: top.key, leakIls: top.leakIls, count: top.count } : null,
+        };
+      }),
+    );
+    return { enabled: true, from, to, ...pickAlertFocus(rows) };
+  }),
 
   /**
    * Validate a branch switch: the target must be one of the caller's own

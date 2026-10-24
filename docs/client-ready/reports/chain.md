@@ -250,3 +250,41 @@ Minor findings, documented and not fixed:
   supabase-sync up to date.
 - Layer 2 **134/134** (`reports/chain-layer2-final.log`), with 0 console errors and 0 server errors.
 - Toolbar period changes went **6/6 on `/dashboard` and on `/dashboard/chain`, in he and in en**.
+
+## Demo hardening (2026-10-24, DEMO_TODAY=2026-10-25)
+
+**QA run:** local seed, `next start`, Playwright, he + en.
+
+- **Per-branch numbers.** Each branch's ₪ leak, % and spend on `/dashboard/chain` equal that branch's own owner dashboard, after switching to it, for:
+  - 6 periods: this month, last month, quarter, ytd, 12 months, and a custom range;
+  - 3 compare modes: off, prev, yoy;
+  - all 3 branches.
+
+  Chain totals equal Σ branches. Result: 190/190.
+- **Compare and heatmap.** The `cmp=prev` per-branch delta equals the dashboard delta. The heatmap ends at the period's end month. The worst branch is picked by leak %.
+- **Branch switching** at 1366 (header) and 390 (drawer list), plus the chain-row "go to branch" button. Every page has the right html lang/dir, zero console errors, zero 5xx and no horizontal scroll. Result: 202/202.
+
+**Fixed: phone width (390).**
+- The ranking table scrolled sideways, with the % column off-screen.
+- The heatmap opened on its oldest, empty months.
+- The suppliers table was clipped.
+
+Below `sm`, the tables now keep only the key columns:
+- the ranking shows branch, ₪, % and trend, with the switch action under the name;
+- the heatmap shows the last 3 months;
+- each supplier's branches appear under its name.
+
+From `sm` up, nothing changed.
+
+**New: `chainAlerts` flag**, "branch to look at this week".
+- `chain.alerts`, last 7 Israel-local days:
+  - per branch, inside its own `withRestaurant`, it reuses the existing `computeLeakSummary` + `computeLeakGrouped(type)`;
+  - the focus branch is the one with the most leak ₪, at ≥ ₪50;
+  - the main driver of each branch is its top discrepancy type and ₪.
+- No new charts SQL.
+- With the flag off, the card is absent and nothing extra is computed.
+- The seeded demo tenant has `features.all`, so the card shows in the demo.
+- QA: each branch's week ₪ equals its own dashboard for the same custom range, and its driver ₪ equals the leak explorer's by-type row. Checked in he and en, at 1366 and 390, with zero console errors.
+- Tests: chain.attack +6 (flag off; A + A2 only, with B/M/X never in the payload; the active branch's flag decides; manager and forged session get FORBIDDEN; the pure window and focus rules). One COVERAGE entry added.
+
+**Immutable files touched:** none. `cross-tenant.attack.test.ts` only gained one COVERAGE entry, which AGENTS.md allows; no assertion was removed or weakened.

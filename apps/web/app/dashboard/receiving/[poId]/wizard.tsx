@@ -96,6 +96,8 @@ export function ReceivingWizard({
   const [grId, setGrId] = useState<string | null>(null);
   const [invoiceId, setInvoiceId] = useState<string | null>(null);
   const [ocrNotice, setOcrNotice] = useState<OcrNotice>(null);
+  /** The scanned number is already on another invoice of this supplier. */
+  const [duplicateNumber, setDuplicateNumber] = useState<string | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
   /** Bumped on retake / skip / unmount — cancels any in-flight poll. */
   const pollTokenRef = useRef(0);
@@ -327,6 +329,7 @@ export function ReceivingWizard({
       labels: { unnamed: t('unnamedItem'), unordered: t('unorderedItem') },
     });
     setResult(adapted.result);
+    setDuplicateNumber(invoice.duplicateOf?.invoiceNumber ?? null);
     setMarks((prev) => keepAdjusted(prev, adapted.initialMarks, adjustedKeysRef.current));
     setGrLineIdByKey(adapted.grLineIdByKey);
     setStep('RECONCILIATION_REVIEW');
@@ -465,6 +468,21 @@ export function ReceivingWizard({
         <OcrNoticeBanner notice={ocrNotice} t={t} dir={dir} onRefresh={() => void refreshInvoice()} />
       ) : null}
 
+      {duplicateNumber && (step === 'RECONCILIATION_REVIEW' || step === 'ADJUST_QUANTITIES') ? (
+        // Calm, not an alarm: the read is kept and goes to a human; receiving continues.
+        <div
+          role="status"
+          data-testid="duplicate-invoice-notice"
+          dir={dir}
+          className="mb-4 flex items-center gap-3 rounded-xl border border-line bg-surface-2 px-4 py-3 text-sm text-ink"
+        >
+          <Info className="h-4 w-4 shrink-0 text-muted" aria-hidden="true" />
+          <span className="flex-1">
+            {t('steps.recon.duplicateInvoice', { number: duplicateNumber })}
+          </span>
+        </div>
+      ) : null}
+
       {step === 'RECONCILIATION_REVIEW' && result ? (
         <Reconciliation
           result={result}
@@ -473,6 +491,7 @@ export function ReceivingWizard({
           onRetake={() => {
             pollTokenRef.current += 1; // drop the old scan's pending result
             setOcrNotice(null);
+            setDuplicateNumber(null);
             setInvoiceId(null);
             setImage(null);
             setResult(null);

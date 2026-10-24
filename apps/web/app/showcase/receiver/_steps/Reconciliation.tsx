@@ -249,7 +249,7 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
       </div>
 
       {/* Mobile: one card per line (receivers use phones), grouped by side. */}
-      <div className="mb-6 space-y-5" data-testid="recon-cards">
+      <div className="mb-6 space-y-5 md:hidden" data-testid="recon-cards">
         {sections ? (
           sections.map((s) => (
             <section key={s.key} data-testid={`recon-section-${s.key}`}>

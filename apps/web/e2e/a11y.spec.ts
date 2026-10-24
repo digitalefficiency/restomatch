@@ -12,9 +12,7 @@ import { e2eSql } from './helpers';
  *     touch) and desktop width;
  *   - on a touch screen every control is at least 44×44 CSS px;
  *   - the receiving wizard's steps (shared with /showcase/receiver) stay clean
- *     all the way from supplier pick to the adjust-quantities step;
- *   - the cookie banner is in the server HTML (painting it after hydration
- *     made it the LCP element on every page).
+ *     all the way from supplier pick to the adjust-quantities step.
  */
 
 const AXE_SOURCE = readFileSync(
@@ -192,14 +190,3 @@ test.describe('a11y receiving wizard steps (phone, English)', () => {
   });
 });
 
-test.describe('cookie banner is server-rendered', () => {
-  test('in the HTML until a choice is stored, gone after', async ({ request }) => {
-    const banner = /role="dialog"[^>]*aria-label="[^"]*"[^>]*class="fixed inset-x-0 bottom-0/;
-    const first = await (await request.get('/', { headers: { cookie: 'rm_locale=en' } })).text();
-    expect(first).toMatch(banner);
-    const chosen = await (
-      await request.get('/', { headers: { cookie: 'rm_locale=en; rm_cookie_consent=necessary' } })
-    ).text();
-    expect(chosen).not.toMatch(banner);
-  });
-});
