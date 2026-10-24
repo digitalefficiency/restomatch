@@ -6,12 +6,13 @@ import {
   createPushNotifier,
   createWhatsAppNotifier,
   getEntitlements,
+  loadPriorDecisions,
   persistMatchRun,
   recipientsForRestaurant,
   recordUsage,
   resolveApprovalThresholds,
 } from '@restomatch/api';
-import { and, eq, invoices, matchRuns, restaurants, suppliers } from '@restomatch/db';
+import { and, desc, eq, invoices, matchRuns, restaurants, suppliers, type Database } from '@restomatch/db';
 import { runMatch, type MatchOutput } from '@restomatch/matching';
 import { makeWorker } from '../queue';
 import { appBaseUrl } from '../lib/notifyHelpers';
@@ -26,6 +27,101 @@ import { findJobInvoice } from './findJobInvoice';
 export interface MatchInvoiceJob {
   restaurantId: string;
   invoiceId: string;
+  /**
+   * Set by receiving.submitReceipt: the receipt is now counted, so a run made
+   * before the count (gr_lines empty → every line "short") must be replaced.
+   * Without it the job stays idempotent (an already-matched invoice is skipped).
+   */
+  rematch?: boolean;
+}
+
+const CLEAN: MatchOutput = { status: 'clean', totalDiscrepancyAmount: 0, discrepancies: [] };
+
+export interface MatchJobOutcome {
+  result: MatchOutput;
+  /** The new run, or null when the job had nothing to do. */
+  persisted: Awaited<ReturnType<typeof persistMatchRun>> | null;
+  /** True when this run replaced an earlier run of the same invoice. */
+  replaced: boolean;
+  /** Why nothing ran (logs/tests). */
+  skipped?: 'ocr_pending' | 'already_matched' | 'awaiting_review' | 'no_lines';
+}
+
+/**
+ * The match-invoice job without its notifications (tested directly).
+ *
+ *  • an invoice still in OCR is a no-op — the OCR job matches it when it lands
+ *    (covers a receipt submitted before its invoice finished reading);
+ *  • a plain job on an already-matched invoice is a no-op (idempotent retries);
+ *  • a `rematch` replaces the earlier run against the same PO and keeps the
+ *    people's decisions on findings that still exist (as match.runForInvoice);
+ *  • a `rematch` of a never-matched invoice honours the OCR gate: an invoice the
+ *    OCR held for a human (low confidence → 'parsed', or a possible duplicate)
+ *    still waits for that human.
+ */
+export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): Promise<MatchJobOutcome> {
+  const { restaurantId, invoiceId } = data;
+  const [inv] = await db
+    .select({ status: invoices.status, ocrPayload: invoices.ocrPayload })
+    .from(invoices)
+    .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
+    .limit(1);
+  if (!inv || inv.status === 'ocr_pending') {
+    return { result: CLEAN, persisted: null, replaced: false, skipped: 'ocr_pending' };
+  }
+
+  const [priorRun] = await db
+    .select({ id: matchRuns.id, poId: matchRuns.poId })
+    .from(matchRuns)
+    .where(and(eq(matchRuns.invoiceId, invoiceId), eq(matchRuns.restaurantId, restaurantId)))
+    .orderBy(desc(matchRuns.runAt))
+    .limit(1);
+  if (priorRun && !data.rematch) {
+    return { result: CLEAN, persisted: null, replaced: false, skipped: 'already_matched' };
+  }
+  if (!priorRun && data.rematch) {
+    const raw = inv.ocrPayload?.raw as { duplicateOf?: unknown } | null | undefined;
+    if (inv.status !== 'matched' || raw?.duplicateOf !== undefined) {
+      return { result: CLEAN, persisted: null, replaced: false, skipped: 'awaiting_review' };
+    }
+  }
+
+  // Discover the PO + assemble the 3-way MatchInput (tolerances/vat/baselines
+  // resolved from the restaurant inside the assembler). A re-match stays on the
+  // PO it was matched against.
+  const built = await buildMatchInputForInvoice(db, restaurantId, invoiceId, {
+    pinnedPoId: priorRun?.poId ?? null,
+  });
+  if (!built) return { result: CLEAN, persisted: null, replaced: false, skipped: 'no_lines' };
+
+  // Per-restaurant approval-routing thresholds (settings.approvalThresholds).
+  const [restaurant] = await db
+    .select({ settings: restaurants.settings })
+    .from(restaurants)
+    .where(eq(restaurants.id, restaurantId))
+    .limit(1);
+  const rules = buildRules(resolveApprovalThresholds(restaurant?.settings?.approvalThresholds));
+  const result = runMatch(built.input);
+
+  const persisted = await db.transaction(async (rawTx) => {
+    const tx = rawTx as unknown as Database;
+    let prior: Awaited<ReturnType<typeof loadPriorDecisions>> | undefined;
+    if (priorRun) {
+      prior = await loadPriorDecisions(tx, restaurantId, invoiceId);
+      await tx
+        .delete(matchRuns)
+        .where(and(eq(matchRuns.invoiceId, invoiceId), eq(matchRuns.restaurantId, restaurantId)));
+    }
+    return persistMatchRun(
+      tx,
+      { restaurantId, invoiceId, poId: built.poId, grId: built.grId },
+      built.input,
+      result,
+      rules,
+      prior,
+    );
+  });
+  return { result, persisted, replaced: Boolean(priorRun) };
 }
 
 // Env-gated provider selection: real WhatsApp Cloud when
@@ -53,46 +149,17 @@ export function startMatchInvoiceWorker() {
       );
     }
 
-    // Idempotency: if this invoice was already matched, skip — avoids duplicate
-    // match_runs / discrepancies when a job is retried.
-    const existingRun = await db
-      .select({ id: matchRuns.id })
-      .from(matchRuns)
-      .where(and(eq(matchRuns.invoiceId, invoiceId), eq(matchRuns.restaurantId, restaurantId)))
-      .limit(1);
-    if (existingRun.length > 0) {
-      console.log(`[match-invoice] invoice=${invoiceId} already matched — skipping (idempotent)`);
-      return { status: 'clean', totalDiscrepancyAmount: 0, discrepancies: [] };
+    const { result, persisted, replaced, skipped } = await matchInvoiceForJob(db, job.data);
+    if (!persisted) {
+      console.log(`[match-invoice] invoice=${invoiceId} — nothing to do (${skipped})`);
+      return result;
     }
-
-    // Discover the PO + assemble the 3-way MatchInput (tolerances/vat/baselines
-    // resolved from the restaurant inside the assembler).
-    const built = await buildMatchInputForInvoice(db, restaurantId, invoiceId);
-    if (!built) {
-      console.warn(`[match-invoice] invoice=${invoiceId} has no lines to match — skipping`);
-      return { status: 'clean', totalDiscrepancyAmount: 0, discrepancies: [] };
-    }
-
-    // Per-restaurant approval-routing thresholds (settings.approvalThresholds).
-    const [restaurant] = await db
-      .select({ settings: restaurants.settings })
-      .from(restaurants)
-      .where(eq(restaurants.id, restaurantId))
-      .limit(1);
-    const rules = buildRules(resolveApprovalThresholds(restaurant?.settings?.approvalThresholds));
-
-    const result = runMatch(built.input);
-    const persisted = await persistMatchRun(
-      db,
-      { restaurantId, invoiceId, poId: built.poId, grId: built.grId },
-      built.input,
-      result,
-      rules,
-    );
 
     // Fire notifications to each role needing attention. WhatsApp is a paid
     // feature (whatsapp_alerts) — gate it on entitlements. Push is always on.
-    if (persisted.rolesNeedingNotification.length > 0) {
+    // A re-match after the count replaces a run whose people were already told;
+    // only a first match notifies (the approvals queue shows the fresh numbers).
+    if (!replaced && persisted.rolesNeedingNotification.length > 0) {
       const ent = await getEntitlements(db, restaurantId);
       const whatsappAllowed = ent.active && ent.features.includes('whatsapp_alerts');
       const summary = `${result.discrepancies.length} חריגות, סה"כ הפסד פוטנציאלי ₪${result.totalDiscrepancyAmount.toFixed(0)}`;

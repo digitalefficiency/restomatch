@@ -1,7 +1,7 @@
 import { sql, type Database } from '@restomatch/db';
 import { computeLeakHero } from './leak-hero';
 import { parseReportMonth } from './leak-report';
-import { computeLeakSummary, viewInvoicesSql, type ViewCompare, type ViewSpec } from './leak-views';
+import { LEAK_FILTER, computeLeakSummary, viewInvoicesSql, type ViewCompare, type ViewSpec } from './leak-views';
 import { computeOwnerKpis } from './owner-kpis';
 
 /**
@@ -106,7 +106,7 @@ const num = (v: unknown): number => (v == null ? 0 : Number(v));
 const money = (v: unknown): number => Math.round(num(v) * 100) / 100;
 const strOrNull = (v: unknown): string | null => (v == null ? null : String(v));
 
-const COUNTS_AS_LEAK = sql`d.severity IN ('warn','block') AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL') AND ABS(d.delta_amount) > 0`;
+const COUNTS_AS_LEAK = sql`${LEAK_FILTER} AND ABS(d.delta_amount) > 0`;
 
 /**
  * One branch's numbers for the selected period. MUST run inside
@@ -132,7 +132,7 @@ export async function computeBranchSnapshot(
       WITH ${viewInvoicesSql(restaurantId, spec)}
       SELECT per.supplier_id, s.name, s.name_en, s.business_id,
         COUNT(*) FILTER (WHERE NOT per.pending_link) AS invoice_count,
-        COALESCE(SUM(per.total_excl) FILTER (WHERE NOT per.pending_link), 0) AS spend,
+        COALESCE(SUM(per.total_excl) FILTER (WHERE NOT per.pending_link AND NOT per.dup_copy), 0) AS spend,
         COALESCE(SUM(LEAST(per.raw_leak, per.total)), 0) AS leak
       FROM per
       LEFT JOIN suppliers s ON s.id = per.supplier_id AND s.restaurant_id = ${restaurantId}
@@ -216,6 +216,20 @@ export function supplierMergeKey(name: string | null, businessId: string | null)
   return norm ? `name:${norm}` : null;
 }
 
+/**
+ * A comparison period is too thin to compare when its checked spend is below
+ * 10% of the current period's (a branch's first month, a seed gap): the UI then
+ * shows only the ₪ difference — no %, no red ▲ (AGENTS.md: calm, never a false
+ * alarm). Spend, not leak, is the yardstick: it is how much data the comparison
+ * stands on. Same rule as apps/web/lib/components/views/state.ts isThinBase.
+ */
+export const THIN_BASE_SPEND_RATIO = 0.1;
+
+export function isThinBase(currentSpend: number, baseSpend: number | null | undefined): boolean {
+  if (baseSpend == null) return false;
+  return baseSpend < currentSpend * THIN_BASE_SPEND_RATIO;
+}
+
 export interface ChainBranchRow extends BranchSnapshot {
   /** 1 = the most leak ₪ in the period. */
   rank: number;
@@ -223,6 +237,8 @@ export interface ChainBranchRow extends BranchSnapshot {
   prevLeakPct: number | null;
   /** leak ₪ in the period − the comparison period; null when compare is off. */
   leakDeltaIls: number | null;
+  /** The comparison period is too thin for a % / alarm colour (isThinBase). */
+  thinBase: boolean;
 }
 
 export interface ChainSupplierRow {
@@ -249,6 +265,8 @@ export interface ChainTotals {
   /** The comparison period's totals; null when compare is off. */
   prevLeakIls: number | null;
   prevLeakPct: number | null;
+  /** The comparison period is too thin for a % / alarm colour (isThinBase); false when compare is off. */
+  thinBase: boolean;
 }
 
 export interface ChainOverview {
@@ -307,6 +325,7 @@ export function aggregateChain(
       prevLeakIls: p ? p.leakIls : null,
       prevLeakPct: p ? p.leakPct : null,
       leakDeltaIls: p ? ils(ag(s.leakIls) - ag(p.leakIls)) : null,
+      thinBase: p ? isThinBase(s.spendIls, p.spendIls) : false,
     };
   });
 
@@ -377,6 +396,7 @@ export function aggregateChain(
       openDiscrepancies: open,
       prevLeakIls: compared ? ils(prevLeak) : null,
       prevLeakPct: compared ? pct(prevLeak, prevSpend) : null,
+      thinBase: compared ? isThinBase(ils(spend), ils(prevSpend)) : false,
     },
     branches,
     heatmap: branches.map((b) => ({ restaurantId: b.restaurantId, cells: b.trend })),

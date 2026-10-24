@@ -65,7 +65,7 @@ export function OverridesForm({ restaurantId, current }: { restaurantId: string;
   }
 
   const inputCls =
-    'w-full rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm text-ink transition-colors focus:border-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary';
+    'w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink transition-colors focus:border-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 
   return (
     <div className="mt-5 border-t border-line pt-5">

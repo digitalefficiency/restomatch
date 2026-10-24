@@ -7,7 +7,7 @@ import { formatDate } from '@/lib/i18n/format';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { leaks as leaksNs } from '@/lib/i18n/messages/leaks';
 import { approvals as approvalsNs } from '@/lib/i18n/messages/approvals';
-import { Card, EmptyState, SectionHeader } from '@/lib/components';
+import { Badge, Card, EmptyState, SectionHeader } from '@/lib/components';
 import { discrepancyLabel, displayName } from '../../approvals/vocab';
 import { PrintButton } from './print-button';
 import { claimableLines, sumClaims, type VatBasis } from '@restomatch/api';
@@ -79,7 +79,7 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
           level={1}
           title={t('claims.title')}
           subtitle={t('claims.subtitle', { month })}
-          action={letters.length > 0 ? <PrintButton label={t('claims.print')} /> : undefined}
+          action={letters.length > 0 ? <PrintButton label={t('claims.print')} primary /> : undefined}
         />
       </div>
 
@@ -98,7 +98,13 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
             >
               <div className="flex flex-col gap-1 text-sm text-muted sm:flex-row sm:justify-between print:text-black">
                 <div>
-                  <p className="font-semibold text-ink print:text-black">{t('claims.to', { supplier: letter.name })}</p>
+                  <p className="flex flex-wrap items-center gap-2 font-semibold text-ink print:text-black">
+                    {t('claims.to', { supplier: letter.name })}
+                    {/* T2 "act now": every letter is still to be sent. */}
+                    <Badge tone="warning-solid" className="print:hidden">
+                      {t('claims.toSend')}
+                    </Badge>
+                  </p>
                   <p>
                     <WithOriginal text={t('claims.from', { restaurant })} value={restaurant} />
                   </p>
