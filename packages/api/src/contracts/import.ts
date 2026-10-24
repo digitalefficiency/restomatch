@@ -213,7 +213,7 @@ export async function commitContractRows(
       result.skipped.push({ row: i + 2, label, reason: 'NO_PRODUCT' });
       continue;
     }
-    if (r.price == null || !(r.price > 0) || r.price > 10_000_000) {
+    if (r.price == null || !(Math.round(r.price * 10_000) >= 1) || r.price > 10_000_000) {
       result.skipped.push({ row: i + 2, label, reason: 'NO_PRICE' });
       continue;
     }

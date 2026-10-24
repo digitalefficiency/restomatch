@@ -1,8 +1,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createDb,
+  discrepancies,
   eq,
   inArray,
+  invoiceLines,
+  invoices,
+  matchRuns,
   notificationsOutbox,
   poLines,
   priceAlerts,
@@ -384,6 +388,56 @@ describe('over-contract lines (badge source)', () => {
     expect(lines[0]).toMatchObject({ invoiceLineId: A.invoiceLineId, contractUnitPrice: 9, billedUnitPrice: 10, overAgorot: 1000 });
   });
 
+  it('never counts a held duplicate copy twice; the window is by invoice date (money review)', async () => {
+    await addContract(A, '9.0000');
+    const [orig] = await db.select().from(invoices).where(eq(invoices.id, A.invoiceId));
+    const [origLine] = await db.select().from(invoiceLines).where(eq(invoiceLines.id, A.invoiceLineId));
+    // A re-scan stored the way writeOcrHeader stores it: number dropped, duplicateOf marker, same lines.
+    const [copy] = await db
+      .insert(invoices)
+      .values({
+        restaurantId: A.restaurantId,
+        supplierId: A.supplierId,
+        invoiceNumber: null,
+        invoiceDate: orig!.invoiceDate,
+        totalExclVat: orig!.totalExclVat,
+        vatAmount: orig!.vatAmount,
+        totalInclVat: orig!.totalInclVat,
+        status: 'disputed',
+        source: 'photo',
+        ocrPayload: { raw: { duplicateOf: { invoiceId: A.invoiceId, invoiceNumber: orig!.invoiceNumber } } } as never,
+      })
+      .returning();
+    const { id: _id, invoiceId: _inv, ...lineRest } = origLine!;
+    await db.insert(invoiceLines).values({ ...lineRest, invoiceId: copy!.id });
+    const since = new Date(Date.now() - 90 * 86_400_000);
+    try {
+      let lines = await findOverContractLines(db, A.restaurantId, { since });
+      expect(lines.map((l) => l.invoiceId)).toEqual([A.invoiceId]);
+      expect(lines.reduce((s, l) => s + l.overAgorot, 0)).toBe(1000);
+
+      // Matched: an open DUPLICATE_INVOICE on the copy's latest run keeps it out…
+      const [run] = await db.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: copy!.id, overallStatus: 'blocked' }).returning();
+      const [dup] = await db
+        .insert(discrepancies)
+        .values({ restaurantId: A.restaurantId, matchRunId: run!.id, type: 'DUPLICATE_INVOICE', severity: 'block', deltaAmount: '0' })
+        .returning();
+      lines = await findOverContractLines(db, A.restaurantId, { since });
+      expect(lines.map((l) => l.invoiceId)).toEqual([A.invoiceId]);
+      // …and a human waiving it ("not a duplicate") brings the copy back.
+      await db.update(discrepancies).set({ resolutionStatus: 'rejected' }).where(eq(discrepancies.id, dup!.id));
+      lines = await findOverContractLines(db, A.restaurantId, { since });
+      expect(lines.map((l) => l.invoiceId).sort()).toEqual([A.invoiceId, copy!.id].sort());
+
+      // The window follows the invoice date, not when the row was created.
+      await db.update(invoices).set({ invoiceDate: new Date(Date.now() - 200 * 86_400_000) }).where(eq(invoices.id, copy!.id));
+      lines = await findOverContractLines(db, A.restaurantId, { since });
+      expect(lines.map((l) => l.invoiceId)).toEqual([A.invoiceId]);
+    } finally {
+      await db.delete(invoices).where(eq(invoices.id, copy!.id));
+    }
+  });
+
   it('is empty within tolerance, without a contract, and for another tenant’s invoice', async () => {
     await addContract(A, '9.9000'); // 10 vs 9.90 → 1%, ₪0.10: inside the default band
     expect(await findOverContractLines(db, A.restaurantId, { invoiceIds: [A.invoiceId] })).toEqual([]);
@@ -416,6 +470,13 @@ describe('contracts router', () => {
     await expect(
       c.contracts.create({ supplierId: A.supplierId, productId: A.productId, contractPrice: 0, validFrom: '2026-01-01' }),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    // …and so is one that rounds to ₪0.0000 when stored (was a CHECK-violation 500).
+    await expect(
+      c.contracts.create({ supplierId: A.supplierId, productId: A.productId, contractPrice: 0.00004, validFrom: '2026-01-01' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    const { id: tiny } = await c.contracts.create({ supplierId: A.supplierId, productId: A.productId, contractPrice: 0.0001, validFrom: '2026-01-01' });
+    await expect(c.contracts.update({ id: tiny, contractPrice: 0.00004 })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await c.contracts.delete({ id: tiny });
   });
 
   it('imports a CSV: resolves by catalog SKU and by name, upserts, reports unknown products', async () => {

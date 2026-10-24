@@ -25,8 +25,16 @@ import { findOverContractLines } from '../contracts/overContract';
 
 const MAX_ROWS = 5000;
 const DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD');
-/** A contract price of ₪0 would turn every billed line into a leak — must be > 0. */
-const PRICE = z.number().finite().positive().max(10_000_000);
+/**
+ * A contract price of ₪0 would turn every billed line into a leak — must be > 0
+ * AFTER the 4-dp rounding it is stored with (`.toFixed(4)`): 0.00004 would
+ * become '0.0000' and hit CHECK contract_price > 0 as an unhandled 500.
+ */
+const PRICE = z
+  .number()
+  .finite()
+  .max(10_000_000)
+  .refine((v) => Math.round(v * 10_000) >= 1, { message: 'contract price must be at least 0.0001' });
 
 const FileInput = z
   .object({

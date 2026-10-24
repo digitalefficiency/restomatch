@@ -1,12 +1,13 @@
 import {
   and,
   desc,
+  discrepancies,
   eq,
-  gte,
   inArray,
   invoiceLines,
   invoices,
   isNotNull,
+  matchRuns,
   products,
   restaurants,
   sql,
@@ -69,7 +70,20 @@ export async function findOverContractLines(
     isNotNull(invoiceLines.productId),
   ];
   if (filter.invoiceIds) conds.push(inArray(invoices.id, filter.invoiceIds));
-  if (filter.since) conds.push(gte(invoices.createdAt, filter.since));
+  // The contract rule dates a line by its invoice date; so does the window.
+  if (filter.since) conds.push(sql`coalesce(${invoices.invoiceDate}, ${invoices.createdAt}) >= ${filter.since.toISOString()}::timestamptz`);
+  // A held duplicate copy keeps its lines (#63 writeOcrHeader): never count the
+  // same supplier invoice twice. Same semantics as price_history / exports:
+  // excluded while its latest run carries a DUPLICATE_INVOICE nobody waived,
+  // or while it still carries the worker's duplicateOf marker and no run has
+  // waived the flag (e.g. not matched yet).
+  const latestRunId = sql`(select mr.id from ${matchRuns} mr where mr.invoice_id = ${invoices.id} and mr.restaurant_id = ${restaurantId} order by mr.run_at desc limit 1)`;
+  const duplicateFlag = (resolution: ReturnType<typeof sql>) =>
+    sql`exists (select 1 from ${discrepancies} d where d.match_run_id = ${latestRunId} and d.restaurant_id = ${restaurantId} and d.type = 'DUPLICATE_INVOICE' and ${resolution})`;
+  conds.push(sql`not ${duplicateFlag(sql`d.resolution_status <> 'rejected'`)}`);
+  conds.push(
+    sql`not ((${invoices.ocrPayload} -> 'raw' -> 'duplicateOf') is not null and not ${duplicateFlag(sql`d.resolution_status = 'rejected'`)})`,
+  );
 
   const lines = await db
     .select({

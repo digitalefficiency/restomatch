@@ -52,6 +52,9 @@ describe('contracts screen logic', () => {
     expect(parsePrice(' 12,5 ')).toBe(12.5);
     expect(parsePrice('')).toBeNull();
     expect(parsePrice('-1')).toBeNull();
+    // stored as NUMERIC(12,4): anything that rounds to 0.0000 is not a price
+    expect(parsePrice('0.00004')).toBeNull();
+    expect(parsePrice('0.0001')).toBe(0.0001);
     // money cross-QA F1: comma = thousands for groups of 3, decimal for 1–2 digits
     expect(parsePrice('1,250')).toBe(1250);
     expect(parsePrice('1,234.50')).toBe(1234.5);

@@ -93,7 +93,8 @@ export function parsePrice(raw: string): number | null {
   else if (/^\d+,\d{1,2}$/.test(s)) norm = s.replace(',', '.');
   if (norm === null) return null;
   const n = Number(norm);
-  return Number.isFinite(n) && n > 0 ? n : null;
+  // > 0 after the 4-dp rounding the API stores (0.00004 would be ₪0.0000).
+  return Number.isFinite(n) && Math.round(n * 10_000) >= 1 ? n : null;
 }
 
 /** "18" (percent, as typed) → 0.18 fraction; null outside (0, 500]. */
