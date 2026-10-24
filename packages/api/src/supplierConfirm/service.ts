@@ -325,6 +325,7 @@ export interface SupplierResponseDiff {
   lines: Array<{
     poLineId: string;
     description: string;
+    descriptionEn: string | null;
     unit: string;
     qtyOrdered: number;
     qtyAvailable: number | null;
@@ -357,7 +358,9 @@ export async function supplierResponseDiff(
         .select({
           id: poLines.id,
           rawDescription: poLines.rawDescription,
+          rawDescriptionEn: poLines.rawDescriptionEn,
           productName: products.canonicalName,
+          productNameEn: products.nameEn,
           unit: poLines.unit,
           qty: poLines.qtyOrdered,
           price: poLines.unitPriceExpected,
@@ -381,6 +384,7 @@ export async function supplierResponseDiff(
           return {
             poLineId: c.poLineId,
             description: l.productName ?? l.rawDescription ?? '',
+            descriptionEn: l.productNameEn ?? l.rawDescriptionEn ?? null,
             unit: l.unit,
             qtyOrdered: Number(l.qty),
             qtyAvailable: c.qtyAvailable,

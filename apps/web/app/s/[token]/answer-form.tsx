@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { CheckCircle2 } from 'lucide-react';
 import { Button, Card, cn } from '@/lib/components';
+import { UnitText } from '@/lib/components/UnitText';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
 import { supplierConfirm } from '@/lib/i18n/messages/supplierConfirm';
@@ -125,7 +126,7 @@ export function SupplierAnswerForm({ token, lines }: { token: string; lines: Por
                 </div>
               </div>
               <p className="mt-1 text-sm text-muted">
-                {t('portal.ordered')}: <bdi className="font-mono tabular-nums">{formatNumber(l.qtyOrdered, locale)}</bdi> {l.unit}
+                {t('portal.ordered')}: <bdi className="font-mono tabular-nums">{formatNumber(l.qtyOrdered, locale)}</bdi> <UnitText unit={l.unit} />
                 {l.unitPrice != null ? (
                   <>
                     {' · '}
@@ -150,7 +151,10 @@ export function SupplierAnswerForm({ token, lines }: { token: string; lines: Por
                   {qtyBad ? <span className="mt-1 block text-danger">{t('portal.invalidQty')}</span> : null}
                 </label>
                 <label className="block text-xs font-medium text-muted">
-                  {t('portal.yourPrice')} <span className="text-subtle">{t('portal.perUnit', { unit: l.unit })}</span>
+                  {t('portal.yourPrice')}{' '}
+                  <span className="text-subtle">
+                    ({t('portal.perUnit')} <UnitText unit={l.unit} />)
+                  </span>
                   <input
                     inputMode="decimal"
                     dir="ltr"

@@ -67,8 +67,11 @@ for (const locale of ['he', 'en']) {
 // 3. Submit a shortage on the first line (he, 390) → done; reopening shows "already answered".
 {
   const r = await open('he', 390, `/s/${TOKEN}`);
+  // Act like a real supplier: dismiss the cookie banner (essential only) first.
+  await r.page.getByRole('button', { name: /רק חיוניות|Essential only/ }).click().catch(() => {});
   const qty = r.page.locator('input[inputmode="decimal"]').first();
   await qty.fill('1');
+  await r.page.locator('button[type=submit]').scrollIntoViewIfNeeded();
   await r.page.click('button[type=submit]');
   await r.page.waitForSelector('[role=status]', { timeout: 15000 });
   const done = await r.page.innerText('[role=status]');

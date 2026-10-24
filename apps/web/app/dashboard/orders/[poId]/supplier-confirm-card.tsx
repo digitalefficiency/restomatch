@@ -4,6 +4,7 @@ import { formatDateTime, formatNumber } from '@/lib/i18n/format';
 import { supplierConfirm } from '@/lib/i18n/messages/supplierConfirm';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { formatIls } from '@/lib/money';
+import { UnitText } from '@/lib/components/UnitText';
 import { createServerCaller } from '@/lib/trpc/server';
 import { SupplierLinkButton } from './supplier-link-button';
 
@@ -67,12 +68,18 @@ export async function SupplierConfirmCard({
                 <tbody>
                   {r.lines.map((l) => (
                     <tr key={l.poLineId} className="border-t border-line">
-                      <td className="p-2 text-ink">{displayName(l.description, null, locale).primary}</td>
+                      <td className="p-2 text-ink">{displayName(l.description, l.descriptionEn, locale).primary}</td>
                       <td className="p-2 text-end tabular-nums">
-                        {formatNumber(l.qtyOrdered, locale)} {l.unit}
+                        {formatNumber(l.qtyOrdered, locale)} <UnitText unit={l.unit} />
                       </td>
                       <td className={`p-2 text-end tabular-nums ${l.qtyAvailable != null ? 'font-semibold text-warn' : 'text-muted'}`}>
-                        {l.qtyAvailable != null ? `${formatNumber(l.qtyAvailable, locale)} ${l.unit}` : '—'}
+                        {l.qtyAvailable != null ? (
+                          <>
+                            {formatNumber(l.qtyAvailable, locale)} <UnitText unit={l.unit} />
+                          </>
+                        ) : (
+                          '—'
+                        )}
                       </td>
                       <td className="p-2 text-end tabular-nums">
                         <bdi dir="ltr">{money(l.unitPriceAgreed)}</bdi>

@@ -6,7 +6,7 @@
  *
  * What it adds to the demo restaurant (כפר הזיתים):
  *  1. Contract price lists for 2 suppliers (HaKerem Butchery, Mediterranean
- *     Fish Co.): the price list that took effect on 2026-10-10, one row per
+ *     Fish Co.): the price list that starts the day before each supplier's latest matched invoice, one row per
  *     product at the PO price of the invoices it covers (see seedContracts for
  *     the hero-number guarantee). The existing PRICE_HIGHER lines above the
  *     contract (entrecôte ₪149 vs ₪139, salmon ₪96 vs ₪89) light up as
@@ -58,7 +58,21 @@ assertSeedTarget(url, 'seed-wave1-contracts-demo');
 const db = createDb(url);
 const NOTIFY = process.argv.includes('--notify');
 
-const CONTRACT_FROM = '2026-10-10';
+/**
+ * The new price list starts the day before each supplier's latest matched
+ * invoice (restaurant-local), so it covers that delivery and every later one —
+ * relative to the seed's DEMO_TODAY, never a hard-coded date.
+ */
+async function contractFrom(restaurantId: string, supplierId: string): Promise<string | null> {
+  const [r] = await db
+    .select({
+      d: sql<string | null>`to_char((max(${invoices.invoiceDate}) at time zone 'Asia/Jerusalem')::date - 1, 'YYYY-MM-DD')`,
+    })
+    .from(matchRuns)
+    .innerJoin(invoices, eq(invoices.id, matchRuns.invoiceId))
+    .where(and(eq(matchRuns.restaurantId, restaurantId), eq(invoices.supplierId, supplierId)));
+  return r?.d ?? null;
+}
 const CONTRACT_SUPPLIERS = ['HaKerem Butchery', 'Mediterranean Fish Co.'];
 const TREND_SUPPLIER = 'HaSharon Produce';
 const CHEAP_SUPPLIER = { name: 'חקלאי העמק', nameEn: 'HaEmek Farmers' };
@@ -98,10 +112,18 @@ async function supplierByEn(restaurantId: string, nameEn: string) {
  * the contract price — so buildMatchInput's contract override leaves every
  * engine input byte-identical and no stored or future leak figure can move.
  */
+const CONTRACT_NOTE = 'מחירון מוסכם — רבעון 4/2026';
+
 async function seedContracts(restaurantId: string) {
   let kept = 0;
   for (const nameEn of CONTRACT_SUPPLIERS) {
     const sup = await supplierByEn(restaurantId, nameEn);
+    const CONTRACT_FROM = await contractFrom(restaurantId, sup.id);
+    if (!CONTRACT_FROM) continue;
+    // Idempotent across seeds with a different DEMO_TODAY: replace this demo's earlier rows.
+    await db
+      .delete(supplierContractPrices)
+      .where(and(eq(supplierContractPrices.supplierId, sup.id), eq(supplierContractPrices.note, CONTRACT_NOTE)));
     const covered = await db
       .select({ productId: poLines.productId, unit: poLines.unit, price: poLines.unitPriceExpected, invoiceDate: invoices.invoiceDate })
       .from(matchRuns)
@@ -135,7 +157,7 @@ async function seedContracts(restaurantId: string) {
           contractPrice: price,
           validFrom: CONTRACT_FROM,
           source: 'import',
-          note: 'מחירון מוסכם — רבעון 4/2026',
+          note: CONTRACT_NOTE,
         })
         .onConflictDoNothing();
       kept += 1;

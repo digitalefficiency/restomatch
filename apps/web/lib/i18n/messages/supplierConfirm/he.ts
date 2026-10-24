@@ -13,7 +13,7 @@ export const he = {
     available: 'כמות שתסופק',
     agreedPrice: 'מחיר מוסכם',
     yourPrice: 'המחיר שלכם',
-    perUnit: 'ליחידה ({unit})',
+    perUnit: 'ליחידה',
     sku: 'מק״ט {sku}',
     shortage: 'חוסר',
     priceChange: 'שינוי מחיר',

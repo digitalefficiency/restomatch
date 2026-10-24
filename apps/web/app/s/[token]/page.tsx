@@ -40,8 +40,9 @@ export default async function SupplierPortalPage({ params }: { params: Promise<{
   const v = res.view;
   const supplier = displayName(v.supplierName, v.supplierNameEn, locale).primary;
 
+  // pb-56: the fixed cookie-consent banner must never cover the answer buttons on a phone.
   return (
-    <main className="mx-auto min-h-screen w-full max-w-xl px-4 pb-16 pt-6 sm:pt-10">
+    <main className="mx-auto min-h-screen w-full max-w-xl px-4 pb-56 pt-6 sm:pt-10">
       <div className="mb-5 flex items-center justify-between gap-3">
         <p className="text-xs font-semibold uppercase tracking-wide text-primary">{t('portal.eyebrow')}</p>
         <LocaleSwitcher />

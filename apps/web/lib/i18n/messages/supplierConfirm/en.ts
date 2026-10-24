@@ -16,7 +16,7 @@ export const en: Shape<typeof he> = {
     available: 'You will deliver',
     agreedPrice: 'Agreed price',
     yourPrice: 'Your price',
-    perUnit: 'per unit ({unit})',
+    perUnit: 'per',
     sku: 'SKU {sku}',
     shortage: 'Shortage',
     priceChange: 'Price change',
