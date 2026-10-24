@@ -278,16 +278,53 @@ describe('ingestConfig', () => {
 
 describe('authVerdictFromHeaders (S4 I2)', () => {
   const h = (value: string) => [{ name: 'Authentication-Results', value }];
-  it('trusts ONLY our authserv-id; dmarc=pass or spf+dkim pass → pass', () => {
-    expect(authVerdictFromHeaders(h('mx.ours; spf=pass; dkim=pass; dmarc=pass'), 'mx.ours')).toBe('pass');
-    expect(authVerdictFromHeaders(h('mx.ours; dmarc=pass'), 'mx.ours')).toBe('pass');
-    expect(authVerdictFromHeaders(h('mx.ours; spf=pass; dkim=none'), 'mx.ours')).toBe('none');
-    expect(authVerdictFromHeaders(h('mx.ours; spf=fail; dkim=pass'), 'mx.ours')).toBe('fail');
+  it('trusts ONLY our authserv-id and ONLY an aligned dmarc=pass', () => {
+    expect(authVerdictFromHeaders(h('mx.ours; spf=pass; dkim=pass; dmarc=pass header.from=s.co.il'), 'mx.ours')).toBe('pass');
+    expect(authVerdictFromHeaders(h('MX.Ours ;  dmarc = pass'), 'mx.ours')).toBe('pass');
+    expect(authVerdictFromHeaders(h('mx.ours; dmarc=fail header.from=s.co.il'), 'mx.ours')).toBe('fail');
   });
-  it('a forged header, no configured id, or two of ours → none', () => {
+  it('refuter #2: spf+dkim pass for the ATTACKER domain without DMARC is not trusted', () => {
+    expect(
+      authVerdictFromHeaders(
+        h('mx.ours; dkim=pass header.d=evil.example; spf=pass smtp.mailfrom=evil.example; dmarc=none header.from=s.co.il'),
+        'mx.ours',
+      ),
+    ).toBe('none');
+  });
+  it('refuter #1: a "dmarc=pass" inside a property value, comment or quoted string never counts', () => {
+    for (const v of [
+      'mx.ours; spf=pass smtp.mailfrom=dmarc=pass@evil.example; dkim=none; dmarc=fail header.from=s.co.il',
+      'mx.ours; spf=pass (domain of dmarc=pass@evil.example designates 1.2.3.4) smtp.mailfrom=evil.example; dmarc=fail (p=reject) header.from=s.co.il',
+      'mx.ours; spf=pass smtp.mailfrom="x; dmarc=pass"@evil.example; dmarc=fail',
+      'mx.ours; spf=pass (nested (dmarc=pass) comment; dmarc=pass) smtp.mailfrom=evil.example',
+      'mx.ours; dmarc=passing',
+    ]) {
+      expect(authVerdictFromHeaders(h(v), 'mx.ours')).not.toBe('pass');
+    }
+  });
+  it('S4 strings: a quoted or unquoted "dmarc=pass" envelope address, nested comments, quoted-pairs, case mix', () => {
+    for (const v of [
+      'mx.ours; spf=none smtp.mailfrom="dmarc=pass"@evil.example; dkim=none',
+      'mx.ours; spf=none smtp.mailfrom=dmarc=pass@evil.example; dkim=none',
+      'mx.ours; spf=none (sender said dmarc=pass) smtp.mailfrom=evil.example; dkim=none',
+      'mx.ours; spf=none (a (nested (dmarc=pass)) comment) smtp.mailfrom=evil.example',
+      'mx.ours; spf=none (escaped \\) dmarc=pass) smtp.mailfrom=evil.example',
+      'mx.ours; spf=none smtp.mailfrom="x\\" ; dmarc=pass"@evil.example',
+      'MX.OURS; SPF=None smtp.mailfrom="DMARC=Pass"@Evil.Example',
+    ]) {
+      expect(authVerdictFromHeaders(h(v), 'mx.ours')).toBe('none');
+    }
+    expect(authVerdictFromHeaders(h('MX.OURS; DMARC=Pass header.from=S.CO.IL'), 'mx.ours')).toBe('pass');
+  });
+  it('multiple headers: only the TOPMOST with our authserv-id counts; foreign ids and lower copies are ignored', () => {
+    const top = { name: 'Authentication-Results', value: 'mx.ours; dmarc=fail header.from=s.co.il' };
+    const injected = { name: 'Authentication-Results', value: 'mx.ours; dmarc=pass' };
+    expect(authVerdictFromHeaders([top, injected], 'mx.ours')).toBe('fail');
+    expect(authVerdictFromHeaders([{ name: 'X-Other', value: 'x' }, ...h('mx.ours; dmarc=pass'), top], 'mx.ours')).toBe('pass');
     expect(authVerdictFromHeaders(h('evil.example; dmarc=pass'), 'mx.ours')).toBe('none');
+    expect(authVerdictFromHeaders(h('mx.ours.evil; dmarc=pass'), 'mx.ours')).toBe('none');
     expect(authVerdictFromHeaders(h('mx.ours; dmarc=pass'), null)).toBe('none');
-    expect(authVerdictFromHeaders([...h('mx.ours; dmarc=pass'), ...h('mx.ours; dmarc=pass')], 'mx.ours')).toBe('none');
+    expect(authVerdictFromHeaders(h('mx.ours; dmarc=fail; dmarc=pass'), 'mx.ours')).toBe('none');
   });
   it('WhatsApp messages are authenticated by Meta', () => {
     const [m] = parseWhatsAppWebhook({

@@ -312,7 +312,10 @@ export async function processInboundMessage(
       // SPF/DKIM/DMARC verdict from our inbound provider. Otherwise the allow-list
       // only SUGGESTS the supplier and the document waits for a manager.
       const autoRegister = senderAllowed && message.authVerdict === 'pass';
-      if (!autoRegister) {
+      // Quota only for UNKNOWN senders: otherwise anyone who knows the inbound
+      // address could exhaust it and starve a real (allow-listed, but not yet
+      // authenticated) supplier's invoices for the day.
+      if (!senderAllowed) {
         // Storage quota for review documents (stored without OCR) per channel per day.
         const rows = (await tx.execute(sql`
           select coalesce(sum(d.size_bytes), 0)::bigint as bytes
@@ -322,6 +325,7 @@ export async function processInboundMessage(
             and d.restaurant_id = ${channel.restaurantId}
             and d.storage_path is not null
             and d.invoice_id is null
+            and not m.sender_allowed
             and d.created_at > now() - interval '1 day'
         `)) as unknown as Array<{ bytes: string | number }>;
         if (Number(rows[0]?.bytes ?? 0) + bytes.byteLength > reviewBytesPerDay()) {

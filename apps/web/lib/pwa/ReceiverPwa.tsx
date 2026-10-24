@@ -73,6 +73,14 @@ export function ReceiverPwa({ restaurantId, userId }: { restaurantId: string; us
 
   const upload = useCallback(
     async (item: QueuedPhoto) => {
+      // scans.upload stores under the SESSION's active restaurant: if another tab
+      // switched branch since this page rendered, never upload this branch's photo there.
+      const session = (await (await fetch('/api/auth/session', { cache: 'no-store' })).json()) as {
+        user?: { id?: string; restaurantId?: string | null };
+      };
+      if (session.user?.restaurantId !== item.restaurantId || session.user?.id !== item.userId) {
+        throw new Error('active restaurant changed — photo kept for its own branch');
+      }
       // Same clientUploadId → same scan object → registerInvoice dedupes (M8).
       const scan = await utils.client.scans.upload.mutate({
         contentBase64: await blobToBase64(item.blob),
