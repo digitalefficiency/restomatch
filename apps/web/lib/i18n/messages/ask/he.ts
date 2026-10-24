@@ -32,6 +32,7 @@ export const he = {
   sources: 'מקורות',
   questionsLeft: 'נותרו היום {count} שאלות',
   error: 'לא הצלחנו לענות כרגע. נסו שוב.',
+  rateLimited: 'הרבה שאלות בזמן קצר — חכו רגע ושאלו שוב.',
   empty: 'עוד לא שאלתם. בחרו שאלה נפוצה או כתבו משלכם.',
   screens: {
     overview: 'סקירה',

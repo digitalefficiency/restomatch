@@ -13,6 +13,7 @@ import { useCallback, useSyncExternalStore } from 'react';
 import { Languages } from 'lucide-react';
 import { unitLabelFor } from '@restomatch/translate/units';
 import { useAppLocale, useDir, useLocale, useT } from '@/lib/i18n/client';
+import { isReceiverLocale } from '@/lib/i18n/config';
 import { formatNumber } from '@/lib/i18n/format';
 import { receiving } from '@/lib/i18n/messages/receiving';
 
@@ -127,15 +128,19 @@ export function useUnitLabel(): (unit: string | null | undefined) => string {
 /** "12 kg" / "12 ק״ג" — isolated in the page direction, number first. */
 export function Qty({ qty, unit }: { qty: number | null; unit?: string | null }) {
   const locale = useLocale();
+  const appLocale = useAppLocale();
   const dir = useDir();
   const label = useUnitLabel();
   if (qty === null) return <span>—</span>;
+  // Arabic/Thai/Ge'ez unit words break in the monospace number font (Arabic
+  // letters stop joining: "ر بطة"), so receiver-language units use the text font.
+  const unitCls = isReceiverLocale(appLocale) ? 'font-sans' : undefined;
   // Page direction, not a forced LTR: in Hebrew "37.5 ליטר" must keep the
   // number first (to the right), it read "ליטר 37.5" inside an LTR isolate.
   return (
     <bdi dir={dir} className="whitespace-nowrap font-mono tabular-nums">
       {formatNumber(qty, locale, { maximumFractionDigits: 3 })}
-      {unit ? ` ${label(unit)}` : ''}
+      {unit ? <span className={unitCls}>{` ${label(unit)}`}</span> : ''}
     </bdi>
   );
 }

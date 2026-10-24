@@ -45,7 +45,9 @@ const MAX_CLAUDE_MISSES = 80;
 export function renderSizeSuffix(suffix: string): string | null {
   const s = suffix.trim();
   if (/^\d+(?:[.,]\d+)?\s*%?$/.test(s)) return s.replace(/\s+/g, '');
-  const m = /^(\d+(?:[.,]\d+)?)\s*(.+)$/.exec(s);
+  // Linear (CodeQL js/polynomial-redos): the number can't give digits back to the
+  // unit ((?![\d.,])), the unit starts at a non-space and may hold any character.
+  const m = /^(\d+(?:[.,]\d+)?)(?![\d.,])\s*(\S[\s\S]*)$/.exec(s);
   if (m) {
     const unit = translateUnit(m[2]!);
     return unit ? `${m[1]} ${unit}` : null;

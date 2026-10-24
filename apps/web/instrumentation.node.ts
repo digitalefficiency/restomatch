@@ -28,7 +28,7 @@ export async function registerNode(): Promise<void> {
     console.warn(`[boot] ${redisProblem} — OCR/import jobs will not be queued until it is fixed`);
   }
 
-  // S14: the assistant's burst limit uses the shared (Redis) rate-limit store.
+  // S14: the assistant's burst limit goes through the app's enforceRateLimit.
   const { registerAskRateLimit } = await import('./lib/askRateLimit');
   registerAskRateLimit();
 

@@ -10,7 +10,12 @@ import { and, assistantUsage, eq, sql, type Database } from '@restomatch/db';
 export const ASK_QUESTIONS_PER_DAY = 60;
 /** $3/day per restaurant (micro-USD). */
 export const ASK_COST_MICRO_USD_PER_DAY = 3_000_000;
-export const ASK_BURST_PER_MINUTE = 10;
+/**
+ * Anti-hammering only (offline answers run DB aggregates): roomy enough that a
+ * person clicking through every suggestion in he and en never sees a 429. Spend
+ * is bounded by the daily caps above, not by this.
+ */
+export const ASK_BURST_PER_MINUTE = 30;
 /** claude-opus-5-5 list price: $4 / $20 per MTok → micro-USD per token. */
 export const INPUT_MICRO_USD_PER_TOKEN = 4;
 export const OUTPUT_MICRO_USD_PER_TOKEN = 20;
@@ -31,11 +36,11 @@ export function takeBurst(restaurantId: string, now: number = Date.now()): boole
 }
 
 /**
- * Shared (cross-instance) burst limiter, injected by the web app at boot
- * (Redis `enforceRateLimit`). Kept on globalThis so every server bundle of this
- * package in the process sees the same registration. The process-local window
- * above still applies on top (it also covers a shared-store outage, where
- * `enforceRateLimit` fails open).
+ * The app's rate limiter (`enforceRateLimit` from apps/web/lib/rateLimit.ts),
+ * injected by the web app at boot — the assistant has no limiter of its own.
+ * Kept on globalThis so every server bundle of this package in the process sees
+ * the same registration. The process-local window above is only a FALLBACK:
+ * when nothing is registered (tests, scripts) or the shared limiter throws.
  */
 export type AskBurstLimiter = (restaurantId: string) => Promise<boolean>;
 const LIMITER_KEY = Symbol.for('restomatch.askBurstLimiter');
@@ -45,22 +50,20 @@ export function setAskBurstLimiter(fn: AskBurstLimiter | null): void {
   (globalThis as LimiterHolder)[LIMITER_KEY] = fn;
 }
 
-/** Both the shared limiter (when registered) and the process-local window must allow. */
+/** The registered shared limiter decides; the process-local window only when there is none (or it throws). */
 export async function allowAskBurst(restaurantId: string, now: number = Date.now()): Promise<boolean> {
   const shared = (globalThis as LimiterHolder)[LIMITER_KEY];
   if (shared) {
-    let ok = true;
     try {
-      ok = await shared(restaurantId);
+      return await shared(restaurantId);
     } catch {
-      ok = true; // store outage → the local window below still applies
+      // limiter outage → fall back to the local window below
     }
-    if (!ok) return false;
   }
   return takeBurst(restaurantId, now);
 }
 
-/** The shared limiter's policy (10 questions / minute / restaurant). */
+/** The shared limiter's policy (ASK_BURST_PER_MINUTE questions / minute / restaurant). */
 export const ASK_BURST_LIMIT = { limit: ASK_BURST_PER_MINUTE, windowSec: 60, prefix: 'ask' } as const;
 
 /** Test seam. */

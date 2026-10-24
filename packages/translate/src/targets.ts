@@ -128,7 +128,10 @@ const ROWS: readonly Row[] = [
 ];
 
 /** Hebrew size/pack tokens we split off the end of a name and re-attach. */
-const TRAILING = /\s*(\([^()]*\)|\d+(?:[.,]\d+)?\s*%?|\d+(?:[.,]\d+)?\s*[א-ת״"׳'.]{0,5}|[א-ת]{1,3}[״"׳'])\s*$/;
+// Linear on any input (CodeQL js/polynomial-redos): no leading/trailing \s* (the
+// text is trimmed and each peel strips separators), a number never starts inside
+// another number, and a short Hebrew unit never starts inside a word.
+const TRAILING = /(?:\([^()]*\)|(?<![\d.,])\d+(?:[.,]\d+)?\s{0,3}%?|(?<![\d.,])\d+(?:[.,]\d+)?\s{0,3}[א-ת״"׳'.]{0,5}|(?<![א-ת])[א-ת]{1,3}[״"׳'])$/;
 
 /** Hebrew pack words inside a trailing "(…)" → neutral rendering. */
 function renderSuffix(raw: string): string | null {
@@ -177,7 +180,7 @@ export class TargetGlossary {
     for (let i = 0; i < 3; i += 1) {
       const m = TRAILING.exec(core);
       if (!m || m.index === 0) break;
-      suffixes.unshift(m[1]!);
+      suffixes.unshift(m[0]);
       core = core.slice(0, m.index).replace(/[\s—–-]+$/, '');
       const hit = this.lookup(core, locale);
       if (hit) {

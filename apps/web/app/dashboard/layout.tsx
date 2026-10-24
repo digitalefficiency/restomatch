@@ -5,7 +5,7 @@ import { auth, signOut } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
 import { ToastProvider } from '@/lib/components';
 import { getLocale, getT } from '@/lib/i18n/server';
-import { LanguagePicker } from '@/lib/i18n/LanguagePicker';
+import { PersistingLanguagePicker } from '@/lib/i18n/PersistingLanguagePicker';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { nav } from '@/lib/i18n/messages/nav';
 import { labelForRole } from '@/lib/roles';
@@ -150,7 +150,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 <div className="ms-auto hidden items-center gap-2 lg:flex">
                   <BranchSwitcher branches={switcherBranches} activeId={active.restaurantId} />
                   <DashboardSearch role={active.role} className="w-72" />
-                  {receiverLangsOn ? <LanguagePicker persist /> : <LocaleSwitcher />}
+                  {receiverLangsOn ? <PersistingLanguagePicker /> : <LocaleSwitcher />}
                   <form action={logout} data-rm-logout="">
                     <button
                       type="submit"
@@ -162,7 +162,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                   </form>
                 </div>
                 {receiverLangsOn ? (
-                  <LanguagePicker persist className="lg:hidden" />
+                  <PersistingLanguagePicker className="lg:hidden" />
                 ) : (
                   <LocaleSwitcher className="lg:hidden" />
                 )}

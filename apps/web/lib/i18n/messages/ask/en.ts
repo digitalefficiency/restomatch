@@ -31,6 +31,7 @@ export const en: Shape<typeof he> = {
   sources: 'Sources',
   questionsLeft: '{count} questions left today',
   error: "We couldn't answer right now. Please try again.",
+  rateLimited: 'Lots of questions in a short time — wait a moment and ask again.',
   empty: "You haven't asked anything yet. Pick a common question or write your own.",
   screens: {
     overview: 'Overview',

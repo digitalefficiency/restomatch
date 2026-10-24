@@ -1,8 +1,8 @@
-import { createDb, eq, invoiceLines, restaurants, testDbUrl, assistantUsage } from '@restomatch/db';
+import { assistantUsage, createDb, discrepancies, eq, invoiceLines, memberships, restaurants, testDbUrl } from '@restomatch/db';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { appRouter } from '../index';
 import { __resetAskBurst, __setAskClient, type AskClientLike } from '../ask';
-import { ASK_QUESTIONS_PER_DAY } from '../ask/budget';
+import { ASK_BURST_PER_MINUTE, ASK_QUESTIONS_PER_DAY } from '../ask/budget';
 import { askSystemPrompt } from '../ask/claude';
 import { classifyQuestion } from '../ask/offline';
 import { groundAnswer, sanitizeAnswer } from '../ask/grounding';
@@ -196,14 +196,14 @@ describe('ask: Claude leg (mocked)', () => {
   it('burst limit per restaurant per minute (every path, offline too)', async () => {
     const { client, create } = fakeClaude(() => final({ answer: 'ok', citations: [] }));
     __setAskClient(client);
-    for (let i = 0; i < 10; i += 1) await caller(A).ask.ask({ question: 'hello there', locale: 'en' });
+    for (let i = 0; i < ASK_BURST_PER_MINUTE; i += 1) await caller(A).ask.ask({ question: 'hello there', locale: 'en' });
     await expect(caller(A).ask.ask({ question: 'hello there', locale: 'en' })).rejects.toMatchObject({
       code: 'TOO_MANY_REQUESTS',
     });
-    expect(create).toHaveBeenCalledTimes(10);
+    expect(create).toHaveBeenCalledTimes(ASK_BURST_PER_MINUTE);
     __resetAskBurst();
     __setAskClient(null);
-    for (let i = 0; i < 10; i += 1) await caller(B).ask.ask({ question: 'how much leaked', locale: 'en' });
+    for (let i = 0; i < ASK_BURST_PER_MINUTE; i += 1) await caller(B).ask.ask({ question: 'how much leaked', locale: 'en' });
     await expect(caller(B).ask.ask({ question: 'how much leaked', locale: 'en' })).rejects.toMatchObject({
       code: 'TOO_MANY_REQUESTS',
     });
@@ -409,6 +409,26 @@ describe('ask: prompt injection from invoice text is data, not instructions', ()
 });
 
 describe('ask: tenant isolation', () => {
+  it('chain owner: each branch answers with its own data only (no cross-branch leak)', async () => {
+    __setAskClient(null);
+    // C is a second branch of A's owner (owner membership in both), with a different leak.
+    const C = await seedTenant(db, 'C');
+    await setFeatures(C, { aiAssistant: true });
+    await db.insert(memberships).values({ userId: A.ownerUserId, restaurantId: C.restaurantId, role: 'owner' });
+    await db.update(discrepancies).set({ deltaAmount: '40.00' }).where(eq(discrepancies.restaurantId, C.restaurantId));
+    const asOwnerIn = (restaurantId: string) =>
+      appRouter.createCaller({ db, session: { userId: A.ownerUserId, restaurantId, role: 'owner' } } as AppContext);
+    for (const [rid, leak, claim] of [
+      [A.restaurantId, 100, 100],
+      [C.restaurantId, 40, 40],
+    ] as const) {
+      const r = await asOwnerIn(rid).ask.ask({ question: 'How much leaked this month?', locale: 'en' });
+      expect(r.facts.leakIls, rid).toBe(leak);
+      const c = await asOwnerIn(rid).ask.ask({ question: 'What should I claim this week?', locale: 'en' });
+      expect(c.facts, rid).toMatchObject({ totalIls: claim, count: 1 });
+    }
+  });
+
   it("tool calls only ever read the session restaurant (A never sees B's invoice)", async () => {
     const { client, bodies } = fakeClaude((_b, call) =>
       call === 0

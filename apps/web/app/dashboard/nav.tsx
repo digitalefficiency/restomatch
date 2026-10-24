@@ -35,7 +35,7 @@ import type { FeatureKey } from '@restomatch/api';
 import { cn } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
-import { LanguagePicker } from '@/lib/i18n/LanguagePicker';
+import { PersistingLanguagePicker } from '@/lib/i18n/PersistingLanguagePicker';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { nav } from '@/lib/i18n/messages/nav';
 import { canSeeRoute } from '@/lib/roles';
@@ -390,7 +390,7 @@ export function MobileNav({
               })}
             </nav>
             <div className="flex items-center justify-between gap-3 border-t border-line px-4 py-3">
-              {receiverLangsOn ? <LanguagePicker persist /> : <LocaleSwitcher />}
+              {receiverLangsOn ? <PersistingLanguagePicker /> : <LocaleSwitcher />}
               <form action={logout} data-rm-logout="">
                 <button
                   type="submit"

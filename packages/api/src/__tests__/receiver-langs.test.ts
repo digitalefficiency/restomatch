@@ -148,3 +148,14 @@ describe('receiverLangs: language preferences', () => {
     expect(m!.l).not.toBe('ar');
   });
 });
+
+describe('renderSizeSuffix: linear on hostile input (CodeQL polynomial ReDoS)', () => {
+  it('handles "9" + 50k spaces + newline quickly', async () => {
+    const { renderSizeSuffix } = await import('../receiving/localize');
+    const t0 = performance.now();
+    renderSizeSuffix('9' + ' '.repeat(50_000) + '\n');
+    renderSizeSuffix('9'.repeat(50_000) + '\n');
+    renderSizeSuffix('9!' + '99'.repeat(25_000) + '\n');
+    expect(performance.now() - t0).toBeLessThan(100);
+  });
+});

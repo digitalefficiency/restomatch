@@ -4,7 +4,6 @@ import { useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Languages } from 'lucide-react';
 import { cn } from '@/lib/components/cn';
-import { trpc } from '@/lib/trpc/client';
 import {
   APP_LOCALES,
   dirOf,
@@ -21,36 +20,17 @@ import { receiverLangs } from './messages/receiverLangs';
  * Six-language picker (he · en · ar · ru · th · ti) — replaces the עב/EN toggle
  * where the `receiverLanguages` flag is on (dashboard) or on signed-out pages
  * (login), unless killed by FEATURES_OFF. Writes `rm_locale`, flips <html
- * lang/dir> at once and refreshes server components. With `persist`, the
- * choice is also saved as the member's language (best effort), so the next
- * login on a new phone opens in it.
- *
- * Only the `persist` variant touches tRPC: public pages (/login) render outside
- * any TrpcProvider (main keeps tRPC off public pages), so the plain picker must
- * not call a tRPC hook.
+ * lang/dir> at once and refreshes server components. No tRPC here: the login
+ * page has no TrpcProvider. The dashboard uses `PersistingLanguagePicker`
+ * (./PersistingLanguagePicker), which passes `onSave` to also store the choice
+ * as the member's language (best effort), so the next login on a new phone opens in it.
  */
-export function LanguagePicker({ className, persist = false }: { className?: string; persist?: boolean }) {
-  return persist ? <PersistingLanguagePicker className={className} /> : <LanguagePickerView className={className} />;
-}
-
-/** Dashboard variant: also saves the member's language (needs the dashboard's TrpcProvider). */
-function PersistingLanguagePicker({ className }: { className?: string }) {
-  const save = trpc.receiverLangs.setMyLocale.useMutation();
-  return (
-    <LanguagePickerView
-      className={className}
-      onPersist={(locale, done) => save.mutate({ locale }, { onSettled: done })}
-    />
-  );
-}
-
-function LanguagePickerView({
+export function LanguagePicker({
   className,
-  onPersist,
+  onSave,
 }: {
   className?: string;
-  /** Save the choice server-side, then call `done` (refreshes server components). */
-  onPersist?: (locale: AppLocale, done: () => void) => void;
+  onSave?: (locale: AppLocale) => Promise<unknown>;
 }) {
   const locale = useAppLocale();
   const router = useRouter();
@@ -63,7 +43,7 @@ function LanguagePickerView({
     document.documentElement.lang = target;
     document.documentElement.dir = dirOf(target);
     const refresh = () => startTransition(() => router.refresh());
-    if (onPersist) onPersist(target, refresh);
+    if (onSave) onSave(target).then(refresh, refresh);
     else refresh();
   }
 

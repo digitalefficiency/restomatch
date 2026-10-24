@@ -267,6 +267,31 @@ Result on the final build: **95/95 passed** (ar, ru, th, ti). Screenshots: `docs
 - Decide when to turn on `receiverLanguages` and `aiAssistant` for real tenants.
 - Have a native speaker review the uncertain items above, Tigrinya first.
 
+## Demo QA round (2026-10-24, after merging main #64–#66 + `claude/sec-next-15-5-28`)
+
+Found and fixed:
+- **`/login` returned 500 in every language** after merging main. Main moved `TrpcProvider` from the root layout into the dashboard layout, and the login page's language picker called a tRPC mutation. The picker no longer uses tRPC; the dashboard uses `PersistingLanguagePicker`, which saves the member's language.
+- **20 new receiving strings from main were missing in ar/ru/th/ti.** They cover the review sections, the pending/mismatch banners, the OCR "still reading" states, `pending_review`, and the upload/network/quota errors. The complete-overlay type caught all of them. I translated them, and one reviewer per language checked them (ar 3, ru 3, th 7, ti 5 edits).
+- **Arabic unit labels rendered in the monospace number font**, which breaks Arabic letter joining ("ر بطة"). Receiver-language units now use the text font (Noto Sans Arabic/Thai/Ethiopic). Flag-OFF (he/en) rendering is unchanged.
+- **Assistant burst limit (10 questions/min per restaurant)** gave a red error when someone clicked the suggestions in he and then en. It is now 30/min; the daily caps (60 questions, $3) are unchanged. A 429 now shows a calm "wait a moment" message.
+
+Verified:
+- `verify-receiver-review.ts`: the read invoice with sections in each receiver language, run on `next dev` + worker because local scan storage + the dev OCR stub are off in production mode. ar/ru/th/ti at 390 and 1366:
+  - section headers translated, no English left;
+  - qty × price reads quantity first: right of the price in RTL, left in LTR;
+  - Arabic units in Noto Sans Arabic.
+- `verify-receiver-phone.ts`: the full wizard on the production build:
+  - ar/ru/th/ti at 390: 107/107;
+  - ar/ru at 1366: 57/57.
+- `verify-ask-chain.ts`: the chain owner asks in each of the 3 branches, in he and en, at 1366 and 390. The answer's ₪ equals that branch's dashboard hero (760 / 355 / 975), and the sources are internal screens: 22/22 each.
+- `ask.test.ts`: added a chain-owner test; each branch answers only from its own data.
+- `verify-wave1-lang-ai.ts`: 83/83.
+
+Not covered by an automated check:
+- The "invoice only" / "order only" sections and the mismatch banner. The dev OCR stub only produces lines that are on the order, so these strings are covered only by the type check and the reviewers.
+
+Reported to the orchestrator (outside my area): the OCR job is enqueued inside the request transaction and has no retry. When the worker reads the invoice before the commit, the scan stays "still reading" forever (1 in about 10 uploads locally).
+
 ## Verification (2 layers)
 
 ### Layer 1: full gate (final head, after merging `origin/claude/client-ready` @ 80a3934)
