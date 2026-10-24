@@ -399,7 +399,7 @@ export function SupplierForm({
                     onChange={toggleDay(d)}
                     className="h-4 w-4 accent-primary"
                   />
-                  <label htmlFor={`sup-day-${d}`} className="min-w-0 flex-1 truncate text-ink">
+                  <label htmlFor={`sup-day-${d}`} className="flex min-h-11 min-w-0 flex-1 items-center truncate text-ink">
                     {t(`days.${d}`)}
                   </label>
                   {active ? (

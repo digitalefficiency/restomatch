@@ -230,8 +230,13 @@ describe('match-invoice job', () => {
   it('a run made before the count is replaced by the re-match — the hero comes back', async () => {
     const before = await hero();
     const { grId, invoiceId, grLineIds } = await receiptWithInvoice();
-    // The old order of events: matched while gr_lines were still 0.
+    // The job now refuses to match against a receipt still being counted…
+    expect((await matchInvoiceForJob(db, { restaurantId, invoiceId })).skipped).toBe('receipt_open');
+    // …so build the legacy state (a run made before any guard, while gr_lines
+    // were still 0) by matching with the receipt briefly not 'pending'.
+    await db.update(goodsReceipts).set({ status: 'partial' }).where(eq(goodsReceipts.id, grId));
     const early = await matchInvoiceForJob(db, { restaurantId, invoiceId });
+    await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, grId));
     expect(early.persisted).not.toBeNull();
     expect(await typesOf(invoiceId)).toContain('QTY_SHORT');
     expect(await hero()).toBeGreaterThan(before);

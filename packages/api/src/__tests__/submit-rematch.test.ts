@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createDb,
+  invoiceLines,
   invoices,
   matchRuns,
   memberships,
@@ -42,13 +43,17 @@ async function tenant(name: string) {
   await db
     .insert(poLines)
     .values({ poId: po!.id, rawDescription: 'עגבניות', qtyOrdered: '10', unit: 'ק״ג', unitPriceExpected: '5' });
-  const invoice = async () =>
-    (
-      await db
-        .insert(invoices)
-        .values({ restaurantId: r!.id, supplierId: s!.id, status: 'matched', source: 'photo', rawImageUrl: `https://x/${Math.random()}.jpg` })
-        .returning()
-    )[0]!.id;
+  // A read scan, as OCR leaves it: header + its line (the matcher pairs on lines).
+  const invoice = async () => {
+    const [inv] = await db
+      .insert(invoices)
+      .values({ restaurantId: r!.id, supplierId: s!.id, status: 'matched', source: 'photo', rawImageUrl: `https://x/${Math.random()}.jpg` })
+      .returning();
+    await db
+      .insert(invoiceLines)
+      .values({ invoiceId: inv!.id, rawDescription: 'עגבניות', qtyBilled: '10', unit: 'ק״ג', unitPriceBilled: '5', lineTotal: '50' });
+    return inv!.id;
+  };
   const caller = appRouter.createCaller({
     db,
     session: { userId: u!.id, restaurantId: r!.id, role: 'receiver' },

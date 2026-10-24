@@ -32,6 +32,11 @@ import { enqueueMatchInvoice, enqueueOcrInvoice, isQueueUnavailableError } from 
 import type { InvoiceOcrResult } from '@restomatch/types';
 import { assertGrOwned, assertSupplierOwned } from '../tenant';
 import { fillEnglishNames } from '../receiving/english';
+import {
+  invoicesWaitingOnReceipt,
+  lockReceipt,
+  scannedInvoicesForReceipt,
+} from '../receiving/matchTriggers';
 import { devOcrStubEnabled, buildDevOcrStub } from '../receiving/devOcrStub';
 import { isAllowedScanUrl } from '../lib/scanUrls';
 import { isInvoiceNumberTaken, readDuplicateOf, withoutDuplicateOf } from '../lib/invoiceDedupe';
@@ -291,7 +296,8 @@ export const receivingRouter = router({
    * ₪ per discrepancy for its invoice — the persisted discrepancies, allocated
    * exactly like the supplier claims letters (claimableLines), never the
    * wizard's client-side estimates. Read-only; tenant-scoped on the receipt and
-   * the invoice. `ready` is false until a match run exists for the invoice.
+   * the invoice. `ready` is false until the receipt is closed AND a match run for
+   * it ran at/after the close (submitReceipt's re-match) — before that, no ₪.
    */
   dockSlip: invoiceReaderProcedure
     .input(z.object({ grId: z.string().uuid(), invoiceId: z.string().uuid().nullish() }))
@@ -793,6 +799,9 @@ export const receivingRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await assertGrOwned(ctx.db, input.grId, ctx.session.restaurantId);
+      // Held to commit: an OCR job deciding whether this receipt is still open
+      // waits for us (receiving/matchTriggers).
+      await lockReceipt(ctx.db, input.grId);
 
       const rows = await ctx.db
         .select({
@@ -1007,28 +1016,41 @@ async function rematchAfterCount(
   scanned: string[],
 ): Promise<void> {
   const grId = receipt.id;
-  const ids = new Set<string>();
-  if (scanned.length > 0) {
-    const own = await db
-      .select({ id: invoices.id })
-      .from(invoices)
-      .where(and(eq(invoices.restaurantId, restaurantId), inArray(invoices.id, scanned)));
-    for (const r of own) ids.add(r.id);
+  // The invoices to match against the count: the ones waiting on this receipt
+  // (server-side — the wizard's in-memory id is lost on a reload or a retake),
+  // the scans the wizard names (narrowed: no unrelated or signed-off invoice),
+  // and any matched against this receipt before the count (that run read every
+  // line as short). Best-effort in a savepoint: a lookup failure must never fail
+  // the submit (match.runForInvoice can re-run it).
+  let ids: Set<string>;
+  try {
+    ids = await db.transaction(async (sp) => {
+      const tx = sp as unknown as Database;
+      const out = new Set<string>(await invoicesWaitingOnReceipt(tx, restaurantId, grId));
+      for (const id of await scannedInvoicesForReceipt(tx, restaurantId, receipt, scanned)) out.add(id);
+      const ran = await tx
+        .selectDistinct({ id: matchRuns.invoiceId })
+        .from(matchRuns)
+        .where(and(eq(matchRuns.restaurantId, restaurantId), eq(matchRuns.grId, grId), isNotNull(matchRuns.invoiceId)));
+      for (const r of ran) if (r.id) out.add(r.id);
+      return out;
+    });
+  } catch (err) {
+    console.error(`[receiving.submitReceipt] could not look up the invoices of gr=${grId}`, err);
+    return;
   }
-  const ran = await db
-    .selectDistinct({ id: matchRuns.invoiceId })
-    .from(matchRuns)
-    .where(and(eq(matchRuns.restaurantId, restaurantId), eq(matchRuns.grId, grId), isNotNull(matchRuns.invoiceId)));
-  for (const r of ran) if (r.id) ids.add(r.id);
   for (const invoiceId of ids) {
+    // A variable, not an object literal: compiles whether or not the queue's job
+    // type (S7's Postgres queue, #49) declares the optional fields yet.
+    const job: Parameters<typeof enqueueMatchInvoice>[0] & { rematch?: boolean; poId?: string } = {
+      restaurantId,
+      invoiceId,
+      rematch: true,
+      // Matched against the order that was counted, not a discovered one.
+      ...(receipt.poId ? { poId: receipt.poId } : {}),
+    };
     try {
-      await enqueueMatchInvoice({
-        restaurantId,
-        invoiceId,
-        rematch: true,
-        // Matched against the order that was counted, not a discovered one.
-        ...(receipt.poId ? { poId: receipt.poId } : {}),
-      });
+      await enqueueMatchInvoice(job);
     } catch (err) {
       console.error(
         `[receiving.submitReceipt] failed to enqueue the re-match for invoice=${invoiceId}` +
