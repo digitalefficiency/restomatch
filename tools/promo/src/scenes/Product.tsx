@@ -11,15 +11,15 @@ import { Eyebrow, FadeUp, RiseLine } from '../components/primitives';
 type U = [number, number, number, number];
 const FOCUS: Record<Locale, Record<'hero' | 'beer' | 'appr' | 'claim', U>> = {
   // beer = product → change columns of the leak-detective row; claim = amount column + total line
-  he: { hero: [0.615, 0.288, 0.89, 0.4], beer: [0.34, 0.466, 0.885, 0.506], appr: [0.58, 0.298, 0.882, 0.366], claim: [0.117, 0.345, 0.5, 0.407] },
-  en: { hero: [0.115, 0.288, 0.385, 0.4], beer: [0.08, 0.466, 0.66, 0.506], appr: [0.118, 0.298, 0.42, 0.366], claim: [0.46, 0.345, 0.883, 0.407] },
+  he: { hero: [0.615, 0.378, 0.89, 0.49], beer: [0.34, 1.012, 0.885, 1.052], appr: [0.58, 0.298, 0.882, 0.366], claim: [0.117, 0.345, 0.5, 0.407] },
+  en: { hero: [0.12, 0.378, 0.38, 0.49], beer: [0.08, 1.054, 0.66, 1.092], appr: [0.118, 0.298, 0.42, 0.366], claim: [0.46, 0.345, 0.883, 0.407] },
 };
 
 // One beat per screen. Within a beat (relative to `push`): camera push 0→28,
 // spotlight opens 22→34 (12 f), holds to 80 (≈1.5 s), closes 80→92, camera pulls back 86→112.
 const BEATS = [
   { key: 'dashboard', from: 0, focus: 'hero', push: 56, accent: C.danger },
-  { key: 'leaks', from: 172, focus: 'beer', push: 192, accent: C.danger },
+  { key: 'leaks', from: 172, focus: 'beer', push: 192, accent: C.danger, scroll: { he: 0.56, en: 0.6 } },
   { key: 'approvals', from: 290, focus: 'appr', push: 310, accent: C.gold },
   { key: 'claims', from: 408, focus: 'claim', push: 428, accent: C.primary },
 ] as const;
@@ -50,7 +50,10 @@ export const Product: React.FC<{ locale: Locale }> = ({ locale }) => {
   const beat = BEATS[bi];
   const lf = f - beat.push;
   const u = FOCUS[locale][beat.focus];
-  const rect = { x: u[0] * sw, y: u[1] * sw, w: (u[2] - u[0]) * sw, h: (u[3] - u[1]) * sw };
+  // some focus rows sit below the first viewport: scroll the page there before the push-in
+  const scrollOf = (b: (typeof BEATS)[number]) => ('scroll' in b ? b.scroll[locale] : 0);
+  const scrollU = scrollOf(beat) * prog(lf, -16, 0, EASE_IN_OUT);
+  const rect = { x: u[0] * sw, y: (u[1] - scrollU) * sw, w: (u[2] - u[0]) * sw, h: (u[3] - u[1]) * sw };
 
   // camera push-in: the focus rect fills the device zone
   const target = Math.min((device.w * 0.9) / rect.w, (device.h * 0.62) / rect.h, 3.4);
@@ -126,10 +129,11 @@ export const Product: React.FC<{ locale: Locale }> = ({ locale }) => {
           }}
         >
           <Laptop width={W} glare={ry / 20}>
-            {bi > 0 ? <Screen src={shot(BEATS[bi - 1].key)} width={sw} redact={redact} /> : null}
+            {bi > 0 ? <Screen src={shot(BEATS[bi - 1].key)} width={sw} scroll={scrollOf(BEATS[bi - 1]) * sw} redact={redact} /> : null}
             <Screen
               src={shot(beat.key)}
               width={sw}
+              scroll={scrollU * sw}
               redact={redact}
               clip={bi > 0 ? (isRtl ? `inset(0 0 0 ${(1 - wipe) * 100}%)` : `inset(0 ${(1 - wipe) * 100}% 0 0)`) : undefined}
             />
@@ -146,7 +150,7 @@ export const Product: React.FC<{ locale: Locale }> = ({ locale }) => {
                 }}
               />
             ) : null}
-            <Spotlight rect={rect} a={spot} src={shot(beat.key)} imgWidth={sw} imgTop={0} screenW={sw} screenH={sh} accent={beat.accent} />
+            <Spotlight rect={rect} a={spot} src={shot(beat.key)} imgWidth={sw} imgTop={-scrollU * sw} screenW={sw} screenH={sh} accent={beat.accent} />
           </Laptop>
         </div>
       </DeviceZone>

@@ -7,16 +7,17 @@ export type Locale = 'he' | 'en';
 
 /** Facts shown on screen (seeded demo tenant, dashboard hero, Oct 2026). */
 export const FACTS = {
-  leak: 572, // "דלף החודש" — owner.leakHero
-  spend: 28389, // pre-VAT checked spend this month
-  leakPct: '2%', // 572 / 28,389 = 2.01% — the app's hero shows "2%"
+  // Demo seed DEMO_TODAY=2026-10-25 (the live demo's seed), month = October 2026.
+  leak: 760, // "דלף החודש" — owner.leakHero
+  spend: 42263, // pre-VAT checked spend this month
+  leakPct: '1.8%', // 760 / 42,263 = 1.80% — the app's hero shows "1.8%"
   caught: 296, // "נתפס לפני תשלום" — leak on unpaid invoices
-  claimed: 276, // "נדרש מהספקים" — accepted to claim back
-  flagged: 9, // invoices with a leak
-  checked: 24, // checked invoices (dashboard "9 מתוך 24")
+  claimed: 464, // "נדרש מהספקים" — accepted to claim back
+  flagged: 13, // invoices with a leak
+  checked: 35, // checked invoices (dashboard "13 מתוך 35")
   beerFrom: 520, // leak detective: beer keg baseline ₪520.00
   beerTo: 575, // last price ₪575.00 (+10.6%)
-  chainLeakPct: '3.1%', // /dashboard/chain: worst branch (Jerusalem) — seed:chain-demo
+  chainLeakPct: '2.9%', // /dashboard/chain: worst branch (Jerusalem ₪975 of ₪33,056) — seed:chain-demo
   pilotTarget: '1.5%', // North Star / pilot target (docs/ICP.md, AGENTS.md)
 };
 export type Facts = typeof FACTS;
