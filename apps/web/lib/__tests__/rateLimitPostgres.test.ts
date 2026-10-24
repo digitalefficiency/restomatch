@@ -134,3 +134,67 @@ describe('enforceRateLimit on Postgres', () => {
     expect(await checkRateLimit(store, 'slow@x.test', opts)).toMatchObject({ allowed: false });
   }, 10_000);
 });
+
+describe('password-login limit counts only FAILED attempts (demo: many logins into one owner account)', () => {
+  const RUN = `${process.pid}-${Date.now()}`;
+  const withRealDb = async (fn: (rl: typeof import('../rateLimit')) => Promise<void>) => {
+    const prev = process.env.DATABASE_URL;
+    process.env.DATABASE_URL = URL;
+    vi.resetModules();
+    try {
+      await fn(await import('../rateLimit'));
+    } finally {
+      process.env.DATABASE_URL = prev;
+      vi.resetModules();
+    }
+  };
+  afterAll(async () => {
+    await raw`DELETE FROM rate_limit_counters WHERE key LIKE ${`login:%${RUN}%`}`;
+  });
+
+  it('20 successful logins in one window all succeed', async () => {
+    await withRealDb(async (rl) => {
+      const email = `owner-${RUN}@demo.test`;
+      for (let i = 0; i < 20; i++) {
+        expect((await rl.enforceLoginLimit(email, `10.1.${i}.1-${RUN}`)).allowed, `login #${i + 1}`).toBe(true);
+        await rl.clearLoginFailures(email); // what authorize() does after a correct password
+      }
+    });
+  });
+
+  it('10 failures lock the account (the 11th attempt is refused, even with the right password)', async () => {
+    await withRealDb(async (rl) => {
+      const email = `victim-${RUN}@demo.test`;
+      for (let i = 0; i < rl.LOGIN_EMAIL_LIMIT.limit; i++) {
+        expect((await rl.enforceLoginLimit(email, `10.2.${i}.1-${RUN}`)).allowed).toBe(true); // wrong password: no clear
+      }
+      expect((await rl.enforceLoginLimit(email, `10.2.99.1-${RUN}`)).allowed).toBe(false);
+    });
+  });
+
+  it('a success after a few failures resets the count', async () => {
+    await withRealDb(async (rl) => {
+      const email = `typo-${RUN}@demo.test`;
+      for (let i = 0; i < 4; i++) await rl.enforceLoginLimit(email, `10.3.${i}.1-${RUN}`); // 4 typos
+      expect((await rl.enforceLoginLimit(email, `10.3.50.1-${RUN}`)).allowed).toBe(true); // then the right password
+      await rl.clearLoginFailures(email);
+      // A full 10 failures are needed again before the lock.
+      for (let i = 0; i < rl.LOGIN_EMAIL_LIMIT.limit; i++) {
+        expect((await rl.enforceLoginLimit(email, `10.3.${60 + i}.1-${RUN}`)).allowed).toBe(true);
+      }
+      expect((await rl.enforceLoginLimit(email, `10.3.99.1-${RUN}`)).allowed).toBe(false);
+    });
+  });
+
+  it('the per-IP limit is unchanged: successes from one IP still count toward it', async () => {
+    await withRealDb(async (rl) => {
+      const ip = `10.4.0.1-${RUN}`;
+      for (let i = 0; i < rl.LOGIN_IP_LIMIT.limit; i++) {
+        const email = `ip${i}-${RUN}@demo.test`;
+        expect((await rl.enforceLoginLimit(email, ip)).allowed).toBe(true);
+        await rl.clearLoginFailures(email);
+      }
+      expect((await rl.enforceLoginLimit(`ipx-${RUN}@demo.test`, ip)).allowed).toBe(false);
+    });
+  });
+});

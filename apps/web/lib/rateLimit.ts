@@ -4,6 +4,7 @@ import {
   canonicalizeEmail,
   checkRateLimit,
   MemoryRateLimitStore,
+  resetRateLimit,
   type RateLimitOptions,
   type RateLimitResult,
   type RateLimitStore,
@@ -61,6 +62,15 @@ export class PostgresRateLimitStore implements RateLimitStore {
           RETURNING count`)) as unknown as Array<{ count: number }>;
         return Number(rows[0]?.count ?? 0);
       })(),
+      RATE_LIMIT_DEADLINE_MS,
+      () => new Error(`rate-limit store timed out after ${RATE_LIMIT_DEADLINE_MS}ms`),
+    );
+  }
+
+  async del(key: string): Promise<void> {
+    await this.connect();
+    await withDeadline(
+      this.db.execute(dsql`DELETE FROM rate_limit_counters WHERE key = ${key}`).then(() => undefined),
       RATE_LIMIT_DEADLINE_MS,
       () => new Error(`rate-limit store timed out after ${RATE_LIMIT_DEADLINE_MS}ms`),
     );
@@ -226,6 +236,21 @@ export const LOGIN_IP_LIMIT: RateLimitOptions = {
  */
 export async function enforceLoginLimit(email: string, ip: string): Promise<RateLimitResult> {
   return enforceEmailAndIpLimit(email, ip, LOGIN_EMAIL_LIMIT, LOGIN_IP_LIMIT);
+}
+
+/**
+ * Call after a SUCCESSFUL password login: clears the per-account counter so only
+ * failed attempts accumulate toward the lockout. (Several people logging into one
+ * demo owner account must not lock it after 10 logins.) Every attempt is still
+ * counted atomically in enforceLoginLimit, so parallel guesses stay bounded; the
+ * per-IP limit is unchanged. Best effort: a store error only logs.
+ */
+export async function clearLoginFailures(email: string): Promise<void> {
+  try {
+    await resetRateLimit(await getStore(), canonicalizeEmail(email), LOGIN_EMAIL_LIMIT);
+  } catch (err) {
+    console.warn('[rateLimit] could not clear login failures:', err instanceof Error ? err.message : err);
+  }
 }
 
 /** Second-factor (TOTP / recovery) attempt limit per account: 8 per 15 minutes. */
