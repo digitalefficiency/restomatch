@@ -80,7 +80,7 @@ export default function GlobalError({
             <p
               style={{
                 fontSize: '0.75rem',
-                color: '#6B8478',
+                color: '#7D9689',
                 margin: '0 0 1.5rem',
                 fontFamily: 'ui-monospace, "JetBrains Mono", monospace',
                 fontVariantNumeric: 'tabular-nums',

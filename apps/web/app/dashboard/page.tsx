@@ -234,7 +234,7 @@ export default async function DashboardPage({
             action={
               <Link
                 href="/dashboard/leaks"
-                className="inline-flex items-center gap-1 rounded-lg text-sm font-semibold text-primary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+                className="touch-target inline-flex items-center gap-1 rounded-lg text-sm font-semibold text-primary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
               >
                 {t('leaks.all')}
                 <ArrowLeft className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
@@ -371,7 +371,7 @@ function LeakHero({
         {canDrill && (hasLeak || hero.pendingLinkCount > 0) ? (
           <Link
             href={drillHref}
-            className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-danger/12 px-4 py-2 text-sm font-semibold text-danger ring-1 ring-danger/30 transition-colors hover:bg-danger/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/60"
+            className="touch-target inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-danger/12 px-4 py-2 text-sm font-semibold text-danger ring-1 ring-danger/30 transition-colors hover:bg-danger/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/60"
           >
             {t('hero.drill')}
             <ArrowLeft className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />

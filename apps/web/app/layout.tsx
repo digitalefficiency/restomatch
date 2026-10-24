@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
+import { cookies } from 'next/headers';
 import { preload } from 'react-dom';
 import { CookieConsent } from '@/lib/components/CookieConsent';
+import { readConsentFrom } from '@/lib/cookieConsent';
 import { RouteProgress } from '@/lib/components/RouteProgress';
 import { I18nProvider } from '@/lib/i18n/client';
 import { dirOf } from '@/lib/i18n/config';
@@ -27,6 +29,8 @@ export default async function RootLayout(props: { children: React.ReactNode }) {
   // Locale comes from the `rm_locale` cookie (LocaleSwitcher / `?lang=`); the
   // document direction follows it so English renders LTR.
   const locale = await getLocale();
+  // Server-rendered consent banner (see CookieConsent): visible until a choice is stored.
+  const consentChosen = readConsentFrom((await cookies()).toString()) !== null;
   for (const href of FONT_PRELOADS) {
     preload(href, { as: 'font', type: 'font/woff2', crossOrigin: 'anonymous' });
   }
@@ -37,7 +41,7 @@ export default async function RootLayout(props: { children: React.ReactNode }) {
           {/* tRPC/react-query is provided by the routes that use it (dashboard, admin,
               onboarding, the lazy lead form) so public pages don't ship it. */}
           {props.children}
-          <CookieConsent />
+          <CookieConsent initialVisible={!consentChosen} />
           <RouteProgress />
         </I18nProvider>
       </body>

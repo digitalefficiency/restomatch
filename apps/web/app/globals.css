@@ -34,6 +34,17 @@
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
     U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
+/* Metric-matched fallback (the numbers next/font computes for Heebo vs Arial):
+   text painted before Heebo arrives takes the same space, so the swap doesn't
+   re-wrap lines (measured: CLS 0.22 → 0 on /dashboard/chain, English, 390 px). */
+@font-face {
+  font-family: 'Heebo Fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  size-adjust: 99.89%;
+  ascent-override: 104.9%;
+  descent-override: 42.14%;
+  line-gap-override: 0%;
+}
 @font-face {
   font-family: 'JetBrains Mono';
   font-style: normal;
@@ -52,7 +63,7 @@
   :root {
     color-scheme: dark;
     /* Font stacks consumed by tailwind.config (fontFamily.sans / .mono). */
-    --font-heebo: 'Heebo';
+    --font-heebo: 'Heebo', 'Heebo Fallback';
     --font-mono: 'JetBrains Mono';
     /* Signature money-flow palette (kept here too for raw CSS / gradients). */
     --rm-bg: #0e1512;
@@ -61,7 +72,7 @@
     --rm-line: #2a3a31;
     --rm-ink: #ecf5ef;
     --rm-muted: #9db2a6;
-    --rm-subtle: #6b8478;
+    --rm-subtle: #7d9689;
     --rm-primary: #22d39a;
     --rm-gold: #e0b341;
     --rm-danger: #ff5c7a;
@@ -169,9 +180,42 @@
 
   /* Frosted glass for sticky nav / headers on the dark canvas. */
   .glass {
-    background-color: rgba(22, 32, 27, 0.72);
+    /* 0.9, not 0.72: at 0.72 a primary-green button scrolling under the
+       mobile bottom bar dropped its muted labels to 4.0:1 (WCAG AA is 4.5). */
+    background-color: rgba(22, 32, 27, 0.9);
     backdrop-filter: saturate(140%) blur(14px);
     -webkit-backdrop-filter: saturate(140%) blur(14px);
+  }
+
+  /* Touch targets ≥ 44×44 CSS px on touch screens (phones, tablets). Desktop
+     (fine pointer) keeps the compact sizes. In the base layer, so an explicit
+     min-h-* / min-w-* utility on a component still wins. */
+  @media (pointer: coarse) {
+    button,
+    select,
+    summary,
+    [role='button'],
+    [role='radio'],
+    [role='tab'],
+    input:not([type='checkbox']):not([type='radio']):not([type='hidden']):not([type='range']):not([type='file']) {
+      min-height: 44px;
+    }
+    button,
+    summary,
+    [role='button'],
+    [role='radio'],
+    [role='tab'] {
+      min-width: 44px;
+    }
+    /* Stand-alone links styled as pills / "see all" actions opt in. */
+    .touch-target {
+      min-height: 44px;
+    }
+    /* A checkbox/radio inside its <label>: the whole label is the target. */
+    label:has(> input[type='checkbox']),
+    label:has(> input[type='radio']) {
+      min-height: 44px;
+    }
   }
 }
 

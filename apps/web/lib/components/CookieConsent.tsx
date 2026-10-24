@@ -14,14 +14,16 @@ import { marketing } from '@/lib/i18n/messages/marketing';
  * always active and are disclosed in the cookie policy; analytics stay off until
  * "accept all".
  */
-export function CookieConsent() {
+export function CookieConsent({ initialVisible = false }: { initialVisible?: boolean }) {
   const t = useT(marketing);
-  // Start hidden; decide after mount so SSR/CSR markup matches and we can read
-  // the existing cookie.
-  const [visible, setVisible] = useState(false);
+  // The root layout reads the consent cookie on the server and passes
+  // `initialVisible`, so the banner is in the first HTML. Mounting it only
+  // after hydration made its paragraph the LCP element (~2.2 s on a throttled
+  // phone) on every page. The effect still covers a choice made in another tab.
+  const [visible, setVisible] = useState(initialVisible);
 
   useEffect(() => {
-    if (getConsentChoice() === null) setVisible(true);
+    setVisible(getConsentChoice() === null);
   }, []);
 
   function choose(choice: ConsentChoice) {

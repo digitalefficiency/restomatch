@@ -14,7 +14,7 @@ export const colors = {
   // Text
   ink: '#ECF5EF', // primary text
   muted: '#9DB2A6', // secondary text
-  subtle: '#6B8478', // tertiary / placeholder
+  subtle: '#7D9689', // tertiary / placeholder (≥4.5:1 on surface-2 — WCAG AA)
 
   // Brand + semantics
   primary: '#22D39A', // neon money-green (primary action, positive, clean-match)

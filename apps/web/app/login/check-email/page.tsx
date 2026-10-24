@@ -21,7 +21,7 @@ export default async function CheckEmailPage() {
           </p>
         ) : null}
         <p className="mt-6 text-xs">
-          <Link href="/login" className="text-brand hover:underline">
+          <Link href="/login" className="text-primary hover:underline">
             {t('checkEmail.back')}
           </Link>
         </p>

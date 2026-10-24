@@ -253,9 +253,9 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
         {sections ? (
           sections.map((s) => (
             <section key={s.key} data-testid={`recon-section-${s.key}`}>
-              <h3 className="mb-2 text-xs font-semibold text-muted">
+              <h2 className="mb-2 text-xs font-semibold text-muted">
                 <SectionLabel section={s} t={t} money={money} />
-              </h3>
+              </h2>
               <ul className="space-y-2">{s.items.map(({ line, index }) => renderCard(line, index))}</ul>
             </section>
           ))

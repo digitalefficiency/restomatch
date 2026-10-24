@@ -268,7 +268,13 @@ export default async function ChainPage({
       {/* Ranking table. */}
       <section className="mt-10">
         <SectionHeader title={t('dashboard.ranking.title')} subtitle={t('dashboard.ranking.subtitle')} />
-        <Card padding="none" className="overflow-x-auto">
+        <Card
+          padding="none"
+          tabIndex={0}
+          role="region"
+          aria-label={t('dashboard.ranking.title')}
+          className="overflow-x-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+        >
           <table className="w-full min-w-[44rem] text-sm" data-testid="chain-ranking">
             <thead>
               <tr className="border-b border-line text-xs uppercase tracking-wider text-subtle">
@@ -328,7 +334,13 @@ export default async function ChainPage({
       {/* Branch × month heatmap. */}
       <section className="mt-10">
         <SectionHeader title={t('dashboard.heatmap.title')} subtitle={t('dashboard.heatmap.subtitle')} />
-        <Card padding="md" className="overflow-x-auto">
+        <Card
+          padding="md"
+          tabIndex={0}
+          role="region"
+          aria-label={t('dashboard.heatmap.title')}
+          className="overflow-x-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+        >
           <table className="w-full min-w-[36rem] border-separate border-spacing-1 text-xs" data-testid="chain-heatmap">
             <thead>
               <tr>
@@ -478,7 +490,13 @@ export default async function ChainPage({
         {data.topSuppliers.length === 0 ? (
           <EmptyState icon={<Undo2 className="h-6 w-6" />} title={t('dashboard.suppliers.empty')} />
         ) : (
-          <Card padding="none" className="overflow-x-auto">
+          <Card
+            padding="none"
+            tabIndex={0}
+            role="region"
+            aria-label={t('dashboard.suppliers.title')}
+            className="overflow-x-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+          >
             <table className="w-full min-w-[36rem] text-sm" data-testid="chain-suppliers">
               <thead>
                 <tr className="border-b border-line text-xs uppercase tracking-wider text-subtle">

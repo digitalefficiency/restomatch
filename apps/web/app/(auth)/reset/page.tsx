@@ -118,7 +118,7 @@ export default async function ResetPage({ searchParams }: PageProps) {
           </Button>
         </form>
         <p className="mt-6 text-center text-xs text-subtle">
-          <Link href="/login" className="text-brand hover:underline">
+          <Link href="/login" className="text-primary hover:underline">
             {t('reset.back')}
           </Link>
         </p>
