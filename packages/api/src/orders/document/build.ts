@@ -41,6 +41,8 @@ export interface BuildOrderDocumentInput {
     qtyOrdered: string;
     unit: string;
     unitPriceExpected: string | null;
+    /** Verified against the contract in force on the order date (see load.ts). */
+    contractPrice?: boolean;
   }>;
   /** Extra lines appended after the totals (see `applyOrderDocumentExtensions`). */
   extraLines?: string[];
@@ -62,6 +64,7 @@ export function buildOrderDocument(input: BuildOrderDocumentInput): OrderDocumen
       unit: l.unit,
       unitPriceAgorot,
       lineTotalAgorot: l.unitPriceExpected !== null ? lineTotalAgorot(l.qtyOrdered, l.unitPriceExpected) : null,
+      contractPrice: l.unitPriceExpected !== null && l.contractPrice === true,
     };
   });
   const doc: OrderDocument = {

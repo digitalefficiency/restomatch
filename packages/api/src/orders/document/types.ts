@@ -18,6 +18,12 @@ export interface OrderDocumentLine {
   unitPriceAgorot: number | null;
   /** qty × unit price, rounded half-up to the agora (null when unpriced). */
   lineTotalAgorot: number | null;
+  /**
+   * The unit price IS the supplier contract price in force on the order date
+   * (flag `contracts`). Only these lines may be called "agreed" (מחיר חוזה);
+   * every other price is just the price on the order.
+   */
+  contractPrice: boolean;
 }
 
 export interface OrderDocument {
@@ -32,7 +38,7 @@ export interface OrderDocument {
   lines: OrderDocumentLine[];
   /** Sum of priced lines, agorot. */
   totalAgorot: number;
-  /** True when at least one line has no agreed price. */
+  /** True when at least one line has no price. */
   hasUnpricedLines: boolean;
   /** Per-restaurant setting: false = the supplier sees SKU + qty only. */
   showPrices: boolean;
@@ -42,6 +48,20 @@ export interface OrderDocument {
 }
 
 /** What an extension knows about the send it contributes to. */
+/**
+ * Contract unit prices in force on `at` for (product, unit) pairs of one
+ * supplier, keyed `${productId}|${unit}` — the shape of S11's
+ * contracts/orderPrices.ts `contractPricesForOrder`, registered at integration
+ * via {@link orderDocumentContractPrices}.
+ */
+export type ContractPriceResolver = (
+  db: Database,
+  restaurantId: string,
+  supplierId: string,
+  items: ReadonlyArray<{ productId: string; unit: string }>,
+  at: Date,
+) => Promise<Map<string, number>>;
+
 export interface OrderDocumentExtensionContext {
   /** The member transaction (tenant GUC set). */
   db: Database;

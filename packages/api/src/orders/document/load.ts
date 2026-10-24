@@ -1,8 +1,22 @@
 import { eq, poLines, purchaseOrders, restaurants, sql, suppliers, type Database } from '@restomatch/db';
 import { applyOrderDocumentExtensions, buildOrderDocument } from './build';
-import type { OrderDocument, OrderDocumentExtension, OrderDocumentSettings } from './types';
+import { isFeatureOn } from '../../lib/featureGate';
+import type { ContractPriceResolver, OrderDocument, OrderDocumentExtension, OrderDocumentSettings } from './types';
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
+
+/**
+ * Where contract prices come from (S11's contracts/orderPrices.ts
+ * `contractPricesForOrder`, registered at integration). Null = no contracts
+ * module: no line is ever called "agreed".
+ */
+export const orderDocumentContractPrices: { resolve: ContractPriceResolver | null } = { resolve: null };
+
+/** The PO price IS the contract price, to the agora — only then may the document call it agreed. */
+export function isContractPrice(poUnitPrice: string | null, contractPrice: number | undefined): boolean {
+  if (poUnitPrice === null || contractPrice === undefined) return false;
+  return Math.round(Number(poUnitPrice) * 100) === Math.round(contractPrice * 100);
+}
 
 /** Per-restaurant order-document settings (restaurants.settings.orderDocument). Default: show prices. */
 export function orderDocumentSettingsOf(settings: unknown): Required<OrderDocumentSettings> {
@@ -56,6 +70,7 @@ export async function loadOrderDocument(
   ]);
   const lines = await db
     .select({
+      productId: poLines.productId,
       rawDescription: poLines.rawDescription,
       supplierSku: sql<string | null>`coalesce(${poLines.supplierSku}, (
         select sci.supplier_sku from supplier_catalog_items sci
@@ -71,17 +86,29 @@ export async function loadOrderDocument(
     .from(poLines)
     .where(eq(poLines.poId, poId));
 
+  // "Agreed" only where the PO price is the contract price in force on the order date
+  // (flag `contracts` on and a contracts module registered); otherwise no line claims it.
+  const placedAt = opts.placedAt ?? po.sentAt ?? new Date();
+  let contractByKey = new Map<string, number>();
+  const resolve = orderDocumentContractPrices.resolve;
+  if (resolve && (await isFeatureOn(db, restaurantId, 'contracts'))) {
+    const items = lines.flatMap((l) => (l.productId ? [{ productId: l.productId, unit: l.unit }] : []));
+    if (items.length > 0) contractByKey = await resolve(db, restaurantId, po.supplierId, items, placedAt);
+  }
   const supplierName = supplier?.name ?? 'ספק';
   const doc = buildOrderDocument({
     restaurantName: restaurant?.name ?? '',
     supplierName,
     poId,
-    placedAt: opts.placedAt ?? po.sentAt ?? new Date(),
+    placedAt,
     expectedDeliveryAt: po.expectedDeliveryAt,
     timezone: restaurant?.timezone ?? DEFAULT_TZ,
     notes: po.notes,
     showPrices: orderDocumentSettingsOf(restaurant?.settings).showPrices,
-    lines,
+    lines: lines.map((l) => ({
+      ...l,
+      contractPrice: l.productId != null && isContractPrice(l.unitPriceExpected, contractByKey.get(`${l.productId}|${l.unit}`)),
+    })),
   });
   const withExtras = await applyOrderDocumentExtensions(doc, opts.extensions ?? [], {
     db,

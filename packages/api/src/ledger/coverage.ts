@@ -13,9 +13,9 @@ import { lineTotalAgorot } from '../orders/document/build';
  *      supplier → covered when it is matched/approved/paid, else in_consolidated;
  *   2. a match run of an invoice used the GR or its PO → covered;
  *   3. the period (raw.periodStart..periodEnd, else the invoice's month ± 3 days) of a
- *      consolidated invoice that lists no notes, or of an invoice still waiting for a PO link,
- *      holds it → same status rule;
- *   4. otherwise not_invoiced.
+ *      consolidated invoice that lists no notes holds it → same status rule;
+ *   4. otherwise not_invoiced — an ordinary invoice waiting for a PO link never covers a note
+ *      (orchestrator decision: a note billed on nothing must not read as covered).
  */
 export interface DeliveryNoteCoverage {
   grId: string;
@@ -117,8 +117,8 @@ export async function deliveryNoteCoverage(
     value.set(l.gr_id, (value.get(l.gr_id) ?? 0) + (lineTotalAgorot(l.qty, l.price) ?? 0));
   }
 
-  // Invoices that can hold notes without a match run: consolidated ones (any status) and
-  // pending ones, dated up to a month after the window (a month-end invoice can come late).
+  // Invoices that can hold notes without a match run: consolidated ones (any status),
+  // dated up to a month after the window (a month-end invoice can come late).
   const candidates = (await db.execute(sql`
     SELECT i.id, i.invoice_number, i.invoice_date, i.status::text AS status,
            EXISTS (SELECT 1 FROM match_runs mr WHERE mr.invoice_id = i.id AND mr.restaurant_id = i.restaurant_id) AS has_run,
@@ -133,7 +133,7 @@ export async function deliveryNoteCoverage(
       AND i.invoice_date >= ${new Date(from.getTime() - 35 * DAY).toISOString()}::timestamptz
       AND i.invoice_date < ${new Date(to.getTime() + 35 * DAY).toISOString()}::timestamptz
   `)) as unknown as CandidateInvoice[];
-  const consolidated = candidates.filter((c) => c.kind === 'consolidated' || !c.has_run);
+  const consolidated = candidates.filter((c) => c.kind === 'consolidated');
   const byNumber = new Map<string, CandidateInvoice>();
   for (const c of consolidated) for (const n of asArray(c.note_numbers)) byNumber.set(n, c);
   const periodOf = (c: CandidateInvoice): [number, number] | null => {
@@ -171,7 +171,7 @@ export async function deliveryNoteCoverage(
         consolidated: consolidatedById.has(n.mr_invoice_id),
       };
     }
-    // 3. Held by the period of a consolidated invoice listing no notes, or of one awaiting a PO link.
+    // 3. Held by the period of a consolidated invoice that lists no notes.
     const at = new Date(n.received_at).getTime();
     const holder = consolidated.find((c) => {
       if (isConsolidated(c) && asArray(c.note_numbers).length > 0) return false;

@@ -1,6 +1,7 @@
 import fontkit from '@pdf-lib/fontkit';
 import { PDFDocument, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import { visualRtl } from './bidi';
+import { priceFootnote } from './text';
 import { ilsFromAgorot, qtyText } from './format';
 import { HEEBO_500_BASE64, HEEBO_800_BASE64 } from './heebo-font';
 import type { OrderDocument } from './types';
@@ -152,7 +153,7 @@ export async function renderOrderPdf(doc: OrderDocument): Promise<Uint8Array> {
       sku: l.sku ?? '—',
       qty: qtyText(l.qty),
       unit: l.unit,
-      price: l.unitPriceAgorot !== null ? ilsFromAgorot(l.unitPriceAgorot) : '—',
+      price: l.unitPriceAgorot !== null ? `${ilsFromAgorot(l.unitPriceAgorot)}${l.contractPrice ? ' · חוזה' : ''}` : '—',
       total: l.lineTotalAgorot !== null ? ilsFromAgorot(l.lineTotalAgorot) : '—',
     };
     for (const c of cols) {
@@ -169,11 +170,13 @@ export async function renderOrderPdf(doc: OrderDocument): Promise<Uint8Array> {
     drawRtl(page, t(`סה״כ הזמנה (לפני מע״מ): ${ilsFromAgorot(doc.totalAgorot)}`), right, y, bold, 13);
     y -= 18;
     if (doc.hasUnpricedLines) {
-      drawRtl(page, t('שורות ללא מחיר מוסכם אינן כלולות בסה״כ.'), right, y, regular, 9, MUTED);
+      drawRtl(page, t('שורות ללא מחיר אינן כלולות בסה״כ.'), right, y, regular, 9, MUTED);
       y -= 14;
     }
-    drawRtl(page, t('המחירים בהזמנה זו הם המחירים המוסכמים. חיוב בחשבונית מעבר להם ייבדק.'), right, y, regular, 9, MUTED);
-    y -= 16;
+    for (const note of priceFootnote(doc)) {
+      drawRtl(page, t(note), right, y, regular, 9, MUTED);
+      y -= 16;
+    }
   }
   if (doc.notes) {
     drawRtl(page, fit(t(`הערות: ${doc.notes}`), regular, 10, width), right, y, regular, 10);
