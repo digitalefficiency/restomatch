@@ -1,4 +1,5 @@
 import { sql, type Database } from '@restomatch/db';
+import { scanAwaitingCountSql } from './awaiting-count';
 import { LEAK_FILTER, LIVE_DUPLICATE, lineFilter, originalChecked, viewInvoicesSql, type ViewSpec } from './leak-views';
 
 /**
@@ -24,6 +25,10 @@ import { LEAK_FILTER, LIVE_DUPLICATE, lineFilter, originalChecked, viewInvoicesS
  *  • Caught before payment = leak on invoices not yet marked paid.
  *  • Recovered = the part of the leak the team accepted as a claim
  *    (resolution accepted/resolved) — same cap.
+ *  • A receiving scan the OCR held for its receipt's count (#94 — photo taken,
+ *    count not submitted yet) is "waiting for the count" (awaitingCount*), not
+ *    "waiting for a PO link": it is bound to its order already. Still in neither
+ *    leak nor spend (no run yet). See awaiting-count.ts.
  */
 
 export interface LeakHero {
@@ -42,6 +47,9 @@ export interface LeakHero {
   /** Invoices waiting for a PO link (unmatched / consolidated / unordered) — in neither leak nor spend. */
   pendingLinkCount: number;
   pendingLinkIls: number;
+  /** Receiving scans waiting for their receipt's count (#94) — in neither leak, spend nor pending link. */
+  awaitingCountCount: number;
+  awaitingCountIls: number;
 }
 
 export interface LeakHeroOptions {
@@ -64,7 +72,8 @@ function monthInvoicesCte(restaurantId: string, now: Date, offset: number) {
       FROM r
     ),
     inv AS (
-      SELECT i.id, i.status, i.total_excl_vat, i.total_incl_vat
+      SELECT i.id, i.status, i.total_excl_vat, i.total_incl_vat,
+             ${scanAwaitingCountSql(restaurantId, sql`i`)} AS counting
       FROM invoices i, b
       WHERE i.restaurant_id = ${restaurantId}
         AND COALESCE(i.invoice_date, i.created_at) >= b.lo
@@ -86,11 +95,15 @@ function monthInvoicesCte(restaurantId: string, now: Date, offset: number) {
         (NOT bool_or(mr.id IS NOT NULL))
           OR COALESCE(bool_or(d.type = 'UNORDERED_ARRIVAL' AND d.resolution_status IN ('open','escalated')), false)
           AS pending_link,
+        -- …except a receiving scan held for its receipt's count (#94): bound to its
+        -- order, waiting for the count. pending_link stays true (spend unchanged);
+        -- the "waiting to be linked" line and list leave it out.
+        (NOT bool_or(mr.id IS NOT NULL)) AND inv.counting AS awaiting_count,
         COALESCE(bool_or(${LIVE_DUPLICATE}), false) AND ${originalChecked(restaurantId, sql`inv.id`)} AS dup_copy
       FROM inv
       LEFT JOIN match_runs mr ON mr.invoice_id = inv.id AND mr.restaurant_id = ${restaurantId}
       LEFT JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${restaurantId}
-      GROUP BY inv.id, inv.status, inv.total_incl_vat, inv.total_excl_vat
+      GROUP BY inv.id, inv.status, inv.total_incl_vat, inv.total_excl_vat, inv.counting
     )`;
 }
 
@@ -120,8 +133,10 @@ export async function computeLeakHero(
       COALESCE(SUM(LEAST(raw_leak, total)) FILTER (WHERE status <> 'paid'), 0) AS caught,
       COALESCE(SUM(LEAST(raw_recovered, LEAST(raw_leak, total))), 0) AS recovered,
       COUNT(*) FILTER (WHERE raw_leak > 0) AS with_leak,
-      COUNT(*) FILTER (WHERE pending_link) AS pending_count,
-      COALESCE(SUM(total) FILTER (WHERE pending_link), 0) AS pending_amount
+      COUNT(*) FILTER (WHERE pending_link AND NOT awaiting_count) AS pending_count,
+      COALESCE(SUM(total) FILTER (WHERE pending_link AND NOT awaiting_count), 0) AS pending_amount,
+      COUNT(*) FILTER (WHERE awaiting_count) AS awaiting_count,
+      COALESCE(SUM(total) FILTER (WHERE awaiting_count), 0) AS awaiting_amount
     FROM per
   `);
   const r = rowsOf(res)[0] ?? {};
@@ -140,6 +155,8 @@ export async function computeLeakHero(
     invoicesWithLeak: n(r.with_leak),
     pendingLinkCount: n(r.pending_count),
     pendingLinkIls: ils(r.pending_amount),
+    awaitingCountCount: n(r.awaiting_count),
+    awaitingCountIls: ils(r.awaiting_amount),
   };
 }
 
@@ -157,6 +174,11 @@ export interface LeakBreakdownLine {
   productNameEn: string | null;
   lineDescription: string | null;
   lineDescriptionEn: string | null;
+  /** Which PO line / invoice line / product the engine flagged (null when not line-level). */
+  poLineId: string | null;
+  /** The invoice line the finding is on; null for invoice-level findings (DUPLICATE_INVOICE, TOTAL_MISMATCH, VAT_MISMATCH…). */
+  invoiceLineId: string | null;
+  productId: string | null;
 }
 
 export interface LeakBreakdownInvoice {
@@ -195,24 +217,53 @@ export async function computeLeakBreakdown(
   const invRes = await db.execute(sql`
     WITH ${cte}
     SELECT
-      per.id, per.status, per.total, LEAST(per.raw_leak, per.total) AS leak, per.pending_link,
+      per.id, per.status, per.total, LEAST(per.raw_leak, per.total) AS leak,
+      per.pending_link AND NOT per.awaiting_count AS pending_link,
       i.invoice_number, COALESCE(i.invoice_date, i.created_at) AS invoice_date,
       s.name AS supplier_name, s.name_en AS supplier_name_en
     FROM per
     JOIN invoices i ON i.id = per.id
     LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${restaurantId}
-    WHERE per.raw_leak > 0 OR per.pending_link
+    -- A scan waiting for its count (#94) is no leak and not "waiting to be linked".
+    WHERE per.raw_leak > 0 OR (per.pending_link AND NOT per.awaiting_count)
     ORDER BY per.pending_link ASC, LEAST(per.raw_leak, per.total) DESC, invoice_date DESC
     LIMIT ${limit}
   `);
   const invRows = rowsOf(invRes);
   if (invRows.length === 0) return [];
 
-  const ids = invRows.map((r) => String(r.id));
+  const linesByInvoice = await breakdownLines(
+    db,
+    restaurantId,
+    invRows.map((r) => String(r.id)),
+    counts,
+  );
+
+  return invRows.map((r) => ({
+    invoiceId: String(r.id),
+    invoiceNumber: (r.invoice_number as string | null) ?? null,
+    invoiceDate: r.invoice_date == null ? null : iso(r.invoice_date),
+    status: String(r.status),
+    supplierName: (r.supplier_name as string | null) ?? null,
+    supplierNameEn: (r.supplier_name_en as string | null) ?? null,
+    totalInclVat: ils(r.total),
+    leakIls: ils(r.leak),
+    pendingLink: Boolean(r.pending_link),
+    lines: linesByInvoice.get(String(r.id)) ?? [],
+  }));
+}
+
+/** The discrepancy lines of the given invoices (all match runs), biggest |delta| first. */
+async function breakdownLines(
+  db: Database,
+  restaurantId: string,
+  ids: string[],
+  counts: ReturnType<typeof sql>,
+): Promise<Map<string, LeakBreakdownLine[]>> {
   const lineRes = await db.execute(sql`
     SELECT
       mr.invoice_id, d.id, d.type, d.severity, d.resolution_status, d.delta_amount,
-      d.expected_value, d.actual_value,
+      d.expected_value, d.actual_value, d.po_line_id, d.invoice_line_id, d.product_id,
       (${counts}) AS counts,
       p.canonical_name AS product_name, p.name_en AS product_name_en,
       il.raw_description AS line_desc, il.raw_description_en AS line_desc_en
@@ -241,11 +292,53 @@ export async function computeLeakBreakdown(
       productNameEn: (l.product_name_en as string | null) ?? null,
       lineDescription: (l.line_desc as string | null) ?? null,
       lineDescriptionEn: (l.line_desc_en as string | null) ?? null,
+      poLineId: (l.po_line_id as string | null) ?? null,
+      invoiceLineId: l.invoice_line_id == null ? null : String(l.invoice_line_id),
+      productId: (l.product_id as string | null) ?? null,
     });
     linesByInvoice.set(key, list);
   }
+  return linesByInvoice;
+}
 
-  return invRows.map((r) => ({
+/**
+ * One invoice's leak exactly as the month breakdown computes it (same filter,
+ * same cap at the invoice total, same pending-link rule) — whatever its date.
+ * Null when the invoice is not this restaurant's.
+ */
+export async function computeInvoiceLeak(
+  db: Database,
+  restaurantId: string,
+  invoiceId: string,
+): Promise<LeakBreakdownInvoice | null> {
+  const res = await db.execute(sql`
+    WITH per AS (
+      SELECT
+        i.id,
+        i.status,
+        COALESCE(i.total_incl_vat, 0) AS total,
+        COALESCE(SUM(ABS(d.delta_amount)) FILTER (WHERE ${LEAK_FILTER}), 0) AS raw_leak,
+        (NOT bool_or(mr.id IS NOT NULL))
+          OR COALESCE(bool_or(d.type = 'UNORDERED_ARRIVAL' AND d.resolution_status IN ('open','escalated')), false)
+          AS pending_link
+      FROM invoices i
+      LEFT JOIN match_runs mr ON mr.invoice_id = i.id AND mr.restaurant_id = ${restaurantId}
+      LEFT JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${restaurantId}
+      WHERE i.id = ${invoiceId}::uuid AND i.restaurant_id = ${restaurantId}
+      GROUP BY i.id, i.status, i.total_incl_vat
+    )
+    SELECT
+      per.id, per.status, per.total, LEAST(per.raw_leak, per.total) AS leak, per.pending_link,
+      i.invoice_number, COALESCE(i.invoice_date, i.created_at) AS invoice_date,
+      s.name AS supplier_name, s.name_en AS supplier_name_en
+    FROM per
+    JOIN invoices i ON i.id = per.id
+    LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${restaurantId}
+  `);
+  const [r] = rowsOf(res);
+  if (!r) return null;
+  const lines = await breakdownLines(db, restaurantId, [String(r.id)], LEAK_FILTER);
+  return {
     invoiceId: String(r.id),
     invoiceNumber: (r.invoice_number as string | null) ?? null,
     invoiceDate: r.invoice_date == null ? null : iso(r.invoice_date),
@@ -255,6 +348,6 @@ export async function computeLeakBreakdown(
     totalInclVat: ils(r.total),
     leakIls: ils(r.leak),
     pendingLink: Boolean(r.pending_link),
-    lines: linesByInvoice.get(String(r.id)) ?? [],
-  }));
+    lines: lines.get(String(r.id)) ?? [],
+  };
 }

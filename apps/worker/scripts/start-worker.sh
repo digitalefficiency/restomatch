@@ -2,7 +2,7 @@
 # RestoMatch pilot worker launcher (owner's Mac). Plan v2, Wave 0.
 #
 # Loads the production secrets from an env file that is NEVER committed, then
-# runs the BullMQ worker in production mode. Used directly (`bash start-worker.sh`)
+# runs the worker (Postgres job queue) in production mode. Used directly (`bash start-worker.sh`)
 # and by the launchd job in ./launchd/com.restomatch.worker.plist (which keeps it
 # alive across crashes and re-launches it at login).
 #
@@ -11,7 +11,7 @@
 #   $HOME/.restomatch/worker.env
 #   <repo>/apps/worker/.env.production.local   (gitignored via .env.*.local)
 #
-# Required keys (see docs/ENV-PRODUCTION.md "Worker"): DATABASE_URL, REDIS_URL,
+# Required keys (see docs/ENV-PRODUCTION.md "Worker"): DATABASE_URL,
 # ANTHROPIC_API_KEY, RESEND_API_KEY, EMAIL_FROM, APP_URL. Optional: SENTRY_DSN,
 # OCR_CLAUDE_MODEL, PORT (health server, default 8080).
 set -euo pipefail
@@ -39,6 +39,11 @@ set -a
 source "$ENV_FILE"
 set +a
 export NODE_ENV=production
+# The job queue is in Postgres now (0061); a REDIS_URL left in the env file is unused.
+if [[ -n "${REDIS_URL:-}" ]]; then
+  echo "[start-worker] note: REDIS_URL in $ENV_FILE is no longer used — you can delete that line" >&2
+  unset REDIS_URL
+fi
 
 # Node via nvm/fnm/volta if the launchd environment lacks it.
 if ! command -v pnpm >/dev/null 2>&1; then

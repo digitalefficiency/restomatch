@@ -22,8 +22,15 @@ export interface CheckResult {
 }
 
 export interface CutoverCheckOptions {
-  /** Last journal idx that must be applied (default: the journal's last entry). */
+  /**
+   * Last journal entry that must be applied, by its journal idx (default: the
+   * newest entry). Entries are compared by `when` (the order the migrator
+   * applies them), never by "idx <= n": idx is not the apply order
+   * (0039_invitation_locale is idx 33, before 0033_plans_catalog at idx 34).
+   */
   throughIdx?: number;
+  /** Same as throughIdx, by tag ('0061_postgres_queue') or its 4-digit prefix ('0061'). */
+  throughTag?: string;
   /** Path to drizzle/meta/_journal.json (default: this package's). */
   journalPath?: string;
   /** Try logging in as restomatch_app with the DEFAULT password; fail if it works. */
@@ -44,6 +51,19 @@ function journalEntries(journalPath: string): Array<{ idx: number; when: number;
   return raw.entries;
 }
 
+/** The newest journal entry that must be applied (entries sorted by `when`), or null if none matches. */
+export function journalCut(
+  entries: Array<{ idx: number; when: number; tag: string }>,
+  opts: Pick<CutoverCheckOptions, 'throughIdx' | 'throughTag'> = {},
+): { idx: number; when: number; tag: string } | null {
+  if (opts.throughTag !== undefined) {
+    const t = opts.throughTag;
+    return entries.find((e) => e.tag === t || (/^\d{4}$/.test(t) && e.tag.startsWith(`${t}_`))) ?? null;
+  }
+  if (opts.throughIdx !== undefined) return entries.find((e) => e.idx === opts.throughIdx) ?? null;
+  return entries.at(-1) ?? null;
+}
+
 export function defaultJournalPath(): string {
   const here = dirname(fileURLToPath(import.meta.url));
   return join(here, '..', 'drizzle', 'meta', '_journal.json');
@@ -59,22 +79,27 @@ export async function runCutoverChecks(
     results.push({ name, ok, detail, skipped });
 
   try {
-    // 1. Every journal entry through `throughIdx` is recorded by the drizzle migrator.
-    const entries = journalEntries(opts.journalPath ?? defaultJournalPath());
-    const through = opts.throughIdx ?? entries[entries.length - 1]!.idx;
-    const expected = entries.filter((e) => e.idx <= through);
+    // 1. Every journal entry up to the cut (by `when`, the migrator's order) is
+    //    recorded by the drizzle migrator.
+    const entries = [...journalEntries(opts.journalPath ?? defaultJournalPath())].sort((a, b) => a.when - b.when);
+    const cut = journalCut(entries, opts);
     const applied = (await sql`
       select created_at from drizzle.__drizzle_migrations
     `) as unknown as Array<{ created_at: string | number }>;
     const appliedWhen = new Set(applied.map((r) => Number(r.created_at)));
-    const missing = expected.filter((e) => !appliedWhen.has(e.when));
-    push(
-      'migrations_applied',
-      missing.length === 0,
-      missing.length === 0
-        ? `all ${expected.length} journal entries through ${String(through).padStart(4, '0')} recorded`
-        : `missing: ${missing.map((m) => m.tag).join(', ')}`,
-    );
+    if (!cut) {
+      push('migrations_applied', false, `no journal entry matches ${opts.throughTag ?? `idx ${opts.throughIdx}`}`);
+    } else {
+      const expected = entries.filter((e) => e.when <= cut.when);
+      const missing = expected.filter((e) => !appliedWhen.has(e.when));
+      push(
+        'migrations_applied',
+        missing.length === 0,
+        missing.length === 0
+          ? `all ${expected.length} journal entries through ${cut.tag} recorded`
+          : `missing: ${missing.map((m) => m.tag).join(', ')}`,
+      );
+    }
 
     // 2. RLS completeness — same invariant as check-rls / assertRlsEnabled.
     const unprotected = (await sql`

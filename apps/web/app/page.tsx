@@ -19,6 +19,7 @@ import { LazyLeadForm } from './(marketing)/_components/LazyLeadForm';
 import { PromoVideoButton } from './(marketing)/_components/PromoVideoButton';
 import { Eyebrow, FaqSection, Forward, faqItems } from './(marketing)/_components/detail-sections';
 import { OrdersStory } from './(marketing)/_components/OrdersStory';
+import { LandingCompare } from '@/lib/growth/LandingCompare';
 import { SITE_URL, metadataBase, socialFor } from './(marketing)/_components/seo';
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -339,6 +340,8 @@ export default async function Home() {
 
       {/* ───────────── 3b · ORDER → DOCK → ₪ (flag landingOrdersStory; off = no section) ───────────── */}
       {landingFlag('landingOrdersStory') && <OrdersStory t={t} locale={locale} />}
+      {/* 3c · ordering system vs RestoMatch (S15, flag landingCompare; off = no section) */}
+      {landingFlag('landingCompare') && <LandingCompare />}
 
       {/* ───────────── 4 · PROOF — the honest math (PLAN_SEED + formatIls) ───────────── */}
       <section className="rm-defer border-y border-line bg-surface/30" aria-labelledby="proof-title">

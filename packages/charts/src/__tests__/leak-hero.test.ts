@@ -2,10 +2,13 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createDb,
   discrepancies,
+  eq,
+  goodsReceipts,
   invoiceLines,
   invoices,
   matchRuns,
   products,
+  purchaseOrders,
   restaurants,
   suppliers,
   testDbUrl,
@@ -22,6 +25,8 @@ async function resetDb() {
   await db.delete(matchRuns);
   await db.delete(invoiceLines);
   await db.delete(invoices);
+  await db.delete(goodsReceipts);
+  await db.delete(purchaseOrders);
   await db.delete(products);
   await db.delete(suppliers);
   await db.delete(restaurants);
@@ -40,6 +45,8 @@ type D = {
   severity: 'info' | 'warn' | 'block';
   delta: string;
   status?: 'open' | 'accepted' | 'rejected' | 'escalated' | 'resolved';
+  /** Invoice-level finding (DUPLICATE_INVOICE, TOTAL_MISMATCH, VAT_MISMATCH): no invoice line. */
+  invoiceLevel?: boolean;
 };
 
 async function setup() {
@@ -111,7 +118,7 @@ async function setup() {
         severity: d.severity,
         deltaAmount: d.delta,
         productId: p!.id,
-        invoiceLineId: line!.id,
+        invoiceLineId: d.invoiceLevel ? null : line!.id,
         resolutionStatus: d.status ?? 'open',
       });
     }
@@ -435,6 +442,49 @@ describe('computeLeakBreakdown', () => {
   });
 });
 
+describe('leak proof sheet basis (flag leakProof: hero + breakdown only)', () => {
+  it('breakdown leaks sum to the hero to the agora, counts are ordered, findings carry their invoice line', async () => {
+    const { restaurantId, invoice } = await setup();
+    const a = await invoice({
+      date: THIS_MONTH,
+      exclVat: '200',
+      inclVat: '236',
+      d: [
+        { type: 'PRICE_HIGHER', severity: 'warn', delta: '12.34' },
+        { type: 'DUPLICATE_INVOICE', severity: 'block', delta: '0.01', invoiceLevel: true },
+      ],
+    });
+    await invoice({ date: THIS_MONTH, exclVat: '100', inclVat: '118', d: [{ type: 'QTY_SHORT', severity: 'block', delta: '-7.65' }] });
+    await invoice({ date: THIS_MONTH, exclVat: '50', inclVat: '59' }); // matched, clean
+    await invoice({ date: THIS_MONTH, exclVat: '900', inclVat: '1062', matched: false }); // pending, unmatched
+    // Pending-link (no PO) AND a ₪1.00 VAT finding: pending invoices still count toward the leak.
+    const pendingWithLeak = await invoice({
+      date: THIS_MONTH,
+      exclVat: '50',
+      inclVat: '59',
+      d: [
+        { type: 'UNORDERED_ARRIVAL', severity: 'block', delta: '59' },
+        { type: 'VAT_MISMATCH', severity: 'warn', delta: '1', invoiceLevel: true },
+      ],
+    });
+
+    const hero = await computeLeakHero(db, restaurantId, { now: NOW });
+    const rows = await computeLeakBreakdown(db, restaurantId, { now: NOW, limit: 200 });
+    const agorot = (v: number) => Math.round(v * 100);
+    // Σ over ALL breakdown rows (pending ones included) == hero leak, to the agora.
+    expect(rows.length).toBeLessThan(200);
+    expect(rows.reduce((s, r) => s + agorot(r.leakIls), 0)).toBe(agorot(hero.leakIls));
+    expect(agorot(hero.leakIls)).toBe(2100); // 12.34 + 0.01 + 7.65 + 1.00 (pending invoice)
+    expect(rows.find((r) => r.invoiceId === pendingWithLeak)).toMatchObject({ pendingLink: true, leakIls: 1 });
+    expect(hero.invoicesWithLeak).toBeLessThanOrEqual(hero.matchedInvoiceCount);
+    expect(hero.matchedInvoiceCount).toBeLessThanOrEqual(hero.invoiceCount);
+    expect(hero.pendingLinkCount).toBe(2);
+    const lines = rows.find((r) => r.invoiceId === a)!.lines;
+    expect(lines.find((l) => l.type === 'PRICE_HIGHER')!.invoiceLineId).toEqual(expect.any(String));
+    expect(lines.find((l) => l.type === 'DUPLICATE_INVOICE')!.invoiceLineId).toBeNull();
+  });
+});
+
 describe('every surface sums to the hero (mutation guards: trend, chain suppliers, breakdown countsAsLeak)', () => {
   // One month with each kind of invoice that the spend / leak rules treat differently.
   async function mixedMonth() {
@@ -538,5 +588,73 @@ describe('every surface sums to the hero (mutation guards: trend, chain supplier
     });
     const counted = rows.flatMap((r) => r.lines).filter((l) => l.countsAsLeak);
     expect(counted.map((l) => l.type)).toEqual(['PRICE_HIGHER']);
+  });
+});
+
+describe('a receiving scan waiting for its count (#94) is not "waiting to be linked"', () => {
+  /** A goods receipt of the restaurant's supplier (the receiving wizard opens it before the photo). */
+  async function receipt(restaurantId: string, status: 'pending' | 'completed') {
+    const [s] = await db.select({ id: suppliers.id }).from(suppliers).where(eq(suppliers.restaurantId, restaurantId));
+    const [po] = await db
+      .insert(purchaseOrders)
+      .values({ restaurantId, supplierId: s!.id, expectedDeliveryAt: THIS_MONTH, status: 'sent', source: 'manual' })
+      .returning();
+    const [gr] = await db.insert(goodsReceipts).values({ restaurantId, poId: po!.id, status }).returning();
+    return gr!.id;
+  }
+  /** What the OCR job records when it holds the scan's match for those receipts' count. */
+  const heldBy = (invoiceId: string, grIds: string[]) =>
+    db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'reconciled', raw: { heldForReceipts: grIds } } })
+      .where(eq(invoices.id, invoiceId));
+
+  it('held by the OCR for a receipt still being counted: "waiting for the count" — not pending link, leak or spend', async () => {
+    const { restaurantId, invoice } = await setup();
+    const checked = await invoice({ date: THIS_MONTH, exclVat: '1000', inclVat: '1180', d: [{ type: 'PRICE_HIGHER', severity: 'warn', delta: '15' }] });
+    const consolidated = await invoice({ date: THIS_MONTH, exclVat: '2000', inclVat: '2360', matched: false });
+    const scan = await invoice({ date: THIS_MONTH, exclVat: '769.17', inclVat: '907.62', matched: false });
+    const gr = await receipt(restaurantId, 'pending');
+    await heldBy(scan, [gr]);
+    await heldBy(checked, [gr]); // a run exists: matched, whatever the marker says
+
+    const hero = await computeLeakHero(db, restaurantId, { now: NOW });
+    expect(hero).toMatchObject({
+      leakIls: 15,
+      spendIls: 1000,
+      pendingLinkCount: 1,
+      pendingLinkIls: 2360,
+      awaitingCountCount: 1,
+      awaitingCountIls: 907.62,
+      invoiceCount: 3,
+      matchedInvoiceCount: 1,
+    });
+    expect(await computeLeakSummary(db, restaurantId, { period: 'this_month', now: NOW })).toEqual(hero);
+    expect((await computeLeakReport(db, restaurantId, '2026-10')).hero).toEqual(hero);
+    const rows = await computeLeakBreakdown(db, restaurantId, { now: NOW });
+    expect(rows.filter((r) => r.pendingLink).map((r) => r.invoiceId)).toEqual([consolidated]);
+    expect(rows.map((r) => r.invoiceId)).not.toContain(scan);
+
+    // The count is in (receipt closed) and still no run: an ordinary unmatched invoice again.
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, gr));
+    expect(await computeLeakHero(db, restaurantId, { now: NOW })).toMatchObject({
+      spendIls: 1000,
+      pendingLinkCount: 2,
+      pendingLinkIls: 3267.62,
+      awaitingCountCount: 0,
+      awaitingCountIls: 0,
+    });
+  });
+
+  it('an unmatched photo with no OCR hold on record stays "waiting to be linked", whatever receipt is open', async () => {
+    const { restaurantId, invoice } = await setup();
+    await receipt(restaurantId, 'pending');
+    await invoice({ date: THIS_MONTH, exclVat: '2000', inclVat: '2360', matched: false });
+    expect(await computeLeakHero(db, restaurantId, { now: NOW })).toMatchObject({
+      pendingLinkCount: 1,
+      pendingLinkIls: 2360,
+      awaitingCountCount: 0,
+      awaitingCountIls: 0,
+    });
   });
 });

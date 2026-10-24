@@ -67,7 +67,7 @@ async function linked(tag: string): Promise<Tenant & { managerId: string; bookke
   await ownerDb.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, T.grLineId));
   await ownerDb
     .update(invoices)
-    .set({ invoiceDate: D0, vatAmount: '18.00', totalInclVat: '118.00' })
+    .set({ invoiceDate: D0, vatAmount: '18.00', totalInclVat: '118.00', source: 'photo' })
     .where(eq(invoices.id, T.invoiceId));
   return { ...T, managerId: await member(T, 'manager'), bookkeeperId: await member(T, 'bookkeeper') };
 }
@@ -79,7 +79,13 @@ const findings = (invoiceId: string) =>
     .where(eq(matchRuns.invoiceId, invoiceId));
 const runPo = async (invoiceId: string) =>
   (await ownerDb.select({ poId: matchRuns.poId }).from(matchRuns).where(eq(matchRuns.invoiceId, invoiceId)))[0]?.poId;
-async function extraPo(T: Tenant, at: Date, price: string, status: 'sent' | 'cancelled' | 'closed' = 'sent') {
+async function extraPo(
+  T: Tenant,
+  at: Date,
+  price: string,
+  status: 'sent' | 'cancelled' | 'closed' = 'sent',
+  received = true,
+) {
   const [po] = await ownerDb
     .insert(purchaseOrders)
     .values({ restaurantId: T.restaurantId, supplierId: T.supplierId, expectedDeliveryAt: at, status, source: 'manual' })
@@ -88,12 +94,16 @@ async function extraPo(T: Tenant, at: Date, price: string, status: 'sent' | 'can
     .insert(poLines)
     .values({ poId: po!.id, productId: T.productId, rawDescription: 'x', qtyOrdered: '10', unit: 'kg', unitPriceExpected: price })
     .returning();
+  if (received) await receive(T, po!.id, pl!.id);
+  return po!.id;
+}
+/** A goods receipt of 10 on the PO's line. */
+async function receive(T: Tenant, poId: string, poLineId: string) {
   const [gr] = await ownerDb
     .insert(goodsReceipts)
-    .values({ restaurantId: T.restaurantId, poId: po!.id, receivedBy: T.ownerUserId, status: 'pending' })
+    .values({ restaurantId: T.restaurantId, poId, receivedBy: T.ownerUserId, status: 'pending' })
     .returning();
-  await ownerDb.insert(grLines).values({ grId: gr!.id, poLineId: pl!.id, qtyReceived: '10', qtyRejected: '0' });
-  return po!.id;
+  await ownerDb.insert(grLines).values({ grId: gr!.id, poLineId, qtyReceived: '10', qtyRejected: '0' });
 }
 describe('re-match PO pin', () => {
   it('a1: date corrected inside the local-day window but >7×24h from the pinned PO → no crash', async () => {
@@ -217,7 +227,7 @@ describe('a received PO outranks an undelivered closer one', () => {
     await ownerDb.update(grLines).set({ qtyReceived: received }).where(eq(grLines.id, T.grLineId));
     await ownerDb
       .update(invoices)
-      .set({ invoiceDate: new Date(D0.getTime() + 2 * DAY), vatAmount: '18.00', totalInclVat: '118.00' })
+      .set({ invoiceDate: new Date(D0.getTime() + 2 * DAY), vatAmount: '18.00', totalInclVat: '118.00', source: 'photo' })
       .where(eq(invoices.id, T.invoiceId));
     await ownerDb.delete(matchRuns).where(eq(matchRuns.invoiceId, T.invoiceId));
     return { T, mgr };
@@ -267,5 +277,55 @@ describe('a received PO outranks an undelivered closer one', () => {
     const second = await state(T.invoiceId);
     expect(second.poId).toBe(T.poId);
     expect(second.raw.filter((x) => x.sev === 'block')).toHaveLength(0);
+  });
+});
+
+/**
+ * An emailed invoice often arrives BEFORE the goods (email / WhatsApp ingest): the
+ * supplier delivers Mon and Thu, and Thursday's invoice is emailed Thursday
+ * morning. It goes by the nearest day — but a pinned PO with a receipt is never
+ * displaced by one without (R1/R2 hold for every source).
+ */
+describe('an emailed invoice goes by the nearest day', () => {
+  /** Mon = PO1 at D0, received; the invoice is emailed, dated Thu (D0+3). */
+  async function emailedThursday() {
+    const T = await linked('E');
+    await ownerDb
+      .update(invoices)
+      .set({ source: 'email', invoiceDate: new Date(D0.getTime() + 3 * DAY) })
+      .where(eq(invoices.id, T.invoiceId));
+    await ownerDb.delete(matchRuns).where(eq(matchRuns.invoiceId, T.invoiceId));
+    const thu = await extraPo(T, new Date(D0.getTime() + 3 * DAY), '9.5', 'sent', false);
+    return { T, thu, mgr: as(T, T.managerId, 'manager') };
+  }
+
+  it("E1: Mon received, Thu not yet — a fresh match of Thursday's emailed invoice picks Thu", async () => {
+    const { T, thu, mgr } = await emailedThursday();
+    await mgr.match.runForInvoice({ invoiceId: T.invoiceId });
+    expect(await runPo(T.invoiceId)).toBe(thu);
+  });
+
+  it('E2: Thu is then received — the re-match stays on Thu', async () => {
+    const { T, thu, mgr } = await emailedThursday();
+    await mgr.match.runForInvoice({ invoiceId: T.invoiceId });
+    const [line] = await ownerDb.select({ id: poLines.id }).from(poLines).where(eq(poLines.poId, thu));
+    await receive(T, thu, line!.id);
+    await mgr.match.runForInvoice({ invoiceId: T.invoiceId });
+    expect(await runPo(T.invoiceId)).toBe(thu);
+  });
+
+  it('E3: emailed invoice pinned to a received PO — a nearer new PO without a receipt does not take it', async () => {
+    const T = await linked('E');
+    await ownerDb
+      .update(invoices)
+      .set({ source: 'email', invoiceDate: new Date(D0.getTime() + 2 * DAY) })
+      .where(eq(invoices.id, T.invoiceId));
+    const mgr = as(T, T.managerId, 'manager');
+    await ownerDb.delete(matchRuns).where(eq(matchRuns.invoiceId, T.invoiceId));
+    await mgr.match.runForInvoice({ invoiceId: T.invoiceId });
+    expect(await runPo(T.invoiceId)).toBe(T.poId);
+    await extraPo(T, new Date(D0.getTime() + 2 * DAY), '9.5', 'sent', false);
+    await mgr.match.runForInvoice({ invoiceId: T.invoiceId });
+    expect(await runPo(T.invoiceId)).toBe(T.poId);
   });
 });

@@ -29,7 +29,6 @@ DB_URL="$PG_BASE/$DB_NAME"
 export DEMO_TODAY="${DEMO_TODAY:-2026-10-25}"
 PROD_PORT="${DEMO_PORT:-3320}"
 STUB_PORT="${DEMO_STUB_PORT:-3321}"
-REDIS="${REDIS_URL:-redis://localhost:6379}"
 LOGS="$WEB/test-results/demo-path/logs"
 mkdir -p "$LOGS"
 
@@ -69,7 +68,7 @@ web_env() {
   env DATABASE_URL="$DB_URL" DATABASE_URL_APP="$APP_DB_URL" \
     AUTH_SECRET=demo-qa-only-secret-not-production-0123456789 \
     AUTH_ENC_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
-    NEXT_TELEMETRY_DISABLED=1 REDIS_URL="$REDIS" "$@"
+    NEXT_TELEMETRY_DISABLED=1 "$@"
 }
 if [[ "${DEMO_REBUILD:-0}" == 1 || ! -f "$WEB/.next/BUILD_ID" ]]; then
   log "next build (log: $LOGS/build.log)"
@@ -97,16 +96,16 @@ start_bg "$LOGS/next-prod.log" bash -c "cd '$WEB' && exec env NODE_ENV=productio
   SUPABASE_SERVICE_ROLE_KEY=verify-placeholder RESEND_API_KEY=re_verify_placeholder EMAIL_FROM=verify@example.invalid \
   CRON_SECRET=verify-placeholder-cron-secret \
   DATABASE_URL='$DB_URL' DATABASE_URL_APP='$APP_DB_URL' AUTH_SECRET=demo-qa-only-secret-not-production-0123456789 \
-  AUTH_ENC_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef NEXT_TELEMETRY_DISABLED=1 REDIS_URL='$REDIS' \
+  AUTH_ENC_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef NEXT_TELEMETRY_DISABLED=1 \
   pnpm exec next start -p $PROD_PORT"
 SCANS="$WEB/test-results/demo-path/scans"
 start_bg "$LOGS/next-stub.log" bash -c "cd '$WEB' && exec env NODE_ENV=development LOCAL_SCAN_DIR='$SCANS' \
   AUTH_URL=http://localhost:$STUB_PORT APP_URL=http://localhost:$STUB_PORT \
   DATABASE_URL='$DB_URL' DATABASE_URL_APP='$APP_DB_URL' AUTH_SECRET=demo-qa-only-secret-not-production-0123456789 \
-  AUTH_ENC_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef NEXT_TELEMETRY_DISABLED=1 REDIS_URL='$REDIS' \
+  AUTH_ENC_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef NEXT_TELEMETRY_DISABLED=1 \
   pnpm exec next start -p $STUB_PORT"
 start_bg "$LOGS/worker.log" bash -c "cd '$ROOT/apps/worker' && exec env NODE_ENV=development LOCAL_SCAN_DIR='$SCANS' \
-  DATABASE_URL='$DB_URL' REDIS_URL='$REDIS' PORT=\${DEMO_WORKER_PORT:-8080} pnpm start"
+  DATABASE_URL='$DB_URL' PORT=\${DEMO_WORKER_PORT:-8080} pnpm start"
 
 wait_http "http://localhost:$PROD_PORT/api/healthz" || { log "prod server did not start ($LOGS/next-prod.log)"; exit 1; }
 wait_http "http://localhost:$STUB_PORT/api/healthz" || { log "stub server did not start ($LOGS/next-stub.log)"; exit 1; }
@@ -114,11 +113,15 @@ sleep 5 # first worker heartbeat
 log "serving: prod :$PROD_PORT · stub :$STUB_PORT · worker"
 
 # ── 4. run ───────────────────────────────────────────────────────────────────
-# Each run signs in ~13 times from 127.0.0.1; the Redis-backed login limiter
-# (30/IP/15 min) would lock back-to-back runs out. Clear its LOCAL counters only.
-if [[ "$REDIS" =~ ^redis://(localhost|127\.0\.0\.1)(:|/|$) ]] && command -v redis-cli >/dev/null; then
-  redis-cli -u "$REDIS" --scan --pattern 'login:*' | while read -r k; do redis-cli -u "$REDIS" del "$k" >/dev/null; done
-fi
+# Each run signs in ~13 times from 127.0.0.1; the login limiter (30/IP/15 min)
+# keeps its counters in Postgres (0061 rate_limit_counters) — in $DB_NAME, which
+# step 1 re-creates, so back-to-back runs start from zero. Clear them anyway
+# (local DB only, checked above) in case the servers were left running.
+(cd "$ROOT/packages/db" && node -e '
+  const postgres = require("postgres");
+  const sql = postgres(process.argv[1], { max: 1, onnotice: () => {} });
+  sql`DELETE FROM rate_limit_counters WHERE key LIKE ${"login:%"}`.then(() => sql.end(), () => sql.end());
+' "$DB_URL") || true
 cd "$WEB" || exit 2
 rm -f test-results/demo-path/demo-path-numbers.json
 DEMO_BASE_URL="http://localhost:$PROD_PORT" DEMO_STUB_URL="http://localhost:$STUB_PORT" DEMO_DATABASE_URL="$DB_URL" \

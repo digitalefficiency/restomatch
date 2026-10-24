@@ -15,6 +15,7 @@ export const he = {
     pay: 'ניתן לשלם',
     hold: 'להשהות — ממתין להחלטה',
     holdLink: 'ממתינה לשיוך להזמנה',
+    holdCount: 'ממתינה לספירת קבלת הסחורה',
     holdDuplicate: 'להשהות — עותק כפול, לא לשלם',
     claim: 'לבקש זיכוי {amount}',
   },

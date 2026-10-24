@@ -9,6 +9,11 @@ describe('wholeShekelRows (chain ranking display)', () => {
     expect(total).toBe(2090);
     expect(rows.reduce((a, b) => a + b, 0)).toBe(total);
   });
+  it('the seeded demo claimed: the chain KPI equals the three branch heroes (₪464 + ₪275 + ₪532), not round(Σ)', () => {
+    const claimed = [463.54, 274.95, 531.95];
+    expect(Math.round(claimed.reduce((a, b) => a + b, 0))).toBe(1270); // the exact sum would print ₪1,270
+    expect(wholeShekelRows(claimed)).toEqual({ rows: [464, 275, 532], total: 1271 });
+  });
   it('last month: caught + claimed printed per branch add up to the printed leak (₪1,892, not 0 + 1,893)', () => {
     // main / Haifa / Jerusalem, all of last month's leak already claimed back.
     const leak = wholeShekelRows([1059.38, 212.29, 621.47]);

@@ -2,3 +2,5 @@
 # Both are migration file names listed in a test, and this file's own first comment — no secrets.
 c3c26ac28069f5a61c9e3d8100489ff83bb79811:packages/db/src/__tests__/user-credentials.test.ts:generic-api-key:31
 bff328f848382b4bd5cd7a971f61b3ad83074620:.gitleaksignore:generic-api-key:2
+# A test idempotency UUID assigned to a variable named `key` (S12 recovery test) — no secret; now generated at runtime.
+aa76aef089c9c257c3a0e9e4f9e5bcd51b71fe80:packages/api/src/__tests__/recovery.test.ts:generic-api-key:470

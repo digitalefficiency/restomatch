@@ -8,7 +8,7 @@
 #   2. landing in Hebrew and English → 200 with the right <html lang/dir>
 #   3. the hero video + poster referenced by the landing → 200/206 with a media type
 #   4. /login → 200 and renders the product name
-#   5. public paths → no 5xx (and no 404 for pages that must exist)
+#   5. public paths → 2xx (no error, no redirect to /login)
 #   6. an unknown path → 404, or (anonymous) the auth redirect to /login — never a 5xx
 # Prints a PASS/FAIL table; exits 1 if anything failed, 2 on bad usage.
 set -uo pipefail
@@ -88,11 +88,12 @@ else
   row FAIL "/login" "status $code"
 fi
 
-# 5. Public paths: must exist (2xx/3xx). Any 4xx/5xx here is a broken deploy.
+# 5. Public paths: must render (2xx). A redirect (e.g. to /login) means a public
+#    page became private; any 4xx/5xx is a broken deploy.
 PUBLIC=(/ /pricing /about /privacy /terms /cookies /login /reset /showcase /robots.txt /sitemap.xml /icon.svg)
 for p in "${PUBLIC[@]}"; do
   read -r code _ < <(fetch "$p" "$TMP/page")
-  if [[ "$code" =~ ^[23] ]]; then
+  if [[ "$code" =~ ^2 ]]; then
     row PASS "GET $p" "$code"
   else
     row FAIL "GET $p" "status $code"

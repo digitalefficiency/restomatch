@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { and, eq, memberships, restaurants, type RestaurantSettings } from '@restomatch/db';
 import { recordAudit } from '../audit';
 import { memberProcedure, ownerProcedure, router } from '../trpc';
+import { hasNoControlChars, NO_CONTROL_CHARS_MESSAGE } from '../lib/text';
 
 /**
  * Per-restaurant matching-rules editor (Phase 5).
@@ -69,7 +70,7 @@ const timezoneSchema = z
  *  nullable so it can be cleared. At least one field required. */
 const ProfileUpdateInput = z
   .object({
-    name: z.string().trim().min(1).max(200).optional(),
+    name: z.string().trim().min(1).max(200).refine(hasNoControlChars, NO_CONTROL_CHARS_MESSAGE).optional(),
     businessId: z.string().trim().max(32).nullable().optional(),
     vatRate: fraction.optional(),
     timezone: timezoneSchema.optional(),
@@ -199,7 +200,13 @@ export const settingsRouter = router({
       )
       .limit(1);
     const locale = row?.locale;
-    return { locale: locale === 'he' || locale === 'en' ? locale : null };
+    // Receiver languages (S14, 0052) pass through; the web gates them by the flag.
+    return {
+      locale:
+        locale === 'he' || locale === 'en' || locale === 'ar' || locale === 'ru' || locale === 'th' || locale === 'ti'
+          ? locale
+          : null,
+    };
   }),
 
   /** Any member sets their OWN app language (self only — keyed by the session). */

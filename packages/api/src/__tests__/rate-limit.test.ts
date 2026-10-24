@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkRateLimit, MemoryRateLimitStore } from '../rateLimit';
+import { checkRateLimit, MemoryRateLimitStore, resetRateLimit } from '../rateLimit';
 
 describe('checkRateLimit (fixed window)', () => {
   it('allows up to the limit then blocks', async () => {
@@ -67,5 +67,24 @@ describe('checkRateLimit (fixed window)', () => {
     const res = await checkRateLimit(store, 'a@x.com', { limit: 5, windowSec, now: () => t });
     expect(res.resetSec).toBeGreaterThan(0);
     expect(res.resetSec).toBeLessThanOrEqual(windowSec);
+  });
+});
+
+describe('resetRateLimit', () => {
+  it("clears only the identifier's current window", async () => {
+    const t = 1_000_000;
+    const store = new MemoryRateLimitStore(() => t);
+    const opts = { limit: 2, windowSec: 60, prefix: 'login:email', now: () => t };
+    await checkRateLimit(store, 'a@x', opts);
+    await checkRateLimit(store, 'a@x', opts);
+    await checkRateLimit(store, 'b@x', opts);
+    expect((await checkRateLimit(store, 'a@x', opts)).allowed).toBe(false);
+    await resetRateLimit(store, 'a@x', opts);
+    expect(await checkRateLimit(store, 'a@x', opts)).toMatchObject({ allowed: true, count: 1 });
+    expect((await checkRateLimit(store, 'b@x', opts)).count).toBe(2); // untouched
+  });
+
+  it('is a no-op for a store without del', async () => {
+    await expect(resetRateLimit({ incr: async () => 1 }, 'a@x', { limit: 1, windowSec: 60 })).resolves.toBeUndefined();
   });
 });

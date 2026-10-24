@@ -21,7 +21,7 @@ export function normalizeLoginEmail(raw: string): string {
 }
 
 /* ── DB lockout backstop (C.2) ───────────────────────────────────────────────
- * Durable, Redis-independent: the Redis limiter fails OPEN on an outage, so the
+ * Durable, store-independent: the rate limiter fails OPEN on an outage, so the
  * real brute-force ceiling lives in user_credentials. After N consecutive
  * failures the account is locked for an exponentially growing window; a correct
  * password DURING the lock is still rejected (uniformly, never revealing the
@@ -46,10 +46,10 @@ export interface LockState {
 }
 
 /**
- * Read the durable lockout state for a user (the Redis-independent backstop —
+ * Read the durable lockout state for a user (the store-independent backstop —
  * C.2). Returns null when no credential row exists yet. Shared by the login
  * (authorizeCredentials) and the TOTP / recovery second-factor paths so a brute
- * force survives a Redis outage on EITHER factor.
+ * force survives a rate-limit store outage on EITHER factor.
  */
 export async function readLockState(userId: string): Promise<LockState | null> {
   const [cred] = await authDb

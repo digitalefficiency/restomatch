@@ -34,8 +34,8 @@ export function startImportCatalogWorker() {
       );
     }
 
-    // A producer that timed out (Redis slow, QA D7) falls back to committing the
-    // import inline, but BullMQ may still land the job later — never commit twice.
+    // A producer that timed out (queue database slow, QA D7) falls back to committing the
+    // import inline, but the job may still land later — never commit twice.
     if (imp.status === 'committed') {
       return { importId, skipped: 'already committed' as const };
     }

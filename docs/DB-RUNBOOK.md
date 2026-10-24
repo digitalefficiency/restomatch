@@ -247,7 +247,7 @@ magic links still work too. `owner@` is also the platform admin (so `/admin` is 
 
 | Screen | What you see |
 |---|---|
-| Overview hero | **₪760 leaked this month (₪759.54) = 1.8 % of ₪42,263 checked food spend (₪42,263.35)** (target 1.5 %; the two pending ריכוז invoices — BR-R-24123 and the monthly Galilee Dairies GD-M-202609 (8 delivery notes) — ₪3,607 incl. VAT, are not in the denominator); ₪296 caught before payment (on invoices not yet marked paid); ₪464 claimed back from suppliers; **13 of 35** checked invoices with a finding (the `seed-demo` log prints 13/37 — it also counts the 2 pending ריכוז invoices); 4 waiting for approval |
+| Overview hero | **₪760 leaked this month (₪759.54) = 1.8 % of ₪42,263 checked food spend (₪42,263.35)** (target 1.5 %; the two pending ריכוז invoices — BR-R-24123 and the monthly Galilee Dairies GD-M-202609 (8 delivery notes) — ₪3,603 incl. VAT, are not in the denominator); ₪296 caught before payment (on invoices not yet marked paid); ₪464 claimed back from suppliers; **13 of 35** checked invoices with a finding (the `seed-demo` log prints 13/37 — it also counts the 2 pending ריכוז invoices); 4 waiting for approval |
 | Last month (hero comparison + monthly leak report) | **₪1,059 = 1.5 % of ₪69,541** (includes the VAT-at-risk invoice MF-24950, 28 Sep, ₪6,240 + ₪1,123.20 VAT, no allocation number; vs August: leak +₪18, spend +12.1 %, 18 of 53 invoices) — different items: lamb, chicken thighs, calamari, red tuna, wine, orange juice, peppers, chickpeas, olive oil, short deliveries (tomatoes, lemons, sourdough, rice, tahini, mineral water, sea bream, ground beef), unordered challah / cola / take-away boxes; all resolved. (August is partial — history starts 8 weeks back.) |
 | Approvals queue | **4** open items on screen, ₪296 at risk, 2 blockers: beer keg ST-24108 ₪104.80 (₪522.60 → ₪575), salmon MF-24108 ₪52.50, entrecôte HK-24108 ₪100.00, cherry tomatoes SH-24121 ₪38.70 (6.5 kg received, 9.5 billed). The `seed-demo` log says "5 open" — the screen shows 4. Approving ST-24108 moves "claimed" ₪464 → ₪568 and the queue to 3 |
 | Leak detective | 30-day price creep ₪336, 3 hotspots: draft-beer keg ₪520 → ₪575 (+10.6 %, ₪110.00), salmon ₪89 → ₪96 (+7.9 %, ₪72.98), entrecôte ₪139 → ₪149 (+7.2 %, ₪152.90) — the 30-day window moves with the date |
@@ -318,3 +318,72 @@ Locally it uses the mock notifiers (no real WhatsApp; e-mail goes to `MAGIC_LINK
 **The seed refuses any non-local database** (it TRUNCATEs every restaurant and user):
 the host must be localhost/127.0.0.1/::1/`postgres`. For a disposable demo project
 only: `SEED_ALLOW_REMOTE_HOST=<exact host>`. The production project is refused even then.
+
+## The whole demo in one command — `pnpm demo:seed-all`
+
+> **עברית (לבעלים)**
+> - פקודה אחת שמכינה את כל נתוני הדמו, לפי הסדר:
+>   1. בסיס
+>   2. משלוחים, חשבוניות והתאמה
+>   3. רשת (3 סניפים)
+>   4. מעקב "₪ חוזר"
+>   5. עלות מנה
+>   6. מחירונים חוזיים והתראות מחיר
+>
+>   חלק שעדיין לא מוזג או שהמיגרציה שלו לא הוחלה — מדולג, עם הודעה.
+> - **מוחקת את כל המסעדות והמשתמשים במסד היעד.** על מסד שיש בו נתונים היא מסרבת לרוץ בלי `--reset`.
+> - על Supabase היא רצה רק מול השרת הישיר של **הפרויקט החדש** (`db.<ref>.supabase.co`), וכש-`SEED_ALLOW_REMOTE_HOST` שווה לו בדיוק. שרת pooler משותף נחסם. על הפרויקט הישן (`cringgshiafwsszyqufo`) היא מסרבת תמיד.
+> - על שרת מרוחק חובה `DEMO_PASSWORD` פרטית: לפחות 12 תווים, ולא סיסמת ברירת המחדל שמופיעה ב-git. שמרו אותה במנהל הסיסמאות.
+> - בסוף היא מדפיסה את מספרי הדמו: דליפה ו-% מהרכש, נתפס, נדרש, "₪ חוזר", מספר מנות ומחירונים.
+> - מומלץ להריץ בערב שלפני הדמו, עם `DEMO_TODAY=<תאריך הדמו>`, כדי ש"היום" יהיה נכון.
+
+**English.** One command seeds every demo extra, in this order. Each step runs as its own process and the run stops at the first failure:
+
+| # | Step | Script |
+|---|---|---|
+| 1 | core | `packages/db/scripts/seed.ts` — **TRUNCATEs every restaurant and user** |
+| 2 | demo | `seed-demo.ts` — deliveries, invoices, real matching |
+| 3 | chain | `seed-chain-demo.ts` (S8) — 2 more branches |
+| 4 | recovery | `seed-recovery-demo.ts` (S12) — ₪-back states |
+| 5 | recipes | `seed-recipes-demo.ts` (S17) |
+| 6 | contracts | `seed-wave1-contracts-demo.ts` (S11) — contract prices + price alerts |
+
+Steps 3–6 are skipped with a notice when their script is not on the branch, or when their table is missing on the target (migration not applied there yet). Every step keeps the leak hero unchanged and checks it.
+
+**Guards** (`apps/worker/src/lib/demoSeedAll.ts`, unit-tested). Nothing is written unless every guard passes:
+- the seed guard: local hosts only, or `SEED_ALLOW_REMOTE_HOST=<exact host>`. **The old production project is refused, always.** That holds whether it is named in the URL, a percent-encoded username, `PGUSER` or `PGHOST`. Shared pooler hosts are refused too;
+- a remote host needs `DEMO_PASSWORD`: no default, not the public one, at least 12 characters;
+- a database that already has rows the base seed would wipe (restaurants, users, billing, audit log) needs `--reset`;
+- the schema must already be migrated.
+
+**Local:**
+
+```bash
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/restomatch_dev pnpm demo:seed-all -- --reset
+```
+
+**On the NEW Supabase demo project** (the evening before). Use the project's **direct** host `db.<NEW_REF>.supabase.co`. Shared pooler hosts (`*.pooler.supabase.com`) are refused, because every project in a region sits behind them:
+
+```bash
+export DATABASE_URL='postgresql://postgres:<OWNER_PASSWORD>@db.<NEW_REF>.supabase.co:5432/postgres'
+export SEED_ALLOW_REMOTE_HOST='db.<NEW_REF>.supabase.co'      # must equal the URL's host exactly
+export DEMO_PASSWORD='<private, 12+ chars — password manager>'
+export DEMO_TODAY=2026-10-19                                 # the demo date
+pnpm db:migrate                                              # only if the GitHub integration hasn't applied them
+pnpm demo:seed-all                                           # on a non-empty project: pnpm demo:seed-all -- --reset
+```
+
+**What a run prints at the end** (a local run on 2026-10-18 with every wave-1 branch merged):
+
+```
+[demo:seed-all] ✔ done
+  steps: core → demo → chain → recovery → recipes → contracts
+  restaurant: כפר הזיתים · branches 3 · users 5 · invoices 339
+  hero (this month): leak ₪572 = 2.0% of ₪28,389 checked spend · caught before payment ₪296 · claimed this month ₪276 · 9/24 invoices with a leak · 2 pending link
+  last month: leak ₪1,137 = 1.8% of ₪63,205
+  ₪ back (all claims to date): claimed ₪1,558 · credited ₪991 · returned this month ₪653 · owed ₪567 · rate 63.6% · 10 overdue
+  recipes: 10
+  contract prices: 10
+```
+
+Logins are `owner@ / manager@ / receiver@ / bookkeeper@ / chef@kfar-hazeitim.test` with `DEMO_PASSWORD`. Running again with `--reset` reproduces the same numbers.

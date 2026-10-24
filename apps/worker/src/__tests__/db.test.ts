@@ -19,3 +19,19 @@ describe('closeJobDbs', () => {
     expect(n()).toBe(0);
   });
 });
+
+// Wave-1 regression: price-alerts / recovery-reminders / monthly-report each
+// called createDb(url) per run and leaked a pool per run. Every job module must
+// go through the shared jobDb pool (type-only imports of createDb are fine).
+describe('job modules', () => {
+  it('never create their own pool', async () => {
+    const { readdirSync, readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const dir = fileURLToPath(new URL('../jobs/', import.meta.url));
+    const offenders = readdirSync(dir)
+      .filter((f) => f.endsWith('.ts'))
+      .filter((f) => /\bcreateDb\s*\(/.test(readFileSync(join(dir, f), 'utf8')));
+    expect(offenders).toEqual([]);
+  });
+});

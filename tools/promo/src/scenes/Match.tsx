@@ -1,7 +1,7 @@
 import React from 'react';
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
 import { COPY, Locale } from '../copy';
-import { C, EASE_IN, FONT, prog } from '../theme';
+import { C, EASE_IN, FONT, isLight, prog } from '../theme';
 import { FadeUp } from '../components/primitives';
 
 const DocIcon: React.FC<{ kind: 0 | 1 | 2; size: number }> = ({ kind, size }) => (
@@ -79,7 +79,7 @@ export const Match: React.FC<{ locale: Locale }> = ({ locale }) => {
                   borderRadius: 36,
                   background: C.surface,
                   border: `2px solid ${lock > 0.5 ? C.primary : C.line}`,
-                  boxShadow: `0 0 ${50 * lock}px ${C.primary}66, 0 30px 60px rgba(0,0,0,.5)`,
+                  boxShadow: `0 0 ${50 * lock}px ${C.primary}66, 0 30px 60px ${isLight() ? 'rgba(15,31,23,.12)' : 'rgba(0,0,0,.5)'}`,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',

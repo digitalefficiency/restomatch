@@ -7,7 +7,9 @@
  * Flags:
  *   --web-url=<origin>   probe /api/healthz, /privacy, /terms, /cookies, /reset (expect 200)
  *   --dump=<file>        require a pg_dump younger than 2h (backup-before-DDL proof)
- *   --through=<idx>      only require journal entries <= idx (default: latest)
+ *   --through=<tag|nnnn|idx>  only require journal entries up to that one, in apply
+ *                        (`when`) order: a tag (0061_postgres_queue), its 4-digit
+ *                        prefix (0061) or a journal idx (default: latest)
  *   --allow-default-password  skip the "restomatch_app still uses the default password" probe
  *
  * Exit 1 on any FAIL. Skipped checks never fail.
@@ -27,7 +29,10 @@ async function main(): Promise<void> {
   const results = await runCutoverChecks(url, {
     webUrl: flag('web-url'),
     dumpPath: flag('dump'),
-    throughIdx: through ? Number(through) : undefined,
+    // A tag or a 4-digit migration number ('0061') names the entry by tag; a bare
+    // small number is a journal idx (kept for old runbooks).
+    throughTag: through && !/^\d{1,3}$/.test(through) ? through : undefined,
+    throughIdx: through && /^\d{1,3}$/.test(through) ? Number(through) : undefined,
     checkDefaultPassword: !local && !process.argv.includes('--allow-default-password'),
   });
   console.log(formatCheckTable(results));

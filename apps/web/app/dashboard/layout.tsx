@@ -5,15 +5,19 @@ import { auth, signOut } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
 import { ToastProvider } from '@/lib/components';
 import { getLocale, getT } from '@/lib/i18n/server';
+import { PersistingLanguagePicker } from '@/lib/i18n/PersistingLanguagePicker';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { nav } from '@/lib/i18n/messages/nav';
 import { labelForRole } from '@/lib/roles';
 import { LocaleSync } from './locale-sync';
 import { BranchSwitcher } from './branch-switcher';
+import { getWave1Access } from './contracts/access';
 import { DesktopNav, MobileNav } from './nav';
 import { DashboardSearch } from './search';
 import { WorkerStatusBanner } from './worker-status';
 import { TrpcProvider } from '@/lib/trpc/client';
+import { enabledFeatures } from '@/lib/ingest/features';
+import { PwaSessionGuard } from '@/lib/pwa/PwaSessionGuard';
 
 /**
  * Dashboard app shell. Sticky frosted header: restaurant + user on the start
@@ -37,8 +41,48 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const active =
     memberships.find((m) => m.restaurantId === session.user.restaurantId) ?? memberships[0]!;
-  const [t, locale] = await Promise.all([getT(nav), getLocale()]);
+  const [t, locale, flags, enabled, receiverLangsOn, recipesFlag, inventoryFlag] = await Promise.all([
+    getT(nav),
+    getLocale(),
+    caller.recovery.flags(),
+    enabledFeatures(active.restaurantId),
+    // Receiver languages (S14): the six-language picker replaces עב/EN when on.
+    caller.receiverLangs
+      .status()
+      .then((r) => r.enabled)
+      .catch(() => false),
+    // Wave-1 flag (MASTER-PLAN §1.3): a disabled feature's nav link is invisible.
+    caller.recipes.enabled().catch(() => ({ enabled: false })),
+    caller.inventory.enabled().catch(() => ({ enabled: false })),
+  ]);
+  // AI assistant (S14): owner/manager + flag on → nav item.
+  const askOn =
+    active.role === 'owner' || active.role === 'manager'
+      ? await caller.ask
+          .status()
+          .then((r) => r.enabled)
+          .catch(() => false)
+      : false;
+  // Wave-1 flags that hide nav items when off (MASTER-PLAN §1.3). `aiAssistant`
+  // comes only from the S14 role-aware check above.
+  const features = [
+    ...new Set<string>([
+      ...enabled.filter((f) => f !== 'aiAssistant'),
+      ...Object.entries(flags)
+        .filter(([, on]) => on)
+        .map(([key]) => key),
+      ...(askOn ? ['aiAssistant'] : []),
+      ...(recipesFlag.enabled ? ['recipes'] : []),
+      ...(inventoryFlag.enabled ? ['inventoryCount'] : []),
+    ]),
+  ];
   const roleLabel = labelForRole(active.role, locale);
+  // Wave-1 nav entry (contracts / price alerts): flag on + finance role; fails silent.
+  const wave1Access = await getWave1Access();
+  const wave1 = {
+    visible: wave1Access.contracts || wave1Access.priceAlerts,
+    badge: wave1Access.openAlerts,
+  };
   const email = session.user.email ?? '';
   // Branches (S8): the switcher lists every membership; the chain tab is for
   // owners who run more than one branch (the chain router re-checks in the DB).
@@ -80,24 +124,23 @@ export default async function DashboardLayout({ children }: { children: React.Re
               <div className="flex items-center gap-3 py-3">
                 <MobileNav
                   role={active.role}
+                  features={features}
                   logout={logout}
                   restaurantName={active.restaurantName}
                   email={email}
                   showChain={showChain}
+                  wave1={wave1}
+                  receiverLangsOn={receiverLangsOn}
                   branchSwitcher={
                     memberships.length > 1 ? (
-                      <BranchSwitcher
-                        variant="list"
-                        branches={switcherBranches}
-                        activeId={active.restaurantId}
-                      />
+                      <BranchSwitcher variant="list" branches={switcherBranches} activeId={active.restaurantId} />
                     ) : undefined
                   }
                 />
                 <div className="min-w-0 flex-1 lg:flex-none">
                   <p className="truncate text-lg font-bold tracking-tight text-ink">
                     {/* Tenant data (usually Hebrew) inside a possibly-English UI: mark the
-                      language and isolate its direction without changing alignment. */}
+                        language and isolate its direction without changing alignment. */}
                     <span {...originalProps(active.restaurantName)}>{active.restaurantName}</span>
                   </p>
                   <p className="truncate text-xs text-subtle">
@@ -109,8 +152,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 <div className="ms-auto hidden items-center gap-2 lg:flex">
                   <BranchSwitcher branches={switcherBranches} activeId={active.restaurantId} />
                   <DashboardSearch role={active.role} className="w-72" />
-                  <LocaleSwitcher />
-                  <form action={logout}>
+                  {receiverLangsOn ? <PersistingLanguagePicker /> : <LocaleSwitcher />}
+                  <form action={logout} data-rm-logout="">
                     <button
                       type="submit"
                       className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-xs font-semibold text-muted transition-colors hover:border-primary/40 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
@@ -120,18 +163,21 @@ export default async function DashboardLayout({ children }: { children: React.Re
                     </button>
                   </form>
                 </div>
-                <LocaleSwitcher className="lg:hidden" />
+                {receiverLangsOn ? (
+                  <PersistingLanguagePicker className="lg:hidden" />
+                ) : (
+                  <LocaleSwitcher className="lg:hidden" />
+                )}
               </div>
-              <DesktopNav role={active.role} showChain={showChain} />
+              <DesktopNav role={active.role} showChain={showChain} features={features} wave1={wave1} />
             </div>
           </header>
-          <main
-            id="main-content"
-            tabIndex={-1}
-            className="mx-auto max-w-6xl px-4 py-6 focus:outline-none sm:px-6 sm:py-8"
-          >
+          <main id="main-content" tabIndex={-1} className="mx-auto max-w-6xl px-4 py-6 focus:outline-none sm:px-6 sm:py-8">
             <WorkerStatusBanner />
             <LocaleSync />
+            {/* Always mounted: it only touches an EXISTING receiver queue, so a sign-out from a branch
+                without receiverPwa still wipes photos queued on another branch. */}
+            <PwaSessionGuard userId={session.user.id} />
             {children}
           </main>
         </div>

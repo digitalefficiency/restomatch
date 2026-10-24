@@ -19,6 +19,7 @@ import { formatNumber } from '@/lib/i18n/format';
 import { accounting } from '@/lib/i18n/messages/accounting';
 import { components } from '@/lib/i18n/messages/components';
 import { presetRange, rangeError, withBom, type RangePreset } from './range';
+import { AccountingFiles } from './accounting-files';
 
 const PRESETS: RangePreset[] = ['thisMonth', 'lastMonth', 'last30', 'thisYear'];
 
@@ -40,6 +41,8 @@ export function ExportsForm() {
   useEffect(() => setUndated(null), [from, to]);
 
   const utils = trpc.useUtils();
+  // Wave-1 `integrations` flag: accounting-package files show only when it's on.
+  const integrationsOn = trpc.integrations.status.useQuery(undefined, { staleTime: 60_000 }).data?.enabled ?? false;
   const invalid = rangeError(from, to);
   const activePreset = PRESETS.find((p) => {
     const r = presetRange(p);
@@ -199,6 +202,8 @@ export function ExportsForm() {
           {t('undated', { count: formatNumber(undated.count, locale) })}
         </p>
       ) : null}
+
+      {integrationsOn ? <AccountingFiles from={from} to={to} disabled={!!invalid} /> : null}
 
       <p className="mt-6 border-t border-line pt-4 text-xs text-subtle">{t('note')}</p>
     </Card>

@@ -6,6 +6,7 @@ import { zones } from '../layout';
 import { Laptop, laptopScreen, Screen } from '../components/Devices';
 import { CaptionZone, Callout, DeviceZone, Spotlight } from '../components/Stage';
 import { Eyebrow, FadeUp, RiseLine } from '../components/primitives';
+import { autoScroll, emailStrip, rectFor } from '../rects';
 
 export const CHAINS_DURATION = 150;
 
@@ -28,8 +29,9 @@ export const Chains: React.FC<{ locale: Locale }> = ({ locale }) => {
   const { w: sw, h: sh } = laptopScreen(W);
   const bezel = Math.round(W * 0.016);
   const lidH = sh + bezel * 2;
-  const u = ROW[locale];
-  const rect = { x: u[0] * sw, y: u[1] * sw, w: (u[2] - u[0]) * sw, h: (u[3] - u[1]) * sw };
+  const u = rectFor(`chain-${locale}`, 'worst', ROW[locale]);
+  const sc = autoScroll(u);
+  const rect = { x: u[0] * sw, y: (u[1] - sc) * sw, w: (u[2] - u[0]) * sw, h: (u[3] - u[1]) * sw };
 
   const enter = prog(f, 0, 30);
   const exit = prog(f, CHAINS_DURATION - 18, CHAINS_DURATION, EASE_IN);
@@ -42,7 +44,7 @@ export const Chains: React.FC<{ locale: Locale }> = ({ locale }) => {
   const ca = prog(f, 60, 72) * (1 - prog(f, 130, 140));
   const rx = (6 + (1 - enter) * 30) * (1 - pin);
   const ry = 10 * side * (1 - pin);
-  const redact = [isRtl ? { y: 0.012, h: 0.01, x: 0.72, w: 0.21 } : { y: 0.012, h: 0.01, x: 0.075, w: 0.21 }];
+  const redact = [emailStrip(`chain-${locale}`, isRtl ? { y: 0.012, h: 0.01, x: 0.72, w: 0.21 } : { y: 0.012, h: 0.01, x: 0.075, w: 0.21 })];
 
   return (
     <AbsoluteFill style={{ opacity: 1 - exit }}>
@@ -58,8 +60,8 @@ export const Chains: React.FC<{ locale: Locale }> = ({ locale }) => {
           }}
         >
           <Laptop width={W} glare={ry / 20}>
-            <Screen src={`shots/chain-${locale}.png`} width={sw} redact={redact} />
-            <Spotlight rect={rect} a={spot} src={`shots/chain-${locale}.png`} imgWidth={sw} imgTop={0} screenW={sw} screenH={sh} accent={C.danger} />
+            <Screen src={`shots/chain-${locale}.png`} width={sw} scroll={sc * sw} redact={redact} />
+            <Spotlight rect={rect} a={spot} src={`shots/chain-${locale}.png`} imgWidth={sw} imgTop={-sc * sw} screenW={sw} screenH={sh} accent={C.danger} />
           </Laptop>
         </div>
       </DeviceZone>

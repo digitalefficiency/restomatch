@@ -36,6 +36,11 @@ const DASHBOARD_PAGES = [
   '/dashboard/receiving/:openPo',
   // A detail page with a breadcrumb trail (lib/components/Breadcrumbs).
   '/dashboard/suppliers/:supplier',
+  // Wave 1 (S12) — flagged screens; the e2e demo tenant has features.all.
+  '/dashboard/recovery',
+  '/dashboard/reports/monthly',
+  '/dashboard/reports/digest',
+  '/dashboard/leaks/proof',
 ];
 
 let openPo = '';
