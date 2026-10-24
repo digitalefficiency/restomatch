@@ -1,6 +1,7 @@
 /**
  * Feature seeds that run AFTER the core demo seed (seed → seed-demo → seed-chain-demo):
- * one entry per feature dataset, in run order. `reseed:demo` runs each one whose
+ * one entry per feature dataset, in run order (inventory reads recovery's credit notes,
+ * so it runs after it). `reseed:demo` runs each one whose
  * script and table exist on this checkout, and `check-demo` asserts its data, so a
  * production reseed never leaves a feature's screens empty.
  *
@@ -24,8 +25,11 @@ export interface DemoExtraStep {
   /** Skipped when this table does not exist (the feature's migration is not here). */
   requiresTable: string;
   /** Read-only assertions on the seeded data (check-demo). */
-  check: (sql: postgres.Sql, rids: string[], mainId: string) => Promise<{ facts: string[]; problems: string[] }>;
+  check: (sql: postgres.Sql, rids: string[], mainId: string, url: string) => Promise<{ facts: string[]; problems: string[] }>;
 }
+
+/** October's actual food cost on the demo (S17): ₪41,135.36 of ₪136,400 food sales. */
+export const EXPECTED_ACTUAL_FOOD_COST_PCT = '30.2';
 
 const count = async (query: Promise<unknown>) => Number(((await query) as Array<{ n: number }>)[0]?.n ?? 0);
 
@@ -55,6 +59,36 @@ export const DEMO_EXTRA_STEPS: DemoExtraStep[] = [
       const problems: string[] = [];
       if (recipes === 0 || items === 0) problems.push(`recipes: ${recipes} recipes / ${items} items on the main demo restaurant (food cost page empty)`);
       return { facts: [`recipes: ${recipes} dishes, ${items} items`], problems };
+    },
+  },
+  {
+    key: 'inventory',
+    label: 'inventory counts → actual food cost (S17)',
+    scripts: ['scripts/seed-inventory-demo.ts'],
+    requiresTable: 'inventory_counts',
+    async check(sql, _rids, mainId, url) {
+      const rows = (await sql`
+        select count_date::text as d, total_value_agorot::text as v, food_sales_ex_vat::text as sales
+        from inventory_counts where restaurant_id = ${mainId} and status = 'completed' order by count_date
+      `) as unknown as Array<{ d: string; v: string; sales: string | null }>;
+      const problems: string[] = [];
+      if (rows.length < 2) problems.push(`inventory: ${rows.length} completed count(s) on the main demo restaurant — the actual food cost needs an opening and a closing count`);
+      else if (rows[rows.length - 1]!.sales == null) problems.push('inventory: the closing count has no food sales — the actual food cost % cannot show');
+      const facts = [`inventory: ${rows.map((r) => `${r.d} ₪${(Number(r.v) / 100).toFixed(2)}${r.sales ? ` (sales ₪${r.sales})` : ''}`).join(', ') || 'no completed counts'}`];
+      // The figure the screen shows, through the same router the page uses.
+      const [owner] = (await sql`select user_id as id from memberships where restaurant_id = ${mainId} and role = 'owner' limit 1`) as unknown as Array<{ id: string }>;
+      if (rows.length >= 2 && owner) {
+        const { appRouter } = await import('@restomatch/api');
+        const { createDb } = await import('@restomatch/db');
+        const caller = appRouter.createCaller({ db: createDb(url), session: { userId: owner.id, restaurantId: mainId, role: 'owner' } } as never) as unknown as {
+          inventory?: { period: () => Promise<{ available: boolean; actualAgorot?: number; salesAgorot?: number | null; actualBp?: number | null }> };
+        };
+        const p = await caller.inventory?.period();
+        const pct = p?.available && p.actualBp != null ? (p.actualBp / 100).toFixed(1) : null;
+        facts.push(`inventory: actual food cost ${pct ?? '—'}% (₪${((p?.actualAgorot ?? 0) / 100).toFixed(2)} of ₪${((p?.salesAgorot ?? 0) / 100).toFixed(2)})`);
+        if (pct !== EXPECTED_ACTUAL_FOOD_COST_PCT) problems.push(`inventory: actual food cost reads ${pct ?? '—'}%, expected ${EXPECTED_ACTUAL_FOOD_COST_PCT}%`);
+      }
+      return { facts, problems };
     },
   },
   {
