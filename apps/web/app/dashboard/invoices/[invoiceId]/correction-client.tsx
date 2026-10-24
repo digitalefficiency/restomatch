@@ -12,6 +12,7 @@ import { formatIls } from '@/lib/money';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
 import { invoices } from '@/lib/i18n/messages/invoices';
+import { localizeServerError } from '@/lib/serverErrors';
 import { HebrewToggle, ItemName, useUnitLabel } from '@/app/showcase/receiver/_steps/english';
 
 type Invoice = inferRouterOutputs<AppRouter>['receiving']['getInvoice'];
@@ -47,6 +48,8 @@ export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canE
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [rematch, setRematch] = useState<MatchResult | null>(null);
+  /** The invoice that already carries the number the user tried to save. */
+  const [holderId, setHolderId] = useState<string | null>(null);
 
   // Header draft
   const [num_, setNum] = useState(invoice.invoiceNumber ?? '');
@@ -70,8 +73,22 @@ export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canE
   };
 
   const updateHeader = trpc.receiving.updateInvoiceHeader.useMutation({
-    onSuccess: () => onOk(t('correction.savedHeader')),
-    onError: onErr,
+    onSuccess: () => {
+      setHolderId(null);
+      onOk(t('correction.savedHeader'));
+    },
+    onError: (e) => {
+      const data = e.data as { appCode?: string; appParams?: { holderInvoiceId?: string } } | undefined;
+      if (data?.appCode === 'invoice.numberTaken') {
+        // Translated CONFLICT naming the invoice that holds the number.
+        setError(localizeServerError(e, locale, t('correction.failed')));
+        setHolderId(data.appParams?.holderInvoiceId || null);
+        setSaved(null);
+        return;
+      }
+      setHolderId(null);
+      onErr(e);
+    },
   });
   const updateLine = trpc.receiving.updateInvoiceLine.useMutation({
     onSuccess: () => {
@@ -142,8 +159,24 @@ export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canE
   return (
     <div className="space-y-6">
       {error && (
-        <div role="alert" className="rounded-md border-s-4 border-danger bg-danger/5 px-3 py-2 text-sm text-danger">
+        <div
+          role="alert"
+          data-testid="correction-error"
+          className="rounded-md border-s-4 border-danger bg-danger/5 px-3 py-2 text-sm text-danger"
+        >
           {error}
+          {holderId ? (
+            <>
+              {' '}
+              <Link
+                href={`/dashboard/invoices/${holderId}`}
+                data-testid="duplicate-holder-link"
+                className="font-medium underline underline-offset-4"
+              >
+                {t('correction.openHolder')}
+              </Link>
+            </>
+          ) : null}
         </div>
       )}
       {saved && (
@@ -151,6 +184,16 @@ export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canE
           <CheckCircle2 className="h-4 w-4" /> {saved}
         </p>
       )}
+
+      {invoice.duplicateOf ? (
+        <div
+          role="status"
+          data-testid="invoice-duplicate-notice"
+          className="rounded-md border-s-4 border-line bg-surface-2 px-3 py-2 text-sm text-ink"
+        >
+          {t('correction.duplicateOf', { number: invoice.duplicateOf.invoiceNumber })}
+        </div>
+      ) : null}
 
       {invoice.ocrFailed || invoice.status === 'ocr_pending' ? (
         <div
