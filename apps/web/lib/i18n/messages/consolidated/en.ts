@@ -26,6 +26,7 @@ export const en: Shape<typeof he> = {
     askIncl: 'Please credit {amount} (VAT included).',
     askBoth: 'Please credit {excl} + VAT, and {incl} (VAT included).',
     inclVat: '(VAT included)',
+    capped: '(capped at the invoice total)',
   },
   finding: {
     duplicate: 'Duplicate invoice',

@@ -557,6 +557,33 @@ describe('buildConsolidatedProposal — #114 verification (P4)', () => {
   });
 });
 
+describe('buildConsolidatedProposal — #116 verification (P5)', () => {
+  it("a '+' / '&' LIST of notes is pooled, not put on its first note (no false QTY_OVER)", () => {
+    for (const d of ['ת.מ. 61036 + 61037 + 61038 · חלב 3%', 'ת.מ. 61036+61037', 'DN 61036 & 61037', 'DN 61036 and 61037', 'ת.מ. 61036 ו-61037']) {
+      expect(deliveryNoteNumberIn(d)).toBeNull();
+    }
+    expect(deliveryNoteNumberIn('ת.מ. 61036 · חלב 3% + ביצים')).toBe('61036');
+    // One month line billing 3 notes of 10 at ₪5 — exactly what was delivered.
+    const notes = [0, 1, 2].map((i) => note(`gr-${i}`, 3 + i * 3, [noteLine(CHALLAH, 10, 5)], String(61036 + i)));
+    const line = invLine(CHALLAH, 30, 5);
+    const lineNotes = new Map<string, string>();
+    const n = deliveryNoteNumberIn('ת.מ. 61036 + 61037 + 61038 · חלה');
+    if (n) lineNotes.set(line.id, n);
+    const p = buildConsolidatedProposal({
+      invoiceId: 'inv-plus',
+      supplierId: 'sup-1',
+      periodStart: new Date('2026-09-27T21:00:00Z'),
+      periodEnd: new Date('2026-11-02T22:00:00Z'),
+      base: base([line]),
+      notes,
+      invoiceLineNotes: lineNotes,
+    });
+    expect(p.findings.filter((f) => f.countsAsLeak)).toEqual([]);
+    expect(p.claim).toEqual({ exclIls: 0, inclIls: 0 });
+    expect(p.deliveryNotes.every((d) => d.status === 'covered')).toBe(true);
+  });
+});
+
 describe('readConsolidatedRaw / periodOfInvoice / deliveryNoteNumberIn', () => {
   it('reads the consolidated payload; anything else is not one', () => {
     expect(
