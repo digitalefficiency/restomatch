@@ -116,31 +116,51 @@ function toJob<T>(r: RawRow): JobRow<T> {
   };
 }
 
-/** Insert a job. Returns null when a job with the same (queue, dedupeKey) exists. */
+/** NOTIFY channel a new job is announced on (payload: the queue name). */
+export const JOB_CHANNEL = 'job_queue';
+
+/**
+ * Insert a job. Returns null when a job with the same (queue, dedupeKey) exists.
+ * The same statement NOTIFYs JOB_CHANNEL (delivered on commit; works through the
+ * transaction pooler), so a LISTENing worker picks the job up at once instead of
+ * waiting for its next idle poll.
+ */
 export async function insertJob(sql: Sql, queue: string, payload: unknown, opts: EnqueueOptions = {}): Promise<{ id: string } | null> {
   const rows = await sql<Array<{ id: string }>>`
-    INSERT INTO job_queue (queue, payload, restaurant_id, dedupe_key, run_at, max_attempts)
-    VALUES (
-      ${queue},
-      ${sql.json(payload as postgres.JSONValue)},
-      ${opts.restaurantId ?? null},
-      ${opts.dedupeKey ?? null},
-      ${opts.runAt ?? new Date()},
-      ${opts.maxAttempts ?? 1}
+    WITH ins AS (
+      INSERT INTO job_queue (queue, payload, restaurant_id, dedupe_key, run_at, max_attempts)
+      VALUES (
+        ${queue},
+        ${sql.json(payload as postgres.JSONValue)},
+        ${opts.restaurantId ?? null},
+        ${opts.dedupeKey ?? null},
+        ${opts.runAt ?? new Date()},
+        ${opts.maxAttempts ?? 1}
+      )
+      ON CONFLICT (queue, dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
+      RETURNING id, queue
     )
-    ON CONFLICT (queue, dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
-    RETURNING id`;
+    SELECT id, pg_notify(${JOB_CHANNEL}, queue) FROM ins`;
   return rows[0] ? { id: String(rows[0].id) } : null;
 }
 
 /** Claim the next runnable job of `queue` for `workerId`, or null. */
 export async function claimJob<T = unknown>(sql: Sql, queue: string, workerId: string): Promise<JobRow<T> | null> {
+  return claimAny<T>(sql, [queue], workerId);
+}
+
+/**
+ * Claim the next runnable job of ANY of `queues` (oldest run_at first) — one
+ * query per poll for the whole worker, however many queues it serves.
+ */
+export async function claimAny<T = unknown>(sql: Sql, queues: string[], workerId: string): Promise<JobRow<T> | null> {
+  if (queues.length === 0) return null;
   const rows = await sql<RawRow[]>`
     UPDATE job_queue
        SET status = 'active', locked_at = now(), locked_by = ${workerId}, attempts = attempts + 1
      WHERE id = (
        SELECT id FROM job_queue
-        WHERE queue = ${queue} AND status = 'queued' AND run_at <= now()
+        WHERE queue = ANY(${queues}::text[]) AND status = 'queued' AND run_at <= now()
         ORDER BY run_at, id
         FOR UPDATE SKIP LOCKED
         LIMIT 1

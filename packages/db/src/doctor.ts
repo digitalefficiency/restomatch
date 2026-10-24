@@ -414,6 +414,15 @@ export async function runDoctor(url: string, opts: DoctorOptions = {}): Promise<
             ? `${drift.length} applied migration file(s) changed after they were applied (comment edits are harmless; DDL edits are not re-run): ${drift.map((d) => d.tag).join(', ')}`
             : 'every applied file matches its recorded hash');
       }
+      // The job queue, rate limits and worker heartbeat live in 0061's tables
+      // (Redis is gone): without them the worker refuses to start, every enqueue
+      // fails and the rate limiter fails open. Deploy-order guard.
+      const ownerOnly = await tx`
+        select t from unnest(${OWNER_ONLY_TABLES}::text[]) as t where to_regclass('public.' || t) is null`;
+      add('migrations', 'queue tables (0061)', ownerOnly.length ? 'FAIL' : 'PASS',
+        ownerOnly.length
+          ? `missing: ${ownerOnly.map((r) => r.t).join(', ')} — the worker refuses to start and uploads cannot be queued until 0061 runs (\`pnpm db:migrate\`, or merge so Supabase applies it)`
+          : 'job_queue, worker_heartbeats, rate_limit_counters, ops_kv present');
 
       // ── 4. Preconditions of pending migrations ──────────────────────────
       if (pending.length === 0) {

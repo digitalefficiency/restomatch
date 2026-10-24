@@ -2,11 +2,12 @@ import { hostname } from 'node:os';
 import cronParser from 'cron-parser';
 import { captureException } from '@restomatch/observability';
 import {
-  claimJob,
+  claimAny,
   completeJob,
   failJob,
   failedJobs,
   insertJob,
+  JOB_CHANNEL,
   listJobs,
   pruneJobs,
   queueCounts,
@@ -49,8 +50,6 @@ export const KEEP_FINISHED_MS = 7 * 24 * 3600_000;
 /** The worker's queue pool: claim loops of ~13 queues + maintenance share it. */
 const WORKER_POOL_MAX = 4;
 
-/** Latency-sensitive queues poll every second; the rest every 5 s. */
-const FAST_QUEUES = new Set(['ocr-invoice', 'match-invoice', 'import-catalog']);
 
 export function workerSql(): Sql {
   const url = queueDbUrl();
@@ -88,94 +87,231 @@ export interface PgWorker {
 
 const inFlight = new Map<string, string>(); // jobId → queue (lock renewal)
 
+/*
+ * One dispatcher per database pool claims for EVERY registered queue with a
+ * single query (claimAny), instead of one poll loop per queue: on the Supabase
+ * free plan egress is metered, and 13 queues × 1–5 s polls was ~5 queries/s
+ * (~6 GB/month) of empty claims. When a claim comes back empty the dispatcher
+ * sleeps with exponential backoff (IDLE_MIN_MS → IDLE_MAX_MS); a claimed job,
+ * a local insert (wakeDispatchers) or a NOTIFY from another process (LISTEN,
+ * startJobListener) resets/wakes it. Per-queue concurrency is enforced here.
+ */
+export const IDLE_MIN_MS = 1_000;
+export const IDLE_MAX_MS = 30_000;
+
+/** The next idle sleep after an empty claim: doubles up to the cap. */
+export function nextIdleMs(current: number, max = IDLE_MAX_MS): number {
+  return Math.min(Math.max(current, 1) * 2, max);
+}
+
+interface Registration {
+  name: string;
+  processor: (job: WorkerJob<unknown>) => Promise<unknown>;
+  concurrency: number;
+  active: Set<Promise<void>>;
+}
+
+class Dispatcher {
+  readonly queues = new Map<string, Registration>();
+  private running = true;
+  private wakeFn: (() => void) | null = null;
+  private pendingWake = false;
+  private lastErrorLogAt = 0;
+  idleMs: number;
+  /** Claim queries issued (for the idle-load measurement in the PR / tests). */
+  claims = 0;
+  /** With a live LISTEN, an empty claim sleeps the full cap at once. */
+  listening = false;
+  readonly done: Promise<void>;
+
+  constructor(
+    readonly sql: Sql,
+    readonly minIdleMs: number,
+    readonly maxIdleMs: number,
+  ) {
+    this.idleMs = minIdleMs;
+    this.done = this.loop();
+  }
+
+  wake(): void {
+    if (this.wakeFn) this.wakeFn();
+    else this.pendingWake = true;
+  }
+
+  stop(): void {
+    this.running = false;
+    this.wake();
+  }
+
+  private sleep(ms: number): Promise<void> {
+    if (this.pendingWake) {
+      this.pendingWake = false;
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      const t = setTimeout(done, ms);
+      const self = this;
+      function done() {
+        clearTimeout(t);
+        self.wakeFn = null;
+        resolve();
+      }
+      this.wakeFn = done;
+    });
+  }
+
+  private async loop(): Promise<void> {
+    while (this.running) {
+      const open = [...this.queues.values()].filter((r) => r.active.size < r.concurrency);
+      if (open.length === 0) {
+        await this.sleep(this.maxIdleMs); // all busy (or none registered): a finishing job wakes us
+        continue;
+      }
+      let row: JobRow<unknown> | null = null;
+      try {
+        this.claims += 1;
+        row = await claimAny(this.sql, open.map((r) => r.name), WORKER_ID);
+      } catch (err) {
+        // DB blip: keep polling (the DB watchdog exits the process if it lasts).
+        const now = Date.now();
+        if (now - this.lastErrorLogAt > 30_000) {
+          this.lastErrorLogAt = now;
+          console.error(`[worker] claim failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      const reg = row ? this.queues.get(row.queue) : undefined;
+      if (row && reg) {
+        this.idleMs = this.minIdleMs;
+        const p: Promise<void> = runOne(this.sql, reg, row).finally(() => {
+          reg.active.delete(p);
+          this.wake(); // capacity freed; there may be more queued
+        });
+        reg.active.add(p);
+        continue; // there may be more ready right now
+      }
+      await this.sleep(this.listening ? this.maxIdleMs : this.idleMs);
+      this.idleMs = nextIdleMs(this.idleMs, this.maxIdleMs);
+    }
+  }
+}
+
+const dispatchers = new Map<Sql, Dispatcher>();
+
+/** Wake every dispatcher in this process (a job was just inserted locally). */
+export function wakeDispatchers(): void {
+  for (const d of dispatchers.values()) d.wake();
+}
+
+/** Test/telemetry hook: the dispatcher serving `sql`, if any. */
+export function dispatcherFor(sql: Sql): { claims: number; idleMs: number; listening: boolean } | undefined {
+  return dispatchers.get(sql);
+}
+
+async function runOne(sql: Sql, reg: Registration, row: JobRow<unknown>): Promise<void> {
+  const name = reg.name;
+  const job: WorkerJob<unknown> = {
+    id: row.id,
+    name,
+    data: row.payload,
+    attemptsMade: row.attempts - 1, // claimAny already counted this run
+    opts: { attempts: row.maxAttempts },
+  };
+  inFlight.set(row.id, name);
+  try {
+    let result: unknown;
+    try {
+      result = await reg.processor(job);
+    } catch (err) {
+      console.error(formatJobFailure(name, { id: row.id, attemptsMade: row.attempts }, err));
+      captureException(err, { queue: name, jobId: row.id });
+      await failJob(sql, row, err instanceof Error ? err.message : String(err), WORKER_ID).catch((e: unknown) =>
+        console.error(`[${name}] could not record the failure of job=${row.id}: ${e instanceof Error ? e.message : e}`),
+      );
+      return;
+    }
+    // Outside the processor's catch: a DB blip here must not turn work that
+    // succeeded into a failure. If it cannot be recorded, stall recovery
+    // re-queues the job later (consumers are idempotent).
+    await completeJob(sql, row.id, WORKER_ID, result).catch((e: unknown) =>
+      console.error(`[${name}] could not record the completion of job=${row.id}: ${e instanceof Error ? e.message : e}`),
+    );
+  } finally {
+    inFlight.delete(row.id);
+  }
+}
+
 export function makeWorker<T>(
   name: string,
   processor: (job: WorkerJob<T>) => Promise<unknown>,
   options: { concurrency?: number; pollMs?: number; sql?: Sql } = {},
 ): PgWorker {
-  const concurrency = options.concurrency ?? 1;
-  const pollMs = options.pollMs ?? (FAST_QUEUES.has(name) ? 1_000 : 5_000);
   const sql = options.sql ?? workerSql();
-  let running = true;
-  let wake: (() => void) | null = null;
-  const active = new Set<Promise<void>>();
-  let lastErrorLogAt = 0;
-
-  const runOne = async (row: JobRow<T>) => {
-    const job: WorkerJob<T> = {
-      id: row.id,
-      name,
-      data: row.payload,
-      attemptsMade: row.attempts - 1, // claimJob already counted this run
-      opts: { attempts: row.maxAttempts },
-    };
-    inFlight.set(row.id, name);
-    try {
-      let result: unknown;
-      try {
-        result = await processor(job);
-      } catch (err) {
-        console.error(formatJobFailure(name, { id: row.id, attemptsMade: row.attempts }, err));
-        captureException(err, { queue: name, jobId: row.id });
-        await failJob(sql, row, err instanceof Error ? err.message : String(err), WORKER_ID).catch((e: unknown) =>
-          console.error(`[${name}] could not record the failure of job=${row.id}: ${e instanceof Error ? e.message : e}`),
-        );
-        return;
-      }
-      // Outside the processor's catch: a DB blip here must not turn work that
-      // succeeded into a failure. If it cannot be recorded, stall recovery
-      // re-queues the job later (consumers are idempotent).
-      await completeJob(sql, row.id, WORKER_ID, result).catch((e: unknown) =>
-        console.error(`[${name}] could not record the completion of job=${row.id}: ${e instanceof Error ? e.message : e}`),
-      );
-    } finally {
-      inFlight.delete(row.id);
-    }
+  let d = dispatchers.get(sql);
+  if (!d) {
+    // pollMs (tests) caps both ends of the idle backoff.
+    const cap = options.pollMs ?? IDLE_MAX_MS;
+    d = new Dispatcher(sql, Math.min(IDLE_MIN_MS, cap), cap);
+    dispatchers.set(sql, d);
+  }
+  const dispatcher = d;
+  if (dispatcher.queues.has(name)) throw new Error(`[worker] queue "${name}" already has a worker`);
+  const reg: Registration = {
+    name,
+    processor: processor as Registration['processor'],
+    concurrency: options.concurrency ?? 1,
+    active: new Set(),
   };
-
-  const loop = async () => {
-    while (running) {
-      if (active.size >= concurrency) {
-        await Promise.race(active);
-        continue;
-      }
-      let row: JobRow<T> | null = null;
-      try {
-        row = await claimJob<T>(sql, name, WORKER_ID);
-      } catch (err) {
-        // DB blip: keep polling (the DB watchdog exits the process if it lasts).
-        const now = Date.now();
-        if (now - lastErrorLogAt > 30_000) {
-          lastErrorLogAt = now;
-          console.error(`[${name}] claim failed: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      }
-      if (row) {
-        const p: Promise<void> = runOne(row).finally(() => active.delete(p));
-        active.add(p);
-        continue; // there may be more ready right now
-      }
-      await new Promise<void>((resolve) => {
-        const t = setTimeout(resolve, pollMs);
-        wake = () => {
-          clearTimeout(t);
-          resolve();
-        };
-      });
-      wake = null;
-    }
-  };
-  const done = loop();
+  dispatcher.queues.set(name, reg);
+  dispatcher.wake();
 
   return {
     name,
     async close() {
-      running = false;
-      wake?.();
-      await done;
-      await Promise.all(active); // let in-flight jobs finish (graceful drain)
+      dispatcher.queues.delete(name); // stop claiming for this queue
+      if (dispatcher.queues.size === 0) {
+        dispatcher.stop();
+        dispatchers.delete(sql);
+        await dispatcher.done;
+      }
+      await Promise.all(reg.active); // let in-flight jobs finish (graceful drain)
     },
   };
+}
+
+/**
+ * LISTEN for new-job NOTIFYs so an upload is picked up in ~1 s while the idle
+ * poll stays at IDLE_MAX_MS. Needs a session connection: the worker's
+ * DATABASE_URL (direct or the Supabase SESSION pooler, port 5432). On the
+ * transaction pooler (6543) LISTEN cannot work, so it is skipped and the
+ * backoff poll alone applies. WORKER_LISTEN=off disables it.
+ */
+export async function startJobListener(
+  sql: Sql = workerSql(),
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<() => Promise<void>> {
+  const url = queueDbUrl(env) ?? '';
+  if (env.WORKER_LISTEN === 'off' || /:6543(\/|$|\?)/.test(url)) {
+    console.warn('[worker] LISTEN disabled (transaction pooler or WORKER_LISTEN=off) — polling only, new jobs wait up to 30 s');
+    return async () => {};
+  }
+  const setListening = (on: boolean) => {
+    for (const d of dispatchers.values()) d.listening = on;
+  };
+  try {
+    const sub = await sql.listen(
+      JOB_CHANNEL,
+      () => wakeDispatchers(),
+      () => setListening(true), // (re)connected
+    );
+    console.log('[worker] listening for new jobs (NOTIFY job_queue)');
+    return async () => {
+      setListening(false);
+      await sub.unlisten();
+    };
+  } catch (err) {
+    console.warn(`[worker] LISTEN failed (${err instanceof Error ? err.message : err}) — polling only`);
+    return async () => {};
+  }
 }
 
 /* ── schedules (BullMQ "job schedulers") ─────────────────────────────────── */
@@ -285,6 +421,7 @@ export async function tickSchedules(sql: Sql, now = new Date()): Promise<string[
     const inserted = await insertJob(sql, s.queue, s.template.data, { dedupeKey });
     s.lastSlot = due.at;
     if (inserted) {
+      wakeDispatchers();
       fired.push(s.id);
       if (due.catchUp) console.log(`[cron] ${s.id}: caught up the missed slot ${due.label}`);
     }
@@ -338,12 +475,14 @@ export function makeQueue<T>(name: string) {
     name,
     async add(_jobName: string, data: T, opts: { jobId?: string; delay?: number; attempts?: number } = {}) {
       const restaurantId = (data as { restaurantId?: unknown } | null)?.restaurantId;
-      return insertJob(workerSql(), name, data, {
+      const inserted = await insertJob(workerSql(), name, data, {
         dedupeKey: opts.jobId,
         runAt: opts.delay ? new Date(Date.now() + opts.delay) : undefined,
         maxAttempts: opts.attempts,
         restaurantId: typeof restaurantId === 'string' ? restaurantId : null,
       });
+      wakeDispatchers();
+      return inserted;
     },
     /** Counts per state; BullMQ's 'completed' is also given as 'done'. */
     async getJobCounts(..._types: string[]): Promise<Record<string, number>> {
@@ -365,6 +504,28 @@ export function makeQueue<T>(name: string) {
       schedules.delete(id);
     },
   };
+}
+
+/* ── deploy-order guard ──────────────────────────────────────────────────── */
+
+export const QUEUE_TABLES = ['job_queue', 'worker_heartbeats', 'rate_limit_counters', 'ops_kv'] as const;
+
+/** The 0061 tables this database is missing ([] when the migration has run). */
+export async function missingQueueTables(sql: Sql): Promise<string[]> {
+  const rows = await sql<Array<{ t: string; present: boolean }>>`
+    SELECT t, to_regclass('public.' || t) IS NOT NULL AS present
+      FROM unnest(${[...QUEUE_TABLES]}::text[]) AS t`;
+  return rows.filter((r) => !r.present).map((r) => r.t);
+}
+
+/** The bilingual refusal printed when the worker starts before migration 0061. */
+export function missingQueueTablesMessage(missing: string[]): string {
+  return [
+    `[worker] REFUSING TO START: migration 0061 has not run on this database (missing: ${missing.join(', ')}).`,
+    '  Merge/deploy the PR so Supabase applies 0061 (or run `pnpm --filter @restomatch/db migrate`), then start the worker again.',
+    `[worker] ה-worker לא עולה: מיגרציה 0061 עוד לא רצה על מסד הנתונים (חסרות הטבלאות: ${missing.join(', ')}).`,
+    '  יש למזג את ה-PR כדי ש-Supabase יריץ את 0061, ואז להפעיל את ה-worker מחדש.',
+  ].join('\n');
 }
 
 /** Test hook: drop all registered schedules. */

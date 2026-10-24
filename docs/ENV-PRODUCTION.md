@@ -48,6 +48,11 @@ on the existing `DATABASE_URL`. `REDIS_URL` is no longer used by web or worker: 
 value only logs a boot warning. Remove it from the worker env; on Vercel delete it a week
 after the cutover (the pre-0061 version still needs it for a rollback — `docs/REDIS-REMOVAL.md`).
 
+**Worker `DATABASE_URL`: use the SESSION pooler (port 5432) or a direct connection.** The
+worker LISTENs for new-job NOTIFYs (instant pickup) and otherwise polls with a 1 s → 30 s
+idle backoff; on the transaction pooler (6543) LISTEN is skipped and new jobs wait up to
+30 s. `WORKER_LISTEN=off` forces polling. The web keeps the transaction pooler (NOTIFY works there).
+
 ## DATABASE_URL_APP — the restomatch_app connection (new Supabase project)
 
 On the NEW project (schema deployed from git, `docs/SUPABASE-GITHUB-DEPLOY.md` §4–5) the

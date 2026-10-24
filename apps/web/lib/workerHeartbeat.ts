@@ -5,7 +5,7 @@
  * it, apps/worker/src/heartbeat.ts).
  */
 /** A beat older than this is "down" (the worker beats every 60s). */
-export const WORKER_STALE_AFTER_MS = 10 * 60_000;
+export const WORKER_STALE_AFTER_MS = 5 * 60_000;
 
 export interface HeartbeatDoc {
   at: string;

@@ -80,7 +80,9 @@ describe('job_queue lifecycle', () => {
     const fresh = await claimJob(sql, Q, 'live-worker');
     await sql`UPDATE job_queue SET locked_at = now() - interval '10 minutes' WHERE id = ${stale!.id}`;
     await renewLocks(sql, [fresh!.id], 'live-worker');
-    expect(await recoverStalled(sql, 2 * 60_000)).toEqual({ requeued: 1, failed: 0 });
+    expect((await recoverStalled(sql, 2 * 60_000)).requeued).toBeGreaterThanOrEqual(1); // global: other suites' rows may count
+    const [freshRow] = await sql<Array<{ status: string }>>`SELECT status FROM job_queue WHERE id = ${fresh!.id}`;
+    expect(freshRow?.status).toBe('active'); // fresh lock left alone
     const again = await claimJob<{ stale: boolean }>(sql, Q, 'w2');
     expect(again?.payload.stale).toBe(true);
     // A stall gives the claim's attempt back (BullMQ: stalled ≠ failed attempt).
@@ -91,8 +93,11 @@ describe('job_queue lifecycle', () => {
     await insertJob(sql, Q, {});
     const mine = await claimJob(sql, Q, 'me');
     await sql`UPDATE job_queue SET locked_at = now() - interval '10 minutes' WHERE id = ${mine!.id}`;
-    expect(await recoverStalled(sql, 2 * 60_000, [mine!.id])).toEqual({ requeued: 0, failed: 0 });
-    expect(await recoverStalled(sql, 2 * 60_000)).toEqual({ requeued: 1, failed: 0 });
+    const status = async () => (await sql<Array<{ status: string }>>`SELECT status FROM job_queue WHERE id = ${mine!.id}`)[0]?.status;
+    await recoverStalled(sql, 2 * 60_000, [mine!.id]);
+    expect(await status()).toBe('active');
+    await recoverStalled(sql, 2 * 60_000);
+    expect(await status()).toBe('queued');
   });
 
   it('keeps finished cron-slot rows (catch-up history) for 40 days', async () => {
@@ -112,9 +117,13 @@ describe('job_queue lifecycle', () => {
     await insertJob(sql, Q, {});
     const j = await claimJob(sql, Q, 'w');
     await completeJob(sql, j!.id, 'w');
-    expect(await pruneJobs(sql, 60_000)).toBe(0);
+    // pruneJobs is global (other suites share this DB): assert on this row.
+    const exists = async () => (await sql`SELECT 1 FROM job_queue WHERE id = ${j!.id}`).length === 1;
+    await pruneJobs(sql, 60_000);
+    expect(await exists()).toBe(true); // finished just now: kept
     await sql`UPDATE job_queue SET finished_at = now() - interval '8 days' WHERE id = ${j!.id}`;
     expect(await pruneJobs(sql, 7 * 24 * 3600_000)).toBeGreaterThanOrEqual(1);
+    expect(await exists()).toBe(false);
   });
 
   it('enqueue() writes payload + restaurant_id from the payload', async () => {

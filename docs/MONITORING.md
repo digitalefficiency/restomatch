@@ -55,7 +55,7 @@ Configure in any monitor (Better Stack, UptimeRobot, Checkly). Regions: at least
 |---|---|---|---|---|---|
 | U1 | Web liveness | `GET https://<app>/api/healthz` | 200, JSON `"status":"ok"`, < 2 s | 1 min | web up, no DB coupling (never flaps on a dependency) |
 | U2 | Login page renders | `GET https://<app>/login` | 200, body contains `RestoMatch` | 5 min | full render path (layout, i18n, CSP) |
-| U3 | Worker alive | `GET https://<app>/api/cron/worker-heartbeat` with header `Authorization: Bearer <CRON_SECRET>` | 200, body contains `"status":"ok"` | 5 min | worker heartbeat in `worker_heartbeats` is < 10 min old |
+| U3 | Worker alive | `GET https://<app>/api/cron/worker-heartbeat` with header `Authorization: Bearer <CRON_SECRET>` | 200, body contains `"status":"ok"` | 5 min | worker heartbeat in `worker_heartbeats` is < 5 min old |
 | U4 | Worker process (Fly only) | built-in Fly check `GET :8080/health` | 200 | 15 s | health status + deploy gate (Fly does not restart on a failed check; the worker's database watchdog exits and `[[restart]]` restarts it) |
 | U5 | TLS | certificate on `<app>` | > 14 days left | daily | |
 
@@ -120,7 +120,7 @@ job, every attempt failed) stays `ocr_pending`. The sweep re-enqueues it **once*
 
 | Signal | Recipient | Channel |
 |---|---|---|
-| Worker down > 10 min | `WORKER_ALERT_EMAILS` | email (heartbeat route) |
+| Worker down > 5 min | `WORKER_ALERT_EMAILS` | email (heartbeat route) |
 | Uptime U1–U5 | owner + on-call | monitor's email/SMS/Slack |
 | Sentry new issue | owner | email |
 | Daily digest | `HEALTH_DIGEST_EMAILS` | email (outbox) |
