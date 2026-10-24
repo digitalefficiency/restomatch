@@ -9,8 +9,10 @@ import { leaks as leaksNs } from '@/lib/i18n/messages/leaks';
 import { approvals as approvalsNs } from '@/lib/i18n/messages/approvals';
 import { Card, EmptyState, SectionHeader } from '@/lib/components';
 import { discrepancyLabel, displayName } from '../../approvals/vocab';
-import { claimableLines } from '@restomatch/charts';
 import { PrintButton } from './print-button';
+
+/** A line is claimable when it counts as leak, is still open/claimed, and the invoice is unpaid. */
+const CLAIMABLE = new Set(['open', 'escalated', 'accepted']);
 
 /**
  * Supplier credit-request letters (מכתבי דרישת זיכוי): turns the month's leak
@@ -42,12 +44,17 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
     { name: string; lines: Array<{ invoice: string; item: string; issue: string; amount: number }> }
   >();
   for (const inv of rows) {
-    const claimable = claimableLines(inv); // shared with the dock dispute slip
-    if (claimable.length === 0) continue;
+    if (inv.pendingLink || inv.status === 'paid') continue;
     const name = displayName(locale, inv.supplierName, inv.supplierNameEn) || '—';
     const key = inv.supplierName ?? name;
     const group = bySupplier.get(key) ?? { name, lines: [] };
-    for (const { line: l, amount } of claimable) {
+    let invClaimed = 0;
+    for (const l of inv.lines) {
+      if (!l.countsAsLeak || !CLAIMABLE.has(l.resolutionStatus)) continue;
+      // Never claim more on an invoice than its capped leak.
+      const amount = Math.min(Math.abs(l.deltaAmount), Math.max(0, inv.leakIls - invClaimed));
+      if (amount <= 0) continue;
+      invClaimed += amount;
       group.lines.push({
         invoice: inv.invoiceNumber ?? '—',
         item:

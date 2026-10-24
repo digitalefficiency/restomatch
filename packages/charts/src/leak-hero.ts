@@ -329,27 +329,3 @@ export async function computeInvoiceLeak(
     lines: lines.get(String(r.id)) ?? [],
   };
 }
-
-/** Resolution statuses that can still be claimed from the supplier. */
-export const CLAIMABLE_STATUSES: ReadonlySet<string> = new Set(['open', 'escalated', 'accepted']);
-
-/**
- * The supplier-claim amounts of one breakdown invoice — the single source for
- * the claims letters and the dock dispute slip, so both agree to the agora:
- * lines that count as leak and are still claimable, each |delta| but never more
- * in total than the invoice's capped leak. Nothing is claimable on an invoice
- * waiting for a PO link or already paid.
- */
-export function claimableLines(inv: LeakBreakdownInvoice): Array<{ line: LeakBreakdownLine; amount: number }> {
-  if (inv.pendingLink || inv.status === 'paid') return [];
-  const out: Array<{ line: LeakBreakdownLine; amount: number }> = [];
-  let claimed = 0;
-  for (const line of inv.lines) {
-    if (!line.countsAsLeak || !CLAIMABLE_STATUSES.has(line.resolutionStatus)) continue;
-    const amount = Math.round(Math.min(Math.abs(line.deltaAmount), Math.max(0, inv.leakIls - claimed)) * 100) / 100;
-    if (amount <= 0) continue;
-    claimed = Math.round((claimed + amount) * 100) / 100;
-    out.push({ line, amount });
-  }
-  return out;
-}

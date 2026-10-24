@@ -25,7 +25,7 @@ import {
   suppliers,
   users,
 } from '@restomatch/db';
-import { claimableLines, computeInvoiceLeak } from '@restomatch/charts';
+import { computeInvoiceLeak } from '@restomatch/charts';
 import { enqueueOcrInvoice, isQueueUnavailableError } from '@restomatch/queue';
 import type { InvoiceOcrResult } from '@restomatch/types';
 import { assertGrOwned, assertSupplierOwned } from '../tenant';
@@ -35,6 +35,7 @@ import { isAllowedScanUrl } from '../lib/scanUrls';
 import { isInvoiceNumberTaken, readDuplicateOf, withoutDuplicateOf } from '../lib/invoiceDedupe';
 import { appError } from '../errors';
 import { endOfDayInTz, startOfDayInTz } from '../lib/time';
+import { claimableLines } from '../lib/claims';
 import { featureEnabled } from '../lib/features';
 import { invoiceReaderProcedure, managerProcedure, memberProcedure, receiverProcedure, router } from '../trpc';
 
@@ -374,7 +375,8 @@ export const receivingRouter = router({
           lineDescriptionEn: line.lineDescriptionEn,
           expected: line.expected,
           actual: line.actual,
-          amountIls: amount,
+          // The letters' amount, to the agora (the letters print each line rounded).
+          amountIls: Math.round(amount * 100) / 100,
         }));
         // Summed in agorot so the total is exact.
         const totalIls = lines.reduce((acc, l) => acc + Math.round(l.amountIls * 100), 0) / 100;

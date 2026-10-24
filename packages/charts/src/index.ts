@@ -7,8 +7,6 @@ export {
 } from './suppliers';
 export { computeBaselines, type BaselineRow, type ComputeBaselinesOptions } from './baselines';
 export {
-  CLAIMABLE_STATUSES,
-  claimableLines,
   computeInvoiceLeak,
   computeLeakBreakdown,
   computeLeakHero,
