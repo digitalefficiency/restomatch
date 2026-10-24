@@ -64,8 +64,8 @@ export async function GET(req: Request) {
       await sendEmail({
         to: to.join(','),
         subject: '⚠️ RestoMatch worker לא מגיב — חשבוניות לא יעברו OCR',
-        html: `<div dir="rtl"><p>ה-worker של RestoMatch (OCR, התאמה, מיילים) לא שלח פעימת חיים.</p><p>${detail}</p><p>הפעל מחדש במק: <code>launchctl kickstart -k gui/$(id -u)/com.restomatch.worker</code> או <code>bash apps/worker/scripts/start-worker.sh</code>.</p></div>`,
-        text: `RestoMatch worker is not responding. ${detail}. Restart: launchctl kickstart -k gui/$(id -u)/com.restomatch.worker`,
+        html: `<div dir="rtl"><p>ה-worker של RestoMatch (OCR, התאמה, מיילים) לא שלח פעימת חיים.</p><p>${detail}</p><p>הפעלה מחדש: ב-Fly <code>fly machine restart -a restomatch-worker</code>; במק <code>launchctl kickstart -k gui/$(id -u)/com.restomatch.worker</code>.</p></div>`,
+        text: `RestoMatch worker is not responding. ${detail}. Restart: fly machine restart -a restomatch-worker (Fly) or launchctl kickstart -k gui/$(id -u)/com.restomatch.worker (Mac)`,
       });
       emailed = 'down';
     }

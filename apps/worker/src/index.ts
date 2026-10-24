@@ -1,7 +1,7 @@
-import { registerSentryClient } from '@restomatch/observability';
+import { initSentryFromEnv } from '@restomatch/observability';
 import { assertWorkerEnv } from './env';
 import { registerCronSchedules } from './cron';
-import { startHealthServer } from './health';
+import { startHealthServer, startRedisWatchdog } from './health';
 import { startHeartbeat } from './heartbeat';
 import { closeJobDbs } from './db';
 import { connection } from './queue';
@@ -11,8 +11,10 @@ import { startImportCatalogWorker } from './jobs/importCatalog';
 import { startEndOfDayReportWorker } from './jobs/endOfDayReport';
 import { startMonthlyReportWorker } from './jobs/monthlyReport';
 import { startRecoveryRemindersWorker } from './jobs/recoveryReminders';
+import { startHealthDigestWorker } from './jobs/healthDigest';
 import { startMatchInvoiceWorker } from './jobs/matchInvoice';
 import { startOcrInvoiceWorker } from './jobs/ocrInvoice';
+import { startOcrSweepWorker } from './jobs/ocrSweep';
 import { startOrderRemindersWorker } from './jobs/orderReminders';
 import { startOutboxDispatchWorker } from './jobs/outboxDispatch';
 import { startRetentionWorker } from './jobs/retention';
@@ -20,41 +22,15 @@ import { startSupplierDelaysWorker } from './jobs/supplierDelays';
 import { startPriceAlertsWorker } from './jobs/priceAlerts';
 import { startSyncPlatformsWorker } from './jobs/syncPlatforms';
 
-interface SentryNode {
-  init(o: { dsn: string; environment?: string }): void;
-  captureException(e: unknown, ctx?: unknown): void;
-  captureMessage(m: string, level?: string): void;
-  setUser(u: { id: string; email?: string }): void;
-  setTag(k: string, v: string): void;
-}
-
-// Env-gated: only activates when SENTRY_DSN is set AND @sentry/node is installed.
-async function initObservability(): Promise<void> {
-  if (!process.env.SENTRY_DSN) return;
-  try {
-    const pkg = '@sentry/node';
-    const Sentry = (await import(pkg)) as unknown as SentryNode;
-    Sentry.init({ dsn: process.env.SENTRY_DSN, environment: process.env.SENTRY_ENV });
-    registerSentryClient({
-      captureException: (e, c) => Sentry.captureException(e, c ? { extra: c } : undefined),
-      captureMessage: (m, level) => Sentry.captureMessage(m, level),
-      setUser: (u) => Sentry.setUser(u),
-      setTag: (k, v) => Sentry.setTag(k, v),
-    });
-    console.log('[worker] Sentry observability registered');
-  } catch (err) {
-    console.warn(
-      '[worker] Sentry not initialised (install @sentry/node to enable):',
-      err instanceof Error ? err.message : err,
-    );
-  }
-}
-
 // Fail fast if the worker is misconfigured (missing REDIS_URL/keys in prod)
 // rather than booting into a process that looks healthy but does nothing.
 assertWorkerEnv();
 
-void initObservability();
+// Sentry: no-op without SENTRY_DSN; with it, needs `pnpm add @sentry/node`
+// (see docs/MONITORING.md). Events are PII-scrubbed in beforeSend.
+void initSentryFromEnv({ service: 'worker' }).then((r) => {
+  if (r.enabled) console.log(`[worker] Sentry enabled (${r.environment})`);
+});
 
 const workers = [
   startSyncPlatformsWorker(),
@@ -71,6 +47,8 @@ const workers = [
   startRetentionWorker(),
   startRecoveryRemindersWorker(),
   startMonthlyReportWorker(),
+  startHealthDigestWorker(),
+  startOcrSweepWorker(),
 ];
 
 console.log(`[worker] started ${workers.length} workers`);
@@ -82,6 +60,10 @@ const healthServer = startHealthServer(workers.length);
 // pilot worker runs on a laptop, so a silent stop must page the owner.
 const stopHeartbeat = startHeartbeat(connection, workers.length);
 
+// Exit (→ platform restart) when Redis stays unreachable ~2 min: a worker with no
+// Redis looks healthy on /health but processes nothing.
+const stopWatchdog = startRedisWatchdog(connection);
+
 void registerCronSchedules().catch((err) => {
   console.error('[worker] failed to register cron schedules', err);
 });
@@ -89,6 +71,7 @@ void registerCronSchedules().catch((err) => {
 const shutdown = async (signal: string) => {
   console.log(`[worker] ${signal} received, shutting down`);
   stopHeartbeat();
+  stopWatchdog();
   healthServer.close();
   await Promise.all(workers.map((w) => w.close()));
   await closeJobDbs();

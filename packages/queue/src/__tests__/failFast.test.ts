@@ -94,3 +94,32 @@ describe('enqueue* with a bad REDIS_URL (real ioredis, no Redis needed)', () => 
     expect(Date.now() - t0).toBeLessThan(q.ENQUEUE_TIMEOUT_MS + 1_000);
   }, 10_000);
 });
+
+describe('whenReady', () => {
+  it('resolves at once when ready, else on the first ready event with one shared listener', async () => {
+    const { EventEmitter } = await import('node:events');
+    const { whenReady } = await import('../index');
+    const ready = Object.assign(new EventEmitter(), { status: 'ready' });
+    await expect(whenReady(ready)).resolves.toBeUndefined();
+
+    const cold = Object.assign(new EventEmitter(), { status: 'connecting' });
+    const waits = [whenReady(cold), whenReady(cold), whenReady(cold)];
+    expect(cold.listenerCount('ready')).toBe(1);
+    let settled = false;
+    void Promise.all(waits).then(() => (settled = true));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(settled).toBe(false);
+    cold.status = 'ready';
+    cold.emit('ready');
+    await Promise.all(waits);
+    expect(cold.listenerCount('ready')).toBe(0);
+
+    // After it has been ready once, an outage stays fail-fast: no waiting.
+    cold.status = 'reconnecting';
+    let resolved = false;
+    void whenReady(cold).then(() => (resolved = true));
+    await Promise.resolve();
+    expect(resolved).toBe(true);
+    expect(cold.listenerCount('ready')).toBe(0);
+  });
+});

@@ -1,0 +1,35 @@
+# Render Blueprint — FALLBACK host for the RestoMatch worker (primary: Fly.io,
+# apps/worker/fly.toml; see docs/WORKER-DEPLOY.md for why).
+# Render → New → Blueprint → this repo. Nothing deploys until you click Apply.
+services:
+  - type: worker              # background worker: no public port
+    name: restomatch-worker
+    runtime: docker
+    dockerfilePath: ./apps/worker/Dockerfile
+    dockerContext: .           # repo root (workspace packages)
+    region: frankfurt          # Render has no Sydney: use after the DB moves to the EU
+    maxShutdownDelaySeconds: 120   # SIGTERM → SIGKILL window (let OCR jobs finish)
+    plan: starter
+    numInstances: 1            # exactly one worker
+    autoDeploy: false          # deploy deliberately, after CI is green
+    envVars:                   # names only — set values in the dashboard
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: APP_URL
+        sync: false
+      - key: WORKER_ALERT_EMAILS
+        sync: false
+      - key: HEALTH_DIGEST_EMAILS
+        sync: false
+      - key: SENTRY_DSN
+        sync: false

@@ -16,6 +16,8 @@
  *                          requests (flag `recovery`, wave 1)
  *   • monthly-report     — 1st of the month at 07:45 IL: last month's
  *                          "one number" report (flag `monthlyReport`, wave 1)
+ *   • ocr-sweep          — every 5 minutes: re-enqueue invoices stuck in
+ *                          ocr_pending (once each)
  */
 import { makeQueue } from './queue';
 import type { BaselinesJob } from './jobs/baselines';
@@ -23,6 +25,8 @@ import type { DailyExpectationsJob } from './jobs/dailyExpectations';
 import type { EndOfDayReportJob } from './jobs/endOfDayReport';
 import type { MonthlyReportJob } from './jobs/monthlyReport';
 import type { RecoveryRemindersJob } from './jobs/recoveryReminders';
+import type { HealthDigestJob } from './jobs/healthDigest';
+import type { OcrSweepJob } from './jobs/ocrSweep';
 import type { OrderRemindersJob } from './jobs/orderReminders';
 import type { OutboxDispatchJob } from './jobs/outboxDispatch';
 import type { PriceAlertsJob } from './jobs/priceAlerts';
@@ -39,6 +43,8 @@ const retentionQueue = makeQueue<RetentionJob>('retention');
 const priceAlertsQueue = makeQueue<PriceAlertsJob>('price-alerts');
 const recoveryRemindersQueue = makeQueue<RecoveryRemindersJob>('recovery-reminders');
 const monthlyReportQueue = makeQueue<MonthlyReportJob>('monthly-report');
+const healthDigestQueue = makeQueue<HealthDigestJob>('health-digest');
+const ocrSweepQueue = makeQueue<OcrSweepJob>('ocr-sweep');
 
 const TZ = 'Asia/Jerusalem';
 
@@ -110,6 +116,21 @@ export async function registerCronSchedules(): Promise<void> {
     { name: 'monthly-report', data: {} },
   );
 
+  // Wave 1 monitoring: daily ops digest (queue depths, failed jobs, stale OCR,
+  // outbox failures) → outbox email. Additive; no other schedule changed.
+  await healthDigestQueue.upsertJobScheduler(
+    'health-digest-0645',
+    { pattern: '45 6 * * *', tz: TZ },
+    { name: 'health-digest', data: {} },
+  );
+
+  // Wave 1: re-enqueue invoices stuck in ocr_pending (once each; see ocrSweep.ts).
+  await ocrSweepQueue.upsertJobScheduler(
+    'ocr-sweep-5m',
+    { every: 5 * 60_000 },
+    { name: 'ocr-sweep', data: {} },
+  );
+
   // Retention purge — every day 03:30 IL. Opt-in via RETENTION_CRON_ENABLED; even
   // when scheduled it dry-runs unless RETENTION_PURGE_ENABLED=1 (see retention.ts).
   if (RETENTION_CRON_ENABLED) {
@@ -123,7 +144,7 @@ export async function registerCronSchedules(): Promise<void> {
   console.log(
     '[cron] registered: daily-expectations(06:00), baselines(02:00), outbox-dispatch(60s), ' +
       'order-reminders(09:00), supplier-delays(10:00), end-of-day-report(19:00), price-alerts(07:00), ' +
-      'recovery-reminders(08:30), monthly-report(1st 07:45)' +
+      'recovery-reminders(08:30), monthly-report(1st 07:45), health-digest(06:45), ocr-sweep(5m)' +
       (RETENTION_CRON_ENABLED ? ', retention(03:30)' : ''),
   );
 }
@@ -135,6 +156,8 @@ export async function unregisterCronSchedules(): Promise<void> {
   await orderRemindersQueue.removeJobScheduler('order-reminders-09');
   await supplierDelaysQueue.removeJobScheduler('supplier-delays-10');
   await endOfDayReportQueue.removeJobScheduler('end-of-day-report-19');
+  await healthDigestQueue.removeJobScheduler('health-digest-0645');
+  await ocrSweepQueue.removeJobScheduler('ocr-sweep-5m');
   await retentionQueue.removeJobScheduler('retention-0330');
   await priceAlertsQueue.removeJobScheduler('price-alerts-07');
   await recoveryRemindersQueue.removeJobScheduler('recovery-reminders-0830');

@@ -8,7 +8,7 @@ import {
   type RateLimitResult,
   type RateLimitStore,
 } from '@restomatch/api';
-import { failFastRedisOptions, withDeadline } from '@restomatch/queue';
+import { failFastRedisOptions, whenReady, withDeadline } from '@restomatch/queue';
 
 /** A rate-limit check may add at most this much latency before failing open. */
 export const RATE_LIMIT_REDIS_DEADLINE_MS = 1_500;
@@ -27,6 +27,9 @@ class RedisRateLimitStore implements RateLimitStore {
     // (or forever) before failing open (QA D1). enforceRateLimit fails open.
     return withDeadline(
       (async () => {
+        // Cold start: wait for the connection (within the deadline) so the first
+        // attempts on a fresh instance are counted instead of failing open.
+        await whenReady(this.redis);
         const count = await this.redis.incr(key);
         if (count === 1) {
           await this.redis.expire(key, windowSec);

@@ -54,3 +54,42 @@ export function startHealthServer(workerCount: number): Server {
 
   return server;
 }
+
+/**
+ * Self-watchdog (QA wave 1, D1). Platform health checks (Fly's machine checks,
+ * Render) do NOT restart a process that is up but useless — e.g. a worker that
+ * lost Redis keeps answering /health. So the worker restarts itself: PING
+ * Redis every `intervalMs`; after `maxFailures` consecutive failures, call
+ * `onDead` (default: log + exit 1). The platform's restart policy then starts a
+ * fresh process. Returns a stop function.
+ */
+export function startRedisWatchdog(
+  redis: { ping(): Promise<unknown> },
+  opts: { intervalMs?: number; maxFailures?: number; pingTimeoutMs?: number; onDead?: (failures: number) => void } = {},
+): () => void {
+  const intervalMs = opts.intervalMs ?? 30_000;
+  const maxFailures = opts.maxFailures ?? 4;
+  const pingTimeoutMs = opts.pingTimeoutMs ?? 5_000;
+  const onDead =
+    opts.onDead ??
+    ((n: number) => {
+      console.error(`[worker] Redis unreachable for ${n} consecutive checks — exiting so the platform restarts us`);
+      process.exit(1);
+    });
+  let failures = 0;
+  const check = async () => {
+    try {
+      await Promise.race([
+        redis.ping(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('ping timeout')), pingTimeoutMs)),
+      ]);
+      failures = 0;
+    } catch {
+      failures += 1;
+      if (failures >= maxFailures) onDead(failures);
+    }
+  };
+  const timer = setInterval(() => void check(), intervalMs);
+  timer.unref();
+  return () => clearInterval(timer);
+}

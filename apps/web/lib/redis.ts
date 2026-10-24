@@ -1,6 +1,6 @@
 import 'server-only';
 import IORedis from 'ioredis';
-import { failFastRedisOptions, redisUrlProblem, withDeadline } from '@restomatch/queue';
+import { failFastRedisOptions, redisUrlProblem, whenReady, withDeadline } from '@restomatch/queue';
 
 /**
  * Shared, lazily-created Redis client for non-rate-limit web reads (worker
@@ -31,5 +31,9 @@ export const REDIS_READ_DEADLINE_MS = 1_500;
 
 /** GET with a hard deadline; rejects on timeout like any other Redis error. */
 export function redisGetWithDeadline(redis: IORedis, key: string): Promise<string | null> {
-  return withDeadline(redis.get(key), REDIS_READ_DEADLINE_MS, () => new Error(`redis GET ${key} timed out`));
+  return withDeadline(
+    whenReady(redis).then(() => redis.get(key)),
+    REDIS_READ_DEADLINE_MS,
+    () => new Error(`redis GET ${key} timed out`),
+  );
 }

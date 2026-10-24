@@ -17,6 +17,11 @@ export async function registerNode(): Promise<void> {
   // A malformed REDIS_URL (classically Upstash's https:// REST URL) is a WARN,
   // not a boot failure: the site still serves, and every enqueue fails fast
   // with 'queue.unavailable' instead of hanging the request (EN-7).
+  // Server-side Sentry (no-op without SENTRY_DSN; enabling needs the SDK —
+  // docs/MONITORING.md). Every event goes through the PII scrubber.
+  const { initSentryFromEnv } = await import('@restomatch/observability');
+  await initSentryFromEnv({ service: 'web' });
+
   const { redisUrlProblem } = await import('@restomatch/queue');
   const redisProblem = redisUrlProblem(process.env.REDIS_URL);
   if (redisProblem) {
