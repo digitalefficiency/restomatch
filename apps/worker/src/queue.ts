@@ -1,6 +1,7 @@
 import { hostname } from 'node:os';
 import cronParser from 'cron-parser';
 import { captureException } from '@restomatch/observability';
+import { WORKER_IDLE_TIMEOUT_SEC } from './db';
 import {
   claimAny,
   completeJob,
@@ -54,7 +55,7 @@ const WORKER_POOL_MAX = 4;
 export function workerSql(): Sql {
   const url = queueDbUrl();
   if (!url) throw new Error('DATABASE_URL is required');
-  return queueSql(url, WORKER_POOL_MAX);
+  return queueSql(url, WORKER_POOL_MAX, WORKER_IDLE_TIMEOUT_SEC);
 }
 
 /**

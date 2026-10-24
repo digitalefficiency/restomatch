@@ -54,15 +54,15 @@ export function queueDbUrl(env: NodeJS.ProcessEnv = process.env): string | null 
 // more for its claim loops. globalThis so `next dev` reloads don't leak pools.
 const memo = globalThis as unknown as { __restomatchQueueSql?: Map<string, Sql> };
 
-export function queueSql(url: string, max = 1): Sql {
+export function queueSql(url: string, max = 1, idleTimeoutSec = 20): Sql {
   memo.__restomatchQueueSql ??= new Map();
-  const key = `${max}|${url}`;
+  const key = `${max}|${idleTimeoutSec}|${url}`;
   let sql = memo.__restomatchQueueSql.get(key);
   if (!sql) {
     sql = postgres(url, {
       max,
       prepare: false, // Supabase pooler (transaction mode)
-      idle_timeout: 20,
+      idle_timeout: idleTimeoutSec,
       connect_timeout: 5,
       onnotice: () => {},
     });
