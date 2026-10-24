@@ -45,7 +45,11 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ po
           { label: t('detail.titleNoSupplier') },
         ]}
       />
-      <SectionHeader level={1} title={title} subtitle={t('detail.subtitle')} />
+      <SectionHeader
+        level={1}
+        title={title}
+        subtitle={data.po?.status === 'draft' ? t('detail.subtitle') : undefined}
+      />
       <OrderDetail data={data} canEdit={canEdit} />
       {canEdit && docSettings.enabled && data.lines.length > 0 ? (
         <div className="mt-6">

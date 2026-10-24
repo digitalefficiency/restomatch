@@ -40,3 +40,28 @@ test('dashboard nav links: no console errors across client navigations', async (
   }
   expect(errors, 'console errors during client navigations').toEqual([]);
 });
+
+test('favicon: /favicon.ico is served (no 404 in every page load)', async ({ request }) => {
+  const res = await request.get('/favicon.ico');
+  expect(res.status()).toBe(200);
+  expect(res.headers()['content-type']).toMatch(/image\//);
+});
+
+test('header search: fixed combobox ids, and aria-controls names the listbox', async ({ page }) => {
+  // The ids used to come from useId(), which shifted when Next's dev-only
+  // wrappers gave server and client different tree shapes (hydration mismatch).
+  await page
+    .context()
+    .addCookies([
+      {
+        name: 'rm_locale',
+        value: 'he',
+        url: test.info().project.use.baseURL ?? 'http://localhost:3100',
+      },
+    ]);
+  await page.goto('/dashboard', { waitUntil: 'load' });
+  const input = page.locator('header').getByRole('combobox');
+  await expect(input).toHaveAttribute('aria-controls', 'dashboard-search-header-list');
+  await input.fill('ירקות');
+  await expect(page.locator('#dashboard-search-header-list')).toBeVisible();
+});

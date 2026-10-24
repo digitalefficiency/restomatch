@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { and, eq, memberships, restaurants, type RestaurantSettings } from '@restomatch/db';
 import { recordAudit } from '../audit';
 import { memberProcedure, ownerProcedure, router } from '../trpc';
+import { hasNoControlChars, NO_CONTROL_CHARS_MESSAGE } from '../lib/text';
 
 /**
  * Per-restaurant matching-rules editor (Phase 5).
@@ -69,7 +70,7 @@ const timezoneSchema = z
  *  nullable so it can be cleared. At least one field required. */
 const ProfileUpdateInput = z
   .object({
-    name: z.string().trim().min(1).max(200).optional(),
+    name: z.string().trim().min(1).max(200).refine(hasNoControlChars, NO_CONTROL_CHARS_MESSAGE).optional(),
     businessId: z.string().trim().max(32).nullable().optional(),
     vatRate: fraction.optional(),
     timezone: timezoneSchema.optional(),

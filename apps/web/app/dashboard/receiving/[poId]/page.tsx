@@ -78,6 +78,7 @@ export default async function ReceivingPoPage({
     expectedAt: po.expectedAt ? new Date(po.expectedAt).toISOString() : null,
     status: po.status,
     totalEstimated: po.totalEstimated != null ? Number(po.totalEstimated) : null,
+    features: { dockSlip: po.features.dockSlip },
     lines: localizePoLines(po.lines.map((l) => ({
       id: l.id,
       productId: l.productId ?? null,

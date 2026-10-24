@@ -6,11 +6,13 @@ import { zones } from '../layout';
 import { Phone, phoneScreen, Screen } from '../components/Devices';
 import { CaptionZone, Callout, DeviceZone, Spotlight } from '../components/Stage';
 import { FadeUp, RiseLine } from '../components/primitives';
+import { emailStrip, rectFor } from '../rects';
 
 export const PHONE_DASH_DURATION = 220;
 
 // Leak hero card on the phone capture (units of the 390-px screen width).
-const HERO = { x0: 0.05, y0: 1.4, x1: 0.95, y1: 1.8 };
+const [hx0, hy0, hx1, hy1] = rectFor('dashboard-he-phone', 'hero', [0.05, 1.4, 0.95, 1.8]);
+const HERO = { x0: hx0, y0: hy0, x1: hx1, y1: hy1 };
 const TOP = 0.11;
 
 /** Vertical cut: the owner's dashboard on a phone (real capture), spotlight on the ₪ hero. */
@@ -56,7 +58,7 @@ export const PhoneDash: React.FC<{ locale: Locale }> = ({ locale }) => {
             }}
           >
             <Phone width={PW} glare={ry / 30}>
-              <Screen src={`shots/dashboard-he-phone.png`} width={sw} top={sw * TOP} redact={[{ y: 0.105, h: 0.04, x: 0.16, w: 0.62 }]} />
+              <Screen src={`shots/dashboard-he-phone.png`} width={sw} top={sw * TOP} redact={[emailStrip('dashboard-he-phone', { y: 0.105, h: 0.04, x: 0.16, w: 0.62 })]} />
               <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: sw * TOP, background: C.bg }} />
               <Spotlight rect={rect} a={spot} src="shots/dashboard-he-phone.png" imgWidth={sw} imgTop={TOP * sw} screenW={sw} screenH={sh} accent={C.danger} />
             </Phone>

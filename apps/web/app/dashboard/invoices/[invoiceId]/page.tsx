@@ -12,6 +12,8 @@ import { getLocale, getT } from '@/lib/i18n/server';
 import { invoices } from '@/lib/i18n/messages/invoices';
 import { overContractBadgesForInvoice } from '../../contracts/over-contract';
 import { dockPriceNotesForInvoice, mergeLineBadges } from './dock-price-notes';
+import { consolidated as consolidatedNs } from '@/lib/i18n/messages/consolidated';
+import { ConsolidatedPanel } from './consolidated-panel';
 
 export default async function InvoiceCorrectionPage({
   params,
@@ -37,13 +39,14 @@ export default async function InvoiceCorrectionPage({
     notFound();
   }
 
-  const [memberships, session, overContract, dockPrice] = await Promise.all([
+  const [memberships, session, overContract, dockPrice, tc] = await Promise.all([
     caller.onboarding.myMemberships(),
     auth(),
     // Wave-1 "over contract" line badges — {} when the flag/role is off (fail silent).
     overContractBadgesForInvoice(invoiceId),
     // Flag `dockPriceContext`: "your usual price" under PRICE_HIGHER lines ({} when off).
     dockPriceNotesForInvoice(invoiceId),
+    getT(consolidatedNs),
   ]);
   const active =
     memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0];
@@ -54,6 +57,10 @@ export default async function InvoiceCorrectionPage({
       ? ((await caller.owner.vatAtRisk({ period: 'all', invoiceId }).catch(() => null))?.rows[0] ?? null)
       : null;
   const tv = vatRow ? await getT(vat) : null;
+  // Consolidated invoice ↔ delivery notes (flag consolidatedMatch; read-only; null
+  // otherwise). It shows ₪ differences — finance roles only, never a receiver.
+  const finance = active?.role === 'owner' || active?.role === 'manager' || active?.role === 'bookkeeper';
+  const proposal = finance ? await caller.consolidated.proposal({ invoiceId }).catch(() => null) : null;
 
   return (
     <div>
@@ -79,6 +86,16 @@ export default async function InvoiceCorrectionPage({
             </p>
           </div>
         </div>
+      ) : null}
+      {/* A ריכוז: its cross-match first — that is the job on this page — then the correction form. */}
+      {proposal ? (
+        <ConsolidatedPanel
+          proposal={proposal}
+          t={tc}
+          locale={locale}
+          supplierName={invoice.supplierName}
+          invoiceNumber={invoice.invoiceNumber}
+        />
       ) : null}
       <InvoiceCorrection invoice={invoice} canEdit={canEdit} lineBadges={mergeLineBadges(overContract, dockPrice)} />
     </div>

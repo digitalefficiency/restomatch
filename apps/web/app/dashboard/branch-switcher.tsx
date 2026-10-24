@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useRef, useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { Check, ChevronDown, Network, Settings2, Store } from 'lucide-react';
 import type { UserRole } from '@restomatch/db';
@@ -44,7 +44,9 @@ export function BranchSwitcher({
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const rootRef = useRef<HTMLDivElement>(null);
-  const menuId = useId();
+  // Fixed per variant, not useId() (see DashboardSearch): one popover and one
+  // drawer list per page.
+  const menuId = `branch-switcher-${variant}-menu`;
   const active = branches.find((b) => b.restaurantId === activeId) ?? branches[0];
   // /dashboard/chain and /dashboard/branches are gated on the ACTIVE role
   // (middleware). Owner here → plain links; owner only in another branch →

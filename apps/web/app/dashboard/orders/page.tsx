@@ -26,6 +26,9 @@ export default async function OrdersPage() {
   // orderCapture (flag): paste / share the WhatsApp order the owner already sent.
   const showCapture = canEdit && (await enabledFeatures(active?.restaurantId)).includes('orderCapture');
   const tIngest = await getT(ingest);
+  // Same credential gate as orders.importPo — without it the button could only
+  // answer with a "not configured" error, so don't offer it.
+  const ocrReady = Boolean(process.env.ANTHROPIC_API_KEY);
 
   return (
     <div>
@@ -42,7 +45,7 @@ export default async function OrdersPage() {
                   <MessageCircle className="h-4 w-4" aria-hidden="true" /> {tIngest('orderCapture.entry')}
                 </LinkButton>
               ) : null}
-              <ZesttImportButton />
+              {ocrReady ? <ZesttImportButton /> : null}
               <LinkButton href="/dashboard/orders/new" size="sm">
                 <Plus className="h-4 w-4" aria-hidden="true" /> {t('newOrder')}
               </LinkButton>

@@ -22,6 +22,7 @@ const ROUTER_KEYS = [
   'ask',
   'catalog',
   'chain',
+  'consolidated',
   'contracts',
   'dsr',
   'exports',

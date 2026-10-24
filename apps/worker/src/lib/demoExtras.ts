@@ -79,7 +79,9 @@ export const DEMO_EXTRA_STEPS: DemoExtraStep[] = [
         select count_date::text as d, total_value_agorot::text as v, food_sales_ex_vat::text as sales
         from inventory_counts where restaurant_id = ${mainId} and status = 'completed' order by count_date
       `) as unknown as Array<{ d: string; v: string; sales: string | null }>;
+      const drafts = await count(sql`select count(*)::int as n from inventory_counts where restaurant_id = ${mainId} and status = 'draft'`);
       const problems: string[] = [];
+      if (drafts > 0) problems.push(`inventory: ${drafts} draft count(s) left open on the main demo restaurant — the count screen would resume a half-done count`);
       if (rows.length < 2) problems.push(`inventory: ${rows.length} completed count(s) on the main demo restaurant — the actual food cost needs an opening and a closing count`);
       else if (rows[rows.length - 1]!.sales == null) problems.push('inventory: the closing count has no food sales — the actual food cost % cannot show');
       const facts = [`inventory: ${rows.map((r) => `${r.d} ₪${(Number(r.v) / 100).toFixed(2)}${r.sales ? ` (sales ₪${r.sales})` : ''}`).join(', ') || 'no completed counts'}`];
@@ -91,7 +93,15 @@ export const DEMO_EXTRA_STEPS: DemoExtraStep[] = [
         const caller = appRouter.createCaller({ db: createDb(url), session: { userId: owner.id, restaurantId: mainId, role: 'owner' } } as never) as unknown as {
           inventory?: { period: () => Promise<{ available: boolean; actualAgorot?: number; salesAgorot?: number | null; actualBp?: number | null }> };
         };
-        const p = await caller.inventory?.period();
+        // A tRPC caller is a proxy: a missing router throws "No procedure found" on call.
+        const p = await caller.inventory?.period().catch((e: unknown) => {
+          if (String(e).includes('No procedure found')) return undefined;
+          throw e;
+        });
+        if (!p) {
+          facts.push('inventory: no inventory router on this checkout — the food cost % is not checked');
+          return { facts, problems };
+        }
         const pct = p?.available && p.actualBp != null ? (p.actualBp / 100).toFixed(1) : null;
         facts.push(`inventory: actual food cost ${pct ?? '—'}% (₪${((p?.actualAgorot ?? 0) / 100).toFixed(2)} of ₪${((p?.salesAgorot ?? 0) / 100).toFixed(2)})`);
         if (pct !== EXPECTED_ACTUAL_FOOD_COST_PCT) problems.push(`inventory: actual food cost reads ${pct ?? '—'}%, expected ${EXPECTED_ACTUAL_FOOD_COST_PCT}%`);

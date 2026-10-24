@@ -23,6 +23,7 @@ import { productsRouter } from './routers/products';
 import { recipesRouter } from './routers/recipes';
 import { teamRouter } from './routers/team';
 import { chainRouter } from './routers/chain';
+import { consolidatedRouter } from './routers/consolidated';
 import { payRunRouter } from './routers/payRun';
 import { contractsRouter } from './routers/contracts';
 import { priceAlertsRouter } from './routers/priceAlerts';
@@ -56,6 +57,7 @@ export const appRouter = router({
   recipes: recipesRouter,
   chain: chainRouter,
   integrations: integrationsRouter,
+  consolidated: consolidatedRouter,
   payRun: payRunRouter,
   team: teamRouter,
   dsr: dsrRouter,
@@ -72,6 +74,7 @@ export const appRouter = router({
 });
 
 export type AppRouter = typeof appRouter;
+export type { ConsolidatedProposal, DeliveryNoteCoverage } from './match/consolidated';
 export type {
   AppContext,
   AuthedContext,
@@ -160,6 +163,7 @@ export {
   lockReceipt,
   receiptState,
   receiptStillOpen,
+  rematchHoldReason,
   scannedInvoicesForReceipt,
 } from './receiving/matchTriggers';
 export { backfillPriceHistory, writePriceHistoryForInvoice } from './match/priceHistory';
@@ -363,3 +367,4 @@ export { NOT_BILLING_OWNER } from './routers/chain';
 export * from './ledger';
 export { CLAIMABLE_STATUSES, claimableLines, sumClaims, vatBasisOf, type ClaimLine, type VatBasis } from './lib/claims';
 export type { PayRunInvoice, PayRunResult, PayRunStatus, PayRunSupplier, PayRunClaim } from './routers/payRun';
+export { SKIPPED_NO_PROVIDER, providerConfigured, supplierMessageState, type SupplierMessageState } from './notifications/delivery';

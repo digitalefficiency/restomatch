@@ -12,6 +12,7 @@ import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 import { orderDocumentContractPrices } from '../orders/document';
+import { poRefOf } from '../orders/supplierMessage';
 
 /**
  * Flag `orderPricesOut`: the supplier-facing order carries SKU, agreed unit
@@ -75,8 +76,23 @@ describe('orders.placeOrder — flag orderPricesOut off', () => {
     const { poId } = await draft();
     await callerFor(A).orders.placeOrder({ poId, channel: 'email' });
     const row = await outboxFor(poId);
+    // #100's supplier-message contract (orders/supplierMessage.ts), the same text
+    // orders.supplierMessagePreview shows: header, contact, PO ref, delivery,
+    // items in PO_LINE_ORDER with trimmed quantities, item count. No prices.
     expect(row.body).toBe(
-      ['הזמנה לספק ספק A', '• עגבניות — 2.500 ק״ג', '• מלפפונים — 3.000 ק״ג', '• פטרוזיליה — 1.000 צרור'].join('\n'),
+      [
+        'הזמנה לספק ספק A',
+        'מאת: Resto A',
+        'איש קשר: Owner A · owner-A@attack.test',
+        `מס׳ הזמנה: ${poRefOf(poId)}`,
+        'אספקה מבוקשת: לתיאום מול המסעדה',
+        '',
+        '• מלפפונים — 3 ק״ג',
+        '• עגבניות — 2.5 ק״ג',
+        '• פטרוזיליה — 1 צרור',
+        '',
+        'סה״כ 3 פריטים',
+      ].join('\n'),
     );
     expect(row.payload ?? {}).not.toHaveProperty('__attachments');
   });

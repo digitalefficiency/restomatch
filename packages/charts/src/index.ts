@@ -13,6 +13,7 @@ export {
   SCAN_RECEIPT_LOOKBACK_HOURS,
 } from './awaiting-count';
 export {
+  computeInvoiceLeak,
   computeLeakBreakdown,
   computeLeakHero,
   type LeakBreakdownInvoice,
