@@ -24,7 +24,6 @@ import { featureEnabled } from '../lib/features';
 import { ClaudePoParser, ORDER_TEXT_MAX_CHARS, orderTextParserFromEnv } from '@restomatch/ocr';
 import { ZesttAdapter } from '@restomatch/procurement';
 import { managerProcedure, memberProcedure, requireFeature, router } from '../trpc';
-import { isFeatureOn } from '../lib/featureGate';
 import { contractPricesForOrder, orderPriceKey } from '../contracts/orderPrices';
 import { assertPoOwned, assertSupplierOwned } from '../tenant';
 import { getEntitlements } from '../entitlements';
