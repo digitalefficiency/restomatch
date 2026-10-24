@@ -46,7 +46,11 @@ export function BranchSwitcher({
   const rootRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
   const active = branches.find((b) => b.restaurantId === activeId) ?? branches[0];
-  const isOwnerSomewhere = branches.some((b) => b.role === 'owner');
+  // /dashboard/chain and /dashboard/branches are gated on the ACTIVE role
+  // (middleware). Owner here → plain links; owner only in another branch →
+  // the same links switch to that branch first (else they would bounce back).
+  const ownedTarget = active?.role === 'owner' ? null : (branches.find((b) => b.role === 'owner') ?? null);
+  const showFooter = active?.role === 'owner' || ownedTarget !== null;
 
   useEffect(() => {
     if (!open) return;
@@ -66,19 +70,20 @@ export function BranchSwitcher({
 
   if (branches.length < 2 || !active) return null;
 
-  function pick(id: string) {
+  function pick(id: string, then = '/dashboard') {
     if (id === activeId || isPending) {
       setOpen(false);
       return;
     }
     setPendingId(id);
     startTransition(async () => {
-      const res = await switchBranchAction(id);
-      // On success the action redirects; we only get here on failure.
-      if (res && !res.ok) {
-        toast.error(t('switcher.failed'));
-        setPendingId(null);
+      const res = await switchBranchAction(id).catch(() => ({ ok: false as const }));
+      if (res.ok) {
+        window.location.assign(then);
+        return;
       }
+      toast.error(t('switcher.failed'));
+      setPendingId(null);
     });
   }
 
@@ -121,16 +126,36 @@ export function BranchSwitcher({
     </ul>
   );
 
-  const footer = isOwnerSomewhere ? (
+  const footerLink = (href: string, className: string, Icon: typeof Network, label: string) =>
+    ownedTarget ? (
+      <button
+        type="button"
+        disabled={isPending}
+        onClick={() => pick(ownedTarget.restaurantId, href)}
+        title={`${t('switcher.viaOwned')} ${ownedTarget.restaurantName}`}
+        data-testid="branch-footer-link"
+        data-href={href}
+        className={cn('inline-flex items-center gap-1', focusRing, className)}
+      >
+        <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+        {label}
+      </button>
+    ) : (
+      <Link href={href} data-testid="branch-footer-link" data-href={href} className={cn('inline-flex items-center gap-1', className)} onClick={() => setOpen(false)}>
+        <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+        {label}
+      </Link>
+    );
+
+  const footer = showFooter ? (
     <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-line px-3 py-2 text-xs">
-      <Link href="/dashboard/chain" className="inline-flex items-center gap-1 font-semibold text-primary hover:text-ink" onClick={() => setOpen(false)}>
-        <Network className="h-3.5 w-3.5" aria-hidden="true" />
-        {t('switcher.chainLink')}
-      </Link>
-      <Link href="/dashboard/branches" className="inline-flex items-center gap-1 text-muted hover:text-ink" onClick={() => setOpen(false)}>
-        <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />
-        {t('switcher.manageLink')}
-      </Link>
+      {footerLink('/dashboard/chain', 'font-semibold text-primary hover:text-ink', Network, t('switcher.chainLink'))}
+      {footerLink('/dashboard/branches', 'text-muted hover:text-ink', Settings2, t('switcher.manageLink'))}
+      {ownedTarget ? (
+        <span className="w-full text-subtle">
+          {t('switcher.viaOwned')} <span {...originalProps(ownedTarget.restaurantName)}>{ownedTarget.restaurantName}</span>
+        </span>
+      ) : null}
     </div>
   ) : null;
 

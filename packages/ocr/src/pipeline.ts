@@ -1,6 +1,7 @@
 import { reconcile } from './reconciler';
 import {
   DEFAULT_REVIEW_THRESHOLD,
+  LINE_REVIEW_THRESHOLD,
   type ImageSource,
   type OcrPipelineOptions,
   type OcrPipelineResult,
@@ -46,6 +47,7 @@ export async function runOcrPipeline(
   const matcherWasUsed = options.catalogMatcher !== undefined;
   const needsHumanReview =
     confidence < reviewThreshold ||
+    hasLowConfidenceLines(reconciledInvoice) ||
     (matcherWasUsed && hasUnresolvedLines(reconciledInvoice));
 
   return {
@@ -68,6 +70,15 @@ async function enrichLine(
   // and surface candidates for human review.
   const productId = best && best.confidence >= 0.95 ? best.productId : null;
   return { ...line, productId, productCandidates: candidates };
+}
+
+/**
+ * A line the provider could not read (EN-3: unreadable qty/price zero-filled at
+ * confidence ≤ 0.2) must never reach the matching engine unreviewed — a 0 qty or
+ * price there would be counted as a ₪ leak that never happened.
+ */
+function hasLowConfidenceLines(invoice: { lines: ResolvedInvoiceLine[] }): boolean {
+  return invoice.lines.some((l) => l.confidence !== undefined && l.confidence < LINE_REVIEW_THRESHOLD);
 }
 
 function hasUnresolvedLines(invoice: { lines: ResolvedInvoiceLine[] }): boolean {

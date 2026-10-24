@@ -84,7 +84,9 @@ export function Confirmed({
             manual:
               (result?.summary.qtyDiffCount ?? 0) +
               (result?.summary.priceDiffCount ?? 0) +
-              (result?.summary.unorderedCount ?? 0),
+              (result?.summary.unorderedCount ?? 0) +
+              (result?.summary.missingCount ?? 0) +
+              (result?.summary.pendingCount ?? 0),
           })}
         />
         {result && result.summary.headlineDelta > 0 ? (
