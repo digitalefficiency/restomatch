@@ -1,5 +1,5 @@
 import type { Database } from '@restomatch/db';
-import { confirmationLink } from './service';
+import { confirmationLink, trimTrailingSlashes } from './service';
 
 /**
  * Order-document extension (S5's `orderPricesOut` document, `ORDER_DOCUMENT_EXTENSIONS`):
@@ -24,7 +24,7 @@ export const SUPPLIER_CONFIRM_DOC_LINE_HE = 'לאישור ההזמנה, סימו
 export const SUPPLIER_CONFIRM_DOC_PREVIEW_HE = 'קישור לאישור ההזמנה יצורף בשליחה (תקף 72 שעות).';
 
 export function supplierAppBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
-  return (env.APP_URL ?? env.AUTH_URL ?? env.NEXTAUTH_URL ?? 'https://app.restomatch.co.il').replace(/\/+$/, '');
+  return trimTrailingSlashes(env.APP_URL ?? env.AUTH_URL ?? env.NEXTAUTH_URL ?? 'https://app.restomatch.co.il');
 }
 
 export async function supplierConfirmDocumentExtension(

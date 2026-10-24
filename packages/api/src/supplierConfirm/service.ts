@@ -132,8 +132,15 @@ export async function createSupplierLink(
 }
 
 /** Absolute portal URL for a raw token. */
+/** Strips trailing '/' in linear time (a `/\/+$/` regex is polynomial on long '/' runs). */
+export function trimTrailingSlashes(s: string): string {
+  let end = s.length;
+  while (end > 0 && s.charCodeAt(end - 1) === 47) end--;
+  return s.slice(0, end);
+}
+
 export function supplierLinkUrl(baseUrl: string, token: string): string {
-  return `${baseUrl.replace(/\/+$/, '')}/s/${token}`;
+  return `${trimTrailingSlashes(baseUrl)}/s/${token}`;
 }
 
 /**

@@ -22,6 +22,8 @@ import {
   resolveSupplierToken,
   submitSupplierAnswer,
   supplierResponseDiff,
+  supplierLinkUrl,
+  trimTrailingSlashes,
 } from '../supplierConfirm/service';
 import { supplierConfirmDocumentExtension } from '../supplierConfirm/documentExtension';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
@@ -227,5 +229,15 @@ describe('order-document extension (S5 ORDER_DOCUMENT_EXTENSIONS)', () => {
     expect(await supplierConfirmDocumentExtension({}, { ...ctx(), mode: 'preview' })).toEqual([]);
     expect(await supplierConfirmDocumentExtension({}, { ...ctx(), mode: 'send' })).toEqual([]);
     expect(await db.select().from(supplierConfirmLinks)).toEqual([]);
+  });
+});
+
+describe('supplierLinkUrl', () => {
+  it('trims trailing slashes in linear time (no polynomial regex)', () => {
+    expect(supplierLinkUrl('https://a.test///', 'T')).toBe('https://a.test/s/T');
+    expect(trimTrailingSlashes('////')).toBe('');
+    const t0 = Date.now();
+    expect(trimTrailingSlashes('a' + '/'.repeat(200_000) + 'b')).toHaveLength(200_002);
+    expect(Date.now() - t0).toBeLessThan(100);
   });
 });
