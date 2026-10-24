@@ -1,104 +1,98 @@
 # Inventory counting → actual food cost (`inventoryCount`) — S17 report
 
-Branch `claude/inventory-count` (cut from `claude/wave1-recipes`; needs recipes + the POS seam). Flag key
-`inventoryCount` (off by default; on for the demo tenant through `features.all`; `FEATURES_OFF=inventoryCount`
-kills it). **Contains an additive schema change (migration 0070 + `schema.ts`) that is on the immutability list —
-it merges only with the owner's explicit approval.**
+Branch `claude/inventory-count` → draft PR #106 into `main` (built on `claude/wave1-recipes`; needs recipes + the
+POS seam). Flag `inventoryCount` (off by default; on for the demo tenant through `features.all`;
+`FEATURES_OFF=inventoryCount` kills it).
 
-**Owner approval for additive schema: 2026-10-24, via the orchestrator session** ("מאשר כל מה שאתה צריך"). It covers migration 0070, its `schema.ts` tables and the journal entry (idx 70), under the 0057 pattern. It covers nothing else on the immutable list.
+**Owner approval for additive schema: 2026-10-24, via the orchestrator session** ("מאשר כל מה שאתה צריך"). It
+covers migration 0070, its `schema.ts` tables and the journal entry (idx 70), under the 0057 pattern. It covers
+nothing else on the immutable list.
 
-> **לבעלים:**
-> - **מה זה:** "ספירת מלאי" בטלפון. סופרים לפי מקרר / מקפיא / ירקות / יבשים / בר.
-> - **שמירה:** כל מספר נשמר מיד, וספירה שנקטעה ממשיכה מאותה נקודה.
-> - **בסוף:** "סיים ספירה" נותן את שווי המלאי בש״ח, נעול לפי המחירים ששולמו באותו יום.
-> - **עלות מזון בפועל:** בין שתי ספירות מקבלים מלאי פתיחה + קניות − זיכויים שהתקבלו − מלאי סגירה, כאחוז מהמכירות. זה כרטיס נפרד, ולא חלק ממספר הדליפה.
-> - **שימוש לא מוסבר:** עם מתכונים וקופה רואים גם את ההפרש מול העלות התאורטית.
-> - **בדמו:** אוקטובר 30.2% (₪41,135 מתוך מכירות מזון של ₪136,400, שהוזנו ידנית).
+**Framing:** this is not inventory software. The count **closes the food-cost month and checks that the leak
+number holds**. No par levels or suggested orders in this PR.
+
+> **לבעלים:** ספירת מלאי בטלפון שסוגרת את חודש עלות המזון.
+> - **בזמן הספירה:**
+>   - סופרים לפי מקרר / מקפיא / ירקות / יבשים / בר, וכל מספר נשמר מיד.
+>   - שורה ריקה היא "לא נספר", לא אפס, וסגירה איתה דורשת אישור מפורש.
+>   - ליד כל פריט רואים מאיפה המחיר: "₪149 לק״ג · חשבונית 4711, 20 באוק׳, קצביית הכרם".
+>   - פריט שנספר יותר מהספירה הקודמת ומכל מה שהתקבל מאז מסומן "בדוק".
+> - **סגירה:** מנהל או בעלים סוגרים ונועלים. אחר כך רק הבעלים יכולים לתקן, עם סיבה שנרשמת ביומן. אפשר להוריד CSV לרואה החשבון.
+> - **עלות מזון בפועל** = מלאי פתיחה + קניות (לפי תאריכי קבלה) − זיכויים **שהתקבלו** − מלאי סגירה.
+>   - "זיכוי לקבל" מוצג בנפרד ולא מקוזז.
+>   - בחודש הראשון, בלי ספירת פתיחה, מוצג "פוד קוסט רכש".
+>   - בדמו: אוקטובר **31.0%** (₪42,295 מתוך ₪136,400 מכירות מזון, שהוזנו ידנית).
 
 ## What was built
 
 | Area | What |
 |---|---|
-| Data | `0070_inventory_counts.sql`, the 0057 pattern exactly. Two tables, `inventory_counts` and `inventory_count_lines`. Same-tenant composite FKs; RLS enabled in the migration with the `<table>_tenant` policy; `updated_at` triggers; FK indexes; CHECKs (status, completed ⇔ completed_at ⇔ total, qty ≥ 0, storage-area enum). **One draft per restaurant** is a partial unique index. Journal idx 70, `when` 1782300000000. supabase-sync entries appended. |
-| Valuation (`inventory/valuation.ts`, pure) | Value = qty × the last **paid** unit price (`price_history`) on or before the count's **local** date, ex-VAT. Units convert through the recipes engine's `unitFactorRational`, which wraps `@restomatch/matching` units; nothing is re-implemented. Integer agorot, **half-up once per line**. A line with no price, or with a unit that can't convert, is excluded from the value and counted visibly ("אין מחיר"). |
-| Snapshot | "Finish" writes each line's unit cost and value plus the count total. A closed count never drifts: a retro-dated price after closing doesn't move it (tested). |
-| Purchases (`inventory/data.ts`) | **Invoices only:** Σ `total_excl_vat` by local invoice date in (opening, closing]. A consolidated invoice is one row and counts once; delivery notes are not invoices. **Leak-engine rules are reused, not copied** (`LIVE_DUPLICATE` and `LEAK_FILTER` are re-exported from `@restomatch/charts`): a live duplicate copy is out, because its goods are on the original. Non-food lines (חד״פ, ניקיון, by pattern) are out. Invoices still waiting for a PO link (consolidated חשבוניות ריכוז) **are** purchases. |
-| Credits | **"זיכויים שהתקבלו" (credits received) are their own term**: recovered claims (accepted/resolved, the hero's "recovered") on food lines, capped per invoice. The card shows the math: opening + purchases − credits − closing. |
-| Delivery notes (info) | Notes that arrived in the period but no invoice covers yet are shown as a calm FYI line at PO prices ("לידיעה: 8 תעודות משלוח…"). They are **not** added to the math; they count when the consolidated invoice arrives. A note is matched only to its own supplier's invoice, on a normalised number. |
-| Period | Actual = opening + purchases − credits − closing; % of food sales. Sales source: <ul><li>POS (`pos_sales`, when the integration is on and has rows);</li><li>otherwise the manual figure on the closing count.</li></ul> With recipes + POS: theoretical cost (recipes × POS quantities) and **"שימוש לא מוסבר" (unexplained usage) = actual − theoretical**. That is T2 (solid badge + ₪ + one CTA) only above 2 points of sales, calm otherwise. It is **never** part of the leak hero. |
-| API | `inventory.*`: enabled, current, start, saveLines (autosave, adds a product by hand), searchProducts, setMeta (date / notes / manual sales), complete, discard, get, history, period. Roles: owner / manager / chef. Flag off ⇒ FORBIDDEN `FEATURE_DISABLED`. Writes take a per-restaurant advisory lock. A product on a count can't be deleted (friendly CONFLICT, like recipes). |
-| UI | <ul><li>`/dashboard/inventory`: start/continue, the actual-food-cost card, past counts with ₪.</li><li>`/dashboard/inventory/count` (mobile-first): grouped by storage area (editable), one compact row per product, numeric keypad (`inputMode=decimal`, "2,5" accepted), debounced autosave plus a flush when the phone locks or the tab hides, retry on failure. Progress, value so far and save state are pinned to the finish bar. The finish summary shows not-counted and no-price items.</li><li>`/dashboard/inventory/<id>`: read-only snapshot.</li><li>The card also sits on `/dashboard/recipes` (next to food cost per dish).</li></ul> Hebrew RTL first, en too; light theme; ₪ via `formatIls`. Nav: "ספירת מלאי" (flag-gated). |
-| Demo | `apps/worker/scripts/seed-inventory-demo.ts` (idempotent; runs the real router as the owner; writes only the two new tables). Opening count 2026-09-30 ₪11,134.46 and closing count 2026-10-24 ₪13,474.46, 51 items across 5 areas. October: purchases ₪43,938.90 (37 invoices ₪45,320.41 − non-food ₪1,381.51) − credits ₪463.54. Actual food cost **₪41,135.36 = 30.2%** of food sales ₪136,400 (entered by hand, labelled "הוזנו ידנית"). FYI line: 8 Galilee delivery notes ₪3,109.99 not billed yet. `check:demo` still ✔ (hero ₪760 of ₪42,263). |
+| Data | `0070_inventory_counts.sql`, the 0057 pattern exactly. Two tables, `inventory_counts` and `inventory_count_lines`. Same-tenant composite FKs; RLS enabled in the migration (`<table>_tenant`); `updated_at` triggers; FK indexes; CHECKs. **One draft per restaurant** is a partial unique index. The `price_source` jsonb snapshot records the invoice #, date and supplier. Journal idx 70; supabase-sync entries regenerated. |
+| Valuation (pure) | qty × the last **paid** price (`price_history`) on or before the count's **local** date, ex-VAT. Units convert through the shared `unitFactorRational`. Integer agorot, half-up once per line. **Snapshot at close:** unit cost, value, price source and the count total; a closed count never drifts. |
+| Blank ≠ zero | An empty line is "לא נספר" (not counted): never valued, never 0. Close lists the uncounted items and needs an explicit OK (`acceptUncounted`). No-price and unit-mismatch lines are flagged ("אין מחיר") and stay out of the value. |
+| Price source | Every line shows "₪X ל-unit · חשבונית #, date, supplier". It is snapshotted at close and shown on the count, the detail page and in the CSV. |
+| Sanity check | A counted qty greater than (last count + goods received since, unit-converted) gets a "בדוק" badge and is listed in the close dialog. |
+| Close & lock | **Owner or manager** closes; a chef counts and sees "מנהל או בעלים סוגרים". Close is written to the audit log (`inventory.count_closed`). A closed count can only be corrected by the **owner, with a reason**: the line value and total are recomputed at the snapshot price, and the change is logged (`inventory.line_amended`, before/after/reason). A discarded draft is logged too. |
+| Purchases | **Receipt dates** ("לפי תאריכי קבלה"). Starting from invoices ex-VAT in (opening, closing]: <ul><li>a live duplicate copy is out (the leak engine's own `LIVE_DUPLICATE`, re-exported from `@restomatch/charts`);</li><li>non-food lines (חד״פ / ניקיון, by pattern) are out;</li><li>delivery notes received in the period and not billed yet are **added at PO prices**;</li><li>notes from an earlier period that a consolidated invoice now bills are **taken back**.</li></ul> So every note counts once, in the month its goods arrived, matched per supplier on a normalised number. |
+| Credits | **Only credits received** reduce the food cost (claims `resolved`). Claims agreed but not yet credited (`accepted`) are shown as **"זיכוי לקבל"** and never subtracted. The formula is shown: opening + purchases − credits received − closing. |
+| Period | Actual food cost as a % of food sales. Sales come from POS (`pos_sales`) when present, else the manual figure on the closing count ("הוזנו ידנית"). With recipes + POS: **"שימוש לא מוסבר" (unexplained usage)** = actual − theoretical. It is compared only when recipes cover ≥ 90% of sales and are fully costed, otherwise shown as a calm "partial" note. It is T2 only above 2 points of sales and **never** part of the leak hero. |
+| First month | No opening count ⇒ no actual food cost and no invented opening value. Instead **"פוד קוסט רכש"** (purchases ÷ sales) for the count's month, labelled as such. |
+| CSV | `exportCsv`: item, item_en, area, qty, unit, unit cost, value, price invoice / date / supplier, plus a TOTAL row. UTF-8 BOM so it opens in Excel; spreadsheet formulas are neutralised. |
+| API | `inventory.*`: enabled, current, start, saveLines, searchProducts, setMeta, complete, amendLine, exportCsv, discard, get, history, period. Writes take a per-restaurant advisory lock. A counted product can't be deleted (friendly CONFLICT). |
+| UI | <ul><li>`/dashboard/inventory`: start/continue, the food-cost card, history.</li><li>`/dashboard/inventory/count`, mobile-first: compact rows per storage area, keypad ("2,5" ok), serialised autosave that also flushes when the phone locks, progress pinned to the close bar.</li><li>`/dashboard/inventory/<id>`: read-only, price sources, CSV, owner correction.</li><li>The card also sits on `/dashboard/recipes`.</li></ul> he/en, light theme, ₪ via `formatIls`. |
+| Demo | `apps/worker/scripts/seed-inventory-demo.ts`, on the reseed contract: `DEMO_RESTAURANT_ID` (else the demo business id + name), dates from `DEMO_TODAY`, deletes only its own rows, never touches invoices. **Numbers:** <ul><li>Opening count 2026-09-30 ₪11,134.46; closing count 2026-10-24 ₪13,474.46 (51 items).</li><li>October purchases ₪45,098.29 on receipt dates = 37 invoices ₪45,320.41 − non-food ₪1,381.51 + 8 Galilee notes ₪3,109.99 − September notes billed on GD-M-202609 ₪1,950.60.</li><li>Credits received ₪463.54.</li><li>**Actual ₪42,294.75 = 31.0%** of food sales ₪136,400.</li><li>Hero unchanged (₪760 of ₪42,263).</li></ul> |
 
 ## Security
 
 - **Tenant isolation:**
-  - every query filters `restaurant_id` and runs in the member RLS transaction;
-  - the composite FKs reject a line that points at another restaurant's count or product, even as owner;
-  - RLS app-role attack suite (`inventory-rls.attack.test.ts`): GUC isolation, a cross-tenant INSERT is blocked, cross-tenant UPDATE/DELETE match nothing, and the router works end to end through `restomatch_app`.
-- **COVERAGE:** add-only entries for all 11 procedures.
+  - every query filters `restaurant_id` inside the member RLS transaction;
+  - composite FKs reject cross-tenant lines, even as owner;
+  - `inventory-rls.attack.test.ts` runs as `restomatch_app`: GUC isolation, cross-tenant INSERT blocked, cross-tenant UPDATE/DELETE match nothing, and the router works end to end.
+- **COVERAGE:** add-only entries for all 13 procedures.
+- **Roles:**
+  - owner / manager / chef count;
+  - owner / manager close;
+  - the owner alone amends a closed count;
+  - receiver / bookkeeper get FORBIDDEN.
 
 ## Immutable / shared files touched
 
-- `packages/db/drizzle/0070_*.sql`, `meta/_journal.json`, `src/schema.ts`: additive. **Owner approval required** (requested by the orchestrator).
-- `packages/api/src/__tests__/cross-tenant.attack.test.ts`: COVERAGE entries added only.
-- `packages/charts/src/index.ts`: one additive re-export line (`LEAK_FILTER`, `LIVE_DUPLICATE`), so the purchase rules are the leak engine's own.
-- `packages/api/src/routers/products.ts`: a counted product can't be deleted (friendly CONFLICT).
-- `apps/web/app/dashboard/{layout,nav}.tsx`, `lib/roles.ts`, `test/appRouterShape.test.ts`: nav item, route roles, router list.
+- **Owner-approved additive schema:** `packages/db/drizzle/0070_*.sql`, `meta/_journal.json`, `src/schema.ts`.
+- **COVERAGE:** `packages/api/src/__tests__/cross-tenant.attack.test.ts`, entries added only.
+- **Re-export:** `packages/charts/src/index.ts`, one additive line (`LEAK_FILTER`, `LIVE_DUPLICATE`).
+- **Audit actions:** `packages/api/src/audit.ts`, three new values.
+- **Delete guard:** `packages/api/src/routers/products.ts`, a counted product can't be deleted.
+- **Nav, roles, router list:** `apps/web/app/dashboard/{layout,nav}.tsx`, `lib/roles.ts`, `test/appRouterShape.test.ts`.
 
 ## Verification (2 layers)
 
-### Layer 1: automated gate
-`scripts/verify.sh` **PASS**:
-- install, fresh-db, migrate, provision-rls, check-rls, db-doctor, supabase-sync, typecheck, test, web-lint, web-build, web-tsc, audit;
-- new suites: `inventory-valuation` 10, `inventory-router` 12, `inventory-rls.attack` 4;
-- COVERAGE and cross-tenant suites green; web vitest 377.
+### Layer 1 — `scripts/verify.sh` PASS
+New suites (all green, together with COVERAGE / cross-tenant):
 
-### Layer 2: production build, he + en, 1366 and 390
-- `VERIFY_E2E=1 VERIFY_SOFTNAV=1 … verify.sh layer2`, including the new `e2e/inventory.spec.ts`: at 390 px in he/en it runs start → count → reload resumes → finish → summary ₪ → food-cost card → type sales → %, with axe 0, no sideways scroll, 44 px targets and no console errors on every screen.
-- `inv-layer2.mjs` on `next start` with the seeded dev DB:
-  - the card shows 30.2% with the formula ₪11,134 + ₪43,939 − credits ₪464 − ₪13,474;
-  - ₪136,400 manual sales;
-  - the unbilled delivery notes appear as an FYI line;
-  - history and detail show the ₪ values;
-  - the card also appears on recipes;
-  - the draft count screen works;
-  - 0 console errors and 0 5xx.
-- 64/72: the 8 misses are the shared header's branch switcher (`label-content-name-mismatch`, desktop). Reported to the orchestrator with a fix; not in this PR's files.
+| Suite | Tests |
+|---|---|
+| `inventory-valuation` | 10 |
+| `inventory-router` | 12 |
+| `inventory-fixes` | 6 |
+| `inventory-must-haves` | 5 |
+| `inventory-rls.attack` | 4 |
+
+### Layer 2 — production build, he + en, 1366 and 390
+- **`VERIFY_E2E=1 VERIFY_SOFTNAV=1 … verify.sh layer2`:** includes `e2e/inventory.spec.ts`, at 390 px in he/en. It runs start → count → reload resumes → close → uncounted list + explicit OK → summary ₪ → food-cost card → type sales → %. Every screen: axe 0, no sideways scroll, 44 px targets, no console errors.
+- **`layer2-inventory.mjs`** on `next start` with the seeded dev DB checks the card, formula, credits, receipt-date note, history, detail, the recipes-page card and the count screen.
 
 ### Independent refuter
-See the section below.
+A subagent that did not write the code confirmed 5 bugs; all are fixed with regression tests (`inventory-fixes.test.ts`):
+1. A false "unexplained usage" alarm on partial recipe coverage.
+2. Credits on non-food lines subtracted twice.
+3. Delivery notes matched on the number alone.
+4. An autosave/close race.
+5. Re-priced tallies on a closed count.
 
-### Independent refuter (a subagent that did not write the code)
+Smaller items were also fixed: the date field, the decimal comma, the non-food pattern.
 
-**Confirmed and fixed:**
+## Next (not in this PR)
 
-| Finding | Fix | Test |
-|---|---|---|
-| **High:** false "unexplained usage" alert when only part of the menu has recipes (theory covered only the matched dishes; sales covered all) | Theory is compared only when recipes cover **≥ 90% of POS sales** and every matched recipe is fully costed; it is scaled to all sales. Otherwise the card shows a calm "partial" note, never an alarm. | `inventory-fixes.test.ts` |
-| A claim accepted on a non-food line was subtracted from food purchases a second time | Credits count only claims on food lines | `inventory-fixes.test.ts` |
-| Delivery-note coverage matched the number alone (another supplier's "100"; "07001" vs "7001"; plain-string elements) | Matched per supplier, on a number normalised like invoice numbers (alphanumerics, upper-case, no leading zeros) | `inventory-fixes.test.ts` |
-| Autosave/finish race (the last qty could be lost; an older save could land after a newer one); the retry loop never stopped | Saves are serialised and Finish waits for them; CONFLICT/NOT_FOUND stops retrying with a message; timers are cleared on unmount | — |
-| A completed count's `progress` was recomputed from live prices | Tallies come from the snapshot | `inventory-fixes.test.ts` |
-
-**Smaller items, also fixed:**
-- The date field now saves on blur, never per keystroke.
-- Dates before 2000 are rejected with BAD_REQUEST, not a Postgres error.
-- The sales input reads "12345,50" as a decimal comma, and manual sales can be edited after saving.
-- The non-food check is a case-insensitive pattern covering the usual spellings (חד״פ / חד פעמי / ניקיון / ניקוי / disposables / cleaning).
-
-**Acknowledged, not changed:**
-- Only `seed-demo` writes delivery notes (`ת.מ.` receipts plus `ocr_payload.raw.deliveryNotes`) today, so the FYI line appears on demo data only.
-- Purchases are invoices only (orchestrator decision). A month whose consolidated invoice arrives after the closing count therefore runs low by the unbilled notes, which the FYI line shows.
-- POS sales that cover only part of the period understate sales. The manual figure remains available.
-- A product's default unit changing after prices were recorded would misprice it, the same assumption as the recipes engine.
-
-## Phase 2 (not today)
-
-**Par levels → suggested order quantity = par − on hand − open PO qty**, prefilled in the order wizard. The last
-completed count is the "on hand".
-
-## Notes / limits
-
-- The theoretical cost uses current recipe costs at the closing date's prices.
-- With POS rows the sales come from the POS. The demo has none on this branch, so the manual figure is used.
+- **Phase 2:** par levels → suggested order quantity = par − on hand − open PO qty, prefilled in the order wizard.
+- **Credits:** a real "credit note received" document type, so "received" isn't inferred from the claim status.
+- **Close:** a "submit for close" flow so a chef can hand the count to a manager from the phone.
