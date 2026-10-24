@@ -56,7 +56,9 @@ export function assertWebEnv(env: NodeJS.ProcessEnv = process.env): WebEnv {
   const v = parsed.data;
   if ((v.NODE_ENV ?? env.NODE_ENV) === 'production') {
     const missing: string[] = [];
-    if (!isParsablePgUrl(v.DATABASE_URL_APP) && !deriveAppRoleUrl(env)) {
+    if (!ownerDbUrl(env))
+      missing.push(`DATABASE_URL — ${pgUrlProblem(v.DATABASE_URL)} (and no usable POSTGRES_URL from the Supabase integration)`);
+    if (!normalizePgUrl(v.DATABASE_URL_APP) && !deriveAppRoleUrl(env)) {
       missing.push(
         v.DATABASE_URL_APP
           ? `DATABASE_URL_APP — ${pgUrlProblem(v.DATABASE_URL_APP)} (or set APP_ROLE_PASSWORD so it is derived from DATABASE_URL)`
@@ -233,8 +235,117 @@ export function pgUrlProblem(raw: string): string {
   if (/^[A-Z][A-Z0-9_]*\s*=/.test(v)) return 'the value starts with "NAME=" — paste only the URL';
   if (/\s/.test(v)) return 'it contains a space or a line break';
   if (/[<>]/.test(v)) return 'it contains < or > — remove the placeholder brackets around the password';
+  if (/:\[[^@]*\]@/.test(v)) return 'the password is still inside [ ] — remove the brackets';
   if (!/^postgres(ql)?:\/\//i.test(v)) return 'it does not start with postgresql://';
   return 'it is not a valid URL — a special character in the password (@ : / ? #) must be URL-encoded';
+}
+
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
+/**
+ * Repair what a DB URL picks up on its way into a dashboard field: a leading
+ * `NAME=`, wrapping quotes, spaces / line breaks, `[ ]` or `< >` left around the
+ * password (Supabase's `[YOUR-PASSWORD]` template), and a password character
+ * that was never URL-encoded (`# / ?` make `new URL` — and so postgres.js —
+ * throw "Invalid URL"). Returns a URL postgres.js can parse — the trimmed input
+ * itself when it already was one — or null when it is beyond repair.
+ */
+export function normalizePgUrl(raw: string | undefined): string | null {
+  if (!raw || raw.trim() === '') return null;
+  const trimmed = raw.trim();
+  if (isParsablePgUrl(trimmed) && !/:\[[^@]*\]@/.test(trimmed)) return trimmed;
+  let v = trimmed
+    .replace(/^[A-Z][A-Z0-9_]*\s*=\s*/, '')
+    .replace(/^(['"])([\s\S]*)\1$/, '$2')
+    .replace(/\s+/g, '');
+  // `user:password@host…` pasted without its scheme.
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(v) && /^[^:@/]+:.+@[^@/]+/.test(v)) v = `postgresql://${v}`;
+  // user = up to the first ':'; password = up to the LAST '@' (it may hold '@').
+  const m = /^(postgres(?:ql)?:\/\/)([^:@/]+):(.*)@([^@]*)$/i.exec(v);
+  if (m) {
+    const [, scheme, user, rawPw, rest] = m as unknown as [string, string, string, string, string];
+    const pw = /^\[(.*)\]$/.exec(rawPw)?.[1] ?? /^<(.*)>$/.exec(rawPw)?.[1] ?? rawPw;
+    v = `${scheme}${user}:${encodeURIComponent(safeDecode(pw))}@${rest}`;
+  }
+  return isParsablePgUrl(v) ? v : null;
+}
+
+/**
+ * Owner URLs the Supabase↔Vercel integration keeps in the project (transaction
+ * pooler first, then the session pooler) — the fallback when DATABASE_URL was
+ * pasted beyond repair.
+ */
+const SUPABASE_INTEGRATION_OWNER_URLS = ['POSTGRES_URL', 'POSTGRES_URL_NON_POOLING'] as const;
+
+/**
+ * Keep only `sslmode`: postgres.js sends any other query parameter (the
+ * integration's `supa=…`, `pgbouncer=true`) to the server as a startup parameter.
+ */
+function withSslmodeOnly(url: string): string {
+  const u = new URL(url);
+  for (const key of [...u.searchParams.keys()]) if (key !== 'sslmode') u.searchParams.delete(key);
+  return u.toString();
+}
+
+/** Which variable the owner connection comes from — DATABASE_URL first — or null. */
+export function ownerDbUrlSource(env: NodeJS.ProcessEnv = process.env): string | null {
+  if (normalizePgUrl(env.DATABASE_URL)) return 'DATABASE_URL';
+  return SUPABASE_INTEGRATION_OWNER_URLS.find((name) => normalizePgUrl(env[name])) ?? null;
+}
+
+/**
+ * The owner connection: DATABASE_URL, repaired by normalizePgUrl — or, when that
+ * is unset or beyond repair, the integration's POSTGRES_URL / POSTGRES_URL_NON_POOLING.
+ * Null when none is usable.
+ */
+export function ownerDbUrl(env: NodeJS.ProcessEnv = process.env): string | null {
+  const source = ownerDbUrlSource(env);
+  if (!source) return null;
+  const url = normalizePgUrl(env[source])!;
+  return source === 'DATABASE_URL' ? url : withSslmodeOnly(url);
+}
+
+/**
+ * The identity layer's owner connection (lib/authDb.ts): DATABASE_URL, repaired
+ * by normalizePgUrl — DATABASE_URL_APP only when DATABASE_URL is unset (legacy
+ * dev setups). A value beyond repair never fails `next build` (the placeholder is
+ * never dialled) but fails at runtime naming the problem, never the value.
+ */
+export function resolveAuthDbUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const owner = ownerDbUrl(env);
+  if (owner) return owner;
+  const name = env.DATABASE_URL?.trim() ? 'DATABASE_URL' : env.DATABASE_URL_APP?.trim() ? 'DATABASE_URL_APP' : null;
+  if (name === 'DATABASE_URL_APP') {
+    const app = normalizePgUrl(env.DATABASE_URL_APP);
+    if (app) return app;
+  }
+  if (isNextBuildPhase(env)) return BUILD_PHASE_DB_PLACEHOLDER;
+  if (!name) return undefined;
+  throw new Error(`[env] ${name} is unusable: ${pgUrlProblem(env[name]!)}.`);
+}
+
+/**
+ * One line on the DB variables — ok / repaired / UNUSABLE / unset, with the
+ * reason — for the build and boot logs. Never contains a value.
+ */
+export function dbEnvReport(env: NodeJS.ProcessEnv = process.env): string {
+  const parts = (['DATABASE_URL', 'DATABASE_URL_APP'] as const).map((name) => {
+    const raw = env[name];
+    if (!raw || raw.trim() === '') return `${name}: unset`;
+    const fixed = normalizePgUrl(raw);
+    if (fixed === raw.trim()) return `${name}: ok`;
+    return `${name}: ${fixed ? 'repaired' : 'UNUSABLE'} (${pgUrlProblem(raw)})`;
+  });
+  parts.push(`owner connection from: ${ownerDbUrlSource(env) ?? 'none'}`);
+  parts.push(`APP_ROLE_PASSWORD: ${env.APP_ROLE_PASSWORD ? 'set' : 'unset'}`);
+  parts.push(`app role derivable: ${deriveAppRoleUrl(env) ? 'yes' : 'no'}`);
+  return parts.join(' · ');
 }
 
 /**
@@ -246,9 +357,9 @@ export function pgUrlProblem(raw: string): string {
  * the resulting connection does not bypass RLS before any tenant is served.
  */
 export function deriveAppRoleUrl(env: NodeJS.ProcessEnv = process.env): string | null {
-  const owner = env.DATABASE_URL?.trim();
+  const owner = ownerDbUrl(env);
   const password = env.APP_ROLE_PASSWORD;
-  if (!owner || !password || /\s/.test(password) || !isParsablePgUrl(owner)) return null;
+  if (!owner || !password || /\s/.test(password)) return null;
   const u = new URL(owner);
   const ref = /^[^.]+\.([a-z0-9]{20})$/.exec(decodeURIComponent(u.username))?.[1];
   u.username = ref ? `restomatch_app.${ref}` : 'restomatch_app';
@@ -258,7 +369,7 @@ export function deriveAppRoleUrl(env: NodeJS.ProcessEnv = process.env): string |
 
 export function resolveWebDbUrl(env: NodeJS.ProcessEnv = process.env): string {
   const appUrl = env.DATABASE_URL_APP;
-  if (env.NODE_ENV === 'production' && !isParsablePgUrl(appUrl)) {
+  if (env.NODE_ENV === 'production' && normalizePgUrl(appUrl) !== appUrl?.trim()) {
     // A missing or malformed DATABASE_URL_APP used to fail the build at page-data
     // collection ("Invalid URL") or every request at boot. Derive the same role
     // from the owner URL instead, and say why — without the value.
@@ -267,10 +378,15 @@ export function resolveWebDbUrl(env: NodeJS.ProcessEnv = process.env): string {
       if (!isNextBuildPhase(env)) {
         console.warn(
           `[env] DATABASE_URL_APP is ${appUrl ? `unusable (${pgUrlProblem(appUrl)})` : 'unset'} — ` +
-            "connecting as restomatch_app on DATABASE_URL's host with APP_ROLE_PASSWORD",
+            `connecting as restomatch_app on ${ownerDbUrlSource(env)}'s host with APP_ROLE_PASSWORD`,
         );
       }
       return derived;
+    }
+    const repaired = normalizePgUrl(appUrl);
+    if (repaired) {
+      if (!isNextBuildPhase(env)) console.warn(`[env] DATABASE_URL_APP repaired: ${pgUrlProblem(appUrl!)}`);
+      return repaired;
     }
     if (appUrl && appUrl.trim() !== '') {
       if (isNextBuildPhase(env)) return BUILD_PHASE_DB_PLACEHOLDER;
