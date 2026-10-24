@@ -7,16 +7,17 @@ name: CI
 #
 # Jobs (plan v2, Wave 0 / T0):
 #   test          - typecheck (non-web) + serial vitest for every package except
-#                   the worker. REDIS_URL is deliberately NOT set here: a repo-wide
-#                   value would flip apps/web/lib/rateLimit.ts and packages/queue
-#                   to real Redis inside the API suites.
-#   worker-tests  - apps/worker suite with a job-scoped Redis service.
+#                   the worker. No Redis anywhere (0061): the job queue, rate
+#                   limits and the worker heartbeat live in Postgres.
+#   worker-tests  - apps/worker suite + a runtime smoke of every queue (Postgres only).
 #   web           - ESLint, `next build` (type-checks: ignoreBuildErrors is off)
 #                   then `tsc --noEmit` for apps/web (the tsconfig includes
 #                   .next/types, which is why the build runs first). All blocking —
 #                   the old "AppRouter inference flake" did not reproduce (client-
 #                   ready sprint, platform report) and test/appRouterShape.test.ts
 #                   now pins the inferred router keys.
+#   verify-layer2 - scripts/verify.sh layer2: production build + `next start` + the
+#                   read-only scripts/verify-prod.sh smoke. Non-blocking (soak).
 #   worker-image  - builds apps/worker/Dockerfile (the production worker image).
 #   e2e           - Playwright against `next dev` on its own restomatch_e2e DB
 #                   (playwright.config.ts seeds the demo tenant, runs the web on the
@@ -73,7 +74,6 @@ jobs:
     env:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/restomatch_test
       DATABASE_URL_TEST: postgres://postgres:postgres@localhost:5432/restomatch_test
-      # No REDIS_URL on purpose -> rate limiting falls back to the in-memory store.
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -108,6 +108,11 @@ jobs:
       - name: db:doctor --strict (schema health, read-only)
         run: pnpm --filter @restomatch/db run doctor --strict
 
+      # supabase/migrations is what the Supabase GitHub integration deploys; it
+      # must match packages/db/drizzle (scripts/verify.sh layer 1 runs the same).
+      - name: supabase/ in sync with packages/db/drizzle
+        run: pnpm --filter @restomatch/db run supabase-sync --check
+
       - name: Typecheck (all packages except web)
         run: pnpm turbo run typecheck --concurrency=1 --filter='!@restomatch/web'
 
@@ -115,7 +120,7 @@ jobs:
         run: pnpm turbo run test --concurrency=1 --filter='!@restomatch/worker'
 
   worker-tests:
-    name: worker tests (job-scoped Redis)
+    name: worker tests (Postgres queue)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -135,21 +140,10 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
 
     env:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/restomatch_test
       DATABASE_URL_TEST: postgres://postgres:postgres@localhost:5432/restomatch_test
-      # Scoped to this job only (see header).
-      REDIS_URL: redis://localhost:6379
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -187,6 +181,7 @@ jobs:
         run: |
           E2E_DATABASE_URL="$SMOKE_DB" pnpm --filter @restomatch/db exec tsx "$GITHUB_WORKSPACE/apps/web/e2e/prepare-db.ts"
           DATABASE_URL="$SMOKE_DB" RESEND_API_KEY=re_local_sink EMAIL_FROM=ci@example.invalid PORT=8090 \
+            HEALTH_DIGEST_EMAILS=ops@example.invalid \
             NODE_OPTIONS="--import $GITHUB_WORKSPACE/apps/worker/scripts/local-email-sink.mjs" \
             pnpm --filter @restomatch/worker start > /tmp/worker.log 2>&1 &
           timeout 90 bash -c 'until curl -sf localhost:8090/health/ready >/dev/null; do sleep 1; done' || { cat /tmp/worker.log; exit 1; }
@@ -319,6 +314,60 @@ jobs:
       - name: Playwright — auth + he/en smoke (non-blocking during soak)
         continue-on-error: true
         run: pnpm --filter @restomatch/web test:e2e
+
+  verify-layer2:
+    name: verify layer 2 (prod build + verify-prod.sh, non-blocking)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+          # trust: the restomatch_app role the production server runs as logs in over TCP.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
+        with:
+          version: 10.33.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Seeds a demo DB, builds, serves `next start` (NODE_ENV=production, boot
+      # guards on, placeholder keys) and runs scripts/verify-prod.sh against it.
+      # Step-level continue-on-error during the soak (docs/VERIFICATION.md).
+      - name: scripts/verify.sh layer2 (non-blocking during soak)
+        id: layer2
+        continue-on-error: true
+        run: scripts/verify.sh layer2
+
+      - name: verify logs (on failure)
+        if: steps.layer2.outcome == 'failure'
+        run: tail -n 80 .verify/*.log
 
   worker-image:
     name: worker image (docker build)

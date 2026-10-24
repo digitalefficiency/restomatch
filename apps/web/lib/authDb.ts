@@ -1,4 +1,5 @@
 import { createDb, type Database } from '@restomatch/db';
+import { BUILD_PHASE_DB_PLACEHOLDER, isNextBuildPhase } from './env';
 
 /**
  * Privileged connection for the IDENTITY layer only (Auth.js adapter +
@@ -9,7 +10,9 @@ import { createDb, type Database } from '@restomatch/db';
  * So identity operations use the owner/service DATABASE_URL, while tenant data
  * (lib/db.ts) uses the non-owner DATABASE_URL_APP. Keep these separate.
  */
-const url = process.env.DATABASE_URL ?? process.env.DATABASE_URL_APP;
+// Build phase only: a placeholder that is never dialled (see lib/env.ts).
+const url =
+  process.env.DATABASE_URL ?? process.env.DATABASE_URL_APP ?? (isNextBuildPhase() ? BUILD_PHASE_DB_PLACEHOLDER : undefined);
 if (!url) {
   throw new Error('DATABASE_URL is required for the auth connection');
 }

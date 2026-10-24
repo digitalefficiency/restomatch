@@ -81,6 +81,7 @@ export const WAVE1_PRECONDITIONS: Record<string, (c: WaveCtx) => Promise<WaveRes
   '0056_recipes_prereqs': async () => ({ status: 'PASS', detail: 'UNIQUE(id, restaurant_id) on products (id is the PK — cannot fail) + an index' }),
   '0057_recipes': async () => ({ status: 'PASS', detail: 'new tables only' }),
   '0058_pos_sales': async () => ({ status: 'PASS', detail: 'new tables only (pos_sales_imports, pos_sales)' }),
+  '0061_postgres_queue': async () => ({ status: 'PASS', detail: 'new tables only (job_queue, worker_heartbeats, rate_limit_counters, ops_kv)' }),
 };
 
 /** `child.col` must point at a row of the same restaurant (single-column FKs in 0048/0050). */

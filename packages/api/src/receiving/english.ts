@@ -58,7 +58,7 @@ export function __setReceivingTranslator(t: CompositeTranslator | null): void {
  * render), so cap the calls per restaurant per hour that may reach the paid
  * Claude leg; past the cap a call is glossary-only (lines still render, in
  * Hebrew where untranslated). Process-local — defence in depth on top of the
- * translator's own miss cache; a shared Redis limiter is the durable version.
+ * translator's own miss cache; a shared database limiter is the durable version.
  */
 export const CLAUDE_CALLS_PER_RESTAURANT_PER_HOUR = 30;
 const HOUR_MS = 60 * 60 * 1000;

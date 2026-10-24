@@ -11,17 +11,14 @@
 export async function registerNode(): Promise<void> {
   const { assertWebEnv, assertAppRoleNoBypass, assertRlsEnabled } = await import('./lib/env');
   // Fail fast on a misconfigured production environment (missing
-  // DATABASE_URL_APP/RESEND/REDIS/etc.) instead of booting and degrading silently.
+  // DATABASE_URL_APP/RESEND/etc.) instead of booting and degrading silently.
   assertWebEnv();
 
-  // A malformed REDIS_URL (classically Upstash's https:// REST URL) is a WARN,
-  // not a boot failure: the site still serves, and every enqueue fails fast
-  // with 'queue.unavailable' instead of hanging the request (EN-7).
-  const { redisUrlProblem } = await import('@restomatch/queue');
-  const redisProblem = redisUrlProblem(process.env.REDIS_URL);
-  if (redisProblem) {
-    console.warn(`[boot] ${redisProblem} — OCR/import jobs will not be queued until it is fixed`);
-  }
+  // Server-side Sentry (no-op without SENTRY_DSN; enabling needs the SDK —
+  // docs/MONITORING.md). Every event goes through the PII scrubber.
+  const { initSentryFromEnv } = await import('@restomatch/observability');
+  await initSentryFromEnv({ service: 'web' });
+
 
   // Tenant-boundary boot guards (Epic 0.1/0.3). Only meaningful when we are
   // actually serving tenant traffic on the app role: in production the role is

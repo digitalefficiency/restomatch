@@ -104,7 +104,7 @@ async function sendMagicLink({
   url: string;
 }): Promise<void> {
   // Throttle per destination mailbox (collapsing +tag / dot aliases): blocks
-  // magic-link bombing / address probing. Fails open on a Redis outage so login
+  // magic-link bombing / address probing. Fails open on a rate-limit store outage so login
   // stays available.
   const rl = await enforceMagicLinkLimit(identifier);
   if (!rl.allowed) {
@@ -166,7 +166,7 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         // token and POST straight to it, skipping the page action entirely. So
         // the email+IP login limit must run INSIDE authorize() to be
         // un-bypassable. Reads the client IP from the request headers. Fails OPEN
-        // on a Redis outage — the durable floor is the per-account DB lockout in
+        // on a rate-limit store outage — the durable floor is the per-account DB lockout in
         // authorizeCredentials. A rate-limited attempt returns the same uniform
         // null as a wrong password (surfaced as CredentialsSignin), revealing no
         // account/lock state.

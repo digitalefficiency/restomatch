@@ -17,6 +17,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { stripTrailingSlashes } from './urls';
 
 const SCAN_ID = /^scan-[a-z0-9]+-[a-f0-9]{8}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -41,7 +42,7 @@ export function isLocalScanId(scanId: string): boolean {
 
 /** URL the app serves a local scan at (auth + tenant checked by the route). */
 export function localScanUrl(scanId: string, env: NodeJS.ProcessEnv = process.env): string {
-  const base = (env.APP_URL ?? env.AUTH_URL ?? 'http://localhost:3000').replace(/\/+$/, '');
+  const base = stripTrailingSlashes(env.APP_URL ?? env.AUTH_URL ?? 'http://localhost:3000');
   return `${base}/scans/${scanId}/file`;
 }
 

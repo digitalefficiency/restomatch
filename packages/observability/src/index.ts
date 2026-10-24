@@ -15,5 +15,9 @@ export {
   scrubPii,
   scrubSentryEvent,
   redactString,
+  initSentryFromEnv,
+  resetSentryClientForTests,
   type SentryClient,
+  type SentryInitResult,
+  type SentrySdk,
 } from './sentry';

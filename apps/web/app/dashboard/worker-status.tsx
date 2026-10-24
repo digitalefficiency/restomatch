@@ -1,8 +1,12 @@
 import { AlertTriangle } from 'lucide-react';
-import { getRedis, redisGetWithDeadline } from '@/lib/redis';
+import { withDeadline } from '@restomatch/queue';
 import { getT } from '@/lib/i18n/server';
 import { nav } from '@/lib/i18n/messages/nav';
-import { evaluateHeartbeat, WORKER_HEARTBEAT_KEY } from '@/lib/workerHeartbeat';
+import { evaluateHeartbeat } from '@/lib/workerHeartbeat';
+import { readHeartbeatRaw } from '@/lib/workerHeartbeatStore';
+
+/** The banner may add at most this much to a dashboard render. */
+export const HEARTBEAT_READ_DEADLINE_MS = 1_500;
 
 /**
  * "Worker offline" banner (plan v2, Wave 0). Renders nothing while the worker
@@ -11,13 +15,11 @@ import { evaluateHeartbeat, WORKER_HEARTBEAT_KEY } from '@/lib/workerHeartbeat';
  * the silent 30-second spinner the audit found.
  */
 export async function WorkerStatusBanner() {
-  const redis = getRedis();
-  if (!redis) return null;
   let raw: string | null = null;
   try {
-    raw = await redisGetWithDeadline(redis, WORKER_HEARTBEAT_KEY);
+    raw = await withDeadline(readHeartbeatRaw(), HEARTBEAT_READ_DEADLINE_MS, () => new Error('heartbeat read timed out'));
   } catch {
-    return null; // Redis hiccup: don't block the dashboard on a status banner.
+    return null; // DB hiccup: don't block the dashboard on a status banner.
   }
   const status = evaluateHeartbeat(raw);
   if (status.state === 'ok') return null;

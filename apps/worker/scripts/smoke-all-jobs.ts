@@ -6,15 +6,16 @@
  *   2. Worker (with the local email sink so outbox email is observable):
  *        EMAIL_SINK_FILE=/tmp/sink.jsonl RESEND_API_KEY=re_local EMAIL_FROM=qa@example.invalid \
  *        NODE_OPTIONS="--import ./scripts/local-email-sink.mjs" \
- *        DATABASE_URL=…/restomatch_e2e REDIS_URL=redis://localhost:6379 pnpm --filter @restomatch/worker start
- *   3. DATABASE_URL=…/restomatch_e2e REDIS_URL=… EMAIL_SINK_FILE=/tmp/sink.jsonl \
+ *        DATABASE_URL=…/restomatch_e2e pnpm --filter @restomatch/worker start
+ *   3. DATABASE_URL=…/restomatch_e2e EMAIL_SINK_FILE=/tmp/sink.jsonl \
  *        pnpm --filter @restomatch/worker exec tsx scripts/smoke-all-jobs.ts
  *
  * Covers the 7 scheduled jobs (enqueued by hand with the scheduler's payload),
  * the OCR(stub) → match chain, a small catalog import, the outbox email path
  * (queued row → Resend call captured by the sink → row 'sent'), and
  * sync-platforms without credentials (must FAIL CLEANLY, not hang). Exit 0 when
- * every step matches its expectation.
+ * every step matches its expectation. Jobs go through the Postgres job_queue
+ * (0061) exactly as producers enqueue them; the script polls each row.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import {
@@ -31,11 +32,9 @@ import {
   suppliers,
 } from '@restomatch/db';
 import type { InvoiceOcrResult } from '@restomatch/types';
-import { Queue, QueueEvents } from 'bullmq';
-import IORedis from 'ioredis';
+import { getJob, insertJob, queueSql } from '@restomatch/queue';
 
 const DATABASE_URL = process.env.DATABASE_URL ?? '';
-const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const SINK = process.env.EMAIL_SINK_FILE;
 const TIMEOUT_MS = 60_000;
 
@@ -46,28 +45,27 @@ if (!['localhost', '127.0.0.1'].includes(db.hostname) || !/_(e2e|test|smoke)$/.t
 
 type Outcome = { step: string; ok: boolean; detail: string; ms: number };
 const outcomes: Outcome[] = [];
-const connection = new IORedis(REDIS_URL, { maxRetriesPerRequest: null });
+const sql = queueSql(DATABASE_URL);
+
+/** Enqueue (as a producer would) and wait for the running worker to finish it. */
+async function waitForJob(queue: string, data: unknown): Promise<{ status: string; result: unknown; error: string | null }> {
+  const inserted = await insertJob(sql, queue, data, { maxAttempts: 1 });
+  if (!inserted) throw new Error(`[smoke-all] could not enqueue ${queue}`);
+  const t0 = Date.now();
+  for (;;) {
+    const job = await getJob(sql, inserted.id);
+    if (job && (job.status === 'done' || job.status === 'failed')) return { status: job.status, result: job.result, error: job.lastError };
+    if (Date.now() - t0 > TIMEOUT_MS) return { status: 'timeout', result: null, error: `not finished after ${TIMEOUT_MS}ms` };
+    await new Promise((res) => setTimeout(res, 200));
+  }
+}
 
 async function runJob(queue: string, data: unknown, expect: 'completed' | 'failed' = 'completed') {
-  const q = new Queue(queue, { connection });
-  const events = new QueueEvents(queue, { connection: connection.duplicate() });
-  await events.waitUntilReady();
   const t0 = Date.now();
-  const job = await q.add(queue, data, { attempts: 1 });
-  let ok = false;
-  let detail = '';
-  try {
-    const value = await job.waitUntilFinished(events, TIMEOUT_MS);
-    ok = expect === 'completed';
-    detail = JSON.stringify(value)?.slice(0, 160) ?? 'undefined';
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    ok = expect === 'failed' && !/timed out/i.test(msg);
-    detail = `failed: ${msg.slice(0, 160)}`;
-  }
+  const r = await waitForJob(queue, data);
+  const ok = expect === 'completed' ? r.status === 'done' : r.status === 'failed';
+  const detail = r.status === 'done' ? (JSON.stringify(r.result)?.slice(0, 160) ?? 'null') : `${r.status}: ${(r.error ?? '').slice(0, 160)}`;
   outcomes.push({ step: `${queue}${expect === 'failed' ? ' (expected clean failure)' : ''}`, ok, detail, ms: Date.now() - t0 });
-  await events.close();
-  await q.close();
 }
 
 async function main() {
@@ -76,7 +74,7 @@ async function main() {
   if (!r) throw new Error('[smoke-all] no restaurant — seed the DB first');
 
   // 1) Scheduled jobs, exactly as the schedulers enqueue them.
-  for (const q of ['daily-expectations', 'baselines', 'order-reminders', 'supplier-delays', 'end-of-day-report', 'retention']) {
+  for (const q of ['daily-expectations', 'baselines', 'order-reminders', 'supplier-delays', 'end-of-day-report', 'retention', 'health-digest', 'ocr-sweep']) {
     await runJob(q, {});
   }
 
@@ -126,14 +124,9 @@ async function main() {
   outcomes.push({ step: 'import-catalog row state', ok: impAfter?.status === 'committed', detail: JSON.stringify(impAfter), ms: 0 });
 
   // 4b) A late duplicate of the same import (timed-out producer, QA D7) must be a no-op.
-  const dupQ = new Queue('import-catalog', { connection });
-  const dupEv = new QueueEvents('import-catalog', { connection: connection.duplicate() });
-  await dupEv.waitUntilReady();
-  const dup = await dupQ.add('import-catalog', { restaurantId: r.id, supplierId: sup!.id, importId: imp!.id, file: { filename: 'smoke.csv', text: 'sku,name,unit,price\nSMK-1,QA tomato,kg,9.90\n' }, mapping }, { attempts: 1 });
-  const dupRes = (await dup.waitUntilFinished(dupEv, TIMEOUT_MS).catch((e: unknown) => ({ error: String(e) }))) as { skipped?: string };
-  outcomes.push({ step: 'import-catalog duplicate is skipped', ok: dupRes?.skipped === 'already committed', detail: JSON.stringify(dupRes), ms: 0 });
-  await dupEv.close();
-  await dupQ.close();
+  const dup = await waitForJob('import-catalog', { restaurantId: r.id, supplierId: sup!.id, importId: imp!.id, file: { filename: 'smoke.csv', text: 'sku,name,unit,price\nSMK-1,QA tomato,kg,9.90\n' }, mapping });
+  const dupRes = dup.result as { skipped?: string } | null;
+  outcomes.push({ step: 'import-catalog duplicate is skipped', ok: dup.status === 'done' && dupRes?.skipped === 'already committed', detail: JSON.stringify(dup), ms: 0 });
 
   // 5) sync-platforms without credentials must fail cleanly (no hang, no crash).
   await runJob('sync-platforms', { restaurantId: r.id, platform: 'marketman' }, 'failed');
@@ -141,7 +134,7 @@ async function main() {
   for (const o of outcomes) console.log(`${o.ok ? 'PASS' : 'FAIL'}  ${o.step.padEnd(48)} ${String(o.ms).padStart(6)}ms  ${o.detail}`);
   const failed = outcomes.filter((o) => !o.ok).length;
   console.log(failed ? `[smoke-all] ${failed} step(s) failed` : '[smoke-all] OK — every queue processed by the running worker');
-  connection.disconnect();
+  await sql.end({ timeout: 5 });
   process.exit(failed ? 1 : 0);
 }
 

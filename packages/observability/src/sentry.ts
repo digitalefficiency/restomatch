@@ -78,6 +78,27 @@ export function scrubSentryEvent<T extends Record<string, unknown>>(event: T): T
   }
   if (e.extra) e.extra = scrubPii(e.extra);
   if (e.contexts) e.contexts = scrubPii(e.contexts);
+  // Free text that commonly carries PII: the message, exception values (error
+  // messages), and breadcrumbs (console lines, e.g. failed-job logs).
+  if (typeof e.message === 'string') e.message = redactString(e.message);
+  if (e.exception && typeof e.exception === 'object') {
+    const ex = { ...(e.exception as Record<string, unknown>) };
+    if (Array.isArray(ex.values)) {
+      ex.values = ex.values.map((v) =>
+        v && typeof v === 'object' && typeof (v as { value?: unknown }).value === 'string'
+          ? { ...(v as Record<string, unknown>), value: redactString((v as { value: string }).value) }
+          : v,
+      );
+    }
+    e.exception = ex;
+  }
+  if (e.breadcrumbs) {
+    const crumbs = Array.isArray(e.breadcrumbs)
+      ? e.breadcrumbs
+      : (e.breadcrumbs as { values?: unknown[] }).values;
+    const clean = (crumbs ?? []).map((b) => scrubPii(b));
+    e.breadcrumbs = Array.isArray(e.breadcrumbs) ? clean : { ...(e.breadcrumbs as object), values: clean };
+  }
   if (e.user && typeof e.user === 'object') {
     const u = { ...(e.user as Record<string, unknown>) };
     // Keep a stable id for grouping; drop direct identifiers.
@@ -130,4 +151,83 @@ export function setSentryTag(key: string, value: string): void {
 
 export function isSentryEnabled(): boolean {
   return _client !== null;
+}
+
+/* ── Env-driven bootstrap (wave 1 monitoring) ─────────────────────────────── */
+
+/** The slice of @sentry/node (or @sentry/nextjs) we call. */
+export interface SentrySdk {
+  init(options: Record<string, unknown>): void;
+  captureException(e: unknown, hint?: unknown): unknown;
+  captureMessage(m: string, level?: string): unknown;
+  setUser(u: { id: string; email?: string } | null): void;
+  setTag(k: string, v: string): void;
+}
+
+export type SentryInitResult =
+  | { enabled: true; service: string; environment: string }
+  | { enabled: false; reason: 'no-dsn' | 'sdk-missing' | 'init-failed'; detail?: string };
+
+const loadSentryNode = async (): Promise<SentrySdk> => {
+  // The SDK is OPTIONAL. `webpackIgnore` keeps this a real runtime import():
+  // without it Next/webpack (this package is in transpilePackages) compiled the
+  // variable specifier into an EMPTY module context that always throws, so web
+  // Sentry could never turn on even after `pnpm add @sentry/node`. The web app
+  // also lists @sentry/node in serverExternalPackages.
+  const pkg = '@sentry/node';
+  return (await import(/* webpackIgnore: true */ pkg)) as SentrySdk;
+};
+
+/**
+ * Initialise Sentry from the environment. SENTRY_DSN unset → a no-op that
+ * never throws (local dev, CI, tests, any deployment that hasn't opted in).
+ * With a DSN: loads the SDK lazily (`pnpm add @sentry/node` in the app), sets
+ * environment/release, disables tracing + default PII and routes every event
+ * through scrubSentryEvent. Safe to call once per process.
+ */
+export async function initSentryFromEnv(opts: {
+  service: 'web' | 'worker' | string;
+  env?: NodeJS.ProcessEnv;
+  loadSdk?: () => Promise<SentrySdk>;
+}): Promise<SentryInitResult> {
+  const env = opts.env ?? process.env;
+  const dsn = env.SENTRY_DSN?.trim();
+  if (!dsn) return { enabled: false, reason: 'no-dsn' };
+  let sdk: SentrySdk;
+  try {
+    sdk = await (opts.loadSdk ?? loadSentryNode)();
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.warn(`[sentry] SENTRY_DSN is set but the SDK is not installed (${opts.service}): ${detail}`);
+    return { enabled: false, reason: 'sdk-missing', detail };
+  }
+  const environment = env.SENTRY_ENV ?? env.VERCEL_ENV ?? env.NODE_ENV ?? 'development';
+  try {
+    sdk.init({
+      dsn,
+      environment,
+      release: env.SENTRY_RELEASE ?? env.VERCEL_GIT_COMMIT_SHA ?? env.FLY_IMAGE_REF,
+      serverName: opts.service,
+      sendDefaultPii: false,
+      tracesSampleRate: 0,
+      beforeSend: (event: Record<string, unknown>) => scrubSentryEvent(event),
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.warn(`[sentry] init failed (${opts.service}): ${detail}`);
+    return { enabled: false, reason: 'init-failed', detail };
+  }
+  registerSentryClient({
+    captureException: (e, c) => void sdk.captureException(e, c ? { extra: c } : undefined),
+    captureMessage: (m, level) => void sdk.captureMessage(m, level),
+    setUser: (u) => sdk.setUser(u),
+    setTag: (k, v) => sdk.setTag(k, v),
+  });
+  sdk.setTag('service', opts.service);
+  return { enabled: true, service: opts.service, environment };
+}
+
+/** Test hook: forget the registered client. */
+export function resetSentryClientForTests(): void {
+  _client = null;
 }

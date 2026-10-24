@@ -1,5 +1,5 @@
 import 'server-only';
-import IORedis from 'ioredis';
+import { sql as dsql } from '@restomatch/db';
 import {
   canonicalizeEmail,
   checkRateLimit,
@@ -8,57 +8,81 @@ import {
   type RateLimitResult,
   type RateLimitStore,
 } from '@restomatch/api';
-import { failFastRedisOptions, withDeadline } from '@restomatch/queue';
+import { withDeadline } from '@restomatch/queue';
 
 /** A rate-limit check may add at most this much latency before failing open. */
-export const RATE_LIMIT_REDIS_DEADLINE_MS = 1_500;
+export const RATE_LIMIT_DEADLINE_MS = 1_500;
+/**
+ * The FIRST check of a process also opens the connection (TCP + TLS + SCRAM to
+ * the pooler, ~1 s cross-region): that gets its own, longer budget so a cold
+ * serverless instance enforces its first logins instead of failing open (the hole
+ * S15 found in the old Redis store). Waited for at most once per process.
+ */
+export const RATE_LIMIT_CONNECT_DEADLINE_MS = 5_000;
 
 /**
- * Redis-backed fixed-window store. INCR creates the counter; EXPIRE on the
- * first increment gives it a TTL so it self-cleans. Multiple serverless
- * instances share one Redis, so the limit is global (unlike the in-memory
- * fallback).
+ * Postgres fixed-window store (0061 rate_limit_counters; was Redis INCR). One
+ * upsert both creates and increments the window's counter and returns the new
+ * count; `expires_at` lets the worker prune old windows. All serverless instances
+ * share the database, so the limit is global (unlike the in-memory fallback).
+ *
+ * Runs on the AUTH (owner) connection: limits are checked before any session
+ * exists, and the tenant app role has no access to this table.
  */
-class RedisRateLimitStore implements RateLimitStore {
-  constructor(private readonly redis: IORedis) {}
+export class PostgresRateLimitStore implements RateLimitStore {
+  private warm: Promise<void> | null = null;
+
+  constructor(private readonly db: { execute: (q: ReturnType<typeof dsql>) => Promise<unknown> }) {}
+
+  /** Open the connection once, outside the per-check deadline. Concurrent first calls share it. */
+  private connect(): Promise<void> {
+    this.warm ??= withDeadline(
+      this.db.execute(dsql`select 1`).then(() => undefined),
+      RATE_LIMIT_CONNECT_DEADLINE_MS,
+      () => new Error(`rate-limit store: no connection within ${RATE_LIMIT_CONNECT_DEADLINE_MS}ms`),
+    ).catch((err: unknown) => {
+      // Only the first check pays this wait. After that a dead database costs
+      // each check the normal 1.5 s deadline, not 5 s.
+      console.warn('[rateLimit] connection warm-up failed:', err instanceof Error ? err.message : err);
+    });
+    return this.warm;
+  }
 
   async incr(key: string, windowSec: number): Promise<number> {
-    // Deadline per check: a black-holed or silent Redis made login wait 30-60 s
-    // (or forever) before failing open (QA D1). enforceRateLimit fails open.
+    await this.connect();
+    // Deadline per check: a black-holed database must not make login wait
+    // (QA D1). enforceRateLimit fails open.
     return withDeadline(
       (async () => {
-        const count = await this.redis.incr(key);
-        if (count === 1) {
-          await this.redis.expire(key, windowSec);
-        }
-        return count;
+        const rows = (await this.db.execute(dsql`
+          INSERT INTO rate_limit_counters (key, count, expires_at)
+          VALUES (${key}, 1, now() + ${windowSec} * interval '1 second')
+          ON CONFLICT (key) DO UPDATE SET count = rate_limit_counters.count + 1
+          RETURNING count`)) as unknown as Array<{ count: number }>;
+        return Number(rows[0]?.count ?? 0);
       })(),
-      RATE_LIMIT_REDIS_DEADLINE_MS,
-      () => new Error(`rate-limit redis timed out after ${RATE_LIMIT_REDIS_DEADLINE_MS}ms`),
+      RATE_LIMIT_DEADLINE_MS,
+      () => new Error(`rate-limit store timed out after ${RATE_LIMIT_DEADLINE_MS}ms`),
     );
   }
 }
 
 let store: RateLimitStore | undefined;
 
-function getStore(): RateLimitStore {
+async function getStore(): Promise<RateLimitStore> {
   if (store) return store;
-  const url = process.env.REDIS_URL;
-  if (url) {
-    const redis = new IORedis(url, failFastRedisOptions());
-    redis.on('error', (err) => {
-      console.warn('[rateLimit] redis error:', err.message);
-    });
-    store = new RedisRateLimitStore(redis);
+  if (process.env.DATABASE_URL || process.env.DATABASE_URL_APP) {
+    const { authDb } = await import('./authDb');
+    store = new PostgresRateLimitStore(authDb);
   } else {
-    // No Redis configured (local dev / tests): process-local counter.
+    // No database configured (unit tests / bare local dev): process-local counter.
     store = new MemoryRateLimitStore();
   }
   return store;
 }
 
 /**
- * Enforce a rate limit. Fails OPEN on infra errors (a Redis outage must not
+ * Enforce a rate limit. Fails OPEN on infra errors (a rate-limit store outage must not
  * lock everyone out of login) — the failure is logged so it is visible.
  */
 export async function enforceRateLimit(
@@ -66,7 +90,7 @@ export async function enforceRateLimit(
   opts: RateLimitOptions,
 ): Promise<RateLimitResult> {
   try {
-    return await checkRateLimit(getStore(), identifier, opts);
+    return await checkRateLimit(await getStore(), identifier, opts);
   } catch (err) {
     console.warn(
       `[rateLimit] store error for ${opts.prefix ?? 'rl'} — failing open:`,
@@ -106,7 +130,7 @@ export function trustedProxyHops(env: NodeJS.ProcessEnv = process.env): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-/** Throttle the public OCR endpoint per client IP. Fails open on a Redis outage. */
+/** Throttle the public OCR endpoint per client IP. Fails open on a rate-limit store outage. */
 export async function enforceOcrLimit(ip: string): Promise<RateLimitResult> {
   return enforceRateLimit(ip, SHOWCASE_OCR_LIMIT);
 }
@@ -136,8 +160,8 @@ export const TOO_MANY_ATTEMPTS_HE = 'יותר מדי ניסיונות. נסו ש
  * multiply the limit per account; the IP key bounds one source spraying many
  * accounts. Allowed only when BOTH pass — the more restrictive (already-blocked)
  * result is returned so the caller can surface ONE uniform message. Each limiter
- * fails OPEN on a Redis outage; the durable ceiling is the DB lockout backstop
- * (independent of Redis), checked in authorize() and the TOTP path.
+ * fails OPEN on a rate-limit store outage; the durable ceiling is the DB lockout backstop
+ * (independent of the rate-limit store), checked in authorize() and the TOTP path.
  */
 export async function enforceEmailAndIpLimit(
   email: string,
@@ -196,9 +220,9 @@ export const LOGIN_IP_LIMIT: RateLimitOptions = {
 };
 
 /**
- * Throttle password-login attempts on email AND IP (C.2). This is the Redis
+ * Throttle password-login attempts on email AND IP (C.2). This is the rate-limit
  * front line; the DB lockout backstop in authorizeCredentials is the durable
- * floor that holds even when Redis fails open.
+ * floor that holds even when the store fails open.
  */
 export async function enforceLoginLimit(email: string, ip: string): Promise<RateLimitResult> {
   return enforceEmailAndIpLimit(email, ip, LOGIN_EMAIL_LIMIT, LOGIN_IP_LIMIT);
@@ -221,7 +245,7 @@ export const TWO_FACTOR_IP_LIMIT: RateLimitOptions = {
 /**
  * Throttle second-factor (TOTP + recovery) verification attempts on email AND
  * IP (C.2). Pairs with the DB lockout backstop in verifySecondFactor so a brute
- * force is bounded even during a Redis outage.
+ * force is bounded even during a rate-limit store outage.
  */
 export async function enforceTwoFactorLimit(email: string, ip: string): Promise<RateLimitResult> {
   return enforceEmailAndIpLimit(email, ip, TWO_FACTOR_EMAIL_LIMIT, TWO_FACTOR_IP_LIMIT);

@@ -25,8 +25,7 @@
     "@restomatch/queue": "workspace:*",
     "@restomatch/translate": "workspace:*",
     "@restomatch/types": "workspace:*",
-    "bullmq": "^5.34.5",
-    "ioredis": "^5.4.2"
+    "cron-parser": "4.9.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

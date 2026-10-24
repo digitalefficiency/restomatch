@@ -79,6 +79,11 @@ const IDENTITY_REVOKED = [
   'password_reset_tokens',
   'user_recovery_codes',
 ];
+/**
+ * 0061 (Redis → Postgres): used only on the owner/service connection; the tenant
+ * app role must have NO privilege on them (rls.ts revokes; RLS deny-all backs it).
+ */
+const OWNER_ONLY_TABLES = ['job_queue', 'worker_heartbeats', 'rate_limit_counters', 'ops_kv'];
 
 /**
  * FK columns intentionally left unindexed (low-churn audit pointers, never
@@ -409,6 +414,15 @@ export async function runDoctor(url: string, opts: DoctorOptions = {}): Promise<
             ? `${drift.length} applied migration file(s) changed after they were applied (comment edits are harmless; DDL edits are not re-run): ${drift.map((d) => d.tag).join(', ')}`
             : 'every applied file matches its recorded hash');
       }
+      // The job queue, rate limits and worker heartbeat live in 0061's tables
+      // (Redis is gone): without them the worker refuses to start, every enqueue
+      // fails and the rate limiter fails open. Deploy-order guard.
+      const ownerOnly = await tx`
+        select t from unnest(${OWNER_ONLY_TABLES}::text[]) as t where to_regclass('public.' || t) is null`;
+      add('migrations', 'queue tables (0061)', ownerOnly.length ? 'FAIL' : 'PASS',
+        ownerOnly.length
+          ? `missing: ${ownerOnly.map((r) => r.t).join(', ')} — the worker refuses to start and uploads cannot be queued until 0061 runs (\`pnpm db:migrate\`, or merge so Supabase applies it)`
+          : 'job_queue, worker_heartbeats, rate_limit_counters, ops_kv present');
 
       // ── 4. Preconditions of pending migrations ──────────────────────────
       if (pending.length === 0) {
@@ -504,7 +518,15 @@ export async function runDoctor(url: string, opts: DoctorOptions = {}): Promise<
         if (auditP && (auditP.upd || auditP.del)) writable.push('audit_log(update/delete)');
         add('app role', 'read-only tables', writable.length ? 'FAIL' : 'PASS',
           writable.length ? `${appRole} can write: ${writable.join(', ')} (tenant self-escalation)` : 'plans/billing/users read-only, audit_log append-only');
-        const revokedOrReadOnly = new Set([...IDENTITY_REVOKED, 'dsr_requests']);
+        const leakedOwnerOnly = OWNER_ONLY_TABLES.filter((t) => {
+          const p = priv.get(t);
+          return p && (p.sel || p.ins || p.upd || p.del);
+        });
+        add('app role', 'owner-only tables revoked', leakedOwnerOnly.length ? 'FAIL' : 'PASS',
+          leakedOwnerOnly.length
+            ? `${appRole} still has privileges on: ${leakedOwnerOnly.join(', ')} — re-run provision-rls`
+            : 'no access to job_queue/worker_heartbeats/rate_limit_counters/ops_kv');
+        const revokedOrReadOnly = new Set([...IDENTITY_REVOKED, ...OWNER_ONLY_TABLES, 'dsr_requests']);
         const ungranted = tables.filter((t) => !revokedOrReadOnly.has(t.t) && !t.sel).map((t) => t.t);
         add('app role', 'grants on tenant tables', ungranted.length ? 'WARN' : 'PASS',
           ungranted.length ? `no SELECT on: ${ungranted.join(', ')} — re-run provision-rls (tables created after the last grant)` : 'SELECT granted on every tenant table');

@@ -45,25 +45,16 @@ secrets. CI builds it on every PR.
 environment; Vercel preview builds lack secrets. Recommended: a second Supabase project + Vercel
 Preview environment variables.
 
-⚠️ **GitHub default branch.** On GitHub, `main` holds an unrelated placeholder history (a single
-commit with a stray Azure workflow, `.github/workflows/azure-webapps-node.yml`). The real code lives
-on the `claude/client-ready` line. Recommended steps for the repository owner (no force-push
-needed):
+**GitHub default branch:** done — `main` now holds the real codebase (`main` ==
+`claude/client-ready` via a regular merge) and is the Supabase GitHub
+integration's production branch, so a merge that touches `supabase/` deploys
+schema to production (`docs/SUPABASE-GITHUB-DEPLOY.md`). Still recommended:
+branch protection on `main` requiring the CI jobs, and a `staging` branch +
+project (`docs/BACKUPS-STAGING.md` §4).
 
-1. Merge the sprint PR into `claude/client-ready`, wait for CI to go green.
-2. Create a new branch from it, e.g. `git push origin claude/client-ready:production`
-   (or name it `trunk`).
-3. GitHub → Settings → General → **Default branch** → switch to that branch.
-4. Rename the old placeholder: Settings → Branches → rename `main` → `main-placeholder-2026`,
-   then rename the new branch to `main` (GitHub redirects open PRs automatically).
-   Alternative, if renames are not wanted: delete the placeholder `main` after step 3 and push
-   the real history as `main`.
-5. Vercel → Project → Settings → Git → **Production Branch** = `main`.
-6. Branch protection on `main`: require `typecheck + test`, `worker tests (job-scoped Redis)`,
-   `web build + typecheck`, `worker image (docker build)`, `pnpm audit`.
-7. Settings → Code security → enable **Dependency graph** (then make the dependency-review step
-   blocking in `ci.yml`).
-8. The Azure workflow disappears with the placeholder history; it was never part of the product.
+**Worker hosting:** `docs/WORKER-DEPLOY.md` (Fly.io primary, Render fallback).
+**Monitoring:** `docs/MONITORING.md` (Sentry, uptime checks, daily health digest).
+**Backups / staging:** `docs/BACKUPS-STAGING.md`.
 
 ## 4. Data residency and privacy
 
@@ -120,8 +111,11 @@ needed):
 - Health endpoints: web `/api/healthz`; worker `/health`, `/health/ready`.
 - The worker writes a heartbeat to Redis every 60 s; Vercel Cron emails the owner when it is
   stale for more than 10 minutes; the dashboard shows a banner.
-- Errors: Sentry hooks are built in and turn on when `SENTRY_DSN` is set (⚠️ not configured in
-  production yet). Failed jobs are also logged one line each.
+- Errors: Sentry is wired for the web server and the worker (PII-scrubbed); it turns on with
+  `SENTRY_DSN` + `pnpm add @sentry/node` (⚠️ not configured in production yet). Failed jobs are
+  also logged one line each.
+- Daily health digest email (06:45 IL): queue depths, failed jobs, OCR stuck > 30 min, failed
+  emails — set `HEALTH_DIGEST_EMAILS`. Uptime-check spec: `docs/MONITORING.md` §2.
 - Admin console at `/admin`: restaurants, plans/trials, leads (incl. erasure).
 
 ## 8. Costs

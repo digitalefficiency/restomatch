@@ -6,7 +6,7 @@ import type { Database } from '@restomatch/db';
  * Fail-fast environment validation for the web app.
  *
  * The app must NOT boot into production with missing secrets and then degrade
- * silently (lost invoices on an unset REDIS_URL, dead login on an unset
+ * silently (dead login on an unset
  * RESEND_API_KEY, inert RLS on an unset DATABASE_URL_APP). Call assertWebEnv()
  * once at startup (instrumentation) to turn those into a LOUD boot failure.
  *
@@ -30,7 +30,6 @@ const WebEnvSchema = z.object({
   APP_URL: z.string().url().optional(),
   RESEND_API_KEY: z.string().min(1).optional(),
   EMAIL_FROM: z.string().min(1).optional(),
-  REDIS_URL: z.string().min(1).optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   // Name the Supabase↔Vercel integration syncs for the new-style secret key.
   SUPABASE_SECRET_KEY: z.string().min(1).optional(),
@@ -65,7 +64,6 @@ export function assertWebEnv(env: NodeJS.ProcessEnv = process.env): WebEnv {
     // MissingSecret) — make it a boot failure instead (F4).
     if (!v.AUTH_SECRET && !v.NEXTAUTH_SECRET)
       missing.push('AUTH_SECRET (or NEXTAUTH_SECRET) — signs the session JWT; every login fails without it');
-    if (!v.REDIS_URL) missing.push('REDIS_URL — OCR/match/cron queue (uploads vanish without it)');
     if (!v.SUPABASE_SERVICE_ROLE_KEY && !v.SUPABASE_SECRET_KEY)
       missing.push('SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY) — signed scan URLs');
     // AUTH_ENC_KEY encrypts the TOTP secret at rest (Epic C). Required in prod so
@@ -136,6 +134,9 @@ function originOf(url: string | undefined): string | null {
  */
 export function webEnvWarnings(env: NodeJS.ProcessEnv = process.env): string[] {
   const warnings: string[] = [];
+  if (env.REDIS_URL) {
+    warnings.push('[env] WARNING: REDIS_URL is set but no longer used — the job queue, rate limits and heartbeat are in Postgres (0061). Remove it.');
+  }
   // WARN, never throw: a malformed value is a likely leftover from another
   // project, but bricking a live deploy over it would be worse than the leftover.
   if (env.NODE_ENV === 'production') {
@@ -188,6 +189,22 @@ function isTruthyFlag(value: string | undefined): boolean {
  * NODE_ENV=test). Otherwise an unset DATABASE_URL_APP is a LOUD boot failure
  * rather than a silent owner fallback.
  */
+/**
+ * `next build` imports every route module to collect page data, and the DB
+ * modules (lib/db.ts, lib/authDb.ts) resolve their URL at import. A build
+ * without database env (a Vercel Preview with no DATABASE_URL) died there, even
+ * though no query runs at build time. ONLY in the build phase, with the URL
+ * missing, those modules get this placeholder instead: postgres.js connects
+ * lazily, so it is never dialled unless a page really queries during the build
+ * (then the build fails loudly, as it should). Runtime is unchanged — the boot
+ * guard (assertWebEnv, instrumentation) still refuses to serve without the URLs.
+ */
+export const BUILD_PHASE_DB_PLACEHOLDER = 'postgres://build:build@build-phase-placeholder.invalid:5432/none';
+
+export function isNextBuildPhase(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.NEXT_PHASE === 'phase-production-build';
+}
+
 export function resolveWebDbUrl(env: NodeJS.ProcessEnv = process.env): string {
   const appUrl = env.DATABASE_URL_APP;
   if (appUrl && appUrl.length > 0) return appUrl;
@@ -195,6 +212,8 @@ export function resolveWebDbUrl(env: NodeJS.ProcessEnv = process.env): string {
   const ownerFallbackAllowed =
     (env.NODE_ENV ?? 'development') === 'test' || isTruthyFlag(env.ALLOW_OWNER_DB);
   if (ownerFallbackAllowed && env.DATABASE_URL) return env.DATABASE_URL;
+
+  if (isNextBuildPhase(env)) return BUILD_PHASE_DB_PLACEHOLDER;
 
   throw new Error(
     '[env] DATABASE_URL_APP is required: the web app must serve tenant traffic on the non-owner ' +

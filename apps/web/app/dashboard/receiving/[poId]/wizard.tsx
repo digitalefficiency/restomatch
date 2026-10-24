@@ -213,7 +213,7 @@ export function ReceivingWizard({
         });
         setInvoiceId(reg.invoiceId);
 
-        // Redis/worker unreachable: the invoice is saved but OCR was not queued —
+        // Queue database unreachable: the invoice is saved but OCR was not queued —
         // say so and receive against the order instead of polling.
         if ('ocrQueued' in reg && reg.ocrQueued === false) {
           setError(t('errors.queueUnavailable'));
