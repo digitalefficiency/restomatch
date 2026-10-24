@@ -23,6 +23,8 @@
 import {
   assertSeedTarget,
   and,
+  DEMO_MAIN_BUSINESS_ID,
+  DEMO_MAIN_NAME,
   createDb,
   desc,
   discrepancies,
@@ -303,9 +305,17 @@ async function seedSupplierConfirm(restaurantId: string) {
 }
 
 async function main() {
-  const [named] = await db.select().from(restaurants).where(eq(restaurants.name, 'כפר הזיתים')).limit(1);
-  const restaurant = named ?? (await db.select().from(restaurants).limit(1))[0];
-  if (!restaurant) throw new Error('no restaurant — run the base seed first');
+  // Only ever the main demo restaurant (reseed:demo passes DEMO_RESTAURANT_ID on
+  // the shared DB); never a name-only match, never "any restaurant".
+  const only = process.env.DEMO_RESTAURANT_ID?.trim();
+  const [restaurant] = only
+    ? await db.select().from(restaurants).where(eq(restaurants.id, only)).limit(1)
+    : await db
+        .select()
+        .from(restaurants)
+        .where(and(eq(restaurants.businessId, DEMO_MAIN_BUSINESS_ID), eq(restaurants.name, DEMO_MAIN_NAME)))
+        .limit(1);
+  if (!restaurant) throw new Error('no demo restaurant — run the base seed first');
   const rid = restaurant.id;
 
   const before = await leakTotalAgorot(rid);
