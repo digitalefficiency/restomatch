@@ -135,13 +135,13 @@ export function BranchSwitcher({
         title={`${t('switcher.viaOwned')} ${ownedTarget.restaurantName}`}
         data-testid="branch-footer-link"
         data-href={href}
-        className={cn('inline-flex items-center gap-1', focusRing, className)}
+        className={cn('touch-target inline-flex items-center gap-1', focusRing, className)}
       >
         <Icon className="h-3.5 w-3.5" aria-hidden="true" />
         {label}
       </button>
     ) : (
-      <Link href={href} data-testid="branch-footer-link" data-href={href} className={cn('inline-flex items-center gap-1', className)} onClick={() => setOpen(false)}>
+      <Link href={href} data-testid="branch-footer-link" data-href={href} className={cn('touch-target inline-flex items-center gap-1', className)} onClick={() => setOpen(false)}>
         <Icon className="h-3.5 w-3.5" aria-hidden="true" />
         {label}
       </Link>

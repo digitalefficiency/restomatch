@@ -37,7 +37,12 @@ let historyHooked = false;
 function hookHistory() {
   if (historyHooked || typeof window === 'undefined') return;
   historyHooked = true;
-  const announce = () => document.dispatchEvent(new Event(ROUTE_COMMIT_EVENT));
+  // Deferred: Next writes history from a useInsertionEffect (HistoryUpdater),
+  // where a synchronous dispatch would schedule a React update inside the commit
+  // ("useInsertionEffect must not schedule updates"; during hydration of a
+  // late-streamed segment it can also force React off the server HTML).
+  const announce = () =>
+    queueMicrotask(() => document.dispatchEvent(new Event(ROUTE_COMMIT_EVENT)));
   for (const method of ['pushState', 'replaceState'] as const) {
     const original = window.history[method];
     window.history[method] = function (this: History, ...args: Parameters<History['pushState']>) {

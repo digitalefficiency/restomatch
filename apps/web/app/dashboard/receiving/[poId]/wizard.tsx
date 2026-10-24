@@ -496,6 +496,8 @@ export function ReceivingWizard({
       await submitReceipt.mutateAsync({
         grId,
         signatureUrl: image?.publicUrl ?? undefined,
+        // The count is in: the server re-matches this invoice against it.
+        invoiceIds: invoiceId ? [invoiceId] : undefined,
       });
       setConfirmedAt(new Date().toISOString());
       setStep('CONFIRMED');

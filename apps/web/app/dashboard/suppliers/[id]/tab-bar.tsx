@@ -61,7 +61,7 @@ export function SupplierTabBar({
               href={`/dashboard/suppliers/${supplierId}?tab=${key}`}
               scroll={false}
               className={cn(
-                '-mb-px inline-block whitespace-nowrap border-b-2 px-4 py-2 text-sm font-semibold transition-colors',
+                'touch-target -mb-px inline-block whitespace-nowrap border-b-2 px-4 py-2 text-sm font-semibold transition-colors',
                 'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
                 active === key
                   ? 'border-primary text-primary'

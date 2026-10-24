@@ -163,6 +163,19 @@ pnpm --filter @restomatch/worker check:demo && pnpm db:doctor
 [check-demo] ✔ demo data coherent
 ```
 
+**אחרי שנתוני גל 1 נכנסו ל-main** (החזרים, מתכונים, ספירות מלאי, חוזי מחיר) מופיעות גם השורות האלה. בשלב 6 ההרצה מדפיסה `feature seed …: will run` לכל אחד מהם:
+
+```
+[check-demo]   recovery: 74 claims, 64 staged
+[check-demo]   recipes: 10 dishes, 59 items
+[check-demo]   inventory: 2026-09-30 ₪11134.46, 2026-10-24 ₪13474.46 (sales ₪136400.00)
+[check-demo]   inventory: actual food cost 30.2% (₪41135.36 of ₪136400.00)
+[check-demo]   contracts: 10 contract prices, 1 price alerts
+```
+
+- אם בבדיקה היבשה (שלב 5) מופיע `refusing: feature seed(s) not scoped to the demo tenants`, **עוצרים**. אחד מסקריפטי גל 1 עוד לא מוגבל למסעדות הדמו, ולא מריצים אותו על פרודקשן. מעבירים את ההודעה למפתחים.
+- אם מופיע `a feature seed moved the leak hero`, עוצרים ושולחים למפתחים.
+
 ואחר כך מ-`db:doctor`: **0 FAIL**.
 
 **מה הקובע:** השורה `✔ demo data coherent` ו-0 FAIL.

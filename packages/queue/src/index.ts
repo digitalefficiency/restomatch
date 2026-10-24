@@ -116,9 +116,9 @@ export const MATCH_INVOICE_QUEUE = 'match-invoice';
 export interface MatchInvoiceQueueJob {
   restaurantId: string;
   invoiceId: string;
-  /** Re-run the match for an invoice that was already matched (receiving fix, #94). */
+  /** Replace an earlier run (receiving.submitReceipt: the count is now in). */
   rematch?: boolean;
-  /** Pin the PO to match against instead of discovering it. */
+  /** The PO of the receipt the invoice was scanned on — matched against it, not a discovered one. */
   poId?: string;
 }
 
