@@ -320,3 +320,57 @@ html {
   content-visibility: auto;
   contain-intrinsic-size: auto 640px;
 }
+
+/* ───────────── S9 accessibility + performance (additive block) ───────────── */
+
+/* Metric-matched fallback (the numbers next/font computes for Heebo vs Arial):
+   text painted before Heebo arrives takes the same space, so the swap doesn't
+   re-wrap lines (measured: CLS 0.216 → 0.0003 on /dashboard/chain, English, 390 px). */
+@font-face {
+  font-family: 'Heebo Fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  size-adjust: 99.89%;
+  ascent-override: 104.9%;
+  descent-override: 42.14%;
+  line-gap-override: 0%;
+}
+
+@layer base {
+  :root {
+    --font-heebo: 'Heebo', 'Heebo Fallback';
+  }
+
+  /* Touch targets ≥ 44×44 CSS px on touch screens (phones, tablets). Desktop
+     (fine pointer) keeps the compact sizes. In the base layer, so an explicit
+     min-h-* / min-w-* utility on a component still wins. */
+  @media (pointer: coarse) {
+    button,
+    select,
+    summary,
+    [role='button'],
+    [role='radio'],
+    [role='tab'],
+    input:not([type='checkbox']):not([type='radio']):not([type='hidden']):not([type='range']):not([type='file']) {
+      min-height: 44px;
+    }
+    button,
+    summary,
+    [role='button'],
+    [role='radio'],
+    [role='tab'] {
+      min-width: 44px;
+    }
+    /* Stand-alone links styled as pills / "see all" actions opt in. The
+       dashboard leak hero's drill-down CTA is matched by its section (its
+       className belongs to the light-theme restyle). */
+    .touch-target,
+    section[aria-labelledby='leak-hero-label'] a {
+      min-height: 44px;
+    }
+    /* A checkbox/radio inside its <label>: the whole label is the target. */
+    label:has(> input[type='checkbox']),
+    label:has(> input[type='radio']) {
+      min-height: 44px;
+    }
+  }
+}

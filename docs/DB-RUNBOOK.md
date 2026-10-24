@@ -243,16 +243,16 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/restomatch_dev pnpm db:
 magic links still work too. `owner@` is also the platform admin (so `/admin` is demo-able);
 `receiver@` (Somchai K.) has `preferred_locale = 'en'`.
 
-**What the demo data shows** (numbers as of a seed on 2026-10-18 — they scale with the date):
+**What the demo data shows** (seed with `DEMO_TODAY=2026-10-25`, read off the screens on 2026-10-25 at 11:00 Israel time — the demo morning; they scale with the date):
 
 | Screen | What you see |
 |---|---|
-| Overview hero | **₪572 leaked this month = 2.0 % of ₪28,389 checked food spend** (target 1.5 %; the two pending ריכוז invoices are not in the denominator); ₪296 caught before payment; ₪276 claimed back from suppliers; 9 of 24 matched invoices with a finding |
-| Last month (hero comparison + monthly leak report) | **₪1,137 = 1.8 % of ₪63,205**, 20 of 52 invoices — different items: lamb, chicken thighs, calamari, red tuna, wine, orange juice, peppers, chickpeas, olive oil, short deliveries (tomatoes, lemons, sourdough, rice, tahini, mineral water, sea bream, ground beef), unordered challah / cola / take-away boxes; all resolved. (August is partial — history starts 8 weeks back.) |
-| Approvals queue | 5 open items (entrecôte and salmon price creep, beer keg +10.6 %, a short tomato delivery billed in full); older ones resolved via credit notes |
-| Leak detective | entrecôte ₪139 → ₪149, salmon ₪89 → ₪96, draft-beer keg ₪520 → ₪575 |
-| Invoices | 90 matched (ocr'd photos), 2 **consolidated invoices (חשבוניות ריכוז) parsed and pending** — they cover this week's bakery drops and the latest dairy delivery, which have goods receipts but no per-delivery invoice, so spend is not double-counted and nothing alarms |
-| Receiving | **3 POs due today** (10:00 produce, 12:30 butcher, 15:00 dairy) with English line names for `receiver@`; 2 more for the coming days |
+| Overview hero | **₪760 leaked this month (₪759.54) = 1.8 % of ₪42,263 checked food spend (₪42,263.35)** (target 1.5 %; the two pending ריכוז invoices, ₪2,847 incl. VAT, are not in the denominator); ₪296 caught before payment (on invoices not yet marked paid); ₪464 claimed back from suppliers; **13 of 35** checked invoices with a finding (the `seed-demo` log prints 13/37 — it also counts the 2 pending ריכוז invoices); 4 waiting for approval |
+| Last month (hero comparison + monthly leak report) | **₪1,059 = 1.7 % of ₪63,301** — different items: lamb, chicken thighs, calamari, red tuna, wine, orange juice, peppers, chickpeas, olive oil, short deliveries (tomatoes, lemons, sourdough, rice, tahini, mineral water, sea bream, ground beef), unordered challah / cola / take-away boxes; all resolved. (August is partial — history starts 8 weeks back.) |
+| Approvals queue | **4** open items on screen, ₪296 at risk, 2 blockers: beer keg ST-24108 ₪104.80 (₪522.60 → ₪575), salmon MF-24108 ₪52.50, entrecôte HK-24108 ₪100.00, cherry tomatoes SH-24121 ₪38.70 (6.5 kg received, 9.5 billed). The `seed-demo` log says "5 open" — the screen shows 4. Approving ST-24108 moves "claimed" ₪464 → ₪568 and the queue to 3 |
+| Leak detective | 30-day price creep ₪336, 3 hotspots: draft-beer keg ₪520 → ₪575 (+10.6 %, ₪110.00), salmon ₪89 → ₪96 (+7.9 %, ₪72.98), entrecôte ₪139 → ₪149 (+7.2 %, ₪152.90) — the 30-day window moves with the date |
+| Invoices | 190 checked (ocr'd photos, history from July), 2 **consolidated invoices (חשבוניות ריכוז) parsed and pending** — they cover this week's bakery drops and the latest dairy delivery, which have goods receipts but no per-delivery invoice, so spend is not double-counted and nothing alarms |
+| Receiving | **3 POs due today** — HaSharon Produce 10:00 (11 items, ₪875.53 estimate), HaKerem Butchery 12:30 (6), Galilee Dairies 15:00 (7) — with English line names for `receiver@`; 2 more for the coming days. Produce suppliers are VAT-exempt (VAT 0) |
 | Catalog | 10 supplier price lists (56 items, מק״ט, list price, English names) as committed imports + learned aliases |
 
 The story behind the numbers: 10 fictional Israeli suppliers, 56 products in Hebrew + English,
@@ -261,10 +261,11 @@ the real matching + approvals + baselines engines. Re-seed the morning of the de
 "today" is right, or the evening before with `DEMO_TODAY=<demo date>`:
 
 ```bash
-DEMO_TODAY=2026-10-19 ./scripts/dev-setup.sh
+DEMO_TODAY=2026-10-25 ./scripts/dev-setup.sh
 # or just the data:
-DATABASE_URL=postgres://postgres:postgres@localhost:5432/restomatch_dev DEMO_TODAY=2026-10-19 pnpm --filter @restomatch/db seed
-DATABASE_URL=postgres://postgres:postgres@localhost:5432/restomatch_dev DEMO_TODAY=2026-10-19 pnpm --filter @restomatch/worker exec tsx scripts/seed-demo.ts
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/restomatch_dev DEMO_TODAY=2026-10-25 pnpm --filter @restomatch/db seed
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/restomatch_dev DEMO_TODAY=2026-10-25 pnpm --filter @restomatch/worker exec tsx scripts/seed-demo.ts
+# or the whole offline demo (seed + build + app on :3000): scripts/demo-local.sh
 ```
 
 `seed-demo` prints the exact hero numbers (it calls the same `computeLeakHero` the dashboard uses).
@@ -273,11 +274,13 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/restomatch_dev DEMO_TOD
 (`pnpm --filter @restomatch/worker seed:chain-demo`, run by `dev-setup.sh` after `seed-demo`)
 turns the demo tenant into a 3-branch chain on one billing account (plan **`chain`**, active):
 
-| Branch | This month (seed on 2026-10-18) | Story |
+| Branch | This month (seed with `DEMO_TODAY=2026-10-25`) | Story |
 |---|---|---|
-| כפר הזיתים (main) | **unchanged: ₪572 = 2.0 % of ₪28,389** | the base demo above — the script asserts these numbers did not move |
-| כפר הזיתים — חיפה | ₪342 = **0.8 %** of ₪41,095, 9 open | the clean branch: occasional small price slips |
-| כפר הזיתים — ירושלים | ₪782 = **3.1 %** of ₪25,583, 17 open | the leaky branch: frequent price bumps, short deliveries billed in full, a local butcher (בשר ההר) creeping every price |
+| כפר הזיתים (main) | **unchanged: ₪760 = 1.8 % of ₪42,263**, 4 open | the base demo above — the script asserts these numbers did not move |
+| כפר הזיתים — חיפה | ₪355 = **0.6 %** of ₪61,740, 6 open on screen (log: 9) | the clean branch: occasional small price slips |
+| כפר הזיתים — ירושלים | ₪975 = **2.9 %** of ₪33,056, 15 open on screen (log: 17) | the leaky branch: frequent price bumps, short deliveries billed in full, a local butcher (בשר ההר) creeping every price |
+
+Chain dashboard on 2026-10-25: **₪2,090 = 1.5 % of ₪137,059** checked spend, ₪819 caught before payment, ₪1,270 claimed, 25 open; leakiest branch Jerusalem; "branch to check this week" (19–25 Oct): Jerusalem ₪343 · 3.8 %. Last month (`?p=last_month`): ₪1,892 of ₪180,336 (1 %).
 
 Each new branch buys from five of the main branch's suppliers (same ח.פ, so the chain dashboard
 merges them in "top suppliers") plus one local supplier, with 10 weeks of deliveries through the
