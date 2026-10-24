@@ -403,4 +403,55 @@ describe('receive the rest — two deliveries, two invoices, one receipt', () =>
       await cleanup(d.grId, [d.inv1, s.inv2]);
     }
   });
+
+  it('(double bill) invoice 2 re-bills units invoice 1 already billed, received once → QTY_OVER on invoice 2 only', async () => {
+    const before = await hero();
+    const d = await firstDelivery();
+    // The rest arrives and is counted, but the supplier bills the WHOLE first line again.
+    await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, d.grId));
+    const g = d.grLineIds.find((x) => x.poLineId === d.short.id)!;
+    await db.update(grLines).set({ qtyReceived: String(d.short.qty) }).where(eq(grLines.id, g.id));
+    // Invoice 1 bills the full line too (re-read after the rest came) — 'half' is already on it.
+    await db.update(invoiceLines).set({ qtyBilled: String(d.short.qty), lineTotal: (Math.round(d.short.qty * d.short.price * 100) / 100).toFixed(2) })
+      .where(and(eq(invoiceLines.invoiceId, d.inv1), eq(invoiceLines.rawDescription, d.short.desc ?? '—')));
+    await db.execute(sql`update invoices set total_excl_vat = t, total_incl_vat = t
+      from (select sum(line_total) as t from invoice_lines where invoice_id = ${d.inv1}) s where id = ${d.inv1}`);
+    const inv2 = await invoiceFor(d.grId, '2', [{ l: d.short, qty: d.short.qty }]);
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, d.grId));
+    try {
+      await matchInvoiceForJob(db, { restaurantId, invoiceId: d.inv1, rematch: true, poId });
+      await matchInvoiceForJob(db, { restaurantId, invoiceId: inv2, rematch: true, poId });
+      expect(await typesOf(d.inv1)).toEqual([]); // the first bill is the real one
+      const rows = await db
+        .select({ type: discrepancies.type, delta: discrepancies.deltaAmount })
+        .from(discrepancies)
+        .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+        // Not 'info': the line has nothing left to order/receive (0 vs 0 reads as a ₪0 info note).
+        .where(and(eq(matchRuns.invoiceId, inv2), sql`${discrepancies.severity} <> 'info'`));
+      expect(rows.map((r) => r.type)).toEqual(['QTY_OVER']);
+      const expected = Math.round(d.short.qty * d.short.price * 100);
+      expect(Math.round(Number(rows[0]!.delta) * 100)).toBe(expected);
+      expect((await hero()) - before).toBe(expected);
+    } finally {
+      await cleanup(d.grId, [d.inv1, inv2]);
+    }
+  });
+
+  it("a sibling's run that goes away stops hiding lines on the next match (no stale state)", async () => {
+    const d = await firstDelivery();
+    const s = await secondDelivery(d);
+    try {
+      expect(await typesOf(s.inv2)).toEqual([]);
+      // Invoice 1's run is gone (invoice deleted / moved to another order): the
+      // stored run of invoice 2 is a snapshot until its next match…
+      await db.delete(matchRuns).where(eq(matchRuns.invoiceId, d.inv1));
+      expect(await typesOf(s.inv2)).toEqual([]);
+      // …which reads the live order: the lines nobody bills now are MISSING again.
+      await matchInvoiceForJob(db, { restaurantId, invoiceId: s.inv2, rematch: true, poId });
+      const types = await typesOf(s.inv2);
+      expect(types.filter((t) => t === 'MISSING_ON_INVOICE')).toHaveLength(lines.length - 1);
+    } finally {
+      await cleanup(d.grId, [d.inv1, s.inv2]);
+    }
+  });
 });

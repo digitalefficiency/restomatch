@@ -297,7 +297,6 @@ export async function buildMatchInputForInvoice(
       unit: p.unit,
       unitPriceExpected: p.unitPriceExpected == null ? null : Number(p.unitPriceExpected),
     }));
-    poLineInputs = await withoutLinesBilledElsewhere(db, restaurantId, invoiceId, po.id, poLineInputs, invoiceLineInputs);
 
     const grs = await db
       .select({ id: goodsReceipts.id })
@@ -323,6 +322,15 @@ export async function buildMatchInputForInvoice(
         qtyReceived: num(g.qtyReceived),
       }));
     }
+    ({ poLines: poLineInputs, grLines: grLineInputs } = await splitBilledOrder(
+      db,
+      restaurantId,
+      { id: invoiceId, createdAt: inv.createdAt },
+      po.id,
+      poLineInputs,
+      grLineInputs,
+      invoiceLineInputs,
+    ));
   }
 
   // ── Tolerances, vat rate, baseline window (restaurant loaded above). ──
@@ -439,37 +447,78 @@ export async function buildMatchInputForInvoice(
 /**
  * One order, several invoices ("receive the rest": a partial delivery billed on
  * one invoice, the rest delivered and billed on another — one receipt per PO).
- * Each invoice is matched against the whole PO, so a PO line that ANOTHER
- * invoice of this order bills, and this one doesn't, would read as
- * MISSING_ON_INVOICE (warn, the line's full value) on this one — a false leak of
- * the part already billed. Such lines are left out of this invoice's match.
+ * The engine checks ONE invoice against the whole PO + the cumulative receipt, so
+ * for an invoice of a split-billed order this narrows the input to its share:
  *
- * A line this invoice bills always stays (so its qty / price checks run), and a
- * line no invoice of the order bills stays MISSING. Pairing mirrors the engine:
- * by product, or by supplier SKU for a line with no product. "Another invoice of
- * this order" = one with a match run on this PO (a sibling not matched yet is
- * picked up on its own run: the receipt submit enqueues the never-matched first).
+ *  • a PO line ANOTHER invoice of the order bills, and this one doesn't, is left
+ *    out — else it reads as MISSING_ON_INVOICE (warn, the line's full value): a
+ *    false leak of the part already billed;
+ *  • what EARLIER invoices of the order already billed (same unit as the PO line)
+ *    comes off both the ordered and the received qty of a line this one bills —
+ *    so a normal split is clean, and units billed twice (received once) read as
+ *    QTY_OVER on the later invoice only, never on both.
  *
- * Known limit (post-demo, api layer): billing the same units on two invoices is
- * not caught here — each is checked against the cumulative receipt on its own.
+ * Pairing mirrors the engine: by product, or by supplier SKU for a line with no
+ * product. "Invoice of this order" = one whose CURRENT match run is on this PO
+ * (a re-match replaces the run; a run moved to another PO or deleted with its
+ * invoice stops counting at once). "Earlier" = created before this one, ties by
+ * id — the same order duplicate detection uses. Stored runs are snapshots: a
+ * sibling that goes away changes this invoice's findings on its next match
+ * (match.runForInvoice / the next receipt close), not retroactively.
  */
-async function withoutLinesBilledElsewhere(
+async function splitBilledOrder(
   db: Database,
   restaurantId: string,
-  invoiceId: string,
+  inv: { id: string; createdAt: Date },
   poId: string,
   po: PoLineInput[],
+  gr: GrLineInput[],
   own: InvoiceLineInput[],
-): Promise<PoLineInput[]> {
+): Promise<{ poLines: PoLineInput[]; grLines: GrLineInput[] }> {
   const others = await db
-    .selectDistinct({ productId: invoiceLines.productId, supplierSku: invoiceLines.supplierSku })
+    .select({
+      productId: invoiceLines.productId,
+      supplierSku: invoiceLines.supplierSku,
+      unit: invoiceLines.unit,
+      qtyBilled: invoiceLines.qtyBilled,
+      earlier: sql<boolean>`(${invoices.createdAt} < ${inv.createdAt.toISOString()}::timestamptz
+        or (${invoices.createdAt} = ${inv.createdAt.toISOString()}::timestamptz and ${invoices.id} < ${inv.id}))`,
+    })
     .from(invoiceLines)
     .innerJoin(matchRuns, eq(matchRuns.invoiceId, invoiceLines.invoiceId))
-    .where(and(eq(matchRuns.restaurantId, restaurantId), eq(matchRuns.poId, poId), ne(matchRuns.invoiceId, invoiceId)));
-  if (others.length === 0) return po;
-  const billedBy = (lines: Array<{ productId: string | null; supplierSku?: string | null }>, l: PoLineInput) =>
-    lines.some((x) => (l.productId ? x.productId === l.productId : !!l.supplierSku && x.supplierSku === l.supplierSku));
-  return po.filter((l) => billedBy(own, l) || !billedBy(others, l));
+    .innerJoin(invoices, eq(invoices.id, invoiceLines.invoiceId))
+    .where(and(eq(matchRuns.restaurantId, restaurantId), eq(matchRuns.poId, poId), ne(matchRuns.invoiceId, inv.id)));
+  if (others.length === 0) return { poLines: po, grLines: gr };
+  const pairs = (x: { productId: string | null; supplierSku?: string | null }, l: PoLineInput) =>
+    l.productId ? x.productId === l.productId : !!l.supplierSku && x.supplierSku === l.supplierSku;
+  const round = (n: number) => Math.round(n * 1000) / 1000;
+
+  const poLines: PoLineInput[] = [];
+  const received = new Map<string, number>(); // what to take off each PO line's received qty
+  for (const l of po) {
+    const billsIt = own.some((x) => pairs(x, l));
+    if (!billsIt) {
+      if (!others.some((x) => pairs(x, l))) poLines.push(l); // nobody bills it: still MISSING
+      continue;
+    }
+    const before = others
+      .filter((x) => x.earlier && x.unit === l.unit && pairs(x, l))
+      .reduce((t, x) => t + num(x.qtyBilled), 0);
+    if (before <= 0) {
+      poLines.push(l);
+      continue;
+    }
+    poLines.push({ ...l, qtyOrdered: Math.max(0, round(l.qtyOrdered - before)) });
+    received.set(l.id, before);
+  }
+  const grLines = gr.map((g) => {
+    const left = g.poLineId ? received.get(g.poLineId) : undefined;
+    if (!left || !g.poLineId) return g;
+    const take = Math.min(left, g.qtyReceived);
+    received.set(g.poLineId, round(left - take));
+    return { ...g, qtyReceived: round(g.qtyReceived - take) };
+  });
+  return { poLines, grLines };
 }
 
 /**
