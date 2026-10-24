@@ -19,6 +19,7 @@ export const RiseLine: React.FC<{
     <div style={{ overflow: 'hidden', paddingBottom: '0.12em', marginBottom: '-0.12em', ...style }}>
       <div
         style={{
+          textWrap: 'balance',
           transform: `translateY(${y}%)`,
           filter: `blur(${(1 - p) * 8 + e * 6}px)`,
           opacity: p * (1 - e),

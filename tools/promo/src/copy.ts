@@ -7,16 +7,17 @@ export type Locale = 'he' | 'en';
 
 /** Facts shown on screen (seeded demo tenant, dashboard hero, Oct 2026). */
 export const FACTS = {
-  leak: 572, // "דלף החודש" — owner.leakHero
-  spend: 28389, // pre-VAT checked spend this month
-  leakPct: '2%', // 572 / 28,389 = 2.01% — the app's hero shows "2%"
+  // Demo seed DEMO_TODAY=2026-10-25 (the live demo's seed), month = October 2026.
+  leak: 760, // "דלף החודש" — owner.leakHero
+  spend: 42263, // pre-VAT checked spend this month
+  leakPct: '1.8%', // 760 / 42,263 = 1.80% — the app's hero shows "1.8%"
   caught: 296, // "נתפס לפני תשלום" — leak on unpaid invoices
-  claimed: 276, // "נדרש מהספקים" — accepted to claim back
-  flagged: 9, // invoices with a leak
-  checked: 24, // checked invoices (dashboard "9 מתוך 24")
+  claimed: 464, // "נדרש מהספקים" — accepted to claim back
+  flagged: 13, // invoices with a leak
+  checked: 35, // checked invoices (dashboard "13 מתוך 35")
   beerFrom: 520, // leak detective: beer keg baseline ₪520.00
   beerTo: 575, // last price ₪575.00 (+10.6%)
-  chainLeakPct: '3.1%', // /dashboard/chain: worst branch (Jerusalem) — seed:chain-demo
+  chainLeakPct: '2.9%', // /dashboard/chain: worst branch (Jerusalem ₪975 of ₪33,056) — seed:chain-demo
   pilotTarget: '1.5%', // North Star / pilot target (docs/ICP.md, AGENTS.md)
 };
 export type Facts = typeof FACTS;
@@ -71,7 +72,7 @@ const he = {
     heatTitle: 'בלש הדליפות',
     heatSub: 'איפה המחיר מזחל, ומי מקצר משלוחים.',
     chipBeer: 'בירה מהחבית: {from} ← {to}',
-    apprTitle: 'עוצרים לפני התשלום',
+    apprTitle: 'עוצרים לפני התשלום.',
     apprSub: 'כל פער מגיע לאדם הנכון — מאשרים, דוחים, או דורשים זיכוי.',
     chipAppr: 'חסום עד אישור שלך:',
     claimTitle: 'מכתב דרישת זיכוי',
@@ -145,12 +146,12 @@ const en: typeof he = {
     heroTitle: 'One number. In shekels.',
     heroSub: 'What leaked this month — and what you can still stop.',
     chipLeak: 'Leaked this month',
-    chipPct: 'of food spend',
+    chipPct: 'of spend',
     chipCaught: 'Caught before payment',
     heatTitle: 'Leak detective',
     heatSub: 'Where prices creep, and who short-delivers.',
     chipBeer: 'Draft beer keg: {from} → {to}',
-    apprTitle: 'Stop it before you pay',
+    apprTitle: 'Stop it before you pay.',
     apprSub: 'Every gap goes to the right person — approve, reject, or claim a credit.',
     chipAppr: 'Blocked until you approve:',
     claimTitle: 'Credit-request letters',

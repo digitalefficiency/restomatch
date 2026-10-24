@@ -393,12 +393,12 @@ function PriceTrendCard({ product }: { product: PriceTrendProduct }) {
   const trendUp = product.trendPct > 0.5;
   const trendDown = product.trendPct < -0.5;
   // Rising price = leak (danger), falling = money-green, flat = muted.
-  const color = trendUp ? '#FF5C7A' : trendDown ? '#22D39A' : '#9DB2A6';
+  const color = trendUp ? '#B80F2A' : trendDown ? '#066B4A' : '#5A6A62';
   const fillStart = trendUp
-    ? 'rgba(255,92,122,0.22)'
+    ? 'rgba(184,15,42,0.16)'
     : trendDown
-      ? 'rgba(34,211,154,0.22)'
-      : 'rgba(157,178,166,0.14)';
+      ? 'rgba(6,107,74,0.16)'
+      : 'rgba(90,106,98,0.12)';
 
   return (
     <div className="rounded-2xl border border-line bg-surface p-5 shadow-card">

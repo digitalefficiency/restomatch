@@ -10,7 +10,7 @@ import { FadeUp, RiseLine } from '../components/primitives';
 export const PHONE_DASH_DURATION = 220;
 
 // Leak hero card on the phone capture (units of the 390-px screen width).
-const HERO = { x0: 0.07, y0: 0.64, x1: 0.93, y1: 1.05 };
+const HERO = { x0: 0.05, y0: 1.4, x1: 0.95, y1: 1.8 };
 const TOP = 0.11;
 
 /** Vertical cut: the owner's dashboard on a phone (real capture), spotlight on the ₪ hero. */

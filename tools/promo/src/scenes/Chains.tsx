@@ -11,8 +11,8 @@ export const CHAINS_DURATION = 150;
 
 // Branch-ranking row #1 (leakiest branch) on the REAL /dashboard/chain capture (units of image width).
 const ROW: Record<Locale, [number, number, number, number]> = {
-  he: [0.5, 0.541, 0.883, 0.575], // % of spend · leak · branch
-  en: [0.117, 0.541, 0.48, 0.575],
+  he: [0.44, 0.583, 0.883, 0.616], // % of spend · leak · branch
+  en: [0.117, 0.583, 0.54, 0.616],
 };
 
 /** Chains & branches — real S8 chain dashboard (seed:chain-demo), spotlight on the leakiest branch. */

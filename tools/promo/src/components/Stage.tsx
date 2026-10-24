@@ -14,9 +14,7 @@ export const DeviceZone: React.FC<{ locale: 'he' | 'en'; children: React.ReactNo
   const vertical = height > width;
   const fade = vertical
     ? 'linear-gradient(to bottom, transparent 0, black 60px, black 100%)'
-    : locale === 'he'
-      ? 'linear-gradient(to left, transparent 0, black 70px, black 100%)'
-      : 'linear-gradient(to right, transparent 0, black 70px, black 100%)';
+    : 'linear-gradient(to right, transparent 0, black 60px, black calc(100% - 60px), transparent 100%)';
   return (
     <div
       style={{
@@ -182,10 +180,11 @@ export const Callout: React.FC<{ locale: 'he' | 'en'; a: number; accent?: string
           background: 'rgba(14,21,18,0.85)',
           border: `1.5px solid ${accent}88`,
           boxShadow: `0 0 40px ${accent}22`,
-          fontSize: 32,
+          fontSize: 29,
           fontWeight: 700,
           color: C.ink,
           maxWidth: '100%',
+          whiteSpace: 'nowrap',
         }}
       >
         <span style={{ width: 12, height: 12, borderRadius: 99, background: accent, boxShadow: `0 0 14px ${accent}`, flex: 'none' }} />

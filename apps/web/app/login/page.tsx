@@ -107,7 +107,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
   }
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center p-6">
+    <main className="relative flex min-h-screen items-center justify-center p-6 pb-[calc(1.5rem+var(--consent-h,0px))]">
       {/* S13 receiver PWA: no queued photos survive a sign-out / expired session (shared devices). */}
       <PwaQueueReset />
       <div className="absolute end-4 top-4">
@@ -200,7 +200,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
             defaultValue={lockedEmail}
             readOnly={!!lockedEmail}
           />
-          <Button type="submit" variant="secondary" className="w-full">
+          <Button type="submit" data-keep-clear variant="secondary" className="w-full">
             {t('login.magicSubmit')}
           </Button>
         </form>

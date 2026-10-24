@@ -34,10 +34,12 @@ export function zones(width: number, height: number, locale: 'he' | 'en'): Zones
   const margin = Math.round(width * SAFE); // title-safe
   const captionX = locale === 'he' ? width - capW : margin;
   const caption = { x: captionX, y: Math.round(height * SAFE), w: capW - margin, h: Math.round(height * (1 - 2 * SAFE)) };
+  // device zone ends at the title-safe margin on the outer side, so a pushed-in spotlight
+  // (and the text inside it) never crosses the 5% safe edge
   const device =
     locale === 'he'
-      ? { x: 0, y: 0, w: width - capW - GUTTER, h: height }
-      : { x: margin + capW - margin + GUTTER, y: 0, w: width - capW - GUTTER, h: height };
+      ? { x: margin, y: 0, w: width - capW - GUTTER - margin, h: height }
+      : { x: capW + GUTTER, y: 0, w: width - capW - GUTTER - margin, h: height };
   return { caption, device };
 }
 

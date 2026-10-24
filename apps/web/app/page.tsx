@@ -8,7 +8,7 @@ import { auth } from '@/auth';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { landing } from '@/lib/i18n/messages/landing';
 import { formatNumber } from '@/lib/i18n/format';
-import { heroMedia, promoVideoFor } from '@/lib/heroMedia';
+import { heroLoopFor, heroMedia, promoVideoFor } from '@/lib/heroMedia';
 import { formatIls } from '@/lib/money';
 import { landingFlag } from '@/lib/landingFlags';
 import { cn } from '@/lib/components/cn';
@@ -67,12 +67,13 @@ export default async function Home() {
 
   const t = await getT(landing);
   const locale = await getLocale();
+  const heroLoop = heroLoopFor(locale);
   // The hero poster is the LCP: fetch it first, ahead of scripts and fonts.
   if (heroMedia.available) {
-    preload(heroMedia.poster, {
+    preload(heroLoop.poster, {
       as: 'image',
       fetchPriority: 'high',
-      imageSrcSet: heroMedia.posterSrcSet,
+      imageSrcSet: heroLoop.posterSrcSet,
       imageSizes: heroMedia.posterSizes,
     });
   }
@@ -215,10 +216,10 @@ export default async function Home() {
           </div>
           {heroMedia.available ? (
             <HeroVideo
-              webm={heroMedia.loop.webm}
-              mp4={heroMedia.loop.mp4}
-              poster={heroMedia.poster}
-              posterSrcSet={heroMedia.posterSrcSet}
+              webm={heroLoop.webm}
+              mp4={heroLoop.mp4}
+              poster={heroLoop.poster}
+              posterSrcSet={heroLoop.posterSrcSet}
               posterSizes={heroMedia.posterSizes}
               label={t('hero.watchTitle')}
               pauseLabel={t('v2.video.pause')}
@@ -293,7 +294,7 @@ export default async function Home() {
               <p className="mt-3 text-base leading-relaxed text-muted">{t('v2.receiver.body')}</p>
               <Link
                 href="/showcase/receiver"
-                className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+                className="touch-target mt-6 inline-flex items-center gap-2 text-sm font-semibold text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
               >
                 {t('v2.receiver.cta')}
                 <Forward />
@@ -377,7 +378,7 @@ export default async function Home() {
           <p className="mt-4 text-center">
             <Link
               href="/about#roi"
-              className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+              className="touch-target inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
             >
               {t('v2.proof.more')}
               <Forward className="h-3.5 w-3.5" />
@@ -463,7 +464,7 @@ export default async function Home() {
             {t('cta.demoPrompt')}{' '}
             <Link
               href="/showcase"
-              className="inline-flex items-center gap-1 font-semibold text-primary hover:underline"
+              className="touch-target inline-flex items-center gap-1 font-semibold text-primary hover:underline"
             >
               {t('cta.demoLink')}
               <Forward className="h-3.5 w-3.5" />

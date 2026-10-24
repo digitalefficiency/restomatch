@@ -34,6 +34,8 @@ import {
   and,
   asc,
   assertSeedTarget,
+  DEMO_MAIN_BUSINESS_ID,
+  DEMO_MAIN_NAME,
   createDb,
   discrepancies,
   eq,
@@ -70,6 +72,8 @@ const db = createDb(url);
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const OPEN_WINDOW_DAYS = 10;
+/** The base seed's HISTORY_WEEKS × 7 (packages/db/scripts/seed.ts). */
+const BASE_HISTORY_DAYS = 56;
 
 /** Start of "today" on the restaurant's wall clock (DEMO_TODAY overrides, like the base seed). */
 function startOfLocalDay(tz: string): Date {
@@ -166,9 +170,15 @@ const INVOICE_PREFIX: Record<string, string> = {
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
 async function main() {
-  // The base seed's restaurant = the oldest one (seed-chain-demo adds branches later).
-  const [restaurant] = await db.select().from(restaurants).orderBy(asc(restaurants.createdAt)).limit(1);
-  if (!restaurant) throw new Error('no restaurant — run the base seed first');
+  // The base seed's demo restaurant, by its fixed business id — NEVER "the oldest
+  // restaurant": on a shared database that is a real tenant whose invoices and
+  // receipts this script deletes below.
+  const [restaurant] = await db
+    .select()
+    .from(restaurants)
+    .where(and(eq(restaurants.businessId, DEMO_MAIN_BUSINESS_ID), eq(restaurants.name, DEMO_MAIN_NAME)))
+    .limit(1);
+  if (!restaurant) throw new Error(`no demo restaurant (business id ${DEMO_MAIN_BUSINESS_ID}) — run the base seed first`);
   const restaurantId = restaurant.id;
 
   // Clean any prior demo-flow rows for this restaurant (idempotent re-run).
@@ -228,8 +238,25 @@ async function main() {
   for (const po of pos) perSupplier.set(po.supplierId, [...(perSupplier.get(po.supplierId) ?? []), po.id]);
   for (const ids of perSupplier.values()) ids.forEach((id, i) => recencyById.set(id, ids.length - i));
 
+  // The base seed's 8-week window (HISTORY_WEEKS) vs the older full months before it.
+  // Window POs keep their scripted story and invoice numbers exactly (the demo pack
+  // quotes ST-24108 …); older ones replay the "last month" incidents (k ≥ 4) so
+  // every month reads like a normal month (~2% leak), never the headline k 1–3.
+  const windowStart = new Date(todayStart.getTime() - BASE_HISTORY_DAYS * DAY_MS);
+  const windowCount = new Map<string, number>();
+  const olderCount = new Map<string, number>();
+  for (const po of pos) {
+    const m = (po.expectedDeliveryAt ?? todayStart) >= windowStart ? windowCount : olderCount;
+    m.set(po.supplierId, (m.get(po.supplierId) ?? 0) + 1);
+  }
+  const scenarioK = (supplierId: string, k: number) => {
+    const w = windowCount.get(supplierId) ?? 0;
+    return k <= w ? k : 4 + ((k - w - 1) % Math.max(w - 5, 1));
+  };
+
   const knownBySupplier = new Map<string, Set<string>>();
-  const invoiceSeq = new Map<string, number>();
+  // Older invoices number downwards from 24100 so the window's numbers never move.
+  const invoiceSeq = new Map<string, number>([...olderCount].map(([id, n]) => [id, 24100 - n] as const));
   let made = 0;
   let openCount = 0;
   // Deliveries billed later on ONE consolidated invoice (חשבונית ריכוז): this
@@ -243,7 +270,10 @@ async function main() {
     const supplier = supplierById.get(po.supplierId)!;
     const supplierEn = supplier.nameEn ?? supplier.name;
     const k = recencyById.get(po.id)!;
-    const sc = scenarioFor(supplierEn, k);
+    const sc = scenarioFor(supplierEn, scenarioK(po.supplierId, k));
+    // The rate the engine expects (buildMatchInput: PO → supplier → restaurant): fresh
+    // produce suppliers are VAT 0, so their invoices carry no VAT.
+    const supplierVat = supplier.vatRate != null ? Number(supplier.vatRate) : vatRate;
     const lines = await db.select().from(poLines).where(eq(poLines.poId, po.id)).orderBy(asc(poLines.id));
     if (lines.length === 0) continue;
     const expected = po.expectedDeliveryAt ?? new Date();
@@ -308,7 +338,7 @@ async function main() {
         unit,
         unitPriceBilled: price.toFixed(2),
         lineTotal: lineTotal.toFixed(2),
-        vatRate: (sc.invoiceVatRate ?? vatRate).toString(),
+        vatRate: (sc.invoiceVatRate ?? supplierVat).toString(),
       });
     };
     for (const g of grRows) {
@@ -320,7 +350,7 @@ async function main() {
       addLine(p?.id ?? null, p?.canonicalName ?? sc.extra.nameEn, sc.extra.nameEn, sc.extra.qty, p?.defaultUnit ?? 'יח׳', sc.extra.price);
     }
     const subtotal = r2(invLineInputs.reduce((a, l) => a + Math.round(l.lineTotal * 100), 0) / 100);
-    const vatAmount = r2(subtotal * (sc.invoiceVatRate ?? vatRate));
+    const vatAmount = r2(subtotal * (sc.invoiceVatRate ?? supplierVat));
     const totalInclVat = r2(subtotal + vatAmount);
 
     const [invoice] = await db
@@ -370,7 +400,7 @@ async function main() {
       })),
       grLines: grRows.map((g) => ({ id: g.grLineId, poLineId: g.poLine.id, productId: g.poLine.productId, qtyReceived: g.qtyReceived })),
       invoiceLines: invLineInputs,
-      vatRate,
+      vatRate: supplierVat,
       tolerances,
       // A COPY: the engine must see only the numbers known BEFORE this invoice.
       // (The old generator added the number to the same Set before runMatch, so
@@ -489,7 +519,8 @@ async function main() {
     const prefix = INVOICE_PREFIX[supplier.nameEn ?? ''] ?? 'IN';
     const items = [...bucket].map(([productId, v]) => ({ p: productById.get(productId)!, ...v }));
     const subtotal = r2(items.reduce((a, l) => a + Math.round(l.qty * l.price * 100), 0) / 100);
-    const vatAmount = r2(subtotal * vatRate);
+    const consolidatedVat = supplier.vatRate != null ? Number(supplier.vatRate) : vatRate;
+    const vatAmount = r2(subtotal * consolidatedVat);
     const at = new Date(todayStart.getTime() - 16 * 60 * 60 * 1000);
     const [inv] = await db
       .insert(invoices)
@@ -519,7 +550,7 @@ async function main() {
         unit: l.p.defaultUnit ?? 'יח׳',
         unitPriceBilled: l.price.toFixed(2),
         lineTotal: r2(l.qty * l.price).toFixed(2),
-        vatRate: vatRate.toString(),
+        vatRate: consolidatedVat.toString(),
       })),
     );
     await db.insert(activityEvents).values({
