@@ -37,7 +37,7 @@ export function InventoryHome() {
           <p className="text-sm text-muted">
             {draft
               ? t('home.draftNote', { date: dayText(draft.countDate, locale), counted: draft.progress.counted, lines: draft.progress.lines })
-              : t('subtitle')}
+              : t('home.startHint')}
           </p>
         </div>
         {current.isLoading ? (

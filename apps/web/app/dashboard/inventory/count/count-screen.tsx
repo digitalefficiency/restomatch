@@ -5,7 +5,7 @@ import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
 import { ArrowRight, Check, CircleAlert, ClipboardList, Plus, Search, Trash2 } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
-import { Badge, Button, Card, EmptyState, Input, LinkButton, Select, Spinner, cn, friendlyError, useToast } from '@/lib/components';
+import { Badge, Button, Card, EmptyState, Input, LinkButton, Spinner, cn, friendlyError, useToast } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { components } from '@/lib/i18n/messages/components';
 import { inventory as inventoryNs } from '@/lib/i18n/messages/inventory';
@@ -170,7 +170,7 @@ function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void 
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date());
 
   return (
-    <div className="pb-28">
+    <div className="pb-56">
       <LinkButton href="/dashboard/inventory" variant="ghost" size="sm" className="touch-target -ms-2 mb-2">
         <ArrowRight className="h-4 w-4 ltr:rotate-180" aria-hidden="true" />
         {t('count.back')}
@@ -193,29 +193,6 @@ function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void 
         </label>
       </div>
 
-      {/* Progress + autosave state, sticky under the header while scrolling the list. */}
-      <div className="sticky top-0 z-10 -mx-4 mt-4 border-b border-line bg-bg/95 px-4 py-3 backdrop-blur" data-testid="count-progress">
-        <div className="flex items-center justify-between gap-2 text-sm">
-          <span className="font-semibold text-ink">{t('count.progress', { counted, lines: lines.length })}</span>
-          <span className="text-xs text-muted" role="status" aria-live="polite">
-            {saveState === 'saving' ? t('count.saving') : saveState === 'saved' ? t('count.saved') : saveState === 'error' ? t('count.saveError') : ''}
-          </span>
-        </div>
-        <div
-          className="mt-2 h-2 overflow-hidden rounded-full bg-surface-2"
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={lines.length}
-          aria-valuenow={counted}
-          aria-label={t('count.progress', { counted, lines: lines.length })}
-        >
-          <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pctDone}%` }} />
-        </div>
-        <p className="mt-1 text-xs text-muted">
-          {t('count.liveValue')}: <bdi dir="ltr" className="font-semibold tabular-nums text-ink">{ils(draft.totalValueAgorot, locale, 0)}</bdi>
-        </p>
-      </div>
-
       {lines.length === 0 ? <p className="mt-4 text-sm text-muted">{t('count.emptyList')}</p> : null}
 
       {byArea.map(([area, ls]) => (
@@ -230,49 +207,52 @@ function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void 
               const bad = invalid[l.productId];
               return (
                 <li key={l.productId}>
-                  <Card padding="sm" className={cn('flex flex-wrap items-center gap-x-3 gap-y-2', l.qty != null && 'border-primary/30')}>
-                    <div className="min-w-0 flex-1 basis-40">
-                      <p className="font-medium text-ink">{localName(l.name, l.nameEn, locale)}</p>
-                      <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted">
-                        {l.qty != null && l.status === 'ok' && l.valueAgorot != null ? (
-                          <bdi dir="ltr" className="tabular-nums">{ils(l.valueAgorot, locale)}</bdi>
-                        ) : null}
-                        {l.qty != null && (l.status === 'noPrice' || l.status === 'unitMismatch') ? <Badge tone="neutral">{t('count.noPrice')}</Badge> : null}
+                  <Card padding="none" className={cn('flex items-center gap-3 px-3 py-2', l.qty != null && 'border-primary/30')}>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium text-ink">{localName(l.name, l.nameEn, locale)}</p>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted">
                         <label className="sr-only" htmlFor={`area-sel-${l.productId}`}>
                           {t('count.area')}
                         </label>
-                        <Select
+                        <select
                           id={`area-sel-${l.productId}`}
                           value={l.storageArea}
                           onChange={(e) => queue(l.productId, { storageArea: e.target.value as Area })}
-                          className="w-auto py-1 text-xs"
+                          className="rounded-lg border border-line-strong bg-surface px-2 py-0.5 text-xs text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
                         >
                           {AREAS.map((a) => (
                             <option key={a} value={a}>
                               {t(`areas.${a}`)}
                             </option>
                           ))}
-                        </Select>
-                      </p>
+                        </select>
+                        {l.qty != null && l.status === 'ok' && l.valueAgorot != null ? (
+                          <bdi dir="ltr" className="tabular-nums">{ils(l.valueAgorot, locale)}</bdi>
+                        ) : null}
+                        {l.qty != null && (l.status === 'noPrice' || l.status === 'unitMismatch') ? <Badge tone="neutral">{t('count.noPrice')}</Badge> : null}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex shrink-0 items-center gap-1.5">
                       <label className="sr-only" htmlFor={inputId}>
                         {t('count.qtyLabel', { name: locale === 'en' && l.nameEn ? l.nameEn : l.name, unit: l.unit })}
                       </label>
-                      <Input
+                      <input
                         id={inputId}
                         inputMode="decimal"
                         enterKeyHint="next"
                         autoComplete="off"
                         dir="ltr"
-                        className="w-24 text-end tabular-nums"
+                        className={cn(
+                          'w-20 rounded-xl border bg-surface px-2 py-2 text-end tabular-nums text-ink placeholder-subtle focus:border-primary/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
+                          bad ? 'border-danger' : 'border-line-strong',
+                        )}
                         value={text}
                         placeholder="—"
                         aria-invalid={bad ? true : undefined}
                         onChange={(e) => onQty(l.productId, e.target.value)}
                         onBlur={() => void flush()}
                       />
-                      <span className="w-12 text-sm text-muted">{l.unit}</span>
+                      <span className="w-10 truncate text-xs text-muted">{l.unit}</span>
                     </div>
                   </Card>
                 </li>
@@ -301,6 +281,27 @@ function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void 
       {/* Finish: one primary action, pinned to the bottom of the phone screen. */}
       <div className="fixed inset-x-0 bottom-16 z-20 border-t border-line bg-surface/95 p-3 backdrop-blur md:bottom-0">
         <div className="mx-auto max-w-3xl">
+          <div className="mb-2" data-testid="count-progress">
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="font-semibold text-ink">{t('count.progress', { counted, lines: lines.length })}</span>
+              <span className="text-muted">
+                {t('count.liveValue')}: <bdi dir="ltr" className="font-semibold tabular-nums text-ink">{ils(draft.totalValueAgorot, locale, 0)}</bdi>
+              </span>
+              <span className="text-muted" role="status" aria-live="polite">
+                {saveState === 'saving' ? t('count.saving') : saveState === 'saved' ? t('count.saved') : saveState === 'error' ? t('count.saveError') : ''}
+              </span>
+            </div>
+            <div
+              className="mt-1.5 flex h-1.5 overflow-hidden rounded-full bg-surface-2"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={lines.length}
+              aria-valuenow={counted}
+              aria-label={t('count.progress', { counted, lines: lines.length })}
+            >
+              <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pctDone}%` }} />
+            </div>
+          </div>
           {confirming ? (
             <div role="dialog" aria-modal="false" aria-labelledby="finish-title" className="space-y-2">
               <p id="finish-title" className="font-semibold text-ink">

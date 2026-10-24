@@ -15,6 +15,7 @@ export const en: Shape<typeof he> = {
   home: {
     start: 'Start a count',
     continue: 'Continue the count',
+    startHint: 'About 15 minutes in the stockroom: count by fridge, freezer, produce, dry store and bar — everything saves as you go.',
     draftNote: 'A count from {date} is open: {counted} of {lines} items counted.',
     historyTitle: 'Past counts',
     historyEmpty: 'No finished counts yet. Your first count is the opening stock.',
