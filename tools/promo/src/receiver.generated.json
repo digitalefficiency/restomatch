@@ -1,1 +1,32 @@
-[]
+[
+  {
+    "en": "Red bell peppers",
+    "he": "פלפל אדום",
+    "qty": "",
+    "unit": "",
+    "price": "",
+    "flag": "price"
+  },
+  {
+    "en": "Cherry tomatoes",
+    "he": "עגבניות שרי",
+    "qty": "",
+    "unit": "",
+    "price": "",
+    "flag": "qty"
+  },
+  {
+    "en": "Onions",
+    "he": "בצל יבש",
+    "qty": "",
+    "unit": "",
+    "price": ""
+  },
+  {
+    "en": "Cucumbers",
+    "he": "מלפפונים",
+    "qty": "",
+    "unit": "",
+    "price": ""
+  }
+]

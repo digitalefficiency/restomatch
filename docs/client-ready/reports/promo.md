@@ -100,8 +100,8 @@ The owner decided that the whole product goes light (#77), so the film follows:
 - **Stage:** soft light stage, silver laptop and phone, the app's own light screens. Accents use the light
   product's AA tokens (primary `#066B4A`, danger `#B80F2A`, gold `#8A5300`).
 - **Spotlight:** on a light stage, dimming the outside reads as a grey cast. The outside is now blurred and
-  washed toward the stage colour (a light fog), and the lifted card gets a soft accent shadow instead of a
-  glow.
+  washed toward the stage colour (a light fog) with a faint vignette. The lifted card keeps the same
+  accent outline and glow as the dark cut.
 - **No hand-measured rects any more.** `scripts/capture.mjs` measures every spotlight rect and every e-mail
   redaction from the live DOM while it captures (`src/rects.generated.json`), and reads the receiver's
   invoice lines off the real reconciliation (`src/receiver.generated.json`). A re-theme or a layout change
