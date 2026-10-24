@@ -45,6 +45,7 @@ import { endOfDayInTz, startOfDayInTz } from '../lib/time';
 import { claimableLines } from '../lib/claims';
 import { featureEnabled } from '../lib/features';
 import { invoiceReaderProcedure, managerProcedure, memberProcedure, receiverProcedure, router } from '../trpc';
+import { readConsolidatedRaw } from '../match/consolidated';
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
 /** R5: undated open POs this recent still show in the receiving inbox. */
@@ -509,6 +510,8 @@ export const receivingRouter = router({
         ...invoiceFields,
         ocrFailed: failure?.ocrFailed === true,
         ocrFailureReason: failure?.ocrFailed === true ? (failure.reason ?? 'extraction_failed') : null,
+        // A חשבונית ריכוז: cross-matched against its delivery notes, never re-matched to a PO.
+        consolidated: readConsolidatedRaw(ocrPayload) !== null,
         // The scanned number already belongs to another invoice of this
         // supplier (worker writeOcrHeader). Only the number is exposed — never
         // the other invoice's id or payload.
