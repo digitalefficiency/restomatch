@@ -24,7 +24,6 @@ import { isEmailConfigured, sendEmail } from './lib/email';
 import { magicLinkEmail } from './lib/emailTemplates';
 import { LOCALE_COOKIE, resolveLocale, type Locale } from './lib/i18n/config';
 import { authorizeCredentials, getSessionSecurityState } from './lib/passwords';
-import { isSessionRevoked, revokeSession } from './lib/sessionRevocation';
 import { consumeTwoFactorTicket } from './lib/totp';
 import { enforceLoginLimit, enforceMagicLinkLimit, trustedProxyHops } from './lib/rateLimit';
 import {
@@ -58,8 +57,6 @@ interface AppJwt {
   loginAt?: number;
   /** 2FA enrolled + second factor still pending (Epic C session gate). */
   twoFactorPending?: boolean;
-  /** Random per-session id — sign-out deny-lists it (lib/sessionRevocation). */
-  sid?: string;
   [key: string]: unknown;
 }
 
@@ -192,14 +189,6 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
       sendVerificationRequest: sendMagicLink,
     }),
   ],
-  events: {
-    // Every signOut() — the dashboard / onboarding / 2FA-cancel buttons and "log
-    // out everywhere" — ends THIS session server-side too, not just its cookie.
-    async signOut(message) {
-      const sid = 'token' in message ? (message.token as AppJwt | null)?.sid : undefined;
-      if (sid) await revokeSession(sid);
-    },
-  },
   callbacks: {
     async jwt({ token, user, trigger, session }) {
       const t = token as AppJwt;
@@ -224,7 +213,6 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
       if (signInId) {
         t.userId = signInId;
         t.loginAt = now;
-        t.sid = crypto.randomUUID();
         const u = user as { rememberMe?: boolean; twoFactorPending?: boolean };
         // Password logins carry an explicit remember-me boolean from the form.
         // Magic-link logins (the adapter user has no such field) default to the
@@ -264,13 +252,6 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         if ((t.ver ?? 0) !== sec.tokenVersion) {
           return {} as AppJwt; // revoked ⇒ unauthenticated
         }
-        // This one session was signed out: a cookie re-planted by a response
-        // that was in flight during sign-out must not bring it back.
-        if (t.sid && (await isSessionRevoked(t.sid))) {
-          return {} as AppJwt;
-        }
-        // Tokens issued before sids existed get one on their next request.
-        t.sid ??= crypto.randomUUID();
       }
 
       // Re-validate membership/role periodically (and on first sight / explicit
