@@ -69,6 +69,43 @@ and that is where the biggest leaks are. The owner hands us the order they alrea
     + replay/re-forward idempotent, stranger → no PO).
 - **No migration:** `po_source` already has `whatsapp`, and `placeOrder` already supports `channel:'none'`.
 
+## VAT at risk (flag `vatAtRisk`) — Invoices reform
+
+Since 1.6.2026, a supplier tax invoice above ₪5,000 before VAT without a valid allocation number (מספר הקצאה) cannot have
+its input VAT deducted (VAT Law §38(א1)). That 18% is lost unless a corrected invoice arrives within 6 months of the
+invoice date.
+
+- **API `owner.vatAtRisk({ period: 'open' | 'this_month' | 'all', invoiceId? })`:**
+  - invoiceReaderProcedure (chef forbidden), flag-gated, RLS. Read-only; it reuses the existing
+    `invoices.allocation_number` column, so there is no migration.
+  - **Threshold table, by invoice date (Israel day, strictly "above"):** ₪25,000 from 5.5.2024, ₪20,000 from
+    1.1.2025, ₪10,000 from 1.1.2026, ₪5,000 from 1.6.2026.
+  - **Allocation number:** only the format is checked (9 digits; spaces and dashes ignored). There is no Tax
+    Authority call, so a well-formed but unissued number is not caught.
+  - **Excluded:** invoices not read yet; credit invoices (amount ≤ 0 — the sources disagree, so they are never
+    flagged); VAT-exempt invoices (no VAT to lose, e.g. produce at VAT 0); copies the latest match run flagged as
+    DUPLICATE_INVOICE, unless a manager rejected that flag (the accounting-export rule).
+  - **Per row:** invoice, supplier, date, amount before VAT, VAT at risk (`vat_amount`, or ex-VAT × the
+    supplier/restaurant rate, in agorot), deadline and days left. Totals are summed in agorot.
+- **Money rule:** VAT at risk is a SEPARATE figure (warn colour family). It is never added to the leak hero, the
+  leak report or claim letters. The e2e proves the hero's leak, spend, % and discrepancy counts do not move.
+- **UI:**
+  - A dashboard card next to the leak hero, for finance roles. T2 when there is something to act on: a solid
+    warn badge, the ₪ amount, the 3 most urgent invoices (soonest deadline first) and ONE CTA,
+    "בקשו מהספק חשבונית עם מספר הקצאה", which opens a per-supplier Hebrew request text to copy. Nothing is sent.
+  - T3 calm when all is clear: "כל החשבוניות מעל ₪5,000 כוללות מספר הקצאה ✓".
+  - A badge on the invoice page with the deadline or "window closed".
+- **Seed:** the 10-25 demo seed has no invoice above ₪5,000, so the card shows T3. S1 is asked (via the
+  orchestrator) to seed one October invoice (₪6,240 + VAT, no allocation number, a VAT-charging supplier) for the
+  T2 demo. As an unmatched invoice it joins only the hero's calm T4 "waiting for an order" line.
+- **Tests:**
+  - 7 API tests: the threshold table, exactly ₪5,000 vs ₪5,000.01, older thresholds, credit / exempt / not-read
+    / duplicate exclusions, 6-month window and days left, router gates;
+  - a COVERAGE entry plus an isolation and foreign-id attack test;
+  - a request-text test;
+  - `scripts/e2e-vat-at-risk.ts`: 35 checks — he/en × 1366/390, T3 on the seed, T2 with one invoice, hero
+    unchanged, CTA text, invoice badge, axe contrast 0, chef / flag off → nothing.
+
 ## Security (public routes)
 
 | Control | How | Test |

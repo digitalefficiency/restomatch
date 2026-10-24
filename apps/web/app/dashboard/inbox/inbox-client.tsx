@@ -73,7 +73,7 @@ interface Props {
   messages: InboxMessage[];
 }
 
-// Emphasis tiers (DESIGN-BRIEF): needs a decision = T2 solid warn ('warning-solid', #77's Badge); read / registered = T3
+// Emphasis tiers (DESIGN-BRIEF): needs a decision = T2 warn (solid); read / registered = T3
 // green; a manager's rejection, duplicates and skips are calm history (T4, never red);
 // only a processing failure is red.
 const MESSAGE_TONE: Record<InboxMessage['status'], BadgeTone> = {

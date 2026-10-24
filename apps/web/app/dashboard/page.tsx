@@ -41,6 +41,8 @@ import { views as viewsNs } from '@/lib/i18n/messages/views';
 import { PaginatedActivityFeed } from './activity';
 import { PriceAlertsTeaser } from './contracts/overview-card';
 import { RecipesOverviewCard } from './recipes/overview-card';
+import { VatAtRiskCard } from './vat-at-risk';
+import { enabledFeatures } from '@/lib/ingest/features';
 import { displayName } from './approvals/vocab';
 
 export default async function DashboardPage({
@@ -55,9 +57,14 @@ export default async function DashboardPage({
     redirect('/onboarding');
   }
   // Fetch only what the active role may see (the hero is for every role).
-  const role = (
-    memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0]!
-  ).role;
+  const activeMembership = memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0]!;
+  const role = activeMembership.role;
+  // VAT at risk (flag vatAtRisk): finance roles; a separate card, never part of the leak.
+  const vatRisk =
+    (role === 'owner' || role === 'manager' || role === 'bookkeeper') &&
+    (await enabledFeatures(activeMembership.restaurantId)).includes('vatAtRisk')
+      ? await caller.owner.vatAtRisk({ period: 'open' }).catch(() => null)
+      : null;
   const canDrill = canSeeRoute(role, '/dashboard/leaks');
   const canDecide = canSeeRoute(role, '/dashboard/approvals');
   const [t, tl, tv, locale] = await Promise.all([getT(overview), getT(leaksNs), getT(viewsNs), getLocale()]);
@@ -219,6 +226,15 @@ export default async function DashboardPage({
         digestLink={canPreviewDigest ? tr('digest.title') : undefined}
         proofLink={canProve ? tp('button', { amount: formatIls(summary.current.leakIls, { locale }) }) : undefined}
       />
+
+      {vatRisk && vatRisk.currentThresholdIls != null ? (
+        <VatAtRiskCard
+          rows={vatRisk.rows}
+          total={vatRisk.totalVatAtRisk}
+          thresholdIls={vatRisk.currentThresholdIls}
+          restaurantName={activeMembership.restaurantName}
+        />
+      ) : null}
 
       {trend ? (
         <section className="mt-4 rounded-2xl border border-line bg-surface p-5 shadow-card">

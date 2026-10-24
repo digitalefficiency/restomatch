@@ -41,6 +41,7 @@ import { team } from './team';
 import { views } from './views';
 import { leakCheck } from './leakCheck';
 import { growth } from './growth';
+import { vat } from './vat';
 
 export const ALL_NAMESPACES = [
   common,
@@ -81,6 +82,7 @@ export const ALL_NAMESPACES = [
   views,
   leakCheck,
   growth,
+  vat,
 ] as const;
 
-export { common, admin, approvals, auth, catalog, chain, components, contracts, supplierConfirm, dockPrice, emails, accounting, ingest, integrations, invoices, landing, leakProof, leaks, marketing, nav, onboarding, orders, overview, products, receiving, recovery, receiverLangs, ask, recipes, scans, settings, showcase, suppliers, team, views, leakCheck, growth };
+export { common, admin, approvals, auth, catalog, chain, components, contracts, supplierConfirm, dockPrice, emails, accounting, ingest, integrations, invoices, landing, leakProof, leaks, marketing, nav, onboarding, orders, overview, products, receiving, recovery, receiverLangs, ask, recipes, scans, settings, showcase, suppliers, team, views, leakCheck, growth, vat };
