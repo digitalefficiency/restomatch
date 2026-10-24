@@ -69,9 +69,11 @@ const MorphLine: React.FC<{ i: number; at: number; w: number }> = ({ i, at, w })
         }}
       >
         <span>{l.he}</span>
-        <span style={{ fontFamily: FONT.sans, fontSize: 28 * k, opacity: 0.8 }}>
-          {l.qty} · <bdi dir="rtl">{`${l.price.replace('₪', '')} ₪`}</bdi>
-        </span>
+        {l.qty ? (
+          <span style={{ fontFamily: FONT.sans, fontSize: 28 * k, opacity: 0.8 }}>
+            {l.qty} · <bdi dir="rtl">{`${l.price.replace('₪', '')} ₪`}</bdi>
+          </span>
+        ) : null}
       </div>
       {/* English — revealed behind the beam */}
       <div
@@ -96,9 +98,11 @@ const MorphLine: React.FC<{ i: number; at: number; w: number }> = ({ i, at, w })
             {l.he}
           </span>
         </span>
-        <span style={{ fontFamily: FONT.mono, fontSize: 26 * k, color: C.muted }}>
-          {l.qtyEn} × {l.price}
-        </span>
+        {l.qtyEn ? (
+          <span style={{ fontFamily: FONT.mono, fontSize: 26 * k, color: C.muted }}>
+            {l.qtyEn} × {l.price}
+          </span>
+        ) : null}
       </div>
       {p > 0 && p < 1 ? (
         <div

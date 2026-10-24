@@ -219,9 +219,10 @@ export const LINES: Line[] =
     ? captured.slice(0, 4).map((c) => ({
         he: c.he,
         en: c.en,
-        qty: `${c.qty} ${UNIT_HE[c.unit] ?? c.unit}`,
-        qtyEn: `${c.qty} ${c.unit}`,
-        price: `₪${c.price}`,
+        // qty/price stay empty when the capture couldn't read them — the scene then shows the names only
+        qty: c.qty ? `${c.qty} ${UNIT_HE[c.unit] ?? c.unit}` : '',
+        qtyEn: c.qty ? `${c.qty} ${c.unit}` : '',
+        price: c.price ? `₪${c.price}` : '',
         flag: c.flag,
       }))
     : LINES_FALLBACK;
