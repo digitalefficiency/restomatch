@@ -15,8 +15,9 @@
  *   byte-for-byte the same — asserted before/after.
  *
  * Run: DATABASE_URL=... pnpm --filter @restomatch/worker exec tsx scripts/seed-recovery-demo.ts
- * Restaurant: every restaurant with the `recovery` flag on (the seeded demo
- * tenant has features.all), or DEMO_RESTAURANT_ID. Local DBs only (seed guard;
+ * Restaurant: DEMO_RESTAURANT_ID, else the main demo restaurant by its business
+ * id + name — never any other tenant — and only with the `recovery` flag on (the
+ * seeded demo tenant has features.all). Dates are anchored to DEMO_TODAY. Local DBs only (seed guard;
  * SEED_ALLOW_REMOTE_HOST=<host> for a disposable demo DB).
  */
 import {
@@ -28,7 +29,7 @@ import {
   transitionClaim,
 } from '@restomatch/api';
 import { computeLeakHero } from '@restomatch/charts';
-import { asc, assertSeedTarget, createDb, eq, recoveryClaims, restaurants } from '@restomatch/db';
+import { and, asc, assertSeedTarget, createDb, DEMO_MAIN_BUSINESS_ID, DEMO_MAIN_NAME, eq, recoveryClaims, restaurants } from '@restomatch/db';
 
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error('DATABASE_URL is required');
@@ -37,6 +38,17 @@ const db = createDb(url);
 
 const DAY = 24 * 60 * 60 * 1000;
 const ils = (agorot: number) => `₪${(agorot / 100).toFixed(2)}`;
+
+/**
+ * "Now" for the staged dates: DEMO_TODAY (YYYY-MM-DD) like the other seeds, so a
+ * reseed the night before lands claim ages relative to the demo day; else the clock.
+ */
+function demoNow(): Date {
+  const day = process.env.DEMO_TODAY?.trim();
+  if (!day) return new Date();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error(`DEMO_TODAY must be YYYY-MM-DD, got "${day}"`);
+  return new Date(`${day}T10:00:00Z`); // midday in Israel
+}
 
 async function stageRestaurant(restaurantId: string, name: string): Promise<void> {
   const heroBefore = await computeLeakHero(db, restaurantId);
@@ -56,8 +68,8 @@ async function stageRestaurant(restaurantId: string, name: string): Promise<void
   if (claims.some((c) => c.status !== 'claimed')) {
     console.log(`[seed-recovery-demo] ${name}: already staged — nothing to do`);
   } else {
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 12);
+    const now = demoNow();
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 12));
     const recoveredAt = new Date(Math.max(monthStart.getTime(), now.getTime() - 2 * DAY));
     const n = claims.length;
     // Oldest first: 35% back in the bank, 15% credited, 15% acknowledged,
@@ -150,10 +162,22 @@ async function stageRestaurant(restaurantId: string, name: string): Promise<void
 }
 
 async function main(): Promise<void> {
+  // Only ever the demo tenant: DEMO_RESTAURANT_ID, else the main demo restaurant
+  // by its fixed business id + name. Never "every restaurant with the flag" —
+  // on a shared database that could include a real tenant.
   const only = process.env.DEMO_RESTAURANT_ID?.trim();
   const rows = only
     ? await db.select({ id: restaurants.id, name: restaurants.name }).from(restaurants).where(eq(restaurants.id, only))
-    : await db.select({ id: restaurants.id, name: restaurants.name }).from(restaurants);
+    : await db
+        .select({ id: restaurants.id, name: restaurants.name })
+        .from(restaurants)
+        .where(and(eq(restaurants.businessId, DEMO_MAIN_BUSINESS_ID), eq(restaurants.name, DEMO_MAIN_NAME)));
+  if (rows.length !== 1) {
+    console.error(
+      `[seed-recovery-demo] refusing: ${only ? `DEMO_RESTAURANT_ID ${only}` : `the demo restaurant (${DEMO_MAIN_NAME}, ${DEMO_MAIN_BUSINESS_ID})`} matched ${rows.length} restaurants — set DEMO_RESTAURANT_ID`,
+    );
+    process.exit(2);
+  }
   let staged = 0;
   for (const r of rows) {
     if (!(await isFeatureOn(db, r.id, 'recovery'))) continue;
