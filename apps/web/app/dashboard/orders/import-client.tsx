@@ -8,6 +8,7 @@ import { Button, friendlyError, useToast } from '@/lib/components';
 import { useT } from '@/lib/i18n/client';
 import { components } from '@/lib/i18n/messages/components';
 import { orders as ordersNs } from '@/lib/i18n/messages/orders';
+import { startRouteProgress } from '@/lib/components/routeProgressState';
 
 /** base64 of the raw file bytes — matches importPo's Buffer.from(base64,'base64'). */
 async function fileToBase64(file: File): Promise<string> {
@@ -31,6 +32,7 @@ export function ZesttImportButton() {
   const importPo = trpc.orders.importPo.useMutation({
     onSuccess: (res) => {
       toast.success(t('import.imported'));
+      startRouteProgress(`/dashboard/orders/${res.poId}`);
       router.push(`/dashboard/orders/${res.poId}`);
     },
     onError: (e) =>

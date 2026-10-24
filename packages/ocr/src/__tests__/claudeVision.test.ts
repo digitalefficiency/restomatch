@@ -157,3 +157,57 @@ describe('ClaudeVision.extract — English rendering (Receiver in English)', () 
     expect((result.lines[0] as { rawDescriptionEn?: string }).rawDescriptionEn).toBeUndefined();
   });
 });
+
+describe('ClaudeVision.extract — nulls the prompt allows (EN-3)', () => {
+  beforeEach(() => {
+    createMock.mockReset();
+  });
+
+  it('accepts nulls in optional fields instead of failing the job', async () => {
+    mockTextResponse({
+      ...CANNED_INVOICE,
+      supplier: { name: 'ספק', businessId: null, phone: null, contacts: [{ role: null, name: null, phone: null }] },
+      invoiceNumber: null,
+      invoiceDate: null,
+      allocationNumber: null,
+      lines: [{ ...CANNED_INVOICE.lines[0], sku: null, vatRate: null, confidence: null, rawDescriptionEn: null }],
+      totals: { subtotal: null, vat: 21.21, total: null },
+      confidence: null,
+    });
+    const r = await new ClaudeVision({ apiKey: 'k', model: 'm' }).extract('https://x/inv.jpg');
+    expect(r.supplier.businessId).toBeUndefined();
+    expect(r.invoiceNumber).toBeUndefined();
+    expect(r.lines[0]!.vatRate).toBeUndefined();
+    expect(r.lines[0]!.qty).toBe(12.5);
+    expect(r.totals).toEqual({ vat: 21.21 });
+  });
+
+  it('repairs an unreadable line number from the other two, with low confidence', async () => {
+    mockTextResponse({
+      ...CANNED_INVOICE,
+      lines: [
+        { rawDescription: 'א', qty: 2, unit: 'ק״ג', unitPrice: null, lineTotal: 20, confidence: 0.95 },
+        { rawDescription: 'ב', qty: null, unit: null, unitPrice: null, lineTotal: null },
+        { rawDescription: null, qty: 1, unit: 'x', unitPrice: 1, lineTotal: 1 },
+      ],
+    });
+    const r = await new ClaudeVision({ apiKey: 'k', model: 'm' }).extract('https://x/inv.jpg');
+    expect(r.lines).toHaveLength(2); // a line with no description is dropped
+    expect(r.lines[0]).toMatchObject({ qty: 2, unitPrice: 10, lineTotal: 20 });
+    expect(r.lines[0]!.confidence).toBeLessThanOrEqual(0.2);
+    expect(r.lines[1]).toMatchObject({ qty: 0, unitPrice: 0, lineTotal: 0, unit: '' });
+    expect(r.lines[1]!.confidence).toBeLessThanOrEqual(0.2);
+  });
+
+  it('a present but malformed part is rejected, never turned into an empty invoice', async () => {
+    mockTextResponse({ ...CANNED_INVOICE, lines: 'garbage' });
+    await expect(new ClaudeVision({ apiKey: 'k', model: 'm' }).extract('https://x/inv.jpg')).rejects.toThrow();
+    mockTextResponse({ ...CANNED_INVOICE, totals: { subtotal: '1,234.00', vat: 1, total: 2 } });
+    await expect(new ClaudeVision({ apiKey: 'k', model: 'm' }).extract('https://x/inv.jpg')).rejects.toThrow();
+  });
+
+  it('still throws on a non-JSON answer (no silent empty invoice)', async () => {
+    createMock.mockResolvedValueOnce({ content: [{ type: 'text', text: 'sorry' }] });
+    await expect(new ClaudeVision({ apiKey: 'k', model: 'm' }).extract('https://x/inv.jpg')).rejects.toThrow();
+  });
+});

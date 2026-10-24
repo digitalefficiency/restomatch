@@ -24,7 +24,9 @@ export type LineStatus =
   | 'qty_diff'
   | 'price_diff'
   | 'unordered'
-  | 'missing_from_invoice';
+  | 'missing_from_invoice'
+  /** Neutral: not compared yet / couldn't be paired automatically (calm UX). */
+  | 'pending_review';
 
 export interface ReconciliationLine {
   invoiceLineIndex: number | null;
@@ -41,6 +43,8 @@ export interface ReconciliationLine {
   invoiceUnit: string | null;
   poUnitPrice: number | null;
   invoiceUnitPrice: number | null;
+  /** Line total as printed on the invoice (discounts included), when read. */
+  invoiceLineTotal?: number | null;
   status: LineStatus;
   deltaIls: number;
 }
@@ -60,6 +64,8 @@ export interface ReconciliationResult {
     invoiceDate: string;
     totalInclVat: number;
     ocrConfidence: number;
+    /** No invoice was read (PO-only review): there is no OCR confidence to show. */
+    noInvoice?: boolean;
   };
   /** Supplier-contact change alerts (e.g. agent phone changed since last invoice). */
   contactAlerts?: ContactChangeAlert[];
@@ -73,6 +79,8 @@ export interface ReconciliationResult {
     priceDiffCount: number;
     unorderedCount: number;
     missingCount: number;
+    /** Lines waiting for a manual check (never counted as a leak). */
+    pendingCount?: number;
     overallConfidence: number;
     headlineDelta: number;
   };

@@ -50,6 +50,48 @@ async function applyFile(sql: postgres.Sql, file: string): Promise<void> {
   await sql.begin((tx) => tx.unsafe(body));
 }
 
+const TENANT_POLICIES = ['invoice_scans_tenant_delete', 'invoice_scans_tenant_insert', 'invoice_scans_tenant_select', 'invoice_scans_tenant_update'];
+const WALKINS_POLICIES = ['invoice_scans_walkins_insert', 'invoice_scans_walkins_select'];
+/** A showcase visitor's upload already sitting under walk-ins/ (seeded platform-side, RLS-bypassing). */
+const WALKIN_PROBE = 'walk-ins/visitor-supplier-invoice.pdf';
+
+class Rollback extends Error {}
+/**
+ * Runs `fn` as Supabase's `anon` role (what the PUBLIC publishable key reaches
+ * through the Storage API / PostgREST) in a transaction that is always rolled
+ * back, so a probe write never persists.
+ */
+async function asAnon<T>(fn: (tx: postgres.TransactionSql) => Promise<T>): Promise<T> {
+  const sup = postgres(superUrl.toString(), { max: 1, prepare: false, onnotice: () => undefined });
+  let out: T | undefined;
+  try {
+    await sup
+      .begin(async (tx) => {
+        await tx.unsafe('set local role anon');
+        out = await fn(tx);
+        throw new Rollback();
+      })
+      .catch((err: unknown) => {
+        if (!(err instanceof Rollback)) throw err;
+      });
+  } finally {
+    await sup.end();
+  }
+  return out as T;
+}
+/** walk-ins/ objects the publishable key can list (and so sign/download). */
+const anonWalkinNames = () =>
+  asAnon(async (tx) =>
+    (await tx`select name from storage.objects where bucket_id = 'invoice-scans' and (storage.foldername(name))[1] = 'walk-ins'`).map((r) => String(r.name)),
+  );
+/** An upload under walk-ins/ with the publishable key. */
+const anonWalkinUpload = () =>
+  asAnon(async (tx) => {
+    await tx`insert into storage.objects (bucket_id, name) values ('invoice-scans', 'walk-ins/anon-upload.pdf')`;
+  });
+const storagePolicies = async (sql: postgres.Sql) =>
+  (await sql`select policyname from pg_policies where schemaname = 'storage' and policyname like 'invoice_scans%' order by 1`).map((r) => String(r.policyname));
+
 beforeAll(async () => {
   const admin = postgres(adminUrl.toString(), { max: 1, prepare: false, onnotice: () => undefined });
   try {
@@ -105,6 +147,9 @@ beforeAll(async () => {
       grant usage on schema storage to ${MIGRATOR}, anon, authenticated, service_role;
       grant all on storage.buckets to ${MIGRATOR};
       grant select on storage.objects to ${MIGRATOR};
+      -- Supabase grants the API roles table privileges on storage.objects: RLS, not a
+      -- missing GRANT, is what stands between the publishable key and the bucket.
+      grant select, insert, update, delete on storage.objects to anon, authenticated, service_role;
       -- Supabase lets the dashboard/SQL-editor role manage storage policies.
       grant supabase_storage_admin to ${MIGRATOR};
       -- Supabase's default privileges: every table the migration role creates in
@@ -197,8 +242,26 @@ describe('git deploy onto an emulated Supabase project', () => {
     const r = await runDoctor(migratorUrl.toString());
     expect(r.findings.find((f) => f.name === 'Supabase Data API locked out')?.status).toBe('PASS');
     expect(r.findings.find((f) => f.name === 'tenant storage policies')?.status).toBe('PASS');
-    // SB-3: the anon walk-ins showcase policies stay until the server-side upload ships — a known WARN
-    expect(r.findings.find((f) => f.name === 'no anonymous storage access')?.status).toBe('WARN');
+    // main's released RLS files still CREATE the two anon walk-ins showcase policies
+    // (4 tenant + 2 walk-ins = 6 — what prod has now). Since SB-3 closed, the doctor
+    // FAILs that and names the repair.
+    expect(await storagePolicies(sql)).toEqual([...TENANT_POLICIES, ...WALKINS_POLICIES]);
+    const anon = r.findings.find((f) => f.name === 'no anonymous storage access');
+    expect(anon?.status).toBe('FAIL');
+    expect(anon?.detail).toContain('invoice_scans_walkins_select');
+    expect(anon?.detail).toContain('invoice_scans_walkins_insert');
+    expect(anon?.detail).toMatch(/re-apply packages\/db\/drizzle\/rls\/0001_invoice_scans_rls\.sql/);
+    expect(anon?.detail).toMatch(/deploy the latest supabase rls migration/);
+    // The hole, proven (positive control for the SB-3 deny assertions below): with these
+    // policies the publishable key lists another visitor's upload and can upload too.
+    const platform = postgres(superUrl.toString(), { max: 1, prepare: false, onnotice: () => undefined });
+    try {
+      await platform`insert into storage.objects (bucket_id, name) values ('invoice-scans', ${WALKIN_PROBE})`;
+    } finally {
+      await platform.end();
+    }
+    expect(await anonWalkinNames()).toEqual([WALKIN_PROBE]);
+    await expect(anonWalkinUpload()).resolves.toBeUndefined();
     const [plans] = await sql`select count(*)::int as n from plans`;
     expect(plans!.n).toBe(0); // F8: no catalog before 0033
   });
@@ -213,6 +276,8 @@ describe('git deploy onto an emulated Supabase project', () => {
     }
     const [n] = await sql`select count(*)::int as n from drizzle.__drizzle_migrations`;
     expect(n!.n).toBe(readJournal().entries.length);
+    // SB-3: the newest RLS file drops the anon walk-ins showcase policies (6 → 4).
+    expect(await storagePolicies(sql)).toEqual(TENANT_POLICIES);
   });
 
   it('drizzle sees it as fully migrated: no journal gaps, `db:migrate` is a no-op', async (ctx) => {
@@ -232,9 +297,9 @@ describe('git deploy onto an emulated Supabase project', () => {
     const [bucket] = await sql`select public from storage.buckets where id = 'invoice-scans'`;
     expect(bucket!.public).toBe(false);
     const pols = (await sql`select policyname from pg_policies where schemaname = 'storage' and policyname like 'invoice_scans%' order by 1`).map((r) => r.policyname);
+    // SB-3: the four per-restaurant policies only — no anon walk-ins showcase policies.
     expect(pols).toEqual([
       'invoice_scans_tenant_delete', 'invoice_scans_tenant_insert', 'invoice_scans_tenant_select', 'invoice_scans_tenant_update',
-      'invoice_scans_walkins_insert', 'invoice_scans_walkins_select',
     ]);
     const [lim] = await sql`select file_size_limit, allowed_mime_types from storage.buckets where id = 'invoice-scans'`;
     expect(Number(lim!.file_size_limit)).toBe(11 * 1024 * 1024);
@@ -263,13 +328,31 @@ describe('git deploy onto an emulated Supabase project', () => {
     await sql.unsafe('drop table public.zz_future_probe');
   });
 
-  it('db:doctor: no FAIL; the only WARNs before go-live are the app role having no LOGIN yet and the walk-ins showcase prefix', async (ctx) => {
+  it('SB-3: the publishable key (anon) can neither list nor upload under walk-ins/ — nor see any object', async (ctx) => {
+    if (!canCreate) ctx.skip();
+    // The visitor upload from step 1 is still in the bucket (platform view)…
+    const platform = postgres(superUrl.toString(), { max: 1, prepare: false, onnotice: () => undefined });
+    try {
+      const [probe] = await platform`select count(*)::int as n from storage.objects where name = ${WALKIN_PROBE}`;
+      expect(probe!.n).toBe(1);
+    } finally {
+      await platform.end();
+    }
+    // …but anon no longer lists it (so cannot sign/download it), and cannot upload.
+    expect(await anonWalkinNames()).toEqual([]);
+    await expect(anonWalkinUpload()).rejects.toThrow(/row-level security/);
+    const [all] = await asAnon(async (tx) => tx`select count(*)::int as n from storage.objects`);
+    expect(all!.n).toBe(0);
+  });
+
+  it('db:doctor: no FAIL; the only WARN before go-live is the app role having no LOGIN yet', async (ctx) => {
     if (!canCreate) ctx.skip();
     const r = await runDoctor(migratorUrl.toString());
     expect(r.findings.filter((f) => f.status === 'FAIL')).toEqual([]);
     expect(r.pending).toEqual([]);
+    expect(r.findings.find((f) => f.name === 'no anonymous storage access')?.status).toBe('PASS');
     const warns = r.findings.filter((f) => f.status === 'WARN').map((f) => f.name);
-    expect(warns).toEqual(['restomatch_app', 'no anonymous storage access']);
+    expect(warns).toEqual(['restomatch_app']);
   });
 
   it('the RLS file is idempotent (re-applying it changes nothing)', async (ctx) => {
@@ -281,14 +364,14 @@ describe('git deploy onto an emulated Supabase project', () => {
     expect(await snapshot()).toBe(before);
   });
 
-  it('after the owner sets the password (ALTER ROLE … LOGIN PASSWORD), the doctor is clean but for the walk-ins WARN', async (ctx) => {
+  it('after the owner sets the password (ALTER ROLE … LOGIN PASSWORD), the doctor is clean', async (ctx) => {
     if (!canCreate) ctx.skip();
     await sql.unsafe(`alter role restomatch_app with login password 'set-by-the-owner-in-the-sql-editor-0123'`);
     const r = await runDoctor(migratorUrl.toString());
-    expect(r.findings.filter((f) => f.status === 'FAIL' || f.status === 'WARN').map((f) => f.name)).toEqual(['no anonymous storage access']);
+    expect(r.findings.filter((f) => f.status === 'FAIL' || f.status === 'WARN').map((f) => f.name)).toEqual([]);
   });
 
-  it('db:doctor FAILs a missing tenant storage policy, a stray anon storage policy and an anon-granted view', async (ctx) => {
+  it('db:doctor FAILs a missing tenant storage policy, a stray anon storage policy, a leftover walk-ins policy and an anon-granted view', async (ctx) => {
     if (!canCreate) ctx.skip();
     const status = async (name: string) => (await runDoctor(migratorUrl.toString())).findings.find((f) => f.name === name)?.status;
     await sql.unsafe('drop policy invoice_scans_tenant_select on storage.objects');
@@ -300,9 +383,17 @@ describe('git deploy onto an emulated Supabase project', () => {
     expect(await status('Supabase Data API locked out')).toBe('FAIL');
     await sql.unsafe('drop view public.zz_probe_view');
     await sql.unsafe('drop policy sneaky_anon on storage.objects');
-    await applyFile(sql, rlsFile); // restores the tenant policy (idempotent)
+    // A project still carrying a pre-SB-3 walk-ins showcase policy FAILs with the repair hint…
+    await sql.unsafe(`create policy invoice_scans_walkins_select on storage.objects for select
+      using (bucket_id = 'invoice-scans' and (storage.foldername(name))[1] = 'walk-ins')`);
+    const stale = (await runDoctor(migratorUrl.toString())).findings.find((f) => f.name === 'no anonymous storage access');
+    expect(stale?.status).toBe('FAIL');
+    expect(stale?.detail).toMatch(/^invoice_scans_walkins_select: .*re-apply packages\/db\/drizzle\/rls\/0001_invoice_scans_rls\.sql.*deploy the latest supabase rls migration/);
+    // …and the latest RLS file both restores the tenant policy and drops the walk-ins one (idempotent).
+    await applyFile(sql, rlsFile);
+    expect(await storagePolicies(sql)).toEqual(TENANT_POLICIES);
     expect(await status('tenant storage policies')).toBe('PASS');
-    expect(await status('no anonymous storage access')).toBe('WARN');
+    expect(await status('no anonymous storage access')).toBe('PASS');
     expect(await status('Supabase Data API locked out')).toBe('PASS');
   });
 
