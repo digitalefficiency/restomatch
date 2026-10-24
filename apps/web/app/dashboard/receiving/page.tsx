@@ -61,7 +61,6 @@ export default async function ReceivingPage() {
               <Link
                 key={e.poId}
                 href={`/dashboard/receiving/${e.poId}`}
-                aria-label={t('inbox.receiveFrom', { supplier: supplierName })}
                 data-testid="receiving-po-card"
                 className="group block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
               ><Card

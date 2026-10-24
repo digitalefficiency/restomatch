@@ -56,6 +56,9 @@ export const ROUTE_ROLES: Record<string, UserRole[]> = {
   '/dashboard/products': ['owner', 'manager'],
   '/dashboard/orders': ['owner', 'manager'],
   '/dashboard/exports': ['owner', 'bookkeeper'],
+  // One supplier invoice (prices, lines, image): opened from receiving, approvals
+  // and the leak drill-down — never the chef. Mirrors receiving.getInvoice.
+  '/dashboard/invoices': ['owner', 'manager', 'receiver', 'bookkeeper'],
   // Team: owners manage the roster; managers see it read-only and may set a
   // member's app language (e.g. an English-speaking receiver).
   '/dashboard/team': ['owner', 'manager'],

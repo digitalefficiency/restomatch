@@ -73,6 +73,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const OPEN_WINDOW_DAYS = 10;
 /** The base seed's HISTORY_WEEKS × 7 (packages/db/scripts/seed.ts). */
 const BASE_HISTORY_DAYS = 56;
+/** Marks the standing-order POs this script creates (delivery notes billed monthly). */
+const STANDING_ORDER_NOTE = 'הזמנה קבועה — חלב וביצים · חיוב בחשבונית מרכזת';
+/** Months of standing-order history before the current month (the supplier ledger). */
+const STANDING_ORDER_MONTHS = 5;
 
 /** Start of "today" on the restaurant's wall clock (DEMO_TODAY overrides, like the base seed). */
 function startOfLocalDay(tz: string): Date {
@@ -168,6 +172,13 @@ const INVOICE_PREFIX: Record<string, string> = {
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
+/** A delivery note (תעודת משלוח): one goods receipt billed later on a consolidated invoice. */
+interface DeliveryNote {
+  grId: string;
+  receivedAt: Date;
+  rows: Array<{ productId: string; qty: number; expected: number; billed: number }>;
+}
+
 async function main() {
   // The base seed's demo restaurant, by its fixed business id — NEVER "the oldest
   // restaurant": on a shared database that is a real tenant whose invoices and
@@ -192,6 +203,11 @@ async function main() {
   if (grIds.length) await db.delete(grLines).where(inArray(grLines.grId, grIds));
   await db.delete(goodsReceipts).where(eq(goodsReceipts.restaurantId, restaurantId));
   await db.delete(activityEvents).where(eq(activityEvents.restaurantId, restaurantId));
+  // Standing-order POs are this script's own rows (po_lines cascade); drop them
+  // before the delivered-PO query below so a re-run never counts them.
+  await db
+    .delete(purchaseOrders)
+    .where(and(eq(purchaseOrders.restaurantId, restaurantId), eq(purchaseOrders.notes, STANDING_ORDER_NOTE)));
 
   const tolerances = resolveTolerances(restaurant.settings?.tolerances);
   const rules = buildRules(resolveApprovalThresholds(restaurant.settings?.approvalThresholds));
@@ -254,13 +270,16 @@ async function main() {
   // per-delivery invoice — exactly how a ריכוז works, so spend is not doubled.
   const isConsolidated = (supplierEn: string, k: number) =>
     (supplierEn === "Brenner's Bakery" && k <= 2) || (supplierEn === 'Galilee Dairies' && k === 1);
-  const consolidatedBuckets = new Map<string, Map<string, { qty: number; price: number }>>();
+  const consolidatedBuckets = new Map<string, DeliveryNote[]>();
 
   for (const po of pos) {
     const supplier = supplierById.get(po.supplierId)!;
     const supplierEn = supplier.nameEn ?? supplier.name;
     const k = recencyById.get(po.id)!;
     const sc = scenarioFor(supplierEn, scenarioK(po.supplierId, k));
+    // The rate the engine expects (buildMatchInput: PO → supplier → restaurant): fresh
+    // produce suppliers are VAT 0, so their invoices carry no VAT.
+    const supplierVat = supplier.vatRate != null ? Number(supplier.vatRate) : vatRate;
     const lines = await db.select().from(poLines).where(eq(poLines.poId, po.id)).orderBy(asc(poLines.id));
     if (lines.length === 0) continue;
     const expected = po.expectedDeliveryAt ?? new Date();
@@ -293,14 +312,10 @@ async function main() {
     }
 
     if (isConsolidated(supplierEn, k)) {
-      const bucket = consolidatedBuckets.get(supplier.id) ?? new Map<string, { qty: number; price: number }>();
-      for (const g of grRows) {
-        if (!g.poLine.productId) continue;
-        const cur = bucket.get(g.poLine.productId) ?? { qty: 0, price: g.price };
-        cur.qty += g.qtyReceived;
-        bucket.set(g.poLine.productId, cur);
-      }
-      consolidatedBuckets.set(supplier.id, bucket);
+      const rows = grRows
+        .filter((g) => g.poLine.productId)
+        .map((g) => ({ productId: g.poLine.productId!, qty: g.qtyReceived, expected: Number(g.poLine.unitPriceExpected ?? 0), billed: g.price }));
+      consolidatedBuckets.set(supplier.id, [...(consolidatedBuckets.get(supplier.id) ?? []), { grId: gr!.id, receivedAt, rows }]);
       continue;
     }
 
@@ -325,7 +340,7 @@ async function main() {
         unit,
         unitPriceBilled: price.toFixed(2),
         lineTotal: lineTotal.toFixed(2),
-        vatRate: (sc.invoiceVatRate ?? vatRate).toString(),
+        vatRate: (sc.invoiceVatRate ?? supplierVat).toString(),
       });
     };
     for (const g of grRows) {
@@ -337,7 +352,7 @@ async function main() {
       addLine(p?.id ?? null, p?.canonicalName ?? sc.extra.nameEn, sc.extra.nameEn, sc.extra.qty, p?.defaultUnit ?? 'יח׳', sc.extra.price);
     }
     const subtotal = r2(invLineInputs.reduce((a, l) => a + Math.round(l.lineTotal * 100), 0) / 100);
-    const vatAmount = r2(subtotal * (sc.invoiceVatRate ?? vatRate));
+    const vatAmount = r2(subtotal * (sc.invoiceVatRate ?? supplierVat));
     const totalInclVat = r2(subtotal + vatAmount);
 
     const [invoice] = await db
@@ -387,7 +402,7 @@ async function main() {
       })),
       grLines: grRows.map((g) => ({ id: g.grLineId, poLineId: g.poLine.id, productId: g.poLine.productId, qtyReceived: g.qtyReceived })),
       invoiceLines: invLineInputs,
-      vatRate,
+      vatRate: supplierVat,
       tolerances,
       // A COPY: the engine must see only the numbers known BEFORE this invoice.
       // (The old generator added the number to the same Set before runMatch, so
@@ -499,62 +514,252 @@ async function main() {
     made += 1;
   }
 
-  // ── consolidated invoices (חשבוניות ריכוז): parsed, PENDING, deliberately calm ──
-  let consolidatedCount = 0;
-  for (const [supplierId, bucket] of consolidatedBuckets) {
-    const supplier = supplierById.get(supplierId)!;
-    const prefix = INVOICE_PREFIX[supplier.nameEn ?? ''] ?? 'IN';
-    const items = [...bucket].map(([productId, v]) => ({ p: productById.get(productId)!, ...v }));
-    const subtotal = r2(items.reduce((a, l) => a + Math.round(l.qty * l.price * 100), 0) / 100);
-    const vatAmount = r2(subtotal * vatRate);
-    const at = new Date(todayStart.getTime() - 16 * 60 * 60 * 1000);
+  // ── consolidated invoices (חשבוניות ריכוז / מרכזת): parsed, PENDING, deliberately calm ──
+  // Each one lists the delivery notes (תעודות משלוח = goods receipts, `ת.מ. <n>` in
+  // goods_receipts.notes) it bills, one line per note × product, plus
+  // ocr_payload.raw.deliveryNotes — the covered set the consolidated cross-match reads.
+  // None gets a match run, so all stay pendingLink: in neither leak nor spend.
+  const tz = restaurant.timezone ?? 'Asia/Jerusalem';
+  const consolidatedVatOf = (s: typeof supplierRows[number]) => (s.vatRate != null ? Number(s.vatRate) : vatRate);
+  const ilDate = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: tz });
+  async function insertConsolidated(opts: {
+    supplier: (typeof supplierRows)[number];
+    number: string;
+    at: Date;
+    status: 'parsed' | 'paid';
+    periodStart: string;
+    periodEnd: string;
+    notes: Array<DeliveryNote & { dn: string }>;
+    detail: string;
+  }) {
+    const vat = consolidatedVatOf(opts.supplier);
+    const lines = opts.notes.flatMap((n) =>
+      n.rows.map((r) => {
+        const p = productById.get(r.productId)!;
+        return { n, r, p, lineTotal: r2(r.qty * r.billed) };
+      }),
+    );
+    const subtotal = r2(lines.reduce((a, l) => a + Math.round(l.lineTotal * 100), 0) / 100);
+    const vatAmount = r2(subtotal * vat);
     const [inv] = await db
       .insert(invoices)
       .values({
         restaurantId,
-        supplierId,
-        invoiceNumber: `${prefix}-R-${(invoiceSeq.get(supplierId) ?? 24100) + 1}`,
-        invoiceDate: at,
-        dueDate: new Date(at.getTime() + 30 * DAY_MS),
+        supplierId: opts.supplier.id,
+        invoiceNumber: opts.number,
+        invoiceDate: opts.at,
+        dueDate: new Date(opts.at.getTime() + 30 * DAY_MS),
         totalExclVat: subtotal.toFixed(2),
         vatAmount: vatAmount.toFixed(2),
         totalInclVat: r2(subtotal + vatAmount).toFixed(2),
-        status: 'parsed',
+        status: opts.status,
         source: 'email',
         ocrConfidence: '0.940',
-        createdAt: at,
-        updatedAt: at,
+        ocrPayload: {
+          provider: 'reconciled',
+          raw: {
+            kind: 'consolidated',
+            periodStart: opts.periodStart,
+            periodEnd: opts.periodEnd,
+            deliveryNotes: opts.notes.map((n) => ({
+              number: n.dn,
+              date: ilDate(n.receivedAt),
+              totalExclVat: r2(n.rows.reduce((a, r) => a + r2(r.qty * r.billed), 0)).toFixed(2),
+            })),
+          },
+        },
+        createdAt: opts.at,
+        updatedAt: opts.at,
       })
       .returning();
     await db.insert(invoiceLines).values(
-      items.map((l) => ({
+      lines.map((l) => ({
         invoiceId: inv!.id,
         productId: l.p.id,
-        rawDescription: `ריכוז תעודות משלוח — ${l.p.canonicalName}`,
-        rawDescriptionEn: `Consolidated delivery notes — ${l.p.nameEn}`,
-        qtyBilled: l.qty.toString(),
+        rawDescription: `ת.מ. ${l.n.dn} · ${l.p.canonicalName}`,
+        rawDescriptionEn: `DN ${l.n.dn} · ${l.p.nameEn}`,
+        qtyBilled: l.r.qty.toString(),
         unit: l.p.defaultUnit ?? 'יח׳',
-        unitPriceBilled: l.price.toFixed(2),
-        lineTotal: r2(l.qty * l.price).toFixed(2),
-        vatRate: vatRate.toString(),
+        unitPriceBilled: l.r.billed.toFixed(2),
+        lineTotal: l.lineTotal.toFixed(2),
+        vatRate: vat.toString(),
       })),
     );
-    await db.insert(activityEvents).values({
-      restaurantId,
-      eventType: 'invoice_received',
-      title: `חשבונית ריכוז ${inv!.invoiceNumber} התקבלה`,
-      detail: `${supplier.name} · ממתינה להתאמה מול תעודות המשלוח של השבוע`,
-      entityType: 'invoice',
-      entityId: inv!.id,
-      metadata: {
-        consolidated: true,
-        invoiceId: inv!.id,
-        invoiceNumber: inv!.invoiceNumber,
-        supplierName: supplier.name,
-        supplierNameEn: supplier.nameEn ?? null,
-        totalInclVatIls: r2(subtotal + vatAmount),
-      },
-      createdAt: at,
+    if (opts.status === 'parsed') {
+      await db.insert(activityEvents).values({
+        restaurantId,
+        eventType: 'invoice_received',
+        title: `חשבונית ריכוז ${inv!.invoiceNumber} התקבלה`,
+        detail: `${opts.supplier.name} · ${opts.detail}`,
+        entityType: 'invoice',
+        entityId: inv!.id,
+        metadata: {
+          consolidated: true,
+          invoiceId: inv!.id,
+          invoiceNumber: inv!.invoiceNumber,
+          supplierName: opts.supplier.name,
+          supplierNameEn: opts.supplier.nameEn ?? null,
+          totalInclVatIls: r2(subtotal + vatAmount),
+          deliveryNotes: opts.notes.length,
+        },
+        createdAt: opts.at,
+      });
+    }
+    return { id: inv!.id, subtotal };
+  }
+  const numberNotes = async (notes: DeliveryNote[], first: number) => {
+    const sorted = [...notes].sort((a, b) => a.receivedAt.getTime() - b.receivedAt.getTime());
+    const out: Array<DeliveryNote & { dn: string }> = [];
+    for (const [i, n] of sorted.entries()) {
+      const dn = String(first + i);
+      await db.update(goodsReceipts).set({ notes: `ת.מ. ${dn}` }).where(eq(goodsReceipts.id, n.grId));
+      out.push({ ...n, dn });
+    }
+    return out;
+  };
+
+  // Galilee Dairies' standing order: milk + eggs every Sunday and Thursday, each drop
+  // a delivery note (its own PO + goods receipt, no invoice of its own), billed once a
+  // month on a חשבונית מרכזת GD-M-<YYYYMM>. Earlier months are invoiced on the
+  // month's last day and paid; LAST month's arrived on the 1st of this month and is
+  // pending (it carries the one deliberate overcharge below); this month's notes wait
+  // for the month-end invoice. Created after the delivered-PO loop so no recency /
+  // scenario above moves; no GD-M invoice is dated inside last month, so last month's
+  // figures do not move either.
+  const STANDING_OVERCHARGE = { product: 'Milk 3%', qty: 24, billed: 7.9 };
+  const standingNotes: DeliveryNote[] = [];
+  const galilee = supplierRows.find((s) => s.nameEn === 'Galilee Dairies');
+  const milk = productByEn.get('Milk 3%');
+  const eggs = productByEn.get('Eggs L (tray of 30)');
+  let consolidatedCount = 0;
+  if (galilee && milk && eggs) {
+    const lastPrice = async (productId: string, fallback: number) => {
+      const [row] = await db
+        .select({ p: poLines.unitPriceExpected })
+        .from(poLines)
+        .innerJoin(purchaseOrders, eq(purchaseOrders.id, poLines.poId))
+        .where(and(eq(purchaseOrders.restaurantId, restaurantId), eq(poLines.productId, productId)))
+        .limit(1);
+      return row?.p != null ? Number(row.p) : fallback;
+    };
+    const milkPrice = await lastPrice(milk.id, 6.4);
+    const eggsPrice = await lastPrice(eggs.id, 34);
+    const [cy, cm] = ilDate(todayStart).split('-').map(Number) as [number, number];
+    const until = todayStart.getTime() - 2 * DAY_MS;
+    let drop = 0;
+    for (let off = -STANDING_ORDER_MONTHS; off <= 0; off++) {
+      const first = new Date(Date.UTC(cy, cm - 1 + off, 1, 12));
+      for (let d = first; d.getUTCMonth() === first.getUTCMonth() && d.getTime() < until; d = new Date(d.getTime() + DAY_MS)) {
+        if (d.getUTCDay() !== 0 && d.getUTCDay() !== 4) continue;
+        const deliveredAt = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 4, 30));
+        const qtyMilk = [24, 30, 18, 24, 30, 24][drop % 6]!;
+        const qtyEggs = drop % 2 ? 3 : 2;
+        drop += 1;
+        const orderedAt = new Date(deliveredAt.getTime() - DAY_MS);
+        const [po] = await db
+          .insert(purchaseOrders)
+          .values({
+            restaurantId,
+            supplierId: galilee.id,
+            expectedDeliveryAt: deliveredAt,
+            status: 'closed',
+            source: 'recurring',
+            totalEstimated: r2(qtyMilk * milkPrice + qtyEggs * eggsPrice).toFixed(2),
+            createdBy: managerId,
+            notes: STANDING_ORDER_NOTE,
+            sentAt: orderedAt,
+            createdAt: orderedAt,
+            updatedAt: deliveredAt,
+          })
+          .returning();
+        const lines = await db
+          .insert(poLines)
+          .values([
+            { poId: po!.id, productId: milk.id, rawDescription: milk.canonicalName, rawDescriptionEn: milk.nameEn, qtyOrdered: String(qtyMilk), unit: milk.defaultUnit ?? 'ליטר', unitPriceExpected: milkPrice.toFixed(4) },
+            { poId: po!.id, productId: eggs.id, rawDescription: eggs.canonicalName, rawDescriptionEn: eggs.nameEn, qtyOrdered: String(qtyEggs), unit: eggs.defaultUnit ?? 'תבנית', unitPriceExpected: eggsPrice.toFixed(4) },
+          ])
+          .returning();
+        const receivedAt = new Date(deliveredAt.getTime() + 20 * 60 * 1000);
+        const [gr] = await db
+          .insert(goodsReceipts)
+          .values({ restaurantId, poId: po!.id, receivedAt, receivedBy: receiverId, status: 'completed', createdAt: receivedAt, updatedAt: receivedAt })
+          .returning();
+        await db.insert(grLines).values(
+          lines.map((l) => ({ grId: gr!.id, poLineId: l.id, productId: l.productId, qtyReceived: l.qtyOrdered, qtyRejected: '0' })),
+        );
+        standingNotes.push({
+          grId: gr!.id,
+          receivedAt,
+          rows: [
+            { productId: milk.id, qty: qtyMilk, expected: milkPrice, billed: milkPrice },
+            { productId: eggs.id, qty: qtyEggs, expected: eggsPrice, billed: eggsPrice },
+          ],
+        });
+      }
+    }
+    // The supplier's own delivery-note numbers run across both kinds of drop.
+    const numbered = await numberNotes([...standingNotes, ...(consolidatedBuckets.get(galilee.id) ?? [])], 61001);
+    const standingIds = new Set(standingNotes.map((n) => n.grId));
+    const byMonth = new Map<string, Array<DeliveryNote & { dn: string }>>();
+    for (const n of numbered.filter((x) => standingIds.has(x.grId))) {
+      const key = ilDate(n.receivedAt).slice(0, 7);
+      byMonth.set(key, [...(byMonth.get(key) ?? []), n]);
+    }
+    const lastMonthKey = ilDate(new Date(Date.UTC(cy, cm - 2, 15))).slice(0, 7);
+    for (const [key, notes] of [...byMonth].sort()) {
+      const [y, m] = key.split('-').map(Number) as [number, number];
+      if (y === cy && m === cm) continue; // this month: invoice expected at month end
+      const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+      const period = { periodStart: `${key}-01`, periodEnd: `${key}-${String(lastDay).padStart(2, '0')}` };
+      if (key === lastMonthKey) {
+        // The one deliberate discrepancy: on one note, milk billed above its PO price.
+        const target = notes.find((n) => n.rows[0]!.qty === STANDING_OVERCHARGE.qty) ?? notes[0]!;
+        target.rows[0]!.billed = STANDING_OVERCHARGE.billed;
+        await insertConsolidated({
+          supplier: galilee,
+          number: `GD-M-${key.replace('-', '')}`,
+          at: new Date(Date.UTC(cy, cm - 1, 1, 8)),
+          status: 'parsed',
+          ...period,
+          notes,
+          detail: `${notes.length} תעודות משלוח · ממתינה להתאמה מול התעודות`,
+        });
+        consolidatedCount += 1;
+        console.log(
+          `[seed-demo] standing order: GD-M-${key.replace('-', '')} covers ${notes.length} delivery notes · overcharge on ת.מ. ${target.dn}: ${STANDING_OVERCHARGE.product} ${STANDING_OVERCHARGE.qty} × (₪${STANDING_OVERCHARGE.billed.toFixed(2)} − ₪${target.rows[0]!.expected.toFixed(2)}) = ₪${r2(STANDING_OVERCHARGE.qty * (STANDING_OVERCHARGE.billed - target.rows[0]!.expected)).toFixed(2)} excl. VAT`,
+        );
+      } else {
+        await insertConsolidated({
+          supplier: galilee,
+          number: `GD-M-${key.replace('-', '')}`,
+          at: new Date(Date.UTC(y, m - 1, lastDay, 10)),
+          status: 'paid',
+          ...period,
+          notes,
+          detail: `${notes.length} תעודות משלוח`,
+        });
+      }
+    }
+    const thisMonth = numbered.filter((n) => ilDate(n.receivedAt).slice(0, 7) === `${cy}-${String(cm).padStart(2, '0')}`).length;
+    console.log(`[seed-demo] standing order: ${standingNotes.length} delivery notes · this month ${thisMonth} not yet invoiced (invoice expected at month end)`);
+  }
+
+  // The bakery's weekly ריכוז: this week's drops, one consolidated invoice.
+  for (const [supplierId, bucket] of consolidatedBuckets) {
+    if (supplierId === galilee?.id) continue; // billed on the monthly GD-M invoice
+    const supplier = supplierById.get(supplierId)!;
+    const prefix = INVOICE_PREFIX[supplier.nameEn ?? ''] ?? 'IN';
+    const notes = await numberNotes(bucket, 8801);
+    const at = new Date(todayStart.getTime() - 16 * 60 * 60 * 1000);
+    await insertConsolidated({
+      supplier,
+      number: `${prefix}-R-${(invoiceSeq.get(supplierId) ?? 24100) + 1}`,
+      at,
+      status: 'parsed',
+      periodStart: ilDate(notes[0]!.receivedAt),
+      periodEnd: ilDate(notes[notes.length - 1]!.receivedAt),
+      notes,
+      detail: 'ממתינה להתאמה מול תעודות המשלוח של השבוע',
     });
     consolidatedCount += 1;
   }

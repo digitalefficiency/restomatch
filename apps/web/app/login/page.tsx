@@ -105,7 +105,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
   }
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center p-6">
+    <main className="relative flex min-h-screen items-center justify-center p-6 pb-[calc(1.5rem+var(--consent-h,0px))]">
       {/* S13 receiver PWA: no queued photos survive a sign-out / expired session (shared devices). */}
       <PwaQueueReset />
       <div className="absolute end-4 top-4">
@@ -128,7 +128,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
         {sent || reset || signedOut ? (
           <div
             role="status"
-            className="mb-4 rounded-md border-s-4 border-success bg-success/5 px-3 py-2 text-sm text-success"
+            className="mb-4 rounded-md border-s-4 border-primary bg-primary/5 px-3 py-2 text-sm text-primary"
           >
             {reset ? t('login.resetDone') : signedOut ? t('login.signedOut') : t('login.sent')}
           </div>
@@ -165,7 +165,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
             />
           </Field>
           <label className="flex items-center gap-2 text-sm text-muted">
-            <input type="checkbox" name="rememberMe" className="h-4 w-4 accent-brand" />
+            <input type="checkbox" name="rememberMe" className="h-4 w-4 accent-primary" />
             {t('login.rememberMe')}
           </label>
           <Button type="submit" className="w-full">
@@ -174,9 +174,9 @@ export default async function LoginPage({ searchParams }: PageProps) {
         </form>
 
         <div className="my-5 flex items-center gap-3 text-xs text-subtle">
-          <span className="h-px flex-1 bg-border" />
+          <span className="h-px flex-1 bg-line" />
           {t('login.or')}
-          <span className="h-px flex-1 bg-border" />
+          <span className="h-px flex-1 bg-line" />
         </div>
 
         {/* BACKUP — magic link */}
@@ -192,13 +192,13 @@ export default async function LoginPage({ searchParams }: PageProps) {
             defaultValue={lockedEmail}
             readOnly={!!lockedEmail}
           />
-          <Button type="submit" variant="secondary" className="w-full">
+          <Button type="submit" data-keep-clear variant="secondary" className="w-full">
             {t('login.magicSubmit')}
           </Button>
         </form>
 
         <p className="mt-6 text-center text-xs text-subtle">
-          <Link href="/reset" className="text-brand hover:underline">
+          <Link href="/reset" className="text-primary hover:underline">
             {t('login.forgot')}
           </Link>
         </p>

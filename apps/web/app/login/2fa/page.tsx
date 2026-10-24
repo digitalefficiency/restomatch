@@ -32,7 +32,7 @@ export default async function TwoFactorPage({ searchParams }: PageProps) {
   const t = await getT(authMessages);
 
   return (
-    <main className="flex min-h-screen items-center justify-center p-6">
+    <main className="flex min-h-screen items-center justify-center p-6 pb-[calc(1.5rem+var(--consent-h,0px))]">
       <Card elevated flow padding="lg" className="w-full max-w-md">
         <h1 className="mb-2 text-2xl font-bold text-ink">{t('twoFactor.title')}</h1>
         <p className="mb-6 text-sm text-muted">{t('twoFactor.subtitle')}</p>
@@ -62,13 +62,13 @@ export default async function TwoFactorPage({ searchParams }: PageProps) {
               dir="ltr"
             />
           </Field>
-          <Button type="submit" className="w-full">
+          <Button type="submit" data-keep-clear className="w-full">
             {t('twoFactor.submit')}
           </Button>
         </form>
 
         <form action={cancelTwoFactorAction} className="mt-4 text-center">
-          <button type="submit" className="text-sm text-brand hover:underline">
+          <button type="submit" className="text-sm text-primary hover:underline">
             {t('twoFactor.switchAccount')}
           </button>
         </form>

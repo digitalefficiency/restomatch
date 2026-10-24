@@ -57,14 +57,14 @@ export default async function LeaksPage({
     <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2">
       <Link
         href="/dashboard/leaks/report"
-        className="inline-flex items-center gap-1.5 rounded-xl bg-gold/12 px-3 py-1.5 text-sm font-semibold text-gold ring-1 ring-gold/30 hover:bg-gold/20"
+        className="touch-target inline-flex items-center gap-1.5 rounded-xl bg-gold/12 px-3 py-1.5 text-sm font-semibold text-gold ring-1 ring-gold/30 hover:bg-gold/20"
       >
         <FileBarChart className="h-4 w-4" aria-hidden="true" />
         {t('report.open')}
       </Link>
       <Link
         href="/dashboard/leaks/breakdown"
-        className="inline-flex max-w-full items-center gap-1 rounded-lg text-sm font-semibold text-primary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+        className="touch-target inline-flex max-w-full items-center gap-1 rounded-lg text-sm font-semibold text-primary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
       >
         {t('detective.toBreakdown')}
         <ArrowLeft className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
@@ -163,7 +163,16 @@ export default async function LeaksPage({
           />
 
           {/* Full breakdown table — scrolls horizontally on phones. */}
-          <Card elevated padding="none" flow className="overflow-x-auto">
+          {/* Focusable + labelled so keyboard users can scroll it (axe scrollable-region-focusable). */}
+          <Card
+            elevated
+            padding="none"
+            flow
+            tabIndex={0}
+            role="region"
+            aria-label={t('detective.caption')}
+            className="overflow-x-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+          >
             <table className="w-full min-w-[640px] text-sm">
               <caption className="sr-only">{t('detective.caption')}</caption>
               <thead className="border-b border-line bg-surface-2 text-xs uppercase tracking-wider text-subtle">

@@ -1,0 +1,4 @@
+node_modules
+# The root .gitignore ignores every `out/` dir; the rendered promo is a deliverable.
+!out/
+out/frames/

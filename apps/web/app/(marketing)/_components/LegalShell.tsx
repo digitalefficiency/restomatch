@@ -87,7 +87,7 @@ export async function LegalClause({ children }: { children: React.ReactNode }) {
   return (
     <p>
       {children}{' '}
-      <span className="whitespace-nowrap font-mono text-xs text-gold/80">{t('legal.shell.reviewTag')}</span>
+      <span className="whitespace-nowrap font-mono text-xs text-gold">{t('legal.shell.reviewTag')}</span>
     </p>
   );
 }

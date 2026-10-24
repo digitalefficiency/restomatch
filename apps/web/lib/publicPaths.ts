@@ -17,9 +17,9 @@ export const PUBLIC_EXACT_PATHS = [
   '/privacy',
   '/terms',
   '/cookies',
-  // Generated SEO/social routes (no file extension in the URL, so the static-asset
-  // rule below doesn't catch them) — crawlers have no session.
-  '/opengraph-image',
+  // Generated SEO/social route (no file extension in the URL, so the static-asset
+  // rule below doesn't catch it) — crawlers have no session. The share cards
+  // (/og/*.png) and /opengraph-image never reach the middleware at all (matcher).
   '/twitter-image',
 ] as const;
 

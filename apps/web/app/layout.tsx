@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { preload } from 'react-dom';
 import { CookieConsent } from '@/lib/components/CookieConsent';
+import { ConsentClearance } from './consent-clearance';
 import { RouteProgress } from '@/lib/components/RouteProgress';
 import { I18nProvider } from '@/lib/i18n/client';
 import { dirOf } from '@/lib/i18n/config';
@@ -9,9 +10,14 @@ import { metadataBase, socialFor } from './(marketing)/_components/seo';
 import './globals.css';
 
 // Fonts are self-hosted (public/fonts, @font-face in globals.css): Heebo for
-// Hebrew + display, JetBrains Mono for money figures. Preload the two Heebo
-// subsets every page paints with so text doesn't flash on first load.
-const FONT_PRELOADS = ['/fonts/heebo/heebo-hebrew-wght.woff2', '/fonts/heebo/heebo-latin-wght.woff2'];
+// Hebrew + display, JetBrains Mono for money figures. Preload the Heebo
+// subsets the page's language paints with so text doesn't flash on first load
+// (an English page preloading the Hebrew subset drew Chrome's "preloaded but
+// not used within a few seconds" warning).
+const FONT_PRELOADS = {
+  he: ['/fonts/heebo/heebo-hebrew-wght.woff2', '/fonts/heebo/heebo-latin-wght.woff2'],
+  en: ['/fonts/heebo/heebo-latin-wght.woff2'],
+} as const;
 
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await getLocale();
@@ -32,7 +38,7 @@ export default async function RootLayout(props: { children: React.ReactNode }) {
   // Locale comes from the `rm_locale` cookie (LocaleSwitcher / `?lang=`); the
   // document direction follows it so English renders LTR.
   const locale = await getLocale();
-  for (const href of FONT_PRELOADS) {
+  for (const href of FONT_PRELOADS[locale]) {
     preload(href, { as: 'font', type: 'font/woff2', crossOrigin: 'anonymous' });
   }
   return (
@@ -43,6 +49,7 @@ export default async function RootLayout(props: { children: React.ReactNode }) {
               onboarding, the lazy lead form) so public pages don't ship it. */}
           {props.children}
           <CookieConsent />
+          <ConsentClearance />
           <RouteProgress />
         </I18nProvider>
       </body>

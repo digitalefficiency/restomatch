@@ -27,6 +27,7 @@ export function KpiCard({
   delta,
   deltaTone = 'neutral',
   sparkline,
+  emphasis = false,
 }: {
   label: string;
   value: React.ReactNode;
@@ -39,6 +40,8 @@ export function KpiCard({
   deltaTone?: 'good' | 'bad' | 'neutral';
   /** Optional inline trend series rendered as a sparkline. */
   sparkline?: number[];
+  /** T1 "the one number" (docs/DESIGN-BRIEF.md): danger start rail + border, ink figure, larger type. */
+  emphasis?: boolean;
 }) {
   const t = tones[tone];
   const deltaUp = (delta ?? 0) >= 0;
@@ -54,8 +57,17 @@ export function KpiCard({
         : 'text-muted';
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-line bg-surface p-6 shadow-card">
-      <div className="absolute inset-x-0 top-0 h-px flow-stream" aria-hidden="true" />
+    <div
+      className={cn(
+        'relative overflow-hidden rounded-2xl border bg-surface p-6 shadow-card',
+        emphasis ? 'border-danger/35' : 'border-line',
+      )}
+    >
+      {emphasis ? (
+        <div className="absolute inset-y-0 start-0 w-1.5 bg-danger" aria-hidden="true" />
+      ) : (
+        <div className="absolute inset-x-0 top-0 h-px flow-stream" aria-hidden="true" />
+      )}
       <div className="mb-4 flex items-start justify-between">
         {icon ? (
           <div className={cn('flex h-10 w-10 items-center justify-center rounded-xl ring-1', t.icon)}>
@@ -76,7 +88,12 @@ export function KpiCard({
       </div>
 
       <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-subtle">{label}</p>
-      <p className={cn('font-mono text-3xl font-extrabold tabular-nums tracking-tight', t.value)}>
+      <p
+        className={cn(
+          'font-mono font-extrabold tabular-nums tracking-tight',
+          emphasis ? 'text-4xl text-ink' : `text-3xl ${t.value}`,
+        )}
+      >
         {value}
       </p>
 

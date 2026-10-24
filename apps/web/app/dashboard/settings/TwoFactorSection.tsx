@@ -97,7 +97,7 @@ export function TwoFactorSection({ initialEnabled, recoveryRemaining }: Props) {
         </div>
         <span
           className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium ${
-            enabled ? 'bg-success/10 text-success' : 'bg-border/40 text-muted'
+            enabled ? 'bg-primary/10 text-primary' : 'bg-line/40 text-muted'
           }`}
         >
           {enabled ? t('twoFactor.on') : t('twoFactor.off')}
@@ -152,9 +152,9 @@ export function TwoFactorSection({ initialEnabled, recoveryRemaining }: Props) {
             alt={t('twoFactor.qrAlt')}
             width={200}
             height={200}
-            className="rounded-md border border-border"
+            className="rounded-md border border-line"
           />
-          <code className="block break-all rounded bg-border/30 px-2 py-1 text-xs" dir="ltr">
+          <code className="block break-all rounded bg-line/30 px-2 py-1 text-xs" dir="ltr">
             {challenge.secret}
           </code>
           <form action={confirm} className="space-y-3">
@@ -197,7 +197,7 @@ export function TwoFactorSection({ initialEnabled, recoveryRemaining }: Props) {
           <p className="text-sm font-medium text-ink">
             {t('twoFactor.codesIntro')}
           </p>
-          <ul className="grid grid-cols-2 gap-2 rounded-md bg-border/20 p-3 font-mono text-sm" dir="ltr">
+          <ul className="grid grid-cols-2 gap-2 rounded-md bg-line/20 p-3 font-mono text-sm" dir="ltr">
             {recoveryCodes.map((c) => (
               <li key={c}>{c}</li>
             ))}

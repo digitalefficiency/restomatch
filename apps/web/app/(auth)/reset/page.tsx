@@ -32,7 +32,7 @@ export default async function ResetPage({ searchParams }: PageProps) {
   // ── Mode 2: a reset token is present → choose a new password ──
   if (token) {
     return (
-      <main className="relative flex min-h-screen items-center justify-center p-6">
+      <main className="relative flex min-h-screen items-center justify-center p-6 pb-[calc(1.5rem+var(--consent-h,0px))]">
         <div className="absolute end-4 top-4">
           <LocaleSwitcher />
         </div>
@@ -74,7 +74,7 @@ export default async function ResetPage({ searchParams }: PageProps) {
                 placeholder="••••••••••"
               />
             </Field>
-            <Button type="submit" className="w-full">
+            <Button type="submit" data-keep-clear className="w-full">
               {t('reset.chooseSubmit')}
             </Button>
           </form>
@@ -85,7 +85,7 @@ export default async function ResetPage({ searchParams }: PageProps) {
 
   // ── Mode 1: request a reset link ──
   return (
-    <main className="relative flex min-h-screen items-center justify-center p-6">
+    <main className="relative flex min-h-screen items-center justify-center p-6 pb-[calc(1.5rem+var(--consent-h,0px))]">
       <div className="absolute end-4 top-4">
         <LocaleSwitcher />
       </div>
@@ -95,7 +95,7 @@ export default async function ResetPage({ searchParams }: PageProps) {
         {sent ? (
           <div
             role="status"
-            className="mb-4 rounded-md border-s-4 border-success bg-success/5 px-3 py-2 text-sm text-success"
+            className="mb-4 rounded-md border-s-4 border-primary bg-primary/5 px-3 py-2 text-sm text-primary"
           >
             {t('reset.sent')}
           </div>
@@ -113,12 +113,12 @@ export default async function ResetPage({ searchParams }: PageProps) {
               placeholder={t('login.emailPlaceholder')}
             />
           </Field>
-          <Button type="submit" className="w-full">
+          <Button type="submit" data-keep-clear className="w-full">
             {t('reset.requestSubmit')}
           </Button>
         </form>
         <p className="mt-6 text-center text-xs text-subtle">
-          <Link href="/login" className="text-brand hover:underline">
+          <Link href="/login" className="text-primary hover:underline">
             {t('reset.back')}
           </Link>
         </p>

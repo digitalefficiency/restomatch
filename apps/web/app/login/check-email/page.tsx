@@ -7,7 +7,7 @@ import { getT } from '@/lib/i18n/server';
 export default async function CheckEmailPage() {
   const t = await getT(authMessages);
   return (
-    <main className="flex min-h-screen items-center justify-center p-6">
+    <main className="flex min-h-screen items-center justify-center p-6 pb-[calc(1.5rem+var(--consent-h,0px))]">
       <Card elevated flow padding="lg" className="w-full max-w-md text-center">
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/12 text-primary ring-1 ring-primary/25">
           <Mail className="h-6 w-6" aria-hidden="true" />
@@ -21,7 +21,7 @@ export default async function CheckEmailPage() {
           </p>
         ) : null}
         <p className="mt-6 text-xs">
-          <Link href="/login" className="text-brand hover:underline">
+          <Link href="/login" className="text-primary hover:underline">
             {t('checkEmail.back')}
           </Link>
         </p>

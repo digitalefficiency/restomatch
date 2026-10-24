@@ -125,7 +125,7 @@ export function ApprovalsList({
       </div>
 
       {error ? (
-        <Card padding="sm" role="alert" className="border-danger/30 bg-danger/5 text-sm text-danger">
+        <Card padding="sm" role="alert" tone="danger" className="bg-danger/5 text-sm text-danger">
           {error}
         </Card>
       ) : null}
@@ -144,6 +144,7 @@ export function ApprovalsList({
               as="article"
               elevated
               padding="none"
+              tone={isBlock ? 'danger' : 'default'}
               className="relative overflow-hidden"
               aria-label={label}
             >
@@ -162,7 +163,7 @@ export function ApprovalsList({
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <SeverityBadge severity={d.severity} label={severityLabel(t, d.severity)} />
-                      <h3 className="text-base font-bold text-ink">{label}</h3>
+                      <h2 className="text-base font-bold text-ink">{label}</h2>
                     </div>
                     {product || supplier ? (
                       <p className="mt-1 text-sm text-muted">
@@ -192,7 +193,7 @@ export function ApprovalsList({
                 {d.invoiceId ? (
                   <Link
                     href={`/dashboard/invoices/${d.invoiceId}`}
-                    className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-info hover:underline"
+                    className="touch-target mt-2 inline-flex items-center gap-1 text-xs font-medium text-info hover:underline"
                   >
                     <FileText className="h-3.5 w-3.5" aria-hidden="true" /> {t('card.fixInvoice')}
                   </Link>
@@ -255,7 +256,8 @@ export function ApprovalsList({
                         {t('card.escalate')}
                       </Button>
                     ) : null}
-                    <Button variant="danger" size="sm" onClick={() => setActiveReject(d.id)}>
+                    {/* One primary action per card (T2); reject stays available, quieter. */}
+                    <Button variant="secondary" size="sm" onClick={() => setActiveReject(d.id)}>
                       {t('card.reject')}
                     </Button>
                     <Button
@@ -341,7 +343,8 @@ function railTint(severity: string): string {
 }
 
 function SeverityBadge({ severity, label }: { severity: string; label: string }) {
+  // T2 "act now": blocking and warning decisions get solid badges; info stays calm.
   const tone: BadgeTone =
-    severity === 'block' ? 'danger' : severity === 'warn' ? 'warning' : 'info';
+    severity === 'block' ? 'danger-solid' : severity === 'warn' ? 'warning-solid' : 'info';
   return <Badge tone={tone}>{label}</Badge>;
 }

@@ -250,7 +250,7 @@ export function MobileNav({
             type="button"
             tabIndex={-1}
             aria-hidden="true"
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            className="absolute inset-0 bg-ink/30 backdrop-blur-sm"
             onClick={() => setOpen(false)}
           />
           <div

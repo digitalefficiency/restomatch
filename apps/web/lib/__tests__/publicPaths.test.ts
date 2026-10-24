@@ -7,7 +7,7 @@ describe('isPublicPath (middleware allowlist)', () => {
     (p) => expect(isPublicPath(p)).toBe(true),
   );
 
-  it.each(['/opengraph-image', '/twitter-image', '/robots.txt', '/sitemap.xml', '/icon.svg'])(
+  it.each(['/twitter-image', '/og/he.png', '/og/en.png', '/robots.txt', '/sitemap.xml', '/icon.svg'])(
     'SEO/social asset %s is public (crawlers have no session)',
     (p) => expect(isPublicPath(p)).toBe(true),
   );
