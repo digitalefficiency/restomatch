@@ -36,7 +36,7 @@ export default async function SetPasswordPage({ searchParams }: PageProps) {
   const t = await getT(authMessages);
 
   return (
-    <main className="flex min-h-screen items-center justify-center p-6">
+    <main className="flex min-h-screen items-center justify-center p-6 pb-[calc(1.5rem+var(--consent-h,0px))]">
       <Card elevated flow padding="lg" className="w-full max-w-md">
         <h1 className="mb-2 text-2xl font-bold text-ink">
           {existing ? t('setPassword.titleChange') : t('setPassword.titleSet')}
@@ -95,7 +95,7 @@ export default async function SetPasswordPage({ searchParams }: PageProps) {
           <Field label={t('setPassword.confirm')} htmlFor="confirm">
             <Input id="confirm" name="confirm" type="password" required dir="ltr" autoComplete="new-password" />
           </Field>
-          <Button type="submit" className="w-full">
+          <Button type="submit" data-keep-clear className="w-full">
             {existing ? t('setPassword.submitChange') : t('setPassword.submitSet')}
           </Button>
         </form>

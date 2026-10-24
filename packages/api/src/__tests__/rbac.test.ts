@@ -89,3 +89,23 @@ describe('RBAC — TRPCError instances', () => {
     }
   });
 });
+
+describe('RBAC — invoiceReaderProcedure (one supplier invoice: no chef)', () => {
+  const invoiceId = '3f1c0e3e-0000-4000-8000-000000000000';
+
+  it('rejects the chef on getInvoice + ensureEnglish', async () => {
+    const caller = appRouter.createCaller(makeCtx({ userId: 'u1', restaurantId, role: 'chef' }));
+    await expect(caller.receiving.getInvoice({ invoiceId })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(caller.receiving.ensureEnglish({ invoiceId })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it.each([['owner'], ['manager'], ['receiver'], ['bookkeeper']] as const)(
+    'lets %s through the role gate (an unknown invoice is then NOT_FOUND, not FORBIDDEN)',
+    async (role) => {
+      const caller = appRouter.createCaller(makeCtx({ userId: 'u1', restaurantId, role }));
+      const err = await caller.receiving.getInvoice({ invoiceId }).catch((e: TRPCError) => e);
+      expect(err).toBeInstanceOf(TRPCError);
+      expect((err as TRPCError).code).not.toBe('FORBIDDEN');
+    },
+  );
+});
