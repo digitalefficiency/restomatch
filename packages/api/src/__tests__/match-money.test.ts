@@ -446,6 +446,41 @@ describe('a re-match after the PO is closed (demo: "התאמה מחדש" on a se
     expect(inv!.status).toBe(res.status === 'blocked' ? 'disputed' : 'matched');
   });
 
+  it('a corrected invoice date moves the invoice to the right PO (no crash re-matching against the old pin)', async () => {
+    const A = await seedTenant(db, 'A');
+    const caller = ownerCaller(A);
+    await db.delete(matchRuns).where(eq(matchRuns.invoiceId, A.invoiceId));
+    // OCR misread the date as a month ago — next to another PO of the same supplier.
+    const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const [oldPo] = await db
+      .insert(purchaseOrders)
+      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, expectedDeliveryAt: monthAgo, status: 'sent', source: 'manual' })
+      .returning();
+    const [orig] = await db.select({ invoiceDate: invoices.invoiceDate }).from(invoices).where(eq(invoices.id, A.invoiceId));
+    await db.update(invoices).set({ invoiceDate: monthAgo }).where(eq(invoices.id, A.invoiceId));
+    await caller.match.runForInvoice({ invoiceId: A.invoiceId });
+    const runPo = async () =>
+      (await db.select({ poId: matchRuns.poId }).from(matchRuns).where(eq(matchRuns.invoiceId, A.invoiceId)))[0]?.poId;
+    expect(await runPo()).toBe(oldPo!.id);
+
+    // The person corrects the date; the old PO closes meanwhile. Re-match must
+    // drop the pin (it is a month outside the window) and find the right PO.
+    await db.update(purchaseOrders).set({ status: 'closed' }).where(eq(purchaseOrders.id, oldPo!.id));
+    await db.update(invoices).set({ invoiceDate: orig!.invoiceDate }).where(eq(invoices.id, A.invoiceId));
+    const res = await caller.match.runForInvoice({ invoiceId: A.invoiceId });
+    expect(res.poMatched).toBe(true);
+    expect(await runPo()).toBe(A.poId);
+    const types = (
+      await db
+        .select({ type: discrepancies.type })
+        .from(discrepancies)
+        .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+        .where(eq(matchRuns.invoiceId, A.invoiceId))
+    ).map((d) => d.type);
+    expect(types).not.toContain('DATE_ANOMALY');
+    expect(types).not.toContain('UNORDERED_ARRIVAL');
+  });
+
   it('a first match still only considers open POs (a closed PO is not picked up by discovery)', async () => {
     const A = await seedTenant(db, 'A');
     await db.delete(matchRuns).where(eq(matchRuns.invoiceId, A.invoiceId)); // never matched before
