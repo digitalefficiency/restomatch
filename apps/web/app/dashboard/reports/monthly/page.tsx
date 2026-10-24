@@ -200,14 +200,14 @@ export default async function MonthlyReportPage({
               title={t('report.emailFrame')}
               srcDoc={email.html}
               sandbox=""
-              className="h-[640px] w-full rounded-xl border border-line bg-white"
+              className="h-[640px] w-full rounded-xl border border-line bg-surface"
             />
           </div>
         ) : (
           <div className="mt-4 max-w-md">
             <pre
               dir={locale === 'he' ? 'rtl' : 'ltr'}
-              className="whitespace-pre-wrap rounded-2xl rounded-ss-sm bg-[#005c4b] p-4 font-sans text-sm leading-relaxed text-white"
+              className="whitespace-pre-wrap rounded-2xl rounded-ss-sm bg-primary/10 p-4 font-sans text-sm leading-relaxed text-ink ring-1 ring-primary/15"
               data-testid="whatsapp-preview"
             >
               {whatsapp}

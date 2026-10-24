@@ -92,7 +92,7 @@ export function SupplierAnswerForm({ token, lines }: { token: string; lines: Por
     return (
       <Card elevated padding="md" className="mt-6" role="status">
         <p className="flex items-center gap-2 text-lg font-bold text-ink">
-          <CheckCircle2 className="h-5 w-5 text-success" aria-hidden="true" />
+          <CheckCircle2 className="h-5 w-5 text-primary" aria-hidden="true" />
           {t('portal.doneTitle')}
         </p>
         <p className="mt-2 text-sm text-muted">

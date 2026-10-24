@@ -44,7 +44,7 @@ export async function SupplierConfirmCard({
         <div className="mt-2">
           <p className="flex items-center gap-2 font-semibold text-ink">
             {r.status === 'confirmed' ? (
-              <CheckCircle2 className="h-4 w-4 text-success" aria-hidden="true" />
+              <CheckCircle2 className="h-4 w-4 text-primary" aria-hidden="true" />
             ) : (
               <FileWarning className="h-4 w-4 text-warn" aria-hidden="true" />
             )}
