@@ -1,6 +1,8 @@
 import { relations, sql } from 'drizzle-orm';
 import {
+  bigint,
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -1098,6 +1100,141 @@ export const priceBaselines = pgTable(
     ),
     index('price_baselines_restaurant_idx').on(t.restaurantId),
     index('price_baselines_supplier_idx').on(t.supplierId),
+  ],
+);
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Recipes — food cost per dish (wave 1, flag `recipes`; migrations 0056–0057)
+ *
+ * The same-tenant composite FKs (recipe_items → recipes / products, both on
+ * (id, restaurant_id)) and the CHECKs live in 0057_recipes.sql; Drizzle only
+ * mirrors the columns. Money is integer agorot (menuPriceAgorot).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export const recipes = pgTable(
+  'recipes',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    nameEn: text('name_en'),
+    category: text('category'),
+    /** A sauce / dough / stock used inside other recipes (not sold on its own). */
+    isSubRecipe: boolean('is_sub_recipe').notNull().default(false),
+    /** What one batch makes: a dish = 1 מנה; a sauce e.g. 2 ק״ג. */
+    yieldQty: numeric('yield_qty', { precision: 12, scale: 4 }).notNull().default('1'),
+    yieldUnit: varchar('yield_unit', { length: 32 }).notNull().default('מנה'),
+    menuPriceAgorot: integer('menu_price_agorot'),
+    menuPriceIncludesVat: boolean('menu_price_includes_vat').notNull().default(true),
+    active: boolean('active').notNull().default(true),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('recipes_restaurant_name_idx').on(t.restaurantId, t.name)],
+);
+
+export const recipeItems = pgTable(
+  'recipe_items',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    recipeId: uuid('recipe_id').notNull(),
+    /** Exactly one of productId / subRecipeId is set (CHECK in 0057). */
+    productId: uuid('product_id'),
+    subRecipeId: uuid('sub_recipe_id'),
+    /** NET quantity on the plate, in `unit`. */
+    quantity: numeric('quantity', { precision: 12, scale: 4 }).notNull(),
+    unit: varchar('unit', { length: 32 }).notNull(),
+    /** Trim/peel/cooking loss: bought = quantity / (1 − wastePct/100). */
+    wastePct: numeric('waste_pct', { precision: 5, scale: 2 }).notNull().default('0'),
+    /** How many `unit` are in one product unit when the units don't convert (tray = 30 eggs). */
+    unitsPerProductUnit: numeric('units_per_product_unit', { precision: 12, scale: 4 }),
+    sortOrder: integer('sort_order').notNull().default(0),
+    note: text('note'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('recipe_items_recipe_idx').on(t.recipeId, t.restaurantId),
+    index('recipe_items_product_idx').on(t.productId, t.restaurantId),
+    index('recipe_items_sub_recipe_idx').on(t.subRecipeId, t.restaurantId),
+    index('recipe_items_restaurant_idx').on(t.restaurantId),
+  ],
+);
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Inventory counts (S17, flag `inventoryCount`, migration 0070)
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** A stock count (ספירת מלאי). Draft while counting; completed = values snapshotted. */
+export const inventoryCounts = pgTable(
+  'inventory_counts',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    /** Local calendar date of the count (YYYY-MM-DD). */
+    countDate: date('count_date', { mode: 'string' }).notNull(),
+    /** 'draft' | 'completed' (CHECK in 0070; one draft per restaurant). */
+    status: varchar('status', { length: 16 }).notNull().default('draft'),
+    countedBy: uuid('counted_by').references(() => users.id, { onDelete: 'set null' }),
+    notes: text('notes'),
+    /** Manual food sales ex-VAT for the period ENDING at this count (when there is no POS). */
+    foodSalesExVat: numeric('food_sales_ex_vat', { precision: 12, scale: 2 }),
+    /** Snapshot at completion: Σ priced line values, integer agorot. */
+    totalValueAgorot: bigint('total_value_agorot', { mode: 'number' }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('inventory_counts_one_draft_idx').on(t.restaurantId).where(sql`${t.status} = 'draft'`),
+    index('inventory_counts_restaurant_date_idx').on(t.restaurantId, t.countDate),
+    index('inventory_counts_counted_by_idx').on(t.countedBy),
+  ],
+);
+
+/** The paid price behind a counted line: the invoice it came from, so the owner recognises it. */
+export interface InventoryPriceSource {
+  observedAt: string;
+  invoiceId: string | null;
+  invoiceNumber: string | null;
+  invoiceDate: string | null;
+  supplierName: string | null;
+}
+
+/** One product on a count. qty NULL = not counted yet; unit_cost/value_agorot/price_source = completion snapshot. */
+export const inventoryCountLines = pgTable(
+  'inventory_count_lines',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    countId: uuid('count_id').notNull(),
+    productId: uuid('product_id').notNull(),
+    /** 'fridge' | 'freezer' | 'dry' | 'produce' | 'bar' | 'other' (CHECK in 0070). */
+    storageArea: varchar('storage_area', { length: 16 }).notNull().default('dry'),
+    qty: numeric('qty', { precision: 12, scale: 4 }),
+    unit: varchar('unit', { length: 32 }).notNull(),
+    /** ₪ ex-VAT per `unit` at completion; NULL = no known price (excluded from the value). */
+    unitCost: numeric('unit_cost', { precision: 12, scale: 4 }),
+    valueAgorot: bigint('value_agorot', { mode: 'number' }),
+    /** Where the snapshot price came from (frozen at completion). */
+    priceSource: jsonb('price_source').$type<InventoryPriceSource | null>(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('inventory_count_lines_count_product_idx').on(t.countId, t.productId),
+    index('inventory_count_lines_count_idx').on(t.countId, t.restaurantId),
+    index('inventory_count_lines_product_idx').on(t.productId, t.restaurantId),
+    index('inventory_count_lines_restaurant_idx').on(t.restaurantId),
   ],
 );
 

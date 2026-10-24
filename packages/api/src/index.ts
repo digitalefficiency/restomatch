@@ -18,6 +18,8 @@ import { ordersRouter } from './routers/orders';
 import { matchRouter } from './routers/match';
 import { mappingRouter } from './routers/mapping';
 import { productsRouter } from './routers/products';
+import { recipesRouter } from './routers/recipes';
+import { inventoryRouter } from './routers/inventory';
 import { teamRouter } from './routers/team';
 import { chainRouter } from './routers/chain';
 import { payRunRouter } from './routers/payRun';
@@ -41,6 +43,8 @@ export const appRouter = router({
   match: matchRouter,
   mapping: mappingRouter,
   products: productsRouter,
+  recipes: recipesRouter,
+  inventory: inventoryRouter,
   chain: chainRouter,
   payRun: payRunRouter,
   team: teamRouter,

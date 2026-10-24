@@ -5,6 +5,8 @@ export {
   type SupplierScorecard,
   type ComputeSupplierScorecardsOptions,
 } from './suppliers';
+// The leak engine's shared rules, re-exported so inventory purchases (S17) reuse them verbatim.
+export { LEAK_FILTER, LIVE_DUPLICATE } from './leak-views';
 export { computeBaselines, type BaselineRow, type ComputeBaselinesOptions } from './baselines';
 export {
   computeInvoiceLeak,

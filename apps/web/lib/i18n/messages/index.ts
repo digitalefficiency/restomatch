@@ -23,6 +23,8 @@ import { overview } from './overview';
 import { payRun } from './payRun';
 import { products } from './products';
 import { receiving } from './receiving';
+import { recipes } from './recipes';
+import { inventory } from './inventory';
 import { scans } from './scans';
 import { settings } from './settings';
 import { showcase } from './showcase';
@@ -51,6 +53,8 @@ export const ALL_NAMESPACES = [
   payRun,
   products,
   receiving,
+  recipes,
+  inventory,
   scans,
   settings,
   showcase,
@@ -59,4 +63,4 @@ export const ALL_NAMESPACES = [
   views,
 ] as const;
 
-export { common, admin, approvals, auth, catalog, chain, components, emails, accounting, invoices, landing, leaks, marketing, nav, onboarding, orders, overview, products, receiving, scans, settings, showcase, suppliers, team, views };
+export { common, admin, approvals, auth, catalog, chain, components, emails, accounting, invoices, landing, leaks, marketing, nav, onboarding, orders, overview, products, receiving, recipes, inventory, scans, settings, showcase, suppliers, team, views };

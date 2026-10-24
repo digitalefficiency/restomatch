@@ -11,6 +11,8 @@ import {
   or,
   poLines,
   products,
+  inventoryCountLines,
+  recipeItems,
   sql,
   suppliers,
 } from '@restomatch/db';
@@ -197,6 +199,32 @@ export const productsRouter = router({
         .from(poLines)
         .where(eq(poLines.productId, input.productId))
         .limit(1);
+      // recipe_items → products is ON DELETE RESTRICT (0057): a product a recipe
+      // uses gets the same friendly CONFLICT instead of a raw FK error.
+      const [recipeRef] = await ctx.db
+        .select({ id: recipeItems.id })
+        .from(recipeItems)
+        .where(and(eq(recipeItems.productId, input.productId), eq(recipeItems.restaurantId, restaurantId)))
+        .limit(1);
+      if (recipeRef) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: 'לא ניתן למחוק — המוצר משמש במתכון. הסירו אותו מהמתכון קודם.',
+        });
+      }
+      // inventory_count_lines → products is RESTRICT too (0070): a counted product
+      // is part of a stock value — the same friendly CONFLICT.
+      const [countRef] = await ctx.db
+        .select({ id: inventoryCountLines.id })
+        .from(inventoryCountLines)
+        .where(and(eq(inventoryCountLines.productId, input.productId), eq(inventoryCountLines.restaurantId, restaurantId)))
+        .limit(1);
+      if (countRef) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: 'לא ניתן למחוק — המוצר מופיע בספירת מלאי. השביתו אותו בקטלוג במקום למחוק.',
+        });
+      }
       if (invRef || poRef) {
         throw new TRPCError({
           code: 'CONFLICT',

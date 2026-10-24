@@ -37,7 +37,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const active =
     memberships.find((m) => m.restaurantId === session.user.restaurantId) ?? memberships[0]!;
-  const [t, locale] = await Promise.all([getT(nav), getLocale()]);
+  const [t, locale, recipesFlag, inventoryFlag] = await Promise.all([
+    getT(nav),
+    getLocale(),
+    // Wave-1 flag (MASTER-PLAN §1.3): a disabled feature's nav link is invisible.
+    caller.recipes.enabled().catch(() => ({ enabled: false })),
+    caller.inventory.enabled().catch(() => ({ enabled: false })),
+  ]);
+  const features = { recipes: recipesFlag.enabled, inventoryCount: inventoryFlag.enabled };
   const roleLabel = labelForRole(active.role, locale);
   const email = session.user.email ?? '';
   // Branches (S8): the switcher lists every membership; the chain tab is for
@@ -83,6 +90,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                   logout={logout}
                   restaurantName={active.restaurantName}
                   email={email}
+                  features={features}
                   showChain={showChain}
                   branchSwitcher={
                     memberships.length > 1 ? (
@@ -122,7 +130,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 </div>
                 <LocaleSwitcher className="lg:hidden" />
               </div>
-              <DesktopNav role={active.role} showChain={showChain} />
+              <DesktopNav role={active.role} showChain={showChain} features={features} />
             </div>
           </header>
           <main

@@ -13,6 +13,8 @@ export const en: Shape<typeof he> = {
     suppliers: 'Suppliers',
     catalog: 'Catalog',
     orders: 'Orders',
+    recipes: 'Food cost',
+    inventory: 'Inventory count',
     exports: 'Exports',
     team: 'Team',
     chain: 'Chain',

@@ -24,7 +24,11 @@ export const FEATURE_KEYS = [
   'aiAssistant',
   'leakCheck',
   'recipes',
+  // S17: alert on a dish whose food cost crossed the target because a supplier raised a price.
+  'dishPriceAlert',
   'integrations',
+  // S17: inventory counting (ספירת מלאי) → actual food cost per period.
+  'inventoryCount',
   'payRun',
   'dockSlip',
 ] as const;

@@ -169,7 +169,7 @@ pnpm --filter @restomatch/worker check:demo && pnpm db:doctor
 [check-demo]   recovery: 74 claims, 64 staged
 [check-demo]   recipes: 10 dishes, 59 items
 [check-demo]   inventory: 2026-09-30 ₪11134.46, 2026-10-24 ₪13474.46 (sales ₪136400.00)
-[check-demo]   inventory: actual food cost 30.2% (₪41135.36 of ₪136400.00)
+[check-demo]   inventory: actual food cost 26.6% (₪36247.99 of ₪136400.00)
 [check-demo]   contracts: 10 contract prices, 1 price alerts
 ```
 
