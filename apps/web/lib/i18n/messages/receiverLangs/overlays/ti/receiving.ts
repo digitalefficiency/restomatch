@@ -178,4 +178,39 @@ export const receiving: Shape<typeof he> = {
   demo: {
     banner: 'ቀጥታ ፈተነ — ናይ ኣብነት ሓበሬታ እዩ፡ ዝኾነ ነገር ኣይዕቀብን።',
   },
+  // dockSlip (#83): dock dispute slip. ₪ amounts are inserted by the app; keep {placeholders}.
+  // review: whole block — machine-drafted Tigrinya, needs a native speaker pass.
+  dockSlip: {
+    title: 'ሰነድ ፍልልያት ምቕባል', // review
+    subtitle: 'ቅድሚ ዘዋሪ ምኻዱ ኣርእዩዎ — እንታይ ጎዲሉ፣ እንታይ ተነጺጉ፣ እንታይ ብዝያዳ ኣብ ፋቱራ ኣትዩ።', // review
+    open: 'ሰነድ ፍልልያት', // review
+    supplier: 'ኣቕራቢ',
+    po: 'ትእዛዝ',
+    invoice: 'ፋቱራ',
+    at: 'ግዜ',
+    receiver: 'ዝተቐበለ',
+    duplicate: 'ቁጽሪ ፋቱራ {number} ኣብዚ ኣቕራቢ ድሮ ኣሎ — ዝተደገመ ፋቱራ ክኸውን ይኽእል።', // review
+    issue: {
+      short: 'ጎደሎ: ዝተኣዘዘ {ordered}፣ ዝመጸ {received}',
+      rejected: 'ዝተነጸገ / ዝተጎድአ: {rejected}',
+      overPrice: 'ዋጋ: ኣብ ትእዛዝ {po}፣ ኣብ ፋቱራ {invoice}',
+      overPriceNoAmount: 'ዋጋ ኣብ ፋቱራ ካብ ትእዛዝ ይበልጽ', // review
+      unordered: 'ዘይተኣዘዘ — ኣብ ፋቱራ {invoiced}',
+      billedNotReceived: 'ኣብ ፋቱራ {invoiced}፣ ዝመጸ {received}',
+    },
+    atStake: 'ኣብ ክትዕ ዘሎ መጠን', // review
+    quantitiesOnly: 'ብዝሒ ጥራይ',
+    total: 'ጠቕላላ ንምምላስ (credit note)', // review: "credit note" wording
+    computing: 'ናይ ምንጽጻር ሲስተም ገንዘብ ይሕሰብ ኣሎ…',
+    afterClose: 'መጠን ₪ ምቕባል ምስ ተዓጽወ ይውሰን — ናይ ምንጽጻር ሲስተም ምስ ብሓቂ ዝተቘጽረ የነጻጽሮ።', // review
+    slow: 'ሕሳብ ካብ ልሙድ ንላዕሊ ግዜ ይወስድ ኣሎ። ብዝሒ ኣብዚ ኣሎ፤ ₪ ደሓር ክመጽእ እዩ።', // review
+    heldReview: 'መጠናት ድሕሪ ምርመራ ፋቱራ ክውሰኑ እዮም።', // review
+    heldSettled: 'እዚ ፋቱራ ድሮ ጸዲቑ — መጠናቱ ኣብ ገጽ ምጽዳቕ ኣሎ።', // review
+    refresh: 'ኣሐድሱ',
+    copy: 'ጽሑፍ ቅዳሕ',
+    copied: 'ተቐዲሑ',
+    whatsapp: 'ናብ ኣቕራቢ ብWhatsApp ስደዱ',
+    share: 'ብWhatsApp ኣካፍሉ',
+    noSend: 'ብኣውቶማቲክ ዝስደድ የለን — እቲ ሊንክ WhatsApp ኹም ምስቲ ጽሑፍ ይኸፍቶ።', // review
+  },
 };

@@ -178,4 +178,38 @@ export const receiving: Shape<typeof he> = {
   demo: {
     banner: 'عرض تجريبي — بيانات نموذجية، لا يتم حفظ شيء.',
   },
+  // dockSlip (#83): dock dispute slip. ₪ amounts are inserted by the app; keep {placeholders}.
+  dockSlip: {
+    title: 'مذكرة فروقات الاستلام', // review: native term for a delivery dispute slip
+    subtitle: 'اعرضها على السائق قبل أن يغادر — ما الناقص، وما المرفوض، وما فُوتر بزيادة.',
+    open: 'مذكرة الفروقات',
+    supplier: 'المورد',
+    po: 'الطلبية',
+    invoice: 'الفاتورة',
+    at: 'الوقت',
+    receiver: 'المستلِم',
+    duplicate: 'رقم الفاتورة {number} موجود مسبقًا لدى هذا المورد — قد تكون فاتورة مكررة.',
+    issue: {
+      short: 'نقص: المطلوب {ordered}، المستلَم {received}',
+      rejected: 'مرفوض / تالف: {rejected}',
+      overPrice: 'السعر: في الطلبية {po}، في الفاتورة {invoice}',
+      overPriceNoAmount: 'سعر الفاتورة أعلى من الطلبية', // review
+      unordered: 'غير مطلوب — فُوتر {invoiced}',
+      billedNotReceived: 'فُوتر {invoiced}، المستلَم {received}',
+    },
+    atStake: 'المبلغ موضع الخلاف',
+    quantitiesOnly: 'الكميات فقط',
+    total: 'المجموع المطلوب كإشعار دائن', // review: "credit note" wording
+    computing: 'محرّك المطابقة يحسب المبالغ…',
+    afterClose: 'يُحدَّد مبلغ الفرق بالـ ₪ بعد إغلاق الاستلام — يقارنه محرّك المطابقة بالعدّ الفعلي.',
+    slow: 'الحساب يستغرق وقتًا أطول من المعتاد. الكميات ظاهرة؛ والمبلغ بالـ ₪ سيظهر لاحقًا.',
+    heldReview: 'ستُحدَّد المبالغ بعد فحص الفاتورة.', // review
+    heldSettled: 'هذه الفاتورة سبق اعتمادها — مبالغها في شاشة الموافقات.', // review
+    refresh: 'تحديث',
+    copy: 'نسخ النص',
+    copied: 'تم النسخ',
+    whatsapp: 'إرسال إلى المورد عبر واتساب',
+    share: 'مشاركة عبر واتساب',
+    noSend: 'لا يُرسَل أي شيء تلقائيًا — الرابط يفتح واتساب الخاص بك ومعه النص.',
+  },
 };

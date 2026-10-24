@@ -178,4 +178,38 @@ export const receiving: Shape<typeof he> = {
   demo: {
     banner: 'ทดลองใช้ — ข้อมูลตัวอย่าง ไม่มีการบันทึก',
   },
+  // dockSlip (#83): dock dispute slip. ₪ amounts are inserted by the app; keep {placeholders}.
+  dockSlip: {
+    title: 'ใบแจ้งของไม่ตรงตอนรับสินค้า', // review: native term for a delivery dispute slip
+    subtitle: 'ให้คนขับดูก่อนออกไป — อะไรขาด อะไรถูกปฏิเสธ และอะไรถูกเรียกเก็บเกิน',
+    open: 'ใบแจ้งของไม่ตรง',
+    supplier: 'ผู้ขาย',
+    po: 'ใบสั่งซื้อ',
+    invoice: 'บิล',
+    at: 'เวลา',
+    receiver: 'ผู้รับสินค้า',
+    duplicate: 'บิลเลขที่ {number} มีอยู่แล้วสำหรับผู้ขายรายนี้ — อาจเป็นบิลซ้ำ',
+    issue: {
+      short: 'ขาด: สั่ง {ordered} ได้รับ {received}',
+      rejected: 'ปฏิเสธ / เสียหาย: {rejected}',
+      overPrice: 'ราคา: ในใบสั่งซื้อ {po} ในบิล {invoice}',
+      overPriceNoAmount: 'ราคาในบิลสูงกว่าในใบสั่งซื้อ', // review
+      unordered: 'ไม่ได้สั่ง — เรียกเก็บ {invoiced}',
+      billedNotReceived: 'เรียกเก็บ {invoiced} ได้รับ {received}',
+    },
+    atStake: 'ยอดที่โต้แย้ง',
+    quantitiesOnly: 'เฉพาะจำนวน',
+    total: 'ยอดรวมที่ขอลดหนี้', // review: "credit note" wording
+    computing: 'ระบบจับคู่กำลังคำนวณยอดเงิน…',
+    afterClose: 'ยอด ₪ จะกำหนดหลังปิดการรับสินค้า — ระบบจับคู่จะตรวจกับจำนวนที่นับได้จริง',
+    slow: 'การคำนวณนานกว่าปกติ จำนวนแสดงแล้ว ยอด ₪ จะตามมา',
+    heldReview: 'ยอดเงินจะกำหนดหลังตรวจบิลแล้ว', // review
+    heldSettled: 'บิลนี้อนุมัติแล้ว — ดูยอดเงินได้ที่หน้าอนุมัติ', // review
+    refresh: 'รีเฟรช',
+    copy: 'คัดลอกข้อความ',
+    copied: 'คัดลอกแล้ว',
+    whatsapp: 'ส่งให้ผู้ขายทาง WhatsApp',
+    share: 'แชร์ทาง WhatsApp',
+    noSend: 'ไม่มีการส่งอะไรอัตโนมัติ — ลิงก์จะเปิด WhatsApp ของคุณพร้อมข้อความนี้',
+  },
 };
