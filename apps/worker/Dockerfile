@@ -36,13 +36,17 @@ RUN --mount=type=secret,id=ca,required=false \
 #    .dockerignore), then an offline install of ONLY the worker and its
 #    workspace dependencies — no Next.js/Expo trees in the image.
 COPY . .
-RUN pnpm install --offline --frozen-lockfile --filter '@restomatch/worker...'
+RUN pnpm install --offline --frozen-lockfile --filter '@restomatch/worker...' \
+    && if find /app -name '.env' -o -name '*.env' -o -name '.env.*' | grep -v '.env.example' | grep -q .; then \
+         echo 'refusing to build: an env file is in the build context' >&2; exit 1; fi
 
 # 4) Runtime stage: just /app (sources + the worker's node_modules). The pnpm
 #    store and the web/mobile packages fetched above stay in the build stage.
 FROM node:22-slim
 WORKDIR /app
-COPY --from=build --chown=node:node /app /app
+# Root-owned + read-only for the app user: the process cannot rewrite its own
+# code (QA D9). devDependencies stay because tsx (the runtime loader) is one.
+COPY --from=build /app /app
 ENV NODE_ENV=production \
     PORT=8080
 EXPOSE 8080

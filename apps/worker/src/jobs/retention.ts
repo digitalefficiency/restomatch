@@ -1,6 +1,7 @@
-import { createDb } from '@restomatch/db';
+
 import { runRetention } from '@restomatch/api';
 import { makeWorker } from '../queue';
+import { jobDb } from '../db';
 
 /**
  * Retention / data-minimization purge (E.8 — Amendment 13).
@@ -28,7 +29,7 @@ export function startRetentionWorker() {
   return makeWorker<RetentionJob>('retention', async (job) => {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error('DATABASE_URL is required');
-    const db = createDb(url);
+    const db = jobDb(url);
 
     // Dry-run unless the purge flag is explicitly set AND the job didn't force
     // a preview.

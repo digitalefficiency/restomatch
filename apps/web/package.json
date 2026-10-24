@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:smoke": "playwright test smoke",
-    "test:e2e:install": "playwright install chromium"
+    "test:e2e:install": "playwright install chromium",
+    "test:prod-softnav": "node scripts/check-soft-nav.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.69.0",
@@ -24,6 +25,7 @@
     "@restomatch/db": "workspace:*",
     "@restomatch/ingest": "workspace:*",
     "@restomatch/ocr": "workspace:*",
+    "@restomatch/queue": "workspace:*",
     "@restomatch/translate": "workspace:*",
     "@restomatch/types": "workspace:*",
     "@restomatch/ui-tokens": "workspace:*",

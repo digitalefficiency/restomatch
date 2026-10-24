@@ -121,6 +121,16 @@ puts the 4 tables under RLS on its own. Grants come from the existing blanket gr
 All runs used local, session-owned Postgres databases (`restomatch_s13_scratch` for tests, `restomatch_s13_dev` seeded
 with the demo tenant for the app) and local Redis. Nothing touched production.
 
+**Re-verified after merging `origin/claude/client-ready` @ `f751c6f` (2026-10-24).** There were four conflicts:
+- `dashboard/layout.tsx`: took the base's `TrpcProvider` wrapper and re-applied the ingest flags, the `data-rm-logout` attribute and `PwaSessionGuard`.
+- `receiving/[poId]/wizard.tsx`: kept the queued-offline notice and adopted the base's `buildFromPoOnly(grId)`.
+- `packages/api/src/index.ts`: kept both export sets.
+- `supabase/released-migrations.json`: took the base's lock and regenerated it with `db:supabase-sync`, not by hand. The ingest Supabase files now sit after the base's SB-3 RLS file, so the trailing RLS copy is `restomatch_rls_ac473419`.
+
+Results:
+- **Layer 1:** 14/14 test tasks pass, typecheck 18/18, web `tsc` 0 errors, lint clean. `check-rls` and `supabase-sync --check` are OK, and the web build is OK.
+- **Layer 2:** production build 143/143, dev 21/21.
+
 ### Layer 1: automated gate
 
 ```bash

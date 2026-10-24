@@ -149,6 +149,9 @@ importers:
       '@restomatch/ocr':
         specifier: workspace:*
         version: link:../../packages/ocr
+      '@restomatch/queue':
+        specifier: workspace:*
+        version: link:../../packages/queue
       '@restomatch/translate':
         specifier: workspace:*
         version: link:../../packages/translate

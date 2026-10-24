@@ -136,9 +136,10 @@ ${rls('0003_audit_immutable.sql')}
 ${rlsAppRoleGrantsSql().trim()}
 
 -- 5. Storage (Supabase): the private invoice-scans bucket the app uploads to,
---    then the storage.objects policies from rls/0001 (per-restaurant + the anon
---    'walk-ins/' showcase prefix — dropping that one waits for the server-side
---    showcase upload, see SUPABASE-GITHUB-DEPLOY.md §SB-3). storage.objects
+--    then the storage.objects policies from rls/0001: the four per-restaurant
+--    ones only. No anonymous access (SB-3): the former anon 'walk-ins/' showcase
+--    policies are DROPPED here, since the showcase uploads server-side (service
+--    role, POST /api/showcase/upload; SUPABASE-GITHUB-DEPLOY.md §SB-3). storage.objects
 --    belongs to supabase_storage_admin; if the migration role may not alter it or
 --    create policies on it, this logs a WARNING instead of failing the deploy —
 --    apply rls/0001 from the SQL editor then (the doctor / verify-cutover report it).

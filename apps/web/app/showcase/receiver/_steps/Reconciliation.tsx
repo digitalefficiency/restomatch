@@ -2,7 +2,7 @@
 
 import { useGSAP } from '@gsap/react';
 import { gsap } from 'gsap';
-import { AlertTriangle, ArrowLeft, Check, Minus, Plus, X, Zap } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Check, Clock, Info, Minus, Plus, X, Zap } from 'lucide-react';
 import { useRef } from 'react';
 import { useDir, useLocale, useT } from '@/lib/i18n/client';
 import { formatPercent } from '@/lib/i18n/format';
@@ -64,7 +64,7 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
       <StepHeader
         eyebrow={t('steps.stepOf', { current: 4, total: 5 })}
         title={t('steps.recon.title')}
-        subtitle={t('steps.recon.subtitle', {
+        subtitle={result.invoiceMeta.noInvoice ? t('steps.recon.subtitleNoInvoice') : t('steps.recon.subtitle', {
           number: result.invoiceMeta.invoiceNumber,
           confidence: formatPercent(result.invoiceMeta.ocrConfidence, locale, 0),
         })}
@@ -149,6 +149,19 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
               </div>
             );
           })}
+        </div>
+      ) : null}
+
+      {(result.summary.pendingCount ?? 0) > 0 ? (
+        <div
+          role="status"
+          data-testid="recon-pending-banner"
+          className="mb-6 flex items-start gap-3 rounded-2xl border border-line bg-surface-2 px-5 py-4"
+        >
+          <Info className="mt-0.5 h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
+          <div className="text-sm text-ink">
+            {t('steps.recon.pendingBanner', { count: result.summary.pendingCount ?? 0 })}
+          </div>
         </div>
       ) : null}
 
@@ -311,6 +324,8 @@ function rowTone(status: LineStatus): string {
       return 'bg-danger/8';
     case 'missing_from_invoice':
       return 'bg-surface-2';
+    case 'pending_review':
+      return 'bg-surface';
   }
 }
 
@@ -320,6 +335,8 @@ const STATUS_STYLE: Record<LineStatus, { tint: string; icon: React.ReactNode }> 
   price_diff: { tint: 'bg-warn/12 text-warn ring-1 ring-warn/25', icon: <Zap className="w-3 h-3" /> },
   unordered: { tint: 'bg-danger/12 text-danger ring-1 ring-danger/25', icon: <Plus className="w-3 h-3" strokeWidth={3} /> },
   missing_from_invoice: { tint: 'bg-surface-2 text-muted ring-1 ring-line', icon: <X className="w-3 h-3" strokeWidth={3} /> },
+  // Neutral by design (calm UX): an unchecked line is never a red alarm.
+  pending_review: { tint: 'bg-surface-2 text-muted ring-1 ring-line', icon: <Clock className="w-3 h-3" /> },
 };
 
 export function StatusBadge({ status, t }: { status: LineStatus; t: T }) {

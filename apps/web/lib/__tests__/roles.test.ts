@@ -24,6 +24,14 @@ describe('roles matrix', () => {
     expect(allowedRolesForPath('/dashboard/receiving/abc')).toContain('receiver');
   });
 
+  it('product pages follow the catalog (owner + manager only)', () => {
+    expect(allowedRolesForPath('/dashboard/products')).toEqual(['owner', 'manager']);
+    expect(allowedRolesForPath('/dashboard/products/abc')).toEqual(['owner', 'manager']);
+    for (const role of ['receiver', 'bookkeeper', 'chef'] as const) {
+      expect(canSeeRoute(role, '/dashboard/products')).toBe(false);
+    }
+  });
+
   it('bookkeeper can open the approvals queue (duplicate invoices are routed to them)', () => {
     expect(canSeeRoute('bookkeeper', '/dashboard/approvals')).toBe(true);
     expect(canSeeRoute('chef', '/dashboard/approvals')).toBe(false);

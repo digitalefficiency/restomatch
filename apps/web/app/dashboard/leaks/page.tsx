@@ -149,7 +149,7 @@ export default async function LeaksPage({
             />
             <StatCard
               label={t('detective.worst')}
-              value={<span dir="ltr">+{formatPercent(worst, locale, 0)}</span>}
+              value={<span dir="ltr">+{formatPercent(worst, locale, 1)}</span>}
               tone="danger"
               hint={t('detective.worstHint')}
             />
