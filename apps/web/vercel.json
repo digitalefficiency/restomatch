@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "ignoreCommand": "[ \"$VERCEL_ENV\" != \"production\" ]",
+  "ignoreCommand": "[ \"$VERCEL_ENV\" = \"preview\" ]",
   "regions": ["hnd1"],
   "crons": [
     {
