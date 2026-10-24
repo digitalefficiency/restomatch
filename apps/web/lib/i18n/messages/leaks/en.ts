@@ -64,6 +64,7 @@ export const en: Shape<typeof he> = {
     title: 'Credit request letters',
     subtitle: 'For each supplier — the lines you can claim a credit for in {month}, ready to print or send.',
     open: 'Credit letters to suppliers',
+    toSend: 'To send',
     print: 'Print / save as PDF',
     empty: 'Nothing to claim this month right now.',
     to: 'To: {supplier}',

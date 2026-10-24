@@ -16,6 +16,7 @@ import {
 import { views as viewsNs } from '@/lib/i18n/messages/views';
 import {
   DeltaBadge,
+  isThinBase,
   ViewToolbar,
   isDefaultData,
   localDay,
@@ -107,17 +108,32 @@ export default async function LeakBreakdownPage({
       />
 
       {/* Month switcher + total — the same number as the hero. */}
-      <Card padding="md" className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <Card
+        padding="md"
+        tone={hero.leakIls > 0 ? 'danger' : 'default'}
+        className="relative mb-6 flex flex-col gap-4 overflow-hidden sm:flex-row sm:items-center sm:justify-between"
+      >
+        {/* T1 — the one number: danger start rail when money leaked. */}
+        {hero.leakIls > 0 ? <div className="absolute inset-y-0 start-0 w-1.5 bg-danger" aria-hidden="true" /> : null}
         <div>
           <p className="text-xs font-semibold uppercase tracking-wider text-subtle">
             {t('breakdown.total')} · {month}
           </p>
-          <p className="mt-1 font-mono text-3xl font-extrabold tabular-nums text-danger">{ils(hero.leakIls, 0)}</p>
+          <p className={`mt-1 font-mono text-4xl font-extrabold tabular-nums ${hero.leakIls > 0 ? 'text-ink' : 'text-primary'}`}>
+            {ils(hero.leakIls, 0)}
+          </p>
           {hero.leakPct != null ? (
             <p className="text-sm text-muted">{t('breakdown.ofSpend', { pct: formatPercent(hero.leakPct, locale, 1) })}</p>
           ) : null}
           {summary.previous ? (
-            <DeltaBadge className="mt-1" current={hero.leakIls} previous={summary.previous.leakIls} compare={view.compare} showAmount />
+            <DeltaBadge
+              className="mt-1"
+              current={hero.leakIls}
+              previous={summary.previous.leakIls}
+              compare={view.compare}
+              thinBase={isThinBase(hero.spendIls, summary.previous.spendIls)}
+              showAmount
+            />
           ) : null}
         </div>
         <nav className="flex flex-wrap items-center gap-2" aria-label={month}>

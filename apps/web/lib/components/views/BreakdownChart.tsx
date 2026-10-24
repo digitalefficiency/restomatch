@@ -31,6 +31,7 @@ export function BreakdownChart({
   chart,
   density = 'comfortable',
   compare = 'off',
+  thinBase = false,
   caption,
   keyHeader,
   valueHeader,
@@ -41,6 +42,8 @@ export function BreakdownChart({
   chart: ChartType;
   density?: Density;
   compare?: Compare;
+  /** The comparison period is too thin to compare (isThinBase): ₪ differences only. */
+  thinBase?: boolean;
   caption: string;
   keyHeader: string;
   valueHeader: string;
@@ -100,7 +103,7 @@ export function BreakdownChart({
                       {r.previous != null ? ils(r.previous) : '—'}
                     </td>
                     <td className={cell}>
-                      <DeltaBadge current={r.value} previous={r.previous ?? 0} compare={compare} bare />
+                      <DeltaBadge current={r.value} previous={r.previous} compare={compare} thinBase={thinBase} bare />
                     </td>
                   </>
                 ) : null}
@@ -123,7 +126,7 @@ export function BreakdownChart({
               <span className="min-w-0 truncate font-medium text-ink">{r.label}</span>
               <span className="flex shrink-0 items-baseline gap-2">
                 {compare !== 'off' ? (
-                  <DeltaBadge current={r.value} previous={r.previous ?? 0} compare={compare} bare />
+                  <DeltaBadge current={r.value} previous={r.previous} compare={compare} thinBase={thinBase} bare />
                 ) : null}
                 <span className="font-mono font-semibold tabular-nums text-danger">{ils(r.value)}</span>
               </span>

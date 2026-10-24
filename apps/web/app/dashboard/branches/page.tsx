@@ -94,7 +94,7 @@ export default async function BranchesPage({
           <AddBranchForm currentBranch={active.name} />
         ) : data.hasBillingAccount && !data.isBillingOwner ? (
           // A co-owner on someone else's account: say who can add a branch — never a plan upsell.
-          <Card padding="md" className="border-info/30 bg-info/5 text-sm text-ink" data-testid="branches-not-payer">
+          <Card padding="md" tone="info" className="bg-info/5 text-sm text-ink" data-testid="branches-not-payer">
             {t('branches.notPayer')}
           </Card>
         ) : !data.hasBillingAccount || data.planKey !== 'chain' ? (
