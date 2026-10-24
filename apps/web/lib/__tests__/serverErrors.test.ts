@@ -27,6 +27,21 @@ describe('localizeServerError', () => {
     expect(localizeServerError(err, 'he')).toBe('אין לכם הרשאה לפעולה הזו.');
     expect(localizeServerError(err, 'en')).toBe('You do not have permission to do this.');
   });
+  it('translates a duplicate invoice number CONFLICT with the number and the holder date', () => {
+    const err = {
+      message: 'מספר החשבונית 1234 כבר קיים בחשבונית אחרת של הספק (מתאריך 2026-10-12)',
+      data: {
+        code: 'CONFLICT',
+        appCode: 'invoice.numberTaken',
+        appParams: { invoiceNumber: '1234', holderDate: '2026-10-12', holderInvoiceId: 'x' },
+      },
+    };
+    const en = localizeServerError(err, 'en');
+    expect(en).toContain('1234');
+    expect(en).toContain('2026-10-12');
+    expect(en).not.toMatch(/[\u0590-\u05FF]/);
+    expect(localizeServerError(err, 'he')).toContain('1234');
+  });
   it('falls back for empty errors', () => {
     expect(localizeServerError(null, 'en', 'Custom')).toBe('Custom');
   });
