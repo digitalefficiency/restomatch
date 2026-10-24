@@ -37,6 +37,12 @@ describe('roles matrix', () => {
     expect(canSeeRoute('chef', '/dashboard/approvals')).toBe(false);
   });
 
+  it('the pay run (/dashboard/approvals/pay-run) is owner / manager / bookkeeper only', () => {
+    expect(allowedRolesForPath('/dashboard/approvals/pay-run')).toEqual(['owner', 'manager', 'bookkeeper']);
+    expect(allowedRolesForPath('/dashboard/approvals/pay-run')).not.toContain('receiver');
+    expect(allowedRolesForPath('/dashboard/approvals/pay-run')).not.toContain('chef');
+  });
+
   it('labels roles in both languages', () => {
     expect(labelForRole('receiver')).toBe('מקבל סחורה');
     expect(labelForRole('receiver', 'en')).toBe('Receiver');

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { computeLeakBreakdown, computeLeakHero, type LeakBreakdownInvoice } from '@restomatch/charts';
-import { eq, restaurants, sql } from '@restomatch/db';
+import { eq, restaurants, sql, type Database } from '@restomatch/db';
 import { claimableLines, sumClaims, type VatBasis } from '../lib/claims';
 import { featureEnabled } from '../lib/features';
 import { financeProcedure, router } from '../trpc';
@@ -113,17 +113,20 @@ export function payRunStatusOf(b: LeakBreakdownInvoice | null): {
   return { status, claims, pendingIls, creditIls };
 }
 
+async function flagOn(db: Database, rid: string): Promise<boolean> {
+  const [r] = await db.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, rid)).limit(1);
+  return featureEnabled(r?.settings ?? {}, 'payRun');
+}
+
 export const payRunRouter = router({
+  /** Cheap: is the pay run on for the active restaurant (the approvals page links to it)? */
+  enabled: financeProcedure.query(async ({ ctx }) => flagOn(ctx.db, ctx.session.restaurantId)),
+
   month: financeProcedure
     .input(z.object({ monthOffset: z.union([z.literal(0), z.literal(-1)]).default(0) }).optional())
     .query(async ({ ctx, input }): Promise<PayRunResult> => {
       const rid = ctx.session.restaurantId;
-      const [r] = await ctx.db
-        .select({ settings: restaurants.settings })
-        .from(restaurants)
-        .where(eq(restaurants.id, rid))
-        .limit(1);
-      if (!featureEnabled(r?.settings ?? {}, 'payRun')) {
+      if (!(await flagOn(ctx.db, rid))) {
         return { enabled: false, monthStart: null, monthEnd: null, suppliers: [], totals: EMPTY_TOTALS };
       }
       const monthOffset = input?.monthOffset ?? 0;
