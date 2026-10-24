@@ -54,7 +54,8 @@ export const he = {
   },
   csv: {
     button: 'ייצוא CSV להנהלת חשבונות',
-    file: 'ריצת-תשלומים-{month}',
+    // ASCII on purpose: some browsers / accounting tools mangle non-Latin file names.
+    file: 'pay-run-{month}',
     supplier: 'ספק',
     invoice: 'מספר חשבונית',
     date: 'תאריך',
