@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { showcase } from '@/lib/i18n/messages/showcase';
 import { getT } from '@/lib/i18n/server';
-import { metadataBase } from '../(marketing)/_components/seo';
+import { metadataBase, socialFor } from '../(marketing)/_components/seo';
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getT(showcase);
@@ -12,7 +12,7 @@ export async function generateMetadata(): Promise<Metadata> {
     title: t('meta.title'),
     description: t('meta.description'),
     metadataBase,
-    openGraph: { title: t('meta.title'), description: t('meta.description'), url: '/showcase' },
+    ...socialFor(t.locale, { title: t('meta.title'), description: t('meta.description'), path: '/showcase' }),
   };
 }
 

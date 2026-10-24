@@ -1,9 +1,13 @@
 import type { MetadataRoute } from 'next';
-import { MARKETING_ROUTES, SITE_URL } from './(marketing)/_components/seo';
+import { MARKETING_ROUTES, siteUrl } from './(marketing)/_components/seo';
+
+// Read APP_URL per request: the production domain is right without a rebuild.
+export const dynamic = 'force-dynamic';
 
 /** Public pages, each with its English (`?lang=en`) hreflang alternate. */
 export default function sitemap(): MetadataRoute.Sitemap {
   const now = new Date();
+  const SITE_URL = siteUrl();
   return MARKETING_ROUTES.map((route) => ({
     url: `${SITE_URL}${route}`,
     lastModified: now,
