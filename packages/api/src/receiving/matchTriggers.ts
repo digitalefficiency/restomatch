@@ -58,9 +58,15 @@ export async function receiptStillOpen(tx: Database, restaurantId: string, grId:
 }
 
 /**
- * Does the matcher pair this invoice with THIS receipt when the receipt's own PO
- * is pinned? (Pinning matters: discovery alone prefers a same-supplier sibling
- * PO that already has a receipt.)
+ * Does this invoice belong to THIS receipt, unambiguously? The matcher must pair
+ * it with the receipt when the receipt's own PO is pinned (pinning matters:
+ * discovery alone prefers a same-supplier sibling PO that already has a
+ * receipt) — and it must NOT also pair with another still-open receipt of the
+ * same supplier. Two orders of one supplier on the same day both win the
+ * same-day tie when pinned, so a scan taken on the sibling's open receipt would
+ * otherwise be claimed by whichever receipt is submitted first and matched
+ * against the wrong count. An ambiguous scan is left for its own receipt (or a
+ * manager's match.runForInvoice), never guessed.
  */
 async function pairsWithReceipt(
   tx: Database,
@@ -69,7 +75,31 @@ async function pairsWithReceipt(
   receipt: { id: string; poId: string | null },
 ): Promise<boolean> {
   const built = await buildMatchInputForInvoice(tx, restaurantId, invoiceId, { pinnedPoId: receipt.poId });
-  return built?.grId === receipt.id;
+  if (built?.grId !== receipt.id) return false;
+
+  const [inv] = await tx
+    .select({ supplierId: invoices.supplierId })
+    .from(invoices)
+    .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
+    .limit(1);
+  if (!inv?.supplierId) return true;
+  const openSiblings = await tx
+    .select({ id: goodsReceipts.id, poId: goodsReceipts.poId })
+    .from(goodsReceipts)
+    .innerJoin(purchaseOrders, eq(purchaseOrders.id, goodsReceipts.poId))
+    .where(
+      and(
+        eq(goodsReceipts.restaurantId, restaurantId),
+        eq(goodsReceipts.status, 'pending'),
+        eq(purchaseOrders.supplierId, inv.supplierId),
+        sql`${goodsReceipts.id} <> ${receipt.id}`,
+      ),
+    );
+  for (const sibling of openSiblings) {
+    const other = await buildMatchInputForInvoice(tx, restaurantId, invoiceId, { pinnedPoId: sibling.poId });
+    if (other?.grId === sibling.id) return false; // ambiguous: it would also be that open receipt's scan
+  }
+  return true;
 }
 
 /** How far back submitReceipt looks for invoices of the receipt's supplier. */

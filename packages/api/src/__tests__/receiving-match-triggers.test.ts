@@ -257,3 +257,52 @@ describe('verifier MINOR 2: a same-supplier sibling PO with a receipt does not h
     );
   });
 });
+
+/** Same supplier, a second order earlier today with its OWN receipt still open (Galilee PO1 07:00). */
+async function openSiblingReceipt(s: Seed) {
+  const morning = new Date();
+  morning.setHours(Math.max(0, morning.getHours() - 3));
+  const [po1] = await db
+    .insert(purchaseOrders)
+    .values({ restaurantId: s.restaurantId, supplierId: s.supplierId, expectedDeliveryAt: morning, status: 'sent', source: 'manual' })
+    .returning();
+  const [pl1] = await db
+    .insert(poLines)
+    .values({ poId: po1!.id, rawDescription: 'עגבניה', qtyOrdered: '20', unit: 'kg', unitPriceExpected: '8' })
+    .returning();
+  const [gr1] = await db.insert(goodsReceipts).values({ restaurantId: s.restaurantId, poId: po1!.id, status: 'pending' }).returning();
+  await db.insert(grLines).values({ grId: gr1!.id, poLineId: pl1!.id, qtyReceived: '0' });
+  return { po1: po1!.id, gr1: gr1!.id };
+}
+
+describe('verifier follow-up (a): two orders of one supplier on the same day, both receipts open', () => {
+  it('closing GR2 does not claim X1, the scan held on the sibling’s still-open GR1', async () => {
+    const s = await seed(); // PO2 + GR2 (s.grId), counted
+    await openSiblingReceipt(s);
+    const x1 = await invoice(s); // registered on GR1 — held
+    const x2 = await invoice(s); // registered on GR2
+    await callerFor(s).receiving.submitReceipt({ grId: s.grId, invoiceIds: [x2] });
+    const sent = enqueueMatchInvoice.mock.calls.map((c) => c[0].invoiceId);
+    expect(sent).not.toContain(x1);
+  });
+});
+
+describe('verifier follow-up (b): re-submitting an already-closed receipt claims nothing', () => {
+  it('a sibling’s held scan, named or not, is not claimed by a re-submit of the closed GR2', async () => {
+    const s = await seed();
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, s.grId));
+    await openSiblingReceipt(s);
+    const x1 = await invoice(s);
+    await callerFor(s).receiving.submitReceipt({ grId: s.grId });
+    await callerFor(s).receiving.submitReceipt({ grId: s.grId, invoiceIds: [x1] });
+    expect(enqueueMatchInvoice.mock.calls.map((c) => c[0].invoiceId)).not.toContain(x1);
+  });
+
+  it('rule 2 on its own: a closed receipt’s re-submit derives no waiting list (no open sibling involved)', async () => {
+    const s = await seed();
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, s.grId));
+    const stray = await invoice(s); // pairs only with GR2, no run
+    await callerFor(s).receiving.submitReceipt({ grId: s.grId, invoiceIds: [stray] });
+    expect(enqueueMatchInvoice).not.toHaveBeenCalled();
+  });
+});

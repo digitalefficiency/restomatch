@@ -648,6 +648,15 @@ export const receivingRouter = router({
       // Held to commit: an OCR job deciding whether this receipt is still open
       // waits for us (receiving/matchTriggers).
       await lockReceipt(ctx.db, input.grId);
+      // Only CLOSING an open receipt claims scans. Re-submitting a receipt that
+      // was already completed/partial must not reach into other (sibling)
+      // receipts' held scans — it only re-matches its own runs.
+      const [before] = await ctx.db
+        .select({ status: goodsReceipts.status })
+        .from(goodsReceipts)
+        .where(and(eq(goodsReceipts.id, input.grId), eq(goodsReceipts.restaurantId, ctx.session.restaurantId)))
+        .limit(1);
+      const wasOpen = before?.status === 'pending';
 
       const rows = await ctx.db
         .select({
@@ -680,7 +689,7 @@ export const receivingRouter = router({
         )
         .returning();
       if (!receipt) throw new TRPCError({ code: 'NOT_FOUND', message: 'GR not found' });
-      await rematchAfterCount(ctx.db, ctx.session.restaurantId, receipt, input.invoiceIds ?? []);
+      await rematchAfterCount(ctx.db, ctx.session.restaurantId, receipt, input.invoiceIds ?? [], wasOpen);
       return receipt;
     }),
 
@@ -860,6 +869,8 @@ async function rematchAfterCount(
   restaurantId: string,
   receipt: { id: string; poId: string | null },
   scanned: string[],
+  /** The receipt was open until this submit: only then may it claim waiting / scanned invoices. */
+  claimScans: boolean,
 ): Promise<void> {
   const grId = receipt.id;
   // The invoices to match against the count: the ones waiting on this receipt
@@ -872,8 +883,11 @@ async function rematchAfterCount(
   try {
     ids = await db.transaction(async (sp) => {
       const tx = sp as unknown as Database;
-      const out = new Set<string>(await invoicesWaitingOnReceipt(tx, restaurantId, grId));
-      for (const id of await scannedInvoicesForReceipt(tx, restaurantId, receipt, scanned)) out.add(id);
+      const out = new Set<string>();
+      if (claimScans) {
+        for (const id of await invoicesWaitingOnReceipt(tx, restaurantId, grId)) out.add(id);
+        for (const id of await scannedInvoicesForReceipt(tx, restaurantId, receipt, scanned)) out.add(id);
+      }
       const ran = await tx
         .selectDistinct({ id: matchRuns.invoiceId })
         .from(matchRuns)
