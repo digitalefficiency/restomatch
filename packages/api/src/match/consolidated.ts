@@ -152,6 +152,8 @@ export interface ConsolidatedProposal {
   deliveryNotes: ProposalDeliveryNote[];
   products: ProposalProduct[];
   findings: ProposalFinding[];
+  /** What a letter asks, capped like the claims letters: before VAT ("+ מע״מ") and incl. VAT / VAT. */
+  claim: { exclIls: number; inclIls: number };
   totals: {
     deliveryNotesIls: number;
     invoiceSubtotalIls: number;
@@ -203,19 +205,21 @@ export function countsAsLeak(
 
 /**
  * The claimable ₪ of the cross-match, by the supplier credit letters' own rule
- * (lib/claims.ts: claimableLines / sumClaims) — so the panel and a letter can never
- * disagree on a shekel. The proposal's findings are presented as one open line
- * each on an invoice already linked (claimableLines claims nothing while an
- * invoice waits for its link, which is exactly what this proposal is about),
- * biggest |Δ| first, capped at the invoice's total like the hero.
+ * (lib/claims.ts: claimableLines / sumClaims) — so the panel, the printed letter and
+ * a claims letter can never disagree on a shekel. The proposal's findings are
+ * presented as one open line each on an invoice already linked (claimableLines
+ * claims nothing while an invoice waits for its link, which is exactly what this
+ * proposal is about), biggest |Δ| first, capped at the invoice's total like the
+ * hero — and the capped amounts are split by VAT basis (vatBasisOf): before VAT
+ * (the letter asks "+ מע״מ") vs incl. VAT / a VAT amount (asked as is).
  */
-export function claimableIls(
+export function claimSplit(
   findings: ReadonlyArray<
     Pick<ProposalFinding, 'type' | 'severity' | 'countsAsLeak' | 'deltaAmount' | 'expected' | 'actual'> &
       Partial<Pick<ProposalFinding, 'productId'>>
   >,
   invoiceTotalInclVat: number,
-): number {
+): { totalIls: number; exclIls: number; inclIls: number } {
   const lines = [...findings]
     .sort((a, b) => Math.abs(b.deltaAmount) - Math.abs(a.deltaAmount))
     .map((f, i) => ({
@@ -237,20 +241,31 @@ export function claimableIls(
       lineDescriptionEn: null,
     }));
   const leakAg = lines.filter((l) => l.countsAsLeak).reduce((s, l) => s + ag(Math.abs(l.deltaAmount)), 0);
-  return sumClaims(
-    claimableLines({
-      invoiceId: 'proposal',
-      invoiceNumber: null,
-      invoiceDate: null,
-      status: 'parsed',
-      supplierName: null,
-      supplierNameEn: null,
-      totalInclVat: invoiceTotalInclVat,
-      leakIls: ils(Math.min(leakAg, Math.max(0, ag(invoiceTotalInclVat)))),
-      pendingLink: false,
-      lines,
-    }),
-  );
+  const claimed = claimableLines({
+    invoiceId: 'proposal',
+    invoiceNumber: null,
+    invoiceDate: null,
+    status: 'parsed',
+    supplierName: null,
+    supplierNameEn: null,
+    totalInclVat: invoiceTotalInclVat,
+    leakIls: ils(Math.min(leakAg, Math.max(0, ag(invoiceTotalInclVat)))),
+    pendingLink: false,
+    lines,
+  });
+  return {
+    totalIls: sumClaims(claimed),
+    exclIls: sumClaims(claimed.filter((c) => c.basis === 'excl')),
+    inclIls: sumClaims(claimed.filter((c) => c.basis !== 'excl')),
+  };
+}
+
+/** The claimable ₪ of the cross-match (claimSplit's total). */
+export function claimableIls(
+  findings: Parameters<typeof claimSplit>[0],
+  invoiceTotalInclVat: number,
+): number {
+  return claimSplit(findings, invoiceTotalInclVat).totalIls;
 }
 
 /** A delivery-note number in free text: `ת.מ. 61036` (Hebrew) or `DN 61036`. */
@@ -258,6 +273,8 @@ export function deliveryNoteNumberIn(text: string | null | undefined): string | 
   if (!text) return null;
   // A RANGE ("ת.מ. 61036-61043", "61036 עד 61043") is a month line: it bills the pool.
   if (/(?:ת\.\s?מ\.?|\bDN)\s*#?\s*\d+\s*(?:[-–—]|עד|to)\s*\d+/i.test(text)) return null;
+  // So is a LIST ("ת.מ. 61036, 61037, 61038" / "61036 ו-61037").
+  if (/(?:ת\.\s?מ\.?|\bDN)\s*#?\s*\d+\s*(?:[,،;/]|ו-?)\s*\d+/i.test(text)) return null;
   const m = /ת\.\s?מ\.?\s*(\d+)/.exec(text) ?? /\bDN\s*#?\s*(\d+)/i.exec(text);
   return m ? m[1]! : null;
 }
@@ -533,6 +550,7 @@ export function buildConsolidatedProposal(args: {
   // are not ALSO billed twice, line by line — one problem, one amount.
   const heldDuplicate = engineFindings.some((d) => d.type === 'DUPLICATE_INVOICE' && countsAsLeak(d));
   const findings: ProposalFinding[] = [...engineFindings, ...pooledFindings, ...(heldDuplicate ? [] : twiceFindings)].map((d) => ({
+    // A held duplicate: the DUPLICATE line alone stands — the rest of the invoice is inside it.
     basis: vatBasisOf(d.type),
     productName: nameOf(d.productId)?.name ?? null,
     productNameEn: nameOf(d.productId)?.nameEn ?? null,
@@ -546,7 +564,7 @@ export function buildConsolidatedProposal(args: {
     expected: d.expected,
     actual: d.actual,
     deltaAmount: d.deltaAmount,
-    countsAsLeak: countsAsLeak(d),
+    countsAsLeak: countsAsLeak(d) && (!heldDuplicate || d.type === 'DUPLICATE_INVOICE'),
   }));
 
   // ── Per product (over all buckets): received vs billed, PO vs billed price, Δ₪. ──
@@ -651,7 +669,8 @@ export function buildConsolidatedProposal(args: {
 
   const deliveryNotesAg = deliveryNotes.reduce((s, n) => s + ag(n.receivedValueIls), 0);
   const subtotalAg = ag(args.base.invoice.totalExclVat);
-  const leakAg = ag(claimableIls(findings, args.base.invoice.totalInclVat));
+  const claim = claimSplit(findings, args.base.invoice.totalInclVat);
+  const leakAg = ag(claim.totalIls);
 
   return {
     invoiceId: args.invoiceId,
@@ -662,6 +681,7 @@ export function buildConsolidatedProposal(args: {
     deliveryNotes,
     products: productRows,
     findings,
+    claim: { exclIls: claim.exclIls, inclIls: claim.inclIls },
     totals: {
       deliveryNotesIls: ils(deliveryNotesAg),
       invoiceSubtotalIls: ils(subtotalAg),
@@ -767,15 +787,19 @@ export function candidatePeriods(at: Date, raw: ConsolidatedRaw | null, tz: stri
  * the 5th would pick last month's notes for the closer total.)
  */
 export function betterFit(a: ConsolidatedProposal, b: ConsolidatedProposal): ConsolidatedProposal {
+  // A window the invoice bills MORE than it delivered (units billed but not received
+  // there) is never the better fit; then no unbilled note; then the most covered.
+  const over = (p: ConsolidatedProposal) =>
+    p.findings.some((f) => (f.type === 'QTY_OVER' || f.type === 'UNORDERED_ITEM') && f.deltaAmount > 0);
   const score = (p: ConsolidatedProposal) => {
     const covered = p.deliveryNotes.filter((n) => n.status === 'covered').length;
     const leftovers = p.deliveryNotes.length - covered;
-    return [p.deliveryNotes.length > 0 && leftovers === 0 ? 1 : 0, covered] as const;
+    return [p.deliveryNotes.length > 0 && !over(p) ? 1 : 0, p.deliveryNotes.length > 0 && leftovers === 0 ? 1 : 0, covered] as const;
   };
-  const [aClean, aCovered] = score(a);
-  const [bClean, bCovered] = score(b);
-  if (bClean !== aClean) return bClean > aClean ? b : a;
-  return bCovered > aCovered ? b : a;
+  const sa = score(a);
+  const sb = score(b);
+  for (let i = 0; i < sa.length; i++) if (sb[i] !== sa[i]) return sb[i]! > sa[i]! ? b : a;
+  return a;
 }
 
 /** The delivery-note number on a goods receipt (`ת.מ. <n>` in its notes). */
@@ -787,14 +811,30 @@ const noteNumberSql = sql<string | null>`substring(${goodsReceipts.notes} from '
 
 /**
  * "Covered by another invoice": a match run of a different invoice used THIS receipt
- * (gr_id). Not its PO: an unrelated invoice paired to the PO by discovery does not
- * bill this delivery note.
+ * (gr_id) — unless both name their products and none overlaps (an unrelated
+ * invoice paired to the PO by discovery does not bill this note). Unmapped lines
+ * can't tell, so they still count.
  */
 const coveredByOther = (restaurantId: string, invoiceId: string | null) => sql`EXISTS (
   SELECT 1 FROM match_runs mr
   WHERE mr.restaurant_id = ${restaurantId}
     ${invoiceId ? sql`AND mr.invoice_id <> ${invoiceId}` : sql``}
     AND mr.gr_id = "goods_receipts"."id"
+    -- …unless both sides name their products and none overlaps: an unrelated
+    -- invoice paired to the note's PO by discovery bills something else.
+    AND NOT (
+      EXISTS (SELECT 1 FROM invoice_lines il WHERE il.invoice_id = mr.invoice_id AND il.product_id IS NOT NULL)
+      AND EXISTS (
+        SELECT 1 FROM gr_lines gl LEFT JOIN po_lines pl ON pl.id = gl.po_line_id
+        WHERE gl.gr_id = "goods_receipts"."id" AND COALESCE(gl.product_id, pl.product_id) IS NOT NULL
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM invoice_lines il
+        JOIN gr_lines gl ON gl.gr_id = "goods_receipts"."id"
+        LEFT JOIN po_lines pl ON pl.id = gl.po_line_id
+        WHERE il.invoice_id = mr.invoice_id AND il.product_id = COALESCE(gl.product_id, pl.product_id)
+      )
+    )
 )`;
 
 type LoadedNote = DeliveryNoteData & { coveredByInvoiceId: string | null };
@@ -825,6 +865,19 @@ async function loadDeliveryNotes(
         WHERE mr.restaurant_id = ${restaurantId}
           ${opts.excludeCoveredExcept ? sql`AND mr.invoice_id <> ${opts.excludeCoveredExcept}` : sql``}
           AND mr.gr_id = "goods_receipts"."id"
+          AND NOT (
+            EXISTS (SELECT 1 FROM invoice_lines il WHERE il.invoice_id = mr.invoice_id AND il.product_id IS NOT NULL)
+            AND EXISTS (
+              SELECT 1 FROM gr_lines gl LEFT JOIN po_lines pl ON pl.id = gl.po_line_id
+              WHERE gl.gr_id = "goods_receipts"."id" AND COALESCE(gl.product_id, pl.product_id) IS NOT NULL
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM invoice_lines il
+              JOIN gr_lines gl ON gl.gr_id = "goods_receipts"."id"
+              LEFT JOIN po_lines pl ON pl.id = gl.po_line_id
+              WHERE il.invoice_id = mr.invoice_id AND il.product_id = COALESCE(gl.product_id, pl.product_id)
+            )
+          )
         ORDER BY mr.run_at DESC LIMIT 1
       )`,
     })
@@ -1157,7 +1210,7 @@ export async function deliveryNoteCoverage(
     for (const n of c.raw.deliveryNoteNumbers) listers.set(n, [...(listers.get(n) ?? []), c]);
   }
   const listerOf = (number: string, at: Date) =>
-    (listers.get(number) ?? []).find((c) => periodsNear(c.period, { start: at, end: at }));
+    (listers.get(number) ?? []).find((c) => c.active && periodsNear(c.period, { start: at, end: at }));
 
   // Period candidates: consolidated invoices that don't list their notes (their
   // stated period — one that lists them covers exactly those). An ordinary invoice

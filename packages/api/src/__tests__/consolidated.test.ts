@@ -4,6 +4,7 @@ import {
   betterFit,
   buildConsolidatedProposal,
   candidatePeriods,
+  claimSplit,
   consolidatedPeriod,
   countsAsLeak,
   deliveryNoteNumberIn,
@@ -508,6 +509,51 @@ describe('buildConsolidatedProposal — #95 verification (P3)', () => {
     const sep = { start: new Date('2026-09-01'), end: new Date('2026-10-01') };
     expect(periodsNear(sep, { start: new Date('2026-10-05'), end: new Date('2026-10-06') })).toBe(true);
     expect(periodsNear(sep, { start: new Date('2025-09-01'), end: new Date('2025-10-01') })).toBe(false);
+  });
+});
+
+describe('buildConsolidatedProposal — #114 verification (P4)', () => {
+  it('(1) the money asked never exceeds the invoice: a held duplicate stands alone, capped like the claims letters', () => {
+    const notes = [note('gr-d', 5, [noteLine(CHALLAH, 10, 5)])];
+    const b = base([invLine(CHALLAH, 10, 8.6)]); // ₪86 vs ₪50 delivered → a ₪36 PRICE_HIGHER…
+    b.knownInvoiceNumbers = new Set([b.invoice.invoiceNumber]); // …on a held duplicate
+    const p = buildConsolidatedProposal({ invoiceId: 'i', supplierId: 's', periodStart: new Date(), periodEnd: new Date(), base: b, notes });
+    expect(p.findings.filter((f) => f.countsAsLeak).map((f) => f.type)).toEqual(['DUPLICATE_INVOICE']);
+    expect(p.claim).toEqual({ exclIls: 0, inclIls: b.invoice.totalInclVat });
+    expect(p.totals.leakIls).toBe(b.invoice.totalInclVat);
+    // And the split is capped in general: three findings above the invoice total.
+    const split = claimSplit(
+      [
+        { type: 'PRICE_HIGHER', severity: 'warn', countsAsLeak: true, deltaAmount: 60, expected: 1, actual: 2 },
+        { type: 'QTY_OVER', severity: 'block', countsAsLeak: true, deltaAmount: 50, expected: 1, actual: 2 },
+        { type: 'VAT_MISMATCH', severity: 'warn', countsAsLeak: true, deltaAmount: 10, expected: 1, actual: 2 },
+      ],
+      100,
+    );
+    expect(split.totalIls).toBe(100);
+    expect(split.exclIls + split.inclIls).toBe(100);
+  });
+
+  it('(2) betterFit: a window the invoice bills MORE than it delivered is never the better fit', () => {
+    // A weekly ריכוז dated Oct 5 billing DN 61044 + 61045 (2×10). Its own month also
+    // holds later, still-unbilled notes; last month's window has other goods only.
+    const own = propose(
+      [invLine(CHALLAH, 20, 5)],
+      [note('gr-44', 2, [noteLine(CHALLAH, 10, 5)]), note('gr-45', 4, [noteLine(CHALLAH, 10, 5)]), note('gr-46', 20, [noteLine(CHALLAH, 10, 5)])],
+    );
+    // Last month: one note of 8, which the 20 billed units "cover" — no leftovers, yet
+    // 12 units billed that the window never delivered (the old rule called it clean).
+    const previous = propose([invLine(CHALLAH, 20, 5)], [note('gr-s1', 25, [noteLine(CHALLAH, 8, 5)])]);
+    expect(previous.deliveryNotes.every((n) => n.status === 'covered')).toBe(true);
+    expect(previous.findings.some((f) => f.type === 'QTY_OVER' || f.type === 'UNORDERED_ITEM')).toBe(true);
+    expect(betterFit(own, previous)).toBe(own);
+    expect(betterFit(previous, own)).toBe(own);
+  });
+
+  it('(4) a comma LIST of notes on one line is pooled too', () => {
+    expect(deliveryNoteNumberIn('ת.מ. 61036, 61037, 61038 · חלב')).toBeNull();
+    expect(deliveryNoteNumberIn('DN 61036/61037')).toBeNull();
+    expect(deliveryNoteNumberIn('ת.מ. 61036 · חלב 3%, 24 ליטר')).toBe('61036');
   });
 });
 
