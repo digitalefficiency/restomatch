@@ -260,11 +260,6 @@ export async function runClaimedJob(
   }
 }
 
-/** Ids of the jobs running in this process right now (any runner). */
-export function inFlightJobIds(): string[] {
-  return [...inFlight.keys()];
-}
-
 export function makeWorker<T>(
   name: string,
   processor: (job: WorkerJob<T>) => Promise<unknown>,
