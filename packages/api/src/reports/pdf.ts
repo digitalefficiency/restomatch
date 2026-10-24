@@ -125,8 +125,12 @@ export async function renderMonthlyReportPdf(
     [c.spend, data.spendAgorot, C.ink],
     [c.caught, data.caughtAgorot, C.gold],
     [c.claimed, data.claimedAgorot, C.ink],
-    [c.returned, data.returnedAgorot, C.gold],
-    [c.outstanding, data.outstandingAgorot, C.danger],
+    ...(data.recoveryTracked === false
+      ? []
+      : ([
+          [c.returned, data.returnedAgorot, C.gold],
+          [c.outstanding, data.outstandingAgorot, C.danger],
+        ] as Array<[string, number, ReturnType<typeof rgb>]>)),
   ];
   for (const [label, agorot, color] of flow) {
     draw(ctx, label, { size: 12, color: C.muted });

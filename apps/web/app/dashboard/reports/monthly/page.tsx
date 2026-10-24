@@ -95,8 +95,13 @@ export default async function MonthlyReportPage({
           <StatCard label={t('report.spend')} value={ils(data.spendAgorot)} />
           <StatCard label={t('report.caught')} value={ils(data.caughtAgorot)} tone="gold" />
           <StatCard label={t('report.claimed')} value={ils(data.claimedAgorot)} tone="primary" />
-          <StatCard label={t('report.returned')} value={ils(data.returnedAgorot)} tone="gold" />
-          <StatCard label={t('report.outstanding')} value={ils(data.outstandingAgorot)} tone="danger" />
+          {/* Without the recovery feature no claims are tracked: unknown, not "₪0 owed". */}
+          {data.recoveryTracked === false ? null : (
+            <>
+              <StatCard label={t('report.returned')} value={ils(data.returnedAgorot)} tone="gold" />
+              <StatCard label={t('report.outstanding')} value={ils(data.outstandingAgorot)} tone="danger" />
+            </>
+          )}
         </div>
       </Card>
 

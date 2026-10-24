@@ -265,6 +265,27 @@ describe('monthly report', () => {
     }
   });
 
+  it('syncs claims before the snapshot: an accepted leak not yet materialised is still owed (money review)', async () => {
+    // beforeEach dropped every claim; nothing has run syncClaims since.
+    const data = await computeMonthlyReport(db, T.restaurantId, month());
+    expect(data.recoveryTracked).toBe(true);
+    expect(data.outstandingAgorot).toBe(10000);
+    expect(data.nextActions.map((a) => a.code)).toContain('sendClaims');
+  });
+
+  it('without the recovery feature, returned/outstanding are hidden (unknown), not "₪0 owed"', async () => {
+    await setFlags({ monthlyReport: true });
+    const data = await computeMonthlyReport(db, T.restaurantId, month());
+    expect(data.recoveryTracked).toBe(false);
+    expect(await db.select().from(recoveryClaims).where(eq(recoveryClaims.restaurantId, T.restaurantId))).toHaveLength(0);
+    const en = monthlyReportEmail(data, { locale: 'en' });
+    expect(en.text).not.toMatch(/Still owed/i);
+    expect(en.text).not.toMatch(/Actually returned/i);
+    expect(monthlyReportWhatsApp(data, { locale: 'en' })).not.toMatch(/Actually returned/i);
+    const bytes = await renderMonthlyReportPdf(data, { locale: 'en' });
+    expect(Buffer.from(bytes.slice(0, 5)).toString()).toBe('%PDF-');
+  });
+
   it('preview + pdf procedures are owner/manager only', async () => {
     const p = await caller('manager').monthlyReport.preview({ month: month(), locale: 'en' });
     expect(p.email.html).toContain('dir="ltr"');

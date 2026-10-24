@@ -1,7 +1,8 @@
 import { computeLeakReport } from '@restomatch/charts';
 import { and, eq, isNull, monthlyReports, restaurants, sql, type Database } from '@restomatch/db';
 import { renderEmail, ilsSpan, type RenderedEmail } from '../notifications/templates';
-import { computeRecoverySummary, returnedInMonth } from '../recovery/service';
+import { isFeatureOn } from '../lib/featureGate';
+import { computeRecoverySummary, returnedInMonth, syncClaims } from '../recovery/service';
 import { formatIlsAgorot, formatPct, ilsToAgorot, type ReportLocale } from './money';
 
 /**
@@ -54,6 +55,12 @@ export interface MonthlyReportData {
   returnedAgorot: number;
   /** Still owed by suppliers on claims for THIS month's invoices (as of generation). */
   outstandingAgorot: number;
+  /**
+   * false = the `recovery` feature was off when generated: no claims are
+   * tracked, so returned/outstanding are not "₪0 owed" but unknown and the
+   * renderers hide them. Absent (older snapshots) = tracked.
+   */
+  recoveryTracked?: boolean;
   invoiceCount: number;
   invoicesWithLeak: number;
   pendingLinkCount: number;
@@ -148,6 +155,12 @@ export async function computeMonthlyReport(
     .limit(1);
   const tz = r?.timezone ?? 'Asia/Jerusalem';
   const report = await computeLeakReport(db, restaurantId, month);
+  // Claims are materialised lazily (tracker views, the 08:30 reminders job);
+  // this job runs at 07:45 on the 1st and its snapshot is frozen once sent, so
+  // sync first or every discrepancy accepted since the last sync is missing
+  // from "still owed" / sendClaims for good.
+  const recoveryTracked = await isFeatureOn(db, restaurantId, 'recovery');
+  if (recoveryTracked) await syncClaims(db, restaurantId);
   const [returned, recovery, issues, owedThisMonth] = await Promise.all([
     returnedInMonth(db, restaurantId, { monthOffset: monthOffsetOf(month, now, tz), now }),
     computeRecoverySummary(db, restaurantId, now),
@@ -202,6 +215,7 @@ export async function computeMonthlyReport(
     claimedAgorot: ilsToAgorot(report.hero.recoveredIls),
     returnedAgorot: returned.returnedAgorot,
     outstandingAgorot: owedThisMonth,
+    recoveryTracked,
     invoiceCount: report.hero.invoiceCount,
     invoicesWithLeak: report.hero.invoicesWithLeak,
     pendingLinkCount: report.hero.pendingLinkCount,
@@ -427,8 +441,8 @@ export function monthlyReportEmail(
       ${row(c.spend, ilsSpan(f.ils(data.spendAgorot)))}
       ${row(c.caught, ilsSpan(f.ils(data.caughtAgorot), 'gold'))}
       ${row(c.claimed, ilsSpan(f.ils(data.claimedAgorot)))}
-      ${row(c.returned, ilsSpan(f.ils(data.returnedAgorot), 'gold'))}
-      ${row(c.outstanding, ilsSpan(f.ils(data.outstandingAgorot), 'danger'))}
+      ${data.recoveryTracked === false ? '' : row(c.returned, ilsSpan(f.ils(data.returnedAgorot), 'gold'))}
+      ${data.recoveryTracked === false ? '' : row(c.outstanding, ilsSpan(f.ils(data.outstandingAgorot), 'danger'))}
     </table>
     ${h2(c.topSuppliers)}
     ${list(data.topSuppliers.map((s) => `<strong>${esc(supplierLabel(s, locale))}</strong> — ${ilsSpan(f.ils(s.leakAgorot), 'danger')} (${esc(f.pct(s.leakPct))})`))}
@@ -453,8 +467,9 @@ export function monthlyReportEmail(
     `${c.spend}: ${f.ils(data.spendAgorot)}`,
     `${c.caught}: ${f.ils(data.caughtAgorot)}`,
     `${c.claimed}: ${f.ils(data.claimedAgorot)}`,
-    `${c.returned}: ${f.ils(data.returnedAgorot)}`,
-    `${c.outstanding}: ${f.ils(data.outstandingAgorot)}`,
+    ...(data.recoveryTracked === false
+      ? []
+      : [`${c.returned}: ${f.ils(data.returnedAgorot)}`, `${c.outstanding}: ${f.ils(data.outstandingAgorot)}`]),
     '',
     `${c.topSuppliers}:`,
     ...data.topSuppliers.map((s, i) => `${i + 1}. ${supplierLabel(s, locale)} — ${f.ils(s.leakAgorot)} (${f.pct(s.leakPct)})`),
@@ -482,7 +497,8 @@ export function monthlyReportWhatsApp(
   const lines = [
     `*${c.title} · ${monthLabel(data.month, locale)}*`,
     c.oneNumber(f.ils(data.leakAgorot), f.pct(data.leakPct)),
-    `${c.caught}: ${f.ils(data.caughtAgorot)} · ${c.claimed}: ${f.ils(data.claimedAgorot)} · ${c.returned}: ${f.ils(data.returnedAgorot)}`,
+    `${c.caught}: ${f.ils(data.caughtAgorot)} · ${c.claimed}: ${f.ils(data.claimedAgorot)}` +
+      (data.recoveryTracked === false ? '' : ` · ${c.returned}: ${f.ils(data.returnedAgorot)}`),
   ];
   const top = data.topSuppliers[0];
   if (top) lines.push(`${c.topSupplier}: ${supplierLabel(top, locale)} (${f.ils(top.leakAgorot)})`);
