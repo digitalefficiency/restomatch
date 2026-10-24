@@ -14,6 +14,7 @@ import {
 } from '@restomatch/db';
 import { makeWorker, type WorkerJob } from '../queue';
 import { jobDb } from '../db';
+import { IL_TZ, startOfIlDay } from '../lib/notifyHelpers';
 
 export interface DailyExpectationsJob {
   /** When omitted, computes for ALL restaurants. */
@@ -31,6 +32,20 @@ export interface DailyExpectationsEntry {
   status: string;
 }
 
+/**
+ * The Israel calendar day containing `ref` — whatever the host's time zone. The
+ * job used to take the process-local midnight: right on the owner's Mac (IL), a
+ * day off on a UTC host such as the web app's serverless runner. `date` is the
+ * IL date (the old label was the UTC date of IL midnight — the day before).
+ */
+export function ilDayWindow(ref: Date): { startOfDay: Date; endOfDay: Date; date: string } {
+  const startOfDay = startOfIlDay(ref);
+  // +36 h always lands in the next IL day (days are 23–25 h around DST).
+  const endOfDay = new Date(startOfIlDay(new Date(startOfDay.getTime() + 36 * 3600_000)).getTime() - 1);
+  const date = new Intl.DateTimeFormat('en-CA', { timeZone: IL_TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(ref);
+  return { startOfDay, endOfDay, date };
+}
+
 export function startDailyExpectationsWorker() {
   return makeWorker<DailyExpectationsJob>('daily-expectations', processDailyExpectations);
 }
@@ -42,10 +57,7 @@ export async function processDailyExpectations(job: WorkerJob<DailyExpectationsJ
   const db = jobDb(url);
 
   const targetDate = job.data.forDate ? new Date(job.data.forDate) : new Date();
-  const startOfDay = new Date(targetDate);
-  startOfDay.setHours(0, 0, 0, 0);
-  const endOfDay = new Date(startOfDay);
-  endOfDay.setHours(23, 59, 59, 999);
+  const { startOfDay, endOfDay, date: forDate } = ilDayWindow(targetDate);
 
   const restaurantRows = job.data.restaurantId
     ? await db.select().from(restaurants).where(eq(restaurants.id, job.data.restaurantId))
@@ -100,7 +112,7 @@ export async function processDailyExpectations(job: WorkerJob<DailyExpectationsJ
       entityType: 'restaurant',
       entityId: restaurant.id,
       after: {
-        forDate: startOfDay.toISOString().slice(0, 10),
+        forDate,
         expectations,
       },
     });
@@ -109,10 +121,10 @@ export async function processDailyExpectations(job: WorkerJob<DailyExpectationsJ
   }
 
   console.log(
-    `[daily-expectations] forDate=${startOfDay.toISOString().slice(0, 10)} ` +
+    `[daily-expectations] forDate=${forDate} ` +
       `restaurants=${summary.length} ` +
       `total_pos=${summary.reduce((s, r) => s + r.count, 0)}`,
   );
 
-  return { date: startOfDay.toISOString().slice(0, 10), summary };
+  return { date: forDate, summary };
 }
