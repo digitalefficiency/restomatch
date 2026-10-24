@@ -88,6 +88,30 @@ demo tenant has `features.all = true`; `FEATURES_OFF=contracts,priceAlerts` kill
 - Leak total before/after: **₪1,859.62 = ₪1,859.62** (the script aborts if it moves). Wired into
   `scripts/dev-setup.sh` (non-fatal).
 
+### 5. Supplier confirmation portal (`supplierConfirm`, migration 0062) — lite, no supplier accounts
+- **Flow:** on a sent order the manager clicks *Create supplier link* (order page card) → copies it or shares it on
+  WhatsApp → the supplier opens `/s/<token>` on the phone (he/en), sees the lines, quantities and agreed prices, and
+  either *confirms as is* or marks per-line shortages / proposes a per-line price (+ a note). The restaurant sees the
+  answer on the order page as **differences**; **the PO is never written**.
+- **Data (0062):** `supplier_confirm_links` (token **hash** only — SHA-256 of 32 random bytes; 72 h `expires_at`;
+  `revoked_at`) and `supplier_responses` (`UNIQUE(po_id)` — first answer wins; lines as jsonb validated against the
+  PO's own lines). Same-tenant composite FKs (adds `UNIQUE(id, restaurant_id)` on `purchase_orders`, additive), RLS +
+  policy inside the migration.
+- **Access model:** the only RLS-bypassing query is the token-hash lookup (owner/auth connection, like
+  `team.acceptInvite`); unknown, revoked and flag-off links are indistinguishable (404), expired → explained (410).
+  Reading the order and writing the answer run as the RLS app role in the link's tenant transaction.
+- **Public surface:** `GET /s/[token]` (server page, `noindex`, `referrer: no-referrer`, per-IP rate limit) and
+  `POST /api/supplier-confirm/[token]` (same-origin, 16 KB streamed body cap, per-IP **and** per-token rate limits via
+  the shared `lib/rateLimit` store, strict zod body). `lib/supplierConfirm/guard.ts` has the same contract as S4's
+  `publicGuard` and is swapped to it when that lands. `/s` + `/api/supplier-confirm` added to `publicPaths`.
+- **For S5:** `confirmationLink(db, restaurantId, poId, { baseUrl })` → `{ url, expiresAt } | null` (null when the flag
+  is off or the order isn't sent) for the order document.
+- **Tests:** `supplierConfirm.test.ts` (tokens/hash-only storage, guessing, 72 h expiry, revoked, flag-off, draft
+  orders, view, confirmed vs changes, PO untouched, replay via the same and a second link, cross-order line, forged
+  cross-tenant link, value ranges, `confirmationLink`, router gates), `cross-tenant.attack` (+2 COVERAGE + foreign PO),
+  `rls.attack` (the whole public flow as `restomatch_app`; GUC=B sees/writes none of A's), and the real route handler
+  (`app/api/supplier-confirm/[token]/__tests__/route.test.ts`: 200/400/404/409/410/413/403, flag off).
+
 ## Money cross-QA (orchestrator) — all fixed, with tests
 | # | Finding | Fix | Test |
 |---|---|---|---|
