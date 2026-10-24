@@ -9,10 +9,13 @@
  * plan v2 T0).
  */
 export async function registerNode(): Promise<void> {
-  const { assertWebEnv, assertAppRoleNoBypass, assertRlsEnabled } = await import('./lib/env');
+  const { assertWebEnv, assertAppRoleNoBypass, assertRlsEnabled, applyRepairedDbEnv } = await import('./lib/env');
   // Fail fast on a misconfigured production environment (missing
   // DATABASE_URL_APP/RESEND/etc.) instead of booting and degrading silently.
   assertWebEnv();
+  // The job queue and raw postgres() callers read DATABASE_URL themselves: hand
+  // them the same repaired owner URL authDb uses.
+  if (applyRepairedDbEnv()) console.warn('[env] DATABASE_URL replaced with its repaired form for this process');
 
   // Server-side Sentry (no-op without SENTRY_DSN; enabling needs the SDK —
   // docs/MONITORING.md). Every event goes through the PII scrubber.

@@ -235,9 +235,10 @@ export function pgUrlProblem(raw: string): string {
   if (/^[A-Z][A-Z0-9_]*\s*=/.test(v)) return 'the value starts with "NAME=" — paste only the URL';
   if (/\s/.test(v)) return 'it contains a space or a line break';
   if (/[<>]/.test(v)) return 'it contains < or > — remove the placeholder brackets around the password';
-  if (/:\[[^@]*\]@/.test(v)) return 'the password is still inside [ ] — remove the brackets';
+  if (/:\[.*\]@[^@]*$/.test(v)) return 'the password is still inside [ ] — remove the brackets';
   if (!/^postgres(ql)?:\/\//i.test(v)) return 'it does not start with postgresql://';
-  return 'it is not a valid URL — a special character in the password (@ : / ? #) must be URL-encoded';
+  if (/%(?![0-9a-f]{2})/i.test(v)) return 'a % in the password must be encoded as %25';
+  return 'a special character in the password (@ : / ? # % space) must be URL-encoded';
 }
 
 function safeDecode(s: string): string {
@@ -249,31 +250,67 @@ function safeDecode(s: string): string {
 }
 
 /**
+ * True when postgres.js 3.4 reads `url` the way it is written: one `@` before the
+ * host, no fragment, and user/password that decodeURIComponent accepts (it throws
+ * URIError at `postgres()` otherwise). `new URL` alone is not enough — it accepts
+ * `user:P@ss#1@host`, which postgres.js reads as host `ss`.
+ */
+function postgresJsReadsAsWritten(url: string): boolean {
+  if (!isParsablePgUrl(url)) return false;
+  const u = new URL(url);
+  if (u.hash !== '') return false;
+  const authority = url.slice(url.indexOf('://') + 3).split(/[?/]/)[0] ?? '';
+  if ((authority.match(/@/g) ?? []).length > 1) return false;
+  try {
+    decodeURIComponent(u.username);
+    decodeURIComponent(u.password);
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+/**
  * Repair what a DB URL picks up on its way into a dashboard field: a leading
- * `NAME=`, wrapping quotes, spaces / line breaks, `[ ]` or `< >` left around the
- * password (Supabase's `[YOUR-PASSWORD]` template), and a password character
- * that was never URL-encoded (`# / ?` make `new URL` — and so postgres.js —
- * throw "Invalid URL"). Returns a URL postgres.js can parse — the trimmed input
- * itself when it already was one — or null when it is beyond repair.
+ * `NAME=`, wrapping quotes, line breaks / tabs, a missing `postgresql://`, `[ ]`
+ * or `< >` left around the password (Supabase's `[YOUR-PASSWORD]` template), and
+ * a password character that was never URL-encoded (`@ : / ? # %` or a space).
+ * The URL is always split structurally — user up to the first `:`, password up
+ * to the LAST `@` — and rebuilt with the password encoded, so a clean URL comes
+ * back unchanged and a mis-encoded one never reaches the wrong host. Returns null
+ * when the result still is not one postgres.js reads as written.
  */
 export function normalizePgUrl(raw: string | undefined): string | null {
   if (!raw || raw.trim() === '') return null;
-  const trimmed = raw.trim();
-  if (isParsablePgUrl(trimmed) && !/:\[[^@]*\]@/.test(trimmed)) return trimmed;
-  let v = trimmed
+  let v = raw
+    .trim()
     .replace(/^[A-Z][A-Z0-9_]*\s*=\s*/, '')
     .replace(/^(['"])([\s\S]*)\1$/, '$2')
-    .replace(/\s+/g, '');
+    .replace(/[\r\n\t]+/g, '')
+    .trim();
   // `user:password@host…` pasted without its scheme.
   if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(v) && /^[^:@/]+:.+@[^@/]+/.test(v)) v = `postgresql://${v}`;
   // user = up to the first ':'; password = up to the LAST '@' (it may hold '@').
-  const m = /^(postgres(?:ql)?:\/\/)([^:@/]+):(.*)@([^@]*)$/i.exec(v);
+  const m = /^(postgres(?:ql)?:\/\/)([^:@/\s]+):(.*)@([^@\s]*)$/i.exec(v);
   if (m) {
     const [, scheme, user, rawPw, rest] = m as unknown as [string, string, string, string, string];
     const pw = /^\[(.*)\]$/.exec(rawPw)?.[1] ?? /^<(.*)>$/.exec(rawPw)?.[1] ?? rawPw;
     v = `${scheme}${user}:${encodeURIComponent(safeDecode(pw))}@${rest}`;
   }
-  return isParsablePgUrl(v) ? v : null;
+  return postgresJsReadsAsWritten(v) ? v : null;
+}
+
+/**
+ * Write the repaired owner URL back into DATABASE_URL so every consumer in this
+ * process — the job queue (`QUEUE_DATABASE_URL || DATABASE_URL`), raw postgres()
+ * callers — gets the same value as authDb. Call once at boot, after assertWebEnv.
+ * Returns whether it changed anything (never the value).
+ */
+export function applyRepairedDbEnv(env: NodeJS.ProcessEnv = process.env): boolean {
+  const owner = ownerDbUrl(env);
+  if (!owner || owner === env.DATABASE_URL) return false;
+  env.DATABASE_URL = owner;
+  return true;
 }
 
 /**
@@ -377,7 +414,7 @@ export function resolveWebDbUrl(env: NodeJS.ProcessEnv = process.env): string {
     if (derived) {
       if (!isNextBuildPhase(env)) {
         console.warn(
-          `[env] DATABASE_URL_APP is ${appUrl ? `unusable (${pgUrlProblem(appUrl)})` : 'unset'} — ` +
+          `[env] DATABASE_URL_APP is ${appUrl ? `not used as is (${pgUrlProblem(appUrl)})` : 'unset'} — ` +
             `connecting as restomatch_app on ${ownerDbUrlSource(env)}'s host with APP_ROLE_PASSWORD`,
         );
       }
