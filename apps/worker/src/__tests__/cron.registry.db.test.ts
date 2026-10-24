@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import cronParser from 'cron-parser';
 import { testDbUrl } from '@restomatch/db';
 import { queueSql } from '@restomatch/queue';
-import { dueSlot, resetSchedulesForTests, tickSchedules } from '../queue';
+import { dueSlot, firstTickKey, resetSchedulesForTests, tickSchedules } from '../queue';
 
 /**
  * cron.ts on the REAL Postgres queue shim — no vi.mock('../queue').
@@ -68,6 +68,8 @@ afterAll(async () => {
   resetSchedulesForTests();
   delete process.env.RETENTION_CRON_ENABLED;
   await sql`DELETE FROM job_queue WHERE starts_with(dedupe_key, 'cron:') AND created_at >= ${startedAt}`;
+  // The scheduler's first-tick records (fake 2026-11-01 clock) for these schedules.
+  await sql`DELETE FROM ops_kv WHERE key = ANY(${EXPECTED.map((e) => firstTickKey(e.id))}::text[])`;
 });
 
 describe('cron.ts on the real Postgres queue shim', () => {

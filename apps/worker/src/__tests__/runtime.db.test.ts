@@ -4,6 +4,7 @@ import { claimJob, insertJob, queueCounts, queueSql } from '@restomatch/queue';
 import {
   assertPattern,
   dueSlot,
+  firstTickKey,
   makeQueue,
   makeWorker,
   resetSchedulesForTests,
@@ -18,10 +19,12 @@ const Q = `rt-${process.pid}`;
 
 beforeEach(async () => {
   await sql`DELETE FROM job_queue WHERE queue LIKE ${`${Q}%`}`;
+  await sql`DELETE FROM ops_kv WHERE starts_with(key, ${firstTickKey(Q)})`;
   resetSchedulesForTests();
 });
 afterAll(async () => {
   await sql`DELETE FROM job_queue WHERE queue LIKE ${`${Q}%`}`;
+  await sql`DELETE FROM ops_kv WHERE starts_with(key, ${firstTickKey(Q)})`;
 });
 
 const until = async (cond: () => Promise<boolean>, ms = 10_000) => {
@@ -168,6 +171,57 @@ describe('schedules', () => {
     expect(rows[0]).toMatchObject({ status: 'done', result: { skipped: expect.any(String) } });
     // The next day's slot runs normally.
     expect(await tickSchedules(sql, new Date('2026-10-25T04:00:05Z'))).toEqual([id]);
+  });
+
+  it('a slot missed AFTER the cutover is caught up, though the schedule has no job row yet (daily + monthly)', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const daily = `${Q}-later-daily`;
+    const monthly = `${Q}-later-monthly`;
+    const register = async () => {
+      const q = makeQueue(Q);
+      await q.upsertJobScheduler(daily, { pattern: '0 6 * * *', tz }, { name: 'x', data: {} });
+      await q.upsertJobScheduler(monthly, { pattern: '45 7 1 * *', tz }, { name: 'x', data: {} });
+    };
+    await register();
+    // Cutover boot at 15:28 IL: both last slots are outside their catch-up windows, nothing is due
+    // and no job row is written — but the first tick is recorded.
+    expect(await tickSchedules(sql, new Date('2026-10-24T12:28:16Z'))).toEqual([]);
+    expect(await sql`SELECT 1 FROM job_queue WHERE queue = ${Q}`).toHaveLength(0);
+    const marks = await sql<Array<{ key: string; expires_at: Date | null }>>`
+      SELECT key, expires_at FROM ops_kv WHERE starts_with(key, ${firstTickKey(Q)}) ORDER BY key`;
+    expect(marks).toEqual([
+      { key: firstTickKey(daily), expires_at: null },
+      { key: firstTickKey(monthly), expires_at: null },
+    ]);
+    // The worker restarts (a fresh process) and the Mac sleeps through 06:00; it wakes at 07:30 IL.
+    resetSchedulesForTests();
+    await register();
+    expect(await tickSchedules(sql, new Date('2026-10-25T05:30:00Z'))).toEqual([daily]);
+    // Pruning removes the finished job rows (7 days); the first-tick record survives it.
+    await sql`DELETE FROM job_queue WHERE queue = ${Q}`;
+    await runMaintenance(sql);
+    // The first monthly report slot (Sun 2026-11-01 07:45 IL) is missed, and that day's 06:00 too;
+    // the worker is up at 09:00 IL.
+    resetSchedulesForTests();
+    await register();
+    expect(await tickSchedules(sql, new Date('2026-11-01T07:00:00Z'))).toEqual([daily, monthly]);
+    const rows = await sql<Array<{ dedupe_key: string; status: string; result: unknown }>>`
+      SELECT dedupe_key, status, result FROM job_queue WHERE queue = ${Q} ORDER BY id`;
+    expect(rows).toEqual([
+      { dedupe_key: `cron:${daily}:2026-11-01T06:00`, status: 'queued', result: null },
+      { dedupe_key: `cron:${monthly}:2026-11-01T07:45`, status: 'queued', result: null },
+    ]);
+  });
+
+  it('two workers agree on the first tick: the earliest record wins', async () => {
+    const id = `${Q}-first-two`;
+    await makeQueue(Q).upsertJobScheduler(id, { pattern: '0 6 * * *', tz }, { name: 'x', data: {} });
+    await tickSchedules(sql, new Date('2026-10-24T12:00:00Z'));
+    resetSchedulesForTests();
+    await makeQueue(Q).upsertJobScheduler(id, { pattern: '0 6 * * *', tz }, { name: 'x', data: {} });
+    await tickSchedules(sql, new Date('2026-10-24T13:00:00Z'));
+    const [mark] = await sql<Array<{ value: { at: string } }>>`SELECT value FROM ops_kv WHERE key = ${firstTickKey(id)}`;
+    expect(mark!.value.at).toBe('2026-10-24T12:00:00.000Z');
   });
 });
 

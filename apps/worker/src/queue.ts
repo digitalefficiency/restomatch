@@ -324,6 +324,8 @@ interface Schedule {
   repeat: Repeat;
   template: { name: string; data: unknown };
   lastSlot?: number;
+  /** When this schedule first ticked on this database (ops_kv, read once per process). */
+  firstTickAt?: number;
 }
 const schedules = new Map<string, Schedule>();
 
@@ -393,20 +395,43 @@ export function dueSlot(repeat: Repeat, now: Date): DueSlot | null {
 }
 
 const cronKeyPrefix = (id: string) => `cron:${id}:`;
+/** ops_kv key holding `{ at }`: the first time a schedule ticked on this database. */
+export const firstTickKey = (id: string) => `cron:first_tick:${id}`;
+
+/**
+ * When `s` first ticked on this database. Written once by whichever worker gets
+ * there first (ON CONFLICT DO NOTHING) with expires_at NULL, so maintenance
+ * never prunes it — unlike the job rows, which go after 7 days.
+ */
+async function firstTickAt(sql: Sql, s: Schedule, now: Date): Promise<number> {
+  if (s.firstTickAt !== undefined) return s.firstTickAt;
+  const key = firstTickKey(s.id);
+  await sql`
+    INSERT INTO ops_kv (key, value, expires_at) VALUES (${key}, ${sql.json({ at: now.toISOString() })}, NULL)
+    ON CONFLICT (key) DO NOTHING`;
+  const [row] = await sql<Array<{ value: { at?: string } | null }>>`SELECT value FROM ops_kv WHERE key = ${key}`;
+  const at = Date.parse(row?.value?.at ?? '');
+  s.firstTickAt = Number.isFinite(at) ? at : now.getTime();
+  return s.firstTickAt;
+}
 
 /**
  * Turn due slots into jobs. Exactly one job per (schedule, slot) across all
- * workers. A missed slot is caught up — except the first time a schedule ever
- * ticks on this database (the cutover from BullMQ, which already ran it): that
- * slot is recorded as skipped, not replayed.
+ * workers. A missed slot is caught up — except a slot from BEFORE the schedule
+ * first ticked on this database with no job row of its own history (the cutover
+ * from BullMQ, which already ran it): that slot is recorded as skipped, not
+ * replayed. The first tick is recorded even when nothing is due, so a slot
+ * missed any time after the cutover (the Mac asleep at 06:00) is caught up.
  */
 export async function tickSchedules(sql: Sql, now = new Date()): Promise<string[]> {
   const fired: string[] = [];
   for (const s of schedules.values()) {
+    // every-N schedules are never caught up, so they need no first-tick record.
+    const since = 'pattern' in s.repeat ? await firstTickAt(sql, s, now) : 0;
     const due = dueSlot(s.repeat, now);
     if (due === null || due.at === s.lastSlot) continue;
     const dedupeKey = `${cronKeyPrefix(s.id)}${due.label}`;
-    if (due.catchUp) {
+    if (due.catchUp && due.at < since) {
       const [seen] = await sql`
         SELECT 1 FROM job_queue WHERE queue = ${s.queue} AND starts_with(dedupe_key, ${cronKeyPrefix(s.id)}) LIMIT 1`;
       if (!seen) {
