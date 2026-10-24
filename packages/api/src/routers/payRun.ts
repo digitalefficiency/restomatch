@@ -189,6 +189,29 @@ export const payRunRouter = router({
                    AND d.severity IN ('warn','block') AND d.resolution_status = 'accepted'
                    AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL','DUPLICATE_INVOICE') AND ABS(d.delta_amount) > 0
                ) AS accepted_ils,
+               -- …a non-waived duplicate copy is held ("don't pay this copy"); its ₪ is the copy's total.
+               (
+                 SELECT LEAST(COALESCE(SUM(ABS(d.delta_amount)), 0), COALESCE(i.total_incl_vat, 0))
+                 FROM match_runs mr4
+                 JOIN discrepancies d ON d.match_run_id = mr4.id AND d.restaurant_id = ${rid}
+                 WHERE mr4.invoice_id = i.id AND mr4.restaurant_id = ${rid}
+                   AND d.type = 'DUPLICATE_INVOICE' AND d.severity IN ('warn','block')
+                   AND d.resolution_status IN ('open','escalated','accepted')
+               ) AS dup_ils,
+               EXISTS (
+                 SELECT 1 FROM match_runs mr5
+                 JOIN discrepancies d ON d.match_run_id = mr5.id AND d.restaurant_id = ${rid}
+                 WHERE mr5.invoice_id = i.id AND mr5.restaurant_id = ${rid}
+                   AND d.type = 'DUPLICATE_INVOICE' AND d.severity IN ('warn','block')
+                   AND d.resolution_status IN ('open','escalated','accepted')
+               ) AS has_dup,
+               -- …and an open unordered arrival means the invoice still waits for its PO link.
+               EXISTS (
+                 SELECT 1 FROM match_runs mr6
+                 JOIN discrepancies d ON d.match_run_id = mr6.id AND d.restaurant_id = ${rid}
+                 WHERE mr6.invoice_id = i.id AND mr6.restaurant_id = ${rid}
+                   AND d.type = 'UNORDERED_ARRIVAL' AND d.resolution_status IN ('open','escalated')
+               ) AS has_ua,
                EXISTS (SELECT 1 FROM match_runs mr WHERE mr.invoice_id = i.id AND mr.restaurant_id = ${rid}) AS matched
         FROM invoices i
         LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${rid}
@@ -214,7 +237,12 @@ export const payRunRouter = router({
           s.creditIls = Math.round(Number(row.accepted_ils) * 100) / 100;
           if (s.status === 'pay') s.status = 'claim';
         }
-        const pendingLink = (b?.pendingLink ?? false) || row.matched !== true;
+        if (!b && row.has_dup === true) {
+          s.duplicate = true;
+          s.duplicateIls = Math.round(Number(row.dup_ils ?? 0) * 100) / 100;
+          s.status = 'hold';
+        }
+        const pendingLink = (b?.pendingLink ?? false) || row.matched !== true || (!b && row.has_ua === true);
         if (pendingLink) s.status = 'hold';
         const inv: PayRunInvoice = {
           invoiceId: id,
