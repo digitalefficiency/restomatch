@@ -289,6 +289,27 @@ describe('monthly report', () => {
     expect(await db.select().from(notificationsOutbox).where(eq(notificationsOutbox.restaurantId, T.restaurantId))).toHaveLength(2);
   });
 
+  it('digest preview (flag monthlyDigestPreview): same numbers as the report, owner recipients, nothing queued', async () => {
+    await setFlags({ recovery: true });
+    await expect(caller().monthlyReport.digest()).rejects.toMatchObject({ code: 'FORBIDDEN', cause: { appCode: 'FEATURE_DISABLED' } });
+    expect((await caller().recovery.flags()).monthlyDigestPreview).toBe(false);
+    await setFlags({ monthlyDigestPreview: true });
+    expect((await caller().recovery.flags()).monthlyDigestPreview).toBe(true);
+    const m = month();
+    const d = await caller().monthlyReport.digest({ month: m, locale: 'he' });
+    const r = await computeMonthlyReport(db, T.restaurantId, m);
+    for (const k of ['leakAgorot', 'spendAgorot', 'leakPct', 'claimedAgorot', 'returnedAgorot', 'outstandingAgorot'] as const) {
+      expect(d.data[k]).toBe(r[k]);
+    }
+    expect(d.data.topSuppliers).toEqual(r.topSuppliers);
+    expect(d.to).toEqual(['owner-R@attack.test']);
+    expect(d.fullReport).toBe(false); // independent of the monthlyReport flag
+    expect(d.sendOn).toMatch(/^\d{4}-\d{2}-01$/);
+    expect(d.subject.length).toBeGreaterThan(0);
+    expect(await db.select().from(notificationsOutbox).where(eq(notificationsOutbox.restaurantId, T.restaurantId))).toHaveLength(0);
+    await expect(caller('bookkeeper').monthlyReport.digest()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
   it('sendMonthlyReports skips restaurants without the flag', async () => {
     await setFlags({ recovery: true });
     expect(await sendMonthlyReports(db, { restaurantId: T.restaurantId })).toMatchObject({ restaurants: 0, emails: 0 });

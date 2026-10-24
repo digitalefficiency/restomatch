@@ -150,6 +150,16 @@ export default async function MonthlyReportPage({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-sm font-bold text-ink">{t('report.channels')}</h2>
           <div className="flex flex-wrap gap-2">
+            {flags.monthlyDigestPreview ? (
+              <Link
+                href={`/dashboard/reports/digest?month=${month}`}
+                data-testid="report-digest-link"
+                className="inline-flex items-center gap-1.5 rounded-xl border border-line bg-surface-2 px-3 py-2 text-xs font-semibold text-ink hover:border-primary/40"
+              >
+                <Mail className="h-4 w-4" aria-hidden="true" />
+                {t('digest.title')}
+              </Link>
+            ) : null}
             <a
               href={`/dashboard/reports/monthly/pdf?month=${month}&locale=he`}
               className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-on-primary hover:brightness-110"

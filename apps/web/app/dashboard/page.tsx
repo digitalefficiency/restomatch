@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { canSeeRoute } from '@/lib/roles';
-import { Activity, ArrowLeft, CheckCircle2, ClipboardCheck, FileText, Hourglass, ShieldCheck } from 'lucide-react';
+import { Activity, ArrowLeft, CheckCircle2, ClipboardCheck, FileText, Hourglass, Mail, ShieldCheck } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
 import { formatNumber, formatPercent } from '@/lib/i18n/format';
@@ -84,6 +84,7 @@ export default async function DashboardPage({
   // joins the hero, and a link previews the monthly report.
   const returned = flags.recovery ? await caller.recovery.returnedThisMonth() : null;
   const canPreviewReport = flags.monthlyReport && canSeeRoute(role, '/dashboard/reports');
+  const canPreviewDigest = flags.monthlyDigestPreview && canSeeRoute(role, '/dashboard/reports/digest');
 
   // Leak grid is owner-only; other roles simply won't see this section. If the
   // feature is gated behind a paid plan, surface a compact upsell teaser rather
@@ -196,6 +197,7 @@ export default async function DashboardPage({
             : undefined
         }
         reportLink={canPreviewReport ? tr('report.preview') : undefined}
+        digestLink={canPreviewDigest ? tr('digest.title') : undefined}
       />
 
       {trend ? (
@@ -307,6 +309,7 @@ function LeakHero({
   num,
   returned,
   reportLink,
+  digestLink,
 }: {
   t: OverviewT;
   hero: Hero;
@@ -325,6 +328,8 @@ function LeakHero({
   returned?: { label: string; value: string; hint?: string; href?: string };
   /** Flag `monthlyReport`: label of the "preview this month's report" link. */
   reportLink?: string;
+  /** Flag `monthlyDigestPreview`: link to the in-app preview of the monthly email. */
+  digestLink?: string;
 }) {
   const hasLeak = hero.leakIls > 0;
   return (
@@ -412,6 +417,16 @@ function LeakHero({
           >
             <FileText className="h-4 w-4" aria-hidden="true" />
             {reportLink}
+          </Link>
+        ) : null}
+        {digestLink ? (
+          <Link
+            href="/dashboard/reports/digest"
+            data-testid="hero-digest-preview"
+            className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl border border-line bg-surface-2 px-4 py-2 text-sm font-semibold text-ink transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+          >
+            <Mail className="h-4 w-4" aria-hidden="true" />
+            {digestLink}
           </Link>
         ) : null}
         {canDrill && (hasLeak || hero.pendingLinkCount > 0) ? (
