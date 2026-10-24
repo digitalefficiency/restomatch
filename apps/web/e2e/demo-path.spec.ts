@@ -315,6 +315,15 @@ function db() {
   return postgres(DB_URL, { max: 1, onnotice: () => {} });
 }
 
+async function withDb<T>(fn: (sql: ReturnType<typeof db>) => Promise<T>): Promise<T> {
+  const sql = db();
+  try {
+    return await fn(sql);
+  } finally {
+    await sql.end();
+  }
+}
+
 /** Today's date in Israel — what the app's "today" means. */
 function israelToday(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date());
@@ -652,6 +661,12 @@ test('C · receiver: HaSharon Produce → photo → OCR → review → adjust �
   });
 
   await test.step('confirm → receipt saved', async () => {
+    // The clone is dated a month out (kept out of today's inbox); the matcher only
+    // pairs an invoice with an order due within ±7 days of it. Date it like the
+    // original while it is received; restored after the dock-slip step.
+    await withDb((sql) => sql`
+      update purchase_orders c set expected_delivery_at = o.expected_delivery_at
+      from purchase_orders o where c.id = ${clone} and o.id = ${original}`);
     await page.getByTestId('close-receipt').click();
     await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('heading', { name: r.steps.confirmed.title })).toBeVisible();
@@ -687,7 +702,11 @@ test('C · receiver: HaSharon Produce → photo → OCR → review → adjust �
       await sql.end();
     }
     await checkScreen(page, errors, L, 'C7-dock-slip');
-  });
+  }).finally(() =>
+    withDb((sql) => sql`
+      update purchase_orders set expected_delivery_at = expected_delivery_at + interval '30 days'
+      where id = ${clone} and expected_delivery_at < now() + interval '20 days'`),
+  );
 });
 
 /* ═══════════════════════════════ D. bookkeeper ═══════════════════════════════ */
