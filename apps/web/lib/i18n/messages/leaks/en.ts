@@ -64,6 +64,7 @@ export const en: Shape<typeof he> = {
     title: 'Credit request letters',
     subtitle: 'For each supplier — the lines you can claim a credit for in {month}, ready to print or send.',
     open: 'Credit letters to suppliers',
+    toSend: 'To send',
     print: 'Print / save as PDF',
     empty: 'Nothing to claim this month right now.',
     to: 'To: {supplier}',
@@ -80,6 +81,12 @@ export const en: Shape<typeof he> = {
     closing: 'Thank you for taking care of this. Feel free to contact us with any question.',
     signature: 'Kind regards,',
     note: 'Includes open and claimed discrepancies on invoices not yet paid. Waived discrepancies are excluded.',
+    basis: {
+      excl: 'before VAT',
+      incl: 'incl. VAT',
+      vat: 'VAT amount',
+    },
+    mixedBasis: 'This total mixes lines on different VAT bases — each line shows its basis.',
   },
   report: {
     open: 'Monthly leak report',

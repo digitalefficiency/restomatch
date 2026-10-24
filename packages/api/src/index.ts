@@ -20,6 +20,7 @@ import { mappingRouter } from './routers/mapping';
 import { productsRouter } from './routers/products';
 import { teamRouter } from './routers/team';
 import { chainRouter } from './routers/chain';
+import { payRunRouter } from './routers/payRun';
 import { contractsRouter } from './routers/contracts';
 import { priceAlertsRouter } from './routers/priceAlerts';
 import { supplierConfirmRouter } from './routers/supplierConfirm';
@@ -44,6 +45,7 @@ export const appRouter = router({
   mapping: mappingRouter,
   products: productsRouter,
   chain: chainRouter,
+  payRun: payRunRouter,
   team: teamRouter,
   dsr: dsrRouter,
   contracts: contractsRouter,
@@ -135,7 +137,7 @@ export {
 export { logActivity, type ActivityEventInput, type ActivityEventType } from './activity';
 export { buildMatchInputForInvoice, type BuiltMatchInput } from './match/buildMatchInput';
 export { backfillPriceHistory, writePriceHistoryForInvoice } from './match/priceHistory';
-export { persistMatchRun, type PersistMatchArgs, type PersistMatchResult } from './match/persist';
+export { matchActivitySummary, persistMatchRun, type PersistMatchArgs, type PersistMatchResult } from './match/persist';
 export {
   parseCatalogFile,
   autoDetectMapping,
@@ -265,3 +267,5 @@ export {
   type ChainOverviewResult,
 } from './routers/chain';
 export { NOT_BILLING_OWNER } from './routers/chain';
+export { CLAIMABLE_STATUSES, claimableLines, sumClaims, vatBasisOf, type ClaimLine, type VatBasis } from './lib/claims';
+export type { PayRunInvoice, PayRunResult, PayRunStatus, PayRunSupplier, PayRunClaim } from './routers/payRun';

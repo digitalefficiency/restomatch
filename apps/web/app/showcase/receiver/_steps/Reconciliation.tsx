@@ -257,9 +257,9 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
         {sections ? (
           sections.map((s) => (
             <section key={s.key} data-testid={`recon-section-${s.key}`}>
-              <h3 className="mb-2 text-xs font-semibold text-muted">
+              <h2 className="mb-2 text-xs font-semibold text-muted">
                 <SectionLabel section={s} t={t} money={money} />
-              </h3>
+              </h2>
               <ul className="space-y-2">{s.items.map(({ line, index }) => renderCard(line, index))}</ul>
             </section>
           ))
@@ -432,9 +432,9 @@ function rowTone(status: LineStatus): string {
 const STATUS_STYLE: Record<LineStatus, { tint: string; icon: React.ReactNode }> = {
   matched: { tint: 'bg-primary/12 text-primary ring-1 ring-primary/25', icon: <Check className="w-3 h-3" strokeWidth={3} /> },
   // T2 "act now": lines that differ from the order get solid badges.
-  qty_diff: { tint: 'bg-warn text-white ring-1 ring-warn', icon: <AlertTriangle className="w-3 h-3" /> },
-  price_diff: { tint: 'bg-warn text-white ring-1 ring-warn', icon: <Zap className="w-3 h-3" /> },
-  unordered: { tint: 'bg-danger text-white ring-1 ring-danger', icon: <Plus className="w-3 h-3" strokeWidth={3} /> },
+  qty_diff: { tint: 'bg-warn text-on-primary ring-1 ring-warn', icon: <AlertTriangle className="w-3 h-3" /> },
+  price_diff: { tint: 'bg-warn text-on-primary ring-1 ring-warn', icon: <Zap className="w-3 h-3" /> },
+  unordered: { tint: 'bg-danger text-on-primary ring-1 ring-danger', icon: <Plus className="w-3 h-3" strokeWidth={3} /> },
   missing_from_invoice: { tint: 'bg-surface-2 text-muted ring-1 ring-line', icon: <X className="w-3 h-3" strokeWidth={3} /> },
   // Neutral by design (calm UX): an unchecked line is never a red alarm.
   pending_review: { tint: 'bg-surface-2 text-muted ring-1 ring-line', icon: <Clock className="w-3 h-3" /> },

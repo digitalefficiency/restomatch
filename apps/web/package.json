@@ -55,6 +55,7 @@
     "@types/react": "19.0.10",
     "@types/react-dom": "19.0.4",
     "autoprefixer": "^10.4.20",
+    "axe-core": "4.14.0",
     "eslint": "^9.39.5",
     "eslint-config-next": "15.5.28",
     "postcss": "^8.5.28",

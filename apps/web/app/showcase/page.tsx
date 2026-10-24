@@ -115,12 +115,12 @@ function ShowcaseCard({
         </span>
       </div>
 
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-primary/80 mb-1.5">{tag}</p>
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-primary mb-1.5">{tag}</p>
       <h2 className="font-bold text-lg mb-2 tracking-tight text-ink leading-snug">{title}</h2>
       <p className="text-sm text-muted leading-relaxed flex-1">{description}</p>
 
       <div className="mt-6 flex items-center justify-between text-xs">
-        <span className="text-primary font-medium opacity-70 group-hover:opacity-100 transition-opacity">
+        <span className="text-primary font-medium group-hover:underline">
           {openLabel}
         </span>
         <ArrowLeft
