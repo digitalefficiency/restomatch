@@ -118,6 +118,7 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
     'attack — chain.attack.test.ts: renaming B or manager-only M → NOT_FOUND, names unchanged',
   'chain.addBranch':
     'attack — chain.attack.test.ts: owner-only, plan limit enforced, copies only the source branch rows, manager / no-billing-account → FORBIDDEN',
+  'owner.vatAtRisk': 'attack',
   'owner.kpis': 'isolation',
   'owner.leakHero': 'isolation',
   'owner.leakBreakdown': 'isolation',
@@ -1719,5 +1720,45 @@ describe('orders.captureFromText (orderCapture): isolation + foreign-id attacks 
     const before = (await draftsOf(B)).length;
     await expect(callerFor(B).orders.captureFromText({ text: '10 ק״ג עגבניות' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
     expect((await draftsOf(B)).length).toBe(before);
+  });
+});
+
+describe('owner.vatAtRisk (vatAtRisk): isolation + foreign-id attack (A → B)', () => {
+  const ids = { a: '', b: '' };
+  beforeAll(async () => {
+    for (const t of [A, B]) {
+      await db.update(restaurants).set({ settings: { features: { vatAtRisk: true } } as never }).where(eq(restaurants.id, t.restaurantId));
+    }
+    const at = (t: Tenant, n: string) =>
+      db
+        .insert(invoices)
+        .values({
+          restaurantId: t.restaurantId,
+          supplierId: t.supplierId,
+          invoiceNumber: n,
+          invoiceDate: new Date(),
+          totalExclVat: '8000.00',
+          vatAmount: '1440.00',
+          status: 'parsed',
+          source: 'photo',
+        })
+        .returning({ id: invoices.id });
+    ids.a = (await at(A, 'VAT-RISK-A'))[0]!.id;
+    ids.b = (await at(B, 'VAT-RISK-B'))[0]!.id;
+  });
+  afterAll(async () => {
+    await db.update(restaurants).set({ settings: { features: { ingestWhatsapp: true, ingestEmail: true } } as never }).where(eq(restaurants.id, A.restaurantId));
+  });
+
+  it("lists only the caller's invoices", async () => {
+    const r = await callerFor(A).owner.vatAtRisk({ period: 'all' });
+    expect(r.rows.map((x) => x.invoiceId)).toContain(ids.a);
+    expect(r.rows.map((x) => x.invoiceId)).not.toContain(ids.b);
+    expect(r.rows.every((x) => x.invoiceNumber !== 'VAT-RISK-B')).toBe(true);
+  });
+
+  it("B's invoiceId returns nothing for A (never reveals B's invoice or amount)", async () => {
+    const r = await callerFor(A).owner.vatAtRisk({ period: 'all', invoiceId: ids.b });
+    expect(r).toMatchObject({ count: 0, totalVatAtRisk: 0, rows: [] });
   });
 });

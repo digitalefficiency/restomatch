@@ -26,9 +26,13 @@ import {
 } from '@restomatch/charts';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { discrepancyType } from '@restomatch/db';
+import { discrepancyType, eq, restaurants } from '@restomatch/db';
+import { appError } from '../errors';
+import { featureEnabled } from '../lib/features';
+import { vatAtRisk, type VatAtRiskResult } from '../vat/vatAtRisk';
 import {
   financeProcedure,
+  invoiceReaderProcedure,
   managerProcedure,
   memberProcedure,
   ownerProcedure,
@@ -79,6 +83,34 @@ const CompareInput = z.enum(VIEW_COMPARES).default('off');
 const specOf = (v: ViewInputT): ViewSpec => ({ period: v.period, from: v.from, to: v.to, filters: v.filters });
 
 export const ownerRouter = router({
+  /**
+   * VAT at risk (flag `vatAtRisk`): tax invoices above the allocation-number
+   * threshold of their date with no valid allocation number — their input VAT
+   * cannot be deducted. A separate figure: never part of the leak. Invoice
+   * readers only (chef is excluded, like the invoice screens). `invoiceId`
+   * narrows it to one invoice (the invoice page badge).
+   */
+  vatAtRisk: invoiceReaderProcedure
+    .input(
+      z
+        .object({
+          period: z.enum(['open', 'this_month', 'all']).default('open'),
+          invoiceId: z.string().uuid().optional(),
+        })
+        .default({}),
+    )
+    .query(async ({ ctx, input }): Promise<VatAtRiskResult> => {
+      const [r] = await ctx.db
+        .select({ settings: restaurants.settings })
+        .from(restaurants)
+        .where(eq(restaurants.id, ctx.session.restaurantId))
+        .limit(1);
+      if (!featureEnabled(r?.settings, 'vatAtRisk')) {
+        throw appError('FORBIDDEN', 'FEATURE_DISABLED', 'הפיצ׳ר אינו פעיל עבור המסעדה');
+      }
+      return vatAtRisk(ctx.db, ctx.session.restaurantId, input.period, { invoiceId: input.invoiceId });
+    }),
+
   // KPIs stay on the core plan — the dashboard headline numbers are table stakes.
   kpis: memberProcedure.query(async ({ ctx }): Promise<OwnerKpis> => {
     return computeOwnerKpis(ctx.db, ctx.session.restaurantId);

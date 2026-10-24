@@ -29,6 +29,7 @@ import { showcase } from './showcase';
 import { suppliers } from './suppliers';
 import { team } from './team';
 import { views } from './views';
+import { vat } from './vat';
 
 export const ALL_NAMESPACES = [
   common,
@@ -57,6 +58,7 @@ export const ALL_NAMESPACES = [
   suppliers,
   team,
   views,
+  vat,
 ] as const;
 
-export { common, admin, approvals, auth, catalog, chain, components, emails, accounting, ingest, invoices, landing, leaks, marketing, nav, onboarding, orders, overview, products, receiving, scans, settings, showcase, suppliers, team, views };
+export { common, admin, approvals, auth, catalog, chain, components, emails, accounting, ingest, invoices, landing, leaks, marketing, nav, onboarding, orders, overview, products, receiving, scans, settings, showcase, suppliers, team, views, vat };

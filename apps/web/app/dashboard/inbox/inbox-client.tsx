@@ -73,19 +73,19 @@ interface Props {
   messages: InboxMessage[];
 }
 
-// Emphasis tiers (DESIGN-BRIEF): needs a decision = T2 warn (→ 'warning-solid' once #77's Badge lands); read / registered = T3
+// Emphasis tiers (DESIGN-BRIEF): needs a decision = T2 warn (solid); read / registered = T3
 // green; a manager's rejection, duplicates and skips are calm history (T4, never red);
 // only a processing failure is red.
 const MESSAGE_TONE: Record<InboxMessage['status'], BadgeTone> = {
   accepted: 'accent',
-  needs_review: 'warning',
+  needs_review: 'warning-solid',
   rejected: 'neutral',
   failed: 'danger',
   empty: 'neutral',
 };
 const DOC_TONE: Record<InboxMessage['documents'][number]['status'], BadgeTone> = {
   registered: 'accent',
-  needs_review: 'warning',
+  needs_review: 'warning-solid',
   rejected: 'neutral',
   failed: 'danger',
   duplicate: 'info',
@@ -161,7 +161,7 @@ export function InboxClient(props: Props) {
           </Link>
         ))}
         {props.needsReview > 0 ? (
-          <Badge tone="warning">
+          <Badge tone="warning-solid">
             {t('inbox.needsReviewCount', { count: formatNumber(props.needsReview, locale) })}
           </Badge>
         ) : null}
