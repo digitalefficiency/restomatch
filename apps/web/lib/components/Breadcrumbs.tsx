@@ -23,7 +23,7 @@ export function Breadcrumbs({
               {it.href && !last ? (
                 <Link
                   href={it.href}
-                  className="rounded hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+                  className="touch-target inline-flex items-center rounded hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
                 >
                   {it.label}
                 </Link>
