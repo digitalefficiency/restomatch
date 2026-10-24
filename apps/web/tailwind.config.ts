@@ -19,7 +19,7 @@ const config: Config = {
         // Text
         ink: '#ECF5EF',
         muted: '#9DB2A6',
-        subtle: '#7D9689',
+        subtle: '#6B8478',
         // Brand + semantics
         primary: '#22D39A',
         'on-primary': '#07120D',

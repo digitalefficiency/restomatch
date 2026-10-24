@@ -68,7 +68,7 @@ export default async function TwoFactorPage({ searchParams }: PageProps) {
         </form>
 
         <form action={cancelTwoFactorAction} className="mt-4 text-center">
-          <button type="submit" className="text-sm text-primary hover:underline">
+          <button type="submit" className="text-sm text-brand hover:underline">
             {t('twoFactor.switchAccount')}
           </button>
         </form>

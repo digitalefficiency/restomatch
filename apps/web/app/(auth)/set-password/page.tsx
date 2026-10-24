@@ -100,7 +100,7 @@ export default async function SetPasswordPage({ searchParams }: PageProps) {
           </Button>
         </form>
         <p className="mt-6 text-center text-xs">
-          <Link href="/dashboard/settings" className="text-primary hover:underline">
+          <Link href="/dashboard/settings" className="text-brand hover:underline">
             {t('setPassword.back')}
           </Link>
         </p>
