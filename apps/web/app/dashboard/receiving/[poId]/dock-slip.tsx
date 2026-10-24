@@ -5,6 +5,7 @@ import { Check, Copy, FileWarning, Loader2, MessageCircle } from 'lucide-react';
 import type { ReconciliationLine } from '@/app/showcase/receiver/_mock';
 import type { LineMark } from '@/app/showcase/receiver/_state';
 import { ItemName, useUnitLabel } from '@/app/showcase/receiver/_steps/english';
+import { Badge } from '@/lib/components';
 import { trpc } from '@/lib/trpc/client';
 import { formatIls } from '@/lib/money';
 import { formatDate, formatNumber } from '@/lib/i18n/format';
@@ -123,7 +124,7 @@ export function DockSlip({
       dir={dir}
       data-testid="dock-slip"
       aria-labelledby="dock-slip-title"
-      className="mt-6 rounded-2xl border border-danger/30 bg-surface p-4 text-start shadow-card sm:p-5"
+      className="mt-6 rounded-2xl border border-warn/30 bg-surface p-4 text-start shadow-card sm:p-5"
     >
       <div className="mb-3 flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -134,12 +135,11 @@ export function DockSlip({
           <p className="mt-0.5 text-xs text-muted">{t('dockSlip.subtitle')}</p>
         </div>
         {total > 0 ? (
-          // T2: solid badge + ₪ (engine total = the claims letters).
-          <span
-            data-testid="dock-slip-total"
-            className="shrink-0 rounded-full bg-danger px-3 py-1 text-sm font-bold text-on-primary"
-          >
-            <bdi dir="ltr" className="font-mono tabular-nums">{money(total)}</bdi>
+          // T2 (act now): solid badge + ₪ (engine total = the claims letters) + one primary CTA below.
+          <span data-testid="dock-slip-total" className="shrink-0">
+            <Badge tone="warning-solid" className="px-3 py-1 text-sm font-bold">
+              <bdi dir="ltr" className="font-mono tabular-nums">{money(total)}</bdi>
+            </Badge>
           </span>
         ) : null}
       </div>
