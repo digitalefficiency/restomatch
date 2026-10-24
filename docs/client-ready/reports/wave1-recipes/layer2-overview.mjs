@@ -47,8 +47,13 @@ try {
         await card.waitFor({ timeout: 15000 }).catch(() => {});
         const txt = (await card.count()) ? await card.innerText() : '';
         check(txt.includes(locale === 'he' ? 'סטייק אנטריקוט' : 'Entrecôte steak'), `[${locale}/${role}] card lists the steak`);
-        check(/\+[\s‎‏]*₪?[\s‎‏]*3[.,]10/.test(txt), `[${locale}/${role}] card shows +₪3.10 per plate`);
-        check(/32[.,]8\s?%/.test(txt) && /34[.,]9\s?%/.test(txt), `[${locale}/${role}] card shows 32.8% → 34.9%`);
+        check(/\+[\s‎‏]*₪?[\s‎‏]*3[.,]41/.test(txt), `[${locale}/${role}] card shows +₪3.41 per plate`);
+        check(/29[.,]3\s?%/.test(txt) && /31[.,]4\s?%/.test(txt), `[${locale}/${role}] card shows 29.3% → 31.4%`);
+        const al = card.locator('[data-testid="dish-price-alert"]');
+        check((await al.count()) === 1, `[${locale}/${role}] card: one price alert`);
+        const alt = (await al.count()) ? await al.innerText() : '';
+        check(alt.includes(locale === 'he' ? 'קצביית הכרם' : 'HaKerem Butchery') && /149[.,]00/.test(alt), `[${locale}/${role}] card alert: entrecôte → ₪149.00 from the supplier`);
+        check(!/3[.,]41/.test(alt), `[${locale}/${role}] card alert does not repeat the row's ₪ per plate`);
         check((await card.locator('a[href="/dashboard/recipes"]').count()) === 1, `[${locale}/${role}] card links to /dashboard/recipes`);
         if (role === 'owner') await s.page.screenshot({ path: `${SHOTS}/overview-card-${locale}.png`, fullPage: true });
       } else {

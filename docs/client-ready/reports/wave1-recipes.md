@@ -6,7 +6,9 @@ on for the demo tenant through `features.all`; `FEATURES_OFF=recipes` kills it).
 > **לבעלים:** מסך "עלות מנה" — כמה עולה כל מנה לפי המחירים ששולמו בפועל, אחוז עלות מזון מול יעד
 > (ירוק/כתום/אדום), רווח לצלחת, "מה השתנה החודש" (מה הזיז את העלות), "מה אם המחיר יעלה?"
 > (עוף +12% ← אילו מנות נפגעות ובכמה), עורך מתכונים עם תתי-מתכונים, וייבוא מ-CSV. במסעדת הדמו:
-> 8 מנות + 2 רטבים; הסטייק עבר מכתום לאדום החודש בגלל עליית מחיר האנטריקוט (₪139.70 ← ₪149/ק״ג).
+> 8 מנות + 2 רטבים; הסטייק (₪199 בתפריט) חצה את יעד 30% החודש — 29.3% ← 31.4% — כי קצביית הכרם העלתה את
+> האנטריקוט מ-₪139 ל-₪149/ק״ג (+₪3.41 לצלחת). התראה על כך מופיעה על כרטיס המנה (דגל `dishPriceAlert`).
+> (מספרים לפי DEMO_TODAY=2026-10-25; הסעיפים ההיסטוריים למטה מתעדים את המספרים של אותו סבב.)
 > מספרי הדליפה לא זזו.
 
 ## What was built
@@ -205,3 +207,73 @@ Also fixed from its plausible list: the incomplete-cost flag; unlinked items are
 - Screenshots: `recipes-pos-{he,en}.png`.
 
 **Re-verified after merging client-ready 807a865** (head after this commit): Layer 1 all ✅ (api 601, web 263, db 74); Layer 2 POS 44/44, recipes 103/103, overview 79/79.
+
+## Demo-eve round (2026-10-24, orchestrator "full build mode", demo 2026-10-25 08:00 UTC)
+
+Branch `claude/wave1-recipes`, merged with `origin/main` (145023c) and the security branch
+`claude/sec-next-15-5-28` (Next.js 15.5.28, a regular merge with no force push). Local DB seeded with `DEMO_TODAY=2026-10-25`.
+
+### (a) QA: food cost per dish and the "dishes hurt" card, with the flag ON
+
+- **Recipe prices are the actually paid prices, and they agree with the leak figures.** Each recipe ingredient's latest
+  `price_history` equals its latest invoice line, with two exceptions: burger buns (₪2.41 vs ₪2.39) and eggs (₪34.00 vs ₪34.17).
+  Both newer lines come from **consolidated pending invoices (חשבוניות ריכוז) dated 2026-10-24**. By design those write
+  no price history, and the leak engine also excludes them, so recipe costs and the leak number read the same
+  invoices. This is by design, so no fix is needed.
+- **Phone (390px), bug found and fixed:** the dish alert sat inside the dish-name column and wrapped word by word. It now
+  has its own full-width row under the dish (`recipes-home.tsx`).
+- **Overview card, wording fixed:** the alert repeated the row's own `before → after` and ₪/plate. On the card it now
+  states only the crossing and its cause.
+- he/en at 1366 and 390: no page-level horizontal overflow on `/dashboard`, any recipes tab, or the editor;
+  0 console errors and 0 5xx (`layer2-phone.mjs`).
+
+### (b) NEW: `dishPriceAlert` (flag; off means unchanged)
+
+When a dish's food cost **crosses** its target this month because a supplier raised a price, the dish card shows:
+before → after %, the target, **+₪ per plate**, the product with its old → new paid price (+%), and **the supplier**.
+
+| Where | What |
+|---|---|
+| API | `recipes.priceAlerts` (recipesProcedure: owner/manager/chef plus the `recipes` flag). Flag off returns `{ enabled: false, alerts: [] }` and does no work. Pure rule `packages/api/src/recipes/alerts.ts`. |
+| Rule | Active menu dish; food cost ≤ target at the start of the month and > target now; cost per plate rose; the cause is the biggest **paid-price rise at the same supplier** as at the start of the month (`changes.rows[].riser`). A switch to a pricier supplier, a recipe edit, a sub-recipe or a price drop is never reported as "a supplier raised a price". |
+| Data | Existing data only: `price_history` (paid ex-VAT prices with `supplier_id`) and `suppliers`, filtered by `restaurant_id`, inside the RLS member transaction. No migration. |
+| UI | Dish list (full-width row), editor banner (`role="alert"`), overview "dishes hurt" card (cause only). i18n he/en: `recipes.alert.*`. |
+| Demo | `seed-recipes-demo.ts`: steak menu ₪179 → **₪199**, so that it crosses: 29.3% → 31.4%, +₪3.41/plate, entrecôte ₪139.00 → ₪149.00 (+7.2%), HaKerem Butchery (קצביית הכרם). |
+| Coverage | COVERAGE entry `recipes.priceAlerts` (additive). |
+
+**Demo caveat:** the alert compares against the start of the **month**. It fires on 2026-10-25. After 1 November
+without a reseed it disappears, because the steak no longer crossed *this* month.
+
+### Verification (2 layers)
+
+**Layer 1: automated gate** @ 08052c4: `scripts/verify.sh` **PASS** (install, fresh-db, migrate, provision-rls,
+check-rls, db-doctor, supabase-sync, typecheck, test, web-lint, web-build, web-tsc, audit). Worker tests run with
+`REDIS_URL`: 25/25. `recipes-alerts.test.ts` 11/11, covering:
+- the pure rule: crossing / at-target / already over / improved / sub-recipe / inactive / no menu price / no rise / ordering;
+- A's alert with exact bp and ₪ figures, plus supplier;
+- B isolation (no alert);
+- the flag off, `FEATURES_OFF=dishPriceAlert`, and `recipes` off (FORBIDDEN) cases;
+- roles: chef and manager pass, receiver and bookkeeper get FORBIDDEN;
+- **refuter regressions:** a supplier switch gives no alert; a biggest-move price drop still alerts on the biggest rise.
+
+**Layer 2: production build (`next start`), he + en, every role**
+- `VERIFY_E2E=1 VERIFY_SOFTNAV=1 … scripts/verify.sh layer2` **PASS** (verify-db, prod-start, verify-prod, soft-nav, e2e).
+- `layer2-recipes.mjs` **133/133**: the steak shows 31.4% and ₪115.75 margin; exactly one alert, 29.3% → 31.4%, +₪3.41,
+  ₪139.00 → ₪149.00 (+7.2%), naming the supplier; the changes tab shows +₪3.41 and why = entrecôte ₪139.00 → ₪149.00;
+  flag off gives 404 and 403 FEATURE_DISABLED.
+- `layer2-overview.mjs` **97/97**: the card shows 29.3% → 31.4%, +₪3.41, and one alert naming the supplier that does not repeat
+  the ₪/plate; receiver and bookkeeper see no card.
+- `layer2-pos.mjs` **44/44**: steak at 31.4% menu vs 40.7% actual, gap +9.3 pts.
+- `layer2-phone.mjs` **44/44**: 1366 and 390, he/en, no horizontal overflow, alert in the list and the editor.
+- All suites: 0 console errors, 0 5xx.
+- The bidi order of `₪139.00 → ₪149.00` in Hebrew was checked from DOM positions.
+- Screenshots: `wave1-recipes/price-alert-*.png` (390 and 1366, he/en) and the refreshed `recipes-*.png` and `overview-card-*.png`.
+
+**Independent refuter** (a subagent that did not write the code) confirmed the demo alert values against the dev DB
+and found:
+1. A supplier switch was reported as a price rise. **Fixed** with the same-supplier `riser` and a regression test.
+2. The alert was missed when the biggest-moving line was a price drop. **Fixed** with a regression test.
+3. A just-over crossing rendered as "30% → 30%". **Fixed:** two decimals when the values would collide.
+4. A rise that comes through a sub-recipe does not alert. This is by design: a sub-recipe has no single supplier.
+5. With the flag off, `recipes.changes` gains one supplier lookup plus an additive `driver.supplier`/`riser` field, and the client
+   fires `priceAlerts`, which returns `enabled:false`. The visible behaviour is unchanged.
