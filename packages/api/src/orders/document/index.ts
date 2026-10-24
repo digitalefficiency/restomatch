@@ -2,11 +2,18 @@ import type { OrderDocumentExtension } from './types';
 
 export * from './types';
 export { applyOrderDocumentExtensions, buildOrderDocument, lineTotalAgorot, decimalToScaled, type BuildOrderDocumentInput } from './build';
-export { renderOrderEmailText, renderOrderWhatsappText } from './text';
+export { priceFootnote, renderOrderEmailText, renderOrderWhatsappText } from './text';
 export { renderOrderPdf } from './pdf';
 export { ilsFromAgorot } from './format';
 export { visualRtl } from './bidi';
-export { loadOrderDocument, orderDocumentSettingsOf, orderPdfFilename, type LoadedOrderDocument } from './load';
+export {
+  isContractPrice,
+  loadOrderDocument,
+  orderDocumentContractPrices,
+  orderDocumentSettingsOf,
+  orderPdfFilename,
+  type LoadedOrderDocument,
+} from './load';
 
 /**
  * Extensions applied to every supplier order document (flag `orderPricesOut`).

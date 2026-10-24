@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   applyOrderDocumentExtensions,
   buildOrderDocument,
+  isContractPrice,
+  priceFootnote,
   decimalToScaled,
   ilsFromAgorot,
   lineTotalAgorot,
@@ -70,7 +72,7 @@ describe('text renderers', () => {
     const text = renderOrderEmailText(buildOrderDocument(base));
     expect(text).toContain('• מק״ט TOM-01 · עגבניות — 2.5 ק״ג × 7.33 ₪ = 18.33 ₪');
     expect(text).toContain('• מלפפונים — 3 ק״ג × 4.20 ₪ = 12.60 ₪');
-    expect(text).toContain('פטרוזיליה — 1 צרור (ללא מחיר מוסכם)');
+    expect(text).toContain('פטרוזיליה — 1 צרור (ללא מחיר)');
     expect(text).toContain('סה״כ הזמנה (לפני מע״מ): 30.93 ₪');
   });
 
@@ -108,6 +110,44 @@ describe('text renderers', () => {
     expect(doc.extraLines).toEqual(['אישור: https://x.test/c/1A2B3C4D']);
     expect(renderOrderEmailText(doc)).toContain('אישור: https://x.test/c/1A2B3C4D');
     expect(renderOrderWhatsappText(doc)).toContain('אישור: https://x.test/c/1A2B3C4D');
+  });
+});
+
+describe('"agreed" only for contract prices', () => {
+  it('without contract lines no price is called agreed', async () => {
+    const doc = buildOrderDocument(base);
+    const text = renderOrderEmailText(doc);
+    expect(text).not.toMatch(/מוסכ|חוזה/);
+    expect(text).toContain('המחירים הם מחירי ההזמנה.');
+    expect(renderOrderWhatsappText(doc)).not.toMatch(/מוסכ|חוזה/);
+    expect(priceFootnote(doc)).toEqual(['המחירים הם מחירי ההזמנה.']);
+  });
+
+  it('marks verified contract lines and words the footnote by how many there are', () => {
+    const mixed = buildOrderDocument({ ...base, lines: base.lines.map((l, i) => ({ ...l, contractPrice: i === 0 })) });
+    expect(mixed.lines.map((l) => l.contractPrice)).toEqual([true, false, false]);
+    const text = renderOrderEmailText(mixed);
+    expect(text).toContain('× 7.33 ₪ (מחיר חוזה) = 18.33 ₪');
+    expect(text).toContain('• מלפפונים — 3 ק״ג × 4.20 ₪ = 12.60 ₪');
+    expect(priceFootnote(mixed)).toEqual(['מחירים המסומנים "מחיר חוזה" הם המחירים המוסכמים בחוזה; שאר המחירים הם מחירי ההזמנה.']);
+    expect(renderOrderWhatsappText(mixed)).toContain('7.33 ₪ (חוזה)');
+
+    const allContract = buildOrderDocument({ ...base, lines: base.lines.slice(0, 2).map((l) => ({ ...l, contractPrice: true })) });
+    expect(priceFootnote(allContract)).toEqual(['המחירים הם מחירי החוזה המוסכמים. חיוב בחשבונית מעבר להם ייבדק.']);
+  });
+
+  it('an unpriced line is never a contract line', () => {
+    const doc = buildOrderDocument({ ...base, lines: [{ ...base.lines[2]!, contractPrice: true }] });
+    expect(doc.lines[0]!.contractPrice).toBe(false);
+    expect(priceFootnote(doc)).toEqual([]);
+  });
+
+  it('isContractPrice compares to the agora', () => {
+    expect(isContractPrice('7.3300', 7.33)).toBe(true);
+    expect(isContractPrice('7.3349', 7.33)).toBe(true);
+    expect(isContractPrice('7.3400', 7.33)).toBe(false);
+    expect(isContractPrice(null, 7.33)).toBe(false);
+    expect(isContractPrice('7.33', undefined)).toBe(false);
   });
 });
 

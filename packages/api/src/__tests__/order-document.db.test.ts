@@ -11,6 +11,7 @@ import {
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
+import { orderDocumentContractPrices } from '../orders/document';
 
 /**
  * Flag `orderPricesOut`: the supplier-facing order carries SKU, agreed unit
@@ -102,7 +103,9 @@ describe('orders.placeOrder — flag orderPricesOut on', () => {
     expect(row.body).toContain('18.33');
     expect(row.body).toContain('12.60');
     expect(row.body).toContain('30.93');
-    expect(row.body).toContain('ללא מחיר מוסכם');
+    expect(row.body).toContain('ללא מחיר');
+    // No contracts module on this base: no price is called agreed.
+    expect(row.body).not.toMatch(/מוסכ|חוזה/);
     const atts = (row.payload as { __attachments?: Array<Record<string, string>> }).__attachments;
     expect(atts).toHaveLength(1);
     expect(atts![0]).toMatchObject({ contentType: 'application/pdf' });
@@ -173,5 +176,46 @@ describe('order document settings + preview', () => {
     expect(Buffer.from(out.pdfBase64, 'base64').subarray(0, 5).toString()).toBe('%PDF-');
     const rows = await db.select().from(notificationsOutbox).where(eq(notificationsOutbox.relatedEntityId, poId));
     expect(rows).toHaveLength(0);
+  });
+});
+
+describe('contract prices ("agreed") on the supplier document', () => {
+  afterEach(() => {
+    orderDocumentContractPrices.resolve = null;
+  });
+
+  async function preview() {
+    const { poId } = await draft();
+    return callerFor(A).orders.documentPreview({ poId });
+  }
+
+  it('a line is "מחיר חוזה" only when its PO price is the contract price in force (flag contracts on)', async () => {
+    await setFeatures({ orderPricesOut: true, contracts: true });
+    orderDocumentContractPrices.resolve = async (_db, _r, _s, items) =>
+      new Map(items.map((i) => [`${i.productId}|${i.unit}`, 7.333]));
+    const out = await preview();
+    expect(out.emailText).toContain('(מחיר חוזה)');
+    expect(out.emailText).toContain('מחירים המסומנים "מחיר חוזה"');
+  });
+
+  it('a different contract price is not claimed as agreed', async () => {
+    await setFeatures({ orderPricesOut: true, contracts: true });
+    orderDocumentContractPrices.resolve = async (_db, _r, _s, items) =>
+      new Map(items.map((i) => [`${i.productId}|${i.unit}`, 7.0]));
+    const out = await preview();
+    expect(out.emailText).not.toMatch(/מוסכ|חוזה/);
+  });
+
+  it('with flag contracts off nothing is called agreed, even with a resolver registered', async () => {
+    await setFeatures({ orderPricesOut: true });
+    let called = false;
+    orderDocumentContractPrices.resolve = async () => {
+      called = true;
+      return new Map();
+    };
+    const out = await preview();
+    expect(called).toBe(false);
+    expect(out.emailText).not.toMatch(/מוסכ|חוזה/);
+    expect(out.emailText).toContain('המחירים הם מחירי ההזמנה.');
   });
 });
