@@ -282,7 +282,8 @@ describe('DATABASE_URL_APP malformed in production → derived from DATABASE_URL
 
   it('without APP_ROLE_PASSWORD a malformed value fails loudly — naming the problem, not the value', async () => {
     const { resolveWebDbUrl } = await import('../env');
-    const bad = 'DATABASE_URL_APP=postgresql://u:secretpw@h/db';
+    // Beyond repair (a NAME= prefix on a URL alone is repaired — see below).
+    const bad = 'DATABASE_URL_APP=secretpw';
     expect(() => resolveWebDbUrl(prodEnv({ APP_ROLE_PASSWORD: undefined, DATABASE_URL_APP: bad }))).toThrow(/starts with "NAME="/);
     try {
       resolveWebDbUrl(prodEnv({ APP_ROLE_PASSWORD: undefined, DATABASE_URL_APP: bad }));
@@ -317,5 +318,117 @@ describe('DATABASE_URL_APP malformed in production → derived from DATABASE_URL
   it('outside production the old behaviour is unchanged', async () => {
     const { resolveWebDbUrl } = await import('../env');
     expect(resolveWebDbUrl({ NODE_ENV: 'test', DATABASE_URL: POOLER, APP_ROLE_PASSWORD: APP_PW } as never)).toBe(POOLER);
+  });
+});
+
+describe('pasted DB URLs are repaired, or named — never echoed', () => {
+  const REF = 'rutbnmvkwirqtixvuhdq';
+  const HOST = 'aws-0-ap-northeast-1.pooler.supabase.com:6543';
+  const PW = 'Sec#ret/pa?ss@w0rd';
+  const urlWith = (pw: string, user = `postgres.${REF}`) => `postgresql://${user}:${pw}@${HOST}/postgres`;
+
+  it('repairs the common paste mistakes into a URL postgres.js parses, with the same password', async () => {
+    const { normalizePgUrl } = await import('../env');
+    for (const raw of [
+      urlWith(PW), // # / ? @ never URL-encoded → "Invalid URL" before
+      `DATABASE_URL=${urlWith(PW)}`,
+      `"${urlWith(PW)}"`,
+      `  ${urlWith(PW)}\n`,
+      urlWith(`[${PW}]`), // Supabase's [YOUR-PASSWORD] brackets left in
+      urlWith(`<${PW}>`),
+      urlWith(encodeURIComponent(PW)), // already encoded: unchanged password
+    ]) {
+      const fixed = normalizePgUrl(raw);
+      expect(fixed, raw).not.toBeNull();
+      const u = new URL(fixed!);
+      expect(decodeURIComponent(u.password)).toBe(PW);
+      expect(decodeURIComponent(u.username)).toBe(`postgres.${REF}`);
+      expect(u.host).toBe(HOST);
+      expect(u.pathname).toBe('/postgres');
+    }
+  });
+
+  it('returns a clean URL unchanged, and null for one beyond repair', async () => {
+    const { normalizePgUrl } = await import('../env');
+    const clean = urlWith(encodeURIComponent(PW));
+    expect(normalizePgUrl(clean)).toBe(clean);
+    expect(normalizePgUrl(` ${clean} `)).toBe(clean);
+    for (const bad of [undefined, '', 'just-a-password', 'https://example.com', 'postgresql://']) {
+      expect(normalizePgUrl(bad)).toBeNull();
+    }
+  });
+
+  it('the auth connection uses the repaired DATABASE_URL; beyond repair it fails at runtime, never the build', async () => {
+    const { resolveAuthDbUrl, BUILD_PHASE_DB_PLACEHOLDER } = await import('../env');
+    const prod = { NODE_ENV: 'production' };
+    expect(decodeURIComponent(new URL(resolveAuthDbUrl({ ...prod, DATABASE_URL: urlWith(PW) } as never)!).password)).toBe(PW);
+    expect(resolveAuthDbUrl({ ...prod, DATABASE_URL: 'just-a-password', NEXT_PHASE: 'phase-production-build' } as never)).toBe(
+      BUILD_PHASE_DB_PLACEHOLDER,
+    );
+    expect(() => resolveAuthDbUrl({ ...prod, DATABASE_URL: 'just-a-password' } as never)).toThrow(
+      /DATABASE_URL is unusable: it does not start with postgresql:\/\//,
+    );
+    try {
+      resolveAuthDbUrl({ ...prod, DATABASE_URL: 'just-a-password' } as never);
+    } catch (e) {
+      expect(String(e)).not.toContain('just-a-password');
+    }
+    // DATABASE_URL_APP only when DATABASE_URL is unset (legacy dev setups).
+    expect(resolveAuthDbUrl({ DATABASE_URL_APP: APP } as never)).toBe(APP);
+    expect(resolveAuthDbUrl({} as never)).toBeUndefined();
+  });
+
+  it('derives the app role from a repaired owner URL', async () => {
+    const { resolveWebDbUrl } = await import('../env');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const u = new URL(
+      resolveWebDbUrl({ NODE_ENV: 'production', DATABASE_URL: urlWith(PW), APP_ROLE_PASSWORD: 'app-pw', DATABASE_URL_APP: 'x' } as never),
+    );
+    expect(u.username).toBe(`restomatch_app.${REF}`);
+    expect(decodeURIComponent(u.password)).toBe('app-pw');
+    warn.mockRestore();
+  });
+
+  it('without APP_ROLE_PASSWORD a repairable DATABASE_URL_APP is repaired; a bracketed one is never used as is', async () => {
+    const { resolveWebDbUrl } = await import('../env');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const appPw = 'ap#p/w';
+    for (const raw of [urlWith(appPw, `restomatch_app.${REF}`), urlWith(`[${appPw}]`, `restomatch_app.${REF}`)]) {
+      const u = new URL(resolveWebDbUrl({ NODE_ENV: 'production', DATABASE_URL_APP: raw } as never));
+      expect(decodeURIComponent(u.password)).toBe(appPw);
+    }
+    for (const [msg] of warn.mock.calls) expect(String(msg)).not.toContain(appPw);
+    warn.mockRestore();
+  });
+
+  it('the build/boot report names each variable\'s state and reason, never a value', async () => {
+    const { dbEnvReport } = await import('../env');
+    const r = dbEnvReport({
+      DATABASE_URL: urlWith(PW),
+      DATABASE_URL_APP: 'DATABASE_URL_APP=junk-secret',
+      APP_ROLE_PASSWORD: 'app-secret',
+    } as never);
+    expect(r).toMatch(/DATABASE_URL: repaired \(.*URL-encoded\)/);
+    expect(r).toMatch(/DATABASE_URL_APP: UNUSABLE \(.*NAME=/);
+    expect(r).toContain('APP_ROLE_PASSWORD: set');
+    expect(r).toContain('app role derivable: yes');
+    for (const secret of [PW, 'Sec', 'junk-secret', 'app-secret']) expect(r).not.toContain(secret);
+    expect(dbEnvReport({ DATABASE_URL: urlWith(encodeURIComponent(PW)) } as never)).toMatch(/^DATABASE_URL: ok · DATABASE_URL_APP: unset/);
+  });
+
+  it('assertWebEnv names an unusable DATABASE_URL in production', async () => {
+    const { assertWebEnv } = await import('../env');
+    const env = {
+      NODE_ENV: 'production',
+      DATABASE_URL: 'just-a-password',
+      DATABASE_URL_APP: urlWith('pw', `restomatch_app.${REF}`),
+      RESEND_API_KEY: 'k',
+      EMAIL_FROM: 'no-reply@example.com',
+      AUTH_URL: 'https://app.example.com',
+      AUTH_SECRET: 's'.repeat(32),
+      SUPABASE_SERVICE_ROLE_KEY: 'k',
+      AUTH_ENC_KEY: 'a'.repeat(64),
+    };
+    expect(() => assertWebEnv(env as never)).toThrow(/DATABASE_URL — it does not start with postgresql:\/\//);
   });
 });
