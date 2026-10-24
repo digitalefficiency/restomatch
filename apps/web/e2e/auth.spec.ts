@@ -35,6 +35,7 @@ test.describe('password login', () => {
     await form.locator('input[name="password"]').fill('definitely-wrong');
     await form.locator('button[type="submit"]').click();
     await expect(page).toHaveURL(/\/login\?error=CredentialsSignin/);
+    // Next's route announcer (#__next-route-announcer__) is also role=alert since 15.5.28.
     await expect(formAlert(page)).toBeVisible();
   });
 
@@ -87,6 +88,7 @@ test.describe('two-factor (TOTP)', () => {
     await page.locator('input[name="code"]').fill('000000');
     await page.locator('form', { has: page.locator('input[name="code"]') }).locator('button[type="submit"]').first().click();
     await expect(page).toHaveURL(/\/login\/2fa\?error=/);
+    // Next's route announcer (#__next-route-announcer__) is also role=alert since 15.5.28.
     await expect(formAlert(page)).toBeVisible();
     // Still gated: the app is unreachable without the second factor.
     await page.goto('/dashboard/approvals');

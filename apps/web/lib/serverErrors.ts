@@ -42,6 +42,7 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   'growth.referralInvalid': 'invalidInput',
   'growth.referralSelf': 'invalidInput',
   'growth.referralAlreadyRedeemed': 'invalidInput',
+  'invoice.numberTaken': 'invoiceNumberTaken',
 };
 
 /**
