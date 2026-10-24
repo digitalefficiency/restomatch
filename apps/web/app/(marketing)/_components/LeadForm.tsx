@@ -46,7 +46,12 @@ function LeadFormInner() {
     onError: (err) => {
       // Server messages are Hebrew-only and technical; show a translated one.
       const code = err.data?.code;
-      const status = err.data?.httpStatus ?? (err.shape as { data?: { httpStatus?: number } } | undefined)?.data?.httpStatus;
+      // The route's rate limiter answers 429 before tRPC runs, with a plain JSON
+      // body — no tRPC error shape, so only the raw response carries the status.
+      const status =
+        err.data?.httpStatus ??
+        (err.shape as { data?: { httpStatus?: number } } | undefined)?.data?.httpStatus ??
+        (err as { meta?: { response?: { status?: number } } }).meta?.response?.status;
       if (code === 'TOO_MANY_REQUESTS' || status === 429) setError(t('lead.errorRate'));
       else setError(t('lead.errorGeneric'));
     },
