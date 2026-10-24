@@ -367,7 +367,7 @@ function ChangesTab() {
                 </div>
                 <div className="text-end text-sm tabular-nums">
                   <span className="block text-xs text-subtle">{t('changes.delta')}</span>
-                  <bdi dir="ltr" className={cn('font-bold', r.costDeltaAgorot > 0 ? 'text-danger' : 'text-primary')}>
+                  <bdi dir="ltr" className={cn('font-bold', r.costDeltaAgorot > 0 ? 'text-warn' : 'text-primary')}>
                     {ilsDelta(r.costDeltaAgorot, locale)}
                   </bdi>
                 </div>
@@ -468,7 +468,7 @@ function ImpactTab() {
                       <Arrow from={ils(r.beforeCostAgorot, locale)} to={ils(r.afterCostAgorot, locale)} />
                     )}
                     {r.marginDeltaAgorot != null ? (
-                      <bdi dir="ltr" className={cn('ms-3 font-semibold tabular-nums', r.marginDeltaAgorot < 0 ? 'text-danger' : 'text-primary')}>
+                      <bdi dir="ltr" className={cn('ms-3 font-semibold tabular-nums', r.marginDeltaAgorot < 0 ? 'text-warn' : 'text-primary')}>
                         {ilsDelta(r.marginDeltaAgorot, locale)}
                       </bdi>
                     ) : null}

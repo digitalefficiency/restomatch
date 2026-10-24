@@ -82,7 +82,8 @@ export async function RecipesOverviewCard() {
                     <bdi>{ils(r.beforeCostAgorot, locale)}</bdi> → <bdi>{ils(r.afterCostAgorot, locale)}</bdi>
                   </bdi>
                 )}
-                <span className="font-semibold text-danger">
+                {/* A rising cost per plate is a warning; only a dish that CROSSED its target gets the T2 badge below. */}
+                <span className="font-semibold text-warn">
                   <bdi dir="ltr" className="tabular-nums">{ilsDelta(r.costDeltaAgorot, locale)}</bdi>{' '}
                   <span className="text-xs font-normal text-subtle">{t('overviewCard.perPlate')}</span>
                 </span>

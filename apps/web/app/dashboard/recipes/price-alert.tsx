@@ -3,7 +3,7 @@
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
 import { TrendingUp } from 'lucide-react';
-import { cn } from '@/lib/components';
+import { Badge, cn } from '@/lib/components';
 import { formatPercent } from '@/lib/i18n/format';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { recipes as recipesNs } from '@/lib/i18n/messages/recipes';
@@ -50,19 +50,23 @@ export function PriceAlertLine({ alert: a, targetBp, compact = false, causeOnly 
     <div
       role={compact ? undefined : 'alert'}
       data-testid="dish-price-alert"
+      // Tier T2 (act now): a solid danger badge says "crossed"; the details stay ink/muted.
       className={cn(
-        'text-danger',
-        compact ? 'mt-1 text-xs' : 'rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm',
+        'text-ink',
+        compact ? 'mt-1 text-xs' : 'rounded-xl border border-danger/35 bg-danger/8 p-3 text-sm',
         className,
       )}
     >
       <p className="flex flex-wrap items-center gap-x-1.5 font-semibold">
-        <TrendingUp className={compact ? 'h-3 w-3' : 'h-4 w-4'} aria-hidden="true" />
         {causeOnly ? (
-          <span>{t('alert.crossed', { target: pct(targetBp, locale) })}</span>
+          <Badge tone="danger-solid" icon={<TrendingUp className="h-3 w-3" aria-hidden="true" />}>
+            {t('alert.crossed', { target: pct(targetBp, locale) })}
+          </Badge>
         ) : (
           <>
-            <span>{t('alert.title')}</span>
+            <Badge tone="danger-solid" icon={<TrendingUp className="h-3 w-3" aria-hidden="true" />}>
+              {t('alert.title')}
+            </Badge>
             <Arrow from={fc(a.beforeFoodCostBp)} to={fc(a.afterFoodCostBp)} />
             <span className="font-normal text-muted">({t('alert.target', { target: pct(targetBp, locale) })})</span>
             <span>
@@ -73,7 +77,7 @@ export function PriceAlertLine({ alert: a, targetBp, compact = false, causeOnly 
       </p>
       <p className={cn('text-muted', compact ? '' : 'mt-1')}>
         {localName(a.product.name, a.product.nameEn, locale)}{' '}
-        <bdi dir="ltr" className="tabular-nums text-danger">+{changeText}</bdi>{' '}
+        <bdi dir="ltr" className="tabular-nums font-semibold text-warn">+{changeText}</bdi>{' '}
         (<Arrow from={priceText(a.product.priceBefore, locale)} to={priceText(a.product.priceNow, locale)} />)
         {a.supplier ? (
           <>
