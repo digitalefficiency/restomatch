@@ -289,3 +289,92 @@ describe('invoice_matched activity carries structured metadata', () => {
     });
   });
 });
+
+describe('a re-match keeps the people’s decisions', () => {
+  async function heldCopy(A: Tenant) {
+    const [orig] = await db.select().from(invoices).where(eq(invoices.id, A.invoiceId));
+    const [copy] = await db
+      .insert(invoices)
+      .values({
+        restaurantId: A.restaurantId,
+        supplierId: A.supplierId,
+        invoiceNumber: null,
+        invoiceDate: orig!.invoiceDate,
+        totalExclVat: '100.00',
+        vatAmount: '17.00',
+        totalInclVat: '117.00',
+        status: 'parsed',
+        source: 'photo',
+        ocrPayload: {
+          provider: 'reconciled',
+          raw: { duplicateOf: { invoiceId: A.invoiceId, invoiceNumber: A.invoiceNumber } },
+        },
+        createdAt: new Date(orig!.createdAt.getTime() + 60_000),
+      })
+      .returning();
+    await db.insert(invoiceLines).values({
+      invoiceId: copy!.id,
+      productId: A.productId,
+      rawDescription: 'rescan',
+      qtyBilled: '10',
+      unit: 'kg',
+      unitPriceBilled: '10.00',
+      lineTotal: '100.00',
+    });
+    return copy!.id;
+  }
+  const findingsFor = (invoiceId: string) =>
+    db
+      .select({
+        id: discrepancies.id,
+        type: discrepancies.type,
+        status: discrepancies.resolutionStatus,
+        resolvedBy: discrepancies.resolvedBy,
+        note: discrepancies.resolutionNote,
+      })
+      .from(discrepancies)
+      .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+      .where(eq(matchRuns.invoiceId, invoiceId));
+
+  it('reject "not a duplicate", re-match → still rejected (same decider and reason)', async () => {
+    const A = await seedTenant(db, 'A');
+    const copyId = await heldCopy(A);
+    const caller = ownerCaller(A);
+    await caller.match.runForInvoice({ invoiceId: copyId });
+    const dup = (await findingsFor(copyId)).find((f) => f.type === 'DUPLICATE_INVOICE');
+    expect(dup?.status).toBe('open');
+    await caller.approvals.reject({ discrepancyId: dup!.id, reason: 'not a duplicate — a second delivery' });
+
+    await caller.match.runForInvoice({ invoiceId: copyId });
+    const after = await findingsFor(copyId);
+    const dupAfter = after.filter((f) => f.type === 'DUPLICATE_INVOICE');
+    expect(dupAfter).toHaveLength(1);
+    expect(dupAfter[0]!.id).not.toBe(dup!.id); // a new run, the decision carried over
+    expect(dupAfter[0]).toMatchObject({
+      status: 'rejected',
+      resolvedBy: A.ownerUserId,
+      note: 'not a duplicate — a second delivery',
+    });
+    // Other findings of the new run that nobody decided are not touched.
+    expect(after.filter((f) => f.type !== 'DUPLICATE_INVOICE').every((f) => f.resolvedBy == null)).toBe(true);
+  });
+
+  it('a decided finding that no longer exists is not resurrected; undecided ones are re-decided by the engine', async () => {
+    const A = await seedTenant(db, 'A');
+    const copyId = await heldCopy(A);
+    const caller = ownerCaller(A);
+    await caller.match.runForInvoice({ invoiceId: copyId });
+    const dup = (await findingsFor(copyId)).find((f) => f.type === 'DUPLICATE_INVOICE');
+    await caller.approvals.reject({ discrepancyId: dup!.id, reason: 'not a duplicate' });
+
+    // The copy turns out to be a different invoice: its number no longer points at A.
+    await db
+      .update(invoices)
+      .set({ invoiceNumber: 'DIFFERENT-1', ocrPayload: { provider: 'reconciled', raw: {} } })
+      .where(eq(invoices.id, copyId));
+    await caller.match.runForInvoice({ invoiceId: copyId });
+    const after = await findingsFor(copyId);
+    expect(after.some((f) => f.type === 'DUPLICATE_INVOICE')).toBe(false);
+    expect(after.every((f) => f.status !== 'rejected')).toBe(true);
+  });
+});

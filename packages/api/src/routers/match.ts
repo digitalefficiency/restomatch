@@ -4,7 +4,7 @@ import { runMatch, type MatchStatus } from '@restomatch/matching';
 import { managerProcedure, router } from '../trpc';
 import { assertInvoiceOwned } from '../tenant';
 import { buildMatchInputForInvoice } from '../match/buildMatchInput';
-import { persistMatchRun } from '../match/persist';
+import { loadPriorDecisions, persistMatchRun } from '../match/persist';
 import { buildRules, resolveApprovalThresholds } from '../approvals/engine';
 
 export interface RunForInvoiceResult {
@@ -21,7 +21,8 @@ export interface RunForInvoiceResult {
  * cross-check from the dashboard after fixing product matches, and works
  * without Redis (runs inline in the member tx). Re-running replaces any prior
  * match run for the invoice (cascade-deletes its discrepancies), so it is safe
- * to invoke repeatedly.
+ * to invoke repeatedly; human decisions (approve / reject / escalate) carry over
+ * to the findings that still exist.
  */
 export const matchRouter = router({
   runForInvoice: managerProcedure
@@ -41,7 +42,10 @@ export const matchRouter = router({
         };
       }
 
-      // Re-match: drop any prior run for this invoice (discrepancies cascade).
+      // Re-match: drop any prior run for this invoice (discrepancies cascade) —
+      // but first keep the people's decisions, re-applied below to findings that
+      // still exist (a rejected "not a duplicate" must not come back open).
+      const priorDecisions = await loadPriorDecisions(ctx.db, restaurantId, input.invoiceId);
       await ctx.db
         .delete(matchRuns)
         .where(and(eq(matchRuns.invoiceId, input.invoiceId), eq(matchRuns.restaurantId, restaurantId)));
@@ -60,6 +64,7 @@ export const matchRouter = router({
         built.input,
         result,
         rules,
+        priorDecisions,
       );
 
       return {

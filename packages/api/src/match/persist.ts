@@ -2,7 +2,9 @@ import {
   and,
   discrepancies,
   eq,
+  inArray,
   invoices,
+  isNotNull,
   matchRuns,
   suppliers,
   type Database,
@@ -19,6 +21,81 @@ export interface PersistMatchArgs {
   invoiceId: string;
   poId: string | null;
   grId: string | null;
+}
+
+/** A human decision on a discrepancy (approve / reject / escalate) to carry across a re-match. */
+export interface PriorDecision {
+  resolutionStatus: 'open' | 'accepted' | 'rejected' | 'escalated' | 'resolved';
+  resolvedBy: string | null;
+  resolvedAt: Date;
+  resolutionNote: string | null;
+}
+
+/**
+ * Identity of a finding across match runs: its type plus the lines it is about.
+ * Invoice / PO lines survive a re-match (only match_runs + discrepancies are
+ * replaced), so the same finding on the same line gets the same key.
+ */
+export function discrepancyKey(d: {
+  type: string;
+  invoiceLineId?: string | null;
+  poLineId?: string | null;
+  productId?: string | null;
+}): string {
+  return [d.type, d.invoiceLineId ?? '', d.poLineId ?? '', d.productId ?? ''].join('|');
+}
+
+/**
+ * Human decisions on the invoice's current discrepancies, by discrepancyKey —
+ * read BEFORE a re-match deletes the old runs, so a bookkeeper's "not a
+ * duplicate" (or an approval) is not silently reset to open. Engine
+ * auto-approvals (no resolvedAt) are not carried: the new run re-decides them.
+ */
+export async function loadPriorDecisions(
+  db: Database,
+  restaurantId: string,
+  invoiceId: string,
+): Promise<Map<string, PriorDecision>> {
+  const runs = await db
+    .select({ id: matchRuns.id })
+    .from(matchRuns)
+    .where(and(eq(matchRuns.invoiceId, invoiceId), eq(matchRuns.restaurantId, restaurantId)));
+  const out = new Map<string, PriorDecision>();
+  if (runs.length === 0) return out;
+  const rows = await db
+    .select({
+      type: discrepancies.type,
+      invoiceLineId: discrepancies.invoiceLineId,
+      poLineId: discrepancies.poLineId,
+      productId: discrepancies.productId,
+      resolutionStatus: discrepancies.resolutionStatus,
+      resolvedBy: discrepancies.resolvedBy,
+      resolvedAt: discrepancies.resolvedAt,
+      resolutionNote: discrepancies.resolutionNote,
+    })
+    .from(discrepancies)
+    .where(
+      and(
+        eq(discrepancies.restaurantId, restaurantId),
+        inArray(
+          discrepancies.matchRunId,
+          runs.map((r) => r.id),
+        ),
+        isNotNull(discrepancies.resolvedAt),
+      ),
+    );
+  for (const r of rows) {
+    const key = discrepancyKey(r);
+    const prev = out.get(key);
+    if (prev && prev.resolvedAt >= r.resolvedAt!) continue; // keep the latest decision
+    out.set(key, {
+      resolutionStatus: r.resolutionStatus,
+      resolvedBy: r.resolvedBy,
+      resolvedAt: r.resolvedAt!,
+      resolutionNote: r.resolutionNote,
+    });
+  }
+  return out;
 }
 
 export interface PersistMatchResult {
@@ -41,6 +118,8 @@ export async function persistMatchRun(
   input: MatchInput,
   result: MatchOutput,
   rules: ReturnType<typeof buildRules>,
+  /** Decisions from the run this one replaces (loadPriorDecisions); kept on findings that still exist. */
+  priorDecisions?: Map<string, PriorDecision>,
 ): Promise<PersistMatchResult> {
   const [matchRun] = await db
     .insert(matchRuns)
@@ -69,6 +148,7 @@ export async function persistMatchRun(
     };
     const decision = evaluateApproval(ctx, rules);
     const initialStatus = decision.action === 'auto_approve' ? 'accepted' : 'open';
+    const prior = priorDecisions?.get(discrepancyKey(d));
 
     await db.insert(discrepancies).values({
       matchRunId: matchRun.id,
@@ -86,10 +166,13 @@ export async function persistMatchRun(
       requiresRole: decision.requiredRole,
       ruleId: decision.ruleId,
       ruleName: decision.ruleName,
-      resolutionStatus: initialStatus,
+      resolutionStatus: prior?.resolutionStatus ?? initialStatus,
+      resolvedBy: prior?.resolvedBy ?? null,
+      resolvedAt: prior?.resolvedAt ?? null,
+      resolutionNote: prior?.resolutionNote ?? null,
     });
 
-    if (decision.requiredRole && decision.action !== 'auto_approve') {
+    if (!prior && decision.requiredRole && decision.action !== 'auto_approve') {
       rolesNeedingNotification.add(decision.requiredRole);
     }
   }
