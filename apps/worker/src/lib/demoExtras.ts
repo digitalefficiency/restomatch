@@ -32,8 +32,8 @@ export interface DemoExtraStep {
 export const EXPECTED_RECOVERY = { claims: 74, claimedAgorot: 367_210 };
 /** S11's contract prices (HaKerem 6 + Mediterranean Fish 4) and the one open tomato alert. */
 export const EXPECTED_CONTRACTS = { prices: 10, alerts: 1 };
-/** October's actual food cost on the demo (S17): ₪41,135.36 of ₪136,400 food sales. */
-export const EXPECTED_ACTUAL_FOOD_COST_PCT = '30.2';
+/** October's actual food cost on the demo (S17): ₪36,247.99 of ₪136,400 food sales. */
+export const EXPECTED_ACTUAL_FOOD_COST_PCT = '26.6';
 
 const count = async (query: Promise<unknown>) => Number(((await query) as Array<{ n: number }>)[0]?.n ?? 0);
 
