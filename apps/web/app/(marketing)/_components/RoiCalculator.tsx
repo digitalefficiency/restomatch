@@ -48,7 +48,7 @@ export function RoiCalculator({ proPriceIls }: { proPriceIls: number }) {
               step={5000}
               value={monthly}
               onChange={(e) => setMonthly(Math.max(0, Number(e.target.value) || 0))}
-              className="w-full rounded-xl border border-line bg-surface-2 py-3 pe-3 ps-8 font-mono text-lg font-bold tabular-nums text-ink transition-colors focus:border-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              className="w-full rounded-xl border border-line-strong bg-surface py-3 pe-3 ps-8 font-mono text-lg font-bold tabular-nums text-ink transition-colors focus:border-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             />
           </div>
           <input

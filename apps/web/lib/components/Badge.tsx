@@ -11,8 +11,8 @@ const tones: Record<BadgeTone, string> = {
   info: 'bg-info/12 text-info ring-1 ring-info/25',
   neutral: 'bg-surface-2 text-muted ring-1 ring-line',
   // Emphasis tier T2 ("act now"): solid fills for blocking / needs-a-decision.
-  'danger-solid': 'bg-danger text-white ring-1 ring-danger',
-  'warning-solid': 'bg-warn text-white ring-1 ring-warn',
+  'danger-solid': 'bg-danger text-on-primary ring-1 ring-danger',
+  'warning-solid': 'bg-warn text-on-primary ring-1 ring-warn',
 };
 
 /** Pill badge for severity / status / trend indicators. */

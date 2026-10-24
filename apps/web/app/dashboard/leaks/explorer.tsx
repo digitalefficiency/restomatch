@@ -9,6 +9,7 @@ import { SectionHeader, StatCard } from '@/lib/components';
 import {
   BreakdownChart,
   DeltaBadge,
+  isThinBase,
   TvMode,
   ViewToolbar,
   hasFilters,
@@ -36,6 +37,8 @@ export async function LeakExplorer({ view }: { view: ViewState }) {
   ]);
   const cur = summary.current;
   const prev = summary.previous && summary.previous.invoiceCount > 0 ? summary.previous : null;
+  // A comparison period with almost no data gets a calm ₪ difference, not a % alarm.
+  const thinBase = prev ? isThinBase(cur.spendIls, prev.spendIls) : false;
   const ils = (v: number) => formatIls(v, { locale });
 
   const labelOf = (key: string, label: string | null, labelEn: string | null) => {
@@ -50,7 +53,8 @@ export async function LeakExplorer({ view }: { view: ViewState }) {
     label: labelOf(r.key, r.label, r.labelEn),
     value: r.leakIls,
     count: r.count,
-    previous: grouped.previous ? (prevByKey.get(r.key) ?? 0) : null,
+    // An empty comparison period (no checked invoices) has no base: neutral "—", never a red ▲ +₪X.
+    previous: grouped.previous && prev ? (prevByKey.get(r.key) ?? 0) : null,
   }));
   const linesTotal = grouped.rows.reduce((s, r) => s + r.leakIls, 0);
   const groupName = t(`groups.${view.group}`);
@@ -93,27 +97,28 @@ export async function LeakExplorer({ view }: { view: ViewState }) {
             label={t('kpis.leak')}
             value={ils(cur.leakIls)}
             tone="danger"
+            emphasis={cur.leakIls > 0}
             icon={<Droplets className="h-4 w-4" />}
-            hint={<DeltaBadge current={cur.leakIls} previous={prev?.leakIls} compare={view.compare} showAmount />}
+            hint={<DeltaBadge current={cur.leakIls} previous={prev?.leakIls} compare={view.compare} thinBase={thinBase} showAmount />}
           />
           <StatCard
             label={t('kpis.pct')}
             value={cur.leakPct != null ? formatPercent(cur.leakPct, locale, 1) : '—'}
             tone="warn"
             icon={<Percent className="h-4 w-4" />}
-            hint={<DeltaBadge current={cur.leakPct ?? 0} previous={prev ? (prev.leakPct ?? 0) : null} compare={view.compare} kind="ratio" bare />}
+            hint={<DeltaBadge current={cur.leakPct ?? 0} previous={prev ? (prev.leakPct ?? 0) : null} compare={view.compare} thinBase={thinBase} kind="ratio" bare />}
           />
           <StatCard
             label={t('kpis.spend')}
             value={ils(cur.spendIls)}
             icon={<Receipt className="h-4 w-4" />}
-            hint={<DeltaBadge current={cur.spendIls} previous={prev?.spendIls} compare={view.compare} neutral bare />}
+            hint={<DeltaBadge current={cur.spendIls} previous={prev?.spendIls} compare={view.compare} thinBase={thinBase} neutral bare />}
           />
           <StatCard
             label={t('kpis.invoices')}
             value={`${formatNumber(cur.invoicesWithLeak, locale)} / ${formatNumber(cur.matchedInvoiceCount, locale)}`}
             icon={<FileWarning className="h-4 w-4" />}
-            hint={<DeltaBadge current={cur.invoicesWithLeak} previous={prev?.invoicesWithLeak} compare={view.compare} kind="count" bare />}
+            hint={<DeltaBadge current={cur.invoicesWithLeak} previous={prev?.invoicesWithLeak} compare={view.compare} thinBase={thinBase} kind="count" bare />}
           />
         </div>
 
@@ -126,6 +131,7 @@ export async function LeakExplorer({ view }: { view: ViewState }) {
             chart={view.chart}
             density={view.density}
             compare={view.compare}
+            thinBase={thinBase}
             caption={t('explorer.chartCaption', { group: groupName })}
             keyHeader={groupName}
             valueHeader={t('explorer.colLeak')}

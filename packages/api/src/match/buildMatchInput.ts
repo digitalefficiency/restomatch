@@ -76,11 +76,20 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * every query is explicitly scoped by restaurant_id either way. Returns null when
  * the invoice has no lines to match (nothing to do). When no PO is found it still
  * returns an input with empty poLines, so the engine emits UNORDERED_ARRIVAL.
+ *
+ * `pinnedPoId` (a re-match): the PO the invoice was already matched against. It
+ * is used whatever its status — by then it is usually `received`/`closed`, which
+ * discovery skips, and re-matching against "no PO" would flag the whole invoice
+ * as UNORDERED_ARRIVAL. Ignored (discovery runs) if it is gone, belongs to
+ * another supplier, or no longer fits the ±PO_MATCH_WINDOW_DAYS window around
+ * the invoice date — i.e. the person corrected a misread supplier or date, so
+ * the invoice must be free to move to the right PO.
  */
 export async function buildMatchInputForInvoice(
   db: Database,
   restaurantId: string,
   invoiceId: string,
+  options: { pinnedPoId?: string | null } = {},
 ): Promise<BuiltMatchInput | null> {
   const [inv] = await db
     .select({
@@ -162,15 +171,30 @@ export async function buildMatchInputForInvoice(
   // ── Discover the candidate PO: same supplier, eligible status, expected
   //    delivery within ±window of the invoice date; nearest delivery wins. ──
   let po: PoCandidate | null = null;
-  if (inv.supplierId) {
-    // Anchor the window to LOCAL-day midnights: from the start of the day
-    // PO_MATCH_WINDOW_DAYS before the invoice date, to the end of the day
-    // PO_MATCH_WINDOW_DAYS after it. This keeps the ±7-day window aligned to the
-    // restaurant's calendar (DST-safe) instead of raw getTime() ± 7*DAY, which
-    // drifts by the UTC offset and shifts the window edges by a day near
-    // midnight. PO_MATCH_WINDOW_DAYS itself is unchanged (engine constant).
-    const lo = startOfDayInTz(addCalendarDaysInTz(invoiceDate, -PO_MATCH_WINDOW_DAYS, tz), tz);
-    const hi = endOfDayInTz(addCalendarDaysInTz(invoiceDate, PO_MATCH_WINDOW_DAYS, tz), tz);
+  // The PO window: from the start of the local day PO_MATCH_WINDOW_DAYS before
+  // the invoice date to the end of the day PO_MATCH_WINDOW_DAYS after it —
+  // aligned to the restaurant's calendar (DST-safe) instead of raw getTime() ±
+  // 7*DAY, which drifts by the UTC offset near midnight. Both the pin and
+  // discovery honour it (the engine's DATE_ANOMALY never fires inside it).
+  const lo = startOfDayInTz(addCalendarDaysInTz(invoiceDate, -PO_MATCH_WINDOW_DAYS, tz), tz);
+  const hi = endOfDayInTz(addCalendarDaysInTz(invoiceDate, PO_MATCH_WINDOW_DAYS, tz), tz);
+  const inWindow = (at: Date | null) => at == null || (at >= lo && at <= hi);
+  if (options.pinnedPoId) {
+    const [pinned] = await db
+      .select({
+        id: purchaseOrders.id,
+        supplierId: purchaseOrders.supplierId,
+        expectedDeliveryAt: purchaseOrders.expectedDeliveryAt,
+        vatRate: purchaseOrders.vatRate,
+      })
+      .from(purchaseOrders)
+      .where(and(eq(purchaseOrders.id, options.pinnedPoId), eq(purchaseOrders.restaurantId, restaurantId)))
+      .limit(1);
+    if (pinned && (!inv.supplierId || pinned.supplierId === inv.supplierId) && inWindow(pinned.expectedDeliveryAt)) {
+      po = { id: pinned.id, expectedDeliveryAt: pinned.expectedDeliveryAt, vatRate: pinned.vatRate };
+    }
+  }
+  if (!po && inv.supplierId) {
     const candidates = await db
       .select({
         id: purchaseOrders.id,

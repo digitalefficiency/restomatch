@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_VIEW,
   delta,
+  deltaView,
   isDefaultData,
+  isThinBase,
   parseView,
   serializeView,
   toViewInput,
@@ -105,6 +107,33 @@ describe('view state ⇄ URL', () => {
     expect(delta(80, 100)).toEqual({ diff: -20, pct: -0.2 });
     expect(delta(50, 0)).toEqual({ diff: 50, pct: null });
     expect(delta(50, null)).toBeNull();
+  });
+
+  it('thin base (S8: last month vs an almost-empty August) → ₪ only: no %, no ▲ colour', () => {
+    // ₪1,059 leak on ₪63,300 vs ₪35 on ₪1,200: was "▲ up 2,926.8% (+₪1,024)".
+    const thin = isThinBase(63300.94, 1200);
+    expect(thin).toBe(true);
+    expect(deltaView(1059.38, 35, { thinBase: thin })).toEqual({ kind: 'thin', diff: 1024.38, up: true });
+    expect(deltaView(63300.94, 1200, { thinBase: thin })).toMatchObject({ kind: 'thin', up: true });
+    expect(deltaView(5, 2, { thinBase: thin, kind: 'count' })).toEqual({ kind: 'thin', diff: 3, up: true });
+    // A leak % against a thin base means nothing either: no comparison shown.
+    expect(deltaView(0.0167, 0.029, { thinBase: thin, kind: 'ratio' })).toEqual({ kind: 'none' });
+  });
+
+  it('normal base → the % change is unchanged', () => {
+    expect(isThinBase(42263.35, 63300.94)).toBe(false);
+    expect(deltaView(759.54, 1059.38, { thinBase: false })).toEqual({ kind: 'change', diff: 759.54 - 1059.38, up: false, pct: (759.54 - 1059.38) / 1059.38 });
+    expect(deltaView(120, 100)).toEqual({ kind: 'change', diff: 20, up: true, pct: 0.2 });
+    expect(deltaView(100, 100)).toEqual({ kind: 'flat' });
+    expect(deltaView(0, 0)).toEqual({ kind: 'none' });
+    expect(deltaView(50, null)).toEqual({ kind: 'none' });
+  });
+
+  it('isThinBase: base spend below 10% of the current period (same rule as charts/chain.ts)', () => {
+    expect(isThinBase(1000, 99.99)).toBe(true);
+    expect(isThinBase(1000, 100)).toBe(false);
+    expect(isThinBase(1000, 5000)).toBe(false);
+    expect(isThinBase(1000, null)).toBe(false);
   });
 });
 
