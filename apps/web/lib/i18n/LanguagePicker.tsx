@@ -4,7 +4,6 @@ import { useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Languages } from 'lucide-react';
 import { cn } from '@/lib/components/cn';
-import { trpc } from '@/lib/trpc/client';
 import {
   APP_LOCALES,
   dirOf,
@@ -21,24 +20,31 @@ import { receiverLangs } from './messages/receiverLangs';
  * Six-language picker (he · en · ar · ru · th · ti) — replaces the עב/EN toggle
  * where the `receiverLanguages` flag is on (dashboard) or on signed-out pages
  * (login), unless killed by FEATURES_OFF. Writes `rm_locale`, flips <html
- * lang/dir> at once and refreshes server components. With `persist`, the
- * choice is also saved as the member's language (best effort), so the next
- * login on a new phone opens in it.
+ * lang/dir> at once and refreshes server components. No tRPC here: the login
+ * page has no TrpcProvider. The dashboard uses `PersistingLanguagePicker`
+ * (./PersistingLanguagePicker), which passes `onSave` to also store the choice
+ * as the member's language (best effort), so the next login on a new phone opens in it.
  */
-export function LanguagePicker({ className, persist = false }: { className?: string; persist?: boolean }) {
+export function LanguagePicker({
+  className,
+  onSave,
+}: {
+  className?: string;
+  onSave?: (locale: AppLocale) => Promise<unknown>;
+}) {
   const locale = useAppLocale();
   const router = useRouter();
   const t = useT(receiverLangs);
   const [pending, startTransition] = useTransition();
-  const save = trpc.receiverLangs.setMyLocale.useMutation();
 
   function switchTo(target: AppLocale) {
     const secure = window.location.protocol === 'https:' ? '; secure' : '';
     document.cookie = `${LOCALE_COOKIE}=${target}; path=/; max-age=${LOCALE_COOKIE_MAX_AGE_SEC}; samesite=lax${secure}`;
     document.documentElement.lang = target;
     document.documentElement.dir = dirOf(target);
-    if (persist) save.mutate({ locale: target }, { onSettled: () => startTransition(() => router.refresh()) });
-    else startTransition(() => router.refresh());
+    const refresh = () => startTransition(() => router.refresh());
+    if (onSave) onSave(target).then(refresh, refresh);
+    else refresh();
   }
 
   return (

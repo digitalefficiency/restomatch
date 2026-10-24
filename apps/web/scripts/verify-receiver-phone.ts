@@ -19,6 +19,9 @@ import { lookup, type MessageTree } from '../lib/i18n/translate';
 const BASE = process.env.BASE_URL ?? 'http://localhost:3100';
 const PASSWORD = process.env.DEMO_PASSWORD ?? 'RestoMatch-Demo-2026!';
 const OUT = path.resolve(process.cwd(), '../../docs/client-ready/screenshots/wave1-lang-ai');
+/** VIEWPORT=1366 runs the same flow on a laptop width (screenshots get a "-1366" suffix). */
+const WIDTH = Number(process.env.VIEWPORT ?? 390);
+const SUFFIX = WIDTH === 390 ? '' : `-${WIDTH}`;
 const LOCALES = (process.argv.slice(2).length ? process.argv.slice(2) : ['ar', 'ru', 'th', 'ti']) as Array<
   'ar' | 'ru' | 'th' | 'ti'
 >;
@@ -67,7 +70,7 @@ async function layoutChecks(page: Page, locale: string, step: string) {
   });
   const wantDir = locale === 'ar' ? 'rtl' : 'ltr';
   check(r.lang === locale && r.dir === wantDir, `${locale} ${step}: <html lang=${r.lang} dir=${r.dir}>`);
-  check(!r.hScroll, `${locale} ${step}: no horizontal page scroll at 390 px`);
+  check(!r.hScroll, `${locale} ${step}: no horizontal page scroll at ${WIDTH} px`);
   check(r.clipped.length === 0, `${locale} ${step}: no clipped/off-screen buttons ${r.clipped.length ? JSON.stringify(r.clipped) : ''}`);
   check(SCRIPT[locale]!.test(r.text), `${locale} ${step}: text in ${locale}`);
   if (locale === 'ar') check(r.mainDir === 'rtl', `ar ${step}: main content computes direction rtl`);
@@ -75,7 +78,11 @@ async function layoutChecks(page: Page, locale: string, step: string) {
 
 async function main() {
   const browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM_PATH });
-  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  const ctx = await browser.newContext(
+    WIDTH === 390
+      ? { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true }
+      : { viewport: { width: WIDTH, height: 900 } },
+  );
   await ctx.addCookies([
     { name: 'rm_locale', value: LOCALES[0]!, url: BASE },
     { name: 'rm_cookie_consent', value: 'necessary', url: BASE },
@@ -93,9 +100,10 @@ async function main() {
 
   for (const [i, locale] of LOCALES.entries()) {
     await ctx.addCookies([{ name: 'rm_locale', value: locale, url: BASE }]);
-    const shot = (n: number, step: string) => page.screenshot({ path: `${OUT}/phone-${locale}-${n}-${step}.png` });
+    const shot = (n: number, step: string) => page.screenshot({ path: `${OUT}/phone-${locale}-${n}-${step}${SUFFIX}.png` });
 
     await page.goto(`${BASE}/dashboard/receiving`);
+    await page.locator('a[href^="/dashboard/receiving/"]').first().waitFor({ timeout: 30_000 });
     await layoutChecks(page, locale, 'inbox');
     await shot(1, 'inbox');
 
@@ -123,6 +131,36 @@ async function main() {
         .evaluateAll((els) => els.map((e) => getComputedStyle(e).direction));
       check(dirs.length > 0 && dirs.every((d) => d === 'rtl'), `ar reconciliation: Arabic item names lay out RTL`);
     }
+    // Review sections / banners (main #64–#66) come from the overlay, never English.
+    const reconText = await page.locator('#main-content').innerText();
+    const sectionKeys = ['steps.recon.sectionBoth', 'steps.recon.sectionInvoiceOnly', 'steps.recon.sectionOrderOnly'];
+    const shown = sectionKeys.filter((k) => reconText.includes(label(locale, k)));
+    // The demo invoice has no uploaded scan, so this is the order-only review: its
+    // subtitle must be translated (sections are covered by verify-receiver-review.ts).
+    check(
+      shown.length > 0 || reconText.includes(label(locale, 'steps.recon.subtitleNoInvoice')),
+      `${locale} reconciliation: review header in ${locale} (${shown.length ? shown.map((k) => k.split('.').pop()).join(', ') : 'order-only subtitle'})`,
+    );
+    const english = ['On the order and the invoice', 'Only on the invoice', 'Only on the order', 'were not matched automatically', 'No invoice line matched', 'Check by hand', 'Matched', 'Quantity differs', 'Price differs', 'Not ordered'];
+    const leaked = english.filter((w) => reconText.includes(w));
+    check(leaked.length === 0, `${locale} reconciliation: no English UI left ${leaked.length ? JSON.stringify(leaked) : ''}`);
+    // qty × price: the quantity comes first in reading order (right of the price in RTL).
+    const order = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('#main-content span.inline-flex'))
+        .filter((s) => Array.from(s.children).some((c) => c.textContent === '×'))
+        .filter((s) => (s as HTMLElement).offsetParent !== null)
+        .map((s) => {
+          const bdis = s.querySelectorAll(':scope > bdi');
+          const q = bdis[0]!.getBoundingClientRect();
+          const p = bdis[bdis.length - 1]!.getBoundingClientRect();
+          return { qtyRight: q.left > p.left, text: (s as HTMLElement).innerText };
+        }),
+    );
+    const wantRight = locale === 'ar';
+    check(
+      order.length > 0 && order.every((o) => o.qtyRight === wantRight),
+      `${locale} reconciliation: qty × price reads qty first (${order.length} lines${order.length ? `, e.g. "${order[0]!.text}"` : ''})`,
+    );
     await shot(3, 'reconciliation');
 
     await page.getByTestId('continue-adjust').click();
