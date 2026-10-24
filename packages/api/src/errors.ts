@@ -33,6 +33,7 @@ export const APP_ERROR_CODES = [
   'input.invalid',
   // Wave-1 per-restaurant flag is off (MASTER-PLAN §1.3; lib/features.ts).
   'FEATURE_DISABLED',
+  'invoice.numberTaken',
 ] as const;
 
 export type AppErrorCode = (typeof APP_ERROR_CODES)[number];
