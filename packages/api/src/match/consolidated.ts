@@ -23,7 +23,7 @@ import {
   type MatchInput,
   type PoLineInput,
 } from '@restomatch/matching';
-import { claimableLines, sumClaims } from '../lib/claims';
+import { claimableLines, sumClaims, vatBasisOf, type VatBasis } from '../lib/claims';
 import { addCalendarDaysInTz, startOfDayInTz } from '../lib/time';
 import { buildMatchInputForInvoice } from './buildMatchInput';
 
@@ -128,6 +128,8 @@ export interface ProposalFinding {
   deliveryNoteNumber: string | null;
   /** Billed twice: the note is already billed on this other invoice. */
   alreadyBilledOn: OtherInvoice | null;
+  /** What the amount is measured on (lib/claims.ts vatBasisOf): before VAT, incl. VAT, or a VAT amount. */
+  basis: VatBasis;
   /** What the line is, for the panel / the supplier letter ("חלב 3% · 24 ליטר"). */
   productName: string | null;
   productNameEn: string | null;
@@ -254,6 +256,8 @@ export function claimableIls(
 /** A delivery-note number in free text: `ת.מ. 61036` (Hebrew) or `DN 61036`. */
 export function deliveryNoteNumberIn(text: string | null | undefined): string | null {
   if (!text) return null;
+  // A RANGE ("ת.מ. 61036-61043", "61036 עד 61043") is a month line: it bills the pool.
+  if (/(?:ת\.\s?מ\.?|\bDN)\s*#?\s*\d+\s*(?:[-–—]|עד|to)\s*\d+/i.test(text)) return null;
   const m = /ת\.\s?מ\.?\s*(\d+)/.exec(text) ?? /\bDN\s*#?\s*(\d+)/i.exec(text);
   return m ? m[1]! : null;
 }
@@ -493,8 +497,8 @@ export function buildConsolidatedProposal(args: {
     const itemizedAg = [...lineGroups.entries()]
       .filter(([gk]) => gk.startsWith(`${number}|`))
       .reduce((sum, [, l]) => sum + ag(l.lineTotal), 0);
-    const valueAg = n.lines.reduce((sum, l) => sum + (l.poPrice == null ? 0 : Math.round((p4Of(l.poPrice) * l.qtyReceived) / 100)), 0);
-    const billedAg = itemizedAg > 0 ? itemizedAg : valueAg;
+    // Only a note this invoice's own lines bill is billed twice (never its PO value).
+    const billedAg = itemizedAg;
     if (billedAg <= 0) continue;
     twiceFindings.push({
       type: 'QTY_OVER',
@@ -525,7 +529,11 @@ export function buildConsolidatedProposal(args: {
     const g = [...groups.values()].find((x) => x.productId === productId);
     return g ? { name: g.name, nameEn: g.nameEn } : (args.productNames?.get(productId) ?? null);
   };
-  const findings: ProposalFinding[] = [...engineFindings, ...pooledFindings, ...twiceFindings].map((d) => ({
+  // A held duplicate (DUPLICATE_INVOICE) already claims the whole invoice: its notes
+  // are not ALSO billed twice, line by line — one problem, one amount.
+  const heldDuplicate = engineFindings.some((d) => d.type === 'DUPLICATE_INVOICE' && countsAsLeak(d));
+  const findings: ProposalFinding[] = [...engineFindings, ...pooledFindings, ...(heldDuplicate ? [] : twiceFindings)].map((d) => ({
+    basis: vatBasisOf(d.type),
     productName: nameOf(d.productId)?.name ?? null,
     productNameEn: nameOf(d.productId)?.nameEn ?? null,
     unit: (d.invoiceLineId ? lineById.get(d.invoiceLineId)?.unit : undefined) ?? null,
@@ -752,13 +760,22 @@ export function candidatePeriods(at: Date, raw: ConsolidatedRaw | null, tz: stri
   return [own, { start: prev.start, end: prev.end }];
 }
 
-/** Pure: the proposal that fits its invoice better — the smaller |invoice − notes|, then more notes, then the first. */
+/**
+ * Pure: the proposal that fits its invoice better — the window that leaves no
+ * delivered note unbilled, then the one covering the most notes; a tie keeps the
+ * first (its own month). (Not the smallest |invoice − notes|: a weekly ריכוז dated
+ * the 5th would pick last month's notes for the closer total.)
+ */
 export function betterFit(a: ConsolidatedProposal, b: ConsolidatedProposal): ConsolidatedProposal {
-  const da = Math.abs(a.totals.differenceIls);
-  const db = Math.abs(b.totals.differenceIls);
-  if (b.deliveryNotes.length > 0 && (a.deliveryNotes.length === 0 || db < da)) return b;
-  if (db === da && b.deliveryNotes.length > a.deliveryNotes.length) return b;
-  return a;
+  const score = (p: ConsolidatedProposal) => {
+    const covered = p.deliveryNotes.filter((n) => n.status === 'covered').length;
+    const leftovers = p.deliveryNotes.length - covered;
+    return [p.deliveryNotes.length > 0 && leftovers === 0 ? 1 : 0, covered] as const;
+  };
+  const [aClean, aCovered] = score(a);
+  const [bClean, bCovered] = score(b);
+  if (bClean !== aClean) return bClean > aClean ? b : a;
+  return bCovered > aCovered ? b : a;
 }
 
 /** The delivery-note number on a goods receipt (`ת.מ. <n>` in its notes). */
@@ -768,12 +785,16 @@ const noteNumberSql = sql<string | null>`substring(${goodsReceipts.notes} from '
 // "invoices"."id"): a bare `${table.col}` in a one-table SELECT field renders
 // unqualified, and inside a subquery it would bind to the inner table.
 
-/** "Covered by another invoice": a match run of a different invoice used this receipt or its PO. */
+/**
+ * "Covered by another invoice": a match run of a different invoice used THIS receipt
+ * (gr_id). Not its PO: an unrelated invoice paired to the PO by discovery does not
+ * bill this delivery note.
+ */
 const coveredByOther = (restaurantId: string, invoiceId: string | null) => sql`EXISTS (
   SELECT 1 FROM match_runs mr
   WHERE mr.restaurant_id = ${restaurantId}
     ${invoiceId ? sql`AND mr.invoice_id <> ${invoiceId}` : sql``}
-    AND (mr.gr_id = "goods_receipts"."id" OR (mr.po_id IS NOT NULL AND mr.po_id = "goods_receipts"."po_id"))
+    AND mr.gr_id = "goods_receipts"."id"
 )`;
 
 type LoadedNote = DeliveryNoteData & { coveredByInvoiceId: string | null };
@@ -803,7 +824,7 @@ async function loadDeliveryNotes(
         SELECT mr.invoice_id FROM match_runs mr
         WHERE mr.restaurant_id = ${restaurantId}
           ${opts.excludeCoveredExcept ? sql`AND mr.invoice_id <> ${opts.excludeCoveredExcept}` : sql``}
-          AND (mr.gr_id = "goods_receipts"."id" OR (mr.po_id IS NOT NULL AND mr.po_id = "goods_receipts"."po_id"))
+          AND mr.gr_id = "goods_receipts"."id"
         ORDER BY mr.run_at DESC LIMIT 1
       )`,
     })
@@ -907,6 +928,7 @@ async function consolidatedInvoicesOf(db: Database, restaurantId: string, suppli
     .orderBy(asc(invoices.createdAt));
   return rows.map((r) => {
     const raw = readConsolidatedRaw(r.ocrPayload)!;
+    const flags = (r.ocrPayload?.raw ?? {}) as { duplicateOf?: unknown; supersededBy?: unknown; credited?: unknown };
     return {
       id: r.id,
       number: r.number,
@@ -914,8 +936,19 @@ async function consolidatedInvoicesOf(db: Database, restaurantId: string, suppli
       createdAt: r.createdAt,
       raw,
       period: periodOfInvoice(r.invoiceDate ?? r.createdAt, raw, tz),
+      // A disputed, held-duplicate, superseded or credited ריכוז bills nothing: it
+      // never makes another invoice's note "billed twice" nor hides a note.
+      active: r.status !== 'disputed' && !flags.duplicateOf && !flags.supersededBy && !flags.credited,
     };
   });
+}
+
+/** A delivery-note number matches another invoice's only within this many days (numbering wraps). */
+export const NUMBER_MATCH_DAYS = 30;
+/** Pure: do two periods lie within NUMBER_MATCH_DAYS of each other? */
+export function periodsNear(a: { start: Date; end: Date }, b: { start: Date; end: Date }, days = NUMBER_MATCH_DAYS): boolean {
+  const slack = days * 86_400_000;
+  return a.start.getTime() - slack < b.end.getTime() && b.start.getTime() - slack < a.end.getTime();
 }
 
 async function timezoneOf(db: Database, restaurantId: string) {
@@ -1001,25 +1034,37 @@ export async function consolidatedProposal(
     });
 
   if (raw.deliveryNoteNumbers.length > 0) {
-    // The notes it lists, looked up around its period — and flagged when another
-    // invoice already bills them (lists the number, or its match run used the note).
-    const period = periodOfInvoice(at, raw, tz);
+    // The notes it lists, looked up around its period — for an early-month invoice
+    // without a stated period, its own month and the one before, keeping the window
+    // that finds the most listed notes (ties: its own month) — and flagged when
+    // another active, EARLIER invoice already lists them near that period, or another
+    // invoice's match run used the very receipt.
+    let period = periodOfInvoice(at, raw, tz);
+    let loaded: LoadedNote[] = [];
+    for (const p of candidatePeriods(at, raw, tz)) {
+      const found = await loadDeliveryNotes(
+        db,
+        restaurantId,
+        inv.supplierId,
+        {
+          numbers: raw.deliveryNoteNumbers,
+          from: addCalendarDaysInTz(p.start, -LISTED_NOTE_SLACK_DAYS, tz),
+          to: addCalendarDaysInTz(p.end, LISTED_NOTE_SLACK_DAYS, tz),
+        },
+        { excludeCoveredExcept: invoiceId },
+      );
+      if (found.length > loaded.length) {
+        period = p;
+        loaded = found;
+      }
+    }
     const listedBy = new Map<string, OtherInvoice>();
-    // Only an EARLIER invoice already bills a note — the later copy is the one billed twice.
-    for (const c of others.filter((o) => o.createdAt < inv.createdAt || (+o.createdAt === +inv.createdAt && o.id < invoiceId))) {
+    const earlier = others.filter(
+      (o) => o.active && periodsNear(o.period, period) && (o.createdAt < inv.createdAt || (+o.createdAt === +inv.createdAt && o.id < invoiceId)),
+    );
+    for (const c of earlier) {
       for (const n of c.raw.deliveryNoteNumbers) if (!listedBy.has(n)) listedBy.set(n, { invoiceId: c.id, invoiceNumber: c.number });
     }
-    const loaded = await loadDeliveryNotes(
-      db,
-      restaurantId,
-      inv.supplierId,
-      {
-        numbers: raw.deliveryNoteNumbers,
-        from: addCalendarDaysInTz(period.start, -LISTED_NOTE_SLACK_DAYS, tz),
-        to: addCalendarDaysInTz(period.end, LISTED_NOTE_SLACK_DAYS, tz),
-      },
-      { excludeCoveredExcept: invoiceId },
-    );
     const coveringIds = [...new Set(loaded.map((n) => n.coveredByInvoiceId).filter((x): x is string => !!x))];
     const numberOf = new Map<string, string | null>();
     if (coveringIds.length > 0) {
@@ -1041,9 +1086,12 @@ export async function consolidatedProposal(
   // No list: the supplier's notes in its period that no other invoice covers (by a
   // match run, or by listing them) — for an early-month invoice without a stated
   // period, its own month and the one before, whichever fits better.
-  const listedElsewhere = new Set(others.flatMap((c) => c.raw.deliveryNoteNumbers));
   let best: ConsolidatedProposal | null = null;
   for (const period of candidatePeriods(at, raw, tz)) {
+    // Notes another active ריכוז near this period lists are its, not this one's.
+    const listedElsewhere = new Set(
+      others.filter((c) => c.active && periodsNear(c.period, period)).flatMap((c) => c.raw.deliveryNoteNumbers),
+    );
     const notes = (
       await loadDeliveryNotes(db, restaurantId, inv.supplierId, { from: period.start, to: period.end }, {
         excludeCoveredExcept: invoiceId,
@@ -1102,8 +1150,14 @@ export async function deliveryNoteCoverage(
   const tz = await timezoneOf(db, restaurantId);
   const consolidated = await consolidatedInvoicesOf(db, restaurantId, supplierId, tz);
   const consolidatedIds = new Set(consolidated.map((c) => c.id));
-  const listing = new Map<string, (typeof consolidated)[number]>();
-  for (const c of consolidated) for (const n of c.raw.deliveryNoteNumbers) if (!listing.has(n)) listing.set(n, c);
+  // A ריכוז lists a note by number — but numbering wraps, so only one whose period
+  // lies within NUMBER_MATCH_DAYS of the note's date lists THIS note.
+  const listers = new Map<string, Array<(typeof consolidated)[number]>>();
+  for (const c of consolidated) {
+    for (const n of c.raw.deliveryNoteNumbers) listers.set(n, [...(listers.get(n) ?? []), c]);
+  }
+  const listerOf = (number: string, at: Date) =>
+    (listers.get(number) ?? []).find((c) => periodsNear(c.period, { start: at, end: at }));
 
   // Period candidates: consolidated invoices that don't list their notes (their
   // stated period — one that lists them covers exactly those). An ordinary invoice
@@ -1133,7 +1187,7 @@ export async function deliveryNoteCoverage(
       receivedAt: n.receivedAt.toISOString(),
       receivedValueIls: ils(valueAg),
     };
-    const lister = n.number ? listing.get(n.number) : undefined;
+    const lister = n.number ? listerOf(n.number, n.receivedAt) : undefined;
     if (lister) {
       return {
         ...base,

@@ -20,6 +20,9 @@ export const he = {
     subject: 'חשבונית ריכוז {number} · תקופה {period}',
     intro: 'בהצלבת חשבונית הריכוז מול תעודות המשלוח נמצאו הפערים הבאים:',
     ask: 'נא לזכות {amount} + מע״מ.',
+    askIncl: 'נא לזכות {amount} (כולל מע״מ).',
+    askBoth: 'נא לזכות {excl} + מע״מ, ועוד {incl} (כולל מע״מ).',
+    inclVat: '(כולל מע״מ)',
   },
   finding: {
     price: '{name} · {qty} {unit} · חויב {billed} במקום {po} = {delta}',

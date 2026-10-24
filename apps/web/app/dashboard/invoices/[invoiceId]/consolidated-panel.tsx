@@ -85,6 +85,16 @@ export function ConsolidatedPanel({
     return t('finding.other', { name, delta: ils(f.deltaAmount) });
   };
   const findingsOf = (number: string | null) => (number ? leaking.filter((f) => f.deliveryNoteNumber === number) : []);
+  // The ask follows each line's VAT basis (lib/claims.ts vatBasisOf): "+ מע״מ" only on
+  // amounts before VAT — a duplicate is already incl. VAT, a VAT difference IS VAT.
+  const exclAsk = leaking.filter((f) => f.basis === 'excl').reduce((s, f) => s + Math.round(f.deltaAmount * 100), 0) / 100;
+  const inclAsk = leaking.filter((f) => f.basis !== 'excl').reduce((s, f) => s + Math.round(f.deltaAmount * 100), 0) / 100;
+  const letterAsk =
+    exclAsk > 0 && inclAsk > 0
+      ? t('letter.askBoth', { excl: ils(exclAsk), incl: ils(inclAsk) })
+      : inclAsk > 0
+        ? t('letter.askIncl', { amount: ils(inclAsk) })
+        : t('letter.ask', { amount: ils(exclAsk > 0 ? exclAsk : totals.leakIls) });
   const signed = (v: number) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${ils(Math.abs(v))}`;
 
   return (
@@ -105,10 +115,11 @@ export function ConsolidatedPanel({
               <li key={i}>
                 {f.deliveryNoteNumber ? `${t('finding.note', { number: f.deliveryNoteNumber })} · ` : ''}
                 {findingText(f)}
+                {f.basis !== 'excl' ? ` ${t('letter.inclVat')}` : ''}
               </li>
             ))}
           </ul>
-          <p className="pt-2 font-semibold">{t('letter.ask', { amount: ils(totals.leakIls) })}</p>
+          <p className="pt-2 font-semibold">{letterAsk}</p>
         </div>
       ) : null}
 
