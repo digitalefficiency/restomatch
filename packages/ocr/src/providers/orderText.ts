@@ -92,15 +92,24 @@ const MAX_LINE_QTY = 100_000;
 
 const toNum = (s: string) => Number(s.replace(',', '.'));
 
+const LEAD_JUNK = new Set([' ', '\t', '-', '–', ':', ',', '.', 'x', '×', '*']);
+const TRAIL_JUNK = new Set([' ', '\t', '-', '–', ':', ',', '.']);
+
+/** Trim list/separator junk from both ends (char loop — no regex backtracking on user text). */
 function cleanName(s: string): string {
-  return s
-    .replace(/^[\s\-–:,.x×*]+|[\s\-–:,.]+$/gu, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
+  let a = 0;
+  let b = s.length;
+  while (a < b && (LEAD_JUNK.has(s[a]!) || /\s/.test(s[a]!))) a++;
+  while (b > a && (TRAIL_JUNK.has(s[b - 1]!) || /\s/.test(s[b - 1]!))) b--;
+  return s.slice(a, b).split(/\s+/).join(' ');
 }
+
+/** An order line is short; anything longer is prose (and bounds every regex below). */
+const MAX_LINE_CHARS = 300;
 
 /** One message line → an order line, or null for greetings, signatures, etc. */
 export function parseOrderLine(raw: string): OrderTextLine | null {
+  if (raw.length > MAX_LINE_CHARS) return null;
   let line = raw.replace(/[‎‏‪-‮]/g, '').trim();
   // Empty lines and delivery times / dates ("עד 10:30", "25/10") are not items.
   if (!line || /\d{1,2}:\d{2}|\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/u.test(line)) return null;
@@ -113,7 +122,7 @@ export function parseOrderLine(raw: string): OrderTextLine | null {
   if (price) {
     unitPrice = toNum(price[1] ?? price[2] ?? '');
     line = (line.slice(0, price.index) + ' ' + line.slice(price.index + price[0].length)).trim();
-    line = line.replace(/\s*(?:ליח׳|ליח'|לק״ג|לק"ג|per\s+\w+|\/\s*\S+)\s*$/iu, '').trim();
+    line = line.replace(/(?:ליח׳|ליח'|לק״ג|לק"ג|per\s\p{L}+|\/\s?[^\s/]+)$/iu, '').trim();
   }
 
   let qty: number | null = null;

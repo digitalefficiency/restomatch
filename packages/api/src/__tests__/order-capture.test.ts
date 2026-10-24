@@ -91,7 +91,7 @@ describe('order capture', () => {
   it('is idempotent per message: a re-forward / double tap returns the same draft', async () => {
     const text = `ספק: ${A.supplierName}\n10 ק״ג tomato-A`;
     const first = await capture(text);
-    const again = await capture(`  ${text.replace('\n', '\n\n')}  `);
+    const again = await capture(`  ${text.replaceAll('\n', '\n\n')}  `);
     expect(first.status === 'draft' && again.status === 'draft' && again.poId === first.poId).toBe(true);
     expect(again).toMatchObject({ created: false, lineCount: 1, mappedCount: 1 });
     expect(captureSourceRef('A  b\nC')).toBe(captureSourceRef('a b c'));

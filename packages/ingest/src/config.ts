@@ -74,6 +74,7 @@ export function ingestEmailAddress(token: string, env: NodeJS.ProcessEnv = proce
 }
 
 export function ingestWhatsAppWebhookUrl(token: string, env: NodeJS.ProcessEnv = process.env): string {
-  const base = (env.APP_URL ?? env.AUTH_URL ?? 'http://localhost:3000').replace(/\/+$/, '');
+  let base = env.APP_URL ?? env.AUTH_URL ?? 'http://localhost:3000';
+  while (base.endsWith('/')) base = base.slice(0, -1);
   return `${base}/api/ingest/whatsapp/${token}`;
 }

@@ -10,7 +10,16 @@ export function normalizeEmailAddress(raw: string | null | undefined): string | 
   // fake "<bills@supplier>" to spoof the allow-list.
   const angles = [...raw.matchAll(/<([^<>\s]+)>/g)];
   const candidate = (angles.length ? angles[angles.length - 1]![1]! : raw).trim().toLowerCase();
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidate) && candidate.length <= 254 ? candidate : null;
+  return isPlainAddress(candidate) ? candidate : null;
+}
+
+/** local@host.tld, no whitespace, one '@', a dot inside the host — linear, no regex backtracking. */
+function isPlainAddress(c: string): boolean {
+  if (c.length > 254 || /\s/.test(c)) return false;
+  const at = c.indexOf('@');
+  if (at < 1 || at !== c.lastIndexOf('@')) return false;
+  const host = c.slice(at + 1);
+  return host.length >= 3 && host.slice(1, -1).includes('.');
 }
 
 /**
