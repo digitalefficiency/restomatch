@@ -1,5 +1,5 @@
 import { computeLeakReport } from '@restomatch/charts';
-import { and, eq, monthlyReports, restaurants, sql, type Database } from '@restomatch/db';
+import { and, eq, isNull, monthlyReports, restaurants, sql, type Database } from '@restomatch/db';
 import { renderEmail, ilsSpan, type RenderedEmail } from '../notifications/templates';
 import { computeRecoverySummary, returnedInMonth } from '../recovery/service';
 import { formatIlsAgorot, formatPct, ilsToAgorot, type ReportLocale } from './money';
@@ -52,7 +52,7 @@ export interface MonthlyReportData {
   claimedAgorot: number;
   /** Money actually back this month (claims that reached `recovered` in the month). */
   returnedAgorot: number;
-  /** Still owed by suppliers on all open claims (as of generation). */
+  /** Still owed by suppliers on claims for THIS month's invoices (as of generation). */
   outstandingAgorot: number;
   invoiceCount: number;
   invoicesWithLeak: number;
@@ -83,6 +83,54 @@ function monthOffsetOf(month: string, now: Date, tz: string): number {
   return (Number(mm[1]) - y) * 12 + (Number(mm[2]) - m);
 }
 
+type Row = Record<string, unknown>;
+const rowsOf = (res: unknown): Row[] => (Array.isArray(res) ? (res as Row[]) : ((res as { rows?: Row[] }).rows ?? []));
+
+/**
+ * Leak by issue type with the hero's per-invoice cap: inside each invoice the
+ * leak lines take, oldest first, only what is left of the invoice total — so
+ * the types sum exactly to the hero leak (a ₪1,000 invoice with a ₪1,000
+ * DUPLICATE and a ₪50 PRICE_HIGHER counts ₪1,000, not ₪1,050).
+ */
+async function cappedIssues(db: Database, restaurantId: string, lo: string, hi: string): Promise<MonthlyReportIssue[]> {
+  const res = await db.execute(sql`
+    WITH lines AS (
+      SELECT d.type,
+             round(abs(d.delta_amount) * 100)::bigint AS raw,
+             round(COALESCE(i.total_incl_vat, 0) * 100)::bigint AS cap,
+             SUM(round(abs(d.delta_amount) * 100)::bigint) OVER (PARTITION BY i.id ORDER BY d.created_at, d.id) AS cum
+      FROM invoices i
+      JOIN match_runs mr ON mr.invoice_id = i.id AND mr.restaurant_id = ${restaurantId}
+      JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${restaurantId}
+      WHERE i.restaurant_id = ${restaurantId}
+        AND COALESCE(i.invoice_date, i.created_at) >= ${lo}::timestamptz
+        AND COALESCE(i.invoice_date, i.created_at) < ${hi}::timestamptz
+        AND d.delta_amount IS NOT NULL
+        AND d.severity IN ('warn','block') AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL')
+    )
+    SELECT type, COUNT(*) AS cnt, SUM(LEAST(raw, GREATEST(0, cap - (cum - raw)))) AS agorot
+    FROM lines
+    GROUP BY type
+    HAVING SUM(LEAST(raw, GREATEST(0, cap - (cum - raw)))) > 0
+    ORDER BY agorot DESC, type
+  `);
+  return rowsOf(res).map((r) => ({ type: String(r.type), count: Number(r.cnt), amountAgorot: Number(r.agorot) }));
+}
+
+/** What suppliers still owe on claims raised for THIS month's invoices (month-scoped, like the rest of the report). */
+async function outstandingForMonth(db: Database, restaurantId: string, lo: string, hi: string): Promise<number> {
+  const res = await db.execute(sql`
+    SELECT COALESCE(SUM(GREATEST(0, c.amount_agorot - c.credited_agorot)), 0) AS owed
+    FROM recovery_claims c
+    JOIN invoices i ON i.id = c.invoice_id AND i.restaurant_id = ${restaurantId}
+    WHERE c.restaurant_id = ${restaurantId}
+      AND c.status IN ('claimed','letter_sent','acknowledged','credited','disputed')
+      AND COALESCE(i.invoice_date, i.created_at) >= ${lo}::timestamptz
+      AND COALESCE(i.invoice_date, i.created_at) < ${hi}::timestamptz
+  `);
+  return Number(rowsOf(res)[0]?.owed ?? 0);
+}
+
 /** Leak share at which a supplier earns a "talk to them" action (the North Star 1.5%). */
 const SUPPLIER_ALERT_PCT = 0.015;
 
@@ -100,9 +148,11 @@ export async function computeMonthlyReport(
     .limit(1);
   const tz = r?.timezone ?? 'Asia/Jerusalem';
   const report = await computeLeakReport(db, restaurantId, month);
-  const [returned, recovery] = await Promise.all([
+  const [returned, recovery, issues, owedThisMonth] = await Promise.all([
     returnedInMonth(db, restaurantId, { monthOffset: monthOffsetOf(month, now, tz), now }),
     computeRecoverySummary(db, restaurantId, now),
+    cappedIssues(db, restaurantId, report.hero.monthStart, report.hero.monthEnd),
+    outstandingForMonth(db, restaurantId, report.hero.monthStart, report.hero.monthEnd),
   ]);
 
   const topSuppliers = report.bySupplier
@@ -114,10 +164,7 @@ export async function computeMonthlyReport(
       leakAgorot: ilsToAgorot(s.leakIls),
       leakPct: s.leakPct,
     }));
-  const topIssues = report.byType
-    .filter((t) => t.amountIls > 0)
-    .slice(0, 3)
-    .map((t) => ({ type: t.type, count: t.count, amountAgorot: ilsToAgorot(t.amountIls) }));
+  const topIssues = issues.slice(0, 3);
 
   const nextActions: NextAction[] = [];
   if (recovery.overdueCount > 0) {
@@ -151,9 +198,10 @@ export async function computeMonthlyReport(
     spendAgorot: ilsToAgorot(report.hero.spendIls),
     leakPct: report.hero.leakPct,
     caughtAgorot: ilsToAgorot(report.hero.caughtBeforePaymentIls),
-    claimedAgorot: ilsToAgorot(report.status.claimedIls),
+    // The hero's claimed figure: accepted lines, capped per invoice (never Σ raw deltas).
+    claimedAgorot: ilsToAgorot(report.hero.recoveredIls),
     returnedAgorot: returned.returnedAgorot,
-    outstandingAgorot: recovery.outstandingAgorot,
+    outstandingAgorot: owedThisMonth,
     invoiceCount: report.hero.invoiceCount,
     invoicesWithLeak: report.hero.invoicesWithLeak,
     pendingLinkCount: report.hero.pendingLinkCount,
@@ -180,7 +228,8 @@ export async function ensureMonthlyReport(
     .from(monthlyReports)
     .where(and(eq(monthlyReports.restaurantId, restaurantId), eq(monthlyReports.month, monthDate)))
     .limit(1);
-  if (existing && !opts.refresh) {
+  // A SENT snapshot is the record of what the owner received: never rewritten.
+  if (existing && (!opts.refresh || existing.sentAt)) {
     return { id: existing.id, data: existing.snapshot as unknown as MonthlyReportData, sentAt: existing.sentAt, created: false };
   }
   const data = await computeMonthlyReport(db, restaurantId, month, opts);
@@ -190,9 +239,12 @@ export async function ensureMonthlyReport(
     .onConflictDoUpdate({
       target: [monthlyReports.restaurantId, monthlyReports.month],
       set: { snapshot: data as unknown as Record<string, unknown>, generatedAt: sql`now()` },
+      // Re-checked at write time: a send that landed since the read wins.
+      setWhere: isNull(monthlyReports.sentAt),
     })
     .returning();
-  return { id: row!.id, data, sentAt: row!.sentAt, created: !existing };
+  if (!row) return ensureMonthlyReport(db, restaurantId, month, { ...opts, refresh: false });
+  return { id: row.id, data, sentAt: row.sentAt, created: !existing };
 }
 
 /**
@@ -262,7 +314,7 @@ const COPY = {
     caught: 'נתפס לפני תשלום',
     claimed: 'נדרש מהספקים',
     returned: 'חזר בפועל',
-    outstanding: 'עדיין חייבים לך',
+    outstanding: 'עדיין חייבים לך (על חשבוניות החודש)',
     topSuppliers: '3 הספקים המובילים בדליפה',
     topSupplier: 'הספק המוביל בדליפה',
     topIssues: '3 הבעיות הנפוצות',
@@ -288,7 +340,7 @@ const COPY = {
     caught: 'Caught before payment',
     claimed: 'Claimed from suppliers',
     returned: 'Actually returned',
-    outstanding: 'Still owed to you',
+    outstanding: "Still owed to you (this month's invoices)",
     topSuppliers: 'Top 3 suppliers by leak',
     topSupplier: 'Top supplier by leak',
     topIssues: 'Top 3 issues',

@@ -123,7 +123,7 @@ export function recoveryReminderEmail(args: {
 export async function enqueueRecoveryReminders(
   db: Database,
   opts: { now?: Date; restaurantId?: string; appUrl?: string } = {},
-): Promise<{ restaurants: number; emails: number; claims: number }> {
+): Promise<{ restaurants: number; emails: number; claims: number; failed: string[] }> {
   const now = opts.now ?? new Date();
   const day = now.toISOString().slice(0, 10);
   const rows = opts.restaurantId
@@ -132,45 +132,52 @@ export async function enqueueRecoveryReminders(
   let emails = 0;
   let claims = 0;
   let processed = 0;
+  const failed: string[] = [];
   for (const r of rows) {
-    if (!(await isFeatureOn(db, r.id, 'recovery'))) continue;
-    processed += 1;
-    await syncClaims(db, r.id);
-    const overdue = await findOverdue(db, r.id, now);
-    if (overdue.claimIds.length === 0) continue;
-    const recipients = await recipientsForRestaurant(db, r.id);
-    const locales = new Map(
-      (
-        await db
-          .select({ userId: memberships.userId, locale: memberships.preferredLocale })
-          .from(memberships)
-          .where(eq(memberships.restaurantId, r.id))
-      ).map((m) => [m.userId, m.locale]),
-    );
-    for (const to of recipients) {
-      const email = recoveryReminderEmail({
-        suppliers: overdue.suppliers,
-        locale: locales.get(to.userId) === 'en' ? 'en' : 'he',
-        trackerUrl: opts.appUrl ? `${opts.appUrl}/dashboard/recovery` : undefined,
-      });
-      const { deduped } = await enqueueNotification(db, {
-        restaurantId: r.id,
-        channel: 'email',
-        target: to.email,
-        subject: email.subject,
-        body: email.text,
-        html: email.html,
-        relatedEntityType: 'restaurant',
-        relatedEntityId: r.id,
-        dedupeKey: `recovery-reminder:${r.id}:${day}:${to.email}`,
-      });
-      if (!deduped) emails += 1;
+    // One bad tenant must not stop the reminders of every restaurant after it.
+    try {
+      if (!(await isFeatureOn(db, r.id, 'recovery'))) continue;
+      processed += 1;
+      await syncClaims(db, r.id);
+      const overdue = await findOverdue(db, r.id, now);
+      if (overdue.claimIds.length === 0) continue;
+      const recipients = await recipientsForRestaurant(db, r.id);
+      const locales = new Map(
+        (
+          await db
+            .select({ userId: memberships.userId, locale: memberships.preferredLocale })
+            .from(memberships)
+            .where(eq(memberships.restaurantId, r.id))
+        ).map((m) => [m.userId, m.locale]),
+      );
+      for (const to of recipients) {
+        const email = recoveryReminderEmail({
+          suppliers: overdue.suppliers,
+          locale: locales.get(to.userId) === 'en' ? 'en' : 'he',
+          trackerUrl: opts.appUrl ? `${opts.appUrl}/dashboard/recovery` : undefined,
+        });
+        const { deduped } = await enqueueNotification(db, {
+          restaurantId: r.id,
+          channel: 'email',
+          target: to.email,
+          subject: email.subject,
+          body: email.text,
+          html: email.html,
+          relatedEntityType: 'restaurant',
+          relatedEntityId: r.id,
+          dedupeKey: `recovery-reminder:${r.id}:${day}:${to.email}`,
+        });
+        if (!deduped) emails += 1;
+      }
+      await db
+        .update(recoveryClaims)
+        .set({ lastReminderAt: now })
+        .where(and(eq(recoveryClaims.restaurantId, r.id), inArray(recoveryClaims.id, overdue.claimIds)));
+      claims += overdue.claimIds.length;
+    } catch (err) {
+      failed.push(r.id);
+      console.error(`[recovery-reminders] restaurant=${r.id} failed`, err);
     }
-    await db
-      .update(recoveryClaims)
-      .set({ lastReminderAt: now })
-      .where(and(eq(recoveryClaims.restaurantId, r.id), inArray(recoveryClaims.id, overdue.claimIds)));
-    claims += overdue.claimIds.length;
   }
-  return { restaurants: processed, emails, claims };
+  return { restaurants: processed, emails, claims, failed };
 }

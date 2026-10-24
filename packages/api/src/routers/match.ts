@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { releaseClaimsForRematch } from '../recovery/service';
 import { and, eq, matchRuns, restaurants } from '@restomatch/db';
 import { runMatch, type MatchStatus } from '@restomatch/matching';
 import { managerProcedure, router } from '../trpc';
@@ -42,6 +43,9 @@ export const matchRouter = router({
       }
 
       // Re-match: drop any prior run for this invoice (discrepancies cascade).
+      // Claims on those discrepancies are money history: release bare ones,
+      // refuse while any is in progress (₪-back tracker, wave 1).
+      await releaseClaimsForRematch(ctx.db, restaurantId, input.invoiceId);
       await ctx.db
         .delete(matchRuns)
         .where(and(eq(matchRuns.invoiceId, input.invoiceId), eq(matchRuns.restaurantId, restaurantId)));

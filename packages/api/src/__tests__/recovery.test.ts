@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { PDFDocument } from 'pdf-lib';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -12,13 +13,14 @@ import {
   recoveryClaims,
   recoveryEvents,
   restaurants,
+  sql,
   testDbUrl,
 } from '@restomatch/db';
 import { computeLeakHero } from '@restomatch/charts';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { enqueueRecoveryReminders } from '../recovery/reminders';
-import { syncClaims } from '../recovery/service';
+import { AUTO_WRITE_OFF_NOTE, listClaims, syncClaims } from '../recovery/service';
 import { computeMonthlyReport, ensureMonthlyReport, monthlyReportEmail, monthlyReportWhatsApp, WHATSAPP_MAX } from '../reports/monthly';
 import { renderMonthlyReportPdf } from '../reports/pdf';
 import { sendMonthlyReports } from '../reports/send';
@@ -30,6 +32,15 @@ let T: Tenant;
 function caller(role: Session['role'] = 'owner') {
   const ctx: AppContext = { db, session: { userId: T.ownerUserId, restaurantId: T.restaurantId, role } };
   return appRouter.createCaller(ctx);
+}
+
+/** Claims block discrepancy deletes (0048, NO ACTION): drop a discrepancy's claims first. */
+async function dropDiscrepancies(where: ReturnType<typeof eq>) {
+  const ids = (await db.select({ id: discrepancies.id }).from(discrepancies).where(where)).map((r) => r.id);
+  for (const id of ids) {
+    await db.delete(recoveryClaims).where(eq(recoveryClaims.discrepancyId, id));
+    await db.delete(discrepancies).where(eq(discrepancies.id, id));
+  }
 }
 
 async function setFlags(features: Record<string, boolean>) {
@@ -111,7 +122,7 @@ describe('claims', () => {
     // Claimed never exceeds what the hero counts as claimed for the month.
     const hero = await computeLeakHero(db, T.restaurantId);
     expect(all.reduce((s, x) => s + x.amountAgorot, 0)).toBe(Math.round(hero.recoveredIls * 100));
-    await db.delete(discrepancies).where(eq(discrepancies.type, 'QTY_OVER'));
+    await dropDiscrepancies(eq(discrepancies.type, 'QTY_OVER'));
   });
 
   it('does not claim open, waived, PRICE_LOWER or info discrepancies', async () => {
@@ -301,7 +312,7 @@ describe('refuter regressions', () => {
       const hero = await computeLeakHero(db, T.restaurantId);
       expect(total).toBe(Math.round(hero.recoveredIls * 100));
     } finally {
-      await db.delete(discrepancies).where(eq(discrepancies.id, extra!.id));
+      await dropDiscrepancies(eq(discrepancies.id, extra!.id));
     }
   });
 
@@ -401,7 +412,302 @@ describe('bulk transitions', () => {
         }
       }
     } finally {
-      await db.delete(discrepancies).where(eq(discrepancies.id, extra!.id));
+      await dropDiscrepancies(eq(discrepancies.id, extra!.id));
     }
+  });
+});
+
+describe('money cross-QA (S3) regressions', () => {
+  it('BLOCKER 2: monthly "claimed" and top issues use the per-invoice cap (sum to the hero)', async () => {
+    // ₪117 invoice: PRICE_HIGHER ₪100 (seed) + DUPLICATE ₪117, both accepted → capped at ₪117.
+    const [dup] = await db
+      .insert(discrepancies)
+      .values({ matchRunId: T.matchRunId, restaurantId: T.restaurantId, type: 'DUPLICATE_INVOICE', severity: 'block', deltaAmount: '117.00', resolutionStatus: 'accepted' })
+      .returning();
+    try {
+      const d = new Date();
+      const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const data = await computeMonthlyReport(db, T.restaurantId, month);
+      const hero = await computeLeakHero(db, T.restaurantId);
+      expect(data.claimedAgorot).toBe(Math.round(hero.recoveredIls * 100));
+      expect(data.claimedAgorot).toBe(11700);
+      expect(data.topIssues.reduce((s, i) => s + i.amountAgorot, 0)).toBe(Math.round(hero.leakIls * 100));
+    } finally {
+      await dropDiscrepancies(eq(discrepancies.id, dup!.id));
+    }
+  });
+
+  it('HIGH 3: a discrepancy no longer accepted writes its untouched claim off (auto), re-accepting re-opens it', async () => {
+    await syncClaims(db, T.restaurantId);
+    await db.update(discrepancies).set({ resolutionStatus: 'rejected' }).where(eq(discrepancies.id, T.discrepancyId));
+    await syncClaims(db, T.restaurantId);
+    let [c] = await db.select().from(recoveryClaims).where(eq(recoveryClaims.restaurantId, T.restaurantId));
+    expect(c!.status).toBe('written_off');
+    const { summary } = await caller().recovery.summary();
+    expect(summary.outstandingAgorot).toBe(0);
+    // A new accepted line on the same invoice gets the full cap again (the written-off claim holds none).
+    const [extra] = await db
+      .insert(discrepancies)
+      .values({ matchRunId: T.matchRunId, restaurantId: T.restaurantId, type: 'QTY_OVER', severity: 'warn', deltaAmount: '117.00', resolutionStatus: 'accepted' })
+      .returning();
+    try {
+      await syncClaims(db, T.restaurantId);
+      const [x] = await db.select().from(recoveryClaims).where(eq(recoveryClaims.discrepancyId, extra!.id));
+      expect(x!.amountAgorot).toBe(11700);
+    } finally {
+      await db.delete(recoveryClaims).where(eq(recoveryClaims.discrepancyId, extra!.id));
+      await dropDiscrepancies(eq(discrepancies.id, extra!.id));
+    }
+    await db.update(discrepancies).set({ resolutionStatus: 'accepted' }).where(eq(discrepancies.id, T.discrepancyId));
+    await syncClaims(db, T.restaurantId);
+    [c] = await db.select().from(recoveryClaims).where(eq(recoveryClaims.restaurantId, T.restaurantId));
+    expect(c!.status).toBe('claimed');
+    const history = await caller().recovery.history({ claimId: c!.id });
+    expect(history.map((h) => h.toStatus)).toEqual(['claimed', 'written_off', 'claimed']);
+  });
+
+  it('HIGH 3: a claim the owner wrote off by hand stays written off when its discrepancy is re-accepted', async () => {
+    await syncClaims(db, T.restaurantId);
+    const [claim] = await caller().recovery.list();
+    await caller().recovery.transition({ claimIds: [claim!.id], to: 'written_off', note: 'owner gave up' });
+    await db.update(discrepancies).set({ resolutionStatus: 'rejected' }).where(eq(discrepancies.id, T.discrepancyId));
+    await syncClaims(db, T.restaurantId);
+    await db.update(discrepancies).set({ resolutionStatus: 'accepted' }).where(eq(discrepancies.id, T.discrepancyId));
+    await syncClaims(db, T.restaurantId);
+    const [c] = await db.select().from(recoveryClaims).where(eq(recoveryClaims.id, claim!.id));
+    expect(c!.status).toBe('written_off');
+    const history = await caller().recovery.history({ claimId: c!.id });
+    expect(history.map((h) => h.toStatus)).toEqual(['claimed', 'written_off']);
+  });
+
+  it('MEDIUM 5: a credit-note number is recorded once per supplier; an idempotency key replays', async () => {
+    const c = caller();
+    const [claim] = await c.recovery.list();
+    const key = randomUUID();
+    const first = await c.recovery.recordCreditNote({ claimIds: [claim!.id], supplierId: T.supplierId, number: 'CN-9', amountAgorot: 1000, issuedOn: '2026-10-05', idempotencyKey: key });
+    const again = await c.recovery.recordCreditNote({ claimIds: [claim!.id], supplierId: T.supplierId, number: 'CN-9', amountAgorot: 1000, issuedOn: '2026-10-05', idempotencyKey: key });
+    expect(again).toMatchObject({ creditNoteId: first.creditNoteId, duplicate: true });
+    await expect(
+      c.recovery.recordCreditNote({ claimIds: [claim!.id], supplierId: T.supplierId, number: 'CN-9', amountAgorot: 1000, issuedOn: '2026-10-05' }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(await db.select().from(creditNotes).where(eq(creditNotes.restaurantId, T.restaurantId))).toHaveLength(1);
+    const [after] = await c.recovery.list();
+    expect(after!.creditedAgorot).toBe(1000);
+  });
+
+  it('MEDIUM 6: a credit note is applied only to the selected claims (no spill-over)', async () => {
+    const [extra] = await db
+      .insert(discrepancies)
+      .values({ matchRunId: T.matchRunId, restaurantId: T.restaurantId, type: 'QTY_OVER', severity: 'warn', deltaAmount: '10.00', resolutionStatus: 'accepted' })
+      .returning();
+    try {
+      const c = caller();
+      const claims = await c.recovery.list();
+      expect(claims).toHaveLength(2);
+      const big = claims.find((x) => x.amountAgorot === 10000)!;
+      const res = await c.recovery.recordCreditNote({ claimIds: [big.id], supplierId: T.supplierId, amountAgorot: 12000, issuedOn: '2026-10-05' });
+      expect(res).toMatchObject({ allocatedAgorot: 10000, unallocatedAgorot: 2000, creditedClaimIds: [big.id] });
+      const other = (await c.recovery.list()).find((x) => x.id !== big.id)!;
+      expect(other.creditedAgorot).toBe(0);
+    } finally {
+      await db.delete(recoveryClaims).where(eq(recoveryClaims.discrepancyId, extra!.id));
+      await dropDiscrepancies(eq(discrepancies.id, extra!.id));
+    }
+  });
+
+  it('LOW: a sent snapshot is never rewritten, even with refresh', async () => {
+    const now = new Date();
+    await sendMonthlyReports(db, { restaurantId: T.restaurantId, now });
+    const [row] = await db.select().from(monthlyReports).where(eq(monthlyReports.restaurantId, T.restaurantId));
+    await db.update(monthlyReports).set({ snapshot: { ...(row!.snapshot as object), leakAgorot: 1 } }).where(eq(monthlyReports.id, row!.id));
+    const again = await ensureMonthlyReport(db, T.restaurantId, (row!.month as string).slice(0, 7), { refresh: true });
+    expect(again.data.leakAgorot).toBe(1);
+  });
+
+  it('LOW: the overdue badge and the reminder job agree at the 14-day boundary', async () => {
+    await syncClaims(db, T.restaurantId);
+    const now = new Date('2026-10-30T09:00:00Z');
+    const justOver = new Date(now.getTime() - 14 * 86_400_000 - 60_000);
+    await db.update(recoveryClaims).set({ status: 'letter_sent', letterSentAt: justOver, lastReminderAt: null }).where(eq(recoveryClaims.restaurantId, T.restaurantId));
+    const [row] = await listClaims(db, T.restaurantId, { now });
+    expect(row!.overdue).toBe(true);
+    const almost = new Date(now.getTime() - 14 * 86_400_000 + 60_000);
+    await db.update(recoveryClaims).set({ letterSentAt: almost }).where(eq(recoveryClaims.restaurantId, T.restaurantId));
+    const [row2] = await listClaims(db, T.restaurantId, { now });
+    expect(row2!.overdue).toBe(false);
+    expect((await enqueueRecoveryReminders(db, { restaurantId: T.restaurantId, now })).claims).toBe(0);
+  });
+});
+
+// Last: a re-match replaces the seeded match run / discrepancy the other tests use.
+describe('re-match vs claims (S3 blocker 1)', () => {
+  it('refuses while money is in flight, and releases bare claims', async () => {
+    await syncClaims(db, T.restaurantId);
+    const [claim] = await db.select().from(recoveryClaims).where(eq(recoveryClaims.restaurantId, T.restaurantId));
+    // Money in flight → refuse, nothing deleted.
+    await db.update(recoveryClaims).set({ status: 'recovered', creditedAgorot: 10000, recoveredAt: new Date() }).where(eq(recoveryClaims.id, claim!.id));
+    await expect(caller().match.runForInvoice({ invoiceId: T.invoiceId })).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(await db.select().from(recoveryClaims).where(eq(recoveryClaims.id, claim!.id))).toHaveLength(1);
+    // The DB refuses a direct discrepancy delete too (NO ACTION), whoever tries.
+    await expect(db.delete(discrepancies).where(eq(discrepancies.id, T.discrepancyId))).rejects.toMatchObject({ code: '23503' });
+    // A bare claim (no money history) is released and the re-match runs.
+    await db.update(recoveryClaims).set({ status: 'claimed', creditedAgorot: 0, recoveredAt: null }).where(eq(recoveryClaims.id, claim!.id));
+    const res = await caller().match.runForInvoice({ invoiceId: T.invoiceId });
+    expect(res).toBeTruthy();
+    expect(await db.select().from(recoveryClaims).where(eq(recoveryClaims.restaurantId, T.restaurantId))).toHaveLength(0);
+  });
+
+});
+
+describe('sendMonthlyReports isolates a failing restaurant (S4 M1)', () => {
+  it('a tenant with an invalid timezone between two good ones is logged and skipped; both good ones are sent', async () => {
+    const bad = await seedTenant(db, 'TZBAD');
+    const good = await seedTenant(db, 'TZOK');
+    const on = { settings: { features: { all: true } } as never };
+    await db.update(restaurants).set(on).where(eq(restaurants.id, good.restaurantId));
+    await db.update(restaurants).set({ ...on, timezone: 'Mars/Olympus_Mons' }).where(eq(restaurants.id, bad.restaurantId));
+    const res = await sendMonthlyReports(db, { now: new Date() });
+    expect(res.failed).toEqual([bad.restaurantId]);
+    for (const id of [T.restaurantId, good.restaurantId]) {
+      const [stored] = await db.select().from(monthlyReports).where(eq(monthlyReports.restaurantId, id));
+      expect(stored?.sentAt).not.toBeNull();
+    }
+    expect(await db.select().from(monthlyReports).where(eq(monthlyReports.restaurantId, bad.restaurantId))).toHaveLength(0);
+  });
+});
+
+describe('refuter round 4 (S3 fixes)', () => {
+  let n = 0;
+  /** A fresh tenant with its seeded discrepancy accepted (₪100 on a ₪117 invoice). */
+  async function fresh() {
+    const X = await seedTenant(db, `RF${++n}`);
+    await db.update(restaurants).set({ settings: { features: { all: true } } as never }).where(eq(restaurants.id, X.restaurantId));
+    await db.update(discrepancies).set({ resolutionStatus: 'accepted', resolvedAt: new Date() }).where(eq(discrepancies.id, X.discrepancyId));
+    const c = appRouter.createCaller({ db, session: { userId: X.ownerUserId, restaurantId: X.restaurantId, role: 'owner' } } as AppContext);
+    const claims = () => db.select().from(recoveryClaims).where(eq(recoveryClaims.restaurantId, X.restaurantId));
+    const setStatus = (status: 'accepted' | 'rejected') =>
+      db.update(discrepancies).set({ resolutionStatus: status }).where(eq(discrepancies.id, X.discrepancyId));
+    return { X, c, claims, setStatus };
+  }
+
+  it('a re-opened claim is re-capped: the freed share taken meanwhile is not claimed twice', async () => {
+    const { X, claims, setStatus } = await fresh();
+    await syncClaims(db, X.restaurantId);
+    await setStatus('rejected');
+    await syncClaims(db, X.restaurantId);
+    await db.insert(discrepancies).values({ matchRunId: X.matchRunId, restaurantId: X.restaurantId, type: 'QTY_OVER', severity: 'warn', deltaAmount: '117.00', resolutionStatus: 'accepted' });
+    await syncClaims(db, X.restaurantId);
+    await setStatus('accepted');
+    await syncClaims(db, X.restaurantId);
+    const held = (await claims()).filter((c) => c.status !== 'written_off');
+    expect(held.reduce((a, c) => a + c.amountAgorot, 0)).toBe(11700);
+    const [first] = (await claims()).filter((c) => c.discrepancyId === X.discrepancyId);
+    expect(first!.status).toBe('written_off'); // nothing left of the cap
+  });
+
+  it('a system re-open restores letter_sent (not claimed)', async () => {
+    const { X, c, claims, setStatus } = await fresh();
+    await syncClaims(db, X.restaurantId);
+    const [cl] = await claims();
+    await c.recovery.transition({ claimIds: [cl!.id], to: 'letter_sent' });
+    await setStatus('rejected');
+    await syncClaims(db, X.restaurantId);
+    await setStatus('accepted');
+    await syncClaims(db, X.restaurantId);
+    expect((await claims())[0]!.status).toBe('letter_sent');
+  });
+
+  it('re-match refuses a claim with history even when it is back to claimed / auto-written-off', async () => {
+    const a = await fresh();
+    await syncClaims(db, a.X.restaurantId);
+    const [ca] = await a.claims();
+    for (const to of ['letter_sent', 'written_off', 'claimed'] as const) await a.c.recovery.transition({ claimIds: [ca!.id], to });
+    await expect(a.c.match.runForInvoice({ invoiceId: a.X.invoiceId })).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(await a.claims()).toHaveLength(1);
+
+    const b = await fresh();
+    await syncClaims(db, b.X.restaurantId);
+    const [cb] = await b.claims();
+    await b.c.recovery.transition({ claimIds: [cb!.id], to: 'letter_sent' });
+    await b.setStatus('rejected');
+    await syncClaims(db, b.X.restaurantId);
+    await expect(b.c.match.runForInvoice({ invoiceId: b.X.invoiceId })).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(await b.claims()).toHaveLength(1);
+  });
+
+  it('typing the system note by hand does not make a write-off "system" (no re-open, no release)', async () => {
+    const { X, c, claims } = await fresh();
+    await syncClaims(db, X.restaurantId);
+    const [cl] = await claims();
+    await c.recovery.transition({ claimIds: [cl!.id], to: 'written_off', note: AUTO_WRITE_OFF_NOTE });
+    await syncClaims(db, X.restaurantId);
+    expect((await claims())[0]!.status).toBe('written_off');
+    await expect(c.match.runForInvoice({ invoiceId: X.invoiceId })).rejects.toMatchObject({ code: 'CONFLICT' });
+  });
+
+  it('re-match racing the tracker sync never 500s (per-restaurant lock)', async () => {
+    for (let i = 0; i < 3; i++) {
+      const { X, c } = await fresh();
+      const res = await Promise.allSettled([c.match.runForInvoice({ invoiceId: X.invoiceId }), c.recovery.summary()]);
+      for (const r of res) if (r.status === 'rejected') expect((r.reason as { code?: string }).code).not.toBe('INTERNAL_SERVER_ERROR');
+    }
+  });
+
+  it('an idempotency key reused with a different payload is a CONFLICT, not a silent duplicate', async () => {
+    const { X, c, claims } = await fresh();
+    await syncClaims(db, X.restaurantId);
+    const [cl] = await claims();
+    const key = randomUUID();
+    await c.recovery.recordCreditNote({ claimIds: [cl!.id], supplierId: X.supplierId, amountAgorot: 3000, issuedOn: '2026-10-01', idempotencyKey: key });
+    await expect(
+      c.recovery.recordCreditNote({ claimIds: [cl!.id], supplierId: X.supplierId, amountAgorot: 9999, issuedOn: '2026-10-01', idempotencyKey: key }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+  });
+
+  it('a human re-open is re-capped too; nothing left of the cap → CONFLICT', async () => {
+    const { X, c, claims } = await fresh();
+    await syncClaims(db, X.restaurantId);
+    const [cl] = await claims();
+    await c.recovery.transition({ claimIds: [cl!.id], to: 'written_off' });
+    const [extra] = await db
+      .insert(discrepancies)
+      .values({ matchRunId: X.matchRunId, restaurantId: X.restaurantId, type: 'QTY_OVER', severity: 'warn', deltaAmount: '117.00', resolutionStatus: 'accepted' })
+      .returning();
+    await syncClaims(db, X.restaurantId);
+    await expect(c.recovery.transition({ claimIds: [cl!.id], to: 'claimed' })).rejects.toMatchObject({ code: 'CONFLICT' });
+    // Free part of the cap: the re-open takes only what is left.
+    await db.update(recoveryClaims).set({ amountAgorot: 10000 }).where(eq(recoveryClaims.discrepancyId, extra!.id));
+    await c.recovery.transition({ claimIds: [cl!.id], to: 'claimed' });
+    const held = (await claims()).filter((x) => x.status !== 'written_off').reduce((a, x) => a + x.amountAgorot, 0);
+    expect(held).toBe(11700);
+  });
+
+  it('a bulk transition and the tracker sync waiting on the same claims never deadlock', async () => {
+    const { X, c, claims } = await fresh();
+    await db
+      .insert(discrepancies)
+      .values({ matchRunId: X.matchRunId, restaurantId: X.restaurantId, type: 'QTY_OVER', severity: 'warn', deltaAmount: '10.00', resolutionStatus: 'accepted' });
+    await syncClaims(db, X.restaurantId);
+    const cs = (await claims()).sort((a, b) => a.id.localeCompare(b.id));
+    const [A, C] = [cs[0]!, cs[1]!]; // A (lower id) will be re-opened by sync; C written off by it
+    const setD = (id: string, st: 'accepted' | 'rejected') =>
+      db.update(discrepancies).set({ resolutionStatus: st }).where(eq(discrepancies.id, id));
+    await setD(A.discrepancyId, 'rejected');
+    await syncClaims(db, X.restaurantId);
+    await setD(A.discrepancyId, 'accepted');
+    await setD(C.discrepancyId, 'rejected');
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    // A third transaction holds A so that the two contenders interleave deterministically.
+    const holder = db.transaction(async (tx) => {
+      await tx.execute(sql`select 1 from recovery_claims where id = ${A.id} for update`);
+      await sleep(500);
+    });
+    await sleep(100);
+    const settle = (p: Promise<unknown>) => p.then(() => 'ok', (e: { code?: string }) => String(e.code));
+    const tr = settle(c.recovery.transition({ claimIds: [A.id, C.id], to: 'written_off' }));
+    await sleep(150);
+    const sm = settle(c.recovery.summary());
+    await holder;
+    for (const o of await Promise.all([tr, sm])) expect(o).not.toBe('INTERNAL_SERVER_ERROR');
   });
 });

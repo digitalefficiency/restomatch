@@ -24,7 +24,7 @@ export function startMonthlyReportWorker() {
       appUrl: appBaseUrl(),
     });
     console.log(
-      `[monthly-report] restaurants=${res.restaurants} emails=${res.emails} whatsapp=${res.whatsapp} skipped=${res.skipped}`,
+      `[monthly-report] restaurants=${res.restaurants} emails=${res.emails} whatsapp=${res.whatsapp} skipped=${res.skipped} failed=${res.failed.length}${res.failed.length ? ` (${res.failed.join(',')})` : ''}`,
     );
     return res;
   });

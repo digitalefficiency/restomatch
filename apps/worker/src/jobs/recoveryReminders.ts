@@ -23,7 +23,7 @@ export function startRecoveryRemindersWorker() {
       now: job.data.forDate ? new Date(job.data.forDate) : new Date(),
       appUrl: appBaseUrl(),
     });
-    console.log(`[recovery-reminders] restaurants=${res.restaurants} emails=${res.emails} claims=${res.claims}`);
+    console.log(`[recovery-reminders] restaurants=${res.restaurants} emails=${res.emails} claims=${res.claims} failed=${res.failed.length}`);
     return res;
   });
 }

@@ -7,7 +7,6 @@ import {
   creditLineSuggestions,
   listClaims,
   lockClaims,
-  MAX_CLAIMS,
   recordCreditNote,
   returnedInMonth,
   summarize,
@@ -48,7 +47,7 @@ export const recoveryRouter = router({
     await syncClaims(ctx.db, ctx.session.restaurantId, ctx.session.userId);
     const now = new Date();
     const [claims, returned] = await Promise.all([
-      listClaims(ctx.db, ctx.session.restaurantId, { now, limit: MAX_CLAIMS }),
+      listClaims(ctx.db, ctx.session.restaurantId, { now, limit: null }),
       returnedInMonth(ctx.db, ctx.session.restaurantId, { now }),
     ]);
     return { summary: summarize(claims), returnedThisMonth: returned };
@@ -102,6 +101,8 @@ export const recoveryRouter = router({
           issuedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
           invoiceLineId: z.string().uuid().optional(),
           note: z.string().trim().max(500).optional(),
+          /** One per form submission (client crypto.randomUUID()): a double submit records once. */
+          idempotencyKey: z.string().uuid().optional(),
         })
         .refine((v) => v.invoiceLineId || (v.supplierId && v.amountAgorot && v.issuedOn), {
           message: 'manual credit notes need supplier, amount and date',

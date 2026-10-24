@@ -45,17 +45,146 @@ const CLAIMABLE_FILTER = sql`d.severity IN ('warn','block')
   AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL')
   AND d.resolution_status IN ('accepted','resolved')`;
 
+/** Event note marking a claim the system wrote off because its discrepancy is no longer accepted. */
+export const AUTO_WRITE_OFF_NOTE = 'auto: discrepancy no longer accepted';
+
 /**
- * Create the missing claims for this restaurant (idempotent: one claim per
- * discrepancy, ON CONFLICT DO NOTHING). Returns how many were created.
+ * Serialises claim bookkeeping per restaurant (syncClaims, re-match release):
+ * held to the end of the caller's transaction.
+ */
+async function lockRecovery(db: Database, restaurantId: string): Promise<void> {
+  await db.execute(sql`select pg_advisory_xact_lock(hashtext(${'recovery:' + restaurantId}))`);
+}
+
+/**
+ * A system write-off: the note AND no actor (a person's transition always
+ * carries their id, so typing the note by hand does not make it "system").
+ */
+const SYSTEM_WRITE_OFF = sql`(e.to_status = 'written_off' AND e.note = ${AUTO_WRITE_OFF_NOTE} AND e.actor_id IS NULL)`;
+
+/**
+ * What a re-opened claim may hold: what is left of its invoice's cap after the
+ * other claims that hold a share (a written-off claim with no money holds none).
+ * No invoice → no cap (`fallback`).
+ */
+async function reopenRoom(db: Database, restaurantId: string, claimId: string, invoiceId: unknown, fallback: number): Promise<number> {
+  if (invoiceId == null) return fallback;
+  const [room] = rowsOf(
+    await db.execute(sql`
+      SELECT GREATEST(0, round(COALESCE(i.total_incl_vat, 0) * 100)::bigint - COALESCE((
+        SELECT SUM(o.amount_agorot) FROM recovery_claims o
+        WHERE o.restaurant_id = ${restaurantId} AND o.invoice_id = i.id AND o.id <> ${claimId}::uuid
+          AND NOT (o.status = 'written_off' AND o.credited_agorot = 0)
+      ), 0)) AS agorot
+      FROM invoices i
+      WHERE i.restaurant_id = ${restaurantId} AND i.id = ${String(invoiceId)}::uuid
+    `),
+  );
+  return room ? int(room.agorot) : fallback;
+}
+
+/**
+ * Bring claims in line with the team's current decisions, then create the
+ * missing ones (idempotent: one claim per discrepancy). Returns how many were
+ * created. Runs under a per-restaurant advisory lock (its own transaction, or
+ * a savepoint inside the caller's).
+ *  1. A discrepancy that is no longer accepted (rejected / re-opened): its
+ *     claim, if no money moved yet (claimed / letter_sent), is written off by
+ *     the system — it stops counting as owed.
+ *  2. Re-accepted again: a claim the SYSTEM wrote off goes back to the status
+ *     it had, for what is left of the invoice cap (re-capped — another claim
+ *     may have taken the freed share meanwhile; nothing left → stays off).
+ *  3. New claims take what is left of the per-invoice cap; written-off claims
+ *     that never received money no longer hold any of it.
  */
 export async function syncClaims(db: Database, restaurantId: string, actorId?: string | null): Promise<number> {
+  return db.transaction(async (rawTx) => {
+    const tx = rawTx as unknown as Database;
+    await lockRecovery(tx, restaurantId);
+    return syncClaimsLocked(tx, restaurantId, actorId);
+  });
+}
+
+async function syncClaimsLocked(db: Database, restaurantId: string, actorId?: string | null): Promise<number> {
+  const autoClosed = rowsOf(
+    await db.execute(sql`
+      WITH gone AS (
+        SELECT c.id, c.status AS from_status
+        FROM recovery_claims c
+        JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}
+        WHERE c.restaurant_id = ${restaurantId}
+          AND c.status IN ('claimed', 'letter_sent')
+          AND NOT (${CLAIMABLE_FILTER})
+        ORDER BY c.id
+        FOR UPDATE OF c
+      )
+      UPDATE recovery_claims c
+      SET status = 'written_off', closed_at = now()
+      FROM gone
+      WHERE c.id = gone.id AND c.restaurant_id = ${restaurantId}
+      RETURNING c.id, c.amount_agorot, gone.from_status
+    `),
+  );
+  // System write-offs whose discrepancy is claimable again, with the status
+  // they had and the discrepancy's own amount; oldest first for the cap.
+  const toReopen = rowsOf(
+    await db.execute(sql`
+      SELECT c.id, c.invoice_id, last.from_status,
+             round(abs(d.delta_amount) * 100)::bigint AS raw_agorot
+      FROM recovery_claims c
+      JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}
+      JOIN LATERAL (
+        SELECT e.from_status, ${SYSTEM_WRITE_OFF} AS is_system
+        FROM recovery_events e
+        WHERE e.claim_id = c.id AND e.restaurant_id = ${restaurantId}
+        ORDER BY e.created_at DESC, e.id DESC LIMIT 1
+      ) last ON last.is_system
+      WHERE c.restaurant_id = ${restaurantId}
+        AND c.status = 'written_off' AND c.credited_agorot = 0
+        AND d.delta_amount IS NOT NULL
+        AND ${CLAIMABLE_FILTER}
+      ORDER BY c.claimed_at, c.id
+      FOR UPDATE OF c
+    `),
+  );
+  const reopened: Row[] = [];
+  for (const r of toReopen) {
+    const amount = Math.min(int(r.raw_agorot), await reopenRoom(db, restaurantId, String(r.id), r.invoice_id, int(r.raw_agorot)));
+    if (amount <= 0) continue; // the freed share was taken: stays written off
+    const back = r.from_status === 'letter_sent' ? 'letter_sent' : 'claimed';
+    await db.execute(sql`
+      UPDATE recovery_claims SET status = ${back}, closed_at = NULL, amount_agorot = ${amount}
+      WHERE id = ${String(r.id)}::uuid AND restaurant_id = ${restaurantId}
+    `);
+    reopened.push({ id: r.id, amount_agorot: amount, from_status: 'written_off', to_status: back });
+  }
+  // System events carry no actor (that is what marks them as system).
+  const events = [
+    ...autoClosed.map((r) => ({ id: r.id, from: r.from_status, to: 'written_off', amount: r.amount_agorot, note: AUTO_WRITE_OFF_NOTE })),
+    ...reopened.map((r) => ({ id: r.id, from: 'written_off', to: r.to_status, amount: r.amount_agorot, note: 'auto: discrepancy accepted again' })),
+  ];
+  if (events.length > 0) {
+    await db.execute(sql`
+      INSERT INTO recovery_events (restaurant_id, claim_id, from_status, to_status, amount_agorot, actor_id, note)
+      SELECT ${restaurantId}, x.id, x.from_status, x.to_status, x.amount, NULL, x.note
+      FROM (VALUES ${sql.join(
+        events.map(
+          (e) =>
+            sql`(${String(e.id)}::uuid, ${String(e.from)}::varchar, ${String(e.to)}::varchar, ${Number(e.amount)}::bigint, ${e.note}::text)`,
+        ),
+        sql`, `,
+      )}) AS x(id, from_status, to_status, amount, note)
+    `);
+  }
+
   const res = await db.execute(sql`
     WITH claimed AS (
-      -- Agorot already claimed per invoice: new claims only get what is left of the cap.
+      -- Agorot already claimed per invoice: new claims only get what is left of
+      -- the cap. A written-off claim that never received money holds none of it.
       SELECT invoice_id, SUM(amount_agorot) AS agorot
       FROM recovery_claims
       WHERE restaurant_id = ${restaurantId} AND invoice_id IS NOT NULL
+        AND NOT (status = 'written_off' AND credited_agorot = 0)
       GROUP BY invoice_id
     ),
     cand AS (
@@ -133,16 +262,17 @@ export interface RecoveryClaimRow {
 export const OVERDUE_DAYS = 14;
 /** Do not chase the same claim more often than this. */
 export const REMIND_EVERY_DAYS = 7;
-/** Upper bound for a tracker read (totals are summed over these rows). */
+/** Upper bound for one page of the claims LIST (totals never truncate — see computeRecoverySummary). */
 export const MAX_CLAIMS = 5000;
 
 export async function listClaims(
   db: Database,
   restaurantId: string,
-  opts: { status?: RecoveryStatus; supplierId?: string; now?: Date; limit?: number } = {},
+  /** `limit: null` = every claim (summaries); otherwise one list page, at most MAX_CLAIMS. */
+  opts: { status?: RecoveryStatus; supplierId?: string; now?: Date; limit?: number | null } = {},
 ): Promise<RecoveryClaimRow[]> {
   const now = opts.now ?? new Date();
-  const limit = Math.min(Math.max(opts.limit ?? 200, 1), MAX_CLAIMS);
+  const limit = opts.limit === null ? null : Math.min(Math.max(opts.limit ?? 200, 1), MAX_CLAIMS);
   const res = await db.execute(sql`
     SELECT
       c.id, c.status, c.amount_agorot, c.credited_agorot, c.supplier_id, c.invoice_id,
@@ -154,9 +284,12 @@ export async function listClaims(
       p.canonical_name AS product_name, p.name_en AS product_name_en,
       il.raw_description AS line_description, il.raw_description_en AS line_description_en,
       cn.number AS credit_note_number,
-      floor(extract(epoch FROM (${now.toISOString()}::timestamptz - c.claimed_at)) / 86400)::int AS age_days,
-      floor(extract(epoch FROM (${now.toISOString()}::timestamptz - COALESCE(c.letter_sent_at, c.claimed_at))) / 86400)::int AS waiting_days
+      -- Ageing in the restaurant's calendar days (Asia/Jerusalem by default).
+      ((${now.toISOString()}::timestamptz AT TIME ZONE tz.tz)::date - (c.claimed_at AT TIME ZONE tz.tz)::date) AS age_days,
+      -- Overdue: exactly the reminder job's rule (findOverdue), so the badge and the email agree.
+      (COALESCE(c.letter_sent_at, c.claimed_at) < ${now.toISOString()}::timestamptz - make_interval(days => ${OVERDUE_DAYS})) AS waiting_overdue
     FROM recovery_claims c
+    CROSS JOIN (SELECT COALESCE(timezone, 'Asia/Jerusalem') AS tz FROM restaurants WHERE id = ${restaurantId}) tz
     JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}
     LEFT JOIN suppliers s ON s.id = c.supplier_id AND s.restaurant_id = ${restaurantId}
     LEFT JOIN invoices i ON i.id = c.invoice_id AND i.restaurant_id = ${restaurantId}
@@ -169,7 +302,7 @@ export async function listClaims(
     ORDER BY
       CASE WHEN c.status IN ('recovered','written_off') THEN 1 ELSE 0 END,
       c.claimed_at ASC, c.id
-    LIMIT ${limit}
+    ${limit === null ? sql`` : sql`LIMIT ${limit}`}
   `);
   return rowsOf(res).map((r) => {
     const status = String(r.status) as RecoveryStatus;
@@ -200,7 +333,7 @@ export async function listClaims(
       closedAt: isoOrNull(r.closed_at),
       lastReminderAt: isoOrNull(r.last_reminder_at),
       ageDays: int(r.age_days),
-      overdue: (AWAITING_SUPPLIER as readonly string[]).includes(status) && int(r.waiting_days) > OVERDUE_DAYS,
+      overdue: (AWAITING_SUPPLIER as readonly string[]).includes(status) && r.waiting_overdue === true,
       creditNoteNumber: (r.credit_note_number as string | null) ?? null,
       note: (r.note as string | null) ?? null,
     };
@@ -324,7 +457,7 @@ export async function computeRecoverySummary(
   restaurantId: string,
   now: Date = new Date(),
 ): Promise<RecoverySummary> {
-  return summarize(await listClaims(db, restaurantId, { now, limit: MAX_CLAIMS }));
+  return summarize(await listClaims(db, restaurantId, { now, limit: null }));
 }
 
 /**
@@ -379,6 +512,9 @@ async function loadOwnedClaims(db: Database, restaurantId: string, ids: string[]
     .from(recoveryClaims)
     .where(and(eq(recoveryClaims.restaurantId, restaurantId), inArray(recoveryClaims.id, ids)))
     .orderBy(recoveryClaims.id);
+  // Every claim write takes the per-restaurant lock BEFORE its row locks, as
+  // syncClaims / re-match do: one order everywhere → no deadlock (40P01).
+  if (lock) await lockRecovery(db, restaurantId);
   const rows = lock ? await q.for('update') : await q;
   if (rows.length !== new Set(ids).size) throw notFound('claim');
   return rows;
@@ -403,6 +539,22 @@ export async function transitionClaim(
   const patch: Partial<typeof recoveryClaims.$inferInsert> = { status: input.to };
   if (stamp) patch[stamp] = at;
   if (input.to === 'claimed') patch.closedAt = null;
+  if (claim.status === 'written_off' && input.to === 'claimed' && claim.creditedAgorot === 0) {
+    // A re-open takes a share of the invoice cap again: re-cap it like the
+    // system re-open does (another claim may hold the freed share by now).
+    const [d] = rowsOf(
+      await db.execute(sql`
+        SELECT round(abs(delta_amount) * 100)::bigint AS raw FROM discrepancies
+        WHERE id = ${claim.discrepancyId}::uuid AND restaurant_id = ${restaurantId}
+      `),
+    );
+    const raw = d?.raw != null ? int(d.raw) : claim.amountAgorot;
+    const amount = Math.min(raw, await reopenRoom(db, restaurantId, claim.id, claim.invoiceId, raw));
+    if (amount <= 0) {
+      throw new TRPCError({ code: 'CONFLICT', message: 'nothing is left to claim on this invoice — other claims already cover its total' });
+    }
+    patch.amountAgorot = amount;
+  }
   if (input.note != null) patch.note = input.note;
   await db
     .update(recoveryClaims)
@@ -491,12 +643,17 @@ export interface RecordCreditNoteInput {
   /** … or matched to a later invoice's credit line (amount/number/date derived from it). */
   invoiceLineId?: string;
   note?: string | null;
+  /** Client-generated per form submission: a double submit records the note once. */
+  idempotencyKey?: string;
   actorId?: string | null;
   at?: Date;
 }
 
 /**
- * Record a supplier credit note and apply it to claims (oldest first). Every
+ * Record a supplier credit note and apply it to the claims the user SELECTED
+ * (oldest first, never to any other claim). Amounts are on the hero's basis:
+ * before VAT. A credit-note number is recorded once per supplier (CONFLICT on a
+ * repeat); a repeated idempotency key returns the first result (`duplicate`). Every
  * claim must belong to this restaurant and to the note's supplier and still be
  * creditable. Claims that receive credit move to `credited`. Any unallocated
  * remainder stays on the note (visible as `unallocatedAgorot`).
@@ -505,7 +662,40 @@ export async function recordCreditNote(
   db: Database,
   restaurantId: string,
   input: RecordCreditNoteInput,
-): Promise<{ creditNoteId: string; allocatedAgorot: number; unallocatedAgorot: number; creditedClaimIds: string[] }> {
+): Promise<{
+  creditNoteId: string;
+  allocatedAgorot: number;
+  unallocatedAgorot: number;
+  creditedClaimIds: string[];
+  duplicate?: boolean;
+}> {
+  if (input.idempotencyKey) {
+    const [seen] = await db
+      .select({
+        id: creditNotes.id,
+        supplierId: creditNotes.supplierId,
+        amountAgorot: creditNotes.amountAgorot,
+        number: creditNotes.number,
+        issuedOn: creditNotes.issuedOn,
+        invoiceLineId: creditNotes.invoiceLineId,
+      })
+      .from(creditNotes)
+      .where(and(eq(creditNotes.restaurantId, restaurantId), eq(creditNotes.idempotencyKey, input.idempotencyKey)))
+      .limit(1);
+    if (seen) {
+      // A replay must be the same request; a reused key with another payload is
+      // a client bug, not a duplicate to swallow silently.
+      const same = input.invoiceLineId
+        ? seen.invoiceLineId === input.invoiceLineId
+        : seen.invoiceLineId == null &&
+          seen.supplierId === input.supplierId &&
+          seen.amountAgorot === input.amountAgorot &&
+          seen.issuedOn === input.issuedOn &&
+          seen.number === (input.number ?? null);
+      if (!same) throw new TRPCError({ code: 'CONFLICT', message: 'this idempotency key was used for a different credit note' });
+      return { creditNoteId: seen.id, allocatedAgorot: 0, unallocatedAgorot: 0, creditedClaimIds: [], duplicate: true };
+    }
+  }
   let supplierId = input.supplierId;
   let amountAgorot = input.amountAgorot;
   let number = input.number ?? null;
@@ -560,23 +750,44 @@ export async function recordCreditNote(
     }
   }
 
+  if (number) {
+    const [dup] = await db
+      .select({ id: creditNotes.id })
+      .from(creditNotes)
+      .where(
+        and(eq(creditNotes.restaurantId, restaurantId), eq(creditNotes.supplierId, supplierId), eq(creditNotes.number, number)),
+      )
+      .limit(1);
+    if (dup) throw new TRPCError({ code: 'CONFLICT', message: `credit note ${number} is already recorded for this supplier` });
+  }
+
   const at = input.at ?? new Date();
-  const [note] = await db
-    .insert(creditNotes)
-    .values({
-      restaurantId,
-      supplierId,
-      number,
-      amountAgorot,
-      issuedOn,
-      source: input.invoiceLineId ? 'invoice_line' : 'manual',
-      invoiceLineId: input.invoiceLineId ?? null,
-      invoiceId,
-      note: input.note ?? null,
-      createdBy: input.actorId ?? null,
-      createdAt: at,
-    })
-    .returning({ id: creditNotes.id });
+  let note: { id: string } | undefined;
+  try {
+    [note] = await db
+      .insert(creditNotes)
+      .values({
+        restaurantId,
+        supplierId,
+        number,
+        amountAgorot,
+        issuedOn,
+        source: input.invoiceLineId ? 'invoice_line' : 'manual',
+        invoiceLineId: input.invoiceLineId ?? null,
+        invoiceId,
+        note: input.note ?? null,
+        idempotencyKey: input.idempotencyKey ?? null,
+        createdBy: input.actorId ?? null,
+        createdAt: at,
+      })
+      .returning({ id: creditNotes.id });
+  } catch (err) {
+    // A concurrent duplicate (same number / line / idempotency key) lost the race.
+    if ((err as { code?: string }).code === '23505') {
+      throw new TRPCError({ code: 'CONFLICT', message: 'this credit note is already recorded' });
+    }
+    throw err;
+  }
   if (!note) throw new Error('credit note insert failed');
 
   const { allocations, remainder } = allocateCredit(amountAgorot, claims);
@@ -620,6 +831,56 @@ export async function lockClaims(db: Database, restaurantId: string, claimIds: s
   const ids = [...new Set(claimIds)].sort();
   await loadOwnedClaims(db, restaurantId, ids, true);
   return ids;
+}
+
+/**
+ * Before a re-match deletes an invoice's match runs (and so its discrepancies):
+ * claims on them that are still bare `claimed` (or system-written-off) carry no
+ * money history — remove them; the re-accepted discrepancies of the new run
+ * are claimed again by syncClaims. Any claim further along (letter sent, credit,
+ * money back, dispute, a manual write-off) is money history: refuse the
+ * re-match (CONFLICT) instead of losing it. The DB backs this up — the claim →
+ * discrepancy FK is ON DELETE NO ACTION.
+ */
+export async function releaseClaimsForRematch(db: Database, restaurantId: string, invoiceId: string): Promise<number> {
+  await lockRecovery(db, restaurantId);
+  // Releasable = no money, no letter / acknowledgement / credit ever, and no
+  // event beyond "claimed" and system write-offs/re-opens: a claim that went
+  // letter_sent → written_off → claimed still has history and blocks.
+  const claims = rowsOf(
+    await db.execute(sql`
+      SELECT c.id,
+        (c.credited_agorot = 0
+          AND c.letter_sent_at IS NULL AND c.acknowledged_at IS NULL AND c.credited_at IS NULL
+          AND c.status IN ('claimed', 'written_off')
+          AND NOT EXISTS (
+            SELECT 1 FROM recovery_events e
+            WHERE e.claim_id = c.id AND e.restaurant_id = ${restaurantId}
+              AND NOT (
+                (e.to_status = 'claimed' AND (e.from_status IS NULL OR e.actor_id IS NULL))
+                OR ${SYSTEM_WRITE_OFF}
+              )
+          )) AS releasable
+      FROM recovery_claims c
+      JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}
+      JOIN match_runs mr ON mr.id = d.match_run_id AND mr.restaurant_id = ${restaurantId}
+      WHERE c.restaurant_id = ${restaurantId} AND mr.invoice_id = ${invoiceId}
+      ORDER BY c.id
+      FOR UPDATE OF c
+    `),
+  );
+  const blocked = claims.filter((r) => r.releasable !== true);
+  if (blocked.length > 0) {
+    throw new TRPCError({
+      code: 'CONFLICT',
+      message: `this invoice has ${blocked.length} credit claim(s) in progress (₪-back tracker) — finish or write them off before re-matching`,
+    });
+  }
+  if (claims.length === 0) return 0;
+  await db
+    .delete(recoveryClaims)
+    .where(and(eq(recoveryClaims.restaurantId, restaurantId), inArray(recoveryClaims.id, claims.map((r) => String(r.id)))));
+  return claims.length;
 }
 
 /** Lifecycle history of one claim (oldest first). */

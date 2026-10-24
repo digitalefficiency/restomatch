@@ -50,6 +50,8 @@ export function TrackerClient({ claims, suggestions }: { claims: Claim[]; sugges
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const [creditFor, setCreditFor] = useState<string | null>(null); // supplier key
+  // A suggested invoice credit line opens the same form, prefilled (the user still picks the claims).
+  const [creditLine, setCreditLine] = useState<Suggestion | null>(null);
   const ils = (agorot: number) => formatIls(agorot / 100, { locale, maximumFractionDigits: 2 });
 
   const done = {
@@ -84,7 +86,7 @@ export function TrackerClient({ claims, suggestions }: { claims: Claim[]; sugges
 
   // Creditable claims grouped by supplier — one credit note usually covers several lines.
   const creditable = useMemo(() => {
-    const m = new Map<string, { supplierId: string; name: string; ids: string[]; owed: number }>();
+    const m = new Map<string, { supplierId: string; name: string; ids: string[]; owed: number; claims: Claim[] }>();
     for (const c of claims) {
       if (!c.supplierId || !CREDITABLE.includes(c.status) || c.outstandingAgorot <= 0) continue;
       const g = m.get(c.supplierId) ?? {
@@ -92,8 +94,10 @@ export function TrackerClient({ claims, suggestions }: { claims: Claim[]; sugges
         name: displayName(locale, c.supplierName, c.supplierNameEn) || '—',
         ids: [],
         owed: 0,
+        claims: [],
       };
       g.ids.push(c.id);
+      g.claims.push(c);
       g.owed += c.outstandingAgorot;
       m.set(c.supplierId, g);
     }
@@ -136,10 +140,9 @@ export function TrackerClient({ claims, suggestions }: { claims: Claim[]; sugges
                       <Button
                         size="sm"
                         variant="secondary"
-                        loading={busy === s.invoiceLineId}
                         onClick={() => {
-                          setBusy(s.invoiceLineId);
-                          credit.mutate({ claimIds: group.ids, invoiceLineId: s.invoiceLineId });
+                          setCreditLine(s);
+                          setCreditFor(group.supplierId);
                         }}
                       >
                         {t('tracker.useLine')}
@@ -163,19 +166,43 @@ export function TrackerClient({ claims, suggestions }: { claims: Claim[]; sugges
                   <span className="font-semibold text-ink">{g.name}</span>
                   <span className="flex items-center gap-2">
                     <span className="font-mono tabular-nums text-danger">{ils(g.owed)}</span>
-                    <Button size="sm" variant="gold" onClick={() => setCreditFor(creditFor === g.supplierId ? null : g.supplierId)}>
+                    <Button
+                      size="sm"
+                      variant="gold"
+                      onClick={() => {
+                        setCreditLine(null);
+                        setCreditFor(creditFor === g.supplierId ? null : g.supplierId);
+                      }}
+                    >
                       {t('actions.credit')}
                     </Button>
                   </span>
                 </div>
                 {creditFor === g.supplierId ? (
                   <CreditForm
+                    key={`${g.supplierId}:${creditLine?.invoiceLineId ?? 'manual'}`}
                     supplier={g.name}
-                    count={g.ids.length}
-                    owed={g.owed}
+                    claims={g.claims}
+                    line={creditLine && creditLine.supplierId === g.supplierId ? creditLine : null}
                     busy={credit.isPending}
-                    onCancel={() => setCreditFor(null)}
-                    onSubmit={(v) => credit.mutate({ claimIds: g.ids, supplierId: g.supplierId, ...v })}
+                    onCancel={() => {
+                      setCreditFor(null);
+                      setCreditLine(null);
+                    }}
+                    onSubmit={(v) =>
+                      credit.mutate(
+                        v.invoiceLineId
+                          ? { claimIds: v.claimIds, invoiceLineId: v.invoiceLineId, idempotencyKey: v.idempotencyKey }
+                          : {
+                              claimIds: v.claimIds,
+                              supplierId: g.supplierId,
+                              number: v.number,
+                              amountAgorot: v.amountAgorot,
+                              issuedOn: v.issuedOn,
+                              idempotencyKey: v.idempotencyKey,
+                            },
+                      )
+                    }
                   />
                 ) : null}
               </li>
@@ -283,50 +310,98 @@ export function TrackerClient({ claims, suggestions }: { claims: Claim[]; sugges
 
 function CreditForm({
   supplier,
-  count,
-  owed,
+  claims,
+  line,
   busy,
   onSubmit,
   onCancel,
 }: {
   supplier: string;
-  count: number;
-  owed: number;
+  claims: Claim[];
+  /** A suggested invoice credit line: amount / number / date come from the invoice. */
+  line: Suggestion | null;
   busy: boolean;
-  onSubmit: (v: { number?: string; amountAgorot: number; issuedOn: string; note?: string }) => void;
+  onSubmit: (v: {
+    claimIds: string[];
+    number?: string;
+    amountAgorot?: number;
+    issuedOn?: string;
+    invoiceLineId?: string;
+    idempotencyKey: string;
+  }) => void;
   onCancel: () => void;
 }) {
   const t = useT(recovery);
+  const ta = useT(approvals);
   const locale = useLocale();
-  const [number, setNumber] = useState('');
-  const [amount, setAmount] = useState((owed / 100).toFixed(2));
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const ils = (agorot: number) => formatIls(agorot / 100, { locale, maximumFractionDigits: 2 });
+  // One key per form instance: a double submit records the note once (server-side idempotency).
+  const [idempotencyKey] = useState(() => crypto.randomUUID());
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(claims.map((c) => c.id)));
+  const chosen = claims.filter((c) => selected.has(c.id));
+  const owed = chosen.reduce((sum, c) => sum + c.outstandingAgorot, 0);
+  const [number, setNumber] = useState(line?.invoiceNumber ?? '');
+  const [amount, setAmount] = useState(((line?.amountAgorot ?? owed) / 100).toFixed(2));
+  const [date, setDate] = useState(line?.invoiceDate?.slice(0, 10) ?? new Date().toISOString().slice(0, 10));
   const [error, setError] = useState<string | null>(null);
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   return (
     <form
       className="mt-3 grid gap-3 rounded-xl border border-line bg-surface-2/60 p-3 sm:grid-cols-3"
       onSubmit={(e) => {
         e.preventDefault();
+        if (chosen.length === 0) {
+          setError(t('creditForm.noneSelected'));
+          return;
+        }
+        const claimIds = chosen.map((c) => c.id);
+        if (line) {
+          onSubmit({ claimIds, invoiceLineId: line.invoiceLineId, idempotencyKey });
+          return;
+        }
         const agorot = parseIlsInput(amount);
         if (agorot == null) {
           setError(t('creditForm.invalidAmount'));
           return;
         }
-        onSubmit({ number: number.trim() || undefined, amountAgorot: agorot, issuedOn: date });
+        onSubmit({ claimIds, number: number.trim() || undefined, amountAgorot: agorot, issuedOn: date, idempotencyKey });
       }}
     >
       <p className="text-sm font-semibold text-ink sm:col-span-3">{t('creditForm.title', { supplier })}</p>
+      <fieldset className="sm:col-span-3">
+        <legend className="mb-1.5 text-sm font-medium text-muted">{t('creditForm.selectClaims')}</legend>
+        <ul className="max-h-48 space-y-1 overflow-y-auto">
+          {claims.map((c) => (
+            <li key={c.id}>
+              <label className="flex items-center gap-2 text-sm text-ink">
+                <input type="checkbox" checked={selected.has(c.id)} onChange={() => toggle(c.id)} />
+                <span className="font-mono text-xs text-muted">{c.invoiceNumber ?? '—'}</span>
+                <span className="min-w-0 flex-1 truncate">
+                  {displayName(locale, c.productName, c.productNameEn) || discrepancyLabel(ta, c.discrepancyType)}
+                </span>
+                <span className="font-mono tabular-nums">{ils(c.outstandingAgorot)}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      </fieldset>
       <Field label={t('creditForm.number')}>
-        <Input value={number} onChange={(e) => setNumber(e.target.value)} maxLength={64} />
+        <Input value={number} onChange={(e) => setNumber(e.target.value)} maxLength={64} readOnly={!!line} />
       </Field>
       <Field label={t('creditForm.amount')} hint={error ?? undefined}>
-        <Input inputMode="decimal" dir="ltr" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        <Input inputMode="decimal" dir="ltr" value={amount} onChange={(e) => setAmount(e.target.value)} readOnly={!!line} />
       </Field>
       <Field label={t('creditForm.date')}>
-        <Input type="date" dir="ltr" value={date} onChange={(e) => setDate(e.target.value)} required />
+        <Input type="date" dir="ltr" value={date} onChange={(e) => setDate(e.target.value)} required readOnly={!!line} />
       </Field>
       <p className="text-xs text-muted sm:col-span-3">
-        {t('creditForm.claims', { count, amount: formatIls(owed / 100, { locale, maximumFractionDigits: 2 }) })}
+        {t('creditForm.claims', { count: chosen.length, amount: ils(owed) })} {t('creditForm.vatNote')}
       </p>
       <div className="flex gap-2 sm:col-span-3">
         <Button type="submit" size="sm" variant="gold" loading={busy}>

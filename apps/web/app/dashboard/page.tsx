@@ -190,8 +190,9 @@ export default async function DashboardPage({
         returned={
           returned
             ? {
-                label: tr('report.returned'),
+                label: tr('hero.returnedTile'),
                 value: ils(returned.returnedAgorot / 100),
+                hint: tr('hero.returnedHint'),
                 href: canSeeRoute(role, '/dashboard/recovery') ? '/dashboard/recovery' : undefined,
               }
             : undefined
@@ -332,7 +333,7 @@ function LeakHero({
   pct: (v: number) => string;
   num: (v: number) => string;
   /** Flag `recovery`: "₪ actually returned this month" tile. */
-  returned?: { label: string; value: string; href?: string };
+  returned?: { label: string; value: string; hint?: string; href?: string };
   /** Flag `monthlyReport`: label of the "preview this month's report" link. */
   reportLink?: string;
 }) {
@@ -393,7 +394,14 @@ function LeakHero({
             value={t('hero.invoicesValue', { withLeak: num(hero.invoicesWithLeak), total: num(hero.matchedInvoiceCount) })}
           />
           {returned ? (
-            <HeroStat label={returned.label} value={returned.value} tone="gold" href={returned.href} testId="hero-returned" />
+            <HeroStat
+              label={returned.label}
+              value={returned.value}
+              hint={returned.hint}
+              tone="gold"
+              href={returned.href}
+              testId="hero-returned"
+            />
           ) : null}
         </dl>
       </div>
