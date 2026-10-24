@@ -467,7 +467,7 @@ async function withoutLinesBilledElsewhere(
     .innerJoin(matchRuns, eq(matchRuns.invoiceId, invoiceLines.invoiceId))
     .where(and(eq(matchRuns.restaurantId, restaurantId), eq(matchRuns.poId, poId), ne(matchRuns.invoiceId, invoiceId)));
   if (others.length === 0) return po;
-  const billedBy = (lines: Array<{ productId: string | null; supplierSku: string | null }>, l: PoLineInput) =>
+  const billedBy = (lines: Array<{ productId: string | null; supplierSku?: string | null }>, l: PoLineInput) =>
     lines.some((x) => (l.productId ? x.productId === l.productId : !!l.supplierSku && x.supplierSku === l.supplierSku));
   return po.filter((l) => billedBy(own, l) || !billedBy(others, l));
 }
