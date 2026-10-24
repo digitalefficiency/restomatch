@@ -23,6 +23,9 @@ export const en: Shape<typeof he> = {
     subject: 'Consolidated invoice {number} · period {period}',
     intro: 'Cross-matching the consolidated invoice against the delivery notes found:',
     ask: 'Please credit {amount} + VAT.',
+    askIncl: 'Please credit {amount} (VAT included).',
+    askBoth: 'Please credit {excl} + VAT, and {incl} (VAT included).',
+    inclVat: '(VAT included)',
   },
   finding: {
     price: '{name} · {qty} {unit} · billed {billed} instead of {po} = {delta}',

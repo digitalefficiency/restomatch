@@ -11,6 +11,7 @@ import {
   grLines,
   invoiceLines,
   invoices,
+  matchRuns,
   poLines,
   purchaseOrders,
   restaurants,
@@ -273,6 +274,88 @@ describe('consolidated.proposal — isolation (RLS app role)', () => {
       expect(first!.findings.every((f) => f.alreadyBilledOn === null)).toBe(true);
     } finally {
       await ownerDb.delete(invoices).where(eq(invoices.id, later!.id));
+    }
+  });
+
+  /** A ריכוז of A listing `numbers`, one line per note at ₪8.50 × qty. */
+  async function listing(number: string, at: Date, numbers: Array<[string, number]>, status: 'parsed' | 'disputed' = 'parsed') {
+    const total = numbers.reduce((s, [, q]) => s + q * 8.5, 0);
+    const [inv] = await ownerDb
+      .insert(invoices)
+      .values({
+        restaurantId: A.restaurantId,
+        supplierId: A.supplierId,
+        invoiceNumber: number,
+        invoiceDate: at,
+        totalExclVat: total.toFixed(2),
+        vatAmount: (total * 0.18).toFixed(2),
+        totalInclVat: (total * 1.18).toFixed(2),
+        status,
+        source: 'email',
+        createdAt: at,
+        ocrPayload: { provider: 'reconciled', raw: { kind: 'consolidated', deliveryNotes: numbers.map(([n]) => ({ number: n })) } } as (typeof invoices.$inferInsert)['ocrPayload'],
+      })
+      .returning();
+    await ownerDb.insert(invoiceLines).values(
+      numbers.map(([n, q]) => ({
+        invoiceId: inv!.id,
+        productId: A.productId,
+        rawDescription: `ת.מ. ${n} · מוצר`,
+        qtyBilled: String(q),
+        unit: 'kg',
+        unitPriceBilled: '8.50',
+        lineTotal: (q * 8.5).toFixed(2),
+      })),
+    );
+    return inv!.id;
+  }
+
+  it('(P3.1) a listed ריכוז dated the 1st, no stated period, finds last month’s notes (no false UNORDERED_ITEM)', async () => {
+    const now = new Date();
+    const first = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 8));
+    const lastMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 18, 8));
+    const gr = await deliveryNote(A, A.supplierId, A.productId, 3, 8.5, lastMonth, '9301');
+    const id = await listing('A-M-301', first, [['9301', 3]]);
+    try {
+      const p = await caller(A).consolidated.proposal({ invoiceId: id });
+      expect(p!.deliveryNotes.map((n) => n.grId)).toEqual([gr]);
+      expect(p!.findings.filter((f) => f.countsAsLeak)).toEqual([]);
+      expect(p!.status).toBe('matched');
+    } finally {
+      await ownerDb.delete(invoices).where(eq(invoices.id, id));
+      await ownerDb.delete(goodsReceipts).where(eq(goodsReceipts.id, gr));
+    }
+  });
+
+  it('(P3.2) billed twice ignores a disputed earlier ריכוז and one from a year ago (number wrap)', async () => {
+    const now = new Date();
+    const yearAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+    const disputed = await listing('A-M-D', new Date(now.getTime() - 60_000), [['9001', 4]], 'disputed');
+    const old = await listing('A-M-OLD', yearAgo, [['9002', 6]]);
+    // A-M-1 (the earliest listing 9001/9002) must not be counted either for this check.
+    await ownerDb.update(invoices).set({ status: 'disputed' }).where(eq(invoices.id, itemizedId));
+    const later = await listing('A-M-LATER', now, [['9001', 4], ['9002', 6]]);
+    try {
+      const p = await caller(A).consolidated.proposal({ invoiceId: later });
+      expect(p!.findings.filter((f) => f.alreadyBilledOn)).toEqual([]);
+    } finally {
+      for (const id of [disputed, old, later]) await ownerDb.delete(invoices).where(eq(invoices.id, id));
+      await ownerDb.update(invoices).set({ status: 'parsed' }).where(eq(invoices.id, itemizedId));
+    }
+  });
+
+  it('(P3.2) a match run that only shares the note’s PO (no receipt of its own) does not cover the note', async () => {
+    // An unrelated invoice paired to the PO by discovery before anything was received.
+    const [po] = await ownerDb.select({ poId: goodsReceipts.poId }).from(goodsReceipts).where(eq(goodsReceipts.id, listedNotes[0]!));
+    const [run] = await ownerDb
+      .insert(matchRuns)
+      .values({ restaurantId: A.restaurantId, invoiceId: A.invoiceId, poId: po!.poId, grId: null, overallStatus: 'clean' })
+      .returning();
+    try {
+      const p = await caller(A).consolidated.proposal({ invoiceId: itemizedId });
+      expect(p!.findings.filter((f) => f.alreadyBilledOn)).toEqual([]);
+    } finally {
+      await ownerDb.delete(matchRuns).where(eq(matchRuns.id, run!.id));
     }
   });
 

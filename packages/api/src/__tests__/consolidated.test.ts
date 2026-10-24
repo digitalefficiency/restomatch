@@ -7,6 +7,7 @@ import {
   consolidatedPeriod,
   countsAsLeak,
   deliveryNoteNumberIn,
+  periodsNear,
   periodOfInvoice,
   readConsolidatedRaw,
   type DeliveryNoteData,
@@ -439,6 +440,74 @@ describe('buildConsolidatedProposal — #95 review (P2)', () => {
     const notes = [1, 2, 3].map((i) => note(`gr-r${i}`, i * 5, [noteLine(CHALLAH, 10, 6.4)]));
     const p = propose([invLine(CHALLAH, 32, 6.5)], notes); // ₪208 vs ₪192
     expect(p.totals).toMatchObject({ differenceIls: 16, leakIls: 16 });
+  });
+});
+
+describe('buildConsolidatedProposal — #95 verification (P3)', () => {
+  const twice = (opts: { billIt: boolean; duplicate?: boolean }) => {
+    const notes = [
+      note('gr-1', 5, [noteLine(CHALLAH, 10, 5)], '9001'),
+      { ...note('gr-2', 9, [noteLine(CHALLAH, 4, 5)], '9002'), alreadyBilledOn: { invoiceId: 'inv-0', invoiceNumber: 'BR-R-1' } },
+    ];
+    const a = invLine(CHALLAH, opts.billIt ? 10 : 14, 5);
+    const lines = [a];
+    const lineNotes = new Map([[a.id, '9001']]);
+    if (opts.billIt) {
+      const b = invLine(CHALLAH, 4, 5);
+      lines.push(b);
+      lineNotes.set(b.id, '9002');
+    }
+    const b0 = base(lines);
+    if (opts.duplicate) b0.knownInvoiceNumbers = new Set([b0.invoice.invoiceNumber]);
+    return buildConsolidatedProposal({
+      invoiceId: 'inv-t',
+      supplierId: 's',
+      periodStart: new Date('2026-09-27T21:00:00Z'),
+      periodEnd: new Date('2026-11-02T22:00:00Z'),
+      base: b0,
+      notes,
+      invoiceLineNotes: lineNotes,
+    });
+  };
+
+  it('(6) billed twice only flags a note the invoice itself bills — never its PO value', () => {
+    expect(twice({ billIt: false }).findings.some((f) => f.alreadyBilledOn)).toBe(false);
+    expect(twice({ billIt: true }).findings.filter((f) => f.alreadyBilledOn).map((f) => f.deltaAmount)).toEqual([20]);
+  });
+
+  it('(3) a held duplicate claims the whole invoice once — no billed-twice lines on top; its basis is incl. VAT', () => {
+    const p = twice({ billIt: true, duplicate: true });
+    expect(p.findings.some((f) => f.alreadyBilledOn)).toBe(false);
+    const dup = p.findings.find((f) => f.type === 'DUPLICATE_INVOICE')!;
+    expect(dup).toMatchObject({ basis: 'incl', countsAsLeak: true });
+    expect(twice({ billIt: true }).findings.find((f) => f.alreadyBilledOn)!.basis).toBe('excl');
+  });
+
+  it('(4) a note RANGE on a month line is pooled, not the first note', () => {
+    expect(deliveryNoteNumberIn('ת.מ. 61036-61043 · חלב 3%')).toBeNull();
+    expect(deliveryNoteNumberIn('ת.מ. 61036 עד 61043')).toBeNull();
+    expect(deliveryNoteNumberIn('DN 61036–61043')).toBeNull();
+    expect(deliveryNoteNumberIn('ת.מ. 61036 · חלב 3% 24-30')).toBe('61036');
+  });
+
+  it('(5) betterFit prefers the window with no unbilled note, then the most notes — not the closer total', () => {
+    // A weekly ריכוז dated Oct 5 bills this week's 2 drops (2×10 at ₪5) at ₪5.50: ₪110,
+    // a real ₪10 difference, every note covered.
+    const thisWeek = propose([invLine(CHALLAH, 20, 5.5)], [note('gr-w1', 2, [noteLine(CHALLAH, 10, 5)]), note('gr-w2', 4, [noteLine(CHALLAH, 10, 5)])]);
+    // Last month's 4 drops (4×5.5 at ₪5 = ₪110) match the TOTAL exactly, but one is left unbilled.
+    const lastMonth = propose(
+      [invLine(CHALLAH, 20, 5.5)],
+      [1, 2, 3, 4].map((i) => note(`gr-m${i}`, i * 5, [noteLine(CHALLAH, 5.5, 5)])),
+    );
+    expect(Math.abs(lastMonth.totals.differenceIls)).toBeLessThan(Math.abs(thisWeek.totals.differenceIls));
+    expect(betterFit(thisWeek, lastMonth)).toBe(thisWeek);
+    expect(betterFit(lastMonth, thisWeek)).toBe(thisWeek);
+  });
+
+  it('(2) a number matches another invoice only within 30 days (numbering wraps)', () => {
+    const sep = { start: new Date('2026-09-01'), end: new Date('2026-10-01') };
+    expect(periodsNear(sep, { start: new Date('2026-10-05'), end: new Date('2026-10-06') })).toBe(true);
+    expect(periodsNear(sep, { start: new Date('2025-09-01'), end: new Date('2025-10-01') })).toBe(false);
   });
 });
 
