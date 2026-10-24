@@ -123,7 +123,7 @@ export function DesktopNav({ role, showChain = false }: { role: UserRole; showCh
                         href={href}
                         aria-current={active ? 'page' : undefined}
                         className={cn(
-                          'inline-flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2.5 transition-colors',
+                          'inline-flex items-center gap-1 whitespace-nowrap border-b-2 px-2.5 py-2.5 transition-colors',
                           focusRing,
                           active
                             ? 'border-primary font-semibold text-primary'

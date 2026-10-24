@@ -15,6 +15,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
+import { UnitText } from '@/lib/components/UnitText';
 import {
   Badge,
   Button,
@@ -33,15 +34,16 @@ import {
   useSingleFlight,
 } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
-import { formatDate, formatPercent } from '@/lib/i18n/format';
+import { formatDate, formatNumber, formatPercent } from '@/lib/i18n/format';
 import { components } from '@/lib/i18n/messages/components';
 import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 import { formatIls } from '@/lib/money';
+import { OrderDocumentPreview } from '../order-document-preview';
 import { addOrMerge, lineTotalIls, linesValid, orderTotalIls } from '../order-logic';
 
 type Outputs = inferRouterOutputs<AppRouter>;
 type Channel = 'email' | 'whatsapp' | 'none';
-type DeliveryPreview = NonNullable<Outputs['orders']['previewDelivery']>;
+type DeliveryPreview = Outputs['orders']['previewDelivery'];
 
 interface DraftLine {
   key: string;
@@ -75,6 +77,8 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
   const [announce, setAnnounce] = useState('');
   /** The draft created on the first submit — retries only re-send it (no duplicate drafts). */
   const [draftId, setDraftId] = useState<string | null>(null);
+  /** Requested delivery, restaurant-local 'YYYY-MM-DD' ('' = not picked yet → the server default). */
+  const [deliveryDate, setDeliveryDate] = useState('');
 
   useEffect(() => {
     const timer = setTimeout(() => setSearch(rawSearch.trim()), 250);
@@ -103,6 +107,7 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
     { supplierId },
     { enabled: !!supplierId, retry: false },
   );
+  const deliveryDay = deliveryDate || delivery.data?.defaultDate || '';
 
   // Default channel follows what the supplier can actually receive.
   const defaultChannel: Channel = supplier?.contactEmail
@@ -156,6 +161,7 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
       if (!poId) {
         const draft = await createDraft.mutateAsync({
           supplierId,
+          expectedDeliveryDate: deliveryDay || undefined,
           lines: lines.map((l) => ({
             productId: l.productId,
             rawDescription: l.rawDescription || undefined,
@@ -192,12 +198,13 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
     setChannel(null);
     setRawSearch('');
     setDraftId(null);
+    setDeliveryDate('');
     createDraft.reset();
     placeOrder.reset();
   };
 
   const money = (v: number) => formatIls(v, { locale, maximumFractionDigits: 2 });
-  const deliveryDate = (iso: string) =>
+  const fmtDeliveryDate = (iso: string) =>
     formatDate(iso, locale, { weekday: 'long', day: 'numeric', month: 'long' });
 
   return (
@@ -263,7 +270,14 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
                 </Select>
               </Field>
               {supplierId ? (
-                <DeliveryPanel d={delivery.data ?? null} loading={delivery.isLoading} fmt={deliveryDate} />
+                <DeliveryPanel
+                  d={delivery.data ?? null}
+                  loading={delivery.isLoading}
+                  fmt={fmtDeliveryDate}
+                  value={deliveryDay}
+                  onChange={(v) => setDeliveryDate(v)}
+                  disabled={!!draftId}
+                />
               ) : null}
               <div className="mt-4">
                 <Button variant="primary" size="sm" disabled={!supplierId} onClick={() => setStep('BUILD')}>
@@ -325,6 +339,7 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
                       <li key={it.id} className="border-b border-line/60 last:border-0">
                         <button
                           type="button"
+                          data-testid="catalog-item"
                           onClick={() =>
                             addLine({
                               productId: it.productId ?? undefined,
@@ -347,7 +362,11 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
                           </span>
                           <span className="flex shrink-0 items-center gap-1 font-mono text-xs tabular-nums text-muted">
                             {it.listPrice != null ? money(Number(it.listPrice)) : '—'}
-                            {it.unit ? <span className="font-sans">/ {it.unit}</span> : null}
+                            {it.unit ? (
+                              <span className="font-sans">
+                                / <UnitText unit={it.unit} />
+                              </span>
+                            ) : null}
                             <Plus className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
                           </span>
                         </button>
@@ -381,8 +400,13 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
                 {lines.map((l) => {
                   const name = displayName(l.rawDescription, l.nameEn, locale);
                   return (
-                    <li key={l.key} className="flex flex-wrap items-end gap-3 border-b border-line/60 pb-3 last:border-0">
-                      <div className="min-w-[10rem] flex-1">
+                    // Grid, not flex: each field owns a fixed column (Input fills its cell), so a
+                    // line stays one row at desktop. Phone: name + delete, then qty/unit/price/total.
+                    <li
+                      key={l.key}
+                      className="grid grid-cols-[4rem_4.5rem_5rem_minmax(0,1fr)_auto] items-end gap-x-2 gap-y-2 border-b border-line/60 pb-3 last:border-0 sm:grid-cols-[minmax(10rem,1fr)_5rem_5rem_6rem_6rem_auto] sm:gap-x-3"
+                    >
+                      <div className="order-1 col-span-4 min-w-0 sm:order-none sm:col-span-1">
                         {l.productId ? (
                           <>
                             <p className="truncate text-sm text-ink">{name.primary}</p>
@@ -404,7 +428,7 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
                           />
                         )}
                       </div>
-                      <label className="text-xs text-subtle">
+                      <label className="order-3 min-w-0 text-xs text-subtle sm:order-none">
                         {t('wizard.qty')}
                         <Input
                           type="number"
@@ -414,19 +438,19 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
                           value={Number.isFinite(l.qty) ? l.qty : ''}
                           onChange={(e) => patchLine(l.key, { qty: e.target.value === '' ? 0 : Number(e.target.value) })}
                           aria-invalid={!(l.qty > 0) || undefined}
-                          className="mt-0.5 w-20 text-end text-sm tabular-nums"
+                          className="mt-0.5 px-2 text-end text-sm tabular-nums"
                         />
                       </label>
-                      <label className="text-xs text-subtle">
+                      <label className="order-3 min-w-0 text-xs text-subtle sm:order-none">
                         {t('wizard.unit')}
                         <Input
                           value={l.unit}
                           onChange={(e) => patchLine(l.key, { unit: e.target.value })}
                           maxLength={32}
-                          className="mt-0.5 w-20 text-sm"
+                          className="mt-0.5 px-2 text-sm"
                         />
                       </label>
-                      <label className="text-xs text-subtle">
+                      <label className="order-3 min-w-0 text-xs text-subtle sm:order-none">
                         {t('wizard.price')}
                         <Input
                           type="number"
@@ -439,17 +463,22 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
                               unitPriceExpected: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)),
                             })
                           }
-                          className="mt-0.5 w-24 text-end text-sm tabular-nums"
+                          className="mt-0.5 px-2 text-end text-sm tabular-nums"
                         />
                       </label>
-                      <span className="w-24 pb-2 text-end font-mono text-sm tabular-nums text-ink">
-                        {money(lineTotalIls(l.qty, l.unitPriceExpected))}
+                      <span className="order-3 pb-2 text-end font-mono text-sm tabular-nums text-ink sm:order-none">
+                        {/* No price yet ≠ free: "—", not ₪0.00. */}
+                        {l.unitPriceExpected == null
+                          ? '—'
+                          : money(lineTotalIls(l.qty, l.unitPriceExpected))}
                       </span>
                       <button
                         type="button"
                         onClick={() => removeLine(l.key)}
-                        className="mb-1.5 rounded p-1 text-subtle hover:text-danger focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
-                        aria-label={t('wizard.remove', { name: name.primary || t('wizard.freeLinePlaceholder') })}
+                        className="order-2 mb-1.5 justify-self-end rounded p-1 text-subtle hover:text-danger focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 sm:order-none"
+                        aria-label={t('wizard.remove', {
+                          name: name.primary || t('wizard.freeLinePlaceholder'),
+                        })}
                       >
                         <Trash2 className="h-4 w-4" aria-hidden="true" />
                       </button>
@@ -487,25 +516,34 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
               return (
                 <li
                   key={l.key}
-                  className="flex flex-wrap items-center justify-between gap-2 border-b border-line/60 pb-2 last:border-0"
+                  className="flex items-start justify-between gap-3 border-b border-line/60 pb-2 last:border-0"
                 >
-                  <span className="min-w-0 flex-1 truncate text-sm text-ink">{name.primary}</span>
-                  <span className="text-xs tabular-nums text-muted">
-                    {l.qty} {l.unit}
+                  {/* The price badge sits under the name so it never squeezes it (phone). */}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm text-ink">{name.primary}</p>
+                    {w && (
+                      <Badge
+                        tone={w.level === 'high' ? 'danger' : 'warning'}
+                        icon={<TriangleAlert className="h-3 w-3" aria-hidden="true" />}
+                        className="mt-1"
+                      >
+                        {w.level === 'high'
+                          ? t('wizard.aboveP90')
+                          : t('wizard.aboveMedian', {
+                              pct: formatPercent(w.pctOverMedian, locale, 0),
+                            })}
+                      </Badge>
+                    )}
+                  </div>
+                  <span className="shrink-0 whitespace-nowrap text-xs tabular-nums text-muted">
+                    <bdi>{formatNumber(l.qty, locale, { maximumFractionDigits: 3 })}</bdi>{' '}
+                    <UnitText unit={l.unit} />
                   </span>
-                  <span className="w-24 text-end font-mono text-sm tabular-nums text-ink">
-                    {money(lineTotalIls(l.qty, l.unitPriceExpected))}
+                  <span className="w-24 shrink-0 text-end font-mono text-sm tabular-nums text-ink">
+                    {l.unitPriceExpected == null
+                      ? '—'
+                      : money(lineTotalIls(l.qty, l.unitPriceExpected))}
                   </span>
-                  {w && (
-                    <Badge
-                      tone={w.level === 'high' ? 'danger' : 'warning'}
-                      icon={<TriangleAlert className="h-3 w-3" aria-hidden="true" />}
-                    >
-                      {w.level === 'high'
-                        ? t('wizard.aboveP90')
-                        : t('wizard.aboveMedian', { pct: formatPercent(w.pctOverMedian, locale, 0) })}
-                    </Badge>
-                  )}
                 </li>
               );
             })}
@@ -515,7 +553,14 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
             <span className="font-mono tabular-nums">{money(total)}</span>
           </div>
 
-          <DeliveryPanel d={delivery.data ?? null} loading={delivery.isLoading} fmt={deliveryDate} />
+          <DeliveryPanel
+                  d={delivery.data ?? null}
+                  loading={delivery.isLoading}
+                  fmt={fmtDeliveryDate}
+                  value={deliveryDay}
+                  onChange={(v) => setDeliveryDate(v)}
+                  disabled={!!draftId}
+                />
 
           {guardrail.isFetching && (
             <p className="mt-3 flex items-center gap-2 text-xs text-subtle">
@@ -525,7 +570,33 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
           {guardrailGated && <p className="mt-3 text-xs text-subtle">{t('wizard.guardrailGated')}</p>}
 
           <div className="mt-5 space-y-3 border-t border-line pt-4">
-            <Field label={t('wizard.channel')} htmlFor="ord-channel">
+            {/* What the supplier will receive — only when something is actually sent. */}
+            {effectiveChannel !== 'none' && supplierId && valid && (
+              <OrderDocumentPreview
+                input={{
+                  supplierId,
+                  expectedDeliveryDate: deliveryDay || undefined,
+                  lines: lines.map((l) => ({
+                    productId: l.productId ?? undefined,
+                    rawDescription: l.rawDescription || undefined,
+                    qty: l.qty,
+                    unit: l.unit,
+                  })),
+                }}
+              />
+            )}
+            {/* Short options (they never clip at 390 px); the destination shows under the field. */}
+            <Field
+              label={t('wizard.channel')}
+              htmlFor="ord-channel"
+              hint={
+                effectiveChannel === 'email' && supplier?.contactEmail ? (
+                  <bdi dir="ltr">{supplier.contactEmail}</bdi>
+                ) : effectiveChannel === 'whatsapp' && supplier?.contactWhatsapp ? (
+                  <bdi dir="ltr">{supplier.contactWhatsapp}</bdi>
+                ) : undefined
+              }
+            >
               <Select
                 id="ord-channel"
                 value={effectiveChannel}
@@ -534,12 +605,12 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
               >
                 <option value="email" disabled={!supplier?.contactEmail}>
                   {supplier?.contactEmail
-                    ? t('wizard.channelEmailTo', { to: supplier.contactEmail })
+                    ? t('wizard.channelEmail')
                     : `${t('wizard.channelEmail')} — ${t('wizard.channelMissing')}`}
                 </option>
                 <option value="whatsapp" disabled={!supplier?.contactWhatsapp}>
                   {supplier?.contactWhatsapp
-                    ? t('wizard.channelWhatsappTo', { to: supplier.contactWhatsapp })
+                    ? t('wizard.channelWhatsapp')
                     : `${t('wizard.channelWhatsapp')} — ${t('wizard.channelMissing')}`}
                 </option>
                 <option value="none">{t('wizard.channelNone')}</option>
@@ -584,9 +655,11 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
         <Card elevated flow className="text-center">
           <CheckCircle2 className="mx-auto h-10 w-10 text-primary" aria-hidden="true" />
           <p className="mt-3 text-lg font-semibold text-ink" role="status">
-            {t('wizard.sentTitle')}
+            {effectiveChannel === 'none' ? t('wizard.markedTitle') : t('wizard.sentTitle')}
           </p>
-          <p className="mt-1 text-sm text-muted">{t('wizard.sentBody')}</p>
+          <p className="mt-1 text-sm text-muted">
+            {effectiveChannel === 'none' ? t('wizard.markedBody') : t('wizard.sentBody')}
+          </p>
           <div className="mt-5 flex flex-wrap justify-center gap-2">
             {draftId ? (
               <LinkButton href={`/dashboard/orders/${draftId}`} size="sm">
@@ -607,32 +680,40 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
 }
 
 /**
- * Shows the DERIVED delivery date for the manager to confirm. When the order is
- * placed after today's cutoff we say so explicitly instead of silently rolling.
+ * The requested delivery date, which the manager confirms or changes. With an
+ * order schedule it starts at the DERIVED date (and says so when today's cutoff
+ * has passed instead of silently rolling); without one it starts at tomorrow.
  */
 function DeliveryPanel({
   d,
   loading,
   fmt,
+  value,
+  onChange,
+  disabled,
 }: {
   d: DeliveryPreview | null;
   loading: boolean;
   fmt: (iso: string) => string;
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
 }) {
   const t = useT(ordersNs);
-  if (loading) return null;
+  if (loading || !d) return null;
+  const derived = d.derived;
   return (
     <div className="mt-4 rounded-xl border border-line bg-surface-2 p-3 text-sm">
-      {d ? (
+      {derived ? (
         <>
           <p className="flex items-center gap-2 text-ink">
             <CalendarClock className="h-4 w-4 text-primary" aria-hidden="true" />
             <span>
-              {t('wizard.deliveryExpected')} <span className="font-semibold">{fmt(d.expectedDeliveryAt)}</span>
+              {t('wizard.deliveryExpected')} <span className="font-semibold">{fmt(derived.expectedDeliveryAt)}</span>
             </span>
           </p>
-          {d.missedCutoff && (
-            <p className="mt-2 text-xs text-warn">{t('wizard.missedCutoff', { date: fmt(d.expectedDeliveryAt) })}</p>
+          {derived.missedCutoff && (
+            <p className="mt-2 text-xs text-warn">{t('wizard.missedCutoff', { date: fmt(derived.expectedDeliveryAt) })}</p>
           )}
           <p className="mt-1 text-xs text-subtle">{t('wizard.deliveryHint')}</p>
         </>
@@ -641,6 +722,18 @@ function DeliveryPanel({
           <CalendarClock className="h-4 w-4" aria-hidden="true" /> {t('wizard.noSchedule')}
         </p>
       )}
+      <Field label={t('wizard.deliveryDate')} htmlFor="ord-delivery-date" className="mt-3">
+        <Input
+          id="ord-delivery-date"
+          type="date"
+          data-testid="order-delivery-date"
+          value={value}
+          min={d.today}
+          required
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      </Field>
     </div>
   );
 }

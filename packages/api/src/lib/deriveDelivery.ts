@@ -14,7 +14,7 @@
  */
 
 import type { OrderSchedule, OrderWindow } from '@restomatch/types';
-import { addCalendarDaysInTz, startOfDayInTz } from './time';
+import { addCalendarDaysInTz, atLocalTimeInTz, startOfDayInTz } from './time';
 
 export interface DerivedDelivery {
   /** UTC instant at the START of the local delivery day. */
@@ -63,16 +63,16 @@ function localDateKey(utc: Date, tz: string): string {
   }).format(safeMidday);
 }
 
-/** UTC instant of the given 'HH:MM' local wall-clock cutoff on `utc`'s local day. */
+/**
+ * UTC instant of the given 'HH:MM' local wall-clock cutoff on `utc`'s local day.
+ * Resolved as a wall-clock time in the zone, NOT local midnight + fixed minutes:
+ * on a DST day (IL fall-back 2026-10-25, spring-forward 2027-03-26) the offset
+ * at the cutoff differs from the offset at midnight, and a fixed add lands the
+ * cutoff an hour off.
+ */
 function cutoffInstant(utc: Date, tz: string, cutoff: string): Date {
   const [hStr, mStr] = cutoff.split(':');
-  const h = Number(hStr ?? 0);
-  const m = Number(mStr ?? 0);
-  const localMidnightUtc = startOfDayInTz(utc, tz);
-  // startOfDayInTz gives local 00:00; adding wall-clock minutes is DST-safe
-  // because we go via addCalendarDaysInTz(0) only for day shifts, not here —
-  // the cutoff is within the same local day so a fixed ms add is correct.
-  return new Date(localMidnightUtc.getTime() + (h * 60 + m) * 60 * 1000);
+  return atLocalTimeInTz(utc, tz, Number(hStr ?? 0), Number(mStr ?? 0));
 }
 
 /**
