@@ -197,6 +197,15 @@ export {
   scanIdFromLocalUrl,
   isLocalScanId,
 } from './lib/localScanStorage';
+export { getServiceStorageClient } from './lib/supabaseStorage';
+export {
+  uploadShowcaseScan,
+  validateShowcaseFile,
+  isShowcaseScanUrl,
+  SHOWCASE_MAX_BYTES,
+  type ShowcaseUploadResult,
+  type ShowcaseUploadError,
+} from './lib/showcaseUpload';
 export {
   growthPricingPublicEnabled,
   creditReferralRedemption,
@@ -217,3 +226,4 @@ export {
   type ChainBranchesResult,
   type ChainOverviewResult,
 } from './routers/chain';
+export { NOT_BILLING_OWNER } from './routers/chain';

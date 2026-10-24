@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { aggregateChain, shiftMonth, supplierMergeKey, type BranchSnapshot } from '../chain';
+import { aggregateChain, monthOfPeriodEnd, shiftMonth, supplierMergeKey, type BranchSnapshot } from '../chain';
 
 function snap(over: Partial<BranchSnapshot> & { restaurantId: string; name: string }): BranchSnapshot {
   return {
-    month: '2026-10',
-    monthStart: '2026-09-30T21:00:00.000Z',
-    monthEnd: '2026-10-31T22:00:00.000Z',
+    periodStart: '2026-09-30T21:00:00.000Z',
+    periodEnd: '2026-10-31T22:00:00.000Z',
     leakIls: 0,
     spendIls: 0,
     leakPct: null,
@@ -15,11 +14,20 @@ function snap(over: Partial<BranchSnapshot> & { restaurantId: string; name: stri
     openDiscrepancies: 0,
     invoiceCount: 0,
     pendingLinkCount: 0,
+    previous: null,
     trend: [],
     suppliers: [],
     ...over,
   };
 }
+
+describe('monthOfPeriodEnd', () => {
+  it('is the local month of the last instant of the period', () => {
+    expect(monthOfPeriodEnd('2026-10-31T22:00:00.000Z')).toBe('2026-10');
+    expect(monthOfPeriodEnd('2026-12-31T22:00:00.000Z')).toBe('2026-12');
+    expect(monthOfPeriodEnd('2027-01-01T00:00:00.000Z')).toBe('2027-01'); // 02:00 local, already January
+  });
+});
 
 describe('shiftMonth', () => {
   it('crosses year boundaries both ways', () => {
@@ -41,6 +49,10 @@ describe('supplierMergeKey', () => {
     expect(a).toBe(supplierMergeKey('דגי הים בע״מ', null));
     expect(supplierMergeKey('Sea Fish Ltd.', null)).toBe(supplierMergeKey('sea fish', null));
   });
+  it('strips בע"מ only as a whole word (not inside "בעמק")', () => {
+    expect(supplierMergeKey('ירקות בעמק', null)).toBe('name:ירקות בעמק');
+    expect(supplierMergeKey('ירקות בעמק', null)).not.toBe(supplierMergeKey('ירקות ק', null));
+  });
   it('returns null when nothing is usable', () => {
     expect(supplierMergeKey(null, null)).toBeNull();
     expect(supplierMergeKey(' "" ', '12')).toBeNull();
@@ -59,6 +71,7 @@ describe('aggregateChain', () => {
     claimedIls: 276.05,
     pendingApprovals: 5,
     openDiscrepancies: 4,
+    previous: { leakIls: 400, spendIls: 20000, leakPct: 0.02 },
     trend: [
       { month: months[0]!, leakIls: 400, spendIls: 20000, leakPct: 0.02 },
       { month: months[1]!, leakIls: 572.1, spendIls: 28389.35, leakPct: 572.1 / 28389.35 },
@@ -76,6 +89,7 @@ describe('aggregateChain', () => {
     leakPct: 0.03101,
     pendingApprovals: 2,
     openDiscrepancies: 3,
+    previous: { leakIls: 700, spendIls: 21000, leakPct: 700 / 21000 },
     trend: [
       { month: months[0]!, leakIls: 700, spendIls: 21000, leakPct: 700 / 21000 },
       { month: months[1]!, leakIls: 620.2, spendIls: 20000, leakPct: 0.03101 },
@@ -88,12 +102,13 @@ describe('aggregateChain', () => {
   const c = snap({
     restaurantId: 'c',
     name: 'חיפה',
+    previous: { leakIls: 0, spendIls: 0, leakPct: null },
     trend: [
       { month: months[0]!, leakIls: 0, spendIls: 0, leakPct: null },
       { month: months[1]!, leakIls: 0, spendIls: 0, leakPct: null },
     ],
   });
-  const out = aggregateChain([a, b, c], { month: '2026-10' });
+  const out = aggregateChain([a, b, c]);
 
   it('sums money to the agora and computes the chain % as Σleak ÷ Σspend', () => {
     expect(out.totals.leakIls).toBe(1192.3);
@@ -119,7 +134,7 @@ describe('aggregateChain', () => {
 
   it('names the worst branch by leak % (not ₪) and ignores clean branches', () => {
     expect(out.worstBranchId).toBe('b');
-    expect(aggregateChain([c], { month: '2026-10' }).worstBranchId).toBeNull();
+    expect(aggregateChain([c]).worstBranchId).toBeNull();
   });
 
   it('builds the branch × month heatmap in ranking order', () => {
@@ -141,10 +156,31 @@ describe('aggregateChain', () => {
   });
 
   it('handles an empty chain', () => {
-    const empty = aggregateChain([], { month: '2026-10' });
+    const empty = aggregateChain([]);
     expect(empty.totals.leakIls).toBe(0);
     expect(empty.totals.leakPct).toBeNull();
+    expect(empty.totals.prevLeakIls).toBeNull();
     expect(empty.branches).toEqual([]);
-    expect(empty.months).toEqual(['2026-10']);
+    expect(empty.months).toEqual([]);
+    expect(empty.periodStart).toBeNull();
+  });
+
+  it('compare off: no comparison totals and no per-branch delta', () => {
+    const off = aggregateChain([a, b, c].map((x) => ({ ...x, previous: null })));
+    expect(off.totals.prevLeakIls).toBeNull();
+    expect(off.totals.prevLeakPct).toBeNull();
+    expect(off.branches.every((r) => r.leakDeltaIls === null && r.prevLeakIls === null)).toBe(true);
+    expect(off.totals.leakIls).toBe(1192.3);
+  });
+
+  it('an empty comparison period gives no delta (not ▲ the whole leak)', () => {
+    const empty = aggregateChain([a, b].map((x) => ({ ...x, previous: { leakIls: 0, spendIls: 0, leakPct: null } })));
+    expect(empty.branches.every((r) => r.leakDeltaIls === null && r.prevLeakIls === null)).toBe(true);
+    expect(empty.totals.prevLeakPct).toBeNull();
+  });
+
+  it('reports the selected period bounds', () => {
+    expect(out.periodStart).toBe('2026-09-30T21:00:00.000Z');
+    expect(out.periodEnd).toBe('2026-10-31T22:00:00.000Z');
   });
 });

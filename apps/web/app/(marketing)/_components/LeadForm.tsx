@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { CheckCircle2 } from 'lucide-react';
-import { trpc } from '@/lib/trpc/client';
+import { TrpcProvider, trpc } from '@/lib/trpc/client';
 import { Button, Field, Input } from '@/lib/components';
 import { useT } from '@/lib/i18n/client';
 import { marketing } from '@/lib/i18n/messages/marketing';
@@ -14,7 +14,16 @@ import { marketing } from '@/lib/i18n/messages/marketing';
  * { ok: true } with no insert (handled server-side); humans leave it empty.
  * Money is captured in shekels and converted to agorot for the contract.
  */
+/** Self-provided: the lead form loads lazily on public pages, which don't ship tRPC up front. */
 export function LeadForm() {
+  return (
+    <TrpcProvider>
+      <LeadFormInner />
+    </TrpcProvider>
+  );
+}
+
+function LeadFormInner() {
   const t = useT(marketing);
   // The exact opt-in wording shown to the visitor (in their language) — persisted
   // server-side as evidence of an informed marketing consent (E.7, Communications

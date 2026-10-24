@@ -37,7 +37,7 @@ export interface FillEnglishResult {
   invoiceLinesFilled: number;
   /** Hebrew names we could not translate (shown in Hebrew). */
   untranslated: number;
-  /** Whether the Claude leg was available for this call. */
+  /** Whether Claude was actually asked in this call (budget charged). */
   claude: boolean;
 }
 
@@ -92,7 +92,7 @@ export async function fillEnglishNames(
     poLinesFilled: 0,
     invoiceLinesFilled: 0,
     untranslated: 0,
-    claude: translator.hasClaude,
+    claude: false,
   };
 
   const poLineRows: Array<{ id: string; text: string; productId: string | null }> = [];
@@ -162,9 +162,13 @@ export async function fillEnglishNames(
   const texts = [...poLineRows, ...invLineRows].map((r) => r.text).concat(productRows.map((p) => p.name));
   if (texts.length === 0) return result;
 
-  const allowClaude = translator.hasClaude ? takeClaudeBudget(restaurantId) : false;
-  result.claude = allowClaude;
-  const translated = await translator.translateMany(texts, { allowClaude });
+  // EN-BUDGET-1: the per-restaurant Claude budget is charged only when the
+  // translator actually has names to send (glossary/memo misses), not on every
+  // call — a page view whose lines the glossary covers costs nothing.
+  result.claude = false;
+  const translated = await translator.translateMany(texts, {
+    beforeClaude: () => (result.claude = takeClaudeBudget(restaurantId)),
+  });
   const enOf = (text: string): string | null => translated.get(text.trim())?.en ?? null;
 
   // Group row ids by English text → one UPDATE per distinct name.
