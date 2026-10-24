@@ -146,6 +146,20 @@ describe('payRunStatusOf', () => {
     });
     expect(payRunStatusOf(inv)).toMatchObject({ status: 'hold', creditIls: 40, pendingIls: 0 });
   });
+  it('a ₪0 finding (the QTY_SHORT twin of a billed QTY_OVER) never keeps the invoice on hold', () => {
+    const inv = invoice({
+      leakIls: 38.7,
+      lines: [
+        line({ discrepancyId: 'over', type: 'QTY_OVER', resolutionStatus: 'accepted', deltaAmount: 38.7 }),
+        line({ discrepancyId: 'twin', type: 'QTY_SHORT', resolutionStatus: 'open', deltaAmount: 0 }),
+      ],
+    });
+    expect(payRunStatusOf(inv)).toMatchObject({ status: 'claim', creditIls: 38.7, pendingIls: 0 });
+    // Waived instead: payable.
+    inv.lines[0]!.resolutionStatus = 'rejected';
+    expect(payRunStatusOf(inv)).toMatchObject({ status: 'pay', creditIls: 0 });
+  });
+
   it('an invoice waiting for its PO link is held, calmly, with nothing to claim', () => {
     expect(payRunStatusOf(invoice({ pendingLink: true, leakIls: 0 }))).toMatchObject({ status: 'hold', claims: [] });
   });

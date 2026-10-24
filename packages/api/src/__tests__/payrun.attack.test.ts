@@ -147,7 +147,7 @@ describe('payRun.month', () => {
     }
   });
 
-  it('an invoice marked paid drops out; an unchecked invoice (no match run) is not listed', async () => {
+  it('an invoice marked paid drops out; one without a match run waits for its link (T4)', async () => {
     await ownerDb.update(invoices).set({ status: 'paid' }).where(eq(invoices.id, A.invoiceId));
     try {
       expect((await asA().payRun.month()).totals.invoices).toBe(0);
@@ -158,10 +158,39 @@ describe('payRun.month', () => {
     const [mr] = await ownerDb.select({ invoiceId: matchRuns.invoiceId }).from(matchRuns).where(eq(matchRuns.id, A.matchRunId));
     if (mr?.invoiceId === null) {
       try {
-        expect((await asA().payRun.month()).totals.invoices).toBe(0);
+        const r = await asA().payRun.month();
+        expect(r.suppliers[0]!.invoices[0]).toMatchObject({ invoiceId: A.invoiceId, status: 'hold', pendingLink: true, creditIls: 0 });
+        expect(r.totals).toMatchObject({ linkCount: 1, linkIls: 117, holdIls: 0, payIls: 0 });
       } finally {
         await ownerDb.update(matchRuns).set({ invoiceId: A.invoiceId }).where(eq(matchRuns.id, A.matchRunId));
       }
+    }
+  });
+
+  it('an unmatched consolidated invoice is listed as "waiting to be linked" (T4), outside pay / hold ₪', async () => {
+    const [extra] = await ownerDb
+      .insert(invoices)
+      .values({
+        restaurantId: A.restaurantId,
+        supplierId: A.supplierId,
+        invoiceNumber: 'INV-PA-CONSOLIDATED',
+        invoiceDate: new Date(),
+        totalExclVat: '50.00',
+        vatAmount: '8.50',
+        totalInclVat: '58.50',
+        status: 'parsed',
+        source: 'photo',
+      })
+      .returning();
+    try {
+      const r = await asA().payRun.month();
+      const row = r.suppliers.flatMap((x) => x.invoices).find((i) => i.invoiceId === extra!.id)!;
+      expect(row).toMatchObject({ status: 'hold', pendingLink: true, claims: [], creditIls: 0, pendingIls: 0 });
+      expect(r.totals).toMatchObject({ linkIls: 58.5, linkCount: 1, holdIls: 117, payIls: 0 });
+      // Still never another tenant's.
+      expect(JSON.stringify(r)).not.toContain(B.invoiceId);
+    } finally {
+      await ownerDb.delete(invoices).where(eq(invoices.id, extra!.id));
     }
   });
 
