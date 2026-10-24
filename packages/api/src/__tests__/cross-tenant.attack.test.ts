@@ -22,6 +22,7 @@ import {
   purchaseOrders,
   restaurants,
   supplierCatalogItems,
+  supplierConfirmLinks,
   supplierContractPrices,
   suppliers,
   type RestaurantSettings,
@@ -247,6 +248,9 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'priceAlerts.setThreshold': 'attack',
   'priceAlerts.deleteThreshold': 'attack',
   'priceAlerts.openCount': 'isolation',
+  // Wave 1 (S11): supplier confirmation portal (flag `supplierConfirm`).
+  'supplierConfirm.createLink': 'attack',
+  'supplierConfirm.responses': 'attack',
 };
 
 function listProcedurePaths(): string[] {
@@ -1672,5 +1676,26 @@ describe('wave 1 (S11): contracts + priceAlerts — foreign ids and isolation', 
     } finally {
       await db.update(restaurants).set({ settings: { features: { contracts: true, priceAlerts: true } } as RestaurantSettings }).where(eq(restaurants.id, A.restaurantId));
     }
+  });
+});
+
+describe('wave 1 (S11): supplierConfirm — foreign order ids', () => {
+  beforeAll(async () => {
+    for (const t of [A, B]) {
+      await db.update(restaurants).set({ settings: { features: { supplierConfirm: true } } as RestaurantSettings }).where(eq(restaurants.id, t.restaurantId));
+      await db.update(purchaseOrders).set({ status: 'sent' }).where(eq(purchaseOrders.id, t.poId));
+    }
+  });
+  afterAll(async () => {
+    for (const t of [A, B]) {
+      await db.update(restaurants).set({ settings: {} }).where(eq(restaurants.id, t.restaurantId));
+    }
+  });
+
+  it('supplierConfirm.createLink / responses reject B’s order and mint nothing for it', async () => {
+    await expect(callerFor(A).supplierConfirm.createLink({ poId: B.poId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(callerFor(A).supplierConfirm.responses({ poId: B.poId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const links = await db.select().from(supplierConfirmLinks).where(eq(supplierConfirmLinks.poId, B.poId));
+    expect(links).toEqual([]);
   });
 });

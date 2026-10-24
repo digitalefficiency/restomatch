@@ -22,6 +22,7 @@ import { teamRouter } from './routers/team';
 import { chainRouter } from './routers/chain';
 import { contractsRouter } from './routers/contracts';
 import { priceAlertsRouter } from './routers/priceAlerts';
+import { supplierConfirmRouter } from './routers/supplierConfirm';
 
 export const appRouter = router({
   owner: ownerRouter,
@@ -47,6 +48,7 @@ export const appRouter = router({
   dsr: dsrRouter,
   contracts: contractsRouter,
   priceAlerts: priceAlertsRouter,
+  supplierConfirm: supplierConfirmRouter,
 });
 
 export type AppRouter = typeof appRouter;
@@ -200,6 +202,23 @@ export {
   DEFAULT_WINDOW_DAYS,
 } from './priceAlerts/detect';
 export { priceAlertEmail } from './priceAlerts/email';
+export {
+  confirmationLink,
+  createSupplierLink,
+  hashSupplierToken,
+  loadSupplierOrder,
+  resolveSupplierToken,
+  submitSupplierAnswer,
+  supplierLinkUrl,
+  supplierResponseDiff,
+  LINK_TTL_MS,
+  type ResolvedLink,
+  type SupplierOrderView,
+  type SupplierAnswerInput,
+  type SubmitError,
+  type SupplierLinkError,
+  type SupplierResponseDiff,
+} from './supplierConfirm/service';
 export {
   APP_ERROR_CODES,
   AppErrorCause,

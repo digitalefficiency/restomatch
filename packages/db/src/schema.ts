@@ -1717,3 +1717,67 @@ export const priceAlerts = pgTable(
 export type SupplierContractPrice = typeof supplierContractPrices.$inferSelect;
 export type PriceAlertThreshold = typeof priceAlertThresholds.$inferSelect;
 export type PriceAlert = typeof priceAlerts.$inferSelect;
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Wave 1 (S11): supplier confirmation portal (0062, flag `supplierConfirm`).
+ * po references are COMPOSITE same-tenant FKs in the SQL.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** One magic link per sent order; only the SHA-256 of the token is stored. */
+export const supplierConfirmLinks = pgTable(
+  'supplier_confirm_links',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    poId: uuid('po_id').notNull(),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('supplier_confirm_links_token_hash_key').on(t.tokenHash),
+    index('supplier_confirm_links_po_idx').on(t.poId, t.restaurantId),
+    index('supplier_confirm_links_restaurant_idx').on(t.restaurantId, t.createdAt),
+    index('supplier_confirm_links_created_by_idx').on(t.createdBy),
+  ],
+);
+
+/** A supplier's per-line answer. Never written onto the PO itself. */
+export interface SupplierResponseLine {
+  poLineId: string;
+  /** Units the supplier can deliver (≤ ordered = shortage); null = as ordered. */
+  qtyAvailable: number | null;
+  /** Proposed unit price in shekels; null = the agreed price stands. */
+  proposedUnitPrice: number | null;
+}
+
+export const supplierResponses = pgTable(
+  'supplier_responses',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    poId: uuid('po_id').notNull(),
+    linkId: uuid('link_id')
+      .notNull()
+      .references(() => supplierConfirmLinks.id, { onDelete: 'cascade' }),
+    status: varchar('status', { length: 16 }).$type<'confirmed' | 'changes'>().notNull(),
+    lines: jsonb('lines').$type<SupplierResponseLine[]>().notNull().default([]),
+    note: text('note'),
+    submittedAt: timestamp('submitted_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('supplier_responses_po_key').on(t.poId),
+    index('supplier_responses_po_idx').on(t.poId, t.restaurantId),
+    index('supplier_responses_link_idx').on(t.linkId),
+    index('supplier_responses_restaurant_idx').on(t.restaurantId, t.submittedAt),
+  ],
+);
+
+export type SupplierConfirmLink = typeof supplierConfirmLinks.$inferSelect;
+export type SupplierResponse = typeof supplierResponses.$inferSelect;

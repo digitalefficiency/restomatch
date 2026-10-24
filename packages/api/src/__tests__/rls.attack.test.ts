@@ -39,7 +39,9 @@ import {
   sessions,
   sql,
   subscriptions,
+  supplierConfirmLinks,
   supplierContractPrices,
+  supplierResponses,
   supplierIntegrations,
   suppliers,
   usageCounters,
@@ -51,6 +53,7 @@ import {
   type Database,
 } from '@restomatch/db';
 import { appRouter } from '../index';
+import { createSupplierLink, loadSupplierOrder, resolveSupplierToken, submitSupplierAnswer } from '../supplierConfirm/service';
 import { meterOcrScan } from '../entitlements';
 import type { AppContext, Session } from '../context';
 import { attachSubscription, resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
@@ -709,5 +712,49 @@ describe('wave 1 (S11) tables: supplier_contract_prices / price_alert_thresholds
         .returning({ id: supplierContractPrices.id }),
     );
     expect(updated).toHaveLength(0);
+  });
+});
+
+describe('wave 1 (S11) supplier portal under the RLS app role', () => {
+  beforeAll(async () => {
+    for (const t of [A, B]) {
+      await ownerDb.update(restaurants).set({ settings: { features: { supplierConfirm: true } } as never }).where(eq(restaurants.id, t.restaurantId));
+      await ownerDb.update(purchaseOrders).set({ status: 'sent' }).where(eq(purchaseOrders.id, t.poId));
+    }
+  });
+  afterAll(async () => {
+    await ownerDb.delete(supplierResponses);
+    await ownerDb.delete(supplierConfirmLinks);
+    for (const t of [A, B]) await ownerDb.update(restaurants).set({ settings: {} }).where(eq(restaurants.id, t.restaurantId));
+  });
+
+  it('the public flow works end-to-end as restomatch_app (resolve on owner, read/write under the link tenant)', async () => {
+    const link = await withRestaurant(appDb, A.restaurantId, (tx) => createSupplierLink(tx, A.restaurantId, A.poId));
+    const resolved = await resolveSupplierToken(ownerDb, link!.token);
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    const view = await withRestaurant(appDb, resolved.link.restaurantId, (tx) => loadSupplierOrder(tx, resolved.link));
+    expect(view!.lines.map((l) => l.id)).toEqual([A.poLineId]);
+    const res = await withRestaurant(appDb, resolved.link.restaurantId, (tx) =>
+      submitSupplierAnswer(tx, resolved.link, { lines: [{ poLineId: A.poLineId, qtyAvailable: 4 }] }),
+    );
+    expect(res).toEqual({ ok: true, status: 'changes' });
+  });
+
+  it('GUC=B sees none of A’s links/responses; a forged cross-tenant link object reads nothing', async () => {
+    const [links, resps] = await withRestaurant(appDb, B.restaurantId, async (tx) => [
+      await tx.select({ rid: supplierConfirmLinks.restaurantId }).from(supplierConfirmLinks),
+      await tx.select({ rid: supplierResponses.restaurantId }).from(supplierResponses),
+    ]);
+    expect(links.every((r) => r.rid === B.restaurantId)).toBe(true);
+    expect(resps.every((r) => r.rid === B.restaurantId)).toBe(true);
+    const forged = { linkId: '00000000-0000-0000-0000-000000000000', restaurantId: A.restaurantId, poId: A.poId, expiresAt: new Date() };
+    // Under B's tenant GUC, even a link object naming A's order can't read or write it.
+    expect(await withRestaurant(appDb, B.restaurantId, (tx) => loadSupplierOrder(tx, forged))).toBeNull();
+    await expect(
+      withRestaurant(appDb, B.restaurantId, (tx) =>
+        tx.insert(supplierResponses).values({ restaurantId: A.restaurantId, poId: A.poId, linkId: forged.linkId, status: 'confirmed' }),
+      ),
+    ).rejects.toThrow();
   });
 });
