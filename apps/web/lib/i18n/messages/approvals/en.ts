@@ -112,7 +112,7 @@ export const en: Shape<typeof he> = {
     p90: 'above the historical 90th percentile ({amount})',
   },
   rules: {
-    'duplicate-invoice': 'Duplicate invoice — payment blocked (bookkeeping)',
+    'duplicate-invoice': 'Duplicate invoice — flagged: hold payment until decided (bookkeeping)',
     'large-invoice-without-po': 'Large invoice with no order — owner approval',
     'unordered-item-significant': 'Significant unordered item — owner approval',
     'severity-block': 'High severity — owner approval',

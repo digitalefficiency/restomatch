@@ -118,6 +118,9 @@ export default async function ChainPage({
   // Display only: whole-₪ rows (= each branch's own dashboard) and totals printed as their sum.
   const leakShown = wholeShekelRows(data.branches.map((b) => b.leakIls));
   const spendShown = wholeShekelRows(data.branches.map((b) => b.spendIls));
+  // Same rule for the caught / claimed split: Σ of each branch's own (dashboard) rounding.
+  const caughtShown = wholeShekelRows(data.branches.map((b) => b.caughtBeforePaymentIls));
+  const claimedShown = wholeShekelRows(data.branches.map((b) => b.claimedIls));
   const rowLeak = leakShown.rows;
   const rowSpend = spendShown.rows;
   const ils = (v: number) => formatIls(v, { locale });
@@ -132,8 +135,9 @@ export default async function ChainPage({
   );
   const noData = totals.spendIls === 0 && totals.leakIls === 0;
   const compared = data.compare !== 'off';
+  // No % against a comparison period with almost no data (totals.thinBase): calm, never a false alarm.
   const leakDeltaPct =
-    totals.prevLeakIls !== null && totals.prevLeakIls > 0
+    totals.prevLeakIls !== null && totals.prevLeakIls > 0 && !totals.thinBase
       ? Math.round(((totals.leakIls - totals.prevLeakIls) / totals.prevLeakIls) * 100)
       : undefined;
   const periodLabel = data.periodStart && data.periodEnd ? rangeLabel(view.period, data.periodStart, data.periodEnd, locale) : '';
@@ -224,14 +228,14 @@ export default async function ChainPage({
         />
         <KpiCard
           label={t('dashboard.kpis.caught')}
-          value={ils(totals.caughtBeforePaymentIls)}
+          value={<span data-testid="chain-caught">{ils(caughtShown.total)}</span>}
           tone="gold"
           icon={<ShieldCheck className="h-5 w-5" />}
           subtitle={
             <>
               {t('dashboard.kpis.caughtHint')}
               <span className="block">
-                {t('dashboard.kpis.claimed')}: <span className="font-mono tabular-nums">{ils(totals.claimedIls)}</span>
+                {t('dashboard.kpis.claimed')}: <span className="font-mono tabular-nums" data-testid="chain-claimed">{ils(claimedShown.total)}</span>
               </span>
             </>
           }
@@ -403,9 +407,16 @@ export default async function ChainPage({
                         ) : b.leakDeltaIls === 0 ? (
                           <span className="text-subtle">{t('dashboard.ranking.flat')}</span>
                         ) : (
-                          <span className={b.leakDeltaIls > 0 ? 'text-danger' : 'text-primary'}>
-                            {b.leakDeltaIls > 0 ? '▲' : '▼'} {ils(Math.abs(b.leakDeltaIls))}
-                          </span>
+                          b.thinBase ? (
+                            <span className="text-muted" title={t('dashboard.ranking.thinBase')} data-delta="thin">
+                              {b.leakDeltaIls > 0 ? '+' : '−'}
+                              {ils(Math.abs(b.leakDeltaIls))}
+                            </span>
+                          ) : (
+                            <span className={b.leakDeltaIls > 0 ? 'text-danger' : 'text-primary'}>
+                              {b.leakDeltaIls > 0 ? '▲' : '▼'} {ils(Math.abs(b.leakDeltaIls))}
+                            </span>
+                          )
                         )}
                       </td>
                     ) : null}
