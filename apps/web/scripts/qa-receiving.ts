@@ -1,6 +1,6 @@
 /**
  * Full QA click-through of the S2 area (receiving / OCR / English) against a
- * running web server + local Postgres/Redis, on the seeded demo tenant.
+ * running web server + local Postgres, on the seeded demo tenant.
  *
  * Scenarios cover desktop + 390 px mobile, he + en, roles receiver / manager /
  * owner / chef, and the edge cases: huge photo (client downscale), PDF, huge

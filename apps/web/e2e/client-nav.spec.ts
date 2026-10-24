@@ -60,7 +60,9 @@ test('header search: fixed combobox ids, and aria-controls names the listbox', a
       },
     ]);
   await page.goto('/dashboard', { waitUntil: 'load' });
-  const input = page.locator('header').getByRole('combobox');
+  // By name: the header can also hold the language picker, a native <select>
+  // (role combobox) when the receiverLanguages flag is on.
+  const input = page.locator('header').getByRole('combobox', { name: 'חיפוש כללי' });
   await expect(input).toHaveAttribute('aria-controls', 'dashboard-search-header-list');
   await input.fill('ירקות');
   await expect(page.locator('#dashboard-search-header-list')).toBeVisible();

@@ -10,6 +10,8 @@
 
 import type { NormalizedPurchaseOrder } from '@restomatch/types';
 import { HttpClient, type HttpClientOptions } from '../http';
+import { MARKETMAN_FIXTURE } from '../fixtures/marketman';
+import { FixtureTransport, isFixtureMode, type JsonTransport } from '../transport';
 import type {
   AdapterContext,
   NormalizedProduct,
@@ -86,7 +88,9 @@ export class MarketManAdapter implements ProcurementAdapter {
     this.httpOptions = config.httpOptions ?? {};
   }
 
-  private clientFor(ctx: AdapterContext): HttpClient {
+  /** Real HTTP for an account; the recorded fixture when credentials say `mode: 'fixture'`. */
+  private clientFor(ctx: AdapterContext): JsonTransport {
+    if (isFixtureMode(ctx.credentials)) return new FixtureTransport(MARKETMAN_FIXTURE);
     const apiKey = ctx.credentials.apiKey;
     if (typeof apiKey !== 'string' || apiKey.length === 0) {
       throw new Error('MarketMan adapter requires credentials.apiKey');

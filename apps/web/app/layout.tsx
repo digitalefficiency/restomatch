@@ -4,8 +4,8 @@ import { CookieConsent } from '@/lib/components/CookieConsent';
 import { ConsentClearance } from './consent-clearance';
 import { RouteProgress } from '@/lib/components/RouteProgress';
 import { I18nProvider } from '@/lib/i18n/client';
-import { dirOf } from '@/lib/i18n/config';
-import { getLocale } from '@/lib/i18n/server';
+import { baseLocaleOf, dirOf } from '@/lib/i18n/config';
+import { getAppLocale, getLocale } from '@/lib/i18n/server';
 import { metadataBase, socialFor } from './(marketing)/_components/seo';
 import './globals.css';
 
@@ -37,8 +37,9 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function RootLayout(props: { children: React.ReactNode }) {
   // Locale comes from the `rm_locale` cookie (LocaleSwitcher / `?lang=`); the
   // document direction follows it so English renders LTR.
-  const locale = await getLocale();
-  for (const href of FONT_PRELOADS[locale]) {
+  // A receiver locale (ar/ru/th/ti) preloads its base locale's subsets.
+  const locale = await getAppLocale();
+  for (const href of FONT_PRELOADS[baseLocaleOf(locale)]) {
     preload(href, { as: 'font', type: 'font/woff2', crossOrigin: 'anonymous' });
   }
   return (

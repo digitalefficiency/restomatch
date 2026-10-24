@@ -175,7 +175,7 @@ export default async function LeakReportPage({
             </p>
             {hero.spendIls > 0 ? (
               <p className="text-sm text-muted">
-                {t('report.spendBase', { spend: ils(hero.spendIls), count: num(Math.max(0, hero.invoiceCount - hero.pendingLinkCount)) })}
+                {t('report.spendBase', { spend: ils(hero.spendIls), count: num(Math.max(0, hero.invoiceCount - hero.pendingLinkCount - hero.awaitingCountCount)) })}
               </p>
             ) : null}
             <p className="mt-1 text-xs text-subtle">{t('report.target')}</p>

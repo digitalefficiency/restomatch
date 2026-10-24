@@ -2,10 +2,10 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
-import { dirOf, LOCALE_COOKIE, LOCALE_COOKIE_MAX_AGE_SEC, type Locale } from '@/lib/i18n/config';
+import { dirOf, LOCALE_COOKIE, LOCALE_COOKIE_MAX_AGE_SEC, type AppLocale } from '@/lib/i18n/config';
 
 /** Writes the member's preferred locale into `rm_locale` and re-renders once. */
-export function ApplyLocale({ locale }: { locale: Locale }) {
+export function ApplyLocale({ locale }: { locale: AppLocale }) {
   const router = useRouter();
   useEffect(() => {
     const secure = window.location.protocol === 'https:' ? '; secure' : '';

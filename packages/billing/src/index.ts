@@ -124,3 +124,5 @@ export function resolveBillingProvider(
       return new NoopBillingProvider();
   }
 }
+
+export * from './chainPricing';

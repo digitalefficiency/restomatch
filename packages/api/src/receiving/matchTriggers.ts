@@ -271,3 +271,21 @@ export async function scannedInvoicesForReceipt(
   }
   return out;
 }
+
+/**
+ * Why a receipt's re-match (submitReceipt → worker `rematch`) will NOT produce a
+ * run for this invoice, or null when it will. One rule for the worker (which
+ * skips) and the dock slip (which says so at once instead of waiting):
+ *  • 'settled' — a person already approved/paid it on an earlier run; a submit
+ *    never rewrites that match (only match.runForInvoice may);
+ *  • 'awaiting_review' — never matched, and the OCR held it for a human (low
+ *    confidence → 'parsed', or a possible duplicate copy).
+ */
+export function rematchHoldReason(
+  inv: { status: string; ocrPayload: unknown },
+  hasPriorRun: boolean,
+): 'settled' | 'awaiting_review' | null {
+  if (hasPriorRun) return inv.status === 'approved' || inv.status === 'paid' ? 'settled' : null;
+  const raw = (inv.ocrPayload as { raw?: { duplicateOf?: unknown } } | null | undefined)?.raw;
+  return inv.status !== 'matched' || raw?.duplicateOf !== undefined ? 'awaiting_review' : null;
+}

@@ -6,18 +6,29 @@ import { getT } from '@/lib/i18n/server';
 import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 import { OrdersList } from './list-client';
 import { ZesttImportButton } from './import-client';
+import { DocumentPricesToggle } from './supplier-document';
+import { MessageCircle } from 'lucide-react';
+import { enabledFeatures } from '@/lib/ingest/features';
+import { ingest } from '@/lib/i18n/messages/ingest';
 
 export default async function OrdersPage() {
   const caller = await createServerCaller();
-  const [initial, memberships, session, t] = await Promise.all([
+  const [initial, memberships, session, t, docSettings] = await Promise.all([
     caller.orders.list({ limit: 50 }),
     caller.onboarding.myMemberships(),
     auth(),
     getT(ordersNs),
+    caller.orders.documentSettings(),
   ]);
   const active =
     memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0];
   const canEdit = active?.role === 'owner' || active?.role === 'manager';
+  // orderCapture (flag): paste / share the WhatsApp order the owner already sent.
+  const showCapture = canEdit && (await enabledFeatures(active?.restaurantId)).includes('orderCapture');
+  const tIngest = await getT(ingest);
+  // Same credential gate as orders.importPo — without it the button could only
+  // answer with a "not configured" error, so don't offer it.
+  const ocrReady = Boolean(process.env.ANTHROPIC_API_KEY);
 
   return (
     <div>
@@ -29,7 +40,12 @@ export default async function OrdersPage() {
         action={
           canEdit ? (
             <div className="flex flex-wrap items-start gap-2">
-              <ZesttImportButton />
+              {showCapture ? (
+                <LinkButton href="/dashboard/orders/capture" size="sm" variant="secondary" data-testid="order-capture-entry">
+                  <MessageCircle className="h-4 w-4" aria-hidden="true" /> {tIngest('orderCapture.entry')}
+                </LinkButton>
+              ) : null}
+              {ocrReady ? <ZesttImportButton /> : null}
               <LinkButton href="/dashboard/orders/new" size="sm">
                 <Plus className="h-4 w-4" aria-hidden="true" /> {t('newOrder')}
               </LinkButton>
@@ -37,6 +53,7 @@ export default async function OrdersPage() {
           ) : undefined
         }
       />
+      {canEdit && docSettings.enabled ? <DocumentPricesToggle initialShowPrices={docSettings.showPrices} /> : null}
       <OrdersList initial={initial} canEdit={canEdit} />
     </div>
   );

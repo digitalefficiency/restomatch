@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   isShowcaseScanUrl,
   SHOWCASE_MAX_BYTES,
+  showcaseScanFetchUrl,
   uploadShowcaseScan,
   validateShowcaseFile,
 } from '../lib/showcaseUpload';
@@ -99,5 +100,19 @@ describe('isShowcaseScanUrl (public OCR endpoint input)', () => {
     expect(isShowcaseScanUrl(`${base}walk-ins/.\t./tenant-1/x.jpg?token=t`, SB)).toBe(false);
     expect(isShowcaseScanUrl(`${base}walk-ins/.\n./tenant-1/x.jpg?token=t`, SB)).toBe(false);
     expect(isShowcaseScanUrl(`${base}walk-ins/.\r./tenant-1/x.jpg?token=t`, SB)).toBe(false);
+  });
+});
+
+describe('showcaseScanFetchUrl (what the public OCR endpoint fetches)', () => {
+  const SB = 'https://sb.test';
+  const ok = `${SB}/storage/v1/object/sign/invoice-scans/walk-ins/2026-10-18/walk-a-b.jpg?token=t`;
+  it('returns the same URL, rebuilt on the configured prefix (trailing slashes too)', () => {
+    expect(showcaseScanFetchUrl(ok, SB)).toBe(ok);
+    expect(showcaseScanFetchUrl(ok, `${SB}//`)).toBe(ok);
+  });
+  it('is null for anything isShowcaseScanUrl refuses', () => {
+    expect(showcaseScanFetchUrl(`https://evil.test/storage/v1/object/sign/invoice-scans/walk-ins/x.jpg`, SB)).toBeNull();
+    expect(showcaseScanFetchUrl(`${SB}/storage/v1/object/sign/invoice-scans/walk-ins/../rid/x.jpg?token=t`, SB)).toBeNull();
+    expect(showcaseScanFetchUrl(ok, undefined)).toBeNull();
   });
 });

@@ -4,6 +4,7 @@ import { eq, memberships, restaurants, sql, storageNamespaces, users } from '@re
 import { z } from 'zod';
 import { appError } from '../errors';
 import { router, userScopedProcedure } from '../trpc';
+import { hasNoControlChars, NO_CONTROL_CHARS_MESSAGE } from '../lib/text';
 
 export const onboardingRouter = router({
   myMemberships: userScopedProcedure.query(async ({ ctx }) => {
@@ -22,7 +23,7 @@ export const onboardingRouter = router({
   createRestaurant: userScopedProcedure
     .input(
       z.object({
-        name: z.string().min(2).max(120),
+        name: z.string().min(2).max(120).refine(hasNoControlChars, NO_CONTROL_CHARS_MESSAGE),
         businessId: z
           .string()
           .min(9)

@@ -2,7 +2,10 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Supplier } from '@restomatch/db';
+import type { inferRouterOutputs } from '@trpc/server';
+import type { AppRouter } from '@restomatch/api';
+
+type SupplierWithFlags = inferRouterOutputs<AppRouter>['suppliers']['get'];
 import { trpc } from '@/lib/trpc/client';
 import { ErrorNotice, Spinner, friendlyError, useToast } from '@/lib/components';
 import { useT } from '@/lib/i18n/client';
@@ -17,7 +20,7 @@ import { scheduleToForm, toUpdatePatch } from '../form-logic';
  * edited with one code path. Saves via suppliers.update; cleared fields are
  * sent as null so they really clear.
  */
-export function SupplierDetailsTab({ supplierId, initial }: { supplierId: string; initial?: Supplier }) {
+export function SupplierDetailsTab({ supplierId, initial }: { supplierId: string; initial?: SupplierWithFlags }) {
   const t = useT(suppliersNs);
   const tc = useT(components);
   const toast = useToast();

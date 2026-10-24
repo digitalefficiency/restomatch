@@ -211,3 +211,42 @@ describe('ClaudeVision.extract — nulls the prompt allows (EN-3)', () => {
     await expect(new ClaudeVision({ apiKey: 'k', model: 'm' }).extract('https://x/inv.jpg')).rejects.toThrow();
   });
 });
+
+describe('ClaudeVision — effort + usage (benchmark knobs)', () => {
+  beforeEach(() => {
+    createMock.mockReset();
+    delete process.env.OCR_CLAUDE_EFFORT;
+  });
+
+  it('sends no output_config by default (behaviour unchanged)', async () => {
+    mockTextResponse(CANNED_INVOICE);
+    await new ClaudeVision({ apiKey: 'k' }).extract('https://example.com/i.jpg');
+    expect(createMock.mock.calls[0]![0]).not.toHaveProperty('output_config');
+  });
+
+  it('sends output_config.effort from config or OCR_CLAUDE_EFFORT; ignores junk', async () => {
+    mockTextResponse(CANNED_INVOICE);
+    await new ClaudeVision({ apiKey: 'k', effort: 'low' }).extract('https://example.com/i.jpg');
+    expect(createMock.mock.calls[0]![0].output_config).toEqual({ effort: 'low' });
+
+    process.env.OCR_CLAUDE_EFFORT = 'medium';
+    mockTextResponse(CANNED_INVOICE);
+    await new ClaudeVision({ apiKey: 'k' }).extract('https://example.com/i.jpg');
+    expect(createMock.mock.calls[1]![0].output_config).toEqual({ effort: 'medium' });
+
+    process.env.OCR_CLAUDE_EFFORT = 'turbo';
+    mockTextResponse(CANNED_INVOICE);
+    await new ClaudeVision({ apiKey: 'k' }).extract('https://example.com/i.jpg');
+    expect(createMock.mock.calls[2]![0]).not.toHaveProperty('output_config');
+  });
+
+  it('reports usage to onUsage', async () => {
+    createMock.mockResolvedValueOnce({
+      content: [{ type: 'text', text: JSON.stringify(CANNED_INVOICE) }],
+      usage: { input_tokens: 1500, output_tokens: 700 },
+    });
+    const seen: unknown[] = [];
+    await new ClaudeVision({ apiKey: 'k', onUsage: (u) => seen.push(u) }).extract('https://example.com/i.jpg');
+    expect(seen).toEqual([{ input_tokens: 1500, output_tokens: 700 }]);
+  });
+});

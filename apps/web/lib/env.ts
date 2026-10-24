@@ -6,7 +6,7 @@ import type { Database } from '@restomatch/db';
  * Fail-fast environment validation for the web app.
  *
  * The app must NOT boot into production with missing secrets and then degrade
- * silently (lost invoices on an unset REDIS_URL, dead login on an unset
+ * silently (dead login on an unset
  * RESEND_API_KEY, inert RLS on an unset DATABASE_URL_APP). Call assertWebEnv()
  * once at startup (instrumentation) to turn those into a LOUD boot failure.
  *
@@ -30,7 +30,6 @@ const WebEnvSchema = z.object({
   APP_URL: z.string().url().optional(),
   RESEND_API_KEY: z.string().min(1).optional(),
   EMAIL_FROM: z.string().min(1).optional(),
-  REDIS_URL: z.string().min(1).optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   // Name the Supabase↔Vercel integration syncs for the new-style secret key.
   SUPABASE_SECRET_KEY: z.string().min(1).optional(),
@@ -57,7 +56,13 @@ export function assertWebEnv(env: NodeJS.ProcessEnv = process.env): WebEnv {
   const v = parsed.data;
   if ((v.NODE_ENV ?? env.NODE_ENV) === 'production') {
     const missing: string[] = [];
-    if (!v.DATABASE_URL_APP) missing.push('DATABASE_URL_APP — RLS app-role connection (RLS is inert without it)');
+    if (!isParsablePgUrl(v.DATABASE_URL_APP) && !deriveAppRoleUrl(env)) {
+      missing.push(
+        v.DATABASE_URL_APP
+          ? `DATABASE_URL_APP — ${pgUrlProblem(v.DATABASE_URL_APP)} (or set APP_ROLE_PASSWORD so it is derived from DATABASE_URL)`
+          : 'DATABASE_URL_APP — RLS app-role connection (RLS is inert without it; or set APP_ROLE_PASSWORD so it is derived from DATABASE_URL)',
+      );
+    }
     if (!v.RESEND_API_KEY) missing.push('RESEND_API_KEY — magic-link login + invites');
     if (!v.EMAIL_FROM) missing.push('EMAIL_FROM — verified sender domain');
     if (!v.AUTH_URL && !v.APP_URL && !env.NEXTAUTH_URL) missing.push('AUTH_URL or APP_URL');
@@ -65,7 +70,6 @@ export function assertWebEnv(env: NodeJS.ProcessEnv = process.env): WebEnv {
     // MissingSecret) — make it a boot failure instead (F4).
     if (!v.AUTH_SECRET && !v.NEXTAUTH_SECRET)
       missing.push('AUTH_SECRET (or NEXTAUTH_SECRET) — signs the session JWT; every login fails without it');
-    if (!v.REDIS_URL) missing.push('REDIS_URL — OCR/match/cron queue (uploads vanish without it)');
     if (!v.SUPABASE_SERVICE_ROLE_KEY && !v.SUPABASE_SECRET_KEY)
       missing.push('SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY) — signed scan URLs');
     // AUTH_ENC_KEY encrypts the TOTP secret at rest (Epic C). Required in prod so
@@ -136,6 +140,9 @@ function originOf(url: string | undefined): string | null {
  */
 export function webEnvWarnings(env: NodeJS.ProcessEnv = process.env): string[] {
   const warnings: string[] = [];
+  if (env.REDIS_URL) {
+    warnings.push('[env] WARNING: REDIS_URL is set but no longer used — the job queue, rate limits and heartbeat are in Postgres (0061). Remove it.');
+  }
   // WARN, never throw: a malformed value is a likely leftover from another
   // project, but bricking a live deploy over it would be worse than the leftover.
   if (env.NODE_ENV === 'production') {
@@ -188,13 +195,95 @@ function isTruthyFlag(value: string | undefined): boolean {
  * NODE_ENV=test). Otherwise an unset DATABASE_URL_APP is a LOUD boot failure
  * rather than a silent owner fallback.
  */
+/**
+ * `next build` imports every route module to collect page data, and the DB
+ * modules (lib/db.ts, lib/authDb.ts) resolve their URL at import. A build
+ * without database env (a Vercel Preview with no DATABASE_URL) died there, even
+ * though no query runs at build time. ONLY in the build phase, with the URL
+ * missing, those modules get this placeholder instead: postgres.js connects
+ * lazily, so it is never dialled unless a page really queries during the build
+ * (then the build fails loudly, as it should). Runtime is unchanged — the boot
+ * guard (assertWebEnv, instrumentation) still refuses to serve without the URLs.
+ */
+export const BUILD_PHASE_DB_PLACEHOLDER = 'postgres://build:build@build-phase-placeholder.invalid:5432/none';
+
+export function isNextBuildPhase(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.NEXT_PHASE === 'phase-production-build';
+}
+
+/**
+ * True when `raw` is a postgres:// / postgresql:// URL that `new URL` — and so
+ * postgres.js — can parse. Raw whitespace or < > never belong in a connection
+ * URL (they would be percent-encoded): `new URL` accepts them, then the login
+ * fails with a mangled password, so they count as malformed here.
+ */
+export function isParsablePgUrl(raw: string | undefined): boolean {
+  if (!raw || raw.trim() === '' || /\s|[<>]/.test(raw.trim())) return false;
+  try {
+    const u = new URL(raw.trim());
+    return (u.protocol === 'postgres:' || u.protocol === 'postgresql:') && u.hostname !== '';
+  } catch {
+    return false;
+  }
+}
+
+/** Why a DB URL cannot be used. Never echoes the value: it carries a password. */
+export function pgUrlProblem(raw: string): string {
+  const v = raw.trim();
+  if (/^[A-Z][A-Z0-9_]*\s*=/.test(v)) return 'the value starts with "NAME=" — paste only the URL';
+  if (/\s/.test(v)) return 'it contains a space or a line break';
+  if (/[<>]/.test(v)) return 'it contains < or > — remove the placeholder brackets around the password';
+  if (!/^postgres(ql)?:\/\//i.test(v)) return 'it does not start with postgresql://';
+  return 'it is not a valid URL — a special character in the password (@ : / ? #) must be URL-encoded';
+}
+
+/**
+ * The restomatch_app connection on DATABASE_URL's host, with APP_ROLE_PASSWORD:
+ * the same role and password the Supabase deploy / provision-rls set
+ * (docs/SUPABASE-GITHUB-DEPLOY.md §4.2). Supavisor names users
+ * `<role>.<project-ref>`, so the ref is carried over. Null when either input
+ * is missing or unusable. assertAppRoleNoBypass (instrumentation) still proves
+ * the resulting connection does not bypass RLS before any tenant is served.
+ */
+export function deriveAppRoleUrl(env: NodeJS.ProcessEnv = process.env): string | null {
+  const owner = env.DATABASE_URL?.trim();
+  const password = env.APP_ROLE_PASSWORD;
+  if (!owner || !password || /\s/.test(password) || !isParsablePgUrl(owner)) return null;
+  const u = new URL(owner);
+  const ref = /^[^.]+\.([a-z0-9]{20})$/.exec(decodeURIComponent(u.username))?.[1];
+  u.username = ref ? `restomatch_app.${ref}` : 'restomatch_app';
+  u.password = encodeURIComponent(password);
+  return u.toString();
+}
+
 export function resolveWebDbUrl(env: NodeJS.ProcessEnv = process.env): string {
   const appUrl = env.DATABASE_URL_APP;
+  if (env.NODE_ENV === 'production' && !isParsablePgUrl(appUrl)) {
+    // A missing or malformed DATABASE_URL_APP used to fail the build at page-data
+    // collection ("Invalid URL") or every request at boot. Derive the same role
+    // from the owner URL instead, and say why — without the value.
+    const derived = deriveAppRoleUrl(env);
+    if (derived) {
+      if (!isNextBuildPhase(env)) {
+        console.warn(
+          `[env] DATABASE_URL_APP is ${appUrl ? `unusable (${pgUrlProblem(appUrl)})` : 'unset'} — ` +
+            "connecting as restomatch_app on DATABASE_URL's host with APP_ROLE_PASSWORD",
+        );
+      }
+      return derived;
+    }
+    if (appUrl && appUrl.trim() !== '') {
+      if (isNextBuildPhase(env)) return BUILD_PHASE_DB_PLACEHOLDER;
+      throw new Error(`[env] DATABASE_URL_APP is unusable: ${pgUrlProblem(appUrl)}.`);
+    }
+  }
   if (appUrl && appUrl.length > 0) return appUrl;
 
   const ownerFallbackAllowed =
     (env.NODE_ENV ?? 'development') === 'test' || isTruthyFlag(env.ALLOW_OWNER_DB);
   if (ownerFallbackAllowed && env.DATABASE_URL) return env.DATABASE_URL;
+
+  if (isNextBuildPhase(env)) return BUILD_PHASE_DB_PLACEHOLDER;
 
   throw new Error(
     '[env] DATABASE_URL_APP is required: the web app must serve tenant traffic on the non-owner ' +

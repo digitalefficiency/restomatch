@@ -1,3 +1,4 @@
+import { createServer } from 'node:net';
 import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -16,6 +17,7 @@ import {
   products,
   purchaseOrders,
   restaurants,
+  sql,
   suppliers,
   users,
 } from '@restomatch/db';
@@ -353,12 +355,13 @@ describe('receiving.registerInvoice', () => {
     expect(pending[0]?.status).toBe('ocr_pending');
   });
 
-  // EN-7 / F7: a set-but-broken REDIS_URL used to hang registerInvoice until the
-  // serverless function timed out. Now the producer fails fast, the invoice is
-  // kept, and the client is told OCR was not queued.
+  // EN-7 / F7: an unreachable queue used to hang registerInvoice until the
+  // serverless function timed out. The queue is Postgres now (0061 job_queue);
+  // the producer still fails fast, the invoice is kept, and the client is told
+  // OCR was not queued.
   it.each([
-    ['an Upstash REST URL (wrong scheme)', 'https://eu1-example.upstash.io', 500],
-    ['a Redis that refuses connections', 'redis://127.0.0.1:1', 4_500],
+    ['a queue database that refuses connections', 'postgres://u:p@127.0.0.1:1/db', 4_500],
+    ['a black-holed queue database (never answers)', 'SILENT', 4_500],
   ])('with %s: answers fast with ocrQueued=false and keeps the invoice', async (_label, url, budgetMs) => {
     const s = await seed();
     const caller = callerFor({
@@ -367,13 +370,16 @@ describe('receiving.registerInvoice', () => {
       role: 'receiver',
     });
     const { receiptId } = await caller.receiving.startReceipt({ poId: s.todayPoId });
-    const saved = process.env.REDIS_URL;
-    process.env.REDIS_URL = url;
+    const silent = createServer(() => {});
+    await new Promise<void>((r) => silent.listen(0, '127.0.0.1', () => r()));
+    const saved = process.env.QUEUE_DATABASE_URL;
+    process.env.QUEUE_DATABASE_URL =
+      url === 'SILENT' ? `postgres://u:p@127.0.0.1:${(silent.address() as { port: number }).port}/db` : url;
     try {
       const t0 = Date.now();
       const res = await caller.receiving.registerInvoice({
         grId: receiptId,
-        imageUrl: 'https://example.com/redis-down.jpg',
+        imageUrl: 'https://example.com/queue-down.jpg',
         supplierId: s.supplierId,
       });
       expect(Date.now() - t0).toBeLessThan(budgetMs);
@@ -382,12 +388,13 @@ describe('receiving.registerInvoice', () => {
       expect(row?.id).toBe(res.invoiceId);
       expect(row?.status).toBe('ocr_pending');
     } finally {
-      if (saved === undefined) delete process.env.REDIS_URL;
-      else process.env.REDIS_URL = saved;
+      if (saved === undefined) delete process.env.QUEUE_DATABASE_URL;
+      else process.env.QUEUE_DATABASE_URL = saved;
+      silent.close();
     }
   }, 10_000);
 
-  it('reports ocrQueued=false when no queue is configured (REDIS_URL unset)', async () => {
+  it('reports ocrQueued=false when no queue database is configured', async () => {
     const s = await seed();
     const caller = callerFor({
       userId: s.receiverId,
@@ -395,12 +402,58 @@ describe('receiving.registerInvoice', () => {
       role: 'receiver',
     });
     const { receiptId } = await caller.receiving.startReceipt({ poId: s.todayPoId });
-    const res = await caller.receiving.registerInvoice({
-      grId: receiptId,
-      imageUrl: 'https://example.com/ok.jpg',
-      supplierId: s.supplierId,
+    const saved = { q: process.env.QUEUE_DATABASE_URL, d: process.env.DATABASE_URL };
+    delete process.env.QUEUE_DATABASE_URL;
+    delete process.env.DATABASE_URL;
+    try {
+      const res = await caller.receiving.registerInvoice({
+        grId: receiptId,
+        imageUrl: 'https://example.com/ok.jpg',
+        supplierId: s.supplierId,
+      });
+      expect(res).toMatchObject({ ocrQueued: false, alreadyExisted: false });
+    } finally {
+      if (saved.q !== undefined) process.env.QUEUE_DATABASE_URL = saved.q;
+      if (saved.d !== undefined) process.env.DATABASE_URL = saved.d;
+    }
+  });
+
+  it('enqueues the OCR job into job_queue (ocrQueued=true) with the tenant + invoice', async () => {
+    const s = await seed();
+    const caller = callerFor({
+      userId: s.receiverId,
+      restaurantId: s.restaurantId,
+      role: 'receiver',
     });
-    expect(res).toMatchObject({ ocrQueued: false, alreadyExisted: false });
+    const { receiptId } = await caller.receiving.startReceipt({ poId: s.todayPoId });
+    const saved = process.env.QUEUE_DATABASE_URL;
+    process.env.QUEUE_DATABASE_URL = TEST_DB_URL;
+    try {
+      const res = await caller.receiving.registerInvoice({
+        grId: receiptId,
+        imageUrl: 'https://example.com/queued.jpg',
+        supplierId: s.supplierId,
+      });
+      expect(res).toMatchObject({ ocrQueued: true, alreadyExisted: false });
+      const rows = (await db.execute(sql`
+        SELECT queue, status, restaurant_id, payload FROM job_queue
+         WHERE payload->>'invoiceId' = ${res.invoiceId}`)) as unknown as Array<{
+        queue: string;
+        status: string;
+        restaurant_id: string;
+        payload: { imageUrl: string; supplierId: string };
+      }>;
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        queue: 'ocr-invoice',
+        status: 'queued',
+        restaurant_id: s.restaurantId,
+        payload: { imageUrl: 'https://example.com/queued.jpg', supplierId: s.supplierId },
+      });
+    } finally {
+      if (saved === undefined) delete process.env.QUEUE_DATABASE_URL;
+      else process.env.QUEUE_DATABASE_URL = saved;
+    }
   });
 });
 

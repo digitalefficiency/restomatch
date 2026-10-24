@@ -304,7 +304,10 @@ function UploadStatusBanner({
           <CheckCircle2 className="w-4 h-4 text-primary" />
           <div className="min-w-0 flex-1">
             <div className="font-semibold text-ink truncate">
-              {t('steps.scan.bannerSaved', { id: state.result.invoiceId })}
+              {/* An offline-queued photo has no invoice yet — never show its internal queued-<uuid> id. */}
+              {state.result.invoiceId.startsWith('queued-')
+                ? t('steps.scan.bannerQueued')
+                : t('steps.scan.bannerSaved', { id: state.result.invoiceId })}
             </div>
           </div>
         </div>

@@ -2,8 +2,8 @@
  * Store-agnostic fixed-window rate limiting.
  *
  * The window is bucketed by floor(now / windowSec): every key gets one counter
- * per window, incremented atomically, with a TTL so it self-expires. A Redis
- * INCR+EXPIRE store is the production backing (apps/web/lib/rateLimit.ts); the
+ * per window, incremented atomically, with an expiry so it can be pruned. A
+ * Postgres upsert store is the production backing (apps/web/lib/rateLimit.ts); the
  * in-memory store here backs tests and single-process dev.
  */
 
@@ -14,6 +14,8 @@ export interface RateLimitStore {
    * counter cannot live forever.
    */
   incr(key: string, windowSec: number): Promise<number>;
+  /** Optional: drop the counter for `key` (resetRateLimit; e.g. a successful login). */
+  del?(key: string): Promise<void>;
 }
 
 export interface RateLimitOptions {
@@ -37,14 +39,19 @@ export interface RateLimitResult {
   resetSec: number;
 }
 
+/** The counter key of `identifier`'s current window (shared by check and reset). */
+function windowKey(identifier: string, opts: RateLimitOptions, now: number): { key: string; windowIndex: number } {
+  const windowIndex = Math.floor(now / 1000 / opts.windowSec);
+  return { key: `${opts.prefix ?? 'rl'}:${identifier}:${windowIndex}`, windowIndex };
+}
+
 export async function checkRateLimit(
   store: RateLimitStore,
   identifier: string,
   opts: RateLimitOptions,
 ): Promise<RateLimitResult> {
   const now = opts.now ? opts.now() : Date.now();
-  const windowIndex = Math.floor(now / 1000 / opts.windowSec);
-  const key = `${opts.prefix ?? 'rl'}:${identifier}:${windowIndex}`;
+  const { key, windowIndex } = windowKey(identifier, opts, now);
 
   const count = await store.incr(key, opts.windowSec);
   const nextWindowStartMs = (windowIndex + 1) * opts.windowSec * 1000;
@@ -57,6 +64,18 @@ export async function checkRateLimit(
     remaining: Math.max(0, opts.limit - count),
     resetSec,
   };
+}
+
+/**
+ * Forget `identifier`'s count in the current window (no-op for a store without
+ * `del`). Used to stop SUCCESSFUL logins from counting toward a per-account
+ * lockout: every attempt still increments atomically (so parallel guesses stay
+ * bounded), and a success clears the account's counter.
+ */
+export async function resetRateLimit(store: RateLimitStore, identifier: string, opts: RateLimitOptions): Promise<void> {
+  if (!store.del) return;
+  const now = opts.now ? opts.now() : Date.now();
+  await store.del(windowKey(identifier, opts, now).key);
 }
 
 /**
@@ -76,6 +95,10 @@ export class MemoryRateLimitStore implements RateLimitStore {
     }
     existing.count += 1;
     return existing.count;
+  }
+
+  async del(key: string): Promise<void> {
+    this.counters.delete(key);
   }
 
   /** Test helper: drop all counters. */

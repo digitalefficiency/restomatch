@@ -1,0 +1,7 @@
+import { handleChallenge } from '@/lib/leakCheck/handlers';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
+
+export const POST = (req: Request) => handleChallenge(req);

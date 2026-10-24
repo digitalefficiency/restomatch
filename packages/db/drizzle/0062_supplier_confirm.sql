@@ -1,0 +1,71 @@
+-- 0062_supplier_confirm (S11 wave-1 `supplierConfirm`: lite supplier portal, no supplier accounts)
+--
+-- supplier_confirm_links — one signed magic link per sent order. The raw token
+--   (32 random bytes, base64url) is shown once and NEVER stored: only its
+--   SHA-256 (token_hash, unique). expires_at = created_at + 72h; revoked_at
+--   kills a link early. Scoped to one restaurant + one PO.
+-- supplier_responses — the supplier's answer: confirmed, or per-line shortages
+--   / proposed prices in `lines` (jsonb, validated server-side against the PO's
+--   own lines). UNIQUE(po_id): the first answer wins, a replay is refused.
+--   The purchase order itself is NEVER written — the restaurant sees the answer
+--   as differences on the order page.
+--
+-- Same-tenant: composite FK (po_id, restaurant_id) → purchase_orders (adds
+-- UNIQUE(id, restaurant_id) on purchase_orders — additive, id is the PK).
+-- RLS: enabled + per-restaurant policy below (same shape as rls/0002; rls/*.sql
+-- untouched). Additive only; rollback = DROP TABLE supplier_responses, supplier_confirm_links.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'purchase_orders_id_restaurant_id_key') THEN
+    ALTER TABLE "purchase_orders" ADD CONSTRAINT "purchase_orders_id_restaurant_id_key" UNIQUE ("id","restaurant_id");
+  END IF;
+END $$;--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "supplier_confirm_links" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE cascade,
+  "po_id" uuid NOT NULL,
+  "token_hash" varchar(64) NOT NULL,
+  "expires_at" timestamp with time zone NOT NULL,
+  "revoked_at" timestamp with time zone,
+  "created_by" uuid REFERENCES "users"("id") ON DELETE set null,
+  "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT "supplier_confirm_links_po_same_tenant_fk" FOREIGN KEY ("po_id","restaurant_id")
+    REFERENCES "purchase_orders"("id","restaurant_id") ON DELETE cascade,
+  CONSTRAINT "supplier_confirm_links_token_hash_hex" CHECK ("token_hash" ~ '^[0-9a-f]{64}$'),
+  CONSTRAINT "supplier_confirm_links_expiry_after_create" CHECK ("expires_at" > "created_at")
+);--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "supplier_confirm_links_token_hash_key" ON "supplier_confirm_links" ("token_hash");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "supplier_confirm_links_po_idx" ON "supplier_confirm_links" ("po_id","restaurant_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "supplier_confirm_links_restaurant_idx" ON "supplier_confirm_links" ("restaurant_id","created_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "supplier_confirm_links_created_by_idx" ON "supplier_confirm_links" ("created_by");--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "supplier_responses" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE cascade,
+  "po_id" uuid NOT NULL,
+  "link_id" uuid NOT NULL REFERENCES "supplier_confirm_links"("id") ON DELETE cascade,
+  "status" varchar(16) NOT NULL,
+  "lines" jsonb DEFAULT '[]'::jsonb NOT NULL,
+  "note" text,
+  "submitted_at" timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT "supplier_responses_po_same_tenant_fk" FOREIGN KEY ("po_id","restaurant_id")
+    REFERENCES "purchase_orders"("id","restaurant_id") ON DELETE cascade,
+  CONSTRAINT "supplier_responses_status_check" CHECK ("status" IN ('confirmed','changes')),
+  CONSTRAINT "supplier_responses_lines_array" CHECK (jsonb_typeof("lines") = 'array'),
+  CONSTRAINT "supplier_responses_note_len" CHECK ("note" IS NULL OR char_length("note") <= 1000)
+);--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "supplier_responses_po_key" ON "supplier_responses" ("po_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "supplier_responses_po_idx" ON "supplier_responses" ("po_id","restaurant_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "supplier_responses_link_idx" ON "supplier_responses" ("link_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "supplier_responses_restaurant_idx" ON "supplier_responses" ("restaurant_id","submitted_at");--> statement-breakpoint
+-- Tenant RLS lives in this migration (not in drizzle/rls/0002, which the
+-- integrator regenerates): same shape as 0002's per-restaurant policy. The
+-- helper is created exactly as rls/0002 defines it (idempotent).
+CREATE SCHEMA IF NOT EXISTS app;--> statement-breakpoint
+CREATE OR REPLACE FUNCTION app.current_restaurant_id() RETURNS uuid
+  LANGUAGE sql STABLE
+  AS $$ select nullif(current_setting('app.current_restaurant_id', true), '')::uuid $$;--> statement-breakpoint
+ALTER TABLE "supplier_confirm_links" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+DROP POLICY IF EXISTS "supplier_confirm_links_tenant" ON "supplier_confirm_links";--> statement-breakpoint
+CREATE POLICY "supplier_confirm_links_tenant" ON "supplier_confirm_links" USING (restaurant_id = app.current_restaurant_id());--> statement-breakpoint
+ALTER TABLE "supplier_responses" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+DROP POLICY IF EXISTS "supplier_responses_tenant" ON "supplier_responses";--> statement-breakpoint
+CREATE POLICY "supplier_responses_tenant" ON "supplier_responses" USING (restaurant_id = app.current_restaurant_id());

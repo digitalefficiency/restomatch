@@ -30,12 +30,16 @@ export function InvoicePaper({ data }: InvoicePaperProps) {
   const docType = data.documentType ?? 'delivery_note';
   const docTitle = docType === 'tax_invoice' ? 'חשבונית מס' : 'תעודת משלוח';
 
+  // Fixed timezone: this renders on the server (UTC) and in the browser — the
+  // runtime's own zone would print different hours on each (hydration #418).
   const dateText = new Date(data.invoiceDate).toLocaleDateString('he-IL', {
+    timeZone: 'Asia/Jerusalem',
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
   });
   const timeText = new Date(data.invoiceDate).toLocaleTimeString('he-IL', {
+    timeZone: 'Asia/Jerusalem',
     hour: '2-digit',
     minute: '2-digit',
   });
