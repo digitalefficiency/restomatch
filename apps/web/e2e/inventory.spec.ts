@@ -34,6 +34,16 @@ test.beforeAll(async () => {
     settingsBefore = r.settings;
     await sql`update restaurants set settings = jsonb_set(coalesce(settings, '{}'::jsonb), '{features}',
       coalesce(settings -> 'features', '{}'::jsonb) || '{"inventoryCount": true}'::jsonb) where id = ${restaurantId}`;
+  } finally {
+    await sql.end();
+  }
+});
+
+// Each locale starts from the same state: only the opening count 20 days back. (A second count on
+// the same day as a closed one is refused — NOT_AFTER_LAST — so the he run's count must not carry over.)
+test.beforeEach(async () => {
+  const sql = e2eSql();
+  try {
     await sql`delete from inventory_counts where restaurant_id = ${restaurantId}`;
     await sql`insert into inventory_counts (restaurant_id, count_date, status, total_value_agorot, completed_at)
       values (${restaurantId}, (now() at time zone 'Asia/Jerusalem')::date - 20, 'completed', 900000, now())`;
