@@ -74,6 +74,7 @@ export function PosImport() {
         const r = await doImport.mutateAsync(submitted);
         toast.success(t('pos.imported', { count: formatNumber(r.rowCount, locale), from: day(r.from!), to: day(r.to!) }));
         if (r.replacedRows > 0) toast.success(t('pos.replaced', { count: formatNumber(r.replacedRows, locale) }));
+        if (r.rejectedDays.length > 0) toast.error(t('pos.rejectedDays', { days: r.rejectedDays.map(day).join(', ') }));
         // Only clear what was imported: a file picked meanwhile stays.
         if (fileRef.current === submitted) {
           fileRef.current = null;
@@ -147,6 +148,11 @@ export function PosImport() {
                 ))}
               </ul>
             </div>
+            {result.rejectedDays.length > 0 ? (
+              <p role="status" className="text-sm text-warn">
+                {t('pos.rejectedDays', { days: result.rejectedDays.map(day).join(', ') })}
+              </p>
+            ) : null}
             {result.issueCount > 0 ? (
               <details className="text-sm text-warn">
                 <summary className="cursor-pointer">{t('pos.issues', { count: formatNumber(result.issueCount, locale) })}</summary>

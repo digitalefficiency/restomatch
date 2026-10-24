@@ -88,6 +88,26 @@ describe('0058 POS tables under RLS (app role)', () => {
     expect(rows).toHaveLength(0);
   });
 
+  it("A cannot attach its own rows to B's import (so B's delete can't cascade into A)", async () => {
+    const [bImport] = await ownerDb
+      .select({ id: posSalesImports.id })
+      .from(posSalesImports)
+      .where(eq(posSalesImports.restaurantId, B.restaurantId));
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) =>
+        tx.insert(posSales).values({
+          restaurantId: A.restaurantId,
+          importId: bImport!.id,
+          soldOn: '2026-12-02',
+          itemRef: 'LINK',
+          itemName: 'linked to B',
+          qty: '1',
+          netAmount: '1',
+        }),
+      ),
+    ).rejects.toThrow(/foreign key|violates/);
+  });
+
   it("A cannot write a row into B, nor delete B's rows", async () => {
     const [bImport] = await ownerDb
       .select({ id: posSalesImports.id })

@@ -19,6 +19,8 @@ export interface PosParseIssue {
   /** 1-based line in the file (header = line 1). */
   line: number;
   code: 'BAD_DATE' | 'BAD_QTY' | 'BAD_AMOUNT' | 'NO_ITEM' | 'BAD_ROW';
+  /** The row's business day, when its date was readable. */
+  soldOn?: string;
 }
 
 export interface PosParseResult {
@@ -26,6 +28,8 @@ export interface PosParseResult {
   issues: PosParseIssue[];
   /** Which file columns were used, for the preview. */
   columns: Record<'date' | 'itemRef' | 'itemName' | 'qty' | 'net', string | null>;
+  /** Days in the file whose every row was rejected (an import keeps their old data). */
+  rejectedDays: string[];
 }
 
 export interface PosSalesProvider {

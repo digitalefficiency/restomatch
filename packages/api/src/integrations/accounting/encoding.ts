@@ -26,15 +26,25 @@ function cp1255Table(): Map<string, number> {
 
 /** Encode to Windows-1255. Characters it can't represent become '?'. */
 export function encodeWindows1255(text: string): Uint8Array {
+  return encodeWindows1255WithReport(text).bytes;
+}
+
+/** Windows-1255 bytes plus how many characters had to become '?' (so the UI can warn). */
+export function encodeWindows1255WithReport(text: string): { bytes: Uint8Array; replaced: number } {
   const table = cp1255Table();
   const out = new Uint8Array(text.length);
   let n = 0;
+  let replaced = 0;
   for (const ch of text) {
     const code = ch.codePointAt(0)!;
     if (code < 0x80) out[n++] = code;
-    else out[n++] = table.get(ch) ?? 0x3f;
+    else {
+      const b = table.get(ch);
+      if (b === undefined) replaced++;
+      out[n++] = b ?? 0x3f;
+    }
   }
-  return out.slice(0, n);
+  return { bytes: out.slice(0, n), replaced };
 }
 
 /** UTF-16LE with a byte-order mark. */

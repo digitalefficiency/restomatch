@@ -126,6 +126,7 @@ export async function fetchInvoices(
       invoiceDate: invoices.invoiceDate,
       supplierName: suppliers.name,
       supplierBusinessId: suppliers.businessId,
+      supplierVatRate: suppliers.vatRate,
       totalExclVat: invoices.totalExclVat,
       vatAmount: invoices.vatAmount,
       totalInclVat: invoices.totalInclVat,

@@ -1,4 +1,4 @@
-import { agorotToPlain, cell, CRLF, ddmmyyyy, supplierAccount } from './common';
+import { agorotToPlain, CRLF, ddmmyyyy, safeCell, supplierAccount } from './common';
 import { encodeUtf16leBom } from './encoding';
 import type { AccountingConfig, AccountingFile, AccountingInvoice } from './types';
 
@@ -25,18 +25,18 @@ export function priorityLines(invoices: AccountingInvoice[], cfg: AccountingConf
     out.push(
       [
         '1',
-        cell(supplierAccount(inv, cfg), 16),
-        cell(inv.invoiceNumber, 20),
+        safeCell(supplierAccount(inv, cfg), 16),
+        safeCell(inv.invoiceNumber, 20),
         ddmmyyyy(inv.invoiceDate, true),
-        cell(inv.supplierName, 48),
+        safeCell(inv.supplierName, 48),
         agorotToPlain(inv.totalInclAgorot),
       ].join('\t'),
     );
     out.push(
       [
         '2',
-        cell(cfg.expenseAccount, 15),
-        cell(`RestoMatch ${inv.invoiceNumber}`, 48),
+        safeCell(cfg.expenseAccount, 15),
+        safeCell(`RestoMatch ${inv.invoiceNumber}`, 48),
         agorotToPlain(inv.totalExclAgorot),
         agorotToPlain(inv.vatAgorot),
       ].join('\t'),
@@ -57,5 +57,6 @@ export function priorityFile(
     encoding: 'utf-16le',
     bytes: encodeUtf16leBom(lines.length ? lines.join(CRLF) + CRLF : ''),
     rowCount: invoices.length,
+    replacedChars: 0,
   };
 }

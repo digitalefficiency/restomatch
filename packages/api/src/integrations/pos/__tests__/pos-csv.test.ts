@@ -17,9 +17,10 @@ describe('POS CSV adapter', () => {
     ]);
     expect(out.issues).toEqual([
       { line: 7, code: 'BAD_DATE' },
-      { line: 8, code: 'NO_ITEM' },
-      { line: 9, code: 'BAD_QTY' },
+      { line: 8, code: 'NO_ITEM', soldOn: '2026-10-02' },
+      { line: 9, code: 'BAD_QTY', soldOn: '2026-10-02' },
     ]);
+    expect(out.rejectedDays).toEqual([]); // 2 Oct still has a valid row
   });
 
   it('English UTF-8 (BOM) export with ₪ amounts', () => {
@@ -52,7 +53,9 @@ describe('POS CSV adapter', () => {
     expect(parseScaled('1,234.56', 2)).toBe(123456);
     expect(parseScaled('12,5', 3)).toBe(12500);
     expect(parseScaled('0.1', 2)).toBe(10);
-    expect(parseScaled('-3.205', 2)).toBe(-321);
+    // Money with 3 decimals is ambiguous ("1.234" = ₪1,234 in a European export): refused.
+    expect(parseScaled('-3.205', 2)).toBeNull();
+    expect(parseScaled('-3.205', 3)).toBe(-3205);
     expect(parseScaled('x', 2)).toBeNull();
     expect(detectPosColumns(['קוד מנה', 'שם מנה', 'יום עסקים', 'יחידות', 'סה"כ'])).toEqual({
       date: 'יום עסקים',
@@ -79,7 +82,9 @@ describe('POS CSV adapter — refuter regressions', () => {
     expect(out.rows).toEqual([{ soldOn: '2026-10-01', itemRef: 'Burger', itemName: 'Burger', qtyMilli: 1000, netAgorot: 5000 }]);
     expect(out.issues).toEqual([]);
     // A negative count with a positive amount is still nonsense.
-    expect(csvPosProvider.parse(csv('date,item,qty,net\n2026-10-01,X,-1,5\n')).issues).toEqual([{ line: 2, code: 'BAD_QTY' }]);
+    expect(csvPosProvider.parse(csv('date,item,qty,net\n2026-10-01,X,-1,5\n')).issues).toEqual([
+      { line: 2, code: 'BAD_QTY', soldOn: '2026-10-01' },
+    ]);
   });
 
   it('number formats: decimal comma, European, trailing minus, parentheses', () => {
@@ -103,5 +108,48 @@ describe('POS CSV adapter — refuter regressions', () => {
     const out = csvPosProvider.parse(csv('date,item,qty,net\n2026-10-01,X,1000000000,10\n2026-10-01,Y,1,99999999999\n'));
     expect(out.rows).toEqual([]);
     expect(out.issues.map((i) => i.code)).toEqual(['BAD_QTY', 'BAD_AMOUNT']);
+  });
+});
+
+describe('POS CSV adapter — S1 cross-QA', () => {
+  const csv = (text: string) => ({ filename: 'r.csv', bytes: new TextEncoder().encode(text) });
+
+  it('ambiguous numbers are refused, never guessed', () => {
+    expect(parseScaled('1.234', 2)).toBeNull(); // ₪1.234 or European ₪1,234?
+    expect(parseScaled('1,250', 3)).toBeNull(); // 1,250 units or 1.25 kg?
+    expect(parseScaled('(-5)', 2)).toBeNull();
+    expect(parseScaled('-5-', 2)).toBeNull();
+    expect(parseScaled('1.234.567', 2)).toBe(123456700);
+    expect(parseScaled('1,5', 3)).toBe(1500);
+    expect(parseScaled('1,234', 2)).toBe(123400);
+    expect(parseScaled('1.234,5', 2)).toBe(123450);
+    expect(parseScaled('1,23,4.5', 2)).toBeNull();
+  });
+
+  it('cashier / register codes are never the item code; gross is never the net', () => {
+    expect(detectPosColumns(['תאריך', 'קוד קופאי', 'קוד פריט', 'שם פריט', 'כמות', 'מכירות נטו'])).toMatchObject({
+      itemRef: 'קוד פריט',
+      net: 'מכירות נטו',
+    });
+    expect(detectPosColumns(['Date', 'Cashier Code', 'Item', 'Qty', 'Gross Total'])).toMatchObject({
+      itemRef: null,
+      net: null,
+    });
+    expect(() => csvPosProvider.parse(csv('Date,Item,Qty,Gross Total\n2026-10-01,Soup,1,11.80\n'))).toThrow(PosFileError);
+  });
+
+  it('line numbers are the file lines, across blank lines and quoted multi-line cells', () => {
+    const text = 'date,item,qty,net\n\n2026-10-01,"Soup\nof the day",1,10\n\n2026-10-01,Bad,x,10\n2026-13-01,Y,1,1\n';
+    const out = csvPosProvider.parse(csv(text));
+    expect(out.rows).toHaveLength(1);
+    expect(out.issues).toEqual([
+      { line: 6, code: 'BAD_QTY', soldOn: '2026-10-01' },
+      { line: 7, code: 'BAD_DATE' },
+    ]);
+  });
+
+  it('a day whose every row was rejected is reported (its old data stays)', () => {
+    const out = csvPosProvider.parse(csv('date,item,qty,net\n2026-10-01,A,1,10\n2026-10-02,B,x,10\n'));
+    expect(out.rejectedDays).toEqual(['2026-10-02']);
   });
 });

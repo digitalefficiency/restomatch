@@ -39,8 +39,12 @@ const KEYWORDS = {
  */
 const EXCLUDE: Partial<Record<keyof typeof KEYWORDS, string[]>> = {
   date: ['עודכן', 'עדכון', 'updated', 'modified', 'created', 'time'],
+  // "קוד קופאי" (cashier code), register/table/branch/receipt numbers are not the item.
+  itemRef: ['קופאי', 'cashier', 'מלצר', 'waiter', 'עובד', 'employee', 'staff', 'קופה', 'register', 'terminal', 'שולחן', 'table', 'סניף', 'branch', 'קבלה', 'receipt', 'חשבונית', 'invoice', 'הזמנה', 'order'],
+  itemName: ['קופאי', 'cashier', 'מלצר', 'waiter', 'עובד', 'employee', 'סניף', 'branch', 'לקוח', 'customer'],
   qty: ['הנחה', 'discount', 'החזר', 'refund'],
-  net: ['הנחה', 'discount', 'מעמ', 'vat', 'tax', 'מס', 'טיפ', 'tip', 'עלות', 'cost', 'מחיר', 'price'],
+  // Net = before VAT: gross / incl.-VAT totals are refused (better "missing column" than a wrong ₪).
+  net: ['הנחה', 'discount', 'מעמ', 'vat', 'tax', 'מס', 'טיפ', 'tip', 'עלות', 'cost', 'מחיר', 'price', 'gross', 'ברוטו', 'כולל'],
 };
 
 type Field = keyof typeof KEYWORDS;
@@ -82,41 +86,66 @@ export function parsePosDate(raw: string): string | null {
 }
 
 /**
- * A decimal cell → integer units of 10^-scale, exact (no float math).
- * Accepts ₪, spaces, thousands separators ("1,234.50", European "1.234,50"),
- * a decimal comma ("12,5", "0,500"), and negatives as "-50", "50-" or "(50)".
+ * A decimal cell → integer units of 10^-scale (scale 2 = money in agorot,
+ * scale 3 = qty in thousandths), exact. ONE locale-safe rule set that refuses
+ * to guess — an ambiguous value is null (the line is reported, not imported):
+ *
+ *  - both "," and "." → the later one is the decimal mark, the other must be
+ *    proper thousands grouping ("1,234.50", "1.234,50");
+ *  - only ","  → "1,234" / "12,345,678" is thousands for money but AMBIGUOUS
+ *    for a qty (1,250 units or 1.25 kg?); "12,5" / "0,500" is a decimal comma;
+ *  - only "."  → money takes ≤ 2 decimals ("1.234" could be ₪1,234 European →
+ *    ambiguous); qty takes ≤ 3;
+ *  - one sign only: "-50", "50-" or "(50)"; "(-5)" / "-5-" are refused.
  */
 export function parseScaled(raw: string, scale: 2 | 3): number | null {
-  let s = raw.replace(/[₪\s\u200e\u200f]/g, '');
+  let s = raw.replace(/[₪\s‎‏]/g, '');
   if (!s) return null;
-  let neg = false;
+  let signs = 0;
   if (/^\(.*\)$/.test(s)) {
-    neg = true;
+    signs++;
     s = s.slice(1, -1);
   }
   if (s.endsWith('-')) {
-    neg = !neg;
+    signs++;
     s = s.slice(0, -1);
   }
   if (s.startsWith('-')) {
-    neg = !neg;
+    signs++;
     s = s.slice(1);
   }
-  const lastDot = s.lastIndexOf('.');
-  const lastComma = s.lastIndexOf(',');
-  if (lastDot >= 0 && lastComma >= 0) {
-    // Both: the later one is the decimal separator.
-    s = lastComma > lastDot ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
-  } else if (lastComma >= 0) {
-    // Only commas: "1,234" / "12,345,678" are thousands — except "0,500" (a decimal).
-    s = /^[1-9]\d{0,2}(,\d{3})+$/.test(s) ? s.replace(/,/g, '') : s.replace(',', '.');
-  }
-  const m = /^(\d+)(?:\.(\d+))?$/.exec(s);
-  if (!m) return null;
-  const frac = (m[2] ?? '').padEnd(scale + 1, '0');
-  let v = Number(m[1]) * 10 ** scale + Number(frac.slice(0, scale)) + (Number(frac[scale]) >= 5 ? 1 : 0);
-  if (neg) v = -v;
-  return Number.isSafeInteger(v) ? v : null;
+  if (signs > 1 || !/^[\d.,]+$/.test(s)) return null;
+  const money = scale === 2;
+  const dots = (s.match(/\./g) ?? []).length;
+  const commas = (s.match(/,/g) ?? []).length;
+  let intPart: string;
+  let frac = '';
+  if (dots && commas) {
+    const dec = s.lastIndexOf('.') > s.lastIndexOf(',') ? '.' : ',';
+    const grp = dec === '.' ? ',' : '.';
+    const [head, tail] = [s.slice(0, s.lastIndexOf(dec)), s.slice(s.lastIndexOf(dec) + 1)];
+    if (head.includes(dec) || !new RegExp(`^\\d{1,3}(\\${grp}\\d{3})+$`).test(head)) return null;
+    intPart = head.split(grp).join('');
+    frac = tail;
+  } else if (commas) {
+    if (/^\d{1,3}(,\d{3})+$/.test(s) && !/^0,/.test(s)) {
+      if (!money) return null; // qty "1,250": thousands or a decimal comma — don't guess
+      intPart = s.replace(/,/g, '');
+    } else if (commas === 1) {
+      [intPart, frac] = s.split(',') as [string, string];
+    } else return null;
+  } else if (dots) {
+    if (dots > 1) {
+      if (!money || !/^\d{1,3}(\.\d{3})+$/.test(s)) return null;
+      intPart = s.replace(/\./g, '');
+    } else {
+      [intPart, frac] = s.split('.') as [string, string];
+    }
+  } else intPart = s;
+  if (!/^\d+$/.test(intPart) || !/^\d*$/.test(frac) || frac.length > scale) return null;
+  const v = Number(intPart) * 10 ** scale + Number(frac.padEnd(scale, '0') || '0');
+  if (!Number.isSafeInteger(v)) return null;
+  return signs ? -v : v;
 }
 
 /** NUMERIC(12,3) qty and NUMERIC(12,2) money ceilings (pos_sales). */
@@ -134,43 +163,64 @@ export const csvPosProvider: PosSalesProvider = {
   parse({ bytes }) {
     if (bytes.length > MAX_POS_BYTES) throw new PosFileError('TOO_LARGE');
     const text = decodePosBytes(bytes);
-    const parsed = Papa.parse<Record<string, string>>(text, {
-      header: true,
-      skipEmptyLines: 'greedy',
-      transformHeader: (h) => h.trim(),
-    });
-    const headers = (parsed.meta.fields ?? []).filter(Boolean);
-    if (headers.length === 0 || parsed.data.length === 0) throw new PosFileError('EMPTY');
-    if (parsed.data.length > MAX_POS_ROWS) throw new PosFileError('TOO_MANY_ROWS');
-    const columns = detectPosColumns(headers);
+    // Rows as arrays (no header mode, no line skipping) so every record maps to
+    // its real line in the file — blank lines and quoted multi-line cells
+    // included — for the line numbers in the issue list.
+    const parsed = Papa.parse<string[]>(text, { header: false, skipEmptyLines: false });
+    const records = parsed.data;
+    let line = 1;
+    const located: Array<{ line: number; cells: string[] }> = [];
+    for (const cells of records) {
+      const here = line;
+      line += 1 + cells.reduce((n, c) => n + (c.match(/\r\n|\r|\n/g)?.length ?? 0), 0);
+      if (cells.length === 1 && cells[0]!.trim() === '') continue; // blank line
+      located.push({ line: here, cells });
+    }
+    const [head, ...body] = located;
+    const headers = (head?.cells ?? []).map((h) => h.trim());
+    if (headers.filter(Boolean).length === 0 || body.length === 0) throw new PosFileError('EMPTY');
+    if (body.length > MAX_POS_ROWS) throw new PosFileError('TOO_MANY_ROWS');
+    const columns = detectPosColumns(headers.filter(Boolean));
     const missing = (['date', 'qty', 'net'] as const).filter((f) => !columns[f]);
     if (!columns.itemRef && !columns.itemName) missing.push('item' as never);
     if (missing.length) throw new PosFileError('NO_COLUMNS', missing);
+    const col = (name: string | null) => (name ? headers.indexOf(name) : -1);
+    const at = { date: col(columns.date), ref: col(columns.itemRef), name: col(columns.itemName), qty: col(columns.qty), net: col(columns.net) };
 
     const issues: PosParseIssue[] = [];
-    // A row whose field count is off (e.g. an unquoted "₪ 1,234.56" split in two)
-    // would import shifted values: report it instead.
-    const brokenRows = new Set(
-      parsed.errors.filter((e) => e.type === 'FieldMismatch' && typeof e.row === 'number').map((e) => e.row as number),
-    );
     const latest = latestBusinessDay();
     const byKey = new Map<string, PosSaleRow>();
-    parsed.data.forEach((rec, i) => {
-      const line = i + 2;
-      if (brokenRows.has(i)) return void issues.push({ line, code: 'BAD_ROW' });
-      const parsedDay = parsePosDate(rec[columns.date!] ?? '');
+    for (const { line, cells } of body) {
+      // A row whose field count is off (e.g. an unquoted "₪ 1,234.56" split in
+      // two) would import shifted values: report it instead.
+      if (cells.length !== headers.length) {
+        issues.push({ line, code: 'BAD_ROW' });
+        continue;
+      }
+      const get = (i: number) => (i >= 0 ? (cells[i] ?? '').trim() : '');
+      const parsedDay = parsePosDate(get(at.date));
       // A future day is a typo (15/09/2062), not a sale.
-      if (!parsedDay || parsedDay > latest) return void issues.push({ line, code: 'BAD_DATE' });
+      if (!parsedDay || parsedDay > latest) {
+        issues.push({ line, code: 'BAD_DATE' });
+        continue;
+      }
       const soldOn = parsedDay;
-      const name = (columns.itemName ? rec[columns.itemName] : '')?.trim() ?? '';
-      const ref = ((columns.itemRef ? rec[columns.itemRef] : '')?.trim() || name).slice(0, 64);
-      if (!ref) return void issues.push({ line, code: 'NO_ITEM' });
-      const qty = parseScaled(rec[columns.qty!] ?? '', 3);
-      const net = parseScaled(rec[columns.net!] ?? '', 2);
-      if (net === null || Math.abs(net) > MAX_NET_AGOROT) return void issues.push({ line, code: 'BAD_AMOUNT' });
+      const name = get(at.name);
+      const ref = Array.from(get(at.ref) || name).slice(0, 64).join('');
+      if (!ref) {
+        issues.push({ line, code: 'NO_ITEM', soldOn });
+        continue;
+      }
+      const qty = parseScaled(get(at.qty), 3);
+      const net = parseScaled(get(at.net), 2);
+      if (net === null || Math.abs(net) > MAX_NET_AGOROT) {
+        issues.push({ line, code: 'BAD_AMOUNT', soldOn });
+        continue;
+      }
       // A refund / void line is negative qty with a non-positive amount; it nets out.
       if (qty === null || Math.abs(qty) > MAX_QTY_MILLI || (qty < 0 && net > 0)) {
-        return void issues.push({ line, code: 'BAD_QTY' });
+        issues.push({ line, code: 'BAD_QTY', soldOn });
+        continue;
       }
       const key = `${soldOn}\u0000${ref}`;
       const prev = byKey.get(key);
@@ -180,7 +230,7 @@ export const csvPosProvider: PosSalesProvider = {
       } else {
         byKey.set(key, { soldOn, itemRef: ref, itemName: name || ref, qtyMilli: qty, netAgorot: net });
       }
-    });
+    }
     for (const [key, r] of byKey) {
       // Refunds can't take a day below zero items; keep the money, floor the count.
       if (r.qtyMilli < 0) r.qtyMilli = 0;
@@ -190,6 +240,10 @@ export const csvPosProvider: PosSalesProvider = {
       }
     }
     const rows = [...byKey.values()].sort((a, b) => (a.soldOn + a.itemRef).localeCompare(b.soldOn + b.itemRef));
-    return { rows, issues, columns };
+    // Days that appear in the file but kept NO valid row: an import leaves their
+    // earlier data in place, so the result says so.
+    const accepted = new Set(rows.map((r) => r.soldOn));
+    const rejectedDays = [...new Set(issues.map((i) => i.soldOn).filter((d): d is string => !!d && !accepted.has(d)))].sort();
+    return { rows, issues, columns, rejectedDays };
   },
 };

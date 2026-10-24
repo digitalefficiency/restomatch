@@ -18,6 +18,7 @@ import {
 import { getAdapter, listSupportedPlatforms, type PlatformId } from '@restomatch/procurement';
 import { bookkeeperProcedure, chefProcedure, managerProcedure, memberProcedure, ownerProcedure, requireFeature, router } from '../trpc';
 import { featureEnabled } from '../lib/features';
+import { assertFeatureOn } from '../lib/featureGate';
 import { localIsoDate } from '../exports/period';
 import { fetchInvoices } from './exports';
 import {
@@ -52,11 +53,9 @@ async function loadSettings(db: import('@restomatch/db').Database, restaurantId:
   return (row?.settings ?? {}) as IntegrationSettings;
 }
 
-/** FORBIDDEN unless the restaurant has the `integrations` flag (and FEATURES_OFF doesn't kill it). */
-async function assertIntegrations(db: import('@restomatch/db').Database, restaurantId: string) {
-  if (!featureEnabled(await loadSettings(db, restaurantId), 'integrations')) {
-    throw new TRPCError({ code: 'FORBIDDEN', message: 'FEATURE_DISABLED:integrations' });
-  }
+/** FORBIDDEN / appCode FEATURE_DISABLED unless the `integrations` flag is on (FEATURES_OFF honoured). */
+function assertIntegrations(db: import('@restomatch/db').Database, restaurantId: string) {
+  return assertFeatureOn(db, restaurantId, 'integrations');
 }
 
 /** Accounting exports: bookkeeper/owner, the accounting_export plan feature, and the flag. */
@@ -115,13 +114,31 @@ function posSummaryOf(parsed: PosParseResult) {
     to: days[days.length - 1] ?? null,
     totalNetAgorot: totalNet,
     columns: parsed.columns,
-    issues: parsed.issues.slice(0, 50),
+    issues: parsed.issues.slice(0, 50).map(({ line, code }) => ({ line, code })),
     issueCount: parsed.issues.length,
+    /** Days whose every row was rejected: an import keeps their previous data. */
+    rejectedDays: parsed.rejectedDays,
     sample: parsed.rows.slice(0, 20),
   };
 }
 
 const PROCUREMENT_PLATFORMS = ['marketman', 'zester'] as const satisfies readonly PlatformId[];
+
+/**
+ * VAT inside a VAT-inclusive total, in agorot, half-up (away from zero):
+ * incl − round(incl / (1 + rate)). The rate is a NUMERIC(5,4) string ("0.18");
+ * the division is done in integers (rate × 10 000) so nothing goes through floats.
+ */
+export function vatFromInclusive(inclAgorot: number, rate: string): number {
+  const r = Math.round(Number(rate) * 10_000);
+  if (!Number.isFinite(r) || r <= 0) return 0;
+  // BigInt: incl × 20 000 can pass 2^53 for NUMERIC(12,2)-sized totals.
+  const incl = BigInt(Math.abs(inclAgorot));
+  const denom = 2n * BigInt(10_000 + r);
+  const excl = Number((incl * 20_000n + BigInt(10_000 + r)) / denom);
+  const vat = Math.abs(inclAgorot) - excl;
+  return inclAgorot < 0 ? -vat : vat;
+}
 
 export function accountingConfigOf(settings: IntegrationSettings): AccountingConfig {
   const saved = settings.integrations?.accounting ?? {};
@@ -220,8 +237,15 @@ export const integrationsRouter = router({
       const restaurantId = ctx.session.restaurantId;
       const config = accountingConfigOf(await loadSettings(ctx.db, restaurantId));
       const { rows, tz, undatedCount } = await fetchInvoices(ctx.db, restaurantId, input.from, input.to);
+      const [rest] = await ctx.db
+        .select({ vatRate: restaurants.vatRate })
+        .from(restaurants)
+        .where(eq(restaurants.id, restaurantId))
+        .limit(1);
+      const restaurantVatRate = rest?.vatRate ?? '0.18';
       const invoices: AccountingInvoice[] = [];
       let skipped = 0;
+      let derivedVat = 0;
       for (const r of rows) {
         const excl = numericToAgorot(r.totalExclVat);
         const vat = numericToAgorot(r.vatAmount);
@@ -231,7 +255,16 @@ export const integrationsRouter = router({
           continue;
         }
         // A missing split is derived so the movement still balances to the agora.
-        const vatA = vat ?? (excl !== null ? incl - excl : 0);
+        // Only the total stored (no excl., no VAT): split it with the supplier's
+        // VAT rate (else the restaurant's) instead of posting VAT 0 and losing
+        // the input VAT. Counted so the UI can say so.
+        let vatA: number;
+        if (vat !== null) vatA = vat;
+        else if (excl !== null) vatA = incl - excl;
+        else {
+          vatA = vatFromInclusive(incl, r.supplierVatRate ?? restaurantVatRate);
+          derivedVat++;
+        }
         const exclA = excl ?? incl - vatA;
         // An invoice whose stored totals don't add up (OCR / a manual edit) would
         // post an unbalanced movement: leave it out and count it for the UI.
@@ -258,6 +291,8 @@ export const integrationsRouter = router({
         base64: Buffer.from(file.bytes).toString('base64'),
         rowCount: file.rowCount,
         skippedCount: skipped,
+        derivedVatCount: derivedVat,
+        replacedChars: file.replacedChars,
         undatedCount,
       };
     }),

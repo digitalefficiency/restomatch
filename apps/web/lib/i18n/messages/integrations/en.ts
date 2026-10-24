@@ -17,6 +17,8 @@ export const en: Shape<typeof he> = {
     downloaded: 'Downloaded — invoices in the file: {count}.',
     empty: 'No checked invoices in this range. The file downloaded empty.',
     skipped: 'Left out (no number, date or total): {count}.',
+    replaced: 'Characters Hashavshevet’s encoding (Windows-1255) can’t hold were written as "?": {count}. Check the supplier names in the file.',
+    derivedVat: 'Invoices stored with only a VAT-inclusive total — VAT was computed from the VAT rate: {count}.',
     failed: 'Download failed.',
     mappingLink: 'Account codes',
     mapping: {
@@ -52,6 +54,7 @@ export const en: Shape<typeof he> = {
     range: 'Range',
     total: 'Net sales',
     issues: 'Lines skipped: {count}',
+    rejectedDays: 'Days whose every row was rejected — their earlier data was kept: {days}.',
     issueLine: 'Line {line}: {reason}',
     reasons: {
       BAD_DATE: 'invalid date',

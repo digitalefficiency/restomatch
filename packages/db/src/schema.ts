@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   date,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -12,6 +13,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
   varchar,
@@ -1388,6 +1390,7 @@ export const posSalesImports = pgTable(
   (t) => [
     index('pos_sales_imports_restaurant_idx').on(t.restaurantId, t.createdAt),
     index('pos_sales_imports_created_by_idx').on(t.createdBy),
+    unique('pos_sales_imports_id_restaurant_key').on(t.id, t.restaurantId),
   ],
 );
 
@@ -1398,9 +1401,8 @@ export const posSales = pgTable(
     restaurantId: uuid('restaurant_id')
       .notNull()
       .references(() => restaurants.id, { onDelete: 'cascade' }),
-    importId: uuid('import_id')
-      .notNull()
-      .references(() => posSalesImports.id, { onDelete: 'cascade' }),
+    // Same-tenant composite FK (import_id, restaurant_id) → pos_sales_imports(id, restaurant_id).
+    importId: uuid('import_id').notNull(),
     soldOn: date('sold_on', { mode: 'string' }).notNull(),
     itemRef: varchar('item_ref', { length: 64 }).notNull(),
     itemName: text('item_name').notNull(),
@@ -1410,7 +1412,12 @@ export const posSales = pgTable(
   },
   (t) => [
     uniqueIndex('pos_sales_day_item_idx').on(t.restaurantId, t.soldOn, t.itemRef),
-    index('pos_sales_import_idx').on(t.importId),
+    index('pos_sales_import_idx').on(t.importId, t.restaurantId),
+    foreignKey({
+      name: 'pos_sales_import_same_tenant_fk',
+      columns: [t.importId, t.restaurantId],
+      foreignColumns: [posSalesImports.id, posSalesImports.restaurantId],
+    }).onDelete('cascade'),
   ],
 );
 
