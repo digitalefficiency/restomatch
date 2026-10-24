@@ -193,7 +193,7 @@ describe('race: submit vs OCR finishing (receipt lock)', () => {
   });
 });
 
-describe('F4: the client-named invoiceIds cannot reach unrelated or signed-off invoices', () => {
+describe('F4 attack: a receiver cannot re-match a paid invoice, or one bound to another receipt, via submitReceipt', () => {
   it('a paid invoice, or one matched against another receipt, is dropped; the real scan still goes', async () => {
     const s = await seed();
     const scan = await invoice(s);
