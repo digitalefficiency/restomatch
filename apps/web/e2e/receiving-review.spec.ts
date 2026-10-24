@@ -12,6 +12,12 @@ import { e2eSql } from './helpers';
  * stub's shape: PO lines, one billed above the agreed price, one billed one
  * unit more — straight into the e2e DB at a moment it chooses. That also makes
  * "OCR finishes late" deterministic.
+ *
+ * TODO(S7 Postgres queue): Redis is being removed and packages/queue moves to a
+ * Postgres-backed queue with the same enqueue signatures. Once that lands, the
+ * e2e server can enqueue for real — drop the registerInvoice route patch and run
+ * the worker (dev OCR stub) instead of finishOcr(), keeping finishOcr() only for
+ * the deterministic late-OCR case.
  */
 
 test.use({ storageState: OWNER_STATE, viewport: { width: 1280, height: 860 } });
