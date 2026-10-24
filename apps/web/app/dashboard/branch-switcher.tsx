@@ -177,7 +177,9 @@ export function BranchSwitcher({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={menuId}
-        aria-label={t('switcher.label')}
+        // The accessible name starts with the visible text (branch name + count), then the
+        // action — axe label-content-name-mismatch.
+        aria-label={`${active.restaurantName} ${branches.length} — ${t('switcher.label')}`}
         data-testid="branch-switcher"
         className={cn(
           'inline-flex max-w-[16rem] items-center gap-1.5 rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-xs font-semibold text-ink transition-colors hover:border-primary/40',
