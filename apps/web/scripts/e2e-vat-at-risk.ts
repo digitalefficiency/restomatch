@@ -83,6 +83,13 @@ async function main() {
       await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
       const state = await page.getByTestId('vat-at-risk-card').getAttribute('data-state');
       check(state === 'clear' || state === 'at-risk', `card on the seed: ${state}`);
+      if (state === 'at-risk') {
+        // The demo seed (S1): exactly one invoice, ₪1,123.20 of VAT at risk.
+        const card = await page.getByTestId('vat-at-risk-card').innerText();
+        check(/1,123/.test(await page.getByTestId('vat-at-risk-total').innerText()), 'seed: ₪1,123.20 of VAT at risk');
+        check(/חשבונית אחת/.test(card), 'seed: exactly one invoice at risk');
+        check(!/הפסד/.test(card), 'copy speaks of risk, never "הפסד"');
+      }
       if (state === 'clear') check(/5,000/.test(await page.getByTestId('vat-at-risk-card').innerText()) && /₪/.test(await page.getByTestId('vat-at-risk-card').innerText()), 'T3 copy names the ₪5,000 threshold');
       check(errors.length === 0, `zero console errors (${errors.join(' | ') || 'none'})`);
       await context.close();
@@ -93,6 +100,13 @@ async function main() {
       const { context, page } = await login(browser, 'owner', 'he', 1366);
       await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
       const t = await heroText(page);
+      await context.close();
+      return t;
+    })();
+    const seedTotal = await (async () => {
+      const { context, page } = await login(browser, 'owner', 'he', 1366);
+      await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+      const t = (await page.getByTestId('vat-at-risk-total').count()) ? await page.getByTestId('vat-at-risk-total').innerText() : '';
       await context.close();
       return t;
     })();
@@ -109,7 +123,9 @@ async function main() {
         await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
         const card = page.getByTestId('vat-at-risk-card');
         check((await card.getAttribute('data-state')) === 'at-risk', 'T2: the card flags the invoice');
-        check(/1,123/.test(await page.getByTestId('vat-at-risk-total').innerText()), 'VAT at risk ₪1,123.20 shown');
+        const total = await page.getByTestId('vat-at-risk-total').innerText();
+        check(total.replace(/\D/g, '') !== seedTotal.replace(/\D/g, ''), `VAT at risk includes the new invoice (${total.replace(/[\u200e\u200f]/g, '')})`);
+        check((await card.innerText()).includes(locale === 'he' ? 'בקשו מהספק מספר הקצאה' : 'Ask the supplier for an allocation number'), 'CTA wording');
         if (locale === 'he' && width === 1366) {
           const after = await heroText(page);
           if (after !== before) console.log('    [hero before]', before.slice(0, 400), '\n    [hero after ]', after.slice(0, 400));
