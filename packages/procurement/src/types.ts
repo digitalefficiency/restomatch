@@ -36,6 +36,8 @@ export interface NormalizedProduct {
 }
 
 export interface AdapterCredentials {
+  /** `'fixture'` = serve the platform's recorded offline fixture (no network, no account). */
+  mode?: 'fixture';
   apiKey?: string;
   refreshToken?: string;
   accessToken?: string;

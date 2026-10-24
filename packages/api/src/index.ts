@@ -20,6 +20,8 @@ import { mappingRouter } from './routers/mapping';
 import { productsRouter } from './routers/products';
 import { teamRouter } from './routers/team';
 import { chainRouter } from './routers/chain';
+import { integrationsRouter } from './routers/integrations';
+import { payRunRouter } from './routers/payRun';
 
 export const appRouter = router({
   owner: ownerRouter,
@@ -41,6 +43,8 @@ export const appRouter = router({
   mapping: mappingRouter,
   products: productsRouter,
   chain: chainRouter,
+  integrations: integrationsRouter,
+  payRun: payRunRouter,
   team: teamRouter,
   dsr: dsrRouter,
 });
@@ -125,6 +129,7 @@ export {
   type Notifier,
   type NotificationPayload,
   type NotificationChannel,
+  type EmailAttachment,
 } from './notifications';
 export { logActivity, type ActivityEventInput, type ActivityEventType } from './activity';
 export { buildMatchInputForInvoice, type BuiltMatchInput } from './match/buildMatchInput';
@@ -208,3 +213,7 @@ export {
   type ChainOverviewResult,
 } from './routers/chain';
 export { NOT_BILLING_OWNER } from './routers/chain';
+
+export * from './ledger';
+export { CLAIMABLE_STATUSES, claimableLines, sumClaims, vatBasisOf, type ClaimLine, type VatBasis } from './lib/claims';
+export type { PayRunInvoice, PayRunResult, PayRunStatus, PayRunSupplier, PayRunClaim } from './routers/payRun';

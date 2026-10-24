@@ -1,11 +1,12 @@
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, ReceiptText } from 'lucide-react';
 import { auth } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
-import { EmptyState, SectionHeader } from '@/lib/components';
+import { EmptyState, LinkButton, SectionHeader } from '@/lib/components';
 import { ViewToolbar, hasFilters, localDay, parseView } from '@/lib/components/views';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { approvals } from '@/lib/i18n/messages/approvals';
 import { views as viewsNs } from '@/lib/i18n/messages/views';
+import { payRun as payRunNs } from '@/lib/i18n/messages/payRun';
 import { ApprovalsList, type QueueFilters } from './list';
 import { discrepancyLabel, displayName, severityLabel } from './vocab';
 
@@ -22,7 +23,7 @@ export default async function ApprovalsPage({
     ...(view.filters.supplierIds.length ? { supplierIds: view.filters.supplierIds } : {}),
   };
   const caller = await createServerCaller();
-  const [t, tv, locale] = await Promise.all([getT(approvals), getT(viewsNs), getLocale()]);
+  const [t, tv, tp, locale] = await Promise.all([getT(approvals), getT(viewsNs), getT(payRunNs), getLocale()]);
   const [queue, options, session, memberships] = await Promise.all([
     caller.approvals.myQueue({ limit: 50, ...filters }),
     caller.owner.viewOptions(),
@@ -32,10 +33,27 @@ export default async function ApprovalsPage({
   // The active membership's role (same lookup as the overview).
   const viewerRole =
     (memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0])?.role ?? null;
+  // Pay run (flag payRun): finance roles get a link to this month's pay run.
+  const showPayRun =
+    viewerRole === 'owner' || viewerRole === 'manager' || viewerRole === 'bookkeeper'
+      ? await caller.payRun.enabled().catch(() => false)
+      : false;
 
   return (
     <div>
-      <SectionHeader level={1} title={t('title')} subtitle={t('subtitle')} />
+      <SectionHeader
+        level={1}
+        title={t('title')}
+        subtitle={t('subtitle')}
+        action={
+          showPayRun ? (
+            <LinkButton href="/dashboard/approvals/pay-run" variant="secondary" size="sm" data-testid="approvals-payrun-link">
+              <ReceiptText className="h-4 w-4" aria-hidden="true" />
+              {tp('open')}
+            </LinkButton>
+          ) : undefined
+        }
+      />
 
       <ViewToolbar
         page="approvals"

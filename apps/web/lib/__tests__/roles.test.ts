@@ -32,9 +32,21 @@ describe('roles matrix', () => {
     }
   });
 
+  it('integrations hub: owner, manager, bookkeeper (sections scoped inside); never receiver/chef', () => {
+    expect(allowedRolesForPath('/dashboard/integrations')).toEqual(['owner', 'manager', 'bookkeeper']);
+    expect(canSeeRoute('receiver', '/dashboard/integrations')).toBe(false);
+    expect(canSeeRoute('chef', '/dashboard/integrations')).toBe(false);
+  });
+
   it('bookkeeper can open the approvals queue (duplicate invoices are routed to them)', () => {
     expect(canSeeRoute('bookkeeper', '/dashboard/approvals')).toBe(true);
     expect(canSeeRoute('chef', '/dashboard/approvals')).toBe(false);
+  });
+
+  it('the pay run (/dashboard/approvals/pay-run) is owner / manager / bookkeeper only', () => {
+    expect(allowedRolesForPath('/dashboard/approvals/pay-run')).toEqual(['owner', 'manager', 'bookkeeper']);
+    expect(allowedRolesForPath('/dashboard/approvals/pay-run')).not.toContain('receiver');
+    expect(allowedRolesForPath('/dashboard/approvals/pay-run')).not.toContain('chef');
   });
 
   it('an invoice page is for the roles that reach it (receiving, approvals, leaks) — never the chef', () => {

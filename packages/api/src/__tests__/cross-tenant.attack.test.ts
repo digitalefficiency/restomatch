@@ -117,6 +117,9 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'owner.kpis': 'isolation',
   'owner.leakHero': 'isolation',
   'owner.leakBreakdown': 'isolation',
+  'payRun.enabled': 'isolation — payrun.attack.test.ts: reads only the caller restaurant flag; receiver/chef FORBIDDEN',
+  'payRun.month':
+    'isolation — payrun.attack.test.ts: only the caller restaurant invoices (B never in the payload); receiver/chef FORBIDDEN; flag off ⇒ nothing listed; ₪ = the credit letters to the agora',
   'owner.leakReport': 'isolation',
   'owner.leakSummary': 'isolation',
   'owner.leakGrouped': 'isolation',
@@ -186,6 +189,18 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   // top of the restaurant-scoped baseline query (which already excluded B's
   // rows). The B-only baseline fixture still proves no leak through the query.
   'orders.guardrail': 'attack',
+  // orderPricesOut (flag): preview takes a client poId → assertPoOwned (attack
+  // test below). The settings pair takes no entity id and reads/writes only
+  // ctx.session.restaurantId's own restaurants row.
+  'orders.documentPreview': 'attack',
+  // supplierLedger (flag): ledger takes a client supplierId → assertSupplierOwned;
+  // ledgerGrid lists only the caller's suppliers (both tests below).
+  'suppliers.ledger': 'attack',
+  'suppliers.ledgerGrid': 'isolation',
+  'orders.documentSettings':
+    'memberProcedure with no input: reads only the caller restaurant row (ctx.session.restaurantId) — no client-supplied tenant id to swap',
+  'orders.setDocumentSettings':
+    'managerProcedure taking only a boolean: jsonb_set on the caller restaurant row (WHERE id = ctx.session.restaurantId) — no client-supplied tenant id; role denial covered in order-document.db.test.ts',
   'match.runForInvoice': 'attack',
   'plans.list':
     'public marketing catalog (publicProcedure); reads the global plans table only, no tenant-scoped rows — nothing to isolate',
@@ -217,6 +232,23 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'products.list': 'isolation',
   'products.setNamesEn': 'attack',
   'products.delete': 'attack',
+  // Wave-1 integrations (flag `integrations`), exercised in integrations.test.ts.
+  'integrations.status': 'isolation — integrations.test.ts: reads only the caller restaurant flag (A on does not enable B)',
+  'integrations.accountingConfig':
+    'isolation — integrations.test.ts: lists only the caller restaurant suppliers; FORBIDDEN while the flag is off',
+  'integrations.setAccountingConfig':
+    'attack — integrations.test.ts: a foreign supplier id in supplierAccounts → NOT_FOUND, nothing saved; owner-only',
+  'integrations.accountingExport':
+    "isolation — integrations.test.ts: A's file never carries B's invoices, suppliers or mapping; bookkeeper/owner + flag only",
+  'integrations.posPreview': 'parses the uploaded file only; reads and writes no tenant rows (integrations.test.ts)',
+  'integrations.posImport':
+    "attack — integrations.test.ts: the day-range replace is pinned to the caller restaurant; B's sales for the same days survive",
+  'integrations.posImports': 'isolation — integrations.test.ts: lists only the caller restaurant imports',
+  'integrations.posSummary': "isolation — integrations.test.ts: A's per-item totals exclude B's sales for the same days",
+  'integrations.procurementProviders':
+    "isolation — integrations.test.ts: B's procurement connection never shows as A's",
+  'integrations.procurementPreview':
+    'runs the platform adapter on its recorded offline fixture; takes only a platform enum, no tenant ids, writes nothing',
   // Data-subject-rights (E.6). Not tenant-scoped: export/delete act ONLY on the
   // caller's own identity (keyed to ctx.session.userId — no client-supplied
   // target, so a member can never reach another user); eraseLead operates on the
@@ -839,6 +871,41 @@ describe('orders router: foreign id attacks + list isolation (A → B)', () => {
       .where(eq(purchaseOrders.id, B.poId));
     expect(afterRow?.status).toBe(beforeRow?.status);
     expect(afterRow?.sentAt ?? null).toEqual(beforeRow?.sentAt ?? null);
+  });
+
+  it('suppliers.ledger rejects a foreign supplierId; ledgerGrid lists only own suppliers (flag on)', async () => {
+    const [prev] = await db
+      .select({ settings: restaurants.settings })
+      .from(restaurants)
+      .where(eq(restaurants.id, A.restaurantId));
+    await db
+      .update(restaurants)
+      .set({ settings: { ...(prev?.settings ?? {}), features: { supplierLedger: true } } } as never)
+      .where(eq(restaurants.id, A.restaurantId));
+    try {
+      await expect(callerFor(A).suppliers.ledger({ supplierId: B.supplierId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      const grid = await callerFor(A).suppliers.ledgerGrid({ months: 6 });
+      const ids = grid.suppliers.map((s) => s.supplierId);
+      expect(ids).not.toContain(B.supplierId);
+    } finally {
+      await db.update(restaurants).set({ settings: prev?.settings ?? {} }).where(eq(restaurants.id, A.restaurantId));
+    }
+  });
+
+  it('orders.documentPreview rejects a foreign poId even with the flag on', async () => {
+    const [prev] = await db
+      .select({ settings: restaurants.settings })
+      .from(restaurants)
+      .where(eq(restaurants.id, A.restaurantId));
+    await db
+      .update(restaurants)
+      .set({ settings: { ...(prev?.settings ?? {}), features: { orderPricesOut: true } } } as never)
+      .where(eq(restaurants.id, A.restaurantId));
+    try {
+      await expect(callerFor(A).orders.documentPreview({ poId: B.poId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    } finally {
+      await db.update(restaurants).set({ settings: prev?.settings ?? {} }).where(eq(restaurants.id, A.restaurantId));
+    }
   });
 
   it('orders.createDraft rejects a foreign supplierId and inserts no PO for A', async () => {
