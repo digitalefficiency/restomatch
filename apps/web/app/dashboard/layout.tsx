@@ -130,6 +130,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                   email={email}
                   showChain={showChain}
                   wave1={wave1}
+                  receiverLangsOn={receiverLangsOn}
                   branchSwitcher={
                     memberships.length > 1 ? (
                       <BranchSwitcher variant="list" branches={switcherBranches} activeId={active.restaurantId} />

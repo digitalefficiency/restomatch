@@ -35,6 +35,7 @@ import type { FeatureKey } from '@restomatch/api';
 import { cn } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
+import { LanguagePicker } from '@/lib/i18n/LanguagePicker';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { nav } from '@/lib/i18n/messages/nav';
 import { canSeeRoute } from '@/lib/roles';
@@ -162,9 +163,11 @@ const focusRing =
   'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
 
 /**
- * Desktop (lg+) primary nav: one calm row of tabs under the top bar, grouped
- * with hairline separators. Scrolls horizontally instead of wrapping if a
- * narrow laptop can't fit every tab.
+ * Desktop (lg+) primary nav: a calm row of tabs under the top bar, grouped
+ * with hairline separators. With the wave-1 flags on an owner has ~17 tabs —
+ * wider than the max-w-6xl header at every viewport — so the row WRAPS onto a
+ * second line instead of scrolling: a hidden-scrollbar overflow clipped
+ * Settings/Team/Contracts (even the active tab) with no cue they existed.
  */
 export function DesktopNav({
   role,
@@ -182,14 +185,14 @@ export function DesktopNav({
   const items = visibleItems(role, showChain, features, wave1);
   return (
     <nav aria-label={t('mainLabel')} className="hidden lg:block">
-      <ul className="-mb-px flex items-stretch gap-1 overflow-x-auto text-sm [scrollbar-width:none]">
+      <ul className="-mb-px flex flex-wrap items-stretch gap-x-1 text-sm" data-testid="desktop-nav-row">
         {GROUPS.map((g, gi) => {
           const groupItems = items.filter((i) => i.group === g);
           if (groupItems.length === 0) return null;
           return (
-            <li key={g} className="flex items-stretch gap-1">
+            <li key={g} className="flex min-w-0 max-w-full items-stretch gap-1">
               {gi > 0 ? <span aria-hidden="true" className="my-3 w-px bg-line" /> : null}
-              <ul className="flex items-stretch gap-0.5" aria-label={t(`groups.${g}`)}>
+              <ul className="flex min-w-0 flex-wrap items-stretch gap-0.5" aria-label={t(`groups.${g}`)}>
                 {groupItems.map(({ key, href, icon: Icon }) => {
                   const active = isActive(pathname, href);
                   return (
@@ -235,9 +238,12 @@ export function MobileNav({
   showChain = false,
   branchSwitcher,
   wave1,
+  receiverLangsOn = false,
 }: {
   role: UserRole;
   features?: readonly string[];
+  /** receiverLanguages flag: the drawer offers the same six-language picker as the header. */
+  receiverLangsOn?: boolean;
   logout: () => Promise<void>;
   restaurantName: string;
   email: string;
@@ -260,8 +266,13 @@ export function MobileNav({
   // Bottom bar = the role's first four visible destinations. Only the AI
   // assistant (S14) stays drawer-only; other flag-gated items (recovery,
   // monthly report, recipes, inbox, contracts) keep their slot as on their
-  // branches, e.g. a chef's bar is [overview, recipes, settings].
-  const primary = items.filter((i) => i.key !== 'ask').slice(0, 4);
+  // branches, e.g. a chef's bar is [overview, recipes, settings]. Leaks — the
+  // hero ₪ page — is pinned for every role that sees it: the invoice inbox
+  // (ingest flags) must not push it into the drawer.
+  const barCandidates = items.filter((i) => i.key !== 'ask');
+  const leaksItem = barCandidates.find((i) => i.key === 'leaks');
+  let primary = barCandidates.slice(0, 4);
+  if (leaksItem && !primary.includes(leaksItem)) primary = [...primary.slice(0, 3), leaksItem];
 
   // Close on navigation.
   useEffect(() => {
@@ -379,7 +390,7 @@ export function MobileNav({
               })}
             </nav>
             <div className="flex items-center justify-between gap-3 border-t border-line px-4 py-3">
-              <LocaleSwitcher />
+              {receiverLangsOn ? <LanguagePicker persist /> : <LocaleSwitcher />}
               <form action={logout} data-rm-logout="">
                 <button
                   type="submit"
