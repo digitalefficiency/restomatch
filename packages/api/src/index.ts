@@ -20,6 +20,7 @@ import { mappingRouter } from './routers/mapping';
 import { productsRouter } from './routers/products';
 import { teamRouter } from './routers/team';
 import { chainRouter } from './routers/chain';
+import { consolidatedRouter } from './routers/consolidated';
 
 export const appRouter = router({
   owner: ownerRouter,
@@ -41,11 +42,13 @@ export const appRouter = router({
   mapping: mappingRouter,
   products: productsRouter,
   chain: chainRouter,
+  consolidated: consolidatedRouter,
   team: teamRouter,
   dsr: dsrRouter,
 });
 
 export type AppRouter = typeof appRouter;
+export type { ConsolidatedProposal, DeliveryNoteCoverage } from './match/consolidated';
 export type {
   AppContext,
   AuthedContext,
