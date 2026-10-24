@@ -5,6 +5,8 @@ import { settings as settingsMessages } from '@/lib/i18n/messages/settings';
 import { getT } from '@/lib/i18n/server';
 import { hasPassword } from '@/lib/passwords';
 import { countUnusedRecoveryCodes, isTwoFactorEnabled } from '@/lib/totp';
+import { enabledFeatures } from '@/lib/ingest/features';
+import { ReferralCard } from '@/lib/growth/ReferralCard';
 import { AccountSection } from './account-section';
 import { SettingsForm } from './form';
 import { ProfileForm } from './profile-form';
@@ -42,6 +44,10 @@ export default async function SettingsPage() {
   const [restaurantSettings, profile] = seesRestaurant
     ? await Promise.all([caller.settings.get(), caller.settings.profile()])
     : [null, null];
+  // Referral programme (wave 1, S15 — flag `growth`): owner/manager see the
+  // restaurant's code + stats; only the owner may redeem someone else's code.
+  const referralOn =
+    (role === 'owner' || role === 'manager') && (await enabledFeatures(active?.restaurantId)).includes('growth');
 
   return (
     <div className="space-y-10">
@@ -65,6 +71,7 @@ export default async function SettingsPage() {
           <SettingsForm initial={restaurantSettings} canEdit={isOwner} />
         </div>
       ) : null}
+      {referralOn ? <ReferralCard canRedeem={isOwner} /> : null}
       <div>
         <SectionHeader title={t('sections.privacyTitle')} subtitle={t('sections.privacySubtitle')} />
         <DsrSection />
