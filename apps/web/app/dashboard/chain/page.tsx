@@ -24,6 +24,7 @@ import {
 } from '@/lib/components';
 import { ViewToolbar, parseView, rangeLabel } from '@/lib/components/views';
 import { SwitchBranchButton } from './switch-button';
+import { wholeShekelRows } from './display';
 
 type Overview = Awaited<ReturnType<Awaited<ReturnType<typeof createServerCaller>>['chain']['overview']>>;
 type Alerts = Awaited<ReturnType<Awaited<ReturnType<typeof createServerCaller>>['chain']['alerts']>>;
@@ -112,6 +113,11 @@ export default async function ChainPage({
   }
 
   const alerts = await alertsP;
+  // Display only: whole-₪ rows (= each branch's own dashboard) and totals printed as their sum.
+  const leakShown = wholeShekelRows(data.branches.map((b) => b.leakIls));
+  const spendShown = wholeShekelRows(data.branches.map((b) => b.spendIls));
+  const rowLeak = leakShown.rows;
+  const rowSpend = spendShown.rows;
   const ils = (v: number) => formatIls(v, { locale });
   const typeLabel = (v: string) => ta(`types.${v}.label` as MessageKey<typeof approvalsHe>);
   const shortDay = (ymd: string) => formatDate(`${ymd}T12:00:00Z`, locale, { day: 'numeric', month: 'short' });
@@ -192,10 +198,10 @@ export default async function ChainPage({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4" data-testid="chain-kpis">
         <KpiCard
           label={t('dashboard.kpis.leak')}
-          value={<span data-testid="chain-leak">{ils(totals.leakIls)}</span>}
+          value={<span data-testid="chain-leak">{ils(leakShown.total)}</span>}
           tone={totals.leakIls > 0 ? 'danger' : 'accent'}
           icon={<AlertTriangle className="h-5 w-5" />}
-          subtitle={t('dashboard.kpis.leakOf', { spend: ils(totals.spendIls) })}
+          subtitle={t('dashboard.kpis.leakOf', { spend: ils(spendShown.total) })}
           delta={leakDeltaPct}
           deltaTone="bad"
           sparkline={chainSpark}
@@ -210,7 +216,7 @@ export default async function ChainPage({
               ? t('dashboard.kpis.vsPrev', {
                   value: totals.prevLeakPct === null ? '—' : formatPercent(totals.prevLeakPct, locale, 1),
                 })
-              : t('dashboard.kpis.leakOf', { spend: ils(totals.spendIls) })
+              : t('dashboard.kpis.leakOf', { spend: ils(spendShown.total) })
           }
         />
         <KpiCard
@@ -229,10 +235,10 @@ export default async function ChainPage({
         />
         <KpiCard
           label={t('dashboard.kpis.pending')}
-          value={formatNumber(totals.pendingApprovals, locale)}
-          tone={totals.pendingApprovals > 0 ? 'warning' : 'neutral'}
+          value={<span data-testid="chain-open">{formatNumber(totals.openDiscrepancies, locale)}</span>}
+          tone={totals.openDiscrepancies > 0 ? 'warning' : 'neutral'}
           icon={<ClipboardCheck className="h-5 w-5" />}
-          subtitle={t('dashboard.kpis.pendingHint')}
+          subtitle={t('dashboard.kpis.pendingHint', { count: formatNumber(totals.pendingApprovals, locale) })}
         />
       </div>
 
@@ -365,7 +371,7 @@ export default async function ChainPage({
               </tr>
             </thead>
             <tbody>
-              {data.branches.map((b) => {
+              {data.branches.map((b, i) => {
                 const isWorst = b.restaurantId === data.worstBranchId;
                 const isActive = b.restaurantId === data.activeRestaurantId;
                 return (
@@ -382,10 +388,10 @@ export default async function ChainPage({
                       )}
                     </td>
                     <td className={cn('px-3 py-3 sm:px-4 text-end font-mono tabular-nums', isWorst ? 'font-bold text-danger' : 'text-ink')}>
-                      {ils(b.leakIls)}
+                      {ils(rowLeak[i]!)}
                     </td>
                     <td className="px-3 py-3 sm:px-4 text-end font-mono tabular-nums text-muted">{pct(b.leakPct)}</td>
-                    <td className="hidden sm:table-cell px-3 py-3 sm:px-4 text-end font-mono tabular-nums text-muted">{ils(b.spendIls)}</td>
+                    <td className="hidden sm:table-cell px-3 py-3 sm:px-4 text-end font-mono tabular-nums text-muted">{ils(rowSpend[i]!)}</td>
                     <td className="hidden sm:table-cell px-3 py-3 sm:px-4 text-end font-mono tabular-nums text-muted">{formatNumber(b.openDiscrepancies, locale)}</td>
                     {compared ? (
                       <td className="px-3 py-3 sm:px-4 text-end font-mono text-xs tabular-nums" data-testid="chain-branch-delta">

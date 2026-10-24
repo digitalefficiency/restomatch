@@ -26,8 +26,8 @@ export const en: Shape<typeof he> = {
       caughtHint: 'Leak on invoices not paid yet',
       claimed: 'Claimed back from suppliers',
       claimedHint: 'Lines approved for a credit',
-      pending: 'Awaiting approval',
-      pendingHint: 'Items in every branch approval queue',
+      pending: 'Open in the period',
+      pendingHint: 'Open items from the period, all branches · in the approval queues now: {count}',
     },
     alerts: {
       title: 'Branch to look at this week',
