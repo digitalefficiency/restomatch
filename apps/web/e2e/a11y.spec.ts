@@ -39,9 +39,12 @@ const DASHBOARD_PAGES = [
   '/dashboard/reports/monthly',
   '/dashboard/reports/digest',
   '/dashboard/leaks/proof',
+  // A detail page with a breadcrumb trail (lib/components/Breadcrumbs).
+  '/dashboard/suppliers/:supplier',
 ];
 
 let openPo = '';
+let supplier = '';
 
 test.beforeAll(async () => {
   const sql = e2eSql();
@@ -51,6 +54,11 @@ test.beforeAll(async () => {
       where r.name = ${DEMO_RESTAURANT_NAME} and po.status = 'sent' order by po.created_at limit 1`;
     if (!row) throw new Error('seed has no sent PO for the receiving wizard');
     openPo = row.id;
+    const [sup] = await sql<{ id: string }[]>`
+      select s.id from suppliers s join restaurants r on r.id = s.restaurant_id
+      where r.name = ${DEMO_RESTAURANT_NAME} order by s.name limit 1`;
+    if (!sup) throw new Error('seed has no supplier for the breadcrumb page');
+    supplier = sup.id;
   } finally {
     await sql.end();
   }
@@ -63,12 +71,39 @@ async function open(page: Page, locale: Locale, path: string) {
     // The banner is covered by its own test below; keep it out of the page scans.
     { name: 'rm_cookie_consent', value: 'necessary', url },
   ]);
-  await page.goto(path.replace(':openPo', openPo), { waitUntil: 'load' });
+  await page.goto(path.replace(':openPo', openPo).replace(':supplier', supplier), {
+    waitUntil: 'load',
+  });
   await page.waitForLoadState('networkidle').catch(() => {});
+}
+
+/**
+ * Several screens fade text in with GSAP (inline opacity): the receiving
+ * wizard's steps, which also render on /dashboard/receiving/:po. Under `next
+ * dev`, StrictMode's double mount makes the second `gsap.from` start from the
+ * half-faded value, so the text can stay stuck there (a production build ends
+ * at 1). Wait briefly for running fades, then finish any stuck text fade, so
+ * axe judges the design's colours, not a frame of an animation. The
+ * viewfinder corners pulse forever but carry no text.
+ */
+async function settleTextFades(page: Page): Promise<void> {
+  const animated = await page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('[style*="opacity"]')].some(
+      (el) => Number.parseFloat(el.style.opacity) < 1 && !!el.textContent?.trim(),
+    ),
+  );
+  if (animated) await page.waitForTimeout(1_500);
+  await page.evaluate(() => {
+    for (const el of document.querySelectorAll<HTMLElement>('[style*="opacity"]')) {
+      const o = Number.parseFloat(el.style.opacity);
+      if (o > 0 && o < 1 && el.textContent?.trim()) el.style.opacity = '1';
+    }
+  });
 }
 
 /** WCAG 2.1 A/AA violations, summarized so a failure names the rule and the element. */
 async function axeViolations(page: Page): Promise<string[]> {
+  await settleTextFades(page);
   await page.addScriptTag({ content: AXE_SOURCE });
   return page.evaluate(async (tags) => {
     const w = window as unknown as {
@@ -113,9 +148,10 @@ async function smallTouchTargets(page: Page): Promise<string[]> {
         if (el.tagName === 'A' && s.display === 'inline') return false;
         if (el instanceof HTMLInputElement && ['hidden', 'file'].includes(el.type)) return false;
         // A checkbox inside its label: the label is the target.
+        // A checkbox/radio whose <label> (wrapping or for=) is a full-size target.
         if (el instanceof HTMLInputElement && ['checkbox', 'radio'].includes(el.type)) {
-          const label = el.closest('label');
-          if (label && label.getBoundingClientRect().height >= 44) return false;
+          const labels = [...(el.labels ?? [])];
+          if (labels.some((l) => l.getBoundingClientRect().height >= 44)) return false;
         }
         return r.width < 44 || r.height < 44;
       })
@@ -163,19 +199,6 @@ test.describe('a11y receiving wizard steps (phone, English)', () => {
     const s = recvEn.steps;
     await open(page, 'en', '/showcase/receiver');
     const check = async (step: string) => {
-      // The steps fade text in with GSAP (inline opacity). Under `next dev`,
-      // StrictMode's double mount makes the second `gsap.from` start from the
-      // half-faded value, so the text stays stuck there (a production build
-      // ends at 1). Wait for the tweens, then finish any stuck text fade so axe
-      // judges the design's colors. The viewfinder corners pulse forever but
-      // carry no text.
-      await page.waitForTimeout(1_500);
-      await page.evaluate(() => {
-        for (const el of document.querySelectorAll<HTMLElement>('main [style*="opacity"]')) {
-          const o = Number.parseFloat(el.style.opacity);
-          if (o > 0 && o < 1 && el.textContent?.trim()) el.style.opacity = '1';
-        }
-      });
       expect(await axeViolations(page), `${step} axe`).toEqual([]);
       const small = (await smallTouchTargets(page)).filter((t) => !t.includes('<a ')); // showcase chrome links
       expect(small, `${step} touch targets`).toEqual([]);
@@ -199,10 +222,11 @@ test.describe('a11y receiving wizard steps (phone, English)', () => {
 });
 
 /**
- * Multi-branch owner: the dashboard header grows a branch switcher, which the
- * single-branch e2e seed never renders (axe once missed its
- * label-content-name-mismatch). Attach a second branch on a shared billing
- * account for this block only, then restore the seed — workers: 1, not parallel.
+ * Multi-branch owner: the dashboard header grows a branch switcher (and the
+ * phone menu drawer a branch list), which the single-branch e2e seed never
+ * renders (axe once missed its label-content-name-mismatch). Attach a second
+ * branch on a shared billing account for this block only, then restore the
+ * seed — workers: 1, not parallel.
  */
 test.describe('a11y multi-branch owner (branch switcher)', () => {
   const SECOND_BRANCH = `${DEMO_RESTAURANT_NAME} — סניף בדיקה`;
@@ -217,7 +241,8 @@ test.describe('a11y multi-branch owner (branch switcher)', () => {
         from restaurants r join memberships m on m.restaurant_id = r.id and m.role = 'owner'
         where r.name = ${DEMO_RESTAURANT_NAME} limit 1`;
       if (!main) throw new Error('seed has no demo restaurant/owner');
-      if (main.billing) throw new Error('demo restaurant already on a billing account — update this setup');
+      if (main.billing)
+        throw new Error('demo restaurant already on a billing account — update this setup');
       const [acct] = await sql<{ id: string }[]>`
         insert into billing_accounts (name, owner_user_id) values ('e2e multi-branch', ${main.ownerId}) returning id`;
       billingAccountId = acct!.id;
@@ -244,13 +269,29 @@ test.describe('a11y multi-branch owner (branch switcher)', () => {
     }
   });
 
-  // The header trigger renders from `lg` up (phones get the list inside the menu drawer).
-  test.use({ viewport: { width: 1280, height: 800 }, storageState: OWNER_STATE });
   for (const locale of LOCALES) {
-    test(`${locale} desktop /dashboard with the branch switcher`, async ({ page }) => {
-      await open(page, locale, '/dashboard');
-      await expect(page.getByTestId('branch-switcher')).toBeVisible();
-      expect(await axeViolations(page), '/dashboard (multi-branch) axe').toEqual([]);
+    test.describe(`[${locale} · desktop]`, () => {
+      test.use({ viewport: { width: 1280, height: 800 }, storageState: OWNER_STATE });
+      test(`${locale} desktop: switcher closed and open`, async ({ page }) => {
+        await open(page, locale, '/dashboard');
+        const trigger = page.getByTestId('branch-switcher');
+        await expect(trigger).toBeVisible();
+        expect(await axeViolations(page), 'switcher closed').toEqual([]);
+        await trigger.click();
+        await expect(page.getByText(SECOND_BRANCH).first()).toBeVisible();
+        expect(await axeViolations(page), 'switcher open').toEqual([]);
+      });
+    });
+
+    test.describe(`[${locale} · phone]`, () => {
+      test.use({ ...PHONE, storageState: OWNER_STATE });
+      test(`${locale} phone: branch list in the menu drawer`, async ({ page }) => {
+        await open(page, locale, '/dashboard');
+        await page.locator('button[aria-controls="dashboard-drawer"]').first().click();
+        await expect(page.getByText(SECOND_BRANCH).first()).toBeVisible();
+        expect(await axeViolations(page), 'drawer with branch list').toEqual([]);
+        expect(await smallTouchTargets(page), 'drawer touch targets').toEqual([]);
+      });
     });
   }
 });

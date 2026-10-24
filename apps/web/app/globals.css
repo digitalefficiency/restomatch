@@ -367,6 +367,9 @@ html {
     section[aria-labelledby='leak-hero-label'] a {
       min-height: 44px;
     }
+    .touch-target {
+      min-width: 44px;
+    }
     /* A checkbox/radio inside its <label>: the whole label is the target. */
     label:has(> input[type='checkbox']),
     label:has(> input[type='radio']) {
