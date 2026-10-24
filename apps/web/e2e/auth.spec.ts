@@ -1,6 +1,10 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { authenticator } from 'otplib';
 import { e2eSql, ensurePasswordUser, loginViaMagicLink } from './helpers';
+
+/** The form's error alert — not Next's (empty) route announcer, which also has role="alert". */
+const formAlert = (page: Page) =>
+  page.locator('[role="alert"]:not(#__next-route-announcer__)');
 
 /**
  * Auth flows as they exist after the security stack (password primary, TOTP
