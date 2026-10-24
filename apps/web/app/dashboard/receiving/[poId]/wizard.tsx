@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Check, FileScan, Info, Loader2, Package, RefreshCw, Scale } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, Check, FileScan, FileWarning, Info, Loader2, Package, RefreshCw, Scale } from 'lucide-react';
 
 import { AdjustQuantities } from '@/app/showcase/receiver/_steps/AdjustQuantities';
 import { Confirmed } from '@/app/showcase/receiver/_steps/Confirmed';
@@ -26,6 +26,8 @@ import {
 } from './_adapters';
 import { receivingErrorText as errorText } from './_errors';
 import { pollInvoiceUntilRead } from './_poll';
+import { buildSlipLines, needsSlip } from './_dockSlip';
+import { DockSlip } from './dock-slip';
 
 /** How long to keep checking in the background after the receiver moved on. */
 const BACKGROUND_POLL_MS = 10 * 60_000;
@@ -55,6 +57,8 @@ interface PoForClient {
   status: string;
   totalEstimated: number | null;
   lines: PoLineRow[];
+  /** Per-restaurant feature flags the wizard reads (receiving.getPo). */
+  features?: { dockSlip?: boolean };
 }
 
 // Authenticated flow skips the SELECT_SUPPLIER step (supplier comes from the PO).
@@ -86,6 +90,9 @@ export function ReceivingWizard({
   const [ocrNotice, setOcrNotice] = useState<OcrNotice>(null);
   /** The scanned number is already on another invoice of this supplier. */
   const [duplicateNumber, setDuplicateNumber] = useState<string | null>(null);
+  /** Flag dockSlip: off → the wizard is exactly as before. */
+  const dockSlipOn = po.features?.dockSlip === true;
+  const [showSlip, setShowSlip] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
   /** Bumped on retake / skip / unmount — cancels any in-flight poll. */
   const pollTokenRef = useRef(0);
@@ -105,6 +112,11 @@ export function ReceivingWizard({
   const locale = useLocale();
   const dir = useDir();
   const supplierLabel = locale === 'en' && po.supplierNameEn ? po.supplierNameEn : po.supplierName;
+  // Is there anything to dispute? (short / rejected / over-priced / unordered / duplicate)
+  const slipNeeded = useMemo(
+    () => dockSlipOn && !!result && needsSlip(buildSlipLines(result.lines, marks, []), duplicateNumber),
+    [dockSlipOn, result, marks, duplicateNumber],
+  );
   const capturingRef = useRef(false);
 
   const utils = trpc.useUtils();
@@ -488,6 +500,32 @@ export function ReceivingWizard({
         />
       ) : null}
 
+      {/* Dock dispute slip (flag dockSlip): a secondary action on the review. */}
+      {step === 'RECONCILIATION_REVIEW' && result && dockSlipOn && grId && slipNeeded ? (
+        <div className="mt-4" dir={dir}>
+          {showSlip ? (
+            <DockSlip
+              grId={grId}
+              invoiceId={invoiceId}
+              lines={result.lines}
+              marks={marks}
+              duplicateNumber={duplicateNumber}
+              fallbackSupplierName={supplierLabel}
+            />
+          ) : (
+            <button
+              type="button"
+              data-testid="open-dock-slip"
+              onClick={() => setShowSlip(true)}
+              className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-danger/40 bg-surface px-4 py-2 text-sm font-medium text-danger"
+            >
+              <FileWarning className="h-4 w-4" aria-hidden="true" />
+              {t('dockSlip.open')}
+            </button>
+          )}
+        </div>
+      ) : null}
+
       {step === 'ADJUST_QUANTITIES' && result ? (
         <>
           <AdjustQuantities
@@ -520,6 +558,18 @@ export function ReceivingWizard({
             window.location.href = '/dashboard/receiving';
           }}
         />
+      ) : null}
+      {step === 'CONFIRMED' && result && dockSlipOn && grId && slipNeeded ? (
+        <div className="mx-auto max-w-md">
+          <DockSlip
+            grId={grId}
+            invoiceId={invoiceId}
+            lines={result.lines}
+            marks={marks}
+            duplicateNumber={duplicateNumber}
+            fallbackSupplierName={supplierLabel}
+          />
+        </div>
       ) : null}
     </main>
   );
