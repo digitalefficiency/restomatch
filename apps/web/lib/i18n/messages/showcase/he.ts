@@ -77,7 +77,7 @@ export const he = {
     clean: 'תקין',
     minor: 'הערה',
     major: 'חריגות',
-    blocked: 'תשלום נחסם',
+    blocked: 'לא לשלם עד החלטה',
   },
 
   common: {

@@ -74,7 +74,7 @@ export const en: Shape<typeof he> = {
     clean: 'Clean',
     minor: 'Note',
     major: 'Variances',
-    blocked: 'Payment blocked',
+    blocked: 'Hold payment until decided',
   },
 
   common: {

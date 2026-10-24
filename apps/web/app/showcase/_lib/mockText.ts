@@ -128,7 +128,7 @@ const EN: Record<string, string> = {
   'סגרה את הקבלה': 'Closed the receiving',
   '4 סטטוסים סודרו · 1 לאישור מנהל': '4 lines resolved · 1 sent for manager approval',
   'חשבונית כפולה זוהתה': 'Duplicate invoice detected',
-  'תשלום נחסם אוטומטית': 'Payment blocked automatically',
+  'סומן: לא לשלם עד החלטה': 'Flagged: hold payment until decided',
   'נשלחה התראה לחשב + בעלים': 'Bookkeeper and owner alerted',
   'התאמה מלאה': 'Full match',
   '2/2 פריטים תואמים': '2/2 lines match',
@@ -155,14 +155,14 @@ const EN: Record<string, string> = {
   'הבקשה ממתינה לחזרת ספק': 'Waiting for the supplier to respond',
   'אחור באספקה — 45 דק׳': 'Late delivery — 45 min',
   'הגיע ב-08:45 במקום 08:00 הצפוי': 'Arrived 08:45 instead of the expected 08:00',
-  'תשלום חסום אוטומטית · ממתין לבירור': 'Payment blocked automatically · pending review',
+  'סומן: לא לשלם עד החלטה · ממתין לבירור': 'Flagged: hold payment until decided · pending review',
   'גולדסטאר עלה ב-6.7%': 'Goldstar up 6.7%',
   'מחלוקת על חוסר במשלוח': 'Dispute over a short delivery',
   'חסרו 4 בקבוקי וודקה — ממתינים לתגובת הספק':
     '4 bottles of vodka missing — waiting on the supplier',
 
   // ── Owner dashboard live feed ────────────────────────────────────────────
-  'INV-4882 מקצביית הכרם — נחסמה אוטומטית': 'INV-4882 from HaKerem Butchery — blocked automatically',
+  'INV-4882 מקצביית הכרם — סומנה: לא לשלם עד החלטה': 'INV-4882 from HaKerem Butchery — flagged: hold payment until decided',
   'PO-1235 התקבל מלא': 'PO-1235 received in full',
   'חריגת מחיר ממתינה לאישור': 'Price variance awaiting approval',
   'סנכרון Market Man': 'MarketMan sync',
