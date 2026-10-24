@@ -74,7 +74,7 @@ export const en: Shape<typeof he> = {
     clean: 'Clean',
     minor: 'Note',
     major: 'Variances',
-    blocked: 'Payment blocked',
+    blocked: 'Hold payment until decided',
   },
 
   common: {
@@ -128,7 +128,7 @@ export const en: Shape<typeof he> = {
       all: 'All · {count}',
       issues: 'With variances · {count}',
       clean: 'Clean · {count}',
-      blocked: 'Blocked · {count}',
+      blocked: 'With blockers · {count}',
       empty: 'No invoices match this filter.',
     },
     row: {
@@ -285,7 +285,7 @@ export const en: Shape<typeof he> = {
     recent: {
       title: 'Recent invoices',
       subtitle: '{count} from the last month · click to view the scan',
-      blocked: 'Blocked',
+      blocked: 'Blocker',
       openInAudit: 'Open in invoice audit',
     },
     activity: {

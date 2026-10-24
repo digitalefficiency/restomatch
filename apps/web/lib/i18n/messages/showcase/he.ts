@@ -77,7 +77,7 @@ export const he = {
     clean: 'תקין',
     minor: 'הערה',
     major: 'חריגות',
-    blocked: 'תשלום נחסם',
+    blocked: 'לא לשלם עד החלטה',
   },
 
   common: {
@@ -131,7 +131,7 @@ export const he = {
       all: 'הכל · {count}',
       issues: 'עם חריגות · {count}',
       clean: 'תקינות · {count}',
-      blocked: 'חסומות · {count}',
+      blocked: 'עם חוסם · {count}',
       empty: 'אין חשבוניות שתואמות לסינון.',
     },
     row: {
@@ -288,7 +288,7 @@ export const he = {
     recent: {
       title: 'חשבוניות אחרונות',
       subtitle: '{count} מהחודש האחרון · לחצו לצפייה בסריקה',
-      blocked: 'נחסם',
+      blocked: 'חוסם',
       openInAudit: 'פתיחה בביקורת החשבוניות',
     },
     activity: {

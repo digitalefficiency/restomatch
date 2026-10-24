@@ -29,6 +29,7 @@ const ROUTER_KEYS = [
   'onboarding',
   'orders',
   'owner',
+  'payRun',
   'plans',
   'products',
   'receiving',

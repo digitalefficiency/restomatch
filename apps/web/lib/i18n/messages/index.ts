@@ -20,6 +20,7 @@ import { nav } from './nav';
 import { onboarding } from './onboarding';
 import { orders } from './orders';
 import { overview } from './overview';
+import { payRun } from './payRun';
 import { products } from './products';
 import { receiving } from './receiving';
 import { recipes } from './recipes';
@@ -48,6 +49,7 @@ export const ALL_NAMESPACES = [
   onboarding,
   orders,
   overview,
+  payRun,
   products,
   receiving,
   recipes,
