@@ -218,6 +218,7 @@ export function LedgerGridTable({ data }: { data: LedgerGridData }) {
         status: statusText(c.status),
       })),
     );
+    // ASCII name: Chromium drops a Hebrew download name (the file arrives as "download", no .csv).
     downloadCsv(`${t('ledger.csvFile')}-${data.months[0]?.key ?? ''}`, columns, rows);
   }
 
