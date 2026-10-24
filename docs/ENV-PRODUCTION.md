@@ -22,7 +22,9 @@
 | `QUEUE_DATABASE_URL` | Supabase, owner | — | optional separate connection for the job queue (`job_queue`); defaults to `DATABASE_URL` |
 | `AUTH_ENC_KEY` | `openssl rand -hex 32` | ✅ | encrypts TOTP secrets at rest (2FA). **Boot fails without it.** Back it up — losing it locks out every 2FA user |
 | `TRUSTED_PROXY_HOPS` | `1` on Vercel | ✅ | rate limiters read the client IP from the right of x-forwarded-for (D1.6); unset = spoofable left-most entry |
-| `CRON_SECRET` | `openssl rand -hex 32` | ✅ | Vercel Cron → `/api/cron/worker-heartbeat` bearer token |
+| `CRON_SECRET` | `openssl rand -hex 32` | ✅ | Vercel Cron → `/api/cron/worker-heartbeat` and `/api/cron/jobs` (the job runner) bearer token |
+| `JOB_KICK` | `off` | — | turns off the after() kick that runs OCR / match / catalog jobs right after an upload; `/api/cron/jobs` still runs them within a minute. Unset = on |
+| `SERVERLESS_CRON_SKIP` | task ids or queue names, comma-separated, or `all` | — | pauses scheduled tasks of `/api/cron/jobs` (ids as in `apps/worker/src/cron.ts`, e.g. `recovery-reminders-0830,price-alerts-07`, or queue names such as `outbox-dispatch`). A skipped daily slot is recorded as skipped and is not replayed when the variable is removed. Queued jobs, uploads (the kick) and the heartbeat are not affected. Unset = nothing skipped. Needs a redeploy, like any env change |
 | `WORKER_ALERT_EMAILS` | owner mailbox(es), comma-separated | — | recipients of the "worker is down" alert (falls back to `PLATFORM_ADMIN_EMAILS`) |
 | `SENTRY_DSN` | sentry.io | — | optional; needs `pnpm add @sentry/nextjs` |
 

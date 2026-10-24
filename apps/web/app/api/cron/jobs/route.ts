@@ -11,7 +11,8 @@ import { loadJobRunner } from '@/lib/jobKick';
  *      (/api/cron/worker-heartbeat) and the dashboard banner see a live runner;
  *   2. stall recovery + pruning (a runner killed mid-job is re-queued);
  *   3. due scheduled tasks — the worker's cron.ts, Asia/Jerusalem wall time,
- *      each slot at most once (its job row is the marker);
+ *      each slot at most once (its job row is the marker); SERVERLESS_CRON_SKIP
+ *      (task ids / queue names, or `all`) pauses some or all of them;
  *   4. the queue, until it is empty or ~240 s are spent (maxDuration 300 s).
  *
  * Uploads do not wait for this: the after() kick (lib/jobKick.ts) runs OCR /

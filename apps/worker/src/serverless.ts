@@ -2,10 +2,11 @@ import { randomBytes } from 'node:crypto';
 import { hostname } from 'node:os';
 import { claimAnySerial, queueDbUrl, queueSql, renewLocks, withRunScope, type Sql } from '@restomatch/queue';
 import { registerCronSchedules } from './cron';
+import { CRON_SKIP_ENV, isCronSkipped, parseCronSkip, unknownCronSkipNames } from './cronSkip';
 import { useServerlessPools } from './db';
 import { HANDLED_QUEUES, JOB_HANDLERS } from './handlers';
 import { writeHeartbeat } from './heartbeat';
-import { runClaimedJob, runMaintenance, STALL_AFTER_MS, tickSchedules, type WorkerJob } from './queue';
+import { registeredSchedules, runClaimedJob, runMaintenance, STALL_AFTER_MS, tickSchedules, type WorkerJob } from './queue';
 
 /**
  * Serverless job execution: the worker's jobs, run by the web app itself — no
@@ -19,7 +20,9 @@ import { runClaimedJob, runMaintenance, STALL_AFTER_MS, tickSchedules, type Work
  *    when due. The per-task "last run" marker is the job row itself: dedupe_key
  *    'cron:<schedule>:<slot in Asia/Jerusalem wall time>' under job_queue's unique
  *    index, so each slot runs at most once — across every runner AND a worker
- *    process running at the same time.
+ *    process running at the same time. SERVERLESS_CRON_SKIP (cronSkip.ts: task ids
+ *    or queue names, comma-separated, or `all`; unset = nothing skipped) pauses
+ *    tasks without a code change — the operational switch next to JOB_KICK.
  *  - runServerlessTick: what /api/cron/jobs does every minute: heartbeat, stall
  *    recovery + pruning, due schedules, then the queue.
  *
@@ -133,20 +136,39 @@ export async function runQueuedJobs(opts: RunQueuedJobsOptions): Promise<RunQueu
 }
 
 let registered: Promise<void> | null = null;
+/** The SERVERLESS_CRON_SKIP value whose unknown names were last warned about (once per value). */
+let warnedSkip: string | undefined;
 
 /**
  * Turn the due slots of cron.ts's schedules into jobs (tickSchedules — the
  * worker's own scheduler). Daily/monthly patterns are Asia/Jerusalem wall time;
  * a missed slot is caught up within its window (daily 6 h, monthly 3 days).
- * Returns the schedule ids that fired.
+ * Tasks named in SERVERLESS_CRON_SKIP (or all, with `all`) do not fire; their
+ * daily/monthly slots are recorded as skipped (cronSkip.ts). Returns the
+ * schedule ids that fired.
  */
-export async function runDueSchedules(sql: Sql = serverlessSql(), now: Date = new Date()): Promise<string[]> {
+export async function runDueSchedules(
+  sql: Sql = serverlessSql(),
+  now: Date = new Date(),
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string[]> {
   registered ??= registerCronSchedules().catch((err: unknown) => {
     registered = null;
     throw err;
   });
   await registered;
-  return tickSchedules(sql, now);
+  const raw = env[CRON_SKIP_ENV];
+  const skip = parseCronSkip(raw);
+  if (!skip) return tickSchedules(sql, now);
+  if (warnedSkip !== raw) {
+    warnedSkip = raw;
+    const unknown = unknownCronSkipNames(skip, registeredSchedules());
+    console.warn(
+      `[cron] ${CRON_SKIP_ENV}=${raw}: ${skip.all ? 'every scheduled task is' : 'these scheduled tasks are'} skipped` +
+        (unknown.length ? ` — no such task: ${unknown.join(', ')}` : ''),
+    );
+  }
+  return tickSchedules(sql, now, { skip: (s) => isCronSkipped(skip, s), skipReason: CRON_SKIP_ENV });
 }
 
 /** Write the job runner's liveness beat (worker_heartbeats) — the watchdog and the dashboard banner read it. */

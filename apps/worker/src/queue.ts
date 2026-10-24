@@ -440,6 +440,29 @@ async function firstTickAt(sql: Sql, s: Schedule, now: Date): Promise<number> {
   return s.firstTickAt;
 }
 
+/** Record `dedupeKey`'s slot as run-and-skipped (a done row): it is never fired or caught up later. */
+async function recordSkippedSlot(sql: Sql, s: Schedule, dedupeKey: string, skipped: string): Promise<void> {
+  await sql`
+    INSERT INTO job_queue (queue, payload, status, dedupe_key, finished_at, result)
+    VALUES (${s.queue}, ${sql.json(s.template.data as never)}, 'done', ${dedupeKey}, now(), ${sql.json({ skipped })})
+    ON CONFLICT (queue, dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING`;
+}
+
+/** The registered schedules (id + queue), e.g. to validate SERVERLESS_CRON_SKIP's names. */
+export function registeredSchedules(): Array<{ id: string; queue: string }> {
+  return [...schedules.values()].map((s) => ({ id: s.id, queue: s.queue }));
+}
+
+export interface TickOptions {
+  /**
+   * Schedules not to fire this tick (the serverless runner's SERVERLESS_CRON_SKIP).
+   * A skipped pattern slot is recorded as done with `{ skipped: skipReason }`, so it
+   * is not caught up once the skip is lifted; a skipped every-N slot just passes.
+   */
+  skip?: (s: { id: string; queue: string }) => boolean;
+  skipReason?: string;
+}
+
 /**
  * Turn due slots into jobs. Exactly one job per (schedule, slot) across all
  * workers. A missed slot is caught up — except a slot from BEFORE the schedule
@@ -448,7 +471,7 @@ async function firstTickAt(sql: Sql, s: Schedule, now: Date): Promise<number> {
  * replayed. The first tick is recorded even when nothing is due, so a slot
  * missed any time after the cutover (the Mac asleep at 06:00) is caught up.
  */
-export async function tickSchedules(sql: Sql, now = new Date()): Promise<string[]> {
+export async function tickSchedules(sql: Sql, now = new Date(), opts: TickOptions = {}): Promise<string[]> {
   const fired: string[] = [];
   for (const s of schedules.values()) {
     // every-N schedules are never caught up, so they need no first-tick record.
@@ -456,15 +479,18 @@ export async function tickSchedules(sql: Sql, now = new Date()): Promise<string[
     const due = dueSlot(s.repeat, now);
     if (due === null || due.at === s.lastSlot) continue;
     const dedupeKey = `${cronKeyPrefix(s.id)}${due.label}`;
+    if (opts.skip?.({ id: s.id, queue: s.queue })) {
+      const reason = opts.skipReason ?? 'skipped';
+      if ('pattern' in s.repeat) await recordSkippedSlot(sql, s, dedupeKey, reason);
+      s.lastSlot = due.at;
+      console.log(`[cron] ${s.id}: slot ${due.label} skipped (${reason})`);
+      continue;
+    }
     if (due.catchUp && due.at < since) {
       const [seen] = await sql`
         SELECT 1 FROM job_queue WHERE queue = ${s.queue} AND starts_with(dedupe_key, ${cronKeyPrefix(s.id)}) LIMIT 1`;
       if (!seen) {
-        await sql`
-          INSERT INTO job_queue (queue, payload, status, dedupe_key, finished_at, result)
-          VALUES (${s.queue}, ${sql.json(s.template.data as never)}, 'done', ${dedupeKey}, now(),
-                  ${sql.json({ skipped: 'first tick of this schedule: a slot before it is not replayed' })})
-          ON CONFLICT (queue, dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING`;
+        await recordSkippedSlot(sql, s, dedupeKey, 'first tick of this schedule: a slot before it is not replayed');
         s.lastSlot = due.at;
         continue;
       }

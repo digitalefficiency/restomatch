@@ -365,6 +365,34 @@ describe('(d) scheduled tasks: the job row is the per-slot marker', () => {
     expect(await slots('daily-expectations')).toHaveLength(2);
   });
 
+  it('SERVERLESS_CRON_SKIP: a skipped task does not fire; its daily slot is marked skipped and not replayed once lifted', async () => {
+    await qsql`DELETE FROM job_queue`;
+    await registerCronSchedules(); // forget this process's fired slots
+    const env = (v?: string) => (v === undefined ? {} : { SERVERLESS_CRON_SKIP: v }) as unknown as NodeJS.ProcessEnv;
+    // 06:00:30 IL: daily-expectations is on time, the outbox fires every minute.
+    const fired = await runDueSchedules(qsql, at('2026-11-20T04:00:30Z'), env(' daily-expectations-06, outbox-dispatch'));
+    expect(fired).not.toContain('daily-expectations-06'); // by task id
+    expect(fired).not.toContain('outbox-dispatch-60s'); // by queue name
+    expect(fired).toContain('ocr-sweep-5m'); // not named: fires as usual
+    const marker = await qsql<Array<{ status: string; result: unknown }>>`
+      SELECT status, result FROM job_queue WHERE dedupe_key = 'cron:daily-expectations-06:2026-11-20T06:00'`;
+    expect(marker).toEqual([{ status: 'done', result: { skipped: 'SERVERLESS_CRON_SKIP' } }]);
+    expect(await slots('outbox-dispatch')).toEqual([]); // every-N: no marker, it just did not fire
+
+    // Lifted a minute later, on a fresh instance (no in-memory slots): the skipped
+    // 06:00 slot is NOT caught up; the outbox fires again.
+    await registerCronSchedules();
+    const lifted = await runDueSchedules(qsql, at('2026-11-20T04:01:30Z'), env());
+    expect(lifted).toContain('outbox-dispatch-60s');
+    expect(lifted).not.toContain('daily-expectations-06');
+    expect(await slots('daily-expectations')).toEqual(['cron:daily-expectations-06:2026-11-20T06:00']);
+
+    // `all`: no scheduled task fires (queued jobs, the kick and the heartbeat are not schedules).
+    await registerCronSchedules();
+    expect(await runDueSchedules(qsql, at('2026-11-20T04:02:30Z'), env('all'))).toEqual([]);
+    expect(await slots('outbox-dispatch')).toEqual(['cron:outbox-dispatch-60s:2026-11-20T04:01:00.000Z']);
+  });
+
   it('the cron tick beats the heartbeat, fires what is due and runs it', async () => {
     await qsql`DELETE FROM job_queue`;
     // 01:30:30 IL: only the every-N schedules are due (no daily slot within its window).

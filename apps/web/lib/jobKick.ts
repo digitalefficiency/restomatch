@@ -17,7 +17,14 @@ import { setEnqueueListener } from '@restomatch/queue';
  *
  * after() outside a request scope (a script, the build, a test) throws — that
  * is caught and ignored: the job stays queued for the cron route (or a worker).
- * JOB_KICK=off turns the kick off (the cron route still runs everything).
+ *
+ * Operational switches (Vercel env; an env change needs a redeploy):
+ *  - JOB_KICK=off turns the kick off (the cron route still runs everything).
+ *  - SERVERLESS_CRON_SKIP pauses scheduled tasks of /api/cron/jobs: cron.ts task
+ *    ids (`recovery-reminders-0830`) or queue names (`recovery-reminders`),
+ *    comma-separated, or `all`; unset = nothing skipped. A skipped daily slot is
+ *    recorded as skipped and not replayed later. Queued jobs, this kick and the
+ *    heartbeat keep running (apps/worker/src/cronSkip.ts).
  */
 
 /** Queues a user is waiting on. Scheduled work (outbox, reports) stays on the cron minute. */
