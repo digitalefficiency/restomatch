@@ -205,7 +205,7 @@ describe('race: submit vs OCR finishing (receipt lock)', () => {
 describe('F4 attack: a receiver cannot re-match a paid invoice, or one bound to another receipt, via submitReceipt', () => {
   it('a paid invoice, or one matched against another receipt, is dropped; the real scan still goes', async () => {
     const s = await seed();
-    const scan = await invoice(s);
+    const scan = await invoice(s, { scanGrId: s.grId }); // the wizard's scan (stamped by the OCR job)
     const paid = await invoice(s);
     await db.update(invoices).set({ status: 'paid' }).where(eq(invoices.id, paid));
     const elsewhere = await invoice(s);
@@ -258,7 +258,7 @@ describe('verifier MINOR 2: a same-supplier sibling PO with a receipt does not h
     const [gr1] = await db.insert(goodsReceipts).values({ restaurantId: s.restaurantId, poId: po1!.id, status: 'completed' }).returning();
     await db.insert(grLines).values({ grId: gr1!.id, poLineId: pl1!.id, qtyReceived: '10' });
 
-    const scan = await invoice(s);
+    const scan = await invoice(s, { scanGrId: s.grId }); // the wizard's scan (stamped by the OCR job)
     expect(await invoicesWaitingOnReceipt(db, s.restaurantId, s.grId)).toEqual([scan]);
     await callerFor(s).receiving.submitReceipt({ grId: s.grId });
     expect(enqueueMatchInvoice).toHaveBeenCalledWith(
@@ -396,13 +396,16 @@ describe('scanGrId stamp: a scan belongs to exactly the receipt it was taken on'
 });
 
 describe('scanGrId stamp: what the OCR job writes', () => {
-  it('stamps only a receipt of the invoice’s own restaurant (a forged / foreign grId stamps nothing)', async () => {
+  it('stamps only a receipt of the invoice’s own restaurant AND supplier (forged / foreign / wrong-supplier grId stamps nothing)', async () => {
     const s = await seed();
     const [r2] = await db.insert(restaurants).values({ name: 'Other' }).returning();
-    expect(await scanReceiptToStamp(db, s.restaurantId, s.grId)).toBe(s.grId);
-    expect(await scanReceiptToStamp(db, r2!.id, s.grId)).toBeUndefined();
-    expect(await scanReceiptToStamp(db, s.restaurantId, '00000000-0000-0000-0000-000000000000')).toBeUndefined();
-    expect(await scanReceiptToStamp(db, s.restaurantId, undefined)).toBeUndefined();
+    const [gal] = await db.insert(suppliers).values({ restaurantId: s.restaurantId, name: 'Galilee' }).returning();
+    expect(await scanReceiptToStamp(db, s.restaurantId, s.grId, s.supplierId)).toBe(s.grId);
+    expect(await scanReceiptToStamp(db, r2!.id, s.grId, s.supplierId)).toBeUndefined();
+    expect(await scanReceiptToStamp(db, s.restaurantId, s.grId, gal!.id)).toBeUndefined(); // HaSharon's receipt, Galilee invoice
+    expect(await scanReceiptToStamp(db, s.restaurantId, s.grId, null)).toBeUndefined();
+    expect(await scanReceiptToStamp(db, s.restaurantId, '00000000-0000-0000-0000-000000000000', s.supplierId)).toBeUndefined();
+    expect(await scanReceiptToStamp(db, s.restaurantId, undefined, s.supplierId)).toBeUndefined();
   });
 
   it('adds only the key (no stamp → the OCR result unchanged), and reads it back defensively', () => {
@@ -489,5 +492,61 @@ describe('verifier scenarios C/D/E/F', () => {
     const x = await invoice(s, { scanGrId: s.grId });
     await callerFor(s).receiving.submitReceipt({ grId: s.grId });
     expect(sent()).toEqual([{ invoiceId: x, poId: await poOf(s.grId) }]);
+  });
+});
+
+/**
+ * Deploy skew (orchestrator verify): the worker runs separately, so scans OCR'd
+ * by a worker from before the stamp — or held across its restart — carry none.
+ * An UNSTAMPED scan that pairs with more than one same-supplier receipt in the
+ * window, open OR closed, is never auto-claimed: it waits for a manager's
+ * match.runForInvoice.
+ */
+describe('hardened rule 1: an unstamped scan with a same-supplier sibling receipt (open or closed) is never auto-claimed', () => {
+  it('MINOR 2 setup, unstamped: PO1 counted this morning (closed GR1) → the scan on PO2 is skipped, not guessed', async () => {
+    const s = await seed();
+    await openSiblingReceipt(s, { qtyOrdered: '10', qtyReceived: '10', status: 'completed' });
+    const scan = await invoice(s);
+    expect(await invoicesWaitingOnReceipt(db, s.restaurantId, s.grId)).toEqual([]);
+    await callerFor(s).receiving.submitReceipt({ grId: s.grId, invoiceIds: [scan] });
+    expect(sentIds()).toEqual([]);
+  });
+
+  it('F with stamps stripped: after GR2 closed with X2 matched, GR1’s later submit does not claim the unstamped X2', async () => {
+    const s = await seed(); // PO2 1x, GR2
+    const { gr1 } = await openSiblingReceipt(s, { qtyOrdered: '20' }); // PO1 2x, GR1 open
+    const x2 = await invoice(s);
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, s.grId));
+    await db.update(grLines).set({ qtyReceived: '20' }).where(eq(grLines.grId, gr1));
+    await callerFor(s).receiving.submitReceipt({ grId: gr1, invoiceIds: [x2] });
+    expect(sentIds()).toEqual([]);
+  });
+
+  it('a sibling of the same supplier far outside the matcher window does not make a scan ambiguous', async () => {
+    const s = await seed();
+    const old = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
+    const [po0] = await db
+      .insert(purchaseOrders)
+      .values({ restaurantId: s.restaurantId, supplierId: s.supplierId, expectedDeliveryAt: old, status: 'sent', source: 'manual' })
+      .returning();
+    await db.insert(goodsReceipts).values({ restaurantId: s.restaurantId, poId: po0!.id, status: 'completed' });
+    const scan = await invoice(s);
+    await callerFor(s).receiving.submitReceipt({ grId: s.grId });
+    expect(sentIds()).toEqual([scan]);
+  });
+});
+
+describe('registerInvoice refuses an invoice of another supplier on this receipt (would be orphaned)', () => {
+  it('Galilee supplierId on HaSharon’s receipt → BAD_REQUEST, no invoice row', async () => {
+    const s = await seed();
+    const [gal] = await db.insert(suppliers).values({ restaurantId: s.restaurantId, name: 'Galilee' }).returning();
+    await expect(
+      callerFor(s).receiving.registerInvoice({
+        grId: s.grId,
+        supplierId: gal!.id,
+        imageUrl: 'https://example.invalid/scan.jpg', // no storage configured in tests: the URL pin is off
+      }),
+    ).rejects.toThrow("supplierId must be the receipt's order supplier");
+    expect(await db.select().from(invoices).where(eq(invoices.restaurantId, s.restaurantId))).toEqual([]);
   });
 });

@@ -115,7 +115,7 @@ export function startOcrInvoiceWorker() {
       const r = result.reconciled;
       // The receipt this photo was taken on — so a receipt submit claims exactly
       // its own scans (receiving/matchTriggers), never a same-day sibling's.
-      const scanGrId = await scanReceiptToStamp(db, job.data.restaurantId, job.data.grId);
+      const scanGrId = await scanReceiptToStamp(db, job.data.restaurantId, job.data.grId, invoice.supplierId);
       const { duplicateOf } = await writeOcrHeader(
         db,
         {

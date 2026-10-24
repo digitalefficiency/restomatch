@@ -717,6 +717,17 @@ export const receivingRouter = router({
       }
       await assertGrOwned(ctx.db, input.grId, ctx.session.restaurantId);
       await assertSupplierOwned(ctx.db, input.supplierId, ctx.session.restaurantId);
+      // The scan is stamped with this receipt and claimed only by it: an invoice
+      // of another supplier would never pair with it and be orphaned (no run).
+      const [grPo] = await ctx.db
+        .select({ supplierId: purchaseOrders.supplierId })
+        .from(goodsReceipts)
+        .innerJoin(purchaseOrders, eq(purchaseOrders.id, goodsReceipts.poId))
+        .where(and(eq(goodsReceipts.id, input.grId), eq(goodsReceipts.restaurantId, ctx.session.restaurantId)))
+        .limit(1);
+      if (grPo && grPo.supplierId !== input.supplierId) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: "supplierId must be the receipt's order supplier" });
+      }
 
       const restaurantId = ctx.session.restaurantId;
       // M8: idempotent on (restaurant, scanned object). A double-tap / client

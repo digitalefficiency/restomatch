@@ -4,13 +4,14 @@ import {
   goodsReceipts,
   gte,
   inArray,
+  lte,
   invoices,
   matchRuns,
   purchaseOrders,
   sql,
   type Database,
 } from '@restomatch/db';
-import { buildMatchInputForInvoice } from '../match/buildMatchInput';
+import { buildMatchInputForInvoice, PO_MATCH_WINDOW_DAYS } from '../match/buildMatchInput';
 
 /**
  * Which invoices to (re-)match when a goods receipt closes, and when the OCR job
@@ -76,22 +77,35 @@ export function withScanGrId<T extends object>(raw: T, scanGrId: string | undefi
 
 /**
  * The grId to stamp on a scan: the job's grId only when that receipt is this
- * restaurant's (a forged / foreign id stamps nothing, and the scan falls back
- * to the pairing rule below).
+ * restaurant's AND its order is from the invoice's supplier. A forged / foreign
+ * id, or a receipt of another supplier, stamps nothing (a stamp pointing at the
+ * wrong supplier's receipt would orphan the scan: no receipt would ever claim
+ * it), and the scan falls back to the pairing rule below.
  */
 export async function scanReceiptToStamp(
   db: Database,
   restaurantId: string,
   grId: string | undefined,
+  supplierId: string | null,
 ): Promise<string | undefined> {
-  if (!grId) return undefined;
+  if (!grId || !supplierId) return undefined;
   const [gr] = await db
     .select({ id: goodsReceipts.id })
     .from(goodsReceipts)
-    .where(and(eq(goodsReceipts.id, grId), eq(goodsReceipts.restaurantId, restaurantId)))
+    .innerJoin(purchaseOrders, eq(purchaseOrders.id, goodsReceipts.poId))
+    .where(
+      and(
+        eq(goodsReceipts.id, grId),
+        eq(goodsReceipts.restaurantId, restaurantId),
+        eq(purchaseOrders.supplierId, supplierId),
+      ),
+    )
     .limit(1);
   return gr?.id;
 }
+
+/** Two POs that can both pair with one invoice fall within twice the matcher's ± window. */
+const SIBLING_WINDOW_MS = 2 * PO_MATCH_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
 /**
  * Does this invoice belong to THIS receipt? The matcher must pair it with the
@@ -99,12 +113,13 @@ export async function scanReceiptToStamp(
  * prefers a same-supplier sibling PO that already has a receipt), and then:
  *  - a stamped scan (readScanGrId) belongs to exactly the receipt it was taken
  *    on — no guess;
- *  - an unstamped one must NOT also pair with another still-open receipt of the
- *    same supplier. Two orders of one supplier on the same day both win the
- *    same-day tie when pinned, so the scan would otherwise be claimed by
- *    whichever receipt is submitted first and matched against the wrong count.
- *    An ambiguous scan is left for a manager's match.runForInvoice, never
- *    guessed.
+ *  - an unstamped one (email / upload, or OCR'd by a worker from before the
+ *    stamp) must NOT also pair with any other receipt of the same supplier in
+ *    the window — open OR closed. Two orders of one supplier on the same day
+ *    both win the same-day tie when pinned, so the scan would otherwise be
+ *    claimed by whichever receipt is submitted first (or, once the other is
+ *    closed, by the later one) and matched against the wrong count. An
+ *    ambiguous scan is left for a manager's match.runForInvoice, never guessed.
  */
 async function pairsWithReceipt(
   tx: Database,
@@ -125,21 +140,34 @@ async function pairsWithReceipt(
   if (built?.grId !== receipt.id) return false;
   if (stamped !== null || !inv.supplierId) return true;
 
-  const openSiblings = await tx
+  const [own] = receipt.poId
+    ? await tx
+        .select({ at: purchaseOrders.expectedDeliveryAt })
+        .from(purchaseOrders)
+        .where(eq(purchaseOrders.id, receipt.poId))
+        .limit(1)
+    : [];
+  const near = own?.at
+    ? and(
+        gte(purchaseOrders.expectedDeliveryAt, new Date(own.at.getTime() - SIBLING_WINDOW_MS)),
+        lte(purchaseOrders.expectedDeliveryAt, new Date(own.at.getTime() + SIBLING_WINDOW_MS)),
+      )
+    : undefined;
+  const siblings = await tx
     .select({ id: goodsReceipts.id, poId: goodsReceipts.poId })
     .from(goodsReceipts)
     .innerJoin(purchaseOrders, eq(purchaseOrders.id, goodsReceipts.poId))
     .where(
       and(
         eq(goodsReceipts.restaurantId, restaurantId),
-        eq(goodsReceipts.status, 'pending'),
         eq(purchaseOrders.supplierId, inv.supplierId),
         sql`${goodsReceipts.id} <> ${receipt.id}`,
+        near,
       ),
     );
-  for (const sibling of openSiblings) {
+  for (const sibling of siblings) {
     const other = await buildMatchInputForInvoice(tx, restaurantId, invoiceId, { pinnedPoId: sibling.poId });
-    if (other?.grId === sibling.id) return false; // ambiguous: it would also be that open receipt's scan
+    if (other?.grId === sibling.id) return false; // ambiguous: it would also be that receipt's scan
   }
   return true;
 }
