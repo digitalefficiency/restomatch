@@ -108,7 +108,7 @@ export function InvoiceDetail({ record, onClose }: Props) {
       <div
         ref={sheetRef}
         onClick={(e) => e.stopPropagation()}
-        className="ml-auto w-full max-w-3xl h-full bg-bg border-l border-line shadow-[-12px_0_48px_-16px_rgba(0,0,0,0.7)] overflow-y-auto"
+        className="ml-auto w-full max-w-3xl h-full bg-bg border-l border-line shadow-[-12px_0_48px_-16px_rgba(15,31,23,0.25)] overflow-y-auto"
       >
         {/* Header */}
         <div className="glass sticky top-0 border-b border-line px-4 sm:px-6 py-4 z-10 flex items-start justify-between gap-3">

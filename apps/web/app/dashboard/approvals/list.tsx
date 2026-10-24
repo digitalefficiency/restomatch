@@ -144,7 +144,7 @@ export function ApprovalsList({
               as="article"
               elevated
               padding="none"
-              className="relative overflow-hidden"
+              className={isBlock ? 'relative overflow-hidden border-danger/40' : 'relative overflow-hidden'}
               aria-label={label}
             >
               {/* Severity rail: leak gradient for blockers, tinted bar otherwise. */}
@@ -255,7 +255,8 @@ export function ApprovalsList({
                         {t('card.escalate')}
                       </Button>
                     ) : null}
-                    <Button variant="danger" size="sm" onClick={() => setActiveReject(d.id)}>
+                    {/* One primary action per card (T2); reject stays available, quieter. */}
+                    <Button variant="secondary" size="sm" onClick={() => setActiveReject(d.id)}>
                       {t('card.reject')}
                     </Button>
                     <Button
@@ -341,7 +342,8 @@ function railTint(severity: string): string {
 }
 
 function SeverityBadge({ severity, label }: { severity: string; label: string }) {
+  // T2 "act now": blocking and warning decisions get solid badges; info stays calm.
   const tone: BadgeTone =
-    severity === 'block' ? 'danger' : severity === 'warn' ? 'warning' : 'info';
+    severity === 'block' ? 'danger-solid' : severity === 'warn' ? 'warning-solid' : 'info';
   return <Badge tone={tone}>{label}</Badge>;
 }

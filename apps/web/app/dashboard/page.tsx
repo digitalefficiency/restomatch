@@ -306,9 +306,14 @@ function LeakHero({
   return (
     <section
       aria-labelledby="leak-hero-label"
-      className="relative overflow-hidden rounded-2xl border border-line bg-surface p-5 shadow-card sm:p-7"
+      className={`relative overflow-hidden rounded-2xl border bg-surface p-5 shadow-card sm:p-7 ${hasLeak ? 'border-danger/35' : 'border-line'}`}
     >
-      <div className="absolute inset-x-0 top-0 h-px flow-stream" aria-hidden="true" />
+      {/* T1 — the one number: a danger accent bar on the start edge when money leaked. */}
+      {hasLeak ? (
+        <div className="absolute inset-y-0 start-0 w-1.5 bg-danger" aria-hidden="true" />
+      ) : (
+        <div className="absolute inset-x-0 top-0 h-px flow-stream" aria-hidden="true" />
+      )}
       <div
         className={`pointer-events-none absolute -bottom-20 -start-16 h-64 w-64 rounded-full opacity-70 blur-3xl ${hasLeak ? 'glow-danger-blob' : 'glow-primary-blob'}`}
         aria-hidden="true"
@@ -324,7 +329,7 @@ function LeakHero({
             {leakedLabel}
           </h2>
           <p
-            className={`mt-1 font-mono text-5xl font-extrabold tabular-nums tracking-tight sm:text-6xl ${hasLeak ? 'text-danger' : 'text-primary'}`}
+            className={`mt-1 font-mono text-5xl font-extrabold tabular-nums tracking-tight sm:text-6xl ${hasLeak ? 'text-ink' : 'text-primary'}`}
           >
             {ils(hero.leakIls)}
           </p>
@@ -371,7 +376,7 @@ function LeakHero({
         {canDrill && (hasLeak || hero.pendingLinkCount > 0) ? (
           <Link
             href={drillHref}
-            className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-danger/12 px-4 py-2 text-sm font-semibold text-danger ring-1 ring-danger/30 transition-colors hover:bg-danger/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/60"
+            className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-danger px-4 py-2 text-sm font-semibold text-white shadow-card transition-colors hover:bg-danger/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/60 focus-visible:ring-offset-2"
           >
             {t('hero.drill')}
             <ArrowLeft className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
