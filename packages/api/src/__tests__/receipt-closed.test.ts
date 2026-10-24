@@ -80,3 +80,40 @@ describe('a closed receipt is read-only', () => {
     expect((await callerFor(A).receiving.getPo({ poId: A.poId })).closedReceipt).toBeNull();
   });
 });
+
+describe('receive the rest — reopenReceipt', () => {
+  it('a partial receipt reopens for the next delivery: cumulative count → completed, re-matched', async () => {
+    const first = await callerFor(A).receiving.submitReceipt({ grId: A.grId }); // 5 of 10
+    expect(first.status).toBe('partial');
+    enqueueMatchInvoice.mockClear();
+
+    expect(await callerFor(A).receiving.reopenReceipt({ grId: A.grId })).toEqual({ grId: A.grId, status: 'pending' });
+    // Open again: getPo no longer reports it closed, and the count takes edits.
+    expect((await callerFor(A).receiving.getPo({ poId: A.poId })).closedReceipt).toBeNull();
+    // The wizard stores the running total (5 already + 5 now).
+    await callerFor(A).receiving.markGrLine({ grLineId: A.grLineId, qtyReceived: 10 });
+    const second = await callerFor(A).receiving.submitReceipt({ grId: A.grId });
+    expect(second.status).toBe('completed');
+    // The second close re-matches the receipt's invoices (the first one included).
+    expect(enqueueMatchInvoice).toHaveBeenCalled();
+    // Completed is final.
+    await expect(callerFor(A).receiving.reopenReceipt({ grId: A.grId })).rejects.toMatchObject({
+      code: 'CONFLICT',
+      cause: { appCode: 'receipt.closed' },
+    });
+  });
+
+  it('a pending receipt is returned as is (a double tap), its count untouched', async () => {
+    const [before] = await db.select().from(goodsReceipts).where(eq(goodsReceipts.id, A.grId));
+    expect(await callerFor(A).receiving.reopenReceipt({ grId: A.grId })).toEqual({ grId: A.grId, status: 'pending' });
+    const [after] = await db.select().from(goodsReceipts).where(eq(goodsReceipts.id, A.grId));
+    expect(after).toEqual(before);
+  });
+
+  it("another tenant's partial receipt is NOT_FOUND and stays closed", async () => {
+    await callerFor(B).receiving.submitReceipt({ grId: B.grId });
+    await expect(callerFor(A).receiving.reopenReceipt({ grId: B.grId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [gr] = await db.select().from(goodsReceipts).where(eq(goodsReceipts.id, B.grId));
+    expect(gr!.status).toBe('partial');
+  });
+});

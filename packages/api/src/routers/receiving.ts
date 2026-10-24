@@ -928,9 +928,9 @@ export const receivingRouter = router({
    * "Receive the rest": reopen a PARTIAL receipt for the next delivery of the
    * same order (one receipt per PO — goods_receipts_po_unique). Only partial →
    * pending, under the receipt lock; a completed receipt stays closed
-   * (CONFLICT 'receipt.closed'), a pending one is returned as is. The close time
-   * (updated_at) is left alone: the next submit stamps the new close, and the
-   * dock slip's "run after the close" gate follows it.
+   * (CONFLICT 'receipt.closed'), a pending one is returned as is. The wizard
+   * then counts the running total (already received + this delivery), and the
+   * next submit stamps the new close and re-matches every invoice on the receipt.
    */
   reopenReceipt: receiverProcedure
     .input(z.object({ grId: z.string().uuid() }))
