@@ -7,6 +7,7 @@ import { Button, Field, Input } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { onboarding } from '@/lib/i18n/messages/onboarding';
 import { localizeServerError } from '@/lib/serverErrors';
+import { startRouteProgress } from '@/lib/components/routeProgressState';
 
 export function OnboardingForm() {
   const router = useRouter();
@@ -19,6 +20,7 @@ export function OnboardingForm() {
   const create = trpc.onboarding.createRestaurant.useMutation({
     onSuccess: () => {
       router.refresh();
+      startRouteProgress('/dashboard');
       router.push('/dashboard');
     },
     onError: (err) => {

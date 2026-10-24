@@ -32,6 +32,8 @@ const WebEnvSchema = z.object({
   EMAIL_FROM: z.string().min(1).optional(),
   REDIS_URL: z.string().min(1).optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
+  // Name the Supabase↔Vercel integration syncs for the new-style secret key.
+  SUPABASE_SECRET_KEY: z.string().min(1).optional(),
   SENTRY_DSN: z.string().min(1).optional(),
   // Symmetric key (32 bytes; hex/base64) used to encrypt the TOTP secret at rest
   // (user_credentials.totp_secret_enc, Epic C). Required in production so 2FA
@@ -64,7 +66,8 @@ export function assertWebEnv(env: NodeJS.ProcessEnv = process.env): WebEnv {
     if (!v.AUTH_SECRET && !v.NEXTAUTH_SECRET)
       missing.push('AUTH_SECRET (or NEXTAUTH_SECRET) — signs the session JWT; every login fails without it');
     if (!v.REDIS_URL) missing.push('REDIS_URL — OCR/match/cron queue (uploads vanish without it)');
-    if (!v.SUPABASE_SERVICE_ROLE_KEY) missing.push('SUPABASE_SERVICE_ROLE_KEY — signed scan URLs');
+    if (!v.SUPABASE_SERVICE_ROLE_KEY && !v.SUPABASE_SECRET_KEY)
+      missing.push('SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY) — signed scan URLs');
     // AUTH_ENC_KEY encrypts the TOTP secret at rest (Epic C). Required in prod so
     // 2FA secrets are never plaintext.
     // NOTE on AUTH_SECRET rotation: AUTH_SECRET signs/encrypts the session JWT.

@@ -363,3 +363,14 @@ html[lang='ti'] .font-sans {
   font-family: 'Noto Sans Ethiopic', 'Heebo', 'Inter', -apple-system, BlinkMacSystemFont, system-ui,
     sans-serif;
 }
+
+/* ───────────── S6 landing perf: skip off-screen work until it's near ─────────────
+ * Below-the-fold landing sections and the marketing footer don't lay out or
+ * paint until they approach the viewport. That keeps first paint (and the hero
+ * poster = LCP) free of their work, and their fonts (JetBrains Mono, the ₪
+ * glyph's latin-ext subset) load when needed instead of during first render.
+ * `auto` remembers each section's real size once rendered (no scroll jumps). */
+.rm-defer {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 640px;
+}
