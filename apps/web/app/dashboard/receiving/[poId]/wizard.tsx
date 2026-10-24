@@ -59,6 +59,8 @@ interface PoForClient {
   lines: PoLineRow[];
   /** Per-restaurant feature flags the wizard reads (receiving.getPo). */
   features?: { dockSlip?: boolean };
+  /** This PO's receipt is already closed: open it read-only, never re-run the flow. */
+  closedReceipt?: { grId: string; invoiceId: string | null; closedAt: string } | null;
 }
 
 // Authenticated flow skips the SELECT_SUPPLIER step (supplier comes from the PO).
@@ -84,9 +86,10 @@ export function ReceivingWizard({
   po: PoForClient;
   restaurantId: string | null;
 }) {
-  const [step, setStep] = useState<Step>('SCAN_INVOICE');
-  const [grId, setGrId] = useState<string | null>(null);
-  const [invoiceId, setInvoiceId] = useState<string | null>(null);
+  const closed = po.closedReceipt ?? null;
+  const [step, setStep] = useState<Step>(closed ? 'CONFIRMED' : 'SCAN_INVOICE');
+  const [grId, setGrId] = useState<string | null>(closed?.grId ?? null);
+  const [invoiceId, setInvoiceId] = useState<string | null>(closed?.invoiceId ?? null);
   const [ocrNotice, setOcrNotice] = useState<OcrNotice>(null);
   /** The scanned number is already on another invoice of this supplier. */
   const [duplicateNumber, setDuplicateNumber] = useState<string | null>(null);
@@ -105,7 +108,7 @@ export function ReceivingWizard({
   const [result, setResult] = useState<ReconciliationResult | null>(null);
   const [marks, setMarks] = useState<Record<string, LineMark>>({});
   const [grLineIdByKey, setGrLineIdByKey] = useState<Record<string, string>>({});
-  const [confirmedAt, setConfirmedAt] = useState<string | null>(null);
+  const [confirmedAt, setConfirmedAt] = useState<string | null>(closed?.closedAt ?? null);
   const [error, setError] = useState<string | null>(null);
   const [poLines, setPoLines] = useState<PoLineRow[]>(po.lines);
   const t = useT(receiving);
@@ -412,6 +415,12 @@ export function ReceivingWizard({
       setStep('CONFIRMED');
       await utils.receiving.todayExpectations.invalidate();
     } catch (err) {
+      // Closed meanwhile (another tab / a replay): it IS closed — show it read-only.
+      if ((err as { data?: { appCode?: unknown } } | null)?.data?.appCode === 'receipt.closed') {
+        setConfirmedAt(new Date().toISOString());
+        setStep('CONFIRMED');
+        return;
+      }
       setError(errorText(err, t, locale));
     } finally {
       submittingRef.current = false;
@@ -563,12 +572,13 @@ export function ReceivingWizard({
       ) : null}
       {/* After the close the engine may add findings the count didn't show (VAT,
           total, duplicate): the slip decides itself whether there is anything to say. */}
-      {step === 'CONFIRMED' && result && dockSlipOn && grId ? (
+      {step === 'CONFIRMED' && (result || closed) && dockSlipOn && grId ? (
         <div className="mx-auto max-w-md">
           <DockSlip
             grId={grId}
             invoiceId={invoiceId}
-            lines={result.lines}
+            // Reopened read-only: no count in memory — the engine's lines only.
+            lines={result?.lines ?? []}
             marks={marks}
             duplicateNumber={duplicateNumber}
             fallbackSupplierName={supplierLabel}

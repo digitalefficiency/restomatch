@@ -32,6 +32,7 @@ export const APP_ERROR_CODES = [
   'auth.forbidden',
   'input.invalid',
   'invoice.numberTaken',
+  'receipt.closed',
 ] as const;
 
 export type AppErrorCode = (typeof APP_ERROR_CODES)[number];

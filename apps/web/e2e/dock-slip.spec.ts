@@ -216,6 +216,16 @@ test('390 px: quantities on the review; the engine ₪ only after the receipt is
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(390);
   await page.screenshot({ path: test.info().outputPath('dock-slip-confirmed-390.png'), fullPage: true });
+
+  // Reopening the PO (reload / back from the inbox) lands on the closed receipt,
+  // read-only — never the photo step again (the closed count can't be redone).
+  await page.reload();
+  await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('input[type="file"]')).toHaveCount(0);
+  await expect(page.getByTestId('close-receipt')).toHaveCount(0);
+  const reopened = page.getByTestId('dock-slip');
+  await expect(reopened.getByTestId('dock-slip-amount')).toHaveCount(2, { timeout: 30_000 });
+  expect(Number((await reopened.getByTestId('dock-slip-total').innerText()).replace(/[^\d.]/g, ''))).toBe(expectedTotal);
 });
 
 test('390 px: a count "= order" with an engine-only finding (VAT) still gets a slip after the close', async ({ page }) => {

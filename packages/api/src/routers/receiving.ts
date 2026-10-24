@@ -34,7 +34,7 @@ import { assertGrOwned, assertSupplierOwned } from '../tenant';
 import { fillEnglishNames } from '../receiving/english';
 import {
   invoicesWaitingOnReceipt,
-  lockReceipt,
+  receiptState,
   rematchHoldReason,
   scannedInvoicesForReceipt,
 } from '../receiving/matchTriggers';
@@ -216,7 +216,47 @@ export const receivingRouter = router({
         .from(restaurants)
         .where(eq(restaurants.id, ctx.session.restaurantId))
         .limit(1);
-      return { ...po, lines, features: { dockSlip: featureEnabled(rest?.settings, 'dockSlip') } };
+      // A receipt already closed for this PO: the page opens it read-only (never
+      // the photo step again). Its invoice: the receipt's latest match run, else
+      // one still waiting on it (both server-side — the wizard's own id is gone).
+      const [closed] = await ctx.db
+        .select({ grId: goodsReceipts.id, status: goodsReceipts.status, closedAt: goodsReceipts.updatedAt })
+        .from(goodsReceipts)
+        .where(
+          and(
+            eq(goodsReceipts.poId, input.poId),
+            eq(goodsReceipts.restaurantId, ctx.session.restaurantId),
+            inArray(goodsReceipts.status, ['completed', 'partial']),
+          ),
+        )
+        .orderBy(desc(goodsReceipts.updatedAt))
+        .limit(1);
+      let closedReceipt: { grId: string; status: string; closedAt: Date; invoiceId: string | null } | null = null;
+      if (closed) {
+        const [run] = await ctx.db
+          .select({ invoiceId: matchRuns.invoiceId })
+          .from(matchRuns)
+          .where(
+            and(
+              eq(matchRuns.grId, closed.grId),
+              eq(matchRuns.restaurantId, ctx.session.restaurantId),
+              isNotNull(matchRuns.invoiceId),
+            ),
+          )
+          .orderBy(desc(matchRuns.runAt))
+          .limit(1);
+        const invoiceId =
+          run?.invoiceId ??
+          (await invoicesWaitingOnReceipt(ctx.db, ctx.session.restaurantId, closed.grId))[0] ??
+          null;
+        closedReceipt = { ...closed, invoiceId };
+      }
+      return {
+        ...po,
+        lines,
+        closedReceipt,
+        features: { dockSlip: featureEnabled(rest?.settings, 'dockSlip') },
+      };
     }),
 
   /**
@@ -801,12 +841,25 @@ export const receivingRouter = router({
               ctx.db
                 .select({ id: goodsReceipts.id })
                 .from(goodsReceipts)
-                .where(eq(goodsReceipts.restaurantId, ctx.session.restaurantId)),
+                // Only a receipt still being counted takes edits.
+                .where(and(eq(goodsReceipts.restaurantId, ctx.session.restaurantId), eq(goodsReceipts.status, 'pending'))),
             ),
           ),
         )
         .returning();
-      if (!updated) throw new TRPCError({ code: 'NOT_FOUND', message: 'GR line not found' });
+      if (!updated) {
+        // Tell "closed" from "not yours / not there" (both updated nothing).
+        const [line] = await ctx.db
+          .select({ status: goodsReceipts.status })
+          .from(grLines)
+          .innerJoin(goodsReceipts, eq(goodsReceipts.id, grLines.grId))
+          .where(and(eq(grLines.id, input.grLineId), eq(goodsReceipts.restaurantId, ctx.session.restaurantId)))
+          .limit(1);
+        if (line && line.status !== 'pending') {
+          throw appError('CONFLICT', 'receipt.closed', 'This goods receipt is already closed');
+        }
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'GR line not found' });
+      }
       return updated;
     }),
 
@@ -826,8 +879,13 @@ export const receivingRouter = router({
     .mutation(async ({ ctx, input }) => {
       await assertGrOwned(ctx.db, input.grId, ctx.session.restaurantId);
       // Held to commit: an OCR job deciding whether this receipt is still open
-      // waits for us (receiving/matchTriggers).
-      await lockReceipt(ctx.db, input.grId);
+      // waits for us (receiving/matchTriggers). A receipt is closed once: a
+      // re-submit (reopened page, replay) must not rewrite a closed count or
+      // re-match it.
+      const state = await receiptState(ctx.db, ctx.session.restaurantId, input.grId);
+      if (!state.open) {
+        throw appError('CONFLICT', 'receipt.closed', 'This goods receipt is already closed');
+      }
 
       const rows = await ctx.db
         .select({

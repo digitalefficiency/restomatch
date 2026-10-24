@@ -51,6 +51,13 @@ export default async function ReceivingPoPage({
     status: po.status,
     totalEstimated: po.totalEstimated != null ? Number(po.totalEstimated) : null,
     features: { dockSlip: po.features.dockSlip },
+    closedReceipt: po.closedReceipt
+      ? {
+          grId: po.closedReceipt.grId,
+          invoiceId: po.closedReceipt.invoiceId,
+          closedAt: new Date(po.closedReceipt.closedAt).toISOString(),
+        }
+      : null,
     lines: po.lines.map((l) => ({
       id: l.id,
       productId: l.productId ?? null,
