@@ -25,6 +25,18 @@ vi.mock('@restomatch/queue', async (orig) => ({
 }));
 
 const { appRouter } = await import('../index');
+const { startOfDayInTz } = await import('../lib/time');
+
+/**
+ * "This morning": up to 3 h before now, but on the SAME local day as now in the
+ * restaurant's zone — the matcher compares local calendar days, and "now − 3 h"
+ * is yesterday during the first hours after midnight in Israel.
+ */
+function earlierToday(): Date {
+  const now = Date.now();
+  const dayStart = startOfDayInTz(new Date(now), 'Asia/Jerusalem').getTime();
+  return new Date(Math.max(now - 3 * 60 * 60 * 1000, dayStart + Math.min(60_000, (now - dayStart) / 2)));
+}
 const { invoicesWaitingOnReceipt, lockReceipt, readScanGrId, receiptStillOpen, scanOwnerReceipt, scanReceiptToStamp, withScanGrId } = await import(
   '../receiving/matchTriggers'
 );
@@ -254,8 +266,7 @@ describe('verifier MINOR 2: a same-supplier sibling PO with a receipt does not h
   it('PO1 counted earlier today + PO2 being counted now: the scan on PO2 is found (no invoiceIds) and pinned to PO2', async () => {
     const s = await seed(); // PO2 + its pending receipt (s.grId)
     const [gr2] = await db.select().from(goodsReceipts).where(eq(goodsReceipts.id, s.grId));
-    const morning = new Date();
-    morning.setHours(Math.max(0, morning.getHours() - 3));
+    const morning = earlierToday();
     const [po1] = await db
       .insert(purchaseOrders)
       .values({ restaurantId: s.restaurantId, supplierId: s.supplierId, expectedDeliveryAt: morning, status: 'sent', source: 'manual' })
@@ -281,8 +292,7 @@ async function openSiblingReceipt(
   s: Seed,
   opts: { qtyOrdered?: string; qtyReceived?: string; status?: 'pending' | 'completed' } = {},
 ) {
-  const morning = new Date();
-  morning.setHours(Math.max(0, morning.getHours() - 3));
+  const morning = earlierToday();
   const [po1] = await db
     .insert(purchaseOrders)
     .values({ restaurantId: s.restaurantId, supplierId: s.supplierId, expectedDeliveryAt: morning, status: 'sent', source: 'manual' })
