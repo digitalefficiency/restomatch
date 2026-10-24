@@ -648,3 +648,28 @@ describe('orderCapture: a forwarded WhatsApp order (text) → a draft PO', () =>
     expect((await drafts()).length).toBe(before);
   });
 });
+
+describe('publicGuard path (web routes pass the guarded raw body)', () => {
+  it('verifies the HMAC over the guarded body: signed → accepted, tampered → 401, oversized → 413', async () => {
+    const body = waBody({ id: 'wamid.guarded.1' });
+    const ok = await handleWhatsAppWebhook(
+      waRequest(tokens.aWa, '{}', signMeta(body, WA_SECRET)),
+      tokens.aWa,
+      deps({ config: waConfig(), rawBody: body }),
+    );
+    expect(ok.status).toBe(200);
+    const tampered = await handleWhatsAppWebhook(
+      waRequest(tokens.aWa, body, signMeta(body, WA_SECRET)),
+      tokens.aWa,
+      deps({ config: waConfig(), rawBody: body.replace('wamid.guarded.1', 'wamid.guarded.2') }),
+    );
+    expect(tampered.status).toBe(401);
+    const huge = 'x'.repeat(300 * 1024);
+    const big = await handleWhatsAppWebhook(
+      waRequest(tokens.aWa, '{}', signMeta(huge, WA_SECRET)),
+      tokens.aWa,
+      deps({ config: waConfig(), rawBody: huge }),
+    );
+    expect(big.status).toBe(413);
+  });
+});

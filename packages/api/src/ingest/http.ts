@@ -39,6 +39,12 @@ export interface IngestHttpDeps {
   clientIp: string;
   config?: IngestChannelConfig;
   nowSec?: number;
+  /**
+   * The body as already read by the web's publicGuard (method, streamed size cap
+   * and per-IP limit done there). When set, preflight skips those two steps and
+   * the signature is verified over these bytes.
+   */
+  rawBody?: string;
 }
 
 export const INGEST_IP_LIMIT: RateLimitOptions = { limit: 120, windowSec: 60, prefix: 'ingest:ip' };
@@ -91,9 +97,15 @@ async function preflight(
 ): Promise<{ ok: true; cfg: IngestChannelConfig; body: Uint8Array } | { ok: false; res: Response }> {
   const cfg = deps.config ?? ingestConfig(kind);
   if (!cfg.secret) return { ok: false, res: json(503, { error: 'not_configured' }) };
+  const max = kind === 'whatsapp' ? INGEST_LIMITS.whatsappBodyBytes : INGEST_LIMITS.emailBodyBytes;
+  if (deps.rawBody !== undefined) {
+    const guarded = new Uint8Array(Buffer.from(deps.rawBody, 'utf8'));
+    if (guarded.byteLength > max) return { ok: false, res: json(413, { error: 'payload_too_large' }) };
+    return { ok: true, cfg, body: guarded };
+  }
   const ip = await deps.rateLimit(deps.clientIp || 'unknown', INGEST_IP_LIMIT);
   if (!ip.allowed) return { ok: false, res: json(429, { error: 'rate_limited' }) };
-  const body = await readBody(req, kind === 'whatsapp' ? INGEST_LIMITS.whatsappBodyBytes : INGEST_LIMITS.emailBodyBytes);
+  const body = await readBody(req, max);
   if (!body) return { ok: false, res: json(413, { error: 'payload_too_large' }) };
   return { ok: true, cfg, body };
 }
