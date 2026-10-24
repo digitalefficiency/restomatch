@@ -5,8 +5,20 @@ import * as schema from './schema';
 
 export type Database = ReturnType<typeof createDb>;
 
+/**
+ * Connections per pool. Default 10; DB_POOL_MAX lowers it — e.g. 3 when the app runs
+ * through Supabase's SESSION pooler (5432), which pins one server connection per
+ * client connection (pool size ~15 per role on nano, two pools per instance).
+ */
+export function dbPoolMax(env: NodeJS.ProcessEnv = process.env): number {
+  const n = Number(env.DB_POOL_MAX ?? 10);
+  return Number.isInteger(n) && n > 0 ? n : 10;
+}
+
 export function createDb(connectionString: string) {
-  const client = postgres(connectionString, { prepare: false, max: 10 });
+  // idle_timeout: release idle connections after 20 s so warm serverless instances
+  // don't hold pooler slots they aren't using.
+  const client = postgres(connectionString, { prepare: false, max: dbPoolMax(), idle_timeout: 20 });
   return drizzle(client, { schema });
 }
 

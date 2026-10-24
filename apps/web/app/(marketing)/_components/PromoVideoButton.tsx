@@ -49,7 +49,7 @@ export function PromoVideoButton({
         aria-label={title}
         onClose={() => setOpen(false)}
         onClick={(e) => e.target === dialog.current && dialog.current?.close()}
-        className="w-[min(92vw,960px)] rounded-2xl border border-line bg-bg p-0 text-ink shadow-card backdrop:bg-black/70"
+        className="w-[min(92vw,960px,calc((100dvh-6rem)*16/9))] max-w-none rounded-2xl border border-line bg-bg p-0 text-ink shadow-card backdrop:bg-black/70"
       >
         <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
           <p className="text-sm font-semibold">{title}</p>

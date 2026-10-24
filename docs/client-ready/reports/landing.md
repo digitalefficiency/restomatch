@@ -483,3 +483,68 @@ Mode **heroMedia on**, with a dummy local WebM/MP4/poster and a promo, built the
   - **L2a:** a production build with the flag off shows no link on `/`, `/pricing` or `/about` (he/en × desktop/mobile), and the full L2 "off" suite still passes. With the flag on, the link appears in the header nav, the mobile menu and the footer with the right label, and there are 0 console errors.
   - **L2b:** an independent reviewer found NOT REFUTED.
 - **Deploy order:** this branch has no `/leak-check` page; it comes from PR #44. Turn `LEAK_CHECK_PUBLIC=1` on only after that page ships, or every marketing page links to a 404.
+
+---
+
+## Round 5: perf, promo modal, SEO, cookie banner (PR #54)
+
+### LCP (mobile)
+
+Lighthouse 12.8.2, `/`, local `next start`:
+
+| Throttling | Base (8289ce1) | Now (db072f1) |
+|---|---|---|
+| Simulated (lantern), he/en × 3 runs | 3.1–3.7 s | **2.2–2.7 s** (he 2.2/2.6/2.7, en 2.3/2.6/2.7) |
+| Applied (devtools), he/en × 2 runs | 2.2–2.4 s | **1.7–1.8 s** (LCP = FCP) |
+
+- Performance 94–98, CLS ≤ 0.002.
+- **What moved it:**
+  - The hero poster is an `<img>` preloaded with `fetchpriority=high` and a WebP `srcset`: 11 KB at Lighthouse's DPR and 24 KB at DPR 3, against the 52 KB JPEG.
+  - The loop `<video>` sits 1px inside the poster, so its first frame can never replace it as LCP. Before, it sometimes did, pulling the 900 KB webm into the measurement.
+  - `content-visibility:auto` on the below-fold sections and footer.
+  - No JetBrains Mono or ₪ latin-ext subset in the first render: the step badges and English eyebrows are sans.
+  - `TrpcProvider` moved off the root layout (react-query/tRPC no longer ships on public pages).
+- **Not met everywhere:** under simulation, 4 of 6 runs are still above 2.5 s.
+  - The rest is the React/Next framework JS and the App Router's serialized payload. Lantern charges it to LCP because, on localhost, it executes before the poster's first paint.
+  - With real applied throttling the poster paints in the first frame (1.7–1.8 s).
+
+### "Watch 60 seconds" promo
+- S10's `promo-he-720.mp4` (60 s, 1280×720, faststart) and `promo-poster-he.jpg`.
+- **English:** shows the Hebrew film until `promo-en-720.mp4` exists (`promoVideoFor` fallback), so there is no 404.
+- **The modal:**
+  - native `<dialog>`: focus trap, Esc / ✕ / backdrop close, focus returns to the button
+  - the video mounts only while open and unmounts on close, so the landing makes 0 requests for it
+  - no autoplay: native controls, so no sound or motion until the visitor presses play
+
+### SEO
+- `robots.txt` and `sitemap.xml` read `APP_URL` per request, so the domain is right without a rebuild.
+- **Per-language share cards:** `/og/he.png` (Hebrew, laid out RTL) and `/og/en.png` from one route, replacing the English-only `opengraph-image`.
+- Every marketing page sets `og:image` in its language, `twitter:card=summary_large_image`, `og:locale`/alternate, and `og:url` in its language. The root page renders its own `og:url`, as it does its canonical.
+
+### Cookie banner
+- Compact on phones (one-line text, 108–127 px).
+- Its height is reserved as body padding while shown, and released after a choice.
+- If it would still cover the hero CTA (`data-keep-clear`; only English at 360×640), it appears once the visitor scrolls the CTA clear. This is re-checked per page and on resize. Non-essential cookies stay off meanwhile.
+
+### Verification (2 layers)
+- **Layer 1:**
+  - frozen install
+  - `turbo test` 13/13 (web 246); the local test DB had to be migrated to 0033 first
+  - typecheck 17/17
+  - web `tsc` 0
+  - lint 0 errors (9 warnings, all pre-existing in files not touched here)
+  - build green
+- **Layer 2(a):** production build, Playwright, he/en × desktop/mobile × reduced motion on/off.
+  - **Hero:** poster preloaded; the loop plays only with motion on; pause toggle works.
+  - **Promo:** 0 requests before open; the Hebrew film plays in both locales; no autoplay; focus trap; Esc / ✕ / backdrop close; the video unmounts.
+  - **Navigation:** the hero CTA lands exactly on `#lead` (top 96 px, which needed `AnchorScrollFix`).
+  - **SEO:** cards he/en 200 (unknown → 404); per-locale `og:image` / `twitter:card` / `og:url` on 4 pages; robots/sitemap use the runtime host.
+  - **Cookie banner:** checked against the CTA at 4 viewports.
+  - **Everything else:** the lead form submits; showcase, `/pricing` and `/about` green; 0 console/hydration errors.
+  - **English crawler**, all 5 roles across the dashboard: 0 findings. This covers the tRPC provider move.
+- **Layer 2(b):** one refuter per milestone, all NOT REFUTED; should-fixes fixed.
+  - **Perf:** the `#lead` smooth scroll stopped short past the deferred sections.
+  - **SEO/banner:** English `og:url`, banner padding, the per-page check, and the generic root `og:title`.
+- **Open, needs routing:**
+  - `/og/*.png` responses carry the Auth.js Set-Cookie from the middleware matcher, so they aren't publicly cacheable. On Vercel that's performance only. The fix is in the security-owned `middleware.ts`.
+  - `publicPaths` still lists the dead `/opengraph-image` (asserted in a test).
