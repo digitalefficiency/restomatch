@@ -220,6 +220,13 @@ export {
   type SupplierResponseDiff,
 } from './supplierConfirm/service';
 export {
+  supplierConfirmDocumentExtension,
+  supplierAppBaseUrl,
+  SUPPLIER_CONFIRM_DOC_LINE_HE,
+  SUPPLIER_CONFIRM_DOC_PREVIEW_HE,
+  type SupplierConfirmDocumentContext,
+} from './supplierConfirm/documentExtension';
+export {
   APP_ERROR_CODES,
   AppErrorCause,
   appError,

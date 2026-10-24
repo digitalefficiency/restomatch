@@ -23,6 +23,7 @@ import {
   submitSupplierAnswer,
   supplierResponseDiff,
 } from '../supplierConfirm/service';
+import { supplierConfirmDocumentExtension } from '../supplierConfirm/documentExtension';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 
 const db = createDb(testDbUrl());
@@ -205,5 +206,26 @@ describe('supplierConfirm router', () => {
       code: 'BAD_REQUEST',
       message: expect.stringMatching(/^SUPPLIER_CONFIRM_NOT_SENT/),
     });
+  });
+});
+
+describe('order-document extension (S5 ORDER_DOCUMENT_EXTENSIONS)', () => {
+  const ctx = () => ({ db, restaurantId: A.restaurantId, poId: A.poId, userId: A.ownerUserId });
+
+  it("'send' mints one link and returns the Hebrew line with its URL; 'preview' never mints", async () => {
+    const preview = await supplierConfirmDocumentExtension({}, { ...ctx(), mode: 'preview' });
+    expect(preview).toHaveLength(1);
+    expect(await db.select().from(supplierConfirmLinks)).toEqual([]);
+    const sent = await supplierConfirmDocumentExtension({}, { ...ctx(), mode: 'send' });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatch(/\/s\/[A-Za-z0-9_-]{43}$/);
+    expect(await db.select().from(supplierConfirmLinks)).toHaveLength(1);
+  });
+
+  it('flag off → [] in both modes (document unchanged)', async () => {
+    await setFlag(A, false);
+    expect(await supplierConfirmDocumentExtension({}, { ...ctx(), mode: 'preview' })).toEqual([]);
+    expect(await supplierConfirmDocumentExtension({}, { ...ctx(), mode: 'send' })).toEqual([]);
+    expect(await db.select().from(supplierConfirmLinks)).toEqual([]);
   });
 });
