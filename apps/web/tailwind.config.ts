@@ -33,6 +33,12 @@ const config: Config = {
         warn: v('warn'),
         info: v('info'),
       },
+      // Tints used across the app (bg-danger/12, bg-warn/8 …) that the default
+      // opacity scale lacks — without these Tailwind emits no rule at all.
+      opacity: {
+        8: '0.08',
+        12: '0.12',
+      },
       fontFamily: {
         // Heebo via next/font CSS var, then the static stack as fallback.
         sans: ['var(--font-heebo)', ...typography.fontFamily.sans.split(',').map((s) => s.trim().replace(/"/g, ''))],
