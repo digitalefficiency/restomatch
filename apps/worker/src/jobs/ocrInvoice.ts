@@ -49,6 +49,36 @@ function buildProviders(job: OcrInvoiceJob): { documentAi: OcrProvider; claude: 
   return { documentAi: claude, claude };
 }
 
+/**
+ * The tenant-guard lookup, tolerant of the enqueue/commit race:
+ * receiving.registerInvoice enqueues this job from INSIDE the request's tenant
+ * transaction (withRestaurant), so a fast worker can run before that
+ * transaction commits and not see the invoice yet. Refusing then left the
+ * invoice in ocr_pending forever (the receiver saw "taking longer" and a
+ * PO-only review). Re-check for a few seconds before refusing; the check
+ * itself (id AND restaurant) is unchanged, so a forged job is still refused.
+ */
+export async function findInvoiceForJob(
+  db: Database,
+  restaurantId: string,
+  invoiceId: string,
+  opts: { waitMs?: number; stepMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<{ id: string; supplierId: string | null } | null> {
+  const waitMs = opts.waitMs ?? 5_000;
+  const stepMs = opts.stepMs ?? 250;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  for (let waited = 0; ; waited += stepMs) {
+    const [row] = await db
+      .select({ id: invoices.id, supplierId: invoices.supplierId })
+      .from(invoices)
+      .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
+      .limit(1);
+    if (row) return row;
+    if (waited >= waitMs) return null;
+    await sleep(stepMs);
+  }
+}
+
 export function startOcrInvoiceWorker() {
   return makeWorker<OcrInvoiceJob>('ocr-invoice', async (job) => {
     const url = process.env.DATABASE_URL;
@@ -58,13 +88,7 @@ export function startOcrInvoiceWorker() {
     // Tenant guard: job payloads are not a trust boundary — verify the invoice
     // belongs to the payload's restaurant, and take supplierId from the verified
     // row rather than the payload.
-    const [invoice] = await db
-      .select({ id: invoices.id, supplierId: invoices.supplierId })
-      .from(invoices)
-      .where(
-        and(eq(invoices.id, job.data.invoiceId), eq(invoices.restaurantId, job.data.restaurantId)),
-      )
-      .limit(1);
+    const invoice = await findInvoiceForJob(db, job.data.restaurantId, job.data.invoiceId);
     if (!invoice) {
       throw new Error(
         `[ocr-invoice] invoice=${job.data.invoiceId} not found in restaurant=${job.data.restaurantId} — refusing to process`,

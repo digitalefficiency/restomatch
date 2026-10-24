@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createDb, eq, invoices, restaurants, suppliers, testDbUrl } from '@restomatch/db';
-import { markOcrFailed } from '../jobs/ocrInvoice';
+import { findInvoiceForJob, markOcrFailed } from '../jobs/ocrInvoice';
 
 // EN-3: a failed OCR must leave the invoice in a terminal, reviewable state —
 // never 'ocr_pending' forever — and must not write any ₪ lines.
@@ -63,5 +63,34 @@ describe('markOcrFailed (EN-3)', () => {
     const rows = await db.select().from(invoices).where(eq(invoices.restaurantId, restaurantId));
     expect(rows.find((r) => r.id === done)!.status).toBe('matched');
     expect(rows.find((r) => r.id === pending)!.status).toBe('ocr_pending');
+  });
+});
+
+describe('findInvoiceForJob — enqueue/commit race', () => {
+  it('finds an invoice whose inserting transaction commits while the job is already running', async () => {
+    const writer = createDb(testDbUrl()); // the web request's connection
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let insertedId = '';
+    const request = writer.transaction(async (tx) => {
+      const [inv] = await tx
+        .insert(invoices)
+        .values({ restaurantId, supplierId, status: 'ocr_pending', source: 'photo', rawImageUrl: 'https://x/r.jpg' })
+        .returning();
+      insertedId = inv!.id;
+      await held; // the job is enqueued here, before COMMIT
+    });
+    while (!insertedId) await new Promise((r) => setTimeout(r, 10));
+    const lookup = findInvoiceForJob(db, restaurantId, insertedId, { waitMs: 3_000, stepMs: 50 });
+    setTimeout(release, 300); // the request commits a moment later
+    await request;
+    expect(await lookup).toEqual({ id: insertedId, supplierId });
+  });
+
+  it('still refuses a job for another restaurant (after the short wait)', async () => {
+    const id = await newInvoice();
+    const t0 = Date.now();
+    expect(await findInvoiceForJob(db, otherRestaurantId, id, { waitMs: 200, stepMs: 50 })).toBeNull();
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(200);
   });
 });

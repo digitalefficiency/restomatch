@@ -15,6 +15,7 @@
  *   PW_CHROMIUM_PATH=/opt/pw-browsers/chromium pnpm exec tsx scripts/qa-receiving.ts [scenario…]
  */
 import { spawn, type ChildProcess } from 'node:child_process';
+import { openSync } from 'node:fs';
 import { mkdir, readdir, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -65,7 +66,10 @@ async function workerOn(): Promise<void> {
   worker = spawn('pnpm', ['--filter', '@restomatch/worker', 'start'], {
     cwd: ROOT,
     env: { ...process.env, DATABASE_URL: DB_URL },
-    stdio: 'ignore',
+    // QA_WORKER_LOG=<file>: keep the worker's output for debugging.
+    stdio: process.env.QA_WORKER_LOG
+      ? ['ignore', openSync(process.env.QA_WORKER_LOG, 'a'), openSync(process.env.QA_WORKER_LOG, 'a')]
+      : 'ignore',
     detached: true,
   });
   await new Promise((r) => setTimeout(r, 8000));
@@ -609,10 +613,16 @@ async function main() {
       page.on('console', (m) => {
         if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push(m.text());
       });
-      await page.goto(`${BASE}/dashboard/receiving`);
-      const card = page.getByText(he ? /ירקות השרון/ : /HaSharon Produce/).first();
-      await card.waitFor();
-      check(true, 'inbox lists HaSharon Produce');
+      // The inbox lists the server's "today": only checkable when the seed's
+      // DEMO_TODAY is today (Asia/Jerusalem); the wizard path below is date-free.
+      const todayIl = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date());
+      if (!process.env.DEMO_TODAY || process.env.DEMO_TODAY === todayIl) {
+        await page.goto(`${BASE}/dashboard/receiving`);
+        await page.getByText(he ? /ירקות השרון/ : /HaSharon Produce/).first().waitFor();
+        check(true, 'inbox lists HaSharon Produce');
+      } else {
+        check(true, `inbox check skipped: seeded for ${process.env.DEMO_TODAY}, server today is ${todayIl}`);
+      }
       const demo = await cloneHaSharon(combo.id);
       await openWizard(page, demo.poId);
       await pick(page, 'IMG_hasharon.jpg', 'image/jpeg', fx.bigJpeg);
@@ -625,12 +635,13 @@ async function main() {
         check(c === 1, `"${n}" shown once (got ${c})`);
       }
       if (!he) {
-        await page.getByTestId('item-name-en').filter({ hasText: 'Cherry tomatoes' }).first().waitFor();
+        await page.getByTestId('item-name-en').filter({ hasText: 'Cherry tomatoes' }).locator('visible=true').first().waitFor();
         check(true, 'English names (Cherry tomatoes) with the Hebrew original');
       }
-      check(await visibleCount(page.getByTestId('recon-section-both')) === 1, 'one "on both" section');
+      const both = await visibleCount(page.getByTestId('recon-section-both'));
+      check(both === 1, `one "on both" section (got ${both})`);
       check((await page.getByTestId('recon-mismatch-banner').count()) === 0, 'no mismatch banner');
-      check((await page.getByRole('alert').count()) === 0, 'no error alert');
+      check((await visibleCount(page.getByRole('alert').filter({ hasText: /\S/ }))) === 0, 'no error alert'); // (Next's route announcer is role=alert)
       await shot(page, `${combo.id}-review`);
       await page.getByTestId('continue-adjust').click();
       for (let pass = 0; pass < 3; pass += 1) {
