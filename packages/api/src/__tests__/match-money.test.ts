@@ -638,6 +638,8 @@ describe('a decision only carries to an equivalent finding (decisionStillApplies
     expect(decisionStillApplies(rejected(), { type: 'PRICE_HIGHER', severity: 'block', deltaAmount: 50, requiredRole: 'manager' })).toBe(false);
     expect(decisionStillApplies(rejected(), { type: 'PRICE_HIGHER', severity: 'warn', deltaAmount: 50.01, requiredRole: 'manager' })).toBe(false);
     expect(decisionStillApplies(rejected(), { type: 'PRICE_HIGHER', severity: 'warn', deltaAmount: 50, requiredRole: 'owner' })).toBe(false);
+    // Same routing it was decided under → still covered (even if the decider's role reads differently today).
+    expect(decisionStillApplies(rejected({ requiresRole: 'owner', deciderRole: 'manager' }), { type: 'PRICE_HIGHER', severity: 'warn', deltaAmount: 50, requiredRole: 'owner' })).toBe(true);
     // An owner's decision covers an owner-routed finding.
     expect(decisionStillApplies(rejected({ deciderRole: 'owner' }), { type: 'PRICE_HIGHER', severity: 'warn', deltaAmount: 50, requiredRole: 'owner' })).toBe(true);
   });

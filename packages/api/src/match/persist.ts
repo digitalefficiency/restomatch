@@ -62,7 +62,12 @@ export function decisionStillApplies(
   if (prior.severity !== next.severity) return false;
   if (Math.round(Math.abs(next.deltaAmount) * 100) > Math.round(Math.abs(prior.deltaAmount) * 100)) return false;
   if (prior.resolutionStatus !== 'escalated') {
-    if (!prior.deciderRole || !canActOn(prior.deciderRole, next.requiredRole)) return false;
+    // Routing must not have become stricter than what the decision covered: the
+    // decider may act on the new routing, or it is the same routing it was
+    // decided under (decided, by definition, by someone allowed to then).
+    const sameRouting = prior.requiresRole === next.requiredRole;
+    const deciderMayAct = !!prior.deciderRole && canActOn(prior.deciderRole, next.requiredRole);
+    if (!sameRouting && !deciderMayAct) return false;
   }
   if (next.type === 'DUPLICATE_INVOICE') {
     if (!prior.duplicateKey || prior.duplicateKey !== next.duplicateKey) return false;
