@@ -69,6 +69,11 @@ async function main() {
     await page.fill('input[name="password"]', PASSWORD);
     await Promise.all([page.waitForURL(/\/dashboard/, { timeout: 30_000 }), page.click('form button[type="submit"] >> nth=0')]);
 
+    // The header switcher is desktop-only (on a phone it sits in the menu): switch
+    // branches at 1366, then ask at the target width.
+    const wide = () => page.setViewportSize({ width: 1366, height: 900 });
+    const target = () => page.setViewportSize({ width: WIDTH, height: WIDTH === 390 ? 844 : 900 });
+    await wide();
     await page.goto(`${BASE}/dashboard`);
     const switcher = page.getByTestId('branch-switcher').first();
     await switcher.waitFor({ timeout: 30_000 });
@@ -80,6 +85,7 @@ async function main() {
     const seen: number[] = [];
     for (let i = 0; i < names.length; i += 1) {
       if (i > 0) {
+        await wide();
         await page.goto(`${BASE}/dashboard`);
         await page.getByTestId('branch-switcher').first().click();
         // The switcher calls a server action, then window.location.assign('/dashboard').
@@ -91,6 +97,7 @@ async function main() {
         const active = await page.getByTestId('branch-switcher').first().innerText();
         check(active.includes(names[i]!.split('\n')[0]!), `${locale}: switched to branch ${i + 1} ("${names[i]!.split('\n')[0]}")`);
       }
+      await target();
       const hero = await heroLeak(page);
       const a = await askLeak(page);
       check(hero !== null && a.ils === hero, `${locale} branch ${i + 1}: ask leak ₪${a.ils} = dashboard hero ₪${hero} ("${a.text}")`);

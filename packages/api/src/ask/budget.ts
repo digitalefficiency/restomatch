@@ -10,7 +10,12 @@ import { and, assistantUsage, eq, sql, type Database } from '@restomatch/db';
 export const ASK_QUESTIONS_PER_DAY = 60;
 /** $3/day per restaurant (micro-USD). */
 export const ASK_COST_MICRO_USD_PER_DAY = 3_000_000;
-export const ASK_BURST_PER_MINUTE = 10;
+/**
+ * Anti-hammering only (offline answers run DB aggregates): roomy enough that a
+ * person clicking through every suggestion in he and en never sees a 429. Spend
+ * is bounded by the daily caps above, not by this.
+ */
+export const ASK_BURST_PER_MINUTE = 30;
 /** claude-opus-5-5 list price: $4 / $20 per MTok → micro-USD per token. */
 export const INPUT_MICRO_USD_PER_TOKEN = 4;
 export const OUTPUT_MICRO_USD_PER_TOKEN = 20;

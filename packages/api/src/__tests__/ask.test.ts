@@ -2,7 +2,7 @@ import { assistantUsage, createDb, discrepancies, eq, invoiceLines, memberships,
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { appRouter } from '../index';
 import { __resetAskBurst, __setAskClient, type AskClientLike } from '../ask';
-import { ASK_QUESTIONS_PER_DAY } from '../ask/budget';
+import { ASK_BURST_PER_MINUTE, ASK_QUESTIONS_PER_DAY } from '../ask/budget';
 import { askSystemPrompt } from '../ask/claude';
 import { classifyQuestion } from '../ask/offline';
 import { groundAnswer, sanitizeAnswer } from '../ask/grounding';
@@ -196,14 +196,14 @@ describe('ask: Claude leg (mocked)', () => {
   it('burst limit per restaurant per minute (every path, offline too)', async () => {
     const { client, create } = fakeClaude(() => final({ answer: 'ok', citations: [] }));
     __setAskClient(client);
-    for (let i = 0; i < 10; i += 1) await caller(A).ask.ask({ question: 'hello there', locale: 'en' });
+    for (let i = 0; i < ASK_BURST_PER_MINUTE; i += 1) await caller(A).ask.ask({ question: 'hello there', locale: 'en' });
     await expect(caller(A).ask.ask({ question: 'hello there', locale: 'en' })).rejects.toMatchObject({
       code: 'TOO_MANY_REQUESTS',
     });
-    expect(create).toHaveBeenCalledTimes(10);
+    expect(create).toHaveBeenCalledTimes(ASK_BURST_PER_MINUTE);
     __resetAskBurst();
     __setAskClient(null);
-    for (let i = 0; i < 10; i += 1) await caller(B).ask.ask({ question: 'how much leaked', locale: 'en' });
+    for (let i = 0; i < ASK_BURST_PER_MINUTE; i += 1) await caller(B).ask.ask({ question: 'how much leaked', locale: 'en' });
     await expect(caller(B).ask.ask({ question: 'how much leaked', locale: 'en' })).rejects.toMatchObject({
       code: 'TOO_MANY_REQUESTS',
     });

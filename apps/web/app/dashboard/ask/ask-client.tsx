@@ -17,7 +17,7 @@ import { formatIls } from '@/lib/money';
 const SUGGESTIONS = ['leakChange', 'priceRaise', 'claimWeek', 'leakTotal', 'topSupplier'] as const;
 
 type T = Translator<typeof askNs.he>;
-type Turn = { id: number; question: string; result: AskResult | null; error: boolean };
+type Turn = { id: number; question: string; result: AskResult | null; error: false | 'generic' | 'rateLimited' };
 // The offline facts bag is shaped per intent server-side (ask/offline.ts); read it loosely here.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Facts = Record<string, any>;
@@ -120,8 +120,11 @@ export function AskClient({ claude, questionsLeftToday }: { claude: boolean; que
       const result = await mutation.mutateAsync({ question: text, locale });
       setTurns((prev) => prev.map((x) => (x.id === id ? { ...x, result } : x)));
       setLeft((n) => Math.max(0, n - 1));
-    } catch {
-      setTurns((prev) => prev.map((x) => (x.id === id ? { ...x, error: true } : x)));
+    } catch (err) {
+      // Burst limit: a calm "wait a moment", not a red failure.
+      const code = (err as { data?: { code?: string } } | null)?.data?.code;
+      const error = code === 'TOO_MANY_REQUESTS' ? 'rateLimited' : 'generic';
+      setTurns((prev) => prev.map((x) => (x.id === id ? { ...x, error } : x)));
     }
   }
 
@@ -164,7 +167,9 @@ export function AskClient({ claude, questionsLeftToday }: { claude: boolean; que
                 ) : null}
               </div>
               {turn.error ? (
-                <p className="text-sm text-danger">{t('error')}</p>
+                <p className={`text-sm ${turn.error === 'rateLimited' ? 'text-muted' : 'text-danger'}`}>
+                  {t(turn.error === 'rateLimited' ? 'rateLimited' : 'error')}
+                </p>
               ) : !turn.result ? (
                 <p className="inline-flex items-center gap-2 text-sm text-muted">
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
