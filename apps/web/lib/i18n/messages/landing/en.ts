@@ -199,12 +199,12 @@ export const en: Shape<typeof he> = {
       lead: 'One order, three stops — and every gap priced in shekels before you pay.',
       s1Title: 'The order goes out at the agreed price',
       s1Body:
-        'From MarketMan, Zester or a spreadsheet — with the quantities and prices you settled with the supplier.',
+        'From MarketMan, a Zester export or a spreadsheet — with the quantities and prices you settled with the supplier.',
       s2Title: 'The check at the receiving dock',
       s2Body:
         'The receiver checks what arrived and photographs the invoice. RestoMatch matches order, delivery and invoice, line by line.',
       s3Title: 'The leak, in shekels',
-      s3Body: 'Every gap gets a shekel amount and is held for approval before payment.',
+      s3Body: 'Every gap above tolerance gets a shekel amount and is held for approval before payment.',
       product: 'Cherry tomatoes · {qty} kg',
       ordered: 'Ordered',
       billed: 'Invoiced',
