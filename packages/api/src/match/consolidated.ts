@@ -208,7 +208,10 @@ export function countsAsLeak(
  * biggest |Δ| first, capped at the invoice's total like the hero.
  */
 export function claimableIls(
-  findings: ReadonlyArray<Pick<ProposalFinding, 'type' | 'severity' | 'countsAsLeak' | 'deltaAmount' | 'expected' | 'actual'>>,
+  findings: ReadonlyArray<
+    Pick<ProposalFinding, 'type' | 'severity' | 'countsAsLeak' | 'deltaAmount' | 'expected' | 'actual'> &
+      Partial<Pick<ProposalFinding, 'productId'>>
+  >,
   invoiceTotalInclVat: number,
 ): number {
   const lines = [...findings]
@@ -222,6 +225,10 @@ export function claimableIls(
       expected: f.expected,
       actual: f.actual,
       countsAsLeak: f.countsAsLeak,
+      // A proposal has no persisted PO / invoice line ids; the product is enough for the rule.
+      poLineId: null,
+      invoiceLineId: null,
+      productId: f.productId ?? null,
       productName: null,
       productNameEn: null,
       lineDescription: null,
