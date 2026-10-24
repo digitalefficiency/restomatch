@@ -561,7 +561,9 @@ export function ReceivingWizard({
           }}
         />
       ) : null}
-      {step === 'CONFIRMED' && result && dockSlipOn && grId && slipNeeded ? (
+      {/* After the close the engine may add findings the count didn't show (VAT,
+          total, duplicate): the slip decides itself whether there is anything to say. */}
+      {step === 'CONFIRMED' && result && dockSlipOn && grId ? (
         <div className="mx-auto max-w-md">
           <DockSlip
             grId={grId}

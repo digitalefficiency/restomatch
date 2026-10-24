@@ -84,7 +84,7 @@ describe('receiving.dockSlip under RLS', () => {
   it('receipt still open ⇒ quantities only: no ₪ even though a match run exists', async () => {
     const slip = await asA().receiving.dockSlip({ grId: A.grId, invoiceId: A.invoiceId });
     if (!slip.enabled) throw new Error('flag off');
-    expect(slip.engine).toEqual({ receiptClosed: false, ready: false, totalIls: 0, lines: [] });
+    expect(slip.engine).toEqual({ receiptClosed: false, ready: false, holdReason: null, totalIls: 0, lines: [] });
   });
 
   it('closed after its only run (a pre-count run) ⇒ still no ₪; a run after the close ⇒ the engine ₪', async () => {

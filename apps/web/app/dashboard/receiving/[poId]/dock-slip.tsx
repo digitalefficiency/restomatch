@@ -14,7 +14,7 @@ import { receiving } from '@/lib/i18n/messages/receiving';
 import { approvals } from '@/lib/i18n/messages/approvals';
 import { waLink } from '@/lib/messageTemplates';
 import { discrepancyLabel } from '../../approvals/vocab';
-import { buildSlipLines, slipBullet, sumIls, type SlipLine } from './_dockSlip';
+import { buildSlipLines, issueMessageKey, needsSlip, slipBullet, slipNote, sumIls, type SlipLine } from './_dockSlip';
 
 /** Stop polling for the engine after this long; the slip still shows quantities. */
 const ENGINE_WAIT_MS = 120_000;
@@ -55,6 +55,8 @@ export function DockSlip({
       // Poll only while the receipt is closed and its re-match is on the way.
       refetchInterval: (query) => {
         const d = query.state.data;
+        // Held re-matches poll too (quietly — the note already says why): a
+        // manager's match.runForInvoice can still bring the ₪ in.
         const waiting = !!invoiceId && d?.enabled === true && d.engine.receiptClosed && !d.engine.ready;
         return waiting && Date.now() - startedAt.current < ENGINE_WAIT_MS ? 4_000 : false;
       },
@@ -82,7 +84,10 @@ export function DockSlip({
   const total = data ? sumIls(slipLines.map((l) => l.amountIls ?? 0)) : 0;
   const dup = duplicateNumber ?? data?.invoice?.duplicateOfNumber ?? null;
 
-  if (q.isLoading || !data) return null;
+  // Nothing to dispute: no flagged line, no engine finding, no duplicate.
+  if (q.isLoading || !data || !needsSlip(slipLines, dup)) return null;
+  const note = slipNote(data.engine, !!invoiceId, gaveUp);
+  const engineReady = data.engine.ready;
 
   const money = (v: number) => formatIls(v, { locale, maximumFractionDigits: 2 });
   const qty = (v: number | null, u: string | null) =>
@@ -97,7 +102,7 @@ export function DockSlip({
 
   function issueTexts(l: SlipLine): string[] {
     const out = l.issues.map((i) =>
-      t(`dockSlip.issue.${i}`, {
+      t(`dockSlip.issue.${issueMessageKey(i, engineReady)}`, {
         ordered: qty(l.ordered, l.unit),
         received: qty(l.received, l.unit),
         rejected: qty(l.rejected, l.unit),
@@ -206,16 +211,20 @@ export function DockSlip({
         ))}
       </ul>
 
-      {invoiceId && !data.engine.receiptClosed ? (
+      {note === 'afterClose' ? (
         <p className="mt-2 text-xs text-muted" data-testid="dock-slip-after-close">
           {t('dockSlip.afterClose')}
         </p>
-      ) : invoiceId && !data.engine.ready && !gaveUp ? (
+      ) : note === 'held' ? (
+        <p className="mt-2 text-xs text-muted" data-testid="dock-slip-held">
+          {t(data.engine.holdReason === 'settled' ? 'dockSlip.heldSettled' : 'dockSlip.heldReview')}
+        </p>
+      ) : note === 'computing' ? (
         <p className="mt-2 flex items-center gap-2 text-xs text-muted" data-testid="dock-slip-computing">
           <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
           {t('dockSlip.computing')}
         </p>
-      ) : invoiceId && !data.engine.ready ? (
+      ) : note === 'slow' ? (
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted" data-testid="dock-slip-slow">
           <span>{t('dockSlip.slow')}</span>
           <button
