@@ -40,10 +40,10 @@ export async function switchBranchAction(restaurantId: string): Promise<BranchAc
     return { ok: false, error: errorOf(err) };
   }
   await unstable_update({ activeRestaurantId: restaurantId } as unknown as Parameters<typeof unstable_update>[0]);
-  revalidatePath('/dashboard', 'layout');
-  // The caller does a full document navigation to /dashboard (see
-  // BranchSwitcher / SwitchBranchButton): a server-action redirect relies on the RSC refetch
-  // that stalled in the production build (reports/chain.md).
+  // No revalidatePath: the caller does a full document navigation to /dashboard
+  // (BranchSwitcher / SwitchBranchButton), which renders fresh anyway. A
+  // revalidation would push an RSC refresh into the page that is being torn
+  // down by that navigation (a suspected source of the intermittent React #418).
   return { ok: true };
 }
 
@@ -61,7 +61,7 @@ export async function addBranchAction(input: {
       copyCatalog: input.copyCatalog === true,
       copySettings: input.copySettings === true,
     });
-    revalidatePath('/dashboard', 'layout');
+    // No revalidatePath: the form follows up with a full navigation (same reason as above).
     return {
       ok: true,
       restaurantId: res.restaurantId,

@@ -119,7 +119,8 @@ beforeAll(async () => {
   B = await seedTenant(ownerDb, 'B');
 
   // Seed storage objects (owner bypasses RLS) under each tenant's prefix + a
-  // shared anonymous showcase object.
+  // walk-ins/ object like the ones the former anon showcase left behind. Since
+  // SB-3 there is no anonymous prefix: only the service role may reach it.
   await clearStorageObjects();
   await seedStorageObject(aPath());
   await seedStorageObject(bPath());
@@ -166,8 +167,9 @@ describe('storage.objects per-restaurant isolation (A.2)', () => {
     const names = await namesVisibleTo(B.restaurantId);
     expect(names).toContain(bPath());
     expect(names).not.toContain(aPath());
-    // walk-ins/ is the shared anonymous showcase space (intentionally visible).
     expect(names.every((n) => !n.startsWith(`${A.restaurantId}/`))).toBe(true);
+    // SB-3: walk-ins/ is no shared space any more — a tenant sees only its own prefix.
+    expect(names.every((n) => n.startsWith(`${B.restaurantId}/`))).toBe(true);
   });
 
   it('guessed-path probe: GUC=B selecting A\'s exact object name returns 0 rows', async () => {
@@ -182,6 +184,35 @@ describe('storage.objects per-restaurant isolation (A.2)', () => {
       sql`select name from storage.objects where bucket_id = ${BUCKET} and (storage.foldername(name))[1] <> 'walk-ins'`,
     )) as unknown as Array<{ name: string }>;
     expect(rows).toHaveLength(0);
+  });
+
+  it('SB-3: a connection with NO restaurant GUC (anon) sees zero walk-ins/ objects — nothing at all', async () => {
+    // The walk-ins/ object exists (owner view)…
+    const seeded = (await ownerDb.execute(
+      sql`select name from storage.objects where bucket_id = ${BUCKET} and (storage.foldername(name))[1] = 'walk-ins'`,
+    )) as unknown as Array<{ name: string }>;
+    expect(seeded).toHaveLength(1);
+    // …but no anonymous policy exposes it any more, so it cannot be listed or signed.
+    const walkins = (await appDb.execute(
+      sql`select name from storage.objects where bucket_id = ${BUCKET} and (storage.foldername(name))[1] = 'walk-ins'`,
+    )) as unknown as Array<{ name: string }>;
+    expect(walkins).toHaveLength(0);
+    const all = (await appDb.execute(sql`select name from storage.objects`)) as unknown as Array<{ name: string }>;
+    expect(all).toHaveLength(0);
+  });
+
+  it('SB-3: a connection with NO restaurant GUC (anon) cannot INSERT under walk-ins/', async () => {
+    await expect(
+      appDb.execute(sql`insert into storage.objects (bucket_id, name) values (${BUCKET}, 'walk-ins/anon-upload.pdf')`),
+    ).rejects.toThrow(/row-level security/);
+  });
+
+  it('SB-3: GUC=B cannot INSERT under walk-ins/ either (tenants write only their own prefix)', async () => {
+    await expect(
+      withRestaurant(appDb, B.restaurantId, (tx) =>
+        tx.execute(sql`insert into storage.objects (bucket_id, name) values (${BUCKET}, 'walk-ins/tenant-upload.pdf')`),
+      ),
+    ).rejects.toThrow(/row-level security/);
   });
 
   it('GUC=B cannot INSERT an object under tenant A\'s prefix (WITH CHECK)', async () => {

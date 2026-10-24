@@ -376,9 +376,10 @@ grant usage on schema public to restomatch_app;
       end $$;
 
 -- 5. Storage (Supabase): the private invoice-scans bucket the app uploads to,
---    then the storage.objects policies from rls/0001 (per-restaurant + the anon
---    'walk-ins/' showcase prefix — dropping that one waits for the server-side
---    showcase upload, see SUPABASE-GITHUB-DEPLOY.md §SB-3). storage.objects
+--    then the storage.objects policies from rls/0001: the four per-restaurant
+--    ones only. No anonymous access (SB-3): the former anon 'walk-ins/' showcase
+--    policies are DROPPED here, since the showcase uploads server-side (service
+--    role, POST /api/showcase/upload; SUPABASE-GITHUB-DEPLOY.md §SB-3). storage.objects
 --    belongs to supabase_storage_admin; if the migration role may not alter it or
 --    create policies on it, this logs a WARNING instead of failing the deploy —
 --    apply rls/0001 from the SQL editor then (the doctor / verify-cutover report it).
@@ -423,9 +424,9 @@ do $restomatch_storage$ begin
 -- layer: bucket privacy + storage.objects per-restaurant path-prefix isolation.
 --
 -- Tenancy key at the storage layer: the FIRST folder segment of the object name
--- is the owning restaurant id, e.g. '<restaurant_id>/<scan-id>.pdf'. The
--- anonymous showcase keeps a single shared 'walk-ins/' prefix (demo data, no
--- tenant). app.current_restaurant_id() is set per-transaction by the app
+-- is the owning restaurant id, e.g. '<restaurant_id>/<scan-id>.pdf'. There is
+-- NO anonymous prefix (SB-3): the public showcase uploads server-side (service
+-- role, POST /api/showcase/upload). app.current_restaurant_id() is set per-transaction by the app
 -- (packages/api/src/trpc.ts memberProcedure → withRestaurant); it is NULL for
 -- connections that never set it, so those see nothing tenant-scoped.
 --
@@ -482,19 +483,12 @@ create policy invoice_scans_tenant_delete on storage.objects
     and (storage.foldername(name))[1] = app.current_restaurant_id()::text
   );
 
--- ── Anonymous showcase: a single shared 'walk-ins/' prefix (demo data only) ──
--- Narrow by prefix (never a tenant prefix), so the public landing-page receiver
--- can upload/read its own demo scans with the publishable (anon) key. It can
--- NEVER touch a '<restaurant_id>/' object because that requires the GUC above.
+-- ── SB-3: no anonymous storage access ──
+-- The former anon 'walk-ins/' showcase policies are dropped (the showcase now
+-- uploads via the service role). Kept as drops so re-applying this file on an
+-- existing project removes them.
 drop policy if exists invoice_scans_walkins_select on storage.objects;
-create policy invoice_scans_walkins_select on storage.objects
-  for select
-  using (bucket_id = 'invoice-scans' and (storage.foldername(name))[1] = 'walk-ins');
-
 drop policy if exists invoice_scans_walkins_insert on storage.objects;
-create policy invoice_scans_walkins_insert on storage.objects
-  for insert
-  with check (bucket_id = 'invoice-scans' and (storage.foldername(name))[1] = 'walk-ins');
     $policies$;
   exception when insufficient_privilege then
     raise warning 'restomatch: storage.objects policies NOT applied as % (%) — run packages/db/drizzle/rls/0001_invoice_scans_rls.sql in the SQL editor', current_user, sqlerrm;

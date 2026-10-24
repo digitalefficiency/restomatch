@@ -70,3 +70,5 @@ export interface OcrPipelineOptions {
 }
 
 export const DEFAULT_REVIEW_THRESHOLD = 0.85;
+/** A single line read below this (e.g. an unreadable qty zero-filled at 0.2) sends the invoice to human review. */
+export const LINE_REVIEW_THRESHOLD = 0.5;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
@@ -67,9 +67,6 @@ export interface ViewToolbarProps {
   exportData?: { columns: CsvColumn[]; rows: CsvRow[] };
 }
 
-/** How long a soft navigation may take before the document-navigation fallback. */
-const SOFT_NAV_FALLBACK_MS = 1200;
-
 const chip =
   'inline-flex items-center gap-1.5 rounded-xl border border-line bg-surface-2 px-3 py-1.5 text-sm font-medium text-muted transition-colors hover:border-primary/40 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60';
 const selectCls =
@@ -91,7 +88,6 @@ export function ViewToolbar(props: ViewToolbarProps) {
   const router = useRouter();
   const pathname = usePathname();
   const id = useId();
-  const latestTarget = useRef<string | null>(null);
 
   const [from, setFrom] = useState(view.from ?? '');
   const [to, setTo] = useState(view.to ?? '');
@@ -113,19 +109,9 @@ export function ViewToolbar(props: ViewToolbarProps) {
     // The breakdown's legacy month offset would contradict the chosen period.
     keep.delete('m');
     const q = serializeView(next, keep).toString();
-    const target = q ? `${pathname}?${q}` : pathname;
-    latestTarget.current = target;
-    router.replace(target, { scroll: false });
-    // Safety net: in the production build a same-route soft navigation that only
-    // changes search params sometimes never commits (Next 15.5; see
-    // docs/client-ready/reports/chain.md). If the URL has not changed shortly
-    // after, do a document navigation — a no-op whenever the soft one worked.
-    const want = q ? `?${q}` : '';
-    window.setTimeout(() => {
-      if (latestTarget.current === target && window.location.pathname === pathname && window.location.search !== want) {
-        window.location.assign(target);
-      }
-    }, SOFT_NAV_FALLBACK_MS);
+    // Same-route soft navigation. It used to stall in production builds under the
+    // route-level loading.tsx boundary (removed; see scripts/check-soft-nav.mjs).
+    router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
   }
   const set = (patch: Partial<ViewState>) => go({ ...view, ...patch });
   const setFilter = <K extends keyof ViewFilters>(key: K, values: ViewFilters[K]) =>
