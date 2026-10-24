@@ -8,18 +8,20 @@ import { lineTotalAgorot } from '../orders/document/build';
  * packages/api/src/match/consolidated.ts, agreed for this ledger; this is a
  * local implementation of the same rules until that lands (then swap the
  * import). One row per delivery note (goods receipt) of the supplier with
- * received_at in [from, to), oldest first:
- *   covered          a match run of some invoice used this GR (gr_id) or its PO (po_id), or a
- *                    settled consolidated invoice lists the note (ocr_payload.raw.deliveryNotes
- *                    number = goods_receipts.notes "ת.מ. <n>") or holds it in its period;
- *   in_consolidated  a still-pending invoice of the supplier (consolidated, or with no match run)
- *                    whose period holds the note — raw.periodStart..periodEnd, else the invoice's
- *                    calendar month (restaurant tz) ± 3 days;
- *   not_invoiced     neither.
+ * received_at in [from, to), oldest first. Rules, in order:
+ *   1. the note's ת.מ. number is listed in raw.deliveryNotes of a consolidated invoice of the
+ *      supplier → covered when it is matched/approved/paid, else in_consolidated;
+ *   2. a match run of an invoice used the GR or its PO → covered;
+ *   3. the period (raw.periodStart..periodEnd, else the invoice's month ± 3 days) of a
+ *      consolidated invoice that lists no notes, or of an invoice still waiting for a PO link,
+ *      holds it → same status rule;
+ *   4. otherwise not_invoiced.
  */
 export interface DeliveryNoteCoverage {
   grId: string;
   poId: string | null;
+  /** The delivery-note number ('ת.מ.' in goods_receipts.notes), or null. */
+  number: string | null;
   poRef: string | null;
   /** ISO */
   receivedAt: string;
@@ -28,6 +30,8 @@ export interface DeliveryNoteCoverage {
   state: 'covered' | 'in_consolidated' | 'not_invoiced';
   invoiceId: string | null;
   invoiceNumber: string | null;
+  /** The covering invoice is a consolidated one (חשבונית ריכוז). */
+  consolidated: boolean;
 }
 
 interface NoteRow {
@@ -139,32 +143,45 @@ export async function deliveryNoteCoverage(
     return c.invoice_date ? monthWindow(new Date(c.invoice_date), tz) : null;
   };
 
+  const isConsolidated = (c: CandidateInvoice) => c.kind === 'consolidated';
+  const stateOf = (c: CandidateInvoice) => (SETTLED.has(c.status) ? ('covered' as const) : ('in_consolidated' as const));
+  const consolidatedById = new Set(candidates.filter(isConsolidated).map((c) => c.id));
+
   return notes.map((n) => {
     const base = {
       grId: n.gr_id,
       poId: n.po_id,
+      number: n.note_number,
       poRef: n.po_ref,
       receivedAt: new Date(n.received_at).toISOString(),
       receivedValueIls: (value.get(n.gr_id) ?? 0) / 100,
     };
-    if (n.mr_invoice_id) {
-      return { ...base, state: 'covered' as const, invoiceId: n.mr_invoice_id, invoiceNumber: n.mr_invoice_number };
-    }
-    const at = new Date(n.received_at).getTime();
+    // 1. Listed by number on a consolidated invoice.
     const listed = n.note_number ? byNumber.get(n.note_number) : undefined;
-    const holder =
-      listed ??
-      consolidated.find((c) => {
-        const p = periodOf(c);
-        return p != null && at >= p[0] && at <= p[1];
-      });
-    if (!holder) return { ...base, state: 'not_invoiced' as const, invoiceId: null, invoiceNumber: null };
-    return {
-      ...base,
-      state: SETTLED.has(holder.status) ? ('covered' as const) : ('in_consolidated' as const),
-      invoiceId: holder.id,
-      invoiceNumber: holder.invoice_number,
-    };
+    if (listed) {
+      return { ...base, state: stateOf(listed), invoiceId: listed.id, invoiceNumber: listed.invoice_number, consolidated: true };
+    }
+    // 2. Used by a match run (GR or PO).
+    if (n.mr_invoice_id) {
+      return {
+        ...base,
+        state: 'covered' as const,
+        invoiceId: n.mr_invoice_id,
+        invoiceNumber: n.mr_invoice_number,
+        consolidated: consolidatedById.has(n.mr_invoice_id),
+      };
+    }
+    // 3. Held by the period of a consolidated invoice listing no notes, or of one awaiting a PO link.
+    const at = new Date(n.received_at).getTime();
+    const holder = consolidated.find((c) => {
+      if (isConsolidated(c) && asArray(c.note_numbers).length > 0) return false;
+      const p = periodOf(c);
+      return p != null && at >= p[0] && at <= p[1];
+    });
+    if (holder) {
+      return { ...base, state: stateOf(holder), invoiceId: holder.id, invoiceNumber: holder.invoice_number, consolidated: isConsolidated(holder) };
+    }
+    return { ...base, state: 'not_invoiced' as const, invoiceId: null, invoiceNumber: null, consolidated: false };
   });
 }
 

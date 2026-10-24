@@ -46,7 +46,10 @@ export default async function SupplierLeakCardPrintPage({ params }: { params: Pr
       <style>{`
         @page { size: A4; margin: 12mm; }
         @media print {
-          html, body { background: #fff !important; background-image: none !important; }
+          /* One page whatever the (hidden) dashboard chrome adds below: the card is pinned to page 1. */
+          html, body { background: #fff !important; background-image: none !important;
+            height: 100% !important; min-height: 0 !important; overflow: hidden !important; }
+          body > * { max-height: 100vh !important; overflow: hidden !important; }
           body * { visibility: hidden !important; }
           #supplier-leak-card, #supplier-leak-card * { visibility: visible !important; }
           html::before, html::after, body::before, body::after { display: none !important; }
