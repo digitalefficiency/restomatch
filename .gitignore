@@ -45,3 +45,6 @@ playwright-report/
 # scripts/verify.sh step logs
 .verify/
 .demo-local/
+
+# Graphify knowledge graph (local build output; `graphify update .` regenerates it)
+graphify-out/
