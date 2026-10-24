@@ -81,7 +81,11 @@ export default async function ReceivingPoPage({
         {t('po.backToList')}
       </Link>
 
-      <ReceivingWizard po={poForClient} restaurantId={restaurantId} />
+      <ReceivingWizard
+        po={poForClient}
+        restaurantId={restaurantId}
+        canCorrect={session?.user?.role === 'owner' || session?.user?.role === 'manager'}
+      />
     </div>
   );
 }

@@ -84,11 +84,17 @@ export default async function ReceivingPage() {
                 </div>
 
                 <div className="mt-4 flex items-center justify-between border-t border-line pt-3 text-sm">
-                  <span className="text-muted">
-                    {e.receiptId ? t('inbox.continueReceipt') : t('inbox.openReceipt')}
+                  {/* The label matches what the receipt page will open: a closed
+                      (partial / completed) receipt opens read-only, not a count. */}
+                  <span className="text-muted" data-testid="receiving-po-state">
+                    {!e.receiptId
+                      ? t('inbox.openReceipt')
+                      : e.receiptStatus === 'pending'
+                        ? t('inbox.continueReceipt')
+                        : t('inbox.closedReceipt')}
                   </span>
                   <span className="inline-flex items-center gap-1 font-semibold text-primary">
-                    {t('inbox.receiveGoods')}
+                    {e.receiptId && e.receiptStatus !== 'pending' ? t('inbox.viewReceipt') : t('inbox.receiveGoods')}
                     <ArrowLeft
                       className="h-4 w-4 transition-transform ltr:-scale-x-100 rtl:group-hover:-translate-x-0.5 ltr:group-hover:translate-x-0.5"
                       aria-hidden="true"

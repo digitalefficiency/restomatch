@@ -11,6 +11,7 @@ import {
   goodsReceipts,
   grLines,
   inArray,
+  memberships,
   invoiceLines,
   invoices,
   matchRuns,
@@ -22,6 +23,7 @@ import {
   testDbUrl,
 } from '@restomatch/db';
 import { computeLeakHero } from '@restomatch/charts';
+import { appRouter, type AppContext } from '@restomatch/api';
 import { matchInvoiceForJob } from '../jobs/matchInvoice';
 import { ocrMayAutoMatch } from '../jobs/ocrInvoice';
 
@@ -452,6 +454,44 @@ describe('receive the rest — two deliveries, two invoices, one receipt', () =>
       expect(types.filter((t) => t === 'MISSING_ON_INVOICE')).toHaveLength(lines.length - 1);
     } finally {
       await cleanup(d.grId, [d.inv1, s.inv2]);
+    }
+  });
+
+  it('the way out, through the real procedures: partial → תיקון ספירה → the full total → completed → the shortfall leaves the hero', async () => {
+    const d = await firstDelivery(); // partial: half of line 1 short, QTY_SHORT on the hero
+    const withShort = await hero();
+    const shortDelta = await db
+      .select({ delta: discrepancies.deltaAmount })
+      .from(discrepancies)
+      .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+      .where(and(eq(matchRuns.invoiceId, d.inv1), eq(discrepancies.type, 'QTY_SHORT')));
+    expect(shortDelta).toHaveLength(1);
+
+    const [owner] = await db
+      .select({ userId: memberships.userId })
+      .from(memberships)
+      .where(and(eq(memberships.restaurantId, restaurantId), eq(memberships.role, 'owner')))
+      .limit(1);
+    const [rest] = await db.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, restaurantId));
+    await db.execute(sql`update restaurants set settings = jsonb_set(coalesce(settings, '{}'::jsonb), '{features,receiptReopen}', 'true'::jsonb, true) where id = ${restaurantId}`);
+    try {
+      const caller = appRouter.createCaller({
+        db,
+        session: { userId: owner!.userId, restaurantId, role: 'owner' },
+      } as AppContext);
+      await caller.receiving.correctReceipt({ grId: d.grId });
+      const g = d.grLineIds.find((x) => x.poLineId === d.short.id)!;
+      await caller.receiving.markGrLine({ grLineId: g.id, qtyReceived: d.short.qty }); // the real total
+      const closed = await caller.receiving.submitReceipt({ grId: d.grId, invoiceIds: [d.inv1] });
+      expect(closed.status).toBe('completed');
+      // The re-match the submit enqueued (the worker's job).
+      const out = await matchInvoiceForJob(db, { restaurantId, invoiceId: d.inv1, rematch: true, poId });
+      expect(out.replaced).toBe(true);
+      expect(await typesOf(d.inv1)).not.toContain('QTY_SHORT');
+      expect(withShort - (await hero())).toBe(Math.round(Number(shortDelta[0]!.delta) * 100));
+    } finally {
+      await db.update(restaurants).set({ settings: rest!.settings }).where(eq(restaurants.id, restaurantId));
+      await cleanup(d.grId, [d.inv1]);
     }
   });
 });

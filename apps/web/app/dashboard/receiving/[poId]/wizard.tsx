@@ -85,9 +85,12 @@ const STEP_ORDER: Step[] = [
 export function ReceivingWizard({
   po,
   restaurantId,
+  canCorrect = false,
 }: {
   po: PoForClient;
   restaurantId: string | null;
+  /** Owner / manager: may correct a closed count ("תיקון ספירה"). */
+  canCorrect?: boolean;
 }) {
   const closed = po.closedReceipt ?? null;
   const [step, setStep] = useState<Step>(closed ? 'CONFIRMED' : 'SCAN_INVOICE');
@@ -119,7 +122,11 @@ export function ReceivingWizard({
    *  stored as the running total. Captured once, at the reopen. */
   const [prior, setPrior] = useState<Record<string, PriorCount> | null>(null);
   const [reopenError, setReopenError] = useState<string | null>(null);
-  const canReceiveRest = po.features?.receiptReopen === true && closed?.status === 'partial' && !result && !prior;
+  /** "תיקון ספירה": a closed count reopened for correction (totals, not a delivery). */
+  const [correcting, setCorrecting] = useState(false);
+  const reopenOn = po.features?.receiptReopen === true && !!closed && !result && !prior && !correcting;
+  const canReceiveRest = reopenOn && closed?.status === 'partial';
+  const canCorrectCount = reopenOn && canCorrect;
   const t = useT(receiving);
   const locale = useLocale();
   const dir = useDir();
@@ -137,6 +144,7 @@ export function ReceivingWizard({
   const markGrLine = trpc.receiving.markGrLine.useMutation();
   const submitReceipt = trpc.receiving.submitReceipt.useMutation();
   const reopenReceipt = trpc.receiving.reopenReceipt.useMutation();
+  const correctReceipt = trpc.receiving.correctReceipt.useMutation();
   // networkMode 'always': React Query's default ('online') PAUSES a mutation
   // while the device is offline — the receiver saw "Uploading…" spin forever.
   // Fail fast instead so the network message (and Retake) shows.
@@ -353,6 +361,30 @@ export function ReceivingWizard({
     }
   }
 
+  /** "תיקון ספירה": reopen the closed count and go straight to the review,
+   *  seeded from the recorded totals (and the receipt's invoice, if any). */
+  async function correctCount() {
+    if (!closed || correctReceipt.isPending) return;
+    setReopenError(null);
+    try {
+      await correctReceipt.mutateAsync({ grId: closed.grId });
+      setCorrecting(true);
+      setGrId(closed.grId);
+      setConfirmedAt(null);
+      if (closed.invoiceId) {
+        try {
+          await showInvoice(closed.grId, closed.invoiceId);
+          return;
+        } catch {
+          /* the invoice can't be read now — correct against the order */
+        }
+      }
+      await buildFromPoOnly(closed.grId);
+    } catch (err) {
+      setReopenError(errorText(err, t, locale));
+    }
+  }
+
   type InvoiceSnapshot = Awaited<ReturnType<typeof utils.receiving.getInvoice.fetch>>;
   async function buildReconciliation(activeGrId: string, invoice: InvoiceSnapshot) {
     const view = await receiptView(activeGrId);
@@ -461,10 +493,10 @@ export function ReceivingWizard({
       setStep('CONFIRMED');
       await utils.receiving.todayExpectations.invalidate();
     } catch (err) {
-      // Closed meanwhile (another tab / a replay): it IS closed — show it read-only.
+      // Closed meanwhile (another tab / a replay): this screen's marks were NOT
+      // saved — reload, and the page opens the receipt as the server holds it.
       if ((err as { data?: { appCode?: unknown } } | null)?.data?.appCode === 'receipt.closed') {
-        setConfirmedAt(new Date().toISOString());
-        setStep('CONFIRMED');
+        window.location.reload();
         return;
       }
       setError(errorText(err, t, locale));
@@ -499,15 +531,15 @@ export function ReceivingWizard({
         </div>
       ) : null}
 
-      {prior && step !== 'CONFIRMED' ? (
+      {(prior || correcting) && step !== 'CONFIRMED' ? (
         <div
           role="status"
-          data-testid="receive-rest-notice"
+          data-testid={prior ? 'receive-rest-notice' : 'correct-count-notice'}
           dir={dir}
           className="mb-4 flex items-center gap-3 rounded-xl border border-line bg-surface-2 px-4 py-3 text-sm text-ink"
         >
           <Info className="h-4 w-4 shrink-0 text-muted" aria-hidden="true" />
-          <span className="flex-1">{t('receiveRest.notice')}</span>
+          <span className="flex-1">{t(prior ? 'receiveRest.notice' : 'receiveRest.correctNotice')}</span>
         </div>
       ) : null}
 
@@ -603,6 +635,7 @@ export function ReceivingWizard({
             onUpdateMark={updateMark}
             onSubmit={() => void submit()}
             onBack={() => setStep('RECONCILIATION_REVIEW')}
+            alreadyReceived={prior ? Object.fromEntries(Object.entries(prior).map(([k, v]) => [k, v.received])) : undefined}
             // Clear the fixed mobile bottom nav (dashboard/nav.tsx, lg:hidden).
             footerBottomClass="bottom-[calc(4.5rem+env(safe-area-inset-bottom)+var(--consent-h,0px))] lg:bottom-[var(--consent-h,0px)]"
           />
@@ -649,6 +682,30 @@ export function ReceivingWizard({
               <Package className="h-4 w-4" aria-hidden="true" />
             )}
             {t('receiveRest.action')}
+          </button>
+        </div>
+      ) : null}
+      {step === 'CONFIRMED' && canCorrectCount ? (
+        <div className="mx-auto mt-4 max-w-md" dir={dir} data-testid="correct-count">
+          <p className="mb-3 text-sm text-muted">{t('receiveRest.correctHint')}</p>
+          {reopenError && !canReceiveRest ? (
+            <p role="alert" className="mb-3 text-sm text-danger">
+              {reopenError}
+            </p>
+          ) : null}
+          <button
+            type="button"
+            data-testid="correct-count-action"
+            onClick={() => void correctCount()}
+            disabled={correctReceipt.isPending || reopenReceipt.isPending}
+            className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-line bg-surface px-4 py-2 text-sm font-medium text-ink hover:border-primary/40 disabled:opacity-60"
+          >
+            {correctReceipt.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Scale className="h-4 w-4" aria-hidden="true" />
+            )}
+            {t('receiveRest.correctAction')}
           </button>
         </div>
       ) : null}

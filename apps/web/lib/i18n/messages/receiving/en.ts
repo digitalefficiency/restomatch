@@ -14,6 +14,8 @@ export const en: Shape<typeof he> = {
     noDeliveryDate: 'No delivery date',
     continueReceipt: 'Continue open receipt',
     openReceipt: 'Start a new receipt',
+    closedReceipt: 'Receipt closed — view and actions',
+    viewReceipt: 'View receipt',
     receiveGoods: 'Receive goods',
     badge: {
       pending: 'Receipt in progress',
@@ -158,6 +160,11 @@ export const en: Shape<typeof he> = {
     action: 'Receive the rest',
     hint: "Part of this order hasn't arrived yet. When the rest comes, scan its invoice and count only what arrived now.",
     notice: 'Follow-up delivery: count only what arrived now. What was already received is kept and added for you.',
+    owed: 'Still owed: {qty}',
+    already: 'Already received: {qty}',
+    correctAction: 'Correct the count',
+    correctHint: 'Counted wrong? A manager can reopen the receipt, fix the received quantities and re-run the check.',
+    correctNotice: 'Correcting the count: the recorded quantities are shown. Set each line to the right total and close again — the check runs again.',
   },
   dockSlip: {
     title: 'Dock dispute slip',
