@@ -19,6 +19,8 @@ import { useDir, useLocale, useT } from '@/lib/i18n/client';
 import { receiving } from '@/lib/i18n/messages/receiving';
 import type { Translator } from '@/lib/i18n/translate';
 import type { UploadedScan } from '@/lib/supabase/client';
+import { ingest } from '@/lib/i18n/messages/ingest';
+import { enqueuePhoto, idbAvailable, isNetworkError } from '@/lib/pwa/offlineQueue';
 import {
   adaptReconciliation,
   keepAdjusted,
@@ -76,9 +78,15 @@ const STEP_ORDER: Step[] = [
 export function ReceivingWizard({
   po,
   restaurantId,
+  offlineQueue = false,
+  userId = null,
 }: {
   po: PoForClient;
   restaurantId: string | null;
+  /** S13 receiverPwa: queue photos in IndexedDB when offline (lib/pwa/offlineQueue). */
+  offlineQueue?: boolean;
+  /** Owner of queued photos — they only ever upload under this user (shared tablets). */
+  userId?: string | null;
 }) {
   const [step, setStep] = useState<Step>('SCAN_INVOICE');
   const [grId, setGrId] = useState<string | null>(null);
@@ -102,6 +110,7 @@ export function ReceivingWizard({
   const [error, setError] = useState<string | null>(null);
   const [poLines, setPoLines] = useState<PoLineRow[]>(po.lines);
   const t = useT(receiving);
+  const tIngest = useT(ingest);
   const locale = useLocale();
   const dir = useDir();
   const supplierLabel = locale === 'en' && po.supplierNameEn ? po.supplierNameEn : po.supplierName;
@@ -154,13 +163,37 @@ export function ReceivingWizard({
    */
   const authedUpload = useCallback(
     async (file: File, clientUploadId: string): Promise<UploadedScan> => {
+      // S13 receiverPwa: offline (or the network drops mid-upload) → keep the
+      // photo in IndexedDB under the SAME clientUploadId; the PWA shell uploads
+      // it when back online (idempotent, M8). An empty publicUrl = queued.
+      const queue = async (): Promise<UploadedScan> => {
+        await enqueuePhoto({
+          clientUploadId,
+          restaurantId: restaurantId!,
+          userId: userId!,
+          poId: po.id,
+          supplierId: po.supplierId,
+          supplierName: po.supplierName,
+          mimeType: file.type || 'image/jpeg',
+          blob: file,
+        });
+        return { invoiceId: `queued-${clientUploadId}`, publicUrl: '', scanRouteUrl: '', storagePath: '', mimeType: file.type };
+      };
+      const canQueue = offlineQueue && Boolean(restaurantId) && Boolean(userId) && idbAvailable();
+      if (canQueue && !navigator.onLine) return queue();
       const contentBase64 = await fileToBase64(file);
-      const r = await uploadScan.mutateAsync({
-        contentBase64,
-        mimeType: file.type || 'application/octet-stream',
-        supplierName: po.supplierName,
-        clientUploadId,
-      });
+      let r;
+      try {
+        r = await uploadScan.mutateAsync({
+          contentBase64,
+          mimeType: file.type || 'application/octet-stream',
+          supplierName: po.supplierName,
+          clientUploadId,
+        });
+      } catch (err) {
+        if (canQueue && isNetworkError(err)) return queue();
+        throw err;
+      }
       return {
         invoiceId: r.invoiceId,
         // Short-lived signed URL for the immediate OCR/register step.
@@ -171,7 +204,7 @@ export function ReceivingWizard({
       };
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [po.supplierName],
+    [po.supplierName, offlineQueue, restaurantId, userId],
   );
 
   const stepIndex = STEP_ORDER.indexOf(step);
@@ -193,6 +226,13 @@ export function ReceivingWizard({
       // Without an uploaded public URL we cannot register/OCR — fall back to a
       // PO-only projection so the receiver can still record quantities.
       if (!captured.publicUrl) {
+        // S13: photo queued offline — say so and let the receiver keep going later.
+        if (offlineQueue && captured.invoiceId?.startsWith('queued-')) {
+          setError(tIngest('pwa.savedOffline'));
+          setStep('SCAN_INVOICE');
+          capturingRef.current = false;
+          return;
+        }
         await buildFromPoOnly(grId);
         capturingRef.current = false;
         return;
@@ -253,7 +293,7 @@ export function ReceivingWizard({
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [grId, po.id, po.supplierId, locale],
+    [grId, po.id, po.supplierId, locale, offlineQueue],
   );
 
   /** OCR finished: (English names if needed) → build the review from it. */

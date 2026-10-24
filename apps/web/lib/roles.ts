@@ -46,6 +46,8 @@ export const ROUTE_ROLES: Record<string, UserRole[]> = {
   // Bookkeeper included: duplicate invoices are routed to them (approvals engine),
   // and approvals.approve/reject/escalate accept bookkeeper-routed items.
   '/dashboard/approvals': ['owner', 'manager', 'bookkeeper'],
+  // S13 invoice inbox (WhatsApp / e-mail ingestion): managers act, bookkeepers read.
+  '/dashboard/inbox': ['owner', 'manager', 'bookkeeper'],
   '/dashboard/leaks': ['owner', 'manager', 'bookkeeper'],
   '/dashboard/suppliers': ['owner', 'manager'],
   '/dashboard/catalog': ['owner', 'manager'],

@@ -19,12 +19,15 @@ import {
   supplierCatalogItems,
   type Database,
 } from '@restomatch/db';
-import { ClaudePoParser } from '@restomatch/ocr';
+import { ClaudePoParser, ORDER_TEXT_MAX_CHARS, orderTextParserFromEnv } from '@restomatch/ocr';
 import { ZesttAdapter } from '@restomatch/procurement';
 import { managerProcedure, memberProcedure, requireFeature, router } from '../trpc';
 import { assertPoOwned, assertSupplierOwned } from '../tenant';
 import { getEntitlements } from '../entitlements';
 import { importPurchaseOrder } from '../orders/importPo';
+import { captureOrderDraft } from '../orders/captureOrder';
+import { featureEnabled } from '../lib/features';
+import { appError } from '../errors';
 import { estimateTotal, recomputePoTotal } from '../orders/totals';
 import { DEDUPE_INDEX_PREDICATE } from '../notifications/outbox';
 import { deriveExpectedDelivery, type DerivedDelivery } from '../lib/deriveDelivery';
@@ -420,6 +423,39 @@ export const ordersRouter = router({
         createdBy: ctx.session.userId,
       });
       return result;
+    }),
+
+  /**
+   * Order capture (flag `orderCapture`): the order message the owner already
+   * sent the supplier (WhatsApp / e-mail, pasted or shared) → a DRAFT PO with
+   * the supplier and catalog lines matched. `needs_supplier` asks the owner to
+   * pick one (pass it back as supplierId). Confirm = placeOrder {channel:'none'}.
+   */
+  captureFromText: managerProcedure
+    .input(
+      z.object({
+        text: z.string().trim().min(1).max(ORDER_TEXT_MAX_CHARS),
+        supplierId: z.string().uuid().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      const [r] = await ctx.db
+        .select({ settings: restaurants.settings })
+        .from(restaurants)
+        .where(eq(restaurants.id, restaurantId))
+        .limit(1);
+      if (!featureEnabled(r?.settings, 'orderCapture')) {
+        throw appError('FORBIDDEN', 'FEATURE_DISABLED', 'הפיצ׳ר אינו פעיל עבור המסעדה');
+      }
+      return captureOrderDraft(ctx.db, {
+        restaurantId,
+        text: input.text,
+        supplierId: input.supplierId ?? null,
+        parser: orderTextParserFromEnv(),
+        source: 'manual',
+        createdBy: ctx.session.userId,
+      });
     }),
 
   cancelOrder: managerProcedure

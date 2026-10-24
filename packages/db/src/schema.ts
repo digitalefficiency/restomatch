@@ -66,7 +66,8 @@ export const invoiceStatus = pgEnum('invoice_status', [
   'paid',
 ]);
 
-export const invoiceSource = pgEnum('invoice_source', ['photo', 'email', 'platform', 'manual']);
+// 'whatsapp' — migration 0051 (S13 ingest).
+export const invoiceSource = pgEnum('invoice_source', ['photo', 'email', 'platform', 'manual', 'whatsapp']);
 
 export const matchStatus = pgEnum('match_status', ['clean', 'minor', 'major', 'blocked']);
 
@@ -1174,6 +1175,113 @@ export const emailInboxes = pgTable('email_inboxes', {
   parseRules: jsonb('parse_rules').$type<Record<string, unknown>>().notNull().default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Invoice ingestion from WhatsApp / e-mail (migration 0050, S13 wave 1).
+ * The webhook finds its restaurant ONLY via the hashed per-restaurant token
+ * (app.ingest_resolve_channel); nothing in a payload names a tenant.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export type IngestChannelKind = 'whatsapp' | 'email';
+export type IngestMessageStatus = 'accepted' | 'needs_review' | 'rejected' | 'failed' | 'empty';
+export type IngestDocumentStatus =
+  | 'registered'
+  | 'needs_review'
+  | 'rejected'
+  | 'failed'
+  | 'duplicate'
+  | 'skipped';
+
+export const ingestChannels = pgTable(
+  'ingest_channels',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    kind: varchar('kind', { length: 16 }).$type<IngestChannelKind>().notNull(),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    tokenHint: varchar('token_hint', { length: 8 }).notNull(),
+    phoneNumberId: varchar('phone_number_id', { length: 64 }),
+    active: boolean('active').notNull().default(true),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (t) => [uniqueIndex('ingest_channels_token_hash_uq').on(t.tokenHash)],
+);
+
+export const ingestSenders = pgTable(
+  'ingest_senders',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    kind: varchar('kind', { length: 16 }).$type<IngestChannelKind>().notNull(),
+    sender: varchar('sender', { length: 320 }).notNull(),
+    // Composite same-tenant FK (supplier_id, restaurant_id) → suppliers — migration 0050.
+    supplierId: uuid('supplier_id'),
+    label: text('label'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('ingest_senders_uq').on(t.restaurantId, t.kind, t.sender)],
+);
+
+export const ingestMessages = pgTable(
+  'ingest_messages',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    // Composite same-tenant FK (channel_id, restaurant_id) → ingest_channels — migration 0050.
+    channelId: uuid('channel_id').notNull(),
+    kind: varchar('kind', { length: 16 }).$type<IngestChannelKind>().notNull(),
+    provider: varchar('provider', { length: 32 }).notNull(),
+    providerMessageId: varchar('provider_message_id', { length: 256 }).notNull(),
+    sender: varchar('sender', { length: 320 }).notNull(),
+    senderAllowed: boolean('sender_allowed').notNull(),
+    // Composite same-tenant FK (supplier_id, restaurant_id) → suppliers — migration 0050.
+    supplierId: uuid('supplier_id'),
+    subject: text('subject'),
+    status: varchar('status', { length: 16 }).$type<IngestMessageStatus>().notNull(),
+    error: text('error'),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('ingest_messages_replay_uq').on(t.restaurantId, t.kind, t.providerMessageId),
+    index('ingest_messages_restaurant_received_idx').on(t.restaurantId, t.receivedAt),
+  ],
+);
+
+export const ingestDocuments = pgTable(
+  'ingest_documents',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    // Composite same-tenant FK (message_id, restaurant_id) → ingest_messages — migration 0050.
+    messageId: uuid('message_id').notNull(),
+    filename: text('filename'),
+    mimeType: varchar('mime_type', { length: 64 }),
+    sizeBytes: integer('size_bytes'),
+    sha256: varchar('sha256', { length: 64 }),
+    storagePath: text('storage_path'),
+    // Composite same-tenant FK (invoice_id, restaurant_id) → invoices — migration 0050.
+    invoiceId: uuid('invoice_id'),
+    status: varchar('status', { length: 16 }).$type<IngestDocumentStatus>().notNull(),
+    error: text('error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('ingest_documents_message_idx').on(t.messageId, t.restaurantId),
+    index('ingest_documents_restaurant_sha_idx').on(t.restaurantId, t.sha256),
+  ],
+);
 
 export const supplierIntegrations = pgTable('supplier_integrations', {
   id: uuid('id').defaultRandom().primaryKey(),

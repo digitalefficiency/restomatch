@@ -33,6 +33,14 @@ describe('isPublicPath (middleware allowlist)', () => {
     (p) => expect(isPublicPath(p)).toBe(false),
   );
 
+  it('S13: exactly the two ingest webhooks are public — not a lookalike prefix, not the dashboard inbox', () => {
+    expect(isPublicPath('/api/ingest/email')).toBe(true);
+    expect(isPublicPath('/api/ingest/whatsapp/wa_0123456789abcdef0123456789abcdef')).toBe(true);
+    expect(isPublicPath('/api/ingestion')).toBe(false);
+    expect(isPublicPath('/api/ingest-admin')).toBe(false);
+    expect(isPublicPath('/dashboard/inbox')).toBe(false);
+  });
+
   it('prefix matching respects path boundaries', () => {
     expect(isPublicPath('/resetting-things')).toBe(false);
     expect(isPublicPath('/loginx')).toBe(false);

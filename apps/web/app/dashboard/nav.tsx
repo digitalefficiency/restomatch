@@ -12,6 +12,7 @@ import {
   Inbox,
   LayoutDashboard,
   LogOut,
+  Mail,
   Menu,
   Network,
   Store,
@@ -25,6 +26,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { UserRole } from '@restomatch/db';
+import type { FeatureKey } from '@restomatch/api';
 import { cn } from '@/lib/components';
 import { useT } from '@/lib/i18n/client';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
@@ -36,6 +38,7 @@ type LinkKey =
   | 'overview'
   | 'receiving'
   | 'approvals'
+  | 'inbox'
   | 'leaks'
   | 'chain'
   | 'suppliers'
@@ -52,12 +55,21 @@ interface NavItem {
   href: string;
   icon: LucideIcon;
   group: GroupKey;
+  /** Wave-1 flag(s): the item shows only when one of them is enabled. */
+  features?: FeatureKey[];
 }
 
 export const NAV_ITEMS: NavItem[] = [
   { key: 'overview', href: '/dashboard', icon: LayoutDashboard, group: 'operations' },
   { key: 'receiving', href: '/dashboard/receiving', icon: PackageCheck, group: 'operations' },
   { key: 'approvals', href: '/dashboard/approvals', icon: Inbox, group: 'operations' },
+  {
+    key: 'inbox',
+    href: '/dashboard/inbox',
+    icon: Mail,
+    group: 'operations',
+    features: ['ingestWhatsapp', 'ingestEmail'],
+  },
   { key: 'leaks', href: '/dashboard/leaks', icon: BarChart3, group: 'operations' },
   { key: 'chain', href: '/dashboard/chain', icon: Network, group: 'operations' },
   { key: 'suppliers', href: '/dashboard/suppliers', icon: Truck, group: 'purchasing' },
@@ -83,13 +95,15 @@ function isActive(pathname: string, href: string): boolean {
  * management is then one click away in the branch switcher and on the chain
  * page); single-branch owners get the Branches tab instead (open a branch /
  * see the chain plan). One of the two, so the tab row still fits.
+ * `enabled`: wave-1 feature flags — an item with `features` shows only when one is on.
  */
-function visibleItems(role: UserRole, showChain = false): NavItem[] {
+function visibleItems(role: UserRole, showChain = false, enabled: readonly FeatureKey[] = []): NavItem[] {
   return NAV_ITEMS.filter(
-    ({ key, href }) =>
+    ({ key, href, features }) =>
       canSeeRoute(role, href) &&
       (key !== 'chain' || showChain) &&
-      (key !== 'branches' || !showChain),
+      (key !== 'branches' || !showChain) &&
+      (!features || features.some((f) => enabled.includes(f))),
   );
 }
 
@@ -101,10 +115,18 @@ const focusRing =
  * with hairline separators. Scrolls horizontally instead of wrapping if a
  * narrow laptop can't fit every tab.
  */
-export function DesktopNav({ role, showChain = false }: { role: UserRole; showChain?: boolean }) {
+export function DesktopNav({
+  role,
+  showChain = false,
+  features,
+}: {
+  role: UserRole;
+  showChain?: boolean;
+  features?: FeatureKey[];
+}) {
   const t = useT(nav);
   const pathname = usePathname();
-  const items = visibleItems(role, showChain);
+  const items = visibleItems(role, showChain, features);
   return (
     <nav aria-label={t('mainLabel')} className="hidden lg:block">
       <ul className="-mb-px flex items-stretch gap-1 overflow-x-auto text-sm [scrollbar-width:none]">
@@ -157,6 +179,7 @@ export function MobileNav({
   email,
   showChain = false,
   branchSwitcher,
+  features,
 }: {
   role: UserRole;
   logout: () => Promise<void>;
@@ -165,6 +188,7 @@ export function MobileNav({
   showChain?: boolean;
   /** The branch switcher (list variant), for users with more than one membership. */
   branchSwitcher?: React.ReactNode;
+  features?: FeatureKey[];
 }) {
   const t = useT(nav);
   const pathname = usePathname();
@@ -176,7 +200,7 @@ export function MobileNav({
   useEffect(() => setMounted(true), []);
   const closeRef = useRef<HTMLButtonElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const items = visibleItems(role, showChain);
+  const items = visibleItems(role, showChain, features);
   const primary = items.slice(0, 4);
 
   // Close on navigation.
@@ -295,7 +319,7 @@ export function MobileNav({
             </nav>
             <div className="flex items-center justify-between gap-3 border-t border-line px-4 py-3">
               <LocaleSwitcher />
-              <form action={logout}>
+              <form action={logout} data-rm-logout="">
                 <button
                   type="submit"
                   className={cn(

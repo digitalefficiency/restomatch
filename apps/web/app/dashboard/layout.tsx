@@ -14,6 +14,8 @@ import { DesktopNav, MobileNav } from './nav';
 import { DashboardSearch } from './search';
 import { WorkerStatusBanner } from './worker-status';
 import { TrpcProvider } from '@/lib/trpc/client';
+import { enabledFeatures } from '@/lib/ingest/features';
+import { PwaSessionGuard } from '@/lib/pwa/PwaSessionGuard';
 
 /**
  * Dashboard app shell. Sticky frosted header: restaurant + user on the start
@@ -37,7 +39,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const active =
     memberships.find((m) => m.restaurantId === session.user.restaurantId) ?? memberships[0]!;
-  const [t, locale] = await Promise.all([getT(nav), getLocale()]);
+  const [t, locale, features] = await Promise.all([getT(nav), getLocale(), enabledFeatures(active.restaurantId)]);
   const roleLabel = labelForRole(active.role, locale);
   const email = session.user.email ?? '';
   // Branches (S8): the switcher lists every membership; the chain tab is for
@@ -83,6 +85,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                   logout={logout}
                   restaurantName={active.restaurantName}
                   email={email}
+                  features={features}
                   showChain={showChain}
                   branchSwitcher={
                     memberships.length > 1 ? (
@@ -110,7 +113,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                   <BranchSwitcher branches={switcherBranches} activeId={active.restaurantId} />
                   <DashboardSearch role={active.role} className="w-72" />
                   <LocaleSwitcher />
-                  <form action={logout}>
+                  <form action={logout} data-rm-logout="">
                     <button
                       type="submit"
                       className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-xs font-semibold text-muted transition-colors hover:border-primary/40 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
@@ -122,7 +125,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 </div>
                 <LocaleSwitcher className="lg:hidden" />
               </div>
-              <DesktopNav role={active.role} showChain={showChain} />
+              <DesktopNav role={active.role} showChain={showChain} features={features} />
             </div>
           </header>
           <main
@@ -132,6 +135,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
           >
             <WorkerStatusBanner />
             <LocaleSync />
+            {/* Always mounted: it only touches an EXISTING receiver queue, so a sign-out from a branch
+                without receiverPwa still wipes photos queued on another branch. */}
+            <PwaSessionGuard userId={session.user.id} />
             {children}
           </main>
         </div>
