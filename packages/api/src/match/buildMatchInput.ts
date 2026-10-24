@@ -39,7 +39,7 @@ const DEFAULT_TZ = 'Asia/Jerusalem';
 /** PO statuses eligible to be matched against an incoming invoice. */
 const ELIGIBLE_PO_STATUSES = ['sent', 'confirmed', 'partial'] as const;
 /** ± window (days) around the invoice date in which a PO's expected delivery may fall. */
-const PO_MATCH_WINDOW_DAYS = 7;
+export const PO_MATCH_WINDOW_DAYS = 7;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_BASELINE_WINDOW_DAYS = 90;
 

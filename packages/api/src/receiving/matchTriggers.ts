@@ -4,13 +4,15 @@ import {
   goodsReceipts,
   gte,
   inArray,
+  lte,
   invoices,
   matchRuns,
   purchaseOrders,
   sql,
   type Database,
 } from '@restomatch/db';
-import { buildMatchInputForInvoice } from '../match/buildMatchInput';
+import { HELD_FOR_RECEIPTS_KEY } from '@restomatch/charts';
+import { buildMatchInputForInvoice, PO_MATCH_WINDOW_DAYS } from '../match/buildMatchInput';
 
 /**
  * Which invoices to (re-)match when a goods receipt closes, and when the OCR job
@@ -58,9 +60,98 @@ export async function receiptStillOpen(tx: Database, restaurantId: string, grId:
 }
 
 /**
- * Does the matcher pair this invoice with THIS receipt when the receipt's own PO
- * is pinned? (Pinning matters: discovery alone prefers a same-supplier sibling
- * PO that already has a receipt.)
+ * The receipt a scan was taken on, as the OCR job stamped it into
+ * `ocr_payload.raw.scanGrId` (from the job's grId, tenant-checked). Null for an
+ * unstamped scan: email / upload, or a row from before the stamp.
+ */
+export function readScanGrId(ocrPayload: unknown): string | null {
+  const raw = (ocrPayload as { raw?: unknown } | null | undefined)?.raw;
+  if (typeof raw !== 'object' || raw === null) return null;
+  const id = (raw as { scanGrId?: unknown }).scanGrId;
+  return typeof id === 'string' && id.length > 0 ? id : null;
+}
+
+/**
+ * The receipt a scan belongs to — ONE answer for every reader:
+ *  1. raw.scanGrId, the OCR job's own grId (tenant- and supplier-checked).
+ *     Authoritative; the OCR sweep's retry carries the original job's grId, so
+ *     a retried scan is stamped too.
+ *  2. Otherwise, for a wizard photo, a hold the OCR job recorded on exactly ONE
+ *     receipt (raw.heldForReceipts, written by the job that lost its receipt:
+ *     the only same-supplier receipt being counted when the scan was read).
+ *     The sweep held the match for that receipt's count, so that receipt's
+ *     submit — and no other — claims it.
+ *  A hold on several receipts is a guess between them: no owner, and the
+ *  pairing rule below decides (ambiguous → left for a manager).
+ */
+export function scanOwnerReceipt(ocrPayload: unknown, source: string | null | undefined): string | null {
+  const stamped = readScanGrId(ocrPayload);
+  if (stamped !== null) return stamped;
+  if (source !== 'photo') return null;
+  const raw = (ocrPayload as { raw?: unknown } | null | undefined)?.raw;
+  const held = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>)[HELD_FOR_RECEIPTS_KEY] : undefined;
+  return Array.isArray(held) && held.length === 1 && typeof held[0] === 'string' && held[0].length > 0 ? held[0] : null;
+}
+
+/** The OCR result with the scan's receipt stamped in (unchanged without one). */
+export function withScanGrId<T extends object>(raw: T, scanGrId: string | undefined): T | (T & { scanGrId: string }) {
+  return scanGrId ? { ...raw, scanGrId } : raw;
+}
+
+/**
+ * The grId to stamp on a scan: the job's grId only when that receipt is this
+ * restaurant's AND its order is from the invoice's supplier. A forged / foreign
+ * id, or a receipt of another supplier, stamps nothing (a stamp pointing at the
+ * wrong supplier's receipt would orphan the scan: no receipt would ever claim
+ * it), and the scan falls back to the pairing rule below.
+ */
+export async function scanReceiptToStamp(
+  db: Database,
+  restaurantId: string,
+  grId: string | undefined,
+  supplierId: string | null,
+): Promise<string | undefined> {
+  if (!grId || !supplierId) return undefined;
+  const [gr] = await db
+    .select({ id: goodsReceipts.id })
+    .from(goodsReceipts)
+    .innerJoin(purchaseOrders, eq(purchaseOrders.id, goodsReceipts.poId))
+    .where(
+      and(
+        eq(goodsReceipts.id, grId),
+        eq(goodsReceipts.restaurantId, restaurantId),
+        eq(purchaseOrders.supplierId, supplierId),
+      ),
+    )
+    .limit(1);
+  return gr?.id;
+}
+
+/** Two POs that can both pair with one invoice fall within twice the matcher's ± window. */
+const SIBLING_WINDOW_MS = 2 * PO_MATCH_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+
+/**
+ * Does this invoice belong to THIS receipt? The matcher must pair it with the
+ * receipt when the receipt's own PO is pinned (pinning matters: discovery alone
+ * prefers a same-supplier sibling PO that already has a receipt), and then:
+ *  - a scan with an owner (scanOwnerReceipt: its stamp, or the OCR's single
+ *    recorded hold) belongs to exactly that receipt — no guess;
+ *  - one without must NOT also pair with another receipt of the same
+ *    supplier. Two orders of one supplier on the same day both win the
+ *    same-day tie when pinned, so the scan would otherwise be claimed by
+ *    whichever receipt is submitted first and matched against the wrong count.
+ *    An ambiguous scan is left for a manager's match.runForInvoice, never
+ *    guessed. Which siblings count depends on the source:
+ *      · a wizard photo ('photo') is stamped by the OCR job, so one without an
+ *        owner was OCR'd by a worker from before the stamp (deploy skew), or
+ *        lost its receipt with several being counted: ANY
+ *        sibling receipt in the window, open OR closed, makes it ambiguous —
+ *        once the other receipt is closed it would otherwise be claimed by the
+ *        later one;
+ *      · email / platform / manual invoices are unstamped by design, and a
+ *        supplier delivering 2–3×/week always has a recent closed receipt:
+ *        only a still-OPEN sibling makes them ambiguous, or they would never
+ *        be auto-claimed (a silently missing ₪).
  */
 async function pairsWithReceipt(
   tx: Database,
@@ -68,8 +159,50 @@ async function pairsWithReceipt(
   invoiceId: string,
   receipt: { id: string; poId: string | null },
 ): Promise<boolean> {
+  const [inv] = await tx
+    .select({ supplierId: invoices.supplierId, source: invoices.source, ocrPayload: invoices.ocrPayload })
+    .from(invoices)
+    .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
+    .limit(1);
+  if (!inv) return false;
+  const stamped = scanOwnerReceipt(inv.ocrPayload, inv.source);
+  if (stamped !== null && stamped !== receipt.id) return false; // another receipt's scan
+
   const built = await buildMatchInputForInvoice(tx, restaurantId, invoiceId, { pinnedPoId: receipt.poId });
-  return built?.grId === receipt.id;
+  if (built?.grId !== receipt.id) return false;
+  if (stamped !== null || !inv.supplierId) return true;
+
+  const [own] = receipt.poId
+    ? await tx
+        .select({ at: purchaseOrders.expectedDeliveryAt })
+        .from(purchaseOrders)
+        .where(eq(purchaseOrders.id, receipt.poId))
+        .limit(1)
+    : [];
+  const near = own?.at
+    ? and(
+        gte(purchaseOrders.expectedDeliveryAt, new Date(own.at.getTime() - SIBLING_WINDOW_MS)),
+        lte(purchaseOrders.expectedDeliveryAt, new Date(own.at.getTime() + SIBLING_WINDOW_MS)),
+      )
+    : undefined;
+  const siblings = await tx
+    .select({ id: goodsReceipts.id, poId: goodsReceipts.poId })
+    .from(goodsReceipts)
+    .innerJoin(purchaseOrders, eq(purchaseOrders.id, goodsReceipts.poId))
+    .where(
+      and(
+        eq(goodsReceipts.restaurantId, restaurantId),
+        eq(purchaseOrders.supplierId, inv.supplierId),
+        sql`${goodsReceipts.id} <> ${receipt.id}`,
+        inv.source === 'photo' ? undefined : eq(goodsReceipts.status, 'pending'),
+        near,
+      ),
+    );
+  for (const sibling of siblings) {
+    const other = await buildMatchInputForInvoice(tx, restaurantId, invoiceId, { pinnedPoId: sibling.poId });
+    if (other?.grId === sibling.id) return false; // ambiguous: it would also be that receipt's scan
+  }
+  return true;
 }
 
 /** How far back submitReceipt looks for invoices of the receipt's supplier. */
