@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * cron.ts is on the immutability list: this pins its full schedule so any
- * change (wave-1 S12 added recovery-reminders + monthly-report) is deliberate.
+ * change (wave-1 S12 added recovery-reminders + monthly-report; #49 health-digest +
+ * ocr-sweep) is deliberate.
  * Queues are faked — no Redis needed.
  */
 const calls: Array<{ queue: string; id: string; repeat: unknown; name: string }> = [];
@@ -40,6 +41,8 @@ describe('cron schedules', () => {
       { queue: 'price-alerts', id: 'price-alerts-07', repeat: { pattern: '0 7 * * *', tz: TZ } },
       { queue: 'recovery-reminders', id: 'recovery-reminders-0830', repeat: { pattern: '30 8 * * *', tz: TZ } },
       { queue: 'monthly-report', id: 'monthly-report-1st-0745', repeat: { pattern: '45 7 1 * *', tz: TZ } },
+      { queue: 'health-digest', id: 'health-digest-0645', repeat: { pattern: '45 6 * * *', tz: TZ } },
+      { queue: 'ocr-sweep', id: 'ocr-sweep-5m', repeat: { every: 5 * 60_000 } },
     ]);
     // The job name each scheduler enqueues equals its queue name (what the worker listens on).
     for (const c of calls) expect(c.name).toBe(c.queue);
@@ -49,7 +52,13 @@ describe('cron schedules', () => {
     const { unregisterCronSchedules } = await import('../cron');
     await unregisterCronSchedules();
     expect(removed).toEqual(
-      expect.arrayContaining(['price-alerts-07', 'recovery-reminders-0830', 'monthly-report-1st-0745']),
+      expect.arrayContaining([
+        'price-alerts-07',
+        'recovery-reminders-0830',
+        'monthly-report-1st-0745',
+        'health-digest-0645',
+        'ocr-sweep-5m',
+      ]),
     );
   });
 });
