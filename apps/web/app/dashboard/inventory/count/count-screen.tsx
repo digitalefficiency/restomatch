@@ -124,14 +124,15 @@ function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void 
     return run;
   }, [draft.id, save, utils, toast, tc]);
 
-  // Leaving the screen: no timer keeps firing behind it.
-  useEffect(
-    () => () => {
+  // Leaving the screen: no timer keeps firing behind it. (Reset on mount —
+  // Strict Mode mounts, unmounts and re-mounts in development.)
+  useEffect(() => {
+    stopped.current = false;
+    return () => {
       stopped.current = true;
       if (timer.current) clearTimeout(timer.current);
-    },
-    [],
-  );
+    };
+  }, []);
 
   const queue = (productId: string, e: Edit) => {
     pending.current[productId] = { ...pending.current[productId], ...e };
