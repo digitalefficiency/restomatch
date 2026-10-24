@@ -164,4 +164,51 @@ describe('the kick fits inside the invocation (after() time counts toward maxDur
     expect(kickQueue('ocr-invoice', schedule, runner, now)).toBe(true);
     expect(tasks).toHaveLength(2);
   });
+
+  it('a live kick in the middle of a job does not swallow a new enqueue: the job may end past its claim deadline', async () => {
+    // The reviewer's probe: job-1 claimed at 0 s runs 60 s (a slow Claude read; the kick
+    // claims until 50 s); job-2 (another tenant) is enqueued at 30 s. Absorbed, it was never
+    // claimed by that kick (past its deadline after job-1) and waited for the cron minute.
+    const clock = { t: 0 };
+    const now = () => clock.t;
+    const tasks: Array<() => Promise<void>> = [];
+    const schedule = (t: () => Promise<void>) => void tasks.push(t);
+    const queued = ['job-1'];
+    const ran: string[] = [];
+    let release!: () => void;
+    const job1Running = new Promise<void>((r) => (release = r));
+    let inJob1 = false;
+    const run = vi.fn(async ({ budgetMs, onJob }: { budgetMs: number; queues: string[]; onJob?: (running: boolean) => void }) => {
+      const stopAt = clock.t + budgetMs;
+      let n = 0;
+      while (queued.length > 0 && clock.t < stopAt) {
+        const job = queued.shift()!;
+        onJob?.(true);
+        if (job === 'job-1') {
+          inJob1 = true;
+          await job1Running;
+          clock.t += 60_000;
+        }
+        ran.push(job);
+        onJob?.(false);
+        n += 1;
+      }
+      return { ran: n, stoppedBy: queued.length > 0 ? 'budget' : 'empty' };
+    });
+    const runner = async () => run;
+
+    expect(kickQueue('ocr-invoice', schedule, runner, now)).toBe(true);
+    const first = tasks[0]!(); // claims job-1 and is busy with it
+    await vi.waitFor(() => expect(inJob1).toBe(true));
+    clock.t = 30_000;
+    queued.push('job-2');
+    expect(kickQueue('ocr-invoice', schedule, runner, now)).toBe(true);
+    expect(tasks).toHaveLength(2); // a fresh kick (its own 50 s), not absorbed into the busy one
+    await tasks[1]!(); // runs alongside: claims job-2 at once
+    expect(ran).toEqual(['job-2']);
+    release();
+    await first; // job-1 ends at 90 s, past its kick's 50 s: nothing left behind
+    expect(ran).toEqual(['job-2', 'job-1']);
+    expect(queued).toEqual([]);
+  });
 });

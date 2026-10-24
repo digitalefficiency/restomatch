@@ -317,6 +317,22 @@ describe('(b) runner semantics', () => {
     expect(b).toEqual({ status: 'failed', attempts: 2 });
   });
 
+  it('onJob brackets each job it runs (the after() kick: a busy kick absorbs no new enqueue)', async () => {
+    await qsql`DELETE FROM job_queue WHERE queue = ${Q}`;
+    const seen: string[] = [];
+    handlers[Q] = (async (job: WorkerJob<{ n: number }>) => {
+      seen.push(`run ${job.data.n}`);
+      if (job.data.n === 2) throw new Error('boom'); // a failing job is bracketed too
+      return {};
+    }) as JobProcessor;
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    for (const n of [1, 2]) await insertJob(qsql, Q, { n }, { maxAttempts: 1 });
+    const r = await runQueuedJobs({ budgetMs: 10_000, queues: [Q], onJob: (running) => seen.push(running ? 'start' : 'end') });
+    expect(r).toMatchObject({ ran: 2, done: 1, failed: 1 });
+    expect(seen).toEqual(['start', 'run 1', 'end', 'start', 'run 2', 'end']);
+    await qsql`DELETE FROM job_queue WHERE queue = ${Q}`;
+  });
+
   it('a spent budget claims nothing', async () => {
     handlers[Q] = (async () => ({})) as JobProcessor;
     await insertJob(qsql, Q, {});

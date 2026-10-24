@@ -60,6 +60,8 @@ export interface RunQueuedJobsOptions {
   workerId?: string;
   /** Tests: lock renewal period. */
   renewEveryMs?: number;
+  /** Told when a claimed job starts (true) and ends (false): the after() kick reads it (apps/web/lib/jobKick.ts). */
+  onJob?: (running: boolean) => void;
 }
 
 export interface RunQueuedJobsResult {
@@ -121,9 +123,10 @@ export async function runQueuedJobs(opts: RunQueuedJobsOptions): Promise<RunQueu
       if (!row) return;
       const processor = JOB_HANDLERS[row.queue] as (job: WorkerJob<unknown>) => Promise<unknown>;
       const claimed = row;
+      opts.onJob?.(true);
       const outcome = await withLockRenewal(sql, claimed.id, workerId, opts.renewEveryMs ?? LOCK_RENEW_MS, () =>
         runClaimedJob(sql, claimed.queue, processor, claimed, workerId),
-      );
+      ).finally(() => opts.onJob?.(false));
       res.ran += 1;
       res.byQueue[claimed.queue] = (res.byQueue[claimed.queue] ?? 0) + 1;
       if (outcome === 'done') res.done += 1;

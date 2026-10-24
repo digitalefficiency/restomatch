@@ -47,14 +47,24 @@ export const KICK_BUDGET_MS = 50_000;
  */
 export const JOB_HEADROOM_MS = 45_000;
 
-/** A live kick with less claim time left than this does not absorb a new enqueue: a fresh kick is started. */
+/**
+ * A live kick absorbs a new enqueue (asks itself to look again) only while it is
+ * BETWEEN jobs with at least this much claim time left — it then claims within
+ * moments. One in the middle of a job may finish past its claim deadline and never
+ * claim again, so a fresh kick is started instead (running alongside is safe:
+ * claimAnySerial never runs two jobs of one queue + tenant at once).
+ */
 const ABSORB_MIN_MS = 10_000;
 
 type Schedule = (task: () => Promise<void>) => void;
-type Runner = (opts: { budgetMs: number; queues: string[] }) => Promise<{ ran: number; stoppedBy: string }>;
+type Runner = (opts: {
+  budgetMs: number;
+  queues: string[];
+  onJob?: (running: boolean) => void;
+}) => Promise<{ ran: number; stoppedBy: string }>;
 
-/** One live kick per queue per process; a second enqueue meanwhile asks it to look again. */
-const active = new Map<string, { again: boolean; deadline: number }>();
+/** One live kick per queue per process; a second enqueue meanwhile asks it to look again (unless it is busy). */
+const active = new Map<string, { again: boolean; deadline: number; busy: boolean }>();
 
 /** The invocation's hard end (route maxDuration), per request. globalThis: Next may load this module twice. */
 const holder = globalThis as unknown as { __restomatchKickBudget?: AsyncLocalStorage<{ endsAt: number }> };
@@ -111,11 +121,11 @@ export function kickQueue(
   const deadline = kickClaimDeadline(t);
   if (deadline <= t) return false; // no room left in this invocation — the cron route runs it
   const live = active.get(queue);
-  if (live && live.deadline - t >= ABSORB_MIN_MS) {
+  if (live && !live.busy && live.deadline - t >= ABSORB_MIN_MS) {
     live.again = true;
     return true;
   }
-  const state = { again: false, deadline };
+  const state = { again: false, deadline, busy: false };
   try {
     schedule(async () => {
       try {
@@ -124,7 +134,13 @@ export function kickQueue(
           state.again = false;
           const left = deadline - now();
           if (left <= 0) break;
-          const r = await runQueuedJobs({ budgetMs: left, queues: [queue] });
+          const r = await runQueuedJobs({
+            budgetMs: left,
+            queues: [queue],
+            onJob: (running) => {
+              state.busy = running;
+            },
+          });
           if (r.ran > 0) console.log(`[jobs] kick ${queue}: ran ${r.ran} (${r.stoppedBy})`);
         } while (state.again);
       } catch (err) {
