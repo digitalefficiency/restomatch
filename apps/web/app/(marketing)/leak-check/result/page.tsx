@@ -219,7 +219,7 @@ export default async function LeakCheckResultPage({ searchParams }: { searchPara
           <p className="mt-1 text-sm leading-relaxed text-muted">
             {t('result.roi.body', {
               pct: formatPercent(leak / report.spendAgorot, locale, 2),
-              price: ils(proPriceAgorot),
+              price: formatIls(proPriceAgorot / 100, { locale }),
               breakEven: formatIls(roiAgorot / 100, { locale }),
             })}
           </p>
