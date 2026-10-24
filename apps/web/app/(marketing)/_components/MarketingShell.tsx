@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Menu, Receipt } from 'lucide-react';
+import { leakCheck as lc } from '@restomatch/api';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { marketing } from '@/lib/i18n/messages/marketing';
 import { getT } from '@/lib/i18n/server';
@@ -14,12 +15,13 @@ const NAV_BASE = [
 ] as const;
 
 /**
- * The public free-leak-check page (S15) is env-gated: LEAK_CHECK_PUBLIC=1.
- * Read at request time on the server, so flipping the env needs no rebuild.
- * (Swap for `leakCheck.leakCheckPublicEnabled()` from @restomatch/api once it is on this base.)
+ * The public free-leak-check page (S15) is env-gated: LEAK_CHECK_PUBLIC=1, and
+ * the FEATURES_OFF kill-switch (leakCheck / all) wins — the same check the
+ * pages and APIs use, so the nav never links to a 404. Read at request time on
+ * the server, so flipping the env needs no rebuild.
  */
 function leakCheckPublic(): boolean {
-  return process.env.LEAK_CHECK_PUBLIC === '1';
+  return lc.leakCheckPublicEnabled();
 }
 
 const LEAK_CHECK = { href: '/leak-check', key: 'shell.nav.leakCheck' } as const;
