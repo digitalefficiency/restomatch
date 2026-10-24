@@ -370,7 +370,16 @@ async function main() {
 
         const [po] = await db
           .insert(purchaseOrders)
-          .values({ restaurantId: rid, supplierId: sp.id, expectedDeliveryAt: expected, status: 'closed', source: 'manual', createdAt: new Date(expected.getTime() - DAY_MS) })
+          .values({
+            restaurantId: rid,
+            supplierId: sp.id,
+            expectedDeliveryAt: expected,
+            status: 'closed',
+            source: 'manual',
+            // Like the base seed: Σ qty × agreed price, so the branch's orders table has totals.
+            totalEstimated: (lines.reduce((sum, l) => sum + Math.round(l.qty * l.price * 100), 0) / 100).toFixed(2),
+            createdAt: new Date(expected.getTime() - DAY_MS),
+          })
           .returning();
         const poRows = [];
         for (const l of lines) {

@@ -18,7 +18,7 @@
  *   4. base seed in demo-only mode (deletes the demo tenants in one transaction,
  *      recreates the restaurant, team, suppliers, catalog, POs), seed-demo
  *      (receipts, invoices, matching, approvals), seed-chain-demo (branches)
- *   5. verify: non-demo data unchanged, demo hero printed
+ *   5. verify: non-demo data unchanged, demo hero printed, check-demo invariants
  *
  * Docs (Hebrew, for the owner): docs/client-ready/RESEED-PROD.md
  */
@@ -36,6 +36,7 @@ import {
   supabaseProjectRef,
 } from '@restomatch/db';
 import postgres from 'postgres';
+import { checkDemo } from './check-demo';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const DEFAULT_DEMO_PASSWORD = 'RestoMatch-Demo-2026!';
@@ -129,6 +130,10 @@ async function main() {
       console.log(`\n[reseed-demo] ✔ done. Other tenants unchanged (${afterFp.restaurants} restaurant(s), ${afterFp.users} user(s)).`);
       console.log(`[reseed-demo] hero (${main.name}): ${JSON.stringify(h)}`);
     }
+    const check = await checkDemo(url!, today!);
+    for (const f of check.facts) console.log(`[reseed-demo]   ${f}`);
+    if (!check.ok) fail(`demo data check failed:\n  - ${check.problems.join('\n  - ')}`);
+    console.log('[reseed-demo] ✔ demo data coherent (hero band, today\'s POs incl. open HaSharon Produce, totals, approvals, branches)');
   } finally {
     await sql.end({ timeout: 5 });
   }
