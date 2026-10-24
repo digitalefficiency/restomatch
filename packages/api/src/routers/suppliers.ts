@@ -4,6 +4,7 @@ import { and, asc, eq, suppliers, type Supplier } from '@restomatch/db';
 import { OrderSchedule } from '@restomatch/types';
 import { managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
+import { isFeatureOn } from '../lib/featureGate';
 
 /**
  * Supplier setup (Phase-2). The CRUD surface for the suppliers a restaurant
@@ -78,14 +79,16 @@ export const suppliersRouter = router({
 
   get: memberProcedure
     .input(z.object({ supplierId: z.string().uuid() }))
-    .query(async ({ ctx, input }): Promise<Supplier> => {
+    .query(async ({ ctx, input }): Promise<Supplier & { leakCardEnabled: boolean }> => {
       await assertSupplierOwned(ctx.db, input.supplierId, ctx.session.restaurantId);
       const [row] = await ctx.db
         .select()
         .from(suppliers)
         .where(eq(suppliers.id, input.supplierId))
         .limit(1);
-      return mustExist(row, 'supplier');
+      // Flag `supplierLeakCard`: the supplier page shows its leak tab + print card.
+      const leakCardEnabled = await isFeatureOn(ctx.db, ctx.session.restaurantId, 'supplierLeakCard');
+      return { ...mustExist(row, 'supplier'), leakCardEnabled };
     }),
 
   create: managerProcedure

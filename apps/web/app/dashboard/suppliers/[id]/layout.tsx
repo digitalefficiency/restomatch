@@ -103,7 +103,7 @@ export default async function SupplierDetailLayout({
         </div>
       </header>
 
-      <SupplierTabBar supplierId={id} />
+      <SupplierTabBar supplierId={id} leakTab={supplier.leakCardEnabled} />
 
       <div>{children}</div>
     </div>
