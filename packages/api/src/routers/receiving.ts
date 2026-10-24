@@ -16,13 +16,16 @@ import {
   sql,
   invoices,
   lte,
+  matchRuns,
   ne,
   poLines,
   products,
   purchaseOrders,
   restaurants,
   suppliers,
+  users,
 } from '@restomatch/db';
+import { claimableLines, computeInvoiceLeak } from '@restomatch/charts';
 import { enqueueOcrInvoice, isQueueUnavailableError } from '@restomatch/queue';
 import type { InvoiceOcrResult } from '@restomatch/types';
 import { assertGrOwned, assertSupplierOwned } from '../tenant';
@@ -32,6 +35,7 @@ import { isAllowedScanUrl } from '../lib/scanUrls';
 import { isInvoiceNumberTaken, readDuplicateOf, withoutDuplicateOf } from '../lib/invoiceDedupe';
 import { appError } from '../errors';
 import { endOfDayInTz, startOfDayInTz } from '../lib/time';
+import { featureEnabled } from '../lib/features';
 import { managerProcedure, memberProcedure, receiverProcedure, router } from '../trpc';
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
@@ -197,7 +201,12 @@ export const receivingRouter = router({
         ...r.line,
         productNameEn: r.productNameEn ?? null,
       }));
-      return { ...po, lines };
+      const [rest] = await ctx.db
+        .select({ settings: restaurants.settings })
+        .from(restaurants)
+        .where(eq(restaurants.id, ctx.session.restaurantId))
+        .limit(1);
+      return { ...po, lines, features: { dockSlip: featureEnabled(rest?.settings, 'dockSlip') } };
     }),
 
   /**
@@ -271,6 +280,120 @@ export const receivingRouter = router({
           productName: l.productName ?? l.rawDescription ?? null,
           productNameEn: l.productNameEn ?? l.rawDescriptionEn ?? null,
         })),
+      };
+    }),
+
+  /**
+   * Dock dispute slip (flag `dockSlip`): the header of a receipt plus the ENGINE's
+   * ₪ per discrepancy for its invoice — the persisted discrepancies, allocated
+   * exactly like the supplier claims letters (claimableLines), never the
+   * wizard's client-side estimates. Read-only; tenant-scoped on the receipt and
+   * the invoice. `ready` is false until a match run exists for the invoice.
+   */
+  dockSlip: memberProcedure
+    .input(z.object({ grId: z.string().uuid(), invoiceId: z.string().uuid().nullish() }))
+    .query(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      const [rest] = await ctx.db
+        .select({ settings: restaurants.settings })
+        .from(restaurants)
+        .where(eq(restaurants.id, restaurantId))
+        .limit(1);
+      if (!featureEnabled(rest?.settings, 'dockSlip')) return { enabled: false as const };
+
+      const [gr] = await ctx.db
+        .select({
+          grId: goodsReceipts.id,
+          receivedAt: goodsReceipts.receivedAt,
+          receiverName: users.name,
+          receiverEmail: users.email,
+          poId: purchaseOrders.id,
+          poRef: purchaseOrders.sourceRef,
+          supplierName: suppliers.name,
+          supplierNameEn: suppliers.nameEn,
+          supplierWhatsapp: suppliers.contactWhatsapp,
+        })
+        .from(goodsReceipts)
+        .leftJoin(
+          purchaseOrders,
+          and(eq(purchaseOrders.id, goodsReceipts.poId), eq(purchaseOrders.restaurantId, restaurantId)),
+        )
+        .leftJoin(
+          suppliers,
+          and(eq(suppliers.id, purchaseOrders.supplierId), eq(suppliers.restaurantId, restaurantId)),
+        )
+        .leftJoin(users, eq(users.id, goodsReceipts.receivedBy))
+        .where(and(eq(goodsReceipts.id, input.grId), eq(goodsReceipts.restaurantId, restaurantId)))
+        .limit(1);
+      if (!gr) throw new TRPCError({ code: 'NOT_FOUND', message: 'Receipt not found' });
+
+      let invoice: { id: string; number: string | null; duplicateOfNumber: string | null } | null = null;
+      let engine: {
+        ready: boolean;
+        totalIls: number;
+        lines: Array<{
+          discrepancyId: string;
+          type: string;
+          poLineId: string | null;
+          invoiceLineId: string | null;
+          productId: string | null;
+          productName: string | null;
+          productNameEn: string | null;
+          lineDescription: string | null;
+          lineDescriptionEn: string | null;
+          expected: number | null;
+          actual: number | null;
+          amountIls: number;
+        }>;
+      } = { ready: false, totalIls: 0, lines: [] };
+
+      if (input.invoiceId) {
+        const [inv] = await ctx.db
+          .select({ id: invoices.id, number: invoices.invoiceNumber, ocrPayload: invoices.ocrPayload })
+          .from(invoices)
+          .where(and(eq(invoices.id, input.invoiceId), eq(invoices.restaurantId, restaurantId)))
+          .limit(1);
+        if (!inv) throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
+        invoice = { id: inv.id, number: inv.number, duplicateOfNumber: readDuplicateOf(inv.ocrPayload)?.invoiceNumber ?? null };
+
+        const leak = await computeInvoiceLeak(ctx.db, restaurantId, inv.id);
+        const [{ runs } = { runs: 0 }] = await ctx.db
+          .select({ runs: count() })
+          .from(matchRuns)
+          .where(and(eq(matchRuns.invoiceId, inv.id), eq(matchRuns.restaurantId, restaurantId)));
+        const claim = leak ? claimableLines(leak) : [];
+        const lines = claim.map(({ line, amount }) => ({
+          discrepancyId: line.discrepancyId,
+          type: line.type,
+          poLineId: line.poLineId,
+          invoiceLineId: line.invoiceLineId,
+          productId: line.productId,
+          productName: line.productName,
+          productNameEn: line.productNameEn,
+          lineDescription: line.lineDescription,
+          lineDescriptionEn: line.lineDescriptionEn,
+          expected: line.expected,
+          actual: line.actual,
+          amountIls: amount,
+        }));
+        // Summed in agorot so the total is exact.
+        const totalIls = lines.reduce((acc, l) => acc + Math.round(l.amountIls * 100), 0) / 100;
+        engine = { ready: Number(runs) > 0, totalIls, lines };
+      }
+
+      return {
+        enabled: true as const,
+        header: {
+          supplierName: gr.supplierName,
+          supplierNameEn: gr.supplierNameEn,
+          supplierWhatsapp: gr.supplierWhatsapp,
+          poId: gr.poId,
+          poRef: gr.poRef,
+          receivedAt: gr.receivedAt,
+          receiverName: gr.receiverName ?? gr.receiverEmail ?? null,
+        },
+        invoice,
+        engine,
       };
     }),
 
