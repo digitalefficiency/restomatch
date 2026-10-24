@@ -6,7 +6,7 @@ import type { he as suppliersHe } from '@/lib/i18n/messages/suppliers/he';
 import type { he as approvalsHe } from '@/lib/i18n/messages/approvals/he';
 import { formatDate, formatNumber, formatPercent } from '@/lib/i18n/format';
 import { formatIls } from '@/lib/money';
-import { Badge, cn } from '@/lib/components';
+import { Badge, LinkButton, cn } from '@/lib/components';
 import { discrepancyLabel, displayName } from '../../approvals/vocab';
 import type { SupplierLeakCard } from './leak-card-data';
 
@@ -46,7 +46,7 @@ export function LeakCardBody({
           data-agorot={0}
           data-from={card.window.from}
           data-to={card.window.to}
-          className="flex items-start gap-3 rounded-2xl border border-primary/30 bg-primary/5 p-5"
+          className="flex items-start gap-3 rounded-2xl border border-line bg-primary/8 p-5"
         >
           <ShieldCheck className="mt-0.5 h-6 w-6 shrink-0 text-primary" aria-hidden="true" />
           <div>
@@ -80,7 +80,7 @@ export function LeakCardBody({
           </p>
         </div>
         {!print && (
-          <Link href={explorerHref} className="rounded text-sm font-semibold text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60">
+          <Link href={explorerHref} className="rounded text-sm font-semibold text-primary underline underline-offset-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60">
             {t('leakCard.explorer')}
           </Link>
         )}
@@ -88,9 +88,9 @@ export function LeakCardBody({
 
       {/* T2 — what's still open, with one CTA */}
       {card.openAgorot > 0 && (
-        <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-danger/30 bg-danger/5 p-4">
+        <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-danger/8 p-4">
           <div className="flex flex-wrap items-center gap-3">
-            <Badge tone="danger">{t('leakCard.open')}</Badge>
+            <Badge tone="danger-solid">{t('leakCard.open')}</Badge>
             <span className="rm-print-accent font-mono text-xl font-bold tabular-nums text-danger">
               {ils(card.openAgorot, locale)}
             </span>
@@ -99,12 +99,9 @@ export function LeakCardBody({
             </span>
           </div>
           {!print && (
-            <Link
-              href="/dashboard/leaks/claims"
-              className="rounded-xl bg-primary px-3 py-1.5 text-sm font-semibold text-on-primary hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
-            >
+            <LinkButton href="/dashboard/leaks/claims" size="sm">
               {t('leakCard.claimsCta')}
-            </Link>
+            </LinkButton>
           )}
         </section>
       )}
@@ -132,7 +129,7 @@ export function LeakCardBody({
 
         <section aria-labelledby="leak-lines">
           <h2 id="leak-lines" className="mb-2 text-sm font-bold text-ink">{t('leakCard.topLines')}</h2>
-          <ol className="divide-y divide-line/60 text-sm">
+          <ol className="divide-y divide-line text-sm">
             {card.topLines.map((l) => {
               const item = displayName(locale, l.productName ?? l.lineDescription, l.productNameEn ?? l.lineDescriptionEn);
               const inv = l.invoiceNumber ? t('leakCard.invoice', { number: l.invoiceNumber }) : t('leakCard.invoiceNoNumber');
@@ -145,7 +142,7 @@ export function LeakCardBody({
                       {print ? (
                         inv
                       ) : (
-                        <Link href={`/dashboard/invoices/${l.invoiceId}`} className="text-primary hover:underline">
+                        <Link href={`/dashboard/invoices/${l.invoiceId}`} className="text-primary underline underline-offset-2">
                           {inv}
                         </Link>
                       )}

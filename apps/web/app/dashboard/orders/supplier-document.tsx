@@ -116,7 +116,7 @@ export function SupplierDocumentPreview({ poId }: { poId: string }) {
                 dir="rtl"
                 lang="he"
                 role="tabpanel"
-                className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-line bg-surface-2/60 p-4 font-sans text-sm leading-relaxed text-ink"
+                className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-line bg-surface-2 p-4 font-sans text-sm leading-relaxed text-ink"
               >
                 {tab === 'email' ? preview.data.emailText : preview.data.whatsappText}
               </pre>
