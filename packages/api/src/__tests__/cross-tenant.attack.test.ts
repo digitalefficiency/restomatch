@@ -183,6 +183,7 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'orders.get': 'attack',
   'orders.createDraft': 'attack',
   'orders.previewDelivery': 'attack',
+  'orders.supplierMessagePreview': 'attack',
   'orders.importPo':
     'managerProcedure that ingests an uploaded document; takes no client-supplied tenant entity id (supplier is resolved FROM the parsed doc) and is gated on ANTHROPIC_API_KEY. Cross-tenant reach is bounded by the member tx restaurant GUC, and the import is keyed to ctx.session.restaurantId. Role denial is covered in the managerProcedure-role-denial block.',
   'orders.cancelOrder': 'attack',
@@ -870,6 +871,16 @@ describe('orders router: foreign id attacks + list isolation (A → B)', () => {
   it('orders.previewDelivery rejects a foreign supplierId before deriving a date', async () => {
     await expect(
       callerFor(A).orders.previewDelivery({ supplierId: B.supplierId }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('orders.supplierMessagePreview rejects a foreign poId and a foreign supplierId (no B text rendered)', async () => {
+    await expect(callerFor(A).orders.supplierMessagePreview({ poId: B.poId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(
+      callerFor(A).orders.supplierMessagePreview({
+        supplierId: B.supplierId,
+        lines: [{ productId: B.productId, qty: 1, unit: 'kg' }],
+      }),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
