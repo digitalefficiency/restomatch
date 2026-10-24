@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
@@ -87,7 +87,8 @@ export function ViewToolbar(props: ViewToolbarProps) {
   const locale = useLocale();
   const router = useRouter();
   const pathname = usePathname();
-  const id = useId();
+  // Fixed per page, not useId() (see app/dashboard/search.tsx): one toolbar per page.
+  const id = `view-toolbar-${page}`;
 
   const [from, setFrom] = useState(view.from ?? '');
   const [to, setTo] = useState(view.to ?? '');

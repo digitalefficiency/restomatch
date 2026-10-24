@@ -10,29 +10,42 @@ import {
   grLines,
   gte,
   inArray,
+  isNotNull,
   isNull,
   invoiceLines,
   or,
   sql,
   invoices,
   lte,
+  matchRuns,
   ne,
   poLines,
   products,
   purchaseOrders,
   restaurants,
   suppliers,
+  users,
+  type Database,
 } from '@restomatch/db';
-import { enqueueOcrInvoice, isQueueUnavailableError } from '@restomatch/queue';
+import { computeInvoiceLeak } from '@restomatch/charts';
+import { enqueueMatchInvoice, enqueueOcrInvoice, isQueueUnavailableError } from '@restomatch/queue';
 import type { InvoiceOcrResult } from '@restomatch/types';
 import { assertGrOwned, assertSupplierOwned } from '../tenant';
 import { fillEnglishNames } from '../receiving/english';
+import {
+  invoicesWaitingOnReceipt,
+  lockReceipt,
+  scannedInvoicesForReceipt,
+} from '../receiving/matchTriggers';
 import { devOcrStubEnabled, buildDevOcrStub } from '../receiving/devOcrStub';
 import { isAllowedScanUrl } from '../lib/scanUrls';
 import { isInvoiceNumberTaken, readDuplicateOf, withoutDuplicateOf } from '../lib/invoiceDedupe';
 import { appError } from '../errors';
 import { endOfDayInTz, startOfDayInTz } from '../lib/time';
+import { claimableLines } from '../lib/claims';
+import { featureEnabled } from '../lib/features';
 import { invoiceReaderProcedure, managerProcedure, memberProcedure, receiverProcedure, router } from '../trpc';
+import { readConsolidatedRaw } from '../match/consolidated';
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
 /** R5: undated open POs this recent still show in the receiving inbox. */
@@ -197,7 +210,12 @@ export const receivingRouter = router({
         ...r.line,
         productNameEn: r.productNameEn ?? null,
       }));
-      return { ...po, lines };
+      const [rest] = await ctx.db
+        .select({ settings: restaurants.settings })
+        .from(restaurants)
+        .where(eq(restaurants.id, ctx.session.restaurantId))
+        .limit(1);
+      return { ...po, lines, features: { dockSlip: featureEnabled(rest?.settings, 'dockSlip') } };
     }),
 
   /**
@@ -275,6 +293,151 @@ export const receivingRouter = router({
     }),
 
   /**
+   * Dock dispute slip (flag `dockSlip`): the header of a receipt plus the ENGINE's
+   * ₪ per discrepancy for its invoice — the persisted discrepancies, allocated
+   * exactly like the supplier claims letters (claimableLines), never the
+   * wizard's client-side estimates. Read-only; tenant-scoped on the receipt and
+   * the invoice. `ready` is false until the receipt is closed AND a match run for
+   * it ran at/after the close (submitReceipt's re-match) — before that, no ₪.
+   */
+  dockSlip: invoiceReaderProcedure
+    .input(z.object({ grId: z.string().uuid(), invoiceId: z.string().uuid().nullish() }))
+    .query(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      const [rest] = await ctx.db
+        .select({ settings: restaurants.settings })
+        .from(restaurants)
+        .where(eq(restaurants.id, restaurantId))
+        .limit(1);
+      if (!featureEnabled(rest?.settings, 'dockSlip')) return { enabled: false as const };
+
+      const [gr] = await ctx.db
+        .select({
+          grId: goodsReceipts.id,
+          status: goodsReceipts.status,
+          closedAt: goodsReceipts.updatedAt,
+          receivedAt: goodsReceipts.receivedAt,
+          receivedBy: goodsReceipts.receivedBy,
+          poId: purchaseOrders.id,
+          poRef: purchaseOrders.sourceRef,
+          supplierName: suppliers.name,
+          supplierNameEn: suppliers.nameEn,
+          supplierWhatsapp: suppliers.contactWhatsapp,
+        })
+        .from(goodsReceipts)
+        .leftJoin(
+          purchaseOrders,
+          and(eq(purchaseOrders.id, goodsReceipts.poId), eq(purchaseOrders.restaurantId, restaurantId)),
+        )
+        .leftJoin(
+          suppliers,
+          and(eq(suppliers.id, purchaseOrders.supplierId), eq(suppliers.restaurantId, restaurantId)),
+        )
+        .where(and(eq(goodsReceipts.id, input.grId), eq(goodsReceipts.restaurantId, restaurantId)))
+        .limit(1);
+      if (!gr) throw new TRPCError({ code: 'NOT_FOUND', message: 'Receipt not found' });
+      // The receiver's name: users is self-only under RLS, so it is read only when
+      // the viewer IS the receiver (the person at the dock). Anyone else gets no
+      // name rather than a name that would vanish in production.
+      let receiverName: string | null = null;
+      if (gr.receivedBy && gr.receivedBy === ctx.session.userId) {
+        const [me] = await ctx.db
+          .select({ name: users.name, email: users.email })
+          .from(users)
+          .where(eq(users.id, ctx.session.userId))
+          .limit(1);
+        receiverName = me?.name ?? me?.email ?? null;
+      }
+      // ₪ only from a match run made AFTER the count: a run from before the
+      // receipt was closed saw gr_lines empty (every line "short") and must
+      // never reach the slip or its WhatsApp text.
+      const receiptClosed = gr.status === 'completed' || gr.status === 'partial';
+
+      let invoice: { id: string; number: string | null; duplicateOfNumber: string | null } | null = null;
+      let engine: {
+        /** The count is in (receipt submitted). Before that the slip shows quantities only. */
+        receiptClosed: boolean;
+        /** A match run for this receipt from after it closed exists — the ₪ below is final. */
+        ready: boolean;
+        totalIls: number;
+        lines: Array<{
+          discrepancyId: string;
+          type: string;
+          poLineId: string | null;
+          invoiceLineId: string | null;
+          productId: string | null;
+          productName: string | null;
+          productNameEn: string | null;
+          lineDescription: string | null;
+          lineDescriptionEn: string | null;
+          expected: number | null;
+          actual: number | null;
+          amountIls: number;
+        }>;
+      } = { receiptClosed, ready: false, totalIls: 0, lines: [] };
+
+      if (input.invoiceId) {
+        const [inv] = await ctx.db
+          .select({ id: invoices.id, number: invoices.invoiceNumber, ocrPayload: invoices.ocrPayload })
+          .from(invoices)
+          .where(and(eq(invoices.id, input.invoiceId), eq(invoices.restaurantId, restaurantId)))
+          .limit(1);
+        if (!inv) throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
+        invoice = { id: inv.id, number: inv.number, duplicateOfNumber: readDuplicateOf(inv.ocrPayload)?.invoiceNumber ?? null };
+
+        const [{ runs } = { runs: 0 }] = receiptClosed
+          ? await ctx.db
+              .select({ runs: count() })
+              .from(matchRuns)
+              .where(
+                and(
+                  eq(matchRuns.invoiceId, inv.id),
+                  eq(matchRuns.restaurantId, restaurantId),
+                  eq(matchRuns.grId, gr.grId),
+                  gte(matchRuns.runAt, gr.closedAt),
+                ),
+              )
+          : [];
+        const ready = Number(runs) > 0;
+        const leak = ready ? await computeInvoiceLeak(ctx.db, restaurantId, inv.id) : null;
+        const claim = leak ? claimableLines(leak) : [];
+        const lines = claim.map(({ line, amount }) => ({
+          discrepancyId: line.discrepancyId,
+          type: line.type,
+          poLineId: line.poLineId,
+          invoiceLineId: line.invoiceLineId,
+          productId: line.productId,
+          productName: line.productName,
+          productNameEn: line.productNameEn,
+          lineDescription: line.lineDescription,
+          lineDescriptionEn: line.lineDescriptionEn,
+          expected: line.expected,
+          actual: line.actual,
+          // The letters' amount, to the agora (the letters print each line rounded).
+          amountIls: Math.round(amount * 100) / 100,
+        }));
+        // Summed in agorot so the total is exact.
+        const totalIls = lines.reduce((acc, l) => acc + Math.round(l.amountIls * 100), 0) / 100;
+        engine = { receiptClosed, ready, totalIls, lines };
+      }
+
+      return {
+        enabled: true as const,
+        header: {
+          supplierName: gr.supplierName,
+          supplierNameEn: gr.supplierNameEn,
+          supplierWhatsapp: gr.supplierWhatsapp,
+          poId: gr.poId,
+          poRef: gr.poRef,
+          receivedAt: gr.receivedAt,
+          receiverName,
+        },
+        invoice,
+        engine,
+      };
+    }),
+
+  /**
    * Invoice detail for the receiving / review screen: OCR status + confidence,
    * invoice number, and parsed invoice lines. Tenant scoped on
    * invoices.restaurantId.
@@ -347,6 +510,8 @@ export const receivingRouter = router({
         ...invoiceFields,
         ocrFailed: failure?.ocrFailed === true,
         ocrFailureReason: failure?.ocrFailed === true ? (failure.reason ?? 'extraction_failed') : null,
+        // A חשבונית ריכוז: cross-matched against its delivery notes, never re-matched to a PO.
+        consolidated: readConsolidatedRaw(ocrPayload) !== null,
         // The scanned number already belongs to another invoice of this
         // supplier (worker writeOcrHeader). Only the number is exposed — never
         // the other invoice's id or payload.
@@ -634,10 +799,18 @@ export const receivingRouter = router({
    */
   submitReceipt: receiverProcedure
     .input(
-      z.object({ grId: z.string().uuid(), signatureUrl: z.string().url().max(2048).optional() }),
+      z.object({
+        grId: z.string().uuid(),
+        signatureUrl: z.string().url().max(2048).optional(),
+        /** The invoice(s) scanned on this receipt (the wizard's registerInvoice ids). */
+        invoiceIds: z.array(z.string().uuid()).max(10).optional(),
+      }),
     )
     .mutation(async ({ ctx, input }) => {
       await assertGrOwned(ctx.db, input.grId, ctx.session.restaurantId);
+      // Held to commit: an OCR job deciding whether this receipt is still open
+      // waits for us (receiving/matchTriggers).
+      await lockReceipt(ctx.db, input.grId);
 
       const rows = await ctx.db
         .select({
@@ -670,6 +843,7 @@ export const receivingRouter = router({
         )
         .returning();
       if (!receipt) throw new TRPCError({ code: 'NOT_FOUND', message: 'GR not found' });
+      await rematchAfterCount(ctx.db, ctx.session.restaurantId, receipt, input.invoiceIds ?? []);
       return receipt;
     }),
 
@@ -763,6 +937,7 @@ export const receivingRouter = router({
           invoiceId: invoice.id,
           supplierId: input.supplierId,
           imageUrl: input.imageUrl,
+          grId: input.grId,
           ...(mockProviders ? { mockProviders } : {}),
         });
       } catch (err) {
@@ -833,3 +1008,64 @@ export const receivingRouter = router({
       .orderBy(desc(invoices.createdAt));
   }),
 });
+
+/**
+ * The count is in: (re-)match the receipt's invoices so the engine sees what was
+ * actually received, against the receipt's own PO. The invoices are the ones the wizard scanned on this
+ * receipt (tenant-checked here) plus any already matched against it — e.g. a
+ * run made before the count, when every line still read as short. The worker
+ * replaces such a run (keeping people's decisions) and skips an invoice still in
+ * OCR (the OCR job matches it when it lands). A queue failure never fails the
+ * submit: the receipt is saved; match.runForInvoice can re-run it on demand.
+ */
+async function rematchAfterCount(
+  db: Database,
+  restaurantId: string,
+  receipt: { id: string; poId: string | null },
+  scanned: string[],
+): Promise<void> {
+  const grId = receipt.id;
+  // The invoices to match against the count: the ones waiting on this receipt
+  // (server-side — the wizard's in-memory id is lost on a reload or a retake),
+  // the scans the wizard names (narrowed: no unrelated or signed-off invoice),
+  // and any matched against this receipt before the count (that run read every
+  // line as short). Best-effort in a savepoint: a lookup failure must never fail
+  // the submit (match.runForInvoice can re-run it).
+  let ids: Set<string>;
+  try {
+    ids = await db.transaction(async (sp) => {
+      const tx = sp as unknown as Database;
+      const out = new Set<string>(await invoicesWaitingOnReceipt(tx, restaurantId, grId));
+      for (const id of await scannedInvoicesForReceipt(tx, restaurantId, receipt, scanned)) out.add(id);
+      const ran = await tx
+        .selectDistinct({ id: matchRuns.invoiceId })
+        .from(matchRuns)
+        .where(and(eq(matchRuns.restaurantId, restaurantId), eq(matchRuns.grId, grId), isNotNull(matchRuns.invoiceId)));
+      for (const r of ran) if (r.id) out.add(r.id);
+      return out;
+    });
+  } catch (err) {
+    console.error(`[receiving.submitReceipt] could not look up the invoices of gr=${grId}`, err);
+    return;
+  }
+  for (const invoiceId of ids) {
+    // A variable, not an object literal: compiles whether or not the queue's job
+    // type (S7's Postgres queue, #49) declares the optional fields yet.
+    const job: Parameters<typeof enqueueMatchInvoice>[0] & { rematch?: boolean; poId?: string } = {
+      restaurantId,
+      invoiceId,
+      rematch: true,
+      // Matched against the order that was counted, not a discovered one.
+      ...(receipt.poId ? { poId: receipt.poId } : {}),
+    };
+    try {
+      await enqueueMatchInvoice(job);
+    } catch (err) {
+      console.error(
+        `[receiving.submitReceipt] failed to enqueue the re-match for invoice=${invoiceId}` +
+          (isQueueUnavailableError(err) ? ' (queue.unavailable)' : ''),
+        err,
+      );
+    }
+  }
+}

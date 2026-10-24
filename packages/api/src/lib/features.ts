@@ -26,6 +26,8 @@ export const FEATURE_KEYS = [
   'recipes',
   'integrations',
   'payRun',
+  'dockSlip',
+  'consolidatedMatch',
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];

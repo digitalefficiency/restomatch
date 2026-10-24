@@ -367,10 +367,29 @@ html {
     section[aria-labelledby='leak-hero-label'] a {
       min-height: 44px;
     }
+    .touch-target {
+      min-width: 44px;
+    }
     /* A checkbox/radio inside its <label>: the whole label is the target. */
     label:has(> input[type='checkbox']),
     label:has(> input[type='radio']) {
       min-height: 44px;
     }
+  }
+}
+
+/* A scoped print (PrintButton `scope`): only the matching data-print-root prints. */
+@media print {
+  html[data-print-scope] body * {
+    visibility: hidden;
+  }
+  html[data-print-scope="xmatch"] [data-print-root="xmatch"],
+  html[data-print-scope="xmatch"] [data-print-root="xmatch"] * {
+    visibility: visible;
+  }
+  html[data-print-scope="xmatch"] [data-print-root="xmatch"] {
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
   }
 }

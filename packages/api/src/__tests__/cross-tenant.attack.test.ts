@@ -104,6 +104,10 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   // owns X on another account — A's chain is exactly its owner branches there.
   'chain.branches':
     'isolation — chain.attack.test.ts: lists only caller-OWNED branches on the active billing account (not B on the same account, not manager-only M, not X on another account)',
+  'consolidated.proposal':
+    'isolation — consolidated.attack.test.ts: RLS app role; A sees only its own uncovered notes of that supplier (not B, not another supplier, not a note covered by another invoice); foreign/unknown invoiceId rejected; finance roles only (receiver + chef FORBIDDEN); only a consolidated invoice gets one; read-only',
+  'consolidated.coverage':
+    "isolation — consolidated.attack.test.ts: RLS app role; B's receipts never listed, B's supplierId from A's session → []; chef FORBIDDEN; flag off → []",
   'chain.overview':
     'isolation — chain.attack.test.ts: per-branch withRestaurant (RLS) sums; totals = A + A2 only, B/M/X excluded; forged session restaurantId → FORBIDDEN',
   'chain.alerts':
@@ -142,6 +146,7 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   // client-supplied poId / invoiceId — a foreign id must be NOT_FOUND and B's
   // po_lines / invoice_lines / products must stay untranslated.
   'receiving.ensureEnglish': 'attack',
+  'receiving.dockSlip': 'attack',
   'scans.upload':
     'memberProcedure write keyed to ctx.session.restaurantId; takes NO client-supplied tenant id or storage prefix (PR1/A.3 — the tenant + object path are derived server-side from the session), so it cannot target another tenant. The actual byte upload + service-role mapping insert are Supabase-network-bound and verified by storage.attack.test (membership gate) + against real Supabase; role denial is implicit in memberProcedure.',
   'admin.listRestaurants': 'admin-denial',
@@ -1001,6 +1006,52 @@ describe('receiving.ensureEnglish: foreign id attacks (A → B)', () => {
       .from(invoiceLines)
       .where(eq(invoiceLines.id, B.invoiceLineId));
     expect(line?.en ?? null).toBeNull();
+  });
+});
+
+describe('receiving.dockSlip: foreign id attacks (A → B)', () => {
+  async function enableDockSlip(t: Tenant) {
+    const [r] = await db.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, t.restaurantId));
+    const settings = { ...(r?.settings ?? {}), features: { ...((r?.settings as { features?: object } | undefined)?.features ?? {}), dockSlip: true } };
+    await db.update(restaurants).set({ settings }).where(eq(restaurants.id, t.restaurantId));
+  }
+  it('flag off: returns nothing but enabled:false', async () => {
+    expect(await callerFor(A).receiving.dockSlip({ grId: A.grId })).toEqual({ enabled: false });
+  });
+  it('rejects a foreign grId', async () => {
+    await enableDockSlip(A);
+    await expect(callerFor(A).receiving.dockSlip({ grId: B.grId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+  it("rejects a foreign invoiceId paired with A's own receipt", async () => {
+    await enableDockSlip(A);
+    await expect(
+      callerFor(A).receiving.dockSlip({ grId: A.grId, invoiceId: B.invoiceId }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+  it("A off (a real boolean false) while B is on ⇒ A gets enabled:false", async () => {
+    const setFlag = async (t: Tenant, on: boolean) => {
+      const [r] = await db.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, t.restaurantId));
+      const prev = (r?.settings as { features?: Record<string, boolean> } | undefined)?.features ?? {};
+      const settings = { ...(r?.settings ?? {}), features: { ...prev, dockSlip: on } };
+      await db.update(restaurants).set({ settings }).where(eq(restaurants.id, t.restaurantId));
+    };
+    await setFlag(A, false);
+    await setFlag(B, true);
+    try {
+      expect(await callerFor(A).receiving.dockSlip({ grId: A.grId, invoiceId: A.invoiceId })).toEqual({ enabled: false });
+      expect((await callerFor(B).receiving.dockSlip({ grId: B.grId })).enabled).toBe(true);
+    } finally {
+      await setFlag(A, true);
+    }
+  });
+  it("B's flag does not open A's data, and A only ever sees its own engine lines", async () => {
+    await enableDockSlip(A);
+    await enableDockSlip(B);
+    const slip = await callerFor(A).receiving.dockSlip({ grId: A.grId, invoiceId: A.invoiceId });
+    expect(slip.enabled).toBe(true);
+    if (!slip.enabled) return;
+    expect(JSON.stringify(slip)).not.toContain(B.invoiceId);
+    expect(JSON.stringify(slip)).not.toContain(B.supplierName);
   });
 });
 

@@ -2,6 +2,7 @@ import React from 'react';
 import { AbsoluteFill, Composition, Sequence, interpolate, useCurrentFrame } from 'remotion';
 import { loadFonts } from './fonts';
 import { applyFacts, Facts, Locale } from './copy';
+import { C, setStage } from './theme';
 import { Background } from './components/Background';
 import { Hook } from './scenes/Hook';
 import { Problem } from './scenes/Problem';
@@ -16,7 +17,7 @@ import { PhoneDash, PHONE_DASH_DURATION } from './scenes/PhoneDash';
 
 loadFonts();
 
-type Props = { locale: Locale; facts?: Partial<Facts> };
+type Props = { locale: Locale; facts?: Partial<Facts>; light?: boolean };
 
 /** Crossfade wrapper: every scene fades in/out over 8 frames on top of its own motion. */
 const Shell: React.FC<{ d: number; children: React.ReactNode }> = ({ d, children }) => {
@@ -54,7 +55,7 @@ export const VERTICAL_FRAMES = VLAST.from + VLAST.d - 8 + 130;
 VERTICAL.push({ from: VLAST.from + VLAST.d - 8, d: 130, el: (l) => <Cta locale={l} /> });
 
 const Film: React.FC<Props & { beats: Beat[] }> = ({ locale, beats }) => (
-  <AbsoluteFill style={{ background: '#08100C' }}>
+  <AbsoluteFill style={{ background: C.bgDeep }}>
     <Background period={600} />
     {beats.map((b, i) => (
       <Sequence key={i} from={b.from} durationInFrames={b.d} layout="none">
@@ -65,17 +66,21 @@ const Film: React.FC<Props & { beats: Beat[] }> = ({ locale, beats }) => (
 );
 
 // `facts` input prop overrides the demo numbers (copy.ts FACTS) for a re-render after a seed change.
-const Promo: React.FC<Props> = ({ locale, facts }) => {
+// `light` (default true — the product's light identity) picks the stage palette; light:false = dark stage.
+const Promo: React.FC<Props> = ({ locale, facts, light }) => {
+  setStage(light ?? true);
   applyFacts(facts);
   return <Film locale={locale} beats={TIMELINE} />;
 };
-const PromoVertical: React.FC<Props> = ({ locale, facts }) => {
+const PromoVertical: React.FC<Props> = ({ locale, facts, light }) => {
+  setStage(light ?? true);
   applyFacts(facts);
   return <Film locale={locale} beats={VERTICAL} />;
 };
-const Loop: React.FC<Props> = ({ locale, facts }) => {
+const Loop: React.FC<Props> = ({ locale, facts, light }) => {
+  setStage(light ?? true);
   applyFacts(facts);
-  return <HeroLoop locale={locale} />;
+  return <HeroLoop locale={locale} light={light ?? true} />;
 };
 
 export const Root: React.FC = () => (

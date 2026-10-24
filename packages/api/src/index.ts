@@ -20,6 +20,7 @@ import { mappingRouter } from './routers/mapping';
 import { productsRouter } from './routers/products';
 import { teamRouter } from './routers/team';
 import { chainRouter } from './routers/chain';
+import { consolidatedRouter } from './routers/consolidated';
 import { payRunRouter } from './routers/payRun';
 
 export const appRouter = router({
@@ -42,12 +43,14 @@ export const appRouter = router({
   mapping: mappingRouter,
   products: productsRouter,
   chain: chainRouter,
+  consolidated: consolidatedRouter,
   payRun: payRunRouter,
   team: teamRouter,
   dsr: dsrRouter,
 });
 
 export type AppRouter = typeof appRouter;
+export type { ConsolidatedProposal, DeliveryNoteCoverage } from './match/consolidated';
 export type {
   AppContext,
   AuthedContext,
@@ -130,8 +133,15 @@ export {
 } from './notifications';
 export { logActivity, type ActivityEventInput, type ActivityEventType } from './activity';
 export { buildMatchInputForInvoice, type BuiltMatchInput } from './match/buildMatchInput';
+export {
+  invoicesWaitingOnReceipt,
+  lockReceipt,
+  receiptState,
+  receiptStillOpen,
+  scannedInvoicesForReceipt,
+} from './receiving/matchTriggers';
 export { backfillPriceHistory, writePriceHistoryForInvoice } from './match/priceHistory';
-export { matchActivitySummary, persistMatchRun, type PersistMatchArgs, type PersistMatchResult } from './match/persist';
+export { loadPriorDecisions, matchActivitySummary, persistMatchRun, type PersistMatchArgs, type PersistMatchResult } from './match/persist';
 export {
   parseCatalogFile,
   autoDetectMapping,

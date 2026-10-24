@@ -1,7 +1,7 @@
 import React from 'react';
 import { AbsoluteFill, random, useCurrentFrame, useVideoConfig } from 'remotion';
 import { COPY, Locale } from '../copy';
-import { C, EASE_IN, EASE_OUT, FONT, lerp, prog } from '../theme';
+import { C, EASE_IN, EASE_OUT, FONT, isLight, lerp, prog } from '../theme';
 import { RiseLine } from '../components/primitives';
 
 // Paper invoice props: each supplier sells what it really sells (seeded catalog names),
@@ -29,11 +29,11 @@ const Paper: React.FC<{ i: number; w: number; labels: (typeof COPY)['he']['probl
         width: w,
         padding: 26 * s,
         boxSizing: 'border-box',
-        background: `linear-gradient(170deg, ${C.paper} 0%, #e9e4d6 100%)`,
+        background: isLight() ? '#FFFDF7' : `linear-gradient(170deg, ${C.paper} 0%, #e9e4d6 100%)`,
         borderRadius: 6 * s,
         color: C.paperInk,
         fontFamily: FONT.sans,
-        boxShadow: '0 40px 80px rgba(0,0,0,0.55), 0 2px 0 rgba(255,255,255,0.4) inset',
+        boxShadow: isLight() ? '0 1px 0 #D3DDD7, 0 30px 60px rgba(15,31,23,0.16)' : '0 40px 80px rgba(0,0,0,0.55), 0 2px 0 rgba(255,255,255,0.4) inset',
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>

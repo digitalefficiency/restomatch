@@ -7,6 +7,7 @@ export {
 } from './suppliers';
 export { computeBaselines, type BaselineRow, type ComputeBaselinesOptions } from './baselines';
 export {
+  computeInvoiceLeak,
   computeLeakBreakdown,
   computeLeakHero,
   type LeakBreakdownInvoice,

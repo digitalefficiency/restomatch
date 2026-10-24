@@ -99,6 +99,11 @@ describe('RBAC — invoiceReaderProcedure (one supplier invoice: no chef)', () =
     await expect(caller.receiving.ensureEnglish({ invoiceId })).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 
+  it('rejects the chef on the dock dispute slip (invoice prices + ₪)', async () => {
+    const caller = appRouter.createCaller(makeCtx({ userId: 'u1', restaurantId, role: 'chef' }));
+    await expect(caller.receiving.dockSlip({ grId: invoiceId, invoiceId })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
   it.each([['owner'], ['manager'], ['receiver'], ['bookkeeper']] as const)(
     'lets %s through the role gate (an unknown invoice is then NOT_FOUND, not FORBIDDEN)',
     async (role) => {

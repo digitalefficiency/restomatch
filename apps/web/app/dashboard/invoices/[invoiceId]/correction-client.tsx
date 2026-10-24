@@ -40,6 +40,9 @@ const STATUS_TONE: Record<string, BadgeTone> = {
 };
 
 export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canEdit: boolean }) {
+  // A consolidated invoice (חשבונית ריכוז) has no PO to re-match against — it is
+  // cross-matched against its delivery notes below; the server refuses it too.
+  const consolidated = invoice.consolidated;
   const router = useRouter();
   const t = useT(invoices);
   const locale = useLocale();
@@ -229,7 +232,7 @@ export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canE
                 </Button>
               </Link>
             )}
-            {canEdit && (
+            {canEdit && !consolidated && (
               <Button
                 variant="primary"
                 size="sm"
@@ -371,9 +374,7 @@ export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canE
         </table>
       </Card>
 
-      <p className="text-xs text-subtle">
-        {t('correction.rerunHint')}
-      </p>
+      {!consolidated && <p className="text-xs text-subtle">{t('correction.rerunHint')}</p>}
     </div>
   );
 }

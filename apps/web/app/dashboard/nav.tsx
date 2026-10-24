@@ -254,7 +254,7 @@ export function MobileNav({
               </button>
             </div>
             <div className="border-b border-line px-4 py-3">
-              <DashboardSearch role={role} />
+              <DashboardSearch role={role} variant="drawer" />
             </div>
             {branchSwitcher ? <div className="border-b border-line px-2 py-3">{branchSwitcher}</div> : null}
             <nav aria-label={t('mainLabel')} className="flex-1 overflow-y-auto px-2 py-3">
@@ -275,7 +275,7 @@ export function MobileNav({
                               href={href}
                               aria-current={active ? 'page' : undefined}
                               className={cn(
-                                'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm',
+                                'flex min-h-11 items-center gap-3 rounded-xl px-3 py-2.5 text-sm',
                                 focusRing,
                                 active
                                   ? 'bg-primary/12 font-semibold text-primary'
