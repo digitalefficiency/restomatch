@@ -180,7 +180,7 @@ export async function checkDemo(url: string, today: string): Promise<DemoCheck> 
     for (const step of DEMO_EXTRA_STEPS) {
       const [t] = await sql`select to_regclass(${`public.${step.requiresTable}`}) is not null as ok`;
       if (!t!.ok) continue;
-      const r = await step.check(sql, rids, main.id);
+      const r = await step.check(sql, rids, main.id, url);
       facts.push(...r.facts);
       problems.push(...r.problems);
     }
