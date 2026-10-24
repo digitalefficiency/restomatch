@@ -81,6 +81,8 @@ interface LocalSupplier {
   nameEn: string;
   businessId: string;
   prefix: string;
+  /** Supplier VAT rate; unset → the restaurant's. Fresh produce is VAT-exempt (0). */
+  vatRate?: string;
   products: Array<{ name: string; nameEn: string; unit: string; price: number; category: string }>;
 }
 
@@ -105,6 +107,7 @@ const BRANCHES: BranchSpec[] = [
       name: 'ירקות הכרמל',
       nameEn: 'Carmel Greens',
       businessId: '514300201',
+      vatRate: '0', // fresh produce: VAT-exempt
       prefix: 'CG',
       products: [
         { name: 'חסה ערבית', nameEn: 'Romaine lettuce', unit: 'יח׳', price: 6.5, category: 'ירקות' },
@@ -292,7 +295,7 @@ async function main() {
 
     // ── suppliers + products (shared businesses copied, plus one local) ──
     type Prod = { id: string; name: string; nameEn: string | null; unit: string; price: number };
-    const supplierPlan: Array<{ id: string; name: string; nameEn: string; prefix: string; local: boolean; products: Prod[] }> = [];
+    const supplierPlan: Array<{ id: string; name: string; nameEn: string; prefix: string; local: boolean; products: Prod[]; vat: number }> = [];
     for (const en of spec.shared) {
       const src = mainSuppliers.find((s) => s.nameEn === en);
       if (!src) continue;
@@ -303,6 +306,7 @@ async function main() {
           name: src.name,
           nameEn: src.nameEn,
           businessId: src.businessId,
+          vatRate: src.vatRate,
           contactEmail: src.contactEmail,
           paymentTerms: src.paymentTerms,
           deliverySchedule: src.deliverySchedule,
@@ -328,13 +332,13 @@ async function main() {
         });
         prods.push({ id: np!.id, name: p.canonicalName, nameEn: p.nameEn, unit: p.defaultUnit ?? 'יח׳', price });
       }
-      supplierPlan.push({ id: s!.id, name: src.name, nameEn: en, prefix: en.slice(0, 2).toUpperCase(), local: false, products: prods });
+      supplierPlan.push({ id: s!.id, name: src.name, nameEn: en, prefix: en.slice(0, 2).toUpperCase(), local: false, products: prods, vat: src.vatRate != null ? Number(src.vatRate) : vatRate });
     }
     {
       const l = spec.local;
       const [s] = await db
         .insert(suppliers)
-        .values({ restaurantId: rid, name: l.name, nameEn: l.nameEn, businessId: l.businessId, paymentTerms: 'שוטף + 30' })
+        .values({ restaurantId: rid, name: l.name, nameEn: l.nameEn, businessId: l.businessId, vatRate: l.vatRate ?? null, paymentTerms: 'שוטף + 30' })
         .returning();
       const prods: Prod[] = [];
       for (const p of l.products) {
@@ -352,7 +356,7 @@ async function main() {
         });
         prods.push({ id: np!.id, name: p.name, nameEn: p.nameEn, unit: p.unit, price: p.price });
       }
-      supplierPlan.push({ id: s!.id, name: l.name, nameEn: l.nameEn, prefix: l.prefix, local: true, products: prods });
+      supplierPlan.push({ id: s!.id, name: l.name, nameEn: l.nameEn, prefix: l.prefix, local: true, products: prods, vat: l.vatRate != null ? Number(l.vatRate) : vatRate });
     }
 
     // ── deliveries over the last HISTORY_DAYS, each through the real engine ──
@@ -439,11 +443,11 @@ async function main() {
             unit: l.unit,
             unitPriceBilled: price.toFixed(2),
             lineTotal: lineTotal.toFixed(2),
-            vatRate: vatRate.toString(),
+            vatRate: sp.vat.toString(),
           });
         }
         const subtotal = r2(invLineInputs.reduce((a, l) => a + Math.round(l.lineTotal * 100), 0) / 100);
-        const vatAmount = r2(subtotal * vatRate);
+        const vatAmount = r2(subtotal * sp.vat);
         const totalInclVat = r2(subtotal + vatAmount);
         const [invoice] = await db
           .insert(invoices)
@@ -481,7 +485,7 @@ async function main() {
           poLines: poRows.map((l) => ({ id: l.id, productId: l.productId, qtyOrdered: Number(l.qtyOrdered), unit: l.unit, unitPriceExpected: Number(l.unitPriceExpected) })),
           grLines: grRows.map((g, i) => ({ id: g.id, poLineId: poRows[i]!.id, productId: poRows[i]!.productId, qtyReceived: g.qtyReceived })),
           invoiceLines: invLineInputs,
-          vatRate,
+          vatRate: sp.vat,
           tolerances,
           knownInvoiceNumbers: new Set(known),
           expectedDeliveryDate: expected,

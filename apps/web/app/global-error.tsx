@@ -8,7 +8,7 @@ import './globals.css';
  * Global error boundary — replaces the ROOT layout when an error is thrown in it.
  * Must render its own <html>/<body>. Kept dependency-free (inline styles) so it
  * renders even if component/styling chunks failed to load. "Command center for
- * money" dark palette, set inline (it replaces the root layout's dark canvas).
+ * money" light palette, set inline (it replaces the root layout's canvas).
  */
 export default function GlobalError({
   error,
@@ -37,9 +37,9 @@ export default function GlobalError({
           padding: '4rem 1.5rem',
           fontFamily:
             'system-ui, -apple-system, "Segoe UI", Rubik, Arial, sans-serif',
-          color: '#ECF5EF',
+          color: '#0F1F17',
           background:
-            'radial-gradient(ellipse 90% 55% at 50% -10%, rgba(34,211,154,0.06), transparent 60%), #0E1512',
+            'radial-gradient(ellipse 90% 55% at 50% -10%, rgba(6,107,74,0.05), transparent 60%), #F6F8F7',
         }}
       >
         <div
@@ -49,12 +49,12 @@ export default function GlobalError({
             width: '100%',
             textAlign: 'center',
             overflow: 'hidden',
-            background: '#16201B',
-            border: '1px solid #2A3A31',
+            background: '#FFFFFF',
+            border: '1px solid #D3DDD7',
             borderRadius: '1rem',
             padding: '2rem',
             boxShadow:
-              '0 0 0 1px rgba(255,92,122,0.20), 0 14px 34px -18px rgba(0,0,0,0.66)',
+              '0 0 0 1px rgba(184,15,42,0.25), 0 1px 2px rgba(15,31,23,0.06), 0 8px 24px -12px rgba(15,31,23,0.12)',
           }}
         >
           <div
@@ -65,13 +65,13 @@ export default function GlobalError({
               top: 0,
               height: '2px',
               background:
-                'linear-gradient(90deg, rgba(255,92,122,0) 0%, #FF5C7A 50%, rgba(255,92,122,0) 100%)',
+                'linear-gradient(90deg, rgba(184,15,42,0) 0%, #B80F2A 50%, rgba(184,15,42,0) 100%)',
             }}
           />
-          <h1 style={{ fontSize: '1.25rem', fontWeight: 700, margin: '0 0 0.5rem', color: '#ECF5EF' }}>
+          <h1 style={{ fontSize: '1.25rem', fontWeight: 700, margin: '0 0 0.5rem', color: '#0F1F17' }}>
             {en ? 'Something went wrong' : 'משהו השתבש'}
           </h1>
-          <p style={{ fontSize: '0.875rem', color: '#9DB2A6', margin: '0 0 1.5rem' }}>
+          <p style={{ fontSize: '0.875rem', color: '#4A5D53', margin: '0 0 1.5rem' }}>
             {en
               ? 'We hit an unexpected error. Try reloading the page.'
               : 'נתקלנו בתקלה בלתי צפויה. נסו לטעון מחדש את העמוד.'}
@@ -80,7 +80,7 @@ export default function GlobalError({
             <p
               style={{
                 fontSize: '0.75rem',
-                color: '#6B8478',
+                color: '#5A6A62',
                 margin: '0 0 1.5rem',
                 fontFamily: 'ui-monospace, "JetBrains Mono", monospace',
                 fontVariantNumeric: 'tabular-nums',
@@ -95,13 +95,13 @@ export default function GlobalError({
               cursor: 'pointer',
               border: 'none',
               borderRadius: '0.75rem',
-              background: '#22D39A',
-              color: '#07120D',
+              background: '#066B4A',
+              color: '#FFFFFF',
               fontSize: '0.875rem',
               fontWeight: 600,
               padding: '0.625rem 1.25rem',
               boxShadow:
-                '0 0 0 1px rgba(34,211,154,0.22), 0 12px 36px -10px rgba(34,211,154,0.22)',
+                '0 1px 2px rgba(15,31,23,0.06), 0 8px 24px -12px rgba(15,31,23,0.14)',
             }}
           >
             {en ? 'Try again' : 'נסו שוב'}
