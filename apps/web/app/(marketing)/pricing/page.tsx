@@ -8,7 +8,7 @@ import { formatNumber } from '@/lib/i18n/format';
 import { marketing } from '@/lib/i18n/messages/marketing';
 import { formatIls } from '@/lib/money';
 import { ChainPricingSection } from '@/lib/growth/ChainPricingSection';
-import { alternatesFor, metadataBase } from '../_components/seo';
+import { alternatesFor, metadataBase, socialFor } from '../_components/seo';
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getT(marketing);
@@ -17,7 +17,7 @@ export async function generateMetadata(): Promise<Metadata> {
     description: t('pricing.metaDescription'),
     metadataBase,
     alternates: alternatesFor('/pricing', t.locale),
-    openGraph: { title: t('pricing.metaTitle'), description: t('pricing.metaDescription'), url: '/pricing' },
+    ...socialFor(t.locale, { title: t('pricing.metaTitle'), description: t('pricing.metaDescription'), path: '/pricing' }),
   };
 }
 

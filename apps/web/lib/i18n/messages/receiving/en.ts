@@ -102,6 +102,7 @@ export const en: Shape<typeof he> = {
       ordered: 'Ordered',
       invoiced: 'Invoiced',
       retake: 'Retake the invoice',
+      duplicateInvoice: 'Invoice number {number} already exists for this supplier — marked for review as a possible duplicate invoice. You can keep receiving as usual.',
       pendingBanner: '{count} lines were not matched automatically — check them against the invoice. This is not a discrepancy, just a check.',
       mismatchBanner:
         'No invoice line matched a line on this order. If this is another supplier’s invoice, open the right order or retake the photo; if it is the right supplier, check the lines by hand.',
