@@ -189,4 +189,3 @@ test.describe('a11y receiving wizard steps (phone, English)', () => {
     await check('adjust');
   });
 });
-
