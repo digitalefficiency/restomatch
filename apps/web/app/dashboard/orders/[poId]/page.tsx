@@ -7,6 +7,7 @@ import { components } from '@/lib/i18n/messages/components';
 import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 import { OrderDetail } from './detail-client';
 import { SupplierDocumentPreview } from '../supplier-document';
+import { SupplierConfirmCard } from './supplier-confirm-card';
 
 export default async function OrderDetailPage({ params }: { params: Promise<{ poId: string }> }) {
   const { poId } = await params;
@@ -58,6 +59,13 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ po
           />
         </div>
       ) : null}
+      {/* Wave-1 `supplierConfirm`: renders nothing when the flag is off. */}
+      <SupplierConfirmCard
+        poId={data.po.id}
+        status={data.po.status}
+        canEdit={canEdit}
+        restaurantName={active?.restaurantName ?? ''}
+      />
     </div>
   );
 }

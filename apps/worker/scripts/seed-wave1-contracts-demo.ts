@@ -6,8 +6,7 @@
  *
  * What it adds to the demo restaurant (כפר הזיתים):
  *  1. Contract price lists for 2 suppliers (HaKerem Butchery, Mediterranean
- *     Fish Co.): the price list that took effect 8 days before the demo's
- *     "today" (DEMO_TODAY; 2026-10-10 for 2026-10-18), one row per
+ *     Fish Co.): the price list that starts the day before each supplier's latest matched invoice, one row per
  *     product at the PO price of the invoices it covers (see seedContracts for
  *     the hero-number guarantee). The existing PRICE_HIGHER lines above the
  *     contract (entrecôte ₪149 vs ₪139, salmon ₪96 vs ₪89) light up as
@@ -30,18 +29,28 @@ import {
   eq,
   invoices,
   matchRuns,
+  asc,
   poLines,
   priceAlerts,
+  purchaseOrders,
   priceHistory,
   products,
   restaurants,
   sql,
   supplierCatalogItems,
+  supplierConfirmLinks,
+  supplierResponses,
   supplierContractPrices,
   suppliers,
 } from '@restomatch/db';
-import { findOverContractLines, runPriceAlertSweep } from '@restomatch/api';
-import { demoContractFrom } from '../src/lib/demoDates';
+import {
+  createSupplierLink,
+  findOverContractLines,
+  resolveSupplierToken,
+  runPriceAlertSweep,
+  submitSupplierAnswer,
+  supplierLinkUrl,
+} from '@restomatch/api';
 
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error('DATABASE_URL is required');
@@ -49,10 +58,21 @@ assertSeedTarget(url, 'seed-wave1-contracts-demo');
 const db = createDb(url);
 const NOTIFY = process.argv.includes('--notify');
 
-// Derived from the demo's "today" (DEMO_TODAY, like every other seed): a fixed
-// date broke the step from DEMO_TODAY=2026-10-20 on (more deliveries fell into
-// the window, the over-contract products got skipped, 0 lines → exit 1).
-const CONTRACT_FROM = demoContractFrom();
+/**
+ * The new price list starts the day before each supplier's latest matched
+ * invoice (restaurant-local), so it covers that delivery and every later one —
+ * relative to the seed's DEMO_TODAY, never a hard-coded date.
+ */
+async function contractFrom(restaurantId: string, supplierId: string): Promise<string | null> {
+  const [r] = await db
+    .select({
+      d: sql<string | null>`to_char((max(${invoices.invoiceDate}) at time zone 'Asia/Jerusalem')::date - 1, 'YYYY-MM-DD')`,
+    })
+    .from(matchRuns)
+    .innerJoin(invoices, eq(invoices.id, matchRuns.invoiceId))
+    .where(and(eq(matchRuns.restaurantId, restaurantId), eq(invoices.supplierId, supplierId)));
+  return r?.d ?? null;
+}
 const CONTRACT_SUPPLIERS = ['HaKerem Butchery', 'Mediterranean Fish Co.'];
 const TREND_SUPPLIER = 'HaSharon Produce';
 const CHEAP_SUPPLIER = { name: 'חקלאי העמק', nameEn: 'HaEmek Farmers' };
@@ -92,10 +112,18 @@ async function supplierByEn(restaurantId: string, nameEn: string) {
  * the contract price — so buildMatchInput's contract override leaves every
  * engine input byte-identical and no stored or future leak figure can move.
  */
+const CONTRACT_NOTE = 'מחירון מוסכם — רבעון 4/2026';
+
 async function seedContracts(restaurantId: string) {
   let kept = 0;
   for (const nameEn of CONTRACT_SUPPLIERS) {
     const sup = await supplierByEn(restaurantId, nameEn);
+    const CONTRACT_FROM = await contractFrom(restaurantId, sup.id);
+    if (!CONTRACT_FROM) continue;
+    // Idempotent across seeds with a different DEMO_TODAY: replace this demo's earlier rows.
+    await db
+      .delete(supplierContractPrices)
+      .where(and(eq(supplierContractPrices.supplierId, sup.id), eq(supplierContractPrices.note, CONTRACT_NOTE)));
     const covered = await db
       .select({ productId: poLines.productId, unit: poLines.unit, price: poLines.unitPriceExpected, invoiceDate: invoices.invoiceDate })
       .from(matchRuns)
@@ -129,7 +157,7 @@ async function seedContracts(restaurantId: string) {
           contractPrice: price,
           validFrom: CONTRACT_FROM,
           source: 'import',
-          note: 'מחירון מוסכם — רבעון 4/2026',
+          note: CONTRACT_NOTE,
         })
         .onConflictDoNothing();
       kept += 1;
@@ -219,6 +247,52 @@ async function seedTrend(restaurantId: string) {
   return { ...sweep, open: open?.n ?? 0 };
 }
 
+/**
+ * Supplier portal demo (flag `supplierConfirm`): of the restaurant's SENT orders,
+ * the earliest gets a supplier answer (a shortage on its first line + a price
+ * proposal on its second) so the order page shows differences; the next one
+ * gets a fresh 72h link printed for the live walkthrough. Idempotent: earlier
+ * unanswered demo links are replaced; an existing answer is kept.
+ */
+async function seedSupplierConfirm(restaurantId: string) {
+  const sent = await db
+    .select({ id: purchaseOrders.id })
+    .from(purchaseOrders)
+    .where(and(eq(purchaseOrders.restaurantId, restaurantId), eq(purchaseOrders.status, 'sent')))
+    .orderBy(asc(purchaseOrders.expectedDeliveryAt), asc(purchaseOrders.id))
+    .limit(2);
+  if (sent.length < 2) return { answered: false, url: null as string | null };
+  const [answeredPo, livePo] = [sent[0]!.id, sent[1]!.id];
+
+  const [existing] = await db.select({ id: supplierResponses.id }).from(supplierResponses).where(eq(supplierResponses.poId, answeredPo)).limit(1);
+  if (!existing) {
+    const lines = await db
+      .select({ id: poLines.id, qty: poLines.qtyOrdered, price: poLines.unitPriceExpected })
+      .from(poLines)
+      .where(eq(poLines.poId, answeredPo))
+      .orderBy(asc(poLines.id))
+      .limit(2);
+    const link = await createSupplierLink(db, restaurantId, answeredPo);
+    const resolved = link ? await resolveSupplierToken(db, link.token) : null;
+    if (resolved?.ok && lines.length > 0) {
+      const answer = [
+        { poLineId: lines[0]!.id, qtyAvailable: Math.max(0, Math.floor(Number(lines[0]!.qty) * 0.6)) },
+        ...(lines[1] && lines[1].price != null
+          ? [{ poLineId: lines[1].id, proposedUnitPrice: Math.round(Number(lines[1].price) * 1.08 * 100) / 100 }]
+          : []),
+      ];
+      await submitSupplierAnswer(db, resolved.link, { lines: answer, note: 'חלק מהסחורה יגיע מחר בבוקר' });
+    }
+  }
+
+  // Replace earlier unanswered demo links for the live order, then mint one.
+  await db.delete(supplierConfirmLinks).where(eq(supplierConfirmLinks.poId, livePo));
+  await db.delete(supplierResponses).where(eq(supplierResponses.poId, livePo));
+  const live = await createSupplierLink(db, restaurantId, livePo);
+  const base = process.env.APP_URL ?? process.env.AUTH_URL ?? 'http://localhost:3000';
+  return { answered: true, url: live ? supplierLinkUrl(base, live.token) : null };
+}
+
 async function main() {
   const [named] = await db.select().from(restaurants).where(eq(restaurants.name, 'כפר הזיתים')).limit(1);
   const restaurant = named ?? (await db.select().from(restaurants).limit(1))[0];
@@ -229,12 +303,14 @@ async function main() {
   const contracts = await seedContracts(rid);
   const over = await findOverContractLines(db, rid);
   const sweep = await seedTrend(rid);
+  const portal = await seedSupplierConfirm(rid);
   const after = await leakTotalAgorot(rid);
 
   console.log(`[wave1-demo] contracts kept=${contracts} over-contract lines=${over.length} alerts created=${sweep.created} open=${sweep.open}`);
   for (const l of over) {
     console.log(`  over contract: ${l.supplierName} · ${l.productName} billed ₪${l.billedUnitPrice} vs contract ₪${l.contractUnitPrice} (+₪${(l.overAgorot / 100).toFixed(2)})`);
   }
+  console.log(`[wave1-demo] supplier portal: answered order seeded=${portal.answered} · live link: ${portal.url ?? '(no sent order)'}`);
   console.log(`[wave1-demo] leak total before=₪${(before / 100).toFixed(2)} after=₪${(after / 100).toFixed(2)}`);
   if (before !== after) throw new Error('hero numbers moved — aborting (this script must be additive)');
   if (over.length < 2) throw new Error(`expected ≥ 2 over-contract lines, got ${over.length}`);

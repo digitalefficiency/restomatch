@@ -32,6 +32,7 @@ import {
   recipes,
   restaurants,
   supplierCatalogItems,
+  supplierConfirmLinks,
   supplierContractPrices,
   suppliers,
   users,
@@ -343,6 +344,11 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'recipes.setTarget': 'isolation',
   'recipes.importCsv': 'attack',
   'recipes.posVsTheory': "isolation — recipes-pos.test.ts: A's per-dish POS totals exclude B's sales of the same item/day (pos_sales is RLS-scoped, query filters restaurant_id)",
+  // Wave 1 (S11): supplier confirmation portal (flag `supplierConfirm`).
+  'supplierConfirm.createLink': 'attack',
+  'supplierConfirm.responses': 'attack',
+  // S11: dock price context (flag `dockPriceContext`).
+  'receiving.priceContext': 'attack',
 };
 
 function listProcedurePaths(): string[] {
@@ -511,6 +517,27 @@ describe('list/aggregate isolation (A must not see B)', () => {
     const poIds = expectations.map((e) => e.poId);
     expect(poIds).toContain(A.poId);
     expect(poIds).not.toContain(B.poId);
+  });
+
+  it("receiving.priceContext: A asking for B's invoice gets no lines and never reads B's price history", async () => {
+    await db
+      .update(restaurants)
+      .set({ settings: { features: { dockPriceContext: true } } as RestaurantSettings })
+      .where(inArray(restaurants.id, [A.restaurantId, B.restaurantId]));
+    const observedAt = new Date(Date.now() - 5 * 86_400_000);
+    await db.insert(priceHistory).values(
+      [B, B, B].map((t) => ({ restaurantId: t.restaurantId, productId: t.productId, supplierId: t.supplierId, observedAt, unitPrice: '1.0000' })),
+    );
+    try {
+      const foreign = await callerFor(A).receiving.priceContext({ invoiceId: B.invoiceId });
+      expect(foreign).toEqual({ enabled: true, lines: [] });
+      const own = await callerFor(A).receiving.priceContext({ invoiceId: A.invoiceId });
+      expect(own.lines).toEqual([]); // B's history must not become A's "usual price"
+      const bOwn = await callerFor(B).receiving.priceContext({ invoiceId: B.invoiceId });
+      expect(bOwn.lines.map((l) => l.invoiceLineId)).toEqual([B.invoiceLineId]);
+    } finally {
+      await db.delete(priceHistory).where(inArray(priceHistory.restaurantId, [A.restaurantId, B.restaurantId]));
+    }
   });
 
   it('receiving.pendingInvoices excludes B invoices', async () => {
@@ -2358,5 +2385,26 @@ describe('recipes.* (wave 1 food cost) — foreign ids rejected, lists isolated'
     await expect(callerFor(B).recipes.list()).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await expect(callerFor(B).recipes.get({ id: recipeB })).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await on(B.restaurantId);
+  });
+});
+
+describe('wave 1 (S11): supplierConfirm — foreign order ids', () => {
+  beforeAll(async () => {
+    for (const t of [A, B]) {
+      await db.update(restaurants).set({ settings: { features: { supplierConfirm: true } } as RestaurantSettings }).where(eq(restaurants.id, t.restaurantId));
+      await db.update(purchaseOrders).set({ status: 'sent' }).where(eq(purchaseOrders.id, t.poId));
+    }
+  });
+  afterAll(async () => {
+    for (const t of [A, B]) {
+      await db.update(restaurants).set({ settings: {} }).where(eq(restaurants.id, t.restaurantId));
+    }
+  });
+
+  it('supplierConfirm.createLink / responses reject B’s order and mint nothing for it', async () => {
+    await expect(callerFor(A).supplierConfirm.createLink({ poId: B.poId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(callerFor(A).supplierConfirm.responses({ poId: B.poId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const links = await db.select().from(supplierConfirmLinks).where(eq(supplierConfirmLinks.poId, B.poId));
+    expect(links).toEqual([]);
   });
 });

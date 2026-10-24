@@ -15,6 +15,7 @@ import {
   type LineMark,
 } from '@/app/showcase/receiver/_state';
 import { trpc } from '@/lib/trpc/client';
+import { useDockPriceLineExtra } from './dock-price-context';
 import { useAppLocale, useDir, useLocale, useT } from '@/lib/i18n/client';
 import { receiving } from '@/lib/i18n/messages/receiving';
 import type { Translator } from '@/lib/i18n/translate';
@@ -83,6 +84,7 @@ export function ReceivingWizard({
   offlineQueue = false,
   userId = null,
   localNames,
+  dockPriceContext = false,
 }: {
   po: PoForClient;
   restaurantId: string | null;
@@ -92,6 +94,8 @@ export function ReceivingWizard({
   userId?: string | null;
   /** Receiver languages (S14): Hebrew → ar/ru/th/ti, fetched by the page. */
   localNames?: LocalNames;
+  /** Flag `dockPriceContext` (resolved on the server page). */
+  dockPriceContext?: boolean;
 }) {
   const [step, setStep] = useState<Step>('SCAN_INVOICE');
   const [grId, setGrId] = useState<string | null>(null);
@@ -126,6 +130,7 @@ export function ReceivingWizard({
   const supplierLabel = locale === 'en' && po.supplierNameEn ? po.supplierNameEn : po.supplierName;
   const capturingRef = useRef(false);
 
+  const dockPriceLineExtra = useDockPriceLineExtra(dockPriceContext && step === 'RECONCILIATION_REVIEW', invoiceId);
   const utils = trpc.useUtils();
   const startReceipt = trpc.receiving.startReceipt.useMutation();
   const registerInvoice = trpc.receiving.registerInvoice.useMutation();
@@ -572,6 +577,7 @@ export function ReceivingWizard({
       {step === 'RECONCILIATION_REVIEW' && result ? (
         <Reconciliation
           result={result}
+          lineExtra={dockPriceLineExtra}
           onQuickConfirm={() => void submit()}
           onContinueAdjust={() => setStep('ADJUST_QUANTITIES')}
           onRetake={() => {

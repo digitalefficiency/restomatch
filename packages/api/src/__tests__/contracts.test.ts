@@ -578,17 +578,15 @@ describe('price-alert sweep (in-app rows + outbox email)', () => {
   const now = new Date('2026-10-18T12:00:00Z');
 
   const TREND = [6.2, 6.2, 7.3, 7.32, 7.34]; // +18% (later mean 7.32 vs baseline 6.20)
-  /** `base`: the sweep's "now". The router's refresh() runs on the wall clock, so
-   *  tests that call it seed relative to the real now (a fixed date drifts out of
-   *  the trend window as the calendar moves on). */
-  async function seedTrend(t: Tenant, prices: number[], base: Date = now) {
+  /** `anchor` = the sweep's "now" (the in-app refresh uses the real clock). */
+  async function seedTrend(t: Tenant, prices: number[], anchor: Date = now) {
     const days = [20, 16, 8, 4, 1];
     for (let i = 0; i < prices.length; i++) {
       await db.insert(priceHistory).values({
         restaurantId: t.restaurantId,
         productId: t.productId,
         supplierId: t.supplierId,
-        observedAt: new Date(base.getTime() - days[i]! * 86_400_000),
+        observedAt: new Date(anchor.getTime() - days[i]! * 86_400_000),
         unitPrice: prices[i]!.toFixed(4),
       });
     }
@@ -669,7 +667,7 @@ describe('price-alert sweep (in-app rows + outbox email)', () => {
   });
 
   it('an alert created by the in-app refresh is emailed by the next daily sweep (money cross-QA F5)', async () => {
-    await seedTrend(A, TREND, new Date());
+    await seedTrend(A, TREND, new Date()); // refresh() sweeps at the real clock
     expect((await caller(A, 'manager').priceAlerts.refresh()).created).toBe(1);
     let [al] = await db.select().from(priceAlerts).where(eq(priceAlerts.restaurantId, A.restaurantId));
     expect(al!.notifiedAt).toBeNull();

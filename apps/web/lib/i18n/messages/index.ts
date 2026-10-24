@@ -11,6 +11,8 @@ import { catalog } from './catalog';
 import { chain } from './chain';
 import { components } from './components';
 import { contracts } from './contracts';
+import { supplierConfirm } from './supplierConfirm';
+import { dockPrice } from './dockPrice';
 import { emails } from './emails';
 import { accounting } from './accounting';
 import { ingest } from './ingest';
@@ -47,6 +49,8 @@ export const ALL_NAMESPACES = [
   chain,
   components,
   contracts,
+  supplierConfirm,
+  dockPrice,
   emails,
   accounting,
   ingest,
@@ -75,4 +79,4 @@ export const ALL_NAMESPACES = [
   growth,
 ] as const;
 
-export { common, admin, approvals, auth, catalog, chain, components, contracts, emails, accounting, ingest, integrations, invoices, landing, leaks, marketing, nav, onboarding, orders, overview, products, receiving, recovery, receiverLangs, ask, recipes, scans, settings, showcase, suppliers, team, views, leakCheck, growth };
+export { common, admin, approvals, auth, catalog, chain, components, contracts, supplierConfirm, dockPrice, emails, accounting, ingest, integrations, invoices, landing, leaks, marketing, nav, onboarding, orders, overview, products, receiving, recovery, receiverLangs, ask, recipes, scans, settings, showcase, suppliers, team, views, leakCheck, growth };

@@ -33,6 +33,8 @@ import { isInvoiceNumberTaken, readDuplicateOf, withoutDuplicateOf } from '../li
 import { appError } from '../errors';
 import { endOfDayInTz, startOfDayInTz } from '../lib/time';
 import { invoiceReaderProcedure, managerProcedure, memberProcedure, receiverProcedure, router } from '../trpc';
+import { isFeatureOn } from '../lib/featureGate';
+import { dockPriceContext } from '../dockPriceContext/service';
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
 /** R5: undated open POs this recent still show in the receiving inbox. */
@@ -826,4 +828,17 @@ export const receivingRouter = router({
       )
       .orderBy(desc(invoices.createdAt));
   }),
+  /**
+   * Flag `dockPriceContext`: "your usual price" (90-day p50 from this
+   * supplier) per mapped invoice line. Read-only and display-only. Without
+   * `invoiceId` it only reports whether the flag is on, so the page can decide
+   * to render the hint at all; with the flag off it is always `{ enabled: false }`.
+   */
+  priceContext: invoiceReaderProcedure
+    .input(z.object({ invoiceId: z.string().uuid().optional() }))
+    .query(async ({ ctx, input }) => {
+      const enabled = await isFeatureOn(ctx.db, ctx.session.restaurantId, 'dockPriceContext');
+      if (!enabled || !input.invoiceId) return { enabled, lines: [] };
+      return { enabled, lines: await dockPriceContext(ctx.db, ctx.session.restaurantId, input.invoiceId) };
+    }),
 });

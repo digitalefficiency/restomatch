@@ -336,6 +336,13 @@
       "version": "7",
       "when": 1782130000000,
       "tag": "0058_pos_sales",
+        "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1782170000000,
+      "tag": "0062_supplier_confirm",
       "breakpoints": true
     }
   ]

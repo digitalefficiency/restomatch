@@ -54,6 +54,11 @@ export default async function ReceivingPoPage({
     // Plain object for the client boundary (the API builds a null-prototype map).
     localNames = { ...(r?.names ?? {}) };
   }
+  // Flag `dockPriceContext`: fail silent (off) on any error.
+  const dockPriceContext = await caller.receiving
+    .priceContext({})
+    .then((r) => r.enabled)
+    .catch(() => false);
 
   let po;
   try {
@@ -102,6 +107,7 @@ export default async function ReceivingPoPage({
         offlineQueue={pwa}
         userId={userId}
         localNames={localNames}
+        dockPriceContext={dockPriceContext}
       />
     </div>
   );

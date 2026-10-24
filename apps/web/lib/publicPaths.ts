@@ -42,6 +42,9 @@ export const PUBLIC_PREFIX_PATHS = [
   // the provider HMAC, rate-limits, caps sizes and resolves the tenant ONLY from a
   // hashed secret token — see packages/api/src/ingest/http.ts + ingest.attack.test.ts.
   '/api/ingest',
+  // Wave-1 supplier portal (flag `supplierConfirm`): token-scoped, rate-limited, no session.
+  '/s',
+  '/api/supplier-confirm',
   '/_next',
 ] as const;
 

@@ -31,6 +31,7 @@ import { ingestRouter } from './routers/ingest';
 import { leakCheckRouter } from './routers/leakCheck';
 import { growthRouter } from './routers/growth';
 import { integrationsRouter } from './routers/integrations';
+import { supplierConfirmRouter } from './routers/supplierConfirm';
 
 export const appRouter = router({
   owner: ownerRouter,
@@ -65,6 +66,7 @@ export const appRouter = router({
   ask: askRouter,
   growth: growthRouter,
   leakCheck: leakCheckRouter,
+  supplierConfirm: supplierConfirmRouter,
 });
 
 export type AppRouter = typeof appRouter;
@@ -220,6 +222,30 @@ export {
 } from './priceAlerts/detect';
 export { priceAlertEmail } from './priceAlerts/email';
 export * as leakCheck from './leakCheck';
+export {
+  confirmationLink,
+  createSupplierLink,
+  hashSupplierToken,
+  loadSupplierOrder,
+  resolveSupplierToken,
+  submitSupplierAnswer,
+  supplierLinkUrl,
+  supplierResponseDiff,
+  LINK_TTL_MS,
+  type ResolvedLink,
+  type SupplierOrderView,
+  type SupplierAnswerInput,
+  type SubmitError,
+  type SupplierLinkError,
+  type SupplierResponseDiff,
+} from './supplierConfirm/service';
+export {
+  supplierConfirmDocumentExtension,
+  supplierAppBaseUrl,
+  SUPPLIER_CONFIRM_DOC_LINE_HE,
+  SUPPLIER_CONFIRM_DOC_PREVIEW_HE,
+  type SupplierConfirmDocumentContext,
+} from './supplierConfirm/documentExtension';
 export {
   APP_ERROR_CODES,
   AppErrorCause,

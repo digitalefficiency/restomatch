@@ -13,10 +13,10 @@ import { enabledFeatures } from '@/lib/ingest/features';
 import { PwaSessionGuard } from '@/lib/pwa/PwaSessionGuard';
 import { LocaleSync } from './locale-sync';
 import { BranchSwitcher } from './branch-switcher';
+import { getWave1Access } from './contracts/access';
 import { DesktopNav, MobileNav } from './nav';
 import { DashboardSearch } from './search';
 import { WorkerStatusBanner } from './worker-status';
-import { getWave1Access } from './contracts/access';
 import { TrpcProvider } from '@/lib/trpc/client';
 
 /**

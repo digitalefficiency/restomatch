@@ -6,6 +6,7 @@ import { InvoiceCorrection } from './correction-client';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { invoices } from '@/lib/i18n/messages/invoices';
 import { overContractBadgesForInvoice } from '../../contracts/over-contract';
+import { dockPriceNotesForInvoice, mergeLineBadges } from './dock-price-notes';
 
 export default async function InvoiceCorrectionPage({
   params,
@@ -31,11 +32,13 @@ export default async function InvoiceCorrectionPage({
     notFound();
   }
 
-  const [memberships, session, overContract] = await Promise.all([
+  const [memberships, session, overContract, dockPrice] = await Promise.all([
     caller.onboarding.myMemberships(),
     auth(),
     // Wave-1 "over contract" line badges — {} when the flag/role is off (fail silent).
     overContractBadgesForInvoice(invoiceId),
+    // Flag `dockPriceContext`: "your usual price" under PRICE_HIGHER lines ({} when off).
+    dockPriceNotesForInvoice(invoiceId),
   ]);
   const active =
     memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0];
@@ -48,7 +51,7 @@ export default async function InvoiceCorrectionPage({
         title={t('correction.title')}
         subtitle={t('correction.subtitle')}
       />
-      <InvoiceCorrection invoice={invoice} canEdit={canEdit} lineBadges={overContract} />
+      <InvoiceCorrection invoice={invoice} canEdit={canEdit} lineBadges={mergeLineBadges(overContract, dockPrice)} />
     </div>
   );
 }

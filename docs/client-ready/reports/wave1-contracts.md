@@ -88,6 +88,63 @@ demo tenant has `features.all = true`; `FEATURES_OFF=contracts,priceAlerts` kill
 - Leak total before/after: **₪1,859.62 = ₪1,859.62** (the script aborts if it moves). Wired into
   `scripts/dev-setup.sh` (non-fatal).
 
+### 5. Supplier confirmation portal (`supplierConfirm`, migration 0062) — lite, no supplier accounts
+- **Flow:** on a sent order the manager clicks *Create supplier link* (order page card) → copies it or shares it on
+  WhatsApp → the supplier opens `/s/<token>` on the phone (he/en), sees the lines, quantities and agreed prices, and
+  either *confirms as is* or marks per-line shortages / proposes a per-line price (+ a note). The restaurant sees the
+  answer on the order page as **differences**; **the PO is never written**.
+- **Data (0062):** `supplier_confirm_links` (token **hash** only — SHA-256 of 32 random bytes; 72 h `expires_at`;
+  `revoked_at`) and `supplier_responses` (`UNIQUE(po_id)` — first answer wins; lines as jsonb validated against the
+  PO's own lines). Same-tenant composite FKs (adds `UNIQUE(id, restaurant_id)` on `purchase_orders`, additive), RLS +
+  policy inside the migration.
+- **Access model:** the only RLS-bypassing query is the token-hash lookup (owner/auth connection, like
+  `team.acceptInvite`); unknown, revoked and flag-off links are indistinguishable (404), expired → explained (410).
+  Reading the order and writing the answer run as the RLS app role in the link's tenant transaction.
+- **Public surface:** `GET /s/[token]` (server page, `noindex`, `referrer: no-referrer`, per-IP rate limit) and
+  `POST /api/supplier-confirm/[token]` (same-origin, 16 KB streamed body cap, per-IP **and** per-token rate limits via
+  the shared `lib/rateLimit` store, strict zod body). `lib/supplierConfirm/guard.ts` has the same contract as S4's
+  `publicGuard` and is swapped to it when that lands. `/s` + `/api/supplier-confirm` added to `publicPaths`.
+- **For S5:** `confirmationLink(db, restaurantId, poId, { baseUrl })` → `{ url, expiresAt } | null` (null when the flag
+  is off or the order isn't sent) for the order document.
+- **Tests:** `supplierConfirm.test.ts` (tokens/hash-only storage, guessing, 72 h expiry, revoked, flag-off, draft
+  orders, view, confirmed vs changes, PO untouched, replay via the same and a second link, cross-order line, forged
+  cross-tenant link, value ranges, `confirmationLink`, router gates), `cross-tenant.attack` (+2 COVERAGE + foreign PO),
+  `rls.attack` (the whole public flow as `restomatch_app`; GUC=B sees/writes none of A's), and the real route handler
+  (`app/api/supplier-confirm/[token]/__tests__/route.test.ts`: 200/400/404/409/410/413/403, flag off).
+
+### 6. Dock price context (`dockPriceContext`): "your usual price" while the driver is still there
+- **What the receiver sees.** On a review line whose invoice price is above the order price, a muted sub-line appears:
+  "המחיר הרגיל שלך: ₪5.90 (90 יום) · +8%". The invoice page shows the same line under PRICE_HIGHER lines, next to the
+  "over contract" badge. MarketMan, xtraCHEF and MarginEdge raise price changes only after processing.
+- **Data.** `receiving.priceContext({ invoiceId? })` is a read-only member procedure.
+  - Without `invoiceId` it only reports whether the flag is on (the page probe).
+  - With an invoice, the usual price is the **p50** of `price_history` for this restaurant, this supplier and this
+    product over the **90 days before the invoice**. The invoice's own rows are excluded.
+  - It needs **≥ 3 observations**; with fewer, the line gets nothing.
+  - The median is converted to the line's unit with the same factor `writePriceHistoryForInvoice` used.
+    Unconvertible units get nothing.
+  - The % is display-only. It feeds no leak, discrepancy or approval math.
+  - No cross-supplier hint: on the demo seed each product has a single supplier.
+- **Demo (DEMO_TODAY=2026-10-25).**
+  - Dock: every HaSharon produce item has 24 observations, so the stub's +8% line shows "₪5.90 · +8%".
+  - Invoice page: MF-24108 salmon shows ₪96 vs a usual ₪89 (+7.9%, 7 observations). HK-24108 entrecôte and
+    ST-24108 beer behave the same way.
+- **Flag off.** The page probe returns `enabled: false`. The wizard sends no query and the review renders as before.
+  The invoice badges are unchanged.
+- **Wizard footprint (S2's files).** About 6 lines in `wizard.tsx`, an optional `lineExtra` render prop on
+  `Reconciliation`, and the flag probe in `page.tsx`. The logic lives in the new `[poId]/dock-price-context.tsx` and
+  `receiving/dock-price-hint.tsx`.
+- **Tests.**
+  - `dockPriceContext.test.ts` (9): the p50, the window and own-invoice exclusion, the minimum sample count, g↔kg and
+    unconvertible units, the PRICE_HIGHER mark, tenant isolation, flag off and the probe, the receiver role.
+  - `cross-tenant.attack`: +1 COVERAGE entry and an isolation test (B's history never becomes A's usual price).
+- **QA.** `apps/web/scripts/qa-dock-price.ts` runs the dev server with the OCR stub and a real worker.
+  - Dock: he/en × 1366/390 shows exactly one hint with +8% and 90 days.
+  - Invoice page: he/en × 1366/390 shows +7.9%.
+  - Flag off: no hint.
+  - No overflow and no 5xx anywhere.
+  - Screenshots: `docs/client-ready/screenshots/dock-price-*.png`.
+
 ## Money cross-QA (orchestrator) — all fixed, with tests
 | # | Finding | Fix | Test |
 |---|---|---|---|
