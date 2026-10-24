@@ -120,7 +120,7 @@ export function VatAtRiskCard({
             <li key={r.invoiceId} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-sm">
               <Link
                 href={`/dashboard/invoices/${r.invoiceId}`}
-                className="w-full min-w-0 font-semibold text-ink hover:text-primary hover:underline sm:w-auto sm:flex-1"
+                className="touch-target w-full min-w-0 font-semibold text-ink hover:text-primary hover:underline sm:w-auto sm:flex-1"
               >
                 <span {...originalProps(name)}>{name}</span>
                 <span className="text-muted">
