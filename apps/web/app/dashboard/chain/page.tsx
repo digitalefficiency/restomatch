@@ -41,6 +41,9 @@ function monthLabel(month: string, locale: Locale, style: 'long' | 'short' = 'lo
 }
 
 /** Heatmap colour by leak share of spend — calm green when clean, gold → red as it grows. */
+/** Phone: only the last 3 heatmap months (the selected period's end) fit; older ones show from `sm`. */
+const HEAT_PHONE_MONTHS = 3;
+
 function heatClass(pct: number | null, leak: number): string {
   if (pct === null) return leak > 0 ? 'bg-warn/20 text-warn' : 'bg-surface-2 text-subtle';
   if (pct <= 0) return 'bg-primary/10 text-primary';
@@ -120,6 +123,7 @@ export default async function ChainPage({
     const last = ymOf(new Date(new Date(data.periodEnd).getTime() - 1));
     for (const m of data.months) if (m >= first && m <= last) inPeriod.add(m);
   }
+  const phoneHidden = (i: number) => (i < data.months.length - HEAT_PHONE_MONTHS ? 'hidden sm:table-cell' : undefined);
 
   return (
     <div>
@@ -269,17 +273,17 @@ export default async function ChainPage({
       <section className="mt-10">
         <SectionHeader title={t('dashboard.ranking.title')} subtitle={t('dashboard.ranking.subtitle')} />
         <Card padding="none" className="overflow-x-auto">
-          <table className="w-full min-w-[44rem] text-sm" data-testid="chain-ranking">
+          <table className="w-full sm:min-w-[44rem] text-sm" data-testid="chain-ranking">
             <thead>
               <tr className="border-b border-line text-xs uppercase tracking-wider text-subtle">
-                <th scope="col" className="px-4 py-3 text-start font-semibold">{t('dashboard.ranking.rank')}</th>
-                <th scope="col" className="px-4 py-3 text-start font-semibold">{t('dashboard.ranking.branch')}</th>
-                <th scope="col" className="px-4 py-3 text-end font-semibold">{t('dashboard.ranking.leak')}</th>
-                <th scope="col" className="px-4 py-3 text-end font-semibold">{t('dashboard.ranking.leakPct')}</th>
-                <th scope="col" className="px-4 py-3 text-end font-semibold">{t('dashboard.ranking.spend')}</th>
-                <th scope="col" className="px-4 py-3 text-end font-semibold">{t('dashboard.ranking.open')}</th>
-                {compared ? <th scope="col" className="px-4 py-3 text-end font-semibold">{t('dashboard.ranking.trend')}</th> : null}
-                <th scope="col" className="px-4 py-3"><span className="sr-only">{t('dashboard.ranking.action')}</span></th>
+                <th scope="col" className="hidden sm:table-cell px-3 py-3 sm:px-4 text-start font-semibold">{t('dashboard.ranking.rank')}</th>
+                <th scope="col" className="px-3 py-3 sm:px-4 text-start font-semibold">{t('dashboard.ranking.branch')}</th>
+                <th scope="col" className="px-3 py-3 sm:px-4 text-end font-semibold">{t('dashboard.ranking.leak')}</th>
+                <th scope="col" className="px-3 py-3 sm:px-4 text-end font-semibold">{t('dashboard.ranking.leakPct')}</th>
+                <th scope="col" className="hidden sm:table-cell px-3 py-3 sm:px-4 text-end font-semibold">{t('dashboard.ranking.spend')}</th>
+                <th scope="col" className="hidden sm:table-cell px-3 py-3 sm:px-4 text-end font-semibold">{t('dashboard.ranking.open')}</th>
+                {compared ? <th scope="col" className="px-3 py-3 sm:px-4 text-end font-semibold">{t('dashboard.ranking.trend')}</th> : null}
+                <th scope="col" className="hidden sm:table-cell px-3 py-3 sm:px-4"><span className="sr-only">{t('dashboard.ranking.action')}</span></th>
               </tr>
             </thead>
             <tbody>
@@ -288,19 +292,25 @@ export default async function ChainPage({
                 const isActive = b.restaurantId === data.activeRestaurantId;
                 return (
                   <tr key={b.restaurantId} className="border-b border-line/60 last:border-0 hover:bg-surface-2/50" data-testid="chain-branch-row">
-                    <td className="px-4 py-3 font-mono tabular-nums text-subtle">{formatNumber(b.rank, locale)}</td>
-                    <td className="px-4 py-3">
+                    <td className="hidden sm:table-cell px-3 py-3 sm:px-4 font-mono tabular-nums text-subtle">{formatNumber(b.rank, locale)}</td>
+                    <td className="px-3 py-3 sm:px-4">
                       <span className="font-semibold text-ink" {...originalProps(b.name)}>{b.name}</span>
                       {isActive ? <Badge tone="accent" className="ms-2">{t('dashboard.ranking.active')}</Badge> : null}
+                      {/* Phone: rank / spend / open / action columns are hidden; the action sits here. */}
+                      {isActive ? null : (
+                        <div className="mt-1.5 sm:hidden">
+                          <SwitchBranchButton restaurantId={b.restaurantId} label={t('dashboard.ranking.switchTo')} variant="ghost" testId="chain-switch" />
+                        </div>
+                      )}
                     </td>
-                    <td className={cn('px-4 py-3 text-end font-mono tabular-nums', isWorst ? 'font-bold text-danger' : 'text-ink')}>
+                    <td className={cn('px-3 py-3 sm:px-4 text-end font-mono tabular-nums', isWorst ? 'font-bold text-danger' : 'text-ink')}>
                       {ils(b.leakIls)}
                     </td>
-                    <td className="px-4 py-3 text-end font-mono tabular-nums text-muted">{pct(b.leakPct)}</td>
-                    <td className="px-4 py-3 text-end font-mono tabular-nums text-muted">{ils(b.spendIls)}</td>
-                    <td className="px-4 py-3 text-end font-mono tabular-nums text-muted">{formatNumber(b.openDiscrepancies, locale)}</td>
+                    <td className="px-3 py-3 sm:px-4 text-end font-mono tabular-nums text-muted">{pct(b.leakPct)}</td>
+                    <td className="hidden sm:table-cell px-3 py-3 sm:px-4 text-end font-mono tabular-nums text-muted">{ils(b.spendIls)}</td>
+                    <td className="hidden sm:table-cell px-3 py-3 sm:px-4 text-end font-mono tabular-nums text-muted">{formatNumber(b.openDiscrepancies, locale)}</td>
                     {compared ? (
-                      <td className="px-4 py-3 text-end font-mono text-xs tabular-nums" data-testid="chain-branch-delta">
+                      <td className="px-3 py-3 sm:px-4 text-end font-mono text-xs tabular-nums" data-testid="chain-branch-delta">
                         {b.leakDeltaIls === null ? (
                           <span className="text-subtle">—</span>
                         ) : b.leakDeltaIls === 0 ? (
@@ -312,7 +322,7 @@ export default async function ChainPage({
                         )}
                       </td>
                     ) : null}
-                    <td className="px-4 py-3 text-end">
+                    <td className="hidden sm:table-cell px-3 py-3 sm:px-4 text-end">
                       {isActive ? null : (
                         <SwitchBranchButton restaurantId={b.restaurantId} label={t('dashboard.ranking.switchTo')} variant="ghost" testId="chain-switch" />
                       )}
@@ -329,14 +339,14 @@ export default async function ChainPage({
       <section className="mt-10">
         <SectionHeader title={t('dashboard.heatmap.title')} subtitle={t('dashboard.heatmap.subtitle')} />
         <Card padding="md" className="overflow-x-auto">
-          <table className="w-full min-w-[36rem] border-separate border-spacing-1 text-xs" data-testid="chain-heatmap">
+          <table className="w-full border-separate sm:min-w-[36rem] border-spacing-1 text-xs" data-testid="chain-heatmap">
             <thead>
               <tr>
                 <th scope="col" className="px-2 py-1 text-start font-semibold text-subtle">
                   <span className="sr-only">{t('dashboard.ranking.branch')}</span>
                 </th>
-                {data.months.map((m) => (
-                  <th key={m} scope="col" className={cn('px-2 py-1 text-center font-mono font-semibold', inPeriod.has(m) ? 'text-primary' : 'text-subtle')}>
+                {data.months.map((m, i) => (
+                  <th key={m} scope="col" className={cn('px-2 py-1 text-center font-mono font-semibold', inPeriod.has(m) ? 'text-primary' : 'text-subtle', phoneHidden(i))}>
                     {monthLabel(m, locale, 'short')}
                   </th>
                 ))}
@@ -347,10 +357,10 @@ export default async function ChainPage({
                 const name = nameOf.get(row.restaurantId) ?? '';
                 return (
                   <tr key={row.restaurantId}>
-                    <th scope="row" className="max-w-[12rem] truncate px-2 py-1 text-start text-sm font-semibold text-ink">
+                    <th scope="row" className="max-w-[7rem] truncate px-2 py-1 sm:max-w-[12rem] text-start text-sm font-semibold text-ink">
                       <span {...originalProps(name)}>{name}</span>
                     </th>
-                    {row.cells.map((c) => (
+                    {row.cells.map((c, i) => (
                       <td
                         key={c.month}
                         title={t('dashboard.heatmap.cell', {
@@ -363,6 +373,7 @@ export default async function ChainPage({
                           'rounded-lg px-2 py-2.5 text-center font-mono tabular-nums',
                           heatClass(c.leakPct, c.leakIls),
                           inPeriod.has(c.month) && 'ring-1 ring-primary/40',
+                          phoneHidden(i),
                         )}
                       >
                         {c.spendIls === 0 && c.leakIls === 0 ? t('dashboard.heatmap.empty') : pct(c.leakPct)}
@@ -479,14 +490,14 @@ export default async function ChainPage({
           <EmptyState icon={<Undo2 className="h-6 w-6" />} title={t('dashboard.suppliers.empty')} />
         ) : (
           <Card padding="none" className="overflow-x-auto">
-            <table className="w-full min-w-[36rem] text-sm" data-testid="chain-suppliers">
+            <table className="w-full sm:min-w-[36rem] text-sm" data-testid="chain-suppliers">
               <thead>
                 <tr className="border-b border-line text-xs uppercase tracking-wider text-subtle">
-                  <th scope="col" className="px-4 py-3 text-start font-semibold">{t('dashboard.suppliers.supplier')}</th>
-                  <th scope="col" className="px-4 py-3 text-start font-semibold">{t('dashboard.suppliers.branches')}</th>
-                  <th scope="col" className="px-4 py-3 text-end font-semibold">{t('dashboard.suppliers.leak')}</th>
-                  <th scope="col" className="px-4 py-3 text-end font-semibold">{t('dashboard.suppliers.leakPct')}</th>
-                  <th scope="col" className="px-4 py-3 text-end font-semibold">{t('dashboard.suppliers.spend')}</th>
+                  <th scope="col" className="px-3 py-3 sm:px-4 text-start font-semibold">{t('dashboard.suppliers.supplier')}</th>
+                  <th scope="col" className="hidden sm:table-cell px-3 py-3 sm:px-4 text-start font-semibold">{t('dashboard.suppliers.branches')}</th>
+                  <th scope="col" className="px-3 py-3 sm:px-4 text-end font-semibold">{t('dashboard.suppliers.leak')}</th>
+                  <th scope="col" className="px-3 py-3 sm:px-4 text-end font-semibold">{t('dashboard.suppliers.leakPct')}</th>
+                  <th scope="col" className="hidden sm:table-cell px-3 py-3 sm:px-4 text-end font-semibold">{t('dashboard.suppliers.spend')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -494,13 +505,24 @@ export default async function ChainPage({
                   const dn = displayName(s.name ?? '—', s.nameEn, locale);
                   return (
                     <tr key={s.key} className="border-b border-line/60 last:border-0">
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-3 sm:px-4">
                         <span className="block font-semibold text-ink" {...originalProps(dn.primary)}>{dn.primary}</span>
                         {dn.secondary ? (
                           <span className="block text-xs text-subtle" {...originalProps(dn.secondary)}>{dn.secondary}</span>
                         ) : null}
+                        {/* Phone: the branches column is hidden; list them under the name. */}
+                        <div className="mt-1 flex flex-wrap gap-1 sm:hidden">
+                          {s.branchIds.map((id) => {
+                            const n = nameOf.get(id) ?? '';
+                            return (
+                              <Badge key={id} tone="neutral">
+                                <span {...originalProps(n)}>{n}</span>
+                              </Badge>
+                            );
+                          })}
+                        </div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="hidden sm:table-cell px-3 py-3 sm:px-4">
                         <div className="flex flex-wrap gap-1">
                           {s.branchIds.map((id) => {
                             const n = nameOf.get(id) ?? '';
@@ -512,9 +534,9 @@ export default async function ChainPage({
                           })}
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-end font-mono font-semibold tabular-nums text-danger">{ils(s.leakIls)}</td>
-                      <td className="px-4 py-3 text-end font-mono tabular-nums text-muted">{pct(s.leakPct)}</td>
-                      <td className="px-4 py-3 text-end font-mono tabular-nums text-muted">{ils(s.spendIls)}</td>
+                      <td className="px-3 py-3 sm:px-4 text-end font-mono font-semibold tabular-nums text-danger">{ils(s.leakIls)}</td>
+                      <td className="px-3 py-3 sm:px-4 text-end font-mono tabular-nums text-muted">{pct(s.leakPct)}</td>
+                      <td className="hidden sm:table-cell px-3 py-3 sm:px-4 text-end font-mono tabular-nums text-muted">{ils(s.spendIls)}</td>
                     </tr>
                   );
                 })}
