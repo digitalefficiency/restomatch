@@ -47,7 +47,9 @@ export interface ContactAlert {
 let _sql: ReturnType<typeof postgres> | null = null;
 function db() {
   if (!_sql) {
-    _sql = postgres(ownerDbUrl() ?? process.env.DATABASE_URL!, { ssl: 'require', max: 1, prepare: false });
+    const url = ownerDbUrl();
+    if (!url) throw new Error('[showcase/ocr] no usable owner database URL (see the [env] boot line)');
+    _sql = postgres(url, { ssl: 'require', max: 1, prepare: false });
   }
   return _sql;
 }
