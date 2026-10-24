@@ -1199,7 +1199,16 @@ export const inventoryCounts = pgTable(
   ],
 );
 
-/** One product on a count. qty NULL = not counted yet; unit_cost/value_agorot = completion snapshot. */
+/** The paid price behind a counted line: the invoice it came from, so the owner recognises it. */
+export interface InventoryPriceSource {
+  observedAt: string;
+  invoiceId: string | null;
+  invoiceNumber: string | null;
+  invoiceDate: string | null;
+  supplierName: string | null;
+}
+
+/** One product on a count. qty NULL = not counted yet; unit_cost/value_agorot/price_source = completion snapshot. */
 export const inventoryCountLines = pgTable(
   'inventory_count_lines',
   {
@@ -1216,6 +1225,8 @@ export const inventoryCountLines = pgTable(
     /** ₪ ex-VAT per `unit` at completion; NULL = no known price (excluded from the value). */
     unitCost: numeric('unit_cost', { precision: 12, scale: 4 }),
     valueAgorot: bigint('value_agorot', { mode: 'number' }),
+    /** Where the snapshot price came from (frozen at completion). */
+    priceSource: jsonb('price_source').$type<InventoryPriceSource | null>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

@@ -8,9 +8,14 @@ import {
   inArray,
   inventoryCountLines,
   inventoryCounts,
+  invoices,
+  lt,
+  priceHistory,
   products,
   sql,
+  suppliers,
   type Database,
+  type InventoryPriceSource,
 } from '@restomatch/db';
 
 type SQL = ReturnType<typeof sql>;
@@ -141,6 +146,7 @@ export async function loadLines(db: Database, restaurantId: string, countId: str
       unit: inventoryCountLines.unit,
       unitCost: inventoryCountLines.unitCost,
       valueAgorot: inventoryCountLines.valueAgorot,
+      priceSource: inventoryCountLines.priceSource,
       name: products.canonicalName,
       nameEn: products.nameEn,
       category: products.category,
@@ -170,7 +176,11 @@ export async function productsById(db: Database, restaurantId: string, ids: stri
 }
 
 export interface Purchases {
-  /** Food purchases ex-VAT: the period's invoices − non-food lines (agorot). Credits are a separate term. */
+  /**
+   * Food purchases ex-VAT on RECEIPT dates: the period's invoices − non-food
+   * lines + delivery notes received but not billed yet − earlier notes billed in
+   * this period (agorot). Credits received are a separate term.
+   */
   purchasesAgorot: number;
   invoiceCount: number;
   /** Σ total_excl_vat of the counted invoices (agorot). */
@@ -180,26 +190,33 @@ export interface Purchases {
   /** Live duplicate copies left out — their goods are on the original (agorot, count). */
   duplicatesAgorot: number;
   duplicateCount: number;
-  /** "זיכויים שהתקבלו": accepted/resolved claims on food lines, capped per invoice (agorot). */
+  /** "זיכויים שהתקבלו": claims on food lines whose credit was RECEIVED (resolved), capped per invoice (agorot). */
   creditsAgorot: number;
-  /** Info only: delivery notes received in the period that no invoice covers yet (at PO prices). Not in purchases. */
-  unbilledNotes: number;
-  unbilledNotesAgorot: number;
+  /** "זיכוי לקבל": claims accepted but the credit not received yet — shown, never subtracted (agorot). */
+  creditsToReceiveAgorot: number;
+  /** Delivery notes received in the period, not billed yet: added at PO prices (agorot, count). */
+  accruedAgorot: number;
+  accruedNotes: number;
+  /** Notes received before the period whose consolidated invoice lands in it: taken back out (agorot). */
+  reversedAgorot: number;
 }
 
 const agorot = (v: unknown) => Math.round(Number(v ?? 0) * 100);
 
 /**
  * Food purchases ex-VAT for local dates (fromYmd, toYmd] — the period AFTER the
- * opening count up to and including the closing count. Rules shared with the
- * leak engine (@restomatch/charts): an invoice carrying a LIVE duplicate
- * finding is a second bill for goods already counted on the original, so it
- * is left out (a duplicate the bookkeeper rejected — "not a duplicate" — is a
- * normal purchase again). Invoices still waiting for a PO link (consolidated
- * חשבוניות ריכוז) ARE purchases: the goods arrived. Delivery notes have no
- * invoice of their own, so a monthly consolidated invoice is counted once —
- * purchases are invoices only. Credits (the recovered part of the leak:
- * claims accepted/resolved on food lines) are returned as their own term.
+ * opening count up to and including the closing count — on RECEIPT dates
+ * ("לפי תאריכי קבלה"): the month closes on goods that arrived, because the
+ * consolidated invoice (חשבונית מרכזת) for a month's delivery notes arrives the
+ * month after.
+ *
+ * Rules shared with the leak engine (@restomatch/charts): an invoice carrying
+ * a LIVE duplicate finding is a second bill for goods already counted on the
+ * original, so it is left out (a duplicate the bookkeeper rejected — "not a
+ * duplicate" — is a normal purchase again). Invoices still waiting for a PO
+ * link ARE purchases: the goods arrived. Credits: only claims whose credit was
+ * RECEIVED (resolution 'resolved') reduce the food cost; accepted claims
+ * ('accepted' — the credit to ask for) are shown as "זיכוי לקבל" only.
  */
 export async function purchasesInPeriod(
   db: Database,
@@ -208,6 +225,16 @@ export async function purchasesInPeriod(
   fromYmd: string,
   toYmd: string,
 ): Promise<Purchases> {
+  const claimOnFood = (statuses: SQL) => sql`coalesce((
+          select sum(abs(d.delta_amount)) from match_runs mr
+          join discrepancies d on d.match_run_id = mr.id and d.restaurant_id = ${restaurantId}
+          left join invoice_lines dl on dl.id = d.invoice_line_id
+          left join products dp on dp.id = coalesce(dl.product_id, d.product_id) and dp.restaurant_id = ${restaurantId}
+          where mr.invoice_id = i.id and mr.restaurant_id = ${restaurantId}
+            and ${LEAK_FILTER} and d.resolution_status in (${statuses})
+            -- a claim on a non-food line: that line is already out of food purchases
+            and not (coalesce(dp.category, '') ~* ${NON_FOOD_PATTERN})
+        ), 0)`;
   const [r] = (await db.execute(sql`
     with inv as (
       select
@@ -223,64 +250,59 @@ export async function purchasesInPeriod(
           join products p on p.id = l.product_id and p.restaurant_id = ${restaurantId}
           where l.invoice_id = i.id and coalesce(p.category, '') ~* ${NON_FOOD_PATTERN}
         ), 0) as non_food,
-        least(coalesce(i.total_excl_vat, 0), coalesce((
-          select sum(abs(d.delta_amount)) from match_runs mr
-          join discrepancies d on d.match_run_id = mr.id and d.restaurant_id = ${restaurantId}
-          left join invoice_lines dl on dl.id = d.invoice_line_id
-          left join products dp on dp.id = coalesce(dl.product_id, d.product_id) and dp.restaurant_id = ${restaurantId}
-          where mr.invoice_id = i.id and mr.restaurant_id = ${restaurantId}
-            and ${LEAK_FILTER} and d.resolution_status in ('accepted','resolved')
-            -- a claim on a non-food line: that line is already out of food purchases
-            and not (coalesce(dp.category, '') ~* ${NON_FOOD_PATTERN})
-        ), 0)) as credit
+        ${claimOnFood(sql`'resolved'`)} as received,
+        ${claimOnFood(sql`'accepted'`)} as to_receive
       from invoices i
       where i.restaurant_id = ${restaurantId}
         and (coalesce(i.invoice_date, i.created_at) at time zone ${tz})::date > ${fromYmd}::date
         and (coalesce(i.invoice_date, i.created_at) at time zone ${tz})::date <= ${toYmd}::date
+    ),
+    capped as (
+      select *, greatest(total_excl - least(non_food, total_excl), 0) as food from inv where not dup
     )
     select
-      count(*) filter (where not dup)::int as n,
-      coalesce(sum(total_excl) filter (where not dup), 0)::numeric(14,2)::text as total,
-      coalesce(sum(least(non_food, total_excl)) filter (where not dup), 0)::numeric(14,2)::text as non_food,
-      count(*) filter (where dup)::int as dup_n,
-      coalesce(sum(total_excl) filter (where dup), 0)::numeric(14,2)::text as dup_total,
-      coalesce(sum(least(credit, total_excl - least(non_food, total_excl))) filter (where not dup), 0)::numeric(14,2)::text as credit
-    from inv
-  `)) as unknown as Array<{ n: number; total: string; non_food: string; dup_n: number; dup_total: string; credit: string }>;
+      (select count(*) from capped)::int as n,
+      (select coalesce(sum(total_excl), 0) from capped)::numeric(14,2)::text as total,
+      (select coalesce(sum(least(non_food, total_excl)), 0) from capped)::numeric(14,2)::text as non_food,
+      (select count(*) from inv where dup)::int as dup_n,
+      (select coalesce(sum(total_excl), 0) from inv where dup)::numeric(14,2)::text as dup_total,
+      (select coalesce(sum(least(received, food)), 0) from capped)::numeric(14,2)::text as received,
+      (select coalesce(sum(least(to_receive, greatest(food - least(received, food), 0))), 0) from capped)::numeric(14,2)::text as to_receive
+  `)) as unknown as Array<{ n: number; total: string; non_food: string; dup_n: number; dup_total: string; received: string; to_receive: string }>;
   const invoicesAgorot = agorot(r?.total);
   const nonFoodAgorot = agorot(r?.non_food);
-  const creditsAgorot = agorot(r?.credit);
-  const notes = await unbilledDeliveryNotes(db, restaurantId, tz, fromYmd, toYmd);
+  const notes = await deliveryNoteAccruals(db, restaurantId, tz, fromYmd, toYmd);
   return {
-    purchasesAgorot: invoicesAgorot - nonFoodAgorot,
+    purchasesAgorot: invoicesAgorot - nonFoodAgorot + notes.accruedAgorot - notes.reversedAgorot,
     invoiceCount: Number(r?.n ?? 0),
     invoicesAgorot,
     nonFoodAgorot,
     duplicatesAgorot: agorot(r?.dup_total),
     duplicateCount: Number(r?.dup_n ?? 0),
-    creditsAgorot,
-    unbilledNotes: notes.count,
-    unbilledNotesAgorot: notes.agorot,
+    creditsAgorot: agorot(r?.received),
+    creditsToReceiveAgorot: agorot(r?.to_receive),
+    ...notes,
   };
 }
 
 /**
- * Info for the owner, never in the math: delivery notes (תעודות משלוח — goods
- * receipts tagged `ת.מ. <n>`, no invoice of their own) received in the period
- * that no invoice dated by the closing date lists in
- * ocr_payload.raw.deliveryNotes yet. Their goods arrived but are billed later
- * on a monthly consolidated invoice, so this period's purchases (invoices
- * only) do not include them yet. Valued at PO prices (food lines, received −
- * rejected, ex-VAT). A note is covered only by an invoice of ITS supplier, on
- * a number normalised like invoice numbers.
+ * Receipt-date accrual for delivery notes (תעודות משלוח: goods receipts tagged
+ * `ת.מ. <n>`, no invoice of their own, billed later on a consolidated invoice
+ * that lists them in ocr_payload.raw.deliveryNotes). A note received in the
+ * period that no invoice dated by the closing date covers yet is ADDED at its
+ * PO prices (food lines, received − rejected, ex-VAT); when a consolidated
+ * invoice in the period covers notes received before the period (already added
+ * then), that same value is TAKEN BACK. One valuation both ways, so across
+ * consecutive periods every note counts exactly once. A note is covered only by
+ * an invoice of ITS supplier, on a number normalised like invoice numbers.
  */
-export async function unbilledDeliveryNotes(
+export async function deliveryNoteAccruals(
   db: Database,
   restaurantId: string,
   tz: string,
   fromYmd: string,
   toYmd: string,
-): Promise<{ count: number; agorot: number }> {
+): Promise<{ accruedAgorot: number; accruedNotes: number; reversedAgorot: number }> {
   // A note number is matched like an invoice number: letters/digits only, upper-case, no leading zeros.
   const norm = (col: SQL) => sql`nullif(regexp_replace(regexp_replace(upper(${col}), '[^[:alnum:]]', '', 'g'), '^0+', ''), '')`;
   const [r] = (await db.execute(sql`
@@ -315,14 +337,120 @@ export async function unbilledDeliveryNotes(
     ),
     marked as (
       select notes.*,
-        exists (select 1 from covered c where c.dn = notes.dn and c.supplier_id = notes.supplier_id and c.idate <= ${toYmd}::date) as billed_by_close
+        exists (select 1 from covered c where c.dn = notes.dn and c.supplier_id = notes.supplier_id and c.idate <= ${toYmd}::date) as billed_by_close,
+        exists (select 1 from covered c where c.dn = notes.dn and c.supplier_id = notes.supplier_id and c.idate <= ${fromYmd}::date) as billed_by_open,
+        exists (select 1 from covered c where c.dn = notes.dn and c.supplier_id = notes.supplier_id and c.idate > ${fromYmd}::date and c.idate <= ${toYmd}::date) as billed_in_period
       from notes
       where notes.dn is not null
     )
     select
-      coalesce(sum(val) filter (where d > ${fromYmd}::date and d <= ${toYmd}::date and not billed_by_close), 0)::numeric(14,2)::text as unbilled,
-      count(*) filter (where d > ${fromYmd}::date and d <= ${toYmd}::date and not billed_by_close)::int as unbilled_n
+      coalesce(sum(val) filter (where d > ${fromYmd}::date and d <= ${toYmd}::date and not billed_by_close), 0)::numeric(14,2)::text as accrued,
+      count(*) filter (where d > ${fromYmd}::date and d <= ${toYmd}::date and not billed_by_close)::int as accrued_n,
+      coalesce(sum(val) filter (where d <= ${fromYmd}::date and billed_in_period and not billed_by_open), 0)::numeric(14,2)::text as reversed
     from marked
-  `)) as unknown as Array<{ unbilled: string; unbilled_n: number }>;
-  return { count: Number(r?.unbilled_n ?? 0), agorot: agorot(r?.unbilled) };
+  `)) as unknown as Array<{ accrued: string; accrued_n: number; reversed: string }>;
+  return { accruedAgorot: agorot(r?.accrued), accruedNotes: Number(r?.accrued_n ?? 0), reversedAgorot: agorot(r?.reversed) };
+}
+
+/** A paid price with where it came from (the invoice the price line was read off). */
+export interface PricedWithSource extends UnitPrice {
+  source: InventoryPriceSource;
+}
+
+/**
+ * Latest PAID unit price per product on or before local date `ymd` (ex-VAT, per
+ * the product's default unit — the recipes engine's price source), with the
+ * invoice it came from (number, date, supplier) so the owner recognises it.
+ */
+export async function pricesWithSourceAsOf(
+  db: Database,
+  restaurantId: string,
+  ymd: string,
+  tz: string,
+  productIds: string[],
+): Promise<Map<string, PricedWithSource>> {
+  if (productIds.length === 0) return new Map();
+  const rows = await db
+    .selectDistinctOn([priceHistory.productId], {
+      productId: priceHistory.productId,
+      unitPrice: priceHistory.unitPrice,
+      observedAt: priceHistory.observedAt,
+      unit: products.defaultUnit,
+      invoiceId: invoices.id,
+      invoiceNumber: invoices.invoiceNumber,
+      invoiceDate: invoices.invoiceDate,
+      supplierName: suppliers.name,
+    })
+    .from(priceHistory)
+    .innerJoin(products, and(eq(products.id, priceHistory.productId), eq(products.restaurantId, restaurantId)))
+    .leftJoin(invoices, and(eq(invoices.id, priceHistory.sourceInvoiceId), eq(invoices.restaurantId, restaurantId)))
+    .leftJoin(suppliers, and(eq(suppliers.id, priceHistory.supplierId), eq(suppliers.restaurantId, restaurantId)))
+    .where(
+      and(
+        eq(priceHistory.restaurantId, restaurantId),
+        lt(priceHistory.observedAt, endOfLocalDate(ymd, tz)),
+        inArray(priceHistory.productId, productIds),
+      ),
+    )
+    .orderBy(priceHistory.productId, desc(priceHistory.observedAt), desc(priceHistory.id));
+  return new Map(
+    rows.map((r) => [
+      r.productId,
+      {
+        unitPrice: r.unitPrice,
+        unit: r.unit,
+        source: {
+          observedAt: r.observedAt.toISOString(),
+          invoiceId: r.invoiceId,
+          invoiceNumber: r.invoiceNumber,
+          invoiceDate: r.invoiceDate ? localToday(tz, r.invoiceDate) : null,
+          supplierName: r.supplierName,
+        },
+      },
+    ]),
+  );
+}
+
+/**
+ * Goods received per product in local dates (fromYmd, toYmd] (received −
+ * rejected), in the product's default unit where the PO unit converts. Feeds the
+ * sanity check "counted more than last count + received since?".
+ */
+export async function receivedBetween(
+  db: Database,
+  restaurantId: string,
+  tz: string,
+  fromYmd: string,
+  toYmd: string,
+  productIds: string[],
+): Promise<Map<string, Array<{ qty: string; unit: string }>>> {
+  if (productIds.length === 0) return new Map();
+  const ids = sql.join(productIds.map((id) => sql`${id}::uuid`), sql`, `);
+  const rows = (await db.execute(sql`
+    select coalesce(gl.product_id, pl.product_id) as pid, pl.unit,
+           sum(gl.qty_received - coalesce(gl.qty_rejected, 0))::numeric(14,4)::text as qty
+    from goods_receipts gr
+    join gr_lines gl on gl.gr_id = gr.id
+    join po_lines pl on pl.id = gl.po_line_id
+    where gr.restaurant_id = ${restaurantId}
+      and (gr.received_at at time zone ${tz})::date > ${fromYmd}::date
+      and (gr.received_at at time zone ${tz})::date <= ${toYmd}::date
+      and coalesce(gl.product_id, pl.product_id) in (${ids})
+    group by 1, 2
+  `)) as unknown as Array<{ pid: string; unit: string; qty: string }>;
+  const out = new Map<string, Array<{ qty: string; unit: string }>>();
+  for (const r of rows) out.set(r.pid, [...(out.get(r.pid) ?? []), { qty: r.qty, unit: r.unit }]);
+  return out;
+}
+
+/** The local month start (YYYY-MM-01) of a local date. */
+export function monthStartOf(ymd: string): string {
+  return `${ymd.slice(0, 7)}-01`;
+}
+
+/** The day before a local date (YYYY-MM-DD), calendar arithmetic. */
+export function dayBefore(ymd: string): string {
+  const d = new Date(`${ymd}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
 }

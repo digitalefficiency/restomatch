@@ -53,7 +53,12 @@ async function product(t: Tenant, name: string, unit: string, category: string |
 const price = (t: Tenant, productId: string, daysAgo: number, unitPrice: string) =>
   db.insert(priceHistory).values({ restaurantId: t.restaurantId, productId, supplierId: t.supplierId, observedAt: atAgo(daysAgo), unitPrice });
 
-async function invoice(t: Tenant, daysAgo: number, totalExcl: string, opts: { nonFood?: { productId: string; total: string }; dup?: boolean; credit?: string } = {}) {
+async function invoice(
+  t: Tenant,
+  daysAgo: number,
+  totalExcl: string,
+  opts: { nonFood?: { productId: string; total: string }; dup?: boolean; credit?: string; creditToReceive?: string } = {},
+) {
   const [inv] = await db
     .insert(invoices)
     .values({ restaurantId: t.restaurantId, supplierId: t.supplierId, source: 'manual', invoiceNumber: `T-${Math.random()}`, invoiceDate: atAgo(daysAgo), totalExclVat: totalExcl, totalInclVat: totalExcl, status: 'matched' })
@@ -61,10 +66,12 @@ async function invoice(t: Tenant, daysAgo: number, totalExcl: string, opts: { no
   if (opts.nonFood) {
     await db.insert(invoiceLines).values({ invoiceId: inv!.id, productId: opts.nonFood.productId, rawDescription: 'מפיות', qtyBilled: '1', unit: 'חבילה', unitPriceBilled: opts.nonFood.total, lineTotal: opts.nonFood.total });
   }
-  if (opts.dup || opts.credit) {
+  if (opts.dup || opts.credit || opts.creditToReceive) {
     const [mr] = await db.insert(matchRuns).values({ restaurantId: t.restaurantId, invoiceId: inv!.id, overallStatus: 'major' }).returning();
     if (opts.dup) await db.insert(discrepancies).values({ restaurantId: t.restaurantId, matchRunId: mr!.id, type: 'DUPLICATE_INVOICE', severity: 'block', deltaAmount: totalExcl });
-    if (opts.credit) await db.insert(discrepancies).values({ restaurantId: t.restaurantId, matchRunId: mr!.id, type: 'PRICE_HIGHER', severity: 'warn', deltaAmount: opts.credit, resolutionStatus: 'accepted' });
+    // 'resolved' = the credit was RECEIVED; 'accepted' = agreed, still to receive.
+    if (opts.credit) await db.insert(discrepancies).values({ restaurantId: t.restaurantId, matchRunId: mr!.id, type: 'PRICE_HIGHER', severity: 'warn', deltaAmount: opts.credit, resolutionStatus: 'resolved' });
+    if (opts.creditToReceive) await db.insert(discrepancies).values({ restaurantId: t.restaurantId, matchRunId: mr!.id, type: 'QTY_SHORT', severity: 'warn', deltaAmount: opts.creditToReceive, resolutionStatus: 'accepted' });
   }
   return inv!.id;
 }
@@ -91,7 +98,7 @@ beforeAll(async () => {
   // Purchases. In the period (after the opening count 20 days ago, up to today):
   await invoice(A, 10, '2000.00', { nonFood: { productId: P.napkins, total: '150.00' } }); // 1,850 food
   await invoice(A, 8, '500.00', { dup: true }); // live duplicate copy: out
-  await invoice(A, 5, '1000.00', { credit: '40.00' }); // 1,000 − 40 recovered
+  await invoice(A, 5, '1000.00', { credit: '40.00', creditToReceive: '25.00' }); // 40 received (subtracted), 25 still to receive (shown only)
   await invoice(A, 25, '7777.00'); // before the opening count: out
   await invoice(B, 10, '99999.00'); // another restaurant: out
 });
@@ -158,7 +165,7 @@ describe('inventory: count → autosave → finish', () => {
     expect(c0.lines.find((l) => l.productId === P.milk)!.storageArea).toBe('bar');
     expect(c0.lines.some((l) => l.productId === P.salt)).toBe(true);
     await caller(A).inventory.saveLines({ countId: closing, lines: [{ productId: P.beef, qty: '5' }, { productId: P.milk, qty: '10' }, { productId: P.salt, qty: '2' }] });
-    expect((await caller(A).inventory.complete({ countId: closing })).totalValueAgorot).toBe(65_600); // 600 + 50 + 6
+    expect((await caller(A).inventory.complete({ countId: closing, acceptUncounted: true })).totalValueAgorot).toBe(65_600); // 600 + 50 + 6
 
     const before = await caller(A).inventory.period();
     expect(before).toMatchObject({ available: true, salesAgorot: null, actualBp: null });
@@ -175,6 +182,7 @@ describe('inventory: count → autosave → finish', () => {
         duplicateCount: 1,
         duplicatesAgorot: 50_000,
         creditsAgorot: 4_000,
+        creditsToReceiveAgorot: 2_500,
         purchasesAgorot: 285_000,
       },
       salesAgorot: 1_000_000,
@@ -265,8 +273,8 @@ describe('inventory: flag + roles', () => {
   });
 });
 
-describe('inventory: delivery notes billed later on a consolidated invoice', () => {
-  it('purchases are invoices only (the consolidated invoice once); unbilled notes are shown as info at PO prices, food only', async () => {
+describe('inventory: purchases on receipt dates — delivery notes billed later count exactly once', () => {
+  it('added in the period they arrive (PO prices, food only), taken back when the consolidated invoice lands', async () => {
     const D = await seedTenant(db, 'ID');
     await db.delete(invoices).where(eq(invoices.restaurantId, D.restaurantId));
     const milk = await product(D, 'חלב', 'ליטר', 'מוצרי חלב');
@@ -297,12 +305,12 @@ describe('inventory: delivery notes billed later on a consolidated invoice', () 
       ocrPayload: { raw: { deliveryNotes: [{ number: '7001' }, { number: '7002' }] } } as never,
     });
     const p1 = await purchasesInPeriod(db, D.restaurantId, TZ, ymdAgo(30), ymdAgo(15));
-    expect(p1).toMatchObject({ invoiceCount: 0, unbilledNotes: 2, unbilledNotesAgorot: 8_000, purchasesAgorot: 0 });
+    expect(p1).toMatchObject({ invoiceCount: 0, accruedNotes: 2, accruedAgorot: 8_000, reversedAgorot: 0, purchasesAgorot: 8_000 });
     const p2 = await purchasesInPeriod(db, D.restaurantId, TZ, ymdAgo(15), today);
-    expect(p2).toMatchObject({ invoiceCount: 1, invoicesAgorot: 8_000, unbilledNotes: 0, purchasesAgorot: 8_000 });
-    // One period spanning both: the invoice once.
+    expect(p2).toMatchObject({ invoiceCount: 1, invoicesAgorot: 8_000, accruedAgorot: 0, reversedAgorot: 8_000, purchasesAgorot: 0 });
+    // One period spanning both: the invoice once, nothing added or taken back.
     const all = await purchasesInPeriod(db, D.restaurantId, TZ, ymdAgo(30), today);
-    expect(all).toMatchObject({ invoicesAgorot: 8_000, unbilledNotes: 0, purchasesAgorot: 8_000 });
+    expect(all).toMatchObject({ invoicesAgorot: 8_000, accruedAgorot: 0, reversedAgorot: 0, purchasesAgorot: 8_000 });
     expect(p1.purchasesAgorot + p2.purchasesAgorot).toBe(all.purchasesAgorot);
   });
 });

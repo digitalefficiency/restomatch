@@ -15,7 +15,9 @@
 --                        how much (qty in `unit`, NULL = not counted yet), and the
 --                        completion snapshot: unit_cost (ex-VAT ₪ per `unit`, NULL =
 --                        no known price → excluded from the value, shown calmly)
---                        and value_agorot (integer agorot, half-up).
+--                        and value_agorot (integer agorot, half-up), plus price_source: where
+--                        that price came from (invoice number + date, supplier, observed
+--                        at) so the owner recognises it — also frozen at completion.
 --
 -- Tenant safety: the 0057 pattern. Both tables carry restaurant_id; every
 -- reference is a SAME-TENANT composite FK; RLS is enabled HERE with the same
@@ -59,6 +61,7 @@ CREATE TABLE IF NOT EXISTS "inventory_count_lines" (
   "unit" varchar(32) NOT NULL,
   "unit_cost" numeric(12, 4),
   "value_agorot" bigint,
+  "price_source" jsonb,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL,
   "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
   CONSTRAINT "inventory_count_lines_count_same_tenant_fk" FOREIGN KEY ("count_id", "restaurant_id")
@@ -93,5 +96,5 @@ DROP POLICY IF EXISTS "inventory_count_lines_tenant" ON "inventory_count_lines";
 CREATE POLICY "inventory_count_lines_tenant" ON "inventory_count_lines" USING ("restaurant_id" = app.current_restaurant_id());
 
 insert into drizzle.__drizzle_migrations (hash, created_at)
-select '150d7216248e6f7e4104f003d1a6fa7dddb2af9e7c9dd3825a42decb717c6989', 1782300000000
+select '9c707bb57d6038dc2e68cdc84b36bcfa35ce829e9a2fc972c79d393b793f61d8', 1782300000000
 where not exists (select 1 from drizzle.__drizzle_migrations where created_at = 1782300000000);

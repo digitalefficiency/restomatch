@@ -10,7 +10,7 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { components } from '@/lib/i18n/messages/components';
 import { inventory as inventoryNs } from '@/lib/i18n/messages/inventory';
 import { originalProps } from '@/lib/i18n/original';
-import { ils } from '../../recipes/recipe-ui';
+import { ils, priceText } from '../../recipes/recipe-ui';
 import { AREAS, dayText, normalizeQty, qtyText, type Area } from '../inventory-ui';
 
 type Draft = NonNullable<inferRouterOutputs<AppRouter>['inventory']['current']>;
@@ -81,6 +81,7 @@ function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void 
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [confirming, setConfirming] = useState(false);
+  const [acceptUncounted, setAcceptUncounted] = useState(false);
 
   const save = trpc.inventory.saveLines.useMutation();
   // One save at a time, in order: a newer flush waits for the one in flight, so
@@ -194,6 +195,13 @@ function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void 
   };
 
   const unpricedCounted = lines.filter((l) => l.qty != null && (l.status === 'noPrice' || l.status === 'unitMismatch')).length;
+  // Blank ≠ zero: an empty line is "not counted" and closing needs an explicit OK.
+  const uncounted = lines.filter((l) => l.qty == null);
+  const checks = lines.filter((l) => l.check);
+  const namesText = (ls: Array<{ name: string; nameEn: string | null }>) => {
+    const names = ls.slice(0, 8).map((l) => (locale === 'en' && l.nameEn ? l.nameEn : l.name));
+    return ls.length > 8 ? `${names.join(', ')} ${t('count.more', { count: ls.length - 8 })}` : names.join(', ');
+  };
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date());
 
   return (
@@ -260,7 +268,17 @@ function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void 
                           <bdi dir="ltr" className="tabular-nums">{ils(l.valueAgorot, locale)}</bdi>
                         ) : null}
                         {l.qty != null && (l.status === 'noPrice' || l.status === 'unitMismatch') ? <Badge tone="neutral">{t('count.noPrice')}</Badge> : null}
+                        {l.check ? (
+                          <span title={t('count.checkHint')}>
+                            <Badge tone="warning">{t('count.check')}</Badge>
+                          </span>
+                        ) : null}
                       </div>
+                      {l.priceSource && l.unitCost ? (
+                        <p className="mt-0.5 truncate text-[11px] text-subtle" data-testid="price-source">
+                          <PriceSourceText unitCost={l.unitCost} unit={l.unit} source={l.priceSource} />
+                        </p>
+                      ) : null}
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
                       <label className="sr-only" htmlFor={inputId}>
@@ -338,19 +356,28 @@ function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void 
                 {t('count.finishTitle')}
               </p>
               <p className="text-sm text-muted">{t('count.finishBody', { date: dayText(draft.countDate, locale) })}</p>
-              {lines.length - counted > 0 ? (
-                <p className="flex items-center gap-1.5 text-sm text-warn">
-                  <CircleAlert className="h-4 w-4" aria-hidden="true" />
-                  {t('count.notCountedWarn', { count: lines.length - counted })}
-                </p>
+              {uncounted.length > 0 ? (
+                <div className="space-y-1 text-sm text-warn" data-testid="uncounted-list">
+                  <p className="flex items-center gap-1.5">
+                    <CircleAlert className="h-4 w-4" aria-hidden="true" />
+                    {t('count.notCountedWarn', { count: uncounted.length })}
+                  </p>
+                  <p className="text-xs">{t('count.uncountedList', { names: namesText(uncounted) })}</p>
+                  <label className="flex items-start gap-2 text-xs text-ink">
+                    <input type="checkbox" className="mt-0.5 h-4 w-4" checked={acceptUncounted} onChange={(e) => setAcceptUncounted(e.target.checked)} />
+                    {t('count.acceptUncounted')}
+                  </label>
+                </div>
               ) : null}
+              {checks.length > 0 ? <p className="text-xs text-warn">{t('count.checkWarn', { count: checks.length, names: namesText(checks) })}</p> : null}
               {unpricedCounted > 0 ? <p className="text-sm text-muted">{t('count.unpricedWarn', { count: unpricedCounted })}</p> : null}
               <div className="flex flex-wrap gap-2">
                 <Button
                   className="touch-target"
                   loading={complete.isPending}
+                  disabled={uncounted.length > 0 && !acceptUncounted}
                   onClick={async () => {
-                    if (await flush()) complete.mutate({ countId: draft.id });
+                    if (await flush()) complete.mutate({ countId: draft.id, acceptUncounted: uncounted.length > 0 ? acceptUncounted : undefined });
                   }}
                 >
                   <Check className="h-4 w-4" aria-hidden="true" />
@@ -361,10 +388,14 @@ function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void 
                 </Button>
               </div>
             </div>
-          ) : (
+          ) : draft.canClose ? (
             <Button className="touch-target w-full" disabled={counted === 0} onClick={() => setConfirming(true)}>
               {counted === 0 ? t('count.nothingCounted') : t('count.finish')}
             </Button>
+          ) : (
+            <p className="text-center text-sm text-muted" data-testid="closers-only">
+              {t('count.closersOnly')}
+            </p>
           )}
         </div>
       </div>
@@ -460,5 +491,26 @@ function DoneSummary({ done }: { done: Done }) {
         </LinkButton>
       </div>
     </Card>
+  );
+}
+
+/** "₪149.00 per kg · invoice 4711, 20 Oct 2026, HaKerem Butchery" — the paid price the owner recognises. */
+export function PriceSourceText({
+  unitCost,
+  unit,
+  source,
+}: {
+  unitCost: string;
+  unit: string;
+  source: { invoiceNumber: string | null; invoiceDate: string | null; supplierName: string | null; observedAt: string };
+}) {
+  const t = useT(inventoryNs);
+  const locale = useLocale();
+  const date = source.invoiceDate ? dayText(source.invoiceDate, locale) : dayText(source.observedAt.slice(0, 10), locale);
+  const price = priceText(unitCost, locale);
+  return source.invoiceNumber ? (
+    <>{t('count.priceFrom', { price, unit, invoice: source.invoiceNumber, date, supplier: source.supplierName ?? '—' })}</>
+  ) : (
+    <>{t('count.priceFromNoInvoice', { price, unit, supplier: source.supplierName ?? '—', date })}</>
   );
 }

@@ -7,6 +7,8 @@ import { inventory as inventoryNs } from '@/lib/i18n/messages/inventory';
 import { originalProps } from '@/lib/i18n/original';
 import { ils, priceText } from '../../recipes/recipe-ui';
 import { AREAS, dayText, qtyText } from '../inventory-ui';
+import { PriceSourceText } from '../count/count-screen';
+import { AmendButton, CsvButton } from './count-actions';
 
 /** A finished count, read-only: the snapshot (unit cost + value per line) as of its date. */
 export default async function InventoryCountDetailPage({ params }: { params: Promise<{ countId: string }> }) {
@@ -41,6 +43,11 @@ export default async function InventoryCountDetailPage({ params }: { params: Pro
           {ils(count.totalValueAgorot, locale, 0)}
         </bdi>
         <span className="text-xs text-muted">{t('home.items', { counted: count.progress.counted })}</span>
+        {count.status === 'completed' ? (
+          <span className="ms-auto">
+            <CsvButton countId={count.id} />
+          </span>
+        ) : null}
       </Card>
       {AREAS.map((a) => {
         const ls = count.lines.filter((l) => l.storageArea === a && l.qty != null);
@@ -51,7 +58,14 @@ export default async function InventoryCountDetailPage({ params }: { params: Pro
             <ul className="divide-y divide-line rounded-xl border border-line bg-surface">
               {ls.map((l) => (
                 <li key={l.productId} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-sm">
-                  <span className="min-w-0 text-ink">{name(l.name, l.nameEn)}</span>
+                  <span className="min-w-0">
+                    <span className="block text-ink">{name(l.name, l.nameEn)}</span>
+                    {l.priceSource && l.unitCost ? (
+                      <span className="block text-[11px] text-subtle" data-testid="price-source">
+                        <PriceSourceText unitCost={l.unitCost} unit={l.unit} source={l.priceSource} />
+                      </span>
+                    ) : null}
+                  </span>
                   <span className="flex items-center gap-3 tabular-nums text-muted">
                     <bdi dir="ltr">
                       {qtyText(l.qty)} {l.unit}
@@ -68,6 +82,9 @@ export default async function InventoryCountDetailPage({ params }: { params: Pro
                     ) : (
                       <Badge tone="neutral">{t('count.noPrice')}</Badge>
                     )}
+                    {count.canAmend && count.status === 'completed' ? (
+                      <AmendButton countId={count.id} productId={l.productId} unit={l.unit} qty={l.qty} />
+                    ) : null}
                   </span>
                 </li>
               ))}

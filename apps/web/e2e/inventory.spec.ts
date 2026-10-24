@@ -127,7 +127,12 @@ for (const locale of ['he', 'en'] as const) {
     await expect(page.locator('main input[inputmode="decimal"][id^="qty-"]').nth(0)).toHaveValue('2.5');
 
     await page.getByRole('button', { name: locale === 'he' ? 'סיים ספירה' : 'Finish count' }).click();
-    await page.getByRole('button', { name: locale === 'he' ? 'כן, סיים' : 'Yes, finish' }).click();
+    // Blank ≠ zero: the uncounted items are listed and closing needs an explicit OK.
+    await expect(page.getByTestId('uncounted-list')).toBeVisible();
+    const confirm = page.getByRole('button', { name: locale === 'he' ? 'כן, סיים' : 'Yes, finish' });
+    await expect(confirm).toBeDisabled();
+    await page.getByTestId('uncounted-list').getByRole('checkbox').check();
+    await confirm.click();
     await expect(page.getByTestId('count-done')).toBeVisible();
     await expect(page.getByTestId('count-done-value')).toContainText('₪');
     await checkScreen(page, `${locale} count summary`);

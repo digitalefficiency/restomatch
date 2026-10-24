@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { and, eq, inArray, inventoryCountLines, inventoryCounts, products, sql, type Database } from '@restomatch/db';
 import { featureEnabled } from '../lib/features';
 import { chefProcedure, memberProcedure, router } from '../trpc';
-import { costRecipes } from '../recipes/cost';
+import { costRecipes, parseScaled, roundHalfUp, unitFactorRational } from '../recipes/cost';
+import { recordAudit } from '../audit';
 import { latestPrices, loadPosSales, loadRecipes, loadRestaurant, toCostRecipes } from '../recipes/data';
 import { posVsTheory } from '../recipes/pos';
 import {
@@ -16,12 +17,16 @@ import {
   loadDraft,
   loadLines,
   localToday,
-  pricesAsOf,
+  dayBefore,
+  monthStartOf,
+  pricesWithSourceAsOf,
   productsById,
   purchasesInPeriod,
+  receivedBetween,
   recentlyBoughtProducts,
+  type PricedWithSource,
 } from '../inventory/data';
-import { actualFoodCost, STORAGE_AREAS, valueCount, type CountLineInput } from '../inventory/valuation';
+import { actualFoodCost, STORAGE_AREAS, valueCount, valueLine, type CountLineInput } from '../inventory/valuation';
 
 /**
  * Inventory counting (ספירת מלאי) → actual food cost per period. Flag
@@ -61,41 +66,83 @@ function notDraft(): never {
   throw new TRPCError({ code: 'CONFLICT', message: 'count is not a draft' });
 }
 
-/** A draft count with its lines, live-valued at the draft date's prices. */
-async function draftView(db: Database, restaurantId: string, tz: string, countId: string) {
+const CLOSERS = new Set(['owner', 'manager']);
+
+/** Is `qty` (in `unit`) more than last count + received since? null when it can't be judged. */
+function overCount(
+  qty: string | null,
+  unit: string,
+  prev: { qty: string | null; unit: string } | undefined,
+  received: Array<{ qty: string; unit: string }> | undefined,
+): boolean | null {
+  if (qty == null || !prev || prev.qty == null) return null;
+  // Everything in the counted line's unit, exact at scale 4.
+  const toLine = (q: string, u: string) => {
+    const f = unitFactorRational(u, unit);
+    return f ? (parseScaled(q, 4) * f[0]) / f[1] : null;
+  };
+  const p = toLine(prev.qty, prev.unit);
+  if (p == null) return null;
+  let total = p;
+  for (const r of received ?? []) {
+    const v = toLine(r.qty, r.unit);
+    if (v == null) return null;
+    total += v;
+  }
+  return parseScaled(qty, 4) > total;
+}
+
+/**
+ * A count with its lines. A draft is live-valued at its date's paid prices; a
+ * completed count is its snapshot (values, price sources, tallies — never
+ * re-priced). Each line carries where its price came from and a sanity flag:
+ * counted more than the last count + goods received since → "בדוק".
+ */
+async function draftView(db: Database, restaurantId: string, tz: string, countId: string, role: string) {
   const c = await loadCount(db, restaurantId, countId);
   const lines = await loadLines(db, restaurantId, countId);
   const snap = c.status === 'completed';
-  // A completed count is its snapshot — never re-priced, not even its tallies.
-  const prices = snap ? new Map() : await pricesAsOf(db, restaurantId, c.countDate, tz, lines.map((l) => l.productId));
+  const ids = lines.map((l) => l.productId);
+  const prices = snap ? new Map<string, PricedWithSource>() : await pricesWithSourceAsOf(db, restaurantId, c.countDate, tz, ids);
   const sum = valueCount(lines.map((l): CountLineInput => ({ productId: l.productId, qty: l.qty, unit: l.unit })), prices);
   const counted = lines.filter((l) => l.qty != null).length;
   const progress = snap
     ? { lines: lines.length, counted, notCounted: lines.length - counted, unpriced: lines.filter((l) => l.qty != null && l.valueAgorot == null).length }
     : { lines: sum.lines, counted: sum.counted, notCounted: sum.notCounted, unpriced: sum.unpriced };
+  // Sanity: the previous completed count before this one, and what arrived since.
+  const prev = (await completedCounts(db, restaurantId, 48)).find((x) => x.id !== c.id && x.countDate < c.countDate);
+  const prevLines = prev ? new Map((await loadLines(db, restaurantId, prev.id)).map((l) => [l.productId, l] as const)) : new Map();
+  const received = prev ? await receivedBetween(db, restaurantId, tz, prev.countDate, c.countDate, ids) : new Map();
+  const out = lines.map((l) => {
+    const v = sum.values.get(l.productId)!;
+    return {
+      productId: l.productId,
+      name: l.name,
+      nameEn: l.nameEn,
+      storageArea: l.storageArea as (typeof STORAGE_AREAS)[number],
+      qty: l.qty,
+      unit: l.unit,
+      // A completed count shows its snapshot, never today's prices.
+      unitCost: snap ? l.unitCost : v.unitCost,
+      valueAgorot: snap ? (l.valueAgorot == null ? null : Number(l.valueAgorot)) : v.valueAgorot,
+      status: snap ? (l.qty == null ? 'notCounted' : l.valueAgorot == null ? 'noPrice' : 'ok') : v.status,
+      priceSource: snap ? (l.priceSource ?? null) : (prices.get(l.productId)?.source ?? null),
+      check: overCount(l.qty, l.unit, prevLines.get(l.productId), received.get(l.productId)) === true,
+    };
+  });
   return {
     id: c.id,
     countDate: c.countDate,
     status: c.status as 'draft' | 'completed',
     notes: c.notes,
     foodSalesExVat: c.foodSalesExVat,
+    completedAt: c.completedAt?.toISOString() ?? null,
     totalValueAgorot: c.status === 'completed' ? Number(c.totalValueAgorot ?? 0) : sum.totalValueAgorot,
     progress,
-    lines: lines.map((l) => {
-      const v = sum.values.get(l.productId)!;
-      return {
-        productId: l.productId,
-        name: l.name,
-        nameEn: l.nameEn,
-        storageArea: l.storageArea as (typeof STORAGE_AREAS)[number],
-        qty: l.qty,
-        unit: l.unit,
-        // A completed count shows its snapshot, never today's prices.
-        unitCost: snap ? l.unitCost : v.unitCost,
-        valueAgorot: snap ? (l.valueAgorot == null ? null : Number(l.valueAgorot)) : v.valueAgorot,
-        status: snap ? (l.qty == null ? 'notCounted' : l.valueAgorot == null ? 'noPrice' : 'ok') : v.status,
-      };
-    }),
+    /** Owner/manager close (and lock) a count; the chef counts. Owner alone amends a closed one. */
+    canClose: CLOSERS.has(role),
+    canAmend: role === 'owner',
+    lines: out,
   };
 }
 
@@ -105,7 +152,27 @@ async function periodFor(db: Database, restaurantId: string, rc: Awaited<ReturnT
   const closing = closingId ? done.find((c) => c.id === closingId) : done[0];
   if (!closing) return { available: false as const, reason: closingId ? ('notFound' as const) : ('noCounts' as const) };
   const opening = done.find((c) => c.countDate < closing.countDate);
-  if (!opening) return { available: false as const, reason: 'needOpening' as const, closing: { id: closing.id, countDate: closing.countDate } };
+  if (!opening) {
+    // First month: no opening count, so no actual food cost — never an invented
+    // opening value. "פוד קוסט רכש" instead: the month's food purchases (receipt
+    // dates) ÷ the sales entered on this count, labelled as such.
+    const from = dayBefore(monthStartOf(closing.countDate));
+    const purchases = await purchasesInPeriod(db, restaurantId, rc.timezone, from, closing.countDate);
+    const salesAgorot = closing.foodSalesExVat == null ? null : Math.round(Number(closing.foodSalesExVat) * 100);
+    const net = purchases.purchasesAgorot - purchases.creditsAgorot;
+    return {
+      available: false as const,
+      reason: 'needOpening' as const,
+      closing: { id: closing.id, countDate: closing.countDate, valueAgorot: Number(closing.totalValueAgorot ?? 0) },
+      purchaseFoodCost: {
+        from: monthStartOf(closing.countDate),
+        to: closing.countDate,
+        purchasesAgorot: net,
+        salesAgorot,
+        bp: salesAgorot && salesAgorot > 0 ? Number(roundHalfUp(BigInt(net) * 10_000n, BigInt(salesAgorot))) : null,
+      },
+    };
+  }
   const purchases = await purchasesInPeriod(db, restaurantId, rc.timezone, opening.countDate, closing.countDate);
   // Sales: POS (when the integration is on and has rows) else the manual figure on the closing count.
   const dayAfter = (ymd: string) => localToday(rc.timezone, endOfLocalDate(ymd, rc.timezone));
@@ -171,7 +238,7 @@ export const inventoryRouter = router({
   /** The open draft (with lines, progress and live value), or null. */
   current: inventoryProcedure.query(async ({ ctx }) => {
     const d = await loadDraft(ctx.db, ctx.session.restaurantId);
-    return d ? draftView(ctx.db, ctx.session.restaurantId, ctx.rc.timezone, d.id) : null;
+    return d ? draftView(ctx.db, ctx.session.restaurantId, ctx.rc.timezone, d.id, ctx.session.role) : null;
   }),
 
   /** Start a count (or return the open draft): every food product bought in the last 60 days, by storage area. */
@@ -296,36 +363,128 @@ export const inventoryRouter = router({
       return { ok: true as const };
     }),
 
-  /** Finish: snapshot every line's unit cost + value at the count date's prices, and the total. */
-  complete: inventoryProcedure.input(z.object({ countId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
-    const rid = ctx.session.restaurantId;
-    await lockCounts(ctx.db, rid);
-    const c = await loadCount(ctx.db, rid, input.countId);
-    if (c.status !== 'draft') notDraft();
-    const lines = await loadLines(ctx.db, rid, c.id);
-    const prices = await pricesAsOf(ctx.db, rid, c.countDate, ctx.rc.timezone, lines.map((l) => l.productId));
-    const sum = valueCount(lines.map((l) => ({ productId: l.productId, qty: l.qty, unit: l.unit })), prices);
-    if (sum.counted === 0) throw new TRPCError({ code: 'BAD_REQUEST', message: 'nothing counted' });
-    for (const l of lines) {
-      const v = sum.values.get(l.productId)!;
+  /**
+   * Close (and lock) the count — owner or manager. Every line's unit cost,
+   * value and price source are snapshotted at the count date's paid prices,
+   * plus the total. Blank lines stay "not counted" (never 0): closing with any
+   * needs `acceptUncounted`. Logged to the audit trail.
+   */
+  complete: inventoryProcedure
+    .input(z.object({ countId: z.string().uuid(), acceptUncounted: z.boolean().optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const rid = ctx.session.restaurantId;
+      if (!CLOSERS.has(ctx.session.role)) throw new TRPCError({ code: 'FORBIDDEN', message: 'only an owner or manager closes a count' });
+      await lockCounts(ctx.db, rid);
+      const c = await loadCount(ctx.db, rid, input.countId);
+      if (c.status !== 'draft') notDraft();
+      const lines = await loadLines(ctx.db, rid, c.id);
+      const prices = await pricesWithSourceAsOf(ctx.db, rid, c.countDate, ctx.rc.timezone, lines.map((l) => l.productId));
+      const sum = valueCount(lines.map((l) => ({ productId: l.productId, qty: l.qty, unit: l.unit })), prices);
+      if (sum.counted === 0) throw new TRPCError({ code: 'BAD_REQUEST', message: 'nothing counted' });
+      const uncounted = lines.filter((l) => l.qty == null);
+      if (uncounted.length > 0 && !input.acceptUncounted) {
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: `UNCOUNTED:${uncounted.length}` });
+      }
+      for (const l of lines) {
+        const v = sum.values.get(l.productId)!;
+        await ctx.db
+          .update(inventoryCountLines)
+          .set({ unitCost: v.unitCost, valueAgorot: v.valueAgorot, priceSource: v.status === 'ok' ? (prices.get(l.productId)?.source ?? null) : null })
+          .where(and(eq(inventoryCountLines.restaurantId, rid), eq(inventoryCountLines.id, l.id)));
+      }
+      const completedAt = new Date();
+      await ctx.db
+        .update(inventoryCounts)
+        .set({ status: 'completed', completedAt, totalValueAgorot: sum.totalValueAgorot, countedBy: c.countedBy ?? ctx.session.userId })
+        .where(and(eq(inventoryCounts.restaurantId, rid), eq(inventoryCounts.id, c.id)));
+      await recordAudit(ctx.db, {
+        restaurantId: rid,
+        userId: ctx.session.userId,
+        action: 'inventory.count_closed',
+        entityType: 'inventory_count',
+        entityId: c.id,
+        after: { countDate: c.countDate, totalValueAgorot: sum.totalValueAgorot, counted: sum.counted, notCounted: sum.notCounted, unpriced: sum.unpriced },
+      });
+      const view = await draftView(ctx.db, rid, ctx.rc.timezone, c.id, ctx.session.role);
+      return {
+        id: c.id,
+        countDate: c.countDate,
+        totalValueAgorot: sum.totalValueAgorot,
+        counted: sum.counted,
+        notCounted: sum.notCounted,
+        unpriced: sum.unpriced,
+        unpricedNames: lines.filter((l) => { const st = sum.values.get(l.productId)!.status; return st === 'noPrice' || st === 'unitMismatch'; }).map((l) => ({ name: l.name, nameEn: l.nameEn })),
+        uncountedNames: uncounted.map((l) => ({ name: l.name, nameEn: l.nameEn })),
+        checkNames: view.lines.filter((l) => l.check).map((l) => ({ name: l.name, nameEn: l.nameEn })),
+      };
+    }),
+
+  /**
+   * Correct one line of a CLOSED count — owner only, with a reason. The
+   * snapshot unit cost is kept (the price as of the count date); the line value
+   * and the count total are recomputed. Logged with before/after/reason.
+   */
+  amendLine: inventoryProcedure
+    .input(z.object({ countId: z.string().uuid(), productId: z.string().uuid(), qty: QTY.nullable(), reason: z.string().trim().min(3).max(500) }))
+    .mutation(async ({ ctx, input }) => {
+      const rid = ctx.session.restaurantId;
+      if (ctx.session.role !== 'owner') throw new TRPCError({ code: 'FORBIDDEN', message: 'only the owner amends a closed count' });
+      await lockCounts(ctx.db, rid);
+      const c = await loadCount(ctx.db, rid, input.countId);
+      if (c.status !== 'completed') throw new TRPCError({ code: 'CONFLICT', message: 'count is not closed' });
+      const lines = await loadLines(ctx.db, rid, c.id);
+      const l = lines.find((x) => x.productId === input.productId);
+      if (!l) throw new TRPCError({ code: 'NOT_FOUND', message: 'line not found' });
+      const v = l.unitCost == null ? null : valueLine(input.qty, l.unit, { unitPrice: l.unitCost, unit: l.unit });
+      const valueAgorot = v && v.status === 'ok' ? v.valueAgorot : null;
       await ctx.db
         .update(inventoryCountLines)
-        .set({ unitCost: v.unitCost, valueAgorot: v.valueAgorot })
+        .set({ qty: input.qty, valueAgorot })
         .where(and(eq(inventoryCountLines.restaurantId, rid), eq(inventoryCountLines.id, l.id)));
-    }
-    await ctx.db
-      .update(inventoryCounts)
-      .set({ status: 'completed', completedAt: new Date(), totalValueAgorot: sum.totalValueAgorot, countedBy: c.countedBy ?? ctx.session.userId })
-      .where(and(eq(inventoryCounts.restaurantId, rid), eq(inventoryCounts.id, c.id)));
-    return {
-      id: c.id,
-      countDate: c.countDate,
-      totalValueAgorot: sum.totalValueAgorot,
-      counted: sum.counted,
-      notCounted: sum.notCounted,
-      unpriced: sum.unpriced,
-      unpricedNames: lines.filter((l) => { const s = sum.values.get(l.productId)!.status; return s === 'noPrice' || s === 'unitMismatch'; }).map((l) => ({ name: l.name, nameEn: l.nameEn })),
+      const total = lines.reduce((a, x) => a + (x.id === l.id ? (valueAgorot ?? 0) : Number(x.valueAgorot ?? 0)), 0);
+      await ctx.db.update(inventoryCounts).set({ totalValueAgorot: total }).where(and(eq(inventoryCounts.restaurantId, rid), eq(inventoryCounts.id, c.id)));
+      await recordAudit(ctx.db, {
+        restaurantId: rid,
+        userId: ctx.session.userId,
+        action: 'inventory.line_amended',
+        entityType: 'inventory_count',
+        entityId: c.id,
+        before: { productId: l.productId, qty: l.qty, valueAgorot: l.valueAgorot == null ? null : Number(l.valueAgorot), totalValueAgorot: Number(c.totalValueAgorot ?? 0) },
+        after: { productId: l.productId, qty: input.qty, valueAgorot, totalValueAgorot: total, reason: input.reason },
+      });
+      return { totalValueAgorot: total };
+    }),
+
+  /** A closed count as CSV for the accountant (item, unit, qty, unit cost, value, area, price source). */
+  exportCsv: inventoryProcedure.input(z.object({ countId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    const rid = ctx.session.restaurantId;
+    const c = await loadCount(ctx.db, rid, input.countId);
+    if (c.status !== 'completed') throw new TRPCError({ code: 'CONFLICT', message: 'count is not closed' });
+    const lines = await loadLines(ctx.db, rid, c.id);
+    const cell = (v: unknown) => {
+      const t = v == null ? '' : String(v);
+      // Quote every cell; neutralise spreadsheet formulas (= + - @ at the start).
+      const safe = /^[=+\-@\t\r]/.test(t) ? `'${t}` : t;
+      return `"${safe.replace(/"/g, '""')}"`;
     };
+    const ils2 = (agorot: number | null | undefined) => (agorot == null ? '' : (Number(agorot) / 100).toFixed(2));
+    const head = ['item', 'item_en', 'area', 'qty', 'unit', 'unit_cost_ex_vat', 'value_ex_vat', 'price_invoice', 'price_invoice_date', 'price_supplier'];
+    const rows = lines.map((l) =>
+      [
+        l.name,
+        l.nameEn,
+        l.storageArea,
+        l.qty == null ? '' : l.qty,
+        l.unit,
+        l.unitCost ?? '',
+        ils2(l.valueAgorot == null ? null : Number(l.valueAgorot)),
+        l.priceSource?.invoiceNumber ?? '',
+        l.priceSource?.invoiceDate ?? '',
+        l.priceSource?.supplierName ?? '',
+      ].map(cell).join(','),
+    );
+    const total = ['TOTAL', '', '', '', '', '', ils2(Number(c.totalValueAgorot ?? 0)), '', '', ''].map(cell).join(',');
+    return { filename: `inventory-count-${c.countDate}.csv`, csv: `﻿${[head.map(cell).join(','), ...rows, total].join('\r\n')}\r\n` };
   }),
 
   /** Throw away the open draft. */
@@ -335,12 +494,13 @@ export const inventoryRouter = router({
     const c = await loadCount(ctx.db, rid, input.countId);
     if (c.status !== 'draft') notDraft();
     await ctx.db.delete(inventoryCounts).where(and(eq(inventoryCounts.restaurantId, rid), eq(inventoryCounts.id, c.id)));
+    await recordAudit(ctx.db, { restaurantId: rid, userId: ctx.session.userId, action: 'inventory.count_discarded', entityType: 'inventory_count', entityId: c.id, before: { countDate: c.countDate } });
     return { ok: true as const };
   }),
 
   /** One count (draft or completed) with its lines. */
   get: inventoryProcedure.input(z.object({ countId: z.string().uuid() })).query(({ ctx, input }) =>
-    draftView(ctx.db, ctx.session.restaurantId, ctx.rc.timezone, input.countId),
+    draftView(ctx.db, ctx.session.restaurantId, ctx.rc.timezone, input.countId, ctx.session.role),
   ),
 
   /** Completed counts, newest first, with their ₪ value and line tallies. */

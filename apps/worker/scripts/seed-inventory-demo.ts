@@ -10,12 +10,16 @@
  * pending and the hero are untouched (check:demo stays green).
  * Idempotent: the demo restaurant's counts are deleted and rebuilt.
  *
- *   DATABASE_URL=… pnpm --filter @restomatch/worker exec tsx scripts/seed-inventory-demo.ts
+ *   DATABASE_URL=… DEMO_TODAY=2026-10-25 pnpm --filter @restomatch/worker exec tsx scripts/seed-inventory-demo.ts
+ * Demo contract (reseed-demo): picks DEMO_RESTAURANT_ID (else the demo business
+ * id + name), deletes only its own rows for that restaurant, dates from
+ * DEMO_TODAY, never touches invoices / discrepancies.
  */
 import { appRouter, type AppContext } from '@restomatch/api';
 import {
+  DEMO_MAIN_BUSINESS_ID,
+  DEMO_MAIN_NAME,
   and,
-  asc,
   assertSeedTarget,
   createDb,
   eq,
@@ -31,8 +35,20 @@ if (!url) throw new Error('DATABASE_URL is required');
 assertSeedTarget(url, 'seed-inventory-demo');
 const db = createDb(url);
 
-const OPENING = '2026-09-30';
-const CLOSING = '2026-10-24';
+/**
+ * Dates anchor on DEMO_TODAY (YYYY-MM-DD, the demo's "today"), never the clock:
+ * the closing count is the day before it, the opening count the last day of the
+ * month before that (2026-10-25 → opening 2026-09-30, closing 2026-10-24).
+ */
+const DEMO_TODAY = process.env.DEMO_TODAY ?? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date());
+if (!/^\d{4}-\d{2}-\d{2}$/.test(DEMO_TODAY)) throw new Error(`DEMO_TODAY must be YYYY-MM-DD, got ${DEMO_TODAY}`);
+const dayBefore = (ymd: string) => {
+  const d = new Date(`${ymd}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+};
+const CLOSING = dayBefore(DEMO_TODAY);
+const OPENING = dayBefore(`${CLOSING.slice(0, 7)}-01`);
 /**
  * October 1–24 food sales before VAT, entered by hand on the closing count (the
  * demo has no POS feed on this branch). ~₪5.7k/day for a 70-seat
@@ -103,8 +119,17 @@ const QTY: Record<string, [string, string]> = {
 const ils = (agorot: number) => `₪${(agorot / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 async function main() {
-  const [r] = await db.select({ id: restaurants.id, name: restaurants.name }).from(restaurants).orderBy(asc(restaurants.createdAt)).limit(1);
-  if (!r) throw new Error('no restaurant — run seed-demo first');
+  // The demo restaurant ONLY — never "the oldest restaurant" (a real tenant on a
+  // shared DB). reseed-demo passes DEMO_RESTAURANT_ID; else the demo identity.
+  const only = process.env.DEMO_RESTAURANT_ID;
+  const [r] = only
+    ? await db.select({ id: restaurants.id, name: restaurants.name }).from(restaurants).where(eq(restaurants.id, only)).limit(1)
+    : await db
+        .select({ id: restaurants.id, name: restaurants.name })
+        .from(restaurants)
+        .where(and(eq(restaurants.businessId, DEMO_MAIN_BUSINESS_ID), eq(restaurants.name, DEMO_MAIN_NAME)))
+        .limit(1);
+  if (!r) throw new Error('no demo restaurant — run seed-demo first');
   const [owner] = await db
     .select({ id: users.id })
     .from(users)
@@ -126,7 +151,8 @@ async function main() {
       .filter((l): l is { productId: string; qty: string } => !!l.productId);
     await caller.inventory.saveLines({ countId: id, lines });
     if (date === CLOSING) await caller.inventory.setMeta({ countId: id, foodSalesExVat: OCTOBER_FOOD_SALES });
-    const done = await caller.inventory.complete({ countId: id });
+    // Products bought in the last 60 days that the demo list doesn't count stay blank (not zero).
+    const done = await caller.inventory.complete({ countId: id, acceptUncounted: true });
     results.push({ date, value: done.totalValueAgorot, counted: done.counted, unpriced: done.unpriced });
   }
   const p = await caller.inventory.period();
@@ -139,7 +165,8 @@ async function main() {
     );
     console.log(
       `[seed-inventory-demo] purchases: ${p.purchases.invoiceCount} invoices ${ils(p.purchases.invoicesAgorot)} − non-food ${ils(p.purchases.nonFoodAgorot)}` +
-        ` · info: ${p.purchases.unbilledNotes} delivery notes not billed yet ${ils(p.purchases.unbilledNotesAgorot)}`,
+        ` + ${p.purchases.accruedNotes} delivery notes received, not billed yet ${ils(p.purchases.accruedAgorot)} − earlier notes billed now ${ils(p.purchases.reversedAgorot)}` +
+        ` (receipt dates) · credit to receive ${ils(p.purchases.creditsToReceiveAgorot)} (shown, not subtracted)`,
     );
   }
   console.log(`[seed-inventory-demo] done for "${r.name}"`);

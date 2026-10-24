@@ -45,23 +45,7 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
   const p = q.data;
   if (!p) return null;
 
-  if (!p.available) {
-    return (
-      <Card padding="md" data-testid="food-cost-period">
-        <h2 className="flex items-center gap-2 text-base font-semibold text-ink">
-          <Calculator className="h-4 w-4 text-muted" aria-hidden="true" />
-          {t('period.title')}
-        </h2>
-        <p className="mt-1 text-sm text-muted">{p.reason === 'needOpening' ? t('period.needOpening') : t('period.noCounts')}</p>
-        {compact ? (
-          <LinkButton href="/dashboard/inventory" size="sm" variant="secondary" className="touch-target mt-3">
-            {t('period.open')}
-          </LinkButton>
-        ) : null}
-      </Card>
-    );
-  }
-
+  const closingId = 'closing' in p && p.closing ? p.closing.id : null;
   const saveSales = (e: React.FormEvent) => {
     e.preventDefault();
     // "12345,50" (decimal comma, as on a Hebrew keypad) vs "12,345.50" / "12,345" (thousands).
@@ -72,8 +56,72 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
       return;
     }
     setSalesError(null);
-    setMeta.mutate({ countId: p.closing.id, foodSalesExVat: v });
+    if (closingId) setMeta.mutate({ countId: closingId, foodSalesExVat: v });
   };
+  const salesForm = (
+    <form onSubmit={saveSales} className="flex flex-wrap items-end gap-2">
+      <label className="min-w-0 flex-1 text-xs text-muted" htmlFor="period-sales">
+        {t('period.salesMissing')}
+        <Input
+          id="period-sales"
+          inputMode="decimal"
+          autoComplete="off"
+          dir="ltr"
+          className="mt-1"
+          value={sales}
+          aria-invalid={salesError ? true : undefined}
+          aria-describedby={salesError ? 'period-sales-error' : undefined}
+          placeholder={t('period.sales')}
+          onChange={(e) => setSales(e.target.value)}
+        />
+      </label>
+      <Button type="submit" size="sm" variant="secondary" className="touch-target" loading={setMeta.isPending}>
+        {t('period.salesSave')}
+      </Button>
+      {salesError ? (
+        <p id="period-sales-error" role="alert" className="w-full text-xs text-danger">
+          {salesError}
+        </p>
+      ) : null}
+    </form>
+  );
+
+  if (!p.available) {
+    return (
+      <Card padding="md" data-testid="food-cost-period">
+        <h2 className="flex items-center gap-2 text-base font-semibold text-ink">
+          <Calculator className="h-4 w-4 text-muted" aria-hidden="true" />
+          {t('period.title')}
+        </h2>
+        <p className="mt-1 text-sm text-muted">{p.reason === 'needOpening' ? t('period.needOpening') : t('period.noCounts')}</p>
+        {'purchaseFoodCost' in p && p.purchaseFoodCost ? (
+          <div className="mt-3 border-t border-line pt-3" data-testid="purchase-food-cost">
+            <p className="text-xs font-semibold text-muted">{t('period.purchaseFoodCost')}</p>
+            <p className="text-2xl font-bold tabular-nums text-ink">
+              {p.purchaseFoodCost.bp != null ? pct(p.purchaseFoodCost.bp, locale) : <bdi dir="ltr">{ils(p.purchaseFoodCost.purchasesAgorot, locale, 0)}</bdi>}
+            </p>
+            <p className="text-xs text-muted">
+              {p.purchaseFoodCost.salesAgorot != null
+                ? t('period.purchaseFoodCostHint', {
+                    purchases: ils(p.purchaseFoodCost.purchasesAgorot, locale, 0),
+                    sales: ils(p.purchaseFoodCost.salesAgorot, locale, 0),
+                    from: dayText(p.purchaseFoodCost.from, locale),
+                    to: dayText(p.purchaseFoodCost.to, locale),
+                  })
+                : null}
+            </p>
+            {p.purchaseFoodCost.salesAgorot == null ? <div className="mt-2">{salesForm}</div> : null}
+          </div>
+        ) : null}
+        {compact ? (
+          <LinkButton href="/dashboard/inventory" size="sm" variant="secondary" className="touch-target mt-3">
+            {t('period.open')}
+          </LinkButton>
+        ) : null}
+      </Card>
+    );
+  }
+
 
   const overTarget = p.actualBp != null && p.actualBp > p.targetBp;
   return (
@@ -114,6 +162,11 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
           closing: ils(p.closing.valueAgorot, locale, 0),
         })}
       </p>
+      {p.purchases.creditsToReceiveAgorot > 0 ? (
+        <p className="mt-1 text-xs text-muted" data-testid="credits-to-receive">
+          {t('period.creditsToReceive', { value: ils(p.purchases.creditsToReceiveAgorot, locale, 0) })}
+        </p>
+      ) : null}
       {!compact ? (
         <p className="mt-1 text-xs text-subtle">
           {t('period.purchasesNote', {
@@ -121,8 +174,15 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
             nonFood: ils(p.purchases.nonFoodAgorot, locale, 0),
             dups: ils(p.purchases.duplicatesAgorot, locale, 0),
           })}
-          {p.purchases.unbilledNotes > 0 ? (
-            <> {t('period.unbilledNote', { count: p.purchases.unbilledNotes, value: ils(p.purchases.unbilledNotesAgorot, locale, 0) })}</>
+          {p.purchases.accruedNotes > 0 || p.purchases.reversedAgorot > 0 ? (
+            <>
+              {' '}
+              {t('period.receiptBasis', {
+                count: p.purchases.accruedNotes,
+                accrued: ils(p.purchases.accruedAgorot, locale, 0),
+                reversed: ils(p.purchases.reversedAgorot, locale, 0),
+              })}
+            </>
           ) : null}
         </p>
       ) : null}
@@ -147,31 +207,7 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
             ) : null}
           </p>
         ) : (
-          <form onSubmit={saveSales} className="flex flex-wrap items-end gap-2">
-            <label className="min-w-0 flex-1 text-xs text-muted" htmlFor="period-sales">
-              {t('period.salesMissing')}
-              <Input
-                id="period-sales"
-                inputMode="decimal"
-                autoComplete="off"
-                dir="ltr"
-                className="mt-1"
-                value={sales}
-                aria-invalid={salesError ? true : undefined}
-                aria-describedby={salesError ? 'period-sales-error' : undefined}
-                placeholder={t('period.sales')}
-                onChange={(e) => setSales(e.target.value)}
-              />
-            </label>
-            <Button type="submit" size="sm" variant="secondary" loading={setMeta.isPending}>
-              {t('period.salesSave')}
-            </Button>
-            {salesError ? (
-              <p id="period-sales-error" role="alert" className="w-full text-xs text-danger">
-                {salesError}
-              </p>
-            ) : null}
-          </form>
+          salesForm
         )}
       </div>
 

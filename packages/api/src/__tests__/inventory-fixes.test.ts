@@ -158,8 +158,8 @@ describe('purchases: credits and delivery notes', () => {
       { restaurantId: T.restaurantId, supplierId: T.supplierId, source: 'manual', invoiceNumber: 'T-M', invoiceDate: atAgo(2), totalExclVat: '50.00', totalInclVat: '59.00', status: 'parsed', ocrPayload: { raw: { deliveryNotes: ['07001'] } } as never },
     ]);
     const p = await purchasesInPeriod(db, T.restaurantId, TZ, ymdAgo(10), today);
-    // Ours "100" is unbilled (info ₪50); "7001" is on our "07001" invoice; purchases = the two invoices.
-    expect(p).toMatchObject({ invoicesAgorot: 10_000, unbilledNotes: 1, unbilledNotesAgorot: 5_000, purchasesAgorot: 10_000 });
+    // Ours "100" is not billed yet (added ₪50 on its receipt date); "7001" is on our "07001" invoice.
+    expect(p).toMatchObject({ invoicesAgorot: 10_000, accruedNotes: 1, accruedAgorot: 5_000, reversedAgorot: 0, purchasesAgorot: 15_000 });
   });
 });
 
@@ -169,7 +169,7 @@ describe('a completed count is its snapshot', () => {
     const [salt] = await db.insert(products).values({ restaurantId: T.restaurantId, canonicalName: 'מלח', defaultUnit: 'ק״ג', category: 'יבשים' }).returning();
     const d = await caller(T).inventory.start();
     await caller(T).inventory.saveLines({ countId: d.id, lines: [{ productId: salt!.id, qty: '2' }] });
-    const done = await caller(T).inventory.complete({ countId: d.id });
+    const done = await caller(T).inventory.complete({ countId: d.id, acceptUncounted: true });
     expect(done.unpriced).toBe(1);
     await db.insert(priceHistory).values({ restaurantId: T.restaurantId, productId: salt!.id, supplierId: T.supplierId, observedAt: atAgo(3), unitPrice: '3.0000' });
     const c = await caller(T).inventory.get({ countId: d.id });

@@ -260,6 +260,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'inventory.discard': "attack — inventory-router.test.ts: B discarding A's count → NOT_FOUND",
   'inventory.get': "attack — inventory-router.test.ts + inventory-rls.attack.test.ts: a foreign count id → NOT_FOUND",
   'inventory.history': "isolation — inventory-router.test.ts: B's history is empty while A has two counts",
+  'inventory.amendLine': "attack — inventory-must-haves.test.ts: B amending A's closed count → NOT_FOUND; owner-only",
+  'inventory.exportCsv': "attack — inventory-must-haves.test.ts: B exporting A's count → NOT_FOUND; lists only the caller's lines",
   'inventory.period': "isolation — inventory-router.test.ts: A's purchases exclude B's ₪99,999 invoice on the same day; B's period is noCounts",
 };
 

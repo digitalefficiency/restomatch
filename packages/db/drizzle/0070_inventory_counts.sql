@@ -12,7 +12,9 @@
 --                        how much (qty in `unit`, NULL = not counted yet), and the
 --                        completion snapshot: unit_cost (ex-VAT ₪ per `unit`, NULL =
 --                        no known price → excluded from the value, shown calmly)
---                        and value_agorot (integer agorot, half-up).
+--                        and value_agorot (integer agorot, half-up), plus price_source: where
+--                        that price came from (invoice number + date, supplier, observed
+--                        at) so the owner recognises it — also frozen at completion.
 --
 -- Tenant safety: the 0057 pattern. Both tables carry restaurant_id; every
 -- reference is a SAME-TENANT composite FK; RLS is enabled HERE with the same
@@ -56,6 +58,7 @@ CREATE TABLE IF NOT EXISTS "inventory_count_lines" (
   "unit" varchar(32) NOT NULL,
   "unit_cost" numeric(12, 4),
   "value_agorot" bigint,
+  "price_source" jsonb,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL,
   "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
   CONSTRAINT "inventory_count_lines_count_same_tenant_fk" FOREIGN KEY ("count_id", "restaurant_id")
