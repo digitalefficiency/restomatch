@@ -76,11 +76,18 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * every query is explicitly scoped by restaurant_id either way. Returns null when
  * the invoice has no lines to match (nothing to do). When no PO is found it still
  * returns an input with empty poLines, so the engine emits UNORDERED_ARRIVAL.
+ *
+ * `pinnedPoId` (a re-match): the PO the invoice was already matched against. It
+ * is used whatever its status — by then it is usually `received`/`closed`, which
+ * discovery skips, and re-matching against "no PO" would flag the whole invoice
+ * as UNORDERED_ARRIVAL. Ignored (discovery runs) if it is gone or belongs to
+ * another supplier.
  */
 export async function buildMatchInputForInvoice(
   db: Database,
   restaurantId: string,
   invoiceId: string,
+  options: { pinnedPoId?: string | null } = {},
 ): Promise<BuiltMatchInput | null> {
   const [inv] = await db
     .select({
@@ -162,7 +169,22 @@ export async function buildMatchInputForInvoice(
   // ── Discover the candidate PO: same supplier, eligible status, expected
   //    delivery within ±window of the invoice date; nearest delivery wins. ──
   let po: PoCandidate | null = null;
-  if (inv.supplierId) {
+  if (options.pinnedPoId) {
+    const [pinned] = await db
+      .select({
+        id: purchaseOrders.id,
+        supplierId: purchaseOrders.supplierId,
+        expectedDeliveryAt: purchaseOrders.expectedDeliveryAt,
+        vatRate: purchaseOrders.vatRate,
+      })
+      .from(purchaseOrders)
+      .where(and(eq(purchaseOrders.id, options.pinnedPoId), eq(purchaseOrders.restaurantId, restaurantId)))
+      .limit(1);
+    if (pinned && (!inv.supplierId || pinned.supplierId === inv.supplierId)) {
+      po = { id: pinned.id, expectedDeliveryAt: pinned.expectedDeliveryAt, vatRate: pinned.vatRate };
+    }
+  }
+  if (!po && inv.supplierId) {
     // Anchor the window to LOCAL-day midnights: from the start of the day
     // PO_MATCH_WINDOW_DAYS before the invoice date, to the end of the day
     // PO_MATCH_WINDOW_DAYS after it. This keeps the ±7-day window aligned to the

@@ -9,6 +9,7 @@ import {
   invoices,
   matchRuns,
   priceHistory,
+  purchaseOrders,
   testDbUrl,
 } from '@restomatch/db';
 import { appRouter } from '../index';
@@ -376,5 +377,46 @@ describe('a re-match keeps the people’s decisions', () => {
     const after = await findingsFor(copyId);
     expect(after.some((f) => f.type === 'DUPLICATE_INVOICE')).toBe(false);
     expect(after.every((f) => f.status !== 'rejected')).toBe(true);
+  });
+});
+
+describe('a re-match after the PO is closed (demo: "התאמה מחדש" on a seeded invoice)', () => {
+  const findings = async (invoiceId: string) =>
+    (
+      await db
+        .select({ type: discrepancies.type, severity: discrepancies.severity, delta: discrepancies.deltaAmount, poId: matchRuns.poId })
+        .from(discrepancies)
+        .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+        .where(eq(matchRuns.invoiceId, invoiceId))
+    )
+      .map((f) => `${f.type}|${f.severity}|${f.delta}|${f.poId}`)
+      .sort();
+
+  it('checks against the invoice’s own PO and GR: identical result, no UNORDERED_ARRIVAL', async () => {
+    const A = await seedTenant(db, 'A');
+    const caller = ownerCaller(A);
+    const first = await caller.match.runForInvoice({ invoiceId: A.invoiceId });
+    expect(first.poMatched).toBe(true);
+    const before = await findings(A.invoiceId);
+    expect(before.some((f) => f.startsWith('UNORDERED_ARRIVAL'))).toBe(false);
+
+    // The delivery was received and the PO closed — discovery no longer sees it.
+    await db.update(purchaseOrders).set({ status: 'closed' }).where(eq(purchaseOrders.id, A.poId));
+    const again = await caller.match.runForInvoice({ invoiceId: A.invoiceId });
+    expect(again.poMatched).toBe(true);
+    expect(again.status).toBe(first.status);
+    expect(again.totalDiscrepancyAmount).toBe(first.totalDiscrepancyAmount);
+    expect(await findings(A.invoiceId)).toEqual(before);
+    const [run] = await db.select({ poId: matchRuns.poId, grId: matchRuns.grId }).from(matchRuns).where(eq(matchRuns.invoiceId, A.invoiceId));
+    expect(run).toMatchObject({ poId: A.poId });
+    expect(run!.grId).not.toBeNull();
+  });
+
+  it('a first match still only considers open POs (a closed PO is not picked up by discovery)', async () => {
+    const A = await seedTenant(db, 'A');
+    await db.delete(matchRuns).where(eq(matchRuns.invoiceId, A.invoiceId)); // never matched before
+    await db.update(purchaseOrders).set({ status: 'closed' }).where(eq(purchaseOrders.id, A.poId));
+    const res = await ownerCaller(A).match.runForInvoice({ invoiceId: A.invoiceId });
+    expect(res.poMatched).toBe(false);
   });
 });

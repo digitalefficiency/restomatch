@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { and, eq, matchRuns, restaurants } from '@restomatch/db';
+import { and, desc, eq, matchRuns, restaurants } from '@restomatch/db';
 import { runMatch, type MatchStatus } from '@restomatch/matching';
 import { managerProcedure, router } from '../trpc';
 import { assertInvoiceOwned } from '../tenant';
@@ -31,7 +31,17 @@ export const matchRouter = router({
       const { restaurantId } = ctx.session;
       await assertInvoiceOwned(ctx.db, input.invoiceId, restaurantId);
 
-      const built = await buildMatchInputForInvoice(ctx.db, restaurantId, input.invoiceId);
+      // A re-match checks against the PO the invoice was already matched to, even
+      // once that PO is received/closed (discovery only looks at open POs).
+      const [priorRun] = await ctx.db
+        .select({ poId: matchRuns.poId })
+        .from(matchRuns)
+        .where(and(eq(matchRuns.invoiceId, input.invoiceId), eq(matchRuns.restaurantId, restaurantId)))
+        .orderBy(desc(matchRuns.runAt))
+        .limit(1);
+      const built = await buildMatchInputForInvoice(ctx.db, restaurantId, input.invoiceId, {
+        pinnedPoId: priorRun?.poId ?? null,
+      });
       if (!built) {
         return {
           matchRunId: null,
