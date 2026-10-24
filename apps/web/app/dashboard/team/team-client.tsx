@@ -27,7 +27,7 @@ type ActionResult = { ok: boolean; message: string; devLink?: string };
 type LocaleChoice = '' | Locale;
 
 const selectClass =
-  'rounded-xl border border-line bg-surface-2 px-3 py-2 text-sm text-ink transition-colors focus:border-primary/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:opacity-50';
+  'rounded-xl border border-line-strong bg-surface px-3 py-2 text-sm text-ink transition-colors focus:border-primary/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:opacity-50';
 
 export function TeamClient({
   initial,

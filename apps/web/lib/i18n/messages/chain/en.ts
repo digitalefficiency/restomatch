@@ -60,6 +60,7 @@ export const en: Shape<typeof he> = {
       switchTo: 'Open',
       noSpend: 'No spend',
       flat: 'No change',
+      thinBase: 'Almost no data in the comparison period — showing the ₪ difference only',
     },
     heatmap: {
       title: 'Heatmap: branch × month',

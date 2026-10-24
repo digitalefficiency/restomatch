@@ -70,7 +70,7 @@ export interface ViewToolbarProps {
 const chip =
   'inline-flex items-center gap-1.5 rounded-xl border border-line bg-surface-2 px-3 py-1.5 text-sm font-medium text-muted transition-colors hover:border-primary/40 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60';
 const selectCls =
-  'rounded-xl border border-line bg-surface-2 py-1.5 pe-8 ps-3 text-sm text-ink focus:border-primary/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60';
+  'rounded-xl border border-line-strong bg-surface py-1.5 pe-8 ps-3 text-sm text-ink focus:border-primary/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60';
 const popover =
   'absolute top-full z-40 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-2xl border border-line bg-surface p-3 shadow-card start-0';
 

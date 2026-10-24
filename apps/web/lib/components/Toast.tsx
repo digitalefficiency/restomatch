@@ -60,6 +60,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     <ToastCtxProvider value={api}>
       {children}
       <div
+        role="region"
         aria-label={t('toast.region')}
         className="pointer-events-none fixed inset-x-4 bottom-20 z-50 flex flex-col items-end gap-2 sm:inset-x-auto sm:bottom-6 sm:end-6 sm:w-96 md:bottom-6"
       >

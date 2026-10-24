@@ -61,6 +61,7 @@ export const he = {
       switchTo: 'כניסה',
       noSpend: 'אין רכש',
       flat: 'ללא שינוי',
+      thinBase: 'בתקופת ההשוואה כמעט אין נתונים — מוצג ההפרש בש״ח בלבד',
     },
     heatmap: {
       title: 'מפת חום: סניף × חודש',
