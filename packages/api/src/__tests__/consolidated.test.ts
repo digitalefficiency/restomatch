@@ -584,6 +584,24 @@ describe('buildConsolidatedProposal — #116 verification (P5)', () => {
   });
 });
 
+describe('deliveryNoteNumberIn — #119 verification (P6): a list needs a note-sized second number; a range always pools', () => {
+  it('a quantity after the note is not a second note', () => {
+    expect(deliveryNoteNumberIn('ת.מ. 61036 + 2 יח׳')).toBe('61036');
+    expect(deliveryNoteNumberIn('ת.מ. 61036, 3 ק״ג')).toBe('61036');
+    expect(deliveryNoteNumberIn('DN 61036 & 12 units')).toBe('61036');
+  });
+  it('short note numbers (a small supplier) still form lists and ranges', () => {
+    expect(deliveryNoteNumberIn('ת.מ. 512, 513')).toBeNull();
+    expect(deliveryNoteNumberIn('ת.מ. 512-520')).toBeNull();
+    // A shortened range always pools (a false note would put the month on one note).
+    expect(deliveryNoteNumberIn('ת.מ. 61036-43')).toBeNull();
+    expect(deliveryNoteNumberIn('ת.מ. 61036 עד 43')).toBeNull();
+    expect(deliveryNoteNumberIn('ת.מ. 98 + 101')).toBeNull();
+    expect(deliveryNoteNumberIn('ת.מ. 61036 & 61037')).toBeNull();
+    expect(deliveryNoteNumberIn('ת.מ. 61036 &amp; 61037')).toBeNull();
+  });
+});
+
 describe('readConsolidatedRaw / periodOfInvoice / deliveryNoteNumberIn', () => {
   it('reads the consolidated payload; anything else is not one', () => {
     expect(

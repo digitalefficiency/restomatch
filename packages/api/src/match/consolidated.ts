@@ -271,10 +271,14 @@ export function claimableIls(
 /** A delivery-note number in free text: `ת.מ. 61036` (Hebrew) or `DN 61036`. */
 export function deliveryNoteNumberIn(text: string | null | undefined): string | null {
   if (!text) return null;
-  // A RANGE ("ת.מ. 61036-61043", "61036 עד 61043") is a month line: it bills the pool.
+  // A RANGE ("ת.מ. 61036-61043", "61036-43", "61036 עד 61043") is a month line: it
+  // bills the pool. When in doubt, pool — a false note puts the month on one note.
   if (/(?:ת\.\s?מ\.?|\bDN)\s*#?\s*\d+\s*(?:[-–—]|עד|to)\s*\d+/i.test(text)) return null;
-  // So is a LIST ("ת.מ. 61036, 61037, 61038" / "61036 + 61037" / "61036 & 61037" / "61036 ו-61037").
-  if (/(?:ת\.\s?מ\.?|\bDN)\s*#?\s*\d+\s*(?:[,،;/+&]|ו-?|and\b)\s*\d+/i.test(text)) return null;
+  // So is a LIST ("61036, 61037" / "61036 + 61037" / "61036 & 61037" / "61036 ו-61037"),
+  // when the second number is note-sized — at least the first's digits less one — so
+  // "ת.מ. 61036 + 2 יח׳" names 61036 while a small supplier's "512, 513" is a list.
+  const pair = /(?:ת\.\s?מ\.?|\bDN)\s*#?\s*(\d+)\s*(?:[,،;/+]|&(?:amp;)?|and\b|ו-?)\s*(\d+)/i.exec(text);
+  if (pair && pair[2]!.length >= pair[1]!.length - 1) return null;
   const m = /ת\.\s?מ\.?\s*(\d+)/.exec(text) ?? /\bDN\s*#?\s*(\d+)/i.exec(text);
   return m ? m[1]! : null;
 }
