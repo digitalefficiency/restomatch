@@ -199,7 +199,7 @@ export function LeakCheckForm() {
         <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
         <span>
           {t('form.privacy')}{' '}
-          <Link href="/privacy" className="text-primary hover:underline">
+          <Link href="/privacy" className="text-primary underline underline-offset-2">
             {t('form.privacyLink')}
           </Link>
         </span>

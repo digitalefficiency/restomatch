@@ -9,7 +9,10 @@ import { leakCheck } from '@/lib/i18n/messages/leakCheck';
 
 export const dynamic = 'force-dynamic';
 
-export const metadata: Metadata = { robots: { index: false, follow: false }, referrer: 'no-referrer' };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT(leakCheck);
+  return { title: t('claim.title'), robots: { index: false, follow: false }, referrer: 'no-referrer' };
+}
 
 type Status = 'done' | 'failed' | 'notOwner' | 'disabled';
 const STATUSES: readonly Status[] = ['done', 'failed', 'notOwner', 'disabled'];

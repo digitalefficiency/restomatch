@@ -34,5 +34,8 @@ describe('landingCompare', () => {
     expect(all).not.toMatch(/won.t (get )?pa(y|id)|לא ישולם|לא ישלמו/i);
     expect(all).not.toMatch(/PDF/);
     expect(all.match(/\d+/g) ?? []).toEqual(['12']);
+    // battle-card rule: no "they don't have", no "only us", no prices
+    expect(all).not.toMatch(/אין להם|אין בהן|רק אנחנו|היחידים|היחידה ש|\bonly\b|don.t have|doesn.t have|₪|\$/i);
+    expect(m.compare.note.length).toBeGreaterThan(20);
   });
 });

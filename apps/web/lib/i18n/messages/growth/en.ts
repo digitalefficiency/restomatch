@@ -83,6 +83,7 @@ export const en: Shape<typeof he> = {
         restomatch: 'A ready credit-request letter for each supplier, with the lines and amounts',
       },
     },
+    note: 'The first column describes the usual job of an ordering and inventory system; some systems do more. RestoMatch works alongside them, not instead of them.',
     keepOrdering: 'Keep ordering where you already do.',
   },
 };

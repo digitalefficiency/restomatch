@@ -85,7 +85,8 @@ export async function LandingCompare() {
         </tbody>
       </table>
 
-      <p className="mt-8 text-center text-base font-semibold text-ink">{t('compare.keepOrdering')}</p>
+      <p className="mt-4 text-center text-xs text-muted">{t('compare.note')}</p>
+      <p className="mt-6 text-center text-base font-semibold text-ink">{t('compare.keepOrdering')}</p>
     </section>
   );
 }
