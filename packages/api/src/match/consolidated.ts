@@ -269,15 +269,50 @@ export function claimableIls(
   return claimSplit(findings, invoiceTotalInclVat).totalIls;
 }
 
-/** A delivery-note number in free text: `ת.מ. 61036` (Hebrew) or `DN 61036`. */
-export function deliveryNoteNumberIn(text: string | null | undefined): string | null {
+/** Bidi / direction marks an RTL invoice may carry between tokens. */
+const BIDI_MARKS = /[‎‏‪-‮⁦-⁩]/g;
+/** A delivery-note prefix: `ת.מ.` / `ת.מ:` / `תעודת משלוח (מס׳)` / `DN`, with `#` / `:` after it. */
+const NOTE_PREFIX = String.raw`(?:תעודת\s+משלוח|ת\.\s?מ\.?|\bDN\.?)\s*(?:מס(?:פר|['׳])?\s*)?[.:#]*\s*`;
+const FIRST_NOTE = new RegExp(`${NOTE_PREFIX}(\\d+)`, 'i');
+/** After a note number: a separator, an optional repeated prefix, and the next number. */
+const NEXT_TOKEN = new RegExp(
+  String.raw`^\s*(?:(?<range>[-–—]|עד|to)|(?<list>[,،;/+&]|and|ו-?))\s*(?:${NOTE_PREFIX})?(?<n>\d+)(?<date>[./]\d{1,2}[./]\d{2,4})?`,
+  'i',
+);
+
+/**
+ * The single delivery note a ריכוז line bills, read against the period's candidate
+ * note numbers — or null, when it bills several (a list / range: the pool) or none
+ * this cross-match knows. A number after a separator is a NOTE when it is a candidate
+ * — as written, or completed as a suffix of the first (`61036/37` → 61037) — and
+ * otherwise a quantity (`ת.מ. 61036 + 2 יח׳`, `+ 1500 גרם`), the line staying on its
+ * note. A range (`61036-61043`, `61036-43`, `61036 עד ת.מ. 61043`) covering candidate
+ * notes is the pool; a dash before a date (`61036 - 03/10/26`) is not a range.
+ */
+export function deliveryNoteNumberIn(
+  text: string | null | undefined,
+  candidates: ReadonlySet<string> | readonly string[],
+): string | null {
   if (!text) return null;
-  // A RANGE ("ת.מ. 61036-61043", "61036 עד 61043") is a month line: it bills the pool.
-  if (/(?:ת\.\s?מ\.?|\bDN)\s*#?\s*\d+\s*(?:[-–—]|עד|to)\s*\d+/i.test(text)) return null;
-  // So is a LIST ("ת.מ. 61036, 61037, 61038" / "61036 + 61037" / "61036 & 61037" / "61036 ו-61037").
-  if (/(?:ת\.\s?מ\.?|\bDN)\s*#?\s*\d+\s*(?:[,،;/+&]|ו-?|and\b)\s*\d+/i.test(text)) return null;
-  const m = /ת\.\s?מ\.?\s*(\d+)/.exec(text) ?? /\bDN\s*#?\s*(\d+)/i.exec(text);
-  return m ? m[1]! : null;
+  const known = candidates instanceof Set ? (candidates as ReadonlySet<string>) : new Set(candidates as readonly string[]);
+  const t = text.replace(BIDI_MARKS, '').replace(/＋/g, '+').replace(/&amp;/gi, '&');
+  const first = FIRST_NOTE.exec(t);
+  if (!first) return null;
+  const n1 = first[1]!;
+  const complete = (n: string) => (n.length >= n1.length ? n : n1.slice(0, n1.length - n.length) + n);
+  const next = NEXT_TOKEN.exec(t.slice(first.index + first[0].length));
+  if (next?.groups && !next.groups.date) {
+    const n2 = complete(next.groups.n!);
+    if (next.groups.range) {
+      // A range: the pool, when it spans candidate notes after the first.
+      const lo = Number(n1);
+      const hi = Number(n2);
+      if (hi > lo && [...known].some((k) => k.length === n1.length && Number(k) > lo && Number(k) <= hi)) return null;
+    } else if (n2 !== n1 && known.has(n2)) {
+      return null; // a list of notes: the pool
+    }
+  }
+  return known.has(n1) ? n1 : null;
 }
 
 const productKey = (l: { productId: string | null; supplierSku?: string | null; poLineId?: string | null; unit: string }) =>
@@ -1087,11 +1122,16 @@ export async function consolidatedProposal(
     .select({ id: invoiceLines.id, d: invoiceLines.rawDescription, dEn: invoiceLines.rawDescriptionEn })
     .from(invoiceLines)
     .where(eq(invoiceLines.invoiceId, invoiceId));
-  const invoiceLineNotes = new Map<string, string>();
-  for (const l of lineRows) {
-    const n = deliveryNoteNumberIn(l.d) ?? deliveryNoteNumberIn(l.dEn);
-    if (n) invoiceLineNotes.set(l.id, n);
-  }
+  /** Line id → the note it bills, read against the window's candidate notes. */
+  const lineNotesFor = (notes: DeliveryNoteData[]) => {
+    const candidates = new Set(notes.map((n) => n.number).filter((x): x is string => !!x));
+    const out = new Map<string, string>();
+    for (const l of lineRows) {
+      const n = deliveryNoteNumberIn(l.d, candidates) ?? deliveryNoteNumberIn(l.dEn, candidates);
+      if (n) out.set(l.id, n);
+    }
+    return out;
+  };
 
   // Names for products billed but on no delivery note.
   const invoiceProductIds = [
@@ -1114,7 +1154,7 @@ export async function consolidatedProposal(
       periodEnd: period.end,
       base: built.input,
       notes,
-      invoiceLineNotes,
+      invoiceLineNotes: lineNotesFor(notes),
       productNames,
     });
 
