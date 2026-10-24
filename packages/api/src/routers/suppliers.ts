@@ -2,9 +2,10 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { and, asc, eq, suppliers, type Supplier } from '@restomatch/db';
 import { OrderSchedule } from '@restomatch/types';
-import { managerProcedure, memberProcedure, router } from '../trpc';
+import { invoiceReaderProcedure, managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
-import { isFeatureOn } from '../lib/featureGate';
+import { assertFeatureOn, isFeatureOn } from '../lib/featureGate';
+import { computeLedgerGrid, computeSupplierLedger } from '../ledger';
 
 /**
  * Supplier setup (Phase-2). The CRUD surface for the suppliers a restaurant
@@ -79,16 +80,41 @@ export const suppliersRouter = router({
 
   get: memberProcedure
     .input(z.object({ supplierId: z.string().uuid() }))
-    .query(async ({ ctx, input }): Promise<Supplier & { leakCardEnabled: boolean }> => {
+    .query(async ({ ctx, input }): Promise<Supplier & { leakCardEnabled: boolean; ledgerEnabled: boolean }> => {
       await assertSupplierOwned(ctx.db, input.supplierId, ctx.session.restaurantId);
       const [row] = await ctx.db
         .select()
         .from(suppliers)
         .where(eq(suppliers.id, input.supplierId))
         .limit(1);
-      // Flag `supplierLeakCard`: the supplier page shows its leak tab + print card.
-      const leakCardEnabled = await isFeatureOn(ctx.db, ctx.session.restaurantId, 'supplierLeakCard');
-      return { ...mustExist(row, 'supplier'), leakCardEnabled };
+      // Flags `supplierLeakCard` / `supplierLedger`: the supplier page's leak + ledger tabs.
+      const [leakCardEnabled, ledgerEnabled] = await Promise.all([
+        isFeatureOn(ctx.db, ctx.session.restaurantId, 'supplierLeakCard'),
+        isFeatureOn(ctx.db, ctx.session.restaurantId, 'supplierLedger'),
+      ]);
+      return { ...mustExist(row, 'supplier'), leakCardEnabled, ledgerEnabled };
+    }),
+
+  /**
+   * Supplier ledger by month (כרטסת ספק, flag `supplierLedger`): delivery notes
+   * vs regular / consolidated invoices per restaurant calendar month, with the
+   * engine's leak, credits asked, paid and open balance, and a drill-down of
+   * which invoice covers each delivery note. Invoice readers (not the chef).
+   */
+  ledger: invoiceReaderProcedure
+    .input(z.object({ supplierId: z.string().uuid(), months: z.number().int().min(1).max(24).default(6) }))
+    .query(async ({ ctx, input }) => {
+      await assertFeatureOn(ctx.db, ctx.session.restaurantId, 'supplierLedger');
+      await assertSupplierOwned(ctx.db, input.supplierId, ctx.session.restaurantId);
+      return computeSupplierLedger(ctx.db, ctx.session.restaurantId, input.supplierId, input.months);
+    }),
+
+  /** Every supplier × month of the ledger (the all-suppliers grid + bookkeeper CSV). */
+  ledgerGrid: invoiceReaderProcedure
+    .input(z.object({ months: z.number().int().min(1).max(24).default(6) }).optional())
+    .query(async ({ ctx, input }) => {
+      await assertFeatureOn(ctx.db, ctx.session.restaurantId, 'supplierLedger');
+      return computeLedgerGrid(ctx.db, ctx.session.restaurantId, input?.months ?? 6);
     }),
 
   create: managerProcedure

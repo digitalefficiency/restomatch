@@ -190,6 +190,10 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   // test below). The settings pair takes no entity id and reads/writes only
   // ctx.session.restaurantId's own restaurants row.
   'orders.documentPreview': 'attack',
+  // supplierLedger (flag): ledger takes a client supplierId → assertSupplierOwned;
+  // ledgerGrid lists only the caller's suppliers (both tests below).
+  'suppliers.ledger': 'attack',
+  'suppliers.ledgerGrid': 'isolation',
   'orders.documentSettings':
     'memberProcedure with no input: reads only the caller restaurant row (ctx.session.restaurantId) — no client-supplied tenant id to swap',
   'orders.setDocumentSettings':
@@ -864,6 +868,25 @@ describe('orders router: foreign id attacks + list isolation (A → B)', () => {
       .where(eq(purchaseOrders.id, B.poId));
     expect(afterRow?.status).toBe(beforeRow?.status);
     expect(afterRow?.sentAt ?? null).toEqual(beforeRow?.sentAt ?? null);
+  });
+
+  it('suppliers.ledger rejects a foreign supplierId; ledgerGrid lists only own suppliers (flag on)', async () => {
+    const [prev] = await db
+      .select({ settings: restaurants.settings })
+      .from(restaurants)
+      .where(eq(restaurants.id, A.restaurantId));
+    await db
+      .update(restaurants)
+      .set({ settings: { ...(prev?.settings ?? {}), features: { supplierLedger: true } } } as never)
+      .where(eq(restaurants.id, A.restaurantId));
+    try {
+      await expect(callerFor(A).suppliers.ledger({ supplierId: B.supplierId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      const grid = await callerFor(A).suppliers.ledgerGrid({ months: 6 });
+      const ids = grid.suppliers.map((s) => s.supplierId);
+      expect(ids).not.toContain(B.supplierId);
+    } finally {
+      await db.update(restaurants).set({ settings: prev?.settings ?? {} }).where(eq(restaurants.id, A.restaurantId));
+    }
   });
 
   it('orders.documentPreview rejects a foreign poId even with the flag on', async () => {

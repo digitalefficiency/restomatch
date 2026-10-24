@@ -7,7 +7,7 @@ import { cn } from '@/lib/components';
 import { useT } from '@/lib/i18n/client';
 import { suppliers } from '@/lib/i18n/messages/suppliers';
 
-export type SupplierTab = 'details' | 'catalog' | 'schedule' | 'orders' | 'leak';
+export type SupplierTab = 'details' | 'catalog' | 'schedule' | 'orders' | 'leak' | 'ledger';
 
 const BASE_TABS: SupplierTab[] = ['details', 'catalog', 'schedule', 'orders'];
 
@@ -16,9 +16,17 @@ const BASE_TABS: SupplierTab[] = ['details', 'catalog', 'schedule', 'orders'];
  * so the active tab is refresh-stable and shareable; the page reads searchParams
  * to render the matching panel server-side. Scrolls horizontally on phones.
  */
-export function SupplierTabBar({ supplierId, leakTab = false }: { supplierId: string; leakTab?: boolean }) {
-  // Flag `supplierLeakCard` adds the "Leak" tab.
-  const TABS: SupplierTab[] = leakTab ? [...BASE_TABS, 'leak'] : BASE_TABS;
+export function SupplierTabBar({
+  supplierId,
+  leakTab = false,
+  ledgerTab = false,
+}: {
+  supplierId: string;
+  leakTab?: boolean;
+  ledgerTab?: boolean;
+}) {
+  // Flags `supplierLeakCard` / `supplierLedger` add the "Leak" / "Ledger" tabs.
+  const TABS: SupplierTab[] = [...BASE_TABS, ...(leakTab ? (['leak'] as const) : []), ...(ledgerTab ? (['ledger'] as const) : [])];
   const t = useT(suppliers);
   const params = useSearchParams();
   // The print card (/suppliers/[id]/leak-card) belongs to the Leak tab.
