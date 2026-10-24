@@ -8,7 +8,7 @@ import { auth } from '@/auth';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { landing } from '@/lib/i18n/messages/landing';
 import { formatNumber } from '@/lib/i18n/format';
-import { heroMedia, promoVideoFor } from '@/lib/heroMedia';
+import { heroLoopFor, heroMedia, promoVideoFor } from '@/lib/heroMedia';
 import { formatIls } from '@/lib/money';
 import { cn } from '@/lib/components/cn';
 import { MarketingShell } from './(marketing)/_components/MarketingShell';
@@ -66,12 +66,13 @@ export default async function Home() {
 
   const t = await getT(landing);
   const locale = await getLocale();
+  const heroLoop = heroLoopFor(locale);
   // The hero poster is the LCP: fetch it first, ahead of scripts and fonts.
   if (heroMedia.available) {
-    preload(heroMedia.poster, {
+    preload(heroLoop.poster, {
       as: 'image',
       fetchPriority: 'high',
-      imageSrcSet: heroMedia.posterSrcSet,
+      imageSrcSet: heroLoop.posterSrcSet,
       imageSizes: heroMedia.posterSizes,
     });
   }
@@ -211,10 +212,10 @@ export default async function Home() {
           </div>
           {heroMedia.available ? (
             <HeroVideo
-              webm={heroMedia.loop.webm}
-              mp4={heroMedia.loop.mp4}
-              poster={heroMedia.poster}
-              posterSrcSet={heroMedia.posterSrcSet}
+              webm={heroLoop.webm}
+              mp4={heroLoop.mp4}
+              poster={heroLoop.poster}
+              posterSrcSet={heroLoop.posterSrcSet}
               posterSizes={heroMedia.posterSizes}
               label={t('hero.watchTitle')}
               pauseLabel={t('v2.video.pause')}

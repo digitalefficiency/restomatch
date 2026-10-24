@@ -72,4 +72,5 @@ if (mode === 'stills') {
   if (mode === 'en' || mode === 'all') await video('Promo', 'en', 'restomatch-promo-en.mp4');
   if (mode === 'vertical' || mode === 'all') await video('PromoVertical', 'he', 'restomatch-promo-he-vertical.mp4');
   if (mode === 'loop' || mode === 'all') await video('HeroLoop', 'he', 'hero-loop-master.mp4', { crf: 12 });
+  if (mode === 'loop-en' || mode === 'all') await video('HeroLoop', 'en', 'hero-loop-en-master.mp4', { crf: 12 });
 }
