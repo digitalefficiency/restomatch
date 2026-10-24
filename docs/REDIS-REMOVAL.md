@@ -33,28 +33,56 @@
 | **Fly / Render** (כשיעבור לענן) | לא להגדיר `REDIS_URL`; הוא הוסר מ-`render.yaml` ומהמדריך |
 | אופציונלי | ‏`QUEUE_DATABASE_URL` — רק אם רוצים חיבור נפרד לתור. ברירת המחדל: `DATABASE_URL` |
 
-## סדר הפעולות (≈15 דקות, עדיף בערב בלי העלאות פתוחות)
+## סדר הפעולות — מדריך העתק-הדבק (≈10 דקות)
 
-1. **לוודא שאין עבודה תלויה ב-Redis:** בדשבורד אין חשבוניות במצב "ממתין ל-OCR". משימות שנשארו ב-Redis לא עוברות לבד. ה-OCR sweep אמנם יכניס מחדש חשבונית שתקועה 10–25 דקות, אבל עדיף לא לסמוך על זה.
-2. **מיזוג ה-PR.** ‏GitHub → ה-PR → Merge.
-   - אינטגרציית Supabase–GitHub מריצה את מיגרציה 0061 (טבלאות חדשות בלבד, אין שינוי בנתונים קיימים).
-   - ‏Vercel פורס את האתר החדש אוטומטית.
-3. **בדיקת האתר:** `scripts/verify-prod.sh https://<האתר>` → כל השורות PASS. התחברות עובדת.
-4. **עדכון ה-worker ב-Mac:**
-   ```bash
-   launchctl bootout gui/$(id -u)/com.restomatch.worker     # עצירה
-   cd <תיקיית הריפו — הנתיב שהוחלף ב-__REPO__ ב-plist> && git pull && pnpm install --frozen-lockfile
-   sed -i '' '/^REDIS_URL=/d' ~/.restomatch/worker.env        # אופציונלי
-   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.restomatch.worker.plist
-   ```
-5. **בדיקת ה-worker:**
-   - `tail -f ~/Library/Logs/restomatch-worker.log` → `[worker] started 13 workers` ו-`[cron] registered: …`.
-   - `curl -s localhost:8080/health/ready` → `{"status":"ready","db":"up"}`.
-   - בדשבורד אין באנר "ה-worker לא פעיל" (תוך דקה).
-   - העלאת חשבונית אחת בקבלת סחורה → מגיעה למסך הבדיקה.
-6. **Upstash:** לא למחוק עדיין. אחרי שבוע בלי בעיות: למחוק את `REDIS_URL` מ-Vercel ואת מסד ה-Upstash.
+> מאז 2026-10-24 Redis (Upstash) לא עובד: נגמרה מכסת הבקשות החודשית. לכן אין צורך לחכות לערב. כל חשבונית שהועלתה בינתיים ממתינה, והיא תעובד אחרי המעבר (ראו שלב 5).
 
-בין שלב 2 לשלב 4 האתר כבר מכניס משימות ל-Postgres. הן מחכות שם (לא הולכות לאיבוד) עד שה-worker החדש עולה ומעבד אותן.
+**שלב 1 — מיזוג.** ב-GitHub: ה-PR → **Merge**. אין צורך לעשות שום דבר נוסף:
+- Supabase מריץ לבד את מיגרציה 0061. היא יוצרת טבלאות חדשות בלבד ולא משנה נתונים קיימים.
+- Vercel פורס לבד את האתר החדש. חכו כ-3 דקות.
+
+**שלב 2 — עצירת ה-worker ב-Mac.** פותחים **Terminal** ומדביקים:
+```bash
+launchctl bootout gui/$(id -u)/com.restomatch.worker
+```
+(אם מופיעה הודעה "No such process", ה-worker כבר עצור. זה בסדר.)
+
+**שלב 3 — עדכון הקוד והסרת Redis.** מדביקים את כל הבלוק:
+```bash
+cd ~/restomatch && git checkout main && git pull && pnpm install --frozen-lockfile
+sed -i '' '/^REDIS_URL=/d' ~/.restomatch/worker.env
+grep -c REDIS ~/.restomatch/worker.env
+```
+השורה האחרונה צריכה להדפיס `0`. ‏`DATABASE_URL` נשאר בקובץ כמו שהוא, ולא מוסיפים שום שורה חדשה.
+
+**שלב 4 — הפעלה מחדש.**
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.restomatch.worker.plist
+sleep 20; curl -s localhost:8080/health/ready; echo; tail -n 20 ~/Library/Logs/restomatch-worker.log
+```
+מה אמור להופיע:
+- `{"status":"ready","db":"up"}`
+- ביומן: `[worker] started … workers` ו-`[cron] registered: …`. אין שורות `ERR max requests limit exceeded`.
+
+**שלב 5 — בדיקה שהכול עובד (בדפדפן):**
+1. בדשבורד, תוך דקה, נעלם הבאנר "ה-worker לא פעיל".
+2. קבלת סחורה → מעלים חשבונית אחת לבדיקה → אחרי כמה שניות היא עוברת ל"נקראה" ומגיעה למסך הבדיקה.
+3. חשבוניות שנתקעו קודם במצב "קורא…": ה-OCR sweep מכניס אותן מחדש לבד, אם הן בנות 10–25 דקות. חשבונית ישנה יותר: מעלים אותה שוב.
+
+**שלב 6 — ניקיון (אחרי שבוע בלי בעיות):** ב-Vercel → Settings → Environment Variables מוחקים את `REDIS_URL`. אחר כך מוחקים את מסד ה-Upstash. עד אז הוא לא בשימוש: האתר רק רושם אזהרה. משאירים אותו למקרה של גלגול לאחור.
+
+## עומס על Supabase
+
+ה-worker לא "מציף" את מסד הנתונים. כשהוא במצב סרק:
+- **3 תורים מהירים** (OCR, התאמה, ייבוא קטלוג) נבדקים כל שנייה: ‏≈180 שאילתות בדקה.
+- **שאר התורים** (10, ובגל 1 עד 13) נבדקים כל 5 שניות: ‏≈120–160 בדקה.
+- **פעימה, תחזוקה, watchdog ומתזמן:** ‏≈5 בדקה.
+
+סה"כ: ‏**≈300–350 שאילתות בדקה (≈5 בשנייה)**. כל אחת היא `UPDATE … SKIP LOCKED` קטנה על אינדקס, שלוקחת פחות ממילישנייה ולא מחזירה שורות כשאין עבודה.
+
+החיבורים: ‏worker אחד מחזיק עד 4 חיבורים לתור, ובאתר יש לכל היותר חיבור אחד לתור לכל instance, והוא נפתח רק בזמן העלאה.
+
+ב-Supabase אין מכסת בקשות כמו ב-Upstash; המגבלה היא רק מספר חיבורים בו-זמנית. ה-pooler מאפשר מאות חיבורים (לפי התוכנית), ואנחנו משתמשים בכמה בודדים.
 
 ## גלגול לאחור (Rollback)
 

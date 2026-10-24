@@ -373,6 +373,14 @@ grant usage on schema public to restomatch_app;
         if to_regclass('public.user_recovery_codes') is not null then
           execute 'revoke all on user_recovery_codes from restomatch_app';
         end if;
+        -- 0061 (Redis → Postgres): the job queue, worker heartbeats, rate-limit
+        -- counters and ops flags are used ONLY on the owner/service connection.
+        -- Without this the blanket grant above would let a compromised tenant
+        -- path reset login counters or fake a live worker.
+        if to_regclass('public.job_queue') is not null then
+          execute 'revoke all on job_queue, worker_heartbeats, rate_limit_counters, ops_kv from restomatch_app';
+          execute 'revoke all on sequence job_queue_id_seq from restomatch_app';
+        end if;
       end $$;
 
 -- 5. Storage (Supabase): the private invoice-scans bucket the app uploads to,
