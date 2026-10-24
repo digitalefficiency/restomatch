@@ -110,6 +110,31 @@ describe('receiverLangs.localNames', () => {
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
+  it('#56: a chef may localize a PO but never read an invoice through it (FORBIDDEN, no cache write)', async () => {
+    await db.update(poLines).set({ rawDescription: 'חזה עוף' }).where(eq(poLines.id, A.poLineId));
+    const chef = caller(A, 'chef');
+    await expect(chef.receiverLangs.localNames({ locale: 'ru', invoiceId: A.invoiceId })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+    await expect(
+      chef.receiverLangs.localNames({ locale: 'ru', poId: A.poId, invoiceId: A.invoiceId }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect(await db.select().from(translationCache).where(eq(translationCache.restaurantId, A.restaurantId))).toEqual(
+      [],
+    );
+    // Same role list as receiving.getInvoice / ensureEnglish: chef is out there too.
+    await expect(chef.receiving.getInvoice({ invoiceId: A.invoiceId })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    // The PO path stays open to the chef (no invoice lines in it).
+    const po = await chef.receiverLangs.localNames({ locale: 'ru', poId: A.poId });
+    expect(po.names['חזה עוף']).toBe('Куриная грудка');
+    // Every invoice reader keeps the invoice path (the receiver wizard needs it).
+    for (const role of ['owner', 'manager', 'receiver', 'bookkeeper'] as const) {
+      await expect(
+        caller(A, role).receiverLangs.localNames({ locale: 'ru', invoiceId: A.invoiceId }),
+      ).resolves.toMatchObject({ locale: 'ru' });
+    }
+  });
+
   it('rejects a non-receiver locale', async () => {
     await expect(
       caller(A).receiverLangs.localNames({ locale: 'fr' as never, poId: A.poId }),
