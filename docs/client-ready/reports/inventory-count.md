@@ -22,7 +22,7 @@ number holds**. No par levels or suggested orders in this PR.
 >   - "זיכוי לקבל" מוצג בנפרד ולא מקוזז.
 >   - ספירה חלקית מקבלת הערה שקטה, ואין התראה על שימוש לא מוסבר.
 >   - בחודש הראשון, בלי ספירת פתיחה, מוצג "פוד קוסט רכש".
->   - בדמו: אוקטובר **26.6%** (₪36,248 מתוך ₪136,400 מכירות מזון, שהוזנו ידנית).
+>   - בדמו: אוקטובר **26.6%** (₪36,245 מתוך ₪136,400 מכירות מזון, שהוזנו ידנית).
 
 ## What was built
 
@@ -44,7 +44,7 @@ number holds**. No par levels or suggested orders in this PR.
 | CSV | `exportCsv`: item, item_en, area, qty, unit, unit cost, value, price invoice / date / supplier, plus a TOTAL row. UTF-8 BOM so it opens in Excel; spreadsheet formulas are neutralised. |
 | API | `inventory.*`: enabled, current, start, saveLines, searchProducts, setMeta, complete, amendLine, exportCsv, discard, get, history, period. Writes take a per-restaurant advisory lock. A counted product can't be deleted (friendly CONFLICT). |
 | UI | <ul><li>`/dashboard/inventory`: start/continue, the food-cost card, history.</li><li>`/dashboard/inventory/count`, mobile-first: compact rows per storage area, keypad ("2,5" = 2.5, "1,200" = 1200, "2," still typing), serialised autosave that also flushes when the phone locks and when the screen is left. Unsaved edits are kept in the browser per count and replayed on return. A failed save goes back under newer edits field by field. Progress is pinned to the close bar, above the bottom nav.</li><li>`/dashboard/inventory/<id>`: read-only, price sources, CSV, owner correction.</li><li>The card also sits on `/dashboard/recipes`.</li></ul> he/en, light theme, ₪ via `formatIls`. |
-| Demo | `apps/worker/scripts/seed-inventory-demo.ts`, on the reseed contract: `DEMO_RESTAURANT_ID` (else the demo business id + name), dates from `DEMO_TODAY`, deletes only its own rows, never touches invoices. **Numbers:** <ul><li>Opening count 2026-09-30 ₪11,134.46, of which food ₪8,279.96. Closing count 2026-10-24 ₪13,474.46, of which food ₪9,490.66. 51 items, 46 of them food, all counted.</li><li>October food purchases ₪37,930.07 on receipt dates = 37 invoices ₪45,320.41 − non-food ₪1,381.51 − beverages ₪7,168.22 + 8 Galilee notes ₪3,109.99 − September notes billed on חשבונית הריכוז GD-M-202609 ₪1,950.60.</li><li>Credits received in October ₪471.38.</li><li>**Actual ₪36,247.99 = 26.6%** of food sales ₪136,400 (fresh reseed, `DEMO_TODAY=2026-10-25`).</li><li>Hero unchanged (₪760 of ₪42,263).</li></ul> |
+| Demo | `apps/worker/scripts/seed-inventory-demo.ts`, on the reseed contract: `DEMO_RESTAURANT_ID` (else the demo business id + name), dates from `DEMO_TODAY`, deletes only its own rows, never touches invoices. **Numbers:** <ul><li>Opening count 2026-09-30 ₪11,134.46, of which food ₪8,279.96. Closing count 2026-10-24 ₪13,474.46, of which food ₪9,490.66. 51 items, 46 of them food, all counted.</li><li>October food purchases ₪37,927.01 on receipt dates = 37 invoices ₪45,317.01 − non-food ₪1,381.51 − beverages ₪7,168.22 + 8 Galilee notes ₪3,106.93 − September notes billed on חשבונית הריכוז GD-M-202609 ₪1,947.20.</li><li>Credits received in October ₪471.38.</li><li>**Actual ₪36,244.93 = 26.6%** of food sales ₪136,400 (fresh reseed, `DEMO_TODAY=2026-10-25`).</li><li>Hero unchanged (₪760 of ₪42,263).</li></ul> |
 
 ## Security
 
