@@ -41,7 +41,7 @@ export function AssignPlanForm({
           id="assign-plan"
           value={plan}
           onChange={(e) => setPlan(e.target.value as PlanKey)}
-          className="rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm text-ink transition-colors focus:border-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink transition-colors focus:border-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           {PLANS.map((p) => (
             <option key={p} value={p}>
