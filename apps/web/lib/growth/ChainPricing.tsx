@@ -73,7 +73,15 @@ export function ChainPricing({ chain, perBranchAgorot, includedBranches, basic, 
             >
               {t(`pricing.${c}`)}
               {c === 'annual' ? (
-                <span className="ms-2 rounded-full bg-gold/15 px-2 py-0.5 text-xs text-gold">{t('pricing.annualBadge')}</span>
+                // On the selected (bg-primary) radio a gold/15 tint would put gold text on green
+                // (1.08:1); a surface pill keeps gold on white (≈6.3:1).
+                <span
+                  className={
+                    'ms-2 rounded-full px-2 py-0.5 text-xs text-gold ' + (cycle === c ? 'bg-surface' : 'bg-gold/15')
+                  }
+                >
+                  {t('pricing.annualBadge')}
+                </span>
               ) : null}
             </button>
           ))}
