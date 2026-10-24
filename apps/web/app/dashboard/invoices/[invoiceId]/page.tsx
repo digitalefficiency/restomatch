@@ -5,6 +5,8 @@ import { SectionHeader } from '@/lib/components';
 import { InvoiceCorrection } from './correction-client';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { invoices } from '@/lib/i18n/messages/invoices';
+import { consolidated as consolidatedNs } from '@/lib/i18n/messages/consolidated';
+import { ConsolidatedPanel } from './consolidated-panel';
 
 export default async function InvoiceCorrectionPage({
   params,
@@ -30,7 +32,13 @@ export default async function InvoiceCorrectionPage({
     notFound();
   }
 
-  const [memberships, session] = await Promise.all([caller.onboarding.myMemberships(), auth()]);
+  const [memberships, session, proposal, tc] = await Promise.all([
+    caller.onboarding.myMemberships(),
+    auth(),
+    // Consolidated invoice ↔ delivery notes (flag consolidatedMatch; read-only; null otherwise).
+    caller.consolidated.proposal({ invoiceId }).catch(() => null),
+    getT(consolidatedNs),
+  ]);
   const active =
     memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0];
   const canEdit = active?.role === 'owner' || active?.role === 'manager';
@@ -43,6 +51,7 @@ export default async function InvoiceCorrectionPage({
         subtitle={t('correction.subtitle')}
       />
       <InvoiceCorrection invoice={invoice} canEdit={canEdit} />
+      {proposal ? <ConsolidatedPanel proposal={proposal} t={tc} locale={locale} /> : null}
     </div>
   );
 }

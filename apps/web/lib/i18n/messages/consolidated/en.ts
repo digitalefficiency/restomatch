@@ -1,0 +1,53 @@
+import type { Shape } from '../../translate';
+import type { he } from './he';
+
+export const en: Shape<typeof he> = {
+  title: 'Cross-match with delivery notes',
+  subtitle: "The consolidated invoice against the supplier's delivery notes for {period}",
+  proposal: 'Cross-match proposal — awaiting approval',
+  proposalNote: 'Read-only: the invoice is still waiting to be linked and is counted in neither the leak nor the spend.',
+  reference: 'Cross-match for reference',
+  referenceNote: 'Read-only: this invoice has already been handled — the cross-match is shown for reference.',
+  status: {
+    matched: 'Matches the delivery notes',
+    matchedBody: 'Everything billed was delivered, at the order price.',
+    differences: 'Differences against the delivery notes',
+    differencesBody: 'The invoice is {amount} above what was delivered at order prices.',
+    none: 'No open delivery notes from this supplier in the period',
+    noneBody: "Deliveries from the supplier in the invoice's month will be cross-matched here.",
+  },
+  print: 'Print the cross-match for the supplier',
+  totals: {
+    notes: 'Delivery notes total (order prices)',
+    invoice: 'Invoice total before VAT',
+    difference: 'Difference',
+    leak: 'To review',
+  },
+  notes: {
+    title: 'Delivery notes',
+    number: 'Note no.',
+    date: 'Date',
+    po: 'Order',
+    value: 'Value at order prices',
+    delta: 'Difference ₪',
+    state: 'On the invoice',
+    covered: 'Included',
+    partly: 'Partly included',
+    not_billed: 'Not on the invoice',
+    noRef: 'No number',
+  },
+  products: {
+    title: 'By product',
+    product: 'Product',
+    received: 'Received',
+    billed: 'Billed',
+    poPrice: 'Order price',
+    billedPrice: 'Invoice price',
+    delta: 'Difference ₪',
+    ok: 'OK',
+    difference: 'Difference',
+    not_billed: 'Not billed',
+    not_received: 'Not received',
+    unnamed: 'Unnamed product',
+  },
+};
