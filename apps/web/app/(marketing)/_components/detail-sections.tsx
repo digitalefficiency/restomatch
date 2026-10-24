@@ -332,7 +332,7 @@ export function TrustSection({ t }: { t: T }) {
 export function FaqSection({ t }: { t: T }) {
   const faqs = faqItems(t);
   return (
-    <section className="border-t border-line bg-surface/30" aria-labelledby="faq-title">
+    <section className="rm-defer border-t border-line bg-surface/30" aria-labelledby="faq-title">
       <div className="mx-auto max-w-3xl px-4 py-20 sm:px-6 sm:py-24">
         <div className="mb-10 text-center">
           <Eyebrow>{t('faq.eyebrow')}</Eyebrow>

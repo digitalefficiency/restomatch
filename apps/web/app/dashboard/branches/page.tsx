@@ -6,12 +6,16 @@ import { getLocale, getT } from '@/lib/i18n/server';
 import { chain } from '@/lib/i18n/messages/chain';
 import { Badge, Card, EmptyState, EntitlementUpsell, LinkButton, SectionHeader } from '@/lib/components';
 import { SwitchBranchButton } from '../chain/switch-button';
-import { AddBranchForm, RenameBranch } from './branch-forms';
+import { AddBranchForm, BranchCreated, RenameBranch } from './branch-forms';
 
 type Branches = Awaited<ReturnType<Awaited<ReturnType<typeof createServerCaller>>['chain']['branches']>>;
 
-export default async function BranchesPage() {
-  const [caller, t, locale] = await Promise.all([createServerCaller(), getT(chain), getLocale()]);
+export default async function BranchesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ created?: string; suppliers?: string; products?: string }>;
+}) {
+  const [caller, t, locale, sp] = await Promise.all([createServerCaller(), getT(chain), getLocale(), searchParams]);
 
   let data: Branches | null = null;
   try {
@@ -30,6 +34,9 @@ export default async function BranchesPage() {
   }
 
   const active = data.branches.find((b) => b.isActive) ?? data.branches[0]!;
+  // Only a branch from the caller's own (server-read) list — never a free-form id.
+  const created = sp.created ? data.branches.find((b) => b.restaurantId === sp.created && !b.isActive) : undefined;
+  const countParam = (v: string | undefined) => (v && /^\d{1,5}$/.test(v) ? Number(v) : 0);
   const count = formatNumber(data.branches.length, locale);
   const plan = t(`plans.${data.planKey}`);
 
@@ -54,6 +61,15 @@ export default async function BranchesPage() {
           : t('branches.planLine', { plan, count, limit: formatNumber(data.branchLimit, locale) })}
       </p>
 
+      {created ? (
+        <BranchCreated
+          restaurantId={created.restaurantId}
+          name={created.name}
+          suppliers={countParam(sp.suppliers)}
+          products={countParam(sp.products)}
+        />
+      ) : null}
+
       <Card padding="none" className="divide-y divide-line">
         <ul data-testid="branches-list">
           {data.branches.map((b) => (
@@ -76,6 +92,11 @@ export default async function BranchesPage() {
       <div className="mt-8">
         {data.canAddBranch ? (
           <AddBranchForm currentBranch={active.name} />
+        ) : data.hasBillingAccount && !data.isBillingOwner ? (
+          // A co-owner on someone else's account: say who can add a branch — never a plan upsell.
+          <Card padding="md" className="border-info/30 bg-info/5 text-sm text-ink" data-testid="branches-not-payer">
+            {t('branches.notPayer')}
+          </Card>
         ) : !data.hasBillingAccount || data.planKey !== 'chain' ? (
           <>
             <EntitlementUpsell feature="chain" title={t('branches.upsell')} />
@@ -85,7 +106,7 @@ export default async function BranchesPage() {
           </>
         ) : (
           <Card padding="md" className="border-warn/30 bg-warn/5 text-sm text-ink">
-            {data.isBillingOwner ? t('branches.limitReached') : t('branches.notPayer')}
+            {t('branches.limitReached')}
           </Card>
         )}
       </div>

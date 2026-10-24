@@ -20,12 +20,12 @@
 
 | Area | Change |
 |---|---|
-| `drizzle/rls/0001_invoice_scans_rls.sql` | Bucket → **private**; storage.objects → **per-restaurant path-prefix** RLS (`(storage.foldername(name))[1] = app.current_restaurant_id()::text`) + a narrow `walk-ins/` policy for the anonymous showcase. |
+| `drizzle/rls/0001_invoice_scans_rls.sql` | Bucket → **private**; storage.objects → **per-restaurant path-prefix** RLS (`(storage.foldername(name))[1] = app.current_restaurant_id()::text`) . The former anonymous `walk-ins/` showcase policies were removed in SB-3 (2026-10-18): the showcase uploads server-side via `POST /api/showcase/upload` (service role). |
 | `drizzle/rls/0002_core_tenant_rls.sql` | Adds `storage_namespaces` to the tenant-table RLS loop. |
 | `drizzle/0019_storage_namespaces.sql` | New `storage_namespaces` table (per-tenant prefix registry). |
 | `drizzle/0020_invoice_scans_restaurant_not_null.sql` | **Guarded** `invoice_scans.restaurant_id` → NOT NULL (refuses while any unscoped row exists). |
 | `packages/api` `scans.upload` | Server-side, membership-enforced upload (tenant + path derived from session, never the client). |
-| `apps/web` | `getPublicUrl` removed; reads are signed URLs; dashboard upload goes through `scans.upload`; anon showcase signs `walk-ins/`; OCR fetches bytes server-side. |
+| `apps/web` | `getPublicUrl` removed; reads are signed URLs; dashboard upload goes through `scans.upload`; showcase uploads/signs `walk-ins/` server-side (SB-3); OCR fetches bytes server-side. |
 
 **Hard prerequisite:** the storage policies reference `app.current_restaurant_id()`
 (created by `0002_core_tenant_rls.sql`). If `0002` is **not** already applied in

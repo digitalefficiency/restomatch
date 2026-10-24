@@ -109,6 +109,8 @@ export function ViewToolbar(props: ViewToolbarProps) {
     // The breakdown's legacy month offset would contradict the chosen period.
     keep.delete('m');
     const q = serializeView(next, keep).toString();
+    // Same-route soft navigation. It used to stall in production builds under the
+    // route-level loading.tsx boundary (removed; see scripts/check-soft-nav.mjs).
     router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
   }
   const set = (patch: Partial<ViewState>) => go({ ...view, ...patch });

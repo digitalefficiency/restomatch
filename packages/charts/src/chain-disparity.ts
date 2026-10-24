@@ -15,7 +15,9 @@ import { supplierMergeKey } from './chain';
  *   • same supplier = same business id (ח.פ) digits, else the same normalized name;
  *   • same product = the same supplier SKU (`sku`), else the same normalized
  *     product name AND the same unit (`name`);
- *   • a row needs ≥ 2 branches, a spread ≥ 3 % and ≥ ₪5 of monthly impact.
+ *   • a row needs ≥ 2 branches, a spread ≥ 3 % and ≥ ₪5 of impact in the period;
+ *   • lines the engine flagged as a price error (PRICE_HIGHER/LOWER warn/block)
+ *     are excluded — those are billing mistakes already in the leak figure.
  * Prices are compared as Σ line total ÷ Σ qty (agorot-exact sums).
  */
 
@@ -78,6 +80,14 @@ export async function computeBranchPriceLines(
       AND COALESCE(i.invoice_date, i.created_at) < ${bounds.monthEnd}::timestamptz
       AND EXISTS (SELECT 1 FROM match_runs mr WHERE mr.invoice_id = i.id AND mr.restaurant_id = ${restaurantId})
       AND il.qty_billed > 0 AND il.line_total > 0
+      -- A line the engine already flagged as a price error is a billing mistake
+      -- (counted in the leak), not the branch's price: leave it out, so a
+      -- one-off overcharge never reads as "this branch pays X% more".
+      AND NOT EXISTS (
+        SELECT 1 FROM discrepancies d
+        WHERE d.restaurant_id = ${restaurantId} AND d.invoice_line_id = il.id
+          AND d.type IN ('PRICE_HIGHER','PRICE_LOWER') AND d.severity IN ('warn','block')
+      )
   `);
   return {
     restaurantId,
@@ -115,6 +125,7 @@ export interface DisparityBranchPrice {
 
 export interface DisparityLine {
   restaurantId: string;
+  invoiceLineId: string;
   invoiceId: string;
   invoiceNumber: string;
   invoiceDate: string;
@@ -219,6 +230,7 @@ export function computePriceDisparities(
       .slice(0, options.linesPerRow ?? 12)
       .map(({ rid, l }) => ({
         restaurantId: rid,
+        invoiceLineId: l.invoiceLineId,
         invoiceId: l.invoiceId,
         invoiceNumber: l.invoiceNumber,
         invoiceDate: l.invoiceDate,

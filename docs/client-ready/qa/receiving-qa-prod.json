@@ -1,0 +1,37 @@
+{
+  "base": "http://localhost:3000",
+  "at": "2026-10-18T13:04:50.984Z",
+  "pass": 2,
+  "total": 2,
+  "results": [
+    {
+      "id": "J",
+      "title": "public showcase · en · 390px — demo invoice in English; upload without storage stays in demo mode",
+      "status": "PASS",
+      "checks": [
+        "real photo without storage env → demo mode (server endpoint answered not_configured)",
+        "demo review in English"
+      ],
+      "ms": 75904
+    },
+    {
+      "id": "K",
+      "title": "receiver · en · 390px · no cookie consent — demo invoice → order-only review → close (S7 trip-wires)",
+      "status": "PASS",
+      "checks": [
+        "scan: \"Step 2 of 5\" with 2 of 5 bars filled",
+        "observation (S6): cookie banner shown=true; \"Use a demo invoice\" COVERED by it at 390px",
+        "no \"OCR confidence 100%\" when no invoice was read",
+        "\"receiving against the order\" subtitle",
+        "no false \"missing\" lines",
+        "calm \"check by hand\" banner",
+        "review: \"Step 4 of 5\" with 4 bars",
+        "sticky \"Close receipt\" CTA is the top-most element (nothing over it)",
+        "every line checked → close enabled",
+        "summary counts the hand-checked lines",
+        "confirmed: all 5 bars"
+      ],
+      "ms": 35238
+    }
+  ]
+}

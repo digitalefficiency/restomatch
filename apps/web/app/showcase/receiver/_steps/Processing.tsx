@@ -60,7 +60,8 @@ function ocrToReconciliation(
     invoiceUnit: l.unit,
     poUnitPrice: null,
     invoiceUnitPrice: l.unitPrice,
-    status: 'unordered',
+    // The demo has no order to compare against: neutral, never "not ordered".
+    status: 'pending_review',
     deltaIls: 0,
   }));
   return {
@@ -79,8 +80,9 @@ function ocrToReconciliation(
       matchedCount: 0,
       qtyDiffCount: 0,
       priceDiffCount: 0,
-      unorderedCount: lines.length,
+      unorderedCount: 0,
       missingCount: 0,
+      pendingCount: lines.length,
       overallConfidence: ocr.confidence ?? 0.9,
       headlineDelta: 0,
     },
