@@ -33,6 +33,11 @@ const DASHBOARD_PAGES = [
   '/dashboard/chain',
   '/dashboard/receiving',
   '/dashboard/receiving/:openPo',
+  // Wave 1 (S12) — flagged screens; the e2e demo tenant has features.all.
+  '/dashboard/recovery',
+  '/dashboard/reports/monthly',
+  '/dashboard/reports/digest',
+  '/dashboard/leaks/proof',
 ];
 
 let openPo = '';

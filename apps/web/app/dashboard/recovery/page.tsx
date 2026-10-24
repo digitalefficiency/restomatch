@@ -39,7 +39,7 @@ export default async function RecoveryPage() {
         action={
           <Link
             href="/dashboard/leaks/claims"
-            className="inline-flex items-center gap-1.5 rounded-xl border border-line bg-surface-2 px-3 py-2 text-sm font-semibold text-muted hover:border-primary/40 hover:text-primary"
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-line bg-surface-2 px-3 py-2 text-sm font-semibold text-muted hover:border-primary/40 hover:text-primary"
           >
             <FileCheck2 className="h-4 w-4" aria-hidden="true" />
             {t('tracker.lettersLink')}
@@ -104,8 +104,9 @@ export default async function RecoveryPage() {
             </Card>
 
             <Card padding="lg">
-              <h2 className="text-sm font-bold text-ink">{t('tracker.suppliersTitle')}</h2>
-              <div className="mt-3 overflow-x-auto">
+              <h2 id="recovery-suppliers-title" className="text-sm font-bold text-ink">{t('tracker.suppliersTitle')}</h2>
+              {/* Scrolls sideways on a phone: focusable so the keyboard can scroll it too. */}
+              <div className="mt-3 overflow-x-auto" tabIndex={0} role="region" aria-labelledby="recovery-suppliers-title">
                 <table className="w-full min-w-[440px] text-sm">
                   <thead className="border-b border-line text-xs text-subtle">
                     <tr>

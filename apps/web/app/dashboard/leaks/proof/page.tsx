@@ -46,7 +46,7 @@ export default async function LeakProofPage() {
       <div className="flex flex-wrap items-center justify-between gap-3" data-print-hide>
         <Link
           href="/dashboard"
-          className="inline-flex items-center gap-1.5 text-sm font-semibold text-muted hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+          className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-muted hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
         >
           <ArrowLeft className="h-4 w-4 rtl:-scale-x-100" aria-hidden="true" />
           {t('back')}
@@ -57,12 +57,13 @@ export default async function LeakProofPage() {
       <SectionHeader level={1} title={t('title', { amount: round(hero.leakIls) })} subtitle={t('subtitle', { month })} />
 
       {/* T1 — the number and how it is made. */}
-      <Card padding="lg" elevated data-testid="proof-number">
+      <Card padding="lg" elevated data-testid="proof-number" className={hero.leakIls > 0 ? 'relative overflow-hidden border-danger/35' : 'relative overflow-hidden'}>
+        {hero.leakIls > 0 ? <div className="absolute inset-y-0 start-0 w-1.5 bg-danger" aria-hidden="true" /> : null}
         <div className="flex items-start gap-3">
           <Sigma className="mt-1 h-5 w-5 shrink-0 text-danger" aria-hidden="true" />
           <div className="min-w-0">
             <h2 className="text-sm font-bold text-ink">{t('numberTitle')}</h2>
-            <p className="mt-1 font-mono text-4xl font-extrabold tabular-nums text-danger" data-testid="proof-leak">
+            <p className="mt-1 font-mono text-4xl font-extrabold tabular-nums text-ink" data-testid="proof-leak">
               {exact(hero.leakIls)}
             </p>
             <p className="mt-2 text-sm text-ink">
@@ -154,7 +155,7 @@ export default async function LeakProofPage() {
                             <Link
                               href={f.href}
                               data-print-hide
-                              className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                              className="inline-flex min-h-11 items-center gap-1 text-xs font-medium text-primary hover:underline sm:min-h-0"
                             >
                               <FileText className="h-3.5 w-3.5" aria-hidden="true" />
                               {f.level === 'line' ? t('openLine') : t('openInvoice')}
