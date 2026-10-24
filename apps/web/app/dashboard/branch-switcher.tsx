@@ -177,7 +177,6 @@ export function BranchSwitcher({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={menuId}
-        aria-label={t('switcher.label')}
         data-testid="branch-switcher"
         className={cn(
           'inline-flex max-w-[16rem] items-center gap-1.5 rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-xs font-semibold text-ink transition-colors hover:border-primary/40',
@@ -190,6 +189,9 @@ export function BranchSwitcher({
         </span>
         <span className="rounded-md bg-primary/12 px-1.5 text-[10px] tabular-nums text-primary">{branches.length}</span>
         <ChevronDown className={cn('h-3.5 w-3.5 text-muted transition-transform', open && 'rotate-180')} aria-hidden="true" />
+        {/* The name comes from the content (visible branch + count), then the action — an
+            aria-label would hide the visible text (axe label-content-name-mismatch). */}
+        <span className="sr-only"> — {t('switcher.label')}</span>
       </button>
       {open ? (
         <div className="absolute start-0 top-full z-50 mt-2 w-72 rounded-xl border border-line bg-surface p-1 shadow-card">

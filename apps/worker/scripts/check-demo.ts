@@ -19,6 +19,9 @@ import postgres from 'postgres';
  */
 export const EXPECTED_CONSOLIDATED_OVERCHARGE_ILS = 36;
 
+/** The one invoice above ₪5,000 without an allocation number: ₪6,240 + 18% VAT. */
+export const EXPECTED_VAT_AT_RISK_ILS = 1123.2;
+
 export interface DemoCheck {
   ok: boolean;
   problems: string[];
@@ -141,6 +144,21 @@ export async function checkDemo(url: string, today: string): Promise<DemoCheck> 
     const overcharge = Math.round(cons.reduce((a, c) => a + Number(c.overcharge), 0) * 100) / 100;
     if (overcharge !== EXPECTED_CONSOLIDATED_OVERCHARGE_ILS) {
       problems.push(`consolidated overcharge ₪${overcharge.toFixed(2)} ≠ the seeded ₪${EXPECTED_CONSOLIDATED_OVERCHARGE_ILS.toFixed(2)} (excl. VAT)`);
+    }
+
+    // 3e. VAT at risk: invoices above ₪5,000 excl. VAT without an allocation number in
+    //     the last 6 months (the input-VAT deduction window). Exactly the one seeded
+    //     case: the main restaurant's MF-24950, ₪1,123.20 VAT.
+    const atRisk = (await sql`
+      select i.invoice_number, i.vat_amount from invoices i
+      where i.restaurant_id in ${sql(rids)} and i.total_excl_vat > 5000 and i.allocation_number is null
+        and i.status <> 'ocr_pending'
+        and i.invoice_date >= ((${today}::date - interval '6 months')::timestamp at time zone 'Asia/Jerusalem')
+    `) as unknown as Array<{ invoice_number: string; vat_amount: string }>;
+    const atRiskVat = Math.round(atRisk.reduce((a, r) => a + Number(r.vat_amount), 0) * 100) / 100;
+    facts.push(`VAT at risk (no allocation number, > ₪5,000): ${atRisk.map((r) => r.invoice_number).join(', ') || 'none'} · ₪${atRiskVat.toFixed(2)}`);
+    if (atRisk.length !== 1 || atRiskVat !== EXPECTED_VAT_AT_RISK_ILS) {
+      problems.push(`VAT at risk: ${atRisk.length} invoice(s), ₪${atRiskVat.toFixed(2)} — expected exactly 1 (MF-24950), ₪${EXPECTED_VAT_AT_RISK_ILS.toFixed(2)}`);
     }
 
     // 4. Approvals queue: open, routed findings in the main restaurant.

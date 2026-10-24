@@ -117,7 +117,7 @@ const flowEvents = dayMemo((): FlowEvent[] => {
     id: '1',
     time: '09:35',
     title: 'חשבונית כפולה זוהתה',
-    detail: 'INV-4882 מקצביית הכרם — נחסמה אוטומטית',
+    detail: 'INV-4882 מקצביית הכרם — סומנה לבירור',
     type: 'block',
   },
   {
