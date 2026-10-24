@@ -268,7 +268,10 @@ describe('verifier MINOR 2: a same-supplier sibling PO with a receipt does not h
 });
 
 /** Same supplier, a second order earlier today with its OWN receipt still open (Galilee PO1 07:00). */
-async function openSiblingReceipt(s: Seed) {
+async function openSiblingReceipt(
+  s: Seed,
+  opts: { qtyOrdered?: string; qtyReceived?: string; status?: 'pending' | 'completed' } = {},
+) {
   const morning = new Date();
   morning.setHours(Math.max(0, morning.getHours() - 3));
   const [po1] = await db
@@ -277,10 +280,13 @@ async function openSiblingReceipt(s: Seed) {
     .returning();
   const [pl1] = await db
     .insert(poLines)
-    .values({ poId: po1!.id, rawDescription: 'עגבניה', qtyOrdered: '20', unit: 'kg', unitPriceExpected: '8' })
+    .values({ poId: po1!.id, rawDescription: 'עגבניה', qtyOrdered: opts.qtyOrdered ?? '20', unit: 'kg', unitPriceExpected: '8' })
     .returning();
-  const [gr1] = await db.insert(goodsReceipts).values({ restaurantId: s.restaurantId, poId: po1!.id, status: 'pending' }).returning();
-  await db.insert(grLines).values({ grId: gr1!.id, poLineId: pl1!.id, qtyReceived: '0' });
+  const [gr1] = await db
+    .insert(goodsReceipts)
+    .values({ restaurantId: s.restaurantId, poId: po1!.id, status: opts.status ?? 'pending' })
+    .returning();
+  await db.insert(grLines).values({ grId: gr1!.id, poLineId: pl1!.id, qtyReceived: opts.qtyReceived ?? '0' });
   return { po1: po1!.id, gr1: gr1!.id };
 }
 
@@ -407,5 +413,81 @@ describe('scanGrId stamp: what the OCR job writes', () => {
     for (const p of [null, undefined, {}, { raw: null }, { raw: { scanGrId: 7 } }, { raw: { scanGrId: '' } }]) {
       expect(readScanGrId(p)).toBeNull();
     }
+  });
+});
+
+/**
+ * The verifier's scenarios. One supplier: PO1 due this morning (0.5x), PO2 due
+ * now; on PO2 the receiver started GR2 and registered X (OCR'd, held, stamped
+ * GR2). Every scan must end on its own receipt: the enqueued re-match carries
+ * that receipt's PO (the match job's binding PO), and nothing else is enqueued.
+ */
+describe('verifier scenarios C/D/E/F', () => {
+  async function poOf(grId: string) {
+    const [g] = await db.select({ poId: goodsReceipts.poId }).from(goodsReceipts).where(eq(goodsReceipts.id, grId));
+    return g!.poId;
+  }
+  const sent = () => enqueueMatchInvoice.mock.calls.map((c) => ({ invoiceId: c[0].invoiceId, poId: c[0].poId }));
+
+  for (const [name, ids] of [
+    ['C (attack): re-submitting the closed GR1 naming X', true],
+    ['E: re-submitting the closed GR1 with no invoiceIds (derived list)', false],
+  ] as const) {
+    it(`${name} claims nothing; GR2’s submit then takes X onto PO2/GR2`, async () => {
+      const s = await seed(); // PO2 + GR2 (s.grId), being counted
+      const { gr1 } = await openSiblingReceipt(s, { qtyOrdered: '5', qtyReceived: '5', status: 'completed' });
+      const x = await invoice(s, { scanGrId: s.grId });
+
+      await callerFor(s).receiving.submitReceipt(ids ? { grId: gr1, invoiceIds: [x] } : { grId: gr1 });
+      expect(sent()).toEqual([]);
+
+      await callerFor(s).receiving.submitReceipt({ grId: s.grId, invoiceIds: [x] });
+      expect(sent()).toEqual([{ invoiceId: x, poId: await poOf(s.grId) }]);
+    });
+  }
+
+  it('D (normal flow): GR1 submitted only after X is held on GR2 does not claim X; GR2 does', async () => {
+    const s = await seed();
+    const { gr1 } = await openSiblingReceipt(s, { qtyOrdered: '5', qtyReceived: '5' }); // counted, still open
+    const x = await invoice(s, { scanGrId: s.grId });
+
+    await callerFor(s).receiving.submitReceipt({ grId: gr1 });
+    expect(sent()).toEqual([]);
+    await callerFor(s).receiving.submitReceipt({ grId: s.grId });
+    expect(sent()).toEqual([{ invoiceId: x, poId: await poOf(s.grId) }]);
+  });
+
+  it('D, unstamped X (legacy): GR1’s submit skips it as ambiguous (GR2 still open) — never guessed onto GR1', async () => {
+    const s = await seed();
+    const { gr1 } = await openSiblingReceipt(s, { qtyOrdered: '5', qtyReceived: '5' });
+    const x = await invoice(s);
+    await callerFor(s).receiving.submitReceipt({ grId: gr1 });
+    expect(sent().map((c) => c.invoiceId)).not.toContain(x);
+  });
+
+  for (const withX2 of [true, false]) {
+    it(`F (= a): PO1 2x + X1 held on GR1; GR2 submitted ${withX2 ? 'with X2 named' : 'with no X2 / no invoiceIds'} → X1 untouched; GR1 later takes X1 onto PO1/GR1`, async () => {
+      const s = await seed(); // PO2 1x
+      const { gr1 } = await openSiblingReceipt(s, { qtyOrdered: '20' }); // PO1 2x, GR1 open
+      const x1 = await invoice(s, { scanGrId: gr1 });
+      const x2 = withX2 ? await invoice(s, { scanGrId: s.grId }) : undefined;
+
+      await callerFor(s).receiving.submitReceipt(x2 ? { grId: s.grId, invoiceIds: [x2] } : { grId: s.grId });
+      expect(sent()).toEqual(x2 ? [{ invoiceId: x2, poId: await poOf(s.grId) }] : []);
+      if (x2) await ranOn(s, x2, s.grId);
+
+      enqueueMatchInvoice.mockClear();
+      await db.update(grLines).set({ qtyReceived: '20' }).where(eq(grLines.grId, gr1));
+      await callerFor(s).receiving.submitReceipt({ grId: gr1, invoiceIds: [x1] });
+      expect(sent()).toEqual([{ invoiceId: x1, poId: await poOf(gr1) }]);
+    });
+  }
+
+  it('still holds (A/B normal sibling flow): the stamped scan on GR2 → exactly one re-match, on PO2', async () => {
+    const s = await seed();
+    await openSiblingReceipt(s, { qtyOrdered: '5', qtyReceived: '5', status: 'completed' }); // PO1 counted this morning
+    const x = await invoice(s, { scanGrId: s.grId });
+    await callerFor(s).receiving.submitReceipt({ grId: s.grId });
+    expect(sent()).toEqual([{ invoiceId: x, poId: await poOf(s.grId) }]);
   });
 });
