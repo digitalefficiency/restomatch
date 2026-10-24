@@ -151,3 +151,14 @@ describe('unitLabelFor (receiver languages)', () => {
     expect(unitLabelFor('bunch', 'ar')).toBe('ربطة');
   });
 });
+
+describe('TargetGlossary: linear on hostile names (CodeQL polynomial ReDoS)', () => {
+  it('peels size tokens in well under 100 ms on 50k-character adversarial input', () => {
+    const g = new TargetGlossary();
+    for (const evil of ['9'.repeat(50_000) + 'x', '(' + ' '.repeat(50_000), '()' + ' '.repeat(50_000) + 'x', 'חלב ' + '9 '.repeat(25_000) + '!']) {
+      const t0 = performance.now();
+      g.translate(evil, 'ar');
+      expect(performance.now() - t0, evil.slice(0, 8)).toBeLessThan(100);
+    }
+  });
+});

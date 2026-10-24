@@ -45,7 +45,7 @@ const MAX_CLAUDE_MISSES = 80;
 export function renderSizeSuffix(suffix: string): string | null {
   const s = suffix.trim();
   if (/^\d+(?:[.,]\d+)?\s*%?$/.test(s)) return s.replace(/\s+/g, '');
-  const m = /^(\d+(?:[.,]\d+)?)\s*(.+)$/.exec(s);
+  const m = /^(\d+(?:[.,]\d+)?)\s*(\S.*)$/.exec(s); // \S: no ambiguous split of the spaces (ReDoS)
   if (m) {
     const unit = translateUnit(m[2]!);
     return unit ? `${m[1]} ${unit}` : null;
