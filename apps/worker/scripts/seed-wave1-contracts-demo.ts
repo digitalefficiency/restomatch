@@ -75,7 +75,8 @@ async function contractFrom(restaurantId: string, supplierId: string): Promise<s
 }
 const CONTRACT_SUPPLIERS = ['HaKerem Butchery', 'Mediterranean Fish Co.'];
 const TREND_SUPPLIER = 'HaSharon Produce';
-const CHEAP_SUPPLIER = { name: 'חקלאי העמק', nameEn: 'HaEmek Farmers' };
+// Fresh produce is VAT-exempt (#79): like HaSharon Produce / Carmel Greens, vat_rate 0.
+const CHEAP_SUPPLIER = { name: 'חקלאי העמק', nameEn: 'HaEmek Farmers', vatRate: '0' };
 const TOMATO = { name: 'עגבניות', nameEn: 'Tomatoes', unit: 'ק״ג' };
 // days ago → price: +18% over 3 weeks, staying up.
 const TREND: Array<[number, string]> = [
@@ -177,8 +178,11 @@ async function seedTrend(restaurantId: string) {
   if (!cheap) {
     [cheap] = await db
       .insert(suppliers)
-      .values({ restaurantId, name: CHEAP_SUPPLIER.name, nameEn: CHEAP_SUPPLIER.nameEn })
+      .values({ restaurantId, name: CHEAP_SUPPLIER.name, nameEn: CHEAP_SUPPLIER.nameEn, vatRate: CHEAP_SUPPLIER.vatRate })
       .returning();
+  } else if (cheap.vatRate == null || Number(cheap.vatRate) !== 0) {
+    // A database seeded before the produce-VAT fix: never leave it on the 18% default.
+    [cheap] = await db.update(suppliers).set({ vatRate: CHEAP_SUPPLIER.vatRate }).where(eq(suppliers.id, cheap.id)).returning();
   }
 
   // Same category as the supplier's other produce, so per-category thresholds apply.
