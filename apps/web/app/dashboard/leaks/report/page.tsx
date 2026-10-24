@@ -164,9 +164,10 @@ export default async function LeakReportPage({
 
         {/* Headline */}
         <section className="grid gap-4 sm:grid-cols-[1.3fr_1fr] sm:items-end">
-          <div>
+          {/* T1 — the one number: danger start rail + ink figure when money leaked. */}
+          <div className={hasLeak ? 'relative border-s-4 border-danger ps-4' : undefined}>
             <p className="text-sm font-semibold text-muted">{t('report.headline')}</p>
-            <p className={`rm-print-accent font-mono text-5xl font-extrabold tabular-nums ${hasLeak ? 'text-danger' : 'text-primary'}`}>
+            <p className={`rm-print-accent font-mono text-5xl font-extrabold tabular-nums ${hasLeak ? 'text-ink' : 'text-primary'}`}>
               {ils(hero.leakIls)}
             </p>
             <p className="mt-1 text-base font-semibold text-ink">
