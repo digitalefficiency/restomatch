@@ -7,7 +7,8 @@
  * delivery happens in outbox-dispatch. Restaurants with the flag off are a no-op.
  */
 import { runPriceAlertSweep } from '@restomatch/api';
-import { createDb, eq, restaurants } from '@restomatch/db';
+import { eq, restaurants } from '@restomatch/db';
+import { jobDb } from '../db';
 import { makeWorker } from '../queue';
 import { appBaseUrl } from '../lib/notifyHelpers';
 
@@ -22,7 +23,7 @@ export function startPriceAlertsWorker() {
   return makeWorker<PriceAlertsJob>('price-alerts', async (job) => {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error('DATABASE_URL is required');
-    const db = createDb(url);
+    const db = jobDb(url);
     const now = job.data.forDate ? new Date(job.data.forDate) : new Date();
 
     const rows = job.data.restaurantId

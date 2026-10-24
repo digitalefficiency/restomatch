@@ -4,7 +4,7 @@
  * through the stub notifier). Idempotent per restaurant-month (sendMonthlyReports).
  */
 import { sendMonthlyReports } from '@restomatch/api';
-import { createDb } from '@restomatch/db';
+import { jobDb } from '../db';
 import { makeWorker } from '../queue';
 import { appBaseUrl } from '../lib/notifyHelpers';
 
@@ -18,7 +18,7 @@ export function startMonthlyReportWorker() {
   return makeWorker<MonthlyReportJob>('monthly-report', async (job) => {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error('DATABASE_URL is required');
-    const res = await sendMonthlyReports(createDb(url), {
+    const res = await sendMonthlyReports(jobDb(url), {
       restaurantId: job.data.restaurantId,
       now: job.data.forDate ? new Date(job.data.forDate) : new Date(),
       appUrl: appBaseUrl(),

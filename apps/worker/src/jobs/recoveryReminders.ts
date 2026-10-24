@@ -4,7 +4,7 @@
  * emails go through the outbox (enqueueRecoveryReminders) and outbox-dispatch.
  */
 import { enqueueRecoveryReminders } from '@restomatch/api';
-import { createDb } from '@restomatch/db';
+import { jobDb } from '../db';
 import { makeWorker } from '../queue';
 import { appBaseUrl } from '../lib/notifyHelpers';
 
@@ -18,7 +18,7 @@ export function startRecoveryRemindersWorker() {
   return makeWorker<RecoveryRemindersJob>('recovery-reminders', async (job) => {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error('DATABASE_URL is required');
-    const res = await enqueueRecoveryReminders(createDb(url), {
+    const res = await enqueueRecoveryReminders(jobDb(url), {
       restaurantId: job.data.restaurantId,
       now: job.data.forDate ? new Date(job.data.forDate) : new Date(),
       appUrl: appBaseUrl(),
