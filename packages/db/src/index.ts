@@ -1,5 +1,5 @@
 export * from './schema';
-export { createDb, withRestaurant, withUser, type Database } from './client';
+export { createDb, dbPoolMax, withRestaurant, withUser, type Database } from './client';
 export {
   applyCoreTenantRls,
   applyStorageRls,
