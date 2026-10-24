@@ -9,6 +9,7 @@ import {
   BarChart3,
   Boxes,
   ChefHat,
+  ClipboardList,
   FileDown,
   FileSignature,
   FileText,
@@ -56,6 +57,7 @@ type LinkKey =
   | 'contracts'
   | 'orders'
   | 'recipes'
+  | 'inventory'
   | 'exports'
   | 'team'
   | 'branches'
@@ -102,6 +104,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'contracts', href: '/dashboard/contracts', icon: FileSignature, group: 'purchasing', wave1: true },
   { key: 'orders', href: '/dashboard/orders', icon: ShoppingCart, group: 'purchasing' },
   { key: 'recipes', href: '/dashboard/recipes', icon: ChefHat, group: 'purchasing', feature: 'recipes' },
+  { key: 'inventory', href: '/dashboard/inventory', icon: ClipboardList, group: 'purchasing', feature: 'inventoryCount' },
   { key: 'exports', href: '/dashboard/exports', icon: FileDown, group: 'admin' },
   { key: 'team', href: '/dashboard/team', icon: Users, group: 'admin' },
   { key: 'branches', href: '/dashboard/branches', icon: Store, group: 'admin' },

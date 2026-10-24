@@ -11,6 +11,7 @@ import {
   or,
   poLines,
   products,
+  inventoryCountLines,
   recipeItems,
   sql,
   suppliers,
@@ -209,6 +210,19 @@ export const productsRouter = router({
         throw new TRPCError({
           code: 'CONFLICT',
           message: 'לא ניתן למחוק — המוצר משמש במתכון. הסירו אותו מהמתכון קודם.',
+        });
+      }
+      // inventory_count_lines → products is RESTRICT too (0070): a counted product
+      // is part of a stock value — the same friendly CONFLICT.
+      const [countRef] = await ctx.db
+        .select({ id: inventoryCountLines.id })
+        .from(inventoryCountLines)
+        .where(and(eq(inventoryCountLines.productId, input.productId), eq(inventoryCountLines.restaurantId, restaurantId)))
+        .limit(1);
+      if (countRef) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: 'לא ניתן למחוק — המוצר מופיע בספירת מלאי. השביתו אותו בקטלוג במקום למחוק.',
         });
       }
       if (invRef || poRef) {

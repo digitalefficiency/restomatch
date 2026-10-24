@@ -20,6 +20,7 @@ export const nav: Shape<typeof he> = {
     contracts: 'Контракты и оповещения',
     orders: 'Заказы',
     recipes: 'Себестоимость блюд',
+    inventory: 'Инвентаризация',
     exports: 'Экспорт',
     team: 'Команда',
     chain: 'Сеть',

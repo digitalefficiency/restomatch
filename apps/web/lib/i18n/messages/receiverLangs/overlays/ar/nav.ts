@@ -20,6 +20,7 @@ export const nav: Shape<typeof he> = {
     contracts: 'العقود والتنبيهات',
     orders: 'الطلبيات',
     recipes: 'تكلفة الطعام',
+    inventory: 'جرد المخزون',
     exports: 'التصدير',
     team: 'الفريق',
     chain: 'السلسلة',
