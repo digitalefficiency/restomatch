@@ -28,7 +28,9 @@ async function partialReceipt(status: 'partial' | 'completed' = 'partial'): Prom
   const sql = e2eSql();
   try {
     const [r] = await sql<{ id: string }[]>`select id from restaurants where name = ${DEMO_RESTAURANT_NAME} limit 1`;
-    const [sup] = await sql<{ id: string }[]>`select id from suppliers where restaurant_id = ${r!.id} order by name limit 1`;
+    // Its own supplier: no other test's waiting invoice can pair with this receipt.
+    const [sup] = await sql<{ id: string }[]>`
+      insert into suppliers (restaurant_id, name) values (${r!.id}, ${`ספק יתרה ${Math.random().toString(36).slice(2, 8)}`}) returning id`;
     const prods = await sql<{ id: string; name: string }[]>`
       select id, canonical_name as name from products
       where restaurant_id = ${r!.id} and canonical_name ~ '[א-ת]' order by canonical_name limit 2`;
