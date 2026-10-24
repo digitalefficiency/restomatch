@@ -96,6 +96,28 @@ const isPhone = (info: TestInfo) => !!info.project.use.isMobile;
 /** Everything that would show red in DevTools on the presenter's screen. */
 function watchErrors(page: Page): string[] {
   const errors: string[] = [];
+  // #418 (hydration mismatch) forensics: keep the last server-rendered document and,
+  // when React reports #418, save it next to the post-hydration DOM for a diff.
+  let lastDoc = '';
+  let lastDocUrl = '';
+  page.on('response', (res) => {
+    if (res.request().resourceType() !== 'document') return;
+    lastDocUrl = res.url();
+    res.text().then((body) => (lastDoc = body), () => {});
+  });
+  page.on('pageerror', (err) => {
+    if (!/Minified React error #4(18|19|21|22|23|25)/.test(err.message)) return;
+    const info = test.info();
+    const dir = join(info.project.outputDir, 'hydration');
+    const tag = `${info.project.name.replace(/[^\w-]+/g, '_')}-${Date.now()}`;
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${tag}-server.html`), `<!-- ${lastDocUrl} -->\n${lastDoc}`);
+    page
+      .evaluate(() => document.documentElement.outerHTML)
+      .then((html) => writeFileSync(join(dir, `${tag}-client.html`), `<!-- ${lastDocUrl} -->\n${html}`))
+      .catch(() => {});
+    info.annotations.push({ type: 'hydration', description: `${err.message.slice(0, 80)} → ${join(dir, tag)}-{server,client}.html` });
+  });
   page.on('console', (msg) => {
     if (msg.type() !== 'error') return;
     const where = msg.location()?.url;
