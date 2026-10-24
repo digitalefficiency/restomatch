@@ -10,6 +10,7 @@ import { landing } from '@/lib/i18n/messages/landing';
 import { formatNumber } from '@/lib/i18n/format';
 import { heroMedia, promoVideoFor } from '@/lib/heroMedia';
 import { formatIls } from '@/lib/money';
+import { landingFlag } from '@/lib/landingFlags';
 import { cn } from '@/lib/components/cn';
 import { MarketingShell } from './(marketing)/_components/MarketingShell';
 import { HeroMatch } from './(marketing)/_components/HeroMatch';
@@ -17,6 +18,7 @@ import { HeroVideo } from './(marketing)/_components/HeroVideo';
 import { LazyLeadForm } from './(marketing)/_components/LazyLeadForm';
 import { PromoVideoButton } from './(marketing)/_components/PromoVideoButton';
 import { Eyebrow, FaqSection, Forward, faqItems } from './(marketing)/_components/detail-sections';
+import { OrdersStory } from './(marketing)/_components/OrdersStory';
 import { SITE_URL, metadataBase, socialFor } from './(marketing)/_components/seo';
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -333,6 +335,9 @@ export default async function Home() {
           </div>
         </div>
       </section>
+
+      {/* ───────────── 3b · ORDER → DOCK → ₪ (flag landingOrdersStory; off = no section) ───────────── */}
+      {landingFlag('landingOrdersStory') && <OrdersStory t={t} locale={locale} />}
 
       {/* ───────────── 4 · PROOF — the honest math (PLAN_SEED + formatIls) ───────────── */}
       <section className="rm-defer border-y border-line bg-surface/30" aria-labelledby="proof-title">

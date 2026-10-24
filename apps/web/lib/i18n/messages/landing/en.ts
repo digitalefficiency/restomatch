@@ -193,6 +193,26 @@ export const en: Shape<typeof he> = {
       note: 'A target, not a promise: your real number shows up after two weeks of scanning.',
       more: 'The full math, features and security',
     },
+    story: {
+      eyebrow: 'From the order to the shekel',
+      title: 'MarketMan orders. RestoMatch checks you weren’t cheated.',
+      lead: 'One order, three stops — and every gap priced in shekels before you pay.',
+      s1Title: 'The order goes out at the agreed price',
+      s1Body:
+        'From MarketMan, Zester or a spreadsheet — with the quantities and prices you settled with the supplier.',
+      s2Title: 'The check at the receiving dock',
+      s2Body:
+        'The receiver checks what arrived and photographs the invoice. RestoMatch matches order, delivery and invoice, line by line.',
+      s3Title: 'The leak, in shekels',
+      s3Body: 'Every gap gets a shekel amount and is held for approval before payment.',
+      product: 'Cherry tomatoes · {qty} kg',
+      ordered: 'Ordered',
+      billed: 'Invoiced',
+      perKg: '{price} / kg',
+      gap: 'Gap',
+      gapValue: '{amount} on one line',
+      note: 'An example from the demo ({supplier}, {po}). It is a one-time gap on one delivery, not a monthly figure. Our pilot target for the monthly leak is 1.5% of purchasing.',
+    },
     cta: {
       trust: 'Full isolation between restaurants · Two-factor sign-in · Designed for Amendment 13',
       trustLink: 'Security & privacy',
