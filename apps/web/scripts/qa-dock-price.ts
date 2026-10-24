@@ -96,6 +96,21 @@ async function login(role: 'receiver' | 'owner', locale: 'he' | 'en', width: num
   return { browser, page, consoleErrors, serverErrors };
 }
 
+const AXE = resolve(ROOT, 'node_modules/.pnpm/axe-core@4.14.0/node_modules/axe-core/axe.min.js');
+/** axe WCAG 2.1 AA, scoped to the hint (the page chrome is other sessions' surface). */
+async function axeHint(page: Page): Promise<string[]> {
+  if ((await page.locator('[data-testid=dock-price-hint]').count()) === 0) return [];
+  await page.addScriptTag({ path: AXE });
+  return page.evaluate(async () => {
+    const axe = (window as unknown as { axe: { run: (ctx: unknown, o: unknown) => Promise<{ violations: Array<{ id: string; nodes: unknown[] }> }> } }).axe;
+    const r = await axe.run(
+      { include: [['[data-testid=dock-price-hint]']] },
+      { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] } },
+    );
+    return r.violations.map((v) => `${v.id} ×${v.nodes.length}`);
+  });
+}
+
 const overflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
 
 async function dock(locale: 'he' | 'en', width: number, flagOn: boolean, png: Buffer) {
@@ -119,6 +134,7 @@ async function dock(locale: 'he' | 'en', width: number, flagOn: boolean, png: Bu
       width,
       flagOn,
       hints: texts,
+      axe: await axeHint(s.page),
       ok: flagOn
         ? texts.length === 1 && /\+\s?8(\.\d)?\s?%/.test(texts[0]!) && /(90 יום|90 days)/.test(texts[0]!)
         : texts.length === 0,
@@ -151,6 +167,7 @@ async function invoicePage(locale: 'he' | 'en', width: number) {
       locale,
       width,
       hints: texts,
+      axe: await axeHint(s.page),
       ok: texts.length >= 1 && texts.some((t) => /89/.test(t) && /\+\s?7\.9\s?%/.test(t)),
       overflow: await overflow(s.page),
       consoleErrors: s.consoleErrors,
@@ -191,7 +208,7 @@ async function main() {
     }
   }
   console.log(JSON.stringify(report, null, 1));
-  process.exit(report.every((r) => r.ok && !r.overflow && !(r.consoleErrors as string[]).length && !(r.serverErrors as string[]).length) ? 0 : 1);
+  process.exit(report.every((r) => r.ok && !(r.axe as string[]).length && !r.overflow && !(r.consoleErrors as string[]).length && !(r.serverErrors as string[]).length) ? 0 : 1);
 }
 
 main().catch((err) => {

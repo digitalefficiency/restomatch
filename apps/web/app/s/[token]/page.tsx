@@ -51,18 +51,18 @@ export default async function SupplierPortalPage({ params }: { params: Promise<{
         {t('portal.title', { restaurant: v.restaurantName })}
       </h1>
       <p className="mt-2 text-sm text-muted">{t('portal.subtitle')}</p>
-      <dl className="mt-4 grid gap-1 text-sm text-muted">
-        <dd>{t('portal.forSupplier', { supplier })}</dd>
-        <dd>
+      <div className="mt-4 grid gap-1 text-sm text-muted">
+        <p>{t('portal.forSupplier', { supplier })}</p>
+        <p>
           {t('portal.orderNumber', { number: v.poNumber })}
           {v.expectedDeliveryAt
             ? ` · ${t('portal.delivery', { date: formatDate(v.expectedDeliveryAt, locale, { dateStyle: 'medium' }) })}`
             : null}
-        </dd>
-        <dd className="text-xs text-subtle">
+        </p>
+        <p className="text-xs text-subtle">
           {t('portal.expires', { date: formatDateTime(v.expiresAt, locale) })}
-        </dd>
-      </dl>
+        </p>
+      </div>
 
       {v.response ? (
         <Card elevated padding="md" className="mt-6">
