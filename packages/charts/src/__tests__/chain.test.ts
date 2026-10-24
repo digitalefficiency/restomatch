@@ -203,6 +203,17 @@ describe('aggregateChain', () => {
     expect(isThinBase(0, 0)).toBe(false);
   });
 
+  it('the period open total is Σ the rows, independent of the all-time approvals queue', () => {
+    // last_month: every item of the period is resolved, but today's queue still holds 25.
+    const past = aggregateChain([
+      snap({ restaurantId: 'a', name: 'א', openDiscrepancies: 0, pendingApprovals: 20 }),
+      snap({ restaurantId: 'b', name: 'ב', openDiscrepancies: 0, pendingApprovals: 5 }),
+    ]);
+    expect(past.totals.openDiscrepancies).toBe(past.branches.reduce((a, r) => a + r.openDiscrepancies, 0));
+    expect(past.totals.openDiscrepancies).toBe(0);
+    expect(past.totals.pendingApprovals).toBe(25);
+  });
+
   it('reports the selected period bounds', () => {
     expect(out.periodStart).toBe('2026-09-30T21:00:00.000Z');
     expect(out.periodEnd).toBe('2026-10-31T22:00:00.000Z');

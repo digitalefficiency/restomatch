@@ -21,7 +21,7 @@ import {
 } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
-import { chainScopeOf, NOT_BILLING_OWNER, type MembershipRow } from '../routers/chain';
+import { alertWeek, chainScopeOf, NOT_BILLING_OWNER, pickAlertFocus, type ChainAlertBranch, type MembershipRow } from '../routers/chain';
 import { attachSubscription, resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
 
 /**
@@ -292,6 +292,76 @@ describe('chain.overview price disparities exclude billing errors', () => {
         .set({ settings: {} as typeof restaurants.$inferInsert['settings'] })
         .where(eq(restaurants.id, A.restaurantId));
     }
+  });
+});
+
+describe('chain.alerts (chainAlerts flag)', () => {
+  const setFlag = (on: boolean) =>
+    ownerDb
+      .update(restaurants)
+      .set({ settings: (on ? { features: { chainAlerts: true } } : {}) as typeof restaurants.$inferInsert['settings'] })
+      .where(eq(restaurants.id, A.restaurantId));
+
+  it('flag off ⇒ enabled:false and nothing computed', async () => {
+    await setFlag(false);
+    expect(await asA().chain.alerts()).toEqual({ enabled: false, from: null, to: null, focus: null, branches: [] });
+  });
+
+  it("covers A + A2 only — never B, M or X — and names A (₪100 PRICE_HIGHER) as this week's branch", async () => {
+    await setFlag(true);
+    try {
+      const r = await asA().chain.alerts();
+      expect(r.enabled).toBe(true);
+      expect(r.branches.map((b) => b.restaurantId).sort()).toEqual([A.restaurantId, A2.restaurantId].sort());
+      expect(JSON.stringify(r)).not.toContain(B.restaurantId);
+      expect(JSON.stringify(r)).not.toContain(M.restaurantId);
+      expect(JSON.stringify(r)).not.toContain(X.restaurantId);
+      expect(r.focus).toMatchObject({ restaurantId: A.restaurantId, leakIls: 100, topDriver: { type: 'PRICE_HIGHER', leakIls: 100 } });
+      expect(r.branches.find((b) => b.restaurantId === A2.restaurantId)).toMatchObject({ leakIls: 40, topDriver: { type: 'PRICE_HIGHER', leakIls: 40 } });
+      expect(r.from! <= r.to!).toBe(true);
+    } finally {
+      await setFlag(false);
+    }
+  });
+
+  it('the flag of the ACTIVE branch decides: B with the flag on still sees only B', async () => {
+    await ownerDb
+      .update(restaurants)
+      .set({ settings: { features: { chainAlerts: true } } as typeof restaurants.$inferInsert['settings'] })
+      .where(eq(restaurants.id, B.restaurantId));
+    try {
+      const r = await caller(B.ownerUserId, B.restaurantId).chain.alerts();
+      expect(r.branches.map((b) => b.restaurantId)).toEqual([B.restaurantId]);
+      expect(r.focus?.leakIls).toBe(90);
+    } finally {
+      await ownerDb
+        .update(restaurants)
+        .set({ settings: {} as typeof restaurants.$inferInsert['settings'] })
+        .where(eq(restaurants.id, B.restaurantId));
+    }
+  });
+
+  it('is FORBIDDEN from a manager-only branch and for a forged session restaurant', async () => {
+    await expect(caller(A.ownerUserId, M.restaurantId, 'manager').chain.alerts()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(caller(A.ownerUserId, B.restaurantId, 'owner').chain.alerts()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+});
+
+describe('chain alerts (pure)', () => {
+  const br = (id: string, leakIls: number, leakPct: number | null = null): ChainAlertBranch => ({
+    restaurantId: id, name: id, leakIls, spendIls: 1000, leakPct, topDriver: null,
+  });
+  it('the week is the last 7 Israel-local days, today included', () => {
+    expect(alertWeek(new Date('2026-10-25T08:00:00Z'))).toEqual({ from: '2026-10-19', to: '2026-10-25' });
+    // 23:30 UTC on the 24th is already the 25th in Israel.
+    expect(alertWeek(new Date('2026-10-24T23:30:00Z'))).toEqual({ from: '2026-10-19', to: '2026-10-25' });
+    expect(alertWeek(new Date('2026-03-03T10:00:00Z'))).toEqual({ from: '2026-02-25', to: '2026-03-03' });
+  });
+  it('focus = most leak ₪, only above the floor', () => {
+    expect(pickAlertFocus([br('a', 60), br('b', 300), br('c', 0)]).focus?.restaurantId).toBe('b');
+    expect(pickAlertFocus([br('a', 49.99), br('b', 10)]).focus).toBeNull();
+    expect(pickAlertFocus([]).focus).toBeNull();
+    expect(pickAlertFocus([br('a', 60), br('b', 300)]).branches.map((b) => b.restaurantId)).toEqual(['b', 'a']);
   });
 });
 
