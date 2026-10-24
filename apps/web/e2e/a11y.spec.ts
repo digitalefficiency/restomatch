@@ -33,9 +33,12 @@ const DASHBOARD_PAGES = [
   '/dashboard/chain',
   '/dashboard/receiving',
   '/dashboard/receiving/:openPo',
+  // A detail page with a breadcrumb trail (lib/components/Breadcrumbs).
+  '/dashboard/suppliers/:supplier',
 ];
 
 let openPo = '';
+let supplier = '';
 
 test.beforeAll(async () => {
   const sql = e2eSql();
@@ -45,6 +48,11 @@ test.beforeAll(async () => {
       where r.name = ${DEMO_RESTAURANT_NAME} and po.status = 'sent' order by po.created_at limit 1`;
     if (!row) throw new Error('seed has no sent PO for the receiving wizard');
     openPo = row.id;
+    const [sup] = await sql<{ id: string }[]>`
+      select s.id from suppliers s join restaurants r on r.id = s.restaurant_id
+      where r.name = ${DEMO_RESTAURANT_NAME} order by s.name limit 1`;
+    if (!sup) throw new Error('seed has no supplier for the breadcrumb page');
+    supplier = sup.id;
   } finally {
     await sql.end();
   }
@@ -57,7 +65,9 @@ async function open(page: Page, locale: Locale, path: string) {
     // The banner is covered by its own test below; keep it out of the page scans.
     { name: 'rm_cookie_consent', value: 'necessary', url },
   ]);
-  await page.goto(path.replace(':openPo', openPo), { waitUntil: 'load' });
+  await page.goto(path.replace(':openPo', openPo).replace(':supplier', supplier), {
+    waitUntil: 'load',
+  });
   await page.waitForLoadState('networkidle').catch(() => {});
 }
 
@@ -107,9 +117,10 @@ async function smallTouchTargets(page: Page): Promise<string[]> {
         if (el.tagName === 'A' && s.display === 'inline') return false;
         if (el instanceof HTMLInputElement && ['hidden', 'file'].includes(el.type)) return false;
         // A checkbox inside its label: the label is the target.
+        // A checkbox/radio whose <label> (wrapping or for=) is a full-size target.
         if (el instanceof HTMLInputElement && ['checkbox', 'radio'].includes(el.type)) {
-          const label = el.closest('label');
-          if (label && label.getBoundingClientRect().height >= 44) return false;
+          const labels = [...(el.labels ?? [])];
+          if (labels.some((l) => l.getBoundingClientRect().height >= 44)) return false;
         }
         return r.width < 44 || r.height < 44;
       })
