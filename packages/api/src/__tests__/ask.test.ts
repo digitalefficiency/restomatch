@@ -360,10 +360,40 @@ describe('ask: prompt injection from invoice text is data, not instructions', ()
     ]) {
       expect(sanitizeAnswer(`see ${evil} now`).stripped, evil).toBe(true);
     }
+    // S4 re-verify: inverted rule — phishing gTLDs, spaced-out letters, comma-as-dot, unknown words.
+    for (const evil of [
+      'evil.zip', 'evil.mov', 'evil.bond', 'evil.sbs', 'evil.cfd', 'evil.lat', 'evil.quest',
+      'e v i l . c o m', 'evil,com', 'e v i l , c o m', 'evil,co,il', 'evil.foobar', 'Evil.Com', 'evil.Zip',
+    ]) {
+      const s = sanitizeAnswer(`Pay at ${evil} now`);
+      expect(s.stripped, evil).toBe(true);
+      expect(s.text, evil).not.toMatch(/evil|e v i l/i);
+      expect(groundAnswer({ answer: `Pay at ${evil} now`, citations: [] }, LINKS, FIG).grounded, evil).toBe(false);
+    }
+    // Refuter round 3: invisible/combining splits, more dot look-alikes, other "dot" words,
+    // restaurant gTLDs behind an abbreviation, Israeli phone formats, split spellings.
+    for (const evil of [
+      'evil.c️om', 'evil.c\u{E0020}om', 'evil.c⠀om', 'evil.c̲om', 'evil̇com', 'evil⸱com',
+      'evil\u318Dcom', 'evil נקודה com', 'evil _dot_ com', 'evil punkt com', 'evil[,]com', 'evil;com',
+      'ref.menu', 'max.pizza', 'kg.wine', 'e-v-i-l.c-o-m', 'evil . c o m', 'evil.c o m', 'evil, com',
+      '054–1234567', '054.123.4567', '(054) 1234567', '05-4123-4567', '+972 (54) 123-4567',
+      '0 5 4 - 1 2 3 4 5 6 7', 'evil (at) gmail (dot) com', '@ evilbot',
+    ]) {
+      expect(sanitizeAnswer(`Pay at ${evil} now`).stripped, evil).toBe(true);
+    }
+    for (const ok of [
+      'Data: 3 invoices from Tnuva were flagged.', 'Prices rose. Today: ₪1,200 leak.', 'Invoice summary. Credit: ₪250',
+      'Payment cash,credit both accepted', 'Price excl.VAT is ₪120.', 'vs.April the price rose 4%', 'Dr.Oetker mix',
+      'Invoice INV-26.10.18.001', 'Invoice 01234567 from Tnuva', 'Invoice 00012345678', 'חשבונית מספר 03123456',
+      '10@3.50 per kg', '*1250 ₪* overcharge', 'Order 1700 250 3000 units?', 'Note:: see below', '1.Tnuva 2.Strauss',
+      'step 2.Review', 'Q3.Revenue up 4%', 'Mon.Tue', 'ממוצע.Avg', 'Coca-Cola 1.5L', 'a.k.a. Shufersal', 'approx.₪1,200',
+    ]) {
+      expect(sanitizeAnswer(ok).stripped, ok).toBe(false);
+    }
     // …and ordinary prose (incl. a double space, "<5%", a missing space after a period) is NOT flagged.
     for (const ok of [
       '1.5% of spend.Next month', 'avg.price', 'report.xlsx', 'Mr. Cohen', 'U.S. dollars', '10:30:45',
-      'spend. It was high', 'הדליפה  ₪1,234.56', 'פחות מ- <5% חריגה', 'פערים.מומלץ', 'The leak rose.It came from X.',
+      'spend. It was high', 'milk,eggs and bread', 'e.g. this', 'the file.pdf', 'Total spend.The leak', 'הדליפה  ₪1,234.56', 'פחות מ- <5% חריגה', 'פערים.מומלץ', 'The leak rose.It came from X.',
     ]) {
       expect(sanitizeAnswer(ok).stripped, ok).toBe(false);
     }

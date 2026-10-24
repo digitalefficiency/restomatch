@@ -11,7 +11,7 @@
  */
 import { useCallback, useSyncExternalStore } from 'react';
 import { Languages } from 'lucide-react';
-import { unitLabel } from '@restomatch/translate/units';
+import { unitLabelFor } from '@restomatch/translate/units';
 import { useAppLocale, useDir, useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
 import { receiving } from '@/lib/i18n/messages/receiving';
@@ -118,10 +118,10 @@ export function ItemName({
   );
 }
 
-/** Unit label in the active language (ק״ג → kg in English). */
+/** Unit label in the active language (ק״ג → kg in English; ארגז → صندوق in Arabic). */
 export function useUnitLabel(): (unit: string | null | undefined) => string {
-  const locale = useLocale();
-  return useCallback((unit) => unitLabel(unit, locale), [locale]);
+  const appLocale = useAppLocale();
+  return useCallback((unit) => unitLabelFor(unit, appLocale), [appLocale]);
 }
 
 /** "12 kg" / "12 ק״ג" — isolated in the page direction, number first. */

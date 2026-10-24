@@ -10,7 +10,7 @@ export const receiverLangs: Shape<typeof he> = {
   },
   lines: {
     original: 'ต้นฉบับ',
-    machine: 'แปลอัตโนมัติ — ตรวจกับใบแจ้งหนี้',
+    machine: 'แปลอัตโนมัติ — ตรวจกับบิล',
     untranslated: 'ไม่มีคำแปล — แสดงเป็นภาษาต้นฉบับ',
   },
 };

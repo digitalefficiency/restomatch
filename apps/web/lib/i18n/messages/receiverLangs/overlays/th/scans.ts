@@ -3,7 +3,7 @@ import type { he } from '../../../scans/he';
 
 /** scans — th overlay (Thai). */
 export const scans: Shape<typeof he> = {
-  scannedInvoice: 'ใบแจ้งหนี้ที่สแกน',
+  scannedInvoice: 'บิลที่สแกน',
   secureLink: 'ลิงก์ปลอดภัย',
   pages: '{count} หน้า',
   localCopy: 'สำเนาในเครื่อง (สำหรับพัฒนา)',

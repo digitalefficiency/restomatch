@@ -8,14 +8,14 @@ export const components: Shape<typeof he> = {
   breadcrumbs: { label: 'መንገዲ ገጽ' },
   toast: {
     region: 'መልእኽትታት',
-    dismiss: 'መልእኽቲ ኣርሕቑ',
+    dismiss: 'መልእኽቲ ዕጸዉ',
   },
   errors: {
     generic: 'ገለ ጌጋ ተፈጢሩ። በጃኹም ደጊምኩም ፈትኑ።',
     network: 'ናብ ሰርቨር ክበጽሕ ኣይከኣለን። ኢንተርነትኩም ኣረጋግጹ እሞ ደጊምኩም ፈትኑ።',
     forbidden: 'ነዚ ንምግባር ፍቓድ የብልኩምን።',
     notFound: 'ኣይተረኽበን — ተደምሲሱ ክኸውን ይኽእል።',
-    validation: 'ገለ ቦታታት ጌጋ እዮም። በጃኹም ኣረጋግጹ እሞ ደጊምኩም ፈትኑ።',
+    validation: 'ገለ ዝመላእኩምዎ ሓበሬታ ጌጋ እዩ። በጃኹም ኣረጋግጹ እሞ ደጊምኩም ፈትኑ።',
     tooMany: 'ብዙሕ ፈተነታት። ቁሩብ ተጸበዩ እሞ ደጊምኩም ፈትኑ።',
   },
   entitlement: {

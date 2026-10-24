@@ -43,7 +43,7 @@ async function session(browser: Browser, locale: string, mobile: boolean) {
   // Dismiss the cookie banner (first-party consent cookie) so it doesn't cover the screenshots.
   const errors: string[] = [];
   page.on('console', (m) => {
-    if (m.type() === 'error') errors.push(m.text());
+    if (m.type() === 'error') errors.push(`${m.text().slice(0, 120)} @ ${page.url()}`);
   });
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('response', (r) => {

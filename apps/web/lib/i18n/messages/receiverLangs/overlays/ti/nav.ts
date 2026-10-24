@@ -55,7 +55,7 @@ export const nav: Shape<typeof he> = {
     noInvoiceNumber: 'ቁጽሪ የብሉን',
   },
   worker: {
-    title: 'ናይ ምስራሕ ሲስተም ሕጂ ኣይሰርሕን ዘሎ።',
+    title: 'ናይ መስርሕ ሲስተም ሕጂ ኣይሰርሕን ዘሎ።',
     body: 'እትሰዱዎም ፋቱራታት ይዕቀቡ፡ ሲስተም ምስ ተመለሰ ድማ ክንበቡን ክነጻጸሩን እዮም።',
     lastBeat: 'መወዳእታ ምልክት ቅድሚ {minutes} ደቒቕ።',
     ownerNotified: 'ወናኒ ተሓቢሩ ኣሎ።',

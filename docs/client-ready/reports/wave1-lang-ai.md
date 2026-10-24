@@ -111,6 +111,20 @@ Branch `claude/wave1-lang-ai` → draft PR #42 into `claude/client-ready`. Both 
   - `ask.status`, `ask.ask`
 - A new describe block covers foreign-id and isolation cases A → B: foreign PO/invoice ids are `NOT_FOUND`, B's member can't be changed, an `ask` answer never contains B's ids or invoice numbers, and the flag is read only for the session restaurant.
 
+## Receiver-language quality pass (orchestrator ask, after S4 cross-QA)
+
+Each language got one more reviewer pass. Every string was checked against its he/en source for meaning and for length, since it must fit buttons on a 390 px phone:
+
+| Language | Strings changed | Flagged for a native speaker | Notes |
+|---|---|---|---|
+| Arabic (ar) | 11 | 14 | terms unified: invoice فاتورة, order طلبية, delivery توصيلة |
+| Russian (ru) | 17 | 13 | shorter buttons; delivery notes renamed "документы поставок" so they no longer clash with "накладная" |
+| Thai (th) | 18 | 17 | invoice term switched to the everyday **บิล** (34 places) |
+| Tigrinya (ti) | 7 | 53 high-priority (P1) + 56 other (P2) | buttons shortened; Amharic words replaced; the gender of ፋቱራ made consistent |
+
+- **Unit words:** word units now show in the receiver's language for ar/ru/th (for example "17 ربطة", "ящик", "ลัง"). Symbols such as kg, g, L and ml are unchanged. Tigrinya stays English until a native review. The code is `unitLabelFor` in `packages/translate/src/units.ts`.
+- **Native-speaker review lists:** the full per-language lists (every change, plus every string to confirm) are in **`docs/client-ready/reports/wave1-lang-ai-native-review.md`**.
+
 ## Uncertain translations (please have a native speaker check)
 
 - **Tigrinya (most important):** nav `ሰንሰለት`/`ጨናፍር` (chain/branches, added at merge time without review);
@@ -154,9 +168,64 @@ Branch `claude/wave1-lang-ai` → draft PR #42 into `claude/client-ready`. Both 
 | **L4** `dump.rdb` was modified in the PR | Restored from the base; locally marked `skip-worktree` | `git diff origin/claude/client-ready -- dump.rdb` is empty |
 | **L3** The `when` order of 0052/0053 | Not renumbered (orchestrator handles it at integration) | — |
 
-The cross-QA fixes were reviewed by one independent refuter. Its round-2 findings are fixed: look-alike/spaced/IDN/zero-width domains no longer survive, whitespace-only flagging is gone, `spend.Next`-style false positives are gone, and IPv6/hex IPs/other phone formats are covered. It found nothing in L2.
+### S4 re-verify @ 1a7a742: L1 still bypassable → inverted rule
+
+S4 found phishing gTLDs (`.zip .mov .bond .sbs .cfd .lat .quest`), `e v i l . c o m` and `evil,com` still returned `grounded:true`. The tight `label.word` form is now **inverted**: it is a link unless it is
+- a file extension from a short list (`xlsx csv pdf png jpg…`, **not** zip/mov);
+- a number, or a Hebrew word (a sentence missing its space);
+- a 2-label prose shape with no port/path: a Title-case English sentence starter (`spend.Next`, `rose.It`); a Title/UPPER-case word that is **not a real TLD** (`excl.VAT`, `Q3.Revenue`); a numbered list item (`1.Tnuva`); or an abbreviation + a word that is not a real TLD (`avg.price`).
+
+"Real TLD" is the full list of 1,288 ASCII TLDs, vendored as a constant in `ask/tlds.ts` from the Public Suffix List in `tldts@7.0.30` (no network at runtime).
+
+Detection-only normalization: spaced-out characters (`e v i l . c o m`, `e-v-i-l.c-o-m`, `evil . c o m`, newline-separated) are collapsed on a copy, and the run is stripped only if the copy is a link. `,` / `;` between labels (`evil,com`, `evil, com`) counts as a dot only before an unmistakable TLD (ccTLDs + com/net/org/…), so `cash,credit` and `milk,eggs` stay prose.
+
+**Refuter round 3** (one independent agent, about 190 probes) found more and they are fixed:
+- Bypasses:
+  - variation selectors, tag characters, braille blank and combining marks splitting a label (`evil.c̲om`), and a combining dot above used as a dot;
+  - more dot look-alikes (`⸱ ⸳ ܁ ᛫ ⦁ ㆍ ᐧ`);
+  - `נקודה` / `_dot_` / `-dot-` / `punkt` / `[,]` / `(at)`;
+  - restaurant gTLDs behind an abbreviation (`ref.menu`, `max.pizza`);
+  - Israeli phones with en dashes, dots, parentheses, odd grouping or spaced digits.
+- False positives:
+  - `Data: 3 invoices` (a scheme needs a non-space after the colon);
+  - `Prices rose. Today: ₪1,200` (the spaced "after-dot" form now needs a lower-case TLD that ends the token);
+  - invoice numbers read as phones (`01234567`, `00012345678`, `03123456`) or IPs (`INV-26.10.18.001`; octets ≤255);
+  - `10@3.50`, markdown `*1250 ₪*`, `Note::`;
+  - `excl.VAT`, `vs.April`, `Dr.Oetker`, `Mon.Tue`, `1.Tnuva`, `cash,credit`.
+
+**Accepted trade-offs**, documented here:
+- Lower-case run-ons (`eggs.bread`) are flagged, as are tokens whose word really is a TLD (`Coke.Zero`, `Mr.Kitchen`, `invoices.zip`, `v2.Final`).
+- A Title-case ccTLD sentence starter (`evil.It`) still passes, because `rose.It came…` has to.
+- These are not detected: digits spaced out without the leading 0, `evil at gmail`, `telegram evilbot`, and `Invoice no. 1700-123-456` (flagged as a toll-free number).
+
+A flag only means the answer shows the "check the screens" note; no answer text is ever turned into a link.
+
+Tests: `ask.test.ts` "S4 cross-QA L1":
+- each S4 string (and `Evil.Com`, `evil.Zip`, `evil,co,il`);
+- 27 round-3 bypasses;
+- 23 round-3 benign phrases;
+- the original 11 must-not-flag phrases plus 5 more.
+
+The earlier cross-QA fixes were also reviewed by one independent refuter. Its round-2 findings are fixed: look-alike/spaced/IDN/zero-width domains no longer survive, whitespace-only flagging is gone, `spend.Next`-style false positives are gone, and IPv6/hex IPs/other phone formats are covered. It found nothing in L2.
 
 New untranslated-by-review strings (merged in from the base): `receiving.errors.queueUnavailable` in ar/ru/th/ti, written by me with no reviewer pass. Tigrinya especially needs a native check.
+
+## Arabic RTL on the receiver phone flow (390 px, production build)
+
+Script: `apps/web/scripts/verify-receiver-phone.ts`. For each locale it walks inbox → PO → demo invoice → reconciliation → adjust (every line settled) → close → confirmed. At each step it checks:
+- `<html lang/dir>`
+- no horizontal page scroll at 390 px
+- no clipped or off-screen button, link or chip
+- the step text is in the locale's script
+- for **ar**, `#main-content` and every Arabic item name compute `direction: rtl`
+- zero console errors and zero 5xx
+
+Result on the final build: **95/95 passed** (ar, ru, th, ti). Screenshots: `docs/client-ready/screenshots/wave1-lang-ai/phone-{ar,ru,th,ti}-{1..5}-*.png`.
+
+**Intermittent React #418 (hydration text mismatch):**
+- Where it appeared: twice across about 10 runs of `verify-wave1-lang-ai.ts`, on different pages (once on `/dashboard/ask` as the Hebrew owner, once during the receiver section).
+- Where it did not reproduce: the 390 px phone flow (95/95, no console errors), 48 targeted navigations, or the 3 runs after I added URL logging to the script.
+- Likely source: shared dashboard chrome rather than an S14 screen. Still unproven; flagged for S5/S7 cross-QA.
 
 ## Still open / not done
 
@@ -202,7 +271,9 @@ New untranslated-by-review strings (merged in from the base): `receiving.errors.
 
 ### Layer 1: full gate (final head, after merging `origin/claude/client-ready` @ 80a3934)
 
-Latest run (after the S4 cross-QA fixes): turbo test 13/13 tasks, **1319 tests** (api 574, web 290, db 73…), typecheck 17/17, lint 0 errors, supabase-sync up to date, web build success; layer 2a 83/83 again on that build.
+Latest run (after the S4 re-verify inverted rule + refuter round 3, and merging `origin/claude/client-ready` @ ccb328a): turbo test 13/13 tasks, **1327 tests** (api 576, web 290…), typecheck + lint 18/18 (0 errors), supabase-sync up to date (44 files), web build success; layer 2a on that production build: verify 83/83, 390 px phone flow 95/95 (ar/ru/th/ti), 0 console errors. Note: the base now refuses `next start` without its production secrets — the local layer-2 server ran with placeholder `RESEND_API_KEY`/`EMAIL_FROM`/`SUPABASE_SERVICE_ROLE_KEY` and `AUTH_URL`/`APP_URL=http://localhost:3100` (nothing sent, nothing committed).
+
+Earlier run (after the S4 cross-QA fixes): turbo test 13/13 tasks, **1319 tests** (api 574, web 290, db 73…), typecheck 17/17, lint 0 errors, supabase-sync up to date, web build success; layer 2a 83/83 again on that build.
 
 
 The latest run is on the merged head: 13/13 tasks, **1271 tests** (api 563, web 271, db 68, charts 64, …), turbo typecheck 17/17, web tsc 0 errors, lint 0 errors, supabase-sync up to date (44 files), web build success.
