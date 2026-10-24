@@ -398,7 +398,7 @@ export function ContractImportWizard({ initialSupplierId }: { initialSupplierId:
             <LinkButton href="/dashboard/contracts?tab=contracts" size="sm">
               {t('import.viewContracts')}
             </LinkButton>
-            <LinkButton href={`/dashboard/suppliers/${supplierId}?tab=contract`} size="sm" variant="secondary">
+            <LinkButton href={`/dashboard/suppliers/${encodeURIComponent(supplierId)}?tab=contract`} size="sm" variant="secondary">
               {t('import.viewSupplier')}
             </LinkButton>
             <Button variant="ghost" size="sm" onClick={resetAll}>

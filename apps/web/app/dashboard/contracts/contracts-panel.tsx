@@ -72,7 +72,7 @@ export function ContractsPanel({
 
   const money = (v: string | number) => formatIls(Number(v), { locale, maximumFractionDigits: 4 });
   const day = (d: string) => formatDate(d, locale, { day: '2-digit', month: '2-digit', year: 'numeric' });
-  const importHref = `/dashboard/contracts/import${filter ? `?supplierId=${filter}` : ''}`;
+  const importHref = `/dashboard/contracts/import${filter ? `?supplierId=${encodeURIComponent(filter)}` : ''}`;
 
   function refreshAll() {
     void utils.contracts.list.invalidate();
