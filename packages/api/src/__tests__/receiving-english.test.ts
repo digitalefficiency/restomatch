@@ -273,7 +273,7 @@ describe('local-demo OCR stub', () => {
     // No rate on supplier or PO: the restaurant's.
     await db.update(suppliers).set({ vatRate: null }).where(eq(suppliers.id, A.supplierId));
     const std = await buildDevOcrStub(db, A.restaurantId, A.grId);
-    expect(std!.totals.vat).toBeCloseTo(Math.round(std!.totals.subtotal * 18) / 100, 2);
+    expect(std!.totals.vat).toBeCloseTo(Math.round((std!.totals.subtotal ?? 0) * 18) / 100, 2);
   });
 
   it('refuses a foreign receipt', async () => {
