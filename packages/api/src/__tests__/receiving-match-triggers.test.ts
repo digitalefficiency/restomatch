@@ -25,7 +25,9 @@ vi.mock('@restomatch/queue', async (orig) => ({
 }));
 
 const { appRouter } = await import('../index');
-const { invoicesWaitingOnReceipt, lockReceipt, receiptStillOpen } = await import('../receiving/matchTriggers');
+const { invoicesWaitingOnReceipt, lockReceipt, readScanGrId, receiptStillOpen, scanReceiptToStamp, withScanGrId } = await import(
+  '../receiving/matchTriggers'
+);
 
 const db = createDb(testDbUrl());
 const other = createDb(testDbUrl()); // a second connection, for the lock race
@@ -73,7 +75,13 @@ async function seed(): Promise<Seed> {
 /** An OCR'd invoice from the PO's supplier (status `matched` = OCR was confident). */
 async function invoice(
   s: Seed,
-  opts: { status?: 'ocr_pending' | 'parsed' | 'matched'; duplicate?: boolean; supplierId?: string } = {},
+  opts: {
+    status?: 'ocr_pending' | 'parsed' | 'matched';
+    duplicate?: boolean;
+    supplierId?: string;
+    /** The receipt the OCR job stamped (raw.scanGrId); unstamped = legacy / email row. */
+    scanGrId?: string;
+  } = {},
 ) {
   const [inv] = await db
     .insert(invoices)
@@ -83,6 +91,7 @@ async function invoice(
       status: opts.status ?? 'matched',
       source: 'photo',
       ...(opts.duplicate ? { ocrPayload: { raw: { duplicateOf: { invoiceNumber: '1' } } } as never } : {}),
+      ...(opts.scanGrId ? { ocrPayload: { raw: { scanGrId: opts.scanGrId } } as never } : {}),
     })
     .returning();
   await db.insert(invoiceLines).values({
@@ -304,5 +313,99 @@ describe('verifier follow-up (b): re-submitting an already-closed receipt claims
     const stray = await invoice(s); // pairs only with GR2, no run
     await callerFor(s).receiving.submitReceipt({ grId: s.grId, invoiceIds: [stray] });
     expect(enqueueMatchInvoice).not.toHaveBeenCalled();
+  });
+});
+
+const sentIds = () => enqueueMatchInvoice.mock.calls.map((c) => c[0].invoiceId);
+/** What the match job would record for a claimed scan: a run on that receipt. */
+async function ranOn(s: Seed, invoiceId: string, grId: string) {
+  await db.insert(matchRuns).values({ restaurantId: s.restaurantId, invoiceId, grId, overallStatus: 'clean' });
+}
+
+describe('scanGrId stamp: a scan belongs to exactly the receipt it was taken on', () => {
+  it('(a) GR2 first, then GR1: each receipt claims only its own stamped scan, named or derived', async () => {
+    const s = await seed(); // PO2 + GR2 (s.grId), counted
+    const { gr1 } = await openSiblingReceipt(s);
+    const x1 = await invoice(s, { scanGrId: gr1 });
+    const x2 = await invoice(s, { scanGrId: s.grId });
+
+    await callerFor(s).receiving.submitReceipt({ grId: s.grId, invoiceIds: [x2, x1] });
+    expect(sentIds()).toEqual([x2]);
+    await ranOn(s, x2, s.grId);
+
+    enqueueMatchInvoice.mockClear();
+    await callerFor(s).receiving.submitReceipt({ grId: gr1, invoiceIds: [x1, x2] });
+    expect(sentIds()).toEqual([x1]); // X2 is GR2's — never moved onto GR1's count
+  });
+
+  it('(a) reverse — GR1 first, then GR2: GR1 does not claim X2 although PO1 wins the pinned tie', async () => {
+    const s = await seed();
+    const { gr1 } = await openSiblingReceipt(s);
+    const x1 = await invoice(s, { scanGrId: gr1 });
+    const x2 = await invoice(s, { scanGrId: s.grId });
+
+    await callerFor(s).receiving.submitReceipt({ grId: gr1 }); // no ids: derived
+    expect(sentIds()).toEqual([x1]);
+    await ranOn(s, x1, gr1);
+
+    enqueueMatchInvoice.mockClear();
+    await callerFor(s).receiving.submitReceipt({ grId: s.grId });
+    expect(sentIds()).toEqual([x2]);
+  });
+
+  it('(b) a re-submit of the closed GR2 does not claim GR1’s stamped held scan, named or not', async () => {
+    const s = await seed();
+    const { gr1 } = await openSiblingReceipt(s);
+    const x1 = await invoice(s, { scanGrId: gr1 });
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, s.grId));
+    await callerFor(s).receiving.submitReceipt({ grId: s.grId });
+    await callerFor(s).receiving.submitReceipt({ grId: s.grId, invoiceIds: [x1] });
+    expect(sentIds()).toEqual([]);
+  });
+
+  it('a scan stamped to another (already closed) receipt is not claimed by this one', async () => {
+    const s = await seed();
+    const { gr1 } = await openSiblingReceipt(s);
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, gr1));
+    const x1 = await invoice(s, { scanGrId: gr1 }); // GR1 closed: its OCR job matches it itself
+    await callerFor(s).receiving.submitReceipt({ grId: s.grId, invoiceIds: [x1] });
+    expect(sentIds()).toEqual([]);
+  });
+
+  it('unstamped legacy rows fall back to rule 1: ambiguous with an open sibling → skipped; a stamped one still goes', async () => {
+    const s = await seed();
+    await openSiblingReceipt(s);
+    const legacy = await invoice(s); // no scanGrId: pairs with GR2 AND with open GR1
+    const stamped = await invoice(s, { scanGrId: s.grId });
+    await callerFor(s).receiving.submitReceipt({ grId: s.grId, invoiceIds: [legacy] });
+    expect(sentIds()).toEqual([stamped]);
+  });
+
+  it('an unstamped row with no open sibling is still matched (F1 unchanged)', async () => {
+    const s = await seed();
+    const legacy = await invoice(s);
+    await callerFor(s).receiving.submitReceipt({ grId: s.grId });
+    expect(sentIds()).toEqual([legacy]);
+  });
+});
+
+describe('scanGrId stamp: what the OCR job writes', () => {
+  it('stamps only a receipt of the invoice’s own restaurant (a forged / foreign grId stamps nothing)', async () => {
+    const s = await seed();
+    const [r2] = await db.insert(restaurants).values({ name: 'Other' }).returning();
+    expect(await scanReceiptToStamp(db, s.restaurantId, s.grId)).toBe(s.grId);
+    expect(await scanReceiptToStamp(db, r2!.id, s.grId)).toBeUndefined();
+    expect(await scanReceiptToStamp(db, s.restaurantId, '00000000-0000-0000-0000-000000000000')).toBeUndefined();
+    expect(await scanReceiptToStamp(db, s.restaurantId, undefined)).toBeUndefined();
+  });
+
+  it('adds only the key (no stamp → the OCR result unchanged), and reads it back defensively', () => {
+    const result = { lines: 4, confidence: 0.9 };
+    expect(withScanGrId(result, undefined)).toBe(result);
+    expect(withScanGrId(result, 'g1')).toEqual({ lines: 4, confidence: 0.9, scanGrId: 'g1' });
+    expect(readScanGrId({ raw: { scanGrId: 'g1' } })).toBe('g1');
+    for (const p of [null, undefined, {}, { raw: null }, { raw: { scanGrId: 7 } }, { raw: { scanGrId: '' } }]) {
+      expect(readScanGrId(p)).toBeNull();
+    }
   });
 });

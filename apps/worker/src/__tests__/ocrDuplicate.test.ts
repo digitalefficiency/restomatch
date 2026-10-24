@@ -99,6 +99,23 @@ describe('writeOcrHeader', () => {
     expect(kept!.status).toBe('matched');
   });
 
+  it('a duplicate keeps the scan’s receipt stamp (raw.scanGrId) next to duplicateOf', async () => {
+    const original = await newInvoice('A-100');
+    const rescan = await newInvoice();
+    const h = header('A-100');
+    await writeOcrHeader(
+      db,
+      { restaurantId, invoiceId: rescan, supplierId },
+      { ...h, ocrPayload: { ...h.ocrPayload, raw: { lines: 4, scanGrId: 'gr-1' } } },
+    );
+    const [row] = await db.select().from(invoices).where(eq(invoices.id, rescan));
+    expect(row!.ocrPayload?.raw).toEqual({
+      lines: 4,
+      scanGrId: 'gr-1',
+      duplicateOf: { invoiceId: original, invoiceNumber: 'A-100' },
+    });
+  });
+
   it('re-writing the same invoice with its own number is not a duplicate (job retry)', async () => {
     const id = await newInvoice();
     await writeOcrHeader(db, { restaurantId, invoiceId: id, supplierId }, header('A-100'));

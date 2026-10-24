@@ -133,9 +133,12 @@ export { buildMatchInputForInvoice, type BuiltMatchInput } from './match/buildMa
 export {
   invoicesWaitingOnReceipt,
   lockReceipt,
+  readScanGrId,
   receiptState,
   receiptStillOpen,
+  scanReceiptToStamp,
   scannedInvoicesForReceipt,
+  withScanGrId,
 } from './receiving/matchTriggers';
 export { backfillPriceHistory, writePriceHistoryForInvoice } from './match/priceHistory';
 export { loadPriorDecisions, matchActivitySummary, persistMatchRun, type PersistMatchArgs, type PersistMatchResult } from './match/persist';
