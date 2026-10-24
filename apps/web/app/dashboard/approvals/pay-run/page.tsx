@@ -40,7 +40,7 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
   const back = (
     <Link
       href="/dashboard/approvals"
-      className="mb-3 -ms-2 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-sm font-semibold text-muted hover:text-ink"
+      className="mb-3 -ms-2 inline-flex min-h-11 items-center gap-1 rounded-lg px-2 py-1 text-sm font-semibold text-muted hover:text-ink sm:min-h-0"
     >
       <ArrowRight className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
       {ta('title')}
@@ -134,7 +134,7 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
             aria-current={m === monthOffset ? 'page' : undefined}
             data-testid={`payrun-month-${m === 0 ? 'this' : 'last'}`}
             className={cn(
-              'rounded-lg px-3 py-1.5 font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
+              'inline-flex min-h-11 items-center rounded-lg px-3 py-1.5 font-semibold transition-colors sm:min-h-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
               m === monthOffset ? 'bg-surface text-ink shadow-card' : 'text-muted hover:text-ink',
             )}
           >
@@ -256,11 +256,11 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
                           <span className="text-xs text-muted">{t('table.pending', { amount: ils(inv.pendingIls) })}</span>
                         ) : null}
                         {inv.status === 'hold' && !inv.pendingLink ? (
-                          <LinkButton href="/dashboard/approvals" size="sm" variant="primary">
+                          <LinkButton href="/dashboard/approvals" size="sm" variant="primary" className="min-h-11 sm:min-h-0">
                             {t('table.toApprovals')}
                           </LinkButton>
                         ) : inv.status === 'claim' ? (
-                          <LinkButton href={`/dashboard/leaks/claims${monthOffset ? '?m=-1' : ''}`} size="sm" variant="secondary">
+                          <LinkButton href={`/dashboard/leaks/claims${monthOffset ? '?m=-1' : ''}`} size="sm" variant="secondary" className="min-h-11 sm:min-h-0">
                             <FileText className="h-4 w-4" aria-hidden="true" />
                             {t('letters')}
                           </LinkButton>
