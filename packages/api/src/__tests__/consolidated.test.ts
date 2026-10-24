@@ -602,6 +602,90 @@ describe('deliveryNoteNumberIn — #119 verification (P6): a list needs a note-s
   });
 });
 
+describe('deliveryNoteNumberIn — #119 verification (P6b): repeated prefixes, bidi marks, #', () => {
+  it('a list that repeats the prefix, or carries RTL marks / a full-width plus, is still a list', () => {
+    for (const d of [
+      'ת.מ. 61036 + ת.מ. 61037',
+      'DN 61036 &amp; DN 61037',
+      'DN 61036 & DN #61037',
+      'ת.מ. 61036 ות.מ. 61037',
+      'ת.מ. 61036 \u200F+\u200F 61037',
+      'ת.מ. \u202B61036\u202C, \u202B61037\u202C',
+      'ת.מ. 61036 ＋ 61037',
+      'DN 61036 and61037',
+    ]) {
+      expect(deliveryNoteNumberIn(d)).toBeNull();
+    }
+  });
+  it("'#' after the prefix is accepted, and a mark doesn't hide a single note", () => {
+    expect(deliveryNoteNumberIn('ת.מ.#61036 · חלב 3%')).toBe('61036');
+    expect(deliveryNoteNumberIn('ת.מ. # 61036')).toBe('61036');
+    expect(deliveryNoteNumberIn('ת.מ. \u200F61036\u200F + 2 יח׳')).toBe('61036');
+  });
+});
+
+describe('buildConsolidatedProposal — #119 verification (P6): a note + quantity line stays on its note', () => {
+  const MILK = 'p-milk';
+  const milk = (qty: number, price: number | null) => noteLine(MILK, qty, price as number, { name: 'חלב 3%', nameEn: 'Milk 3%' });
+  const run = (desc: string, billed: { qty: number; price: number }, notes: DeliveryNoteData[]) => {
+    const line = invLine(MILK, billed.qty, billed.price);
+    const lineNotes = new Map<string, string>();
+    const n = deliveryNoteNumberIn(desc);
+    if (n) lineNotes.set(line.id, n);
+    return buildConsolidatedProposal({
+      invoiceId: 'inv-p6',
+      supplierId: 'sup-1',
+      periodStart: new Date('2026-09-27T21:00:00Z'),
+      periodEnd: new Date('2026-11-03T22:00:00Z'),
+      base: { ...base([line]), tolerances: DEFAULT_TOLERANCES },
+      notes,
+      invoiceLineNotes: lineNotes,
+    });
+  };
+  const leaks = (p: ReturnType<typeof run>) =>
+    p.findings.filter((f) => f.countsAsLeak).map((f) => [f.type, f.deltaAmount, f.deliveryNoteNumber ?? null]);
+
+  it('S1: a bonus quantity after the note — 12 @ 6.50 vs 6.40 is within the price tolerance → ₪0', () => {
+    const p = run('ת.מ. 61036 + 2 יח׳ בונוס · חלב 3%', { qty: 12, price: 6.5 }, [note('gr-36', 5, [milk(12, 6.4)], '61036')]);
+    expect(leaks(p)).toEqual([]);
+  });
+
+  it("S1b: 'DN 61036 &amp; 2 crates free' — 200 @ 6.52 vs 6.40 within tolerance → ₪0", () => {
+    for (const d of ['DN 61036 &amp; 2 crates free · milk 3%', 'DN 61036 & 2 crates free · milk 3%']) {
+      const p = run(d, { qty: 200, price: 6.52 }, [note('gr-36', 5, [milk(200, 6.4)], '61036')]);
+      expect(leaks(p)).toEqual([]);
+    }
+  });
+
+  it("S2': billed at the note's own price; unbilled edge-day notes (one unpriced) never set its price → ₪0", () => {
+    const p = run('ת.מ. 61036 + 2 יח׳ בונוס · חלב 3%', { qty: 10, price: 6.4 }, [
+      note('gr-36', 5, [milk(10, 6.4)], '61036'),
+      note('gr-90', 32, [milk(10, 6)], '61090'),
+      note('gr-91', 33, [milk(5, null)], '61091'),
+    ]);
+    expect(leaks(p)).toEqual([]);
+  });
+
+  it('S3: a real overcharge on 61036 is the ₪60 on that note, not re-priced by an unbilled note', () => {
+    const p = run('ת.מ. 61036 + 1 ארגז · חלב 3%', { qty: 10, price: 14 }, [
+      note('gr-36', 5, [milk(10, 8)], '61036'),
+      note('gr-40', 30, [milk(10, 5)], '61040'),
+    ]);
+    expect(leaks(p)).toEqual([['PRICE_HIGHER', 60, '61036']]);
+    expect(p.findings.find((f) => f.type === 'PRICE_HIGHER')?.expected).toBe(8);
+  });
+
+  it('S4: a note already billed on another invoice is still caught (billed twice, ₪64)', () => {
+    const p = run('ת.מ. 61036 + 2 יח׳ בונוס · חלב 3%', { qty: 10, price: 6.4 }, [
+      { ...note('gr-36', 5, [milk(10, 6.4)], '61036'), alreadyBilledOn: { invoiceId: 'inv-0', invoiceNumber: 'R-0' } },
+      note('gr-90', 32, [milk(10, 6)], '61090'),
+      note('gr-91', 33, [milk(5, null)], '61091'),
+    ]);
+    expect(leaks(p)).toEqual([['QTY_OVER', 64, '61036']]);
+    expect(p.findings.find((f) => f.type === 'QTY_OVER')?.alreadyBilledOn?.invoiceNumber).toBe('R-0');
+  });
+});
+
 describe('readConsolidatedRaw / periodOfInvoice / deliveryNoteNumberIn', () => {
   it('reads the consolidated payload; anything else is not one', () => {
     expect(

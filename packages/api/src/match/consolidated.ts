@@ -268,18 +268,23 @@ export function claimableIls(
   return claimSplit(findings, invoiceTotalInclVat).totalIls;
 }
 
+/** Bidi / direction marks an RTL invoice may carry between tokens, and the full-width plus. */
+const BIDI_MARKS = /[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
+
 /** A delivery-note number in free text: `ת.מ. 61036` (Hebrew) or `DN 61036`. */
 export function deliveryNoteNumberIn(text: string | null | undefined): string | null {
   if (!text) return null;
+  text = text.replace(BIDI_MARKS, '').replace(/＋/g, '+');
   // A RANGE ("ת.מ. 61036-61043", "61036-43", "61036 עד 61043") is a month line: it
   // bills the pool. When in doubt, pool — a false note puts the month on one note.
   if (/(?:ת\.\s?מ\.?|\bDN)\s*#?\s*\d+\s*(?:[-–—]|עד|to)\s*\d+/i.test(text)) return null;
-  // So is a LIST ("61036, 61037" / "61036 + 61037" / "61036 & 61037" / "61036 ו-61037"),
-  // when the second number is note-sized — at least the first's digits less one — so
-  // "ת.מ. 61036 + 2 יח׳" names 61036 while a small supplier's "512, 513" is a list.
-  const pair = /(?:ת\.\s?מ\.?|\bDN)\s*#?\s*(\d+)\s*(?:[,،;/+]|&(?:amp;)?|and\b|ו-?)\s*(\d+)/i.exec(text);
+  // So is a LIST ("61036, 61037" / "61036 + ת.מ. 61037" / "DN 61036 & DN 61037" /
+  // "61036 ות.מ. 61037"), when the second number is note-sized — at least the first's
+  // digits less one — so "ת.מ. 61036 + 2 יח׳" names 61036 while "512, 513" is a list.
+  const pair =
+    /(?:ת\.\s?מ\.?|\bDN)\s*#?\s*(\d+)\s*(?:[,،;/+]|&(?:amp;)?|and|ו-?)\s*(?:(?:ת\.\s?מ\.?|DN)\s*)?#?\s*(\d+)/i.exec(text);
   if (pair && pair[2]!.length >= pair[1]!.length - 1) return null;
-  const m = /ת\.\s?מ\.?\s*(\d+)/.exec(text) ?? /\bDN\s*#?\s*(\d+)/i.exec(text);
+  const m = /ת\.\s?מ\.?\s*#?\s*(\d+)/.exec(text) ?? /\bDN\s*#?\s*(\d+)/i.exec(text);
   return m ? m[1]! : null;
 }
 
