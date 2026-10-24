@@ -142,7 +142,7 @@ export function slipBullet(name: string, issues: string[], amount: string | null
  * slip (and its WhatsApp text) carries NO ₪ at all — not even unit prices: an
  * over-price line just says the invoice price is above the order.
  */
-export function issueMessageKey(issue: SlipIssue, engineReady: boolean): string {
+export function issueMessageKey(issue: SlipIssue, engineReady: boolean): SlipIssue | 'overPriceNoAmount' {
   return issue === 'overPrice' && !engineReady ? 'overPriceNoAmount' : issue;
 }
 
