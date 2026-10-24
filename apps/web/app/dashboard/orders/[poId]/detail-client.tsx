@@ -140,11 +140,18 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
             {po.sentAt ? (
               <div>
                 <dt className="text-xs text-subtle">
-                  {po.sentChannel
-                    ? t('detail.sentVia', { channel: t(`detail.channelNames.${po.sentChannel as 'email' | 'whatsapp'}`) })
+                  {po.sentChannel && data.supplierMessage !== 'not_configured' && data.supplierMessage !== 'failed'
+                    ? t(data.supplierMessage === 'pending' ? 'detail.sendingVia' : 'detail.sentVia', {
+                        channel: t(`detail.channelNames.${po.sentChannel as 'email' | 'whatsapp'}`),
+                      })
                     : t('detail.sentAt')}
                 </dt>
                 <dd className="tabular-nums text-ink">{formatDateTime(po.sentAt, locale)}</dd>
+                {data.supplierMessage === 'not_configured' || data.supplierMessage === 'failed' ? (
+                  <dd className="mt-1 text-xs text-muted" data-testid="supplier-message-state" data-state={data.supplierMessage}>
+                    {t(data.supplierMessage === 'failed' ? 'detail.messageFailed' : 'detail.messageNotConfigured')}
+                  </dd>
+                ) : null}
               </div>
             ) : null}
             <div>

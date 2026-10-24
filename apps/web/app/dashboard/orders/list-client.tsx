@@ -33,17 +33,39 @@ function queryOf(f: StatusFilter): { status?: OrderStatus; delivery?: 'awaiting'
 export function OrdersList({ initial, canEdit }: { initial: Order[]; canEdit: boolean }) {
   const t = useT(ordersNs);
   const [status, setStatus] = useState<StatusFilter>('all');
-  const [limit, setLimit] = useState(PAGE);
+  // Pages past the first, fetched by offset (orders.list caps `limit` at 100, so
+  // growing one query's limit broke "load more" at the third page).
+  const [more, setMore] = useState<Order[]>([]);
+  const [lastPage, setLastPage] = useState<number | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [moreError, setMoreError] = useState(false);
+  const utils = trpc.useUtils();
 
   const q = trpc.orders.list.useQuery(
-    { ...queryOf(status), limit },
+    { ...queryOf(status), limit: PAGE },
     {
-      initialData: status === 'all' && limit === PAGE ? initial : undefined,
+      initialData: status === 'all' ? initial : undefined,
       placeholderData: (prev) => prev,
     },
   );
-  const orders = q.data ?? [];
-  const hasMore = orders.length >= limit;
+  const first = q.data ?? [];
+  const seen = new Set(first.map((o) => o.id));
+  const orders = [...first, ...more.filter((o) => !seen.has(o.id))];
+  const hasMore = (lastPage ?? first.length) >= PAGE;
+
+  async function loadMore() {
+    setLoadingMore(true);
+    setMoreError(false);
+    try {
+      const page = await utils.orders.list.fetch({ ...queryOf(status), limit: PAGE, offset: first.length + more.length });
+      setMore((m) => [...m, ...page]);
+      setLastPage(page.length);
+    } catch {
+      setMoreError(true);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -55,7 +77,9 @@ export function OrdersList({ initial, canEdit }: { initial: Order[]; canEdit: bo
             aria-pressed={status === f}
             onClick={() => {
               setStatus(f);
-              setLimit(PAGE);
+              setMore([]);
+              setLastPage(null);
+              setMoreError(false);
             }}
             className={cn(
               'whitespace-nowrap rounded-full px-3 py-1 text-sm transition-colors',
@@ -95,7 +119,8 @@ export function OrdersList({ initial, canEdit }: { initial: Order[]; canEdit: bo
         </div>
       )}
 
-      <LoadMore onClick={() => setLimit((l) => l + PAGE)} loading={q.isFetching} hasMore={hasMore} />
+      {moreError ? <ErrorNotice message={t('list.error')} /> : null}
+      <LoadMore onClick={loadMore} loading={loadingMore || q.isFetching} hasMore={hasMore} />
     </div>
   );
 }

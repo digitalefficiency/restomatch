@@ -14,10 +14,12 @@
  *
  * Real provider integration (WhatsApp Cloud, Expo Push, Resend) is plug-in:
  * we look up the provider by channel and call its `dispatch` method.
- * Until credentials are provisioned, the dispatcher runs but does nothing
- * (the mock notifiers already marked rows as `sent` at enqueue time).
+ * A row whose channel has no provider configured is parked as `failed` with
+ * last_error = SKIPPED_NO_PROVIDER — never `sent` — so the order page can say
+ * "supplier sending isn't configured" instead of "sent by email".
  */
 import {
+  SKIPPED_NO_PROVIDER,
   isResendConfigured,
   isWhatsAppCloudConfigured,
   makeResendDispatcher,
@@ -83,6 +85,7 @@ export function startOutboxDispatchWorker() {
 
     let dispatched = 0;
     let failed = 0;
+    let skipped = 0;
 
     for (const claimedRow of claimed) {
       const row = {
@@ -98,7 +101,15 @@ export function startOutboxDispatchWorker() {
         attemptCount: claimedRow.attempt_count,
       };
       try {
-        await dispatch(row);
+        const outcome = await dispatch(row);
+        if (outcome === 'no_provider') {
+          await db
+            .update(notificationsOutbox)
+            .set({ status: 'failed', lastError: SKIPPED_NO_PROVIDER, claimedAt: null })
+            .where(eq(notificationsOutbox.id, row.id));
+          skipped += 1;
+          continue;
+        }
         await db
           .update(notificationsOutbox)
           .set({ status: 'sent', sentAt: new Date() })
@@ -138,9 +149,9 @@ export function startOutboxDispatchWorker() {
     }
 
     console.log(
-      `[outbox-dispatch] claimed=${claimed.length} dispatched=${dispatched} failed=${failed}`,
+      `[outbox-dispatch] claimed=${claimed.length} dispatched=${dispatched} failed=${failed} skipped_no_provider=${skipped}`,
     );
-    return { dispatched, failed };
+    return { dispatched, failed, skipped };
   });
 }
 
@@ -156,9 +167,10 @@ export function startOutboxDispatchWorker() {
  *
  * Rows enqueued by the mock notifiers are already `sent` at enqueue and never
  * reach here. Rows left `queued` (real-provider path, or a failed first send)
- * are delivered here without re-enqueueing. Throwing marks the row for retry.
+ * are delivered here without re-enqueueing. Throwing marks the row for retry;
+ * 'no_provider' means nothing was sent and nothing can be until keys exist.
  */
-async function dispatch(row: {
+export async function dispatch(row: {
   restaurantId: string;
   channel: 'whatsapp' | 'push' | 'email';
   target: string;
@@ -167,22 +179,22 @@ async function dispatch(row: {
   html?: string;
   relatedEntityType: string | null;
   relatedEntityId: string | null;
-}): Promise<void> {
+}): Promise<'sent' | 'no_provider'> {
   const env = process.env;
 
   if (row.channel === 'whatsapp') {
-    if (!isWhatsAppCloudConfigured(env)) return; // no creds -> no-op
+    if (!isWhatsAppCloudConfigured(env)) return 'no_provider';
     const notifier = new WhatsAppCloudNotifier({
       phoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID!,
       accessToken: env.WHATSAPP_ACCESS_TOKEN!,
       apiBase: env.WHATSAPP_API_BASE,
     });
     await notifier.dispatch(row.target, row.body);
-    return;
+    return 'sent';
   }
 
   if (row.channel === 'email') {
-    if (!isResendConfigured(env)) return; // no creds -> no-op
+    if (!isResendConfigured(env)) return 'no_provider';
     const send = makeResendDispatcher({
       apiKey: env.RESEND_API_KEY!,
       from: env.RESEND_FROM ?? env.EMAIL_FROM,
@@ -198,11 +210,11 @@ async function dispatch(row: {
       relatedEntityId: row.relatedEntityId ?? undefined,
     };
     await send(payload);
-    return;
+    return 'sent';
   }
 
-  // push: no real provider wired yet -> no-op
-  return;
+  // push: no real provider wired yet.
+  return 'no_provider';
 }
 
 function backoff(attempt: number): Date {

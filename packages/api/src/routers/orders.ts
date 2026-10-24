@@ -22,6 +22,7 @@ import {
   users,
   type Database,
 } from '@restomatch/db';
+import { resolveTolerances } from '@restomatch/matching';
 import { ClaudePoParser } from '@restomatch/ocr';
 import { ZesttAdapter } from '@restomatch/procurement';
 import { managerProcedure, memberProcedure, requireFeature, router } from '../trpc';
@@ -30,6 +31,7 @@ import { getEntitlements } from '../entitlements';
 import { importPurchaseOrder } from '../orders/importPo';
 import { estimateTotal, recomputePoTotal } from '../orders/totals';
 import { DEDUPE_INDEX_PREDICATE } from '../notifications/outbox';
+import { supplierMessageState, type SupplierMessageState } from '../notifications/delivery';
 import { deriveExpectedDelivery, type DerivedDelivery } from '../lib/deriveDelivery';
 import { addCalendarDaysInTz, localDateKeyInTz, startOfDayInTz, startOfLocalDateInTz } from '../lib/time';
 import { poRefOf, renderOrderDocument } from '../orders/document';
@@ -40,8 +42,29 @@ const MAX_PO_DOC_BYTES = 8 * 1024 * 1024;
 const DEFAULT_BASELINE_WINDOW_DAYS = 90;
 /** Fallback timezone for date formatting when a restaurant has none set. */
 const DEFAULT_TZ = 'Asia/Jerusalem';
-/** % over the 90-day median at which we surface an "elevated price" warning. */
+/**
+ * % over the 90-day median below which the guardrail stays quiet. The bar is
+ * max(5%, the restaurant's matching price tolerance): a bump the matcher would
+ * never flag on the invoice is not a warning at order time either.
+ */
 const ELEVATED_PCT = 0.05;
+
+/** The guardrail's minimum % over median for this restaurant. */
+export function guardrailThreshold(pricePercent: number | null | undefined): number {
+  return Math.max(ELEVATED_PCT, resolveTolerances({ pricePercent: pricePercent ?? undefined }).pricePercent);
+}
+
+/** 'high' = above p90 AND over the threshold; 'elevated' = over the threshold only. */
+export function guardrailLevel(
+  unitPrice: number,
+  b: { p50: number; p90: number },
+  threshold: number,
+): 'high' | 'elevated' | null {
+  if (b.p50 <= 0) return null;
+  const pctOverMedian = (unitPrice - b.p50) / b.p50;
+  if (pctOverMedian <= threshold) return null;
+  return unitPrice > b.p90 ? 'high' : 'elevated';
+}
 
 const LineInput = z
   .object({
@@ -77,6 +100,7 @@ async function computeGuardrail(
   supplierId: string,
   lines: Array<{ productId?: string; unitPriceExpected?: number }>,
   windowDays: number,
+  threshold: number = ELEVATED_PCT,
 ): Promise<GuardrailWarning[]> {
   const priced = lines.filter(
     (l): l is { productId: string; unitPriceExpected: number } =>
@@ -112,12 +136,10 @@ async function computeGuardrail(
   for (const l of priced) {
     const b = baselineByProduct.get(l.productId);
     if (!b || b.p50 <= 0) continue;
+    const level = guardrailLevel(l.unitPriceExpected, b, threshold);
+    if (!level) continue;
     const pctOverMedian = (l.unitPriceExpected - b.p50) / b.p50;
-    if (l.unitPriceExpected > b.p90) {
-      warnings.push({ productId: l.productId, unitPrice: l.unitPriceExpected, p50: b.p50, p90: b.p90, pctOverMedian, level: 'high' });
-    } else if (pctOverMedian > ELEVATED_PCT) {
-      warnings.push({ productId: l.productId, unitPrice: l.unitPriceExpected, p50: b.p50, p90: b.p90, pctOverMedian, level: 'elevated' });
-    }
+    warnings.push({ productId: l.productId, unitPrice: l.unitPriceExpected, p50: b.p50, p90: b.p90, pctOverMedian, level });
   }
   return warnings;
 }
@@ -157,13 +179,16 @@ async function deriveForSupplier(
   return deriveExpectedDelivery(supplier.orderSchedule, nowUtc, tz);
 }
 
-async function baselineWindow(db: Database, restaurantId: string): Promise<number> {
+async function guardrailSettings(db: Database, restaurantId: string): Promise<{ windowDays: number; threshold: number }> {
   const [r] = await db
     .select({ settings: restaurants.settings })
     .from(restaurants)
     .where(eq(restaurants.id, restaurantId))
     .limit(1);
-  return r?.settings?.baselineWindowDays ?? DEFAULT_BASELINE_WINDOW_DAYS;
+  return {
+    windowDays: r?.settings?.baselineWindowDays ?? DEFAULT_BASELINE_WINDOW_DAYS,
+    threshold: guardrailThreshold(r?.settings?.tolerances?.pricePercent),
+  };
 }
 
 /** A restaurant-local calendar date, 'YYYY-MM-DD'. */
@@ -374,7 +399,22 @@ export const ordersRouter = router({
         ...l,
         productNameEn: l.productId ? (nameEnById.get(l.productId) ?? null) : null,
       }));
+      // What actually happened to the order message — not just the channel picked.
+      const [msg] = await ctx.db
+        .select({ status: notificationsOutbox.status, lastError: notificationsOutbox.lastError, channel: notificationsOutbox.channel })
+        .from(notificationsOutbox)
+        .where(
+          and(
+            eq(notificationsOutbox.restaurantId, restaurantId),
+            eq(notificationsOutbox.relatedEntityType, 'purchase_order'),
+            eq(notificationsOutbox.relatedEntityId, input.poId),
+          ),
+        )
+        .orderBy(desc(notificationsOutbox.createdAt))
+        .limit(1);
+      const supplierMessage: SupplierMessageState | null = msg ? supplierMessageState(msg) : null;
       return {
+        supplierMessage,
         po,
         lines,
         supplierName: supplier?.name ?? null,
@@ -860,8 +900,8 @@ export const ordersRouter = router({
     .query(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
       await assertSupplierOwned(ctx.db, input.supplierId, restaurantId);
-      const windowDays = await baselineWindow(ctx.db, restaurantId);
-      const warnings = await computeGuardrail(ctx.db, restaurantId, input.supplierId, input.lines, windowDays);
+      const { windowDays, threshold } = await guardrailSettings(ctx.db, restaurantId);
+      const warnings = await computeGuardrail(ctx.db, restaurantId, input.supplierId, input.lines, windowDays, threshold);
       return { warnings };
     }),
 });
