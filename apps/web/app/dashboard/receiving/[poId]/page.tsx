@@ -50,7 +50,7 @@ export default async function ReceivingPoPage({
     expectedAt: po.expectedAt ? new Date(po.expectedAt).toISOString() : null,
     status: po.status,
     totalEstimated: po.totalEstimated != null ? Number(po.totalEstimated) : null,
-    features: { dockSlip: po.features.dockSlip, receiveRest: po.features.receiveRest },
+    features: { dockSlip: po.features.dockSlip, receiptReopen: po.features.receiptReopen },
     closedReceipt: po.closedReceipt
       ? {
           grId: po.closedReceipt.grId,

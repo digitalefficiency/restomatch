@@ -50,7 +50,10 @@ export type AuditAction =
   | 'discrepancy.escalated'
   // Chain / branches (chain router)
   | 'chain.branch_added'
-  | 'chain.branch_renamed';
+  | 'chain.branch_renamed'
+  // Receiving: a closed goods receipt reopened (receiving router)
+  | 'receiving.receipt_reopened'
+  | 'receiving.count_corrected';
 
 export interface AuditEntry {
   /** Tenant the action belongs to. On a tenant connection this must equal the GUC. */

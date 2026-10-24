@@ -34,6 +34,7 @@ import { assertGrOwned, assertSupplierOwned } from '../tenant';
 import { fillEnglishNames } from '../receiving/english';
 import {
   invoicesWaitingOnReceipt,
+  lockReceipt,
   receiptState,
   rematchHoldReason,
   scannedInvoicesForReceipt,
@@ -42,6 +43,7 @@ import { devOcrStubEnabled, buildDevOcrStub } from '../receiving/devOcrStub';
 import { isAllowedScanUrl } from '../lib/scanUrls';
 import { isInvoiceNumberTaken, readDuplicateOf, withoutDuplicateOf } from '../lib/invoiceDedupe';
 import { appError } from '../errors';
+import { recordAudit } from '../audit';
 import { endOfDayInTz, startOfDayInTz } from '../lib/time';
 import { claimableLines } from '../lib/claims';
 import { featureEnabled } from '../lib/features';
@@ -257,7 +259,7 @@ export const receivingRouter = router({
         closedReceipt,
         features: {
           dockSlip: featureEnabled(rest?.settings, 'dockSlip'),
-          receiveRest: featureEnabled(rest?.settings, 'receiveRest'),
+          receiptReopen: featureEnabled(rest?.settings, 'receiptReopen'),
         },
       };
     }),
@@ -822,6 +824,16 @@ export const receivingRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      // Under the receipt's lock, like submitReceipt: an edit can't land between
+      // a close computing the status and committing it (it waits, then sees the
+      // receipt closed). Tenant-scoped lookup — a foreign line takes no lock.
+      const [owner] = await ctx.db
+        .select({ grId: grLines.grId })
+        .from(grLines)
+        .innerJoin(goodsReceipts, eq(goodsReceipts.id, grLines.grId))
+        .where(and(eq(grLines.id, input.grLineId), eq(goodsReceipts.restaurantId, ctx.session.restaurantId)))
+        .limit(1);
+      if (owner) await lockReceipt(ctx.db, owner.grId);
       // gr_lines has no restaurant_id — tenant scope goes through the parent
       // goods_receipt, inside the UPDATE itself so there is no TOCTOU window.
       const [updated] = await ctx.db
@@ -859,7 +871,7 @@ export const receivingRouter = router({
           .where(and(eq(grLines.id, input.grLineId), eq(goodsReceipts.restaurantId, ctx.session.restaurantId)))
           .limit(1);
         if (line && line.status !== 'pending') {
-          throw appError('CONFLICT', 'receipt.closed', 'This goods receipt is already closed');
+          throw appError('CONFLICT', 'receipt.closed', RECEIPT_CLOSED_MSG);
         }
         throw new TRPCError({ code: 'NOT_FOUND', message: 'GR line not found' });
       }
@@ -887,7 +899,7 @@ export const receivingRouter = router({
       // re-match it.
       const state = await receiptState(ctx.db, ctx.session.restaurantId, input.grId);
       if (!state.open) {
-        throw appError('CONFLICT', 'receipt.closed', 'This goods receipt is already closed');
+        throw appError('CONFLICT', 'receipt.closed', RECEIPT_CLOSED_MSG);
       }
 
       const rows = await ctx.db
@@ -934,20 +946,13 @@ export const receivingRouter = router({
    * (CONFLICT 'receipt.closed'), a pending one is returned as is. The wizard
    * then counts the running total (already received + this delivery), and the
    * next submit stamps the new close and re-matches every invoice on the receipt.
-   * Flag `receiveRest`.
+   * Flag `receiptReopen`. Audited (receiving.receipt_reopened).
    */
   reopenReceipt: receiverProcedure
     .input(z.object({ grId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       await assertGrOwned(ctx.db, input.grId, ctx.session.restaurantId);
-      const [rest] = await ctx.db
-        .select({ settings: restaurants.settings })
-        .from(restaurants)
-        .where(eq(restaurants.id, ctx.session.restaurantId))
-        .limit(1);
-      if (!featureEnabled(rest?.settings, 'receiveRest')) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Receiving the rest of an order is not enabled' });
-      }
+      await assertReopenEnabled(ctx.db, ctx.session.restaurantId);
       await receiptState(ctx.db, ctx.session.restaurantId, input.grId); // takes the lock
       const [gr] = await ctx.db
         .select({ id: goodsReceipts.id, status: goodsReceipts.status })
@@ -957,12 +962,35 @@ export const receivingRouter = router({
       if (!gr) throw new TRPCError({ code: 'NOT_FOUND', message: 'GR not found' });
       if (gr.status === 'pending') return { grId: gr.id, status: 'pending' as const };
       if (gr.status !== 'partial') {
-        throw appError('CONFLICT', 'receipt.closed', 'This goods receipt is already closed');
+        throw appError('CONFLICT', 'receipt.closed', RECEIPT_CLOSED_MSG);
       }
-      await ctx.db
-        .update(goodsReceipts)
-        .set({ status: 'pending' })
-        .where(and(eq(goodsReceipts.id, gr.id), eq(goodsReceipts.restaurantId, ctx.session.restaurantId)));
+      await reopen(ctx.db, ctx.session, gr, 'receiving.receipt_reopened');
+      return { grId: gr.id, status: 'pending' as const };
+    }),
+
+  /**
+   * "תיקון ספירה" — correct a closed count (completed OR partial): an owner /
+   * manager reopens the receipt, re-counts (the recorded totals are the starting
+   * point), and the next submit re-matches every invoice on it. Under the
+   * receipt lock, audited (receiving.count_corrected). Flag `receiptReopen`.
+   */
+  correctReceipt: managerProcedure
+    .input(z.object({ grId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertGrOwned(ctx.db, input.grId, ctx.session.restaurantId);
+      await assertReopenEnabled(ctx.db, ctx.session.restaurantId);
+      await receiptState(ctx.db, ctx.session.restaurantId, input.grId); // takes the lock
+      const [gr] = await ctx.db
+        .select({ id: goodsReceipts.id, status: goodsReceipts.status })
+        .from(goodsReceipts)
+        .where(and(eq(goodsReceipts.id, input.grId), eq(goodsReceipts.restaurantId, ctx.session.restaurantId)))
+        .limit(1);
+      if (!gr) throw new TRPCError({ code: 'NOT_FOUND', message: 'GR not found' });
+      if (gr.status === 'pending') return { grId: gr.id, status: 'pending' as const };
+      if (gr.status !== 'partial' && gr.status !== 'completed') {
+        throw appError('CONFLICT', 'receipt.closed', RECEIPT_CLOSED_MSG);
+      }
+      await reopen(ctx.db, ctx.session, gr, 'receiving.count_corrected');
       return { grId: gr.id, status: 'pending' as const };
     }),
 
@@ -1127,6 +1155,43 @@ export const receivingRouter = router({
       .orderBy(desc(invoices.createdAt));
   }),
 });
+
+/** Flag `receiptReopen` (receive the rest / correct a count). */
+async function assertReopenEnabled(db: Database, restaurantId: string): Promise<void> {
+  const [rest] = await db
+    .select({ settings: restaurants.settings })
+    .from(restaurants)
+    .where(eq(restaurants.id, restaurantId))
+    .limit(1);
+  if (!featureEnabled(rest?.settings, 'receiptReopen')) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'פתיחה מחדש של קבלת סחורה אינה זמינה' });
+  }
+}
+
+/** A closed receipt back to 'pending' (caller holds the receipt lock), audited in the same tx. */
+async function reopen(
+  db: Database,
+  session: { userId: string; restaurantId: string },
+  gr: { id: string; status: string },
+  action: 'receiving.receipt_reopened' | 'receiving.count_corrected',
+): Promise<void> {
+  await db
+    .update(goodsReceipts)
+    .set({ status: 'pending' })
+    .where(and(eq(goodsReceipts.id, gr.id), eq(goodsReceipts.restaurantId, session.restaurantId)));
+  await recordAudit(db, {
+    restaurantId: session.restaurantId,
+    userId: session.userId,
+    action,
+    entityType: 'goods_receipt',
+    entityId: gr.id,
+    before: { status: gr.status },
+    after: { status: 'pending' },
+  });
+}
+
+/** receipt.closed — router messages stay human Hebrew (errors.ts); clients key off the appCode. */
+const RECEIPT_CLOSED_MSG = 'קבלת הסחורה הזו כבר נסגרה';
 
 /**
  * The count is in: (re-)match the receipt's invoices so the engine sees what was

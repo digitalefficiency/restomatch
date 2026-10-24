@@ -3,7 +3,7 @@ import { DEMO_RESTAURANT_NAME, OWNER_STATE } from './env';
 import { e2eSql } from './helpers';
 
 /**
- * "Receive the rest" (flag receiveRest) on a 390-px phone. An order whose
+ * "Receive the rest" (flag receiptReopen) on a 390-px phone. An order whose
  * receipt closed partial (2 of 4 kg of one item; the other item complete): the
  * read-only receipt offers "קבלת יתרת ההזמנה", the receiver scans the second
  * invoice, counts only what arrived now, and the receipt holds the running
@@ -54,12 +54,12 @@ async function partialReceipt(): Promise<Fixture> {
   }
 }
 
-async function setReceiveRest(restaurantId: string, on: boolean) {
+async function setReceiptReopen(restaurantId: string, on: boolean) {
   const sql = e2eSql();
   try {
     await sql`
       update restaurants
-      set settings = jsonb_set(coalesce(settings, '{}'::jsonb), '{features,receiveRest}', to_jsonb(${on}::boolean), true)
+      set settings = jsonb_set(coalesce(settings, '{}'::jsonb), '{features,receiptReopen}', to_jsonb(${on}::boolean), true)
       where id = ${restaurantId}`;
   } finally {
     await sql.end();
@@ -89,20 +89,20 @@ test.beforeEach(async ({ page }) => {
 
 test('flag off: a partial receipt stays read-only, no "receive the rest"', async ({ page }) => {
   const f = await partialReceipt();
-  await setReceiveRest(f.restaurantId, false);
+  await setReceiptReopen(f.restaurantId, false);
   try {
     await page.goto(`/dashboard/receiving/${f.poId}`);
     await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId('receive-rest-action')).toHaveCount(0);
   } finally {
-    await setReceiveRest(f.restaurantId, true);
+    await setReceiptReopen(f.restaurantId, true);
   }
 });
 
 test('the rest arrives: count only this delivery, the receipt holds the running total and closes completed', async ({ page }) => {
   test.setTimeout(180_000);
   const f = await partialReceipt();
-  await setReceiveRest(f.restaurantId, true);
+  await setReceiptReopen(f.restaurantId, true);
 
   await page.goto(`/dashboard/receiving/${f.poId}`);
   await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 30_000 });

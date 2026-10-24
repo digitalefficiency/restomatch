@@ -61,7 +61,7 @@ interface PoForClient {
   totalEstimated: number | null;
   lines: PoLineRow[];
   /** Per-restaurant feature flags the wizard reads (receiving.getPo). */
-  features?: { dockSlip?: boolean; receiveRest?: boolean };
+  features?: { dockSlip?: boolean; receiptReopen?: boolean };
   /** This PO's receipt is already closed: open it read-only, never re-run the flow. */
   closedReceipt?: { grId: string; invoiceId: string | null; closedAt: string; status?: string } | null;
 }
@@ -114,12 +114,12 @@ export function ReceivingWizard({
   const [confirmedAt, setConfirmedAt] = useState<string | null>(closed?.closedAt ?? null);
   const [error, setError] = useState<string | null>(null);
   const [poLines, setPoLines] = useState<PoLineRow[]>(po.lines);
-  /** "Receive the rest" (flag receiveRest): what the reopened partial receipt
+  /** "Receive the rest" (flag receiptReopen): what the reopened partial receipt
    *  already holds per PO line. Set → this delivery is counted on its own and
    *  stored as the running total. Captured once, at the reopen. */
   const [prior, setPrior] = useState<Record<string, PriorCount> | null>(null);
   const [reopenError, setReopenError] = useState<string | null>(null);
-  const canReceiveRest = po.features?.receiveRest === true && closed?.status === 'partial' && !result && !prior;
+  const canReceiveRest = po.features?.receiptReopen === true && closed?.status === 'partial' && !result && !prior;
   const t = useT(receiving);
   const locale = useLocale();
   const dir = useDir();

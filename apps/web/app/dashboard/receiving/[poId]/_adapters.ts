@@ -384,7 +384,7 @@ export interface PriorCount {
 }
 
 /**
- * "Receive the rest" (flag receiveRest): the next delivery of an order whose
+ * "Receive the rest" (flag receiptReopen): the next delivery of an order whose
  * receipt closed partial. The receiver counts only what arrives NOW; the
  * receipt keeps the running total (prior + now).
  *
