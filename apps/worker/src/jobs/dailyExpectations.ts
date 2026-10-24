@@ -14,7 +14,7 @@ import {
 } from '@restomatch/db';
 import { makeWorker, type WorkerJob } from '../queue';
 import { jobDb } from '../db';
-import { IL_TZ, startOfIlDay } from '../lib/notifyHelpers';
+import { ilDateKey, startOfIlDay } from '../lib/notifyHelpers';
 
 export interface DailyExpectationsJob {
   /** When omitted, computes for ALL restaurants. */
@@ -42,8 +42,7 @@ export function ilDayWindow(ref: Date): { startOfDay: Date; endOfDay: Date; date
   const startOfDay = startOfIlDay(ref);
   // +36 h always lands in the next IL day (days are 23–25 h around DST).
   const endOfDay = new Date(startOfIlDay(new Date(startOfDay.getTime() + 36 * 3600_000)).getTime() - 1);
-  const date = new Intl.DateTimeFormat('en-CA', { timeZone: IL_TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(ref);
-  return { startOfDay, endOfDay, date };
+  return { startOfDay, endOfDay, date: ilDateKey(ref) };
 }
 
 export function startDailyExpectationsWorker() {

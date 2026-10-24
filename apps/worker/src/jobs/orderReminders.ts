@@ -16,6 +16,7 @@ import { and, eq, gte, isNotNull, ne, purchaseOrders, restaurants, suppliers } f
 import { makeWorker, type WorkerJob } from '../queue';
 import {
   appBaseUrl,
+  ilDateKey,
   ilWeekday,
   ilWeekdayLabel,
   startOfIlDay,
@@ -41,7 +42,7 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
 
   const now = job.data.forDate ? new Date(job.data.forDate) : new Date();
   const startToday = startOfIlDay(now);
-  const todayKey = startToday.toISOString().slice(0, 10);
+  const todayKey = ilDateKey(now); // the Israel date (not the UTC date of IL midnight)
   const weekday = ilWeekday(now);
   const weekdayLabel = ilWeekdayLabel(now);
 

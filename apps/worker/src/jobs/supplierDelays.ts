@@ -26,7 +26,7 @@ import {
   suppliers,
 } from '@restomatch/db';
 import { makeWorker, type WorkerJob } from '../queue';
-import { appBaseUrl, formatIlDate, startOfIlDay } from '../lib/notifyHelpers';
+import { appBaseUrl, formatIlDate, ilDateKey, startOfIlDay } from '../lib/notifyHelpers';
 import { jobDb } from '../db';
 
 export interface SupplierDelaysJob {
@@ -50,7 +50,7 @@ export async function processSupplierDelays(job: WorkerJob<SupplierDelaysJob>) {
 
   const now = job.data.forDate ? new Date(job.data.forDate) : new Date();
   const startToday = startOfIlDay(now);
-  const todayKey = startToday.toISOString().slice(0, 10);
+  const todayKey = ilDateKey(now); // the Israel date (not the UTC date of IL midnight)
 
   const restaurantRows = job.data.restaurantId
     ? await db.select().from(restaurants).where(eq(restaurants.id, job.data.restaurantId))
