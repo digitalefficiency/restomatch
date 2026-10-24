@@ -74,6 +74,20 @@ export async function checkDemo(url: string, today: string): Promise<DemoCheck> 
     const [noTotal] = await sql`select count(*)::int as n from purchase_orders where restaurant_id in ${sql(rids)} and total_estimated is null`;
     if (noTotal!.n > 0) problems.push(`${noTotal!.n} demo PO(s) without total_estimated (orders table shows "—")`);
 
+    // 3b. Nothing is dated in the future: every created / sent / received / invoice
+    //     timestamp is before the end of DEMO_TODAY on the Israel wall clock.
+    const future = (await sql`
+      with lim as (select ((${today}::date + 1)::timestamp at time zone 'Asia/Jerusalem') as t)
+      select 'purchase_orders.created_at' as col, count(*)::int as n from purchase_orders, lim where restaurant_id in ${sql(rids)} and created_at >= lim.t
+      union all select 'purchase_orders.sent_at', count(*)::int from purchase_orders, lim where restaurant_id in ${sql(rids)} and sent_at >= lim.t
+      union all select 'invoices.created_at', count(*)::int from invoices, lim where restaurant_id in ${sql(rids)} and created_at >= lim.t
+      union all select 'invoices.invoice_date', count(*)::int from invoices, lim where restaurant_id in ${sql(rids)} and invoice_date >= lim.t
+      union all select 'goods_receipts.received_at', count(*)::int from goods_receipts, lim where restaurant_id in ${sql(rids)} and received_at >= lim.t
+      union all select 'goods_receipts.created_at', count(*)::int from goods_receipts, lim where restaurant_id in ${sql(rids)} and created_at >= lim.t
+      union all select 'discrepancies.created_at', count(*)::int from discrepancies, lim where restaurant_id in ${sql(rids)} and created_at >= lim.t
+    `) as unknown as Array<{ col: string; n: number }>;
+    for (const f of future) if (f.n > 0) problems.push(`${f.n} demo row(s) with ${f.col} after ${today} (future date on screen)`);
+
     // 4. Approvals queue: open, routed findings in the main restaurant.
     const [open] = await sql`
       select count(*)::int as n from discrepancies where restaurant_id = ${main.id} and resolution_status = 'open' and requires_role is not null`;

@@ -446,7 +446,9 @@ async function main() {
     const supplier = supplierByKey.get(s.key)!;
     const basket = productRows.filter((p) => p.spec.supplier === s.key && p.spec.qty > 0);
     const expectedDeliveryAt = zonedInstant(ymd, time);
-    const orderedAt = new Date(expectedDeliveryAt.getTime() - 24 * 3600 * 1000);
+    // Ordered the day before delivery — but never after DEMO_TODAY 09:00 (wall clock):
+    // a PO for the coming days must not show a future "created / sent" date.
+    const orderedAt = new Date(Math.min(expectedDeliveryAt.getTime() - 24 * 3600 * 1000, zonedInstant(today, '09:00').getTime()));
     const lines = basket.map((p, j) => {
       const qty = roundQty(p.spec.qty * at(QTY_PATTERN, ordinal + j), p.spec.unit);
       const price = Math.round(p.spec.price * at(PRICE_PATTERN, ordinal + j) * 100) / 100;
