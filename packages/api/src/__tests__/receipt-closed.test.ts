@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createDb, eq, goodsReceipts, grLines, testDbUrl } from '@restomatch/db';
+import { createDb, eq, goodsReceipts, grLines, restaurants, testDbUrl } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext } from '../context';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
@@ -82,6 +82,22 @@ describe('a closed receipt is read-only', () => {
 });
 
 describe('receive the rest — reopenReceipt', () => {
+  const flag = (t: Tenant, on: boolean) =>
+    db
+      .update(restaurants)
+      .set({ settings: { features: { receiveRest: on } } as (typeof restaurants.$inferInsert)['settings'] })
+      .where(eq(restaurants.id, t.restaurantId));
+  beforeEach(() => flag(A, true));
+
+  it('flag receiveRest off ⇒ FORBIDDEN, the partial receipt stays closed', async () => {
+    await flag(A, false);
+    await callerFor(A).receiving.submitReceipt({ grId: A.grId });
+    await expect(callerFor(A).receiving.reopenReceipt({ grId: A.grId })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    const [gr] = await db.select().from(goodsReceipts).where(eq(goodsReceipts.id, A.grId));
+    expect(gr!.status).toBe('partial');
+    expect((await callerFor(A).receiving.getPo({ poId: A.poId })).features.receiveRest).toBe(false);
+  });
+
   it('a partial receipt reopens for the next delivery: cumulative count → completed, re-matched', async () => {
     const first = await callerFor(A).receiving.submitReceipt({ grId: A.grId }); // 5 of 10
     expect(first.status).toBe('partial');

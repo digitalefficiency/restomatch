@@ -255,7 +255,10 @@ export const receivingRouter = router({
         ...po,
         lines,
         closedReceipt,
-        features: { dockSlip: featureEnabled(rest?.settings, 'dockSlip') },
+        features: {
+          dockSlip: featureEnabled(rest?.settings, 'dockSlip'),
+          receiveRest: featureEnabled(rest?.settings, 'receiveRest'),
+        },
       };
     }),
 
@@ -931,11 +934,20 @@ export const receivingRouter = router({
    * (CONFLICT 'receipt.closed'), a pending one is returned as is. The wizard
    * then counts the running total (already received + this delivery), and the
    * next submit stamps the new close and re-matches every invoice on the receipt.
+   * Flag `receiveRest`.
    */
   reopenReceipt: receiverProcedure
     .input(z.object({ grId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       await assertGrOwned(ctx.db, input.grId, ctx.session.restaurantId);
+      const [rest] = await ctx.db
+        .select({ settings: restaurants.settings })
+        .from(restaurants)
+        .where(eq(restaurants.id, ctx.session.restaurantId))
+        .limit(1);
+      if (!featureEnabled(rest?.settings, 'receiveRest')) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Receiving the rest of an order is not enabled' });
+      }
       await receiptState(ctx.db, ctx.session.restaurantId, input.grId); // takes the lock
       const [gr] = await ctx.db
         .select({ id: goodsReceipts.id, status: goodsReceipts.status })

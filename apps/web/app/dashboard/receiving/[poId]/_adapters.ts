@@ -376,3 +376,55 @@ export function keepAdjusted(
   }
   return out;
 }
+
+/** What a reopened (partial) receipt already holds for one PO line. */
+export interface PriorCount {
+  received: number;
+  rejected: number;
+}
+
+/**
+ * "Receive the rest" (flag receiveRest): the next delivery of an order whose
+ * receipt closed partial. The receiver counts only what arrives NOW; the
+ * receipt keeps the running total (prior + now).
+ *
+ *  • `poLines`: what is still owed (ordered − already received), lines already
+ *    complete left out — an invoice line for one shows as not ordered;
+ *  • `receiptLines`: the same gr_lines with the count zeroed, so the review seeds
+ *    from this delivery's invoice (or the remaining qty), never the old total;
+ *  • `prior`: per PO line, what the receipt already holds (added back on submit).
+ */
+export function restOfOrder(
+  poLines: PoLineRow[],
+  receiptLines: ReceiptLineRow[],
+): { poLines: PoLineRow[]; receiptLines: ReceiptLineRow[]; prior: Record<string, PriorCount> } {
+  const prior: Record<string, PriorCount> = {};
+  for (const r of receiptLines) {
+    if (!r.poLineId) continue;
+    prior[r.poLineId] = { received: num(r.qtyReceived) ?? 0, rejected: num(r.qtyRejected) ?? 0 };
+  }
+  const remaining = poLines
+    .map((pl) => {
+      const ordered = num(pl.qtyOrdered) ?? 0;
+      const left = Math.round((ordered - (prior[pl.id]?.received ?? 0)) * 1000) / 1000;
+      return { ...pl, qtyOrdered: left };
+    })
+    .filter((pl) => (pl.qtyOrdered as number) > 0);
+  return {
+    poLines: remaining,
+    receiptLines: receiptLines.map((r) => ({ ...r, qtyReceived: 0, qtyRejected: 0 })),
+    prior,
+  };
+}
+
+/** The running total markGrLine stores for a line counted in a follow-up delivery. */
+export function cumulativeCount(
+  prior: PriorCount | undefined,
+  now: { qtyReceived: number; qtyRejected: number },
+): { qtyReceived: number; qtyRejected: number } {
+  const r = (n: number) => Math.round(n * 1000) / 1000;
+  return {
+    qtyReceived: r((prior?.received ?? 0) + now.qtyReceived),
+    qtyRejected: r((prior?.rejected ?? 0) + now.qtyRejected),
+  };
+}

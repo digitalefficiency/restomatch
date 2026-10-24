@@ -154,6 +154,11 @@ export const en: Shape<typeof he> = {
       backToInbox: 'Back to deliveries',
     },
   },
+  receiveRest: {
+    action: 'Receive the rest',
+    hint: "Part of this order hasn't arrived yet. When the rest comes, scan its invoice and count only what arrived now.",
+    notice: 'Follow-up delivery: count only what arrived now. What was already received is kept and added for you.',
+  },
   dockSlip: {
     title: 'Dock dispute slip',
     subtitle: 'Show the driver before they leave — what is short, rejected or over-billed.',

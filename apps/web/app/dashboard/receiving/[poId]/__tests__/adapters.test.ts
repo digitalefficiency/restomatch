@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { noLinePaired, reconSections } from '@/app/showcase/receiver/_state';
-import { adaptReconciliation, keepAdjusted, type InvoiceLineRow, type PoLineRow } from '../_adapters';
+import {
+  adaptReconciliation,
+  cumulativeCount,
+  keepAdjusted,
+  restOfOrder,
+  type InvoiceLineRow,
+  type PoLineRow,
+  type ReceiptLineRow,
+} from '../_adapters';
 
 /** EN-5: the receiving review is calm — no false "missing" / "not ordered" alarms. */
 const po = { id: 'po', supplierId: 's', supplierName: 'ספק', expectedAt: null, status: 'sent', totalEstimated: null };
@@ -221,5 +229,51 @@ describe('keepAdjusted (EN-4: "Show results" never discards what the receiver co
     expect(out.b!.qtyReceived).toBe(5); // auto-touched only — takes the new invoice default
     expect(out.c!.qtyReceived).toBe(1);
     expect(Object.keys(out).sort()).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('receive the rest — the follow-up delivery counts only what arrives now', () => {
+  const gr = (poLineId: string, received: string, rejected = '0'): ReceiptLineRow => ({
+    grLineId: `gr-${poLineId}`,
+    poLineId,
+    productId: null,
+    productName: null,
+    rawDescription: null,
+    orderedQty: null,
+    unit: 'ק״ג',
+    qtyReceived: received,
+    qtyRejected: rejected,
+  });
+  // First delivery: 2 of 4 chicken, all the tomatoes.
+  const receipt = [gr('pl1', '2', '0.5'), gr('pl2', '2')];
+
+  it('owes only the rest; a line already complete drops out', () => {
+    const rest = restOfOrder(poLines, receipt);
+    expect(rest.poLines.map((l) => [l.id, l.qtyOrdered])).toEqual([['pl1', 2]]);
+    expect(rest.prior).toEqual({ pl1: { received: 2, rejected: 0.5 }, pl2: { received: 2, rejected: 0 } });
+  });
+
+  it('seeds from this delivery (invoice / remaining), never the old total', () => {
+    const rest = restOfOrder(poLines, receipt);
+    const poOnly = adaptReconciliation({ po, poLines: rest.poLines, receiptLines: rest.receiptLines });
+    expect(Object.values(poOnly.initialMarks).map((m) => m.qtyReceived)).toEqual([2]);
+    expect(Object.values(poOnly.grLineIdByKey)).toEqual(['gr-pl1']);
+    const withInvoice = adaptReconciliation({
+      po,
+      poLines: rest.poLines,
+      receiptLines: rest.receiptLines,
+      invoiceLines: [inv({ id: 'a', productId: 'p1', qtyBilled: '1.5', unitPriceBilled: '20' })],
+    });
+    expect(Object.values(withInvoice.initialMarks).map((m) => m.qtyReceived)).toEqual([1.5]);
+    // Compared with what is still owed (2), not the whole order (4).
+    expect(withInvoice.result.lines[0]).toMatchObject({ poQty: 2, invoiceQty: 1.5, status: 'qty_diff' });
+  });
+
+  it('stores the running total: already received + this delivery', () => {
+    expect(cumulativeCount({ received: 2, rejected: 0.5 }, { qtyReceived: 1.7, qtyRejected: 0.1 })).toEqual({
+      qtyReceived: 3.7,
+      qtyRejected: 0.6,
+    });
+    expect(cumulativeCount(undefined, { qtyReceived: 3, qtyRejected: 0 })).toEqual({ qtyReceived: 3, qtyRejected: 0 });
   });
 });

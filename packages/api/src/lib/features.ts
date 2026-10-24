@@ -28,6 +28,7 @@ export const FEATURE_KEYS = [
   'payRun',
   'dockSlip',
   'consolidatedMatch',
+  'receiveRest',
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
