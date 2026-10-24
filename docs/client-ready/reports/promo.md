@@ -39,7 +39,7 @@ screen comes from that seed and its dashboard (sources in `tools/promo/STORYBOAR
     the left 38% in English, a top band in the vertical cut). Devices, screenshots and camera moves render
     inside a clip of the other zone. `scripts/check-layout.mjs` asserts the two zones are disjoint.
   - **AE-style spotlight on the one thing each beat is about:**
-    - dashboard: the ₪572 hero;
+    - dashboard: the ₪760 hero;
     - leak detective: the beer row (520 → 575 ₪, +10.6%);
     - approvals: the blocked card with its buttons;
     - claim letter: the total;
@@ -55,9 +55,9 @@ screen comes from that seed and its dashboard (sources in `tools/promo/STORYBOAR
 - **Honesty rules:**
   - No ROI or savings-rate claims, and no customers.
   - "Real screen · demo data" is labelled on the product beat.
-  - "₪276" is shown as *claimed from suppliers* (the dashboard's label), not "recovered".
+  - "₪464" is shown as *claimed from suppliers* (the dashboard's label), not "recovered".
   - The chains view is the real chain dashboard on the chain demo seed. The base branch is unchanged at
-    572 ₪ = 2% of 28,389 ₪.
+    760 ₪ = 1.8% of 42,263 ₪.
   - The paper invoices in the problem beat are props, but their math adds up: each line total is
     qty × price, the invoice total is the sum of the lines, and each supplier sells what it really sells.
   - The URL `restomatch.co.il` is a placeholder (`SITE` in `copy.ts`).
@@ -81,7 +81,7 @@ I rendered stills across the whole timeline and reviewed each one. Fixes made fr
     "expected" prices on two screens.
 - **S3 / leak detective:** the tiles round to "+11%" while the table says "+10.6%".
 - **Demo hygiene:** my first receiver captures added test receipts to the **local** dev DB, and the
-  hero moved to ₪1,481. Re-running `./scripts/dev-setup.sh` restores the clean demo (₪572). Anyone who
+  hero moved to ₪1,481. Re-running `./scripts/dev-setup.sh` restores the clean demo (₪760 with `DEMO_TODAY=2026-10-25`). Anyone who
   clicks through the receiving demo before a live presentation should reseed afterwards.
 
 - **S2 / receiving:** in the wizard, *"Use a demo invoice (no upload)"* → *Process invoice* on a real
