@@ -87,7 +87,7 @@ export const en: Shape<typeof he> = {
     metaDescription: 'RestoMatch plans — from a free trial to restaurant groups.',
     eyebrow: 'Pricing',
     title: 'A plan for every kitchen',
-    lead: 'Start on the free trial plan — no credit card — and upgrade once you see how much RestoMatch stops.',
+    lead: 'Start on the free trial plan — no credit card — and upgrade once you see how much RestoMatch finds.',
     recommended: 'Recommended',
     free: 'Free',
     perMonth: '/ month',
@@ -123,7 +123,7 @@ export const en: Shape<typeof he> = {
   },
   about: {
     metaTitle: 'About · RestoMatch',
-    metaDescription: 'The story behind RestoMatch — why we built a system that stops leaks at goods receiving.',
+    metaDescription: 'The story behind RestoMatch — why we built a system that finds leaks at goods receiving.',
     title: "We built RestoMatch because money shouldn't leak quietly",
     p1: "Every restaurant handles dozens of invoices a week. A price that went up without a word, a case that never arrived, an item nobody ordered — it all gets lost in the daily rush, and at the end of the month the money simply isn't there.",
     p2: "RestoMatch automatically compares what you ordered, what you received and what the invoice says — and shows you exactly where there's a gap, before you pay. So you only pay for what you actually got.",

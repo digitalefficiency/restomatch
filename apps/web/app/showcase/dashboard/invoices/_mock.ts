@@ -340,7 +340,7 @@ function authored(): RecordInput[] {
         at: isoAt(9, 35),
         actor: 'מערכת',
         role: 'system',
-        action: 'תשלום נחסם אוטומטית',
+        action: 'סומן: לא לשלם עד החלטה',
         detail: 'נשלחה התראה לחשב + בעלים',
       },
     ],
