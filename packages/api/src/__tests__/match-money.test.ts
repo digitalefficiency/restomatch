@@ -16,7 +16,7 @@ import { appRouter } from '../index';
 import type { AppContext } from '../context';
 import { normalizeInvoiceNumber } from '../match/buildMatchInput';
 import { backfillPriceHistory, writePriceHistoryForInvoice } from '../match/priceHistory';
-import { matchActivitySummary, pairPriorDecisions, type PriorDecision } from '../match/persist';
+import { decisionStillApplies, matchActivitySummary, pairPriorDecisions, type PriorDecision } from '../match/persist';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
 
 /**
@@ -536,6 +536,9 @@ describe('pairPriorDecisions: one decision per finding, never applied to the wro
     resolvedAt: resolutionStatus === 'escalated' ? null : new Date('2026-10-20T10:00:00Z'),
     resolutionNote: resolutionStatus,
     requiresRole: resolutionStatus === 'escalated' ? 'owner' : null,
+    severity: 'warn',
+    deltaAmount: 50,
+    deciderRole: 'manager',
   });
   const line = { invoiceLineId: 'il-1', poLineId: 'pl-1', productId: 'p-1' };
 
@@ -589,5 +592,131 @@ describe('pairPriorDecisions: one decision per finding, never applied to the wro
       ],
     );
     expect(out.filter(Boolean)).toHaveLength(1);
+  });
+});
+
+describe('a decision only carries to an equivalent finding (decisionStillApplies)', () => {
+  const rejected = (over: Partial<PriorDecision> = {}): PriorDecision => ({
+    resolutionStatus: 'rejected',
+    resolvedBy: 'mgr',
+    resolvedAt: new Date('2026-10-20T10:00:00Z'),
+    resolutionNote: 'ok — agreed price',
+    requiresRole: 'manager',
+    severity: 'warn',
+    deltaAmount: 50,
+    deciderRole: 'manager',
+    ...over,
+  });
+
+  it('unchanged or smaller finding, same routing → the decision stays', () => {
+    expect(decisionStillApplies(rejected(), { type: 'PRICE_HIGHER', severity: 'warn', deltaAmount: 50, requiredRole: 'manager' })).toBe(true);
+    expect(decisionStillApplies(rejected(), { type: 'PRICE_HIGHER', severity: 'warn', deltaAmount: 30, requiredRole: 'manager' })).toBe(true);
+  });
+
+  it('review repro: rejected warn ₪50 → price corrected → block ₪650 routed to the owner → starts fresh', () => {
+    expect(decisionStillApplies(rejected(), { type: 'PRICE_HIGHER', severity: 'block', deltaAmount: 650, requiredRole: 'owner' })).toBe(false);
+    // Each condition on its own:
+    expect(decisionStillApplies(rejected(), { type: 'PRICE_HIGHER', severity: 'block', deltaAmount: 50, requiredRole: 'manager' })).toBe(false);
+    expect(decisionStillApplies(rejected(), { type: 'PRICE_HIGHER', severity: 'warn', deltaAmount: 50.01, requiredRole: 'manager' })).toBe(false);
+    expect(decisionStillApplies(rejected(), { type: 'PRICE_HIGHER', severity: 'warn', deltaAmount: 50, requiredRole: 'owner' })).toBe(false);
+    // An owner's decision covers an owner-routed finding.
+    expect(decisionStillApplies(rejected({ deciderRole: 'owner' }), { type: 'PRICE_HIGHER', severity: 'warn', deltaAmount: 50, requiredRole: 'owner' })).toBe(true);
+  });
+
+  it('a duplicate decision needs the same matched number / supplier', () => {
+    const dup = rejected({ severity: 'block', deltaAmount: 118, deciderRole: 'owner', duplicateKey: 's1|INV12' });
+    expect(decisionStillApplies(dup, { type: 'DUPLICATE_INVOICE', severity: 'block', deltaAmount: 118, requiredRole: 'owner', duplicateKey: 's1|INV12' })).toBe(true);
+    expect(decisionStillApplies(dup, { type: 'DUPLICATE_INVOICE', severity: 'block', deltaAmount: 118, requiredRole: 'owner', duplicateKey: 's1|INV99' })).toBe(false);
+    // Unknown (a run from before the key was recorded) → fresh, never a silent carry.
+    expect(decisionStillApplies({ ...dup, duplicateKey: null }, { type: 'DUPLICATE_INVOICE', severity: 'block', deltaAmount: 118, requiredRole: 'owner', duplicateKey: 's1|INV12' })).toBe(false);
+  });
+
+  it('an escalation (no decider, handed to the owner) carries while the finding is unchanged', () => {
+    const esc = rejected({ resolutionStatus: 'escalated', resolvedBy: null, resolvedAt: null, deciderRole: 'owner', requiresRole: 'owner' });
+    expect(decisionStillApplies(esc, { type: 'QTY_SHORT', severity: 'warn', deltaAmount: 50, requiredRole: 'manager' })).toBe(true);
+  });
+});
+
+describe('re-match: a materially different finding starts fresh (router)', () => {
+  it('rejected finding grows after a correction → open again, routed, not the old note', async () => {
+    const A = await seedTenant(db, 'A');
+    const caller = ownerCaller(A);
+    await caller.match.runForInvoice({ invoiceId: A.invoiceId });
+    const find = async () =>
+      db
+        .select({ id: discrepancies.id, type: discrepancies.type, status: discrepancies.resolutionStatus, delta: discrepancies.deltaAmount, note: discrepancies.resolutionNote })
+        .from(discrepancies)
+        .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+        .where(and(eq(matchRuns.invoiceId, A.invoiceId), eq(discrepancies.type, 'UNORDERED_ITEM')));
+    const [item] = await find();
+    expect(item).toBeDefined();
+    await caller.approvals.reject({ discrepancyId: item!.id, reason: 'small, let it go' });
+    // Unchanged re-match: still rejected.
+    await caller.match.runForInvoice({ invoiceId: A.invoiceId });
+    expect((await find())[0]).toMatchObject({ status: 'rejected', note: 'small, let it go' });
+    // The billed line is corrected upward → the finding is bigger → a new decision is needed.
+    await db.update(invoiceLines).set({ qtyBilled: '30', lineTotal: '300.00' }).where(eq(invoiceLines.invoiceId, A.invoiceId));
+    await caller.match.runForInvoice({ invoiceId: A.invoiceId });
+    const [after] = await find();
+    expect(Number(after!.delta)).toBeGreaterThan(Number(item!.delta));
+    expect(after).toMatchObject({ status: 'open', note: null });
+  });
+
+  it('duplicate rejected, then the number corrected to a DIFFERENT real original → open again (back in the leak)', async () => {
+    const A = await seedTenant(db, 'A');
+    const [orig] = await db.select().from(invoices).where(eq(invoices.id, A.invoiceId));
+    const [copy] = await db
+      .insert(invoices)
+      .values({
+        restaurantId: A.restaurantId,
+        supplierId: A.supplierId,
+        invoiceNumber: null,
+        invoiceDate: orig!.invoiceDate,
+        totalExclVat: '100.00',
+        vatAmount: '17.00',
+        totalInclVat: '117.00',
+        status: 'parsed',
+        source: 'photo',
+        ocrPayload: { provider: 'reconciled', raw: { duplicateOf: { invoiceId: A.invoiceId, invoiceNumber: A.invoiceNumber } } },
+        createdAt: new Date(orig!.createdAt.getTime() + 60_000),
+      })
+      .returning();
+    await db.insert(invoiceLines).values({ invoiceId: copy!.id, productId: A.productId, rawDescription: 'rescan', qtyBilled: '10', unit: 'kg', unitPriceBilled: '10.00', lineTotal: '100.00' });
+    const caller = ownerCaller(A);
+    await caller.match.runForInvoice({ invoiceId: copy!.id });
+    const dupOf = async () =>
+      (
+        await db
+          .select({ id: discrepancies.id, status: discrepancies.resolutionStatus })
+          .from(discrepancies)
+          .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+          .where(and(eq(matchRuns.invoiceId, copy!.id), eq(discrepancies.type, 'DUPLICATE_INVOICE')))
+      )[0];
+    await caller.approvals.reject({ discrepancyId: (await dupOf())!.id, reason: 'not a duplicate' });
+    await caller.match.runForInvoice({ invoiceId: copy!.id });
+    expect((await dupOf())!.status).toBe('rejected'); // same duplicate: decision kept
+
+    // It turns out to be a copy of ANOTHER real invoice of the supplier.
+    const [other] = await db
+      .insert(invoices)
+      .values({
+        restaurantId: A.restaurantId,
+        supplierId: A.supplierId,
+        invoiceNumber: 'INV-OTHER-7',
+        invoiceDate: orig!.invoiceDate,
+        totalExclVat: '100.00',
+        vatAmount: '17.00',
+        totalInclVat: '117.00',
+        status: 'matched',
+        source: 'photo',
+        createdAt: new Date(orig!.createdAt.getTime() - 60_000),
+      })
+      .returning();
+    await db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'reconciled', raw: { duplicateOf: { invoiceId: other!.id, invoiceNumber: 'INV-OTHER-7' } } } })
+      .where(eq(invoices.id, copy!.id));
+    await caller.match.runForInvoice({ invoiceId: copy!.id });
+    expect((await dupOf())!.status).toBe('open');
   });
 });

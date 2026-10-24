@@ -1,10 +1,12 @@
 import {
+  activityEvents,
   and,
   discrepancies,
   eq,
   inArray,
   invoices,
   isNotNull,
+  memberships,
   ne,
   or,
   matchRuns,
@@ -16,6 +18,7 @@ import type { MatchInput, MatchOutput } from '@restomatch/matching';
 import { evaluateApproval, type ApprovalContext } from '../approvals/engine';
 import { buildRules } from '../approvals/engine';
 import { logActivity } from '../activity';
+import { canActOn } from '../lib/roles';
 import { writePriceHistoryForInvoice } from './priceHistory';
 
 export interface PersistMatchArgs {
@@ -34,7 +37,41 @@ export interface PriorDecision {
   resolutionNote: string | null;
   /** Escalation moves the finding to the owner — keep that routing too. */
   requiresRole: UserRole | null;
+  /** What was decided on — the decision only carries to an equivalent finding (decisionStillApplies). */
+  severity: string;
+  deltaAmount: number;
+  /** The decider's role in this restaurant (escalations: the owner they were handed to). */
+  deciderRole: UserRole | null;
+  /** DUPLICATE_INVOICE: supplier|normalized number it matched (the prior run's feed metadata). */
+  duplicateKey?: string | null;
 }
+
+/**
+ * Does a person's decision still apply to the new run's version of the finding?
+ * Only when nothing material changed: same severity, the ₪ did not grow, the
+ * decider may still act on where it is routed now (canActOn — what
+ * approvals.ensureCanAct enforces), and for a duplicate the same number /
+ * supplier it matched. A rejected PRICE_HIGHER warn ₪50 that comes back as a
+ * block ₪650 routed to the owner starts fresh — open, routed, notified — rather
+ * than staying "rejected" with a manager's note in nobody's queue.
+ */
+export function decisionStillApplies(
+  prior: PriorDecision,
+  next: { type: string; severity: string; deltaAmount: number; requiredRole: UserRole | null; duplicateKey?: string | null },
+): boolean {
+  if (prior.severity !== next.severity) return false;
+  if (Math.round(Math.abs(next.deltaAmount) * 100) > Math.round(Math.abs(prior.deltaAmount) * 100)) return false;
+  if (prior.resolutionStatus !== 'escalated') {
+    if (!prior.deciderRole || !canActOn(prior.deciderRole, next.requiredRole)) return false;
+  }
+  if (next.type === 'DUPLICATE_INVOICE') {
+    if (!prior.duplicateKey || prior.duplicateKey !== next.duplicateKey) return false;
+  }
+  return true;
+}
+
+/** The identity a duplicate finding matched: the supplier + the (normalized) number. */
+export const duplicateKeyOf = (input: MatchInput) => `${input.invoice.supplierId}|${input.invoice.invoiceNumber}`;
 
 /** A finding as both the old rows and the new engine output describe it. */
 export interface FindingIdentity {
@@ -133,8 +170,15 @@ export async function loadPriorDecisions(
       resolvedAt: discrepancies.resolvedAt,
       resolutionNote: discrepancies.resolutionNote,
       requiresRole: discrepancies.requiresRole,
+      severity: discrepancies.severity,
+      matchRunId: discrepancies.matchRunId,
+      deciderRole: memberships.role,
     })
     .from(discrepancies)
+    .leftJoin(
+      memberships,
+      and(eq(memberships.userId, discrepancies.resolvedBy), eq(memberships.restaurantId, restaurantId)),
+    )
     .where(
       and(
         eq(discrepancies.restaurantId, restaurantId),
@@ -145,6 +189,23 @@ export async function loadPriorDecisions(
         or(isNotNull(discrepancies.resolvedAt), eq(discrepancies.resolutionStatus, 'escalated')),
       ),
     );
+  // The number / supplier each prior run's duplicate matched (written in its feed row).
+  const feed = await db
+    .select({ entityId: activityEvents.entityId, metadata: activityEvents.metadata })
+    .from(activityEvents)
+    .where(
+      and(
+        eq(activityEvents.restaurantId, restaurantId),
+        eq(activityEvents.eventType, 'invoice_matched'),
+        inArray(
+          activityEvents.entityId,
+          runs.map((r) => r.id),
+        ),
+      ),
+    );
+  const dupKeyByRun = new Map(
+    feed.map((f) => [f.entityId, typeof f.metadata?.duplicateKey === 'string' ? (f.metadata.duplicateKey as string) : null]),
+  );
   return rows.map((r) => ({
     type: r.type,
     invoiceLineId: r.invoiceLineId,
@@ -159,6 +220,10 @@ export async function loadPriorDecisions(
       resolvedAt: r.resolvedAt,
       resolutionNote: r.resolutionNote,
       requiresRole: r.requiresRole,
+      severity: r.severity,
+      deltaAmount: Number(r.deltaAmount ?? 0),
+      deciderRole: r.resolutionStatus === 'escalated' ? 'owner' : (r.deciderRole ?? null),
+      duplicateKey: dupKeyByRun.get(r.matchRunId) ?? null,
     },
   }));
 }
@@ -260,7 +325,18 @@ export async function persistMatchRun(
     };
     const decision = evaluateApproval(ctx, rules);
     const initialStatus = decision.action === 'auto_approve' ? 'accepted' : 'open';
-    const prior = carried[index];
+    const paired = carried[index];
+    const prior =
+      paired &&
+      decisionStillApplies(paired, {
+        type: d.type,
+        severity: d.severity,
+        deltaAmount: d.deltaAmount,
+        requiredRole: decision.requiredRole,
+        duplicateKey: duplicateKeyOf(input),
+      })
+        ? paired
+        : undefined;
 
     await db.insert(discrepancies).values({
       matchRunId: matchRun.id,
@@ -347,6 +423,8 @@ export async function persistMatchRun(
       leakCount: feed.leakCount,
       leakIls: feed.leakIls,
       pendingLink: feed.pendingLink,
+      // What a duplicate matched, so a re-match can tell "same duplicate" (keep the decision) from a new one.
+      ...(result.discrepancies.some((d) => d.type === 'DUPLICATE_INVOICE') ? { duplicateKey: duplicateKeyOf(input) } : {}),
       status: result.status,
     },
   });
