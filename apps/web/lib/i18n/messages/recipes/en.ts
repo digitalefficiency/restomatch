@@ -210,6 +210,7 @@ export const en: Shape<typeof he> = {
   alert: {
     title: 'Crossed the food-cost target:',
     target: 'target {target}',
+    crossed: 'Crossed the {target} food-cost target',
     perPlate: 'per plate',
     supplier: 'from',
     banner: 'This dish crossed the food-cost target this month because a supplier raised a price.',

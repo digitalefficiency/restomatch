@@ -88,7 +88,7 @@ export async function RecipesOverviewCard() {
                 </span>
               </span>
               {alertById.has(r.recipeId) && alertsRes?.enabled ? (
-                <PriceAlertLine alert={alertById.get(r.recipeId)!} targetBp={alertsRes.targetBp} compact className="w-full" />
+                <PriceAlertLine alert={alertById.get(r.recipeId)!} targetBp={alertsRes.targetBp} compact causeOnly className="w-full" />
               ) : null}
             </li>
           ))}

@@ -208,6 +208,7 @@ export const he = {
   alert: {
     title: 'חצתה את יעד עלות המזון:',
     target: 'יעד {target}',
+    crossed: 'חצתה את יעד עלות המזון ({target})',
     perPlate: 'לכל צלחת',
     supplier: 'אצל',
     banner: 'המנה חצתה את יעד עלות המזון החודש בגלל עליית מחיר אצל ספק.',

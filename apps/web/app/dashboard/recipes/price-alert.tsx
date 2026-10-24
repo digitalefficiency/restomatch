@@ -29,11 +29,14 @@ function localName(he: string, en: string | null, locale: string) {
  * Dish price alert (flag `dishPriceAlert`): the dish crossed the food-cost
  * target this month because a supplier raised an ingredient's price.
  * `compact` = one line under a dish name; otherwise a banner (editor).
+ * `causeOnly` = the row already shows before → after and ₪ per plate (overview
+ * card): state the crossing and its cause, without repeating the numbers.
  */
-export function PriceAlertLine({ alert: a, targetBp, compact = false, className }: {
+export function PriceAlertLine({ alert: a, targetBp, compact = false, causeOnly = false, className }: {
   alert: DishPriceAlert;
   targetBp: number;
   compact?: boolean;
+  causeOnly?: boolean;
   className?: string;
 }) {
   const t = useT(recipesNs);
@@ -51,12 +54,18 @@ export function PriceAlertLine({ alert: a, targetBp, compact = false, className 
     >
       <p className="flex flex-wrap items-center gap-x-1.5 font-semibold">
         <TrendingUp className={compact ? 'h-3 w-3' : 'h-4 w-4'} aria-hidden="true" />
-        <span>{t('alert.title')}</span>
-        <Arrow from={pct(a.beforeFoodCostBp, locale)} to={pct(a.afterFoodCostBp, locale)} />
-        <span className="font-normal text-muted">({t('alert.target', { target: pct(targetBp, locale) })})</span>
-        <span>
-          · <bdi dir="ltr" className="tabular-nums">+{ils(a.costDeltaAgorot, locale)}</bdi> {t('alert.perPlate')}
-        </span>
+        {causeOnly ? (
+          <span>{t('alert.crossed', { target: pct(targetBp, locale) })}</span>
+        ) : (
+          <>
+            <span>{t('alert.title')}</span>
+            <Arrow from={pct(a.beforeFoodCostBp, locale)} to={pct(a.afterFoodCostBp, locale)} />
+            <span className="font-normal text-muted">({t('alert.target', { target: pct(targetBp, locale) })})</span>
+            <span>
+              · <bdi dir="ltr" className="tabular-nums">+{ils(a.costDeltaAgorot, locale)}</bdi> {t('alert.perPlate')}
+            </span>
+          </>
+        )}
       </p>
       <p className={cn('text-muted', compact ? '' : 'mt-1')}>
         {localName(a.product.name, a.product.nameEn, locale)}{' '}
