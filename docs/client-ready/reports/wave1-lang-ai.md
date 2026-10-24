@@ -292,6 +292,16 @@ Not covered by an automated check:
 
 Reported to the orchestrator (outside my area): the OCR job is enqueued inside the request transaction and has no retry. When the worker reads the invoice before the commit, the scan stays "still reading" forever (1 in about 10 uploads locally).
 
+## Light theme (#77) on the wave-1 screens (2026-10-24)
+
+Sweep: the S14 UI files contain no hard-coded colours or dark-only classes, so the token sweep needed no code changes. They are the language picker, ask page, locale sync, nav item, wizard localization, login and the unit-label font. The receiving review my languages render is `Reconciliation.tsx` (main/#77). With #77 merged it already applies the tiers:
+- T2: solid warn/danger badges on lines that differ;
+- T4: a neutral "check by hand" chip and pending banner, never red.
+
+Its solid badges use `text-white`, the same as `Badge` `danger-solid`; #77 has no `on-danger` token.
+
+Contrast: `scripts/verify-wave1-contrast.ts`, with axe `color-contrast` at WCAG AA, run on `next start` with #77 merged. Screens: login, receiving inbox, scan, review, adjust, ask (empty) and ask (answered). Locales he/en/ar at 1366 and 390. **0 violations in 42 checks**, 0 console errors. The script waits for entry animations to settle, including the review's GSAP row fade-in; mid-fade rows otherwise report false failures. Screenshots: `screenshots/wave1-lang-ai/light-*`.
+
 ## Verification (2 layers)
 
 ### Layer 1: full gate (final head, after merging `origin/claude/client-ready` @ 80a3934)
