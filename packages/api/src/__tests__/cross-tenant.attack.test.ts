@@ -244,6 +244,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'contracts.importCommit': 'attack',
   'contracts.overContractForInvoice': 'attack',
   'contracts.overContract': 'isolation',
+  // S11 audit: contract prices in the new-order wizard.
+  'contracts.orderPrices': 'attack',
   'priceAlerts.list': 'isolation',
   'priceAlerts.dismiss': 'attack',
   'priceAlerts.refresh': 'isolation',
@@ -1634,6 +1636,15 @@ describe('wave 1 (S11): contracts + priceAlerts — foreign ids and isolation', 
     expect(await callerFor(A).contracts.overContractForInvoice({ invoiceId: B.invoiceId })).toEqual([]);
     // sanity: B sees its own over-contract line
     expect(await callerFor(B).contracts.overContractForInvoice({ invoiceId: B.invoiceId })).toHaveLength(1);
+  });
+
+  it("contracts.orderPrices rejects B's supplier and never prices a B product under A's supplier", async () => {
+    const bItems = [{ productId: B.productId, unit: 'kg' }];
+    await expect(callerFor(A).contracts.orderPrices({ supplierId: B.supplierId, items: bItems })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const own = await callerFor(A).contracts.orderPrices({ supplierId: A.supplierId, items: bItems });
+    expect(own.prices).toEqual([]);
+    // sanity: B sees its own contract price
+    expect((await callerFor(B).contracts.orderPrices({ supplierId: B.supplierId, items: bItems })).prices).toHaveLength(1);
   });
 
   it('contracts.productOptions / importPreview / importCommit reject B’s supplier', async () => {

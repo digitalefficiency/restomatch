@@ -22,6 +22,8 @@ import {
 import { ClaudePoParser } from '@restomatch/ocr';
 import { ZesttAdapter } from '@restomatch/procurement';
 import { managerProcedure, memberProcedure, requireFeature, router } from '../trpc';
+import { isFeatureOn } from '../lib/featureGate';
+import { contractPricesForOrder, orderPriceKey } from '../contracts/orderPrices';
 import { assertPoOwned, assertSupplierOwned } from '../tenant';
 import { getEntitlements } from '../entitlements';
 import { importPurchaseOrder } from '../orders/importPo';
@@ -304,11 +306,27 @@ export const ordersRouter = router({
         }
       }
 
+      // Flag `contracts`: a contract price in force today (in the line's unit)
+      // wins over the catalog list price for lines left unpriced.
+      const unpriced = input.lines.filter(
+        (l): l is typeof l & { productId: string } => l.unitPriceExpected == null && !!l.productId,
+      );
+      const contractByKey =
+        unpriced.length > 0 && (await isFeatureOn(ctx.db, restaurantId, 'contracts'))
+          ? await contractPricesForOrder(ctx.db, restaurantId, input.supplierId, unpriced)
+          : new Map<string, number>();
+
       const resolvedLines = input.lines.map((l) => {
+        const fromContract =
+          l.unitPriceExpected == null && l.productId ? contractByKey.get(orderPriceKey(l.productId, l.unit)) : undefined;
         const fromCatalog =
           l.unitPriceExpected == null && l.productId ? priceByProduct.get(l.productId) : undefined;
         const unitPriceExpected =
-          l.unitPriceExpected != null ? l.unitPriceExpected.toString() : (fromCatalog ?? null);
+          l.unitPriceExpected != null
+            ? l.unitPriceExpected.toString()
+            : fromContract !== undefined
+              ? fromContract.toString()
+              : (fromCatalog ?? null);
         return { ...l, unitPriceExpected };
       });
 

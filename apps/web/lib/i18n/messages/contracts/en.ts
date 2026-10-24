@@ -233,4 +233,9 @@ export const en: Shape<typeof he> = {
     body: '{count} products rose in price past your threshold.',
     link: 'View alerts',
   },
+  order: {
+    overContract: '{amount}/unit above the contract',
+    overContractTitle: 'Contract price: {contract}/unit. Price entered: {price}',
+    contractPrice: 'Contract price',
+  },
 };

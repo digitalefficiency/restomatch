@@ -17,6 +17,8 @@ export interface PortalLine {
   qtyOrdered: number;
   unit: string;
   unitPrice: number | null;
+  /** The order price IS the contract price → "agreed"; otherwise "order price". */
+  agreed: boolean;
 }
 
 /** "12", "7.5", "7,5", "0" → number ≥ 0; anything else null. */
@@ -130,7 +132,7 @@ export function SupplierAnswerForm({ token, lines }: { token: string; lines: Por
                 {l.unitPrice != null ? (
                   <>
                     {' · '}
-                    {t('portal.agreedPrice')}: <bdi dir="ltr" className="font-mono tabular-nums">{formatIls(l.unitPrice, { locale, maximumFractionDigits: 2 })}</bdi>
+                    {t(l.agreed ? 'portal.agreedPrice' : 'portal.orderPrice')}: <bdi dir="ltr" className="font-mono tabular-nums">{formatIls(l.unitPrice, { locale, maximumFractionDigits: 2 })}</bdi>
                   </>
                 ) : null}
               </p>

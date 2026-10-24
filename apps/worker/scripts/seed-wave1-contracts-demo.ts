@@ -75,6 +75,15 @@ async function contractFrom(restaurantId: string, supplierId: string): Promise<s
 }
 const CONTRACT_SUPPLIERS = ['HaKerem Butchery', 'Mediterranean Fish Co.'];
 const TREND_SUPPLIER = 'HaSharon Produce';
+
+/**
+ * The demo's "now": noon (Israel) on DEMO_TODAY when set — like the base seed,
+ * so the tomato trend and its alert are fresh on demo day — else the real clock.
+ */
+function demoNow(): Date {
+  const d = process.env.DEMO_TODAY?.trim();
+  return d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? new Date(`${d}T09:00:00Z`) : new Date();
+}
 const CHEAP_SUPPLIER = { name: 'חקלאי העמק', nameEn: 'HaEmek Farmers' };
 const TOMATO = { name: 'עגבניות', nameEn: 'Tomatoes', unit: 'ק״ג' };
 // days ago → price: +18% over 3 weeks, staying up.
@@ -206,11 +215,11 @@ async function seedTrend(restaurantId: string) {
       .returning();
   }
 
-  // Re-anchor the series to "now" on every run (idempotent: replace it).
+  // Re-anchor the series to the demo's "now" on every run (idempotent: replace it).
   await db
     .delete(priceHistory)
     .where(and(eq(priceHistory.productId, tomato!.id), eq(priceHistory.supplierId, produce.id)));
-  const now = Date.now();
+  const now = demoNow().getTime();
   await db.insert(priceHistory).values(
     TREND.map(([daysAgo, price]) => ({
       restaurantId,
@@ -239,7 +248,7 @@ async function seedTrend(restaurantId: string) {
   }
   // One live alert for the demo product: drop earlier runs' rows, re-detect.
   await db.delete(priceAlerts).where(and(eq(priceAlerts.restaurantId, restaurantId), eq(priceAlerts.productId, tomato!.id)));
-  const sweep = await runPriceAlertSweep(db, restaurantId, { notify: NOTIFY });
+  const sweep = await runPriceAlertSweep(db, restaurantId, { notify: NOTIFY, now: demoNow() });
   const [open] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(priceAlerts)

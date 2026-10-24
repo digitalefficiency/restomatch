@@ -61,7 +61,7 @@ export async function SupplierConfirmCard({
                     <th className="p-2 text-start font-medium">{t('card.item')}</th>
                     <th className="p-2 text-end font-medium">{t('card.ordered')}</th>
                     <th className="p-2 text-end font-medium">{t('card.supplierQty')}</th>
-                    <th className="p-2 text-end font-medium">{t('card.agreed')}</th>
+                    <th className="p-2 text-end font-medium">{t('card.orderPrice')}</th>
                     <th className="p-2 text-end font-medium">{t('card.proposed')}</th>
                   </tr>
                 </thead>
@@ -83,6 +83,11 @@ export async function SupplierConfirmCard({
                       </td>
                       <td className="p-2 text-end tabular-nums">
                         <bdi dir="ltr">{money(l.unitPriceAgreed)}</bdi>
+                        {l.agreed ? (
+                          <span className="ms-1 text-xs text-subtle" title={t('card.contractTagTitle')}>
+                            ({t('card.contractTag')})
+                          </span>
+                        ) : null}
                       </td>
                       <td className={`p-2 text-end tabular-nums ${l.proposedUnitPrice != null ? 'font-semibold text-warn' : 'text-muted'}`}>
                         <bdi dir="ltr">{l.proposedUnitPrice != null ? money(l.proposedUnitPrice) : '—'}</bdi>

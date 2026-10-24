@@ -16,6 +16,8 @@ import {
   type SupplierResponseLine,
 } from '@restomatch/db';
 import { featureEnabled } from '../lib/features';
+import { isFeatureOn } from '../lib/featureGate';
+import { contractPricesForOrder, isContractPrice, orderPriceKey } from '../contracts/orderPrices';
 
 /**
  * Supplier confirmation portal (wave-1 `supplierConfirm`).
@@ -181,8 +183,30 @@ export interface SupplierOrderView {
     qtyOrdered: number;
     unit: string;
     unitPrice: number | null;
+    /** `unitPrice` is the contract price in force on the order date. */
+    agreed: boolean;
   }>;
   response: { status: 'confirmed' | 'changes'; submittedAt: Date; lines: SupplierResponseLine[]; note: string | null } | null;
+}
+
+/**
+ * Line ids whose order price IS the contract price in force on the order date
+ * (flag `contracts`). Only those may be labelled "agreed"; every other price is
+ * just "the price on the order".
+ */
+async function agreedLineIds(
+  db: Database,
+  restaurantId: string,
+  supplierId: string,
+  orderedAt: Date,
+  lines: ReadonlyArray<{ id: string; productId: string | null; unit: string; price: number | null }>,
+): Promise<Set<string>> {
+  const priced = lines.filter((l): l is typeof l & { productId: string } => !!l.productId && l.price !== null);
+  if (priced.length === 0 || !(await isFeatureOn(db, restaurantId, 'contracts'))) return new Set();
+  const contract = await contractPricesForOrder(db, restaurantId, supplierId, priced, orderedAt);
+  return new Set(
+    priced.filter((l) => isContractPrice(l.price, contract.get(orderPriceKey(l.productId, l.unit)))).map((l) => l.id),
+  );
 }
 
 /** What the supplier sees. `db` = a withRestaurant(link.restaurantId) transaction. */
@@ -190,6 +214,8 @@ export async function loadSupplierOrder(db: Database, link: ResolvedLink): Promi
   const [po] = await db
     .select({
       id: purchaseOrders.id,
+      supplierId: purchaseOrders.supplierId,
+      createdAt: purchaseOrders.createdAt,
       expectedDeliveryAt: purchaseOrders.expectedDeliveryAt,
       restaurantName: restaurants.name,
       supplierName: suppliers.name,
@@ -208,6 +234,7 @@ export async function loadSupplierOrder(db: Database, link: ResolvedLink): Promi
       rawDescriptionEn: poLines.rawDescriptionEn,
       productName: products.canonicalName,
       productNameEn: products.nameEn,
+      productId: poLines.productId,
       supplierSku: poLines.supplierSku,
       qtyOrdered: poLines.qtyOrdered,
       unit: poLines.unit,
@@ -227,6 +254,13 @@ export async function loadSupplierOrder(db: Database, link: ResolvedLink): Promi
     .from(supplierResponses)
     .where(and(eq(supplierResponses.poId, po.id), eq(supplierResponses.restaurantId, link.restaurantId)))
     .limit(1);
+  const agreed = await agreedLineIds(
+    db,
+    link.restaurantId,
+    po.supplierId,
+    po.createdAt,
+    lines.map((l) => ({ id: l.id, productId: l.productId, unit: l.unit, price: l.unitPriceExpected == null ? null : Number(l.unitPriceExpected) })),
+  );
   return {
     restaurantName: po.restaurantName,
     supplierName: po.supplierName,
@@ -243,6 +277,7 @@ export async function loadSupplierOrder(db: Database, link: ResolvedLink): Promi
       qtyOrdered: Number(l.qtyOrdered),
       unit: l.unit,
       unitPrice: l.unitPriceExpected == null ? null : Number(l.unitPriceExpected),
+      agreed: agreed.has(l.id),
     })),
     response: resp ?? null,
   };
@@ -336,7 +371,10 @@ export interface SupplierResponseDiff {
     unit: string;
     qtyOrdered: number;
     qtyAvailable: number | null;
+    /** The unit price on the order (the PO is never rewritten). */
     unitPriceAgreed: number | null;
+    /** `unitPriceAgreed` is the contract price in force on the order date. */
+    agreed: boolean;
     proposedUnitPrice: number | null;
   }>;
 }
@@ -368,6 +406,9 @@ export async function supplierResponseDiff(
           rawDescriptionEn: poLines.rawDescriptionEn,
           productName: products.canonicalName,
           productNameEn: products.nameEn,
+          productId: poLines.productId,
+          supplierId: purchaseOrders.supplierId,
+          orderedAt: purchaseOrders.createdAt,
           unit: poLines.unit,
           qty: poLines.qtyOrdered,
           price: poLines.unitPriceExpected,
@@ -378,6 +419,16 @@ export async function supplierResponseDiff(
         .where(and(inArray(poLines.id, ids), eq(purchaseOrders.restaurantId, restaurantId), eq(poLines.poId, poId)))
     : [];
   const byId = new Map(lines.map((l) => [l.id, l]));
+  const first = lines[0];
+  const agreed = first
+    ? await agreedLineIds(
+        db,
+        restaurantId,
+        first.supplierId,
+        first.orderedAt,
+        lines.map((l) => ({ id: l.id, productId: l.productId, unit: l.unit, price: l.price == null ? null : Number(l.price) })),
+      )
+    : new Set<string>();
   return {
     latestLink: latestLink ?? null,
     response: {
@@ -396,6 +447,7 @@ export async function supplierResponseDiff(
             qtyOrdered: Number(l.qty),
             qtyAvailable: c.qtyAvailable,
             unitPriceAgreed: l.price == null ? null : Number(l.price),
+            agreed: agreed.has(c.poLineId),
             proposedUnitPrice: c.proposedUnitPrice,
           };
         })
