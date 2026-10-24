@@ -1,45 +1,45 @@
 // RestoMatch design tokens — "Command Center for Money" (חדר בקרה לכסף).
-// Locked dark fintech palette: near-black green-ink canvas, neon money-green
-// primary, gold for money recovered, danger-rose for leaks. See
-// docs/DESIGN-BRIEF.md. These tokens are mirrored into apps/web/tailwind.config.ts
-// (semantic Tailwind names) — keep the two in sync.
+// Light identity: calm off-white canvas, white cards, deep money-green primary,
+// gold for money recovered, danger-red for leaks. Every text/background pair is
+// WCAG AA. See docs/DESIGN-BRIEF.md. Mirrored into apps/web (CSS variables in
+// app/globals.css, semantic Tailwind names in tailwind.config.ts) — keep in sync.
 
 export const colors = {
-  // Canvas / surfaces (dark, green-ink)
-  bg: '#0E1512', // near-black green-ink canvas
-  surface: '#16201B', // cards
-  surface2: '#1C2A23', // raised / hover / inputs
-  line: '#2A3A31', // borders / dividers
+  // Canvas / surfaces
+  bg: '#F6F8F7', // off-white canvas
+  surface: '#FFFFFF', // cards
+  surface2: '#EEF3F0', // raised / hover / inputs
+  line: '#D3DDD7', // dividers (decorative)
+  lineStrong: '#7A8B82', // control borders (≥3:1)
 
   // Text
-  ink: '#ECF5EF', // primary text
-  muted: '#9DB2A6', // secondary text
-  subtle: '#6B8478', // tertiary / placeholder
+  ink: '#0F1F17', // primary text
+  muted: '#4A5D53', // secondary text
+  subtle: '#5A6A62', // tertiary / placeholder
 
   // Brand + semantics
-  primary: '#22D39A', // neon money-green (primary action, positive, clean-match)
-  onPrimary: '#07120D', // text ON primary
-  gold: '#E0B341', // savings / money recovered / positive ₪
-  danger: '#FF5C7A', // leak / loss / block
-  warn: '#F0A33E', // warning severity
-  info: '#5BB0FF', // informational
+  primary: '#066B4A', // deep money-green (primary action, positive, clean-match)
+  onPrimary: '#FFFFFF', // text ON primary
+  gold: '#8A5300', // savings / money recovered / positive ₪
+  danger: '#B80F2A', // leak / loss / block
+  warn: '#9A4405', // warning severity
+  info: '#1A5BC7', // informational
 
-  // --- Legacy aliases (consumed by apps/mobile) — mapped onto the dark palette
-  //     so native screens share the same "command center" identity. ---
-  background: '#0E1512', // → bg
-  primaryHover: '#1BB888', // darker money-green for pressed states
-  accent: '#E0B341', // → gold (savings accent)
-  warning: '#F0A33E', // → warn
-  textPrimary: '#ECF5EF', // → ink
-  textSecondary: '#9DB2A6', // → muted
-  border: '#2A3A31', // → line
+  // --- Legacy aliases (consumed by apps/mobile) — mapped onto the same palette. ---
+  background: '#F6F8F7', // → bg
+  primaryHover: '#055A3E', // darker money-green for pressed states
+  accent: '#8A5300', // → gold (savings accent)
+  warning: '#9A4405', // → warn
+  textPrimary: '#0F1F17', // → ink
+  textSecondary: '#4A5D53', // → muted
+  border: '#D3DDD7', // → line
 } as const;
 
-/** Glow + soft-shadow recipes for the dark canvas (soft borders + glows, not heavy drop shadows). */
+/** Emphasis tints (1px rings / soft washes) on the light canvas. */
 export const glows = {
-  primary: 'rgba(34,211,154,.22)',
-  danger: 'rgba(255,92,122,.20)',
-  gold: 'rgba(224,179,65,.18)',
+  primary: 'rgba(6,107,74,.28)',
+  danger: 'rgba(184,15,42,.30)',
+  gold: 'rgba(138,83,0,.28)',
 } as const;
 
 export const spacing = {

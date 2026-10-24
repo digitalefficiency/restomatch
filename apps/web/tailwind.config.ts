@@ -2,31 +2,36 @@ import type { Config } from 'tailwindcss';
 import { typography } from '@restomatch/ui-tokens';
 
 // RestoMatch web — "Command Center for Money" (חדר בקרה לכסף) design language.
-// Locked dark fintech identity (see docs/DESIGN-BRIEF.md):
-// near-black green-ink canvas, neon money-green primary, gold for money
-// recovered, danger-rose for leaks, soft 1px borders + glows (not heavy
-// shadows), money-flow signature motif. Mirrors packages/ui-tokens.
+// Light identity (see docs/DESIGN-BRIEF.md): a calm off-white canvas, white
+// cards, deep money-green primary, gold for money recovered, danger-red for
+// leaks, soft shadows. Every colour is a CSS variable (RGB channels, values in
+// app/globals.css :root) so `/opacity` modifiers keep working. Mirrors
+// packages/ui-tokens.
+const v = (name: string) => `rgb(var(--c-${name}) / <alpha-value>)`;
+
 const config: Config = {
   content: ['./app/**/*.{ts,tsx}', './components/**/*.{ts,tsx}', './lib/**/*.{ts,tsx}'],
   theme: {
     extend: {
       colors: {
         // Canvas / surfaces
-        bg: '#0E1512',
-        surface: '#16201B',
-        'surface-2': '#1C2A23',
-        line: '#2A3A31',
+        bg: v('bg'),
+        surface: v('surface'),
+        'surface-2': v('surface-2'),
+        line: v('line'),
+        // Input / control borders (≥3:1 against surfaces, WCAG 1.4.11).
+        'line-strong': v('line-strong'),
         // Text
-        ink: '#ECF5EF',
-        muted: '#9DB2A6',
-        subtle: '#6B8478',
+        ink: v('ink'),
+        muted: v('muted'),
+        subtle: v('subtle'),
         // Brand + semantics
-        primary: '#22D39A',
-        'on-primary': '#07120D',
-        gold: '#E0B341',
-        danger: '#FF5C7A',
-        warn: '#F0A33E',
-        info: '#5BB0FF',
+        primary: v('primary'),
+        'on-primary': v('on-primary'),
+        gold: v('gold'),
+        danger: v('danger'),
+        warn: v('warn'),
+        info: v('info'),
       },
       fontFamily: {
         // Heebo via next/font CSS var, then the static stack as fallback.
@@ -34,17 +39,19 @@ const config: Config = {
         mono: ['var(--font-mono)', ...typography.fontFamily.mono.split(',').map((s) => s.trim().replace(/"/g, ''))],
       },
       boxShadow: {
-        // Soft card depth for the dark canvas (subtle, not heavy drop shadows).
-        card: '0 1px 0 0 rgba(255,255,255,0.02) inset, 0 14px 34px -18px rgba(0,0,0,0.66)',
-        // Signature glows — used on KPIs, heatmap cells, primary CTAs.
-        'glow-primary': '0 0 0 1px rgba(34,211,154,0.22), 0 12px 36px -10px rgba(34,211,154,0.22)',
-        'glow-danger': '0 0 0 1px rgba(255,92,122,0.20), 0 12px 36px -10px rgba(255,92,122,0.20)',
-        'glow-gold': '0 0 0 1px rgba(224,179,65,0.18), 0 12px 36px -10px rgba(224,179,65,0.18)',
+        // Soft card depth on the light canvas.
+        card: '0 1px 2px rgba(15,31,23,0.06), 0 8px 24px -12px rgba(15,31,23,0.12)',
+        // Emphasis shadows (names kept from the dark "glow" era so pages don't churn):
+        // a tinted 1px ring + the soft card shadow.
+        'glow-primary': '0 0 0 1px rgb(var(--c-primary) / 0.28), 0 1px 2px rgba(15,31,23,0.06), 0 8px 24px -12px rgba(15,31,23,0.14)',
+        'glow-danger': '0 0 0 1px rgb(var(--c-danger) / 0.30), 0 1px 2px rgba(15,31,23,0.06), 0 8px 24px -12px rgba(184,15,42,0.16)',
+        'glow-gold': '0 0 0 1px rgb(var(--c-gold) / 0.28), 0 1px 2px rgba(15,31,23,0.06), 0 8px 24px -12px rgba(15,31,23,0.14)',
       },
       dropShadow: {
-        'glow-primary': '0 0 10px rgba(34,211,154,0.45)',
-        'glow-danger': '0 0 10px rgba(255,92,122,0.45)',
-        'glow-gold': '0 0 10px rgba(224,179,65,0.4)',
+        // No neon text glows on a light canvas.
+        'glow-primary': '0 0 0 transparent',
+        'glow-danger': '0 0 0 transparent',
+        'glow-gold': '0 0 0 transparent',
       },
     },
   },
