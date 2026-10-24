@@ -1,8 +1,32 @@
 // RestoMatch design tokens — "Command Center for Money" (חדר בקרה לכסף).
-// Locked dark fintech palette: near-black green-ink canvas, neon money-green
-// primary, gold for money recovered, danger-rose for leaks. See
-// docs/DESIGN-BRIEF.md. These tokens are mirrored into apps/web/tailwind.config.ts
-// (semantic Tailwind names) — keep the two in sync.
+//
+// Two palettes during the light-theme transition (see docs/DESIGN-BRIEF.md):
+// - `webColors` — the LIGHT identity of apps/web (the source of truth there is
+//   the CSS variables in apps/web/app/globals.css; keep the two in sync).
+// - `colors` — the previous dark palette, still consumed by apps/mobile through
+//   its legacy aliases. Unchanged on purpose until mobile gets its own pass.
+
+export const webColors = {
+  // Canvas / surfaces
+  bg: '#F6F8F7', // off-white canvas
+  surface: '#FFFFFF', // cards
+  surface2: '#EEF3F0', // raised / hover / inputs
+  line: '#D3DDD7', // dividers (decorative)
+  lineStrong: '#7A8B82', // control borders (≥3:1)
+
+  // Text
+  ink: '#0F1F17', // primary text
+  muted: '#4A5D53', // secondary text
+  subtle: '#5A6A62', // tertiary / placeholder
+
+  // Brand + semantics
+  primary: '#066B4A', // deep money-green (primary action, positive, clean-match)
+  onPrimary: '#FFFFFF', // text ON primary
+  gold: '#8A5300', // savings / money recovered / positive ₪
+  danger: '#B80F2A', // leak / loss / block
+  warn: '#9A4405', // warning severity
+  info: '#1A5BC7', // informational
+} as const;
 
 export const colors = {
   // Canvas / surfaces (dark, green-ink)

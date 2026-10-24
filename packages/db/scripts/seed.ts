@@ -115,6 +115,8 @@ interface SupplierSpec {
   name: string;
   nameEn: string;
   businessId: string;
+  /** Supplier VAT rate; unset → the restaurant's. Fresh produce is VAT-exempt in Israel (0). */
+  vatRate?: string;
   contactEmail: string;
   contactWhatsapp: string;
   paymentTerms: string;
@@ -125,7 +127,7 @@ interface SupplierSpec {
 }
 
 const SUPPLIERS: SupplierSpec[] = [
-  { key: 'veg', name: 'ירקות השרון', nameEn: 'HaSharon Produce', businessId: '514200101', contactEmail: 'orders@sharon-produce.test', contactWhatsapp: '+972521110101', paymentTerms: 'שוטף + 30', days: [0, 2, 4], everyWeeks: 1, time: '07:30' },
+  { key: 'veg', name: 'ירקות השרון', nameEn: 'HaSharon Produce', businessId: '514200101', vatRate: '0', contactEmail: 'orders@sharon-produce.test', contactWhatsapp: '+972521110101', paymentTerms: 'שוטף + 30', days: [0, 2, 4], everyWeeks: 1, time: '07:30' },
   { key: 'meat', name: 'קצביית הכרם', nameEn: 'HaKerem Butchery', businessId: '514200102', contactEmail: 'office@hakerem-meat.test', contactWhatsapp: '+972521110102', paymentTerms: 'שוטף + 45', days: [1], everyWeeks: 1, time: '09:30' },
   { key: 'bakery', name: 'מאפיית ברנר', nameEn: "Brenner's Bakery", businessId: '514200103', contactEmail: 'bakery@brenner.test', contactWhatsapp: '+972521110103', paymentTerms: 'שוטף + 30', days: [0, 2, 4], everyWeeks: 1, time: '06:00' },
   { key: 'fish', name: 'דגי הים התיכון', nameEn: 'Mediterranean Fish Co.', businessId: '514200104', contactEmail: 'sales@medfish.test', contactWhatsapp: '+972521110104', paymentTerms: 'שוטף + 30', days: [2], everyWeeks: 1, time: '11:00' },
@@ -345,7 +347,7 @@ async function main() {
         contactEmail: s.contactEmail,
         contactWhatsapp: s.contactWhatsapp,
         paymentTerms: s.paymentTerms,
-        vatRate: null,
+        vatRate: s.vatRate ?? null,
         deliverySchedule: Object.fromEntries(s.days.map((d) => [dayKey[d], [s.time]])) as DeliverySchedule,
       })),
     )
