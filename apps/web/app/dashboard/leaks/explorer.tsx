@@ -93,6 +93,7 @@ export async function LeakExplorer({ view }: { view: ViewState }) {
             label={t('kpis.leak')}
             value={ils(cur.leakIls)}
             tone="danger"
+            emphasis={cur.leakIls > 0}
             icon={<Droplets className="h-4 w-4" />}
             hint={<DeltaBadge current={cur.leakIls} previous={prev?.leakIls} compare={view.compare} showAmount />}
           />
