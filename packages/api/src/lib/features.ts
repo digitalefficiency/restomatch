@@ -25,6 +25,7 @@ export const FEATURE_KEYS = [
   'leakCheck',
   'recipes',
   'integrations',
+  'dockSlip',
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
