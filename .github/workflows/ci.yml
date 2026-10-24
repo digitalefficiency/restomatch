@@ -48,7 +48,7 @@ concurrency:
 jobs:
   test:
     name: typecheck + test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
 
@@ -116,7 +116,7 @@ jobs:
 
   worker-tests:
     name: worker tests (job-scoped Redis)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
 
@@ -194,7 +194,7 @@ jobs:
 
   web:
     name: web build + typecheck
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
 
@@ -263,7 +263,7 @@ jobs:
 
   e2e:
     name: e2e (playwright, non-blocking during soak)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
 
@@ -322,7 +322,7 @@ jobs:
 
   worker-image:
     name: worker image (docker build)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -336,7 +336,7 @@ jobs:
 
   audit:
     name: pnpm audit (prod, high+)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -367,7 +367,7 @@ jobs:
 
   dependency-review:
     name: dependency review
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # PR-only: diffs the PR's dependency manifest against the base branch and
     # blocks newly-introduced vulnerable dependencies before they merge.
     #
