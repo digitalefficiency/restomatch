@@ -9,7 +9,7 @@
 import { runPriceAlertSweep } from '@restomatch/api';
 import { eq, restaurants } from '@restomatch/db';
 import { jobDb } from '../db';
-import { makeWorker } from '../queue';
+import { makeWorker, type WorkerJob } from '../queue';
 import { appBaseUrl } from '../lib/notifyHelpers';
 
 export interface PriceAlertsJob {
@@ -20,31 +20,34 @@ export interface PriceAlertsJob {
 }
 
 export function startPriceAlertsWorker() {
-  return makeWorker<PriceAlertsJob>('price-alerts', async (job) => {
-    const url = process.env.DATABASE_URL;
-    if (!url) throw new Error('DATABASE_URL is required');
-    const db = jobDb(url);
-    const now = job.data.forDate ? new Date(job.data.forDate) : new Date();
+  return makeWorker<PriceAlertsJob>('price-alerts', processPriceAlerts);
+}
 
-    const rows = job.data.restaurantId
-      ? await db.select({ id: restaurants.id }).from(restaurants).where(eq(restaurants.id, job.data.restaurantId))
-      : await db.select({ id: restaurants.id }).from(restaurants);
+/** The price-alerts job: run by the worker loop (above) and by the serverless runner (handlers.ts). */
+export async function processPriceAlerts(job: WorkerJob<PriceAlertsJob>) {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error('DATABASE_URL is required');
+  const db = jobDb(url);
+  const now = job.data.forDate ? new Date(job.data.forDate) : new Date();
 
-    let created = 0;
-    let enqueued = 0;
-    let failed = 0;
-    for (const r of rows) {
-      // One tenant's bad data must not abort the sweep for everyone else.
-      try {
-        const res = await runPriceAlertSweep(db, r.id, { now, notify: true, appBaseUrl: appBaseUrl() });
-        created += res.created;
-        enqueued += res.enqueued;
-      } catch (err) {
-        failed += 1;
-        console.error(`[price-alerts] restaurant=${r.id} failed`, err);
-      }
+  const rows = job.data.restaurantId
+    ? await db.select({ id: restaurants.id }).from(restaurants).where(eq(restaurants.id, job.data.restaurantId))
+    : await db.select({ id: restaurants.id }).from(restaurants);
+
+  let created = 0;
+  let enqueued = 0;
+  let failed = 0;
+  for (const r of rows) {
+    // One tenant's bad data must not abort the sweep for everyone else.
+    try {
+      const res = await runPriceAlertSweep(db, r.id, { now, notify: true, appBaseUrl: appBaseUrl() });
+      created += res.created;
+      enqueued += res.enqueued;
+    } catch (err) {
+      failed += 1;
+      console.error(`[price-alerts] restaurant=${r.id} failed`, err);
     }
-    console.log(`[price-alerts] restaurants=${rows.length} created=${created} enqueued=${enqueued} failed=${failed}`);
-    return { created, enqueued, failed };
-  });
+  }
+  console.log(`[price-alerts] restaurants=${rows.length} created=${created} enqueued=${enqueued} failed=${failed}`);
+  return { created, enqueued, failed };
 }

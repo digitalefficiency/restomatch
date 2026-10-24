@@ -15,7 +15,7 @@ import {
   recipientsForRestaurant,
 } from '@restomatch/api';
 import { and, count, discrepancies, eq, gte, inArray, restaurants, sql } from '@restomatch/db';
-import { makeWorker } from '../queue';
+import { makeWorker, type WorkerJob } from '../queue';
 import { appBaseUrl, formatIlsAmount, formatIlDate, startOfIlDay } from '../lib/notifyHelpers';
 import { jobDb } from '../db';
 
@@ -30,106 +30,109 @@ export interface EndOfDayReportJob {
 const OPEN_STATES = ['open', 'escalated'] as const;
 
 export function startEndOfDayReportWorker() {
-  return makeWorker<EndOfDayReportJob>('end-of-day-report', async (job) => {
-    const url = process.env.DATABASE_URL;
-    if (!url) throw new Error('DATABASE_URL is required');
-    const db = jobDb(url);
+  return makeWorker<EndOfDayReportJob>('end-of-day-report', processEndOfDayReport);
+}
 
-    const now = job.data.forDate ? new Date(job.data.forDate) : new Date();
-    const startToday = startOfIlDay(now);
-    const todayKey = startToday.toISOString().slice(0, 10);
+/** The end-of-day-report job: run by the worker loop (above) and by the serverless runner (handlers.ts). */
+export async function processEndOfDayReport(job: WorkerJob<EndOfDayReportJob>) {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error('DATABASE_URL is required');
+  const db = jobDb(url);
 
-    const restaurantRows = job.data.restaurantId
-      ? await db.select().from(restaurants).where(eq(restaurants.id, job.data.restaurantId))
-      : await db.select().from(restaurants);
+  const now = job.data.forDate ? new Date(job.data.forDate) : new Date();
+  const startToday = startOfIlDay(now);
+  const todayKey = startToday.toISOString().slice(0, 10);
 
-    let sent = 0;
-    let skipped = 0;
+  const restaurantRows = job.data.restaurantId
+    ? await db.select().from(restaurants).where(eq(restaurants.id, job.data.restaurantId))
+    : await db.select().from(restaurants);
 
-    for (const restaurant of restaurantRows) {
-      // Open credits: unresolved discrepancies with recoverable ₪.
-      const [openAgg] = await db
-        .select({
-          cnt: count(discrepancies.id),
-          total: sql<string>`coalesce(sum(abs(${discrepancies.deltaAmount})), 0)`,
-        })
-        .from(discrepancies)
-        .where(
-          and(
-            eq(discrepancies.restaurantId, restaurant.id),
-            inArray(discrepancies.resolutionStatus, [...OPEN_STATES]),
-          ),
-        );
+  let sent = 0;
+  let skipped = 0;
 
-      // What was flagged today.
-      const [todayAgg] = await db
-        .select({
-          cnt: count(discrepancies.id),
-          total: sql<string>`coalesce(sum(abs(${discrepancies.deltaAmount})), 0)`,
-        })
-        .from(discrepancies)
-        .where(
-          and(
-            eq(discrepancies.restaurantId, restaurant.id),
-            gte(discrepancies.createdAt, startToday),
-          ),
-        );
+  for (const restaurant of restaurantRows) {
+    // Open credits: unresolved discrepancies with recoverable ₪.
+    const [openAgg] = await db
+      .select({
+        cnt: count(discrepancies.id),
+        total: sql<string>`coalesce(sum(abs(${discrepancies.deltaAmount})), 0)`,
+      })
+      .from(discrepancies)
+      .where(
+        and(
+          eq(discrepancies.restaurantId, restaurant.id),
+          inArray(discrepancies.resolutionStatus, [...OPEN_STATES]),
+        ),
+      );
 
-      const openCount = Number(openAgg?.cnt ?? 0);
-      const todayCount = Number(todayAgg?.cnt ?? 0);
+    // What was flagged today.
+    const [todayAgg] = await db
+      .select({
+        cnt: count(discrepancies.id),
+        total: sql<string>`coalesce(sum(abs(${discrepancies.deltaAmount})), 0)`,
+      })
+      .from(discrepancies)
+      .where(
+        and(
+          eq(discrepancies.restaurantId, restaurant.id),
+          gte(discrepancies.createdAt, startToday),
+        ),
+      );
 
-      // Quiet day → skip (no open credits, nothing caught today).
-      if (openCount === 0 && todayCount === 0) {
-        skipped += 1;
-        continue;
-      }
+    const openCount = Number(openAgg?.cnt ?? 0);
+    const todayCount = Number(todayAgg?.cnt ?? 0);
 
-      // Items awaiting a manager decision (subset of open).
-      const [pendingAgg] = await db
-        .select({ cnt: count(discrepancies.id) })
-        .from(discrepancies)
-        .where(
-          and(
-            eq(discrepancies.restaurantId, restaurant.id),
-            eq(discrepancies.resolutionStatus, 'open'),
-          ),
-        );
-
-      const recipients = await recipientsForRestaurant(db, restaurant.id);
-      if (recipients.length === 0) {
-        skipped += 1;
-        continue;
-      }
-
-      const email = endOfDayReportEmail({
-        dateLabel: formatIlDate(startToday).split(',')[0]?.trim() ?? todayKey,
-        openCreditsCount: openCount,
-        openCreditsIls: formatIlsAmount(Number(openAgg?.total ?? 0)),
-        todayCaughtCount: todayCount,
-        todayCaughtIls: formatIlsAmount(Number(todayAgg?.total ?? 0)),
-        pendingApprovals: Number(pendingAgg?.cnt ?? 0),
-        approvalsUrl: `${appBaseUrl()}/dashboard/approvals`,
-      });
-
-      for (const recipient of recipients) {
-        const { deduped } = await enqueueNotification(db, {
-          restaurantId: restaurant.id,
-          channel: 'email',
-          target: recipient.email,
-          subject: email.subject,
-          body: email.text,
-          html: email.html,
-          relatedEntityType: 'restaurant',
-          relatedEntityId: restaurant.id,
-          dedupeKey: `eod-report:${restaurant.id}:${todayKey}:${recipient.email}`,
-        });
-        if (!deduped) sent += 1;
-      }
+    // Quiet day → skip (no open credits, nothing caught today).
+    if (openCount === 0 && todayCount === 0) {
+      skipped += 1;
+      continue;
     }
 
-    console.log(
-      `[end-of-day-report] date=${todayKey} restaurants=${restaurantRows.length} sent=${sent} skipped=${skipped}`,
-    );
-    return { date: todayKey, sent, skipped };
-  });
+    // Items awaiting a manager decision (subset of open).
+    const [pendingAgg] = await db
+      .select({ cnt: count(discrepancies.id) })
+      .from(discrepancies)
+      .where(
+        and(
+          eq(discrepancies.restaurantId, restaurant.id),
+          eq(discrepancies.resolutionStatus, 'open'),
+        ),
+      );
+
+    const recipients = await recipientsForRestaurant(db, restaurant.id);
+    if (recipients.length === 0) {
+      skipped += 1;
+      continue;
+    }
+
+    const email = endOfDayReportEmail({
+      dateLabel: formatIlDate(startToday).split(',')[0]?.trim() ?? todayKey,
+      openCreditsCount: openCount,
+      openCreditsIls: formatIlsAmount(Number(openAgg?.total ?? 0)),
+      todayCaughtCount: todayCount,
+      todayCaughtIls: formatIlsAmount(Number(todayAgg?.total ?? 0)),
+      pendingApprovals: Number(pendingAgg?.cnt ?? 0),
+      approvalsUrl: `${appBaseUrl()}/dashboard/approvals`,
+    });
+
+    for (const recipient of recipients) {
+      const { deduped } = await enqueueNotification(db, {
+        restaurantId: restaurant.id,
+        channel: 'email',
+        target: recipient.email,
+        subject: email.subject,
+        body: email.text,
+        html: email.html,
+        relatedEntityType: 'restaurant',
+        relatedEntityId: restaurant.id,
+        dedupeKey: `eod-report:${restaurant.id}:${todayKey}:${recipient.email}`,
+      });
+      if (!deduped) sent += 1;
+    }
+  }
+
+  console.log(
+    `[end-of-day-report] date=${todayKey} restaurants=${restaurantRows.length} sent=${sent} skipped=${skipped}`,
+  );
+  return { date: todayKey, sent, skipped };
 }

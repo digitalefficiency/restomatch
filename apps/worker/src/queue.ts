@@ -1,7 +1,7 @@
 import { hostname } from 'node:os';
 import cronParser from 'cron-parser';
 import { captureException } from '@restomatch/observability';
-import { WORKER_IDLE_TIMEOUT_SEC } from './db';
+import { jobIdleTimeoutSec } from './db';
 import {
   claimAny,
   completeJob,
@@ -55,7 +55,7 @@ const WORKER_POOL_MAX = 4;
 export function workerSql(): Sql {
   const url = queueDbUrl();
   if (!url) throw new Error('DATABASE_URL is required');
-  return queueSql(url, WORKER_POOL_MAX, WORKER_IDLE_TIMEOUT_SEC);
+  return queueSql(url, WORKER_POOL_MAX, jobIdleTimeoutSec());
 }
 
 /**
@@ -209,7 +209,25 @@ export function dispatcherFor(sql: Sql): { claims: number; idleMs: number; liste
 }
 
 async function runOne(sql: Sql, reg: Registration, row: JobRow<unknown>): Promise<void> {
-  const name = reg.name;
+  await runClaimedJob(sql, reg.name, reg.processor, row);
+}
+
+/** What became of a claimed job: done, queued again after a backoff, or failed for good. */
+export type JobOutcome = 'done' | 'retry' | 'failed';
+
+/**
+ * Run one claimed job and record the outcome — THE job semantics, shared by the
+ * worker's dispatcher and the serverless runner (serverless.ts), so both
+ * complete / retry with backoff / dead-letter ('failed') a job identically.
+ * `workerId` is the claimer (the lock holder completeJob/failJob check).
+ */
+export async function runClaimedJob(
+  sql: Sql,
+  name: string,
+  processor: (job: WorkerJob<unknown>) => Promise<unknown>,
+  row: JobRow<unknown>,
+  workerId: string = WORKER_ID,
+): Promise<JobOutcome> {
   const job: WorkerJob<unknown> = {
     id: row.id,
     name,
@@ -221,24 +239,30 @@ async function runOne(sql: Sql, reg: Registration, row: JobRow<unknown>): Promis
   try {
     let result: unknown;
     try {
-      result = await reg.processor(job);
+      result = await processor(job);
     } catch (err) {
       console.error(formatJobFailure(name, { id: row.id, attemptsMade: row.attempts }, err));
       captureException(err, { queue: name, jobId: row.id });
-      await failJob(sql, row, err instanceof Error ? err.message : String(err), WORKER_ID).catch((e: unknown) =>
-        console.error(`[${name}] could not record the failure of job=${row.id}: ${e instanceof Error ? e.message : e}`),
-      );
-      return;
+      return await failJob(sql, row, err instanceof Error ? err.message : String(err), workerId).catch((e: unknown) => {
+        console.error(`[${name}] could not record the failure of job=${row.id}: ${e instanceof Error ? e.message : e}`);
+        return row.attempts < row.maxAttempts ? ('retry' as const) : ('failed' as const);
+      });
     }
     // Outside the processor's catch: a DB blip here must not turn work that
     // succeeded into a failure. If it cannot be recorded, stall recovery
     // re-queues the job later (consumers are idempotent).
-    await completeJob(sql, row.id, WORKER_ID, result).catch((e: unknown) =>
+    await completeJob(sql, row.id, workerId, result).catch((e: unknown) =>
       console.error(`[${name}] could not record the completion of job=${row.id}: ${e instanceof Error ? e.message : e}`),
     );
+    return 'done';
   } finally {
     inFlight.delete(row.id);
   }
+}
+
+/** Ids of the jobs running in this process right now (any runner). */
+export function inFlightJobIds(): string[] {
+  return [...inFlight.keys()];
 }
 
 export function makeWorker<T>(

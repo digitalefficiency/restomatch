@@ -13,13 +13,31 @@ const pools = new Map<string, Database>();
 
 /** Idle connections of the worker's pools close after 5 min (web: 20 s). */
 export const WORKER_IDLE_TIMEOUT_SEC = 300;
+/** The web app's idle timeout (packages/db createDb default, packages/queue queueSql). */
+export const SERVERLESS_IDLE_TIMEOUT_SEC = 20;
+
+let idleTimeoutSec = WORKER_IDLE_TIMEOUT_SEC;
+
+/**
+ * Jobs run inside the web app (serverless.ts): short-lived instances, many of
+ * them on the Supabase pooler — release idle connections like the web does
+ * instead of holding them 5 min. Call before the first jobDb()/workerSql().
+ */
+export function useServerlessPools(): void {
+  idleTimeoutSec = SERVERLESS_IDLE_TIMEOUT_SEC;
+}
+
+/** Idle timeout for the job pools of this process (worker 300 s, serverless 20 s). */
+export function jobIdleTimeoutSec(): number {
+  return idleTimeoutSec;
+}
 
 export function jobDb(url: string): Database {
   let db = pools.get(url);
   if (!db) {
     // Long-lived process: keep connections warm (outbox-dispatch runs every
     // 60 s) instead of reconnecting each minute — see WORKER_IDLE_TIMEOUT_SEC.
-    db = createDb(url, { idleTimeoutSec: WORKER_IDLE_TIMEOUT_SEC });
+    db = createDb(url, { idleTimeoutSec });
     pools.set(url, db);
   }
   return db;

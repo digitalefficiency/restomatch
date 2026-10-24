@@ -5,7 +5,7 @@
  */
 import { enqueueRecoveryReminders } from '@restomatch/api';
 import { jobDb } from '../db';
-import { makeWorker } from '../queue';
+import { makeWorker, type WorkerJob } from '../queue';
 import { appBaseUrl } from '../lib/notifyHelpers';
 
 export interface RecoveryRemindersJob {
@@ -15,15 +15,18 @@ export interface RecoveryRemindersJob {
 }
 
 export function startRecoveryRemindersWorker() {
-  return makeWorker<RecoveryRemindersJob>('recovery-reminders', async (job) => {
-    const url = process.env.DATABASE_URL;
-    if (!url) throw new Error('DATABASE_URL is required');
-    const res = await enqueueRecoveryReminders(jobDb(url), {
-      restaurantId: job.data.restaurantId,
-      now: job.data.forDate ? new Date(job.data.forDate) : new Date(),
-      appUrl: appBaseUrl(),
-    });
-    console.log(`[recovery-reminders] restaurants=${res.restaurants} emails=${res.emails} claims=${res.claims} failed=${res.failed.length}`);
-    return res;
+  return makeWorker<RecoveryRemindersJob>('recovery-reminders', processRecoveryReminders);
+}
+
+/** The recovery-reminders job: run by the worker loop (above) and by the serverless runner (handlers.ts). */
+export async function processRecoveryReminders(job: WorkerJob<RecoveryRemindersJob>) {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error('DATABASE_URL is required');
+  const res = await enqueueRecoveryReminders(jobDb(url), {
+    restaurantId: job.data.restaurantId,
+    now: job.data.forDate ? new Date(job.data.forDate) : new Date(),
+    appUrl: appBaseUrl(),
   });
+  console.log(`[recovery-reminders] restaurants=${res.restaurants} emails=${res.emails} claims=${res.claims} failed=${res.failed.length}`);
+  return res;
 }

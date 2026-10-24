@@ -5,7 +5,7 @@
  */
 import { sendMonthlyReports } from '@restomatch/api';
 import { jobDb } from '../db';
-import { makeWorker } from '../queue';
+import { makeWorker, type WorkerJob } from '../queue';
 import { appBaseUrl } from '../lib/notifyHelpers';
 
 export interface MonthlyReportJob {
@@ -15,17 +15,20 @@ export interface MonthlyReportJob {
 }
 
 export function startMonthlyReportWorker() {
-  return makeWorker<MonthlyReportJob>('monthly-report', async (job) => {
-    const url = process.env.DATABASE_URL;
-    if (!url) throw new Error('DATABASE_URL is required');
-    const res = await sendMonthlyReports(jobDb(url), {
-      restaurantId: job.data.restaurantId,
-      now: job.data.forDate ? new Date(job.data.forDate) : new Date(),
-      appUrl: appBaseUrl(),
-    });
-    console.log(
-      `[monthly-report] restaurants=${res.restaurants} emails=${res.emails} whatsapp=${res.whatsapp} skipped=${res.skipped} failed=${res.failed.length}${res.failed.length ? ` (${res.failed.join(',')})` : ''}`,
-    );
-    return res;
+  return makeWorker<MonthlyReportJob>('monthly-report', processMonthlyReport);
+}
+
+/** The monthly-report job: run by the worker loop (above) and by the serverless runner (handlers.ts). */
+export async function processMonthlyReport(job: WorkerJob<MonthlyReportJob>) {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error('DATABASE_URL is required');
+  const res = await sendMonthlyReports(jobDb(url), {
+    restaurantId: job.data.restaurantId,
+    now: job.data.forDate ? new Date(job.data.forDate) : new Date(),
+    appUrl: appBaseUrl(),
   });
+  console.log(
+    `[monthly-report] restaurants=${res.restaurants} emails=${res.emails} whatsapp=${res.whatsapp} skipped=${res.skipped} failed=${res.failed.length}${res.failed.length ? ` (${res.failed.join(',')})` : ''}`,
+  );
+  return res;
 }
