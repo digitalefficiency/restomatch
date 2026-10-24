@@ -1,6 +1,6 @@
 import { fillEnglishNames, meterOcrScan, receiptState } from '@restomatch/api';
 import { matchProductTopN, MockEmbeddingProvider } from '@restomatch/catalog';
-import { receiptsBeingCountedForScan } from '@restomatch/charts';
+import { HELD_FOR_RECEIPTS_KEY, receiptsBeingCountedForScan } from '@restomatch/charts';
 import { and, eq, invoiceLines, invoices, ne, restaurants, sql, type Database } from '@restomatch/db';
 import {
   ClaudeVision,
@@ -180,9 +180,14 @@ export function startOcrInvoiceWorker() {
       // auto-proceed. Low-confidence (parsed / needs-review) invoices wait for a
       // human to confirm product matches first (match.runForInvoice on demand).
       // A queue failure must never break the OCR persistence above.
-      const decision = needsHumanReview
+      const decision: OcrMatchHold = needsHumanReview
         ? { match: false }
-        : await ocrAutoMatchDecision(db, job.data.restaurantId, job.data.grId, { invoiceId: job.data.invoiceId });
+        : await ocrAutoMatchHold(db, job.data.restaurantId, job.data.grId, { invoiceId: job.data.invoiceId });
+      // Held for a receipt's count: say so on the invoice, so the owner's screens show
+      // "waiting for the count", not "waiting to be linked to an order" (#94).
+      if (decision.heldFor?.length) {
+        await markHeldForCount(db, job.data.restaurantId, job.data.invoiceId, decision.heldFor);
+      }
       if (decision.match) {
         try {
           // A variable, not a literal: compiles on either queue job shape (#49).
@@ -366,15 +371,55 @@ export async function ocrAutoMatchDecision(
   grId: string | undefined,
   scan?: { invoiceId: string },
 ): Promise<{ match: boolean; poId?: string }> {
+  const { heldFor: _heldFor, ...decision } = await ocrAutoMatchHold(db, restaurantId, grId, scan);
+  return decision;
+}
+
+/** ocrAutoMatchDecision plus, when held, the receipts whose count it waits for. */
+export interface OcrMatchHold {
+  match: boolean;
+  poId?: string;
+  heldFor?: string[];
+}
+
+export async function ocrAutoMatchHold(
+  db: Database,
+  restaurantId: string,
+  grId: string | undefined,
+  scan?: { invoiceId: string },
+): Promise<OcrMatchHold> {
   if (!grId) return scan ? receiptLostDecision(db, restaurantId, scan.invoiceId) : { match: true };
   try {
     // Takes the receipt lock: a submit in flight is waited for (receiving/matchTriggers).
     const state = await db.transaction((tx) => receiptState(tx as unknown as Database, restaurantId, grId));
     // Matched against the order that was counted, not a discovered sibling.
-    return state.open ? { match: false } : { match: true, ...(state.poId ? { poId: state.poId } : {}) };
+    return state.open ? { match: false, heldFor: [grId] } : { match: true, ...(state.poId ? { poId: state.poId } : {}) };
   } catch (err) {
     console.warn(`[ocr-invoice] receipt check failed for gr=${grId} — matching now`, err);
     return { match: true };
+  }
+}
+
+/**
+ * Record on the invoice the receipts whose count its match waits for:
+ * ocr_payload.raw.heldForReceipts (charts awaiting-count.ts reads it — the hero /
+ * pay run show "waiting for the count" while one of them is pending and no run
+ * exists). Display only: a failure is logged, never fails the OCR job.
+ */
+export async function markHeldForCount(
+  db: Database,
+  restaurantId: string,
+  invoiceId: string,
+  receiptIds: string[],
+): Promise<void> {
+  try {
+    await db.execute(sql`
+      UPDATE invoices
+         SET ocr_payload = jsonb_set(ocr_payload, ${`{raw,${HELD_FOR_RECEIPTS_KEY}}`}::text[], ${JSON.stringify(receiptIds)}::jsonb, true)
+       WHERE id = ${invoiceId} AND restaurant_id = ${restaurantId}
+         AND jsonb_typeof(ocr_payload -> 'raw') = 'object'`);
+  } catch (err) {
+    console.warn(`[ocr-invoice] could not record the receipt hold on invoice=${invoiceId}`, err);
   }
 }
 
@@ -390,11 +435,7 @@ export async function ocrAutoMatchDecision(
  * scans, and photos with no such receipt, match at once. A failing check matches
  * now (logged), like the receipt check above.
  */
-async function receiptLostDecision(
-  db: Database,
-  restaurantId: string,
-  invoiceId: string,
-): Promise<{ match: boolean; poId?: string }> {
+async function receiptLostDecision(db: Database, restaurantId: string, invoiceId: string): Promise<OcrMatchHold> {
   try {
     return await db.transaction(async (raw) => {
       const tx = raw as unknown as Database;
@@ -405,9 +446,10 @@ async function receiptLostDecision(
         String((r as { id: unknown }).id),
       );
       if (ids.length === 0) return { match: true };
-      const states = [];
+      const states: Array<{ open: boolean; poId: string | null }> = [];
       for (const id of ids) states.push(await receiptState(tx, restaurantId, id));
-      if (states.some((st) => st.open)) return { match: false };
+      const open = ids.filter((_, i) => states[i]!.open);
+      if (open.length) return { match: false, heldFor: open };
       const only = states.length === 1 ? states[0]!.poId : null;
       return only ? { match: true, poId: only } : { match: true };
     });

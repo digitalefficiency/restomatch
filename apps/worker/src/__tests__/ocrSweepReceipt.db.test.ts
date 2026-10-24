@@ -46,6 +46,7 @@ const qsql = queueSql(testDbUrl());
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
 let restaurantId = '';
 let receiverId = '';
+let ownerId = '';
 let hakerem = '';
 type Closeable = { close: () => Promise<void> };
 let ocrWorker: Closeable | null = null;
@@ -118,6 +119,20 @@ const hero = async () => {
   const h = await computeLeakHero(db, restaurantId, { now: new Date() });
   return { leak: Math.round(h.leakIls * 100), caught: Math.round(h.caughtBeforePaymentIls * 100) };
 };
+/** The hero's calm lines, in agorot: "waiting to be linked" vs "waiting for the count". */
+const waiting = async () => {
+  const h = await computeLeakHero(db, restaurantId, { now: new Date() });
+  return {
+    pending: h.pendingLinkCount,
+    pendingAg: Math.round(h.pendingLinkIls * 100),
+    awaiting: h.awaitingCountCount,
+    awaitingAg: Math.round(h.awaitingCountIls * 100),
+  };
+};
+const payRun = () =>
+  appRouter
+    .createCaller({ db, session: { userId: ownerId, restaurantId, role: 'owner' } } as never)
+    .payRun.month();
 
 /** PO1 counted + submitted 3 h ago (half the quantities), PO2 being counted now — same supplier, same day. */
 async function siblings() {
@@ -184,6 +199,12 @@ beforeAll(async () => {
     .where(and(eq(memberships.restaurantId, restaurantId), eq(memberships.role, 'receiver')))
     .limit(1);
   receiverId = m!.userId;
+  const [o] = await db
+    .select({ userId: memberships.userId })
+    .from(memberships)
+    .where(and(eq(memberships.restaurantId, restaurantId), eq(memberships.role, 'owner')))
+    .limit(1);
+  ownerId = o!.userId;
   const [s] = await db
     .select({ id: suppliers.id })
     .from(suppliers)
@@ -230,6 +251,7 @@ describe('OCR sweep retry of a receiving scan, with a same-day sibling PO', () =
 
   it('lost enqueue (no original job on record): the retry has no receipt — still no run while GR2 is counted, then exactly 1 run on PO2/GR2', async () => {
     const { po2, gr2 } = await siblings();
+    const w0 = await waiting(); // before the photo (a scan still being read counts as pending, ₪0)
     const { invoiceId, original } = await scanWithoutOcr(gr2);
     await qsql`DELETE FROM job_queue WHERE id = ${original.id}`; // EN-7: the enqueue never landed
     const h0 = await hero();
@@ -241,11 +263,58 @@ describe('OCR sweep retry of a receiving scan, with a same-day sibling PO', () =
     expect(await grStatus(gr2)).toBe('pending');
     expect(await runsOf(invoiceId)).toEqual([]); // …but held: HaKerem's receipt is still being counted
     expect(await hero()).toEqual(h0);
+    // …and shown as waiting for the count, not as a consolidated invoice waiting for a link.
+    expect(await waiting()).toMatchObject({ pending: w0.pending, pendingAg: w0.pendingAg, awaiting: w0.awaiting + 1 });
 
     // The wizard lost its ids (reload): the submit finds the waiting scan server-side.
     await countAsOrdered(gr2);
     await caller().receiving.submitReceipt({ grId: gr2 });
     await drain();
     expect(await runsOf(invoiceId)).toEqual([{ poId: po2, grId: gr2 }]);
+  });
+});
+
+describe('a receiving scan held for its count (#94) on the owner screens', () => {
+  it('is "waiting for the count" in the hero and the pay run — never "waiting to be linked"; the submit clears it', async () => {
+    if (!ocrWorker) ocrWorker = startOcrInvoiceWorker();
+    const po = await freshPo(0);
+    const gr = (await caller().receiving.startReceipt({ poId: po })).receiptId;
+    const w0 = await waiting();
+    const p0 = await payRun();
+
+    // The receiver photographs the invoice; the OCR reads it and holds the match for the count.
+    const res = await caller().receiving.registerInvoice({
+      grId: gr,
+      supplierId: hakerem,
+      imageUrl: `https://local.test/invoice-scans/${gr}-held.jpg`,
+    });
+    await drain();
+    const [inv] = await db
+      .select({ status: invoices.status, total: invoices.totalInclVat })
+      .from(invoices)
+      .where(eq(invoices.id, res.invoiceId));
+    expect(inv!.status).toBe('matched');
+    expect(await runsOf(res.invoiceId)).toEqual([]);
+    const totalAg = Math.round(Number(inv!.total) * 100);
+    expect(totalAg).toBeGreaterThan(0);
+
+    expect(await waiting()).toEqual({
+      pending: w0.pending, // the consolidated-invoice line does not move
+      pendingAg: w0.pendingAg,
+      awaiting: w0.awaiting + 1,
+      awaitingAg: w0.awaitingAg + totalAg,
+    });
+    const p1 = await payRun();
+    const row = p1.suppliers.flatMap((x) => x.invoices).find((i) => i.invoiceId === res.invoiceId);
+    expect(row).toMatchObject({ status: 'hold', awaitingCount: true, pendingLink: false });
+    expect(p1.totals.linkCount).toBe(p0.totals.linkCount);
+    expect(Math.round(p1.totals.linkIls * 100)).toBe(Math.round(p0.totals.linkIls * 100));
+
+    // Count + close: one run on the receipt's order, and the waiting line is gone.
+    await countAsOrdered(gr);
+    await caller().receiving.submitReceipt({ grId: gr, invoiceIds: [res.invoiceId] });
+    await drain();
+    expect(await runsOf(res.invoiceId)).toEqual([{ poId: po, grId: gr }]);
+    expect(await waiting()).toMatchObject({ pending: w0.pending, pendingAg: w0.pendingAg, awaiting: w0.awaiting });
   });
 });

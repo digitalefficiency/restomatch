@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { computeLeakBreakdown, computeLeakHero, type LeakBreakdownInvoice } from '@restomatch/charts';
+import { computeLeakBreakdown, computeLeakHero, scanAwaitingCountSql, type LeakBreakdownInvoice } from '@restomatch/charts';
 import { eq, restaurants, sql, type Database } from '@restomatch/db';
 import { claimableLines, sumClaims, type VatBasis } from '../lib/claims';
 import { featureEnabled } from '../lib/features';
@@ -43,6 +43,11 @@ export interface PayRunInvoice {
   status: PayRunStatus;
   /** The invoice still waits for its PO link (a consolidated invoice): held, calmly. */
   pendingLink: boolean;
+  /**
+   * A receiving scan waiting for its receipt's count (#94): held until the count
+   * is in — bound to its order already, so never "waiting to be linked".
+   */
+  awaitingCount: boolean;
   /** A (non-waived) duplicate copy: held — "don't pay this copy", never a credit to ask for. */
   duplicate: boolean;
   /** The claimable ₪ of the duplicate finding(s) (= the copy's total incl. VAT); not in pending / credit. */
@@ -212,7 +217,9 @@ export const payRunRouter = router({
                  WHERE mr6.invoice_id = i.id AND mr6.restaurant_id = ${rid}
                    AND d.type = 'UNORDERED_ARRIVAL' AND d.resolution_status IN ('open','escalated')
                ) AS has_ua,
-               EXISTS (SELECT 1 FROM match_runs mr WHERE mr.invoice_id = i.id AND mr.restaurant_id = ${rid}) AS matched
+               EXISTS (SELECT 1 FROM match_runs mr WHERE mr.invoice_id = i.id AND mr.restaurant_id = ${rid}) AS matched,
+               -- …a receiving scan the OCR held for its receipt's count (#94, same rule as the hero).
+               ${scanAwaitingCountSql(rid, sql`i`)} AS counting
         FROM invoices i
         LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${rid}
         WHERE i.restaurant_id = ${rid}
@@ -242,14 +249,18 @@ export const payRunRouter = router({
           s.duplicateIls = Math.round(Number(row.dup_ils ?? 0) * 100) / 100;
           s.status = 'hold';
         }
-        const pendingLink = (b?.pendingLink ?? false) || row.matched !== true || (!b && row.has_ua === true);
-        if (pendingLink) s.status = 'hold';
+        // Waiting for the count (#94): no run yet, but bound to its order — held, not T4.
+        const awaitingCount = row.matched !== true && row.counting === true;
+        const pendingLink =
+          !awaitingCount && ((b?.pendingLink ?? false) || row.matched !== true || (!b && row.has_ua === true));
+        if (pendingLink || awaitingCount) s.status = 'hold';
         const inv: PayRunInvoice = {
           invoiceId: id,
           invoiceNumber: row.invoice_number == null ? null : String(row.invoice_number),
           invoiceDate: iso(row.at),
           status: s.status,
           pendingLink,
+          awaitingCount,
           duplicate: s.duplicate,
           duplicateIls: s.duplicateIls,
           totalInclVat: Number(row.total_incl),

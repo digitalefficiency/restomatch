@@ -2,10 +2,13 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createDb,
   discrepancies,
+  eq,
+  goodsReceipts,
   invoiceLines,
   invoices,
   matchRuns,
   products,
+  purchaseOrders,
   restaurants,
   suppliers,
   testDbUrl,
@@ -22,6 +25,8 @@ async function resetDb() {
   await db.delete(matchRuns);
   await db.delete(invoiceLines);
   await db.delete(invoices);
+  await db.delete(goodsReceipts);
+  await db.delete(purchaseOrders);
   await db.delete(products);
   await db.delete(suppliers);
   await db.delete(restaurants);
@@ -583,5 +588,73 @@ describe('every surface sums to the hero (mutation guards: trend, chain supplier
     });
     const counted = rows.flatMap((r) => r.lines).filter((l) => l.countsAsLeak);
     expect(counted.map((l) => l.type)).toEqual(['PRICE_HIGHER']);
+  });
+});
+
+describe('a receiving scan waiting for its count (#94) is not "waiting to be linked"', () => {
+  /** A goods receipt of the restaurant's supplier (the receiving wizard opens it before the photo). */
+  async function receipt(restaurantId: string, status: 'pending' | 'completed') {
+    const [s] = await db.select({ id: suppliers.id }).from(suppliers).where(eq(suppliers.restaurantId, restaurantId));
+    const [po] = await db
+      .insert(purchaseOrders)
+      .values({ restaurantId, supplierId: s!.id, expectedDeliveryAt: THIS_MONTH, status: 'sent', source: 'manual' })
+      .returning();
+    const [gr] = await db.insert(goodsReceipts).values({ restaurantId, poId: po!.id, status }).returning();
+    return gr!.id;
+  }
+  /** What the OCR job records when it holds the scan's match for those receipts' count. */
+  const heldBy = (invoiceId: string, grIds: string[]) =>
+    db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'reconciled', raw: { heldForReceipts: grIds } } })
+      .where(eq(invoices.id, invoiceId));
+
+  it('held by the OCR for a receipt still being counted: "waiting for the count" — not pending link, leak or spend', async () => {
+    const { restaurantId, invoice } = await setup();
+    const checked = await invoice({ date: THIS_MONTH, exclVat: '1000', inclVat: '1180', d: [{ type: 'PRICE_HIGHER', severity: 'warn', delta: '15' }] });
+    const consolidated = await invoice({ date: THIS_MONTH, exclVat: '2000', inclVat: '2360', matched: false });
+    const scan = await invoice({ date: THIS_MONTH, exclVat: '769.17', inclVat: '907.62', matched: false });
+    const gr = await receipt(restaurantId, 'pending');
+    await heldBy(scan, [gr]);
+    await heldBy(checked, [gr]); // a run exists: matched, whatever the marker says
+
+    const hero = await computeLeakHero(db, restaurantId, { now: NOW });
+    expect(hero).toMatchObject({
+      leakIls: 15,
+      spendIls: 1000,
+      pendingLinkCount: 1,
+      pendingLinkIls: 2360,
+      awaitingCountCount: 1,
+      awaitingCountIls: 907.62,
+      invoiceCount: 3,
+      matchedInvoiceCount: 1,
+    });
+    expect(await computeLeakSummary(db, restaurantId, { period: 'this_month', now: NOW })).toEqual(hero);
+    expect((await computeLeakReport(db, restaurantId, '2026-10')).hero).toEqual(hero);
+    const rows = await computeLeakBreakdown(db, restaurantId, { now: NOW });
+    expect(rows.filter((r) => r.pendingLink).map((r) => r.invoiceId)).toEqual([consolidated]);
+    expect(rows.map((r) => r.invoiceId)).not.toContain(scan);
+
+    // The count is in (receipt closed) and still no run: an ordinary unmatched invoice again.
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, gr));
+    expect(await computeLeakHero(db, restaurantId, { now: NOW })).toMatchObject({
+      spendIls: 1000,
+      pendingLinkCount: 2,
+      pendingLinkIls: 3267.62,
+      awaitingCountCount: 0,
+      awaitingCountIls: 0,
+    });
+  });
+
+  it('an unmatched photo with no OCR hold on record stays "waiting to be linked", whatever receipt is open', async () => {
+    const { restaurantId, invoice } = await setup();
+    await receipt(restaurantId, 'pending');
+    await invoice({ date: THIS_MONTH, exclVat: '2000', inclVat: '2360', matched: false });
+    expect(await computeLeakHero(db, restaurantId, { now: NOW })).toMatchObject({
+      pendingLinkCount: 1,
+      pendingLinkIls: 2360,
+      awaitingCountCount: 0,
+      awaitingCountIls: 0,
+    });
   });
 });

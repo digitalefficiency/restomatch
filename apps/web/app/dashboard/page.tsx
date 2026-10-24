@@ -462,6 +462,16 @@ function LeakHero({
           {t('hero.pending', { count: num(hero.pendingLinkCount), amount: ils(hero.pendingLinkIls) })}
         </p>
       ) : null}
+      {hero.awaitingCountCount > 0 ? (
+        // A receiving scan waiting for its count (#94): bound to its order, not a consolidated invoice.
+        <p
+          data-testid="hero-awaiting-count"
+          className="mt-3 flex items-start gap-2 rounded-xl border border-line bg-surface-2 px-3 py-2 text-sm text-muted"
+        >
+          <Hourglass className="mt-0.5 h-4 w-4 shrink-0 text-info" aria-hidden="true" />
+          {t('hero.awaitingCount', { count: num(hero.awaitingCountCount), amount: ils(hero.awaitingCountIls) })}
+        </p>
+      ) : null}
 
       <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="max-w-xl text-xs text-subtle">{t('hero.calc')}</p>

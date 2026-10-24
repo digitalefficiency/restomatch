@@ -1,4 +1,5 @@
 import { sql, type Database } from '@restomatch/db';
+import { scanAwaitingCountSql } from './awaiting-count';
 import { LEAK_FILTER, LIVE_DUPLICATE, lineFilter, originalChecked, viewInvoicesSql, type ViewSpec } from './leak-views';
 
 /**
@@ -24,6 +25,10 @@ import { LEAK_FILTER, LIVE_DUPLICATE, lineFilter, originalChecked, viewInvoicesS
  *  • Caught before payment = leak on invoices not yet marked paid.
  *  • Recovered = the part of the leak the team accepted as a claim
  *    (resolution accepted/resolved) — same cap.
+ *  • A receiving scan the OCR held for its receipt's count (#94 — photo taken,
+ *    count not submitted yet) is "waiting for the count" (awaitingCount*), not
+ *    "waiting for a PO link": it is bound to its order already. Still in neither
+ *    leak nor spend (no run yet). See awaiting-count.ts.
  */
 
 export interface LeakHero {
@@ -42,6 +47,9 @@ export interface LeakHero {
   /** Invoices waiting for a PO link (unmatched / consolidated / unordered) — in neither leak nor spend. */
   pendingLinkCount: number;
   pendingLinkIls: number;
+  /** Receiving scans waiting for their receipt's count (#94) — in neither leak, spend nor pending link. */
+  awaitingCountCount: number;
+  awaitingCountIls: number;
 }
 
 export interface LeakHeroOptions {
@@ -64,7 +72,8 @@ function monthInvoicesCte(restaurantId: string, now: Date, offset: number) {
       FROM r
     ),
     inv AS (
-      SELECT i.id, i.status, i.total_excl_vat, i.total_incl_vat
+      SELECT i.id, i.status, i.total_excl_vat, i.total_incl_vat,
+             ${scanAwaitingCountSql(restaurantId, sql`i`)} AS counting
       FROM invoices i, b
       WHERE i.restaurant_id = ${restaurantId}
         AND COALESCE(i.invoice_date, i.created_at) >= b.lo
@@ -86,11 +95,15 @@ function monthInvoicesCte(restaurantId: string, now: Date, offset: number) {
         (NOT bool_or(mr.id IS NOT NULL))
           OR COALESCE(bool_or(d.type = 'UNORDERED_ARRIVAL' AND d.resolution_status IN ('open','escalated')), false)
           AS pending_link,
+        -- …except a receiving scan held for its receipt's count (#94): bound to its
+        -- order, waiting for the count. pending_link stays true (spend unchanged);
+        -- the "waiting to be linked" line and list leave it out.
+        (NOT bool_or(mr.id IS NOT NULL)) AND inv.counting AS awaiting_count,
         COALESCE(bool_or(${LIVE_DUPLICATE}), false) AND ${originalChecked(restaurantId, sql`inv.id`)} AS dup_copy
       FROM inv
       LEFT JOIN match_runs mr ON mr.invoice_id = inv.id AND mr.restaurant_id = ${restaurantId}
       LEFT JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${restaurantId}
-      GROUP BY inv.id, inv.status, inv.total_incl_vat, inv.total_excl_vat
+      GROUP BY inv.id, inv.status, inv.total_incl_vat, inv.total_excl_vat, inv.counting
     )`;
 }
 
@@ -120,8 +133,10 @@ export async function computeLeakHero(
       COALESCE(SUM(LEAST(raw_leak, total)) FILTER (WHERE status <> 'paid'), 0) AS caught,
       COALESCE(SUM(LEAST(raw_recovered, LEAST(raw_leak, total))), 0) AS recovered,
       COUNT(*) FILTER (WHERE raw_leak > 0) AS with_leak,
-      COUNT(*) FILTER (WHERE pending_link) AS pending_count,
-      COALESCE(SUM(total) FILTER (WHERE pending_link), 0) AS pending_amount
+      COUNT(*) FILTER (WHERE pending_link AND NOT awaiting_count) AS pending_count,
+      COALESCE(SUM(total) FILTER (WHERE pending_link AND NOT awaiting_count), 0) AS pending_amount,
+      COUNT(*) FILTER (WHERE awaiting_count) AS awaiting_count,
+      COALESCE(SUM(total) FILTER (WHERE awaiting_count), 0) AS awaiting_amount
     FROM per
   `);
   const r = rowsOf(res)[0] ?? {};
@@ -140,6 +155,8 @@ export async function computeLeakHero(
     invoicesWithLeak: n(r.with_leak),
     pendingLinkCount: n(r.pending_count),
     pendingLinkIls: ils(r.pending_amount),
+    awaitingCountCount: n(r.awaiting_count),
+    awaitingCountIls: ils(r.awaiting_amount),
   };
 }
 
@@ -197,13 +214,15 @@ export async function computeLeakBreakdown(
   const invRes = await db.execute(sql`
     WITH ${cte}
     SELECT
-      per.id, per.status, per.total, LEAST(per.raw_leak, per.total) AS leak, per.pending_link,
+      per.id, per.status, per.total, LEAST(per.raw_leak, per.total) AS leak,
+      per.pending_link AND NOT per.awaiting_count AS pending_link,
       i.invoice_number, COALESCE(i.invoice_date, i.created_at) AS invoice_date,
       s.name AS supplier_name, s.name_en AS supplier_name_en
     FROM per
     JOIN invoices i ON i.id = per.id
     LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${restaurantId}
-    WHERE per.raw_leak > 0 OR per.pending_link
+    -- A scan waiting for its count (#94) is no leak and not "waiting to be linked".
+    WHERE per.raw_leak > 0 OR (per.pending_link AND NOT per.awaiting_count)
     ORDER BY per.pending_link ASC, LEAST(per.raw_leak, per.total) DESC, invoice_date DESC
     LIMIT ${limit}
   `);

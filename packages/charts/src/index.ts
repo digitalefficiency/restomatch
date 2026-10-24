@@ -6,7 +6,12 @@ export {
   type ComputeSupplierScorecardsOptions,
 } from './suppliers';
 export { computeBaselines, type BaselineRow, type ComputeBaselinesOptions } from './baselines';
-export { receiptsBeingCountedForScan, SCAN_RECEIPT_LOOKBACK_HOURS } from './awaiting-count';
+export {
+  HELD_FOR_RECEIPTS_KEY,
+  receiptsBeingCountedForScan,
+  scanAwaitingCountSql,
+  SCAN_RECEIPT_LOOKBACK_HOURS,
+} from './awaiting-count';
 export {
   computeLeakBreakdown,
   computeLeakHero,
