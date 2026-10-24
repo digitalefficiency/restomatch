@@ -13,7 +13,10 @@ for (const [w, h] of [
   for (const locale of ['he', 'en']) {
     const z = zones(w, h, locale);
     const inFrame = (r) => r.x >= 0 && r.y >= 0 && r.x + r.w <= w && r.y + r.h <= h;
-    const ok = !intersects(z.caption, z.device) && inFrame(z.caption) && inFrame(z.device) && inside(z.caption, safeBox(w, h));
+    const s = safeBox(w, h);
+    // landscape: the device zone (and so every spotlight / pushed-in screen) stays within the safe width too
+    const deviceSafe = h > w || (z.device.x >= s.x && z.device.x + z.device.w <= s.x + s.w);
+    const ok = !intersects(z.caption, z.device) && inFrame(z.caption) && inFrame(z.device) && inside(z.caption, s) && deviceSafe;
     console.log(`${ok ? 'PASS' : 'FAIL'} ${w}×${h} ${locale} caption=${JSON.stringify(z.caption)} device=${JSON.stringify(z.device)}`);
     if (!ok) fail = 1;
   }

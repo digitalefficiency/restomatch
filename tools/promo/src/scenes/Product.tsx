@@ -11,8 +11,8 @@ import { Eyebrow, FadeUp, RiseLine } from '../components/primitives';
 type U = [number, number, number, number];
 const FOCUS: Record<Locale, Record<'hero' | 'beer' | 'appr' | 'claim', U>> = {
   // beer = product → change columns of the leak-detective row; claim = amount column + total line
-  he: { hero: [0.615, 0.288, 0.89, 0.4], beer: [0.34, 0.466, 0.885, 0.506], appr: [0.58, 0.298, 0.882, 0.372], claim: [0.117, 0.345, 0.5, 0.407] },
-  en: { hero: [0.115, 0.288, 0.385, 0.4], beer: [0.08, 0.466, 0.66, 0.506], appr: [0.118, 0.298, 0.42, 0.372], claim: [0.5, 0.345, 0.883, 0.407] },
+  he: { hero: [0.615, 0.288, 0.89, 0.4], beer: [0.34, 0.466, 0.885, 0.506], appr: [0.58, 0.298, 0.882, 0.366], claim: [0.117, 0.345, 0.5, 0.407] },
+  en: { hero: [0.115, 0.288, 0.385, 0.4], beer: [0.08, 0.466, 0.66, 0.506], appr: [0.118, 0.298, 0.42, 0.366], claim: [0.46, 0.345, 0.883, 0.407] },
 };
 
 // One beat per screen. Within a beat (relative to `push`): camera push 0→28,

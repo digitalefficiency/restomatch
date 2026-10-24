@@ -262,10 +262,9 @@ export const Receiver: React.FC<{ locale: Locale }> = ({ locale }) => {
             <div style={{ fontSize: 30, color: C.muted, marginTop: 20, lineHeight: 1.4 }}>{t.sub}</div>
           </FadeUp>
           <Callout locale={locale} a={ca} accent={C.primary}>
-            <span dir="ltr">Cherry tomatoes</span>
-            <span style={{ color: C.muted, fontWeight: 500 }}>
-              ← <bdi dir="rtl">עגבניות שרי</bdi>
-            </span>
+            <bdi dir="rtl" style={{ color: C.muted, fontWeight: 500 }}>עגבניות שרי</bdi>
+            <span style={{ color: C.muted }}>{isRtl ? '←' : '→'}</span>
+            <bdi dir="ltr">Cherry tomatoes</bdi>
           </Callout>
         </div>
       </CaptionZone>
