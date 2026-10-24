@@ -94,6 +94,12 @@ export interface OcrInvoiceJob {
   invoiceId: string;
   supplierId: string | null;
   imageUrl: string;
+  /**
+   * The goods receipt the scan was taken on (receiving wizard). While that
+   * receipt is still being counted the OCR job does not auto-match — the count
+   * is not in yet; receiving.submitReceipt triggers the match instead.
+   */
+  grId?: string;
   /** When set, the worker bypasses real providers and uses these results. */
   mockProviders?: { docAi: InvoiceOcrResult; claude: InvoiceOcrResult };
 }
