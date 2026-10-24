@@ -24,6 +24,16 @@
  *   - at most one automatic retry per invoice: the job's dedupe_key
  *     `ocr-sweep-<invoiceId>` is unique, so overlapping sweeps (or two workers)
  *     can't double-enqueue — and the retry job itself counts as "on record".
+ *   - the retry keeps the scan's goods receipt. A receiving scan's link to the
+ *     receipt it was photographed on lives ONLY in its job (payload.grId —
+ *     invoices has no receipt column), and the OCR job holds the match while
+ *     that receipt is still being counted (#94). Without it the retry matched
+ *     blind: discovery took a same-supplier sibling PO whose receipt was already
+ *     closed, and the later submit never repaired it. So the retry carries the
+ *     original job's grId (the refused job row is still on record). When there
+ *     is no original job at all (the enqueue was lost), the OCR job itself holds
+ *     a receipt-less photo scan while its supplier has a receipt being counted
+ *     (ocrInvoice.ts, ocrAutoMatchDecision); that receipt's submit matches it.
  *
  * Without ANTHROPIC_API_KEY a retry could only fail (the original job may have
  * carried dev stub results), so the sweep does nothing.
@@ -54,8 +64,15 @@ export interface OcrSweepResult {
 export async function runOcrSweep(sql: Sql, now = new Date()): Promise<OcrSweepResult> {
   const staleBefore = new Date(now.getTime() - OCR_SWEEP_STALE_AFTER_MS);
   const notBefore = new Date(now.getTime() - OCR_SWEEP_MAX_AGE_MS);
-  const stale = await sql<Array<{ id: string; restaurant_id: string; supplier_id: string | null; raw_image_url: string }>>`
-    SELECT i.id, i.restaurant_id, i.supplier_id, i.raw_image_url
+  const stale = await sql<
+    Array<{ id: string; restaurant_id: string; supplier_id: string | null; raw_image_url: string; gr_id: string | null }>
+  >`
+    SELECT i.id, i.restaurant_id, i.supplier_id, i.raw_image_url,
+           -- the receipt the scan was taken on, from its original (refused) job
+           (SELECT j.payload->>'grId' FROM job_queue j
+             WHERE j.queue = 'ocr-invoice' AND j.payload->>'invoiceId' = i.id::text
+               AND j.payload->>'restaurantId' = i.restaurant_id::text AND j.payload->>'grId' IS NOT NULL
+             ORDER BY j.id LIMIT 1) AS gr_id
       FROM invoices i
      WHERE i.status = 'ocr_pending'
        AND i.raw_image_url ~* '^https?://'
@@ -79,7 +96,13 @@ export async function runOcrSweep(sql: Sql, now = new Date()): Promise<OcrSweepR
     const inserted = await insertJob(
       sql,
       'ocr-invoice',
-      { restaurantId: inv.restaurant_id, invoiceId: inv.id, supplierId: inv.supplier_id, imageUrl: inv.raw_image_url },
+      {
+        restaurantId: inv.restaurant_id,
+        invoiceId: inv.id,
+        supplierId: inv.supplier_id,
+        imageUrl: inv.raw_image_url,
+        ...(inv.gr_id ? { grId: inv.gr_id } : {}),
+      },
       { restaurantId: inv.restaurant_id, dedupeKey: `ocr-sweep-${inv.id}` },
     );
     (inserted ? result.requeued : result.raced).push(inv.id);

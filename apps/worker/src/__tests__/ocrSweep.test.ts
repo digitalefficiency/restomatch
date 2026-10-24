@@ -87,7 +87,7 @@ describe('ocr-pending retry sweep — commit-race refusal (Postgres queue)', () 
   beforeAll(async () => {
     const [r] = await db.insert(restaurants).values({ name: 'OCR sweep race QA' }).returning({ id: restaurants.id });
     rid2 = r!.id;
-    for (const key of ['refused', 'quota', 'retryRefused'] as const) {
+    for (const key of ['refused', 'quota', 'retryRefused', 'receiving'] as const) {
       const [inv] = await db
         .insert(invoices)
         .values({ restaurantId: rid2, source: 'photo', status: 'ocr_pending', rawImageUrl: `https://x.example/${key}.jpg`, createdAt: minutesAgo(15) })
@@ -98,6 +98,10 @@ describe('ocr-pending retry sweep — commit-race refusal (Postgres queue)', () 
     await insertJob(sql, 'ocr-invoice', { restaurantId: rid2, invoiceId: ids2.refused });
     await sql`UPDATE job_queue SET status = 'failed', finished_at = now(), last_error = ${refusal(ids2.refused!)}
                WHERE payload->>'invoiceId' = ${ids2.refused!}`;
+    // A receiving scan's original job carried its goods receipt (#94) and was refused the same way.
+    await insertJob(sql, 'ocr-invoice', { restaurantId: rid2, invoiceId: ids2.receiving, grId: 'gr-of-the-scan' });
+    await sql`UPDATE job_queue SET status = 'failed', finished_at = now(), last_error = ${refusal(ids2.receiving!)}
+               WHERE payload->>'invoiceId' = ${ids2.receiving!}`;
     // Any other failure already ran and was metered.
     await insertJob(sql, 'ocr-invoice', { restaurantId: rid2, invoiceId: ids2.quota });
     await sql`UPDATE job_queue SET status = 'failed', finished_at = now(), last_error = 'QuotaExceededError: monthly OCR cap reached'
@@ -116,7 +120,7 @@ describe('ocr-pending retry sweep — commit-race refusal (Postgres queue)', () 
   it('an original job refused by the tenant guard did not really run: it gets its one retry; other failures never do', async () => {
     const ours = (list: string[]) => list.filter((id) => Object.values(ids2).includes(id));
     const res = await runOcrSweep(sql, NOW);
-    expect(ours(res.requeued)).toEqual([ids2.refused]);
+    expect(ours(res.requeued).sort()).toEqual([ids2.refused, ids2.receiving].sort());
     const jobs = await jobsFor(ids2.refused!);
     expect(jobs.map((j) => j.dedupe_key ?? '').sort()).toEqual(['', `ocr-sweep-${ids2.refused}`].sort());
     expect(await jobsFor(ids2.quota!)).toHaveLength(1);
@@ -125,5 +129,13 @@ describe('ocr-pending retry sweep — commit-race refusal (Postgres queue)', () 
     const again = await runOcrSweep(sql, new Date(NOW.getTime() + 5 * 60_000));
     expect(ours(again.requeued)).toEqual([]);
     expect(await jobsFor(ids2.refused!)).toHaveLength(2);
+  });
+
+  it("the retry keeps the scan's goods receipt from the original job — the OCR job holds the match on it (#94)", async () => {
+    const retry = (await jobsFor(ids2.receiving!)).find((j) => j.dedupe_key === `ocr-sweep-${ids2.receiving}`);
+    expect(retry?.payload).toMatchObject({ restaurantId: rid2, invoiceId: ids2.receiving, grId: 'gr-of-the-scan' });
+    // A scan whose original job carried no receipt gets none.
+    const plain = (await jobsFor(ids2.refused!)).find((j) => j.dedupe_key === `ocr-sweep-${ids2.refused}`);
+    expect(plain?.payload).not.toHaveProperty('grId');
   });
 });
