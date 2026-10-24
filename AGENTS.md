@@ -90,9 +90,14 @@ the governing files. An agent that needs one changed proposes it and stops.
 
 ## Design vocabulary (when touching UI)
 
-Dark "command center for money": Hebrew-first, **RTL**, `he-IL` numerals, ₪ via `formatIls()`. Leak = the
-hero number. Calm on "pending / consolidated invoice" (`חשבוניות ריכוז`) — never a false alarm. Tokens
-live in `packages/ui-tokens`; rendering in `apps/web` styles. Don't invent a second design language.
+LIGHT "command center for money" (owner decision 2026-10-24: the whole product is light): Hebrew-first,
+**RTL**, `he-IL` numerals, ₪ via `formatIls()`, every text/background pair WCAG AA (4.5:1). Emphasis tiers:
+**T1** the leak ₪ is the hero number; **T2** act-now items (₪ awaiting approval, blocking discrepancies,
+receiving mismatches, claims to send) get a solid danger/warn badge + ₪ + one primary CTA; **T3** good news
+(caught, claimed, recovered) is calm gold/green; **T4** pending / consolidated invoice (`חשבוניות ריכוז`) is
+neutral — never a false alarm. Tokens live in `packages/ui-tokens` and the CSS variables in
+`apps/web/app/globals.css`; rendering in `apps/web` styles. Don't invent a second design language and don't
+hard-code colours outside the tokens.
 
 ## Ownership map (CODEOWNERS-style — the collision-free partition)
 
