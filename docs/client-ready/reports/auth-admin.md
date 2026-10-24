@@ -223,3 +223,219 @@ Adversarial seed: **RIVAL**, a restaurant on the *same billing account*, owned b
 | Interplay with `/api/session/refresh` | ✅ `unstable_update({})` keeps the current branch, and also drops a removed one |
 
 Proposal (not fixed; it's in the shared auth/team code): on member removal or role change, bump a per-user membership epoch (or `token_version` for the removed user) so the 10-min window closes immediately.
+
+### Cross-QA: S15 wave-1 growth (PR #44, `claude/wave1-growth` @ eff9961)
+Tested on a production build (`next start`, NODE_ENV=production) against a local DB. OCR used the stub (`LEAK_CHECK_ALLOW_SAMPLE=1`), so there was zero Claude spend. `TRUSTED_PROXY_HOPS=1` was set, and distinct client IPs were simulated via the right-most XFF entry. #44's own suites pass: api 142/142, web 43/43.
+
+**Findings (fixes go back to S15)**
+| # | Sev | Finding | Fix |
+|---|---|---|---|
+| W1 | **medium** | The site-wide 40/h submit cap is consumed **before** the proof of work is checked (`handlers.ts`: `enforceRateLimit('all', …)` runs before `verifyPow`). Verified: 40 junk POSTs with no solved PoW (8 IPs × 5, under the per-IP limit) → the next real prospect gets `503 budget_exhausted` for the hour. The lead magnet can be shut off with zero work. | Move the global cap after `verifyPow` + the single-use check (ideally right before `runLeakCheck`) |
+| W2 | low (defence in depth) | The migrations' `REVOKE ALL ON leak_check_sessions/leak_check_ocr_usage FROM restomatch_app` and `REVOKE UPDATE, DELETE ON referral_*` are **undone by `provision-rls`'s blanket grants** (it runs after migrate). Isolation still holds via RLS default-deny (verified: 0 rows visible, INSERT rejected, UPDATE/DELETE affect 0 rows, credits can't be minted). But it's one layer, not the intended two. | Exclude/re-revoke these tables in `rls.ts`' grants (immutable → human PR), or re-assert the revoke in `provision-rls` |
+| W3 | low (hygiene) | The PR modifies the committed **`dump.rdb`** (a Redis snapshot: rate-limit/session keys). It was ruled never-commit earlier. | Drop it from the PR; `git rm --cached` + `.gitignore` |
+| W4 | low | The 7-day hard delete only runs on the next submit. With no traffic, expired rows persist (reads filter on `expires_at`, so they're never served). | Schedule `purgeExpiredLeakChecks` (already a tracked follow-up) |
+
+**Verified ✅**
+- Foreign/no Origin → 403.
+- Gate off (`LEAK_CHECK_PUBLIC` unset) → page + API 404.
+- `TRUSTED_PROXY_HOPS=0` in prod → 503 fail-closed.
+- Chunked body → 411. A real 9 MB body → 413 in 34 ms, before parsing.
+- Text named `.pdf` → 415 (magic bytes). A >4 MB file → 413. 11 files → 400. 0 files → 400. Honeypot → fake success, nothing stored.
+- PoW: replayed / forged / unsolved / expired / low-difficulty (server-signed) → 403.
+- Per-IP 5/day (6th → 429). Per-email 3/day, with `+tag` aliases counted as the same mailbox.
+- Daily OCR budget (cap 3: 2 invoices OK, the next 2 → 503).
+- Signed result links: a swapped session id, an extended exp, a bad signature or an expired link are all rejected **identically** (same page, no data). A valid link shows only its own session.
+- Tenant role cannot see sandbox rows. An expired session is hard-deleted on the next submit.
+- Lead route: tampered → 400, foreign origin → 403, the same token twice → one lead row.
+- Claim:
+  - GET changes nothing.
+  - An email mismatch → failed.
+  - A cross-origin server-action replay → rejected. A cross-origin tRPC call → 403.
+  - A matching owner → claimed to their own restaurant.
+  - Another restaurant can't re-point it.
+  - The claimed list is tenant-scoped.
+  - A tampered token → `BAD_REQUEST` with only `appCode: leakCheck.invalidLink` + a Hebrew message, no stack/SQL.
+- Referral: own code → `referralSelf`; unknown → `referralInvalid`; a second redeem → `referralAlreadyRedeemed`; a restaurant >30 days old → rejected; a shared member → self-dealing blocked; an A↔B swap → blocked; the referred side sees `pending` with no credit; a pre-credited INSERT → RLS violation; a tenant sees only its own code.
+- `publicPaths` adds only `/leak-check` and `/api/leak-check` (prefix match is segment-bounded). Every route re-checks the gate, origin, limits and PoW; the claim page itself requires a signed-in owner.
+
+Accepted / by design: a sock-puppet referral from a second mailbox is possible, but credits fill only on conversion (payment). Prospect email is unverified at submit, but claiming requires signing in with that email.
+
+### Cross-QA: S17 recipes / food cost (PR #46, `claude/wave1-recipes` @ 5993028)
+Tested on a production build against a local DB with the recipes demo seed, plus a RIVAL tenant holding a product and a sub-recipe. #46's suites (cross-tenant, rls.attack, recipes-router, recipes-cost) pass 205/205.
+
+**Finding (fix goes back to S17)**
+| # | Sev | Finding | Fix |
+|---|---|---|---|
+| R1 | low-medium | **Concurrent sub-recipe saves that would close a cycle → HTTP 500.** Reproduced 8/8: X→Y and Y→X saved at the same moment. Postgres reports `deadlock detected` on the composite-FK row locks, one save wins and the other returns a generic `INTERNAL_SERVER_ERROR`. No cycle was ever persisted, and `recipes.list` stays fast (cost is memoised and marks cycles), so there's no DoS. But the protection is **incidental** (lock ordering), not the cycle check, and the user sees a 500. | Serialize recipe-graph writes per restaurant: `pg_advisory_xact_lock(hashtext('recipes:'||restaurant_id))` at the start of `save`/`importCsv`. The cycle check then sees committed edges and returns the friendly `recipes.cycle` |
+
+**Verified ✅**
+- **Roles:** owner/manager/chef can list and edit, and the page renders. Receiver/bookkeeper get 403 on the API and bounce from the page. `setTarget` is owner/manager only (chef 403).
+- **Cross-tenant references:** blocked at every layer.
+  - API: save with another restaurant's product → `productNotFound`; with its sub-recipe → `subRecipeNotFound`. get/delete of a foreign recipe → 404, with no effect. `searchProducts` never returns another tenant's products.
+  - DB, as the app role: the composite same-tenant FK rejects a foreign `product_id`. RLS hides other tenants' recipes and rejects an INSERT into another tenant.
+- **Cycles:** A→B→A and A→A rejected on save (`recipes.cycle`). CSV P↔Q rejected with nothing written.
+- **Feature flag off:** `FEATURE_DISABLED:recipes` (403, appCode only), and `recipes.enabled` = false.
+- **products.delete guard:** deleting a product a recipe uses → friendly 409, product kept. A foreign product → 404. Deleting a sub-recipe that's in use → `recipes.inUse` 409.
+- **CSV import:**
+  - >200 KB → 400 before parsing; 2001 rows → `tooManyRows`.
+  - A decimal comma `"1,5"` → `badQuantity` (never 15).
+  - An ingredient named like another tenant's product doesn't resolve to it.
+  - A formula-like name (`=HYPERLINK(…)`) is stored as plain text; there's no CSV export, and React escapes it on display. Note: neutralize leading `= + - @` if a recipe export is ever added.
+- **COVERAGE:** all 11 `recipes.*` procedures listed (attack/isolation).
+- **Error bodies:** no SQL/stack.
+
+### Proposal (needs a human-authored PR): per-user membership epoch
+Not implemented by an agent. It requires `packages/db/src/schema.ts` and `packages/db/drizzle/meta/_journal.json`, which are on the AGENTS.md immutable list (the edit was refused when attempted). Ready-to-apply design:
+
+1. **Migration `0060_membership_epoch.sql`** (journal `when` 1782150000000, then `pnpm --filter @restomatch/db supabase-sync` for the mirror):
+   ```sql
+   ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "membership_epoch" integer DEFAULT 0 NOT NULL;
+   CREATE OR REPLACE FUNCTION app.bump_membership_epoch() RETURNS trigger
+     LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+   BEGIN
+     UPDATE public.users SET membership_epoch = membership_epoch + 1 WHERE id = OLD.user_id;
+     IF TG_OP = 'UPDATE' AND NEW.user_id IS DISTINCT FROM OLD.user_id THEN
+       UPDATE public.users SET membership_epoch = membership_epoch + 1 WHERE id = NEW.user_id;
+     END IF;
+     RETURN NULL;
+   END $$;
+   REVOKE ALL ON FUNCTION app.bump_membership_epoch() FROM PUBLIC;
+   CREATE TRIGGER memberships_bump_epoch AFTER DELETE OR UPDATE OF role, restaurant_id, user_id
+     ON memberships FOR EACH ROW EXECUTE FUNCTION app.bump_membership_epoch();
+   ```
+   A trigger (not app code) covers every path: team `removeMember` / `changeRole` (delete + insert), the admin console, chain edits and restaurant cascades. `preferred_locale`-only updates don't bump.
+2. **Schema:** `users.membershipEpoch: integer('membership_epoch').notNull().default(0)`.
+3. **`apps/web/lib/passwords.ts` `getSessionSecurityState`:** select `users.membershipEpoch` (users LEFT JOIN user_credentials, so magic-link-only users are covered too).
+4. **`apps/web/auth.ts` jwt:** stamp `t.mep = sec.membershipEpoch` at sign-in. On every later request (inside the existing `!isSignIn` token_version block, same query), `if ((t.mep ?? 0) !== sec.membershipEpoch) { t.mep = sec.membershipEpoch; forceRefresh = true }` and add `forceRefresh` to `stale`. This re-reads memberships immediately (fall back to another membership or none ⇒ `memberProcedure` FORBIDDEN), without logging the user out.
+5. **Tests:**
+   - db: the trigger bumps on delete and on a role update, not on a locale update; the app role can't call the function directly.
+   - web: removing a member makes the very next tRPC call FORBIDDEN (DB-backed, like `rls.attack`).
+   - Pure unit test of the stale predicate.
+
+Cost: one extra integer column read in a query that already runs per request.
+
+### Cross-QA: S13 ingest webhooks + receiver PWA (PR #43, `claude/wave1-ingest` @ b12497f)
+Tested on a production build (`next start`), with a test-only network preload faking Supabase Storage and Meta Graph/CDN in-process (zero real egress; anything else is blocked and logged). `INGEST_PROVIDER=live`, real HMAC secrets, `TRUSTED_PROXY_HOPS=1`. #43's suites: ingest.attack + cross-tenant 139/139 (on a fresh DB), packages/ingest 21/21, web 38/38. 48 runtime checks.
+
+**Findings**
+| # | Sev | Finding | Fix / owner |
+|---|---|---|---|
+| I1 | **medium (release)** | **Migration ordering hazard.** #43's `0050_ingest`/`0051` have a lower journal `when` (2026-06-21) than #44's 0054/0055 and #46's 0056/0057 (2026-06-22). Drizzle's migrator only applies entries newer than the last applied one, so if #44/#46 reach a DB first, **0050/0051 are silently skipped** (reproduced: my test DB had 0054–0057 → `ingest_channels` didn't exist). Supabase's path may also reject the out-of-order versions. | Merge #43 before #44/#46, or renumber 0050/0051 above 0057 (orchestrator/S13) |
+| I2 | medium (known) | **The e-mail allow-list trusts the From header.** A spoofed allow-listed From with a valid recipient token auto-registers an invoice and enqueues OCR (verified: the doc goes `registered` with an invoice). It's bounded by the secret recipient address + 60/min per channel. | SPF/DKIM verdict from the inbound provider before trusting a sender (S13's follow-up). Until then, treat allow-listed e-mail as "suggest", not "auto" |
+| I3 | low (privacy) | **The offline photo queue (IndexedDB `restomatch-receiver`) is never cleared on logout.** `clearQueue` exists but has no caller. On a shared tablet, invoice photos stay readable in the browser after logout, and later upload under whoever next opens the same restaurant (another restaurant's photos are held back — that part works). | Call `clearQueue()` (or tag items with the user id) on logout (S13) |
+| I4 | low | Unknown-sender attachments are stored (no OCR) up to 10 × 10 MB per message at 60 msgs/min per channel. That's a storage-cost amplifier for anyone holding the address. | A per-channel daily byte quota (S13) |
+
+**Verified ✅**
+- **WhatsApp:**
+  - Signature: missing or over different bytes → 401. A valid signature with an unknown token → 404 (the token is resolved only via the hashed-token SECURITY DEFINER lookup).
+  - Accept and replay: a valid event → stored under the token's restaurant only; an exact replay → `duplicate`.
+  - Binding: an event for another `phone_number_id` → rejected; a RIVAL token carrying MAIN's phone id → rejected, nothing stored for either; an 8-day-old event → rejected.
+  - Size: 300 KB → 413 before the signature check; chunked 400 KB → 413 while streaming.
+  - Rate limit: 60/min per channel → 429.
+  - Verify handshake: a wrong verify token → 403; a valid one echoes the challenge as text/plain; an XSS challenge → 403.
+  - **SSRF:** when Graph returns `http://169.254.169.254/…`, `https://evil.example/…`, `https://lookaside.fbsbx.com.attacker.io/…` or `https://facebook.com@evil.example/…`, all are refused and never fetched.
+- **E-mail:**
+  - Signature: no headers / wrong secret → 401; a timestamp 10 min old → 401 `stale`; a replay → `duplicate`.
+  - Unknown sender → stored as `needs_review`, no invoice, no OCR.
+  - HTML disguised as PDF → `rejected unsupported_type`. 21 MB → 413.
+  - An unknown token or a token on a foreign domain → 404.
+- Flags off → 404, identical to an unknown token.
+- **Inbox:**
+  - The page renders for owner/manager/bookkeeper and bounces receiver/chef. Bookkeeper can't approve or rotate (403); receiver can't read (403).
+  - Approving another restaurant's document → 404, untouched; RIVAL docs never listed.
+  - **approve ∥ reject race → exactly one 200, the other 409** (the row lock holds; no 500).
+  - `rotateChannel` → the old token returns 404 immediately.
+- **Service worker:** precaches only the 5 public `/pwa/*` files, never intercepts API/tRPC/scans/POST, navigations are network-first with an offline fallback, `nosniff` + `no-cache`. The manifest is public.
+- **React #418 on bookkeeper/he:** not reproduced. The inbox console was clean in the prod build (I've seen #418 intermittently on other dashboard pages; see the QA round above).
+
+### Cross-QA: S14 receiver languages + AI assistant (PR #42, `claude/wave1-lang-ai` @ a04265a)
+**Verification (2 layers).**
+- Layer 1: #42's suites on a fresh DB: ask + receiver-langs + cross-tenant 136/136; packages/translate 80/80.
+- Layer 2: production build (`next start`), offline mode (no Anthropic key — zero spend), with an adversarial RIVAL owner; 23 runtime checks, he + en.
+- The prompt-injection layer was exercised directly by feeding `groundAnswer` hijacked model outputs, since the live model isn't callable without spend.
+
+| # | Sev | Finding | Fix / owner |
+|---|---|---|---|
+| L1 | low-medium | **The answer sanitizer only strips domains on a fixed TLD list.** If an injected invoice/product name steers the model, `evil.ly/…`, `secure-restomatch.dev`, `restomatch.shop/pay` and `evil[.]com` survive in the answer, and it stays `grounded: true` (verified). A non-Israeli phone number survives too (it's flagged ungrounded only because of its digits). The impact is phishing of the owner; there is no cross-tenant read and no exfiltration channel (no web/write tools). | Generic domain/obfuscation pattern (`[\w-]+(\.|\[\.\])[a-z]{2,24}`), and mark any stripped or suspicious token `grounded: false` (S14) |
+| L2 | low | The burst limit (10/min) is process-local. On Vercel it's per lambda instance, so it's not a real limit; the durable daily cap (60 questions / $3) does hold. | Use the shared Redis limiter (`enforceRateLimit`) (S14) |
+| L3 | medium (release) | Migrations 0052/0053 are dated 2026-06-21, before #44/#46's 0054–0057, so they're subject to the same skip hazard as I1 (#43). | Merge order or renumber (orchestrator) |
+| L4 | low (hygiene) | The PR modifies the committed `dump.rdb` again. | Drop it from the PR (S14) |
+
+**Verified ✅**
+- **Roles:** `ask` works for owner/manager only (bookkeeper/receiver/chef → 403, the page bounces).
+- **Isolation:** the rival owner's answer shows its own zeros, never MAIN's ₪571.5 / 2%. Tools take only month/limit from the model; the tenant comes from the session, under RLS.
+- **Input limits:** question 2–500 chars (501 → 400, 1 → 400); locale he/en only.
+- **Usage:** recorded without the question text.
+- **Injection text in a product name** (`<img onerror>` + "IGNORE ALL PREVIOUS…"): rendered as text, no script execution.
+- **Flags:**
+  - `aiAssistant` off → `FEATURE_DISABLED` 403, `status.enabled=false`, nav link hidden.
+  - `receiverLanguages` off → `setMyLocale`/`localNames` FEATURE_DISABLED, and `?lang=ar` is ignored.
+- **Direction and fonts:** `ar` → `<html lang=ar dir=rtl>` + Noto Sans Arabic; `ru`/`th`/`ti` → ltr + Thai/Ethiopic fonts; he rtl / en ltr. The ask page console is clean in he and en. An unsupported locale → 400.
+- **Translation spend:** cached per restaurant+locale, ≤80 Claude misses per call, plus an hourly budget.
+- **COVERAGE:** `ask.*` and `receiverLangs.*` are listed.
+
+### Cross-QA: S12 ₪-back tracker + monthly report (PR #45 @ a2e8007) and S11 contracts + price alerts (PR #48 @ 51ca875)
+**Verification (2 layers).**
+- Layer 1, each PR's suites on a fresh DB: #45 recovery + lifecycle + cross-tenant + rls.attack 201/201 and the seed-guard unit tests 12/12; #48 cross-tenant + rls.attack 174/174.
+- Layer 2, production builds (`next start`) with a RIVAL owner/tenant: #45 19 runtime checks plus a direct send-loop run; #48 20 runtime checks plus a direct 07:00-sweep run (×2).
+- No real sends: the outbox only (no worker dispatch), and WhatsApp is the mock.
+
+**#45 findings**
+| # | Sev | Finding | Fix / owner |
+|---|---|---|---|
+| M1 | low-medium | **`sendMonthlyReports` has no per-restaurant try/catch.** One tenant with bad data (verified: an invalid timezone → `RangeError`) makes the **whole run throw**, so every restaurant after it in the loop gets no report. #48's price-alert job does this correctly. | Wrap each restaurant like `jobs/priceAlerts.ts` (count `failed`, keep going) (S12) |
+| M2 | info (governance) | Both #45 and #48 modify **immutable** `apps/worker/src/cron.ts` and `packages/api/src/notifications/outbox.ts` (S7's outbox fix). | Human review/sign-off per AGENTS.md (orchestrator) |
+| M3 | medium (release) | Migrations 0046–0049 are dated before 0050–0057: the same skip hazard. All of wave 1 must merge/apply in numeric order. | Orchestrator |
+| M4 | low | `demo:seed-all` blocks only the OLD production ref. If a new production project exists, add its ref to `PRODUCTION_DB_MARKERS`. | S12 |
+
+**#45 verified ✅**
+- **Roles:** recovery is owner/manager/bookkeeper (receiver/chef 403, page bounces); the monthly report is owner/manager.
+- **Rival tenant:** never sees MAIN claims; transition/history on a MAIN claim → 404; a correctly shaped credit note on a MAIN claim → 404, nothing credited, no row.
+- **Integer agorot:** fractional/negative → 400; over-credit is **capped at the claim amount** (3852 → credited 3852, the rest reported unallocated); an illegal transition → 409.
+- **PDF:** per-tenant (different bytes), `application/pdf`; unauthenticated → 307 to login.
+- **Monthly send:** run 1 → 3 emails + 2 WhatsApp (mock); **run 2 → 0** (sent_at + dedupe keys); emails only to owner/manager members; no real send.
+- **Flags off** → `FEATURE_DISABLED`, nav hidden.
+- **Migrations:** 0048/0049 have composite same-tenant FKs on every reference and RLS enabled in-file.
+- **`demo:seed-all` guards:**
+  - the old prod ref is refused, even percent-encoded or only in `PGUSER`;
+  - a shared pooler is refused;
+  - a remote host is refused without `SEED_ALLOW_REMOTE_HOST`;
+  - a remote target needs a `DEMO_PASSWORD` that's set, not the public default, and ≥12 chars;
+  - a non-empty DB is refused without `--reset`.
+  - `?host=` in the URL is **not** a bypass: postgres-js still connects to the URL host and forwards `host` as a startup GUC, which Postgres rejects (42704).
+
+**#48 verified ✅**
+- **Roles:** contracts/alerts read for owner/manager/bookkeeper, write for owner/manager; receiver/chef 403.
+- **Rival tenant:** a RIVAL supplier/product on create → 404, including own supplier + RIVAL product; update/delete of a RIVAL contract → 404, untouched; importPreview into a RIVAL supplier → 404; dismissing a foreign alert → 404.
+- **Import:** `"1,250"` → ₪1250, `"1.234,56"` → skipped, a `=cmd|calc` unit → `BAD_UNIT`, >12 MB → 400 before parsing, no 5xx.
+- **07:00 sweep:** per-restaurant try/catch ✓. Run 1 queued 2 emails, **run 2 queued 0** (`notified_at` + per-alert/recipient dedupe), 0 unnotified left, 0 emails to non-members.
+- **Flags off** → `FEATURE_DISABLED`, nav hidden.
+
+### Re-verification of fixes + cross-QA of S5 integrations (#50)
+**Verification (2 layers).**
+- Layer 1: code review of each fix diff, plus direct probes of the fixed functions (`authVerdictFromHeaders`, `groundAnswer`).
+- Layer 2: #50 on a production build with a RIVAL owner, 14 runtime checks plus a client-bundle secret scan.
+
+**#43 @ 6233151 (S13)**
+| Finding | Status |
+|---|---|
+| I2 (spoofed allow-listed e-mail → auto-OCR) | ❌ **BYPASSABLE.** Auto-register now needs `authVerdict === 'pass'` from an `Authentication-Results` header carrying our authserv-id (good: zero or 2+ such headers → `none`). But `authVerdictFromHeaders` takes the first `dmarc=`/`spf=`/`dkim=` **anywhere in the header value**, so a sender who controls their envelope address forges it. Verified `pass` for `smtp.mailfrom="dmarc=pass"@evil.example`, the unquoted `smtp.mailfrom=dmarc=pass@evil.example`, and a `(… dmarc=pass)` comment, all on a domain with no SPF/DKIM (`spf=none; dkim=none; dmarc=none`). **Fix:** split the value on `;` into resinfo clauses, strip `(comments)`, and read `method=result` only at the **start** of each clause (`/^\s*(spf\|dkim\|dmarc)\s*=\s*(\w+)/`), ignoring properties. Also only configure the trusted authserv-id where the provider strips forged copies of its own header (RFC 8601 §5), since a lone forged header is otherwise trusted. |
+| I3 (offline queue survives logout) | ✅ Fixed. Items are tagged with the user id, the upload scope is restaurant+user, sign-out forms (`data-rm-logout`) wipe the queue, `/login` wipes it, and another user signing in purges foreign items. Trade-off: a receiver whose session expires before syncing loses unsent photos when the login page loads. |
+| I4 (unknown-sender storage amplifier) | ✅ Fixed. A 50 MB/channel/day review-blob quota; over quota, the metadata is kept with no blob (`quota_exceeded`). |
+
+**#42 @ 1a7a742 (S14)**
+| Finding | Status |
+|---|---|
+| L1 (link smuggling in answers) | ⚠ **Improved, still bypassable.** Now stripped/flagged: NFKC, zero-width chars, look-alike dots, `[.]`/`(dot)`, `hxxps`, punycode, Cyrillic look-alikes, bare/decimal IPs, `t.me`, `wa.me`, `mailto:`, `ftp:`, `@handles`, `%2E`. **Still passes as `grounded:true`:** phishing-favourite gTLDs missing from the allow-list (`.zip` `.mov` `.bond` `.sbs` `.cfd` `.lat` `.quest`), plus the non-clickable `e v i l . c o m` and `evil,com`. **Fix:** invert the logic, so any `label.[a-z]{2,24}` is a link unless the suffix is a known file extension (xlsx/pdf/csv…), or use the full IANA TLD list. |
+| L2 (process-local burst limit) | ✅ Fixed. The shared Redis limiter is registered at boot (`instrumentation.node.ts` → `registerAskRateLimit`), with the local window still on top (it also covers a store outage). |
+
+**#50 @ aea9f23 (S5 integrations)** — no findings.
+- **Accounting export:** owner + bookkeeper only (manager/receiver/chef 403, matching `/dashboard/exports`). The rival export contains none of MAIN's invoices. It's tRPC, with no separate file route.
+- **Rivhit CSV:** a planted supplier name `=HYPERLINK(...)` is exported as `'=HYPERLINK…` (neutralized).
+- **POS import:**
+  - 6 MB → 400 before parsing; 50,001 rows → `POS_FILE_TOO_MANY_ROWS`; binary/UTF-16 junk → 400.
+  - Windows-1255 Hebrew decodes correctly; a formula-like item is plain text.
+  - Receiver → 403. A rival import lands only in the rival, and MAIN's summary never shows it.
+- **Procurement:** `procurementProviders` never returns the vault ref (only `sample`/`live`). `loadCredentials('fixture:…')` throws in production. The Zester token sits only in a server-side header; the only error message never includes it.
+- **Client bundle:** `.next/static` has no `*_API_KEY` / `*_ACCESS_TOKEN` / vault names.
+- **Flags off:** `FEATURE_DISABLED`.
