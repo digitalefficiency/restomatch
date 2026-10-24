@@ -12,6 +12,8 @@ import {
   sql,
   type Database,
 } from '@restomatch/db';
+
+type SQL = ReturnType<typeof sql>;
 import { appError } from '../errors';
 import { featureEnabled } from '../lib/features';
 import { addCalendarDaysInTz, startOfDayInTz } from '../lib/time';
@@ -73,11 +75,17 @@ export function defaultArea(category: string | null): StorageArea {
   return 'other';
 }
 
-/** Not food: never on a count, never in food purchases. */
-export const NON_FOOD_CATEGORIES = ['חד״פ', 'חד"פ', 'ניקיון', 'disposables', 'cleaning'] as const;
+/**
+ * Not food: never on a count, never in food purchases. Categories are free
+ * text, so this is a pattern (case-insensitive) over the usual spellings:
+ * חד״פ / חד"פ / חד פעמי, ניקיון / ניקוי / חומרי ניקוי, disposables, cleaning.
+ * The same source drives the SQL (~*) and isFood().
+ */
+export const NON_FOOD_PATTERN = "(חד[״\"׳'\\s]*פ|חד[\\s-]?פעמי|ניקיון|ניקוי|disposab|cleaning)";
+const NON_FOOD_RE = new RegExp(NON_FOOD_PATTERN, 'i');
 
 export function isFood(category: string | null): boolean {
-  return !NON_FOOD_CATEGORIES.includes((category ?? '').trim() as (typeof NON_FOOD_CATEGORIES)[number]);
+  return !NON_FOOD_RE.test(category ?? '');
 }
 
 /** Products bought in the `days` before local date `ymd` (food only), for a new count. */
@@ -201,7 +209,6 @@ export async function purchasesInPeriod(
   fromYmd: string,
   toYmd: string,
 ): Promise<Purchases> {
-  const nonFood = sql.join(NON_FOOD_CATEGORIES.map((c) => sql`${c}`), sql`, `);
   const [r] = (await db.execute(sql`
     with inv as (
       select
@@ -215,13 +222,17 @@ export async function purchasesInPeriod(
         coalesce((
           select sum(l.line_total) from invoice_lines l
           join products p on p.id = l.product_id and p.restaurant_id = ${restaurantId}
-          where l.invoice_id = i.id and btrim(p.category) in (${nonFood})
+          where l.invoice_id = i.id and coalesce(p.category, '') ~* ${NON_FOOD_PATTERN}
         ), 0) as non_food,
         least(coalesce(i.total_excl_vat, 0), coalesce((
           select sum(abs(d.delta_amount)) from match_runs mr
           join discrepancies d on d.match_run_id = mr.id and d.restaurant_id = ${restaurantId}
+          left join invoice_lines dl on dl.id = d.invoice_line_id
+          left join products dp on dp.id = coalesce(dl.product_id, d.product_id) and dp.restaurant_id = ${restaurantId}
           where mr.invoice_id = i.id and mr.restaurant_id = ${restaurantId}
             and ${LEAK_FILTER} and d.resolution_status in ('accepted','resolved')
+            -- a claim on a non-food line: that line is already out of food purchases
+            and not (coalesce(dp.category, '') ~* ${NON_FOOD_PATTERN})
         ), 0)) as credit
       from invoices i
       where i.restaurant_id = ${restaurantId}
@@ -273,47 +284,51 @@ export async function deliveryNoteAccruals(
   fromYmd: string,
   toYmd: string,
 ): Promise<{ accruedAgorot: number; accruedNotes: number; reversedAgorot: number }> {
-  const nonFood = sql.join(NON_FOOD_CATEGORIES.map((c) => sql`${c}`), sql`, `);
+  // A note number is matched like an invoice number: letters/digits only, upper-case, no leading zeros.
+  const norm = (col: SQL) => sql`nullif(regexp_replace(regexp_replace(upper(${col}), '[^[:alnum:]]', '', 'g'), '^0+', ''), '')`;
   const [r] = (await db.execute(sql`
     with notes as (
       select
         gr.id,
+        po.supplier_id,
         (gr.received_at at time zone ${tz})::date as d,
-        btrim(substring(gr.notes from '^ת\\.מ\\.\\s*(\\S+)')) as dn,
+        ${norm(sql`substring(gr.notes from '^ת\\.מ\\.\\s*(\\S+)')`)} as dn,
         coalesce(sum((gl.qty_received - coalesce(gl.qty_rejected, 0)) * pl.unit_price_expected)
-          filter (where p.id is null or btrim(coalesce(p.category, '')) not in (${nonFood})), 0) as val
+          filter (where not (coalesce(p.category, '') ~* ${NON_FOOD_PATTERN})), 0) as val
       from goods_receipts gr
+      join purchase_orders po on po.id = gr.po_id and po.restaurant_id = ${restaurantId}
       join gr_lines gl on gl.gr_id = gr.id
       join po_lines pl on pl.id = gl.po_line_id
       left join products p on p.id = coalesce(gl.product_id, pl.product_id) and p.restaurant_id = ${restaurantId}
       where gr.restaurant_id = ${restaurantId}
         and gr.notes ~ '^ת\\.מ\\.'
         and not exists (select 1 from match_runs mr where mr.gr_id = gr.id and mr.restaurant_id = ${restaurantId} and mr.invoice_id is not null)
-      group by gr.id, gr.received_at, gr.notes
+      group by gr.id, po.supplier_id, gr.received_at, gr.notes
     ),
     covered as (
-      select btrim(n ->> 'number') as dn, (coalesce(i.invoice_date, i.created_at) at time zone ${tz})::date as idate
+      select
+        i.supplier_id,
+        ${norm(sql`case when jsonb_typeof(n) = 'object' then n ->> 'number' else n #>> '{}' end`)} as dn,
+        (coalesce(i.invoice_date, i.created_at) at time zone ${tz})::date as idate
       from invoices i
       cross join lateral jsonb_array_elements(
         case when jsonb_typeof(i.ocr_payload -> 'raw' -> 'deliveryNotes') = 'array' then i.ocr_payload -> 'raw' -> 'deliveryNotes' else '[]'::jsonb end
       ) n
       where i.restaurant_id = ${restaurantId}
+    ),
+    marked as (
+      select notes.*,
+        exists (select 1 from covered c where c.dn = notes.dn and c.supplier_id = notes.supplier_id and c.idate <= ${toYmd}::date) as billed_by_close,
+        exists (select 1 from covered c where c.dn = notes.dn and c.supplier_id = notes.supplier_id and c.idate <= ${fromYmd}::date) as billed_by_open,
+        exists (select 1 from covered c where c.dn = notes.dn and c.supplier_id = notes.supplier_id and c.idate > ${fromYmd}::date and c.idate <= ${toYmd}::date) as billed_in_period
+      from notes
+      where notes.dn is not null
     )
     select
-      coalesce(sum(val) filter (
-        where d > ${fromYmd}::date and d <= ${toYmd}::date
-          and not exists (select 1 from covered c where c.dn = notes.dn and c.idate <= ${toYmd}::date)
-      ), 0)::numeric(14,2)::text as accrued,
-      count(*) filter (
-        where d > ${fromYmd}::date and d <= ${toYmd}::date
-          and not exists (select 1 from covered c where c.dn = notes.dn and c.idate <= ${toYmd}::date)
-      )::int as accrued_n,
-      coalesce(sum(val) filter (
-        where d <= ${fromYmd}::date
-          and exists (select 1 from covered c where c.dn = notes.dn and c.idate > ${fromYmd}::date and c.idate <= ${toYmd}::date)
-          and not exists (select 1 from covered c where c.dn = notes.dn and c.idate <= ${fromYmd}::date)
-      ), 0)::numeric(14,2)::text as reversed
-    from notes
+      coalesce(sum(val) filter (where d > ${fromYmd}::date and d <= ${toYmd}::date and not billed_by_close), 0)::numeric(14,2)::text as accrued,
+      count(*) filter (where d > ${fromYmd}::date and d <= ${toYmd}::date and not billed_by_close)::int as accrued_n,
+      coalesce(sum(val) filter (where d <= ${fromYmd}::date and billed_in_period and not billed_by_open), 0)::numeric(14,2)::text as reversed
+    from marked
   `)) as unknown as Array<{ accrued: string; accrued_n: number; reversed: string }>;
   return { accruedAgorot: agorot(r?.accrued), accruedNotes: Number(r?.accrued_n ?? 0), reversedAgorot: agorot(r?.reversed) };
 }

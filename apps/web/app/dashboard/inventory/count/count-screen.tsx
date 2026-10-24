@@ -83,29 +83,55 @@ function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void 
   const [confirming, setConfirming] = useState(false);
 
   const save = trpc.inventory.saveLines.useMutation();
-  const flush = useCallback(async () => {
+  // One save at a time, in order: a newer flush waits for the one in flight, so
+  // an older quantity can never land after a newer one, and Finish only runs
+  // once every keystroke is on the server.
+  const inFlight = useRef<Promise<boolean>>(Promise.resolve(true));
+  const stopped = useRef(false);
+  const flush = useCallback((): Promise<boolean> => {
     if (timer.current) {
       clearTimeout(timer.current);
       timer.current = null;
     }
-    const batch = pending.current;
-    const ids = Object.keys(batch);
-    if (ids.length === 0) return true;
-    pending.current = {};
-    setSaveState('saving');
-    try {
-      await save.mutateAsync({ countId: draft.id, lines: ids.map((productId) => ({ productId, ...batch[productId] })) });
-      setSaveState('saved');
-      void utils.inventory.current.invalidate();
-      return true;
-    } catch {
-      // Keep the unsaved edits (newer keystrokes win) and retry shortly.
-      pending.current = { ...batch, ...pending.current };
-      setSaveState('error');
-      timer.current = setTimeout(() => void flush(), 3000);
-      return false;
-    }
-  }, [draft.id, save, utils]);
+    const run = inFlight.current.then(async () => {
+      const batch = pending.current;
+      const ids = Object.keys(batch);
+      if (ids.length === 0 || stopped.current) return ids.length === 0;
+      pending.current = {};
+      setSaveState('saving');
+      try {
+        await save.mutateAsync({ countId: draft.id, lines: ids.map((productId) => ({ productId, ...batch[productId] })) });
+        setSaveState('saved');
+        void utils.inventory.current.invalidate();
+        return true;
+      } catch (e) {
+        // Keep the unsaved edits (newer keystrokes win).
+        pending.current = { ...batch, ...pending.current };
+        setSaveState('error');
+        const code = (e as { data?: { code?: string } }).data?.code;
+        if (code === 'CONFLICT' || code === 'NOT_FOUND') {
+          // Finished or discarded elsewhere (another phone/tab): stop, don't loop.
+          stopped.current = true;
+          toast.error(friendlyError(e, tc));
+          void utils.inventory.invalidate();
+        } else if (!stopped.current) {
+          timer.current = setTimeout(() => void flush(), 3000);
+        }
+        return false;
+      }
+    });
+    inFlight.current = run;
+    return run;
+  }, [draft.id, save, utils, toast, tc]);
+
+  // Leaving the screen: no timer keeps firing behind it.
+  useEffect(
+    () => () => {
+      stopped.current = true;
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
 
   const queue = (productId: string, e: Edit) => {
     pending.current[productId] = { ...pending.current[productId], ...e };
@@ -184,10 +210,13 @@ function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void 
             id="count-date"
             type="date"
             className="mt-1 w-44"
+            min="2000-01-01"
             max={today}
-            value={draft.countDate}
-            onChange={(e) => {
-              if (/^\d{4}-\d{2}-\d{2}$/.test(e.target.value)) setDate.mutate({ countId: draft.id, countDate: e.target.value });
+            defaultValue={draft.countDate}
+            key={draft.countDate}
+            onBlur={(e) => {
+              const v = e.target.value;
+              if (/^\d{4}-\d{2}-\d{2}$/.test(v) && v >= '2000-01-01' && v <= today && v !== draft.countDate) setDate.mutate({ countId: draft.id, countDate: v });
             }}
           />
         </label>

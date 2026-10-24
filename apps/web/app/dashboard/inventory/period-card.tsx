@@ -25,9 +25,13 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
   const utils = trpc.useUtils();
   const q = trpc.inventory.period.useQuery(undefined, { staleTime: 30_000 });
   const [sales, setSales] = useState('');
+  const [editingSales, setEditingSales] = useState(false);
   const [salesError, setSalesError] = useState<string | null>(null);
   const setMeta = trpc.inventory.setMeta.useMutation({
-    onSuccess: () => void utils.inventory.period.invalidate(),
+    onSuccess: () => {
+      setEditingSales(false);
+      void utils.inventory.period.invalidate();
+    },
     onError: (e) => toast.error(friendlyError(e, tc)),
   });
 
@@ -60,7 +64,9 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
 
   const saveSales = (e: React.FormEvent) => {
     e.preventDefault();
-    const v = sales.trim().replace(/,/g, '');
+    // "12345,50" (decimal comma, as on a Hebrew keypad) vs "12,345.50" / "12,345" (thousands).
+    const raw = sales.trim().replace(/[\s₪]/g, '');
+    const v = /^\d+,\d{1,2}$/.test(raw) ? raw.replace(',', '.') : raw.replace(/,/g, '');
     if (!/^\d{1,10}(\.\d{1,2})?$/.test(v)) {
       setSalesError(t('period.salesInvalid'));
       return;
@@ -122,10 +128,23 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
       ) : null}
 
       <div className="mt-3 border-t border-line pt-3 text-sm">
-        {p.salesAgorot != null ? (
-          <p className="text-muted">
+        {p.salesAgorot != null && !(editingSales && p.salesSource === 'manual') ? (
+          <p className="flex flex-wrap items-center gap-x-2 text-muted">
             {t('period.sales')}: <bdi dir="ltr" className="tabular-nums font-semibold text-ink">{ils(p.salesAgorot, locale, 0)}</bdi>{' '}
             <span className="text-xs">({p.salesSource === 'pos' ? t('period.salesPos') : t('period.salesManual')})</span>
+            {p.salesSource === 'manual' ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="touch-target"
+                onClick={() => {
+                  setSales(String((p.salesAgorot ?? 0) / 100));
+                  setEditingSales(true);
+                }}
+              >
+                {t('period.salesEdit')}
+              </Button>
+            ) : null}
           </p>
         ) : (
           <form onSubmit={saveSales} className="flex flex-wrap items-end gap-2">
@@ -156,6 +175,13 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
         )}
       </div>
 
+      {p.theoreticalAgorot == null && p.theoreticalCoverageBp != null ? (
+        <p className="mt-3 border-t border-line pt-3 text-xs text-muted" data-testid="food-cost-theory-partial">
+          {p.theoreticalIncomplete && p.theoreticalCoverageBp >= 9000
+            ? t('period.theoryIncomplete')
+            : t('period.theoryPartial', { coverage: pct(p.theoreticalCoverageBp, locale) })}
+        </p>
+      ) : null}
       {p.theoreticalAgorot != null && p.varianceAgorot != null ? (
         <div className="mt-3 border-t border-line pt-3 text-sm" data-testid="food-cost-variance">
           <p className="text-muted">

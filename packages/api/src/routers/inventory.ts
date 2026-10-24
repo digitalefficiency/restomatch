@@ -35,7 +35,10 @@ const inventoryProcedure = chefProcedure.use(async ({ ctx, next }) => {
   return next({ ctx: { ...ctx, rc } });
 });
 
-const YMD = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((s) => !Number.isNaN(Date.parse(`${s}T12:00:00Z`)) && new Date(`${s}T12:00:00Z`).toISOString().startsWith(s), 'invalid date');
+const YMD = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine((s) => s >= '2000-01-01' && !Number.isNaN(Date.parse(`${s}T12:00:00Z`)) && new Date(`${s}T12:00:00Z`).toISOString().startsWith(s), 'invalid date');
 const QTY = z
   .string()
   .trim()
@@ -45,6 +48,9 @@ const SALES = z
   .string()
   .trim()
   .regex(/^\d{1,10}(\.\d{1,2})?$/, 'sales');
+
+/** Theoretical cost is compared only when recipes cover at least this share of sales. */
+export const THEORY_MIN_COVERAGE_BP = 9000;
 
 /** Serialises writes to one restaurant's counts (autosave vs finish). */
 async function lockCounts(db: Database, restaurantId: string) {
@@ -59,8 +65,14 @@ function notDraft(): never {
 async function draftView(db: Database, restaurantId: string, tz: string, countId: string) {
   const c = await loadCount(db, restaurantId, countId);
   const lines = await loadLines(db, restaurantId, countId);
-  const prices = await pricesAsOf(db, restaurantId, c.countDate, tz, lines.map((l) => l.productId));
+  const snap = c.status === 'completed';
+  // A completed count is its snapshot — never re-priced, not even its tallies.
+  const prices = snap ? new Map() : await pricesAsOf(db, restaurantId, c.countDate, tz, lines.map((l) => l.productId));
   const sum = valueCount(lines.map((l): CountLineInput => ({ productId: l.productId, qty: l.qty, unit: l.unit })), prices);
+  const counted = lines.filter((l) => l.qty != null).length;
+  const progress = snap
+    ? { lines: lines.length, counted, notCounted: lines.length - counted, unpriced: lines.filter((l) => l.qty != null && l.valueAgorot == null).length }
+    : { lines: sum.lines, counted: sum.counted, notCounted: sum.notCounted, unpriced: sum.unpriced };
   return {
     id: c.id,
     countDate: c.countDate,
@@ -68,10 +80,9 @@ async function draftView(db: Database, restaurantId: string, tz: string, countId
     notes: c.notes,
     foodSalesExVat: c.foodSalesExVat,
     totalValueAgorot: c.status === 'completed' ? Number(c.totalValueAgorot ?? 0) : sum.totalValueAgorot,
-    progress: { lines: sum.lines, counted: sum.counted, notCounted: sum.notCounted, unpriced: sum.unpriced },
+    progress,
     lines: lines.map((l) => {
       const v = sum.values.get(l.productId)!;
-      const snap = c.status === 'completed';
       return {
         productId: l.productId,
         name: l.name,
@@ -102,6 +113,8 @@ async function periodFor(db: Database, restaurantId: string, rc: Awaited<ReturnT
   let salesAgorot: number | null = null;
   let salesSource: 'pos' | 'manual' | null = null;
   let theoreticalAgorot: number | null = null;
+  let theoreticalCoverageBp: number | null = null;
+  let theoreticalIncomplete = false;
   const pos = featureEnabled(rc.settings, 'integrations') ? await loadPosSales(db, restaurantId, from, closing.countDate) : null;
   if (pos && pos.length > 0) {
     salesAgorot = pos.reduce((a, r) => a + Math.round(Number(r.netAmount) * 100), 0);
@@ -114,7 +127,16 @@ async function periodFor(db: Database, restaurantId: string, rc: Awaited<ReturnT
         productIds: [...new Set(items.map((i) => i.productId).filter((x): x is string => !!x))],
       });
       const res = posVsTheory(pos, rows, costRecipes(costInput, prices, rc.vatBp));
-      if (res.rows.length > 0) theoreticalAgorot = res.totals.theoreticalCostAgorot;
+      // Theory only covers POS items that have a recipe. Compare like with like:
+      // only when recipes cover ≥ 90% of the period's sales and every matched
+      // recipe is fully costed, scaled up to all sales; otherwise it is partial
+      // (shown calmly, never an alarm).
+      const matched = res.totals.netSalesAgorot;
+      theoreticalCoverageBp = salesAgorot > 0 ? Math.min(10_000, Math.round((matched * 10_000) / salesAgorot)) : 0;
+      theoreticalIncomplete = res.rows.some((r) => r.costIncomplete);
+      if (res.rows.length > 0 && matched > 0 && theoreticalCoverageBp >= THEORY_MIN_COVERAGE_BP && !theoreticalIncomplete) {
+        theoreticalAgorot = Math.round((res.totals.theoreticalCostAgorot * salesAgorot) / matched);
+      }
     }
   } else if (closing.foodSalesExVat != null) {
     salesAgorot = Math.round(Number(closing.foodSalesExVat) * 100);
@@ -131,6 +153,9 @@ async function periodFor(db: Database, restaurantId: string, rc: Awaited<ReturnT
     salesAgorot,
     salesSource,
     theoreticalAgorot,
+    /** Share of sales whose dishes have a recipe (null without POS + recipes). */
+    theoreticalCoverageBp,
+    theoreticalIncomplete,
     targetBp: rc.targetBp,
     ...result,
   };
