@@ -1,7 +1,7 @@
 import { computeLeakBreakdown, computeLeakGrouped } from '@restomatch/charts';
 import { eq, restaurants, sql, type Database } from '@restomatch/db';
 import { decimalToScaled } from '../orders/document/build';
-import { claimableAgorot } from './credits';
+import { claimableLines, sumClaims } from '../lib/claims';
 import { deliveryNoteCoverage, type DeliveryNote, type NoteCoverage } from './coverage';
 import { ledgerMonths, monthKeyOf, type LedgerMonth } from './months';
 
@@ -191,7 +191,9 @@ export async function computeSupplierLedger(
           computeLeakBreakdown(db, restaurantId, { view, limit: 200 }),
         ]);
         const row = grouped.find((r) => r.key === supplierId);
-        return { leak: Math.round((row?.leakIls ?? 0) * 100), credits: claimableAgorot(breakdown) };
+        // Credits asked = the claim letters' rule (lib/claims), per supplier-month.
+        const credits = Math.round(sumClaims(breakdown.flatMap((inv) => claimableLines(inv))) * 100);
+        return { leak: Math.round((row?.leakIls ?? 0) * 100), credits };
       }),
     ),
   ]);
