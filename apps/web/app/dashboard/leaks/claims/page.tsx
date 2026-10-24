@@ -131,7 +131,13 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
       </h2>
       <p className="mt-2 text-sm text-muted print:text-black">{t('claims.intro', { amount: ils(letter.total) })}</p>
 
-      <div className="mt-4 overflow-x-auto">
+      {/* Focusable so keyboard users can scroll the table on a phone (axe scrollable-region-focusable). */}
+      <div
+        className="mt-4 overflow-x-auto"
+        tabIndex={0}
+        role="region"
+        aria-label={kind === 'tracker' ? t('claims.trackerSubject') : t('claims.subject', { month })}
+      >
         <table className="w-full min-w-[480px] text-sm">
           <thead className="border-b border-line text-xs text-subtle print:text-black">
             <tr>
