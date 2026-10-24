@@ -24,21 +24,47 @@ import { receiverLangs } from './messages/receiverLangs';
  * lang/dir> at once and refreshes server components. With `persist`, the
  * choice is also saved as the member's language (best effort), so the next
  * login on a new phone opens in it.
+ *
+ * Only the `persist` variant touches tRPC: public pages (/login) render outside
+ * any TrpcProvider (main keeps tRPC off public pages), so the plain picker must
+ * not call a tRPC hook.
  */
 export function LanguagePicker({ className, persist = false }: { className?: string; persist?: boolean }) {
+  return persist ? <PersistingLanguagePicker className={className} /> : <LanguagePickerView className={className} />;
+}
+
+/** Dashboard variant: also saves the member's language (needs the dashboard's TrpcProvider). */
+function PersistingLanguagePicker({ className }: { className?: string }) {
+  const save = trpc.receiverLangs.setMyLocale.useMutation();
+  return (
+    <LanguagePickerView
+      className={className}
+      onPersist={(locale, done) => save.mutate({ locale }, { onSettled: done })}
+    />
+  );
+}
+
+function LanguagePickerView({
+  className,
+  onPersist,
+}: {
+  className?: string;
+  /** Save the choice server-side, then call `done` (refreshes server components). */
+  onPersist?: (locale: AppLocale, done: () => void) => void;
+}) {
   const locale = useAppLocale();
   const router = useRouter();
   const t = useT(receiverLangs);
   const [pending, startTransition] = useTransition();
-  const save = trpc.receiverLangs.setMyLocale.useMutation();
 
   function switchTo(target: AppLocale) {
     const secure = window.location.protocol === 'https:' ? '; secure' : '';
     document.cookie = `${LOCALE_COOKIE}=${target}; path=/; max-age=${LOCALE_COOKIE_MAX_AGE_SEC}; samesite=lax${secure}`;
     document.documentElement.lang = target;
     document.documentElement.dir = dirOf(target);
-    if (persist) save.mutate({ locale: target }, { onSettled: () => startTransition(() => router.refresh()) });
-    else startTransition(() => router.refresh());
+    const refresh = () => startTransition(() => router.refresh());
+    if (onPersist) onPersist(target, refresh);
+    else refresh();
   }
 
   return (
