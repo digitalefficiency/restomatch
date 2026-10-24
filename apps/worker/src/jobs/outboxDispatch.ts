@@ -22,6 +22,7 @@ import {
   isWhatsAppCloudConfigured,
   makeResendDispatcher,
   WhatsAppCloudNotifier,
+  type EmailAttachment,
   type NotificationPayload,
 } from '@restomatch/api';
 import { eq, notificationsOutbox, sql } from '@restomatch/db';
@@ -47,6 +48,19 @@ interface ClaimedRow {
   related_entity_type: string | null;
   related_entity_id: string | null;
   attempt_count: number;
+}
+
+/** Email attachments ride in `payload.__attachments` (e.g. the order PDF). */
+export function readAttachments(payload: Record<string, unknown> | null): EmailAttachment[] | undefined {
+  const raw = payload?.__attachments;
+  if (!Array.isArray(raw)) return undefined;
+  const out = raw.filter(
+    (a): a is EmailAttachment =>
+      !!a && typeof a === 'object' &&
+      typeof (a as EmailAttachment).filename === 'string' &&
+      typeof (a as EmailAttachment).contentBase64 === 'string',
+  );
+  return out.length ? out : undefined;
 }
 
 export function startOutboxDispatchWorker() {
@@ -93,6 +107,7 @@ export function startOutboxDispatchWorker() {
         subject: claimedRow.subject,
         body: claimedRow.body,
         html: typeof claimedRow.payload?.__html === 'string' ? claimedRow.payload.__html : undefined,
+        attachments: readAttachments(claimedRow.payload),
         relatedEntityType: claimedRow.related_entity_type,
         relatedEntityId: claimedRow.related_entity_id,
         attemptCount: claimedRow.attempt_count,
@@ -165,6 +180,7 @@ async function dispatch(row: {
   subject: string | null;
   body: string;
   html?: string;
+  attachments?: EmailAttachment[];
   relatedEntityType: string | null;
   relatedEntityId: string | null;
 }): Promise<void> {
@@ -194,6 +210,7 @@ async function dispatch(row: {
       subject: row.subject ?? undefined,
       body: row.body,
       html: row.html,
+      attachments: row.attachments,
       relatedEntityType: row.relatedEntityType ?? undefined,
       relatedEntityId: row.relatedEntityId ?? undefined,
     };
