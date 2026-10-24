@@ -182,6 +182,19 @@ function startOfLocalDay(tz: string): Date {
   return new Date(guess.getTime() - offset);
 }
 
+/** Above this (excl. VAT) a 2026 invoice needs an allocation number. */
+const ALLOCATION_THRESHOLD_ILS = 5000;
+const allocationNumbers = new Set<string>();
+/** A deterministic, unique 9-digit allocation number for a seeded invoice. */
+function allocationNumberFor(key: string): string {
+  let h = 2166136261;
+  for (const ch of key) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
+  let n = 100_000_000 + (h % 900_000_000);
+  while (allocationNumbers.has(String(n))) n = n === 999_999_999 ? 100_000_000 : n + 1;
+  allocationNumbers.add(String(n));
+  return String(n);
+}
+
 async function wipeBranch(restaurantId: string) {
   const invIds = (await db.select({ id: invoices.id }).from(invoices).where(eq(invoices.restaurantId, restaurantId))).map((r) => r.id);
   const grIds = (await db.select({ id: goodsReceipts.id }).from(goodsReceipts).where(eq(goodsReceipts.restaurantId, restaurantId))).map((r) => r.id);
@@ -460,6 +473,10 @@ async function main() {
             totalExclVat: subtotal.toFixed(2),
             vatAmount: vatAmount.toFixed(2),
             totalInclVat: totalInclVat.toFixed(2),
+            // From 2026 an invoice above ₪5,000 excl. VAT carries a Tax Authority
+            // allocation number (מספר הקצאה); real suppliers send it, so the branches
+            // show no VAT at risk (the main restaurant holds the one deliberate case).
+            allocationNumber: subtotal > ALLOCATION_THRESHOLD_ILS ? allocationNumberFor(`${spec.key}:${invNumber}`) : null,
             status: 'matched',
             source: 'photo',
             ocrConfidence: '0.965',

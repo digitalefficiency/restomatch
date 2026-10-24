@@ -9,6 +9,15 @@ describe('wholeShekelRows (chain ranking display)', () => {
     expect(total).toBe(2090);
     expect(rows.reduce((a, b) => a + b, 0)).toBe(total);
   });
+  it('last month: caught + claimed printed per branch add up to the printed leak (₪1,892, not 0 + 1,893)', () => {
+    // main / Haifa / Jerusalem, all of last month's leak already claimed back.
+    const leak = wholeShekelRows([1059.38, 212.29, 621.47]);
+    const caught = wholeShekelRows([0, 0, 0]);
+    const claimed = wholeShekelRows([1059.38, 212.29, 621.47]);
+    expect(leak.total).toBe(1892);
+    expect(caught.total + claimed.total).toBe(leak.total);
+  });
+
   it('whole shekels, zeros and an empty chain', () => {
     expect(wholeShekelRows([100, 0, 40])).toEqual({ rows: [100, 0, 40], total: 140 });
     expect(wholeShekelRows([])).toEqual({ rows: [], total: 0 });

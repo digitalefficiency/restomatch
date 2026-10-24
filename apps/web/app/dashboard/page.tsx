@@ -127,7 +127,17 @@ export default async function DashboardPage({
       value={formatNumber(kpis.pendingApprovalsCount, locale)}
       tone={kpis.pendingApprovalsCount > 0 ? 'warning' : 'neutral'}
       icon={<ClipboardCheck className="h-5 w-5" />}
-      subtitle={t('kpis.pendingHint')}
+      subtitle={
+        // T2: when decisions wait, the card (already a link to the queue) says so.
+        kpis.pendingApprovalsCount > 0 && canDecide ? (
+          <span className="inline-flex items-center gap-1 font-semibold text-primary">
+            {t('kpis.pendingCta')}
+            <ArrowLeft className="h-3.5 w-3.5 ltr:-scale-x-100" aria-hidden="true" />
+          </span>
+        ) : (
+          t('kpis.pendingHint')
+        )
+      }
     />
   );
 

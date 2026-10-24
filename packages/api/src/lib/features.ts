@@ -29,6 +29,7 @@ export const FEATURE_KEYS = [
   'integrations',
   // S17: inventory counting (ספירת מלאי) → actual food cost per period.
   'inventoryCount',
+  'payRun',
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
