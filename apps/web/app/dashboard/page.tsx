@@ -234,7 +234,7 @@ export default async function DashboardPage({
             action={
               <Link
                 href="/dashboard/leaks"
-                className="inline-flex items-center gap-1 rounded-lg text-sm font-semibold text-primary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+                className="touch-target inline-flex items-center gap-1 rounded-lg text-sm font-semibold text-primary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
               >
                 {t('leaks.all')}
                 <ArrowLeft className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />

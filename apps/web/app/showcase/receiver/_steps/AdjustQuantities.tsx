@@ -322,7 +322,7 @@ function Chip({
     <button
       type="button"
       onClick={onClick}
-      className={`min-h-10 text-sm font-medium px-4 py-2 rounded-full border transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${tones[tone]}`}
+      className={`min-h-11 text-sm font-medium px-4 py-2 rounded-full border transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${tones[tone]}`}
     >
       {label}
     </button>
