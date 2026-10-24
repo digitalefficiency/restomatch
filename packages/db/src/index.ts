@@ -25,7 +25,9 @@ export {
   DEMO_MAIN_NAME,
   deleteDemoTenants,
   demoTenantRowCounts,
+  FINGERPRINT_SKIPPED_TABLES,
   findDemoTenants,
+  nonDemoFingerprint,
   type DemoTenants,
 } from './demoTenants';
 export {
