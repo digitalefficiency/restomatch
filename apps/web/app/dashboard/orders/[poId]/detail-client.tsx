@@ -157,8 +157,6 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
           <OrderStatusBadge status={po.status} receiptStatus={data.receiptStatus} />
         </div>
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="space-y-3">
-          <OrderStatusBadge status={po.status} />
           <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm sm:grid-cols-4">
             <div>
               <dt className="text-xs text-subtle">{t('detail.created')}</dt>
@@ -200,7 +198,6 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
               </div>
             ) : null}
           </dl>
-          </div>
 
           {canEdit && canCancel && (
             <div className="flex flex-wrap items-center gap-2">
