@@ -26,7 +26,7 @@ import { LOCALE_COOKIE, resolveLocale, type Locale } from './lib/i18n/config';
 import { authorizeCredentials, getSessionSecurityState } from './lib/passwords';
 import { SIGNOUT_COOKIE, issuedBeforeSignOut, signOutCookieOptions } from './lib/signOutTombstone';
 import { consumeTwoFactorTicket } from './lib/totp';
-import { enforceLoginLimit, enforceMagicLinkLimit, trustedProxyHops } from './lib/rateLimit';
+import { clearLoginFailures, enforceLoginLimit, enforceMagicLinkLimit, trustedProxyHops } from './lib/rateLimit';
 import {
   SESSION_TTL_LONG_SEC,
   isSessionExpired,
@@ -175,6 +175,8 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         if (!rl.allowed) return null;
         const result = await authorizeCredentials({ email, password });
         if (!result) return null;
+        // Correct password: only FAILED attempts count toward the per-account limit.
+        await clearLoginFailures(email);
         const rememberMe =
           creds?.rememberMe === true ||
           creds?.rememberMe === 'true' ||

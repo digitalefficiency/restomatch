@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { journalCut, runCutoverChecks } from '../cutoverChecks';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { defaultJournalPath, journalCut, runCutoverChecks } from '../cutoverChecks';
 import { applyAuditImmutableRls, applyCoreTenantRls, ensureRlsAppRole } from '../rls';
 import { testDbUrl } from '../test-env';
 
@@ -70,5 +73,23 @@ describe('runCutoverChecks against the migrated + provisioned test DB', () => {
     expect(journalCut(entries, { throughTag: '0033' })?.when).toBe(1781980000000);
     expect(journalCut(entries, { throughIdx: 61 })?.tag).toBe('0061_postgres_queue');
     expect(journalCut(entries, { throughIdx: 60 })).toBeNull();
+  });
+
+  it('checks every entry by `when`, not by the highest applied one (wave-1 lands with an older `when` than 0061)', async () => {
+    // Emulate a journal where an entry is OLDER (when) than the newest applied
+    // migration and sits at a higher idx — wave-1's 0046–0058 vs 0061. If it is
+    // not recorded, the check must name it, not report "all applied".
+    const j = JSON.parse(readFileSync(defaultJournalPath(), 'utf8')) as {
+      entries: Array<{ idx: number; when: number; tag: string; version?: string; breakpoints?: boolean }>;
+    };
+    const last = j.entries[j.entries.length - 1]!;
+    j.entries.push({ ...last, idx: last.idx + 1, when: j.entries[1]!.when + 1, tag: '0046_not_applied_wave1' });
+    const dir = mkdtempSync(join(tmpdir(), 'journal-'));
+    const journalPath = join(dir, '_journal.json');
+    writeFileSync(journalPath, JSON.stringify(j));
+    const results = await runCutoverChecks(url, { checkDefaultPassword: false, journalPath });
+    const mig = results.find((r) => r.name === 'migrations_applied');
+    expect(mig?.ok).toBe(false);
+    expect(mig?.detail).toMatch(/missing: 0046_not_applied_wave1/);
   });
 });

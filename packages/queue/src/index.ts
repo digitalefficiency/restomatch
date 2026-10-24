@@ -116,6 +116,10 @@ export const MATCH_INVOICE_QUEUE = 'match-invoice';
 export interface MatchInvoiceQueueJob {
   restaurantId: string;
   invoiceId: string;
+  /** Re-run the match for an invoice that was already matched (receiving fix, #94). */
+  rematch?: boolean;
+  /** Pin the PO to match against instead of discovering it. */
+  poId?: string;
 }
 
 /** Enqueue a 'match-invoice' job (same contract as enqueueOcrInvoice). */
