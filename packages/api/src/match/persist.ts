@@ -6,6 +6,7 @@ import {
   invoices,
   isNotNull,
   ne,
+  or,
   matchRuns,
   suppliers,
   type Database,
@@ -28,8 +29,22 @@ export interface PersistMatchArgs {
 export interface PriorDecision {
   resolutionStatus: 'open' | 'accepted' | 'rejected' | 'escalated' | 'resolved';
   resolvedBy: string | null;
-  resolvedAt: Date;
+  /** Null for an escalation (it is a hand-off, not a resolution). */
+  resolvedAt: Date | null;
   resolutionNote: string | null;
+  /** Escalation moves the finding to the owner — keep that routing too. */
+  requiresRole: UserRole | null;
+}
+
+/** A finding as both the old rows and the new engine output describe it. */
+export interface FindingIdentity {
+  type: string;
+  invoiceLineId?: string | null;
+  poLineId?: string | null;
+  productId?: string | null;
+  deltaAmount: number | string | null;
+  expected?: number | string | null;
+  actual?: number | string | null;
 }
 
 /**
@@ -37,42 +52,87 @@ export interface PriorDecision {
  * Invoice / PO lines survive a re-match (only match_runs + discrepancies are
  * replaced), so the same finding on the same line gets the same key.
  */
-export function discrepancyKey(d: {
-  type: string;
-  invoiceLineId?: string | null;
-  poLineId?: string | null;
-  productId?: string | null;
-}): string {
+export function discrepancyKey(d: Pick<FindingIdentity, 'type' | 'invoiceLineId' | 'poLineId' | 'productId'>): string {
   return [d.type, d.invoiceLineId ?? '', d.poLineId ?? '', d.productId ?? ''].join('|');
 }
 
+const num4 = (v: number | string | null | undefined) => (v == null ? '' : Number(v).toFixed(4));
+/** Key + the amounts: tells apart two findings of one type on one line (e.g. two QTY_OVER). */
+const fingerprint = (d: FindingIdentity) =>
+  `${discrepancyKey(d)}|${num4(d.deltaAmount)}|${num4(d.expected)}|${num4(d.actual)}`;
+
 /**
- * Human decisions on the invoice's current discrepancies, by discrepancyKey —
- * read BEFORE a re-match deletes the old runs, so a bookkeeper's "not a
- * duplicate" (or an approval) is not silently reset to open. Engine
- * auto-approvals (no resolvedAt) are not carried: the new run re-decides them.
+ * Pair the old run's human decisions with the new run's findings; returns one
+ * entry per finding (undefined = nothing to carry). Each decision is used at
+ * most once: first findings whose key AND amounts are unchanged; then, per key,
+ * a leftover pair only when exactly one old decision and one new finding remain
+ * (the same finding with a changed amount). Anything ambiguous starts fresh —
+ * better a finding back in the queue than a decision applied to the wrong one.
+ */
+export function pairPriorDecisions(
+  prior: Array<FindingIdentity & { decision: PriorDecision }>,
+  findings: FindingIdentity[],
+): Array<PriorDecision | undefined> {
+  const out: Array<PriorDecision | undefined> = findings.map(() => undefined);
+  const left = new Set(prior.map((_, i) => i));
+  findings.forEach((f, i) => {
+    const fp = fingerprint(f);
+    const j = [...left].find((k) => fingerprint(prior[k]!) === fp);
+    if (j !== undefined) {
+      out[i] = prior[j]!.decision;
+      left.delete(j);
+    }
+  });
+  const byKey = new Map<string, { olds: number[]; news: number[] }>();
+  for (const k of left) {
+    const key = discrepancyKey(prior[k]!);
+    const g = byKey.get(key) ?? { olds: [], news: [] };
+    g.olds.push(k);
+    byKey.set(key, g);
+  }
+  findings.forEach((f, i) => {
+    if (out[i]) return;
+    const g = byKey.get(discrepancyKey(f));
+    if (g) g.news.push(i);
+  });
+  for (const g of byKey.values()) {
+    if (g.olds.length === 1 && g.news.length === 1) out[g.news[0]!] = prior[g.olds[0]!]!.decision;
+  }
+  return out;
+}
+
+/**
+ * Human decisions on the invoice's current discrepancies (approved / rejected /
+ * resolved — resolved_at set — and escalated), read BEFORE a re-match deletes the
+ * old runs so a bookkeeper's "not a duplicate", an approval or an escalation to
+ * the owner is not silently reset to open. Engine auto-approvals (no
+ * resolved_at) are not carried: the new run re-decides them. Pair them with the
+ * new findings via pairPriorDecisions.
  */
 export async function loadPriorDecisions(
   db: Database,
   restaurantId: string,
   invoiceId: string,
-): Promise<Map<string, PriorDecision>> {
+): Promise<Array<FindingIdentity & { decision: PriorDecision }>> {
   const runs = await db
     .select({ id: matchRuns.id })
     .from(matchRuns)
     .where(and(eq(matchRuns.invoiceId, invoiceId), eq(matchRuns.restaurantId, restaurantId)));
-  const out = new Map<string, PriorDecision>();
-  if (runs.length === 0) return out;
+  if (runs.length === 0) return [];
   const rows = await db
     .select({
       type: discrepancies.type,
       invoiceLineId: discrepancies.invoiceLineId,
       poLineId: discrepancies.poLineId,
       productId: discrepancies.productId,
+      deltaAmount: discrepancies.deltaAmount,
+      expected: discrepancies.expectedValue,
+      actual: discrepancies.actualValue,
       resolutionStatus: discrepancies.resolutionStatus,
       resolvedBy: discrepancies.resolvedBy,
       resolvedAt: discrepancies.resolvedAt,
       resolutionNote: discrepancies.resolutionNote,
+      requiresRole: discrepancies.requiresRole,
     })
     .from(discrepancies)
     .where(
@@ -82,21 +142,25 @@ export async function loadPriorDecisions(
           discrepancies.matchRunId,
           runs.map((r) => r.id),
         ),
-        isNotNull(discrepancies.resolvedAt),
+        or(isNotNull(discrepancies.resolvedAt), eq(discrepancies.resolutionStatus, 'escalated')),
       ),
     );
-  for (const r of rows) {
-    const key = discrepancyKey(r);
-    const prev = out.get(key);
-    if (prev && prev.resolvedAt >= r.resolvedAt!) continue; // keep the latest decision
-    out.set(key, {
+  return rows.map((r) => ({
+    type: r.type,
+    invoiceLineId: r.invoiceLineId,
+    poLineId: r.poLineId,
+    productId: r.productId,
+    deltaAmount: r.deltaAmount,
+    expected: r.expected,
+    actual: r.actual,
+    decision: {
       resolutionStatus: r.resolutionStatus,
       resolvedBy: r.resolvedBy,
-      resolvedAt: r.resolvedAt!,
+      resolvedAt: r.resolvedAt,
       resolutionNote: r.resolutionNote,
-    });
-  }
-  return out;
+      requiresRole: r.requiresRole,
+    },
+  }));
 }
 
 /**
@@ -154,7 +218,7 @@ export async function persistMatchRun(
   result: MatchOutput,
   rules: ReturnType<typeof buildRules>,
   /** Decisions from the run this one replaces (loadPriorDecisions); kept on findings that still exist. */
-  priorDecisions?: Map<string, PriorDecision>,
+  priorDecisions?: Array<FindingIdentity & { decision: PriorDecision }>,
 ): Promise<PersistMatchResult> {
   const [matchRun] = await db
     .insert(matchRuns)
@@ -173,7 +237,19 @@ export async function persistMatchRun(
   const rolesNeedingNotification = new Set<UserRole>();
   const feedFindings: Parameters<typeof matchActivitySummary>[0] = [];
 
-  for (const d of result.discrepancies) {
+  const carried = pairPriorDecisions(
+    priorDecisions ?? [],
+    result.discrepancies.map((d) => ({
+      type: d.type,
+      invoiceLineId: d.invoiceLineId ?? null,
+      poLineId: d.poLineId ?? null,
+      productId: d.productId,
+      deltaAmount: d.deltaAmount,
+      expected: d.expected ?? null,
+      actual: d.actual ?? null,
+    })),
+  );
+  for (const [index, d] of result.discrepancies.entries()) {
     const ctx: ApprovalContext = {
       discrepancy: { type: d.type, severity: d.severity, deltaAmount: d.deltaAmount },
       matchRun: {
@@ -184,7 +260,7 @@ export async function persistMatchRun(
     };
     const decision = evaluateApproval(ctx, rules);
     const initialStatus = decision.action === 'auto_approve' ? 'accepted' : 'open';
-    const prior = priorDecisions?.get(discrepancyKey(d));
+    const prior = carried[index];
 
     await db.insert(discrepancies).values({
       matchRunId: matchRun.id,
@@ -199,7 +275,7 @@ export async function persistMatchRun(
       actualValue: d.actual?.toString() ?? null,
       deltaAmount: d.deltaAmount.toString(),
       toleranceUsed: d.toleranceUsed,
-      requiresRole: decision.requiredRole,
+      requiresRole: prior?.requiresRole ?? decision.requiredRole,
       ruleId: decision.ruleId,
       ruleName: decision.ruleName,
       resolutionStatus: prior?.resolutionStatus ?? initialStatus,

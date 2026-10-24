@@ -16,7 +16,7 @@ import { appRouter } from '../index';
 import type { AppContext } from '../context';
 import { normalizeInvoiceNumber } from '../match/buildMatchInput';
 import { backfillPriceHistory, writePriceHistoryForInvoice } from '../match/priceHistory';
-import { matchActivitySummary } from '../match/persist';
+import { matchActivitySummary, pairPriorDecisions, type PriorDecision } from '../match/persist';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
 
 /**
@@ -361,6 +361,23 @@ describe('a re-match keeps the people’s decisions', () => {
     expect(after.filter((f) => f.type !== 'DUPLICATE_INVOICE').every((f) => f.resolvedBy == null)).toBe(true);
   });
 
+  it('escalate to the owner, re-match → still escalated and still routed to the owner', async () => {
+    const A = await seedTenant(db, 'A');
+    const copyId = await heldCopy(A);
+    const caller = ownerCaller(A);
+    await caller.match.runForInvoice({ invoiceId: copyId });
+    const dup = (await findingsFor(copyId)).find((f) => f.type === 'DUPLICATE_INVOICE');
+    await caller.approvals.escalate({ discrepancyId: dup!.id, note: 'owner to call the supplier' });
+
+    await caller.match.runForInvoice({ invoiceId: copyId });
+    const [after] = await db
+      .select({ status: discrepancies.resolutionStatus, role: discrepancies.requiresRole, note: discrepancies.resolutionNote })
+      .from(discrepancies)
+      .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+      .where(and(eq(matchRuns.invoiceId, copyId), eq(discrepancies.type, 'DUPLICATE_INVOICE')));
+    expect(after).toEqual({ status: 'escalated', role: 'owner', note: 'owner to call the supplier' });
+  });
+
   it('a decided finding that no longer exists is not resurrected; undecided ones are re-decided by the engine', async () => {
     const A = await seedTenant(db, 'A');
     const copyId = await heldCopy(A);
@@ -474,5 +491,68 @@ describe('the feed tells the hero’s story (matchActivitySummary)', () => {
     // A small VAT finding can still count (the hero counts it too); the story is "pending".
     expect(ev!.metadata).toMatchObject({ pendingLink: true });
     expect(ev!.detail).not.toContain('הפסד פוטנציאלי');
+  });
+});
+
+describe('pairPriorDecisions: one decision per finding, never applied to the wrong one', () => {
+  const decision = (resolutionStatus: PriorDecision['resolutionStatus']): PriorDecision => ({
+    resolutionStatus,
+    resolvedBy: 'u1',
+    resolvedAt: resolutionStatus === 'escalated' ? null : new Date('2026-10-20T10:00:00Z'),
+    resolutionNote: resolutionStatus,
+    requiresRole: resolutionStatus === 'escalated' ? 'owner' : null,
+  });
+  const line = { invoiceLineId: 'il-1', poLineId: 'pl-1', productId: 'p-1' };
+
+  it('two QTY_OVER on one line: each keeps its own decision (matched by amounts)', () => {
+    const prior = [
+      { type: 'QTY_OVER', ...line, deltaAmount: '42.50', expected: '5', actual: '10', decision: decision('rejected') },
+      { type: 'QTY_OVER', ...line, deltaAmount: '8.50', expected: '9', actual: '10', decision: decision('accepted') },
+    ];
+    const findings = [
+      { type: 'QTY_OVER', ...line, deltaAmount: 8.5, expected: 9, actual: 10 },
+      { type: 'QTY_OVER', ...line, deltaAmount: 42.5, expected: 5, actual: 10 },
+    ];
+    const out = pairPriorDecisions(prior, findings);
+    expect(out.map((d) => d?.resolutionStatus)).toEqual(['accepted', 'rejected']);
+  });
+
+  it('two findings on one line, only ONE decided: the undecided one stays fresh', () => {
+    const prior = [{ type: 'QTY_OVER', ...line, deltaAmount: '42.50', expected: '5', actual: '10', decision: decision('rejected') }];
+    const findings = [
+      { type: 'QTY_OVER', ...line, deltaAmount: 42.5, expected: 5, actual: 10 },
+      { type: 'QTY_OVER', ...line, deltaAmount: 8.5, expected: 9, actual: 10 },
+    ];
+    expect(pairPriorDecisions(prior, findings).map((d) => d?.resolutionStatus)).toEqual(['rejected', undefined]);
+  });
+
+  it('the same single finding with a changed amount keeps its decision; ambiguous leftovers start fresh', () => {
+    const one = pairPriorDecisions(
+      [{ type: 'PRICE_HIGHER', ...line, deltaAmount: '40', expected: '139', actual: '149', decision: decision('escalated') }],
+      [{ type: 'PRICE_HIGHER', ...line, deltaAmount: 30, expected: 139, actual: 145 }],
+    );
+    expect(one[0]).toMatchObject({ resolutionStatus: 'escalated', requiresRole: 'owner' });
+    const ambiguous = pairPriorDecisions(
+      [
+        { type: 'QTY_OVER', ...line, deltaAmount: '1', expected: '1', actual: '2', decision: decision('rejected') },
+        { type: 'QTY_OVER', ...line, deltaAmount: '2', expected: '1', actual: '3', decision: decision('accepted') },
+      ],
+      [
+        { type: 'QTY_OVER', ...line, deltaAmount: 3, expected: 1, actual: 4 },
+        { type: 'QTY_OVER', ...line, deltaAmount: 4, expected: 1, actual: 5 },
+      ],
+    );
+    expect(ambiguous).toEqual([undefined, undefined]);
+  });
+
+  it('a decision is never used twice', () => {
+    const out = pairPriorDecisions(
+      [{ type: 'DUPLICATE_INVOICE', invoiceLineId: null, poLineId: null, productId: null, deltaAmount: '118', decision: decision('rejected') }],
+      [
+        { type: 'DUPLICATE_INVOICE', invoiceLineId: null, poLineId: null, productId: null, deltaAmount: 118 },
+        { type: 'DUPLICATE_INVOICE', invoiceLineId: null, poLineId: null, productId: null, deltaAmount: 118 },
+      ],
+    );
+    expect(out.filter(Boolean)).toHaveLength(1);
   });
 });
