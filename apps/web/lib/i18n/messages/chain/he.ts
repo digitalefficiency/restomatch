@@ -11,6 +11,7 @@ export const he = {
     chainLink: 'דאשבורד רשתי',
     manageLink: 'ניהול סניפים',
     failed: 'לא ניתן לעבור לסניף הזה.',
+    viaOwned: 'יעבור לסניף:',
   },
   dashboard: {
     title: 'דאשבורד רשתי',

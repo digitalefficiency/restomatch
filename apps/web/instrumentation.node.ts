@@ -37,10 +37,13 @@ export async function registerNode(): Promise<void> {
   const isProd = process.env.NODE_ENV === 'production';
   if (usingAppRole || isProd) {
     const { db } = await import('./lib/db');
+    const { retryTransientDb } = await import('./lib/bootRetry');
     // A misconfigured DATABASE_URL_APP pointing at owner/service_role would make
-    // RLS silently inert — fail the boot loudly instead.
-    await assertAppRoleNoBypass(db);
+    // RLS silently inert — fail the boot loudly instead. Only a dropped
+    // connection is retried: a failed boot hook 500s every request on the
+    // instance until it is recycled.
+    await retryTransientDb('app-role guard', () => assertAppRoleNoBypass(db));
     // And prove the policies were actually applied (no forgotten/new table).
-    await assertRlsEnabled(db);
+    await retryTransientDb('RLS guard', () => assertRlsEnabled(db));
   }
 }
