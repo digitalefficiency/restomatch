@@ -103,6 +103,11 @@ export const en: Shape<typeof he> = {
       invoiced: 'Invoiced',
       retake: 'Retake the invoice',
       pendingBanner: '{count} lines were not matched automatically — check them against the invoice. This is not a discrepancy, just a check.',
+      mismatchBanner:
+        'No invoice line matched a line on this order. If this is another supplier’s invoice, open the right order or retake the photo; if it is the right supplier, check the lines by hand.',
+      sectionBoth: 'On the order and the invoice · {count}',
+      sectionInvoiceOnly: 'Only on the invoice · {count}',
+      sectionOrderOnly: 'Only on the order · {count}',
       quickConfirm: 'All good — quick confirm',
       continueAdjust: 'Continue to quantities',
     },

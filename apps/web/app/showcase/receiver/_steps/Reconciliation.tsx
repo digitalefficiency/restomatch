@@ -4,6 +4,7 @@ import { useGSAP } from '@gsap/react';
 import { gsap } from 'gsap';
 import { AlertTriangle, ArrowLeft, Check, Clock, Info, Minus, Plus, X, Zap } from 'lucide-react';
 import { useRef } from 'react';
+import { lineTotalIls } from '@/app/dashboard/orders/order-logic';
 import { useDir, useLocale, useT } from '@/lib/i18n/client';
 import { formatPercent } from '@/lib/i18n/format';
 import { receiving } from '@/lib/i18n/messages/receiving';
@@ -11,6 +12,7 @@ import type { Translator } from '@/lib/i18n/translate';
 import { messageTemplates, telLink, waLink } from '@/lib/messageTemplates';
 import { formatIls } from '@/lib/money';
 import type { LineStatus, ReconciliationLine, ReconciliationResult } from '../_mock';
+import { noLinePaired, reconSections, type ReconSection } from '../_state';
 import { HebrewToggle, ItemName, Qty } from './english';
 import { StepHeader } from './SupplierSelect';
 
@@ -58,6 +60,74 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
     0;
 
   const money = (v: number) => formatIls(v, { locale, maximumFractionDigits: 2 });
+
+  // Say "wrong invoice?" instead of listing every line as "pending review".
+  const mismatch = noLinePaired(result.lines);
+  const sections = reconSections(result.lines);
+
+  const renderCard = (line: ReconciliationLine, i: number) => (
+    <li
+      key={`${line.productName}-${i}`}
+      className={`recon-row rounded-2xl border border-line p-4 ${rowTone(line.status)}`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <ItemName
+          he={line.productName}
+          en={line.productNameEn}
+          strike={line.status === 'missing_from_invoice'}
+          className="text-base font-semibold text-ink"
+        />
+        <StatusBadge status={line.status} t={t} />
+      </div>
+      <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">
+        <div>
+          <dt className="text-xs text-subtle">{t('steps.recon.ordered')}</dt>
+          <dd className="text-ink">
+            <LineQty qty={line.poQty} unit={line.poUnit} price={line.poUnitPrice} money={money} />
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs text-subtle">{t('steps.recon.invoiced')}</dt>
+          <dd className="text-ink">
+            <LineQty qty={line.invoiceQty} unit={line.invoiceUnit} price={line.invoiceUnitPrice} total={line.invoiceLineTotal} money={money} />
+          </dd>
+        </div>
+      </dl>
+      {line.deltaIls > 0 ? (
+        <div className="mt-2 text-sm font-semibold text-danger">
+          <bdi dir="ltr" className="font-mono tabular-nums">+{money(line.deltaIls)}</bdi>
+        </div>
+      ) : null}
+      {line.sku ? <div className="mt-1 font-mono text-xs text-subtle" dir="ltr">{line.sku}</div> : null}
+    </li>
+  );
+
+  const renderRow = (line: ReconciliationLine, i: number) => (
+    <tr key={`${line.productName}-${i}`} className={`recon-row border-t border-line ${rowTone(line.status)}`}>
+      <td className="p-3 font-mono tabular-nums text-subtle text-xs whitespace-nowrap" dir="ltr">
+        {line.sku ?? '—'}
+      </td>
+      <td className="p-3 font-medium text-ink">
+        <ItemName he={line.productName} en={line.productNameEn} strike={line.status === 'missing_from_invoice'} />
+      </td>
+      <td className="p-3 text-muted">
+        <LineQty qty={line.poQty} unit={line.poUnit} price={line.poUnitPrice} money={money} />
+      </td>
+      <td className="p-3 text-muted">
+        <LineQty qty={line.invoiceQty} unit={line.invoiceUnit} price={line.invoiceUnitPrice} total={line.invoiceLineTotal} money={money} />
+      </td>
+      <td className="p-3">
+        <StatusBadge status={line.status} t={t} />
+      </td>
+      <td className="p-3 font-mono tabular-nums">
+        {line.deltaIls > 0 ? (
+          <bdi dir="ltr" className="text-danger font-semibold">+{money(line.deltaIls)}</bdi>
+        ) : (
+          <span className="text-subtle">—</span>
+        )}
+      </td>
+    </tr>
+  );
 
   return (
     <div ref={ref} dir={dir}>
@@ -152,7 +222,16 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
         </div>
       ) : null}
 
-      {(result.summary.pendingCount ?? 0) > 0 ? (
+      {mismatch ? (
+        <div
+          role="status"
+          data-testid="recon-mismatch-banner"
+          className="mb-6 flex items-start gap-3 rounded-2xl border border-line bg-surface-2 px-5 py-4"
+        >
+          <Info className="mt-0.5 h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
+          <div className="text-sm text-ink">{t('steps.recon.mismatchBanner')}</div>
+        </div>
+      ) : (result.summary.pendingCount ?? 0) > 0 ? (
         <div
           role="status"
           data-testid="recon-pending-banner"
@@ -169,45 +248,21 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
         <HebrewToggle />
       </div>
 
-      {/* Mobile: one card per line (receivers use phones). */}
-      <ul className="mb-6 space-y-2 md:hidden" data-testid="recon-cards">
-        {result.lines.map((line, i) => (
-          <li
-            key={`${line.productName}-${i}`}
-            className={`recon-row rounded-2xl border border-line p-4 ${rowTone(line.status)}`}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <ItemName
-                he={line.productName}
-                en={line.productNameEn}
-                strike={line.status === 'missing_from_invoice'}
-                className="text-base font-semibold text-ink"
-              />
-              <StatusBadge status={line.status} t={t} />
-            </div>
-            <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">
-              <div>
-                <dt className="text-xs text-subtle">{t('steps.recon.ordered')}</dt>
-                <dd className="text-ink">
-                  <LineQty qty={line.poQty} unit={line.poUnit} price={line.poUnitPrice} money={money} />
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs text-subtle">{t('steps.recon.invoiced')}</dt>
-                <dd className="text-ink">
-                  <LineQty qty={line.invoiceQty} unit={line.invoiceUnit} price={line.invoiceUnitPrice} money={money} />
-                </dd>
-              </div>
-            </dl>
-            {line.deltaIls > 0 ? (
-              <div className="mt-2 text-sm font-semibold text-danger">
-                <bdi dir="ltr" className="font-mono tabular-nums">+{money(line.deltaIls)}</bdi>
-              </div>
-            ) : null}
-            {line.sku ? <div className="mt-1 font-mono text-xs text-subtle" dir="ltr">{line.sku}</div> : null}
-          </li>
-        ))}
-      </ul>
+      {/* Mobile: one card per line (receivers use phones), grouped by side. */}
+      <div className="mb-6 space-y-5" data-testid="recon-cards">
+        {sections ? (
+          sections.map((s) => (
+            <section key={s.key} data-testid={`recon-section-${s.key}`}>
+              <h3 className="mb-2 text-xs font-semibold text-muted">
+                <SectionLabel section={s} t={t} money={money} />
+              </h3>
+              <ul className="space-y-2">{s.items.map(({ line, index }) => renderCard(line, index))}</ul>
+            </section>
+          ))
+        ) : (
+          <ul className="space-y-2">{result.lines.map((line, i) => renderCard(line, i))}</ul>
+        )}
+      </div>
 
       {/* Desktop table */}
       <div className="hidden md:block rounded-2xl border border-line bg-surface overflow-hidden shadow-card mb-6">
@@ -222,34 +277,20 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
               <th className="text-start p-3 font-semibold">{t('steps.recon.colDelta')}</th>
             </tr>
           </thead>
-          <tbody>
-            {result.lines.map((line, i) => (
-              <tr key={`${line.productName}-${i}`} className={`recon-row border-t border-line ${rowTone(line.status)}`}>
-                <td className="p-3 font-mono tabular-nums text-subtle text-xs whitespace-nowrap" dir="ltr">
-                  {line.sku ?? '—'}
-                </td>
-                <td className="p-3 font-medium text-ink">
-                  <ItemName he={line.productName} en={line.productNameEn} strike={line.status === 'missing_from_invoice'} />
-                </td>
-                <td className="p-3 text-muted">
-                  <LineQty qty={line.poQty} unit={line.poUnit} price={line.poUnitPrice} money={money} />
-                </td>
-                <td className="p-3 text-muted">
-                  <LineQty qty={line.invoiceQty} unit={line.invoiceUnit} price={line.invoiceUnitPrice} money={money} />
-                </td>
-                <td className="p-3">
-                  <StatusBadge status={line.status} t={t} />
-                </td>
-                <td className="p-3 font-mono tabular-nums">
-                  {line.deltaIls > 0 ? (
-                    <bdi dir="ltr" className="text-danger font-semibold">+{money(line.deltaIls)}</bdi>
-                  ) : (
-                    <span className="text-subtle">—</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
+          {sections ? (
+            sections.map((s) => (
+              <tbody key={s.key} data-testid={`recon-section-${s.key}`}>
+                <tr className="border-t border-line bg-surface-2">
+                  <th colSpan={6} scope="colgroup" className="p-3 text-start text-xs font-semibold text-muted">
+                    <SectionLabel section={s} t={t} money={money} />
+                  </th>
+                </tr>
+                {s.items.map(({ line, index }) => renderRow(line, index))}
+              </tbody>
+            ))
+          ) : (
+            <tbody>{result.lines.map((line, i) => renderRow(line, i))}</tbody>
+          )}
         </table>
       </div>
 
@@ -263,7 +304,7 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
           {t('steps.recon.retake')}
         </button>
         <div className="flex flex-col gap-2 sm:flex-row">
-          {allGood ? (
+          {allGood && !mismatch ? (
             <button
               type="button"
               onClick={onQuickConfirm}
@@ -288,24 +329,72 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
   );
 }
 
+/** "רק בחשבונית · 2 · ₪34.00": which side the lines are on, how many, and what they come to. */
+function SectionLabel({
+  section,
+  t,
+  money,
+}: {
+  section: ReconSection;
+  t: T;
+  money: (v: number) => string;
+}) {
+  const count = section.items.length;
+  const label =
+    section.key === 'both'
+      ? t('steps.recon.sectionBoth', { count })
+      : section.key === 'invoiceOnly'
+        ? t('steps.recon.sectionInvoiceOnly', { count })
+        : t('steps.recon.sectionOrderOnly', { count });
+  return (
+    <>
+      {label}
+      {section.totalIls !== null ? (
+        <>
+          {' · '}
+          <bdi dir="ltr" className="font-mono tabular-nums">
+            {money(section.totalIls)}
+          </bdi>
+        </>
+      ) : null}
+    </>
+  );
+}
+
 function LineQty({
   qty,
   unit,
   price,
+  total,
   money,
 }: {
   qty: number | null;
   unit: string | null;
   price: number | null;
+  /** Printed line total (invoice side); else qty × price. */
+  total?: number | null;
   money: (v: number) => string;
 }) {
   if (qty === null) return <span className="text-subtle">—</span>;
+  // The × sits between its own isolates so it reads "37.5 ליטר × ₪6.43" in
+  // both directions; inside one LTR isolate with the price it drifted to the
+  // far left in RTL ("× 6.43₪ 37.5 ליטר").
   return (
-    <span className="inline-flex flex-wrap items-baseline gap-x-1">
-      <Qty qty={qty} unit={unit} />
+    <span className="flex flex-col gap-0.5">
+      <span className="inline-flex flex-wrap items-baseline gap-x-1.5">
+        <Qty qty={qty} unit={unit} />
+        {price !== null ? (
+          <>
+            <span className="text-xs text-subtle">×</span>
+            <bdi dir="ltr" className="font-mono text-xs tabular-nums text-subtle">
+              {money(price)}
+            </bdi>
+          </>
+        ) : null}
+      </span>
       {price !== null ? (
-        <bdi dir="ltr" className="font-mono text-xs tabular-nums text-subtle">
-          × {money(price)}
+        <bdi dir="ltr" className="self-start font-mono tabular-nums text-ink">
+          {money(total ?? lineTotalIls(qty, price))}
         </bdi>
       ) : null}
     </span>
