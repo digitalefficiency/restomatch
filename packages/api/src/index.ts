@@ -165,6 +165,7 @@ export {
   receiptState,
   receiptStillOpen,
   rematchHoldReason,
+  scanOwnerReceipt,
   scanReceiptToStamp,
   scannedInvoicesForReceipt,
   withScanGrId,

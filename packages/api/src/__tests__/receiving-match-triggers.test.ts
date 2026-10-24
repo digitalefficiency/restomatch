@@ -25,7 +25,7 @@ vi.mock('@restomatch/queue', async (orig) => ({
 }));
 
 const { appRouter } = await import('../index');
-const { invoicesWaitingOnReceipt, lockReceipt, readScanGrId, receiptStillOpen, scanReceiptToStamp, withScanGrId } = await import(
+const { invoicesWaitingOnReceipt, lockReceipt, readScanGrId, receiptStillOpen, scanOwnerReceipt, scanReceiptToStamp, withScanGrId } = await import(
   '../receiving/matchTriggers'
 );
 
@@ -81,6 +81,8 @@ async function invoice(
     supplierId?: string;
     /** The receipt the OCR job stamped (raw.scanGrId); unstamped = legacy / email row. */
     scanGrId?: string;
+    /** raw.heldForReceipts, as the OCR job records a hold (wave-1 sweep). */
+    heldFor?: string[];
     source?: 'photo' | 'email' | 'platform' | 'manual';
   } = {},
 ) {
@@ -92,7 +94,13 @@ async function invoice(
       status: opts.status ?? 'matched',
       source: opts.source ?? 'photo',
       ...(opts.duplicate ? { ocrPayload: { raw: { duplicateOf: { invoiceNumber: '1' } } } as never } : {}),
-      ...(opts.scanGrId ? { ocrPayload: { raw: { scanGrId: opts.scanGrId } } as never } : {}),
+      ...(opts.scanGrId || opts.heldFor
+        ? {
+            ocrPayload: {
+              raw: { ...(opts.scanGrId ? { scanGrId: opts.scanGrId } : {}), ...(opts.heldFor ? { heldForReceipts: opts.heldFor } : {}) },
+            } as never,
+          }
+        : {}),
     })
     .returning();
   await db.insert(invoiceLines).values({
@@ -598,4 +606,40 @@ describe('rule 1 by source: emailed / platform / manual invoices are unstamped b
       expect(sentIds()).toEqual(claimed ? [inv] : []);
     });
   }
+});
+
+/**
+ * One source of truth with the wave-1 OCR sweep: a photo whose job lost its
+ * receipt is held by the OCR for the receipts being counted
+ * (raw.heldForReceipts). A hold on exactly one receipt is that scan's owner —
+ * the same as a stamp; a hold on several is a guess, and rule 1 decides.
+ */
+describe('scan owner: stamp, else the OCR’s single recorded hold', () => {
+  it('a lost-receipt photo held for GR2 alone is claimed by GR2 — despite a same-day closed sibling — and never by the sibling', async () => {
+    const s = await seed();
+    const { gr1 } = await openSiblingReceipt(s, { qtyOrdered: '10', qtyReceived: '10', status: 'completed' });
+    const x = await invoice(s, { heldFor: [s.grId] });
+    await callerFor(s).receiving.submitReceipt({ grId: s.grId });
+    expect(sentIds()).toEqual([x]);
+    enqueueMatchInvoice.mockClear();
+    expect(await invoicesWaitingOnReceipt(db, s.restaurantId, gr1)).toEqual([]);
+  });
+
+  it('a hold on two receipts is a guess: neither claims it while the other pairs (left for a manager)', async () => {
+    const s = await seed();
+    const { gr1 } = await openSiblingReceipt(s);
+    const x = await invoice(s, { heldFor: [gr1, s.grId] });
+    await callerFor(s).receiving.submitReceipt({ grId: s.grId });
+    expect(sentIds()).not.toContain(x);
+  });
+
+  it('the stamp wins over a recorded hold; a hold counts only for a wizard photo', () => {
+    expect(scanOwnerReceipt({ raw: { scanGrId: 'g2', heldForReceipts: ['g1'] } }, 'photo')).toBe('g2');
+    expect(scanOwnerReceipt({ raw: { heldForReceipts: ['g1'] } }, 'photo')).toBe('g1');
+    expect(scanOwnerReceipt({ raw: { heldForReceipts: ['g1'] } }, 'email')).toBeNull();
+    expect(scanOwnerReceipt({ raw: { heldForReceipts: ['g1', 'g2'] } }, 'photo')).toBeNull();
+    expect(scanOwnerReceipt({ raw: { heldForReceipts: [] } }, 'photo')).toBeNull();
+    expect(scanOwnerReceipt({ raw: { heldForReceipts: 'g1' } }, 'photo')).toBeNull();
+    expect(scanOwnerReceipt(null, 'photo')).toBeNull();
+  });
 });
