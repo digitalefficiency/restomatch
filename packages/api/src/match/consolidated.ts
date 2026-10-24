@@ -22,6 +22,7 @@ import {
   type MatchInput,
   type PoLineInput,
 } from '@restomatch/matching';
+import { claimableLines, sumClaims } from '../lib/claims';
 import { addCalendarDaysInTz, startOfDayInTz } from '../lib/time';
 import { buildMatchInputForInvoice } from './buildMatchInput';
 
@@ -158,19 +159,48 @@ export function countsAsLeak(d: Pick<Discrepancy, 'type' | 'severity' | 'deltaAm
 }
 
 /**
- * The claimable ₪ of the cross-match — the ONE place its rule lives. Same rule as
- * the supplier credit letters (packages/api/src/lib/claims.ts in #80:
- * claimableLines / sumClaims): the lines that count as leak, biggest |Δ| first,
- * never more than the invoice's capped total; a price / quantity line is on the
- * amount before VAT. Switch to claims.ts here once #80 is on main.
+ * The claimable ₪ of the cross-match, by the supplier credit letters' own rule
+ * (lib/claims.ts: claimableLines / sumClaims) — so the panel and a letter can never
+ * disagree on a shekel. The proposal's findings are presented as one open line
+ * each on an invoice already linked (claimableLines claims nothing while an
+ * invoice waits for its link, which is exactly what this proposal is about),
+ * biggest |Δ| first, capped at the invoice's total like the hero.
  */
-export function claimableIls(findings: ReadonlyArray<Pick<ProposalFinding, 'countsAsLeak' | 'deltaAmount'>>, invoiceTotalInclVat: number): number {
-  const capAg = Math.max(0, ag(invoiceTotalInclVat));
-  let claimedAg = 0;
-  for (const f of [...findings].filter((x) => x.countsAsLeak).sort((a, b) => Math.abs(b.deltaAmount) - Math.abs(a.deltaAmount))) {
-    claimedAg += Math.min(ag(Math.abs(f.deltaAmount)), capAg - claimedAg);
-  }
-  return ils(claimedAg);
+export function claimableIls(
+  findings: ReadonlyArray<Pick<ProposalFinding, 'type' | 'severity' | 'countsAsLeak' | 'deltaAmount' | 'expected' | 'actual'>>,
+  invoiceTotalInclVat: number,
+): number {
+  const lines = [...findings]
+    .sort((a, b) => Math.abs(b.deltaAmount) - Math.abs(a.deltaAmount))
+    .map((f, i) => ({
+      discrepancyId: `proposal-${i}`,
+      type: f.type,
+      severity: f.severity,
+      resolutionStatus: 'open',
+      deltaAmount: f.deltaAmount,
+      expected: f.expected,
+      actual: f.actual,
+      countsAsLeak: f.countsAsLeak,
+      productName: null,
+      productNameEn: null,
+      lineDescription: null,
+      lineDescriptionEn: null,
+    }));
+  const leakAg = lines.filter((l) => l.countsAsLeak).reduce((s, l) => s + ag(Math.abs(l.deltaAmount)), 0);
+  return sumClaims(
+    claimableLines({
+      invoiceId: 'proposal',
+      invoiceNumber: null,
+      invoiceDate: null,
+      status: 'parsed',
+      supplierName: null,
+      supplierNameEn: null,
+      totalInclVat: invoiceTotalInclVat,
+      leakIls: ils(Math.min(leakAg, Math.max(0, ag(invoiceTotalInclVat)))),
+      pendingLink: false,
+      lines,
+    }),
+  );
 }
 
 /** A delivery-note number in free text: `ת.מ. 61036` (Hebrew) or `DN 61036`. */
