@@ -154,6 +154,8 @@ describe('renderSizeSuffix: linear on hostile input (CodeQL polynomial ReDoS)', 
     const { renderSizeSuffix } = await import('../receiving/localize');
     const t0 = performance.now();
     renderSizeSuffix('9' + ' '.repeat(50_000) + '\n');
+    renderSizeSuffix('9'.repeat(50_000) + '\n');
+    renderSizeSuffix('9!' + '99'.repeat(25_000) + '\n');
     expect(performance.now() - t0).toBeLessThan(100);
   });
 });
