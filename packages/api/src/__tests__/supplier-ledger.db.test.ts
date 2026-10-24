@@ -1,6 +1,6 @@
 import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { createDb, eq, goodsReceipts, matchRuns, restaurants } from '@restomatch/db';
+import { createDb, eq, goodsReceipts, invoices, matchRuns, restaurants } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { ledgerMonths } from '../ledger';
@@ -58,20 +58,36 @@ describe('suppliers.ledger', () => {
     expect(m.invoicesWithoutNote.count).toBe(0);
     // Billed ₪100 for ₪42.50 delivered: whatever the engine's leak doesn't explain is a T2 gap.
     const unexplained = 10000 - 4250 - m.leakAgorot;
-    expect(m.status).toEqual(Math.abs(unexplained) <= 100 ? { kind: 'matched' } : { kind: 'diff', diffAgorot: unexplained });
+    expect(m.status).toEqual(unexplained > 100 ? { kind: 'diff', diffAgorot: unexplained } : { kind: 'matched' });
     expect(m.openBalanceAgorot).toBe(m.invoices.regular.inclVatAgorot - m.paidAgorot);
     const d = l.detail[m.month]!;
-    expect(d.notes[0]).toMatchObject({ grId: A.grId, coverage: { kind: 'invoiced', invoiceId: A.invoiceId } });
+    expect(d.notes[0]).toMatchObject({ grId: A.grId, state: 'covered', invoiceId: A.invoiceId });
     expect(d.invoices[0]).toMatchObject({ invoiceId: A.invoiceId, deliveryNotes: 1, consolidated: false });
   });
 
   it('an unbilled delivery note in the current month is calm "open", not a discrepancy', async () => {
     await flagOn(A);
     await db.delete(matchRuns).where(eq(matchRuns.id, A.matchRunId));
-    const m = (await callerFor(A).suppliers.ledger({ supplierId: A.supplierId })).months[0]!;
+    // Move the invoice well out of the note's period so nothing can hold the note.
+    await db.update(invoices).set({ invoiceDate: new Date(Date.now() - 70 * 86_400_000) }).where(eq(invoices.id, A.invoiceId));
+    const l = await callerFor(A).suppliers.ledger({ supplierId: A.supplierId });
+    const m = l.months[0]!;
     expect(m.uninvoicedNotes).toEqual({ count: 1, agorot: 4250 });
-    expect(m.invoicesWithoutNote.count).toBe(1);
     expect(m.status).toEqual({ kind: 'open', uninvoicedNotes: 1 });
+    expect(l.detail[m.month]!.notes[0]).toMatchObject({ state: 'not_invoiced', invoiceId: null });
+  });
+
+  it('a pending invoice of the same period holds the note as a consolidated proposal', async () => {
+    await flagOn(A);
+    await db.delete(matchRuns).where(eq(matchRuns.id, A.matchRunId));
+    await db.update(invoices).set({ status: 'parsed' }).where(eq(invoices.id, A.invoiceId));
+    const l = await callerFor(A).suppliers.ledger({ supplierId: A.supplierId });
+    const m = l.months[0]!;
+    expect(l.detail[m.month]!.notes[0]).toMatchObject({ state: 'in_consolidated', invoiceId: A.invoiceId });
+    expect(m.uninvoicedNotes.count).toBe(0);
+    expect(m.invoicesWithoutNote.count).toBe(0);
+    // Awaiting the consolidated cross-match: calm T4 unless the ₪ says otherwise.
+    expect(['pending', 'diff']).toContain(m.status.kind);
   });
 
   it('rejects a foreign supplier and the chef', async () => {

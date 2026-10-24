@@ -26,8 +26,8 @@ function useMonthLabel() {
 
 /**
  * Month status. T3 matched = calm green; T4 open (the current month is still
- * being billed — consolidated invoices come at month end) = neutral, never red;
- * T2 a real ₪ gap = solid danger.
+ * being billed) and pending (notes held by a consolidated invoice awaiting its
+ * cross-match) = neutral, never red; T2 a real gap = solid danger.
  */
 export function LedgerStatusChip({ status }: { status: Status }) {
   const t = useT(suppliersNs);
@@ -37,6 +37,8 @@ export function LedgerStatusChip({ status }: { status: Status }) {
       return <Badge tone="accent">{t('ledger.matched')}</Badge>;
     case 'open':
       return <Badge tone="neutral">{t('ledger.open', { count: status.uninvoicedNotes })}</Badge>;
+    case 'pending':
+      return <Badge tone="neutral">{t('ledger.pending', { count: status.inConsolidated })}</Badge>;
     case 'diff':
       return <Badge tone="danger-solid">{t('ledger.diff', { amount: ils(Math.abs(status.diffAgorot), locale) })}</Badge>;
     default:
@@ -120,14 +122,14 @@ export function SupplierLedgerTable({ data }: { data: SupplierLedgerData }) {
                                 <li key={n.grId} className="flex flex-wrap items-baseline justify-between gap-2">
                                   <span className="text-ink">{t('ledger.noteRow', { date: day(n.receivedAt) })}</span>
                                   <span className="text-xs">
-                                    {n.coverage.kind === 'none' ? (
+                                    {n.state === 'not_invoiced' || !n.invoiceId ? (
                                       <span className="text-muted">{t('ledger.notBilled')}</span>
                                     ) : (
-                                      <Link href={`/dashboard/invoices/${n.coverage.invoiceId}`} className="text-primary underline underline-offset-2">
-                                        {n.coverage.kind === 'proposed'
-                                          ? t('ledger.proposed', { number: n.coverage.invoiceNumber ?? '—' })
-                                          : n.coverage.invoiceNumber
-                                            ? t('ledger.coveredBy', { number: n.coverage.invoiceNumber })
+                                      <Link href={`/dashboard/invoices/${n.invoiceId}`} className="text-primary underline underline-offset-2">
+                                        {n.state === 'in_consolidated'
+                                          ? t('ledger.proposed', { number: n.invoiceNumber ?? '—' })
+                                          : n.invoiceNumber
+                                            ? t('ledger.coveredBy', { number: n.invoiceNumber })
                                             : t('ledger.coveredByNoNumber')}
                                       </Link>
                                     )}
@@ -191,6 +193,8 @@ export function LedgerGridTable({ data }: { data: LedgerGridData }) {
         ? t('ledger.matched')
         : st.kind === 'open'
           ? t('ledger.open', { count: st.uninvoicedNotes })
+          : st.kind === 'pending'
+            ? t('ledger.pending', { count: st.inConsolidated })
           : st.kind === 'diff'
             ? t('ledger.diff', { amount: (Math.abs(st.diffAgorot) / 100).toFixed(2) })
             : t('ledger.empty');

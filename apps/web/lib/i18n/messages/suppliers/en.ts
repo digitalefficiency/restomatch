@@ -182,6 +182,7 @@ export const en: Shape<typeof he> = {
     count: '{count}',
     matched: 'Matched',
     open: 'Open: {count} notes not invoiced',
+    pending: '{count} notes in a consolidated cross-match',
     diff: 'Difference {amount}',
     empty: 'No activity',
     details: 'Details',

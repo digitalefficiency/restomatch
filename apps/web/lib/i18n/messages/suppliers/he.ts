@@ -184,6 +184,7 @@ export const he = {
     count: '{count}',
     matched: 'מותאם',
     open: 'פתוח: {count} תעודות ללא חשבונית',
+    pending: '{count} תעודות בהצלבה לחשבונית מרכזת',
     diff: 'הפרש {amount}',
     empty: 'אין פעילות',
     details: 'פירוט',

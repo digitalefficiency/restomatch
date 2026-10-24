@@ -2,15 +2,16 @@ import { computeLeakBreakdown, computeLeakGrouped } from '@restomatch/charts';
 import { eq, restaurants, sql, type Database } from '@restomatch/db';
 import { decimalToScaled } from '../orders/document/build';
 import { claimableLines, sumClaims } from '../lib/claims';
-import { deliveryNoteCoverage, type DeliveryNote, type NoteCoverage } from './coverage';
+import { consolidatedInvoiceIds, deliveryNoteCoverage, type DeliveryNoteCoverage } from './coverage';
 import { ledgerMonths, monthKeyOf, type LedgerMonth } from './months';
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
 
-/** "מותאם" (T3) · open notes in the current month (T4) · an uncovered note/invoice or unexplained ₪ gap (T2). */
+/** "מותאם" (T3) · open / pending consolidated (T4) · an uncovered note/invoice or billing beyond delivered + leak (T2). */
 export type LedgerStatus =
   | { kind: 'matched' }
   | { kind: 'open'; uninvoicedNotes: number }
+  | { kind: 'pending'; inConsolidated: number }
   | { kind: 'diff'; diffAgorot: number }
   | { kind: 'empty' };
 
@@ -28,9 +29,12 @@ export interface LedgerInvoice {
 export interface LedgerNote {
   grId: string;
   poId: string | null;
+  poRef: string | null;
   receivedAt: string;
   valueAgorot: number;
-  coverage: NoteCoverage;
+  state: DeliveryNoteCoverage['state'];
+  invoiceId: string | null;
+  invoiceNumber: string | null;
 }
 
 export interface LedgerMonthRow {
@@ -108,28 +112,39 @@ const agorot = (v: string | null) => decimalToScaled(v, 2) ?? 0;
 
 /**
  * T3 matched: every delivery note is billed, every invoice has a note, and the
- * billed-vs-delivered gap is explained by the engine's leak (already shown in
- * ₪). T4 open: the current month still has unbilled notes (consolidated
- * suppliers invoice at month end). T2 diff: a note or invoice left uncovered in
- * a closed month, or a gap the leak doesn't explain.
+ * supplier billed no more than delivered + the engine's leak (already shown in
+ * ₪; billing less than delivered is not an alarm). T4 open: the current month
+ * still has unbilled notes (consolidated suppliers invoice at month end). T4
+ * pending: notes held by a consolidated invoice awaiting its cross-match. T2
+ * diff: a note or invoice left uncovered in a closed month, or billing beyond
+ * delivered + leak.
  */
-function statusOf(row: Omit<LedgerMonthRow, 'status'>): LedgerStatus {
+function statusOf(row: Omit<LedgerMonthRow, 'status'>, regularGap: number, inConsolidated: number): LedgerStatus {
   if (row.notes.count === 0 && row.invoices.regular.count + row.invoices.consolidated.count === 0) return { kind: 'empty' };
   if (row.current && row.uninvoicedNotes.count > 0) return { kind: 'open', uninvoicedNotes: row.uninvoicedNotes.count };
-  const gap = row.invoices.regular.exclVatAgorot + row.invoices.consolidated.exclVatAgorot - row.notes.agorot;
-  const unexplained = gap - row.leakAgorot;
-  if (row.uninvoicedNotes.count === 0 && row.invoicesWithoutNote.count === 0 && Math.abs(unexplained) <= DIFF_TOLERANCE_AGOROT) {
-    return { kind: 'matched' };
+  const unexplained = regularGap - row.leakAgorot;
+  if (row.uninvoicedNotes.count > 0 || row.invoicesWithoutNote.count > 0) {
+    return { kind: 'diff', diffAgorot: row.uninvoicedNotes.agorot + row.invoicesWithoutNote.agorot };
   }
-  return { kind: 'diff', diffAgorot: unexplained };
+  if (regularGap > DIFF_TOLERANCE_AGOROT && unexplained > DIFF_TOLERANCE_AGOROT) return { kind: 'diff', diffAgorot: unexplained };
+  if (inConsolidated > 0) return { kind: 'pending', inConsolidated };
+  return { kind: 'matched' };
+}
+
+interface MonthNote {
+  valueAgorot: number;
+  state: DeliveryNoteCoverage['state'];
+  invoiceId: string | null;
 }
 
 function buildMonth(
   m: LedgerMonth,
   current: boolean,
-  notes: DeliveryNote[],
+  notes: MonthNote[],
   invoices: InvoiceRow[],
-  grIdsByInvoice: Map<string, string[]>,
+  /** invoiceId → delivery notes it covers (any month of the window). */
+  notesByInvoice: Map<string, number>,
+  consolidatedIds: Set<string>,
   leakAgorot: number,
   creditsAskedAgorot: number,
 ): LedgerMonthRow {
@@ -137,20 +152,26 @@ function buildMonth(
   let paid = 0;
   let incl = 0;
   const withoutNote = { count: 0, agorot: 0 };
+  const isConsolidated = (id: string) => consolidatedIds.has(id) || (notesByInvoice.get(id) ?? 0) >= 2;
   for (const i of invoices) {
-    const grIds = grIdsByInvoice.get(i.id) ?? [];
-    const bucket = grIds.length >= 2 ? inv.consolidated : inv.regular;
+    const bucket = isConsolidated(i.id) ? inv.consolidated : inv.regular;
     bucket.count += 1;
     bucket.exclVatAgorot += agorot(i.total_excl_vat);
     bucket.inclVatAgorot += agorot(i.total_incl_vat);
     incl += agorot(i.total_incl_vat);
     if (i.status === 'paid') paid += agorot(i.total_incl_vat);
-    if (grIds.length === 0) {
+    if ((notesByInvoice.get(i.id) ?? 0) === 0) {
       withoutNote.count += 1;
       withoutNote.agorot += agorot(i.total_excl_vat);
     }
   }
-  const uninvoiced = notes.filter((n) => n.coverage.kind === 'none');
+  const uninvoiced = notes.filter((n) => n.state === 'not_invoiced');
+  // Regular invoices reconcile in ₪ against the notes they cover; a consolidated invoice is
+  // reconciled through coverage (and S3's cross-match findings), often dated the next month.
+  const regularIds = new Set(invoices.filter((i) => !isConsolidated(i.id)).map((i) => i.id));
+  const regularNotesAgorot = notes
+    .filter((n) => n.invoiceId != null && regularIds.has(n.invoiceId))
+    .reduce((s, n) => s + n.valueAgorot, 0);
   const base = {
     month: m.key,
     from: m.from,
@@ -165,7 +186,20 @@ function buildMonth(
     paidAgorot: paid,
     openBalanceAgorot: incl - paid,
   };
-  return { ...base, status: statusOf(base) };
+  const inConsolidated = notes.filter((n) => n.state === 'in_consolidated').length;
+  return { ...base, status: statusOf(base, inv.regular.exclVatAgorot - regularNotesAgorot, inConsolidated) };
+}
+
+const toMonthNote = (n: DeliveryNoteCoverage): MonthNote => ({
+  valueAgorot: Math.round(n.receivedValueIls * 100),
+  state: n.state,
+  invoiceId: n.invoiceId,
+});
+
+function notesPerInvoice(notes: readonly DeliveryNoteCoverage[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const n of notes) if (n.invoiceId) out.set(n.invoiceId, (out.get(n.invoiceId) ?? 0) + 1);
+  return out;
 }
 
 /** One supplier's ledger by month (newest first) with the per-month drill-down. */
@@ -180,7 +214,7 @@ export async function computeSupplierLedger(
   const months = ledgerMonths(now, tz, monthsBack);
   const from = months[months.length - 1]!.start;
   const to = months[0]!.end;
-  const [{ notes, invoices: covered }, invoices, perMonth] = await Promise.all([
+  const [notes, invoices, perMonth] = await Promise.all([
     deliveryNoteCoverage(db, restaurantId, supplierId, from, to),
     loadInvoices(db, restaurantId, supplierId, from, to),
     Promise.all(
@@ -197,36 +231,49 @@ export async function computeSupplierLedger(
       }),
     ),
   ]);
-  const grIdsByInvoice = new Map(covered.map((c) => [c.invoiceId, c.grIds]));
+  const perInvoice = notesPerInvoice(notes);
+  const consolidatedIds = await consolidatedInvoiceIds(db, restaurantId, invoices.map((i) => i.id));
   const currentKey = months[0]!.key;
 
   const detail: SupplierLedgerDetail['detail'] = {};
   const rows = months.map((m, idx) => {
-    const mNotes = notes.filter((n) => monthKeyOf(n.receivedAt, tz) === m.key);
+    const mNotes = notes.filter((n) => monthKeyOf(new Date(n.receivedAt), tz) === m.key);
     const mInv = invoices.filter((i) => i.invoice_date && monthKeyOf(new Date(i.invoice_date), tz) === m.key);
     detail[m.key] = {
       notes: mNotes.map((n) => ({
         grId: n.grId,
         poId: n.poId,
-        receivedAt: n.receivedAt.toISOString(),
-        valueAgorot: n.valueAgorot,
-        coverage: n.coverage,
+        poRef: n.poRef,
+        receivedAt: n.receivedAt,
+        valueAgorot: Math.round(n.receivedValueIls * 100),
+        state: n.state,
+        invoiceId: n.invoiceId,
+        invoiceNumber: n.invoiceNumber,
       })),
       invoices: mInv.map((i) => {
-        const grIds = grIdsByInvoice.get(i.id) ?? [];
+        const covered = perInvoice.get(i.id) ?? 0;
         return {
           invoiceId: i.id,
           invoiceNumber: i.invoice_number,
           invoiceDate: i.invoice_date ? new Date(i.invoice_date).toISOString() : null,
           status: i.status,
-          consolidated: grIds.length >= 2,
+          consolidated: consolidatedIds.has(i.id) || covered >= 2,
           exclVatAgorot: agorot(i.total_excl_vat),
           inclVatAgorot: agorot(i.total_incl_vat),
-          deliveryNotes: grIds.length,
+          deliveryNotes: covered,
         };
       }),
     };
-    return buildMonth(m, m.key === currentKey, mNotes, mInv, grIdsByInvoice, perMonth[idx]!.leak, perMonth[idx]!.credits);
+    return buildMonth(
+      m,
+      m.key === currentKey,
+      mNotes.map(toMonthNote),
+      mInv,
+      perInvoice,
+      consolidatedIds,
+      perMonth[idx]!.leak,
+      perMonth[idx]!.credits,
+    );
   });
   return { supplierId, timezone: tz, months: rows, detail };
 }
@@ -257,8 +304,7 @@ export async function computeLedgerGrid(
   const months = ledgerMonths(now, tz, monthsBack);
   const from = months[months.length - 1]!.start;
   const to = months[0]!.end;
-  const [{ notes, invoices: covered }, invoices, leaks, supplierRows] = await Promise.all([
-    deliveryNoteCoverage(db, restaurantId, null, from, to),
+  const [invoices, leaks, supplierRows] = await Promise.all([
     loadInvoices(db, restaurantId, null, from, to),
     Promise.all(
       months.map((m) => computeLeakGrouped(db, restaurantId, { period: 'custom', from: m.from, to: m.to, now }, 'supplier', 'off', 500)),
@@ -267,30 +313,34 @@ export async function computeLedgerGrid(
       SELECT id, name, name_en FROM suppliers WHERE restaurant_id = ${restaurantId}::uuid ORDER BY name
     `) as unknown as Promise<Array<{ id: string; name: string; name_en: string | null }>>,
   ]);
-  const grIdsByInvoice = new Map(covered.map((c) => [c.invoiceId, c.grIds]));
+  const consolidatedIds = await consolidatedInvoiceIds(db, restaurantId, invoices.map((i) => i.id));
   const currentKey = months[0]!.key;
 
-  const suppliers = supplierRows
-    .map((s) => {
-      const cells = months.map((m, idx) => {
-        const mNotes = notes.filter((n) => n.supplierId === s.id && monthKeyOf(n.receivedAt, tz) === m.key);
-        const mInv = invoices.filter(
-          (i) => i.supplier_id === s.id && i.invoice_date && monthKeyOf(new Date(i.invoice_date), tz) === m.key,
-        );
-        const leak = Math.round((leaks[idx]!.find((r) => r.key === s.id)?.leakIls ?? 0) * 100);
-        const row = buildMonth(m, m.key === currentKey, mNotes, mInv, grIdsByInvoice, leak, 0);
-        return {
-          month: m.key,
-          notesAgorot: row.notes.agorot,
-          invoicedExclVatAgorot: row.invoices.regular.exclVatAgorot + row.invoices.consolidated.exclVatAgorot,
-          leakAgorot: row.leakAgorot,
-          openBalanceAgorot: row.openBalanceAgorot,
-          status: row.status,
-        };
-      });
-      return { supplierId: s.id, name: s.name, nameEn: s.name_en, cells };
-    })
-    .filter((s) => s.cells.some((c) => c.status.kind !== 'empty'));
+  const suppliers = (
+    await Promise.all(
+      supplierRows.map(async (s) => {
+        const notes = await deliveryNoteCoverage(db, restaurantId, s.id, from, to);
+        const perInvoice = notesPerInvoice(notes);
+        const cells = months.map((m, idx) => {
+          const mNotes = notes.filter((n) => monthKeyOf(new Date(n.receivedAt), tz) === m.key).map(toMonthNote);
+          const mInv = invoices.filter(
+            (i) => i.supplier_id === s.id && i.invoice_date && monthKeyOf(new Date(i.invoice_date), tz) === m.key,
+          );
+          const leak = Math.round((leaks[idx]!.find((r) => r.key === s.id)?.leakIls ?? 0) * 100);
+          const row = buildMonth(m, m.key === currentKey, mNotes, mInv, perInvoice, consolidatedIds, leak, 0);
+          return {
+            month: m.key,
+            notesAgorot: row.notes.agorot,
+            invoicedExclVatAgorot: row.invoices.regular.exclVatAgorot + row.invoices.consolidated.exclVatAgorot,
+            leakAgorot: row.leakAgorot,
+            openBalanceAgorot: row.openBalanceAgorot,
+            status: row.status,
+          };
+        });
+        return { supplierId: s.id, name: s.name, nameEn: s.name_en, cells };
+      }),
+    )
+  ).filter((s) => s.cells.some((c) => c.status.kind !== 'empty'));
   return {
     timezone: tz,
     months: months.map((m) => ({ key: m.key, from: m.from, to: m.to, current: m.key === currentKey })),
