@@ -164,6 +164,9 @@ importers:
       '@restomatch/ui-tokens':
         specifier: workspace:*
         version: link:../../packages/ui-tokens
+      '@restomatch/worker':
+        specifier: workspace:*
+        version: link:../worker
       '@supabase/supabase-js':
         specifier: ^2.106.1
         version: 2.106.1

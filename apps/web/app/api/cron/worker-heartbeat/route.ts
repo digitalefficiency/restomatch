@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { cronAuthorized } from '@/lib/cronAuth';
 import { sendEmail } from '@/lib/email';
 import { clearAlerted, getAlerted, readHeartbeatRaw, setAlerted } from '@/lib/workerHeartbeatStore';
 import { evaluateHeartbeat, isWorkerDown } from '@/lib/workerHeartbeat';
@@ -23,12 +24,6 @@ export const runtime = 'nodejs';
 
 const ALERT_TTL_SEC = 6 * 60 * 60;
 
-function authorized(req: Request): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return process.env.NODE_ENV !== 'production';
-  return req.headers.get('authorization') === `Bearer ${secret}`;
-}
-
 function alertRecipients(): string[] {
   const raw = process.env.WORKER_ALERT_EMAILS ?? process.env.PLATFORM_ADMIN_EMAILS ?? '';
   return raw
@@ -38,7 +33,7 @@ function alertRecipients(): string[] {
 }
 
 export async function GET(req: Request) {
-  if (!authorized(req)) {
+  if (!cronAuthorized(req)) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
   const raw = await readHeartbeatRaw();
