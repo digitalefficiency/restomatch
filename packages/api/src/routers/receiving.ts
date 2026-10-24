@@ -925,6 +925,36 @@ export const receivingRouter = router({
     }),
 
   /**
+   * "Receive the rest": reopen a PARTIAL receipt for the next delivery of the
+   * same order (one receipt per PO — goods_receipts_po_unique). Only partial →
+   * pending, under the receipt lock; a completed receipt stays closed
+   * (CONFLICT 'receipt.closed'), a pending one is returned as is. The close time
+   * (updated_at) is left alone: the next submit stamps the new close, and the
+   * dock slip's "run after the close" gate follows it.
+   */
+  reopenReceipt: receiverProcedure
+    .input(z.object({ grId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertGrOwned(ctx.db, input.grId, ctx.session.restaurantId);
+      await receiptState(ctx.db, ctx.session.restaurantId, input.grId); // takes the lock
+      const [gr] = await ctx.db
+        .select({ id: goodsReceipts.id, status: goodsReceipts.status })
+        .from(goodsReceipts)
+        .where(and(eq(goodsReceipts.id, input.grId), eq(goodsReceipts.restaurantId, ctx.session.restaurantId)))
+        .limit(1);
+      if (!gr) throw new TRPCError({ code: 'NOT_FOUND', message: 'GR not found' });
+      if (gr.status === 'pending') return { grId: gr.id, status: 'pending' as const };
+      if (gr.status !== 'partial') {
+        throw appError('CONFLICT', 'receipt.closed', 'This goods receipt is already closed');
+      }
+      await ctx.db
+        .update(goodsReceipts)
+        .set({ status: 'pending' })
+        .where(and(eq(goodsReceipts.id, gr.id), eq(goodsReceipts.restaurantId, ctx.session.restaurantId)));
+      return { grId: gr.id, status: 'pending' as const };
+    }),
+
+  /**
    * Register an invoice for a goods receipt. Creates the invoice row in
    * status=ocr_pending. Caller can then enqueue an `ocr-invoice` job
    * (worker handles OCR + persistence + line creation).

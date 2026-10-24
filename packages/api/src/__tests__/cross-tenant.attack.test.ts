@@ -138,6 +138,7 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'receiving.startReceipt': 'attack',
   'receiving.markGrLine': 'attack',
   'receiving.submitReceipt': 'attack',
+  'receiving.reopenReceipt': 'attack',
   'receiving.registerInvoice': 'attack',
   'receiving.updateInvoiceHeader': 'attack',
   'receiving.updateInvoiceLine': 'attack',
@@ -299,6 +300,22 @@ describe('foreign-id attacks (A → B)', () => {
       .from(goodsReceipts)
       .where(eq(goodsReceipts.id, B.grId));
     expect(gr?.status).toBe('pending');
+  });
+
+  it('receiving.reopenReceipt rejects a foreign grId and leaves a partial receipt closed', async () => {
+    await db.update(goodsReceipts).set({ status: 'partial' }).where(eq(goodsReceipts.id, B.grId));
+    try {
+      await expect(callerFor(A).receiving.reopenReceipt({ grId: B.grId })).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+      const [gr] = await db
+        .select({ status: goodsReceipts.status })
+        .from(goodsReceipts)
+        .where(eq(goodsReceipts.id, B.grId));
+      expect(gr?.status).toBe('partial');
+    } finally {
+      await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, B.grId));
+    }
   });
 
   it('receiving.registerInvoice rejects a foreign grId', async () => {
