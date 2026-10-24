@@ -50,7 +50,7 @@ export interface MatchJobOutcome {
   /** True when this run replaced an earlier run of the same invoice. */
   replaced: boolean;
   /** Why nothing ran (logs/tests). */
-  skipped?: 'ocr_pending' | 'already_matched' | 'awaiting_review' | 'no_lines';
+  skipped?: 'ocr_pending' | 'already_matched' | 'awaiting_review' | 'no_lines' | 'settled';
 }
 
 /**
@@ -84,6 +84,11 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
     .limit(1);
   if (priorRun && !data.rematch) {
     return { result: CLEAN, persisted: null, replaced: false, skipped: 'already_matched' };
+  }
+  // A person already signed this invoice off: a receipt submit never rewrites
+  // its match (only match.runForInvoice, a manager action, may).
+  if (priorRun && data.rematch && (inv.status === 'approved' || inv.status === 'paid')) {
+    return { result: CLEAN, persisted: null, replaced: false, skipped: 'settled' };
   }
   if (!priorRun && data.rematch) {
     const raw = inv.ocrPayload?.raw as { duplicateOf?: unknown } | null | undefined;

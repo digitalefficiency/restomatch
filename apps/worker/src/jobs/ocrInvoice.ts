@@ -1,6 +1,6 @@
-import { fillEnglishNames, meterOcrScan } from '@restomatch/api';
+import { fillEnglishNames, meterOcrScan, receiptStillOpen } from '@restomatch/api';
 import { matchProductTopN, MockEmbeddingProvider } from '@restomatch/catalog';
-import { and, eq, goodsReceipts, invoiceLines, invoices, ne, restaurants, type Database } from '@restomatch/db';
+import { and, eq, invoiceLines, invoices, ne, restaurants, type Database } from '@restomatch/db';
 import {
   ClaudeVision,
   runOcrPipeline,
@@ -354,10 +354,12 @@ export async function ocrMayAutoMatch(
   grId: string | undefined,
 ): Promise<boolean> {
   if (!grId) return true;
-  const [gr] = await db
-    .select({ status: goodsReceipts.status })
-    .from(goodsReceipts)
-    .where(and(eq(goodsReceipts.id, grId), eq(goodsReceipts.restaurantId, restaurantId)))
-    .limit(1);
-  return gr?.status !== 'pending';
+  try {
+    // Takes the receipt lock: a submit in flight is waited for (receiving/matchTriggers).
+    const open = await db.transaction((tx) => receiptStillOpen(tx as unknown as Database, restaurantId, grId));
+    return !open;
+  } catch (err) {
+    console.warn(`[ocr-invoice] receipt check failed for gr=${grId} — matching now`, err);
+    return true;
+  }
 }
