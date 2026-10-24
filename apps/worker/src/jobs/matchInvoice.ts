@@ -16,6 +16,7 @@ import { runMatch, type MatchOutput } from '@restomatch/matching';
 import { makeWorker } from '../queue';
 import { appBaseUrl } from '../lib/notifyHelpers';
 import { jobDb } from '../db';
+import { findJobInvoice } from './findJobInvoice';
 
 /**
  * The producer sends only identifiers; the worker discovers the PO/GR and
@@ -43,12 +44,9 @@ export function startMatchInvoiceWorker() {
     const { restaurantId, invoiceId } = job.data;
 
     // Tenant guard: job payloads are not a trust boundary — verify the invoice
-    // actually belongs to the payload's restaurant before any write.
-    const [invoice] = await db
-      .select({ id: invoices.id })
-      .from(invoices)
-      .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
-      .limit(1);
+    // actually belongs to the payload's restaurant before any write. Re-read
+    // briefly first, in case the producer enqueued before its commit.
+    const invoice = await findJobInvoice(db, restaurantId, invoiceId);
     if (!invoice) {
       throw new Error(
         `[match-invoice] invoice=${invoiceId} not found in restaurant=${restaurantId} — refusing to match`,
