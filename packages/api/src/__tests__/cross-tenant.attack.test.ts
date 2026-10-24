@@ -108,6 +108,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
     'isolation — chain.attack.test.ts: lists only caller-OWNED branches on the active billing account (not B on the same account, not manager-only M, not X on another account)',
   'chain.overview':
     'isolation — chain.attack.test.ts: per-branch withRestaurant (RLS) sums; totals = A + A2 only, B/M/X excluded; forged session restaurantId → FORBIDDEN',
+  'chain.alerts':
+    'isolation — chain.attack.test.ts: flag off ⇒ nothing computed; per-branch withRestaurant (RLS) over A + A2 only, B/M/X never in the payload; manager / forged session → FORBIDDEN',
   'chain.switchTarget':
     'attack — chain.attack.test.ts: switching to B (no membership) or a random uuid → NOT_FOUND',
   'chain.renameBranch':
