@@ -174,11 +174,13 @@ export async function claimAny<T = unknown>(sql: Sql, queues: string[], workerId
  * (restaurant_id; NULL for the scheduled all-tenant jobs) is running — the
  * worker's per-queue concurrency of 1, kept across processes.
  *
- * The worker gets that serialization for free: one process, one dispatcher, one
- * job per queue at a time. Serverless runners (the web's cron route and its
- * after() kicks) are many processes at once, and two match-invoice jobs of the
- * same invoice running side by side could both write a match run (the job
- * checks for an earlier run, then inserts — fine sequentially, not in parallel).
+ * Within one worker process its dispatcher already runs one job per queue at a
+ * time; across processes — serverless runners (the web's cron route and its
+ * after() kicks) and a worker process, all at once — only this claim keeps it.
+ * Both the serverless runner and the worker's dispatcher claim through here: two
+ * match-invoice jobs of the same invoice running side by side could both write a
+ * match run (the job checks for an earlier run, then inserts — fine
+ * sequentially, not in parallel).
  *
  * Claims are serialized by a transaction-scoped advisory lock taken in its OWN
  * statement first: under READ COMMITTED each statement sees the data committed

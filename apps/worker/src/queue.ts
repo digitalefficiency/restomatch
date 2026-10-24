@@ -3,7 +3,7 @@ import cronParser from 'cron-parser';
 import { captureException } from '@restomatch/observability';
 import { jobIdleTimeoutSec } from './db';
 import {
-  claimAny,
+  claimAnySerial,
   completeJob,
   failJob,
   failedJobs,
@@ -90,12 +90,18 @@ const inFlight = new Map<string, string>(); // jobId → queue (lock renewal)
 
 /*
  * One dispatcher per database pool claims for EVERY registered queue with a
- * single query (claimAny), instead of one poll loop per queue: on the Supabase
+ * single claim (claimAnySerial), instead of one poll loop per queue: on the Supabase
  * free plan egress is metered, and 13 queues × 1–5 s polls was ~5 queries/s
  * (~6 GB/month) of empty claims. When a claim comes back empty the dispatcher
  * sleeps with exponential backoff (IDLE_MIN_MS → IDLE_MAX_MS); a claimed job,
  * a local insert (wakeDispatchers) or a NOTIFY from another process (LISTEN,
  * startJobListener) resets/wakes it. Per-queue concurrency is enforced here.
+ *
+ * claimAnySerial, not plain claimAny: it never starts a job while another job of
+ * the same queue + tenant is running ANYWHERE — so the serverless runners
+ * (/api/cron/jobs, the after() kick) and a worker process running at the same
+ * time keep the worker's one-at-a-time-per-queue guarantee between them (two
+ * match-invoice jobs of one invoice must not both write a match run).
  */
 export const IDLE_MIN_MS = 1_000;
 export const IDLE_MAX_MS = 30_000;
@@ -171,7 +177,7 @@ class Dispatcher {
       let row: JobRow<unknown> | null = null;
       try {
         this.claims += 1;
-        row = await claimAny(this.sql, open.map((r) => r.name), WORKER_ID);
+        row = await claimAnySerial(this.sql, open.map((r) => r.name), WORKER_ID, STALL_AFTER_MS);
       } catch (err) {
         // DB blip: keep polling (the DB watchdog exits the process if it lasts).
         const now = Date.now();
@@ -232,7 +238,7 @@ export async function runClaimedJob(
     id: row.id,
     name,
     data: row.payload,
-    attemptsMade: row.attempts - 1, // claimAny already counted this run
+    attemptsMade: row.attempts - 1, // the claim already counted this run
     opts: { attempts: row.maxAttempts },
   };
   inFlight.set(row.id, name);

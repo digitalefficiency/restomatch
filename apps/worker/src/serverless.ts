@@ -24,8 +24,9 @@ import { runClaimedJob, runMaintenance, STALL_AFTER_MS, tickSchedules, type Work
  *    recovery + pruning, due schedules, then the queue.
  *
  * Safe next to a running worker: claims are FOR UPDATE SKIP LOCKED (a job runs
- * once), and claimAnySerial never starts a job while another job of the same
- * queue + tenant is running — the worker's per-queue concurrency of 1.
+ * once), and both this runner and the worker's dispatcher claim through
+ * claimAnySerial, which never starts a job while another job of the same
+ * queue + tenant is running anywhere — the worker's per-queue concurrency of 1.
  * Every job runs on the owner DATABASE_URL (jobDb / queueDbUrl), exactly like
  * the worker — never on the RLS app role.
  */

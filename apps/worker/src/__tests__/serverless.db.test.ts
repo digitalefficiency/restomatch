@@ -22,10 +22,11 @@ import {
 } from '@restomatch/db';
 import { appRouter } from '@restomatch/api';
 import { computeLeakHero } from '@restomatch/charts';
+import { mulIls, toAgorot } from '@restomatch/matching';
 import { insertJob, queueSql } from '@restomatch/queue';
 import { registerCronSchedules } from '../cron';
 import { JOB_HANDLERS, type JobProcessor } from '../handlers';
-import type { WorkerJob } from '../queue';
+import { makeWorker, type WorkerJob } from '../queue';
 import { runDueSchedules, runQueuedJobs, runServerlessTick } from '../serverless';
 
 /**
@@ -85,7 +86,10 @@ async function freshPo(n: number): Promise<{ poId: string; lines: Array<{ qty: n
       unitPriceExpected: l.unitPriceExpected,
     })),
   );
-  return { poId: po!.id, lines: lines.map((l) => ({ qty: Number(l.qtyOrdered), price: Number(l.unitPriceExpected) })) };
+  // The NEW PO's lines in the order the dev OCR stub reads them (by id — random
+  // UUIDs, so not the source PO's order): lines[0] is the line it bills +8%.
+  const created = await db.select().from(poLines).where(eq(poLines.poId, po!.id)).orderBy(asc(poLines.id));
+  return { poId: po!.id, lines: created.map((l) => ({ qty: Number(l.qtyOrdered), price: Number(l.unitPriceExpected) })) };
 }
 
 beforeAll(async () => {
@@ -177,8 +181,9 @@ describe('(a) photo → OCR → match, run by the serverless runner (no worker)'
       .from(discrepancies)
       .where(eq(discrepancies.matchRunId, runs[0]!.id));
     expect(found.map((d) => d.type)).toEqual(['PRICE_HIGHER']);
+    // The engine's own arithmetic: (billed − agreed) × billed qty, quantized once (mulIls).
     const { qty, price } = lines[0]!;
-    const expectedAg = Math.round((ag(Math.round(price * 1.08 * 100) / 100) - ag(price)) * qty);
+    const expectedAg = toAgorot(mulIls(Math.round(price * 1.08 * 100) / 100 - price, qty));
     expect(ag(Number(found[0]!.delta))).toBe(expectedAg);
     expect(expectedAg).toBeGreaterThan(0);
 
@@ -235,6 +240,62 @@ describe('(b) runner semantics', () => {
     const rows = await qsql<Array<{ status: string; attempts: number; result: { n: number } }>>`
       SELECT status, attempts, result FROM job_queue WHERE queue = ${Q}`;
     expect(rows.every((r) => r.status === 'done' && r.attempts === 1 && typeof r.result.n === 'number')).toBe(true);
+  });
+
+  it('a worker process next to two runners: still one job per queue + tenant at a time, each job once', async () => {
+    // The worker's dispatcher claims through claimAnySerial too (it used plain
+    // claimAny: the worker could start a job of a tenant a runner was running).
+    await qsql`DELETE FROM job_queue WHERE queue = ${Q}`;
+    const extra = await db
+      .insert(restaurants)
+      .values([{ name: 'serverless test C' }, { name: 'serverless test D' }])
+      .returning({ id: restaurants.id });
+    const tenants = [restaurantId, ...extra.map((r) => r.id)];
+    const ids: string[] = [];
+    // Uneven tenants and run times, so the claimers do not settle into one tenant each.
+    for (let i = 0; i < 30; i++) ids.push((await insertJob(qsql, Q, { n: i }, { restaurantId: tenants[(i * i + i) % 3]! }))!.id);
+    for (let i = 0; i < 6; i++) ids.push((await insertJob(qsql, Q, { n: 100 + i }))!.id);
+    const runs = new Map<string, number>();
+    const busy = new Map<string, string[]>();
+    const overlaps: string[] = [];
+    const claimers = new Set<string>();
+    const processor = (async (job: WorkerJob<{ n: number }>) => {
+      runs.set(job.id, (runs.get(job.id) ?? 0) + 1);
+      const [row] = await qsql<Array<{ restaurant_id: string | null; locked_by: string }>>`
+        SELECT restaurant_id, locked_by FROM job_queue WHERE id = ${job.id}`;
+      const group = row!.restaurant_id ?? 'all';
+      const by = row!.locked_by.startsWith('runner-') ? row!.locked_by : 'worker';
+      claimers.add(by);
+      const now = busy.get(group) ?? [];
+      if (now.length > 0) overlaps.push(`${group}: ${by} while ${now.join(',')}`);
+      busy.set(group, [...now, by]);
+      await new Promise((r) => setTimeout(r, 3 + ((job.data.n * 7) % 23)));
+      busy.set(group, (busy.get(group) ?? []).filter((_, i, a) => i !== a.indexOf(by)));
+      return { n: job.data.n };
+    }) as JobProcessor;
+    handlers[Q] = processor;
+
+    const worker = makeWorker(Q, processor as never, { pollMs: 5, sql: queueSql(testDbUrl(), 2, 21) });
+    try {
+      await Promise.all([
+        runQueuedJobs({ budgetMs: 60_000, queues: [Q], workerId: 'runner-1', sql: queueSql(testDbUrl(), 2, 22) }),
+        runQueuedJobs({ budgetMs: 60_000, queues: [Q], workerId: 'runner-2', sql: queueSql(testDbUrl(), 2, 23) }),
+      ]);
+      // Runners stop when nothing is claimable for them; the worker drains the rest.
+      await vi.waitFor(
+        async () => {
+          const [left] = await qsql<Array<{ n: number }>>`SELECT count(*)::int AS n FROM job_queue WHERE queue = ${Q} AND status <> 'done'`;
+          expect(left!.n).toBe(0);
+        },
+        { timeout: 30_000, interval: 50 },
+      );
+    } finally {
+      await worker.close();
+    }
+    expect(overlaps).toEqual([]);
+    expect([...runs.keys()].sort()).toEqual([...ids].sort());
+    expect([...runs.values()].every((n) => n === 1)).toBe(true);
+    expect(claimers.has('worker')).toBe(true);
   });
 
   it('a failing job is retried with backoff, then dead-lettered — like the worker', async () => {
