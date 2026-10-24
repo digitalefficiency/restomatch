@@ -52,7 +52,8 @@ async function slotJob(id: string, label: string) {
 }
 
 beforeAll(async () => {
-  [{ t: startedAt }] = await sql<Array<{ t: Date }>>`SELECT now() AS t`;
+  const [row] = await sql<Array<{ t: Date }>>`SELECT now() AS t`;
+  startedAt = row!.t;
   // Retention is opt-in (read when cron.ts loads): opt in so EVERY schedule is covered.
   process.env.RETENTION_CRON_ENABLED = '1';
   vi.spyOn(console, 'log').mockImplementation(() => {});
