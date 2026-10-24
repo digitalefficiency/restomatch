@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { TRPCError } from '@trpc/server';
-import { AlertTriangle, ClipboardCheck, Network, PartyPopper, Scale, ShieldCheck, Undo2 } from 'lucide-react';
+import { AlertTriangle, ClipboardCheck, Network, PartyPopper, Radar, Scale, ShieldCheck, Undo2 } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
 import { formatDate, formatNumber, formatPercent } from '@/lib/i18n/format';
@@ -8,6 +8,9 @@ import { getLocale, getT } from '@/lib/i18n/server';
 import { originalProps } from '@/lib/i18n/original';
 import type { Locale } from '@/lib/i18n/config';
 import { chain } from '@/lib/i18n/messages/chain';
+import { approvals } from '@/lib/i18n/messages/approvals';
+import type { he as approvalsHe } from '@/lib/i18n/messages/approvals/he';
+import type { MessageKey } from '@/lib/i18n/translate';
 import {
   Badge,
   Card,
@@ -21,8 +24,12 @@ import {
 } from '@/lib/components';
 import { ViewToolbar, parseView, rangeLabel } from '@/lib/components/views';
 import { SwitchBranchButton } from './switch-button';
+import { wholeShekelRows } from './display';
 
 type Overview = Awaited<ReturnType<Awaited<ReturnType<typeof createServerCaller>>['chain']['overview']>>;
+type Alerts = Awaited<ReturnType<Awaited<ReturnType<typeof createServerCaller>>['chain']['alerts']>>;
+/** Same floor as the router's ALERT_MIN_LEAK_ILS (copy only). */
+const ALERT_MIN_LEAK_ILS = 50;
 
 /** 'YYYY-MM' of an instant in Israel time (heatmap columns are local months). */
 function ymOf(value: string | Date): string {
@@ -41,6 +48,9 @@ function monthLabel(month: string, locale: Locale, style: 'long' | 'short' = 'lo
 }
 
 /** Heatmap colour by leak share of spend — calm green when clean, gold → red as it grows. */
+/** Phone: only the last 3 heatmap months (the selected period's end) fit; older ones show from `sm`. */
+const HEAT_PHONE_MONTHS = 3;
+
 function heatClass(pct: number | null, leak: number): string {
   if (pct === null) return leak > 0 ? 'bg-warn/20 text-warn' : 'bg-surface-2 text-subtle';
   if (pct <= 0) return 'bg-primary/10 text-primary';
@@ -56,9 +66,10 @@ export default async function ChainPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [caller, t, locale, sp] = await Promise.all([
+  const [caller, t, ta, locale, sp] = await Promise.all([
     createServerCaller(),
     getT(chain),
+    getT(approvals),
     getLocale(),
     searchParams,
   ]);
@@ -67,6 +78,9 @@ export default async function ChainPage({
 
   let data: Overview | null = null;
   let blocked: 'entitlement' | 'role' | null = null;
+  // chainAlerts (flag): the weekly card; `enabled: false` when the flag is off.
+  // It never blocks the page — an error just hides the card.
+  const alertsP: Promise<Alerts | null> = caller.chain.alerts().catch(() => null);
   try {
     data = await caller.chain.overview({
       view: { period: view.period, ...(view.period === 'custom' ? { from: view.from, to: view.to } : {}) },
@@ -98,7 +112,15 @@ export default async function ChainPage({
     );
   }
 
+  const alerts = await alertsP;
+  // Display only: whole-₪ rows (= each branch's own dashboard) and totals printed as their sum.
+  const leakShown = wholeShekelRows(data.branches.map((b) => b.leakIls));
+  const spendShown = wholeShekelRows(data.branches.map((b) => b.spendIls));
+  const rowLeak = leakShown.rows;
+  const rowSpend = spendShown.rows;
   const ils = (v: number) => formatIls(v, { locale });
+  const typeLabel = (v: string) => ta(`types.${v}.label` as MessageKey<typeof approvalsHe>);
+  const shortDay = (ymd: string) => formatDate(`${ymd}T12:00:00Z`, locale, { day: 'numeric', month: 'short' });
   const pct = (v: number | null) => (v === null ? t('dashboard.ranking.noSpend') : formatPercent(v, locale, 1));
   const { totals } = data;
   const worst = data.branches.find((b) => b.restaurantId === data.worstBranchId) ?? null;
@@ -120,6 +142,7 @@ export default async function ChainPage({
     const last = ymOf(new Date(new Date(data.periodEnd).getTime() - 1));
     for (const m of data.months) if (m >= first && m <= last) inPeriod.add(m);
   }
+  const phoneHidden = (i: number) => (i < data.months.length - HEAT_PHONE_MONTHS ? 'hidden sm:table-cell' : undefined);
 
   return (
     <div>
@@ -175,10 +198,10 @@ export default async function ChainPage({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4" data-testid="chain-kpis">
         <KpiCard
           label={t('dashboard.kpis.leak')}
-          value={<span data-testid="chain-leak">{ils(totals.leakIls)}</span>}
+          value={<span data-testid="chain-leak">{ils(leakShown.total)}</span>}
           tone={totals.leakIls > 0 ? 'danger' : 'accent'}
           icon={<AlertTriangle className="h-5 w-5" />}
-          subtitle={t('dashboard.kpis.leakOf', { spend: ils(totals.spendIls) })}
+          subtitle={t('dashboard.kpis.leakOf', { spend: ils(spendShown.total) })}
           delta={leakDeltaPct}
           deltaTone="bad"
           sparkline={chainSpark}
@@ -193,7 +216,7 @@ export default async function ChainPage({
               ? t('dashboard.kpis.vsPrev', {
                   value: totals.prevLeakPct === null ? '—' : formatPercent(totals.prevLeakPct, locale, 1),
                 })
-              : t('dashboard.kpis.leakOf', { spend: ils(totals.spendIls) })
+              : t('dashboard.kpis.leakOf', { spend: ils(spendShown.total) })
           }
         />
         <KpiCard
@@ -212,10 +235,10 @@ export default async function ChainPage({
         />
         <KpiCard
           label={t('dashboard.kpis.pending')}
-          value={formatNumber(totals.pendingApprovals, locale)}
-          tone={totals.pendingApprovals > 0 ? 'warning' : 'neutral'}
+          value={<span data-testid="chain-open">{formatNumber(totals.openDiscrepancies, locale)}</span>}
+          tone={totals.openDiscrepancies > 0 ? 'warning' : 'neutral'}
           icon={<ClipboardCheck className="h-5 w-5" />}
-          subtitle={t('dashboard.kpis.pendingHint')}
+          subtitle={t('dashboard.kpis.pendingHint', { count: formatNumber(totals.pendingApprovals, locale) })}
         />
       </div>
 
@@ -261,6 +284,71 @@ export default async function ChainPage({
         ) : null}
       </Card>
 
+      {/* chainAlerts (flag): the branch to look at this week + each branch's main leak driver. */}
+      {alerts?.enabled ? (
+        <Card elevated padding="md" className="mt-6" data-testid="chain-alerts">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-danger/12 text-danger ring-1 ring-danger/25">
+                <Radar className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-wider text-subtle">{t('dashboard.alerts.title')}</p>
+                <p className="text-xs text-subtle" data-testid="chain-alerts-window">
+                  {alerts.from && alerts.to ? t('dashboard.alerts.window', { from: shortDay(alerts.from), to: shortDay(alerts.to) }) : null}
+                </p>
+                {alerts.focus ? (
+                  <div className="mt-1" data-testid="chain-alerts-focus">
+                    <p className="text-base text-ink">
+                      <span className="font-bold" {...originalProps(alerts.focus.name)}>{alerts.focus.name}</span>
+                      <span className="text-muted">
+                        {' · '}
+                        {t('dashboard.alerts.body', { leak: ils(alerts.focus.leakIls), pct: pct(alerts.focus.leakPct) })}
+                      </span>
+                    </p>
+                    {alerts.focus.topDriver ? (
+                      <p className="mt-0.5 text-sm text-danger" data-testid="chain-alerts-driver">
+                        {t('dashboard.alerts.driver', {
+                          type: typeLabel(alerts.focus.topDriver.type),
+                          amount: ils(alerts.focus.topDriver.leakIls),
+                        })}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="mt-1 text-base text-ink" data-testid="chain-alerts-calm">
+                    {t('dashboard.alerts.calm', { min: ils(ALERT_MIN_LEAK_ILS) })}
+                  </p>
+                )}
+              </div>
+            </div>
+            {alerts.focus && alerts.focus.restaurantId !== data.activeRestaurantId ? (
+              <SwitchBranchButton restaurantId={alerts.focus.restaurantId} label={t('dashboard.alerts.cta')} variant="secondary" testId="chain-alerts-switch" />
+            ) : null}
+          </div>
+          {alerts.branches.length > 1 ? (
+            <div className="mt-4 border-t border-line pt-3">
+              <p className="mb-2 text-xs font-semibold text-subtle">{t('dashboard.alerts.byBranch')}</p>
+              <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {alerts.branches.map((b) => (
+                  <li key={b.restaurantId} className="rounded-lg border border-line/60 bg-surface-2/40 px-3 py-2 text-sm" data-testid="chain-alerts-branch">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="truncate font-semibold text-ink" {...originalProps(b.name)}>{b.name}</span>
+                      <span className={cn('shrink-0 font-mono tabular-nums', b.leakIls > 0 ? 'text-danger' : 'text-subtle')}>{ils(b.leakIls)}</span>
+                    </div>
+                    <p className="mt-0.5 text-xs text-muted">
+                      {b.topDriver
+                        ? `${typeLabel(b.topDriver.type)} · ${ils(b.topDriver.leakIls)}`
+                        : t('dashboard.alerts.noLeak')}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </Card>
+      ) : null}
+
       {noData ? (
         <EmptyState className="mt-8" title={t('dashboard.empty.title')} description={t('dashboard.empty.body')} />
       ) : null}
@@ -269,38 +357,44 @@ export default async function ChainPage({
       <section className="mt-10">
         <SectionHeader title={t('dashboard.ranking.title')} subtitle={t('dashboard.ranking.subtitle')} />
         <Card padding="none" className="overflow-x-auto">
-          <table className="w-full min-w-[44rem] text-sm" data-testid="chain-ranking">
+          <table className="w-full sm:min-w-[44rem] text-sm" data-testid="chain-ranking">
             <thead>
               <tr className="border-b border-line text-xs uppercase tracking-wider text-subtle">
-                <th scope="col" className="px-4 py-3 text-start font-semibold">{t('dashboard.ranking.rank')}</th>
-                <th scope="col" className="px-4 py-3 text-start font-semibold">{t('dashboard.ranking.branch')}</th>
-                <th scope="col" className="px-4 py-3 text-end font-semibold">{t('dashboard.ranking.leak')}</th>
-                <th scope="col" className="px-4 py-3 text-end font-semibold">{t('dashboard.ranking.leakPct')}</th>
-                <th scope="col" className="px-4 py-3 text-end font-semibold">{t('dashboard.ranking.spend')}</th>
-                <th scope="col" className="px-4 py-3 text-end font-semibold">{t('dashboard.ranking.open')}</th>
-                {compared ? <th scope="col" className="px-4 py-3 text-end font-semibold">{t('dashboard.ranking.trend')}</th> : null}
-                <th scope="col" className="px-4 py-3"><span className="sr-only">{t('dashboard.ranking.action')}</span></th>
+                <th scope="col" className="hidden sm:table-cell px-3 py-3 sm:px-4 text-start font-semibold">{t('dashboard.ranking.rank')}</th>
+                <th scope="col" className="px-3 py-3 sm:px-4 text-start font-semibold">{t('dashboard.ranking.branch')}</th>
+                <th scope="col" className="px-3 py-3 sm:px-4 text-end font-semibold">{t('dashboard.ranking.leak')}</th>
+                <th scope="col" className="px-3 py-3 sm:px-4 text-end font-semibold">{t('dashboard.ranking.leakPct')}</th>
+                <th scope="col" className="hidden sm:table-cell px-3 py-3 sm:px-4 text-end font-semibold">{t('dashboard.ranking.spend')}</th>
+                <th scope="col" className="hidden sm:table-cell px-3 py-3 sm:px-4 text-end font-semibold">{t('dashboard.ranking.open')}</th>
+                {compared ? <th scope="col" className="px-3 py-3 sm:px-4 text-end font-semibold">{t('dashboard.ranking.trend')}</th> : null}
+                <th scope="col" className="hidden sm:table-cell px-3 py-3 sm:px-4"><span className="sr-only">{t('dashboard.ranking.action')}</span></th>
               </tr>
             </thead>
             <tbody>
-              {data.branches.map((b) => {
+              {data.branches.map((b, i) => {
                 const isWorst = b.restaurantId === data.worstBranchId;
                 const isActive = b.restaurantId === data.activeRestaurantId;
                 return (
                   <tr key={b.restaurantId} className="border-b border-line/60 last:border-0 hover:bg-surface-2/50" data-testid="chain-branch-row">
-                    <td className="px-4 py-3 font-mono tabular-nums text-subtle">{formatNumber(b.rank, locale)}</td>
-                    <td className="px-4 py-3">
+                    <td className="hidden sm:table-cell px-3 py-3 sm:px-4 font-mono tabular-nums text-subtle">{formatNumber(b.rank, locale)}</td>
+                    <td className="px-3 py-3 sm:px-4">
                       <span className="font-semibold text-ink" {...originalProps(b.name)}>{b.name}</span>
                       {isActive ? <Badge tone="accent" className="ms-2">{t('dashboard.ranking.active')}</Badge> : null}
+                      {/* Phone: rank / spend / open / action columns are hidden; the action sits here. */}
+                      {isActive ? null : (
+                        <div className="mt-1.5 sm:hidden">
+                          <SwitchBranchButton restaurantId={b.restaurantId} label={t('dashboard.ranking.switchTo')} variant="ghost" testId="chain-switch" />
+                        </div>
+                      )}
                     </td>
-                    <td className={cn('px-4 py-3 text-end font-mono tabular-nums', isWorst ? 'font-bold text-danger' : 'text-ink')}>
-                      {ils(b.leakIls)}
+                    <td className={cn('px-3 py-3 sm:px-4 text-end font-mono tabular-nums', isWorst ? 'font-bold text-danger' : 'text-ink')}>
+                      {ils(rowLeak[i]!)}
                     </td>
-                    <td className="px-4 py-3 text-end font-mono tabular-nums text-muted">{pct(b.leakPct)}</td>
-                    <td className="px-4 py-3 text-end font-mono tabular-nums text-muted">{ils(b.spendIls)}</td>
-                    <td className="px-4 py-3 text-end font-mono tabular-nums text-muted">{formatNumber(b.openDiscrepancies, locale)}</td>
+                    <td className="px-3 py-3 sm:px-4 text-end font-mono tabular-nums text-muted">{pct(b.leakPct)}</td>
+                    <td className="hidden sm:table-cell px-3 py-3 sm:px-4 text-end font-mono tabular-nums text-muted">{ils(rowSpend[i]!)}</td>
+                    <td className="hidden sm:table-cell px-3 py-3 sm:px-4 text-end font-mono tabular-nums text-muted">{formatNumber(b.openDiscrepancies, locale)}</td>
                     {compared ? (
-                      <td className="px-4 py-3 text-end font-mono text-xs tabular-nums" data-testid="chain-branch-delta">
+                      <td className="px-3 py-3 sm:px-4 text-end font-mono text-xs tabular-nums" data-testid="chain-branch-delta">
                         {b.leakDeltaIls === null ? (
                           <span className="text-subtle">—</span>
                         ) : b.leakDeltaIls === 0 ? (
@@ -312,7 +406,7 @@ export default async function ChainPage({
                         )}
                       </td>
                     ) : null}
-                    <td className="px-4 py-3 text-end">
+                    <td className="hidden sm:table-cell px-3 py-3 sm:px-4 text-end">
                       {isActive ? null : (
                         <SwitchBranchButton restaurantId={b.restaurantId} label={t('dashboard.ranking.switchTo')} variant="ghost" testId="chain-switch" />
                       )}
@@ -329,14 +423,14 @@ export default async function ChainPage({
       <section className="mt-10">
         <SectionHeader title={t('dashboard.heatmap.title')} subtitle={t('dashboard.heatmap.subtitle')} />
         <Card padding="md" className="overflow-x-auto">
-          <table className="w-full min-w-[36rem] border-separate border-spacing-1 text-xs" data-testid="chain-heatmap">
+          <table className="w-full border-separate sm:min-w-[36rem] border-spacing-1 text-xs" data-testid="chain-heatmap">
             <thead>
               <tr>
                 <th scope="col" className="px-2 py-1 text-start font-semibold text-subtle">
                   <span className="sr-only">{t('dashboard.ranking.branch')}</span>
                 </th>
-                {data.months.map((m) => (
-                  <th key={m} scope="col" className={cn('px-2 py-1 text-center font-mono font-semibold', inPeriod.has(m) ? 'text-primary' : 'text-subtle')}>
+                {data.months.map((m, i) => (
+                  <th key={m} scope="col" className={cn('px-2 py-1 text-center font-mono font-semibold', inPeriod.has(m) ? 'text-primary' : 'text-subtle', phoneHidden(i))}>
                     {monthLabel(m, locale, 'short')}
                   </th>
                 ))}
@@ -347,10 +441,10 @@ export default async function ChainPage({
                 const name = nameOf.get(row.restaurantId) ?? '';
                 return (
                   <tr key={row.restaurantId}>
-                    <th scope="row" className="max-w-[12rem] truncate px-2 py-1 text-start text-sm font-semibold text-ink">
+                    <th scope="row" className="max-w-[7rem] truncate px-2 py-1 sm:max-w-[12rem] text-start text-sm font-semibold text-ink">
                       <span {...originalProps(name)}>{name}</span>
                     </th>
-                    {row.cells.map((c) => (
+                    {row.cells.map((c, i) => (
                       <td
                         key={c.month}
                         title={t('dashboard.heatmap.cell', {
@@ -363,6 +457,7 @@ export default async function ChainPage({
                           'rounded-lg px-2 py-2.5 text-center font-mono tabular-nums',
                           heatClass(c.leakPct, c.leakIls),
                           inPeriod.has(c.month) && 'ring-1 ring-primary/40',
+                          phoneHidden(i),
                         )}
                       >
                         {c.spendIls === 0 && c.leakIls === 0 ? t('dashboard.heatmap.empty') : pct(c.leakPct)}
@@ -479,14 +574,14 @@ export default async function ChainPage({
           <EmptyState icon={<Undo2 className="h-6 w-6" />} title={t('dashboard.suppliers.empty')} />
         ) : (
           <Card padding="none" className="overflow-x-auto">
-            <table className="w-full min-w-[36rem] text-sm" data-testid="chain-suppliers">
+            <table className="w-full sm:min-w-[36rem] text-sm" data-testid="chain-suppliers">
               <thead>
                 <tr className="border-b border-line text-xs uppercase tracking-wider text-subtle">
-                  <th scope="col" className="px-4 py-3 text-start font-semibold">{t('dashboard.suppliers.supplier')}</th>
-                  <th scope="col" className="px-4 py-3 text-start font-semibold">{t('dashboard.suppliers.branches')}</th>
-                  <th scope="col" className="px-4 py-3 text-end font-semibold">{t('dashboard.suppliers.leak')}</th>
-                  <th scope="col" className="px-4 py-3 text-end font-semibold">{t('dashboard.suppliers.leakPct')}</th>
-                  <th scope="col" className="px-4 py-3 text-end font-semibold">{t('dashboard.suppliers.spend')}</th>
+                  <th scope="col" className="px-3 py-3 sm:px-4 text-start font-semibold">{t('dashboard.suppliers.supplier')}</th>
+                  <th scope="col" className="hidden sm:table-cell px-3 py-3 sm:px-4 text-start font-semibold">{t('dashboard.suppliers.branches')}</th>
+                  <th scope="col" className="px-3 py-3 sm:px-4 text-end font-semibold">{t('dashboard.suppliers.leak')}</th>
+                  <th scope="col" className="px-3 py-3 sm:px-4 text-end font-semibold">{t('dashboard.suppliers.leakPct')}</th>
+                  <th scope="col" className="hidden sm:table-cell px-3 py-3 sm:px-4 text-end font-semibold">{t('dashboard.suppliers.spend')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -494,13 +589,24 @@ export default async function ChainPage({
                   const dn = displayName(s.name ?? '—', s.nameEn, locale);
                   return (
                     <tr key={s.key} className="border-b border-line/60 last:border-0">
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-3 sm:px-4">
                         <span className="block font-semibold text-ink" {...originalProps(dn.primary)}>{dn.primary}</span>
                         {dn.secondary ? (
                           <span className="block text-xs text-subtle" {...originalProps(dn.secondary)}>{dn.secondary}</span>
                         ) : null}
+                        {/* Phone: the branches column is hidden; list them under the name. */}
+                        <div className="mt-1 flex flex-wrap gap-1 sm:hidden">
+                          {s.branchIds.map((id) => {
+                            const n = nameOf.get(id) ?? '';
+                            return (
+                              <Badge key={id} tone="neutral">
+                                <span {...originalProps(n)}>{n}</span>
+                              </Badge>
+                            );
+                          })}
+                        </div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="hidden sm:table-cell px-3 py-3 sm:px-4">
                         <div className="flex flex-wrap gap-1">
                           {s.branchIds.map((id) => {
                             const n = nameOf.get(id) ?? '';
@@ -512,9 +618,9 @@ export default async function ChainPage({
                           })}
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-end font-mono font-semibold tabular-nums text-danger">{ils(s.leakIls)}</td>
-                      <td className="px-4 py-3 text-end font-mono tabular-nums text-muted">{pct(s.leakPct)}</td>
-                      <td className="px-4 py-3 text-end font-mono tabular-nums text-muted">{ils(s.spendIls)}</td>
+                      <td className="px-3 py-3 sm:px-4 text-end font-mono font-semibold tabular-nums text-danger">{ils(s.leakIls)}</td>
+                      <td className="px-3 py-3 sm:px-4 text-end font-mono tabular-nums text-muted">{pct(s.leakPct)}</td>
+                      <td className="hidden sm:table-cell px-3 py-3 sm:px-4 text-end font-mono tabular-nums text-muted">{ils(s.spendIls)}</td>
                     </tr>
                   );
                 })}

@@ -339,3 +339,26 @@ Risks:
     - MEDIUM: §7 password loss → fixed;
     - LOW: `when` reservation → orchestrator ask;
     - LOW: bucket 10 MiB vs the app's 10.5 MB cap → 11 MiB.
+
+### Cross-QA (S1): S5 wave-1 integrations (PR #50 `claude/client-ready-ops-ui` @ aea9f23)
+
+Read-only review: nothing was pushed to S5's branch. One refuter subagent reviewed the accounting/POS code; I ran the DB, numbers and UI checks.
+
+| Area | Verdict | Evidence |
+|---|---|---|
+| 0058 migration | ✅ with one MEDIUM | Additive. RLS and the tenant policy live inside the migration (rls/0002 untouched). Fresh migrate → provision-rls → check-rls → `doctor --strict` gives 0/0. The db suite passes 73/73, including the Supabase emulation (main's 37 files + appended) and the 0018→0058 upgrade. `supabase-sync --check` is up to date. |
+| 0058 same-tenant FK | ❌ MEDIUM | `pos_sales.import_id` is a single-column FK. Probe as `restomatch_app` with tenant A's GUC: inserting a row that points at B's import **succeeded**. When B then deleted its import, the cascade **deleted A's row**. The API always creates the import id server-side, so the app path is not exploitable; this is a defense-in-depth gap. Fix: `UNIQUE (id, restaurant_id)` on `pos_sales_imports` plus a composite FK `(import_id, restaurant_id)`, the 0021/0048 pattern. The doctor now reports such rows (`pos_sale.import same tenant`). |
+| Accounting: exactness | ✅ | On the seeded demo, Hashavshevet, Priority and Rivhit each export 24 invoices. Σ excl. VAT is **₪28,388.97** (the hero's ₪28,389), VAT ₪5,097.37, incl. ₪33,486.34. Every row balances, 0 are skipped, lines end in CRLF. The refuter's 3,000 random invoices, including 1e9 agorot, VAT 0/0.17/0.18 and credit notes, were exact in all 3 files. No float math. |
+| Accounting: VAT-less invoice | ⚠️ MEDIUM | `routers/integrations.ts:234`: an invoice with only `totalInclVat` set is posted as excl. = incl., VAT 0. The file balances, but the input VAT is lost. Skip and count it, or derive VAT from the rate and mark it. |
+| Accounting: formula injection | ❌ MEDIUM for TSV | Rivhit CSV neutralises cells starting with `= + - @`, tab or CR. The Hashavshevet and Priority TSVs only strip tab/CR/LF (`common.ts:39 cell()`), so a supplier name like `=HYPERLINK(…)` is written raw. Apply the same guard there. |
+| Accounting: encoding | ✅ / ⚠️ LOW | Priority UTF-16LE with BOM and Rivhit UTF-8 with BOM both round-trip exactly. Hashavshevet in Windows-1255 keeps Hebrew, ״ and –. Arabic and emoji silently become `?`; it should warn. Truncation can split a surrogate pair. |
+| POS: re-import | ✅ / LOW | Live probe: importing 1–2 Oct, then a file with only 2 Oct, left 1 Oct untouched and replaced 2 Oct. The delete is scoped by restaurant and file days inside one transaction. LOW: a day whose rows were *all* rejected keeps stale data, and the import goes ahead despite issues. |
+| POS: parser | ⚠️ MEDIUM | `"1.234"` → ₪1.23 (European thousands); qty `"1,250"` → 1,250 units while `"1,5"` → 1.5; `"(-5)"` / `"-5-"` → +5. Line numbers in issue reports are wrong after blank or multi-line rows (`csv.ts:159`). `קוד קופאי` (cashier code) is taken as the item code; `Gross Total` is taken as net. Row and byte limits are enforced server-side, and impossible dates are rejected. |
+| Flag off | ✅ / LOW | API: every procedure except `status` → `FORBIDDEN FEATURE_DISABLED:integrations` (live probe). UI: the hub renders the 404 page (Next streams it with HTTP 200), and the exports page shows no accounting cards. Tests assert only 2 of the 9 gated procedures. |
+| Prod build he + en | ✅ | `next build` green. Owner click-through of `/dashboard/integrations`, `/exports` and `/catalog`: he (`rtl`) and en (`ltr`) all 200 with 0 page errors. |
+| API suite | ✅ | 579/579, including `pos-rls.attack`, the cross-tenant COVERAGE and the golden-file tests. |
+
+**Merge verdict:** OK for the demo behind the flag (off by default). Before any real customer turns it on, fix:
+- the two MEDIUM safety items: TSV formula guard and the composite FK on `pos_sales`;
+- the POS number ambiguity.
+The rest can follow.

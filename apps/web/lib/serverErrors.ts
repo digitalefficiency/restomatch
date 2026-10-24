@@ -34,6 +34,7 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   'auth.unauthorized': 'unauthorized',
   'auth.forbidden': 'forbidden',
   'input.invalid': 'invalidInput',
+  'invoice.numberTaken': 'invoiceNumberTaken',
 };
 
 /**
