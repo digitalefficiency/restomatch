@@ -24,8 +24,10 @@ export async function onRequestError(
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
   try {
     const { captureException } = await import('@restomatch/observability');
+    // routePath is the pattern (/api/ingest/whatsapp/[token]); the concrete
+    // request.path can carry capability secrets (the WhatsApp channel token,
+    // ?t= result links, reset/invite tokens), so it never leaves the process.
     captureException(error, {
-      path: request.path,
       method: request.method,
       routePath: context.routePath,
       routeType: context.routeType,

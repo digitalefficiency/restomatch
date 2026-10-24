@@ -15,6 +15,7 @@ export {
   scrubPii,
   scrubSentryEvent,
   redactString,
+  redactUrl,
   initSentryFromEnv,
   resetSentryClientForTests,
   type SentryClient,

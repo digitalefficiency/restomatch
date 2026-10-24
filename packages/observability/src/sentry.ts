@@ -30,9 +30,31 @@ const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 // Phone-ish runs of 7+ digits with optional separators / leading +.
 const PHONE_RE = /(?<![\w.])\+?\d[\d\s().-]{6,}\d(?![\w.])/g;
 
-/** Redact PII-shaped substrings inside a free-text string. */
+// Capability secrets that live in URLs: the per-restaurant ingest channel
+// tokens (/api/ingest/whatsapp/wa_<hex>, inv_<hex>@…), signed leak-check result
+// links (<uuid>.<exp>.<sig>), and any token-ish query parameter (reset /
+// invite / magic-link tokens, ?t=…).
+const INGEST_TOKEN_RE = /\b(?:wa|inv)_[0-9a-f]{16,}\b/gi;
+const SIGNED_LINK_RE = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.\d{1,12}\.[A-Za-z0-9_-]{16,}/gi;
+const SECRET_QUERY_RE = /((?:^|[?&])(?:t|token|code|key|sig|signature|secret|otp|invite|reset)=)[^&#\s]+/gim;
+
+/** Redact PII-shaped and capability-secret substrings inside a free-text string. */
 export function redactString(input: string): string {
-  return input.replace(EMAIL_RE, '[redacted-email]').replace(PHONE_RE, '[redacted-phone]');
+  return input
+    .replace(SECRET_QUERY_RE, '$1[redacted]')
+    .replace(SIGNED_LINK_RE, '[redacted-link]')
+    .replace(INGEST_TOKEN_RE, '[redacted-token]')
+    .replace(EMAIL_RE, '[redacted-email]')
+    .replace(PHONE_RE, '[redacted-phone]');
+}
+
+/**
+ * A URL or path safe for the error pipeline: no query string or fragment at
+ * all (they carry tokens), and secret-looking path segments masked.
+ */
+export function redactUrl(input: string): string {
+  const cut = input.search(/[?#]/);
+  return redactString(cut === -1 ? input : input.slice(0, cut));
 }
 
 /**
@@ -71,9 +93,14 @@ export function scrubSentryEvent<T extends Record<string, unknown>>(event: T): T
     if ('data' in req) req.data = scrubPii(req.data);
     if ('cookies' in req) req.cookies = REDACTED;
     if ('headers' in req) req.headers = scrubPii(req.headers);
+    // Query strings carry capability tokens (reset/invite links, ?t=…):
+    // token-ish params are masked along with emails/phones.
     if ('query_string' in req && typeof req.query_string === 'string') {
       req.query_string = redactString(req.query_string);
+    } else if ('query_string' in req && req.query_string) {
+      req.query_string = REDACTED;
     }
+    if ('url' in req && typeof req.url === 'string') req.url = redactUrl(req.url);
     e.request = req;
   }
   if (e.extra) e.extra = scrubPii(e.extra);
