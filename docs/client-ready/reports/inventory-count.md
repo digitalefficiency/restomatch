@@ -79,7 +79,7 @@ New suites (all green, together with COVERAGE / cross-tenant):
 | `inventory-router` | 12 |
 | `inventory-fixes` | 6 |
 | `inventory-must-haves` | 5 |
-| `inventory-review` | 8 |
+| `inventory-review` | 9 |
 | `inventory-rls.attack` | 7 |
 | web `test/inventory-ui` | 5 |
 
@@ -106,6 +106,7 @@ Smaller items were also fixed: the date field, the decimal comma, the non-food p
   - keyboard next-field order on the count;
   - focus handling in the confirm step;
   - cancel for the sales edit.
+  - unbilled delivery notes are an estimate at PO prices. When the invoice arrives at a different price, the difference lands in the month the invoice is booked. A refinement could book it back to the receipt month.
 
 - **Phase 2:** par levels → suggested order quantity = par − on hand − open PO qty, prefilled in the order wizard.
 - **Credits:** a real "credit note received" document type, so "received" isn't inferred from the claim status.

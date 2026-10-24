@@ -3,12 +3,16 @@ import {
   createDb,
   discrepancies,
   eq,
+  goodsReceipts,
+  grLines,
   inventoryCounts,
   invoiceLines,
   invoices,
   matchRuns,
+  poLines,
   priceHistory,
   products,
+  purchaseOrders,
   restaurants,
   testDbUrl,
   type RestaurantSettings,
@@ -133,6 +137,27 @@ describe('purchases', () => {
     await invoice('N-1', 5, null, { totalInclVat: '1170.00', vatAmount: '170.00' });
     const p = await purchasesInPeriod(db, T.restaurantId, TZ, ymdAgo(10), ymdAgo(0));
     expect(p).toMatchObject({ invoicesAgorot: 100_000, purchasesAgorot: 100_000, missingTotalCount: 0 });
+  });
+});
+
+describe('delivery notes on receipt dates: every note exactly once across periods', () => {
+  it('a note received in month N and billed on a consolidated invoice in N+1 is added in N and not counted again in N+1', async () => {
+    const [po] = await db.insert(purchaseOrders).values({ restaurantId: T.restaurantId, supplierId: T.supplierId, status: 'closed' }).returning();
+    const [pl] = await db.insert(poLines).values({ poId: po!.id, productId: beef, rawDescription: 'בקר', qtyOrdered: '10', unit: 'ק״ג', unitPriceExpected: '100.0000' }).returning();
+    const [gr] = await db.insert(goodsReceipts).values({ restaurantId: T.restaurantId, poId: po!.id, receivedAt: atAgo(25), status: 'completed', notes: 'ת.מ. 5501' }).returning();
+    await db.insert(grLines).values({ grId: gr!.id, poLineId: pl!.id, productId: beef, qtyReceived: '10' });
+    // Month N = (−40, −20]: the note arrived, no invoice yet → added at PO prices (₪1,000).
+    const n = await purchasesInPeriod(db, T.restaurantId, TZ, ymdAgo(40), ymdAgo(20));
+    expect(n).toMatchObject({ invoicesAgorot: 0, accruedNotes: 1, accruedAgorot: 100_000, reversedAgorot: 0, purchasesAgorot: 100_000 });
+    // Month N+1 = (−20, 0]: the consolidated invoice bills it (₪1,050 — a different price) → the ₪1,000 is taken back.
+    await invoice('GD-M-1', 5, '1050.00', { ocrPayload: { raw: { deliveryNotes: [{ number: '5501' }] } } as never });
+    const n1 = await purchasesInPeriod(db, T.restaurantId, TZ, ymdAgo(20), ymdAgo(0));
+    expect(n1).toMatchObject({ invoicesAgorot: 105_000, accruedNotes: 0, accruedAgorot: 0, reversedAgorot: 100_000, purchasesAgorot: 5_000 });
+    // Across both months the goods count once, at the billed price: ₪1,000 + ₪50 = ₪1,050.
+    expect(n.purchasesAgorot + n1.purchasesAgorot).toBe(105_000);
+    // Re-reading month N after the invoice exists still adds the note once (it was unbilled at N's close).
+    expect((await purchasesInPeriod(db, T.restaurantId, TZ, ymdAgo(40), ymdAgo(20))).accruedAgorot).toBe(100_000);
+    await db.delete(purchaseOrders).where(eq(purchaseOrders.id, po!.id)).catch(() => undefined);
   });
 });
 

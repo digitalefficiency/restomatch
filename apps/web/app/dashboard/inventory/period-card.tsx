@@ -203,17 +203,24 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
             dups: ils(p.purchases.duplicatesAgorot, locale, 0),
           })}
           {p.purchases.missingTotalCount > 0 ? <> {t('period.missingTotal', { count: p.purchases.missingTotalCount })}</> : null}
-          {p.purchases.accruedNotes > 0 || p.purchases.reversedAgorot > 0 ? (
-            <>
-              {' '}
-              {t('period.receiptBasis', {
-                count: p.purchases.accruedNotes,
-                accrued: ils(p.purchases.accruedAgorot, locale, 0),
-                reversed: ils(p.purchases.reversedAgorot, locale, 0),
-              })}
-            </>
-          ) : null}
         </p>
+      ) : null}
+      {!compact && (p.purchases.accruedAgorot > 0 || p.purchases.reversedAgorot > 0) ? (
+        <div className="mt-2 text-xs text-muted" data-testid="receipt-basis">
+          <p className="font-semibold">{t('period.receiptBasis')}</p>
+          <ul className="mt-0.5 space-y-0.5">
+            {p.purchases.accruedAgorot > 0 ? (
+              <li>
+                <bdi dir="ltr" className="tabular-nums">+ {ils(p.purchases.accruedAgorot, locale)}</bdi> · {t('period.accruedLine', { count: p.purchases.accruedNotes })}
+              </li>
+            ) : null}
+            {p.purchases.reversedAgorot > 0 ? (
+              <li>
+                <bdi dir="ltr" className="tabular-nums">− {ils(p.purchases.reversedAgorot, locale)}</bdi> · {t('period.reversedLine')}
+              </li>
+            ) : null}
+          </ul>
+        </div>
       ) : null}
 
       <div className="mt-3 border-t border-line pt-3 text-sm">
