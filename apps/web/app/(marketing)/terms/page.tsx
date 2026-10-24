@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { marketing } from '@/lib/i18n/messages/marketing';
 import { getT } from '@/lib/i18n/server';
-import { alternatesFor, metadataBase } from '../_components/seo';
+import { alternatesFor, metadataBase, socialFor } from '../_components/seo';
 import { LegalShell, LegalSection, LegalClause } from '../_components/LegalShell';
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -11,6 +11,11 @@ export async function generateMetadata(): Promise<Metadata> {
     description: t('legal.terms.metaDescription'),
     metadataBase,
     alternates: alternatesFor('/terms', t.locale),
+    ...socialFor(t.locale, {
+      title: t('legal.terms.metaTitle'),
+      description: t('legal.terms.metaDescription'),
+      path: '/terms',
+    }),
   };
 }
 
