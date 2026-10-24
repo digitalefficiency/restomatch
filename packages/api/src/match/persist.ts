@@ -334,8 +334,8 @@ export async function persistMatchRun(
       poLineId: d.poLineId ?? null,
       productId: d.productId,
       deltaAmount: d.deltaAmount,
-      expected: d.expected ?? null,
-      actual: d.actual ?? null,
+      expected: d.type === 'DATE_ANOMALY' ? null : (d.expected ?? null),
+      actual: d.type === 'DATE_ANOMALY' ? null : (d.actual ?? null),
     })),
   );
   for (const [index, d] of result.discrepancies.entries()) {
@@ -371,8 +371,10 @@ export async function persistMatchRun(
       poLineId: d.poLineId ?? null,
       grLineId: d.grLineId ?? null,
       invoiceLineId: d.invoiceLineId ?? null,
-      expectedValue: d.expected?.toString() ?? null,
-      actualValue: d.actual?.toString() ?? null,
+      // DATE_ANOMALY carries epoch-ms dates in expected/actual (engine.ts, immutable)
+      // — far past NUMERIC(12,4); its dates live in the message. Store no number.
+      expectedValue: d.type === 'DATE_ANOMALY' ? null : (d.expected?.toString() ?? null),
+      actualValue: d.type === 'DATE_ANOMALY' ? null : (d.actual?.toString() ?? null),
       deltaAmount: d.deltaAmount.toString(),
       toleranceUsed: d.toleranceUsed,
       requiresRole: prior?.requiresRole ?? decision.requiredRole,

@@ -80,10 +80,11 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * `pinnedPoId` (a re-match): the PO the invoice was already matched against. It
  * is used whatever its status — by then it is usually `received`/`closed`, which
  * discovery skips, and re-matching against "no PO" would flag the whole invoice
- * as UNORDERED_ARRIVAL. Ignored (discovery runs) if it is gone, belongs to
- * another supplier, or no longer fits the ±PO_MATCH_WINDOW_DAYS window around
- * the invoice date — i.e. the person corrected a misread supplier or date, so
- * the invoice must be free to move to the right PO.
+ * as UNORDERED_ARRIVAL. It is one more discovery candidate (nearest wins,
+ * ties to it), dropped when gone, cancelled, of another supplier, or outside the
+ * ±PO_MATCH_WINDOW_DAYS window around the invoice date — so after a corrected
+ * date or supplier the invoice is free to move to the right PO, and a re-match
+ * picks what a fresh match would.
  */
 export async function buildMatchInputForInvoice(
   db: Database,
@@ -174,28 +175,43 @@ export async function buildMatchInputForInvoice(
   // The PO window: from the start of the local day PO_MATCH_WINDOW_DAYS before
   // the invoice date to the end of the day PO_MATCH_WINDOW_DAYS after it —
   // aligned to the restaurant's calendar (DST-safe) instead of raw getTime() ±
-  // 7*DAY, which drifts by the UTC offset near midnight. Both the pin and
-  // discovery honour it (the engine's DATE_ANOMALY never fires inside it).
+  // 7*DAY, which drifts by the UTC offset near midnight. (Being local-day
+  // aligned, it reaches up to ~8×24h each side — so a candidate can be past the
+  // engine's 7×24h DATE_ANOMALY threshold; persistMatchRun stores that finding
+  // without its epoch-ms values.)
   const lo = startOfDayInTz(addCalendarDaysInTz(invoiceDate, -PO_MATCH_WINDOW_DAYS, tz), tz);
   const hi = endOfDayInTz(addCalendarDaysInTz(invoiceDate, PO_MATCH_WINDOW_DAYS, tz), tz);
   const inWindow = (at: Date | null) => at == null || (at >= lo && at <= hi);
-  if (options.pinnedPoId) {
-    const [pinned] = await db
-      .select({
-        id: purchaseOrders.id,
-        supplierId: purchaseOrders.supplierId,
-        expectedDeliveryAt: purchaseOrders.expectedDeliveryAt,
-        vatRate: purchaseOrders.vatRate,
-      })
-      .from(purchaseOrders)
-      .where(and(eq(purchaseOrders.id, options.pinnedPoId), eq(purchaseOrders.restaurantId, restaurantId)))
-      .limit(1);
-    if (pinned && (!inv.supplierId || pinned.supplierId === inv.supplierId) && inWindow(pinned.expectedDeliveryAt)) {
-      po = { id: pinned.id, expectedDeliveryAt: pinned.expectedDeliveryAt, vatRate: pinned.vatRate };
+  if (inv.supplierId) {
+    const candidates: PoCandidate[] = [];
+    // A re-match's pinned PO is ONE MORE candidate, never a short-circuit: it
+    // skips the status filter (by then it is usually closed / received, which
+    // discovery skips) but is dropped when cancelled, from another supplier or
+    // out of the window. Listed first, so a tie goes to it (pickNearest keeps the
+    // first of equals); a closer open PO still wins — a re-match picks what a
+    // fresh match would, plus the PO it already had.
+    if (options.pinnedPoId) {
+      const [pinned] = await db
+        .select({
+          id: purchaseOrders.id,
+          supplierId: purchaseOrders.supplierId,
+          status: purchaseOrders.status,
+          expectedDeliveryAt: purchaseOrders.expectedDeliveryAt,
+          vatRate: purchaseOrders.vatRate,
+        })
+        .from(purchaseOrders)
+        .where(and(eq(purchaseOrders.id, options.pinnedPoId), eq(purchaseOrders.restaurantId, restaurantId)))
+        .limit(1);
+      if (
+        pinned &&
+        pinned.status !== 'cancelled' &&
+        pinned.supplierId === inv.supplierId &&
+        inWindow(pinned.expectedDeliveryAt)
+      ) {
+        candidates.push({ id: pinned.id, expectedDeliveryAt: pinned.expectedDeliveryAt, vatRate: pinned.vatRate });
+      }
     }
-  }
-  if (!po && inv.supplierId) {
-    const candidates = await db
+    const open = await db
       .select({
         id: purchaseOrders.id,
         expectedDeliveryAt: purchaseOrders.expectedDeliveryAt,
@@ -214,6 +230,7 @@ export async function buildMatchInputForInvoice(
         ),
       )
       .orderBy(asc(purchaseOrders.expectedDeliveryAt));
+    for (const c of open) if (!candidates.some((x) => x.id === c.id)) candidates.push(c);
     po = pickNearest(candidates, invoiceDate, tz);
   }
 
