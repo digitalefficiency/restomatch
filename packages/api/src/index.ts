@@ -21,6 +21,7 @@ import { productsRouter } from './routers/products';
 import { teamRouter } from './routers/team';
 import { chainRouter } from './routers/chain';
 import { consolidatedRouter } from './routers/consolidated';
+import { payRunRouter } from './routers/payRun';
 
 export const appRouter = router({
   owner: ownerRouter,
@@ -43,6 +44,7 @@ export const appRouter = router({
   products: productsRouter,
   chain: chainRouter,
   consolidated: consolidatedRouter,
+  payRun: payRunRouter,
   team: teamRouter,
   dsr: dsrRouter,
 });
@@ -211,3 +213,5 @@ export {
   type ChainOverviewResult,
 } from './routers/chain';
 export { NOT_BILLING_OWNER } from './routers/chain';
+export { CLAIMABLE_STATUSES, claimableLines, sumClaims, vatBasisOf, type ClaimLine, type VatBasis } from './lib/claims';
+export type { PayRunInvoice, PayRunResult, PayRunStatus, PayRunSupplier, PayRunClaim } from './routers/payRun';
