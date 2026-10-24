@@ -135,6 +135,11 @@ async function session(email, viewport, locale) {
 async function shot(page, path, name, { full = false, wait = 1500, rects } = {}) {
   await page.goto(`${BASE}${path}`, { waitUntil: 'networkidle', timeout: 120000 });
   await page.waitForTimeout(wait);
+  // the "engine unavailable" banner means the worker is down — never ship that frame
+  const body = await page.evaluate('document.body.innerText');
+  if (/processing engine is unavailable|מנוע העיבוד לא זמין/.test(body)) {
+    throw new Error(`worker-down banner on ${path} — start the worker (apps/worker) and re-run`);
+  }
   // hide Next dev indicator + cookie banners
   await page.addStyleTag({ content: 'nextjs-portal,[data-nextjs-toast],#__next-build-watcher{display:none!important}' });
   await page.screenshot({ path: `${OUT}/${name}.png`, fullPage: full });
