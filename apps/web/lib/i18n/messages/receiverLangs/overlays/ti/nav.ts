@@ -20,6 +20,7 @@ export const nav: Shape<typeof he> = {
     contracts: 'ውዕላትን መጠንቀቕታታትን',
     orders: 'ትእዛዛት',
     recipes: 'ዋጋ መግቢ',
+    inventory: 'ቆጸራ ንብረት',
     exports: 'ምውጻእ ፋይላት',
     team: 'ጉጅለ',
     chain: 'ሰንሰለት',

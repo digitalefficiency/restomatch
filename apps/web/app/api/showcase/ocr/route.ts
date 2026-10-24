@@ -12,6 +12,7 @@ import postgres from 'postgres';
 import { clientIpFromHeaders, isOriginAllowed, showcaseScanFetchUrl } from '@restomatch/api';
 import { ClaudeVision } from '@restomatch/ocr';
 import { enforceOcrLimit, trustedProxyHops } from '@/lib/rateLimit';
+import { ownerDbUrl } from '@/lib/env';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -46,7 +47,9 @@ export interface ContactAlert {
 let _sql: ReturnType<typeof postgres> | null = null;
 function db() {
   if (!_sql) {
-    _sql = postgres(process.env.DATABASE_URL!, { ssl: 'require', max: 1, prepare: false });
+    const url = ownerDbUrl();
+    if (!url) throw new Error('[showcase/ocr] no usable owner database URL (see the [env] boot line)');
+    _sql = postgres(url, { ssl: 'require', max: 1, prepare: false });
   }
   return _sql;
 }

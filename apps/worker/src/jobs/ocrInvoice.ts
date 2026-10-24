@@ -1,4 +1,4 @@
-import { fillEnglishNames, meterOcrScan, receiptState } from '@restomatch/api';
+import { fillEnglishNames, meterOcrScan, receiptState, scanReceiptToStamp, withScanGrId } from '@restomatch/api';
 import { matchProductTopN, MockEmbeddingProvider } from '@restomatch/catalog';
 import { HELD_FOR_RECEIPTS_KEY, receiptsBeingCountedForScan } from '@restomatch/charts';
 import { and, eq, invoiceLines, invoices, ne, restaurants, sql, type Database } from '@restomatch/db';
@@ -118,6 +118,9 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
     });
 
     const r = result.reconciled;
+    // The receipt this photo was taken on — so a receipt submit claims exactly
+    // its own scans (receiving/matchTriggers), never a same-day sibling's.
+    const scanGrId = await scanReceiptToStamp(db, job.data.restaurantId, job.data.grId, invoice.supplierId);
     const { duplicateOf } = await writeOcrHeader(
       db,
       {
@@ -134,7 +137,7 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
         allocationNumber: r.allocationNumber ?? null,
         ocrPayload: {
           provider: 'reconciled',
-          raw: result,
+          raw: withScanGrId(result, scanGrId),
           reconciledAt: new Date().toISOString(),
         },
         ocrConfidence: result.confidence.toString(),

@@ -50,7 +50,11 @@ export type AuditAction =
   | 'discrepancy.escalated'
   // Chain / branches (chain router)
   | 'chain.branch_added'
-  | 'chain.branch_renamed';
+  | 'chain.branch_renamed'
+  // Inventory counts (inventory router, flag inventoryCount)
+  | 'inventory.count_closed'
+  | 'inventory.count_discarded'
+  | 'inventory.line_amended';
 
 export interface AuditEntry {
   /** Tenant the action belongs to. On a tenant connection this must equal the GUC. */

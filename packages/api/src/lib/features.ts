@@ -43,6 +43,8 @@ export const FEATURE_KEYS = [
   'vatAtRisk',
   'supplierLeakCard',
   'supplierLedger',
+  // S17: inventory counting (ספירת מלאי) → actual food cost per period.
+  'inventoryCount',
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];

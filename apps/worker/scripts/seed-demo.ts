@@ -653,12 +653,18 @@ async function main() {
   const eggs = productByEn.get('Eggs L (tray of 30)');
   let consolidatedCount = 0;
   if (galilee && milk && eggs) {
+    // The restaurant's usual price for the product: the most frequent PO price
+    // (ties → the lower). A bare LIMIT 1 returned whichever row came first
+    // physically — 6.37 instead of 6.40 on a database with row churn, which
+    // turned the ₪36.00 cross-match beat into ₪36.72 and failed check:demo.
     const lastPrice = async (productId: string, fallback: number) => {
       const [row] = await db
         .select({ p: poLines.unitPriceExpected })
         .from(poLines)
         .innerJoin(purchaseOrders, eq(purchaseOrders.id, poLines.poId))
         .where(and(eq(purchaseOrders.restaurantId, restaurantId), eq(poLines.productId, productId)))
+        .groupBy(poLines.unitPriceExpected)
+        .orderBy(sql`count(*) desc`, asc(poLines.unitPriceExpected))
         .limit(1);
       return row?.p != null ? Number(row.p) : fallback;
     };

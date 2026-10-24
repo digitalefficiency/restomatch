@@ -20,6 +20,7 @@ export const nav: Shape<typeof he> = {
     contracts: 'สัญญาและการแจ้งเตือน',
     orders: 'ใบสั่งซื้อ',
     recipes: 'ต้นทุนอาหาร',
+    inventory: 'นับสต็อก',
     exports: 'ส่งออกข้อมูล',
     team: 'ทีม',
     chain: 'เครือร้าน',

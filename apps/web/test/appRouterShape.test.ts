@@ -29,6 +29,7 @@ const ROUTER_KEYS = [
   'growth',
   'ingest',
   'integrations',
+  'inventory',
   'leads',
   'leakCheck',
   'mapping',

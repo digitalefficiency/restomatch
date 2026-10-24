@@ -1170,6 +1170,78 @@ export const recipeItems = pgTable(
 );
 
 /* ──────────────────────────────────────────────────────────────────────────
+ * Inventory counts (S17, flag `inventoryCount`, migration 0070)
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** A stock count (ספירת מלאי). Draft while counting; completed = values snapshotted. */
+export const inventoryCounts = pgTable(
+  'inventory_counts',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    /** Local calendar date of the count (YYYY-MM-DD). */
+    countDate: date('count_date', { mode: 'string' }).notNull(),
+    /** 'draft' | 'completed' (CHECK in 0070; one draft per restaurant). */
+    status: varchar('status', { length: 16 }).notNull().default('draft'),
+    countedBy: uuid('counted_by').references(() => users.id, { onDelete: 'set null' }),
+    notes: text('notes'),
+    /** Manual food sales ex-VAT for the period ENDING at this count (when there is no POS). */
+    foodSalesExVat: numeric('food_sales_ex_vat', { precision: 12, scale: 2 }),
+    /** Snapshot at completion: Σ priced line values, integer agorot. */
+    totalValueAgorot: bigint('total_value_agorot', { mode: 'number' }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('inventory_counts_one_draft_idx').on(t.restaurantId).where(sql`${t.status} = 'draft'`),
+    index('inventory_counts_restaurant_date_idx').on(t.restaurantId, t.countDate),
+    index('inventory_counts_counted_by_idx').on(t.countedBy),
+  ],
+);
+
+/** The paid price behind a counted line: the invoice it came from, so the owner recognises it. */
+export interface InventoryPriceSource {
+  observedAt: string;
+  invoiceId: string | null;
+  invoiceNumber: string | null;
+  invoiceDate: string | null;
+  supplierName: string | null;
+}
+
+/** One product on a count. qty NULL = not counted yet; unit_cost/value_agorot/price_source = completion snapshot. */
+export const inventoryCountLines = pgTable(
+  'inventory_count_lines',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    countId: uuid('count_id').notNull(),
+    productId: uuid('product_id').notNull(),
+    /** 'fridge' | 'freezer' | 'dry' | 'produce' | 'bar' | 'other' (CHECK in 0070). */
+    storageArea: varchar('storage_area', { length: 16 }).notNull().default('dry'),
+    qty: numeric('qty', { precision: 12, scale: 4 }),
+    unit: varchar('unit', { length: 32 }).notNull(),
+    /** ₪ ex-VAT per `unit` at completion; NULL = no known price (excluded from the value). */
+    unitCost: numeric('unit_cost', { precision: 12, scale: 4 }),
+    valueAgorot: bigint('value_agorot', { mode: 'number' }),
+    /** Where the snapshot price came from (frozen at completion). */
+    priceSource: jsonb('price_source').$type<InventoryPriceSource | null>(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('inventory_count_lines_count_product_idx').on(t.countId, t.productId),
+    index('inventory_count_lines_count_idx').on(t.countId, t.restaurantId),
+    index('inventory_count_lines_product_idx').on(t.productId, t.restaurantId),
+    index('inventory_count_lines_restaurant_idx').on(t.restaurantId),
+  ],
+);
+
+/* ──────────────────────────────────────────────────────────────────────────
  * Approvals + audit
  * ────────────────────────────────────────────────────────────────────────── */
 

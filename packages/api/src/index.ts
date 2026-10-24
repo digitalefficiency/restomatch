@@ -21,6 +21,7 @@ import { matchRouter } from './routers/match';
 import { mappingRouter } from './routers/mapping';
 import { productsRouter } from './routers/products';
 import { recipesRouter } from './routers/recipes';
+import { inventoryRouter } from './routers/inventory';
 import { teamRouter } from './routers/team';
 import { chainRouter } from './routers/chain';
 import { consolidatedRouter } from './routers/consolidated';
@@ -55,6 +56,7 @@ export const appRouter = router({
   mapping: mappingRouter,
   products: productsRouter,
   recipes: recipesRouter,
+  inventory: inventoryRouter,
   chain: chainRouter,
   integrations: integrationsRouter,
   consolidated: consolidatedRouter,
@@ -161,10 +163,14 @@ export { buildMatchInputForInvoice, type BuiltMatchInput } from './match/buildMa
 export {
   invoicesWaitingOnReceipt,
   lockReceipt,
+  readScanGrId,
   receiptState,
   receiptStillOpen,
   rematchHoldReason,
+  scanOwnerReceipt,
+  scanReceiptToStamp,
   scannedInvoicesForReceipt,
+  withScanGrId,
 } from './receiving/matchTriggers';
 export { backfillPriceHistory, writePriceHistoryForInvoice } from './match/priceHistory';
 export { loadPriorDecisions, matchActivitySummary, persistMatchRun, type PersistMatchArgs, type PersistMatchResult } from './match/persist';
