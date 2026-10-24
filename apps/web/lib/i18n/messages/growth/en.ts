@@ -49,4 +49,41 @@ export const en: Shape<typeof he> = {
       generic: 'Something went wrong. Please try again.',
     },
   },
+  compare: {
+    eyebrow: 'Already have an ordering system?',
+    title: 'Your ordering system orders. RestoMatch checks.',
+    lead: 'RestoMatch doesn’t replace your ordering or inventory system — it is the control layer that comes after it: what arrived, what was billed, and what to stop before you pay.',
+    colStep: 'Step',
+    colOrdering: 'Ordering / inventory system',
+    colRestomatch: 'RestoMatch',
+    rows: {
+      number: {
+        step: 'The number you get',
+        ordering: 'Quantities, stock and purchasing costs',
+        restomatch: 'How much money leaked this month — one number in shekels, every shekel linked to an invoice line',
+      },
+      dock: {
+        step: 'At the back door',
+        ordering: 'The order goes out to the supplier',
+        restomatch: 'What actually arrived is checked against the order, line by line',
+      },
+      invoice: {
+        step: 'The invoice',
+        ordering: 'Recorded for stock and costs',
+        restomatch: 'Checked for 12 kinds of discrepancy — price, quantity, units, unordered items, duplicate invoices and more',
+      },
+      payment: {
+        step: 'Before payment',
+        ordering: 'The invoice moves on to your usual payment process',
+        restomatch: 'Discrepancies go to an approval queue before payment — you decide before the money leaves',
+      },
+      supplier: {
+        step: 'With the supplier',
+        ordering: 'Following up with the supplier is done separately',
+        restomatch: 'A ready credit-request letter for each supplier, with the lines and amounts',
+      },
+    },
+    note: 'The first column describes the usual job of an ordering and inventory system; some systems do more. RestoMatch works alongside them, not instead of them.',
+    keepOrdering: 'Keep ordering where you already do.',
+  },
 };
