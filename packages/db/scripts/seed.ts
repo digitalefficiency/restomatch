@@ -12,8 +12,14 @@
  *   DEMO_TODAY     YYYY-MM-DD to treat as "today" (default: today in Asia/Jerusalem) —
  *                  seed the evening before a demo with tomorrow's date
  *
- * ⛔ DELETES every restaurant, user and their data (TRUNCATE … CASCADE). Refuses
- * any non-local database (src/seedGuard.ts).
+ *   SEED_SCOPE     unset → ⛔ DELETES every restaurant, user and their data (TRUNCATE … CASCADE).
+ *                  'demo' → deletes ONLY the demo tenants (src/demoTenants.ts: refuses if they are
+ *                  mixed with real data) and leaves every other tenant untouched — what the
+ *                  production reseed uses (docs/client-ready/RESEED-PROD.md).
+ *   DEMO_PLATFORM_ADMIN  '1' makes the demo owner a platform admin (/admin). Default: yes on a
+ *                  local DB, NO on a remote one — on a real project /admin shows every tenant.
+ *
+ * Refuses any non-local database unless SEED_ALLOW_REMOTE_HOST names it (src/seedGuard.ts).
  */
 import { hashPassword } from '@restomatch/crypto';
 import postgres from 'postgres';
@@ -35,7 +41,8 @@ import {
   type DeliverySchedule,
   type RestaurantSettings,
 } from '../src/schema';
-import { assertSeedTarget } from '../src/seedGuard';
+import { deleteDemoTenants } from '../src/demoTenants';
+import { assertSeedTarget, isLocalDbUrl } from '../src/seedGuard';
 
 export const DEFAULT_DEMO_PASSWORD = 'RestoMatch-Demo-2026!';
 const TZ = 'Asia/Jerusalem';
@@ -210,6 +217,13 @@ async function main() {
   const today = process.env.DEMO_TODAY?.trim() || localYmd(new Date());
   if (!/^\d{4}-\d{2}-\d{2}$/.test(today)) throw new Error(`[seed] DEMO_TODAY must be YYYY-MM-DD, got ${today}`);
   const password = process.env.DEMO_PASSWORD?.trim() || DEFAULT_DEMO_PASSWORD;
+  const scope = process.env.SEED_SCOPE?.trim();
+  if (scope && scope !== 'demo') throw new Error(`[seed] SEED_SCOPE must be 'demo' or unset, got ${scope}`);
+  const demoOnly = scope === 'demo';
+  if (!demoOnly && !isLocalDbUrl(url)) {
+    throw new Error('[seed] refusing a FULL wipe (TRUNCATE every tenant) on a non-local database — use SEED_SCOPE=demo (docs/client-ready/RESEED-PROD.md)');
+  }
+  const platformAdmin = process.env.DEMO_PLATFORM_ADMIN ? process.env.DEMO_PLATFORM_ADMIN === '1' : isLocalDbUrl(url);
 
   const db = createDb(url);
 
@@ -237,9 +251,14 @@ async function main() {
       });
   }
 
-  console.log('[seed] clearing every restaurant + user (TRUNCATE … CASCADE)');
   const raw = postgres(url, { max: 1, prepare: false, onnotice: () => undefined });
-  await raw.unsafe('TRUNCATE restaurants, users RESTART IDENTITY CASCADE');
+  if (demoOnly) {
+    const { tenants, removed } = await deleteDemoTenants(raw);
+    console.log(`[seed] demo-only: removed ${tenants.restaurants.length} demo restaurant(s), ${tenants.userIds.length} demo user(s) — ${JSON.stringify(removed)}`);
+  } else {
+    console.log('[seed] clearing every restaurant + user (TRUNCATE … CASCADE)');
+    await raw.unsafe('TRUNCATE restaurants, users RESTART IDENTITY CASCADE');
+  }
   await raw.end();
 
   console.log('[seed] restaurant');
@@ -277,8 +296,9 @@ async function main() {
         email: u.email,
         name: u.name,
         emailVerified: verifiedAt,
-        // The demo owner doubles as the platform operator so /admin is demo-able.
-        isPlatformAdmin: u.role === 'owner',
+        // The demo owner doubles as the platform operator so /admin is demo-able —
+        // locally by default; on a real project only with DEMO_PLATFORM_ADMIN=1.
+        isPlatformAdmin: platformAdmin && u.role === 'owner',
       })),
     )
     .returning();

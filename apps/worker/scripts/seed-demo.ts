@@ -34,6 +34,8 @@ import {
   and,
   asc,
   assertSeedTarget,
+  DEMO_MAIN_BUSINESS_ID,
+  DEMO_MAIN_NAME,
   createDb,
   discrepancies,
   eq,
@@ -165,9 +167,15 @@ const INVOICE_PREFIX: Record<string, string> = {
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
 async function main() {
-  // The base seed's restaurant = the oldest one (seed-chain-demo adds branches later).
-  const [restaurant] = await db.select().from(restaurants).orderBy(asc(restaurants.createdAt)).limit(1);
-  if (!restaurant) throw new Error('no restaurant — run the base seed first');
+  // The base seed's demo restaurant, by its fixed business id — NEVER "the oldest
+  // restaurant": on a shared database that is a real tenant whose invoices and
+  // receipts this script deletes below.
+  const [restaurant] = await db
+    .select()
+    .from(restaurants)
+    .where(and(eq(restaurants.businessId, DEMO_MAIN_BUSINESS_ID), eq(restaurants.name, DEMO_MAIN_NAME)))
+    .limit(1);
+  if (!restaurant) throw new Error(`no demo restaurant (business id ${DEMO_MAIN_BUSINESS_ID}) — run the base seed first`);
   const restaurantId = restaurant.id;
 
   // Clean any prior demo-flow rows for this restaurant (idempotent re-run).

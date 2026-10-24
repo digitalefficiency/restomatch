@@ -10,7 +10,17 @@ export {
 export { PLAN_SEED, PLAN_SEED_LIST, type PlanSeed } from './plans';
 export { testDbUrl, DEFAULT_TEST_DB_URL } from './test-env';
 export { runCutoverChecks, formatCheckTable, type CheckResult } from './cutoverChecks';
-export { assertSeedTarget, seedTargetProblem } from './seedGuard';
+export { assertSeedTarget, isLocalDbUrl, seedTargetProblem, supabaseProjectRef } from './seedGuard';
+export {
+  DEMO_EMAIL_DOMAIN,
+  DEMO_MAIN_BUSINESS_ID,
+  DEMO_BRANCH_NAMES,
+  DEMO_MAIN_NAME,
+  deleteDemoTenants,
+  demoTenantRowCounts,
+  findDemoTenants,
+  type DemoTenants,
+} from './demoTenants';
 export {
   and,
   asc,
