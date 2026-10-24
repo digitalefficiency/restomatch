@@ -25,6 +25,9 @@ export const he = {
     inclVat: '(כולל מע״מ)',
   },
   finding: {
+    duplicate: 'חשבונית כפולה',
+    vat: 'הפרש מע״מ',
+    total: 'הפרש בסכום החשבונית',
     price: '{name} · {qty} {unit} · חויב {billed} במקום {po} = {delta}',
     twice: 'חויבה כבר בחשבונית {other} = {delta}',
     other: '{name} = {delta}',

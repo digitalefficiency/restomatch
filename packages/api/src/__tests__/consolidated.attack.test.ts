@@ -13,6 +13,7 @@ import {
   invoices,
   matchRuns,
   poLines,
+  products,
   purchaseOrders,
   restaurants,
   suppliers,
@@ -356,6 +357,60 @@ describe('consolidated.proposal — isolation (RLS app role)', () => {
       expect(p!.findings.filter((f) => f.alreadyBilledOn)).toEqual([]);
     } finally {
       await ownerDb.delete(matchRuns).where(eq(matchRuns.id, run!.id));
+    }
+  });
+
+  it('(P4.3) an unrelated invoice whose run used the note’s receipt does not make it billed twice (no product overlap)', async () => {
+    const [other] = await ownerDb
+      .insert(invoices)
+      .values({
+        restaurantId: A.restaurantId,
+        supplierId: A.supplierId,
+        invoiceNumber: 'A-CHEESE-1',
+        invoiceDate: new Date(),
+        totalExclVat: '50.00',
+        vatAmount: '9.00',
+        totalInclVat: '59.00',
+        status: 'matched',
+        source: 'email',
+      })
+      .returning();
+    const [cheese] = await ownerDb
+      .insert(products)
+      .values({ restaurantId: A.restaurantId, canonicalName: 'גבינה צהובה', category: 'חלב', defaultUnit: 'ק״ג' })
+      .returning();
+    // The note's line names its product, so "no overlap" is knowable.
+    await ownerDb.update(grLines).set({ productId: A.productId }).where(eq(grLines.grId, listedNotes[0]!));
+    await ownerDb.insert(invoiceLines).values({
+      invoiceId: other!.id,
+      productId: cheese!.id,
+      rawDescription: 'גבינה',
+      qtyBilled: '1',
+      unit: 'kg',
+      unitPriceBilled: '50.00',
+      lineTotal: '50.00',
+    });
+    const [po] = await ownerDb.select({ poId: goodsReceipts.poId }).from(goodsReceipts).where(eq(goodsReceipts.id, listedNotes[0]!));
+    const [run] = await ownerDb
+      .insert(matchRuns)
+      .values({ restaurantId: A.restaurantId, invoiceId: other!.id, poId: po!.poId, grId: listedNotes[0]!, overallStatus: 'clean' })
+      .returning();
+    try {
+      const p = await caller(A).consolidated.proposal({ invoiceId: itemizedId });
+      expect(p!.findings.filter((f) => f.alreadyBilledOn)).toEqual([]);
+    } finally {
+      await ownerDb.delete(matchRuns).where(eq(matchRuns.id, run!.id));
+      await ownerDb.delete(invoices).where(eq(invoices.id, other!.id));
+    }
+  });
+
+  it('(P4.5) the ledger: a disputed ריכוז does not list its notes', async () => {
+    await ownerDb.update(invoices).set({ status: 'disputed' }).where(eq(invoices.id, itemizedId));
+    try {
+      const rows = await caller(A).consolidated.coverage({ supplierId: A.supplierId, from: '2026-01-01T00:00:00Z', to: '2027-12-31T00:00:00Z' });
+      for (const id of listedNotes) expect(rows.find((r) => r.grId === id)?.invoiceId).not.toBe(itemizedId);
+    } finally {
+      await ownerDb.update(invoices).set({ status: 'parsed' }).where(eq(invoices.id, itemizedId));
     }
   });
 
