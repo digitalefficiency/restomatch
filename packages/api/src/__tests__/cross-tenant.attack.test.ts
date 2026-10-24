@@ -117,6 +117,9 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'owner.kpis': 'isolation',
   'owner.leakHero': 'isolation',
   'owner.leakBreakdown': 'isolation',
+  'payRun.enabled': 'isolation — payrun.attack.test.ts: reads only the caller restaurant flag; receiver/chef FORBIDDEN',
+  'payRun.month':
+    'isolation — payrun.attack.test.ts: only the caller restaurant invoices (B never in the payload); receiver/chef FORBIDDEN; flag off ⇒ nothing listed; ₪ = the credit letters to the agora',
   'owner.leakReport': 'isolation',
   'owner.leakSummary': 'isolation',
   'owner.leakGrouped': 'isolation',
