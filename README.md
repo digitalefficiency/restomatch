@@ -34,14 +34,12 @@ flowchart LR
   end
 
   subgraph Supabase
-    PG[(Postgres 16<br/>+ pgvector<br/>RLS per restaurant)]
+    PG[(Postgres 16<br/>+ pgvector<br/>RLS per restaurant<br/>+ job_queue · heartbeat)]
     ST[(Storage<br/>private invoice-scans bucket)]
   end
 
-  R[(Redis<br/>Upstash · BullMQ)]
-
   subgraph Worker["apps/worker (Docker · Fly.io / any container host)"]
-    Q[BullMQ consumers<br/>ocr-invoice · match-invoice · import-catalog<br/>outbox-dispatch · cron jobs]
+    Q[job_queue consumers<br/>ocr-invoice · match-invoice · import-catalog<br/>outbox-dispatch · cron jobs]
     H[/health · heartbeat/]
   end
 
@@ -55,13 +53,13 @@ flowchart LR
   M -.->|tRPC| W
   W -->|restomatch_app role<br/>RLS enforced| PG
   W -->|signed URLs| ST
-  W -->|enqueue jobs| R
-  R --> Q
+  W -->|enqueue jobs<br/>job_queue| PG
+  PG -->|claim<br/>SKIP LOCKED| Q
   Q -->|owner role<br/>tenant-checked in code| PG
   Q --> AN
   Q --> RS
   Q -.-> WA
-  H -->|heartbeat key| R
+  H -->|worker_heartbeats| PG
   C -->|reads heartbeat,<br/>emails owner if stale| W
 ```
 
@@ -81,7 +79,7 @@ pnpm workspaces + turbo. Every package exports its TypeScript sources directly (
 | Path | What it is |
 |---|---|
 | `apps/web` | Next.js 15 web app: marketing site, dashboard, admin, auth (password + TOTP 2FA + magic link), tRPC route, cron route |
-| `apps/worker` | BullMQ worker: OCR, matching, catalog import, cadence alerts, outbox dispatch, retention; `/health` server + Redis heartbeat; `Dockerfile` + `fly.toml` |
+| `apps/worker` | Postgres job-queue worker: OCR, matching, catalog import, cadence alerts, outbox dispatch, retention; `/health` server + heartbeat (`worker_heartbeats`); `Dockerfile` + `fly.toml` |
 | `apps/mobile` | Expo (React Native) prototype — see [Mobile](#mobile-app) |
 | `packages/api` | tRPC routers, tenant guards, approvals engine, entitlements, notifications |
 | `packages/db` | Drizzle schema, hand-written SQL migrations (`drizzle/00NN_*.sql`), RLS policies + provisioning, seed, `db:doctor` |
@@ -90,7 +88,7 @@ pnpm workspaces + turbo. Every package exports its TypeScript sources directly (
 | `packages/ocr` | OCR pipeline, Claude Vision provider, stub provider, reconciler |
 | `packages/catalog` | Product catalog matcher (exact SKU → aliases → pgvector) |
 | `packages/procurement` | MarketMan / Zestt purchase-order sync clients |
-| `packages/queue` | BullMQ producers shared by web + worker |
+| `packages/queue` | Postgres job queue (`job_queue`, `FOR UPDATE SKIP LOCKED`) shared by web + worker |
 | `packages/billing` | Plans, entitlements, provider-agnostic billing rails |
 | `packages/crypto` | argon2id password hashing |
 | `packages/observability` | Sentry-compatible error hooks (no-op until configured) |
@@ -103,7 +101,7 @@ Requirements: **Node 22** (`.nvmrc`), **pnpm 10.33** (via corepack), and either 
 (Linux apt / macOS Homebrew) or Docker. Everything else is handled by one script:
 
 ```bash
-./scripts/dev-setup.sh          # deps · Postgres 16 + pgvector · Redis · migrate + RLS (test + dev DBs)
+./scripts/dev-setup.sh          # deps · Postgres 16 + pgvector · migrate + RLS (test + dev DBs)
                                 # · seed the demo restaurant · write apps/web/.env.local
 pnpm --filter @restomatch/web dev        # → http://localhost:3000
 ```
@@ -125,7 +123,7 @@ pnpm dev:worker                          # loads apps/web/.env.local; tsx watch;
 pnpm --filter @restomatch/worker exec tsx scripts/smoke-queues.ts
 ```
 
-If the container/laptop restarted: `service postgresql start; redis-server --daemonize yes`
+If the container/laptop restarted: `service postgresql start`
 (or `docker compose up -d`).
 
 ## Environment variables
@@ -138,7 +136,7 @@ Local values are written by `dev-setup.sh` into `apps/web/.env.local`. The full 
 |---|:-:|:-:|---|
 | `DATABASE_URL` | ✓ | ✓ | owner connection (worker, migrations, Auth.js identity layer) |
 | `DATABASE_URL_APP` | ✓ | | non-owner `restomatch_app` role — RLS enforced (required in prod; boot guard) |
-| `REDIS_URL` | ✓ | ✓ | BullMQ queues + rate limiting + worker heartbeat |
+| `QUEUE_DATABASE_URL` | ✓ | ✓ | optional separate connection for the job queue; defaults to `DATABASE_URL` |
 | `AUTH_SECRET`, `AUTH_URL`, `APP_URL` | ✓ | | Auth.js |
 | `AUTH_ENC_KEY` | ✓ | | encrypts TOTP secrets at rest (back it up) |
 | `RESEND_API_KEY`, `EMAIL_FROM` | ✓ | ✓ | email (magic links, invites, alerts) |
@@ -147,7 +145,9 @@ Local values are written by `dev-setup.sh` into `apps/web/.env.local`. The full 
 | `CRON_SECRET`, `WORKER_ALERT_EMAILS` | ✓ | | worker watchdog cron |
 
 Both apps **fail fast at boot** in production when a required variable is missing
-(`apps/web/lib/env.ts`, `apps/worker/src/env.ts`).
+(`apps/web/lib/env.ts`, `apps/worker/src/env.ts`). There is no Redis: the job queue, cron schedules,
+rate limits and the worker heartbeat live in Postgres (migration 0061, `docs/REDIS-REMOVAL.md`); a
+leftover `REDIS_URL` only logs a warning.
 
 ## Tests and checks
 
@@ -173,8 +173,8 @@ bounce to `/login`, correct `<html lang dir>`, no error boundary, no console err
 Hebrew left in the English UI chrome.
 
 **CI** (`.github/workflows/ci.yml`, on every PR): typecheck + tests against Postgres 16 + pgvector
-with every migration applied, RLS provisioning + completeness gate + `db:doctor`; worker tests with
-Redis; web lint + `next build` (type-checked) + `tsc`; the worker Docker image build; Playwright
+with every migration applied, RLS provisioning + completeness gate + `db:doctor`; worker tests
+(Postgres only); web lint + `next build` (type-checked) + `tsc`; the worker Docker image build; Playwright
 (non-blocking during its soak); `pnpm audit` and dependency review. CodeQL and secret scanning run
 in their own workflows.
 
@@ -184,7 +184,6 @@ in their own workflows.
 |---|---|---|
 | Web | Vercel (`apps/web`, build `turbo run build --filter @restomatch/web`) | git-connected; env vars per `docs/ENV-PRODUCTION.md`; cron in `apps/web/vercel.json` |
 | Database + storage | Supabase | `DATABASE_URL=<direct owner URL> pnpm db:migrate`, then `provision-rls` (`docs/RLS-PROVISIONING-RUNBOOK.md`, `docs/DB-RUNBOOK.md`) |
-| Redis | Upstash | `REDIS_URL` (TLS `rediss://`) |
 | Worker | any container host (Fly.io config included) | `docker build -f apps/worker/Dockerfile .` from the repo root; `fly deploy --config apps/worker/fly.toml --dockerfile apps/worker/Dockerfile .` |
 
 The worker image is multi-stage (≈670 MB), runs as the non-root `node` user with `node` as PID 1
@@ -193,11 +192,11 @@ run on the owner's Mac (`apps/worker/scripts/start-worker.sh` + launchd plist). 
 production rollout: `docs/GO-LIVE.md`.
 
 **Worker hosting options** (same image everywhere; build context = repo root; one instance is
-enough for the pilot — BullMQ makes extra instances safe if you scale later):
+enough for the pilot — jobs are claimed with `SKIP LOCKED`, so extra instances are safe if you scale later):
 
 | Host | Setup |
 |---|---|
-| Fly.io (config in repo) | `fly launch --no-deploy --copy-config --name restomatch-worker` → `fly secrets set DATABASE_URL=… REDIS_URL=… ANTHROPIC_API_KEY=… RESEND_API_KEY=… EMAIL_FROM=… APP_URL=…` → `fly deploy --config apps/worker/fly.toml --dockerfile apps/worker/Dockerfile .`. Set `primary_region` next to the database. |
+| Fly.io (config in repo) | `fly launch --no-deploy --copy-config --name restomatch-worker` → `fly secrets set DATABASE_URL=… ANTHROPIC_API_KEY=… RESEND_API_KEY=… EMAIL_FROM=… APP_URL=…` → `fly deploy --config apps/worker/fly.toml --dockerfile apps/worker/Dockerfile .`. Set `primary_region` next to the database. |
 | Render | New → **Background Worker** → Docker, Dockerfile path `apps/worker/Dockerfile`, context `.`; add the same env vars. (Or a Web Service with health check path `/health` if you want the HTTP probe.) |
 | Railway | New service from the repo → Settings → Build: Dockerfile `apps/worker/Dockerfile`, root `/`; Variables: the same env vars; health check `/health`. |
 | Any Docker host | `docker run -d --restart=always -p 8080:8080 --env-file worker.env restomatch-worker` |
@@ -207,8 +206,8 @@ header).
 
 ## Operations
 
-- **Health:** web `GET /api/healthz`; worker `GET /health` (liveness) and `/health/ready` (Redis).
-- **Worker watchdog:** the worker writes `restomatch:worker:heartbeat` to Redis every 60 s; Vercel
+- **Health:** web `GET /api/healthz`; worker `GET /health` (liveness) and `/health/ready` (database `select 1`).
+- **Worker watchdog:** the worker upserts its row in `worker_heartbeats` every 60 s; Vercel
   Cron hits `/api/cron/worker-heartbeat` every 5 min and emails `WORKER_ALERT_EMAILS` when it is
   stale; the dashboard shows a banner.
 - **Failed jobs** are logged one line each (`[queue] job=… attempt=… failed: …`) and sent to Sentry

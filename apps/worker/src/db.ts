@@ -11,10 +11,15 @@ import { createDb, type Database } from '@restomatch/db';
  */
 const pools = new Map<string, Database>();
 
+/** Idle connections of the worker's pools close after 5 min (web: 20 s). */
+export const WORKER_IDLE_TIMEOUT_SEC = 300;
+
 export function jobDb(url: string): Database {
   let db = pools.get(url);
   if (!db) {
-    db = createDb(url);
+    // Long-lived process: keep connections warm (outbox-dispatch runs every
+    // 60 s) instead of reconnecting each minute — see WORKER_IDLE_TIMEOUT_SEC.
+    db = createDb(url, { idleTimeoutSec: WORKER_IDLE_TIMEOUT_SEC });
     pools.set(url, db);
   }
   return db;

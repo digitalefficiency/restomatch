@@ -3,7 +3,7 @@
  *
  * Once a day (cron.ts, 06:45 Asia/Jerusalem) the worker emails the ops recipients a short
  * snapshot of everything that silently rots when nobody looks:
- *   - BullMQ queue depths (waiting / active / delayed / failed) per queue,
+ *   - job_queue depths (waiting / active / delayed / failed) per queue,
  *   - jobs that FAILED in the last 24 h (name + first error line),
  *   - invoices stuck in `ocr_pending` for more than 30 minutes (OCR never ran),
  *   - outbox notifications created in the last 24 h that ended `failed`.
@@ -96,7 +96,7 @@ export interface HealthSnapshot {
   outboxFailedLast24h: number;
 }
 
-/** Minimal BullMQ surface the collector needs (so tests can pass fakes). */
+/** Minimal queue surface the collector needs (so tests can pass fakes). */
 export interface QueueProbe {
   name: string;
   getJobCounts(...types: string[]): Promise<Record<string, number>>;
@@ -269,7 +269,7 @@ export async function runHealthDigest(db: Database, probes: QueueProbe[], now = 
 }
 
 export function startHealthDigestWorker() {
-  // Read-only probes on the worker's own Redis connection (same as the queues).
+  // Read-only probes on the job_queue table (the worker's queue connection).
   const probes = DIGEST_QUEUES.map((name) => makeQueue(name) as unknown as QueueProbe);
   return makeWorker<HealthDigestJob>('health-digest', async (job) => {
     const url = process.env.DATABASE_URL;

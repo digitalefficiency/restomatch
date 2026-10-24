@@ -1,3 +1,5 @@
+import { stripTrailingSlashes } from './urls';
+
 /**
  * Where invoice images may be fetched from (plan v2 S4 / Epic A.8).
  *
@@ -21,7 +23,7 @@ export function allowedScanUrlPrefix(env: NodeJS.ProcessEnv = process.env): stri
   if (explicit && explicit.length > 0) return explicit;
   const base = env.NEXT_PUBLIC_SUPABASE_URL ?? env.SUPABASE_URL;
   if (!base) return null;
-  return `${base.replace(/\/+$/, '')}/storage/v1/object/sign/${INVOICE_SCANS_BUCKET}/`;
+  return `${stripTrailingSlashes(base)}/storage/v1/object/sign/${INVOICE_SCANS_BUCKET}/`;
 }
 
 export function isAllowedScanUrl(url: string, env: NodeJS.ProcessEnv = process.env): boolean {

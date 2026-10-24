@@ -746,11 +746,11 @@ export const receivingRouter = router({
         if (stub) mockProviders = { docAi: stub, claude: stub };
       }
 
-      // Server-authoritative enqueue of the OCR job. The queue producer no-ops
-      // (console.warn) when REDIS_URL is unset and fails fast (≤3 s, coded
-      // 'queue.unavailable') when Redis is unreachable — so the invoice stays
-      // persisted and the client is told OCR was not queued instead of hanging
-      // until the function times out (EN-7). REDIS_URL unset (no queue at all)
+      // Server-authoritative enqueue of the OCR job (Postgres job_queue). The
+      // producer no-ops (console.warn) without a queue database and fails fast
+      // (≤3 s, coded 'queue.unavailable') when the database is unreachable — so
+      // the invoice stays persisted and the client is told OCR was not queued
+      // instead of hanging until the function times out (EN-7). No queue at all
       // also reports ocrQueued:false, so the wizard doesn't poll for 30 s.
       let ocrQueued = false;
       try {

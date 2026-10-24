@@ -40,7 +40,6 @@ describe('assertWebEnv — production hardening', () => {
     EMAIL_FROM: 'no-reply@example.com',
     AUTH_URL: 'https://app.example.com',
     AUTH_SECRET: 'test-secret',
-    REDIS_URL: 'redis://localhost:6379',
     SUPABASE_SERVICE_ROLE_KEY: 'svc',
     // Required in production by Epic B/C (B.6) — AES-256-GCM key for the TOTP secret.
     AUTH_ENC_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
@@ -79,7 +78,6 @@ describe('assertWebEnv — AUTH_SECRET + Supabase URL shape (F4/F5)', () => {
     EMAIL_FROM: 'no-reply@example.com',
     AUTH_URL: 'https://app.example.com',
     AUTH_SECRET: 'test-secret',
-    REDIS_URL: 'redis://localhost:6379',
     SUPABASE_SERVICE_ROLE_KEY: 'svc',
     AUTH_ENC_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
   };
@@ -178,7 +176,6 @@ describe('assertWebEnv — empty secrets + legacy URL name', () => {
     EMAIL_FROM: 'no-reply@example.com',
     AUTH_URL: 'https://app.example.com',
     AUTH_SECRET: 'test-secret',
-    REDIS_URL: 'redis://localhost:6379',
     SUPABASE_SERVICE_ROLE_KEY: 'svc',
     AUTH_ENC_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
   };
@@ -191,5 +188,47 @@ describe('assertWebEnv — empty secrets + legacy URL name', () => {
     const { AUTH_URL: _omit, ...rest } = prod;
     expect(() => assertWebEnv(rest as never)).toThrow(/AUTH_URL or APP_URL/);
     expect(() => assertWebEnv({ ...rest, NEXTAUTH_URL: 'https://app.example.com' } as never)).not.toThrow();
+  });
+});
+
+describe('build-phase DB placeholder (Vercel Preview builds without database env)', () => {
+  it('resolveWebDbUrl returns the placeholder ONLY during next build', async () => {
+    const { resolveWebDbUrl, BUILD_PHASE_DB_PLACEHOLDER } = await import('../env');
+    expect(resolveWebDbUrl({ NODE_ENV: 'production', NEXT_PHASE: 'phase-production-build' })).toBe(
+      BUILD_PHASE_DB_PLACEHOLDER,
+    );
+    // Runtime (no NEXT_PHASE, or any other phase): still fail-closed.
+    expect(() => resolveWebDbUrl({ NODE_ENV: 'production' })).toThrow(/DATABASE_URL_APP is required/);
+    expect(() => resolveWebDbUrl({ NODE_ENV: 'production', NEXT_PHASE: 'phase-production-server' })).toThrow(
+      /DATABASE_URL_APP is required/,
+    );
+  });
+
+  it('a real URL always wins over the placeholder', async () => {
+    const { resolveWebDbUrl } = await import('../env');
+    expect(
+      resolveWebDbUrl({ NODE_ENV: 'production', NEXT_PHASE: 'phase-production-build', DATABASE_URL_APP: 'postgres://a/b' }),
+    ).toBe('postgres://a/b');
+  });
+
+  it('the production boot guard ignores the build phase: missing env still refuses to boot', async () => {
+    const { assertWebEnv } = await import('../env');
+    expect(() => assertWebEnv({ NODE_ENV: 'production', NEXT_PHASE: 'phase-production-build' })).toThrow(
+      /invalid web environment[\s\S]*DATABASE_URL/,
+    );
+    // …and with DATABASE_URL present, the production secrets are still mandatory.
+    expect(() =>
+      assertWebEnv({ NODE_ENV: 'production', NEXT_PHASE: 'phase-production-build', DATABASE_URL: 'postgres://a/b' }),
+    ).toThrow(/missing required production secrets[\s\S]*DATABASE_URL_APP/);
+  });
+});
+
+describe('Redis is gone (0061)', () => {
+  it('production boots without REDIS_URL; a leftover one only warns', async () => {
+    const { webEnvWarnings } = await import('../env');
+    expect(webEnvWarnings({ NODE_ENV: 'production', REDIS_URL: 'rediss://x:6379' } as never)).toEqual(
+      expect.arrayContaining([expect.stringMatching(/REDIS_URL is set but no longer used/)]),
+    );
+    expect(webEnvWarnings({ NODE_ENV: 'production' } as never).some((w) => /REDIS/.test(w))).toBe(false);
   });
 });

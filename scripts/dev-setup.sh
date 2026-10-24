@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # One-shot local environment for RestoMatch (Linux + macOS; Docker as fallback).
 #
-#   ./scripts/dev-setup.sh              # deps + Postgres(pgvector) + Redis + migrate + RLS + seed demo data
+#   ./scripts/dev-setup.sh              # deps + Postgres(pgvector) + migrate + RLS + seed demo data
 #   ./scripts/dev-setup.sh --no-seed    # everything except the demo data
-#   ./scripts/dev-setup.sh --docker     # force the docker compose Postgres/Redis
+#   ./scripts/dev-setup.sh --docker     # force the docker compose Postgres
 #   DEMO_TODAY=2026-10-19 ./scripts/dev-setup.sh   # seed "today's" deliveries for another date
 #
 # Idempotent: safe to re-run (existing databases are migrated forward, the demo
@@ -13,7 +13,9 @@
 #   1. something already answers on localhost:5432 with postgres/postgres → use it
 #   2. Linux with a local PostgreSQL install (apt) → start it, add pgvector
 #   3. macOS with Homebrew PostgreSQL → brew services start, add pgvector
-#   4. docker compose (pgvector/pgvector:pg16 + redis:7)
+#   4. docker compose (pgvector/pgvector:pg16)
+#
+# No Redis: the job queue, rate limits and the worker heartbeat are in Postgres (0061).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -111,8 +113,8 @@ elif [[ $FORCE_DOCKER == 0 && $OS == Darwin ]] && have brew && brew list --formu
   psql -d postgres -qc "ALTER ROLE postgres WITH LOGIN SUPERUSER PASSWORD 'postgres';" >/dev/null
 elif have docker; then
   PG_MODE=docker
-  log "using docker compose (pgvector/pgvector:pg16 + redis:7)"
-  docker compose up -d postgres redis >/dev/null
+  log "using docker compose (pgvector/pgvector:pg16)"
+  docker compose up -d postgres >/dev/null
 else
   die "no PostgreSQL found. Install one of: PostgreSQL 16 + pgvector (apt / brew), or Docker — then re-run."
 fi
@@ -149,18 +151,7 @@ for db in "${DBS[@]}"; do
     || { log "creating database ${db}"; psql_admin -c "CREATE DATABASE ${db};"; }
 done
 
-# ── 2. Redis (optional for the web app; the worker and queue need it) ───────
-if have redis-cli && redis-cli ping >/dev/null 2>&1; then
-  :
-elif have redis-server; then
-  redis-server --daemonize yes >/dev/null
-elif have docker && [[ $PG_MODE != docker ]]; then
-  docker compose up -d redis >/dev/null 2>&1 || warn "redis not started (worker/queue features need it)"
-elif [[ $PG_MODE != docker ]]; then
-  warn "redis not found — the web app runs without it; the worker needs REDIS_URL"
-fi
-
-# ── 3. schema + RLS ─────────────────────────────────────────────────────────
+# ── 2. schema + RLS ─────────────────────────────────────────────────────────
 for db in "${DBS[@]}"; do
   log "migrating ${db}"
   DATABASE_URL="${PG_URL_BASE}/${db}" pnpm --filter @restomatch/db migrate >/dev/null
@@ -168,7 +159,7 @@ for db in "${DBS[@]}"; do
     || die "provision-rls failed on ${db} (run: DATABASE_URL=${PG_URL_BASE}/${db} pnpm --filter @restomatch/db provision-rls)"
 done
 
-# ── 4. demo data ────────────────────────────────────────────────────────────
+# ── 3. demo data ────────────────────────────────────────────────────────────
 if [[ $SEED == 1 ]]; then
   log "seeding demo data into restomatch_dev${DEMO_TODAY:+ (today = ${DEMO_TODAY})}"
   DATABASE_URL="${PG_URL_BASE}/restomatch_dev" pnpm --filter @restomatch/db seed | tail -3
@@ -182,7 +173,7 @@ if [[ $SEED == 1 ]]; then
   DATABASE_URL="${PG_URL_BASE}/restomatch_dev" pnpm --filter @restomatch/worker exec tsx scripts/seed-recovery-demo.ts | tail -1
 fi
 
-# ── 5. apps/web/.env.local ──────────────────────────────────────────────────
+# ── 4. apps/web/.env.local ──────────────────────────────────────────────────
 if [[ ! -f apps/web/.env.local ]]; then
   log "writing apps/web/.env.local"
   APP_URL_LINE=$(DATABASE_URL="${PG_URL_BASE}/restomatch_dev" pnpm --filter @restomatch/db provision-rls --print-app-url 2>&1 | grep -o 'postgres://restomatch_app[^ ]*' | tail -1)
@@ -194,12 +185,11 @@ AUTH_URL=http://localhost:3000
 APP_URL=http://localhost:3000
 AUTH_ENC_KEY=$(openssl rand -hex 32)
 MAGIC_LINK_FILE=/tmp/restomatch-magic-link.json
-REDIS_URL=redis://localhost:6379
 NEXT_PUBLIC_ENABLE_SCAN_MOCKS=1
 ENV
 fi
 
-# ── 6. health ───────────────────────────────────────────────────────────────
+# ── 5. health ───────────────────────────────────────────────────────────────
 DATABASE_URL="${PG_URL_BASE}/restomatch_dev" pnpm --filter @restomatch/db run doctor >/dev/null 2>&1 \
   && log "db:doctor (restomatch_dev): no blocking problems" \
   || warn "db:doctor reports problems — run: DATABASE_URL=${PG_URL_BASE}/restomatch_dev pnpm db:doctor"

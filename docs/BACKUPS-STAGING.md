@@ -12,7 +12,7 @@ integration). 👤 = owner action in a dashboard; nothing here runs by itself.
 | Invoice scans (photos/PDFs) | Supabase Storage bucket `invoice-scans` (private) | evidence for supplier credits | storage is **not** in database backups — see §3 |
 | `AUTH_ENC_KEY` | Vercel env + password manager | every enrolled 2FA secret becomes unreadable | keep a copy offline; never rotate without a re-encrypt plan |
 | `APP_ROLE_PASSWORD`, `AUTH_SECRET`, API keys | Vercel / Fly secrets + password manager | re-issue (users re-login) | password manager |
-| Queues, rate-limit counters, heartbeat | Upstash Redis | in-flight jobs only (BullMQ re-runs stalled jobs; schedules re-register at worker boot) | none needed |
+| Queues, rate-limit counters, heartbeat | Supabase Postgres (`job_queue`, `rate_limit_counters`, `worker_heartbeats`, `ops_kv` — migration 0061) | in-flight jobs only (stalled jobs are re-queued; schedules re-register at worker boot) | covered by the database backups below — nothing extra |
 
 ## 2. Database backups and PITR
 
@@ -68,7 +68,7 @@ integration from a long-lived **`staging`** git branch.
 | Supabase GitHub integration | production branch = `main` | production branch = `staging` (its own integration on the staging project) |
 | Vercel | Production env (`main`) | Preview env scoped to branch `staging` (stable URL `…-git-staging-….vercel.app`) |
 | Worker | Fly app `restomatch-worker` | Fly app `restomatch-worker-staging` (`fly launch --name …-staging`, same `fly.toml`) |
-| Redis | Upstash prod DB | a second Upstash DB (never share queues between envs) |
+| Job queue | `job_queue` in the prod database | `job_queue` in the staging database (separate projects, so queues are never shared; no extra service) |
 | Email | Resend live key | Resend key restricted to the team's addresses, or no key (magic links logged) |
 | OCR | Anthropic key | same key with a low spend limit, or none (stub OCR) |
 | Data | real | `pnpm db:seed` + `seed-demo` (the demo tenant) |
@@ -103,4 +103,4 @@ migrations deploy → click through the demo path (or run `scripts/verify-prod.s
 <staging-url>` once it lands) → `PR staging → main` → merge = production.
 
 Rules: a migration reaches `main` only after it ran on staging; never point
-staging at production keys or the production Redis.
+staging at production keys or the production database.

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { startRedisWatchdog } from '../health';
+import { startDbWatchdog } from '../health';
 
-describe('startRedisWatchdog', () => {
+describe('startDbWatchdog', () => {
   it('calls onDead after N consecutive failed pings, and a success resets the count', async () => {
     vi.useFakeTimers();
     const results = [false, false, true, false, false, false];
@@ -10,7 +10,7 @@ describe('startRedisWatchdog', () => {
       return 'PONG';
     });
     const onDead = vi.fn();
-    const stop = startRedisWatchdog({ ping }, { intervalMs: 1_000, maxFailures: 3, onDead });
+    const stop = startDbWatchdog({ ping }, { intervalMs: 1_000, maxFailures: 3, onDead });
     for (let i = 0; i < 6; i++) await vi.advanceTimersByTimeAsync(1_000);
     stop();
     vi.useRealTimers();
@@ -22,7 +22,7 @@ describe('startRedisWatchdog', () => {
   it('treats a ping that never answers as a failure', async () => {
     vi.useFakeTimers();
     const onDead = vi.fn();
-    const stop = startRedisWatchdog({ ping: () => new Promise(() => {}) }, { intervalMs: 1_000, maxFailures: 2, pingTimeoutMs: 100, onDead });
+    const stop = startDbWatchdog({ ping: () => new Promise(() => {}) }, { intervalMs: 1_000, maxFailures: 2, pingTimeoutMs: 100, onDead });
     for (let i = 0; i < 3; i++) await vi.advanceTimersByTimeAsync(1_000);
     stop();
     vi.useRealTimers();

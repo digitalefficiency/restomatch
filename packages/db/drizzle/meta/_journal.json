@@ -336,7 +336,14 @@
       "version": "7",
       "when": 1782130000000,
       "tag": "0058_pos_sales",
-        "breakpoints": true
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1782160000000,
+      "tag": "0061_postgres_queue",
+      "breakpoints": true
     },
     {
       "idx": 62,

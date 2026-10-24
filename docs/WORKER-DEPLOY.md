@@ -20,9 +20,9 @@ managed container host. **Nothing here creates an account or deploys by itself.*
 (Sydney) and after the EU move, its machine check gates every deploy and shows
 health continuously, it restarts the process whenever it exits, and it allows a
 long enough graceful stop for an in-flight OCR call. No platform restarts a
-process that is *up but useless*, so the worker does it itself: a **Redis
-watchdog** exits the process after ~2 minutes without Redis (4 failed PINGs, 30 s
-apart) and the restart policy brings it back; the heartbeat watchdog + uptime
+process that is *up but useless*, so the worker does it itself: a **database
+watchdog** exits the process after ~2 minutes without the database (4 failed
+`select 1` checks, 30 s apart) and the restart policy brings it back; the heartbeat watchdog + uptime
 check U3 (docs/MONITORING.md) alert a human if it still isn't processing.
 Render is the low-touch fallback (dashboard-only, Frankfurt, no Sydney).
 Railway was not added: health checks only at deploy time and no Sydney region.
@@ -32,23 +32,28 @@ Railway was not added: health checks only at deploy time and no Sydney region.
 - Built from the repo root with the frozen lockfile; only the worker and its
   workspace packages are installed (~710 MB).
 - Runs as the non-root `node` user; the code in `/app` is root-owned (read-only).
-- Redis watchdog: after ~2 min without Redis the process exits (code 1) so the
-  platform restarts it — a worker without Redis would otherwise look healthy.
+- Database watchdog: after ~2 min without the database the process exits (code 1)
+  so the platform restarts it — a worker without its database (which is also the
+  job queue) would otherwise look healthy.
 - `node` is PID 1 → `SIGTERM` reaches the worker: it stops taking jobs, lets
   in-flight jobs finish, drains its Postgres pool and exits. A job cut off anyway
-  is "stalled" and BullMQ runs it again — nothing is lost.
-- Refuses to boot in production without `DATABASE_URL`, `REDIS_URL`
-  (`redis://`/`rediss://` only — the Upstash **REST** URL is rejected),
-  `ANTHROPIC_API_KEY`, `RESEND_API_KEY`, `EMAIL_FROM`.
-- `GET /health` (liveness) and `GET /health/ready` (Redis PING) on `$PORT` (8080).
-- Exactly one instance is enough; BullMQ makes more safe if ever needed.
+  is "stalled" (its `job_queue` lock is no longer renewed) and a live worker
+  queues it again — nothing is lost.
+- Refuses to boot in production without `DATABASE_URL`, `ANTHROPIC_API_KEY`,
+  `RESEND_API_KEY`, `EMAIL_FROM`. No Redis: the job queue, schedules and the
+  heartbeat live in Postgres (migration 0061); a leftover `REDIS_URL` only logs a
+  warning.
+- `GET /health` (liveness) and `GET /health/ready` (database `select 1` →
+  `{"status":"ready","db":"up"}`, else 503) on `$PORT` (8080).
+- Exactly one instance is enough; more are safe if ever needed (jobs are claimed
+  with `FOR UPDATE SKIP LOCKED`, so two workers never take the same job).
 
 ## Secrets (names only — never paste values into chat or git)
 
 | Name | Required | Notes |
 |---|:-:|---|
 | `DATABASE_URL` | ✅ | owner/service connection, **session** pooler or direct (the worker is long-lived) |
-| `REDIS_URL` | ✅ | Upstash **Redis** URL `rediss://default:…@…upstash.io:6379` (not the REST URL) |
+| `QUEUE_DATABASE_URL` | — | separate connection for the job queue; defaults to `DATABASE_URL` |
 | `ANTHROPIC_API_KEY` | ✅ | invoice OCR |
 | `RESEND_API_KEY`, `EMAIL_FROM` | ✅ | outbox email |
 | `APP_URL` | — | public web URL; only used by the local-disk scan storage path |
@@ -70,7 +75,7 @@ fly launch --no-deploy --copy-config --config apps/worker/fly.toml --name restom
 
 # 2. Secrets (one command; values from your password manager).
 fly secrets set -a restomatch-worker \
-  DATABASE_URL=… REDIS_URL=… ANTHROPIC_API_KEY=… RESEND_API_KEY=… EMAIL_FROM=… \
+  DATABASE_URL=… ANTHROPIC_API_KEY=… RESEND_API_KEY=… EMAIL_FROM=… \
   HEALTH_DIGEST_EMAILS=… SENTRY_DSN=…
 
 # 3. STOP the Mac worker first (two workers are safe, but the Mac one is the
@@ -93,7 +98,7 @@ fly ssh console -a restomatch-worker -C "node -e \"fetch('http://127.0.0.1:8080/
 ```
 
 Then in the app: upload an invoice photo → it reaches "matched" within a minute;
-the dashboard's "worker is down" banner is gone (the worker heartbeat is in Redis);
+the dashboard's "worker is down" banner is gone (the worker heartbeat is in `worker_heartbeats`);
 `/api/cron/worker-heartbeat` (with the cron bearer) returns `"status":"ok"`.
 
 ### Day 2
@@ -104,7 +109,7 @@ the dashboard's "worker is down" banner is gone (the worker heartbeat is in Redi
 | Roll back | `fly releases -a restomatch-worker --image` → `fly deploy -a restomatch-worker --config apps/worker/fly.toml --image <previous image ref>` |
 | Restart | `fly machine restart -a restomatch-worker` |
 | Rotate a secret | `fly secrets set -a restomatch-worker NAME=…` (restarts the machine) |
-| Pause everything | `fly scale count 0 -a restomatch-worker` (jobs wait in Redis) |
+| Pause everything | `fly scale count 0 -a restomatch-worker` (jobs wait in Postgres `job_queue`) |
 | Move region (EU) | change `primary_region` to `fra`, `fly deploy`, `fly scale count 1 --region fra` |
 
 ## Render — fallback
@@ -113,7 +118,7 @@ the dashboard's "worker is down" banner is gone (the worker heartbeat is in Redi
 2. Fill the secret values (`sync: false` entries) → **Apply**. One `starter`
    background worker in Frankfurt, auto-deploy off.
 3. Deploy: Render → the service → **Manual Deploy** (after CI is green).
-4. Render restarts the container when it exits (including the worker's own Redis
+4. Render restarts the container when it exits (including the worker's own database
    watchdog exit) but has no HTTP health check for workers: rely on the heartbeat
    watchdog + uptime monitor (docs/MONITORING.md).
 
@@ -121,6 +126,6 @@ the dashboard's "worker is down" banner is gone (the worker heartbeat is in Redi
 
 ```bash
 docker build -f apps/worker/Dockerfile -t restomatch-worker .
-docker run --rm --network=host -e NODE_ENV=development -e DATABASE_URL=… -e REDIS_URL=redis://localhost:6379 restomatch-worker
-pnpm --filter @restomatch/worker exec tsx scripts/smoke-queues.ts       # OCR → match
+docker run --rm --network=host -e NODE_ENV=development -e DATABASE_URL=… restomatch-worker
+DATABASE_URL=… pnpm --filter @restomatch/worker exec tsx scripts/smoke-queues.ts       # OCR → match
 ```

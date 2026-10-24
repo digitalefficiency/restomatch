@@ -1,0 +1,15 @@
+{
+  "supplier": { "name": "ירקות השרון בע\"מ", "businessId": "514276389" },
+  "invoiceNumber": "40917",
+  "invoiceDate": "2026-10-14",
+  "allocationNumber": "202610140917",
+  "lines": [
+    { "sku": "1102", "rawDescription": "עגבניות שרי", "qty": 12, "unit": "ק\"ג", "unitPrice": 14.9, "lineTotal": 178.8 },
+    { "sku": "1107", "rawDescription": "מלפפונים", "qty": 20, "unit": "ק\"ג", "unitPrice": 6.5, "lineTotal": 130 },
+    { "sku": "2210", "rawDescription": "בצל יבש", "qty": 15, "unit": "ק\"ג", "unitPrice": 4.2, "lineTotal": 63 },
+    { "sku": "3304", "rawDescription": "פטרוזיליה צרור", "qty": 30, "unit": "יח'", "unitPrice": 3.5, "lineTotal": 105 },
+    { "sku": "4120", "rawDescription": "תפוחי אדמה לבנים", "qty": 25, "unit": "ק\"ג", "unitPrice": 5.8, "lineTotal": 145 },
+    { "sku": "5031", "rawDescription": "לימונים", "qty": 8, "unit": "ק\"ג", "unitPrice": 9.9, "lineTotal": 79.2 }
+  ],
+  "totals": { "subtotal": 701, "vat": 126.18, "total": 827.18 }
+}

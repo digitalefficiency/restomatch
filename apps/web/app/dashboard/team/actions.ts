@@ -25,7 +25,7 @@ interface ActionResult {
 /**
  * Invite/resend emails go to arbitrary mailboxes, so a compromised (or hostile)
  * owner account could be used as a spam relay. Cap outbound invite emails per
- * inviter. Fails open on a Redis outage, like every other limiter.
+ * inviter. Fails open on a rate-limit store outage, like every other limiter.
  */
 const INVITE_EMAIL_LIMIT: RateLimitOptions = { limit: 20, windowSec: 60 * 60 };
 
