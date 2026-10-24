@@ -6,7 +6,8 @@
  *
  * What it adds to the demo restaurant (כפר הזיתים):
  *  1. Contract price lists for 2 suppliers (HaKerem Butchery, Mediterranean
- *     Fish Co.): the price list that took effect on 2026-10-10, one row per
+ *     Fish Co.): the price list that took effect 8 days before the demo's
+ *     "today" (DEMO_TODAY; 2026-10-10 for 2026-10-18), one row per
  *     product at the PO price of the invoices it covers (see seedContracts for
  *     the hero-number guarantee). The existing PRICE_HIGHER lines above the
  *     contract (entrecôte ₪149 vs ₪139, salmon ₪96 vs ₪89) light up as
@@ -40,6 +41,7 @@ import {
   suppliers,
 } from '@restomatch/db';
 import { findOverContractLines, runPriceAlertSweep } from '@restomatch/api';
+import { demoContractFrom } from '../src/lib/demoDates';
 
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error('DATABASE_URL is required');
@@ -47,7 +49,10 @@ assertSeedTarget(url, 'seed-wave1-contracts-demo');
 const db = createDb(url);
 const NOTIFY = process.argv.includes('--notify');
 
-const CONTRACT_FROM = '2026-10-10';
+// Derived from the demo's "today" (DEMO_TODAY, like every other seed): a fixed
+// date broke the step from DEMO_TODAY=2026-10-20 on (more deliveries fell into
+// the window, the over-contract products got skipped, 0 lines → exit 1).
+const CONTRACT_FROM = demoContractFrom();
 const CONTRACT_SUPPLIERS = ['HaKerem Butchery', 'Mediterranean Fish Co.'];
 const TREND_SUPPLIER = 'HaSharon Produce';
 const CHEAP_SUPPLIER = { name: 'חקלאי העמק', nameEn: 'HaEmek Farmers' };
