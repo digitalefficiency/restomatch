@@ -189,6 +189,12 @@ export async function claimAny<T = unknown>(sql: Sql, queues: string[], workerId
  * A short explicit transaction works through the Supabase transaction pooler.
  * An active job whose lock is older than `stallMs` belongs to a dead runner and
  * does not block its group (stall recovery re-queues it).
+ *
+ * The price, accepted: a runner killed mid-job (a worker restart, a function cut
+ * off at maxDuration) blocks that queue + tenant — for the all-tenant jobs, the
+ * whole queue — until its lock is `stallMs` old (2 min). Latency only: nothing is
+ * lost or run twice. Treating a younger lock as dead would let two jobs of one
+ * tenant run side by side after a single slow lock renewal (renewed every 30 s).
  */
 export async function claimAnySerial<T = unknown>(
   sql: Sql,
