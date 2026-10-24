@@ -319,7 +319,7 @@ export function InvoicePoCompareViewer({ data, lines, invoiceScan, onClose }: Pr
             className="flex-1 overflow-auto bg-bg p-4 sm:p-8"
             style={{
               backgroundImage:
-                'radial-gradient(circle at 1px 1px, rgba(42,58,49,0.5) 1px, transparent 0)',
+                'radial-gradient(circle at 1px 1px, rgba(15,31,23,0.12) 1px, transparent 0)',
               backgroundSize: '24px 24px',
             }}
           >
@@ -352,7 +352,7 @@ export function InvoicePoCompareViewer({ data, lines, invoiceScan, onClose }: Pr
                   tone="amber"
                 />
                 <div
-                  className="bg-surface-2 rounded-md shadow-[0_16px_44px_-16px_rgba(0,0,0,0.6)] overflow-hidden"
+                  className="bg-surface-2 rounded-md shadow-[0_16px_44px_-16px_rgba(15,31,23,0.25)] overflow-hidden"
                   style={{ width: 540, height: 765 }}
                 >
                   {invoiceScan ? (

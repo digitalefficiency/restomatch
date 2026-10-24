@@ -92,10 +92,10 @@ async function loadDemoScan(invoiceId: string): Promise<ScanData | null> {
   return null;
 }
 
-/** Dark "command center" stage: near-black canvas with a faint money-green dot
- *  grid + soft top aura, on which the scanned paper floats. */
+/** Light stage: a soft surface with a faint money-green dot grid + top aura,
+ *  on which the scanned paper floats. */
 const STAGE_BG =
-  'radial-gradient(circle at 1px 1px, rgba(34,211,154,0.05) 1px, transparent 0) 0 0 / 24px 24px, radial-gradient(120% 60% at 50% 0%, rgba(34,211,154,0.06) 0%, transparent 60%), #0E1512';
+  'radial-gradient(circle at 1px 1px, rgba(6,107,74,0.08) 1px, transparent 0) 0 0 / 24px 24px, radial-gradient(120% 60% at 50% 0%, rgba(6,107,74,0.05) 0%, transparent 60%), #EEF3F0';
 
 function MockScanCanvas({ scanData }: { scanData: ScanData }) {
   return (

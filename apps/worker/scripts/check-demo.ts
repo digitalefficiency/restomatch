@@ -88,6 +88,20 @@ export async function checkDemo(url: string, today: string): Promise<DemoCheck> 
     `) as unknown as Array<{ col: string; n: number }>;
     for (const f of future) if (f.n > 0) problems.push(`${f.n} demo row(s) with ${f.col} after ${today} (future date on screen)`);
 
+    // 3c. Fresh produce is VAT-exempt: produce suppliers are VAT 0 (so a real "פטור
+    //     ממע״מ" invoice matches) and never carry a VAT_MISMATCH.
+    const produce = (await sql`
+      select s.name, s.name_en, s.vat_rate,
+        (select count(*)::int from discrepancies d join match_runs m on m.id = d.match_run_id join invoices i on i.id = m.invoice_id
+          where i.supplier_id = s.id and d.type = 'VAT_MISMATCH') as vat_findings
+      from suppliers s where s.restaurant_id in ${sql(rids)} and s.name_en in ('HaSharon Produce', 'Carmel Greens')
+    `) as unknown as Array<{ name: string; name_en: string; vat_rate: string | null; vat_findings: number }>;
+    facts.push(`produce VAT: ${produce.map((p) => `${p.name_en} ${p.vat_rate == null ? 'unset' : `${Number(p.vat_rate) * 100}%`}`).join(', ') || 'no produce suppliers'} · VAT_MISMATCH on produce: ${produce.reduce((n, p) => n + p.vat_findings, 0)}`);
+    for (const p of produce) {
+      if (p.vat_rate == null || Number(p.vat_rate) !== 0) problems.push(`${p.name_en}: vat_rate ${p.vat_rate ?? 'unset (→ 18%)'} — fresh produce must be 0`);
+      if (p.vat_findings > 0) problems.push(`${p.name_en}: ${p.vat_findings} VAT_MISMATCH finding(s) on a VAT-exempt produce supplier`);
+    }
+
     // 4. Approvals queue: open, routed findings in the main restaurant.
     const [open] = await sql`
       select count(*)::int as n from discrepancies where restaurant_id = ${main.id} and resolution_status = 'open' and requires_role is not null`;
@@ -97,7 +111,8 @@ export async function checkDemo(url: string, today: string): Promise<DemoCheck> 
     // 5. The chain: each branch has matched invoices.
     for (const r of t.restaurants.filter((x) => x.id !== main.id)) {
       const [inv] = await sql`select count(*)::int as n from invoices where restaurant_id = ${r.id}`;
-      facts.push(`${r.name}: ${inv!.n} invoices`);
+      const bh = await computeLeakHero(createDb(url), r.id, { now });
+      facts.push(`${r.name}: ${inv!.n} invoices · leak ₪${Math.round(bh.leakIls)} of ₪${Math.round(bh.spendIls)} (${(bh.leakPct * 100).toFixed(1)}%)`);
       if (inv!.n < 1) problems.push(`branch ${r.name} has no invoices`);
     }
   } finally {

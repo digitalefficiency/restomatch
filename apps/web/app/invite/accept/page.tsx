@@ -43,7 +43,7 @@ export default async function InviteAcceptPage({ searchParams }: PageProps) {
 
   const t = await getT(authMessages);
   return (
-    <main className="flex min-h-screen items-center justify-center p-6">
+    <main className="flex min-h-screen items-center justify-center p-6 pb-[calc(1.5rem+var(--consent-h,0px))]">
       <Card elevated flow padding="lg" className="w-full max-w-md">
         <div className="mb-2 flex items-center gap-2 text-danger">
           <AlertCircle className="h-5 w-5 shrink-0" aria-hidden="true" />
