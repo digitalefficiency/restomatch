@@ -51,6 +51,7 @@ export const receiving: Shape<typeof he> = {
       back: 'رجوع',
       bannerUploading: 'جارٍ رفع الصورة…',
       bannerSaved: 'تم الحفظ · {id}',
+      bannerQueued: 'محفوظة على الهاتف · تُرفع عند عودة الاتصال',
       uploadFailed: 'فشل الرفع: {message}',
       tooLarge: 'الملف كبير جدًا (الحد الأقصى {mb} MB). صوّر الفاتورة بدلًا من ذلك، أو قسّم ملف PDF.',
       unsupportedType: 'نوع الملف غير مدعوم. ارفع صورة (JPG / PNG / WEBP) أو ملف PDF.',

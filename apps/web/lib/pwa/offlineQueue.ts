@@ -148,6 +148,23 @@ export function idbAvailable(): boolean {
 /** Change event so every mounted banner/hook refreshes its count. */
 export const QUEUE_EVENT = 'rm-receiver-queue';
 
+/**
+ * Fired by the PWA shell for each queued photo it uploaded and registered, so
+ * an open receiving wizard that captured it offline can resume (stop showing
+ * "saved on the phone", poll the now-registered invoice).
+ */
+export const SYNCED_EVENT = 'rm-receiver-synced';
+export interface SyncedPhotoDetail {
+  clientUploadId: string;
+  poId: string;
+  grId: string;
+  invoiceId: string;
+}
+
+export function announceSynced(detail: SyncedPhotoDetail): void {
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent<SyncedPhotoDetail>(SYNCED_EVENT, { detail }));
+}
+
 /** Wipe the device queue (sign-out on a shared phone). */
 export async function clearQueue(store: QueueStore = idbQueueStore): Promise<void> {
   for (const i of await store.list()) await store.remove(i.clientUploadId);

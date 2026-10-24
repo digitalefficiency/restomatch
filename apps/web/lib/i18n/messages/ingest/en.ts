@@ -88,6 +88,7 @@ export const en: Shape<typeof he> = {
     offlineTitle: 'You are offline',
     offlineBody: 'Keep taking photos. They are saved on the phone and upload by themselves when you are back online.',
     queued: '{count} photos waiting to upload',
+    queuedOne: '1 photo waiting to upload',
     syncing: 'Uploading saved photos…',
     synced: 'All photos uploaded',
     syncFailed: 'Upload failed, retrying shortly',

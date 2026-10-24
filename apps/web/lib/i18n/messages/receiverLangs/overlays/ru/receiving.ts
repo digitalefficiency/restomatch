@@ -51,6 +51,7 @@ export const receiving: Shape<typeof he> = {
       back: 'Назад',
       bannerUploading: 'Загружаем скан…',
       bannerSaved: 'Сохранено · {id}',
+      bannerQueued: 'Сохранено на телефоне · загрузится, когда связь вернётся',
       uploadFailed: 'Не удалось загрузить: {message}',
       tooLarge: 'Файл слишком большой (до {mb} МБ). Сфотографируйте накладную или разделите PDF.',
       unsupportedType: 'Этот тип файла не поддерживается. Загрузите фото (JPG / PNG / WEBP) или PDF.',

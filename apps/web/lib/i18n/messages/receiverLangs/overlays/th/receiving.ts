@@ -51,6 +51,7 @@ export const receiving: Shape<typeof he> = {
       back: 'กลับ',
       bannerUploading: 'กำลังอัปโหลดรูปสแกน…',
       bannerSaved: 'บันทึกแล้ว · {id}',
+      bannerQueued: 'บันทึกในโทรศัพท์แล้ว · จะอัปโหลดเมื่อกลับมาออนไลน์',
       uploadFailed: 'อัปโหลดไม่สำเร็จ: {message}',
       tooLarge: 'ไฟล์ใหญ่เกินไป (สูงสุด {mb} MB) ถ่ายรูปบิลแทน หรือแบ่งไฟล์ PDF',
       unsupportedType: 'ไม่รองรับไฟล์ประเภทนี้ อัปโหลดรูป (JPG / PNG / WEBP) หรือ PDF',

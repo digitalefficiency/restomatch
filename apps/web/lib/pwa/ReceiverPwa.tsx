@@ -8,6 +8,7 @@ import { ingest } from '@/lib/i18n/messages/ingest';
 import { trpc } from '@/lib/trpc/client';
 import {
   QUEUE_EVENT,
+  announceSynced,
   idbAvailable,
   idbQueueStore,
   processQueue,
@@ -59,6 +60,7 @@ export function ReceiverPwa({ restaurantId, userId }: { restaurantId: string; us
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [installed, setInstalled] = useState(false);
   const running = useRef(false);
+  const queuedText = queued === 1 ? t('pwa.queuedOne') : t('pwa.queued', { count: formatNumber(queued, locale) });
 
   const refreshCount = useCallback(async () => {
     if (!idbAvailable()) return;
@@ -91,11 +93,13 @@ export function ReceiverPwa({ restaurantId, userId }: { restaurantId: string; us
       const imageUrl = scan.signedUrl;
       if (!imageUrl) throw new Error('upload returned no URL');
       const receipt = await utils.client.receiving.startReceipt.mutate({ poId: item.poId });
-      return utils.client.receiving.registerInvoice.mutate({
+      const reg = await utils.client.receiving.registerInvoice.mutate({
         grId: receipt.receiptId,
         imageUrl,
         supplierId: item.supplierId,
       });
+      announceSynced({ clientUploadId: item.clientUploadId, poId: item.poId, grId: receipt.receiptId, invoiceId: reg.invoiceId });
+      return reg;
     },
     [utils],
   );
@@ -177,7 +181,7 @@ export function ReceiverPwa({ restaurantId, userId }: { restaurantId: string; us
             <p className="text-sm text-muted">{t('pwa.offlineBody')}</p>
             {queued > 0 ? (
               <p className="mt-1 text-sm font-semibold" data-testid="pwa-queue-count">
-                {t('pwa.queued', { count: formatNumber(queued, locale) })}
+                {queuedText}
               </p>
             ) : null}
           </div>
@@ -195,7 +199,7 @@ export function ReceiverPwa({ restaurantId, userId }: { restaurantId: string; us
             <UploadCloud className="h-5 w-5 text-primary" aria-hidden="true" />
           )}
           <span>
-            {syncing ? t('pwa.syncing') : syncError ? t('pwa.syncFailed') : t('pwa.queued', { count: formatNumber(queued, locale) })}
+            {syncing ? t('pwa.syncing') : syncError ? t('pwa.syncFailed') : queuedText}
           </span>
         </div>
       ) : null}

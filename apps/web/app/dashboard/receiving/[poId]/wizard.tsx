@@ -21,7 +21,7 @@ import type { Translator } from '@/lib/i18n/translate';
 import { isReceiverLocale } from '@/lib/i18n/config';
 import type { UploadedScan } from '@/lib/supabase/client';
 import { ingest } from '@/lib/i18n/messages/ingest';
-import { enqueuePhoto, idbAvailable, isNetworkError } from '@/lib/pwa/offlineQueue';
+import { SYNCED_EVENT, enqueuePhoto, idbAvailable, isNetworkError, type SyncedPhotoDetail } from '@/lib/pwa/offlineQueue';
 import {
   adaptReconciliation,
   keepAdjusted,
@@ -282,29 +282,7 @@ export function ReceivingWizard({
           return;
         }
 
-        const token = ++pollTokenRef.current;
-        skipWaitRef.current = false;
-        setElapsedMs(0);
-        const { outcome, invoice } = await pollInvoiceUntilRead({
-          fetch: () => utils.receiving.getInvoice.fetch({ invoiceId: reg.invoiceId }),
-          onTick: setElapsedMs,
-          isCancelled: () => pollTokenRef.current !== token || skipWaitRef.current,
-        });
-        if (pollTokenRef.current !== token) return; // retaken meanwhile
-        if (outcome === 'ready' && invoice) {
-          await showInvoice(activeGrId, reg.invoiceId);
-        } else if (outcome === 'failed') {
-          setOcrNotice(invoice?.ocrFailureReason === 'quota_exceeded' ? 'quota' : 'failed');
-          await buildFromPoOnly(activeGrId);
-        } else {
-          // Timed out (or the receiver chose not to wait): receive against the
-          // order now, keep checking quietly, and offer the result when ready.
-          setOcrNotice('reading');
-          await buildFromPoOnly(activeGrId);
-          watchInBackground(activeGrId, reg.invoiceId, token).catch(() => {
-            // Background check only — the Refresh button stays available.
-          });
-        }
+        await pollAndShow(activeGrId, reg.invoiceId);
       } catch (err) {
         setError(errorText(err, t, locale));
         // Degrade gracefully to a PO-only table so receiving still completes.
@@ -316,6 +294,63 @@ export function ReceivingWizard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [grId, po.id, po.supplierId, locale, offlineQueue],
   );
+
+  /** A registered invoice: poll until OCR read it, then the review (or the PO-only fallback). */
+  async function pollAndShow(activeGrId: string, id: string) {
+    const token = ++pollTokenRef.current;
+    skipWaitRef.current = false;
+    setElapsedMs(0);
+    const { outcome, invoice } = await pollInvoiceUntilRead({
+      fetch: () => utils.receiving.getInvoice.fetch({ invoiceId: id }),
+      onTick: setElapsedMs,
+      isCancelled: () => pollTokenRef.current !== token || skipWaitRef.current,
+    });
+    if (pollTokenRef.current !== token) return; // retaken meanwhile
+    if (outcome === 'ready' && invoice) {
+      await showInvoice(activeGrId, id);
+    } else if (outcome === 'failed') {
+      setOcrNotice(invoice?.ocrFailureReason === 'quota_exceeded' ? 'quota' : 'failed');
+      await buildFromPoOnly(activeGrId);
+    } else {
+      // Timed out (or the receiver chose not to wait): receive against the
+      // order now, keep checking quietly, and offer the result when ready.
+      setOcrNotice('reading');
+      await buildFromPoOnly(activeGrId);
+      watchInBackground(activeGrId, id, token).catch(() => {
+        // Background check only — the Refresh button stays available.
+      });
+    }
+  }
+
+  // S13: a photo captured offline was uploaded + registered by the PWA shell
+  // (ReceiverPwa) once back online. Resume from it — without this the wizard
+  // kept the stale "saved on the phone" alert forever and a Retake uploaded a
+  // second copy of the same paper (second invoice row, second OCR charge).
+  useEffect(() => {
+    if (!offlineQueue) return;
+    const onSynced = (e: Event) => {
+      const d = (e as CustomEvent<SyncedPhotoDetail>).detail;
+      if (!d || d.poId !== po.id || !image || image.invoiceId !== `queued-${d.clientUploadId}`) return;
+      if (capturingRef.current) return;
+      capturingRef.current = true;
+      setImage({ ...image, invoiceId: d.invoiceId });
+      setGrId(d.grId);
+      setInvoiceId(d.invoiceId);
+      setError(null);
+      setStep('PROCESSING');
+      pollAndShow(d.grId, d.invoiceId)
+        .catch(async (err) => {
+          setError(errorText(err, t, locale));
+          await buildFromPoOnly(d.grId);
+        })
+        .finally(() => {
+          capturingRef.current = false;
+        });
+    };
+    window.addEventListener(SYNCED_EVENT, onSynced);
+    return () => window.removeEventListener(SYNCED_EVENT, onSynced);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offlineQueue, po.id, image, locale]);
 
   /** OCR finished: (English names if needed) → build the review from it. */
   async function showInvoice(activeGrId: string, id: string) {

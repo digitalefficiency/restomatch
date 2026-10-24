@@ -8,7 +8,7 @@ import {
   resolveAppLocale,
   resolveLocale,
 } from '../i18n/config';
-import { ALL_NAMESPACES, auth, components, nav, receiverLangs, receiving, scans } from '../i18n/messages';
+import { ALL_NAMESPACES, auth, components, ingest, nav, receiverLangs, receiving, scans } from '../i18n/messages';
 import { createTranslator, lookup, type MessageTree } from '../i18n/translate';
 
 /**
@@ -40,6 +40,8 @@ const RECEIVER: Array<{ ns: { name: string; he: MessageTree; extra?: unknown }; 
   { ns: components as never },
   { ns: receiverLangs as never },
   { ns: auth as never, roots: ['login', 'checkEmail', 'twoFactor'] },
+  // The receiver PWA (S13) speaks to the same receivers: offline banner, queue, sync.
+  { ns: ingest as never, roots: ['pwa'] },
 ];
 
 describe('receiver locale config', () => {

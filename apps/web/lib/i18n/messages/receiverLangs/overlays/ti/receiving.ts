@@ -51,6 +51,7 @@ export const receiving: Shape<typeof he> = {
       back: 'ንድሕሪት',
       bannerUploading: 'ስእሊ ይለኣኽ ኣሎ…',
       bannerSaved: 'ተዓቂቡ · {id}',
+      bannerQueued: 'ኣብ ተሌፎን ተዓቂባ · ምትእስሳር ምስ ተመልሰ ክትለኣኽ እያ',
       uploadFailed: 'ምልኣኽ ኣይሰለጠን: {message}',
       tooLarge: 'እቲ ፋይል ኣዝዩ ዓብዪ እዩ (ክሳብ {mb} MB)። ኣብ ክንዲኡ ስእሊ ፋቱራ ኣልዕሉ፡ ወይ ነቲ PDF ምቕሉዎ።',
       unsupportedType: 'ዘይድገፍ ዓይነት ፋይል። ስእሊ (JPG / PNG / WEBP) ወይ PDF ልኣኹ።',
