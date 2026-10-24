@@ -99,10 +99,13 @@ describe('job_queue lifecycle', () => {
     await insertJob(sql, Q, {}, { dedupeKey: 'cron:x:2026-09-01T07:45' });
     await insertJob(sql, Q, {}, { dedupeKey: 'plain' });
     await sql`UPDATE job_queue SET status = 'done', finished_at = now() - interval '10 days' WHERE queue = ${Q}`;
-    expect(await pruneJobs(sql, 7 * 24 * 3600_000)).toBe(1);
-    expect((await sql`SELECT dedupe_key FROM job_queue WHERE queue = ${Q}`).map((r) => r.dedupe_key)).toEqual(['cron:x:2026-09-01T07:45']);
+    // pruneJobs is global (other suites share this DB): assert on this queue's rows.
+    const keys = async () => (await sql`SELECT dedupe_key FROM job_queue WHERE queue = ${Q}`).map((r) => r.dedupe_key);
+    expect(await pruneJobs(sql, 7 * 24 * 3600_000)).toBeGreaterThanOrEqual(1);
+    expect(await keys()).toEqual(['cron:x:2026-09-01T07:45']);
     await sql`UPDATE job_queue SET finished_at = now() - interval '41 days' WHERE queue = ${Q}`;
-    expect(await pruneJobs(sql, 7 * 24 * 3600_000)).toBe(1);
+    expect(await pruneJobs(sql, 7 * 24 * 3600_000)).toBeGreaterThanOrEqual(1);
+    expect(await keys()).toEqual([]);
   });
 
   it('prunes finished jobs older than the cutoff only', async () => {
