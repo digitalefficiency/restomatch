@@ -9,14 +9,21 @@ import { expect, test, type Page } from '@playwright/test';
  * session cookie, so a request in flight during sign-out could re-plant the
  * owner's JWT (30% of sign-outs on a production build). The sign-out tombstone
  * (lib/signOutTombstone) keeps it dead. Repeated, because the race is timing-
- * dependent; it bites hardest on a production build (link prefetch) — point
- * ROLE_SWITCH_BASE_URL at a `next start` server to run it there.
+ * dependent; it bites hardest on a production build (link prefetch):
+ *   ROLE_SWITCH_BASE_URL=http://localhost:3310 pnpm exec playwright test e2e/role-switch.spec.ts
+ * against a `next start` server on the seeded demo tenant (keep ROUNDS × 2 ≤ 10 logins
+ * per 15 min, the login rate limit).
  */
 
 const PASSWORD = process.env.DEMO_PASSWORD ?? 'RestoMatch-Demo-2026!';
 const ROUNDS = Number(process.env.ROLE_SWITCH_ROUNDS ?? 3);
 
-if (process.env.ROLE_SWITCH_BASE_URL) test.use({ baseURL: process.env.ROLE_SWITCH_BASE_URL });
+const BASE = process.env.ROLE_SWITCH_BASE_URL;
+// Needs the seeded demo tenant (password logins for owner@ / receiver@kfar-hazeitim.test),
+// like i18n-sweep / demo-path. Opt-in, not in run-demo-path: 2 logins per round would
+// push the owner past the login rate limit (10 / 15 min) next to the demo legs.
+test.skip(!BASE, 'set ROLE_SWITCH_BASE_URL (a next start build on the seeded demo tenant) to run');
+test.use({ baseURL: BASE });
 
 async function signIn(page: Page, role: 'owner' | 'receiver') {
   await page.goto('/login');
