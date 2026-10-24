@@ -30,16 +30,28 @@ export const heroMedia = {
   posterSizes: '(min-width: 640px) 36rem, 100vw',
   /**
    * Full promo shown in the "Watch 60 seconds" modal (S10's film, per locale).
-   * The English cut isn't produced yet, so English viewers get the Hebrew film
-   * (no 404) — add `en: { src: '/media/promo-en-720.mp4', poster: '/media/promo-poster-en.jpg' }`
-   * when S10 delivers it. null hides the button. Nothing downloads until the modal opens.
+   * null hides the button. Nothing downloads until the modal opens.
    */
   promoVideo: {
     he: { src: '/media/promo-he-720.mp4', poster: '/media/promo-poster-he.jpg' },
+    en: { src: '/media/promo-en-720.mp4', poster: '/media/promo-poster-en.jpg' },
   } as PromoSources | null,
+  /** English hero loop (same motion, English dashboard + callouts); Hebrew is the default above. */
+  loopEn: {
+    webm: '/media/hero-loop-en.webm',
+    mp4: '/media/hero-loop-en.mp4',
+    poster: '/media/hero-poster-en.jpg',
+    posterSrcSet: '/media/hero-poster-en-768.webp 768w, /media/hero-poster-en-1280.webp 1280w',
+  },
 } as const;
 
 export type HeroMedia = typeof heroMedia;
+
+/** The hero loop + poster for this viewer's language (Hebrew is the default). */
+export function heroLoopFor(locale: Locale) {
+  if (locale === 'en') return heroMedia.loopEn;
+  return { ...heroMedia.loop, poster: heroMedia.poster, posterSrcSet: heroMedia.posterSrcSet };
+}
 
 /** The promo for this viewer's language (Hebrew cut as fallback), or null (button hidden). */
 export function promoVideoFor(locale: Locale): PromoFilm | null {
