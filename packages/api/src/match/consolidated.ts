@@ -273,8 +273,8 @@ export function deliveryNoteNumberIn(text: string | null | undefined): string | 
   if (!text) return null;
   // A RANGE ("ת.מ. 61036-61043", "61036 עד 61043") is a month line: it bills the pool.
   if (/(?:ת\.\s?מ\.?|\bDN)\s*#?\s*\d+\s*(?:[-–—]|עד|to)\s*\d+/i.test(text)) return null;
-  // So is a LIST ("ת.מ. 61036, 61037, 61038" / "61036 ו-61037").
-  if (/(?:ת\.\s?מ\.?|\bDN)\s*#?\s*\d+\s*(?:[,،;/]|ו-?)\s*\d+/i.test(text)) return null;
+  // So is a LIST ("ת.מ. 61036, 61037, 61038" / "61036 + 61037" / "61036 & 61037" / "61036 ו-61037").
+  if (/(?:ת\.\s?מ\.?|\bDN)\s*#?\s*\d+\s*(?:[,،;/+&]|ו-?|and\b)\s*\d+/i.test(text)) return null;
   const m = /ת\.\s?מ\.?\s*(\d+)/.exec(text) ?? /\bDN\s*#?\s*(\d+)/i.exec(text);
   return m ? m[1]! : null;
 }
