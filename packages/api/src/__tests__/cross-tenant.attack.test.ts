@@ -332,6 +332,7 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'recipes.changes': 'isolation',
   'recipes.setTarget': 'isolation',
   'recipes.importCsv': 'attack',
+  'recipes.posVsTheory': "isolation — recipes-pos.test.ts: A's per-dish POS totals exclude B's sales of the same item/day (pos_sales is RLS-scoped, query filters restaurant_id)",
 };
 
 function listProcedurePaths(): string[] {

@@ -12,6 +12,7 @@ import {
   recipeItems,
   recipes,
   restaurants,
+  sql,
   type Database,
 } from '@restomatch/db';
 import { appError } from '../errors';
@@ -235,4 +236,35 @@ export async function loadProducts(db: Database, restaurantId: string, ids: stri
     .from(products)
     .where(and(eq(products.restaurantId, restaurantId), inArray(products.id, ids)));
   return new Map(rows.map((r) => [r.id, r]));
+}
+
+/**
+ * POS sales per item for [from, to] (dates, inclusive) — the same aggregate as
+ * S5's `integrations.posSummary` (`pos_sales`, migration 0058). Returns null
+ * when the POS table does not exist on this database yet (the integrations
+ * wave not deployed), so food cost shows a neutral "no POS data" state instead
+ * of failing. Runs in the member transaction: RLS scopes `pos_sales` too.
+ */
+export async function loadPosSales(
+  db: Database,
+  restaurantId: string,
+  from: string,
+  to: string,
+): Promise<Array<{ itemRef: string; itemName: string; qty: string; netAmount: string }> | null> {
+  const [reg] = (await db.execute(sql`select to_regclass('public.pos_sales')::text as t`)) as unknown as Array<{ t: string | null }>;
+  if (!reg?.t) return null;
+  // The member transaction must survive a missing grant (0058 applied before the
+  // app role's grants were refreshed): probe privilege first, never throw.
+  const [can] = (await db.execute(
+    sql`select has_table_privilege(current_user, 'public.pos_sales', 'SELECT') as ok`,
+  )) as unknown as Array<{ ok: boolean }>;
+  if (!can?.ok) return null;
+  const rows = (await db.execute(sql`
+    select item_ref as "itemRef", max(item_name) as "itemName",
+           sum(qty)::numeric(14,3)::text as qty, sum(net_amount)::numeric(14,2)::text as "netAmount"
+    from pos_sales
+    where restaurant_id = ${restaurantId} and sold_on >= ${from}::date and sold_on <= ${to}::date
+    group by item_ref
+  `)) as unknown as Array<{ itemRef: string; itemName: string; qty: string; netAmount: string }>;
+  return [...rows];
 }

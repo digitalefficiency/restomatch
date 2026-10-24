@@ -32,21 +32,24 @@ import { originalProps } from '@/lib/i18n/original';
 import { LIGHT_TONE, ils, ilsDelta, pct, priceText, type Light } from './recipe-ui';
 
 type ListOutput = inferRouterOutputs<AppRouter>['recipes']['list'];
-type Tab = 'dishes' | 'changes' | 'impact' | 'import';
-const TABS: Tab[] = ['dishes', 'changes', 'impact', 'import'];
+type Tab = 'dishes' | 'changes' | 'impact' | 'import' | 'pos';
 
 export function RecipesHome({ initial, canSetTarget }: { initial: ListOutput; canSetTarget: boolean }) {
   const t = useT(recipesNs);
   const [tab, setTab] = useState<Tab>('dishes');
   const list = trpc.recipes.list.useQuery(undefined, { initialData: initial });
   const data = list.data ?? initial;
+  // The POS tab exists only when the `integrations` flag is on as well.
+  const posProbe = trpc.recipes.posVsTheory.useQuery({ month: 'current' }, { staleTime: 60_000 });
+  const showPos = !!posProbe.data && posProbe.data.reason !== 'integrationsOff';
+  const tabs: Tab[] = showPos ? ['dishes', 'changes', 'impact', 'pos', 'import'] : ['dishes', 'changes', 'impact', 'import'];
 
   return (
     <div className="space-y-6">
       <TargetBar targetBp={data.targetBp} canSetTarget={canSetTarget} />
       <Summary data={data} />
       <div role="tablist" aria-label={t('title')} className="flex gap-1 overflow-x-auto border-b border-line text-sm">
-        {TABS.map((k) => (
+        {tabs.map((k) => (
           <button
             key={k}
             role="tab"
@@ -69,6 +72,7 @@ export function RecipesHome({ initial, canSetTarget }: { initial: ListOutput; ca
         {tab === 'changes' ? <ChangesTab /> : null}
         {tab === 'impact' ? <ImpactTab /> : null}
         {tab === 'import' ? <ImportTab onDone={() => setTab('dishes')} /> : null}
+        {tab === 'pos' && showPos ? <PosTab targetBp={data.targetBp} /> : null}
       </div>
     </div>
   );
@@ -453,6 +457,137 @@ function ImpactTab() {
             </ul>
           )}
         </Card>
+      ) : null}
+    </div>
+  );
+}
+
+function PosTab({ targetBp }: { targetBp: number }) {
+  const t = useT(recipesNs);
+  const locale = useLocale();
+  const [month, setMonth] = useState<'current' | 'previous'>('current');
+  const q = trpc.recipes.posVsTheory.useQuery({ month }, { placeholderData: (p) => p });
+  const d = q.data;
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-ink">{t('pos.title')}</h2>
+          <p className="max-w-3xl text-sm text-muted">{t('pos.subtitle')}</p>
+        </div>
+        <div className="inline-flex rounded-xl border border-line bg-surface-2 p-0.5 text-sm" role="group" aria-label={t('pos.title')}>
+          {(['current', 'previous'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              aria-pressed={month === m}
+              onClick={() => setMonth(m)}
+              className={cn('rounded-lg px-3 py-1.5', month === m ? 'bg-surface font-semibold text-ink' : 'text-muted hover:text-ink')}
+            >
+              {t(`pos.month.${m}`)}
+            </button>
+          ))}
+        </div>
+      </div>
+      {!d ? <Spinner /> : null}
+      {d ? (
+        <p className="text-xs text-subtle" dir="ltr">
+          <bdi>{formatDate(d.from, locale)}</bdi> – <bdi>{formatDate(d.to, locale)}</bdi>
+        </p>
+      ) : null}
+      {d && !d.available ? (
+        <EmptyState icon={<TrendingUp className="h-6 w-6" />} title={t('pos.emptyNoData')} />
+      ) : null}
+      {d && d.available && d.rows.length === 0 ? (
+        <EmptyState icon={<TrendingUp className="h-6 w-6" />} title={t('pos.emptyNoMatch')} />
+      ) : null}
+      {d && d.available && d.rows.length > 0 ? (
+        <>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <StatCard label={t('pos.sales')} value={ils(d.totals.netSalesAgorot, locale, 0)} />
+            <StatCard label={t('pos.mixCost')} value={ils(d.totals.theoreticalCostAgorot, locale, 0)} />
+            <StatCard
+              label={t('pos.actual')}
+              value={pct(d.totals.foodCostBp, locale)}
+              tone={d.totals.foodCostBp == null ? 'neutral' : d.totals.foodCostBp <= targetBp ? 'primary' : 'warn'}
+            />
+          </div>
+          <Card padding="none" className="overflow-x-auto">
+            <table className="w-full text-sm" data-testid="pos-table">
+              <thead className="text-xs text-subtle">
+                <tr className="border-b border-line">
+                  <th scope="col" className="px-4 py-3 text-start font-semibold">{t('pos.dish')}</th>
+                  <th scope="col" className="px-4 py-3 text-end font-semibold">{t('pos.sold')}</th>
+                  <th scope="col" className="px-4 py-3 text-end font-semibold">{t('pos.avgPrice')}</th>
+                  <th scope="col" className="px-4 py-3 text-end font-semibold">{t('pos.menuFc')}</th>
+                  <th scope="col" className="px-4 py-3 text-end font-semibold">{t('pos.actualFc')}</th>
+                  <th scope="col" className="px-4 py-3 text-end font-semibold">{t('pos.gap')}</th>
+                  <th scope="col" className="px-4 py-3 text-end font-semibold">{t('pos.cost')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.rows.map((r) => (
+                  <tr key={r.recipeId} className="border-b border-line/60 last:border-0">
+                    <td className="px-4 py-3">
+                      <Link href={`/dashboard/recipes/${r.recipeId}`} className="font-medium text-ink hover:text-primary">
+                        <Name name={r.name} nameEn={r.nameEn} />
+                      </Link>
+                      {r.costIncomplete ? (
+                        <span className="mt-0.5 flex items-center gap-1 text-xs text-warn">
+                          <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                          {t('pos.incomplete')}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="px-4 py-3 text-end tabular-nums">{formatNumber(r.qtySold, locale)}</td>
+                    <td className="px-4 py-3 text-end tabular-nums">{r.avgNetPriceAgorot == null ? '—' : ils(r.avgNetPriceAgorot, locale)}</td>
+                    <td className="px-4 py-3 text-end tabular-nums text-muted">{pct(r.menuFoodCostBp, locale)}</td>
+                    <td className="px-4 py-3 text-end tabular-nums">
+                      {r.implausible ? (
+                        <span title={t('pos.implausibleHint')}>
+                          <Badge tone="warning">{t('pos.implausible')}</Badge>
+                        </span>
+                      ) : r.actualFoodCostBp == null ? (
+                        t('pos.noSales')
+                      ) : (
+                        pct(r.actualFoodCostBp, locale)
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-end">
+                      {r.gapBp == null ? (
+                        '—'
+                      ) : Math.abs(r.gapBp) < 5 ? (
+                        // Under 0.05 points rounds to "0%": say "≈0" in a neutral tone, not an amber "+0%".
+                        <Badge>≈0</Badge>
+                      ) : (
+                        <Badge tone={r.gapBp > 100 ? 'danger' : r.gapBp > 0 ? 'warning' : 'accent'}>
+                          <bdi dir="ltr" className="tabular-nums">
+                            {r.gapBp > 0 ? '+' : r.gapBp < 0 ? '−' : ''}
+                            {pct(Math.abs(r.gapBp), locale)}
+                          </bdi>
+                        </Badge>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-end tabular-nums">{ils(r.theoreticalCostAgorot, locale, 0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+          {d.unmatchedCount > 0 ? (
+            <div className="text-xs text-subtle" data-testid="pos-unmatched">
+              <p>{t('pos.unmatched', { count: formatNumber(d.unmatchedCount, locale) })}</p>
+              <ul className="mt-1 flex flex-wrap gap-1.5">
+                {d.unmatched.map((u) => (
+                  <li key={u.itemRef} className="rounded-lg border border-line px-2 py-0.5">
+                    <span {...originalProps(u.itemName)}>{u.itemName}</span>{' '}
+                    <bdi dir="ltr" className="tabular-nums text-muted">{ils(u.netSalesAgorot, locale, 0)}</bdi>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </>
       ) : null}
     </div>
   );
