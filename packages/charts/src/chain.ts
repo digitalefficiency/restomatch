@@ -1,7 +1,7 @@
 import { sql, type Database } from '@restomatch/db';
 import { computeLeakHero } from './leak-hero';
 import { parseReportMonth } from './leak-report';
-import { computeLeakSummary, viewInvoicesSql, type ViewCompare, type ViewSpec } from './leak-views';
+import { LEAK_FILTER, computeLeakSummary, viewInvoicesSql, type ViewCompare, type ViewSpec } from './leak-views';
 import { computeOwnerKpis } from './owner-kpis';
 
 /**
@@ -106,7 +106,7 @@ const num = (v: unknown): number => (v == null ? 0 : Number(v));
 const money = (v: unknown): number => Math.round(num(v) * 100) / 100;
 const strOrNull = (v: unknown): string | null => (v == null ? null : String(v));
 
-const COUNTS_AS_LEAK = sql`d.severity IN ('warn','block') AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL') AND ABS(d.delta_amount) > 0`;
+const COUNTS_AS_LEAK = sql`${LEAK_FILTER} AND ABS(d.delta_amount) > 0`;
 
 /**
  * One branch's numbers for the selected period. MUST run inside
@@ -132,7 +132,7 @@ export async function computeBranchSnapshot(
       WITH ${viewInvoicesSql(restaurantId, spec)}
       SELECT per.supplier_id, s.name, s.name_en, s.business_id,
         COUNT(*) FILTER (WHERE NOT per.pending_link) AS invoice_count,
-        COALESCE(SUM(per.total_excl) FILTER (WHERE NOT per.pending_link), 0) AS spend,
+        COALESCE(SUM(per.total_excl) FILTER (WHERE NOT per.pending_link AND NOT per.dup_copy), 0) AS spend,
         COALESCE(SUM(LEAST(per.raw_leak, per.total)), 0) AS leak
       FROM per
       LEFT JOIN suppliers s ON s.id = per.supplier_id AND s.restaurant_id = ${restaurantId}

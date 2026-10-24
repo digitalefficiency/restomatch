@@ -1,5 +1,5 @@
 import { sql, type Database } from '@restomatch/db';
-import { lineFilter, viewInvoicesSql, type ViewSpec } from './leak-views';
+import { LEAK_FILTER, LIVE_DUPLICATE, lineFilter, viewInvoicesSql, type ViewSpec } from './leak-views';
 
 /**
  * The owner's 10-second story: "₪X leaked this month, Y% of spend, Z caught
@@ -12,12 +12,14 @@ import { lineFilter, viewInvoicesSql, type ViewSpec } from './leak-views';
  *    Excluded: `info` (inside tolerance bands), PRICE_LOWER (the supplier
  *    under-charged — that's not a leak) and UNORDERED_ARRIVAL (no PO found:
  *    typically a consolidated חשבונית ריכוז or a late/early invoice — shown
- *    calmly as "waiting for a PO link", never as a false alarm).
+ *    calmly as "waiting for a PO link", never as a false alarm), and a
+ *    DUPLICATE_INVOICE the bookkeeper rejected as "not a duplicate".
  *  • Per invoice the leak is capped at the invoice total: you cannot lose more
  *    on an invoice than the invoice itself (stacked DUPLICATE + line findings).
  *  • Spend = Σ total_excl_vat of the month's CHECKED invoices (matched to a PO),
  *    so "% of spend" is leak ÷ the spend it was measured on. Invoices not yet
- *    linked to a PO (unmatched / consolidated) are "pending": in neither.
+ *    linked to a PO (unmatched / consolidated) are "pending": in neither. A
+ *    live duplicate copy is leak but not spend (its goods are the original's).
  *  • Caught before payment = leak on invoices not yet marked paid.
  *  • Recovered = the part of the leak the team accepted as a claim
  *    (resolution accepted/resolved) — same cap.
@@ -47,8 +49,6 @@ export interface LeakHeroOptions {
   /** 0 = this month, -1 = last month, … */
   monthOffset?: number;
 }
-
-const LEAK_FILTER = sql`d.severity IN ('warn','block') AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL')`;
 
 /** Shared CTEs: month bounds in the restaurant tz + the month's invoices. */
 function monthInvoicesCte(restaurantId: string, now: Date, offset: number) {
@@ -84,7 +84,8 @@ function monthInvoicesCte(restaurantId: string, now: Date, offset: number) {
         -- at all (e.g. a parsed consolidated invoice waiting to be linked).
         (NOT bool_or(mr.id IS NOT NULL))
           OR COALESCE(bool_or(d.type = 'UNORDERED_ARRIVAL' AND d.resolution_status IN ('open','escalated')), false)
-          AS pending_link
+          AS pending_link,
+        COALESCE(bool_or(${LIVE_DUPLICATE}), false) AS dup_copy
       FROM inv
       LEFT JOIN match_runs mr ON mr.invoice_id = inv.id AND mr.restaurant_id = ${restaurantId}
       LEFT JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${restaurantId}
@@ -111,7 +112,7 @@ export async function computeLeakHero(
     SELECT
       (SELECT lo FROM b) AS lo,
       (SELECT hi FROM b) AS hi,
-      COALESCE(SUM(total_excl) FILTER (WHERE NOT pending_link), 0) AS spend,
+      COALESCE(SUM(total_excl) FILTER (WHERE NOT pending_link AND NOT dup_copy), 0) AS spend,
       (SELECT COUNT(*) FROM inv) AS invoice_count,
       COUNT(*) FILTER (WHERE matched) AS matched_count,
       COALESCE(SUM(LEAST(raw_leak, total)), 0) AS leak,
@@ -149,7 +150,7 @@ export interface LeakBreakdownLine {
   deltaAmount: number;
   expected: number | null;
   actual: number | null;
-  /** Counts toward the hero leak (false for info / PRICE_LOWER / UNORDERED_ARRIVAL). */
+  /** Counts toward the hero leak (false for info / PRICE_LOWER / UNORDERED_ARRIVAL / a rejected duplicate). */
   countsAsLeak: boolean;
   productName: string | null;
   productNameEn: string | null;

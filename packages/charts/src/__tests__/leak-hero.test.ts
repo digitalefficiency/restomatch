@@ -11,6 +11,8 @@ import {
   testDbUrl,
 } from '@restomatch/db';
 import { computeLeakBreakdown, computeLeakHero } from '../leak-hero';
+import { computeLeakReport } from '../leak-report';
+import { computeLeakSummary } from '../leak-views';
 
 const db = createDb(testDbUrl());
 
@@ -235,6 +237,96 @@ describe('computeLeakHero', () => {
     const hero = await computeLeakHero(db, a.restaurantId, { now: NOW });
     expect(hero.leakIls).toBe(0);
     expect(hero.spendIls).toBe(0);
+  });
+});
+
+describe('duplicate invoices (a held, re-photographed copy)', () => {
+  // The probe from #63–#65: an original with a ₪5 over-charge, then a copy of
+  // it (same number) raised DUPLICATE_INVOICE (block) at its full value.
+  async function originalAndCopy(dupStatus: D['status']) {
+    const t = await setup();
+    await t.invoice({
+      date: THIS_MONTH,
+      exclVat: '100',
+      inclVat: '118',
+      d: [{ type: 'PRICE_HIGHER', severity: 'warn', delta: '5' }],
+    });
+    const copy = await t.invoice({
+      date: THIS_MONTH,
+      exclVat: '100',
+      inclVat: '118',
+      d: [{ type: 'DUPLICATE_INVOICE', severity: 'block', delta: '118', status: dupStatus }],
+    });
+    return { ...t, copy };
+  }
+
+  it('an open duplicate counts at the copy value, and the copy is not food spend', async () => {
+    const { restaurantId } = await originalAndCopy('open');
+    const hero = await computeLeakHero(db, restaurantId, { now: NOW });
+    expect(hero.leakIls).toBe(123);
+    // The copy bills the original's goods: the spend is the original's only.
+    expect(hero.spendIls).toBe(100);
+    expect(hero.leakPct).toBeCloseTo(1.23, 10);
+    expect(hero.invoicesWithLeak).toBe(2);
+    expect(hero.caughtBeforePaymentIls).toBe(123);
+  });
+
+  it('an escalated or accepted duplicate still counts', async () => {
+    for (const status of ['escalated', 'accepted'] as const) {
+      await resetDb();
+      const { restaurantId } = await originalAndCopy(status);
+      const hero = await computeLeakHero(db, restaurantId, { now: NOW });
+      expect(hero.leakIls, status).toBe(123);
+      expect(hero.spendIls, status).toBe(100);
+    }
+  });
+
+  it('a duplicate rejected as "not a duplicate" is no leak, and the invoice is ordinary spend', async () => {
+    const { restaurantId, copy } = await originalAndCopy('rejected');
+    const hero = await computeLeakHero(db, restaurantId, { now: NOW });
+    expect(hero.leakIls).toBe(5);
+    expect(hero.spendIls).toBe(200);
+    expect(hero.leakPct).toBeCloseTo(0.025, 10);
+    expect(hero.invoicesWithLeak).toBe(1);
+    expect(hero.caughtBeforePaymentIls).toBe(5);
+
+    const rows = await computeLeakBreakdown(db, restaurantId, { now: NOW });
+    expect(rows.map((r) => r.invoiceId)).not.toContain(copy);
+    expect(rows).toHaveLength(1);
+  });
+
+  it('other rejected findings are unaffected: still leak (waived, not claimed)', async () => {
+    const { restaurantId, invoice } = await setup();
+    await invoice({
+      date: THIS_MONTH,
+      exclVat: '1000',
+      inclVat: '1180',
+      d: [
+        { type: 'PRICE_HIGHER', severity: 'block', delta: '30', status: 'rejected' },
+        { type: 'QTY_SHORT', severity: 'warn', delta: '20', status: 'rejected' },
+        { type: 'VAT_MISMATCH', severity: 'warn', delta: '10', status: 'rejected' },
+      ],
+    });
+    const hero = await computeLeakHero(db, restaurantId, { now: NOW });
+    expect(hero.leakIls).toBe(60);
+    expect(hero.spendIls).toBe(1000);
+  });
+
+  it('view summary and monthly report agree with the hero', async () => {
+    for (const status of ['open', 'rejected'] as const) {
+      await resetDb();
+      const { restaurantId } = await originalAndCopy(status);
+      const hero = await computeLeakHero(db, restaurantId, { now: NOW });
+      expect(await computeLeakSummary(db, restaurantId, { period: 'this_month', now: NOW }), status).toEqual(hero);
+      const report = await computeLeakReport(db, restaurantId, '2026-10');
+      expect(report.hero, status).toEqual(hero);
+      const supplierSpend = report.bySupplier.reduce((a, x) => a + x.spendIls, 0);
+      expect(supplierSpend, status).toBe(hero.spendIls);
+      const typeLeak = report.byType.reduce((a, x) => a + x.amountIls, 0);
+      expect(typeLeak, status).toBe(status === 'open' ? 123 : 5);
+      // A rejected duplicate is not a "waived" leak either.
+      expect(report.status.waivedIls, status).toBe(0);
+    }
   });
 });
 

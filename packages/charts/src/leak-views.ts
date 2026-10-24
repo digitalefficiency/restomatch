@@ -9,9 +9,11 @@ type SQL = ReturnType<typeof sql>;
  *
  * Same definitions as the hero, so the default view (this month, no filters)
  * returns the hero's numbers exactly (tested):
- *  • leak = Σ|delta| of warn/block discrepancies, excluding PRICE_LOWER and
- *    UNORDERED_ARRIVAL, capped per invoice at the invoice total;
- *  • spend = Σ total_excl_vat of CHECKED invoices (matched, not pending a PO link);
+ *  • leak = Σ|delta| of the lines LEAK_FILTER counts (warn/block, excluding
+ *    PRICE_LOWER, UNORDERED_ARRIVAL and rejected duplicates), capped per
+ *    invoice at the invoice total;
+ *  • spend = Σ total_excl_vat of CHECKED invoices (matched, not pending a PO
+ *    link, not a live duplicate copy);
  *  • periods are local calendar ranges in the restaurant's timezone, by invoice date.
  *
  * Filters: `supplierIds` narrows the invoices (leak AND spend). `categories`,
@@ -120,9 +122,31 @@ function boundsCte(restaurantId: string, spec: ViewSpec, compare: ViewCompare): 
 const uuidList = (ids: string[]) => sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `);
 const textList = (vals: string[]) => sql.join(vals.map((v) => sql`${v}`), sql`, `);
 
+/**
+ * Does a discrepancy line (alias `d`) count toward the leak? warn/block only;
+ * never PRICE_LOWER (an under-charge) or UNORDERED_ARRIVAL (waiting for a PO
+ * link); and never a DUPLICATE_INVOICE a bookkeeper rejected — "not a
+ * duplicate" means no money was at risk. (Other rejected findings stay in: the
+ * money did leak, the team chose not to claim it — the report's "waived".)
+ * The single definition for the hero, views, report and chain.
+ */
+export const LEAK_FILTER: SQL = sql`d.severity IN ('warn','block')
+  AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL')
+  AND NOT (d.type = 'DUPLICATE_INVOICE' AND d.resolution_status = 'rejected')`;
+
+/**
+ * A live duplicate finding (alias `d`): the invoice is a second bill for goods
+ * another invoice already billed. Its whole value is the leak, but it is not
+ * food spend — the original already carries that spend — so it stays out of
+ * the "% of spend" denominator. Once rejected ("not a duplicate") the invoice
+ * is ordinary spend again.
+ */
+export const LIVE_DUPLICATE: SQL = sql`d.type = 'DUPLICATE_INVOICE' AND d.severity IN ('warn','block')
+  AND d.resolution_status <> 'rejected'`;
+
 /** Extra discrepancy-line conditions from the filters (on alias `d`). */
 export function lineFilter(restaurantId: string, f: ViewFilters | undefined): SQL {
-  const parts: SQL[] = [sql`d.severity IN ('warn','block') AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL')`];
+  const parts: SQL[] = [LEAK_FILTER];
   if (f?.types?.length) parts.push(sql`d.type::text IN (${textList(f.types)})`);
   if (f?.severities?.length) parts.push(sql`d.severity::text IN (${textList(f.severities)})`);
   if (f?.statuses?.length) parts.push(sql`d.resolution_status::text IN (${textList(f.statuses)})`);
@@ -160,7 +184,8 @@ function invoicesCte(restaurantId: string, f: ViewFilters | undefined): SQL {
         ), 0) AS raw_recovered,
         (NOT bool_or(mr.id IS NOT NULL))
           OR COALESCE(bool_or(d.type = 'UNORDERED_ARRIVAL' AND d.resolution_status IN ('open','escalated')), false)
-          AS pending_link
+          AS pending_link,
+        COALESCE(bool_or(${LIVE_DUPLICATE}), false) AS dup_copy
       FROM inv
       LEFT JOIN match_runs mr ON mr.invoice_id = inv.id AND mr.restaurant_id = ${restaurantId}
       LEFT JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${restaurantId}
@@ -180,7 +205,7 @@ export async function computeLeakSummary(
     SELECT
       (SELECT lo FROM b) AS lo,
       (SELECT hi FROM b) AS hi,
-      COALESCE(SUM(total_excl) FILTER (WHERE NOT pending_link), 0) AS spend,
+      COALESCE(SUM(total_excl) FILTER (WHERE NOT pending_link AND NOT dup_copy), 0) AS spend,
       (SELECT COUNT(*) FROM inv) AS invoice_count,
       COUNT(*) FILTER (WHERE matched) AS matched_count,
       COALESCE(SUM(LEAST(raw_leak, total)), 0) AS leak,
@@ -309,7 +334,7 @@ export async function computeLeakTrend(
     SELECT g.unit,
            date_trunc(g.unit, per.at AT TIME ZONE g.tz) AT TIME ZONE g.tz AS bucket,
            COALESCE(SUM(LEAST(per.raw_leak, per.total)), 0) AS leak,
-           COALESCE(SUM(per.total_excl) FILTER (WHERE NOT per.pending_link), 0) AS spend
+           COALESCE(SUM(per.total_excl) FILTER (WHERE NOT per.pending_link AND NOT per.dup_copy), 0) AS spend
     FROM per, g
     GROUP BY g.unit, bucket
     ORDER BY bucket
