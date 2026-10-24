@@ -1,7 +1,7 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
-import { Check, Copy, FileWarning, Loader2, MessageCircle } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Check, Copy, FileWarning, Loader2, MessageCircle, RefreshCw } from 'lucide-react';
 import type { ReconciliationLine } from '@/app/showcase/receiver/_mock';
 import type { LineMark } from '@/app/showcase/receiver/_state';
 import { ItemName, useUnitLabel } from '@/app/showcase/receiver/_steps/english';
@@ -14,7 +14,7 @@ import { receiving } from '@/lib/i18n/messages/receiving';
 import { approvals } from '@/lib/i18n/messages/approvals';
 import { waLink } from '@/lib/messageTemplates';
 import { discrepancyLabel } from '../../approvals/vocab';
-import { buildSlipLines, sumIls, type SlipLine } from './_dockSlip';
+import { buildSlipLines, slipBullet, sumIls, type SlipLine } from './_dockSlip';
 
 /** Stop polling for the engine after this long; the slip still shows quantities. */
 const ENGINE_WAIT_MS = 120_000;
@@ -47,18 +47,33 @@ export function DockSlip({
   const unit = useUnitLabel();
   const startedAt = useRef(Date.now());
   const [copied, setCopied] = useState(false);
+  const [gaveUp, setGaveUp] = useState(false);
 
   const q = trpc.receiving.dockSlip.useQuery(
     { grId, invoiceId },
     {
+      // Poll only while the receipt is closed and its re-match is on the way.
       refetchInterval: (query) => {
         const d = query.state.data;
-        const waiting = !!invoiceId && d?.enabled === true && !d.engine.ready;
+        const waiting = !!invoiceId && d?.enabled === true && d.engine.receiptClosed && !d.engine.ready;
         return waiting && Date.now() - startedAt.current < ENGINE_WAIT_MS ? 4_000 : false;
       },
     },
   );
   const data = q.data?.enabled ? q.data : null;
+  const waiting = !!invoiceId && !!data && data.engine.receiptClosed && !data.engine.ready;
+  // After ENGINE_WAIT_MS stop the spinner: a calm note + a manual refresh.
+  useEffect(() => {
+    if (!waiting || gaveUp) return;
+    const left = ENGINE_WAIT_MS - (Date.now() - startedAt.current);
+    const timer = setTimeout(() => setGaveUp(true), Math.max(0, left));
+    return () => clearTimeout(timer);
+  }, [waiting, gaveUp]);
+  function refresh() {
+    startedAt.current = Date.now();
+    setGaveUp(false);
+    void q.refetch();
+  }
 
   const slipLines = useMemo(
     () => buildSlipLines(lines, marks, data?.engine.lines ?? []),
@@ -102,7 +117,7 @@ export function DockSlip({
     ...(dup ? [t('dockSlip.duplicate', { number: dup })] : []),
     '',
     ...slipLines.map(
-      (l) => `• ${name(l)}: ${issueTexts(l).join('; ')}${l.amountIls !== null ? ` — ${money(l.amountIls)}` : ''}`,
+      (l) => slipBullet(name(l), issueTexts(l), l.amountIls !== null ? money(l.amountIls) : null),
     ),
     ...(total > 0 ? ['', `${t('dockSlip.total')}: ${money(total)}`] : []),
   ].join('\n');
@@ -191,11 +206,27 @@ export function DockSlip({
         ))}
       </ul>
 
-      {invoiceId && !data.engine.ready ? (
+      {invoiceId && !data.engine.receiptClosed ? (
+        <p className="mt-2 text-xs text-muted" data-testid="dock-slip-after-close">
+          {t('dockSlip.afterClose')}
+        </p>
+      ) : invoiceId && !data.engine.ready && !gaveUp ? (
         <p className="mt-2 flex items-center gap-2 text-xs text-muted" data-testid="dock-slip-computing">
           <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
           {t('dockSlip.computing')}
         </p>
+      ) : invoiceId && !data.engine.ready ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted" data-testid="dock-slip-slow">
+          <span>{t('dockSlip.slow')}</span>
+          <button
+            type="button"
+            onClick={refresh}
+            className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface-2 px-2.5 py-1 font-medium text-ink"
+          >
+            <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+            {t('dockSlip.refresh')}
+          </button>
+        </div>
       ) : null}
 
       {total > 0 ? (

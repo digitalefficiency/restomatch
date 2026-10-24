@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ReconciliationLine } from '@/app/showcase/receiver/_mock';
 import { lineKey, type LineMark } from '@/app/showcase/receiver/_state';
-import { buildSlipLines, lineIssues, needsSlip, sumIls, type EngineSlipLine } from '../_dockSlip';
+import { buildSlipLines, lineIssues, needsSlip, slipBullet, sumIls, type EngineSlipLine } from '../_dockSlip';
 
 const line = (o: Partial<ReconciliationLine>): ReconciliationLine => ({
   invoiceLineIndex: 0,
@@ -97,5 +97,17 @@ describe('dock slip — ₪ only from the engine', () => {
   it('sums in agorot (no float drift)', () => {
     expect(sumIls([0.1, 0.2])).toBe(0.3);
     expect(sumIls([194.4, 0.01, 12.96])).toBe(207.37);
+  });
+});
+
+describe('dock slip — shared text', () => {
+  it('an item line reads "name: issues — ₪"', () => {
+    expect(slipBullet('עגבניות', ['חסר 2', 'מחיר גבוה'], '₪25.00')).toBe('• עגבניות: חסר 2; מחיר גבוה — ₪25.00');
+  });
+  it('an invoice-level finding (no item name) has no empty "• :" prefix', () => {
+    expect(slipBullet('', ['אי־התאמה במע״מ'], '₪4.10')).toBe('• אי־התאמה במע״מ — ₪4.10');
+  });
+  it('no engine ₪ → no amount', () => {
+    expect(slipBullet('מלפפון', ['חסר 1'], null)).toBe('• מלפפון: חסר 1');
   });
 });

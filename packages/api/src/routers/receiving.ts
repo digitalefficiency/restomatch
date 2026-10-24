@@ -307,9 +307,10 @@ export const receivingRouter = router({
       const [gr] = await ctx.db
         .select({
           grId: goodsReceipts.id,
+          status: goodsReceipts.status,
+          closedAt: goodsReceipts.updatedAt,
           receivedAt: goodsReceipts.receivedAt,
-          receiverName: users.name,
-          receiverEmail: users.email,
+          receivedBy: goodsReceipts.receivedBy,
           poId: purchaseOrders.id,
           poRef: purchaseOrders.sourceRef,
           supplierName: suppliers.name,
@@ -325,13 +326,31 @@ export const receivingRouter = router({
           suppliers,
           and(eq(suppliers.id, purchaseOrders.supplierId), eq(suppliers.restaurantId, restaurantId)),
         )
-        .leftJoin(users, eq(users.id, goodsReceipts.receivedBy))
         .where(and(eq(goodsReceipts.id, input.grId), eq(goodsReceipts.restaurantId, restaurantId)))
         .limit(1);
       if (!gr) throw new TRPCError({ code: 'NOT_FOUND', message: 'Receipt not found' });
+      // The receiver's name: users is self-only under RLS, so it is read only when
+      // the viewer IS the receiver (the person at the dock). Anyone else gets no
+      // name rather than a name that would vanish in production.
+      let receiverName: string | null = null;
+      if (gr.receivedBy && gr.receivedBy === ctx.session.userId) {
+        const [me] = await ctx.db
+          .select({ name: users.name, email: users.email })
+          .from(users)
+          .where(eq(users.id, ctx.session.userId))
+          .limit(1);
+        receiverName = me?.name ?? me?.email ?? null;
+      }
+      // ₪ only from a match run made AFTER the count: a run from before the
+      // receipt was closed saw gr_lines empty (every line "short") and must
+      // never reach the slip or its WhatsApp text.
+      const receiptClosed = gr.status === 'completed' || gr.status === 'partial';
 
       let invoice: { id: string; number: string | null; duplicateOfNumber: string | null } | null = null;
       let engine: {
+        /** The count is in (receipt submitted). Before that the slip shows quantities only. */
+        receiptClosed: boolean;
+        /** A match run for this receipt from after it closed exists — the ₪ below is final. */
         ready: boolean;
         totalIls: number;
         lines: Array<{
@@ -348,7 +367,7 @@ export const receivingRouter = router({
           actual: number | null;
           amountIls: number;
         }>;
-      } = { ready: false, totalIls: 0, lines: [] };
+      } = { receiptClosed, ready: false, totalIls: 0, lines: [] };
 
       if (input.invoiceId) {
         const [inv] = await ctx.db
@@ -359,11 +378,21 @@ export const receivingRouter = router({
         if (!inv) throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
         invoice = { id: inv.id, number: inv.number, duplicateOfNumber: readDuplicateOf(inv.ocrPayload)?.invoiceNumber ?? null };
 
-        const leak = await computeInvoiceLeak(ctx.db, restaurantId, inv.id);
-        const [{ runs } = { runs: 0 }] = await ctx.db
-          .select({ runs: count() })
-          .from(matchRuns)
-          .where(and(eq(matchRuns.invoiceId, inv.id), eq(matchRuns.restaurantId, restaurantId)));
+        const [{ runs } = { runs: 0 }] = receiptClosed
+          ? await ctx.db
+              .select({ runs: count() })
+              .from(matchRuns)
+              .where(
+                and(
+                  eq(matchRuns.invoiceId, inv.id),
+                  eq(matchRuns.restaurantId, restaurantId),
+                  eq(matchRuns.grId, gr.grId),
+                  gte(matchRuns.runAt, gr.closedAt),
+                ),
+              )
+          : [];
+        const ready = Number(runs) > 0;
+        const leak = ready ? await computeInvoiceLeak(ctx.db, restaurantId, inv.id) : null;
         const claim = leak ? claimableLines(leak) : [];
         const lines = claim.map(({ line, amount }) => ({
           discrepancyId: line.discrepancyId,
@@ -382,7 +411,7 @@ export const receivingRouter = router({
         }));
         // Summed in agorot so the total is exact.
         const totalIls = lines.reduce((acc, l) => acc + Math.round(l.amountIls * 100), 0) / 100;
-        engine = { ready: Number(runs) > 0, totalIls, lines };
+        engine = { receiptClosed, ready, totalIls, lines };
       }
 
       return {
@@ -394,7 +423,7 @@ export const receivingRouter = router({
           poId: gr.poId,
           poRef: gr.poRef,
           receivedAt: gr.receivedAt,
-          receiverName: gr.receiverName ?? gr.receiverEmail ?? null,
+          receiverName,
         },
         invoice,
         engine,

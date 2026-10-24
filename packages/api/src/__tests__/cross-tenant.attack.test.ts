@@ -1013,6 +1013,22 @@ describe('receiving.dockSlip: foreign id attacks (A → B)', () => {
       callerFor(A).receiving.dockSlip({ grId: A.grId, invoiceId: B.invoiceId }),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
+  it("A off (a real boolean false) while B is on ⇒ A gets enabled:false", async () => {
+    const setFlag = async (t: Tenant, on: boolean) => {
+      const [r] = await db.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, t.restaurantId));
+      const prev = (r?.settings as { features?: Record<string, boolean> } | undefined)?.features ?? {};
+      const settings = { ...(r?.settings ?? {}), features: { ...prev, dockSlip: on } };
+      await db.update(restaurants).set({ settings }).where(eq(restaurants.id, t.restaurantId));
+    };
+    await setFlag(A, false);
+    await setFlag(B, true);
+    try {
+      expect(await callerFor(A).receiving.dockSlip({ grId: A.grId, invoiceId: A.invoiceId })).toEqual({ enabled: false });
+      expect((await callerFor(B).receiving.dockSlip({ grId: B.grId })).enabled).toBe(true);
+    } finally {
+      await setFlag(A, true);
+    }
+  });
   it("B's flag does not open A's data, and A only ever sees its own engine lines", async () => {
     await enableDockSlip(A);
     await enableDockSlip(B);

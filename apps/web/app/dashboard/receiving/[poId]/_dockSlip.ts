@@ -131,3 +131,8 @@ export function sumIls(values: number[]): number {
 export function needsSlip(slipLines: SlipLine[], duplicateNumber: string | null): boolean {
   return Boolean(duplicateNumber) || slipLines.length > 0;
 }
+
+/** One line of the shared slip text; invoice-level findings (VAT / total / duplicate) have no item name. */
+export function slipBullet(name: string, issues: string[], amount: string | null): string {
+  return `• ${name ? `${name}: ` : ''}${issues.join('; ')}${amount !== null ? ` — ${amount}` : ''}`;
+}
