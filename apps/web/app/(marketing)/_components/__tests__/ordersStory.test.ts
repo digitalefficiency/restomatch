@@ -28,6 +28,8 @@ describe('landing orders story', () => {
       expect(note).toMatch(/1\.5%/);
       expect(note).toMatch(/חד-פעמי|one-time/);
       expect(note).toMatch(/יעד|target/);
+      // It is the fictional product tour, never the live demo restaurant.
+      expect(note).toMatch(/בדויים|fictional/);
     }
   });
 });

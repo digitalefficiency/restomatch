@@ -211,7 +211,7 @@ export const en: Shape<typeof he> = {
       perKg: '{price} / kg',
       gap: 'Gap',
       gapValue: '{amount} on one line',
-      note: 'An example from the demo ({supplier}, {po}). It is a one-time gap on one delivery, not a monthly figure. Our pilot target for the monthly leak is 1.5% of purchasing.',
+      note: 'An example from the product tour, on fictional data ({supplier}, {po}). It is a one-time gap on one delivery, not a monthly figure. Our pilot target for the monthly leak is 1.5% of purchasing.',
     },
     cta: {
       trust: 'Full isolation between restaurants · Two-factor sign-in · Designed for Amendment 13',
