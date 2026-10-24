@@ -23,6 +23,7 @@ import {
   BreakdownChart,
   DEFAULT_VIEW,
   DeltaBadge,
+  isThinBase,
   TvMode,
   ViewToolbar,
   bucketLabel,
@@ -77,6 +78,8 @@ export default async function DashboardPage({
   const hero = summary.current;
   // A comparison period with no invoices has nothing to compare against.
   const previous = summary.previous && summary.previous.invoiceCount > 0 ? summary.previous : null;
+  // A comparison period with almost no data gets a calm ₪ difference, not a % alarm.
+  const thinBase = previous ? isThinBase(hero.spendIls, previous.spendIls) : false;
 
   // Leak grid is owner-only; other roles simply won't see this section. If the
   // feature is gated behind a paid plan, surface a compact upsell teaser rather
@@ -123,7 +126,17 @@ export default async function DashboardPage({
       value={formatNumber(kpis.pendingApprovalsCount, locale)}
       tone={kpis.pendingApprovalsCount > 0 ? 'warning' : 'neutral'}
       icon={<ClipboardCheck className="h-5 w-5" />}
-      subtitle={t('kpis.pendingHint')}
+      subtitle={
+        // T2: when decisions wait, the card (already a link to the queue) says so.
+        kpis.pendingApprovalsCount > 0 && canDecide ? (
+          <span className="inline-flex items-center gap-1 font-semibold text-primary">
+            {t('kpis.pendingCta')}
+            <ArrowLeft className="h-3.5 w-3.5 ltr:-scale-x-100" aria-hidden="true" />
+          </span>
+        ) : (
+          t('kpis.pendingHint')
+        )
+      }
     />
   );
 
@@ -169,9 +182,9 @@ export default async function DashboardPage({
         delta={
           view.compare !== 'off' ? (
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-              <DeltaBadge current={hero.leakIls} previous={previous?.leakIls} compare={view.compare} showAmount />
+              <DeltaBadge current={hero.leakIls} previous={previous?.leakIls} compare={view.compare} thinBase={thinBase} showAmount />
               {previous ? (
-                <DeltaBadge current={hero.spendIls} previous={previous.spendIls} compare={view.compare} neutral />
+                <DeltaBadge current={hero.spendIls} previous={previous.spendIls} compare={view.compare} thinBase={thinBase} neutral />
               ) : null}
             </div>
           ) : null
@@ -190,6 +203,7 @@ export default async function DashboardPage({
             rows={trendRows}
             chart={view.chart}
             density={view.density}
+            thinBase={thinBase}
             caption={tv('trend.title')}
             keyHeader={tv('trend.colBucket')}
             valueHeader={tv('trend.colLeak')}
