@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createDb, eq, leads, leakCheckOcrUsage, leakCheckSessions, testDbUrl } from '@restomatch/db';
+import { createDb, eq, leads, leakCheckOcrUsage, leakCheckSessions, sql, testDbUrl } from '@restomatch/db';
 import { leakCheck as lc } from '@restomatch/api';
 import { GLOBAL_SUBMIT_LIMIT, handleChallenge, handleLead, handleSubmit } from '@/lib/leakCheck/handlers';
 import { enforceRateLimit } from '@/lib/rateLimit';
@@ -10,13 +10,18 @@ import { enforceRateLimit } from '@/lib/rateLimit';
  * Drives the three public handlers the way an attacker would: with the gate
  * off, cross-origin, without / with a replayed proof of work, past the rate
  * limits, with a honeypot, with non-invoice bytes and oversize bodies, with
- * forged result links, and against the daily Claude budget. The in-memory
- * rate-limit store is per process, so each test uses its own client IP.
+ * forged result links, and against the daily Claude budget. Each test uses its
+ * own client IPs, and the leak-check counters are cleared before and after the
+ * suite: with a database configured the store is Postgres (0061
+ * rate_limit_counters), which outlives the process — a re-run within the hour
+ * would otherwise start over the limits (and the site-wide cap) of the last run.
  */
 const db = createDb(testDbUrl());
 const ORIGIN = 'http://localhost:3000';
 let ipSeq = 10;
-const nextIp = () => `198.51.100.${ipSeq++}`;
+/** Unique per run as well (198.18.0.0/15, the benchmarking range; a random third octet per run). */
+const RUN_OCTET = Math.floor(Math.random() * 256);
+const nextIp = () => `198.${18 + (Math.floor(ipSeq / 250) % 2)}.${RUN_OCTET}.${(ipSeq++ % 250) + 1}`;
 
 function post(path: string, body: BodyInit | null, ip: string, headers: Record<string, string> = {}) {
   return new Request(`${ORIGIN}${path}`, {
@@ -62,10 +67,18 @@ async function submitForm(
   return handleSubmit(await postForm('/api/leak-check/submit', fd, ip));
 }
 
+/** Every leak-check limiter key ('lc-challenge:…', 'lc-submit-global:all:…', …). */
+const clearLeakCheckCounters = async () => {
+  if (await db.execute(sql`select to_regclass('public.rate_limit_counters') is not null as ok`).then((r) => (r as unknown as Array<{ ok: boolean }>)[0]?.ok)) {
+    await db.execute(sql`DELETE FROM rate_limit_counters WHERE key LIKE 'lc-%'`);
+  }
+};
+
 beforeAll(async () => {
   process.env.LEAK_CHECK_PUBLIC = '1';
   delete process.env.FEATURES_OFF;
   await db.delete(leakCheckOcrUsage);
+  await clearLeakCheckCounters();
 });
 
 beforeEach(() => {
@@ -74,6 +87,7 @@ beforeEach(() => {
 });
 
 afterAll(async () => {
+  await clearLeakCheckCounters();
   await db.delete(leakCheckOcrUsage);
   await db.delete(leads).where(eq(leads.source, 'leak-check'));
 });
