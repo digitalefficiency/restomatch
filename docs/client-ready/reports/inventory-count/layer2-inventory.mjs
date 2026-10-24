@@ -52,10 +52,10 @@ try {
     await card.waitFor({ timeout: 15000 });
     await page.getByTestId('food-cost-actual').waitFor({ timeout: 15000 });
     const ct = await card.innerText();
-    check(/30[.,]2\s?%/.test(ct), `${tag} period: 30.2% actual food cost`);
-    check(/11,134|11,134/.test(ct.replace(/[‎‏]/g, '')) && /43,939/.test(ct.replace(/[‎‏]/g, '')) && /13,474/.test(ct.replace(/[‎‏]/g, '')), `${tag} period formula ₪11,134 + ₪43,939 − credits ₪464 − ₪13,474`);
+    check(/31([.,]0)?\s?%/.test(ct), `${tag} period: 31.0% actual food cost`);
+    check(/11,134|11,134/.test(ct.replace(/[‎‏]/g, '')) && /45,098/.test(ct.replace(/[‎‏]/g, '')) && /13,474/.test(ct.replace(/[‎‏]/g, '')), `${tag} period formula ₪11,134 + ₪45,098 − credits ₪464 − ₪13,474`);
     check(/136,400/.test(ct.replace(/[‎‏]/g, '')), `${tag} period sales ₪136,400 (manual)`);
-    check(ct.includes(locale === 'he' ? 'תעודות משלוח' : 'delivery notes'), `${tag} unbilled delivery notes shown as info`);
+    check(ct.includes(locale === 'he' ? 'תעודות משלוח' : 'delivery notes'), `${tag} purchases on receipt dates explained`);
     const hist = await page.getByTestId('count-history').innerText();
     check(/13,474/.test(hist.replace(/[‎‏]/g, '')) && /11,134/.test(hist.replace(/[‎‏]/g, '')), `${tag} history lists both counts with ₪ value`);
     await audit(page, `${tag} /dashboard/inventory`, phone);
@@ -71,7 +71,7 @@ try {
     // recipes page KPI card
     await page.goto(`${BASE}/dashboard/recipes`);
     await page.getByTestId('food-cost-actual').waitFor({ timeout: 15000 });
-    check(/30[.,]2\s?%/.test(await page.getByTestId('food-cost-period').innerText()), `${tag} recipes page: actual food cost card 30.2%`);
+    check(/31([.,]0)?\s?%/.test(await page.getByTestId('food-cost-period').innerText()), `${tag} recipes page: actual food cost card 31.0%`);
     await audit(page, `${tag} /dashboard/recipes (with period card)`, phone);
     // count screen (creates a draft; discarded at the end)
     await page.goto(`${BASE}/dashboard/inventory`);
