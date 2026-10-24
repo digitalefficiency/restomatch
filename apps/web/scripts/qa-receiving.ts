@@ -561,6 +561,101 @@ async function main() {
     await ctx.close();
   });
 
+  // ── Demo path (DEMO-PACK 11:45): HaSharon Produce, real worker + dev OCR stub.
+  // Seed first: DEMO_TODAY=2026-10-25 ./scripts/dev-setup.sh. Each combo works on
+  // a clone of the seeded HaSharon PO so the demo PO itself stays untouched.
+  async function cloneHaSharon(tag: string): Promise<{ poId: string; names: string[]; namesEn: string[] }> {
+    const [sup] = await db.select().from(suppliers).where(eq(suppliers.nameEn, 'HaSharon Produce')).limit(1);
+    if (!sup) throw new Error('HaSharon Produce not seeded');
+    restaurantId = sup.restaurantId;
+    const [src] = await db
+      .select()
+      .from(purchaseOrders)
+      .where(and(eq(purchaseOrders.supplierId, sup.id), eq(purchaseOrders.status, 'sent')))
+      .orderBy(desc(purchaseOrders.expectedDeliveryAt))
+      .limit(1);
+    if (!src) throw new Error('no open HaSharon PO — re-seed');
+    const srcLines = await db.select().from(poLines).where(eq(poLines.poId, src.id));
+    const { id: _id, createdAt: _c, updatedAt: _u, ...poCopy } = src as typeof src & { createdAt?: unknown; updatedAt?: unknown };
+    const [po] = await db.insert(purchaseOrders).values({ ...poCopy, notes: `qa-demo-${tag}` }).returning();
+    await db.insert(poLines).values(
+      srcLines.map(({ id: _l, poId: _p, ...l }) => ({ ...l, poId: po!.id })),
+    );
+    return {
+      poId: po!.id,
+      names: srcLines.map((l) => l.rawDescription ?? ''),
+      namesEn: srcLines.map((l) => l.rawDescriptionEn ?? '').filter(Boolean),
+    };
+  }
+
+  async function visibleCount(loc: ReturnType<Page['locator']>): Promise<number> {
+    let n = 0;
+    for (const el of await loc.all()) if (await el.isVisible()) n += 1;
+    return n;
+  }
+
+  const DEMO_COMBOS: Array<{ id: string; role: Role; locale: 'he' | 'en'; mobile: boolean }> = [
+    { id: 'DEMO-en-phone', role: 'receiver', locale: 'en', mobile: true },
+    { id: 'DEMO-he-desktop', role: 'manager', locale: 'he', mobile: false },
+    { id: 'DEMO-en-desktop', role: 'owner', locale: 'en', mobile: false },
+    { id: 'DEMO-he-phone', role: 'receiver', locale: 'he', mobile: true },
+  ];
+  for (const combo of DEMO_COMBOS) {
+    const he = combo.locale === 'he';
+    await scenario(combo.id, `${combo.role} · ${combo.locale} · ${combo.mobile ? '390px' : 'desktop'} — HaSharon Produce: inbox → photo → OCR → review → close`, async (check) => {
+      const { ctx, page } = await session(combo.role, { mobile: combo.mobile, locale: combo.locale });
+      const errors: string[] = [];
+      page.on('pageerror', (e) => errors.push(e.message));
+      page.on('console', (m) => {
+        if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push(m.text());
+      });
+      await page.goto(`${BASE}/dashboard/receiving`);
+      const card = page.getByText(he ? /ירקות השרון/ : /HaSharon Produce/).first();
+      await card.waitFor();
+      check(true, 'inbox lists HaSharon Produce');
+      const demo = await cloneHaSharon(combo.id);
+      await openWizard(page, demo.poId);
+      await pick(page, 'IMG_hasharon.jpg', 'image/jpeg', fx.bigJpeg);
+      await waitUploaded(page);
+      await page.getByRole('button', { name: PROCESS }).click();
+      await waitReview(page);
+      // Every PO line exactly once (no duplicated cards/rows on any width).
+      for (const n of demo.names) {
+        const c = await visibleCount(page.getByText(n, { exact: true }));
+        check(c === 1, `"${n}" shown once (got ${c})`);
+      }
+      if (!he) {
+        await page.getByTestId('item-name-en').filter({ hasText: 'Cherry tomatoes' }).first().waitFor();
+        check(true, 'English names (Cherry tomatoes) with the Hebrew original');
+      }
+      check(await visibleCount(page.getByTestId('recon-section-both')) === 1, 'one "on both" section');
+      check((await page.getByTestId('recon-mismatch-banner').count()) === 0, 'no mismatch banner');
+      check((await page.getByRole('alert').count()) === 0, 'no error alert');
+      await shot(page, `${combo.id}-review`);
+      await page.getByTestId('continue-adjust').click();
+      for (let pass = 0; pass < 3; pass += 1) {
+        for (const c of await page.locator('.adjust-card').all()) {
+          if (!(await c.isVisible())) continue;
+          const btn = c.getByRole('button', { name: he ? /^= חשבונית/ : /^= invoice/ });
+          const alt = c.getByRole('button', { name: he ? /^= הזמנה/ : /^= order/ });
+          if (await btn.isVisible().catch(() => false)) await btn.click();
+          else if (await alt.isVisible().catch(() => false)) await alt.click();
+        }
+        if (await page.getByTestId('close-receipt').isEnabled()) break;
+      }
+      const cta = page.getByTestId('close-receipt');
+      check(await unobstructed(page, cta), '"Close receipt" is not covered');
+      await shot(page, `${combo.id}-adjust`);
+      await cta.click();
+      await page.getByTestId('receipt-confirmed').waitFor({ timeout: 60_000 });
+      await shot(page, `${combo.id}-confirmed`);
+      const [gr] = await db.select().from(goodsReceipts).where(eq(goodsReceipts.poId, demo.poId));
+      check(gr?.status === 'completed' || gr?.status === 'partial', `receipt closed (${gr?.status})`);
+      check(errors.length === 0, `no console/page errors${errors.length ? `: ${errors[0]}` : ''}`);
+      await ctx.close();
+    });
+  }
+
   await browser.close();
   const pass = results.filter((r) => r.status === 'PASS').length;
   await writeFile(join(OUT, `${process.env.QA_RUN ?? 'receiving-qa'}.json`), JSON.stringify({ base: BASE, at: new Date().toISOString(), pass, total: results.length, results }, null, 2));
