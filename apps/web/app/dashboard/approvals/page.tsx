@@ -47,7 +47,7 @@ export default async function ApprovalsPage({
         subtitle={t('subtitle')}
         action={
           showPayRun ? (
-            <LinkButton href="/dashboard/approvals/pay-run" variant="secondary" size="sm" className="min-h-11 sm:min-h-0" data-testid="approvals-payrun-link">
+            <LinkButton href="/dashboard/approvals/pay-run" variant="secondary" size="sm" className="touch-target" data-testid="approvals-payrun-link">
               <ReceiptText className="h-4 w-4" aria-hidden="true" />
               {tp('open')}
             </LinkButton>
