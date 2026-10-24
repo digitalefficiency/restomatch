@@ -134,3 +134,18 @@ web/worker runtime):
 | GHSA-86w9-cpqp-85rv | node-forge ≤1.4.0 | high | `apps/mobile › expo › @expo/cli` — local dev-server certificate tooling; no signature verification of untrusted input in production. |
 
 Result: `pnpm audit --prod --audit-level=high` → 0 unignored high/critical (117 → 35 total findings).
+
+## 2026-10-24 refresh (post-demo)
+
+Two new advisories turned the gate red on every branch:
+
+| Package | Fix |
+|---|---|
+| next | **Fixed**: `apps/web` `next` + `eslint-config-next` 15.5.25 → **15.5.28** (GHSA-2464-fhr4-w9xw **critical**: unauthenticated RCE in the Image Optimization API with SVG; GHSA-p3m5-59mp-jv5r high: Server Actions DoS). Production ran the vulnerable version until this lands. |
+
+Newly **baselined** (no patched release in the major we use):
+
+| GHSA | Package | Sev | Why acceptable, and until when |
+|---|---|---|---|
+| GHSA-mrhx-c7xc-m3w5 | zod <4.6.6 (we use ^3.24.1; the only fix is zod ≥4.6.6) | high | Memory exhaustion while validating *oversized constrained collections*. On `main` the only unauthenticated tRPC procedures are `leads.*` and `plans.*`, whose inputs contain no arrays/records/sets/maps; every other input needs a session, and Vercel caps request bodies at 4.5 MB. **Expires with the zod 4 migration** (tracked follow-up). Any new public endpoint that validates a collection must cap the raw body size before zod parses it, or this exception no longer holds. **Wave-1 public zod inputs (checked at the wave-1 integration):** `growth.pricing` (public tRPC query; `{cycle, branches}` scalars only, no collections); `/api/ingest/whatsapp/[token]` and `/api/ingest/email` (zod parses the payload's arrays only *after* the raw body is read with a hard cap — `INGEST_LIMITS.whatsappBodyBytes` 256 KB / `emailBodyBytes` 20 MB, `packages/api/src/ingest/http.ts` `readBody` → 413 — and after the X-Hub-Signature-256 / Standard-Webhooks HMAC check; every array in `packages/ingest/src/payloads.ts` is also `.max()`-bounded). The public leak check (`/api/leak-check/*`) does not use zod (body capped at `MAX_BODY_BYTES` 4.4 MB). |
+
