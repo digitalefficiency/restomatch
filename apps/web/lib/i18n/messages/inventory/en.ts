@@ -69,6 +69,7 @@ export const en: Shape<typeof he> = {
     ofSales: 'of sales',
     formula: 'Opening stock {opening} + purchases {purchases} − closing stock {closing}',
     purchasesNote: '{count} invoices, before VAT. Left out: disposables & cleaning {nonFood} · duplicates {dups} · credits received {credits}.',
+    accruedNote: 'Includes {count} delivery notes received but not billed yet ({value}, at order prices) — they’ll be on the consolidated invoice.',
     sales: 'Food sales (before VAT)',
     salesPos: 'from the POS',
     salesManual: 'entered by hand',

@@ -67,6 +67,7 @@ export const he = {
     ofSales: 'מהמכירות',
     formula: 'מלאי פתיחה {opening} + קניות {purchases} − מלאי סגירה {closing}',
     purchasesNote: '{count} חשבוניות, לפני מע״מ. לא כולל: חד״פ וניקיון {nonFood} · כפילויות {dups} · זיכויים שהתקבלו {credits}.',
+    accruedNote: 'כולל {count} תעודות משלוח שהגיעו ועוד לא חויבו ({value}, לפי מחירי ההזמנה) — ייכנסו לחשבונית המרכזת.',
     sales: 'מכירות מזון (לפני מע״מ)',
     salesPos: 'מהקופה',
     salesManual: 'הוזן ידנית',

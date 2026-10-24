@@ -2,6 +2,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   createDb,
   discrepancies,
+  goodsReceipts,
+  grLines,
+  poLines,
+  purchaseOrders,
   eq,
   inventoryCounts,
   invoiceLines,
@@ -16,7 +20,7 @@ import {
 } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
-import { localToday } from '../inventory/data';
+import { localToday, purchasesInPeriod } from '../inventory/data';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 
 /**
@@ -258,5 +262,47 @@ describe('inventory: flag + roles', () => {
     await db.delete(restaurants).where(eq(restaurants.id, C.restaurantId));
     const rows = (await db.execute(sql`select count(*)::int as n from inventory_counts where id = ${d.id}`)) as unknown as Array<{ n: number }>;
     expect(rows[0]?.n).toBe(0);
+  });
+});
+
+describe('inventory: delivery notes billed later on a consolidated invoice count exactly once', () => {
+  it('accrued in the period they arrive (PO prices, food only), reversed when the consolidated invoice lands', async () => {
+    const D = await seedTenant(db, 'ID');
+    await db.delete(invoices).where(eq(invoices.restaurantId, D.restaurantId));
+    const milk = await product(D, 'חלב', 'ליטר', 'מוצרי חלב');
+    const cups = await product(D, 'כוסות', 'חבילה', 'חד״פ');
+    const note = async (dn: string, daysAgo: number) => {
+      const [po] = await db.insert(purchaseOrders).values({ restaurantId: D.restaurantId, supplierId: D.supplierId, status: 'closed' }).returning();
+      const [ml] = await db.insert(poLines).values({ poId: po!.id, productId: milk, rawDescription: 'חלב', qtyOrdered: '10', unit: 'ליטר', unitPriceExpected: '5.0000' }).returning();
+      const [cl] = await db.insert(poLines).values({ poId: po!.id, productId: cups, rawDescription: 'כוסות', qtyOrdered: '1', unit: 'חבילה', unitPriceExpected: '30.0000' }).returning();
+      const [gr] = await db.insert(goodsReceipts).values({ restaurantId: D.restaurantId, poId: po!.id, receivedAt: atAgo(daysAgo), status: 'completed', notes: `ת.מ. ${dn}` }).returning();
+      // 10 L received, 2 L rejected → 8 L × ₪5 = ₪40 food; the cups (non-food) stay out.
+      await db.insert(grLines).values([
+        { grId: gr!.id, poLineId: ml!.id, productId: milk, qtyReceived: '10', qtyRejected: '2' },
+        { grId: gr!.id, poLineId: cl!.id, productId: cups, qtyReceived: '1' },
+      ]);
+    };
+    await note('7001', 20);
+    await note('7002', 18);
+    // The consolidated invoice for both notes arrives 10 days ago: ₪80 food (+₪0 non-food on its lines here).
+    await db.insert(invoices).values({
+      restaurantId: D.restaurantId,
+      supplierId: D.supplierId,
+      source: 'manual',
+      invoiceNumber: 'GD-M-TEST',
+      invoiceDate: atAgo(10),
+      totalExclVat: '80.00',
+      totalInclVat: '94.40',
+      status: 'parsed',
+      ocrPayload: { raw: { deliveryNotes: [{ number: '7001' }, { number: '7002' }] } } as never,
+    });
+    const p1 = await purchasesInPeriod(db, D.restaurantId, TZ, ymdAgo(30), ymdAgo(15));
+    expect(p1).toMatchObject({ invoiceCount: 0, accruedAgorot: 8_000, accruedNotes: 2, reversedAgorot: 0, purchasesAgorot: 8_000 });
+    const p2 = await purchasesInPeriod(db, D.restaurantId, TZ, ymdAgo(15), today);
+    expect(p2).toMatchObject({ invoiceCount: 1, invoicesAgorot: 8_000, accruedAgorot: 0, reversedAgorot: 8_000, purchasesAgorot: 0 });
+    // One period spanning both: the invoice once, nothing accrued or reversed.
+    const all = await purchasesInPeriod(db, D.restaurantId, TZ, ymdAgo(30), today);
+    expect(all).toMatchObject({ invoicesAgorot: 8_000, accruedAgorot: 0, reversedAgorot: 0, purchasesAgorot: 8_000 });
+    expect(p1.purchasesAgorot + p2.purchasesAgorot).toBe(all.purchasesAgorot);
   });
 });

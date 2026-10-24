@@ -115,6 +115,9 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
             dups: ils(p.purchases.duplicatesAgorot, locale, 0),
             credits: ils(p.purchases.creditsAgorot, locale, 0),
           })}
+          {p.purchases.accruedNotes > 0 ? (
+            <> {t('period.accruedNote', { count: p.purchases.accruedNotes, value: ils(p.purchases.accruedAgorot, locale, 0) })}</>
+          ) : null}
         </p>
       ) : null}
 

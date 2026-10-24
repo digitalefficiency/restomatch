@@ -174,6 +174,11 @@ export interface Purchases {
   duplicateCount: number;
   /** Money the suppliers gave back: accepted/resolved claims, capped per invoice (agorot). */
   creditsAgorot: number;
+  /** Food on delivery notes received in the period but not invoiced yet (billed later on a consolidated invoice), at PO prices (agorot). */
+  accruedAgorot: number;
+  accruedNotes: number;
+  /** Notes accrued in an EARLIER period whose consolidated invoice lands in this one — taken back out so nothing counts twice (agorot). */
+  reversedAgorot: number;
 }
 
 const agorot = (v: unknown) => Math.round(Number(v ?? 0) * 100);
@@ -235,13 +240,80 @@ export async function purchasesInPeriod(
   const invoicesAgorot = agorot(r?.total);
   const nonFoodAgorot = agorot(r?.non_food);
   const creditsAgorot = agorot(r?.credit);
+  const notes = await deliveryNoteAccruals(db, restaurantId, tz, fromYmd, toYmd);
   return {
-    purchasesAgorot: invoicesAgorot - nonFoodAgorot - creditsAgorot,
+    purchasesAgorot: invoicesAgorot - nonFoodAgorot - creditsAgorot + notes.accruedAgorot - notes.reversedAgorot,
     invoiceCount: Number(r?.n ?? 0),
     invoicesAgorot,
     nonFoodAgorot,
     duplicatesAgorot: agorot(r?.dup_total),
     duplicateCount: Number(r?.dup_n ?? 0),
     creditsAgorot,
+    ...notes,
   };
+}
+
+/**
+ * Delivery notes (תעודות משלוח: goods receipts tagged `ת.מ. <n>`, no invoice of
+ * their own) are billed later on a monthly consolidated invoice that lists them
+ * in ocr_payload.raw.deliveryNotes — the covered set the consolidated
+ * cross-match reads. The goods are used when they ARRIVE, so a note received in
+ * the period that no invoice dated by the closing date covers yet is accrued at
+ * its PO prices (food lines, received − rejected, ex-VAT); and when a
+ * consolidated invoice in the period covers notes received before the period
+ * (already accrued then), that same value is taken back out. The two use one
+ * valuation, so across periods every note counts exactly once.
+ * Ordinary receipts (not tagged as a delivery note) are matched to their own
+ * invoice and are not accrued.
+ */
+export async function deliveryNoteAccruals(
+  db: Database,
+  restaurantId: string,
+  tz: string,
+  fromYmd: string,
+  toYmd: string,
+): Promise<{ accruedAgorot: number; accruedNotes: number; reversedAgorot: number }> {
+  const nonFood = sql.join(NON_FOOD_CATEGORIES.map((c) => sql`${c}`), sql`, `);
+  const [r] = (await db.execute(sql`
+    with notes as (
+      select
+        gr.id,
+        (gr.received_at at time zone ${tz})::date as d,
+        btrim(substring(gr.notes from '^ת\\.מ\\.\\s*(\\S+)')) as dn,
+        coalesce(sum((gl.qty_received - coalesce(gl.qty_rejected, 0)) * pl.unit_price_expected)
+          filter (where p.id is null or btrim(coalesce(p.category, '')) not in (${nonFood})), 0) as val
+      from goods_receipts gr
+      join gr_lines gl on gl.gr_id = gr.id
+      join po_lines pl on pl.id = gl.po_line_id
+      left join products p on p.id = coalesce(gl.product_id, pl.product_id) and p.restaurant_id = ${restaurantId}
+      where gr.restaurant_id = ${restaurantId}
+        and gr.notes ~ '^ת\\.מ\\.'
+        and not exists (select 1 from match_runs mr where mr.gr_id = gr.id and mr.restaurant_id = ${restaurantId} and mr.invoice_id is not null)
+      group by gr.id, gr.received_at, gr.notes
+    ),
+    covered as (
+      select btrim(n ->> 'number') as dn, (coalesce(i.invoice_date, i.created_at) at time zone ${tz})::date as idate
+      from invoices i
+      cross join lateral jsonb_array_elements(
+        case when jsonb_typeof(i.ocr_payload -> 'raw' -> 'deliveryNotes') = 'array' then i.ocr_payload -> 'raw' -> 'deliveryNotes' else '[]'::jsonb end
+      ) n
+      where i.restaurant_id = ${restaurantId}
+    )
+    select
+      coalesce(sum(val) filter (
+        where d > ${fromYmd}::date and d <= ${toYmd}::date
+          and not exists (select 1 from covered c where c.dn = notes.dn and c.idate <= ${toYmd}::date)
+      ), 0)::numeric(14,2)::text as accrued,
+      count(*) filter (
+        where d > ${fromYmd}::date and d <= ${toYmd}::date
+          and not exists (select 1 from covered c where c.dn = notes.dn and c.idate <= ${toYmd}::date)
+      )::int as accrued_n,
+      coalesce(sum(val) filter (
+        where d <= ${fromYmd}::date
+          and exists (select 1 from covered c where c.dn = notes.dn and c.idate > ${fromYmd}::date and c.idate <= ${toYmd}::date)
+          and not exists (select 1 from covered c where c.dn = notes.dn and c.idate <= ${fromYmd}::date)
+      ), 0)::numeric(14,2)::text as reversed
+    from notes
+  `)) as unknown as Array<{ accrued: string; accrued_n: number; reversed: string }>;
+  return { accruedAgorot: agorot(r?.accrued), accruedNotes: Number(r?.accrued_n ?? 0), reversedAgorot: agorot(r?.reversed) };
 }
