@@ -15,6 +15,11 @@
  *     delayed is a backlog, not a lost job; one that failed or completed already
  *     ran (and was metered) — retrying a quota / inactive-subscription / bad-image
  *     failure would only meter and fail again. Those go to the digest instead.
+ *     EXCEPT a job refused by the tenant guard ("invoice … not found … refusing
+ *     to process"): it read the row before the producer's transaction committed
+ *     it (the commit race #72 narrows with a backoff, e.g. the S13 offline-sync
+ *     path with nobody watching), never fetched the scan and never metered — so
+ *     it counts as "never ran" and gets its one retry.
  *   - only http(s) scan URLs (never stub / smoke rows like `smoke://…`), so a
  *     retry can't turn a mock-provider job into a paid call.
  *   - at most one automatic retry per invoice: a Redis `SET NX` marker (7 days),
@@ -44,10 +49,17 @@ const FINISHED_STATES = ['failed', 'completed'];
 const PENDING_SCAN_LIMIT = 1_000;
 const HTTP_URL = /^https?:\/\//i;
 
+/** ocrInvoice.ts's tenant-guard refusal: nothing was fetched or metered. */
+export const NOT_FOUND_REFUSAL = /not found in restaurant=\S+ — refusing to process/;
+
 /** The slice of a BullMQ Queue the sweep uses (tests pass a fake). */
 export interface OcrSweepQueue {
   getJobCounts(...types: string[]): Promise<Record<string, number>>;
-  getJobs(types: string[], start?: number, end?: number): Promise<Array<{ data?: Partial<OcrInvoiceJob> } | undefined>>;
+  getJobs(
+    types: string[],
+    start?: number,
+    end?: number,
+  ): Promise<Array<{ data?: Partial<OcrInvoiceJob>; failedReason?: string } | undefined>>;
   add(name: string, data: OcrInvoiceJob, opts?: { jobId?: string }): Promise<unknown>;
 }
 
@@ -90,7 +102,12 @@ export async function runOcrSweep(
   const jobs = pendingJobs ? await queue.getJobs(PENDING_STATES, 0, PENDING_SCAN_LIMIT - 1) : [];
   const queued = new Set(jobs.map((j) => j?.data?.invoiceId).filter(Boolean));
   const finished = await queue.getJobs(FINISHED_STATES, 0, PENDING_SCAN_LIMIT - 1);
-  const ran = new Set(finished.map((j) => j?.data?.invoiceId).filter(Boolean));
+  const ran = new Set(
+    finished
+      .filter((j) => !NOT_FOUND_REFUSAL.test(j?.failedReason ?? ''))
+      .map((j) => j?.data?.invoiceId)
+      .filter(Boolean),
+  );
 
   const stale = await db
     .select({

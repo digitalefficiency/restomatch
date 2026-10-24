@@ -81,6 +81,31 @@ describe('ocr-pending retry sweep', () => {
     expect(job.jobId).toBe(`ocr-sweep-${ids.stale}`);
   });
 
+  it('a job refused by the tenant guard (commit race) did not really run: it gets its one retry', async () => {
+    const refusal = (id: string) =>
+      `[ocr-invoice] invoice=${id} not found in restaurant=${restaurantId} — refusing to process`;
+    const added: Array<{ data: OcrInvoiceJob; jobId?: string }> = [];
+    const q: OcrSweepQueue = {
+      getJobCounts: async () => ({}),
+      getJobs: async (types) =>
+        types.includes('failed')
+          ? [
+              { data: { invoiceId: ids.failedBefore! }, failedReason: refusal(ids.failedBefore!) },
+              { data: { invoiceId: ids.stale! }, failedReason: 'QuotaExceededError: monthly OCR cap reached' },
+            ]
+          : [],
+      add: async (_name, data, opts) => {
+        added.push({ data, jobId: opts?.jobId });
+        return {};
+      },
+    };
+    const res = await runOcrSweep(db, q, memoryMarker(), NOW);
+    expect(mine(res.requeued)).toContain(ids.failedBefore);
+    // Any other failure (quota, bad image…) already ran and was metered: never auto-retried.
+    expect(res.skipped.find((x) => x.invoiceId === ids.stale)?.reason).toBe('already-ran');
+    expect(added.find((a) => a.data.invoiceId === ids.failedBefore)?.jobId).toBe(`ocr-sweep-${ids.failedBefore}`);
+  });
+
   it('is idempotent: a second sweep does not enqueue the same invoice again', async () => {
     const marker = memoryMarker();
     const q = fakeQueue();
