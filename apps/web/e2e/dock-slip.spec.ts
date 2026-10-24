@@ -134,7 +134,7 @@ test('390 px: slip on the review (quantities, then engine ₪) and on the confir
   const slip = page.getByTestId('dock-slip');
   await expect(slip).toBeVisible();
   await expect(slip.getByTestId('dock-slip-supplier')).toHaveText(f.supplierName);
-  await expect(slip.getByText(`DS-${invoiceId.slice(0, 6)}`)).toBeVisible();
+  await expect(slip.locator("dd").getByText(`DS-${invoiceId.slice(0, 6)}`)).toBeVisible();
   // Engine not run yet: quantities only, no ₪ invented from the wizard.
   await expect(slip.getByTestId('dock-slip-computing')).toBeVisible();
   await expect(slip.getByTestId('dock-slip-amount')).toHaveCount(0);
@@ -159,11 +159,12 @@ test('390 px: slip on the review (quantities, then engine ₪) and on the confir
   const totalText = (await slip.getByTestId('dock-slip-total').innerText()).replace(/[^\d.]/g, '');
   expect(Number(totalText)).toBe(expectedTotal);
 
+  await slip.screenshot({ path: test.info().outputPath('dock-slip-review-390.png') });
   // Share: wa.me with the slip text; copy keeps the same text.
   const href = await slip.getByTestId('dock-slip-whatsapp').getAttribute('href');
   expect(href).toMatch(/^https:\/\/wa\.me\//);
   expect(decodeURIComponent(href!.split('text=')[1]!)).toContain(f.supplierName);
-  expect(await slip.getByTestId('dock-slip-text').inputValue()).toContain('תעודת חריגה');
+  expect(await slip.getByTestId('dock-slip-copy').getAttribute('data-slip-text')).toContain('תעודת חריגה');
   // Phone-first: nothing overflows the 390-px viewport.
   const box = (await slip.boundingBox())!;
   expect(box.x).toBeGreaterThanOrEqual(0);
@@ -179,4 +180,5 @@ test('390 px: slip on the review (quantities, then engine ₪) and on the confir
   await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId('dock-slip')).toBeVisible();
   await expect(page.getByTestId('dock-slip-total')).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath('dock-slip-confirmed-390.png'), fullPage: true });
 });

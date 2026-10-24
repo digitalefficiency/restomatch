@@ -220,6 +220,7 @@ export function DockSlip({
           type="button"
           onClick={() => void copy()}
           data-testid="dock-slip-copy"
+          data-slip-text={text}
           className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-line bg-surface-2 px-4 py-3 text-sm font-medium text-ink"
         >
           {copied ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
@@ -227,7 +228,6 @@ export function DockSlip({
         </button>
       </div>
       <p className="mt-2 text-[11px] text-subtle">{t('dockSlip.noSend')}</p>
-      <textarea readOnly hidden aria-hidden="true" data-testid="dock-slip-text" value={text} />
     </section>
   );
 }
