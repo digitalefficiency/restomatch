@@ -44,6 +44,6 @@ export const he = {
     clean: 'נקי — אין חריגות',
     minor: 'חריגות קלות',
     major: 'חריגות חמורות',
-    blocked: 'נחסם',
+    blocked: 'חוסם',
   },
 };
