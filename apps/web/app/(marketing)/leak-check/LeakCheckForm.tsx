@@ -96,6 +96,7 @@ export function LeakCheckForm() {
         return setError(t('form.errors.tooLarge'));
       }
       const cRes = await fetch('/api/leak-check/challenge', { method: 'POST' });
+      if (cRes.status === 429) throw new Error('rate_limited');
       const c = (await cRes.json()) as { ok: boolean; token?: string; salt?: string; bits?: number; error?: string };
       if (!c.ok || !c.token || !c.salt || !c.bits) throw new Error(c.error ?? 'challenge');
       setPhase('pow');

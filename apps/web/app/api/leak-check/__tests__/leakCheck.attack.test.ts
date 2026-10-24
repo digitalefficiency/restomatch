@@ -204,11 +204,12 @@ describe('leak-check public routes — attack suite', () => {
     expect((await db.select().from(leakCheckSessions)).length).toBe(before);
   });
 
-  it('RAW cap on the lead JSON: an oversized body behind a small content-length is 413; JSON null is 400', async () => {
+  it('RAW cap on the lead JSON: an oversized body behind a small content-length is 413; JSON null is 422', async () => {
     const huge = JSON.stringify({ token: 'x'.repeat(10_000) });
     const lying = post('/api/leak-check/lead', huge, nextIp(), { 'content-type': 'application/json', 'content-length': '20' });
     expect((await handleLead(lying)).status).toBe(413);
-    expect((await handleLead(postJson('/api/leak-check/lead', 'null', nextIp()))).status).toBe(400);
+    // zod runs only AFTER the cap (publicGuard): a JSON null fails the schema → 422, field paths only.
+    expect((await handleLead(postJson('/api/leak-check/lead', 'null', nextIp()))).status).toBe(422);
   });
 
   it('a chunked body without content-length is refused before parsing (411)', async () => {

@@ -7,6 +7,8 @@ import { authDb } from '@/lib/authDb';
 import { db } from '@/lib/db';
 import { localeFromCookieHeader } from '@/lib/i18n/config';
 import { enforceRateLimit, trustedProxyHops } from '@/lib/rateLimit';
+import { z } from 'zod';
+import { guardPublicRequest } from '@/lib/publicGuard';
 import { formDataFrom, readCappedBody } from './bodyCap';
 
 /**
@@ -47,15 +49,28 @@ const fail = (error: string, status: number, headers?: Record<string, string>) =
   json({ ok: false, error }, status, headers);
 
 /** Shared preamble. Returns a Response to short-circuit, or the client IP. */
-async function guard(req: Request, limit: (typeof LIMITS)[keyof typeof LIMITS]): Promise<Response | string> {
+/**
+ * Feature gate + production fail-closed proxy check (every route). Per-IP
+ * limits are meaningless on a spoofable left-most X-Forwarded-For, so in
+ * production this spend surface refuses until TRUSTED_PROXY_HOPS is declared.
+ */
+function preflight(): Response | null {
   if (!lc.leakCheckPublicEnabled()) return fail('not_found', 404);
-  // Per-IP limits are meaningless on a spoofable left-most X-Forwarded-For.
-  // In production this spend surface fails CLOSED until the proxy depth is
-  // declared (TRUSTED_PROXY_HOPS=1 on Vercel).
   if (process.env.NODE_ENV === 'production' && trustedProxyHops() === 0) {
     console.error('[leak-check] TRUSTED_PROXY_HOPS is not set — refusing (per-IP limits would be spoofable)');
     return fail('unavailable', 503);
   }
+  return null;
+}
+
+/**
+ * The upload route's front door. It cannot use guardPublicRequest end to end:
+ * that helper decodes the capped body as TEXT, which would corrupt binary
+ * invoice files — the multipart body is read byte-safe by readCappedBody.
+ */
+async function guard(req: Request, limit: (typeof LIMITS)[keyof typeof LIMITS]): Promise<Response | string> {
+  const pre = preflight();
+  if (pre) return pre;
   if (
     req.method !== 'POST' ||
     !isOriginAllowed({
@@ -83,8 +98,11 @@ function secretOr503(): string | Response {
 }
 
 export async function handleChallenge(req: Request): Promise<Response> {
-  const g = await guard(req, LIMITS.challenge);
-  if (typeof g !== 'string') return g;
+  const pre = preflight();
+  if (pre) return pre;
+  // Shared public front door (S4): same-origin, rate limit, raw body cap (no body expected).
+  const g = await guardPublicRequest(req, { rateLimit: LIMITS.challenge, maxBodyBytes: 1024, sameOrigin: true });
+  if (!g.ok) return g.response;
   const secret = secretOr503();
   if (typeof secret !== 'string') return secret;
   if (!lc.leakCheckOcrMode()) return fail('unavailable', 503);
@@ -196,31 +214,33 @@ export async function handleSubmit(req: Request): Promise<Response> {
   }
 }
 
+const LeadBody = z.object({
+  token: z.string().max(200),
+  phone: z.string().max(32).optional(),
+  restaurantName: z.string().max(200).optional(),
+});
+
 export async function handleLead(req: Request): Promise<Response> {
-  const lengthHeader = req.headers.get('content-length');
-  if (lengthHeader === null) return fail('length_required', 411);
-  if (!(Number(lengthHeader) <= LEAD_BODY_CAP)) return fail('body_too_large', 413);
-  const g = await guard(req, LIMITS.lead);
-  if (typeof g !== 'string') return g;
+  const pre = preflight();
+  if (pre) return pre;
+  // Shared public front door (S4): same-origin, rate limit, streamed raw cap, zod AFTER the cap.
+  const g = await guardPublicRequest(req, {
+    rateLimit: LIMITS.lead,
+    maxBodyBytes: LEAD_BODY_CAP,
+    schema: LeadBody,
+    sameOrigin: true,
+  });
+  if (!g.ok) return g.response;
+  const body = g.data;
   const secret = secretOr503();
   if (typeof secret !== 'string') return secret;
-
-  let body: { token?: unknown; phone?: unknown; restaurantName?: unknown };
-  const raw = await readCappedBody(req, LEAD_BODY_CAP);
-  if (!raw.ok) return raw.reason === 'too_large' ? fail('body_too_large', 413) : fail('bad_request', 400);
-  try {
-    body = JSON.parse(new TextDecoder().decode(raw.bytes)) as typeof body;
-  } catch {
-    return fail('bad_request', 400);
-  }
-  if (typeof body !== 'object' || body === null) return fail('bad_request', 400);
-  const sessionId = lc.verifyResultLink(secret, typeof body.token === 'string' ? body.token : '');
+  const sessionId = lc.verifyResultLink(secret, body.token);
   if (!sessionId) return fail('invalid_link', 400);
   const s = await lc.markLeadRequested(authDb, sessionId);
   if (!s) return fail('invalid_link', 400);
   if (s.firstTime) {
-    const phone = typeof body.phone === 'string' ? body.phone.trim().slice(0, 32) : '';
-    const restaurantName = typeof body.restaurantName === 'string' ? body.restaurantName.trim().slice(0, 200) : '';
+    const phone = body.phone?.trim().slice(0, 32) ?? '';
+    const restaurantName = body.restaurantName?.trim().slice(0, 200) ?? '';
     // Public INSERT-only policy on leads — the tenant (app-role) connection suffices.
     await db.insert(leads).values({
       name: s.name || s.email,
