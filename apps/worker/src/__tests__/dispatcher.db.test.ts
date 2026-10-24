@@ -91,6 +91,41 @@ describe('LISTEN / NOTIFY', () => {
     await w.close();
   }, 15_000);
 
+  it('survives a dropped LISTEN connection (pooler restart): polling covers the gap, no crash or busy loop, LISTEN comes back', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const local = queueSql(url, 1, 20); // its own pool → its own dispatcher (cap 2 s for a fast test)
+    const seen: string[] = [];
+    const w = makeWorker(`${Q}-drop`, async (job) => void seen.push(job.id), { sql: local, pollMs: 2_000 });
+    const stop = await startJobListener(local, { DATABASE_URL: url } as NodeJS.ProcessEnv);
+    const listenerPids = async () =>
+      (await sql<Array<{ pid: number }>>`
+        SELECT pid FROM pg_stat_activity WHERE datname = current_database() AND query ILIKE 'listen%job_queue%'`).map((r) => r.pid);
+    await until(async () => (await listenerPids()).length >= 1, 5_000);
+    const before = await listenerPids();
+
+    // The pooler drops the session connection.
+    await sql`SELECT pg_terminate_backend(pid) FROM unnest(${before}::int[]) AS pid`;
+    const claims0 = dispatcherFor(local)!.claims;
+
+    // A job enqueued by another process while LISTEN is down: the poll picks it up within one cycle (cap 2 s).
+    const job = await insertJob(other, `${Q}-drop`, {});
+    await until(() => seen.includes(job!.id), 4_000);
+
+    // No busy loop: a handful of claims in 3 s, not hundreds.
+    await new Promise((r) => setTimeout(r, 3_000));
+    expect(dispatcherFor(local)!.claims - claims0).toBeLessThan(10);
+
+    // postgres.js re-LISTENs on a new backend, and NOTIFY works again.
+    await until(async () => (await listenerPids()).some((p) => !before.includes(p)), 15_000);
+    const t0 = Date.now();
+    const job2 = await insertJob(other, `${Q}-drop`, {});
+    await until(() => seen.includes(job2!.id), 3_000);
+    expect(Date.now() - t0).toBeLessThan(2_500);
+
+    await stop();
+    await w.close();
+  }, 40_000);
+
   it('is skipped on the transaction pooler (6543), where LISTEN cannot work', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const stop = await startJobListener(sql, { DATABASE_URL: 'postgres://u:p@pooler.supabase.com:6543/postgres' } as NodeJS.ProcessEnv);

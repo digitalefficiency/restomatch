@@ -2,6 +2,13 @@
 
 # הסרת Redis — מעבר ל-Postgres (Supabase) בלבד
 
+> **5 צעדים לבעלים (על ה-Mac, אחרי שה-PR מוזג)** — הפירוט המלא והפקודות להעתקה נמצאים ב"סדר הפעולות" למטה.
+> 1. ב-`~/.restomatch/worker.env`: לוודא ש-`DATABASE_URL` הוא ה-**Session pooler**, פורט **5432**: ‏Supabase ← Connect ← Session pooler.
+> 2. לעצור את ה-worker הישן: `launchctl bootout gui/$(id -u)/com.restomatch.worker`
+> 3. לעדכן: `cd ~/restomatch && git checkout main && git pull && pnpm install --frozen-lockfile`
+> 4. להפעיל: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.restomatch.worker.plist`
+> 5. לבדוק ביומן (`tail -n 20 ~/Library/Logs/restomatch-worker.log`) שמופיעה השורה `[worker] listening for new jobs (NOTIFY job_queue)`, ושאין שורות `ERR max requests limit exceeded`. אם מופיע `REFUSING TO START: migration 0061` — המיגרציה עוד לא רצה; מחכים כמה דקות אחרי המיזוג ומפעילים שוב (צעד 4).
+
 **החלטת בעלים, 2026-10-24:** "drop redis change all to supabase".
 מהגרסה הזו המערכת רצה על Postgres בלבד. אין יותר Upstash, ‏ioredis, ‏BullMQ או `REDIS_URL`.
 
