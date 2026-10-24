@@ -30,6 +30,9 @@ import {
   type PoLineInput,
 } from '@restomatch/matching';
 import { addCalendarDaysInTz, endOfDayInTz, startOfDayInTz } from '../lib/time';
+import { featureEnabled } from '../lib/features';
+import { applyContractPrices } from '../contracts/load';
+import { localDateKey } from '../contracts/core';
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
 
@@ -302,6 +305,20 @@ export async function buildMatchInputForInvoice(
         qtyReceived: num(g.qtyReceived),
       }));
     }
+  }
+
+  // ── Contract prices (wave-1 `contracts`): the contract in force on the
+  //    invoice's LOCAL date beats the PO price as the expected unit price, so an
+  //    over-contract line is a PRICE_HIGHER against the contract. Feature-gated;
+  //    off ⇒ byte-identical input to before. See contracts/core.ts for the rule.
+  if (inv.supplierId && poLineInputs.length > 0 && featureEnabled(restaurant?.settings, 'contracts')) {
+    ({ poLines: poLineInputs } = await applyContractPrices(
+      db,
+      restaurantId,
+      inv.supplierId,
+      poLineInputs,
+      localDateKey(invoiceDate, tz),
+    ));
   }
 
   // ── Tolerances, vat rate, baseline window (restaurant loaded above). ──

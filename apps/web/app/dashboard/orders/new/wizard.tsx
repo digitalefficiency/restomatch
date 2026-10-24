@@ -38,6 +38,7 @@ import { components } from '@/lib/i18n/messages/components';
 import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 import { formatIls } from '@/lib/money';
 import { addOrMerge, lineTotalIls, linesValid, orderTotalIls } from '../order-logic';
+import { OverContractNote, useOrderContractPrices } from './contract-price';
 
 type Outputs = inferRouterOutputs<AppRouter>;
 type Channel = 'email' | 'whatsapp' | 'none';
@@ -97,6 +98,8 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
     { supplierId, search: search || undefined, limit: search ? 20 : 8 },
     { enabled: step === 'BUILD' && !!supplierId, placeholderData: (prev) => prev },
   );
+  // Flag `contracts`: contract prices for what's on screen (no-op when off).
+  const contractPrice = useOrderContractPrices(supplierId, [...(catalog.data ?? []), ...lines]);
 
   // Cadence: derive the delivery date for the manager to CONFIRM (never silent).
   const delivery = trpc.orders.previewDelivery.useQuery(
@@ -321,6 +324,8 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
                 <ul>
                   {(catalog.data ?? []).map((it) => {
                     const name = displayName(it.supplierNameRaw, it.productNameEn, locale);
+                    const unit = it.unit ?? (locale === 'en' ? 'unit' : 'יח׳');
+                    const listPrice = contractPrice(it.productId, unit) ?? (it.listPrice != null ? Number(it.listPrice) : undefined);
                     return (
                       <li key={it.id} className="border-b border-line/60 last:border-0">
                         <button
@@ -331,8 +336,8 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
                               rawDescription: it.supplierNameRaw,
                               nameEn: it.productNameEn,
                               qty: 1,
-                              unit: it.unit ?? (locale === 'en' ? 'unit' : 'יח׳'),
-                              unitPriceExpected: it.listPrice != null ? Number(it.listPrice) : undefined,
+                              unit,
+                              unitPriceExpected: listPrice,
                             })
                           }
                           className="flex w-full items-center justify-between gap-3 px-3 py-2 text-start text-sm hover:bg-surface-2 focus:bg-surface-2 focus:outline-none"
@@ -346,7 +351,7 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
                             ) : null}
                           </span>
                           <span className="flex shrink-0 items-center gap-1 font-mono text-xs tabular-nums text-muted">
-                            {it.listPrice != null ? money(Number(it.listPrice)) : '—'}
+                            {listPrice !== undefined ? money(listPrice) : '—'}
                             {it.unit ? <span className="font-sans">/ {it.unit}</span> : null}
                             <Plus className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
                           </span>
@@ -442,6 +447,7 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
                           className="mt-0.5 w-24 text-end text-sm tabular-nums"
                         />
                       </label>
+                      <OverContractNote price={l.unitPriceExpected} contract={contractPrice(l.productId, l.unit)} />
                       <span className="w-24 pb-2 text-end font-mono text-sm tabular-nums text-ink">
                         {money(lineTotalIls(l.qty, l.unitPriceExpected))}
                       </span>
@@ -491,8 +497,17 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
                 >
                   <span className="min-w-0 flex-1 truncate text-sm text-ink">{name.primary}</span>
                   <span className="text-xs tabular-nums text-muted">
-                    {l.qty} {l.unit}
+                    <bdi>
+                      {l.qty} {l.unit}
+                    </bdi>
+                    {l.unitPriceExpected !== undefined ? (
+                      <>
+                        {' × '}
+                        <bdi dir="ltr">{money(l.unitPriceExpected)}</bdi>
+                      </>
+                    ) : null}
                   </span>
+                  <OverContractNote price={l.unitPriceExpected} contract={contractPrice(l.productId, l.unit)} />
                   <span className="w-24 text-end font-mono text-sm tabular-nums text-ink">
                     {money(lineTotalIls(l.qty, l.unitPriceExpected))}
                   </span>

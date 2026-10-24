@@ -246,6 +246,27 @@
       "when": 1781980000000,
       "tag": "0033_plans_catalog",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1782010000000,
+      "tag": "0046_supplier_contract_prices",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1782020000000,
+      "tag": "0047_price_alerts",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1782170000000,
+      "tag": "0062_supplier_confirm",
+      "breakpoints": true
     }
   ]
 }

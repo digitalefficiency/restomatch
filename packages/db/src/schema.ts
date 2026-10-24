@@ -1,6 +1,7 @@
 import { relations, sql } from 'drizzle-orm';
 import {
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -1618,3 +1619,165 @@ export type Lead = typeof leads.$inferSelect;
 export type NewLead = typeof leads.$inferInsert;
 export type DsrRequest = typeof dsrRequests.$inferSelect;
 export type NewDsrRequest = typeof dsrRequests.$inferInsert;
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Wave 1 (S11): supplier contract prices + price-trend alerts (0046–0047).
+ * supplier/product references are COMPOSITE same-tenant FKs in the SQL
+ * ((x_id, restaurant_id) → x(id, restaurant_id)); Drizzle only mirrors columns.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** Agreed price for one product from one supplier on a date range (0046). */
+export const supplierContractPrices = pgTable(
+  'supplier_contract_prices',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    supplierId: uuid('supplier_id').notNull(),
+    productId: uuid('product_id').notNull(),
+    /** Unit the price is quoted in; NULL = the PO/invoice line's own unit. */
+    unit: varchar('unit', { length: 32 }),
+    contractPrice: numeric('contract_price', { precision: 12, scale: 4 }).notNull(),
+    /** Restaurant-local calendar dates, inclusive; validTo NULL = open-ended. */
+    validFrom: date('valid_from', { mode: 'string' }).notNull(),
+    validTo: date('valid_to', { mode: 'string' }),
+    source: varchar('source', { length: 16 }).$type<'manual' | 'import'>().notNull().default('manual'),
+    note: text('note'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('supplier_contract_prices_key').on(t.supplierId, t.productId, t.validFrom),
+    index('supplier_contract_prices_lookup_idx').on(t.restaurantId, t.supplierId, t.productId, t.validFrom),
+    index('supplier_contract_prices_product_idx').on(t.productId, t.restaurantId),
+    index('supplier_contract_prices_created_by_idx').on(t.createdBy),
+  ],
+);
+
+/** When a sustained increase becomes an alert, per supplier and/or category (0047). */
+export const priceAlertThresholds = pgTable(
+  'price_alert_thresholds',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    supplierId: uuid('supplier_id'),
+    category: text('category'),
+    /** Fraction: 0.10 = +10%. */
+    thresholdPct: numeric('threshold_pct', { precision: 6, scale: 4 }).notNull(),
+    windowDays: integer('window_days').notNull().default(21),
+    enabled: boolean('enabled').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('price_alert_thresholds_supplier_idx').on(t.supplierId, t.restaurantId)],
+);
+
+/** One detected sustained price increase for a (product, supplier) (0047). */
+export const priceAlerts = pgTable(
+  'price_alerts',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    productId: uuid('product_id').notNull(),
+    supplierId: uuid('supplier_id').notNull(),
+    windowDays: integer('window_days').notNull(),
+    thresholdPct: numeric('threshold_pct', { precision: 6, scale: 4 }).notNull(),
+    startPrice: numeric('start_price', { precision: 12, scale: 4 }).notNull(),
+    endPrice: numeric('end_price', { precision: 12, scale: 4 }).notNull(),
+    pctChange: numeric('pct_change', { precision: 8, scale: 4 }).notNull(),
+    startAt: timestamp('start_at', { withTimezone: true }).notNull(),
+    endAt: timestamp('end_at', { withTimezone: true }).notNull(),
+    observations: integer('observations').notNull(),
+    cheaperSupplierId: uuid('cheaper_supplier_id'),
+    cheaperPrice: numeric('cheaper_price', { precision: 12, scale: 4 }),
+    status: varchar('status', { length: 16 }).$type<'open' | 'dismissed'>().notNull().default('open'),
+    dismissedBy: uuid('dismissed_by').references(() => users.id, { onDelete: 'set null' }),
+    dismissedAt: timestamp('dismissed_at', { withTimezone: true }),
+    /** When owners/managers were emailed (NULL = not yet; the daily sweep sends it). */
+    notifiedAt: timestamp('notified_at', { withTimezone: true }),
+    dedupeKey: text('dedupe_key').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('price_alerts_dedupe_key').on(t.restaurantId, t.dedupeKey),
+    index('price_alerts_restaurant_status_idx').on(t.restaurantId, t.status, t.createdAt),
+    index('price_alerts_product_idx').on(t.productId, t.restaurantId),
+    index('price_alerts_supplier_idx').on(t.supplierId, t.restaurantId),
+    index('price_alerts_cheaper_supplier_idx').on(t.cheaperSupplierId, t.restaurantId),
+    index('price_alerts_dismissed_by_idx').on(t.dismissedBy),
+  ],
+);
+
+export type SupplierContractPrice = typeof supplierContractPrices.$inferSelect;
+export type PriceAlertThreshold = typeof priceAlertThresholds.$inferSelect;
+export type PriceAlert = typeof priceAlerts.$inferSelect;
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Wave 1 (S11): supplier confirmation portal (0062, flag `supplierConfirm`).
+ * po references are COMPOSITE same-tenant FKs in the SQL.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** One magic link per sent order; only the SHA-256 of the token is stored. */
+export const supplierConfirmLinks = pgTable(
+  'supplier_confirm_links',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    poId: uuid('po_id').notNull(),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('supplier_confirm_links_token_hash_key').on(t.tokenHash),
+    index('supplier_confirm_links_po_idx').on(t.poId, t.restaurantId),
+    index('supplier_confirm_links_restaurant_idx').on(t.restaurantId, t.createdAt),
+    index('supplier_confirm_links_created_by_idx').on(t.createdBy),
+  ],
+);
+
+/** A supplier's per-line answer. Never written onto the PO itself. */
+export interface SupplierResponseLine {
+  poLineId: string;
+  /** Units the supplier can deliver (≤ ordered = shortage); null = as ordered. */
+  qtyAvailable: number | null;
+  /** Proposed unit price in shekels; null = the agreed price stands. */
+  proposedUnitPrice: number | null;
+}
+
+export const supplierResponses = pgTable(
+  'supplier_responses',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    poId: uuid('po_id').notNull(),
+    linkId: uuid('link_id')
+      .notNull()
+      .references(() => supplierConfirmLinks.id, { onDelete: 'cascade' }),
+    status: varchar('status', { length: 16 }).$type<'confirmed' | 'changes'>().notNull(),
+    lines: jsonb('lines').$type<SupplierResponseLine[]>().notNull().default([]),
+    note: text('note'),
+    submittedAt: timestamp('submitted_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('supplier_responses_po_key').on(t.poId),
+    index('supplier_responses_po_idx').on(t.poId, t.restaurantId),
+    index('supplier_responses_link_idx').on(t.linkId),
+    index('supplier_responses_restaurant_idx').on(t.restaurantId, t.submittedAt),
+  ],
+);
+
+export type SupplierConfirmLink = typeof supplierConfirmLinks.$inferSelect;
+export type SupplierResponse = typeof supplierResponses.$inferSelect;

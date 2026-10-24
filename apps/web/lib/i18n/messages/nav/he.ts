@@ -13,6 +13,7 @@ export const he = {
     leaks: 'בלש דליפות',
     suppliers: 'ספקים',
     catalog: 'קטלוג',
+    contracts: 'חוזים והתראות',
     orders: 'הזמנות',
     exports: 'ייצוא',
     team: 'צוות',

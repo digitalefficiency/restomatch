@@ -32,6 +32,12 @@ export default async function ReceivingPoPage({
     ]);
   }
 
+  // Flag `dockPriceContext`: fail silent (off) on any error.
+  const dockPriceContext = await caller.receiving
+    .priceContext({})
+    .then((r) => r.enabled)
+    .catch(() => false);
+
   let po;
   try {
     po = await caller.receiving.getPo({ poId });
@@ -72,7 +78,7 @@ export default async function ReceivingPoPage({
         {t('po.backToList')}
       </Link>
 
-      <ReceivingWizard po={poForClient} restaurantId={restaurantId} />
+      <ReceivingWizard po={poForClient} restaurantId={restaurantId} dockPriceContext={dockPriceContext} />
     </div>
   );
 }

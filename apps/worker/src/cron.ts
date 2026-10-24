@@ -10,6 +10,8 @@
  *                          connected procurement platform
  *   • outbox-dispatch    — every 60 seconds: pick up queued notifications
  *                          and dispatch via real provider clients
+ *   • price-alerts       — every day at 07:00 IL: sustained price increases
+ *                          (wave-1 `priceAlerts`; no-op for tenants with the flag off)
  */
 import { makeQueue } from './queue';
 import type { BaselinesJob } from './jobs/baselines';
@@ -17,6 +19,7 @@ import type { DailyExpectationsJob } from './jobs/dailyExpectations';
 import type { EndOfDayReportJob } from './jobs/endOfDayReport';
 import type { OrderRemindersJob } from './jobs/orderReminders';
 import type { OutboxDispatchJob } from './jobs/outboxDispatch';
+import type { PriceAlertsJob } from './jobs/priceAlerts';
 import type { RetentionJob } from './jobs/retention';
 import type { SupplierDelaysJob } from './jobs/supplierDelays';
 
@@ -27,6 +30,7 @@ const orderRemindersQueue = makeQueue<OrderRemindersJob>('order-reminders');
 const supplierDelaysQueue = makeQueue<SupplierDelaysJob>('supplier-delays');
 const endOfDayReportQueue = makeQueue<EndOfDayReportJob>('end-of-day-report');
 const retentionQueue = makeQueue<RetentionJob>('retention');
+const priceAlertsQueue = makeQueue<PriceAlertsJob>('price-alerts');
 
 const TZ = 'Asia/Jerusalem';
 
@@ -76,6 +80,13 @@ export async function registerCronSchedules(): Promise<void> {
     { name: 'end-of-day-report', data: {} },
   );
 
+  // Price-trend alerts — every day 07:00 IL (after the 02:00 baselines run)
+  await priceAlertsQueue.upsertJobScheduler(
+    'price-alerts-07',
+    { pattern: '0 7 * * *', tz: TZ },
+    { name: 'price-alerts', data: {} },
+  );
+
   // Retention purge — every day 03:30 IL. Opt-in via RETENTION_CRON_ENABLED; even
   // when scheduled it dry-runs unless RETENTION_PURGE_ENABLED=1 (see retention.ts).
   if (RETENTION_CRON_ENABLED) {
@@ -88,7 +99,7 @@ export async function registerCronSchedules(): Promise<void> {
 
   console.log(
     '[cron] registered: daily-expectations(06:00), baselines(02:00), outbox-dispatch(60s), ' +
-      'order-reminders(09:00), supplier-delays(10:00), end-of-day-report(19:00)' +
+      'order-reminders(09:00), supplier-delays(10:00), end-of-day-report(19:00), price-alerts(07:00)' +
       (RETENTION_CRON_ENABLED ? ', retention(03:30)' : ''),
   );
 }
@@ -101,4 +112,5 @@ export async function unregisterCronSchedules(): Promise<void> {
   await supplierDelaysQueue.removeJobScheduler('supplier-delays-10');
   await endOfDayReportQueue.removeJobScheduler('end-of-day-report-19');
   await retentionQueue.removeJobScheduler('retention-0330');
+  await priceAlertsQueue.removeJobScheduler('price-alerts-07');
 }

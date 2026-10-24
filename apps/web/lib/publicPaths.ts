@@ -34,6 +34,9 @@ export const PUBLIC_PREFIX_PATHS = [
   '/api/healthz',
   '/api/cron', // Vercel Cron; each route verifies CRON_SECRET itself
   '/api/inbound', // reserved for the Wave-3 inbox webhook (signature-verified per route)
+  // Wave-1 supplier portal (flag `supplierConfirm`): token-scoped, rate-limited, no session.
+  '/s',
+  '/api/supplier-confirm',
   '/_next',
 ] as const;
 

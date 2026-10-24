@@ -15,6 +15,7 @@ import { startOrderRemindersWorker } from './jobs/orderReminders';
 import { startOutboxDispatchWorker } from './jobs/outboxDispatch';
 import { startRetentionWorker } from './jobs/retention';
 import { startSupplierDelaysWorker } from './jobs/supplierDelays';
+import { startPriceAlertsWorker } from './jobs/priceAlerts';
 import { startSyncPlatformsWorker } from './jobs/syncPlatforms';
 
 interface SentryNode {
@@ -63,6 +64,7 @@ const workers = [
   startOutboxDispatchWorker(),
   startOrderRemindersWorker(),
   startSupplierDelaysWorker(),
+  startPriceAlertsWorker(),
   startEndOfDayReportWorker(),
   startRetentionWorker(),
 ];

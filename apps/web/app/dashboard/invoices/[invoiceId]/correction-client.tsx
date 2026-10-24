@@ -39,7 +39,16 @@ const STATUS_TONE: Record<string, BadgeTone> = {
   blocked: 'danger',
 };
 
-export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canEdit: boolean }) {
+export function InvoiceCorrection({
+  invoice,
+  canEdit,
+  lineBadges,
+}: {
+  invoice: Invoice;
+  canEdit: boolean;
+  /** Optional server-rendered per-line badges (e.g. wave-1 "over contract"), keyed by line id. */
+  lineBadges?: Record<string, React.ReactNode>;
+}) {
   const router = useRouter();
   const t = useT(invoices);
   const locale = useLocale();
@@ -314,6 +323,7 @@ export function InvoiceCorrection({ invoice, canEdit }: { invoice: Invoice; canE
                     ) : (
                       <ItemName he={l.rawDescription} en={l.rawDescriptionEn ?? l.productNameEn} />
                     )}
+                    {!editing && lineBadges?.[l.id] ? lineBadges[l.id] : null}
                   </td>
                   <td className="px-4 py-3 font-mono tabular-nums text-muted">
                     {editing ? (

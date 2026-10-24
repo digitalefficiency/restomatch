@@ -53,6 +53,9 @@ export const ROUTE_ROLES: Record<string, UserRole[]> = {
   // supplier); without this rule every role could open them by URL.
   '/dashboard/products': ['owner', 'manager'],
   '/dashboard/orders': ['owner', 'manager'],
+  // Wave-1 contracts + price alerts: finance tier, same as the contracts/priceAlerts
+  // routers (financeProcedure). The nav entry is additionally feature-flag gated.
+  '/dashboard/contracts': ['owner', 'manager', 'bookkeeper'],
   '/dashboard/exports': ['owner', 'bookkeeper'],
   // One supplier invoice (prices, lines, image): opened from receiving, approvals
   // and the leak drill-down — never the chef. Mirrors receiving.getInvoice.
