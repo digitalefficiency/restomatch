@@ -54,14 +54,15 @@ describe('valueCount (partial counts, no-price items)', () => {
   });
 });
 
-describe('actualFoodCost (opening + purchases − closing)', () => {
+describe('actualFoodCost (opening + purchases − credits − closing)', () => {
   it('the period formula, % of sales half-up in basis points', () => {
-    const r = actualFoodCost({ openingAgorot: 110_000, purchasesAgorot: 281_000, closingAgorot: 65_600, salesAgorot: 1_000_000, theoreticalAgorot: null });
+    // credits received are their own term, not hidden in purchases
+    const r = actualFoodCost({ openingAgorot: 110_000, purchasesAgorot: 285_000, creditsAgorot: 4_000, closingAgorot: 65_600, salesAgorot: 1_000_000, theoreticalAgorot: null });
     expect(r).toEqual({ actualAgorot: 325_400, actualBp: 3254, theoreticalBp: null, varianceAgorot: null, varianceBp: null, varianceAlert: false });
   });
 
   it('without sales there is a ₪ figure but no %', () => {
-    expect(actualFoodCost({ openingAgorot: 1, purchasesAgorot: 2, closingAgorot: 0, salesAgorot: null, theoreticalAgorot: 1 })).toMatchObject({
+    expect(actualFoodCost({ openingAgorot: 1, purchasesAgorot: 2, creditsAgorot: 0, closingAgorot: 0, salesAgorot: null, theoreticalAgorot: 1 })).toMatchObject({
       actualAgorot: 3,
       actualBp: null,
       varianceAgorot: 2,
@@ -71,7 +72,7 @@ describe('actualFoodCost (opening + purchases − closing)', () => {
   });
 
   it('variance = actual − theoretical; T2 only above 2 points of sales', () => {
-    const base = { openingAgorot: 0, closingAgorot: 0, salesAgorot: 1_000_000 };
+    const base = { openingAgorot: 0, creditsAgorot: 0, closingAgorot: 0, salesAgorot: 1_000_000 };
     // 2.00 points exactly: calm
     expect(actualFoodCost({ ...base, purchasesAgorot: 320_000, theoreticalAgorot: 300_000 })).toMatchObject({ varianceAgorot: 20_000, varianceBp: VARIANCE_ALERT_BP, varianceAlert: false });
     // 2.01 points: act now
@@ -81,6 +82,6 @@ describe('actualFoodCost (opening + purchases − closing)', () => {
   });
 
   it('closing stock above opening + purchases gives a negative actual (shown, not hidden)', () => {
-    expect(actualFoodCost({ openingAgorot: 0, purchasesAgorot: 100, closingAgorot: 500, salesAgorot: 10_000, theoreticalAgorot: null })).toMatchObject({ actualAgorot: -400, actualBp: -400 });
+    expect(actualFoodCost({ openingAgorot: 0, purchasesAgorot: 100, creditsAgorot: 0, closingAgorot: 500, salesAgorot: 10_000, theoreticalAgorot: null })).toMatchObject({ actualAgorot: -400, actualBp: -400 });
   });
 });

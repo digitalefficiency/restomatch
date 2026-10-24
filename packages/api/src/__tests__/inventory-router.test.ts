@@ -175,12 +175,12 @@ describe('inventory: count → autosave → finish', () => {
         duplicateCount: 1,
         duplicatesAgorot: 50_000,
         creditsAgorot: 4_000,
-        purchasesAgorot: 281_000,
+        purchasesAgorot: 285_000,
       },
       salesAgorot: 1_000_000,
       salesSource: 'manual',
       theoreticalAgorot: null,
-      // 1,100 + 2,810 − 656 = 3,254 → 32.54% of ₪10,000
+      // 1,100 + 2,850 − 40 credits − 656 = 3,254 → 32.54% of ₪10,000
       actualAgorot: 325_400,
       actualBp: 3254,
       varianceAlert: false,
@@ -265,8 +265,8 @@ describe('inventory: flag + roles', () => {
   });
 });
 
-describe('inventory: delivery notes billed later on a consolidated invoice count exactly once', () => {
-  it('accrued in the period they arrive (PO prices, food only), reversed when the consolidated invoice lands', async () => {
+describe('inventory: delivery notes billed later on a consolidated invoice', () => {
+  it('purchases are invoices only (the consolidated invoice once); unbilled notes are shown as info at PO prices, food only', async () => {
     const D = await seedTenant(db, 'ID');
     await db.delete(invoices).where(eq(invoices.restaurantId, D.restaurantId));
     const milk = await product(D, 'חלב', 'ליטר', 'מוצרי חלב');
@@ -297,12 +297,12 @@ describe('inventory: delivery notes billed later on a consolidated invoice count
       ocrPayload: { raw: { deliveryNotes: [{ number: '7001' }, { number: '7002' }] } } as never,
     });
     const p1 = await purchasesInPeriod(db, D.restaurantId, TZ, ymdAgo(30), ymdAgo(15));
-    expect(p1).toMatchObject({ invoiceCount: 0, accruedAgorot: 8_000, accruedNotes: 2, reversedAgorot: 0, purchasesAgorot: 8_000 });
+    expect(p1).toMatchObject({ invoiceCount: 0, unbilledNotes: 2, unbilledNotesAgorot: 8_000, purchasesAgorot: 0 });
     const p2 = await purchasesInPeriod(db, D.restaurantId, TZ, ymdAgo(15), today);
-    expect(p2).toMatchObject({ invoiceCount: 1, invoicesAgorot: 8_000, accruedAgorot: 0, reversedAgorot: 8_000, purchasesAgorot: 0 });
-    // One period spanning both: the invoice once, nothing accrued or reversed.
+    expect(p2).toMatchObject({ invoiceCount: 1, invoicesAgorot: 8_000, unbilledNotes: 0, purchasesAgorot: 8_000 });
+    // One period spanning both: the invoice once.
     const all = await purchasesInPeriod(db, D.restaurantId, TZ, ymdAgo(30), today);
-    expect(all).toMatchObject({ invoicesAgorot: 8_000, accruedAgorot: 0, reversedAgorot: 0, purchasesAgorot: 8_000 });
+    expect(all).toMatchObject({ invoicesAgorot: 8_000, unbilledNotes: 0, purchasesAgorot: 8_000 });
     expect(p1.purchasesAgorot + p2.purchasesAgorot).toBe(all.purchasesAgorot);
   });
 });

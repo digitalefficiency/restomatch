@@ -158,7 +158,8 @@ describe('purchases: credits and delivery notes', () => {
       { restaurantId: T.restaurantId, supplierId: T.supplierId, source: 'manual', invoiceNumber: 'T-M', invoiceDate: atAgo(2), totalExclVat: '50.00', totalInclVat: '59.00', status: 'parsed', ocrPayload: { raw: { deliveryNotes: ['07001'] } } as never },
     ]);
     const p = await purchasesInPeriod(db, T.restaurantId, TZ, ymdAgo(10), today);
-    expect(p).toMatchObject({ invoicesAgorot: 10_000, accruedNotes: 1, accruedAgorot: 5_000, reversedAgorot: 0, purchasesAgorot: 15_000 });
+    // Ours "100" is unbilled (info ₪50); "7001" is on our "07001" invoice; purchases = the two invoices.
+    expect(p).toMatchObject({ invoicesAgorot: 10_000, unbilledNotes: 1, unbilledNotesAgorot: 5_000, purchasesAgorot: 10_000 });
   });
 });
 

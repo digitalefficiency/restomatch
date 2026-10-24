@@ -133,13 +133,13 @@ async function main() {
   for (const x of results) console.log(`[seed-inventory-demo] count ${x.date}: ${ils(x.value)} · ${x.counted} items · ${x.unpriced} without a price`);
   if (p.available) {
     console.log(
-      `[seed-inventory-demo] October actual food cost: ${ils(p.opening.valueAgorot)} + purchases ${ils(p.purchases.purchasesAgorot)} − ${ils(p.closing.valueAgorot)} = ${ils(p.actualAgorot)}` +
+      `[seed-inventory-demo] October actual food cost: ${ils(p.opening.valueAgorot)} + purchases ${ils(p.purchases.purchasesAgorot)} − credits ${ils(p.purchases.creditsAgorot)} − ${ils(p.closing.valueAgorot)} = ${ils(p.actualAgorot)}` +
         ` = ${p.actualBp == null ? '—' : (p.actualBp / 100).toFixed(1)}% of food sales ${p.salesAgorot == null ? '—' : ils(p.salesAgorot)} (${p.salesSource ?? 'none'})` +
         (p.varianceAgorot == null ? '' : ` · unexplained usage ${ils(p.varianceAgorot)}`),
     );
     console.log(
-      `[seed-inventory-demo] purchases: ${p.purchases.invoiceCount} invoices ${ils(p.purchases.invoicesAgorot)} − non-food ${ils(p.purchases.nonFoodAgorot)} − credits ${ils(p.purchases.creditsAgorot)}` +
-        ` + ${p.purchases.accruedNotes} delivery notes not billed yet ${ils(p.purchases.accruedAgorot)} − earlier notes billed now ${ils(p.purchases.reversedAgorot)}`,
+      `[seed-inventory-demo] purchases: ${p.purchases.invoiceCount} invoices ${ils(p.purchases.invoicesAgorot)} − non-food ${ils(p.purchases.nonFoodAgorot)}` +
+        ` · info: ${p.purchases.unbilledNotes} delivery notes not billed yet ${ils(p.purchases.unbilledNotesAgorot)}`,
     );
   }
   console.log(`[seed-inventory-demo] done for "${r.name}"`);

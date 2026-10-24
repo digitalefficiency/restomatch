@@ -110,6 +110,7 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
         {t('period.formula', {
           opening: ils(p.opening.valueAgorot, locale, 0),
           purchases: ils(p.purchases.purchasesAgorot, locale, 0),
+          credits: ils(p.purchases.creditsAgorot, locale, 0),
           closing: ils(p.closing.valueAgorot, locale, 0),
         })}
       </p>
@@ -119,10 +120,9 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
             count: p.purchases.invoiceCount,
             nonFood: ils(p.purchases.nonFoodAgorot, locale, 0),
             dups: ils(p.purchases.duplicatesAgorot, locale, 0),
-            credits: ils(p.purchases.creditsAgorot, locale, 0),
           })}
-          {p.purchases.accruedNotes > 0 ? (
-            <> {t('period.accruedNote', { count: p.purchases.accruedNotes, value: ils(p.purchases.accruedAgorot, locale, 0) })}</>
+          {p.purchases.unbilledNotes > 0 ? (
+            <> {t('period.unbilledNote', { count: p.purchases.unbilledNotes, value: ils(p.purchases.unbilledNotesAgorot, locale, 0) })}</>
           ) : null}
         </p>
       ) : null}

@@ -170,7 +170,7 @@ export async function productsById(db: Database, restaurantId: string, ids: stri
 }
 
 export interface Purchases {
-  /** Food purchases ex-VAT after every exclusion below (agorot). */
+  /** Food purchases ex-VAT: the period's invoices − non-food lines (agorot). Credits are a separate term. */
   purchasesAgorot: number;
   invoiceCount: number;
   /** Σ total_excl_vat of the counted invoices (agorot). */
@@ -180,13 +180,11 @@ export interface Purchases {
   /** Live duplicate copies left out — their goods are on the original (agorot, count). */
   duplicatesAgorot: number;
   duplicateCount: number;
-  /** Money the suppliers gave back: accepted/resolved claims, capped per invoice (agorot). */
+  /** "זיכויים שהתקבלו": accepted/resolved claims on food lines, capped per invoice (agorot). */
   creditsAgorot: number;
-  /** Food on delivery notes received in the period but not invoiced yet (billed later on a consolidated invoice), at PO prices (agorot). */
-  accruedAgorot: number;
-  accruedNotes: number;
-  /** Notes accrued in an EARLIER period whose consolidated invoice lands in this one — taken back out so nothing counts twice (agorot). */
-  reversedAgorot: number;
+  /** Info only: delivery notes received in the period that no invoice covers yet (at PO prices). Not in purchases. */
+  unbilledNotes: number;
+  unbilledNotesAgorot: number;
 }
 
 const agorot = (v: unknown) => Math.round(Number(v ?? 0) * 100);
@@ -199,8 +197,9 @@ const agorot = (v: unknown) => Math.round(Number(v ?? 0) * 100);
  * is left out (a duplicate the bookkeeper rejected — "not a duplicate" — is a
  * normal purchase again). Invoices still waiting for a PO link (consolidated
  * חשבוניות ריכוז) ARE purchases: the goods arrived. Delivery notes have no
- * invoice of their own, so a monthly consolidated invoice is counted once.
- * Credits = the recovered part of the leak (claims accepted/resolved).
+ * invoice of their own, so a monthly consolidated invoice is counted once —
+ * purchases are invoices only. Credits (the recovered part of the leak:
+ * claims accepted/resolved on food lines) are returned as their own term.
  */
 export async function purchasesInPeriod(
   db: Database,
@@ -251,39 +250,37 @@ export async function purchasesInPeriod(
   const invoicesAgorot = agorot(r?.total);
   const nonFoodAgorot = agorot(r?.non_food);
   const creditsAgorot = agorot(r?.credit);
-  const notes = await deliveryNoteAccruals(db, restaurantId, tz, fromYmd, toYmd);
+  const notes = await unbilledDeliveryNotes(db, restaurantId, tz, fromYmd, toYmd);
   return {
-    purchasesAgorot: invoicesAgorot - nonFoodAgorot - creditsAgorot + notes.accruedAgorot - notes.reversedAgorot,
+    purchasesAgorot: invoicesAgorot - nonFoodAgorot,
     invoiceCount: Number(r?.n ?? 0),
     invoicesAgorot,
     nonFoodAgorot,
     duplicatesAgorot: agorot(r?.dup_total),
     duplicateCount: Number(r?.dup_n ?? 0),
     creditsAgorot,
-    ...notes,
+    unbilledNotes: notes.count,
+    unbilledNotesAgorot: notes.agorot,
   };
 }
 
 /**
- * Delivery notes (תעודות משלוח: goods receipts tagged `ת.מ. <n>`, no invoice of
- * their own) are billed later on a monthly consolidated invoice that lists them
- * in ocr_payload.raw.deliveryNotes — the covered set the consolidated
- * cross-match reads. The goods are used when they ARRIVE, so a note received in
- * the period that no invoice dated by the closing date covers yet is accrued at
- * its PO prices (food lines, received − rejected, ex-VAT); and when a
- * consolidated invoice in the period covers notes received before the period
- * (already accrued then), that same value is taken back out. The two use one
- * valuation, so across periods every note counts exactly once.
- * Ordinary receipts (not tagged as a delivery note) are matched to their own
- * invoice and are not accrued.
+ * Info for the owner, never in the math: delivery notes (תעודות משלוח — goods
+ * receipts tagged `ת.מ. <n>`, no invoice of their own) received in the period
+ * that no invoice dated by the closing date lists in
+ * ocr_payload.raw.deliveryNotes yet. Their goods arrived but are billed later
+ * on a monthly consolidated invoice, so this period's purchases (invoices
+ * only) do not include them yet. Valued at PO prices (food lines, received −
+ * rejected, ex-VAT). A note is covered only by an invoice of ITS supplier, on
+ * a number normalised like invoice numbers.
  */
-export async function deliveryNoteAccruals(
+export async function unbilledDeliveryNotes(
   db: Database,
   restaurantId: string,
   tz: string,
   fromYmd: string,
   toYmd: string,
-): Promise<{ accruedAgorot: number; accruedNotes: number; reversedAgorot: number }> {
+): Promise<{ count: number; agorot: number }> {
   // A note number is matched like an invoice number: letters/digits only, upper-case, no leading zeros.
   const norm = (col: SQL) => sql`nullif(regexp_replace(regexp_replace(upper(${col}), '[^[:alnum:]]', '', 'g'), '^0+', ''), '')`;
   const [r] = (await db.execute(sql`
@@ -318,17 +315,14 @@ export async function deliveryNoteAccruals(
     ),
     marked as (
       select notes.*,
-        exists (select 1 from covered c where c.dn = notes.dn and c.supplier_id = notes.supplier_id and c.idate <= ${toYmd}::date) as billed_by_close,
-        exists (select 1 from covered c where c.dn = notes.dn and c.supplier_id = notes.supplier_id and c.idate <= ${fromYmd}::date) as billed_by_open,
-        exists (select 1 from covered c where c.dn = notes.dn and c.supplier_id = notes.supplier_id and c.idate > ${fromYmd}::date and c.idate <= ${toYmd}::date) as billed_in_period
+        exists (select 1 from covered c where c.dn = notes.dn and c.supplier_id = notes.supplier_id and c.idate <= ${toYmd}::date) as billed_by_close
       from notes
       where notes.dn is not null
     )
     select
-      coalesce(sum(val) filter (where d > ${fromYmd}::date and d <= ${toYmd}::date and not billed_by_close), 0)::numeric(14,2)::text as accrued,
-      count(*) filter (where d > ${fromYmd}::date and d <= ${toYmd}::date and not billed_by_close)::int as accrued_n,
-      coalesce(sum(val) filter (where d <= ${fromYmd}::date and billed_in_period and not billed_by_open), 0)::numeric(14,2)::text as reversed
+      coalesce(sum(val) filter (where d > ${fromYmd}::date and d <= ${toYmd}::date and not billed_by_close), 0)::numeric(14,2)::text as unbilled,
+      count(*) filter (where d > ${fromYmd}::date and d <= ${toYmd}::date and not billed_by_close)::int as unbilled_n
     from marked
-  `)) as unknown as Array<{ accrued: string; accrued_n: number; reversed: string }>;
-  return { accruedAgorot: agorot(r?.accrued), accruedNotes: Number(r?.accrued_n ?? 0), reversedAgorot: agorot(r?.reversed) };
+  `)) as unknown as Array<{ unbilled: string; unbilled_n: number }>;
+  return { count: Number(r?.unbilled_n ?? 0), agorot: agorot(r?.unbilled) };
 }

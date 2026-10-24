@@ -144,7 +144,7 @@ async function periodFor(db: Database, restaurantId: string, rc: Awaited<ReturnT
   }
   const openingAgorot = Number(opening.totalValueAgorot ?? 0);
   const closingAgorot = Number(closing.totalValueAgorot ?? 0);
-  const result = actualFoodCost({ openingAgorot, purchasesAgorot: purchases.purchasesAgorot, closingAgorot, salesAgorot, theoreticalAgorot });
+  const result = actualFoodCost({ openingAgorot, purchasesAgorot: purchases.purchasesAgorot, creditsAgorot: purchases.creditsAgorot, closingAgorot, salesAgorot, theoreticalAgorot });
   return {
     available: true as const,
     opening: { id: opening.id, countDate: opening.countDate, valueAgorot: openingAgorot },

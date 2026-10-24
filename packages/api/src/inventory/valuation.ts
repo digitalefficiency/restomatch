@@ -95,8 +95,10 @@ export function valueCount(lines: readonly CountLineInput[], prices: ReadonlyMap
 
 export interface PeriodInput {
   openingAgorot: number;
-  /** Purchases in the period, ex-VAT, after duplicates/credits (agorot). */
+  /** Food purchases in the period, ex-VAT, duplicates and non-food out (agorot). */
   purchasesAgorot: number;
+  /** Credits received in the period ("זיכויים שהתקבלו"), its own term (agorot). */
+  creditsAgorot: number;
   closingAgorot: number;
   /** Food sales ex-VAT for the period (agorot), or null when unknown. */
   salesAgorot: number | null;
@@ -126,7 +128,7 @@ function bpOf(part: bigint, whole: bigint): number | null {
 }
 
 export function actualFoodCost(p: PeriodInput): PeriodResult {
-  const actual = BigInt(p.openingAgorot) + BigInt(p.purchasesAgorot) - BigInt(p.closingAgorot);
+  const actual = BigInt(p.openingAgorot) + BigInt(p.purchasesAgorot) - BigInt(p.creditsAgorot) - BigInt(p.closingAgorot);
   const sales = p.salesAgorot == null ? null : BigInt(p.salesAgorot);
   const theo = p.theoreticalAgorot == null ? null : BigInt(p.theoreticalAgorot);
   const variance = theo == null ? null : actual - theo;
