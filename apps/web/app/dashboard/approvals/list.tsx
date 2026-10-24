@@ -125,7 +125,7 @@ export function ApprovalsList({
       </div>
 
       {error ? (
-        <Card padding="sm" role="alert" className="border-danger/30 bg-danger/5 text-sm text-danger">
+        <Card padding="sm" role="alert" tone="danger" className="bg-danger/5 text-sm text-danger">
           {error}
         </Card>
       ) : null}
@@ -144,7 +144,8 @@ export function ApprovalsList({
               as="article"
               elevated
               padding="none"
-              className={isBlock ? 'relative overflow-hidden border-danger/40' : 'relative overflow-hidden'}
+              tone={isBlock ? 'danger' : 'default'}
+              className="relative overflow-hidden"
               aria-label={label}
             >
               {/* Severity rail: leak gradient for blockers, tinted bar otherwise. */}

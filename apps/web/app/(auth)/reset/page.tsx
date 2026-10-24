@@ -95,7 +95,7 @@ export default async function ResetPage({ searchParams }: PageProps) {
         {sent ? (
           <div
             role="status"
-            className="mb-4 rounded-md border-s-4 border-success bg-success/5 px-3 py-2 text-sm text-success"
+            className="mb-4 rounded-md border-s-4 border-primary bg-primary/5 px-3 py-2 text-sm text-primary"
           >
             {t('reset.sent')}
           </div>
@@ -118,7 +118,7 @@ export default async function ResetPage({ searchParams }: PageProps) {
           </Button>
         </form>
         <p className="mt-6 text-center text-xs text-subtle">
-          <Link href="/login" className="text-brand hover:underline">
+          <Link href="/login" className="text-primary hover:underline">
             {t('reset.back')}
           </Link>
         </p>

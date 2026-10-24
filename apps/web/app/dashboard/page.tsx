@@ -379,7 +379,7 @@ function LeakHero({
             className={
               // T1 alarm only when money leaked; pending-only (consolidated invoices) stays calm (T4).
               hasLeak
-                ? 'inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-danger px-4 py-2 text-sm font-semibold text-white shadow-card transition-colors hover:bg-danger/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/60 focus-visible:ring-offset-2'
+                ? 'inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-danger px-4 py-2 text-sm font-semibold text-on-primary shadow-card transition-colors hover:bg-danger/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/60 focus-visible:ring-offset-2'
                 : 'inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl border border-line-strong bg-surface px-4 py-2 text-sm font-semibold text-ink transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2'
             }
           >

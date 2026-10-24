@@ -109,7 +109,8 @@ export default async function LeakBreakdownPage({
       {/* Month switcher + total — the same number as the hero. */}
       <Card
         padding="md"
-        className={`relative mb-6 flex flex-col gap-4 overflow-hidden sm:flex-row sm:items-center sm:justify-between ${hero.leakIls > 0 ? 'border-danger/35' : ''}`}
+        tone={hero.leakIls > 0 ? 'danger' : 'default'}
+        className="relative mb-6 flex flex-col gap-4 overflow-hidden sm:flex-row sm:items-center sm:justify-between"
       >
         {/* T1 — the one number: danger start rail when money leaked. */}
         {hero.leakIls > 0 ? <div className="absolute inset-y-0 start-0 w-1.5 bg-danger" aria-hidden="true" /> : null}
