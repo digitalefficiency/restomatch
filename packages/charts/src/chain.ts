@@ -216,6 +216,20 @@ export function supplierMergeKey(name: string | null, businessId: string | null)
   return norm ? `name:${norm}` : null;
 }
 
+/**
+ * A comparison period is too thin to compare when its checked spend is below
+ * 10% of the current period's (a branch's first month, a seed gap): the UI then
+ * shows only the ₪ difference — no %, no red ▲ (AGENTS.md: calm, never a false
+ * alarm). Spend, not leak, is the yardstick: it is how much data the comparison
+ * stands on. Same rule as apps/web/lib/components/views/state.ts isThinBase.
+ */
+export const THIN_BASE_SPEND_RATIO = 0.1;
+
+export function isThinBase(currentSpend: number, baseSpend: number | null | undefined): boolean {
+  if (baseSpend == null) return false;
+  return baseSpend < currentSpend * THIN_BASE_SPEND_RATIO;
+}
+
 export interface ChainBranchRow extends BranchSnapshot {
   /** 1 = the most leak ₪ in the period. */
   rank: number;
@@ -223,6 +237,8 @@ export interface ChainBranchRow extends BranchSnapshot {
   prevLeakPct: number | null;
   /** leak ₪ in the period − the comparison period; null when compare is off. */
   leakDeltaIls: number | null;
+  /** The comparison period is too thin for a % / alarm colour (isThinBase). */
+  thinBase: boolean;
 }
 
 export interface ChainSupplierRow {
@@ -249,6 +265,8 @@ export interface ChainTotals {
   /** The comparison period's totals; null when compare is off. */
   prevLeakIls: number | null;
   prevLeakPct: number | null;
+  /** The comparison period is too thin for a % / alarm colour (isThinBase); false when compare is off. */
+  thinBase: boolean;
 }
 
 export interface ChainOverview {
@@ -307,6 +325,7 @@ export function aggregateChain(
       prevLeakIls: p ? p.leakIls : null,
       prevLeakPct: p ? p.leakPct : null,
       leakDeltaIls: p ? ils(ag(s.leakIls) - ag(p.leakIls)) : null,
+      thinBase: p ? isThinBase(s.spendIls, p.spendIls) : false,
     };
   });
 
@@ -377,6 +396,7 @@ export function aggregateChain(
       openDiscrepancies: open,
       prevLeakIls: compared ? ils(prevLeak) : null,
       prevLeakPct: compared ? pct(prevLeak, prevSpend) : null,
+      thinBase: compared ? isThinBase(ils(spend), ils(prevSpend)) : false,
     },
     branches,
     heatmap: branches.map((b) => ({ restaurantId: b.restaurantId, cells: b.trend })),

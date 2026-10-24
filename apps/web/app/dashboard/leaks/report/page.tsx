@@ -13,7 +13,7 @@ import { Card, SectionHeader } from '@/lib/components';
 import { discrepancyLabel, displayName } from '../../approvals/vocab';
 import { PrintButton } from '../claims/print-button';
 import { views as viewsNs } from '@/lib/i18n/messages/views';
-import { DeltaBadge, ViewToolbar, parseView } from '@/lib/components/views';
+import { DeltaBadge, ViewToolbar, isThinBase, parseView } from '@/lib/components/views';
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 /** North Star: ≥1.5% of food spend surfaced as leak. */
@@ -180,8 +180,20 @@ export default async function LeakReportPage({
             <p className="mt-1 text-xs text-subtle">{t('report.target')}</p>
             {previous && previous.hero.invoiceCount > 0 ? (
               <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-                <DeltaBadge current={hero.leakIls} previous={previous.hero.leakIls} compare={view.compare} showAmount />
-                <DeltaBadge current={hero.spendIls} previous={previous.hero.spendIls} compare={view.compare} neutral />
+                <DeltaBadge
+                  current={hero.leakIls}
+                  previous={previous.hero.leakIls}
+                  compare={view.compare}
+                  thinBase={isThinBase(hero.spendIls, previous.hero.spendIls)}
+                  showAmount
+                />
+                <DeltaBadge
+                  current={hero.spendIls}
+                  previous={previous.hero.spendIls}
+                  compare={view.compare}
+                  thinBase={isThinBase(hero.spendIls, previous.hero.spendIls)}
+                  neutral
+                />
               </div>
             ) : null}
           </div>

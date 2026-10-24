@@ -16,6 +16,7 @@ import {
 import { views as viewsNs } from '@/lib/i18n/messages/views';
 import {
   DeltaBadge,
+  isThinBase,
   ViewToolbar,
   isDefaultData,
   localDay,
@@ -117,7 +118,14 @@ export default async function LeakBreakdownPage({
             <p className="text-sm text-muted">{t('breakdown.ofSpend', { pct: formatPercent(hero.leakPct, locale, 1) })}</p>
           ) : null}
           {summary.previous ? (
-            <DeltaBadge className="mt-1" current={hero.leakIls} previous={summary.previous.leakIls} compare={view.compare} showAmount />
+            <DeltaBadge
+              className="mt-1"
+              current={hero.leakIls}
+              previous={summary.previous.leakIls}
+              compare={view.compare}
+              thinBase={isThinBase(hero.spendIls, summary.previous.spendIls)}
+              showAmount
+            />
           ) : null}
         </div>
         <nav className="flex flex-wrap items-center gap-2" aria-label={month}>
