@@ -78,6 +78,8 @@ const BASE_HISTORY_DAYS = 56;
 const STANDING_ORDER_NOTE = 'הזמנה קבועה — חלב וביצים · חיוב בחשבונית מרכזת';
 /** Months of standing-order history before the current month (the supplier ledger). */
 const STANDING_ORDER_MONTHS = 5;
+/** Marks the one large event order (the VAT-at-risk demo invoice) this script creates. */
+const EVENT_ORDER_NOTE = 'הזמנה מיוחדת — אירוע';
 
 /** Start of "today" on the restaurant's wall clock (DEMO_TODAY overrides, like the base seed). */
 function startOfLocalDay(tz: string): Date {
@@ -204,11 +206,11 @@ async function main() {
   if (grIds.length) await db.delete(grLines).where(inArray(grLines.grId, grIds));
   await db.delete(goodsReceipts).where(eq(goodsReceipts.restaurantId, restaurantId));
   await db.delete(activityEvents).where(eq(activityEvents.restaurantId, restaurantId));
-  // Standing-order POs are this script's own rows (po_lines cascade); drop them
+  // Standing-order and event POs are this script's own rows (po_lines cascade); drop them
   // before the delivered-PO query below so a re-run never counts them.
   await db
     .delete(purchaseOrders)
-    .where(and(eq(purchaseOrders.restaurantId, restaurantId), eq(purchaseOrders.notes, STANDING_ORDER_NOTE)));
+    .where(and(eq(purchaseOrders.restaurantId, restaurantId), inArray(purchaseOrders.notes, [STANDING_ORDER_NOTE, EVENT_ORDER_NOTE])));
 
   const tolerances = resolveTolerances(restaurant.settings?.tolerances);
   const rules = buildRules(resolveApprovalThresholds(restaurant.settings?.approvalThresholds));
@@ -750,6 +752,135 @@ async function main() {
     }
     const thisMonth = numbered.filter((n) => ilDate(n.receivedAt).slice(0, 7) === `${cy}-${String(cm).padStart(2, '0')}`).length;
     console.log(`[seed-demo] standing order: ${standingNotes.length} delivery notes · this month ${thisMonth} not yet invoiced (invoice expected at month end)`);
+  }
+
+  // ── the VAT-at-risk case: one large invoice without an allocation number ──
+  // From 2026 an invoice above ₪5,000 excl. VAT needs a Tax Authority allocation
+  // number (מספר הקצאה) or its input VAT cannot be deducted. One event order from
+  // the fish supplier, 27 days ago (last month, so this month's figures do not move),
+  // delivered and billed exactly as ordered: the engine matches it clean, and its
+  // ₪1,123.20 VAT is the only VAT at risk in the demo.
+  const fish = supplierRows.find((s) => s.nameEn === 'Mediterranean Fish Co.');
+  // Agreed event prices (the catalog's list prices): 20·89 + 25·62 + 15·145 + 15·49 = ₪6,240.
+  const eventItems = (
+    [
+      ['Salmon fillet', 20, 89],
+      ['Whole sea bream', 25, 62],
+      ['Red tuna', 15, 145],
+      ['Calamari', 15, 49],
+    ] as const
+  ).map(([en, qty, price]) => ({ p: productByEn.get(en), qty, price }));
+  if (fish && eventItems.every((i) => i.p)) {
+    const vat = fish.vatRate != null ? Number(fish.vatRate) : vatRate;
+    const deliveredAt = new Date(todayStart.getTime() - 27 * DAY_MS + 10 * 60 * 60 * 1000);
+    const orderedAt = new Date(deliveredAt.getTime() - 3 * DAY_MS);
+    const priced = eventItems;
+    const subtotal = r2(priced.reduce((a, i) => a + Math.round(i.qty * i.price * 100), 0) / 100);
+    const vatAmount = r2(subtotal * vat);
+    const [po] = await db
+      .insert(purchaseOrders)
+      .values({
+        restaurantId,
+        supplierId: fish.id,
+        expectedDeliveryAt: deliveredAt,
+        status: 'closed',
+        source: 'manual',
+        totalEstimated: subtotal.toFixed(2),
+        createdBy: managerId,
+        notes: EVENT_ORDER_NOTE,
+        sentAt: orderedAt,
+        createdAt: orderedAt,
+        updatedAt: deliveredAt,
+      })
+      .returning();
+    const lines = await db
+      .insert(poLines)
+      .values(
+        priced.map((i) => ({
+          poId: po!.id,
+          productId: i.p!.id,
+          rawDescription: i.p!.canonicalName,
+          rawDescriptionEn: i.p!.nameEn,
+          qtyOrdered: String(i.qty),
+          unit: i.p!.defaultUnit ?? 'ק״ג',
+          unitPriceExpected: i.price.toFixed(4),
+        })),
+      )
+      .returning();
+    const receivedAt = new Date(deliveredAt.getTime() + 20 * 60 * 1000);
+    const [gr] = await db
+      .insert(goodsReceipts)
+      .values({ restaurantId, poId: po!.id, receivedAt, receivedBy: receiverId, status: 'completed', createdAt: receivedAt, updatedAt: receivedAt })
+      .returning();
+    const grRowsEvent = await db
+      .insert(grLines)
+      .values(lines.map((l) => ({ grId: gr!.id, poLineId: l.id, productId: l.productId, qtyReceived: l.qtyOrdered, qtyRejected: '0' })))
+      .returning();
+    const invNumber = 'MF-24950';
+    const invLines = lines.map((l) => ({
+      id: crypto.randomUUID(),
+      productId: l.productId,
+      qtyBilled: Number(l.qtyOrdered),
+      unit: l.unit,
+      unitPriceBilled: Number(l.unitPriceExpected),
+      lineTotal: r2(Number(l.qtyOrdered) * Number(l.unitPriceExpected)),
+    }));
+    const [invoice] = await db
+      .insert(invoices)
+      .values({
+        restaurantId,
+        supplierId: fish.id,
+        invoiceNumber: invNumber,
+        invoiceDate: receivedAt,
+        dueDate: new Date(receivedAt.getTime() + 30 * DAY_MS),
+        totalExclVat: subtotal.toFixed(2),
+        vatAmount: vatAmount.toFixed(2),
+        totalInclVat: r2(subtotal + vatAmount).toFixed(2),
+        allocationNumber: null,
+        status: 'matched',
+        source: 'email',
+        ocrConfidence: '0.970',
+        createdAt: receivedAt,
+        updatedAt: receivedAt,
+      })
+      .returning();
+    await db.insert(invoiceLines).values(
+      invLines.map((l, i) => ({
+        id: l.id,
+        invoiceId: invoice!.id,
+        productId: l.productId,
+        rawDescription: lines[i]!.rawDescription ?? '',
+        rawDescriptionEn: lines[i]!.rawDescriptionEn,
+        qtyBilled: l.qtyBilled.toString(),
+        unit: l.unit,
+        unitPriceBilled: l.unitPriceBilled.toFixed(2),
+        lineTotal: l.lineTotal.toFixed(2),
+        vatRate: vat.toString(),
+      })),
+    );
+    const result = runMatch({
+      invoice: { invoiceNumber: invNumber, invoiceDate: receivedAt, supplierId: fish.id, totalExclVat: subtotal, vatAmount, totalInclVat: r2(subtotal + vatAmount) },
+      poLines: lines.map((l) => ({ id: l.id, productId: l.productId, qtyOrdered: Number(l.qtyOrdered), unit: l.unit, unitPriceExpected: Number(l.unitPriceExpected) })),
+      grLines: grRowsEvent.map((g) => ({ id: g.id, poLineId: g.poLineId, productId: g.productId, qtyReceived: Number(g.qtyReceived) })),
+      invoiceLines: invLines,
+      vatRate: vat,
+      tolerances,
+      knownInvoiceNumbers: new Set(knownBySupplier.get(fish.id) ?? []),
+      expectedDeliveryDate: deliveredAt,
+    });
+    if (result.discrepancies.length > 0) {
+      throw new Error(`event invoice ${invNumber} must match clean, got ${result.discrepancies.map((d) => d.type).join(', ')}`);
+    }
+    await db.insert(matchRuns).values({
+      restaurantId,
+      poId: po!.id,
+      grId: gr!.id,
+      invoiceId: invoice!.id,
+      runAt: receivedAt,
+      overallStatus: result.status,
+      totalDiscrepancyAmount: result.totalDiscrepancyAmount.toFixed(2),
+    });
+    console.log(`[seed-demo] VAT at risk: ${invNumber} ₪${subtotal.toFixed(2)} + VAT ₪${vatAmount.toFixed(2)} on ${ilDate(receivedAt)}, no allocation number, matched ${result.status}`);
   }
 
   // The bakery's weekly ריכוז: this week's drops, one consolidated invoice.
