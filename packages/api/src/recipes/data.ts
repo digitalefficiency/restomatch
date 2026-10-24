@@ -9,6 +9,7 @@ import {
   lt,
   priceHistory,
   products,
+  suppliers,
   recipeItems,
   recipes,
   restaurants,
@@ -152,6 +153,8 @@ export function toCostRecipes(rows: RecipeRow[], items: ItemRow[]): CostRecipe[]
 
 export interface PriceWithDate extends ProductPrice {
   observedAt: Date;
+  /** Supplier the price was paid to (the latest observation's supplier). */
+  supplierId: string;
 }
 
 /**
@@ -178,13 +181,14 @@ export async function latestPrices(
       productId: priceHistory.productId,
       unitPrice: priceHistory.unitPrice,
       observedAt: priceHistory.observedAt,
+      supplierId: priceHistory.supplierId,
       unit: products.defaultUnit,
     })
     .from(priceHistory)
     .innerJoin(products, and(eq(products.id, priceHistory.productId), eq(products.restaurantId, restaurantId)))
     .where(and(...conds))
-    .orderBy(priceHistory.productId, desc(priceHistory.observedAt));
-  return new Map(rows.map((r) => [r.productId, { unitPrice: r.unitPrice, unit: r.unit, observedAt: r.observedAt }]));
+    .orderBy(priceHistory.productId, desc(priceHistory.observedAt), desc(priceHistory.id));
+  return new Map(rows.map((r) => [r.productId, { unitPrice: r.unitPrice, unit: r.unit, observedAt: r.observedAt, supplierId: r.supplierId }]));
 }
 
 /** The first price per product observed at or after `from` (baseline for products first bought this period). */
@@ -200,6 +204,7 @@ export async function earliestPricesFrom(
       productId: priceHistory.productId,
       unitPrice: priceHistory.unitPrice,
       observedAt: priceHistory.observedAt,
+      supplierId: priceHistory.supplierId,
       unit: products.defaultUnit,
     })
     .from(priceHistory)
@@ -211,8 +216,8 @@ export async function earliestPricesFrom(
         ...(productIds ? [inArray(priceHistory.productId, productIds)] : []),
       ),
     )
-    .orderBy(priceHistory.productId, asc(priceHistory.observedAt));
-  return new Map(rows.map((r) => [r.productId, { unitPrice: r.unitPrice, unit: r.unit, observedAt: r.observedAt }]));
+    .orderBy(priceHistory.productId, asc(priceHistory.observedAt), asc(priceHistory.id));
+  return new Map(rows.map((r) => [r.productId, { unitPrice: r.unitPrice, unit: r.unit, observedAt: r.observedAt, supplierId: r.supplierId }]));
 }
 
 export interface ProductInfo {
@@ -267,4 +272,17 @@ export async function loadPosSales(
     group by item_ref
   `)) as unknown as Array<{ itemRef: string; itemName: string; qty: string; netAmount: string }>;
   return [...rows];
+}
+
+export async function loadSuppliers(
+  db: Database,
+  restaurantId: string,
+  ids: string[],
+): Promise<Map<string, { name: string; nameEn: string | null }>> {
+  if (ids.length === 0) return new Map();
+  const rows = await db
+    .select({ id: suppliers.id, name: suppliers.name, nameEn: suppliers.nameEn })
+    .from(suppliers)
+    .where(and(eq(suppliers.restaurantId, restaurantId), inArray(suppliers.id, ids)));
+  return new Map(rows.map((r) => [r.id, { name: r.name, nameEn: r.nameEn }]));
 }

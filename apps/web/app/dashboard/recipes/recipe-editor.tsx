@@ -36,6 +36,7 @@ import {
   trimDecimal,
   unitOptions,
 } from './recipe-ui';
+import { PriceAlertLine } from './price-alert';
 
 type Detail = inferRouterOutputs<AppRouter>['recipes']['get'];
 
@@ -86,6 +87,9 @@ export function RecipeEditor({ recipeId, startAsSub = false }: { recipeId?: stri
   const utils = trpc.useUtils();
   const detail = trpc.recipes.get.useQuery({ id: recipeId ?? '' }, { enabled: !!recipeId });
   const subs = trpc.recipes.subRecipes.useQuery();
+  // Dish price alert (flag `dishPriceAlert`) for this dish, if any.
+  const alertsQ = trpc.recipes.priceAlerts.useQuery(undefined, { enabled: !!recipeId, staleTime: 60_000 });
+  const priceAlert = alertsQ.data?.enabled ? alertsQ.data.alerts.find((a) => a.recipeId === recipeId) : undefined;
 
   const [name, setName] = useState('');
   const [nameEn, setNameEn] = useState('');
@@ -194,6 +198,12 @@ export function RecipeEditor({ recipeId, startAsSub = false }: { recipeId?: stri
       }}
     >
       <div className="space-y-6">
+        {priceAlert && alertsQ.data?.enabled ? (
+          <div>
+            <p className="mb-1 text-xs text-subtle">{t('alert.banner')}</p>
+            <PriceAlertLine alert={priceAlert} targetBp={alertsQ.data.targetBp} />
+          </div>
+        ) : null}
         <Card className="grid gap-4 sm:grid-cols-2">
           <Field label={t('editor.name')} htmlFor="r-name">
             <Input id="r-name" required maxLength={120} value={name} onChange={(e) => setName(e.target.value)} dir="auto" />

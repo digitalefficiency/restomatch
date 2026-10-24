@@ -10,8 +10,9 @@
  *
  * It writes NO prices: costs come from the price_history seed-demo.ts already
  * created, so the leak hero / KPIs are unchanged. The "hurt" dish is the
- * entrecôte steak — seed-demo's butchery creep (₪139.70 → ₪145 → ₪149/kg this
- * month) pushes it over the food-cost target in "What changed this month".
+ * entrecôte steak — seed-demo's butchery creep (→ ₪145 → ₪149/kg this month, HaKerem
+ * Butchery) pushes it from under the 30% food-cost target to over it: "What changed
+ * this month" shows it, and with the `dishPriceAlert` flag it raises a dish price alert.
  */
 import {
   and,
@@ -76,8 +77,10 @@ const DEMO: DemoRecipe[] = [
     name: 'סטייק אנטריקוט',
     nameEn: 'Entrecôte steak',
     category: 'עיקריות',
-    // ₪179: 32.8% (amber) at the start of the month → 34.9% (red) at today's ₪149/kg.
-    menu: 179,
+    // ₪199: 29.5% (under the 30% target) at the start of the month → 31.4% at today's
+    // ₪149/kg entrecôte — it crosses the target, so the dishPriceAlert demo fires
+    // (HaKerem Butchery raised the price).
+    menu: 199,
     lines: [
       ['Entrecôte (rib-eye)', '300', 'גרם', 12],
       ['Potatoes', '250', 'גרם', 15],

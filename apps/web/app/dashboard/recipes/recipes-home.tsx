@@ -30,6 +30,7 @@ import { components } from '@/lib/i18n/messages/components';
 import { recipes as recipesNs } from '@/lib/i18n/messages/recipes';
 import { originalProps } from '@/lib/i18n/original';
 import { LIGHT_TONE, ils, ilsDelta, pct, priceText, type Light } from './recipe-ui';
+import { PriceAlertLine } from './price-alert';
 
 type ListOutput = inferRouterOutputs<AppRouter>['recipes']['list'];
 type Tab = 'dishes' | 'changes' | 'impact' | 'import' | 'pos';
@@ -42,6 +43,8 @@ export function RecipesHome({ initial, canSetTarget }: { initial: ListOutput; ca
   // The POS tab exists only when the `integrations` flag is on as well.
   const posProbe = trpc.recipes.posVsTheory.useQuery({ month: 'current' }, { staleTime: 60_000 });
   const showPos = !!posProbe.data && posProbe.data.reason !== 'integrationsOff';
+  // Dish price alerts (flag `dishPriceAlert`): `enabled: false` ⇒ nothing changes.
+  const alertsQ = trpc.recipes.priceAlerts.useQuery(undefined, { staleTime: 60_000 });
   const tabs: Tab[] = showPos ? ['dishes', 'changes', 'impact', 'pos', 'import'] : ['dishes', 'changes', 'impact', 'import'];
 
   return (
@@ -68,7 +71,7 @@ export function RecipesHome({ initial, canSetTarget }: { initial: ListOutput; ca
         ))}
       </div>
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
-        {tab === 'dishes' ? <DishesTab data={data} /> : null}
+        {tab === 'dishes' ? <DishesTab data={data} alerts={alertsQ.data?.enabled ? alertsQ.data : null} /> : null}
         {tab === 'changes' ? <ChangesTab /> : null}
         {tab === 'impact' ? <ImpactTab /> : null}
         {tab === 'import' ? <ImportTab onDone={() => setTab('dishes')} /> : null}
@@ -195,7 +198,14 @@ function Arrow({ from, to }: { from: string; to: string }) {
   );
 }
 
-function DishesTab({ data }: { data: ListOutput }) {
+function DishesTab({
+  data,
+  alerts,
+}: {
+  data: ListOutput;
+  alerts: { targetBp: number; alerts: Array<import('./price-alert').DishPriceAlert> } | null;
+}) {
+  const alertById = new Map((alerts?.alerts ?? []).map((a) => [a.recipeId, a] as const));
   const t = useT(recipesNs);
   const locale = useLocale();
   const [q, setQ] = useState('');
@@ -251,6 +261,9 @@ function DishesTab({ data }: { data: ListOutput }) {
                         </span>
                       ) : null}
                     </div>
+                    {alerts && alertById.has(r.id) ? (
+                      <PriceAlertLine alert={alertById.get(r.id)!} targetBp={alerts.targetBp} compact />
+                    ) : null}
                   </td>
                   <td className="px-4 py-3 text-end tabular-nums">{ils(r.portionCostAgorot, locale)}</td>
                   <td className="px-4 py-3 text-end tabular-nums text-muted">{ils(r.menuPriceAgorot, locale)}</td>

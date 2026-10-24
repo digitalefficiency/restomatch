@@ -7,6 +7,7 @@ import { formatNumber } from '@/lib/i18n/format';
 import { recipes as recipesNs } from '@/lib/i18n/messages/recipes';
 import { originalProps } from '@/lib/i18n/original';
 import { ils, ilsDelta, pct } from './recipe-ui';
+import { PriceAlertLine } from './price-alert';
 
 const TOP = 3;
 
@@ -26,7 +27,13 @@ export async function RecipesOverviewCard() {
     return null;
   });
   if (!changes) return null;
-  const [t, locale] = await Promise.all([getT(recipesNs), getLocale()]);
+  const [t, locale, alertsRes] = await Promise.all([
+    getT(recipesNs),
+    getLocale(),
+    // Flag `dishPriceAlert`: with it off this is { enabled: false } and the card is unchanged.
+    caller.recipes.priceAlerts().catch(() => null),
+  ]);
+  const alertById = new Map((alertsRes?.enabled ? alertsRes.alerts : []).map((a) => [a.recipeId, a] as const));
   // Dishes on the menu only (an archived dish is not "hurting" anyone).
   const hurt = changes.rows.filter((r) => r.active && !r.isSubRecipe && r.costDeltaAgorot > 0);
   const noRecipes = changes.activeDishCount === 0;
@@ -80,6 +87,9 @@ export async function RecipesOverviewCard() {
                   <span className="text-xs font-normal text-subtle">{t('overviewCard.perPlate')}</span>
                 </span>
               </span>
+              {alertById.has(r.recipeId) && alertsRes?.enabled ? (
+                <PriceAlertLine alert={alertById.get(r.recipeId)!} targetBp={alertsRes.targetBp} compact className="w-full" />
+              ) : null}
             </li>
           ))}
         </ul>

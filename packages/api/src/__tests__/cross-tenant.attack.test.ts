@@ -243,6 +243,7 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'recipes.changes': 'isolation',
   'recipes.setTarget': 'isolation',
   'recipes.importCsv': 'attack',
+  'recipes.priceAlerts': "isolation — recipes-alerts.test.ts: B (same dish, flat price) gets no alert and never A's; reads only the caller's recipes/price_history/suppliers",
   'recipes.posVsTheory': "isolation — recipes-pos.test.ts: A's per-dish POS totals exclude B's sales of the same item/day (pos_sales is RLS-scoped, query filters restaurant_id)",
 };
 
