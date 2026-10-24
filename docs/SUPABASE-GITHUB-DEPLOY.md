@@ -10,7 +10,8 @@
 > 1. בדשבורד של Supabase → Integrations → GitHub: לוודא שתיקיית העבודה היא שורש הריפו, ושענף הייצור הוא `main`
 >    (`main` מכיל עכשיו את הקוד המלא).
 >    לכבות **Automatic branching**, כדי שלא ייווצרו מסדי תצוגה בתשלום.
-> 2. מיזוג ל-`main` → Supabase מריץ מיד את הקבצים החדשים על מסד הייצור החדש (כרגע 39 קבצים: הכנה, 35 מיגרציות של Drizzle ו-3 קבצי RLS).
+> 2. מיזוג ל-`main` → Supabase מריץ מיד את הקבצים החדשים על מסד הייצור החדש (כרגע 40 קבצים: הכנה, 35 מיגרציות של Drizzle ו-4 קבצי RLS).
+>    קובץ ה-RLS הרביעי (SB-3) מוחק את הגישה האנונימית ל-`walk-ins/` — הוא נכנס ל-`main` רק יחד עם `POST /api/showcase/upload` (ראו SB-3 ב-§4).
 >    הקבצים כוללים נעילה של ה-Data API, כך שהמפתח הציבורי לא נותן גישה לאף טבלה. אין בקבצים נתוני דמו.
 > 3. ב-SQL Editor להריץ פעם אחת:
 >    `alter role restomatch_app with login password '<APP_ROLE_PASSWORD>';`
@@ -74,6 +75,7 @@ Until step 4 the live site keeps using the old project, so steps 1–3 are invis
   - every file applies in order, with one transaction per file;
   - drizzle then sees no gap, and `db:migrate` is a no-op;
   - the doctor reports 0 FAIL, and its only WARN is the role having no LOGIN yet;
+  - the publishable key (`anon`) can neither list nor upload under `walk-ins/` (SB-3);
   - re-applying the RLS file is a no-op;
   - without rights on `storage.objects`, the RLS file still applies with a WARNING instead of failing the deploy.
 
@@ -118,9 +120,9 @@ This pushes the same `supabase/migrations`.
 
 ## 4. First deploy — checks and the one manual step
 
-1. Merge to the production branch. In the dashboard (Database → Migrations, or the integration's deploy log), expect **39 migrations** in total (36 from the first merge, `20260620072002_…rls_2a5eafd1` = Data API lockout, then `20260620182640_0033_plans_catalog` + `20260620182641_…rls_a71f80e5` = plan catalog and the bucket upload limits). Or run in the SQL editor:
+1. Merge to the production branch. In the dashboard (Database → Migrations, or the integration's deploy log), expect **40 migrations** in total (36 from the first merge, `20260620072002_…rls_2a5eafd1` = Data API lockout, then `20260620182640_0033_plans_catalog` + `20260620182641_…rls_a71f80e5` = plan catalog and the bucket upload limits, then `20260620182642_…rls_ac473419` = SB-3, the anon walk-ins policies dropped). Or run in the SQL editor:
    ```sql
-   select count(*) from supabase_migrations.schema_migrations;   -- 39
+   select count(*) from supabase_migrations.schema_migrations;   -- 40
    select count(*) from drizzle.__drizzle_migrations;            -- 35
    ```
 2. **Give the tenant role its password.** Generate it locally (`openssl rand -hex 32`), store it in your password manager, then run in the SQL editor:
@@ -129,7 +131,7 @@ This pushes the same `supabase/migrations`.
    ```
 3. Check that the storage policies landed:
    ```sql
-   select count(*) from pg_policies where schemaname = 'storage' and policyname like 'invoice_scans%';  -- 6 (4 tenant + 2 walk-ins showcase, see "SB-3" below)
+   select count(*) from pg_policies where schemaname = 'storage' and policyname like 'invoice_scans%';  -- 4 (the per-restaurant tenant policies; no anon policy, see "SB-3" below)
    select public, file_size_limit, allowed_mime_types from storage.buckets where id = 'invoice-scans'; -- false | 11534336 | {pdf,jpeg,png,webp,heic,heif}
    select count(*) from plans;                                                                           -- 4 (0033)
    ```
@@ -140,24 +142,29 @@ This pushes the same `supabase/migrations`.
    ```
    It should report **0 FAIL · 0 WARN**. Before step 2, the single expected WARN is the app role having no LOGIN yet.
 
-### SB-3 — anonymous showcase uploads (deferred, needs the server upload route)
+### SB-3 — no anonymous storage access (closed)
 
-Two storage policies remain open to the publishable (anon) key:
+**What was open:** the two policies `invoice_scans_walkins_select` and `invoice_scans_walkins_insert` let anyone holding the publishable (anon) key list, download and upload under the shared `walk-ins/` prefix. Prospects upload real supplier invoices on the public showcase, so every visitor could read every other visitor's invoice.
 
-- `invoice_scans_walkins_select`
-- `invoice_scans_walkins_insert`
+**What closed it:**
+- `packages/db/drizzle/rls/0001_invoice_scans_rls.sql` no longer creates the two policies. It keeps the `drop policy if exists` lines, so re-applying it removes them from a project that has them (owner-approved change to an immutable file).
+- `supabase/migrations/20260620182642_restomatch_rls_ac473419.sql` is the appended RLS version that drops them on the git deploy. The released RLS files before it still create them; they are never edited.
+- `db:doctor` → `no anonymous storage access` is **PASS** only when no anon or public policy is left on `storage.objects`. A leftover `invoice_scans_walkins_*` policy is a **FAIL**, with the repair: re-apply `rls/0001` in the SQL editor, or deploy the latest supabase RLS migration. Any other anon or public policy, or a missing tenant policy, is also a FAIL.
+- Proven on the emulated Supabase (`packages/db/src/__tests__/supabase-deploy.test.ts`): with `main`'s released files, `anon` lists another visitor's `walk-ins/` file and can upload. After the appended file, `anon` sees 0 objects and its `walk-ins/` INSERT is refused by RLS. `packages/api/src/__tests__/storage.attack.test.ts` proves the same for a connection without a restaurant.
 
-They cover **only** the shared demo prefix `walk-ins/` and can never reach a `<restaurant_id>/` tenant prefix. The cost is that anyone holding the public key can list and download other visitors' showcase uploads, and can upload files of at most 11 MiB, in the allowed types only, under `walk-ins/`.
+**Release dependency — ships with `POST /api/showcase/upload`.** The public `/showcase/receiver` must upload server-side, with the service role, before this reaches `main`. Merging to `main` makes Supabase apply the drop at once, and the old anon-key upload (`apps/web/lib/supabase/client.ts` → `uploadInvoiceScan`) then fails. Merge both in the same change and redeploy Vercel right after.
 
-The public `/showcase/receiver` still uploads with the anon key (`apps/web/lib/supabase/client.ts` → `uploadInvoiceScan`). Dropping these policies before a server-side upload route exists breaks the landing-page demo, so the drop is **not** in this release. `db:doctor` reports it as a known **WARN** (`no anonymous storage access`). It reports **FAIL** if any *other* anon or public policy appears on `storage.objects`, or if one of the 4 tenant policies is missing.
+**Owner verification** (SQL editor, after the deploy):
+```sql
+select policyname from pg_policies
+ where schemaname = 'storage' and policyname like 'invoice_scans_walkins%';                       -- 0 rows
+select version from supabase_migrations.schema_migrations where version = '20260620182642';      -- 1 row
+```
+If the first query returns rows, re-run `packages/db/drizzle/rls/0001_invoice_scans_rls.sql` in the SQL editor, then `pnpm db:doctor`. Expect `no anonymous storage access` = PASS.
 
-To close it, ship these together in ONE PR:
+**If the policy count above is 6** (on a project that already had the walk-ins policies): the storage block did not apply and the anon walk-ins policies were NOT dropped — same fix as below; the SB-3 query must return 0 rows afterwards.
 
-1. A server route (service-role upload into `walk-ins/` that returns a signed URL), with the showcase page passing `uploadFile` to `<InvoiceScan>`.
-2. Removal of the two `create policy invoice_scans_walkins_*` statements in `packages/db/drizzle/rls/0001_invoice_scans_rls.sql`. This file is immutable, so it needs a human-authored PR. Keep the `drop policy if exists` lines.
-3. `pnpm db:supabase-sync`, which emits a new appended RLS version.
-
-**If the policy count above is below 6:** the migration role was not allowed to manage `storage.objects` policies, and the deploy log only shows a WARNING (`storage.objects policies NOT applied`). Run `packages/db/drizzle/rls/0001_invoice_scans_rls.sql` in the SQL editor, then re-run `pnpm db:doctor`. Expect `tenant storage policies` = PASS.
+**If the policy count above is below 4:** the migration role was not allowed to manage `storage.objects` policies, and the deploy log only shows a WARNING (`storage.objects policies NOT applied`). Run `packages/db/drizzle/rls/0001_invoice_scans_rls.sql` in the SQL editor, then re-run `pnpm db:doctor`. Expect `tenant storage policies` = PASS.
 
 ## 5. Environment for the new project
 
