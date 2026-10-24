@@ -89,13 +89,13 @@ describe('POST /api/supplier-confirm/[token]', () => {
     expect((await post(token, { lines: [] })).status).toBe(410);
   });
 
-  it('body cap → 413 (declared and streamed); malformed / extra keys → 400; foreign origin → 403', async () => {
+  it('body cap → 413 (declared and streamed); malformed json → 400; extra keys → 422 (schema); foreign origin → 403', async () => {
     const { token } = (await createSupplierLink(db, rid, poId))!;
     const huge = JSON.stringify({ lines: [], note: 'x'.repeat(20_000) });
     expect((await post(token, huge)).status).toBe(413);
     expect((await post(token, huge, { 'content-length': '10' })).status).toBe(413);
     expect((await post(token, '{not json')).status).toBe(400);
-    expect((await post(token, { lines: [], restaurantId: rid })).status).toBe(400);
+    expect((await post(token, { lines: [], restaurantId: rid })).status).toBe(422);
     expect((await post(token, { lines: [] }, { origin: 'https://evil.example' })).status).toBe(403);
     expect(await db.select().from(supplierResponses).where(eq(supplierResponses.restaurantId, rid))).toEqual([]);
   });
