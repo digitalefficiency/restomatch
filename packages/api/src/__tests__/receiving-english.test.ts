@@ -9,13 +9,15 @@ import {
   poLines,
   products,
   purchaseOrders,
+  restaurants,
+  suppliers,
   testDbUrl,
 } from '@restomatch/db';
 import { ClaudeTranslator, CompositeTranslator, type MessagesClientLike } from '@restomatch/translate';
 import { appRouter } from '../index';
 import type { AppContext } from '../context';
 import { __setReceivingTranslator, fillEnglishNames } from '../receiving/english';
-import { buildDevOcrStub, devOcrStubEnabled } from '../receiving/devOcrStub';
+import { buildDevOcrStub, devOcrStubEnabled, stubVatRate } from '../receiving/devOcrStub';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 
 const db = createDb(testDbUrl());
@@ -253,6 +255,25 @@ describe('local-demo OCR stub', () => {
     expect(stub!.lines[1]!.qty).toBe(Number(second!.qtyOrdered) + 1);
     const subtotal = stub!.lines.reduce((s, l) => s + l.lineTotal, 0);
     expect(stub!.totals.subtotal).toBeCloseTo(subtotal, 2);
+  });
+
+  it('bills VAT at the rate the matcher expects: PO → supplier → restaurant → 18%', async () => {
+    expect(stubVatRate(null, '0.0000', '0.1800')).toBe(0);
+    expect(stubVatRate('0.1700', '0', '0.18')).toBe(0.17);
+    expect(stubVatRate(null, null, '0.1800')).toBe(0.18);
+    expect(stubVatRate(null, null, null)).toBe(0.18);
+    // A 0%-VAT produce supplier: no VAT on the stub invoice (no false VAT_MISMATCH).
+    await db.update(purchaseOrders).set({ vatRate: null }).where(eq(purchaseOrders.id, A.poId));
+    await db.update(suppliers).set({ vatRate: '0' }).where(eq(suppliers.id, A.supplierId));
+    await db.update(restaurants).set({ vatRate: '0.18' }).where(eq(restaurants.id, A.restaurantId));
+    const zero = await buildDevOcrStub(db, A.restaurantId, A.grId);
+    expect(zero!.totals.vat).toBe(0);
+    expect(zero!.totals.total).toBe(zero!.totals.subtotal);
+    expect(zero!.lines.every((l) => l.vatRate === 0)).toBe(true);
+    // No rate on supplier or PO: the restaurant's.
+    await db.update(suppliers).set({ vatRate: null }).where(eq(suppliers.id, A.supplierId));
+    const std = await buildDevOcrStub(db, A.restaurantId, A.grId);
+    expect(std!.totals.vat).toBeCloseTo(Math.round(std!.totals.subtotal * 18) / 100, 2);
   });
 
   it('refuses a foreign receipt', async () => {
