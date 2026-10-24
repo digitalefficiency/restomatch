@@ -18,11 +18,15 @@
  *   4. base seed in demo-only mode (deletes the demo tenants in one transaction,
  *      recreates the restaurant, team, suppliers, catalog, POs), seed-demo
  *      (receipts, invoices, matching, approvals), seed-chain-demo (branches)
- *   5. verify: non-demo data unchanged, demo hero printed, check-demo invariants
+ *   5. the feature seeds of src/lib/demoExtras.ts (recovery, recipes, contracts, …) — each
+ *      one whose script + table exist here, scoped to the demo tenants; the leak hero
+ *      is snapshotted before them and must be identical after
+ *   6. verify: non-demo data unchanged, demo hero printed, check-demo invariants
  *
  * Docs (Hebrew, for the owner): docs/client-ready/RESEED-PROD.md
  */
 import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { computeLeakHero } from '@restomatch/charts';
@@ -37,6 +41,7 @@ import {
 } from '@restomatch/db';
 import postgres from 'postgres';
 import { checkDemo } from './check-demo';
+import { DEMO_EXTRA_STEPS, scriptIsDemoScoped } from '../src/lib/demoExtras';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const DEFAULT_DEMO_PASSWORD = 'RestoMatch-Demo-2026!';
@@ -95,6 +100,35 @@ function run(label: string, cmd: string[], env: NodeJS.ProcessEnv) {
   if (r.status !== 0) fail(`${label} failed (exit ${r.status}). Nothing outside the demo tenants was touched; fix the cause and run the same command again.`);
 }
 
+const WORKER = join(ROOT, 'apps', 'worker');
+
+/** Which feature seeds run here: script present, table migrated, demo-scoped when remote. */
+async function planExtras(sql: postgres.Sql) {
+  const out = [];
+  for (const step of DEMO_EXTRA_STEPS) {
+    const script = step.scripts.find((s) => existsSync(join(WORKER, s)));
+    const [t] = await sql`select to_regclass(${`public.${step.requiresTable}`}) is not null as ok`;
+    const scopedOk = script ? scriptIsDemoScoped(readFileSync(join(WORKER, script), 'utf8')) : false;
+    const why = !script ? 'script not on this checkout' : !t!.ok ? `table ${step.requiresTable} not migrated` : null;
+    out.push({ step, script, run: !why, why, refuse: !why && !local && !scopedOk });
+  }
+  return out;
+}
+
+/** Every hero figure of every demo restaurant, this month and the last two. */
+async function heroSnapshot(rids: string[], day: string): Promise<Record<string, string>> {
+  const db = createDb(url!);
+  const now = new Date(`${day}T12:00:00+03:00`);
+  const out: Record<string, string> = {};
+  for (const rid of rids) {
+    for (const monthOffset of [0, -1, -2]) {
+      const h = await computeLeakHero(db, rid, { now, monthOffset });
+      out[`${rid.slice(0, 8)}@${monthOffset}`] = JSON.stringify(h);
+    }
+  }
+  return out;
+}
+
 async function main() {
   const sql = postgres(url!, { max: 1, prepare: false, onnotice: () => undefined });
   const target = local ? 'local database' : `Supabase project ${supabaseProjectRef(url!)}`;
@@ -108,12 +142,31 @@ async function main() {
     console.log('[reseed-demo] rows that will be DELETED (demo tenants only):');
     for (const [t, n] of Object.entries(counts)) console.log(`    ${t.padEnd(32)} ${String(n).padStart(7)}`);
     console.log(`[reseed-demo] other tenants (left untouched): ${before.restaurants} restaurant(s), ${before.users} user(s)`);
+    const extras = await planExtras(sql);
+    for (const e of extras) console.log(`[reseed-demo] feature seed ${e.step.key}: ${e.run ? `will run ${e.script}` : `skipped — ${e.why}`}`);
+    const refused = extras.filter((e) => e.refuse);
+    if (refused.length) {
+      fail(`refusing: feature seed(s) not scoped to the demo tenants on a remote database: ${refused.map((e) => `${e.step.key} (${e.script})`).join(', ')} — the script must read DEMO_RESTAURANT_ID / DEMO_RESTAURANT_IDS`);
+    }
     if (dryRun) return;
 
     const env = { ...process.env, DEMO_TODAY: today, SEED_SCOPE: 'demo' };
     run('base seed (demo tenants only)', ['pnpm', '--filter', '@restomatch/db', 'seed'], env);
     run('seed-demo (receipts, invoices, matching)', ['pnpm', '--filter', '@restomatch/worker', 'exec', 'tsx', 'scripts/seed-demo.ts'], env);
     run('seed-chain-demo (Haifa + Jerusalem branches)', ['pnpm', '--filter', '@restomatch/worker', 'exec', 'tsx', 'scripts/seed-chain-demo.ts'], env);
+
+    // Feature seeds: scoped to the demo tenants, and the leak hero must not move.
+    const seeded = await findDemoTenants(sql);
+    const mainId = seeded.restaurants.find((r) => r.businessId === DEMO_MAIN_BUSINESS_ID)?.id;
+    if (!mainId) fail('the core seed did not create the demo restaurant');
+    const heroBefore = await heroSnapshot(seeded.restaurants.map((r) => r.id), today!);
+    const scoped = { ...env, DEMO_RESTAURANT_ID: mainId, DEMO_RESTAURANT_IDS: seeded.restaurants.map((r) => r.id).join(',') };
+    for (const e of extras.filter((x) => x.run)) {
+      run(`${e.step.label} (${e.script})`, ['pnpm', '--filter', '@restomatch/worker', 'exec', 'tsx', e.script!], scoped);
+    }
+    const heroAfter = await heroSnapshot(seeded.restaurants.map((r) => r.id), today!);
+    const moved = Object.keys(heroBefore).filter((k) => heroBefore[k] !== heroAfter[k]);
+    if (moved.length) fail(`a feature seed moved the leak hero: ${moved.map((k) => `${k}: ${heroBefore[k]} → ${heroAfter[k]}`).join('; ')}`);
 
     const after = await findDemoTenants(sql);
     const afterFp = await nonDemoFingerprint(sql, after.restaurants.map((r) => r.id), after.userIds);
