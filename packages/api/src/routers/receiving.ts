@@ -24,8 +24,10 @@ import {
   purchaseOrders,
   restaurants,
   suppliers,
+  users,
   type Database,
 } from '@restomatch/db';
+import { computeInvoiceLeak } from '@restomatch/charts';
 import { enqueueMatchInvoice, enqueueOcrInvoice, isQueueUnavailableError } from '@restomatch/queue';
 import type { InvoiceOcrResult } from '@restomatch/types';
 import { assertGrOwned, assertSupplierOwned } from '../tenant';
@@ -40,6 +42,8 @@ import { isAllowedScanUrl } from '../lib/scanUrls';
 import { isInvoiceNumberTaken, readDuplicateOf, withoutDuplicateOf } from '../lib/invoiceDedupe';
 import { appError } from '../errors';
 import { endOfDayInTz, startOfDayInTz } from '../lib/time';
+import { claimableLines } from '../lib/claims';
+import { featureEnabled } from '../lib/features';
 import { invoiceReaderProcedure, managerProcedure, memberProcedure, receiverProcedure, router } from '../trpc';
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
@@ -205,7 +209,12 @@ export const receivingRouter = router({
         ...r.line,
         productNameEn: r.productNameEn ?? null,
       }));
-      return { ...po, lines };
+      const [rest] = await ctx.db
+        .select({ settings: restaurants.settings })
+        .from(restaurants)
+        .where(eq(restaurants.id, ctx.session.restaurantId))
+        .limit(1);
+      return { ...po, lines, features: { dockSlip: featureEnabled(rest?.settings, 'dockSlip') } };
     }),
 
   /**
@@ -279,6 +288,151 @@ export const receivingRouter = router({
           productName: l.productName ?? l.rawDescription ?? null,
           productNameEn: l.productNameEn ?? l.rawDescriptionEn ?? null,
         })),
+      };
+    }),
+
+  /**
+   * Dock dispute slip (flag `dockSlip`): the header of a receipt plus the ENGINE's
+   * ₪ per discrepancy for its invoice — the persisted discrepancies, allocated
+   * exactly like the supplier claims letters (claimableLines), never the
+   * wizard's client-side estimates. Read-only; tenant-scoped on the receipt and
+   * the invoice. `ready` is false until the receipt is closed AND a match run for
+   * it ran at/after the close (submitReceipt's re-match) — before that, no ₪.
+   */
+  dockSlip: invoiceReaderProcedure
+    .input(z.object({ grId: z.string().uuid(), invoiceId: z.string().uuid().nullish() }))
+    .query(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      const [rest] = await ctx.db
+        .select({ settings: restaurants.settings })
+        .from(restaurants)
+        .where(eq(restaurants.id, restaurantId))
+        .limit(1);
+      if (!featureEnabled(rest?.settings, 'dockSlip')) return { enabled: false as const };
+
+      const [gr] = await ctx.db
+        .select({
+          grId: goodsReceipts.id,
+          status: goodsReceipts.status,
+          closedAt: goodsReceipts.updatedAt,
+          receivedAt: goodsReceipts.receivedAt,
+          receivedBy: goodsReceipts.receivedBy,
+          poId: purchaseOrders.id,
+          poRef: purchaseOrders.sourceRef,
+          supplierName: suppliers.name,
+          supplierNameEn: suppliers.nameEn,
+          supplierWhatsapp: suppliers.contactWhatsapp,
+        })
+        .from(goodsReceipts)
+        .leftJoin(
+          purchaseOrders,
+          and(eq(purchaseOrders.id, goodsReceipts.poId), eq(purchaseOrders.restaurantId, restaurantId)),
+        )
+        .leftJoin(
+          suppliers,
+          and(eq(suppliers.id, purchaseOrders.supplierId), eq(suppliers.restaurantId, restaurantId)),
+        )
+        .where(and(eq(goodsReceipts.id, input.grId), eq(goodsReceipts.restaurantId, restaurantId)))
+        .limit(1);
+      if (!gr) throw new TRPCError({ code: 'NOT_FOUND', message: 'Receipt not found' });
+      // The receiver's name: users is self-only under RLS, so it is read only when
+      // the viewer IS the receiver (the person at the dock). Anyone else gets no
+      // name rather than a name that would vanish in production.
+      let receiverName: string | null = null;
+      if (gr.receivedBy && gr.receivedBy === ctx.session.userId) {
+        const [me] = await ctx.db
+          .select({ name: users.name, email: users.email })
+          .from(users)
+          .where(eq(users.id, ctx.session.userId))
+          .limit(1);
+        receiverName = me?.name ?? me?.email ?? null;
+      }
+      // ₪ only from a match run made AFTER the count: a run from before the
+      // receipt was closed saw gr_lines empty (every line "short") and must
+      // never reach the slip or its WhatsApp text.
+      const receiptClosed = gr.status === 'completed' || gr.status === 'partial';
+
+      let invoice: { id: string; number: string | null; duplicateOfNumber: string | null } | null = null;
+      let engine: {
+        /** The count is in (receipt submitted). Before that the slip shows quantities only. */
+        receiptClosed: boolean;
+        /** A match run for this receipt from after it closed exists — the ₪ below is final. */
+        ready: boolean;
+        totalIls: number;
+        lines: Array<{
+          discrepancyId: string;
+          type: string;
+          poLineId: string | null;
+          invoiceLineId: string | null;
+          productId: string | null;
+          productName: string | null;
+          productNameEn: string | null;
+          lineDescription: string | null;
+          lineDescriptionEn: string | null;
+          expected: number | null;
+          actual: number | null;
+          amountIls: number;
+        }>;
+      } = { receiptClosed, ready: false, totalIls: 0, lines: [] };
+
+      if (input.invoiceId) {
+        const [inv] = await ctx.db
+          .select({ id: invoices.id, number: invoices.invoiceNumber, ocrPayload: invoices.ocrPayload })
+          .from(invoices)
+          .where(and(eq(invoices.id, input.invoiceId), eq(invoices.restaurantId, restaurantId)))
+          .limit(1);
+        if (!inv) throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
+        invoice = { id: inv.id, number: inv.number, duplicateOfNumber: readDuplicateOf(inv.ocrPayload)?.invoiceNumber ?? null };
+
+        const [{ runs } = { runs: 0 }] = receiptClosed
+          ? await ctx.db
+              .select({ runs: count() })
+              .from(matchRuns)
+              .where(
+                and(
+                  eq(matchRuns.invoiceId, inv.id),
+                  eq(matchRuns.restaurantId, restaurantId),
+                  eq(matchRuns.grId, gr.grId),
+                  gte(matchRuns.runAt, gr.closedAt),
+                ),
+              )
+          : [];
+        const ready = Number(runs) > 0;
+        const leak = ready ? await computeInvoiceLeak(ctx.db, restaurantId, inv.id) : null;
+        const claim = leak ? claimableLines(leak) : [];
+        const lines = claim.map(({ line, amount }) => ({
+          discrepancyId: line.discrepancyId,
+          type: line.type,
+          poLineId: line.poLineId,
+          invoiceLineId: line.invoiceLineId,
+          productId: line.productId,
+          productName: line.productName,
+          productNameEn: line.productNameEn,
+          lineDescription: line.lineDescription,
+          lineDescriptionEn: line.lineDescriptionEn,
+          expected: line.expected,
+          actual: line.actual,
+          // The letters' amount, to the agora (the letters print each line rounded).
+          amountIls: Math.round(amount * 100) / 100,
+        }));
+        // Summed in agorot so the total is exact.
+        const totalIls = lines.reduce((acc, l) => acc + Math.round(l.amountIls * 100), 0) / 100;
+        engine = { receiptClosed, ready, totalIls, lines };
+      }
+
+      return {
+        enabled: true as const,
+        header: {
+          supplierName: gr.supplierName,
+          supplierNameEn: gr.supplierNameEn,
+          supplierWhatsapp: gr.supplierWhatsapp,
+          poId: gr.poId,
+          poRef: gr.poRef,
+          receivedAt: gr.receivedAt,
+          receiverName,
+        },
+        invoice,
+        engine,
       };
     }),
 

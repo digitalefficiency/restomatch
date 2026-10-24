@@ -318,6 +318,15 @@ function db() {
   return postgres(DB_URL, { max: 1, onnotice: () => {} });
 }
 
+async function withDb<T>(fn: (sql: ReturnType<typeof db>) => Promise<T>): Promise<T> {
+  const sql = db();
+  try {
+    return await fn(sql);
+  } finally {
+    await sql.end();
+  }
+}
+
 /** Today's date in Israel — what the app's "today" means. */
 function israelToday(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date());
@@ -655,11 +664,52 @@ test('C · receiver: HaSharon Produce → photo → OCR → review → adjust �
   });
 
   await test.step('confirm → receipt saved', async () => {
+    // The clone is dated a month out (kept out of today's inbox); the matcher only
+    // pairs an invoice with an order due within ±7 days of it. Date it like the
+    // original while it is received; restored after the dock-slip step.
+    await withDb((sql) => sql`
+      update purchase_orders c set expected_delivery_at = o.expected_delivery_at
+      from purchase_orders o where c.id = ${clone} and o.id = ${original}`);
     await page.getByTestId('close-receipt').click();
     await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('heading', { name: r.steps.confirmed.title })).toBeVisible();
     await checkScreen(page, errors, L, 'C6-confirmed');
   });
+
+  await test.step('dock slip: the worker re-matches after the count → the engine ₪ (never a pre-count run)', async () => {
+    // The demo tenant has every feature on (dockSlip included). submitReceipt
+    // enqueues the re-match; the real worker runs it against the actual count.
+    const slip = page.getByTestId('dock-slip');
+    await expect(slip).toBeVisible();
+    await expect(slip.getByTestId('dock-slip-total'), 'engine ₪ after the re-match').toBeVisible({ timeout: 90_000 });
+    await expect(slip.getByTestId('dock-slip-computing')).toHaveCount(0);
+    const lineAmounts = (await slip.getByTestId('dock-slip-amount').allInnerTexts()).map((x) => amounts(x)[0]!);
+    const total = amounts(await slip.getByTestId('dock-slip-total').innerText())[0]!;
+    expect(lineAmounts.length).toBeGreaterThan(0);
+    expect(Math.round(lineAmounts.reduce((a, b) => a + b, 0) * 100)).toBe(Math.round(total * 100));
+    // The run behind it is from after the close, and saw the count: no line read as received 0.
+    const sql = db();
+    try {
+      const rows = await sql<{ after: boolean; zeroShort: number; runs: number }[]>`
+        select bool_and(mr.run_at >= gr.updated_at) as after,
+               count(*) filter (where d.type = 'QTY_SHORT' and d.actual_value = 0)::int as "zeroShort",
+               count(distinct mr.id)::int as runs
+        from goods_receipts gr
+        join match_runs mr on mr.gr_id = gr.id
+        left join discrepancies d on d.match_run_id = mr.id
+        where gr.po_id = ${clone}`;
+      expect(rows[0]!.runs, 'one match run for the receipt').toBe(1);
+      expect(rows[0]!.after, 'the run is from after the receipt was closed').toBe(true);
+      expect(rows[0]!.zeroShort, 'no line matched as "received 0"').toBe(0);
+    } finally {
+      await sql.end();
+    }
+    await checkScreen(page, errors, L, 'C7-dock-slip');
+  }).finally(() =>
+    withDb((sql) => sql`
+      update purchase_orders set expected_delivery_at = expected_delivery_at + interval '30 days'
+      where id = ${clone} and expected_delivery_at < now() + interval '20 days'`),
+  );
 });
 
 /* ═══════════════════════════════ D. bookkeeper ═══════════════════════════════ */
