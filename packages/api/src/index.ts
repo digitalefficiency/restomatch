@@ -147,6 +147,7 @@ export {
   type Notifier,
   type NotificationPayload,
   type NotificationChannel,
+  type EmailAttachment,
 } from './notifications';
 export { logActivity, type ActivityEventInput, type ActivityEventType } from './activity';
 export { buildMatchInputForInvoice, type BuiltMatchInput } from './match/buildMatchInput';

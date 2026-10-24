@@ -157,4 +157,18 @@ export const en: Shape<typeof he> = {
     deliveryHint: 'Derived from the supplier’s order schedule.',
     noSchedule: 'This supplier has no order schedule — no delivery date will be calculated.',
   },
+  document: {
+    toggleLabel: 'Prices on supplier orders',
+    toggleHint: 'On: the supplier gets the SKU, agreed price and total (plus a PDF by email). Off: items and quantities only.',
+    saved: 'Setting saved',
+    previewTitle: 'What the supplier receives',
+    previewBody: 'The order as it will be sent: the email text (with the PDF attached) and the WhatsApp message.',
+    show: 'Show',
+    hide: 'Hide',
+    email: 'Email',
+    whatsapp: 'WhatsApp',
+    downloadPdf: 'Download PDF',
+    pricesHidden: 'Prices are hidden on supplier orders. You can change this on the Orders page.',
+    failed: "We couldn't prepare the preview.",
+  },
 };

@@ -6,14 +6,16 @@ import { getT } from '@/lib/i18n/server';
 import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 import { OrdersList } from './list-client';
 import { ZesttImportButton } from './import-client';
+import { DocumentPricesToggle } from './supplier-document';
 
 export default async function OrdersPage() {
   const caller = await createServerCaller();
-  const [initial, memberships, session, t] = await Promise.all([
+  const [initial, memberships, session, t, docSettings] = await Promise.all([
     caller.orders.list({ limit: 50 }),
     caller.onboarding.myMemberships(),
     auth(),
     getT(ordersNs),
+    caller.orders.documentSettings(),
   ]);
   const active =
     memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0];
@@ -37,6 +39,7 @@ export default async function OrdersPage() {
           ) : undefined
         }
       />
+      {canEdit && docSettings.enabled ? <DocumentPricesToggle initialShowPrices={docSettings.showPrices} /> : null}
       <OrdersList initial={initial} canEdit={canEdit} />
     </div>
   );

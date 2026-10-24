@@ -37,7 +37,7 @@ import { formatDate, formatPercent } from '@/lib/i18n/format';
 import { components } from '@/lib/i18n/messages/components';
 import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 import { formatIls } from '@/lib/money';
-import { addOrMerge, lineTotalIls, linesValid, orderTotalIls } from '../order-logic';
+import { addOrMerge, lineTotalIls, linesValid, ltrIsolate, orderTotalIls } from '../order-logic';
 
 type Outputs = inferRouterOutputs<AppRouter>;
 type Channel = 'email' | 'whatsapp' | 'none';
@@ -534,12 +534,12 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
               >
                 <option value="email" disabled={!supplier?.contactEmail}>
                   {supplier?.contactEmail
-                    ? t('wizard.channelEmailTo', { to: supplier.contactEmail })
+                    ? t('wizard.channelEmailTo', { to: ltrIsolate(supplier.contactEmail) })
                     : `${t('wizard.channelEmail')} — ${t('wizard.channelMissing')}`}
                 </option>
                 <option value="whatsapp" disabled={!supplier?.contactWhatsapp}>
                   {supplier?.contactWhatsapp
-                    ? t('wizard.channelWhatsappTo', { to: supplier.contactWhatsapp })
+                    ? t('wizard.channelWhatsappTo', { to: ltrIsolate(supplier.contactWhatsapp) })
                     : `${t('wizard.channelWhatsapp')} — ${t('wizard.channelMissing')}`}
                 </option>
                 <option value="none">{t('wizard.channelNone')}</option>

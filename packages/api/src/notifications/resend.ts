@@ -14,6 +14,18 @@
 import { EmailNotifier } from './email';
 import type { NotificationPayload } from './types';
 
+/** Resend's attachment shape: `content` is the base64 file body. */
+function resendAttachments(payload: NotificationPayload) {
+  if (!payload.attachments?.length) return {};
+  return {
+    attachments: payload.attachments.map((a) => ({
+      filename: a.filename,
+      content: a.contentBase64,
+      ...(a.contentType ? { contentType: a.contentType } : {}),
+    })),
+  };
+}
+
 export interface ResendConfig {
   apiKey: string;
   from?: string;
@@ -27,6 +39,7 @@ interface ResendClient {
       subject: string;
       text: string;
       html?: string;
+      attachments?: Array<{ filename: string; content: string; contentType?: string }>;
     }): Promise<{ data?: { id?: string } | null; error?: { message?: string } | null }>;
   };
 }
@@ -60,6 +73,7 @@ async function sendViaResendHttp(
       subject: payload.subject ?? '(ללא נושא)',
       text: payload.body,
       ...(payload.html ? { html: payload.html } : {}),
+      ...resendAttachments(payload),
     }),
   });
   if (!res.ok) {
@@ -89,6 +103,7 @@ export function makeResendDispatcher(
       subject: payload.subject ?? '(ללא נושא)',
       text: payload.body,
       ...(payload.html ? { html: payload.html } : {}),
+      ...resendAttachments(payload),
     });
 
     if (result.error) {

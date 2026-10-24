@@ -207,6 +207,14 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   // top of the restaurant-scoped baseline query (which already excluded B's
   // rows). The B-only baseline fixture still proves no leak through the query.
   'orders.guardrail': 'attack',
+  // orderPricesOut (flag): preview takes a client poId → assertPoOwned (attack
+  // test below). The settings pair takes no entity id and reads/writes only
+  // ctx.session.restaurantId's own restaurants row.
+  'orders.documentPreview': 'attack',
+  'orders.documentSettings':
+    'memberProcedure with no input: reads only the caller restaurant row (ctx.session.restaurantId) — no client-supplied tenant id to swap',
+  'orders.setDocumentSettings':
+    'managerProcedure taking only a boolean: jsonb_set on the caller restaurant row (WHERE id = ctx.session.restaurantId) — no client-supplied tenant id; role denial covered in order-document.db.test.ts',
   'match.runForInvoice': 'attack',
   'plans.list':
     'public marketing catalog (publicProcedure); reads the global plans table only, no tenant-scoped rows — nothing to isolate',
@@ -948,6 +956,22 @@ describe('orders router: foreign id attacks + list isolation (A → B)', () => {
       .where(eq(purchaseOrders.id, B.poId));
     expect(afterRow?.status).toBe(beforeRow?.status);
     expect(afterRow?.sentAt ?? null).toEqual(beforeRow?.sentAt ?? null);
+  });
+
+  it('orders.documentPreview rejects a foreign poId even with the flag on', async () => {
+    const [prev] = await db
+      .select({ settings: restaurants.settings })
+      .from(restaurants)
+      .where(eq(restaurants.id, A.restaurantId));
+    await db
+      .update(restaurants)
+      .set({ settings: { ...(prev?.settings ?? {}), features: { orderPricesOut: true } } } as never)
+      .where(eq(restaurants.id, A.restaurantId));
+    try {
+      await expect(callerFor(A).orders.documentPreview({ poId: B.poId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    } finally {
+      await db.update(restaurants).set({ settings: prev?.settings ?? {} }).where(eq(restaurants.id, A.restaurantId));
+    }
   });
 
   it('orders.createDraft rejects a foreign supplierId and inserts no PO for A', async () => {

@@ -15,10 +15,12 @@ import {
   products,
   purchaseOrders,
   restaurants,
+  sql,
   suppliers,
   supplierCatalogItems,
   type Database,
 } from '@restomatch/db';
+import { featureEnabled } from '../lib/features';
 import { ClaudePoParser } from '@restomatch/ocr';
 import { ZesttAdapter } from '@restomatch/procurement';
 import { managerProcedure, memberProcedure, requireFeature, router } from '../trpc';
@@ -28,6 +30,16 @@ import { importPurchaseOrder } from '../orders/importPo';
 import { estimateTotal, recomputePoTotal } from '../orders/totals';
 import { DEDUPE_INDEX_PREDICATE } from '../notifications/outbox';
 import { deriveExpectedDelivery, type DerivedDelivery } from '../lib/deriveDelivery';
+import { assertFeatureOn, isFeatureOn } from '../lib/featureGate';
+import {
+  loadOrderDocument,
+  ORDER_DOCUMENT_EXTENSIONS,
+  orderDocumentSettingsOf,
+  orderPdfFilename,
+  renderOrderEmailText,
+  renderOrderPdf,
+  renderOrderWhatsappText,
+} from '../orders/document';
 
 /** Cap on an uploaded order document, decoded — a single-page PO PDF is ~50KB. */
 const MAX_PO_DOC_BYTES = 8 * 1024 * 1024;
@@ -581,7 +593,44 @@ export const ordersRouter = router({
             message: `לספק אין ${input.channel === 'email' ? 'אימייל' : 'וואטסאפ'} מוגדר`,
           });
         }
-        const body = renderOrderDocument(supplier?.name ?? 'ספק', po.expectedDeliveryAt, lines, tz);
+        // Flag `orderPricesOut`: SKU + agreed prices + totals, and a PDF on email.
+        // Flag off → today's "item — quantity" text, byte for byte.
+        let body: string;
+        let payload: Record<string, unknown> | undefined;
+        const pricesOut = await isFeatureOn(ctx.db, restaurantId, 'orderPricesOut');
+        if (pricesOut) {
+          // Extensions (e.g. the supplier-confirmation link) need the PO already
+          // `sent`; same transaction, so any later failure rolls this back.
+          const placedAt = new Date();
+          await ctx.db
+            .update(purchaseOrders)
+            .set({ status: 'sent', sentAt: placedAt, sentChannel: input.channel, updatedAt: placedAt })
+            .where(eq(purchaseOrders.id, input.poId));
+          const loaded = await loadOrderDocument(ctx.db, restaurantId, input.poId, {
+            mode: 'send',
+            userId: ctx.session.userId ?? null,
+            placedAt,
+            extensions: ORDER_DOCUMENT_EXTENSIONS,
+          });
+          if (!loaded) throw new TRPCError({ code: 'NOT_FOUND', message: 'purchase order not found' });
+          if (input.channel === 'email') {
+            body = renderOrderEmailText(loaded.doc);
+            const pdf = await renderOrderPdf(loaded.doc);
+            payload = {
+              __attachments: [
+                {
+                  filename: orderPdfFilename(loaded.doc),
+                  contentBase64: Buffer.from(pdf).toString('base64'),
+                  contentType: 'application/pdf',
+                },
+              ],
+            };
+          } else {
+            body = renderOrderWhatsappText(loaded.doc);
+          }
+        } else {
+          body = renderOrderDocument(supplier?.name ?? 'ספק', po.expectedDeliveryAt, lines, tz);
+        }
         // Decouple from the (churning) notifier module: write to the outbox the
         // outboxDispatch worker already drains.
         //
@@ -599,6 +648,7 @@ export const ordersRouter = router({
             target,
             subject: `הזמנה חדשה — ${supplier?.name ?? ''}`.trim(),
             body,
+            ...(payload ? { payload } : {}),
             status: 'queued',
             relatedEntityType: 'purchase_order',
             relatedEntityId: input.poId,
@@ -613,6 +663,60 @@ export const ordersRouter = router({
         .set({ status: 'sent', sentAt: new Date(), sentChannel, updatedAt: new Date() })
         .where(eq(purchaseOrders.id, input.poId));
       return { ok: true, sentChannel };
+    }),
+
+  /** Order-document settings (flag `orderPricesOut`). `enabled` false → the UI hides the controls. */
+  documentSettings: memberProcedure.query(async ({ ctx }) => {
+    const restaurantId = ctx.session.restaurantId;
+    const [row] = await ctx.db
+      .select({ settings: restaurants.settings })
+      .from(restaurants)
+      .where(eq(restaurants.id, restaurantId))
+      .limit(1);
+    return { enabled: featureEnabled(row?.settings, 'orderPricesOut'), ...orderDocumentSettingsOf(row?.settings) };
+  }),
+
+  /** Show or hide prices on what the supplier receives (owner / manager). */
+  setDocumentSettings: managerProcedure
+    .input(z.object({ showPrices: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      await assertFeatureOn(ctx.db, restaurantId, 'orderPricesOut');
+      // jsonb_set in one statement: no read-modify-write race with other settings writers.
+      await ctx.db
+        .update(restaurants)
+        .set({
+          settings: sql`jsonb_set(coalesce(${restaurants.settings}, '{}'::jsonb), '{orderDocument}',
+            coalesce(${restaurants.settings} -> 'orderDocument', '{}'::jsonb) || ${JSON.stringify({ showPrices: input.showPrices })}::jsonb)`,
+          updatedAt: new Date(),
+        })
+        .where(eq(restaurants.id, restaurantId));
+      return { showPrices: input.showPrices };
+    }),
+
+  /** What the supplier receives for this PO: email text, WhatsApp text and the PDF (base64). */
+  documentPreview: managerProcedure
+    .input(z.object({ poId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      await assertFeatureOn(ctx.db, restaurantId, 'orderPricesOut');
+      await assertPoOwned(ctx.db, input.poId, restaurantId);
+      const loaded = await loadOrderDocument(ctx.db, restaurantId, input.poId, {
+        mode: 'preview',
+        userId: ctx.session.userId ?? null,
+        extensions: ORDER_DOCUMENT_EXTENSIONS,
+      });
+      if (!loaded) throw new TRPCError({ code: 'NOT_FOUND', message: 'purchase order not found' });
+      const pdf = await renderOrderPdf(loaded.doc);
+      return {
+        emailText: renderOrderEmailText(loaded.doc),
+        whatsappText: renderOrderWhatsappText(loaded.doc),
+        pdfBase64: Buffer.from(pdf).toString('base64'),
+        filename: orderPdfFilename(loaded.doc),
+        showPrices: loaded.doc.showPrices,
+        totalAgorot: loaded.doc.totalAgorot,
+        hasUnpricedLines: loaded.doc.hasUnpricedLines,
+      };
     }),
 
   /** Order-time leak guardrail preview (advanced_analytics). */
