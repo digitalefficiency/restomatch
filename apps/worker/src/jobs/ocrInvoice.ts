@@ -12,6 +12,7 @@ import { enqueueMatchInvoice } from '@restomatch/queue';
 import type { OcrInvoiceJob } from '@restomatch/types';
 import { makeWorker } from '../queue';
 import { jobDb } from '../db';
+import { findJobInvoice } from './findJobInvoice';
 
 export type { OcrInvoiceJob };
 
@@ -57,14 +58,9 @@ export function startOcrInvoiceWorker() {
 
     // Tenant guard: job payloads are not a trust boundary — verify the invoice
     // belongs to the payload's restaurant, and take supplierId from the verified
-    // row rather than the payload.
-    const [invoice] = await db
-      .select({ id: invoices.id, supplierId: invoices.supplierId })
-      .from(invoices)
-      .where(
-        and(eq(invoices.id, job.data.invoiceId), eq(invoices.restaurantId, job.data.restaurantId)),
-      )
-      .limit(1);
+    // row rather than the payload. Re-read briefly first: the producer enqueues
+    // before its transaction commits the row.
+    const invoice = await findJobInvoice(db, job.data.restaurantId, job.data.invoiceId);
     if (!invoice) {
       throw new Error(
         `[ocr-invoice] invoice=${job.data.invoiceId} not found in restaurant=${job.data.restaurantId} — refusing to process`,
