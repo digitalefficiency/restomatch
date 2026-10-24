@@ -432,3 +432,66 @@ describe('pasted DB URLs are repaired, or named — never echoed', () => {
     expect(() => assertWebEnv(env as never)).toThrow(/DATABASE_URL — it does not start with postgresql:\/\//);
   });
 });
+
+describe('owner connection falls back to the Supabase integration when DATABASE_URL is beyond repair', () => {
+  const REF = 'rutbnmvkwirqtixvuhdq';
+  const POOLER = `aws-0-ap-northeast-1.pooler.supabase.com`;
+  const INTEGRATION = `postgres://postgres.${REF}:intPw@${POOLER}:6543/postgres?sslmode=require&supa=base-pooler.x&pgbouncer=true`;
+
+  it('repairs a URL pasted without its scheme', async () => {
+    const { normalizePgUrl } = await import('../env');
+    const u = new URL(normalizePgUrl(`postgres.${REF}:p#w@${POOLER}:6543/postgres`)!);
+    expect(u.protocol).toBe('postgresql:');
+    expect(decodeURIComponent(u.password)).toBe('p#w');
+    expect(u.host).toBe(`${POOLER}:6543`);
+  });
+
+  it('uses POSTGRES_URL (only sslmode kept) when DATABASE_URL is unusable; DATABASE_URL wins when usable', async () => {
+    const { ownerDbUrl, ownerDbUrlSource } = await import('../env');
+    const env = { DATABASE_URL: 'just-a-password', POSTGRES_URL: INTEGRATION } as never;
+    expect(ownerDbUrlSource(env)).toBe('POSTGRES_URL');
+    const u = new URL(ownerDbUrl(env)!);
+    expect(decodeURIComponent(u.username)).toBe(`postgres.${REF}`);
+    expect(u.host).toBe(`${POOLER}:6543`);
+    expect([...u.searchParams.keys()]).toEqual(['sslmode']);
+    expect(u.searchParams.get('sslmode')).toBe('require');
+
+    const good = `postgresql://postgres.${REF}:ownPw@${POOLER}:6543/postgres`;
+    expect(ownerDbUrl({ DATABASE_URL: good, POSTGRES_URL: INTEGRATION } as never)).toBe(good);
+    // The non-pooling URL is the last resort.
+    expect(ownerDbUrlSource({ POSTGRES_URL_NON_POOLING: INTEGRATION.replace(':6543', ':5432') } as never)).toBe(
+      'POSTGRES_URL_NON_POOLING',
+    );
+    expect(ownerDbUrl({ DATABASE_URL: 'just-a-password' } as never)).toBeNull();
+  });
+
+  it('auth connection, derived app role, boot guard and report all follow the fallback', async () => {
+    const { resolveAuthDbUrl, resolveWebDbUrl, assertWebEnv, dbEnvReport } = await import('../env');
+    const env = {
+      NODE_ENV: 'production',
+      DATABASE_URL: 'just-a-password',
+      DATABASE_URL_APP: 'also-broken',
+      POSTGRES_URL: INTEGRATION,
+      APP_ROLE_PASSWORD: 'app-pw',
+      RESEND_API_KEY: 'k',
+      EMAIL_FROM: 'no-reply@example.com',
+      AUTH_URL: 'https://app.example.com',
+      AUTH_SECRET: 's'.repeat(32),
+      SUPABASE_SERVICE_ROLE_KEY: 'k',
+      AUTH_ENC_KEY: 'a'.repeat(64),
+    } as never;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(decodeURIComponent(new URL(resolveAuthDbUrl(env)!).username)).toBe(`postgres.${REF}`);
+    const app = new URL(resolveWebDbUrl(env));
+    expect(decodeURIComponent(app.username)).toBe(`restomatch_app.${REF}`);
+    expect(decodeURIComponent(app.password)).toBe('app-pw');
+    expect(app.host).toBe(`${POOLER}:6543`);
+    expect(app.toString()).not.toContain('intPw');
+    expect(() => assertWebEnv(env)).not.toThrow();
+    const r = dbEnvReport(env);
+    expect(r).toContain('owner connection from: POSTGRES_URL');
+    expect(r).toContain('app role derivable: yes');
+    for (const secret of ['intPw', 'just-a-password', 'also-broken', 'app-pw']) expect(r).not.toContain(secret);
+    warn.mockRestore();
+  });
+});
