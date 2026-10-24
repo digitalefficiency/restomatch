@@ -55,6 +55,10 @@ export const components: Shape<typeof he> = {
     savings: 'ประหยัดได้ {amount}',
     matchesOrderAndReceipt: 'ตรงกับใบสั่งซื้อและการรับสินค้า',
     awaitingMonthlyMatch: 'รอเทียบกับใบส่งของเดือนนี้',
+    awaitingPoLink: 'รอเชื่อมกับใบสั่งซื้อ',
+    noPoLinked: 'ยังไม่ได้เชื่อมใบสั่งซื้อ',
+    toReviewOne: 'มี 1 รายการที่ต้องตรวจสอบ',
+    toReview: 'มี {count} รายการที่ต้องตรวจสอบ',
     empty: 'ยังไม่มีความเคลื่อนไหว',
   },
 };

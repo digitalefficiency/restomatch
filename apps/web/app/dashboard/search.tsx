@@ -137,7 +137,7 @@ export function DashboardSearch({ role, className }: { role: UserRole; className
           aria-autocomplete="list"
           aria-activedescendant={showPanel && activeIdx >= 0 ? optionId(activeIdx) : undefined}
           autoComplete="off"
-          className="w-full rounded-xl border border-line bg-surface-2 py-2 pe-9 ps-9 text-sm text-ink placeholder-subtle transition-colors focus:border-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="w-full rounded-xl border border-line-strong bg-surface py-2 pe-9 ps-9 text-sm text-ink placeholder-subtle transition-colors focus:border-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         />
         {results.isFetching && enabled ? (
           <Spinner className="absolute end-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-subtle" />

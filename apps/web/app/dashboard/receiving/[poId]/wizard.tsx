@@ -510,7 +510,7 @@ export function ReceivingWizard({
   const submitting = markGrLine.isPending || submitReceipt.isPending;
 
   return (
-    <main className="mx-auto max-w-3xl px-1 py-2">
+    <div className="mx-auto max-w-3xl px-1 py-2">
       {/* Progress bar: the same 5 steps as the "Step N of 5" eyebrows. Step 1
           (supplier) is already done — the PO names it — so the bar is always
           one segment ahead of STEP_ORDER. */}
@@ -625,7 +625,7 @@ export function ReceivingWizard({
           }}
         />
       ) : null}
-    </main>
+    </div>
   );
 }
 

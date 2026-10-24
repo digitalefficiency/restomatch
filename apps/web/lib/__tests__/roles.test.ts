@@ -43,6 +43,12 @@ describe('roles matrix', () => {
     expect(canSeeRoute('chef', '/dashboard/approvals')).toBe(false);
   });
 
+  it('the pay run (/dashboard/approvals/pay-run) is owner / manager / bookkeeper only', () => {
+    expect(allowedRolesForPath('/dashboard/approvals/pay-run')).toEqual(['owner', 'manager', 'bookkeeper']);
+    expect(allowedRolesForPath('/dashboard/approvals/pay-run')).not.toContain('receiver');
+    expect(allowedRolesForPath('/dashboard/approvals/pay-run')).not.toContain('chef');
+  });
+
   it('an invoice page is for the roles that reach it (receiving, approvals, leaks) — never the chef', () => {
     for (const r of ['owner', 'manager', 'receiver', 'bookkeeper'] as const) {
       expect(canSeeRoute(r, '/dashboard/invoices')).toBe(true);

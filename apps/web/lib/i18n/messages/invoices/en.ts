@@ -43,6 +43,6 @@ export const en: Shape<typeof he> = {
     clean: 'Clean — no discrepancies',
     minor: 'Minor discrepancies',
     major: 'Major discrepancies',
-    blocked: 'Blocked',
+    blocked: 'Blocker',
   },
 };

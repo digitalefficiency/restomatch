@@ -24,6 +24,7 @@ import { isEmailConfigured, sendEmail } from './lib/email';
 import { magicLinkEmail } from './lib/emailTemplates';
 import { LOCALE_COOKIE, resolveLocale, type Locale } from './lib/i18n/config';
 import { authorizeCredentials, getSessionSecurityState } from './lib/passwords';
+import { SIGNOUT_COOKIE, issuedBeforeSignOut, signOutCookieOptions } from './lib/signOutTombstone';
 import { consumeTwoFactorTicket } from './lib/totp';
 import { enforceLoginLimit, enforceMagicLinkLimit, trustedProxyHops } from './lib/rateLimit';
 import {
@@ -68,6 +69,15 @@ const MEMBERSHIP_REVALIDATE_MS = 10 * 60 * 1000;
 // exactly (no cookie-name change ⇒ no session invalidation) and gives Epic B a
 // single place to vary lifetimes from.
 const useSecureCookies = resolveUseSecureCookies();
+
+/** This browser's last sign-out time (see lib/signOutTombstone), if any. */
+async function readSignOutTombstone(): Promise<string | undefined> {
+  try {
+    return (await cookies()).get(SIGNOUT_COOKIE)?.value;
+  } catch {
+    return undefined; // no request scope (e.g. a script) — nothing to compare
+  }
+}
 
 const adapter = DrizzleAdapter(authDb, {
   usersTable: users,
@@ -189,6 +199,17 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
       sendVerificationRequest: sendMagicLink,
     }),
   ],
+  events: {
+    // Every signOut() — the dashboard / onboarding / 2FA-cancel buttons and "log
+    // out everywhere" — leaves a tombstone so a re-planted cookie stays dead.
+    async signOut() {
+      try {
+        (await cookies()).set(SIGNOUT_COOKIE, String(Date.now()), signOutCookieOptions(useSecureCookies));
+      } catch {
+        // Outside a server action / route handler there is no response to set it on.
+      }
+    },
+  },
   callbacks: {
     async jwt({ token, user, trigger, session }) {
       const t = token as AppJwt;
@@ -251,6 +272,12 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         const sec = await getSessionSecurityState(t.userId);
         if ((t.ver ?? 0) !== sec.tokenVersion) {
           return {} as AppJwt; // revoked ⇒ unauthenticated
+        }
+        // This browser signed out after this token was issued: a cookie
+        // re-planted by a response that was in flight during sign-out must not
+        // bring the session back (lib/signOutTombstone).
+        if (issuedBeforeSignOut(t.loginAt, await readSignOutTombstone())) {
+          return {} as AppJwt;
         }
       }
 

@@ -36,6 +36,7 @@ const ROUTER_KEYS = [
   'onboarding',
   'orders',
   'owner',
+  'payRun',
   'plans',
   'priceAlerts',
   'products',

@@ -55,6 +55,10 @@ export const components: Shape<typeof he> = {
     savings: 'تم توفير {amount}',
     matchesOrderAndReceipt: 'مطابقة للطلبية ولاستلام البضاعة',
     awaitingMonthlyMatch: 'بانتظار المطابقة مع إشعارات التسليم لهذا الشهر',
+    awaitingPoLink: 'بانتظار الربط بطلبية',
+    noPoLinked: 'لا توجد طلبية مرتبطة',
+    toReviewOne: 'فرق واحد للمراجعة',
+    toReview: '{count} فروق للمراجعة',
     empty: 'لا يوجد نشاط بعد.',
   },
 };

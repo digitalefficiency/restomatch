@@ -22,9 +22,9 @@ export const webColors = {
   // Brand + semantics
   primary: '#066B4A', // deep money-green (primary action, positive, clean-match)
   onPrimary: '#FFFFFF', // text ON primary
-  gold: '#8A5300', // savings / money recovered / positive ₪
+  gold: '#755C00', // savings / money recovered / positive ₪
   danger: '#B80F2A', // leak / loss / block
-  warn: '#9A4405', // warning severity
+  warn: '#A63D00', // warning severity
   info: '#1A5BC7', // informational
 } as const;
 

@@ -11,6 +11,17 @@ import { computeLeakHero } from '@restomatch/charts';
 import { createDb, DEMO_MAIN_BUSINESS_ID, findDemoTenants } from '@restomatch/db';
 import postgres from 'postgres';
 
+/**
+ * The one deliberate discrepancy across the demo's consolidated invoices (seed-demo's
+ * STANDING_OVERCHARGE): on one delivery note, 24 L of milk billed at ₪7.90 against
+ * the PO's ₪6.40, i.e. ₪36.00 excl. VAT (₪42.48 at 18%). The consolidated
+ * cross-match must reproduce exactly this.
+ */
+export const EXPECTED_CONSOLIDATED_OVERCHARGE_ILS = 36;
+
+/** The one invoice above ₪5,000 without an allocation number: ₪6,240 + 18% VAT. */
+export const EXPECTED_VAT_AT_RISK_ILS = 1123.2;
+
 export interface DemoCheck {
   ok: boolean;
   problems: string[];
@@ -102,6 +113,54 @@ export async function checkDemo(url: string, today: string): Promise<DemoCheck> 
     for (const p of produce) {
       if (p.vat_rate == null || Number(p.vat_rate) !== 0) problems.push(`${p.name_en}: vat_rate ${p.vat_rate ?? 'unset (→ 18%)'} — fresh produce must be 0`);
       if (p.vat_findings > 0) problems.push(`${p.name_en}: ${p.vat_findings} VAT_MISMATCH finding(s) on a VAT-exempt produce supplier`);
+    }
+
+    // 3d. Consolidated invoices (חשבונית ריכוז / מרכזת): each lists delivery notes that
+    //     are real goods receipts of the same supplier (`ת.מ. <n>` in goods_receipts.notes),
+    //     none is matched (all stay pendingLink, so the hero never counts them), and the
+    //     only overcharge across them is the one seed-demo plants.
+    const cons = (await sql`
+      select i.id, i.invoice_number, i.status, i.ocr_payload->'raw'->'deliveryNotes' as dns,
+        (select count(*)::int from match_runs m where m.invoice_id = i.id) as runs,
+        (select count(*)::int from jsonb_array_elements(i.ocr_payload->'raw'->'deliveryNotes') dn
+          join goods_receipts g on g.restaurant_id = i.restaurant_id and g.notes = 'ת.מ. ' || (dn->>'number')
+          join purchase_orders po on po.id = g.po_id and po.supplier_id = i.supplier_id) as covered,
+        (select coalesce(sum(greatest(il.unit_price_billed - pl.unit_price_expected, 0) * il.qty_billed), 0)
+          from invoice_lines il
+          join goods_receipts g on g.restaurant_id = i.restaurant_id and g.notes = 'ת.מ. ' || substring(il.raw_description from '^ת\\.מ\\. (\\d+)')
+          join purchase_orders po on po.id = g.po_id and po.supplier_id = i.supplier_id
+          join po_lines pl on pl.po_id = po.id and pl.product_id = il.product_id
+          where il.invoice_id = i.id) as overcharge
+      from invoices i
+      where i.restaurant_id in ${sql(rids)} and i.ocr_payload->'raw'->>'kind' = 'consolidated'
+      order by i.invoice_date
+    `) as unknown as Array<{ invoice_number: string; status: string; dns: Array<{ number: string }> | null; runs: number; covered: number; overcharge: string }>;
+    facts.push(`consolidated: ${cons.map((c) => `${c.invoice_number} ${c.status} ${c.covered}/${c.dns?.length ?? 0} notes${Number(c.overcharge) > 0 ? ` · overcharge ₪${Number(c.overcharge).toFixed(2)}` : ''}`).join(', ') || 'none'}`);
+    if (cons.length < 2) problems.push(`expected ≥2 consolidated invoices, found ${cons.length}`);
+    for (const c of cons) {
+      const listed = c.dns?.length ?? 0;
+      if (listed === 0) problems.push(`${c.invoice_number}: lists no delivery notes`);
+      if (c.covered !== listed) problems.push(`${c.invoice_number}: ${listed - c.covered} of ${listed} delivery notes are not goods receipts of its supplier`);
+      if (c.runs > 0) problems.push(`${c.invoice_number}: consolidated invoice was matched (${c.runs} run(s)) — it must stay pending, outside the hero`);
+    }
+    const overcharge = Math.round(cons.reduce((a, c) => a + Number(c.overcharge), 0) * 100) / 100;
+    if (overcharge !== EXPECTED_CONSOLIDATED_OVERCHARGE_ILS) {
+      problems.push(`consolidated overcharge ₪${overcharge.toFixed(2)} ≠ the seeded ₪${EXPECTED_CONSOLIDATED_OVERCHARGE_ILS.toFixed(2)} (excl. VAT)`);
+    }
+
+    // 3e. VAT at risk: invoices above ₪5,000 excl. VAT without an allocation number in
+    //     the last 6 months (the input-VAT deduction window). Exactly the one seeded
+    //     case: the main restaurant's MF-24950, ₪1,123.20 VAT.
+    const atRisk = (await sql`
+      select i.invoice_number, i.vat_amount from invoices i
+      where i.restaurant_id in ${sql(rids)} and i.total_excl_vat > 5000 and i.allocation_number is null
+        and i.status <> 'ocr_pending'
+        and i.invoice_date >= ((${today}::date - interval '6 months')::timestamp at time zone 'Asia/Jerusalem')
+    `) as unknown as Array<{ invoice_number: string; vat_amount: string }>;
+    const atRiskVat = Math.round(atRisk.reduce((a, r) => a + Number(r.vat_amount), 0) * 100) / 100;
+    facts.push(`VAT at risk (no allocation number, > ₪5,000): ${atRisk.map((r) => r.invoice_number).join(', ') || 'none'} · ₪${atRiskVat.toFixed(2)}`);
+    if (atRisk.length !== 1 || atRiskVat !== EXPECTED_VAT_AT_RISK_ILS) {
+      problems.push(`VAT at risk: ${atRisk.length} invoice(s), ₪${atRiskVat.toFixed(2)} — expected exactly 1 (MF-24950), ₪${EXPECTED_VAT_AT_RISK_ILS.toFixed(2)}`);
     }
 
     // 4. Approvals queue: open, routed findings in the main restaurant.

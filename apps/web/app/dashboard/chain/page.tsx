@@ -47,18 +47,20 @@ function monthLabel(month: string, locale: Locale, style: 'long' | 'short' = 'lo
   });
 }
 
-/** Heatmap colour by leak share of spend — calm green when clean, gold → red as it grows (tints kept light enough for ≥4.5:1 text). */
+/** Heatmap colour by leak share of spend — calm green when clean, gold under target, orange → red over it. */
 /** Phone: only the last 3 heatmap months (the selected period's end) fit; older ones show from `sm`. */
 const HEAT_PHONE_MONTHS = 3;
 
 function heatClass(pct: number | null, leak: number): string {
-  if (pct === null) return leak > 0 ? 'bg-warn/15 text-warn' : 'bg-surface-2 text-subtle';
+  // Bands around the 1.5% pilot target. Over target (≥1.5%) gets a stronger tint +
+  // inset ring and ink text, so 1.7% never reads as calm; text stays ≥6.5:1.
+  if (pct === null) return leak > 0 ? 'bg-warn/30 text-ink ring-1 ring-inset ring-warn/60' : 'bg-surface-2 text-subtle';
   if (pct <= 0) return 'bg-primary/10 text-primary';
   if (pct < 0.01) return 'bg-primary/20 text-primary';
   if (pct < 0.015) return 'bg-gold/20 text-gold';
-  if (pct < 0.02) return 'bg-warn/15 text-warn';
-  if (pct < 0.03) return 'bg-danger/15 text-danger';
-  return 'bg-danger/45 text-ink';
+  if (pct < 0.02) return 'bg-warn/30 text-ink ring-1 ring-inset ring-warn/60';
+  if (pct < 0.03) return 'bg-danger/30 text-ink ring-1 ring-inset ring-danger/60';
+  return 'bg-danger/50 text-ink font-bold ring-1 ring-inset ring-danger';
 }
 
 export default async function ChainPage({
@@ -116,7 +118,7 @@ export default async function ChainPage({
   // Display only: whole-₪ rows (= each branch's own dashboard) and totals printed as their sum.
   const leakShown = wholeShekelRows(data.branches.map((b) => b.leakIls));
   const spendShown = wholeShekelRows(data.branches.map((b) => b.spendIls));
-  // Caught / claimed too: the chain KPI equals the sum of the branch heroes (₪464 + ₪275 + ₪532 = ₪1,271).
+  // Same rule for the caught / claimed split: Σ of each branch's own (dashboard) rounding.
   const caughtShown = wholeShekelRows(data.branches.map((b) => b.caughtBeforePaymentIls));
   const claimedShown = wholeShekelRows(data.branches.map((b) => b.claimedIls));
   const rowLeak = leakShown.rows;
@@ -133,8 +135,9 @@ export default async function ChainPage({
   );
   const noData = totals.spendIls === 0 && totals.leakIls === 0;
   const compared = data.compare !== 'off';
+  // No % against a comparison period with almost no data (totals.thinBase): calm, never a false alarm.
   const leakDeltaPct =
-    totals.prevLeakIls !== null && totals.prevLeakIls > 0
+    totals.prevLeakIls !== null && totals.prevLeakIls > 0 && !totals.thinBase
       ? Math.round(((totals.leakIls - totals.prevLeakIls) / totals.prevLeakIls) * 100)
       : undefined;
   const periodLabel = data.periodStart && data.periodEnd ? rangeLabel(view.period, data.periodStart, data.periodEnd, locale) : '';
@@ -203,6 +206,7 @@ export default async function ChainPage({
           label={t('dashboard.kpis.leak')}
           value={<span data-testid="chain-leak">{ils(leakShown.total)}</span>}
           tone={totals.leakIls > 0 ? 'danger' : 'accent'}
+          emphasis={totals.leakIls > 0}
           icon={<AlertTriangle className="h-5 w-5" />}
           subtitle={t('dashboard.kpis.leakOf', { spend: ils(spendShown.total) })}
           delta={leakDeltaPct}
@@ -224,14 +228,14 @@ export default async function ChainPage({
         />
         <KpiCard
           label={t('dashboard.kpis.caught')}
-          value={ils(caughtShown.total)}
+          value={<span data-testid="chain-caught">{ils(caughtShown.total)}</span>}
           tone="gold"
           icon={<ShieldCheck className="h-5 w-5" />}
           subtitle={
             <>
               {t('dashboard.kpis.caughtHint')}
               <span className="block">
-                {t('dashboard.kpis.claimed')}: <span className="font-mono tabular-nums">{ils(claimedShown.total)}</span>
+                {t('dashboard.kpis.claimed')}: <span className="font-mono tabular-nums" data-testid="chain-claimed">{ils(claimedShown.total)}</span>
               </span>
             </>
           }
@@ -403,9 +407,16 @@ export default async function ChainPage({
                         ) : b.leakDeltaIls === 0 ? (
                           <span className="text-subtle">{t('dashboard.ranking.flat')}</span>
                         ) : (
-                          <span className={b.leakDeltaIls > 0 ? 'text-danger' : 'text-primary'}>
-                            {b.leakDeltaIls > 0 ? '▲' : '▼'} {ils(Math.abs(b.leakDeltaIls))}
-                          </span>
+                          b.thinBase ? (
+                            <span className="text-muted" title={t('dashboard.ranking.thinBase')} data-delta="thin">
+                              {b.leakDeltaIls > 0 ? '+' : '−'}
+                              {ils(Math.abs(b.leakDeltaIls))}
+                            </span>
+                          ) : (
+                            <span className={b.leakDeltaIls > 0 ? 'text-danger' : 'text-primary'}>
+                              {b.leakDeltaIls > 0 ? '▲' : '▼'} {ils(Math.abs(b.leakDeltaIls))}
+                            </span>
+                          )
                         )}
                       </td>
                     ) : null}
@@ -473,7 +484,7 @@ export default async function ChainPage({
           </table>
           <div className="mt-3 flex items-center justify-end gap-2 text-[11px] text-subtle" aria-hidden="true">
             <span>{t('dashboard.heatmap.legendLow')}</span>
-            {['bg-primary/20', 'bg-gold/20', 'bg-warn/15', 'bg-danger/15', 'bg-danger/45'].map((c) => (
+            {['bg-primary/20', 'bg-gold/20', 'bg-warn/30 ring-1 ring-inset ring-warn/60', 'bg-danger/30 ring-1 ring-inset ring-danger/60', 'bg-danger/50 ring-1 ring-inset ring-danger'].map((c) => (
               <span key={c} className={cn('h-3 w-6 rounded', c)} />
             ))}
             <span>{t('dashboard.heatmap.legendHigh')}</span>

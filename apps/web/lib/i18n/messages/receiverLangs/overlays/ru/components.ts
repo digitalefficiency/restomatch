@@ -55,6 +55,10 @@ export const components: Shape<typeof he> = {
     savings: 'сэкономлено {amount}',
     matchesOrderAndReceipt: 'совпадает с заказом и приёмкой товара',
     awaitingMonthlyMatch: 'ожидает сверки с документами поставок за этот месяц',
+    awaitingPoLink: 'ожидает привязки к заказу',
+    noPoLinked: 'заказ не привязан',
+    toReviewOne: '1 расхождение на проверку',
+    toReview: 'На проверку расхождений: {count}',
     empty: 'Пока нет событий.',
   },
 };

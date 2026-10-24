@@ -63,7 +63,7 @@ export function MemberRoles({ restaurantId, members }: { restaurantId: string; m
                 setError(null);
                 setRole.mutate({ restaurantId, userId: m.userId, role: e.target.value as Role });
               }}
-              className="rounded-lg border border-line bg-surface-2 px-2 py-1 text-sm text-ink transition-colors focus:border-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"
+              className="rounded-lg border border-line-strong bg-surface px-2 py-1 text-sm text-ink transition-colors focus:border-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"
             >
               {ALL_ROLES.map((r) => (
                 <option key={r} value={r}>

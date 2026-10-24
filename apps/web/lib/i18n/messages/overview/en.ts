@@ -27,6 +27,7 @@ export const en: Shape<typeof he> = {
   kpis: {
     pending: 'Waiting for approval',
     pendingHint: 'Discrepancies in the queue — owner, manager, bookkeeping',
+    pendingCta: 'Open the approvals queue',
     clean: 'Clean matches this week',
     cleanNone: 'No matches yet this week',
     cleanHint: 'Average of the last seven days',

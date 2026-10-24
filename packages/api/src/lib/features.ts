@@ -17,19 +17,21 @@ export const FEATURE_KEYS = [
   'priceAlerts',
   'recovery',
   'monthlyReport',
-  // In-app preview of the monthly email (S12, demo 2026-10-25). Read-only: no send.
-  'monthlyDigestPreview',
   'ingestWhatsapp',
   'ingestEmail',
   'receiverPwa',
   'receiverLanguages',
   'aiAssistant',
   'leakCheck',
-  'growth',
   'recipes',
+  'integrations',
+  'payRun',
+  // Wave-1 keys (appended after main's order).
+  // In-app preview of the monthly email (S12, demo 2026-10-25). Read-only: no send.
+  'monthlyDigestPreview',
+  'growth',
   // S17: alert on a dish whose food cost crossed the target because a supplier raised a price.
   'dishPriceAlert',
-  'integrations',
   'orderPricesOut',
   'supplierConfirm',
   'dockPriceContext',

@@ -24,6 +24,7 @@ import {
   BreakdownChart,
   DEFAULT_VIEW,
   DeltaBadge,
+  isThinBase,
   TvMode,
   ViewToolbar,
   bucketLabel,
@@ -87,6 +88,8 @@ export default async function DashboardPage({
   const returned = flags.recovery ? await caller.recovery.returnedThisMonth() : null;
   const canPreviewReport = flags.monthlyReport && canSeeRoute(role, '/dashboard/reports');
   const canPreviewDigest = flags.monthlyDigestPreview && canSeeRoute(role, '/dashboard/reports/digest');
+  // A comparison period with almost no data gets a calm ₪ difference, not a % alarm.
+  const thinBase = previous ? isThinBase(hero.spendIls, previous.spendIls) : false;
 
   // Leak grid is owner-only; other roles simply won't see this section. If the
   // feature is gated behind a paid plan, surface a compact upsell teaser rather
@@ -133,7 +136,17 @@ export default async function DashboardPage({
       value={formatNumber(kpis.pendingApprovalsCount, locale)}
       tone={kpis.pendingApprovalsCount > 0 ? 'warning' : 'neutral'}
       icon={<ClipboardCheck className="h-5 w-5" />}
-      subtitle={t('kpis.pendingHint')}
+      subtitle={
+        // T2: when decisions wait, the card (already a link to the queue) says so.
+        kpis.pendingApprovalsCount > 0 && canDecide ? (
+          <span className="inline-flex items-center gap-1 font-semibold text-primary">
+            {t('kpis.pendingCta')}
+            <ArrowLeft className="h-3.5 w-3.5 ltr:-scale-x-100" aria-hidden="true" />
+          </span>
+        ) : (
+          t('kpis.pendingHint')
+        )
+      }
     />
   );
 
@@ -179,9 +192,9 @@ export default async function DashboardPage({
         delta={
           view.compare !== 'off' ? (
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-              <DeltaBadge current={hero.leakIls} previous={previous?.leakIls} compare={view.compare} showAmount />
+              <DeltaBadge current={hero.leakIls} previous={previous?.leakIls} compare={view.compare} thinBase={thinBase} showAmount />
               {previous ? (
-                <DeltaBadge current={hero.spendIls} previous={previous.spendIls} compare={view.compare} neutral />
+                <DeltaBadge current={hero.spendIls} previous={previous.spendIls} compare={view.compare} thinBase={thinBase} neutral />
               ) : null}
             </div>
           ) : null
@@ -212,6 +225,7 @@ export default async function DashboardPage({
             rows={trendRows}
             chart={view.chart}
             density={view.density}
+            thinBase={thinBase}
             caption={tv('trend.title')}
             keyHeader={tv('trend.colBucket')}
             valueHeader={tv('trend.colLeak')}
@@ -265,7 +279,7 @@ export default async function DashboardPage({
             action={
               <Link
                 href="/dashboard/leaks"
-                className="inline-flex items-center gap-1 rounded-lg text-sm font-semibold text-primary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+                className="touch-target inline-flex items-center gap-1 rounded-lg text-sm font-semibold text-primary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
               >
                 {t('leaks.all')}
                 <ArrowLeft className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
@@ -453,7 +467,7 @@ function LeakHero({
             className={
               // T1 alarm only when money leaked; pending-only (consolidated invoices) stays calm (T4).
               hasLeak
-                ? 'inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-danger px-4 py-2 text-sm font-semibold text-white shadow-card transition-colors hover:bg-danger/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/60 focus-visible:ring-offset-2'
+                ? 'inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-danger px-4 py-2 text-sm font-semibold text-on-primary shadow-card transition-colors hover:bg-danger/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/60 focus-visible:ring-offset-2'
                 : 'inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl border border-line-strong bg-surface px-4 py-2 text-sm font-semibold text-ink transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2'
             }
           >

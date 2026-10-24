@@ -55,6 +55,10 @@ export const components: Shape<typeof he> = {
     savings: '{amount} ተቘጢቡ',
     matchesOrderAndReceipt: 'ምስ ትእዛዝን ኣቕርቦትን ይሰማማዕ',
     awaitingMonthlyMatch: 'ምስ ናይዚ ወርሒ ወረቐት ኣቕርቦት ክነጻጸር ይጽበ ኣሎ',
+    awaitingPoLink: 'ምስ ትእዛዝ ክተኣሳሰር ይጽበ ኣሎ',
+    noPoLinked: 'ዝተኣሳሰረ ትእዛዝ የለን',
+    toReviewOne: '1 ፍልልይ ንምርመራ',
+    toReview: '{count} ፍልልያት ንምርመራ',
     empty: 'ገና ዝኾነ ንጥፈት የለን።',
   },
 };

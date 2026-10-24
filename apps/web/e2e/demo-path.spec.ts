@@ -98,12 +98,14 @@ function watchErrors(page: Page): string[] {
   const errors: string[] = [];
   // #418 (hydration mismatch) forensics: keep the last server-rendered document and,
   // when React reports #418, save it next to the post-hydration DOM for a diff.
-  let lastDoc = '';
+  // Keep the body PROMISE with its URL: reading the text is async, and #418 can fire
+  // before it resolves — storing the string would pair the new URL with the old page.
+  let lastDoc: Promise<string> = Promise.resolve('');
   let lastDocUrl = '';
   page.on('response', (res) => {
     if (res.request().resourceType() !== 'document') return;
     lastDocUrl = res.url();
-    res.text().then((body) => (lastDoc = body), () => {});
+    lastDoc = res.text().catch(() => '');
   });
   page.on('pageerror', (err) => {
     if (!/Minified React error #4(18|19|21|22|23|25)/.test(err.message)) return;
@@ -111,7 +113,8 @@ function watchErrors(page: Page): string[] {
     const dir = join(info.project.outputDir, 'hydration');
     const tag = `${info.project.name.replace(/[^\w-]+/g, '_')}-${Date.now()}`;
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, `${tag}-server.html`), `<!-- ${lastDocUrl} -->\n${lastDoc}`);
+    const docUrl = lastDocUrl;
+    void lastDoc.then((body) => writeFileSync(join(dir, `${tag}-server.html`), `<!-- ${docUrl} -->\n${body}`));
     page
       .evaluate(() => document.documentElement.outerHTML)
       .then((html) => writeFileSync(join(dir, `${tag}-client.html`), `<!-- ${lastDocUrl} -->\n${html}`))

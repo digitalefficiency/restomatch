@@ -64,6 +64,7 @@ export const en: Shape<typeof he> = {
     title: 'Credit request letters',
     subtitle: 'For each supplier — the lines you can claim a credit for in {month}, ready to print or send.',
     open: 'Credit letters to suppliers',
+    toSend: 'To send',
     print: 'Print / save as PDF',
     empty: 'Nothing to claim this month right now.',
     to: 'To: {supplier}',
@@ -86,6 +87,12 @@ export const en: Shape<typeof he> = {
     trackerSubject: 'Re: Credit request for invoice discrepancies',
     trackerTotal: 'Total claimed',
     monthTitle: 'Before payment — unpaid invoices of {month}',
+    basis: {
+      excl: 'before VAT',
+      incl: 'incl. VAT',
+      vat: 'VAT amount',
+    },
+    mixedBasis: 'This total mixes lines on different VAT bases — each line shows its basis.',
   },
   report: {
     open: 'Monthly leak report',

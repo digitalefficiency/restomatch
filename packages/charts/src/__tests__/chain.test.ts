@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aggregateChain, monthOfPeriodEnd, shiftMonth, supplierMergeKey, type BranchSnapshot } from '../chain';
+import { aggregateChain, isThinBase, monthOfPeriodEnd, shiftMonth, supplierMergeKey, type BranchSnapshot } from '../chain';
 
 function snap(over: Partial<BranchSnapshot> & { restaurantId: string; name: string }): BranchSnapshot {
   return {
@@ -177,6 +177,30 @@ describe('aggregateChain', () => {
     const empty = aggregateChain([a, b].map((x) => ({ ...x, previous: { leakIls: 0, spendIls: 0, leakPct: null } })));
     expect(empty.branches.every((r) => r.leakDeltaIls === null && r.prevLeakIls === null)).toBe(true);
     expect(empty.totals.prevLeakPct).toBeNull();
+  });
+
+  it('normal comparison base: not thin — the % / ▲ stay', () => {
+    expect(out.totals.thinBase).toBe(false);
+    expect(out.branches.find((r) => r.restaurantId === 'a')!.thinBase).toBe(false);
+    expect(out.branches.find((r) => r.restaurantId === 'b')!.thinBase).toBe(false);
+  });
+
+  it('thin comparison base (S8: last month vs an almost-empty August): flagged, ₪ delta kept', () => {
+    // ₪35 leak on ₪1,200 spend vs ₪1,059 on ₪63,300 → "▲ 2,926.8%" before this rule.
+    const thin = aggregateChain([
+      { ...a, leakIls: 1059.38, spendIls: 63300.94, previous: { leakIls: 35, spendIls: 1200, leakPct: 35 / 1200 } },
+    ]);
+    expect(thin.totals.thinBase).toBe(true);
+    expect(thin.branches[0]!.thinBase).toBe(true);
+    expect(thin.branches[0]!.leakDeltaIls).toBe(1024.38); // the calm ₪ difference is still there
+  });
+
+  it('isThinBase: base spend under 10% of the current period', () => {
+    expect(isThinBase(63300, 1200)).toBe(true);
+    expect(isThinBase(63300, 6330)).toBe(false); // exactly 10% is a real base
+    expect(isThinBase(28389, 42263)).toBe(false); // a bigger base is never thin
+    expect(isThinBase(1000, null)).toBe(false); // compare off
+    expect(isThinBase(0, 0)).toBe(false);
   });
 
   it('the period open total is Σ the rows, independent of the all-time approvals queue', () => {
