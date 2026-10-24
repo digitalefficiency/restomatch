@@ -15,7 +15,8 @@ const check = (ok, msg) => {
   results.push(`${ok ? 'PASS' : 'FAIL'} ${msg}`);
   if (!ok) failures++;
 };
-const psql = (q) => execSync(`psql ${DB} -At -c "${q.replace(/"/g, '\\"')}"`).toString().trim();
+// SQL goes on stdin: no shell quoting to get wrong.
+const psql = (q) => execSync(`psql ${DB} -At`, { input: q }).toString().trim();
 
 async function session(browser, role, locale) {
   const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 } });
