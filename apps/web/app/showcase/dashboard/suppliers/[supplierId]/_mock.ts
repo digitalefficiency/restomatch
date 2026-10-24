@@ -361,7 +361,7 @@ function buildProfiles(): Record<string, SupplierProfile> {
         at: isoDaysAgo(0, 9, 35),
         type: 'invoice_blocked',
         title: 'INV-4882 חסומה — חשבונית כפולה',
-        detail: 'סומן: לא לשלם עד החלטה · ממתין לבירור',
+        detail: 'סומן לבירור — ממתין להחלטה',
         amount: auditById('inv-7822').totalInvoiceIls,
       },
       {

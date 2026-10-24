@@ -115,7 +115,7 @@ export const he = {
     p90: 'מעל אחוזון 90 ההיסטורי ({amount})',
   },
   rules: {
-    'duplicate-invoice': 'חשבונית כפולה — חסימת תשלום (הנהלת חשבונות)',
+    'duplicate-invoice': 'חשבונית כפולה — סומנה: לא לשלם עד החלטה (הנהלת חשבונות)',
     'large-invoice-without-po': 'חשבונית גדולה ללא הזמנה — אישור בעלים',
     'unordered-item-significant': 'פריט משמעותי שלא הוזמן — אישור בעלים',
     'severity-block': 'חומרה גבוהה — אישור בעלים',

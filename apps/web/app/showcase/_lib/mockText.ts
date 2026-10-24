@@ -155,14 +155,14 @@ const EN: Record<string, string> = {
   'הבקשה ממתינה לחזרת ספק': 'Waiting for the supplier to respond',
   'אחור באספקה — 45 דק׳': 'Late delivery — 45 min',
   'הגיע ב-08:45 במקום 08:00 הצפוי': 'Arrived 08:45 instead of the expected 08:00',
-  'סומן: לא לשלם עד החלטה · ממתין לבירור': 'Flagged: hold payment until decided · pending review',
+  'סומן לבירור — ממתין להחלטה': 'Flagged for review — awaiting a decision',
   'גולדסטאר עלה ב-6.7%': 'Goldstar up 6.7%',
   'מחלוקת על חוסר במשלוח': 'Dispute over a short delivery',
   'חסרו 4 בקבוקי וודקה — ממתינים לתגובת הספק':
     '4 bottles of vodka missing — waiting on the supplier',
 
   // ── Owner dashboard live feed ────────────────────────────────────────────
-  'INV-4882 מקצביית הכרם — סומנה: לא לשלם עד החלטה': 'INV-4882 from HaKerem Butchery — flagged: hold payment until decided',
+  'INV-4882 מקצביית הכרם — סומנה לבירור': 'INV-4882 from HaKerem Butchery — flagged for review',
   'PO-1235 התקבל מלא': 'PO-1235 received in full',
   'חריגת מחיר ממתינה לאישור': 'Price variance awaiting approval',
   'סנכרון Market Man': 'MarketMan sync',
