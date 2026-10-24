@@ -344,6 +344,17 @@ async function invoicePhoto(browser: Browser): Promise<Buffer> {
   return buf;
 }
 
+/** Pick the photo; the scan step's input is server-rendered, so re-pick once if it raced hydration. */
+async function uploadInvoice(page: Page, photo: Buffer, processLabel: string) {
+  await page.waitForLoadState('networkidle').catch(() => {});
+  const process = page.getByRole('button', { name: processLabel });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await page.locator('input[type="file"]').setInputFiles({ name: 'invoice.jpg', mimeType: 'image/jpeg', buffer: photo });
+    if (await process.isVisible({ timeout: 5_000 }).catch(() => false)) return;
+  }
+  await expect(process, 'the picked photo never reached "Process invoice"').toBeVisible();
+}
+
 /* ═══════════════════════════════ A. landing ═══════════════════════════════ */
 
 test('A · landing + 60-second promo (logged out)', async ({ page }, info) => {
@@ -555,7 +566,7 @@ test('C · receiver: HaSharon Produce → photo → OCR → review → adjust �
     await goto(page, `${STUB}/dashboard/receiving/${clone}`);
     await expect(page.getByRole('heading', { name: r.steps.scan.title })).toBeVisible();
     await checkScreen(page, errors, L, 'C3-scan');
-    await page.locator('input[type="file"]').setInputFiles({ name: 'invoice.jpg', mimeType: 'image/jpeg', buffer: await invoicePhoto(browser) });
+    await uploadInvoice(page, await invoicePhoto(browser), r.steps.scan.process);
     await page.getByRole('button', { name: r.steps.scan.process }).click();
     await expect(page.getByRole('heading', { name: r.steps.recon.title })).toBeVisible({ timeout: 60_000 });
     await expect(page.locator('[data-testid^="ocr-notice"]'), 'OCR fell back to the order (stub/worker not running?)').toHaveCount(0);
@@ -566,8 +577,14 @@ test('C · receiver: HaSharon Produce → photo → OCR → review → adjust �
   await test.step('review: sections, English names + Hebrew original, qty × price = total, potential loss', async () => {
     const cards = page.getByTestId('recon-cards');
     const table = page.getByTestId('recon-table');
+    // Exactly ONE rendering of the review: cards on a phone, the table on desktop
+    // (main@145023c rendered both on desktop — the double list fixed by #67).
+    await expect(cards.or(table).first()).toBeVisible();
+    const shown = [await cards.isVisible(), await table.isVisible()].filter(Boolean).length;
+    expect(shown, 'exactly one of recon-cards / recon-table visible (double list, see #67)').toBe(1);
+    if (!isPhone(info)) await expect(table, 'desktop review shows the table').toBeVisible();
+    else await expect(cards, 'phone review shows the cards').toBeVisible();
     const view = (await cards.isVisible()) ? cards : table;
-    await expect(view).toBeVisible();
     await expect(view.getByTestId('recon-section-both')).toBeVisible();
     await expect(page.getByTestId('recon-mismatch-banner'), 'right supplier → no "nothing matched" banner').toHaveCount(0);
     if (L === 'en') {
@@ -656,4 +673,39 @@ test('D · bookkeeper: CSV + uniform-file exports', async ({ page, context }, in
 
   // Phone: the exports page is reachable from the bottom nav / menu too.
   if (isPhone(info)) await expect(page.locator('html')).toHaveAttribute('dir', L === 'he' ? 'rtl' : 'ltr');
+});
+
+/* ═════════════════════ C′. receiver OCR race (opt-in stress) ═════════════════════ */
+
+/**
+ * DEMO_OCR_ROUNDS=N: N fresh uploads in a row (each on its own clone of the
+ * HaSharon order). Counts how many fall back to "still reading" instead of the
+ * review — the OCR-job-vs-invoice-commit race (#72) hit ~1 in 10. Must be 0.
+ * Runs in one project only (desktop-en:receiver).
+ */
+test('C · receiver OCR race: N uploads all reach "Check result"', async ({ page, browser }, info) => {
+  const rounds = Number(process.env.DEMO_OCR_ROUNDS ?? 0);
+  test.skip(!STUB || rounds <= 0 || info.project.name !== 'desktop-en:receiver', 'set DEMO_OCR_ROUNDS (runs on desktop-en:receiver)');
+  test.setTimeout(rounds * 90_000 + 60_000);
+  const r = M.en.receiving;
+  await login(page, STUB!, RECEIVER, 'en');
+  const photo = await invoicePhoto(browser);
+  const outcomes: { round: number; outcome: string; ms: number }[] = [];
+  for (let i = 1; i <= rounds; i += 1) {
+    const { clone } = await hasharonOrders(`${info.project.name}#race${i}`);
+    await goto(page, `${STUB}/dashboard/receiving/${clone}`);
+    await uploadInvoice(page, photo, r.steps.scan.process);
+    const t0 = Date.now();
+    await page.getByRole('button', { name: r.steps.scan.process }).click();
+    const review = page.getByRole('heading', { name: r.steps.recon.title });
+    const notice = page.locator('[data-testid^="ocr-notice"]');
+    await expect(review.or(notice).first()).toBeVisible({ timeout: 75_000 });
+    const outcome = (await notice.count()) ? ((await notice.first().getAttribute('data-testid')) ?? 'ocr-notice') : 'review';
+    outcomes.push({ round: i, outcome, ms: Date.now() - t0 });
+  }
+  const bad = outcomes.filter((o) => o.outcome !== 'review');
+  info.annotations.push({ type: 'ocr-race', description: `${bad.length}/${rounds} fell back: ${JSON.stringify(outcomes)}` });
+  writeFileSync(join(info.project.outputDir, 'demo-path-ocr-race.json'), JSON.stringify(outcomes, null, 2));
+  console.log(`[ocr-race] ${bad.length}/${rounds} uploads fell back to the order: ${JSON.stringify(outcomes)}`);
+  expect(bad, `uploads that did not reach "Check result" (${bad.length}/${rounds})`).toEqual([]);
 });
