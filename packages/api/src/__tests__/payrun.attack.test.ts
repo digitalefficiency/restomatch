@@ -228,6 +228,62 @@ describe('payRun.month', () => {
     }
   });
 
+  it('past the window: an accepted duplicate copy holds, an open unordered arrival waits for its link — never "can pay"', async () => {
+    await ownerDb.execute(sql`
+      WITH inv AS (
+        INSERT INTO invoices (restaurant_id, supplier_id, invoice_number, invoice_date, total_excl_vat, vat_amount, total_incl_vat, status, source)
+        SELECT ${A.restaurantId}, ${A.supplierId}, 'PAID-WIN2-' || g, now(), 5000, 850, 5850, 'paid', 'photo'
+        FROM generate_series(1, 205) g
+        RETURNING id
+      ), mr AS (
+        INSERT INTO match_runs (restaurant_id, po_id, gr_id, invoice_id, overall_status, total_discrepancy_amount)
+        SELECT ${A.restaurantId}, ${A.poId}, ${A.grId}, inv.id, 'major', 1000 FROM inv
+        RETURNING id
+      )
+      INSERT INTO discrepancies (match_run_id, restaurant_id, type, severity, delta_amount, requires_role, resolution_status)
+      SELECT mr.id, ${A.restaurantId}, 'PRICE_HIGHER', 'warn', 1000, 'manager', 'resolved' FROM mr
+    `);
+    // EDGE-DUP: an accepted duplicate copy (₪300); EDGE-UA: a matched invoice with an open unordered arrival (₪400).
+    await ownerDb.execute(sql`
+      WITH inv AS (
+        INSERT INTO invoices (restaurant_id, supplier_id, invoice_number, invoice_date, total_excl_vat, vat_amount, total_incl_vat, status, source)
+        VALUES (${A.restaurantId}, ${A.supplierId}, 'EDGE-DUP', now(), 256.41, 43.59, 300, 'matched', 'photo'),
+               (${A.restaurantId}, ${A.supplierId}, 'EDGE-UA', now(), 341.88, 58.12, 400, 'matched', 'photo')
+        RETURNING id, invoice_number
+      ), mr AS (
+        INSERT INTO match_runs (restaurant_id, po_id, gr_id, invoice_id, overall_status, total_discrepancy_amount)
+        SELECT ${A.restaurantId}, ${A.poId}, ${A.grId}, inv.id, 'blocked', 0 FROM inv
+        RETURNING id, invoice_id
+      )
+      INSERT INTO discrepancies (match_run_id, restaurant_id, type, severity, delta_amount, requires_role, resolution_status)
+      SELECT mr.id, ${A.restaurantId},
+             CASE WHEN inv.invoice_number = 'EDGE-DUP' THEN 'DUPLICATE_INVOICE' ELSE 'UNORDERED_ARRIVAL' END::discrepancy_type,
+             'block',
+             CASE WHEN inv.invoice_number = 'EDGE-DUP' THEN 300 ELSE 400 END,
+             'manager',
+             CASE WHEN inv.invoice_number = 'EDGE-DUP' THEN 'accepted' ELSE 'open' END::resolution_status
+      FROM mr JOIN inv ON inv.id = mr.invoice_id
+    `);
+    try {
+      const r = await asA().payRun.month();
+      const rows = r.suppliers.flatMap((x) => x.invoices);
+      const dup = rows.find((i) => i.invoiceNumber === 'EDGE-DUP')!;
+      const ua = rows.find((i) => i.invoiceNumber === 'EDGE-UA')!;
+      expect(dup).toMatchObject({ status: 'hold', duplicate: true, duplicateIls: 300, creditIls: 0 });
+      expect(ua).toMatchObject({ status: 'hold', pendingLink: true, creditIls: 0 });
+      // Neither is counted as payable; the UA copy is a T4 link total.
+      expect(r.totals.payIls).toBe(0);
+      expect(r.totals.linkIls).toBe(400);
+    } finally {
+      await ownerDb.execute(sql`
+        DELETE FROM discrepancies WHERE match_run_id IN (
+          SELECT mr.id FROM match_runs mr JOIN invoices i ON i.id = mr.invoice_id
+          WHERE i.invoice_number LIKE 'PAID-WIN2-%' OR i.invoice_number IN ('EDGE-DUP','EDGE-UA'))`);
+      await ownerDb.execute(sql`DELETE FROM match_runs WHERE invoice_id IN (SELECT id FROM invoices WHERE invoice_number LIKE 'PAID-WIN2-%' OR invoice_number IN ('EDGE-DUP','EDGE-UA'))`);
+      await ownerDb.execute(sql`DELETE FROM invoices WHERE invoice_number LIKE 'PAID-WIN2-%' OR invoice_number IN ('EDGE-DUP','EDGE-UA')`);
+    }
+  });
+
   it('manager and bookkeeper may read it; receiver and chef are FORBIDDEN', async () => {
     await expect(asA('manager').payRun.month()).resolves.toMatchObject({ enabled: true });
     await expect(asA('bookkeeper').payRun.month()).resolves.toMatchObject({ enabled: true });
