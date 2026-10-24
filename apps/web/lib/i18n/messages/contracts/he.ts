@@ -235,4 +235,10 @@ export const he = {
     body: '{count} מוצרים עלו במחיר מעל הסף שהגדרתם.',
     link: 'לצפייה בהתראות',
   },
+  /** New-order wizard (flag `contracts`): contract prices while ordering. */
+  order: {
+    overContract: 'מעל החוזה ב-{amount} ליח׳',
+    overContractTitle: 'מחיר החוזה: {contract} ליח׳. המחיר שהוזן: {price}',
+    contractPrice: 'מחיר חוזה',
+  },
 };

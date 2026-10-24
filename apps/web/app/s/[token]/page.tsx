@@ -84,6 +84,7 @@ export default async function SupplierPortalPage({ params }: { params: Promise<{
             qtyOrdered: l.qtyOrdered,
             unit: l.unit,
             unitPrice: l.unitPrice,
+            agreed: l.agreed,
           }))}
         />
       )}

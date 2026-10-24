@@ -13,7 +13,8 @@ import {
 } from '@restomatch/db';
 import { financeProcedure, managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
-import { assertFeatureOn } from '../lib/featureGate';
+import { assertFeatureOn, isFeatureOn } from '../lib/featureGate';
+import { contractPricesForOrder, orderPriceKey } from '../contracts/orderPrices';
 import { featureEnabled } from '../lib/features';
 import { CatalogFileError, parseCatalogFile, type ParsedTable } from '../catalog/parse';
 import {
@@ -365,5 +366,31 @@ export const contractsRouter = router({
         /** True when more invoice lines exist than one scan covers — the total is a lower bound. */
         truncated,
       };
+    }),
+  /**
+   * Contract unit prices for an order being built (new-order wizard): for each
+   * (product, unit) of `supplierId`, the contract price in force today, in that
+   * unit. Managers only (same as orders.createDraft). Flag off → `enabled: false`.
+   */
+  orderPrices: managerProcedure
+    .input(
+      z
+        .object({
+          supplierId: z.string().uuid(),
+          items: z.array(z.object({ productId: z.string().uuid(), unit: z.string().trim().min(1).max(32) })).max(500),
+        })
+        .strict(),
+    )
+    .query(async ({ ctx, input }) => {
+      const rid = ctx.session.restaurantId;
+      if (!(await isFeatureOn(ctx.db, rid, 'contracts'))) return { enabled: false, prices: [] };
+      await assertSupplierOwned(ctx.db, input.supplierId, rid);
+      const map = await contractPricesForOrder(ctx.db, rid, input.supplierId, input.items);
+      const prices: Array<{ productId: string; unit: string; contractPrice: number }> = [];
+      for (const it of input.items) {
+        const contractPrice = map.get(orderPriceKey(it.productId, it.unit));
+        if (contractPrice !== undefined) prices.push({ productId: it.productId, unit: it.unit, contractPrice });
+      }
+      return { enabled: true, prices };
     }),
 });

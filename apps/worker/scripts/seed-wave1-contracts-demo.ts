@@ -23,6 +23,8 @@
 import {
   assertSeedTarget,
   and,
+  DEMO_MAIN_BUSINESS_ID,
+  DEMO_MAIN_NAME,
   createDb,
   desc,
   discrepancies,
@@ -75,6 +77,15 @@ async function contractFrom(restaurantId: string, supplierId: string): Promise<s
 }
 const CONTRACT_SUPPLIERS = ['HaKerem Butchery', 'Mediterranean Fish Co.'];
 const TREND_SUPPLIER = 'HaSharon Produce';
+
+/**
+ * The demo's "now": noon (Israel) on DEMO_TODAY when set — like the base seed,
+ * so the tomato trend and its alert are fresh on demo day — else the real clock.
+ */
+function demoNow(): Date {
+  const d = process.env.DEMO_TODAY?.trim();
+  return d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? new Date(`${d}T09:00:00Z`) : new Date();
+}
 // Fresh produce is VAT-exempt (#79): like HaSharon Produce / Carmel Greens, vat_rate 0.
 const CHEAP_SUPPLIER = { name: 'חקלאי העמק', nameEn: 'HaEmek Farmers', vatRate: '0' };
 const TOMATO = { name: 'עגבניות', nameEn: 'Tomatoes', unit: 'ק״ג' };
@@ -210,11 +221,11 @@ async function seedTrend(restaurantId: string) {
       .returning();
   }
 
-  // Re-anchor the series to "now" on every run (idempotent: replace it).
+  // Re-anchor the series to the demo's "now" on every run (idempotent: replace it).
   await db
     .delete(priceHistory)
     .where(and(eq(priceHistory.productId, tomato!.id), eq(priceHistory.supplierId, produce.id)));
-  const now = Date.now();
+  const now = demoNow().getTime();
   await db.insert(priceHistory).values(
     TREND.map(([daysAgo, price]) => ({
       restaurantId,
@@ -243,7 +254,7 @@ async function seedTrend(restaurantId: string) {
   }
   // One live alert for the demo product: drop earlier runs' rows, re-detect.
   await db.delete(priceAlerts).where(and(eq(priceAlerts.restaurantId, restaurantId), eq(priceAlerts.productId, tomato!.id)));
-  const sweep = await runPriceAlertSweep(db, restaurantId, { notify: NOTIFY });
+  const sweep = await runPriceAlertSweep(db, restaurantId, { notify: NOTIFY, now: demoNow() });
   const [open] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(priceAlerts)
@@ -298,9 +309,17 @@ async function seedSupplierConfirm(restaurantId: string) {
 }
 
 async function main() {
-  const [named] = await db.select().from(restaurants).where(eq(restaurants.name, 'כפר הזיתים')).limit(1);
-  const restaurant = named ?? (await db.select().from(restaurants).limit(1))[0];
-  if (!restaurant) throw new Error('no restaurant — run the base seed first');
+  // Only ever the main demo restaurant (reseed:demo passes DEMO_RESTAURANT_ID on
+  // the shared DB); never a name-only match, never "any restaurant".
+  const only = process.env.DEMO_RESTAURANT_ID?.trim();
+  const [restaurant] = only
+    ? await db.select().from(restaurants).where(eq(restaurants.id, only)).limit(1)
+    : await db
+        .select()
+        .from(restaurants)
+        .where(and(eq(restaurants.businessId, DEMO_MAIN_BUSINESS_ID), eq(restaurants.name, DEMO_MAIN_NAME)))
+        .limit(1);
+  if (!restaurant) throw new Error('no demo restaurant — run the base seed first');
   const rid = restaurant.id;
 
   const before = await leakTotalAgorot(rid);

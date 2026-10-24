@@ -9,6 +9,7 @@ import {
   matchRuns,
   notificationsOutbox,
   poLines,
+  purchaseOrders,
   priceAlerts,
   priceAlertThresholds,
   priceHistory,
@@ -36,6 +37,7 @@ import { findOverContractLines } from '../contracts/overContract';
 import { cheaperOffer, detectSustainedIncrease, resolveThreshold } from '../priceAlerts/detect';
 import { runPriceAlertSweep } from '../priceAlerts/sweep';
 import { enqueueNotification } from '../notifications/outbox';
+import { createSupplierLink, loadSupplierOrder, resolveSupplierToken } from '../supplierConfirm/service';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 
 /* ─────────────────────────── pure rules ─────────────────────────── */
@@ -711,6 +713,95 @@ describe('price-alert sweep (in-app rows + outbox email)', () => {
     const res = await caller(A, 'manager').priceAlerts.refresh();
     expect(res.created).toBe(0);
     expect(await db.select().from(priceAlerts)).toEqual([]);
+  });
+});
+
+describe('orders use contract prices (audit #1/#2)', () => {
+  it('contracts.orderPrices: the price in force today, in each unit; none for expired / unconvertible', async () => {
+    await addContract(A, '40', '2020-01-01', null, 'kg');
+    const r = await caller(A, 'manager').contracts.orderPrices({
+      supplierId: A.supplierId,
+      items: [
+        { productId: A.productId, unit: 'kg' },
+        { productId: A.productId, unit: 'g' },
+        { productId: A.productId, unit: 'ליטר' },
+      ],
+    });
+    expect(r).toEqual({
+      enabled: true,
+      prices: [
+        { productId: A.productId, unit: 'kg', contractPrice: 40 },
+        { productId: A.productId, unit: 'g', contractPrice: 0.04 },
+      ],
+    });
+    await db.delete(supplierContractPrices);
+    await addContract(A, '40', '2020-01-01', '2020-12-31', 'kg');
+    expect((await caller(A, 'manager').contracts.orderPrices({ supplierId: A.supplierId, items: [{ productId: A.productId, unit: 'kg' }] })).prices).toEqual([]);
+  });
+
+  it('contracts.orderPrices: flag off → enabled:false; managers only; foreign supplier rejected', async () => {
+    await addContract(A, '40', '2020-01-01', null, 'kg');
+    const items = [{ productId: A.productId, unit: 'kg' }];
+    await setFeatures(A, { all: true, contracts: false });
+    expect(await caller(A, 'manager').contracts.orderPrices({ supplierId: A.supplierId, items })).toEqual({ enabled: false, prices: [] });
+    await setFeatures(A, { all: true });
+    await expect(caller(A, 'bookkeeper').contracts.orderPrices({ supplierId: A.supplierId, items })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(caller(A, 'manager').contracts.orderPrices({ supplierId: B.supplierId, items })).rejects.toBeTruthy();
+  });
+
+  it('orders.createDraft pre-fills an unpriced line from the contract (in the line unit), not the list price', async () => {
+    await addContract(A, '9.5', '2020-01-01', null, 'kg');
+    await db
+      .insert(supplierCatalogItems)
+      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, productId: A.productId, supplierNameRaw: 'x', unit: 'kg', listPrice: '12.0000' });
+    try {
+      const c = caller(A, 'manager');
+      const { poId } = await c.orders.createDraft({
+        supplierId: A.supplierId,
+        lines: [
+          { productId: A.productId, qty: 2, unit: 'kg' },
+          { productId: A.productId, qty: 500, unit: 'g' },
+          { productId: A.productId, qty: 1, unit: 'kg', unitPriceExpected: 11 },
+        ],
+      });
+      const rows = await db.select({ unit: poLines.unit, price: poLines.unitPriceExpected, qty: poLines.qtyOrdered }).from(poLines).where(eq(poLines.poId, poId));
+      const byQty = new Map(rows.map((r) => [Number(r.qty), r.price]));
+      expect(byQty.get(2)).toBe('9.5000'); // contract, not the 12.00 list price
+      expect(byQty.get(500)).toBe('0.0095'); // converted to ₪/g
+      expect(byQty.get(1)).toBe('11.0000'); // a typed price stands
+
+      // Flag off → the catalog list price, exactly as before.
+      await setFeatures(A, { all: true, contracts: false });
+      const off = await c.orders.createDraft({ supplierId: A.supplierId, lines: [{ productId: A.productId, qty: 3, unit: 'kg' }] });
+      const [offLine] = await db.select({ price: poLines.unitPriceExpected }).from(poLines).where(eq(poLines.poId, off.poId));
+      expect(offLine!.price).toBe('12.0000');
+    } finally {
+      await db.delete(supplierCatalogItems);
+    }
+  });
+
+  it('supplier portal calls a price "agreed" only when it IS the contract price on the order date', async () => {
+    await addContract(A, '9.5', '2020-01-01', null, 'kg');
+    const c = caller(A, 'manager');
+    const { poId } = await c.orders.createDraft({
+      supplierId: A.supplierId,
+      lines: [
+        { productId: A.productId, qty: 2, unit: 'kg' },
+        { productId: A.productId, qty: 1, unit: 'kg', unitPriceExpected: 11 },
+      ],
+    });
+    await db.update(purchaseOrders).set({ status: 'sent' }).where(eq(purchaseOrders.id, poId));
+    const { token } = (await createSupplierLink(db, A.restaurantId, poId))!;
+    const res = await resolveSupplierToken(db, token);
+    if (!res.ok) throw new Error('link');
+    const view = (await loadSupplierOrder(db, res.link))!;
+    const agreed = new Map(view.lines.map((l) => [l.unitPrice, l.agreed]));
+    expect(agreed.get(9.5)).toBe(true);
+    expect(agreed.get(11)).toBe(false);
+
+    await setFeatures(A, { all: true, contracts: false });
+    const off = (await loadSupplierOrder(db, res.link))!;
+    expect(off.lines.every((l) => !l.agreed)).toBe(true);
   });
 });
 
