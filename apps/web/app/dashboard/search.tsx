@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { FileText, Package, Search, Truck } from 'lucide-react';
 import type { UserRole } from '@restomatch/db';
@@ -19,7 +19,16 @@ import { startRouteProgress } from '@/lib/components/routeProgressState';
  * can't open (e.g. a receiver and the suppliers page) are hidden. In English
  * the product/supplier English name is shown when it exists.
  */
-export function DashboardSearch({ role, className }: { role: UserRole; className?: string }) {
+export function DashboardSearch({
+  role,
+  className,
+  variant = 'header',
+}: {
+  role: UserRole;
+  className?: string;
+  /** Where it renders: the desktop header or the mobile menu drawer (one of each per page). */
+  variant?: 'header' | 'drawer';
+}) {
   const t = useT(nav);
   const locale = useLocale();
   const router = useRouter();
@@ -29,7 +38,11 @@ export function DashboardSearch({ role, className }: { role: UserRole; className
   const [activeIdx, setActiveIdx] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const listboxId = useId();
+  // A fixed id, not useId(): useId encodes the tree position, and Next's
+  // dev-only segment-explorer wrappers above the app have intermittently given
+  // server and client different shapes there (aria-controls hydration mismatch,
+  // the #418 family). One search per variant per page keeps it unique.
+  const listboxId = `dashboard-search-${variant}-list`;
   const optionId = (i: number) => `${listboxId}-opt-${i}`;
 
   // Debounce the raw input into the actual query (250ms).

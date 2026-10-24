@@ -3,6 +3,8 @@
 // "כפר הזיתים" (scripts/dev-setup.sh → seed-demo log + the live /dashboard hero),
 // month = October 2026. Change copy here; layout reads it.
 
+import receiverGenerated from './receiver.generated.json';
+
 export type Locale = 'he' | 'en';
 
 /** Facts shown on screen (seeded demo tenant, dashboard hero, Oct 2026). */
@@ -65,16 +67,16 @@ const he = {
   },
   product: {
     heroTitle: 'מספר אחד. בשקלים.',
-    heroSub: 'כמה דלף החודש — ומה עוד אפשר לעצור.',
+    heroSub: 'כמה דלף החודש — ומה עוד לא שולם.',
     chipLeak: 'דלף החודש',
     chipPct: 'מהרכש',
     chipCaught: 'נתפס לפני תשלום',
     heatTitle: 'בלש הדליפות',
     heatSub: 'איפה המחיר מזחל, ומי מקצר משלוחים.',
     chipBeer: 'בירה מהחבית: {from} ← {to}',
-    apprTitle: 'עוצרים לפני התשלום.',
+    apprTitle: 'מסמנים לפני התשלום.',
     apprSub: 'כל פער מגיע לאדם הנכון — מאשרים, דוחים, או דורשים זיכוי.',
-    chipAppr: 'חסום עד אישור שלך:',
+    chipAppr: 'ממתין לאישור שלך:',
     claimTitle: 'מכתב דרישת זיכוי',
     claimSub: 'מכתב לכל ספק, מוכן להדפסה — בלחיצה.',
     chipClaim: 'סה״כ לזיכוי:',
@@ -86,7 +88,7 @@ const he = {
     title: 'מקבל הסחורה לא קורא עברית?',
     title2: 'לא בעיה.',
     sub: 'החשבונית בעברית — העובד ברציף רואה את השורות והמוצרים באנגלית, ובודק את המשלוח בעצמו.',
-    paper: 'חשבונית ספק · ירקות השרון',
+    paper: 'חשבונית ספק · בעברית',
     phoneCaption: 'Receiver in English',
   },
   chains: {
@@ -144,16 +146,16 @@ const en: typeof he = {
   },
   product: {
     heroTitle: 'One number. In shekels.',
-    heroSub: 'What leaked this month — and what you can still stop.',
+    heroSub: 'What leaked this month — and what’s still unpaid.',
     chipLeak: 'Leaked this month',
     chipPct: 'of spend',
     chipCaught: 'Caught before payment',
     heatTitle: 'Leak detective',
     heatSub: 'Where prices creep, and who short-delivers.',
     chipBeer: 'Draft beer keg: {from} → {to}',
-    apprTitle: 'Stop it before you pay.',
+    apprTitle: 'Flag it before you pay.',
     apprSub: 'Every gap goes to the right person — approve, reject, or claim a credit.',
-    chipAppr: 'Blocked until you approve:',
+    chipAppr: 'Held for your approval:',
     claimTitle: 'Credit-request letters',
     claimSub: 'One letter per supplier, ready to print — in one click.',
     chipClaim: 'Total credit requested:',
@@ -165,7 +167,7 @@ const en: typeof he = {
     title: 'Your receiver can’t read Hebrew?',
     title2: 'No problem.',
     sub: 'The invoice is in Hebrew — the worker at the back door sees every line and product in English, and checks the delivery themselves.',
-    paper: 'Supplier invoice · HaSharon Produce',
+    paper: 'Supplier invoice · in Hebrew',
     phoneCaption: 'Receiver in English',
   },
   chains: {
@@ -196,10 +198,31 @@ const en: typeof he = {
 export const COPY = { he, en };
 export type Copy = typeof he;
 
+
+type Line = { he: string; en: string; qty: string; qtyEn: string; price: string; flag?: 'price' | 'qty' };
 /** Hebrew invoice line → English, exactly as the app showed them (public/shots/reconcile-en.png, HaSharon Produce). */
-export const LINES: { he: string; en: string; qty: string; qtyEn: string; price: string; flag?: 'price' | 'qty' }[] = [
+const LINES_FALLBACK: Line[] = [
   { he: 'עגבניות שרי', en: 'Cherry tomatoes', qty: '15 ק״ג', qtyEn: '15 kg', price: '₪14.00', flag: 'price' },
   { he: 'כוסברה', en: 'Coriander', qty: '10 צרור', qtyEn: '10 bunch', price: '₪3.01', flag: 'qty' },
   { he: 'חסה ערבית', en: 'Romaine lettuce', qty: '20 יח׳', qtyEn: '20 unit', price: '₪4.50' },
   { he: 'מלפפונים', en: 'Cucumbers', qty: '12 ק״ג', qtyEn: '12 kg', price: '₪5.87' },
 ];
+
+// English unit → the Hebrew abbreviation the paper invoice uses.
+const UNIT_HE: Record<string, string> = { kg: 'ק״ג', g: 'גר׳', L: 'ל׳', ml: 'מ״ל', unit: 'יח׳', tray: 'תבנית', bunch: 'צרור', case: 'ארגז', pack: 'מארז', bottle: 'בקבוק', can: 'פחית', carton: 'קרטון', sack: 'שק', jar: 'צנצנת' };
+
+/** The first invoice lines of the real English reconciliation (scripts/capture.mjs → receiver.generated.json). */
+type Captured = { en: string; he: string; qty: string; unit: string; price: string; flag?: 'price' | 'qty' };
+const captured = receiverGenerated as Captured[];
+export const LINES: Line[] =
+  captured.length >= 4
+    ? captured.slice(0, 4).map((c) => ({
+        he: c.he,
+        en: c.en,
+        // qty/price stay empty when the capture couldn't read them — the scene then shows the names only
+        qty: c.qty ? `${c.qty} ${UNIT_HE[c.unit] ?? c.unit}` : '',
+        qtyEn: c.qty ? `${c.qty} ${c.unit}` : '',
+        price: c.price ? `₪${c.price}` : '',
+        flag: c.flag,
+      }))
+    : LINES_FALLBACK;
