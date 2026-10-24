@@ -121,7 +121,7 @@ export function CaptureClient({ initialText }: { initialText: string }) {
             <p className="mt-1 text-sm text-muted">{t('orderCapture.draftHint')}</p>
             <div className="mt-2 flex flex-wrap gap-2">
               <Badge tone="neutral">{t(`orderCapture.matchedBy.${draft.matchedBy}`)}</Badge>
-              {!draft.created ? <Badge tone="warning">{t('orderCapture.alreadyCaptured')}</Badge> : null}
+              {!draft.created ? <Badge tone="info">{t('orderCapture.alreadyCaptured')}</Badge> : null}
             </div>
 
             <ul className="mt-5 divide-y divide-line rounded-xl border border-line" data-testid="capture-lines">
