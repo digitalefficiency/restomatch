@@ -21,8 +21,11 @@ import type { Translator } from '@/lib/i18n/translate';
 import type { UploadedScan } from '@/lib/supabase/client';
 import {
   adaptReconciliation,
+  cumulativeCount,
   keepAdjusted,
+  restOfOrder,
   type PoLineRow,
+  type PriorCount,
 } from './_adapters';
 import { receivingErrorText as errorText } from './_errors';
 import { pollInvoiceUntilRead } from './_poll';
@@ -58,7 +61,9 @@ interface PoForClient {
   totalEstimated: number | null;
   lines: PoLineRow[];
   /** Per-restaurant feature flags the wizard reads (receiving.getPo). */
-  features?: { dockSlip?: boolean };
+  features?: { dockSlip?: boolean; receiptReopen?: boolean };
+  /** This PO's receipt is already closed: open it read-only, never re-run the flow. */
+  closedReceipt?: { grId: string; invoiceId: string | null; closedAt: string; status?: string } | null;
 }
 
 // Authenticated flow skips the SELECT_SUPPLIER step (supplier comes from the PO).
@@ -80,13 +85,17 @@ const STEP_ORDER: Step[] = [
 export function ReceivingWizard({
   po,
   restaurantId,
+  canCorrect = false,
 }: {
   po: PoForClient;
   restaurantId: string | null;
+  /** Owner / manager: may correct a closed count ("תיקון ספירה"). */
+  canCorrect?: boolean;
 }) {
-  const [step, setStep] = useState<Step>('SCAN_INVOICE');
-  const [grId, setGrId] = useState<string | null>(null);
-  const [invoiceId, setInvoiceId] = useState<string | null>(null);
+  const closed = po.closedReceipt ?? null;
+  const [step, setStep] = useState<Step>(closed ? 'CONFIRMED' : 'SCAN_INVOICE');
+  const [grId, setGrId] = useState<string | null>(closed?.grId ?? null);
+  const [invoiceId, setInvoiceId] = useState<string | null>(closed?.invoiceId ?? null);
   const [ocrNotice, setOcrNotice] = useState<OcrNotice>(null);
   /** The scanned number is already on another invoice of this supplier. */
   const [duplicateNumber, setDuplicateNumber] = useState<string | null>(null);
@@ -105,9 +114,19 @@ export function ReceivingWizard({
   const [result, setResult] = useState<ReconciliationResult | null>(null);
   const [marks, setMarks] = useState<Record<string, LineMark>>({});
   const [grLineIdByKey, setGrLineIdByKey] = useState<Record<string, string>>({});
-  const [confirmedAt, setConfirmedAt] = useState<string | null>(null);
+  const [confirmedAt, setConfirmedAt] = useState<string | null>(closed?.closedAt ?? null);
   const [error, setError] = useState<string | null>(null);
   const [poLines, setPoLines] = useState<PoLineRow[]>(po.lines);
+  /** "Receive the rest" (flag receiptReopen): what the reopened partial receipt
+   *  already holds per PO line. Set → this delivery is counted on its own and
+   *  stored as the running total. Captured once, at the reopen. */
+  const [prior, setPrior] = useState<Record<string, PriorCount> | null>(null);
+  const [reopenError, setReopenError] = useState<string | null>(null);
+  /** "תיקון ספירה": a closed count reopened for correction (totals, not a delivery). */
+  const [correcting, setCorrecting] = useState(false);
+  const reopenOn = po.features?.receiptReopen === true && !!closed && !result && !prior && !correcting;
+  const canReceiveRest = reopenOn && closed?.status === 'partial';
+  const canCorrectCount = reopenOn && canCorrect;
   const t = useT(receiving);
   const locale = useLocale();
   const dir = useDir();
@@ -124,6 +143,8 @@ export function ReceivingWizard({
   const registerInvoice = trpc.receiving.registerInvoice.useMutation();
   const markGrLine = trpc.receiving.markGrLine.useMutation();
   const submitReceipt = trpc.receiving.submitReceipt.useMutation();
+  const reopenReceipt = trpc.receiving.reopenReceipt.useMutation();
+  const correctReceipt = trpc.receiving.correctReceipt.useMutation();
   // networkMode 'always': React Query's default ('online') PAUSES a mutation
   // while the device is offline — the receiver saw "Uploading…" spin forever.
   // Fail fast instead so the network message (and Retake) shows.
@@ -265,7 +286,7 @@ export function ReceivingWizard({
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [grId, po.id, po.supplierId, locale],
+    [grId, po.id, po.supplierId, locale, prior],
   );
 
   /** OCR finished: (English names if needed) → build the review from it. */
@@ -310,9 +331,63 @@ export function ReceivingWizard({
     pollTokenRef.current += 1;
   }, []);
 
+  /** The receipt's lines + the PO lines the review compares with — for a
+   *  follow-up delivery, only what is still owed, counted from zero. */
+  async function receiptView(activeGrId: string) {
+    const receipt = await utils.receiving.getReceipt.fetch({ grId: activeGrId });
+    if (!prior) return { poLines, receiptLines: receipt.lines };
+    const held = receipt.lines.map((r) => {
+      const p = r.poLineId ? prior[r.poLineId] : undefined;
+      return p ? { ...r, qtyReceived: p.received, qtyRejected: p.rejected } : r;
+    });
+    const rest = restOfOrder(poLines, held);
+    return { poLines: rest.poLines, receiptLines: rest.receiptLines };
+  }
+
+  /** "Receive the rest": reopen the partial receipt, then scan the new invoice. */
+  async function receiveRest() {
+    if (!closed || reopenReceipt.isPending) return;
+    setReopenError(null);
+    try {
+      await reopenReceipt.mutateAsync({ grId: closed.grId });
+      const receipt = await utils.receiving.getReceipt.fetch({ grId: closed.grId });
+      setPrior(restOfOrder(poLines, receipt.lines).prior);
+      setGrId(closed.grId);
+      setInvoiceId(null); // the new delivery's invoice is scanned next
+      setConfirmedAt(null);
+      setStep('SCAN_INVOICE');
+    } catch (err) {
+      setReopenError(errorText(err, t, locale));
+    }
+  }
+
+  /** "תיקון ספירה": reopen the closed count and go straight to the review,
+   *  seeded from the recorded totals (and the receipt's invoice, if any). */
+  async function correctCount() {
+    if (!closed || correctReceipt.isPending) return;
+    setReopenError(null);
+    try {
+      await correctReceipt.mutateAsync({ grId: closed.grId });
+      setCorrecting(true);
+      setGrId(closed.grId);
+      setConfirmedAt(null);
+      if (closed.invoiceId) {
+        try {
+          await showInvoice(closed.grId, closed.invoiceId);
+          return;
+        } catch {
+          /* the invoice can't be read now — correct against the order */
+        }
+      }
+      await buildFromPoOnly(closed.grId);
+    } catch (err) {
+      setReopenError(errorText(err, t, locale));
+    }
+  }
+
   type InvoiceSnapshot = Awaited<ReturnType<typeof utils.receiving.getInvoice.fetch>>;
   async function buildReconciliation(activeGrId: string, invoice: InvoiceSnapshot) {
-    const receipt = await utils.receiving.getReceipt.fetch({ grId: activeGrId });
+    const view = await receiptView(activeGrId);
     const adapted = adaptReconciliation({
       po: {
         id: po.id,
@@ -322,8 +397,8 @@ export function ReceivingWizard({
         status: po.status,
         totalEstimated: po.totalEstimated,
       },
-      poLines,
-      receiptLines: receipt.lines,
+      poLines: view.poLines,
+      receiptLines: view.receiptLines,
       invoiceLines: invoice.lines,
       invoiceMeta: { invoiceNumber: invoice.invoiceNumber, ocrConfidence: invoice.ocrConfidence },
       labels: { unnamed: t('unnamedItem'), unordered: t('unorderedItem') },
@@ -344,7 +419,7 @@ export function ReceivingWizard({
         activeGrId = r.receiptId;
         setGrId(activeGrId);
       }
-      const receipt = await utils.receiving.getReceipt.fetch({ grId: activeGrId });
+      const view = await receiptView(activeGrId);
       const adapted = adaptReconciliation({
         po: {
           id: po.id,
@@ -354,8 +429,8 @@ export function ReceivingWizard({
           status: po.status,
           totalEstimated: po.totalEstimated,
         },
-        poLines,
-        receiptLines: receipt.lines,
+        poLines: view.poLines,
+        receiptLines: view.receiptLines,
         invoiceLines: [],
         invoiceMeta: null,
         labels: { unnamed: t('unnamedItem'), unordered: t('unorderedItem') },
@@ -393,10 +468,16 @@ export function ReceivingWizard({
         const grLineId = grLineIdByKey[key];
         const mark = marks[key];
         if (!grLineId || !mark) continue; // unordered arrivals have no gr_line yet
+        // A follow-up delivery stores the running total (already + now): an
+        // absolute value, so a retried submit never adds twice.
+        const count =
+          prior && mark.poLineId
+            ? cumulativeCount(prior[mark.poLineId], mark)
+            : { qtyReceived: mark.qtyReceived, qtyRejected: mark.qtyRejected };
         await markGrLine.mutateAsync({
           grLineId,
-          qtyReceived: mark.qtyReceived,
-          qtyRejected: mark.qtyRejected,
+          qtyReceived: count.qtyReceived,
+          qtyRejected: count.qtyRejected,
           condition: mark.condition,
           conditionNotes: mark.notes,
           photos: image?.publicUrl ? [image.publicUrl] : undefined,
@@ -412,6 +493,12 @@ export function ReceivingWizard({
       setStep('CONFIRMED');
       await utils.receiving.todayExpectations.invalidate();
     } catch (err) {
+      // Closed meanwhile (another tab / a replay): this screen's marks were NOT
+      // saved — reload, and the page opens the receipt as the server holds it.
+      if ((err as { data?: { appCode?: unknown } } | null)?.data?.appCode === 'receipt.closed') {
+        window.location.reload();
+        return;
+      }
       setError(errorText(err, t, locale));
     } finally {
       submittingRef.current = false;
@@ -441,6 +528,18 @@ export function ReceivingWizard({
         <div role="alert" className="mb-4 flex items-center gap-2 rounded-xl border border-danger/30 bg-danger/8 px-4 py-3 text-sm text-danger" dir={dir}>
           <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
           <span>{error}</span>
+        </div>
+      ) : null}
+
+      {(prior || correcting) && step !== 'CONFIRMED' ? (
+        <div
+          role="status"
+          data-testid={prior ? 'receive-rest-notice' : 'correct-count-notice'}
+          dir={dir}
+          className="mb-4 flex items-center gap-3 rounded-xl border border-line bg-surface-2 px-4 py-3 text-sm text-ink"
+        >
+          <Info className="h-4 w-4 shrink-0 text-muted" aria-hidden="true" />
+          <span className="flex-1">{t(prior ? 'receiveRest.notice' : 'receiveRest.correctNotice')}</span>
         </div>
       ) : null}
 
@@ -536,6 +635,7 @@ export function ReceivingWizard({
             onUpdateMark={updateMark}
             onSubmit={() => void submit()}
             onBack={() => setStep('RECONCILIATION_REVIEW')}
+            alreadyReceived={prior ? Object.fromEntries(Object.entries(prior).map(([k, v]) => [k, v.received])) : undefined}
             // Clear the fixed mobile bottom nav (dashboard/nav.tsx, lg:hidden).
             footerBottomClass="bottom-[calc(4.5rem+env(safe-area-inset-bottom)+var(--consent-h,0px))] lg:bottom-[var(--consent-h,0px)]"
           />
@@ -561,14 +661,63 @@ export function ReceivingWizard({
           }}
         />
       ) : null}
+      {step === 'CONFIRMED' && canReceiveRest ? (
+        <div className="mx-auto mt-4 max-w-md" dir={dir} data-testid="receive-rest">
+          <p className="mb-3 text-sm text-muted">{t('receiveRest.hint')}</p>
+          {reopenError ? (
+            <p role="alert" className="mb-3 text-sm text-danger">
+              {reopenError}
+            </p>
+          ) : null}
+          <button
+            type="button"
+            data-testid="receive-rest-action"
+            onClick={() => void receiveRest()}
+            disabled={reopenReceipt.isPending}
+            className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-60"
+          >
+            {reopenReceipt.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Package className="h-4 w-4" aria-hidden="true" />
+            )}
+            {t('receiveRest.action')}
+          </button>
+        </div>
+      ) : null}
+      {step === 'CONFIRMED' && canCorrectCount ? (
+        <div className="mx-auto mt-4 max-w-md" dir={dir} data-testid="correct-count">
+          <p className="mb-3 text-sm text-muted">{t('receiveRest.correctHint')}</p>
+          {reopenError && !canReceiveRest ? (
+            <p role="alert" className="mb-3 text-sm text-danger">
+              {reopenError}
+            </p>
+          ) : null}
+          <button
+            type="button"
+            data-testid="correct-count-action"
+            onClick={() => void correctCount()}
+            disabled={correctReceipt.isPending || reopenReceipt.isPending}
+            className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-line bg-surface px-4 py-2 text-sm font-medium text-ink hover:border-primary/40 disabled:opacity-60"
+          >
+            {correctReceipt.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Scale className="h-4 w-4" aria-hidden="true" />
+            )}
+            {t('receiveRest.correctAction')}
+          </button>
+        </div>
+      ) : null}
       {/* After the close the engine may add findings the count didn't show (VAT,
           total, duplicate): the slip decides itself whether there is anything to say. */}
-      {step === 'CONFIRMED' && result && dockSlipOn && grId ? (
+      {step === 'CONFIRMED' && (result || closed) && dockSlipOn && grId ? (
         <div className="mx-auto max-w-md">
           <DockSlip
             grId={grId}
             invoiceId={invoiceId}
-            lines={result.lines}
+            // Reopened read-only: no count in memory — the engine's lines only.
+            lines={result?.lines ?? []}
             marks={marks}
             duplicateNumber={duplicateNumber}
             fallbackSupplierName={supplierLabel}

@@ -106,6 +106,7 @@ export const en: Shape<typeof he> = {
     unauthorized: 'Your session has expired. Please sign in again.',
     invalidInput: 'One of the values you entered is invalid.',
     invoiceNumberTaken: 'Invoice number {invoiceNumber} is already on another invoice from this supplier (dated {holderDate}). Check the number — or open the existing invoice.',
+    receiptClosed: 'This receipt is already closed — it can no longer be changed.',
     generic: 'The action failed. Please try again.',
   },
 };

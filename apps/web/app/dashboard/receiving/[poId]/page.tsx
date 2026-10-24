@@ -50,7 +50,15 @@ export default async function ReceivingPoPage({
     expectedAt: po.expectedAt ? new Date(po.expectedAt).toISOString() : null,
     status: po.status,
     totalEstimated: po.totalEstimated != null ? Number(po.totalEstimated) : null,
-    features: { dockSlip: po.features.dockSlip },
+    features: { dockSlip: po.features.dockSlip, receiptReopen: po.features.receiptReopen },
+    closedReceipt: po.closedReceipt
+      ? {
+          grId: po.closedReceipt.grId,
+          invoiceId: po.closedReceipt.invoiceId,
+          closedAt: new Date(po.closedReceipt.closedAt).toISOString(),
+          status: po.closedReceipt.status,
+        }
+      : null,
     lines: po.lines.map((l) => ({
       id: l.id,
       productId: l.productId ?? null,
@@ -73,7 +81,11 @@ export default async function ReceivingPoPage({
         {t('po.backToList')}
       </Link>
 
-      <ReceivingWizard po={poForClient} restaurantId={restaurantId} />
+      <ReceivingWizard
+        po={poForClient}
+        restaurantId={restaurantId}
+        canCorrect={session?.user?.role === 'owner' || session?.user?.role === 'manager'}
+      />
     </div>
   );
 }

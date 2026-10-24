@@ -31,6 +31,9 @@ interface Props {
   /** Tailwind `bottom-*` for the sticky footer — the dashboard lifts it above
    *  its fixed mobile bottom nav; the showcase has none. */
   footerBottomClass?: string;
+  /** A follow-up delivery ("receive the rest"): what the receipt already holds,
+   *  by PO line id — the card then reads "still owed X · already received Y". */
+  alreadyReceived?: Record<string, number>;
 }
 
 export function AdjustQuantities({
@@ -40,6 +43,7 @@ export function AdjustQuantities({
   onSubmit,
   onBack,
   footerBottomClass = 'bottom-0',
+  alreadyReceived,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const t = useT(receiving);
@@ -140,6 +144,7 @@ export function AdjustQuantities({
               onUpdate={(patch) => onUpdateMark(key, patch)}
               t={t}
               locale={locale}
+              already={line.poLineId ? alreadyReceived?.[line.poLineId] : undefined}
             />
           );
         })}
@@ -179,9 +184,10 @@ interface AdjustCardProps {
   onUpdate: (patch: Partial<LineMark>) => void;
   t: T;
   locale: 'he' | 'en';
+  already?: number;
 }
 
-function AdjustCard({ line, mark, onUpdate, t, locale }: AdjustCardProps) {
+function AdjustCard({ line, mark, onUpdate, t, locale, already }: AdjustCardProps) {
   const accent = statusAccent(line.status);
   const unit = useUnitLabel();
   const qtyText = (q: number, u: string | null) =>
@@ -204,7 +210,13 @@ function AdjustCard({ line, mark, onUpdate, t, locale }: AdjustCardProps) {
         <div className="min-w-0">
           <ItemName he={line.productName} en={line.productNameEn} className="text-base font-semibold text-ink" />
           <div className="text-xs text-muted mt-1 tabular-nums">
-            {line.poQty !== null ? (
+            {line.poQty !== null && already !== undefined ? (
+              <span data-testid="already-received">
+                {t('receiveRest.owed', { qty: qtyText(line.poQty, line.poUnit) })}
+                <span className="text-subtle mx-1.5">·</span>
+                {t('receiveRest.already', { qty: qtyText(already, line.poUnit) })}
+              </span>
+            ) : line.poQty !== null ? (
               <span>{t('steps.adjust.ordered', { qty: qtyText(line.poQty, line.poUnit) })}</span>
             ) : (
               <span className="text-danger">{t('steps.adjust.notOrdered')}</span>
