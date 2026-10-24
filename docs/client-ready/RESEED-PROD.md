@@ -51,7 +51,9 @@ postgresql://postgres.<PROJECT_REF>:[YOUR-PASSWORD]@<POOLER_HOST>:5432/postgres
 צריך משם שלושה דברים:
 1. **Project ref**: 20 התווים שבשם המשתמש, אחרי `postgres.`.
 2. **Pooler host**: הכתובת שאחרי ה-`@`, למשל `aws-0-ap-northeast-1.pooler.supabase.com`.
-3. **סיסמת ה-DB**: אותה סיסמה של Project Settings ← Database. אם אינך זוכר אותה, **לא לאפס אותה** בלי לבדוק קודם עם המפתחים, כי האתר משתמש בה.
+3. **סיסמת ה-DB**: אותה סיסמה של Project Settings ← Database, ואותה סיסמה שנמצאת ב-`DATABASE_URL` ב-Vercel.
+   - אם אינך זוכר אותה, מותר לאפס: Project Settings ← Database ← **Reset database password**. הסיסמה השמורה היום ב-Vercel ממילא שגויה (מסד הנתונים דוחה אותה), כך שהאיפוס לא שובר שום דבר שעובד.
+   - שומרים את הסיסמה החדשה **קודם** במנהל הסיסמאות, מעדכנים אותה ב-Vercel (`DATABASE_URL`, Production), ומקלידים כאן את אותה סיסמה.
 
 **איזה DATABASE_URL? חשוב:**
 - הזריעה רצה עם משתמש הבעלים **`postgres.<ref>`** דרך **Session pooler, פורט 5432**. זה מה שבלוק 3 בונה.
