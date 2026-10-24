@@ -70,7 +70,17 @@ export function ConsolidatedPanel({
   const leaking = proposal.findings.filter((f) => f.countsAsLeak);
   /** The finding as the owner (and the supplier) reads it: "חלב 3% · 24 ליטר · חויב ₪7.90 במקום ₪6.40 = ₪36.00". */
   const findingText = (f: Finding) => {
-    const name = f.productName ? displayName(f.productName, f.productNameEn, locale).primary : t('products.unnamed');
+    // Header-level findings name the invoice, not a product.
+    const headerLabel =
+      f.type === 'DUPLICATE_INVOICE'
+        ? t('finding.duplicate')
+        : f.type === 'VAT_MISMATCH'
+          ? t('finding.vat')
+          : f.type === 'TOTAL_MISMATCH'
+            ? t('finding.total')
+            : null;
+    const name =
+      headerLabel ?? (f.productName ? displayName(f.productName, f.productNameEn, locale).primary : t('products.unnamed'));
     if (f.alreadyBilledOn) return t('finding.twice', { other: f.alreadyBilledOn.invoiceNumber ?? '—', delta: ils(f.deltaAmount) });
     if ((f.type === 'PRICE_HIGHER' || f.type === 'PRICE_LOWER') && f.qty != null && f.actual != null && f.expected != null) {
       return t('finding.price', {
@@ -85,16 +95,16 @@ export function ConsolidatedPanel({
     return t('finding.other', { name, delta: ils(f.deltaAmount) });
   };
   const findingsOf = (number: string | null) => (number ? leaking.filter((f) => f.deliveryNoteNumber === number) : []);
-  // The ask follows each line's VAT basis (lib/claims.ts vatBasisOf): "+ מע״מ" only on
-  // amounts before VAT — a duplicate is already incl. VAT, a VAT difference IS VAT.
-  const exclAsk = leaking.filter((f) => f.basis === 'excl').reduce((s, f) => s + Math.round(f.deltaAmount * 100), 0) / 100;
-  const inclAsk = leaking.filter((f) => f.basis !== 'excl').reduce((s, f) => s + Math.round(f.deltaAmount * 100), 0) / 100;
+  // The ask is the API's claim, capped exactly like the claims letters and split by
+  // each line's VAT basis (lib/claims.ts): "+ מע״מ" only on amounts before VAT.
+  const exclAsk = proposal.claim.exclIls;
+  const inclAsk = proposal.claim.inclIls;
   const letterAsk =
     exclAsk > 0 && inclAsk > 0
       ? t('letter.askBoth', { excl: ils(exclAsk), incl: ils(inclAsk) })
       : inclAsk > 0
         ? t('letter.askIncl', { amount: ils(inclAsk) })
-        : t('letter.ask', { amount: ils(exclAsk > 0 ? exclAsk : totals.leakIls) });
+        : t('letter.ask', { amount: ils(exclAsk) });
   const signed = (v: number) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${ils(Math.abs(v))}`;
 
   return (

@@ -28,6 +28,9 @@ export const en: Shape<typeof he> = {
     inclVat: '(VAT included)',
   },
   finding: {
+    duplicate: 'Duplicate invoice',
+    vat: 'VAT difference',
+    total: 'Invoice total difference',
     price: '{name} · {qty} {unit} · billed {billed} instead of {po} = {delta}',
     twice: 'already billed on invoice {other} = {delta}',
     other: '{name} = {delta}',
