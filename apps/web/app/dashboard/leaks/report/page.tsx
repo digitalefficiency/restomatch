@@ -227,8 +227,8 @@ export default async function LeakReportPage({
           <>
             {/* By type */}
             <section>
-              <h2 className="mb-2 text-base font-bold text-ink">{t('report.byTypeTitle')}</h2>
-              <div className="overflow-x-auto">
+              <h2 id="report-byTypeTitle" className="mb-2 text-base font-bold text-ink">{t('report.byTypeTitle')}</h2>
+              <div className="overflow-x-auto" tabIndex={0} role="region" aria-labelledby="report-byTypeTitle">
                 <table className="w-full min-w-[420px] text-sm">
                   <thead className="border-b border-line text-xs text-subtle">
                     <tr>
@@ -264,8 +264,8 @@ export default async function LeakReportPage({
 
             {/* By supplier */}
             <section>
-              <h2 className="mb-2 text-base font-bold text-ink">{t('report.bySupplierTitle')}</h2>
-              <div className="overflow-x-auto">
+              <h2 id="report-bySupplierTitle" className="mb-2 text-base font-bold text-ink">{t('report.bySupplierTitle')}</h2>
+              <div className="overflow-x-auto" tabIndex={0} role="region" aria-labelledby="report-bySupplierTitle">
                 <table className="w-full min-w-[480px] text-sm">
                   <thead className="border-b border-line text-xs text-subtle">
                     <tr>
@@ -299,12 +299,12 @@ export default async function LeakReportPage({
 
         {/* Price creep */}
         <section>
-          <h2 className="text-base font-bold text-ink">{t('report.creepTitle')}</h2>
+          <h2 id="report-creepTitle" className="text-base font-bold text-ink">{t('report.creepTitle')}</h2>
           <p className="mb-2 text-xs text-subtle">{t('report.creepHint')}</p>
           {report.priceCreep.length === 0 ? (
             <p className="text-sm text-muted">{t('report.creepEmpty')}</p>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto" tabIndex={0} role="region" aria-labelledby="report-creepTitle">
               <table className="w-full min-w-[560px] text-sm">
                 <thead className="border-b border-line text-xs text-subtle">
                   <tr>
