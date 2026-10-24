@@ -19,7 +19,7 @@ export function Sparkline({ data, className }: { data: number[]; className?: str
 
   const rising = data[data.length - 1]! >= data[0]!;
   // Rising price = leak (danger), falling price = money saved (primary green).
-  const stroke = rising ? '#FF5C7A' : '#22D39A';
+  const stroke = rising ? '#B80F2A' : '#066B4A';
   const gid = `spark-${rising ? 'up' : 'dn'}`;
   const areaPoints = `0,${h} ${points} ${w},${h}`;
 

@@ -1,7 +1,7 @@
 import { cn } from './cn';
 
 const fieldBase =
-  'w-full rounded-xl border border-line bg-surface-2 px-3 py-2 text-ink placeholder-subtle transition-colors focus:border-primary/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-0 disabled:opacity-50 disabled:cursor-not-allowed';
+  'w-full rounded-xl border border-line-strong bg-surface px-3 py-2 text-ink placeholder-subtle transition-colors focus:border-primary/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-0 disabled:opacity-50 disabled:cursor-not-allowed';
 
 export function Input({ className, ...rest }: React.ComponentPropsWithRef<'input'>) {
   return <input className={cn(fieldBase, className)} {...rest} />;
