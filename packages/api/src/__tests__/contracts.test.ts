@@ -515,17 +515,19 @@ describe('contracts router', () => {
 
 describe('price-alert sweep (in-app rows + outbox email)', () => {
   const now = new Date('2026-10-18T12:00:00Z');
-  const at = (d: number) => new Date(now.getTime() - d * 86_400_000);
 
   const TREND = [6.2, 6.2, 7.3, 7.32, 7.34]; // +18% (later mean 7.32 vs baseline 6.20)
-  async function seedTrend(t: Tenant, prices: number[]) {
+  /** `base`: the sweep's "now". The router's refresh() runs on the wall clock, so
+   *  tests that call it seed relative to the real now (a fixed date drifts out of
+   *  the trend window as the calendar moves on). */
+  async function seedTrend(t: Tenant, prices: number[], base: Date = now) {
     const days = [20, 16, 8, 4, 1];
     for (let i = 0; i < prices.length; i++) {
       await db.insert(priceHistory).values({
         restaurantId: t.restaurantId,
         productId: t.productId,
         supplierId: t.supplierId,
-        observedAt: at(days[i]!),
+        observedAt: new Date(base.getTime() - days[i]! * 86_400_000),
         unitPrice: prices[i]!.toFixed(4),
       });
     }
@@ -606,7 +608,7 @@ describe('price-alert sweep (in-app rows + outbox email)', () => {
   });
 
   it('an alert created by the in-app refresh is emailed by the next daily sweep (money cross-QA F5)', async () => {
-    await seedTrend(A, TREND);
+    await seedTrend(A, TREND, new Date());
     expect((await caller(A, 'manager').priceAlerts.refresh()).created).toBe(1);
     let [al] = await db.select().from(priceAlerts).where(eq(priceAlerts.restaurantId, A.restaurantId));
     expect(al!.notifiedAt).toBeNull();
@@ -646,7 +648,7 @@ describe('price-alert sweep (in-app rows + outbox email)', () => {
   });
 
   it('the manual refresh is tenant-scoped (B’s history never creates A’s alerts)', async () => {
-    await seedTrend(B, TREND);
+    await seedTrend(B, TREND, new Date());
     const res = await caller(A, 'manager').priceAlerts.refresh();
     expect(res.created).toBe(0);
     expect(await db.select().from(priceAlerts)).toEqual([]);
