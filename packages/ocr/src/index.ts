@@ -12,3 +12,17 @@ export {
 } from './providers/claudePoVision';
 export { reconcile, type ReconcileResult } from './reconciler';
 export { runOcrPipeline } from './pipeline';
+export {
+  ClaudeOrderTextParser,
+  StubOrderTextParser,
+  OrderTextExtraction,
+  OrderTextLine,
+  ORDER_TEXT_MAX_CHARS,
+  ORDER_TEXT_MAX_LINES,
+  canonicalUnit,
+  orderTextParserFromEnv,
+  parseOrderLine,
+  parseOrderTextDeterministic,
+  type ClaudeOrderTextParserConfig,
+  type OrderTextParser,
+} from './providers/orderText';

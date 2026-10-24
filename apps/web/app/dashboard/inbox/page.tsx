@@ -66,6 +66,7 @@ export default async function InboxPage({
             error: m.error,
             receivedAt: new Date(m.receivedAt).toISOString(),
             supplierName: m.supplierName ?? null,
+            order: m.order ?? null,
             documents: m.documents.map((d) => ({
               id: d.id,
               filename: d.filename,

@@ -35,9 +35,13 @@ describe('receiver service worker', () => {
       scope: string;
       start_url: string;
       icons: Array<{ src: string }>;
+      share_target?: { action: string; method: string };
     };
     expect(m.scope).toBe('/dashboard/receiving');
     expect(m.start_url.startsWith(m.scope)).toBe(true);
     expect(m.icons.every((i) => i.src.startsWith('/pwa/'))).toBe(true);
+    // orderCapture share target: inside the scope, GET only (no body to an authed route).
+    expect(m.share_target?.action.startsWith(`${m.scope}/`)).toBe(true);
+    expect(m.share_target?.method).toBe('GET');
   });
 });

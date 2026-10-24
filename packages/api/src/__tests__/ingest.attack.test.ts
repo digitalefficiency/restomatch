@@ -19,6 +19,7 @@ import {
   sql,
   testDbUrl,
   type Database,
+  purchaseOrders,
 } from '@restomatch/db';
 import {
   DEV_EMAIL_WEBHOOK_SECRET,
@@ -40,6 +41,7 @@ import {
   type IngestHttpDeps,
 } from '../ingest/http';
 import { checkRateLimit, MemoryRateLimitStore } from '../rateLimit';
+import { appRouter } from '../index';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 
 /**
@@ -578,5 +580,71 @@ describe('refuter regressions', () => {
     const [m] = (await messagesOf(A.restaurantId)).filter((x) => x.providerMessageId === 'wamid.noprov');
     const [d] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.messageId, m!.id));
     expect(d).toMatchObject({ status: 'failed', error: 'fetch_failed', invoiceId: null, storagePath: null });
+  });
+});
+
+describe('orderCapture: a forwarded WhatsApp order (text) → a draft PO', () => {
+  const text = (id: string, body: string, from = '972501111111') =>
+    JSON.stringify({
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          id: 'WABA',
+          changes: [
+            {
+              field: 'messages',
+              value: {
+                metadata: { phone_number_id: 'PNID-A' },
+                messages: [{ from, id, timestamp: String(NOW - 10), type: 'text', text: { body } }],
+              },
+            },
+          ],
+        },
+      ],
+    });
+  const send = (id: string, body: string, from?: string) =>
+    handleWhatsAppWebhook(waRequest(tokens.aWa, text(id, body, from)), tokens.aWa, deps({ config: waConfig() }));
+  const drafts = () =>
+    ownerDb.select().from(purchaseOrders).where(eq(purchaseOrders.restaurantId, A.restaurantId));
+  const setFlags = (features: Record<string, boolean>) =>
+    ownerDb.update(restaurants).set({ settings: { features } as never }).where(eq(restaurants.id, A.restaurantId));
+
+  afterAll(async () => {
+    await setFlags({ ingestWhatsapp: true, ingestEmail: true });
+  });
+
+  it('flag off → the text is recorded as an empty message, no PO', async () => {
+    const before = (await drafts()).length;
+    await send('wamid.order.off', '10 ק״ג עגבניות');
+    const [m] = (await messagesOf(A.restaurantId)).filter((x) => x.providerMessageId === 'wamid.order.off');
+    expect(m?.status).toBe('empty');
+    expect((await drafts()).length).toBe(before);
+  });
+
+  it("allow-listed sender + flag on → a whatsapp draft PO on the sender's supplier, under the token's restaurant", async () => {
+    await setFlags({ ingestWhatsapp: true, orderCapture: true });
+    const res = await send('wamid.order.1', 'הזמנה למחר:\n10 ק״ג tomato-A\n2 ארגזים חסה 40 ₪');
+    expect(res.status).toBe(200);
+    const [m] = (await messagesOf(A.restaurantId)).filter((x) => x.providerMessageId === 'wamid.order.1');
+    expect(m).toMatchObject({ status: 'accepted', error: null });
+    const po = (await drafts()).find((p) => p.source === 'whatsapp' && p.status === 'draft');
+    expect(po).toMatchObject({ supplierId: A.supplierId, restaurantId: A.restaurantId });
+    // The inbox links the message to its draft.
+    const inbox = await appRouter
+      .createCaller({ db: appDb, session: { userId: A.ownerUserId, restaurantId: A.restaurantId, role: 'owner' } })
+      .ingest.inbox({ filter: 'all', limit: 100 });
+    expect(inbox.find((x) => x.id === m!.id)?.order).toEqual({ poId: po!.id, poStatus: 'draft' });
+    // A re-delivery is a replay no-op; a re-forward returns the same draft.
+    await send('wamid.order.1', 'הזמנה למחר:\n10 ק״ג tomato-A\n2 ארגזים חסה 40 ₪');
+    await send('wamid.order.1b', 'הזמנה למחר:\n10 ק״ג tomato-A\n2 ארגזים חסה 40 ₪');
+    expect((await drafts()).filter((p) => p.source === 'whatsapp')).toHaveLength(1);
+  });
+
+  it('an unknown number never creates a PO (anyone can text the ingest number)', async () => {
+    const before = (await drafts()).length;
+    await send('wamid.order.stranger', '50 ק״ג סלמון', '972509999999');
+    const [m] = (await messagesOf(A.restaurantId)).filter((x) => x.providerMessageId === 'wamid.order.stranger');
+    expect(m?.senderAllowed).toBe(false);
+    expect((await drafts()).length).toBe(before);
   });
 });

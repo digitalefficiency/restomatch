@@ -5,6 +5,7 @@ import {
   desc,
   eq,
   inArray,
+  purchaseOrders,
   ingestChannels,
   ingestDocuments,
   ingestMessages,
@@ -26,6 +27,7 @@ import { appError } from '../errors';
 import { featureEnabled } from '../lib/features';
 import { enqueueIngestJobs, INGEST_FEATURE, messageStatus, registerIngestedDocument } from '../ingest/pipeline';
 import { assertSupplierOwned } from '../tenant';
+import { captureSourceRef } from '../orders/captureOrder';
 import { financeProcedure, managerProcedure, router } from '../trpc';
 
 const KindEnum = z.enum(['whatsapp', 'email']);
@@ -279,9 +281,29 @@ export const ingestRouter = router({
             .from(ingestDocuments)
             .where(and(eq(ingestDocuments.restaurantId, rid), inArray(ingestDocuments.messageId, ids)))
         : [];
+      // orderCapture: a forwarded order (WhatsApp text, no files) links to the
+      // draft PO captured from it (same idempotency key as captureOrderDraft).
+      const refOf = new Map<string, string>();
+      for (const m of messages) {
+        if (m.kind === 'whatsapp' && m.subject && !docs.some((d) => d.messageId === m.id)) {
+          refOf.set(m.id, captureSourceRef(m.subject));
+        }
+      }
+      const orderPos = refOf.size
+        ? await ctx.db
+            .select({ id: purchaseOrders.id, sourceRef: purchaseOrders.sourceRef, status: purchaseOrders.status })
+            .from(purchaseOrders)
+            .where(and(eq(purchaseOrders.restaurantId, rid), inArray(purchaseOrders.sourceRef, [...refOf.values()])))
+        : [];
       // Never expose storage paths — only whether a file is stored.
       return messages.map((m) => ({
         ...m,
+        order: refOf.has(m.id)
+          ? (() => {
+              const po = orderPos.find((p) => p.sourceRef === refOf.get(m.id));
+              return po ? { poId: po.id, poStatus: po.status } : m.error === 'order_needs_supplier' ? { poId: null, poStatus: null } : null;
+            })()
+          : null,
         documents: docs
           .filter((d) => d.messageId === m.id)
           .map(({ storagePath, ...d }) => ({ ...d, stored: storagePath !== null })),

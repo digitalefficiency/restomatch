@@ -52,6 +52,8 @@ export interface InboxMessage {
     invoiceId: string | null;
     stored: boolean;
   }>;
+  /** orderCapture: a forwarded WhatsApp order (text) and the draft PO captured from it. */
+  order?: { poId: string | null; poStatus: string | null } | null;
 }
 
 interface Props {
@@ -215,6 +217,32 @@ export function InboxClient(props: Props) {
                     <Badge tone={MESSAGE_TONE[m.status]}>{t(`messageStatus.${m.status}`)}</Badge>
                   </div>
                 </div>
+
+                {m.order ? (
+                  <div
+                    className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3"
+                    data-testid="ingest-order"
+                  >
+                    <Badge tone="info">{t('orderCapture.inboxOrder')}</Badge>
+                    {props.canManage ? (
+                      m.order.poId ? (
+                        <Link
+                          href={`/dashboard/orders/${m.order.poId}`}
+                          className="text-sm font-semibold text-primary underline-offset-2 hover:underline"
+                        >
+                          {t('orderCapture.inboxOpenDraft')}
+                        </Link>
+                      ) : (
+                        <Link
+                          href={`/dashboard/orders/capture?text=${encodeURIComponent(m.subject ?? '')}`}
+                          className="text-sm font-semibold text-primary underline-offset-2 hover:underline"
+                        >
+                          {t('orderCapture.inboxNeedsSupplier')}
+                        </Link>
+                      )
+                    ) : null}
+                  </div>
+                ) : null}
 
                 {m.documents.length > 0 ? (
                   <ul className="mt-3 space-y-2 border-t border-line pt-3">

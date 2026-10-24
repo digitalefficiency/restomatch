@@ -29,6 +29,8 @@ export interface InboundMessage {
   /** WhatsApp: the receiving phone_number_id (checked against the channel). */
   phoneNumberId: string | null;
   attachments: InboundAttachment[];
+  /** WhatsApp: the full text of a text message (a forwarded order — flag orderCapture). */
+  body?: string | null;
   /**
    * Sender authentication (e-mail SPF/DKIM/DMARC as verified by OUR inbound
    * provider). 'none' = no trustworthy verdict — the default; WhatsApp senders are
@@ -153,6 +155,7 @@ export function parseWhatsAppWebhook(json: unknown): InboundMessage[] {
           sentAtSec: Number(m.timestamp),
           phoneNumberId: change.value.metadata?.phone_number_id ?? null,
           authVerdict: 'pass',
+          body: m.type === 'text' ? (m.text?.body ?? null) : null,
           attachments: media
             ? [
                 {

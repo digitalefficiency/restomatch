@@ -179,6 +179,7 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'orders.previewDelivery': 'attack',
   'orders.importPo':
     'managerProcedure that ingests an uploaded document; takes no client-supplied tenant entity id (supplier is resolved FROM the parsed doc) and is gated on ANTHROPIC_API_KEY. Cross-tenant reach is bounded by the member tx restaurant GUC, and the import is keyed to ctx.session.restaurantId. Role denial is covered in the managerProcedure-role-denial block.',
+  'orders.captureFromText': 'attack',
   'orders.cancelOrder': 'attack',
   'orders.updateOrderLine': 'attack',
   'orders.deleteOrderLine': 'attack',
@@ -1660,5 +1661,61 @@ describe('ingest.*: isolation + foreign-id attacks (A → B)', () => {
       .update(restaurants)
       .set({ settings: { features: { ingestWhatsapp: true, ingestEmail: true } } as never })
       .where(eq(restaurants.id, A.restaurantId));
+  });
+});
+
+describe('orders.captureFromText (orderCapture): isolation + foreign-id attacks (A → B)', () => {
+  beforeAll(async () => {
+    for (const t of [A, B]) {
+      await db
+        .update(restaurants)
+        .set({ settings: { features: { orderCapture: true } } as never })
+        .where(eq(restaurants.id, t.restaurantId));
+    }
+  });
+  afterAll(async () => {
+    await db
+      .update(restaurants)
+      .set({ settings: { features: { ingestWhatsapp: true, ingestEmail: true } } as never })
+      .where(eq(restaurants.id, A.restaurantId));
+  });
+
+  const draftsOf = async (t: Tenant) =>
+    db
+      .select({ id: purchaseOrders.id, supplierId: purchaseOrders.supplierId })
+      .from(purchaseOrders)
+      .where(and(eq(purchaseOrders.restaurantId, t.restaurantId), eq(purchaseOrders.status, 'draft')));
+
+  it("B's supplierId is never used: A gets only its own suppliers as candidates, no PO is written", async () => {
+    const before = (await draftsOf(B)).length;
+    const r = await callerFor(A).orders.captureFromText({ text: '10 ק״ג עגבניות', supplierId: B.supplierId });
+    expect(r.status).toBe('needs_supplier');
+    if (r.status !== 'needs_supplier') return;
+    expect(r.candidates.map((c) => c.id)).toEqual([A.supplierId]);
+    expect((await draftsOf(B)).length).toBe(before);
+  });
+
+  it("naming B's supplier in the text does not reach B's supplier (RLS hides it)", async () => {
+    const r = await callerFor(A).orders.captureFromText({ text: `ספק: ${B.supplierName}\n10 ק״ג עגבניות` });
+    expect(r.status).toBe('needs_supplier');
+    if (r.status === 'needs_supplier') expect(r.candidates.map((c) => c.id)).toEqual([A.supplierId]);
+  });
+
+  it("the draft lands in A only, on A's supplier, with A's catalog match", async () => {
+    const r = await callerFor(A).orders.captureFromText({ text: `ספק: ${A.supplierName}\n4 ק״ג tomato-a\n2 ק״ג tomato-b` });
+    expect(r).toMatchObject({ status: 'draft', created: true, supplier: { id: A.supplierId }, lineCount: 2, mappedCount: 1 });
+    if (r.status !== 'draft') return;
+    const [po] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.id, r.poId));
+    expect(po).toMatchObject({ restaurantId: A.restaurantId, supplierId: A.supplierId, status: 'draft' });
+    const lines = await db.select().from(poLines).where(eq(poLines.poId, r.poId));
+    // "tomato-b" is B's alias: it must not resolve to B's product.
+    expect(lines.map((l) => l.productId).sort()).toEqual([A.productId, null].sort());
+  });
+
+  it('flag off → FORBIDDEN FEATURE_DISABLED, nothing written', async () => {
+    await db.update(restaurants).set({ settings: {} as never }).where(eq(restaurants.id, B.restaurantId));
+    const before = (await draftsOf(B)).length;
+    await expect(callerFor(B).orders.captureFromText({ text: '10 ק״ג עגבניות' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect((await draftsOf(B)).length).toBe(before);
   });
 });

@@ -25,6 +25,8 @@ import {
   type InboundMessage,
 } from '@restomatch/ingest';
 import { enqueueOcrInvoice } from '@restomatch/queue';
+import { ORDER_TEXT_MAX_CHARS, orderTextParserFromEnv } from '@restomatch/ocr';
+import { captureOrderDraft } from '../orders/captureOrder';
 import { featureEnabled } from '../lib/features';
 import { isAllowedScanUrl } from '../lib/scanUrls';
 import { signedUrlForStoragePath, storeIngestedFile } from './store';
@@ -384,6 +386,42 @@ export async function processInboundMessage(
         }
         docs.push({ id: docId, status: 'failed' });
       }
+    }
+
+    // orderCapture: a forwarded order (a WhatsApp text, no media) from an
+    // allow-listed number → a DRAFT purchase order for one-tap confirm.
+    const orderText = message.attachments.length === 0 ? message.body?.trim() : '';
+    if (
+      orderText &&
+      channel.kind === 'whatsapp' &&
+      senderAllowed &&
+      message.authVerdict === 'pass' &&
+      featureEnabled(restaurant.settings, 'orderCapture')
+    ) {
+      const body = orderText.slice(0, ORDER_TEXT_MAX_CHARS);
+      const order = await captureOrderDraft(tx, {
+        restaurantId: channel.restaurantId,
+        text: body,
+        parser: orderTextParserFromEnv(),
+        supplierId,
+        senderPhone: sender,
+        source: 'whatsapp',
+      }).catch((err: unknown) => {
+        console.error('[ingest] order capture failed', err);
+        return { status: 'failed' as const };
+      });
+      const status: IngestMessageStatus =
+        order.status === 'draft' ? 'accepted' : order.status === 'needs_supplier' ? 'needs_review' : order.status === 'failed' ? 'failed' : 'empty';
+      // The full text is kept (subject) so the inbox can open it in the capture screen.
+      await tx
+        .update(ingestMessages)
+        .set({
+          subject: body,
+          status,
+          error: order.status === 'needs_supplier' ? 'order_needs_supplier' : order.status === 'failed' ? 'order_capture_failed' : null,
+        })
+        .where(eq(ingestMessages.id, msg.id));
+      return { status, messageId: msg.id, documents: docs };
     }
 
     const status = messageStatus(docs.map((d) => d.status));
