@@ -110,6 +110,45 @@ describe('localizeActivity — structured metadata (S3 writers + demo seed)', ()
     expect(out.detail).toBe('HaKerem Butchery · 2 discrepancies · potential loss ₪154');
   });
 
+  it('English never shows "חריגה אחת" (stored singular / pending text, no metadata)', () => {
+    const out = localizeActivity({ eventType: 'invoice_matched', title: 'x', detail: 'משקאות שטיינברג · חריגה אחת · הפסד פוטנציאלי ₪105' }, 'en');
+    expect(out.detail).toBe('משקאות שטיינברג · 1 discrepancy · potential loss ₪105');
+    const pending = localizeActivity({ eventType: 'invoice_matched', title: 'x', detail: 'ירקות השרון · ממתינה לשיוך להזמנה' }, 'en');
+    expect(pending.detail).toBe('ירקות השרון · waiting to be linked to an order');
+  });
+
+  it('metadata: the hero-rule leak (leakCount / leakIls / pendingLink) wins over the engine totals', () => {
+    const base = { invoiceNumber: 'X-1', supplierNameEn: 'Sharon', discrepancyCount: 3, potentialLossIls: 1273 };
+    const pending = localizeActivity({ eventType: 'invoice_matched', ...he, metadata: { ...base, leakCount: 0, leakIls: 0, pendingLink: true } }, 'en');
+    expect(pending.detail).toBe('Sharon · waiting to be linked to an order');
+    const clean = localizeActivity({ eventType: 'invoice_matched', ...he, metadata: { ...base, leakCount: 0, leakIls: 0, pendingLink: false } }, 'en');
+    expect(clean.detail).toBe('Sharon · matches the order and the goods receipt');
+    const one = localizeActivity({ eventType: 'invoice_matched', ...he, metadata: { ...base, leakCount: 1, leakIls: 104.8, pendingLink: false } }, 'en');
+    expect(one.detail).toBe('Sharon · 1 discrepancy · potential loss ₪105');
+  });
+
+  it('metadata with poMatched: worded from the findings (no PO + loss, to review, no order linked)', () => {
+    const base = { invoiceNumber: 'X-1', supplierNameEn: 'Sharon', discrepancyCount: 2, potentialLossIls: 1285 };
+    const pendingLoss = localizeActivity(
+      { eventType: 'invoice_matched', ...he, metadata: { ...base, poMatched: false, pendingLink: true, leakCount: 1, leakIls: 12.6, reviewCount: 0 } },
+      'en',
+    );
+    expect(pendingLoss.detail).toBe('Sharon · waiting to be linked to an order · 1 discrepancy · potential loss ₪13');
+    const review = localizeActivity(
+      { eventType: 'invoice_matched', ...he, metadata: { ...base, poMatched: true, pendingLink: false, leakCount: 0, leakIls: 0, reviewCount: 2 } },
+      'en',
+    );
+    expect(review.detail).toBe('Sharon · 2 findings to review');
+    const noPo = localizeActivity(
+      { eventType: 'invoice_matched', ...he, metadata: { ...base, poMatched: false, pendingLink: false, leakCount: 0, leakIls: 0, reviewCount: 0 } },
+      'en',
+    );
+    expect(noPo.detail).toBe('Sharon · no order linked');
+    expect(localizeActivity({ eventType: 'invoice_matched', title: 'x', detail: 'ירקות השרון · חריגה אחת לבדיקה' }, 'en').detail).toBe(
+      'ירקות השרון · 1 finding to review',
+    );
+  });
+
   it('singular discrepancy', () => {
     const out = localizeActivity(
       { eventType: 'invoice_matched', ...he, metadata: { invoiceNumber: 'ST-1', supplierNameEn: 'Steinberg', discrepancyCount: 1, potentialLossIls: 104.8 } },

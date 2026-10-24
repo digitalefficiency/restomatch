@@ -215,6 +215,46 @@ export function toViewInput(v: ViewState): {
   };
 }
 
+/**
+ * A comparison period is too THIN to compare when its checked spend is below
+ * 10% of the current period's — a first month on the product, a branch that
+ * just started, a seed gap. A % against it ("▲ 2,926.8%") is noise and reads as
+ * an alarm, so the change is shown calmly as a ₪ difference only.
+ *
+ * Why spend and not the leak: spend is how much data the comparison stands
+ * on. A full month with a small leak is a real (good) base and must keep its %;
+ * a month with almost no checked invoices is not. The same rule (same 10%) runs
+ * server-side for the chain view — packages/charts/src/chain.ts isThinBase.
+ */
+export const THIN_BASE_SPEND_RATIO = 0.1;
+
+export function isThinBase(currentSpend: number, baseSpend: number | null | undefined): boolean {
+  if (baseSpend == null) return false;
+  return baseSpend < currentSpend * THIN_BASE_SPEND_RATIO;
+}
+
+export type DeltaView =
+  /** Nothing to compare against. */
+  | { kind: 'none' }
+  | { kind: 'flat' }
+  /** Thin base: the ₪/count difference only — no %, no ▲, no good/bad colour. */
+  | { kind: 'thin'; diff: number; up: boolean }
+  | { kind: 'change'; diff: number; up: boolean; pct: number | null };
+
+/** What a ▲/▼ badge shows for current vs previous (DeltaBadge renders it). */
+export function deltaView(
+  current: number,
+  previous: number | null | undefined,
+  opts: { thinBase?: boolean; kind?: 'ils' | 'ratio' | 'count' } = {},
+): DeltaView {
+  const d = delta(current, previous);
+  if (!d || (d.pct == null && d.diff === 0)) return { kind: 'none' };
+  if (Math.abs(d.diff) < (opts.kind === 'ratio' ? 0.00005 : 0.005)) return { kind: 'flat' };
+  // A leak % against a thin base is as meaningless as the % change itself.
+  if (opts.thinBase) return opts.kind === 'ratio' ? { kind: 'none' } : { kind: 'thin', diff: d.diff, up: d.diff > 0 };
+  return { kind: 'change', diff: d.diff, up: d.diff > 0, pct: d.pct };
+}
+
 /** Relative change; null when there is nothing to compare against. */
 export function delta(current: number, previous: number | null | undefined): { pct: number | null; diff: number } | null {
   if (previous == null) return null;

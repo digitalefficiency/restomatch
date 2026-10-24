@@ -25,6 +25,7 @@ import {
   BreakdownChart,
   DEFAULT_VIEW,
   DeltaBadge,
+  isThinBase,
   TvMode,
   ViewToolbar,
   bucketLabel,
@@ -89,6 +90,8 @@ export default async function DashboardPage({
   const canPreviewDigest = flags.monthlyDigestPreview && canSeeRoute(role, '/dashboard/reports/digest');
   // "How did we get to ₪X?" proves THIS month's hero → only on the default view.
   const canProve = flags.leakProof && defaultView && canSeeRoute(role, '/dashboard/leaks/proof');
+  // A comparison period with almost no data gets a calm ₪ difference, not a % alarm.
+  const thinBase = previous ? isThinBase(hero.spendIls, previous.spendIls) : false;
 
   // Leak grid is owner-only; other roles simply won't see this section. If the
   // feature is gated behind a paid plan, surface a compact upsell teaser rather
@@ -181,9 +184,9 @@ export default async function DashboardPage({
         delta={
           view.compare !== 'off' ? (
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-              <DeltaBadge current={hero.leakIls} previous={previous?.leakIls} compare={view.compare} showAmount />
+              <DeltaBadge current={hero.leakIls} previous={previous?.leakIls} compare={view.compare} thinBase={thinBase} showAmount />
               {previous ? (
-                <DeltaBadge current={hero.spendIls} previous={previous.spendIls} compare={view.compare} neutral />
+                <DeltaBadge current={hero.spendIls} previous={previous.spendIls} compare={view.compare} thinBase={thinBase} neutral />
               ) : null}
             </div>
           ) : null
@@ -215,6 +218,7 @@ export default async function DashboardPage({
             rows={trendRows}
             chart={view.chart}
             density={view.density}
+            thinBase={thinBase}
             caption={tv('trend.title')}
             keyHeader={tv('trend.colBucket')}
             valueHeader={tv('trend.colLeak')}
@@ -458,7 +462,7 @@ function LeakHero({
             className={
               // T1 alarm only when money leaked; pending-only (consolidated invoices) stays calm (T4).
               hasLeak
-                ? 'inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-danger px-4 py-2 text-sm font-semibold text-white shadow-card transition-colors hover:bg-danger/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/60 focus-visible:ring-offset-2'
+                ? 'inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-danger px-4 py-2 text-sm font-semibold text-on-primary shadow-card transition-colors hover:bg-danger/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/60 focus-visible:ring-offset-2'
                 : 'inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl border border-line-strong bg-surface px-4 py-2 text-sm font-semibold text-ink transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2'
             }
           >

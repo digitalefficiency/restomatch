@@ -1,11 +1,11 @@
 import { z } from 'zod';
 import { releaseClaimsForRematch } from '../recovery/service';
-import { and, eq, matchRuns, restaurants } from '@restomatch/db';
+import { and, desc, eq, matchRuns, restaurants } from '@restomatch/db';
 import { runMatch, type MatchStatus } from '@restomatch/matching';
 import { managerProcedure, router } from '../trpc';
 import { assertInvoiceOwned } from '../tenant';
 import { buildMatchInputForInvoice } from '../match/buildMatchInput';
-import { persistMatchRun } from '../match/persist';
+import { loadPriorDecisions, persistMatchRun } from '../match/persist';
 import { buildRules, resolveApprovalThresholds } from '../approvals/engine';
 
 export interface RunForInvoiceResult {
@@ -22,7 +22,8 @@ export interface RunForInvoiceResult {
  * cross-check from the dashboard after fixing product matches, and works
  * without Redis (runs inline in the member tx). Re-running replaces any prior
  * match run for the invoice (cascade-deletes its discrepancies), so it is safe
- * to invoke repeatedly.
+ * to invoke repeatedly; human decisions (approve / reject / escalate) carry over
+ * to the findings that still exist.
  */
 export const matchRouter = router({
   runForInvoice: managerProcedure
@@ -31,7 +32,17 @@ export const matchRouter = router({
       const { restaurantId } = ctx.session;
       await assertInvoiceOwned(ctx.db, input.invoiceId, restaurantId);
 
-      const built = await buildMatchInputForInvoice(ctx.db, restaurantId, input.invoiceId);
+      // A re-match checks against the PO the invoice was already matched to, even
+      // once that PO is received/closed (discovery only looks at open POs).
+      const [priorRun] = await ctx.db
+        .select({ poId: matchRuns.poId })
+        .from(matchRuns)
+        .where(and(eq(matchRuns.invoiceId, input.invoiceId), eq(matchRuns.restaurantId, restaurantId)))
+        .orderBy(desc(matchRuns.runAt))
+        .limit(1);
+      const built = await buildMatchInputForInvoice(ctx.db, restaurantId, input.invoiceId, {
+        pinnedPoId: priorRun?.poId ?? null,
+      });
       if (!built) {
         return {
           matchRunId: null,
@@ -44,8 +55,11 @@ export const matchRouter = router({
 
       // Re-match: drop any prior run for this invoice (discrepancies cascade).
       // Claims on those discrepancies are money history: release bare ones,
-      // refuse while any is in progress (₪-back tracker, wave 1).
+      // refuse while any is in progress (₪-back tracker, wave 1) — before any work.
       await releaseClaimsForRematch(ctx.db, restaurantId, input.invoiceId);
+      // Keep the people's decisions, re-applied below to findings that still
+      // exist (a rejected "not a duplicate" must not come back open).
+      const priorDecisions = await loadPriorDecisions(ctx.db, restaurantId, input.invoiceId);
       await ctx.db
         .delete(matchRuns)
         .where(and(eq(matchRuns.invoiceId, input.invoiceId), eq(matchRuns.restaurantId, restaurantId)));
@@ -64,6 +78,7 @@ export const matchRouter = router({
         built.input,
         result,
         rules,
+        priorDecisions,
       );
 
       return {

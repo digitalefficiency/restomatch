@@ -122,9 +122,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ file: s
               lineHeight: 1.04,
               letterSpacing: rtl ? 0 : -2,
               display: 'flex',
-              backgroundImage: `linear-gradient(${rtl ? 270 : 90}deg, #0E8F63, #3FB58A 55%, #C08A1E)`,
-              backgroundClip: 'text',
-              color: 'transparent',
+              // Solid primary (6.1:1 on the light canvas); a gradient text fill drops to ~2–3:1.
+              color: '#066B4A',
             }}
           >
             {v(c.line2)}

@@ -408,7 +408,7 @@ export function SupplierForm({
                       value={form.schedule[d] ?? ''}
                       onChange={setDayTime(d)}
                       aria-label={t(`days.${d}`)}
-                      className="rounded border border-line bg-surface-2 px-1.5 py-0.5 text-ink tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+                      className="rounded border border-line-strong bg-surface px-1.5 py-0.5 text-ink tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
                     />
                   ) : null}
                 </div>
