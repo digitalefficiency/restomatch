@@ -9,6 +9,7 @@ import {
   eq,
   goodsReceipts,
   grLines,
+  invoiceLines,
   invoices,
   matchRuns,
   memberships,
@@ -179,5 +180,92 @@ describe('re-match PO pin', () => {
     const res = await mgr.match.runForInvoice({ invoiceId: T.invoiceId });
     expect(res.poMatched).toBe(true);
     expect(await runPo(T.invoiceId)).toBe(T.poId);
+  });
+});
+
+/**
+ * #90 verification (MAJOR): the next standing order — placed, not yet delivered,
+ * with a closer expected day — must never take an invoice from the PO its goods
+ * were received against. Candidates rank by "has a goods receipt", then nearest day.
+ */
+describe('a received PO outranks an undelivered closer one', () => {
+  const state = async (invoiceId: string) => {
+    const [run] = await ownerDb
+      .select({ poId: matchRuns.poId, total: matchRuns.totalDiscrepancyAmount })
+      .from(matchRuns)
+      .where(eq(matchRuns.invoiceId, invoiceId));
+    const f = await ownerDb
+      .select({
+        id: discrepancies.id,
+        type: discrepancies.type,
+        delta: discrepancies.deltaAmount,
+        status: discrepancies.resolutionStatus,
+        sev: discrepancies.severity,
+      })
+      .from(discrepancies)
+      .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+      .where(eq(matchRuns.invoiceId, invoiceId));
+    return { poId: run?.poId, total: run?.total, raw: f };
+  };
+  /** PO1 expected D0, received `received` of 10 kg at ₪10; the invoice bills 10 kg, dated D0+2. */
+  async function onPo1(received: string) {
+    const T = await seedTenant(ownerDb, 'S');
+    const managerId = await member(T, 'manager');
+    const mgr = as(T, managerId, 'manager');
+    await ownerDb.update(purchaseOrders).set({ expectedDeliveryAt: D0 }).where(eq(purchaseOrders.id, T.poId));
+    await ownerDb.update(poLines).set({ productId: T.productId, unitPriceExpected: '10' }).where(eq(poLines.id, T.poLineId));
+    await ownerDb.update(grLines).set({ qtyReceived: received }).where(eq(grLines.id, T.grLineId));
+    await ownerDb
+      .update(invoices)
+      .set({ invoiceDate: new Date(D0.getTime() + 2 * DAY), vatAmount: '18.00', totalInclVat: '118.00' })
+      .where(eq(invoices.id, T.invoiceId));
+    await ownerDb.delete(matchRuns).where(eq(matchRuns.invoiceId, T.invoiceId));
+    return { T, mgr };
+  }
+  const placeNextOrder = async (T: Tenant, mgr: ReturnType<typeof as>, line: Record<string, unknown>) => {
+    const draft = await mgr.orders.createDraft({
+      supplierId: T.supplierId,
+      expectedDeliveryAt: new Date(D0.getTime() + 3 * DAY),
+      lines: [line as never],
+    });
+    await mgr.orders.placeOrder({ poId: draft.poId, channel: 'none' });
+  };
+
+  it('R1: late delivery billed on PO1 (GR short) — next standing order PO2 placed — re-match after a line fix stays on PO1', async () => {
+    const { T, mgr } = await onPo1('8');
+    await mgr.match.runForInvoice({ invoiceId: T.invoiceId });
+    const first = await state(T.invoiceId);
+    expect(first.poId).toBe(T.poId);
+    const qs = first.raw.find((x) => x.type === 'QTY_SHORT');
+    if (qs && qs.status === 'open') {
+      await as(T, T.ownerUserId, 'owner').approvals.approve({ discrepancyId: qs.id, note: 'credit note promised' });
+    }
+    await placeNextOrder(T, mgr, { productId: T.productId, qty: 10, unit: 'kg', unitPriceExpected: 10 });
+    const [line] = await ownerDb.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, T.invoiceId));
+    await mgr.receiving.updateInvoiceLine({ lineId: line!.id, patch: { rawDescription: 'עגבניות שרי' } });
+    await mgr.match.runForInvoice({ invoiceId: T.invoiceId });
+    const second = await state(T.invoiceId);
+    expect(second.poId).toBe(T.poId);
+    expect(second.total).toBe(first.total); // the ₪ leak survives
+    expect(second.raw.find((x) => x.type === 'QTY_SHORT')?.status).toBe('accepted'); // decision carried
+  });
+
+  it('R1 (fresh match): with PO2 already placed, a first match still picks the received PO1', async () => {
+    const { T, mgr } = await onPo1('8');
+    await placeNextOrder(T, mgr, { productId: T.productId, qty: 10, unit: 'kg', unitPriceExpected: 10 });
+    await mgr.match.runForInvoice({ invoiceId: T.invoiceId });
+    const s = await state(T.invoiceId);
+    expect(s.poId).toBe(T.poId);
+    expect(s.raw.some((x) => x.type === 'QTY_OVER')).toBe(true); // billed 10, received 8
+  });
+
+  it('R2: clean invoice on PO1 — next order PO2 for other goods — re-match stays clean on PO1', async () => {
+    const { T, mgr } = await onPo1('10');
+    await mgr.match.runForInvoice({ invoiceId: T.invoiceId });
+    await placeNextOrder(T, mgr, { rawDescription: 'מלפפונים', qty: 20, unit: 'kg', unitPriceExpected: 6 });
+    await mgr.match.runForInvoice({ invoiceId: T.invoiceId });
+    const second = await state(T.invoiceId);
+    expect(second.poId).toBe(T.poId);
+    expect(second.raw.filter((x) => x.sev === 'block')).toHaveLength(0);
   });
 });

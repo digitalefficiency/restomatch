@@ -372,7 +372,8 @@ export async function persistMatchRun(
       grLineId: d.grLineId ?? null,
       invoiceLineId: d.invoiceLineId ?? null,
       // DATE_ANOMALY carries epoch-ms dates in expected/actual (engine.ts, immutable)
-      // — far past NUMERIC(12,4); its dates live in the message. Store no number.
+      // — far past NUMERIC(12,4). Store no number: the dates live on
+      // invoices.invoice_date and the matched PO's expected_delivery_at.
       expectedValue: d.type === 'DATE_ANOMALY' ? null : (d.expected?.toString() ?? null),
       actualValue: d.type === 'DATE_ANOMALY' ? null : (d.actual?.toString() ?? null),
       deltaAmount: d.deltaAmount.toString(),
