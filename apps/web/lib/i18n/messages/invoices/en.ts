@@ -32,6 +32,8 @@ export const en: Shape<typeof he> = {
     savedHeader: 'Invoice details saved.',
     savedLine: 'Line saved.',
     failed: 'The action failed.',
+    openHolder: 'Open the existing invoice',
+    duplicateOf: 'Invoice number {number} already exists for this supplier — this invoice is marked for review as a possible duplicate. If the number is different, correct it below.',
     ocrFailed: "We couldn't read this invoice automatically. Enter the totals and lines by hand, or retake the photo from Receiving.",
     ocrQuota: "This month's invoice-scan quota is used up, so this invoice wasn't read automatically. You can enter it by hand.",
     ocrPending: 'The invoice is still being read. Refresh the page in a minute.',
