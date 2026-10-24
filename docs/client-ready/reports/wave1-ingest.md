@@ -31,6 +31,44 @@ photographed invoice:** storage under the restaurant prefix → invoice row (`oc
   offline is queued in IndexedDB and uploaded automatically when the phone is back online. The upload is
   idempotent: the same `clientUploadId` gives the same scan and the same invoice.
 
+## Order capture (flag `orderCapture`, wave-1 round 2)
+
+**Why:** many owners order vegetables, meat and fish over WhatsApp. No PO exists, so the 3-way match cannot run,
+and that is where the biggest leaks are. The owner hands us the order they already sent, and it becomes a normal PO.
+
+- **Ways in:**
+  1. Paste the message at `/dashboard/orders/capture` (entry button on the orders page).
+  2. Share it to the installed receiver app. The manifest `share_target` (GET, inside the PWA scope) goes to
+     `/dashboard/receiving/share` → the capture screen, pre-filled.
+  3. Forward it to the restaurant's WhatsApp ingest number. A text message (no media) from an **allow-listed**
+     number becomes a draft directly. The inbox shows it as *Forwarded order* with a link to the draft, or to the
+     capture screen when the supplier is unknown. An unknown number never creates a PO.
+- **Parsing:** the same Anthropic extraction path as the PO/invoice parsers, with text in and JSON out
+  (`ClaudeOrderTextParser`; the message is fenced as data).
+  - Without a key, in CI, or when the model call fails, the deterministic he/en `StubOrderTextParser` is used:
+    quantity + unit + item + optional ₪ price (`@ 12`, `40 ₪`, `14.90 nis`).
+  - Units are canonicalised to the stored Hebrew forms (ק״ג, יח׳, ארגז, צרור…).
+  - Greetings, times, dates, phone numbers, order/reference numbers and quantities above 100,000 are ignored.
+- **Matching:**
+  - Supplier: the owner's pick, then the sender's phone (`suppliers.contact_whatsapp`, E.164), then an explicit
+    "ספק:/To:" line, then a supplier name in the text. It is **never created and never guessed**: two candidates
+    → the owner picks.
+  - Lines: exact catalog match (supplier alias, then product name he/en). A missing price is taken from the
+    supplier's catalog list price; unmatched lines stay unmapped (they show as "New item").
+- **Draft → one tap:** a `draft` PO (source `manual` or `whatsapp`), idempotent per message (normalised-text hash in
+  `source_ref` + advisory lock). A re-forward or a double tap returns the same draft.
+  - *Confirm* = `orders.placeOrder({channel:'none'})`: draft → sent, **nothing is transmitted** (the supplier
+    already has the message).
+  - *Edit* opens the normal order screen.
+- **Security:** `orders.captureFromText` is managerProcedure under RLS, flag-gated (FORBIDDEN `FEATURE_DISABLED`),
+  with text ≤ 8 KB.
+  - A foreign `supplierId` is never used (the owner gets only their own suppliers as candidates).
+  - A foreign supplier's name in the text does not resolve (RLS).
+  - A foreign alias does not match.
+  - There is a COVERAGE entry plus 4 attack tests, and 3 webhook tests (flag off, allow-listed → draft + inbox link
+    + replay/re-forward idempotent, stranger → no PO).
+- **No migration:** `po_source` already has `whatsapp`, and `placeOrder` already supports `channel:'none'`.
+
 ## Security (public routes)
 
 | Control | How | Test |
@@ -120,6 +158,16 @@ puts the 4 tables under RLS on its own. Grants come from the existing blanket gr
 
 All runs used local, session-owned Postgres databases (`restomatch_s13_scratch` for tests, `restomatch_s13_dev` seeded
 with the demo tenant for the app) and local Redis. Nothing touched production.
+
+**Re-verified after merging `origin/claude/client-ready` @ `f751c6f` (2026-10-24).** There were four conflicts:
+- `dashboard/layout.tsx`: took the base's `TrpcProvider` wrapper and re-applied the ingest flags, the `data-rm-logout` attribute and `PwaSessionGuard`.
+- `receiving/[poId]/wizard.tsx`: kept the queued-offline notice and adopted the base's `buildFromPoOnly(grId)`.
+- `packages/api/src/index.ts`: kept both export sets.
+- `supabase/released-migrations.json`: took the base's lock and regenerated it with `db:supabase-sync`, not by hand. The ingest Supabase files now sit after the base's SB-3 RLS file, so the trailing RLS copy is `restomatch_rls_ac473419`.
+
+Results:
+- **Layer 1:** 14/14 test tasks pass, typecheck 18/18, web `tsc` 0 errors, lint clean. `check-rls` and `supabase-sync --check` are OK, and the web build is OK.
+- **Layer 2:** production build 143/143, dev 21/21.
 
 ### Layer 1: automated gate
 

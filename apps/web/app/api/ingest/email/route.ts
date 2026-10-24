@@ -6,13 +6,23 @@
  * Public by design (lib/publicPaths.ts); checks in @restomatch/api
  * handleEmailWebhook, covered by ingest.attack.test.ts.
  */
-import { handleEmailWebhook } from '@restomatch/api';
+import { handleEmailWebhook, INGEST_IP_LIMIT } from '@restomatch/api';
+import { INGEST_LIMITS } from '@restomatch/ingest';
 import { ingestDeps } from '@/lib/ingest/webhook';
+import { guardPublicRequest } from '@/lib/publicGuard';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 export async function POST(req: Request) {
-  return handleEmailWebhook(req, ingestDeps(req));
+  // Shared front door (S4): method, streamed body cap, per-IP limit; the
+  // Svix/Standard-Webhooks signature is verified over g.rawBody in the handler.
+  const g = await guardPublicRequest(req, {
+    rateLimit: { ...INGEST_IP_LIMIT, prefix: 'ingest:email:ip' },
+    maxBodyBytes: INGEST_LIMITS.emailBodyBytes,
+    bodyType: 'text',
+  });
+  if (!g.ok) return g.response;
+  return handleEmailWebhook(req, { ...ingestDeps(req), rawBody: g.rawBody });
 }

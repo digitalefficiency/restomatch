@@ -52,6 +52,8 @@ export interface InboxMessage {
     invoiceId: string | null;
     stored: boolean;
   }>;
+  /** orderCapture: a forwarded WhatsApp order (text) and the draft PO captured from it. */
+  order?: { poId: string | null; poStatus: string | null } | null;
 }
 
 interface Props {
@@ -71,17 +73,20 @@ interface Props {
   messages: InboxMessage[];
 }
 
+// Emphasis tiers (DESIGN-BRIEF): needs a decision = T2 warn (→ 'warning-solid' once #77's Badge lands); read / registered = T3
+// green; a manager's rejection, duplicates and skips are calm history (T4, never red);
+// only a processing failure is red.
 const MESSAGE_TONE: Record<InboxMessage['status'], BadgeTone> = {
   accepted: 'accent',
   needs_review: 'warning',
-  rejected: 'danger',
+  rejected: 'neutral',
   failed: 'danger',
   empty: 'neutral',
 };
 const DOC_TONE: Record<InboxMessage['documents'][number]['status'], BadgeTone> = {
   registered: 'accent',
   needs_review: 'warning',
-  rejected: 'danger',
+  rejected: 'neutral',
   failed: 'danger',
   duplicate: 'info',
   skipped: 'neutral',
@@ -216,6 +221,32 @@ export function InboxClient(props: Props) {
                   </div>
                 </div>
 
+                {m.order ? (
+                  <div
+                    className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3"
+                    data-testid="ingest-order"
+                  >
+                    <Badge tone="info">{t('orderCapture.inboxOrder')}</Badge>
+                    {props.canManage ? (
+                      m.order.poId ? (
+                        <Link
+                          href={`/dashboard/orders/${m.order.poId}`}
+                          className="text-sm font-semibold text-primary underline-offset-2 hover:underline"
+                        >
+                          {t('orderCapture.inboxOpenDraft')}
+                        </Link>
+                      ) : (
+                        <Link
+                          href={`/dashboard/orders/capture?text=${encodeURIComponent(m.subject ?? '')}`}
+                          className="text-sm font-semibold text-primary underline-offset-2 hover:underline"
+                        >
+                          {t('orderCapture.inboxNeedsSupplier')}
+                        </Link>
+                      )
+                    ) : null}
+                  </div>
+                ) : null}
+
                 {m.documents.length > 0 ? (
                   <ul className="mt-3 space-y-2 border-t border-line pt-3">
                     {m.documents.map((d) => (
@@ -241,7 +272,12 @@ export function InboxClient(props: Props) {
                           ) : null}
                           <Badge tone={DOC_TONE[d.status]}>{t(`documentStatus.${d.status}`)}</Badge>
                           {d.error ? (
-                            <span className="inline-flex items-center gap-1 text-xs text-danger">
+                            <span
+                              className={cn(
+                                'inline-flex items-center gap-1 text-xs',
+                                d.status === 'failed' ? 'text-danger' : 'text-muted',
+                              )}
+                            >
                               <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
                               {errorText(d.error)}
                             </span>

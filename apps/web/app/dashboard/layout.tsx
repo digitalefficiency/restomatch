@@ -9,8 +9,6 @@ import { LanguagePicker } from '@/lib/i18n/LanguagePicker';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { nav } from '@/lib/i18n/messages/nav';
 import { labelForRole } from '@/lib/roles';
-import { enabledFeatures } from '@/lib/ingest/features';
-import { PwaSessionGuard } from '@/lib/pwa/PwaSessionGuard';
 import { LocaleSync } from './locale-sync';
 import { BranchSwitcher } from './branch-switcher';
 import { getWave1Access } from './contracts/access';
@@ -18,6 +16,8 @@ import { DesktopNav, MobileNav } from './nav';
 import { DashboardSearch } from './search';
 import { WorkerStatusBanner } from './worker-status';
 import { TrpcProvider } from '@/lib/trpc/client';
+import { enabledFeatures } from '@/lib/ingest/features';
+import { PwaSessionGuard } from '@/lib/pwa/PwaSessionGuard';
 
 /**
  * Dashboard app shell. Sticky frosted header: restaurant + user on the start

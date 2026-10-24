@@ -31,6 +31,7 @@ export const FEATURE_KEYS = [
   'orderPricesOut',
   'supplierConfirm',
   'dockPriceContext',
+  'orderCapture',
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];

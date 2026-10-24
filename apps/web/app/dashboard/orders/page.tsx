@@ -7,6 +7,9 @@ import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 import { OrdersList } from './list-client';
 import { ZesttImportButton } from './import-client';
 import { DocumentPricesToggle } from './supplier-document';
+import { MessageCircle } from 'lucide-react';
+import { enabledFeatures } from '@/lib/ingest/features';
+import { ingest } from '@/lib/i18n/messages/ingest';
 
 export default async function OrdersPage() {
   const caller = await createServerCaller();
@@ -20,6 +23,9 @@ export default async function OrdersPage() {
   const active =
     memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0];
   const canEdit = active?.role === 'owner' || active?.role === 'manager';
+  // orderCapture (flag): paste / share the WhatsApp order the owner already sent.
+  const showCapture = canEdit && (await enabledFeatures(active?.restaurantId)).includes('orderCapture');
+  const tIngest = await getT(ingest);
 
   return (
     <div>
@@ -31,6 +37,11 @@ export default async function OrdersPage() {
         action={
           canEdit ? (
             <div className="flex flex-wrap items-start gap-2">
+              {showCapture ? (
+                <LinkButton href="/dashboard/orders/capture" size="sm" variant="secondary" data-testid="order-capture-entry">
+                  <MessageCircle className="h-4 w-4" aria-hidden="true" /> {tIngest('orderCapture.entry')}
+                </LinkButton>
+              ) : null}
               <ZesttImportButton />
               <LinkButton href="/dashboard/orders/new" size="sm">
                 <Plus className="h-4 w-4" aria-hidden="true" /> {t('newOrder')}
