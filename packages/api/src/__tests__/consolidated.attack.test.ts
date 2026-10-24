@@ -336,6 +336,36 @@ describe('consolidated.coverage — isolation (RLS app role)', () => {
     }
   });
 
+  it('an ordinary invoice waiting for its PO link covers nothing: a note in its month stays not_invoiced', async () => {
+    // #95 review: it has no billing period — counting it would hide a note nobody billed.
+    // Move A-R-1 out of the way (not a ריכוז for this check) and add a plain waiting invoice.
+    await ownerDb.update(invoices).set({ ocrPayload: null }).where(eq(invoices.id, consolidatedId));
+    const [plain] = await ownerDb
+      .insert(invoices)
+      .values({
+        restaurantId: A.restaurantId,
+        supplierId: A.supplierId,
+        invoiceNumber: 'A-77002',
+        invoiceDate: new Date(),
+        totalExclVat: '10.00',
+        vatAmount: '1.80',
+        totalInclVat: '11.80',
+        status: 'parsed',
+        source: 'email',
+      })
+      .returning();
+    try {
+      const rows = await caller(A).consolidated.coverage({ supplierId: A.supplierId, ...wide });
+      for (const id of ownNotes) expect(rows.find((r) => r.grId === id)).toMatchObject({ state: 'not_invoiced', invoiceId: null });
+    } finally {
+      await ownerDb.delete(invoices).where(eq(invoices.id, plain!.id));
+      await ownerDb
+        .update(invoices)
+        .set({ ocrPayload: { provider: 'reconciled', raw: { kind: 'consolidated' } } as (typeof invoices.$inferInsert)['ocrPayload'] })
+        .where(eq(invoices.id, consolidatedId));
+    }
+  });
+
   it("B's supplier id from A's session returns nothing (RLS: B's receipts are invisible)", async () => {
     expect(await caller(A).consolidated.coverage({ supplierId: B.supplierId, ...wide })).toEqual([]);
   });

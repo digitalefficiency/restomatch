@@ -847,18 +847,6 @@ async function loadDeliveryNotes(
   }));
 }
 
-const rowsOf = (r: unknown) => (Array.isArray(r) ? r : ((r as { rows?: unknown[] }).rows ?? [])) as Array<Record<string, unknown>>;
-
-/** Invoices whose latest-or-only state is "waiting for a PO link": no match run, or an open UNORDERED_ARRIVAL. */
-const waitingForPoLink = (restaurantId: string) => sql`(
-  NOT EXISTS (SELECT 1 FROM match_runs mr WHERE mr.invoice_id = "invoices"."id" AND mr.restaurant_id = ${restaurantId})
-  OR EXISTS (
-    SELECT 1 FROM match_runs mr JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${restaurantId}
-    WHERE mr.invoice_id = "invoices"."id" AND mr.restaurant_id = ${restaurantId}
-      AND d.type = 'UNORDERED_ARRIVAL' AND d.resolution_status IN ('open','escalated')
-  )
-)`;
-
 /** The consolidated invoices of a supplier (payload kind 'consolidated'), with what they list. */
 async function consolidatedInvoicesOf(db: Database, restaurantId: string, supplierId: string, tz: string) {
   const rows = await db
@@ -1058,9 +1046,9 @@ const SETTLED_STATUSES = new Set(['matched', 'approved', 'paid']);
  *   1. a consolidated invoice of the supplier that LISTS the note's number —
  *      covered once it is matched / approved / paid, else in_consolidated;
  *   2. an invoice whose match run used the receipt or its PO → covered;
- *   3. a consolidated invoice that lists no notes (or one waiting for a PO link)
- *      whose period contains it — covered / in_consolidated by the same status
- *      rule (a waiting one is always in_consolidated);
+ *   3. a consolidated invoice that lists no notes whose period contains it —
+ *      covered / in_consolidated by the same status rule (an ordinary invoice
+ *      waiting for its PO link has no period and covers nothing);
  *   4. else not_invoiced.
  */
 export async function deliveryNoteCoverage(
@@ -1079,26 +1067,13 @@ export async function deliveryNoteCoverage(
   const listing = new Map<string, (typeof consolidated)[number]>();
   for (const c of consolidated) for (const n of c.raw.deliveryNoteNumbers) if (!listing.has(n)) listing.set(n, c);
 
-  const waiting = (
-    await db
-      .select({ id: invoices.id, number: invoices.invoiceNumber, invoiceDate: invoices.invoiceDate, createdAt: invoices.createdAt })
-      .from(invoices)
-      .where(and(eq(invoices.restaurantId, restaurantId), eq(invoices.supplierId, supplierId), waitingForPoLink(restaurantId)))
-      .orderBy(asc(invoices.createdAt))
-  ).filter((w) => !consolidatedIds.has(w.id));
   // Period candidates: consolidated invoices that don't list their notes (their
-  // stated period — one that lists them covers exactly those), then the ones
-  // waiting for a link.
-  const byPeriod = [
-    ...consolidated.filter((c) => c.raw.deliveryNoteNumbers.length === 0).map((c) => ({ id: c.id, number: c.number, settled: SETTLED_STATUSES.has(c.status), consolidated: true, period: c.period })),
-    ...waiting.map((w) => ({
-      id: w.id,
-      number: w.number,
-      settled: false,
-      consolidated: false,
-      period: periodOfInvoice(w.invoiceDate ?? w.createdAt, null, tz),
-    })),
-  ];
+  // stated period — one that lists them covers exactly those). An ordinary invoice
+  // waiting for its PO link has no billing period and covers nothing: counting it
+  // would hide a note nobody has billed.
+  const byPeriod = consolidated
+    .filter((c) => c.raw.deliveryNoteNumbers.length === 0)
+    .map((c) => ({ id: c.id, number: c.number, settled: SETTLED_STATUSES.has(c.status), consolidated: true, period: c.period }));
 
   const numberOf = new Map<string, string | null>();
   const coveringIds = [...new Set(notes.map((n) => n.coveredByInvoiceId).filter((x): x is string => !!x))];
