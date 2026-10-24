@@ -1,7 +1,8 @@
 /**
  * Demo/dev base seed: one Israeli restaurant ("כפר הזיתים"), its team, ten
  * suppliers, ~55 products (Hebrew + English names for "Receiver in English"),
- * eight weeks of purchase orders on each supplier's real delivery cadence, three
+ * purchase orders back to the 1st of the month three months before today on each
+ * supplier's real delivery cadence, three
  * POs expected TODAY (ready to receive live) and two for the coming days.
  *
  *   DATABASE_URL=postgres://postgres:postgres@localhost:5432/restomatch_dev pnpm --filter @restomatch/db seed
@@ -12,8 +13,14 @@
  *   DEMO_TODAY     YYYY-MM-DD to treat as "today" (default: today in Asia/Jerusalem) —
  *                  seed the evening before a demo with tomorrow's date
  *
- * ⛔ DELETES every restaurant, user and their data (TRUNCATE … CASCADE). Refuses
- * any non-local database (src/seedGuard.ts).
+ *   SEED_SCOPE     unset → ⛔ DELETES every restaurant, user and their data (TRUNCATE … CASCADE).
+ *                  'demo' → deletes ONLY the demo tenants (src/demoTenants.ts: refuses if they are
+ *                  mixed with real data) and leaves every other tenant untouched — what the
+ *                  production reseed uses (docs/client-ready/RESEED-PROD.md).
+ *   DEMO_PLATFORM_ADMIN  '1' makes the demo owner a platform admin (/admin). Default: yes on a
+ *                  local DB, NO on a remote one — on a real project /admin shows every tenant.
+ *
+ * Refuses any non-local database unless SEED_ALLOW_REMOTE_HOST names it (src/seedGuard.ts).
  */
 import { hashPassword } from '@restomatch/crypto';
 import postgres from 'postgres';
@@ -35,11 +42,19 @@ import {
   type DeliverySchedule,
   type RestaurantSettings,
 } from '../src/schema';
-import { assertSeedTarget } from '../src/seedGuard';
+import { deleteDemoTenants } from '../src/demoTenants';
+import { assertSeedTarget, isLocalDbUrl } from '../src/seedGuard';
 
 export const DEFAULT_DEMO_PASSWORD = 'RestoMatch-Demo-2026!';
 const TZ = 'Asia/Jerusalem';
 const HISTORY_WEEKS = 8;
+/**
+ * Months of FULL history before DEMO_TODAY's month (so "last month vs the month
+ * before" compares two real months). Deliveries older than HISTORY_WEEKS get
+ * negative ordinals: every PO inside the 8-week window keeps the exact ordinal —
+ * so the same quantities and prices — it always had (the quoted October hero).
+ */
+const FULL_HISTORY_MONTHS = 3;
 
 /* ── time helpers (restaurant wall clock → UTC instant) ─────────────────── */
 
@@ -78,6 +93,15 @@ function addDays(ymd: string, days: number): string {
   const [y, m, d] = ymd.split('-').map(Number) as [number, number, number];
   return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 }
+
+/** Days from the 1st of the month `months` before `ymd`'s month up to `ymd`. */
+function daysSinceMonthStart(ymd: string, months: number): number {
+  const [y, m, d] = ymd.split('-').map(Number) as [number, number, number];
+  return Math.round((Date.UTC(y, m - 1, d) - Date.UTC(y, m - 1 - months, 1)) / 86_400_000);
+}
+
+/** Pattern lookup that also accepts the negative ordinals of the extended history. */
+const at = <T,>(arr: readonly T[], i: number): T => arr[((i % arr.length) + arr.length) % arr.length]!;
 
 function weekday(ymd: string): number {
   const [y, m, d] = ymd.split('-').map(Number) as [number, number, number];
@@ -210,6 +234,13 @@ async function main() {
   const today = process.env.DEMO_TODAY?.trim() || localYmd(new Date());
   if (!/^\d{4}-\d{2}-\d{2}$/.test(today)) throw new Error(`[seed] DEMO_TODAY must be YYYY-MM-DD, got ${today}`);
   const password = process.env.DEMO_PASSWORD?.trim() || DEFAULT_DEMO_PASSWORD;
+  const scope = process.env.SEED_SCOPE?.trim();
+  if (scope && scope !== 'demo') throw new Error(`[seed] SEED_SCOPE must be 'demo' or unset, got ${scope}`);
+  const demoOnly = scope === 'demo';
+  if (!demoOnly && !isLocalDbUrl(url)) {
+    throw new Error('[seed] refusing a FULL wipe (TRUNCATE every tenant) on a non-local database — use SEED_SCOPE=demo (docs/client-ready/RESEED-PROD.md)');
+  }
+  const platformAdmin = process.env.DEMO_PLATFORM_ADMIN ? process.env.DEMO_PLATFORM_ADMIN === '1' : isLocalDbUrl(url);
 
   const db = createDb(url);
 
@@ -237,9 +268,14 @@ async function main() {
       });
   }
 
-  console.log('[seed] clearing every restaurant + user (TRUNCATE … CASCADE)');
   const raw = postgres(url, { max: 1, prepare: false, onnotice: () => undefined });
-  await raw.unsafe('TRUNCATE restaurants, users RESTART IDENTITY CASCADE');
+  if (demoOnly) {
+    const { tenants, removed } = await deleteDemoTenants(raw);
+    console.log(`[seed] demo-only: removed ${tenants.restaurants.length} demo restaurant(s), ${tenants.userIds.length} demo user(s) — ${JSON.stringify(removed)}`);
+  } else {
+    console.log('[seed] clearing every restaurant + user (TRUNCATE … CASCADE)');
+    await raw.unsafe('TRUNCATE restaurants, users RESTART IDENTITY CASCADE');
+  }
   await raw.end();
 
   console.log('[seed] restaurant');
@@ -277,8 +313,9 @@ async function main() {
         email: u.email,
         name: u.name,
         emailVerified: verifiedAt,
-        // The demo owner doubles as the platform operator so /admin is demo-able.
-        isPlatformAdmin: u.role === 'owner',
+        // The demo owner doubles as the platform operator so /admin is demo-able —
+        // locally by default; on a real project only with DEMO_PLATFORM_ADMIN=1.
+        isPlatformAdmin: platformAdmin && u.role === 'owner',
       })),
     )
     .returning();
@@ -394,7 +431,7 @@ async function main() {
     catalogItems += rows.length;
   }
 
-  console.log(`[seed] purchase orders (${HISTORY_WEEKS} weeks of history, today = ${today})`);
+  console.log(`[seed] purchase orders (history from the 1st of ${FULL_HISTORY_MONTHS} months back, today = ${today})`);
   const owner = insertedUsers[0]!;
   const manager = insertedUsers[1]!;
   let poCount = 0;
@@ -409,10 +446,12 @@ async function main() {
     const supplier = supplierByKey.get(s.key)!;
     const basket = productRows.filter((p) => p.spec.supplier === s.key && p.spec.qty > 0);
     const expectedDeliveryAt = zonedInstant(ymd, time);
-    const orderedAt = new Date(expectedDeliveryAt.getTime() - 24 * 3600 * 1000);
+    // Ordered the day before delivery — but never after DEMO_TODAY 09:00 (wall clock):
+    // a PO for the coming days must not show a future "created / sent" date.
+    const orderedAt = new Date(Math.min(expectedDeliveryAt.getTime() - 24 * 3600 * 1000, zonedInstant(today, '09:00').getTime()));
     const lines = basket.map((p, j) => {
-      const qty = roundQty(p.spec.qty * QTY_PATTERN[(ordinal + j) % QTY_PATTERN.length]!, p.spec.unit);
-      const price = Math.round(p.spec.price * PRICE_PATTERN[(ordinal + j) % PRICE_PATTERN.length]! * 100) / 100;
+      const qty = roundQty(p.spec.qty * at(QTY_PATTERN, ordinal + j), p.spec.unit);
+      const price = Math.round(p.spec.price * at(PRICE_PATTERN, ordinal + j) * 100) / 100;
       return { p, qty, price };
     });
     const total = lines.reduce((acc, l) => acc + Math.round(l.qty * l.price * 100), 0) / 100;
@@ -447,6 +486,23 @@ async function main() {
     poCount += 1;
     lineCount += lines.length;
   };
+
+  // Older history (the FULL_HISTORY_MONTHS before today's month, beyond the 8-week
+  // window): same cadence, ordinals -m … -1 so the window below is unchanged.
+  const fullDays = Math.max(HISTORY_WEEKS * 7, daysSinceMonthStart(today, FULL_HISTORY_MONTHS));
+  const older: Array<{ s: (typeof SUPPLIERS)[number]; ymd: string }> = [];
+  for (let back = fullDays; back > HISTORY_WEEKS * 7; back -= 1) {
+    const ymd = addDays(today, -back);
+    const week = Math.floor(back / 7);
+    for (const s of SUPPLIERS) if (s.days.includes(weekday(ymd)) && week % s.everyWeeks === 0) older.push({ s, ymd });
+  }
+  const olderLeft = new Map<string, number>();
+  for (const o of older) olderLeft.set(o.s.key, (olderLeft.get(o.s.key) ?? 0) + 1);
+  for (const o of older) {
+    const left = olderLeft.get(o.s.key)!;
+    olderLeft.set(o.s.key, left - 1);
+    await createPo(o.s, o.ymd, o.s.time, 'closed', -left);
+  }
 
   // History: every scheduled delivery day in the last HISTORY_WEEKS weeks, up to yesterday.
   const ordinals = new Map<string, number>();
