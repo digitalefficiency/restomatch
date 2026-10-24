@@ -250,7 +250,12 @@ export const integrationsRouter = router({
         const excl = numericToAgorot(r.totalExclVat);
         const vat = numericToAgorot(r.vatAmount);
         const incl = numericToAgorot(r.totalInclVat);
-        if (!r.invoiceNumber || !r.invoiceDate || incl === null) {
+        // A supplier-less invoice (e.g. an e-mail/WhatsApp ingest approved
+        // without a supplier) has no supplier card to post to, and duplicate
+        // detection needs a supplier, so it could be the same paper as an
+        // already-exported photo: posting it under a fallback card could book
+        // the purchase — and its input VAT — twice. Left out and counted.
+        if (!r.invoiceNumber || !r.invoiceDate || incl === null || !r.supplierId) {
           skipped++;
           continue;
         }

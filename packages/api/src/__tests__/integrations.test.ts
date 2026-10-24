@@ -118,6 +118,12 @@ describe('accounting exports', () => {
     expect(out).toMatchObject({ rowCount: 0, skippedCount: 1 });
   });
 
+  it('a supplier-less invoice is skipped, never posted under a fallback supplier card (money review)', async () => {
+    await db.update(invoices).set({ supplierId: null }).where(eq(invoices.id, A.invoiceId));
+    const out = await callerFor(A).integrations.accountingExport({ format: 'hashavshevet', ...PERIOD });
+    expect(out).toMatchObject({ rowCount: 0, skippedCount: 1 });
+  });
+
   it('an invoice with only the VAT-inclusive total is split with the VAT rate, not posted as VAT 0', async () => {
     await db.update(invoices).set({ totalExclVat: null, vatAmount: null, totalInclVat: '118.00' }).where(eq(invoices.id, A.invoiceId));
     const out = await callerFor(A).integrations.accountingExport({ format: 'hashavshevet', ...PERIOD });
