@@ -64,8 +64,9 @@ landing() { # locale expected-dir
 landing he rtl
 landing en ltr
 
-# 3. Hero media referenced by the landing page (fails if the page stops pointing at it).
-mapfile -t MEDIA < <(grep -oE '/media/[A-Za-z0-9._-]+\.(webm|mp4|jpg|jpeg|png|webp)' "$TMP/landing-he.html" 2>/dev/null | sort -u)
+# 3. Hero media referenced by the landing page in either language (the English landing has
+#    its own loop/poster/promo cut) — fails if a page stops pointing at its media.
+mapfile -t MEDIA < <(cat "$TMP/landing-he.html" "$TMP/landing-en.html" 2>/dev/null | grep -oE '/media/[A-Za-z0-9._-]+\.(webm|mp4|jpg|jpeg|png|webp)' | sort -u)
 if [[ ${#MEDIA[@]} -eq 0 ]]; then
   row FAIL "hero media" "landing references no /media/* asset"
 else
