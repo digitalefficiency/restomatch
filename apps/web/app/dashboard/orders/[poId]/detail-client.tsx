@@ -46,7 +46,8 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
   const router = useRouter();
   const po = data.po!;
   const isDraft = po.status === 'draft';
-  const canCancel = po.status !== 'cancelled' && po.status !== 'closed';
+  // A goods receipt makes the order history even while its status reads 'sent'.
+  const canCancel = po.status !== 'cancelled' && po.status !== 'closed' && data.receiptStatus == null;
   const editable = canEdit && isDraft;
 
   const [channel, setChannel] = useState<Channel>('none');

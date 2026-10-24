@@ -156,7 +156,13 @@ export const en: Shape<typeof he> = {
     another: 'Another order',
     deliveryExpected: 'Expected delivery:',
     missedCutoff: 'Today’s order cutoff has passed — the next delivery is {date}.',
-    deliveryHint: 'Derived from the supplier’s order schedule.',
-    noSchedule: 'This supplier has no order schedule — no delivery date will be calculated.',
+    deliveryHint: 'Derived from the supplier’s order schedule. You can change it.',
+    noSchedule: 'This supplier has no order schedule — pick the delivery date.',
+    deliveryDate: 'Requested delivery date',
+  },
+  preview: {
+    title: 'What the supplier receives',
+    loading: 'Preparing the preview…',
+    unavailable: 'The preview isn’t available right now.',
   },
 };

@@ -6,6 +6,7 @@ import {
   eq,
   invoices,
   matchRuns,
+  notificationsOutbox,
   poLines,
   products,
   purchaseOrders,
@@ -128,6 +129,79 @@ describe('orders: totals follow line edits; cancel guard', () => {
     await expect(callerFor(A).orders.cancelOrder({ poId })).rejects.toMatchObject({
       code: 'CONFLICT',
     });
+  });
+
+  it('cancelOrder refuses an order that already has a goods receipt (status still sent)', async () => {
+    // seedTenant gives A.poId status 'sent' and a goods receipt.
+    await expect(callerFor(A).orders.cancelOrder({ poId: A.poId })).rejects.toMatchObject({ code: 'CONFLICT' });
+    const [po] = await db.select({ status: purchaseOrders.status }).from(purchaseOrders).where(eq(purchaseOrders.id, A.poId));
+    expect(po?.status).toBe('sent');
+  });
+
+  it('createDraft stores a picked delivery date as local midnight in the restaurant zone', async () => {
+    const { defaultDate, today } = await callerFor(A).orders.previewDelivery({ supplierId: A.supplierId });
+    expect(defaultDate > today).toBe(true);
+    const { poId } = await callerFor(A).orders.createDraft({
+      supplierId: A.supplierId,
+      expectedDeliveryDate: '2099-03-02',
+      lines: [{ rawDescription: 'עגבניות', qty: 2, unit: 'ק״ג' }],
+    });
+    const [po] = await db
+      .select({ at: purchaseOrders.expectedDeliveryAt })
+      .from(purchaseOrders)
+      .where(eq(purchaseOrders.id, poId));
+    expect(po?.at?.toISOString()).toBe('2099-03-01T22:00:00.000Z'); // 00:00 IST (+02:00)
+    await expect(
+      callerFor(A).orders.createDraft({
+        supplierId: A.supplierId,
+        expectedDeliveryDate: '2020-01-01',
+        lines: [{ rawDescription: 'x', qty: 1, unit: 'ק״ג' }],
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('the supplier document names the restaurant, the contact, the date, product names and clean quantities — and the preview is exactly what is sent', async () => {
+    await db.update(suppliers).set({ contactEmail: 'orders@supplier.test' }).where(eq(suppliers.id, A.supplierId));
+    const { poId } = await callerFor(A).orders.createDraft({
+      supplierId: A.supplierId,
+      expectedDeliveryDate: '2099-03-02',
+      lines: [
+        { productId: A.productId, qty: 15, unit: 'ק״ג' },
+        { rawDescription: 'בצל', qty: 2.5, unit: 'ק״ג' },
+      ],
+    });
+    const preview = await callerFor(A).orders.documentPreview({ poId });
+    expect(preview.body).toContain('Resto A');
+    expect(preview.body).toContain('Owner A');
+    expect(preview.body).toContain('owner-A@attack.test');
+    expect(preview.body).toMatch(/אספקה מבוקשת: .*2099/);
+    expect(preview.body).toContain('• עגבניה A — 15 ק״ג'); // product name, not "פריט"; not "15.000"
+    expect(preview.body).toContain('• בצל — 2.5 ק״ג');
+    expect(preview.body).not.toMatch(/\d\.\d*0 /);
+
+    await callerFor(A).orders.placeOrder({ poId, channel: 'email' });
+    const [row] = await db
+      .select({ subject: notificationsOutbox.subject, body: notificationsOutbox.body })
+      .from(notificationsOutbox)
+      .where(eq(notificationsOutbox.relatedEntityId, poId));
+    expect(row).toEqual({ subject: preview.subject, body: preview.body });
+
+    // The wizard's unsaved lines render the same way (no PO ref yet).
+    const unsaved = await callerFor(A).orders.documentPreview({
+      supplierId: A.supplierId,
+      expectedDeliveryDate: '2099-03-02',
+      lines: [{ productId: A.productId, qty: 15, unit: 'ק״ג' }],
+    });
+    expect(unsaved.body).toContain('• עגבניה A — 15 ק״ג');
+    expect(unsaved.body).not.toContain('מס׳ הזמנה');
+  });
+
+  it('a document without a delivery date says so instead of dropping the line', async () => {
+    const preview = await callerFor(A).orders.documentPreview({
+      supplierId: A.supplierId,
+      lines: [{ rawDescription: 'בצל', qty: 1, unit: 'ק״ג' }],
+    });
+    expect(preview.body).toContain('אספקה מבוקשת: לתיאום מול המסעדה');
   });
 
   it('placeOrder refuses a draft whose lines were all deleted', async () => {

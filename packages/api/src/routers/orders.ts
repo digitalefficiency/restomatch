@@ -6,6 +6,7 @@ import {
   count,
   desc,
   eq,
+  goodsReceipts,
   inArray,
   isNull,
   notificationsOutbox,
@@ -18,6 +19,7 @@ import {
   sql,
   suppliers,
   supplierCatalogItems,
+  users,
   type Database,
 } from '@restomatch/db';
 import { ClaudePoParser } from '@restomatch/ocr';
@@ -29,6 +31,8 @@ import { importPurchaseOrder } from '../orders/importPo';
 import { estimateTotal, recomputePoTotal } from '../orders/totals';
 import { DEDUPE_INDEX_PREDICATE } from '../notifications/outbox';
 import { deriveExpectedDelivery, type DerivedDelivery } from '../lib/deriveDelivery';
+import { addCalendarDaysInTz, localDateKeyInTz, startOfDayInTz, startOfLocalDateInTz } from '../lib/time';
+import { poRefOf, renderOrderDocument } from '../orders/document';
 
 /** Cap on an uploaded order document, decoded — a single-page PO PDF is ~50KB. */
 const MAX_PO_DOC_BYTES = 8 * 1024 * 1024;
@@ -162,6 +166,94 @@ async function baselineWindow(db: Database, restaurantId: string): Promise<numbe
   return r?.settings?.baselineWindowDays ?? DEFAULT_BASELINE_WINDOW_DAYS;
 }
 
+/** A restaurant-local calendar date, 'YYYY-MM-DD'. */
+const LocalDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD');
+
+async function restaurantTz(db: Database, restaurantId: string): Promise<string> {
+  const [r] = await db
+    .select({ timezone: restaurants.timezone })
+    .from(restaurants)
+    .where(eq(restaurants.id, restaurantId))
+    .limit(1);
+  return r?.timezone ?? DEFAULT_TZ;
+}
+
+/** Fri/Sat — no deliveries (same rule as deriveExpectedDelivery). */
+const NO_DELIVERY_WEEKDAYS = new Set(['Fri', 'Sat']);
+
+/**
+ * The date the wizard pre-fills when the supplier has no order schedule:
+ * tomorrow in the restaurant's timezone, rolled past Fri/Sat.
+ */
+function defaultDeliveryDate(nowUtc: Date, tz: string): string {
+  let day = addCalendarDaysInTz(startOfDayInTz(nowUtc, tz), 1, tz);
+  for (let i = 0; i < 3; i++) {
+    const midday = new Date(day.getTime() + 12 * 60 * 60 * 1000);
+    const wd = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' }).format(midday);
+    if (!NO_DELIVERY_WEEKDAYS.has(wd)) break;
+    day = addCalendarDaysInTz(day, 1, tz);
+  }
+  return localDateKeyInTz(day, tz);
+}
+
+/** A picked delivery date must not be in the past (restaurant-local). */
+function deliveryFromLocalDate(dateKey: string, nowUtc: Date, tz: string): Date {
+  if (dateKey < localDateKeyInTz(nowUtc, tz)) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: 'תאריך האספקה כבר עבר' });
+  }
+  return startOfLocalDateInTz(dateKey, tz);
+}
+
+/**
+ * Everything the supplier-facing document needs, loaded under the caller's
+ * tenant: restaurant name + business id, the placing manager as contact, and
+ * product names for lines saved with a productId only.
+ */
+async function buildOrderDocument(
+  db: Database,
+  restaurantId: string,
+  userId: string,
+  o: {
+    poId?: string;
+    supplierName: string;
+    expectedDeliveryAt: Date | null;
+    lines: Array<{ productId: string | null; rawDescription: string | null; qtyOrdered: string | number; unit: string }>;
+  },
+): Promise<{ subject: string; body: string }> {
+  const [restaurant] = await db
+    .select({ name: restaurants.name, businessId: restaurants.businessId, timezone: restaurants.timezone })
+    .from(restaurants)
+    .where(eq(restaurants.id, restaurantId))
+    .limit(1);
+  const [contact] = await db
+    .select({ name: users.name, phone: users.phone, email: users.email })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  const ids = [...new Set(o.lines.filter((l) => !l.rawDescription?.trim() && l.productId).map((l) => l.productId!))];
+  const nameById = new Map<string, string>();
+  if (ids.length > 0) {
+    const rows = await db
+      .select({ id: products.id, name: products.canonicalName })
+      .from(products)
+      .where(and(eq(products.restaurantId, restaurantId), inArray(products.id, ids)));
+    for (const r of rows) nameById.set(r.id, r.name);
+  }
+  return renderOrderDocument({
+    poRef: o.poId ? poRefOf(o.poId) : null,
+    supplierName: o.supplierName,
+    restaurant: { name: restaurant?.name ?? '', businessId: restaurant?.businessId ?? null },
+    contact: contact ?? null,
+    expectedDeliveryAt: o.expectedDeliveryAt,
+    lines: o.lines.map((l) => ({
+      name: l.rawDescription?.trim() || (l.productId ? (nameById.get(l.productId) ?? null) : null),
+      qtyOrdered: l.qtyOrdered,
+      unit: l.unit,
+    })),
+    tz: restaurant?.timezone ?? DEFAULT_TZ,
+  });
+}
+
 
 /**
  * The PO's delivery state comes from its latest goods receipt, not from
@@ -179,6 +271,12 @@ function latestReceiptStatus(restaurantId: string) {
   )`;
 }
 const OPEN_PO_STATUSES = ['sent', 'confirmed', 'partial'] as const;
+/**
+ * One stable line order for the detail page and the supplier document.
+ * po_lines has no insertion column (adding one is a schema change), so lines
+ * read by description, then id — never by the random UUID alone.
+ */
+const PO_LINE_ORDER = [sql`${poLines.rawDescription} ASC NULLS LAST`, asc(poLines.id)] as const;
 
 export const ordersRouter = router({
   /** Purchase orders for the restaurant, with supplier name + line count. */
@@ -261,7 +359,7 @@ export const ordersRouter = router({
         .select()
         .from(poLines)
         .where(eq(poLines.poId, input.poId))
-        .orderBy(asc(poLines.id));
+        .orderBy(...PO_LINE_ORDER);
       // English product names for the "Receiver in English" display (0028).
       const productIds = [...new Set(rawLines.map((l) => l.productId).filter((id): id is string => !!id))];
       const nameEnById = new Map<string, string | null>();
@@ -290,6 +388,8 @@ export const ordersRouter = router({
       z.object({
         supplierId: z.string().uuid(),
         expectedDeliveryAt: z.date().optional(),
+        /** The date the manager picked in the wizard, restaurant-local. */
+        expectedDeliveryDate: LocalDate.optional(),
         notes: z.string().trim().max(2000).optional(),
         lines: z.array(LineInput).min(1).max(500),
       }),
@@ -297,6 +397,9 @@ export const ordersRouter = router({
     .mutation(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
       await assertSupplierOwned(ctx.db, input.supplierId, restaurantId);
+      const pickedDelivery = input.expectedDeliveryDate
+        ? deliveryFromLocalDate(input.expectedDeliveryDate, new Date(), await restaurantTz(ctx.db, restaurantId))
+        : (input.expectedDeliveryAt ?? null);
 
       // Cadence: when the manager didn't pick a date, DERIVE it from the
       // supplier's order schedule (NEW POs only — this is createDraft). If the
@@ -304,9 +407,9 @@ export const ordersRouter = router({
       // and we surface it so the UI can explain the roll rather than silently
       // shifting the date. A supplier with no schedule → derivation is null and
       // expectedDeliveryAt stays whatever the manual entry provided (or null).
-      let expectedDeliveryAt: Date | null = input.expectedDeliveryAt ?? null;
+      let expectedDeliveryAt: Date | null = pickedDelivery;
       let derivation: DeliveryDerivation | null = null;
-      if (!input.expectedDeliveryAt) {
+      if (!pickedDelivery) {
         const derived = await deriveForSupplier(ctx.db, restaurantId, input.supplierId, new Date());
         if (derived) {
           expectedDeliveryAt = derived.expectedDeliveryAt;
@@ -392,17 +495,99 @@ export const ordersRouter = router({
    */
   previewDelivery: memberProcedure
     .input(z.object({ supplierId: z.string().uuid() }))
-    .query(async ({ ctx, input }): Promise<DeliveryDerivation | null> => {
+    .query(
+      async ({ ctx, input }): Promise<{ derived: DeliveryDerivation | null; defaultDate: string; today: string }> => {
+        const restaurantId = ctx.session.restaurantId;
+        await assertSupplierOwned(ctx.db, input.supplierId, restaurantId);
+        const now = new Date();
+        const tz = await restaurantTz(ctx.db, restaurantId);
+        const derived = await deriveForSupplier(ctx.db, restaurantId, input.supplierId, now);
+        return {
+          derived: derived
+            ? {
+                expectedDeliveryAt: derived.expectedDeliveryAt.toISOString(),
+                nextOrderCutoffAt: derived.nextOrderCutoffAt.toISOString(),
+                missedCutoff: derived.missedCutoff,
+                windowUsed: derived.windowUsed,
+              }
+            : null,
+          /** What the wizard's date input starts at: the schedule's date, else tomorrow. */
+          defaultDate: derived ? localDateKeyInTz(derived.expectedDeliveryAt, tz) : defaultDeliveryDate(now, tz),
+          today: localDateKeyInTz(now, tz),
+        };
+      },
+    ),
+
+  /**
+   * Exactly what the supplier will receive, before it is sent: for a saved
+   * draft (poId) or for the wizard's unsaved lines. Read-only — nothing queued.
+   */
+  documentPreview: memberProcedure
+    .input(
+      z.union([
+        z.object({ poId: z.string().uuid() }).strict(),
+        z
+          .object({
+            supplierId: z.string().uuid(),
+            expectedDeliveryDate: LocalDate.optional(),
+            lines: z
+              .array(
+                z.object({
+                  productId: z.string().uuid().optional(),
+                  rawDescription: z.string().trim().max(400).optional(),
+                  qty: z.number().nonnegative().max(1_000_000),
+                  unit: z.string().trim().min(1).max(32),
+                }),
+              )
+              .max(500),
+          })
+          .strict(),
+      ]),
+    )
+    .query(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
+      if ('poId' in input) {
+        await assertPoOwned(ctx.db, input.poId, restaurantId);
+        const [po] = await ctx.db
+          .select({ supplierId: purchaseOrders.supplierId, expectedDeliveryAt: purchaseOrders.expectedDeliveryAt })
+          .from(purchaseOrders)
+          .where(eq(purchaseOrders.id, input.poId))
+          .limit(1);
+        if (!po) throw new TRPCError({ code: 'NOT_FOUND', message: 'purchase order not found' });
+        const [supplier] = await ctx.db
+          .select({ name: suppliers.name })
+          .from(suppliers)
+          .where(eq(suppliers.id, po.supplierId))
+          .limit(1);
+        const lines = await ctx.db
+          .select({ productId: poLines.productId, rawDescription: poLines.rawDescription, qtyOrdered: poLines.qtyOrdered, unit: poLines.unit })
+          .from(poLines)
+          .where(eq(poLines.poId, input.poId))
+          .orderBy(...PO_LINE_ORDER);
+        return buildOrderDocument(ctx.db, restaurantId, ctx.session.userId, {
+          poId: input.poId,
+          supplierName: supplier?.name ?? 'ספק',
+          expectedDeliveryAt: po.expectedDeliveryAt,
+          lines,
+        });
+      }
       await assertSupplierOwned(ctx.db, input.supplierId, restaurantId);
-      const derived = await deriveForSupplier(ctx.db, restaurantId, input.supplierId, new Date());
-      if (!derived) return null;
-      return {
-        expectedDeliveryAt: derived.expectedDeliveryAt.toISOString(),
-        nextOrderCutoffAt: derived.nextOrderCutoffAt.toISOString(),
-        missedCutoff: derived.missedCutoff,
-        windowUsed: derived.windowUsed,
-      };
+      const [supplier] = await ctx.db
+        .select({ name: suppliers.name })
+        .from(suppliers)
+        .where(eq(suppliers.id, input.supplierId))
+        .limit(1);
+      const tz = await restaurantTz(ctx.db, restaurantId);
+      return buildOrderDocument(ctx.db, restaurantId, ctx.session.userId, {
+        supplierName: supplier?.name ?? 'ספק',
+        expectedDeliveryAt: input.expectedDeliveryDate ? startOfLocalDateInTz(input.expectedDeliveryDate, tz) : null,
+        lines: input.lines.map((l) => ({
+          productId: l.productId ?? null,
+          rawDescription: l.rawDescription ?? null,
+          qtyOrdered: l.qty,
+          unit: l.unit,
+        })),
+      });
     }),
 
   /**
@@ -472,6 +657,16 @@ export const ordersRouter = router({
       // goods receipt and invoice match. Cancelling twice is a no-op error.
       if (current && (current.status === 'closed' || current.status === 'cancelled')) {
         throw new TRPCError({ code: 'CONFLICT', message: 'לא ניתן לבטל הזמנה שנסגרה או בוטלה' });
+      }
+      // Receiving never moves the PO out of 'sent', so a delivered order looks
+      // open by status alone: any goods receipt makes it history too.
+      const [receipt] = await ctx.db
+        .select({ id: goodsReceipts.id })
+        .from(goodsReceipts)
+        .where(and(eq(goodsReceipts.poId, input.poId), eq(goodsReceipts.restaurantId, restaurantId)))
+        .limit(1);
+      if (receipt) {
+        throw new TRPCError({ code: 'CONFLICT', message: 'לא ניתן לבטל הזמנה שכבר התחילה קבלה עליה' });
       }
       await ctx.db
         .update(purchaseOrders)
@@ -576,22 +771,16 @@ export const ordersRouter = router({
         .from(suppliers)
         .where(eq(suppliers.id, po.supplierId))
         .limit(1);
-      // The delivery date printed on the supplier-facing doc must be formatted
-      // in the restaurant's wall-clock timezone, not the server's.
-      const [restaurant] = await ctx.db
-        .select({ timezone: restaurants.timezone })
-        .from(restaurants)
-        .where(eq(restaurants.id, restaurantId))
-        .limit(1);
-      const tz = restaurant?.timezone ?? DEFAULT_TZ;
       const lines = await ctx.db
         .select({
+          productId: poLines.productId,
           rawDescription: poLines.rawDescription,
           qtyOrdered: poLines.qtyOrdered,
           unit: poLines.unit,
         })
         .from(poLines)
-        .where(eq(poLines.poId, input.poId));
+        .where(eq(poLines.poId, input.poId))
+        .orderBy(...PO_LINE_ORDER);
       // An empty order would reach the supplier as a blank document.
       if (lines.length === 0) {
         throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'אי אפשר לשלוח הזמנה בלי שורות' });
@@ -617,7 +806,13 @@ export const ordersRouter = router({
             message: `לספק אין ${input.channel === 'email' ? 'אימייל' : 'וואטסאפ'} מוגדר`,
           });
         }
-        const body = renderOrderDocument(supplier?.name ?? 'ספק', po.expectedDeliveryAt, lines, tz);
+        // The same text orders.documentPreview showed the manager.
+        const doc = await buildOrderDocument(ctx.db, restaurantId, ctx.session.userId, {
+          poId: input.poId,
+          supplierName: supplier?.name ?? 'ספק',
+          expectedDeliveryAt: po.expectedDeliveryAt,
+          lines,
+        });
         // Decouple from the (churning) notifier module: write to the outbox the
         // outboxDispatch worker already drains.
         //
@@ -633,8 +828,8 @@ export const ordersRouter = router({
             restaurantId,
             channel: input.channel,
             target,
-            subject: `הזמנה חדשה — ${supplier?.name ?? ''}`.trim(),
-            body,
+            subject: doc.subject,
+            body: doc.body,
             status: 'queued',
             relatedEntityType: 'purchase_order',
             relatedEntityId: input.poId,
@@ -670,20 +865,3 @@ export const ordersRouter = router({
       return { warnings };
     }),
 });
-
-/** Render a Hebrew order document for the outbox body. */
-function renderOrderDocument(
-  supplierName: string,
-  expectedDeliveryAt: Date | null,
-  lines: Array<{ rawDescription: string | null; qtyOrdered: string; unit: string }>,
-  tz: string = DEFAULT_TZ,
-): string {
-  const header = `הזמנה לספק ${supplierName}`;
-  const delivery = expectedDeliveryAt
-    ? `אספקה מבוקשת: ${expectedDeliveryAt.toLocaleDateString('he-IL', { timeZone: tz })}`
-    : '';
-  const items = lines
-    .map((l) => `• ${l.rawDescription ?? 'פריט'} — ${l.qtyOrdered} ${l.unit}`)
-    .join('\n');
-  return [header, delivery, '', items].filter(Boolean).join('\n');
-}

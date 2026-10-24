@@ -25,6 +25,7 @@ const VIEWPORTS = [
 ] as const;
 const RECEIVED_LABEL: Record<Locale, string> = { he: 'התקבלה', en: 'Received' };
 const RECEIVED_FILTER: Record<Locale, string> = { he: 'התקבלו', en: 'Received' };
+const CANCEL_LABEL: Record<Locale, string> = { he: 'ביטול הזמנה', en: 'Cancel order' };
 
 const TINY_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
@@ -138,6 +139,8 @@ for (const vp of VIEWPORTS) {
           'data-status',
           'received',
         );
+        // A received order is history: no cancel (the server refuses it too).
+        await expect(page.getByRole('button', { name: CANCEL_LABEL[locale] })).toHaveCount(0);
         expect(errors, errors.join('\n')).toEqual([]);
       });
     }
