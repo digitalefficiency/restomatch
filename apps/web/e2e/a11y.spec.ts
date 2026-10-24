@@ -72,8 +72,33 @@ async function open(page: Page, locale: Locale, path: string) {
   await page.waitForLoadState('networkidle').catch(() => {});
 }
 
+/**
+ * Several screens fade text in with GSAP (inline opacity): the receiving
+ * wizard's steps, which also render on /dashboard/receiving/:po. Under `next
+ * dev`, StrictMode's double mount makes the second `gsap.from` start from the
+ * half-faded value, so the text can stay stuck there (a production build ends
+ * at 1). Wait briefly for running fades, then finish any stuck text fade, so
+ * axe judges the design's colours, not a frame of an animation. The
+ * viewfinder corners pulse forever but carry no text.
+ */
+async function settleTextFades(page: Page): Promise<void> {
+  const animated = await page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('[style*="opacity"]')].some(
+      (el) => Number.parseFloat(el.style.opacity) < 1 && !!el.textContent?.trim(),
+    ),
+  );
+  if (animated) await page.waitForTimeout(1_500);
+  await page.evaluate(() => {
+    for (const el of document.querySelectorAll<HTMLElement>('[style*="opacity"]')) {
+      const o = Number.parseFloat(el.style.opacity);
+      if (o > 0 && o < 1 && el.textContent?.trim()) el.style.opacity = '1';
+    }
+  });
+}
+
 /** WCAG 2.1 A/AA violations, summarized so a failure names the rule and the element. */
 async function axeViolations(page: Page): Promise<string[]> {
+  await settleTextFades(page);
   await page.addScriptTag({ content: AXE_SOURCE });
   return page.evaluate(async (tags) => {
     const w = window as unknown as {
@@ -169,19 +194,6 @@ test.describe('a11y receiving wizard steps (phone, English)', () => {
     const s = recvEn.steps;
     await open(page, 'en', '/showcase/receiver');
     const check = async (step: string) => {
-      // The steps fade text in with GSAP (inline opacity). Under `next dev`,
-      // StrictMode's double mount makes the second `gsap.from` start from the
-      // half-faded value, so the text stays stuck there (a production build
-      // ends at 1). Wait for the tweens, then finish any stuck text fade so axe
-      // judges the design's colors. The viewfinder corners pulse forever but
-      // carry no text.
-      await page.waitForTimeout(1_500);
-      await page.evaluate(() => {
-        for (const el of document.querySelectorAll<HTMLElement>('main [style*="opacity"]')) {
-          const o = Number.parseFloat(el.style.opacity);
-          if (o > 0 && o < 1 && el.textContent?.trim()) el.style.opacity = '1';
-        }
-      });
       expect(await axeViolations(page), `${step} axe`).toEqual([]);
       const small = (await smallTouchTargets(page)).filter((t) => !t.includes('<a ')); // showcase chrome links
       expect(small, `${step} touch targets`).toEqual([]);
