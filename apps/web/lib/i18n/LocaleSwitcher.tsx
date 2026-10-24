@@ -32,7 +32,6 @@ export function LocaleSwitcher({ className }: { className?: string }) {
       onClick={() => switchTo(next)}
       disabled={pending}
       lang={next}
-      aria-label={next === 'en' ? 'Switch to English' : 'החלפה לעברית'}
       title={next === 'en' ? 'Switch to English' : 'החלפה לעברית'}
       className={cn(
         'inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-xs font-semibold text-muted transition-colors hover:border-primary/40 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:opacity-60',
@@ -40,7 +39,9 @@ export function LocaleSwitcher({ className }: { className?: string }) {
       )}
     >
       <Languages className="h-3.5 w-3.5" aria-hidden="true" />
+      {/* The accessible name starts with the visible text (WCAG 2.5.3 label-in-name). */}
       <span>{next === 'en' ? 'EN' : 'עב'}</span>
+      <span className="sr-only">{next === 'en' ? ' — Switch to English' : ' — החלפה לעברית'}</span>
     </button>
   );
 }

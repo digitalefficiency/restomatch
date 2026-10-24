@@ -25,7 +25,7 @@ export default async function ShowcaseLayout({ children }: { children: React.Rea
       style={{
         fontFamily: 'var(--font-heebo), "Heebo", system-ui, sans-serif',
         backgroundImage:
-          'radial-gradient(ellipse 80% 60% at 50% -20%, rgba(34, 211, 154, 0.10), transparent 60%)',
+          'radial-gradient(ellipse 80% 60% at 50% -20%, rgba(6, 107, 74, 0.06), transparent 60%)',
         backgroundAttachment: 'fixed',
       }}
     >
