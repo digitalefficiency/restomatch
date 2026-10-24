@@ -33,6 +33,19 @@ export async function checkDemo(url: string, today: string): Promise<DemoCheck> 
     facts.push(`hero: ₪${Math.round(h.leakIls)} of ₪${Math.round(h.spendIls)} (${(h.leakPct * 100).toFixed(1)}%)`);
     if (!(h.leakPct >= 0.015 && h.leakPct <= 0.03)) problems.push(`hero leak ${(h.leakPct * 100).toFixed(2)}% is outside the 1.5–3% demo band`);
 
+    // 1b. Month compares (last month vs the month before): both months fully seeded,
+    //     comparable spend and a believable leak — a thin base reads as "+2,926%".
+    const now = new Date(`${today}T12:00:00+03:00`);
+    const prev = await computeLeakHero(createDb(url), main.id, { now, monthOffset: -1 });
+    const prev2 = await computeLeakHero(createDb(url), main.id, { now, monthOffset: -2 });
+    facts.push(`last month ₪${Math.round(prev.leakIls)} of ₪${Math.round(prev.spendIls)} (${(prev.leakPct * 100).toFixed(1)}%) · month before ₪${Math.round(prev2.leakIls)} of ₪${Math.round(prev2.spendIls)} (${(prev2.leakPct * 100).toFixed(1)}%)`);
+    for (const [label, m] of [['last month', prev], ['the month before', prev2]] as const) {
+      if (!(m.leakPct >= 0.01 && m.leakPct <= 0.03)) problems.push(`${label}: leak ${(m.leakPct * 100).toFixed(2)}% is outside 1–3%`);
+    }
+    if (!(prev2.spendIls > 0 && Math.abs(prev.spendIls / prev2.spendIls - 1) <= 0.25)) {
+      problems.push(`last month's spend ₪${Math.round(prev.spendIls)} vs the month before ₪${Math.round(prev2.spendIls)} — not comparable (thin history?)`);
+    }
+
     // 2. Today's deliveries on Receiving (Israel wall clock), untouched by any receipt.
     const todays = (await sql`
       select s.name, s.name_en, po.status, po.total_estimated,

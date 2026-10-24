@@ -1,7 +1,8 @@
 /**
  * Demo/dev base seed: one Israeli restaurant ("כפר הזיתים"), its team, ten
  * suppliers, ~55 products (Hebrew + English names for "Receiver in English"),
- * eight weeks of purchase orders on each supplier's real delivery cadence, three
+ * purchase orders back to the 1st of the month three months before today on each
+ * supplier's real delivery cadence, three
  * POs expected TODAY (ready to receive live) and two for the coming days.
  *
  *   DATABASE_URL=postgres://postgres:postgres@localhost:5432/restomatch_dev pnpm --filter @restomatch/db seed
@@ -47,6 +48,13 @@ import { assertSeedTarget, isLocalDbUrl } from '../src/seedGuard';
 export const DEFAULT_DEMO_PASSWORD = 'RestoMatch-Demo-2026!';
 const TZ = 'Asia/Jerusalem';
 const HISTORY_WEEKS = 8;
+/**
+ * Months of FULL history before DEMO_TODAY's month (so "last month vs the month
+ * before" compares two real months). Deliveries older than HISTORY_WEEKS get
+ * negative ordinals: every PO inside the 8-week window keeps the exact ordinal —
+ * so the same quantities and prices — it always had (the quoted October hero).
+ */
+const FULL_HISTORY_MONTHS = 3;
 
 /* ── time helpers (restaurant wall clock → UTC instant) ─────────────────── */
 
@@ -85,6 +93,15 @@ function addDays(ymd: string, days: number): string {
   const [y, m, d] = ymd.split('-').map(Number) as [number, number, number];
   return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 }
+
+/** Days from the 1st of the month `months` before `ymd`'s month up to `ymd`. */
+function daysSinceMonthStart(ymd: string, months: number): number {
+  const [y, m, d] = ymd.split('-').map(Number) as [number, number, number];
+  return Math.round((Date.UTC(y, m - 1, d) - Date.UTC(y, m - 1 - months, 1)) / 86_400_000);
+}
+
+/** Pattern lookup that also accepts the negative ordinals of the extended history. */
+const at = <T,>(arr: readonly T[], i: number): T => arr[((i % arr.length) + arr.length) % arr.length]!;
 
 function weekday(ymd: string): number {
   const [y, m, d] = ymd.split('-').map(Number) as [number, number, number];
@@ -414,7 +431,7 @@ async function main() {
     catalogItems += rows.length;
   }
 
-  console.log(`[seed] purchase orders (${HISTORY_WEEKS} weeks of history, today = ${today})`);
+  console.log(`[seed] purchase orders (history from the 1st of ${FULL_HISTORY_MONTHS} months back, today = ${today})`);
   const owner = insertedUsers[0]!;
   const manager = insertedUsers[1]!;
   let poCount = 0;
@@ -431,8 +448,8 @@ async function main() {
     const expectedDeliveryAt = zonedInstant(ymd, time);
     const orderedAt = new Date(expectedDeliveryAt.getTime() - 24 * 3600 * 1000);
     const lines = basket.map((p, j) => {
-      const qty = roundQty(p.spec.qty * QTY_PATTERN[(ordinal + j) % QTY_PATTERN.length]!, p.spec.unit);
-      const price = Math.round(p.spec.price * PRICE_PATTERN[(ordinal + j) % PRICE_PATTERN.length]! * 100) / 100;
+      const qty = roundQty(p.spec.qty * at(QTY_PATTERN, ordinal + j), p.spec.unit);
+      const price = Math.round(p.spec.price * at(PRICE_PATTERN, ordinal + j) * 100) / 100;
       return { p, qty, price };
     });
     const total = lines.reduce((acc, l) => acc + Math.round(l.qty * l.price * 100), 0) / 100;
@@ -467,6 +484,23 @@ async function main() {
     poCount += 1;
     lineCount += lines.length;
   };
+
+  // Older history (the FULL_HISTORY_MONTHS before today's month, beyond the 8-week
+  // window): same cadence, ordinals -m … -1 so the window below is unchanged.
+  const fullDays = Math.max(HISTORY_WEEKS * 7, daysSinceMonthStart(today, FULL_HISTORY_MONTHS));
+  const older: Array<{ s: (typeof SUPPLIERS)[number]; ymd: string }> = [];
+  for (let back = fullDays; back > HISTORY_WEEKS * 7; back -= 1) {
+    const ymd = addDays(today, -back);
+    const week = Math.floor(back / 7);
+    for (const s of SUPPLIERS) if (s.days.includes(weekday(ymd)) && week % s.everyWeeks === 0) older.push({ s, ymd });
+  }
+  const olderLeft = new Map<string, number>();
+  for (const o of older) olderLeft.set(o.s.key, (olderLeft.get(o.s.key) ?? 0) + 1);
+  for (const o of older) {
+    const left = olderLeft.get(o.s.key)!;
+    olderLeft.set(o.s.key, left - 1);
+    await createPo(o.s, o.ymd, o.s.time, 'closed', -left);
+  }
 
   // History: every scheduled delivery day in the last HISTORY_WEEKS weeks, up to yesterday.
   const ordinals = new Map<string, number>();

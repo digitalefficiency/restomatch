@@ -71,6 +71,8 @@ const db = createDb(url);
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const OPEN_WINDOW_DAYS = 10;
+/** The base seed's HISTORY_WEEKS × 7 (packages/db/scripts/seed.ts). */
+const BASE_HISTORY_DAYS = 56;
 
 /** Start of "today" on the restaurant's wall clock (DEMO_TODAY overrides, like the base seed). */
 function startOfLocalDay(tz: string): Date {
@@ -226,8 +228,25 @@ async function main() {
   for (const po of pos) perSupplier.set(po.supplierId, [...(perSupplier.get(po.supplierId) ?? []), po.id]);
   for (const ids of perSupplier.values()) ids.forEach((id, i) => recencyById.set(id, ids.length - i));
 
+  // The base seed's 8-week window (HISTORY_WEEKS) vs the older full months before it.
+  // Window POs keep their scripted story and invoice numbers exactly (the demo pack
+  // quotes ST-24108 …); older ones replay the "last month" incidents (k ≥ 4) so
+  // every month reads like a normal month (~2% leak), never the headline k 1–3.
+  const windowStart = new Date(todayStart.getTime() - BASE_HISTORY_DAYS * DAY_MS);
+  const windowCount = new Map<string, number>();
+  const olderCount = new Map<string, number>();
+  for (const po of pos) {
+    const m = (po.expectedDeliveryAt ?? todayStart) >= windowStart ? windowCount : olderCount;
+    m.set(po.supplierId, (m.get(po.supplierId) ?? 0) + 1);
+  }
+  const scenarioK = (supplierId: string, k: number) => {
+    const w = windowCount.get(supplierId) ?? 0;
+    return k <= w ? k : 4 + ((k - w - 1) % Math.max(w - 5, 1));
+  };
+
   const knownBySupplier = new Map<string, Set<string>>();
-  const invoiceSeq = new Map<string, number>();
+  // Older invoices number downwards from 24100 so the window's numbers never move.
+  const invoiceSeq = new Map<string, number>([...olderCount].map(([id, n]) => [id, 24100 - n] as const));
   let made = 0;
   let openCount = 0;
   // Deliveries billed later on ONE consolidated invoice (חשבונית ריכוז): this
@@ -241,7 +260,7 @@ async function main() {
     const supplier = supplierById.get(po.supplierId)!;
     const supplierEn = supplier.nameEn ?? supplier.name;
     const k = recencyById.get(po.id)!;
-    const sc = scenarioFor(supplierEn, k);
+    const sc = scenarioFor(supplierEn, scenarioK(po.supplierId, k));
     const lines = await db.select().from(poLines).where(eq(poLines.poId, po.id)).orderBy(asc(poLines.id));
     if (lines.length === 0) continue;
     const expected = po.expectedDeliveryAt ?? new Date();
