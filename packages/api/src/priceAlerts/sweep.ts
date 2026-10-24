@@ -319,6 +319,8 @@ export interface PriceAlertDetail {
   observations: number;
   cheaperSupplierId: string | null;
   cheaperSupplierName: string | null;
+  /** English name of the cheaper supplier (display only; null when none). */
+  cheaperSupplierNameEn: string | null;
   cheaperPrice: string | null;
   status: 'open' | 'dismissed';
   createdAt: Date;
@@ -364,16 +366,16 @@ export async function loadAlertDetails(
     .orderBy(desc(priceAlerts.createdAt))
     .limit(opts.limit ?? 200);
   const cheaperIds = [...new Set(rows.map((r) => r.cheaperSupplierId).filter((x): x is string => !!x))];
-  const names = new Map<string, string>();
+  const names = new Map<string, { name: string; nameEn: string | null }>();
   if (cheaperIds.length) {
     const sup = await db
-      .select({ id: suppliers.id, name: suppliers.name })
+      .select({ id: suppliers.id, name: suppliers.name, nameEn: suppliers.nameEn })
       .from(suppliers)
       .where(and(eq(suppliers.restaurantId, restaurantId), inArray(suppliers.id, cheaperIds)));
-    for (const s of sup) names.set(s.id, s.name);
+    for (const s of sup) names.set(s.id, { name: s.name, nameEn: s.nameEn });
   }
-  return rows.map((r) => ({
-    ...r,
-    cheaperSupplierName: r.cheaperSupplierId ? names.get(r.cheaperSupplierId) ?? null : null,
-  }));
+  return rows.map((r) => {
+    const cheaper = r.cheaperSupplierId ? names.get(r.cheaperSupplierId) : undefined;
+    return { ...r, cheaperSupplierName: cheaper?.name ?? null, cheaperSupplierNameEn: cheaper?.nameEn ?? null };
+  });
 }

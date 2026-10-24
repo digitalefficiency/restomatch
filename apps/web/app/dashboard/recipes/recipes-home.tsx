@@ -173,10 +173,15 @@ function Name({ name, nameEn }: { name: string; nameEn: string | null }) {
   return (
     <span>
       <span {...originalProps(d.secondary ? null : d.primary)}>{d.primary}</span>
+      {/* The gap is a plain space OUTSIDE the original: a margin on the dir="auto"
+          (RTL) span lands on its far side and fused "House burgerהמבורגר הבית". */}
       {d.secondary ? (
-        <span className="ms-1.5 text-xs text-subtle" {...originalProps(d.secondary)}>
-          {d.secondary}
-        </span>
+        <>
+          {' '}
+          <span className="text-xs text-subtle" {...originalProps(d.secondary)}>
+            {d.secondary}
+          </span>
+        </>
       ) : null}
     </span>
   );

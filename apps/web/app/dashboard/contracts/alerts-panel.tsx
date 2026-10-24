@@ -160,7 +160,10 @@ export function AlertsPanel({ canManage }: { canManage: boolean }) {
                   </p>
                   {a.cheaperSupplierName && a.cheaperPrice != null ? (
                     <p className="mt-3 rounded-xl border border-primary/25 bg-primary/5 px-3 py-2 text-sm text-primary">
-                      {t('alerts.cheaper', { supplier: a.cheaperSupplierName, price: money(a.cheaperPrice) })}
+                      {t('alerts.cheaper', {
+                        supplier: displayName(a.cheaperSupplierName, a.cheaperSupplierNameEn, locale).primary,
+                        price: money(a.cheaperPrice),
+                      })}
                     </p>
                   ) : null}
                 </Card>
