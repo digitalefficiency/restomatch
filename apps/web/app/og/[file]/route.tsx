@@ -71,9 +71,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ file: s
           flexDirection: 'column',
           justifyContent: 'space-between',
           padding: '64px 72px',
-          background: 'radial-gradient(ellipse 80% 70% at 50% -10%, rgba(34,211,154,0.22), #0E1512 62%)',
-          backgroundColor: '#0E1512',
-          color: '#ECF5EF',
+          background: 'radial-gradient(ellipse 80% 70% at 50% -10%, rgba(6,107,74,0.12), #F6F8F7 62%)',
+          backgroundColor: '#F6F8F7',
+          color: '#0F1F17',
           fontFamily: 'Heebo',
         }}
       >
@@ -83,11 +83,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ file: s
               width: 64,
               height: 64,
               borderRadius: 18,
-              background: '#22D39A',
+              background: '#066B4A',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: '#07120D',
+              color: '#FFFFFF',
               fontSize: 40,
               fontWeight: 800,
             }}
@@ -100,8 +100,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ file: s
               [rtl ? 'marginRight' : 'marginLeft']: 'auto',
               display: 'flex',
               fontSize: 22,
-              color: '#22D39A',
-              border: '2px solid rgba(34,211,154,0.4)',
+              color: '#066B4A',
+              border: '2px solid rgba(6,107,74,0.4)',
               borderRadius: 999,
               padding: '6px 18px',
               fontWeight: 500,
@@ -122,14 +122,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ file: s
               lineHeight: 1.04,
               letterSpacing: rtl ? 0 : -2,
               display: 'flex',
-              backgroundImage: `linear-gradient(${rtl ? 270 : 90}deg, #22D39A, #6FE0BD 55%, #E0B341)`,
+              backgroundImage: `linear-gradient(${rtl ? 270 : 90}deg, #0E8F63, #3FB58A 55%, #C08A1E)`,
               backgroundClip: 'text',
               color: 'transparent',
             }}
           >
             {v(c.line2)}
           </div>
-          <div style={{ fontSize: 30, color: '#9DB2A6', fontWeight: 500, display: 'flex' }}>{v(c.sub)}</div>
+          <div style={{ fontSize: 30, color: '#4A5D53', fontWeight: 500, display: 'flex' }}>{v(c.sub)}</div>
         </div>
 
         <div style={{ display: 'flex', flexDirection: row, alignItems: 'flex-end', justifyContent: 'space-between' }}>
@@ -143,8 +143,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ file: s
                   fontWeight: 500,
                   padding: '8px 16px',
                   borderRadius: 12,
-                  color: i === 0 ? '#22D39A' : '#FF5C7A',
-                  background: i === 0 ? 'rgba(34,211,154,0.12)' : 'rgba(255,92,122,0.12)',
+                  color: i === 0 ? '#066B4A' : '#B80F2A',
+                  background: i === 0 ? 'rgba(6,107,74,0.1)' : 'rgba(184,15,42,0.08)',
                 }}
               >
                 {v(l)}
@@ -158,12 +158,12 @@ export async function GET(_req: Request, { params }: { params: Promise<{ file: s
               alignItems: rtl ? 'flex-start' : 'flex-end',
               padding: '14px 26px',
               borderRadius: 20,
-              border: '2px solid rgba(255,92,122,0.4)',
-              background: 'rgba(255,92,122,0.10)',
+              border: '2px solid rgba(184,15,42,0.4)',
+              background: 'rgba(184,15,42,0.06)',
             }}
           >
-            <div style={{ fontSize: 20, color: '#FF5C7A', fontWeight: 500, display: 'flex' }}>{v(c.caught)}</div>
-            <div style={{ fontSize: 58, fontWeight: 800, color: '#FF5C7A', display: 'flex' }}>
+            <div style={{ fontSize: 20, color: '#B80F2A', fontWeight: 500, display: 'flex' }}>{v(c.caught)}</div>
+            <div style={{ fontSize: 58, fontWeight: 800, color: '#B80F2A', display: 'flex' }}>
               {rtl ? '₪ 412' : '₪412'}
             </div>
           </div>
