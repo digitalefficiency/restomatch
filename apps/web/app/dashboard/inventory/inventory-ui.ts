@@ -12,8 +12,10 @@ export function dayText(ymd: string, locale: Locale): string {
 
 /**
  * What a person types on a phone keypad → the server's qty format.
- * - A comma + exactly 3 digits is a thousands separator ("1,200" → 1200).
- * - A comma + 1–2 digits is the decimal ("2,5" → 2.5).
+ * - A comma + exactly 3 digits is a thousands separator ("1,200" → 1200), after
+ *   a first group of 1–3 digits that is not 0.
+ * - A comma + 1–2 digits is the decimal ("2,5" → 2.5), and so is any comma
+ *   after a lone 0 ("0,250" → 0.250).
  * Returns '' for blank (not counted), `undefined` while a trailing separator is
  * still being typed ("2," — no error, nothing to save) and null when invalid.
  */
@@ -22,8 +24,8 @@ export function normalizeQty(raw: string): string | null | undefined {
   if (v === '') return '';
   if (/^\d+(,\d{3})*[.,]$/.test(v)) return undefined;
   let n: string;
-  if (/^\d+(,\d{3})+(\.\d+)?$/.test(v)) n = v.replace(/,/g, '');
-  else if (/^\d+,\d{1,2}$/.test(v)) n = v.replace(',', '.');
+  if (/^[1-9]\d{0,2}(,\d{3})+(\.\d+)?$/.test(v)) n = v.replace(/,/g, '');
+  else if (/^\d+,\d{1,2}$/.test(v) || /^0,\d{1,4}$/.test(v)) n = v.replace(',', '.');
   else n = v;
   return /^\d{1,8}(\.\d{1,4})?$/.test(n) ? n : null;
 }

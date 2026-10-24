@@ -161,6 +161,47 @@ describe('delivery notes on receipt dates: every note exactly once across period
   });
 });
 
+describe('delivery notes: matching is normalised and survives an unlinked consolidated invoice', () => {
+  it('"ת.מ. 007702" on the ריכוז covers note 7702; a ריכוז with no supplier yet still covers the listed note', async () => {
+    const pos: string[] = [];
+    for (const dn of ['7702', '7703']) {
+      const [po] = await db.insert(purchaseOrders).values({ restaurantId: T.restaurantId, supplierId: T.supplierId, status: 'closed' }).returning();
+      pos.push(po!.id);
+      const [pl] = await db.insert(poLines).values({ poId: po!.id, productId: beef, rawDescription: 'בקר', qtyOrdered: '1', unit: 'ק״ג', unitPriceExpected: '100.0000' }).returning();
+      const [gr] = await db.insert(goodsReceipts).values({ restaurantId: T.restaurantId, poId: po!.id, receivedAt: atAgo(6), status: 'completed', notes: `ת.מ. ${dn}` }).returning();
+      await db.insert(grLines).values({ grId: gr!.id, poLineId: pl!.id, productId: beef, qtyReceived: '1' });
+    }
+    await invoice('GD-M-2', 3, '100.00', { ocrPayload: { raw: { deliveryNotes: ['ת.מ. 007702'] } } as never });
+    await invoice('GD-M-3', 3, '100.00', { supplierId: null, ocrPayload: { raw: { deliveryNotes: [{ number: '7703' }] } } as never });
+    const p = await purchasesInPeriod(db, T.restaurantId, TZ, ymdAgo(10), ymdAgo(0));
+    // Both notes are billed by the close: nothing accrued, so the goods count once (on the invoices).
+    try {
+      expect(p).toMatchObject({ invoicesAgorot: 20_000, accruedNotes: 0, accruedAgorot: 0, purchasesAgorot: 20_000 });
+    } finally {
+      for (const id of pos) await db.delete(purchaseOrders).where(eq(purchaseOrders.id, id));
+    }
+  });
+});
+
+describe('period: plausibility', () => {
+  it('a negative or out-of-band food cost is flagged implausible: no % alarm, no variance', async () => {
+    await db.insert(priceHistory).values({ restaurantId: T.restaurantId, productId: beef, supplierId: T.supplierId, observedAt: atAgo(30), unitPrice: '100.0000' });
+    const c = caller(T);
+    const open = (await c.inventory.start({ countDate: ymdAgo(20) })).id;
+    await c.inventory.saveLines({ countId: open, lines: [{ productId: beef, qty: '1' }] });
+    await c.inventory.complete({ countId: open });
+    const close = (await c.inventory.start({ countDate: ymdAgo(5) })).id;
+    // 400 kg on the shelf at close: closing ≫ opening + purchases → a negative food cost.
+    await c.inventory.saveLines({ countId: close, lines: [{ productId: beef, qty: '400' }] });
+    await c.inventory.complete({ countId: close });
+    await c.inventory.setMeta({ countId: close, foodSalesExVat: '10000.00' });
+    const p = await c.inventory.period();
+    if (!p.available) throw new Error('period');
+    expect(p.actualAgorot).toBeLessThan(0);
+    expect(p).toMatchObject({ implausible: true, varianceAlert: false });
+  });
+});
+
 describe('period: the bar is not food, coverage per count, close order', () => {
   async function closedCount(daysAgo: number, lines: Array<{ productId: string; qty: string | null; area?: 'bar' }>) {
     const c = caller(T);
@@ -199,6 +240,16 @@ describe('period: the bar is not food, coverage per count, close order', () => {
     expect(p.coverageComplete).toBe(false);
     expect(p.varianceAlert).toBe(false);
     await db.delete(products).where(eq(products.id, rice)).catch(() => undefined);
+  });
+
+  it('a draft dated on or before the latest closed count says so up front (lastClosedDate)', async () => {
+    await db.insert(priceHistory).values({ restaurantId: T.restaurantId, productId: beef, supplierId: T.supplierId, observedAt: atAgo(30), unitPrice: '100.0000' });
+    await closedCount(0, [{ productId: beef, qty: '1' }]);
+    const d = await caller(T).inventory.start();
+    const v = await caller(T).inventory.get({ countId: d.id });
+    expect(v.countDate).toBe(ymdAgo(0));
+    expect(v.lastClosedDate).toBe(ymdAgo(0));
+    await caller(T).inventory.discard({ countId: d.id });
   });
 
   it('closing a count dated on or before the latest closed count is refused', async () => {

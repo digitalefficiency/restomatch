@@ -228,7 +228,10 @@ function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void 
     },
     onError: (e) => {
       const last = /^NOT_AFTER_LAST:(\d{4}-\d{2}-\d{2})$/.exec(e.message);
-      toast.error(last ? t('count.notAfterLast', { date: dayText(last[1]!, locale) }) : friendlyError(e, tc));
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date());
+      toast.error(
+        last ? (last[1] === today ? t('count.notAfterLastToday') : t('count.notAfterLast', { date: dayText(last[1]!, locale) })) : friendlyError(e, tc),
+      );
     },
   });
   const discard = trpc.inventory.discard.useMutation({
@@ -293,6 +296,13 @@ function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void 
           />
         </label>
       </div>
+
+      {draft.lastClosedDate && draft.countDate <= draft.lastClosedDate ? (
+        <p className="mt-3 flex items-start gap-1.5 text-sm text-warn" role="status" data-testid="closed-on-warn">
+          <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          {draft.lastClosedDate === today ? t('count.notAfterLastToday') : t('count.closedOnWarn', { date: dayText(draft.lastClosedDate, locale) })}
+        </p>
+      ) : null}
 
       {lines.length === 0 ? <p className="mt-4 text-sm text-muted">{t('count.emptyList')}</p> : null}
 

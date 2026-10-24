@@ -12,6 +12,12 @@ describe('normalizeQty: what a phone keypad types → the server qty', () => {
     expect(normalizeQty('0.125')).toBe('0.125');
   });
 
+  it('a leading-zero group is never thousands: "0,250" is 0.25 (and "1234,567" is not a thousands group)', () => {
+    expect(normalizeQty('0,250')).toBe('0.250');
+    expect(normalizeQty('0,5')).toBe('0.5');
+    expect(normalizeQty('1234,567')).toBeNull();
+  });
+
   it('blank is "not counted"; a trailing separator is still being typed (no error, nothing to save)', () => {
     expect(normalizeQty('')).toBe('');
     expect(normalizeQty('2,')).toBeUndefined();

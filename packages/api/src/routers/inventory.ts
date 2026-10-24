@@ -58,6 +58,13 @@ const SALES = z
 /** Theoretical cost is compared only when recipes cover at least this share of sales. */
 export const THEORY_MIN_COVERAGE_BP = 9000;
 
+/**
+ * A food cost outside this band (or negative) is a counting / entry slip, not a
+ * result: shown as "בדקו את הספירה" instead of a %, never an alarm. Same idea
+ * as the POS check's IMPLAUSIBLE_FOOD_COST_BP, tighter because both ends are counted.
+ */
+export const PLAUSIBLE_FOOD_COST_BP = { min: 500, max: 8000 } as const;
+
 /** Below this share of food lines counted and priced, an end is "incomplete": a calm caveat, never an alarm. */
 export const COUNT_MIN_COVERAGE_BP = 9500;
 
@@ -121,7 +128,10 @@ async function draftView(db: Database, restaurantId: string, tz: string, countId
     ? { lines: lines.length, counted, notCounted: lines.length - counted, unpriced: lines.filter((l) => l.qty != null && l.valueAgorot == null).length }
     : { lines: sum.lines, counted: sum.counted, notCounted: sum.notCounted, unpriced: sum.unpriced };
   // Sanity: the previous completed count before this one, and what arrived since.
-  const prev = (await completedCounts(db, restaurantId, 48)).find((x) => x.id !== c.id && x.countDate < c.countDate);
+  const done = await completedCounts(db, restaurantId, 48);
+  const prev = done.find((x) => x.id !== c.id && x.countDate < c.countDate);
+  // A draft on or before the latest closed count can't be closed (NOT_AFTER_LAST): said up front.
+  const lastClosedDate = done.find((x) => x.id !== c.id)?.countDate ?? null;
   const prevLines = prev ? new Map((await loadLines(db, restaurantId, prev.id)).map((l) => [l.productId, l] as const)) : new Map();
   const received = prev ? await receivedBetween(db, restaurantId, tz, prev.countDate, c.countDate, ids) : new Map();
   const out = lines.map((l) => {
@@ -152,6 +162,7 @@ async function draftView(db: Database, restaurantId: string, tz: string, countId
     progress,
     /** Owner/manager close (and lock) a count; the chef counts. Owner alone amends a closed one. */
     canClose: CLOSERS.has(role),
+    lastClosedDate,
     canAmend: role === 'owner',
     lines: out,
   };
@@ -224,19 +235,31 @@ async function periodFor(db: Database, restaurantId: string, rc: Awaited<ReturnT
   const closeEnd = await foodEnd(db, restaurantId, closing);
   // An end with uncounted / unpriced food lines understates stock: the % is shown with a caveat, and no variance alarm.
   const coverageComplete = openEnd.coverage.complete && closeEnd.coverage.complete;
+  const raw = actualFoodCost({
+    openingAgorot: openEnd.valueAgorot,
+    purchasesAgorot: purchases.purchasesAgorot,
+    creditsAgorot: purchases.creditsAgorot,
+    closingAgorot: closeEnd.valueAgorot,
+    salesAgorot,
+    theoreticalAgorot: null,
+  });
+  const implausible =
+    raw.actualAgorot < 0 || (raw.actualBp != null && (raw.actualBp < PLAUSIBLE_FOOD_COST_BP.min || raw.actualBp > PLAUSIBLE_FOOD_COST_BP.max));
   const result = actualFoodCost({
     openingAgorot: openEnd.valueAgorot,
     purchasesAgorot: purchases.purchasesAgorot,
     creditsAgorot: purchases.creditsAgorot,
     closingAgorot: closeEnd.valueAgorot,
     salesAgorot,
-    theoreticalAgorot: coverageComplete ? theoreticalAgorot : null,
+    theoreticalAgorot: coverageComplete && !implausible ? theoreticalAgorot : null,
   });
   return {
     available: true as const,
     opening: openEnd,
     closing: closeEnd,
     coverageComplete,
+    /** A negative or out-of-band result: "check the count", never a % to act on. */
+    implausible,
     purchases,
     salesAgorot,
     salesSource,

@@ -8,6 +8,7 @@ import { Button, friendlyError, useToast } from '@/lib/components';
 import { useT } from '@/lib/i18n/client';
 import { components } from '@/lib/i18n/messages/components';
 import { inventory as inventoryNs } from '@/lib/i18n/messages/inventory';
+import { normalizeQty } from '../inventory-ui';
 
 /** The closed count as a CSV file for the accountant (UTF-8 with BOM, opens in Excel). */
 export function CsvButton({ countId }: { countId: string }) {
@@ -67,8 +68,9 @@ export function AmendButton({ countId, productId, unit, qty }: { countId: string
       onClick={() => {
         const raw = window.prompt(t('detail.amendQty', { unit }), qty ?? '');
         if (raw === null) return;
-        const v = raw.trim().replace(',', '.');
-        if (v !== '' && !/^\d{1,8}(\.\d{1,4})?$/.test(v)) return;
+        // Same keypad rules as the count ("1,200" = 1200, "2,5" = 2.5).
+        const v = normalizeQty(raw);
+        if (v == null) return;
         const reason = window.prompt(t('detail.amendReason'), '');
         if (!reason || reason.trim().length < 3) return;
         amend.mutate({ countId, productId, qty: v === '' ? null : v, reason: reason.trim() });

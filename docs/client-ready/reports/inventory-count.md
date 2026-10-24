@@ -79,9 +79,9 @@ New suites (all green, together with COVERAGE / cross-tenant):
 | `inventory-router` | 12 |
 | `inventory-fixes` | 6 |
 | `inventory-must-haves` | 5 |
-| `inventory-review` | 9 |
+| `inventory-review` | 12 |
 | `inventory-rls.attack` | 7 |
-| web `test/inventory-ui` | 5 |
+| web `test/inventory-ui` | 6 |
 
 ### Layer 2 — production build, he + en, 1366 and 390
 - **`VERIFY_E2E=1 VERIFY_SOFTNAV=1 … verify.sh layer2`:** includes `e2e/inventory.spec.ts`, at 390 px in he/en. It runs start → count → reload resumes → close → uncounted list + explicit OK → summary ₪ → food-cost card → type sales → %. Every screen: axe 0, no sideways scroll, 44 px targets, no console errors.
@@ -106,6 +106,10 @@ Smaller items were also fixed: the date field, the decimal comma, the non-food p
   - keyboard next-field order on the count;
   - focus handling in the confirm step;
   - cancel for the sales edit.
+  - a negative credit note plus the same finding marked `resolved` can subtract the same credit twice; `resolved` should re-stamp `resolved_at` when the credit is received;
+  - food kept on the bar shelf (e.g. lemons) is out of stock but its purchases are in;
+  - delivery-note accrual can drift by 1 agora (per-line vs per-note rounding);
+  - the seed's `localToday` uses the wall clock, not `DEMO_TODAY`;
   - unbilled delivery notes are an estimate at PO prices. When the invoice arrives at a different price, the difference lands in the month the invoice is booked. A refinement could book it back to the receipt month.
 
 - **Phase 2:** par levels → suggested order quantity = par − on hand − open PO qty, prefilled in the order wizard.

@@ -94,16 +94,16 @@ describe('unexplained usage is compared only on what the recipes cover', () => {
     await db.insert(priceHistory).values({ restaurantId: T.restaurantId, productId: p!.id, supplierId: T.supplierId, observedAt: atAgo(30), unitPrice: '40.0000' });
     // ₪10 per burger (250 g × ₪40/kg).
     await caller(T).recipes.save({ name: 'בורגר', nameEn: 'Burger', menuPriceAgorot: 5900, items: [{ productId: p!.id, quantity: '250', unit: 'גרם', wastePct: 0 }] });
-    // Opening ₪9,000, closing ₪0, no purchases ⇒ actual ₪9,000.
+    // Opening ₪2,000, closing ₪0, no purchases ⇒ actual ₪2,000 (a plausible share of sales in both cases below).
     const [o, c] = await db
       .insert(inventoryCounts)
       .values([
-        { restaurantId: T.restaurantId, countDate: ymdAgo(10), status: 'completed', totalValueAgorot: 900_000, completedAt: new Date(Date.now() - 2_000) },
+        { restaurantId: T.restaurantId, countDate: ymdAgo(10), status: 'completed', totalValueAgorot: 200_000, completedAt: new Date(Date.now() - 2_000) },
         { restaurantId: T.restaurantId, countDate: today, status: 'completed', totalValueAgorot: 0, completedAt: new Date() },
       ])
       .returning();
     await db.insert(inventoryCountLines).values([
-      { restaurantId: T.restaurantId, countId: o!.id, productId: p!.id, storageArea: 'fridge', qty: '225', unit: 'ק״ג', unitCost: '40.0000', valueAgorot: 900_000 },
+      { restaurantId: T.restaurantId, countId: o!.id, productId: p!.id, storageArea: 'fridge', qty: '50', unit: 'ק״ג', unitCost: '40.0000', valueAgorot: 200_000 },
       { restaurantId: T.restaurantId, countId: c!.id, productId: p!.id, storageArea: 'fridge', qty: '0', unit: 'ק״ג', unitCost: '40.0000', valueAgorot: 0 },
     ]);
     const [imp] = (await db.execute(sql`insert into pos_sales_imports (restaurant_id, provider, filename, period_from, period_to)
@@ -116,7 +116,7 @@ describe('unexplained usage is compared only on what the recipes cover', () => {
       available: true,
       salesAgorot: 3_000_000,
       salesSource: 'pos',
-      actualBp: 3000,
+      actualBp: 667,
       theoreticalAgorot: null,
       theoreticalCoverageBp: 1000,
       varianceAgorot: null,
@@ -125,7 +125,7 @@ describe('unexplained usage is compared only on what the recipes cover', () => {
     // Only the burger sells: theory covers all sales.
     await db.execute(sql`delete from pos_sales where restaurant_id = ${T.restaurantId} and item_ref = 'P1'`);
     const full = await caller(T).inventory.period();
-    expect(full).toMatchObject({ salesAgorot: 300_000, theoreticalAgorot: 100_000, theoreticalCoverageBp: 10_000, varianceAgorot: 800_000, varianceAlert: true });
+    expect(full).toMatchObject({ salesAgorot: 300_000, implausible: false, theoreticalAgorot: 100_000, theoreticalCoverageBp: 10_000, varianceAgorot: 100_000, varianceAlert: true });
     await db.execute(sql`delete from pos_sales where restaurant_id = ${T.restaurantId}`);
     await db.delete(inventoryCounts).where(eq(inventoryCounts.restaurantId, T.restaurantId));
   });

@@ -139,7 +139,8 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
   }
 
 
-  const overTarget = p.actualBp != null && p.actualBp > p.targetBp;
+  // Amber only on a full, plausible count: a partial or implausible one never reads as over target.
+  const overTarget = p.actualBp != null && p.actualBp > p.targetBp && p.coverageComplete && !p.implausible;
   return (
     <Card padding="md" data-testid="food-cost-period">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -159,7 +160,12 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
         ) : null}
       </div>
 
-      <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+      {p.implausible ? (
+        <p className="mt-3 text-sm text-muted" data-testid="food-cost-implausible">
+          <span className="font-semibold text-ink">{t('period.implausibleTitle')}</span> {t('period.implausibleBody')}
+        </p>
+      ) : null}
+      <div className={p.implausible ? 'hidden' : 'mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1'}>
         <span className="text-3xl font-bold tabular-nums text-ink" data-testid="food-cost-actual">
           {p.actualBp != null ? pct(p.actualBp, locale) : ils(p.actualAgorot, locale, 0)}
         </span>

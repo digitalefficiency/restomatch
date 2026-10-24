@@ -370,8 +370,10 @@ export async function deliveryNoteAccruals(
   fromYmd: string,
   toYmd: string,
 ): Promise<{ accruedAgorot: number; accruedNotes: number; reversedAgorot: number }> {
-  // A note number is matched like an invoice number: letters/digits only, upper-case, no leading zeros.
-  const norm = (col: SQL) => sql`nullif(regexp_replace(regexp_replace(upper(${col}), '[^[:alnum:]]', '', 'g'), '^0+', ''), '')`;
+  // A note number is matched like an invoice number: a "ת.מ." / ת"מ prefix dropped, letters/digits only,
+  // upper-case, no leading zeros ("ת.מ. 007702" = "7702").
+  const norm = (col: SQL) =>
+    sql`nullif(regexp_replace(regexp_replace(regexp_replace(upper(${col}), '^\s*ת\s*[.״"׳'']?\s*מ\s*[.״"׳'']?\s*', ''), '[^[:alnum:]]', '', 'g'), '^0+', ''), '')`;
   const [r] = (await db.execute(sql`
     with notes as (
       select
@@ -402,11 +404,13 @@ export async function deliveryNoteAccruals(
       ) n
       where i.restaurant_id = ${restaurantId}
     ),
+    -- A consolidated invoice whose supplier is not linked yet (OCR) covers the listed number for whichever
+    -- supplier's note carries it (the notes' supplier is the fallback).
     marked as (
       select notes.*,
-        exists (select 1 from covered c where c.dn = notes.dn and c.supplier_id = notes.supplier_id and c.idate <= ${toYmd}::date) as billed_by_close,
-        exists (select 1 from covered c where c.dn = notes.dn and c.supplier_id = notes.supplier_id and c.idate <= ${fromYmd}::date) as billed_by_open,
-        exists (select 1 from covered c where c.dn = notes.dn and c.supplier_id = notes.supplier_id and c.idate > ${fromYmd}::date and c.idate <= ${toYmd}::date) as billed_in_period
+        exists (select 1 from covered c where c.dn = notes.dn and (c.supplier_id = notes.supplier_id or c.supplier_id is null) and c.idate <= ${toYmd}::date) as billed_by_close,
+        exists (select 1 from covered c where c.dn = notes.dn and (c.supplier_id = notes.supplier_id or c.supplier_id is null) and c.idate <= ${fromYmd}::date) as billed_by_open,
+        exists (select 1 from covered c where c.dn = notes.dn and (c.supplier_id = notes.supplier_id or c.supplier_id is null) and c.idate > ${fromYmd}::date and c.idate <= ${toYmd}::date) as billed_in_period
       from notes
       where notes.dn is not null
     )
