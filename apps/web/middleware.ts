@@ -125,6 +125,14 @@ export default auth((req) => {
   return res;
 });
 
+// Next requires a static literal here (it is read at build time, not run).
+// Excluded — middleware never runs, so no Auth.js Set-Cookie and no CSP on them:
+// Auth.js's own routes, Next's static output, and the anonymous, read-only
+// crawler surfaces (share cards under /og/, the generated OG image, the icon,
+// robots.txt, sitemap.xml). A Set-Cookie on those stops public caches/CDNs from
+// caching them. Tested against lib/__tests__/middlewareMatcher.test.ts.
 export const config = {
-  matcher: ['/((?!api/auth|_next/static|_next/image|favicon.ico).*)'],
+  matcher: [
+    '/((?!api/auth|_next/static|_next/image|favicon.ico|og/|opengraph-image|icon.svg|robots.txt|sitemap.xml).*)',
+  ],
 };
