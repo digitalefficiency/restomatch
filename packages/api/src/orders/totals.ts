@@ -13,7 +13,8 @@ export function estimateTotal(
   let any = false;
   for (const l of lines) {
     if (l.unitPriceExpected == null || l.unitPriceExpected === '') continue;
-    const qty = Number(l.qty);
+    // Quantity as po_lines stores it (NUMERIC(12,3)), so the header matches its lines.
+    const qty = Math.round(Number(l.qty) * 1000) / 1000;
     const price = Number(l.unitPriceExpected);
     if (!Number.isFinite(qty) || !Number.isFinite(price)) continue;
     // +1e-9 guards the half-up step against binary artefacts (1.005 × 100 = 100.49999…).

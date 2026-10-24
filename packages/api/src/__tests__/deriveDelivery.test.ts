@@ -72,3 +72,32 @@ describe('deriveExpectedDelivery — golden fixtures', () => {
     expect(localDay(res!.expectedDeliveryAt)).toBe('2026-06-23');
   });
 });
+
+describe('deriveExpectedDelivery — cutoff is local wall-clock time on DST days', () => {
+  const weekdays: OrderSchedule = {
+    windows: [{ orderDays: [0, 1, 2, 3, 4, 5], cutoff: '14:00', fulfillment: { kind: 'lead_days', leadDays: 1 } }],
+  };
+
+  it('fall-back Sun 2026-10-25 (demo day): 13:30 local is before a 14:00 cutoff', () => {
+    // Clocks went 02:00 → 01:00, so local midnight is +03:00 and 13:30 is +02:00 (= 11:30Z).
+    const res = deriveExpectedDelivery(weekdays, new Date('2026-10-25T11:30:00Z'), TZ)!;
+    expect(res.missedCutoff).toBe(false);
+    expect(res.nextOrderCutoffAt.toISOString()).toBe('2026-10-25T12:00:00.000Z'); // 14:00 IST
+    expect(localDay(res.expectedDeliveryAt)).toBe('2026-10-26');
+  });
+
+  it('fall-back Sun 2026-10-25: 14:30 local is after the cutoff', () => {
+    const res = deriveExpectedDelivery(weekdays, new Date('2026-10-25T12:30:00Z'), TZ)!;
+    expect(res.missedCutoff).toBe(true);
+    expect(localDay(res.expectedDeliveryAt)).toBe('2026-10-27');
+  });
+
+  it('spring-forward Fri 2027-03-26: the cutoff is 14:00 IDT, not an hour later', () => {
+    // Clocks went 02:00 → 03:00: midnight is +02:00, 14:00 is +03:00 (= 11:00Z).
+    const before = deriveExpectedDelivery(weekdays, new Date('2027-03-26T10:30:00Z'), TZ)!; // 13:30 IDT
+    expect(before.missedCutoff).toBe(false);
+    expect(before.nextOrderCutoffAt.toISOString()).toBe('2027-03-26T11:00:00.000Z');
+    const after = deriveExpectedDelivery(weekdays, new Date('2027-03-26T11:30:00Z'), TZ)!; // 14:30 IDT
+    expect(after.missedCutoff).toBe(true);
+  });
+});

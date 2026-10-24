@@ -1,6 +1,9 @@
+import { TRPCError } from '@trpc/server';
 import {
   and,
   eq,
+  goodsReceipts,
+  inArray,
   poLines,
   purchaseOrders,
   sql,
@@ -53,11 +56,21 @@ function metaStr(meta: Record<string, unknown> | undefined, key: string): string
   return typeof v === 'string' && v.trim() ? v.trim() : null;
 }
 
+/** po_lines.qty_ordered is NUMERIC(12,3): totals use the quantity as stored. */
+export function qty3(qty: number): number {
+  return Math.round(qty * 1000 + (qty >= 0 ? 1e-9 : -1e-9)) / 1000;
+}
+
 /** Per-line ex-VAT contribution: trust the printed line total, else price×qty. */
 function lineExclVat(l: NormalizedPurchaseOrder['lines'][number]): number {
   if (typeof l.lineTotal === 'number') return l.lineTotal;
-  if (typeof l.unitPrice === 'number') return mulIls(l.unitPrice, l.qty);
+  if (typeof l.unitPrice === 'number') return mulIls(l.unitPrice, qty3(l.qty));
   return 0;
+}
+
+/** The identity of a line across re-imports: its SKU, else its printed name. */
+function lineKey(l: { supplierSku: string | null; rawDescription: string | null }): string {
+  return l.supplierSku ? `sku:${l.supplierSku}` : `name:${(l.rawDescription ?? '').trim()}`;
 }
 
 /**
@@ -82,6 +95,15 @@ export async function importPurchaseOrder(
 ): Promise<ImportPoResult> {
   const { restaurantId, normalized: po } = args;
   const meta = po.metadata as Record<string, unknown> | undefined;
+
+  // A misread quantity (negative / not a number) is the user's document, not a 500.
+  const badLine = po.lines.find((l) => !Number.isFinite(l.qty) || l.qty < 0 || qty3(l.qty) > 999_999_999);
+  if (badLine) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: `כמות לא תקינה בשורה "${badLine.rawDescription}" — בדקו את המסמך ונסו שוב`,
+    });
+  }
 
   // ── 1. Checksum (agorot-exact) ───────────────────────────────────────────
   const computedExclVat = sumIls(po.lines.map(lineExclVat));
@@ -131,7 +153,7 @@ export async function importPurchaseOrder(
         productId,
         supplierSku: sku,
         rawDescription: l.rawDescription,
-        qtyOrdered: l.qty.toString(),
+        qtyOrdered: qty3(l.qty).toString(),
         unit: l.unit,
         unitPriceExpected: typeof l.unitPrice === 'number' ? l.unitPrice.toString() : null,
       };
@@ -151,7 +173,7 @@ export async function importPurchaseOrder(
   // not collide. (po_restaurant_source_ref_unique — per restaurant since 0029 —
   // is the DB backstop.)
   const [existing] = await db
-    .select({ id: purchaseOrders.id })
+    .select({ id: purchaseOrders.id, status: purchaseOrders.status })
     .from(purchaseOrders)
     .where(
       and(
@@ -165,6 +187,20 @@ export async function importPurchaseOrder(
   let poId: string;
   let created: boolean;
   if (existing) {
+    // A re-import may refresh an order that is still just an order. Once it was
+    // cancelled, closed or received against, it is history: re-importing must
+    // not un-cancel it or rewrite the lines a goods receipt points at.
+    if (existing.status === 'cancelled' || existing.status === 'closed') {
+      throw new TRPCError({ code: 'CONFLICT', message: 'ההזמנה הזו כבר נסגרה או בוטלה — לא ניתן לייבא אותה מחדש' });
+    }
+    const [receipt] = await db
+      .select({ id: goodsReceipts.id })
+      .from(goodsReceipts)
+      .where(and(eq(goodsReceipts.poId, existing.id), eq(goodsReceipts.restaurantId, restaurantId)))
+      .limit(1);
+    if (receipt) {
+      throw new TRPCError({ code: 'CONFLICT', message: 'כבר התחילה קבלה על ההזמנה הזו — לא ניתן לייבא אותה מחדש' });
+    }
     poId = existing.id;
     created = false;
     await db
@@ -180,7 +216,23 @@ export async function importPurchaseOrder(
         updatedAt: new Date(),
       })
       .where(and(eq(purchaseOrders.id, poId), eq(purchaseOrders.restaurantId, restaurantId)));
-    await db.delete(poLines).where(eq(poLines.poId, poId));
+    // Upsert by line key: unchanged lines keep their ids (anything pointing at
+    // them stays linked); new lines are inserted, dropped lines removed.
+    const current = await db
+      .select({ id: poLines.id, supplierSku: poLines.supplierSku, rawDescription: poLines.rawDescription })
+      .from(poLines)
+      .where(eq(poLines.poId, poId));
+    const byKey = new Map<string, string[]>();
+    for (const c of current) byKey.set(lineKey(c), [...(byKey.get(lineKey(c)) ?? []), c.id]);
+    const fresh: typeof resolved = [];
+    for (const r of resolved) {
+      const id = byKey.get(lineKey(r))?.shift();
+      if (id) await db.update(poLines).set(r).where(eq(poLines.id, id));
+      else fresh.push(r);
+    }
+    const gone = [...byKey.values()].flat();
+    if (gone.length > 0) await db.delete(poLines).where(inArray(poLines.id, gone));
+    if (fresh.length > 0) await db.insert(poLines).values(fresh.map((r) => ({ poId, ...r })));
   } else {
     const [inserted] = await db
       .insert(purchaseOrders)
@@ -204,7 +256,7 @@ export async function importPurchaseOrder(
     created = true;
   }
 
-  if (resolved.length > 0) {
+  if (created && resolved.length > 0) {
     await db.insert(poLines).values(resolved.map((r) => ({ poId, ...r })));
   }
 

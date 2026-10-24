@@ -41,7 +41,7 @@ import { addOrMerge, lineTotalIls, linesValid, orderTotalIls } from '../order-lo
 
 type Outputs = inferRouterOutputs<AppRouter>;
 type Channel = 'email' | 'whatsapp' | 'none';
-type DeliveryPreview = NonNullable<Outputs['orders']['previewDelivery']>;
+type DeliveryPreview = Outputs['orders']['previewDelivery'];
 
 interface DraftLine {
   key: string;
@@ -75,6 +75,8 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
   const [announce, setAnnounce] = useState('');
   /** The draft created on the first submit — retries only re-send it (no duplicate drafts). */
   const [draftId, setDraftId] = useState<string | null>(null);
+  /** Requested delivery, restaurant-local 'YYYY-MM-DD' ('' = not picked yet → the server default). */
+  const [deliveryDate, setDeliveryDate] = useState('');
 
   useEffect(() => {
     const timer = setTimeout(() => setSearch(rawSearch.trim()), 250);
@@ -103,6 +105,7 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
     { supplierId },
     { enabled: !!supplierId, retry: false },
   );
+  const deliveryDay = deliveryDate || delivery.data?.defaultDate || '';
 
   // Default channel follows what the supplier can actually receive.
   const defaultChannel: Channel = supplier?.contactEmail
@@ -156,6 +159,7 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
       if (!poId) {
         const draft = await createDraft.mutateAsync({
           supplierId,
+          expectedDeliveryDate: deliveryDay || undefined,
           lines: lines.map((l) => ({
             productId: l.productId,
             rawDescription: l.rawDescription || undefined,
@@ -192,12 +196,13 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
     setChannel(null);
     setRawSearch('');
     setDraftId(null);
+    setDeliveryDate('');
     createDraft.reset();
     placeOrder.reset();
   };
 
   const money = (v: number) => formatIls(v, { locale, maximumFractionDigits: 2 });
-  const deliveryDate = (iso: string) =>
+  const fmtDeliveryDate = (iso: string) =>
     formatDate(iso, locale, { weekday: 'long', day: 'numeric', month: 'long' });
 
   return (
@@ -263,7 +268,14 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
                 </Select>
               </Field>
               {supplierId ? (
-                <DeliveryPanel d={delivery.data ?? null} loading={delivery.isLoading} fmt={deliveryDate} />
+                <DeliveryPanel
+                  d={delivery.data ?? null}
+                  loading={delivery.isLoading}
+                  fmt={fmtDeliveryDate}
+                  value={deliveryDay}
+                  onChange={(v) => setDeliveryDate(v)}
+                  disabled={!!draftId}
+                />
               ) : null}
               <div className="mt-4">
                 <Button variant="primary" size="sm" disabled={!supplierId} onClick={() => setStep('BUILD')}>
@@ -325,6 +337,7 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
                       <li key={it.id} className="border-b border-line/60 last:border-0">
                         <button
                           type="button"
+                          data-testid="catalog-item"
                           onClick={() =>
                             addLine({
                               productId: it.productId ?? undefined,
@@ -515,7 +528,14 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
             <span className="font-mono tabular-nums">{money(total)}</span>
           </div>
 
-          <DeliveryPanel d={delivery.data ?? null} loading={delivery.isLoading} fmt={deliveryDate} />
+          <DeliveryPanel
+                  d={delivery.data ?? null}
+                  loading={delivery.isLoading}
+                  fmt={fmtDeliveryDate}
+                  value={deliveryDay}
+                  onChange={(v) => setDeliveryDate(v)}
+                  disabled={!!draftId}
+                />
 
           {guardrail.isFetching && (
             <p className="mt-3 flex items-center gap-2 text-xs text-subtle">
@@ -607,32 +627,40 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
 }
 
 /**
- * Shows the DERIVED delivery date for the manager to confirm. When the order is
- * placed after today's cutoff we say so explicitly instead of silently rolling.
+ * The requested delivery date, which the manager confirms or changes. With an
+ * order schedule it starts at the DERIVED date (and says so when today's cutoff
+ * has passed instead of silently rolling); without one it starts at tomorrow.
  */
 function DeliveryPanel({
   d,
   loading,
   fmt,
+  value,
+  onChange,
+  disabled,
 }: {
   d: DeliveryPreview | null;
   loading: boolean;
   fmt: (iso: string) => string;
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
 }) {
   const t = useT(ordersNs);
-  if (loading) return null;
+  if (loading || !d) return null;
+  const derived = d.derived;
   return (
     <div className="mt-4 rounded-xl border border-line bg-surface-2 p-3 text-sm">
-      {d ? (
+      {derived ? (
         <>
           <p className="flex items-center gap-2 text-ink">
             <CalendarClock className="h-4 w-4 text-primary" aria-hidden="true" />
             <span>
-              {t('wizard.deliveryExpected')} <span className="font-semibold">{fmt(d.expectedDeliveryAt)}</span>
+              {t('wizard.deliveryExpected')} <span className="font-semibold">{fmt(derived.expectedDeliveryAt)}</span>
             </span>
           </p>
-          {d.missedCutoff && (
-            <p className="mt-2 text-xs text-warn">{t('wizard.missedCutoff', { date: fmt(d.expectedDeliveryAt) })}</p>
+          {derived.missedCutoff && (
+            <p className="mt-2 text-xs text-warn">{t('wizard.missedCutoff', { date: fmt(derived.expectedDeliveryAt) })}</p>
           )}
           <p className="mt-1 text-xs text-subtle">{t('wizard.deliveryHint')}</p>
         </>
@@ -641,6 +669,18 @@ function DeliveryPanel({
           <CalendarClock className="h-4 w-4" aria-hidden="true" /> {t('wizard.noSchedule')}
         </p>
       )}
+      <Field label={t('wizard.deliveryDate')} htmlFor="ord-delivery-date" className="mt-3">
+        <Input
+          id="ord-delivery-date"
+          type="date"
+          data-testid="order-delivery-date"
+          value={value}
+          min={d.today}
+          required
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      </Field>
     </div>
   );
 }

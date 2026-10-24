@@ -46,7 +46,8 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
   const router = useRouter();
   const po = data.po!;
   const isDraft = po.status === 'draft';
-  const canCancel = po.status !== 'cancelled' && po.status !== 'closed';
+  // A goods receipt makes the order history even while its status reads 'sent'.
+  const canCancel = po.status !== 'cancelled' && po.status !== 'closed' && data.receiptStatus == null;
   const editable = canEdit && isDraft;
 
   const [channel, setChannel] = useState<Channel>('none');
@@ -130,7 +131,7 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
         <div className="flex flex-wrap items-start justify-between gap-4">
           <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm sm:grid-cols-4">
             <div className="col-span-2 sm:col-span-4">
-              <OrderStatusBadge status={po.status} />
+              <OrderStatusBadge status={po.status} receiptStatus={data.receiptStatus} />
             </div>
             <div>
               <dt className="text-xs text-subtle">{t('detail.created')}</dt>
@@ -139,11 +140,18 @@ export function OrderDetail({ data, canEdit }: { data: OrderData; canEdit: boole
             {po.sentAt ? (
               <div>
                 <dt className="text-xs text-subtle">
-                  {po.sentChannel
-                    ? t('detail.sentVia', { channel: t(`detail.channelNames.${po.sentChannel as 'email' | 'whatsapp'}`) })
+                  {po.sentChannel && data.supplierMessage !== 'not_configured' && data.supplierMessage !== 'failed'
+                    ? t(data.supplierMessage === 'pending' ? 'detail.sendingVia' : 'detail.sentVia', {
+                        channel: t(`detail.channelNames.${po.sentChannel as 'email' | 'whatsapp'}`),
+                      })
                     : t('detail.sentAt')}
                 </dt>
                 <dd className="tabular-nums text-ink">{formatDateTime(po.sentAt, locale)}</dd>
+                {data.supplierMessage === 'not_configured' || data.supplierMessage === 'failed' ? (
+                  <dd className="mt-1 text-xs text-muted" data-testid="supplier-message-state" data-state={data.supplierMessage}>
+                    {t(data.supplierMessage === 'failed' ? 'detail.messageFailed' : 'detail.messageNotConfigured')}
+                  </dd>
+                ) : null}
               </div>
             ) : null}
             <div>
