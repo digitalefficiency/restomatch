@@ -35,12 +35,13 @@ const monthOffset = z.number().int().min(-24).max(0).optional();
 export const recoveryRouter = router({
   /** Which of this area's flags are on for the caller's restaurant (nav / hero / routes). Never gated. */
   flags: memberProcedure.query(async ({ ctx }) => {
-    const [recovery, monthlyReport, monthlyDigestPreview] = await Promise.all([
+    const [recovery, monthlyReport, monthlyDigestPreview, leakProof] = await Promise.all([
       isFeatureOn(ctx.db, ctx.session.restaurantId, 'recovery'),
       isFeatureOn(ctx.db, ctx.session.restaurantId, 'monthlyReport'),
       isFeatureOn(ctx.db, ctx.session.restaurantId, 'monthlyDigestPreview'),
+      isFeatureOn(ctx.db, ctx.session.restaurantId, 'leakProof'),
     ]);
-    return { recovery, monthlyReport, monthlyDigestPreview };
+    return { recovery, monthlyReport, monthlyDigestPreview, leakProof };
   }),
 
   /** Totals, ageing, per-supplier recovery rate + this month's returned ₪. Materialises new claims first. */

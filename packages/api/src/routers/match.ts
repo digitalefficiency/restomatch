@@ -55,7 +55,7 @@ export const matchRouter = router({
 
       // Re-match: drop any prior run for this invoice (discrepancies cascade).
       // Claims on those discrepancies are money history: release bare ones,
-      // refuse while any is in progress (₪-back tracker, wave 1).
+      // refuse while any is in progress (₪-back tracker, wave 1) — before any work.
       await releaseClaimsForRematch(ctx.db, restaurantId, input.invoiceId);
       // Keep the people's decisions, re-applied below to findings that still
       // exist (a rejected "not a duplicate" must not come back open).

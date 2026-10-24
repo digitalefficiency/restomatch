@@ -66,7 +66,7 @@ export default async function MonthlyReportPage({
   });
   const pill = (active: boolean) =>
     cn(
-      'rounded-lg px-3 py-1.5 text-xs font-semibold',
+      'inline-flex min-h-11 items-center rounded-lg px-3 py-1.5 text-xs font-semibold',
       active ? 'bg-surface text-ink shadow-card' : 'text-muted hover:text-ink',
     );
   const qs = (m: string, v = view) => `?month=${m}${v === 'whatsapp' ? '&view=whatsapp' : ''}`;
@@ -84,8 +84,17 @@ export default async function MonthlyReportPage({
         </Link>
       </nav>
 
-      <Card padding="lg" elevated data-testid="report-hero">
-        <p className="font-mono text-4xl font-extrabold tabular-nums text-danger sm:text-5xl">{ils(data.leakAgorot)}</p>
+      <Card
+        padding="lg"
+        elevated
+        data-testid="report-hero"
+        className={cn('relative overflow-hidden', data.leakAgorot > 0 ? 'border-danger/35' : undefined)}
+      >
+        {/* T1 — the one number: ink on light, a danger bar on the start edge when money leaked. */}
+        {data.leakAgorot > 0 ? <div className="absolute inset-y-0 start-0 w-1.5 bg-danger" aria-hidden="true" /> : null}
+        <p className={cn('font-mono text-4xl font-extrabold tabular-nums sm:text-5xl', data.leakAgorot > 0 ? 'text-ink' : 'text-primary')}>
+          {ils(data.leakAgorot)}
+        </p>
         <p className="mt-2 text-base font-semibold text-ink">
           {data.spendAgorot > 0
             ? t('report.headline', { amount: ils(data.leakAgorot), pct: pct(data.leakPct) })
@@ -159,7 +168,7 @@ export default async function MonthlyReportPage({
               <Link
                 href={`/dashboard/reports/digest?month=${month}`}
                 data-testid="report-digest-link"
-                className="inline-flex items-center gap-1.5 rounded-xl border border-line bg-surface-2 px-3 py-2 text-xs font-semibold text-ink hover:border-primary/40"
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-line bg-surface-2 px-3 py-2 text-xs font-semibold text-ink hover:border-primary/40"
               >
                 <Mail className="h-4 w-4" aria-hidden="true" />
                 {t('digest.title')}
@@ -167,14 +176,14 @@ export default async function MonthlyReportPage({
             ) : null}
             <a
               href={`/dashboard/reports/monthly/pdf?month=${month}&locale=he`}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-on-primary hover:brightness-110"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-on-primary hover:brightness-110"
             >
               <Download className="h-4 w-4" aria-hidden="true" />
               {t('report.downloadHe')}
             </a>
             <a
               href={`/dashboard/reports/monthly/pdf?month=${month}&locale=en`}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-line bg-surface-2 px-3 py-2 text-xs font-semibold text-ink hover:border-primary/40"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-line bg-surface-2 px-3 py-2 text-xs font-semibold text-ink hover:border-primary/40"
             >
               <Download className="h-4 w-4" aria-hidden="true" />
               {t('report.downloadEn')}
@@ -207,7 +216,7 @@ export default async function MonthlyReportPage({
           <div className="mt-4 max-w-md">
             <pre
               dir={locale === 'he' ? 'rtl' : 'ltr'}
-              className="whitespace-pre-wrap rounded-2xl rounded-ss-sm bg-primary/10 p-4 font-sans text-sm leading-relaxed text-ink ring-1 ring-primary/15"
+              className="whitespace-pre-wrap rounded-2xl rounded-ss-sm bg-primary p-4 font-sans text-sm leading-relaxed text-on-primary"
               data-testid="whatsapp-preview"
             >
               {whatsapp}

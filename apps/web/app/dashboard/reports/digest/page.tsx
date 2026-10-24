@@ -49,7 +49,7 @@ export default async function MonthlyDigestPage({ searchParams }: { searchParams
       ? { href: '/dashboard/recovery', label: t('digest.ctaTracker') }
       : null;
   const pill = (active: boolean) =>
-    cn('rounded-lg px-3 py-1.5 text-xs font-semibold', active ? 'bg-surface text-ink shadow-card' : 'text-muted hover:text-ink');
+    cn('inline-flex min-h-11 items-center rounded-lg px-3 py-1.5 text-xs font-semibold', active ? 'bg-surface text-ink shadow-card' : 'text-muted hover:text-ink');
   const top = data.topSuppliers.slice(0, 3);
 
   return (
@@ -92,8 +92,15 @@ export default async function MonthlyDigestPage({ searchParams }: { searchParams
         <div dir={dir} className="space-y-6 px-5 py-6 sm:px-8">
           <p className="text-sm text-ink">{t('digest.greeting', { month: monthName })}</p>
 
-          <section data-testid="digest-one-number" className="rounded-2xl bg-danger/10 px-5 py-5 ring-1 ring-danger/25">
-            <p className="font-mono text-4xl font-extrabold tabular-nums text-danger sm:text-5xl">{ils(data.leakAgorot)}</p>
+          <section
+            data-testid="digest-one-number"
+            className={cn('relative overflow-hidden rounded-2xl border bg-surface px-5 py-5', data.leakAgorot > 0 ? 'border-danger/35' : 'border-line')}
+          >
+            {/* T1 — the one number: ink, a danger bar on the start edge when money leaked. */}
+            {data.leakAgorot > 0 ? <div className="absolute inset-y-0 start-0 w-1.5 bg-danger" aria-hidden="true" /> : null}
+            <p className={cn('font-mono text-4xl font-extrabold tabular-nums sm:text-5xl', data.leakAgorot > 0 ? 'text-ink' : 'text-primary')}>
+              {ils(data.leakAgorot)}
+            </p>
             <p className="mt-1 text-sm font-semibold text-ink">{t('digest.oneNumberLabel')}</p>
             <p className="mt-1 text-sm text-muted">
               {data.spendAgorot > 0 ? t('digest.pctOfSpend', { pct: pct(data.leakPct), spend: ils(data.spendAgorot) }) : t('digest.noSpend')}
@@ -144,7 +151,7 @@ export default async function MonthlyDigestPage({ searchParams }: { searchParams
           {cta ? (
             <Link
               href={cta.href}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-on-primary hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-on-primary hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
             >
               {cta.label}
               <ArrowLeft className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />

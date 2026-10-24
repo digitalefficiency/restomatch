@@ -84,7 +84,7 @@ export const WAVE1_PRECONDITIONS: Record<string, (c: WaveCtx) => Promise<WaveRes
   '0061_postgres_queue': async () => ({ status: 'PASS', detail: 'new tables only (job_queue, worker_heartbeats, rate_limit_counters, ops_kv)' }),
 };
 
-/** `child.col` must point at a row of the same restaurant (0048 enforces it with composite FKs; 0050 with single-column FKs). */
+/** `child.col` must point at a row of the same restaurant (single-column FKs in 0048/0050). */
 function sameTenant(name: string, child: string, col: string, parent: string): { name: string; needs: Array<[string, string]>; sql: string } {
   return {
     name,

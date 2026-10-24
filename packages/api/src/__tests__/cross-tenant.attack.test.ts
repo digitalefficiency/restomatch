@@ -2022,8 +2022,8 @@ describe('recovery + monthly report (A → B)', () => {
   it('flags are per restaurant: B with the flag off is refused while A works', async () => {
     await db.update(restaurants).set({ settings: {} as never }).where(eq(restaurants.id, B.restaurantId));
     try {
-      expect(await callerFor(B).recovery.flags()).toEqual({ recovery: false, monthlyReport: false, monthlyDigestPreview: false });
-      expect(await callerFor(A).recovery.flags()).toEqual({ recovery: true, monthlyReport: true, monthlyDigestPreview: true });
+      expect(await callerFor(B).recovery.flags()).toEqual({ recovery: false, monthlyReport: false, monthlyDigestPreview: false, leakProof: false });
+      expect(await callerFor(A).recovery.flags()).toEqual({ recovery: true, monthlyReport: true, monthlyDigestPreview: true, leakProof: true });
       await expect(callerFor(B).recovery.summary()).rejects.toMatchObject({ code: 'FORBIDDEN' });
       await expect(callerFor(B).monthlyReport.digest()).rejects.toMatchObject({ code: 'FORBIDDEN' });
       await expect(callerFor(A).recovery.summary()).resolves.toBeDefined();
