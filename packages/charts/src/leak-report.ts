@@ -1,6 +1,6 @@
 import { sql, type Database } from '@restomatch/db';
 import { computeLeakHero, type LeakHero } from './leak-hero';
-import { LEAK_FILTER, LIVE_DUPLICATE } from './leak-views';
+import { LEAK_FILTER, LIVE_DUPLICATE, originalChecked } from './leak-views';
 
 /**
  * The monthly leak report — the one-page, print-ready story an owner can hand
@@ -132,7 +132,8 @@ export async function computeLeakReport(
         EXISTS (SELECT 1 FROM lines l WHERE l.invoice_id = inv.id AND l.type = 'UNORDERED_ARRIVAL'
                 AND l.resolution_status IN ('open','escalated')) AS no_po,
         EXISTS (SELECT 1 FROM match_runs mr JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${restaurantId}
-                WHERE mr.invoice_id = inv.id AND mr.restaurant_id = ${restaurantId} AND ${LIVE_DUPLICATE}) AS dup_copy
+                WHERE mr.invoice_id = inv.id AND mr.restaurant_id = ${restaurantId} AND ${LIVE_DUPLICATE})
+          AND ${originalChecked(restaurantId, sql`inv.id`)} AS dup_copy
       FROM inv
     )`;
 

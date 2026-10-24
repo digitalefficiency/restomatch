@@ -137,12 +137,50 @@ export const LEAK_FILTER: SQL = sql`d.severity IN ('warn','block')
 /**
  * A live duplicate finding (alias `d`): the invoice is a second bill for goods
  * another invoice already billed. Its whole value is the leak, but it is not
- * food spend — the original already carries that spend — so it stays out of
- * the "% of spend" denominator. Once rejected ("not a duplicate") the invoice
- * is ordinary spend again.
+ * food spend when the original already carries that spend (originalChecked) —
+ * then it stays out of the "% of spend" denominator. Once rejected ("not a
+ * duplicate") the invoice is ordinary spend again.
  */
 export const LIVE_DUPLICATE: SQL = sql`d.type = 'DUPLICATE_INVOICE' AND d.severity IN ('warn','block')
   AND d.resolution_status <> 'rejected'`;
+
+/** normalizeInvoiceNumber (packages/api match/buildMatchInput.ts) in SQL: letters/digits, upper-case, no leading zeros. */
+const normNumber = (col: SQL) =>
+  sql`NULLIF(regexp_replace(regexp_replace(upper(normalize(${col}, NFKC)), '[^[:alnum:]]', '', 'g'), '(^|[^0-9])0+([0-9])', '\\1\\2', 'g'), '')`;
+
+/**
+ * Is the ORIGINAL of duplicate copy `invoiceId` itself in checked spend? The
+ * original is found the way the engine found it (buildMatchInput): the held
+ * copy's ocr_payload.raw.duplicateOf invoice, or an earlier invoice of the same
+ * supplier with the same normalized number. Checked = matched to a PO and not
+ * waiting for a PO link. Only then is the copy's spend already counted — if the
+ * original is pending / unmatched, dropping the copy too would leave the goods
+ * in neither (₪39,900 instead of ₪42,263, 8.6% instead of 1.8%).
+ */
+export function originalChecked(restaurantId: string, invoiceId: SQL): SQL {
+  return sql`EXISTS (
+    SELECT 1
+    FROM invoices c
+    JOIN invoices o ON o.restaurant_id = c.restaurant_id AND o.id <> c.id
+    WHERE c.id = ${invoiceId}
+      AND c.restaurant_id = ${restaurantId}
+      AND (
+        o.id::text = c.ocr_payload -> 'raw' -> 'duplicateOf' ->> 'invoiceId'
+        OR (
+          o.supplier_id = c.supplier_id
+          AND ${normNumber(sql`o.invoice_number`)} = ${normNumber(sql`c.invoice_number`)}
+          AND (o.created_at < c.created_at OR (o.created_at = c.created_at AND o.id < c.id))
+        )
+      )
+      AND EXISTS (SELECT 1 FROM match_runs omr WHERE omr.invoice_id = o.id AND omr.restaurant_id = ${restaurantId})
+      AND NOT EXISTS (
+        SELECT 1 FROM match_runs omr
+        JOIN discrepancies od ON od.match_run_id = omr.id AND od.restaurant_id = ${restaurantId}
+        WHERE omr.invoice_id = o.id AND omr.restaurant_id = ${restaurantId}
+          AND od.type = 'UNORDERED_ARRIVAL' AND od.resolution_status IN ('open','escalated')
+      )
+  )`;
+}
 
 /** Extra discrepancy-line conditions from the filters (on alias `d`). */
 export function lineFilter(restaurantId: string, f: ViewFilters | undefined): SQL {
@@ -185,7 +223,7 @@ function invoicesCte(restaurantId: string, f: ViewFilters | undefined): SQL {
         (NOT bool_or(mr.id IS NOT NULL))
           OR COALESCE(bool_or(d.type = 'UNORDERED_ARRIVAL' AND d.resolution_status IN ('open','escalated')), false)
           AS pending_link,
-        COALESCE(bool_or(${LIVE_DUPLICATE}), false) AS dup_copy
+        COALESCE(bool_or(${LIVE_DUPLICATE}), false) AND ${originalChecked(restaurantId, sql`inv.id`)} AS dup_copy
       FROM inv
       LEFT JOIN match_runs mr ON mr.invoice_id = inv.id AND mr.restaurant_id = ${restaurantId}
       LEFT JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${restaurantId}

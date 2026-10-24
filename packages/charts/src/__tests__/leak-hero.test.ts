@@ -60,6 +60,10 @@ async function setup() {
     status?: 'matched' | 'disputed' | 'paid';
     d?: D[];
     matched?: boolean;
+    /** Invoice number (default H-n); null = a held copy stored without its number. */
+    number?: string | null;
+    /** A held re-scan: ocr_payload.raw.duplicateOf points at this invoice. */
+    duplicateOf?: string;
   }) {
     n += 1;
     const [inv] = await db
@@ -67,7 +71,11 @@ async function setup() {
       .values({
         restaurantId: r!.id,
         supplierId: s!.id,
-        invoiceNumber: `H-${n}`,
+        invoiceNumber: opts.number === undefined ? `H-${n}` : opts.number,
+        ...(opts.duplicateOf
+          ? { ocrPayload: { provider: 'reconciled', raw: { duplicateOf: { invoiceId: opts.duplicateOf, invoiceNumber: 'H-1' } } } }
+          : {}),
+        createdAt: new Date(opts.date.getTime() + n * 60_000),
         invoiceDate: opts.date,
         totalExclVat: opts.exclVat,
         vatAmount: '0',
@@ -243,22 +251,72 @@ describe('computeLeakHero', () => {
 describe('duplicate invoices (a held, re-photographed copy)', () => {
   // The probe from #63–#65: an original with a ₪5 over-charge, then a copy of
   // it (same number) raised DUPLICATE_INVOICE (block) at its full value.
-  async function originalAndCopy(dupStatus: D['status']) {
+  async function originalAndCopy(dupStatus: D['status'], opts: { originalMatched?: boolean } = {}) {
     const t = await setup();
-    await t.invoice({
+    const original = await t.invoice({
       date: THIS_MONTH,
       exclVat: '100',
       inclVat: '118',
-      d: [{ type: 'PRICE_HIGHER', severity: 'warn', delta: '5' }],
+      ...(opts.originalMatched === false ? { matched: false } : { d: [{ type: 'PRICE_HIGHER', severity: 'warn', delta: '5' }] }),
     });
+    // What the worker stores for a re-scan whose number is taken (held copy).
     const copy = await t.invoice({
       date: THIS_MONTH,
       exclVat: '100',
       inclVat: '118',
+      number: null,
+      duplicateOf: original,
       d: [{ type: 'DUPLICATE_INVOICE', severity: 'block', delta: '118', status: dupStatus }],
     });
-    return { ...t, copy };
+    return { ...t, original, copy };
   }
+
+  it('original NOT in checked spend (unmatched / pending), copy open → the copy stays in spend', async () => {
+    const { restaurantId } = await originalAndCopy('open', { originalMatched: false });
+    const hero = await computeLeakHero(db, restaurantId, { now: NOW });
+    // Dropping the copy too would leave the goods in neither leak base nor spend.
+    expect(hero.spendIls).toBe(100);
+    expect(hero.leakIls).toBe(118);
+    expect(hero.pendingLinkCount).toBe(1);
+    expect(await computeLeakSummary(db, restaurantId, { period: 'this_month', now: NOW })).toEqual(hero);
+    const report = await computeLeakReport(db, restaurantId, '2026-10');
+    expect(report.bySupplier.reduce((a, x) => a + x.spendIls, 0)).toBe(100);
+  });
+
+  it('original pending a PO link (open UNORDERED_ARRIVAL) → the copy stays in spend', async () => {
+    const t = await setup();
+    const original = await t.invoice({
+      date: THIS_MONTH,
+      exclVat: '100',
+      inclVat: '118',
+      d: [{ type: 'UNORDERED_ARRIVAL', severity: 'warn', delta: '118' }],
+    });
+    await t.invoice({
+      date: THIS_MONTH,
+      exclVat: '100',
+      inclVat: '118',
+      number: null,
+      duplicateOf: original,
+      d: [{ type: 'DUPLICATE_INVOICE', severity: 'block', delta: '118' }],
+    });
+    const hero = await computeLeakHero(db, t.restaurantId, { now: NOW });
+    expect(hero.spendIls).toBe(100);
+  });
+
+  it('a copy found by its (normalized) number, not a held re-scan, is matched to its original too', async () => {
+    const t = await setup();
+    await t.invoice({ date: THIS_MONTH, exclVat: '100', inclVat: '118', number: 'INV-0012' });
+    await t.invoice({
+      date: THIS_MONTH,
+      exclVat: '100',
+      inclVat: '118',
+      number: 'inv 12',
+      d: [{ type: 'DUPLICATE_INVOICE', severity: 'block', delta: '118' }],
+    });
+    const hero = await computeLeakHero(db, t.restaurantId, { now: NOW });
+    expect(hero.spendIls).toBe(100);
+    expect(hero.leakIls).toBe(118);
+  });
 
   it('an open duplicate counts at the copy value, and the copy is not food spend', async () => {
     const { restaurantId } = await originalAndCopy('open');

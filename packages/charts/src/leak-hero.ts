@@ -1,5 +1,5 @@
 import { sql, type Database } from '@restomatch/db';
-import { LEAK_FILTER, LIVE_DUPLICATE, lineFilter, viewInvoicesSql, type ViewSpec } from './leak-views';
+import { LEAK_FILTER, LIVE_DUPLICATE, lineFilter, originalChecked, viewInvoicesSql, type ViewSpec } from './leak-views';
 
 /**
  * The owner's 10-second story: "₪X leaked this month, Y% of spend, Z caught
@@ -19,7 +19,8 @@ import { LEAK_FILTER, LIVE_DUPLICATE, lineFilter, viewInvoicesSql, type ViewSpec
  *  • Spend = Σ total_excl_vat of the month's CHECKED invoices (matched to a PO),
  *    so "% of spend" is leak ÷ the spend it was measured on. Invoices not yet
  *    linked to a PO (unmatched / consolidated) are "pending": in neither. A
- *    live duplicate copy is leak but not spend (its goods are the original's).
+ *    live duplicate copy is leak but not spend when its original is checked
+ *    spend (its goods are already counted there).
  *  • Caught before payment = leak on invoices not yet marked paid.
  *  • Recovered = the part of the leak the team accepted as a claim
  *    (resolution accepted/resolved) — same cap.
@@ -85,7 +86,7 @@ function monthInvoicesCte(restaurantId: string, now: Date, offset: number) {
         (NOT bool_or(mr.id IS NOT NULL))
           OR COALESCE(bool_or(d.type = 'UNORDERED_ARRIVAL' AND d.resolution_status IN ('open','escalated')), false)
           AS pending_link,
-        COALESCE(bool_or(${LIVE_DUPLICATE}), false) AS dup_copy
+        COALESCE(bool_or(${LIVE_DUPLICATE}), false) AND ${originalChecked(restaurantId, sql`inv.id`)} AS dup_copy
       FROM inv
       LEFT JOIN match_runs mr ON mr.invoice_id = inv.id AND mr.restaurant_id = ${restaurantId}
       LEFT JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${restaurantId}
