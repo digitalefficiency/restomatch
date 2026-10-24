@@ -114,7 +114,7 @@ describe('claimableLines — no behaviour change vs the claims letters', () => {
 
 describe('payRunStatusOf', () => {
   it('no finding at all ⇒ can pay', () => {
-    expect(payRunStatusOf(null)).toEqual({ status: 'pay', claims: [], pendingIls: 0, creditIls: 0 });
+    expect(payRunStatusOf(null)).toEqual({ status: 'pay', duplicate: false, duplicateIls: 0, claims: [], pendingIls: 0, creditIls: 0 });
   });
   it('an open or escalated leak finding holds the invoice', () => {
     for (const st of ['open', 'escalated']) {
@@ -149,6 +149,21 @@ describe('payRunStatusOf', () => {
   it('an invoice waiting for its PO link is held, calmly, with nothing to claim', () => {
     expect(payRunStatusOf(invoice({ pendingLink: true, leakIls: 0 }))).toMatchObject({ status: 'hold', claims: [] });
   });
+  it('an unpaid duplicate copy is held ("don\'t pay this copy"), never a credit to ask for', () => {
+    for (const st of ['open', 'accepted']) {
+      const s = payRunStatusOf(
+        invoice({ leakIls: 1170, lines: [line({ discrepancyId: 'dup', type: 'DUPLICATE_INVOICE', severity: 'block', resolutionStatus: st, deltaAmount: 1170 })] }),
+      );
+      expect(s).toMatchObject({ status: 'hold', duplicate: true, duplicateIls: 1170, creditIls: 0, pendingIls: 0 });
+      expect(s.claims[0]).toMatchObject({ basis: 'incl' });
+    }
+    // A duplicate the team waived ("not a duplicate") does not hold.
+    const waived = payRunStatusOf(
+      invoice({ lines: [line({ discrepancyId: 'dup', type: 'DUPLICATE_INVOICE', resolutionStatus: 'rejected', deltaAmount: 1170 })] }),
+    );
+    expect(waived).toMatchObject({ status: 'pay', duplicate: false });
+  });
+
   it('waived / resolved lines do not hold and are not claimed', () => {
     const s = payRunStatusOf(
       invoice({ lines: [line({ discrepancyId: 'a', resolutionStatus: 'rejected' }), line({ discrepancyId: 'b', resolutionStatus: 'resolved' })] }),

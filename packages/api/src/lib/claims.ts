@@ -22,7 +22,8 @@ const CLAIMABLE = new Set<string>(CLAIMABLE_STATUSES);
 export type VatBasis = 'excl' | 'incl' | 'vat';
 
 export function vatBasisOf(type: string): VatBasis {
-  if (type === 'DUPLICATE_INVOICE') return 'incl';
+  // Both carry the invoice's total incl. VAT as Δ (UNORDERED_ARRIVAL is never claimable, but may be shown).
+  if (type === 'DUPLICATE_INVOICE' || type === 'UNORDERED_ARRIVAL') return 'incl';
   if (type === 'VAT_MISMATCH') return 'vat';
   return 'excl';
 }

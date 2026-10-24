@@ -54,12 +54,14 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
   const day = (iso: string) => formatDate(iso, locale, { dateStyle: 'medium' });
   const supplierLabel = (s: { supplierName: string | null; supplierNameEn: string | null }) =>
     displayName(locale, s.supplierName, s.supplierNameEn) || '—';
-  const statusLabel = (inv: { status: PayRunStatus; pendingLink: boolean; creditIls: number }) =>
+  const statusLabel = (inv: { status: PayRunStatus; pendingLink: boolean; duplicate: boolean; creditIls: number }) =>
     inv.status === 'claim'
       ? t('status.claim', { amount: ils(inv.creditIls) })
-      : inv.status === 'hold' && inv.pendingLink
-        ? t('status.holdLink')
-        : t(`status.${inv.status}`);
+      : inv.status === 'hold' && inv.duplicate
+        ? t('status.holdDuplicate')
+        : inv.status === 'hold' && inv.pendingLink
+          ? t('status.holdLink')
+          : t(`status.${inv.status}`);
   const count = (st: PayRunStatus) =>
     data.suppliers.reduce((n, s) => n + s.invoices.filter((i) => i.status === st).length, 0);
   /** The credit's VAT basis: one basis, or "mixed" (never silently summed as one). */

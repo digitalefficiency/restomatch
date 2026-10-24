@@ -98,7 +98,8 @@ describe('payRun.month', () => {
     const inv = r.suppliers[0]!.invoices[0]!;
     expect(inv).toMatchObject({ status: 'hold', pendingIls: 100, creditIls: 0, totalInclVat: 117 });
     expect(inv.claims.map((c) => [c.discrepancyId, c.amount, c.basis])).toEqual([[A.discrepancyId, 100, 'excl']]);
-    expect(r.totals.pendingIls + r.totals.creditIls).toBe(await lettersTotal(asA()));
+    expect(r.totals.pendingIls + r.totals.creditIls + inv.duplicateIls).toBe(await lettersTotal(asA()));
+    expect(inv).toMatchObject({ duplicate: false, duplicateIls: 0 });
     expect(r.totals).toMatchObject({ invoices: 1, holdIls: 117, payIls: 0, claimIls: 0 });
   });
 
@@ -112,6 +113,26 @@ describe('payRun.month', () => {
       expect(r.totals.claimIls).toBe(117);
     } finally {
       await ownerDb.update(discrepancies).set({ resolutionStatus: 'open' }).where(eq(discrepancies.id, A.discrepancyId));
+    }
+  });
+
+  it('an accepted DUPLICATE_INVOICE on an unpaid copy holds it — never a credit to ask for', async () => {
+    await ownerDb
+      .update(discrepancies)
+      .set({ type: 'DUPLICATE_INVOICE', severity: 'block', resolutionStatus: 'accepted', deltaAmount: '117.00' })
+      .where(eq(discrepancies.id, A.discrepancyId));
+    try {
+      const r = await asA().payRun.month();
+      const inv = r.suppliers[0]!.invoices[0]!;
+      expect(inv).toMatchObject({ status: 'hold', duplicate: true, creditIls: 0, pendingIls: 0 });
+      expect(inv.duplicateIls).toBeGreaterThan(0);
+      expect(inv.claims[0]).toMatchObject({ basis: 'incl' });
+      expect(r.totals).toMatchObject({ creditIls: 0, payIls: 0, claimIls: 0, holdIls: 117 });
+    } finally {
+      await ownerDb
+        .update(discrepancies)
+        .set({ type: 'PRICE_HIGHER', severity: 'warn', resolutionStatus: 'open', deltaAmount: '100.00' })
+        .where(eq(discrepancies.id, A.discrepancyId));
     }
   });
 

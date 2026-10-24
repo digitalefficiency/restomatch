@@ -43,6 +43,10 @@ export interface PayRunInvoice {
   status: PayRunStatus;
   /** The invoice still waits for its PO link (a consolidated invoice): held, calmly. */
   pendingLink: boolean;
+  /** A (non-waived) duplicate copy: held — "don't pay this copy", never a credit to ask for. */
+  duplicate: boolean;
+  /** The claimable ₪ of the duplicate finding(s) (= the copy's total incl. VAT); not in pending / credit. */
+  duplicateIls: number;
   totalInclVat: number;
   totalExclVat: number;
   /** Open / escalated claimable ₪ (waits for a decision). */
@@ -77,6 +81,7 @@ export interface PayRunResult {
 }
 
 const OPEN = new Set(['open', 'escalated']);
+const CLAIMABLE_DUP = new Set(['open', 'escalated', 'accepted']);
 const ag = (v: number) => Math.round(v * 100);
 const ils = (a: number) => a / 100;
 const EMPTY_TOTALS = { invoices: 0, payIls: 0, holdIls: 0, claimIls: 0, creditIls: 0, pendingIls: 0 };
@@ -88,11 +93,13 @@ const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : new D
 /** Pure: one invoice's pay-run status from its breakdown entry (null = no finding at all). */
 export function payRunStatusOf(b: LeakBreakdownInvoice | null): {
   status: PayRunStatus;
+  duplicate: boolean;
+  duplicateIls: number;
   claims: PayRunClaim[];
   pendingIls: number;
   creditIls: number;
 } {
-  if (!b) return { status: 'pay', claims: [], pendingIls: 0, creditIls: 0 };
+  if (!b) return { status: 'pay', duplicate: false, duplicateIls: 0, claims: [], pendingIls: 0, creditIls: 0 };
   const lines = claimableLines(b);
   const claims = lines.map(({ line, amount, basis }) => ({
     discrepancyId: line.discrepancyId,
@@ -105,12 +112,18 @@ export function payRunStatusOf(b: LeakBreakdownInvoice | null): {
     lineDescription: line.lineDescription,
     lineDescriptionEn: line.lineDescriptionEn,
   }));
-  const pendingIls = sumClaims(claims.filter((c) => OPEN.has(c.resolutionStatus)));
-  const creditIls = sumClaims(claims.filter((c) => c.resolutionStatus === 'accepted'));
+  // An unpaid duplicate copy is not a credit to ask for: the action is "don't pay this copy".
+  // Its ₪ (the copy's total incl. VAT) stays out of pending / credit and out of the pay total.
+  const isDup = (c: { type: string }) => c.type === 'DUPLICATE_INVOICE';
+  const duplicate = b.lines.some((l) => l.countsAsLeak && isDup(l) && CLAIMABLE_DUP.has(l.resolutionStatus));
+  const duplicateIls = sumClaims(claims.filter(isDup));
+  const rest = claims.filter((c) => !isDup(c));
+  const pendingIls = sumClaims(rest.filter((c) => OPEN.has(c.resolutionStatus)));
+  const creditIls = sumClaims(rest.filter((c) => c.resolutionStatus === 'accepted'));
   // Any open / escalated leak finding holds the invoice, even one whose ₪ the cap already used up.
-  const waiting = b.pendingLink || b.lines.some((l) => l.countsAsLeak && OPEN.has(l.resolutionStatus));
+  const waiting = duplicate || b.pendingLink || b.lines.some((l) => l.countsAsLeak && OPEN.has(l.resolutionStatus));
   const status: PayRunStatus = waiting ? 'hold' : creditIls > 0 ? 'claim' : 'pay';
-  return { status, claims, pendingIls, creditIls };
+  return { status, duplicate, duplicateIls, claims, pendingIls, creditIls };
 }
 
 async function flagOn(db: Database, rid: string): Promise<boolean> {
@@ -170,6 +183,8 @@ export const payRunRouter = router({
           invoiceDate: iso(row.at),
           status: s.status,
           pendingLink: b?.pendingLink ?? false,
+          duplicate: s.duplicate,
+          duplicateIls: s.duplicateIls,
           totalInclVat: Number(row.total_incl),
           totalExclVat: Number(row.total_excl),
           pendingIls: s.pendingIls,

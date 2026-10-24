@@ -12,6 +12,7 @@ export const en = {
     pay: 'Can pay',
     hold: 'Hold — awaiting a decision',
     holdLink: 'Hold — waiting to be linked to an order',
+    holdDuplicate: "Hold — duplicate copy, don't pay",
     claim: 'Ask for a {amount} credit',
   },
   kpis: {
