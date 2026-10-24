@@ -110,6 +110,7 @@ export const receiving: Shape<typeof he> = {
       sectionBoth: 'В заказе и в накладной · {count}',
       sectionInvoiceOnly: 'Только в накладной · {count}',
       sectionOrderOnly: 'Только в заказе · {count}',
+      duplicateInvoice: 'Накладная с номером {number} от этого поставщика уже есть — отмечена для проверки как возможный дубликат. Можно продолжать приёмку как обычно.',
     },
     status: {
       matched: 'Совпадает',

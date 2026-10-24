@@ -110,6 +110,7 @@ export const receiving: Shape<typeof he> = {
       sectionBoth: 'มีทั้งในใบสั่งซื้อและบิล · {count}',
       sectionInvoiceOnly: 'มีแค่ในบิล · {count}',
       sectionOrderOnly: 'มีแค่ในใบสั่งซื้อ · {count}',
+      duplicateInvoice: 'บิลเลขที่ {number} ของผู้จำหน่ายรายนี้มีอยู่แล้ว — ทำเครื่องหมายให้ตรวจว่าอาจเป็นบิลซ้ำ รับสินค้าต่อได้ตามปกติ',
     },
     status: {
       matched: 'ตรงกัน',

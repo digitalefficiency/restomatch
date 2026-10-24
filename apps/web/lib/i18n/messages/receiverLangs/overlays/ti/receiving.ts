@@ -110,6 +110,7 @@ export const receiving: Shape<typeof he> = {
       sectionBoth: 'ኣብ ትእዛዝን ፋቱራን · {count}',
       sectionInvoiceOnly: 'ኣብ ፋቱራ ጥራይ · {count}',
       sectionOrderOnly: 'ኣብ ትእዛዝ ጥራይ · {count}',
+      duplicateInvoice: 'ቁጽሪ ፋቱራ {number} ኣብዚ ኣቕራቢ ቀደም ኣሎ — ክድገም ዝኽእል ፋቱራ ስለ ዝኾነ ንምርመራ ተመልኪቱ ኣሎ። ከም ልሙድ ምቕባል ክትቕጽሉ ትኽእሉ።',
     },
     status: {
       matched: 'ይሰማማዕ',

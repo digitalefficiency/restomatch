@@ -110,6 +110,7 @@ export const receiving: Shape<typeof he> = {
       sectionBoth: 'في الطلبية والفاتورة · {count}',
       sectionInvoiceOnly: 'في الفاتورة فقط · {count}',
       sectionOrderOnly: 'في الطلبية فقط · {count}',
+      duplicateInvoice: 'رقم الفاتورة {number} موجود مسبقًا لدى هذا المورد — تم وضع علامة للمراجعة كفاتورة مكررة محتملة. يمكنك متابعة الاستلام كالمعتاد.',
     },
     status: {
       matched: 'مطابق',
