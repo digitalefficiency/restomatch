@@ -40,7 +40,8 @@ export interface ProofBreakdownInvoice {
     productNameEn: string | null;
     lineDescription: string | null;
     lineDescriptionEn: string | null;
-    invoiceLineId: string | null;
+    /** Always set by the breakdown; optional only so older callers' shapes still fit. */
+    invoiceLineId?: string | null;
   }[];
 }
 

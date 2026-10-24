@@ -158,7 +158,7 @@ export interface LeakBreakdownLine {
   lineDescription: string | null;
   lineDescriptionEn: string | null;
   /** The invoice line the finding is on; null for invoice-level findings (DUPLICATE_INVOICE, TOTAL_MISMATCH, VAT_MISMATCH…). */
-  invoiceLineId: string | null;
+  invoiceLineId?: string | null;
 }
 
 export interface LeakBreakdownInvoice {
