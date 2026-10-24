@@ -5,13 +5,17 @@ import {
   discrepancies,
   eq,
   invoices,
+  goodsReceipts,
   matchRuns,
+  memberships,
   notificationsOutbox,
   poLines,
   products,
   purchaseOrders,
   supplierCatalogItems,
+  restaurants,
   suppliers,
+  users,
 } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
@@ -191,7 +195,7 @@ describe('orders: totals follow line edits; cancel guard', () => {
         { rawDescription: 'בצל', qty: 2.5, unit: 'ק״ג' },
       ],
     });
-    const preview = await callerFor(A).orders.documentPreview({ poId });
+    const preview = await callerFor(A).orders.supplierMessagePreview({ poId });
     expect(preview.body).toContain('Resto A');
     expect(preview.body).toContain('Owner A');
     expect(preview.body).toContain('owner-A@attack.test');
@@ -208,7 +212,7 @@ describe('orders: totals follow line edits; cancel guard', () => {
     expect(row).toEqual({ subject: preview.subject, body: preview.body });
 
     // The wizard's unsaved lines render the same way (no PO ref yet).
-    const unsaved = await callerFor(A).orders.documentPreview({
+    const unsaved = await callerFor(A).orders.supplierMessagePreview({
       supplierId: A.supplierId,
       expectedDeliveryDate: '2099-03-02',
       lines: [{ productId: A.productId, qty: 15, unit: 'ק״ג' }],
@@ -251,8 +255,104 @@ describe('orders: totals follow line edits; cancel guard', () => {
     }
   });
 
+  it('startReceipt refuses a cancelled or closed order (no receipt on a cancelled PO)', async () => {
+    const { poId } = await draftWithTwoLines();
+    await callerFor(A).orders.cancelOrder({ poId });
+    await expect(callerFor(A).receiving.startReceipt({ poId })).rejects.toMatchObject({ code: 'CONFLICT' });
+    const grs = await db.select({ id: goodsReceipts.id }).from(goodsReceipts).where(eq(goodsReceipts.poId, poId));
+    expect(grs).toHaveLength(0);
+  });
+
+  it('cancel and receipt-start at the same time never leave a cancelled PO with a goods receipt', async () => {
+    for (let i = 0; i < 12; i++) {
+      const { poId } = await draftWithTwoLines();
+      await db.update(purchaseOrders).set({ status: 'sent' }).where(eq(purchaseOrders.id, poId));
+      await Promise.allSettled([
+        callerFor(A).orders.cancelOrder({ poId }),
+        callerFor(A).receiving.startReceipt({ poId }),
+      ]);
+      const [po] = await db.select({ status: purchaseOrders.status }).from(purchaseOrders).where(eq(purchaseOrders.id, poId));
+      const grs = await db.select({ id: goodsReceipts.id }).from(goodsReceipts).where(eq(goodsReceipts.poId, poId));
+      expect(po?.status === 'cancelled' && grs.length > 0, `round ${i}: cancelled with ${grs.length} receipt(s)`).toBe(false);
+    }
+  });
+
+  it('orders.list offset pages never repeat or skip orders that share created_at', async () => {
+    const at = new Date('2026-10-20T08:00:00Z');
+    const rows = Array.from({ length: 23 }, () => ({
+      restaurantId: A.restaurantId,
+      supplierId: A.supplierId,
+      status: 'draft' as const,
+      source: 'manual' as const,
+      createdAt: at,
+    }));
+    await db.insert(purchaseOrders).values(rows);
+    const all = await callerFor(A).orders.list({ status: 'draft', limit: 100 });
+    const paged: string[] = [];
+    for (let offset = 0; offset < all.length; offset += 5) {
+      const page = await callerFor(A).orders.list({ status: 'draft', limit: 5, offset });
+      paged.push(...page.map((o) => o.id));
+    }
+    expect(new Set(paged).size).toBe(all.length);
+    expect(paged).toEqual(all.map((o) => o.id));
+  });
+
+  it('a delivery date that does not exist (2026-02-31) is refused, not rolled over', async () => {
+    await expect(
+      callerFor(A).orders.createDraft({
+        supplierId: A.supplierId,
+        expectedDeliveryDate: '2099-02-31',
+        lines: [{ rawDescription: 'x', qty: 1, unit: 'ק״ג' }],
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('quantities are stored at 3 dp on create and on edit, and the total uses the stored quantity', async () => {
+    const { poId } = await callerFor(A).orders.createDraft({
+      supplierId: A.supplierId,
+      lines: [{ rawDescription: 'גבינה', qty: 1.23456, unit: 'ק״ג', unitPriceExpected: 100 }],
+    });
+    const [line] = await db.select().from(poLines).where(eq(poLines.poId, poId));
+    expect(line?.qtyOrdered).toBe('1.235');
+    expect(await totalOf(poId)).toBe('123.50');
+    await callerFor(A).orders.updateOrderLine({ lineId: line!.id, patch: { qtyOrdered: 2.00049 } });
+    const [edited] = await db.select().from(poLines).where(eq(poLines.poId, poId));
+    expect(edited?.qtyOrdered).toBe('2.000');
+  });
+
+  it('the preview contact is the order creator, exactly as placeOrder sends it — not whoever opens the preview', async () => {
+    const [mgr] = await db
+      .insert(users)
+      .values({ email: 'mgr-A@attack.test', name: 'Manager A', emailVerified: new Date() })
+      .returning();
+    await db.insert(memberships).values({ userId: mgr!.id, restaurantId: A.restaurantId, role: 'manager' });
+    const asMgr = appRouter.createCaller({ db, session: { userId: mgr!.id, restaurantId: A.restaurantId, role: 'manager' } });
+    await db.update(suppliers).set({ contactEmail: 'orders@supplier.test' }).where(eq(suppliers.id, A.supplierId));
+    const { poId } = await callerFor(A).orders.createDraft({
+      supplierId: A.supplierId,
+      lines: [{ rawDescription: 'בצל', qty: 1, unit: 'ק״ג' }],
+    });
+    const preview = await asMgr.orders.supplierMessagePreview({ poId });
+    expect(preview.body).toContain('Owner A');
+    expect(preview.body).not.toContain('Manager A');
+    await asMgr.orders.placeOrder({ poId, channel: 'email' });
+    const [row] = await db.select({ body: notificationsOutbox.body }).from(notificationsOutbox).where(eq(notificationsOutbox.relatedEntityId, poId));
+    expect(row?.body).toBe(preview.body);
+    expect(preview.body).toContain('סה״כ פריט אחד');
+  });
+
+  it('the email subject is one line even if a stored name carries CR/LF; name inputs refuse control characters', async () => {
+    await db.update(restaurants).set({ name: 'Resto\r\nBcc: x@evil.test' }).where(eq(restaurants.id, A.restaurantId));
+    const preview = await callerFor(A).orders.supplierMessagePreview({
+      supplierId: A.supplierId,
+      lines: [{ rawDescription: 'בצל', qty: 1, unit: 'ק״ג' }],
+    });
+    expect(preview.subject).not.toMatch(/[\r\n\t]/);
+    await expect(callerFor(A).settings.updateProfile({ name: 'Resto\nX' })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
   it('a document without a delivery date says so instead of dropping the line', async () => {
-    const preview = await callerFor(A).orders.documentPreview({
+    const preview = await callerFor(A).orders.supplierMessagePreview({
       supplierId: A.supplierId,
       lines: [{ rawDescription: 'בצל', qty: 1, unit: 'ק״ג' }],
     });

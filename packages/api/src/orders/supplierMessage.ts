@@ -6,7 +6,7 @@
  *
  * Pure: (loaded PO + restaurant + contact) → { subject, body }. The caller
  * loads the rows; placeOrder enqueues exactly this text and
- * orders.documentPreview shows exactly this text before sending.
+ * orders.supplierMessagePreview shows exactly this text before sending.
  */
 
 export interface SupplierMessageInput {
@@ -29,7 +29,8 @@ export function formatOrderQty(qty: string | number): string {
 }
 
 export function renderSupplierMessage(d: SupplierMessageInput): { subject: string; body: string } {
-  const subject = `הזמנה חדשה — ${d.restaurant.name}`;
+  // One header line, whatever a stored name contains.
+  const subject = `הזמנה חדשה — ${d.restaurant.name}`.replace(/[\r\n\t]+/g, ' ').trim();
   const from = d.restaurant.businessId
     ? `מאת: ${d.restaurant.name} (ח.פ. ${d.restaurant.businessId})`
     : `מאת: ${d.restaurant.name}`;
@@ -55,7 +56,7 @@ export function renderSupplierMessage(d: SupplierMessageInput): { subject: strin
     '',
     ...items,
     '',
-    `סה״כ ${d.lines.length} פריטים`,
+    d.lines.length === 1 ? 'סה״כ פריט אחד' : `סה״כ ${d.lines.length} פריטים`,
   ]
     .filter((x): x is string => x !== null)
     .join('\n');

@@ -162,6 +162,7 @@ export const en: Shape<typeof he> = {
     deliveryHint: 'Derived from the supplier’s order schedule. You can change it.',
     noSchedule: 'This supplier has no order schedule — pick the delivery date.',
     deliveryDate: 'Requested delivery date',
+    scheduleHint: 'The supplier’s order schedule says {date}.',
   },
   preview: {
     title: 'What the supplier receives',

@@ -29,7 +29,7 @@ import { managerProcedure, memberProcedure, requireFeature, router } from '../tr
 import { assertPoOwned, assertSupplierOwned } from '../tenant';
 import { getEntitlements } from '../entitlements';
 import { importPurchaseOrder } from '../orders/importPo';
-import { estimateTotal, recomputePoTotal } from '../orders/totals';
+import { estimateTotal, qty3, recomputePoTotal } from '../orders/totals';
 import { DEDUPE_INDEX_PREDICATE } from '../notifications/outbox';
 import { supplierMessageState, type SupplierMessageState } from '../notifications/delivery';
 import { deriveExpectedDelivery, type DerivedDelivery } from '../lib/deriveDelivery';
@@ -192,7 +192,14 @@ async function guardrailSettings(db: Database, restaurantId: string): Promise<{ 
 }
 
 /** A restaurant-local calendar date, 'YYYY-MM-DD'. */
-const LocalDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD');
+const LocalDate = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD')
+  .refine((s) => {
+    // A real calendar date: 2026-02-31 must not roll over to March 3.
+    const d = new Date(`${s}T00:00:00Z`);
+    return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+  }, 'תאריך לא קיים');
 
 async function restaurantTz(db: Database, restaurantId: string): Promise<string> {
   const [r] = await db
@@ -351,7 +358,7 @@ export const ordersRouter = router({
         .leftJoin(poLines, eq(poLines.poId, purchaseOrders.id))
         .where(and(...conds))
         .groupBy(purchaseOrders.id, suppliers.name, suppliers.nameEn)
-        .orderBy(desc(purchaseOrders.createdAt))
+        .orderBy(desc(purchaseOrders.createdAt), desc(purchaseOrders.id)) // unique: offset pages never repeat/skip
         .limit(input?.limit ?? 50)
         .offset(input?.offset ?? 0);
     }),
@@ -518,7 +525,7 @@ export const ordersRouter = router({
           poId: po.id,
           productId: l.productId ?? null,
           rawDescription: l.rawDescription ?? null,
-          qtyOrdered: l.qty.toString(),
+          qtyOrdered: qty3(l.qty).toString(),
           unit: l.unit,
           unitPriceExpected: l.unitPriceExpected,
         })),
@@ -562,7 +569,7 @@ export const ordersRouter = router({
    * Exactly what the supplier will receive, before it is sent: for a saved
    * draft (poId) or for the wizard's unsaved lines. Read-only — nothing queued.
    */
-  documentPreview: memberProcedure
+  supplierMessagePreview: memberProcedure
     .input(
       z.union([
         z.object({ poId: z.string().uuid() }).strict(),
@@ -589,7 +596,11 @@ export const ordersRouter = router({
       if ('poId' in input) {
         await assertPoOwned(ctx.db, input.poId, restaurantId);
         const [po] = await ctx.db
-          .select({ supplierId: purchaseOrders.supplierId, expectedDeliveryAt: purchaseOrders.expectedDeliveryAt })
+          .select({
+            supplierId: purchaseOrders.supplierId,
+            expectedDeliveryAt: purchaseOrders.expectedDeliveryAt,
+            createdBy: purchaseOrders.createdBy,
+          })
           .from(purchaseOrders)
           .where(eq(purchaseOrders.id, input.poId))
           .limit(1);
@@ -604,7 +615,8 @@ export const ordersRouter = router({
           .from(poLines)
           .where(eq(poLines.poId, input.poId))
           .orderBy(...PO_LINE_ORDER);
-        return buildSupplierMessage(ctx.db, restaurantId, ctx.session.userId, {
+        // The contact is the order's creator — the same one placeOrder prints.
+        return buildSupplierMessage(ctx.db, restaurantId, po.createdBy ?? ctx.session.userId, {
           poId: input.poId,
           supplierName: supplier?.name ?? 'ספק',
           expectedDeliveryAt: po.expectedDeliveryAt,
@@ -688,30 +700,30 @@ export const ordersRouter = router({
     .mutation(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
       await assertPoOwned(ctx.db, input.poId, restaurantId);
-      const [current] = await ctx.db
-        .select({ status: purchaseOrders.status })
-        .from(purchaseOrders)
-        .where(eq(purchaseOrders.id, input.poId))
-        .limit(1);
-      // A received (closed) order is history — cancelling it would orphan its
-      // goods receipt and invoice match. Cancelling twice is a no-op error.
-      if (current && (current.status === 'closed' || current.status === 'cancelled')) {
-        throw new TRPCError({ code: 'CONFLICT', message: 'לא ניתן לבטל הזמנה שנסגרה או בוטלה' });
-      }
-      // Receiving never moves the PO out of 'sent', so a delivered order looks
-      // open by status alone: any goods receipt makes it history too.
-      const [receipt] = await ctx.db
-        .select({ id: goodsReceipts.id })
-        .from(goodsReceipts)
-        .where(and(eq(goodsReceipts.poId, input.poId), eq(goodsReceipts.restaurantId, restaurantId)))
-        .limit(1);
-      if (receipt) {
-        throw new TRPCError({ code: 'CONFLICT', message: 'לא ניתן לבטל הזמנה שכבר התחילה קבלה עליה' });
-      }
-      await ctx.db
+      // Lock the PO first: receiving.startReceipt takes the same row lock, so a
+      // cancel and a receipt start serialize. The UPDATE below is a NEW statement
+      // (fresh READ COMMITTED snapshot), so it sees a receipt committed while we
+      // waited — a cancelled PO can never end up with a goods receipt.
+      await ctx.db.execute(
+        sql`SELECT 1 FROM purchase_orders WHERE id = ${input.poId} AND restaurant_id = ${restaurantId} FOR UPDATE`,
+      );
+      // A closed / cancelled order is history, and so is a received one: its
+      // status stays 'sent' after receiving, so the receipt itself decides.
+      const cancelled = await ctx.db
         .update(purchaseOrders)
         .set({ status: 'cancelled', updatedAt: new Date() })
-        .where(and(eq(purchaseOrders.id, input.poId), eq(purchaseOrders.restaurantId, restaurantId)));
+        .where(
+          and(
+            eq(purchaseOrders.id, input.poId),
+            eq(purchaseOrders.restaurantId, restaurantId),
+            sql`${purchaseOrders.status} NOT IN ('closed', 'cancelled')`,
+            sql`NOT EXISTS (SELECT 1 FROM goods_receipts g WHERE g.po_id = ${input.poId} AND g.restaurant_id = ${restaurantId})`,
+          ),
+        )
+        .returning({ id: purchaseOrders.id });
+      if (cancelled.length === 0) {
+        throw new TRPCError({ code: 'CONFLICT', message: 'לא ניתן לבטל הזמנה שנסגרה, בוטלה או שכבר התחילה קבלה עליה' });
+      }
       return { ok: true };
     }),
 
@@ -756,7 +768,7 @@ export const ordersRouter = router({
       const p = input.patch;
       const set: Partial<typeof poLines.$inferInsert> = {};
       if (p.rawDescription !== undefined) set.rawDescription = p.rawDescription;
-      if (p.qtyOrdered !== undefined) set.qtyOrdered = String(p.qtyOrdered);
+      if (p.qtyOrdered !== undefined) set.qtyOrdered = String(qty3(p.qtyOrdered));
       if (p.unit !== undefined) set.unit = p.unit;
       if (p.unitPriceExpected !== undefined)
         set.unitPriceExpected = p.unitPriceExpected == null ? null : String(p.unitPriceExpected);
@@ -797,7 +809,13 @@ export const ordersRouter = router({
       await assertPoOwned(ctx.db, input.poId, restaurantId);
 
       const [po] = await ctx.db
-        .select({ id: purchaseOrders.id, status: purchaseOrders.status, supplierId: purchaseOrders.supplierId, expectedDeliveryAt: purchaseOrders.expectedDeliveryAt })
+        .select({
+          id: purchaseOrders.id,
+          status: purchaseOrders.status,
+          supplierId: purchaseOrders.supplierId,
+          expectedDeliveryAt: purchaseOrders.expectedDeliveryAt,
+          createdBy: purchaseOrders.createdBy,
+        })
         .from(purchaseOrders)
         .where(eq(purchaseOrders.id, input.poId))
         .limit(1);
@@ -846,8 +864,8 @@ export const ordersRouter = router({
             message: `לספק אין ${input.channel === 'email' ? 'אימייל' : 'וואטסאפ'} מוגדר`,
           });
         }
-        // The same text orders.documentPreview showed the manager.
-        const doc = await buildSupplierMessage(ctx.db, restaurantId, ctx.session.userId, {
+        // The same text orders.supplierMessagePreview showed the manager.
+        const doc = await buildSupplierMessage(ctx.db, restaurantId, po.createdBy ?? ctx.session.userId, {
           poId: input.poId,
           supplierName: supplier?.name ?? 'ספק',
           expectedDeliveryAt: po.expectedDeliveryAt,

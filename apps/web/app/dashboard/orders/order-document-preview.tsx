@@ -15,14 +15,14 @@ type PreviewInput =
     };
 
 /**
- * Read-only: exactly the text the supplier will receive (orders.documentPreview
+ * Read-only: exactly the text the supplier will receive (orders.supplierMessagePreview
  * renders it with the same function placeOrder sends). The document is always
  * Hebrew — it goes to an Israeli supplier — so it keeps lang="he" / RTL even in
  * the English UI. Placement is the caller's (wizard review step, draft detail).
  */
 export function OrderDocumentPreview({ input, className }: { input: PreviewInput; className?: string }) {
   const t = useT(ordersNs);
-  const q = trpc.orders.documentPreview.useQuery(input, { retry: false, placeholderData: (prev) => prev });
+  const q = trpc.orders.supplierMessagePreview.useQuery(input, { retry: false, placeholderData: (prev) => prev });
   return (
     <section aria-labelledby="order-doc-preview-title" className={className} data-testid="order-document-preview">
       <h3 id="order-doc-preview-title" className="mb-2 flex items-center gap-2 text-sm font-semibold text-ink">

@@ -518,6 +518,8 @@ export const receivingRouter = router({
         return { receiptId: existing[0].id, alreadyExisted: true as const };
       }
 
+      // Row lock shared with orders.cancelOrder: a receipt never starts on an
+      // order that is being (or was) cancelled.
       const po = await ctx.db
         .select()
         .from(purchaseOrders)
@@ -527,8 +529,12 @@ export const receivingRouter = router({
             eq(purchaseOrders.restaurantId, ctx.session.restaurantId),
           ),
         )
-        .limit(1);
+        .limit(1)
+        .for('update');
       if (!po[0]) throw new TRPCError({ code: 'NOT_FOUND', message: 'PO not found' });
+      if (po[0].status === 'cancelled' || po[0].status === 'closed') {
+        throw new TRPCError({ code: 'CONFLICT', message: 'ההזמנה בוטלה או נסגרה — אי אפשר לפתוח עליה קבלה' });
+      }
 
       const lines = await ctx.db.select().from(poLines).where(eq(poLines.poId, input.poId));
 

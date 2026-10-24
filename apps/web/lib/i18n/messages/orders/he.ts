@@ -163,6 +163,7 @@ export const he = {
     deliveryHint: 'התאריך נגזר מלוח ההזמנות של הספק. אפשר לשנות אותו.',
     noSchedule: 'לספק אין לוח הזמנות — בחרו את תאריך האספקה.',
     deliveryDate: 'תאריך אספקה מבוקש',
+    scheduleHint: 'לפי לוח ההזמנות של הספק: {date}.',
   },
   preview: {
     title: 'מה הספק יקבל',

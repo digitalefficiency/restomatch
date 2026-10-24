@@ -13,6 +13,7 @@ import {
 import { matchByAlias, matchBySku } from '@restomatch/catalog';
 import { mulIls, quantizeIls, sumIls, toAgorot } from '@restomatch/matching';
 import type { NormalizedPurchaseOrder } from '@restomatch/types';
+import { qty3 } from './totals';
 
 /** ±₪ slack allowed between the PDF's printed totals and our agorot-exact recompute. */
 const CHECKSUM_TOLERANCE_ILS = 1;
@@ -54,11 +55,6 @@ function metaNum(meta: Record<string, unknown> | undefined, key: string): number
 function metaStr(meta: Record<string, unknown> | undefined, key: string): string | null {
   const v = meta?.[key];
   return typeof v === 'string' && v.trim() ? v.trim() : null;
-}
-
-/** po_lines.qty_ordered is NUMERIC(12,3): totals use the quantity as stored. */
-export function qty3(qty: number): number {
-  return Math.round(qty * 1000 + (qty >= 0 ? 1e-9 : -1e-9)) / 1000;
 }
 
 /** Per-line ex-VAT contribution: trust the printed line total, else price×qty. */

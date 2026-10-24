@@ -6,6 +6,12 @@ import { eq, poLines, purchaseOrders, type Database } from '@restomatch/db';
  * never a float running sum (AGENTS.md money facts). Unpriced lines are skipped;
  * a PO with no priced line has no estimate (null). Returns NUMERIC-style text.
  */
+/** po_lines.qty_ordered is NUMERIC(12,3): quantities are stored and totalled at 3 dp. */
+export function qty3(qty: number | string): number {
+  const n = Number(qty);
+  return Math.round(n * 1000 + (n >= 0 ? 1e-9 : -1e-9)) / 1000;
+}
+
 export function estimateTotal(
   lines: Array<{ qty: number | string; unitPriceExpected?: number | string | null }>,
 ): string | null {
@@ -13,8 +19,8 @@ export function estimateTotal(
   let any = false;
   for (const l of lines) {
     if (l.unitPriceExpected == null || l.unitPriceExpected === '') continue;
-    // Quantity as po_lines stores it (NUMERIC(12,3)), so the header matches its lines.
-    const qty = Math.round(Number(l.qty) * 1000) / 1000;
+    // Quantity as po_lines stores it, so the header matches its lines.
+    const qty = qty3(l.qty);
     const price = Number(l.unitPriceExpected);
     if (!Number.isFinite(qty) || !Number.isFinite(price)) continue;
     // +1e-9 guards the half-up step against binary artefacts (1.005 × 100 = 100.49999…).

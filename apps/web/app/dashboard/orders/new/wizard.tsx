@@ -159,7 +159,9 @@ export function NewOrderWizard({ initialSupplierId }: { initialSupplierId: strin
       if (!poId) {
         const draft = await createDraft.mutateAsync({
           supplierId,
-          expectedDeliveryDate: deliveryDay || undefined,
+          // A scheduled supplier's date is re-derived on the server (a cutoff may
+          // have passed since the preview) unless the manager picked another one.
+          expectedDeliveryDate: deliveryDate || (delivery.data?.derived ? undefined : deliveryDay || undefined),
           lines: lines.map((l) => ({
             productId: l.productId,
             rawDescription: l.rawDescription || undefined,
@@ -649,25 +651,34 @@ function DeliveryPanel({
   const t = useT(ordersNs);
   if (loading || !d) return null;
   const derived = d.derived;
+  // The headline is the date that will be sent; the schedule's date is a hint
+  // only when the manager picked another one.
+  const pickedIso = value ? `${value}T12:00:00Z` : null; // noon UTC is the same calendar day in IL
+  const scheduleDay = derived ? derived.expectedDeliveryAt : null;
+  const differs = !!derived && !!value && value !== d.defaultDate;
   return (
     <div className="mt-4 rounded-xl border border-line bg-surface-2 p-3 text-sm">
+      {pickedIso ? (
+        <p className="flex items-center gap-2 text-ink" data-testid="order-delivery-headline">
+          <CalendarClock className="h-4 w-4 text-primary" aria-hidden="true" />
+          <span>
+            {t('wizard.deliveryExpected')} <span className="font-semibold">{fmt(pickedIso)}</span>
+          </span>
+        </p>
+      ) : null}
       {derived ? (
         <>
-          <p className="flex items-center gap-2 text-ink">
-            <CalendarClock className="h-4 w-4 text-primary" aria-hidden="true" />
-            <span>
-              {t('wizard.deliveryExpected')} <span className="font-semibold">{fmt(derived.expectedDeliveryAt)}</span>
-            </span>
-          </p>
-          {derived.missedCutoff && (
+          {derived.missedCutoff && !differs && (
             <p className="mt-2 text-xs text-warn">{t('wizard.missedCutoff', { date: fmt(derived.expectedDeliveryAt) })}</p>
           )}
-          <p className="mt-1 text-xs text-subtle">{t('wizard.deliveryHint')}</p>
+          <p className="mt-1 text-xs text-subtle">
+            {differs && scheduleDay
+              ? t('wizard.scheduleHint', { date: fmt(scheduleDay) })
+              : t('wizard.deliveryHint')}
+          </p>
         </>
       ) : (
-        <p className="flex items-center gap-2 text-xs text-subtle">
-          <CalendarClock className="h-4 w-4" aria-hidden="true" /> {t('wizard.noSchedule')}
-        </p>
+        <p className="mt-1 flex items-center gap-2 text-xs text-subtle">{t('wizard.noSchedule')}</p>
       )}
       <Field label={t('wizard.deliveryDate')} htmlFor="ord-delivery-date" className="mt-3">
         <Input
