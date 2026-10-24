@@ -10,6 +10,7 @@ import {
 } from '@restomatch/db';
 import {
   analyzeLeakCheck,
+  breakEvenMonthlySpendAgorot,
   getLeakCheckSession,
   issuePowChallenge,
   LeakCheckError,
@@ -141,6 +142,18 @@ describe('analyzeLeakCheck — every number traceable, agorot-exact', () => {
     const other = { ...b!, supplierBusinessId: '599999999', supplierName: 'אחר' };
     const r = analyzeLeakCheck([a!, other]);
     expect(r.findings.filter((f) => f.kind === 'price_creep')).toEqual([]);
+  });
+});
+
+describe('breakEvenMonthlySpendAgorot — grounded ROI line', () => {
+  it('Pro (59,000 agorot) at the sample rate 3,778 / 153,894 → ₪24,034 a month (rounded UP to the shekel)', () => {
+    // 59,000 × 153,894 / 3,778 = 2,403,315.5 agorot → ceil to ₪24,034
+    expect(breakEvenMonthlySpendAgorot(3778, 153894, 59000)).toBe(2403400);
+  });
+  it('no leak, no spend or no price → no ROI line at all', () => {
+    expect(breakEvenMonthlySpendAgorot(0, 153894, 59000)).toBeNull();
+    expect(breakEvenMonthlySpendAgorot(3778, 0, 59000)).toBeNull();
+    expect(breakEvenMonthlySpendAgorot(3778, 153894, 0)).toBeNull();
   });
 });
 

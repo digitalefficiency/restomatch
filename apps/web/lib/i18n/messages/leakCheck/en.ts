@@ -91,6 +91,11 @@ export const en: Shape<typeof he> = {
       ocrFailures: '{n} files couldn’t be read and were left out.',
     },
     method: 'How we counted: only overcharges count; errors in your favour don’t offset them; an invoice that looks duplicated is shown separately and not counted; return (negative) lines aren’t checked; rounding noise up to ₪1 is ignored.',
+    roi: {
+      title: 'When does it pay for itself?',
+      body: 'In this sample the leak is {pct} of the spend checked. If that rate held, the Pro plan ({price} a month) pays for itself from {breakEven} of monthly purchasing.',
+      note: 'An estimate from a small sample, not a promise: a full month’s rate can be higher or lower, and “surfaced as leak” is not “recovered”.',
+    },
     ctaTitle: 'This is a sample. At the back door you see the whole picture.',
     ctaBody: 'RestoMatch checks every delivery against the order and the delivery note — including short deliveries and unordered items — and stops the payment before the money leaves.',
     ctaDemo: 'Book a short demo',

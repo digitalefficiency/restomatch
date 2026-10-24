@@ -354,3 +354,20 @@ export function analyzeLeakCheck(
   const spendAgorot = analysed.reduce((acc, inv) => acc + toAgorot(inv.total ?? inv.subtotal ?? 0), 0);
   return { findings, notes, leakAgorot, spendAgorot, analysedInvoices: analysed.length };
 }
+
+/**
+ * Grounded ROI line for a leak-check result: the monthly purchasing volume at
+ * which a plan pays for itself IF the sample's leak rate held. Every input is
+ * the check's own data (leak and checked spend, integer agorot) plus the plan
+ * price from PLAN_SEED — nothing else. Rounded UP to the shekel so the claim is
+ * never flattering. Null when the sample found nothing (no rate to extrapolate).
+ */
+export function breakEvenMonthlySpendAgorot(
+  leakAgorot: number,
+  spendAgorot: number,
+  planPriceAgorot: number,
+): number | null {
+  if (!(leakAgorot > 0) || !(spendAgorot > 0) || !(planPriceAgorot > 0)) return null;
+  const agorot = (planPriceAgorot * spendAgorot) / leakAgorot;
+  return Math.ceil(agorot / 100) * 100;
+}

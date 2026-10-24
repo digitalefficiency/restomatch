@@ -173,6 +173,44 @@ describe('leak-check public routes — attack suite', () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(Object.keys(body).sort()).toEqual(['ok', 'token']);
   });
+  it('RAW cap: a body larger than its (lying) content-length is cut off at the cap, never parsed', async () => {
+    const big = new Uint8Array(lc.MAX_BODY_BYTES + 200 * 1024);
+    let sent = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(ctrl) {
+        if (sent >= big.byteLength) return ctrl.close();
+        const chunk = big.subarray(sent, sent + 256 * 1024);
+        sent += chunk.byteLength;
+        ctrl.enqueue(chunk);
+      },
+    });
+    const req = new Request(`${ORIGIN}/api/leak-check/submit`, {
+      method: 'POST',
+      body: stream,
+      // @ts-expect-error — undici needs duplex for a streamed request body
+      duplex: 'half',
+      headers: {
+        origin: ORIGIN,
+        host: 'localhost:3000',
+        'x-forwarded-for': nextIp(),
+        'content-length': '1000',
+        'content-type': 'multipart/form-data; boundary=x',
+      },
+    });
+    const before = (await db.select().from(leakCheckSessions)).length;
+    const res = await handleSubmit(req);
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ ok: false, error: 'body_too_large' });
+    expect((await db.select().from(leakCheckSessions)).length).toBe(before);
+  });
+
+  it('RAW cap on the lead JSON: an oversized body behind a small content-length is 413; JSON null is 400', async () => {
+    const huge = JSON.stringify({ token: 'x'.repeat(10_000) });
+    const lying = post('/api/leak-check/lead', huge, nextIp(), { 'content-type': 'application/json', 'content-length': '20' });
+    expect((await handleLead(lying)).status).toBe(413);
+    expect((await handleLead(postJson('/api/leak-check/lead', 'null', nextIp()))).status).toBe(400);
+  });
+
   it('a chunked body without content-length is refused before parsing (411)', async () => {
     const res = await handleSubmit(post('/api/leak-check/submit', new FormData(), nextIp()));
     expect(res.status).toBe(411);

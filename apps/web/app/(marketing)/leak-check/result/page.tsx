@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { FlaskConical, Info } from 'lucide-react';
 import { leakCheck as lc } from '@restomatch/api';
+import { PLAN_SEED } from '@restomatch/db';
 import { authDb } from '@/lib/authDb';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { formatDate, formatNumber, formatPercent } from '@/lib/i18n/format';
@@ -52,6 +53,9 @@ export default async function LeakCheckResultPage({ searchParams }: { searchPara
   const inv = (i: number) => view.invoices.find((x) => x.index === i);
   const { report } = view;
   const leak = report.leakAgorot;
+  // Grounded ROI line: the check's own leak/spend + the Pro price from PLAN_SEED only.
+  const proPriceAgorot = PLAN_SEED.pro.priceAgorotMonthly;
+  const roiAgorot = lc.breakEvenMonthlySpendAgorot(leak, report.spendAgorot, proPriceAgorot);
 
   const describe = (f: lc.LeakFinding): string => {
     const line = f.lineIndex !== null ? inv(f.invoiceIndex)?.lines[f.lineIndex] : undefined;
@@ -200,6 +204,26 @@ export default async function LeakCheckResultPage({ searchParams }: { searchPara
             ))}
             {report.ocrFailures > 0 ? <li>{t('result.notes.ocrFailures', { n: report.ocrFailures })}</li> : null}
           </ul>
+        </section>
+      ) : null}
+
+      {roiAgorot !== null ? (
+        <section
+          data-testid="roi-line"
+          aria-labelledby="lc-roi"
+          className="mt-8 rounded-2xl border border-gold/30 bg-gold/[0.06] p-5"
+        >
+          <h2 id="lc-roi" className="text-sm font-semibold text-ink">
+            {t('result.roi.title')}
+          </h2>
+          <p className="mt-1 text-sm leading-relaxed text-muted">
+            {t('result.roi.body', {
+              pct: formatPercent(leak / report.spendAgorot, locale, 2),
+              price: ils(proPriceAgorot),
+              breakEven: formatIls(roiAgorot / 100, { locale }),
+            })}
+          </p>
+          <p className="mt-2 text-xs leading-relaxed text-subtle">{t('result.roi.note')}</p>
         </section>
       ) : null}
 

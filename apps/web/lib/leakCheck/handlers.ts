@@ -7,6 +7,7 @@ import { authDb } from '@/lib/authDb';
 import { db } from '@/lib/db';
 import { localeFromCookieHeader } from '@/lib/i18n/config';
 import { enforceRateLimit, trustedProxyHops } from '@/lib/rateLimit';
+import { formDataFrom, readCappedBody } from './bodyCap';
 
 /**
  * Public leak-check surface (S15 wave 1). Three POST routes:
@@ -33,6 +34,10 @@ export const LIMITS = {
  * attacker with many real IPs can drain at most one hour's slice of the daily
  * OCR budget before real prospects get through again.
  */
+/** Raw body caps: multipart upload (all files + fields) and the lead JSON. */
+export const SUBMIT_BODY_CAP = lc.MAX_BODY_BYTES + 64 * 1024;
+export const LEAD_BODY_CAP = 4096;
+
 export const GLOBAL_SUBMIT_LIMIT = { limit: 40, windowSec: 60 * 60, prefix: 'lc-submit-global' } as const;
 
 const json = (body: unknown, status = 200, headers?: Record<string, string>) =>
@@ -107,14 +112,13 @@ async function fileToUpload(v: FormDataEntryValue): Promise<lc.LeakCheckUpload |
 
 export async function handleSubmit(req: Request): Promise<Response> {
   if (!lc.leakCheckPublicEnabled()) return fail('not_found', 404);
-  // Size cap BEFORE parsing — a missing/lying content-length is caught again
-  // by the per-file and total checks in validateUploads.
-  // A chunked body (no content-length) would be buffered whole by formData():
-  // browsers always send a length for FormData, so require one.
+  // Fast reject on the declared length; the RAW cap below (readCappedBody)
+  // is what actually bounds the bytes parsed, even if the header lies.
+  // Browsers always send a length for FormData, so a missing one is refused.
   const lengthHeader = req.headers.get('content-length');
   if (lengthHeader === null) return fail('length_required', 411);
   const declared = Number(lengthHeader);
-  if (!Number.isFinite(declared) || declared > lc.MAX_BODY_BYTES + 64 * 1024) {
+  if (!Number.isFinite(declared) || declared > SUBMIT_BODY_CAP) {
     return fail('body_too_large', 413);
   }
   const g = await guard(req, LIMITS.submitIp);
@@ -126,9 +130,11 @@ export async function handleSubmit(req: Request): Promise<Response> {
   const mode = lc.leakCheckOcrMode();
   if (!mode) return fail('unavailable', 503);
 
+  const raw = await readCappedBody(req, SUBMIT_BODY_CAP);
+  if (!raw.ok) return raw.reason === 'too_large' ? fail('body_too_large', 413) : fail('bad_request', 400);
   let form: FormData;
   try {
-    form = await req.formData();
+    form = await formDataFrom(raw.bytes, req.headers.get('content-type'));
   } catch {
     return fail('bad_request', 400);
   }
@@ -193,18 +199,21 @@ export async function handleSubmit(req: Request): Promise<Response> {
 export async function handleLead(req: Request): Promise<Response> {
   const lengthHeader = req.headers.get('content-length');
   if (lengthHeader === null) return fail('length_required', 411);
-  if (!(Number(lengthHeader) <= 4096)) return fail('body_too_large', 413);
+  if (!(Number(lengthHeader) <= LEAD_BODY_CAP)) return fail('body_too_large', 413);
   const g = await guard(req, LIMITS.lead);
   if (typeof g !== 'string') return g;
   const secret = secretOr503();
   if (typeof secret !== 'string') return secret;
 
   let body: { token?: unknown; phone?: unknown; restaurantName?: unknown };
+  const raw = await readCappedBody(req, LEAD_BODY_CAP);
+  if (!raw.ok) return raw.reason === 'too_large' ? fail('body_too_large', 413) : fail('bad_request', 400);
   try {
-    body = (await req.json()) as typeof body;
+    body = JSON.parse(new TextDecoder().decode(raw.bytes)) as typeof body;
   } catch {
     return fail('bad_request', 400);
   }
+  if (typeof body !== 'object' || body === null) return fail('bad_request', 400);
   const sessionId = lc.verifyResultLink(secret, typeof body.token === 'string' ? body.token : '');
   if (!sessionId) return fail('invalid_link', 400);
   const s = await lc.markLeadRequested(authDb, sessionId);
