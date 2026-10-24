@@ -81,8 +81,8 @@ export function LeakHeatmap({
                 +{pct(c.deltaPct)}
               </div>
               <div className="mt-1 truncate text-sm font-semibold">{c.productName}</div>
-              <div className="truncate text-xs opacity-80">{c.supplierName}</div>
-              <div className="mt-2 font-mono text-xs font-semibold tabular-nums opacity-90">
+              <div className="truncate text-xs">{c.supplierName}</div>
+              <div className="mt-2 font-mono text-xs font-semibold tabular-nums">
                 {fmtIls(c.monthExcessIls)}
               </div>
             </div>

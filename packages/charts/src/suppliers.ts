@@ -11,6 +11,10 @@ import {
   suppliers,
   type Database,
 } from '@restomatch/db';
+import { LEAK_FILTER } from './leak-views';
+
+type Row = Record<string, unknown>;
+const rowsOf = (res: unknown): Row[] => (Array.isArray(res) ? (res as Row[]) : ((res as { rows?: Row[] }).rows ?? []));
 
 export interface SupplierScorecard {
   supplierId: string;
@@ -91,20 +95,21 @@ export async function computeSupplierScorecards(
       );
     const avgPriceDeltaPct = Number(priceAgg[0]?.avgDelta ?? 0);
 
-    // Duplicate invoices count
-    const duplicates = await db
-      .select({ c: count(discrepancies.id) })
-      .from(discrepancies)
-      .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
-      .innerJoin(invoices, eq(invoices.id, matchRuns.invoiceId))
-      .where(
-        and(
-          eq(discrepancies.restaurantId, restaurantId),
-          eq(invoices.supplierId, s.id),
-          eq(discrepancies.type, 'DUPLICATE_INVOICE'),
-          gte(discrepancies.createdAt, since),
-        ),
-      );
+    // Duplicate invoices: the findings the leak counts (LEAK_FILTER), so one the
+    // bookkeeper rejected as "not a duplicate" is not held against the supplier.
+    const duplicates = rowsOf(
+      await db.execute(sql`
+        SELECT COUNT(*) AS c
+        FROM discrepancies d
+        JOIN match_runs mr ON mr.id = d.match_run_id AND mr.restaurant_id = ${restaurantId}
+        JOIN invoices i ON i.id = mr.invoice_id AND i.restaurant_id = ${restaurantId}
+        WHERE d.restaurant_id = ${restaurantId}
+          AND i.supplier_id = ${s.id}
+          AND d.type = 'DUPLICATE_INVOICE'
+          AND ${LEAK_FILTER}
+          AND d.created_at >= ${since.toISOString()}::timestamptz
+      `),
+    );
 
     // Trend: compare second-half-window vs first-half-window cleanPct
     const half = new Date(Date.now() - (windowDays / 2) * 24 * 60 * 60 * 1000);
