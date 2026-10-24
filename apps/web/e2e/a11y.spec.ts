@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { expect, test, type Page } from '@playwright/test';
 import { en as recvEn } from '../lib/i18n/messages/receiving/en';
-import { DEMO_RESTAURANT_NAME, OWNER_STATE } from './env';
+import { DEMO_OWNER_EMAIL, DEMO_RESTAURANT_NAME, OWNER_STATE } from './env';
 import { e2eSql } from './helpers';
 
 /**
@@ -149,6 +149,70 @@ for (const locale of LOCALES) {
     });
   }
 }
+
+/**
+ * Multi-branch owner: the base e2e seed has one branch, so the branch switcher
+ * (rendered only with 2+ memberships) would never be scanned. A throwaway second
+ * branch is added for these tests and removed afterwards.
+ */
+test.describe('a11y branch switcher (multi-branch owner)', () => {
+  const BRANCH = `${DEMO_RESTAURANT_NAME} — a11y`;
+  let branchId = '';
+
+  test.beforeAll(async () => {
+    const sql = e2eSql();
+    try {
+      const [owner] = await sql<
+        { id: string }[]
+      >`select id from users where email = ${DEMO_OWNER_EMAIL}`;
+      if (!owner) throw new Error('demo owner missing from the e2e DB');
+      const [r] = await sql<
+        { id: string }[]
+      >`insert into restaurants (name) values (${BRANCH}) returning id`;
+      branchId = r!.id;
+      await sql`insert into memberships (user_id, restaurant_id, role) values (${owner.id}, ${branchId}, 'owner')`;
+    } finally {
+      await sql.end();
+    }
+  });
+
+  test.afterAll(async () => {
+    if (!branchId) return;
+    const sql = e2eSql();
+    try {
+      await sql`delete from memberships where restaurant_id = ${branchId}`;
+      await sql`delete from restaurants where id = ${branchId}`;
+    } finally {
+      await sql.end();
+    }
+  });
+
+  for (const locale of LOCALES) {
+    test.describe(`[${locale} · desktop]`, () => {
+      test.use({ viewport: { width: 1280, height: 800 }, storageState: OWNER_STATE });
+      test(`${locale} desktop: switcher closed and open`, async ({ page }) => {
+        await open(page, locale, '/dashboard');
+        const trigger = page.getByTestId('branch-switcher');
+        await expect(trigger).toBeVisible();
+        expect(await axeViolations(page), 'switcher closed').toEqual([]);
+        await trigger.click();
+        await expect(page.getByText(BRANCH).first()).toBeVisible();
+        expect(await axeViolations(page), 'switcher open').toEqual([]);
+      });
+    });
+
+    test.describe(`[${locale} · phone]`, () => {
+      test.use({ ...PHONE, storageState: OWNER_STATE });
+      test(`${locale} phone: branch list in the menu drawer`, async ({ page }) => {
+        await open(page, locale, '/dashboard');
+        await page.locator('button[aria-controls="dashboard-drawer"]').first().click();
+        await expect(page.getByText(BRANCH).first()).toBeVisible();
+        expect(await axeViolations(page), 'drawer with branch list').toEqual([]);
+        expect(await smallTouchTargets(page), 'drawer touch targets').toEqual([]);
+      });
+    });
+  }
+});
 
 test.describe('a11y receiving wizard steps (phone, English)', () => {
   test.use(PHONE);
