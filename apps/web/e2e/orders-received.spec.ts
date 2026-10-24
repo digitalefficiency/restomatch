@@ -83,6 +83,7 @@ function rowStatus(page: Page) {
 }
 
 test('open PO → receive "= order" → close → the orders list says received', async ({ page }) => {
+  test.setTimeout(180_000);
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1366, height: 900 });
   await setLocale(page, 'he');
@@ -96,8 +97,14 @@ test('open PO → receive "= order" → close → the orders list says received'
   await page.locator('input[type="file"]').setInputFiles({ name: 'invoice.png', mimeType: 'image/png', buffer: TINY_PNG });
   await expect(page.getByText(/^נשמר · scan-/)).toBeVisible({ timeout: 60_000 });
   await page.getByRole('button', { name: /^עבד את החשבונית/ }).click();
-  // No OCR queue on the e2e server: the wizard receives against the order.
-  await page.getByTestId('continue-adjust').click();
+  // No OCR result comes: without a queue the wizard receives against the order
+  // at once; with one (REDIS_URL set, no worker) the receiver stops waiting
+  // after 30 s and receives against the order.
+  const adjust = page.getByTestId('continue-adjust');
+  const skip = page.getByTestId('skip-ocr-wait');
+  await expect(adjust.or(skip)).toBeVisible({ timeout: 60_000 });
+  if (await skip.isVisible()) await skip.click();
+  await adjust.click();
   for (const card of await page.locator('.adjust-card').all()) {
     if (!(await card.isVisible())) continue;
     const btn = card.getByRole('button', { name: /^= הזמנה/ });
