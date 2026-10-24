@@ -17,14 +17,14 @@ export function consentBannerHeight(el: Element | null): number {
 }
 
 /**
- * Keeps the dashboard's fixed chrome clear of the cookie-consent banner.
+ * Keeps the app's own bottom-anchored UI clear of the cookie-consent banner.
  *
  * Until the visitor answers it, the banner is fixed to the bottom of the
- * viewport — on a phone exactly where the bottom nav and the receiving wizard's
- * sticky "close receipt" CTA live, so a receiver on a fresh phone had to dismiss
- * it before they could navigate. This publishes the banner's height as
- * `--consent-h` on <html> while it is shown (0 after a choice); the bottom nav,
- * the page's bottom padding and the wizard footer sit that much higher, so the
+ * viewport — on a phone exactly where the dashboard's bottom nav, the receiving
+ * wizard's sticky "close receipt" CTA and the sign-in buttons of the (short,
+ * centred) auth pages sit. Mounted once in the root layout, this publishes the
+ * banner's height as `--consent-h` on <html> while it is shown (0 after a
+ * choice); those surfaces add it to their bottom offset / padding, so the
  * banner and everything above it stay clickable.
  */
 export function ConsentClearance() {
