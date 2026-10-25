@@ -16,7 +16,7 @@ const MOBILE_NAV_LABELS = [
 
 export function FieldMode({ children, className }: { children: React.ReactNode; className?: string }) {
   const css = `@media (max-width: 1023.98px){${MOBILE_NAV_LABELS.map(
-    (l) => `nav[aria-label="${l.replace(/"/g, '\\"')}"]`,
+    (l) => `nav[aria-label="${l.replace(/["\\]/g, '\\$&')}"]`,
   ).join(',')}{display:none!important}}`;
   return (
     <div data-mode="field" className={className}>

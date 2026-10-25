@@ -75,7 +75,7 @@ for (const vp of VIEWPORTS) {
         await page.locator('#ord-channel').selectOption('none');
         // The send button names the effect (W1-11) and waits out a 10 s undo window.
         const send = page.getByTestId('cart-primary');
-        await expect(send).toHaveText(new RegExp(m.send.cta.none.split('{supplier}')[0]!.replace(/[()]/g, '\\$&')));
+        await expect(send).toHaveText(new RegExp(m.send.cta.none.split('{supplier}')[0]!.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
         await send.click();
         await expect(page.getByRole('status').filter({ hasText: m.wizard.markedTitle })).toBeVisible({ timeout: 30_000 });
         const href = await page.getByRole('link', { name: m.wizard.viewOrder }).getAttribute('href');
