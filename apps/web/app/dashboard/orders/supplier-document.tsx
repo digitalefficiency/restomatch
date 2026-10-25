@@ -26,7 +26,7 @@ export function DocumentPricesToggle({ initialShowPrices }: { initialShowPrices:
     onError: (err) => toast.error(friendlyError(err, tc)),
   });
   return (
-    <label className="mb-4 flex max-w-2xl items-start gap-2 text-sm text-ink">
+    <label className="flex max-w-2xl items-start gap-2 text-sm text-ink">
       <input
         type="checkbox"
         checked={showPrices}
@@ -45,8 +45,74 @@ export function DocumentPricesToggle({ initialShowPrices }: { initialShowPrices:
 
 type Tab = 'email' | 'whatsapp';
 
-/** "What the supplier receives" for one PO: email text, WhatsApp text and the PDF. */
-export function SupplierDocumentPreview({ poId }: { poId: string }) {
+function downloadPdfOf(data: { pdfBase64: string; filename: string }) {
+  const blob = new Blob([base64ToBytes(data.pdfBase64)], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = data.filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * The literal priced document (flag `orderPricesOut`) for the wizard's review: the
+ * WhatsApp bubble or the e-mail text exactly as it will go, with its PDF — always
+ * open, for the channel that will actually be used.
+ */
+export function InlineDocument({ poId, channel }: { poId: string; channel: 'email' | 'whatsapp' }) {
+  const t = useT(ordersNs);
+  const tc = useT(components);
+  const preview = trpc.orders.documentPreview.useQuery({ poId }, { retry: false, staleTime: 0 });
+  return (
+    <section aria-labelledby="inline-doc-title" data-testid="order-document-preview" data-kind="priced">
+      <h3 id="inline-doc-title" className="mb-2 flex items-center gap-2 text-sm font-semibold text-ink">
+        <FileText className="h-4 w-4 text-primary" aria-hidden="true" /> {t('preview.title')} ·{' '}
+        {t(`document.${channel}`)}
+      </h3>
+      {preview.error ? (
+        <p role="alert" className="text-sm text-danger">
+          {t('document.failed')} {friendlyError(preview.error, tc)}
+        </p>
+      ) : !preview.data ? (
+        <div className="h-32 animate-pulse rounded-xl bg-surface-2" aria-busy="true" />
+      ) : (
+        <>
+          <pre
+            dir="rtl"
+            lang="he"
+            className={cn(
+              'max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-xl border p-3 font-sans text-sm leading-relaxed text-ink',
+              channel === 'whatsapp' ? 'border-primary/30 bg-primary/5' : 'border-line bg-surface-2',
+            )}
+          >
+            {channel === 'email' ? preview.data.emailText : preview.data.whatsappText}
+          </pre>
+          {channel === 'email' ? (
+            <Button size="sm" variant="ghost" className="mt-1 min-h-11" onClick={() => downloadPdfOf(preview.data!)}>
+              <FileDown className="h-4 w-4" aria-hidden="true" /> {t('document.downloadPdf')}
+            </Button>
+          ) : null}
+        </>
+      )}
+    </section>
+  );
+}
+
+/**
+ * "What the supplier receives" for one PO: email text, WhatsApp text and the PDF.
+ * Owner/manager also get the restaurant-wide "prices on supplier orders" setting
+ * here, next to its effect (it used to sit on the orders list page).
+ */
+export function SupplierDocumentPreview({
+  poId,
+  settings,
+}: {
+  poId: string;
+  settings?: { showPrices: boolean } | null;
+}) {
   const t = useT(ordersNs);
   const tc = useT(components);
   const [open, setOpen] = useState(false);
@@ -54,20 +120,11 @@ export function SupplierDocumentPreview({ poId }: { poId: string }) {
   const preview = trpc.orders.documentPreview.useQuery({ poId }, { enabled: open, retry: false, staleTime: 0 });
 
   function downloadPdf() {
-    if (!preview.data) return;
-    const blob = new Blob([base64ToBytes(preview.data.pdfBase64)], { type: 'application/pdf' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = preview.data.filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    if (preview.data) downloadPdfOf(preview.data);
   }
 
   return (
-    <Card elevated padding="lg" data-testid="supplier-document">
+    <Card elevated padding="lg" data-testid="supplier-document" id="supplier-document" className="scroll-mt-24">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="flex items-center gap-2 text-base font-bold text-ink">
@@ -79,6 +136,11 @@ export function SupplierDocumentPreview({ poId }: { poId: string }) {
           {open ? t('document.hide') : t('document.show')}
         </Button>
       </div>
+      {settings ? (
+        <div className="mt-4 border-t border-line pt-4">
+          <DocumentPricesToggle initialShowPrices={settings.showPrices} />
+        </div>
+      ) : null}
       {open && (
         <div className="mt-4 space-y-3">
           {preview.error ? (
@@ -100,7 +162,7 @@ export function SupplierDocumentPreview({ poId }: { poId: string }) {
                       aria-selected={tab === k}
                       onClick={() => setTab(k)}
                       className={cn(
-                        'rounded-md px-3 py-1 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
+                        'min-h-11 rounded-md px-3 py-1 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary',
                         tab === k ? 'bg-surface-2 font-medium text-ink' : 'text-muted hover:text-ink',
                       )}
                     >
