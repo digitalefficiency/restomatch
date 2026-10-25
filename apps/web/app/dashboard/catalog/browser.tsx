@@ -335,7 +335,7 @@ export function CatalogBrowser({
             !filtered ? (
               canEdit ? (
                 <LinkButton
-                  href={locked ? `/dashboard/catalog/import?supplierId=${lockedSupplierId}` : '/dashboard/catalog/import'}
+                  href={locked ? `/dashboard/catalog/import?supplierId=${encodeURIComponent(lockedSupplierId ?? '')}` : '/dashboard/catalog/import'}
                 >
                   {t('browser.firstImport')}
                 </LinkButton>

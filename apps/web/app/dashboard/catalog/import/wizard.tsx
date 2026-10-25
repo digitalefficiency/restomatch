@@ -640,7 +640,7 @@ export function ImportWizard({ initialSupplierId }: { initialSupplierId: string 
             >
               {t('import.viewCatalog')}
             </LinkButton>
-            <LinkButton href={`/dashboard/suppliers/${supplierId}?tab=catalog`} variant="secondary">
+            <LinkButton href={`/dashboard/suppliers/${encodeURIComponent(supplierId)}?tab=catalog`} variant="secondary">
               {t('import.viewSupplier')}
             </LinkButton>
             <Button variant="ghost" onClick={resetAll}>
