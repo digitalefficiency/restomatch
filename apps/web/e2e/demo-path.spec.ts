@@ -457,23 +457,22 @@ test('B · owner: hero ₪, leak detective, approvals, claims, report, chain, br
     await expect(hero.locator('#leak-hero-label')).toHaveText(m.overview.hero.leakedLabel);
     // The one number sits above the fold (1366×768 and 390×844): no extra hero tile may push it down.
     await page.evaluate(() => window.scrollTo(0, 0));
-    const leakBox = await hero.locator('p.font-mono').first().boundingBox();
+    const leakBox = await hero.getByTestId('leak-hero-amount').boundingBox();
     const fold = page.viewportSize()!.height;
     expect(leakBox, 'hero ₪ is rendered').not.toBeNull();
     expect(leakBox!.y + leakBox!.height, `hero ₪ bottom vs the ${fold}px fold`).toBeLessThanOrEqual(fold);
     const heroText = await hero.innerText();
-    n.leak = num(await hero.locator('p.font-mono').first().innerText());
+    n.leak = num(await hero.getByTestId('leak-hero-amount').innerText());
     n.pct = num(/(\d+(?:\.\d+)?)\s*%/.exec(heroText.replace(BIDI, ''))![1]!);
-    const spendLine = await hero.locator('p.font-mono + p span').first().innerText();
-    n.spend = num(spendLine);
-    n.caught = num(await valueAfter(hero, m.overview.hero.caught));
-    n.claimed = num(await valueAfter(hero, m.overview.hero.recovered));
-    n.pendingApprovals = num(await valueAfter(page, m.overview.kpis.pending));
-    const lastMonth = /(?:חודש קודם|Last month):?\s*([^\n·]+)/.exec(heroText);
-    if (lastMonth) n.lastMonthLeak = num(lastMonth[1]!);
-
+    n.spend = num(await hero.getByTestId('leak-hero-base').innerText());
+    // The split boxes are desktop-only (the phone reads them as one sentence): read the DOM text.
+    n.caught = num((await hero.getByTestId('hero-caught').textContent())!.replace(m.overview.hero.caught, ''));
+    n.claimed = num((await hero.getByTestId('hero-claimed').textContent())!.replace(m.overview.hero.recovered, ''));
+    // "מחכה לך": the decisions waiting for the viewer, in ₪ and count (the old count-only KPI is gone).
+    n.pendingApprovals = num(await page.getByTestId('needs-decide-sub').innerText());
+    expect(num(await page.getByTestId('needs-decide-value').innerText()), '"waiting for your decision" ₪ vs the hero split').toBe(n.caught);
     expect(n.leak, 'hero leak > 0 (the demo needs a number)').toBeGreaterThan(0);
-    // The % is leak ÷ spend, rounded to one decimal (the target line says 1.5%).
+    // The % is leak ÷ spend, rounded to one decimal (no target line: R-14 default).
     expect(Math.abs(n.pct - Math.round((n.leak / n.spend) * 1000) / 10), `hero % (${n.pct}) vs ₪${n.leak} ÷ ₪${n.spend}`).toBeLessThanOrEqual(0.1);
     // The leak splits into "caught before payment" + "claimed from suppliers".
     expect(Math.abs(n.caught + n.claimed - n.leak), `caught ₪${n.caught} + claimed ₪${n.claimed} vs leak ₪${n.leak}`).toBeLessThanOrEqual(1);
@@ -495,8 +494,8 @@ test('B · owner: hero ₪, leak detective, approvals, claims, report, chain, br
     await clickNav(page, m.nav.links.approvals, '/dashboard/approvals');
     const inQueue = num(await valueAfter(page, m.approvals.summary.inQueue));
     n.atRisk = num(await valueAfter(page, m.approvals.summary.atRisk));
-    expect(inQueue, 'approvals "in queue" vs dashboard "waiting for approval"').toBe(n.pendingApprovals);
-    expect(n.atRisk, 'approvals "amount at risk" vs dashboard "caught before payment"').toBe(n.caught);
+    expect(inQueue, 'approvals "in queue" vs dashboard "waiting for your decision"').toBe(n.pendingApprovals);
+    expect(n.atRisk, 'approvals "amount at risk" vs dashboard "awaiting a decision"').toBe(n.caught);
     // Owner sees Approve / Reject, never "escalate to owner" (pack 5:30).
     await expect(page.getByRole('button', { name: m.approvals.card.approve, exact: true }).first()).toBeVisible();
     await expect(page.getByRole('button', { name: m.approvals.card.escalate })).toHaveCount(0);
@@ -592,10 +591,13 @@ test('C · receiver: HaSharon Produce → photo → OCR → review → adjust �
 
   await test.step('receiving inbox lists HaSharon Produce today', async () => {
     await clickNav(page, M[L].nav.links.receiving, '/dashboard/receiving');
-    const card = page.getByTestId('receiving-po-card').filter({ hasText: L === 'en' ? HASHARON_EN : 'ירקות השרון' });
+    // The board shows the next truck enlarged (its own card) and the rest as rows.
+    const card = page
+      .locator('[data-testid="receiving-po-card"], [data-testid="board-next"]')
+      .filter({ hasText: L === 'en' ? HASHARON_EN : 'ירקות השרון' });
     if (israelToday() === DEMO_TODAY) {
       await expect(card, `HaSharon card in the receiving inbox on ${DEMO_TODAY}`).toHaveCount(1);
-      await expect(card).toHaveAttribute('href', new RegExp(original));
+      await expect(card.locator('xpath=self::a | .//a').first()).toHaveAttribute('href', new RegExp(original));
     } else {
       info.annotations.push({ type: 'note', description: `inbox check skipped: today is ${israelToday()}, seed is for ${DEMO_TODAY}` });
     }

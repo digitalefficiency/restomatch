@@ -104,7 +104,11 @@ function NeedLink({ row }: { row: NeedRow }) {
         <span className="block text-2xl font-bold leading-7 tabular-nums text-ink" data-testid={`needs-${row.key}-value`}>
           <bdi>{row.value}</bdi>
         </span>
-        {row.sub ? <span className="block truncate text-xs text-muted">{row.sub}</span> : null}
+        {row.sub ? (
+          <span className="block truncate text-xs text-muted" data-testid={`needs-${row.key}-sub`}>
+            {row.sub}
+          </span>
+        ) : null}
       </span>
       <span
         className={cn(
