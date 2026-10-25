@@ -421,13 +421,16 @@ export function TrackerClient({
                       {g.claims.map((c) => (
                         <li key={c.id} className="space-y-2 py-3" data-testid="claim-card" data-status={statusOf(c)}>
                           <div className="flex items-start gap-3">
-                            <input
-                              type="checkbox"
-                              className="mt-1 h-5 w-5 accent-primary"
-                              checked={selected.has(c.id)}
-                              onChange={() => toggle(c.id)}
-                              aria-label={t('batch.select', { invoice: c.invoiceNumber ?? '—', item: itemOf(c) })}
-                            />
+                            {/* The label is the 44 px touch target around the box. */}
+                            <label className="-m-3 inline-flex h-11 w-11 shrink-0 items-center justify-center">
+                              <input
+                                type="checkbox"
+                                className="h-5 w-5 accent-primary"
+                                checked={selected.has(c.id)}
+                                onChange={() => toggle(c.id)}
+                                aria-label={t('batch.select', { invoice: c.invoiceNumber ?? '—', item: itemOf(c) })}
+                              />
+                            </label>
                             <span className="min-w-0 flex-1 font-medium text-ink">{itemOf(c)}</span>
                             <span className="shrink-0 text-end text-lg font-bold tabular-nums text-ink">{amountCell(c)}</span>
                           </div>
