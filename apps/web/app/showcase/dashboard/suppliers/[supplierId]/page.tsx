@@ -2,6 +2,7 @@
 
 import { useGSAP } from '@gsap/react';
 import { gsap } from 'gsap';
+import { whenMotionOk } from '../../../_lib/motion';
 import {
   ArrowDown,
   ArrowLeft,
@@ -57,15 +58,16 @@ export default function SupplierDetailPage({ params }: PageProps) {
   const [scanInvoiceId, setScanInvoiceId] = useState<string | null>(null);
 
   useGSAP(
-    () => {
-      gsap.from('.detail-block', {
-        y: 20,
-        opacity: 0,
-        stagger: 0.08,
-        duration: 0.5,
-        ease: 'power3.out',
-      });
-    },
+    () =>
+      whenMotionOk(() => {
+        gsap.from('.detail-block', {
+          y: 20,
+          opacity: 0,
+          stagger: 0.08,
+          duration: 0.5,
+          ease: 'power3.out',
+        });
+      }),
     { scope: containerRef },
   );
 
@@ -147,7 +149,7 @@ export default function SupplierDetailPage({ params }: PageProps) {
 
         {/* Right: action panel */}
         <div className="rounded-2xl border border-line bg-surface p-6 shadow-card flex flex-col gap-3">
-          <h2 className="text-xs uppercase tracking-wider text-muted font-semibold mb-1">
+          <h2 className="text-xs ltr:uppercase ltr:tracking-wider text-muted font-semibold mb-1">
             {t('supplier.actions.title')}
           </h2>
           <ActionButton
@@ -375,7 +377,7 @@ function KpiCard({
       <div className={`w-10 h-10 rounded-xl ring-1 flex items-center justify-center mb-3 ${t.icon}`}>
         {icon}
       </div>
-      <div className="text-xs uppercase tracking-wider text-muted font-semibold mb-1">
+      <div className="text-xs ltr:uppercase ltr:tracking-wider text-muted font-semibold mb-1">
         {label}
       </div>
       <div className={`font-mono text-2xl font-extrabold tabular-nums mb-1 ${t.value}`}>{value}</div>
@@ -436,7 +438,7 @@ function PriceTrendCard({ product }: { product: PriceTrendProduct }) {
 
       <div className="mt-3 pt-3 border-t border-line flex items-baseline justify-between">
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-muted font-semibold">
+          <div className="text-xs ltr:uppercase ltr:tracking-wider text-muted font-semibold">
             {t('supplier.prices.latest')}
           </div>
           <div className="text-lg font-bold font-mono tabular-nums text-ink">
@@ -444,7 +446,7 @@ function PriceTrendCard({ product }: { product: PriceTrendProduct }) {
           </div>
         </div>
         <div className="text-end">
-          <div className="text-[10px] uppercase tracking-wider text-muted font-semibold">
+          <div className="text-xs ltr:uppercase ltr:tracking-wider text-muted font-semibold">
             {t('supplier.prices.avg60')}
           </div>
           <div className="text-sm font-semibold font-mono tabular-nums text-muted">

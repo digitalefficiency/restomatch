@@ -177,11 +177,11 @@ const EN: Record<string, string> = {
   'חשבונית גדולה שלא נמצאה הזמנת רכש תואמת': 'A large invoice with no matching purchase order',
   'הסכמת ספק שזה משלוח חירום, אישור ידני': 'Supplier confirmed an emergency delivery; approved manually',
   'פריט שלא הוזמן (> ₪100)': 'Unordered item (over ₪100)',
-  'שורה בחשבונית שאין לה PO line תואם, מעל ערך ₪100':
+  'שורה בחשבונית שאין לה שורת הזמנה תואמת, מעל ערך ₪100':
     'An invoice line with no matching PO line, worth more than ₪100',
   'מבצע לקראת חג': 'Holiday promotion',
   'הפרש מחיר > 10%': 'Price variance over 10%',
-  'מחיר חויב חרג מעל סף ה-block המוגדר': 'The billed price exceeded the configured blocking threshold',
+  'המחיר שחויב חרג מסף החסימה המוגדר': 'The billed price exceeded the configured blocking threshold',
   'דרשנו הסבר מאבי הירקן': 'We asked Avi the greengrocer for an explanation',
   'הפרש מחיר 2-10%': 'Price variance 2–10%',
   'חריגה בינונית — דרושה סקירה של מנהל משמרת': 'Moderate variance — needs a shift manager review',

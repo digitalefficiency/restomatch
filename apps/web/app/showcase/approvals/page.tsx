@@ -2,6 +2,7 @@
 
 import { useGSAP } from '@gsap/react';
 import { gsap } from 'gsap';
+import { whenMotionOk } from '../_lib/motion';
 import {
   Bell,
   Check,
@@ -21,6 +22,7 @@ import { formatIls } from '@/lib/money';
 import { mockText } from '../_lib/mockText';
 import { localDate, localTime } from '../_lib/time';
 import { dayMemo, inv4882FirstSeen, invoiceAudits } from '../dashboard/invoices/_mock';
+import { SAMPLE_CAUGHT_THIS_MONTH_ILS, ShowcaseEndCard } from '../_components/ShowcaseEndCard';
 
 type SeverityTier = 'auto' | 'review-manager' | 'review-owner' | 'block' | 'hard-block';
 type ApproverRole = 'auto' | 'clerk' | 'manager' | 'owner' | 'bookkeeper';
@@ -114,7 +116,7 @@ const rules = dayMemo((now): Rule[] => {
   {
     id: 'rule-90',
     type: 'פריט שלא הוזמן (> ₪100)',
-    description: 'שורה בחשבונית שאין לה PO line תואם, מעל ערך ₪100',
+    description: 'שורה בחשבונית שאין לה שורת הזמנה תואמת, מעל ערך ₪100',
     approverRole: 'owner',
     action: 'whatsapp_alert',
     severity: 'block',
@@ -141,7 +143,7 @@ const rules = dayMemo((now): Rule[] => {
   {
     id: 'rule-80',
     type: 'הפרש מחיר > 10%',
-    description: 'מחיר חויב חרג מעל סף ה-block המוגדר',
+    description: 'המחיר שחויב חרג מסף החסימה המוגדר',
     approverRole: 'owner',
     action: 'hold_invoice',
     severity: 'review-owner',
@@ -204,15 +206,16 @@ export default function ApprovalsShowcase() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useGSAP(
-    () => {
-      gsap.from('.rule-row', {
-        y: 16,
-        opacity: 0,
-        stagger: 0.06,
-        duration: 0.5,
-        ease: 'power2.out',
-      });
-    },
+    () =>
+      whenMotionOk(() => {
+        gsap.from('.rule-row', {
+          y: 16,
+          opacity: 0,
+          stagger: 0.06,
+          duration: 0.5,
+          ease: 'power2.out',
+        });
+      }),
     { scope: containerRef },
   );
 
@@ -220,7 +223,7 @@ export default function ApprovalsShowcase() {
     <main ref={containerRef} className="max-w-6xl mx-auto px-4 sm:px-6 py-12">
       <div className="mb-10">
         <div className="mb-2 h-0.5 w-12 rounded-full flow-stream" aria-hidden="true" />
-        <p className="text-xs uppercase ltr:tracking-[0.2em] rtl:text-sm text-primary font-semibold mb-2">
+        <p className="text-xs ltr:uppercase ltr:tracking-[0.2em] rtl:text-sm text-primary font-semibold mb-2">
           {t('approvals.eyebrow')}
         </p>
         <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-2 text-ink">
@@ -231,7 +234,7 @@ export default function ApprovalsShowcase() {
 
       <div className="rounded-2xl border border-line bg-surface overflow-x-auto shadow-card">
         <div className="min-w-[760px]">
-          <div className="grid grid-cols-[40px_1fr_150px_170px_90px_40px] gap-4 px-5 py-3 border-b border-line text-xs uppercase tracking-wider text-muted font-semibold bg-surface-2">
+          <div className="grid grid-cols-[40px_1fr_150px_170px_90px_40px] gap-4 px-5 py-3 border-b border-line text-xs ltr:uppercase ltr:tracking-wider text-muted font-semibold bg-surface-2">
             <div>#</div>
             <div>{t('approvals.columns.type')}</div>
             <div>{t('approvals.columns.approver')}</div>
@@ -253,6 +256,7 @@ export default function ApprovalsShowcase() {
         <LegendSwatch tone="block" label={t('approvals.legend.block')} />
         <LegendSwatch tone="hard-block" label={t('approvals.legend.hardBlock')} />
       </div>
+      <ShowcaseEndCard kind="dashboard" amountIls={SAMPLE_CAUGHT_THIS_MONTH_ILS} />
     </main>
   );
 }
@@ -264,21 +268,28 @@ function RuleRow({ rule, idx }: { rule: Rule; idx: number }) {
 
   useGSAP(
     () => {
-      if (!expandRef.current) return;
-      if (expanded) {
-        gsap.fromTo(
-          expandRef.current,
-          { height: 0, opacity: 0 },
-          { height: 'auto', opacity: 1, duration: 0.4, ease: 'power2.out' },
-        );
-      } else {
-        gsap.to(expandRef.current, {
-          height: 0,
-          opacity: 0,
-          duration: 0.25,
-          ease: 'power2.in',
-        });
-      }
+      const el = expandRef.current;
+      if (!el) return;
+      return whenMotionOk(
+        () => {
+          if (expanded) {
+            gsap.fromTo(
+              el,
+              { height: 0, opacity: 0 },
+              { height: 'auto', opacity: 1, duration: 0.4, ease: 'power2.out' },
+            );
+          } else {
+            gsap.to(el, {
+              height: 0,
+              opacity: 0,
+              duration: 0.25,
+              ease: 'power2.in',
+            });
+          }
+        },
+        // Reduced motion: jump straight to the open / closed state.
+        () => gsap.set(el, expanded ? { height: 'auto', opacity: 1 } : { height: 0, opacity: 0 }),
+      );
     },
     { dependencies: [expanded] },
   );
@@ -361,7 +372,7 @@ function AuditLog({ entries }: { entries: AuditEntry[] }) {
         ))}
       </div>
 
-      <div className="mt-4 pt-3 border-t border-dashed border-line flex items-center justify-between gap-4 text-[10px] text-muted">
+      <div className="mt-4 pt-3 border-t border-dashed border-line flex items-center justify-between gap-4 text-xs text-muted">
         <span>{t('approvals.log.footnote')}</span>
         <span className="font-mono tabular-nums text-primary shrink-0">{t('approvals.log.verified')}</span>
       </div>
@@ -399,12 +410,12 @@ function AuditEntryRow({ entry }: { entry: AuditEntry }) {
           <RoleBadge role={entry.actorRole} small />
         </div>
         {entry.note ? (
-          <div className="text-[11px] text-muted mt-0.5">{mockText(entry.note, locale)}</div>
+          <div className="text-xs text-muted mt-0.5">{mockText(entry.note, locale)}</div>
         ) : null}
       </div>
       <div>
         <span
-          className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold ${decisionColors[entry.decision]}`}
+          className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold ${decisionColors[entry.decision]}`}
         >
           {decisionLabel[entry.decision]}
         </span>
@@ -449,7 +460,7 @@ function RoleBadge({ role, small }: { role: ApproverRole; small?: boolean }) {
   return (
     <span
       className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-semibold ${tint} ${
-        small ? 'text-[10px] py-0.5' : ''
+        small ? 'text-xs py-0.5' : ''
       }`}
     >
       {icon}

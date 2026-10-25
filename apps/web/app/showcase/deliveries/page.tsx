@@ -17,6 +17,7 @@ import { useEffect, useState } from 'react';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { showcase } from '@/lib/i18n/messages/showcase';
 import { mockText } from '../_lib/mockText';
+import { SAMPLE_CAUGHT_THIS_MONTH_ILS, ShowcaseEndCard } from '../_components/ShowcaseEndCard';
 
 interface Delivery {
   id: string;
@@ -28,6 +29,16 @@ interface Delivery {
   orderedTime: string; // "HH:MM"
   cutoff: string; // "HH:MM" — editable
   arrived: boolean;
+}
+
+/** Every 15 minutes from 05:00 to 23:45, plus the current value when it falls between steps. */
+function cutoffOptions(current: string): string[] {
+  const out: string[] = [];
+  for (let m = 5 * 60; m < 24 * 60; m += 15) {
+    out.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
+  }
+  if (!out.includes(current)) out.push(current);
+  return out.sort();
 }
 
 function hhmm(d: Date): string {
@@ -172,16 +183,23 @@ export default function DeliveriesPage() {
                 <label className="flex items-center gap-2 text-sm text-muted shrink-0">
                   <Clock className="w-4 h-4" />
                   {t('deliveries.cutoff')}
-                  <input
-                    type="time"
+                  {/* 24-hour HH:mm in both languages (a native type=time showed "07:41 AM"; mkt-31). */}
+                  <select
                     value={d.cutoff}
                     onChange={(e) =>
                       setDeliveries((prev) =>
                         prev.map((x) => (x.id === d.id ? { ...x, cutoff: e.target.value } : x)),
                       )
                     }
-                    className="bg-surface-2 border border-line rounded-lg px-2 py-1 text-ink tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                  />
+                    dir="ltr"
+                    className="bg-surface-2 border border-line rounded-lg px-2 py-1 text-ink tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    {cutoffOptions(d.cutoff).map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
                 </label>
               </div>
 
@@ -256,6 +274,7 @@ export default function DeliveriesPage() {
       </div>
 
       <p className="text-xs text-muted mt-8 max-w-2xl leading-relaxed">{t('deliveries.footnote')}</p>
+      <ShowcaseEndCard kind="dashboard" amountIls={SAMPLE_CAUGHT_THIS_MONTH_ILS} />
     </main>
   );
 }

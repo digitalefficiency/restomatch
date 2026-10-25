@@ -2,6 +2,7 @@
 
 import { useGSAP } from '@gsap/react';
 import { gsap } from 'gsap';
+import { whenMotionOk } from '../../_lib/motion';
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -30,6 +31,7 @@ import {
   type InvoiceAuditStatus,
 } from './_mock';
 import { InvoiceDetail } from './_detail';
+import { ShowcaseEndCard } from '../../_components/ShowcaseEndCard';
 
 type FilterStatus = 'all' | 'has_issues' | 'clean' | 'blocked';
 
@@ -54,23 +56,24 @@ export default function InvoiceAuditPage() {
   const selected = invoiceAudits().find((r) => r.id === selectedId) ?? null;
 
   useGSAP(
-    () => {
-      gsap.from('.audit-kpi', {
-        y: 16,
-        opacity: 0,
-        stagger: 0.06,
-        duration: 0.5,
-        ease: 'power3.out',
-      });
-      gsap.from('.audit-row', {
-        x: -10,
-        opacity: 0,
-        stagger: 0.05,
-        duration: 0.4,
-        ease: 'power2.out',
-        delay: 0.15,
-      });
-    },
+    () =>
+      whenMotionOk(() => {
+        gsap.from('.audit-kpi', {
+          y: 16,
+          opacity: 0,
+          stagger: 0.06,
+          duration: 0.5,
+          ease: 'power3.out',
+        });
+        gsap.from('.audit-row', {
+          x: -10,
+          opacity: 0,
+          stagger: 0.05,
+          duration: 0.4,
+          ease: 'power2.out',
+          delay: 0.15,
+        });
+      }),
     { scope: containerRef, dependencies: [filter] },
   );
 
@@ -78,7 +81,7 @@ export default function InvoiceAuditPage() {
     <main ref={containerRef} className="max-w-7xl mx-auto px-4 sm:px-6 py-10 space-y-8">
       <div>
         <div className="mb-2 h-0.5 w-12 rounded-full flow-stream" aria-hidden="true" />
-        <p className="text-xs uppercase ltr:tracking-[0.18em] rtl:text-sm text-primary font-semibold mb-2">
+        <p className="text-xs ltr:uppercase ltr:tracking-[0.18em] rtl:text-sm text-primary font-semibold mb-2">
           {t('invoices.eyebrow')}
         </p>
         <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-ink mb-2">
@@ -169,6 +172,7 @@ export default function InvoiceAuditPage() {
       </div>
 
       {selected ? <InvoiceDetail record={selected} onClose={() => setSelectedId(null)} /> : null}
+      <ShowcaseEndCard kind="invoices" amountIls={stats.savingsCaptured} />
     </main>
   );
 }
@@ -201,7 +205,7 @@ function KpiCard({
           {icon}
         </div>
       </div>
-      <div className="text-xs uppercase tracking-wider text-muted font-semibold mb-1">
+      <div className="text-xs ltr:uppercase ltr:tracking-wider text-muted font-semibold mb-1">
         {label}
       </div>
       <div className={`font-mono text-3xl font-extrabold tabular-nums mb-1 ${t.value}`}>{value}</div>
@@ -252,27 +256,26 @@ function InvoiceRow({
   const statusInfo = statusBadge(record.status);
   const supplierName = mockText(record.supplierName, locale);
   return (
+    // One real <button> stretched over the row toggles it; the supplier links sit
+    // above it as siblings, so nothing interactive is nested (mkt-25, a11y-20).
     <div
-      role="button"
-      tabIndex={0}
-      onClick={onToggle}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onToggle();
-        }
-      }}
-      className={`audit-row w-full text-start rounded-2xl border bg-surface px-4 sm:px-5 py-4 transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
+      className={`audit-row relative w-full text-start rounded-2xl border bg-surface px-4 sm:px-5 py-4 transition-all ${
         isExpanded
           ? 'border-primary/50 shadow-glow-primary'
           : 'border-line hover:border-primary/40 shadow-card'
       }`}
     >
-      <div className="flex items-center gap-3 sm:gap-4">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={isExpanded}
+        aria-label={t('invoices.row.toggle', { number: record.invoiceNumber, name: supplierName })}
+        className="absolute inset-0 rounded-2xl cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      />
+      <div className="pointer-events-none relative flex items-center gap-3 sm:gap-4">
         <Link
           href={`/showcase/dashboard/suppliers/${record.supplierId}`}
-          onClick={(e) => e.stopPropagation()}
-          className="w-11 h-11 rounded-xl bg-primary/12 border border-primary/25 flex items-center justify-center font-bold text-primary shrink-0 hover:bg-primary/20 transition-colors"
+          className="pointer-events-auto w-11 h-11 rounded-xl bg-primary/12 border border-primary/25 flex items-center justify-center font-bold text-primary shrink-0 hover:bg-primary/20 transition-colors"
           title={t('invoices.row.supplierLink', { name: supplierName })}
         >
           {mockText(record.supplierInitials, locale)}
@@ -281,8 +284,7 @@ function InvoiceRow({
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             <Link
               href={`/showcase/dashboard/suppliers/${record.supplierId}`}
-              onClick={(e) => e.stopPropagation()}
-              className="group inline-flex items-center gap-1 font-semibold text-ink text-base hover:text-primary transition-colors"
+              className="pointer-events-auto group inline-flex items-center gap-1 font-semibold text-ink text-base hover:text-primary transition-colors"
             >
               <span>{supplierName}</span>
               <ArrowUpRight className="w-3.5 h-3.5 text-muted group-hover:text-primary transition-colors rtl:-scale-x-100" />
@@ -326,14 +328,14 @@ function InvoiceRow({
           </div>
         </div>
         <div className="text-end shrink-0">
-          <div className="text-[10px] text-muted uppercase tracking-wider font-semibold">
+          <div className="text-xs text-muted ltr:uppercase ltr:tracking-wider font-semibold">
             {t('invoices.row.billed')}
           </div>
           <div className="font-mono font-bold tabular-nums text-ink">
             {ilsExact(record.totalInvoiceIls, locale)}
           </div>
           {record.totalApprovedIls !== record.totalInvoiceIls ? (
-            <div className="text-[10px] text-muted mt-0.5">
+            <div className="text-xs text-muted mt-0.5">
               {t('invoices.row.approved')}{' '}
               <span className="font-semibold font-mono tabular-nums text-gold">
                 {ilsExact(record.totalApprovedIls, locale)}
@@ -341,7 +343,7 @@ function InvoiceRow({
             </div>
           ) : null}
           {record.savingsCapturedIls > 0 ? (
-            <div className="text-[10px] text-gold font-semibold mt-0.5 font-mono tabular-nums flex items-center gap-1 justify-end">
+            <div className="text-xs text-gold font-semibold mt-0.5 font-mono tabular-nums flex items-center gap-1 justify-end">
               <Sparkles className="w-3 h-3" />
               {t('invoices.row.saved', {
                 amount: ilsExact(record.savingsCapturedIls, locale),

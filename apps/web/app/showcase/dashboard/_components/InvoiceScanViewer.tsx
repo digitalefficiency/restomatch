@@ -2,6 +2,7 @@
 
 import { useGSAP } from '@gsap/react';
 import { gsap } from 'gsap';
+import { whenMotionOk } from '../../_lib/motion';
 import {
   Camera,
   Check,
@@ -84,14 +85,15 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
   const [zoom, setZoom] = useState(1);
 
   useGSAP(
-    () => {
-      gsap.fromTo(overlayRef.current, { opacity: 0 }, { opacity: 1, duration: 0.2 });
-      gsap.fromTo(
-        sheetRef.current,
-        { y: 24, opacity: 0, scale: 0.98 },
-        { y: 0, opacity: 1, scale: 1, duration: 0.4, ease: 'power3.out' },
-      );
-    },
+    () =>
+      whenMotionOk(() => {
+        gsap.fromTo(overlayRef.current, { opacity: 0 }, { opacity: 1, duration: 0.2 });
+        gsap.fromTo(
+          sheetRef.current,
+          { y: 24, opacity: 0, scale: 0.98 },
+          { y: 0, opacity: 1, scale: 1, duration: 0.4, ease: 'power3.out' },
+        );
+      }),
     { dependencies: [data.invoiceNumber] },
   );
 
@@ -217,7 +219,7 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
           <div className="flex-1 relative overflow-auto bg-bg">
             <div className="sticky top-3 z-10 mx-3 mt-3 flex items-center gap-2 glass border border-line rounded-full px-3 py-1.5 pointer-events-none w-fit max-w-[calc(100%-1.5rem)]">
               <Languages className="w-3.5 h-3.5 text-primary shrink-0" aria-hidden="true" />
-              <span className="text-[11px] text-muted truncate">{t('scan.original')}</span>
+              <span className="text-xs text-muted truncate">{t('scan.original')}</span>
             </div>
             <div className="w-max mx-auto px-4 pb-8 pt-4">
               {/* CSS `zoom` (not transform) so the scroll area follows the size. */}
@@ -230,7 +232,7 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
           {/* Extraction sidebar */}
           <aside className="w-80 shrink-0 border-s border-line bg-surface overflow-y-auto hidden lg:block">
             <div className="px-5 py-4 border-b border-line">
-              <div className="text-xs uppercase tracking-wider text-muted font-semibold mb-1">
+              <div className="text-xs ltr:uppercase ltr:tracking-wider text-muted font-semibold mb-1">
                 {t('scan.extracted')}
               </div>
               <div className="text-xs text-muted">
@@ -272,7 +274,7 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
             </div>
 
             <div className="border-t border-line px-5 py-4">
-              <div className="text-xs uppercase tracking-wider text-muted font-semibold mb-3 flex items-center gap-1.5">
+              <div className="text-xs ltr:uppercase ltr:tracking-wider text-muted font-semibold mb-3 flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-primary" />
                 <span>{t('scan.lines', { count: data.lines.length })}</span>
               </div>
@@ -284,7 +286,7 @@ export function InvoiceScanViewer({ data, onClose }: Props) {
                   >
                     <div className="min-w-0 flex-1">
                       <div className="font-medium text-ink truncate">{mockText(line.name, locale)}</div>
-                      <div className="text-[10px] text-muted font-mono tabular-nums">
+                      <div className="text-xs text-muted font-mono tabular-nums">
                         {line.qty} {mockText(line.unit, locale)} × {formatIls(line.unitPrice, { locale, maximumFractionDigits: 2 })}
                       </div>
                     </div>
@@ -318,7 +320,7 @@ function ConfidenceBadge({ value }: { value: number }) {
         : 'bg-danger/12 text-danger ring-1 ring-danger/25';
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold font-mono tabular-nums ${tone}`}
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold font-mono tabular-nums ${tone}`}
     >
       OCR {pct}%
     </span>
@@ -352,10 +354,10 @@ function ExtractedField({
   return (
     <div>
       <div className="flex items-center justify-between mb-0.5">
-        <span className="text-[10px] uppercase tracking-wider text-muted font-semibold">
+        <span className="text-xs ltr:uppercase ltr:tracking-wider text-muted font-semibold">
           {label}
         </span>
-        <span className="text-[10px] font-mono tabular-nums text-muted">
+        <span className="text-xs font-mono tabular-nums text-muted">
           {Math.round(confidence * 100)}%
         </span>
       </div>

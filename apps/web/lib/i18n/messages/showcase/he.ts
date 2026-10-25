@@ -23,7 +23,25 @@ export const he = {
     demoBadge: 'הדגמה · נתונים להמחשה',
     demoNote: 'כל המסעדות, הספקים, האנשים והסכומים בעמודים אלה בדויים ומיועדים להמחשה בלבד.',
     backToSite: 'לאתר',
-    cta: 'תאמו הדגמה',
+    cta: 'בדיקת דליפה חינם',
+    ctaShort: 'בדיקה חינם',
+    skip: 'דילוג לתוכן הראשי',
+    pickDemo: 'בחרו דמו',
+    pickDemoTitle: 'מסכי ההדגמה',
+    closePicker: 'סגירת רשימת הדמו',
+    aboutDemo: 'על נתוני ההדגמה',
+    footerLabel: 'קישורי תחתית',
+  },
+  endCard: {
+    eyebrow: 'מה שראיתם בדמו',
+    body: 'רוצים לראות את זה על החשבוניות שלכם? בפיילוט נריץ אותן ונראה לכם את הפער בשקלים.',
+    ctaPilot: 'התחילו פיילוט חינם',
+    ctaWhatsapp: 'שלחו חשבונית בוואטסאפ',
+    whatsappText: 'היי, ראיתי את הדמו של RestoMatch ואשמח לשלוח חשבונית לבדיקה.',
+    receiver: '{amount} נתפסו במשלוח הזה — לפני תשלום.',
+    receiverClean: 'המשלוח הזה תואם להזמנה — ו-RestoMatch בודקת כל משלוח כזה.',
+    dashboard: '{amount} נתפסו החודש במסעדה לדוגמה — לפני תשלום.',
+    invoices: '{amount} נתפסו בחשבוניות האלה — לפני תשלום.',
   },
 
   index: {
@@ -60,7 +78,7 @@ export const he = {
     },
     ctaTitle: 'רוצים לראות את זה על החשבוניות שלכם?',
     ctaBody: 'נריץ את RestoMatch על חשבוניות אמיתיות מהמסעדה שלכם ונראה יחד כמה כסף דלף.',
-    ctaButton: 'תאמו הדגמה',
+    ctaButton: 'בדיקת דליפה חינם',
   },
 
   lineStatus: {
@@ -135,6 +153,7 @@ export const he = {
       empty: 'אין חשבוניות שתואמות לסינון.',
     },
     row: {
+      toggle: 'פרטי חשבונית {number} של {name}',
       supplierLink: 'לעמוד הספק {name}',
       items: '{count} פריטים',
       clean: 'תקין',
