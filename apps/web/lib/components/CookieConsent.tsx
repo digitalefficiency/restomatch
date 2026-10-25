@@ -125,7 +125,7 @@ export function CookieConsent({ decided = false }: { decided?: boolean }) {
         aria-label={t('cookie.label')}
         data-consent="inline"
         onKeyDown={onKeyDown}
-        className="border-b border-line bg-surface"
+        className="border-b border-line bg-surface print:hidden"
       >
         <div className="mx-auto flex max-w-app items-center justify-between gap-3 px-4 py-1.5">
           <p className="min-w-0 text-xs leading-4 text-muted sm:text-sm sm:leading-5">
@@ -159,7 +159,7 @@ export function CookieConsent({ decided = false }: { decided?: boolean }) {
       aria-label={t('cookie.label')}
       data-consent="floating"
       onKeyDown={onKeyDown}
-      className={`fixed inset-x-0 bottom-0 z-consent px-3 pb-3 sm:px-4 sm:pb-4 ${shown ? '' : 'invisible'}`}
+      className={`fixed inset-x-0 bottom-0 z-consent px-3 pb-3 print:hidden sm:px-4 sm:pb-4 ${shown ? '' : 'invisible'}`}
       aria-hidden={!shown || undefined}
     >
       {/* Compact on phones (it must not cover the primary CTA); roomier from sm up. */}
