@@ -91,6 +91,11 @@ export const he = {
     decide: 'לתור האישורים',
   },
   claims: {
+    reminder: {
+      cta: 'הכינו תזכורת לספק',
+      note: 'באיחור? מכינים לספק טיוטת תזכורת בוואטסאפ — היא יוצאת רק כשאתם לוחצים שליחה.',
+      text: 'שלום {supplier}, תזכורת לדרישת הזיכוי מ{restaurant} שנשלחה ב-{date} על {count} שורות, בסך {amount}. נודה לחשבונית זיכוי בהקדם. תודה, {signer}',
+    },
     openForClaim: 'פתוח לדרישת זיכוי',
     openSupplierLetter: 'פתחו דרישת זיכוי · {amount}',
     title: 'מכתבי דרישת זיכוי',

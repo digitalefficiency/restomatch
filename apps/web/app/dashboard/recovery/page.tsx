@@ -196,7 +196,7 @@ export default async function RecoveryPage({
                     <p className="ms-6 mt-0.5 text-xs text-muted">{t('followUp.reminderNote')}</p>
                   </div>
                   <Link
-                    href="/dashboard/recovery?tab=todo#claims"
+                    href="/dashboard/leaks/claims#sent-letters-title"
                     className="inline-flex min-h-11 items-center rounded-xl border border-line-strong bg-surface px-4 text-sm font-semibold text-ink hover:border-primary/40"
                   >
                     {t('followUp.waitingCta')}
@@ -243,20 +243,20 @@ export default async function RecoveryPage({
                 <thead className="border-b border-line text-xs text-subtle">
                   <tr>
                     <th scope="col" className="py-2 pe-3 text-start font-semibold">{t('tracker.colSupplier')}</th>
-                    <th scope="col" className="py-2 pe-3 text-end font-semibold">{t('tracker.colOutstanding')}</th>
-                    <th scope="col" className="py-2 pe-3 text-end font-semibold">{t('tracker.colClaimed')}</th>
-                    <th scope="col" className="py-2 pe-3 text-end font-semibold">{t('tracker.colCredited')}</th>
-                    <th scope="col" className="py-2 text-end font-semibold">{t('tracker.colRate')}</th>
+                    <th scope="col" className="py-2 pe-3 text-right font-semibold">{t('tracker.colOutstanding')}</th>
+                    <th scope="col" className="py-2 pe-3 text-right font-semibold">{t('tracker.colClaimed')}</th>
+                    <th scope="col" className="py-2 pe-3 text-right font-semibold">{t('tracker.colCredited')}</th>
+                    <th scope="col" className="py-2 text-right font-semibold">{t('tracker.colRate')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {summary.bySupplier.map((s) => (
                     <tr key={s.supplierId ?? '—'} className="border-b border-line/60">
                       <td className="py-2 pe-3 text-ink">{displayName(locale, s.supplierName, s.supplierNameEn) || '—'}</td>
-                      <td className="py-2 pe-3 text-end font-semibold tabular-nums text-ink">{exact(s.outstandingAgorot)}</td>
-                      <td className="py-2 pe-3 text-end tabular-nums text-muted">{exact(s.claimedAgorot)}</td>
-                      <td className="py-2 pe-3 text-end tabular-nums text-primary">{exact(s.creditedAgorot)}</td>
-                      <td className="py-2 text-end tabular-nums text-muted">{pct(s.recoveryRate)}</td>
+                      <td className="py-2 pe-3 text-right font-semibold tabular-nums text-ink">{exact(s.outstandingAgorot)}</td>
+                      <td className="py-2 pe-3 text-right tabular-nums text-muted">{exact(s.claimedAgorot)}</td>
+                      <td className="py-2 pe-3 text-right tabular-nums text-primary">{exact(s.creditedAgorot)}</td>
+                      <td className="py-2 text-right tabular-nums text-muted">{pct(s.recoveryRate)}</td>
                     </tr>
                   ))}
                 </tbody>

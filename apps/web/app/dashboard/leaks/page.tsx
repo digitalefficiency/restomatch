@@ -182,11 +182,11 @@ export default async function LeaksPage({
                 <tr>
                   <th scope="col" className="p-3 text-start font-semibold">{t('detective.colProduct')}</th>
                   <th scope="col" className="p-3 text-start font-semibold">{t('detective.colSupplier')}</th>
-                  <th scope="col" className="p-3 text-start font-semibold">{t('detective.colMedian')}</th>
-                  <th scope="col" className="p-3 text-start font-semibold">{t('detective.colLast')}</th>
+                  <th scope="col" className="p-3 text-right font-semibold">{t('detective.colMedian')}</th>
+                  <th scope="col" className="p-3 text-right font-semibold">{t('detective.colLast')}</th>
                   <th scope="col" className="p-3 text-start font-semibold">{t('detective.colChange')}</th>
                   <th scope="col" className="p-3 text-start font-semibold">{t('detective.colTrend')}</th>
-                  <th scope="col" className="p-3 text-start font-semibold">{t('detective.colExcess')}</th>
+                  <th scope="col" className="p-3 text-right font-semibold">{t('detective.colExcess')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -205,8 +205,8 @@ export default async function LeaksPage({
                       ) : null}
                     </td>
                     <td className="p-3 text-muted">{row.supplierName}</td>
-                    <td className="p-3 tabular-nums text-muted">{money(row.baselineP50)}</td>
-                    <td className="p-3 tabular-nums text-ink">{money(row.lastObservedPrice)}</td>
+                    <td className="p-3 text-right tabular-nums text-muted">{money(row.baselineP50)}</td>
+                    <td className="p-3 text-right tabular-nums text-ink">{money(row.lastObservedPrice)}</td>
                     <td className="p-3">
                       <Badge tone="warning">
                         <bdi>+{formatPercent(row.deltaPct, locale, 1)}</bdi>
@@ -215,7 +215,7 @@ export default async function LeaksPage({
                     <td className="p-3">
                       <Sparkline data={row.series} />
                     </td>
-                    <td className="p-3 font-semibold tabular-nums text-ink">{money(row.monthExcessIls)}</td>
+                    <td className="p-3 text-right font-semibold tabular-nums text-ink">{money(row.monthExcessIls)}</td>
                   </tr>
                 ))}
               </tbody>

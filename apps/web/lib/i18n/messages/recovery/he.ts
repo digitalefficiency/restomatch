@@ -82,8 +82,8 @@ export const he = {
     unsent: '{count} דרישות עוד לא נשלחו לספק · {amount}',
     unsentCta: 'לשליחת הדרישות',
     waiting: '{count} ממתינות לתשובת ספק מעל 14 יום · {amount}',
-    waitingCta: 'להצגת הממתינות',
-    reminderNote: 'תזכורת נשלחת אליכם במייל (לא לספק).',
+    waitingCta: 'להכנת תזכורות לספקים',
+    reminderNote: 'התזכורת האוטומטית מגיעה אליכם בלבד. לספק מכינים טיוטה, והיא נשלחת רק בלחיצה שלכם.',
   },
   countdown: {
     left: 'נותרו {days} ימים · עד {date}',

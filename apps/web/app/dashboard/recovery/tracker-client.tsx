@@ -369,7 +369,7 @@ export function TrackerClient({
                     <th scope="col" className="py-2 pe-3 text-start font-semibold">{t('tracker.colSupplier')}</th>
                     <th scope="col" className="py-2 pe-3 text-start font-semibold">{t('tracker.colInvoice')}</th>
                     <th scope="col" className="py-2 pe-3 text-start font-semibold">{t('tracker.colItem')}</th>
-                    <th scope="col" className="py-2 pe-3 text-end font-semibold">{t('tracker.colAmount')}</th>
+                    <th scope="col" className="py-2 pe-3 text-right font-semibold">{t('tracker.colAmount')}</th>
                     <th scope="col" className="py-2 pe-3 text-start font-semibold">{t('tracker.colStatus')}</th>
                     <th scope="col" className="py-2 text-end font-semibold">{t('tracker.colActions')}</th>
                   </tr>
@@ -394,7 +394,7 @@ export function TrackerClient({
                         <span className="text-ink">{itemOf(c)}</span>
                         <span className="block text-xs text-muted">{discrepancyLabel(ta, c.discrepancyType)}</span>
                       </td>
-                      <td className="py-2 pe-3 text-end">{amountCell(c)}</td>
+                      <td className="py-2 pe-3 text-right">{amountCell(c)}</td>
                       <td className="py-2 pe-3">{statusChips(c)}</td>
                       <td className="py-2">{rowActions(c)}</td>
                     </tr>

@@ -85,6 +85,11 @@ export const en: Shape<typeof he> = {
     decide: 'To the approvals queue',
   },
   claims: {
+    reminder: {
+      cta: 'Draft a reminder to the supplier',
+      note: 'Late? Draft a WhatsApp reminder to the supplier — it goes out only when you press send.',
+      text: 'Hello {supplier}, a reminder about the credit request from {restaurant} sent on {date} for {count} lines, totalling {amount}. We look forward to the credit note. Thank you, {signer}',
+    },
     openForClaim: 'Open for a credit request',
     openSupplierLetter: 'Open the credit request · {amount}',
     title: 'Credit-request letters',

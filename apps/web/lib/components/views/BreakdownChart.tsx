@@ -86,12 +86,12 @@ export function BreakdownChart({
           <thead className="border-b border-line bg-surface-2 text-xs text-subtle">
             <tr>
               <th scope="col" className={cn(cell, 'text-start font-semibold')}>{keyHeader}</th>
-              <th scope="col" className={cn(cell, 'text-end font-semibold')}>{valueHeader}</th>
-              {countHeader ? <th scope="col" className={cn(cell, 'text-end font-semibold')}>{countHeader}</th> : null}
-              <th scope="col" className={cn(cell, 'text-end font-semibold')}>{t('explorer.colShare')}</th>
+              <th scope="col" className={cn(cell, 'text-right font-semibold')}>{valueHeader}</th>
+              {countHeader ? <th scope="col" className={cn(cell, 'text-right font-semibold')}>{countHeader}</th> : null}
+              <th scope="col" className={cn(cell, 'text-right font-semibold')}>{t('explorer.colShare')}</th>
               {compare !== 'off' ? (
                 <>
-                  <th scope="col" className={cn(cell, 'text-end font-semibold')}>{t('explorer.colPrev')}</th>
+                  <th scope="col" className={cn(cell, 'text-right font-semibold')}>{t('explorer.colPrev')}</th>
                   <th scope="col" className={cn(cell, 'text-start font-semibold')}>{t('explorer.colChange')}</th>
                 </>
               ) : null}
@@ -101,18 +101,18 @@ export function BreakdownChart({
             {rows.map((r) => (
               <tr key={r.key} className="border-t border-line transition-colors hover:bg-surface-2/60">
                 <td className={cn(cell, 'font-medium text-ink')}>{r.label}</td>
-                <td className={cn(cell, 'text-end font-semibold tabular-nums', isZero(r.value) ? 'text-subtle' : 'text-ink')}>{ils(r.value)}</td>
+                <td className={cn(cell, 'text-right font-semibold tabular-nums', isZero(r.value) ? 'text-subtle' : 'text-ink')}>{ils(r.value)}</td>
                 {countHeader ? (
-                  <td className={cn(cell, 'text-end tabular-nums text-muted')}>
+                  <td className={cn(cell, 'text-right tabular-nums text-muted')}>
                     {r.count != null ? formatNumber(r.count, locale) : '—'}
                   </td>
                 ) : null}
-                <td className={cn(cell, 'text-end tabular-nums text-muted')}>
+                <td className={cn(cell, 'text-right tabular-nums text-muted')}>
                   {total > 0 ? formatPercent(r.value / total, locale, 0) : '—'}
                 </td>
                 {compare !== 'off' ? (
                   <>
-                    <td className={cn(cell, 'text-end tabular-nums text-muted')}>
+                    <td className={cn(cell, 'text-right tabular-nums text-muted')}>
                       {r.previous != null ? ils(r.previous) : '—'}
                     </td>
                     <td className={cell}>
@@ -127,7 +127,7 @@ export function BreakdownChart({
             <tfoot>
               <tr className="border-t border-line">
                 <th scope="row" className={cn(cell, 'text-start font-semibold text-ink')}>{totalLabel}</th>
-                <td className={cn(cell, 'text-end font-bold tabular-nums text-ink')} data-testid="chart-total" data-amount={total}>
+                <td className={cn(cell, 'text-right font-bold tabular-nums text-ink')} data-testid="chart-total" data-amount={total}>
                   {ils(total)}
                 </td>
                 <td colSpan={(countHeader ? 2 : 1) + (compare !== 'off' ? 2 : 0)} />

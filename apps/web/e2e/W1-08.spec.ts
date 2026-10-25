@@ -82,6 +82,9 @@ test('claims: one letter per supplier, sums to the agora, signed by the active r
   await expect(page.getByTestId('letter-math').first()).toBeVisible();
   // No "תביעה" (lawsuit) anywhere in the letters.
   await expect(page.locator('main')).not.toContainText('תביע');
+  // A late sent letter offers a DRAFT reminder to the supplier — a wa.me link the user sends, nothing auto-sends.
+  const reminder = page.getByTestId('sent-reminder').first();
+  if (await reminder.count()) await expect(reminder).toHaveAttribute('href', /^https:\/\/wa\.me\/\?text=/);
 });
 
 test('claims: "mark as sent" waits 10 s with undo, then moves the claims in one call', async ({ page }) => {
@@ -130,6 +133,9 @@ test('report: like-for-like compare, the money partition adds up', async ({ page
   const found = Number(await page.getByTestId('report-found').getAttribute('data-amount'));
   expect(sumAgora(parts)).toBe(agora(found));
   await expect(page.locator('main')).not.toContainText('יעד: 1.5%');
+  // Owner decision: numbers in tables are physically right-aligned (Hebrew too).
+  const align = await page.getByTestId('report-supplier-total').evaluate((el) => getComputedStyle(el).textAlign);
+  expect(align).toBe('right');
 });
 
 test('recovery: the funnel adds up; no select writes money; a write-off needs a confirm naming ₪ + supplier', async ({ page }) => {

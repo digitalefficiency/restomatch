@@ -310,9 +310,10 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
 
           {sent.length > 0 ? (
             <section aria-labelledby="sent-letters-title" className="print:hidden" data-testid="sent-letters">
-              <h2 id="sent-letters-title" className="mb-2 text-lg font-bold text-ink">
+              <h2 id="sent-letters-title" className="mb-2 scroll-mt-24 text-lg font-bold text-ink">
                 {t('claims.sentTitle')}
               </h2>
+              <p className="mb-2 text-xs text-muted">{t('claims.reminder.note')}</p>
               <Card padding="none">
                 <ul className="divide-y divide-line">
                   {sent.map((s) => {
@@ -331,6 +332,27 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
                               : t('claims.sentBadge', { date: formatDate(s.sentAt, locale, { day: '2-digit', month: '2-digit' }), days: formatNumber(left, locale) })}
                           </Badge>
                           <span className="font-semibold tabular-nums text-ink">{ils(s.outstandingAgorot / 100)}</span>
+                          {left < 0 ? (
+                            // Owner decision §8.16: a DRAFT reminder to the supplier, sent only by the user's own click.
+                            <a
+                              href={`https://wa.me/?text=${encodeURIComponent(
+                                t('claims.reminder.text', {
+                                  supplier: supplierOf(s),
+                                  restaurant,
+                                  date: formatDate(s.sentAt, locale),
+                                  count: formatNumber(s.count, locale),
+                                  amount: ils(s.outstandingAgorot / 100),
+                                  signer: signer || restaurant,
+                                }),
+                              )}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              data-testid="sent-reminder"
+                              className="inline-flex min-h-11 items-center rounded-xl border border-line-strong bg-surface px-3 text-sm font-semibold text-ink hover:border-primary/40 hover:text-primary md:min-h-9"
+                            >
+                              {t('claims.reminder.cta')}
+                            </a>
+                          ) : null}
                         </span>
                       </li>
                     );

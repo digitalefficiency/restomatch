@@ -311,8 +311,8 @@ export default async function LeakReportPage({
                   <thead className="border-b border-line text-xs text-subtle">
                     <tr>
                       <th scope="col" className="py-2 pe-3 text-start font-semibold">{t('report.colType')}</th>
-                      <th scope="col" className="py-2 pe-3 text-end font-semibold">{t('report.colCount')}</th>
-                      <th scope="col" className="py-2 pe-3 text-end font-semibold">{t('report.colAmount')}</th>
+                      <th scope="col" className="py-2 pe-3 text-right font-semibold">{t('report.colCount')}</th>
+                      <th scope="col" className="py-2 pe-3 text-right font-semibold">{t('report.colAmount')}</th>
                       <th scope="col" className="w-1/3 py-2 text-start font-semibold">{t('report.colShare')}</th>
                     </tr>
                   </thead>
@@ -322,8 +322,8 @@ export default async function LeakReportPage({
                       return (
                         <tr key={r.type} className="border-b border-line/60">
                           <td className="py-2 pe-3 text-ink">{discrepancyLabel(ta, r.type)}</td>
-                          <td className="py-2 pe-3 text-end tabular-nums text-muted">{num(r.count)}</td>
-                          <td className="py-2 pe-3 text-end tabular-nums text-ink">{ils(r.amountIls)}</td>
+                          <td className="py-2 pe-3 text-right tabular-nums text-muted">{num(r.count)}</td>
+                          <td className="py-2 pe-3 text-right tabular-nums text-ink">{ils(r.amountIls)}</td>
                           <td className="py-2">
                             <div className="flex items-center gap-2">
                               <span className="h-2 flex-1 overflow-hidden rounded-full bg-surface-2">
@@ -340,7 +340,7 @@ export default async function LeakReportPage({
                     <tr>
                       <th scope="row" className="pt-2 pe-3 text-start font-semibold text-ink">{t('report.total')}</th>
                       <td />
-                      <td className="pt-2 pe-3 text-end font-bold tabular-nums text-ink" data-testid="report-type-total">{ils(typeTotal)}</td>
+                      <td className="pt-2 pe-3 text-right font-bold tabular-nums text-ink" data-testid="report-type-total">{ils(typeTotal)}</td>
                       <td />
                     </tr>
                   </tfoot>
@@ -356,31 +356,31 @@ export default async function LeakReportPage({
                   <thead className="border-b border-line text-xs text-subtle">
                     <tr>
                       <th scope="col" className="py-2 pe-3 text-start font-semibold">{t('report.colSupplier')}</th>
-                      <th scope="col" className="py-2 pe-3 text-end font-semibold">{t('report.colLeak')}</th>
-                      <th scope="col" className="py-2 pe-3 text-end font-semibold">{t('report.colPct')}</th>
-                      <th scope="col" className="py-2 pe-3 text-end font-semibold">{t('report.colSpend')}</th>
-                      <th scope="col" className="py-2 text-end font-semibold">{t('report.colInvoices')}</th>
+                      <th scope="col" className="py-2 pe-3 text-right font-semibold">{t('report.colLeak')}</th>
+                      <th scope="col" className="py-2 pe-3 text-right font-semibold">{t('report.colPct')}</th>
+                      <th scope="col" className="py-2 pe-3 text-right font-semibold">{t('report.colSpend')}</th>
+                      <th scope="col" className="py-2 text-right font-semibold">{t('report.colInvoices')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {report.bySupplier.map((r) => (
                       <tr key={r.supplierId ?? 'none'} className="border-b border-line/60">
                         <td className="py-2 pe-3 text-ink">{displayName(locale, r.supplierName, r.supplierNameEn) || '—'}</td>
-                        <td className={`py-2 pe-3 text-end font-semibold tabular-nums ${r.leakIls > 0 ? 'text-ink' : 'text-subtle'}`}>
+                        <td className={`py-2 pe-3 text-right font-semibold tabular-nums ${r.leakIls > 0 ? 'text-ink' : 'text-subtle'}`}>
                           {ils(r.leakIls)}
                         </td>
-                        <td className="py-2 pe-3 text-end tabular-nums text-muted">{r.leakPct != null ? pct1(r.leakPct) : '—'}</td>
-                        <td className="py-2 pe-3 text-end tabular-nums text-muted">{ils(r.spendIls, 0)}</td>
-                        <td className="py-2 text-end tabular-nums text-muted">{num(r.invoiceCount)}</td>
+                        <td className="py-2 pe-3 text-right tabular-nums text-muted">{r.leakPct != null ? pct1(r.leakPct) : '—'}</td>
+                        <td className="py-2 pe-3 text-right tabular-nums text-muted">{ils(r.spendIls, 0)}</td>
+                        <td className="py-2 text-right tabular-nums text-muted">{num(r.invoiceCount)}</td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot>
                     <tr>
                       <th scope="row" className="pt-2 pe-3 text-start font-semibold text-ink">{t('report.total')}</th>
-                      <td className="pt-2 pe-3 text-end font-bold tabular-nums text-ink" data-testid="report-supplier-total">{ils(supplierLeakTotal)}</td>
+                      <td className="pt-2 pe-3 text-right font-bold tabular-nums text-ink" data-testid="report-supplier-total">{ils(supplierLeakTotal)}</td>
                       <td />
-                      <td className="pt-2 pe-3 text-end tabular-nums text-muted">{ils(supplierSpendTotal, 0)}</td>
+                      <td className="pt-2 pe-3 text-right tabular-nums text-muted">{ils(supplierSpendTotal, 0)}</td>
                       <td />
                     </tr>
                   </tfoot>
@@ -403,10 +403,10 @@ export default async function LeakReportPage({
                   <tr>
                     <th scope="col" className="py-2 pe-3 text-start font-semibold">{t('report.colProduct')}</th>
                     <th scope="col" className="py-2 pe-3 text-start font-semibold">{t('report.colSupplier')}</th>
-                    <th scope="col" className="py-2 pe-3 text-end font-semibold">{t('report.colBefore')}</th>
-                    <th scope="col" className="py-2 pe-3 text-end font-semibold">{t('report.colAfter')}</th>
-                    <th scope="col" className="py-2 pe-3 text-end font-semibold">{t('report.colChange')}</th>
-                    <th scope="col" className="py-2 text-end font-semibold">{t('report.colExcess')}</th>
+                    <th scope="col" className="py-2 pe-3 text-right font-semibold">{t('report.colBefore')}</th>
+                    <th scope="col" className="py-2 pe-3 text-right font-semibold">{t('report.colAfter')}</th>
+                    <th scope="col" className="py-2 pe-3 text-right font-semibold">{t('report.colChange')}</th>
+                    <th scope="col" className="py-2 text-right font-semibold">{t('report.colExcess')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -414,12 +414,12 @@ export default async function LeakReportPage({
                     <tr key={`${r.productId}-${r.supplierName}`} className="border-b border-line/60">
                       <td className="py-2 pe-3 text-ink">{displayName(locale, r.productName, r.productNameEn)}</td>
                       <td className="py-2 pe-3 text-muted">{displayName(locale, r.supplierName, r.supplierNameEn)}</td>
-                      <td className="py-2 pe-3 text-end tabular-nums text-muted">{ils(r.beforePrice)}</td>
-                      <td className="py-2 pe-3 text-end tabular-nums text-ink">{ils(r.afterPrice)}</td>
-                      <td className="py-2 pe-3 text-end tabular-nums text-warn">
+                      <td className="py-2 pe-3 text-right tabular-nums text-muted">{ils(r.beforePrice)}</td>
+                      <td className="py-2 pe-3 text-right tabular-nums text-ink">{ils(r.afterPrice)}</td>
+                      <td className="py-2 pe-3 text-right tabular-nums text-warn">
                         <bdi>+{formatPercent(r.deltaPct, locale, 1)}</bdi>
                       </td>
-                      <td className="py-2 text-end tabular-nums text-ink">{ils(r.excessIls)}</td>
+                      <td className="py-2 text-right tabular-nums text-ink">{ils(r.excessIls)}</td>
                     </tr>
                   ))}
                 </tbody>
