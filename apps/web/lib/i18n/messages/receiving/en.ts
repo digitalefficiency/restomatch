@@ -154,9 +154,9 @@ export const en: Shape<typeof he> = {
     },
   },
   dockSlip: {
-    title: 'Dock dispute slip',
+    title: 'Discrepancy slip',
     subtitle: 'Show the driver before they leave — what is short, damaged or over-billed.',
-    open: 'Dispute slip',
+    open: 'Discrepancy slip',
     supplier: 'Supplier',
     po: 'Order',
     invoice: 'Invoice',

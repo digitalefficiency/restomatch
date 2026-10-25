@@ -32,6 +32,8 @@ interface Props {
   eyebrow?: string;
   /** Under the lines, above the bar (the dock-slip button). */
   children?: React.ReactNode;
+  /** Prices and totals. Off for the receiver and the chef (owner decision): quantities only. Default on (showcase). */
+  showMoney?: boolean;
 }
 
 /**
@@ -40,7 +42,7 @@ interface Props {
  * comes only from the engine, on the dock slip — RCV-11), and ONE primary: on
  * to the Delivery Check, where every line is counted.
  */
-export function Reconciliation({ result, onContinueAdjust, onRetake, lineExtra, eyebrow, children }: Props) {
+export function Reconciliation({ result, onContinueAdjust, onRetake, lineExtra, eyebrow, children, showMoney = true }: Props) {
   const t = useT(receiving);
   const td = useT(receivingDelivery);
   const locale = useLocale();
@@ -58,7 +60,8 @@ export function Reconciliation({ result, onContinueAdjust, onRetake, lineExtra, 
     .join(' · ');
   const lowConfidence = !result.invoiceMeta.noInvoice && result.invoiceMeta.ocrConfidence < LOW_READ_CONFIDENCE;
 
-  const money = (v: number) => formatIls(v, { locale, maximumFractionDigits: 2 });
+  // null = money hidden for this viewer; every ₪ below goes through this.
+  const money = showMoney ? (v: number) => formatIls(v, { locale, maximumFractionDigits: 2 }) : null;
 
   // Say "wrong invoice?" instead of listing every line as "pending review".
   const mismatch = noLinePaired(result.lines);
@@ -299,7 +302,7 @@ function SectionLabel({
 }: {
   section: ReconSection;
   t: T;
-  money: (v: number) => string;
+  money: ((v: number) => string) | null;
 }) {
   const count = section.items.length;
   const label =
@@ -311,7 +314,7 @@ function SectionLabel({
   return (
     <>
       {label}
-      {section.totalIls !== null ? (
+      {section.totalIls !== null && money ? (
         <>
           {' · '}
           <bdi className="tabular-nums">{money(section.totalIls)}</bdi>
@@ -333,9 +336,10 @@ function LineQty({
   price: number | null;
   /** Printed line total (invoice side); else qty × price. */
   total?: number | null;
-  money: (v: number) => string;
+  money: ((v: number) => string) | null;
 }) {
   if (qty === null) return <span className="text-muted">—</span>;
+  if (!money) return <Qty qty={qty} unit={unit} />;
   // The × sits between its own isolates so it reads "37.5 ליטר × ₪6.43" in
   // both directions; inside one LTR isolate with the price it drifted to the
   // far left in RTL ("× 6.43₪ 37.5 ליטר").

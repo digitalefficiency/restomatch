@@ -26,6 +26,12 @@ export default async function ReceivingPoPage({
   const session = await auth();
   const restaurantId = session?.user?.restaurantId ?? null;
   const userId = session?.user?.id ?? null;
+  // Owner decision (REVIEW-REPORT §8 #6): the receiver and the chef see no ₪ at the
+  // dock — quantities, units, supplier and photos only. UI now; the server-side
+  // block is a human PR (H-11).
+  const role = session?.user?.role ?? null;
+  const showMoney = role === 'owner' || role === 'manager' || role === 'bookkeeper';
+  const receiverName = session?.user?.name?.trim() || null;
 
   const [locale, appLocale, t, features] = await Promise.all([
     getLocale(),
@@ -142,6 +148,8 @@ export default async function ReceivingPoPage({
         localNames={localNames}
         dockPriceContext={dockPriceContext}
         existingReceipt={existingReceipt}
+        showMoney={showMoney}
+        receiverName={receiverName}
         tolerance={{ qtyPercent: DEFAULT_TOLERANCES.qtyPercent, qtyAbsolute: DEFAULT_TOLERANCES.qtyAbsolute }}
       />
     </div>

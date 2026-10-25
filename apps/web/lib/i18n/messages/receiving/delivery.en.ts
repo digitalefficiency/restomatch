@@ -69,12 +69,13 @@ export const en: Shape<typeof he> = {
       unorderedNeeds: 'Mark whether the items that were not ordered arrived',
     },
     confirmed: {
-      summary: '{lines} lines · {exceptions} exceptions',
+      summary: '{lines} lines · {exceptions} gaps',
       noExceptions: '{lines} lines · everything as ordered',
       amountPending: 'The amount to claim is set after the check',
       viewInvoice: 'View the invoice',
       next: 'Next delivery: {supplier}',
       nextAt: 'Next delivery: {supplier} · {time}',
+      receivedBy: 'Received by {name}',
     },
     summary: {
       title: 'This receipt is already closed',

@@ -25,6 +25,8 @@ interface Props {
   amount?: React.ReactNode;
   /** Below the summary, above the bar (the dock slip). */
   children?: React.ReactNode;
+  /** Who received the goods (the signed-in person on a shared tablet). */
+  receivedBy?: string | null;
 }
 
 /**
@@ -43,6 +45,7 @@ export function Confirmed({
   invoiceHref,
   amount,
   children,
+  receivedBy,
 }: Props) {
   const t = useT(receiving);
   const td = useT(receivingDelivery);
@@ -97,6 +100,11 @@ export function Confirmed({
               </a>
             ) : null}
           </div>
+        ) : null}
+        {receivedBy ? (
+          <p className="text-base text-muted" data-testid="confirmed-received-by">
+            {td('delivery.confirmed.receivedBy', { name: receivedBy })}
+          </p>
         ) : null}
         {amount ? <div className="text-base text-muted">{amount}</div> : null}
       </div>

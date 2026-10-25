@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { expect, test, type Page, type Route } from '@playwright/test';
-import { DEMO_RESTAURANT_NAME } from './env';
+import { DEMO_RESTAURANT_NAME, OWNER_STATE } from './env';
 import { e2eSql } from './helpers';
 
 /**
@@ -202,6 +202,8 @@ test('invoice 10 = order 10, 8 arrived: recorded as qty_received 8 in ≤4 taps;
   const invoiceId = await scanAndProcess(page, po.poId);
   await finishOcrAsOrdered(invoiceId, po);
   await expect(page.getByRole('heading', { name: 'תוצאת ההצלבה' })).toBeVisible({ timeout: 60_000 });
+  // The receiver sees no ₪ (owner decision): quantities only, no prices or totals.
+  await expect(page.locator('main')).not.toContainText('₪');
   // "Invoice = order" says so — it is not "arrived".
   await expect(page.getByText('החשבונית = ההזמנה').first()).toBeVisible();
   await page.getByTestId('continue-adjust').tap();
@@ -242,6 +244,12 @@ test('invoice 10 = order 10, 8 arrived: recorded as qty_received 8 in ≤4 taps;
   // Confirmed links to the invoice page, not to a signed URL.
   await expect(page.getByTestId('confirmed-invoice-link')).toHaveAttribute('href', `/dashboard/invoices/${invoiceId}`);
   await expect(page.getByTestId('receipt-confirmed')).not.toContainText('חיסכון');
+  // Who received it is on the receipt.
+  await expect(page.getByTestId('confirmed-received-by')).toContainText('התקבל ע״י');
+  // …and still no ₪ for the receiver, the dock slip and its WhatsApp text included.
+  await expect(page.locator('main')).not.toContainText('₪');
+  const slipText = await page.getByTestId('dock-slip-copy').getAttribute('data-slip-text').catch(() => null);
+  if (slipText) expect(slipText).not.toContain('₪');
 });
 
 test('no invoice, everything arrived: ≤3 taps from the deliveries list, every line = ordered', async ({ page }) => {
@@ -381,6 +389,15 @@ test('field mode: bar in the bottom third at 390×844 and 375×667, 48 px target
 
 test('the dock slip shows ₪ left of the digits in Hebrew (no LTR isolate, no mono)', async ({ page }) => {
   test.setTimeout(180_000);
+  // ₪ is for the owner / manager — sign in as the owner for this one.
+  const owner = JSON.parse(readFileSync(OWNER_STATE, 'utf8')) as { cookies: Parameters<import('@playwright/test').BrowserContext['addCookies']>[0] };
+  await page.context().clearCookies();
+  const url = test.info().project.use.baseURL!;
+  await page.context().addCookies([
+    ...owner.cookies,
+    { name: 'rm_locale', value: 'he', url },
+    { name: 'rm_cookie_consent', value: 'necessary', url },
+  ]);
   const po = await freshPo('money', { dockSlip: true });
   const invoiceId = await scanAndProcess(page, po.poId);
   await finishOcrAsOrdered(invoiceId, po, 'matched');

@@ -20,7 +20,7 @@ import { buildSlipLines, issueMessageKey, needsSlip, slipBullet, slipNote, sumIl
 const ENGINE_WAIT_MS = 120_000;
 
 /**
- * Dock dispute slip ("תעודת חריגה", flag `dockSlip`): the verdict at the dock,
+ * Dock dispute slip ("תעודת פערים", flag `dockSlip`): the verdict at the dock,
  * while the driver is still there. Quantities from the receiver's count; ₪ only
  * from the matching engine (same allocation as the claims letters). Copy text or
  * open WhatsApp with it pre-filled — nothing is sent by us.
@@ -32,6 +32,7 @@ export function DockSlip({
   marks,
   duplicateNumber,
   fallbackSupplierName,
+  showMoney = true,
 }: {
   grId: string;
   invoiceId: string | null;
@@ -39,6 +40,8 @@ export function DockSlip({
   marks: Record<string, LineMark>;
   duplicateNumber: string | null;
   fallbackSupplierName: string;
+  /** Off for the receiver and the chef (owner decision): the slip carries quantities only — no ₪, not in its text either. */
+  showMoney?: boolean;
 }) {
   const t = useT(receiving);
   const ta = useT(approvals);
@@ -57,7 +60,7 @@ export function DockSlip({
         const d = query.state.data;
         // Held re-matches poll too (quietly — the note already says why): a
         // manager's match.runForInvoice can still bring the ₪ in.
-        const waiting = !!invoiceId && d?.enabled === true && d.engine.receiptClosed && !d.engine.ready;
+        const waiting = showMoney && !!invoiceId && d?.enabled === true && d.engine.receiptClosed && !d.engine.ready;
         return waiting && Date.now() - startedAt.current < ENGINE_WAIT_MS ? 4_000 : false;
       },
     },
@@ -81,13 +84,15 @@ export function DockSlip({
     () => buildSlipLines(lines, marks, data?.engine.lines ?? []),
     [lines, marks, data?.engine.lines],
   );
-  const total = data ? sumIls(slipLines.map((l) => l.amountIls ?? 0)) : 0;
+  const total = data && showMoney ? sumIls(slipLines.map((l) => l.amountIls ?? 0)) : 0;
   const dup = duplicateNumber ?? data?.invoice?.duplicateOfNumber ?? null;
 
   // Nothing to dispute: no flagged line, no engine finding, no duplicate.
   if (q.isLoading || !data || !needsSlip(slipLines, dup)) return null;
-  const note = slipNote(data.engine, !!invoiceId, gaveUp);
-  const engineReady = data.engine.ready;
+  // The notes are all about when the ₪ arrives — nothing to say without ₪.
+  const note = showMoney ? slipNote(data.engine, !!invoiceId, gaveUp) : null;
+  const engineReady = showMoney && data.engine.ready;
+  const amountOf = (l: SlipLine) => (showMoney ? l.amountIls : null);
 
   const money = (v: number) => formatIls(v, { locale, maximumFractionDigits: 2 });
   const qty = (v: number | null, u: string | null) =>
@@ -124,7 +129,7 @@ export function DockSlip({
     ...(dup ? [t('dockSlip.duplicate', { number: dup })] : []),
     '',
     ...slipLines.map(
-      (l) => slipBullet(name(l), issueTexts(l), l.amountIls !== null ? money(l.amountIls) : null),
+      (l) => slipBullet(name(l), issueTexts(l), amountOf(l) !== null ? money(amountOf(l)!) : null),
     ),
     ...(total > 0 ? ['', `${t('dockSlip.total')}: ${money(total)}`] : []),
   ].join('\n');
@@ -201,13 +206,13 @@ export function DockSlip({
               </ul>
             </div>
             <div className="shrink-0 text-end text-base">
-              {l.amountIls !== null ? (
+              {amountOf(l) !== null ? (
                 <bdi data-testid="dock-slip-amount" className="font-semibold tabular-nums text-ink">
-                  {money(l.amountIls)}
+                  {money(amountOf(l)!)}
                 </bdi>
-              ) : (
+              ) : showMoney ? (
                 <span className="text-sm text-muted">{t('dockSlip.quantitiesOnly')}</span>
-              )}
+              ) : null}
             </div>
           </li>
         ))}

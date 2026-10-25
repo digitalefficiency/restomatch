@@ -176,7 +176,7 @@ test('390 px: quantities on the review; the engine ₪ only after the receipt is
   await expect(review.getByText('המחיר בחשבונית גבוה מההזמנה')).toBeVisible();
   expect(await review.innerText()).not.toContain('₪');
   const reviewText = (await review.getByTestId('dock-slip-copy').getAttribute('data-slip-text'))!;
-  expect(reviewText).toContain('תעודת חריגה');
+  expect(reviewText).toContain('תעודת פערים'); // owner terminology: פער
   expect(reviewText).not.toContain('₪'); // the WhatsApp text too
   const href = await review.getByTestId('dock-slip-whatsapp').getAttribute('href');
   expect(href).toMatch(/^https:\/\/wa\.me\//);

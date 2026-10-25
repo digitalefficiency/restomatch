@@ -1,5 +1,5 @@
 /**
- * Dock dispute slip ("תעודת חריגה") model — pure, so it is unit-tested.
+ * Dock dispute slip ("תעודת פערים") model — pure, so it is unit-tested.
  *
  * Quantities and the kind of issue come from what the receiver recorded in the
  * wizard (ordered / received / rejected / invoiced, PO vs invoice price). The ₪

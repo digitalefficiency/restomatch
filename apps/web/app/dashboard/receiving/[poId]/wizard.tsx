@@ -106,6 +106,8 @@ export function ReceivingWizard({
   dockPriceContext = false,
   existingReceipt = null,
   tolerance,
+  showMoney = false,
+  receiverName = null,
 }: {
   po: PoForClient;
   restaurantId: string | null;
@@ -121,6 +123,10 @@ export function ReceivingWizard({
   existingReceipt?: ReceiptForClient | null;
   /** The matching engine's quantity tolerance (read on the server from @restomatch/matching). */
   tolerance?: QtyTolerance;
+  /** Owner / manager / bookkeeper. The receiver and the chef see no ₪ (owner decision). */
+  showMoney?: boolean;
+  /** Who is receiving (the signed-in person) — shown on the confirmation. */
+  receiverName?: string | null;
 }) {
   const t = useT(receiving);
   const td = useT(receivingDelivery);
@@ -231,7 +237,7 @@ export function ReceivingWizard({
     () => dockSlipOn && !!result && needsSlip(buildSlipLines(result.lines, marks, []), duplicateNumber),
     [dockSlipOn, result, marks, duplicateNumber],
   );
-  const dockPriceLineExtra = useDockPriceLineExtra(dockPriceContext && step === 'RECONCILIATION_REVIEW', invoiceId);
+  const dockPriceLineExtra = useDockPriceLineExtra(showMoney && dockPriceContext && step === 'RECONCILIATION_REVIEW', invoiceId);
 
   /** Receiver languages: fetch (DB-cached) local names; best effort. */
   async function refreshLocalNames(scope: { invoiceId?: string }) {
@@ -725,6 +731,7 @@ export function ReceivingWizard({
                 marks={closedView.initialMarks}
                 duplicateNumber={null}
                 fallbackSupplierName={supplierLabel}
+                showMoney={showMoney}
               />
             </div>
           ) : null}
@@ -775,6 +782,7 @@ export function ReceivingWizard({
       {step === 'RECONCILIATION_REVIEW' && result ? (
         <Reconciliation
           result={result}
+          showMoney={showMoney}
           lineExtra={dockPriceLineExtra}
           onContinueAdjust={() => setStep('ADJUST_QUANTITIES')}
           onRetake={() => {
@@ -797,6 +805,7 @@ export function ReceivingWizard({
                   marks={marks}
                   duplicateNumber={duplicateNumber}
                   fallbackSupplierName={supplierLabel}
+                  showMoney={showMoney}
                 />
               ) : (
                 <button
@@ -855,7 +864,8 @@ export function ReceivingWizard({
           capturedImage={image}
           exceptions={exceptions}
           invoiceHref={invoiceId ? `/dashboard/invoices/${invoiceId}` : null}
-          amount={exceptions > 0 && !dockSlipOn ? td('delivery.confirmed.amountPending') : null}
+          amount={showMoney && exceptions > 0 && !dockSlipOn ? td('delivery.confirmed.amountPending') : null}
+          receivedBy={receiverName}
           resetLabel={next?.label ?? t('steps.confirmed.backToInbox')}
           onReset={() => router.push(next ? `/dashboard/receiving/${next.poId}` : '/dashboard/receiving')}
         >
@@ -869,6 +879,7 @@ export function ReceivingWizard({
               marks={marks}
               duplicateNumber={duplicateNumber}
               fallbackSupplierName={supplierLabel}
+              showMoney={showMoney}
             />
           ) : null}
         </Confirmed>
