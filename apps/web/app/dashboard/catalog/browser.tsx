@@ -11,9 +11,11 @@ import {
   Badge,
   Button,
   Card,
+  ConfirmDialog,
   EmptyState,
   ErrorNotice,
   Input,
+  LinkButton,
   LoadMore,
   Select,
   Spinner,
@@ -28,7 +30,7 @@ import { formatNumber } from '@/lib/i18n/format';
 import { catalog as catalogNs } from '@/lib/i18n/messages/catalog';
 import { components } from '@/lib/i18n/messages/components';
 import { formatIls } from '@/lib/money';
-import { parsePrice } from '../orders/order-logic';
+import { formatPriceInput, parsePriceInput } from './money-logic';
 
 type Outputs = inferRouterOutputs<AppRouter>;
 type CatalogItem = Outputs['catalog']['items'][number];
@@ -90,6 +92,7 @@ export function CatalogBrowser({
   const [creating, setCreating] = useState(false);
   const [newDraft, setNewDraft] = useState<Draft>(EMPTY_DRAFT);
   const [rowError, setRowError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<CatalogItem | null>(null);
 
   // Debounce typing → query (one request per pause, not per keystroke).
   useEffect(() => {
@@ -167,7 +170,7 @@ export function CatalogBrowser({
 
   function saveEdit(it: CatalogItem) {
     if (!draft.supplierNameRaw.trim()) return setRowError(t('item.descriptionRequired'));
-    const price = parsePrice(draft.listPrice);
+    const price = parsePriceInput(draft.listPrice);
     if (price === 'invalid') return setRowError(t('item.priceInvalid'));
     update.mutate({
       itemId: it.id,
@@ -183,7 +186,7 @@ export function CatalogBrowser({
   function submitCreate() {
     if (!effectiveSupplierId) return;
     if (!newDraft.supplierNameRaw.trim()) return setRowError(t('item.descriptionRequired'));
-    const price = parsePrice(newDraft.listPrice);
+    const price = parsePriceInput(newDraft.listPrice);
     if (price === 'invalid') return setRowError(t('item.priceInvalid'));
     const supplierId = effectiveSupplierId;
     once(() =>
@@ -213,6 +216,26 @@ export function CatalogBrowser({
 
   return (
     <div className="space-y-4">
+      <ConfirmDialog
+        open={!!pendingDelete}
+        title={
+          pendingDelete
+            ? t('item.confirmDelete', {
+                name: pendingDelete.supplierNameRaw,
+                supplier: displayName(pendingDelete.supplierName, pendingDelete.supplierNameEn, locale).primary,
+              })
+            : ''
+        }
+        body={t('item.confirmDeleteBody')}
+        confirmLabel={t('item.delete')}
+        cancelLabel={t('item.keep')}
+        loading={remove.isPending}
+        onConfirm={() => {
+          if (pendingDelete) remove.mutate({ itemId: pendingDelete.id });
+          setPendingDelete(null);
+        }}
+        onClose={() => setPendingDelete(null)}
+      />
       <div className="flex flex-wrap items-end gap-3">
         {!locked && (
           <div className="w-full sm:w-auto sm:min-w-[12rem]">
@@ -309,7 +332,15 @@ export function CatalogBrowser({
           title={filtered ? t('browser.noResultsTitle') : t('browser.emptyTitle')}
           description={filtered ? t('browser.noResultsBody') : t('browser.emptyBody')}
           action={
-            filtered ? (
+            !filtered ? (
+              canEdit ? (
+                <LinkButton
+                  href={locked ? `/dashboard/catalog/import?supplierId=${lockedSupplierId}` : '/dashboard/catalog/import'}
+                >
+                  {t('browser.firstImport')}
+                </LinkButton>
+              ) : undefined
+            ) : (
               <Button
                 variant="secondary"
                 size="sm"
@@ -322,7 +353,7 @@ export function CatalogBrowser({
               >
                 {t('browser.clearFilters')}
               </Button>
-            ) : undefined
+            )
           }
         />
       ) : (
@@ -346,16 +377,14 @@ export function CatalogBrowser({
           onSubmitCreate={submitCreate}
           onCancelCreate={() => setCreating(false)}
           onToggle={(it) => toggle.mutate({ itemId: it.id, active: !it.active })}
-          onDelete={(it) => {
-            if (confirm(t('item.confirmDelete', { name: it.supplierNameRaw }))) remove.mutate({ itemId: it.id });
-          }}
+          onDelete={(it) => setPendingDelete(it)}
           onRefresh={refresh}
           money={money}
         />
         <Card elevated padding="none" className={cn('hidden overflow-x-auto transition-opacity md:block', q.isFetching && 'opacity-80')}>
           <table className="w-full min-w-[760px] text-start text-sm">
             <thead>
-              <tr className="border-b border-line text-xs uppercase tracking-wide text-subtle">
+              <tr className="border-b border-line text-xs text-subtle ltr:uppercase ltr:tracking-wide">
                 {!locked && <th scope="col" className={th}>{t('columns.supplier')}</th>}
                 <th scope="col" className={th}>{t('columns.supplierDescription')}</th>
                 <th scope="col" className={th}>{t('columns.product')}</th>
@@ -409,16 +438,18 @@ export function CatalogBrowser({
                   </td>
                   <td className="px-4 py-2">
                     <Input
-                      type="number"
+                      type="text"
                       inputMode="decimal"
-                      step="any"
-                      min="0"
+                      dir="ltr"
+                      autoComplete="off"
                       value={newDraft.listPrice}
                       onChange={(e) => setNewDraft({ ...newDraft, listPrice: e.target.value })}
+                      onBlur={(e) => setNewDraft({ ...newDraft, listPrice: formatPriceInput(e.target.value) })}
+                      title={t('item.priceHint')}
                       onKeyDown={onRowKey(submitCreate, () => setCreating(false))}
                       placeholder="₪"
                       aria-label={t('columns.listPrice')}
-                      className="text-end"
+                      className="text-end text-base"
                     />
                   </td>
                   <td className="px-4 py-2">
@@ -511,18 +542,20 @@ export function CatalogBrowser({
                         <UnitText unit={it.unit} />
                       )}
                     </td>
-                    <td className="px-4 py-3 text-end font-mono tabular-nums text-ink">
+                    <td className="px-4 py-3 text-end tabular-nums text-ink">
                       {editing ? (
                         <Input
-                          type="number"
+                          type="text"
                           inputMode="decimal"
-                          step="any"
-                          min="0"
+                          dir="ltr"
+                          autoComplete="off"
                           value={draft.listPrice}
                           onChange={(e) => setDraft({ ...draft, listPrice: e.target.value })}
+                          onBlur={(e) => setDraft({ ...draft, listPrice: formatPriceInput(e.target.value) })}
+                          title={t('item.priceHint')}
                           onKeyDown={onRowKey(() => saveEdit(it), cancelEdit)}
                           aria-label={t('columns.listPrice')}
-                          className="text-end"
+                          className="text-end text-base"
                         />
                       ) : (
                         money(it.listPrice)
@@ -575,11 +608,7 @@ export function CatalogBrowser({
                               title={t('item.delete')}
                               aria-label={`${t('item.delete')}: ${it.supplierNameRaw}`}
                               disabled={busy}
-                              onClick={() => {
-                                if (confirm(t('item.confirmDelete', { name: it.supplierNameRaw }))) {
-                                  remove.mutate({ itemId: it.id });
-                                }
-                              }}
+                              onClick={() => setPendingDelete(it)}
                             >
                               <Trash2 className="h-4 w-4 text-danger" aria-hidden="true" />
                             </Button>
@@ -686,14 +715,15 @@ function MobileCards({
       <label className="col-span-2 text-xs text-subtle">
         {t('card.price')}
         <Input
-          type="number"
+          type="text"
           inputMode="decimal"
-          step="any"
-          min="0"
+          dir="ltr"
+          autoComplete="off"
           value={d.listPrice}
           onChange={(e) => set({ ...d, listPrice: e.target.value })}
+          onBlur={(e) => set({ ...d, listPrice: formatPriceInput(e.target.value) })}
           placeholder="₪"
-          className="mt-0.5 text-end text-sm tabular-nums"
+          className="mt-0.5 text-end text-base tabular-nums"
         />
       </label>
     </div>
@@ -741,13 +771,17 @@ function MobileCards({
                       <p className="text-xs text-muted">{displayName(it.supplierName, it.supplierNameEn, locale).primary}</p>
                     ) : null}
                   </div>
-                  <p className="shrink-0 font-mono text-base font-bold tabular-nums text-ink">{money(it.listPrice)}</p>
+                  <p className="shrink-0 text-base font-bold tabular-nums text-ink">{money(it.listPrice)}</p>
                 </div>
                 <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
                   <dt className="text-subtle">{t('card.product')}</dt>
                   <dd className="truncate text-end">
                     {it.productId ? (
-                      <Link href={`/dashboard/products/${it.productId}`} className="text-primary hover:underline" lang="he">
+                      <Link
+                        href={`/dashboard/products/${it.productId}`}
+                        className="inline-flex min-h-6 max-w-full items-center truncate text-primary hover:underline [@media(pointer:coarse)]:min-h-[44px]"
+                        lang="he"
+                      >
                         {it.canonicalName ?? '—'}
                       </Link>
                     ) : (
@@ -839,7 +873,7 @@ function EnglishNameCell({
           setDraft(value);
           setEditing(true);
         }}
-        className="group inline-flex items-center gap-1.5 rounded text-start text-ink hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+        className="group inline-flex min-h-6 items-center gap-1.5 rounded text-start text-ink hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 [@media(pointer:coarse)]:min-h-[44px]"
         aria-label={`${t('nameEn.edit')}: ${value}`}
       >
         <span dir="ltr" lang="en">
@@ -854,7 +888,7 @@ function EnglishNameCell({
           setDraft('');
           setEditing(true);
         }}
-        className="inline-flex items-center gap-1 rounded text-xs text-subtle hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+        className="inline-flex min-h-6 items-center gap-1 rounded text-xs text-subtle hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 [@media(pointer:coarse)]:min-h-[44px]"
       >
         <Languages className="h-3.5 w-3.5" aria-hidden="true" /> {t('nameEn.add')}
       </button>
