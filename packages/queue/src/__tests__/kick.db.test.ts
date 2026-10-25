@@ -89,12 +89,16 @@ describe('enqueue hook', () => {
 });
 
 describe('claimAnySerial', () => {
+  // Claims go oldest run_at first, then by (random uuid) id. insertJob's default run_at is new Date(),
+  // so two inserts in the same millisecond tie and their order is a coin flip: give the jobs whose
+  // order the test asserts distinct, increasing run_at values.
+  const at = (n: number) => ({ runAt: new Date(Date.now() - 60_000 + n * 1000) });
   it('one job per queue + tenant at a time; other tenants and queues still run', async () => {
     const [a] = await sql<Array<{ id: string }>>`INSERT INTO restaurants (name) VALUES ('kick test') RETURNING id`;
     const [b] = await sql<Array<{ id: string }>>`INSERT INTO restaurants (name) VALUES ('kick test') RETURNING id`;
-    await insertJob(sql, `${Q}-m`, { n: 1 }, { restaurantId: a!.id });
-    await insertJob(sql, `${Q}-m`, { n: 2 }, { restaurantId: a!.id });
-    await insertJob(sql, `${Q}-m`, { n: 3 }, { restaurantId: b!.id });
+    await insertJob(sql, `${Q}-m`, { n: 1 }, { restaurantId: a!.id, ...at(1) });
+    await insertJob(sql, `${Q}-m`, { n: 2 }, { restaurantId: a!.id, ...at(2) });
+    await insertJob(sql, `${Q}-m`, { n: 3 }, { restaurantId: b!.id, ...at(3) });
     await insertJob(sql, `${Q}-o`, { n: 4 }, { restaurantId: a!.id });
 
     const first = await claimAnySerial<{ n: number }>(sql, [`${Q}-m`], 'r1', STALL);
@@ -111,8 +115,8 @@ describe('claimAnySerial', () => {
   });
 
   it('an active job with a stale lock (dead runner) does not block its group', async () => {
-    await insertJob(sql, `${Q}-s`, { n: 1 });
-    await insertJob(sql, `${Q}-s`, { n: 2 });
+    await insertJob(sql, `${Q}-s`, { n: 1 }, at(1));
+    await insertJob(sql, `${Q}-s`, { n: 2 }, at(2));
     const dead = await claimAnySerial(sql, [`${Q}-s`], 'dead', STALL);
     expect(await claimAnySerial(sql, [`${Q}-s`], 'live', STALL)).toBeNull();
     await sql`UPDATE job_queue SET locked_at = now() - interval '10 minutes' WHERE id = ${dead!.id}`;
