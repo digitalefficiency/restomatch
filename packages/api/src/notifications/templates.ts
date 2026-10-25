@@ -321,6 +321,40 @@ export function orderNotPlacedEmail(args: {
 
 /* ─────────────────────── approval needed ─────────────────────────── */
 
+/**
+ * The approval decision vocabulary (W1-07), named by what happens to the money.
+ * ONE map for the queue buttons (apps/web approvals i18n + vocab.ts — a web unit
+ * test locks them equal to this), the activity titles the approvals router
+ * writes and the approval e-mail below. The procedure each verb calls is fixed:
+ *
+ *   approve()  → resolution 'accepted' → the ₪ is claimed from the supplier;
+ *   reject()   → resolution 'rejected' → waived, the invoice is paid as billed;
+ *   escalate() → resolution 'escalated', routed to the owner.
+ *
+ * Never swap a label onto the other procedure (functional-flows-08): "אשר" used
+ * to mean "claim" and every AP tool reads it as "pay".
+ */
+export const DECISION_COPY = {
+  he: {
+    approve: 'דרוש {amount} מהספק',
+    reject: 'שלם כפי שחויב',
+    escalate: 'העבר לבעלים',
+    approved: 'נדרש מהספק',
+    rejected: 'שולם כפי שחויב',
+    escalated: 'הועבר לבעלים',
+    reopened: 'ההחלטה בוטלה',
+  },
+  en: {
+    approve: 'Claim {amount} back',
+    reject: 'Pay as billed',
+    escalate: 'Send to owner',
+    approved: 'Claimed from supplier',
+    rejected: 'Paid as billed',
+    escalated: 'Sent to owner',
+    reopened: 'Decision undone',
+  },
+} as const satisfies Record<EmailLocale, Record<string, string>>;
+
 export function approvalNeededEmail(args: {
   supplierName: string;
   discrepancyCount: number;
@@ -338,10 +372,10 @@ export function approvalNeededEmail(args: {
          סכום בסיכון: ${ilsSpan(args.atRiskIls, 'danger')}`,
         'danger',
       )}
-      <p style="margin:10px 0 0">החלטה מהירה (אישור/דחייה) תשחרר את התשלום או תמנע חיוב יתר.</p>`,
+      <p style="margin:10px 0 0">לכל פער שתי אפשרויות: <strong>«${DECISION_COPY.he.approve.replace(' {amount}', '')}»</strong> או <strong>«${DECISION_COPY.he.reject}»</strong>.</p>`,
     cta: args.approvalsUrl ? { label: 'מעבר לתור האישורים', url: args.approvalsUrl } : undefined,
   });
-  const text = `דרושה החלטה — ${args.supplierName}\n\n${args.discrepancyCount} פערים, סכום בסיכון ${args.atRiskIls}.${args.approvalsUrl ? `\n\nתור האישורים: ${args.approvalsUrl}` : ''}`;
+  const text = `דרושה החלטה — ${args.supplierName}\n\n${args.discrepancyCount} פערים, סכום בסיכון ${args.atRiskIls}.\n${DECISION_COPY.he.approve.replace(' {amount}', '')} / ${DECISION_COPY.he.reject}${args.approvalsUrl ? `\n\nתור האישורים: ${args.approvalsUrl}` : ''}`;
   return { subject, html, text };
 }
 
