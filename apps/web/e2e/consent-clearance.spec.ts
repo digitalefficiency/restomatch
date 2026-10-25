@@ -4,12 +4,14 @@ import { e2eSql } from './helpers';
 
 /**
  * Fresh phone, cookie banner not answered yet: the dashboard's bottom nav and
- * the receiving wizard's sticky "close receipt" CTA must stay clickable — the
- * banner sits below them (app/dashboard/consent-clearance.tsx), never on top.
+ * the receiving wizard's sticky "close receipt" CTA must stay clickable. Inside
+ * the app the banner is an inline strip at the top of the page (W1-01,
+ * a11y-12 / mobile-field-19) — it never overlaps fixed chrome, so the nav keeps
+ * the bottom edge and nothing has to make room for it.
  */
 test.use({ storageState: OWNER_STATE, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
-const BANNER = '[role="dialog"][aria-label="הסכמה לשימוש בעוגיות"]';
+const BANNER = '[role="region"][aria-label="הסכמה לשימוש בעוגיות"]';
 
 /** True when the element's centre is the top-most hit target (nothing over it). */
 async function onTop(page: Page, loc: Locator): Promise<boolean> {
@@ -32,22 +34,26 @@ test.beforeEach(async ({ page }) => {
   await ctx.addCookies([{ name: 'rm_locale', value: 'he', url: test.info().project.use.baseURL! }]);
 });
 
-test('bottom nav stays clickable above the unanswered cookie banner, and drops back after a choice', async ({ page }) => {
+test('bottom nav stays clickable with the unanswered cookie banner, which sits inline at the top', async ({ page }) => {
   await page.goto('/dashboard');
   const banner = page.locator(BANNER);
   await expect(banner).toBeVisible();
+  await expect(banner).toHaveAttribute('data-consent', 'inline');
   const bottomNav = page.locator('nav.fixed').filter({ has: page.locator('a[href="/dashboard/receiving"]') });
   const receiving = bottomNav.locator('a[href="/dashboard/receiving"]');
   await expect(receiving).toBeVisible();
 
+  // Inline at the top: in the document flow, above the page, never over fixed chrome.
+  const bannerBox = (await banner.boundingBox())!;
+  expect(bannerBox.y, 'banner starts at the top of the page').toBeLessThanOrEqual(1);
+  expect(await banner.evaluate((el) => getComputedStyle(el).position)).toBe('static');
   const navBox = (await bottomNav.boundingBox())!;
-  const bannerBox = (await banner.locator('> div').boundingBox())!;
-  expect(navBox.y + navBox.height, 'nav sits above the banner').toBeLessThanOrEqual(bannerBox.y + 1);
+  expect(Math.round(navBox.y + navBox.height), 'nav keeps the bottom edge').toBe(844);
   expect(await onTop(page, receiving), 'bottom-nav link is not covered').toBe(true);
   await receiving.click();
   await expect(page).toHaveURL(/\/dashboard\/receiving$/);
 
-  // Choosing releases the space: the nav returns to the bottom edge.
+  // Choosing removes the strip.
   await page.getByRole('button', { name: 'רק חיוניות' }).click();
   await expect(banner).toHaveCount(0);
   await expect
