@@ -8,6 +8,7 @@ import {
   invoices,
   isNull,
   poLines,
+  productAliases,
   products,
   purchaseOrders,
   sql,
@@ -16,8 +17,103 @@ import {
   type Database,
 } from '@restomatch/db';
 import { recordConfirmedMatch } from '@restomatch/catalog';
+import { enqueue, isQueueUnavailableError, MATCH_INVOICE_QUEUE, type MatchInvoiceQueueJob } from '@restomatch/queue';
 import { managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
+import { readConsolidatedRaw } from '../match/consolidated';
+
+/**
+ * A re-match job waits this long before it may be claimed: the job row commits
+ * on the queue's own connection at once, the backfill only when this request's
+ * transaction does — a worker that claimed it sooner would match the old lines.
+ */
+const REMATCH_DELAY_MS = 3_000;
+
+export interface RematchReport {
+  /** Invoices sent to the match-invoice job (their leak figure is recomputed). */
+  requeued: number;
+  /** Skipped: a credit claim exists on one of its findings (₪-back tracker) — re-match by hand. */
+  blockedByClaims: number;
+  /** Skipped: a consolidated invoice (חשבונית ריכוז) is cross-matched to its delivery notes instead. */
+  consolidated: number;
+  /** Skipped: already approved or paid — a person signed it off. */
+  settled: number;
+  /** The queue database did not answer; the lines are linked, the re-check did not start. */
+  failed: number;
+}
+
+/**
+ * Re-match the invoices whose lines a link just changed (catalog-03): a line
+ * that gains (or loses) its product changes MISSING / EXTRA / price findings,
+ * so the leak and approvals must be recomputed — no engine change, the
+ * existing match-invoice job does it. Restaurant-scoped; best effort (a queue
+ * failure never fails the link).
+ */
+export async function requeueInvoicesForRematch(
+  db: Database,
+  restaurantId: string,
+  invoiceIds: Iterable<string>,
+): Promise<RematchReport> {
+  const ids = [...new Set(invoiceIds)];
+  const report: RematchReport = { requeued: 0, blockedByClaims: 0, consolidated: 0, settled: 0, failed: 0 };
+  if (ids.length === 0) return report;
+  const rows = await db
+    .select({ id: invoices.id, status: invoices.status, ocrPayload: invoices.ocrPayload })
+    .from(invoices)
+    .where(and(eq(invoices.restaurantId, restaurantId), inArray(invoices.id, ids)));
+  const claimed = await db.execute(sql`
+    SELECT DISTINCT mr.invoice_id AS id
+    FROM recovery_claims c
+    JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}
+    JOIN match_runs mr ON mr.id = d.match_run_id AND mr.restaurant_id = ${restaurantId}
+    WHERE c.restaurant_id = ${restaurantId}
+      AND mr.invoice_id IN (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})
+  `);
+  const claimedRows = (Array.isArray(claimed) ? claimed : (claimed as { rows?: unknown[] }).rows ?? []) as Array<{
+    id: string;
+  }>;
+  const blocked = new Set(claimedRows.map((r) => String(r.id)));
+  const runAt = new Date(Date.now() + REMATCH_DELAY_MS);
+  for (const inv of rows) {
+    if (readConsolidatedRaw(inv.ocrPayload)) {
+      report.consolidated += 1;
+      continue;
+    }
+    if (inv.status === 'approved' || inv.status === 'paid') {
+      report.settled += 1;
+      continue;
+    }
+    if (blocked.has(inv.id)) {
+      report.blockedByClaims += 1;
+      continue;
+    }
+    const job: MatchInvoiceQueueJob = { restaurantId, invoiceId: inv.id, rematch: true };
+    try {
+      await enqueue(MATCH_INVOICE_QUEUE, job, { runAt });
+      report.requeued += 1;
+    } catch (err) {
+      report.failed += 1;
+      console.error(
+        `[mapping.confirm] failed to enqueue the re-match for invoice=${inv.id}` +
+          (isQueueUnavailableError(err) ? ' (queue.unavailable)' : ''),
+        err,
+      );
+    }
+  }
+  return report;
+}
+
+/** Exactly what a confirm changed, handed back so "בטל" can put it back. */
+const RevertSchema = z
+  .object({
+    productId: z.string().uuid(),
+    poLineIds: z.array(z.string().uuid()).max(5000),
+    invoiceLineIds: z.array(z.string().uuid()).max(5000),
+    catalogItemIds: z.array(z.string().uuid()).max(5000),
+    /** The alias this confirm created (null when it only refreshed an existing one). */
+    aliasId: z.string().uuid().nullable(),
+  })
+  .strict();
 
 export interface UnmappedSku {
   supplierId: string;
@@ -142,14 +238,104 @@ export const mappingRouter = router({
           rawName: z.string().trim().min(1).max(400),
           productId: z.string().uuid().optional(),
           newProductName: z.string().trim().min(1).max(200).optional(),
+          /**
+           * Undo ("בטל") a confirm made moments ago: unlink exactly the lines it
+           * linked (still on that product, this supplier and SKU), drop the alias
+           * it created, and re-match those invoices again.
+           */
+          revert: RevertSchema.optional(),
         })
-        .refine((v) => !!v.productId || !!v.newProductName, {
+        .refine((v) => !!v.revert || !!v.productId || !!v.newProductName, {
           message: 'provide a productId or a newProductName',
         }),
     )
     .mutation(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
       await assertSupplierOwned(ctx.db, input.supplierId, rid);
+
+      const poIds = ctx.db
+        .select({ id: purchaseOrders.id })
+        .from(purchaseOrders)
+        .where(and(eq(purchaseOrders.restaurantId, rid), eq(purchaseOrders.supplierId, input.supplierId)));
+      const invIds = ctx.db
+        .select({ id: invoices.id })
+        .from(invoices)
+        .where(and(eq(invoices.restaurantId, rid), eq(invoices.supplierId, input.supplierId)));
+
+      if (input.revert) {
+        const r = input.revert;
+        const undonePo = r.poLineIds.length
+          ? await ctx.db
+              .update(poLines)
+              .set({ productId: null })
+              .where(
+                and(
+                  inArray(poLines.id, r.poLineIds),
+                  eq(poLines.productId, r.productId),
+                  eq(poLines.supplierSku, input.supplierSku),
+                  inArray(poLines.poId, poIds),
+                ),
+              )
+              .returning({ id: poLines.id })
+          : [];
+        const undoneInv = r.invoiceLineIds.length
+          ? await ctx.db
+              .update(invoiceLines)
+              .set({ productId: null })
+              .where(
+                and(
+                  inArray(invoiceLines.id, r.invoiceLineIds),
+                  eq(invoiceLines.productId, r.productId),
+                  eq(invoiceLines.supplierSku, input.supplierSku),
+                  inArray(invoiceLines.invoiceId, invIds),
+                ),
+              )
+              .returning({ id: invoiceLines.id, invoiceId: invoiceLines.invoiceId })
+          : [];
+        if (r.catalogItemIds.length) {
+          await ctx.db
+            .update(supplierCatalogItems)
+            .set({ productId: null, updatedAt: new Date() })
+            .where(
+              and(
+                inArray(supplierCatalogItems.id, r.catalogItemIds),
+                eq(supplierCatalogItems.restaurantId, rid),
+                eq(supplierCatalogItems.supplierId, input.supplierId),
+                eq(supplierCatalogItems.productId, r.productId),
+              ),
+            );
+        }
+        if (r.aliasId) {
+          // Only the alias this confirm created, and only through a product of this restaurant.
+          const own = ctx.db
+            .select({ id: products.id })
+            .from(products)
+            .where(and(eq(products.id, r.productId), eq(products.restaurantId, rid)));
+          await ctx.db
+            .delete(productAliases)
+            .where(
+              and(
+                eq(productAliases.id, r.aliasId),
+                eq(productAliases.productId, r.productId),
+                eq(productAliases.supplierId, input.supplierId),
+                inArray(productAliases.productId, own),
+              ),
+            );
+        }
+        const rematch = await requeueInvoicesForRematch(
+          ctx.db,
+          rid,
+          undoneInv.map((l) => l.invoiceId),
+        );
+        return {
+          productId: r.productId,
+          createdProduct: false,
+          poLinesUpdated: undonePo.length,
+          invoiceLinesUpdated: undoneInv.length,
+          rematch,
+          undo: null,
+        };
+      }
 
       // Resolve the target product (verify ownership / create new).
       let productId: string;
@@ -176,7 +362,7 @@ export const mappingRouter = router({
       }
 
       // Learn the alias (name + SKU) so future imports/OCR auto-resolve.
-      await recordConfirmedMatch(ctx.db, {
+      const alias = await recordConfirmedMatch(ctx.db, {
         productId,
         rawName: input.rawName,
         supplierId: input.supplierId,
@@ -185,10 +371,6 @@ export const mappingRouter = router({
       });
 
       // Backfill already-imported lines, scoped to this restaurant + supplier.
-      const poIds = ctx.db
-        .select({ id: purchaseOrders.id })
-        .from(purchaseOrders)
-        .where(and(eq(purchaseOrders.restaurantId, rid), eq(purchaseOrders.supplierId, input.supplierId)));
       const updatedPo = await ctx.db
         .update(poLines)
         .set({ productId })
@@ -201,10 +383,6 @@ export const mappingRouter = router({
         )
         .returning({ id: poLines.id });
 
-      const invIds = ctx.db
-        .select({ id: invoices.id })
-        .from(invoices)
-        .where(and(eq(invoices.restaurantId, rid), eq(invoices.supplierId, input.supplierId)));
       const updatedInv = await ctx.db
         .update(invoiceLines)
         .set({ productId })
@@ -215,10 +393,10 @@ export const mappingRouter = router({
             inArray(invoiceLines.invoiceId, invIds),
           ),
         )
-        .returning({ id: invoiceLines.id });
+        .returning({ id: invoiceLines.id, invoiceId: invoiceLines.invoiceId });
 
       // Link the priced catalog row too, when one exists for this SKU.
-      await ctx.db
+      const linkedItems = await ctx.db
         .update(supplierCatalogItems)
         .set({ productId, updatedAt: new Date() })
         .where(
@@ -228,13 +406,29 @@ export const mappingRouter = router({
             eq(supplierCatalogItems.supplierSku, input.supplierSku),
             isNull(supplierCatalogItems.productId),
           ),
-        );
+        )
+        .returning({ id: supplierCatalogItems.id });
+
+      // The lines changed, so their invoices' findings (and the leak) must too.
+      const rematch = await requeueInvoicesForRematch(
+        ctx.db,
+        rid,
+        updatedInv.map((l) => l.invoiceId),
+      );
 
       return {
         productId,
         createdProduct,
         poLinesUpdated: updatedPo.length,
         invoiceLinesUpdated: updatedInv.length,
+        rematch,
+        undo: {
+          productId,
+          poLineIds: updatedPo.map((l) => l.id),
+          invoiceLineIds: updatedInv.map((l) => l.id),
+          catalogItemIds: linkedItems.map((l) => l.id),
+          aliasId: alias.created ? alias.aliasId : null,
+        },
       };
     }),
 });

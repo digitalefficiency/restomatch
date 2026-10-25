@@ -7,6 +7,14 @@ import ExcelJS from 'exceljs';
 import type { Cell } from 'exceljs';
 const { Workbook } = ExcelJS;
 import type { CatalogColumnMapping } from '@restomatch/db';
+import {
+  detectDecimalStyle,
+  exVatPriceUnits,
+  parseMoneyCell,
+  priceUnitsToNumeric,
+  toPriceUnits,
+  type DecimalStyle,
+} from '../lib/parseMoneyCell';
 
 /**
  * Hard byte ceiling for a spreadsheet, enforced BEFORE handing the bytes to the
@@ -226,26 +234,79 @@ export function autoDetectMapping(headers: string[]): CatalogColumnMapping {
   return mapping;
 }
 
-/** Parse a price/quantity cell that may carry ₪, thousands separators, etc. */
-export function parseNumeric(raw: string | undefined | null): number | null {
-  if (raw == null) return null;
-  let s = String(raw).replace(/[₪$€\s]/g, '').trim();
-  if (!s) return null;
-  if (s.includes('.') && s.includes(',')) {
-    // Both present → comma is the thousands separator (e.g. 1,234.56).
-    s = s.replace(/,/g, '');
-  } else if (s.includes(',')) {
-    // Only comma → treat as decimal separator (European style).
-    s = s.replace(/,/g, '.');
-  }
-  s = s.replace(/[^0-9.\-]/g, '');
-  if (!s || s === '-' || s === '.') return null;
-  const n = Number(s);
-  return Number.isFinite(n) ? n : null;
+/**
+ * Parse a price/quantity cell that may carry ₪, thousands separators, etc.
+ * Strict (lib/parseMoneyCell): "1,250" is 1250, "12,90" is 12.9, and a cell
+ * that can't be read unambiguously ("-5", "1,2345") is null, never guessed.
+ */
+export function parseNumeric(raw: string | undefined | null, decimal: DecimalStyle = 'auto'): number | null {
+  const cell = parseMoneyCell(raw, decimal);
+  return cell.kind === 'ok' ? cell.value : null;
 }
 
-/** Project parsed rows onto normalized catalog rows using a column mapping. */
-export function extractCatalogRows(table: ParsedTable, mapping: CatalogColumnMapping): CatalogRow[] {
+/** Is the price list quoted before VAT ('ex', the default) or including it ('inc')? */
+export type VatBasis = 'ex' | 'inc';
+
+/**
+ * The catalog import's choices beyond column → field, stored with the mapping
+ * in `catalog_imports.column_mapping` (jsonb, no schema change) and carried in
+ * the worker's job payload, so the inline and background paths read the file
+ * the same way.
+ */
+export interface CatalogImportOptions {
+  vatBasis?: VatBasis;
+  /**
+   * The restaurant's VAT rate at import time, as its NUMERIC(5,4) string
+   * ("0.1800"); used only when vatBasis = 'inc'. A string so the mapping stays a
+   * flat string map (the queue payload's shape).
+   */
+  vatRate?: string;
+}
+export type CatalogImportMapping = CatalogColumnMapping & CatalogImportOptions;
+
+/** A header that says the prices include VAT ("כולל מע״מ", "incl. VAT"). */
+const INC_VAT = /כולל\s*מע["״'׳]?מ|כולל\s*מעמ|incl(?:uding|\.)?\s*vat|vat\s*incl/i;
+const EX_VAT = /(?:לא\s*כולל|ללא|לפני)\s*מע["״'׳]?מ|excl(?:uding|\.)?\s*vat|before\s*vat|\+\s*מע["״'׳]?מ/i;
+
+/** Pre-set the VAT basis from the headers: a "כולל מע״מ" header → 'inc', else null (ask). */
+export function detectVatBasis(headers: string[]): VatBasis | null {
+  if (headers.some((h) => EX_VAT.test(h))) return 'ex';
+  if (headers.some((h) => INC_VAT.test(h))) return 'inc';
+  return null;
+}
+
+/** Why a non-empty row is held out of the commit. */
+export type HeldReason = 'UNCLEAR_PRICE';
+
+export interface HeldRow {
+  /** 1-based data-row number (the header is row 0) — what the user sees in the file. */
+  rowNumber: number;
+  supplierNameRaw: string;
+  supplierSku: string | null;
+  rawPrice: string;
+  reason: HeldReason;
+}
+
+export interface AnalyzedRow extends CatalogRow {
+  rowNumber: number;
+  /** The price cell as written in the file. */
+  rawPrice: string | null;
+}
+
+export interface CatalogRowsAnalysis {
+  /** Rows that will be committed (prices already VAT-exclusive). */
+  rows: AnalyzedRow[];
+  /** Rows with a non-empty price cell that didn't parse — never committed. */
+  held: HeldRow[];
+  decimal: DecimalStyle;
+}
+
+/**
+ * Project parsed rows onto catalog rows using a column mapping, holding out
+ * any row whose price cell is present but unreadable ("מחיר לא ברור"), and
+ * converting VAT-inclusive prices to ex-VAT (integer price units, half-up).
+ */
+export function analyzeCatalogRows(table: ParsedTable, mapping: CatalogImportMapping): CatalogRowsAnalysis {
   const get = (row: Record<string, string>, header?: string): string | null => {
     if (!header) return null;
     const v = row[header];
@@ -253,18 +314,53 @@ export function extractCatalogRows(table: ParsedTable, mapping: CatalogColumnMap
     const t = String(v).trim();
     return t === '' ? null : t;
   };
-  const out: CatalogRow[] = [];
-  for (const row of table.rows) {
+  const decimal = mapping.price ? detectDecimalStyle(table.rows.map((r) => get(r, mapping.price))) : 'auto';
+  const vatRate = Number(mapping.vatRate);
+  const inc = mapping.vatBasis === 'inc' && Number.isFinite(vatRate) && vatRate > 0 && vatRate < 1;
+  const rows: AnalyzedRow[] = [];
+  const held: HeldRow[] = [];
+  table.rows.forEach((row, i) => {
     const supplierNameRaw = get(row, mapping.name);
-    if (!supplierNameRaw) continue; // a row without a description can't be a catalog item
-    out.push({
-      supplierSku: get(row, mapping.sku),
+    if (!supplierNameRaw) return; // a row without a description can't be a catalog item
+    const supplierSku = get(row, mapping.sku);
+    const rawPrice = get(row, mapping.price);
+    const cell = parseMoneyCell(rawPrice, decimal);
+    if (cell.kind === 'invalid') {
+      held.push({ rowNumber: i + 1, supplierNameRaw, supplierSku, rawPrice: cell.raw, reason: 'UNCLEAR_PRICE' });
+      return;
+    }
+    let listPrice: number | null = cell.kind === 'ok' ? cell.value : null;
+    if (listPrice != null) {
+      const units = toPriceUnits(listPrice);
+      listPrice = Number(priceUnitsToNumeric(inc ? exVatPriceUnits(units, vatRate) : units));
+    }
+    rows.push({
+      rowNumber: i + 1,
+      rawPrice,
+      supplierSku,
       supplierNameRaw,
       unit: get(row, mapping.unit),
-      listPrice: parseNumeric(get(row, mapping.price)),
+      listPrice,
       barcodeEan: get(row, mapping.barcode),
       packSize: parseNumeric(get(row, mapping.packSize)),
     });
-  }
-  return out;
+  });
+  return { rows, held, decimal };
+}
+
+/**
+ * The committable catalog rows (held-out rows excluded). Shared by the inline
+ * tRPC commit and the import-catalog worker, so neither can store a guess.
+ */
+export function extractCatalogRows(table: ParsedTable, mapping: CatalogImportMapping): CatalogRow[] {
+  return analyzeCatalogRows(table, mapping).rows.map(
+    ({ supplierSku, supplierNameRaw, unit, listPrice, barcodeEan, packSize }) => ({
+      supplierSku,
+      supplierNameRaw,
+      unit,
+      listPrice,
+      barcodeEan,
+      packSize,
+    }),
+  );
 }
