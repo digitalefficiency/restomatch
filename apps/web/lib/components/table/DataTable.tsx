@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, ChevronsUpDown, Lock, MoreHorizontal } from 'lucide-react';
 import { useLocale } from '@/lib/i18n/client';
 import { formatDate } from '@/lib/i18n/format';
+import { formatIls } from '@/lib/money';
 import { cn } from '../cn';
 import { Skeleton } from '../Skeleton';
 import { Peek } from '../desk/Peek';
@@ -350,7 +351,11 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
       actions={(batchActions ?? []).map((a) => ({
         id: a.id,
         primary: a.primary,
-        disabled: busy || summary.actionable.length === 0,
+        disabled: busy || summary.actionable.length === 0 || (!!a.capped && summary.overCap.length > 0),
+        disabledReason:
+          a.capped && summary.overCap.length > 0 && capAgorot != null
+            ? copy.overCapDisabled(formatIls(capAgorot / 100, { locale }))
+            : undefined,
         label: a.label(summary.actionable.length, summary.sumAgorot),
         onRun: () => void runBatch(a),
       }))}

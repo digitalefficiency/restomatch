@@ -311,7 +311,14 @@ export function DeskLab({
           selectable={(r) => (r.severity === 'block' ? { disabled: deskCopy(locale).blockReason } : true)}
           amountAgorot={(r) => r.deltaAgorot}
           batchActions={[
-            { id: 'assign', primary: true, label: (n) => t.assignBatch(n), run: (sel) => setNotice(t.assignedToast(sel.length)) },
+            {
+              id: 'approve',
+              primary: true,
+              capped: true,
+              label: (n, sum) => t.approveBatch(n, formatIls(sum / 100, { maximumFractionDigits: 2, locale })),
+              run: (sel) => approveRows(sel.map((r) => r.id)),
+            },
+            { id: 'assign', label: (n) => t.assignBatch(n), run: (sel) => setNotice(t.assignedToast(sel.length)) },
             { id: 'export', label: (n) => t.exportBatch(n), run: exportSelected },
           ]}
           rowActions={(r) => [

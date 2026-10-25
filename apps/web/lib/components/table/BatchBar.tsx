@@ -11,12 +11,14 @@ export interface BatchBarAction {
   label: string;
   primary?: boolean;
   disabled?: boolean;
+  /** Shown beside the bar while the action is disabled (never a silent grey button). */
+  disabledReason?: string;
   onRun: () => void;
 }
 
 /**
- * "N נבחרו · ₪Σ · [primary] [clear · Esc]" (RUBRIC C2). Never an approve or pay
- * action — the owner rejected bulk approval (REVIEW-REPORT §8). It replaces the table
+ * "N נבחרו · ₪Σ · [primary] [clear · Esc]" (RUBRIC C2). An approve/pay action is
+ * disabled with its reason while any selected row is above the ₪200 cap. It replaces the table
  * toolbar while rows are selected and stays sticky above the rows. The ₪ is
  * Σ|amount| of the rows the actions will touch; rows above the per-item cap
  * are counted but named as held back (R-12).
@@ -65,12 +67,21 @@ export function BatchBar({
       {overCapCount > 0 && capAgorot != null ? (
         <p className="text-xs text-warn">{copy.overCap(overCapCount, formatIls(capAgorot / 100, { locale }))}</p>
       ) : null}
+      {actions
+        .filter((a) => a.disabled && a.disabledReason)
+        .map((a) => (
+          <p key={a.id} id={`batch-why-${a.id}`} data-batch-why={a.id} className="text-xs font-semibold text-warn">
+            {a.disabledReason}
+          </p>
+        ))}
       <div className="ms-auto flex flex-wrap items-center gap-2">
         {actions.map((a) => (
           <button
             key={a.id}
             type="button"
             disabled={a.disabled}
+            aria-describedby={a.disabled && a.disabledReason ? `batch-why-${a.id}` : undefined}
+            data-batch-action={a.id}
             onClick={a.onRun}
             className={cn(
               'inline-flex h-8 items-center rounded-lg px-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50',

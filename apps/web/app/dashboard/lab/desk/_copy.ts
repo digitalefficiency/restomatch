@@ -22,7 +22,7 @@ const he = {
   open: 'פתיחה',
   hold: 'השהיה',
   disable: 'השבתה',
-  // No bulk approval anywhere (owner decision, REVIEW-REPORT §8): batch actions never approve or pay.
+  approveBatch: (n: number, sum: string) => `אישור ${n} · ${sum}`,
   assignBatch: (n: number) => `שיוך ${n} לבדיקה`,
   exportBatch: (n: number) => `ייצוא ${n} נבחרות`,
   assignedToast: (n: number) => `${n} חשבוניות שויכו לבדיקה (מעבדה בלבד)`,
@@ -66,6 +66,7 @@ const en: LabCopy = {
   open: 'Open',
   hold: 'Hold',
   disable: 'Disable',
+  approveBatch: (n, sum) => `Approve ${n} · ${sum}`,
   assignBatch: (n) => `Assign ${n} for review`,
   exportBatch: (n) => `Export ${n} selected`,
   assignedToast: (n) => `${n} invoices assigned for review (lab only)`,

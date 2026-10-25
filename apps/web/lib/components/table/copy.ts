@@ -11,6 +11,7 @@ export interface DeskCopy {
   clear: string;
   clearHint: string;
   overCap: (n: number, cap: string) => string;
+  overCapDisabled: (cap: string) => string;
   blockReason: string;
   selectRow: (name: string) => string;
   selectAll: string;
@@ -51,6 +52,7 @@ const he: DeskCopy = {
   clear: 'ניקוי',
   clearHint: 'Esc',
   overCap: (n, cap) => (n === 1 ? `שורה אחת מעל ${cap} — לטיפול פרטני` : `${n} שורות מעל ${cap} — לטיפול פרטני`),
+  overCapDisabled: (cap) => `אישור מרוכז רק עד ${cap} לחשבונית — הסירו מהבחירה את השורות שמעל`,
   blockReason: 'דורש בדיקה פרטנית',
   selectRow: (name) => `בחירת ${name}`,
   selectAll: 'בחירת כל השורות המתאימות',
@@ -91,6 +93,7 @@ const en: DeskCopy = {
   clear: 'Clear',
   clearHint: 'Esc',
   overCap: (n, cap) => (n === 1 ? `1 row above ${cap} — review it one by one` : `${n} rows above ${cap} — review them one by one`),
+  overCapDisabled: (cap) => `Batch approval only up to ${cap} per invoice — remove the rows above it`,
   blockReason: 'Needs individual review',
   selectRow: (name) => `Select ${name}`,
   selectAll: 'Select all eligible rows',

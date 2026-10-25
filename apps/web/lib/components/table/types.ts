@@ -49,6 +49,12 @@ export interface BatchAction<Row> {
   id: string;
   label: (count: number, sumAgorot: number) => string;
   primary?: boolean;
+  /**
+   * A ₪-moving action (approve, pay): disabled, with the reason shown, while the
+   * selection holds a row above the per-item cap (R-12). Block rows are never
+   * selectable at all. The server still enforces both rules.
+   */
+  capped?: boolean;
   /** Runs once per eligible row (the existing per-item procedure); never a bulk engine. */
   run: (rows: Row[]) => void | Promise<void>;
 }

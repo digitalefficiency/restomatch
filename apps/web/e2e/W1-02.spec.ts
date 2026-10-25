@@ -134,8 +134,10 @@ test.describe('W1-02 DataTable', () => {
     const block = page.locator('tr[data-block]').first();
     await expect(block.locator('input[type=checkbox]')).toBeDisabled();
     await expect(block).toContainText('דורש בדיקה פרטנית');
-    // A page that mixes rows under and over the ₪200 cap.
-    await open(page, 'he', `${LAB}?sort=atRisk:asc&page=5`);
+    // The page (sorted by gap ascending) where rows under and over the ₪200 cap meet.
+    const ranked = [...labRows()].map((r, i) => ({ r, i })).sort((a, b) => Math.abs(a.r.deltaAgorot) - Math.abs(b.r.deltaAgorot) || a.i - b.i);
+    const firstOver = ranked.findIndex((x) => Math.abs(x.r.deltaAgorot) > 20_000);
+    await open(page, 'he', `${LAB}?sort=atRisk:asc&page=${Math.floor((firstOver - 3) / 50) + 1}`);
 
     const pick = page.locator('tr[data-row-id]:not([data-block]):not([data-over-cap])');
     for (let i = 0; i < 3; i++) await pick.nth(i).locator('input[type=checkbox]').check();
@@ -149,9 +151,19 @@ test.describe('W1-02 DataTable', () => {
       new Intl.NumberFormat('he-IL', { minimumFractionDigits: 2 }).format(sum / 100),
     );
     expect(await shekelLeftOfDigits(page, '[data-batch-sum]')).toEqual([true]);
-    // No bulk approval anywhere (owner decision, REVIEW-REPORT §8).
-    await expect(bar.getByRole('button', { name: /אישור|תשלום/ })).toHaveCount(0);
-    await expect(bar.getByRole('button', { name: 'שיוך 3 לבדיקה' })).toBeVisible();
+    // Bulk approve up to ₪200 per invoice (owner-confirmed): enabled for in-cap rows…
+    const approve = bar.locator('[data-batch-action="approve"]');
+    await expect(approve).toBeEnabled();
+    await expect(approve).toContainText('אישור 3');
+    // …and disabled, with the reason shown, as soon as an over-cap row joins the selection.
+    const over = page.locator('tr[data-over-cap]:not([data-block])').first();
+    await over.locator('input[type=checkbox]').check();
+    await expect(bar.locator('[data-batch-count]')).toHaveText('4 נבחרו');
+    await expect(approve).toBeDisabled();
+    await expect(bar.locator('[data-batch-why="approve"]')).toContainText('אישור מרוכז רק עד');
+    await expect(approve).toHaveAttribute('aria-describedby', 'batch-why-approve');
+    await over.locator('input[type=checkbox]').uncheck();
+    await expect(approve).toBeEnabled();
 
     await bar.getByRole('button', { name: /ניקוי/ }).click();
     await expect(bar).toHaveCount(0);
