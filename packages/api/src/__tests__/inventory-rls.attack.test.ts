@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  and,
   applyAuditImmutableRls,
   applyAuthCredentialTables,
   applyCoreTenantRls,
@@ -102,6 +103,9 @@ describe('inventory_counts / inventory_count_lines (0070) are tenant-isolated un
 
   it('the inventory router works through the app role once the flag is on (grants + GUC wiring)', async () => {
     await ownerDb.update(restaurants).set({ settings: { features: { inventoryCount: true } } as unknown as RestaurantSettings }).where(eq(restaurants.id, A.restaurantId));
+    // The shared fixture also prices this product (₪8.50 at 11:00 today), which is "newer" than now
+    // before 11:00 — so this test owns the product's only paid price, whatever the clock says.
+    await ownerDb.delete(priceHistory).where(and(eq(priceHistory.restaurantId, A.restaurantId), eq(priceHistory.productId, A.productId)));
     await ownerDb.insert(priceHistory).values({ restaurantId: A.restaurantId, productId: A.productId, supplierId: A.supplierId, observedAt: new Date(), unitPrice: '2.0000' });
     const hist = await callerFor(A, appDb).inventory.history();
     expect(hist.map((h) => h.id)).toEqual([aCount]);
