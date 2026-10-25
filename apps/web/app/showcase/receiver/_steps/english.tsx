@@ -132,13 +132,13 @@ export function Qty({ qty, unit }: { qty: number | null; unit?: string | null })
   const dir = useDir();
   const label = useUnitLabel();
   if (qty === null) return <span>—</span>;
-  // Arabic/Thai/Ge'ez unit words break in the monospace number font (Arabic
-  // letters stop joining: "ر بطة"), so receiver-language units use the text font.
+  // Quantities use the text font with tabular digits (never the mono "token"
+  // face); receiver-language unit words keep the text font explicitly.
   const unitCls = isReceiverLocale(appLocale) ? 'font-sans' : undefined;
   // Page direction, not a forced LTR: in Hebrew "37.5 ליטר" must keep the
   // number first (to the right), it read "ליטר 37.5" inside an LTR isolate.
   return (
-    <bdi dir={dir} className="whitespace-nowrap font-mono tabular-nums">
+    <bdi dir={dir} className="whitespace-nowrap tabular-nums">
       {formatNumber(qty, locale, { maximumFractionDigits: 3 })}
       {unit ? <span className={unitCls}>{` ${label(unit)}`}</span> : ''}
     </bdi>

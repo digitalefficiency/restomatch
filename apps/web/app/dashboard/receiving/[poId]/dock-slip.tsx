@@ -96,7 +96,9 @@ export function DockSlip({
   const supplier =
     (locale === 'en' && data.header.supplierNameEn ? data.header.supplierNameEn : data.header.supplierName) ??
     fallbackSupplierName;
-  const poRef = data.header.poRef ?? (data.header.poId ? `PO-${data.header.poId.slice(0, 8).toUpperCase()}` : '—');
+  // One reference everywhere (orders-12): the one printed on the order the
+  // supplier received (api orders/supplierMessage poRefOf: first 8 hex, upper-case).
+  const poRef = data.header.poRef ?? (data.header.poId ? data.header.poId.replace(/-/g, '').slice(0, 8).toUpperCase() : '—');
   const invoiceNo = data.invoice?.number ?? '—';
   const at = formatDate(data.header.receivedAt ?? new Date(), locale, { dateStyle: 'short', timeStyle: 'short' });
 
@@ -144,27 +146,27 @@ export function DockSlip({
       dir={dir}
       data-testid="dock-slip"
       aria-labelledby="dock-slip-title"
-      className="mt-6 rounded-2xl border border-warn/30 bg-surface p-4 text-start shadow-card sm:p-5"
+      className="mt-6 rounded-2xl border border-line-strong bg-surface p-4 text-start shadow-card sm:p-5"
     >
       <div className="mb-3 flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 id="dock-slip-title" className="flex items-center gap-2 text-lg font-bold text-ink">
-            <FileWarning className="h-5 w-5 shrink-0 text-danger" aria-hidden="true" />
+            <FileWarning className="h-5 w-5 shrink-0 text-warn" aria-hidden="true" />
             {t('dockSlip.title')}
           </h2>
-          <p className="mt-0.5 text-xs text-muted">{t('dockSlip.subtitle')}</p>
+          <p className="mt-0.5 text-base text-muted">{t('dockSlip.subtitle')}</p>
         </div>
         {total > 0 ? (
           // T2 (act now): solid badge + ₪ (engine total = the claims letters) + one primary CTA below.
           <span data-testid="dock-slip-total" className="shrink-0">
-            <Badge tone="warning-solid" className="px-3 py-1 text-sm font-bold">
-              <bdi dir="ltr" className="font-mono tabular-nums">{money(total)}</bdi>
+            <Badge tone="warning-solid" className="px-3 py-1 text-base font-bold">
+              <bdi className="tabular-nums">{money(total)}</bdi>
             </Badge>
           </span>
         ) : null}
       </div>
 
-      <dl className="mb-3 grid grid-cols-2 gap-x-3 gap-y-1 rounded-xl bg-surface-2 p-3 text-xs">
+      <dl className="mb-3 grid grid-cols-2 gap-x-3 gap-y-1 rounded-xl bg-surface-2 p-3 text-sm">
         <dt className="text-muted">{t('dockSlip.supplier')}</dt>
         <dd className="font-medium text-ink" data-testid="dock-slip-supplier">{supplier}</dd>
         <dt className="text-muted">{t('dockSlip.po')}</dt>
@@ -182,7 +184,7 @@ export function DockSlip({
       </dl>
 
       {dup ? (
-        <p data-testid="dock-slip-duplicate" className="mb-3 rounded-xl border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-ink">
+        <p data-testid="dock-slip-duplicate" className="mb-3 rounded-xl border border-warn/40 bg-surface px-3 py-2 text-base text-ink">
           {t('dockSlip.duplicate', { number: dup })}
         </p>
       ) : null}
@@ -191,20 +193,20 @@ export function DockSlip({
         {slipLines.map((l) => (
           <li key={l.key} data-testid="dock-slip-line" className="flex items-start justify-between gap-3 py-2.5">
             <div className="min-w-0">
-              <ItemName he={l.name} en={l.nameEn} className="text-sm font-semibold text-ink" />
-              <ul className="mt-0.5 space-y-0.5 text-xs text-muted tabular-nums">
+              <ItemName he={l.name} en={l.nameEn} className="text-base font-semibold text-ink" />
+              <ul className="mt-0.5 space-y-0.5 text-sm text-ink tabular-nums">
                 {issueTexts(l).map((s) => (
                   <li key={s}>{s}</li>
                 ))}
               </ul>
             </div>
-            <div className="shrink-0 text-end text-sm">
+            <div className="shrink-0 text-end text-base">
               {l.amountIls !== null ? (
-                <bdi dir="ltr" data-testid="dock-slip-amount" className="font-mono font-semibold tabular-nums text-danger">
+                <bdi data-testid="dock-slip-amount" className="font-semibold tabular-nums text-ink">
                   {money(l.amountIls)}
                 </bdi>
               ) : (
-                <span className="text-xs text-subtle">{t('dockSlip.quantitiesOnly')}</span>
+                <span className="text-sm text-muted">{t('dockSlip.quantitiesOnly')}</span>
               )}
             </div>
           </li>
@@ -212,36 +214,36 @@ export function DockSlip({
       </ul>
 
       {note === 'afterClose' ? (
-        <p className="mt-2 text-xs text-muted" data-testid="dock-slip-after-close">
+        <p className="mt-2 text-sm text-muted" data-testid="dock-slip-after-close">
           {t('dockSlip.afterClose')}
         </p>
       ) : note === 'held' ? (
-        <p className="mt-2 text-xs text-muted" data-testid="dock-slip-held">
+        <p className="mt-2 text-sm text-muted" data-testid="dock-slip-held">
           {t(data.engine.holdReason === 'settled' ? 'dockSlip.heldSettled' : 'dockSlip.heldReview')}
         </p>
       ) : note === 'computing' ? (
-        <p className="mt-2 flex items-center gap-2 text-xs text-muted" data-testid="dock-slip-computing">
+        <p className="mt-2 flex items-center gap-2 text-sm text-muted" data-testid="dock-slip-computing">
           <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
           {t('dockSlip.computing')}
         </p>
       ) : note === 'slow' ? (
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted" data-testid="dock-slip-slow">
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted" data-testid="dock-slip-slow">
           <span>{t('dockSlip.slow')}</span>
           <button
             type="button"
             onClick={refresh}
-            className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface-2 px-2.5 py-1 font-medium text-ink"
+            className="inline-flex min-h-12 items-center gap-1.5 rounded-xl border border-line bg-surface-2 px-4 font-semibold text-ink"
           >
-            <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
             {t('dockSlip.refresh')}
           </button>
         </div>
       ) : null}
 
       {total > 0 ? (
-        <div className="mt-3 flex items-center justify-between border-t border-line pt-3 text-sm font-semibold text-ink">
+        <div className="mt-3 flex items-center justify-between border-t border-line pt-3 text-base font-bold text-ink">
           <span>{t('dockSlip.total')}</span>
-          <bdi dir="ltr" className="font-mono tabular-nums text-danger">{money(total)}</bdi>
+          <bdi className="tabular-nums" data-testid="dock-slip-total-line">{money(total)}</bdi>
         </div>
       ) : null}
 
@@ -251,7 +253,7 @@ export function DockSlip({
           target="_blank"
           rel="noopener noreferrer"
           data-testid="dock-slip-whatsapp"
-          className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-on-primary"
+          className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-base font-semibold text-on-primary"
         >
           <MessageCircle className="h-4 w-4" aria-hidden="true" />
           {phone ? t('dockSlip.whatsapp') : t('dockSlip.share')}
@@ -261,13 +263,13 @@ export function DockSlip({
           onClick={() => void copy()}
           data-testid="dock-slip-copy"
           data-slip-text={text}
-          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-line bg-surface-2 px-4 py-3 text-sm font-medium text-ink"
+          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-line bg-surface-2 px-4 py-3 text-base font-medium text-ink"
         >
           {copied ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
           {copied ? t('dockSlip.copied') : t('dockSlip.copy')}
         </button>
       </div>
-      <p className="mt-2 text-[11px] text-subtle">{t('dockSlip.noSend')}</p>
+      <p className="mt-2 text-sm text-muted">{t('dockSlip.noSend')}</p>
     </section>
   );
 }

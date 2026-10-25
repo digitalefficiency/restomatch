@@ -55,7 +55,10 @@ export function lineIssues(line: ReconciliationLine, mark: LineMark | undefined)
   const rejected = mark?.qtyRejected ?? 0;
   if (line.poLineId === null && line.invoiceLineIndex !== null) out.push('unordered');
   if (line.poQty !== null && received + EPS < line.poQty) out.push('short');
-  if (rejected > EPS || mark?.condition === 'rejected' || mark?.condition === 'damaged') out.push('rejected');
+  // "חסר" is a short delivery, never a rejection: the slip must not tell the
+  // supplier that goods which never arrived were "rejected / damaged".
+  const missing = mark?.rejectReason === 'missing';
+  if (!missing && (rejected > EPS || mark?.condition === 'rejected' || mark?.condition === 'damaged')) out.push('rejected');
   if (line.poUnitPrice !== null && line.invoiceUnitPrice !== null && line.invoiceUnitPrice > line.poUnitPrice + EPS) {
     out.push('overPrice');
   }

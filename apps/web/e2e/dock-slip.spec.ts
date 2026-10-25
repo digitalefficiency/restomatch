@@ -75,9 +75,12 @@ async function scanAndProcess(page: Page, poId: string): Promise<string> {
     await route.fulfill({ response: res, json: body });
   });
   await page.goto(`/dashboard/receiving/${poId}`);
-  await page.locator('input[type="file"]').setInputFiles({ name: 'invoice.png', mimeType: 'image/png', buffer: TINY_PNG });
-  await expect(page.getByText(/^נשמר · scan-/)).toBeVisible({ timeout: 60_000 });
-  await page.getByRole('button', { name: /^עבד את החשבונית/ }).click();
+  // One input: the rear camera by default; "upload a file / PDF" widens it for one pick (W1-06).
+  await page.getByTestId('scan-input').setInputFiles({ name: 'invoice.png', mimeType: 'image/png', buffer: TINY_PNG });
+  // Uploaded — and no internal scan id on screen (RCV-30).
+  await expect(page.getByTestId('scan-status')).toHaveText('החשבונית הועלתה', { timeout: 60_000 });
+  await expect(page.getByTestId('scan-status')).not.toContainText('scan-');
+  await page.getByRole('button', { name: /^קראו את החשבונית/ }).click();
   await expect.poll(() => invoiceId, { timeout: 30_000 }).not.toBe('');
   return invoiceId;
 }
@@ -102,14 +105,10 @@ async function writeOcrWithDifferences(invoiceId: string, f: Fixture) {
   }
 }
 
-/** Review → adjust ("= order" on every difference) → close the receipt. */
+/** Review → Delivery Check → "everything arrived as ordered" (marks every line, then closes). */
 async function closeReceipt(page: Page) {
   await page.getByTestId('continue-adjust').click();
-  for (const card of await page.locator('.adjust-card').all()) {
-    const btn = card.getByRole('button', { name: /^= הזמנה/ });
-    if (await btn.isVisible()) await btn.click();
-  }
-  await page.getByTestId('close-receipt').click();
+  await page.getByTestId('all-arrived').click();
   await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 60_000 });
 }
 
@@ -238,7 +237,8 @@ test('390 px: a count "= order" with an engine-only finding (VAT) still gets a s
   // Nothing differs on the count: no slip button on the review.
   await expect(page.getByTestId('open-dock-slip')).toHaveCount(0);
   await page.getByTestId('continue-adjust').click();
-  await page.getByTestId('close-receipt').click();
+  // Invoice = order is not "arrived": the count still says so, in one tap.
+  await page.getByTestId('all-arrived').click();
   await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId('dock-slip')).toHaveCount(0);
 

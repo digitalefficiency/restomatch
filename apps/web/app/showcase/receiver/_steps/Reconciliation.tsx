@@ -1,65 +1,62 @@
 'use client';
 
-import { useGSAP } from '@gsap/react';
-import { gsap } from 'gsap';
-import { AlertTriangle, ArrowLeft, Check, Clock, Info, Minus, Plus, X, Zap } from 'lucide-react';
-import { useRef } from 'react';
+import { AlertTriangle, ArrowLeft, Check, Clock, Info, Plus, RefreshCw, X, Zap } from 'lucide-react';
 import { lineTotalIls } from '@/app/dashboard/orders/order-logic';
 import { useDir, useLocale, useT } from '@/lib/i18n/client';
-import { formatPercent } from '@/lib/i18n/format';
+import { formatNumber } from '@/lib/i18n/format';
 import { receiving } from '@/lib/i18n/messages/receiving';
+import { receivingDelivery } from '@/lib/i18n/messages/receiving/delivery';
 import type { Translator } from '@/lib/i18n/translate';
 import { messageTemplates, telLink, waLink } from '@/lib/messageTemplates';
 import { formatIls } from '@/lib/money';
 import type { LineStatus, ReconciliationLine, ReconciliationResult } from '../_mock';
 import { noLinePaired, reconSections, type ReconSection } from '../_state';
+import { ActionBar, PRIMARY_56, SECONDARY_48 } from './ActionBar';
 import { HebrewToggle, ItemName, Qty } from './english';
 import { StepHeader } from './SupplierSelect';
+
+/** Below this OCR confidence the review says "compare with the paper" (R-11: confidence only when low).
+ *  PLACEHOLDER: the per-restaurant `ocrReviewThreshold` is not exposed to the client yet. */
+export const LOW_READ_CONFIDENCE = 0.85;
 
 type T = Translator<typeof receiving.he>;
 
 interface Props {
   result: ReconciliationResult;
-  onQuickConfirm: () => void;
+  /** Unused: "everything arrived" lives on the Delivery Check now (RCV-01/14). Kept for the showcase wiring. */
+  onQuickConfirm?: () => void;
   onContinueAdjust: () => void;
   onRetake: () => void;
   /** Optional per-line sub-line (flag `dockPriceContext`: "your usual price"). */
   lineExtra?: (line: ReconciliationLine) => React.ReactNode;
+  eyebrow?: string;
+  /** Under the lines, above the bar (the dock-slip button). */
+  children?: React.ReactNode;
 }
 
-export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRetake, lineExtra }: Props) {
-  const ref = useRef<HTMLDivElement>(null);
+/**
+ * The invoice compared with the order — read-only facts (RCV-14): one summary
+ * sentence (no zero tiles), every line once, no client-side ₪ estimate (the ₪
+ * comes only from the engine, on the dock slip — RCV-11), and ONE primary: on
+ * to the Delivery Check, where every line is counted.
+ */
+export function Reconciliation({ result, onContinueAdjust, onRetake, lineExtra, eyebrow, children }: Props) {
   const t = useT(receiving);
+  const td = useT(receivingDelivery);
   const locale = useLocale();
   const dir = useDir();
 
-  useGSAP(
-    () => {
-      gsap.from('.kpi-card', {
-        y: 16,
-        opacity: 0,
-        stagger: 0.05,
-        duration: 0.4,
-        ease: 'power3.out',
-      });
-      gsap.from('.recon-row', {
-        y: 8,
-        opacity: 0,
-        stagger: 0.03,
-        duration: 0.35,
-        ease: 'power2.out',
-        delay: 0.2,
-      });
-    },
-    { scope: ref },
-  );
-
-  const allGood =
-    result.summary.qtyDiffCount +
-      result.summary.priceDiffCount +
-      result.summary.unorderedCount +
-      result.summary.missingCount ===
-    0;
+  const n = (v: number) => formatNumber(v, locale);
+  const s = result.summary;
+  const summary = [
+    td('delivery.review.lines', { count: n(result.lines.length) }),
+    s.qtyDiffCount + s.priceDiffCount > 0 ? td('delivery.review.differ', { count: n(s.qtyDiffCount + s.priceDiffCount) }) : null,
+    s.unorderedCount > 0 ? td('delivery.review.unordered', { count: n(s.unorderedCount) }) : null,
+    (s.pendingCount ?? 0) > 0 ? td('delivery.review.pending', { count: n(s.pendingCount ?? 0) }) : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const lowConfidence = !result.invoiceMeta.noInvoice && result.invoiceMeta.ocrConfidence < LOW_READ_CONFIDENCE;
 
   const money = (v: number) => formatIls(v, { locale, maximumFractionDigits: 2 });
 
@@ -67,7 +64,17 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
   const mismatch = noLinePaired(result.lines);
   const sections = reconSections(result.lines);
 
-  const renderCard = (line: ReconciliationLine, i: number) => (
+  const renderCard = (line: ReconciliationLine, i: number) =>
+    line.status === 'matched' ? (
+      // Invoice = order: one compact row, not a full card (RCV-14).
+      <li key={`${line.productName}-${i}`} className="recon-row flex items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-4 py-3">
+        <ItemName he={line.productName} en={line.productNameEn} className="text-base font-semibold text-ink" />
+        <span className="flex shrink-0 items-center gap-2 text-base text-muted">
+          <Qty qty={line.invoiceQty} unit={line.invoiceUnit} />
+          <StatusBadge status={line.status} t={t} />
+        </span>
+      </li>
+    ) : (
     <li
       key={`${line.productName}-${i}`}
       className={`recon-row rounded-2xl border p-4 ${cardBorder(line.status)} ${rowTone(line.status)}`}
@@ -81,33 +88,29 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
         />
         <StatusBadge status={line.status} t={t} />
       </div>
-      <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">
+      <dl className="mt-3 grid grid-cols-2 gap-2 text-base">
         <div>
-          <dt className="text-xs text-subtle">{t('steps.recon.ordered')}</dt>
+          <dt className="text-sm text-muted">{t('steps.recon.ordered')}</dt>
           <dd className="text-ink">
             <LineQty qty={line.poQty} unit={line.poUnit} price={line.poUnitPrice} money={money} />
           </dd>
         </div>
         <div>
-          <dt className="text-xs text-subtle">{t('steps.recon.invoiced')}</dt>
+          <dt className="text-sm text-muted">{t('steps.recon.invoiced')}</dt>
           <dd className="text-ink">
             <LineQty qty={line.invoiceQty} unit={line.invoiceUnit} price={line.invoiceUnitPrice} total={line.invoiceLineTotal} money={money} />
           </dd>
         </div>
       </dl>
-      {line.deltaIls > 0 ? (
-        <div className="mt-2 text-sm font-semibold text-danger">
-          <bdi dir="ltr" className="font-mono tabular-nums">+{money(line.deltaIls)}</bdi>
-        </div>
-      ) : null}
+      {line.status === 'price_diff' ? <p className="mt-2 text-sm text-muted">{td('delivery.review.priceToManager')}</p> : null}
       {lineExtra?.(line)}
-      {line.sku ? <div className="mt-1 font-mono text-xs text-subtle" dir="ltr">{line.sku}</div> : null}
+      {line.sku ? <div className="mt-1 font-mono text-sm text-muted" dir="ltr">{line.sku}</div> : null}
     </li>
   );
 
   const renderRow = (line: ReconciliationLine, i: number) => (
     <tr key={`${line.productName}-${i}`} className={`recon-row border-t border-line ${rowTone(line.status)}`}>
-      <td className="p-3 font-mono tabular-nums text-subtle text-xs whitespace-nowrap" dir="ltr">
+      <td className="p-3 font-mono tabular-nums text-muted text-sm whitespace-nowrap" dir="ltr">
         {line.sku ?? '—'}
       </td>
       <td className="p-3 font-medium text-ink">
@@ -123,55 +126,30 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
       <td className="p-3">
         <StatusBadge status={line.status} t={t} />
       </td>
-      <td className="p-3 font-mono tabular-nums">
-        {line.deltaIls > 0 ? (
-          <bdi dir="ltr" className="text-danger font-semibold">+{money(line.deltaIls)}</bdi>
-        ) : (
-          <span className="text-subtle">—</span>
-        )}
-      </td>
     </tr>
   );
 
   return (
-    <div ref={ref} dir={dir}>
+    <div dir={dir}>
       <StepHeader
-        eyebrow={t('steps.stepOf', { current: 4, total: 5 })}
+        compact
+        eyebrow={eyebrow}
         title={t('steps.recon.title')}
-        subtitle={result.invoiceMeta.noInvoice ? t('steps.recon.subtitleNoInvoice') : t('steps.recon.subtitle', {
-          number: result.invoiceMeta.invoiceNumber,
-          confidence: formatPercent(result.invoiceMeta.ocrConfidence, locale, 0),
-        })}
+        subtitle={
+          result.invoiceMeta.noInvoice
+            ? t('steps.recon.subtitleNoInvoice')
+            : td('delivery.review.invoice', { number: result.invoiceMeta.invoiceNumber })
+        }
       />
 
-      {/* KPI Header */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        <KpiTile label={t('steps.recon.matched')} value={result.summary.matchedCount} icon={<Check className="w-5 h-5" />} tone="primary" />
-        <KpiTile
-          label={t('steps.recon.different')}
-          value={result.summary.qtyDiffCount + result.summary.priceDiffCount}
-          icon={<AlertTriangle className="w-5 h-5" />}
-          tone="warn"
-        />
-        <KpiTile label={t('steps.recon.unordered')} value={result.summary.unorderedCount} icon={<Plus className="w-5 h-5" />} tone="danger" />
-        <KpiTile label={t('steps.recon.missing')} value={result.summary.missingCount} icon={<Minus className="w-5 h-5" />} tone="neutral" />
-      </div>
-
-      {/* Headline delta */}
-      {result.summary.headlineDelta > 0 ? (
-        <div className="mb-6 relative overflow-hidden rounded-2xl border border-warn/25 bg-warn/8 px-5 py-4 flex items-center gap-3">
-          <span aria-hidden className="pointer-events-none absolute inset-y-0 start-0 w-0.5 leak-gradient" />
-          <Zap className="w-5 h-5 text-warn shrink-0" />
-          <div className="flex-1">
-            <div className="text-sm font-semibold text-ink">
-              {t('steps.recon.potentialLoss')}{' '}
-              <bdi dir="ltr" className="font-mono tabular-nums text-danger">
-                {money(result.summary.headlineDelta)}
-              </bdi>
-            </div>
-            <div className="text-xs text-muted mt-0.5">{t('steps.recon.potentialLossHint')}</div>
-          </div>
-        </div>
+      <p className="mb-4 text-lg font-semibold text-ink" data-testid="recon-summary">
+        {summary}
+      </p>
+      {lowConfidence ? (
+        <p role="status" className="mb-4 flex items-start gap-2 rounded-xl border border-line bg-surface-2 px-4 py-3 text-base text-ink" data-testid="recon-low-confidence">
+          <Info className="mt-0.5 h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
+          {td('delivery.review.lowConfidence')}
+        </p>
       ) : null}
 
       {/* Supplier-contact change alerts (e.g. agent phone changed since last invoice) */}
@@ -257,7 +235,7 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
         {sections ? (
           sections.map((s) => (
             <section key={s.key} data-testid={`recon-section-${s.key}`}>
-              <h2 className="mb-2 text-xs font-semibold text-muted">
+              <h2 className="mb-2 text-sm font-semibold text-muted">
                 <SectionLabel section={s} t={t} money={money} />
               </h2>
               <ul className="space-y-2">{s.items.map(({ line, index }) => renderCard(line, index))}</ul>
@@ -271,21 +249,20 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
       {/* Desktop table */}
       <div className="hidden md:block rounded-2xl border border-line bg-surface overflow-hidden shadow-card mb-6">
         <table className="w-full text-sm" data-testid="recon-table">
-          <thead className="bg-surface-2 text-subtle text-xs uppercase tracking-wider">
+          <thead className="bg-surface-2 text-muted text-sm ltr:uppercase ltr:tracking-wider ltr:text-xs">
             <tr>
               <th className="text-start p-3 font-semibold">{t('steps.recon.colSku')}</th>
               <th className="text-start p-3 font-semibold">{t('steps.recon.colProduct')}</th>
               <th className="text-start p-3 font-semibold">{t('steps.recon.colOrdered')}</th>
               <th className="text-start p-3 font-semibold">{t('steps.recon.colInvoiced')}</th>
               <th className="text-start p-3 font-semibold">{t('steps.recon.colStatus')}</th>
-              <th className="text-start p-3 font-semibold">{t('steps.recon.colDelta')}</th>
             </tr>
           </thead>
           {sections ? (
             sections.map((s) => (
               <tbody key={s.key} data-testid={`recon-section-${s.key}`}>
                 <tr className="border-t border-line bg-surface-2">
-                  <th colSpan={6} scope="colgroup" className="p-3 text-start text-xs font-semibold text-muted">
+                  <th colSpan={5} scope="colgroup" className="p-3 text-start text-sm font-semibold text-muted">
                     <SectionLabel section={s} t={t} money={money} />
                   </th>
                 </tr>
@@ -298,37 +275,18 @@ export function Reconciliation({ result, onQuickConfirm, onContinueAdjust, onRet
         </table>
       </div>
 
-      {/* Bottom CTAs */}
-      <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <button
-          type="button"
-          onClick={onRetake}
-          className="min-h-11 text-sm text-muted hover:text-ink underline underline-offset-4 decoration-line"
-        >
+      {children}
+
+      <ActionBar testId="recon-actions">
+        <button type="button" onClick={onRetake} className={SECONDARY_48}>
+          <RefreshCw className="h-5 w-5" aria-hidden="true" />
           {t('steps.recon.retake')}
         </button>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          {allGood && !mismatch ? (
-            <button
-              type="button"
-              onClick={onQuickConfirm}
-              className="inline-flex min-h-12 items-center justify-center gap-2 bg-gold hover:brightness-110 text-on-primary rounded-xl px-5 py-3 font-medium shadow-glow-gold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:ring-gold"
-            >
-              <Check className="w-4 h-4" strokeWidth={3} />
-              {t('steps.recon.quickConfirm')}
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={onContinueAdjust}
-            data-testid="continue-adjust"
-            className="inline-flex min-h-12 items-center justify-center gap-2 bg-primary hover:brightness-110 text-on-primary rounded-xl px-5 py-3 font-medium shadow-glow-primary transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:ring-primary"
-          >
-            {t('steps.recon.continueAdjust')}
-            <ArrowLeft className="w-4 h-4 ltr:-scale-x-100" aria-hidden="true" />
-          </button>
-        </div>
-      </div>
+        <button type="button" onClick={onContinueAdjust} data-testid="continue-adjust" className={PRIMARY_56}>
+          {t('steps.recon.continueAdjust')}
+          <ArrowLeft className="h-5 w-5 ltr:-scale-x-100" aria-hidden="true" />
+        </button>
+      </ActionBar>
     </div>
   );
 }
@@ -356,9 +314,7 @@ function SectionLabel({
       {section.totalIls !== null ? (
         <>
           {' · '}
-          <bdi dir="ltr" className="font-mono tabular-nums">
-            {money(section.totalIls)}
-          </bdi>
+          <bdi className="tabular-nums">{money(section.totalIls)}</bdi>
         </>
       ) : null}
     </>
@@ -379,7 +335,7 @@ function LineQty({
   total?: number | null;
   money: (v: number) => string;
 }) {
-  if (qty === null) return <span className="text-subtle">—</span>;
+  if (qty === null) return <span className="text-muted">—</span>;
   // The × sits between its own isolates so it reads "37.5 ליטר × ₪6.43" in
   // both directions; inside one LTR isolate with the price it drifted to the
   // far left in RTL ("× 6.43₪ 37.5 ליטר").
@@ -389,17 +345,13 @@ function LineQty({
         <Qty qty={qty} unit={unit} />
         {price !== null ? (
           <>
-            <span className="text-xs text-subtle">×</span>
-            <bdi dir="ltr" className="font-mono text-xs tabular-nums text-subtle">
-              {money(price)}
-            </bdi>
+            <span className="text-sm text-muted">×</span>
+            <bdi className="text-sm tabular-nums text-muted">{money(price)}</bdi>
           </>
         ) : null}
       </span>
       {price !== null ? (
-        <bdi dir="ltr" className="self-start font-mono tabular-nums text-ink">
-          {money(total ?? lineTotalIls(qty, price))}
-        </bdi>
+        <bdi className="self-start tabular-nums text-ink">{money(total ?? lineTotalIls(qty, price))}</bdi>
       ) : null}
     </span>
   );
@@ -443,37 +395,10 @@ const STATUS_STYLE: Record<LineStatus, { tint: string; icon: React.ReactNode }> 
 export function StatusBadge({ status, t }: { status: LineStatus; t: T }) {
   const info = STATUS_STYLE[status];
   return (
-    <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${info.tint}`}>
+    <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-sm font-medium ${info.tint}`}>
       {info.icon}
       <span>{t(`steps.status.${status}`)}</span>
     </span>
-  );
-}
-
-function KpiTile({
-  label,
-  value,
-  icon,
-  tone,
-}: {
-  label: string;
-  value: number;
-  icon: React.ReactNode;
-  tone: 'primary' | 'warn' | 'danger' | 'neutral';
-}) {
-  const tints = {
-    primary: { bg: 'bg-primary/8', border: 'border-primary/25', icon: 'text-primary', value: 'text-ink' },
-    warn: { bg: 'bg-warn/8', border: 'border-warn/25', icon: 'text-warn', value: 'text-ink' },
-    danger: { bg: 'bg-danger/8', border: 'border-danger/25', icon: 'text-danger', value: 'text-danger' },
-    neutral: { bg: 'bg-surface-2', border: 'border-line', icon: 'text-muted', value: 'text-ink' },
-  };
-  const tone_ = tints[tone];
-  return (
-    <div className={`kpi-card rounded-2xl border ${tone_.border} ${tone_.bg} p-4`}>
-      <div className={`mb-2 ${tone_.icon}`}>{icon}</div>
-      <div className="text-xs text-muted font-medium mb-1">{label}</div>
-      <div className={`text-2xl font-bold font-mono tabular-nums ${tone_.value}`}>{value}</div>
-    </div>
   );
 }
 

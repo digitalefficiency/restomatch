@@ -58,6 +58,18 @@ describe('dock slip — issues from what the receiver recorded', () => {
       'unordered',
     ]);
   });
+  it('"חסר" (missing) is short, never "rejected / damaged" — even with an old rejected condition', () => {
+    const missing = mark({ qtyReceived: 0, qtyRejected: 0, condition: 'ok', rejectReason: 'missing' });
+    expect(lineIssues(line({}), missing)).toEqual(['short', 'billedNotReceived']);
+    expect(lineIssues(line({}), { ...missing, condition: 'rejected' })).not.toContain('rejected');
+    const [l] = buildSlipLines([line({})], { [lineKey(line({}))]: missing }, []);
+    expect(l!.rejected).toBe(0);
+    expect(l!.issues).toEqual(['short', 'billedNotReceived']);
+  });
+  it('invoice = order = 10, 8 arrived: the slip says short (the leak RCV-01 could not record)', () => {
+    const l = line({ poQty: 10, invoiceQty: 10 });
+    expect(lineIssues(l, mark({ qtyReceived: 8 }))).toEqual(['short', 'billedNotReceived']);
+  });
   it('a possible duplicate alone is enough for a slip', () => {
     expect(needsSlip([], '1234')).toBe(true);
   });
