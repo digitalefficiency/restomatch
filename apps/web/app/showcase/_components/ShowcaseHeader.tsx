@@ -221,14 +221,14 @@ export function ShowcaseHeader({
             <Link
               href={cta.href}
               className={cn(
-                'inline-flex min-h-10 items-center rounded-full bg-primary px-3 text-sm font-semibold text-on-primary hover:brightness-110 sm:px-4',
+                'inline-flex min-h-10 [@media(pointer:coarse)]:min-h-11 items-center rounded-full bg-primary px-3 text-sm font-semibold text-on-primary hover:brightness-110 sm:px-4',
                 focus,
               )}
             >
               <span className="sm:hidden">{cta.short}</span>
               <span className="hidden sm:inline">{cta.label}</span>
             </Link>
-            <LocaleSwitcher className="min-h-10" />
+            <LocaleSwitcher />
           </div>
         </div>
       </header>
