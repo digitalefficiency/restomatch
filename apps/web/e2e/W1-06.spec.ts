@@ -13,15 +13,15 @@ import { e2eSql, loginViaMagicLink } from './helpers';
 
 const RECEIVER = 'receiver@kfar-hazeitim.test';
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } as const;
-/** The receiver signs in once for the file (magic links are rate-limited per address). */
-const RECEIVER_STATE = 'test-results/.auth/receiver-w106.json';
-test.use({ ...PHONE, storageState: RECEIVER_STATE });
+test.use(PHONE);
 
+/** The receiver signs in once for the file (magic links are rate-limited per address). */
+let receiverCookies: Awaited<ReturnType<import('@playwright/test').BrowserContext['cookies']>> = [];
 test.beforeAll(async ({ browser }) => {
   const ctx = await browser.newContext({ baseURL: test.info().project.use.baseURL });
   const page = await ctx.newPage();
   await loginViaMagicLink(page, RECEIVER, '/dashboard/receiving');
-  await ctx.storageState({ path: RECEIVER_STATE });
+  receiverCookies = await ctx.cookies();
   await ctx.close();
 });
 
@@ -182,6 +182,7 @@ test.beforeEach(async ({ page }) => {
     { name: 'rm_locale', value: 'he', url },
     { name: 'rm_cookie_consent', value: 'necessary', url },
   ]);
+  await page.context().addCookies(receiverCookies);
 });
 
 test('invoice 10 = order 10, 8 arrived: recorded as qty_received 8 in ≤4 taps; no signed URL kept as evidence', async ({ page }) => {
