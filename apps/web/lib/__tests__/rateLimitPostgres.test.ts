@@ -12,6 +12,15 @@ import { checkRateLimit } from '@restomatch/api';
 const URL = process.env.DATABASE_URL ?? 'postgres://postgres:postgres@localhost:5432/restomatch_test';
 const raw = postgres(URL, { max: 1, prepare: false, onnotice: () => {} });
 const PREFIX = `rl-test-${process.pid}`;
+// Limits use fixed windows keyed by floor(now / windowSec). A sequence of checks
+// that straddles a window boundary lands in two windows, so the later count
+// restarts at 1. The slow-connect test spends ~2 s per sequence and crossed a
+// minute boundary in about 3% of runs. Every sequence that asserts counts within
+// one window pins the clock it buckets by.
+const frozenNow = () => {
+  const t = Date.now();
+  return () => t;
+};
 
 let silent: Server;
 let silentPort = 0;
@@ -43,7 +52,7 @@ describe('PostgresRateLimitStore', () => {
   it('login lockout stays as strict: the limit+1-th attempt in a window is blocked', async () => {
     const { PostgresRateLimitStore, LOGIN_EMAIL_LIMIT } = await import('../rateLimit');
     const store = new PostgresRateLimitStore(createDb(URL));
-    const opts = { ...LOGIN_EMAIL_LIMIT, prefix: `${PREFIX}:login` };
+    const opts = { ...LOGIN_EMAIL_LIMIT, prefix: `${PREFIX}:login`, now: frozenNow() };
     let last = await checkRateLimit(store, 'owner@x.test', opts);
     for (let i = 1; i < LOGIN_EMAIL_LIMIT.limit; i++) last = await checkRateLimit(store, 'owner@x.test', opts);
     expect(last).toMatchObject({ allowed: true, count: LOGIN_EMAIL_LIMIT.limit, remaining: 0 });
@@ -103,7 +112,7 @@ describe('enforceRateLimit on Postgres', () => {
     const warn = vi.spyOn(console, 'warn');
     try {
       const rl = await import('../rateLimit');
-      const opts = { limit: 1, windowSec: 60, prefix: `${PREFIX}:cold` };
+      const opts = { limit: 1, windowSec: 60, prefix: `${PREFIX}:cold`, now: frozenNow() };
       expect(await rl.enforceRateLimit('first@x.test', opts)).toMatchObject({ allowed: true, count: 1 });
       expect(await rl.enforceRateLimit('first@x.test', opts)).toMatchObject({ allowed: false, count: 2 });
       expect(warn).not.toHaveBeenCalledWith(expect.stringMatching(/failing open/), expect.anything());
@@ -129,7 +138,7 @@ describe('enforceRateLimit on Postgres', () => {
       },
     };
     const store = new PostgresRateLimitStore(slowToConnect as never);
-    const opts = { limit: 1, windowSec: 60, prefix: `${PREFIX}:slow` };
+    const opts = { limit: 1, windowSec: 60, prefix: `${PREFIX}:slow`, now: frozenNow() };
     expect(await checkRateLimit(store, 'slow@x.test', opts)).toMatchObject({ allowed: true, count: 1 });
     expect(await checkRateLimit(store, 'slow@x.test', opts)).toMatchObject({ allowed: false });
   }, 10_000);
@@ -141,9 +150,12 @@ describe('password-login limit counts only FAILED attempts (demo: many logins in
     const prev = process.env.DATABASE_URL;
     process.env.DATABASE_URL = URL;
     vi.resetModules();
+    // enforceLoginLimit buckets by Date.now(): freeze Date only (timers and I/O stay real).
+    vi.useFakeTimers({ toFake: ['Date'] });
     try {
       await fn(await import('../rateLimit'));
     } finally {
+      vi.useRealTimers();
       process.env.DATABASE_URL = prev;
       vi.resetModules();
     }
