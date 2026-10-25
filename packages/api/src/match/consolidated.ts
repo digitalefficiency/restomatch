@@ -15,6 +15,7 @@ import {
   type Database,
 } from '@restomatch/db';
 import {
+  resolveTolerances,
   runMatch,
   unitConversionFactor,
   type Discrepancy,
@@ -268,15 +269,71 @@ export function claimableIls(
   return claimSplit(findings, invoiceTotalInclVat).totalIls;
 }
 
-/** A delivery-note number in free text: `ת.מ. 61036` (Hebrew) or `DN 61036`. */
-export function deliveryNoteNumberIn(text: string | null | undefined): string | null {
+/** Bidi / direction marks an RTL invoice may carry between tokens. */
+const BIDI_MARKS = /[‎‏‪-‮⁦-⁩]/g;
+/** A delivery-note prefix: `ת.מ.` / `ת.מ:` / `תעודת משלוח (מס׳)` / `תעודות משלוח` / `DN`, with `#` / `:` after it. */
+const NOTE_PREFIX = String.raw`(?:תעודו?ת\s+משלוח|ת\.\s?מ\.?|\bDN\.?)\s*(?:מס(?:פר|['׳])?\s*)?[.:#]*\s*`;
+const NOTE_REF = new RegExp(`${NOTE_PREFIX}(\\d+)`, 'gi');
+/** After a number: a separator (or just whitespace), an optional repeated prefix, the next number. */
+const NEXT_TOKEN = new RegExp(
+  String.raw`^(?<sp>\s*)(?:(?<range>[-–—]|עד|to)|(?<list>[,،;/+&·|]|and|וגם|ו-?))?\s*(?<pre>${NOTE_PREFIX})?(?<n>\d+)(?<tail>[./-](?<t2>\d{1,2})(?!\d))?`,
+  'i',
+);
+/** `24/10`, `03.10.26`, `2026-10-24`: a day (or a year) then a month — a date, not a note. */
+const isDate = (n: string, month: string | undefined) =>
+  month != null && Number(month) >= 1 && Number(month) <= 12 && ((Number(n) >= 1 && Number(n) <= 31) || /^(?:19|20)\d\d$/.test(n));
+
+/**
+ * The single delivery note a ריכוז line bills, read against the period's candidate
+ * note numbers — or null, when it bills several (a list / range: the pool) or none
+ * this cross-match knows. A number after a separator is a NOTE when it is a candidate
+ * — as written, or completed as a suffix of the first (`61036/37` → 61037) — and
+ * otherwise a quantity, amount, code or date (`+ 2 יח׳`, `+ 1,500 גרם`, `/ 7290000066318`,
+ * `, 24/10`), the line staying on its note. A range (`61036-43`, `61036 עד ת.מ. 61043`)
+ * spanning candidate notes is the pool; any other candidate note named on the line
+ * (`ת.מ. 61036 + 2 יח׳, ת.מ. 61037`) makes it a list too. When in doubt, the pool — it
+ * never invents ₪ (see the pooled amount check).
+ */
+export function deliveryNoteNumberIn(
+  text: string | null | undefined,
+  candidates: ReadonlySet<string> | readonly string[],
+): string | null {
   if (!text) return null;
-  // A RANGE ("ת.מ. 61036-61043", "61036 עד 61043") is a month line: it bills the pool.
-  if (/(?:ת\.\s?מ\.?|\bDN)\s*#?\s*\d+\s*(?:[-–—]|עד|to)\s*\d+/i.test(text)) return null;
-  // So is a LIST ("ת.מ. 61036, 61037, 61038" / "61036 ו-61037").
-  if (/(?:ת\.\s?מ\.?|\bDN)\s*#?\s*\d+\s*(?:[,،;/]|ו-?)\s*\d+/i.test(text)) return null;
-  const m = /ת\.\s?מ\.?\s*(\d+)/.exec(text) ?? /\bDN\s*#?\s*(\d+)/i.exec(text);
-  return m ? m[1]! : null;
+  const known = candidates instanceof Set ? (candidates as ReadonlySet<string>) : new Set(candidates as readonly string[]);
+  const t = text.replace(BIDI_MARKS, '').replace(/＋/g, '+').replace(/&amp;/gi, '&');
+  const refs = [...t.matchAll(NOTE_REF)];
+  const first = refs[0];
+  if (!first) return null;
+  const n1 = first[1]!;
+  /** A following number as a note number of the first's shape (leading zeros, suffix completion). */
+  const asNote = (n: string) =>
+    n.length > n1.length ? n.replace(/^0+/, '').padStart(n1.length, '0') : n1.slice(0, n1.length - n.length) + n;
+  const otherNote = (n: string) => n !== n1 && known.has(n);
+  /** A following number names another note: as written, or in the first's shape. */
+  const namesNote = (n: string) => otherNote(n) || otherNote(asNote(n));
+  // Another candidate note named with its own prefix anywhere on the line → a list.
+  if (refs.slice(1).some((r) => namesNote(r[1]!))) return null;
+  // The chain right after the first number: `+ 2 + 61037`, `, 37, 38`, `61036 61037`.
+  let rest = t.slice(first.index! + first[0].length);
+  for (let i = 0; i < 12; i++) {
+    const m = NEXT_TOKEN.exec(rest);
+    const g = m?.groups;
+    if (!m || !g) break;
+    const separated = !!(g.range || g.list || g.pre);
+    if (!separated && !g.sp) break;
+    if (isDate(g.n!, g.t2)) break; // a date ends the chain
+    const n2 = asNote(g.n!);
+    if (g.range) {
+      const lo = Number(n1);
+      const hi = Number(n2);
+      if (hi > lo && [...known].some((k) => k.length === n1.length && Number(k) > lo && Number(k) <= hi)) return null;
+      break;
+    }
+    if (namesNote(g.n!)) return null;
+    if (!separated) break; // whitespace then a non-note number: description
+    rest = rest.slice(m[0].length);
+  }
+  return known.has(n1) ? n1 : null;
 }
 
 const productKey = (l: { productId: string | null; supplierSku?: string | null; poLineId?: string | null; unit: string }) =>
@@ -346,6 +403,8 @@ export function buildConsolidatedProposal(args: {
     qtyReceived: number;
     pricedQty: number;
     pricedP4: number; // Σ qty × price, in price units (1/100 agora) · qty — no agora rounding of the price
+    /** The priced quantities at each price (price units), for the pooled bounds. */
+    priced: Array<{ qty: number; p4: number }>;
   };
   const groups = new Map<string, Group>();
   /** A note line's group key and its qty / price in the group's unit (kg↔g, l↔ml; else its own group). */
@@ -382,11 +441,13 @@ export function buildConsolidatedProposal(args: {
           qtyReceived: 0,
           pricedQty: 0,
           pricedP4: 0,
+          priced: [],
         } satisfies Group);
       g.qtyReceived += qty;
       if (p4 != null) {
         g.pricedQty += qty;
         g.pricedP4 += p4 * qty;
+        g.priced.push({ qty, p4 });
       }
       groups.set(gk, g);
     }
@@ -463,13 +524,32 @@ export function buildConsolidatedProposal(args: {
     [...lineGroups.entries()].filter(([gk]) => !gk.startsWith(`${POOL}|`)).map(([gk, l]) => [l.id, gk.slice(0, gk.indexOf('|'))]),
   );
   // A pooled product is billed as one month's total against many notes: compare
-  // AMOUNTS (billed Σ line totals vs Σ received × PO price, in agorot) instead of the
-  // engine's per-unit price check, whose 2% / ₪5 tolerance on a monthly AVERAGE
-  // price would hide (or invent) a difference. Units billed beyond what was
-  // received stay the engine's QTY_OVER (at the billed price) — not counted twice.
-  // When the month's amounts say the product was NOT billed above what was delivered,
-  // that decides: no QTY_OVER / price finding on it (32 @ ₪6.00 = 30 @ ₪6.40 = ₪192).
-  // Only products the amount check could compare replace the engine's price finding.
+  // AMOUNTS (billed Σ line totals vs what was received, in agorot) instead of the
+  // engine's per-unit price check on a monthly AVERAGE price. Units billed beyond
+  // what was received stay the engine's QTY_OVER (at the billed price) — not counted
+  // twice. When the month's amounts say the product was NOT billed above what was
+  // delivered, that decides: no QTY_OVER / price finding on it (32 @ ₪6.00 = 30 @ ₪6.40).
+  //
+  // The pool never invents ₪: which of its notes a pooled line bills is unknown, so
+  // the billed q units are compared with the MOST they could be worth (the dearest
+  // q units received) for a higher price, and the LEAST (the cheapest) for a lower
+  // one — a cheaper note the line may not bill (an edge-day note, another week)
+  // never lowers the price expected. A product with any unpriced quantity gets no
+  // pooled price finding at all (its price is unknown), and the difference must
+  // clear the restaurant's price tolerance, per unit, as the engine's does.
+  const tolerances = resolveTolerances(args.base.tolerances);
+  /** Σ price × qty (price units · qty) of the first q units, dearest or cheapest first. */
+  const boundP4 = (priced: Group['priced'], q: number, dearest: boolean) => {
+    let left = q;
+    let total = 0;
+    for (const s of [...priced].sort((a, b) => (dearest ? b.p4 - a.p4 : a.p4 - b.p4))) {
+      const take = Math.min(left, s.qty);
+      total += take * s.p4;
+      left -= take;
+      if (left <= 0) break;
+    }
+    return total;
+  };
   const pooled = paired.filter(([, g]) => g.bucket === POOL);
   const pooledPoLines = new Set<string>(); // compared: the amount check replaces the engine's PRICE_*
   const notAboveDelivered = new Set<string>(); // billed ≤ delivered: no QTY_OVER / PRICE_* at all
@@ -477,31 +557,39 @@ export function buildConsolidatedProposal(args: {
   for (const [gk, g] of pooled) {
     const il = lineGroups.get(gk)!;
     const factor = convFactor(il.unit, g.unit);
-    const avgP4 = g.pricedQty > 0 ? g.pricedP4 / g.pricedQty : null;
-    if (factor == null || avgP4 == null) continue;
+    if (factor == null || g.pricedQty <= 0) continue;
     const billedQty = il.qtyBilled * factor;
     const q = Math.min(billedQty, g.qtyReceived);
     if (q <= 0 || billedQty <= 0) continue;
     pooledPoLines.add(g.poLineId);
-    if (g.pricedQty >= g.qtyReceived && ag(il.lineTotal) <= Math.round(g.pricedP4 / 100)) {
+    // An unpriced delivered quantity: the price of what is billed is unknown.
+    if (g.pricedQty < g.qtyReceived) continue;
+    if (ag(il.lineTotal) <= Math.round(g.pricedP4 / 100)) {
       notAboveDelivered.add(g.poLineId);
       continue;
     }
     const billedOnQAg = Math.round((ag(il.lineTotal) * q) / billedQty);
-    const expectedAg = Math.round((q * avgP4) / 100);
+    const highAg = Math.round(boundP4(g.priced, q, true) / 100);
+    const lowAg = Math.round(boundP4(g.priced, q, false) / 100);
+    const expectedAg = billedOnQAg > highAg ? highAg : billedOnQAg < lowAg ? lowAg : null;
+    if (expectedAg == null) continue;
     const deltaAg = billedOnQAg - expectedAg;
-    if (deltaAg === 0) continue;
+    // The engine's price tolerance, on the per-unit prices (evaluatePrice's rule).
+    const expectedUnit = expectedAg / 100 / q;
+    const unitDiff = Math.abs(deltaAg) / 100 / q;
+    const pct = expectedUnit > 0 ? unitDiff / expectedUnit : 1;
+    if (pct <= tolerances.pricePercent && unitDiff <= tolerances.priceAbsolute) continue;
     pooledFindings.push({
       type: deltaAg > 0 ? 'PRICE_HIGHER' : 'PRICE_LOWER',
-      severity: deltaAg > 0 ? 'warn' : 'info',
+      severity: deltaAg < 0 ? 'info' : pct >= tolerances.blockPricePercent ? 'block' : 'warn',
       productId: g.productId,
       poLineId: g.poLineId,
       grLineId: g.grLineId,
       invoiceLineId: il.id,
-      expected: Math.round(avgP4) / 10_000,
+      expected: Math.round(expectedAg * 100 / q) / 10_000,
       actual: Math.round((billedOnQAg / q) * 100) / 10_000,
       deltaAmount: ils(Math.abs(deltaAg)),
-      toleranceUsed: 'pooled ריכוז: billed amount vs Σ received × PO price (agorot)',
+      toleranceUsed: `pooled ריכוז: billed amount vs the received units' bound (agorot); price ±${tolerances.pricePercent * 100}% or ₪${tolerances.priceAbsolute}`,
     } as Discrepancy);
   }
   // Billed twice: a note this invoice bills that another invoice already bills —
@@ -1055,11 +1143,16 @@ export async function consolidatedProposal(
     .select({ id: invoiceLines.id, d: invoiceLines.rawDescription, dEn: invoiceLines.rawDescriptionEn })
     .from(invoiceLines)
     .where(eq(invoiceLines.invoiceId, invoiceId));
-  const invoiceLineNotes = new Map<string, string>();
-  for (const l of lineRows) {
-    const n = deliveryNoteNumberIn(l.d) ?? deliveryNoteNumberIn(l.dEn);
-    if (n) invoiceLineNotes.set(l.id, n);
-  }
+  /** Line id → the note it bills, read against the window's candidate notes. */
+  const lineNotesFor = (notes: DeliveryNoteData[]) => {
+    const candidates = new Set(notes.map((n) => n.number).filter((x): x is string => !!x));
+    const out = new Map<string, string>();
+    for (const l of lineRows) {
+      const n = deliveryNoteNumberIn(l.d, candidates) ?? deliveryNoteNumberIn(l.dEn, candidates);
+      if (n) out.set(l.id, n);
+    }
+    return out;
+  };
 
   // Names for products billed but on no delivery note.
   const invoiceProductIds = [
@@ -1082,7 +1175,7 @@ export async function consolidatedProposal(
       periodEnd: period.end,
       base: built.input,
       notes,
-      invoiceLineNotes,
+      invoiceLineNotes: lineNotesFor(notes),
       productNames,
     });
 
