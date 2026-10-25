@@ -187,6 +187,9 @@ export const approvalsRouter = router({
           invoiceId: matchRuns.invoiceId,
           // Why-line facts (approvals-06): what was billed, against which order.
           invoiceLineId: discrepancies.invoiceLineId,
+          // The line's own text: the card's name when the line has no catalog product.
+          lineDescription: invoiceLines.rawDescription,
+          lineDescriptionEn: invoiceLines.rawDescriptionEn,
           qtyBilled: invoiceLines.qtyBilled,
           billedUnit: invoiceLines.unit,
           qtyOrdered: poLines.qtyOrdered,
