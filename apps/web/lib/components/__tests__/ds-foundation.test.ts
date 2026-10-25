@@ -21,8 +21,17 @@ import { formatDateField, monthGrid, normalizeDecimal, parseDateInput, parseMone
 // Loosely typed createElement: two @types/react majors are hoisted in the workspace (STATE.md).
 const h = createElement as unknown as (type: unknown, props?: Record<string, unknown> | null, ...children: unknown[]) => ReactElement;
 const render = (el: ReactElement, locale: Locale = 'he') => renderToStaticMarkup(h(I18nProvider, { locale }, el));
-/** Text content of a rendered fragment (entities decoded enough for ₪ strings). */
-const textOf = (html: string) => html.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ');
+/** Text content of a rendered fragment: characters outside tags (entities decoded enough for ₪ strings). */
+function textOf(html: string): string {
+  let out = '';
+  let inTag = false;
+  for (const ch of html) {
+    if (ch === '<') inTag = true;
+    else if (ch === '>') inTag = false;
+    else if (!inTag) out += ch;
+  }
+  return out.split('&nbsp;').join('\u00A0');
+}
 
 const VALUES = [0, 0.5, 1, 7.5, 12.34, 99.99, 104.8, 522.6, 575, 759.54, 1000, 1240, 1759.5, 3571, 13474, 99999.99, 125050.5, 1234567.89, 0.01, 42];
 
@@ -209,6 +218,16 @@ describe('component contracts', () => {
     expect(render(h(MetricTile, { label: 'x', value: '1' }))).toMatch(/data-num="true" class="[^"]*text-right/);
     const { MoneyInput } = await import('../form/MoneyInput');
     expect(render(h(MoneyInput, {}))).toMatch(/<input[^>]*class="[^"]*text-right/);
+  });
+
+  it('LinkButton only renders safe hrefs', async () => {
+    const { safeHref } = await import('../Button');
+    expect(safeHref('/dashboard/orders/1')).toBe('/dashboard/orders/1');
+    expect(safeHref('?density=compact')).toBe('?density=compact');
+    expect(safeHref('https://restomatch.co.il')).toBe('https://restomatch.co.il');
+    expect(safeHref('javascript:alert(1)')).toBe('#');
+    expect(safeHref(' JavaScript:alert(1)')).toBe('#');
+    expect(safeHref('//evil.example')).toBe('#');
   });
 
   it('creep steps flip to white text from step 4', () => {

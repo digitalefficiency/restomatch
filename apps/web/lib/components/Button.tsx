@@ -174,6 +174,23 @@ export function Button({
   );
 }
 
+const SAFE_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:']);
+
+/**
+ * Only same-origin paths ("/…", "?…", "#…") and http(s)/mailto/tel URLs are
+ * rendered; anything else (e.g. a `javascript:` URL built from user input)
+ * becomes "#". Hrefs are often assembled from form values.
+ */
+export function safeHref(href: string): string {
+  const h = href.trim();
+  if (/^[/?#]/.test(h) && !h.startsWith('//')) return h;
+  try {
+    return SAFE_PROTOCOLS.has(new URL(h).protocol) ? h : '#';
+  } catch {
+    return '#';
+  }
+}
+
 /**
  * A navigation link styled as a Button. Use instead of `<Link><Button/></Link>`
  * (a button nested in a link is two interactive elements — invalid HTML and a
@@ -195,7 +212,7 @@ export function LinkButton({
   children: React.ReactNode;
 } & Omit<React.AnchorHTMLAttributes<HTMLAnchorElement>, 'href'>) {
   return (
-    <Link href={href} className={cn(base, variants[variant], sizes[size], fullWidth && 'w-full', className)} {...rest}>
+    <Link href={safeHref(href)} className={cn(base, variants[variant], sizes[size], fullWidth && 'w-full', className)} {...rest}>
       {icon}
       {children}
       {iconEnd}
