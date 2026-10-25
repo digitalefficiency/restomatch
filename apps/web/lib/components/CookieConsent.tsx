@@ -4,46 +4,48 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Cookie } from 'lucide-react';
-import { getConsentChoice, setConsentChoice, type ConsentChoice } from '@/lib/cookieConsent';
+import { consentPlacement, getConsentChoice, setConsentChoice, type ConsentChoice } from '@/lib/cookieConsent';
 import { useT } from '@/lib/i18n/client';
 import { marketing } from '@/lib/i18n/messages/marketing';
 
 /**
- * Cookie-consent banner (E.3). Appears on first visit until the visitor makes a
- * choice; the choice is stored in a first-party cookie and the banner does not
- * reappear after reload. Strictly-necessary cookies (Auth.js session/CSRF) are
- * always active and are disclosed in the cookie policy; analytics stay off until
- * "accept all".
+ * Cookie-consent banner (E.3; a11y-12). Shown until the visitor makes a choice;
+ * the choice is a first-party cookie, so it does not reappear after reload.
+ * Strictly-necessary cookies (Auth.js session/CSRF) are always active and are
+ * disclosed in the cookie policy; analytics stay off until "accept all".
+ *
+ * - A labelled `region` (not a dialog, not a live region), rendered FIRST in
+ *   <body> by the root layout, so it is the first stop in the focus order.
+ * - Esc anywhere inside it = "רק חיוניות" (the safe, reversible default).
+ * - Inside the app and on auth / portal routes it is an inline strip at the
+ *   top of the page (never over a form, the bottom nav or a field CTA); on
+ *   marketing pages a floating card that publishes its height as `--consent-h`
+ *   and waits until the page's `[data-keep-clear]` CTA is clear.
+ *
+ * `decided` comes from the server (the consent cookie), so the inline strip
+ * renders in the first paint and never shifts the layout.
  */
-export function CookieConsent() {
+export function CookieConsent({ decided = false }: { decided?: boolean }) {
   const t = useT(marketing);
-  // Start hidden; decide after mount so SSR/CSR markup matches and we can read
-  // the existing cookie.
-  const [visible, setVisible] = useState(false);
-  // Measured before it's shown: if it would cover the page's primary CTA
-  // ([data-keep-clear], e.g. the landing hero button on a small phone), it waits
-  // until the visitor scrolls that CTA clear. Non-essential cookies stay off
-  // until a choice is made, so showing it a moment later changes nothing.
+  const pathname = usePathname();
+  const placement = consentPlacement(pathname);
+  const [visible, setVisible] = useState(!decided);
+  // Floating only: measured before it's shown — if it would cover the page's
+  // primary CTA ([data-keep-clear]), it waits until that CTA is scrolled clear.
   const [shown, setShown] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const pathname = usePathname();
 
   useEffect(() => {
-    if (getConsentChoice() === null) setVisible(true);
+    setVisible(getConsentChoice() === null);
   }, []);
 
-  // While shown, reserve the banner's height at the bottom of the page so it
-  // never sits on top of content for good (e.g. the landing's primary CTA on a
-  // phone): everything can scroll clear of it.
   useEffect(() => {
     const el = ref.current;
-    if (!visible || !el) return;
-    // Re-evaluated per page (the banner lives in the root layout) and on resize.
+    if (!visible || placement !== 'floating' || !el) return;
     const clear = () => {
       const keep = document.querySelector('[data-keep-clear]');
       return !keep || keep.getBoundingClientRect().bottom <= window.innerHeight - el.offsetHeight;
     };
-    // Decided afresh on each page; once shown it stays (no flicker while scrolling).
     setShown(clear());
     const check = () => {
       if (clear()) setShown(true);
@@ -54,71 +56,124 @@ export function CookieConsent() {
       window.removeEventListener('scroll', check);
       window.removeEventListener('resize', check);
     };
-  }, [visible, pathname]);
+  }, [visible, placement, pathname]);
 
+  // Floating and shown: reserve its height at the bottom of the page and publish
+  // it as --consent-h (bottom-anchored app UI and scroll-padding add it).
   useEffect(() => {
     const el = ref.current;
-    if (!shown || !el) return;
+    if (!shown || placement !== 'floating' || !el) return;
+    const root = document.documentElement;
     const body = document.body;
     const prev = body.style.paddingBottom;
     const ro = new ResizeObserver(() => {
       body.style.paddingBottom = `${el.offsetHeight}px`;
+      root.style.setProperty('--consent-h', `${el.offsetHeight}px`);
     });
     ro.observe(el);
     return () => {
       ro.disconnect();
       body.style.paddingBottom = prev;
+      root.style.setProperty('--consent-h', '0px');
     };
-  }, [shown]);
+  }, [shown, placement]);
 
   function choose(choice: ConsentChoice) {
     setConsentChoice(choice);
-    setShown(false); // releases the reserved bottom padding
+    setShown(false);
     setVisible(false);
   }
 
   if (!visible) return null;
 
+  const link = (
+    <Link href="/cookies" className="whitespace-nowrap text-primary underline hover:no-underline">
+      {t('cookie.link')}
+    </Link>
+  );
+  const buttons = (
+    <div className="flex shrink-0 gap-2">
+      <button
+        type="button"
+        onClick={() => choose('necessary')}
+        className="min-h-10 flex-1 rounded-control border border-line-strong bg-surface px-4 text-sm font-medium text-ink transition-colors duration-micro hover:bg-surface-2 sm:flex-none"
+      >
+        {t('cookie.necessary')}
+      </button>
+      <button
+        type="button"
+        onClick={() => choose('all')}
+        className="min-h-10 flex-1 rounded-control bg-primary-bold px-4 text-sm font-semibold text-on-bold transition-colors duration-micro hover:bg-primary-bold-hover sm:flex-none"
+      >
+        {t('cookie.all')}
+      </button>
+    </div>
+  );
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      choose('necessary');
+    }
+  };
+
+  if (placement === 'inline') {
+    // One compact row (mobile-field-19): it must not push a short auth card below the fold.
+    return (
+      <div
+        ref={ref}
+        role="region"
+        aria-label={t('cookie.label')}
+        data-consent="inline"
+        onKeyDown={onKeyDown}
+        className="border-b border-line bg-surface"
+      >
+        <div className="mx-auto flex max-w-app items-center justify-between gap-3 px-4 py-1.5">
+          <p className="min-w-0 text-xs leading-4 text-muted sm:text-sm sm:leading-5">
+            {t('cookie.short')} {link}
+          </p>
+          <div className="flex shrink-0 gap-2">
+            <button
+              type="button"
+              onClick={() => choose('necessary')}
+              className="min-h-9 whitespace-nowrap rounded-control [@media(pointer:coarse)]:min-h-11 border border-line-strong bg-surface px-2.5 text-xs font-medium text-ink transition-colors duration-micro hover:bg-surface-2 sm:px-4 sm:text-sm"
+            >
+              {t('cookie.necessary')}
+            </button>
+            <button
+              type="button"
+              onClick={() => choose('all')}
+              className="min-h-9 whitespace-nowrap rounded-control [@media(pointer:coarse)]:min-h-11 bg-primary-bold px-2.5 text-xs font-semibold text-on-bold transition-colors duration-micro hover:bg-primary-bold-hover sm:px-4 sm:text-sm"
+            >
+              {t('cookie.all')}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       ref={ref}
-      role="dialog"
-      aria-live="polite"
+      role="region"
       aria-label={t('cookie.label')}
-      className={`fixed inset-x-0 bottom-0 z-50 px-3 pb-3 sm:px-4 sm:pb-4 ${shown ? '' : 'invisible'}`}
+      data-consent="floating"
+      onKeyDown={onKeyDown}
+      className={`fixed inset-x-0 bottom-0 z-consent px-3 pb-3 sm:px-4 sm:pb-4 ${shown ? '' : 'invisible'}`}
       aria-hidden={!shown || undefined}
     >
       {/* Compact on phones (it must not cover the primary CTA); roomier from sm up. */}
-      <div className="glass mx-auto flex max-w-3xl flex-col gap-3 rounded-2xl border border-line bg-surface/95 p-3 shadow-card sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:p-5">
+      <div className="mx-auto flex max-w-3xl flex-col gap-3 rounded-overlay border border-line bg-surface p-3 shadow-e2 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:p-5">
         <div className="flex items-start gap-3">
-          <span className="mt-0.5 hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/12 text-primary sm:flex">
+          <span className="mt-0.5 hidden h-8 w-8 shrink-0 items-center justify-center rounded-control bg-primary-subtle text-primary sm:flex">
             <Cookie className="h-4 w-4" aria-hidden="true" />
           </span>
           <p className="text-xs leading-relaxed text-muted sm:text-sm">
             <span className="sm:hidden">{t('cookie.short')}</span>
-            <span className="hidden sm:inline">{t('cookie.body')}</span>{' '}
-            <Link href="/cookies" className="text-primary underline hover:no-underline">
-              {t('cookie.link')}
-            </Link>
-            .
+            <span className="hidden sm:inline">{t('cookie.body')}</span> {link}
           </p>
         </div>
-        <div className="flex shrink-0 gap-2">
-          <button
-            type="button"
-            onClick={() => choose('necessary')}
-            className="flex-1 rounded-xl border border-line bg-surface-2 px-4 py-2 text-sm sm:flex-none sm:py-2.5 font-medium text-ink transition-colors hover:border-primary/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
-          >
-            {t('cookie.necessary')}
-          </button>
-          <button
-            type="button"
-            onClick={() => choose('all')}
-            className="flex-1 rounded-xl bg-primary px-4 py-2 text-sm sm:flex-none sm:py-2.5 font-semibold text-on-primary shadow-glow-primary transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
-          >
-            {t('cookie.all')}
-          </button>
-        </div>
+        {buttons}
       </div>
     </div>
   );

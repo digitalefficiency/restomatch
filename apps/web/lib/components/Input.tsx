@@ -1,10 +1,13 @@
+import { Children, cloneElement, isValidElement, useId, type ReactElement } from 'react';
+import { OctagonAlert } from 'lucide-react';
 import { cn } from './cn';
 
-// No width here: `cn` only joins classes (no tailwind-merge), so a default
-// `w-full` would beat a caller's `w-20`. Fields are full-width unless
-// `fullWidth={false}`, in which case the caller's className sets the width.
-const fieldBase =
-  'rounded-xl border border-line-strong bg-surface px-3 py-2 text-ink placeholder-subtle transition-colors focus:border-primary/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-0 disabled:opacity-50 disabled:cursor-not-allowed';
+// No width here: fields are full-width unless `fullWidth={false}`, in which case
+// the caller's className sets the width. Focus is the global :focus-visible
+// outline (the border stays `line-strong`); `aria-invalid` turns the border danger.
+// 16 px text on coarse pointers so iOS never zooms into a field.
+export const fieldBase =
+  'rounded-control border border-line-strong bg-surface px-3 py-2 text-ink placeholder-subtle transition-colors duration-micro aria-[invalid=true]:border-danger disabled:cursor-not-allowed disabled:border-line disabled:bg-surface-2 disabled:text-subtle [@media(pointer:coarse)]:text-body';
 
 type Width = {
   /** Default true. Pass false and a `w-*` class to size the field yourself. */
@@ -37,30 +40,67 @@ export function Select({
   return <select className={cn(fieldBase, width(fullWidth), 'pe-8', className)} {...rest} />;
 }
 
-/** Label + control wrapper with consistent spacing and optional hint. */
+/**
+ * Field v2 (a11y-11, auth-21): label above, then the hint, then the control,
+ * then the error (which replaces nothing — both stay linked). The single child
+ * control gets `id`, `aria-describedby` (hint + error) and `aria-invalid`
+ * injected, so hints and errors are announced. `optional` marks the minority
+ * of fields "(רשות)" — pass the localized text.
+ */
 export function Field({
   label,
   htmlFor,
   hint,
+  error,
+  optional,
   children,
   className,
 }: {
   label: React.ReactNode;
   htmlFor?: string;
   hint?: React.ReactNode;
+  /** Inline error under the control (sets `aria-invalid`). */
+  error?: React.ReactNode;
+  /** Localized "(רשות)" / "(optional)" suffix for the label. */
+  optional?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
 }) {
-  const hintId = htmlFor ? `${htmlFor}-hint` : undefined;
+  const auto = useId();
+  const controlId = htmlFor ?? `f${auto.replace(/:/g, '')}`;
+  const hintId = hint ? `${controlId}-hint` : undefined;
+  const errorId = error ? `${controlId}-error` : undefined;
+
+  // Inject into a single control: a native input/select/textarea or a component
+  // (Input, MoneyInput, DateField…). A wrapper <div> is left alone (no duplicate ids).
+  const only = Children.count(children) === 1 ? Children.only(children) : null;
+  const el = isValidElement(only) ? (only as ReactElement<Record<string, unknown>>) : null;
+  const injectable = el && (typeof el.type !== 'string' || ['input', 'select', 'textarea'].includes(el.type));
+  const control: React.ReactNode = injectable
+    ? (cloneElement(el, {
+        id: (el.props.id as string | undefined) ?? controlId,
+        'aria-describedby':
+          [el.props['aria-describedby'] as string | undefined, hintId, errorId].filter(Boolean).join(' ') || undefined,
+        'aria-invalid': error ? true : (el.props['aria-invalid'] as boolean | undefined),
+      }) as unknown as React.ReactNode)
+    : children;
+
   return (
     <div className={className}>
-      <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-medium text-muted">
+      <label htmlFor={controlId} className="mb-1.5 block text-sm font-medium text-muted">
         {label}
+        {optional ? <span className="ms-1 font-normal text-subtle">{optional}</span> : null}
       </label>
-      {children}
       {hint ? (
-        <p id={hintId} className="mt-1 text-xs text-subtle">
+        <p id={hintId} className="-mt-0.5 mb-1.5 text-xs text-subtle">
           {hint}
+        </p>
+      ) : null}
+      {control}
+      {error ? (
+        <p id={errorId} className="mt-1.5 flex items-start gap-1.5 text-sm text-danger">
+          <OctagonAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>{error}</span>
         </p>
       ) : null}
     </div>
