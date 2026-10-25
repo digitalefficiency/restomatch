@@ -66,7 +66,6 @@ export const nav: Shape<typeof he> = {
     invoices: 'الفواتير',
     count: 'الجرد',
     dishes: 'الأطباق',
-    suppliers: 'الموردون',
     more: 'المزيد',
   },
   groups: {

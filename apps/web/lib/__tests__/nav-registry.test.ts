@@ -209,6 +209,8 @@ describe('nav per role', () => {
           (d) =>
             (d.nav === 'item' || d.nav === 'linked') &&
             canOpen(role, d) &&
+            // Owner decision: kept off this role's nav until the server-side block lands.
+            !d.navHiddenFor?.includes(role) &&
             !(d.chain === 'only' && !showChain) &&
             !(d.chain === 'single' && showChain),
         );
@@ -221,7 +223,9 @@ describe('nav per role', () => {
     expect(keysOf(viewer('bookkeeper'))).toEqual(expect.arrayContaining(['payRun', 'ledger', 'integrations', 'claims']));
     expect(keysOf(viewer('owner'))).toEqual(expect.arrayContaining(['payRun', 'ledger', 'integrations']));
     expect(keysOf(viewer('manager'))).toEqual(expect.arrayContaining(['payRun', 'ledger', 'integrations']));
-    expect(keysOf(viewer('receiver'))).toContain('ledger');
+    // Owner decision (2026-10-25): the receiver sees no supplier ledger or ₪ screens.
+    expect(keysOf(viewer('receiver'))).not.toContain('ledger');
+    expect(barItems(viewer('receiver')).map((b) => b.def.key)).not.toContain('ledger');
     for (const role of ['receiver', 'chef'] as const) {
       expect(keysOf(viewer(role))).not.toContain('payRun');
       expect(keysOf(viewer(role))).not.toContain('integrations');
@@ -249,7 +253,7 @@ describe('bottom bars', () => {
   const bar = (v: NavViewer) => barItems(v).map((b) => `${b.def.key}:${b.label}`);
 
   it('per-role sets (slot order, start → end)', () => {
-    expect(bar(viewer('receiver'))).toEqual(['home:today', 'receiving:receipts', 'ledger:suppliers']);
+    expect(bar(viewer('receiver'))).toEqual(['home:today', 'receiving:receipts']);
     expect(bar(viewer('chef'))).toEqual(['home:today', 'inventory:count', 'recipes:dishes']);
     expect(bar(viewer('manager'))).toEqual(['home:today', 'orders:orders', 'receiving:receive', 'approvals:approvals']);
     expect(bar(viewer('owner'))).toEqual(['home:home', 'approvals:approvals', 'leaks:leaks', 'orders:orders']);

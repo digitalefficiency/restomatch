@@ -31,8 +31,7 @@ export type BarLabel =
   | 'payments'
   | 'invoices'
   | 'count'
-  | 'dishes'
-  | 'suppliers';
+  | 'dishes';
 
 export type BarSlot = 1 | 2 | 3 | 4;
 

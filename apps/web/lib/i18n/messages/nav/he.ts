@@ -69,7 +69,6 @@ export const he = {
     invoices: 'חשבוניות',
     count: 'ספירה',
     dishes: 'מנות',
-    suppliers: 'ספקים',
     more: 'עוד',
   },
   groups: {

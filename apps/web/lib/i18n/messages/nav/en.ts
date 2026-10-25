@@ -65,7 +65,6 @@ export const en: Shape<typeof he> = {
     invoices: 'Invoices',
     count: 'Count',
     dishes: 'Dishes',
-    suppliers: 'Suppliers',
     more: 'More',
   },
   groups: {

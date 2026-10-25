@@ -18,7 +18,8 @@ const AXE_SOURCE = readFileSync(createRequire(import.meta.url).resolve('axe-core
 
 /** The plan's per-role bars (slot 1 → 4, then "עוד"). */
 const BARS: Record<Role, { he: string[]; en: string[] }> = {
-  receiver: { he: ['היום', 'קבלות', 'ספקים', 'עוד'], en: ['Today', 'Receipts', 'Suppliers', 'More'] },
+  // Owner decision (2026-10-25): no supplier ledger or ₪ screens for the receiver.
+  receiver: { he: ['היום', 'קבלות', 'עוד'], en: ['Today', 'Receipts', 'More'] },
   chef: { he: ['היום', 'ספירה', 'מנות', 'עוד'], en: ['Today', 'Count', 'Dishes', 'More'] },
   manager: { he: ['היום', 'הזמנות', 'קבלה', 'אישורים', 'עוד'], en: ['Today', 'Orders', 'Receive', 'Approvals', 'More'] },
   owner: { he: ['בית', 'אישורים', 'דליפות', 'הזמנות', 'עוד'], en: ['Home', 'Approvals', 'Leaks', 'Orders', 'More'] },
@@ -303,4 +304,16 @@ test('admin layout: skip link, banner, labelled nav, main', async ({ browser, ba
   await expect(page.locator('main#main-content')).toHaveCount(1);
   await expect(page.locator('main header')).toHaveCount(0);
   await page.context().close();
+});
+
+test('receiver: no supplier ledger anywhere in the nav (owner decision 2026-10-25)', async ({ browser, baseURL }) => {
+  for (const device of [PHONE, DESK]) {
+    const page = await open(browser, baseURL!, 'receiver', 'he', device);
+    await expect(page.locator('header a[href="/dashboard/suppliers/ledger"]')).toHaveCount(0);
+    if (device === PHONE) {
+      await page.getByTestId('bottom-bar').locator('button[aria-controls="dashboard-drawer"]').click();
+      await expect(page.locator('#dashboard-drawer a[href="/dashboard/suppliers/ledger"]')).toHaveCount(0);
+    }
+    await page.context().close();
+  }
 });

@@ -66,7 +66,6 @@ export const nav: Shape<typeof he> = {
     invoices: 'Счета',
     count: 'Подсчёт',
     dishes: 'Блюда',
-    suppliers: 'Поставщики',
     more: 'Ещё',
   },
   groups: {
