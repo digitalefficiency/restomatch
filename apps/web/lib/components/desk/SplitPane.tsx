@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useRef, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLocale } from '@/lib/i18n/client';
 import { cn } from '../cn';
@@ -35,10 +35,10 @@ export function SplitPane<Item>({
   itemKey: (item: Item) => string;
   /** Accessible name of the list. */
   label: string;
-  renderItem: (item: Item, selected: boolean) => ReactNode;
-  renderDetail: (item: Item) => ReactNode;
-  detailTitle: (item: Item) => ReactNode;
-  emptyDetail: ReactNode;
+  renderItem: (item: Item, selected: boolean) => React.ReactNode;
+  renderDetail: (item: Item) => React.ReactNode;
+  detailTitle: (item: Item) => React.ReactNode;
+  emptyDetail: React.ReactNode;
   /** Full-page URL of an item (Enter / Ctrl+Enter / the peek's "open full page"). */
   hrefOf?: (item: Item) => string;
   /** Called with the next few ids after a move, so detail data can be warmed. */

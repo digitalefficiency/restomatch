@@ -1,6 +1,5 @@
 'use client';
 
-import type { ReactNode } from 'react';
 import { useLocale } from '@/lib/i18n/client';
 import { formatIls } from '@/lib/money';
 import { cn } from '../cn';
@@ -38,7 +37,7 @@ export function MobileCardList<Row>({
   onRetry?: () => void;
   filtered?: boolean;
   onClearFilters?: () => void;
-  emptyAction?: ReactNode;
+  emptyAction?: React.ReactNode;
   rowActions?: (row: Row) => RowAction[];
   onOpen?: (row: Row) => void;
   caption: string;
@@ -89,7 +88,7 @@ export function MobileCardList<Row>({
       </div>
     );
 
-  const text = (c: ColumnDef<Row>, row: Row): ReactNode => {
+  const text = (c: ColumnDef<Row>, row: Row): React.ReactNode => {
     const custom = c.cell?.(row);
     if (custom !== undefined) return isCellState(custom) ? <CellStateView state={custom} /> : custom;
     const v = c.value?.(row);

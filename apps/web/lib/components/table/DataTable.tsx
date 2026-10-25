@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, ChevronsUpDown, Lock, MoreHorizontal } from 'lucide-react';
 import { useLocale } from '@/lib/i18n/client';
 import { formatDate } from '@/lib/i18n/format';
@@ -48,7 +48,7 @@ export interface DataTableProps<Row> {
   /** Filters are active: the empty state offers to clear them. */
   filtered?: boolean;
   onClearFilters?: () => void;
-  emptyAction?: ReactNode;
+  emptyAction?: React.ReactNode;
   // Batch mode
   selectable?: (row: Row) => Selectability;
   amountAgorot?: (row: Row) => number;
@@ -59,9 +59,9 @@ export interface DataTableProps<Row> {
   rowActions?: (row: Row) => RowAction[];
   rowTone?: (row: Row) => 'danger' | 'warn' | undefined;
   onOpen?: (row: Row) => void;
-  peek?: { title: (row: Row) => ReactNode; render: (row: Row) => ReactNode; href?: (row: Row) => string };
+  peek?: { title: (row: Row) => React.ReactNode; render: (row: Row) => React.ReactNode; href?: (row: Row) => string };
   /** Toolbar content before the menus (view tabs, search, filters). */
-  toolbar?: ReactNode;
+  toolbar?: React.ReactNode;
   exportMeta?: Omit<ExportMeta, 'generatedAt'>;
   className?: string;
 }
@@ -533,7 +533,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     );
   }
 
-  let bodyRows: ReactNode;
+  let bodyRows: React.ReactNode;
   if (status === 'loading') {
     bodyRows = Array.from({ length: 8 }, (_, i) => (
       <tr key={i} className={cn(ROW_H[density], COARSE, '[&>td]:border-b [&>td]:border-line')} aria-hidden>

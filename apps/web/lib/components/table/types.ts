@@ -1,5 +1,3 @@
-import type { ReactNode } from 'react';
-
 /**
  * DataTable contracts (docs/ux/IMPLEMENTATION-PLAN.md §1.2, lens-exec-desktop §3.5).
  * Money crosses into the table as integer agorot; display goes through
@@ -21,7 +19,7 @@ export interface ColumnDef<Row> {
   /** Sort value. Money columns return agorot; text returns a string; dates return epoch ms. */
   value?: (row: Row) => string | number | null | undefined;
   /** Custom cell; defaults to the formatted `value`. Return a CellState to render that state. */
-  cell?: (row: Row) => ReactNode | CellState;
+  cell?: (row: Row) => React.ReactNode | CellState;
   /** Fixed decimals for money / number columns (one precision per column, B3e). */
   decimals?: number;
   sortable?: boolean;

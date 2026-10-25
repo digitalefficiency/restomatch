@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { cn } from '../cn';
 
 /**
@@ -18,11 +18,11 @@ export function ToolbarPopover({
   disabled = false,
 }: {
   label: string;
-  icon?: ReactNode;
+  icon?: React.ReactNode;
   /** Show only the icon; `label` becomes the accessible name. */
   iconOnly?: boolean;
   disabled?: boolean;
-  children: (close: () => void) => ReactNode;
+  children: (close: () => void) => React.ReactNode;
   className?: string;
 }) {
   const [open, setOpen] = useState(false);

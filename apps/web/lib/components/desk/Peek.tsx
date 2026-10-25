@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef } from 'react';
 import Link from 'next/link';
 import { Maximize2, X } from 'lucide-react';
 import { useLocale } from '@/lib/i18n/client';
@@ -27,12 +27,12 @@ export function Peek({
   children,
 }: {
   open: boolean;
-  title: ReactNode;
+  title: React.ReactNode;
   onClose: () => void;
   fullHref?: string;
   /** Where focus goes on close; defaults to whatever had focus when it opened. */
   returnFocus?: () => HTMLElement | null | undefined;
-  children: ReactNode;
+  children: React.ReactNode;
 }) {
   const copy = deskCopy(useLocale());
   const panel = useRef<HTMLDivElement>(null);
