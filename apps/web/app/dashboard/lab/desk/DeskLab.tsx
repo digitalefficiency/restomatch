@@ -8,7 +8,19 @@ import { formatDate } from '@/lib/i18n/format';
 import { formatIls } from '@/lib/money';
 import { cn } from '@/lib/components/cn';
 import { SplitPane } from '@/lib/components/desk';
-import { DataTable, NUM_ALIGN, NumValue, ViewTabs, deskCopy, updateTableUrl, useTableUrlValue, type ColumnDef } from '@/lib/components/table';
+import {
+  DataTable,
+  NUM_ALIGN,
+  NumValue,
+  ViewTabs,
+  buildExportCsv,
+  deskCopy,
+  downloadText,
+  exportTable,
+  updateTableUrl,
+  useTableUrlValue,
+  type ColumnDef,
+} from '@/lib/components/table';
 import { labCopy } from './_copy';
 import { LAB_VIEWS, inView, labRows, type LabRow, type LabView } from './_data';
 
@@ -128,6 +140,17 @@ export function DeskLab({
   const approveRows = (ids: string[]) => {
     setApproved((s) => new Set([...s, ...ids]));
     setNotice(t.approvedToast(ids.length));
+  };
+
+  const exportSelected = (sel: LabRow[]) => {
+    const out = exportTable(columns, sel);
+    const csv = buildExportCsv(
+      { title: t.caption, period: t.period, scope: t.scope, filters: t.exportBatch(sel.length), generatedAt: new Date() },
+      deskCopy(locale).exportMeta,
+      out.columns,
+      out.rows,
+    );
+    downloadText('lab-desk-selected.csv', csv);
   };
 
   const peekBody = (r: LabRow) => {
@@ -288,13 +311,8 @@ export function DeskLab({
           selectable={(r) => (r.severity === 'block' ? { disabled: deskCopy(locale).blockReason } : true)}
           amountAgorot={(r) => r.deltaAgorot}
           batchActions={[
-            {
-              id: 'approve',
-              primary: true,
-              label: (n, sum) => t.approveBatch(n, formatIls(sum / 100, { maximumFractionDigits: 2, locale })),
-              run: (sel) => approveRows(sel.map((r) => r.id)),
-            },
-            { id: 'hold', label: (n) => t.holdBatch(n), run: () => undefined },
+            { id: 'assign', primary: true, label: (n) => t.assignBatch(n), run: (sel) => setNotice(t.assignedToast(sel.length)) },
+            { id: 'export', label: (n) => t.exportBatch(n), run: exportSelected },
           ]}
           rowActions={(r) => [
             { id: 'approve', label: t.approve, onRun: () => approveRows([r.id]) },

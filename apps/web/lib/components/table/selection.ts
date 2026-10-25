@@ -8,7 +8,11 @@ import type { Selectability } from './types';
  * - Batch actions receive only eligible rows within the cap.
  */
 
-/** R-12 default per-item bulk cap: ₪200. Owner decision still open (REVIEW-REPORT §8). */
+/**
+ * R-12 per-item cap for any ₪-moving batch: ₪200. The owner rejected bulk
+ * approval at any cap (REVIEW-REPORT §8), so no batch action may approve or
+ * pay; the cap still bounds the other batch actions callers add.
+ */
 export const DEFAULT_BULK_CAP_AGOROT = 20_000;
 
 export interface SelectionRules<Row> {

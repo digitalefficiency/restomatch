@@ -12,6 +12,6 @@ export type { TableUrlState } from './urlState';
 export { DEFAULT_BULK_CAP_AGOROT } from './selection';
 export { deskCopy } from './copy';
 export type { DeskCopy } from './copy';
-export { buildExportCsv, exportTable, formatGeneratedAt } from './exportCsv';
+export { buildExportCsv, downloadText, exportTable, formatGeneratedAt } from './exportCsv';
 export type { ExportMeta } from './exportCsv';
 export type * from './types';

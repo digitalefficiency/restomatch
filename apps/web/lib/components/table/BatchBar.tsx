@@ -15,7 +15,8 @@ export interface BatchBarAction {
 }
 
 /**
- * "N נבחרו · ₪Σ · [primary] [clear · Esc]" (RUBRIC C2). It replaces the table
+ * "N נבחרו · ₪Σ · [primary] [clear · Esc]" (RUBRIC C2). Never an approve or pay
+ * action — the owner rejected bulk approval (REVIEW-REPORT §8). It replaces the table
  * toolbar while rows are selected and stays sticky above the rows. The ₪ is
  * Σ|amount| of the rows the actions will touch; rows above the per-item cap
  * are counted but named as held back (R-12).
