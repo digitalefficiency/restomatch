@@ -276,7 +276,7 @@ function ReauthSheet() {
                 </p>
               ) : null}
               <div className="flex flex-col gap-2 sm:flex-row-reverse sm:items-center sm:justify-between">
-                <Button type="submit" variant="primary" loading={busy} disabled={!email || !password} className="min-h-[48px]">
+                <Button type="submit" variant="primary" loading={busy} disabled={!email || !password} className="min-h-[48px] w-full sm:w-auto">
                   {busy ? t('shell.session.submitting') : t('shell.session.submit')}
                 </Button>
                 <button
@@ -288,6 +288,18 @@ function ReauthSheet() {
                   {t('shell.session.magicLink')}
                 </button>
               </div>
+              {/* Shared tablets (owner decision §8): each worker has their own login.
+                  A different person goes through the full sign-in; nothing of this
+                  page's work is replayed for them. */}
+              {owner.current?.email ? (
+                <a
+                  href="/login?callbackUrl=%2Fdashboard"
+                  data-testid="reauth-other-user"
+                  className="flex min-h-[48px] items-center justify-center rounded-xl border border-line text-sm font-semibold text-ink hover:border-primary/40 hover:text-primary"
+                >
+                  {t('shell.session.otherUserLink')}
+                </a>
+              ) : null}
             </form>
           )}
         </div>

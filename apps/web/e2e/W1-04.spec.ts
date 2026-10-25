@@ -351,6 +351,8 @@ test.describe('connectivity and session layer (perf-states-08, -15)', () => {
     await expect(sheet).toBeVisible();
     await expect(sheet.getByRole('heading')).toHaveText('ההתחברות פגה');
     await expect(sheet.locator('#reauth-email')).toHaveValue(DEMO_OWNER_EMAIL);
+    // Shared tablet: another worker has an obvious way to their own sign-in.
+    await expect(sheet.getByTestId('reauth-other-user')).toHaveAttribute('href', '/login?callbackUrl=%2Fdashboard');
     expect(await axe(page), 'axe with the re-auth sheet').toEqual([]);
 
     await sheet.locator('#reauth-password').fill(PASSWORD);
