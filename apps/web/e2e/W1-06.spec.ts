@@ -49,8 +49,9 @@ async function freshPo(tag: string, opts: { dockSlip?: boolean } = {}): Promise<
     const [r] = await sql<{ id: string }[]>`select id from restaurants where name = ${DEMO_RESTAURANT_NAME} limit 1`;
     if (!r) throw new Error('demo restaurant missing from the e2e DB');
     if (opts.dockSlip !== undefined) {
+      // inventory.spec restores settings with `${text}::jsonb`, which postgres.js stores as a jsonb string.
       await sql`update restaurants
-        set settings = jsonb_set(coalesce(settings, '{}'::jsonb), '{features,dockSlip}', to_jsonb(${opts.dockSlip}::boolean), true)
+        set settings = jsonb_set(case jsonb_typeof(settings) when 'object' then settings when 'string' then (settings #>> '{}')::jsonb else '{}'::jsonb end, '{features,dockSlip}', to_jsonb(${opts.dockSlip}::boolean), true)
         where id = ${r.id}`;
     }
     const [sup] = await sql<{ id: string }[]>`select id from suppliers where restaurant_id = ${r.id} order by name limit 1`;

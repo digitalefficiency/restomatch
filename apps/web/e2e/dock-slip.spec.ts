@@ -55,7 +55,7 @@ async function setDockSlip(restaurantId: string, on: boolean) {
   try {
     await sql`
       update restaurants
-      set settings = jsonb_set(coalesce(settings, '{}'::jsonb), '{features,dockSlip}', to_jsonb(${on}::boolean), true)
+      set settings = jsonb_set(case jsonb_typeof(settings) when 'object' then settings when 'string' then (settings #>> '{}')::jsonb else '{}'::jsonb end, '{features,dockSlip}', to_jsonb(${on}::boolean), true)
       where id = ${restaurantId}`;
   } finally {
     await sql.end();
