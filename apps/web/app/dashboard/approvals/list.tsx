@@ -391,7 +391,7 @@ export function ApprovalsList({
                     <span>{decided[d.id]}</span>
                     <button
                       type="button"
-                      className="touch-target shrink-0 rounded-lg px-3 font-semibold text-ink hover:bg-surface-2"
+                      className="touch-target shrink-0 rounded-lg px-3 font-semibold text-ink hover:bg-surface-2 outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface scroll-mb-28 scroll-mt-20"
                       onClick={() => setHidden((s) => add(s, d.id))}
                     >
                       {t('card.hide')}
@@ -454,7 +454,7 @@ export function ApprovalsList({
               type="button"
               onClick={undoLast}
               disabled={reopen.isPending}
-              className="inline-flex h-12 shrink-0 items-center gap-1.5 rounded-lg px-3 font-semibold text-primary hover:bg-surface-2 disabled:opacity-50"
+              className="inline-flex h-12 shrink-0 items-center gap-1.5 rounded-lg px-3 font-semibold text-primary hover:bg-surface-2 disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface scroll-mb-28 scroll-mt-20"
               data-testid="approvals-undo-button"
             >
               <Undo2 className="h-4 w-4" aria-hidden="true" />
@@ -514,7 +514,7 @@ function DecisionCard({
         <button
           type="button"
           role="menuitem"
-          className="flex h-12 w-full items-center gap-2 px-4 text-start text-sm text-ink hover:bg-surface-2"
+          className="flex h-12 w-full items-center gap-2 px-4 text-start text-sm text-ink hover:bg-surface-2 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
           onClick={() => onDecide({ procedure: 'escalate' }, t('decision.escalated'))}
         >
           <Send className="h-4 w-4 text-subtle" aria-hidden="true" />
@@ -530,7 +530,7 @@ function DecisionCard({
         <Link
           role="menuitem"
           href={`/dashboard/invoices/${d.invoiceId}${d.invoiceLineId ? `#line-${d.invoiceLineId}` : ''}`}
-          className="flex h-12 w-full items-center gap-2 px-4 text-sm text-ink hover:bg-surface-2"
+          className="flex h-12 w-full items-center gap-2 px-4 text-sm text-ink hover:bg-surface-2 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
         >
           <FileText className="h-4 w-4 text-subtle" aria-hidden="true" />
           {t('card.fixInvoice')}
@@ -646,7 +646,7 @@ function DecisionCard({
               <button
                 type="button"
                 onClick={error.retry}
-                className="touch-target rounded-lg px-2 font-semibold underline"
+                className="touch-target rounded-lg px-2 font-semibold underline outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface scroll-mb-28 scroll-mt-20"
               >
                 {t('card.retry')}
               </button>
@@ -699,7 +699,7 @@ function Actions({
   describedBy: string;
 }) {
   const btn =
-    'inline-flex h-12 w-full items-center justify-center gap-1.5 rounded-xl px-3 text-sm font-semibold transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-45';
+    'inline-flex h-12 w-full items-center justify-center gap-1.5 rounded-xl px-3 text-sm font-semibold transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-45 outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface scroll-mb-28 scroll-mt-20';
   const primaryCls = cn(btn, 'bg-primary text-on-primary hover:brightness-95');
   const secondaryCls = cn(btn, 'border border-line-strong bg-surface text-ink hover:bg-surface-2');
   const only = actions.length === 1 ? actions[0]! : null;
@@ -841,7 +841,7 @@ function WaiveReasons({
             ref={i === 0 ? firstRef : undefined}
             disabled={busy}
             aria-pressed={code === 'other' ? other : undefined}
-            className="inline-flex min-h-12 items-center rounded-full border border-line-strong bg-surface px-4 text-sm text-ink hover:bg-surface-2 disabled:opacity-45"
+            className="inline-flex min-h-12 items-center rounded-full border border-line-strong bg-surface px-4 text-sm text-ink hover:bg-surface-2 disabled:opacity-45 outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface scroll-mb-28 scroll-mt-20"
             onClick={() =>
               code === 'other' ? setOther((o) => !o) : onPick(code, t(`reasons.${code}`))
             }
@@ -865,7 +865,7 @@ function WaiveReasons({
           <div className="flex justify-end gap-2">
             <button
               type="button"
-              className="h-12 rounded-xl px-4 text-sm text-muted hover:bg-surface"
+              className="h-12 rounded-xl px-4 text-sm text-muted hover:bg-surface outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface scroll-mb-28 scroll-mt-20"
               onClick={onCancel}
             >
               {t('reasons.cancel')}
@@ -873,7 +873,7 @@ function WaiveReasons({
             <button
               type="button"
               disabled={busy || !text.trim()}
-              className="h-12 rounded-xl border border-line-strong bg-surface px-4 text-sm font-semibold text-ink disabled:opacity-45"
+              className="h-12 rounded-xl border border-line-strong bg-surface px-4 text-sm font-semibold text-ink disabled:opacity-45 outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface scroll-mb-28 scroll-mt-20"
               onClick={() => onPick('other', text.trim())}
             >
               {t('reasons.otherConfirm')}
@@ -909,7 +909,7 @@ function MoreMenu({ t, items }: { t: T; items: Array<{ key: string; node: React.
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={t('card.more')}
-        className="inline-flex h-12 w-12 items-center justify-center rounded-xl text-muted hover:bg-surface-2 hover:text-ink sm:h-10 sm:w-10"
+        className="inline-flex h-12 w-12 items-center justify-center rounded-xl text-muted hover:bg-surface-2 hover:text-ink sm:h-10 sm:w-10 outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface scroll-mb-28 scroll-mt-20"
         onClick={() => setOpen((o) => !o)}
         data-testid="card-more"
       >
@@ -1013,7 +1013,7 @@ function OthersLane({
       className="rounded-xl border border-line bg-surface px-4 py-2 text-sm"
       data-testid="approvals-others"
     >
-      <summary className="flex min-h-12 cursor-pointer items-center gap-2 font-semibold text-ink">
+      <summary className="flex min-h-12 cursor-pointer items-center gap-2 font-semibold text-ink rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface scroll-mb-28 scroll-mt-20">
         {t('others.title')}
         <span className="font-normal text-muted">
           · <bdi className="tabular-nums">{formatNumber(others.count, locale)}</bdi> ·{' '}
@@ -1164,7 +1164,7 @@ export function FiltersDisclosure({
         aria-controls="approvals-filters"
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          'mb-3 inline-flex h-12 items-center rounded-full border px-4 text-sm font-semibold sm:hidden',
+          'mb-3 inline-flex h-12 items-center rounded-full border px-4 text-sm font-semibold sm:hidden outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface scroll-mb-28 scroll-mt-20',
           active > 0 ? 'border-primary text-primary' : 'border-line-strong text-ink',
         )}
         data-testid="approvals-filters-toggle"
