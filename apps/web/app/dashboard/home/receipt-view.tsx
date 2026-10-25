@@ -24,6 +24,7 @@ export function ReceiptView({
   t: Translator<typeof overviewHe>;
   locale: Locale;
 }) {
+  // Owner decision §8.15: numbers in tables are right-aligned in both locales (physical right, not text-end).
   const qty = (v: string | number | null) => (v == null ? '—' : formatNumber(Number(v), locale, { maximumFractionDigits: 3 }));
   return (
     <section aria-labelledby="receipt-title" data-testid="receipt-view" className="space-y-4">
@@ -52,9 +53,9 @@ export function ReceiptView({
           <thead>
             <tr className="border-b border-line text-start text-xs font-semibold text-subtle">
               <th scope="col" className="py-2 text-start">{t('board.receipt.product')}</th>
-              <th scope="col" className="py-2 text-end">{t('board.receipt.ordered')}</th>
-              <th scope="col" className="py-2 text-end">{t('board.receipt.received')}</th>
-              <th scope="col" className="py-2 text-end">{t('board.receipt.rejected')}</th>
+              <th scope="col" className="py-2 text-right">{t('board.receipt.ordered')}</th>
+              <th scope="col" className="py-2 text-right">{t('board.receipt.received')}</th>
+              <th scope="col" className="py-2 text-right">{t('board.receipt.rejected')}</th>
             </tr>
           </thead>
           <tbody>
@@ -67,9 +68,9 @@ export function ReceiptView({
                     <bdi>{name}</bdi>
                     {l.unit ? <span className="ms-1 text-xs text-muted">({l.unit})</span> : null}
                   </td>
-                  <td className="py-2 text-end tabular-nums text-muted">{qty(l.orderedQty)}</td>
-                  <td className={`py-2 text-end font-semibold tabular-nums ${short ? 'text-warn' : 'text-ink'}`}>{qty(l.qtyReceived)}</td>
-                  <td className="py-2 text-end tabular-nums text-muted">{Number(l.qtyRejected) > 0 ? qty(l.qtyRejected) : '—'}</td>
+                  <td className="py-2 text-right tabular-nums text-muted">{qty(l.orderedQty)}</td>
+                  <td className={`py-2 text-right font-semibold tabular-nums ${short ? 'text-warn' : 'text-ink'}`}>{qty(l.qtyReceived)}</td>
+                  <td className="py-2 text-right tabular-nums text-muted">{Number(l.qtyRejected) > 0 ? qty(l.qtyRejected) : '—'}</td>
                 </tr>
               );
             })}

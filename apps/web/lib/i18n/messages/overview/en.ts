@@ -105,7 +105,6 @@ export const en: Shape<typeof he> = {
     dishesTitle: 'Dishes over target',
     dishesSubtitle: 'Dishes whose food cost rose above the {target} target because an ingredient got pricier.',
     dishCause: '{ingredient} · {supplier}',
-    dishMove: 'Up {amount} per plate',
     dishCost: '{before} → {after}',
     dishesNone: 'No dish crossed its target this month ✓',
     dishesAll: 'All dishes',

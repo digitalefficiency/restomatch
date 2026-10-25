@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import { ArrowLeft, ClipboardList, UtensilsCrossed } from 'lucide-react';
 import { cn } from '@/lib/components';
-import { formatIls } from '@/lib/money';
 import { formatNumber, formatPercent } from '@/lib/i18n/format';
 import type { Locale } from '@/lib/i18n/config';
 import type { Translator } from '@/lib/i18n/translate';
@@ -28,7 +27,10 @@ async function ReceiverBoard({ caller, t, locale }: { caller: HomeCaller<'receiv
   return <ReceivingBoard rows={rows} t={t} locale={locale} />;
 }
 
-/** Chef "Today": the count tile, then dishes over their food-cost target with the cause ingredient. */
+/**
+ * Chef "Today": the count tile, then dishes over their food-cost target with the cause ingredient.
+ * Food-cost % only — no purchase or leak ₪ on staff homes (owner decision §8.6).
+ */
 export function ChefHome({ caller, t, locale, fail }: { caller: HomeCaller<'chef'>; t: T; locale: Locale; fail: Set<string> }) {
   return (
     <div className="grid gap-4 lg:grid-cols-12 lg:items-start">
@@ -129,9 +131,6 @@ async function DishesOverTarget({ caller, t, locale }: { caller: HomeCaller<'che
                 <span className="shrink-0 text-end">
                   <span className="block text-sm font-bold tabular-nums text-danger">
                     {t('chef.dishCost', { before: pct(a.beforeFoodCostBp), after: pct(a.afterFoodCostBp) })}
-                  </span>
-                  <span className="block text-xs text-muted">
-                    {t('chef.dishMove', { amount: formatIls(a.costDeltaAgorot / 100, { locale, maximumFractionDigits: 2 }) })}
                   </span>
                 </span>
               </Link>
