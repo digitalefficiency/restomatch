@@ -15,10 +15,10 @@ const PAGE = 8;
  * with server-rendered `initial`; subsequent pages are fetched with the last
  * row's createdAt as the cursor.
  */
-export function PaginatedActivityFeed({ initial }: { initial: FeedItem[] }) {
+export function PaginatedActivityFeed({ initial, pageSize = PAGE }: { initial: FeedItem[]; pageSize?: number }) {
   const [items, setItems] = useState<FeedItem[]>(initial);
   // hasMore is "maybe more": true while the last fetch returned a full page.
-  const [hasMore, setHasMore] = useState(initial.length >= PAGE);
+  const [hasMore, setHasMore] = useState(initial.length >= pageSize);
 
   const utils = trpc.useUtils();
   const [loading, setLoading] = useState(false);
@@ -29,11 +29,11 @@ export function PaginatedActivityFeed({ initial }: { initial: FeedItem[] }) {
     setLoading(true);
     try {
       const next = await utils.activity.feed.fetch({
-        limit: PAGE,
+        limit: pageSize,
         cursor: new Date(last.createdAt).toISOString(),
       });
       setItems((prev) => [...prev, ...next]);
-      setHasMore(next.length >= PAGE);
+      setHasMore(next.length >= pageSize);
     } finally {
       setLoading(false);
     }

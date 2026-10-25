@@ -316,6 +316,65 @@ describe('receiving.markGrLine and submitReceipt', () => {
   });
 });
 
+describe('a closed receipt is read-only (receiving board: "התקבל ✓")', () => {
+  async function closed(status: 'completed' | 'partial') {
+    const s = await seed();
+    const caller = callerFor({ userId: s.receiverId, restaurantId: s.restaurantId, role: 'receiver' });
+    const { receiptId } = await caller.receiving.startReceipt({ poId: s.todayPoId });
+    const lines = (await db.select().from(grLines)).filter((l) => l.grId === receiptId);
+    await caller.receiving.markGrLine({ grLineId: lines[0]!.id, qtyReceived: 10 });
+    await caller.receiving.markGrLine({ grLineId: lines[1]!.id, qtyReceived: status === 'completed' ? 5 : 3 });
+    const receipt = await caller.receiving.submitReceipt({
+      grId: receiptId,
+      signatureUrl: 'https://example.com/signature-1.png',
+    });
+    expect(receipt.status).toBe(status);
+    return { s, caller, receiptId, lines, receipt };
+  }
+
+  it.each(['completed', 'partial'] as const)('markGrLine on a %s receipt is rejected and the count is untouched', async (status) => {
+    const { caller, lines } = await closed(status);
+    await expect(caller.receiving.markGrLine({ grLineId: lines[0]!.id, qtyReceived: 99 })).rejects.toMatchObject({
+      code: 'CONFLICT',
+    });
+    const [row] = (await db.select().from(grLines)).filter((l) => l.id === lines[0]!.id);
+    expect(Number(row!.qtyReceived)).toBe(10);
+  });
+
+  it('a re-submit of a closed receipt changes nothing: status, signature and close time stay', async () => {
+    const { s, caller, receiptId, lines, receipt } = await closed('partial');
+    // Even if the line were raised behind the API's back, a re-close never flips partial → completed.
+    await db.execute(sql`update gr_lines set qty_received = 5 where id = ${lines[1]!.id}`);
+    const again = await caller.receiving.submitReceipt({
+      grId: receiptId,
+      signatureUrl: 'https://example.com/signature-2.png',
+    });
+    expect(again.status).toBe('partial');
+    expect(again.signatureUrl).toBe('https://example.com/signature-1.png');
+    expect(new Date(again.updatedAt).getTime()).toBe(new Date(receipt.updatedAt).getTime());
+    const list = await caller.receiving.todayExpectations();
+    expect(list.find((e) => e.poId === s.todayPoId)).toMatchObject({ receiptStatus: 'partial' });
+  });
+
+  it('an open receipt still takes counts (the guard is about closed receipts only)', async () => {
+    const s = await seed();
+    const caller = callerFor({ userId: s.receiverId, restaurantId: s.restaurantId, role: 'receiver' });
+    const { receiptId } = await caller.receiving.startReceipt({ poId: s.todayPoId });
+    const [line] = (await db.select().from(grLines)).filter((l) => l.grId === receiptId);
+    const updated = await caller.receiving.markGrLine({ grLineId: line!.id, qtyReceived: 4 });
+    expect(Number(updated.qtyReceived)).toBe(4);
+  });
+
+  it('a line of another restaurant stays NOT_FOUND, open or closed (no status oracle)', async () => {
+    const { lines } = await closed('completed');
+    const [other] = await db.insert(restaurants).values({ name: 'Other Bistro' }).returning();
+    const stranger = callerFor({ userId: (await db.select().from(users))[0]!.id, restaurantId: other!.id, role: 'owner' });
+    await expect(stranger.receiving.markGrLine({ grLineId: lines[0]!.id, qtyReceived: 1 })).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+  });
+});
+
 describe('receiving.registerInvoice', () => {
   it('creates an invoice row in ocr_pending state', async () => {
     const s = await seed();
