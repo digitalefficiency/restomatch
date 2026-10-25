@@ -83,8 +83,11 @@ export function InlineDocument({ poId, channel }: { poId: string; channel: 'emai
           <pre
             dir="rtl"
             lang="he"
+            // Scrolls when long: focusable so the keyboard can scroll it (axe scrollable-region-focusable).
+            tabIndex={0}
+            aria-labelledby="inline-doc-title"
             className={cn(
-              'max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-xl border p-3 font-sans text-sm leading-relaxed text-ink',
+              'max-h-80 overflow-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-primary whitespace-pre-wrap break-words rounded-xl border p-3 font-sans text-sm leading-relaxed text-ink',
               channel === 'whatsapp' ? 'border-primary/30 bg-primary/5' : 'border-line bg-surface-2',
             )}
           >
@@ -178,7 +181,8 @@ export function SupplierDocumentPreview({
                 dir="rtl"
                 lang="he"
                 role="tabpanel"
-                className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-line bg-surface-2 p-4 font-sans text-sm leading-relaxed text-ink"
+                tabIndex={0}
+                className="max-h-96 overflow-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-primary whitespace-pre-wrap break-words rounded-lg border border-line bg-surface-2 p-4 font-sans text-sm leading-relaxed text-ink"
               >
                 {tab === 'email' ? preview.data.emailText : preview.data.whatsappText}
               </pre>

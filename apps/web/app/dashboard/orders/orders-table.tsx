@@ -69,7 +69,8 @@ const SHORT_DATE: Intl.DateTimeFormatOptions = { day: '2-digit', month: '2-digit
 /**
  * Purchase-order table shared by /dashboard/orders and the supplier "orders"
  * tab. Desktop: one stretched link per row (one Tab stop, named supplier · #ref ·
- * date · ₪) plus a ⋯ menu; numbers end-aligned and tabular. Phones: cards with the
+ * date · ₪) plus a ⋯ menu; numbers physically right-aligned in both locales (owner
+ * decision) and tabular. Phones: cards with the
  * same stretched link and one inline action ("הזמן שוב"). `canReorder` shows it.
  */
 export function OrdersTable({
@@ -103,8 +104,8 @@ export function OrdersTable({
               <th scope="col" className="px-4 py-3 text-start font-medium">{t('columns.created')}</th>
               <th scope="col" className="px-4 py-3 text-start font-medium">{t('columns.status')}</th>
               <th scope="col" className="px-4 py-3 text-start font-medium">{t('columns.expectedDelivery')}</th>
-              <th scope="col" className="px-4 py-3 text-end font-medium">{t('columns.lines')}</th>
-              <th scope="col" className="px-4 py-3 text-end font-medium">{t('columns.total')}</th>
+              <th scope="col" className="px-4 py-3 text-right font-medium">{t('columns.lines')}</th>
+              <th scope="col" className="px-4 py-3 text-right font-medium">{t('columns.total')}</th>
               {canReorder ? (
                 <th scope="col" className="w-14 px-2 py-3">
                   <span className="sr-only">{t('columns.actions')}</span>
@@ -153,8 +154,8 @@ export function OrdersTable({
                   <OrderStatusBadge status={o.status} receiptStatus={o.receiptStatus} />
                 </td>
                 <td className="px-4 py-3 tabular-nums text-muted">{date(o.expectedDeliveryAt)}</td>
-                <td className="px-4 py-3 text-end tabular-nums text-muted">{formatNumber(o.lineCount, locale)}</td>
-                <td className="px-4 py-3 text-end tabular-nums text-ink">{total(o.totalEstimated)}</td>
+                <td className="px-4 py-3 text-right tabular-nums text-muted">{formatNumber(o.lineCount, locale)}</td>
+                <td className="px-4 py-3 text-right tabular-nums text-ink">{total(o.totalEstimated)}</td>
                 {canReorder ? (
                   <td className="px-2 py-1 text-end">
                     {reorderable(o) ? (

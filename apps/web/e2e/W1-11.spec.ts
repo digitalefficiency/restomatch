@@ -112,14 +112,18 @@ function tapper() {
 }
 
 async function axeSeriousOrWorse(page: Page): Promise<string[]> {
+  // Scan a settled page: a list refetch dims rows (opacity) for a moment, and
+  // contrast measured mid-fade is not what the user reads.
+  await page.waitForLoadState('networkidle').catch(() => {});
+  await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running')).catch(() => {});
   await page.addScriptTag({ content: AXE_SOURCE });
   const res = await page.evaluate(async () => {
-    const axe = (window as unknown as { axe: { run: (c: unknown, o: unknown) => Promise<{ violations: Array<{ id: string; impact: string; nodes: unknown[] }> }> } }).axe;
+    const axe = (window as unknown as { axe: { run: (c: unknown, o: unknown) => Promise<{ violations: Array<{ id: string; impact: string; nodes: Array<{ target: unknown[] }> }> }> } }).axe;
     return axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] } });
   });
   return res.violations
     .filter((v) => v.impact === 'serious' || v.impact === 'critical')
-    .map((v) => `${v.id} (${v.impact}) ×${v.nodes.length}`);
+    .map((v) => `${v.id} (${v.impact}) ×${v.nodes.length}: ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`);
 }
 
 /** In Hebrew the ₪ glyph renders to the LEFT of the first digit (DoD-4). */

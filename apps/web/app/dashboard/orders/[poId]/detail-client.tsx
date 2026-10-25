@@ -412,10 +412,10 @@ export function OrderDetail({
           <thead>
             <tr className="border-b border-line text-xs text-subtle ltr:uppercase ltr:tracking-wide">
               <th scope="col" className="px-4 py-3 text-start font-medium">{t('lineColumns.description')}</th>
-              <th scope="col" className={cn('px-4 py-3 text-end font-medium', wideCol)}>{t('lineColumns.qty')}</th>
+              <th scope="col" className={cn('px-4 py-3 text-right font-medium', wideCol)}>{t('lineColumns.qty')}</th>
               <th scope="col" className={cn('px-4 py-3 text-start font-medium', wideCol)}>{t('lineColumns.unit')}</th>
-              <th scope="col" className={cn('px-4 py-3 text-end font-medium', wideCol)}>{t('lineColumns.unitPrice')}</th>
-              <th scope="col" className="px-4 py-3 text-end font-medium">{t('lineColumns.lineTotal')}</th>
+              <th scope="col" className={cn('px-4 py-3 text-right font-medium', wideCol)}>{t('lineColumns.unitPrice')}</th>
+              <th scope="col" className="px-4 py-3 text-right font-medium">{t('lineColumns.lineTotal')}</th>
               {editable && (
                 <th scope="col" className="px-4 py-3 font-medium">
                   <span className="sr-only">{t('lineColumns.actions')}</span>
@@ -456,7 +456,7 @@ export function OrderDetail({
                       </>
                     )}
                   </td>
-                  <td className={cn('px-4 py-3 text-end tabular-nums text-muted', wideCol)}>
+                  <td className={cn('px-4 py-3 text-right tabular-nums text-muted', wideCol)}>
                     {editing ? (
                       <Input
                         type="text"
@@ -467,7 +467,7 @@ export function OrderDetail({
                         value={ld.qtyOrdered}
                         onChange={(e) => setLd({ ...ld, qtyOrdered: e.target.value })}
                         aria-label={t('lineColumns.qty')}
-                        className="w-24 text-end"
+                        className="w-24 text-right"
                       />
                     ) : (
                       qtyFmt(l.qtyOrdered)
@@ -486,7 +486,7 @@ export function OrderDetail({
                       <UnitText unit={l.unit} />
                     )}
                   </td>
-                  <td className={cn('px-4 py-3 text-end tabular-nums text-ink', wideCol)}>
+                  <td className={cn('px-4 py-3 text-right tabular-nums text-ink', wideCol)}>
                     {editing ? (
                       <Input
                         type="text"
@@ -497,13 +497,13 @@ export function OrderDetail({
                         value={ld.unitPriceExpected}
                         onChange={(e) => setLd({ ...ld, unitPriceExpected: e.target.value })}
                         aria-label={t('lineColumns.unitPrice')}
-                        className="w-28 text-end"
+                        className="w-28 text-right"
                       />
                     ) : (
                       money(l.unitPriceExpected)
                     )}
                   </td>
-                  <td className="px-4 py-3 text-end tabular-nums text-ink">{money(lineTotal)}</td>
+                  <td className="px-4 py-3 text-right tabular-nums text-ink">{money(lineTotal)}</td>
                   {editable && (
                     <td className="px-4 py-3">
                       {editing ? (
