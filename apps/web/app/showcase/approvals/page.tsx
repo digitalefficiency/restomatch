@@ -142,7 +142,7 @@ const rules = dayMemo((now): Rule[] => {
   },
   {
     id: 'rule-80',
-    type: 'הפרש מחיר > 10%',
+    type: 'פער מחיר > 10%',
     description: 'המחיר שחויב חרג מסף החסימה המוגדר',
     approverRole: 'owner',
     action: 'hold_invoice',
@@ -162,8 +162,8 @@ const rules = dayMemo((now): Rule[] => {
   },
   {
     id: 'rule-60',
-    type: 'הפרש מחיר 2-10%',
-    description: 'חריגה בינונית — דרושה סקירה של מנהל משמרת',
+    type: 'פער מחיר 2-10%',
+    description: 'פער בינוני — דרושה סקירה של מנהל משמרת',
     approverRole: 'manager',
     action: 'queue_review',
     severity: 'review-manager',
@@ -181,7 +181,7 @@ const rules = dayMemo((now): Rule[] => {
   },
   {
     id: 'rule-10',
-    type: 'הפרשים < 2%',
+    type: 'פערים < 2%',
     description: 'תנודה זניחה — אישור אוטומטי, רישום בלבד',
     approverRole: 'auto',
     action: 'auto_approve',

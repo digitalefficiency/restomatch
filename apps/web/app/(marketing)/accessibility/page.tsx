@@ -3,7 +3,13 @@ import { Mail, MessageCircle, Phone } from 'lucide-react';
 import { marketing } from '@/lib/i18n/messages/marketing';
 import { getT } from '@/lib/i18n/server';
 import { formatDate } from '@/lib/i18n/format';
-import { accessibilityCoordinator, contactChannels, whatsappHref } from '@/lib/contact';
+import {
+  accessibilityCoordinator,
+  assertStatementPublishable,
+  companyDetails,
+  contactChannels,
+  whatsappHref,
+} from '@/lib/contact';
 import { alternatesFor, metadataBase, socialFor } from '../_components/seo';
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -25,6 +31,10 @@ export async function generateMetadata(): Promise<Metadata> {
 const A11Y_AUDIT_DATE = '2026-10-25';
 /** Date this statement was last changed. */
 const A11Y_STATEMENT_UPDATED = '2026-10-25';
+
+// Release guard: a production deploy fails (at build, when this module loads)
+// rather than ship the statement with a placeholder in it. See lib/contact.ts.
+assertStatementPublishable();
 
 const ARRANGEMENTS = [
   'skip',
@@ -51,6 +61,7 @@ export default async function AccessibilityStatementPage() {
   const date = (iso: string) =>
     formatDate(`${iso}T12:00:00Z`, t.locale, { day: '2-digit', month: '2-digit', year: 'numeric' });
   const coordinator = accessibilityCoordinator();
+  const company = companyDetails();
   const channels = contactChannels();
   const wa = channels.whatsapp
     ? whatsappHref(channels.whatsapp.digits, t('shell.whatsappText'))
@@ -67,7 +78,14 @@ export default async function AccessibilityStatementPage() {
       </p>
       <p className="mt-6 text-lg leading-relaxed text-muted">{t('a11y.intro')}</p>
       <p className="mt-3 text-sm text-muted">
-        {t('a11y.operatorLabel')}: <Placeholder>{t('a11y.operatorPlaceholder')}</Placeholder>
+        {t('a11y.operatorLabel')}:{' '}
+        {company.legalName && company.companyId ? (
+          <span className="font-medium text-ink">
+            {company.legalName[t.locale]} · {t('a11y.companyId', { id: company.companyId })}
+          </span>
+        ) : (
+          <Placeholder>{t('a11y.operatorPlaceholder')}</Placeholder>
+        )}
       </p>
 
       <div className="mt-10 space-y-10 text-base leading-relaxed text-muted">
@@ -121,7 +139,13 @@ export default async function AccessibilityStatementPage() {
             <h3 className="text-base font-bold text-ink">{t('a11y.coordinatorTitle')}</h3>
             <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
               <dt className="font-medium text-ink">{t('a11y.coordinatorName')}</dt>
-              <dd>{coordinator.name ?? <Placeholder>{t('a11y.placeholderName')}</Placeholder>}</dd>
+              <dd>
+                {coordinator.name ? (
+                  coordinator.name[t.locale]
+                ) : (
+                  <Placeholder>{t('a11y.placeholderName')}</Placeholder>
+                )}
+              </dd>
               <dt className="font-medium text-ink">{t('a11y.coordinatorPhone')}</dt>
               <dd>
                 {coordinator.phone ? (

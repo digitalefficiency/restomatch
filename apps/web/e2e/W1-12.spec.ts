@@ -81,6 +81,8 @@ test.describe('accessibility statement', () => {
       await expect(page.getByRole('heading', { name: m.a11y.gapsTitle })).toBeVisible();
       const coordinator = page.getByTestId('a11y-coordinator');
       await expect(coordinator).toContainText(m.a11y.sla);
+      // Owner decision: the coordinator is Rom Koren; pending phone / e-mail show as marked placeholders.
+      await expect(coordinator).toContainText(locale === 'he' ? 'רום קורן' : 'Rom Koren');
       // Name / phone / e-mail are present — either the owner's values or marked placeholders.
       await expect(coordinator.locator('dd')).toHaveCount(3);
       // No overlay widget.
@@ -104,6 +106,11 @@ test.describe('accessibility statement', () => {
     const sitemap = await (await request.get('/sitemap.xml')).text();
     expect(sitemap).toContain('/accessibility</loc>');
   });
+});
+
+test('pricing states the 30-day Pro trial', async ({ page }) => {
+  await open(page, '/pricing');
+  await expect(page.getByTestId('trial-terms')).toHaveText(mHe.pricing.trialTerms);
 });
 
 test.describe('phone conversion basics', () => {

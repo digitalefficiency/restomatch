@@ -73,7 +73,7 @@ export const he = {
       approvals: {
         tag: 'ווב · בקרה',
         title: 'אישורים לפני תשלום',
-        description: 'מי מאשר מה: חריגות קטנות עוברות אוטומטית, גדולות נעצרות אצל המנהל או הבעלים — עם תיעוד של כל החלטה.',
+        description: 'מי מאשר מה: פערים קטנים עוברים אוטומטית, גדולים נעצרים אצל המנהל או הבעלים — עם תיעוד של כל החלטה.',
       },
     },
     ctaTitle: 'רוצים לראות את זה על החשבוניות שלכם?',
@@ -94,7 +94,7 @@ export const he = {
   invoiceStatus: {
     clean: 'תקין',
     minor: 'הערה',
-    major: 'חריגות',
+    major: 'פערים',
     blocked: 'לא לשלם עד החלטה',
   },
 
@@ -104,8 +104,8 @@ export const he = {
     zoomOut: 'הקטנה',
     download: 'הורדה',
     open: 'פתיחה',
-    varianceOne: 'חריגה אחת',
-    varianceMany: '{count} חריגות',
+    varianceOne: 'פער אחד',
+    varianceMany: '{count} פערים',
   },
 
   dashboard: {
@@ -137,7 +137,7 @@ export const he = {
     lead: 'מה הספקים חייבו, מה הצוות אישר בפועל ואיפה היו פערים. לחצו על חשבונית כדי לראות את ההשוואה המלאה. הסכומים לפני מע״מ.',
     kpi: {
       scanned: 'נסרקו היום',
-      withIssues: 'עם חריגות',
+      withIssues: 'עם פערים',
       withIssuesSub: '{pct}% מהחשבוניות',
       saved: 'נחסך בזכות הבדיקה',
       savedSub: 'פערים שהצוות תפס לפני האישור',
@@ -147,7 +147,7 @@ export const he = {
     filter: {
       label: 'סינון:',
       all: 'הכל · {count}',
-      issues: 'עם חריגות · {count}',
+      issues: 'עם פערים · {count}',
       clean: 'תקינות · {count}',
       blocked: 'עם חוסם · {count}',
       empty: 'אין חשבוניות שתואמות לסינון.',
@@ -177,18 +177,18 @@ export const he = {
     compareCard: {
       title: 'השוואת הזמנה ↔ חשבונית',
       recommended: 'מומלץ',
-      description: 'שני המסמכים זה לצד זה · החריגות מסומנות',
+      description: 'שני המסמכים זה לצד זה · הפערים מסומנים',
     },
     scanCard: {
       title: 'הסריקה המקורית',
       description: 'צילום החשבונית, השדות שזוהו ורמת הביטחון בזיהוי',
     },
-    calloutOne: 'נמצאה חריגה אחת בחשבונית הזו',
-    calloutMany: 'נמצאו {count} חריגות בחשבונית הזו',
+    calloutOne: 'נמצא פער אחד בחשבונית הזו',
+    calloutMany: 'נמצאו {count} פערים בחשבונית הזו',
     calloutBody: 'לכל שורה: מה הוזמן, מה הגיע בפועל ומה הספק חייב.',
-    allClean: 'כל הפריטים תאמו. אין חריגות.',
+    allClean: 'כל הפריטים תאמו. אין פערים.',
     sections: {
-      issues: 'חריגות לבדיקה',
+      issues: 'פערים לבדיקה',
       matched: 'פריטים תואמים · {count}',
       timeline: 'ציר אירועים',
     },
@@ -197,7 +197,7 @@ export const he = {
       received: 'התקבל בפועל',
       invoiced: 'חויב בחשבונית',
     },
-    variance: 'הפרש כספי',
+    variance: 'פער כספי',
     actions: {
       flag: 'סימון לבירור מול הספק',
       send: 'שליחה לספק',
@@ -280,7 +280,7 @@ export const he = {
       whatsapp: 'פתיחת WhatsApp',
       call: 'התקשרות עכשיו',
       priceList: 'בקשת מחירון מעודכן',
-      dispute: 'פתיחת בירור על חריגה',
+      dispute: 'פתיחת בירור על פער',
     },
     status: {
       stable: 'ספק יציב',
@@ -351,9 +351,9 @@ export const he = {
   approvals: {
     eyebrow: 'אישורים לפני תשלום',
     title: 'מטריצת אישורים',
-    lead: 'מי מאשר מה, לפי סוג החריגה וגודלה. לחצו על כלל כדי לראות את יומן ההחלטות שלו — מי החליט, מתי ולמה.',
+    lead: 'מי מאשר מה, לפי סוג הפער וגודלו. לחצו על כלל כדי לראות את יומן ההחלטות שלו — מי החליט, מתי ולמה.',
     columns: {
-      type: 'סוג חריגה',
+      type: 'סוג פער',
       approver: 'מי מאשר',
       action: 'פעולה אוטומטית',
       month: 'החודש',

@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  PUBLIC_FACTS,
   accessibilityCoordinator,
+  assertStatementPublishable,
   contactChannels,
+  pendingStatementFacts,
   hasAnyChannel,
   internationalDigits,
   whatsappHref,
@@ -61,11 +64,61 @@ describe('lib/contact — channels render only when configured (mkt-06)', () => 
     expect(c.email).toBeNull();
   });
 
-  it('the accessibility coordinator is null-per-field until the owner sets it', () => {
-    expect(accessibilityCoordinator({})).toEqual({ name: null, phone: null, email: null });
-    expect(accessibilityCoordinator({ NEXT_PUBLIC_A11Y_COORDINATOR_NAME: ' דנה ' }).name).toBe(
-      'דנה',
-    );
+  it('the coordinator is Rom Koren (owner decision); phone and e-mail stay pending until supplied', () => {
+    const c = accessibilityCoordinator({});
+    expect(c.name).toEqual({ he: 'רום קורן', en: 'Rom Koren' });
+    expect(c.phone).toBeNull();
+    expect(c.email).toBeNull();
+    // The deployment env fills a pending fact without a code change.
+    expect(
+      accessibilityCoordinator({ NEXT_PUBLIC_A11Y_COORDINATOR_PHONE: ' 050-1234567 ' }).phone,
+    ).toBe('050-1234567');
+  });
+
+  it('no contact value is invented: every pending fact is null in the one config spot', () => {
+    expect(PUBLIC_FACTS.channels).toEqual({ whatsapp: null, phone: null, email: null });
+    expect(PUBLIC_FACTS.company).toEqual({
+      legalName: null,
+      companyId: null,
+      address: null,
+      privacyContact: null,
+    });
+  });
+});
+
+describe('the statement never ships to production with a placeholder', () => {
+  const filled = {
+    ...PUBLIC_FACTS,
+    a11yCoordinator: {
+      name: { he: 'א', en: 'A' },
+      phone: '050-1234567',
+      email: 'a11y@example.co.il',
+    },
+    company: {
+      ...PUBLIC_FACTS.company,
+      legalName: { he: 'חברה בע״מ', en: 'Co Ltd' },
+      companyId: '510000000',
+    },
+  };
+
+  it('lists what is still pending', () => {
+    expect(pendingStatementFacts({})).toEqual([
+      'a11yCoordinator.phone',
+      'a11yCoordinator.email',
+      'company.legalName',
+      'company.companyId',
+    ]);
+    expect(pendingStatementFacts({}, filled)).toEqual([]);
+  });
+
+  it('a production deploy fails while anything is pending', () => {
+    expect(() => assertStatementPublishable('production', {})).toThrow(/a11yCoordinator\.phone/);
+  });
+
+  it('previews and local builds are allowed; production passes once every fact is filled', () => {
+    expect(() => assertStatementPublishable('preview', {})).not.toThrow();
+    expect(() => assertStatementPublishable(undefined, {})).not.toThrow();
+    expect(() => assertStatementPublishable('production', {}, filled)).not.toThrow();
   });
 });
 
@@ -213,5 +266,29 @@ describe('/accessibility is public and indexed (mkt-02, a11y-01)', () => {
     expect(marketingHe.shell.cta).toBe('בדיקת דליפה חינם');
     expect(marketingHe.about.cta).toBe(marketingHe.shell.cta);
     expect(marketingHe.shell.nav.leakCheck).toBe(marketingHe.shell.cta);
+  });
+});
+
+describe('owner decisions in the public copy', () => {
+  it('never shows 1.5% as a target (REVIEW-REPORT §8 item 4)', async () => {
+    const { he: landingHe } = await import('@/lib/i18n/messages/landing/he');
+    const { en: landingEn } = await import('@/lib/i18n/messages/landing/en');
+    const all = JSON.stringify([
+      landingHe,
+      landingEn,
+      marketingHe.roi,
+      marketingEn.roi,
+      marketingHe.pricing,
+      marketingEn.pricing,
+    ]);
+    expect(all).not.toMatch(
+      /יעד[^"]{0,40}1\.5|1\.5%[^"]{0,40}יעד|target[^"]{0,40}1\.5|1\.5%[^"]{0,40}target/i,
+    );
+  });
+
+  it('states the 30-day Pro trial on the pricing page (REVIEW-REPORT §8 item 11)', () => {
+    expect(marketingHe.pricing.trialTerms).toContain('30 יום');
+    expect(marketingHe.pricing.trialTerms).toContain('מקצועי');
+    expect(marketingEn.pricing.trialTerms).toMatch(/30 days.*Pro/);
   });
 });

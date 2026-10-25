@@ -86,7 +86,7 @@ export const en: Shape<typeof he> = {
     leak: 'Estimated leak rate',
     leakValue: '{pct} percent',
     leakHint:
-      'Unapproved price rises, goods that never arrived, items nobody ordered, duplicate invoices. Our pilot target: surface at least 1.5%.',
+      'Unapproved price rises, goods that never arrived, items nobody ordered, duplicate invoices. This is your own estimate — the real number shows up after two weeks of scanning.',
     monthlyLeak: 'Estimated leak per month',
     annualLeak: 'per year',
     annualSub: 'Money paid to suppliers for nothing in return — by your own estimate.',
@@ -110,7 +110,8 @@ export const en: Shape<typeof he> = {
     metaDescription: 'RestoMatch plans — from a free trial to restaurant groups.',
     eyebrow: 'Pricing',
     title: 'A plan for every kitchen',
-    lead: 'Start on the free trial plan — no credit card — and upgrade once you see how much RestoMatch finds.',
+    lead: 'Start with 30 free days on the Pro plan — no credit card — and pick a plan once you see how much RestoMatch finds.',
+    trialTerms: '30 days free with everything in the Pro plan · no credit card',
     recommended: 'Recommended',
     free: 'Free',
     perMonth: '/ month',
@@ -131,7 +132,7 @@ export const en: Shape<typeof he> = {
     anchorBody:
       "The subscription is priced as a small slice of the leak it's meant to catch. If the pilot doesn't find enough to justify the price, we'll tell you so honestly.",
     plans: {
-      trial: { name: 'Trial', tagline: 'Every feature at a limited volume — so you can see the value' },
+      trial: { name: 'Trial', tagline: '30 days with everything in the Pro plan' },
       basic: { name: 'Basic', tagline: 'For a single restaurant that wants to stop leaks' },
       pro: { name: 'Pro', tagline: 'For a restaurant that wants full control and analytics' },
       chain: { name: 'Group', tagline: 'For groups with several branches' },
@@ -182,6 +183,7 @@ export const en: Shape<typeof he> = {
     intro:
       'We want RestoMatch to work for everyone who works in a restaurant and everyone who visits this site, including people with disabilities. We are making the site and the product accessible under the Israeli Equal Rights for Persons with Disabilities (Service Accessibility Adjustments) Regulations, 5773-2013.',
     operatorLabel: 'Operated by',
+    companyId: 'Company no. {id}',
     operatorPlaceholder: '[Legal company name and company number]',
     levelTitle: 'Conformance level',
     levelBody: 'Our target: Israeli Standard IS 5568 at level AA, and WCAG 2.2 at level AA.',

@@ -52,7 +52,8 @@ const MORPH_LINES = [
 
 /** Worked example used by the proof block (same figures as the calculator default). */
 const EXAMPLE_PURCHASING_ILS = 150_000;
-const PILOT_TARGET = 0.015;
+/** An illustrative leak rate for the worked example — never presented as a target. */
+const EXAMPLE_LEAK_RATE = 0.015;
 
 /**
  * Landing v2 — short and visual (owner: "efficient, not overloaded, invest in
@@ -94,7 +95,7 @@ export default async function Home() {
   ];
   const proof = [
     {
-      value: t('v2.proof.leakValue', { amount: ils(EXAMPLE_PURCHASING_ILS * PILOT_TARGET) }),
+      value: t('v2.proof.leakValue', { amount: ils(EXAMPLE_PURCHASING_ILS * EXAMPLE_LEAK_RATE) }),
       label: t('v2.proof.leakLabel', { purchasing: ils(EXAMPLE_PURCHASING_ILS) }),
       tone: 'text-danger',
     },

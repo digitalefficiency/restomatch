@@ -141,7 +141,7 @@ const flowEvents = dayMemo((): FlowEvent[] => {
     // INV-7821 closed at 08:18 with this line sent up for approval.
     id: '3',
     time: '08:18',
-    title: 'חריגת מחיר ממתינה לאישור',
+    title: 'פער מחיר ממתין לאישור',
     detail: `עגבניה שרי — עלייה ${tomatoPct}% מעל ממוצע 60 ימים`,
     type: 'flag',
   },
