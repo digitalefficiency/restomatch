@@ -35,6 +35,12 @@ import { leakCheckRouter } from './routers/leakCheck';
 import { growthRouter } from './routers/growth';
 import { integrationsRouter } from './routers/integrations';
 import { supplierConfirmRouter } from './routers/supplierConfirm';
+// Pre-registered, still empty (W1-04): later waves own these files, not this one.
+import { invoicesRouter } from './routers/invoices';
+import { tasksRouter } from './routers/tasks';
+import { navRouter } from './routers/nav';
+import { pushRouter } from './routers/push';
+import { closeRouter } from './routers/close';
 
 export const appRouter = router({
   owner: ownerRouter,
@@ -73,6 +79,11 @@ export const appRouter = router({
   growth: growthRouter,
   leakCheck: leakCheckRouter,
   supplierConfirm: supplierConfirmRouter,
+  invoices: invoicesRouter,
+  tasks: tasksRouter,
+  nav: navRouter,
+  push: pushRouter,
+  close: closeRouter,
 });
 
 export type AppRouter = typeof appRouter;
