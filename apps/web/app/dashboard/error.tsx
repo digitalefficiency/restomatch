@@ -6,7 +6,6 @@ import { Button, Card, LinkButton } from '@/lib/components';
 import { useT } from '@/lib/i18n/client';
 import { common } from '@/lib/i18n/messages/common';
 import { useOnline } from '@/lib/net/online';
-import { SUPPORT_EMAIL } from '@/lib/net/support';
 
 /**
  * In-shell error boundary (W1-04, perf-states-09; lens-perf-states §2.6). A
@@ -14,7 +13,8 @@ import { SUPPORT_EMAIL } from '@/lib/net/support';
  * nav and branch switcher stay, so the receiver keeps their place. "נסו שוב"
  * re-fetches the server tree AND resets the boundary in one transition (a
  * bare `reset()` would re-render the same failed RSC payload). The digest is
- * shown so a report can be matched to the server log.
+ * shown so a report can be matched to the server log. No contact address
+ * until the single contact config (W1-12) exists — never an invented one.
  */
 export default function DashboardError({
   error,
@@ -49,11 +49,6 @@ export default function DashboardError({
   }, [online]);
 
   const digest = error.digest;
-  const report = digest
-    ? `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(t('shell.error.reportSubject', { digest }))}&body=${encodeURIComponent(
-        t('shell.error.reportBody', { digest, url: typeof window === 'undefined' ? '' : window.location.href }),
-      )}`
-    : null;
 
   return (
     <section aria-labelledby="dashboard-error-title" data-testid="dashboard-error" className="mx-auto max-w-xl">
@@ -78,11 +73,6 @@ export default function DashboardError({
           <LinkButton href="/dashboard" variant="secondary" className="min-h-[44px]">
             {t('shell.error.home')}
           </LinkButton>
-          {report ? (
-            <a href={report} className="inline-flex min-h-[44px] items-center px-2 text-sm font-semibold text-primary underline-offset-2 hover:underline">
-              {t('shell.error.report')}
-            </a>
-          ) : null}
         </div>
       </Card>
     </section>
