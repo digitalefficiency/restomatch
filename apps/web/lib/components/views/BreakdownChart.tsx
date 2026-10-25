@@ -23,8 +23,10 @@ export interface ChartRow {
 /**
  * One chart, three faces: horizontal bars (ranked groups), an SVG line (a
  * trend over time) or a plain table. Every face shows the same rows, so the
- * toggle never changes the numbers. RTL-aware: bars grow from the start edge
- * and the line runs in reading direction.
+ * toggle never changes the numbers. Bars grow from the start edge; the line is
+ * never mirrored (time runs left = oldest in both locales, R-3). A ₪0 row is a
+ * muted tick, never a red stub. With `totalLabel` a totals row shows Σ rows at
+ * the rows' own precision (`digits`), so the visible total equals its rows.
  */
 export function BreakdownChart({
   rows,
@@ -37,6 +39,9 @@ export function BreakdownChart({
   valueHeader,
   countHeader,
   emptyText,
+  digits = 0,
+  totalLabel,
+  summary,
 }: {
   rows: ChartRow[];
   chart: ChartType;
@@ -49,20 +54,28 @@ export function BreakdownChart({
   valueHeader: string;
   countHeader?: string;
   emptyText: string;
+  /** Decimals of every ₪ on the chart (2 when the rows sit next to an exact total). */
+  digits?: number;
+  /** Adds a totals row "label · Σ rows" (Σ in integer agorot, at `digits`). */
+  totalLabel?: string;
+  /** A sentence for screen readers ("leak by supplier: …"); defaults to the caption. */
+  summary?: string;
 }) {
   const t = useT(views);
   const locale = useLocale();
-  const ils = (v: number) => formatIls(v, { locale });
+  const ils = (v: number) => formatIls(v, { locale, maximumFractionDigits: digits });
   const compact = density === 'compact';
+  const isZero = (v: number) => Math.abs(v) < 0.005;
 
   if (rows.length === 0) {
     return <p className="rounded-xl border border-line bg-surface-2/50 px-4 py-6 text-center text-sm text-muted">{emptyText}</p>;
   }
 
   const max = Math.max(...rows.map((r) => Math.max(r.value, r.previous ?? 0)), 0.01);
-  const total = rows.reduce((s, r) => s + r.value, 0);
+  const total = rows.reduce((s, r) => s + Math.round(r.value * 100), 0) / 100;
+  const label = summary ?? caption;
 
-  if (chart === 'line') return <LineFace rows={rows} max={max} caption={caption} ils={ils} compare={compare} />;
+  if (chart === 'line') return <LineFace rows={rows} max={max} caption={caption} label={label} ils={ils} compare={compare} />;
 
   if (chart === 'table') {
     const cell = compact ? 'px-3 py-1.5' : 'p-3';
@@ -70,7 +83,7 @@ export function BreakdownChart({
       <div className="overflow-x-auto rounded-2xl border border-line">
         <table className="w-full min-w-[520px] text-sm">
           <caption className="sr-only">{caption}</caption>
-          <thead className="border-b border-line bg-surface-2 text-xs uppercase tracking-wider text-subtle">
+          <thead className="border-b border-line bg-surface-2 text-xs text-subtle">
             <tr>
               <th scope="col" className={cn(cell, 'text-start font-semibold')}>{keyHeader}</th>
               <th scope="col" className={cn(cell, 'text-end font-semibold')}>{valueHeader}</th>
@@ -88,18 +101,18 @@ export function BreakdownChart({
             {rows.map((r) => (
               <tr key={r.key} className="border-t border-line transition-colors hover:bg-surface-2/60">
                 <td className={cn(cell, 'font-medium text-ink')}>{r.label}</td>
-                <td className={cn(cell, 'text-end font-mono font-semibold tabular-nums text-danger')}>{ils(r.value)}</td>
+                <td className={cn(cell, 'text-end font-semibold tabular-nums', isZero(r.value) ? 'text-subtle' : 'text-ink')}>{ils(r.value)}</td>
                 {countHeader ? (
-                  <td className={cn(cell, 'text-end font-mono tabular-nums text-muted')}>
+                  <td className={cn(cell, 'text-end tabular-nums text-muted')}>
                     {r.count != null ? formatNumber(r.count, locale) : '—'}
                   </td>
                 ) : null}
-                <td className={cn(cell, 'text-end font-mono tabular-nums text-muted')}>
+                <td className={cn(cell, 'text-end tabular-nums text-muted')}>
                   {total > 0 ? formatPercent(r.value / total, locale, 0) : '—'}
                 </td>
                 {compare !== 'off' ? (
                   <>
-                    <td className={cn(cell, 'text-end font-mono tabular-nums text-muted')}>
+                    <td className={cn(cell, 'text-end tabular-nums text-muted')}>
                       {r.previous != null ? ils(r.previous) : '—'}
                     </td>
                     <td className={cell}>
@@ -110,6 +123,17 @@ export function BreakdownChart({
               </tr>
             ))}
           </tbody>
+          {totalLabel ? (
+            <tfoot>
+              <tr className="border-t border-line">
+                <th scope="row" className={cn(cell, 'text-start font-semibold text-ink')}>{totalLabel}</th>
+                <td className={cn(cell, 'text-end font-bold tabular-nums text-ink')} data-testid="chart-total" data-amount={total}>
+                  {ils(total)}
+                </td>
+                <td colSpan={(countHeader ? 2 : 1) + (compare !== 'off' ? 2 : 0)} />
+              </tr>
+            </tfoot>
+          ) : null}
         </table>
       </div>
     );
@@ -117,8 +141,8 @@ export function BreakdownChart({
 
   // Bars: ranked, labelled, with the comparison period as a thin ghost bar.
   return (
-    <figure>
-      <figcaption className="sr-only">{caption}</figcaption>
+    <figure aria-label={label}>
+      <figcaption className="sr-only">{label}</figcaption>
       <ul className={compact ? 'space-y-1.5' : 'space-y-3'}>
         {rows.map((r) => (
           <li key={r.key}>
@@ -128,14 +152,22 @@ export function BreakdownChart({
                 {compare !== 'off' ? (
                   <DeltaBadge current={r.value} previous={r.previous} compare={compare} thinBase={thinBase} bare />
                 ) : null}
-                <span className="font-mono font-semibold tabular-nums text-danger">{ils(r.value)}</span>
+                <span
+                  className={cn('font-semibold tabular-nums', isZero(r.value) ? 'text-subtle' : 'text-ink')}
+                  data-testid="chart-row"
+                  data-amount={r.value}
+                >
+                  {ils(r.value)}
+                </span>
               </span>
             </div>
             <div className={cn('mt-1 overflow-hidden rounded-full bg-surface-2', compact ? 'h-1.5' : 'h-2.5')}>
-              <div
-                className="rm-bar leak-gradient h-full rounded-full"
-                style={{ width: `${Math.max(1.5, (r.value / max) * 100)}%` }}
-              />
+              {isZero(r.value) ? (
+                // A clean ₪0 row: a muted baseline tick, not a red stub.
+                <div className="h-full w-1 rounded-full bg-line-strong" />
+              ) : (
+                <div className="rm-bar leak-gradient h-full rounded-full" style={{ width: `${Math.max(1.5, (r.value / max) * 100)}%` }} />
+              )}
             </div>
             {compare !== 'off' && r.previous != null && r.previous > 0 ? (
               <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-transparent">
@@ -145,6 +177,14 @@ export function BreakdownChart({
           </li>
         ))}
       </ul>
+      {totalLabel ? (
+        <p className="mt-3 flex items-baseline justify-between gap-3 border-t border-line pt-2 text-sm">
+          <span className="font-semibold text-ink">{totalLabel}</span>
+          <span className="font-bold tabular-nums text-ink" data-testid="chart-total" data-amount={total}>
+            {ils(total)}
+          </span>
+        </p>
+      ) : null}
     </figure>
   );
 }
@@ -153,12 +193,14 @@ function LineFace({
   rows,
   max,
   caption,
+  label,
   ils,
   compare,
 }: {
   rows: ChartRow[];
   max: number;
   caption: string;
+  label: string;
   ils: (v: number) => string;
   compare: Compare;
 }) {
@@ -177,8 +219,8 @@ function LineFace({
   return (
     <figure>
       <figcaption className="sr-only">{caption}</figcaption>
-      {/* The SVG is direction-neutral; in RTL we mirror it so time runs right → left. */}
-      <svg viewBox={`0 0 ${W} ${H + 18}`} className="h-auto max-h-72 w-full rtl:-scale-x-100" role="img" aria-label={caption}>
+      {/* Never mirrored: time runs left = oldest in both locales (R-3). */}
+      <svg viewBox={`0 0 ${W} ${H + 18}`} className="h-auto max-h-72 w-full" role="img" aria-label={label}>
         <line x1={PAD} x2={W - PAD} y1={H - PAD} y2={H - PAD} className="stroke-line" strokeWidth="1" />
         {showPrev ? (
           <path d={path(prev)} fill="none" className="stroke-muted" strokeOpacity="0.5" strokeWidth="1.5" strokeDasharray="4 4" />
@@ -186,7 +228,7 @@ function LineFace({
         <path d={path(cur)} fill="none" className="stroke-danger" strokeWidth="2.5" strokeLinejoin="round" />
         {rows.map((r, i) => (
           <g key={r.key}>
-            <circle cx={x(i)} cy={y(r.value)} r="3.5" className="fill-danger">
+            <circle cx={x(i)} cy={y(r.value)} r="3.5" className={r.value > 0.005 ? 'fill-danger' : 'fill-line-strong'}>
               <title>{`${r.label}: ${ils(r.value)}`}</title>
             </circle>
             {i % every === 0 || i === n - 1 ? (
@@ -194,8 +236,8 @@ function LineFace({
                 x={x(i)}
                 y={H + 6}
                 textAnchor="middle"
-                className="fill-subtle rtl:-scale-x-100"
-                style={{ fontSize: 11, transformBox: 'fill-box', transformOrigin: 'center' }}
+                className="fill-subtle"
+                style={{ fontSize: 12 }}
               >
                 {r.label}
               </text>

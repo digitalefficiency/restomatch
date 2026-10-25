@@ -11,13 +11,14 @@ import { deltaView, type Compare } from './state';
 /**
  * ▲/▼ change against the comparison period. For a leak, up is bad (danger) and
  * down is good (primary); `upIsGood` flips that for spend-like figures shown
- * neutrally. Renders nothing when compare is off. With `thinBase` (isThinBase)
+ * neutrally. Renders nothing when compare is off or `previous` is undefined (not compared). With `thinBase` (isThinBase)
  * it shows only the calm ₪ difference — never a % or a red ▲ against a period
  * that has almost no data.
  */
 export function DeltaBadge({
   current,
   previous,
+  vs: vsLabel,
   compare,
   upIsGood = false,
   neutral = false,
@@ -28,7 +29,10 @@ export function DeltaBadge({
   className,
 }: {
   current: number;
+  /** null = compared, but there is no base (says so); undefined = not compared here (renders nothing). */
   previous: number | null | undefined;
+  /** What it is compared with, e.g. "מול 1–25 בספט׳" (default: "vs the previous period"). */
+  vs?: string;
   compare: Compare;
   upIsGood?: boolean;
   /** Spend-like figure: show the change without a good/bad colour. */
@@ -45,8 +49,8 @@ export function DeltaBadge({
 }) {
   const t = useT(views);
   const locale = useLocale();
-  if (compare === 'off') return null;
-  const vs = compare === 'yoy' ? t('delta.yoy') : t('delta.prev');
+  if (compare === 'off' || previous === undefined) return null;
+  const vs = vsLabel ?? (compare === 'yoy' ? t('delta.yoy') : t('delta.prev'));
   const v = deltaView(current, previous, { thinBase, kind });
   if (v.kind === 'none') {
     // In a table cell (bare) a quiet dash; standalone, say why there is no change.
@@ -66,10 +70,10 @@ export function DeltaBadge({
         title={t('delta.thinBase')}
         data-delta="thin"
       >
-        <span className="font-mono tabular-nums" dir="ltr">
+        <bdi className="tabular-nums">
           {v.up ? '+' : '−'}
           {abs(Math.abs(v.diff))}
-        </span>
+        </bdi>
         {bare ? null : <span className="font-normal text-subtle">{vs}</span>}
         <span className="font-normal text-subtle">· {t('delta.thinBase')}</span>
       </span>
@@ -95,10 +99,10 @@ export function DeltaBadge({
       <span aria-hidden="true">{flat ? '' : up ? '▲' : '▼'}</span>
       <span>{text}</span>
       {showAmount && !flat && pct ? (
-        <span className="font-mono tabular-nums" dir="ltr">
+        <bdi className="tabular-nums">
           ({up ? '+' : '−'}
           {abs(Math.abs(diff))})
-        </span>
+        </bdi>
       ) : null}
       {bare ? null : <span className="font-normal text-subtle">{vs}</span>}
     </span>

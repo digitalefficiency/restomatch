@@ -6,8 +6,11 @@ import type { he as suppliersHe } from '@/lib/i18n/messages/suppliers/he';
 import type { he as approvalsHe } from '@/lib/i18n/messages/approvals/he';
 import { formatDate, formatNumber, formatPercent } from '@/lib/i18n/format';
 import { formatIls } from '@/lib/money';
+import { createTranslator } from '@/lib/i18n/translate';
+import { leaks as leaksNs } from '@/lib/i18n/messages/leaks';
 import { Badge, LinkButton, cn } from '@/lib/components';
 import { discrepancyLabel, displayName } from '../../approvals/vocab';
+import { lineMathText } from '../../leaks/claims/why';
 import type { SupplierLeakCard } from './leak-card-data';
 
 const ils = (agorot: number, locale: Locale) => formatIls(agorot / 100, { locale, maximumFractionDigits: 2 });
@@ -37,6 +40,8 @@ export function LeakCardBody({
   const windowText = t('leakCard.window', { from: day(card.window.from), to: day(card.window.to) });
   const explorerHref = `/dashboard/leaks?p=custom&from=${card.window.from}&to=${card.window.to}&g=supplier&sup=${supplierId}`;
   const sc = card.scorecard;
+  // Claim wording comes from the leak glossary ("דרישת זיכוי", never "תביעה").
+  const tl = createTranslator(t.appLocale, leaksNs);
 
   if (card.leakAgorot === 0 && card.topLines.length === 0) {
     return (
@@ -72,7 +77,7 @@ export function LeakCardBody({
       >
         <div>
           <p className="text-sm font-semibold text-muted">{t('leakCard.total')}</p>
-          <p className="rm-print-accent font-mono text-5xl font-extrabold tabular-nums text-danger">
+          <p className="rm-print-accent text-5xl font-extrabold tabular-nums text-ink">
             {ils(card.leakAgorot, locale)}
           </p>
           <p className="mt-1 text-xs tabular-nums text-subtle">
@@ -90,8 +95,8 @@ export function LeakCardBody({
       {card.openAgorot > 0 && (
         <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-danger/8 p-4">
           <div className="flex flex-wrap items-center gap-3">
-            <Badge tone="danger-solid">{t('leakCard.open')}</Badge>
-            <span className="rm-print-accent font-mono text-xl font-bold tabular-nums text-danger">
+            <Badge tone="danger-solid">{tl('claims.openForClaim')}</Badge>
+            <span className="rm-print-accent text-xl font-bold tabular-nums text-ink">
               {ils(card.openAgorot, locale)}
             </span>
             <span className="text-xs text-muted">
@@ -99,8 +104,8 @@ export function LeakCardBody({
             </span>
           </div>
           {!print && (
-            <LinkButton href="/dashboard/leaks/claims" size="sm">
-              {t('leakCard.claimsCta')}
+            <LinkButton href={`/dashboard/leaks/claims?sup=${supplierId}`} size="sm" data-testid="supplier-claims-cta">
+              {tl('claims.openSupplierLetter', { amount: ils(card.openAgorot, locale) })}
             </LinkButton>
           )}
         </section>
@@ -116,7 +121,7 @@ export function LeakCardBody({
                 <li key={r.key}>
                   <div className="flex items-baseline justify-between gap-3 text-sm">
                     <span className="min-w-0 truncate text-ink">{discrepancyLabel(ta, r.key)}</span>
-                    <span className="shrink-0 font-mono tabular-nums text-ink">{formatIls(r.leakIls, { locale, maximumFractionDigits: 2 })}</span>
+                    <span className="shrink-0 tabular-nums text-ink">{formatIls(r.leakIls, { locale, maximumFractionDigits: 2 })}</span>
                   </div>
                   <div className="mt-1 h-1.5 rounded-full bg-surface-2" aria-hidden="true">
                     <div className="rm-bar h-1.5 rounded-full bg-danger" style={{ width: `${Math.max(4, pct * 100)}%` }} />
@@ -133,10 +138,20 @@ export function LeakCardBody({
             {card.topLines.map((l) => {
               const item = displayName(locale, l.productName ?? l.lineDescription, l.productNameEn ?? l.lineDescriptionEn);
               const inv = l.invoiceNumber ? t('leakCard.invoice', { number: l.invoiceNumber }) : t('leakCard.invoiceNoNumber');
+              // Expected vs charged, so the supplier can verify the line (SUP-02).
+              const math = lineMathText(
+                { type: l.type, expected: l.expected ?? null, actual: l.actual ?? null, deltaAmount: l.deltaAmount },
+                t.appLocale,
+              );
               return (
-                <li key={l.discrepancyId} className="flex items-start justify-between gap-3 py-2">
+                <li key={l.discrepancyId} className="flex items-start justify-between gap-3 py-2" data-testid="supplier-leak-line">
                   <div className="min-w-0">
                     <p className="truncate text-ink">{item || discrepancyLabel(ta, l.type)}</p>
+                    {math ? (
+                      <p className="text-xs text-ink" data-testid="supplier-leak-math">
+                        {math}
+                      </p>
+                    ) : null}
                     <p className="text-xs text-subtle">
                       {discrepancyLabel(ta, l.type)} ·{' '}
                       {print ? (
@@ -149,7 +164,7 @@ export function LeakCardBody({
                       {l.invoiceDate ? <> · <span className="tabular-nums">{day(l.invoiceDate.slice(0, 10))}</span></> : null}
                     </p>
                   </div>
-                  <span className="rm-print-accent shrink-0 font-mono tabular-nums text-danger">{ils(l.amountAgorot, locale)}</span>
+                  <span className="rm-print-accent shrink-0 font-semibold tabular-nums text-ink">{ils(l.amountAgorot, locale)}</span>
                 </li>
               );
             })}
@@ -195,7 +210,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <dt className="text-xs text-subtle">{label}</dt>
-      <dd className="font-mono tabular-nums text-ink">{value}</dd>
+      <dd className="tabular-nums text-ink">{value}</dd>
     </div>
   );
 }

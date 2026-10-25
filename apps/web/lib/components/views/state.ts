@@ -65,9 +65,14 @@ export interface ViewState {
   filters: ViewFilters;
 }
 
+/**
+ * Compare is ON by default (`prev`, exec-desktop-10): the engine's comparison is
+ * already day-aligned (a running month vs the same day-span of the previous
+ * one), so a leak is never read without its like-for-like context.
+ */
 export const DEFAULT_VIEW: ViewState = {
   period: 'this_month',
-  compare: 'off',
+  compare: 'prev',
   group: 'supplier',
   chart: 'bar',
   density: 'comfortable',
@@ -189,9 +194,12 @@ export function hasFilters(v: ViewState): boolean {
   return !!(f.supplierIds.length || f.categories.length || f.types.length || f.severities.length || f.statuses.length);
 }
 
-/** The default view renders the classic hero (this month, no compare, no filters). */
+/**
+ * The default view renders the classic hero (this month, the default compare, no
+ * filters); pages that show a delta fetch the aligned comparison next to it.
+ */
 export function isDefaultData(v: ViewState): boolean {
-  return v.period === 'this_month' && v.compare === 'off' && !hasFilters(v);
+  return v.period === 'this_month' && v.compare === DEFAULT_VIEW.compare && !hasFilters(v);
 }
 
 /** The tRPC `ViewInput` for this state (the server re-validates). */
