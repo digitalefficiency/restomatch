@@ -25,8 +25,8 @@ import {
   restaurants,
   suppliers,
 } from '@restomatch/db';
-import { makeWorker } from '../queue';
-import { appBaseUrl, formatIlDate, startOfIlDay } from '../lib/notifyHelpers';
+import { makeWorker, type WorkerJob } from '../queue';
+import { appBaseUrl, formatIlDate, ilDateKey, startOfIlDay } from '../lib/notifyHelpers';
 import { jobDb } from '../db';
 
 export interface SupplierDelaysJob {
@@ -39,91 +39,94 @@ export interface SupplierDelaysJob {
 const OPEN_STATUSES = ['sent', 'confirmed', 'partial'] as const;
 
 export function startSupplierDelaysWorker() {
-  return makeWorker<SupplierDelaysJob>('supplier-delays', async (job) => {
-    const url = process.env.DATABASE_URL;
-    if (!url) throw new Error('DATABASE_URL is required');
-    const db = jobDb(url);
+  return makeWorker<SupplierDelaysJob>('supplier-delays', processSupplierDelays);
+}
 
-    const now = job.data.forDate ? new Date(job.data.forDate) : new Date();
-    const startToday = startOfIlDay(now);
-    const todayKey = startToday.toISOString().slice(0, 10);
+/** The supplier-delays job: run by the worker loop (above) and by the serverless runner (handlers.ts). */
+export async function processSupplierDelays(job: WorkerJob<SupplierDelaysJob>) {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error('DATABASE_URL is required');
+  const db = jobDb(url);
 
-    const restaurantRows = job.data.restaurantId
-      ? await db.select().from(restaurants).where(eq(restaurants.id, job.data.restaurantId))
-      : await db.select().from(restaurants);
+  const now = job.data.forDate ? new Date(job.data.forDate) : new Date();
+  const startToday = startOfIlDay(now);
+  const todayKey = ilDateKey(now); // the Israel date (not the UTC date of IL midnight)
 
-    let enqueued = 0;
-    let overdue = 0;
+  const restaurantRows = job.data.restaurantId
+    ? await db.select().from(restaurants).where(eq(restaurants.id, job.data.restaurantId))
+    : await db.select().from(restaurants);
 
-    for (const restaurant of restaurantRows) {
-      const rows = await db
-        .select({
-          poId: purchaseOrders.id,
-          supplierName: suppliers.name,
-          expectedAt: purchaseOrders.expectedDeliveryAt,
-        })
-        .from(purchaseOrders)
-        .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
-        .where(
-          and(
-            eq(purchaseOrders.restaurantId, restaurant.id),
-            isNotNull(purchaseOrders.expectedDeliveryAt),
-            lt(purchaseOrders.expectedDeliveryAt, startToday),
-            inArray(purchaseOrders.status, [...OPEN_STATUSES]),
-          ),
-        )
-        .orderBy(asc(purchaseOrders.expectedDeliveryAt));
+  let enqueued = 0;
+  let overdue = 0;
 
-      if (rows.length === 0) continue;
-      overdue += rows.length;
+  for (const restaurant of restaurantRows) {
+    const rows = await db
+      .select({
+        poId: purchaseOrders.id,
+        supplierName: suppliers.name,
+        expectedAt: purchaseOrders.expectedDeliveryAt,
+      })
+      .from(purchaseOrders)
+      .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
+      .where(
+        and(
+          eq(purchaseOrders.restaurantId, restaurant.id),
+          isNotNull(purchaseOrders.expectedDeliveryAt),
+          lt(purchaseOrders.expectedDeliveryAt, startToday),
+          inArray(purchaseOrders.status, [...OPEN_STATUSES]),
+        ),
+      )
+      .orderBy(asc(purchaseOrders.expectedDeliveryAt));
 
-      const recipients = await recipientsForRestaurant(db, restaurant.id);
-      if (recipients.length === 0) continue;
+    if (rows.length === 0) continue;
+    overdue += rows.length;
 
-      // Line counts for the overdue POs (one grouped query).
-      const poIds = rows.map((r) => r.poId);
-      const lineCountMap = new Map<string, number>();
-      const counts = await db
-        .select({ poId: poLines.poId, c: count(poLines.id) })
-        .from(poLines)
-        .where(inArray(poLines.poId, poIds))
-        .groupBy(poLines.poId);
-      for (const c of counts) lineCountMap.set(c.poId, Number(c.c));
+    const recipients = await recipientsForRestaurant(db, restaurant.id);
+    if (recipients.length === 0) continue;
 
-      for (const r of rows) {
-        const expectedAt = r.expectedAt ?? startToday;
-        const daysLate = Math.max(
-          1,
-          Math.floor((startToday.getTime() - startOfIlDay(expectedAt).getTime()) / 86_400_000),
-        );
-        const email = supplierDelayEmail({
-          supplierName: r.supplierName,
-          expectedAtLabel: formatIlDate(expectedAt),
-          daysLate,
-          lineCount: lineCountMap.get(r.poId) ?? 0,
-          poUrl: `${appBaseUrl()}/dashboard/receiving/${r.poId}`,
+    // Line counts for the overdue POs (one grouped query).
+    const poIds = rows.map((r) => r.poId);
+    const lineCountMap = new Map<string, number>();
+    const counts = await db
+      .select({ poId: poLines.poId, c: count(poLines.id) })
+      .from(poLines)
+      .where(inArray(poLines.poId, poIds))
+      .groupBy(poLines.poId);
+    for (const c of counts) lineCountMap.set(c.poId, Number(c.c));
+
+    for (const r of rows) {
+      const expectedAt = r.expectedAt ?? startToday;
+      const daysLate = Math.max(
+        1,
+        Math.floor((startToday.getTime() - startOfIlDay(expectedAt).getTime()) / 86_400_000),
+      );
+      const email = supplierDelayEmail({
+        supplierName: r.supplierName,
+        expectedAtLabel: formatIlDate(expectedAt),
+        daysLate,
+        lineCount: lineCountMap.get(r.poId) ?? 0,
+        poUrl: `${appBaseUrl()}/dashboard/receiving/${r.poId}`,
+      });
+
+      for (const recipient of recipients) {
+        const { deduped } = await enqueueNotification(db, {
+          restaurantId: restaurant.id,
+          channel: 'email',
+          target: recipient.email,
+          subject: email.subject,
+          body: email.text,
+          html: email.html,
+          relatedEntityType: 'purchase_order',
+          relatedEntityId: r.poId,
+          dedupeKey: `po:${r.poId}:delay:${todayKey}:${recipient.email}`,
         });
-
-        for (const recipient of recipients) {
-          const { deduped } = await enqueueNotification(db, {
-            restaurantId: restaurant.id,
-            channel: 'email',
-            target: recipient.email,
-            subject: email.subject,
-            body: email.text,
-            html: email.html,
-            relatedEntityType: 'purchase_order',
-            relatedEntityId: r.poId,
-            dedupeKey: `po:${r.poId}:delay:${todayKey}:${recipient.email}`,
-          });
-          if (!deduped) enqueued += 1;
-        }
+        if (!deduped) enqueued += 1;
       }
     }
+  }
 
-    console.log(
-      `[supplier-delays] date=${todayKey} restaurants=${restaurantRows.length} overdue=${overdue} enqueued=${enqueued}`,
-    );
-    return { date: todayKey, overdue, enqueued };
-  });
+  console.log(
+    `[supplier-delays] date=${todayKey} restaurants=${restaurantRows.length} overdue=${overdue} enqueued=${enqueued}`,
+  );
+  return { date: todayKey, overdue, enqueued };
 }

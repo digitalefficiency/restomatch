@@ -1,9 +1,9 @@
 import { hostname } from 'node:os';
 import cronParser from 'cron-parser';
 import { captureException } from '@restomatch/observability';
-import { WORKER_IDLE_TIMEOUT_SEC } from './db';
+import { jobIdleTimeoutSec } from './db';
 import {
-  claimAny,
+  claimAnySerial,
   completeJob,
   failJob,
   failedJobs,
@@ -55,7 +55,7 @@ const WORKER_POOL_MAX = 4;
 export function workerSql(): Sql {
   const url = queueDbUrl();
   if (!url) throw new Error('DATABASE_URL is required');
-  return queueSql(url, WORKER_POOL_MAX, WORKER_IDLE_TIMEOUT_SEC);
+  return queueSql(url, WORKER_POOL_MAX, jobIdleTimeoutSec());
 }
 
 /**
@@ -90,12 +90,18 @@ const inFlight = new Map<string, string>(); // jobId → queue (lock renewal)
 
 /*
  * One dispatcher per database pool claims for EVERY registered queue with a
- * single query (claimAny), instead of one poll loop per queue: on the Supabase
+ * single claim (claimAnySerial), instead of one poll loop per queue: on the Supabase
  * free plan egress is metered, and 13 queues × 1–5 s polls was ~5 queries/s
  * (~6 GB/month) of empty claims. When a claim comes back empty the dispatcher
  * sleeps with exponential backoff (IDLE_MIN_MS → IDLE_MAX_MS); a claimed job,
  * a local insert (wakeDispatchers) or a NOTIFY from another process (LISTEN,
  * startJobListener) resets/wakes it. Per-queue concurrency is enforced here.
+ *
+ * claimAnySerial, not plain claimAny: it never starts a job while another job of
+ * the same queue + tenant is running ANYWHERE — so the serverless runners
+ * (/api/cron/jobs, the after() kick) and a worker process running at the same
+ * time keep the worker's one-at-a-time-per-queue guarantee between them (two
+ * match-invoice jobs of one invoice must not both write a match run).
  */
 export const IDLE_MIN_MS = 1_000;
 export const IDLE_MAX_MS = 30_000;
@@ -171,7 +177,7 @@ class Dispatcher {
       let row: JobRow<unknown> | null = null;
       try {
         this.claims += 1;
-        row = await claimAny(this.sql, open.map((r) => r.name), WORKER_ID);
+        row = await claimAnySerial(this.sql, open.map((r) => r.name), WORKER_ID, STALL_AFTER_MS);
       } catch (err) {
         // DB blip: keep polling (the DB watchdog exits the process if it lasts).
         const now = Date.now();
@@ -209,33 +215,52 @@ export function dispatcherFor(sql: Sql): { claims: number; idleMs: number; liste
 }
 
 async function runOne(sql: Sql, reg: Registration, row: JobRow<unknown>): Promise<void> {
-  const name = reg.name;
+  await runClaimedJob(sql, reg.name, reg.processor, row);
+}
+
+/** What became of a claimed job: done, queued again after a backoff, or failed for good. */
+export type JobOutcome = 'done' | 'retry' | 'failed';
+
+/**
+ * Run one claimed job and record the outcome — THE job semantics, shared by the
+ * worker's dispatcher and the serverless runner (serverless.ts), so both
+ * complete / retry with backoff / dead-letter ('failed') a job identically.
+ * `workerId` is the claimer (the lock holder completeJob/failJob check).
+ */
+export async function runClaimedJob(
+  sql: Sql,
+  name: string,
+  processor: (job: WorkerJob<unknown>) => Promise<unknown>,
+  row: JobRow<unknown>,
+  workerId: string = WORKER_ID,
+): Promise<JobOutcome> {
   const job: WorkerJob<unknown> = {
     id: row.id,
     name,
     data: row.payload,
-    attemptsMade: row.attempts - 1, // claimAny already counted this run
+    attemptsMade: row.attempts - 1, // the claim already counted this run
     opts: { attempts: row.maxAttempts },
   };
   inFlight.set(row.id, name);
   try {
     let result: unknown;
     try {
-      result = await reg.processor(job);
+      result = await processor(job);
     } catch (err) {
       console.error(formatJobFailure(name, { id: row.id, attemptsMade: row.attempts }, err));
       captureException(err, { queue: name, jobId: row.id });
-      await failJob(sql, row, err instanceof Error ? err.message : String(err), WORKER_ID).catch((e: unknown) =>
-        console.error(`[${name}] could not record the failure of job=${row.id}: ${e instanceof Error ? e.message : e}`),
-      );
-      return;
+      return await failJob(sql, row, err instanceof Error ? err.message : String(err), workerId).catch((e: unknown) => {
+        console.error(`[${name}] could not record the failure of job=${row.id}: ${e instanceof Error ? e.message : e}`);
+        return row.attempts < row.maxAttempts ? ('retry' as const) : ('failed' as const);
+      });
     }
     // Outside the processor's catch: a DB blip here must not turn work that
     // succeeded into a failure. If it cannot be recorded, stall recovery
     // re-queues the job later (consumers are idempotent).
-    await completeJob(sql, row.id, WORKER_ID, result).catch((e: unknown) =>
+    await completeJob(sql, row.id, workerId, result).catch((e: unknown) =>
       console.error(`[${name}] could not record the completion of job=${row.id}: ${e instanceof Error ? e.message : e}`),
     );
+    return 'done';
   } finally {
     inFlight.delete(row.id);
   }
@@ -415,6 +440,29 @@ async function firstTickAt(sql: Sql, s: Schedule, now: Date): Promise<number> {
   return s.firstTickAt;
 }
 
+/** Record `dedupeKey`'s slot as run-and-skipped (a done row): it is never fired or caught up later. */
+async function recordSkippedSlot(sql: Sql, s: Schedule, dedupeKey: string, skipped: string): Promise<void> {
+  await sql`
+    INSERT INTO job_queue (queue, payload, status, dedupe_key, finished_at, result)
+    VALUES (${s.queue}, ${sql.json(s.template.data as never)}, 'done', ${dedupeKey}, now(), ${sql.json({ skipped })})
+    ON CONFLICT (queue, dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING`;
+}
+
+/** The registered schedules (id + queue), e.g. to validate SERVERLESS_CRON_SKIP's names. */
+export function registeredSchedules(): Array<{ id: string; queue: string }> {
+  return [...schedules.values()].map((s) => ({ id: s.id, queue: s.queue }));
+}
+
+export interface TickOptions {
+  /**
+   * Schedules not to fire this tick (the serverless runner's SERVERLESS_CRON_SKIP).
+   * A skipped pattern slot is recorded as done with `{ skipped: skipReason }`, so it
+   * is not caught up once the skip is lifted; a skipped every-N slot just passes.
+   */
+  skip?: (s: { id: string; queue: string }) => boolean;
+  skipReason?: string;
+}
+
 /**
  * Turn due slots into jobs. Exactly one job per (schedule, slot) across all
  * workers. A missed slot is caught up — except a slot from BEFORE the schedule
@@ -423,7 +471,7 @@ async function firstTickAt(sql: Sql, s: Schedule, now: Date): Promise<number> {
  * replayed. The first tick is recorded even when nothing is due, so a slot
  * missed any time after the cutover (the Mac asleep at 06:00) is caught up.
  */
-export async function tickSchedules(sql: Sql, now = new Date()): Promise<string[]> {
+export async function tickSchedules(sql: Sql, now = new Date(), opts: TickOptions = {}): Promise<string[]> {
   const fired: string[] = [];
   for (const s of schedules.values()) {
     // every-N schedules are never caught up, so they need no first-tick record.
@@ -431,15 +479,18 @@ export async function tickSchedules(sql: Sql, now = new Date()): Promise<string[
     const due = dueSlot(s.repeat, now);
     if (due === null || due.at === s.lastSlot) continue;
     const dedupeKey = `${cronKeyPrefix(s.id)}${due.label}`;
+    if (opts.skip?.({ id: s.id, queue: s.queue })) {
+      const reason = opts.skipReason ?? 'skipped';
+      if ('pattern' in s.repeat) await recordSkippedSlot(sql, s, dedupeKey, reason);
+      s.lastSlot = due.at;
+      console.log(`[cron] ${s.id}: slot ${due.label} skipped (${reason})`);
+      continue;
+    }
     if (due.catchUp && due.at < since) {
       const [seen] = await sql`
         SELECT 1 FROM job_queue WHERE queue = ${s.queue} AND starts_with(dedupe_key, ${cronKeyPrefix(s.id)}) LIMIT 1`;
       if (!seen) {
-        await sql`
-          INSERT INTO job_queue (queue, payload, status, dedupe_key, finished_at, result)
-          VALUES (${s.queue}, ${sql.json(s.template.data as never)}, 'done', ${dedupeKey}, now(),
-                  ${sql.json({ skipped: 'first tick of this schedule: a slot before it is not replayed' })})
-          ON CONFLICT (queue, dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING`;
+        await recordSkippedSlot(sql, s, dedupeKey, 'first tick of this schedule: a slot before it is not replayed');
         s.lastSlot = due.at;
         continue;
       }

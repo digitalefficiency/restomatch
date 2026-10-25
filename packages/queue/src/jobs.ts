@@ -169,6 +169,67 @@ export async function claimAny<T = unknown>(sql: Sql, queues: string[], workerId
   return rows[0] ? toJob<T>(rows[0]) : null;
 }
 
+/**
+ * claimAny, but never while another job of the same queue AND tenant
+ * (restaurant_id; NULL for the scheduled all-tenant jobs) is running — the
+ * worker's per-queue concurrency of 1, kept across processes.
+ *
+ * Within one worker process its dispatcher already runs one job per queue at a
+ * time; across processes — serverless runners (the web's cron route and its
+ * after() kicks) and a worker process, all at once — only this claim keeps it.
+ * Both the serverless runner and the worker's dispatcher claim through here: two
+ * match-invoice jobs of the same invoice running side by side could both write a
+ * match run (the job checks for an earlier run, then inserts — fine
+ * sequentially, not in parallel).
+ *
+ * Claims are serialized by a transaction-scoped advisory lock taken in its OWN
+ * statement first: under READ COMMITTED each statement sees the data committed
+ * before it starts, so the claim statement that follows sees every claim that
+ * committed while it waited for the lock (a single-statement check could not).
+ * A short explicit transaction works through the Supabase transaction pooler.
+ * An active job whose lock is older than `stallMs` belongs to a dead runner and
+ * does not block its group (stall recovery re-queues it).
+ *
+ * The price, accepted: a runner killed mid-job (a worker restart, a function cut
+ * off at maxDuration) blocks that queue + tenant — for the all-tenant jobs, the
+ * whole queue — until its lock is `stallMs` old (2 min). Latency only: nothing is
+ * lost or run twice. Treating a younger lock as dead would let two jobs of one
+ * tenant run side by side after a single slow lock renewal (renewed every 30 s).
+ */
+export async function claimAnySerial<T = unknown>(
+  sql: Sql,
+  queues: string[],
+  workerId: string,
+  stallMs: number,
+): Promise<JobRow<T> | null> {
+  if (queues.length === 0) return null;
+  const rows = await sql.begin(async (tx) => {
+    await tx`SELECT pg_advisory_xact_lock(hashtext(${CLAIM_LOCK}))`;
+    return tx<RawRow[]>`
+      UPDATE job_queue
+         SET status = 'active', locked_at = now(), locked_by = ${workerId}, attempts = attempts + 1
+       WHERE id = (
+         SELECT j.id FROM job_queue j
+          WHERE j.queue = ANY(${queues}::text[]) AND j.status = 'queued' AND j.run_at <= now()
+            AND NOT EXISTS (
+              SELECT 1 FROM job_queue a
+               WHERE a.queue = j.queue AND a.status = 'active'
+                 AND a.restaurant_id IS NOT DISTINCT FROM j.restaurant_id
+                 AND a.locked_at > now() - ${stallMs} * interval '1 millisecond'
+            )
+          ORDER BY j.run_at, j.id
+          FOR UPDATE SKIP LOCKED
+          LIMIT 1
+       )
+      RETURNING *`;
+  });
+  const row = (rows as unknown as RawRow[])[0];
+  return row ? toJob<T>(row) : null;
+}
+
+/** The advisory-lock name claimAnySerial serializes on. */
+const CLAIM_LOCK = 'restomatch:job_queue:claim';
+
 /** JSON-safe copy of a processor's return value (undefined → null; unserializable → a note). */
 function toJsonResult(value: unknown): postgres.JSONValue {
   if (value === undefined) return null;

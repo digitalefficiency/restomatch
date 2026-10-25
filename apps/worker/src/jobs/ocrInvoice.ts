@@ -11,7 +11,7 @@ import {
 } from '@restomatch/ocr';
 import { enqueueMatchInvoice } from '@restomatch/queue';
 import type { OcrInvoiceJob } from '@restomatch/types';
-import { makeWorker } from '../queue';
+import { makeWorker, type WorkerJob } from '../queue';
 import { jobDb } from '../db';
 import { findJobInvoice } from './findJobInvoice';
 
@@ -52,182 +52,185 @@ function buildProviders(job: OcrInvoiceJob): { documentAi: OcrProvider; claude: 
 }
 
 export function startOcrInvoiceWorker() {
-  return makeWorker<OcrInvoiceJob>('ocr-invoice', async (job) => {
-    const url = process.env.DATABASE_URL;
-    if (!url) throw new Error('DATABASE_URL is required');
-    const db = jobDb(url);
+  return makeWorker<OcrInvoiceJob>('ocr-invoice', processOcrInvoice);
+}
 
-    // Tenant guard: job payloads are not a trust boundary — verify the invoice
-    // belongs to the payload's restaurant, and take supplierId from the verified
-    // row rather than the payload. Re-read briefly first: the producer enqueues
-    // before its transaction commits the row.
-    const invoice = await findJobInvoice(db, job.data.restaurantId, job.data.invoiceId);
-    if (!invoice) {
-      throw new Error(
-        `[ocr-invoice] invoice=${job.data.invoiceId} not found in restaurant=${job.data.restaurantId} — refusing to process`,
-      );
-    }
+/** The ocr-invoice job: run by the worker loop (above) and by the serverless runner (handlers.ts). */
+export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error('DATABASE_URL is required');
+  const db = jobDb(url);
 
-    try {
-      // Authoritative usage metering — counts the scan and enforces the plan's
-      // monthly OCR cap here at the worker (race-safe), so the limit can't be
-      // bypassed by enqueuing jobs directly. No-op for restaurants without a
-      // billing account (implicit trial). Throws QuotaExceededError when over cap.
-      await meterOcrScan(db, job.data.restaurantId);
+  // Tenant guard: job payloads are not a trust boundary — verify the invoice
+  // belongs to the payload's restaurant, and take supplierId from the verified
+  // row rather than the payload. Re-read briefly first: the producer enqueues
+  // before its transaction commits the row.
+  const invoice = await findJobInvoice(db, job.data.restaurantId, job.data.invoiceId);
+  if (!invoice) {
+    throw new Error(
+      `[ocr-invoice] invoice=${job.data.invoiceId} not found in restaurant=${job.data.restaurantId} — refusing to process`,
+    );
+  }
 
-      const providers = buildProviders(job.data);
+  try {
+    // Authoritative usage metering — counts the scan and enforces the plan's
+    // monthly OCR cap here at the worker (race-safe), so the limit can't be
+    // bypassed by enqueuing jobs directly. No-op for restaurants without a
+    // billing account (implicit trial). Throws QuotaExceededError when over cap.
+    await meterOcrScan(db, job.data.restaurantId);
 
-      const matcher: CatalogMatcherFn = async (line) => {
-        const embedding = await embedder.embed(line.rawDescription);
-        const candidates = await matchProductTopN(
-          db,
-          {
-            restaurantId: job.data.restaurantId,
-            supplierId: invoice.supplierId,
-            rawDescription: line.rawDescription,
-            // מק״ט from the invoice — strategy-0 exact key when the supplier prints it.
-            supplierSku: line.sku ?? undefined,
-            embedding,
-          },
-          3,
-        );
-        return candidates.map((c) => ({
-          productId: c.productId,
-          canonicalName: c.canonicalName,
-          confidence: c.confidence,
-          matchedBy: c.matchedBy,
-        }));
-      };
+    const providers = buildProviders(job.data);
 
-      // Per-restaurant review threshold (falls back to pipeline default)
-      const restaurant = await db
-        .select({ settings: restaurants.settings })
-        .from(restaurants)
-        .where(eq(restaurants.id, job.data.restaurantId))
-        .limit(1);
-      const reviewThreshold = restaurant[0]?.settings?.ocrReviewThreshold;
-
-      const result = await runOcrPipeline(job.data.imageUrl, {
-        ...providers,
-        catalogMatcher: matcher,
-        ...(reviewThreshold !== undefined ? { reviewThreshold } : {}),
-      });
-
-      const r = result.reconciled;
-      // The receipt this photo was taken on — so a receipt submit claims exactly
-      // its own scans (receiving/matchTriggers), never a same-day sibling's.
-      const scanGrId = await scanReceiptToStamp(db, job.data.restaurantId, job.data.grId, invoice.supplierId);
-      const { duplicateOf } = await writeOcrHeader(
+    const matcher: CatalogMatcherFn = async (line) => {
+      const embedding = await embedder.embed(line.rawDescription);
+      const candidates = await matchProductTopN(
         db,
         {
           restaurantId: job.data.restaurantId,
-          invoiceId: job.data.invoiceId,
           supplierId: invoice.supplierId,
+          rawDescription: line.rawDescription,
+          // מק״ט from the invoice — strategy-0 exact key when the supplier prints it.
+          supplierSku: line.sku ?? undefined,
+          embedding,
         },
-        {
-          invoiceNumber: r.invoiceNumber ?? null,
-          invoiceDate: r.invoiceDate ? new Date(r.invoiceDate) : null,
-          totalExclVat: r.totals.subtotal?.toString() ?? null,
-          vatAmount: r.totals.vat?.toString() ?? null,
-          totalInclVat: r.totals.total?.toString() ?? null,
-          allocationNumber: r.allocationNumber ?? null,
-          ocrPayload: {
-            provider: 'reconciled',
-            raw: withScanGrId(result, scanGrId),
-            reconciledAt: new Date().toISOString(),
-          },
-          ocrConfidence: result.confidence.toString(),
-          status: result.needsHumanReview ? 'parsed' : 'matched',
-        },
+        3,
       );
-      // A number already on file holds the invoice for a human (no auto-match).
-      const needsHumanReview = result.needsHumanReview || duplicateOf !== undefined;
+      return candidates.map((c) => ({
+        productId: c.productId,
+        canonicalName: c.canonicalName,
+        confidence: c.confidence,
+        matchedBy: c.matchedBy,
+      }));
+    };
 
-      await db.delete(invoiceLines).where(eq(invoiceLines.invoiceId, job.data.invoiceId));
-      if (r.lines.length > 0) {
-        await db.insert(invoiceLines).values(
-          r.lines.map((line) => ({
-            invoiceId: job.data.invoiceId,
-            productId: line.productId,
-            supplierSku: line.sku ?? null,
-            rawDescription: line.rawDescription,
-            // "Receiver in English": Claude Vision returns it in the same call.
-            rawDescriptionEn: line.rawDescriptionEn ?? null,
-            qtyBilled: line.qty.toString(),
-            unit: line.unit,
-            unitPriceBilled: line.unitPrice.toString(),
-            lineTotal: line.lineTotal.toString(),
-            vatRate: line.vatRate?.toString() ?? null,
-            ocrConfidenceLine: line.confidence?.toString() ?? null,
-          })),
-        );
-      }
+    // Per-restaurant review threshold (falls back to pipeline default)
+    const restaurant = await db
+      .select({ settings: restaurants.settings })
+      .from(restaurants)
+      .where(eq(restaurants.id, job.data.restaurantId))
+      .limit(1);
+    const reviewThreshold = restaurant[0]?.settings?.ocrReviewThreshold;
 
-      // Fill any English the extraction didn't carry (stub / Document AI lines)
-      // plus the linked products' name_en — glossary first, Claude only when
-      // keyed. Display-only; a failure here must never fail the OCR job.
-      try {
-        await fillEnglishNames(db, job.data.restaurantId, { invoiceId: job.data.invoiceId });
-      } catch (err) {
-        console.warn(`[ocr-invoice] English fill failed for invoice=${job.data.invoiceId}`, err);
-      }
+    const result = await runOcrPipeline(job.data.imageUrl, {
+      ...providers,
+      catalogMatcher: matcher,
+      ...(reviewThreshold !== undefined ? { reviewThreshold } : {}),
+    });
 
-      console.log(
-        `[ocr-invoice] restaurant=${job.data.restaurantId} invoice=${job.data.invoiceId} ` +
-          `confidence=${result.confidence.toFixed(2)} conflicts=${result.conflicts.length} ` +
-          `lines=${r.lines.length} needsReview=${needsHumanReview}` +
-          (duplicateOf !== undefined ? ` duplicateOf=${duplicateOf ?? 'unknown'}` : ''),
-      );
-
-      // Chain into the 3-way PO↔invoice match when OCR is confident enough to
-      // auto-proceed. Low-confidence (parsed / needs-review) invoices wait for a
-      // human to confirm product matches first (match.runForInvoice on demand).
-      // A queue failure must never break the OCR persistence above.
-      const decision: OcrMatchHold = needsHumanReview
-        ? { match: false }
-        : await ocrAutoMatchHold(db, job.data.restaurantId, job.data.grId, { invoiceId: job.data.invoiceId });
-      // Held for a receipt's count: say so on the invoice, so the owner's screens show
-      // "waiting for the count", not "waiting to be linked to an order" (#94).
-      if (decision.heldFor?.length) {
-        await markHeldForCount(db, job.data.restaurantId, job.data.invoiceId, decision.heldFor);
-      }
-      if (decision.match) {
-        try {
-          // A variable, not a literal: compiles on either queue job shape (#49).
-          const matchJob: Parameters<typeof enqueueMatchInvoice>[0] & { poId?: string } = {
-            restaurantId: job.data.restaurantId,
-            invoiceId: job.data.invoiceId,
-            ...(decision.poId ? { poId: decision.poId } : {}),
-          };
-          await enqueueMatchInvoice(matchJob);
-        } catch (err) {
-          console.warn(
-            `[ocr-invoice] failed to enqueue match for invoice=${job.data.invoiceId}`,
-            err,
-          );
-        }
-      }
-
-      return {
+    const r = result.reconciled;
+    // The receipt this photo was taken on — so a receipt submit claims exactly
+    // its own scans (receiving/matchTriggers), never a same-day sibling's.
+    const scanGrId = await scanReceiptToStamp(db, job.data.restaurantId, job.data.grId, invoice.supplierId);
+    const { duplicateOf } = await writeOcrHeader(
+      db,
+      {
+        restaurantId: job.data.restaurantId,
         invoiceId: job.data.invoiceId,
-        confidence: result.confidence,
-        needsHumanReview,
-        conflicts: result.conflicts.length,
-        lines: r.lines.length,
-      };
+        supplierId: invoice.supplierId,
+      },
+      {
+        invoiceNumber: r.invoiceNumber ?? null,
+        invoiceDate: r.invoiceDate ? new Date(r.invoiceDate) : null,
+        totalExclVat: r.totals.subtotal?.toString() ?? null,
+        vatAmount: r.totals.vat?.toString() ?? null,
+        totalInclVat: r.totals.total?.toString() ?? null,
+        allocationNumber: r.allocationNumber ?? null,
+        ocrPayload: {
+          provider: 'reconciled',
+          raw: withScanGrId(result, scanGrId),
+          reconciledAt: new Date().toISOString(),
+        },
+        ocrConfidence: result.confidence.toString(),
+        status: result.needsHumanReview ? 'parsed' : 'matched',
+      },
+    );
+    // A number already on file holds the invoice for a human (no auto-match).
+    const needsHumanReview = result.needsHumanReview || duplicateOf !== undefined;
+
+    await db.delete(invoiceLines).where(eq(invoiceLines.invoiceId, job.data.invoiceId));
+    if (r.lines.length > 0) {
+      await db.insert(invoiceLines).values(
+        r.lines.map((line) => ({
+          invoiceId: job.data.invoiceId,
+          productId: line.productId,
+          supplierSku: line.sku ?? null,
+          rawDescription: line.rawDescription,
+          // "Receiver in English": Claude Vision returns it in the same call.
+          rawDescriptionEn: line.rawDescriptionEn ?? null,
+          qtyBilled: line.qty.toString(),
+          unit: line.unit,
+          unitPriceBilled: line.unitPrice.toString(),
+          lineTotal: line.lineTotal.toString(),
+          vatRate: line.vatRate?.toString() ?? null,
+          ocrConfidenceLine: line.confidence?.toString() ?? null,
+        })),
+      );
+    }
+
+    // Fill any English the extraction didn't carry (stub / Document AI lines)
+    // plus the linked products' name_en — glossary first, Claude only when
+    // keyed. Display-only; a failure here must never fail the OCR job.
+    try {
+      await fillEnglishNames(db, job.data.restaurantId, { invoiceId: job.data.invoiceId });
     } catch (err) {
-      // EN-3: a failed OCR used to leave the invoice in 'ocr_pending' forever
-      // (the receiver's wizard spun until it gave up). On the FINAL attempt
-      // move it to a terminal, reviewable state the UI can show.
-      const raw = job as { attemptsMade?: number; opts?: { attempts?: number } };
-      if ((raw.attemptsMade ?? 0) + 1 >= (raw.opts?.attempts ?? 1)) {
-        await markOcrFailed(db, job.data.restaurantId, job.data.invoiceId, err).catch((e) =>
-          console.error(`[ocr-invoice] could not mark invoice=${job.data.invoiceId} failed`, e),
+      console.warn(`[ocr-invoice] English fill failed for invoice=${job.data.invoiceId}`, err);
+    }
+
+    console.log(
+      `[ocr-invoice] restaurant=${job.data.restaurantId} invoice=${job.data.invoiceId} ` +
+        `confidence=${result.confidence.toFixed(2)} conflicts=${result.conflicts.length} ` +
+        `lines=${r.lines.length} needsReview=${needsHumanReview}` +
+        (duplicateOf !== undefined ? ` duplicateOf=${duplicateOf ?? 'unknown'}` : ''),
+    );
+
+    // Chain into the 3-way PO↔invoice match when OCR is confident enough to
+    // auto-proceed. Low-confidence (parsed / needs-review) invoices wait for a
+    // human to confirm product matches first (match.runForInvoice on demand).
+    // A queue failure must never break the OCR persistence above.
+    const decision: OcrMatchHold = needsHumanReview
+      ? { match: false }
+      : await ocrAutoMatchHold(db, job.data.restaurantId, job.data.grId, { invoiceId: job.data.invoiceId });
+    // Held for a receipt's count: say so on the invoice, so the owner's screens show
+    // "waiting for the count", not "waiting to be linked to an order" (#94).
+    if (decision.heldFor?.length) {
+      await markHeldForCount(db, job.data.restaurantId, job.data.invoiceId, decision.heldFor);
+    }
+    if (decision.match) {
+      try {
+        // A variable, not a literal: compiles on either queue job shape (#49).
+        const matchJob: Parameters<typeof enqueueMatchInvoice>[0] & { poId?: string } = {
+          restaurantId: job.data.restaurantId,
+          invoiceId: job.data.invoiceId,
+          ...(decision.poId ? { poId: decision.poId } : {}),
+        };
+        await enqueueMatchInvoice(matchJob);
+      } catch (err) {
+        console.warn(
+          `[ocr-invoice] failed to enqueue match for invoice=${job.data.invoiceId}`,
+          err,
         );
       }
-      throw err;
     }
-  });
+
+    return {
+      invoiceId: job.data.invoiceId,
+      confidence: result.confidence,
+      needsHumanReview,
+      conflicts: result.conflicts.length,
+      lines: r.lines.length,
+    };
+  } catch (err) {
+    // EN-3: a failed OCR used to leave the invoice in 'ocr_pending' forever
+    // (the receiver's wizard spun until it gave up). On the FINAL attempt
+    // move it to a terminal, reviewable state the UI can show.
+    const raw = job as { attemptsMade?: number; opts?: { attempts?: number } };
+    if ((raw.attemptsMade ?? 0) + 1 >= (raw.opts?.attempts ?? 1)) {
+      await markOcrFailed(db, job.data.restaurantId, job.data.invoiceId, err).catch((e) =>
+        console.error(`[ocr-invoice] could not mark invoice=${job.data.invoiceId} failed`, e),
+      );
+    }
+    throw err;
+  }
 }
 
 type InvoiceHeader = Pick<

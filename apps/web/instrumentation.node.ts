@@ -27,6 +27,12 @@ export async function registerNode(): Promise<void> {
   const { registerAskRateLimit } = await import('./lib/askRateLimit');
   registerAskRateLimit();
 
+  // Serverless jobs (no worker process): a request that enqueues OCR / match /
+  // catalog work runs it right after its response (after()); everything else —
+  // and anything a kick could not finish — runs from /api/cron/jobs every minute.
+  const { registerJobKick } = await import('./lib/jobKick');
+  registerJobKick();
+
   // Tenant-boundary boot guards (Epic 0.1/0.3). Only meaningful when we are
   // actually serving tenant traffic on the app role: in production the role is
   // mandatory; in dev we still run the guard when DATABASE_URL_APP is set (to
