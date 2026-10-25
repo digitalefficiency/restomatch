@@ -224,8 +224,8 @@ export function ProductEditor({
                 <th scope="col" className="px-4 py-3 text-start font-medium">{t('prices.supplier')}</th>
                 <th scope="col" className="hidden px-4 py-3 text-start font-medium sm:table-cell">{t('prices.sku')}</th>
                 <th scope="col" className="hidden px-4 py-3 text-start font-medium sm:table-cell">{t('prices.unit')}</th>
-                <th scope="col" className="hidden px-4 py-3 text-end font-medium sm:table-cell">{t('prices.listPrice')}</th>
-                <th scope="col" className="px-4 py-3 text-end font-medium">{unitLabel}</th>
+                <th scope="col" className="hidden px-4 py-3 text-right font-medium sm:table-cell">{t('prices.listPrice')}</th>
+                <th scope="col" className="px-4 py-3 text-right font-medium">{unitLabel}</th>
                 <th scope="col" className="px-4 py-3 text-start font-medium">{t('prices.status')}</th>
               </tr>
             </thead>
@@ -260,8 +260,8 @@ export function ProductEditor({
                       </span>
                     ) : null}
                   </td>
-                  <td className="hidden px-4 py-3 text-end tabular-nums text-muted sm:table-cell">{money(it.listPrice)}</td>
-                  <td className="px-4 py-3 text-end tabular-nums text-ink" data-testid="unit-price">
+                  <td className="hidden px-4 py-3 text-right tabular-nums text-muted sm:table-cell">{money(it.listPrice)}</td>
+                  <td className="px-4 py-3 text-right tabular-nums text-ink" data-testid="unit-price">
                     {it.unitPricePerDefaultUnit != null ? (
                       <span className="font-semibold">{money(it.unitPricePerDefaultUnit)}</span>
                     ) : (
@@ -305,7 +305,7 @@ export function ProductEditor({
                 <tr className="border-b border-line text-xs text-subtle ltr:uppercase ltr:tracking-wide">
                   <th scope="col" className="px-4 py-3 text-start font-medium">{t('history.date')}</th>
                   <th scope="col" className="px-4 py-3 text-start font-medium">{t('history.supplier')}</th>
-                  <th scope="col" className="px-4 py-3 text-end font-medium">{t('history.unitPrice')}</th>
+                  <th scope="col" className="px-4 py-3 text-right font-medium">{t('history.unitPrice')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -319,7 +319,7 @@ export function ProductEditor({
                       <td className="px-4 py-2.5 text-ink">
                         {s ? displayName(s.name, s.nameEn, locale).primary : t('history.unknownSupplier')}
                       </td>
-                      <td className="px-4 py-2.5 text-end tabular-nums text-ink">{money(h.unitPrice)}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-ink">{money(h.unitPrice)}</td>
                     </tr>
                   );
                 })}

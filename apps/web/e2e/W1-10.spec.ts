@@ -116,6 +116,8 @@ test('import: "1,250" → ₪1,250.00, "-5" held, VAT basis required, ₪ on the
   await expect(imported.first()).toContainText('1,250.00');
   await expect(imported.nth(1)).toContainText('12.90');
   expect(await shekelIsLeftOfDigits(imported.first())).toBe(true);
+  // Owner decision: numbers in tables are always physically right-aligned (he and en).
+  expect(await imported.first().evaluate((el) => getComputedStyle(el).textAlign)).toBe('right');
   await expect(page.getByText('מחיר לא ברור · 1 שורות לא ייובאו')).toBeVisible();
   if (SHOTS) {
     mkdirSync(SHOTS, { recursive: true });

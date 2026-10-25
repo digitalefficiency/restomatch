@@ -234,7 +234,7 @@ export const en: Shape<typeof he> = {
     createNew: 'Create new product: {name}',
     linking: 'Linking and updating lines…',
     linked: 'Linked · {count} lines · {invoices} invoices sent for a re-check',
-    linkedBlocked: '{count} invoices with an open credit claim weren’t re-checked. Re-run their match from the invoice page.',
+    linkedBlocked: '{count} invoices with an open credit request weren’t re-checked. Re-run their match from the invoice page.',
     linkedFailed: 'The re-check of {count} invoices didn’t start. Try linking again in a moment.',
     undo: 'Undo',
     undoLabel: 'Undo the link of SKU {sku}',

@@ -691,13 +691,13 @@ function PriceCheck({
               <th scope="col" className="px-3 py-2 text-start font-medium">
                 {t('import.check.name')}
               </th>
-              <th scope="col" className="px-3 py-2 text-end font-medium">
+              <th scope="col" className="px-3 py-2 text-right font-medium">
                 {t('import.check.inFile')}
               </th>
-              <th scope="col" className="px-3 py-2 text-end font-medium">
+              <th scope="col" className="px-3 py-2 text-right font-medium">
                 {t('import.check.imported')}
               </th>
-              <th scope="col" className="hidden px-3 py-2 text-end font-medium sm:table-cell">
+              <th scope="col" className="hidden px-3 py-2 text-right font-medium sm:table-cell">
                 {t('import.check.current')}
               </th>
               <th scope="col" className="px-3 py-2 text-start font-medium">
@@ -717,11 +717,11 @@ function PriceCheck({
                 >
                   {r.supplierNameRaw}
                 </td>
-                <td className="whitespace-nowrap px-3 py-1.5 text-end text-subtle">
+                <td className="whitespace-nowrap px-3 py-1.5 text-right text-subtle">
                   <bdi>{r.rawPrice ?? '—'}</bdi>
                 </td>
                 <td
-                  className="whitespace-nowrap px-3 py-1.5 text-end font-semibold tabular-nums text-ink"
+                  className="whitespace-nowrap px-3 py-1.5 text-right font-semibold tabular-nums text-ink"
                   data-testid="imported-price"
                 >
                   {r.price == null ? (
@@ -730,7 +730,7 @@ function PriceCheck({
                     money(r.price)
                   )}
                 </td>
-                <td className="hidden whitespace-nowrap px-3 py-1.5 text-end tabular-nums text-muted sm:table-cell">
+                <td className="hidden whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-muted sm:table-cell">
                   {money(r.currentPrice)}
                 </td>
                 <td className="px-3 py-1.5 text-xs">

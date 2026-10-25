@@ -391,7 +391,7 @@ export function CatalogBrowser({
                 <th scope="col" className={th}>{t('columns.nameEn')}</th>
                 <th scope="col" className={th}>{t('columns.sku')}</th>
                 <th scope="col" className={th}>{t('columns.unit')}</th>
-                <th scope="col" className={cn(th, 'text-end')}>{t('columns.listPrice')}</th>
+                <th scope="col" className={cn(th, 'text-right')}>{t('columns.listPrice')}</th>
                 {canEdit && (
                   <th scope="col" className={th}>
                     <span className="sr-only">{t('columns.actions')}</span>
@@ -449,7 +449,7 @@ export function CatalogBrowser({
                       onKeyDown={onRowKey(submitCreate, () => setCreating(false))}
                       placeholder="₪"
                       aria-label={t('columns.listPrice')}
-                      className="text-end text-base"
+                      className="text-right text-base"
                     />
                   </td>
                   <td className="px-4 py-2">
@@ -542,7 +542,7 @@ export function CatalogBrowser({
                         <UnitText unit={it.unit} />
                       )}
                     </td>
-                    <td className="px-4 py-3 text-end tabular-nums text-ink">
+                    <td className="px-4 py-3 text-right tabular-nums text-ink">
                       {editing ? (
                         <Input
                           type="text"
@@ -555,7 +555,7 @@ export function CatalogBrowser({
                           title={t('item.priceHint')}
                           onKeyDown={onRowKey(() => saveEdit(it), cancelEdit)}
                           aria-label={t('columns.listPrice')}
-                          className="text-end text-base"
+                          className="text-right text-base"
                         />
                       ) : (
                         money(it.listPrice)
@@ -723,7 +723,7 @@ function MobileCards({
           onChange={(e) => set({ ...d, listPrice: e.target.value })}
           onBlur={(e) => set({ ...d, listPrice: formatPriceInput(e.target.value) })}
           placeholder="₪"
-          className="mt-0.5 text-end text-base tabular-nums"
+          className="mt-0.5 text-right text-base tabular-nums"
         />
       </label>
     </div>
