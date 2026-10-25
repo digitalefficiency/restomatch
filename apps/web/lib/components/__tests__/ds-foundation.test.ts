@@ -204,6 +204,13 @@ describe('component contracts', () => {
     expect(textOf(render(h(CountBadge, { count: 140 })))).toBe('99+');
   });
 
+  it('numbers are physically right-aligned in tiles and numeric inputs (owner decision §8.15)', async () => {
+    const { MetricTile } = await import('../money/MetricTile');
+    expect(render(h(MetricTile, { label: 'x', value: '1' }))).toMatch(/data-num="true" class="[^"]*text-right/);
+    const { MoneyInput } = await import('../form/MoneyInput');
+    expect(render(h(MoneyInput, {}))).toMatch(/<input[^>]*class="[^"]*text-right/);
+  });
+
   it('creep steps flip to white text from step 4', () => {
     expect(creepStep(0).text).toBe('text-on-creep-1');
     expect(creepStep(0.7).step).toBe(4);

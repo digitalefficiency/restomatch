@@ -84,7 +84,7 @@ export function QuantityInput({
             value={text}
             aria-invalid={invalid || ariaInvalid || undefined}
             aria-describedby={[describedBy, invalid ? errorId : null].filter(Boolean).join(' ') || undefined}
-            className={cn(fieldBase, 'num w-full min-w-0 rtl:text-right', unit ? 'rounded-e-none' : '')}
+            className={cn(fieldBase, 'num w-full min-w-0 text-right', unit ? 'rounded-e-none' : '')}
             onChange={(e) => {
               setText(e.target.value);
               const parsed = parseQuantityInput(e.target.value, maxDecimals);

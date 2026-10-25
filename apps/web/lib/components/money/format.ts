@@ -8,6 +8,13 @@ import type { Locale } from '@/lib/i18n/config';
  * helpers pick its precision and split its output for styling.
  */
 
+/**
+ * Owner decision (REVIEW-REPORT §8.15): numbers and ₪ in tables, tiles and
+ * numeric inputs are ALWAYS physically right-aligned, in Hebrew and English
+ * (R-1). The one allow-listed physical class; use it on numeric cells/values.
+ */
+export const NUM_ALIGN = 'text-right';
+
 export type MoneyContext = 'hero' | 'tile' | 'line' | 'unit' | 'inline';
 
 /** Precision contract (B3): hero/tile/inline 0 dp · line 2 dp · unit 4 dp. */

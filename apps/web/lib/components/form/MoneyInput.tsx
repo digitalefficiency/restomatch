@@ -67,7 +67,7 @@ export function MoneyInput({
           value={text}
           aria-invalid={invalid || ariaInvalid || undefined}
           aria-describedby={[describedBy, invalid ? errorId : null].filter(Boolean).join(' ') || undefined}
-          className={cn(fieldBase, 'num w-full min-w-0 rounded-s-none rtl:text-right')}
+          className={cn(fieldBase, 'num w-full min-w-0 rounded-s-none text-right')}
           onChange={(e) => {
             const next = e.target.value;
             setText(next);

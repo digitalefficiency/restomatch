@@ -15,7 +15,7 @@ import { Money } from './money/Money';
  *
  * Money or data deletions name what is at stake (C10, R-8): pass `amount`
  * (shekels) and `party` and the dialog shows "‏1,240.00 ₪ · תנובה" above the
- * buttons; the confirm label should name them too ("מחק ₪1,240 מהדרישה לתנובה").
+ * buttons; the confirm label should name them too ("מחיקת ₪1,240 מדרישת הזיכוי לתנובה").
  */
 export function ConfirmDialog({
   open,

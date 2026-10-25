@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { moneyStates } from '@restomatch/ui-tokens';
 import { cn } from '../cn';
 import { Skeleton } from '../Skeleton';
+import { NUM_ALIGN } from './format';
 
 const FIGURE = { ink: 'text-ink', muted: 'text-muted', gold: 'text-gold', primary: 'text-primary' } as const;
 
@@ -57,7 +58,7 @@ export function MetricTile({
       ) : unavailable ? (
         <p className="text-body-sm text-muted">{unavailable}</p>
       ) : (
-        <div className={cn('min-w-0 break-words text-metric-lg', state ? FIGURE[moneyStates[state].figure] : 'text-ink')}>
+        <div data-num className={cn('min-w-0 break-words text-metric-lg', NUM_ALIGN, state ? FIGURE[moneyStates[state].figure] : 'text-ink')}>
           {value}
         </div>
       )}

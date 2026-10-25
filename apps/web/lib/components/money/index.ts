@@ -8,4 +8,4 @@ export { DateTime } from './DateTime';
 export type { DateTimeVariant } from './DateTime';
 export { MetricTile } from './MetricTile';
 export { DeadlineChip } from './DeadlineChip';
-export { MONEY_DECIMALS, type MoneyContext } from './format';
+export { MONEY_DECIMALS, NUM_ALIGN, type MoneyContext } from './format';
