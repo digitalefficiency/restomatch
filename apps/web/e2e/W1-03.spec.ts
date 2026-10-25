@@ -172,10 +172,11 @@ test('bookkeeper: pay run, ledger, integrations and claims are in the sidebar; n
 
 test('client navigation: title changes, the route is announced, focus moves to the h1', async ({ browser, baseURL }) => {
   const page = await open(browser, baseURL!, 'owner', 'he', DESK);
-  await expect(page).toHaveTitle('בית · כפר הזיתים — RestoMatch');
+  // The branch shows only with ≥2 memberships (the lab reseed has two, the e2e seed one).
+  await expect(page).toHaveTitle(/^בית( · .+)? — RestoMatch$/);
   await page.getByTestId('sidebar').locator('a[href="/dashboard/approvals"]').click();
   await page.waitForURL('**/dashboard/approvals');
-  await expect(page).toHaveTitle('אישורים · כפר הזיתים — RestoMatch');
+  await expect(page).toHaveTitle(/^אישורים( · .+)? — RestoMatch$/);
   await expect
     .poll(() => page.evaluate(() => document.querySelector('next-route-announcer')?.shadowRoot?.textContent ?? ''))
     .toContain('אישורים');
@@ -207,9 +208,10 @@ test('"עוד" sheet: modal (0 of 45 Tab stops escape), Esc returns focus to the
     if (!(await page.evaluate(() => !!document.activeElement?.closest('#dashboard-drawer')))) escaped += 1;
   }
   expect(escaped).toBe(0);
-  // Help, accessibility statement and contact sit in the sheet; the branch list too (2 memberships).
+  // Help, accessibility statement and contact sit in the sheet; the branch list too with ≥2 memberships.
   await expect(sheet.getByTestId('support-links-sheet').locator('a')).toHaveCount(3);
-  await expect(sheet.getByTestId('branch-switcher-list')).toBeVisible();
+  const multiBranch = (await page.getByTestId('branch-switcher').count()) > 0;
+  await expect(sheet.getByTestId('branch-switcher-list')).toHaveCount(multiBranch ? 1 : 0);
   expect(await axeSerious(page)).toEqual([]);
   await page.keyboard.press('Escape');
   await expect(sheet).toBeHidden();

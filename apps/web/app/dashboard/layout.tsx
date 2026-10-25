@@ -250,7 +250,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <MoreSheet
               viewer={viewer}
               badges={badges}
-              language={languageFor('rm-lang-sheet')}
+              // 44 px targets in the sheet (the picker's class lands on its wrapper, the toggle's on itself).
+              language={languageFor('rm-lang-sheet min-h-11 [&>button]:min-h-11')}
               logout={logout}
               branchList={
                 multiBranch ? (

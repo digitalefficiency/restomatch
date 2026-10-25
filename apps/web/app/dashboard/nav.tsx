@@ -483,7 +483,7 @@ export function SupportLinks({ variant }: { variant: 'sidebar' | 'rail' | 'sheet
             prefetch={false}
             className={cn(
               'inline-flex items-center rounded hover:text-ink hover:underline',
-              variant === 'sheet' ? 'min-h-11' : 'min-h-6',
+              variant === 'sheet' ? 'min-h-11 min-w-11 justify-center px-1' : 'min-h-6',
               focusRing,
             )}
           >
