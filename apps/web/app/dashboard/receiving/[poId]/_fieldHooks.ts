@@ -224,8 +224,8 @@ export function useFieldBarOffset(el: React.RefObject<HTMLElement | null>): void
         const r = n.getBoundingClientRect();
         if (r.height > 0 && r.top > window.innerHeight / 2 && getComputedStyle(n).display !== 'none') top = Math.min(top, r.top);
       }
-      const offset = top < window.innerHeight ? `${Math.round(window.innerHeight - top)}px` : 'var(--consent-h, 0px)';
-      root.style.setProperty('--rm-field-bar-bottom', offset);
+      if (top < window.innerHeight) root.style.setProperty('--rm-field-bar-bottom', `${Math.round(window.innerHeight - top)}px`);
+      else root.style.removeProperty('--rm-field-bar-bottom'); // no bottom nav: the CSS default (lg: consent only)
     };
     measure();
     const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;

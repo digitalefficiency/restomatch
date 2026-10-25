@@ -88,6 +88,12 @@ async function grLines(poId: string) {
   }
 }
 
+/** Open a PO and wait until the wizard is interactive (a tap before hydration does nothing under `next dev`). */
+async function openPo(page: Page, poId: string) {
+  await page.goto(`/dashboard/receiving/${poId}`);
+  await page.waitForLoadState('networkidle');
+}
+
 /** Every tap the receiver makes is counted through this. */
 function tapper() {
   let taps = 0;
@@ -160,7 +166,7 @@ async function scanAndProcess(page: Page, poId: string): Promise<string> {
     }
     await route.fulfill({ response: res, json: body });
   });
-  await page.goto(`/dashboard/receiving/${poId}`);
+  await openPo(page, poId);
   await page.getByTestId('scan-input').setInputFiles({ name: 'invoice.png', mimeType: 'image/png', buffer: TINY_PNG });
   await expect(page.getByTestId('scan-process')).toBeEnabled({ timeout: 60_000 });
   await page.getByTestId('scan-process').tap();
@@ -168,14 +174,14 @@ async function scanAndProcess(page: Page, poId: string): Promise<string> {
   return invoiceId;
 }
 
-async function finishOcrAsOrdered(invoiceId: string, po: Po) {
+async function finishOcrAsOrdered(invoiceId: string, po: Po, status: 'parsed' | 'matched' = 'parsed') {
   const sql = e2eSql();
   try {
     for (const l of po.lines) {
       await sql`insert into invoice_lines (invoice_id, product_id, raw_description, qty_billed, unit, unit_price_billed, line_total, ocr_confidence_line)
                 values (${invoiceId}, ${l.productId}, ${l.name}, ${l.qty}, ${l.unit}, ${l.price}, ${Math.round(l.qty * l.price * 100) / 100}, 0.97)`;
     }
-    await sql`update invoices set status = 'parsed', ocr_confidence = 0.96, invoice_number = ${`W6-${invoiceId.slice(0, 6)}`} where id = ${invoiceId}`;
+    await sql`update invoices set status = ${status}, ocr_confidence = 0.96, invoice_number = ${`W6-${invoiceId.slice(0, 6)}`}, total_incl_vat = 999 where id = ${invoiceId}`;
   } finally {
     await sql.end();
   }
@@ -243,13 +249,15 @@ test('no invoice, everything arrived: ≤3 taps from the deliveries list, every 
   const po = await freshPo('all');
   const taps = tapper();
   await page.goto('/dashboard/receiving');
+  await page.waitForLoadState('networkidle');
   const card = page.locator(`a[href="/dashboard/receiving/${po.poId}"]`);
   if (await card.count()) await taps.tap(card.first());
   else {
     // Near midnight the fresh PO can fall outside "today": open it directly, counted as the card tap.
-    await page.goto(`/dashboard/receiving/${po.poId}`);
+    await openPo(page, po.poId);
     taps.add();
   }
+  await page.waitForLoadState('networkidle');
   await expectPrimaryInThumbZone(page, 'scan-capture');
   // The live flow never offers a demo invoice; it offers "no invoice right now".
   await expect(page.getByTestId('scan-use-demo')).toHaveCount(0);
@@ -267,7 +275,7 @@ test('no invoice, everything arrived: ≤3 taps from the deliveries list, every 
   for (const r of await grLines(po.poId)) expect(Number(r.qty)).toBe(po.lines.find((l) => l.poLineId === r.poLineId)!.qty);
 
   // Reopening a closed receipt shows what was counted — never a fresh scan step.
-  await page.goto(`/dashboard/receiving/${po.poId}`);
+  await openPo(page, po.poId);
   await expect(page.getByTestId('receipt-summary')).toBeVisible();
   await expect(page.getByTestId('scan-capture')).toHaveCount(0);
 });
@@ -275,7 +283,7 @@ test('no invoice, everything arrived: ≤3 taps from the deliveries list, every 
 test('a reload mid-count restores every mark; "חסר" is 0 received, nothing rejected', async ({ page }) => {
   test.setTimeout(120_000);
   const po = await freshPo('reload', { dockSlip: true });
-  await page.goto(`/dashboard/receiving/${po.poId}`);
+  await openPo(page, po.poId);
   await page.getByTestId('scan-no-invoice').tap();
   const [a, b] = po.lines;
   const lineA = page.getByTestId('count-line').filter({ hasText: a!.name });
@@ -290,6 +298,7 @@ test('a reload mid-count restores every mark; "חסר" is 0 received, nothing re
   await expect(page.getByRole('progressbar', { name: `2 מתוך ${po.lines.length} אושרו` })).toHaveAttribute('aria-valuenow', '2');
 
   await page.reload();
+  await page.waitForLoadState('networkidle');
   await expect(page.getByTestId('delivery-check')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('count-resumed')).toBeVisible();
   await expect(page.getByTestId('count-progress')).toHaveText(`2 מתוך ${po.lines.length} אושרו`);
@@ -312,7 +321,7 @@ test('a reload mid-count restores every mark; "חסר" is 0 received, nothing re
 test('offline: marks are kept on the phone, the leave sheet stops a silent exit, and they sync once back online', async ({ page, context }) => {
   test.setTimeout(120_000);
   const po = await freshPo('offline');
-  await page.goto(`/dashboard/receiving/${po.poId}`);
+  await openPo(page, po.poId);
   await page.getByTestId('scan-no-invoice').tap();
   await expect(page.getByTestId('delivery-check')).toBeVisible();
   const weighed = po.lines[1]!;
@@ -342,10 +351,11 @@ test('offline: marks are kept on the phone, the leave sheet stops a silent exit,
 
 test('field mode: bar in the bottom third at 390×844 and 375×667, 48 px targets, axe clean (he + en)', async ({ page }) => {
   test.setTimeout(180_000);
-  const po = await freshPo('field');
+  let po = await freshPo('field');
   for (const vp of [{ width: 390, height: 844 }, { width: 375, height: 667 }]) {
+    po = await freshPo(`field-${vp.width}`); // a fresh order opens on the capture step
     await page.setViewportSize(vp);
-    await page.goto(`/dashboard/receiving/${po.poId}`);
+    await openPo(page, po.poId);
     await expectPrimaryInThumbZone(page, 'scan-capture');
     expect(await smallTargets(page), `scan ${vp.width}`).toEqual([]);
     expect(await axe(page), `scan axe ${vp.width}`).toEqual([]);
@@ -363,7 +373,7 @@ test('field mode: bar in the bottom third at 390×844 and 375×667, 48 px target
   const url = test.info().project.use.baseURL!;
   await page.context().addCookies([{ name: 'rm_locale', value: 'en', url }]);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(`/dashboard/receiving/${po.poId}`);
+  await openPo(page, po.poId);
   await expect(page.getByTestId('delivery-check')).toBeVisible({ timeout: 30_000 }); // resumed: the receipt exists
   expect(await axe(page), 'count axe en').toEqual([]);
   await expect(page.getByTestId('count-progress')).toContainText('checked');
@@ -373,7 +383,7 @@ test('the dock slip shows ₪ left of the digits in Hebrew (no LTR isolate, no m
   test.setTimeout(180_000);
   const po = await freshPo('money', { dockSlip: true });
   const invoiceId = await scanAndProcess(page, po.poId);
-  await finishOcrAsOrdered(invoiceId, po);
+  await finishOcrAsOrdered(invoiceId, po, 'matched');
   await expect(page.getByRole('heading', { name: 'תוצאת ההצלבה' })).toBeVisible({ timeout: 60_000 });
   await page.getByTestId('continue-adjust').tap();
   await page.getByTestId('all-arrived').tap();

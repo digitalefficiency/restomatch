@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertTriangle, ArrowLeft, ArrowRight, Camera, CheckCircle2, CloudUpload, FileUp, ImageIcon, Loader2, RefreshCw } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, Camera, CheckCircle2, CloudUpload, FileText, FileUp, ImageIcon, Loader2, RefreshCw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useDir, useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
@@ -45,15 +45,6 @@ interface Props {
   eyebrow?: string;
 }
 
-/**
- * The preview is only ever an object URL of the picked file or the demo
- * invoice's inline SVG; anything else (a remote or javascript: URL) is not shown.
- */
-export function safePreviewSrc(url: string | null): string | null {
-  if (!url) return null;
-  return url.startsWith('blob:') || url.startsWith('data:image/svg+xml;') ? url : null;
-}
-
 /** One id per file selection — a retried/double-submitted upload reuses it (M8). */
 function newUploadId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
@@ -83,7 +74,10 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadFile
   const dir = useDir();
   const capturedRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(image?.url ?? null);
+  /** What the frame shows: the picked file (drawn, never put into a URL attribute), the demo page, or nothing. */
+  const [preview, setPreview] = useState<{ kind: 'file'; file: File } | { kind: 'demo' } | { kind: 'kept' } | null>(
+    image ? { kind: 'kept' } : null,
+  );
   const [upload, setUpload] = useState<UploadState>(
     image?.invoiceId ? { phase: 'uploaded', result: image } : { phase: 'idle' },
   );
@@ -98,7 +92,7 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadFile
 
   async function handleFile(file: File, skipQuality = false) {
     const localUrl = URL.createObjectURL(file);
-    setPreviewUrl(localUrl);
+    setPreview({ kind: 'file', file });
     if (!skipQuality && file.type.startsWith('image/')) {
       setUpload({ phase: 'checking' });
       const issue = await checkScanQuality(file);
@@ -187,7 +181,7 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadFile
       encodeURIComponent(
         `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 560"><rect width="400" height="560" fill="%23f8fafc"/><rect x="40" y="40" width="320" height="40" fill="%23e2e8f0"/><rect x="40" y="100" width="200" height="20" fill="%23cbd5e1"/><rect x="40" y="130" width="160" height="20" fill="%23cbd5e1"/><line x1="40" y1="180" x2="360" y2="180" stroke="%2394a3b8" stroke-width="1"/><rect x="40" y="200" width="320" height="14" fill="%23e2e8f0"/><rect x="40" y="225" width="320" height="14" fill="%23e2e8f0"/><rect x="40" y="250" width="320" height="14" fill="%23e2e8f0"/><rect x="40" y="275" width="320" height="14" fill="%23e2e8f0"/><rect x="40" y="300" width="320" height="14" fill="%23e2e8f0"/><line x1="40" y1="340" x2="360" y2="340" stroke="%2394a3b8" stroke-width="1"/><rect x="200" y="360" width="160" height="20" fill="%231e293b"/></svg>`,
       );
-    setPreviewUrl(mockUrl);
+    setPreview({ kind: 'demo' });
     setUpload({ phase: 'uploaded', result: { url: mockUrl, filename: 'invoice-mock.svg' } });
   }
 
@@ -201,7 +195,7 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadFile
 
   function reset() {
     capturedRef.current = false;
-    setPreviewUrl(null);
+    setPreview(null);
     setUpload({ phase: 'idle' });
   }
 
@@ -212,8 +206,7 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadFile
     if (file) void handleFile(file);
   };
 
-  const hasPhoto = previewUrl !== null && upload.phase !== 'idle';
-  const previewSrc = safePreviewSrc(previewUrl);
+  const hasPhoto = preview !== null && upload.phase !== 'idle';
   const elapsed = upload.phase === 'uploading' ? Math.max(0, Math.round((now - upload.startedAt) / 1000)) : 0;
 
   return (
@@ -229,9 +222,10 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadFile
 
       {/* A framing hint, not a camera: kept short so the actions stay in reach (RCV-06). */}
       <div className="relative mx-auto mb-4 flex h-[min(30vh,16rem)] max-w-md items-center justify-center overflow-hidden rounded-2xl border border-line bg-surface-2">
-        {previewSrc ? (
-          // eslint-disable-next-line @next/next/no-img-element -- blob URL of the picked file: next/image cannot optimize it
-          <img src={previewSrc} alt={t('steps.scan.invoiceAlt')} className="absolute inset-0 h-full w-full object-contain" />
+        {preview?.kind === 'file' ? (
+          <FilePreview file={preview.file} label={t('steps.scan.invoiceAlt')} />
+        ) : preview ? (
+          <FileText className="h-16 w-16 text-muted" role="img" aria-label={t('steps.scan.invoiceAlt')} />
         ) : (
           <>
             <div className="flex flex-col items-center justify-center text-muted">
@@ -332,6 +326,43 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadFile
       </ActionBar>
     </div>
   );
+}
+
+/**
+ * The picked photo, decoded and drawn on a canvas (contain-fit). A PDF, or a
+ * browser that cannot decode the image, shows a document icon instead.
+ */
+function FilePreview({ file, label }: { file: File; label: string }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    setFailed(false);
+    if (!file.type.startsWith('image/') || typeof createImageBitmap !== 'function') {
+      setFailed(true);
+      return;
+    }
+    createImageBitmap(file)
+      .then((bmp) => {
+        const canvas = ref.current;
+        if (cancelled || !canvas) return bmp.close();
+        const box = canvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = Math.max(1, Math.round(box.width * dpr));
+        canvas.height = Math.max(1, Math.round(box.height * dpr));
+        const scale = Math.min(canvas.width / bmp.width, canvas.height / bmp.height);
+        const w = bmp.width * scale;
+        const h = bmp.height * scale;
+        canvas.getContext('2d')?.drawImage(bmp, (canvas.width - w) / 2, (canvas.height - h) / 2, w, h);
+        bmp.close();
+      })
+      .catch(() => !cancelled && setFailed(true));
+    return () => {
+      cancelled = true;
+    };
+  }, [file]);
+  if (failed) return <FileText className="h-16 w-16 text-muted" role="img" aria-label={label} />;
+  return <canvas ref={ref} role="img" aria-label={label} className="absolute inset-0 h-full w-full" />;
 }
 
 function UploadStatus({
