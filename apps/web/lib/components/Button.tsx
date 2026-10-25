@@ -197,13 +197,13 @@ export function safeHref(href: string): string {
  * double tab stop for keyboard users).
  */
 export function LinkButton({
-  href,
+  href: rawHref,
   variant = 'primary',
   size = 'md',
   icon,
   iconEnd,
   fullWidth = false,
-  className,
+  className: extraClassName,
   children,
   ...rest
 }: CommonProps & {
@@ -211,8 +211,10 @@ export function LinkButton({
   className?: string;
   children: React.ReactNode;
 } & Omit<React.AnchorHTMLAttributes<HTMLAnchorElement>, 'href'>) {
+  const href = safeHref(rawHref);
+  const className = cn(fullWidth && 'w-full', extraClassName);
   return (
-    <Link href={safeHref(href)} className={cn(base, variants[variant], sizes[size], fullWidth && 'w-full', className)} {...rest}>
+    <Link href={href} className={cn(base, variants[variant], sizes[size], className)} {...rest}>
       {icon}
       {children}
       {iconEnd}
