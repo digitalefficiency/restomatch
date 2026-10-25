@@ -45,6 +45,15 @@ interface Props {
   eyebrow?: string;
 }
 
+/**
+ * The preview is only ever an object URL of the picked file or the demo
+ * invoice's inline SVG; anything else (a remote or javascript: URL) is not shown.
+ */
+export function safePreviewSrc(url: string | null): string | null {
+  if (!url) return null;
+  return url.startsWith('blob:') || url.startsWith('data:image/svg+xml;') ? url : null;
+}
+
 /** One id per file selection — a retried/double-submitted upload reuses it (M8). */
 function newUploadId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
@@ -204,6 +213,7 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadFile
   };
 
   const hasPhoto = previewUrl !== null && upload.phase !== 'idle';
+  const previewSrc = safePreviewSrc(previewUrl);
   const elapsed = upload.phase === 'uploading' ? Math.max(0, Math.round((now - upload.startedAt) / 1000)) : 0;
 
   return (
@@ -219,9 +229,9 @@ export function InvoiceScan({ supplierName, image, onCapture, onBack, uploadFile
 
       {/* A framing hint, not a camera: kept short so the actions stay in reach (RCV-06). */}
       <div className="relative mx-auto mb-4 flex h-[min(30vh,16rem)] max-w-md items-center justify-center overflow-hidden rounded-2xl border border-line bg-surface-2">
-        {previewUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element -- signed / blob URL of a private scan: next/image cannot optimize it
-          <img src={previewUrl} alt={t('steps.scan.invoiceAlt')} className="absolute inset-0 h-full w-full object-contain" />
+        {previewSrc ? (
+          // eslint-disable-next-line @next/next/no-img-element -- blob URL of the picked file: next/image cannot optimize it
+          <img src={previewSrc} alt={t('steps.scan.invoiceAlt')} className="absolute inset-0 h-full w-full object-contain" />
         ) : (
           <>
             <div className="flex flex-col items-center justify-center text-muted">

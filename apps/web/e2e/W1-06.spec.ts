@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { expect, test, type Page, type Route } from '@playwright/test';
 import { DEMO_RESTAURANT_NAME } from './env';
-import { e2eSql, loginViaMagicLink } from './helpers';
+import { e2eSql } from './helpers';
 
 /**
  * W1-06 · Delivery Check v1 and never losing field work — the receiver, on a
@@ -15,12 +15,17 @@ const RECEIVER = 'receiver@kfar-hazeitim.test';
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } as const;
 test.use(PHONE);
 
-/** The receiver signs in once for the file (magic links are rate-limited per address). */
+/** The receiver signs in once for the file. */
 let receiverCookies: Awaited<ReturnType<import('@playwright/test').BrowserContext['cookies']>> = [];
 test.beforeAll(async ({ browser }) => {
   const ctx = await browser.newContext({ baseURL: test.info().project.use.baseURL });
   const page = await ctx.newPage();
-  await loginViaMagicLink(page, RECEIVER, '/dashboard/receiving');
+  // The seeded password (the magic-link route is rate-limited per address).
+  await page.goto('/login');
+  await page.locator('form:has(#password) [name=email]').fill(RECEIVER);
+  await page.locator('#password').fill(process.env.DEMO_PASSWORD ?? 'RestoMatch-Demo-2026!');
+  await page.locator('form:has(#password) button[type=submit]').click();
+  await page.waitForURL(/\/dashboard/, { timeout: 60_000 });
   receiverCookies = await ctx.cookies();
   await ctx.close();
 });
