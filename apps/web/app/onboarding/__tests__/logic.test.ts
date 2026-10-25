@@ -20,5 +20,9 @@ describe('onboarding form rules (auth-21, auth-27)', () => {
   it('treats the company number as optional and never accepts control characters in names', () => {
     expect(validateOnboarding({ yourName: 'דנה', name: 'כפר', businessId: '' }).values.businessId).toBeUndefined();
     expect(validateOnboarding({ yourName: 'דנה\nBcc: x', name: 'כפר', businessId: '' }).errors.yourName).toBe(true);
+    // Bidi overrides / isolates (U+202A–U+202E, U+2066–U+2069) never reach an invite or the portal.
+    for (const c of ['\u202e', '\u202a', '\u2066', '\u2069']) {
+      expect(validateOnboarding({ yourName: `דנה${c}abc`, name: 'כפר', businessId: '' }).errors.yourName).toBe(true);
+    }
   });
 });

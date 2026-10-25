@@ -10,7 +10,10 @@ export const HINT_COOKIE = 'rm_login_hint';
 export const HINT_MAX_AGE_SEC = 15 * 60;
 /** Wrong passwords before the email-link fallback is offered. */
 export const FALLBACK_AFTER_FAILS = 2;
-/** Seconds before "check your email" may send another link. */
+/**
+ * Seconds of the "resend" UX countdown on "check your email". Not a rate limit:
+ * the cookie is client-held. The real limit is MAGIC_LINK_LIMIT (lib/rateLimit.ts).
+ */
 export const RESEND_COOLDOWN_SEC = 30;
 
 export interface LoginHint {

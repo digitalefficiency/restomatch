@@ -26,8 +26,9 @@ export default async function CheckEmailPage({ searchParams }: { searchParams: P
     'use server';
     const h = await readHint();
     if (!h) redirect('/login');
-    // The cooldown is enforced here too, not just by the disabled button; the
-    // per-mailbox throttle inside sendMagicLink stays the real limit.
+    // A UX countdown only: it rides on a cookie the browser holds, so it is no
+    // security control. The real limit is the per-mailbox MAGIC_LINK_LIMIT
+    // inside sendMagicLink (lib/rateLimit.ts), which this never bypasses.
     if (resendWaitSec(h.sentAt) > 0) redirect('/login/check-email');
     const next = safeRelativePath(h.next);
     await writeHint({ ...h, sentAt: Date.now() });

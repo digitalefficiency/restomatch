@@ -3,7 +3,10 @@
 import { useEffect, useState } from 'react';
 import { SubmitButton } from '../../(auth)/_components/SubmitButton';
 
-/** "Resend in 0:30" → "Resend": counts down client-side from the server's wait. */
+/**
+ * "Resend in 30 s" → "Resend": a UX countdown, counted client-side from the
+ * server's wait. Not a security control — the server-side mail limits are.
+ */
 export function ResendButton({
   waitSec,
   label,

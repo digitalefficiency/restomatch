@@ -6,8 +6,10 @@
 export type OnboardingField = 'yourName' | 'name' | 'businessId';
 export const FIELD_ORDER: readonly OnboardingField[] = ['yourName', 'name', 'businessId'];
 
-// C0 controls + DEL (a name ends up in email headers — same rule as the API).
-const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
+// C0 controls + DEL (a name ends up in email headers — same rule as the API),
+// plus bidi embedding/override/isolate controls: the signer name is shown in
+// invites and on the supplier portal, where they could reorder the text around it.
+const CONTROL_CHARS = /[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/;
 
 /** "51-477812-3" / "514 778 123" → "514778123" (dashes and spaces are stripped, not rejected). */
 export function normalizeBusinessId(raw: string): string {
