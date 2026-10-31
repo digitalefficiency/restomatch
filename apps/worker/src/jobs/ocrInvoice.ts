@@ -250,6 +250,13 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
       await markOcrFailed(db, job.data.restaurantId, job.data.invoiceId, err).catch((e) =>
         console.error(`[ocr-invoice] could not mark invoice=${job.data.invoiceId} failed`, e),
       );
+      // G-09 release — a terminal failure settles the page's cluster too: the
+      // failed page is flagged page_unreadable (never a continuation) and the
+      // siblings held for it are released to the match. Never masks `err`.
+      await settleDocumentPages(db, { restaurantId: job.data.restaurantId, invoiceId: job.data.invoiceId }).catch((e) =>
+        console.warn(`[ocr-invoice] G-09 release failed for invoice=${job.data.invoiceId}`, e),
+      );
+      // end G-09 release
     }
     throw err;
   }

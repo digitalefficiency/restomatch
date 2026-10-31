@@ -4,6 +4,7 @@ import {
   creditNotes,
   eq,
   inArray,
+  invoiceLines,
   invoices,
   matchRuns,
   priceHistory,
@@ -27,8 +28,9 @@ import type { DocumentFailureReason } from './types';
 export const PAGE_ABSORBED_ACTION = 'document.page_absorbed';
 
 /**
- * Re-open an OPEN invoice for OCR (→ `ocr_pending`). Its match runs are
- * undecided by the caller's openness check; they are reset here, because a
+ * Re-open an OPEN, unreferenced invoice for OCR (→ `ocr_pending`). The caller
+ * checked `retireBlocker` under row locks. Its match runs are undecided; they
+ * are reset here, because a
  * re-OCR replaces invoice_lines and a plain match job skips an invoice that
  * already has a run, which would leave stale gaps (a false leak).
  */
@@ -46,6 +48,14 @@ export async function reopenForOcr(tx: Database, restaurantId: string, invoiceId
     .returning({ id: invoices.id });
   if (moved.length === 0) return false;
   await tx.delete(matchRuns).where(and(eq(matchRuns.invoiceId, invoiceId), eq(matchRuns.restaurantId, restaurantId)));
+  // The re-OCR rewrites every line and the totals. Clear them now, so a failed
+  // re-OCR leaves NO lines (nothing to match, no ₪ computed from a stale
+  // single-page read) instead of page 1's old lines without the absorbed pages.
+  await tx.delete(invoiceLines).where(eq(invoiceLines.invoiceId, invoiceId));
+  await tx
+    .update(invoices)
+    .set({ totalExclVat: null, vatAmount: null, totalInclVat: null, updatedAt: new Date() })
+    .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)));
   return true;
 }
 

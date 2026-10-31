@@ -32,7 +32,7 @@ import { captureOrderDraft } from '../orders/captureOrder';
 import { featureEnabled } from '../lib/features';
 import { createIntakeInvoice, upsertInvoiceScan } from '../documents/intake';
 import { objectRefMatchValues, signObjectRef, storedImageValue, tenantPath } from '../documents/objectRef';
-import { groupMinutes, INLINE_IMAGE_MAX_BYTES, isPageMime, mimeOfRef, ocrDedupeKey, reviewGroupOf } from './grouping';
+import { groupMinutes, INLINE_IMAGE_MAX_BYTES, isPageMime, mimeOfRef, multiPageEnabled, ocrDedupeKey, reviewGroupOf } from './grouping';
 import { storeIngestedFile } from './store';
 
 /** Feature key per channel kind (MASTER-PLAN §3). */
@@ -357,8 +357,14 @@ export async function processInboundMessage(
         docs.push({ id: d!.id, status: 'rejected' });
         continue;
       }
-      // An e-mail signature logo / inline image is not a page.
-      if (channel.kind === 'email' && mime !== 'application/pdf' && bytes.byteLength < INLINE_IMAGE_MAX_BYTES) {
+      // An e-mail signature logo / inline image is not a page — only where the
+      // multi-page switch is on (elsewhere every image registers, as before).
+      if (
+        channel.kind === 'email' &&
+        mime !== 'application/pdf' &&
+        bytes.byteLength < INLINE_IMAGE_MAX_BYTES &&
+        multiPageEnabled(restaurant.settings)
+      ) {
         const [d] = await tx
           .insert(ingestDocuments)
           .values({ ...base, mimeType: mime, sizeBytes: bytes.byteLength, sha256, status: 'skipped', error: 'inline_image' })

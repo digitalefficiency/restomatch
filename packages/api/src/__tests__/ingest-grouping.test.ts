@@ -131,6 +131,13 @@ interface OcrHead {
   businessId?: string;
   invoiceNumber?: string | null;
   status?: 'parsed' | 'matched';
+  /** writeOcrHeader's duplicate branch: number blanked, raw.duplicateOf set. */
+  duplicateOf?: { invoiceId: string | null; invoiceNumber: string };
+  /** markOcrFailed: no lines, raw.ocrFailed. */
+  failed?: boolean;
+  /** Line content (default: unique per invoice). Same content = a re-shot photo. */
+  lineTotal?: string;
+  totalInclVat?: string;
 }
 const ACME: OcrHead = { supplierName: 'תנובה בע"מ', businessId: '51-000123-4', invoiceNumber: 'A-100' };
 const OTHER: OcrHead = { supplierName: 'שטראוס', businessId: '52-999888-7', invoiceNumber: 'S-7' };
@@ -143,26 +150,42 @@ let ocrCalls: Array<{ invoiceId: string; dedupeKey?: string }> = [];
  * the line insert do), then the settle hook. Returns its verdict.
  */
 async function ocr(invoiceId: string, head: OcrHead): Promise<SettleResult> {
+  await writeOcr(invoiceId, head);
+  return settle(invoiceId);
+}
+
+/** The worker's writes for one page (writeOcrHeader + lines, or markOcrFailed). */
+async function writeOcr(invoiceId: string, head: OcrHead): Promise<void> {
+  const raw = head.failed
+    ? { ocrFailed: true, reason: 'provider error' }
+    : {
+        reconciled: { supplier: { name: head.supplierName, businessId: head.businessId }, invoiceNumber: head.invoiceNumber },
+        ...(head.duplicateOf ? { duplicateOf: head.duplicateOf } : {}),
+      };
   await ownerDb
     .update(invoices)
     .set({
-      status: head.status ?? 'matched',
-      invoiceNumber: head.invoiceNumber ?? null,
-      ocrPayload: {
-        provider: 'stub',
-        raw: { reconciled: { supplier: { name: head.supplierName, businessId: head.businessId }, invoiceNumber: head.invoiceNumber } },
-      } as never,
+      status: head.failed || head.duplicateOf ? 'parsed' : (head.status ?? 'matched'),
+      invoiceNumber: head.duplicateOf || head.failed ? null : (head.invoiceNumber ?? null),
+      totalInclVat: head.totalInclVat ?? null,
+      ocrPayload: { provider: 'stub', raw } as never,
     })
     .where(eq(invoices.id, invoiceId));
   await ownerDb.delete(invoiceLines).where(eq(invoiceLines.invoiceId, invoiceId));
+  if (head.failed) return;
+  const unique = `${10 + (parseInt(invoiceId.slice(0, 6), 16) % 900)}.00`;
   await ownerDb.insert(invoiceLines).values({
     invoiceId,
     rawDescription: `line of ${invoiceId.slice(0, 8)}`,
     qtyBilled: '1',
     unit: 'unit',
     unitPriceBilled: '10.0000',
-    lineTotal: '10.00',
+    lineTotal: head.lineTotal ?? unique,
   });
+}
+
+/** The settle hook, exactly where the worker calls it. */
+async function settle(invoiceId: string): Promise<SettleResult> {
   return withRestaurant(appDb, A.restaurantId, (tx) =>
     settleDocumentPages(
       tx,
@@ -283,17 +306,186 @@ describe('owner rule: multi-page invoices FROM THE SAME SUPPLIER', () => {
     expect(ocrCalls).toEqual([]);
   });
 
-  it('a flagged page never joins later: page 3 of the real invoice still merges into page 1', async () => {
+  it('after a flagged page NOTHING later merges into page 1, even with page 1\'s own number', async () => {
     const p1 = await invoiceOf(await send(ch.wa, wa([jpegBytes('f-p1')]), at(0)));
     const p2 = await invoiceOf(await send(ch.wa, wa([jpegBytes('f-p2')]), at(1)));
     const p3 = await invoiceOf(await send(ch.wa, wa([jpegBytes('f-p3')]), at(2)));
     await ocr(p1, ACME);
     await ocr(p2, OTHER);
     const s3 = await ocr(p3, { ...ACME, invoiceNumber: 'A 100' }); // same number, other spacing
-    expect(s3.flagged).toEqual([{ invoiceId: p2, reason: 'page_other_supplier' }]);
-    expect(s3).toMatchObject({ absorbed: true, mergedInto: p1 });
+    expect(s3.flagged).toEqual([
+      { invoiceId: p2, reason: 'page_other_supplier' },
+      { invoiceId: p3, reason: 'page_not_merged' },
+    ]);
+    expect(s3.absorbed).toBe(false);
+    expect(await invoicesOfA()).toHaveLength(3);
+  });
+});
+
+const pages = async (n: number, tag: string, gapMin = 1, startMin = 0) => {
+  const ids: string[] = [];
+  for (let i = 0; i < n; i++) ids.push(await invoiceOf(await send(ch.wa, wa([jpegBytes(`${tag}-${i}`)]), at(startMin + i * gapMin))));
+  return ids;
+};
+const NOHEAD: OcrHead = { invoiceNumber: null };
+const linesOf = async (id: string) => ownerDb.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, id));
+
+describe('review fixes: false-leak paths (CRITICAL-1/2, HIGH-1)', () => {
+  beforeEach(() => {
+    matchCalls = [];
+    ocrCalls = [];
+  });
+
+  it('CRITICAL-1: a page whose number is ANOTHER invoice already on file is never a continuation', async () => {
+    const [p1, p2] = await pages(2, 'c1a');
+    await ocr(p1!, ACME);
+    const s2 = await ocr(p2!, { ...ACME, duplicateOf: { invoiceId: A.invoiceId, invoiceNumber: A.invoiceNumber } });
+    expect(s2).toMatchObject({ absorbed: false, flagged: [{ invoiceId: p2, reason: 'page_other_invoice' }] });
+    expect(await invoicesOfA()).toHaveLength(2);
+    expect(ocrCalls).toEqual([]);
+  });
+
+  it('CRITICAL-1: a new invoice after a duplicate page 1 keeps its own number (effective numbers compared)', async () => {
+    const [p1, p2] = await pages(2, 'c1b');
+    await ocr(p1!, { ...ACME, duplicateOf: { invoiceId: A.invoiceId, invoiceNumber: 'A-100' } });
+    const s2 = await ocr(p2!, { ...ACME, invoiceNumber: 'A-555' });
+    expect(s2.flagged).toEqual([{ invoiceId: p2, reason: 'page_other_invoice' }]);
+    expect(await invoicesOfA()).toHaveLength(2);
+  });
+
+  it('CRITICAL-1: a real page 2 that repeats page 1\'s number (blanked against page 1 itself) still merges', async () => {
+    const [p1, p2] = await pages(2, 'c1c');
+    await ocr(p1!, ACME);
+    const s2 = await ocr(p2!, { ...ACME, duplicateOf: { invoiceId: p1!, invoiceNumber: 'A-100' } });
+    expect(s2).toMatchObject({ absorbed: true, mergedInto: p1 });
+    expect(await pdfPagesOf(p1!)).toBe(2);
+  });
+
+  it('HIGH-1: a re-shot photo of page 1 (same number, same content) is flagged page_duplicate, never merged', async () => {
+    const [p1, p2] = await pages(2, 'h1');
+    await ocr(p1!, { ...ACME, lineTotal: '77.00', totalInclVat: '90.86' });
+    const s2 = await ocr(p2!, { ...ACME, duplicateOf: { invoiceId: p1!, invoiceNumber: 'A-100' }, lineTotal: '77.00', totalInclVat: '90.86' });
+    expect(s2.flagged).toEqual([{ invoiceId: p2, reason: 'page_duplicate' }]);
+    expect(await invoicesOfA()).toHaveLength(2);
+    const [dup] = await ownerDb.select().from(invoices).where(eq(invoices.id, p2!));
+    expect(dup!.status).toBe('parsed'); // the duplicate hold stays for a human
+    expect(ocrCalls).toEqual([]);
+  });
+
+  it('CRITICAL-2 v1: [ACME, OTHER, header-less] → the header-less page is NOT summed into ACME', async () => {
+    const [p1, p2, p3] = await pages(3, 'c2v1');
+    await ocr(p1!, ACME);
+    await ocr(p2!, OTHER);
+    const s3 = await ocr(p3!, NOHEAD);
+    expect(s3.absorbed).toBe(false);
+    expect(s3.flagged).toEqual([
+      { invoiceId: p2, reason: 'page_other_supplier' },
+      { invoiceId: p3, reason: 'page_not_merged' },
+    ]);
+    expect(await linesOf(p1!)).toHaveLength(1);
+    expect(await invoicesOfA()).toHaveLength(3);
+  });
+
+  it('CRITICAL-2 v2: [ACME, header-less, OTHER, header-less] → only the page right after ACME joins it', async () => {
+    const [p1, p2, p3, p4] = await pages(4, 'c2v2');
+    await ocr(p1!, ACME);
+    await ocr(p2!, NOHEAD);
+    await ocr(p3!, OTHER);
+    const s4 = await ocr(p4!, NOHEAD);
+    expect(s4.flagged).toEqual([
+      { invoiceId: p3, reason: 'page_other_supplier' },
+      { invoiceId: p4, reason: 'page_not_merged' },
+    ]);
+    expect((await invoicesOfA()).map((i) => i.id).sort()).toEqual([p1, p3, p4].sort());
+    expect(await pdfPagesOf(p1!)).toBe(2);
+  });
+
+  it('CRITICAL-2 v3: [ACME A-100, ACME A-200, header-less] → A-200\'s continuation is not summed into A-100', async () => {
+    const [p1, p2, p3] = await pages(3, 'c2v3');
+    await ocr(p1!, ACME);
+    await ocr(p2!, { ...ACME, invoiceNumber: 'A-200' });
+    const s3 = await ocr(p3!, NOHEAD);
+    expect(s3.flagged).toEqual([
+      { invoiceId: p2, reason: 'page_other_invoice' },
+      { invoiceId: p3, reason: 'page_not_merged' },
+    ]);
+    expect(await invoicesOfA()).toHaveLength(3);
+  });
+
+  it('CRITICAL-2 v4: a failed read or a no-lines page is never a continuation, and breaks the chain', async () => {
+    const [p1, p2, p3] = await pages(3, 'c2v4');
+    await ocr(p1!, ACME);
+    await ocr(p2!, { failed: true });
+    const s3 = await ocr(p3!, NOHEAD);
+    expect(s3.flagged).toEqual([
+      { invoiceId: p2, reason: 'page_unreadable' },
+      { invoiceId: p3, reason: 'page_not_merged' },
+    ]);
+    expect(await invoicesOfA()).toHaveLength(3);
+    // A 'parsed' page with no lines is unreadable too.
+    const [q1, q2] = await pages(2, 'c2v4b', 1, 60); // a later, separate cluster
+    await ocr(q1!, { ...ACME, invoiceNumber: 'A-9' });
+    await writeOcr(q2!, { ...NOHEAD, status: 'parsed' });
+    await ownerDb.delete(invoiceLines).where(eq(invoiceLines.invoiceId, q2!));
+    expect((await settle(q2!)).flagged).toEqual([{ invoiceId: q2, reason: 'page_unreadable' }]);
+  });
+});
+
+describe('review fixes: stranded clusters and ₪ hygiene (HIGH-2/3, MEDIUM-1, U-2)', () => {
+  beforeEach(() => {
+    matchCalls = [];
+    ocrCalls = [];
+  });
+
+  it('HIGH-2: a sibling whose OCR fails terminally releases the held page 1 to the match', async () => {
+    const [p1, p2] = await pages(2, 'h2');
+    expect((await ocr(p1!, ACME)).hold).toBe(true);
+    // The worker's catch: markOcrFailed, then the G-09 release (settle).
+    const s2 = await ocr(p2!, { failed: true });
+    expect(s2.flagged).toEqual([{ invoiceId: p2, reason: 'page_unreadable' }]);
+    expect(matchCalls).toEqual([p1]);
+  });
+
+  it('HIGH-3: pages summing above the 10 MB limit are not merged; flagged, page 1 released, no rollback loop', async () => {
+    const big = (t: string) => jpegBytes(t, 6_000_000);
+    const p1 = await invoiceOf(await send(ch.wa, wa([big('h3-1')]), at(0)));
+    const p2 = await invoiceOf(await send(ch.wa, wa([big('h3-2')]), at(1)));
+    expect((await ocr(p1, ACME)).hold).toBe(true);
+    const s2 = await ocr(p2, NOHEAD);
+    expect(s2).toMatchObject({ absorbed: false, flagged: [{ invoiceId: p2, reason: 'page_not_merged' }] });
+    expect(matchCalls).toEqual([p1]);
+    // Settling again is stable: the flagged page left the cluster.
+    expect(await settle(p2)).toEqual({ hold: false, absorbed: false, flagged: [] });
+  });
+
+  it('HIGH-3: a compose failure inside the merge rolls back ONLY the merge; pages flagged, page 1 released', async () => {
+    const [p1, p2] = await pages(2, 'h3b');
+    const [d2] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, p2!));
+    expect((await ocr(p1!, ACME)).hold).toBe(true);
+    await localDocumentStorage().remove(A.restaurantId, [d2!.storagePath!]); // the page object vanished
+    const s2 = await ocr(p2!, NOHEAD);
+    expect(s2).toMatchObject({ absorbed: false, flagged: [{ invoiceId: p2, reason: 'page_not_merged' }] });
     expect((await invoicesOfA()).map((i) => i.id).sort()).toEqual([p1, p2].sort());
-    expect(await pdfPagesOf(p1)).toBe(2);
+    const [one] = await ownerDb.select().from(invoices).where(eq(invoices.id, p1!));
+    expect(one!.status).toBe('matched'); // the re-open was rolled back
+    expect(await linesOf(p1!)).toHaveLength(1);
+    expect(matchCalls).toEqual([p1]);
+  });
+
+  it('MEDIUM-1: re-opening page 1 for the composed re-OCR clears its lines and totals', async () => {
+    const [p1, p2] = await pages(2, 'm1');
+    await ocr(p1!, { ...ACME, totalInclVat: '118.00' });
+    expect((await ocr(p2!, NOHEAD)).absorbed).toBe(true);
+    expect(await linesOf(p1!)).toHaveLength(0);
+    const [one] = await ownerDb.select().from(invoices).where(eq(invoices.id, p1!));
+    expect(one).toMatchObject({ status: 'ocr_pending', totalInclVat: null, totalExclVat: null, vatAmount: null });
+  });
+
+  it('U-2: with the switch OFF a small e-mail image is registered as before (not skipped)', async () => {
+    await setSettings({});
+    const out = await send(ch.email, mail([{ name: 'small.jpg', bytes: jpegBytes('u2-small', 4_000) }]), at(0));
+    const docs = await docsOf((out as { messageId: string }).messageId);
+    expect(docs.map((d) => [d.status, d.error])).toEqual([['registered', null]]);
   });
 });
 
@@ -420,7 +612,7 @@ describe('one message and one sender window', () => {
       const p1 = await invoiceOf(await send(ch.wa, wa([jpegBytes(`ref-${label}-1`)]), at(minute)));
       const p2 = await invoiceOf(await send(ch.wa, wa([jpegBytes(`ref-${label}-2`)]), at(minute + 1)));
       await ocr(p1, { ...ACME, invoiceNumber: `A-${minute}` });
-      await ownerDb.update(invoices).set({ status: 'matched', invoiceNumber: null, ocrPayload: { raw: { reconciled: { supplier: { name: ACME.supplierName, businessId: ACME.businessId } } } } as never }).where(eq(invoices.id, p2));
+      await writeOcr(p2, { supplierName: ACME.supplierName, businessId: ACME.businessId, invoiceNumber: null });
       await link(p2);
       const res = await withRestaurant(appDb, A.restaurantId, (tx) => settleDocumentPages(tx, { restaurantId: A.restaurantId, invoiceId: p2 }, { enqueueOcr: async () => {}, enqueueMatch: async () => {} }));
       expect({ label, res }).toMatchObject({ label, res: { absorbed: false, flagged: [{ invoiceId: p2, reason: 'page_not_merged' }] } });

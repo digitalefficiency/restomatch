@@ -1,9 +1,9 @@
-import { and, eq, ingestDocuments, inArray, invoices, restaurants, sql, type Database } from '@restomatch/db';
+import { and, discrepancies, eq, ingestDocuments, inArray, invoices, matchRuns, restaurants, sql, type Database } from '@restomatch/db';
 import { enqueueIngestJobs, type OcrJobToEnqueue } from '../ingest/pipeline';
 import { invoicePageRows, isPageMime, multiPageEnabled, recomposeInvoice, type PageRow } from '../ingest/grouping';
 import { MAX_DOCUMENT_PAGES } from './compose';
 import { DocumentError, documentNotFound } from './errors';
-import { createIntakeInvoice, invoiceClosedReason } from './intake';
+import { createIntakeInvoice } from './intake';
 import { reopenForOcr, retireBlocker, retireInvoice } from './reocr';
 import { storedImageValue } from './objectRef';
 import type { AttachAsPageInput, AttachAsPageResult, SplitDocumentInput, SplitDocumentResult } from './types';
@@ -15,25 +15,31 @@ export interface AttachDeps {
   enqueue?: (jobs: OcrJobToEnqueue[]) => Promise<void>;
 }
 
-/** Open, tenant-owned, or a named refusal / NOT_FOUND (foreign and missing look alike). */
-async function assertOpen(tx: Database, restaurantId: string, invoiceId: string): Promise<void> {
-  const reason = await invoiceClosedReason(tx, restaurantId, invoiceId);
-  if (reason === 'not_found') throw documentNotFound();
-  if (reason) throw new DocumentError(reason);
-}
-
 /** The multi-page switch of this restaurant (settings.ingest.multiPage), or a named refusal. */
 async function assertMultiPage(tx: Database, restaurantId: string): Promise<void> {
   const [r] = await tx.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, restaurantId)).limit(1);
   if (!r || !multiPageEnabled(r.settings)) throw new DocumentError('reocr_not_enabled');
 }
 
+/** Lock the invoices and their gaps: no decision / claim / credit note can land between check and write. */
 async function lockInvoices(tx: Database, restaurantId: string, ids: string[]): Promise<void> {
   await tx
     .select({ id: invoices.id })
     .from(invoices)
     .where(and(eq(invoices.restaurantId, restaurantId), inArray(invoices.id, ids)))
     .for('update');
+  await tx.execute(sql`
+    select d.id from ${discrepancies} d
+    join ${matchRuns} r on r.id = d.match_run_id and r.restaurant_id = d.restaurant_id
+    where d.restaurant_id = ${restaurantId} and r.invoice_id in (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})
+    for update of d`);
+}
+
+/** Open AND unreferenced (re-OCR clears its lines), or a named refusal / NOT_FOUND. */
+async function assertRecomposable(tx: Database, restaurantId: string, invoiceId: string): Promise<void> {
+  const blocker = await retireBlocker(tx, restaurantId, invoiceId);
+  if (blocker === 'not_found') throw documentNotFound();
+  if (blocker) throw new DocumentError(blocker);
 }
 
 async function pagesOf(tx: Database, restaurantId: string, invoiceId: string): Promise<PageRow[]> {
@@ -75,7 +81,7 @@ export async function attachAsPage(db: Database, input: AttachAsPageInput, deps:
     const tx = raw as unknown as Database;
     await assertMultiPage(tx, restaurantId);
     await lockInvoices(tx, restaurantId, [invoiceId, documentId]);
-    await assertOpen(tx, restaurantId, invoiceId);
+    await assertRecomposable(tx, restaurantId, invoiceId);
     // The absorbed invoice is retired: nothing may reference it.
     const blocker = await retireBlocker(tx, restaurantId, documentId);
     if (blocker === 'not_found') throw documentNotFound();
@@ -137,7 +143,7 @@ export async function splitDocument(db: Database, input: SplitDocumentInput, dep
     const tx = raw as unknown as Database;
     await assertMultiPage(tx, restaurantId);
     await lockInvoices(tx, restaurantId, [invoiceId]);
-    await assertOpen(tx, restaurantId, invoiceId);
+    await assertRecomposable(tx, restaurantId, invoiceId);
     const rows = await pagesOf(tx, restaurantId, invoiceId);
     if (!validPartition(input.pages, rows.length)) throw new DocumentError('invalid_split');
     const [orig] = await tx
