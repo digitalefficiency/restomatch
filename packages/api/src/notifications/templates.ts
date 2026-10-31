@@ -9,15 +9,24 @@
  *   • supplierDelayEmail    — a placed PO is past its expected delivery
  *   • orderNotPlacedEmail   — today is an order-day but no PO was placed
  *   • approvalNeededEmail    — a discrepancy needs a manager decision
- *   • weeklyLeakReportEmail — the Sunday "₪X נחסכו / דלפו השבוע" digest
+ *   • weeklyLeakReportEmail — the Sunday "found in discrepancies / still open" digest
+ *   • endOfDayReportEmail   — the evening open-credits digest
+ *   • invoiceOcrFailedEmail — an uploaded invoice could not be read (no ₪, G-06)
+ *   • taskNoticeEmail       — a generic act-now notice (₪ only when the caller passes it)
+ *
+ * Copy: every subject/body string lives in `./copy/{he,en}.ts` (EMAIL_COPY, W2-13),
+ * filled by `fill()` (plurals with the Hebrew dual; values isolated with FSI…PDI in
+ * text and <bdi> in HTML). This file only lays out markup.
  *
  * Design notes:
  *   - Inline styles + table layout: Gmail/Outlook strip <style> and flexbox.
  *   - dir="rtl" + text-align:right throughout (Hebrew-first product).
- *   - ₪ figures use a tabular/mono stack so columns align; gold = saved,
- *     red = leaked/at-risk (mirrors the in-app "command center" semantics).
+ *   - ₪ figures arrive pre-formatted and render with tabular figures; gold = caught,
+ *     red = at-risk (mirrors the in-app "command center" semantics).
  *   - No external assets — everything self-contained for deliverability.
  */
+
+import { EMAIL_COPY, escapeHtml, fill, type CopyVars, type EmailCopy } from './copy';
 
 /** Email language. Hebrew (RTL) is the default; English renders LTR. */
 export type EmailLocale = 'he' | 'en';
@@ -43,15 +52,8 @@ const COLORS = {
 
 const FONT =
   "-apple-system,BlinkMacSystemFont,'Segoe UI',Rubik,Arial,sans-serif";
-const MONO = "'SF Mono',ui-monospace,Menlo,Consolas,monospace";
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
+/** Tabular figures in the body font: ₪ columns align without a mono face (DoD-4). */
+const NUMS = 'font-variant-numeric:tabular-nums';
 
 export interface EmailLayout {
   /** Pre-header / preview text shown in the inbox list (kept out of the body). */
@@ -81,6 +83,7 @@ export function renderEmail(layout: EmailLayout): string {
   const en = layout.locale === 'en';
   const dir = en ? 'ltr' : 'rtl';
   const align = en ? 'left' : 'right';
+  const copy = EMAIL_COPY[en ? 'en' : 'he'];
   const cta = layout.cta
     ? `<tr><td style="padding:8px 0 4px">
          <a href="${escapeHtml(layout.cta.url)}"
@@ -104,7 +107,7 @@ export function renderEmail(layout: EmailLayout): string {
                     box-shadow:0 8px 28px rgba(0,0,0,.28)">
         <tr><td style="padding:22px 28px 0">
           <span style="font-size:18px;font-weight:800;color:${COLORS.ink}">RestoMatch</span>
-          <span style="font-size:13px;color:${COLORS.muted}">· ${en ? 'Command center for your money' : 'מוקד הבקרה של הכסף'}</span>
+          <span style="font-size:13px;color:${COLORS.muted}">· ${escapeHtml(copy.frame.tagline)}</span>
         </td></tr>
         <tr><td style="padding:14px 28px 0">
           <div style="height:3px;width:44px;background:${accent};border-radius:2px"></div>
@@ -119,16 +122,12 @@ export function renderEmail(layout: EmailLayout): string {
         <tr><td style="padding:22px 28px 24px">
           <div style="border-top:1px solid ${COLORS.line};margin-top:8px;padding-top:14px;
                       color:${COLORS.muted};font-size:12px;line-height:1.6;text-align:${align}">
-            ${
-              en
-                ? 'This message was sent automatically by RestoMatch. If you don’t recognise it, you can ignore it.'
-                : 'הודעה זו נשלחה אוטומטית מ-RestoMatch. אם אינך מזהה אותה, אפשר להתעלם.'
-            }
+            ${escapeHtml(copy.frame.footer)}
             ${
               layout.unsubscribeUrl
                 ? `<br><a href="${escapeHtml(layout.unsubscribeUrl)}"
                        style="color:${COLORS.muted};text-decoration:underline">
-                     ${en ? 'Unsubscribe from this mailing list' : 'להסרה מרשימת הדיוור — לחצו כאן'}
+                     ${escapeHtml(copy.frame.unsubscribe)}
                    </a>`
                 : ''
             }
@@ -143,77 +142,79 @@ export function renderEmail(layout: EmailLayout): string {
 /** Render a ₪ figure as a colored, mono, aligned span. */
 export function ilsSpan(text: string, tone: 'gold' | 'danger' | 'ink' = 'ink'): string {
   const color = tone === 'gold' ? COLORS.gold : tone === 'danger' ? COLORS.danger : COLORS.ink;
-  return `<span style="font-family:${MONO};font-weight:800;color:${color}">${escapeHtml(text)}</span>`;
+  return `<span style="${NUMS};font-weight:800;color:${color}"><bdi>${escapeHtml(text)}</bdi></span>`;
 }
 
 /** A subtle callout box (amber for positive, red for at-risk). */
-function callout(html: string, tone: 'gold' | 'danger'): string {
+function callout(html: string, tone: 'gold' | 'danger', locale: EmailLocale = 'he'): string {
   const bg = tone === 'gold' ? COLORS.goldBg : COLORS.warnBg;
   const border = tone === 'gold' ? COLORS.gold : COLORS.danger;
-  return `<div style="background:${bg};border-right:4px solid ${border};border-radius:8px;
-              padding:12px 14px;margin:12px 0;text-align:right">${html}</div>`;
+  const side = locale === 'en' ? 'left' : 'right';
+  return `<div style="background:${bg};border-${side}:4px solid ${border};border-radius:8px;
+              padding:12px 14px;margin:12px 0;text-align:${side}">${html}</div>`;
 }
+
+/* ─────────────────────────── copy helpers ───────────────────────── */
+
+function copyOf(locale: EmailLocale | undefined): EmailCopy {
+  return EMAIL_COPY[locale === 'en' ? 'en' : 'he'] as EmailCopy;
+}
+function loc(locale: EmailLocale | undefined): EmailLocale {
+  return locale === 'en' ? 'en' : 'he';
+}
+/** Plain text (subjects, previews, text bodies): values isolated with FSI…PDI where needed. */
+function txt(locale: EmailLocale, template: string, vars: CopyVars = {}, raw?: readonly string[]): string {
+  return fill(template, vars, { locale, raw });
+}
+/** Escaped HTML: values in <bdi> where needed, `strong` vars bold, `trusted` vars spliced as markup. */
+function htm(
+  locale: EmailLocale,
+  template: string,
+  vars: CopyVars = {},
+  strong?: readonly string[],
+  trusted?: readonly string[],
+): string {
+  return fill(template, vars, { locale, html: true, strong, trustedHtml: trusted });
+}
+const P = '<p style="margin:0 0 10px">';
+const NOTE = `<p style="margin:0;color:${COLORS.muted};font-size:13px">`;
+const lines = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join('\n');
+
 
 /* ─────────────────────────── magic link ─────────────────────────── */
 
 export function magicLinkEmail(args: { url: string; locale?: EmailLocale }): RenderedEmail {
-  if (args.locale === 'en') {
-    return {
-      subject: 'Your RestoMatch sign-in link',
-      html: renderEmail({
-        locale: 'en',
-        preview: 'One click and you’re in — the link is valid for 24 hours.',
-        heading: 'Sign in to RestoMatch',
-        bodyHtml: `
-      <p style="margin:0 0 10px">Hi, you asked to sign in to your account. Click the button to get in — no password needed.</p>
-      <p style="margin:0;color:${COLORS.muted};font-size:13px">The link is valid for 24 hours and can be used once.</p>`,
-        cta: { label: 'Sign in', url: args.url },
-      }),
-      text: `Sign in to RestoMatch\n\nTo sign in, open this link (valid for 24 hours, single use):\n${args.url}\n\nIf you didn't ask to sign in, you can ignore this message.`,
-    };
-  }
-  const subject = 'הקישור שלך להתחברות ל-RestoMatch';
-  const html = renderEmail({
-    preview: 'לחיצה אחת ואתה בפנים — הקישור תקף ל-24 שעות.',
-    heading: 'התחברות ל-RestoMatch',
-    bodyHtml: `
-      <p style="margin:0 0 10px">היי, ביקשת להתחבר לחשבון שלך. לחיצה על הכפתור תכניס אותך פנימה — בלי סיסמה.</p>
-      <p style="margin:0;color:${COLORS.muted};font-size:13px">הקישור תקף ל-24 שעות וניתן לשימוש פעם אחת.</p>`,
-    cta: { label: 'כניסה לחשבון', url: args.url },
-  });
-  const text = `התחברות ל-RestoMatch\n\nכדי להיכנס לחשבון, פתח את הקישור הבא (תקף ל-24 שעות, חד-פעמי):\n${args.url}\n\nאם לא ביקשת להתחבר, אפשר להתעלם מהודעה זו.`;
-  return { subject, html, text };
+  const l = loc(args.locale);
+  const c = copyOf(l).magicLink;
+  return {
+    subject: c.subject,
+    html: renderEmail({
+      locale: l,
+      preview: c.preview,
+      heading: c.heading,
+      bodyHtml: `${P}${htm(l, c.body)}</p>${NOTE}${htm(l, c.note)}</p>`,
+      cta: { label: c.cta, url: args.url },
+    }),
+    text: lines(c.heading, '', c.textIntro, args.url, '', c.ignore),
+  };
 }
 
 /* ─────────────────────────── password reset ─────────────────────── */
 
 export function passwordResetEmail(args: { url: string; locale?: EmailLocale }): RenderedEmail {
-  if (args.locale === 'en') {
-    return {
-      subject: 'Reset your RestoMatch password',
-      html: renderEmail({
-        locale: 'en',
-        preview: 'Your password reset link — valid for one hour.',
-        heading: 'Reset your password',
-        bodyHtml: `
-      <p style="margin:0 0 10px">We received a request to reset your account password. Click the button to choose a new one.</p>
-      <p style="margin:0;color:${COLORS.muted};font-size:13px">The link is valid for one hour and can be used once. If you didn't ask for a reset, ignore this message — your current password stays as it is.</p>`,
-        cta: { label: 'Choose a new password', url: args.url },
-      }),
-      text: `Reset your RestoMatch password\n\nTo choose a new password, open this link (valid for one hour, single use):\n${args.url}\n\nIf you didn't ask for a reset, you can ignore this message.`,
-    };
-  }
-  const subject = 'איפוס הסיסמה שלך ב-RestoMatch';
-  const html = renderEmail({
-    preview: 'קישור לאיפוס הסיסמה — תקף לשעה אחת.',
-    heading: 'איפוס סיסמה',
-    bodyHtml: `
-      <p style="margin:0 0 10px">קיבלנו בקשה לאיפוס הסיסמה לחשבון שלך. לחיצה על הכפתור תאפשר לבחור סיסמה חדשה.</p>
-      <p style="margin:0;color:${COLORS.muted};font-size:13px">הקישור תקף לשעה אחת וניתן לשימוש פעם אחת. אם לא ביקשת לאפס סיסמה — אפשר להתעלם מהודעה זו, הסיסמה הנוכחית תישאר בתוקף.</p>`,
-    cta: { label: 'בחירת סיסמה חדשה', url: args.url },
-  });
-  const text = `איפוס סיסמה ב-RestoMatch\n\nכדי לבחור סיסמה חדשה, פתח את הקישור (תקף לשעה, חד-פעמי):\n${args.url}\n\nאם לא ביקשת לאפס סיסמה, אפשר להתעלם מהודעה זו.`;
-  return { subject, html, text };
+  const l = loc(args.locale);
+  const c = copyOf(l).passwordReset;
+  return {
+    subject: c.subject,
+    html: renderEmail({
+      locale: l,
+      preview: c.preview,
+      heading: c.heading,
+      bodyHtml: `${P}${htm(l, c.body)}</p>${NOTE}${htm(l, c.note)}</p>`,
+      cta: { label: c.cta, url: args.url },
+    }),
+    text: lines(c.heading, '', c.textIntro, args.url, '', c.ignore),
+  };
 }
 
 /* ─────────────────────────── team invite ────────────────────────── */
@@ -226,38 +227,22 @@ export function inviteEmail(args: {
   /** Invitee's language (chosen by the inviter). Default Hebrew. */
   locale?: EmailLocale;
 }): RenderedEmail {
-  if (args.locale === 'en') {
-    const who = args.inviterName ? `${args.inviterName} invited you` : 'You’ve been invited';
-    return {
-      subject: `You're invited to join ${args.restaurantName} on RestoMatch`,
-      html: renderEmail({
-        locale: 'en',
-        preview: `${who} to join the ${args.restaurantName} team.`,
-        heading: 'You’re invited to the team',
-        bodyHtml: `
-      <p style="margin:0 0 8px">${escapeHtml(who)} to join the team at <strong>${escapeHtml(args.restaurantName)}</strong>
-        as <strong>${escapeHtml(args.roleLabel)}</strong>.</p>
-      <p style="margin:0;color:${COLORS.muted};font-size:13px">The link is valid for 7 days. RestoMatch will open in English for you.</p>`,
-        cta: { label: 'Join the team', url: args.url },
-      }),
-      text: `You're invited to join ${args.restaurantName} on RestoMatch (role: ${args.roleLabel}).\n\nJoin via this link (valid for 7 days):\n${args.url}`,
-    };
-  }
-  const subject = `הוזמנת לצוות של ${args.restaurantName} ב-RestoMatch`;
-  const inviterPlain = args.inviterName ? `${args.inviterName} הזמין/ה אותך` : 'הוזמנת';
-  const inviter = escapeHtml(inviterPlain);
-  const html = renderEmail({
-    // renderEmail escapes the preview itself — pass the plain text (no double escape).
-    preview: `${inviterPlain} להצטרף לצוות של ${args.restaurantName}.`,
-    heading: 'הוזמנת לצוות',
-    bodyHtml: `
-      <p style="margin:0 0 8px">${inviter} להצטרף לצוות של <strong>${escapeHtml(args.restaurantName)}</strong>
-        בתפקיד <strong>${escapeHtml(args.roleLabel)}</strong>.</p>
-      <p style="margin:0;color:${COLORS.muted};font-size:13px">הקישור תקף ל-7 ימים.</p>`,
-    cta: { label: 'הצטרפות לצוות', url: args.url },
-  });
-  const text = `הוזמנת לצוות של ${args.restaurantName} ב-RestoMatch (תפקיד: ${args.roleLabel}).\n\nהצטרפו דרך הקישור (תקף 7 ימים):\n${args.url}`;
-  return { subject, html, text };
+  const l = loc(args.locale);
+  const c = copyOf(l).invite;
+  const vars = { restaurant: args.restaurantName, role: args.roleLabel, inviter: args.inviterName ?? '' };
+  const by = Boolean(args.inviterName);
+  return {
+    subject: txt(l, c.subject, vars),
+    html: renderEmail({
+      locale: l,
+      // renderEmail escapes the preview itself: pass plain text (no double escape).
+      preview: txt(l, by ? c.previewBy : c.preview, vars),
+      heading: c.heading,
+      bodyHtml: `<p style="margin:0 0 8px">${htm(l, by ? c.bodyBy : c.body, vars, ['restaurant', 'role'])}</p>${NOTE}${htm(l, c.note)}</p>`,
+      cta: { label: c.cta, url: args.url },
+    }),
+    text: lines(txt(l, c.text, vars), '', c.textIntro, args.url),
+  };
 }
 
 /* ─────────────────────── supplier delivery delay ─────────────────── */
@@ -268,26 +253,34 @@ export function supplierDelayEmail(args: {
   daysLate: number;
   lineCount: number;
   poUrl?: string;
+  locale?: EmailLocale;
 }): RenderedEmail {
-  const subject = `⏰ איחור באספקה — ${args.supplierName}`;
-  const lateText =
-    args.daysLate >= 1 ? `באיחור של ${args.daysLate} ימים` : 'לא סופקה במועד';
+  const l = loc(args.locale);
+  const c = copyOf(l).supplierDelay;
+  const late = args.daysLate >= 1 ? txt(l, c.late, { days: args.daysLate }) : c.notOnTime;
+  const vars = { supplier: args.supplierName, late, date: args.expectedAtLabel, lines: args.lineCount };
   const html = renderEmail({
+    locale: l,
     accent: COLORS.danger,
-    preview: `הזמנה מ-${args.supplierName} ${lateText}.`,
-    heading: `אספקה מ-${args.supplierName} מתעכבת`,
+    preview: txt(l, c.preview, vars),
+    heading: txt(l, c.heading, vars),
     bodyHtml: `
       ${callout(
-        `<strong style="color:${COLORS.danger}">ההזמנה ${lateText}.</strong><br>
-         מועד אספקה צפוי: <span style="font-family:${MONO}">${escapeHtml(args.expectedAtLabel)}</span>`,
+        `<strong style="color:${COLORS.danger}">${htm(l, c.callout, vars)}</strong><br>
+         ${htm(l, c.expected, vars, ['date'])}`,
         'danger',
+        l,
       )}
-      <p style="margin:10px 0 0">ההזמנה כוללת <strong>${args.lineCount}</strong> פריטים ועדיין לא נקלטה במערכת.
-      כדאי ליצור קשר עם הספק או לעדכן את הסטטוס.</p>`,
-    cta: args.poUrl ? { label: 'צפייה בהזמנה', url: args.poUrl } : undefined,
+      <p style="margin:10px 0 0">${htm(l, c.body, vars)}</p>`,
+    cta: args.poUrl ? { label: c.cta, url: args.poUrl } : undefined,
   });
-  const text = `איחור באספקה — ${args.supplierName}\n\nההזמנה ${lateText}. מועד צפוי: ${args.expectedAtLabel}. ${args.lineCount} פריטים, טרם נקלטה.${args.poUrl ? `\n\nצפייה בהזמנה: ${args.poUrl}` : ''}`;
-  return { subject, html, text };
+  const text = lines(
+    txt(l, c.subject, vars),
+    '',
+    txt(l, c.text, vars),
+    args.poUrl && `\n${c.cta}: ${args.poUrl}`,
+  );
+  return { subject: txt(l, c.subject, vars), html, text };
 }
 
 /* ─────────────────────── order not placed (cadence) ─────────────── */
@@ -297,26 +290,32 @@ export function orderNotPlacedEmail(args: {
   orderDayLabel: string; // e.g. "יום ראשון"
   cutoffLabel?: string; // e.g. "12:00"
   ordersUrl?: string;
+  locale?: EmailLocale;
 }): RenderedEmail {
-  const subject = `📋 לא בוצעה הזמנה — ${args.supplierName}`;
-  const cutoffLine = args.cutoffLabel
-    ? `<br>מועד אחרון להזמנה היום: <span style="font-family:${MONO}">${escapeHtml(args.cutoffLabel)}</span>`
-    : '';
+  const l = loc(args.locale);
+  const c = copyOf(l).orderNotPlaced;
+  const vars = { supplier: args.supplierName, day: args.orderDayLabel, cutoff: args.cutoffLabel ?? '' };
   const html = renderEmail({
+    locale: l,
     accent: COLORS.gold,
-    preview: `היום (${args.orderDayLabel}) יום הזמנה ל-${args.supplierName} — עדיין לא הוזמן.`,
-    heading: `תזכורת: הזמנה ל-${args.supplierName}`,
+    preview: txt(l, c.preview, vars),
+    heading: txt(l, c.heading, vars),
     bodyHtml: `
       ${callout(
-        `היום <strong>${escapeHtml(args.orderDayLabel)}</strong> — יום הזמנה קבוע ל-<strong>${escapeHtml(args.supplierName)}</strong>,
-         אך עדיין לא נוצרה הזמנה.${cutoffLine}`,
+        `${htm(l, c.callout, vars, ['day', 'supplier'])}${args.cutoffLabel ? `<br>${htm(l, c.cutoff, vars, ['cutoff'])}` : ''}`,
         'gold',
+        l,
       )}
-      <p style="margin:10px 0 0">כדי שלא להחמיץ את חלון האספקה, אפשר ליצור את ההזמנה עכשיו.</p>`,
-    cta: args.ordersUrl ? { label: 'יצירת הזמנה', url: args.ordersUrl } : undefined,
+      <p style="margin:10px 0 0">${htm(l, c.body)}</p>`,
+    cta: args.ordersUrl ? { label: c.cta, url: args.ordersUrl } : undefined,
   });
-  const text = `תזכורת הזמנה — ${args.supplierName}\n\nהיום (${args.orderDayLabel}) יום הזמנה קבוע ל-${args.supplierName}, אך עדיין לא נוצרה הזמנה.${args.cutoffLabel ? ` מועד אחרון: ${args.cutoffLabel}.` : ''}${args.ordersUrl ? `\n\nיצירת הזמנה: ${args.ordersUrl}` : ''}`;
-  return { subject, html, text };
+  const text = lines(
+    txt(l, c.heading, vars),
+    '',
+    txt(l, c.callout, vars) + (args.cutoffLabel ? ` ${txt(l, c.cutoff, vars)}.` : ''),
+    args.ordersUrl && `\n${c.cta}: ${args.ordersUrl}`,
+  );
+  return { subject: txt(l, c.subject, vars), html, text };
 }
 
 /* ─────────────────────── approval needed ─────────────────────────── */
@@ -333,86 +332,112 @@ export function orderNotPlacedEmail(args: {
  *
  * Never swap a label onto the other procedure (functional-flows-08): "אשר" used
  * to mean "claim" and every AP tool reads it as "pay".
+ *
+ * The strings live in EMAIL_COPY.{he,en}.decision (W2-13); this keeps the old shape.
+ * The three masculine-singular verbs are W2-04's work item (pinned by its test).
  */
 export const DECISION_COPY = {
-  he: {
-    approve: 'דרוש {amount} מהספק',
-    reject: 'שלם כפי שחויב',
-    escalate: 'העבר לבעלים',
-    approved: 'נדרש מהספק',
-    rejected: 'שולם כפי שחויב',
-    escalated: 'הועבר לבעלים',
-    reopened: 'ההחלטה בוטלה',
-    duplicateHeld: 'העותק מוחזק · לא ישולם',
-    reviewed: 'סומן כנבדק',
-  },
-  en: {
-    approve: 'Claim {amount} back',
-    reject: 'Pay as billed',
-    escalate: 'Send to owner',
-    approved: 'Claimed from supplier',
-    rejected: 'Paid as billed',
-    escalated: 'Sent to owner',
-    reopened: 'Decision undone',
-    duplicateHeld: 'Copy held · not paid',
-    reviewed: 'Marked as checked',
-  },
+  he: EMAIL_COPY.he.decision,
+  en: EMAIL_COPY.en.decision,
 } as const satisfies Record<EmailLocale, Record<string, string>>;
 
 export function approvalNeededEmail(args: {
   supplierName: string;
   discrepancyCount: number;
   atRiskIls: string; // formatted ₪
+  /** Formatted ₪ the owner can claim back (W2-04: Σ claimableLines). Replaces the at-risk line. */
+  claimableIls?: string;
   approvalsUrl?: string;
+  /** Deep link to this invoice's decision (W2-04). Preferred over `approvalsUrl` for the CTA. */
+  invoiceUrl?: string;
+  locale?: EmailLocale;
 }): RenderedEmail {
-  const subject = `דרושה החלטה — ${args.discrepancyCount} פערים בחשבונית מ-${args.supplierName}`;
+  const l = loc(args.locale);
+  const c = copyOf(l).approvalNeeded;
+  const d = DECISION_COPY[l];
+  const amount = args.claimableIls ?? args.atRiskIls;
+  const vars = {
+    supplier: args.supplierName,
+    count: args.discrepancyCount,
+    amount,
+    approve: d.approve.replace(/\s*\{amount\}\s*/, ' ').trim(),
+    reject: d.reject,
+  };
+  const amountHtml = ilsSpan(amount, 'danger');
   const html = renderEmail({
+    locale: l,
     accent: COLORS.danger,
-    preview: `${args.discrepancyCount} פערים בסכום של ${args.atRiskIls} ממתינים לאישור.`,
-    heading: 'דרושה החלטה לחשבונית',
+    preview: txt(l, c.preview, vars),
+    heading: c.heading,
     bodyHtml: `
       ${callout(
-        `נמצאו <strong>${args.discrepancyCount}</strong> פערים בחשבונית מ-<strong>${escapeHtml(args.supplierName)}</strong>.<br>
-         סכום בסיכון: ${ilsSpan(args.atRiskIls, 'danger')}`,
+        `${htm(l, c.found, vars, ['supplier'])}<br>
+         ${htm(l, args.claimableIls ? c.claimable : c.atRisk, { amount: amountHtml }, [], ['amount'])}`,
         'danger',
+        l,
       )}
-      <p style="margin:10px 0 0">לכל פער שתי אפשרויות: <strong>«${DECISION_COPY.he.approve.replace(' {amount}', '')}»</strong> או <strong>«${DECISION_COPY.he.reject}»</strong>.</p>`,
-    cta: args.approvalsUrl ? { label: 'מעבר לתור האישורים', url: args.approvalsUrl } : undefined,
+      <p style="margin:10px 0 0">${htm(l, c.choices, vars, ['approve', 'reject'])}</p>`,
+    cta: args.invoiceUrl
+      ? { label: c.ctaInvoice, url: args.invoiceUrl }
+      : args.approvalsUrl
+        ? { label: c.cta, url: args.approvalsUrl }
+        : undefined,
   });
-  const text = `דרושה החלטה — ${args.supplierName}\n\n${args.discrepancyCount} פערים, סכום בסיכון ${args.atRiskIls}.\n${DECISION_COPY.he.approve.replace(' {amount}', '')} / ${DECISION_COPY.he.reject}${args.approvalsUrl ? `\n\nתור האישורים: ${args.approvalsUrl}` : ''}`;
-  return { subject, html, text };
+  const link = args.invoiceUrl ?? args.approvalsUrl;
+  const text = lines(
+    txt(l, c.subject, vars),
+    '',
+    txt(l, c.found, vars),
+    txt(l, args.claimableIls ? c.claimable : c.atRisk, vars),
+    txt(l, c.choices, vars),
+    link && `\n${args.invoiceUrl ? c.ctaInvoice : c.cta}: ${link}`,
+  );
+  return { subject: txt(l, c.subject, vars), html, text };
 }
 
-/* ─────────────────────── weekly leak digest ─────────────────────── */
+/* ─────────────────────── weekly digest ──────────────────────────── */
 
 export function weeklyLeakReportEmail(args: {
   weekLabel: string; // e.g. "13–19 ביוני"
-  savedIls: string; // formatted ₪ caught/prevented
-  leakedIls: string; // formatted ₪ still leaking
+  savedIls: string; // formatted ₪ found in discrepancies this week
+  leakedIls: string; // formatted ₪ still open (not decided)
   topSupplier?: string;
   dashboardUrl?: string;
+  locale?: EmailLocale;
 }): RenderedEmail {
-  const subject = `הסיכום השבועי שלך — ${args.savedIls} נחסכו`;
+  const l = loc(args.locale);
+  const c = copyOf(l).weekly;
+  const vars = { week: args.weekLabel, found: args.savedIls, open: args.leakedIls, supplier: args.topSupplier ?? '' };
   const html = renderEmail({
+    locale: l,
     accent: COLORS.gold,
-    preview: `${args.savedIls} נחסכו השבוע · ${args.leakedIls} עדיין דולפים.`,
-    heading: `הסיכום השבועי · ${escapeHtml(args.weekLabel)}`,
+    preview: txt(l, c.preview, vars),
+    heading: txt(l, c.heading, vars),
     bodyHtml: `
-      ${callout(`נחסך/נמנע השבוע: ${ilsSpan(args.savedIls, 'gold')}`, 'gold')}
-      ${callout(`עדיין דולף (לא טופל): ${ilsSpan(args.leakedIls, 'danger')}`, 'danger')}
-      ${args.topSupplier ? `<p style="margin:10px 0 0">הספק עם הכי הרבה פערים השבוע: <strong>${escapeHtml(args.topSupplier)}</strong>.</p>` : ''}`,
-    cta: args.dashboardUrl ? { label: 'פתיחת הדשבורד', url: args.dashboardUrl } : undefined,
+      ${callout(htm(l, c.found, { amount: ilsSpan(args.savedIls, 'gold') }, [], ['amount']), 'gold', l)}
+      ${callout(htm(l, c.open, { amount: ilsSpan(args.leakedIls, 'danger') }, [], ['amount']), 'danger', l)}
+      ${args.topSupplier ? `<p style="margin:10px 0 0">${htm(l, c.topSupplier, vars, ['supplier'])}</p>` : ''}`,
+    cta: args.dashboardUrl ? { label: c.cta, url: args.dashboardUrl } : undefined,
   });
-  const text = `הסיכום השבועי · ${args.weekLabel}\n\nנחסך/נמנע: ${args.savedIls}\nעדיין דולף: ${args.leakedIls}${args.topSupplier ? `\nספק בולט: ${args.topSupplier}` : ''}${args.dashboardUrl ? `\n\nדשבורד: ${args.dashboardUrl}` : ''}`;
-  return { subject, html, text };
+  const text = lines(
+    txt(l, c.heading, vars),
+    '',
+    txt(l, c.found, { amount: args.savedIls }),
+    txt(l, c.open, { amount: args.leakedIls }),
+    args.topSupplier && txt(l, c.topSupplier, vars),
+    args.dashboardUrl && `\n${c.cta}: ${args.dashboardUrl}`,
+  );
+  return { subject: txt(l, c.subject, vars), html, text };
 }
 
 /* ─────────────────────── end-of-day digest ──────────────────────── */
 
-function statRow(label: string, valueHtml: string): string {
+function statRow(label: string, valueHtml: string, locale: EmailLocale = 'he'): string {
+  const start = locale === 'en' ? 'left' : 'right';
+  const end = locale === 'en' ? 'right' : 'left';
   return `<tr>
-    <td style="padding:8px 0;border-bottom:1px solid ${COLORS.line};color:${COLORS.muted};font-size:14px;text-align:right">${label}</td>
-    <td style="padding:8px 0;border-bottom:1px solid ${COLORS.line};font-size:15px;text-align:left;white-space:nowrap">${valueHtml}</td>
+    <td style="padding:8px 0;border-bottom:1px solid ${COLORS.line};color:${COLORS.muted};font-size:14px;text-align:${start}">${escapeHtml(label)}</td>
+    <td style="padding:8px 0;border-bottom:1px solid ${COLORS.line};font-size:15px;text-align:${end};white-space:nowrap">${valueHtml}</td>
   </tr>`;
 }
 
@@ -425,40 +450,142 @@ export function endOfDayReportEmail(args: {
   pendingApprovals?: number; // items waiting for a manager decision
   topSupplier?: string; // supplier with the most open credits
   approvalsUrl?: string;
+  locale?: EmailLocale;
 }): RenderedEmail {
-  const subject = `סיכום יומי · ${args.openCreditsCount} זיכויים פתוחים (${args.openCreditsIls})`;
+  const l = loc(args.locale);
+  const c = copyOf(l).endOfDay;
+  const nf = new Intl.NumberFormat(l === 'en' ? 'en-GB' : 'he-IL');
+  const vars = {
+    count: args.openCreditsCount,
+    amount: args.openCreditsIls,
+    caught: args.todayCaughtCount,
+    date: args.dateLabel,
+  };
   const rows = [
-    statRow('זיכויים פתוחים לגבייה', `${ilsSpan(args.openCreditsIls, 'danger')} · ${args.openCreditsCount}`),
-    statRow('פערים שזוהו היום', `${ilsSpan(args.todayCaughtIls, 'gold')} · ${args.todayCaughtCount}`),
+    statRow(c.openLabel, `${ilsSpan(args.openCreditsIls, 'danger')} · ${nf.format(args.openCreditsCount)}`, l),
+    statRow(c.caughtLabel, `${ilsSpan(args.todayCaughtIls, 'gold')} · ${nf.format(args.todayCaughtCount)}`, l),
     args.pendingApprovals != null
-      ? statRow('ממתינים להחלטה', `<strong>${args.pendingApprovals}</strong>`)
+      ? statRow(c.pendingLabel, `<strong>${nf.format(args.pendingApprovals)}</strong>`, l)
       : '',
-    args.topSupplier
-      ? statRow('ספק עם הכי הרבה זיכויים', `<strong>${escapeHtml(args.topSupplier)}</strong>`)
-      : '',
+    args.topSupplier ? statRow(c.topLabel, `<strong><bdi>${escapeHtml(args.topSupplier)}</bdi></strong>`, l) : '',
   ].join('');
 
   const html = renderEmail({
+    locale: l,
     accent: args.openCreditsCount > 0 ? COLORS.danger : COLORS.gold,
-    preview: `${args.openCreditsCount} זיכויים פתוחים בסך ${args.openCreditsIls} · ${args.todayCaughtCount} פערים זוהו היום.`,
-    heading: `סיכום סוף יום · ${escapeHtml(args.dateLabel)}`,
+    preview: txt(l, c.preview, vars),
+    heading: txt(l, c.heading, vars),
     bodyHtml: `
-      <p style="margin:0 0 8px">תמונת מצב לסוף היום — מה פתוח לטיפול ומה נתפס היום:</p>
+      <p style="margin:0 0 8px">${htm(l, c.intro)}</p>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:6px 0">${rows}</table>
       ${
         args.openCreditsCount > 0
-          ? `<p style="margin:12px 0 0;color:${COLORS.muted};font-size:13px">זיכויים פתוחים הם כסף שעדיין אפשר לגבות חזרה מהספקים. כדאי לסגור אותם לפני התשלום הבא.</p>`
-          : `<p style="margin:12px 0 0;color:${COLORS.gold};font-weight:700">כל הכבוד — אין זיכויים פתוחים. 🎉</p>`
+          ? `<p style="margin:12px 0 0;color:${COLORS.muted};font-size:13px">${htm(l, c.openNote)}</p>`
+          : `<p style="margin:12px 0 0;color:${COLORS.gold};font-weight:700">${htm(l, c.clean)}</p>`
       }`,
-    cta: args.approvalsUrl ? { label: 'מעבר לתור האישורים', url: args.approvalsUrl } : undefined,
+    cta: args.approvalsUrl ? { label: c.cta, url: args.approvalsUrl } : undefined,
   });
 
-  const text =
-    `סיכום סוף יום · ${args.dateLabel}\n\n` +
-    `זיכויים פתוחים לגבייה: ${args.openCreditsIls} (${args.openCreditsCount})\n` +
-    `פערים שזוהו היום: ${args.todayCaughtIls} (${args.todayCaughtCount})\n` +
-    (args.pendingApprovals != null ? `ממתינים להחלטה: ${args.pendingApprovals}\n` : '') +
-    (args.topSupplier ? `ספק בולט: ${args.topSupplier}\n` : '') +
-    (args.approvalsUrl ? `\nתור האישורים: ${args.approvalsUrl}` : '');
+  const text = lines(
+    txt(l, c.heading, vars),
+    '',
+    `${c.openLabel}: ${txt(l, '{amount}', { amount: args.openCreditsIls })} (${nf.format(args.openCreditsCount)})`,
+    `${c.caughtLabel}: ${txt(l, '{amount}', { amount: args.todayCaughtIls })} (${nf.format(args.todayCaughtCount)})`,
+    args.pendingApprovals != null && `${c.pendingLabel}: ${nf.format(args.pendingApprovals)}`,
+    args.topSupplier && `${c.topLabel}: ${txt(l, '{s}', { s: args.topSupplier })}`,
+    args.approvalsUrl && `\n${c.cta}: ${args.approvalsUrl}`,
+  );
+  return { subject: txt(l, c.subject, vars), html, text };
+}
+
+/* ─────────────────────── invoice could not be read (G-06) ───────── */
+
+/**
+ * A terminal OCR failure (G-06). Two audiences: `uploader` (what failed + what to do next)
+ * and `managers` (who uploaded + what failed). Carries no ₪ at all, so it is safe for every
+ * role. The supplier is named only when `showSupplier` is not false.
+ */
+export function invoiceOcrFailedEmail(args: {
+  audience?: 'uploader' | 'managers';
+  supplierName?: string | null;
+  fileName?: string | null;
+  /** The uploader's display name (managers version). */
+  uploaderName?: string | null;
+  /** Short, human reason (already localised by the caller), e.g. "הצילום מטושטש". */
+  reason?: string | null;
+  /** Default true. Pass false for a recipient who may not see the supplier. */
+  showSupplier?: boolean;
+  url?: string;
+  locale?: EmailLocale;
+}): RenderedEmail {
+  const l = loc(args.locale);
+  const c = copyOf(l).invoiceOcrFailed;
+  const supplier = args.showSupplier === false ? null : args.supplierName;
+  const vars = {
+    supplier: supplier ?? '',
+    file: args.fileName ?? '',
+    reason: args.reason ?? '',
+    uploader: args.uploaderName || c.someone,
+  };
+  const subject = supplier ? txt(l, c.subjectSupplier, vars) : c.subject;
+  const body =
+    args.audience === 'managers'
+      ? args.fileName
+        ? c.managersFile
+        : c.managers
+      : args.fileName
+        ? c.uploaderFile
+        : c.uploader;
+  const html = renderEmail({
+    locale: l,
+    accent: COLORS.danger,
+    preview: txt(l, body, vars),
+    heading: c.heading,
+    bodyHtml: `${P}${htm(l, body, vars, ['file', 'uploader'])}</p>${args.reason ? `${NOTE}${htm(l, c.reason, vars)}</p>` : ''}`,
+    cta: args.url ? { label: c.cta, url: args.url } : undefined,
+  });
+  const text = lines(
+    subject,
+    '',
+    txt(l, body, vars),
+    args.reason && txt(l, c.reason, vars),
+    args.url && `\n${c.cta}: ${args.url}`,
+  );
   return { subject, html, text };
+}
+
+/* ─────────────────────── generic task notice (G-06) ─────────────── */
+
+/**
+ * A generic act-now notice: the caller supplies the (already localised) title and
+ * body. `amountIls` renders only when passed, so callers omit it for roles without
+ * `money.view` (receiver, chef).
+ */
+export function taskNoticeEmail(args: {
+  title: string;
+  body?: string | null;
+  amountIls?: string | null;
+  url?: string;
+  locale?: EmailLocale;
+}): RenderedEmail {
+  const l = loc(args.locale);
+  const c = copyOf(l).taskNotice;
+  const html = renderEmail({
+    locale: l,
+    accent: COLORS.primary,
+    preview: args.body ?? args.title,
+    heading: args.title,
+    bodyHtml: [
+      args.body ? `${P}${escapeHtml(args.body)}</p>` : '',
+      args.amountIls ? `${P}${htm(l, c.amount, { amount: ilsSpan(args.amountIls, 'ink') }, [], ['amount'])}</p>` : '',
+    ].join(''),
+    cta: args.url ? { label: c.cta, url: args.url } : undefined,
+  });
+  const text = lines(
+    args.title,
+    args.body && `\n${args.body}`,
+    args.amountIls && txt(l, c.amount, { amount: args.amountIls }),
+    args.url && `\n${c.cta}: ${args.url}`,
+  );
+  return { subject: args.title, html, text };
 }

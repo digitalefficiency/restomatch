@@ -566,11 +566,13 @@ async function main() {
         await db.insert(activityEvents).values({
           restaurantId: rid,
           eventType: 'invoice_matched',
-          title: `חשבונית ${invNumber} הותאמה`,
-          detail: sp.name,
+          // v2 (W2-13): machine title, no detail; the feed renders from metadata in every locale.
+          title: `invoice_matched:${invNumber}`,
+          detail: null,
           entityType: 'match_run',
           entityId: matchRun!.id,
           metadata: {
+            v: 2,
             invoiceId: invoice!.id,
             invoiceNumber: invNumber,
             supplierName: sp.name,

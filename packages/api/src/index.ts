@@ -169,6 +169,7 @@ export {
   type NotificationChannel,
   type EmailAttachment,
 } from './notifications';
+export { EMAIL_COPY, type EmailCopy } from './notifications/copy';
 export { logActivity, type ActivityEventInput, type ActivityEventType } from './activity';
 export { buildMatchInputForInvoice, type BuiltMatchInput } from './match/buildMatchInput';
 export {
