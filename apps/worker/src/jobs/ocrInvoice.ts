@@ -101,7 +101,32 @@ export async function ocrModeFor(
 /** First 8 characters of an id, for logs. */
 const short = (id: string) => id.slice(0, 8);
 
-function realProviders(): { documentAi: OcrProvider; claude: OcrProvider } {
+/** Token usage of the job's Claude call(s), for the one log line (no content). */
+interface OcrUsage {
+  model: string | null;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+/**
+ * $ per 1M tokens (input, output) — Anthropic list prices, 2026-10, the same
+ * table as packages/ocr bench/run.ts (not exported there). Log-only estimate;
+ * an unknown model logs usd=? rather than a guess.
+ */
+const OCR_PRICES_PER_MTOK: Readonly<Record<string, readonly [number, number]>> = {
+  'claude-opus-4-8': [5, 25],
+  'claude-opus-5-5': [4, 20],
+  'claude-sonnet-5-5': [2, 10],
+  'claude-haiku-5-5': [0.1, 0.5],
+};
+
+export function ocrCostUsd(usage: OcrUsage): number | null {
+  const price = usage.model ? OCR_PRICES_PER_MTOK[usage.model] : undefined;
+  if (!price) return null;
+  return (usage.inputTokens * price[0] + usage.outputTokens * price[1]) / 1e6;
+}
+
+function realProviders(usage?: OcrUsage): { documentAi: OcrProvider; claude: OcrProvider } {
   // ocrModeFor returned 'claude', so the key is set.
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error('OCR providers not configured — ANTHROPIC_API_KEY unset');
@@ -118,9 +143,18 @@ function realProviders(): { documentAi: OcrProvider; claude: OcrProvider } {
     apiKey,
     model: process.env.OCR_CLAUDE_MODEL,
     fetchBytes: true,
+    onUsage: (u) => {
+      if (!usage) return;
+      usage.inputTokens += u.input_tokens ?? 0;
+      usage.outputTokens += u.output_tokens ?? 0;
+    },
   });
+  if (usage) usage.model = process.env.OCR_CLAUDE_MODEL ?? OCR_DEFAULT_MODEL;
   return { documentAi: claude, claude };
 }
+
+/** packages/ocr ClaudeVision's default when OCR_CLAUDE_MODEL is unset (log only). */
+const OCR_DEFAULT_MODEL = 'claude-opus-4-8';
 
 /** One stub instance in both slots: the pipeline calls it once and sees full agreement. */
 function stubProviders(result: InvoiceOcrResult): { documentAi: OcrProvider; claude: OcrProvider } {
@@ -166,13 +200,24 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
   }
 
   // One log line per job (mode, short ids, outcome) — never a URL or content.
+  // A read also logs model, tokens, ms, estimated $ and the document kind.
   let mode: OcrMode | 'mock' = 'disabled';
   let outcome = '';
-  const logLine = () =>
+  const t0 = Date.now();
+  const usage: OcrUsage = { model: null, inputTokens: 0, outputTokens: 0 };
+  let read = false;
+  const logLine = () => {
+    const usd = ocrCostUsd(usage);
+    const cost = read
+      ? ` model=${usage.model ?? '-'} tokens=${usage.inputTokens}/${usage.outputTokens} ms=${Date.now() - t0}` +
+        ` usd=${usd == null ? '?' : usd.toFixed(4)}`
+      : '';
     console.log(
       `[ocr-invoice] mode=${mode} restaurant=${short(job.data.restaurantId)} invoice=${short(job.data.invoiceId)}` +
-        (outcome ? ` ${outcome}` : ''),
+        (outcome ? ` ${outcome}` : '') +
+        cost,
     );
+  };
 
   // Only an invoice still waiting for its read is read: a retry / duplicate job
   // must never overwrite a read (or a human's correction) already on file.
@@ -215,7 +260,7 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
     }
     providers = stubProviders(stub);
   } else {
-    providers = mock ?? realProviders();
+    providers = mock ?? realProviders(usage);
   }
 
   try {
@@ -261,6 +306,7 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
       .limit(1);
     const reviewThreshold = restaurant[0]?.settings?.ocrReviewThreshold;
 
+    read = true;
     const result = await runOcrPipeline(imageUrl, {
       ...providers,
       catalogMatcher: matcher,
@@ -268,54 +314,92 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
     });
 
     const r = result.reconciled;
+    // From the provider's own extraction: the reconciler keeps only the fields it
+    // compares, so documentKind / billingPeriod / deliveryNotes live on `primary`.
+    const facts = documentFacts({ ...(result.primary ?? {}), ...r });
     // The receipt this photo was taken on — so a receipt submit claims exactly
     // its own scans (receiving/matchTriggers), never a same-day sibling's.
     const scanGrId = await scanReceiptToStamp(db, job.data.restaurantId, job.data.grId, invoice.supplierId);
-    const { duplicateOf } = await writeOcrHeader(
-      db,
-      {
-        restaurantId: job.data.restaurantId,
-        invoiceId: job.data.invoiceId,
-        supplierId: invoice.supplierId,
-      },
-      {
-        invoiceNumber: r.invoiceNumber ?? null,
-        invoiceDate: r.invoiceDate ? new Date(r.invoiceDate) : null,
-        totalExclVat: r.totals.subtotal?.toString() ?? null,
-        vatAmount: r.totals.vat?.toString() ?? null,
-        totalInclVat: r.totals.total?.toString() ?? null,
-        allocationNumber: r.allocationNumber ?? null,
-        ocrPayload: {
-          provider: 'reconciled',
-          raw: withScanGrId(result, scanGrId),
-          reconciledAt: new Date().toISOString(),
-        },
-        ocrConfidence: result.confidence.toString(),
-        status: result.needsHumanReview ? 'parsed' : 'matched',
-      },
-    );
-    // A number already on file holds the invoice for a human (no auto-match).
-    const needsHumanReview = result.needsHumanReview || duplicateOf !== undefined;
+    // What holds the invoice for a human instead of the auto-match (PR-OCR-2b):
+    //  - a document that is not an ordinary tax invoice (doc_kind_<kind>);
+    //  - a consolidated invoice (חשבונית ריכוז) is never single-PO matched: it is
+    //    cross-matched against its delivery notes (match/consolidated.ts) — and
+    //    with no known supplier there is nothing to cross-match, so a human.
+    const reviewReasons: string[] = [];
+    if (facts.kind !== 'tax_invoice' && facts.kind !== 'consolidated') reviewReasons.push(`doc_kind_${facts.kind}`);
+    if (facts.kind === 'consolidated' && !invoice.supplierId) reviewReasons.push('consolidated_unknown_supplier');
+    const holdForHuman = result.needsHumanReview || facts.kind !== 'tax_invoice';
 
-    await db.delete(invoiceLines).where(eq(invoiceLines.invoiceId, job.data.invoiceId));
-    if (r.lines.length > 0) {
-      await db.insert(invoiceLines).values(
-        r.lines.map((line) => ({
-          invoiceId: job.data.invoiceId,
-          productId: line.productId,
-          supplierSku: line.sku ?? null,
-          rawDescription: line.rawDescription,
-          // "Receiver in English": Claude Vision returns it in the same call.
-          rawDescriptionEn: line.rawDescriptionEn ?? null,
-          qtyBilled: line.qty.toString(),
-          unit: line.unit,
-          unitPriceBilled: line.unitPrice.toString(),
-          lineTotal: line.lineTotal.toString(),
-          vatRate: line.vatRate?.toString() ?? null,
-          ocrConfidenceLine: line.confidence?.toString() ?? null,
-        })),
+    // ONE copy of the extraction (the pipeline result repeats it as primary,
+    // reconciled and both providers) + the keys the readers look for at the top
+    // level of raw: kind / periodStart / periodEnd / deliveryNotes (consolidated
+    // cross-match, supplier ledger coverage, inventory).
+    const raw = withScanGrId(
+      {
+        reconciled: r,
+        confidence: result.confidence,
+        conflicts: result.conflicts,
+        needsHumanReview: result.needsHumanReview,
+        kind: facts.kind,
+        ...(facts.kind === 'consolidated'
+          ? { periodStart: facts.periodStart, periodEnd: facts.periodEnd, deliveryNotes: facts.deliveryNotes }
+          : {}),
+        ...(reviewReasons.length ? { reviewReasons } : {}),
+      },
+      scanGrId,
+    );
+
+    // Header + lines in ONE transaction, written only while the invoice is still
+    // 'ocr_pending': a second job (a sweep retry, a stalled run's twin) that read
+    // the same scan meanwhile finds it taken and writes nothing — never a header
+    // from one read over lines from another.
+    const written = await db.transaction(async (rawTx) => {
+      const tx = rawTx as unknown as Database;
+      const header = await writeOcrHeader(
+        tx,
+        { restaurantId: job.data.restaurantId, invoiceId: job.data.invoiceId, supplierId: invoice.supplierId },
+        {
+          invoiceNumber: r.invoiceNumber ?? null,
+          invoiceDate: r.invoiceDate ? new Date(r.invoiceDate) : null,
+          totalExclVat: r.totals.subtotal?.toString() ?? null,
+          vatAmount: r.totals.vat?.toString() ?? null,
+          totalInclVat: r.totals.total?.toString() ?? null,
+          allocationNumber: r.allocationNumber ?? null,
+          ocrPayload: { provider: 'reconciled', raw, reconciledAt: new Date().toISOString() },
+          ocrConfidence: result.confidence.toString(),
+          status: holdForHuman ? 'parsed' : 'matched',
+        },
+        { onlyPending: true },
       );
+      if (header.written === false) return header;
+      await tx.delete(invoiceLines).where(eq(invoiceLines.invoiceId, job.data.invoiceId));
+      if (r.lines.length > 0) {
+        await tx.insert(invoiceLines).values(
+          r.lines.map((line) => ({
+            invoiceId: job.data.invoiceId,
+            productId: line.productId,
+            supplierSku: line.sku ?? null,
+            rawDescription: line.rawDescription,
+            // "Receiver in English": Claude Vision returns it in the same call.
+            rawDescriptionEn: line.rawDescriptionEn ?? null,
+            qtyBilled: line.qty.toString(),
+            unit: line.unit,
+            unitPriceBilled: line.unitPrice.toString(),
+            lineTotal: line.lineTotal.toString(),
+            vatRate: line.vatRate?.toString() ?? null,
+            ocrConfidenceLine: line.confidence?.toString() ?? null,
+          })),
+        );
+      }
+      return header;
+    });
+    if (written.written === false) {
+      outcome = `skipped=already_read kind=${facts.kind}`;
+      return { invoiceId: job.data.invoiceId, skipped: 'already_read' as const };
     }
+    const { duplicateOf } = written;
+    // A number already on file holds the invoice for a human (no auto-match).
+    const needsHumanReview = holdForHuman || duplicateOf !== undefined;
 
     // Fill any English the extraction didn't carry (stub / Document AI lines)
     // plus the linked products' name_en — glossary first, Claude only when
@@ -327,7 +411,7 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
     }
 
     outcome =
-      `confidence=${result.confidence.toFixed(2)} conflicts=${result.conflicts.length} ` +
+      `kind=${facts.kind} confidence=${result.confidence.toFixed(2)} conflicts=${result.conflicts.length} ` +
       `lines=${r.lines.length} needsReview=${needsHumanReview}` +
       (duplicateOf !== undefined ? ` duplicateOf=${duplicateOf ? short(duplicateOf) : 'unknown'}` : '');
 
@@ -391,6 +475,45 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
   }
 }
 
+/**
+ * What kind of document the read was, from the extraction (S14 PR-OCR-2 /
+ * claude/pilot-ocr-consolidated add documentKind, billingPeriod, deliveryNotes).
+ * Read loosely: an extraction without them (today's, the stub) is an ordinary
+ * tax invoice. `kind` is what `ocr_payload.raw.kind` stores — 'consolidated' is
+ * the value match/consolidated.ts and ledger/coverage.ts look for.
+ */
+export interface DocumentFacts {
+  kind: string;
+  /** Consolidated only: the billed period, local dates 'YYYY-MM-DD'. */
+  periodStart: string | null;
+  periodEnd: string | null;
+  /** Consolidated only: the delivery notes (ת.מ.) it lists, by number. */
+  deliveryNotes: Array<{ number: string }>;
+}
+
+const LOCAL_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const CONSOLIDATED_KINDS = new Set(['consolidated', 'consolidated_invoice', 'monthly_consolidated']);
+const TAX_INVOICE_KINDS = new Set(['tax_invoice', 'invoice', 'tax_invoice_receipt']);
+
+export function documentFacts(extraction: unknown): DocumentFacts {
+  const e = (extraction ?? {}) as Record<string, unknown>;
+  const rawKind = typeof e.documentKind === 'string' ? e.documentKind.trim().toLowerCase() : '';
+  const kind = !rawKind || TAX_INVOICE_KINDS.has(rawKind) ? 'tax_invoice' : CONSOLIDATED_KINDS.has(rawKind) ? 'consolidated' : rawKind.replace(/[^a-z0-9_]/g, '_').slice(0, 40);
+  const period = (e.billingPeriod ?? {}) as Record<string, unknown>;
+  const day = (v: unknown) => (typeof v === 'string' && LOCAL_DAY.test(v.trim()) ? v.trim() : null);
+  const notes = Array.isArray(e.deliveryNotes) ? e.deliveryNotes : [];
+  const numbers = notes
+    .map((n) => (typeof n === 'object' && n !== null ? (n as { number?: unknown }).number : n))
+    .map((v) => (typeof v === 'number' ? String(v) : typeof v === 'string' ? v.trim() : ''))
+    .filter((v) => v.length > 0 && v.length <= 32);
+  return {
+    kind,
+    periodStart: day(period.start ?? period.from ?? e.periodStart),
+    periodEnd: day(period.end ?? period.to ?? e.periodEnd),
+    deliveryNotes: [...new Set(numbers)].map((number) => ({ number })),
+  };
+}
+
 type InvoiceHeader = Pick<
   typeof invoices.$inferInsert,
   | 'invoiceNumber'
@@ -428,15 +551,26 @@ export async function writeOcrHeader(
   db: Database,
   ids: { restaurantId: string; invoiceId: string; supplierId: string | null },
   header: InvoiceHeader,
-): Promise<{ duplicateOf?: string | null }> {
-  const where = and(eq(invoices.id, ids.invoiceId), eq(invoices.restaurantId, ids.restaurantId));
+  opts: { onlyPending?: boolean } = {},
+): Promise<{ duplicateOf?: string | null; written?: false }> {
+  // onlyPending: write only while the invoice still waits for its read
+  // (`written: false` when another read got there first).
+  const where = and(
+    eq(invoices.id, ids.invoiceId),
+    eq(invoices.restaurantId, ids.restaurantId),
+    ...(opts.onlyPending ? [eq(invoices.status, 'ocr_pending')] : []),
+  );
   // Blank → NULL: the prompt allows '' for an unreadable number, and '' is a
   // value to the unique index (a second blank collides); NULLs never do.
   const invoiceNumber = header.invoiceNumber?.trim() || null;
   header = { ...header, invoiceNumber };
   try {
-    await db.update(invoices).set(header).where(where);
-    return {};
+    // A savepoint: inside the caller's transaction a unique violation would
+    // otherwise abort it, and the number-less retry below could not run.
+    const rows = await db.transaction((sp) =>
+      (sp as unknown as Database).update(invoices).set(header).where(where).returning({ id: invoices.id }),
+    );
+    return rows.length > 0 ? {} : { written: false };
   } catch (err) {
     if (!invoiceNumber || !isInvoiceNumberTaken(err)) throw err;
   }
@@ -458,7 +592,7 @@ export async function writeOcrHeader(
     : [];
   const duplicateOf = existing?.id ?? null;
   const payload = header.ocrPayload;
-  await db
+  const rows = await db
     .update(invoices)
     .set({
       ...header,
@@ -474,8 +608,9 @@ export async function writeOcrHeader(
           }
         : payload,
     })
-    .where(where);
-  return { duplicateOf };
+    .where(where)
+    .returning({ id: invoices.id });
+  return rows.length > 0 ? { duplicateOf } : { duplicateOf, written: false };
 }
 
 /**
