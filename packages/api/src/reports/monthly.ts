@@ -1,4 +1,4 @@
-import { computeLeakReport } from '@restomatch/charts';
+import { LEAK_EXCLUDED_TYPES, computeLeakReport } from '@restomatch/charts';
 import { and, eq, isNull, monthlyReports, restaurants, sql, type Database } from '@restomatch/db';
 import { renderEmail, ilsSpan, type RenderedEmail } from '../notifications/templates';
 import { isFeatureOn } from '../lib/featureGate';
@@ -113,7 +113,7 @@ async function cappedIssues(db: Database, restaurantId: string, lo: string, hi: 
         AND COALESCE(i.invoice_date, i.created_at) >= ${lo}::timestamptz
         AND COALESCE(i.invoice_date, i.created_at) < ${hi}::timestamptz
         AND d.delta_amount IS NOT NULL
-        AND d.severity IN ('warn','block') AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL')
+        AND d.severity IN ('warn','block') AND d.type NOT IN (${sql.join(LEAK_EXCLUDED_TYPES.map((t) => sql`${t}`), sql`, `)})
     )
     SELECT type, COUNT(*) AS cnt, SUM(LEAST(raw, GREATEST(0, cap - (cum - raw)))) AS agorot
     FROM lines

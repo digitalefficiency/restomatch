@@ -14,6 +14,7 @@ import {
   type Database,
   type UserRole,
 } from '@restomatch/db';
+import { isLeakType } from '@restomatch/charts';
 import type { MatchInput, MatchOutput } from '@restomatch/matching';
 import { evaluateApproval, type ApprovalContext } from '../approvals/engine';
 import { buildRules } from '../approvals/engine';
@@ -236,8 +237,9 @@ export async function loadPriorDecisions(
 /**
  * The feed's story for a match, on the SAME rule as the dashboard hero
  * (packages/charts LEAK_FILTER + per-invoice cap): leak = Σ|delta| of warn/block
- * findings, not PRICE_LOWER (an under-charge), not UNORDERED_ARRIVAL (no PO yet
- * — "pending", calm) and not a duplicate a person rejected; capped at the
+ * findings of a leak type (charts LEAK_EXCLUDED_TYPES: not an under-charge, not
+ * UNORDERED_ARRIVAL — no PO yet, "pending", calm — not MISSING_ON_INVOICE) and not
+ * a duplicate a person rejected; capped at the
  * invoice total. So a no-PO invoice reads "ממתינה לשיוך להזמנה", not "הפסד
  * פוטנציאלי ₪1,273" while the hero calls it pending; a clean match reads "תואמת
  * להזמנה ולקבלה", never "0 חריגות · ₪0". Shared by persistMatchRun and the seed.
@@ -254,8 +256,7 @@ export function matchActivitySummary(
   const leaking = findings.filter(
     (f) =>
       (f.severity === 'warn' || f.severity === 'block') &&
-      f.type !== 'PRICE_LOWER' &&
-      f.type !== 'UNORDERED_ARRIVAL' &&
+      isLeakType(f.type) &&
       !(f.type === 'DUPLICATE_INVOICE' && f.resolutionStatus === 'rejected') &&
       Math.abs(f.deltaAmount) > 0,
   );

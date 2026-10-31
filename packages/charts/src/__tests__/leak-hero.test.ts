@@ -15,7 +15,7 @@ import {
 } from '@restomatch/db';
 import { computeLeakBreakdown, computeLeakHero } from '../leak-hero';
 import { computeLeakReport } from '../leak-report';
-import { computeLeakSummary, computeLeakTrend } from '../leak-views';
+import { computeLeakGrouped, computeLeakSummary, computeLeakTrend } from '../leak-views';
 import { computeBranchSnapshot } from '../chain';
 
 const db = createDb(testDbUrl());
@@ -499,6 +499,9 @@ describe('every surface sums to the hero (mutation guards: trend, chain supplier
         { type: 'QTY_SHORT', severity: 'warn', delta: '20', status: 'rejected' }, // waived: still leak
         { type: 'PRICE_LOWER', severity: 'warn', delta: '7' }, // under-charge: not leak
         { type: 'QTY_OVER', severity: 'info', delta: '3' }, // inside tolerance: not leak
+        // Owner 31.10: "להוציא את 'חסר בחשבונית' ממספר הדליפה" — an ordered line never billed
+        // is a review item, never ₪ in the leak (hero, explorer, supplier card, chain, report).
+        { type: 'MISSING_ON_INVOICE', severity: 'block', delta: '64' },
       ],
     });
     await t.invoice({ date: THIS_MONTH, exclVat: '300', inclVat: '354', matched: false }); // pending: neither
@@ -553,6 +556,16 @@ describe('every surface sums to the hero (mutation guards: trend, chain supplier
     expect(snap.suppliers.reduce((a, x) => a + x.leakIls, 0)).toBe(LEAK);
   });
 
+  it('explorer + supplier card: Σ grouped-by-supplier and by-type leak = the hero; MISSING_ON_INVOICE has no ₪ row', async () => {
+    const { restaurantId } = await mixedMonth();
+    const spec = { period: 'this_month' as const, now: NOW };
+    const bySupplier = await computeLeakGrouped(db, restaurantId, spec, 'supplier');
+    expect(bySupplier.reduce((a, x) => a + x.leakIls, 0)).toBe(LEAK);
+    const byType = await computeLeakGrouped(db, restaurantId, spec, 'type');
+    expect(byType.map((r) => r.key)).not.toContain('MISSING_ON_INVOICE');
+    expect((await computeLeakSummary(db, restaurantId, spec)).leakIls).toBe(LEAK);
+  });
+
   it('report: supplier spend and by-type leak = the hero', async () => {
     const { restaurantId } = await mixedMonth();
     const report = await computeLeakReport(db, restaurantId, '2026-10');
@@ -573,6 +586,7 @@ describe('every surface sums to the hero (mutation guards: trend, chain supplier
         'QTY_OVER:open:false',
         'QTY_SHORT:rejected:true',
         'UNORDERED_ARRIVAL:open:false',
+        'MISSING_ON_INVOICE:open:false',
       ].sort(),
     );
     const counted = rows.flatMap((r) => r.lines).filter((l) => l.countsAsLeak).reduce((a, l) => a + l.deltaAmount, 0);

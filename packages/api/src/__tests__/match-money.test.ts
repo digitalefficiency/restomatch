@@ -515,6 +515,13 @@ describe('the feed tells the hero’s story (matchActivitySummary)', () => {
     expect(matchActivitySummary([f('UNORDERED_ARRIVAL', 'block', 117, 'accepted')], 117, { poMatched: false }).detail).toBe('ללא הזמנה מקושרת');
   });
 
+  it('MISSING_ON_INVOICE is a review item, never ₪ in the leak (owner-approved 31.10)', () => {
+    const s = matchActivitySummary([f('MISSING_ON_INVOICE', 'block', 64), f('PRICE_HIGHER', 'warn', 10)], 1000, { poMatched: true });
+    expect(s.leakIls).toBe(10);
+    expect(s.leakCount).toBe(1);
+    expect(s.reviewCount).toBe(1);
+  });
+
   it('no PO yet → pending, calm — not "הפסד פוטנציאלי ₪1,273"', () => {
     const s = matchActivitySummary([f('UNORDERED_ARRIVAL', 'warn', 1273)], 1273, { poMatched: false });
     expect(s).toEqual({ detail: 'ממתינה לשיוך להזמנה', leakCount: 0, leakIls: 0, pendingLink: true, poMatched: false, reviewCount: 0 });
