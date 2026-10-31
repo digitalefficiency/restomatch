@@ -6,7 +6,7 @@ const leafPaths = (tree: MessageTree, prefix = ''): string[] =>
   Object.entries(tree).flatMap(([k, v]) => (typeof v === 'string' ? [`${prefix}${k}`] : leafPaths(v, `${prefix}${k}.`)));
 const placeholders = (s: string) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
 
-/** 'receivingDelivery' is not in ALL_NAMESPACES (messages/index.ts is not this package's) — same parity rules here. */
+/** 'receivingDelivery' is also in ALL_NAMESPACES (i18n.test.ts); its receiver overlays are checked in receiver-langs.test.ts. */
 describe('receivingDelivery catalog parity (he ⇄ en)', () => {
   const he = receivingDelivery.he as MessageTree;
   const en = receivingDelivery.en as MessageTree;
