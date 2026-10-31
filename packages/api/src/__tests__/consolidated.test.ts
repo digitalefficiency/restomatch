@@ -612,3 +612,48 @@ describe('consolidatedPeriod (Asia/Jerusalem month, ±3 days)', () => {
     expect(p.monthStart.toISOString()).toBe('2026-09-30T21:00:00.000Z');
   });
 });
+
+describe('G-04: only closed receipts are delivery notes (pending note → "not received yet")', () => {
+  it('a line billing a note with no closed receipt is pending: no claim ₪, no false "differences"', () => {
+    const delivered = invLine(CHALLAH, 10, 5);
+    const notYet = invLine(CHALLAH, 6, 5); // its note 9002 is still being counted (or not here yet)
+    const p = buildConsolidatedProposal({
+      invoiceId: 'inv-1',
+      supplierId: 's',
+      periodStart: new Date('2026-09-27T21:00:00Z'),
+      periodEnd: new Date('2026-11-02T22:00:00Z'),
+      base: base([delivered, notYet]),
+      // loadDeliveryNotes returns only CLOSED receipts: 9002 is absent.
+      notes: [note('gr-1', 5, [noteLine(CHALLAH, 10, 5)], '9001')],
+      invoiceLineNotes: new Map([
+        [delivered.id, '9001'],
+        [notYet.id, '9002'],
+      ]),
+      pendingNoteNumbers: new Set(['9002']),
+    });
+    expect(p.findings.filter((f) => f.countsAsLeak)).toEqual([]);
+    expect(p.claim).toEqual({ exclIls: 0, inclIls: 0 });
+    expect(p.totals.leakIls).toBe(0);
+    expect(p.pendingNotes).toEqual([{ number: '9002', billedIls: 30 }]);
+    expect(p.findings.filter((f) => f.notReceivedYet).every((f) => f.deliveryNoteNumber === '9002' && !f.countsAsLeak)).toBe(true);
+    expect(p.status).toBe('matched');
+  });
+  it('without the pending mark (a note no receipt will ever carry) the same line stays a claimable finding', () => {
+    const delivered = invLine(CHALLAH, 10, 5);
+    const unknown = invLine(CHALLAH, 6, 5);
+    const p = buildConsolidatedProposal({
+      invoiceId: 'inv-1',
+      supplierId: 's',
+      periodStart: new Date('2026-09-27T21:00:00Z'),
+      periodEnd: new Date('2026-11-02T22:00:00Z'),
+      base: base([delivered, unknown]),
+      notes: [note('gr-1', 5, [noteLine(CHALLAH, 10, 5)], '9001')],
+      invoiceLineNotes: new Map([
+        [delivered.id, '9001'],
+        [unknown.id, '9002'],
+      ]),
+    });
+    expect(p.claim.exclIls).toBeGreaterThan(0);
+    expect(p.pendingNotes).toEqual([]);
+  });
+});

@@ -481,12 +481,25 @@ describe('a re-match after the PO is closed (demo: "התאמה מחדש" on a se
     expect(types).not.toContain('UNORDERED_ARRIVAL');
   });
 
-  it('a first match still only considers open POs (a closed PO is not picked up by discovery)', async () => {
+  // G-04 (functional-flows-01) inverts the old contract "a first match only considers
+  // open POs": a MarketMan / Zester PO syncs as `closed` before its invoice arrives,
+  // and an undiscoverable PO left that invoice unchecked. Discovery now uses
+  // receiptTruth PO_MATCHABLE (all but draft / cancelled); see match-input-truth.test.ts.
+  it('a first match also considers a closed PO (the Zester case: synced closed before its invoice)', async () => {
     const A = await seedTenant(db, 'A');
     await db.delete(matchRuns).where(eq(matchRuns.invoiceId, A.invoiceId)); // never matched before
     await db.update(purchaseOrders).set({ status: 'closed' }).where(eq(purchaseOrders.id, A.poId));
     const res = await ownerCaller(A).match.runForInvoice({ invoiceId: A.invoiceId });
-    expect(res.poMatched).toBe(false);
+    expect(res.poMatched).toBe(true);
+  });
+  it('a first match never considers a cancelled or draft PO', async () => {
+    const A = await seedTenant(db, 'A');
+    for (const status of ['cancelled', 'draft'] as const) {
+      await db.delete(matchRuns).where(eq(matchRuns.invoiceId, A.invoiceId));
+      await db.update(purchaseOrders).set({ status }).where(eq(purchaseOrders.id, A.poId));
+      const res = await ownerCaller(A).match.runForInvoice({ invoiceId: A.invoiceId });
+      expect(res.poMatched).toBe(false);
+    }
   });
 });
 

@@ -26,6 +26,16 @@ import {
 import { claimableLines, sumClaims, vatBasisOf, type VatBasis } from '../lib/claims';
 import { addCalendarDaysInTz, startOfDayInTz } from '../lib/time';
 import { buildMatchInputForInvoice } from './buildMatchInput';
+import {
+  closedReceiptSql,
+  countedLineSql,
+  deliveryNoteNumberIn,
+  deliveryNoteNumberSql,
+  normalizeDeliveryNoteNumber,
+} from './receiptTruth';
+
+/** The ONE delivery-note helper lives in receiptTruth (G-04); re-exported for existing importers. */
+export { deliveryNoteNumberIn };
 
 /**
  * Cross-match (הצלבה) of a consolidated invoice (חשבונית מרכזת / ריכוז) against
@@ -140,6 +150,16 @@ export interface ProposalFinding {
   actual: number | null;
   deltaAmount: number;
   countsAsLeak: boolean;
+  /**
+   * Stable identity within the proposal (type × note × product × paired lines), so a
+   * finding seen twice is claimed once (claimSplit). Never the array index.
+   */
+  key?: string;
+  /**
+   * The line names a delivery note with no closed goods receipt yet: "not received
+   * yet" — T4 pending, never a claimable shortfall (countsAsLeak is false).
+   */
+  notReceivedYet?: boolean;
 }
 
 export interface ConsolidatedProposal {
@@ -163,6 +183,11 @@ export interface ConsolidatedProposal {
     leakIls: number;
     invoiceTotalInclVat: number;
   };
+  /**
+   * Delivery notes the invoice bills by number that have no closed goods receipt yet
+   * (not received, or still being counted): pending, never a leak. Σ billed before VAT.
+   */
+  pendingNotes?: Array<{ number: string; billedIls: number }>;
   /** matched = nothing counts as leak; differences = something does; no_delivery_notes = nothing to cross-match. */
   status: 'matched' | 'differences' | 'no_delivery_notes';
 }
@@ -216,14 +241,24 @@ export function countsAsLeak(
 export function claimSplit(
   findings: ReadonlyArray<
     Pick<ProposalFinding, 'type' | 'severity' | 'countsAsLeak' | 'deltaAmount' | 'expected' | 'actual'> &
-      Partial<Pick<ProposalFinding, 'productId'>>
+      Partial<Pick<ProposalFinding, 'productId' | 'key'>>
   >,
   invoiceTotalInclVat: number,
 ): { totalIls: number; exclIls: number; inclIls: number } {
-  const lines = [...findings]
+  // Each finding is claimed ONCE: a finding with a stable key (the proposal's
+  // type × note × product × paired lines) seen twice counts once. Without a key it
+  // is its own finding (a caller that never repeats one).
+  const seen = new Set<string>();
+  const unique = findings.filter((f) => {
+    if (!f.key) return true;
+    if (seen.has(f.key)) return false;
+    seen.add(f.key);
+    return true;
+  });
+  const lines = [...unique]
     .sort((a, b) => Math.abs(b.deltaAmount) - Math.abs(a.deltaAmount))
     .map((f, i) => ({
-      discrepancyId: `proposal-${i}`,
+      discrepancyId: f.key ?? `proposal-${i}`,
       type: f.type,
       severity: f.severity,
       resolutionStatus: 'open',
@@ -268,22 +303,13 @@ export function claimableIls(
   return claimSplit(findings, invoiceTotalInclVat).totalIls;
 }
 
-/** A delivery-note number in free text: `ת.מ. 61036` (Hebrew) or `DN 61036`. */
-export function deliveryNoteNumberIn(text: string | null | undefined): string | null {
-  if (!text) return null;
-  // A RANGE ("ת.מ. 61036-61043", "61036 עד 61043") is a month line: it bills the pool.
-  if (/(?:ת\.\s?מ\.?|\bDN)\s*#?\s*\d+\s*(?:[-–—]|עד|to)\s*\d+/i.test(text)) return null;
-  // So is a LIST ("ת.מ. 61036, 61037, 61038" / "61036 ו-61037").
-  if (/(?:ת\.\s?מ\.?|\bDN)\s*#?\s*\d+\s*(?:[,،;/]|ו-?)\s*\d+/i.test(text)) return null;
-  const m = /ת\.\s?מ\.?\s*(\d+)/.exec(text) ?? /\bDN\s*#?\s*(\d+)/i.exec(text);
-  return m ? m[1]! : null;
-}
-
 const productKey = (l: { productId: string | null; supplierSku?: string | null; poLineId?: string | null; unit: string }) =>
   l.productId ? `p:${l.productId}` : l.supplierSku ? `s:${l.supplierSku}` : `l:${l.poLineId ?? 'none'}`;
 
 /** The bucket of the notes / invoice lines that don't name a delivery note. */
 const POOL = '*';
+/** Bucket prefix of invoice lines billing a note that has no closed receipt yet. */
+const PENDING = '?';
 
 /**
  * Pure: the proposal for a consolidated invoice, given its base MatchInput (invoice
@@ -305,6 +331,11 @@ export function buildConsolidatedProposal(args: {
   notes: DeliveryNoteData[];
   /** Invoice line id → the delivery-note number it bills (lines that name one). */
   invoiceLineNotes?: Map<string, string>;
+  /**
+   * Note numbers the invoice's lines name that have NO closed goods receipt (not
+   * received yet, or still being counted): those lines are pending, never a leak.
+   */
+  pendingNoteNumbers?: ReadonlySet<string>;
   /** Display names for invoice-only products (not on any delivery note). */
   productNames?: Map<string, { name: string | null; nameEn: string | null }>;
 }): ConsolidatedProposal {
@@ -319,7 +350,15 @@ export function buildConsolidatedProposal(args: {
   // some invoice line names that note for that product, so a ריכוז that itemizes the
   // milk but bills the month's eggs in one line pairs each correctly.
   const noteProducts = new Set(notes.flatMap((n) => (n.number ? n.lines.map((l) => `${n.number}|${productKey(l)}`) : [])));
+  const pendingNumbers = args.pendingNoteNumbers ?? new Set<string>();
+  /** The note a line names when that note has no closed receipt yet (else null). */
+  const pendingNoteOf = (il: InvoiceLineInput) => {
+    const n = lineNotes.get(il.id);
+    return n && !noteNumbers.has(n) && pendingNumbers.has(n) ? n : null;
+  };
   const bucketOfLine = (il: InvoiceLineInput) => {
+    const pending = pendingNoteOf(il);
+    if (pending) return `${PENDING}${pending}`;
     const n = lineNotes.get(il.id);
     return n && noteNumbers.has(n) && noteProducts.has(`${n}|${invKey(il)}`) ? n : POOL;
   };
@@ -448,9 +487,14 @@ export function buildConsolidatedProposal(args: {
     qtyReceived: g.qtyReceived,
   }));
 
+  // A line billing a not-yet-received note never pairs with a delivered PO line
+  // (the engine pairs by product / SKU): it is shown as pending, not as "received 0".
+  const pendingLineIds = new Set(
+    [...lineGroups.entries()].filter(([gk]) => gk.startsWith(PENDING)).map(([, l]) => l.id),
+  );
   const input: MatchInput = {
     ...args.base,
-    invoiceLines: orderedLines,
+    invoiceLines: orderedLines.map((l) => (pendingLineIds.has(l.id) ? { ...l, productId: null, supplierSku: null } : l)),
     poLines: poLineInputs,
     grLines: grLineInputs,
   };
@@ -460,7 +504,12 @@ export function buildConsolidatedProposal(args: {
 
   const noteOfPoLine = new Map(orderedGroups.filter((g) => g.bucket !== POOL).map((g) => [g.poLineId, g.bucket]));
   const noteOfInvoiceLine = new Map(
-    [...lineGroups.entries()].filter(([gk]) => !gk.startsWith(`${POOL}|`)).map(([gk, l]) => [l.id, gk.slice(0, gk.indexOf('|'))]),
+    [...lineGroups.entries()]
+      .filter(([gk]) => !gk.startsWith(`${POOL}|`))
+      .map(([gk, l]) => {
+        const bucket = gk.slice(0, gk.indexOf('|'));
+        return [l.id, bucket.startsWith(PENDING) ? bucket.slice(PENDING.length) : bucket];
+      }),
   );
   // A pooled product is billed as one month's total against many notes: compare
   // AMOUNTS (billed Σ line totals vs Σ received × PO price, in agorot) instead of the
@@ -549,23 +598,33 @@ export function buildConsolidatedProposal(args: {
   // A held duplicate (DUPLICATE_INVOICE) already claims the whole invoice: its notes
   // are not ALSO billed twice, line by line — one problem, one amount.
   const heldDuplicate = engineFindings.some((d) => d.type === 'DUPLICATE_INVOICE' && countsAsLeak(d));
-  const findings: ProposalFinding[] = [...engineFindings, ...pooledFindings, ...(heldDuplicate ? [] : twiceFindings)].map((d) => ({
+  const isPending = (d: Discrepancy) => !!d.invoiceLineId && pendingLineIds.has(d.invoiceLineId);
+  const findings: ProposalFinding[] = [...engineFindings, ...pooledFindings, ...(heldDuplicate ? [] : twiceFindings)].map((d) => {
+    const pending = isPending(d);
+    // The engine saw a pending line without its product (so it could not pair it); restore it.
+    const productId = d.productId ?? (pending ? (lineById.get(d.invoiceLineId!)?.productId ?? null) : null);
+    const deliveryNoteNumber = (d as Partial<TwiceFinding>).noteNumber ?? noteOf(d) ?? null;
+    return {
     // A held duplicate: the DUPLICATE line alone stands — the rest of the invoice is inside it.
     basis: vatBasisOf(d.type),
-    productName: nameOf(d.productId)?.name ?? null,
-    productNameEn: nameOf(d.productId)?.nameEn ?? null,
+    productName: nameOf(productId)?.name ?? null,
+    productNameEn: nameOf(productId)?.nameEn ?? null,
     unit: (d.invoiceLineId ? lineById.get(d.invoiceLineId)?.unit : undefined) ?? null,
     qty: (d.invoiceLineId ? lineById.get(d.invoiceLineId)?.qtyBilled : undefined) ?? null,
     type: d.type,
     severity: d.severity,
-    productId: d.productId,
-    deliveryNoteNumber: (d as Partial<TwiceFinding>).noteNumber ?? noteOf(d) ?? null,
+    productId,
+    deliveryNoteNumber,
     alreadyBilledOn: (d as Partial<TwiceFinding>).alreadyBilledOn ?? null,
     expected: d.expected,
     actual: d.actual,
     deltaAmount: d.deltaAmount,
-    countsAsLeak: countsAsLeak(d) && (!heldDuplicate || d.type === 'DUPLICATE_INVOICE'),
-  }));
+    // Not received yet is pending (T4), never a leak or a claim.
+    countsAsLeak: !pending && countsAsLeak(d) && (!heldDuplicate || d.type === 'DUPLICATE_INVOICE'),
+    key: [d.type, deliveryNoteNumber ?? POOL, productId ?? '', d.poLineId ?? '', d.invoiceLineId ?? ''].join('|'),
+    ...(pending ? { notReceivedYet: true } : {}),
+    };
+  });
 
   // ── Per product (over all buckets): received vs billed, PO vs billed price, Δ₪. ──
   type Agg = { productId: string | null; name: string | null; nameEn: string | null; unit: string; qty: number; pricedQty: number; pricedP4: number };
@@ -669,6 +728,13 @@ export function buildConsolidatedProposal(args: {
 
   const deliveryNotesAg = deliveryNotes.reduce((s, n) => s + ag(n.receivedValueIls), 0);
   const subtotalAg = ag(args.base.invoice.totalExclVat);
+  const pendingAg = new Map<string, number>();
+  for (const [gk, l] of lineGroups) {
+    if (!gk.startsWith(PENDING)) continue;
+    const n = gk.slice(PENDING.length, gk.indexOf('|'));
+    pendingAg.set(n, (pendingAg.get(n) ?? 0) + ag(l.lineTotal));
+  }
+  const pendingTotalAg = [...pendingAg.values()].reduce((a, b) => a + b, 0);
   const claim = claimSplit(findings, args.base.invoice.totalInclVat);
   const leakAg = ag(claim.totalIls);
 
@@ -682,6 +748,7 @@ export function buildConsolidatedProposal(args: {
     products: productRows,
     findings,
     claim: { exclIls: claim.exclIls, inclIls: claim.inclIls },
+    pendingNotes: [...pendingAg].map(([number, a]) => ({ number, billedIls: ils(a) })),
     totals: {
       deliveryNotesIls: ils(deliveryNotesAg),
       invoiceSubtotalIls: ils(subtotalAg),
@@ -690,7 +757,9 @@ export function buildConsolidatedProposal(args: {
       invoiceTotalInclVat: args.base.invoice.totalInclVat,
     },
     // Never "matched" while the invoice bills more than the notes are worth at PO prices.
-    status: notes.length === 0 ? 'no_delivery_notes' : leakAg > 0 || subtotalAg > deliveryNotesAg ? 'differences' : 'matched',
+    // What a not-yet-received note bills is pending, not "billed above the notes".
+    status:
+      notes.length === 0 ? 'no_delivery_notes' : leakAg > 0 || subtotalAg - pendingTotalAg > deliveryNotesAg ? 'differences' : 'matched',
   };
 }
 
@@ -735,7 +804,10 @@ export function readConsolidatedRaw(payload: unknown): ConsolidatedRaw | null {
         notes
           .map((n) => (n as { number?: unknown } | null)?.number)
           .map((v) => (typeof v === 'number' ? String(v) : typeof v === 'string' ? v.trim() : ''))
-          .filter((v) => /^\d+$/.test(v)),
+          .filter((v) => /^\d+$/.test(v))
+          // One normalisation with the receipts' numbers (receiptTruth): 007702 = 7702.
+          .map((v) => normalizeDeliveryNoteNumber(v))
+          .filter((v): v is string => !!v),
       ),
     ],
   };
@@ -802,8 +874,8 @@ export function betterFit(a: ConsolidatedProposal, b: ConsolidatedProposal): Con
   return a;
 }
 
-/** The delivery-note number on a goods receipt (`ת.מ. <n>` in its notes). */
-const noteNumberSql = sql<string | null>`substring(${goodsReceipts.notes} from 'ת\\.\\s?מ\\.?\\s*([0-9]+)')`;
+/** The delivery-note number on a goods receipt (`ת.מ. <n>` in its notes), normalised (receiptTruth). */
+const noteNumberSql = sql<string | null>`${deliveryNoteNumberSql(goodsReceipts.notes)}`;
 
 // The correlated subqueries below spell their outer columns out ("goods_receipts"."id",
 // "invoices"."id"): a bare `${table.col}` in a one-table SELECT field renders
@@ -893,7 +965,9 @@ async function loadDeliveryNotes(
         ...(scope.numbers ? [inArray(noteNumberSql, scope.numbers)] : []),
         sql`${goodsReceipts.receivedAt} >= ${scope.from.toISOString()}::timestamptz`,
         sql`${goodsReceipts.receivedAt} < ${scope.to.toISOString()}::timestamptz`,
-        sql`${goodsReceipts.status} <> 'rejected'`,
+        // Receipt truth: only CLOSED receipts are delivery notes (a pending one is a
+        // receiver still counting — its note is "not received yet", never "received 0").
+        closedReceiptSql(),
         ...(opts.onlyUncovered ? [sql`NOT ${coveredByOther(restaurantId, opts.excludeCoveredExcept ?? null)}`] : []),
       ),
     )
@@ -926,9 +1000,13 @@ async function loadDeliveryNotes(
       ),
     )
     .where(
-      inArray(
-        grLines.grId,
-        grs.map((g) => g.id),
+      and(
+        inArray(
+          grLines.grId,
+          grs.map((g) => g.id),
+        ),
+        // …and only their COUNTED lines: an untouched 0/0 line is unknown, not 0.
+        countedLineSql(),
       ),
     );
   const byGr = new Map<string, DeliveryNoteLineData[]>();
@@ -957,6 +1035,39 @@ async function loadDeliveryNotes(
     lines: byGr.get(g.id) ?? [],
     coveredByInvoiceId: g.coveredBy ?? null,
   }));
+}
+
+/**
+ * Of these delivery-note numbers, the ones a CLOSED goods receipt of the supplier
+ * carries in [from, to). A number an invoice line names that no closed receipt
+ * carries is "not received yet" (pending) — never "received 0".
+ */
+async function closedNoteNumbers(
+  db: Database,
+  restaurantId: string,
+  supplierId: string,
+  numbers: string[],
+  scope: { from: Date; to: Date },
+): Promise<Set<string>> {
+  if (numbers.length === 0) return new Set();
+  const rows = await db
+    .selectDistinct({ number: noteNumberSql })
+    .from(goodsReceipts)
+    .innerJoin(
+      purchaseOrders,
+      and(eq(purchaseOrders.id, goodsReceipts.poId), eq(purchaseOrders.restaurantId, restaurantId)),
+    )
+    .where(
+      and(
+        eq(goodsReceipts.restaurantId, restaurantId),
+        eq(purchaseOrders.supplierId, supplierId),
+        inArray(noteNumberSql, numbers),
+        sql`${goodsReceipts.receivedAt} >= ${scope.from.toISOString()}::timestamptz`,
+        sql`${goodsReceipts.receivedAt} < ${scope.to.toISOString()}::timestamptz`,
+        closedReceiptSql(),
+      ),
+    );
+  return new Set(rows.map((r) => r.number).filter((n): n is string => !!n));
 }
 
 /** The consolidated invoices of a supplier (payload kind 'consolidated'), with what they list. */
@@ -1060,6 +1171,15 @@ export async function consolidatedProposal(
     const n = deliveryNoteNumberIn(l.d) ?? deliveryNoteNumberIn(l.dEn);
     if (n) invoiceLineNotes.set(l.id, n);
   }
+  // Notes the lines name that no closed receipt carries anywhere near the invoice's
+  // periods: not received yet (or still being counted) — those lines are pending.
+  const named = [...new Set(invoiceLineNotes.values())];
+  const periods = candidatePeriods(at, raw, tz);
+  const closedNamed = await closedNoteNumbers(db, restaurantId, inv.supplierId, named, {
+    from: addCalendarDaysInTz(new Date(Math.min(...periods.map((p) => p.start.getTime()))), -LISTED_NOTE_SLACK_DAYS, tz),
+    to: addCalendarDaysInTz(new Date(Math.max(...periods.map((p) => p.end.getTime()))), LISTED_NOTE_SLACK_DAYS, tz),
+  });
+  const pendingNoteNumbers = new Set(named.filter((n) => !closedNamed.has(n)));
 
   // Names for products billed but on no delivery note.
   const invoiceProductIds = [
@@ -1083,6 +1203,7 @@ export async function consolidatedProposal(
       base: built.input,
       notes,
       invoiceLineNotes,
+      pendingNoteNumbers,
       productNames,
     });
 
