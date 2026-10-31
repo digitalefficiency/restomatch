@@ -55,7 +55,7 @@ async function setDockSlip(restaurantId: string, on: boolean) {
   try {
     await sql`
       update restaurants
-      set settings = jsonb_set(coalesce(settings, '{}'::jsonb), '{features,dockSlip}', to_jsonb(${on}::boolean), true)
+      set settings = jsonb_set(case jsonb_typeof(settings) when 'object' then settings when 'string' then (settings #>> '{}')::jsonb else '{}'::jsonb end, '{features,dockSlip}', to_jsonb(${on}::boolean), true)
       where id = ${restaurantId}`;
   } finally {
     await sql.end();
@@ -75,9 +75,12 @@ async function scanAndProcess(page: Page, poId: string): Promise<string> {
     await route.fulfill({ response: res, json: body });
   });
   await page.goto(`/dashboard/receiving/${poId}`);
-  await page.locator('input[type="file"]').setInputFiles({ name: 'invoice.png', mimeType: 'image/png', buffer: TINY_PNG });
-  await expect(page.getByText(/^נשמר · scan-/)).toBeVisible({ timeout: 60_000 });
-  await page.getByRole('button', { name: /^עבד את החשבונית/ }).click();
+  // One input: the rear camera by default; "upload a file / PDF" widens it for one pick (W1-06).
+  await page.getByTestId('scan-input').setInputFiles({ name: 'invoice.png', mimeType: 'image/png', buffer: TINY_PNG });
+  // Uploaded — and no internal scan id on screen (RCV-30).
+  await expect(page.getByTestId('scan-status')).toHaveText('החשבונית הועלתה', { timeout: 60_000 });
+  await expect(page.getByTestId('scan-status')).not.toContainText('scan-');
+  await page.getByRole('button', { name: /^קראו את החשבונית/ }).click();
   await expect.poll(() => invoiceId, { timeout: 30_000 }).not.toBe('');
   return invoiceId;
 }
@@ -102,14 +105,36 @@ async function writeOcrWithDifferences(invoiceId: string, f: Fixture) {
   }
 }
 
-/** Review → adjust ("= order" on every difference) → close the receipt. */
+/**
+ * The blind spot check before a bulk "as ordered" (owner decision 20): count
+ * each picked line — as ordered, unless `count` says otherwise. The ordered
+ * qty is not on the screen, so the test reads it from the order.
+ */
+async function passSpotCheck(page: Page, count?: (poLineId: string, ordered: number) => number): Promise<number> {
+  const panel = page.getByTestId('spot-check');
+  await expect(panel).toBeVisible();
+  const rows = panel.getByTestId('spot-line');
+  const n = await rows.count();
+  const sql = e2eSql();
+  try {
+    for (let i = 0; i < n; i += 1) {
+      const id = (await rows.nth(i).getAttribute('data-key'))!.replace(/^po-/, '');
+      const [pl] = await sql<{ q: string }[]>`select qty_ordered::text as q from po_lines where id = ${id}`;
+      const ordered = Number(pl!.q);
+      await rows.nth(i).getByTestId('spot-qty').fill(String(count ? count(id, ordered) : ordered));
+    }
+  } finally {
+    await sql.end();
+  }
+  await panel.getByTestId('spot-confirm').click();
+  return n;
+}
+
+/** Review → Delivery Check → "everything arrived as ordered" (spot check, marks every line, then closes). */
 async function closeReceipt(page: Page) {
   await page.getByTestId('continue-adjust').click();
-  for (const card of await page.locator('.adjust-card').all()) {
-    const btn = card.getByRole('button', { name: /^= הזמנה/ });
-    if (await btn.isVisible()) await btn.click();
-  }
-  await page.getByTestId('close-receipt').click();
+  await page.getByTestId('all-arrived').click();
+  await passSpotCheck(page);
   await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 60_000 });
 }
 
@@ -177,7 +202,7 @@ test('390 px: quantities on the review; the engine ₪ only after the receipt is
   await expect(review.getByText('המחיר בחשבונית גבוה מההזמנה')).toBeVisible();
   expect(await review.innerText()).not.toContain('₪');
   const reviewText = (await review.getByTestId('dock-slip-copy').getAttribute('data-slip-text'))!;
-  expect(reviewText).toContain('תעודת חריגה');
+  expect(reviewText).toContain('תעודת פערים'); // owner terminology: פער
   expect(reviewText).not.toContain('₪'); // the WhatsApp text too
   const href = await review.getByTestId('dock-slip-whatsapp').getAttribute('href');
   expect(href).toMatch(/^https:\/\/wa\.me\//);
@@ -238,7 +263,9 @@ test('390 px: a count "= order" with an engine-only finding (VAT) still gets a s
   // Nothing differs on the count: no slip button on the review.
   await expect(page.getByTestId('open-dock-slip')).toHaveCount(0);
   await page.getByTestId('continue-adjust').click();
-  await page.getByTestId('close-receipt').click();
+  // Invoice = order is not "arrived": the count still says so (one tap + the blind spot check).
+  await page.getByTestId('all-arrived').click();
+  await passSpotCheck(page);
   await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId('dock-slip')).toHaveCount(0);
 

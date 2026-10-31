@@ -1,43 +1,57 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, FileScan, FileWarning, Info, Loader2, Package, RefreshCw, Scale } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
+import { Camera, Check, FileScan, FileWarning, Info, Loader2, RefreshCw, Scale } from 'lucide-react';
 
-import { AdjustQuantities } from '@/app/showcase/receiver/_steps/AdjustQuantities';
+import { AdjustQuantities, type LineSaveUi } from '@/app/showcase/receiver/_steps/AdjustQuantities';
 import { Confirmed } from '@/app/showcase/receiver/_steps/Confirmed';
 import { InvoiceScan } from '@/app/showcase/receiver/_steps/InvoiceScan';
 import { Reconciliation } from '@/app/showcase/receiver/_steps/Reconciliation';
 import { StepHeader } from '@/app/showcase/receiver/_steps/SupplierSelect';
+import type { QtyTolerance } from '@/app/showcase/receiver/_steps/qtyEntry';
 import type { ReconciliationResult } from '@/app/showcase/receiver/_mock';
-import {
-  lineKey,
-  type CapturedImage,
-  type LineMark,
-} from '@/app/showcase/receiver/_state';
+import { lineKey, type CapturedImage, type LineMark } from '@/app/showcase/receiver/_state';
 import { trpc } from '@/lib/trpc/client';
 import { useDockPriceLineExtra } from './dock-price-context';
 import { useAppLocale, useDir, useLocale, useT } from '@/lib/i18n/client';
+import { formatDate, formatNumber } from '@/lib/i18n/format';
 import { receiving } from '@/lib/i18n/messages/receiving';
+import { receivingDelivery } from '@/lib/i18n/messages/receiving/delivery';
 import type { Translator } from '@/lib/i18n/translate';
 import { isReceiverLocale } from '@/lib/i18n/config';
 import type { UploadedScan } from '@/lib/supabase/client';
 import { ingest } from '@/lib/i18n/messages/ingest';
-import { SYNCED_EVENT, enqueuePhoto, idbAvailable, isNetworkError, type SyncedPhotoDetail } from '@/lib/pwa/offlineQueue';
-import {
-  adaptReconciliation,
-  keepAdjusted,
-  type PoLineRow,
-} from './_adapters';
+import { SYNCED_EVENT, enqueuePhoto, idbAvailable, isNetworkError, isTransientFailure, type SyncedPhotoDetail } from '@/lib/pwa/offlineQueue';
+import { adaptReconciliation, keepAdjusted, markFromCount, type PoLineRow, type ReceiptLineRow } from './_adapters';
+import { fromGrLine } from './_count';
 import { localizeInvoiceLines, localizePoLines, localizeReceiptLines, type LocalNames } from './_localize';
 import { receivingErrorText as errorText } from './_errors';
 import { pollInvoiceUntilRead } from './_poll';
-import { buildSlipLines, needsSlip } from './_dockSlip';
-import { DockSlip } from './dock-slip';
+import { buildSlipLines, lineIssues, needsSlip } from './_dockSlip';
+import {
+  payloadFor,
+  payloadIsCounted,
+  readDraft,
+  readLocalMarks,
+  writeLocalMarks,
+  useLeaveGuard,
+  useLineSaves,
+  useFieldBarOffset,
+  useWakeLock,
+  writeDraft,
+  type LeaveTarget,
+} from './_fieldHooks';
+import { ReceiptSummary } from './receipt-summary';
+
+// The slip is only needed once there is something to dispute: keep it out of the first load.
+const DockSlip = dynamic(() => import('./dock-slip').then((m) => m.DockSlip), { ssr: false });
 
 /** How long to keep checking in the background after the receiver moved on. */
 const BACKGROUND_POLL_MS = 10 * 60_000;
-/** After this long on the processing screen, offer "continue with the order". */
-const STILL_READING_AFTER_MS = 30_000;
+/** After this long reading, offer "continue with the order" (perf-states-11, NN/g 10 s). */
+export const STILL_READING_AFTER_MS = 10_000;
 
 /** Why the review was built without (fresh) invoice lines. */
 type OcrNotice = null | 'reading' | 'failed' | 'quota' | 'ready';
@@ -66,21 +80,25 @@ interface PoForClient {
   features?: { dockSlip?: boolean };
 }
 
+/** The PO's goods receipt as the page found it (receiving.getReceipt), if one exists. */
+export interface ReceiptForClient {
+  id: string;
+  status: string;
+  receivedAt: string | null;
+  lines: ReceiptLineRow[];
+}
+
 // Authenticated flow skips the SELECT_SUPPLIER step (supplier comes from the PO).
 type Step =
+  | 'RESUMING'
   | 'SCAN_INVOICE'
   | 'PROCESSING'
   | 'RECONCILIATION_REVIEW'
   | 'ADJUST_QUANTITIES'
-  | 'CONFIRMED';
+  | 'CONFIRMED'
+  | 'SUMMARY';
 
-const STEP_ORDER: Step[] = [
-  'SCAN_INVOICE',
-  'PROCESSING',
-  'RECONCILIATION_REVIEW',
-  'ADJUST_QUANTITIES',
-  'CONFIRMED',
-];
+const isClosed = (status: string | undefined) => status === 'completed' || status === 'partial';
 
 export function ReceivingWizard({
   po,
@@ -89,6 +107,10 @@ export function ReceivingWizard({
   userId = null,
   localNames,
   dockPriceContext = false,
+  existingReceipt = null,
+  tolerance,
+  showMoney = false,
+  receiverName = null,
 }: {
   po: PoForClient;
   restaurantId: string | null;
@@ -100,65 +122,130 @@ export function ReceivingWizard({
   localNames?: LocalNames;
   /** Flag `dockPriceContext` (resolved on the server page). */
   dockPriceContext?: boolean;
+  /** This PO's receipt when the page opened (resume a count / read-only when closed). */
+  existingReceipt?: ReceiptForClient | null;
+  /** The matching engine's quantity tolerance (read on the server from @restomatch/matching). */
+  tolerance?: QtyTolerance;
+  /** Owner / manager / bookkeeper. The receiver and the chef see no ₪ (owner decision). */
+  showMoney?: boolean;
+  /** Who is receiving (the signed-in person) — shown on the confirmation. */
+  receiverName?: string | null;
 }) {
-  const [step, setStep] = useState<Step>('SCAN_INVOICE');
-  const [grId, setGrId] = useState<string | null>(null);
+  const t = useT(receiving);
+  const td = useT(receivingDelivery);
+  const tIngest = useT(ingest);
+  const locale = useLocale();
+  const appLocale = useAppLocale();
+  const dir = useDir();
+  const router = useRouter();
+  const receiverLocale = isReceiverLocale(appLocale) ? appLocale : null;
+  const supplierLabel = locale === 'en' && po.supplierNameEn ? po.supplierNameEn : po.supplierName;
+  const storeKey = `${userId ?? '-'}:${po.id}`;
+  const draftKey = `rm-rcv-draft:${storeKey}`;
+
+  const closedAtOpen = existingReceipt && isClosed(existingReceipt.status) ? existingReceipt : null;
+  const [step, setStep] = useState<Step>(
+    closedAtOpen ? 'SUMMARY' : existingReceipt ? 'RESUMING' : 'SCAN_INVOICE',
+  );
+  const [grId, setGrId] = useState<string | null>(existingReceipt?.id ?? null);
   const [invoiceId, setInvoiceId] = useState<string | null>(null);
   const [ocrNotice, setOcrNotice] = useState<OcrNotice>(null);
   /** The scanned number is already on another invoice of this supplier. */
   const [duplicateNumber, setDuplicateNumber] = useState<string | null>(null);
-  /** Flag dockSlip: off → the wizard is exactly as before. */
+  /** Flag dockSlip: off → no slip anywhere. */
   const dockSlipOn = po.features?.dockSlip === true;
   const [showSlip, setShowSlip] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
+  const [resumed, setResumed] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const [footerError, setFooterError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [leaveAsk, setLeaveAsk] = useState<LeaveTarget | null>(null);
+  const [next, setNext] = useState<{ poId: string; label: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
   /** Bumped on retake / skip / unmount — cancels any in-flight poll. */
   const pollTokenRef = useRef(0);
   const skipWaitRef = useRef(false);
   const submittingRef = useRef(false);
-  /** Lines the receiver adjusted by hand — kept when the review is rebuilt
-   *  ("Show results" after a slow OCR read), never reset to the invoice. */
+  const capturingRef = useRef(false);
+  /** Lines the receiver changed by hand — kept when the review is rebuilt, never reset to the invoice. */
   const adjustedKeysRef = useRef(new Set<string>());
   const [image, setImage] = useState<CapturedImage | null>(null);
   const [result, setResult] = useState<ReconciliationResult | null>(null);
-  const [marks, setMarks] = useState<Record<string, LineMark>>({});
-  const [grLineIdByKey, setGrLineIdByKey] = useState<Record<string, string>>({});
+  const [marks, setMarksState] = useState<Record<string, LineMark>>({});
+  const marksRef = useRef(marks);
+  const [grLineIdByKey, setGrLineIdByKeyState] = useState<Record<string, string>>({});
+  const grLineIdByKeyRef = useRef(grLineIdByKey);
   const [confirmedAt, setConfirmedAt] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [poLines, setPoLines] = useState<PoLineRow[]>(po.lines);
-  const t = useT(receiving);
-  const tIngest = useT(ingest);
-  const locale = useLocale();
-  const appLocale = useAppLocale();
-  const receiverLocale = isReceiverLocale(appLocale) ? appLocale : null;
   // Receiver languages (S14): Hebrew → ar/ru/th/ti names for this PO/invoice.
   const localNamesRef = useRef<LocalNames>(localNames ?? {});
   const localNamesMut = trpc.receiverLangs.localNames.useMutation();
-  const dir = useDir();
-  const supplierLabel = locale === 'en' && po.supplierNameEn ? po.supplierNameEn : po.supplierName;
-  // Is there anything to dispute? (short / rejected / over-priced / unordered / duplicate)
-  const slipNeeded = useMemo(
-    () => dockSlipOn && !!result && needsSlip(buildSlipLines(result.lines, marks, []), duplicateNumber),
-    [dockSlipOn, result, marks, duplicateNumber],
-  );
-  const capturingRef = useRef(false);
+  const rootRef = useRef<HTMLDivElement>(null);
 
-  const dockPriceLineExtra = useDockPriceLineExtra(dockPriceContext && step === 'RECONCILIATION_REVIEW', invoiceId);
+  const setMarks = useCallback((next: Record<string, LineMark>) => {
+    marksRef.current = next;
+    setMarksState(next);
+  }, []);
+  const setGrLineIdByKey = useCallback((next: Record<string, string>) => {
+    grLineIdByKeyRef.current = next;
+    setGrLineIdByKeyState(next);
+  }, []);
+
   const utils = trpc.useUtils();
-  const startReceipt = trpc.receiving.startReceipt.useMutation();
   const registerInvoice = trpc.receiving.registerInvoice.useMutation();
-  const markGrLine = trpc.receiving.markGrLine.useMutation();
-  const submitReceipt = trpc.receiving.submitReceipt.useMutation();
+  // startReceipt / submitReceipt go through the plain client: React Query would
+  // PAUSE them offline (a forever spinner) instead of failing fast.
   // networkMode 'always': React Query's default ('online') PAUSES a mutation
   // while the device is offline — the receiver saw "Uploading…" spin forever.
   // Fail fast instead so the network message (and Retake) shows.
   const uploadScan = trpc.scans.upload.useMutation({ networkMode: 'always' });
   const ensureEnglish = trpc.receiving.ensureEnglish.useMutation();
 
-  /**
-   * Receiver in English: make sure the PO (and invoice) lines + products have
-   * English names, then refresh the PO lines. Display-only and best-effort — a
-   * failure just leaves Hebrew on screen.
-   */
+  // Every mark is saved on change (300 ms, full row) and kept on the phone offline.
+  const { outbox, states: saveByGrLine, pending: unsent } = useLineSaves(
+    `rm-rcv-lines:${storeKey}`,
+    (p) => utils.client.receiving.markGrLine.mutate(p),
+    Boolean(closedAtOpen),
+  );
+  // Marks on invoice-only lines (no gr_line to save to) are kept on the device.
+  const localMarksKey = `rm-rcv-unordered:${storeKey}`;
+  const saveStates = useMemo(() => {
+    const out: Record<string, LineSaveUi> = {};
+    for (const [key, id] of Object.entries(grLineIdByKey)) if (saveByGrLine[id]) out[key] = saveByGrLine[id];
+    return out;
+  }, [grLineIdByKey, saveByGrLine]);
+
+  const counting = step === 'RECONCILIATION_REVIEW' || step === 'ADJUST_QUANTITIES';
+  useFieldBarOffset(rootRef);
+  useWakeLock(step !== 'CONFIRMED' && step !== 'SUMMARY');
+  const { leave } = useLeaveGuard(unsent > 0 && step !== 'CONFIRMED', setLeaveAsk);
+
+  // A step change moves focus to its heading and the page to the top (a11y-06).
+  const firstStep = useRef(true);
+  useEffect(() => {
+    if (firstStep.current) {
+      firstStep.current = false;
+      return;
+    }
+    rootRef.current?.querySelector<HTMLElement>('[data-step-heading]')?.focus({ preventScroll: true });
+    window.scrollTo({ top: 0 });
+  }, [step]);
+
+  // Remember the receipt + invoice on this device so a reload resumes the same read.
+  useEffect(() => {
+    if (grId && step !== 'CONFIRMED' && step !== 'SUMMARY' && step !== 'RESUMING') {
+      writeDraft(draftKey, { grId, invoiceId, savedAt: Date.now() });
+    }
+  }, [grId, invoiceId, step, draftKey]);
+
+  // Is there anything to dispute? (short / rejected / over-priced / unordered / duplicate)
+  const slipNeeded = useMemo(
+    () => dockSlipOn && !!result && needsSlip(buildSlipLines(result.lines, marks, []), duplicateNumber),
+    [dockSlipOn, result, marks, duplicateNumber],
+  );
+  const dockPriceLineExtra = useDockPriceLineExtra(showMoney && dockPriceContext && step === 'RECONCILIATION_REVIEW', invoiceId);
+
   /** Receiver languages: fetch (DB-cached) local names; best effort. */
   async function refreshLocalNames(scope: { invoiceId?: string }) {
     if (!receiverLocale) return;
@@ -170,6 +257,11 @@ export function ReceivingWizard({
     }
   }
 
+  /**
+   * Receiver in English: make sure the PO (and invoice) lines + products have
+   * English names, then refresh the PO lines. Display-only and best-effort — a
+   * failure just leaves Hebrew on screen.
+   */
   async function ensureEnglishFor(scope: { invoiceId?: string }) {
     if (locale !== 'en') return;
     try {
@@ -214,6 +306,8 @@ export function ReceivingWizard({
           supplierName: po.supplierName,
           mimeType: file.type || 'image/jpeg',
           blob: file,
+          // Shared tablet: a colleague may upload it later — "צולם על ידי".
+          capturedByName: receiverName ?? null,
         });
         return { invoiceId: `queued-${clientUploadId}`, publicUrl: '', scanRouteUrl: '', storagePath: '', mimeType: file.type };
       };
@@ -234,7 +328,8 @@ export function ReceivingWizard({
       }
       return {
         invoiceId: r.invoiceId,
-        // Short-lived signed URL for the immediate OCR/register step.
+        // Short-lived signed URL: ONLY for the immediate register/OCR step. It is
+        // never persisted as evidence (RCV-08) — no gr_line photo, no signature.
         publicUrl: r.signedUrl ?? r.scanRouteUrl,
         scanRouteUrl: r.scanRouteUrl,
         storagePath: r.storagePath,
@@ -245,11 +340,13 @@ export function ReceivingWizard({
     [po.supplierName, offlineQueue, restaurantId, userId],
   );
 
-  const stepIndex = STEP_ORDER.indexOf(step);
-
-  // The goods receipt is created on the receiver's first real action (capture,
-  // or the PO-only fallback) — not on page view, which used to create a
-  // receipt (and its audit trail) for anyone who merely opened the PO.
+  /** The goods receipt (created on the receiver's first real action, never on page view). */
+  async function ensureReceipt(known: string | null): Promise<string> {
+    if (known) return known;
+    const r = await utils.client.receiving.startReceipt.mutate({ poId: po.id });
+    setGrId(r.receiptId);
+    return r.receiptId;
+  }
 
   /** After capture: register the invoice for OCR, then poll until parsed. */
   const onCapture = useCallback(
@@ -258,32 +355,21 @@ export function ReceivingWizard({
       if (capturingRef.current) return;
       capturingRef.current = true;
       setImage(captured);
-      setStep('PROCESSING');
       setError(null);
 
-      // Without an uploaded public URL we cannot register/OCR — fall back to a
-      // PO-only projection so the receiver can still record quantities.
+      // Without an uploaded URL we cannot register/OCR.
       if (!captured.publicUrl) {
-        // S13: photo queued offline — say so and let the receiver keep going later.
-        if (offlineQueue && captured.invoiceId?.startsWith('queued-')) {
-          setError(tIngest('pwa.savedOffline'));
-          setStep('SCAN_INVOICE');
-          capturingRef.current = false;
-          return;
-        }
+        // S13: photo queued offline — say so calmly (T4) and count against the
+        // order meanwhile; the photo uploads by itself (mobile-field-02).
+        if (offlineQueue && captured.invoiceId?.startsWith('queued-')) setNotice(tIngest('pwa.savedOffline'));
         await buildFromPoOnly(grId);
         capturingRef.current = false;
         return;
       }
 
+      setStep('PROCESSING');
       try {
-        let activeGrId = grId;
-        if (!activeGrId) {
-          const r = await startReceipt.mutateAsync({ poId: po.id });
-          activeGrId = r.receiptId;
-          setGrId(activeGrId);
-        }
-
+        const activeGrId = await ensureReceipt(grId);
         const reg = await registerInvoice.mutateAsync({
           grId: activeGrId,
           imageUrl: captured.publicUrl,
@@ -294,7 +380,7 @@ export function ReceivingWizard({
         // Queue database unreachable: the invoice is saved but OCR was not queued —
         // say so and receive against the order instead of polling.
         if ('ocrQueued' in reg && reg.ocrQueued === false) {
-          setError(t('errors.queueUnavailable'));
+          setNotice(t('errors.queueUnavailable'));
           await buildFromPoOnly(activeGrId);
           return;
         }
@@ -302,7 +388,7 @@ export function ReceivingWizard({
         await pollAndShow(activeGrId, reg.invoiceId);
       } catch (err) {
         setError(errorText(err, t, locale));
-        // Degrade gracefully to a PO-only table so receiving still completes.
+        // Degrade gracefully to receiving against the order.
         await buildFromPoOnly(grId);
       } finally {
         capturingRef.current = false;
@@ -312,7 +398,7 @@ export function ReceivingWizard({
     [grId, po.id, po.supplierId, locale, offlineQueue],
   );
 
-  /** A registered invoice: poll until OCR read it, then the review (or the PO-only fallback). */
+  /** A registered invoice: poll until OCR read it, then the review (or the order-only count). */
   async function pollAndShow(activeGrId: string, id: string) {
     const token = ++pollTokenRef.current;
     skipWaitRef.current = false;
@@ -329,59 +415,51 @@ export function ReceivingWizard({
       setOcrNotice(invoice?.ocrFailureReason === 'quota_exceeded' ? 'quota' : 'failed');
       await buildFromPoOnly(activeGrId);
     } else {
-      // Timed out (or the receiver chose not to wait): receive against the
-      // order now, keep checking quietly, and offer the result when ready.
+      // Timed out (or the receiver chose not to wait): count against the order
+      // now, keep checking quietly, and offer the result when ready.
       setOcrNotice('reading');
       await buildFromPoOnly(activeGrId);
-      watchInBackground(activeGrId, id, token).catch(() => {
+      watchInBackground(id, token).catch(() => {
         // Background check only — the Refresh button stays available.
       });
     }
   }
 
   // S13: a photo captured offline was uploaded + registered by the PWA shell
-  // (ReceiverPwa) once back online. Resume from it — without this the wizard
-  // kept the stale "saved on the phone" alert forever and a Retake uploaded a
-  // second copy of the same paper (second invoice row, second OCR charge).
+  // (ReceiverPwa) once back online. Pick it up: the invoice is read in the
+  // background while the receiver keeps counting (a Retake would have uploaded a
+  // second copy of the same paper — second invoice row, second OCR charge).
   useEffect(() => {
     if (!offlineQueue) return;
     const onSynced = (e: Event) => {
       const d = (e as CustomEvent<SyncedPhotoDetail>).detail;
       if (!d || d.poId !== po.id || !image || image.invoiceId !== `queued-${d.clientUploadId}`) return;
-      if (capturingRef.current) return;
-      capturingRef.current = true;
       setImage({ ...image, invoiceId: d.invoiceId });
       setGrId(d.grId);
       setInvoiceId(d.invoiceId);
-      setError(null);
-      setStep('PROCESSING');
-      pollAndShow(d.grId, d.invoiceId)
-        .catch(async (err) => {
-          setError(errorText(err, t, locale));
-          await buildFromPoOnly(d.grId);
-        })
-        .finally(() => {
-          capturingRef.current = false;
-        });
+      setNotice(null);
+      setOcrNotice('reading');
+      const token = ++pollTokenRef.current;
+      watchInBackground(d.invoiceId, token).catch(() => null);
     };
     window.addEventListener(SYNCED_EVENT, onSynced);
     return () => window.removeEventListener(SYNCED_EVENT, onSynced);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offlineQueue, po.id, image, locale]);
+  }, [offlineQueue, po.id, image]);
 
   /** OCR finished: (English names if needed) → build the review from it. */
-  async function showInvoice(activeGrId: string, id: string) {
+  async function showInvoice(activeGrId: string, id: string, toStep: Step = 'RECONCILIATION_REVIEW') {
     if (locale === 'en') await ensureEnglishFor({ invoiceId: id });
     const invoice = await utils.receiving.getInvoice.fetch({ invoiceId: id });
     // Receiver languages (S14): local names for the invoice lines (best effort).
     await refreshLocalNames({ invoiceId: id });
     setOcrNotice(null);
     setError(null);
-    await buildReconciliation(activeGrId, invoice);
+    await buildReconciliation(activeGrId, invoice, toStep);
   }
 
   /** Keep checking after the receiver moved on; flag the result when it lands. */
-  async function watchInBackground(activeGrId: string, id: string, token: number) {
+  async function watchInBackground(id: string, token: number) {
     const { outcome, invoice } = await pollInvoiceUntilRead({
       fetch: () => utils.receiving.getInvoice.fetch({ invoiceId: id }),
       maxMs: BACKGROUND_POLL_MS,
@@ -393,7 +471,7 @@ export function ReceivingWizard({
     else if (outcome === 'failed') setOcrNotice(invoice?.ocrFailureReason === 'quota_exceeded' ? 'quota' : 'failed');
   }
 
-  /** Manual refresh from the review screen ("still reading" / "ready" banner). */
+  /** Manual refresh from the count / review ("still reading" / "ready" banner). */
   async function refreshInvoice() {
     if (!invoiceId || !grId || submittingRef.current) return;
     const token = pollTokenRef.current;
@@ -413,9 +491,54 @@ export function ReceivingWizard({
     pollTokenRef.current += 1;
   }, []);
 
+  /**
+   * Overlay what THIS device wrote (unsent, or sent and acknowledged this
+   * session) on a fresh server projection. The snapshot may predate a row the
+   * outbox's retry just sent (the resume race): the local row wins, so a count
+   * can never fall back to "not counted" and be overwritten by a bulk action.
+   */
+  function withUnsent(base: Record<string, LineMark>, idByKey: Record<string, string>): Record<string, LineMark> {
+    const out = { ...base };
+    for (const [key, m] of Object.entries(readLocalMarks(localMarksKey))) {
+      if (out[key] && !idByKey[key]) {
+        out[key] = { ...out[key], ...m };
+        adjustedKeysRef.current.add(key);
+      }
+    }
+    const keyById = new Map(Object.entries(idByKey).map(([k, id]) => [id, k]));
+    for (const p of outbox.latest()) {
+      const key = keyById.get(p.grLineId);
+      const m = key ? out[key] : undefined;
+      if (!key || !m) continue;
+      // Through the count model: a reset is "not counted", a missing line stays missing,
+      // and the method (bulk / spot check / one by one) comes back with it.
+      out[key] = payloadIsCounted(p)
+        ? markFromCount(m, fromGrLine(p, null), m.qtyReceived, p.conditionNotes ?? null)
+        : { ...m, touched: false };
+      adjustedKeysRef.current.add(key);
+    }
+    return out;
+  }
+
+  /**
+   * getReceipt that never PAUSES offline (react-query's default networkMode
+   * waits for the network — the receiver would be stuck on the scan step):
+   * it fails at once, and then the cached copy stands in.
+   */
+  async function loadReceipt(activeGrId: string) {
+    const input = { grId: activeGrId };
+    try {
+      return await utils.receiving.getReceipt.fetch(input, { networkMode: 'always', gcTime: Infinity });
+    } catch (err) {
+      const cached = utils.receiving.getReceipt.getData(input);
+      if (cached && isTransientFailure(err)) return cached;
+      throw err;
+    }
+  }
+
   type InvoiceSnapshot = Awaited<ReturnType<typeof utils.receiving.getInvoice.fetch>>;
-  async function buildReconciliation(activeGrId: string, invoice: InvoiceSnapshot) {
-    const receipt = await utils.receiving.getReceipt.fetch({ grId: activeGrId });
+  async function buildReconciliation(activeGrId: string, invoice: InvoiceSnapshot, toStep: Step = 'RECONCILIATION_REVIEW') {
+    const receipt = await loadReceipt(activeGrId);
     const adapted = adaptReconciliation({
       po: {
         id: po.id,
@@ -433,21 +556,16 @@ export function ReceivingWizard({
     });
     setResult(adapted.result);
     setDuplicateNumber(invoice.duplicateOf?.invoiceNumber ?? null);
-    setMarks((prev) => keepAdjusted(prev, adapted.initialMarks, adjustedKeysRef.current));
     setGrLineIdByKey(adapted.grLineIdByKey);
-    setStep('RECONCILIATION_REVIEW');
+    setMarks(withUnsent(keepAdjusted(marksRef.current, adapted.initialMarks, adjustedKeysRef.current), adapted.grLineIdByKey));
+    setStep(toStep);
   }
 
-  /** No invoice (or OCR failed): project the PO + receipt lines alone. */
+  /** No invoice (or OCR failed / still reading): straight to the count, against the order (RCV-14/15). */
   async function buildFromPoOnly(knownGrId: string | null) {
     try {
-      let activeGrId = knownGrId ?? grId;
-      if (!activeGrId) {
-        const r = await startReceipt.mutateAsync({ poId: po.id });
-        activeGrId = r.receiptId;
-        setGrId(activeGrId);
-      }
-      const receipt = await utils.receiving.getReceipt.fetch({ grId: activeGrId });
+      const activeGrId = await ensureReceipt(knownGrId ?? grId);
+      const receipt = await loadReceipt(activeGrId);
       const adapted = adaptReconciliation({
         po: {
           id: po.id,
@@ -464,104 +582,236 @@ export function ReceivingWizard({
         labels: { unnamed: t('unnamedItem'), unordered: t('unorderedItem') },
       });
       setResult(adapted.result);
-      setMarks(adapted.initialMarks);
       setGrLineIdByKey(adapted.grLineIdByKey);
-      setStep('RECONCILIATION_REVIEW');
+      setMarks(withUnsent(keepAdjusted(marksRef.current, adapted.initialMarks, adjustedKeysRef.current), adapted.grLineIdByKey));
+      setStep('ADJUST_QUANTITIES');
     } catch (err) {
+      // Offline with a count already on screen (the receiver went to scan the
+      // invoice): back to that count, every mark kept, with the offline note
+      // inline — never stranded on the scan step.
+      if (isTransientFailure(err) && Object.keys(marksRef.current).length > 0) {
+        setFooterError(td('delivery.count.offline'));
+        setStep('ADJUST_QUANTITIES');
+        return;
+      }
       setError(errorText(err, t, locale));
+      setStep('SCAN_INVOICE');
     }
   }
 
+  // Reopened mid-receipt (reload, a call, the tab was evicted): resume the count
+  // with every saved mark — never restart at the scan step (RCV-02).
+  useEffect(() => {
+    if (step !== 'RESUMING' || !existingReceipt) return;
+    const draft = readDraft(draftKey);
+    const knownInvoice = draft?.grId === existingReceipt.id ? draft.invoiceId : null;
+    const serverProgress = existingReceipt.lines.some(
+      (l) => Number(l.qtyReceived ?? 0) > 0 || Number(l.qtyRejected ?? 0) > 0 || Boolean(l.rejectReason),
+    );
+    if (!serverProgress && !knownInvoice && outbox.pendingCount() === 0 && !draft) {
+      setStep('SCAN_INVOICE');
+      return;
+    }
+    setResumed(true);
+    void (async () => {
+      if (knownInvoice) {
+        setInvoiceId(knownInvoice);
+        try {
+          const inv = await utils.receiving.getInvoice.fetch({ invoiceId: knownInvoice });
+          if (inv.status !== 'ocr_pending' && !inv.ocrFailed) {
+            await showInvoice(existingReceipt.id, knownInvoice, 'ADJUST_QUANTITIES');
+            return;
+          }
+          setOcrNotice(inv.ocrFailed ? (inv.ocrFailureReason === 'quota_exceeded' ? 'quota' : 'failed') : 'reading');
+          if (!inv.ocrFailed) {
+            const token = ++pollTokenRef.current;
+            watchInBackground(knownInvoice, token).catch(() => null);
+          }
+        } catch {
+          /* the invoice is gone or unreadable — count against the order */
+        }
+      }
+      await buildFromPoOnly(existingReceipt.id);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
+
   function updateMark(key: string, patch: Partial<LineMark>) {
+    const existing = marksRef.current[key];
+    // Nothing changes while the receipt is closing (it would be saved after the close).
+    if (!existing || submittingRef.current) return;
+    // An explicit `touched: false` is an undo / an unconfirmed weight; anything else resolves the line.
+    const nextMark: LineMark = {
+      ...existing,
+      ...patch,
+      touched: patch.touched ?? true,
+      // A hand change is a per-line count unless the patch says how (bulk, spot check, undo).
+      method: patch.method ?? 'per_line',
+      unconfirmed: patch.unconfirmed ?? false,
+    };
     adjustedKeysRef.current.add(key);
-    setMarks((prev) => {
-      const existing = prev[key];
-      if (!existing) return prev;
-      return { ...prev, [key]: { ...existing, ...patch, touched: true } };
-    });
+    setMarks({ ...marksRef.current, [key]: nextMark });
+    setFooterError(null);
+    const grLineId = grLineIdByKeyRef.current[key];
+    if (grLineId) outbox.set(payloadFor(grLineId, nextMark));
+    else {
+      // Invoice-only line: no gr_line exists — keep it on the device so a reload restores it.
+      const local = readLocalMarks(localMarksKey);
+      local[key] = nextMark;
+      writeLocalMarks(localMarksKey, local);
+    }
   }
 
-  /** Persist every touched line via markGrLine, then close the receipt. */
+  /** Close the receipt: every line is already saved (or flushed now); then submitReceipt re-matches. */
   async function submit() {
     if (!grId || !result) return;
     // Double-tap on "close receipt" must not submit twice.
     if (submittingRef.current) return;
     submittingRef.current = true;
+    setClosing(true);
+    setFooterError(null);
     setError(null);
-    pollTokenRef.current += 1; // stop background OCR polling
     try {
-      // Persist marks that map to a real gr_line.
-      for (const line of result.lines) {
-        const key = lineKey(line);
-        const grLineId = grLineIdByKey[key];
-        const mark = marks[key];
-        if (!grLineId || !mark) continue; // unordered arrivals have no gr_line yet
-        await markGrLine.mutateAsync({
-          grLineId,
-          qtyReceived: mark.qtyReceived,
-          qtyRejected: mark.qtyRejected,
-          condition: mark.condition,
-          conditionNotes: mark.notes,
-          photos: image?.publicUrl ? [image.publicUrl] : undefined,
-        });
+      const flushed = await outbox.flush();
+      if (flushed.queued.length > 0 || !navigator.onLine) {
+        setFooterError(td('delivery.count.offline'));
+        return;
       }
-      await submitReceipt.mutateAsync({
+      if (flushed.failed.length > 0) {
+        setFooterError(td('delivery.count.saveFailed', { count: formatNumber(flushed.failed.length, locale) }));
+        return;
+      }
+      pollTokenRef.current += 1; // stop background OCR polling
+      await utils.client.receiving.submitReceipt.mutate({
         grId,
-        signatureUrl: image?.publicUrl ?? undefined,
-        // The count is in: the server re-matches this invoice against it.
+        // The count is in: the server re-matches this invoice against it. No
+        // signature: the invoice photo is not a driver's signature (RCV-07/08).
         invoiceIds: invoiceId ? [invoiceId] : undefined,
       });
       setConfirmedAt(new Date().toISOString());
       setStep('CONFIRMED');
+      writeDraft(draftKey, null);
+      // Closed: nothing left to send or restore for this receipt.
+      outbox.clear();
+      writeLocalMarks(localMarksKey, null);
       await utils.receiving.todayExpectations.invalidate();
+      void findNextDelivery();
     } catch (err) {
-      setError(errorText(err, t, locale));
+      setFooterError(isNetworkError(err) ? td('delivery.count.offline') : errorText(err, t, locale));
     } finally {
       submittingRef.current = false;
+      setClosing(false);
     }
   }
 
-  const submitting = markGrLine.isPending || submitReceipt.isPending;
+  /** "Next delivery: Galilee Dairies · 15:00 →" on the confirmation (RCV-30). */
+  async function findNextDelivery() {
+    try {
+      const today = await utils.receiving.todayExpectations.fetch();
+      const open = today
+        .filter((e) => e.poId !== po.id && !isClosed(e.receiptStatus ?? undefined))
+        .sort((a, b) => a.expectedAt.localeCompare(b.expectedAt));
+      const n = open[0];
+      if (!n) return;
+      const name = locale === 'en' && n.supplierNameEn ? n.supplierNameEn : n.supplierName;
+      setNext({
+        poId: n.poId,
+        label: n.hasDeliveryDate
+          ? td('delivery.confirmed.nextAt', { supplier: name, time: formatDate(n.expectedAt, locale, { hour: '2-digit', minute: '2-digit' }) })
+          : td('delivery.confirmed.next', { supplier: name }),
+      });
+    } catch {
+      /* the list is the fallback */
+    }
+  }
+
+  // Read-only view of a receipt that was closed before this visit.
+  const closedView = useMemo(() => {
+    if (!closedAtOpen) return null;
+    const adapted = adaptReconciliation({
+      po: { id: po.id, supplierId: po.supplierId, supplierName: po.supplierName, expectedAt: po.expectedAt, status: po.status, totalEstimated: po.totalEstimated },
+      poLines: po.lines,
+      receiptLines: closedAtOpen.lines,
+      invoiceLines: [],
+      invoiceMeta: null,
+      labels: { unnamed: t('unnamedItem'), unordered: t('unorderedItem') },
+    });
+    return adapted;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closedAtOpen]);
+
+  const exceptions = result ? result.lines.filter((l) => lineIssues(l, marks[lineKey(l)]).length > 0).length : 0;
 
   return (
-    <div className="mx-auto max-w-3xl px-1 py-2">
-      {/* Progress bar: the same 5 steps as the "Step N of 5" eyebrows. Step 1
-          (supplier) is already done — the PO names it — so the bar is always
-          one segment ahead of STEP_ORDER. */}
-      <div className="mb-8 flex items-center gap-2" dir={dir} data-testid="wizard-progress" data-filled={Math.min(stepIndex + 2, 5)}>
-        {[0, 1, 2, 3, 4].map((i) => {
-          const filled = i <= stepIndex + 1;
-          return (
-            <div
-              key={i}
-              className={`h-1.5 flex-1 rounded-full transition-all ${filled ? 'flow-stream' : 'bg-surface-2'}`}
-            />
-          );
-        })}
-      </div>
-
+    <div
+      ref={rootRef}
+      // The field bar rides on top of the phone's bottom nav / the consent bar. The CSS default is the
+      // nav's height, so the bar paints in place; useFieldBarOffset then only refines it (no jump under a tap).
+      className="mx-auto max-w-3xl px-1 py-2 [--rm-field-bar-bottom:calc(3.3125rem+env(safe-area-inset-bottom)+var(--consent-h,0px))] lg:[--rm-field-bar-bottom:var(--consent-h,0px)]"
+      data-mode="field"
+    >
       {error ? (
-        <div role="alert" className="mb-4 flex items-center gap-2 rounded-xl border border-danger/30 bg-danger/8 px-4 py-3 text-sm text-danger" dir={dir}>
-          <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+        // Calm, in place: the receiver can keep going; the detail of a failed line is on the line itself.
+        <div role="alert" className="mb-4 flex items-start gap-2 rounded-xl border border-danger/40 bg-surface px-4 py-3 text-base text-ink" dir={dir}>
+          <Info className="mt-0.5 h-5 w-5 shrink-0 text-danger" aria-hidden="true" />
           <span>{error}</span>
         </div>
+      ) : null}
+      {notice ? (
+        <div role="status" className="mb-4 flex items-start gap-2 rounded-xl border border-line bg-surface-2 px-4 py-3 text-base text-ink" dir={dir} data-testid="wizard-notice">
+          <Info className="mt-0.5 h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
+          <span>{notice}</span>
+        </div>
+      ) : null}
+
+      {step === 'RESUMING' ? (
+        <div role="status" className="flex items-center justify-center gap-2 py-16 text-base text-muted" dir={dir}>
+          <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+          {t('loading')}
+        </div>
+      ) : null}
+
+      {step === 'SUMMARY' && closedAtOpen && closedView ? (
+        <>
+          <ReceiptSummary
+            status={closedAtOpen.status as 'completed' | 'partial'}
+            receivedAt={closedAtOpen.receivedAt}
+            result={closedView.result}
+            marks={closedView.initialMarks}
+          />
+          {dockSlipOn ? (
+            <div className="mx-auto max-w-md">
+              <DockSlip
+                grId={closedAtOpen.id}
+                invoiceId={null}
+                lines={closedView.result.lines}
+                marks={closedView.initialMarks}
+                duplicateNumber={null}
+                fallbackSupplierName={supplierLabel}
+                showMoney={showMoney}
+              />
+            </div>
+          ) : null}
+        </>
       ) : null}
 
       {step === 'SCAN_INVOICE' ? (
         <InvoiceScan
           supplierName={supplierLabel}
           image={image}
-          backLabel={t('steps.scan.back')}
           uploadFile={restaurantId ? authedUpload : undefined}
           onCapture={(img) => void onCapture(img)}
-          onBack={() => history.back()}
+          onNoInvoice={() => void buildFromPoOnly(grId)}
         />
       ) : null}
 
       {step === 'PROCESSING' ? (
         <ProcessingPoll
           t={t}
+          td={td}
           dir={dir}
+          locale={locale}
+          elapsedMs={elapsedMs}
           stillReading={elapsedMs >= STILL_READING_AFTER_MS}
           onSkip={() => {
             skipWaitRef.current = true;
@@ -569,30 +819,28 @@ export function ReceivingWizard({
         />
       ) : null}
 
-      {ocrNotice && (step === 'RECONCILIATION_REVIEW' || step === 'ADJUST_QUANTITIES') ? (
+      {ocrNotice && counting ? (
         <OcrNoticeBanner notice={ocrNotice} t={t} dir={dir} onRefresh={() => void refreshInvoice()} />
       ) : null}
 
-      {duplicateNumber && (step === 'RECONCILIATION_REVIEW' || step === 'ADJUST_QUANTITIES') ? (
+      {duplicateNumber && counting ? (
         // Calm, not an alarm: the read is kept and goes to a human; receiving continues.
         <div
           role="status"
           data-testid="duplicate-invoice-notice"
           dir={dir}
-          className="mb-4 flex items-center gap-3 rounded-xl border border-line bg-surface-2 px-4 py-3 text-sm text-ink"
+          className="mb-4 flex items-center gap-3 rounded-xl border border-line bg-surface-2 px-4 py-3 text-base text-ink"
         >
-          <Info className="h-4 w-4 shrink-0 text-muted" aria-hidden="true" />
-          <span className="flex-1">
-            {t('steps.recon.duplicateInvoice', { number: duplicateNumber })}
-          </span>
+          <Info className="h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
+          <span className="flex-1">{t('steps.recon.duplicateInvoice', { number: duplicateNumber })}</span>
         </div>
       ) : null}
 
       {step === 'RECONCILIATION_REVIEW' && result ? (
         <Reconciliation
           result={result}
+          showMoney={showMoney}
           lineExtra={dockPriceLineExtra}
-          onQuickConfirm={() => void submit()}
           onContinueAdjust={() => setStep('ADJUST_QUANTITIES')}
           onRetake={() => {
             pollTokenRef.current += 1; // drop the old scan's pending result
@@ -600,55 +848,68 @@ export function ReceivingWizard({
             setDuplicateNumber(null);
             setInvoiceId(null);
             setImage(null);
-            setResult(null);
             setStep('SCAN_INVOICE');
           }}
-        />
-      ) : null}
-
-      {/* Dock dispute slip (flag dockSlip): a secondary action on the review. */}
-      {step === 'RECONCILIATION_REVIEW' && result && dockSlipOn && grId && slipNeeded ? (
-        <div className="mt-4" dir={dir}>
-          {showSlip ? (
-            <DockSlip
-              grId={grId}
-              invoiceId={invoiceId}
-              lines={result.lines}
-              marks={marks}
-              duplicateNumber={duplicateNumber}
-              fallbackSupplierName={supplierLabel}
-            />
-          ) : (
-            <button
-              type="button"
-              data-testid="open-dock-slip"
-              onClick={() => setShowSlip(true)}
-              className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-danger/40 bg-surface px-4 py-2 text-sm font-medium text-danger"
-            >
-              <FileWarning className="h-4 w-4" aria-hidden="true" />
-              {t('dockSlip.open')}
-            </button>
-          )}
-        </div>
+        >
+          {/* Dock dispute slip (flag dockSlip): quantities on the review, before the count. */}
+          {dockSlipOn && grId && slipNeeded ? (
+            <div className="mt-4" dir={dir}>
+              {showSlip ? (
+                <DockSlip
+                  grId={grId}
+                  invoiceId={invoiceId}
+                  lines={result.lines}
+                  marks={marks}
+                  duplicateNumber={duplicateNumber}
+                  fallbackSupplierName={supplierLabel}
+                  showMoney={showMoney}
+                />
+              ) : (
+                <button
+                  type="button"
+                  data-testid="open-dock-slip"
+                  onClick={() => setShowSlip(true)}
+                  className="inline-flex min-h-12 items-center gap-2 rounded-xl border border-line-strong bg-surface px-4 py-2 text-base font-semibold text-ink"
+                >
+                  <FileWarning className="h-5 w-5 text-warn" aria-hidden="true" />
+                  {t('dockSlip.open')}
+                </button>
+              )}
+            </div>
+          ) : null}
+        </Reconciliation>
       ) : null}
 
       {step === 'ADJUST_QUANTITIES' && result ? (
         <>
+          {result.invoiceMeta.noInvoice && !invoiceId && !image ? (
+            // The invoice can still be photographed: marks are kept (count first, invoice in parallel — RCV-05).
+            <div className="mb-3 flex justify-end" dir={dir}>
+              <button
+                type="button"
+                onClick={() => setStep('SCAN_INVOICE')}
+                className="inline-flex min-h-12 items-center gap-2 rounded-xl border border-line-strong bg-surface px-4 text-base font-semibold text-ink"
+                data-testid="count-scan-invoice"
+              >
+                <Camera className="h-5 w-5" aria-hidden="true" />
+                {t('steps.scan.capture')}
+              </button>
+            </div>
+          ) : null}
           <AdjustQuantities
             result={result}
             marks={marks}
             onUpdateMark={updateMark}
             onSubmit={() => void submit()}
-            onBack={() => setStep('RECONCILIATION_REVIEW')}
-            // Clear the fixed mobile bottom nav (dashboard/nav.tsx, lg:hidden).
-            footerBottomClass="bottom-[calc(4.5rem+env(safe-area-inset-bottom)+var(--consent-h,0px))] lg:bottom-[var(--consent-h,0px)]"
+            onBack={result.invoiceMeta.noInvoice ? undefined : () => setStep('RECONCILIATION_REVIEW')}
+            eyebrow={supplierLabel}
+            saveStates={saveStates}
+            onRetrySave={() => void outbox.retry()}
+            tolerance={tolerance}
+            resumed={resumed}
+            closing={closing}
+            footerMessage={footerError}
           />
-          {submitting ? (
-            <div className="mt-3 flex items-center justify-center gap-2 text-sm text-muted" dir={dir}>
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              {t('steps.adjust.saving')}
-            </div>
-          ) : null}
         </>
       ) : null}
 
@@ -656,46 +917,104 @@ export function ReceivingWizard({
         <Confirmed
           supplierName={supplierLabel}
           result={result}
-          resetLabel={t('steps.confirmed.backToInbox')}
           confirmedAt={confirmedAt}
-          capturedImage={image}
-          onReset={() => {
-            // Closed receipts are immutable here — send the receiver back to the list.
-            window.location.href = '/dashboard/receiving';
-          }}
-        />
+          // The invoice page and the scan are full of ₪: no link for the receiver / chef (owner decision).
+          capturedImage={showMoney ? image : null}
+          exceptions={exceptions}
+          invoiceHref={showMoney && invoiceId ? `/dashboard/invoices/${invoiceId}` : null}
+          amount={showMoney && exceptions > 0 && !dockSlipOn ? td('delivery.confirmed.amountPending') : null}
+          receivedBy={receiverName}
+          bulkCount={Object.values(marks).filter((m) => m.touched && m.method === 'bulk_as_ordered').length}
+          resetLabel={next?.label ?? t('steps.confirmed.backToInbox')}
+          onReset={() => router.push(next ? `/dashboard/receiving/${next.poId}` : '/dashboard/receiving')}
+        >
+          {/* After the close the engine may add findings the count didn't show (VAT,
+              total, duplicate): the slip decides itself whether there is anything to say. */}
+          {result && dockSlipOn && grId ? (
+            <DockSlip
+              grId={grId}
+              invoiceId={invoiceId}
+              lines={result.lines}
+              marks={marks}
+              duplicateNumber={duplicateNumber}
+              fallbackSupplierName={supplierLabel}
+              showMoney={showMoney}
+            />
+          ) : null}
+        </Confirmed>
       ) : null}
-      {/* After the close the engine may add findings the count didn't show (VAT,
-          total, duplicate): the slip decides itself whether there is anything to say. */}
-      {step === 'CONFIRMED' && result && dockSlipOn && grId ? (
-        <div className="mx-auto max-w-md">
-          <DockSlip
-            grId={grId}
-            invoiceId={invoiceId}
-            lines={result.lines}
-            marks={marks}
-            duplicateNumber={duplicateNumber}
-            fallbackSupplierName={supplierLabel}
-          />
-        </div>
-      ) : null}
+
+      <LeaveSheet
+        target={leaveAsk}
+        count={unsent}
+        td={td}
+        locale={locale}
+        onStay={() => setLeaveAsk(null)}
+        onLeave={() => {
+          const target = leaveAsk;
+          setLeaveAsk(null);
+          if (target) leave(target);
+        }}
+      />
     </div>
   );
 }
 
-/**
- * Real-OCR "processing" view. Mirrors the showcase Processing visuals but the
- * actual progress is driven by the wizard's invoice polling (not a mock timer),
- * so this component is purely presentational — no onComplete / no fake delays.
- * We do NOT mutate the shared showcase Processing.tsx; this is a local twin.
- */
-const PROC_STEPS = [
-  { id: 'ocr', label: 'steps.processing.ocr', icon: FileScan },
-  { id: 'catalog', label: 'steps.processing.catalog', icon: Package },
-  { id: 'compare', label: 'steps.processing.compare', icon: Scale },
-] as const;
+/** "N lines are not on the server yet — they are saved on the phone." Stay is the default. */
+function LeaveSheet({
+  target,
+  count,
+  td,
+  locale,
+  onStay,
+  onLeave,
+}: {
+  target: LeaveTarget | null;
+  count: number;
+  td: Translator<typeof receivingDelivery.he>;
+  locale: 'he' | 'en';
+  onStay: () => void;
+  onLeave: () => void;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const d = ref.current;
+    if (!d || typeof d.showModal !== 'function') return;
+    if (target && !d.open) d.showModal();
+    else if (!target && d.open) d.close();
+  }, [target]);
+  return (
+    <dialog
+      ref={ref}
+      aria-labelledby="rm-leave-title"
+      data-testid="leave-sheet"
+      onCancel={(e) => {
+        e.preventDefault();
+        onStay();
+      }}
+      className="!m-auto w-[min(92vw,28rem)] rounded-2xl border border-line bg-surface p-0 text-ink shadow-card backdrop:bg-black/50"
+    >
+      {target ? (
+        <div className="space-y-3 p-5">
+          <h2 id="rm-leave-title" className="text-lg font-bold">
+            {td('delivery.leave.title')}
+          </h2>
+          <p className="text-base text-muted">{td('delivery.leave.body', { count: formatNumber(count, locale) })}</p>
+          <div className="flex flex-col gap-2">
+            <button type="button" autoFocus onClick={onStay} className="inline-flex min-h-14 items-center justify-center rounded-xl bg-primary px-4 text-base font-semibold text-on-primary" data-testid="leave-stay">
+              {td('delivery.leave.stay')}
+            </button>
+            <button type="button" onClick={onLeave} className="inline-flex min-h-12 items-center justify-center rounded-xl border border-line bg-surface-2 px-4 text-base font-medium text-ink" data-testid="leave-go">
+              {td('delivery.leave.leave')}
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </dialog>
+  );
+}
 
-/** Banner on the review screens about the invoice read (EN-3 / EN-4). Calm tone. */
+/** Banner on the count / review screens about the invoice read (EN-3 / EN-4). Calm tone. */
 function OcrNoticeBanner({
   notice,
   t,
@@ -721,17 +1040,17 @@ function OcrNoticeBanner({
       role="status"
       data-testid={`ocr-notice-${notice}`}
       dir={dir}
-      className={`mb-4 flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3 text-sm ${
-        notice === 'ready' ? 'border-primary/30 bg-primary/8 text-ink' : 'border-line bg-surface-2 text-ink'
+      className={`mb-4 flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3 text-base ${
+        notice === 'ready' ? 'border-primary/40 bg-surface text-ink' : 'border-line bg-surface-2 text-ink'
       }`}
     >
-      <Info className="h-4 w-4 shrink-0 text-muted" aria-hidden="true" />
+      <Info className="h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
       <span className="flex-1">{text}</span>
       {canRefresh ? (
         <button
           type="button"
           onClick={onRefresh}
-          className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-line bg-surface px-4 py-2 font-medium text-ink hover:border-primary/40"
+          className="inline-flex min-h-12 items-center gap-2 rounded-xl border border-line-strong bg-surface px-4 py-2 font-semibold text-ink"
         >
           <RefreshCw className="h-4 w-4" aria-hidden="true" />
           {notice === 'ready' ? t('steps.processing.showResults') : t('steps.processing.refresh')}
@@ -741,84 +1060,75 @@ function OcrNoticeBanner({
   );
 }
 
+/**
+ * Reading the invoice (RCV-22, perf-states-11): honest stages from what is
+ * actually known — the invoice is in (done), its lines are being read (with the
+ * seconds so far), the comparison waits for that. Nothing loops, nothing ticks
+ * "done" before it happened; "continue with the order" appears at 10 s.
+ */
 function ProcessingPoll({
   t,
+  td,
   dir,
+  locale,
+  elapsedMs,
   stillReading,
   onSkip,
 }: {
   t: Translator<typeof receiving.he>;
+  td: Translator<typeof receivingDelivery.he>;
   dir: 'rtl' | 'ltr';
+  locale: 'he' | 'en';
+  elapsedMs: number;
   stillReading: boolean;
   onSkip: () => void;
 }) {
-  // Cycle the active indicator while the wizard polls getInvoice in the
-  // background; the wizard flips the step once OCR resolves.
-  const [active, setActive] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setActive((a) => (a + 1) % PROC_STEPS.length), 1400);
-    return () => clearInterval(t);
-  }, []);
-
+  const seconds = formatNumber(Math.round(elapsedMs / 1000), locale);
+  const stages = [
+    { id: 'uploaded', label: td('delivery.processing.uploaded'), icon: FileScan, state: 'done' as const },
+    { id: 'reading', label: td('delivery.processing.reading'), icon: Loader2, state: 'active' as const },
+    { id: 'compare', label: td('delivery.processing.compare'), icon: Scale, state: 'waiting' as const },
+  ];
   return (
-    <div dir={dir} className="mx-auto max-w-md py-6">
+    <div dir={dir} className="mx-auto max-w-md py-2">
       <StepHeader
-        eyebrow={t('steps.processing.eyebrow')}
+        compact
         title={stillReading ? t('steps.processing.stillReadingTitle') : t('steps.processing.title')}
         subtitle={stillReading ? t('steps.processing.stillReading') : t('steps.processing.subtitleLive')}
       />
-      <div className="relative overflow-hidden rounded-2xl border border-line bg-surface p-6 shadow-card">
-        <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px flow-stream" />
-        <div className="space-y-4">
-          {PROC_STEPS.map((s, idx) => {
-            const Icon = s.icon;
-            const isActive = idx === active;
-            const isDone = idx < active;
-            return (
-              <div
-                key={s.id}
-                className={`flex items-center gap-4 rounded-xl p-3 transition-all ${
-                  isActive ? 'border border-primary/25 bg-primary/8' : 'bg-transparent'
-                }`}
-              >
-                <div
-                  className={`flex h-10 w-10 items-center justify-center rounded-xl transition-all ${
-                    isDone || isActive
-                      ? 'bg-primary/12 text-primary ring-1 ring-primary/25'
-                      : 'bg-surface-2 text-subtle ring-1 ring-line'
-                  }`}
-                >
-                  {isDone ? (
-                    <Check className="h-5 w-5" strokeWidth={3} />
-                  ) : isActive ? (
-                    <Loader2 className="h-5 w-5 animate-spin" />
-                  ) : (
-                    <Icon className="h-5 w-5" />
-                  )}
-                </div>
-                <div className="flex-1">
-                  <div className={isActive || isDone ? 'font-medium text-ink' : 'font-medium text-subtle'}>
-                    {t(s.label)}
-                  </div>
-                  <div className="mt-0.5 text-xs text-muted">
-                    {isDone
-                      ? t('steps.processing.done')
-                      : isActive
-                        ? t('steps.processing.running')
-                        : t('steps.processing.waiting')}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      <ol className="space-y-2 rounded-2xl border border-line bg-surface p-4" aria-label={t('steps.processing.eyebrow')}>
+        {stages.map((s) => (
+          <li key={s.id} className="flex min-h-12 items-center gap-3 text-base" aria-current={s.state === 'active' ? 'step' : undefined}>
+            <span
+              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border ${
+                s.state === 'waiting' ? 'border-line text-muted' : 'border-primary text-primary'
+              }`}
+            >
+              {s.state === 'done' ? (
+                <Check className="h-5 w-5" strokeWidth={3} aria-hidden="true" />
+              ) : s.state === 'active' ? (
+                <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+              ) : (
+                <s.icon className="h-5 w-5" aria-hidden="true" />
+              )}
+            </span>
+            <span className={`flex-1 ${s.state === 'waiting' ? 'text-muted' : 'font-semibold text-ink'}`}>
+              {s.state === 'active' ? <span role="status">{s.label}</span> : s.label}
+            </span>
+            {s.state === 'active' ? (
+              <span className="tabular-nums text-muted" aria-hidden="true" data-testid="processing-elapsed">
+                {td('delivery.processing.elapsed', { seconds })}
+              </span>
+            ) : null}
+          </li>
+        ))}
+      </ol>
       {stillReading ? (
         <button
           type="button"
           onClick={onSkip}
           data-testid="skip-ocr-wait"
-          className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-line bg-surface-2 px-5 py-3 font-medium text-ink hover:border-primary/40"
+          className="mt-4 inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-xl bg-primary px-5 text-lg font-bold text-on-primary"
         >
           {t('steps.processing.continueWithOrder')}
         </button>

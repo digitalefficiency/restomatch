@@ -5,29 +5,21 @@ import { CloudOff, Download, Loader2, UploadCloud } from 'lucide-react';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
 import { ingest } from '@/lib/i18n/messages/ingest';
-import { trpc } from '@/lib/trpc/client';
-import {
-  QUEUE_EVENT,
-  announceSynced,
-  idbAvailable,
-  idbQueueStore,
-  processQueue,
-  type QueuedPhoto,
-} from './offlineQueue';
+import { receivingDelivery } from '@/lib/i18n/messages/receiving/delivery';
+import { QUEUE_EVENT, idbAvailable, idbQueueStore, processQueue, type ProcessResult } from './offlineQueue';
+import { useQueuedPhotoUpload } from './useQueuedPhotoUpload';
 
-/** Encode a Blob to base64 (chunked — large photos overflow String.fromCharCode). */
-export async function blobToBase64(blob: Blob): Promise<string> {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  }
-  return btoa(binary);
-}
+export { blobToBase64 } from './useQueuedPhotoUpload';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
 }
+
+/** "Syncing" shows only when it lasts longer than this — a fast sync never flashes (perf-states-05). */
+export const SYNC_CHIP_DELAY_MS = 400;
+
+/** How long "uploaded · taken by …" stays up. */
+const ATTRIBUTION_MS = 8_000;
 
 /**
  * Large-touch-target "installed" mode: only when launched from the home screen
@@ -45,80 +37,72 @@ html[data-pwa='installed'] body { overscroll-behavior-y: contain; }
 /**
  * Receiver PWA shell (flag `receiverPwa`), mounted on the receiving pages:
  * manifest + theme links, service-worker registration (scope
- * /dashboard/receiving), the he/en offline banner, the offline photo queue
- * uploader and the install prompt. Renders nothing visible while online with
- * an empty queue.
+ * /dashboard/receiving), the offline photo queue uploader and the install
+ * prompt. Its state is ONE fixed chip under the header (mobile-field
+ * §3.7) — it never sits in the content flow, so it can't push the delivery
+ * cards under the receiver's thumb (CLS). Offline is neutral (T4), never a
+ * warning. Renders nothing while online with an empty queue. A colleague's
+ * photo of this branch (shared tablet) uploads too, and the chip says who took
+ * it ("צולם על ידי", decision 22 default).
  */
 export function ReceiverPwa({ restaurantId, userId }: { restaurantId: string; userId: string }) {
   const t = useT(ingest);
+  const tr = useT(receivingDelivery);
   const locale = useLocale();
-  const utils = trpc.useUtils();
+  const upload = useQueuedPhotoUpload();
   const [online, setOnline] = useState(true);
   const [queued, setQueued] = useState(0);
-  const [syncing, setSyncing] = useState(false);
+  const [others, setOthers] = useState(0);
+  const [syncingShown, setSyncingShown] = useState(false);
   const [syncError, setSyncError] = useState(false);
+  const [attributed, setAttributed] = useState<ProcessResult['attributed']>([]);
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [installed, setInstalled] = useState(false);
   const running = useRef(false);
   const queuedText = queued === 1 ? t('pwa.queuedOne') : t('pwa.queued', { count: formatNumber(queued, locale) });
 
+  // This branch's photos — the colleague's too — upload here; another branch's wait for it.
+  const ofBranch = useCallback((i: { restaurantId: string }) => i.restaurantId === restaurantId, [restaurantId]);
+
   const refreshCount = useCallback(async () => {
     if (!idbAvailable()) return;
     try {
-      setQueued(
-        (await idbQueueStore.list()).filter((i) => i.restaurantId === restaurantId && i.userId === userId).length,
-      );
+      const all = await idbQueueStore.list();
+      setQueued(all.filter(ofBranch).length);
+      setOthers(all.filter((i) => !ofBranch(i)).length);
     } catch {
       /* private mode without IndexedDB */
     }
-  }, [restaurantId, userId]);
-
-  const upload = useCallback(
-    async (item: QueuedPhoto) => {
-      // scans.upload stores under the SESSION's active restaurant: if another tab
-      // switched branch since this page rendered, never upload this branch's photo there.
-      const session = (await (await fetch('/api/auth/session', { cache: 'no-store' })).json()) as {
-        user?: { id?: string; restaurantId?: string | null };
-      };
-      if (session.user?.restaurantId !== item.restaurantId || session.user?.id !== item.userId) {
-        throw new Error('active restaurant changed — photo kept for its own branch');
-      }
-      // Same clientUploadId → same scan object → registerInvoice dedupes (M8).
-      const scan = await utils.client.scans.upload.mutate({
-        contentBase64: await blobToBase64(item.blob),
-        mimeType: item.mimeType,
-        supplierName: item.supplierName,
-        clientUploadId: item.clientUploadId,
-      });
-      const imageUrl = scan.signedUrl;
-      if (!imageUrl) throw new Error('upload returned no URL');
-      const receipt = await utils.client.receiving.startReceipt.mutate({ poId: item.poId });
-      const reg = await utils.client.receiving.registerInvoice.mutate({
-        grId: receipt.receiptId,
-        imageUrl,
-        supplierId: item.supplierId,
-      });
-      announceSynced({ clientUploadId: item.clientUploadId, poId: item.poId, grId: receipt.receiptId, invoiceId: reg.invoiceId });
-      return reg;
-    },
-    [utils],
-  );
+  }, [ofBranch]);
 
   const sync = useCallback(async () => {
     if (running.current || !idbAvailable() || !navigator.onLine) return;
     running.current = true;
-    setSyncing(true);
+    let timer: ReturnType<typeof setTimeout> | null = null;
     try {
+      // Nothing of this branch queued: no sync, no chip, no layout work at all.
+      if ((await idbQueueStore.list()).filter(ofBranch).length === 0) return;
+      timer = setTimeout(() => setSyncingShown(true), SYNC_CHIP_DELAY_MS);
       const r = await processQueue(idbQueueStore, upload, () => navigator.onLine, { restaurantId, userId });
       setSyncError(r.failed.length > 0);
       setQueued(r.remaining);
+      if (r.attributed.length > 0) setAttributed(r.attributed);
     } catch {
       setSyncError(true);
     } finally {
+      if (timer) clearTimeout(timer);
       running.current = false;
-      setSyncing(false);
+      setSyncingShown(false);
     }
-  }, [upload, restaurantId, userId]);
+  }, [upload, ofBranch, restaurantId, userId]);
+
+  useEffect(() => {
+    if (attributed.length === 0) return;
+    const id = setTimeout(() => setAttributed([]), ATTRIBUTION_MS);
+    return () => clearTimeout(id);
+  }, [attributed]);
+
+  const names = [...new Set(attributed.map((a) => a.capturedByName ?? tr('pwa.someoneElse')))].join(', ');
 
   useEffect(() => {
     setOnline(navigator.onLine);
@@ -159,6 +143,27 @@ export function ReceiverPwa({ restaurantId, userId }: { restaurantId: string; us
     };
   }, [refreshCount, sync]);
 
+  const chip = !online
+    ? { testId: 'pwa-offline-banner', icon: <CloudOff className="h-4 w-4 shrink-0" aria-hidden="true" />, text: tr('pwa.offline') }
+    : syncingShown
+      ? { testId: 'pwa-sync-banner', icon: <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />, text: t('pwa.syncing') }
+      : queued > 0
+        ? {
+            testId: 'pwa-sync-banner',
+            icon: <UploadCloud className="h-4 w-4 shrink-0" aria-hidden="true" />,
+            text: syncError ? t('pwa.syncFailed') : queuedText,
+          }
+        : attributed.length > 0
+          ? {
+              testId: 'pwa-attributed',
+              icon: <UploadCloud className="h-4 w-4 shrink-0" aria-hidden="true" />,
+              text:
+                attributed.length === 1
+                  ? tr('pwa.capturedByOne', { names })
+                  : tr('pwa.capturedByMany', { count: formatNumber(attributed.length, locale), names }),
+            }
+          : null;
+
   return (
     <>
       <link rel="manifest" href="/pwa/manifest.webmanifest" />
@@ -168,59 +173,50 @@ export function ReceiverPwa({ restaurantId, userId }: { restaurantId: string; us
       <meta name="apple-mobile-web-app-capable" content="yes" />
       <style>{INSTALLED_CSS}</style>
 
-      {!online ? (
-        <div
-          role="status"
-          aria-live="polite"
-          data-testid="pwa-offline-banner"
-          className="mb-4 flex items-start gap-3 rounded-2xl border border-warn/40 bg-warn/10 p-4 text-ink"
-        >
-          <CloudOff className="mt-0.5 h-6 w-6 shrink-0 text-warn" aria-hidden="true" />
-          <div>
-            <p className="font-bold">{t('pwa.offlineTitle')}</p>
-            <p className="text-sm text-muted">{t('pwa.offlineBody')}</p>
-            {queued > 0 ? (
-              <p className="mt-1 text-sm font-semibold" data-testid="pwa-queue-count">
-                {queuedText}
-              </p>
-            ) : null}
-          </div>
+      {/* Fixed, out of the flow: appearing or leaving never moves the page (CLS ≤ 0.05). */}
+      <div
+        className="pointer-events-none fixed inset-x-0 z-40 flex flex-col items-center gap-2 px-4"
+        style={{ top: 'calc(var(--rm-header-h, 4.25rem) + 0.5rem)' }}
+      >
+        <div role="status" aria-live="polite" className="contents">
+          {chip ? (
+            <p
+              data-testid={chip.testId}
+              className="pointer-events-auto inline-flex max-w-full items-center gap-2 rounded-full border border-line bg-surface px-4 py-2 text-sm font-medium text-ink shadow-card"
+            >
+              {chip.icon}
+              <span>{chip.text}</span>
+              {!online && queued > 0 ? (
+                <span data-testid="pwa-queue-count" className="text-muted">
+                  · {queuedText}
+                </span>
+              ) : null}
+            </p>
+          ) : null}
         </div>
-      ) : queued > 0 || syncing ? (
-        <div
-          role="status"
-          aria-live="polite"
-          data-testid="pwa-sync-banner"
-          className="mb-4 flex items-center gap-3 rounded-2xl border border-primary/30 bg-primary/10 p-4 text-sm text-ink"
-        >
-          {syncing ? (
-            <Loader2 className="h-5 w-5 animate-spin text-primary" aria-hidden="true" />
-          ) : (
-            <UploadCloud className="h-5 w-5 text-primary" aria-hidden="true" />
-          )}
-          <span>
-            {syncing ? t('pwa.syncing') : syncError ? t('pwa.syncFailed') : queuedText}
-          </span>
-        </div>
-      ) : null}
-
-      {installEvent && !installed ? (
-        <button
-          type="button"
-          data-testid="pwa-install"
-          onClick={async () => {
-            await installEvent.prompt().catch(() => null);
-            setInstallEvent(null);
-          }}
-          className="mb-4 flex min-h-14 w-full items-center gap-3 rounded-2xl border border-line bg-surface-2 p-4 text-start text-sm text-ink transition-colors hover:border-primary/40"
-        >
-          <Download className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
-          <span>
-            <span className="block font-semibold">{t('pwa.install')}</span>
-            <span className="block text-xs text-muted">{t('pwa.installHint')}</span>
-          </span>
-        </button>
-      ) : null}
+        {others > 0 && online && !chip ? (
+          <p
+            data-testid="pwa-others-queued"
+            className="pointer-events-auto rounded-full border border-line bg-surface px-4 py-2 text-sm text-muted shadow-card"
+          >
+            {tr('pwa.othersQueued', { count: formatNumber(others, locale) })}
+          </p>
+        ) : null}
+        {installEvent && !installed ? (
+          <button
+            type="button"
+            data-testid="pwa-install"
+            onClick={async () => {
+              await installEvent.prompt().catch(() => null);
+              setInstallEvent(null);
+            }}
+            className="pointer-events-auto inline-flex min-h-12 items-center gap-2 rounded-full border border-line bg-surface px-4 text-sm font-medium text-ink shadow-card"
+          >
+            <Download className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+            {t('pwa.install')}
+          </button>
+        ) : null}
+      </div>
     </>
   );
 }
