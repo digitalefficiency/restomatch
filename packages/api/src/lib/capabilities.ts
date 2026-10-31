@@ -9,8 +9,10 @@ import type { UserRole } from '@restomatch/db';
  * Owner decisions encoded (README §7 + 31.10):
  *  - Receiver and chef see no purchase / leak ₪ (`money.view`).
  *  - The chef sees, creates, edits, sends and cancels the restaurant's orders
- *    with no manager approval, and sees prices + totals on the ORDERS screens
- *    only (`order.money.view`). Everywhere else the chef sees no ₪.
+ *    with no manager approval. The chef's ₪ scopes are exactly: the ORDERS
+ *    screens (`order.money.view`) and RECIPES — plate cost, menu price, margin
+ *    (`recipe.money.view`). Everywhere else (inventory, leaks, approvals,
+ *    invoices, claims, home, search, bell, badges) the chef sees no ₪.
  *  - The receiver sees no ₪ anywhere and gets no supplier ledger.
  *  - The bookkeeper reads everything and edits account cards (audited).
  *
@@ -30,6 +32,9 @@ export const CAP = {
   'order.view': ['owner', 'manager', 'bookkeeper', 'chef'],
   /** Prices + order totals ON THE ORDERS SCREENS ONLY (owner, 31.10 later). */
   'order.money.view': ['owner', 'manager', 'bookkeeper', 'chef'],
+  /** Recipe ₪ — plate cost, menu price, margin (owner, 31.10 evening). */
+  'recipe.money.view': ['owner', 'manager', 'bookkeeper', 'chef'],
+
   /** Create + edit an order (draft). */
   'order.draft': ['owner', 'manager', 'chef'],
   /** Send an order to the supplier — the chef orders directly, no approval. */
@@ -90,14 +95,21 @@ export function canOn(ctx: CapSubject, cap: Cap, row: { createdBy: string | null
 }
 
 /**
- * Where a price is shown. `'orders'` = the orders screens (create / edit / send
- * / list / detail), where the chef sees prices + totals; `'general'` = anywhere
- * else.
+ * Where a ₪ figure is shown. `'orders'` = the orders screens (create / edit /
+ * send / list / detail); `'recipes'` = recipe plate cost, menu price, margin;
+ * `'general'` = anywhere else. H-11's server strip reads the same table.
  */
-export type PriceScope = 'orders' | 'general';
+export type PriceScope = 'orders' | 'recipes' | 'general';
+
+/** The capability that gates ₪ in each scope. */
+export const MONEY_SCOPE_CAP: Readonly<Record<PriceScope, Cap>> = {
+  orders: 'order.money.view',
+  recipes: 'recipe.money.view',
+  general: 'price.view',
+};
 
 export function canViewPrices(role: UserRole, scope: PriceScope = 'general'): boolean {
-  return hasCap(role, scope === 'orders' ? 'order.money.view' : 'price.view');
+  return hasCap(role, MONEY_SCOPE_CAP[scope]);
 }
 
 /**

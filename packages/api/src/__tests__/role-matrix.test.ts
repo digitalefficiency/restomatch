@@ -102,12 +102,21 @@ describe('CAP — role matrix snapshot', () => {
         'ledger.view',
         'order.view',
         'order.money.view',
+        'recipe.money.view',
         'intake.approve',
         'invoice.correct',
         'discrepancy.decide',
         'accounting.edit',
       ],
-      chef: ['order.view', 'order.money.view', 'order.draft', 'order.send', 'order.cancel', 'receipt.count'],
+      chef: [
+        'order.view',
+        'order.money.view',
+        'recipe.money.view',
+        'order.draft',
+        'order.send',
+        'order.cancel',
+        'receipt.count',
+      ],
     });
   });
 
@@ -121,8 +130,9 @@ describe('CAP — role matrix snapshot', () => {
     }
   });
 
-  it('chef: prices + totals on the orders screens only; no ₪ anywhere else', () => {
+  it('chef: ₪ on the orders screens and in recipes only; no ₪ anywhere else', () => {
     expect(canViewPrices('chef', 'orders')).toBe(true);
+    expect(canViewPrices('chef', 'recipes')).toBe(true);
     expect(canViewPrices('chef', 'general')).toBe(false);
     expect(canViewPrices('chef')).toBe(false);
     expect(hasCap('chef', 'money.view')).toBe(false);
@@ -132,7 +142,7 @@ describe('CAP — role matrix snapshot', () => {
   });
 
   it('receiver: no ₪ anywhere, no ledger, no intake approval, no ordering', () => {
-    for (const scope of ['orders', 'general'] as const) expect(canViewPrices('receiver', scope)).toBe(false);
+    for (const scope of ['orders', 'recipes', 'general'] as const) expect(canViewPrices('receiver', scope)).toBe(false);
     for (const cap of [
       'money.view',
       'price.view',
@@ -142,6 +152,7 @@ describe('CAP — role matrix snapshot', () => {
       'order.draft',
       'order.send',
       'order.money.view',
+      'recipe.money.view',
     ] as const) {
       expect(hasCap('receiver', cap), cap).toBe(false);
     }
@@ -168,8 +179,10 @@ describe('CAP — role matrix snapshot', () => {
 describe('redactPrices', () => {
   const line = { id: 'l1', name: 'עגבניות', unitPrice: '12.5000', lineTotal: '125.00', qty: 10 };
 
-  it('orders scope: chef sees prices; receiver gets them nulled', () => {
+  it('orders + recipes scopes: chef sees ₪; receiver gets them nulled', () => {
     expect(redactPrices(ctxOf('chef'), line, ['unitPrice', 'lineTotal'], 'orders')).toBe(line);
+    expect(redactPrices(ctxOf('chef'), line, ['unitPrice', 'lineTotal'], 'recipes')).toBe(line);
+    expect(redactPrices(ctxOf('receiver'), line, ['unitPrice'], 'recipes')).toEqual({ ...line, unitPrice: null });
     expect(redactPrices(ctxOf('receiver'), line, ['unitPrice', 'lineTotal'], 'orders')).toEqual({
       ...line,
       unitPrice: null,

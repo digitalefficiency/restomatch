@@ -86,8 +86,11 @@ describe('CAP invariants', () => {
     }
   });
 
-  it('order.money.view ⊇ money.view holders (orders-scoped ₪ is the wider one)', () => {
-    for (const role of CAP['money.view']) expect(CAP['order.money.view']).toContain(role);
+  it('scoped ₪ caps (orders, recipes) ⊇ money.view holders; the receiver holds none', () => {
+    for (const cap of ['order.money.view', 'recipe.money.view'] as const) {
+      for (const role of CAP['money.view']) expect(CAP[cap], cap).toContain(role);
+      expect(CAP[cap], cap).not.toContain('receiver');
+    }
   });
 
   it('everyone who can write an order can see the orders and their prices', () => {
