@@ -28,20 +28,20 @@ import {
   SKIPPED_NO_PROVIDER,
   STAFF_ALERT_DAILY_CAP,
   capKey,
-  isExemptFromSendWindow,
   isResendConfigured,
+  isStaffAlert,
   isUndeliverableAddress,
-  localDay,
   nextDayAllowedAt,
   shabbatWindow,
   staffAlertWindow,
+  staffAlertsSentToday,
   isWhatsAppCloudConfigured,
   makeResendDispatcher,
   WhatsAppCloudNotifier,
   type EmailAttachment,
   type NotificationPayload,
 } from '@restomatch/api';
-import { eq, notificationsOutbox, sql, type Database } from '@restomatch/db';
+import { eq, notificationsOutbox, sql } from '@restomatch/db';
 import { makeWorker, type WorkerJob } from '../queue';
 import { jobDb } from '../db';
 
@@ -131,10 +131,11 @@ export async function processOutboxDispatch(job: WorkerJob<OutboxDispatchJob>) {
 
   const window = shabbatWindow();
   const gate = staffAlertWindow(now, window);
-  const isStaff = (r: ClaimedRow) =>
-    !isExemptFromSendWindow({ relatedEntityType: r.related_entity_type, dedupeKey: r.dedupe_key });
+  const isStaff = (r: ClaimedRow) => isStaffAlert({ relatedEntityType: r.related_entity_type, dedupeKey: r.dedupe_key });
   // Staff alerts already sent today, per person — loaded only when the window is open.
-  const sentToday = gate.open ? await staffAlertsSentToday(db, now, claimed.filter(isStaff)) : new Map<string, number>();
+  const sentToday = gate.open
+    ? await staffAlertsSentToday(db, now, claimed.filter(isStaff).map((r) => r.target))
+    : new Map<string, number>();
 
   // RETURNING has no order: oldest first, so the first alerts of the day are the ones that go out.
   claimed.sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
@@ -241,32 +242,6 @@ export async function processOutboxDispatch(job: WorkerJob<OutboxDispatchJob>) {
     `[outbox-dispatch] claimed=${claimed.length} dispatched=${dispatched} failed=${failed} skipped_no_provider=${skipped}`,
   );
   return { dispatched, failed, skipped, deferred };
-}
-
-/**
- * Staff alerts already sent on `now`'s Israel day, per cap key, for the
- * people in this batch. Rows a mock notifier marked sent at enqueue count too:
- * the person was alerted either way.
- */
-async function staffAlertsSentToday(db: Database, now: Date, rows: ClaimedRow[]): Promise<Map<string, number>> {
-  const counts = new Map<string, number>();
-  if (rows.length === 0) return counts;
-  const targets = [...new Set(rows.map((r) => r.target.trim().toLowerCase()))];
-  const day = localDay(now);
-  const sent = (await db.execute(sql`
-    SELECT restaurant_id, target, related_entity_type, dedupe_key
-    FROM ${notificationsOutbox}
-    WHERE status = 'sent'
-      AND sent_at >= ${day.start.toISOString()}::timestamptz
-      AND sent_at < ${day.end.toISOString()}::timestamptz
-      AND lower(btrim(target)) IN (${sql.join(targets.map((t) => sql`${t}`), sql`, `)})
-  `)) as unknown as Array<{ restaurant_id: string; target: string; related_entity_type: string | null; dedupe_key: string | null }>;
-  for (const r of sent) {
-    if (isExemptFromSendWindow({ relatedEntityType: r.related_entity_type, dedupeKey: r.dedupe_key })) continue;
-    const key = capKey({ restaurantId: r.restaurant_id, target: r.target });
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
-  return counts;
 }
 
 /**

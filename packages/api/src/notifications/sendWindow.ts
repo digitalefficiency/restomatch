@@ -8,12 +8,16 @@
  *
  * Pure: an instant in, an answer out. Wall-clock math goes through Intl in
  * Asia/Jerusalem, so it stays right across the DST changes (the next allowed
- * instant is resolved from local wall time, never by adding 24 h).
+ * instant is resolved from local wall time, never by adding 24 h). The one DB
+ * read — how many alerts a person already got today — is at the bottom
+ * (staffAlertsSentToday / staffAlertHold), shared by the dispatcher and the
+ * notifiers that send inline (email.ts, whatsappCloud.ts).
  *
  * Supplier-facing messages a user explicitly sent (a PO send) are exempt —
  * see isExemptFromSendWindow. Auth emails (reset, magic link, invite) never
  * enter the outbox: the web app sends them directly (apps/web/lib/email.ts).
  */
+import { notificationsOutbox, sql, type Database } from '@restomatch/db';
 
 export const SEND_WINDOW_TZ = 'Asia/Jerusalem';
 export const QUIET_START_HOUR = 23;
@@ -220,6 +224,29 @@ export function isExemptFromSendWindow(row: OutboxKindFields): boolean {
 }
 
 /**
+ * The related_entity_type of every staff-alert producer (EOD report, order
+ * reminders, supplier delays, price alerts, recovery reminders, monthly
+ * report, match-run alert, health digest). Anything else — transactional mail
+ * (reset, magic link, invite, 2FA, verification: no entity type) or an
+ * unknown kind — is never held: a missed alert beats a missed login.
+ */
+export const STAFF_ALERT_ENTITY_TYPES: ReadonlySet<string> = new Set([
+  'restaurant',
+  'supplier',
+  'purchase_order',
+  'price_alert',
+  'monthly_report',
+  'match_run',
+  'health_digest',
+]);
+
+/** Is this outbox row a staff alert (held by quiet hours, Shabbat and the cap)? */
+export function isStaffAlert(row: OutboxKindFields): boolean {
+  if (!row.relatedEntityType || !STAFF_ALERT_ENTITY_TYPES.has(row.relatedEntityType)) return false;
+  return !isExemptFromSendWindow(row);
+}
+
+/**
  * The per-person key the daily cap counts by. A real address is the person
  * (across restaurants). A symbolic target ('role:manager') is only a person
  * within its restaurant.
@@ -243,4 +270,46 @@ export function isUndeliverableAddress(address: string): boolean {
   if (at < 0) return false;
   const domain = a.slice(at + 1).replace(/\.$/, '');
   return domain === DEMO_EMAIL_DOMAIN_FOR_SENDING || domain === 'test' || domain.endsWith('.test');
+}
+
+/**
+ * Staff alerts already sent on `now`'s Israel day, per capKey, for `targets`.
+ * Rows a mock notifier marked sent at enqueue count too: the person was told.
+ */
+export async function staffAlertsSentToday(db: Database, now: Date, targets: string[]): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  const wanted = [...new Set(targets.map((t) => t.trim().toLowerCase()))];
+  if (wanted.length === 0) return counts;
+  const day = localDay(now);
+  const sent = (await db.execute(sql`
+    SELECT restaurant_id, target, related_entity_type, dedupe_key
+    FROM ${notificationsOutbox}
+    WHERE status = 'sent'
+      AND sent_at >= ${day.start.toISOString()}::timestamptz
+      AND sent_at < ${day.end.toISOString()}::timestamptz
+      AND lower(btrim(target)) IN (${sql.join(wanted.map((t) => sql`${t}`), sql`, `)})
+  `)) as unknown as Array<{ restaurant_id: string; target: string; related_entity_type: string | null; dedupe_key: string | null }>;
+  for (const r of sent) {
+    if (!isStaffAlert({ relatedEntityType: r.related_entity_type, dedupeKey: r.dedupe_key })) continue;
+    const key = capKey({ restaurantId: r.restaurant_id, target: r.target });
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/**
+ * For a notifier about to send inline: null = send now; a Date = enqueue only,
+ * due then (the dispatcher delivers it). Never holds a non-staff message.
+ */
+export async function staffAlertHold(
+  db: Database,
+  row: { restaurantId: string; target: string; relatedEntityType?: string | null; dedupeKey?: string | null },
+  now: Date,
+): Promise<Date | null> {
+  if (!isStaffAlert({ relatedEntityType: row.relatedEntityType ?? null, dedupeKey: row.dedupeKey ?? null })) return null;
+  const window = shabbatWindow();
+  const gate = staffAlertWindow(now, window);
+  if (!gate.open) return gate.nextAllowedAt;
+  const sent = await staffAlertsSentToday(db, now, [row.target]);
+  return (sent.get(capKey(row)) ?? 0) >= STAFF_ALERT_DAILY_CAP ? nextDayAllowedAt(now, window) : null;
 }
