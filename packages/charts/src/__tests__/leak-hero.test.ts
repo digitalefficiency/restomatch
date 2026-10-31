@@ -7,6 +7,7 @@ import {
   invoiceLines,
   invoices,
   matchRuns,
+  poLines,
   products,
   purchaseOrders,
   restaurants,
@@ -669,6 +670,8 @@ describe('G-08: an invoice held for a "זה אותו מוצר?" question', () =>
       .update(invoices)
       .set({ status: 'parsed', ocrPayload: { provider: 'reconciled', raw: { reviewReasons: ['unlinked'] } } as never })
       .where(eq(invoices.id, held));
+    // …and its line really is unlinked (the flag is LIVE — round 3).
+    await db.update(invoiceLines).set({ productId: null }).where(eq(invoiceLines.invoiceId, held));
 
     const hero = await computeLeakHero(db, restaurantId, { now: NOW });
     expect(hero).toMatchObject({
@@ -689,10 +692,38 @@ describe('G-08: an invoice held for a "זה אותו מוצר?" question', () =>
       .set({ ocrPayload: { provider: 'reconciled', raw: { reviewReasons: ['confidence'] } } as never })
       .where(eq(invoices.id, held));
     expect(await computeLeakHero(db, restaurantId, { now: NOW })).toMatchObject({ awaitingQuestionCount: 0, pendingLinkCount: 2 });
+    // 'unlinkedPo' counts while the order it waits for has an unlinked, name-only, non-blank line.
+    const [{ supplierId }] = (await db.select({ supplierId: invoices.supplierId }).from(invoices).where(eq(invoices.id, held))) as [
+      { supplierId: string },
+    ];
+    const [po] = await db
+      .insert(purchaseOrders)
+      .values({ restaurantId, supplierId, status: 'sent', source: 'manual', expectedDeliveryAt: THIS_MONTH })
+      .returning({ id: purchaseOrders.id });
+    const [pl] = await db
+      .insert(poLines)
+      .values({ poId: po!.id, productId: null, rawDescription: 'בצל סגול', qtyOrdered: '1', unit: 'ק״ג', unitPriceExpected: '5' })
+      .returning({ id: poLines.id });
+    const [prod] = await db.select({ id: products.id }).from(products).where(eq(products.restaurantId, restaurantId));
+    const [line] = await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, held));
+    await db.update(invoiceLines).set({ productId: prod!.id }).where(eq(invoiceLines.id, line!.id));
     await db
       .update(invoices)
-      .set({ ocrPayload: { provider: 'reconciled', raw: { reviewReasons: ['unlinkedPo'] } } as never })
+      .set({ ocrPayload: { provider: 'reconciled', raw: { reviewReasons: ['unlinkedPo'] }, heldPoId: po!.id } as never })
       .where(eq(invoices.id, held));
     expect(await computeLeakHero(db, restaurantId, { now: NOW })).toMatchObject({ awaitingQuestionCount: 1, pendingLinkCount: 1 });
+
+    // LIVE (round 3): once the order line is answered, the stale reason no longer counts —
+    // the invoice is "waiting" like any other held invoice, never "waiting for a question".
+    await db.update(poLines).set({ productId: prod!.id }).where(eq(poLines.id, pl!.id));
+    expect(await computeLeakHero(db, restaurantId, { now: NOW })).toMatchObject({ awaitingQuestionCount: 0 });
+
+    // …and a charge line ("שורת חיוב — לא מוצר") is never a question.
+    await db.update(invoiceLines).set({ productId: null }).where(eq(invoiceLines.id, line!.id));
+    await db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'reconciled', raw: { reviewReasons: ['unlinked'] }, chargeLineIds: [line!.id] } as never })
+      .where(eq(invoices.id, held));
+    expect(await computeLeakHero(db, restaurantId, { now: NOW })).toMatchObject({ awaitingQuestionCount: 0 });
   });
 });

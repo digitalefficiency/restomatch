@@ -34,6 +34,7 @@ export const APP_ERROR_CODES = [
   'invoice.numberTaken',
   // G-08 hold: a manual re-match while an invoice line is still a question.
   'invoice.unlinkedLines',
+  'order.unlinkedLines',
   'FEATURE_DISABLED',
   'leakCheck.invalidLink',
   'growth.referralInvalid',

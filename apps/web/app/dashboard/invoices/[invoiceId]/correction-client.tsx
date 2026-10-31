@@ -121,7 +121,7 @@ export function InvoiceCorrection({
     onError: (e) => {
       // G-08 hold: unlinked lines → the questions, not a raw failure.
       const code = (e as { data?: { appCode?: unknown } | null }).data?.appCode;
-      setOpenQuestions(code === 'invoice.unlinkedLines');
+      setOpenQuestions(code === 'invoice.unlinkedLines' || code === 'order.unlinkedLines');
       setError(localizeServerError(e, locale, t('correction.failed')));
       setSaved(null);
     },
@@ -344,7 +344,8 @@ export function InvoiceCorrection({
                   key={l.id}
                   // Deep-link target (#line-<id>) from the leak proof sheet: highlighted when targeted.
                   id={`line-${l.id}`}
-                  className="scroll-mt-28 border-b border-line/60 last:border-0 hover:bg-surface-2/60 target:bg-surface-2 target:ring-2 target:ring-inset target:ring-primary/50"
+                  className={`scroll-mt-28 border-b border-line/60 last:border-0 hover:bg-surface-2/60 target:bg-surface-2 target:ring-2 target:ring-inset target:ring-primary/50${l.charge ? ' bg-surface-2/60 text-muted' : ''}`}
+                  data-charge={l.charge ? 'true' : undefined}
                 >
                   <td className="px-4 py-3 text-ink">
                     {editing ? (
@@ -353,6 +354,16 @@ export function InvoiceCorrection({
                       <ItemName he={l.rawDescription} en={l.rawDescriptionEn ?? l.productNameEn} />
                     )}
                     {!editing && lineBadges?.[l.id] ? lineBadges[l.id] : null}
+                    {/* G-08 charge: not a product, not checked against the order (T4, neutral). */}
+                    {!editing && l.charge ? (
+                      <p className="mt-1 text-xs text-muted" data-testid="invoice-line-charge">
+                        {l.charge.auto
+                          ? t('correction.chargeAuto')
+                          : l.charge.byName
+                            ? t('correction.chargeBy', { name: l.charge.byName })
+                            : t('correction.charge')}
+                      </p>
+                    ) : null}
                   </td>
                   <td className="px-4 py-3 font-mono tabular-nums text-muted">
                     {editing ? (

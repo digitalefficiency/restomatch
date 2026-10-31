@@ -63,6 +63,8 @@ export interface BranchSnapshot {
   openDiscrepancies: number;
   invoiceCount: number;
   pendingLinkCount: number;
+  /** G-08: invoices held for a "זה אותו מוצר?" question (in neither leak nor spend). */
+  awaitingQuestionCount?: number;
   /** The comparison period (shared view control `compare`); null when compare is off. */
   previous: BranchPeriodTotals | null;
   /** Monthly heatmap, oldest → newest, ending with the month the period ends in. */
@@ -174,6 +176,7 @@ export async function computeBranchSnapshot(
     openDiscrepancies: num(rowsOf(openRes)[0]?.c),
     invoiceCount: current.invoiceCount,
     pendingLinkCount: current.pendingLinkCount,
+    awaitingQuestionCount: current.awaitingQuestionCount,
     previous: previous
       ? { leakIls: previous.leakIls, spendIls: previous.spendIls, leakPct: previous.leakPct }
       : null,

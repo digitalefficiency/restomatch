@@ -1,3 +1,4 @@
+import { AWAITING_QUESTION_SQL } from './awaiting-question';
 import { sql, type Database } from '@restomatch/db';
 import { scanAwaitingCountSql } from './awaiting-count';
 import type { LeakHero } from './leak-hero';
@@ -208,8 +209,7 @@ function invoicesCte(restaurantId: string, f: ViewFilters | undefined): SQL {
              ${scanAwaitingCountSql(restaurantId, sql`i`)} AS counting,
              -- G-08: held for a "זה אותו מוצר?" question (no run yet) — in neither
              -- leak, spend nor "waiting to be linked to an order".
-             (i.status = 'parsed'
-               AND COALESCE(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| array['unlinked', 'unlinkedPo']) AS question
+             ${AWAITING_QUESTION_SQL} AS question
       FROM invoices i, b
       WHERE i.restaurant_id = ${restaurantId}
         AND COALESCE(i.invoice_date, i.created_at) >= b.lo

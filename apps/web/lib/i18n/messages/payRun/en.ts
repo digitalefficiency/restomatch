@@ -14,6 +14,7 @@ export const en = {
     holdLink: 'Waiting to be linked to an order',
     holdCount: 'Waiting for the goods-receipt count',
     holdQuestion: 'Waiting for a question: is this the same product?',
+    holdReview: 'To review',
     holdDuplicate: "Hold — duplicate copy, don't pay",
     claim: 'Ask for a {amount} credit',
   },

@@ -177,7 +177,9 @@ export async function buildMatchInputForInvoice(
   const chargeIds = readChargeLineIds(inv.ocrPayload);
   const chargeRows = invLineRows.filter((l) => chargeIds.has(l.id));
   const productRows = chargeRows.length > 0 ? invLineRows.filter((l) => !chargeIds.has(l.id)) : invLineRows;
-  if (productRows.length === 0) return null;
+  // Every line a charge (a deposit-only slip): nothing to compare — matched clean
+  // (round 3 LOW). No PO is discovered: an empty engine input yields no finding.
+  const allCharge = productRows.length === 0;
 
   const invoiceLineInputs: InvoiceLineInput[] = productRows.map((l) => ({
     id: l.id,
@@ -218,7 +220,7 @@ export async function buildMatchInputForInvoice(
   const lo = startOfDayInTz(addCalendarDaysInTz(invoiceDate, -PO_MATCH_WINDOW_DAYS, tz), tz);
   const hi = endOfDayInTz(addCalendarDaysInTz(invoiceDate, PO_MATCH_WINDOW_DAYS, tz), tz);
   const inWindow = (at: Date | null) => at == null || (at >= lo && at <= hi);
-  if (inv.supplierId && !options.skipPoDiscovery) {
+  if (inv.supplierId && !options.skipPoDiscovery && !allCharge) {
     const candidates: PoCandidate[] = [];
     // A re-match's pinned PO is ONE MORE candidate, never a short-circuit: it
     // skips the status filter (by then it is usually closed / received, which
@@ -444,6 +446,8 @@ export async function buildMatchInputForInvoice(
   let totalExclVat = num(inv.totalExclVat);
   let vatAmount = num(inv.vatAmount);
   let totalInclVat = num(inv.totalInclVat);
+  // Only from a total the supplier printed (round 3 LOW): a NULL header total
+  // stays 0 rather than turning negative.
   if (chargeRows.length > 0) {
     let netAg = 0;
     let vatAg = 0;
@@ -452,9 +456,9 @@ export async function buildMatchInputForInvoice(
       netAg += lineAg;
       vatAg += Math.sign(lineAg) * Math.round(Math.abs(lineAg) * (l.vatRate == null ? vatRate : Number(l.vatRate)));
     }
-    totalExclVat = (Math.round(totalExclVat * 100) - netAg) / 100;
-    vatAmount = (Math.round(vatAmount * 100) - vatAg) / 100;
-    totalInclVat = (Math.round(totalInclVat * 100) - netAg - vatAg) / 100;
+    if (inv.totalExclVat != null) totalExclVat = (Math.round(totalExclVat * 100) - netAg) / 100;
+    if (inv.vatAmount != null) vatAmount = (Math.round(vatAmount * 100) - vatAg) / 100;
+    if (inv.totalInclVat != null) totalInclVat = (Math.round(totalInclVat * 100) - netAg - vatAg) / 100;
   }
 
   const input: MatchInput = {

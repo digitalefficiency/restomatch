@@ -2,6 +2,7 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import {
   and,
+  auditLog,
   eq,
   inArray,
   invoiceLines,
@@ -24,6 +25,16 @@ import {
   recordConfirmedMatch,
 } from '@restomatch/catalog';
 import { signAnswerUndo, verifyAnswerUndo } from '../catalog/answerUndo';
+import {
+  chargeKeyCovers,
+  IL_NOT_CHARGE,
+  NOT_CHARGE_ROW,
+  poLineIsQuestion,
+  pruneAnsweredReasons,
+  readChargeKeys,
+  releaseQuestionHolds,
+  sumAbsIls,
+} from '../catalog/linkQuestions';
 import { enqueue, isQueueUnavailableError, MATCH_INVOICE_QUEUE, type MatchInvoiceQueueJob } from '@restomatch/queue';
 import { chefProcedure, managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
@@ -156,13 +167,6 @@ export interface UnmappedSku {
 /** Name-keyed questions are capped per read (suggestions cost two queries each). */
 export const NAME_QUESTIONS_MAX = 50;
 
-/**
- * G-08 charge (review M-2): an invoice line an owner / manager answered
- * "שורת חיוב — לא מוצר" (deposit, delivery, discount) is listed in its invoice's
- * `ocr_payload.chargeLineIds`. It is no longer a question, never holds the
- * invoice and never reaches the engine (buildMatchInput). Aliases: il / i.
- */
-export const IL_NOT_CHARGE = sql.raw(`not (coalesce(i.ocr_payload -> 'chargeLineIds', '[]'::jsonb) ? il.id::text)`);
 
 
 /**
@@ -186,11 +190,12 @@ async function nameKeyedRows(
       select po.supplier_id, pl.raw_description
         from po_lines pl
         join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid}
-       where pl.product_id is null and pl.supplier_sku is null
+       where ${poLineIsQuestion(rid)}
       union all
       select sci.supplier_id, sci.supplier_name_raw
         from supplier_catalog_items sci
        where sci.restaurant_id = ${rid} and sci.product_id is null and sci.supplier_sku is null
+         and not ${chargeKeyCovers(rid, sql`sci.supplier_id`, sql`sci.supplier_sku`, sql`sci.supplier_name_raw`)}
     )
     select s.id as supplier_id, s.name as supplier_name, ${normNameSql(sql`l.raw`)} as name_key,
            min(btrim(l.raw)) as sample, count(*)::int as occurrences
@@ -234,11 +239,12 @@ async function openQuestion(
       union all
       select pl.raw_description from po_lines pl
         join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid} and po.supplier_id = ${supplierId}
-       where pl.product_id is null and pl.supplier_sku is null
+       where ${poLineIsQuestion(rid)}
       union all
       select sci.supplier_name_raw from supplier_catalog_items sci
        where sci.restaurant_id = ${rid} and sci.supplier_id = ${supplierId}
          and sci.product_id is null and sci.supplier_sku is null
+         and not ${chargeKeyCovers(rid, sql`sci.supplier_id`, sql`sci.supplier_sku`, sql`sci.supplier_name_raw`)}
     )
     select min(btrim(raw)) as sample from lines where ${normNameSql(sql`raw`)} = ${nameKey}
   `)) as unknown as Array<{ sample: string | null }>;
@@ -281,35 +287,11 @@ async function invoicesForPoLines(db: Database, rid: string, poLineIds: string[]
  * duplicate), release it to 'matched' so the re-match runs. Returns the ids.
  */
 async function releaseLinkHolds(db: Database, rid: string, invoiceIds: string[]): Promise<string[]> {
-  if (invoiceIds.length === 0) return [];
-  const rows = (await db.execute(sql`
-    update invoices i
-       set status = 'matched',
-           ocr_payload = (i.ocr_payload - 'heldPoId') || jsonb_build_object('linkReleasedAt', now()::text)
-     where i.restaurant_id = ${rid}
-       and i.id in (${sql.join([...new Set(invoiceIds)].map((id) => sql`${id}::uuid`), sql`, `)})
-       and i.status = 'parsed'
-       -- held ONLY for questions (the match-invoice job applies the same rule)
-       and jsonb_typeof(i.ocr_payload -> 'raw' -> 'reviewReasons') = 'array'
-       and jsonb_array_length(i.ocr_payload -> 'raw' -> 'reviewReasons') > 0
-       and not exists (
-         select 1 from jsonb_array_elements_text(i.ocr_payload -> 'raw' -> 'reviewReasons') r(reason)
-          where r.reason not in ('unlinked', 'unlinkedPo')
-       )
-       and (i.ocr_payload -> 'raw' -> 'duplicateOf') is null
-       and not exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null and ${IL_NOT_CHARGE})
-       and not exists (select 1 from match_runs mr where mr.invoice_id = i.id and mr.restaurant_id = ${rid})
-       and (
-         (i.ocr_payload ->> 'heldPoId') is null
-         or not exists (
-           select 1 from po_lines pl
-             join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid}
-            where pl.po_id = (i.ocr_payload ->> 'heldPoId')::uuid and pl.product_id is null and pl.supplier_sku is null
-         )
-       )
-    returning i.id
-  `)) as unknown as Array<{ id: string }>;
-  return rows.map((r) => String(r.id));
+  const released = (await releaseQuestionHolds(db, rid, invoiceIds)).map((r) => r.id);
+  // Held for another reason too: the answered question reasons are pruned (round 3).
+  const done = new Set(released);
+  await pruneAnsweredReasons(db, rid, invoiceIds.filter((id) => !done.has(id)));
+  return released;
 }
 
 /**
@@ -364,10 +346,12 @@ export async function countQuestions(db: Database, rid: string, includeSku: bool
         from po_lines pl
         join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid}
        where pl.product_id is null and pl.supplier_sku is not null
+         and not ${chargeKeyCovers(rid, sql`po.supplier_id`, sql`pl.supplier_sku`, sql`pl.raw_description`)}
       union all
       select sci.supplier_id, sci.supplier_sku
         from supplier_catalog_items sci
        where sci.restaurant_id = ${rid} and sci.product_id is null and sci.supplier_sku is not null
+         and not ${chargeKeyCovers(rid, sql`sci.supplier_id`, sql`sci.supplier_sku`, sql`sci.supplier_name_raw`)}
     )
     select count(distinct (l.supplier_id, l.sku))::int as n
       from lines l
@@ -388,11 +372,12 @@ export async function countNameQuestions(db: Database, rid: string): Promise<num
       select po.supplier_id, pl.raw_description
         from po_lines pl
         join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid}
-       where pl.product_id is null and pl.supplier_sku is null
+       where ${poLineIsQuestion(rid)}
       union all
       select sci.supplier_id, sci.supplier_name_raw
         from supplier_catalog_items sci
        where sci.restaurant_id = ${rid} and sci.product_id is null and sci.supplier_sku is null
+         and not ${chargeKeyCovers(rid, sql`sci.supplier_id`, sql`sci.supplier_sku`, sql`sci.supplier_name_raw`)}
     )
     select count(distinct (l.supplier_id, ${normNameSql(sql`l.raw`)}))::int as n
       from lines l
@@ -403,10 +388,6 @@ export async function countNameQuestions(db: Database, rid: string): Promise<num
 }
 
 
-/** The same rule on an `invoice_lines` row in a one-table UPDATE (no aliases). */
-const NOT_CHARGE_ROW = sql.raw(
-  `not exists (select 1 from invoices ci where ci.id = "invoice_lines"."invoice_id" and coalesce(ci.ocr_payload -> 'chargeLineIds', '[]'::jsonb) ? "invoice_lines"."id"::text)`,
-);
 
 /** The link/backfill input shared by mapping.confirm and mapping.answerLink (G-08). */
 export interface LinkInput {
@@ -727,80 +708,188 @@ export interface ChargeInput {
   supplierId: string;
   supplierSku?: string;
   rawName: string;
-  /** Undo ("בטל") a mark made moments ago: exactly these lines become questions again. */
-  undo?: { invoiceLineIds: string[] };
+  /** Undo ("בטל") a mark made moments ago: exactly these lines become questions again; forgetKey drops the learned key it added. */
+  undo?: { invoiceLineIds: string[]; forgetKey?: boolean };
 }
 
+/** The charge key of an input: (supplier, SKU) or (supplier, normalized name). */
+function chargeKeyOf(input: ChargeInput) {
+  return input.supplierSku
+    ? { supplierId: input.supplierId, sku: input.supplierSku, nameKey: null as string | null }
+    : { supplierId: input.supplierId, sku: null as string | null, nameKey: normalizeLinkName(input.rawName) };
+}
+
+/** Is `ck` (jsonb element alias) this key? */
+const sameChargeKey = (k: { supplierId: string; sku: string | null; nameKey: string | null }) =>
+  k.sku
+    ? sql`ck ->> 'supplierId' = ${k.supplierId} and ck ->> 'sku' = ${k.sku}`
+    : sql`ck ->> 'supplierId' = ${k.supplierId} and (ck ->> 'sku') is null and ck ->> 'nameKey' = ${k.nameKey}`;
+
 /**
- * G-08 charge (review M-2): mark every unlinked invoice line of a key (supplier
- * + SKU, or supplier + normalized name) as a charge line — "שורת חיוב — לא מוצר".
- * The line keeps product_id NULL; its id joins `ocr_payload.chargeLineIds` (a
- * jsonb merge, other keys survive). Then the holds it caused release and the
- * invoices re-match (buildMatchInput leaves charge lines out, totals reconciled).
- * Invoice lines only: an order or price-list row is a product by definition.
+ * G-08 charge (review M-2, round 3): mark a key (supplier + SKU, or supplier +
+ * normalized name) "שורת חיוב — לא מוצר".
+ *   - every unlinked invoice line of the key becomes a charge line: its id joins
+ *     `ocr_payload.chargeLineIds`, with `chargeLines: [{id, by, at}]` (jsonb merge);
+ *   - the key is LEARNED (`restaurants.settings.chargeKeys`): the OCR job pre-marks
+ *     next week's line, and an order / price-list line of the key is no longer a
+ *     question (M-4's escape for a "משלוח" order line);
+ *   - holds release (or their answered reasons are pruned), invoices re-match;
+ *   - one audit_log row: who, supplier, key, lines, invoices, ₪ of the lines.
+ * Locks: the per-key advisory lock, then the invoices' row locks by id, THEN
+ * the lines are read (product_id re-checked under the lock).
  */
-async function applyCharge(db: Database, rid: string, input: ChargeInput) {
+async function applyCharge(db: Database, rid: string, userId: string, input: ChargeInput) {
   await assertSupplierOwned(db, input.supplierId, rid);
-  const sku = input.supplierSku;
-  const nameKey = normalizeLinkName(input.rawName);
-  const lineKey = sku
-    ? sql`il.supplier_sku = ${sku}`
-    : sql`il.supplier_sku is null and ${normNameSql(sql`il.raw_description`)} = ${nameKey}`;
-  if (!sku) await db.execute(sql`select pg_advisory_xact_lock(hashtext(${`g08:${rid}:${input.supplierId}:${nameKey}`}))`);
+  const key = chargeKeyOf(input);
+  const lineKey = key.sku
+    ? sql`il.supplier_sku = ${key.sku}`
+    : sql`il.supplier_sku is null and ${normNameSql(sql`il.raw_description`)} = ${key.nameKey}`;
+  await db.execute(
+    sql`select pg_advisory_xact_lock(hashtext(${`g08:${rid}:${input.supplierId}:${key.sku ?? key.nameKey}`}))`,
+  );
+  const sameKey = sameChargeKey(key);
 
   if (input.undo) {
     const ids = input.undo.invoiceLineIds;
-    if (ids.length === 0) return { invoiceLinesMarked: 0, rematch: await requeueInvoicesForRematch(db, rid, []), undo: null };
-    const idList = sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `);
-    const target = (await db.execute(sql`
-      select il.id, il.invoice_id from invoice_lines il
-        join invoices i on i.id = il.invoice_id and i.restaurant_id = ${rid} and i.supplier_id = ${input.supplierId}
-       where il.id in (${idList}) and il.product_id is null and ${lineKey}
-         and coalesce(i.ocr_payload -> 'chargeLineIds', '[]'::jsonb) ? il.id::text
-       order by il.invoice_id
-    `)) as unknown as Array<{ id: string; invoice_id: string }>;
+    let target: Array<{ id: string; invoice_id: string }> = [];
+    if (ids.length > 0) {
+      await db.execute(sql`
+        select i.id from invoices i
+         where i.restaurant_id = ${rid} and i.supplier_id = ${input.supplierId}
+           and exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)}))
+         order by i.id for update
+      `);
+      target = (await db.execute(sql`
+        select il.id, il.invoice_id from invoice_lines il
+          join invoices i on i.id = il.invoice_id and i.restaurant_id = ${rid} and i.supplier_id = ${input.supplierId}
+         where il.id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)}) and il.product_id is null and ${lineKey}
+           and coalesce(i.ocr_payload -> 'chargeLineIds', '[]'::jsonb) ? il.id::text
+         order by il.invoice_id
+      `)) as unknown as Array<{ id: string; invoice_id: string }>;
+    }
     const byInv = groupByInvoice(target);
     for (const [invoiceId, lineIds] of byInv) {
+      const arr = sql`${`{${lineIds.join(',')}}`}::text[]`;
       await db.execute(sql`
         update invoices i
-           set ocr_payload = i.ocr_payload || jsonb_build_object('chargeLineIds', coalesce(
-                 (select jsonb_agg(x) from jsonb_array_elements_text(i.ocr_payload -> 'chargeLineIds') x
-                   where x <> all (${`{${lineIds.join(',')}}`}::text[])), '[]'::jsonb))
+           set ocr_payload = i.ocr_payload || jsonb_build_object(
+                 'chargeLineIds', coalesce((select jsonb_agg(x) from jsonb_array_elements_text(i.ocr_payload -> 'chargeLineIds') x
+                                             where x <> all (${arr})), '[]'::jsonb),
+                 'chargeLines', coalesce((select jsonb_agg(c) from jsonb_array_elements(coalesce(i.ocr_payload -> 'chargeLines', '[]'::jsonb)) c
+                                           where (c ->> 'id') <> all (${arr})), '[]'::jsonb))
          where i.id = ${invoiceId}::uuid and i.restaurant_id = ${rid}
       `);
     }
+    if (input.undo.forgetKey) await forgetChargeKey(db, rid, sameKey);
     const touched = [...byInv.keys()];
     const reheld = new Set(await reholdLinkHolds(db, rid, touched));
     const rematch = await requeueInvoicesForRematch(db, rid, touched.filter((id) => !reheld.has(id)));
-    return { invoiceLinesMarked: 0, rematch, undo: null };
+    await db.insert(auditLog).values({
+      restaurantId: rid,
+      userId,
+      action: 'mapping.unmarkCharge',
+      entityType: 'supplier',
+      entityId: input.supplierId,
+      after: { sku: key.sku, nameKey: key.nameKey, lineIds: target.map((t) => String(t.id)), invoiceIds: touched, forgotKey: !!input.undo.forgetKey },
+    });
+    return { invoiceLinesMarked: 0, learnedKey: false, rematch, undo: null };
   }
 
-  // Lock order (as applyLink): the invoices' row locks first, by id.
+  // An open question of this key must exist: an invoice line, an order line or a price-list row.
+  const [open] = (await db.execute(sql`
+    select (
+      exists (select 1 from invoice_lines il join invoices i on i.id = il.invoice_id and i.restaurant_id = ${rid} and i.supplier_id = ${input.supplierId}
+               where il.product_id is null and ${lineKey} and ${IL_NOT_CHARGE})
+      or exists (select 1 from po_lines pl join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid} and po.supplier_id = ${input.supplierId}
+               where pl.product_id is null and ${key.sku ? sql`pl.supplier_sku = ${key.sku}` : sql`pl.supplier_sku is null and ${normNameSql(sql`pl.raw_description`)} = ${key.nameKey}`})
+      or exists (select 1 from supplier_catalog_items sci where sci.restaurant_id = ${rid} and sci.supplier_id = ${input.supplierId}
+               and sci.product_id is null and ${key.sku ? sql`sci.supplier_sku = ${key.sku}` : sql`sci.supplier_sku is null and ${normNameSql(sql`sci.supplier_name_raw`)} = ${key.nameKey}`})
+    ) as open
+  `)) as unknown as Array<{ open: boolean }>;
+  if (!open?.open) throw new TRPCError({ code: 'NOT_FOUND', message: 'no open question' });
+
+  // Lock order (as applyLink, vs G-09): the invoices' row locks first, by id; then read the lines.
+  await db.execute(sql`
+    select i.id from invoices i
+     where i.restaurant_id = ${rid} and i.supplier_id = ${input.supplierId}
+       and exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null and ${lineKey} and ${IL_NOT_CHARGE})
+     order by i.id for update
+  `);
   const target = (await db.execute(sql`
-    select il.id, il.invoice_id from invoice_lines il
+    select il.id, il.invoice_id, il.line_total from invoice_lines il
       join invoices i on i.id = il.invoice_id and i.restaurant_id = ${rid} and i.supplier_id = ${input.supplierId}
      where il.product_id is null and ${lineKey} and ${IL_NOT_CHARGE}
      order by il.invoice_id
-  `)) as unknown as Array<{ id: string; invoice_id: string }>;
-  if (target.length === 0) throw new TRPCError({ code: 'NOT_FOUND', message: 'no open question' });
+  `)) as unknown as Array<{ id: string; invoice_id: string; line_total: string }>;
   const byInv = groupByInvoice(target);
-  const touched = [...byInv.keys()];
-  await db.execute(sql`
-    select i.id from invoices i
-     where i.restaurant_id = ${rid} and i.id in (${sql.join(touched.map((id) => sql`${id}::uuid`), sql`, `)})
-     order by i.id for update
-  `);
+  const at = new Date().toISOString();
   for (const [invoiceId, lineIds] of byInv) {
+    const meta = lineIds.map((id) => ({ id, by: userId, at }));
     await db.execute(sql`
       update invoices i
-         set ocr_payload = coalesce(i.ocr_payload, '{}'::jsonb) || jsonb_build_object('chargeLineIds',
-               coalesce(i.ocr_payload -> 'chargeLineIds', '[]'::jsonb) || to_jsonb(${`{${lineIds.join(',')}}`}::text[]))
+         set ocr_payload = coalesce(i.ocr_payload, '{}'::jsonb) || jsonb_build_object(
+               'chargeLineIds', coalesce(i.ocr_payload -> 'chargeLineIds', '[]'::jsonb) || to_jsonb(${`{${lineIds.join(',')}}`}::text[]),
+               'chargeLines', coalesce(i.ocr_payload -> 'chargeLines', '[]'::jsonb) || ${JSON.stringify(meta)}::jsonb)
        where i.id = ${invoiceId}::uuid and i.restaurant_id = ${rid}
     `);
   }
+
+  // Learn the key (once): next week's line of it is pre-marked by the OCR job.
+  const learned = (await db.execute(sql`
+    update restaurants r
+       set settings = r.settings || jsonb_build_object('chargeKeys',
+             coalesce(r.settings -> 'chargeKeys', '[]'::jsonb) || ${JSON.stringify([{ ...key, by: userId, at }])}::jsonb)
+     where r.id = ${rid}
+       and not exists (select 1 from jsonb_array_elements(coalesce(r.settings -> 'chargeKeys', '[]'::jsonb)) ck where ${sameKey})
+    returning r.id
+  `)) as unknown as Array<{ id: string }>;
+
+  // Invoices whose first match waits for an order line of this key (M-4) are touched too.
+  const heldOnOrder = (await db.execute(sql`
+    select i.id from invoices i
+     where i.restaurant_id = ${rid} and i.status = 'parsed'
+       and (i.ocr_payload ->> 'heldPoId') is not null
+       and exists (select 1 from po_lines pl join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid} and po.supplier_id = ${input.supplierId}
+                    where pl.po_id = (i.ocr_payload ->> 'heldPoId')::uuid and pl.product_id is null
+                      and ${key.sku ? sql`pl.supplier_sku = ${key.sku}` : sql`pl.supplier_sku is null and ${normNameSql(sql`pl.raw_description`)} = ${key.nameKey}`})
+  `)) as unknown as Array<{ id: string }>;
+  const touched = [...new Set([...byInv.keys(), ...heldOnOrder.map((r) => String(r.id))])];
   await releaseLinkHolds(db, rid, touched);
   const rematch = await requeueInvoicesForRematch(db, rid, touched);
-  return { invoiceLinesMarked: target.length, rematch, undo: { invoiceLineIds: target.map((t) => String(t.id)) } };
+  await db.insert(auditLog).values({
+    restaurantId: rid,
+    userId,
+    action: 'mapping.markCharge',
+    entityType: 'supplier',
+    entityId: input.supplierId,
+    after: {
+      sku: key.sku,
+      nameKey: key.nameKey,
+      lineIds: target.map((t) => String(t.id)),
+      lineCount: target.length,
+      invoiceIds: touched,
+      // The ₪ the engine would have flagged on these lines (UNORDERED_ITEM = |line total|).
+      chargedIls: sumAbsIls(target.map((t) => t.line_total)),
+      learnedKey: learned.length > 0,
+    },
+  });
+  return {
+    invoiceLinesMarked: target.length,
+    learnedKey: learned.length > 0,
+    rematch,
+    undo: { invoiceLineIds: target.map((t) => String(t.id)), forgetKey: learned.length > 0 },
+  };
+}
+
+/** Drop a learned charge key (restaurant-scoped). */
+async function forgetChargeKey(db: Database, rid: string, sameKey: ReturnType<typeof sql>) {
+  await db.execute(sql`
+    update restaurants r
+       set settings = r.settings || jsonb_build_object('chargeKeys', coalesce(
+             (select jsonb_agg(ck) from jsonb_array_elements(coalesce(r.settings -> 'chargeKeys', '[]'::jsonb)) ck where not (${sameKey})),
+             '[]'::jsonb))
+     where r.id = ${rid}
+  `);
 }
 
 function groupByInvoice(rows: Array<{ id: string; invoice_id: string }>): Map<string, string[]> {
@@ -845,6 +934,7 @@ export const mappingRouter = router({
           and(
             isNull(poLines.productId),
             sql`${poLines.supplierSku} is not null`,
+            sql`not ${chargeKeyCovers(rid, sql`${purchaseOrders.supplierId}`, sql`${poLines.supplierSku}`, sql`${poLines.rawDescription}`)}`,
             supplierFilter ? eq(purchaseOrders.supplierId, supplierFilter) : undefined,
           ),
         );
@@ -892,6 +982,7 @@ export const mappingRouter = router({
             eq(supplierCatalogItems.restaurantId, rid),
             isNull(supplierCatalogItems.productId),
             sql`${supplierCatalogItems.supplierSku} is not null`,
+            sql`not ${chargeKeyCovers(rid, sql`${supplierCatalogItems.supplierId}`, sql`${supplierCatalogItems.supplierSku}`, sql`${supplierCatalogItems.supplierNameRaw}`)}`,
             supplierFilter ? eq(supplierCatalogItems.supplierId, supplierFilter) : undefined,
           ),
         );
@@ -1082,9 +1173,55 @@ export const mappingRouter = router({
           supplierId: z.string().uuid(),
           supplierSku: z.string().trim().min(1).max(64).optional(),
           rawName: z.string().trim().min(1).max(400),
-          undo: z.object({ invoiceLineIds: z.array(z.string().uuid()).max(5000) }).strict().optional(),
+          undo: z
+            .object({ invoiceLineIds: z.array(z.string().uuid()).max(5000), forgetKey: z.boolean().optional() })
+            .strict()
+            .optional(),
         })
         .strict(),
     )
-    .mutation(({ ctx, input }) => applyCharge(ctx.db, ctx.session.restaurantId, input)),
+    .mutation(({ ctx, input }) => applyCharge(ctx.db, ctx.session.restaurantId, ctx.session.userId, input)),
+
+  /** G-08 charge keys (round 3): the learned "שורת חיוב — לא מוצר" keys, visible to owner / manager. No ₪. */
+  chargeKeys: managerProcedure.query(async ({ ctx }) => {
+    const rid = ctx.session.restaurantId;
+    const keys = await readChargeKeys(ctx.db, rid);
+    if (keys.length === 0) return [];
+    const sups = await ctx.db
+      .select({ id: suppliers.id, name: suppliers.name })
+      .from(suppliers)
+      .where(and(eq(suppliers.restaurantId, rid), inArray(suppliers.id, [...new Set(keys.map((k) => k.supplierId))])));
+    const names = new Map(sups.map((x) => [x.id, x.name]));
+    return keys
+      .filter((k) => names.has(k.supplierId))
+      .map((k) => ({ supplierId: k.supplierId, supplierName: names.get(k.supplierId)!, sku: k.sku, nameKey: k.nameKey, at: k.at }));
+  }),
+
+  /** Forget a learned charge key: future lines of it are questions again (lines already marked stay marked). Audited. */
+  removeChargeKey: managerProcedure
+    .input(
+      z
+        .object({
+          supplierId: z.string().uuid(),
+          sku: z.string().trim().min(1).max(64).nullable(),
+          nameKey: z.string().min(1).max(400).nullable(),
+        })
+        .strict()
+        .refine((v) => (v.sku == null) !== (v.nameKey == null), { message: 'sku or nameKey' }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const rid = ctx.session.restaurantId;
+      await assertSupplierOwned(ctx.db, input.supplierId, rid);
+      const key = { supplierId: input.supplierId, sku: input.sku, nameKey: input.nameKey };
+      await forgetChargeKey(ctx.db, rid, sameChargeKey(key));
+      await ctx.db.insert(auditLog).values({
+        restaurantId: rid,
+        userId: ctx.session.userId,
+        action: 'mapping.removeChargeKey',
+        entityType: 'supplier',
+        entityId: input.supplierId,
+        after: { sku: input.sku, nameKey: input.nameKey },
+      });
+      return { removed: true };
+    }),
 });

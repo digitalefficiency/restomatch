@@ -200,6 +200,15 @@ export {
   type CommitResult,
   type AmbiguousRow,
 } from './catalog/commit';
+// G-08: the shared "open question" rules (mapping router, match job, OCR job).
+export {
+  applyLearnedCharges,
+  invoiceQuestionCount,
+  orderQuestionCount,
+  pruneAnsweredReasons,
+  releaseQuestionHolds,
+  type ChargeKey,
+} from './catalog/linkQuestions';
 export {
   checkRateLimit,
   resetRateLimit,

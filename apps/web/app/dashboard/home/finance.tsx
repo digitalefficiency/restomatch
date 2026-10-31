@@ -388,6 +388,7 @@ async function Hero(ctx: Ctx) {
   const ils = (v: number) => formatIls(v, { locale });
   const n = (v: number) => formatNumber(v, locale);
   const state = leakHeroState(current);
+  const onlyQuestions = current.pendingLinkCount === 0 && (current.awaitingCountCount ?? 0) === 0 && (current.awaitingQuestionCount ?? 0) > 0;
   const split = leakSplit(current);
 
   const drillQuery = serializeView({ ...DEFAULT_VIEW, period: view.period, from: view.from, to: view.to, filters: view.filters }).toString();
@@ -456,9 +457,15 @@ async function Hero(ctx: Ctx) {
           cta: canSeeRoute(role, '/dashboard/receiving') ? { label: t('hero.noData.cta'), href: '/dashboard/receiving', testId: 'hero-nodata-cta' } : null,
         }}
         primary={
-          canDrill && (state === 'leak' || state === 'pendingOnly')
-            ? { label: state === 'leak' ? t('hero.drill', { amount: ils(current.leakIls) }) : t('hero.drillPending'), href: drillHref, testId: 'hero-drill' }
-            : null
+          // G-08 (round 3 LOW): "pending" made only of question holds drills to the
+          // questions (the leaks list has nothing to show for them).
+          state === 'pendingOnly' && onlyQuestions
+            ? canSeeRoute(role, '/dashboard/catalog/mapping')
+              ? { label: t('hero.awaitingQuestionCta'), href: '/dashboard/catalog/mapping', testId: 'hero-drill' }
+              : null
+            : canDrill && (state === 'leak' || state === 'pendingOnly')
+              ? { label: state === 'leak' ? t('hero.drill', { amount: ils(current.leakIls) }) : t('hero.drillPending'), href: drillHref, testId: 'hero-drill' }
+              : null
         }
         tertiary={canProve ? { label: t('hero.howCalc'), href: '/dashboard/leaks/proof', testId: 'hero-proof' } : null}
         calcNote={t('hero.calc')}
@@ -491,7 +498,8 @@ async function HeroNotes({ role, view, t, locale }: Ctx) {
         <Notice
           testId="hero-awaiting-question"
           text={t('hero.awaitingQuestion', { count: n(current.awaitingQuestionCount), amount: ils(current.awaitingQuestionIls) })}
-          cta={{ href: '/dashboard/catalog/mapping', label: t('hero.awaitingQuestionCta') }}
+          // G-08: the mapper only for a role that may answer (never the bookkeeper).
+          cta={canSeeRoute(role, '/dashboard/catalog/mapping') ? { href: '/dashboard/catalog/mapping', label: t('hero.awaitingQuestionCta') } : undefined}
         />
       ) : null}
       {current.awaitingCountCount > 0 ? (

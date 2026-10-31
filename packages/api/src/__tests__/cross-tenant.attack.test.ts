@@ -268,6 +268,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'mapping.questionCount': 'isolation — catalog-mapping.attack.test.ts: counts only the caller restaurant name-keyed questions; B never counted for A',
   // G-08 charge (review M-2): owner/manager mark an unlinked invoice-line key "שורת חיוב — לא מוצר".
   'mapping.markCharge': 'attack — catalog-link-hold.test.ts: B supplier NOT_FOUND, A lines of another supplier untouched, chef / receiver FORBIDDEN, no ₪',
+  'mapping.chargeKeys': 'isolation — catalog-link-hold.test.ts: lists only the caller restaurant learned keys (B never listed for A); chef FORBIDDEN; no ₪',
+  'mapping.removeChargeKey': 'attack — catalog-link-hold.test.ts: B supplier NOT_FOUND; chef FORBIDDEN; audited',
   // Canonical product management (rename / recategorize / exclusivity / delete).
   'products.update': 'attack',
   'products.list': 'isolation',

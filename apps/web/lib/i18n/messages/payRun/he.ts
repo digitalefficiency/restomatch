@@ -17,6 +17,7 @@ export const he = {
     holdLink: 'ממתינה לשיוך להזמנה',
     holdCount: 'ממתינה לספירת קבלת הסחורה',
     holdQuestion: 'מחכה לשאלה: זה אותו מוצר?',
+    holdReview: 'לבדיקה',
     holdDuplicate: 'להשהות — עותק כפול, לא לשלם',
     claim: 'לבקש זיכוי {amount}',
   },

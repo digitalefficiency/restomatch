@@ -7,6 +7,9 @@ import {
   createWhatsAppNotifier,
   getEntitlements,
   loadPriorDecisions,
+  orderQuestionCount,
+  pruneAnsweredReasons,
+  releaseQuestionHolds,
   receiptStillOpen,
   persistMatchRun,
   rematchHoldReason,
@@ -57,59 +60,24 @@ const CLEAN: MatchOutput = { status: 'clean', totalDiscrepancyAmount: 0, discrep
 /** Reasons only a person's answer clears; any other reason keeps the human hold. */
 const LINK_HOLD_REASONS = sql`array['unlinked', 'unlinkedPo']`;
 
-/** Unlinked name-only lines on this order (restaurant-scoped). */
-async function orderHasQuestions(db: Database, restaurantId: string, poId: string): Promise<boolean> {
-  const [r] = (await db.execute(sql`
-    select exists (
-      select 1 from po_lines pl
-        join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${restaurantId}
-       where pl.po_id = ${poId}::uuid and pl.product_id is null and pl.supplier_sku is null
-    ) as open
-  `)) as unknown as Array<{ open: boolean }>;
-  return Boolean(r?.open);
-}
-
 /**
- * Release an invoice held ONLY for questions (reasons ⊆ unlinked/unlinkedPo, not a
- * duplicate, never matched) once no line of it — nor of the order it waited for —
- * is unlinked. Returns the receipt's order (raw.scanGrId) to pin the match to.
+ * Release an invoice held ONLY for questions (the shared rule, @restomatch/api
+ * releaseQuestionHolds); returns the receipt's order (raw.scanGrId) to pin to.
  */
 async function releaseLinkHold(
   db: Database,
   restaurantId: string,
   invoiceId: string,
 ): Promise<{ released: boolean; pinPoId: string | null }> {
-  const rows = (await db.execute(sql`
-    update invoices i
-       set status = 'matched',
-           ocr_payload = (i.ocr_payload - 'heldPoId') || jsonb_build_object('linkReleasedAt', now()::text)
-     where i.restaurant_id = ${restaurantId} and i.id = ${invoiceId}::uuid
-       and i.status = 'parsed'
-       and jsonb_typeof(i.ocr_payload -> 'raw' -> 'reviewReasons') = 'array'
-       and jsonb_array_length(i.ocr_payload -> 'raw' -> 'reviewReasons') > 0
-       and not exists (
-         select 1 from jsonb_array_elements_text(i.ocr_payload -> 'raw' -> 'reviewReasons') r(reason)
-          where not (r.reason = any (${LINK_HOLD_REASONS}))
-       )
-       and (i.ocr_payload -> 'raw' -> 'duplicateOf') is null
-       and not exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null
-           and not (coalesce(i.ocr_payload -> 'chargeLineIds', '[]'::jsonb) ? il.id::text))
-       and not exists (select 1 from match_runs mr where mr.invoice_id = i.id and mr.restaurant_id = ${restaurantId})
-       and (
-         (i.ocr_payload ->> 'heldPoId') is null
-         or not exists (
-           select 1 from po_lines pl
-             join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${restaurantId}
-            where pl.po_id = (i.ocr_payload ->> 'heldPoId')::uuid and pl.product_id is null and pl.supplier_sku is null
-         )
-       )
-    returning i.ocr_payload -> 'raw' ->> 'scanGrId' as gr
-  `)) as unknown as Array<{ gr: string | null }>;
-  if (rows.length === 0) return { released: false, pinPoId: null };
-  const gr = rows[0]!.gr;
-  if (!gr) return { released: true, pinPoId: null };
+  const [rel] = await releaseQuestionHolds(db, restaurantId, [invoiceId]);
+  if (!rel) {
+    // Held for another reason too: prune the answered question reasons (round 3).
+    await pruneAnsweredReasons(db, restaurantId, [invoiceId]);
+    return { released: false, pinPoId: null };
+  }
+  if (!rel.scanGrId) return { released: true, pinPoId: null };
   const [pin] = (await db.execute(sql`
-    select po_id from goods_receipts where id = ${gr}::uuid and restaurant_id = ${restaurantId}
+    select po_id from goods_receipts where id = ${rel.scanGrId}::uuid and restaurant_id = ${restaurantId}
   `)) as unknown as Array<{ po_id: string | null }>;
   return { released: true, pinPoId: pin?.po_id ?? null };
 }
@@ -203,7 +171,7 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
   // counted for this invoice: if the matcher wouldn't pair the invoice with it
   // (other supplier, outside the window, a sibling PO preferred), don't fall back
   // to some other order — skip.
-  if (data.poId && built.poId !== data.poId) {
+  if (data.poId && built.poId !== data.poId && built.input.invoiceLines.length > 0) {
     console.warn(`[match-invoice] invoice=${invoiceId} does not pair with the job's po=${data.poId} — skipping`);
     return { result: CLEAN, persisted: null, replaced: false, skipped: 'po_rejected' };
   }
@@ -218,7 +186,7 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
 
   // G-08 hold (M-4, after the receipt check): a first match waits while its order still has unlinked
   // name-only lines (a WhatsApp / text order) — the question is in the mapper.
-  if (!priorRun && built.poId && (await orderHasQuestions(db, restaurantId, built.poId))) {
+  if (!priorRun && built.poId && (await orderQuestionCount(db, restaurantId, built.poId)) > 0) {
     await holdForOrderQuestions(db, restaurantId, invoiceId, built.poId);
     return { result: CLEAN, persisted: null, replaced: false, skipped: 'awaiting_review' };
   }

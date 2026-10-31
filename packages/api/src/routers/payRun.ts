@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { computeLeakBreakdown, computeLeakHero, scanAwaitingCountSql, type LeakBreakdownInvoice } from '@restomatch/charts';
+import { AWAITING_QUESTION_SQL, computeLeakBreakdown, computeLeakHero, scanAwaitingCountSql, type LeakBreakdownInvoice } from '@restomatch/charts';
 import { eq, restaurants, sql, type Database } from '@restomatch/db';
 import { claimableLines, sumClaims, type VatBasis } from '../lib/claims';
 import { featureEnabled } from '../lib/features';
@@ -50,6 +50,8 @@ export interface PayRunInvoice {
   awaitingCount: boolean;
   /** G-08: held for a "זה אותו מוצר?" question (no run yet) — T4, answered in the mapper. */
   awaitingQuestion: boolean;
+  /** G-08 (round 3): held by OCR for a person ("לבדיקה", T4) with no question open — open the invoice. */
+  awaitingReview: boolean;
   /** A (non-waived) duplicate copy: held — "don't pay this copy", never a credit to ask for. */
   duplicate: boolean;
   /** The claimable ₪ of the duplicate finding(s) (= the copy's total incl. VAT); not in pending / credit. */
@@ -82,6 +84,8 @@ export interface PayRunSupplier {
 }
 
 export interface PayRunResult {
+  /** G-08: may this role answer questions in the mapper? (never the bookkeeper) */
+  canAnswer: boolean;
   enabled: boolean;
   monthStart: string | null;
   monthEnd: string | null;
@@ -164,7 +168,7 @@ export const payRunRouter = router({
     .query(async ({ ctx, input }): Promise<PayRunResult> => {
       const rid = ctx.session.restaurantId;
       if (!(await flagOn(ctx.db, rid))) {
-        return { enabled: false, monthStart: null, monthEnd: null, suppliers: [], totals: EMPTY_TOTALS };
+        return { enabled: false, monthStart: null, monthEnd: null, suppliers: [], totals: EMPTY_TOTALS, canAnswer: false };
       }
       const monthOffset = input?.monthOffset ?? 0;
       const hero = await computeLeakHero(ctx.db, rid, { monthOffset });
@@ -174,7 +178,7 @@ export const payRunRouter = router({
       // The month's invoices not marked paid (matched, or read but waiting for a PO link) — same
       // date rule as the hero.
       const res = await ctx.db.execute(sql`
-        SELECT i.id, i.invoice_number, COALESCE(i.invoice_date, i.created_at) AS at,
+        SELECT i.id, i.invoice_number, i.status AS inv_status, COALESCE(i.invoice_date, i.created_at) AS at,
                COALESCE(i.total_incl_vat, 0) AS total_incl, COALESCE(i.total_excl_vat, 0) AS total_excl,
                i.supplier_id, s.name AS supplier_name, s.name_en AS supplier_name_en,
                -- Safety net for an invoice past the breakdown's 200-row window: any open
@@ -223,8 +227,7 @@ export const payRunRouter = router({
                -- …a receiving scan the OCR held for its receipt's count (#94, same rule as the hero).
                ${scanAwaitingCountSql(rid, sql`i`)} AS counting,
                -- G-08: held for a "זה אותו מוצר?" question (same rule as the hero).
-               (i.status = 'parsed'
-                 AND COALESCE(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| array['unlinked', 'unlinkedPo']) AS question
+               ${AWAITING_QUESTION_SQL} AS question
         FROM invoices i
         LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${rid}
         WHERE i.restaurant_id = ${rid}
@@ -258,11 +261,15 @@ export const payRunRouter = router({
         const awaitingCount = row.matched !== true && row.counting === true;
         // G-08: a question to answer, not "waiting to be linked to an order".
         const awaitingQuestion = !awaitingCount && row.matched !== true && row.question === true;
+        // …and held for a person with no question open (confidence / lowLines): "לבדיקה".
+        const awaitingReview =
+          !awaitingCount && !awaitingQuestion && row.matched !== true && row.inv_status === 'parsed' && row.has_dup !== true;
         const pendingLink =
           !awaitingCount &&
           !awaitingQuestion &&
+          !awaitingReview &&
           ((b?.pendingLink ?? false) || row.matched !== true || (!b && row.has_ua === true));
-        if (pendingLink || awaitingCount || awaitingQuestion) s.status = 'hold';
+        if (pendingLink || awaitingCount || awaitingQuestion || awaitingReview) s.status = 'hold';
         const inv: PayRunInvoice = {
           invoiceId: id,
           invoiceNumber: row.invoice_number == null ? null : String(row.invoice_number),
@@ -271,6 +278,7 @@ export const payRunRouter = router({
           pendingLink,
           awaitingCount,
           awaitingQuestion,
+          awaitingReview,
           duplicate: s.duplicate,
           duplicateIls: s.duplicateIls,
           totalInclVat: Number(row.total_incl),
@@ -330,6 +338,8 @@ export const payRunRouter = router({
       );
       return {
         enabled: true,
+        // G-08: may this role answer questions in the mapper? (never the bookkeeper)
+        canAnswer: ctx.session.role !== 'bookkeeper',
         monthStart: hero.monthStart,
         monthEnd: hero.monthEnd,
         suppliers,

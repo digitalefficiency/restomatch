@@ -1,5 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { computeLeakHero } from '@restomatch/charts';
 import {
+  auditLog,
   createDb,
   discrepancies,
   eq,
@@ -12,6 +14,7 @@ import {
   purchaseOrders,
   supplierCatalogItems,
   suppliers,
+  restaurants,
   testDbUrl,
 } from '@restomatch/db';
 type Job = { restaurantId: string; invoiceId: string; rematch?: boolean };
@@ -20,6 +23,8 @@ import type { AppContext, Session } from '../context';
 import { rematchHoldReason } from '../receiving/matchTriggers';
 import { signAnswerUndo, UNDO_TTL_MS, verifyAnswerUndo } from '../catalog/answerUndo';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
+import { applyLearnedCharges, orderQuestionCount } from '../catalog/linkQuestions';
+import { buildMatchInputForInvoice } from '../match/buildMatchInput';
 
 /**
  * G-08 review fixes (warden + money lenses, 31.10):
@@ -375,11 +380,190 @@ describe('R2 M-2: "שורת חיוב — לא מוצר" keeps a charge line out 
     expect((await invoiceRow(invoiceId)).ocrPayload).not.toHaveProperty('chargeLineIds');
 
     const r = await callerFor(A, 'manager').mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים' });
-    expect(Object.keys(r).sort()).toEqual(['invoiceLinesMarked', 'rematch', 'undo']);
+    expect(Object.keys(r).sort()).toEqual(['invoiceLinesMarked', 'learnedKey', 'rematch', 'undo']);
     expect((await invoiceRow(oInv!.id)).ocrPayload ?? {}).not.toHaveProperty('chargeLineIds');
     // A foreign undo list never touches lines of another supplier.
     const [oLine] = await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, oInv!.id));
     await callerFor(A).mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים', undo: { invoiceLineIds: [oLine!.id] } });
     expect((await invoiceRow(invoiceId)).ocrPayload).toHaveProperty('chargeLineIds');
+  });
+});
+
+/* ── G-08 review round 3 (31.10) ─────────────────────────────────────────── */
+
+const reasonsOf = async (id: string) =>
+  ((await invoiceRow(id)).ocrPayload as unknown as { raw?: { reviewReasons?: string[] } } | null)?.raw?.reviewReasons ?? [];
+
+describe('R3 HIGH: a manual first match refuses an order with open questions', () => {
+  it('runForInvoice on an M-4-held invoice → PRECONDITION_FAILED order.unlinkedLines; no run, no false pair', async () => {
+    const po = await order([
+      { productId: P, raw: 'פלפל אדום' },
+      { productId: null, raw: 'בצל סגול' },
+    ]);
+    const inv = await heldInvoice('פלפל אדום', ['unlinkedPo']);
+    await db.update(invoiceLines).set({ productId: P }).where(eq(invoiceLines.id, inv.lineId));
+    const err = await callerFor(A, 'manager')
+      .match.runForInvoice({ invoiceId: inv.invoiceId })
+      .then(() => null, (e: unknown) => e as { code: string; cause?: { appCode?: string; appParams?: unknown } });
+    expect(err?.code).toBe('PRECONDITION_FAILED');
+    expect(err?.cause?.appCode).toBe('order.unlinkedLines');
+    expect(err?.cause?.appParams).toEqual({ count: 1 });
+    expect(await findingTypes(inv.invoiceId)).toEqual([]);
+    expect(await orderQuestionCount(db, A.restaurantId, po.poId)).toBe(1);
+  });
+
+  it('a blank name-only order line is never a question (LOW): the first match runs', async () => {
+    const po = await order([
+      { productId: P, raw: 'פלפל אדום' },
+      { productId: null, raw: '   ' },
+    ]);
+    expect(await orderQuestionCount(db, A.restaurantId, po.poId)).toBe(0);
+  });
+});
+
+describe('R3 MEDIUM: the "awaiting question" bucket is live', () => {
+  it('held for confidence AND a question → answered → leaves the bucket, the answered reason is pruned', async () => {
+    await order([{ productId: P, raw: 'פלפל אדום' }]);
+    const inv = await heldInvoice('פלפל אדום חריף', ['confidence', 'unlinked']);
+    expect((await computeLeakHero(db, A.restaurantId)).awaitingQuestionCount).toBe(1);
+    await callerFor(A).mapping.confirm({ supplierId: S, rawName: 'פלפל אדום חריף', productId: P });
+    expect((await invoiceRow(inv.invoiceId)).status).toBe('parsed'); // still held for confidence
+    expect(await reasonsOf(inv.invoiceId)).toEqual(['confidence']);
+    expect((await computeLeakHero(db, A.restaurantId)).awaitingQuestionCount).toBe(0);
+  });
+
+  it('a stale reason alone never counts: reasons say unlinked but no line is unlinked → not in the bucket', async () => {
+    const inv = await heldInvoice('פלפל אדום', ['lowLines', 'unlinked']);
+    await db.update(invoiceLines).set({ productId: P }).where(eq(invoiceLines.id, inv.lineId));
+    expect((await computeLeakHero(db, A.restaurantId)).awaitingQuestionCount).toBe(0);
+  });
+});
+
+describe('R3 MEDIUM: markCharge is visible and accountable', () => {
+  it('writes one audit row (who, supplier, key, lines, invoices, ₪) and {by, at} per line; the invoice page shows it', async () => {
+    await order([{ productId: P, raw: 'פלפל אדום' }]);
+    const invoiceId = await invoiceWithCharge({ raw: 'פיקדון ארגזים', total: 10, vatRate: 0 }, 0.18);
+    await callerFor(A).mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים' });
+    const audits = await db.select().from(auditLog).where(eq(auditLog.restaurantId, A.restaurantId));
+    const mark = audits.find((a) => a.action === 'mapping.markCharge');
+    expect(mark).toMatchObject({ userId: A.ownerUserId, entityType: 'supplier', entityId: S });
+    expect(mark!.after).toMatchObject({ nameKey: 'פיקדון ארגזים', lineCount: 1, invoiceIds: [invoiceId], chargedIls: 10, learnedKey: true });
+    const meta = (await invoiceRow(invoiceId)).ocrPayload as unknown as { chargeLines: Array<{ id: string; by: string; at: string }> };
+    expect(meta.chargeLines).toHaveLength(1);
+    expect(meta.chargeLines[0]!.by).toBe(A.ownerUserId);
+    const page = await callerFor(A).receiving.getInvoice({ invoiceId });
+    const charged = page.lines.filter((l) => l.charge);
+    expect(charged).toHaveLength(1);
+    expect(charged[0]!.rawDescription).toBe('פיקדון ארגזים');
+    expect(charged[0]!.charge).toMatchObject({ auto: false });
+  });
+});
+
+describe('R3 MEDIUM: a charge answer is learned', () => {
+  it("week 2's same line is pre-marked a charge line with no hold; its order line is no question either", async () => {
+    await order([{ productId: P, raw: 'פלפל אדום' }]);
+    await invoiceWithCharge({ raw: 'פיקדון ארגזים', total: 10, vatRate: 0 }, 0.18);
+    await callerFor(A).mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים' });
+    expect(await callerFor(A).mapping.chargeKeys()).toEqual([
+      expect.objectContaining({ supplierId: S, sku: null, nameKey: 'פיקדון ארגזים' }),
+    ]);
+
+    // Week 2: OCR wrote the lines and held the invoice for the unlinked deposit line.
+    const week2 = await invoiceWithCharge({ raw: '  פיקדון   ארגזים ', total: 10, vatRate: 0 }, 0.18);
+    const r = await applyLearnedCharges(db, A.restaurantId, week2);
+    expect(r).toEqual({ charged: 1, released: true });
+    const row = await invoiceRow(week2);
+    expect(row.status).toBe('matched');
+    expect((row.ocrPayload as unknown as { chargeLineIds: string[] }).chargeLineIds).toHaveLength(1);
+    await callerFor(A).match.runForInvoice({ invoiceId: week2 });
+    expect(await findingTypes(week2)).not.toContain('UNORDERED_ITEM');
+
+    // An order line of the learned key is not a question (M-4's escape for "משלוח").
+    const po = await order([{ productId: P, raw: 'פלפל אדום' }, { productId: null, raw: 'פיקדון ארגזים' }]);
+    expect(await orderQuestionCount(db, A.restaurantId, po.poId)).toBe(0);
+  });
+
+  it('removeChargeKey forgets it (audited); the undo of a mark forgets the key it learned; owner/manager only; B isolated', async () => {
+    const B = await seedTenant(db, 'B');
+    await invoiceWithCharge({ raw: 'פיקדון ארגזים', total: 10, vatRate: 0 }, 0.18);
+    const m = await callerFor(A).mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים' });
+    expect(m.undo).toMatchObject({ forgetKey: true });
+    await expect(callerFor(A, 'chef').mapping.chargeKeys()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(
+      callerFor(A, 'chef').mapping.removeChargeKey({ supplierId: S, sku: null, nameKey: 'פיקדון ארגזים' }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect(await callerFor(B).mapping.chargeKeys()).toEqual([]);
+    const [bSup] = await db.insert(suppliers).values({ restaurantId: B.restaurantId, name: 'ספק B' }).returning({ id: suppliers.id });
+    await expect(
+      callerFor(A).mapping.removeChargeKey({ supplierId: bSup!.id, sku: null, nameKey: 'פיקדון ארגזים' }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+
+    await callerFor(A).mapping.removeChargeKey({ supplierId: S, sku: null, nameKey: 'פיקדון ארגזים' });
+    expect(await callerFor(A).mapping.chargeKeys()).toEqual([]);
+    const audits = await db.select({ action: auditLog.action }).from(auditLog).where(eq(auditLog.restaurantId, A.restaurantId));
+    expect(audits.map((a) => a.action)).toContain('mapping.removeChargeKey');
+
+    // Mark again (learns again), then undo: the key goes with it.
+    await db.update(restaurants).set({ settings: {} }).where(eq(restaurants.id, A.restaurantId));
+    const inv2 = await invoiceWithCharge({ raw: 'דמי משלוח', total: 20, vatRate: 0.18 }, 0.18);
+    const m2 = await callerFor(A).mapping.markCharge({ supplierId: S, rawName: 'דמי משלוח' });
+    expect((await callerFor(A).mapping.chargeKeys()).map((k) => k.nameKey)).toEqual(['דמי משלוח']);
+    await callerFor(A).mapping.markCharge({ supplierId: S, rawName: 'דמי משלוח', undo: m2.undo! });
+    expect(await callerFor(A).mapping.chargeKeys()).toEqual([]);
+    expect((await invoiceRow(inv2)).ocrPayload).toMatchObject({ chargeLines: [] });
+  });
+});
+
+describe('R3 LOWs', () => {
+  it('a NULL header total stays 0 after the charge subtraction (never negative)', async () => {
+    const [inv] = await db
+      .insert(invoices)
+      .values({ restaurantId: A.restaurantId, supplierId: S, status: 'matched', source: 'photo', invoiceDate: new Date() })
+      .returning({ id: invoices.id });
+    const [charge] = await db
+      .insert(invoiceLines)
+      .values([
+        { invoiceId: inv!.id, productId: P, rawDescription: 'פלפל אדום', qtyBilled: '2', unit: 'ק״ג', unitPriceBilled: '11', lineTotal: '22' },
+        { invoiceId: inv!.id, productId: null, rawDescription: 'פיקדון ארגזים', qtyBilled: '1', unit: 'יח׳', unitPriceBilled: '10', lineTotal: '10', vatRate: '0' },
+      ])
+      .returning({ id: invoiceLines.id, raw: invoiceLines.rawDescription });
+    void charge;
+    await callerFor(A).mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים' });
+    const built = await buildMatchInputForInvoice(db, A.restaurantId, inv!.id);
+    expect(built!.input.invoice).toMatchObject({ totalExclVat: 0, vatAmount: 0, totalInclVat: 0 });
+  });
+
+  it('an invoice whose every line is a charge matches clean (no lines to compare), not "waiting" forever', async () => {
+    await order([{ productId: P, raw: 'פלפל אדום' }]);
+    const [inv] = await db
+      .insert(invoices)
+      .values({
+        restaurantId: A.restaurantId,
+        supplierId: S,
+        status: 'parsed',
+        source: 'photo',
+        invoiceDate: new Date(),
+        totalExclVat: '10.00',
+        vatAmount: '0.00',
+        totalInclVat: '10.00',
+        ocrPayload: { provider: 'reconciled', raw: { reviewReasons: ['unlinked'] } } as never,
+      })
+      .returning({ id: invoices.id });
+    await db.insert(invoiceLines).values({ invoiceId: inv!.id, productId: null, rawDescription: 'פיקדון ארגזים', qtyBilled: '1', unit: 'יח׳', unitPriceBilled: '10', lineTotal: '10', vatRate: '0' });
+    await callerFor(A).mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים' });
+    expect((await invoiceRow(inv!.id)).status).toBe('matched');
+    const r = await callerFor(A).match.runForInvoice({ invoiceId: inv!.id });
+    expect(r.status).toBe('clean');
+    expect(await findingTypes(inv!.id)).toEqual([]);
+    const hero = await computeLeakHero(db, A.restaurantId);
+    expect(hero.awaitingQuestionCount).toBe(0);
+  });
+
+  it('markCharge on a key with only an order line (no invoice line yet) learns it, so the order is no longer held', async () => {
+    const po = await order([{ productId: P, raw: 'פלפל אדום' }, { productId: null, raw: 'משלוח' }]);
+    expect(await orderQuestionCount(db, A.restaurantId, po.poId)).toBe(1);
+    const r = await callerFor(A).mapping.markCharge({ supplierId: S, rawName: 'משלוח' });
+    expect(r).toMatchObject({ invoiceLinesMarked: 0, learnedKey: true });
+    expect(await orderQuestionCount(db, A.restaurantId, po.poId)).toBe(0);
   });
 });

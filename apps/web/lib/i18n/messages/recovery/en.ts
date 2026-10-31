@@ -205,6 +205,7 @@ export const en: Shape<typeof he> = {
     decideOpen: 'Decide on {count} open discrepancies ({amount})',
     sendClaims: 'Send claim letters for {count} discrepancies ({amount})',
     linkPending: 'Link {count} pending invoices to their orders',
+    answerQuestions: 'Answer "Is this the same product?" — {count} invoices are waiting for a question',
     talkToSupplier: 'Talk to {supplier} — {pct} of spend leaked',
     allClear: 'Nothing open — well done',
   },

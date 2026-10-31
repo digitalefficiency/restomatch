@@ -147,7 +147,55 @@ export function SkuMapper({ initial, chef = false }: { initial: UnmappedSku[]; c
           </ul>
         </>
       )}
+      {!chef && <ChargeKeys />}
     </div>
+  );
+}
+
+/**
+ * G-08 charge keys (round 3): what the restaurant answered "שורת חיוב — לא מוצר"
+ * for — learned, so next week's line is not asked again. Visible and removable
+ * (owner / manager); a removal is audited and applies to future lines only.
+ */
+function ChargeKeys() {
+  const t = useT(catalogNs);
+  const tc = useT(components);
+  const toast = useToast();
+  const utils = trpc.useUtils();
+  const keys = trpc.mapping.chargeKeys.useQuery();
+  const remove = trpc.mapping.removeChargeKey.useMutation({
+    onSuccess: () => {
+      toast.success(t('mapping.chargeKeyRemoved'));
+      void utils.mapping.chargeKeys.invalidate();
+      void utils.mapping.unmapped.invalidate();
+    },
+    onError: (e) => toast.error(friendlyError(e, tc)),
+  });
+  if (!keys.data || keys.data.length === 0) return null;
+  return (
+    <Card className="p-4" data-testid="mapping-charge-keys">
+      <h2 className="text-sm font-medium text-ink">{t('mapping.chargeKeysTitle')}</h2>
+      <p className="mt-1 text-sm text-muted">{t('mapping.chargeKeysBody')}</p>
+      <ul className="mt-3 space-y-2">
+        {keys.data.map((k) => (
+          <li key={`${k.supplierId}:${k.sku ?? ''}:${k.nameKey ?? ''}`} className="flex flex-wrap items-center justify-between gap-2">
+            <span className="flex flex-wrap items-center gap-2 text-sm text-ink">
+              <Badge>{k.supplierName}</Badge>
+              {k.sku ? <span className="font-mono">{t('mapping.sku', { sku: k.sku })}</span> : <span>{k.nameKey}</span>}
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              loading={remove.isPending}
+              aria-label={t('mapping.chargeKeyRemoveLabel', { name: k.sku ?? k.nameKey ?? '' })}
+              onClick={() => remove.mutate({ supplierId: k.supplierId, sku: k.sku, nameKey: k.nameKey })}
+            >
+              {t('mapping.chargeKeyRemove')}
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }
 
