@@ -118,7 +118,7 @@ describe('bulk "as ordered" in the Delivery Check', () => {
     lines,
     summary: { matchedCount: 0, qtyDiffCount: 0, priceDiffCount: 0, unorderedCount: 0, missingCount: 0, pendingCount: 4, overallConfidence: 1, headlineDelta: 0 },
   };
-  const fresh = () =>
+  const fresh = (): Record<string, import('@/app/showcase/receiver/_state').LineMark> =>
     Object.fromEntries(
       lines.map((l) => [`po-${l.poLineId}`, { poLineId: l.poLineId, invoiceLineIndex: null, productId: l.productId, productName: l.productName, qtyReceived: l.poQty, qtyRejected: 0, condition: 'ok' as const, touched: false }]),
     );
@@ -148,6 +148,18 @@ describe('bulk "as ordered" in the Delivery Check', () => {
     expect(r.next['po-a']).toMatchObject({ qtyReceived: 8, touched: true, method: 'spot_check' });
     expect(r.next['po-b']!.touched).toBe(false);
     expect(r.next['po-d']!.touched).toBe(false);
+  });
+
+  it('a bulk never overwrites a line that has ANY count — an unconfirmed weighed count included', async () => {
+    const { confirmSpotCheck, markRestAsOrdered, unresolvedOrderLines } = await mk();
+    const marks = fresh();
+    // 8 typed on an order of 13, waiting for the tolerance confirm.
+    marks['po-d'] = { ...marks['po-d']!, qtyReceived: 8, touched: false, unconfirmed: true };
+    expect(unresolvedOrderLines(result, marks).map((l) => l.poLineId)).toEqual(['a', 'b', 'c']);
+    expect(markRestAsOrdered(result, marks).next['po-d']).toMatchObject({ qtyReceived: 8, touched: false, unconfirmed: true });
+    const r = confirmSpotCheck(result, marks, { 'po-a': 10, 'po-b': 11 }, TOL);
+    expect(r.next['po-d']).toMatchObject({ qtyReceived: 8, touched: false, unconfirmed: true });
+    expect(r.previous['po-d']).toBeUndefined();
   });
 
   it('a spot count of 0 is "missing", not a rejection, and is a mismatch', async () => {

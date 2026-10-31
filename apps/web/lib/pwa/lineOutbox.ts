@@ -58,6 +58,14 @@ export interface LineOutbox {
   pendingCount(): number;
   /** Payloads not yet confirmed — restored into the marks on resume. */
   pending(): GrLinePayload[];
+  /**
+   * The latest row this device wrote per line: unsent, or sent and acknowledged
+   * in this session. A resume overlays these on the server snapshot, which may
+   * predate a row the retry just sent (the resume race).
+   */
+  latest(): GrLinePayload[];
+  /** Forget every unsent row and the stored copy (the receipt was closed). */
+  clear(): void;
   states(): Readonly<Record<string, LineSaveState>>;
   dispose(): void;
 }
@@ -161,6 +169,19 @@ export function createLineOutbox(opts: LineOutboxOptions): LineOutbox {
     },
     pendingCount: () => pending.size,
     pending: () => [...pending.values()],
+    latest: () => {
+      const out = new Map(lastSent);
+      for (const [id, p] of pending) out.set(id, p);
+      return [...out.values()];
+    },
+    clear() {
+      for (const t of timers.values()) clearTimeout(t);
+      timers.clear();
+      pending.clear();
+      states.clear();
+      persist();
+      emit();
+    },
     states: () => Object.fromEntries(states),
     dispose() {
       disposed = true;

@@ -277,8 +277,8 @@ test('invoice 10 = order 10, 8 arrived: recorded as qty_received 8 in ≤4 taps;
   } finally {
     await sql.end();
   }
-  // Confirmed links to the invoice page, not to a signed URL.
-  await expect(page.getByTestId('confirmed-invoice-link')).toHaveAttribute('href', `/dashboard/invoices/${invoiceId}`);
+  // The invoice page (and the scan) are full of ₪: the receiver gets no link to them.
+  await expect(page.getByTestId('confirmed-invoice-link')).toHaveCount(0);
   await expect(page.getByTestId('receipt-confirmed')).not.toContainText('חיסכון');
   // Who received it is on the receipt.
   await expect(page.getByTestId('confirmed-received-by')).toContainText('התקבל ע״י');
@@ -307,6 +307,10 @@ test('no invoice, everything arrived: 3 taps + a 2-line blind spot check, record
   await expect(page.getByTestId('scan-use-demo')).toHaveCount(0);
   await expect(page.getByTestId('scan-input')).toHaveAttribute('capture', 'environment');
   await expect(page.getByTestId('scan-input')).toHaveAttribute('accept', 'image/*');
+  // No money in the receiver's page payload either: no PO prices, no order total.
+  const html = await page.content();
+  expect(html, 'no PO prices in the receiver payload').not.toMatch(/unitPriceExpected\\?"\s*:\s*\d/);
+  expect(html, 'no order total in the receiver payload').not.toMatch(/totalEstimated\\?"\s*:\s*\d/);
   await taps.tap(page.getByTestId('scan-no-invoice'));
   await expect(page.getByTestId('delivery-check')).toBeVisible();
   // A step change moves focus to the step heading.
@@ -445,11 +449,60 @@ test('offline: marks are kept on the phone, the leave sheet stops a silent exit,
   await page.getByTestId('leave-stay').tap();
   await expect(page).toHaveURL(new RegExp(`/dashboard/receiving/${po.poId}$`));
 
+  // Going to scan the invoice while offline never strands the receiver: the
+  // photo is kept on the phone and the count comes straight back, marks intact.
+  await page.getByTestId('count-scan-invoice').tap();
+  await page.getByTestId('scan-input').setInputFiles({ name: 'invoice.png', mimeType: 'image/png', buffer: TINY_PNG });
+  await expect(page.getByTestId('scan-process')).toBeEnabled({ timeout: 30_000 });
+  await page.getByTestId('scan-process').tap();
+  await expect(page.getByTestId('delivery-check')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('count-line').filter({ hasText: weighed.name }).getByTestId('count-line-result')).toHaveText(/2\.125/);
+
   await context.setOffline(false);
   await page.evaluate(() => window.dispatchEvent(new Event('online')));
   await expect(line.getByTestId('line-save-state')).toHaveAttribute('data-state', 'saved', { timeout: 30_000 });
   const row = (await grLines(po.poId)).find((r) => r.poLineId === weighed.poLineId)!;
   expect(Number(row.qty)).toBe(2.125);
+
+  // Everything is sent: ONE back press leaves — the guard's extra history entry is not a dead press.
+  await page.goBack();
+  await expect.poll(() => page.url(), { timeout: 10_000 }).not.toContain(po.poId);
+});
+
+test('a count on a line that is only on the invoice survives a reload', async ({ page }) => {
+  test.setTimeout(180_000);
+  const po = await freshPo('unordered');
+  const invoiceId = await scanAndProcess(page, po.poId);
+  // The supplier billed the order plus one item nobody ordered.
+  const sql = e2eSql();
+  let extra: { id: string; name: string } | undefined;
+  try {
+    [extra] = await sql<{ id: string; name: string }[]>`
+      select id, canonical_name as name from products
+      where restaurant_id = ${po.restaurantId} and canonical_name ~ '[א-ת]' order by canonical_name offset 10 limit 1`;
+    await sql`insert into invoice_lines (invoice_id, product_id, raw_description, qty_billed, unit, unit_price_billed, line_total, ocr_confidence_line)
+              values (${invoiceId}, ${extra!.id}, ${extra!.name}, 6, 'ק״ג', 9, 54, 0.97)`;
+  } finally {
+    await sql.end();
+  }
+  await finishOcrAsOrdered(invoiceId, po);
+  await expect(page.getByRole('heading', { name: 'תוצאת ההצלבה' })).toBeVisible({ timeout: 60_000 });
+  await page.getByTestId('continue-adjust').tap();
+  const line = page.getByTestId('count-line').filter({ hasText: extra!.name });
+  // Billed but not ordered: nothing is assumed to have arrived.
+  await expect(line).toHaveAttribute('data-resolved', 'false');
+  if (await line.getByTestId('count-edit').count()) await line.getByTestId('count-edit').tap();
+  await line.getByTestId('count-qty').fill('4');
+  await line.getByTestId('count-qty').press('Enter');
+  if (await line.getByTestId('count-confirm-qty').count()) await line.getByTestId('count-confirm-qty').tap();
+  await expect(line).toHaveAttribute('data-resolved', 'true');
+
+  await page.reload();
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByTestId('delivery-check')).toBeVisible({ timeout: 60_000 });
+  const again = page.getByTestId('count-line').filter({ hasText: extra!.name });
+  await expect(again).toHaveAttribute('data-resolved', 'true');
+  await expect(again.getByTestId('count-line-result')).toHaveText(/^4/);
 });
 
 test('field mode: bar in the bottom third at 390×844 and 375×667, 48 px targets, axe clean (he + en)', async ({ page }) => {
@@ -507,6 +560,8 @@ test('the dock slip shows ₪ left of the digits in Hebrew (no LTR isolate, no m
   await page.getByTestId('all-arrived').tap();
   await passSpotCheck(page, po);
   await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 60_000 });
+  // The owner's Confirmed links to the invoice page — never to a signed URL.
+  await expect(page.getByTestId('confirmed-invoice-link')).toHaveAttribute('href', `/dashboard/invoices/${invoiceId}`);
   // Play the engine's post-count run: one VAT finding with a ₪ amount.
   const sql = e2eSql();
   try {

@@ -185,6 +185,8 @@ export function AdjustQuantities({
         <HebrewToggle />
       </div>
 
+      {/* Nothing is editable while the receipt is closing (an edit would be saved after the close). */}
+      <fieldset disabled={closing} className="m-0 min-w-0 border-0 p-0">
       <ul className="mb-4 space-y-3">
         {ordered.map((line) => {
           const key = lineKey(line);
@@ -207,6 +209,7 @@ export function AdjustQuantities({
           );
         })}
       </ul>
+      </fieldset>
 
       {onBack ? (
         <button type="button" onClick={onBack} className="min-h-12 text-base text-muted underline underline-offset-4 hover:text-ink">
@@ -438,8 +441,9 @@ function LineEditor({
     const pct = typed && kind === 'measured' && tolerance ? outsideTolerance(line.poQty, qty, tolerance) : null;
     if (pct !== null && qty > 0) {
       // Far from the order: keep the number, ask once before it counts as resolved.
+      // It is still a count — no bulk action may overwrite it (unconfirmed).
       setPendingConfirm(pct);
-      onUpdate({ ...qtyPatch(mark, qty), touched: false });
+      onUpdate({ ...qtyPatch(mark, qty), touched: false, unconfirmed: true });
       return;
     }
     setPendingConfirm(null);

@@ -46,6 +46,8 @@ export interface LineMark {
   touched: boolean;
   /** How it was resolved: one by one (default), the bulk "as ordered", or a blind spot count. */
   method?: CountMethod;
+  /** A typed count waiting for the tolerance confirm — not resolved, but a count: no bulk may overwrite it. */
+  unconfirmed?: boolean;
 }
 
 export interface WizardState {
@@ -146,6 +148,7 @@ export function reducer(state: WizardState, action: WizardAction): WizardState {
             touched: action.patch.touched ?? true,
             // A hand change is a per-line count unless the patch says otherwise (bulk, spot check, undo).
             method: action.patch.method ?? 'per_line',
+            unconfirmed: action.patch.unconfirmed ?? false,
           },
         },
       };
@@ -185,13 +188,20 @@ export function countProgress(
   return { resolved, total: reconciliation.lines.length };
 }
 
-/** A line the receiver still has to resolve, in the order the bulk action resolves it. */
+/**
+ * Order lines a bulk "as ordered" may fill: nobody counted them at all. A line
+ * with ANY count — resolved, or a typed weight still waiting for its tolerance
+ * confirm — is never overwritten by a bulk action.
+ */
 export function unresolvedOrderLines(
   result: ReconciliationResult | null,
   marks: Record<string, LineMark>,
 ): ReconciliationLine[] {
   if (!result) return [];
-  return result.lines.filter((l) => l.poLineId !== null && !marks[lineKey(l)]?.touched);
+  return result.lines.filter((l) => {
+    const m = marks[lineKey(l)];
+    return l.poLineId !== null && !m?.touched && !m?.unconfirmed;
+  });
 }
 
 /** ✓ as ordered. */
