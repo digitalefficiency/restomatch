@@ -59,7 +59,8 @@ export function RegisterClient({
   const columns = useMemo(() => registerColumns(t, locale), [t, locale]);
   const visible = useMemo(() => (rows ?? []).filter((r) => inTab(r, view)), [rows, view]);
   const totals = visibleTotals(visible);
-  const href = (r: RegisterRow) => `/dashboard/invoices/${r.id}?from=register${view ? `&view=${view}` : ''}`;
+  const href = (r: RegisterRow) =>
+    `/dashboard/invoices/${r.id}?from=register${view ? `&view=${view}` : ''}${monthOffset ? `&month=${monthOffset}` : ''}`;
   const monthHref = (o: number) => (o === 0 ? '/dashboard/invoices' : `/dashboard/invoices?month=${o}`);
   const Prev = locale === 'he' ? ChevronRight : ChevronLeft;
   const Next = locale === 'he' ? ChevronLeft : ChevronRight;
