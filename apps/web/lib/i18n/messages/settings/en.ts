@@ -6,6 +6,8 @@ export const en: Shape<typeof he> = {
   sections: {
     accountTitle: 'My account',
     accountSubtitle: 'App language, password and signed-in devices — your personal settings only.',
+    letterheadTitle: 'Details for credit-request letters',
+    letterheadSubtitle: 'Shown at the top of every credit-request letter to a supplier. Fill in once.',
     profileTitle: 'Restaurant details',
     profileSubtitle: 'Name, company number, VAT rate and time zone — these drive the leak calculation and day boundaries.',
     matchingTitle: 'Matching settings',
@@ -35,6 +37,19 @@ export const en: Shape<typeof he> = {
   readOnly: {
     profile: 'View only — only the “Owner” role can update the restaurant details.',
     matching: 'View only — only the “Owner” role can update the matching settings.',
+    letterhead: 'View only — an owner or manager can update the letter details.',
+  },
+  letterhead: {
+    cardTitle: 'Letterhead',
+    legalName: 'Legal name',
+    businessId: 'Company / dealer no.',
+    businessIdHint: '9 digits',
+    address: 'Address',
+    phone: 'Phone',
+    email: 'Email',
+    save: 'Save',
+    saved: 'Letter details saved.',
+    failed: 'Not saved — check the details and try again.',
   },
   profile: {
     cardTitle: 'Restaurant details',

@@ -123,6 +123,11 @@ export const he = {
     from: 'מאת: {restaurant}',
     businessId: 'ח״פ: {id}',
     businessIdMissing: 'ח״פ: [להשלים בהגדרות המסעדה]',
+    letterhead: {
+      phone: 'טל׳',
+      email: 'דוא״ל',
+      prompt: 'השלימו פרטי מסעדה למכתב',
+    },
     date: 'תאריך: {date}',
     subject: 'הנדון: דרישת זיכוי בגין פערים בחשבוניות — {month}',
     intro: 'בבדיקת החשבוניות מול ההזמנות ותעודות המשלוח מצאנו את הפערים הבאים, בסך',

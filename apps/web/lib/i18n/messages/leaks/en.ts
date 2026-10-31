@@ -117,6 +117,11 @@ export const en: Shape<typeof he> = {
     from: 'From: {restaurant}',
     businessId: 'Company no.: {id}',
     businessIdMissing: 'Company no.: [add it in the restaurant settings]',
+    letterhead: {
+      phone: 'Tel.',
+      email: 'Email',
+      prompt: 'Complete the restaurant details for the letter',
+    },
     date: 'Date: {date}',
     subject: 'Re: credit request for invoice discrepancies — {month}',
     intro: 'Checking the invoices against the orders and delivery notes, we found the following discrepancies, totalling',

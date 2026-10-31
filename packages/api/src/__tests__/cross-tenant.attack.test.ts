@@ -186,6 +186,9 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'settings.update': 'isolation',
   'settings.profile': 'isolation',
   'settings.updateProfile': 'isolation',
+  // W1-08 pilot: the credit-letter letterhead (letterhead.test.ts covers the isolation).
+  'settings.letterhead': 'isolation',
+  'settings.updateLetterhead': 'isolation',
   'search.global': 'isolation',
   // Phase-2 supplier-centric surface (suppliers / catalog / orders / on-demand match).
   // Every procedure that takes a client-supplied supplierId / productId / poId /
