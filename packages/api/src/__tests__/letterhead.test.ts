@@ -18,9 +18,8 @@ function callerFor(tenant: Tenant, role: Session['role'] = 'owner') {
   return appRouter.createCaller(ctx);
 }
 const settingsOf = async (t: Tenant) =>
-  (await db.select({ s: restaurants.settings }).from(restaurants).where(eq(restaurants.id, t.restaurantId)))[0]!.s as RestaurantSettings & {
-    letterhead?: Record<string, string>;
-  };
+  (await db.select({ s: restaurants.settings }).from(restaurants).where(eq(restaurants.id, t.restaurantId)))[0]!.s as RestaurantSettings &
+    Record<string, unknown> & { letterhead?: Record<string, string> };
 
 describe('settings.updateLetterhead / settings.letterhead', () => {
   beforeAll(async () => {
