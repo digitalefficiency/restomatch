@@ -93,11 +93,12 @@ test('a held invoice says why (T4 chips) in the list and on its page; a link-onl
     const row = page.getByTestId('needs-lines-row').filter({ hasText: `HELD-${tag}` });
     const chips = row.getByTestId('needs-lines-held-reasons');
     await expect(chips).toContainText('ח.פ. במסמך שונה מהרשום לספק');
-    await expect(chips).toContainText('זה לא נראה כמו חשבונית מס');
+    await expect(chips).toContainText('נראה כמו קבלה');
     await expect(chips).not.toContainText('unlinked');
     await expect(page.getByTestId('needs-lines-row').filter({ hasText: `LINK-${tag}` })).toHaveCount(0);
     await row.click();
     await expect(page.getByTestId('invoice-held-reasons')).toContainText('ח.פ. במסמך שונה מהרשום לספק');
+    await expect(page.getByTestId('invoice-held-supplier-link')).toHaveAttribute('href', /\/dashboard\/suppliers\/[0-9a-f-]{36}$/);
     await page.context().close();
   } finally {
     const clean = e2eSql();

@@ -337,7 +337,7 @@ async function Needs(ctx: Ctx) {
       // Only held-for-review invoices (T4) → neutral; any failed / unread read → warn.
       tone: lines.value.rows.every((r) => r.reason === 'held') ? 'neutral' : 'warn',
       label: t('needs.invoiceLines.label'),
-      value: t('needs.invoiceLinesValue', { count: n(lines.value.count) }),
+      value: t('needs.invoiceLinesValue', { count: lines.value.count }),
       verb: t('needs.invoiceLines.verb'),
       href: '/dashboard/invoices',
     });

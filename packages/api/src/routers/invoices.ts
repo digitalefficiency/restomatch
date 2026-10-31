@@ -16,10 +16,14 @@ import { financeProcedure, router } from '../trpc';
 export type NeedsLinesReason = 'ocr_failed' | 'no_lines' | 'held';
 
 /**
- * Link-only hold codes belong to G-08's "ממתינות לשיוך" question flow (#200):
- * never listed here, and dropped from a mixed hold's reasons.
+ * Codes that never make an invoice "waiting for you" on their own:
+ * - link codes belong to G-08's "ממתינות לשיוך" question flow (#200);
+ * - 'consolidated' is S13's MARKER on every חשבונית מרכזת, not an action — a
+ *   consolidated invoice is listed only with an actionable code next to it.
+ * Dropped from a mixed hold's reasons too. Mirrored in SQL by `actionableHold`.
  */
-export const LINK_HOLD_CODES: ReadonlySet<string> = new Set(['unlinked', 'unlinkedPo']);
+export const NON_ACTION_HOLD_CODES: readonly string[] = ['unlinked', 'unlinkedPo', 'consolidated'];
+const NON_ACTION = new Set(NON_ACTION_HOLD_CODES);
 
 /**
  * The non-link review reasons S13's pipeline wrote on a held invoice
@@ -31,7 +35,7 @@ export function holdReasonsOf(raw: unknown): string[] {
   const out: string[] = [];
   for (const r of raw) {
     const code = typeof r === 'string' ? r : r && typeof r === 'object' && typeof (r as { code?: unknown }).code === 'string' ? (r as { code: string }).code : null;
-    if (code && !LINK_HOLD_CODES.has(code) && !out.includes(code)) out.push(code);
+    if (code && !NON_ACTION.has(code) && !out.includes(code)) out.push(code);
   }
   return out;
 }
@@ -42,8 +46,10 @@ export interface NeedsLinesRow {
   supplierNameEn: string | null;
   invoiceDate: Date | null;
   invoiceNumber: string | null;
+  /** For the "supplier details" link on supplier_id_mismatch (an id, never ₪). */
+  supplierId: string | null;
   reason: NeedsLinesReason;
-  /** For `held`: the non-link review reason codes (S13 #224), e.g. supplier_id_mismatch, doc_kind_receipt. */
+  /** The actionable review reason codes (S13 #224), e.g. supplier_id_mismatch, doc_kind_receipt — on any row (extra chips). */
   reviewReasons: string[];
 }
 
@@ -56,9 +62,12 @@ export const invoicesRouter = router({
    * while OCR is still reading, not paid, never a חשבונית מרכזת (cross-matched
    * against its delivery notes, not itemised). Owner, manager, bookkeeper only.
    *
-   * Also every HELD invoice (status `parsed`, not a failed read, with ≥1 non-link
-   * `reviewReasons` code — S13 #224), so no invoice sits held without the owner
-   * knowing why. Precedence per row: ocr_failed > held > no_lines. No ₪ here.
+   * Also every HELD invoice (status `parsed` with ≥1 actionable `reviewReasons`
+   * code — S13 #224), so no invoice sits held without the owner knowing why.
+   * A failed read is listed only while it still has no lines (a person may have
+   * typed them, #216). Precedence: ocr_failed > no_lines > held; the actionable
+   * reasons ride along on every row as extra chips. The whole filter runs in SQL
+   * (before LIMIT), so link-only / marker-only holds never crowd the page. No ₪.
    */
   needsLines: financeProcedure.query(async ({ ctx }): Promise<{ count: number; rows: NeedsLinesRow[] }> => {
     const rid = ctx.session.restaurantId;
@@ -66,9 +75,13 @@ export const invoicesRouter = router({
     const noLines = sql<boolean>`NOT EXISTS (SELECT 1 FROM invoice_lines il WHERE il.invoice_id = ${invoices.id})`;
     const consolidated = sql<boolean>`COALESCE((${invoices.ocrPayload} -> 'raw' ->> 'kind') = 'consolidated', false)`;
     const scannedNoLines = sql<boolean>`(NOT ${consolidated} AND ${invoices.status} <> 'ocr_pending' AND ${invoices.source} IN ('photo', 'email', 'whatsapp') AND ${noLines})`;
-    // Any review reason at all (link-only holds are dropped below, in one place: holdReasonsOf).
-    const held = sql<boolean>`COALESCE(jsonb_typeof(${invoices.ocrPayload} -> 'raw' -> 'reviewReasons') = 'array'
-      AND jsonb_array_length(${invoices.ocrPayload} -> 'raw' -> 'reviewReasons') > 0, false)`;
+    // ≥1 actionable review code (strings or {code}); link codes and the 'consolidated' marker don't count.
+    const reasonsJson = sql`${invoices.ocrPayload} -> 'raw' -> 'reviewReasons'`;
+    const actionableHold = sql<boolean>`(CASE WHEN jsonb_typeof(${reasonsJson}) = 'array' THEN EXISTS (
+      SELECT 1 FROM jsonb_array_elements(${reasonsJson}) e
+      WHERE (CASE jsonb_typeof(e) WHEN 'string' THEN e #>> '{}' WHEN 'object' THEN e ->> 'code' END)
+        NOT IN (${sql.join(NON_ACTION_HOLD_CODES.map((c) => sql`${c}`), sql`, `)})
+    ) ELSE false END)`;
     const rows = await ctx.db
       .select({
         id: invoices.id,
@@ -76,7 +89,9 @@ export const invoicesRouter = router({
         supplierNameEn: suppliers.nameEn,
         invoiceDate: invoices.invoiceDate,
         invoiceNumber: invoices.invoiceNumber,
+        supplierId: invoices.supplierId,
         failed,
+        lineless: sql<boolean>`(${noLines})`,
         reviewReasons: sql<unknown>`${invoices.ocrPayload} -> 'raw' -> 'reviewReasons'`,
         unreadLines: sql<boolean>`(${scannedNoLines})`,
         parsed: sql<boolean>`(${invoices.status} = 'parsed')`,
@@ -88,21 +103,20 @@ export const invoicesRouter = router({
           eq(invoices.restaurantId, rid),
           sql`${invoices.status} <> 'paid'`,
           sql`(
-            ${failed}
+            (${failed} AND ${noLines})
             OR ${scannedNoLines}
-            OR (${invoices.status} = 'parsed' AND ${held})
+            OR (${invoices.status} = 'parsed' AND ${actionableHold})
           )`,
         ),
       )
       .orderBy(desc(invoices.createdAt))
       .limit(200);
     const out: NeedsLinesRow[] = [];
-    for (const { failed: f, reviewReasons: rr, unreadLines, parsed, ...r } of rows) {
+    for (const { failed: f, lineless, reviewReasons: rr, unreadLines, parsed, ...r } of rows) {
       const reasons = parsed ? holdReasonsOf(rr) : [];
-      if (f) out.push({ ...r, reason: 'ocr_failed', reviewReasons: [] });
+      if (f && lineless) out.push({ ...r, reason: 'ocr_failed', reviewReasons: reasons });
+      else if (unreadLines) out.push({ ...r, reason: 'no_lines', reviewReasons: reasons });
       else if (reasons.length > 0) out.push({ ...r, reason: 'held', reviewReasons: reasons });
-      else if (unreadLines) out.push({ ...r, reason: 'no_lines', reviewReasons: [] });
-      // else: a link-only hold — G-08's flow owns it.
     }
     return { count: out.length, rows: out };
   }),

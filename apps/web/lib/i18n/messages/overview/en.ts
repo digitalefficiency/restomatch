@@ -91,7 +91,7 @@ export const en: Shape<typeof he> = {
     cutoffs: { label: 'Orders closing today', sub: 'Next: {supplier} at {time}', verb: 'Order' },
     cutoffsValue: '{count} suppliers',
     invoiceLines: { label: 'Invoices waiting for you', verb: 'Review' },
-    invoiceLinesValue: '{count} invoices',
+    invoiceLinesValue: '{count, plural, one {# invoice} other {# invoices}}',
     exportLast: { label: 'Last export to the accountant', value: 'Not recorded yet', verb: 'Exports' },
   },
   rail: {

@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { auth } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
@@ -66,7 +67,7 @@ export default async function InvoiceCorrectionPage({
   // PILOT (#222): a held invoice says why at the top (S13 #224 review reasons; link-only holds are G-08's).
   // No ₪ in it; finance roles only, like the list it comes from.
   const held = finance
-    ? ((await caller.invoices.needsLines().catch(() => null))?.rows.find((r) => r.id === invoiceId && r.reason === 'held') ?? null)
+    ? ((await caller.invoices.needsLines().catch(() => null))?.rows.find((r) => r.id === invoiceId && r.reviewReasons.length > 0) ?? null)
     : null;
 
   return (
@@ -82,14 +83,24 @@ export default async function InvoiceCorrectionPage({
           data-testid="invoice-held-reasons"
           className="mb-4 rounded-2xl border border-line bg-surface-2 p-4"
         >
-          <p className="text-sm font-semibold text-ink">{t('needsLines.heldTitle')}</p>
+          {/* The bookkeeper can't edit here — the owner or manager reviews it. */}
+          <p className="text-sm font-semibold text-ink">{t(canEdit ? 'needsLines.heldTitle' : 'needsLines.heldTitleReadOnly')}</p>
           <ul className="mt-2 flex flex-wrap gap-1">
             {holdReasonKeys(held.reviewReasons).map((k) => (
               <li key={k}>
-                <StatusChip tone="neutral" emphasis="subtle" icon={null} label={t(`needsLines.held.${k}`)} />
+                <StatusChip tone="neutral" emphasis="subtle" shape="control" icon={null} label={t(`needsLines.held.${k}`)} />
               </li>
             ))}
           </ul>
+          {held.supplierId && held.reviewReasons.includes('supplier_id_mismatch') ? (
+            <Link
+              href={`/dashboard/suppliers/${held.supplierId}`}
+              data-testid="invoice-held-supplier-link"
+              className="mt-2 inline-block text-sm font-semibold text-primary underline underline-offset-4"
+            >
+              {t('needsLines.supplierDetails')}
+            </Link>
+          ) : null}
         </div>
       ) : null}
       {vatRow && tv ? (

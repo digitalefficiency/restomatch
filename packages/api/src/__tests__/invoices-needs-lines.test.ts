@@ -127,17 +127,58 @@ describe('invoices.needsLines', () => {
     expect(r.rows.map((x) => [x.id, x.reviewReasons])).toEqual([[mixed, ['consolidated_evidence']]]);
   });
 
-  it('a held חשבונית מרכזת is listed (its reason says why); not-parsed statuses are not "held"', async () => {
-    const cons = await heldWithLine(A, 'C-H', ['consolidated']);
-    await ownerDb.update(invoices).set({ ocrPayload: { provider: 'reconciled', raw: { kind: 'consolidated', reviewReasons: ['consolidated'] } } as never }).where(eq(invoices.id, cons));
+  it("review #3: 'consolidated' is a marker, not an action — alone it is not listed; with an actionable code it is, without the marker", async () => {
+    const marker = await heldWithLine(A, 'C-M', ['consolidated']);
+    const unknown = await heldWithLine(A, 'C-U', ['consolidated', 'consolidated_unknown_supplier']);
+    for (const id of [marker, unknown]) {
+      await ownerDb
+        .update(invoices)
+        .set({ ocrPayload: { provider: 'reconciled', raw: { kind: 'consolidated', reviewReasons: id === marker ? ['consolidated'] : ['consolidated', 'consolidated_unknown_supplier'] } } as never })
+        .where(eq(invoices.id, id));
+    }
     await heldWithLine(A, 'X-1', ['supplier_id_mismatch']).then((id) => ownerDb.update(invoices).set({ status: 'matched' }).where(eq(invoices.id, id)));
     const r = await callerOf(A).invoices.needsLines();
-    expect(r.rows.map((x) => [x.id, x.reason, x.reviewReasons])).toEqual([[cons, 'held', ['consolidated']]]);
+    expect(r.rows.map((x) => [x.id, x.reason, x.reviewReasons])).toEqual([[unknown, 'held', ['consolidated_unknown_supplier']]]);
+  });
+
+  it('review #1: a failed read whose lines a person typed (and was matched) leaves the list', async () => {
+    const id = await addInvoice(A, { ocrPayload: { provider: 'reconciled', raw: { ocrFailed: true, reason: 'extraction_failed' } } as never });
+    await ownerDb.insert(invoiceLines).values({ invoiceId: id, rawDescription: 'typed', qtyBilled: '2', unit: 'kg', unitPriceBilled: '5', lineTotal: '10' });
+    await ownerDb.update(invoices).set({ status: 'matched' }).where(eq(invoices.id, id));
+    expect((await callerOf(A).invoices.needsLines()).rows.map((x) => x.id)).not.toContain(id);
+  });
+
+  it('review #2: link-only holds are filtered in SQL, so 205 of them never push a real hold past the LIMIT', async () => {
+    const values = Array.from({ length: 205 }, (_, i) => ({
+      restaurantId: A.restaurantId,
+      supplierId: A.supplierId,
+      source: 'photo' as const,
+      status: 'parsed' as const,
+      invoiceNumber: `LNK-${i}`,
+      ocrPayload: { provider: 'reconciled', raw: { reviewReasons: i % 2 ? ['unlinked'] : [{ code: 'unlinkedPo' }] } } as never,
+    }));
+    const linkIds = (await ownerDb.insert(invoices).values(values).returning({ id: invoices.id })).map((x) => x.id);
+    // They have lines (a held invoice usually does), so only their hold could list them.
+    await ownerDb.insert(invoiceLines).values(linkIds.map((invoiceId) => ({ invoiceId, rawDescription: 'x', qtyBilled: '1', unit: 'kg', unitPriceBilled: '1', lineTotal: '1' })));
+    const real = await heldWithLine(A, 'REAL-1', ['supplier_id_mismatch']);
+    // The real one is the OLDEST (orderBy createdAt desc): it must still be returned.
+    await ownerDb.update(invoices).set({ createdAt: new Date('2020-01-01T00:00:00Z') }).where(eq(invoices.id, real));
+    const r = await callerOf(A).invoices.needsLines();
+    expect(r.rows.map((x) => x.id)).toEqual([real]);
+  });
+
+  it('review #5: a scanned read with 0 lines is no_lines (warn + CTA) even when held, its reasons riding along', async () => {
+    const id = await addInvoice(A, { invoiceNumber: 'Z-1', ocrPayload: heldPayload(['unlinked', 'doc_kind_receipt']) });
+    expect((await callerOf(A).invoices.needsLines()).rows).toEqual([
+      expect.objectContaining({ id, reason: 'no_lines', reviewReasons: ['doc_kind_receipt'], supplierId: A.supplierId }),
+    ]);
   });
 
   it('a failed read wins over its hold reasons', async () => {
     const id = await addInvoice(A, { ocrPayload: { provider: 'reconciled', raw: { ocrFailed: true, reviewReasons: ['supplier_id_mismatch'] } } as never });
-    expect((await callerOf(A).invoices.needsLines()).rows).toEqual([expect.objectContaining({ id, reason: 'ocr_failed', reviewReasons: [] })]);
+    expect((await callerOf(A).invoices.needsLines()).rows).toEqual([
+      expect.objectContaining({ id, reason: 'ocr_failed', reviewReasons: ['supplier_id_mismatch'] }),
+    ]);
   });
 
   it("held isolation: B's held invoice never reaches A", async () => {
@@ -150,7 +191,7 @@ describe('invoices.needsLines', () => {
   });
 
   it('holdReasonsOf reads loosely: strings or {code}, deduped, link codes dropped, junk ignored', () => {
-    expect(holdReasonsOf(['a', { code: 'b' }, 'a', 'unlinked', 3, null, { x: 1 }])).toEqual(['a', 'b']);
+    expect(holdReasonsOf(['a', { code: 'b' }, 'a', 'unlinked', 'consolidated', 3, null, { x: 1 }])).toEqual(['a', 'b']);
     expect(holdReasonsOf(null)).toEqual([]);
     expect(holdReasonsOf('supplier_id_mismatch')).toEqual([]);
   });
