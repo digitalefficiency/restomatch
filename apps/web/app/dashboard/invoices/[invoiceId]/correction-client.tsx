@@ -5,9 +5,10 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
-import { CheckCircle2, FileText, Pencil, Play, X } from 'lucide-react';
+import { CheckCircle2, Pencil, X } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
 import { Badge, Button, Card, Field, Input, type BadgeTone } from '@/lib/components';
+import { DateField, MoneyInput, QuantityInput } from '@/lib/components/form';
 import { formatIls } from '@/lib/money';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
@@ -19,12 +20,9 @@ type Invoice = inferRouterOutputs<AppRouter>['receiving']['getInvoice'];
 type Line = Invoice['lines'][number];
 type MatchResult = inferRouterOutputs<AppRouter>['match']['runForInvoice'];
 
-function num(raw: string): number | null {
-  const t = raw.trim();
-  if (t === '') return null;
-  const n = Number(t);
-  return Number.isFinite(n) ? n : null;
-}
+/** Agorot ↔ the procedure's ₪ number (the receiving procedures take shekels). */
+const toAgorot = (v: string | number | null | undefined) => (v == null || v === '' ? null : Math.round(Number(v) * 100));
+const fromAgorot = (a: number | null) => (a == null ? null : a / 100);
 
 function dateInput(d: Date | string | null): string {
   if (!d) return '';
@@ -42,10 +40,13 @@ const STATUS_TONE: Record<string, BadgeTone> = {
 export function InvoiceCorrection({
   invoice,
   canEdit,
+  canRematch = canEdit,
   lineBadges,
 }: {
   invoice: Invoice;
   canEdit: boolean;
+  /** `invoice.correct` (owner, manager, bookkeeper): a save re-matches automatically. */
+  canRematch?: boolean;
   /** Optional server-rendered per-line badges (e.g. wave-1 "over contract"), keyed by line id. */
   lineBadges?: Record<string, React.ReactNode>;
 }) {
@@ -66,24 +67,43 @@ export function InvoiceCorrection({
   // Header draft
   const [num_, setNum] = useState(invoice.invoiceNumber ?? '');
   const [date, setDate] = useState(dateInput(invoice.invoiceDate));
-  const [excl, setExcl] = useState(invoice.totalExclVat != null ? String(invoice.totalExclVat) : '');
-  const [vat, setVat] = useState(invoice.vatAmount != null ? String(invoice.vatAmount) : '');
-  const [incl, setIncl] = useState(invoice.totalInclVat != null ? String(invoice.totalInclVat) : '');
+  const [excl, setExcl] = useState<number | null>(toAgorot(invoice.totalExclVat));
+  const [vat, setVat] = useState<number | null>(toAgorot(invoice.vatAmount));
+  const [incl, setIncl] = useState<number | null>(toAgorot(invoice.totalInclVat));
 
   // Line editing
   const [editingLine, setEditingLine] = useState<string | null>(null);
-  const [ld, setLd] = useState({ rawDescription: '', qtyBilled: '', unit: '', unitPriceBilled: '', lineTotal: '' });
+  const [ld, setLd] = useState<{ rawDescription: string; qtyBilled: number | null; unit: string; unitPriceBilled: number | null; lineTotal: number | null }>({
+    rawDescription: '',
+    qtyBilled: null,
+    unit: '',
+    unitPriceBilled: null,
+    lineTotal: null,
+  });
 
+  // Saving re-matches automatically (approvals-44): no separate "rerun" step.
   const onOk = (msg: string) => {
     setSaved(msg);
     setError(null);
-    router.refresh();
+    if (canRematch && !consolidated) runMatch.mutate({ invoiceId: invoice.id });
+    else router.refresh();
   };
   const onErr = (e: { message: string }) => {
     setError(locale === 'en' ? t('correction.failed') : e.message || t('correction.failed'));
     setSaved(null);
   };
 
+  const runMatch = trpc.match.runForInvoice.useMutation({
+    onSuccess: (res) => {
+      setRematch(res);
+      setError(null);
+      router.refresh();
+    },
+    onError: () => {
+      setError(t('cockpit.rematchFailed'));
+      router.refresh();
+    },
+  });
   const updateHeader = trpc.receiving.updateInvoiceHeader.useMutation({
     onSuccess: () => {
       setHolderId(null);
@@ -109,24 +129,15 @@ export function InvoiceCorrection({
     },
     onError: onErr,
   });
-  const runMatch = trpc.match.runForInvoice.useMutation({
-    onSuccess: (res) => {
-      setRematch(res);
-      setError(null);
-      router.refresh();
-    },
-    onError: onErr,
-  });
-
   function saveHeader() {
     updateHeader.mutate({
       invoiceId: invoice.id,
       patch: {
         invoiceNumber: num_.trim() || null,
         invoiceDate: date ? new Date(date) : null,
-        totalExclVat: num(excl),
-        vatAmount: num(vat),
-        totalInclVat: num(incl),
+        totalExclVat: fromAgorot(excl),
+        vatAmount: fromAgorot(vat),
+        totalInclVat: fromAgorot(incl),
       },
     });
   }
@@ -135,18 +146,18 @@ export function InvoiceCorrection({
     setEditingLine(l.id);
     setLd({
       rawDescription: l.rawDescription,
-      qtyBilled: String(l.qtyBilled),
+      qtyBilled: Number(l.qtyBilled),
       unit: l.unit,
-      unitPriceBilled: String(l.unitPriceBilled),
-      lineTotal: String(l.lineTotal),
+      unitPriceBilled: toAgorot(l.unitPriceBilled),
+      lineTotal: toAgorot(l.lineTotal),
     });
     setError(null);
   }
 
   function saveLine(l: Line) {
-    const qty = num(ld.qtyBilled);
-    const price = num(ld.unitPriceBilled);
-    const total = num(ld.lineTotal);
+    const qty = ld.qtyBilled;
+    const price = fromAgorot(ld.unitPriceBilled);
+    const total = fromAgorot(ld.lineTotal);
     updateLine.mutate({
       lineId: l.id,
       patch: {
@@ -225,7 +236,7 @@ export function InvoiceCorrection({
       <Card flow elevated padding="lg">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
-            <h3 className="text-lg font-bold text-ink">{t('correction.details')}</h3>
+            <h2 className="text-lg font-bold text-ink">{t('correction.details')}</h2>
             {invoice.supplierName ? (
               <p className="text-sm text-muted">
                 {t('correction.supplier')}:{' '}
@@ -233,35 +244,16 @@ export function InvoiceCorrection({
               </p>
             ) : null}
           </div>
-          <div className="flex items-center gap-2">
-            {invoice.rawImageUrl && (
-              <Link href={`/scans/${invoice.id}`}>
-                <Button variant="ghost" size="sm">
-                  <FileText className="h-4 w-4" /> {t('correction.viewScan')}
-                </Button>
-              </Link>
-            )}
-            {canEdit && !consolidated && (
-              <Button
-                variant="primary"
-                size="sm"
-                loading={runMatch.isPending}
-                onClick={() => runMatch.mutate({ invoiceId: invoice.id })}
-              >
-                <Play className="h-4 w-4 ltr:-scale-x-100" /> {t('correction.rerun')}
-              </Button>
-            )}
-          </div>
         </div>
 
         {st && (
           <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-line bg-surface-2/50 px-4 py-3">
             <Badge tone={st.tone}>{st.label}</Badge>
-            <span className="text-sm text-muted">
-              {t('correction.leak')}{' '}
-              <bdi dir="ltr" className="font-mono font-semibold text-ink">
-                {money(rematch!.totalDiscrepancyAmount)}
-              </bdi>
+            <span className="text-sm text-ink" role="status" data-testid="rematch-before-after">
+              {t('cockpit.rematched', {
+                before: formatIls(rematch!.before / 100, { maximumFractionDigits: 2, locale }),
+                after: formatIls(rematch!.after / 100, { maximumFractionDigits: 2, locale }),
+              })}
             </span>
             <span className="text-sm text-muted">
               {t('correction.discrepancies', { count: rematch!.discrepancyCount })}
@@ -275,16 +267,16 @@ export function InvoiceCorrection({
             <Input id="inv-num" value={num_} onChange={(e) => setNum(e.target.value)} disabled={!canEdit} maxLength={120} />
           </Field>
           <Field label={t('correction.date')} htmlFor="inv-date">
-            <Input id="inv-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} disabled={!canEdit} />
+            <DateField id="inv-date" value={date || null} onValueChange={(v) => setDate(v ?? '')} disabled={!canEdit} />
           </Field>
           <Field label={t('correction.exclVat')} htmlFor="inv-excl">
-            <Input id="inv-excl" type="number" inputMode="decimal" step="any" min="0" value={excl} onChange={(e) => setExcl(e.target.value)} disabled={!canEdit} />
+            <MoneyInput id="inv-excl" value={excl} onValueChange={setExcl} disabled={!canEdit} />
           </Field>
           <Field label={t('correction.vat')} htmlFor="inv-vat">
-            <Input id="inv-vat" type="number" inputMode="decimal" step="any" min="0" value={vat} onChange={(e) => setVat(e.target.value)} disabled={!canEdit} />
+            <MoneyInput id="inv-vat" value={vat} onValueChange={setVat} disabled={!canEdit} />
           </Field>
           <Field label={t('correction.inclVat')} htmlFor="inv-incl">
-            <Input id="inv-incl" type="number" inputMode="decimal" step="any" min="0" value={incl} onChange={(e) => setIncl(e.target.value)} disabled={!canEdit} />
+            <MoneyInput id="inv-incl" value={incl} onValueChange={setIncl} disabled={!canEdit} />
           </Field>
         </div>
 
@@ -306,12 +298,12 @@ export function InvoiceCorrection({
       <Card elevated padding="none" className="overflow-x-auto">
         <table className="w-full text-start text-sm">
           <thead>
-            <tr className="border-b border-line text-xs uppercase tracking-wide text-subtle">
+            <tr className="border-b border-line text-xs text-muted">
               <th className="px-4 py-3 text-start font-medium">{t('correction.colDescription')}</th>
-              <th className="px-4 py-3 text-start font-medium">{t('correction.colQty')}</th>
+              <th className="px-4 py-3 text-right font-medium">{t('correction.colQty')}</th>
               <th className="px-4 py-3 text-start font-medium">{t('correction.colUnit')}</th>
-              <th className="px-4 py-3 text-start font-medium">{t('correction.colUnitPrice')}</th>
-              <th className="px-4 py-3 text-start font-medium">{t('correction.colLineTotal')}</th>
+              <th className="px-4 py-3 text-right font-medium">{t('correction.colUnitPrice')}</th>
+              <th className="px-4 py-3 text-right font-medium">{t('correction.colLineTotal')}</th>
               {canEdit && <th className="px-4 py-3 font-medium" />}
             </tr>
           </thead>
@@ -327,34 +319,34 @@ export function InvoiceCorrection({
                 >
                   <td className="px-4 py-3 text-ink">
                     {editing ? (
-                      <Input value={ld.rawDescription} onChange={(e) => setLd({ ...ld, rawDescription: e.target.value })} />
+                      <Input aria-label={t('correction.colDescription')} value={ld.rawDescription} onChange={(e) => setLd({ ...ld, rawDescription: e.target.value })} />
                     ) : (
                       <ItemName he={l.rawDescription} en={l.rawDescriptionEn ?? l.productNameEn} />
                     )}
                     {!editing && lineBadges?.[l.id] ? lineBadges[l.id] : null}
                   </td>
-                  <td className="px-4 py-3 font-mono tabular-nums text-muted">
+                  <td className="px-4 py-3 text-right tabular-nums text-muted">
                     {editing ? (
-                      <Input type="number" inputMode="decimal" step="any" min="0" value={ld.qtyBilled} onChange={(e) => setLd({ ...ld, qtyBilled: e.target.value })} />
+                      <QuantityInput aria-label={t('correction.colQty')} value={ld.qtyBilled} onValueChange={(v) => setLd({ ...ld, qtyBilled: v })} />
                     ) : (
-                      <bdi dir="ltr">{formatNumber(Number(l.qtyBilled), locale, { maximumFractionDigits: 3 })}</bdi>
+                      <bdi>{formatNumber(Number(l.qtyBilled), locale, { maximumFractionDigits: 3 })}</bdi>
                     )}
                   </td>
                   <td className="px-4 py-3 text-muted">
-                    {editing ? <Input value={ld.unit} onChange={(e) => setLd({ ...ld, unit: e.target.value })} /> : unit(l.unit)}
+                    {editing ? <Input aria-label={t('correction.colUnit')} value={ld.unit} onChange={(e) => setLd({ ...ld, unit: e.target.value })} /> : unit(l.unit)}
                   </td>
-                  <td className="px-4 py-3 font-mono tabular-nums text-ink">
+                  <td className="px-4 py-3 text-right tabular-nums text-ink">
                     {editing ? (
-                      <Input type="number" inputMode="decimal" step="any" min="0" value={ld.unitPriceBilled} onChange={(e) => setLd({ ...ld, unitPriceBilled: e.target.value })} />
+                      <MoneyInput aria-label={t('correction.colUnitPrice')} value={ld.unitPriceBilled} onValueChange={(v) => setLd({ ...ld, unitPriceBilled: v })} />
                     ) : (
-                      <bdi dir="ltr">{money(Number(l.unitPriceBilled))}</bdi>
+                      <bdi>{money(Number(l.unitPriceBilled))}</bdi>
                     )}
                   </td>
-                  <td className="px-4 py-3 font-mono tabular-nums text-ink">
+                  <td className="px-4 py-3 text-right tabular-nums text-ink">
                     {editing ? (
-                      <Input type="number" inputMode="decimal" step="any" min="0" value={ld.lineTotal} onChange={(e) => setLd({ ...ld, lineTotal: e.target.value })} />
+                      <MoneyInput aria-label={t('correction.colLineTotal')} value={ld.lineTotal} onValueChange={(v) => setLd({ ...ld, lineTotal: v })} />
                     ) : (
-                      <bdi dir="ltr">{money(Number(l.lineTotal))}</bdi>
+                      <bdi>{money(Number(l.lineTotal))}</bdi>
                     )}
                   </td>
                   {canEdit && (
@@ -389,7 +381,6 @@ export function InvoiceCorrection({
         </table>
       </Card>
 
-      {!consolidated && <p className="text-xs text-subtle">{t('correction.rerunHint')}</p>}
     </div>
   );
 }

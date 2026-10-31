@@ -274,7 +274,7 @@ describe('bottom bars', () => {
     expect(bar(viewer('chef'))).toEqual(['home:today', 'inventory:count', 'recipes:dishes']);
     expect(bar(viewer('manager'))).toEqual(['home:today', 'orders:orders', 'receiving:receive', 'approvals:approvals']);
     expect(bar(viewer('owner'))).toEqual(['home:home', 'approvals:approvals', 'leaks:leak', 'orders:orders']);
-    expect(bar(viewer('bookkeeper'))).toEqual(['home:home', 'approvals:approvals', 'payRun:payments', 'inbox:invoices']);
+    expect(bar(viewer('bookkeeper'))).toEqual(['home:home', 'approvals:approvals', 'payRun:payments', 'invoices:invoices']); // W2-02: slot 4 → the register (acceptance 10)
   });
 
   it('a chain owner keeps the same bar (the chain lives in "עוד")', () => {

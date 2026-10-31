@@ -13,9 +13,37 @@ import {
 } from '@restomatch/db';
 import type { AppContext, MemberSession } from './context';
 import { getEntitlements } from './entitlements';
-import { publicErrorMessage, resolveAppError } from './errors';
+import { appError, publicErrorMessage, resolveAppError } from './errors';
+import { hasCap, type Cap } from './lib/capabilities';
 
-const t = initTRPC.context<AppContext>().create({
+/** The role tier a procedure was built on (G-07). Set by the tier exports below. */
+export const TIERS = [
+  'public',
+  'authed',
+  'userScoped',
+  'member',
+  'owner',
+  'manager',
+  'receiver',
+  'bookkeeper',
+  'chef',
+  'invoiceReader',
+  'finance',
+  'admin',
+] as const;
+export type Tier = (typeof TIERS)[number];
+
+/**
+ * Procedure metadata (G-07). Optional fields so a bare `t.procedure` still
+ * typechecks; tRPC merges meta shallowly across `.use()` / `.meta()`, so a
+ * tier's `tier` flows into router-local wrappers and `can()` adds `cap`.
+ */
+export interface ProcMeta {
+  tier?: Tier;
+  cap?: Cap;
+}
+
+const t = initTRPC.context<AppContext>().meta<ProcMeta>().create({
   transformer: superjson,
   // Expose a stable machine code (`data.appCode`, see errors.ts) so clients
   // translate errors by code, never by matching the (Hebrew) message text.
@@ -49,9 +77,9 @@ const errorCapture = t.middleware(async ({ next, path, type }) => {
 });
 
 export const router = t.router;
-export const publicProcedure = t.procedure.use(errorCapture);
+export const publicProcedure = t.procedure.use(errorCapture).meta({ tier: 'public' });
 
-export const authedProcedure = publicProcedure.use(({ ctx, next }) => {
+export const authedProcedure = publicProcedure.meta({ tier: 'authed' }).use(({ ctx, next }) => {
   // A 2FA-pending session has only passed the FIRST factor — treat it as
   // unauthenticated everywhere (Epic C). The /login/2fa second step runs as a
   // server action, not a tRPC procedure, so no carve-out is needed here.
@@ -67,7 +95,7 @@ export const authedProcedure = publicProcedure.use(({ ctx, next }) => {
  * the user-scoped RLS policies (memberships_self, users_self,
  * restaurants_member_select) apply on an RLS-enforced connection.
  */
-export const userScopedProcedure = authedProcedure.use(async ({ ctx, next }) => {
+export const userScopedProcedure = authedProcedure.meta({ tier: 'userScoped' }).use(async ({ ctx, next }) => {
   const userId = ctx.session.userId;
   const runNext = (tx: Database) => next({ ctx: { ...ctx, db: tx } });
   try {
@@ -95,7 +123,7 @@ class TxRollback extends Error {
   }
 }
 
-const memberProcedureBase = authedProcedure.use(async ({ ctx, next }) => {
+const memberProcedureBase = authedProcedure.meta({ tier: 'member' }).use(async ({ ctx, next }) => {
   if (!ctx.session.restaurantId || !ctx.session.role) {
     throw new TRPCError({
       code: 'FORBIDDEN',
@@ -131,8 +159,8 @@ const memberProcedureBase = authedProcedure.use(async ({ ctx, next }) => {
 
 export const memberProcedure = memberProcedureBase;
 
-function requireRoles(allowed: ReadonlyArray<UserRole>) {
-  return memberProcedureBase.use(({ ctx, next }) => {
+function requireRoles(allowed: ReadonlyArray<UserRole>, tier: Tier) {
+  return memberProcedureBase.meta({ tier }).use(({ ctx, next }) => {
     if (!allowed.includes(ctx.session.role)) {
       throw new TRPCError({
         code: 'FORBIDDEN',
@@ -143,11 +171,11 @@ function requireRoles(allowed: ReadonlyArray<UserRole>) {
   });
 }
 
-export const ownerProcedure = requireRoles(['owner']);
-export const managerProcedure = requireRoles(['owner', 'manager']);
-export const receiverProcedure = requireRoles(['owner', 'manager', 'receiver']);
-export const bookkeeperProcedure = requireRoles(['owner', 'bookkeeper']);
-export const chefProcedure = requireRoles(['owner', 'manager', 'chef']);
+export const ownerProcedure = requireRoles(['owner'], 'owner');
+export const managerProcedure = requireRoles(['owner', 'manager'], 'manager');
+export const receiverProcedure = requireRoles(['owner', 'manager', 'receiver'], 'receiver');
+export const bookkeeperProcedure = requireRoles(['owner', 'bookkeeper'], 'bookkeeper');
+export const chefProcedure = requireRoles(['owner', 'manager', 'chef'], 'chef');
 /**
  * Roles that may read a supplier invoice's lines over tRPC (no chef). Wider than
  * the /dashboard/invoices page gate: the receiver keeps it for the Delivery Check
@@ -156,9 +184,9 @@ export const chefProcedure = requireRoles(['owner', 'manager', 'chef']);
  */
 export const INVOICE_READER_ROLES: ReadonlyArray<UserRole> = ['owner', 'manager', 'receiver', 'bookkeeper'];
 /** One supplier invoice (lines, prices, image) — see INVOICE_READER_ROLES. */
-export const invoiceReaderProcedure = requireRoles(INVOICE_READER_ROLES);
+export const invoiceReaderProcedure = requireRoles(INVOICE_READER_ROLES, 'invoiceReader');
 /** Invoice-level money detail (leak drill-down, claims) — matches /dashboard/leaks. */
-export const financeProcedure = requireRoles(['owner', 'manager', 'bookkeeper']);
+export const financeProcedure = requireRoles(['owner', 'manager', 'bookkeeper'], 'finance');
 
 /**
  * Platform-admin procedure for the internal ops console. Cross-tenant BY
@@ -167,7 +195,7 @@ export const financeProcedure = requireRoles(['owner', 'manager', 'bookkeeper'])
  * tenant. Authorized by the users.is_platform_admin flag OR the
  * PLATFORM_ADMIN_EMAILS env allowlist (bootstrap for the first admin).
  */
-export const adminProcedure = authedProcedure.use(async ({ ctx, next }) => {
+export const adminProcedure = authedProcedure.meta({ tier: 'admin' }).use(async ({ ctx, next }) => {
   const conn = ctx.adminDb ?? ctx.db;
   const [user] = await conn
     .select({
@@ -220,4 +248,35 @@ export function requireFeature(feature: FeatureKey) {
     }
     return next();
   });
+}
+
+/**
+ * Capability gate as a composable middleware (no meta): `anyTier.use(requireCap('order.send'))`.
+ * Prefer `can()`, which also records `meta.cap` for the procedure walk.
+ * FORBIDDEN with appCode `capability.required` + `appParams.capability`.
+ */
+export function requireCap(cap: Cap) {
+  return t.middleware(({ ctx, next }) => {
+    const session = ctx.session as MemberSession | null;
+    if (!session?.role || !hasCap(session.role, cap)) {
+      throw appError('FORBIDDEN', 'capability.required', `Required capability: ${cap}`, {
+        capability: cap,
+      });
+    }
+    return next();
+  });
+}
+
+/**
+ * G-07 capability builder: a member procedure (or `base`, any member-or-higher
+ * tier) that records `meta.cap` and rejects callers whose role lacks `cap`.
+ *
+ *   createDraft: can('order.draft').input(...).mutation(...)
+ *   send:        can('order.send', chefProcedure).input(...).mutation(...)
+ *
+ * Row-level rules (own rows, price redaction) stay in the resolver: `canOn`,
+ * `redactPrices` (lib/capabilities.ts).
+ */
+export function can(cap: Cap, base = memberProcedureBase) {
+  return base.meta({ cap }).use(requireCap(cap));
 }

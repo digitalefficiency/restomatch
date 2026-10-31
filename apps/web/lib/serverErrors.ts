@@ -33,6 +33,7 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   'entitlement.required': 'entitlementRequired',
   'auth.unauthorized': 'unauthorized',
   'auth.forbidden': 'forbidden',
+  'capability.required': 'forbidden',
   'input.invalid': 'invalidInput',
   'invoice.numberTaken': 'invoiceNumberTaken',
   // Wave-1 (S15) codes: generic fallbacks here; the owning screens (growth /
@@ -42,6 +43,9 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   'growth.referralInvalid': 'invalidInput',
   'growth.referralSelf': 'invalidInput',
   'growth.referralAlreadyRedeemed': 'invalidInput',
+  // G-05: owning screens may show who changed it and when (appParams); this is the generic copy.
+  'lifecycle.conflict': 'lifecycleConflict',
+  'lifecycle.refused': 'lifecycleRefused',
 };
 
 /**
