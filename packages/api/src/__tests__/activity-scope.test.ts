@@ -187,6 +187,9 @@ describe('activity.feed — money scope by role (G-07)', () => {
       const b = await caller(B, role).activity.feed();
       expect(b.map((r) => r.title)).toEqual(['B only']);
     }
-    expect(JSON.stringify(await caller(B, 'chef').activity.feed())).not.toContain('99');
+    // B's chef sees its own row without the ₪ (a bare "99" can occur in a uuid or timestamp).
+    const bChef = await caller(B, 'chef').activity.feed();
+    expect(JSON.stringify(bChef)).not.toContain('₪');
+    expect(bChef[0]).toMatchObject({ title: 'B only', detail: null, metadata: {} });
   });
 });
