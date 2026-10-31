@@ -45,6 +45,11 @@ import { devOcrStubEnabled, buildDevOcrStub } from '../receiving/devOcrStub';
 import { isAllowedScanUrl } from '../lib/scanUrls';
 import { isInvoiceNumberTaken, readDuplicateOf, withoutDuplicateOf } from '../lib/invoiceDedupe';
 import { appError } from '../errors';
+import { recordAudit } from '../audit';
+import type { MemberSession } from '../context';
+import { matchRouter } from './match';
+import { lineTotalAgorot } from '../orders/document/build';
+import { agorotToPlain, numericToAgorot } from '../integrations/accounting/common';
 import { endOfDayInTz, startOfDayInTz } from '../lib/time';
 import { claimableLines } from '../lib/claims';
 import { featureEnabled } from '../lib/features';
@@ -629,7 +634,15 @@ export const receivingRouter = router({
     .mutation(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
       const [current] = await ctx.db
-        .select({ supplierId: invoices.supplierId, ocrPayload: invoices.ocrPayload })
+        .select({
+          supplierId: invoices.supplierId,
+          ocrPayload: invoices.ocrPayload,
+          invoiceNumber: invoices.invoiceNumber,
+          invoiceDate: invoices.invoiceDate,
+          totalExclVat: invoices.totalExclVat,
+          vatAmount: invoices.vatAmount,
+          totalInclVat: invoices.totalInclVat,
+        })
         .from(invoices)
         .where(and(eq(invoices.id, input.invoiceId), eq(invoices.restaurantId, restaurantId)))
         .limit(1);
@@ -683,6 +696,19 @@ export const receivingRouter = router({
           { invoiceNumber: number, holderDate, holderInvoiceId: holder?.id ?? '' },
         );
       }
+      // Only the fields this edit touched, before and after.
+      const touched = (['invoiceNumber', 'invoiceDate', 'totalExclVat', 'vatAmount', 'totalInclVat'] as const).filter(
+        (k) => set[k] !== undefined,
+      );
+      await recordAudit(ctx.db, {
+        restaurantId,
+        userId: ctx.session.userId,
+        action: 'receiving.invoice_header_updated',
+        entityType: 'invoice',
+        entityId: input.invoiceId,
+        before: Object.fromEntries(touched.map((k) => [k, current[k]])),
+        after: Object.fromEntries(touched.map((k) => [k, set[k]])),
+      });
       return { ok: true };
     }),
 
@@ -713,7 +739,15 @@ export const receivingRouter = router({
       const restaurantId = ctx.session.restaurantId;
       // Scope through the parent invoice (invoice_lines carries no restaurant_id).
       const [owned] = await ctx.db
-        .select({ id: invoiceLines.id })
+        .select({
+          id: invoiceLines.id,
+          invoiceId: invoiceLines.invoiceId,
+          rawDescription: invoiceLines.rawDescription,
+          qtyBilled: invoiceLines.qtyBilled,
+          unit: invoiceLines.unit,
+          unitPriceBilled: invoiceLines.unitPriceBilled,
+          lineTotal: invoiceLines.lineTotal,
+        })
         .from(invoiceLines)
         .innerJoin(
           invoices,
@@ -736,7 +770,141 @@ export const receivingRouter = router({
       if (p.unitPriceBilled !== undefined) set.unitPriceBilled = String(p.unitPriceBilled);
       if (p.lineTotal !== undefined) set.lineTotal = String(p.lineTotal);
       await ctx.db.update(invoiceLines).set(set).where(eq(invoiceLines.id, input.lineId));
+      const keys = (['rawDescription', 'qtyBilled', 'unit', 'unitPriceBilled', 'lineTotal'] as const).filter(
+        (k) => set[k] !== undefined,
+      );
+      await recordAudit(ctx.db, {
+        restaurantId,
+        userId: ctx.session.userId,
+        action: 'receiving.invoice_line_updated',
+        entityType: 'invoice_line',
+        entityId: input.lineId,
+        before: { invoiceId: owned.invoiceId, ...Object.fromEntries(keys.map((k) => [k, owned[k]])) },
+        after: { invoiceId: owned.invoiceId, ...Object.fromEntries(keys.map((k) => [k, set[k]])) },
+      });
       return { ok: true };
+    }),
+
+  /**
+   * B8 — "הזינו את השורות ידנית": add a line by hand to an invoice the OCR could
+   * not read (failed → 'parsed', no lines) or held for review ('parsed'). The
+   * header totals are recomputed from the lines (integer agorot, NUMERIC strings
+   * in the DB) and the invoice is re-matched through match.runForInvoice.
+   * Owner / manager only (₪ on the line); audited. A foreign invoice is NOT_FOUND.
+   */
+  addInvoiceLine: managerProcedure
+    .input(
+      z.object({
+        invoiceId: z.string().uuid(),
+        line: z
+          .object({
+            rawDescription: z.string().trim().min(1).max(400),
+            qtyBilled: z.number().finite().positive().max(1_000_000),
+            unit: z.string().trim().min(1).max(32),
+            unitPriceBilled: z.number().finite().nonnegative().max(10_000_000),
+            /** Optional catalogue link (this restaurant's product); else map it later. */
+            productId: z.string().uuid().optional(),
+          })
+          .strict(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      const inv = await editableInvoice(ctx.db, restaurantId, input.invoiceId);
+      if (input.line.productId) {
+        const [prod] = await ctx.db
+          .select({ id: products.id })
+          .from(products)
+          .where(and(eq(products.id, input.line.productId), eq(products.restaurantId, restaurantId)))
+          .limit(1);
+        if (!prod) throw new TRPCError({ code: 'NOT_FOUND', message: 'product not found' });
+      }
+      const qty = decimalString(input.line.qtyBilled, 3);
+      const price = decimalString(input.line.unitPriceBilled, 4);
+      const totalAgorot = lineTotalAgorot(qty, price);
+      if (totalAgorot === null) throw new TRPCError({ code: 'BAD_REQUEST', message: 'כמות או מחיר לא תקינים' });
+      const [line] = await ctx.db
+        .insert(invoiceLines)
+        .values({
+          invoiceId: inv.id,
+          productId: input.line.productId ?? null,
+          rawDescription: input.line.rawDescription,
+          qtyBilled: qty,
+          unit: input.line.unit,
+          unitPriceBilled: price,
+          lineTotal: agorotToPlain(totalAgorot),
+        })
+        .returning({ id: invoiceLines.id });
+      if (!line) throw new Error('failed to add invoice line');
+      if (!inv.handEntered) {
+        // A held-for-review read that now has hand-entered lines stays editable
+        // after the re-match (which moves it out of 'parsed').
+        const payload = inv.ocrPayload;
+        await ctx.db
+          .update(invoices)
+          .set({
+            ocrPayload: {
+              provider: payload?.provider ?? 'claude_vision',
+              ...(payload?.reconciledAt ? { reconciledAt: payload.reconciledAt } : {}),
+              raw: { ...((payload?.raw as object | null) ?? {}), manualLines: true },
+            },
+          })
+          .where(and(eq(invoices.id, inv.id), eq(invoices.restaurantId, restaurantId)));
+      }
+      const totals = await recomputeInvoiceTotals(ctx.db, restaurantId, inv);
+      await recordAudit(ctx.db, {
+        restaurantId,
+        userId: ctx.session.userId,
+        action: 'receiving.invoice_line_added',
+        entityType: 'invoice_line',
+        entityId: line.id,
+        before: { invoiceId: inv.id, totals: inv.totals },
+        after: {
+          invoiceId: inv.id,
+          line: { rawDescription: input.line.rawDescription, qtyBilled: qty, unit: input.line.unit, unitPriceBilled: price, lineTotal: agorotToPlain(totalAgorot), productId: input.line.productId ?? null },
+          totals,
+        },
+      });
+      const rematched = await rematchAfterEdit(ctx, inv.id);
+      return { lineId: line.id, totals, rematched };
+    }),
+
+  /** B8 — remove a hand-entered (or misread) line; same rules as addInvoiceLine. */
+  deleteInvoiceLine: managerProcedure
+    .input(z.object({ lineId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      const [line] = await ctx.db
+        .select({
+          id: invoiceLines.id,
+          invoiceId: invoiceLines.invoiceId,
+          rawDescription: invoiceLines.rawDescription,
+          qtyBilled: invoiceLines.qtyBilled,
+          unit: invoiceLines.unit,
+          unitPriceBilled: invoiceLines.unitPriceBilled,
+          lineTotal: invoiceLines.lineTotal,
+          productId: invoiceLines.productId,
+        })
+        .from(invoiceLines)
+        .innerJoin(invoices, and(eq(invoices.id, invoiceLines.invoiceId), eq(invoices.restaurantId, restaurantId)))
+        .where(eq(invoiceLines.id, input.lineId))
+        .limit(1);
+      if (!line) throw new TRPCError({ code: 'NOT_FOUND', message: 'invoice line not found' });
+      const inv = await editableInvoice(ctx.db, restaurantId, line.invoiceId);
+      await ctx.db.delete(invoiceLines).where(eq(invoiceLines.id, line.id));
+      const totals = await recomputeInvoiceTotals(ctx.db, restaurantId, inv);
+      const { id: _id, ...gone } = line;
+      await recordAudit(ctx.db, {
+        restaurantId,
+        userId: ctx.session.userId,
+        action: 'receiving.invoice_line_deleted',
+        entityType: 'invoice_line',
+        entityId: line.id,
+        before: { invoiceId: inv.id, line: gone, totals: inv.totals },
+        after: { invoiceId: inv.id, totals },
+      });
+      const rematched = await rematchAfterEdit(ctx, inv.id);
+      return { ok: true, totals, rematched };
     }),
 
   /**
@@ -1349,4 +1517,109 @@ function receiptInvoiceSql(restaurantId: string, grId: string) {
       sql`(select ${matchRuns.invoiceId} from ${matchRuns} where ${matchRuns.restaurantId} = ${restaurantId} and ${matchRuns.grId} = ${grId})`,
     ),
   );
+}
+
+type InvoiceTotals = { totalExclVat: string | null; vatAmount: string | null; totalInclVat: string | null };
+
+/**
+ * The invoice a manual line edit may touch (B8), row-locked: this tenant's, and
+ * one the OCR could not read (raw.ocrFailed) or held for a human ('parsed').
+ * The re-match after an edit moves it to 'matched' / 'disputed', so a hand-
+ * entered invoice is marked (raw.manualLines) and stays editable line by line;
+ * the OCR-failed marker survives the re-match as well. Never once approved or
+ * paid (money history). A read invoice is corrected with updateInvoiceLine; a
+ * foreign / missing id is NOT_FOUND.
+ */
+async function editableInvoice(db: Database, restaurantId: string, invoiceId: string) {
+  const [inv] = await db
+    .select({
+      id: invoices.id,
+      status: invoices.status,
+      ocrPayload: invoices.ocrPayload,
+      supplierId: invoices.supplierId,
+      totalExclVat: invoices.totalExclVat,
+      vatAmount: invoices.vatAmount,
+      totalInclVat: invoices.totalInclVat,
+    })
+    .from(invoices)
+    .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
+    .limit(1)
+    .for('update');
+  if (!inv) throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
+  const raw = (inv.ocrPayload?.raw ?? null) as { ocrFailed?: unknown; manualLines?: unknown } | null;
+  const handEntered = raw?.ocrFailed === true || raw?.manualLines === true;
+  const editable =
+    inv.status === 'parsed' || (handEntered && (inv.status === 'matched' || inv.status === 'disputed'));
+  if (!editable) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message: 'אפשר להוסיף או למחוק שורות רק בחשבונית שלא נקראה אוטומטית או שממתינה לבדיקה',
+    });
+  }
+  const totals: InvoiceTotals = { totalExclVat: inv.totalExclVat, vatAmount: inv.vatAmount, totalInclVat: inv.totalInclVat };
+  return { id: inv.id, supplierId: inv.supplierId, totals, ocrPayload: inv.ocrPayload, handEntered };
+}
+
+/**
+ * Header totals from the lines, exact: Σ line totals (NUMERIC → integer agorot),
+ * VAT = excl × rate (supplier's, else the restaurant's, else 18%) rounded
+ * half-up to the agora, incl = excl + VAT; written back as NUMERIC strings.
+ */
+async function recomputeInvoiceTotals(
+  db: Database,
+  restaurantId: string,
+  inv: { id: string; supplierId: string | null },
+): Promise<InvoiceTotals> {
+  const lines = await db.select({ lineTotal: invoiceLines.lineTotal }).from(invoiceLines).where(eq(invoiceLines.invoiceId, inv.id));
+  const exclAgorot = lines.reduce((t, l) => t + (numericToAgorot(l.lineTotal) ?? 0), 0);
+  const [rest] = await db.select({ vatRate: restaurants.vatRate }).from(restaurants).where(eq(restaurants.id, restaurantId)).limit(1);
+  const [sup] = inv.supplierId
+    ? await db
+        .select({ vatRate: suppliers.vatRate })
+        .from(suppliers)
+        .where(and(eq(suppliers.id, inv.supplierId), eq(suppliers.restaurantId, restaurantId)))
+        .limit(1)
+    : [];
+  const rateBp = rateToBasisPoints(sup?.vatRate ?? rest?.vatRate ?? null);
+  const vatAgorot = Number((BigInt(exclAgorot) * BigInt(rateBp) + 5_000n) / 10_000n); // half-up (excl ≥ 0)
+  const totals: InvoiceTotals = {
+    totalExclVat: agorotToPlain(exclAgorot),
+    vatAmount: agorotToPlain(vatAgorot),
+    totalInclVat: agorotToPlain(exclAgorot + vatAgorot),
+  };
+  await db
+    .update(invoices)
+    .set({ ...totals, updatedAt: new Date() })
+    .where(and(eq(invoices.id, inv.id), eq(invoices.restaurantId, restaurantId)));
+  return totals;
+}
+
+/** A VAT rate as a NUMERIC string ("0.18", "0.1700") → basis points (1800); none → 18%. */
+function rateToBasisPoints(rate: string | null): number {
+  if (rate == null) return 1800;
+  const m = /^(\d+)(?:\.(\d+))?$/.exec(rate.trim());
+  if (!m) return 1800;
+  return Number(m[1]) * 10_000 + Number((m[2] ?? '').padEnd(4, '0').slice(0, 4));
+}
+
+/** A non-negative number → a fixed-scale decimal string (NUMERIC), no float noise. */
+function decimalString(n: number, scale: number): string {
+  return n.toFixed(scale);
+}
+
+/**
+ * Re-match after a manual line edit — through match.runForInvoice itself (its
+ * consolidated / claims-in-progress guards included), in a savepoint: a refused
+ * re-match never undoes the edit; the caller reports it (rematched: false).
+ */
+async function rematchAfterEdit(ctx: { db: Database; session: MemberSession }, invoiceId: string): Promise<boolean> {
+  try {
+    await ctx.db.transaction(async (sp) => {
+      await matchRouter.createCaller({ db: sp as unknown as Database, session: ctx.session }).runForInvoice({ invoiceId });
+    });
+    return true;
+  } catch (err) {
+    console.warn(`[receiving] re-match after a manual line edit was refused for invoice=${invoiceId}`, err);
+    return false;
+  }
 }
