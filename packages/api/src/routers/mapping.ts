@@ -16,7 +16,7 @@ import {
   supplierCatalogItems,
   type Database,
 } from '@restomatch/db';
-import { recordConfirmedMatch } from '@restomatch/catalog';
+import { matchProductTopN, normalizeLinkName, recordConfirmedMatch } from '@restomatch/catalog';
 import { enqueue, isQueueUnavailableError, MATCH_INVOICE_QUEUE, type MatchInvoiceQueueJob } from '@restomatch/queue';
 import { managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
@@ -118,13 +118,109 @@ const RevertSchema = z
   })
   .strict();
 
+/** A product the link policy suggests for a name-keyed question (no ₪, ever). */
+export interface LinkSuggestion {
+  productId: string;
+  canonicalName: string;
+  confidence: number;
+}
+
 export interface UnmappedSku {
+  /** G-08: 'sku' = keyed by (supplier, מק״ט); 'name' = no SKU, keyed by (supplier, normalized name). */
+  kind: 'sku' | 'name';
   supplierId: string;
   supplierName: string;
-  supplierSku: string;
+  /** The SKU for a 'sku' row; null for a 'name' row. */
+  supplierSku: string | null;
+  /** The normalized name for a 'name' row (normalizeLinkName); null for a 'sku' row. */
+  nameKey: string | null;
   sampleDescription: string;
-  /** How many po_lines + invoice_lines + unlinked price-list rows (G-08) carry this SKU unmapped. */
+  /** How many po_lines + invoice_lines + unlinked price-list rows carry this key unmapped. */
   occurrences: number;
+  /** G-08: the top 1–3 products the policy suggests for a 'name' row ("זה אותו מוצר?"). */
+  suggestions: LinkSuggestion[];
+}
+
+/** Name-keyed questions are capped per read (suggestions cost two queries each). */
+export const NAME_QUESTIONS_MAX = 50;
+
+/**
+ * SQL twin of `normalizeLinkName` (catalog/linkPolicy): NFC, gershayim/geresh
+ * folded to ASCII quotes, whitespace collapsed, trimmed, lower-cased.
+ */
+export function normNameSql(col: unknown) {
+  return sql`lower(btrim(regexp_replace(translate(normalize(${col}, NFC), '״“”׳‘’', '"""' || repeat(chr(39), 3)), '[[:space:]]+', ' ', 'g')))`;
+}
+
+/**
+ * Name-keyed open questions (G-08): unlinked invoice / order / price-list lines
+ * with NO SKU, grouped by (supplier, normalized name). Every branch is
+ * restaurant-scoped on its own table AND through the supplier join.
+ */
+async function nameKeyedRows(
+  db: Database,
+  rid: string,
+  supplierFilter?: string,
+): Promise<Array<{ supplierId: string; supplierName: string; nameKey: string; sample: string; occurrences: number }>> {
+  const sup = supplierFilter ? sql`and s.id = ${supplierFilter}` : sql``;
+  const rows = (await db.execute(sql`
+    with lines as (
+      select i.supplier_id, il.raw_description as raw
+        from invoice_lines il
+        join invoices i on i.id = il.invoice_id and i.restaurant_id = ${rid}
+       where il.product_id is null and il.supplier_sku is null
+      union all
+      select po.supplier_id, pl.raw_description
+        from po_lines pl
+        join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid}
+       where pl.product_id is null and pl.supplier_sku is null
+      union all
+      select sci.supplier_id, sci.supplier_name_raw
+        from supplier_catalog_items sci
+       where sci.restaurant_id = ${rid} and sci.product_id is null and sci.supplier_sku is null
+    )
+    select s.id as supplier_id, s.name as supplier_name, ${normNameSql(sql`l.raw`)} as name_key,
+           min(btrim(l.raw)) as sample, count(*)::int as occurrences
+      from lines l
+      join suppliers s on s.id = l.supplier_id and s.restaurant_id = ${rid} ${sup}
+     where coalesce(btrim(l.raw), '') <> ''
+     group by s.id, s.name, name_key
+     order by occurrences desc, sample
+     limit ${NAME_QUESTIONS_MAX}
+  `)) as unknown as Array<Record<string, unknown>>;
+  return rows.map((r) => ({
+    supplierId: String(r.supplier_id),
+    supplierName: String(r.supplier_name),
+    nameKey: String(r.name_key),
+    sample: String(r.sample),
+    occurrences: Number(r.occurrences),
+  }));
+}
+
+/** How many name-keyed questions are open (the home "זה אותו מוצר?" line). Restaurant-scoped. */
+export async function countNameQuestions(db: Database, rid: string): Promise<number> {
+  const [r] = (await db.execute(sql`
+    with lines as (
+      select i.supplier_id, il.raw_description as raw
+        from invoice_lines il
+        join invoices i on i.id = il.invoice_id and i.restaurant_id = ${rid}
+       where il.product_id is null and il.supplier_sku is null
+      union all
+      select po.supplier_id, pl.raw_description
+        from po_lines pl
+        join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid}
+       where pl.product_id is null and pl.supplier_sku is null
+      union all
+      select sci.supplier_id, sci.supplier_name_raw
+        from supplier_catalog_items sci
+       where sci.restaurant_id = ${rid} and sci.product_id is null and sci.supplier_sku is null
+    )
+    select count(distinct (l.supplier_id, ${normNameSql(sql`l.raw`)}))::int as n
+      from lines l
+      join suppliers s on s.id = l.supplier_id and s.restaurant_id = ${rid}
+     where coalesce(btrim(l.raw), '') <> ''
+  `)) as unknown as Array<{ n: number }>;
+  return Number(r?.n ?? 0);
 }
 
 /**
@@ -222,16 +318,45 @@ export const mappingRouter = router({
           }
         } else {
           byKey.set(key, {
+            kind: 'sku',
             supplierId: r.supplierId,
             supplierName: r.supplierName,
             supplierSku: r.supplierSku,
+            nameKey: null,
             sampleDescription: r.rawDescription ?? '',
             occurrences: 1,
+            suggestions: [],
           });
         }
       }
-      return [...byKey.values()].sort((a, b) => b.occurrences - a.occurrences);
+      // G-08: name-keyed questions (no SKU). The policy sent these to review,
+      // so a person is asked "זה אותו מוצר?" with the top 1–3 suggestions,
+      // computed on read and never carrying ₪.
+      const named: UnmappedSku[] = [];
+      for (const r of await nameKeyedRows(ctx.db, rid, supplierFilter)) {
+        const cands = await matchProductTopN(
+          ctx.db,
+          { restaurantId: rid, supplierId: r.supplierId, rawDescription: r.sample },
+          3,
+        );
+        named.push({
+          kind: 'name',
+          supplierId: r.supplierId,
+          supplierName: r.supplierName,
+          supplierSku: null,
+          nameKey: r.nameKey,
+          sampleDescription: r.sample,
+          occurrences: r.occurrences,
+          suggestions: cands.map((c) => ({ productId: c.productId, canonicalName: c.canonicalName, confidence: c.confidence })),
+        });
+      }
+      return [...byKey.values(), ...named].sort((a, b) => b.occurrences - a.occurrences);
     }),
+
+  /** G-08: how many "זה אותו מוצר?" questions are open (the home line). No ₪. */
+  questionCount: memberProcedure.query(async ({ ctx }) => ({
+    count: await countNameQuestions(ctx.db, ctx.session.restaurantId),
+  })),
 
   /** Product picker: fuzzy/ILIKE search over the restaurant's products. */
   searchProducts: memberProcedure
@@ -262,7 +387,8 @@ export const mappingRouter = router({
       z
         .object({
           supplierId: z.string().uuid(),
-          supplierSku: z.string().trim().min(1).max(64),
+          /** Absent → a G-08 name-keyed question: the key is (supplier, normalized rawName). */
+          supplierSku: z.string().trim().min(1).max(64).optional(),
           rawName: z.string().trim().min(1).max(400),
           productId: z.string().uuid().optional(),
           newProductName: z.string().trim().min(1).max(200).optional(),
@@ -280,6 +406,23 @@ export const mappingRouter = router({
     .mutation(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
       await assertSupplierOwned(ctx.db, input.supplierId, rid);
+
+      // The line key: (supplier, SKU), or for a G-08 name question (supplier,
+      // normalized name) on lines that carry NO SKU.
+      const sku = input.supplierSku;
+      const nameKey = normalizeLinkName(input.rawName);
+      const poKey = sku
+        ? eq(poLines.supplierSku, sku)
+        : and(isNull(poLines.supplierSku), sql`${normNameSql(poLines.rawDescription)} = ${nameKey}`);
+      const invKey = sku
+        ? eq(invoiceLines.supplierSku, sku)
+        : and(isNull(invoiceLines.supplierSku), sql`${normNameSql(invoiceLines.rawDescription)} = ${nameKey}`);
+      const itemKey = sku
+        ? eq(supplierCatalogItems.supplierSku, sku)
+        : and(
+            isNull(supplierCatalogItems.supplierSku),
+            sql`${normNameSql(supplierCatalogItems.supplierNameRaw)} = ${nameKey}`,
+          );
 
       const poIds = ctx.db
         .select({ id: purchaseOrders.id })
@@ -300,7 +443,7 @@ export const mappingRouter = router({
                 and(
                   inArray(poLines.id, r.poLineIds),
                   eq(poLines.productId, r.productId),
-                  eq(poLines.supplierSku, input.supplierSku),
+                  poKey,
                   inArray(poLines.poId, poIds),
                 ),
               )
@@ -314,7 +457,7 @@ export const mappingRouter = router({
                 and(
                   inArray(invoiceLines.id, r.invoiceLineIds),
                   eq(invoiceLines.productId, r.productId),
-                  eq(invoiceLines.supplierSku, input.supplierSku),
+                  invKey,
                   inArray(invoiceLines.invoiceId, invIds),
                 ),
               )
@@ -407,13 +550,15 @@ export const mappingRouter = router({
         createdProduct = true;
       }
 
-      // Learn the alias (name + SKU) so future imports/OCR auto-resolve.
+      // Learn the alias (name + SKU) so future imports/OCR auto-resolve. A SKU
+      // link is a person's (1.000); a G-08 name answer learns the exact-key
+      // alias (0.999) for this supplier's exact name (orchestrator 31.10).
       const alias = await recordConfirmedMatch(ctx.db, {
         productId,
         rawName: input.rawName,
         supplierId: input.supplierId,
-        supplierSku: input.supplierSku,
-        provenance: 'human', // G-08: a person linked it → 1.000
+        supplierSku: sku ?? null,
+        provenance: sku ? 'human' : 'exactKey',
       });
 
       // Backfill already-imported lines, scoped to this restaurant + supplier.
@@ -423,7 +568,7 @@ export const mappingRouter = router({
         .where(
           and(
             isNull(poLines.productId),
-            eq(poLines.supplierSku, input.supplierSku),
+            poKey,
             inArray(poLines.poId, poIds),
           ),
         )
@@ -435,7 +580,7 @@ export const mappingRouter = router({
         .where(
           and(
             isNull(invoiceLines.productId),
-            eq(invoiceLines.supplierSku, input.supplierSku),
+            invKey,
             inArray(invoiceLines.invoiceId, invIds),
           ),
         )
@@ -449,7 +594,7 @@ export const mappingRouter = router({
           and(
             eq(supplierCatalogItems.restaurantId, rid),
             eq(supplierCatalogItems.supplierId, input.supplierId),
-            eq(supplierCatalogItems.supplierSku, input.supplierSku),
+            itemKey,
             isNull(supplierCatalogItems.productId),
           ),
         )

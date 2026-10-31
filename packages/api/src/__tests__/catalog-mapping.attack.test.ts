@@ -2,7 +2,10 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createDb,
   eq,
+  invoiceLines,
+  poLines,
   productAliases,
+  products,
   supplierCatalogItems,
   testDbUrl,
 } from '@restomatch/db';
@@ -93,5 +96,125 @@ describe('G-08 mapping.unmapped — catalog review rows', () => {
       .where(eq(productAliases.supplierNameRaw, 'פלפל אדום חריף'));
     expect(alias?.confidence).toBe('1.000');
     expect((await callerFor(A).mapping.unmapped()).some((r) => r.supplierSku === 'G08-A')).toBe(false);
+  });
+});
+
+/** An OCR'd invoice line with NO SKU that the policy left unlinked (review). */
+async function unlinkedInvoiceLine(t: Tenant, raw: string) {
+  const [l] = await db
+    .insert(invoiceLines)
+    .values({
+      invoiceId: t.invoiceId,
+      productId: null,
+      supplierSku: null,
+      rawDescription: raw,
+      qtyBilled: '2',
+      unit: 'kg',
+      unitPriceBilled: '11.00',
+      lineTotal: '22.00',
+    })
+    .returning({ id: invoiceLines.id });
+  return l!.id;
+}
+
+async function supplierProduct(t: Tenant, name: string) {
+  const [p] = await db
+    .insert(products)
+    .values({ restaurantId: t.restaurantId, supplierId: t.supplierId, canonicalName: name, defaultUnit: 'kg' })
+    .returning({ id: products.id });
+  // The supplier already sells it, so the policy may suggest it.
+  await db.insert(supplierCatalogItems).values({
+    restaurantId: t.restaurantId,
+    supplierId: t.supplierId,
+    productId: p!.id,
+    supplierNameRaw: name,
+  });
+  return p!.id;
+}
+
+describe('G-08 name-keyed questions ("זה אותו מוצר?")', () => {
+  it('unmapped lists a no-SKU line keyed by (supplier, normalized name), with 1–3 suggestions and the count', async () => {
+    const pepper = await supplierProduct(A, 'פלפל אדום');
+    await unlinkedInvoiceLine(A, 'פלפל אדום חריף');
+    await unlinkedInvoiceLine(A, '  פלפל   אדום חריף ');
+    const rows = await callerFor(A).mapping.unmapped();
+    const q = rows.find((r) => r.kind === 'name' && r.nameKey === 'פלפל אדום חריף');
+    expect(q).toMatchObject({ supplierId: A.supplierId, supplierSku: null, occurrences: 2 });
+    expect(q!.suggestions.length).toBeGreaterThanOrEqual(1);
+    expect(q!.suggestions.length).toBeLessThanOrEqual(3);
+    expect(q!.suggestions[0]).toMatchObject({ productId: pepper, canonicalName: 'פלפל אדום' });
+    // No ₪ anywhere in a question.
+    expect(JSON.stringify(q)).not.toMatch(/price|lineTotal|unitPrice|₪/i);
+    expect((await callerFor(A).mapping.questionCount()).count).toBeGreaterThanOrEqual(1);
+  });
+
+  it('confirm by name key links that supplier\'s same-name lines in place and learns a 0.999 alias', async () => {
+    const pepper = await supplierProduct(A, 'פלפל אדום');
+    const l1 = await unlinkedInvoiceLine(A, 'פלפל אדום חריף');
+    const l2 = await unlinkedInvoiceLine(A, 'פלפל  אדום חריף');
+    const other = await unlinkedInvoiceLine(A, 'בצל לבן');
+    const [po] = await db
+      .insert(poLines)
+      .values({ poId: A.poId, rawDescription: 'פלפל אדום חריף', qtyOrdered: '1', unit: 'kg' })
+      .returning({ id: poLines.id });
+    const before = (await callerFor(A).mapping.questionCount()).count;
+
+    const r = await callerFor(A, 'manager').mapping.confirm({
+      supplierId: A.supplierId,
+      rawName: 'פלפל אדום חריף',
+      productId: pepper,
+    });
+    expect(r.invoiceLinesUpdated).toBe(2);
+    expect(r.poLinesUpdated).toBe(1);
+    const linked = await db.select({ id: invoiceLines.id, productId: invoiceLines.productId }).from(invoiceLines);
+    const byId = new Map(linked.map((x) => [x.id, x.productId]));
+    expect(byId.get(l1)).toBe(pepper);
+    expect(byId.get(l2)).toBe(pepper);
+    expect(byId.get(other)).toBeNull();
+    const [p] = await db.select({ productId: poLines.productId }).from(poLines).where(eq(poLines.id, po!.id));
+    expect(p?.productId).toBe(pepper);
+    const [alias] = await db
+      .select({ confidence: productAliases.confidence, supplierSku: productAliases.supplierSku })
+      .from(productAliases)
+      .where(eq(productAliases.supplierNameRaw, 'פלפל אדום חריף'));
+    expect(alias).toEqual({ confidence: '0.999', supplierSku: null });
+    expect((await callerFor(A).mapping.questionCount()).count).toBe(before - 1);
+
+    // Undo puts exactly those lines back.
+    await callerFor(A, 'manager').mapping.confirm({
+      supplierId: A.supplierId,
+      rawName: 'פלפל אדום חריף',
+      revert: r.undo!,
+    });
+    const [back] = await db.select({ productId: invoiceLines.productId }).from(invoiceLines).where(eq(invoiceLines.id, l1));
+    expect(back?.productId).toBeNull();
+  });
+
+  it("B's name questions never list or count for A", async () => {
+    await unlinkedInvoiceLine(B, 'שורה סודית של B');
+    const rows = await callerFor(A).mapping.unmapped();
+    expect(rows.some((r) => r.supplierId === B.supplierId || r.sampleDescription.includes('B'))).toBe(false);
+    expect(await callerFor(A).mapping.unmapped({ supplierId: B.supplierId })).toEqual([]);
+    const a = (await callerFor(A).mapping.questionCount()).count;
+    await unlinkedInvoiceLine(B, 'עוד שורה של B');
+    expect((await callerFor(A).mapping.questionCount()).count).toBe(a);
+  });
+
+  it("confirm by name key with B's supplierId → NOT_FOUND, and B's lines stay unlinked", async () => {
+    const lineB = await unlinkedInvoiceLine(B, 'שורה של B');
+    await expect(
+      callerFor(A, 'manager').mapping.confirm({ supplierId: B.supplierId, rawName: 'שורה של B', productId: A.productId }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [l] = await db.select({ productId: invoiceLines.productId }).from(invoiceLines).where(eq(invoiceLines.id, lineB));
+    expect(l?.productId).toBeNull();
+  });
+
+  it("confirm by name key with B's productId → NOT_FOUND, nothing linked", async () => {
+    const lineA = await unlinkedInvoiceLine(A, 'שורה של A');
+    await expect(
+      callerFor(A, 'manager').mapping.confirm({ supplierId: A.supplierId, rawName: 'שורה של A', productId: B.productId }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [l] = await db.select({ productId: invoiceLines.productId }).from(invoiceLines).where(eq(invoiceLines.id, lineA));
+    expect(l?.productId).toBeNull();
   });
 });

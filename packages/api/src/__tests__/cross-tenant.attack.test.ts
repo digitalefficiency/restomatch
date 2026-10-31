@@ -260,6 +260,9 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'mapping.unmapped': 'isolation',
   'mapping.searchProducts': 'isolation',
   'mapping.confirm': 'attack',
+  // G-08: the open "זה אותו מוצר?" count for the home line — a restaurant-scoped
+  // count, no ₪. See catalog-mapping.attack.test.ts.
+  'mapping.questionCount': 'isolation — catalog-mapping.attack.test.ts: counts only the caller restaurant name-keyed questions; B never counted for A',
   // Canonical product management (rename / recategorize / exclusivity / delete).
   'products.update': 'attack',
   'products.list': 'isolation',

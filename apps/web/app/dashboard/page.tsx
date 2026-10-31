@@ -9,10 +9,12 @@ import { views as viewsNs } from '@/lib/i18n/messages/views';
 import { leaks as leaksNs } from '@/lib/i18n/messages/leaks';
 import { recovery as recoveryNs } from '@/lib/i18n/messages/recovery';
 import { leakProof as leakProofNs } from '@/lib/i18n/messages/leakProof';
+import { catalog as catalogNs } from '@/lib/i18n/messages/catalog';
 import { homeCaller } from './home/caller';
 import { FinanceHome } from './home/finance';
 import { forcedFailures } from './home/section';
 import { ChefHome, ReceiverHome } from './home/staff';
+import { QuestionsLine } from './home/questions';
 
 /**
  * /dashboard renders by role ("Today", W1-05). The role is resolved BEFORE any
@@ -43,6 +45,28 @@ export default async function DashboardPage({
     <SectionHeader level={1} title={t(`homeTitle.${role}`)} subtitle={t(`homeSubtitle.${role}`)} />
   );
 
+  // G-08: the "זה אותו מוצר?" line for those who can answer it (owner, manager).
+  // A count only, no ₪. A failed read hides the line rather than blocking the home.
+  const asks = role === 'owner' || role === 'manager';
+  const [questions, tc] = asks
+    ? await Promise.all([
+        caller.mapping
+          .questionCount()
+          .then((r) => r.count)
+          .catch(() => 0),
+        getT(catalogNs),
+      ])
+    : [0, null];
+  const questionsLine =
+    asks && tc ? (
+      <QuestionsLine
+        count={questions}
+        locale={locale}
+        label={(count) => tc('mapping.pendingQuestions', { count })}
+        cta={tc('mapping.answerCta')}
+      />
+    ) : null;
+
   if (role === 'receiver') {
     return (
       <div data-home="receiver">
@@ -65,6 +89,7 @@ export default async function DashboardPage({
     <div data-home={role}>
       {/* Finance homes: the strip is the answer — no subtitle line pushing it down. */}
       <div className="[&>div]:mb-4 [&_p]:hidden">{header}</div>
+      {questionsLine}
       <FinanceHome
         caller={caller}
         role={role}

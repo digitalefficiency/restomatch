@@ -246,5 +246,12 @@ export const he = {
     undoLabel: 'ביטול הקישור של המק״ט {sku}',
     undone: 'הקישור בוטל · {count} שורות',
     linkTo: 'קישור ל-{name}',
+    question: 'זה אותו מוצר?',
+    questionBody: 'שורה בלי מק״ט. בחרו את המוצר המתאים, חפשו אחר או צרו מוצר חדש.',
+    suggestionsLabel: 'הצעות למוצר תואם',
+    noSuggestions: 'אין הצעה מתאימה. חפשו מוצר או צרו חדש.',
+    answerCta: 'ענו על השאלות',
+    pendingQuestions: '{count} מוצרים מחכים לשאלה: זה אותו מוצר?',
+    undoLabelName: 'ביטול הקישור של {name}',
   },
 };

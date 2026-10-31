@@ -245,5 +245,12 @@ export const en: Shape<typeof he> = {
     undoLabel: 'Undo the link of SKU {sku}',
     undone: 'Link undone · {count} lines',
     linkTo: 'Link to {name}',
+    question: 'Is this the same product?',
+    questionBody: 'A line with no SKU. Pick the matching product, search for another, or create a new one.',
+    suggestionsLabel: 'Suggested matching products',
+    noSuggestions: 'No good suggestion. Search for a product or create a new one.',
+    answerCta: 'Answer the questions',
+    pendingQuestions: '{count} products waiting for a question: is this the same product?',
+    undoLabelName: 'Undo the link of {name}',
   },
 };

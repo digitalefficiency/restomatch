@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
 import { Boxes, Check, Plus, Search } from 'lucide-react';
@@ -28,6 +28,16 @@ type ConfirmResult = Outputs['mapping']['confirm'];
 /** How long "ביטול" stays on screen after a link (an action needs ≥10 s). */
 const UNDO_MS = 10_000;
 
+/** The confirm key: (supplier, SKU), or a G-08 name question (supplier, name, no SKU). */
+function confirmKey(row: UnmappedSku) {
+  return {
+    supplierId: row.supplierId,
+    ...(row.supplierSku ? { supplierSku: row.supplierSku } : {}),
+    rawName: row.sampleDescription || row.supplierSku || '',
+  };
+}
+const rowKey = (row: UnmappedSku) => `${row.supplierId}::${row.kind}::${row.supplierSku ?? row.nameKey ?? ''}`;
+
 /** The last link, with what it changed, so it can be undone. */
 interface LastLink {
   row: UnmappedSku;
@@ -40,6 +50,7 @@ export function SkuMapper({ initial }: { initial: UnmappedSku[] }) {
   const utils = trpc.useUtils();
   const q = trpc.mapping.unmapped.useQuery(undefined, { initialData: initial });
   const rows = q.data ?? [];
+  const questions = rows.filter((r) => r.kind === 'name').length;
   const [last, setLast] = useState<LastLink | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
@@ -78,7 +89,7 @@ export function SkuMapper({ initial }: { initial: UnmappedSku[] }) {
     >
       {last ? (
         <LinkStatus
-          key={last.result.productId + last.row.supplierSku}
+          key={last.result.productId + rowKey(last.row)}
           last={last}
           onUndone={() => {
             pause();
@@ -105,12 +116,19 @@ export function SkuMapper({ initial }: { initial: UnmappedSku[] }) {
         />
       ) : (
         <>
-          <p className="text-sm text-muted">
-            {t('mapping.pending', { count: formatNumber(rows.length, locale) })}
-          </p>
+          {questions > 0 && (
+            <p className="text-sm text-muted">
+              {t('mapping.pendingQuestions', { count: formatNumber(questions, locale) })}
+            </p>
+          )}
+          {rows.length - questions > 0 && (
+            <p className="text-sm text-muted">
+              {t('mapping.pending', { count: formatNumber(rows.length - questions, locale) })}
+            </p>
+          )}
           <ul className="space-y-3">
             {rows.map((row) => (
-              <li key={`${row.supplierId}::${row.supplierSku}`}>
+              <li key={rowKey(row)}>
                 <MapRow row={row} onLinked={onLinked} />
               </li>
             ))}
@@ -177,15 +195,12 @@ function LinkStatus({ last, onUndone }: { last: LastLink; onUndone: () => void }
           variant="secondary"
           size="sm"
           loading={undo.isPending}
-          aria-label={t('mapping.undoLabel', { sku: row.supplierSku })}
-          onClick={() =>
-            undo.mutate({
-              supplierId: row.supplierId,
-              supplierSku: row.supplierSku,
-              rawName: row.sampleDescription || row.supplierSku,
-              revert: result.undo!,
-            })
+          aria-label={
+            row.supplierSku
+              ? t('mapping.undoLabel', { sku: row.supplierSku })
+              : t('mapping.undoLabelName', { name: row.sampleDescription })
           }
+          onClick={() => undo.mutate({ ...confirmKey(row), revert: result.undo! })}
         >
           {t('mapping.undo')}
         </Button>
@@ -222,14 +237,10 @@ function MapRow({ row, onLinked }: { row: UnmappedSku; onLinked: (link: LastLink
   });
 
   const link = (args: { productId?: string; newProductName?: string }) => {
-    confirm.mutate({
-      supplierId: row.supplierId,
-      supplierSku: row.supplierSku,
-      rawName: row.sampleDescription || row.supplierSku,
-      ...args,
-    });
+    confirm.mutate({ ...confirmKey(row), ...args });
   };
-  const panelId = `map-${row.supplierId}-${row.supplierSku}`;
+  const panelId = `map-${useId().replace(/:/g, '')}`;
+  const isQuestion = row.kind === 'name';
 
   return (
     <Card className="p-4">
@@ -237,9 +248,13 @@ function MapRow({ row, onLinked }: { row: UnmappedSku; onLinked: (link: LastLink
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <Badge>{row.supplierName}</Badge>
-            <span className="font-mono text-sm text-subtle">
-              {t('mapping.sku', { sku: row.supplierSku })}
-            </span>
+            {row.supplierSku ? (
+              <span className="font-mono text-sm text-subtle">
+                {t('mapping.sku', { sku: row.supplierSku })}
+              </span>
+            ) : (
+              <span className="text-sm font-medium text-ink">{t('mapping.question')}</span>
+            )}
             {row.occurrences > 1 && (
               <span className="text-xs text-subtle">
                 · {t('mapping.occurrences', { count: formatNumber(row.occurrences, locale) })}
@@ -249,6 +264,7 @@ function MapRow({ row, onLinked }: { row: UnmappedSku; onLinked: (link: LastLink
           <div className="mt-1 truncate text-ink" lang="he">
             {row.sampleDescription || '—'}
           </div>
+          {isQuestion && <p className="mt-1 text-xs text-muted">{t('mapping.questionBody')}</p>}
         </div>
         <Button
           variant={open ? 'secondary' : 'primary'}
@@ -260,6 +276,31 @@ function MapRow({ row, onLinked }: { row: UnmappedSku; onLinked: (link: LastLink
           {open ? t('mapping.close') : t('mapping.map')}
         </Button>
       </div>
+
+      {isQuestion && (
+        <div className="mt-3">
+          {row.suggestions.length > 0 ? (
+            <ul className="flex flex-wrap gap-2" aria-label={t('mapping.suggestionsLabel')}>
+              {row.suggestions.map((sug) => (
+                <li key={sug.productId}>
+                  <button
+                    type="button"
+                    disabled={confirm.isPending}
+                    onClick={() => link({ productId: sug.productId })}
+                    aria-label={t('mapping.linkTo', { name: sug.canonicalName })}
+                    className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full border border-line bg-surface-2 px-3 py-1.5 text-sm text-ink transition hover:border-primary/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:opacity-50"
+                  >
+                    <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+                    <span lang="he">{sug.canonicalName}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-subtle">{t('mapping.noSuggestions')}</p>
+          )}
+        </div>
+      )}
 
       {open && (
         <div id={panelId} className="mt-4 border-t border-line pt-4">
