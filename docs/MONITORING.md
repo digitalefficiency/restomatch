@@ -3,9 +3,21 @@
 Three layers, cheapest first. Everything is **off by default** and needs no
 code change to enable — only env vars (and, for Sentry, one dependency).
 
+**Production has no worker process (#136).** Every background job — OCR, matching,
+e-mails, the scheduled tasks of `cron.ts`, stall recovery — runs inside Vercel:
+Vercel Cron calls `/api/cron/jobs` every minute (`apps/web/vercel.json`); it
+beats `worker_heartbeats` (worker_id `vercel-cron`), recovers stalled jobs, runs
+due scheduled tasks and drains the queue for ~240 s. Uploads are also kicked
+right after their request (`lib/jobKick.ts`). "Worker" below means that runner.
+The Mac / Fly worker (`apps/worker`) is optional and may run next to it.
+
+The owner's on-call card (what each alert means, the first check, what to do)
+is `docs/ops/ALERT-CARD.he.md`; the morning read-only queries are
+`docs/ops/DAILY-CHECKS.sql`.
+
 | Layer | Catches | Where |
 |---|---|---|
-| Worker heartbeat watchdog | worker process down / laptop asleep / database unreachable | built in (`/api/cron/worker-heartbeat`, every 5 min on Vercel Cron) |
+| Job-runner heartbeat watchdog | `/api/cron/jobs` not running (Vercel Cron off, deploy broken) / database unreachable | built in (`/api/cron/worker-heartbeat`, every 5 min on Vercel Cron) |
 | Uptime monitor (external) | web down, cron not running, TLS/DNS problems | spec below (Better Stack / UptimeRobot / Checkly) |
 | Sentry | exceptions in web (server) and worker, with PII scrubbed | `@restomatch/observability` → `initSentryFromEnv` |
 | Daily health digest | slow rot: stuck OCR, failed jobs, failed emails, queue backlog | worker job `health-digest`, 06:45 Asia/Jerusalem |
@@ -46,26 +58,35 @@ client config; the server side covers tRPC and rendering failures).
 Recommended alert rules in Sentry: *new issue* → email; *issue seen > 10 times in
 1 h* → email + Slack.
 
-## 2. Uptime checks (external monitor spec)
+## 2. Uptime checks (UptimeRobot — the owner creates these)
 
-Configure in any monitor (Better Stack, UptimeRobot, Checkly). Regions: at least
-2, one in Europe. Alert after 2 consecutive failures.
+**UptimeRobot**, free plan, three HTTP(S) **Keyword** monitors. All three use the same settings:
+- interval **5 min**;
+- alert after **2 consecutive failures** (UptimeRobot: "Alert after 2 down checks" / confirmation);
+- notify via the **UptimeRobot phone app (push)**, plus e-mail as a backup.
 
-| # | Check | Request | Expect | Interval | Why |
-|---|---|---|---|---|---|
-| U1 | Web liveness | `GET https://<app>/api/healthz` | 200, JSON `"status":"ok"`, < 2 s | 1 min | web up, no DB coupling (never flaps on a dependency) |
-| U2 | Login page renders | `GET https://<app>/login` | 200, body contains `RestoMatch` | 5 min | full render path (layout, i18n, CSP) |
-| U3 | Worker alive | `GET https://<app>/api/cron/worker-heartbeat` with header `Authorization: Bearer <CRON_SECRET>` | 200, body contains `"status":"ok"` | 5 min | worker heartbeat in `worker_heartbeats` is < 5 min old |
-| U4 | Worker process (Fly only) | built-in Fly check `GET :8080/health` | 200 | 15 s | health status + deploy gate (Fly does not restart on a failed check; the worker's database watchdog exits and `[[restart]]` restarts it) |
-| U5 | TLS | certificate on `<app>` | > 14 days left | daily | |
+No secret is needed by any of them, and none of them sends one.
 
-U3 doubles as "is Vercel Cron running": the same route also emails
-`WORKER_ALERT_EMAILS` when the beat is stale. It returns 401 without the bearer
-(never expose `CRON_SECRET` to a monitor that shares dashboards publicly). A 500
-from U3 means either the database is unreachable from the web app (the heartbeat
-read fails — no alert email can be sent in that state, so the monitor IS the
-alert) or the alert
-email itself failed (the next tick retries). Either way: page a human.
+| # | Monitor name | Type / URL | Keyword (alert when NOT found) | Means when it fires |
+|---|---|---|---|---|
+| U1 | `RestoMatch healthz` | Keyword · `GET https://restomatchrrr.vercel.app/api/healthz` | `"status":"ok"` | the web app is down (no DB coupling: never flaps on a dependency) |
+| U2 | `RestoMatch login` | Keyword · `GET https://restomatchrrr.vercel.app/login` | `RestoMatch` | the login page does not render (layout, i18n, CSP) |
+| U3 | `RestoMatch jobs` | Keyword · `GET https://restomatchrrr.vercel.app/api/healthz?jobs=1` | `"jobs":"ok"` | the job runner has not beaten for ≥ 180 s (OCR / e-mails stopped), or the database did not answer |
+| U5 | (optional) SSL expiry | UptimeRobot's SSL check on the U1 monitor | — | certificate < 14 days left |
+
+U3 is public and secret-free. `/api/healthz?jobs=1` adds two fields to the U1 answer, and always answers HTTP 200 so that only the keyword decides:
+- `jobs`:
+  - `ok`: the freshest `worker_heartbeats` row is under 180 s old (the runner beats every 60 s);
+  - `stale`: it is older, or there is no row;
+  - `unknown`: the database errored or was slower than 2.5 s.
+- `heartbeatAgeSec`: the age of that row.
+
+It sends `Cache-Control: no-store`. The base `/api/healthz` never touches the database and its answer is unchanged.
+
+The **e-mail** side of the same signal is `/api/cron/worker-heartbeat`, run by Vercel Cron every 5 min with `CRON_SECRET`:
+- it e-mails `WORKER_ALERT_EMAILS` once when the beat is stale (> 5 min), and again on recovery;
+- it is NOT an uptime target, because it needs the bearer;
+- when the database itself is down it cannot e-mail; U3 is the alert then.
 
 ## 3. Daily health digest
 
@@ -120,7 +141,7 @@ job, every attempt failed) stays `ocr_pending`. The sweep re-enqueues it **once*
 
 | Signal | Recipient | Channel |
 |---|---|---|
-| Worker down > 5 min | `WORKER_ALERT_EMAILS` | email (heartbeat route) |
-| Uptime U1–U5 | owner + on-call | monitor's email/SMS/Slack |
+| Job runner down > 5 min | `WORKER_ALERT_EMAILS` | email (heartbeat route) |
+| Uptime U1 / U2 / U3 | owner | UptimeRobot phone-app push (+ e-mail) |
 | Sentry new issue | owner | email |
 | Daily digest | `HEALTH_DIGEST_EMAILS` | email (outbox) |
