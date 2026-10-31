@@ -258,6 +258,26 @@ describe('password-login limit counts only FAILED attempts (demo: many logins in
     });
   });
 
+  it('per IP, a refund lands in the window the attempt was counted in (never the next one)', async () => {
+    await withRealDb(async (rl) => {
+      const ip = `10.4.4.1-${RUN}`;
+      const windowMs = rl.LOGIN_IP_LIMIT.windowSec * 1000;
+      const k = Math.floor(Date.now() / windowMs) * windowMs; // start of the current window
+      const inK = k + windowMs - 10; // 10 ms before the boundary
+      const inNext = k + windowMs + 10; // 10 ms after it
+      // A successful login counted at the very end of window k ...
+      expect((await rl.enforceLoginLimit(`edge-${RUN}@demo.test`, ip, inK)).allowed).toBe(true);
+      // ... while 29 failures land in the next window ...
+      for (let i = 0; i < rl.LOGIN_IP_LIMIT.limit - 1; i++) {
+        await rl.enforceLoginLimit(`edgefail${i}-${RUN}@demo.test`, ip, inNext);
+      }
+      // ... and its refund runs after the boundary: it must give back window k's unit.
+      await rl.refundLoginIp(ip, inK);
+      expect((await rl.enforceLoginLimit(`edgefail29-${RUN}@demo.test`, ip, inNext)).allowed).toBe(true); // #30 in k+1
+      expect((await rl.enforceLoginLimit(`edgefail30-${RUN}@demo.test`, ip, inNext)).allowed).toBe(false); // #31 refused
+    });
+  });
+
   it('per IP, a parallel burst stays bounded even with refunds pending', async () => {
     await withRealDb(async (rl) => {
       const ip = `10.4.3.1-${RUN}`;

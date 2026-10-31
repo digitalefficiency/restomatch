@@ -259,8 +259,17 @@ export const LOGIN_IP_LIMIT: RateLimitOptions = {
  * front line; the DB lockout backstop in authorizeCredentials is the durable
  * floor that holds even when the store fails open.
  */
-export async function enforceLoginLimit(email: string, ip: string): Promise<RateLimitResult> {
-  return enforceEmailAndIpLimit(email, ip, LOGIN_EMAIL_LIMIT, LOGIN_IP_LIMIT);
+export async function enforceLoginLimit(email: string, ip: string, attemptAt?: number): Promise<RateLimitResult> {
+  // `attemptAt` pins the fixed window this attempt is counted in, so the refund
+  // of a successful login (refundLoginIp) gives back exactly that window's unit
+  // even when the password check straddles a window boundary.
+  const at = attemptAt === undefined ? undefined : () => attemptAt;
+  return enforceEmailAndIpLimit(
+    email,
+    ip,
+    at ? { ...LOGIN_EMAIL_LIMIT, now: at } : LOGIN_EMAIL_LIMIT,
+    at ? { ...LOGIN_IP_LIMIT, now: at } : LOGIN_IP_LIMIT,
+  );
 }
 
 /**
@@ -286,9 +295,12 @@ export async function clearLoginFailures(email: string): Promise<void> {
  * IP). Failures, unknown users, locked accounts and rate-denied attempts keep
  * their unit. Best effort: a store error only logs, like clearLoginFailures.
  */
-export async function refundLoginIp(ip: string): Promise<void> {
+export async function refundLoginIp(ip: string, attemptAt?: number): Promise<void> {
   try {
-    await refundRateLimit(await getStore(), ip || 'unknown', LOGIN_IP_LIMIT);
+    // Pass the same `attemptAt` given to enforceLoginLimit: the unit is refunded
+    // in the window it was counted in, never taken from the next window.
+    const opts = attemptAt === undefined ? LOGIN_IP_LIMIT : { ...LOGIN_IP_LIMIT, now: () => attemptAt };
+    await refundRateLimit(await getStore(), ip || 'unknown', opts);
   } catch (err) {
     console.warn('[rateLimit] could not refund the login IP unit:', err instanceof Error ? err.message : err);
   }

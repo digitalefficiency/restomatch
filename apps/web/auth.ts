@@ -174,7 +174,9 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         // limiters key on any email string + IP). A wrong password and the DB
         // lockout stay the uniform null → CredentialsSignin.
         const ip = clientIpFromHeaders(await headers(), { trustedProxyHops: trustedProxyHops() });
-        const rl = await enforceLoginLimit(email, ip);
+        // One timestamp for the count and its refund: the same fixed window.
+        const attemptAt = Date.now();
+        const rl = await enforceLoginLimit(email, ip, attemptAt);
         if (!rl.allowed) throw new LoginRateLimited();
         const result = await authorizeCredentials({ email, password });
         if (!result) return null;
@@ -182,7 +184,7 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         await clearLoginFailures(email);
         // Give back this attempt's per-IP unit: only failures count per network
         // (owner decision 31.10; staff share one restaurant Wi-Fi).
-        await refundLoginIp(ip);
+        await refundLoginIp(ip, attemptAt);
         const rememberMe =
           creds?.rememberMe === true ||
           creds?.rememberMe === 'true' ||
