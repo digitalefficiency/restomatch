@@ -56,7 +56,10 @@ test.afterAll(async () => {
   const sql = e2eSql();
   try {
     await sql`delete from inventory_counts where restaurant_id = ${restaurantId}`;
-    await sql`update restaurants set settings = ${settingsBefore}::jsonb where id = ${restaurantId}`;
+    // `::text::jsonb`, not `::jsonb`: postgres.js JSON-encodes a `$1::jsonb` param, so the restored
+    // object landed as a jsonb STRING, and a retry encoded it twice, which turned every feature flag
+    // off for every spec that runs after this one.
+    await sql`update restaurants set settings = ${settingsBefore}::text::jsonb where id = ${restaurantId}`;
   } finally {
     await sql.end();
   }

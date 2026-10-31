@@ -23,10 +23,17 @@ export function InventoryHome({ showMoney }: { showMoney: boolean }) {
   const locale = useLocale();
   const toast = useToast();
   const router = useRouter();
+  const utils = trpc.useUtils();
   const current = trpc.inventory.current.useQuery();
   const history = trpc.inventory.history.useQuery();
   const start = trpc.inventory.start.useMutation({
-    onSuccess: () => router.push('/dashboard/inventory/count'),
+    // The count screen reads this same `inventory.current` entry, and it stays mounted across the
+    // push, so with the app's 30 s staleTime (W1-04) it would keep the cached "no open count" and
+    // show "start a count" again. Load the new draft into the cache first, then navigate.
+    onSuccess: async () => {
+      await utils.inventory.current.invalidate();
+      router.push('/dashboard/inventory/count');
+    },
     onError: (e) => toast.error(friendlyError(e, tc)),
   });
   const draft = current.data;
