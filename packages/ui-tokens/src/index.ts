@@ -83,8 +83,9 @@ export const typography = {
     // Heebo drives Hebrew text, display and money (tabular-nums lining-nums).
     sans: '"Heebo", "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif',
     // Mono is for IDENTIFIERS only (invoice, PO, SKU numbers via <Token>) — never money:
-    // the JetBrains Mono subset has no ₪ glyph (design-system-02).
-    mono: 'ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace',
+    // the JetBrains Mono subset has no ₪ glyph (design-system-02). Safety net: Heebo
+    // right after JetBrains Mono, so a stray mono ₪ still draws from Heebo.
+    mono: '"JetBrains Mono", "Heebo", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace',
   },
   fontSize: {
     xs: 12,
