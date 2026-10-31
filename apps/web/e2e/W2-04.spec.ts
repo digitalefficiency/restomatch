@@ -224,6 +224,28 @@ test.describe('desktop 1440 he', () => {
   });
 });
 
+test.describe('owner: a card escalated to me while open updates in place (warden LOW-5)', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+  test('CONFLICT "escalated" → "הועבר אליך", actions kept, the next tap decides', async ({ page }) => {
+    await setLocale(page, 'he');
+    await page.goto('/dashboard/approvals');
+    const card = cardsOf(page, 'W204-3').first();
+    await expect(card).toBeVisible();
+    // A manager escalates it to the owner underneath the open page.
+    const sql = e2eSql();
+    try {
+      await sql`update discrepancies set resolution_status = 'escalated', requires_role = 'owner' where id = ${fx.c}`;
+    } finally {
+      await sql.end();
+    }
+    await card.getByTestId('decide-approve').click();
+    await expect(card).toContainText('הועבר אליך');
+    await expect(card.getByTestId('decide-approve')).toBeEnabled();
+    await card.getByTestId('decide-approve').click();
+    await expect.poll(() => statuses([fx.c])).toEqual(['accepted']);
+  });
+});
+
 test.describe('desktop 1536: three panes', () => {
   test.use({ viewport: { width: 1536, height: 900 } });
   test('list | document | decision', async ({ page }) => {

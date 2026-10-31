@@ -264,6 +264,13 @@ export function ApprovalsList({
             [d.id]: { text: t('desk.amountChanged', { amount: ils(moved.nowAgorot, locale) }) },
           }));
           void refreshSummary();
+        } else if (conflict && conflict.status === 'escalated' && viewerRole === 'owner') {
+          // A colleague escalated this card to ME while I looked at it: it is
+          // still a decision, now mine. Update it in place and keep the actions.
+          const fresh = { ...d, resolutionStatus: 'escalated', requiredRole: 'owner' as const, canAct: true };
+          setItems((xs) => xs.map((x) => (x.id === d.id ? (fresh as QueueItem) : x)));
+          setRowError((e) => ({ ...e, [d.id]: { text: t('desk.escalatedToYou') } }));
+          void refreshSummary();
         } else if (conflict) {
           setDecided((m) => ({ ...m, [d.id]: conflictText(t, conflict, locale) }));
           void refreshSummary();
@@ -364,6 +371,22 @@ export function ApprovalsList({
    * refuses a blocking row and any invoice over ₪200 on its own; the UI never
    * offers those (BatchBar / group primary), so a refusal here is a race.
    */
+  // One replay id per attempt on the SAME selection: a re-tap after a lost
+  // response replays (the server answers with the first result), never a 2nd batch.
+  const batchAttempt = useRef<{ key: string; id: string } | null>(null);
+  async function reloadQueue() {
+    try {
+      const fresh = await utils.approvals.myQueue.fetch({ limit: PAGE, ...filters }, { staleTime: 0 });
+      setItems(fresh);
+      setHidden(new Set());
+      setSelected(new Set());
+      setHasMore(fresh.length >= PAGE);
+    } catch {
+      /* the note already says the outcome is unknown */
+    }
+    void refreshSummary();
+  }
+
   function decideBatch(rows: QueueItem[], doneLabel: string) {
     if (rows.length === 0) return;
     const ids = rows.map((r) => r.id);
@@ -377,7 +400,11 @@ export function ApprovalsList({
           expectedStatus: r.resolutionStatus as 'open' | 'escalated',
         })),
         decision: 'accepted',
-        clientMutationId: newClientMutationId(),
+        clientMutationId: (() => {
+          const key = [...ids].sort().join(',');
+          if (batchAttempt.current?.key !== key) batchAttempt.current = { key, id: newClientMutationId() };
+          return batchAttempt.current.id;
+        })(),
       })
       .then(() => {
         for (const r of rows) adjustSummary(r, -1);
@@ -386,10 +413,18 @@ export function ApprovalsList({
         const text = t('desk.batchDone', { count: formatNumber(rows.length, locale), amount: ils(total, locale) });
         setAnnouncement(`${doneLabel} · ${text}`);
         setUndo({ id: ids[0]!, ids, text, until: Date.now() + UNDO_MS, remaining: null });
+        batchAttempt.current = null;
         void refreshSummary();
       })
       .catch((err: { data?: { code?: string } | null }) => {
-        setBatchNote(err.data?.code === 'CONFLICT' ? t('desk.batchConflict') : t('desk.batchError'));
+        const code = err.data?.code;
+        if (code === 'CONFLICT') setBatchNote(t('desk.batchConflict'));
+        else if (code === 'FORBIDDEN' || code === 'BAD_REQUEST') setBatchNote(t('desk.batchError'));
+        else {
+          // Network / server error: the batch may or may not have committed.
+          setBatchNote(t('desk.batchUnknown'));
+          void reloadQueue();
+        }
       })
       .finally(() => setBusyId((b) => (b === 'batch' ? null : b)));
   }

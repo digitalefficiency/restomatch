@@ -163,7 +163,7 @@ describe('approvals.decideMany', () => {
     expect(await statuses(ids)).toEqual({ [ids[0]!]: 'rejected' });
   });
 
-  it('reopenMany restores every item (and writes off the claims the decision made)', async () => {
+  it('reopenMany restores every item (and removes the bare claims the decision made)', async () => {
     const { matchRunId } = await addInvoice(db, T, 'undo');
     const ids = [
       await addGap(db, T, matchRunId, { deltaAmount: '40.00' }),
@@ -176,7 +176,7 @@ describe('approvals.decideMany', () => {
     expect(res.reopened.sort()).toEqual([...ids].sort());
     expect(await statuses(ids)).toEqual({ [ids[0]!]: 'open', [ids[1]!]: 'open' });
     const after = await db.select().from(recoveryClaims).where(inArray(recoveryClaims.discrepancyId, ids));
-    expect(after.every((c) => c.status === 'written_off')).toBe(true);
+    expect(after).toHaveLength(0);
   });
 
   it('reopenMany is all-or-nothing: an item nobody decided refuses the batch', async () => {

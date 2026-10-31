@@ -38,6 +38,8 @@ export const he = {
     unrouted: 'מנהל או בעלים',
   },
   desk: {
+    batchUnknown: 'לא ידוע אם האישור נשמר. מרעננים את התור.',
+    escalatedToYou: 'הועבר אליך · ההחלטה שלך',
     amountChanged: 'הסכום לדרישה השתנה ל-{amount}. בדקו ואשרו שוב.',
     groupGapsOne: 'פער אחד',
     groupGapsMany: '{count} פערים',
@@ -52,7 +54,7 @@ export const he = {
     batchOverCap: 'חשבונית מעל {cap} בבחירה',
     batchCannotAct: 'יש בבחירה פער שלא בסמכותך',
     batchDone: 'אושרו {count} · {amount}',
-    batchError: 'האישור לא נשמר. דבר לא השתנה.',
+    batchError: 'השרת סירב לאישור. דבר לא השתנה.',
     batchConflict: 'מישהו כבר החליט על חלק מהפערים. רעננו את התור.',
     evidence: 'הצג ראיות',
     evidenceTitle: 'ראיות',

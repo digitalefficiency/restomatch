@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { and, createDb, eq, notificationsOutbox, restaurants, sql, testDbUrl } from '@restomatch/db';
 import { awaitingDecision, claimableLines, formatIlsAgorot, materializeClaims } from '@restomatch/api';
 import { computeInvoiceLeak } from '@restomatch/charts';
@@ -70,7 +70,8 @@ describe('match-invoice notification copy', () => {
       WHERE d.restaurant_id = ${restaurantId} AND d.resolution_status IN ('open','escalated') AND mr.invoice_id IS NOT NULL
       ORDER BY abs(d.delta_amount) DESC LIMIT 1`)) as unknown as Array<{ invoice_id: string }>;
     const inv = await computeInvoiceLeak(db, restaurantId, invoiceId);
-    const expected = claimableLines(inv!).reduce((n, c) => n + Math.round(c.amount * 100), 0);
+    // Before-VAT basis only: a duplicate (incl.) or a VAT amount is never added in.
+    const expected = claimableLines(inv!).filter((c) => c.basis === 'excl').reduce((n, c) => n + Math.round(c.amount * 100), 0);
     expect(await invoiceClaimAgorot(db, restaurantId, invoiceId)).toBe(expected);
   });
 
@@ -107,13 +108,17 @@ describe('match-invoice re-match keeps claims honest (W2-04 §8)', () => {
     expect(rows.every((r) => r.created_by === decider && r.resolution_status === 'accepted')).toBe(true);
   });
 
-  it('a claim with money history refuses the re-match with CONFLICT (surfaced, not swallowed)', async () => {
+  it('a claim with money history: the re-match is SKIPPED (no endless retry), the old run is kept, one ops line', async () => {
     const [inv] = (await db.execute(sql`
-      SELECT mr.invoice_id FROM recovery_claims c JOIN discrepancies d ON d.id = c.discrepancy_id
-      JOIN match_runs mr ON mr.id = d.match_run_id WHERE c.restaurant_id = ${restaurantId} LIMIT 1`)) as unknown as Array<{ invoice_id: string }>;
+      SELECT mr.invoice_id, mr.id AS run_id FROM recovery_claims c JOIN discrepancies d ON d.id = c.discrepancy_id
+      JOIN match_runs mr ON mr.id = d.match_run_id WHERE c.restaurant_id = ${restaurantId} LIMIT 1`)) as unknown as Array<{ invoice_id: string; run_id: string }>;
     await db.execute(sql`UPDATE recovery_claims SET letter_sent_at = now() WHERE invoice_id = ${inv!.invoice_id}::uuid`);
-    await expect(matchInvoiceForJob(db, { restaurantId, invoiceId: inv!.invoice_id, rematch: true })).rejects.toMatchObject({
-      code: 'CONFLICT',
-    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const out = await matchInvoiceForJob(db, { restaurantId, invoiceId: inv!.invoice_id, rematch: true });
+    expect(out).toMatchObject({ persisted: null, skipped: 'claims_in_progress' });
+    expect(warn.mock.calls.filter((c) => String(c[0]).includes('re-match skipped'))).toHaveLength(1);
+    warn.mockRestore();
+    const [still] = (await db.execute(sql`SELECT count(*)::int AS n FROM match_runs WHERE id = ${inv!.run_id}::uuid`)) as unknown as Array<{ n: number }>;
+    expect(still!.n).toBe(1);
   });
 });

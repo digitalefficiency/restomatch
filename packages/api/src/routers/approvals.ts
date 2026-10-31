@@ -5,6 +5,7 @@ import {
   activityEvents,
   auditLog,
   desc,
+  recoveryClaims,
   discrepancies,
   discrepancyType,
   eq,
@@ -420,13 +421,20 @@ export const approvalsRouter = router({
             throw new TRPCError({ code: 'FORBIDDEN', message: QUICK_REFUSED_PREFIX + JSON.stringify({ reason: why }) });
           }
         }
-        const { updated } = await decide(tx, ctx, row, {
+        const { updated, committedAgorot } = await decide(tx, ctx, row, {
           decision: 'accepted',
           note: input.note ?? null,
           expectedStatus: input.expectedStatus,
           seenClaimAgorot: input.seenClaimAgorot,
           channel: input.channel ?? 'desk',
         });
+        if (input.channel === 'quick') {
+          // Fail closed on what was actually claimed (the preview can read 0).
+          const why = quickApproveRefusal({ severity: row.severity, claimAgorot: committedAgorot });
+          if (why) {
+            throw new TRPCError({ code: 'FORBIDDEN', message: QUICK_REFUSED_PREFIX + JSON.stringify({ reason: why }) });
+          }
+        }
         return updated;
       }),
     ),
@@ -507,7 +515,7 @@ export const approvalsRouter = router({
         const decided: Array<{ discrepancyId: string; amountAgorot: number }> = [];
         for (const item of input.items) {
           const row = rows.get(item.discrepancyId)!;
-          await decide(tx, ctx, row, {
+          const { committedAgorot } = await decide(tx, ctx, row, {
             decision: input.decision,
             reason,
             reasonCode: input.reasonCode ?? null,
@@ -515,7 +523,31 @@ export const approvalsRouter = router({
             channel: 'bulk',
             clientMutationId: input.clientMutationId,
           });
-          decided.push({ discrepancyId: row.id, amountAgorot: row.claimAgorot });
+          decided.push({
+            discrepancyId: row.id,
+            amountAgorot: input.decision === 'accepted' ? committedAgorot : row.claimAgorot,
+          });
+        }
+        if (input.decision === 'accepted') {
+          // The cap again, on the COMMITTED claims (Σ per invoice across the
+          // batch): a preview of 0 must never let ₪300 through. Fail closed —
+          // the throw rolls back every decision of the batch.
+          const late = bulkRefusals(
+            decided.map((d) => ({
+              discrepancyId: d.discrepancyId,
+              invoiceId: rows.get(d.discrepancyId)!.invoiceId,
+              severity: rows.get(d.discrepancyId)!.severity,
+              claimAgorot: d.amountAgorot,
+            })),
+          );
+          if (late.size > 0) {
+            throw new TRPCError({
+              code: 'FORBIDDEN',
+              message:
+                BULK_REFUSED_PREFIX +
+                JSON.stringify([...late].map(([discrepancyId, reason]) => ({ discrepancyId, reason }))),
+            });
+          }
         }
         return {
           decided,
@@ -657,7 +689,30 @@ interface DecisionRow {
 
 /** Every write of a decision runs in ONE transaction (a savepoint when the caller already holds one). */
 function inTx<T>(ctx: Ctx, fn: (tx: Database) => Promise<T>): Promise<T> {
-  return ctx.db.transaction(async (raw) => fn(raw as unknown as Database));
+  return ctx.db.transaction(async (raw) => {
+    const tx = raw as unknown as Database;
+    // The recovery lock FIRST, before any row is updated: materializeClaims
+    // takes the same (re-entrant) key, so every decision path locks in ONE
+    // order and two batches can never deadlock (row CAS ↔ advisory lock).
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'recovery:' + ctx.session.restaurantId}))`);
+    return fn(tx);
+  });
+}
+
+/** The agorot of the claim this decision actually holds now (0 = none). */
+async function committedClaimAgorot(tx: Database, restaurantId: string, discrepancyId: string): Promise<number> {
+  const [c] = await tx
+    .select({ amount: recoveryClaims.amountAgorot })
+    .from(recoveryClaims)
+    .where(
+      and(
+        eq(recoveryClaims.restaurantId, restaurantId),
+        eq(recoveryClaims.discrepancyId, discrepancyId),
+        eq(recoveryClaims.status, 'claimed'),
+      ),
+    )
+    .limit(1);
+  return c ? Number(c.amount) : 0;
 }
 
 /** A side effect that must never roll the decision back (G-05: effects run in savepoints). */
@@ -738,16 +793,10 @@ async function decide(
     channel: 'desk' | 'quick' | 'bulk';
     clientMutationId?: string;
   },
-): Promise<{ updated: typeof discrepancies.$inferSelect; auditId: string }> {
+): Promise<{ updated: typeof discrepancies.$inferSelect; auditId: string; committedAgorot: number }> {
   const rid = ctx.session.restaurantId;
   const tctx = { ...ctx, db: tx };
   if (opts.expectedStatus && row.status !== opts.expectedStatus) throw await decidedConflict(tctx, row.id);
-  if (opts.seenClaimAgorot !== undefined && opts.seenClaimAgorot !== row.claimAgorot) {
-    throw new TRPCError({
-      code: 'CONFLICT',
-      message: AMOUNT_CHANGED_PREFIX + JSON.stringify({ seenAgorot: opts.seenClaimAgorot, nowAgorot: row.claimAgorot }),
-    });
-  }
   const now = new Date();
   const set =
     opts.decision === 'escalated'
@@ -765,10 +814,30 @@ async function decide(
     .returning();
   if (!updated) throw await decidedConflict(tctx, row.id);
 
+  // The claim first (W2-10a), then read back what it COMMITTED: the gates, the
+  // audit, the activity and the response all use this one figure, never the
+  // queue's preview (which can differ on a paid / pending-link invoice or when
+  // the invoice cap binds in decision order). A throw rolls everything back.
+  // An accepted duplicate is BOTH held from payment (pay run, "duplicateHeld"
+  // wording) AND claimed (incl. VAT) — the letters and syncClaims count it too.
+  const heldDuplicate = opts.decision === 'accepted' && row.type === 'DUPLICATE_INVOICE';
+  if (opts.decision !== 'escalated') {
+    await materializeClaims(tx, { restaurantId: rid, discrepancyIds: [row.id], actorId: ctx.session.userId });
+  }
+  const committedAgorot = opts.decision === 'accepted' ? await committedClaimAgorot(tx, rid, row.id) : 0;
+  if (opts.decision === 'accepted' && opts.seenClaimAgorot !== undefined && opts.seenClaimAgorot !== committedAgorot) {
+    throw new TRPCError({
+      code: 'CONFLICT',
+      message: AMOUNT_CHANGED_PREFIX + JSON.stringify({ seenAgorot: opts.seenClaimAgorot, nowAgorot: committedAgorot }),
+    });
+  }
+  // Approve: the ₪ now claimed. Waive / escalate: the ₪ the decider saw on the row.
+  const amountAgorot = opts.decision === 'accepted' ? committedAgorot : row.claimAgorot;
+
   const before = { status: row.status, requiresRole: row.requiresRole, note: row.note };
   const common = {
     decision: opts.decision,
-    amountAgorot: row.claimAgorot,
+    amountAgorot,
     channel: opts.channel,
     ...(opts.clientMutationId ? { clientMutationId: opts.clientMutationId } : {}),
   };
@@ -791,18 +860,10 @@ async function decide(
     })
     .returning({ id: auditLog.id });
 
-  // An accepted duplicate is BOTH held from payment (pay run, "duplicateHeld"
-  // wording) AND claimed (the supplier is asked to cancel it, incl. VAT) —
-  // the letters and syncClaims already count it (orchestrator, 31.10).
-  const heldDuplicate = opts.decision === 'accepted' && row.type === 'DUPLICATE_INVOICE';
-  if (opts.decision !== 'escalated') {
-    await materializeClaims(tx, { restaurantId: rid, discrepancyIds: [row.id], actorId: ctx.session.userId });
-  }
-
   const metadata = {
     v: 2,
     decision: opts.decision,
-    amountAgorot: row.claimAgorot,
+    amountAgorot,
     supplierName: row.supplierName,
     /** |Δ| of the gap itself (may exceed the claimable ₪ after the invoice cap). */
     deltaAgorot: Math.abs(Math.round(Number(row.deltaAmount ?? 0) * 100)),
@@ -837,7 +898,7 @@ async function decide(
       });
     });
   }
-  return { updated, auditId: audit!.id };
+  return { updated, auditId: audit!.id, committedAgorot };
 }
 
 /**
@@ -1028,8 +1089,37 @@ async function reopenOne(tx: Database, ctx: Ctx, discrepancyId: string) {
     before: { status: decided, undoes: last.id },
     after: { status: priorStatus, requiresRole: updated.requiresRole, role: ctx.session.role },
   });
-  // The decision's claim goes with it (written off while no money moved).
+  // The decision's claim goes with it. A BARE claim (no money, no letter, only
+  // its own "claimed" / system events — the releaseClaimsForRematch rule) is
+  // deleted, so a later re-accept creates a fresh claim under the person who
+  // decides then, with a fresh overdue clock. Anything with history is
+  // written off by materializeClaims as before.
+  await tx.execute(sql`
+    WITH bare AS (
+      SELECT c.id FROM recovery_claims c
+      WHERE c.restaurant_id = ${rid} AND c.discrepancy_id = ${discrepancyId}::uuid
+        AND c.status = 'claimed' AND c.credited_agorot = 0
+        AND c.letter_sent_at IS NULL AND c.acknowledged_at IS NULL AND c.credited_at IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM recovery_events e
+          WHERE e.claim_id = c.id AND e.restaurant_id = ${rid}
+            AND NOT (e.to_status = 'claimed' AND (e.from_status IS NULL OR e.actor_id IS NULL))
+        )
+    ), gone AS (
+      DELETE FROM recovery_events e USING bare WHERE e.claim_id = bare.id AND e.restaurant_id = ${rid}
+    )
+    DELETE FROM recovery_claims c USING bare WHERE c.id = bare.id AND c.restaurant_id = ${rid}
+  `);
   await materializeClaims(tx, { restaurantId: rid, discrepancyIds: [discrepancyId], actorId: ctx.session.userId });
+  if (decided === 'escalated') {
+    // The owners were told about a hand-off that no longer exists: cancel the
+    // still-queued e-mails of THAT escalation (outbox.ts untouched).
+    await tx.execute(sql`
+      UPDATE notifications_outbox SET status = 'cancelled'
+      WHERE restaurant_id = ${rid} AND status = 'queued'
+        AND dedupe_key LIKE ${`approvals.escalated:${last.id}:%`}
+    `);
+  }
   // Withdraw the decision's own feed row (written moments ago by this user).
   await tx.execute(sql`
     DELETE FROM activity_events

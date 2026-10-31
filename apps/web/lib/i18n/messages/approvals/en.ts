@@ -35,6 +35,8 @@ export const en: Shape<typeof he> = {
     unrouted: 'manager or owner',
   },
   desk: {
+    batchUnknown: 'We could not confirm the approval. Refreshing the queue.',
+    escalatedToYou: 'Sent to you · your decision',
     amountChanged: 'The claimable amount changed to {amount}. Check and approve again.',
     groupGapsOne: '1 gap',
     groupGapsMany: '{count} gaps',
@@ -49,7 +51,7 @@ export const en: Shape<typeof he> = {
     batchOverCap: 'An invoice over {cap} is selected',
     batchCannotAct: 'A selected gap is not yours to decide',
     batchDone: 'Approved {count} · {amount}',
-    batchError: 'The approval was not saved. Nothing changed.',
+    batchError: 'The server refused the approval. Nothing changed.',
     batchConflict: 'Someone already decided some of these gaps. Refresh the queue.',
     evidence: 'Show evidence',
     evidenceTitle: 'Evidence',

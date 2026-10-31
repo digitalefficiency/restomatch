@@ -69,7 +69,16 @@ export interface MatchJobOutcome {
   /** True when this run replaced an earlier run of the same invoice. */
   replaced: boolean;
   /** Why nothing ran (logs/tests). */
-  skipped?: 'ocr_pending' | 'already_matched' | 'awaiting_review' | 'no_lines' | 'settled' | 'po_rejected' | 'receipt_open';
+  skipped?:
+    | 'ocr_pending'
+    | 'already_matched'
+    | 'awaiting_review'
+    | 'no_lines'
+    | 'settled'
+    | 'po_rejected'
+    | 'receipt_open'
+    /** A claim on the old run has money history (letter / credit): keep the run, don't retry. */
+    | 'claims_in_progress';
 }
 
 /**
@@ -84,7 +93,10 @@ export interface MatchJobOutcome {
  *    OCR held for a human (low confidence → 'parsed', or a possible duplicate)
  *    still waits for that human.
  */
-export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): Promise<MatchJobOutcome> {
+export async function matchInvoiceForJob(
+  db: Database,
+  data: MatchInvoiceJob,
+): Promise<MatchJobOutcome> {
   const { restaurantId, invoiceId } = data;
   const [inv] = await db
     .select({ status: invoices.status, ocrPayload: invoices.ocrPayload })
@@ -124,7 +136,9 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
   // (other supplier, outside the window, a sibling PO preferred), don't fall back
   // to some other order — skip.
   if (data.poId && built.poId !== data.poId) {
-    console.warn(`[match-invoice] invoice=${invoiceId} does not pair with the job's po=${data.poId} — skipping`);
+    console.warn(
+      `[match-invoice] invoice=${invoiceId} does not pair with the job's po=${data.poId} — skipping`,
+    );
     return { result: CLEAN, persisted: null, replaced: false, skipped: 'po_rejected' };
   }
   // Never match against a receipt that is still being counted (every line would
@@ -132,7 +146,9 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
   // waits for that submit to commit.
   if (built.grId) {
     const grId = built.grId;
-    const open = await db.transaction((tx) => receiptStillOpen(tx as unknown as Database, restaurantId, grId));
+    const open = await db.transaction((tx) =>
+      receiptStillOpen(tx as unknown as Database, restaurantId, grId),
+    );
     if (open) return { result: CLEAN, persisted: null, replaced: false, skipped: 'receipt_open' };
   }
 
@@ -145,30 +161,44 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
   const rules = buildRules(resolveApprovalThresholds(restaurant?.settings?.approvalThresholds));
   const result = runMatch(built.input);
 
-  const persisted = await db.transaction(async (rawTx) => {
-    const tx = rawTx as unknown as Database;
-    let prior: Awaited<ReturnType<typeof loadPriorDecisions>> | undefined;
-    if (priorRun) {
-      // Claims reference the discrepancies about to be deleted (FK). Release the
-      // bare ones first; a claim with money history (letter, credit) refuses the
-      // re-match with CONFLICT, which fails this job loudly (never swallowed).
-      await releaseClaimsForRematch(tx, restaurantId, invoiceId);
-      prior = await loadPriorDecisions(tx, restaurantId, invoiceId);
-      await tx
-        .delete(matchRuns)
-        .where(and(eq(matchRuns.invoiceId, invoiceId), eq(matchRuns.restaurantId, restaurantId)));
+  let persisted: Awaited<ReturnType<typeof persistMatchRun>>;
+  try {
+    persisted = await db.transaction(async (rawTx) => {
+      const tx = rawTx as unknown as Database;
+      let prior: Awaited<ReturnType<typeof loadPriorDecisions>> | undefined;
+      if (priorRun) {
+        // Claims reference the discrepancies about to be deleted (FK). Release the
+        // bare ones first; a claim with money history (letter, credit) refuses the
+        // re-match with CONFLICT, which fails this job loudly (never swallowed).
+        await releaseClaimsForRematch(tx, restaurantId, invoiceId);
+        prior = await loadPriorDecisions(tx, restaurantId, invoiceId);
+        await tx
+          .delete(matchRuns)
+          .where(and(eq(matchRuns.invoiceId, invoiceId), eq(matchRuns.restaurantId, restaurantId)));
+      }
+      const out = await persistMatchRun(
+        tx,
+        { restaurantId, invoiceId, poId: built.poId, grId: built.grId },
+        built.input,
+        result,
+        rules,
+        prior,
+      );
+      if (priorRun) await rebindDecidedClaims(tx, restaurantId, out.matchRunId);
+      return out;
+    });
+  } catch (err) {
+    // releaseClaimsForRematch refused: a claim of the old run already has money
+    // history. Retrying can never succeed, so keep the existing run, write ONE
+    // ops line and skip (the tx rolled back; nothing was deleted).
+    if ((err as { code?: string }).code === 'CONFLICT') {
+      console.warn(
+        `[match-invoice] restaurant=${restaurantId} invoice=${invoiceId} re-match skipped: ${(err as Error).message}`,
+      );
+      return { result: CLEAN, persisted: null, replaced: false, skipped: 'claims_in_progress' };
     }
-    const out = await persistMatchRun(
-      tx,
-      { restaurantId, invoiceId, poId: built.poId, grId: built.grId },
-      built.input,
-      result,
-      rules,
-      prior,
-    );
-    if (priorRun) await rebindDecidedClaims(tx, restaurantId, out.matchRunId);
-    return out;
-  });
+    throw err;
+  }
   return { result, persisted, replaced: Boolean(priorRun) };
 }
 
@@ -185,7 +215,11 @@ const email = createEmailNotifier();
  * still exist. Their claims (released above) come back under the ORIGINAL
  * decider (`resolved_by`), never the job — one `materializeClaims` per decider.
  */
-async function rebindDecidedClaims(tx: Database, restaurantId: string, matchRunId: string): Promise<void> {
+async function rebindDecidedClaims(
+  tx: Database,
+  restaurantId: string,
+  matchRunId: string,
+): Promise<void> {
   const decided = await tx
     .select({ id: discrepancies.id, by: discrepancies.resolvedBy })
     .from(discrepancies)
@@ -208,22 +242,49 @@ async function rebindDecidedClaims(tx: Database, restaurantId: string, matchRunI
  * The branch-aware deep link of every approval notification (ia-nav-09):
  * `/dashboard/go?r=<restaurantId>&to=/dashboard/approvals?invoice=<id>`.
  */
-export function approvalsGoLink(restaurantId: string, invoiceId: string | null, base = appBaseUrl()): string {
+export function approvalsGoLink(
+  restaurantId: string,
+  invoiceId: string | null,
+  base = appBaseUrl(),
+): string {
   const to = invoiceId ? `/dashboard/approvals?invoice=${invoiceId}` : '/dashboard/approvals';
   return `${base}/dashboard/go?r=${encodeURIComponent(restaurantId)}&to=${encodeURIComponent(to)}`;
 }
 
 /** Σ claimable agorot of one invoice: `claimableLines(computeInvoiceLeak(id))`. */
-export async function invoiceClaimAgorot(db: Database, restaurantId: string, invoiceId: string): Promise<number> {
+export async function invoiceClaimAgorot(
+  db: Database,
+  restaurantId: string,
+  invoiceId: string,
+): Promise<number> {
+  return (await invoiceClaim(db, restaurantId, invoiceId)).agorot;
+}
+
+/**
+ * The invoice's claimable ₪ on the BEFORE-VAT basis only (a duplicate's incl.
+ * VAT or a VAT amount is never added into it), and whether it still waits for
+ * its PO link (then there is nothing to claim yet, and the copy says so).
+ */
+export async function invoiceClaim(
+  db: Database,
+  restaurantId: string,
+  invoiceId: string,
+): Promise<{ agorot: number; pendingLink: boolean }> {
   const inv = await computeInvoiceLeak(db, restaurantId, invoiceId);
-  if (!inv) return 0;
-  return claimableLines(inv).reduce((n, c) => n + Math.round(c.amount * 100), 0);
+  if (!inv) return { agorot: 0, pendingLink: false };
+  const agorot = claimableLines(inv)
+    .filter((c) => c.basis === 'excl')
+    .reduce((n, c) => n + Math.round(c.amount * 100), 0);
+  return { agorot, pendingLink: inv.pendingLink };
 }
 
 /** Push / WhatsApp body: "N פערים · ₪X לדרישת זיכוי" + the link. No baked ₪ template string. */
 export function approvalSummary(count: number, claimAgorot: number, link: string): string {
   const gaps = count === 1 ? 'פער אחד' : `${count} פערים`;
-  const money = claimAgorot > 0 ? ` · ${formatIlsAgorot(claimAgorot, { maximumFractionDigits: 2 })} לדרישת זיכוי` : '';
+  const money =
+    claimAgorot > 0
+      ? ` · ${formatIlsAgorot(claimAgorot, { maximumFractionDigits: 2 })} לדרישת זיכוי`
+      : '';
   return `${gaps} בחשבונית${money}\n${link}`;
 }
 
@@ -263,7 +324,7 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
     const whatsappAllowed = ent.active && ent.features.includes('whatsapp_alerts');
     // ₪ = what this invoice can actually claim (the letters' rule), never the
     // engine's raw Σ|Δ|; formatted once by the server money util.
-    const claimAgorot = await invoiceClaimAgorot(db, restaurantId, invoiceId);
+    const { agorot: claimAgorot, pendingLink } = await invoiceClaim(db, restaurantId, invoiceId);
     const link = approvalsGoLink(restaurantId, invoiceId);
     const summary = approvalSummary(result.discrepancies.length, claimAgorot, link);
     for (const role of persisted.rolesNeedingNotification) {
@@ -312,7 +373,13 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
         supplierName: sup?.name ?? 'ספק',
         discrepancyCount: result.discrepancies.length,
         // TODO(W2-13 13a): `claimableIls` + `invoiceUrl` once the template takes them (one line).
-        atRiskIls: formatIlsAgorot(claimAgorot, { maximumFractionDigits: 2 }),
+        // ₪ only when there is ₪ to claim; never "₪0.00 בסיכון".
+        atRiskIls:
+          claimAgorot > 0
+            ? formatIlsAgorot(claimAgorot, { maximumFractionDigits: 2 })
+            : pendingLink
+              ? 'ממתין לקישור להזמנה'
+              : 'ללא סכום לדרישה',
         approvalsUrl: link,
       });
       for (const r of recipients) {

@@ -108,12 +108,11 @@ describe('claim at decision', () => {
     expect((await counts()).claims).toBe(1);
   });
 
-  it('undo inside the window writes the claim off with the decision', async () => {
+  it('undo inside the window removes the bare claim; re-deciding creates exactly one fresh claim', async () => {
     await callerAs(db, T, 'manager').approvals.approve({ discrepancyId: T.discrepancyId });
     await callerAs(db, T, 'manager').approvals.reopen({ discrepancyId: T.discrepancyId });
-    const [c] = await db.select().from(recoveryClaims).where(eq(recoveryClaims.discrepancyId, T.discrepancyId));
-    expect(c!.status).toBe('written_off');
-    // Re-deciding re-opens the same claim under the system write-off rule: still one claim.
+    // Bare (no letter, no money): deleted with the undo, not left as a write-off (warden LOW-2).
+    expect((await counts()).claims).toBe(0);
     await callerAs(db, T, 'manager').approvals.approve({ discrepancyId: T.discrepancyId });
     expect((await counts()).claims).toBe(1);
   });
