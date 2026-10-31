@@ -110,7 +110,7 @@ What a default run does:
 - **Roles:**
   - Receiver and chef see **no purchase or leak ₪**. This package hides it in the UI; server-side enforcement is H-11. The receiver gets no supplier ledger.
   - The bookkeeper reads everything and edits account cards, with an audit log.
-  - The chef orders **directly**, with no approval.
+  - The chef orders **directly**, with no approval, and **sees prices and totals on the orders screens only** (owner, 31.10 later). Elsewhere the chef still sees no ₪; H-11's server strip must exempt the chef on `orders.*`.
   - Each worker signs in with their own e-mail and password; there is no PIN.
 - **Money limits:** bulk approve is capped at ₪200 per invoice, one-tap WhatsApp approve at ₪500, and a blocking item is never bulk-approved. **The server enforces all three.**
 - **Payment:**
@@ -278,7 +278,7 @@ Findings and evidence stay in `docs/ux/review/area-*.md` and `lens-*.md` (`grep 
 - **Known items assigned in wave 2:**
   - WorkerStatusBanner pushes content (CLS) when the heartbeat is stale; it moves out of flow (W2-15 or W1-04).
   - Receiver/chef ₪ in tRPC JSON is H-11 (human PR).
-  - The chef cannot order yet; that is W2-06 (the owner's decision is "orders directly").
+  - Chef ordering: the base (route, nav entry, `chefProcedure` on order writes, ₪ visible in orders) lands **before the pilot in train A via W1-11**. W2-06 builds on it and does not redo it.
   - `/dashboard/orders/<unknown>` answers 200 because `loading.tsx` streams before `notFound()`. W2-06 makes it answer 404.
 - **Pilot freeze 06.11–10.11:** nothing merges to `main` and nothing deploys. Keep working on your branch; the first wave-2 integration (`release/wave-2`) lands after 10.11.
 - **Self-check before you send GREEN:**
