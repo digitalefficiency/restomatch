@@ -34,6 +34,7 @@ import { enqueueMatchInvoice, enqueueOcrInvoice, isQueueUnavailableError } from 
 import type { InvoiceOcrResult } from '@restomatch/types';
 import { assertGrOwned, assertSupplierOwned } from '../tenant';
 import { fillEnglishNames } from '../receiving/english';
+import { lineOrder } from '../receiving/lineOrder';
 import {
   invoicesWaitingOnReceipt,
   lockReceipt,
@@ -259,7 +260,7 @@ export const receivingRouter = router({
           and(eq(products.id, poLines.productId), eq(products.restaurantId, ctx.session.restaurantId)),
         )
         .where(eq(poLines.poId, input.poId))
-        .orderBy(asc(poLines.id));
+        .orderBy(...lineOrder(products.category, sql`coalesce(${products.canonicalName}, ${poLines.rawDescription})`, poLines.id));
 
       // English display name: the line's own translation, else the product's.
       const lines = rows.map((r) => ({
@@ -339,7 +340,7 @@ export const receivingRouter = router({
         .leftJoin(poLines, eq(poLines.id, grLines.poLineId))
         .leftJoin(products, eq(products.id, grLines.productId))
         .where(eq(grLines.grId, receipt.id))
-        .orderBy(asc(grLines.id));
+        .orderBy(...lineOrder(products.category, sql`coalesce(${products.canonicalName}, ${poLines.rawDescription})`, grLines.id));
 
       return {
         ...receipt,
@@ -576,7 +577,7 @@ export const receivingRouter = router({
           and(eq(products.id, invoiceLines.productId), eq(products.restaurantId, ctx.session.restaurantId)),
         )
         .where(eq(invoiceLines.invoiceId, invoice.id))
-        .orderBy(asc(invoiceLines.id));
+        .orderBy(...lineOrder(products.category, sql`coalesce(${products.canonicalName}, ${invoiceLines.rawDescription})`, invoiceLines.id));
 
       // EN-3: the worker marks a final OCR failure in ocr_payload.raw; expose
       // only the flag + reason (never the raw extraction payload).
