@@ -72,6 +72,7 @@ export const en: Shape<typeof he> = {
       heldDiscard: 'Discard the phone count',
       heldNotCounted: 'not counted',
       saveFailed: '{count} lines were not saved',
+      uncounted: "{count} lines are not counted yet — count them or mark them missing",
       unorderedNeeds: 'Mark whether the items that were not ordered arrived',
       spotTitle: 'Spot check before you confirm',
       spotHint: 'Count these items and enter what actually arrived.',
@@ -82,6 +83,7 @@ export const en: Shape<typeof he> = {
       bulkTag: 'Not counted item by item',
     },
     confirmed: {
+      queued: 'Closed on the phone · it sends by itself when the connection is back',
       summary: '{lines} lines · {exceptions} gaps',
       noExceptions: '{lines} lines · everything as ordered',
       amountPending: 'The amount to claim is set after the check',
@@ -92,6 +94,7 @@ export const en: Shape<typeof he> = {
       bulkNote: '{count} lines marked as ordered — not counted item by item',
     },
     summary: {
+      closedUncounted: '{count} lines were closed without a count',
       title: 'This receipt is already closed',
       subtitle: 'Received at {time}. These are the recorded quantities.',
       subtitleNoTime: 'These are the recorded quantities.',

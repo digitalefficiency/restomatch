@@ -34,6 +34,9 @@ import { enqueueMatchInvoice, enqueueOcrInvoice, isQueueUnavailableError } from 
 import type { InvoiceOcrResult } from '@restomatch/types';
 import { assertGrOwned, assertSupplierOwned } from '../tenant';
 import { fillEnglishNames } from '../receiving/english';
+import { lineOrder } from '../receiving/lineOrder';
+import { linkInvoiceToReceipt, linkedInvoiceId } from '../receiving/invoiceLink';
+import { countedLineSql, withIdempotency } from '../receiving/deps';
 import {
   invoicesWaitingOnReceipt,
   lockReceipt,
@@ -259,7 +262,7 @@ export const receivingRouter = router({
           and(eq(products.id, poLines.productId), eq(products.restaurantId, ctx.session.restaurantId)),
         )
         .where(eq(poLines.poId, input.poId))
-        .orderBy(asc(poLines.id));
+        .orderBy(...lineOrder(products.category, sql`coalesce(${products.canonicalName}, ${poLines.rawDescription})`, poLines.id));
 
       // English display name: the line's own translation, else the product's.
       const lines = rows.map((r) => ({
@@ -339,10 +342,25 @@ export const receivingRouter = router({
         .leftJoin(poLines, eq(poLines.id, grLines.poLineId))
         .leftJoin(products, eq(products.id, grLines.productId))
         .where(eq(grLines.grId, receipt.id))
-        .orderBy(asc(grLines.id));
+        .orderBy(...lineOrder(products.category, sql`coalesce(${products.canonicalName}, ${poLines.rawDescription})`, grLines.id));
 
+      // W2-05: lines closed without a count ("לא נספר"), from the close's audit row — never silent.
+      const [closeAudit] = await ctx.db
+        .select({ after: auditLog.after })
+        .from(auditLog)
+        .where(
+          and(
+            eq(auditLog.restaurantId, ctx.session.restaurantId),
+            eq(auditLog.action, 'goods_receipt.closed'),
+            eq(auditLog.entityId, receipt.id),
+          ),
+        )
+        .orderBy(desc(auditLog.at))
+        .limit(1);
+      const uncountedIds = (closeAudit?.after as { uncountedLineIds?: unknown } | null)?.uncountedLineIds;
       return {
         ...receipt,
+        closedUncounted: Array.isArray(uncountedIds) ? uncountedIds.length : 0,
         lines: lines.map((l) => ({
           ...l,
           // Surface a human label even when no catalog product is linked.
@@ -576,7 +594,7 @@ export const receivingRouter = router({
           and(eq(products.id, invoiceLines.productId), eq(products.restaurantId, ctx.session.restaurantId)),
         )
         .where(eq(invoiceLines.invoiceId, invoice.id))
-        .orderBy(asc(invoiceLines.id));
+        .orderBy(...lineOrder(products.category, sql`coalesce(${products.canonicalName}, ${invoiceLines.rawDescription})`, invoiceLines.id));
 
       // EN-3: the worker marks a final OCR failure in ocr_payload.raw; expose
       // only the flag + reason (never the raw extraction payload).
@@ -858,7 +876,15 @@ export const receivingRouter = router({
     }),
 
   /**
-   * Update a single GR line (qty received, rejection, condition).
+   * Save ONE line's count (the Delivery Check saves on change). W2-05:
+   * - `outcome: 'missing'` ("חסר") is stored 0 received / 0 rejected / reason
+   *   `missing` — never a rejection;
+   * - `expected` is a CAS: the UPDATE carries the row the client last saw, so a
+   *   stale write is a CONFLICT, never a silent overwrite;
+   * - an identical payload (a replay) returns the stored row: no write, no
+   *   second audit row; `clientMutationId` replays through withIdempotency.
+   * Only an OPEN receipt takes a count; tenant scope goes through the parent
+   * receipt inside the UPDATE (no TOCTOU), and a foreign line is NOT_FOUND.
    */
   markGrLine: receiverProcedure
     .input(
@@ -870,65 +896,36 @@ export const receivingRouter = router({
         conditionNotes: z.string().max(500).optional(),
         condition: ConditionEnum.optional(),
         photos: z.array(z.string().url().max(2048)).max(20).optional(),
+        outcome: z.enum(['missing']).optional(),
+        clientMutationId: z.string().uuid().optional(),
+        expected: z
+          .object({
+            qtyReceived: z.number().nonnegative(),
+            qtyRejected: z.number().nonnegative(),
+            rejectReason: z.string().max(500).nullable(),
+            conditionNotes: z.string().max(500).nullable(),
+          })
+          .optional(),
       }),
     )
-    .mutation(async ({ ctx, input }) => {
-      // gr_lines has no restaurant_id — tenant scope goes through the parent
-      // goods_receipt, inside the UPDATE itself so there is no TOCTOU window.
-      // Only an OPEN receipt takes a count: once closed, the counted quantities are
-      // the record the match and the supplier claims were made against.
-      const next = {
-        qtyReceived: input.qtyReceived.toString(),
-        qtyRejected: input.qtyRejected.toString(),
-        rejectReason: input.rejectReason ?? null,
-        conditionNotes:
-          input.condition === 'damaged'
-            ? `damaged: ${input.conditionNotes ?? ''}`.trim()
-            : input.conditionNotes ?? null,
-        photos: input.photos ?? [],
-      };
-      const [updated] = await ctx.db
-        .update(grLines)
-        .set(next)
-        .where(
-          and(
-            eq(grLines.id, input.grLineId),
-            inArray(
-              grLines.grId,
-              ctx.db
-                .select({ id: goodsReceipts.id })
-                .from(goodsReceipts)
-                .where(
-                  and(
-                    eq(goodsReceipts.restaurantId, ctx.session.restaurantId),
-                    eq(goodsReceipts.status, 'pending'),
-                  ),
-                ),
-            ),
-          ),
-        )
-        .returning();
-      if (!updated) {
-        // Same tenant scope as above: a foreign line stays NOT_FOUND (no oracle).
-        const [own] = await ctx.db
-          .select({ line: grLines })
-          .from(grLines)
-          .innerJoin(goodsReceipts, eq(goodsReceipts.id, grLines.grId))
-          .where(and(eq(grLines.id, input.grLineId), eq(goodsReceipts.restaurantId, ctx.session.restaurantId)))
-          .limit(1);
-        if (!own) throw new TRPCError({ code: 'NOT_FOUND', message: 'GR line not found' });
-        // A retry of a mark whose answer was lost (the wizard re-sends its marks before
-        // the idempotent submit) changes nothing: hand back the stored line. Only a real
-        // change to a closed count is refused.
-        if (sameMark(own.line, next)) return own.line;
-        throw new TRPCError({ code: 'CONFLICT', message: 'הקבלה כבר נסגרה — אי אפשר לשנות את הספירה' });
-      }
-      return updated;
+    .mutation(({ ctx, input }) => {
+      const { clientMutationId, ...request } = input;
+      return ctx.db.transaction((tx) => {
+        const db = tx as unknown as typeof ctx.db;
+        const run = () => markGrLineOnce(db, ctx.session, request);
+        return clientMutationId
+          ? withIdempotency({ db, session: ctx.session }, { key: clientMutationId, procedure: 'receiving.markGrLine', input: request }, run)
+          : run();
+      });
     }),
 
   /**
-   * Close the goods receipt. Status = 'completed' if every line met or
-   * exceeded its ordered qty; 'partial' otherwise.
+   * Close the goods receipt — one transaction under lockReceipt. Status =
+   * 'completed' if every line met or exceeded its ordered qty; 'partial'
+   * otherwise. W2-05: a receipt with "לא נספר" lines is refused with
+   * PRECONDITION_FAILED {uncounted_lines: n}, unless `closeAs: 'partial'`,
+   * which closes it partial and records those line ids. `clientMutationId`
+   * makes a replayed close one close and one re-match.
    */
   submitReceipt: receiverProcedure
     .input(
@@ -937,72 +934,70 @@ export const receivingRouter = router({
         signatureUrl: z.string().url().max(2048).optional(),
         /** The invoice(s) scanned on this receipt (the wizard's registerInvoice ids). */
         invoiceIds: z.array(z.string().uuid()).max(10).optional(),
+        clientMutationId: z.string().uuid().optional(),
+        closeAs: z.enum(['partial']).optional(),
       }),
     )
-    .mutation(async ({ ctx, input }) => {
-      await assertGrOwned(ctx.db, input.grId, ctx.session.restaurantId);
-      // Held to commit: an OCR job deciding whether this receipt is still open
-      // waits for us (receiving/matchTriggers).
-      await lockReceipt(ctx.db, input.grId);
-      // Only CLOSING an open receipt claims scans. Re-submitting a receipt that
-      // was already completed/partial must not reach into other (sibling)
-      // receipts' held scans — it only re-matches its own runs.
-      const [before] = await ctx.db
-        .select({ status: goodsReceipts.status })
-        .from(goodsReceipts)
-        .where(and(eq(goodsReceipts.id, input.grId), eq(goodsReceipts.restaurantId, ctx.session.restaurantId)))
-        .limit(1);
-      const wasOpen = before?.status === 'pending';
-      if (before && !wasOpen) {
-        // A closed receipt is never re-closed: its status, signature and close time
-        // stay as recorded (no flipping completed ↔ partial, no new signature). A
-        // retry of a submit whose answer was lost lands here and gets the stored
-        // receipt back; only its own runs are re-matched, never a sibling's scans.
-        const [closed] = await ctx.db
-          .select()
-          .from(goodsReceipts)
-          .where(and(eq(goodsReceipts.id, input.grId), eq(goodsReceipts.restaurantId, ctx.session.restaurantId)))
-          .limit(1);
-        if (!closed) throw new TRPCError({ code: 'NOT_FOUND', message: 'GR not found' });
-        await rematchAfterCount(ctx.db, ctx.session.restaurantId, closed, [], false);
-        return closed;
-      }
+    .mutation(({ ctx, input }) => {
+      const { clientMutationId, ...request } = input;
+      return ctx.db.transaction((tx) => {
+        const db = tx as unknown as typeof ctx.db;
+        // The W2-05 contract (a client mutation id) refuses "לא נספר" lines. A legacy close
+        // (no clientMutationId) stays lenient while LEGACY_LENIENT_CLOSE holds — see its note.
+        const run = () =>
+          submitReceiptOnce(db, ctx.session, request, { strict: Boolean(clientMutationId) || !LEGACY_LENIENT_CLOSE });
+        return clientMutationId
+          ? withIdempotency({ db, session: ctx.session }, { key: clientMutationId, procedure: 'receiving.submitReceipt', input: request }, run)
+          : run();
+      });
+    }),
 
-      const rows = await ctx.db
+  /**
+   * W2-05 · resume a Delivery Check on ANY phone (receiving-02): the receipt of
+   * this PO, its saved line marks, and the invoice registered for it in THIS
+   * open/close cycle — so a reload or a second phone lands on review with no
+   * re-shoot and no second OCR job. No ₪ (quantities and states only).
+   */
+  resumeState: receiverProcedure
+    .input(z.object({ poId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      const [po] = await ctx.db
+        .select({ id: purchaseOrders.id })
+        .from(purchaseOrders)
+        .where(and(eq(purchaseOrders.id, input.poId), eq(purchaseOrders.restaurantId, restaurantId)))
+        .limit(1);
+      if (!po) throw new TRPCError({ code: 'NOT_FOUND', message: 'PO not found' });
+      const [gr] = await ctx.db
+        .select({ id: goodsReceipts.id, status: goodsReceipts.status, updatedAt: goodsReceipts.updatedAt })
+        .from(goodsReceipts)
+        .where(and(eq(goodsReceipts.poId, input.poId), eq(goodsReceipts.restaurantId, restaurantId)))
+        .limit(1);
+      if (!gr) return { grId: null, status: null, version: null, marks: [], invoice: null };
+      const version = gr.updatedAt.toISOString();
+      const marks = await ctx.db
         .select({
+          grLineId: grLines.id,
           poLineId: grLines.poLineId,
           qtyReceived: grLines.qtyReceived,
-          qtyOrdered: poLines.qtyOrdered,
+          qtyRejected: grLines.qtyRejected,
+          rejectReason: grLines.rejectReason,
+          conditionNotes: grLines.conditionNotes,
         })
         .from(grLines)
-        .leftJoin(poLines, eq(poLines.id, grLines.poLineId))
-        .where(eq(grLines.grId, input.grId));
-
-      const allComplete = rows.every(
-        (r) =>
-          r.qtyOrdered === null || Number(r.qtyReceived) >= Number(r.qtyOrdered),
-      );
-      const newStatus: 'completed' | 'partial' = allComplete ? 'completed' : 'partial';
-
-      const [receipt] = await ctx.db
-        .update(goodsReceipts)
-        .set({
-          status: newStatus,
-          signatureUrl: input.signatureUrl ?? null,
-          // DB clock, like match_runs.run_at: the dock slip compares the two (a
-          // skewed API clock must not make the post-count run look older).
-          updatedAt: sql`now()`,
-        })
-        .where(
-          and(
-            eq(goodsReceipts.id, input.grId),
-            eq(goodsReceipts.restaurantId, ctx.session.restaurantId),
-          ),
-        )
-        .returning();
-      if (!receipt) throw new TRPCError({ code: 'NOT_FOUND', message: 'GR not found' });
-      await rematchAfterCount(ctx.db, ctx.session.restaurantId, receipt, input.invoiceIds ?? [], wasOpen);
-      return receipt;
+        .where(eq(grLines.grId, gr.id))
+        .orderBy(asc(grLines.id));
+      const invoiceId = await linkedInvoiceId(ctx.db, { restaurantId, grId: gr.id, version });
+      let invoice: { invoiceId: string; status: string } | null = null;
+      if (invoiceId) {
+        const [inv] = await ctx.db
+          .select({ id: invoices.id, status: invoices.status })
+          .from(invoices)
+          .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
+          .limit(1);
+        if (inv) invoice = { invoiceId: inv.id, status: inv.status };
+      }
+      return { grId: gr.id, status: gr.status, version, marks, invoice };
     }),
 
   /**
@@ -1064,7 +1059,10 @@ export const receivingRouter = router({
             ),
           )
           .limit(1);
-        if (existing) return { invoiceId: existing.id, created: false as const };
+        if (existing) {
+          await linkInvoiceToReceipt(tx, { restaurantId, userId: ctx.session.userId, grId: input.grId, invoiceId: existing.id });
+          return { invoiceId: existing.id, created: false as const };
+        }
 
         const [row] = await tx
           .insert(invoices)
@@ -1078,6 +1076,7 @@ export const receivingRouter = router({
           })
           .returning({ id: invoices.id });
         if (!row) throw new Error('failed to register invoice');
+        await linkInvoiceToReceipt(tx, { restaurantId, userId: ctx.session.userId, grId: input.grId, invoiceId: row.id });
         return { invoiceId: row.id, created: true as const };
       });
       if (!outcome.created) {
@@ -1271,4 +1270,200 @@ async function rematchAfterCount(
       );
     }
   }
+}
+
+/* ── W2-05 · count truth (server) ───────────────────────────────────────── */
+
+/**
+ * Callers without a clientMutationId (the FROZEN mobile receiver app, tabs
+ * opened before W2-05) still close a receipt that has "לא נספר" lines — the ids
+ * are recorded on the close and shown to the manager on the receipt, never
+ * silent. Orchestrator decision 31.10.
+ * TODO(mobile retirement): set to false when apps/mobile/app/receiver is retired;
+ * every close then refuses uncounted lines (PRECONDITION_FAILED).
+ */
+export const LEGACY_LENIENT_CLOSE = true;
+
+type ReceivingDb = Parameters<typeof lockReceipt>[0];
+type ReceivingSession = { restaurantId: string; userId: string };
+
+interface MarkRequest {
+  grLineId: string;
+  qtyReceived: number;
+  qtyRejected: number;
+  rejectReason?: string;
+  conditionNotes?: string;
+  condition?: 'ok' | 'damaged' | 'rejected';
+  photos?: string[];
+  outcome?: 'missing';
+  expected?: { qtyReceived: number; qtyRejected: number; rejectReason: string | null; conditionNotes: string | null };
+}
+
+async function markGrLineOnce(db: ReceivingDb, session: ReceivingSession, input: MarkRequest) {
+  const missing = input.outcome === 'missing';
+  const next = {
+    qtyReceived: (missing ? 0 : input.qtyReceived).toString(),
+    qtyRejected: (missing ? 0 : input.qtyRejected).toString(),
+    rejectReason: missing ? 'missing' : (input.rejectReason ?? null),
+    conditionNotes:
+      input.condition === 'damaged' && !missing ? `damaged: ${input.conditionNotes ?? ''}`.trim() : (input.conditionNotes ?? null),
+    photos: input.photos ?? [],
+  };
+  // The row as stored, tenant-scoped through its receipt (a foreign line is NOT_FOUND: no oracle).
+  const [own] = await db
+    .select({ line: grLines, status: goodsReceipts.status })
+    .from(grLines)
+    .innerJoin(goodsReceipts, eq(goodsReceipts.id, grLines.grId))
+    .where(and(eq(grLines.id, input.grLineId), eq(goodsReceipts.restaurantId, session.restaurantId)))
+    .limit(1);
+  if (!own) throw new TRPCError({ code: 'NOT_FOUND', message: 'GR line not found' });
+  // A replay of what is already stored (a lost answer, the outbox resending) is a success:
+  // the stored row, no write, no second audit row — also after the close.
+  if (sameMark(own.line, next)) return own.line;
+
+  const e = input.expected;
+  const [updated] = await db
+    .update(grLines)
+    .set(next)
+    .where(
+      and(
+        eq(grLines.id, input.grLineId),
+        inArray(
+          grLines.grId,
+          db
+            .select({ id: goodsReceipts.id })
+            .from(goodsReceipts)
+            .where(and(eq(goodsReceipts.restaurantId, session.restaurantId), eq(goodsReceipts.status, 'pending'))),
+        ),
+        // CAS: only over the row the client saw (compared in the UPDATE itself).
+        ...(e
+          ? [
+              sql`${grLines.qtyReceived} = ${e.qtyReceived}`,
+              sql`${grLines.qtyRejected} = ${e.qtyRejected}`,
+              sql`${grLines.rejectReason} IS NOT DISTINCT FROM ${e.rejectReason}`,
+              sql`${grLines.conditionNotes} IS NOT DISTINCT FROM ${e.conditionNotes}`,
+            ]
+          : []),
+      ),
+    )
+    .returning();
+  if (!updated) {
+    if (own.status !== 'pending') {
+      throw new TRPCError({ code: 'CONFLICT', message: 'הקבלה כבר נסגרה — אי אפשר לשנות את הספירה' });
+    }
+    // Open receipt, but the row changed since the client read it (another phone counted it).
+    throw new TRPCError({ code: 'CONFLICT', message: 'stale_count: השורה נספרה בינתיים במכשיר אחר' });
+  }
+  await db.insert(auditLog).values({
+    restaurantId: session.restaurantId,
+    userId: session.userId,
+    action: 'gr_line.marked',
+    entityType: 'gr_line',
+    entityId: updated.id,
+    before: {
+      qtyReceived: own.line.qtyReceived,
+      qtyRejected: own.line.qtyRejected,
+      rejectReason: own.line.rejectReason,
+      conditionNotes: own.line.conditionNotes,
+    },
+    after: { qtyReceived: next.qtyReceived, qtyRejected: next.qtyRejected, rejectReason: next.rejectReason, conditionNotes: next.conditionNotes },
+  });
+  return updated;
+}
+
+interface SubmitRequest {
+  grId: string;
+  signatureUrl?: string;
+  invoiceIds?: string[];
+  closeAs?: 'partial';
+}
+
+async function submitReceiptOnce(
+  db: ReceivingDb,
+  session: ReceivingSession,
+  input: SubmitRequest,
+  opts: { strict: boolean },
+) {
+  await assertGrOwned(db, input.grId, session.restaurantId);
+  // Held to commit: an OCR job deciding whether this receipt is still open
+  // waits for us (receiving/matchTriggers).
+  await lockReceipt(db, input.grId);
+  // Only CLOSING an open receipt claims scans. Re-submitting a receipt that
+  // was already completed/partial must not reach into other (sibling)
+  // receipts' held scans — it only re-matches its own runs.
+  const [before] = await db
+    .select({ status: goodsReceipts.status })
+    .from(goodsReceipts)
+    .where(and(eq(goodsReceipts.id, input.grId), eq(goodsReceipts.restaurantId, session.restaurantId)))
+    .limit(1);
+  const wasOpen = before?.status === 'pending';
+  if (before && !wasOpen) {
+    // A closed receipt is never re-closed: its status, signature and close time
+    // stay as recorded. A retry of a submit whose answer was lost lands here and
+    // gets the stored receipt back; only its own runs are re-matched.
+    const [closed] = await db
+      .select()
+      .from(goodsReceipts)
+      .where(and(eq(goodsReceipts.id, input.grId), eq(goodsReceipts.restaurantId, session.restaurantId)))
+      .limit(1);
+    if (!closed) throw new TRPCError({ code: 'NOT_FOUND', message: 'GR not found' });
+    await rematchAfterCount(db, session.restaurantId, closed, [], false);
+    return closed;
+  }
+
+  // "לא נספר" is a server state (deep-fix class 1): never closed silently.
+  const uncounted = (
+    await db
+      .select({ id: grLines.id })
+      .from(grLines)
+      .where(and(eq(grLines.grId, input.grId), sql`NOT ${countedLineSql('gr_lines')}`))
+  ).map((r) => r.id);
+  if (uncounted.length > 0 && input.closeAs !== 'partial' && opts.strict) {
+    throw new TRPCError({ code: 'PRECONDITION_FAILED', message: JSON.stringify({ uncounted_lines: uncounted.length }) });
+  }
+  // Decision 20: the lines confirmed by "הכל הגיע" were attested, not counted by hand.
+  const attested = (
+    await db
+      .select({ id: grLines.id })
+      .from(grLines)
+      .where(and(eq(grLines.grId, input.grId), sql`coalesce(${grLines.conditionNotes}, '') ~ 'count:bulk_as_ordered'`))
+  ).map((r) => r.id);
+
+  const rows = await db
+    .select({ qtyReceived: grLines.qtyReceived, qtyOrdered: poLines.qtyOrdered })
+    .from(grLines)
+    .leftJoin(poLines, eq(poLines.id, grLines.poLineId))
+    .where(eq(grLines.grId, input.grId));
+  // A legacy close keeps its W1 status rule; the strict one never calls a receipt with "לא נספר" lines complete.
+  const allComplete = (!opts.strict || uncounted.length === 0) && rows.every((r) => r.qtyOrdered === null || Number(r.qtyReceived) >= Number(r.qtyOrdered));
+  const newStatus: 'completed' | 'partial' = allComplete ? 'completed' : 'partial';
+
+  const [receipt] = await db
+    .update(goodsReceipts)
+    .set({
+      status: newStatus,
+      signatureUrl: input.signatureUrl ?? null,
+      // DB clock, like match_runs.run_at: the dock slip compares the two.
+      updatedAt: sql`now()`,
+    })
+    .where(and(eq(goodsReceipts.id, input.grId), eq(goodsReceipts.restaurantId, session.restaurantId)))
+    .returning();
+  if (!receipt) throw new TRPCError({ code: 'NOT_FOUND', message: 'GR not found' });
+  await db.insert(auditLog).values({
+    restaurantId: session.restaurantId,
+    userId: session.userId,
+    action: 'goods_receipt.closed',
+    entityType: 'goods_receipt',
+    entityId: receipt.id,
+    before: { status: 'pending' },
+    after: {
+      status: newStatus,
+      uncountedLineIds: uncounted,
+      attestedLineIds: attested,
+      closeAs: input.closeAs ?? null,
+      contract: opts.strict ? 'w2-05' : 'legacy',
+    },
+  });
+  await rematchAfterCount(db, session.restaurantId, receipt, input.invoiceIds ?? [], wasOpen);
+  return receipt;
 }

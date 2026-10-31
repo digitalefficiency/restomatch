@@ -74,6 +74,7 @@ export const receivingDelivery: Shape<typeof he> = {
       heldDiscard: 'ቁጽሪ ካብ ተሌፎን ደምስሱ',
       heldNotCounted: 'ኣይተቖጽረን',
       saveFailed: 'ምዕቃብ {count} መስመራት ኣይተዓወተን',
+      uncounted: "{count} መስመራት ገና ኣይተቖጽሩን — ቍጸርዎም ወይ ከም ዝጎደሉ ምልክት ግበሩ",
       unorderedNeeds: 'ዘይተኣዘዙ ኣቕሑ መጺኦም እንተኾይኖም ምልክት ግበሩ',
       spotTitle: 'ቅድሚ ምርግጋጽ ናይ ናሙና ምርመራ',
       spotHint: 'ነዞም ኣቕሑ ቁጸሩ እሞ ብሓቂ ክንደይ ከም ዝመጸ ጽሓፉ።',
@@ -84,6 +85,7 @@ export const receivingDelivery: Shape<typeof he> = {
       bulkTag: 'ሓደ ብሓደ ኣይተቖጽረን',
     },
     confirmed: {
+      queued: 'ኣብ ተሌፎን ተዓጽዩ · ርክብ ምስ ተመልሰ ባዕሉ ይለኣኽ',
       summary: '{lines} መስመራት · {exceptions} ፍልልያት',
       noExceptions: '{lines} መስመራት · ኩሉ ከም ትእዛዝ',
       amountPending: 'ናይ ክሬዲት ሕቶ መጠን ድሕሪ ምርመራ ይውሰን',
@@ -94,6 +96,7 @@ export const receivingDelivery: Shape<typeof he> = {
       bulkNote: '{count} መስመራት ከም ትእዛዝ ተመልኪቶም — ሓደ ብሓደ ኣይተቖጽሩን',
     },
     summary: {
+      closedUncounted: '{count} መስመራት ብዘይ ቍጽሪ ተዓጽዮም',
       title: 'ምቕባል ኣቕሓ ድሮ ተዓጽዩ',
       subtitle: 'ኣብ {time} ተቐቢሉ። እዚኦም እዮም ዝተመዝገቡ ብዝሓት።',
       subtitleNoTime: 'እዚኦም እዮም ዝተመዝገቡ ብዝሓት።',

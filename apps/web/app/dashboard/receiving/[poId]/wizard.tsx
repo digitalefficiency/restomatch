@@ -47,6 +47,9 @@ import {
   writeDraft,
   type LeaveTarget,
 } from './_fieldHooks';
+import { clearCloseKey, closeKeyFor, uncountedLinesOf } from './_closeKey';
+import { SUBMIT_RECEIPT_KIND, receiptGroup, type SubmitReceiptPayload } from '@/lib/pwa/fieldOutbox';
+import { enqueue, idbOutboxStore, outboxKey } from '@/lib/pwa/outbox';
 import { ReceiptSummary } from './receipt-summary';
 
 // The slip is only needed once there is something to dispute: keep it out of the first load.
@@ -91,6 +94,8 @@ export interface ReceiptForClient {
   receivedAt: string | null;
   /** Its open/close cycle (`updatedAt`): offline rows from an earlier cycle are held, never replayed. */
   version: string | null;
+  /** W2-05: lines this receipt was closed with WITHOUT a count (recorded on the close). */
+  closedUncounted?: number;
   lines: ReceiptLineRow[];
 }
 
@@ -228,7 +233,9 @@ export function ReceivingWizard({
     },
     restaurantId && userId ? { restaurantId, userId } : null,
   );
-  useClaimReceiptGroup(grId);
+  // A queued close hands the receipt to the background drainer: release the group.
+  const [closeQueued, setCloseQueued] = useState(false);
+  useClaimReceiptGroup(closeQueued ? null : grId);
   // Once the receipt's version is known, sort the stored rows: current ones go, stale ones are held.
   useEffect(() => {
     if (grId && receiptVersion && !closedAtOpen) void outbox.retry();
@@ -648,17 +655,37 @@ export function ReceivingWizard({
   useEffect(() => {
     if (step !== 'RESUMING' || !existingReceipt) return;
     const draft = readDraft(draftKey);
-    // Only an invoice read in THIS open/close cycle of the receipt (not before a close / reopen).
-    const knownInvoice = draft?.grId === existingReceipt.id && draft.version === existingReceipt.version ? draft.invoiceId : null;
     const serverProgress = existingReceipt.lines.some(
       (l) => Number(l.qtyReceived ?? 0) > 0 || Number(l.qtyRejected ?? 0) > 0 || Boolean(l.rejectReason),
     );
-    if (!serverProgress && !knownInvoice && outbox.pendingCount() === 0 && !draft) {
-      setStep('SCAN_INVOICE');
-      return;
-    }
-    setResumed(true);
     void (async () => {
+      // Closed on this phone with no signal, still waiting to send: show that, never the count again.
+      if (restaurantId && userId) {
+        const queued = await idbOutboxStore.get(outboxKey('submitReceipt', existingReceipt.id)).catch(() => undefined);
+        if (queued && queued.restaurantId === restaurantId) {
+          outbox.dispose();
+          setCloseQueued(true);
+          setStep('CONFIRMED');
+          return;
+        }
+      }
+      // Only an invoice read in THIS open/close cycle of the receipt (not before a close / reopen).
+      // This phone's draft first; else the server's record (a reload after the draft was lost,
+      // or another phone): resume at review — never a re-shoot, never a second OCR job (W2-05).
+      let knownInvoice = draft?.grId === existingReceipt.id && draft.version === existingReceipt.version ? draft.invoiceId : null;
+      if (!knownInvoice) {
+        const server = await utils.receiving.resumeState
+          .fetch({ poId: po.id }, { networkMode: 'always' })
+          .catch(() => null);
+        if (server?.grId === existingReceipt.id && server.version === existingReceipt.version && server.invoice) {
+          knownInvoice = server.invoice.invoiceId;
+        }
+      }
+      if (!serverProgress && !knownInvoice && outbox.pendingCount() === 0 && !draft) {
+        setStep('SCAN_INVOICE');
+        return;
+      }
+      setResumed(true);
       if (knownInvoice) {
         setInvoiceId(knownInvoice);
         try {
@@ -729,6 +756,26 @@ export function ReceivingWizard({
     outbox.set({ ...row, stamp: stampRef.current });
   }
 
+  /** Put the close in the field outbox (offline) and show it as closed on the phone, waiting to send. */
+  async function queueClose(activeGrId: string) {
+    await enqueue(
+      idbOutboxStore,
+      'submitReceipt',
+      {
+        grId: activeGrId,
+        clientMutationId: closeKeyFor(activeGrId, receiptVersion),
+        invoiceIds: invoiceId ? [invoiceId] : undefined,
+      } satisfies SubmitReceiptPayload,
+      { restaurantId: restaurantId!, userId: userId!, capturedByName: receiverName ?? null, group: receiptGroup(activeGrId) },
+      { idempotencyKey: SUBMIT_RECEIPT_KIND.idempotencyKey({ grId: activeGrId, clientMutationId: '' }) },
+    );
+    // From here the shell's drainer owns this receipt: its rows, then the close, in order.
+    outbox.dispose();
+    setCloseQueued(true);
+    setConfirmedAt(new Date().toISOString());
+    setStep('CONFIRMED');
+  }
+
   /** Close the receipt: every line is already saved (or flushed now); then submitReceipt re-matches. */
   async function submit() {
     if (!grId || !result) return;
@@ -745,6 +792,10 @@ export function ReceivingWizard({
         if (authGate.blocked) {
           requestReauth();
           setFooterError(td('delivery.count.sessionExpired'));
+        } else if (restaurantId && userId && flushed.failed.length === 0) {
+          // No signal (W2-05): the close waits in the field outbox behind this receipt's counts and
+          // goes by itself — the same close key, so it is ONE close however often it is retried.
+          await queueClose(grId);
         } else setFooterError(td('delivery.count.offline'));
         return;
       }
@@ -758,10 +809,14 @@ export function ReceivingWizard({
         // The count is in: the server re-matches this invoice against it. No
         // signature: the invoice photo is not a driver's signature (RCV-07/08).
         invoiceIds: invoiceId ? [invoiceId] : undefined,
+        // ONE close per intent (W2-05): a retry after a lost answer, a reload or a
+        // double tap replays the same close — one close, one re-match.
+        clientMutationId: closeKeyFor(grId, receiptVersion),
       });
       setConfirmedAt(new Date().toISOString());
       setStep('CONFIRMED');
       writeDraft(draftKey, null);
+      clearCloseKey(grId, receiptVersion);
       // Closed: nothing left to send or restore for this receipt.
       outbox.clear();
       writeLocalMarks(localMarksKey, null);
@@ -771,7 +826,16 @@ export function ReceivingWizard({
       if (isSessionExpired(err)) {
         requestReauth();
         setFooterError(td('delivery.count.sessionExpired'));
-      } else setFooterError(isNetworkError(err) ? td('delivery.count.offline') : errorText(err, t, locale));
+      } else {
+        const uncounted = uncountedLinesOf(err);
+        setFooterError(
+          uncounted !== null
+            ? td('delivery.count.uncounted', { count: formatNumber(uncounted, locale) })
+            : isNetworkError(err)
+              ? td('delivery.count.offline')
+              : errorText(err, t, locale),
+        );
+      }
     } finally {
       submittingRef.current = false;
       setClosing(false);
@@ -852,6 +916,8 @@ export function ReceivingWizard({
             receivedAt={closedAtOpen.receivedAt}
             result={closedView.result}
             marks={closedView.initialMarks}
+            // The manager sees what was closed without a count (T4, never a false alarm); the receiver doesn't.
+            closedUncounted={showMoney ? (closedAtOpen.closedUncounted ?? 0) : 0}
           />
           {dockSlipOn ? (
             <div className="mx-auto max-w-md">
@@ -1017,7 +1083,12 @@ export function ReceivingWizard({
         >
           {/* After the close the engine may add findings the count didn't show (VAT,
               total, duplicate): the slip decides itself whether there is anything to say. */}
-          {result && dockSlipOn && grId ? (
+          {closeQueued ? (
+            <p role="status" data-testid="close-queued" className="mx-auto mt-3 max-w-md rounded-2xl border border-line bg-surface-2 px-4 py-3 text-base text-ink">
+              {td('delivery.confirmed.queued')}
+            </p>
+          ) : null}
+          {result && dockSlipOn && grId && !closeQueued ? (
             <DockSlip
               grId={grId}
               invoiceId={invoiceId}

@@ -74,6 +74,7 @@ export const receivingDelivery: Shape<typeof he> = {
       heldDiscard: 'Удалить подсчёт с телефона',
       heldNotCounted: 'не посчитано',
       saveFailed: 'Не удалось сохранить строк: {count}',
+      uncounted: "Ещё не посчитано строк: {count} — посчитайте их или отметьте «нет»",
       unorderedNeeds: 'Отметьте, пришли ли незаказанные товары',
       spotTitle: 'Выборочная проверка перед подтверждением',
       spotHint: 'Посчитайте эти товары и укажите, сколько пришло на самом деле.',
@@ -84,6 +85,7 @@ export const receivingDelivery: Shape<typeof he> = {
       bulkTag: 'Не посчитано поштучно',
     },
     confirmed: {
+      queued: 'Закрыто в телефоне · отправится само, когда появится связь',
       summary: 'Строк: {lines} · расхождений: {exceptions}',
       noExceptions: 'Строк: {lines} · всё как в заказе',
       amountPending: 'Сумма запроса на кредит-ноту будет определена после проверки',
@@ -94,6 +96,7 @@ export const receivingDelivery: Shape<typeof he> = {
       bulkNote: 'Отмечено как в заказе строк: {count} — не посчитаны поштучно',
     },
     summary: {
+      closedUncounted: 'Закрыто без пересчёта строк: {count}',
       title: 'Приёмка товара уже закрыта',
       subtitle: 'Принято в {time}. Вот записанные количества.',
       subtitleNoTime: 'Вот записанные количества.',

@@ -79,6 +79,7 @@ export const he = {
       heldDiscard: 'מחקו את הספירה מהטלפון',
       heldNotCounted: 'לא נספר',
       saveFailed: 'שמירת {count} שורות נכשלה',
+      uncounted: "{count} שורות עוד לא נספרו — ספרו אותן או סמנו 'חסר'",
       unorderedNeeds: 'סמנו אם הפריטים שלא הוזמנו הגיעו',
       spotTitle: 'בדיקה מדגמית לפני האישור',
       spotHint: 'ספרו את הפריטים האלה ורשמו כמה הגיע בפועל.',
@@ -89,6 +90,7 @@ export const he = {
       bulkTag: 'לא נספר פריט-פריט',
     },
     confirmed: {
+      queued: 'נסגר בטלפון · יישלח לבד כשיחזור החיבור',
       summary: '{lines} שורות · {exceptions} פערים',
       noExceptions: '{lines} שורות · הכל כמו בהזמנה',
       amountPending: 'הסכום לדרישת זיכוי ייקבע אחרי הבדיקה',
@@ -99,6 +101,7 @@ export const he = {
       bulkNote: '{count} שורות סומנו כמו בהזמנה — לא נספרו פריט-פריט',
     },
     summary: {
+      closedUncounted: '{count} שורות נסגרו בלי ספירה',
       title: 'קבלת הסחורה כבר נסגרה',
       subtitle: 'נקלטה ב־{time}. אלה הכמויות שנרשמו.',
       subtitleNoTime: 'אלה הכמויות שנרשמו.',

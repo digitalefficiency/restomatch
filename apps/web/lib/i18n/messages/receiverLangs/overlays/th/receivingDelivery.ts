@@ -74,6 +74,7 @@ export const receivingDelivery: Shape<typeof he> = {
       heldDiscard: 'ลบการนับจากโทรศัพท์',
       heldNotCounted: 'ยังไม่ได้นับ',
       saveFailed: 'บันทึก {count} รายการไม่สำเร็จ',
+      uncounted: "ยังไม่ได้นับ {count} รายการ — นับหรือทำเครื่องหมายว่าขาด",
       unorderedNeeds: 'ทำเครื่องหมายว่าสินค้าที่ไม่ได้สั่งมาถึงหรือไม่',
       spotTitle: 'สุ่มตรวจก่อนยืนยัน',
       spotHint: 'นับสินค้าเหล่านี้แล้วใส่จำนวนที่มาจริง',
@@ -84,6 +85,7 @@ export const receivingDelivery: Shape<typeof he> = {
       bulkTag: 'ไม่ได้นับทีละชิ้น',
     },
     confirmed: {
+      queued: 'ปิดในโทรศัพท์แล้ว · จะส่งเองเมื่อมีสัญญาณ',
       summary: '{lines} รายการ · ส่วนต่าง {exceptions}',
       noExceptions: '{lines} รายการ · ทุกอย่างตรงตามใบสั่งซื้อ',
       amountPending: 'ยอดสำหรับขอใบลดหนี้จะกำหนดหลังการตรวจ',
@@ -94,6 +96,7 @@ export const receivingDelivery: Shape<typeof he> = {
       bulkNote: 'ทำเครื่องหมาย {count} รายการว่าตรงตามใบสั่งซื้อ — ไม่ได้นับทีละชิ้น',
     },
     summary: {
+      closedUncounted: 'ปิดไปโดยไม่ได้นับ {count} รายการ',
       title: 'การรับสินค้านี้ปิดไปแล้ว',
       subtitle: 'รับเมื่อ {time} นี่คือจำนวนที่บันทึกไว้',
       subtitleNoTime: 'นี่คือจำนวนที่บันทึกไว้',

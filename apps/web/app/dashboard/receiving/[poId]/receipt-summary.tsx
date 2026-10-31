@@ -21,8 +21,11 @@ export function ReceiptSummary({
   receivedAt,
   result,
   marks,
+  closedUncounted = 0,
 }: {
   status: 'completed' | 'partial';
+  /** Lines closed without a count (manager view only; 0 hides the note). */
+  closedUncounted?: number;
   receivedAt: string | null;
   result: ReconciliationResult;
   marks: Record<string, LineMark>;
@@ -53,6 +56,17 @@ export function ReceiptSummary({
           </p>
         </div>
       </div>
+
+      {closedUncounted > 0 ? (
+        // T4: a fact to know, never an alarm.
+        <p
+          role="note"
+          data-testid="receipt-closed-uncounted"
+          className="mb-4 rounded-2xl border border-line bg-surface-2 px-4 py-3 text-base text-ink"
+        >
+          {td('delivery.summary.closedUncounted', { count: formatNumber(closedUncounted, locale) })}
+        </p>
+      ) : null}
 
       <ul className="mb-4 divide-y divide-line rounded-2xl border border-line bg-surface">
         {result.lines

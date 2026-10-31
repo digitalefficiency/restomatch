@@ -74,6 +74,7 @@ export const receivingDelivery: Shape<typeof he> = {
       heldDiscard: 'احذف العدّ من الهاتف',
       heldNotCounted: 'لم يُعدّ',
       saveFailed: 'فشل حفظ {count} أسطر',
+      uncounted: "{count} أسطر لم تُعدّ بعد — اعدّها أو علّمها كناقصة",
       unorderedNeeds: 'حدّد هل وصلت الأصناف التي لم تُطلب',
       spotTitle: 'فحص بالعيّنة قبل التأكيد',
       spotHint: 'عُدّ هذه الأصناف واكتب كم وصل فعلًا.',
@@ -84,6 +85,7 @@ export const receivingDelivery: Shape<typeof he> = {
       bulkTag: 'لم يُعدّ صنفًا صنفًا',
     },
     confirmed: {
+      queued: 'أُغلق في الهاتف · يُرسل تلقائيًا عند عودة الاتصال',
       summary: '{lines} أسطر · {exceptions} فروق',
       noExceptions: '{lines} أسطر · كل شيء كما في الطلبية',
       amountPending: 'مبلغ طلب الإشعار الدائن يُحدَّد بعد الفحص',
@@ -94,6 +96,7 @@ export const receivingDelivery: Shape<typeof he> = {
       bulkNote: 'تم تحديد {count} أسطر كما في الطلبية — لم تُعدّ صنفًا صنفًا',
     },
     summary: {
+      closedUncounted: '{count} أسطر أُغلقت بدون عدّ',
       title: 'استلام البضاعة مُغلق بالفعل',
       subtitle: 'استُلمت في {time}. هذه هي الكميات المسجّلة.',
       subtitleNoTime: 'هذه هي الكميات المسجّلة.',
