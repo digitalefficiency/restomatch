@@ -86,7 +86,8 @@
         "GHSA-v2hh-gcrm-f6hx",
         "GHSA-w3rx-r6r6-pgpr",
         "GHSA-vfj7-8cjw-p6xm",
-        "GHSA-86w9-cpqp-85rv"
+        "GHSA-86w9-cpqp-85rv",
+        "GHSA-qr28-fpjm-wq7f"
       ]
     },
     "overrides": {
@@ -101,7 +102,8 @@
       "js-yaml@>=3.0.0 <3.15.2": "^3.15.2",
       "js-yaml@>=4.0.0 <4.3.2": "^4.3.2",
       "source-map-js@>=1.0.0 <1.2.2": "^1.2.2",
-      "undici@>=6.7.0 <6.28.1": "^6.28.1"
+      "undici@>=6.7.0 <6.28.1": "^6.28.1",
+      "node-forge@<1.4.1": "^1.4.1"
     }
   }
 }
