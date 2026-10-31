@@ -157,7 +157,31 @@ describe('ח״פ / ע״מ check digit', () => {
   it('an invalid printed ח״פ and a ח״פ different from the one on file are flagged', () => {
     expect(checkInvoice({ ...CLEAN, supplier: { businessId: '514276389' } }).reasons).toEqual(['supplier_id_invalid']);
     expect(checkInvoice(CLEAN, { expectedSupplierBusinessId: '514276385' }).passed).toBe(true);
-    expect(checkInvoice(CLEAN, { expectedSupplierBusinessId: '515555551' }).reasons).toEqual(['supplier_id_mismatch']);
+    expect(checkInvoice(CLEAN, { expectedSupplierBusinessId: '515209641' }).reasons).toEqual(['supplier_id_mismatch']);
+  });
+
+  it('unknown on either side is not a mismatch (missing, bad check digit, wrong length)', () => {
+    const noId = { ...CLEAN, supplier: {} };
+    expect(checkInvoice(noId, { expectedSupplierBusinessId: '515209641' }).passed).toBe(true);
+    expect(checkInvoice(CLEAN, { expectedSupplierBusinessId: '515555551' }).passed).toBe(true); // bad check digit on file
+    expect(checkInvoice({ ...CLEAN, supplier: { businessId: '514276389' } }, { expectedSupplierBusinessId: '515209641' }).reasons)
+      .toEqual(['supplier_id_invalid']);
+  });
+
+  it.each([
+    ['51-427638-5', '514276385'],
+    ['ח.פ. 514276385', '514276385'],
+    ['0514276385', '514276385'],
+    [514276385, '514276385'],
+    ['30123459', '030123459'], // 8 digits → padded (valid)
+    ['514276389', null], // check digit fails → unknown
+    ['123', null],
+    ['12345678901', null],
+    [undefined, null],
+    [null, null],
+  ] as const)('normalizeBusinessId(%s) → %s', async (v, want) => {
+    const { normalizeBusinessId } = await import('../checks');
+    expect(normalizeBusinessId(v)).toBe(want);
   });
 });
 
@@ -192,7 +216,7 @@ describe('runOcrPipeline + gate', () => {
 
   it('passes expectedSupplierBusinessId to the gate and carries the v2 fields onto the reconciled invoice', async () => {
     const v2 = { ...CLEAN, documentKind: 'tax_invoice', buyer: { name: 'ציקטי' }, totals: { ...CLEAN.totals, vatRate: 0.18 } };
-    const r = await runOcrPipeline('x', { ...single(v2 as InvoiceOcrResult), expectedSupplierBusinessId: '515555551' });
+    const r = await runOcrPipeline('x', { ...single(v2 as InvoiceOcrResult), expectedSupplierBusinessId: '515209641' });
     expect(r.checks.reasons).toEqual(['supplier_id_mismatch']);
     expect(r.needsHumanReview).toBe(true);
     expect(r.reconciled.documentKind).toBe('tax_invoice');

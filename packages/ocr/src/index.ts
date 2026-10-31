@@ -27,6 +27,7 @@ export { OcrExtractionError, isOcrExtractionError, type OcrFailureCode, type Ocr
 export {
   checkInvoice,
   isValidIsraeliBusinessId,
+  normalizeBusinessId,
   lineProductAgorot,
   toAgorot,
   REVIEW_SCORE,

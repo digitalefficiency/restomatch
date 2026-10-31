@@ -1,5 +1,6 @@
 import type { InvoiceOcrLine, InvoiceOcrResult, NormalizedPurchaseOrder } from '@restomatch/types';
 import type { OcrChecks } from './checks';
+import type { ExtractionMeta } from './providers/claudeVision';
 import type { BillingPeriod, Consolidation, ConsolidationBasis } from './consolidation';
 import type { DocumentKind, InvoiceExtractionV2, LineKind } from './providers/invoiceSchema';
 
@@ -82,6 +83,8 @@ export interface OcrPipelineResult {
   conflicts: OcrConflict[];
   /** Arithmetic gate + ח״פ + document flags (./checks). Any reason ⇒ needsHumanReview. */
   checks: OcrChecks;
+  /** The Claude call's model / effort / tokens / duration (for the cost log); absent for stub reads. */
+  meta?: ExtractionMeta;
 }
 
 export type CatalogMatcherFn = (line: InvoiceOcrLine) => Promise<ProductCandidate[]>;

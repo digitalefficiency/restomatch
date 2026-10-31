@@ -183,4 +183,12 @@ describe('bench fixtures 2–4 (מרכזת ×2, regular citing one ת.מ.)', () 
     ]);
     expect(scoreExtraction(t, wrong).moneyExact).toBe(false);
   });
+
+  it('the pipeline result carries the Claude call meta (model for the cost log); a stub read has none', async () => {
+    const meta = { model: 'm', effort: 'low' as const, usage: { inputTokens: 1, outputTokens: 2 }, elapsedMs: 3 };
+    const stub = new StubOcrProvider('claude_vision', { ...asExtraction(4), meta } as never);
+    expect((await runOcrPipeline(Buffer.from('x'), { documentAi: stub, claude: stub })).meta).toEqual(meta);
+    const bare = new StubOcrProvider('claude_vision', asExtraction(4));
+    expect((await runOcrPipeline(Buffer.from('x'), { documentAi: bare, claude: bare })).meta).toBeUndefined();
+  });
 });

@@ -97,7 +97,7 @@ export interface CheckableInvoice {
 }
 
 export interface CheckOptions {
-  /** The supplier's ח״פ on file; a different printed one adds supplier_id_mismatch. */
+  /** The supplier's ח״פ on file; a different (valid) printed one adds supplier_id_mismatch. */
   expectedSupplierBusinessId?: string | null;
 }
 
@@ -136,7 +136,20 @@ export function isValidIsraeliBusinessId(raw: string | null | undefined): boolea
   return sum % 10 === 0;
 }
 
-const normId = (s: string | null | undefined) => (s ?? '').replace(/\D/g, '').replace(/^0+/, '');
+/**
+ * THE ח.פ. / ע.מ. normaliser (shared with the worker's persistence, S13):
+ * digits only; a 10-digit value with a leading 0 loses it; 8–9 digits are
+ * left-padded to 9; anything else, or a failed check digit, is UNKNOWN (null) —
+ * never a value to compare, so never a mismatch.
+ */
+export function normalizeBusinessId(v: unknown): string | null {
+  if (typeof v !== 'string' && typeof v !== 'number') return null;
+  let digits = String(v).replace(/\D/g, '');
+  if (digits.length === 10 && digits.startsWith('0')) digits = digits.slice(1);
+  if (digits.length < 8 || digits.length > 9) return null;
+  const id = digits.padStart(9, '0');
+  return isValidIsraeliBusinessId(id) ? id : null;
+}
 
 /** Israeli VAT by invoice date: 18% from 2025-01-01, 17% before. */
 export function defaultVatRate(isoDate: string | null | undefined): number {
@@ -238,8 +251,11 @@ export function checkInvoice(inv: CheckableInvoice, opts: CheckOptions = {}): Oc
   // ── Supplier ח״פ
   const printedId = inv.supplier?.businessId;
   if (printedId && !isValidIsraeliBusinessId(printedId)) add('supplier_id_invalid');
-  const expected = opts.expectedSupplierBusinessId;
-  if (expected && normId(expected) !== normId(printedId)) add('supplier_id_mismatch');
+  // Mismatch only when BOTH sides are known (valid) and differ; unknown on
+  // either side is nothing to compare.
+  const expected = normalizeBusinessId(opts.expectedSupplierBusinessId);
+  const printed = normalizeBusinessId(printedId);
+  if (expected && printed && expected !== printed) add('supplier_id_mismatch');
 
   // ── Document flags
   if (inv.documentKind && NOT_AN_INVOICE.has(inv.documentKind)) add('document_kind_not_invoice');

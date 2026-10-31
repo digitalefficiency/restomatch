@@ -1,5 +1,6 @@
 import { checkInvoice } from './checks';
 import { classifyConsolidation } from './consolidation';
+import type { ExtractionMeta } from './providers/claudeVision';
 import type { InvoiceExtractionV2 } from './providers/invoiceSchema';
 import { reconcile } from './reconciler';
 import {
@@ -90,6 +91,7 @@ export async function runOcrPipeline(
     hasLowConfidenceLines(reconciledInvoice) ||
     (matcherWasUsed && hasUnresolvedLines(reconciledInvoice));
 
+  const meta = (claude as { meta?: ExtractionMeta }).meta;
   return {
     primary: claude,
     reconciled: reconciledInvoice,
@@ -98,6 +100,7 @@ export async function runOcrPipeline(
     needsHumanReview,
     conflicts,
     checks,
+    ...(meta ? { meta } : {}),
   };
 }
 
