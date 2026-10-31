@@ -14,6 +14,8 @@ import { overContractBadgesForInvoice } from '../../contracts/over-contract';
 import { dockPriceNotesForInvoice, mergeLineBadges } from './dock-price-notes';
 import { consolidated as consolidatedNs } from '@/lib/i18n/messages/consolidated';
 import { ConsolidatedPanel } from './consolidated-panel';
+import { StatusChip } from '@/lib/components/feedback';
+import { holdReasonKeys } from '../hold-reasons';
 
 export default async function InvoiceCorrectionPage({
   params,
@@ -61,6 +63,11 @@ export default async function InvoiceCorrectionPage({
   // otherwise). It shows ₪ differences — finance roles only, never a receiver.
   const finance = active?.role === 'owner' || active?.role === 'manager' || active?.role === 'bookkeeper';
   const proposal = finance ? await caller.consolidated.proposal({ invoiceId }).catch(() => null) : null;
+  // PILOT (#222): a held invoice says why at the top (S13 #224 review reasons; link-only holds are G-08's).
+  // No ₪ in it; finance roles only, like the list it comes from.
+  const held = finance
+    ? ((await caller.invoices.needsLines().catch(() => null))?.rows.find((r) => r.id === invoiceId && r.reason === 'held') ?? null)
+    : null;
 
   return (
     <div>
@@ -69,6 +76,22 @@ export default async function InvoiceCorrectionPage({
         title={t('correction.title')}
         subtitle={t('correction.subtitle')}
       />
+      {held ? (
+        <div
+          role="note"
+          data-testid="invoice-held-reasons"
+          className="mb-4 rounded-2xl border border-line bg-surface-2 p-4"
+        >
+          <p className="text-sm font-semibold text-ink">{t('needsLines.heldTitle')}</p>
+          <ul className="mt-2 flex flex-wrap gap-1">
+            {holdReasonKeys(held.reviewReasons).map((k) => (
+              <li key={k}>
+                <StatusChip tone="neutral" emphasis="subtle" icon={null} label={t(`needsLines.held.${k}`)} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {vatRow && tv ? (
         <div
           role="note"

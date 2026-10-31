@@ -334,7 +334,8 @@ async function Needs(ctx: Ctx) {
   if (lines?.ok && lines.value.count > 0) {
     rows.push({
       key: 'invoiceLines',
-      tone: 'warn',
+      // Only held-for-review invoices (T4) → neutral; any failed / unread read → warn.
+      tone: lines.value.rows.every((r) => r.reason === 'held') ? 'neutral' : 'warn',
       label: t('needs.invoiceLines.label'),
       value: t('needs.invoiceLinesValue', { count: n(lines.value.count) }),
       verb: t('needs.invoiceLines.verb'),

@@ -90,7 +90,7 @@ export const en: Shape<typeof he> = {
     countValue: '{counted}/{lines}',
     cutoffs: { label: 'Orders closing today', sub: 'Next: {supplier} at {time}', verb: 'Order' },
     cutoffsValue: '{count} suppliers',
-    invoiceLines: { label: 'Invoices waiting for lines', verb: 'Complete' },
+    invoiceLines: { label: 'Invoices waiting for you', verb: 'Review' },
     invoiceLinesValue: '{count} invoices',
     exportLast: { label: 'Last export to the accountant', value: 'Not recorded yet', verb: 'Exports' },
   },

@@ -96,7 +96,7 @@ export const he = {
     countValue: '{counted}/{lines}',
     cutoffs: { label: 'הזמנות שנסגרות היום', sub: 'הבא: {supplier} ב־{time}', verb: 'להזמנה' },
     cutoffsValue: '{count} ספקים',
-    invoiceLines: { label: 'חשבוניות ממתינות להשלמת שורות', verb: 'להשלמה' },
+    invoiceLines: { label: 'חשבוניות שממתינות לכם', verb: 'לבדיקה' },
     invoiceLinesValue: '{count} חשבוניות',
     exportLast: { label: 'ייצוא אחרון להנהלת החשבונות', value: 'עדיין לא נרשם', verb: 'לייצוא' },
   },
