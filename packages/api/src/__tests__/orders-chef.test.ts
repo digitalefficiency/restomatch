@@ -1,6 +1,6 @@
 import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { createDb, eq, poLines, purchaseOrders, restaurants } from '@restomatch/db';
+import { createDb, eq, poLines, purchaseOrders, restaurants, supplierContractPrices } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
@@ -117,6 +117,33 @@ describe('orders · role × procedure (chef orders freely)', () => {
       if (MANAGERS.includes(role)) await expect(run, role).resolves.toEqual({ showPrices: false });
       else await expect(run, role).rejects.toMatchObject({ code: 'FORBIDDEN' });
     }
+  });
+
+  it('contracts.orderPrices: the chef reorders at CONTRACT prices; receiver / bookkeeper FORBIDDEN; a foreign supplier NOT_FOUND', async () => {
+    await db
+      .update(restaurants)
+      .set({ settings: { features: { orderCapture: true, orderPricesOut: true, contracts: true } } as never })
+      .where(eq(restaurants.id, A.restaurantId));
+    await db.insert(supplierContractPrices).values({
+      restaurantId: A.restaurantId,
+      supplierId: A.supplierId,
+      productId: A.productId,
+      contractPrice: '40',
+      validFrom: '2020-01-01',
+      validTo: null,
+      unit: 'kg',
+    });
+    const items = [{ productId: A.productId, unit: 'kg' }];
+    // A chef's "הזמן שוב" gets the contract price, never the list price (a PO at list price would mask an over-contract invoice).
+    await expect(callerFor('chef').contracts.orderPrices({ supplierId: A.supplierId, items })).resolves.toEqual({
+      enabled: true,
+      prices: [{ productId: A.productId, unit: 'kg', contractPrice: 40 }],
+    });
+    for (const role of ['receiver', 'bookkeeper'] as const) {
+      await expect(callerFor(role).contracts.orderPrices({ supplierId: A.supplierId, items }), role).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    }
+    const B = await seedTenant(db, 'B');
+    await expect(callerFor('chef').contracts.orderPrices({ supplierId: B.supplierId, items })).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
   it('PO import: owner / manager only (the role gate comes before the OCR gate)', async () => {

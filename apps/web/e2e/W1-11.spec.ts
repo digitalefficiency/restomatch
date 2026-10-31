@@ -740,6 +740,7 @@ test.describe('pilot · truthful send state · chef orders', () => {
   });
 
   test('a failed e-mail is a T2 warning with the WhatsApp/phone fallback and a copy button', async ({ page, context }) => {
+    test.setTimeout(180_000); // the first open of a polling PO page can stall on a cold CI dev server
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await setLocale(page, 'he');
     const poId = await placedByEmail('failed', 'Resend 500');

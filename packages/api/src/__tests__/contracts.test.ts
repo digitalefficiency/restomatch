@@ -739,7 +739,7 @@ describe('orders use contract prices (audit #1/#2)', () => {
     expect((await caller(A, 'manager').contracts.orderPrices({ supplierId: A.supplierId, items: [{ productId: A.productId, unit: 'kg' }] })).prices).toEqual([]);
   });
 
-  it('contracts.orderPrices: flag off → enabled:false; managers only; foreign supplier rejected', async () => {
+  it('contracts.orderPrices: flag off → enabled:false; order writers only (owner/manager/chef); foreign supplier rejected', async () => {
     await addContract(A, '40', '2020-01-01', null, 'kg');
     const items = [{ productId: A.productId, unit: 'kg' }];
     await setFeatures(A, { all: true, contracts: false });
