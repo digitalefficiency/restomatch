@@ -21,7 +21,7 @@ const AXE_SOURCE = readFileSync(createRequire(import.meta.url).resolve('axe-core
 const BARS: Record<Role, { he: string[]; en: string[] }> = {
   // Owner decision (2026-10-25): no supplier ledger or ₪ screens for the receiver.
   receiver: { he: ['היום', 'קבלות', 'עוד'], en: ['Today', 'Receipts', 'More'] },
-  chef: { he: ['היום', 'ספירה', 'מנות', 'עוד'], en: ['Today', 'Count', 'Dishes', 'More'] },
+  chef: { he: ['היום', 'ספירה', 'מנות', 'הזמנות', 'עוד'], en: ['Today', 'Count', 'Dishes', 'Orders', 'More'] },
   manager: { he: ['היום', 'הזמנות', 'קבלה', 'אישורים', 'עוד'], en: ['Today', 'Orders', 'Receive', 'Approvals', 'More'] },
   owner: { he: ['בית', 'אישורים', 'דליפה', 'הזמנות', 'עוד'], en: ['Home', 'Approvals', 'Leak', 'Orders', 'More'] },
   bookkeeper: { he: ['בית', 'אישורים', 'תשלומים', 'חשבוניות', 'עוד'], en: ['Home', 'Approvals', 'Payments', 'Invoices', 'More'] },

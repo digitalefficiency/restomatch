@@ -27,6 +27,7 @@ test.describe.configure({ mode: 'serial' });
 let supplierA = { id: '', name: '' };
 let supplierB = { id: '', name: '' };
 let reorderPo = '';
+let restaurantId = '';
 let goneItem = '';
 /** Catalog list prices of the two reorderable lines (what "order again" must price at). */
 let todaysPrices: number[] = [];
@@ -36,6 +37,7 @@ test.beforeAll(async ({ browser }) => {
   try {
     const [r] = await sql<{ id: string }[]>`select id from restaurants where name = ${DEMO_RESTAURANT_NAME} limit 1`;
     if (!r) throw new Error('demo restaurant missing from the e2e DB');
+    restaurantId = r.id;
     // Two suppliers with ≥2 active catalog products, no order schedule, no server
     // drafts (so the reorder lands without the attach/replace choice) — A has e-mail.
     const sups = await sql<{ id: string; name: string; email: string | null }[]>`
@@ -248,7 +250,7 @@ test.describe('phone 390 · manager · he', () => {
     await taps.tap(send);
 
     await expect(page.getByTestId('send-undo')).toBeVisible();
-    const sentTitle = m.wizard.sentTitle.replace('{supplier}', supplierA.name).replace('{channel}', m.detail.channelNames.email);
+    const sentTitle = m.sendStatus.queued; // orders.sendStatus: queued until the dispatcher runs
     await expect(page.getByRole('status').filter({ hasText: sentTitle })).toBeVisible({ timeout: 30_000 });
     expect(taps.count, 'routine reorder taps').toBeLessThanOrEqual(4);
 
@@ -694,5 +696,119 @@ test.describe('desktop 1440 · manager', () => {
     await page.getByTestId('cart-primary').click();
     await expect(page.getByTestId('cart-primary')).toContainText('Send to');
     expect(await axeSeriousOrWorse(page), 'axe on review (en)').toEqual([]);
+  });
+});
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Pilot (train A): the order screens tell what really happened to the message
+ * (orders.sendStatus), and the chef orders freely (owner decision 31.10).
+ * ────────────────────────────────────────────────────────────────────────── */
+test.describe('pilot · truthful send state · chef orders', () => {
+  test.use(PHONE);
+
+  /** A placed PO to supplier A by e-mail with one line and an outbox row in `status`. */
+  async function placedByEmail(status: 'queued' | 'failed', lastError: string | null = null): Promise<string> {
+    const sql = e2eSql();
+    try {
+      const [po] = await sql<{ id: string }[]>`
+        insert into purchase_orders (restaurant_id, supplier_id, status, source, notes, sent_at, sent_channel, total_estimated)
+        values (${restaurantId}, ${supplierA.id}, 'sent', 'manual', 'e2e-W1-11-pilot', now(), 'email', '48.00')
+        returning id`;
+      await sql`insert into po_lines (po_id, raw_description, qty_ordered, unit, unit_price_expected)
+                values (${po!.id}, 'W1-11 pilot עגבניות', 4, 'ק״ג', 12)`;
+      await sql`insert into notifications_outbox (restaurant_id, channel, target, subject, body, status, last_error, related_entity_type, related_entity_id)
+                values (${restaurantId}, 'email', 'orders@supplier.test', 'הזמנה', 'הזמנה חדשה', ${status}, ${lastError}, 'purchase_order', ${po!.id})`;
+      return po!.id;
+    } finally {
+      await sql.end();
+    }
+  }
+
+  test('S16 step 4: a record-only order reads "נרשמה", never "נשלחה", and has no sent time', async ({ page }) => {
+    await setLocale(page, 'he');
+    await page.goto(`/dashboard/orders/${reorderPo}`);
+    const header = page.getByTestId('order-header');
+    await expect(header.getByTestId('order-status')).toHaveAttribute('data-status', 'recorded');
+    await expect(header.getByTestId('order-status')).toHaveText(MSG.he.status.recorded);
+    await expect(header.getByTestId('placed-label')).toHaveText(MSG.he.detail.recordedAt);
+    await expect(header.getByTestId('send-status')).toHaveAttribute('data-state', 'none');
+    await expect(header.getByTestId('send-status')).toHaveText(MSG.he.sendStatus.none);
+    // The list says the same.
+    await page.goto('/dashboard/orders');
+    const card = page.getByTestId('order-card').filter({ has: page.locator(`a[href="/dashboard/orders/${reorderPo}"]`) });
+    await expect(card.getByTestId('order-status')).toHaveAttribute('data-status', 'recorded');
+  });
+
+  test('a failed e-mail is a T2 warning with the WhatsApp/phone fallback and a copy button', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await setLocale(page, 'he');
+    const poId = await placedByEmail('failed', 'Resend 500');
+    await page.goto(`/dashboard/orders/${poId}`);
+    const note = page.getByTestId('send-status');
+    await expect(note).toHaveAttribute('data-state', 'failed', { timeout: 30_000 });
+    await expect(note).toContainText(MSG.he.sendStatus.failed);
+    await expect(note).toContainText(MSG.he.sendStatus.failedHint);
+    await expect(page.getByTestId('order-status')).toHaveAttribute('data-status', 'unsent');
+    await note.getByTestId('copy-order-text').tap();
+    await expect(page.getByText(MSG.he.sendStatus.copied)).toBeVisible({ timeout: 15_000 });
+    const copied = await page.evaluate(() => navigator.clipboard.readText());
+    expect(copied).toContain('W1-11 pilot עגבניות');
+    expect(await axeSeriousOrWorse(page)).toEqual([]);
+  });
+
+  test('queued → sent: the PO page polls until the state is final', async ({ page }) => {
+    test.setTimeout(120_000);
+    await setLocale(page, 'he');
+    const poId = await placedByEmail('queued');
+    await page.goto(`/dashboard/orders/${poId}`);
+    const note = page.getByTestId('send-status');
+    await expect(note).toHaveAttribute('data-state', 'queued', { timeout: 30_000 });
+    await expect(note).toHaveText(MSG.he.sendStatus.queued);
+    const sql = e2eSql();
+    try {
+      await sql`update notifications_outbox set status = 'sent', sent_at = now() where related_entity_id = ${poId}`;
+    } finally {
+      await sql.end();
+    }
+    // No reload: the ≤60 s poll (30 s) picks it up.
+    await expect(note).toHaveAttribute('data-state', 'sent', { timeout: 60_000 });
+    await expect(note).toContainText(MSG.he.sendStatus.sentEmail.split(' · ')[0]!);
+    await expect(page.getByTestId('placed-label')).toHaveText(
+      MSG.he.detail.sentVia.replace('{channel}', MSG.he.detail.channelNames.email),
+    );
+  });
+
+  test('the chef creates and places a record-only order, and sees ₪ on it', async ({ browser }) => {
+    test.setTimeout(180_000);
+    const ctx = await browser.newContext({ ...PHONE, baseURL: test.info().project.use.baseURL });
+    const page = await ctx.newPage();
+    try {
+      await setLocale(page, 'he');
+      await loginViaMagicLink(page, 'chef@kfar-hazeitim.test', '/dashboard');
+      const since = new Date(Date.now() - 1000);
+      page.on('dialog', (d) => void d.accept());
+      await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
+      const items = page.getByTestId('catalog-item');
+      await expect(items.first()).toBeVisible({ timeout: 30_000 });
+      await items.nth(0).tap();
+      await page.getByTestId('cart-primary').tap(); // review → the server draft
+      await page.locator('#ord-channel').selectOption('none');
+      await expect(page.locator('#ord-channel option[value="none"]')).toHaveText(MSG.he.wizard.channelNone);
+      await expect(page.getByTestId('cart-summary')).toContainText('₪');
+      await page.getByTestId('cart-primary').tap();
+      const hero = page.getByTestId('send-status');
+      await expect(hero).toHaveAttribute('data-state', 'none', { timeout: 30_000 });
+      await expect(page.getByRole('status').filter({ hasText: MSG.he.wizard.markedTitle })).toBeVisible();
+      const pos = await posSince(supplierB.id, since);
+      expect(pos.map((p) => p.status)).toEqual(['sent']);
+
+      await page.goto(`/dashboard/orders/${pos[0]!.id}`);
+      await expect(page.getByTestId('order-status')).toHaveAttribute('data-status', 'recorded');
+      const total = page.getByTestId('order-total');
+      await expect(total).toContainText('₪');
+      expect(await shekelLeftOfDigits(total)).toBe(true);
+    } finally {
+      await ctx.close();
+    }
   });
 });

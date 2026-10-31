@@ -22,7 +22,7 @@ export default async function OrderCapturePage({
 }) {
   const session = await auth();
   const role = session?.user?.role;
-  if (role !== 'owner' && role !== 'manager') notFound();
+  if (role !== 'owner' && role !== 'manager' && role !== 'chef') notFound();
   const features = await enabledFeatures(session?.user?.restaurantId);
   if (!features.includes('orderCapture')) notFound();
   const { text, title } = await searchParams;

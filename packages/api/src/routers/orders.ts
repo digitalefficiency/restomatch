@@ -27,7 +27,7 @@ import { latestReceiptStatusSql } from '../lib/deliveryState';
 import { resolveTolerances } from '@restomatch/matching';
 import { ClaudePoParser, ORDER_TEXT_MAX_CHARS, orderTextParserFromEnv } from '@restomatch/ocr';
 import { ZesttAdapter } from '@restomatch/procurement';
-import { managerProcedure, memberProcedure, requireFeature, router } from '../trpc';
+import { chefProcedure, managerProcedure, memberProcedure, requireFeature, router } from '../trpc';
 import { contractPricesForOrder, orderPriceKey } from '../contracts/orderPrices';
 import { assertPoOwned, assertSupplierOwned } from '../tenant';
 import { getEntitlements } from '../entitlements';
@@ -36,7 +36,7 @@ import { captureOrderDraft } from '../orders/captureOrder';
 import { appError } from '../errors';
 import { estimateTotal, qty3, recomputePoTotal } from '../orders/totals';
 import { DEDUPE_INDEX_PREDICATE } from '../notifications/outbox';
-import { supplierMessageState, type SupplierMessageState } from '../notifications/delivery';
+import { SKIPPED_NO_PROVIDER, supplierMessageState, type SupplierMessageState } from '../notifications/delivery';
 import { deriveExpectedDelivery, type DerivedDelivery } from '../lib/deriveDelivery';
 import { assertFeatureOn, isFeatureOn } from '../lib/featureGate';
 import {
@@ -318,6 +318,20 @@ const OPEN_PO_STATUSES = ['sent', 'confirmed', 'partial'] as const;
  */
 const PO_LINE_ORDER = [sql`${poLines.rawDescription} ASC NULLS LAST`, asc(poLines.id)] as const;
 
+export type SendState = 'queued' | 'sent' | 'failed' | 'skipped' | 'none';
+
+/** The send state of a PO from its latest outbox row (orders.sendStatus). Pure. */
+export function sendStateOf(
+  poStatus: string,
+  msg: { status: string; lastError: string | null } | null,
+): SendState {
+  if (poStatus === 'draft' || !msg) return 'none';
+  if (msg.status === 'sent') return 'sent';
+  if (msg.lastError === SKIPPED_NO_PROVIDER) return 'skipped';
+  if (msg.status === 'failed' || msg.status === 'cancelled') return 'failed';
+  return 'queued';
+}
+
 export const ordersRouter = router({
   /** Purchase orders for the restaurant, with supplier name + line count. */
   list: memberProcedure
@@ -357,6 +371,8 @@ export const ordersRouter = router({
           expectedDeliveryAt: purchaseOrders.expectedDeliveryAt,
           totalEstimated: purchaseOrders.totalEstimated,
           sentAt: purchaseOrders.sentAt,
+          /** null on a placed PO = recorded only ("ללא שליחה"): the list must not read "sent". */
+          sentChannel: purchaseOrders.sentChannel,
           createdAt: purchaseOrders.createdAt,
           lineCount: count(poLines.id),
           receiptStatus: receipt,
@@ -438,7 +454,7 @@ export const ordersRouter = router({
       };
     }),
 
-  createDraft: managerProcedure
+  createDraft: chefProcedure
     .input(
       z.object({
         supplierId: z.string().uuid(),
@@ -725,7 +741,7 @@ export const ordersRouter = router({
    * the supplier and catalog lines matched. `needs_supplier` asks the owner to
    * pick one (pass it back as supplierId). Confirm = placeOrder {channel:'none'}.
    */
-  captureFromText: managerProcedure
+  captureFromText: chefProcedure
     .input(
       z.object({
         text: z.string().trim().min(1).max(ORDER_TEXT_MAX_CHARS),
@@ -752,7 +768,7 @@ export const ordersRouter = router({
       });
     }),
 
-  cancelOrder: managerProcedure
+  cancelOrder: chefProcedure
     .input(z.object({ poId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
@@ -790,7 +806,7 @@ export const ordersRouter = router({
    * are checked through the parent PO. A sent order's lines are frozen (it has
    * already gone to the supplier).
    */
-  updateOrderLine: managerProcedure
+  updateOrderLine: chefProcedure
     .input(
       z.object({
         lineId: z.string().uuid(),
@@ -836,7 +852,7 @@ export const ordersRouter = router({
     }),
 
   /** Remove a line from a DRAFT order. */
-  deleteOrderLine: managerProcedure
+  deleteOrderLine: chefProcedure
     .input(z.object({ lineId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
@@ -859,7 +875,7 @@ export const ordersRouter = router({
     }),
 
   /** Place a draft PO: transition draft → sent, enqueue an order document to the outbox. */
-  placeOrder: managerProcedure
+  placeOrder: chefProcedure
     .input(z.object({ poId: z.string().uuid(), channel: z.enum(['email', 'whatsapp', 'none']) }))
     .mutation(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
@@ -1002,6 +1018,57 @@ export const ordersRouter = router({
       return { ok: true, sentChannel };
     }),
 
+  /**
+   * Pilot (W1-11): what really happened to a placed order's message — never "sent"
+   * on faith. The channel the PO went out on and the latest outbox row for it:
+   *   queued  — waiting for the dispatcher (queued / sending);
+   *   sent    — the provider accepted it (`sentAt`);
+   *   failed  — failed or cancelled after retries;
+   *   skipped — no provider configured (outboxDispatch's skipped_no_provider);
+   *   none    — recorded only ("ללא שליחה"), or still a draft: no message exists.
+   * `final` tells the PO page to stop polling. Read-only, tenant-scoped (NOT_FOUND
+   * for another restaurant's PO, as orders.get).
+   */
+  sendStatus: memberProcedure
+    .input(z.object({ poId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      await assertPoOwned(ctx.db, input.poId, restaurantId);
+      const [po] = await ctx.db
+        .select({ status: purchaseOrders.status, sentChannel: purchaseOrders.sentChannel, placedAt: purchaseOrders.sentAt })
+        .from(purchaseOrders)
+        .where(and(eq(purchaseOrders.id, input.poId), eq(purchaseOrders.restaurantId, restaurantId)))
+        .limit(1);
+      if (!po) throw new TRPCError({ code: 'NOT_FOUND', message: 'purchase order not found' });
+      const [msg] = await ctx.db
+        .select({
+          status: notificationsOutbox.status,
+          lastError: notificationsOutbox.lastError,
+          channel: notificationsOutbox.channel,
+          sentAt: notificationsOutbox.sentAt,
+        })
+        .from(notificationsOutbox)
+        .where(
+          and(
+            eq(notificationsOutbox.restaurantId, restaurantId),
+            eq(notificationsOutbox.relatedEntityType, 'purchase_order'),
+            eq(notificationsOutbox.relatedEntityId, input.poId),
+          ),
+        )
+        .orderBy(desc(notificationsOutbox.createdAt))
+        .limit(1);
+      const state = sendStateOf(po.status, msg ?? null);
+      const channel = msg && msg.channel !== 'push' ? msg.channel : po.sentChannel === 'email' || po.sentChannel === 'whatsapp' ? po.sentChannel : null;
+      return {
+        state,
+        channel,
+        poStatus: po.status,
+        placedAt: po.placedAt ? po.placedAt.toISOString() : null,
+        sentAt: state === 'sent' && msg?.sentAt ? msg.sentAt.toISOString() : null,
+        final: state !== 'queued',
+      };
+    }),
+
   /** Order-document settings (flag `orderPricesOut`). `enabled` false → the UI hides the controls. */
   documentSettings: memberProcedure.query(async ({ ctx }) => {
     const restaurantId = ctx.session.restaurantId;
@@ -1032,7 +1099,7 @@ export const ordersRouter = router({
     }),
 
   /** What the supplier receives for this PO: email text, WhatsApp text and the PDF (base64). */
-  documentPreview: managerProcedure
+  documentPreview: chefProcedure
     .input(z.object({ poId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;

@@ -34,7 +34,9 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ po
   ]);
   const active =
     memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0];
-  const canEdit = active?.role === 'owner' || active?.role === 'manager';
+  // Owner decision 31.10 (pilot): the chef creates, edits, sends and cancels orders.
+  const canManage = active?.role === 'owner' || active?.role === 'manager';
+  const canEdit = canManage || active?.role === 'chef';
   const supplier = data.supplierName
     ? displayName(data.supplierName, data.supplierNameEn, locale).primary
     : null;
@@ -71,7 +73,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ po
               ...data.lines.map((l) => `${l.id}:${l.qtyOrdered}:${l.unit}:${l.unitPriceExpected}:${l.rawDescription}`),
             ].join('|')}
             poId={data.po.id}
-            settings={{ showPrices: docSettings.showPrices }}
+            settings={canManage ? { showPrices: docSettings.showPrices } : null}
           />
         </div>
       ) : null}
@@ -79,7 +81,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ po
       <SupplierConfirmCard
         poId={data.po.id}
         status={data.po.status}
-        canEdit={canEdit}
+        canEdit={canManage}
         restaurantName={active?.restaurantName ?? ''}
       />
     </div>

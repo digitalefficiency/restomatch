@@ -41,7 +41,8 @@ async function OrdersContent() {
   ]);
   const active =
     memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0];
-  const canEdit = active?.role === 'owner' || active?.role === 'manager';
+  // Owner decision 31.10 (pilot): the chef orders freely.
+  const canEdit = active?.role === 'owner' || active?.role === 'manager' || active?.role === 'chef';
   // orderCapture (flag): paste / share the WhatsApp order the owner already sent.
   const showCapture = canEdit && (await enabledFeatures(active?.restaurantId)).includes('orderCapture');
   const tIngest = await getT(ingest);

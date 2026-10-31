@@ -94,19 +94,40 @@ export function orderTotalIls(lines: Array<{ qty: number; unitPriceExpected?: nu
 export type PoStatus = 'draft' | 'sent' | 'confirmed' | 'partial' | 'closed' | 'cancelled';
 export type ReceiptStatus = 'pending' | 'partial' | 'completed' | 'rejected' | null;
 /** What the order screens show: the stored PO status, or the goods receipt's state for an open PO. */
-export type DisplayOrderStatus = PoStatus | 'received';
+export type DisplayOrderStatus = PoStatus | 'received' | 'recorded' | 'unsent';
+/** orders.sendStatus: what happened to the order message. */
+export type SendState = 'queued' | 'sent' | 'failed' | 'skipped' | 'none';
 
 /**
  * An open PO (sent / confirmed / partial) shows its delivery state from the latest goods
  * receipt: a completed receipt reads "received", a partial one "partially received".
  * Receiving never changes the stored PO status (invoice matching still needs to find the PO),
  * so without this a delivered order kept reading "sent".
+ *
+ * Pilot (S16 step 4): a placed PO nobody sent never reads "sent" — recorded only
+ * (`send` 'none', channel "ללא שליחה") reads "recorded", a failed or skipped message
+ * "not sent".
  */
-export function deliveryStatusOf(status: PoStatus, receipt: ReceiptStatus | undefined): DisplayOrderStatus {
+export function deliveryStatusOf(
+  status: PoStatus,
+  receipt: ReceiptStatus | undefined,
+  send?: SendState | null,
+): DisplayOrderStatus {
   if (status !== 'sent' && status !== 'confirmed' && status !== 'partial') return status;
   if (receipt === 'completed') return 'received';
   if (receipt === 'partial') return 'partial';
+  if (status === 'sent' && send === 'none') return 'recorded';
+  if (status === 'sent' && (send === 'failed' || send === 'skipped')) return 'unsent';
   return status;
+}
+
+/**
+ * The send state the PO row alone tells (no outbox read): placed here (`sentAt`) with
+ * no channel = recorded only. A synced or imported PO (no `sentAt`) keeps its status.
+ */
+export function sendStateOfRow(o: { status: string; sentAt?: Date | string | null; sentChannel?: string | null }): SendState | null {
+  if (o.status !== 'sent' || o.sentChannel === undefined || !o.sentAt) return null;
+  return o.sentChannel === null ? 'none' : null;
 }
 
 /**

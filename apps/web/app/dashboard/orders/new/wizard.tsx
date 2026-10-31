@@ -7,7 +7,6 @@ import type { AppRouter } from '@restomatch/api';
 import {
   ArrowRight,
   CalendarClock,
-  CheckCircle2,
   ChevronLeft,
   History,
   Plus,
@@ -57,6 +56,7 @@ import {
 import { DecimalInput } from '../decimal-input';
 import { FieldMode } from '../field-mode';
 import { UNDO_MS, UndoCountdown } from '../undo-bar';
+import { LiveSendStatus } from '../send-status';
 import { InlineDocument } from '../supplier-document';
 import { OverContractNote, useOrderContractPrices } from './contract-price';
 import { addDays, localNow, nextDeliveryOptions, type DeliveryOption } from './delivery-days';
@@ -1357,15 +1357,8 @@ export function NewOrderWizard({
 
         {step === 'SENT' && sent && (
           <Card elevated flow className="text-center">
-            <CheckCircle2 className="mx-auto h-10 w-10 text-primary" aria-hidden="true" />
-            <p className="mt-3 text-lg font-semibold text-ink" role="status">
-              {sent.channel === 'none'
-                ? t('wizard.markedTitle')
-                : t('wizard.sentTitle', {
-                    supplier: sent.supplier,
-                    channel: t(`detail.channelNames.${sent.channel}`),
-                  })}
-            </p>
+            {/* What really happened (orders.sendStatus) — never "sent" on faith. */}
+            <LiveSendStatus poId={sent.poId} pickedChannel={sent.channel} variant="hero" />
             <p className="mt-1 text-sm text-muted">
               {sent.channel === 'none'
                 ? t('wizard.markedBody')
