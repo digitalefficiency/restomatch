@@ -44,6 +44,7 @@ import {
 } from '@restomatch/db';
 import postgres from 'postgres';
 import { checkDemo } from './check-demo';
+import { demoNow } from '../src/lib/demoDates';
 import { DEMO_EXTRA_STEPS, scriptIsDemoScoped } from '../src/lib/demoExtras';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -103,7 +104,7 @@ async function planExtras(sql: postgres.Sql) {
 /** Every hero figure of every demo restaurant, this month and the last two. */
 async function heroSnapshot(rids: string[], day: string): Promise<Record<string, string>> {
   const db = createDb(url!);
-  const now = new Date(`${day}T12:00:00+03:00`);
+  const now = demoNow(day);
   const out: Record<string, string> = {};
   for (const rid of rids) {
     for (const monthOffset of [0, -1, -2]) {
@@ -164,7 +165,8 @@ async function main() {
     const db = createDb(url!);
     const main = after.restaurants.find((r) => r.businessId === DEMO_MAIN_BUSINESS_ID);
     if (main) {
-      const h = await computeLeakHero(db, main.id);
+      // At DEMO_TODAY when given (the same instant check:demo uses), else the real clock.
+      const h = await computeLeakHero(db, main.id, today ? { now: demoNow(today) } : {});
       console.log(`\n[reseed-demo] ✔ done. Other tenants unchanged (${afterFp.restaurants} restaurant(s), ${afterFp.users} user(s)).`);
       console.log(`[reseed-demo] hero (${main.name}): ${JSON.stringify(h)}`);
     }
