@@ -494,11 +494,16 @@ export async function markOcrFailed(
     .set({
       status: 'parsed',
       ocrConfidence: '0',
-      ocrPayload: {
-        provider: 'claude_vision',
-        raw: { ocrFailed: true, reason },
-        reconciledAt: new Date().toISOString(),
-      },
+      // MERGE into the raw already on the row: keys stamped before the read
+      // (raw.scanGrId — the receipt the scan was taken on, which the
+      // one-receipt-one-invoice resume keys on) survive a failed read. Only
+      // ocrFailed / reason are set; a non-object raw is replaced.
+      ocrPayload: sql`jsonb_build_object(
+        'provider', 'claude_vision',
+        'raw', (CASE WHEN jsonb_typeof(${invoices.ocrPayload} -> 'raw') = 'object'
+                     THEN ${invoices.ocrPayload} -> 'raw' ELSE '{}'::jsonb END)
+               || ${JSON.stringify({ ocrFailed: true, reason })}::jsonb,
+        'reconciledAt', ${new Date().toISOString()}::text)`,
       updatedAt: new Date(),
     })
     .where(
