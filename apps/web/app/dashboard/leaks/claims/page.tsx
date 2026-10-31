@@ -14,7 +14,7 @@ import { discrepancyLabel, displayName } from '../../approvals/vocab';
 import { PrintButton } from './print-button';
 import { LetterActions } from './letter-actions';
 import { DeferredProvider } from '../../recovery/deferred';
-import { addDays, buildLetters, daysLeft, sumAgora, type LetterLine, type SupplierLetter } from './letters';
+import { addDays, buildLetters, daysLeft, lettersFromServer, sumAgora, type LetterLine, type SupplierLetter } from './letters';
 import { lineMathText } from './why';
 import { ALL_CLAIMS, ANSWER_DAYS } from '../../recovery/logic';
 
@@ -33,8 +33,6 @@ const REASON_TYPES = [
   'TOTAL_MISMATCH',
 ] as const;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-/** Months of breakdown looked up to show the basis (date, expected vs charged) of tracker lines. */
-const HISTORY_MONTHS = 6;
 
 /**
  * Supplier credit-request letters (מכתבי דרישת זיכוי): ONE letter per supplier
@@ -64,16 +62,11 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
   ]);
   // Tracker claims (any status: `claimed` get letters, `letter_sent` show as sent, the rest are handled).
   // No .catch: a failed read is the route's error state ("not available · try again"), never "no letters".
-  const tracked = flags.recovery ? await caller.recovery.list({ limit: ALL_CLAIMS }) : [];
-  const history = flags.recovery
-    ? (
-        await Promise.all(
-          Array.from({ length: HISTORY_MONTHS }, (_, i) => -i)
-            .filter((o) => o !== monthOffset)
-            .map((o) => caller.owner.leakBreakdown({ monthOffset: o, limit: 200 })),
-        )
-      ).flat()
-    : [];
+  // W2-10: the letters themselves come ONLY from recovery_claims (server-built, `claimed`, decided).
+  const [tracked, serverLetters] = await Promise.all([
+    flags.recovery ? caller.recovery.list({ limit: ALL_CLAIMS }) : Promise.resolve([]),
+    caller.recovery.letters(),
+  ]);
 
   // The sender is the ACTIVE restaurant (the session's), never memberships[0].
   const restaurant =
@@ -87,7 +80,9 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
   const ils = (v: number) => formatIls(v, { locale, maximumFractionDigits: 2 });
   const supplierIdByName = new Map(options.suppliers.map((s) => [s.name, s.id]));
 
-  const built = buildLetters({ month: rows, tracked, history });
+  // The month breakdown only counts the UNDECIDED lines (a "decide first" prompt); it never adds a letter line.
+  const { undecided: undecidedAll } = buildLetters({ month: rows, tracked });
+  const built = { ...lettersFromServer(serverLetters, tracked), undecided: undecidedAll };
   const withIds = built.letters.map((l) => ({
     ...l,
     supplierId: l.supplierId ?? (l.supplierName ? (supplierIdByName.get(l.supplierName) ?? null) : null),
@@ -239,6 +234,7 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
         <div className="mt-5 border-t border-line pt-4">
           <LetterActions
             scope={scope}
+            supplierId={letter.supplierId}
             claimIds={letter.claimIds}
             whatsappText={textOf(letter)}
             mailSubject={t('claims.subject', { month })}

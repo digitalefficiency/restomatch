@@ -12,16 +12,16 @@ export type RecoveryStatus =
   | 'disputed'
   | 'written_off';
 
-/** Mirrors packages/api/src/recovery/lifecycle.ts (the server re-validates every move). */
-export const NEXT: Record<RecoveryStatus, RecoveryStatus[]> = {
-  claimed: ['letter_sent', 'acknowledged', 'disputed', 'written_off'],
-  letter_sent: ['acknowledged', 'disputed', 'written_off'],
-  acknowledged: ['disputed', 'written_off'],
-  credited: ['recovered', 'disputed'],
-  recovered: [],
-  disputed: ['letter_sent', 'acknowledged', 'written_off'],
-  written_off: ['claimed'],
-};
+/**
+ * The allowed moves come from the SERVER (`recovery.list` → `next[]`, from
+ * packages/api lifecycle.ts): this screen never mirrors the transition table.
+ */
+export interface NextEdge {
+  to: RecoveryStatus;
+  requiresReason: boolean;
+  terminal: boolean;
+  undoable: boolean;
+}
 
 /**
  * Ask recovery.list for EVERY claim (packages/api MAX_CLAIMS) — screens that sum
@@ -54,17 +54,19 @@ export function nextStep(status: RecoveryStatus): NextStep {
   }
 }
 
-/** The moves left for the ⋯ menu (everything allowed except the primary step). */
-export function menuMoves(status: RecoveryStatus): RecoveryStatus[] {
+const tos = (next: ReadonlyArray<NextEdge | RecoveryStatus>): RecoveryStatus[] => next.map((e) => (typeof e === 'string' ? e : e.to));
+
+/** The moves left for the ⋯ menu: the server's allowed moves except the primary step. */
+export function menuMoves(status: RecoveryStatus, next: ReadonlyArray<NextEdge | RecoveryStatus>): RecoveryStatus[] {
   const primary = nextStep(status);
-  return NEXT[status].filter((s) => !(primary?.kind === 'move' && primary.to === s));
+  return tos(next).filter((s) => !(primary?.kind === 'move' && primary.to === s));
 }
 
 /** Moves valid for EVERY selected claim (one batch call can then never half-fail on the lifecycle). */
-export function batchMoves(statuses: ReadonlyArray<RecoveryStatus>): RecoveryStatus[] {
-  if (statuses.length === 0) return [];
-  const [first, ...rest] = statuses;
-  return NEXT[first!].filter((to) => rest.every((s) => NEXT[s].includes(to)));
+export function batchMoves(nexts: ReadonlyArray<ReadonlyArray<NextEdge | RecoveryStatus>>): RecoveryStatus[] {
+  if (nexts.length === 0) return [];
+  const [first, ...rest] = nexts.map(tos);
+  return first!.filter((to) => rest.every((n) => n.includes(to)));
 }
 
 /**
@@ -224,16 +226,41 @@ export function confirmAgorot(
 }
 
 /** Claims grouped by supplier (phone cards), largest outstanding first. */
-export function bySupplier<T extends { supplierId: string | null; supplierName: string | null; outstandingAgorot: number }>(
-  claims: ReadonlyArray<T>,
-): Array<{ key: string; claims: T[]; outstandingAgorot: number }> {
-  const m = new Map<string, { key: string; claims: T[]; outstandingAgorot: number }>();
+/**
+ * Claims grouped per supplier for the desk, RANKED by what waiting costs:
+ * Σ(owed agorot × days overdue) first (the server's `daysOverdue`, from the
+ * shared overdue constant — never a day count of this screen), then owed ₪.
+ * A supplier owing ₪0 (fully credited) never leads the open list.
+ */
+export function bySupplier<
+  T extends { supplierId: string | null; supplierName: string | null; outstandingAgorot: number; daysOverdue?: number },
+>(claims: ReadonlyArray<T>): Array<{ key: string; claims: T[]; outstandingAgorot: number; urgency: number }> {
+  const m = new Map<string, { key: string; claims: T[]; outstandingAgorot: number; urgency: number }>();
   for (const c of claims) {
     const key = c.supplierId ?? c.supplierName ?? '—';
-    const g = m.get(key) ?? { key, claims: [], outstandingAgorot: 0 };
+    const g = m.get(key) ?? { key, claims: [], outstandingAgorot: 0, urgency: 0 };
     g.claims.push(c);
     g.outstandingAgorot += c.outstandingAgorot;
+    g.urgency += c.outstandingAgorot * Math.max(0, c.daysOverdue ?? 0);
     m.set(key, g);
   }
-  return [...m.values()].sort((a, b) => b.outstandingAgorot - a.outstandingAgorot || a.key.localeCompare(b.key));
+  return [...m.values()].sort(
+    (a, b) =>
+      Number(b.outstandingAgorot > 0) - Number(a.outstandingAgorot > 0) ||
+      b.urgency - a.urgency ||
+      b.outstandingAgorot - a.outstandingAgorot ||
+      a.key.localeCompare(b.key),
+  );
+}
+
+/**
+ * DISPLAY-ONLY preview of the server's incl. → excl. VAT conversion
+ * (packages/api recovery/service.ts `exclVatAgorot`: integer agorot, half-up,
+ * the supplier's rate in basis points), so the credit form can show ✓ at 0
+ * before submit. The server converts again and is the only one that books.
+ */
+export function previewExclAgorot(printedAgorot: number, vat: 'incl' | 'excl', rateBp: number): number {
+  if (vat === 'excl') return printedAgorot;
+  const den = 10_000 + rateBp;
+  return Math.floor((2 * printedAgorot * 10_000 + den) / (2 * den));
 }

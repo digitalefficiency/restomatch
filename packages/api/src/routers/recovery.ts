@@ -178,14 +178,15 @@ export const recoveryRouter = router({
   /**
    * Claim letters (W2-10): one draft per supplier, built ONLY from that
    * supplier's `claimed` claims, in two sections (before payment / for credit).
-   * Reads only.
+   * Reads only. Finance tier, not behind the `recovery` flag: the composer
+   * (/dashboard/leaks/claims) works without the tracker screen, as before.
    */
-  letters: recoveryProcedure
+  letters: financeProcedure
     .input(z.object({ supplierId: z.string().uuid().optional() }).optional())
     .query(({ ctx, input }) => buildClaimLetters(ctx.db, ctx.session.restaurantId, { supplierId: input?.supplierId })),
 
   /** Confirm a letter went out (after the hand-off + 10 s undo): its claims → letter_sent, all or nothing. */
-  sendLetter: recoveryProcedure
+  sendLetter: financeProcedure
     .input(
       z.object({
         supplierId: z.string().uuid(),
@@ -196,7 +197,7 @@ export const recoveryRouter = router({
     .mutation(({ ctx, input }) => sendLetter(ctx.db, ctx.session.restaurantId, { ...input, actorId: ctx.session.userId })),
 
   /** Take a sent letter back within the window (guarded letter_sent → claimed). */
-  unsendLetter: recoveryProcedure
+  unsendLetter: financeProcedure
     .input(z.object({ claimIds: z.array(z.string().uuid()).min(1).max(500) }))
     .mutation(({ ctx, input }) => unsendLetter(ctx.db, ctx.session.restaurantId, { claimIds: input.claimIds, actorId: ctx.session.userId })),
 

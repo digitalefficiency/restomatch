@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { LeakBreakdownInvoice, LeakBreakdownLine } from '@restomatch/charts';
 import { activeMembershipOf } from '@/lib/activeRestaurant';
 import { formatIls } from '@/lib/money';
-import { approvedNotClaimed, buildLetters, daysLeft, letterAgorotFor, lineMath, sumAgora, type TrackedClaim } from '../claims/letters';
+import { approvedNotClaimed, buildLetters, daysLeft, letterAgorotFor, lettersFromServer, lineMath, sumAgora, type ServerLetter, type TrackedClaim } from '../claims/letters';
 import { lineMathText } from '../claims/why';
 import { leakStateOf, zeroNoteOf } from '../states';
 
@@ -335,5 +335,43 @@ describe('a ₪0 line says why only when the engine proves it', () => {
   it('the billed-short note never claims "not billed"', async () => {
     const { he } = await import('@/lib/i18n/messages/leaks/he');
     expect(he.breakdown.noMoneyShort).not.toMatch(/לא חויבתם/);
+  });
+});
+
+describe('W2-10: letters from recovery.letters only', () => {
+  const line = (claimId: string, amountAgorot: number): ServerLetter['beforePayment'][number] => ({
+    claimId,
+    discrepancyId: `d-${claimId}`,
+    invoiceId: 'i1',
+    invoiceNumber: 'INV-1',
+    invoiceDate: '2026-10-10T00:00:00.000Z',
+    type: 'PRICE_HIGHER',
+    severity: 'warn',
+    productName: 'עגבניות',
+    productNameEn: null,
+    lineDescription: null,
+    lineDescriptionEn: null,
+    amountAgorot,
+    basis: 'excl',
+    expected: 10,
+    actual: 12,
+    deltaAmount: 20,
+  });
+  it('keeps the two sections, sums to the agora and never adds a line the server did not send', () => {
+    const server: ServerLetter[] = [
+      { supplierId: 's1', supplierName: 'ספק', supplierNameEn: null, beforePayment: [line('c1', 3333)], forCredit: [line('c2', 1)], claimIds: ['c1', 'c2'] },
+    ];
+    const { letters } = lettersFromServer(server, []);
+    expect(letters).toHaveLength(1);
+    const [l] = letters;
+    expect(l!.beforePayment.map((x) => x.claimId)).toEqual(['c1']);
+    expect(l!.forCredit.map((x) => x.claimId)).toEqual(['c2']);
+    expect(l!.beforePaymentTotal).toBe(33.33);
+    expect(l!.forCreditTotal).toBe(0.01);
+    expect(Math.round(l!.total * 100)).toBe(3334);
+    expect(l!.claimIds).toEqual(['c1', 'c2']);
+  });
+  it('an empty server answer is no letter — undecided month lines are never letters (decision 18)', () => {
+    expect(lettersFromServer([], []).letters).toEqual([]);
   });
 });

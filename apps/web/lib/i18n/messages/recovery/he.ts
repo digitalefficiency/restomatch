@@ -4,6 +4,7 @@
  */
 export const he = {
   tracker: {
+    paged: 'מוצגות {shown} מתוך {total} דרישות',
     loading: 'טוען את מעקב ₪ חוזר',
     errorTitle: 'מעקב ₪ חוזר לא זמין כרגע',
     errorBody: 'לא הצלחנו לטעון את הדרישות. שום שינוי לא אבד — נסו שוב.',
@@ -139,6 +140,7 @@ export const he = {
     recoveredLetGo: 'החלק שלא זוכה, {amount}, ייסגר כוויתור.',
     recoveredCta: 'אישור: הכסף חזר',
     reason: 'סיבה (נשמרת ביומן הדרישה)',
+    reasonRequired: 'בחרו סיבה כדי לסגור.',
     cancel: 'חזרה',
     reasons: {
       written_off: {
@@ -154,7 +156,40 @@ export const he = {
       },
     },
   },
+  reminder: {
+    title: 'תזכורות לספקים',
+    hint: 'טיוטה בלבד. נפתחת בוואטסאפ או במייל רק כשלוחצים.',
+    line: 'תזכורת לספק {supplier} · {count} דרישות',
+    why: 'למה?',
+    whyText: 'עבר שבוע בלי תעודת זיכוי. הוותיקה מחכה {days} ימים.',
+    whatsapp: 'פתיחה בוואטסאפ',
+    mail: 'פתיחה במייל',
+    subject: 'תזכורת: דרישת זיכוי · {count} פערים · {amount}',
+    body: 'שלום {supplier}, תזכורת לדרישת הזיכוי ששלחנו: {count} פערים בסך {amount} לפני מע״מ, הוותיקה ממתינה {days} ימים. נשמח לחשבונית זיכוי או לחשבונית מתוקנת. תודה!',
+  },
+  peek: {
+    claimed: 'נדרש',
+    owed: 'עוד חייבים',
+    invoice: 'חשבונית {number}',
+    history: 'היסטוריה',
+    loading: 'טוענים…',
+    retry: 'נסו שוב',
+    system: 'המערכת',
+    open: 'היסטוריה',
+    role: { owner: 'בעלים', manager: 'מנהל/ת', bookkeeper: 'הנהלת חשבונות', receiver: 'קבלת סחורה', chef: 'שף' },
+  },
+  exportMenu: {
+    csv: 'ייצוא CSV',
+    xlsx: 'ייצוא Excel',
+    failed: 'הייצוא נכשל. נסו שוב.',
+  },
   creditForm: {
+    amountAsPrinted: 'הסכום כפי שמופיע בתעודה',
+    vatLegend: 'הסכום בתעודה',
+    vat: { incl: 'כולל מע״מ', excl: 'לפני מע״מ' },
+    vatRequired: 'בחרו אם הסכום כולל מע״מ',
+    running: 'נבחר {chosen} מתוך {typed} לפני מע״מ',
+    diff: 'הפרש {amount}',
     title: 'רישום תעודת זיכוי · {supplier}',
     number: 'מספר תעודה',
     amount: 'סכום (₪, לפני מע״מ)',

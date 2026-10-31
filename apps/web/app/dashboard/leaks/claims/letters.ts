@@ -349,3 +349,83 @@ export function letterAgorotFor(
   const hit = letters.find((l) => l.supplierId === supplier.id) ?? (name ? letters.find((l) => (l.supplierName ?? '').trim() === name) : undefined);
   return hit ? Math.round(hit.total * 100) : 0;
 }
+
+/** One supplier letter as `recovery.letters` returns it (built on the server from `claimed` claims only). */
+export interface ServerLetterLine {
+  claimId: string;
+  discrepancyId: string;
+  invoiceId: string | null;
+  invoiceNumber: string | null;
+  invoiceDate: string | null;
+  type: string;
+  severity: string | null;
+  productName: string | null;
+  productNameEn: string | null;
+  lineDescription: string | null;
+  lineDescriptionEn: string | null;
+  amountAgorot: number;
+  basis: VatBasis;
+  expected: number | null;
+  actual: number | null;
+  deltaAmount: number | null;
+}
+export interface ServerLetter {
+  supplierId: string | null;
+  supplierName: string | null;
+  supplierNameEn: string | null;
+  beforePayment: ServerLetterLine[];
+  forCredit: ServerLetterLine[];
+  claimIds: string[];
+}
+
+const fromServerLine = (l: ServerLetterLine): LetterLine => ({
+  key: l.claimId,
+  invoiceId: l.invoiceId,
+  invoiceNumber: l.invoiceNumber,
+  invoiceDate: l.invoiceDate,
+  type: l.type,
+  severity: l.severity,
+  productName: l.productName,
+  productNameEn: l.productNameEn,
+  lineDescription: l.lineDescription,
+  lineDescriptionEn: l.lineDescriptionEn,
+  amount: l.amountAgorot / 100,
+  basis: l.basis,
+  expected: l.expected,
+  actual: l.actual,
+  deltaAmount: l.deltaAmount,
+  claimId: l.claimId,
+});
+
+/**
+ * W2-10: the claim letters of the composer, from `recovery.letters` ONLY —
+ * every line is a decided claim (decision 18), in exactly one section
+ * (decision 19), and Σ letter = Σ its claims to the agora (integer agorot from
+ * the server; no local money math). `sent` comes from the tracker rows as before.
+ */
+export function lettersFromServer(
+  server: ReadonlyArray<ServerLetter>,
+  tracked: ReadonlyArray<TrackedClaim>,
+): { letters: SupplierLetter[]; sent: SentLetter[] } {
+  const letters = server.map((g) => {
+    const beforePayment = g.beforePayment.map(fromServerLine);
+    const forCredit = g.forCredit.map(fromServerLine);
+    const beforePaymentTotal = sumAgora(beforePayment.map((l) => l.amount));
+    const forCreditTotal = sumAgora(forCredit.map((l) => l.amount));
+    return {
+      key: g.supplierId ?? supplierKey(g.supplierName),
+      supplierId: g.supplierId,
+      supplierName: g.supplierName,
+      supplierNameEn: g.supplierNameEn,
+      beforePayment,
+      forCredit,
+      beforePaymentTotal,
+      forCreditTotal,
+      total: sumAgora([beforePaymentTotal, forCreditTotal]),
+      claimIds: [...g.claimIds],
+    };
+  });
+  // Already sent: the same rule as buildLetters (one row per supplier, the latest send).
+  const { sent } = buildLetters({ month: [], tracked });
+  return { letters, sent };
+}

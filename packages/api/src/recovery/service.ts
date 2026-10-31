@@ -320,6 +320,14 @@ export interface RecoveryClaimRow {
 /** A `listClaims` row: the claim plus the moves it may take next, from the server machine (no client mirror). */
 export interface RecoveryClaimListRow extends RecoveryClaimRow {
   next: RecoveryEdge[];
+  /** The VAT rate this supplier's paper uses (basis points): supplier rate ?? restaurant rate — for the credit form's preview. */
+  vatRateBp: number;
+  /**
+   * Whole days past the answer deadline (OVERDUE_DAYS after the letter, or
+   * the claim when no letter went out); 0 when not overdue or not waiting on
+   * the supplier. The desk ranks suppliers by owed ₪ × these days.
+   */
+  daysOverdue: number;
 }
 
 /** Waiting on the supplier this many days after the letter (or the claim) ⇒ overdue. */
@@ -343,6 +351,7 @@ export async function listClaims(
       c.claimed_at, c.letter_sent_at, c.acknowledged_at, c.credited_at, c.recovered_at, c.closed_at,
       c.last_reminder_at, c.note,
       s.name AS supplier_name, s.name_en AS supplier_name_en,
+      round(COALESCE(s.vat_rate, tz.vat_rate) * 10000)::int AS vat_rate_bp,
       i.invoice_number,
       d.type AS discrepancy_type,
       p.canonical_name AS product_name, p.name_en AS product_name_en,
@@ -351,9 +360,10 @@ export async function listClaims(
       -- Ageing in the restaurant's calendar days (Asia/Jerusalem by default).
       ((${now.toISOString()}::timestamptz AT TIME ZONE tz.tz)::date - (c.claimed_at AT TIME ZONE tz.tz)::date) AS age_days,
       -- Overdue: exactly the reminder job's rule (findOverdue), so the badge and the email agree.
-      (COALESCE(c.letter_sent_at, c.claimed_at) < ${now.toISOString()}::timestamptz - make_interval(days => ${OVERDUE_DAYS})) AS waiting_overdue
+      (COALESCE(c.letter_sent_at, c.claimed_at) < ${now.toISOString()}::timestamptz - make_interval(days => ${OVERDUE_DAYS})) AS waiting_overdue,
+      GREATEST(0, floor(extract(epoch FROM (${now.toISOString()}::timestamptz - COALESCE(c.letter_sent_at, c.claimed_at))) / 86400)::int - ${OVERDUE_DAYS}) AS days_past
     FROM recovery_claims c
-    CROSS JOIN (SELECT COALESCE(timezone, 'Asia/Jerusalem') AS tz FROM restaurants WHERE id = ${restaurantId}) tz
+    CROSS JOIN (SELECT COALESCE(timezone, 'Asia/Jerusalem') AS tz, vat_rate FROM restaurants WHERE id = ${restaurantId}) tz
     JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}
     LEFT JOIN suppliers s ON s.id = c.supplier_id AND s.restaurant_id = ${restaurantId}
     LEFT JOIN invoices i ON i.id = c.invoice_id AND i.restaurant_id = ${restaurantId}
@@ -402,6 +412,8 @@ export async function listClaims(
       creditNoteNumber: (r.credit_note_number as string | null) ?? null,
       note: (r.note as string | null) ?? null,
       next: nextEdges(status, { amountAgorot: amount, creditedAgorot: credited }),
+      vatRateBp: int(r.vat_rate_bp),
+      daysOverdue: (AWAITING_SUPPLIER as readonly string[]).includes(status) && r.waiting_overdue === true ? int(r.days_past) : 0,
     };
   });
 }
