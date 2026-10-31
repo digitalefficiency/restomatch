@@ -6,8 +6,8 @@ import { formatDate } from '@/lib/i18n/format';
 import {
   accessibilityCoordinator,
   assertStatementPublishable,
-  companyDetails,
   contactChannels,
+  operatorText,
   whatsappHref,
 } from '@/lib/contact';
 import { alternatesFor, metadataBase, socialFor } from '../_components/seo';
@@ -61,7 +61,7 @@ export default async function AccessibilityStatementPage() {
   const date = (iso: string) =>
     formatDate(`${iso}T12:00:00Z`, t.locale, { day: '2-digit', month: '2-digit', year: 'numeric' });
   const coordinator = accessibilityCoordinator();
-  const company = companyDetails();
+  const operator = operatorText(t.locale, (id) => t('a11y.companyId', { id }));
   const channels = contactChannels();
   const wa = channels.whatsapp
     ? whatsappHref(channels.whatsapp.digits, t('shell.whatsappText'))
@@ -79,9 +79,9 @@ export default async function AccessibilityStatementPage() {
       <p className="mt-6 text-lg leading-relaxed text-muted">{t('a11y.intro')}</p>
       <p className="mt-3 text-sm text-muted">
         {t('a11y.operatorLabel')}:{' '}
-        {company.legalName && company.companyId ? (
-          <span className="font-medium text-ink">
-            {company.legalName[t.locale]} · {t('a11y.companyId', { id: company.companyId })}
+        {operator ? (
+          <span className="font-medium text-ink" data-testid="a11y-operator">
+            {operator}
           </span>
         ) : (
           <Placeholder>{t('a11y.operatorPlaceholder')}</Placeholder>

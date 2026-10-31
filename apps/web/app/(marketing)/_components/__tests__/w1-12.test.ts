@@ -3,6 +3,7 @@ import {
   PUBLIC_FACTS,
   accessibilityCoordinator,
   assertStatementPublishable,
+  operatorText,
   contactChannels,
   pendingStatementFacts,
   hasAnyChannel,
@@ -91,9 +92,13 @@ describe('lib/contact — channels render only when configured (mkt-06)', () => 
     ).toBe('050-1234567');
   });
 
-  it('the company is named on the statement; address and privacy contact stay pending (null)', () => {
-    expect(PUBLIC_FACTS.company.legalName?.he).toBe('דיגיטל אפישנסי בע״מ');
-    expect(PUBLIC_FACTS.company.companyId).toMatch(/^\d{9}$/);
+  it('the company is named on the statement; no number, address or privacy contact (null)', () => {
+    expect(PUBLIC_FACTS.company.legalName).toEqual({
+      he: 'דיגיטל אפישנסי בע״מ',
+      en: 'Digital Efficiency Ltd.',
+    });
+    // Owner decision 2026-10-31: publish no company number for now.
+    expect(PUBLIC_FACTS.company.companyId).toBeNull();
     expect(PUBLIC_FACTS.company.address).toBeNull();
     expect(PUBLIC_FACTS.company.privacyContact).toBeNull();
   });
@@ -121,15 +126,18 @@ describe('the statement never ships to production with a placeholder', () => {
       'a11yCoordinator.phone',
       'a11yCoordinator.email',
       'company.legalName',
-      'company.companyId',
     ]);
     expect(pendingStatementFacts({}, filled)).toEqual([]);
+    // The company number is optional: missing, it never blocks publishing.
+    expect(
+      pendingStatementFacts({}, { ...filled, company: { ...filled.company, companyId: null } }),
+    ).toEqual([]);
   });
 
   it('a production deploy fails while anything is pending', () => {
     const noCompany = { ...PUBLIC_FACTS, company: UNSET.company };
     expect(() => assertStatementPublishable('production', {}, noCompany)).toThrow(
-      /company\.legalName, company\.companyId/,
+      /placeholders: company\.legalName\./,
     );
     expect(() => assertStatementPublishable('production', {}, UNSET)).toThrow(
       /a11yCoordinator\.phone/,
@@ -142,6 +150,35 @@ describe('the statement never ships to production with a placeholder', () => {
     expect(() => assertStatementPublishable('production', {}, filled)).not.toThrow();
     // The real config is complete: the production build is allowed.
     expect(() => assertStatementPublishable('production', {})).not.toThrow();
+  });
+});
+
+describe('no company number is published while none is configured', () => {
+  const idLabel = (id: string) => `ח״פ ${id}`;
+
+  it('the operator line is the legal name alone: no number, no placeholder', () => {
+    for (const locale of ['he', 'en'] as const) {
+      const text = operatorText(locale, idLabel);
+      expect(text).toBe(PUBLIC_FACTS.company.legalName![locale]);
+      expect(text).not.toMatch(/\d/);
+      expect(text).not.toMatch(/\[|ח״פ|Company no/);
+    }
+  });
+
+  it('the number appears only once one is configured', () => {
+    const withId = {
+      ...PUBLIC_FACTS,
+      company: { ...PUBLIC_FACTS.company, companyId: '510000000' },
+    };
+    expect(operatorText('he', idLabel, withId)).toBe('דיגיטל אפישנסי בע״מ · ח״פ 510000000');
+  });
+
+  it('a missing legal name yields no operator text (the page then shows the marked placeholder)', () => {
+    expect(operatorText('he', idLabel, UNSET)).toBeNull();
+  });
+
+  it('no 9-digit company or ID number is in the public config anywhere', () => {
+    expect(JSON.stringify(PUBLIC_FACTS)).not.toMatch(/\d{9}/);
   });
 });
 
