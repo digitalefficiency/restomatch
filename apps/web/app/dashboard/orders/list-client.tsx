@@ -25,7 +25,8 @@ type StatusFilter = 'all' | OrderStatus | 'received';
 
 const PAGE = 50;
 
-const FILTERS: StatusFilter[] = ['all', 'draft', 'sent', 'partial', 'received', 'closed', 'cancelled'];
+// 'draft' is the "טיוטות" queue view now (W2-06 §5.6): one control, not two with the same name.
+const FILTERS: StatusFilter[] = ['all', 'sent', 'partial', 'received', 'closed', 'cancelled'];
 
 /**
  * Open orders filter by their goods receipt (orders.list `delivery`): "sent" = not received

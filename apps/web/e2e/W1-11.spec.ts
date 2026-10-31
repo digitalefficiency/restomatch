@@ -374,7 +374,8 @@ test.describe('phone 390 · manager · he', () => {
     expect(await poStatus(draftId)).toBe('draft');
     const list = await context.newPage();
     await list.goto('/dashboard/orders');
-    await list.getByRole('button', { name: m.filters.draft, exact: true }).click();
+    // W2-06: drafts are the "טיוטות" queue view (the status filter of the same name was folded into it).
+    await list.locator('[data-view="drafts"]').click();
     await expect(list.locator(`a[href="/dashboard/orders/${draftId}"]`).first()).toBeAttached({ timeout: 30_000 });
   });
 
