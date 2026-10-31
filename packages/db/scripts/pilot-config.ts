@@ -8,7 +8,9 @@
  *   restaurant.csv  one row: שם, ח״פ, כתובת
  *   staff.csv       שם מלא, תפקיד (בעלים|מנהל|מקבל סחורה|שף|הנהלת חשבונות), מייל, נייד, שפה (he|en|ar|ru|ti|th)
  *   suppliers.csv   שם הספק, ח״פ, איש קשר, נייד, מייל להזמנות, ימי הזמנה ("א,ג,ה"), שעת סגירה (HH:MM),
- *                   ימי אספקה, מע״מ (18%|0%), חשבונית מרכזת (כן|לא)
+ *                   ימי אספקה, מע״מ (18%|0%), חשבונית מרכזת (כן|לא), [תנאי תשלום]
+ * The headers are the bare names of S6's onboarding templates (docs/pilot/…/templates);
+ * a trailing parenthetical such as "מע״מ (18%|0%)" is tolerated.
  *
  * Every unknown value is an error naming the file, row and column. The result
  * is validated exactly like a hand-written config and then goes through the
@@ -66,8 +68,12 @@ export function parseCsv(text: string): string[][] {
   return rows;
 }
 
-/** Header match ignoring spaces and the ״ / " / ׳ / ' marks people type differently. */
-const headerKey = (h: string) => h.normalize('NFC').replace(/[\s"'״׳]/g, '').toLowerCase();
+/**
+ * Header match ignoring a trailing parenthetical ("תפקיד (בעלים|מנהל)"), spaces,
+ * and the ״ / " / ׳ / ' marks people type differently.
+ */
+const headerKey = (h: string) =>
+  h.normalize('NFC').replace(/\s*\([^)]*\)\s*$/, '').replace(/[\s"'״׳]/g, '').toLowerCase();
 
 interface Table {
   file: string;
@@ -170,6 +176,7 @@ export function configFromCsv(dir: string): PilotConfig {
       contactName: row.get('איש קשר') || undefined,
       contactWhatsapp: row.get('נייד') || undefined,
       contactEmail: row.get('מייל להזמנות') || undefined,
+      paymentTerms: row.get('תנאי תשלום') || undefined,
       vatRate,
       orderSchedule: orderDays && deliveryDays && /^\d\d:\d\d$/.test(cutoff) ? orderScheduleFrom(orderDays, cutoff, deliveryDays) : undefined,
       consolidatedInvoice: consolidated ?? false,

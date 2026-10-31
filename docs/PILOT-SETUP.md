@@ -20,7 +20,9 @@ pnpm --filter @restomatch/db pilot:config -- --from-csv ~/restomatch-pilot/tziki
 |---|---|
 | `restaurant.csv` | one row: שם, ח״פ, כתובת |
 | `staff.csv` | שם מלא, תפקיד (בעלים / מנהל / מקבל סחורה / שף / הנהלת חשבונות), מייל, נייד, שפה (he / en / ar / ru / ti / th) |
-| `suppliers.csv` | שם הספק, ח״פ, איש קשר, נייד, מייל להזמנות, ימי הזמנה (e.g. `א,ג,ה`), שעת סגירה (HH:MM), ימי אספקה, מע״מ (18% / 0%), חשבונית מרכזת (כן / לא) |
+| `suppliers.csv` | שם הספק, ח״פ, איש קשר, נייד, מייל להזמנות, ימי הזמנה (e.g. `א,ג,ה`), שעת סגירה (HH:MM), ימי אספקה, מע״מ (18% / 0%), חשבונית מרכזת (כן / לא), optional תנאי תשלום |
+
+These are the bare headers of S6's onboarding templates (`docs/pilot/chikti/templates/`, how to fill them: `HOW-TO-FILL.he.md`). A header with a trailing parenthetical, such as `מע״מ (18%|0%)`, is read the same.
 
 How the CSV values are turned into the config:
 - **Validation:** every unknown value stops the run with the file, row and column.

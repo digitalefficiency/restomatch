@@ -310,6 +310,31 @@ describe('pilot:config — intake CSVs → config', () => {
     expect(a.hash).toBe(b.hash);
   });
 
+  it("reads S6's onboarding templates (their exact header rows, extra columns included) into the same config", () => {
+    // Header rows copied from docs/pilot/chikti/templates/*.csv (S6, PR #175).
+    const s6 = {
+      'restaurant.csv': 'שם,ח״פ,כתובת,שם תצוגה,ימי פעילות,שעות פעילות,חותם על הסכם הפיילוט,חותם על ה-DPA\nRestoMatch QA (פנימי),516111119,רחוב הבדיקה 1,QA,א-ה,08-22,x,y\n',
+      'staff.csv':
+        'שם מלא,תפקיד,מייל,נייד,שפה,משמרות,סמארטפון\n' +
+        'QA Owner,בעלים,qa-owner@example.invalid,,he,בוקר,כן\nQA Receiver,מקבל סחורה,qa-receiver@example.invalid,0500000000,en,ערב,כן\n',
+      'suppliers.csv':
+        'שם הספק,ח״פ,איש קשר,נייד,מייל להזמנות,ימי הזמנה,שעת סגירה,ימי אספקה,מע״מ,חשבונית מרכזת,שעות אספקה,תנאי תשלום,איך מזמינים היום,קטגוריה\n' +
+        'QA ירקות,301000022,,,,"א,ג,ה",14:00,"ב,ד,ו",0%,לא,07:00,,וואטסאפ,ירקות\n' +
+        'QA חלב,,,,,"ב׳, ד׳",12:00,"ג,ה",18%,כן,06:00,שוטף + 30,טלפון,חלב\n',
+    };
+    const withTerms = JSON.parse(JSON.stringify(handWritten));
+    withTerms.suppliers[1].paymentTerms = 'שוטף + 30';
+    expect(configFromCsv(write(s6))).toEqual(withTerms);
+
+    // The same headers with the allowed values in a trailing parenthetical.
+    const annotated = {
+      ...csv,
+      'staff.csv': csv['staff.csv'].replace('תפקיד,', 'תפקיד (בעלים|מנהל|מקבל סחורה|שף|הנהלת חשבונות),').replace('שפה,', 'שפה (he|en),'),
+      'suppliers.csv': csv['suppliers.csv'].replace('מע״מ,', 'מע״מ (18%|0%),').replace('שעת סגירה,', 'שעת סגירה (HH:MM),'),
+    };
+    expect(configFromCsv(write(annotated))).toEqual(handWritten);
+  });
+
   it('rejects an unknown role, VAT value or weekday, naming file, row and column', () => {
     const bad = (patch: Record<string, string>) => () => configFromCsv(write({ ...csv, ...patch }));
     expect(bad({ 'staff.csv': 'שם מלא,תפקיד,מייל\nX,מלצר,x@example.invalid\n' })).toThrow(/staff\.csv row 2, column "תפקיד": unknown role "מלצר"/);
