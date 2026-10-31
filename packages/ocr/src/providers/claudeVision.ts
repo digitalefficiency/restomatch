@@ -91,7 +91,7 @@ export const SYSTEM_PROMPT = `אתה מומחה לקריאת מסמכי ספקי
   "invoiceNumber": string,
   "invoiceDate": "YYYY-MM-DD",
   "allocationNumber": string | null,
-  "deliveryNotes": [{ "number": string, "date": "YYYY-MM-DD"? }],
+  "deliveryNotes": [{ "number": string, "date": "YYYY-MM-DD"?, "totalExclVat": number? }],
   "periodStart": "YYYY-MM-DD" | null,
   "periodEnd": "YYYY-MM-DD" | null,
   "lines": [{ "sku": string?, "rawDescription": string, "rawDescriptionEn": string, "lineKind": "item" | "deposit" | "delivery_fee", "qty": number, "unit": string, "unitPrice": number, "lineDiscountPct": number?, "lineTotal": number, "vatRate": number?, "confidence": number? }],
@@ -103,7 +103,7 @@ export const SYSTEM_PROMPT = `אתה מומחה לקריאת מסמכי ספקי
 }
 
 סוג המסמך ("documentKind"):
-- "חשבונית מס" = tax_invoice; "חשבונית מס קבלה" = tax_invoice_receipt; "חשבונית זיכוי" / "זיכוי" = credit_note; "תעודת משלוח" = delivery_note; "חשבונית מרכזת" (מרכזת כמה תעודות משלוח) = consolidated; "קבלה" = receipt; "הצעת מחיר" = quote; אחרת other.
+- "חשבונית מס" = tax_invoice; "חשבונית מס קבלה" = tax_invoice_receipt; "חשבונית זיכוי" / "זיכוי" = credit_note; "תעודת משלוח" = delivery_note; "חשבונית מרכזת" / "חשבונית ריכוז" / "ריכוז תעודות משלוח" / חשבונית שמפרטת רשימה של כמה מספרי ת.מ. = consolidated; "קבלה" = receipt; "הצעת מחיר" = quote; אחרת other.
 
 צדדים:
 - "supplier" = מי שהנפיק את המסמך (בכותרת, ליד ח.פ./ע.מ.). "businessId" = מספר ח.פ./ע.מ. של הספק כפי שמודפס, ספרות בלבד.
@@ -111,7 +111,11 @@ export const SYSTEM_PROMPT = `אתה מומחה לקריאת מסמכי ספקי
 - "contacts" = כל איש קשר מודפס: מנהל אזור / סוכן / מנהל תיק לקוח / נהג — role בעברית, name וטלפון אם מופיע. "phone" ברמת supplier = הטלפון הראשי של הספק.
 - "allocationNumber" = "מספר הקצאה" אם מופיע, ספרות בלבד.
 
-חשבונית מרכזת: "deliveryNotes" = כל תעודות המשלוח שהיא מרכזת (מספר ותאריך); "periodStart"/"periodEnd" = התקופה המודפסת. במסמך אחר — רשימה ריקה ו-null.
+תעודות משלוח ותקופה:
+- "deliveryNotes" = כל מספר תעודת משלוח (ת.מ.) שמודפס במסמך, פעם אחת כל אחד: "number" ספרות בלבד, "date" אם מודפס לצידו, "totalExclVat" = סכום התעודה לפני מע״מ אם מודפס לצידה. אין ת.מ. — רשימה ריקה.
+- "periodStart"/"periodEnd" = תקופת החיוב המודפסת ("לתקופה 01/10–31/10", "חודש אוקטובר") — רק אם מודפסת; אחרת null.
+- "consolidated" רק כשהמסמך בבירור מרכזת: כותרת מרכזת/ריכוז, או רשימה של שתי ת.מ. ומעלה. חשבונית רגילה שמציינת ת.מ. אחת ("לפי ת.מ. 1234") — נשארת tax_invoice, ואת הת.מ. רשום ב-"deliveryNotes". בספק — tax_invoice.
+- במרכזת שמפרטת רק תעודות (בלי מוצרים) — "lines" ריקה; במרכזת שמפרטת מוצרים מסוכמים לחודש — שורה לכל מוצר כרגיל.
 
 שורות:
 - שורה אחת לכל שורת פריט מודפסת, בסדר המודפס. "sku" = המק״ט של הספק כפי שמודפס; אם אין — השמט.

@@ -1,4 +1,5 @@
 import { checkInvoice } from './checks';
+import { classifyConsolidation } from './consolidation';
 import type { InvoiceExtractionV2 } from './providers/invoiceSchema';
 import { reconcile } from './reconciler';
 import {
@@ -57,6 +58,10 @@ export async function runOcrPipeline(
     ]),
   });
   if (v2.totals?.vatRate !== undefined) reconciledInvoice.totals.vatRate = v2.totals.vatRate;
+  const { consolidation, basis, billingPeriod } = classifyConsolidation(reconciledInvoice);
+  reconciledInvoice.consolidation = consolidation;
+  reconciledInvoice.consolidationBasis = basis;
+  if (billingPeriod) reconciledInvoice.billingPeriod = billingPeriod;
   const checks = checkInvoice(reconciledInvoice, {
     expectedSupplierBusinessId: options.expectedSupplierBusinessId,
   });

@@ -18,6 +18,8 @@ export {
   InvoiceLineV2,
   DOCUMENT_KINDS,
   LINE_KINDS,
+  DeliveryNoteRef,
+  cleanDeliveryNotes,
   type DocumentKind,
   type LineKind,
 } from './providers/invoiceSchema';
@@ -41,6 +43,17 @@ export {
   type PoExtraction,
   type PlatformId,
 } from './providers/claudePoVision';
+export {
+  classifyConsolidation,
+  billingPeriodOf,
+  consolidatedRawOf,
+  type BillingPeriod,
+  type Consolidation,
+  type ConsolidationBasis,
+  type ConsolidationInput,
+  type ConsolidationResult,
+  type ConsolidatedRawFields,
+} from './consolidation';
 export { reconcile, type ReconcileResult } from './reconciler';
 export { runOcrPipeline } from './pipeline';
 export {

@@ -14,13 +14,21 @@
  * outside the VAT base — both readings are accepted. VAT may be 0% (fresh
  * produce is zero-rated in Israel) or mixed per line (0% produce + 18% goods):
  * the VAT check accepts base × rate, Σ line × line rate, and a printed 0.
+ *
+ * Consolidated invoice (חשבונית מרכזת, ./consolidation): when every listed
+ * delivery note prints its own total, Σ note totals must equal the subtotal
+ * (tolerance 100 agorot) — a misread note total would otherwise surface as a
+ * leak on that delivery. Such a מרכזת may list notes only, no product lines,
+ * so no_lines is not raised for it.
  */
-import type { DocumentKind, LineKind } from './providers/invoiceSchema';
+import { classifyConsolidation, type Consolidation } from './consolidation';
+import type { DeliveryNoteRef, DocumentKind, LineKind } from './providers/invoiceSchema';
 
 export const LINE_TOLERANCE_AGOROT = 5;
 export const SUBTOTAL_TOLERANCE_AGOROT = 100;
 export const VAT_TOLERANCE_AGOROT = 100;
 export const TOTAL_TOLERANCE_AGOROT = 5;
+export const DELIVERY_NOTES_TOLERANCE_AGOROT = 100;
 
 export type OcrCheckReason =
   | 'missing_invoice_number'
@@ -33,6 +41,7 @@ export type OcrCheckReason =
   | 'subtotal_mismatch'
   | 'vat_mismatch'
   | 'total_mismatch'
+  | 'delivery_notes_total_mismatch'
   | 'supplier_id_invalid'
   | 'supplier_id_mismatch'
   | 'document_kind_not_invoice'
@@ -71,6 +80,11 @@ export interface CheckableInvoice {
   invoiceDiscount?: number | null;
   continuesOnAnotherPage?: boolean;
   handwrittenCorrection?: boolean;
+  deliveryNotes?: DeliveryNoteRef[];
+  periodStart?: string;
+  periodEnd?: string;
+  /** As set by the pipeline; classified here when absent. */
+  consolidation?: Consolidation;
   lines: Array<{
     qty: number;
     unitPrice: number;
@@ -153,7 +167,10 @@ export function checkInvoice(inv: CheckableInvoice, opts: CheckOptions = {}): Oc
   if (inv.totals.total === undefined) add('missing_total');
   if (inv.totals.subtotal === undefined) add('missing_subtotal');
   if (inv.totals.vat === undefined) add('missing_vat');
-  if (inv.lines.length === 0) add('no_lines');
+  const consolidated = (inv.consolidation ?? classifyConsolidation(inv).consolidation) === 'consolidated';
+  const notes = inv.deliveryNotes ?? [];
+  const notesPriced = consolidated && notes.length > 0 && notes.every((n) => n.totalExclVat !== undefined);
+  if (inv.lines.length === 0 && !notesPriced) add('no_lines');
 
   // ── Lines: qty × net unit price = line total (a discounted line is skipped)
   inv.lines.forEach((l, i) => {
@@ -209,6 +226,13 @@ export function checkInvoice(inv: CheckableInvoice, opts: CheckOptions = {}): Oc
       Math.abs(subtotal + vat + depositAgorot - total),
     );
     if (delta > TOTAL_TOLERANCE_AGOROT) add('total_mismatch', { deltaAgorot: delta });
+  }
+
+  // ── Consolidated: Σ delivery-note totals = subtotal
+  if (notesPriced && subtotal !== undefined) {
+    const notesAgorot = notes.reduce((s, n) => s + toAgorot(n.totalExclVat!), 0);
+    const delta = Math.abs(notesAgorot - subtotal);
+    if (delta > DELIVERY_NOTES_TOLERANCE_AGOROT) add('delivery_notes_total_mismatch', { deltaAgorot: delta });
   }
 
   // ── Supplier ח״פ

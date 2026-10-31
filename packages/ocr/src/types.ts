@@ -1,5 +1,6 @@
 import type { InvoiceOcrLine, InvoiceOcrResult, NormalizedPurchaseOrder } from '@restomatch/types';
 import type { OcrChecks } from './checks';
+import type { BillingPeriod, Consolidation, ConsolidationBasis } from './consolidation';
 import type { DocumentKind, InvoiceExtractionV2, LineKind } from './providers/invoiceSchema';
 
 export type OcrProviderId = 'document_ai' | 'claude_vision';
@@ -61,6 +62,12 @@ export interface ResolvedInvoice extends Omit<InvoiceOcrResult, 'lines' | 'total
   invoiceDiscount?: number;
   continuesOnAnotherPage?: boolean;
   handwrittenCorrection?: boolean;
+  /** Consolidated invoice (חשבונית מרכזת)? Set by the pipeline (./consolidation), conservative. */
+  consolidation?: Consolidation;
+  /** Why it was called consolidated ('none' when regular). */
+  consolidationBasis?: ConsolidationBasis;
+  /** The printed billing period, when both ends are printed. */
+  billingPeriod?: BillingPeriod;
 }
 
 export interface OcrPipelineResult {
