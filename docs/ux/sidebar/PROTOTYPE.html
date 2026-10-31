@@ -838,7 +838,7 @@ const BULK_CAP = 200;
 
 /* ───────── State ───────── */
 const S = {
-  role: 'owner', active: 'home', scope: 'main', railPref: false, ovl: false, groups: {}, lru: {}, fav: [], recent: [],
+  role: 'owner', active: 'home', scope: 'main', railPref: false, ovl: false, groups: Object.create(null), lru: Object.create(null), fav: [], recent: [],
   bellUnread: true, keys1: true, approved: new Set(), qScope: 'mine', qSel: 0, confirm: false, booted: false, flyApex: null,
 };
 const R = () => ROLES[S.role];
@@ -1285,6 +1285,7 @@ function syncDeckNav() {
 
 /* ───────── Groups: disclosure, persistence and the fit rule ───────── */
 function setGroup(g, open, persist = true) {
+  if (!g || g === '__proto__' || g === 'constructor' || g === 'prototype') return;
   const el = $('.grp[data-g="' + g + '"]');
   if (!el || g === 'help') return;
   el.classList.toggle('open', open);
@@ -1757,7 +1758,7 @@ ROOT.addEventListener('click', (e) => {
   if (t.closest('#skipLink')) { e.preventDefault(); $('#main').focus({ preventScroll: false }); $('#main').scrollIntoView({ block: 'start' }); return; }
   const pin = t.closest('[data-pin]');
   if (pin) {
-    const g = pin.dataset.pin; closeAllFly(); S.groups[g] = true; S.lru[g] = Date.now(); LS.set('rm:nav:groups:' + S.role, JSON.stringify(S.groups));
+    const g = pin.dataset.pin; if (!g || g === '__proto__' || g === 'constructor' || g === 'prototype') return; closeAllFly(); S.groups[g] = true; S.lru[g] = Date.now(); LS.set('rm:nav:groups:' + S.role, JSON.stringify(S.groups));
     if (narrow()) { S.ovl = true; } else { S.railPref = false; LS.set('rm:nav:rail', '0'); }
     renderSidebar(); applyMode(true);
     setTimeout(() => { const h = $('#gh-' + g); if (h) { h.scrollIntoView({ block: 'nearest' }); h.focus(); } fitGroups(g); }, 260);
@@ -1772,7 +1773,7 @@ ROOT.addEventListener('click', (e) => {
   }
   const fav = t.closest('[data-favtoggle]');
   if (fav) {
-    const k = fav.dataset.favtoggle;
+    const k = knownKey(IT, fav.dataset.favtoggle); if (!k) return;
     if (S.fav.includes(k)) S.fav = S.fav.filter((x) => x !== k);
     else if (S.fav.length >= 5) { toast('אפשר להצמיד עד 5 מסכים'); return; }
     else { S.fav = [...S.fav, k]; S.groups.fav = true; }
@@ -1976,9 +1977,9 @@ function setRole(v) {
   announce('תצוגה כ־' + ROLES[k].label);
 }
 function loadPrefs() {
-  try { const g = JSON.parse(LS.get('rm:nav:groups:' + S.role) || '{}') || {}; S.groups = {}; Object.keys(g).forEach((k) => { if (g[k] === true) S.groups[k] = true; }); } catch (e) { S.groups = {}; }
+  try { const g = JSON.parse(LS.get('rm:nav:groups:' + S.role) || '{}') || {}; S.groups = Object.create(null); Object.keys(g).forEach((k) => { if (g[k] === true && k !== '__proto__' && k !== 'constructor' && k !== 'prototype') S.groups[k] = true; }); } catch (e) { S.groups = Object.create(null); }
   try { const v = visibleKeys(); S.fav = (JSON.parse(LS.get('rm:nav:fav:' + S.role) || '[]') || []).map((x) => v.find((k) => k === x)).filter(Boolean).slice(0, 5); } catch (e) { S.fav = []; }
-  S.lru = {};
+  S.lru = Object.create(null);
 }
 
 /* ───────── Boot ───────── */
