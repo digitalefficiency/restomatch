@@ -1,13 +1,15 @@
 /**
- * G-09 · one document = one invoice on the WhatsApp / e-mail intake.
- * Drives processInboundMessage on the RLS-enforced app role with the stub
- * provider (as ingest.attack.test.ts does): no network, no paid OCR.
+ * G-09 · one document = one invoice on the WhatsApp / e-mail intake, FROM THE
+ * SAME SUPPLIER ONLY (owner decision 31.10). Drives processInboundMessage on the
+ * RLS-enforced app role with the stub provider (as ingest.attack.test.ts does),
+ * then plays the OCR worker: write the page's OCR header + a line, then call
+ * settleDocumentPages exactly where the worker does. No network, no paid OCR.
  */
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PDFDocument } from 'pdf-lib';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   and,
   applyAuditImmutableRls,
@@ -19,8 +21,10 @@ import {
   ingestChannels,
   ingestDocuments,
   ingestSenders,
+  invoiceLines,
   invoiceScans,
   invoices,
+  matchRuns,
   restaurants,
   sql,
   testDbUrl,
@@ -29,7 +33,7 @@ import {
 } from '@restomatch/db';
 import { StubIngestProvider, type InboundMessage } from '@restomatch/ingest';
 import { processInboundMessage, registerReviewGroup, type ResolvedChannel } from '../ingest/pipeline';
-import { __setReocrEdgeForTests } from '../documents/reocr';
+import { settleDocumentPages, type SettleResult } from '../documents/settle';
 import { toObjectRef } from '../documents/objectRef';
 import { localDocumentStorage } from '../documents/storage';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
@@ -109,6 +113,71 @@ async function pdfPagesOf(invoiceId: string): Promise<number> {
   return (await PDFDocument.load(bytes)).getPageCount();
 }
 
+async function setSettings(ingest: Record<string, unknown>) {
+  await ownerDb
+    .update(restaurants)
+    .set({ settings: { features: { ingestWhatsapp: true, ingestEmail: true }, ingest } as never })
+    .where(eq(restaurants.id, A.restaurantId));
+}
+
+interface OcrHead {
+  supplierName?: string;
+  businessId?: string;
+  invoiceNumber?: string | null;
+  status?: 'parsed' | 'matched';
+}
+const ACME: OcrHead = { supplierName: 'תנובה בע"מ', businessId: '51-000123-4', invoiceNumber: 'A-100' };
+const OTHER: OcrHead = { supplierName: 'שטראוס', businessId: '52-999888-7', invoiceNumber: 'S-7' };
+
+let matchCalls: string[] = [];
+let ocrCalls: Array<{ invoiceId: string; dedupeKey?: string }> = [];
+
+/**
+ * Play the OCR worker for one invoice: header + one line (as writeOcrHeader +
+ * the line insert do), then the settle hook. Returns its verdict.
+ */
+async function ocr(invoiceId: string, head: OcrHead): Promise<SettleResult> {
+  await ownerDb
+    .update(invoices)
+    .set({
+      status: head.status ?? 'matched',
+      invoiceNumber: head.invoiceNumber ?? null,
+      ocrPayload: {
+        provider: 'stub',
+        raw: { reconciled: { supplier: { name: head.supplierName, businessId: head.businessId }, invoiceNumber: head.invoiceNumber } },
+      } as never,
+    })
+    .where(eq(invoices.id, invoiceId));
+  await ownerDb.delete(invoiceLines).where(eq(invoiceLines.invoiceId, invoiceId));
+  await ownerDb.insert(invoiceLines).values({
+    invoiceId,
+    rawDescription: `line of ${invoiceId.slice(0, 8)}`,
+    qtyBilled: '1',
+    unit: 'unit',
+    unitPriceBilled: '10.0000',
+    lineTotal: '10.00',
+  });
+  return withRestaurant(appDb, A.restaurantId, (tx) =>
+    settleDocumentPages(
+      tx,
+      { restaurantId: A.restaurantId, invoiceId },
+      {
+        enqueueOcr: async (jobs) => {
+          ocrCalls.push(...jobs.map((j) => ({ invoiceId: j.invoiceId, dedupeKey: j.dedupeKey })));
+        },
+        enqueueMatch: async (j) => {
+          matchCalls.push(j.invoiceId);
+        },
+      },
+    ),
+  );
+}
+
+async function invoiceOf(out: { messageId?: string } | unknown): Promise<string> {
+  const [d] = await docsOf((out as { messageId: string }).messageId);
+  return d!.invoiceId!;
+}
+
 async function invoicesOfA() {
   return ownerDb.select().from(invoices).where(and(eq(invoices.restaurantId, A.restaurantId), sql`${invoices.source} in ('whatsapp','email')`));
 }
@@ -143,26 +212,105 @@ beforeEach(async () => {
     { restaurantId: A.restaurantId, kind: 'email', sender: SUPPLIER_MAIL, supplierId: A.supplierId },
   ]);
   provider = new StubIngestProvider('whatsapp');
-  __setReocrEdgeForTests(true);
+  await setSettings({ multiPage: true });
 });
-
-afterEach(() => __setReocrEdgeForTests(false));
 afterAll(async () => {
   await resetDb(ownerDb);
 });
 
-describe('one message → one document', () => {
-  it('an e-mail with 3 images → ONE 3-page document, every attachment row points at it', async () => {
+
+describe('owner rule: multi-page invoices FROM THE SAME SUPPLIER', () => {
+  beforeEach(() => {
+    matchCalls = [];
+    ocrCalls = [];
+  });
+
+  it('2 pages, same supplier (2 WhatsApp messages 3 min apart) → ONE invoice, 2 pages, one extra OCR', async () => {
+    const p1 = await invoiceOf(await send(ch.wa, wa([jpegBytes('s-p1')]), at(0)));
+    const p2 = await invoiceOf(await send(ch.wa, wa([jpegBytes('s-p2')]), at(3)));
+    expect(p2).not.toBe(p1); // each page is OCR'd alone first
+    // Page 1 is read while page 2 is still pending → no match yet.
+    expect(await ocr(p1, ACME)).toMatchObject({ hold: true, absorbed: false });
+    // Page 2: same ח.פ., no invoice number (a continuation page) → merged.
+    const s2 = await ocr(p2, { ...ACME, invoiceNumber: null });
+    expect(s2).toMatchObject({ absorbed: true, mergedInto: p1, flagged: [] });
+    expect((await invoicesOfA()).map((i) => i.id)).toEqual([p1]);
+    expect(await pdfPagesOf(p1)).toBe(2);
+    expect(ocrCalls).toEqual([{ invoiceId: p1, dedupeKey: `ocr:${p1}:2` }]);
+    const [inv] = await ownerDb.select().from(invoices).where(eq(invoices.id, p1));
+    expect(inv!.status).toBe('ocr_pending');
+    // The re-OCR of page 1 settles as a 2-page document: nothing left to merge.
+    expect(await ocr(p1, ACME)).toMatchObject({ hold: false, absorbed: false, flagged: [] });
+  });
+
+  it('page 2 from ANOTHER supplier (different ח.פ.) → NOT merged, flagged, page 1 is matched on its own', async () => {
+    const p1 = await invoiceOf(await send(ch.wa, wa([jpegBytes('o-p1')]), at(0)));
+    const p2 = await invoiceOf(await send(ch.wa, wa([jpegBytes('o-p2')]), at(2)));
+    expect((await ocr(p1, ACME)).hold).toBe(true);
+    const s2 = await ocr(p2, OTHER);
+    expect(s2).toMatchObject({ absorbed: false, hold: false, flagged: [{ invoiceId: p2, reason: 'page_other_supplier' }] });
+    expect((await invoicesOfA()).map((i) => i.id).sort()).toEqual([p1, p2].sort());
+    const [d2] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, p2));
+    expect(d2!.error).toBe('page_other_supplier');
+    // Never summed: each invoice keeps only its own line.
+    for (const id of [p1, p2]) expect(await ownerDb.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, id))).toHaveLength(1);
+    expect(ocrCalls).toEqual([]);
+    expect(matchCalls).toEqual([p1]); // the held page 1 is released to the match
+  });
+
+  it('a different supplier NAME (no ח.פ. read) is another supplier too', async () => {
+    const p1 = await invoiceOf(await send(ch.wa, wa([jpegBytes('n-p1')]), at(0)));
+    const p2 = await invoiceOf(await send(ch.wa, wa([jpegBytes('n-p2')]), at(2)));
+    await ocr(p1, { supplierName: 'תנובה בע"מ', invoiceNumber: 'A-1' });
+    const s2 = await ocr(p2, { supplierName: 'שטראוס בע"מ', invoiceNumber: null });
+    expect(s2.flagged).toEqual([{ invoiceId: p2, reason: 'page_other_supplier' }]);
+    expect(await invoicesOfA()).toHaveLength(2);
+  });
+
+  it('same supplier, a DIFFERENT invoice number → NOT merged (two invoices), flagged', async () => {
+    const p1 = await invoiceOf(await send(ch.wa, wa([jpegBytes('i-p1')]), at(0)));
+    const p2 = await invoiceOf(await send(ch.wa, wa([jpegBytes('i-p2')]), at(2)));
+    await ocr(p1, ACME);
+    const s2 = await ocr(p2, { ...ACME, invoiceNumber: 'A-101' });
+    expect(s2.flagged).toEqual([{ invoiceId: p2, reason: 'page_other_invoice' }]);
+    expect(await invoicesOfA()).toHaveLength(2);
+    expect(ocrCalls).toEqual([]);
+  });
+
+  it('a flagged page never joins later: page 3 of the real invoice still merges into page 1', async () => {
+    const p1 = await invoiceOf(await send(ch.wa, wa([jpegBytes('f-p1')]), at(0)));
+    const p2 = await invoiceOf(await send(ch.wa, wa([jpegBytes('f-p2')]), at(1)));
+    const p3 = await invoiceOf(await send(ch.wa, wa([jpegBytes('f-p3')]), at(2)));
+    await ocr(p1, ACME);
+    await ocr(p2, OTHER);
+    const s3 = await ocr(p3, { ...ACME, invoiceNumber: 'A 100' }); // same number, other spacing
+    expect(s3.flagged).toEqual([{ invoiceId: p2, reason: 'page_other_supplier' }]);
+    expect(s3).toMatchObject({ absorbed: true, mergedInto: p1 });
+    expect((await invoicesOfA()).map((i) => i.id).sort()).toEqual([p1, p2].sort());
+    expect(await pdfPagesOf(p1)).toBe(2);
+  });
+});
+
+describe('one message and one sender window', () => {
+  beforeEach(() => {
+    matchCalls = [];
+    ocrCalls = [];
+  });
+
+  it('an e-mail with 3 images of one invoice → ONE 3-page invoice after OCR', async () => {
     const out = await send(ch.email, mail([1, 2, 3].map((i) => ({ name: `p${i}.jpg`, bytes: jpegBytes(`m3-${i}`, 40_000) }))), at(0));
     expect(out.status).toBe('accepted');
     const docs = await docsOf((out as { messageId: string }).messageId);
     expect(docs.map((d) => d.status)).toEqual(['registered', 'registered', 'registered']);
-    const ids = new Set(docs.map((d) => d.invoiceId));
-    expect(ids.size).toBe(1);
-    const invoiceId = docs[0]!.invoiceId!;
-    expect(await invoicesOfA()).toHaveLength(1);
-    expect(await pdfPagesOf(invoiceId)).toBe(3);
-    expect((await ocrJobs(invoiceId)).map((j) => j.dedupe_key)).toEqual([`ocr:${invoiceId}:3`]);
+    const [a, b, c] = docs.map((d) => d.invoiceId!);
+    expect((await ocr(a!, ACME)).hold).toBe(true);
+    expect((await ocr(b!, { ...ACME, invoiceNumber: null })).hold).toBe(true); // page 3 still pending
+    const last = await ocr(c!, { ...ACME, invoiceNumber: null });
+    expect(last).toMatchObject({ absorbed: true, mergedInto: a });
+    expect((await invoicesOfA()).map((i) => i.id)).toEqual([a]);
+    expect(await pdfPagesOf(a!)).toBe(3);
+    const [scan] = await ownerDb.select().from(invoiceScans).where(eq(invoiceScans.invoiceId, a!));
+    expect(scan).toMatchObject({ pageCount: 3, mimeType: 'application/pdf' });
   });
 
   it('an e-mail with a PDF + a 4 KB logo → one document, the logo skipped:inline_image', async () => {
@@ -186,51 +334,45 @@ describe('one message → one document', () => {
     const [scan] = await ownerDb.select().from(invoiceScans).where(eq(invoiceScans.invoiceId, docs[0]!.invoiceId!));
     expect(scan).toMatchObject({ mimeType: 'application/pdf', pageCount: 2, restaurantId: A.restaurantId });
   });
-});
 
-describe('one sender within N minutes → one document', () => {
-  it('a 2-photo WhatsApp invoice (two messages, 3 min apart) → ONE invoice, one extra OCR job, both pages composed', async () => {
-    const m1 = await send(ch.wa, wa([jpegBytes('wa-p1')]), at(0));
-    const m2 = await send(ch.wa, wa([jpegBytes('wa-p2')]), at(3));
-    const [d1] = await docsOf((m1 as { messageId: string }).messageId);
-    const [d2] = await docsOf((m2 as { messageId: string }).messageId);
-    expect(d2!.invoiceId).toBe(d1!.invoiceId);
-    expect(await invoicesOfA()).toHaveLength(1);
-    const invoiceId = d1!.invoiceId!;
-    expect(await pdfPagesOf(invoiceId)).toBe(2);
-    expect((await ocrJobs(invoiceId)).map((j) => j.dedupe_key)).toEqual([`ocr:${invoiceId}:1`, `ocr:${invoiceId}:2`]);
-    const [scan] = await ownerDb.select().from(invoiceScans).where(eq(invoiceScans.invoiceId, invoiceId));
-    expect(scan!.pageCount).toBe(2);
-  });
-
-  it('a 3rd photo 11 min after the first → a new document', async () => {
-    await send(ch.wa, wa([jpegBytes('n-p1')]), at(0));
-    await send(ch.wa, wa([jpegBytes('n-p2')]), at(3));
-    await send(ch.wa, wa([jpegBytes('n-p3')]), at(11));
-    const inv = await invoicesOfA();
-    expect(inv).toHaveLength(2);
+  it('a 3rd photo 11 min after the first → its own document, even from the same supplier', async () => {
+    const p1 = await invoiceOf(await send(ch.wa, wa([jpegBytes('w-p1')]), at(0)));
+    const p2 = await invoiceOf(await send(ch.wa, wa([jpegBytes('w-p2')]), at(3)));
+    const p3 = await invoiceOf(await send(ch.wa, wa([jpegBytes('w-p3')]), at(11)));
+    await ocr(p1, ACME);
+    await ocr(p2, { ...ACME, invoiceNumber: null });
+    expect(await ocr(p3, { ...ACME, invoiceNumber: null })).toMatchObject({ absorbed: false, hold: false, flagged: [] });
+    expect((await invoicesOfA()).map((i) => i.id).sort()).toEqual([p1, p3].sort());
   });
 
   it('settings.ingest.groupMinutes (5) is honoured', async () => {
-    await ownerDb
-      .update(restaurants)
-      .set({ settings: { features: { ingestWhatsapp: true, ingestEmail: true }, ingest: { groupMinutes: 5 } } as never })
-      .where(eq(restaurants.id, A.restaurantId));
-    await send(ch.wa, wa([jpegBytes('g-p1')]), at(0));
-    await send(ch.wa, wa([jpegBytes('g-p2')]), at(4));
-    expect(await invoicesOfA()).toHaveLength(1);
-    await send(ch.wa, wa([jpegBytes('g-p3')]), at(6));
+    await setSettings({ multiPage: true, groupMinutes: 5 });
+    const p1 = await invoiceOf(await send(ch.wa, wa([jpegBytes('g-p1')]), at(0)));
+    const p2 = await invoiceOf(await send(ch.wa, wa([jpegBytes('g-p2')]), at(6)));
+    await ocr(p1, ACME);
+    expect(await ocr(p2, { ...ACME, invoiceNumber: null })).toMatchObject({ absorbed: false });
     expect(await invoicesOfA()).toHaveLength(2);
   });
 
-  it('a photo after the first invoice was approved → a new document', async () => {
-    const m1 = await send(ch.wa, wa([jpegBytes('ap-p1')]), at(0));
-    const [d1] = await docsOf((m1 as { messageId: string }).messageId);
-    await ownerDb.update(invoices).set({ status: 'approved' }).where(eq(invoices.id, d1!.invoiceId!));
-    const m2 = await send(ch.wa, wa([jpegBytes('ap-p2')]), at(2));
-    const [d2] = await docsOf((m2 as { messageId: string }).messageId);
-    expect(d2!.invoiceId).not.toBe(d1!.invoiceId);
-    expect(await ocrJobs(d1!.invoiceId!)).toHaveLength(1);
+  it('a page after page 1 was approved → not merged (flagged), page 1 untouched', async () => {
+    const p1 = await invoiceOf(await send(ch.wa, wa([jpegBytes('ap-p1')]), at(0)));
+    await ocr(p1, ACME);
+    await ownerDb.update(invoices).set({ status: 'approved' }).where(eq(invoices.id, p1));
+    const p2 = await invoiceOf(await send(ch.wa, wa([jpegBytes('ap-p2')]), at(2)));
+    const s2 = await ocr(p2, { ...ACME, invoiceNumber: null });
+    expect(s2.flagged).toEqual([{ invoiceId: p2, reason: 'page_not_merged' }]);
+    const [inv] = await ownerDb.select().from(invoices).where(eq(invoices.id, p1));
+    expect(inv!.status).toBe('approved');
+    expect(ocrCalls).toEqual([]);
+  });
+
+  it("merging into an already-matched page 1 resets its undecided match run (no stale gap)", async () => {
+    const p1 = await invoiceOf(await send(ch.wa, wa([jpegBytes('mr-p1')]), at(0)));
+    await ocr(p1, ACME);
+    await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: p1, overallStatus: 'minor' });
+    const p2 = await invoiceOf(await send(ch.wa, wa([jpegBytes('mr-p2')]), at(2)));
+    expect(await ocr(p2, { ...ACME, invoiceNumber: null })).toMatchObject({ absorbed: true, mergedInto: p1 });
+    expect(await ownerDb.select().from(matchRuns).where(eq(matchRuns.invoiceId, p1))).toHaveLength(0);
   });
 
   it('the same bytes re-sent → duplicate: no page, no OCR', async () => {
@@ -240,20 +382,49 @@ describe('one sender within N minutes → one document', () => {
     const [d1] = await docsOf((m1 as { messageId: string }).messageId);
     const [d2] = await docsOf((m2 as { messageId: string }).messageId);
     expect(d2).toMatchObject({ status: 'duplicate', invoiceId: d1!.invoiceId });
-    expect(await pdfPagesOf(d1!.invoiceId!)).toBe(1);
     expect(await ocrJobs(d1!.invoiceId!)).toHaveLength(1);
   });
 
-  it('with the re-OCR edge OFF (production default) a later photo is its own document', async () => {
-    __setReocrEdgeForTests(false);
-    await send(ch.wa, wa([jpegBytes('off-p1')]), at(0));
-    await send(ch.wa, wa([jpegBytes('off-p2')]), at(2));
+  it('with settings.ingest.multiPage OFF (the default) every page stays its own invoice', async () => {
+    await setSettings({});
+    const p1 = await invoiceOf(await send(ch.wa, wa([jpegBytes('off-p1')]), at(0)));
+    const p2 = await invoiceOf(await send(ch.wa, wa([jpegBytes('off-p2')]), at(2)));
+    expect(await ocr(p1, ACME)).toEqual({ hold: false, absorbed: false, flagged: [] });
+    expect(await ocr(p2, { ...ACME, invoiceNumber: null })).toEqual({ hold: false, absorbed: false, flagged: [] });
+    expect(await invoicesOfA()).toHaveLength(2);
+  });
+
+  it('INGEST_MULTIPAGE_OFF=1 is a global kill switch', async () => {
+    process.env.INGEST_MULTIPAGE_OFF = '1';
+    try {
+      const p1 = await invoiceOf(await send(ch.wa, wa([jpegBytes('k-p1')]), at(0)));
+      const p2 = await invoiceOf(await send(ch.wa, wa([jpegBytes('k-p2')]), at(2)));
+      await ocr(p1, ACME);
+      expect((await ocr(p2, { ...ACME, invoiceNumber: null })).absorbed).toBe(false);
+      expect(await invoicesOfA()).toHaveLength(2);
+    } finally {
+      delete process.env.INGEST_MULTIPAGE_OFF;
+    }
+  });
+
+  it("another restaurant's id settles nothing (tenant-scoped)", async () => {
+    const p1 = await invoiceOf(await send(ch.wa, wa([jpegBytes('t-p1')]), at(0)));
+    const p2 = await invoiceOf(await send(ch.wa, wa([jpegBytes('t-p2')]), at(2)));
+    await ocr(p1, ACME);
+    const other = await seedTenant(ownerDb, 'X');
+    const res = await withRestaurant(appDb, other.restaurantId, (tx) => settleDocumentPages(tx, { restaurantId: other.restaurantId, invoiceId: p2 }));
+    expect(res).toEqual({ hold: false, absorbed: false, flagged: [] });
     expect(await invoicesOfA()).toHaveLength(2);
   });
 });
 
 describe('review documents and the mapping row', () => {
-  it("an unknown sender's 2 photos → one review document; approving registers ONE invoice with both pages", async () => {
+  beforeEach(() => {
+    matchCalls = [];
+    ocrCalls = [];
+  });
+
+  it("an unknown sender's 2 photos → one review group; approved, OCR'd, same supplier → ONE invoice", async () => {
     const stranger = '972509999999';
     const m1 = await send(ch.wa, wa([pngBytes('u1')], { from: stranger }), at(0));
     const m2 = await send(ch.wa, wa([pngBytes('u2')], { from: stranger }), at(2));
@@ -266,25 +437,26 @@ describe('review documents and the mapping row', () => {
       registerReviewGroup(tx, { restaurantId: A.restaurantId, documentId: d1!.id, kind: 'whatsapp', supplierId: A.supplierId, userId: A.ownerUserId }),
     );
     expect(reg.documentIds.sort()).toEqual([d1!.id, d2!.id].sort());
+    expect(reg.invoiceIds).toHaveLength(2);
+    await ocr(reg.invoiceIds[0]!, ACME);
+    expect(await ocr(reg.invoiceIds[1]!, { ...ACME, invoiceNumber: null })).toMatchObject({ absorbed: true });
     expect(await invoicesOfA()).toHaveLength(1);
-    expect(await pdfPagesOf(reg.invoiceId)).toBe(2);
+    expect(await pdfPagesOf(reg.invoiceIds[0]!)).toBe(2);
   });
 
   it('invoice_scans.invoice_id is the invoice UUID, with page_count', async () => {
-    const out = await send(ch.wa, wa([jpegBytes('map-1'), jpegBytes('map-2')]), at(0));
-    const [d] = await docsOf((out as { messageId: string }).messageId);
+    const id = await invoiceOf(await send(ch.wa, wa([jpegBytes('map-1')]), at(0)));
     const rows = await ownerDb.select().from(invoiceScans).where(eq(invoiceScans.restaurantId, A.restaurantId));
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ invoiceId: d!.invoiceId, pageCount: 2, mimeType: 'application/pdf' });
+    expect(rows[0]).toMatchObject({ invoiceId: id, pageCount: 1, mimeType: 'image/jpeg' });
     expect(rows[0]!.storagePath.startsWith(`${A.restaurantId}/`)).toBe(true);
+    expect(await ocrJobs(id)).toEqual([{ dedupe_key: `ocr:${id}:1` }]);
   });
 
   it('a new invoice row never stores an expiring signed URL (a stable object form)', async () => {
-    const out = await send(ch.wa, wa([jpegBytes('stable')]), at(0));
-    const [d] = await docsOf((out as { messageId: string }).messageId);
-    const [inv] = await ownerDb.select().from(invoices).where(eq(invoices.id, d!.invoiceId!));
+    const id = await invoiceOf(await send(ch.wa, wa([jpegBytes('stable')]), at(0)));
+    const [inv] = await ownerDb.select().from(invoices).where(eq(invoices.id, id));
     expect(inv!.rawImageUrl).not.toMatch(/[?&]token=/);
     expect(toObjectRef(inv!.rawImageUrl!, A.restaurantId)).toBeTruthy();
   });
 });
-

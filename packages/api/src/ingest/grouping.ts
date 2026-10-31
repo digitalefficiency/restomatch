@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { and, asc, eq, ingestDocuments, ingestMessages, invoices, sql, type Database } from '@restomatch/db';
+import { and, asc, eq, ingestDocuments, ingestMessages, sql, type Database } from '@restomatch/db';
 import { composeDocument, MAX_DOCUMENT_PAGES } from '../documents/compose';
 import { extOf, signObjectRef, storedImageValue } from '../documents/objectRef';
 import { setInvoiceImage, upsertInvoiceScan } from '../documents/intake';
@@ -25,13 +25,16 @@ export function isPageMime(mime: string | null | undefined): boolean {
 }
 
 /**
- * `settings.ingest.groupMinutes`, read through a LOCAL parser:
+ * `settings.ingest.{groupMinutes,multiPage}`, read through a LOCAL parser:
  * `RestaurantSettings` lives in immutable schema.ts and is not widened.
  */
-const GroupSettings = z
+const IngestSettings = z
   .object({
     ingest: z
-      .object({ groupMinutes: z.number().int().min(0).max(120).optional() })
+      .object({
+        groupMinutes: z.number().int().min(0).max(120).optional().catch(undefined),
+        multiPage: z.boolean().optional().catch(undefined),
+      })
       .partial()
       .passthrough()
       .optional()
@@ -39,10 +42,24 @@ const GroupSettings = z
   })
   .passthrough();
 
+function ingestSettings(settings: unknown): { groupMinutes?: number; multiPage?: boolean } {
+  const parsed = IngestSettings.safeParse(settings ?? {});
+  return parsed.success ? (parsed.data.ingest ?? {}) : {};
+}
+
 export function groupMinutes(settings: unknown): number {
-  const parsed = GroupSettings.safeParse(settings ?? {});
-  const v = parsed.success ? parsed.data.ingest?.groupMinutes : undefined;
+  const v = ingestSettings(settings).groupMinutes;
   return typeof v === 'number' ? v : DEFAULT_GROUP_MINUTES;
+}
+
+/**
+ * THE pilot switch for multi-page documents: `settings.ingest.multiPage === true`
+ * per restaurant (default OFF), with a global kill `INGEST_MULTIPAGE_OFF=1`.
+ * OFF = every page is its own invoice (the pre-G-09 behaviour): no merge, no re-OCR.
+ */
+export function multiPageEnabled(settings: unknown, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.INGEST_MULTIPAGE_OFF === '1' || env.INGEST_MULTIPAGE_OFF === 'true') return false;
+  return ingestSettings(settings).multiPage === true;
 }
 
 export interface PageRow {
@@ -66,39 +83,6 @@ export async function invoicePageRows(tx: Database, restaurantId: string, invoic
     )
     .orderBy(asc(ingestDocuments.createdAt), asc(ingestDocuments.id));
   return rows.map((r) => ({ id: r.id, storagePath: r.storagePath!, mimeType: r.mimeType }));
-}
-
-/**
- * The open candidate an image from (channel, sender) at `now` joins: the most
- * recent ingested IMAGE invoice from that sender whose first page arrived
- * within `minutes`, still in an open status. Openness beyond the status
- * (decisions, claims) is checked by the caller.
- */
-export async function findOpenCandidate(
-  tx: Database,
-  args: { restaurantId: string; channelId: string; sender: string; messageId: string; now: Date; minutes: number },
-): Promise<string | null> {
-  if (args.minutes <= 0) return null;
-  const since = new Date(args.now.getTime() - args.minutes * 60_000);
-  const rows = (await tx.execute(sql`
-    select d.invoice_id
-    from ${ingestDocuments} d
-    join ${ingestMessages} m on m.id = d.message_id and m.restaurant_id = d.restaurant_id
-    join ${invoices} i on i.id = d.invoice_id and i.restaurant_id = d.restaurant_id
-    where d.restaurant_id = ${args.restaurantId}
-      and d.status = 'registered'
-      and d.invoice_id is not null
-      and m.id <> ${args.messageId}
-      and i.status in ('ocr_pending', 'parsed', 'matched')
-    group by d.invoice_id
-    having bool_and(m.channel_id = ${args.channelId} and m.sender = ${args.sender})
-       and bool_and(d.mime_type in ('image/jpeg', 'image/png'))
-       and min(m.received_at) >= ${since.toISOString()}::timestamptz
-       and min(m.received_at) <= ${args.now.toISOString()}::timestamptz
-    order by min(m.received_at) desc
-    limit 1
-  `)) as unknown as Array<{ invoice_id: string }>;
-  return rows[0]?.invoice_id ?? null;
 }
 
 /**

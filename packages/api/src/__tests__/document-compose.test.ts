@@ -7,7 +7,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PDFDocument } from 'pdf-lib';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   applyAuditImmutableRls,
   applyAuthCredentialTables,
@@ -32,7 +32,6 @@ import { StubIngestProvider, type InboundMessage } from '@restomatch/ingest';
 import { composeDocument, composedPathFor } from '../documents/compose';
 import { DocumentError } from '../documents/errors';
 import { attachAsPage, splitDocument } from '../documents/attach';
-import { __setReocrEdgeForTests } from '../documents/reocr';
 import { storedImageValue, toObjectRef } from '../documents/objectRef';
 import { localDocumentStorage, type DocumentStorage } from '../documents/storage';
 import { processInboundMessage, type OcrJobToEnqueue, type ResolvedChannel } from '../ingest/pipeline';
@@ -220,6 +219,13 @@ async function pagesOf(invoiceId: string): Promise<number> {
   return (await PDFDocument.load(bytes!)).getPageCount();
 }
 
+async function setMultiPage(on: boolean) {
+  await ownerDb
+    .update(restaurants)
+    .set({ settings: { features: { ingestWhatsapp: true }, ingest: { multiPage: on } } as never })
+    .where(eq(restaurants.id, A.restaurantId));
+}
+
 const asA = <T>(fn: (tx: Database) => Promise<T>) => withRestaurant(appDb, A.restaurantId, fn);
 
 describe('attachAsPage / splitDocument', () => {
@@ -234,10 +240,6 @@ describe('attachAsPage / splitDocument', () => {
     await resetDb(ownerDb);
     A = await seedTenant(ownerDb, 'A');
     B = await seedTenant(ownerDb, 'B');
-    await ownerDb
-      .update(restaurants)
-      .set({ settings: { features: { ingestWhatsapp: true } } as never })
-      .where(eq(restaurants.id, A.restaurantId));
     const [c] = await ownerDb
       .insert(ingestChannels)
       .values({ restaurantId: A.restaurantId, kind: 'whatsapp', tokenHash: `h-${randomUUID()}`, tokenHint: 'wa' })
@@ -246,10 +248,9 @@ describe('attachAsPage / splitDocument', () => {
     await ownerDb.insert(ingestSenders).values({ restaurantId: A.restaurantId, kind: 'whatsapp', sender: PHONE, supplierId: A.supplierId });
     provider = new StubIngestProvider('whatsapp');
     enqueued = [];
-    __setReocrEdgeForTests(true);
+    await setMultiPage(true);
   });
 
-  afterEach(() => __setReocrEdgeForTests(false));
   afterAll(async () => {
     await resetDb(ownerDb);
   });
@@ -307,14 +308,14 @@ describe('attachAsPage / splitDocument', () => {
     expect(enqueued).toHaveLength(0);
   });
 
-  it('refused for an approved invoice and while the re-OCR edge is off', async () => {
+  it('refused for an approved invoice and while settings.ingest.multiPage is off', async () => {
     const first = await photoInvoice('st-1', 0);
     const second = await photoInvoice('st-2', 30);
     await ownerDb.update(invoices).set({ status: 'approved' }).where(eq(invoices.id, first));
     expect(await reason(asA((tx) => attachAsPage(tx, { restaurantId: A.restaurantId, invoiceId: first, documentId: second }, { enqueue: capture })))).toBe(
       'approved_or_paid',
     );
-    __setReocrEdgeForTests(false);
+    await setMultiPage(false);
     expect(await reason(asA((tx) => splitDocument(tx, { restaurantId: A.restaurantId, invoiceId: second, pages: [[0]] }, { enqueue: capture })))).toBe(
       'reocr_not_enabled',
     );
@@ -322,9 +323,10 @@ describe('attachAsPage / splitDocument', () => {
 
   it('splitDocument → 2 invoices, each composed and OCR’d once', async () => {
     const first = await photoInvoice('sp-1', 0);
-    const second = await photoInvoice('sp-2', 3); // joins `first` (one sender, 3 min)
-    expect(second).toBe(first);
+    const second = await photoInvoice('sp-2', 3);
+    await asA((tx) => attachAsPage(tx, { restaurantId: A.restaurantId, invoiceId: first, documentId: second }, { enqueue: capture }));
     expect(await pagesOf(first)).toBe(2);
+    enqueued = [];
     expect(await reason(asA((tx) => splitDocument(tx, { restaurantId: A.restaurantId, invoiceId: first, pages: [[0], [0]] }, { enqueue: capture })))).toBe(
       'invalid_split',
     );

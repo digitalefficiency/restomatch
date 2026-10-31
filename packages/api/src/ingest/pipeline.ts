@@ -30,23 +30,9 @@ import { enqueue, enqueueOcrInvoice, OCR_INVOICE_QUEUE } from '@restomatch/queue
 import { ORDER_TEXT_MAX_CHARS, orderTextParserFromEnv } from '@restomatch/ocr';
 import { captureOrderDraft } from '../orders/captureOrder';
 import { featureEnabled } from '../lib/features';
-import { MAX_DOCUMENT_PAGES } from '../documents/compose';
-import { createIntakeInvoice, invoiceClosedReason, upsertInvoiceScan } from '../documents/intake';
-import { reopenForOcr, reocrEdgeEnabled } from '../documents/reocr';
+import { createIntakeInvoice, upsertInvoiceScan } from '../documents/intake';
 import { objectRefMatchValues, signObjectRef, storedImageValue, tenantPath } from '../documents/objectRef';
-import {
-  findOpenCandidate,
-  groupMinutes,
-  INLINE_IMAGE_MAX_BYTES,
-  invoicePageRows,
-  isPageMime,
-  mimeOfRef,
-  objectForPages,
-  ocrDedupeKey,
-  recomposeInvoice,
-  reviewGroupOf,
-  type PageRow,
-} from './grouping';
+import { groupMinutes, INLINE_IMAGE_MAX_BYTES, isPageMime, mimeOfRef, ocrDedupeKey, reviewGroupOf } from './grouping';
 import { storeIngestedFile } from './store';
 
 /** Feature key per channel kind (MASTER-PLAN §3). */
@@ -184,15 +170,16 @@ export async function registerIngestedDocument(
 }
 
 /**
- * G-09: register a review document TOGETHER with its review group (the other
- * needs_review images of the same sender within N minutes) as ONE invoice —
- * what an inbox "approve" should call so a supplier's 2 photos stay 1 invoice.
- * A non-image document registers alone, exactly like registerIngestedDocument.
+ * G-09: approve a review document TOGETHER with its review group (the other
+ * needs_review images of the same sender within N minutes). Each page becomes
+ * its own invoice and is OCR'd alone; settleDocumentPages merges them after
+ * OCR when their supplier and invoice number agree. A non-image document
+ * registers alone, exactly like registerIngestedDocument.
  */
 export async function registerReviewGroup(
   tx: Database,
   args: { restaurantId: string; documentId: string; kind: IngestKind; supplierId: string | null; userId: string | null },
-): Promise<{ invoiceId: string; job: OcrJobToEnqueue | null; documentIds: string[] }> {
+): Promise<{ invoiceIds: string[]; jobs: OcrJobToEnqueue[]; documentIds: string[] }> {
   const [restaurant] = await tx
     .select({ settings: restaurants.settings })
     .from(restaurants)
@@ -200,19 +187,22 @@ export async function registerReviewGroup(
     .limit(1);
   const group = await reviewGroupOf(tx, args.restaurantId, args.documentId, groupMinutes(restaurant?.settings));
   if (group.length === 0) throw new Error('document is no longer awaiting review');
-  const obj = await objectForPages(args.restaurantId, group[0]!.id, group.map((g) => g.storagePath));
-  const main = group.find((g) => g.id === args.documentId) ?? group[0]!;
-  const reg = await registerIngestedDocument(tx, {
-    restaurantId: args.restaurantId,
-    documentId: main.id,
-    storagePath: obj.storagePath,
-    kind: args.kind,
-    supplierId: args.supplierId,
-    userId: args.userId,
-    extraDocumentIds: group.filter((g) => g.id !== main.id).map((g) => g.id),
-    pageCount: obj.pageCount,
-  });
-  return { ...reg, documentIds: group.map((g) => g.id) };
+  const invoiceIds: string[] = [];
+  const jobs: OcrJobToEnqueue[] = [];
+  for (const page of group) {
+    const reg = await registerIngestedDocument(tx, {
+      restaurantId: args.restaurantId,
+      documentId: page.id,
+      storagePath: page.storagePath,
+      kind: args.kind,
+      supplierId: args.supplierId,
+      userId: args.userId,
+      pageCount: isPageMime(page.mimeType) ? 1 : null,
+    });
+    invoiceIds.push(reg.invoiceId);
+    if (reg.job) jobs.push(reg.job);
+  }
+  return { invoiceIds, jobs, documentIds: group.map((g) => g.id) };
 }
 
 /** Enqueue OCR jobs after the transaction committed. Never throws. */
@@ -328,10 +318,6 @@ export async function processInboundMessage(
     if (!msg) return { status: 'duplicate', messageId: null };
 
     const docs: Array<{ id: string; status: IngestDocumentStatus }> = [];
-    // G-09: the auto-registered JPEG/PNG images of THIS message → ONE document.
-    const pages: PageRow[] = [];
-    const pageShas = new Set<string>();
-    const sameMessageDups: string[] = [];
     for (const [i, a] of message.attachments.entries()) {
       const base = {
         restaurantId: channel.restaurantId,
@@ -378,16 +364,6 @@ export async function processInboundMessage(
           .values({ ...base, mimeType: mime, sizeBytes: bytes.byteLength, sha256, status: 'skipped', error: 'inline_image' })
           .returning({ id: ingestDocuments.id });
         docs.push({ id: d!.id, status: 'skipped' });
-        continue;
-      }
-      // The same image twice in ONE message is one page, linked to the document.
-      if (isPageMime(mime) && pageShas.has(sha256)) {
-        const [d] = await tx
-          .insert(ingestDocuments)
-          .values({ ...base, mimeType: mime, sizeBytes: bytes.byteLength, sha256, status: 'duplicate' })
-          .returning({ id: ingestDocuments.id });
-        sameMessageDups.push(d!.id);
-        docs.push({ id: d!.id, status: 'duplicate' });
         continue;
       }
       // Same bytes already registered for this restaurant → link, don't re-OCR.
@@ -456,12 +432,10 @@ export async function processInboundMessage(
           })
           .returning({ id: ingestDocuments.id });
         docId = d!.id;
-        if (autoRegister && isPageMime(mime)) {
-          // Registered with its siblings after the loop (one document).
-          pages.push({ id: docId, storagePath: stored.storagePath, mimeType: mime });
-          pageShas.add(sha256);
-          docs.push({ id: docId, status: 'registered' });
-        } else if (autoRegister) {
+        if (autoRegister) {
+          // G-09: every page is its own invoice and is OCR'd alone; pages of one
+          // document are merged AFTER OCR, only when their supplier and invoice
+          // number agree (documents/settle.ts).
           const reg = await registerIngestedDocument(tx, {
             restaurantId: channel.restaurantId,
             documentId: docId,
@@ -492,35 +466,6 @@ export async function processInboundMessage(
           docId = d!.id;
         }
         docs.push({ id: docId, status: 'failed' });
-      }
-    }
-
-    if (pages.length > 0) {
-      try {
-        const invoiceId = await registerMessagePages(tx, {
-          channel,
-          sender,
-          messageId: msg.id,
-          now,
-          minutes: groupMinutes(restaurant.settings),
-          supplierId,
-          pages,
-          jobs,
-        });
-        if (sameMessageDups.length > 0) {
-          await tx
-            .update(ingestDocuments)
-            .set({ invoiceId, updatedAt: new Date() })
-            .where(and(inArray(ingestDocuments.id, sameMessageDups), eq(ingestDocuments.restaurantId, channel.restaurantId)));
-        }
-      } catch (err) {
-        console.error('[ingest] compose/register failed', err);
-        const ids = pages.map((p) => p.id);
-        await tx
-          .update(ingestDocuments)
-          .set({ status: 'failed', error: 'store_failed', updatedAt: new Date() })
-          .where(and(inArray(ingestDocuments.id, ids), eq(ingestDocuments.restaurantId, channel.restaurantId)));
-        for (const d of docs) if (ids.includes(d.id)) d.status = 'failed';
       }
     }
 
@@ -579,88 +524,4 @@ async function pdfPageCount(bytes: Uint8Array): Promise<number | null> {
   } catch {
     return null;
   }
-}
-
-/**
- * G-09: register the image pages of one message. They join the sender's OPEN
- * candidate (same channel + sender, first page within N minutes, no decision,
- * no claim, not approved/paid) when the re-OCR edge is on; otherwise they are
- * ONE new document. Returns the invoice they point at.
- */
-async function registerMessagePages(
-  tx: Database,
-  args: {
-    channel: ResolvedChannel;
-    sender: string;
-    messageId: string;
-    now: Date;
-    minutes: number;
-    supplierId: string | null;
-    pages: PageRow[];
-    jobs: OcrJobToEnqueue[];
-  },
-): Promise<string> {
-  const { channel, pages } = args;
-  const restaurantId = channel.restaurantId;
-  // One sender's concurrent messages extend one document in turn.
-  await tx.execute(
-    sql`select pg_advisory_xact_lock(hashtext(${`ingest-group:${restaurantId}:${channel.channelId}:${args.sender}`}))`,
-  );
-  if (reocrEdgeEnabled()) {
-    const candidate = await findOpenCandidate(tx, {
-      restaurantId,
-      channelId: channel.channelId,
-      sender: args.sender,
-      messageId: args.messageId,
-      now: args.now,
-      minutes: args.minutes,
-    });
-    if (candidate) {
-      const existing = await invoicePageRows(tx, restaurantId, candidate);
-      const all = [...existing, ...pages];
-      if (
-        existing.length > 0 &&
-        all.length <= MAX_DOCUMENT_PAGES &&
-        (await invoiceClosedReason(tx, restaurantId, candidate)) === null &&
-        (await reopenForOcr(tx, restaurantId, candidate))
-      ) {
-        const [inv] = await tx
-          .select({ supplierId: invoices.supplierId })
-          .from(invoices)
-          .where(and(eq(invoices.id, candidate), eq(invoices.restaurantId, restaurantId)))
-          .limit(1);
-        const r = await recomposeInvoice(tx, {
-          restaurantId,
-          invoiceId: candidate,
-          supplierId: inv?.supplierId ?? args.supplierId,
-          pages: all,
-        });
-        await tx
-          .update(ingestDocuments)
-          .set({ status: 'registered', invoiceId: candidate, error: null, updatedAt: new Date() })
-          .where(
-            and(
-              inArray(ingestDocuments.id, pages.map((p) => p.id)),
-              eq(ingestDocuments.restaurantId, restaurantId),
-              eq(ingestDocuments.status, 'needs_review'),
-            ),
-          );
-        args.jobs.push(r.job);
-        return candidate;
-      }
-    }
-  }
-  const obj = await objectForPages(restaurantId, pages[0]!.id, pages.map((p) => p.storagePath));
-  const reg = await registerIngestedDocument(tx, {
-    restaurantId,
-    documentId: pages[0]!.id,
-    storagePath: obj.storagePath,
-    kind: channel.kind,
-    supplierId: args.supplierId,
-    userId: null,
-    extraDocumentIds: pages.slice(1).map((p) => p.id),
-    pageCount: obj.pageCount,
-  });
-  if (reg.job) args.jobs.push(reg.job);
-  return reg.invoiceId;
 }

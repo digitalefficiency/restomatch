@@ -1,10 +1,10 @@
-import { and, eq, ingestDocuments, inArray, invoices, sql, type Database } from '@restomatch/db';
+import { and, eq, ingestDocuments, inArray, invoices, restaurants, sql, type Database } from '@restomatch/db';
 import { enqueueIngestJobs, type OcrJobToEnqueue } from '../ingest/pipeline';
-import { invoicePageRows, isPageMime, recomposeInvoice, type PageRow } from '../ingest/grouping';
+import { invoicePageRows, isPageMime, multiPageEnabled, recomposeInvoice, type PageRow } from '../ingest/grouping';
 import { MAX_DOCUMENT_PAGES } from './compose';
 import { DocumentError, documentNotFound } from './errors';
 import { createIntakeInvoice, invoiceClosedReason } from './intake';
-import { reocrEdgeEnabled, reopenForOcr, retireInvoice } from './reocr';
+import { reopenForOcr, retireInvoice } from './reocr';
 import { storedImageValue } from './objectRef';
 import type { AttachAsPageInput, AttachAsPageResult, SplitDocumentInput, SplitDocumentResult } from './types';
 
@@ -20,6 +20,12 @@ async function assertOpen(tx: Database, restaurantId: string, invoiceId: string)
   const reason = await invoiceClosedReason(tx, restaurantId, invoiceId);
   if (reason === 'not_found') throw documentNotFound();
   if (reason) throw new DocumentError(reason);
+}
+
+/** The multi-page switch of this restaurant (settings.ingest.multiPage), or a named refusal. */
+async function assertMultiPage(tx: Database, restaurantId: string): Promise<void> {
+  const [r] = await tx.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, restaurantId)).limit(1);
+  if (!r || !multiPageEnabled(r.settings)) throw new DocumentError('reocr_not_enabled');
 }
 
 async function lockInvoices(tx: Database, restaurantId: string, ids: string[]): Promise<void> {
@@ -64,10 +70,10 @@ export async function attachAsPage(db: Database, input: AttachAsPageInput, deps:
   const { restaurantId, invoiceId, documentId } = input;
   if (!UUID.test(invoiceId) || !UUID.test(documentId)) throw documentNotFound();
   if (invoiceId === documentId) throw new DocumentError('same_invoice');
-  if (!reocrEdgeEnabled()) throw new DocumentError('reocr_not_enabled');
 
   const { result, job } = await db.transaction(async (raw) => {
     const tx = raw as unknown as Database;
+    await assertMultiPage(tx, restaurantId);
     await lockInvoices(tx, restaurantId, [invoiceId, documentId]);
     await assertOpen(tx, restaurantId, invoiceId);
     await assertOpen(tx, restaurantId, documentId);
@@ -122,10 +128,10 @@ function validPartition(groups: number[][], n: number): boolean {
 export async function splitDocument(db: Database, input: SplitDocumentInput, deps: AttachDeps = {}): Promise<SplitDocumentResult> {
   const { restaurantId, invoiceId } = input;
   if (!UUID.test(invoiceId)) throw documentNotFound();
-  if (!reocrEdgeEnabled()) throw new DocumentError('reocr_not_enabled');
 
   const { ids, jobs } = await db.transaction(async (raw) => {
     const tx = raw as unknown as Database;
+    await assertMultiPage(tx, restaurantId);
     await lockInvoices(tx, restaurantId, [invoiceId]);
     await assertOpen(tx, restaurantId, invoiceId);
     const rows = await pagesOf(tx, restaurantId, invoiceId);

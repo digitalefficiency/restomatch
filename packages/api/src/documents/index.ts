@@ -6,5 +6,6 @@ export { toObjectRef, signObjectRef } from './objectRef';
 export { attachAsPage, splitDocument } from './attach';
 export { composedPathFor } from './compose';
 export { createIntakeInvoice } from './intake';
-export { REOCR_EDGE_ENABLED, reocrEdgeEnabled } from './reocr';
+export { settleDocumentPages, pageMismatch, PAGE_FLAGS, type PageFlag, type SettleResult } from './settle';
+export { multiPageEnabled } from '../ingest/grouping';
 export { STORE_OBJECT_PATH } from './objectRef';
