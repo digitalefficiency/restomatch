@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { localizeActivity } from '../components/activityText';
-import { components } from '../i18n/messages/components';
 import {
   appLocaleFromCookieHeader,
   baseLocaleOf,
@@ -191,7 +190,11 @@ describe('receiver activity feed: a redacted amount never leaves money wording b
       const t = createTranslator(locale, components);
       const moneyWords = [t('activity.potentialLoss', { amount: '' }).trim(), t('activity.savings', { amount: '' }).trim()];
       for (const item of redacted) {
-        const { title, detail } = localizeActivity(item as Parameters<typeof localizeActivity>[0], locale);
+        // The feed passes the app locale (a receiver language too) through the same translator.
+        const { title, detail } = localizeActivity(
+          item as Parameters<typeof localizeActivity>[0],
+          locale as unknown as Parameters<typeof localizeActivity>[1],
+        );
         for (const s of [title, detail ?? '']) {
           expect(s).not.toMatch(/₪|\{amount\}|\{/);
           for (const w of moneyWords) expect(s.includes(w), `"${s}" carries "${w}"`).toBe(false);
