@@ -74,6 +74,7 @@ export const receivingDelivery: Shape<typeof he> = {
       heldDiscard: 'ลบการนับจากโทรศัพท์',
       heldNotCounted: 'ยังไม่ได้นับ',
       saveFailed: 'บันทึก {count} รายการไม่สำเร็จ',
+      uncounted: "ยังไม่ได้นับ {count} รายการ — นับหรือทำเครื่องหมายว่าขาด",
       unorderedNeeds: 'ทำเครื่องหมายว่าสินค้าที่ไม่ได้สั่งมาถึงหรือไม่',
       spotTitle: 'สุ่มตรวจก่อนยืนยัน',
       spotHint: 'นับสินค้าเหล่านี้แล้วใส่จำนวนที่มาจริง',

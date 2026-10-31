@@ -72,6 +72,7 @@ export const en: Shape<typeof he> = {
       heldDiscard: 'Discard the phone count',
       heldNotCounted: 'not counted',
       saveFailed: '{count} lines were not saved',
+      uncounted: "{count} lines are not counted yet — count them or mark them missing",
       unorderedNeeds: 'Mark whether the items that were not ordered arrived',
       spotTitle: 'Spot check before you confirm',
       spotHint: 'Count these items and enter what actually arrived.',

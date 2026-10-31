@@ -74,6 +74,7 @@ export const receivingDelivery: Shape<typeof he> = {
       heldDiscard: 'احذف العدّ من الهاتف',
       heldNotCounted: 'لم يُعدّ',
       saveFailed: 'فشل حفظ {count} أسطر',
+      uncounted: "{count} أسطر لم تُعدّ بعد — اعدّها أو علّمها كناقصة",
       unorderedNeeds: 'حدّد هل وصلت الأصناف التي لم تُطلب',
       spotTitle: 'فحص بالعيّنة قبل التأكيد',
       spotHint: 'عُدّ هذه الأصناف واكتب كم وصل فعلًا.',

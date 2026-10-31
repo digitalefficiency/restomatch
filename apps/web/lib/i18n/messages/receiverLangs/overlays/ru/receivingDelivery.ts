@@ -74,6 +74,7 @@ export const receivingDelivery: Shape<typeof he> = {
       heldDiscard: 'Удалить подсчёт с телефона',
       heldNotCounted: 'не посчитано',
       saveFailed: 'Не удалось сохранить строк: {count}',
+      uncounted: "Ещё не посчитано строк: {count} — посчитайте их или отметьте «нет»",
       unorderedNeeds: 'Отметьте, пришли ли незаказанные товары',
       spotTitle: 'Выборочная проверка перед подтверждением',
       spotHint: 'Посчитайте эти товары и укажите, сколько пришло на самом деле.',

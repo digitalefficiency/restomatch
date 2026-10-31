@@ -8,6 +8,8 @@ import {
   GR_LINE_KIND,
   LEGACY_LINES_PREFIX,
   PHOTO_KIND,
+  SUBMIT_RECEIPT_KIND,
+  type SubmitReceiptPayload,
   dropLegacyLine,
   ensurePhotosMigrated,
   hasUnmirroredLegacyLines,
@@ -92,10 +94,16 @@ export function useOutboxDrainer(userId: string): void {
       ...PHOTO_KIND,
       send: (p, item) => uploadPhoto({ ...p, attempts: item.attempts, lastError: item.lastError }),
     });
-    // submitReceipt / slipShared bind with their server procedures (slices B/C); until then their items wait.
+    // A queued close goes after its receipt's counts (same group); the server replays it by clientMutationId.
+    const offSubmit = registerOutboxKind<SubmitReceiptPayload>('submitReceipt', {
+      ...SUBMIT_RECEIPT_KIND,
+      send: (p) => utils.client.receiving.submitReceipt.mutate(p),
+    });
+    // slipShared binds with receiving.slipShared (slice C); until then its items wait.
     return () => {
       offLine();
       offPhoto();
+      offSubmit();
     };
   }, [utils, uploadPhoto]);
 

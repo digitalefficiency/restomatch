@@ -79,6 +79,7 @@ export const he = {
       heldDiscard: 'מחקו את הספירה מהטלפון',
       heldNotCounted: 'לא נספר',
       saveFailed: 'שמירת {count} שורות נכשלה',
+      uncounted: "{count} שורות עוד לא נספרו — ספרו אותן או סמנו 'חסר'",
       unorderedNeeds: 'סמנו אם הפריטים שלא הוזמנו הגיעו',
       spotTitle: 'בדיקה מדגמית לפני האישור',
       spotHint: 'ספרו את הפריטים האלה ורשמו כמה הגיע בפועל.',

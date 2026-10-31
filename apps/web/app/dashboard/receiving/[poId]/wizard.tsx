@@ -47,6 +47,7 @@ import {
   writeDraft,
   type LeaveTarget,
 } from './_fieldHooks';
+import { clearCloseKey, closeKeyFor, uncountedLinesOf } from './_closeKey';
 import { ReceiptSummary } from './receipt-summary';
 
 // The slip is only needed once there is something to dispute: keep it out of the first load.
@@ -768,10 +769,14 @@ export function ReceivingWizard({
         // The count is in: the server re-matches this invoice against it. No
         // signature: the invoice photo is not a driver's signature (RCV-07/08).
         invoiceIds: invoiceId ? [invoiceId] : undefined,
+        // ONE close per intent (W2-05): a retry after a lost answer, a reload or a
+        // double tap replays the same close — one close, one re-match.
+        clientMutationId: closeKeyFor(grId, receiptVersion),
       });
       setConfirmedAt(new Date().toISOString());
       setStep('CONFIRMED');
       writeDraft(draftKey, null);
+      clearCloseKey(grId, receiptVersion);
       // Closed: nothing left to send or restore for this receipt.
       outbox.clear();
       writeLocalMarks(localMarksKey, null);
@@ -781,7 +786,16 @@ export function ReceivingWizard({
       if (isSessionExpired(err)) {
         requestReauth();
         setFooterError(td('delivery.count.sessionExpired'));
-      } else setFooterError(isNetworkError(err) ? td('delivery.count.offline') : errorText(err, t, locale));
+      } else {
+        const uncounted = uncountedLinesOf(err);
+        setFooterError(
+          uncounted !== null
+            ? td('delivery.count.uncounted', { count: formatNumber(uncounted, locale) })
+            : isNetworkError(err)
+              ? td('delivery.count.offline')
+              : errorText(err, t, locale),
+        );
+      }
     } finally {
       submittingRef.current = false;
       setClosing(false);

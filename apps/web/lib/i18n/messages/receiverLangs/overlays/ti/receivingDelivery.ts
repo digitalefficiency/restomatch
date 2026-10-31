@@ -74,6 +74,7 @@ export const receivingDelivery: Shape<typeof he> = {
       heldDiscard: 'ቁጽሪ ካብ ተሌፎን ደምስሱ',
       heldNotCounted: 'ኣይተቖጽረን',
       saveFailed: 'ምዕቃብ {count} መስመራት ኣይተዓወተን',
+      uncounted: "{count} መስመራት ገና ኣይተቖጽሩን — ቍጸርዎም ወይ ከም ዝጎደሉ ምልክት ግበሩ",
       unorderedNeeds: 'ዘይተኣዘዙ ኣቕሑ መጺኦም እንተኾይኖም ምልክት ግበሩ',
       spotTitle: 'ቅድሚ ምርግጋጽ ናይ ናሙና ምርመራ',
       spotHint: 'ነዞም ኣቕሑ ቁጸሩ እሞ ብሓቂ ክንደይ ከም ዝመጸ ጽሓፉ።',
