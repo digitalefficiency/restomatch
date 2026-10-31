@@ -18,6 +18,7 @@ export async function writeHint(h: LoginHint): Promise<void> {
   });
 }
 
+/** Every sign-out in the auth pages calls this: the next person on a shared device starts clean. */
 export async function clearHint(): Promise<void> {
   (await cookies()).set(HINT_COOKIE, '', { path: '/login', maxAge: 0 });
 }

@@ -118,6 +118,13 @@ test.describe('login', () => {
       expect(page.url()).not.toContain('e2e-w109');
     }
     await expect(page.getByTestId('magic-fallback')).toBeVisible();
+    // Enter in the password field always tries the PASSWORD — never the email-link fallback
+    // (review #2). Other specs (demo-path, i18n-sweep) rely on ONE submit inside the form.
+    await expect(page.locator('form:has(#password) button[type="submit"]')).toHaveCount(1);
+    await page.locator('input[name="password"]').fill('wrong-3');
+    await page.locator('input[name="password"]').press('Enter');
+    await expect(page).toHaveURL(/error=CredentialsSignin/);
+    await expect(page).not.toHaveURL(/check-email/);
     // "שכחתם?" sits on the password label row at 14 px; the eye toggle is 44 px.
     const forgot = page.getByRole('link', { name: 'שכחתם?' });
     expect(await forgot.evaluate((el) => getComputedStyle(el).fontSize)).toBe('14px');
@@ -268,6 +275,31 @@ test.describe('auth-11 · invite errors are calm and specific', () => {
     await expect(page.locator('h1')).not.toHaveClass(/text-danger/);
   });
 
+  test('an expired invite reads EXPIRED on every open, not "already used" (review #3)', async ({ page }) => {
+    const expiredToken = randomBytes(24).toString('base64url');
+    const sql = e2eSql();
+    try {
+      const [r] = await sql<{ id: string }[]>`select id from restaurants where name = ${DEMO_RESTAURANT_NAME} limit 1`;
+      await sql`delete from invitations where email = ${email}`;
+      await sql`
+        insert into invitations (restaurant_id, email, role, token_hash, expires_at, created_at)
+        values (${r!.id}, ${email}, 'receiver', ${createHash('sha256').update(expiredToken).digest('hex')},
+                now() - interval '1 day', now() - interval '8 days')`;
+    } finally {
+      await sql.end();
+    }
+    await setLocale(page, 'he');
+    await page.goto('/login');
+    await page.locator('input[name="email"]').fill(email);
+    await page.locator('input[name="password"]').fill(PASSWORD);
+    await page.getByRole('button', { name: 'כניסה', exact: true }).click();
+    await expect(page).toHaveURL(/\/dashboard/);
+    for (let open = 1; open <= 2; open += 1) {
+      await page.goto(`/invite/accept?token=${expiredToken}`);
+      await expect(page.getByTestId('invite-state')).toHaveAttribute('data-state', 'expired');
+    }
+  });
+
   test('an unknown invite never links a member-less user to /dashboard', async ({ page }) => {
     const lone = `e2e-w109-lone-${Date.now()}@restomatch.test`;
     await loginViaMagicLink(page, lone, '/invite/accept?token=nope');
@@ -378,6 +410,8 @@ test.describe('auth-02/03/14/16 · supplier portal', () => {
     await page.getByRole('button', { name: 'אישור כפי שהוזמן' }).click();
     await expect(page.getByRole('alertdialog')).toContainText('לבטל 2 שינויים ולאשר כפי שהוזמן?');
     await page.getByRole('button', { name: 'חזרה לשינויים' }).click();
+    // Cancelling the question returns focus to the button that opened it (review #10).
+    await expect(page.getByRole('button', { name: 'אישור כפי שהוזמן' })).toBeFocused();
     await expect(page.locator(`#qty-${lineIds[0]}`)).toHaveValue('0');
     expect(await storedResponse(poId)).toBeNull();
     // The note is the supplier's own words: discarding line edits never drops it.
@@ -440,6 +474,44 @@ test.describe('auth-02/03/14/16 · supplier portal', () => {
     // The sticky primary is never under the cookie bar or off-screen.
     const bar = (await page.getByTestId('portal-actions').boundingBox())!;
     expect(bar.y + bar.height).toBeLessThanOrEqual(844 + 1);
+  });
+
+  test('an invalid edit alone blocks the send — never "confirm as is" (review #1)', async ({ page }) => {
+    const { token, poId, lineIds } = await freshSupplierLink();
+    await setLocale(page, 'he');
+    await page.goto(`/s/${token}`);
+    await page.locator(`#qty-${lineIds[0]}`).fill('שש');
+    await expect(page.locator('[data-primary]')).not.toHaveText('אישור ההזמנה כפי שהיא');
+    await page.locator('[data-primary]').click();
+    await expect(page.getByText('יש שדות לא תקינים')).toBeVisible();
+    await expect(page.locator(`#qty-${lineIds[0]}`)).toBeFocused();
+    await page.waitForTimeout(500);
+    expect(await storedResponse(poId)).toBeNull();
+    // The VAT basis is stated on the totals and the price field (review #5).
+    await expect(page.getByTestId('order-total')).toContainText('לפני מע״מ');
+    await expect(page.locator('label[for^="price-"]').first()).toContainText('לפני מע״מ');
+  });
+
+  test('a retried submit whose first try landed is the supplier\'s own answer, not "not saved" (review #6)', async ({ page }) => {
+    const { token, poId, lineIds } = await freshSupplierLink();
+    await setLocale(page, 'he');
+    await page.goto(`/s/${token}`);
+    await page.locator(`#qty-${lineIds[0]}`).fill('0.5');
+    // First try reaches the server but the reply is lost (flaky 4G).
+    let dropped = false;
+    await page.route('**/api/supplier-confirm/**', async (route) => {
+      if (dropped) return route.continue();
+      dropped = true;
+      await route.fetch();
+      await route.abort('connectionreset');
+    });
+    await page.locator('[data-primary]').click();
+    await expect(page.getByText('משהו השתבש')).toBeVisible();
+    expect((await storedResponse(poId))?.status).toBe('changes');
+    await page.locator('[data-primary]').click();
+    await expect(page.getByTestId('portal-answered')).toContainText('התשובה שלכם נרשמה');
+    await expect(page.getByTestId('portal-answered')).not.toContainText('לא נשמרו');
+    expect(page.url()).not.toContain('answered=');
   });
 
   test('a dead link has no dashboard CTA', async ({ page }) => {

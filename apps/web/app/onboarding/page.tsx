@@ -5,6 +5,7 @@ import { onboarding } from '@/lib/i18n/messages/onboarding';
 import { getT } from '@/lib/i18n/server';
 import { safeRelativePath } from '@/lib/safeRedirect';
 import { AuthShell, authTitle } from '../(auth)/_components/AuthShell';
+import { clearHint } from '../login/hint';
 import { OnboardingForm } from './form';
 
 export const generateMetadata = () => authTitle('shell.titles.onboarding');
@@ -38,6 +39,7 @@ export default async function OnboardingPage({ searchParams }: { searchParams: P
 
   async function logout() {
     'use server';
+    await clearHint();
     await signOut({ redirectTo: '/login?signedOut=1' });
   }
 

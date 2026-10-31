@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2 } from 'lucide-react';
 import { Button, Card, cn } from '@/lib/components';
 import { UnitText } from '@/lib/components/UnitText';
@@ -10,7 +10,8 @@ import { formatNumber } from '@/lib/i18n/format';
 import { supplierConfirm } from '@/lib/i18n/messages/supplierConfirm';
 import { formatIls } from '@/lib/money';
 import { DiffList } from './Diff';
-import { answerBody, computeAnswer, type DiffItem, type PortalLine } from './logic';
+import { answerBody, computeAnswer, primaryAction, type DiffItem, type PortalLine } from './logic';
+import { rememberAttempt } from './attempt';
 
 export type { PortalLine } from './logic';
 
@@ -54,6 +55,13 @@ export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; 
   const [note, setNote] = useState('');
   const [phase, setPhase] = useState<Phase>({ kind: 'edit' });
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const asIsRef = useRef<HTMLButtonElement>(null);
+  const wasConfirming = useRef(false);
+  // Closing the discard question returns focus to the button that opened it.
+  useEffect(() => {
+    if (wasConfirming.current && !confirmDiscard) asIsRef.current?.focus();
+    wasConfirming.current = confirmDiscard;
+  }, [confirmDiscard]);
   const [showInvalid, setShowInvalid] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -84,7 +92,9 @@ export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; 
       // reload the page, which shows the RECORDED answer, its date, and that
       // these changes were not saved.
       if (res.status === 409) {
-        router.replace(`/s/${encodeURIComponent(token)}?answered=1`);
+        // The page then compares the recorded answer with this attempt: a
+        // retried submit whose first try did land is the supplier's own answer.
+        rememberAttempt(token, body);
         router.refresh();
         return;
       }
@@ -124,14 +134,15 @@ export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; 
       : t('portal.sendAnswerMany', { count: formatNumber(changeCount, locale) });
 
   function onPrimary() {
-    if (!hasChanges) return void send('asIs');
-    if (invalid) {
-      // Never a silently disabled button: say why and go to the first bad field.
+    const action = primaryAction(answer);
+    if (action === 'invalid') {
+      // An invalid field blocks the send — never a fallback to "as is", never a
+      // silently disabled button: say why and go to the first bad field.
       setShowInvalid(true);
       formRef.current?.querySelector<HTMLInputElement>('[aria-invalid="true"]')?.focus();
       return;
     }
-    void send('answer');
+    void send(action);
   }
 
   return (
@@ -230,7 +241,7 @@ export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; 
                     <label htmlFor={priceId} className="block text-sm font-medium text-ink">
                       {t('portal.yourPrice')}{' '}
                       <span className="font-normal text-muted">
-                        ({t('portal.perUnit')} <UnitText unit={l.unit} />)
+                        ({t('portal.perUnit')} <UnitText unit={l.unit} /> · {t('portal.beforeVat')})
                       </span>
                     </label>
                     <input
@@ -280,13 +291,13 @@ export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; 
       >
         <div className="mx-auto w-full max-w-xl px-4 pb-[max(env(safe-area-inset-bottom),0.75rem)] pt-3">
           <div aria-live="polite" className="mb-2">
-            {hasChanges ? (
+            {diff.length > 0 || note.trim() ? (
               <div className="rounded-lg border border-warn bg-surface px-3 py-2" data-testid="portal-diff">
                 <DiffList items={diff} note={note.trim() || null} limit={3} className="space-y-0.5 text-sm text-ink" />
               </div>
-            ) : (
+            ) : !hasChanges ? (
               <p className="text-sm text-muted">{t('portal.noChanges')}</p>
-            )}
+            ) : null}
             {showInvalid && invalid ? (
               <p role="alert" className="mt-1 text-sm font-medium text-danger">
                 {t('portal.fixFields')}
@@ -331,6 +342,7 @@ export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; 
                 <button
                   type="button"
                   disabled={busy}
+                  ref={asIsRef}
                   onClick={() => setConfirmDiscard(true)}
                   className="mt-1 inline-flex min-h-11 w-full items-center justify-center text-sm font-semibold text-primary hover:underline disabled:opacity-50"
                 >
@@ -352,7 +364,9 @@ function OrderTotals({ answer, locale }: { answer: ReturnType<typeof computeAnsw
   return (
     <div className="rounded-xl border border-line-strong bg-surface px-3 py-3" data-testid="order-total">
       <p className="flex items-baseline justify-between gap-3 text-base font-semibold text-ink">
-        <span>{t('portal.orderTotal')}</span>
+        <span>
+          {t('portal.orderTotal')} <span className="text-sm font-normal text-muted">({t('portal.beforeVat')})</span>
+        </span>
         <Ils agorot={orderTotalAgorot} locale={locale} />
       </p>
       {changeCount > 0 && !invalid && answerTotalAgorot !== orderTotalAgorot ? (

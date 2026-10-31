@@ -11,7 +11,8 @@ import { getLocale, getT } from '@/lib/i18n/server';
 import { localizeServerError } from '@/lib/serverErrors';
 import { AuthShell, authTitle } from '../../(auth)/_components/AuthShell';
 import { SubmitButton } from '../../(auth)/_components/SubmitButton';
-import { inviteFailure, type InviteFailure } from './failure';
+import { clearHint } from '../../login/hint';
+import { invitationExpired, inviteFailure, type InviteFailure } from './failure';
 
 export const generateMetadata = () => authTitle('shell.titles.invite');
 
@@ -25,15 +26,17 @@ interface PageProps {
  * like team.acceptInvite: holding the token is what proves you were invited,
  * and the invited address is already in the invite link itself.
  */
-async function inviteContext(token: string): Promise<{ email: string; inviter: string | null } | null> {
+async function inviteContext(
+  token: string,
+): Promise<{ email: string; inviter: string | null; status: string; expiresAt: Date } | null> {
   const hash = createHash('sha256').update(token).digest('hex');
   const [row] = await authDb
-    .select({ email: invitations.email, inviter: users.name })
+    .select({ email: invitations.email, inviter: users.name, status: invitations.status, expiresAt: invitations.expiresAt })
     .from(invitations)
     .leftJoin(users, eq(users.id, invitations.invitedByUserId))
     .where(eq(invitations.tokenHash, hash))
     .limit(1);
-  return row ? { email: row.email, inviter: row.inviter?.trim() || null } : null;
+  return row ? { email: row.email, inviter: row.inviter?.trim() || null, status: row.status, expiresAt: row.expiresAt } : null;
 }
 
 /**
@@ -70,8 +73,12 @@ export default async function InviteAcceptPage({ searchParams }: PageProps) {
   const [t, memberships, ctx] = await Promise.all([
     getT(authMessages),
     caller.onboarding.myMemberships().catch(() => []),
-    failure === 'wrongEmail' || failure === 'expired' ? inviteContext(token) : Promise.resolve(null),
+    failure === 'wrongEmail' || failure === 'expired' || failure === 'used' ? inviteContext(token) : Promise.resolve(null),
   ]);
+  // acceptInvite flips an expired invite's status to 'expired' on the first
+  // open, so every later open reports it as "used". The expiry date is stable:
+  // derive the state from it, so an expired invite reads EXPIRED every time.
+  if (failure === 'used' && ctx && invitationExpired(ctx)) failure = 'expired';
   // A user with no membership is never sent to /dashboard (it would bounce them
   // to "create a restaurant" — the wrong door for an invitee).
   const isMember = memberships.length > 0;
@@ -83,6 +90,7 @@ export default async function InviteAcceptPage({ searchParams }: PageProps) {
     'use server';
     const qs = new URLSearchParams({ callbackUrl: backToInvite });
     if (invitedEmail) qs.set('email', invitedEmail);
+    await clearHint();
     await signOut({ redirectTo: `/login?${qs.toString()}` });
   }
 
