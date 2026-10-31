@@ -47,6 +47,7 @@ import { OrderDocumentPreview } from '../order-document-preview';
 import {
   addOrMerge,
   lineTotalIls,
+  ltrIsolate,
   linesValid,
   orderTotalIls,
   poRefOf,
@@ -124,6 +125,9 @@ const cartLineOf = (l: PoLine): CartLine => ({
 const dayKeyOf = (at: Date | string | null | undefined) => (at ? localNow(new Date(at), TZ).date : '');
 
 /** The device cart's server draft was sent or cancelled somewhere else. */
+/** A draft line the cart still pairs with is gone on the server (deleted on the order page). */
+class LineGoneError extends Error {}
+
 class StaleDraftError extends Error {
   constructor(
     readonly poId: string,
@@ -459,9 +463,22 @@ export function NewOrderWizard({
     reorderItems.length,
   ]);
 
-  async function resolveReorder(mode: 'attach' | 'replace') {
+  async function resolveReorder(mode: 'attach' | 'replace' | 'keep') {
     const p = pendingReorder;
     if (!p) return;
+    if (mode === 'keep') {
+      // Keep my draft: the existing cart exactly as it was; the old order is not added.
+      if (p.existing.kind === 'local') applyCart(p.existing.cart);
+      setReorderInfo(null);
+      setPendingReorder(null);
+      if (p.existing.kind === 'server') {
+        // The unsent draft lives on its own page; leave the wizard's cart empty.
+        applyCart(emptyCart());
+      }
+      setStep('BUILD');
+      setUrl(p.supplierId);
+      return;
+    }
     let base: Cart;
     if (p.existing.kind === 'local') {
       base = p.existing.cart;
@@ -570,9 +587,16 @@ export function NewOrderWizard({
     if (id) {
       const plan = planDraftSync({ lines, deliveryDate, deliveryDay, server: serverRef.current });
       if (!plan.replace) {
-        await applyPlan(plan);
-        if (plan.deletes.length > 0 || plan.updates.length > 0) await readBack(id, lines);
-        return id;
+        try {
+          await applyPlan(plan);
+          if (plan.deletes.length > 0 || plan.updates.length > 0) await readBack(id, lines);
+          return id;
+        } catch (e) {
+          if (!(e instanceof LineGoneError)) throw e;
+          // A line was deleted on the order page meanwhile: re-pair with what the
+          // draft really holds; the unpaired cart line makes this a replace below.
+          await readBack(id, lines);
+        }
       }
     }
     const created = await createDraft.mutateAsync({
@@ -597,8 +621,21 @@ export function NewOrderWizard({
   }
 
   async function applyPlan(plan: ReturnType<typeof planDraftSync>) {
-    for (const lineId of plan.deletes) await deleteLine.mutateAsync({ lineId });
-    for (const u of plan.updates) await updateLine.mutateAsync({ lineId: u.lineId, patch: u.patch });
+    for (const lineId of plan.deletes) {
+      try {
+        await deleteLine.mutateAsync({ lineId });
+      } catch (e) {
+        if (trpcErrorCode(e) !== 'NOT_FOUND') throw e; // already gone: that is what we wanted
+      }
+    }
+    for (const u of plan.updates) {
+      try {
+        await updateLine.mutateAsync({ lineId: u.lineId, patch: u.patch });
+      } catch (e) {
+        if (trpcErrorCode(e) === 'NOT_FOUND') throw new LineGoneError();
+        throw e;
+      }
+    }
   }
 
   /** The draft is gone from "unsent": drop the device cart and say where the order is. */
@@ -644,7 +681,12 @@ export function NewOrderWizard({
             if (cur.po) dropStale(new StaleDraftError(poId, cur.po.status));
             return;
           }
-          await applyPlan(plan);
+          try {
+            await applyPlan(plan);
+          } catch (e) {
+            if (!(e instanceof LineGoneError)) throw e;
+          }
+          // Re-pair with what the draft really holds (also after a NOT_FOUND).
           await readBack(poId, snapshot);
         } catch {
           // Quiet: the next save (review / send) brings the draft in line or says why not.
@@ -776,7 +818,7 @@ export function NewOrderWizard({
               <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" aria-hidden="true" />
               {t(stale.status === 'cancelled' ? 'draft.staleCancelled' : 'draft.staleSent', {
                 supplier: nameOf(suppliers.data?.find((x) => x.id === stale.supplierId)),
-                ref: poRefOf(stale.poId),
+                ref: ltrIsolate(`#${poRefOf(stale.poId)}`),
               })}
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
@@ -834,6 +876,9 @@ export function NewOrderWizard({
               </Button>
               <Button className="min-h-14" variant="secondary" onClick={() => void resolveReorder('replace')}>
                 {t('reorder.replace')}
+              </Button>
+              <Button className="min-h-14 sm:col-span-2" variant="ghost" onClick={() => void resolveReorder('keep')}>
+                {t('reorder.keep')}
               </Button>
             </div>
           </Card>
@@ -915,7 +960,9 @@ export function NewOrderWizard({
               {!search && (catalog.data ?? []).length > 0 ? (
                 <p className="mt-2 text-xs text-subtle">{t('wizard.browseHint')}</p>
               ) : null}
-              <div className="mt-2 max-h-72 overflow-y-auto rounded-xl border border-line">
+              {/* Phones: the list flows with the page (no inner scroll box), so focus scrolling
+                  keeps every item clear of the sticky cart bar (WCAG 2.4.11). */}
+              <div className="mt-2 rounded-xl border border-line sm:max-h-72 sm:overflow-y-auto">
                 {catalog.isLoading ? (
                   <div className="flex items-center gap-2 p-3 text-sm text-muted">
                     <Spinner className="h-4 w-4" /> {t('wizard.searching')}
@@ -1111,7 +1158,7 @@ export function NewOrderWizard({
                 disabled={busy}
                 onClick={() => setStep('BUILD')}
               >
-                <ChevronLeft className="h-4 w-4 ltr:rotate-180" aria-hidden="true" /> {t('wizard.back')}
+                <ChevronLeft className="h-4 w-4 rtl:-scale-x-100" aria-hidden="true" /> {t('wizard.back')}
               </Button>
             </div>
             <ul className="space-y-2">
@@ -1325,6 +1372,7 @@ export function NewOrderWizard({
       {(step === 'BUILD' || step === 'REVIEW') && reorderDone && !pendingReorder ? (
         <div
           data-testid="cart-bar"
+          data-field-bar=""
           className="fixed inset-x-0 bottom-[var(--consent-h,0px)] z-40 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] shadow-card backdrop-blur"
         >
           <div className="mx-auto flex max-w-3xl flex-col gap-2 px-4 py-2 sm:flex-row sm:items-center sm:justify-between">
@@ -1332,6 +1380,7 @@ export function NewOrderWizard({
               <UndoCountdown
                 className="w-full border-primary/40"
                 testId="send-undo"
+                autoFocus
                 deadline={sending.deadline}
                 message={(s) =>
                   effectiveChannel === 'none'
@@ -1495,7 +1544,7 @@ function ReorderNotice({ info, compact = false }: { info: { ref: string; unavail
     <div className={cn('rounded-xl border border-line bg-surface-2 p-3 text-sm', compact ? 'mb-3' : '')} data-testid="reorder-notice">
       <p className="flex items-center gap-2 font-medium text-ink">
         <Repeat className="h-4 w-4 text-primary" aria-hidden="true" />
-        {t('reorder.from', { ref: info.ref })}
+        {t('reorder.from', { ref: ltrIsolate(`#${info.ref}`) })}
       </p>
       {!compact ? <p className="mt-1 text-muted">{t('reorder.added', { count: formatNumber(info.count, locale) })}</p> : null}
       {info.unavailable.length > 0 ? (

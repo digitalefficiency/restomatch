@@ -31,6 +31,7 @@ import {
   cancelNoticeText,
   lineLabel,
   lineTotalIls,
+  ltrIsolate,
   mailtoLink,
   parsePositive,
   parsePrice,
@@ -159,6 +160,8 @@ export function OrderDetail({
     const wantsNotice = notify && !!po.sentAt && notifyVia !== null;
     // Opened inside the tap (popup blockers), pointed at WhatsApp once the cancel lands.
     const win = wantsNotice && notifyVia === 'whatsapp' ? window.open('about:blank', '_blank') : null;
+    // The handle is kept only to point it at WhatsApp; the new page gets no way back to this one.
+    if (win) win.opener = null;
     cancel.mutate(
       { poId: po.id },
       {
@@ -233,7 +236,8 @@ export function OrderDetail({
         : t('detail.totalExcludes', { count: formatNumber(unpriced, locale) });
   const sendLabel = t(`send.cta.${channel}`, { supplier: supplierName || t('detail.titleNoSupplier') });
   const canReorder = canEdit && !isDraft && data.lines.length > 0;
-  const menuItems = canEdit && canCancel
+  // No cancel while a send is counting down: undo that first.
+  const menuItems = canEdit && canCancel && sending === null
     ? [
         {
           key: 'cancel',
@@ -379,6 +383,7 @@ export function OrderDetail({
           <UndoCountdown
             className="mt-4"
             testId="send-undo"
+            autoFocus
             deadline={sending}
             message={(sec) =>
               channel === 'none'
@@ -575,7 +580,7 @@ export function OrderDetail({
           <>
             <p className="tabular-nums text-ink" data-testid="cancel-facts">
               {t('detail.cancelFacts', {
-                ref,
+                ref: ltrIsolate(`#${ref}`),
                 total: money(po.totalEstimated),
                 date: po.expectedDeliveryAt
                   ? formatDate(po.expectedDeliveryAt, locale, { weekday: 'short', day: 'numeric', month: 'numeric' })

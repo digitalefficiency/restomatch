@@ -8,7 +8,7 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { formatDate, formatNumber } from '@/lib/i18n/format';
 import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 import { formatIls } from '@/lib/money';
-import { deliveryStatusOf, poRefOf, type DisplayOrderStatus, type ReceiptStatus } from './order-logic';
+import { deliveryStatusOf, ltrIsolate, poRefOf, type DisplayOrderStatus, type ReceiptStatus } from './order-logic';
 import { RowMenu } from './row-menu';
 
 export type OrderStatus = 'draft' | 'sent' | 'confirmed' | 'partial' | 'closed' | 'cancelled';
@@ -89,7 +89,7 @@ export function OrdersTable({
   const total = (v: string | null) => (v != null ? formatIls(Number(v), { locale, maximumFractionDigits: 2 }) : '—');
   const supplier = (o: OrderRow) => displayName(o.supplierName, o.supplierNameEn, locale).primary;
   const rowLabel = (o: OrderRow) =>
-    t('list.rowLabel', { supplier: supplier(o), ref: poRefOf(o.id), date: date(o.createdAt), total: total(o.totalEstimated) });
+    t('list.rowLabel', { supplier: supplier(o), ref: ltrIsolate(`#${poRefOf(o.id)}`), date: date(o.createdAt), total: total(o.totalEstimated) });
   const reorderable = (o: OrderRow) => canReorder && o.status !== 'draft' && o.lineCount > 0;
   const reorderHref = (o: OrderRow) => `/dashboard/orders/new?from=${o.id}`;
 
@@ -160,7 +160,7 @@ export function OrdersTable({
                   <td className="px-2 py-1 text-end">
                     {reorderable(o) ? (
                       <RowMenu
-                        label={t('list.more', { supplier: supplier(o), ref: poRefOf(o.id) })}
+                        label={t('list.more', { supplier: supplier(o), ref: ltrIsolate(`#${poRefOf(o.id)}`) })}
                         items={[
                           {
                             key: 'reorder',

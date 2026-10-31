@@ -11,6 +11,8 @@ import {
   waPhone,
 } from '../order-logic';
 import { addDays, localNow, nextDeliveryOptions, weekdayOf } from '../new/delivery-days';
+import { en as ordersEn } from '../../../../lib/i18n/messages/orders/en';
+import { he as ordersHe } from '../../../../lib/i18n/messages/orders/he';
 import {
   emptyCart,
   pairServerLines,
@@ -266,5 +268,19 @@ describe('draft store', () => {
     // A draft whose day we don't know (resumed before it was read back) can't be trusted.
     const unknownDay = { deliveryDate: '', lines: { a: srv('1', a) } };
     expect(planDraftSync({ lines: [a], deliveryDate: '', deliveryDay: '2026-10-27', server: unknownDay }).replace).toBe(true);
+  });
+});
+
+describe('order copy is bidi-safe', () => {
+  const flat = (o: unknown, out: string[] = []): string[] => {
+    if (typeof o === 'string') out.push(o);
+    else if (o && typeof o === 'object') for (const v of Object.values(o)) flat(v, out);
+    return out;
+  };
+  it('no message glues "#" to the ref outside the isolate (RTL showed "F8E05686#")', () => {
+    for (const m of [...flat(ordersHe), ...flat(ordersEn)]) expect(m).not.toMatch(/#\{ref\}/);
+  });
+  it('Hebrew arrows point the reading way (← in RTL)', () => {
+    for (const m of flat(ordersHe)) expect(m).not.toContain('→');
   });
 });

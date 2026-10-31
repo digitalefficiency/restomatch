@@ -28,6 +28,8 @@ let supplierA = { id: '', name: '' };
 let supplierB = { id: '', name: '' };
 let reorderPo = '';
 let goneItem = '';
+/** Catalog list prices of the two reorderable lines (what "order again" must price at). */
+let todaysPrices: number[] = [];
 
 test.beforeAll(async ({ browser }) => {
   const sql = e2eSql();
@@ -48,11 +50,19 @@ test.beforeAll(async ({ browser }) => {
     supplierB = { id: sups[1]!.id, name: sups[1]!.name };
 
     // A sent PO to A: two catalog products, one product A doesn't sell, one free line
-    // (4×10 + 5×11 + 2×5 + 1×25 = ₪130.00 estimated).
-    const cat = await sql<{ product_id: string; name: string; unit: string | null }[]>`
-      select c.product_id, c.supplier_name_raw as name, c.unit from supplier_catalog_items c
+    // (the estimate below is a fixed placeholder total; only its ₪ rendering is asserted).
+    // Priced in the catalog, no contract: "today's price" is the list price, and the
+    // seeded last price (list + ₪1) must NOT come back.
+    const cat = await sql<{ product_id: string; name: string; unit: string | null; list: string }[]>`
+      select c.product_id, c.supplier_name_raw as name, c.unit, c.list_price::text as list
+      from supplier_catalog_items c
       where c.supplier_id = ${supplierA.id} and c.active and c.product_id is not null
+        and c.list_price is not null and c.unit is not null
+        and not exists (select 1 from supplier_contract_prices k
+                        where k.supplier_id = c.supplier_id and k.product_id = c.product_id)
       order by c.supplier_name_raw limit 2`;
+    if (cat.length < 2) throw new Error('seed needs 2 priced, uncontracted catalog products for supplier A');
+    todaysPrices = cat.map((c) => Number(c.list));
     const [gone] = await sql<{ id: string; name: string }[]>`
       select p.id, p.canonical_name as name from products p
       where p.restaurant_id = ${r.id}
@@ -67,7 +77,7 @@ test.beforeAll(async ({ browser }) => {
     reorderPo = po!.id;
     for (const [i, c] of cat.entries()) {
       await sql`insert into po_lines (po_id, product_id, raw_description, qty_ordered, unit, unit_price_expected)
-                values (${reorderPo}, ${c.product_id}, ${c.name}, ${4 + i}, ${c.unit ?? 'יח׳'}, ${10 + i})`;
+                values (${reorderPo}, ${c.product_id}, ${c.name}, ${4 + i}, ${c.unit ?? 'יח׳'}, ${Number(c.list) + 1})`;
     }
     await sql`insert into po_lines (po_id, product_id, raw_description, qty_ordered, unit, unit_price_expected)
               values (${reorderPo}, ${gone.id}, ${goneItem}, 2, 'יח׳', 5)`;
@@ -247,10 +257,16 @@ test.describe('phone 390 · manager · he', () => {
     expect(await poStatus(poId)).toBe('sent');
     const sql = e2eSql();
     try {
-      const lines = await sql<{ raw: string | null }[]>`select raw_description as raw from po_lines where po_id = ${poId}`;
+      const lines = await sql<{ raw: string | null; price: string | null; product: string | null }[]>`
+        select raw_description as raw, unit_price_expected::text as price, product_id as product
+        from po_lines where po_id = ${poId}`;
       expect(lines.map((l) => l.raw)).toContain('W1-11 שורה חופשית');
       expect(lines.map((l) => l.raw)).not.toContain(goneItem);
       expect(lines).toHaveLength(3);
+      // Today's prices: the catalog list price, not the last order's (list + ₪1); the free line keeps ₪25.
+      const productPrices = lines.filter((l) => l.product).map((l) => Number(l.price)).sort((a, b) => a - b);
+      expect(productPrices).toEqual([...todaysPrices].sort((a, b) => a - b));
+      expect(Number(lines.find((l) => !l.product)!.price)).toBe(25);
     } finally {
       await sql.end();
     }
@@ -487,6 +503,114 @@ test.describe('phone 390 · manager · review fixes', () => {
     await expect(page.getByTestId('order-card').first()).toBeVisible({ timeout: 30_000 });
     await expect(page.locator(`a[href="/dashboard/orders/${d}"]`)).toHaveCount(0);
     expect((await posSince(supplierB.id, since)).filter((p) => p.status === 'draft')).toHaveLength(1);
+  });
+});
+
+test.describe('phone 390 · manager · verifier fixes', () => {
+  test.use(PHONE);
+
+  test('"order again" offers to keep my draft: the device cart stays exactly as it was', async ({ page }) => {
+    await setLocale(page, 'he');
+    page.on('dialog', (d) => void d.accept());
+    await page.goto(`/dashboard/orders/new?supplierId=${supplierA.id}`);
+    const items = page.getByTestId('catalog-item');
+    await expect(items.first()).toBeVisible({ timeout: 30_000 });
+    await items.nth(0).tap();
+    await expect(page.getByTestId('order-line')).toHaveCount(1);
+    const before = await page.getByTestId('order-line').first().innerText();
+
+    await page.goto(`/dashboard/orders/new?from=${reorderPo}`);
+    await page.getByRole('button', { name: MSG.he.reorder.keep }).tap();
+    await expect(page.getByTestId('order-line')).toHaveCount(1);
+    expect(await page.getByTestId('order-line').first().innerText()).toBe(before);
+    await expect(page.getByTestId('reorder-notice')).toHaveCount(0);
+    expect((await deviceCarts(page))[supplierA.id]?.lines).toHaveLength(1);
+  });
+
+  test('a line removed on the order page meanwhile is re-paired, not a stuck save', async ({ page }) => {
+    test.setTimeout(150_000);
+    await setLocale(page, 'he');
+    page.on('dialog', (d) => void d.accept());
+    await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
+    const items = page.getByTestId('catalog-item');
+    await expect(items.first()).toBeVisible({ timeout: 30_000 });
+    await items.nth(0).tap();
+    await items.nth(1).tap();
+    await page.getByTestId('cart-primary').tap(); // review → draft D
+    await expect.poll(async () => (await deviceCarts(page))[supplierB.id]?.draftId ?? null, { timeout: 30_000 }).not.toBeNull();
+    const d = (await deviceCarts(page))[supplierB.id]!.draftId!;
+    await page.getByRole('button', { name: MSG.he.wizard.back }).tap();
+
+    // Someone deletes line 2 on the order page (another tab / device).
+    const second = await page.getByTestId('order-line').nth(1).locator('p').first().innerText();
+    const sql = e2eSql();
+    try {
+      await sql`delete from po_lines where po_id = ${d} and raw_description = ${second}`;
+    } finally {
+      await sql.end();
+    }
+    // Editing that line here must still land: the next save re-pairs and carries qty 9.
+    await page.getByTestId('order-line').nth(1).getByRole('textbox', { name: /כמות/ }).fill('9');
+    await page.waitForTimeout(2_000); // the background sync meets the NOT_FOUND
+    await page.getByTestId('cart-primary').tap();
+    // No save error (the wizard's own alerts; Next's route announcer is also role=alert).
+    await expect(page.locator('p.text-danger[role="alert"]')).toHaveCount(0);
+    await expect.poll(async () => {
+      const id = (await deviceCarts(page))[supplierB.id]?.draftId;
+      return id ? (await poLines(id)).find((l) => l.raw === second)?.qty ?? null : null;
+    }, { timeout: 30_000 }).toBe(9);
+  });
+
+  test('the fixed cart bar never hides the focused control (WCAG 2.4.11)', async ({ page }) => {
+    await setLocale(page, 'he');
+    await page.goto(`/dashboard/orders/new?supplierId=${supplierA.id}`);
+    const items = page.getByTestId('catalog-item');
+    await expect(items.first()).toBeVisible({ timeout: 30_000 });
+    await items.nth(0).tap();
+    await items.nth(1).tap();
+    const bar = await page.getByTestId('cart-bar').boundingBox();
+    // Walk the tab order through the build step; every focused control clears the bar.
+    for (let i = 0; i < 40; i++) {
+      await page.keyboard.press('Tab');
+      const r = await page.evaluate(() => {
+        const el = document.activeElement as HTMLElement | null;
+        if (!el || el === document.body || el.closest('[data-testid="cart-bar"]')) return null;
+        if (el.tagName.toLowerCase() === 'nextjs-portal') return null; // next dev's overlay, not in production
+        const b = el.getBoundingClientRect();
+        if (b.height === 0) return null;
+        return {
+          top: b.top,
+          bottom: b.bottom,
+          name: `${el.tagName.toLowerCase()} ${el.getAttribute('aria-label') ?? el.textContent?.slice(0, 30) ?? ''}`,
+        };
+      });
+      if (!r || r.bottom <= 0) continue;
+      expect(r.bottom, `focused "${r.name}" (top ${Math.round(r.top)}) is not under the cart bar`).toBeLessThanOrEqual(bar!.y + 1);
+    }
+  });
+});
+
+test.describe('desktop 1440 · manager · keyboard', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  test('send-with-undo is reachable from the keyboard: focus lands on the undo, Enter undoes', async ({ page }) => {
+    test.setTimeout(150_000);
+    await setLocale(page, 'he');
+    page.on('dialog', (d) => void d.accept());
+    await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
+    await expect(page.getByTestId('catalog-item').first()).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId('catalog-item').first().click();
+    await page.getByTestId('cart-primary').click();
+    await page.locator('#ord-channel').selectOption('none');
+    await page.getByTestId('cart-primary').focus();
+    await page.keyboard.press('Enter');
+    const undo = page.getByTestId('send-undo').getByRole('button', { name: MSG.he.send.undo });
+    await expect(undo).toBeFocused({ timeout: 30_000 });
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('send-undo')).toHaveCount(0);
+    const id = (await deviceCarts(page))[supplierB.id]!.draftId!;
+    await page.waitForTimeout(11_000);
+    expect(await poStatus(id)).toBe('draft');
   });
 });
 

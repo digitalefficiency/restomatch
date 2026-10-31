@@ -83,7 +83,9 @@ export function RowMenu({ label, items, className }: { label: string; items: Row
               type="button"
               role="menuitem"
               onClick={() => {
-                close(false);
+                // Focus goes back to the trigger first, so a dialog the action opens
+                // returns focus there when it closes (not to <body>).
+                close(true);
                 it.onSelect();
               }}
               className={cn(
