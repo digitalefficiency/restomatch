@@ -79,8 +79,10 @@ describe('PwaSessionGuard wiring', () => {
     expect(src).not.toMatch(/\bclearQueue\s*\(/);
     expect(src).not.toMatch(/\bpurgeOtherUsers\s*\(/);
     expect(src).toMatch(/runLogoutGuard\(/);
-    // clearForUser is reachable only as the guard's clearMine (called after ask → 'delete').
-    expect(src.match(/clearForUser\(/g)?.length).toBe(1);
-    expect(src).toMatch(/clearMine: \(\) => clearForUser\(userId\)/);
+    // W2-05: the queue is the field outbox; its delete (this user's items, every kind) is reachable
+    // only as the guard's clearMine (called after ask → 'delete'). No other delete path in the guard.
+    expect(src.match(/clearMineOnDevice\(/g)?.length).toBe(1);
+    expect(src).toMatch(/clearMine: \(\) => clearMineOnDevice\(userId\)/);
+    expect(src).not.toMatch(/\bclearForUser\s*\(|\bremoveItem\s*\(|\.remove\(/);
   });
 });

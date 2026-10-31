@@ -40,6 +40,7 @@ import {
   readLocalMarks,
   writeLocalMarks,
   useLeaveGuard,
+  useClaimReceiptGroup,
   useLineSaves,
   useFieldBarOffset,
   useWakeLock,
@@ -225,7 +226,9 @@ export function ReceivingWizard({
       if (!cur) return 'unknown';
       return p.stamp && p.stamp.grId === cur.grId && p.stamp.version === cur.version ? 'current' : 'stale';
     },
+    restaurantId && userId ? { restaurantId, userId } : null,
   );
+  useClaimReceiptGroup(grId);
   // Once the receipt's version is known, sort the stored rows: current ones go, stale ones are held.
   useEffect(() => {
     if (grId && receiptVersion && !closedAtOpen) void outbox.retry();

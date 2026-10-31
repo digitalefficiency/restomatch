@@ -1,6 +1,9 @@
 /**
  * Receiver PWA offline photo queue (flag `receiverPwa`).
  *
+ * Storage moved into the field outbox in W2-05 (see `idbQueueStore`); the
+ * queue semantics below are unchanged.
+ *
  * A photo taken while offline is stored in IndexedDB (database
  * "restomatch-receiver", store "photos", key = clientUploadId) together with
  * the PO it belongs to. When the device is back online the queue uploads it
@@ -14,6 +17,9 @@
  * receiver could not send uploads with the next signed-in user of the same
  * branch, attributed to whoever took it ("צולם על ידי", decision 22 default).
  */
+import { FIELD_DB_NAMES, ensurePhotosMigrated, outboxPhotoStore } from './fieldOutbox';
+import { idbOutboxStore } from './outbox';
+
 export interface QueuedPhoto {
   clientUploadId: string;
   /** The restaurant the photo was taken for — only uploaded while that restaurant is active. */
@@ -224,50 +230,15 @@ export function resetPersistRequest(): void {
 
 /* ── IndexedDB adapter ───────────────────────────────────────────────────── */
 
-const DB_NAME = 'restomatch-receiver';
-const STORE = 'photos';
-
-function openDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = () => {
-      if (!req.result.objectStoreNames.contains(STORE)) {
-        req.result.createObjectStore(STORE, { keyPath: 'clientUploadId' });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-function tx<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> {
-  return openDb().then(
-    (db) =>
-      new Promise<T>((resolve, reject) => {
-        const t = db.transaction(STORE, mode);
-        const r = fn(t.objectStore(STORE));
-        t.oncomplete = () => {
-          db.close();
-          resolve(r.result);
-        };
-        t.onerror = () => {
-          db.close();
-          reject(t.error);
-        };
-      }),
-  );
-}
-
+/**
+ * The photo queue lives in the ONE field outbox (lib/pwa/outbox.ts, kind
+ * `photo`) since W2-05. This is the same QueueStore over it; the W1 database
+ * ("restomatch-receiver") is moved in on first use, with zero loss.
+ */
 export const idbQueueStore: QueueStore = {
-  async put(item) {
-    await tx('readwrite', (s) => s.put(item));
-  },
-  async list() {
-    return (await tx<QueuedPhoto[]>('readonly', (s) => s.getAll() as IDBRequest<QueuedPhoto[]>)) ?? [];
-  },
-  async remove(id) {
-    await tx('readwrite', (s) => s.delete(id));
-  },
+  put: (item) => outboxPhotoStore(idbOutboxStore, ensurePhotosMigrated).put(item),
+  list: () => outboxPhotoStore(idbOutboxStore, ensurePhotosMigrated).list(),
+  remove: (id) => outboxPhotoStore(idbOutboxStore, ensurePhotosMigrated).remove(id),
 };
 
 export function idbAvailable(): boolean {
@@ -344,12 +315,13 @@ export async function clearForUser(userId: string, store: QueueStore = idbQueueS
 /** Marks the sign-out forms; PwaSessionGuard runs the queued-photos guard when one is submitted. */
 export const LOGOUT_FORM_ATTR = 'data-rm-logout';
 
-/** Only touch IndexedDB if the receiver database already exists (never create it just to check). */
+/** Only touch IndexedDB if the field outbox (or the W1 photo database) already exists (never create it just to check). */
 export async function queueDbExists(): Promise<boolean> {
   if (typeof indexedDB === 'undefined') return false;
   const list = (indexedDB as IDBFactory & { databases?: () => Promise<Array<{ name?: string }>> }).databases;
   if (!list) return true;
-  return (await list.call(indexedDB)).some((d) => d.name === 'restomatch-receiver');
+  const have = new Set((await list.call(indexedDB)).map((d) => d.name));
+  return FIELD_DB_NAMES.some((n) => have.has(n));
 }
 
 export async function enqueuePhoto(

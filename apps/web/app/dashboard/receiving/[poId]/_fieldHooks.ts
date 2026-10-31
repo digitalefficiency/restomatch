@@ -8,9 +8,10 @@ import { isTransientFailure } from '@/lib/pwa/offlineQueue';
 import { useReauthResumed } from '@/lib/pwa/useReauthResumed';
 import { grLineForMark } from './_adapters';
 import { grLineIsCounted } from './_count';
+import { fieldLineStorage, receiptGroup, type MirrorScope } from '@/lib/pwa/fieldOutbox';
+import { claimOutboxGroup } from '@/lib/pwa/outbox';
 import {
   createLineOutbox,
-  localStorageOutbox,
   type GrLinePayload,
   type LineOutbox,
   type LineSaveState,
@@ -46,6 +47,12 @@ export function useLineSaves(
   closed = false,
   /** Is a stored row for the receipt as it is now (not counted before a close / reopen)? */
   rowStatus?: (p: GrLinePayload) => RowStatus,
+  /**
+   * Who counts, for which restaurant: every unsent row is also mirrored into
+   * the field outbox (W2-05), so the background drainer sends it after the
+   * receiver left this screen. Null: localStorage only (no session yet).
+   */
+  mirror: MirrorScope | null = null,
 ): { outbox: LineOutbox; states: Record<string, LineSaveState>; pending: number; authGate: AuthGate } {
   const sendRef = useRef(send);
   sendRef.current = send;
@@ -63,7 +70,7 @@ export function useLineSaves(
       rowStatus: (p) => statusRef.current?.(p) ?? 'current',
       // No network, or signed out mid-count (401): kept on the phone, retried — never "failed".
       isNetworkError: isTransientFailure,
-      storage: typeof window === 'undefined' ? undefined : localStorageOutbox(storageKey),
+      storage: typeof window === 'undefined' ? undefined : fieldLineStorage(storageKey, mirror),
       onChange: (s) => {
         setStates(s);
         setPending(box.pendingCount());
@@ -97,6 +104,15 @@ export function useLineSaves(
   });
 
   return { outbox, states, pending, authGate };
+}
+
+/**
+ * While this screen works on a receipt, it owns that receipt's outbox group:
+ * the background drainer skips the group (no line is ever sent twice) and
+ * takes over the moment the screen is gone.
+ */
+export function useClaimReceiptGroup(grId: string | null): void {
+  useEffect(() => (grId ? claimOutboxGroup(receiptGroup(grId)) : undefined), [grId]);
 }
 
 /** What the wizard remembers per PO on this device so a reload resumes (grId, the invoice being read). */
