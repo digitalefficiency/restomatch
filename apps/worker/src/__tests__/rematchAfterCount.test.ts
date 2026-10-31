@@ -234,8 +234,12 @@ describe('match-invoice job', () => {
     expect((await matchInvoiceForJob(db, { restaurantId, invoiceId })).skipped).toBe('receipt_open');
     // …so build the legacy state (a run made before any guard, while gr_lines
     // were still 0) by matching with the receipt briefly not 'pending'.
+    // (G-04 receipt truth feeds only COUNTED lines, so the legacy "received 0" is
+    // built as lines briefly counted 0 — reason `missing` — then reset to untouched.)
     await db.update(goodsReceipts).set({ status: 'partial' }).where(eq(goodsReceipts.id, grId));
+    for (const g of grLineIds) await db.update(grLines).set({ rejectReason: 'missing' }).where(eq(grLines.id, g.id));
     const early = await matchInvoiceForJob(db, { restaurantId, invoiceId });
+    for (const g of grLineIds) await db.update(grLines).set({ rejectReason: null }).where(eq(grLines.id, g.id));
     await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, grId));
     expect(early.persisted).not.toBeNull();
     expect(await typesOf(invoiceId)).toContain('QTY_SHORT');
