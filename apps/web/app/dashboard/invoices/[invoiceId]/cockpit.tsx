@@ -69,6 +69,7 @@ export function Cockpit({
   locale,
   from,
   view,
+  queueMonth = 0,
   copy: t,
   scan,
   showMoney,
@@ -81,6 +82,8 @@ export function Cockpit({
   locale: Locale;
   from: CockpitFrom;
   view: string | null;
+  /** The register month the [ / ] queue steps through (the invoice's own month by default). */
+  queueMonth?: number;
   copy: CockpitCopy;
   scan: { src: string; mimeType: string } | null;
   showMoney: boolean;
@@ -104,7 +107,7 @@ export function Cockpit({
   }, [d.id, locale]);
 
   // [ / ] step through the originating register tab (KeyboardEvent.code; inactive in inputs).
-  const queue = trpc.invoices.list.useQuery({}, { enabled: from === 'register' && showMoney, staleTime: 60_000 });
+  const queue = trpc.invoices.list.useQuery({ monthOffset: queueMonth }, { enabled: from === 'register' && showMoney, staleTime: 60_000 });
   const siblings = useMemo(() => {
     const rows = queue.data?.rows ?? [];
     const tab = view ?? 'review';
@@ -113,12 +116,13 @@ export function Cockpit({
     );
     const list = inTab.some((r) => r.id === d.id) ? inTab : rows;
     const i = list.findIndex((r) => r.id === d.id);
-    const href = (id: string) => `/dashboard/invoices/${id}?from=register${view ? `&view=${view}` : ''}`;
+    const href = (id: string) =>
+      `/dashboard/invoices/${id}?from=register${view ? `&view=${view}` : ''}${queueMonth ? `&month=${queueMonth}` : ''}`;
     return {
       prev: i > 0 ? href(list[i - 1]!.id) : null,
       next: i >= 0 && i < list.length - 1 ? href(list[i + 1]!.id) : null,
     };
-  }, [queue.data, d.id, view]);
+  }, [queue.data, d.id, view, queueMonth]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || isTypingTarget(e.target)) return;

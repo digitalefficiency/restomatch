@@ -24,6 +24,20 @@ import { loadDetail } from './load';
 
 export const dynamic = 'force-dynamic';
 
+/** Year·month in Israel time (the register's month rule). */
+const ilMonth = (d: Date) => {
+  const [y, m] = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit' })
+    .format(d)
+    .split('-')
+    .map(Number);
+  return y! * 12 + (m! - 1);
+};
+/** The register month for [ / ]: `?month=` from the register, else the invoice's own month (≤ 0, ≥ −24). */
+function queueMonthOf(param: string | undefined, invoiceDate: Date | string | null): number {
+  const raw = param != null ? Number.parseInt(param, 10) : invoiceDate ? ilMonth(new Date(invoiceDate)) - ilMonth(new Date()) : 0;
+  return Number.isFinite(raw) ? Math.max(-24, Math.min(0, raw)) : 0;
+}
+
 const FROM: readonly CockpitFrom[] = ['approvals', 'payRun', 'inbox', 'register', 'leaks'];
 const FROM_HREF: Record<CockpitFrom, string> = {
   approvals: '/dashboard/approvals',
@@ -53,7 +67,7 @@ export default async function InvoiceCockpitPage({
   searchParams,
 }: {
   params: Promise<{ invoiceId: string }>;
-  searchParams: Promise<{ from?: string; view?: string }>;
+  searchParams: Promise<{ from?: string; view?: string; month?: string }>;
 }) {
   const [{ invoiceId }, sp] = await Promise.all([params, searchParams]);
   const detail = await loadDetail(invoiceId);
@@ -176,6 +190,7 @@ export default async function InvoiceCockpitPage({
         locale={locale}
         from={from}
         view={sp.view ?? null}
+        queueMonth={queueMonthOf(sp.month, detail.invoiceDate)}
         copy={copy}
         scan={scan ? { src: scan.signedUrl, mimeType: scan.mimeType } : null}
         showMoney={finance}

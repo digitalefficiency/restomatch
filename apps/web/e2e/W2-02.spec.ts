@@ -91,10 +91,26 @@ async function invoiceIdInState(where: 'open' | 'any'): Promise<string> {
   }
 }
 
+/** `?month=N` for the register month (Israel time) of an invoice, '' for the current month. */
+async function monthParamOf(invoiceId: string): Promise<string> {
+  const sql = e2eSql();
+  try {
+    const [r] = await sql<{ off: number }[]>`
+      select ((extract(year from (i.invoice_date at time zone 'Asia/Jerusalem')) * 12 + extract(month from (i.invoice_date at time zone 'Asia/Jerusalem')))
+            - (extract(year from (now() at time zone 'Asia/Jerusalem')) * 12 + extract(month from (now() at time zone 'Asia/Jerusalem'))))::int as off
+      from invoices i where i.id = ${invoiceId}`;
+    return r && r.off < 0 ? `?month=${r.off}` : '';
+  } finally {
+    await sql.end();
+  }
+}
+
 test('register: tabs with counts, Σ visible rows, row opens the cockpit (he 1440)', async ({ browser }) => {
   const page = await signedIn(browser, 'owner');
   const errors = collectPageErrors(page);
-  await page.goto('/dashboard/invoices');
+  // The month of a flagged invoice (the default tab), not "now": at a month's start
+  // (Israel time) the current month can be empty.
+  await page.goto(`/dashboard/invoices${await monthParamOf(await invoiceIdInState('open'))}`);
   await expect(page.getByRole('heading', { level: 1, name: 'חשבוניות' })).toBeVisible();
   const register = page.getByTestId('invoice-register');
   await expect(register).toBeVisible();
