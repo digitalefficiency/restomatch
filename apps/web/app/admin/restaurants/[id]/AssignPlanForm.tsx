@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { trpc } from '@/lib/trpc/client';
 import { Button } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
@@ -16,9 +16,9 @@ type Status = (typeof STATUSES)[number];
 const DEFAULT_TRIAL_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** The same rule as admin.assignPlan: a trialing plan ends `days` whole days from now. */
-function trialEnd(days: number): Date {
-  return new Date(Date.now() + days * DAY_MS);
+/** The same rule as admin.assignPlan: a trialing plan ends `days` whole days from `now`. */
+function trialEnd(now: number, days: number): Date {
+  return new Date(now + days * DAY_MS);
 }
 
 export function AssignPlanForm({
@@ -38,6 +38,10 @@ export function AssignPlanForm({
   );
   const [status, setStatus] = useState<Status>(currentStatus === 'trialing' ? 'trialing' : 'active');
   const [days, setDays] = useState(String(DEFAULT_TRIAL_DAYS));
+  // The preview depends on the clock and the browser's date formatting: compute it
+  // after mount only, so the server render never disagrees with the client.
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => setNow(Date.now()), []);
   const assign = trpc.admin.assignPlan.useMutation({
     onSuccess: () => router.refresh(),
   });
@@ -119,9 +123,11 @@ export function AssignPlanForm({
       <p className="mt-2 text-xs text-muted" aria-live="polite">
         {status !== 'trialing'
           ? t('assign.noEnd')
-          : daysValid
-            ? t('assign.endsOn', { date: formatDate(trialEnd(trialDays), locale, { dateStyle: 'full' }) })
-            : t('assign.daysInvalid')}
+          : !daysValid
+            ? t('assign.daysInvalid')
+            : now === null
+              ? null
+              : t('assign.endsOn', { date: formatDate(trialEnd(now, trialDays), locale, { dateStyle: 'full' }) })}
       </p>
       {assign.error ? (
         <p className="mt-2 text-xs text-danger">{localizeServerError(assign.error, locale, t('generic'))}</p>
