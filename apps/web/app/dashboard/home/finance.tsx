@@ -47,8 +47,7 @@ import {
   loadSuppliers,
   loadToday,
   loadTrend,
-  loadVatAtRisk,
-} from './data';
+  loadVatAtRisk, loadNeedsLines } from './data';
 import { NeedsYou, type NeedRow, type NeedTone } from './needs-you';
 import { HomeSection, Suspense } from './section';
 import { CardSkeleton, HeroSkeleton, NeedsSkeleton } from './skeletons';
@@ -218,8 +217,10 @@ async function Needs(ctx: Ctx) {
     vat: role === 'owner' || role === 'bookkeeper',
     payRun: role === 'owner' || role === 'bookkeeper',
     ops: role === 'manager',
+    // PILOT (W2-02): an unread photo invoice needs a person to complete its lines.
+    lines: role === 'owner' || role === 'manager',
   };
-  const [queue, recovery, vat, payRun, today, count, suppliers] = await Promise.all([
+  const [queue, recovery, vat, payRun, today, count, suppliers, lines] = await Promise.all([
     settle(loadDecide()),
     wants.claims ? settle(loadRecoveryClaims()) : null,
     wants.vat ? settle(loadVatAtRisk(restaurantId, role)) : null,
@@ -227,8 +228,9 @@ async function Needs(ctx: Ctx) {
     wants.ops ? settle(loadToday()) : null,
     wants.ops ? settle(loadOpenCount()) : null,
     wants.ops ? settle(loadSuppliers()) : null,
+    wants.lines ? settle(loadNeedsLines()) : null,
   ]);
-  const sources: Settled<unknown>[] = [queue, recovery, vat, payRun, today, count, suppliers].filter((x) => x !== null) as Settled<unknown>[];
+  const sources: Settled<unknown>[] = [queue, recovery, vat, payRun, today, count, suppliers, lines].filter((x) => x !== null) as Settled<unknown>[];
   const rows: NeedRow[] = [];
 
   // The decision queue is this card's core: if it can't be read, the card fails
@@ -327,6 +329,17 @@ async function Needs(ctx: Ctx) {
       sub: t('needs.count.sub', { counted: n(p.counted), lines: n(p.lines) }),
       verb: t('needs.count.verb'),
       href: '/dashboard/inventory/count',
+    });
+  }
+  if (lines?.ok && lines.value.count > 0) {
+    rows.push({
+      key: 'invoiceLines',
+      // Only held-for-review invoices (T4) → neutral; any failed / unread read → warn.
+      tone: lines.value.rows.every((r) => r.reason === 'held') ? 'neutral' : 'warn',
+      label: t('needs.invoiceLines.label'),
+      value: t('needs.invoiceLinesValue', { count: lines.value.count }),
+      verb: t('needs.invoiceLines.verb'),
+      href: '/dashboard/invoices',
     });
   }
   if (role === 'bookkeeper') {

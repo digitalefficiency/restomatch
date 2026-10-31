@@ -336,6 +336,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'ingest.inbox': 'isolation',
   'ingest.approveDocument': 'attack',
   'ingest.rejectDocument': 'attack',
+  // PILOT (W2-02, train B, add-only): invoices waiting for a person to complete their lines.
+  'invoices.needsLines': "isolation — invoices-needs-lines.test.ts: A's list holds only A's invoices (B's unread or held invoice never listed, B's own list empty of A); receiver/chef FORBIDDEN",
   // Growth (wave 1, S15 — flag `growth`). pricing is a pure public quote over
   // the plan catalog (no tenant data, no ids); the referral procedures are
   // tenant-scoped — see the growth.* block at the end of this file.
