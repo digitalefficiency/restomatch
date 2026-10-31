@@ -4,6 +4,7 @@ import {
   cancelNoticeText,
   mailtoLink,
   matchesOrderSearch,
+  parsePriceInput,
   poRefOf,
   reorderLines,
   unpricedCount,
@@ -11,6 +12,8 @@ import {
   waPhone,
 } from '../order-logic';
 import { addDays, localNow, nextDeliveryOptions, weekdayOf } from '../new/delivery-days';
+import { en as ordersEn } from '../../../../lib/i18n/messages/orders/en';
+import { he as ordersHe } from '../../../../lib/i18n/messages/orders/he';
 import {
   emptyCart,
   pairServerLines,
@@ -266,5 +269,40 @@ describe('draft store', () => {
     // A draft whose day we don't know (resumed before it was read back) can't be trusted.
     const unknownDay = { deliveryDate: '', lines: { a: srv('1', a) } };
     expect(planDraftSync({ lines: [a], deliveryDate: '', deliveryDay: '2026-10-27', server: unknownDay }).replace).toBe(true);
+  });
+});
+
+describe('order copy is bidi-safe', () => {
+  const flat = (o: unknown, out: string[] = []): string[] => {
+    if (typeof o === 'string') out.push(o);
+    else if (o && typeof o === 'object') for (const v of Object.values(o)) flat(v, out);
+    return out;
+  };
+  it('no message glues "#" to the ref outside the isolate (RTL showed "F8E05686#")', () => {
+    for (const m of [...flat(ordersHe), ...flat(ordersEn)]) expect(m).not.toMatch(/#\{ref\}/);
+  });
+  it('Hebrew arrows point the reading way (← in RTL)', () => {
+    for (const m of flat(ordersHe)) expect(m).not.toContain('→');
+  });
+});
+
+describe('parsePriceInput (strict ₪ entry)', () => {
+  it('a 3-digit comma group is thousands; a leading 0 or 1–2 digits make it a decimal comma', () => {
+    expect(parsePriceInput('1,250')).toBe(1250);
+    expect(parsePriceInput('0,250')).toBe(0.25);
+    expect(parsePriceInput('7,5')).toBe(7.5);
+    expect(parsePriceInput('12,40')).toBe(12.4);
+    expect(parsePriceInput('1,250.50')).toBe(1250.5);
+    expect(parsePriceInput('1.250,50')).toBe(1250.5);
+    expect(parsePriceInput('12,345,678')).toBe(12345678);
+    expect(parsePriceInput(' ₪ 1 250 ')).toBe(1250);
+    expect(parsePriceInput('6.90')).toBe(6.9);
+  });
+  it('blank clears; anything ambiguous or malformed is invalid, never a guess', () => {
+    expect(parsePriceInput('')).toBeNull();
+    expect(parsePriceInput('   ')).toBeNull();
+    for (const bad of ['1,2,3', '1.2.3', '1,25.5,0', 'abc', '-5', '1e3', '12,3456', '.', ',']) {
+      expect(parsePriceInput(bad), bad).toBe('invalid');
+    }
   });
 });

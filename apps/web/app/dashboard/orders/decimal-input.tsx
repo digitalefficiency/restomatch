@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Input } from '@/lib/components';
-import { parsePositive, parsePrice } from './order-logic';
+import { parsePositive, parsePriceInput } from './order-logic';
 
 /**
  * Quantity / price as text with the decimal keypad (never `type="number"`: it
@@ -29,7 +29,7 @@ export function DecimalInput({
     if (!focused.current) setText(show(value));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
-  const bad = kind === 'qty' ? parsePositive(text) == null : parsePrice(text) === 'invalid';
+  const bad = kind === 'qty' ? parsePositive(text) == null : parsePriceInput(text) === 'invalid';
   return (
     <Input
       {...rest}
@@ -53,7 +53,7 @@ export function DecimalInput({
         setText(raw);
         if (kind === 'qty') onValue(parsePositive(raw) ?? 0);
         else {
-          const p = parsePrice(raw);
+          const p = parsePriceInput(raw);
           if (p !== 'invalid') onValue(p ?? undefined);
         }
       }}
