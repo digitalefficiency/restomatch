@@ -14,7 +14,7 @@ import { resetDb, seedTenant, type Tenant } from './fixtures';
 const db = createDb(testDbUrl());
 let A: Tenant;
 
-type Role = Session['role'];
+type Role = NonNullable<Session['role']>;
 const ROLES: Role[] = ['owner', 'manager', 'chef', 'receiver', 'bookkeeper'];
 const WRITERS: Role[] = ['owner', 'manager', 'chef'];
 const MANAGERS: Role[] = ['owner', 'manager'];
