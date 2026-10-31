@@ -17,6 +17,8 @@ import {
   type Database,
 } from '@restomatch/db';
 import { hasColumn, invoiceMachine, isTransitionConflict, isTransitionRefused, transition, transitionMany } from '../lifecycle';
+import type { TRPCError } from '@trpc/server';
+import { resolveAppError } from '../errors';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
 
 /**
@@ -170,6 +172,7 @@ describe('invoice machine', () => {
     const claimed = await move('reocr', { expectedFrom: 'matched' }).catch((e: unknown) => e);
     expect(isTransitionRefused(claimed)).toBe(true);
     expect((claimed as { cause: { appParams: { reason: string } } }).cause.appParams.reason).toBe('invoice_has_claim');
+    expect(resolveAppError(claimed as TRPCError)).toEqual({ appCode: 'lifecycle.refused', appParams: { reason: 'invoice_has_claim' } });
     await ownerDb.delete(recoveryClaims).where(eq(recoveryClaims.restaurantId, A.restaurantId));
     const decided = await move('reocr', { expectedFrom: 'matched' }).catch((e: unknown) => e);
     expect((decided as { cause: { appParams: { reason: string } } }).cause.appParams.reason).toBe('invoice_has_decision');

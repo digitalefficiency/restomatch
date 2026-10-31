@@ -20,6 +20,8 @@ import {
   transitionMany,
   TRANSITION_CONFLICT_PREFIX,
 } from '../lifecycle';
+import type { TRPCError } from '@trpc/server';
+import { resolveAppError } from '../errors';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
 
 /**
@@ -124,6 +126,8 @@ describe('transition()', () => {
     expect(params).toMatchObject({ currentStatus: 'accepted', actorName: 'Owner KA', machine: 'discrepancy', event: 'reject' });
     expect(params.at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect((err as Error).message.startsWith(TRANSITION_CONFLICT_PREFIX)).toBe(true);
+    // The errorFormatter exposes it to clients as data.appCode / data.appParams.
+    expect(resolveAppError(err as TRPCError)).toMatchObject({ appCode: 'lifecycle.conflict', appParams: { currentStatus: 'accepted' } });
     expect((await statusOf(id)).resolutionStatus).toBe('accepted');
     expect((await statusOf(id)).resolutionNote).toBeNull();
     expect(await audits(id)).toHaveLength(1);
