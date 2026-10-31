@@ -11,6 +11,8 @@ export interface NeedRow {
   /** The ₪ (formatIls) or count that the landing list repeats. */
   value: string;
   sub?: string;
+  /** Muted side items that are NOT part of the value (e.g. duplicates incl. VAT). */
+  notes?: string;
   /** One verb that names what the tap does. */
   verb: string;
   href: string;
@@ -107,6 +109,11 @@ function NeedLink({ row }: { row: NeedRow }) {
         {row.sub ? (
           <span className="block truncate text-xs text-muted" data-testid={`needs-${row.key}-sub`}>
             {row.sub}
+          </span>
+        ) : null}
+        {row.notes ? (
+          <span className="block truncate text-xs text-subtle" data-testid={`needs-${row.key}-notes`}>
+            {row.notes}
           </span>
         ) : null}
       </span>

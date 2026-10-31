@@ -2,8 +2,8 @@ import { cache } from 'react';
 import type { UserRole } from '@restomatch/db';
 import { createServerCaller } from '@/lib/trpc/server';
 import { enabledFeatures } from '@/lib/ingest/features';
-import { db } from '@/lib/db';
-import { decideSummary } from './queue-summary';
+import { ALL_CLAIMS } from '../recovery/logic';
+import { decideNeed } from './queue-summary';
 
 /**
  * Request-scoped loaders for the finance homes. `cache` dedupes a source read by
@@ -16,12 +16,8 @@ export const loadFeatures = cache(async (restaurantId: string) => enabledFeature
 
 export const loadRecoveryFlags = cache(async () => (await caller()).recovery.flags());
 
-/**
- * The viewer's whole decision queue (owner: everyone's) in ₪ and count — one SQL
- * aggregate under the restaurant GUC, see queue-summary.ts.
- * TODO(W2-08): switch to approvals.queueSummary.
- */
-export const loadDecide = cache(async (restaurantId: string, role: UserRole) => decideSummary(db, restaurantId, role));
+/** The viewer's decision queue, exactly as the approvals tiles show it (approvals.queueSummary). */
+export const loadDecide = cache(async () => decideNeed(await (await caller()).approvals.queueSummary()));
 
 export const loadVatAtRisk = cache(async (restaurantId: string, role: UserRole) => {
   if (role !== 'owner' && role !== 'manager' && role !== 'bookkeeper') return null;
@@ -29,9 +25,10 @@ export const loadVatAtRisk = cache(async (restaurantId: string, role: UserRole) 
   return (await caller()).owner.vatAtRisk({ period: 'open' });
 });
 
-export const loadRecoverySummary = cache(async () => {
+/** Every claim, as the recovery page reads them, for its follow-up queues (recovery/logic followUps). */
+export const loadRecoveryClaims = cache(async () => {
   if (!(await loadRecoveryFlags()).recovery) return null;
-  return (await caller()).recovery.summary();
+  return (await caller()).recovery.list({ limit: ALL_CLAIMS });
 });
 
 export const loadPayRun = cache(async () => {
