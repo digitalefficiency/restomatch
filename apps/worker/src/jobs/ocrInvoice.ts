@@ -104,6 +104,9 @@ function stringList(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.length > 0 && x.length <= 64) : [];
 }
 
+/** A scan object name under `<restaurantId>/` (mirrors @restomatch/api ingest/store SCAN_OBJECT_NAME). */
+const SCAN_OBJECT_NAME = /^scan-[a-z0-9]+-[a-f0-9]+(?:\.[a-z0-9]{1,5})?$/;
+
 /**
  * The URL a real read fetches for the scan on the invoice ROW (review #3). The
  * row is the trust boundary — the payload's imageUrl is never used.
@@ -111,10 +114,12 @@ function stringList(v: unknown): string[] {
  *   - a full URL (has a scheme): returned as is; the caller's isAllowedScanUrl
  *     pins it to our signed invoice-scans bucket (SSRF), as before;
  *   - a bare storage path (G-09 #190 stores `<restaurantId>/<scan>` once
- *     STORE_OBJECT_PATH lands): accepted ONLY under the row's own tenant prefix,
- *     with no scheme, no leading '/', no '..' or backslash, then signed now
+ *     STORE_OBJECT_PATH lands): accepted ONLY when it is exactly
+ *     `<row's restaurantId>/scan-<id>-<hex>[.<ext>]` (an allowlist: no '%', no
+ *     control characters, no sub-folders, no '?' / '#'), then signed now
  *     (bucket TTL, ingest/store.ts) — an old row never fails on an expired URL;
- *   - anything else: null (refused).
+ *   - anything else, or a 4xx from storage while signing: null (refused). A
+ *     5xx / network error while signing is THROWN, so the job retries it.
  *
  * TODO(G-09): swap to toObjectRef/signObjectRef once #190 is on main.
  */
@@ -122,13 +127,26 @@ export async function rowScanUrl(restaurantId: string, stored: string): Promise<
   const value = stored.trim();
   if (!value) return null;
   if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return value;
-  if (value.startsWith('/') || value.includes('..') || value.includes('\\') || !value.startsWith(`${restaurantId}/`)) return null;
-  if (value.length <= restaurantId.length + 1) return null;
+  // An exact allowlist (`<restaurantId>/scan-<id>-<hex>[.<ext>]`, what our
+  // writers store), not a '..' blacklist: '%2e%2e', '.%2E' or a tab/CR/LF-split
+  // '..' would pass a blacklist, and storage-js signs the concatenated path.
+  // Same pattern as signedUrlForStoragePath (@restomatch/api ingest/store).
+  if (!(restaurantId && value.startsWith(`${restaurantId}/`) && SCAN_OBJECT_NAME.test(value.slice(restaurantId.length + 1)))) {
+    return null;
+  }
   try {
     return await signedUrlForStoragePath(restaurantId, value);
   } catch (err) {
-    console.warn(`[ocr-invoice] signing the scan path failed: ${err instanceof Error ? err.message : err}`);
-    return null;
+    // A 4xx from storage (no such object, bad request) will not get better: the
+    // scan is refused. Anything else (5xx, 'fetch failed', a timeout) is
+    // rethrown, so classifyOcrError retries it instead of refusing for good.
+    const status = (err as { status?: unknown; statusCode?: unknown } | null)?.status ?? (err as { statusCode?: unknown } | null)?.statusCode;
+    const code = Number(status);
+    if (Number.isFinite(code) && code >= 400 && code < 500) {
+      console.warn(`[ocr-invoice] signing the scan path was refused by storage (${code})`);
+      return null;
+    }
+    throw err;
   }
 }
 

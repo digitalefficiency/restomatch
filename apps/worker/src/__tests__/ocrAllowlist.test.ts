@@ -309,6 +309,56 @@ describe('processOcrInvoice gate (DB)', () => {
       expect(h.claudeCtor).not.toHaveBeenCalled();
     });
 
+    it('an exact allowlist, not a blacklist: encoded / split dots, sub-folders, a query or a fragment are refused unsigned', async () => {
+      allowlist();
+      const obj = 'scan-abc123-def456.jpg';
+      for (const url of [
+        `${rid}/%2e%2e/${A}/${obj}`,
+        `${rid}/.%2E/${A}/${obj}`,
+        `${rid}/%2E./${A}/${obj}`,
+        `${rid}/.\t./${A}/${obj}`,
+        `${rid}/.\r\n./${A}/${obj}`,
+        `${rid}/sub/${obj}`,
+        `${rid}/${obj}?x=1`,
+        `${rid}/${obj}#x`,
+        `${rid}/scan-abc123-def456%2Ejpg`,
+      ]) {
+        const inv = await newInvoice({ url });
+        expect(await run({ invoiceId: inv.id }), JSON.stringify(url)).toMatchObject({ skipped: 'scan_url_refused' });
+      }
+      expect(h.signed).toEqual([]);
+      expect(h.claudeCtor).not.toHaveBeenCalled();
+      expect(h.meter).not.toHaveBeenCalled();
+    });
+
+    it('a transient storage error while signing is RETRIED (not refused); a 4xx refuses the scan', async () => {
+      allowlist();
+      const path = `${rid}/scan-abc123-def456.pdf`;
+      const withRetry = (data: Record<string, unknown>) =>
+        processOcrInvoice({
+          data: { restaurantId: rid, supplierId: null, imageUrl: 'https://payload.example/evil.jpg', ...data },
+          attemptsMade: 0,
+          opts: { attempts: 2 },
+        } as never);
+      for (const err of [Object.assign(new Error('storage unavailable'), { status: 503 }), new TypeError('fetch failed')]) {
+        h.signTo = () => {
+          throw err;
+        };
+        const inv = await newInvoice({ url: path });
+        const thrown = await withRetry({ invoiceId: inv.id }).catch((e: unknown) => e as Error);
+        expect(thrown, err.message).toBeInstanceOf(Error);
+        expect((thrown as Error).message.startsWith('[terminal] ')).toBe(false);
+        expect((await read(inv.id)).status).toBe('ocr_pending'); // left for the retry
+      }
+      h.signTo = () => {
+        throw Object.assign(new Error('Object not found'), { status: 400, statusCode: '404' });
+      };
+      const gone = await newInvoice({ url: path });
+      expect(await withRetry({ invoiceId: gone.id })).toMatchObject({ skipped: 'scan_url_refused' });
+      expect(h.claudeCtor).not.toHaveBeenCalled();
+      expect(h.meter).not.toHaveBeenCalled();
+    });
+
     it('a signature outside our scans bucket (or none at all) is refused by the same check', async () => {
       allowlist();
       h.signTo = () => 'https://elsewhere.example/x.pdf';

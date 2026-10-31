@@ -44,16 +44,41 @@ export async function storeIngestedFile(args: {
   return { scanId, storagePath };
 }
 
-/** A short-lived URL the OCR worker can fetch (signed bucket URL / local route). */
+/**
+ * The one object name our writers produce under `<restaurantId>/`:
+ * `scan-<base36|hex>-<hex>[.<ext>]` (scans.upload, deterministicScanId,
+ * storeIngestedFile). An exact ALLOWLIST, not a blacklist: no '%', no control
+ * characters, no sub-folders, no '?' / '#' — `%2e%2e` or a tab-split `..` would
+ * otherwise reach storage-js, which concatenates the path into the sign URL,
+ * and the service-role client would sign another tenant's object.
+ */
+const SCAN_OBJECT_NAME = /^scan-[a-z0-9]+-[a-f0-9]+(?:\.[a-z0-9]{1,5})?$/;
+
+/** `storagePath` is exactly `<restaurantId>/<scan object name>`. */
+export function isTenantScanPath(restaurantId: string, storagePath: string): boolean {
+  return (
+    restaurantId.length > 0 &&
+    storagePath.startsWith(`${restaurantId}/`) &&
+    SCAN_OBJECT_NAME.test(storagePath.slice(restaurantId.length + 1))
+  );
+}
+
+/**
+ * A short-lived URL the OCR worker can fetch (signed bucket URL / local route).
+ * null when the path is not this tenant's scan object or no storage is
+ * configured; a storage error is THROWN (the caller decides — the OCR job
+ * retries a 5xx / network failure instead of refusing the scan for good).
+ */
 export async function signedUrlForStoragePath(restaurantId: string, storagePath: string): Promise<string | null> {
-  // The path must stay under the tenant prefix — never sign another tenant's object.
-  if (!storagePath.startsWith(`${restaurantId}/`) || storagePath.includes('..')) return null;
+  // The path must be this tenant's scan object — never sign another tenant's.
+  if (!isTenantScanPath(restaurantId, storagePath)) return null;
   const storage = getServiceStorageClient();
   if (!storage) {
     if (!localScanStorageEnabled()) return null;
     const scanId = storagePath.slice(restaurantId.length + 1).replace(/\.[a-z0-9]+$/i, '');
     return localScanUrl(scanId);
   }
-  const { data } = await storage.storage.from(BUCKET).createSignedUrl(storagePath, SIGNED_URL_TTL_SEC);
+  const { data, error } = await storage.storage.from(BUCKET).createSignedUrl(storagePath, SIGNED_URL_TTL_SEC);
+  if (error) throw error;
   return data?.signedUrl ?? null;
 }
