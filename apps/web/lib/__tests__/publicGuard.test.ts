@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 // Process-local limiter store for the test (no external store) — set before the import
@@ -155,17 +155,17 @@ describe('guardPublicRequest', () => {
 
   it('a burst that straddles an hour boundary is still counted in one window (pinned limiter clock)', async () => {
     const boundary = Date.parse('2026-10-31T23:00:00.000Z');
-    let clock = boundary - 1;
-    const rl = { ...limit(1), now: () => clock };
-    expect((await guard.guardPublicRequest(post('{}'), { rateLimit: rl })).ok).toBe(true);
-    // A real clock would now be in the next hour: the 2nd call would be allowed.
-    clock = boundary + 1;
-    const unpinned = await guard.guardPublicRequest(post('{}'), { rateLimit: rl });
-    expect(unpinned.ok).toBe(true); // documents the hazard the pinned helper removes
-    const pinned = limit(1);
-    expect((await guard.guardPublicRequest(post('{}'), { rateLimit: pinned })).ok).toBe(true);
-    const again = await guard.guardPublicRequest(post('{}'), { rateLimit: pinned });
-    expect(!again.ok && again.response.status).toBe(429);
+    const clock = vi.spyOn(Date, 'now');
+    try {
+      clock.mockReturnValue(boundary - 1); // 22:59:59.999
+      const rl = limit(1); // the helper pins the limiter to THIS instant
+      expect((await guard.guardPublicRequest(post('{}'), { rateLimit: rl })).ok).toBe(true);
+      clock.mockReturnValue(boundary + 1); // the real clock is now in the next hour's window
+      const again = await guard.guardPublicRequest(post('{}'), { rateLimit: rl });
+      expect(!again.ok && again.response.status).toBe(429); // still the same window: counted
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it("bodyType 'text' returns the raw string unparsed (webhook signatures)", async () => {
