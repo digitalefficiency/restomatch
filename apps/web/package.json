@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "copy:baseline": "COPY_BASELINE=1 vitest run lib/copy/__tests__/copy-budget.test.ts",
     "test:e2e:smoke": "playwright test smoke",
     "test:e2e:install": "playwright install chromium",
     "test:prod-softnav": "node scripts/check-soft-nav.mjs"
