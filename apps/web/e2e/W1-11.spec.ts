@@ -469,7 +469,8 @@ test.describe('phone 390 · manager · review fixes', () => {
     await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
     await expect(page.getByTestId('catalog-item').first()).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId('order-line')).toHaveCount(0);
-    expect((await posSince(supplierB.id, since)).map((p) => p.id), 'no second PO').toEqual([draftId]);
+    // The draft may predate this test (resumed from the server, W2-06): no OTHER PO appears.
+    expect((await posSince(supplierB.id, since)).map((p) => p.id).filter((id) => id !== draftId), 'no second PO').toEqual([]);
   });
 
   test('the day is settled before the draft: picking another day sends ONE order, no phantom cancelled row', async ({ page }) => {
