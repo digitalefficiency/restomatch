@@ -181,7 +181,9 @@ export function whySegments(d: WhyFacts, labels: WhyLabels): WhySegment[][] {
       groups.push([{ text: labels.explain(d.type) }, ...(equals.length ? [{ text: ' ' }, ...equals] : [])]);
     }
   }
-  if (d.toleranceUsed) groups.push(fill(tp.threshold, { tolerance: labels.tolerance(d.toleranceUsed) }));
+  // In the ledger a p90 "threshold" only restates the expected-price group above it.
+  const ledgerP90 = (labels.layout ?? 'inline') === 'ledger' && p90;
+  if (d.toleranceUsed && !ledgerP90) groups.push(fill(tp.threshold, { tolerance: labels.tolerance(d.toleranceUsed) }));
   if (d.capped && tp.capped) groups.push([{ text: tp.capped }]);
   return groups;
 }

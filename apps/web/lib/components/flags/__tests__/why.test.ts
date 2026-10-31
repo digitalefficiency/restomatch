@@ -86,7 +86,8 @@ describe('whySegments (flags/why.ts)', () => {
     for (const locale of ['he', 'en'] as const) {
       const text = whyText(whySegments(p90, leakWhyLabels(locale)));
       expect(text).not.toMatch(/בהזמנה|ordered at/);
-      expect(text).toMatch(/אחוזון 90|90th percentile/);
+      expect(text).toMatch(/המחיר הרגיל של הספק \(90 יום\)|the supplier's usual price \(90 days\)/);
+      expect(text).not.toMatch(/אחוזון|percentile|חציון/); // plain words, no jargon
     }
   });
 

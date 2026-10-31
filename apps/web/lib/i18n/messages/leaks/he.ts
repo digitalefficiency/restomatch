@@ -239,8 +239,10 @@ export const he = {
     priceP90NoQty: 'חויב {actual} ליחידה',
     expected: 'צפוי {expected}',
     sourcePo: 'בהזמנה {expected} ({po}, {date})',
-    expectedP90: 'אחוזון 90 של הספק {expected}',
-    sourceP90: 'אחוזון 90 של הספק {expected}',
+    expectedP90: 'מעל המחיר הרגיל של הספק (90 יום): {expected}',
+    sourceP90: 'מעל המחיר הרגיל של הספק (90 יום): {expected}',
+    /** The full p90 sentence, for the in-place "למה?" fold (W2-16). */
+    p90Why: 'גבוה מ-90% מהמחירים של הספק ב-90 הימים האחרונים',
     equals: 'פער {amount}',
     qtyOver: 'חויבו {billed} {unit}, התקבלו {received}',
     qtyShort: 'הוזמנו {ordered} {unit}, התקבלו {received}',
