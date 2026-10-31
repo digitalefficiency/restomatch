@@ -50,6 +50,9 @@ export interface LeakHero {
   /** Receiving scans waiting for their receipt's count (#94) — in neither leak, spend nor pending link. */
   awaitingCountCount: number;
   awaitingCountIls: number;
+  /** Invoices held for a "זה אותו מוצר?" question (G-08) — in neither leak, spend nor pending link. */
+  awaitingQuestionCount: number;
+  awaitingQuestionIls: number;
 }
 
 export interface LeakHeroOptions {
@@ -73,7 +76,11 @@ function monthInvoicesCte(restaurantId: string, now: Date, offset: number) {
     ),
     inv AS (
       SELECT i.id, i.status, i.total_excl_vat, i.total_incl_vat,
-             ${scanAwaitingCountSql(restaurantId, sql`i`)} AS counting
+             ${scanAwaitingCountSql(restaurantId, sql`i`)} AS counting,
+             -- G-08: held for a "זה אותו מוצר?" question (no run yet) — in neither
+             -- leak, spend nor "waiting to be linked to an order".
+             (i.status = 'parsed'
+               AND COALESCE(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| array['unlinked', 'unlinkedPo']) AS question
       FROM invoices i, b
       WHERE i.restaurant_id = ${restaurantId}
         AND COALESCE(i.invoice_date, i.created_at) >= b.lo
@@ -99,11 +106,12 @@ function monthInvoicesCte(restaurantId: string, now: Date, offset: number) {
         -- order, waiting for the count. pending_link stays true (spend unchanged);
         -- the "waiting to be linked" line and list leave it out.
         (NOT bool_or(mr.id IS NOT NULL)) AND inv.counting AS awaiting_count,
+        (NOT bool_or(mr.id IS NOT NULL)) AND inv.question AS awaiting_question,
         COALESCE(bool_or(${LIVE_DUPLICATE}), false) AND ${originalChecked(restaurantId, sql`inv.id`)} AS dup_copy
       FROM inv
       LEFT JOIN match_runs mr ON mr.invoice_id = inv.id AND mr.restaurant_id = ${restaurantId}
       LEFT JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${restaurantId}
-      GROUP BY inv.id, inv.status, inv.total_incl_vat, inv.total_excl_vat, inv.counting
+      GROUP BY inv.id, inv.status, inv.total_incl_vat, inv.total_excl_vat, inv.counting, inv.question
     )`;
 }
 
@@ -133,10 +141,12 @@ export async function computeLeakHero(
       COALESCE(SUM(LEAST(raw_leak, total)) FILTER (WHERE status <> 'paid'), 0) AS caught,
       COALESCE(SUM(LEAST(raw_recovered, LEAST(raw_leak, total))), 0) AS recovered,
       COUNT(*) FILTER (WHERE raw_leak > 0) AS with_leak,
-      COUNT(*) FILTER (WHERE pending_link AND NOT awaiting_count) AS pending_count,
-      COALESCE(SUM(total) FILTER (WHERE pending_link AND NOT awaiting_count), 0) AS pending_amount,
+      COUNT(*) FILTER (WHERE pending_link AND NOT awaiting_count AND NOT awaiting_question) AS pending_count,
+      COALESCE(SUM(total) FILTER (WHERE pending_link AND NOT awaiting_count AND NOT awaiting_question), 0) AS pending_amount,
       COUNT(*) FILTER (WHERE awaiting_count) AS awaiting_count,
-      COALESCE(SUM(total) FILTER (WHERE awaiting_count), 0) AS awaiting_amount
+      COALESCE(SUM(total) FILTER (WHERE awaiting_count), 0) AS awaiting_amount,
+      COUNT(*) FILTER (WHERE awaiting_question AND NOT awaiting_count) AS question_count,
+      COALESCE(SUM(total) FILTER (WHERE awaiting_question AND NOT awaiting_count), 0) AS question_amount
     FROM per
   `);
   const r = rowsOf(res)[0] ?? {};
@@ -157,6 +167,8 @@ export async function computeLeakHero(
     pendingLinkIls: ils(r.pending_amount),
     awaitingCountCount: n(r.awaiting_count),
     awaitingCountIls: ils(r.awaiting_amount),
+    awaitingQuestionCount: n(r.question_count),
+    awaitingQuestionIls: ils(r.question_amount),
   };
 }
 
@@ -218,14 +230,14 @@ export async function computeLeakBreakdown(
     WITH ${cte}
     SELECT
       per.id, per.status, per.total, LEAST(per.raw_leak, per.total) AS leak,
-      per.pending_link AND NOT per.awaiting_count AS pending_link,
+      per.pending_link AND NOT per.awaiting_count AND NOT per.awaiting_question AS pending_link,
       i.invoice_number, COALESCE(i.invoice_date, i.created_at) AS invoice_date,
       s.name AS supplier_name, s.name_en AS supplier_name_en
     FROM per
     JOIN invoices i ON i.id = per.id
     LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${restaurantId}
     -- A scan waiting for its count (#94) is no leak and not "waiting to be linked".
-    WHERE per.raw_leak > 0 OR (per.pending_link AND NOT per.awaiting_count)
+    WHERE per.raw_leak > 0 OR (per.pending_link AND NOT per.awaiting_count AND NOT per.awaiting_question)
     ORDER BY per.pending_link ASC, LEAST(per.raw_leak, per.total) DESC, invoice_date DESC
     LIMIT ${limit}
   `);

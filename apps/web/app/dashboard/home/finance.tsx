@@ -481,11 +481,18 @@ async function HeroNotes({ role, view, t, locale }: Ctx) {
   );
   const ils = (v: number) => formatIls(v, { locale });
   const n = (v: number) => formatNumber(v, locale);
-  if (current.pendingLinkCount === 0 && current.awaitingCountCount === 0) return null;
+  if (current.pendingLinkCount === 0 && current.awaitingCountCount === 0 && current.awaitingQuestionCount === 0) return null;
   return (
     <div className="space-y-2">
       {current.pendingLinkCount > 0 ? (
         <Notice testId="hero-pending-link" text={t('hero.pending', { count: n(current.pendingLinkCount), amount: ils(current.pendingLinkIls) })} />
+      ) : null}
+      {current.awaitingQuestionCount > 0 ? (
+        <Notice
+          testId="hero-awaiting-question"
+          text={t('hero.awaitingQuestion', { count: n(current.awaitingQuestionCount), amount: ils(current.awaitingQuestionIls) })}
+          cta={{ href: '/dashboard/catalog/mapping', label: t('hero.awaitingQuestionCta') }}
+        />
       ) : null}
       {current.awaitingCountCount > 0 ? (
         <Notice testId="hero-awaiting-count" text={t('hero.awaitingCount', { count: n(current.awaitingCountCount), amount: ils(current.awaitingCountIls) })} />
@@ -494,12 +501,22 @@ async function HeroNotes({ role, view, t, locale }: Ctx) {
   );
 }
 
-function Notice({ text, testId }: { text: string; testId?: string }) {
+function Notice({ text, testId, cta }: { text: string; testId?: string; cta?: { href: string; label: string } }) {
   // T4: pending is neutral, never an alarm.
   return (
     <p data-testid={testId} className="flex items-start gap-2 rounded-xl border border-line bg-surface px-3 py-2 text-sm text-muted">
       <Hourglass className="mt-0.5 h-4 w-4 shrink-0 text-muted" aria-hidden="true" />
-      {text}
+      <span className="min-w-0">
+        {text}
+        {cta ? (
+          <>
+            {' '}
+            <Link href={cta.href} className="font-semibold text-primary underline-offset-2 hover:underline">
+              {cta.label}
+            </Link>
+          </>
+        ) : null}
+      </span>
     </p>
   );
 }

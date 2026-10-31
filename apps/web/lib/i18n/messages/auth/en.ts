@@ -181,6 +181,7 @@ export const en: Shape<typeof he> = {
     forbidden: 'You do not have permission to do this.',
     unauthorized: 'Your session has expired. Please sign in again.',
     invalidInput: 'One of the values you entered is invalid.',
+    invoiceUnlinkedLines: 'This invoice has {count} lines not linked to a product yet. Answer "Is this the same product?" in mapping first, then re-run the match.',
     invoiceNumberTaken: 'Invoice number {invoiceNumber} is already on another invoice from this supplier (dated {holderDate}). Check the number — or open the existing invoice.',
     generic: 'The action failed. Please try again.',
   },

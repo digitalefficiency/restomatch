@@ -247,3 +247,139 @@ describe('HIGH-1: the answer undo token', () => {
     expect(verifyAnswerUndo(`${t}x`, who, 1_000)).toBeNull();
   });
 });
+
+/* ── G-08 review round 2 (31.10) ─────────────────────────────────────────── */
+
+describe('R2 H-2: an unknown-SKU line prompts owner / manager (the chef keeps name questions)', () => {
+  it('a held invoice line with an unlinked מק״ט adds one question for owner and manager, none for the chef', async () => {
+    const before = {
+      owner: (await callerFor(A).mapping.questionCount()).count,
+      manager: (await callerFor(A, 'manager').mapping.questionCount()).count,
+      chef: (await callerFor(A, 'chef').mapping.questionCount()).count,
+    };
+    const inv = await heldInvoice('קישוא');
+    await db.update(invoiceLines).set({ supplierSku: 'Q-77' }).where(eq(invoiceLines.id, inv.lineId));
+    expect((await callerFor(A).mapping.questionCount()).count).toBe(before.owner + 1);
+    expect((await callerFor(A, 'manager').mapping.questionCount()).count).toBe(before.manager + 1);
+    expect((await callerFor(A, 'chef').mapping.questionCount()).count).toBe(before.chef);
+  });
+});
+
+describe('R2 M-3: a manual re-match refuses an invoice with open questions', () => {
+  it('runForInvoice → PRECONDITION_FAILED, appCode invoice.unlinkedLines; no run written', async () => {
+    await order([{ productId: P, raw: 'פלפל אדום' }]);
+    const inv = await heldInvoice('פלפל אדום חריף');
+    await db.update(invoices).set({ status: 'matched' }).where(eq(invoices.id, inv.invoiceId));
+    const err = await callerFor(A)
+      .match.runForInvoice({ invoiceId: inv.invoiceId })
+      .then(() => null, (e: unknown) => e as { code: string; cause?: { appCode?: string; appParams?: unknown } });
+    expect(err?.code).toBe('PRECONDITION_FAILED');
+    expect(err?.cause?.appCode).toBe('invoice.unlinkedLines');
+    expect(err?.cause?.appParams).toEqual({ count: 1 });
+    expect(await findingTypes(inv.invoiceId)).toEqual([]);
+  });
+});
+
+/**
+ * An invoice: one ordered product line (2 × ₪11 = ₪22, invoice VAT rate) plus one
+ * non-product line; header totals as the supplier printed them.
+ */
+async function invoiceWithCharge(charge: { raw: string; total: number; vatRate: number | null }, rate: number) {
+  const chargeVat = Math.round(charge.total * 100 * (charge.vatRate ?? rate)) / 100;
+  const excl = 22 + charge.total;
+  const vat = Math.round(22 * rate * 100) / 100 + chargeVat;
+  const [inv] = await db
+    .insert(invoices)
+    .values({
+      restaurantId: A.restaurantId,
+      supplierId: S,
+      status: 'parsed',
+      source: 'photo',
+      invoiceDate: new Date(),
+      totalExclVat: excl.toFixed(2),
+      vatAmount: vat.toFixed(2),
+      totalInclVat: (excl + vat).toFixed(2),
+      ocrPayload: { provider: 'reconciled', raw: { reviewReasons: ['unlinked'], keep: 'me' } } as never,
+    })
+    .returning({ id: invoices.id });
+  await db.insert(invoiceLines).values([
+    { invoiceId: inv!.id, productId: P, rawDescription: 'פלפל אדום', qtyBilled: '2', unit: 'ק״ג', unitPriceBilled: '11', lineTotal: '22' },
+    {
+      invoiceId: inv!.id,
+      productId: null,
+      rawDescription: charge.raw,
+      qtyBilled: '1',
+      unit: 'יח׳',
+      unitPriceBilled: charge.total.toFixed(2),
+      lineTotal: charge.total.toFixed(2),
+      vatRate: charge.vatRate == null ? null : charge.vatRate.toFixed(4),
+    },
+  ]);
+  return inv!.id;
+}
+
+describe('R2 M-2: "שורת חיוב — לא מוצר" keeps a charge line out of the engine, totals reconciled', () => {
+  const cases = [
+    { name: 'a deposit (פיקדון ארגזים, VAT 0)', charge: { raw: 'פיקדון ארגזים', total: 10, vatRate: 0 } },
+    { name: 'a delivery charge at 18% VAT', charge: { raw: 'דמי משלוח', total: 20, vatRate: 0.18 } },
+    { name: 'a discount line (negative, the invoice rate)', charge: { raw: 'הנחה', total: -2, vatRate: null } },
+  ];
+  for (const c of cases) {
+    it(`${c.name} → no UNORDERED_ITEM, TOTAL_MISMATCH, VAT_MISMATCH or PRICE finding`, async () => {
+      await order([{ productId: P, raw: 'פלפל אדום' }]);
+      const invoiceId = await invoiceWithCharge(c.charge, 0.18);
+      const r = await callerFor(A).mapping.markCharge({ supplierId: S, rawName: c.charge.raw });
+      expect(r.invoiceLinesMarked).toBe(1);
+      const row = await invoiceRow(invoiceId);
+      expect(row.status).toBe('matched'); // the hold released
+      // jsonb merge: the other ocr_payload keys survive.
+      expect(row.ocrPayload).toMatchObject({ provider: 'reconciled', raw: { keep: 'me' } });
+      expect((row.ocrPayload as unknown as { chargeLineIds: string[] }).chargeLineIds).toHaveLength(1);
+      await callerFor(A).match.runForInvoice({ invoiceId });
+      const types = await findingTypes(invoiceId);
+      for (const t of ['UNORDERED_ITEM', 'TOTAL_MISMATCH', 'VAT_MISMATCH', 'PRICE_HIGHER', 'PRICE_LOWER', 'MISSING_ON_INVOICE']) {
+        expect(types).not.toContain(t);
+      }
+      // No longer a question for anyone.
+      expect((await callerFor(A).mapping.unmapped()).some((q) => q.sampleDescription === c.charge.raw)).toBe(false);
+    });
+  }
+
+  it('the undo puts exactly those lines back as questions and the invoice back on hold', async () => {
+    await order([{ productId: P, raw: 'פלפל אדום' }]);
+    const invoiceId = await invoiceWithCharge({ raw: 'פיקדון ארגזים', total: 10, vatRate: 0 }, 0.18);
+    const r = await callerFor(A).mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים' });
+    expect((await invoiceRow(invoiceId)).status).toBe('matched');
+    await callerFor(A).mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים', undo: r.undo! });
+    const back = await invoiceRow(invoiceId);
+    expect(back.status).toBe('parsed');
+    expect((back.ocrPayload as unknown as { chargeLineIds: string[] }).chargeLineIds).toEqual([]);
+    expect((await callerFor(A).mapping.unmapped()).some((q) => q.sampleDescription === 'פיקדון ארגזים')).toBe(true);
+  });
+
+  it('owner / manager only; a B supplier → NOT_FOUND; another supplier of A is untouched; no ₪ returned', async () => {
+    const B = await seedTenant(db, 'B');
+    const [other] = await db.insert(suppliers).values({ restaurantId: A.restaurantId, name: 'ספק אחר' }).returning({ id: suppliers.id });
+    const invoiceId = await invoiceWithCharge({ raw: 'פיקדון ארגזים', total: 10, vatRate: 0 }, 0.18);
+    const [oInv] = await db
+      .insert(invoices)
+      .values({ restaurantId: A.restaurantId, supplierId: other!.id, status: 'parsed', source: 'photo', invoiceDate: new Date() })
+      .returning({ id: invoices.id });
+    await db.insert(invoiceLines).values({ invoiceId: oInv!.id, productId: null, rawDescription: 'פיקדון ארגזים', qtyBilled: '1', unit: 'יח׳', unitPriceBilled: '10', lineTotal: '10' });
+
+    for (const role of ['chef', 'receiver'] as const) {
+      await expect(callerFor(A, role).mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    }
+    const [bSup] = await db.insert(suppliers).values({ restaurantId: B.restaurantId, name: 'ספק B' }).returning({ id: suppliers.id });
+    await expect(callerFor(A).mapping.markCharge({ supplierId: bSup!.id, rawName: 'פיקדון ארגזים' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect((await invoiceRow(invoiceId)).ocrPayload).not.toHaveProperty('chargeLineIds');
+
+    const r = await callerFor(A, 'manager').mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים' });
+    expect(Object.keys(r).sort()).toEqual(['invoiceLinesMarked', 'rematch', 'undo']);
+    expect((await invoiceRow(oInv!.id)).ocrPayload ?? {}).not.toHaveProperty('chargeLineIds');
+    // A foreign undo list never touches lines of another supplier.
+    const [oLine] = await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, oInv!.id));
+    await callerFor(A).mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים', undo: { invoiceLineIds: [oLine!.id] } });
+    expect((await invoiceRow(invoiceId)).ocrPayload).toHaveProperty('chargeLineIds');
+  });
+});

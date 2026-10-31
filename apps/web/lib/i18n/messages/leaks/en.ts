@@ -188,6 +188,8 @@ export const en: Shape<typeof he> = {
     noSpend: 'No checked invoices this month',
     compareSpan: '{current} vs {previous}',
     pending: '{count} invoices ({amount}) are waiting for a PO link and are not included.',
+    awaitingQuestion: '{count} invoices ({amount}) are waiting for a question: is this the same product? They are not included until it is answered.',
+    awaitingQuestionCta: 'To the questions',
     statusTitle: 'What happened to the money',
     found: 'Found',
     foundHint: 'Sum of this month’s discrepancy lines',

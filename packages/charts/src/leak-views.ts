@@ -205,7 +205,11 @@ function invoicesCte(restaurantId: string, f: ViewFilters | undefined): SQL {
     inv AS (
       SELECT i.id, i.supplier_id, i.status, i.total_excl_vat, i.total_incl_vat,
              COALESCE(i.invoice_date, i.created_at) AS at,
-             ${scanAwaitingCountSql(restaurantId, sql`i`)} AS counting
+             ${scanAwaitingCountSql(restaurantId, sql`i`)} AS counting,
+             -- G-08: held for a "זה אותו מוצר?" question (no run yet) — in neither
+             -- leak, spend nor "waiting to be linked to an order".
+             (i.status = 'parsed'
+               AND COALESCE(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| array['unlinked', 'unlinkedPo']) AS question
       FROM invoices i, b
       WHERE i.restaurant_id = ${restaurantId}
         AND COALESCE(i.invoice_date, i.created_at) >= b.lo
@@ -227,11 +231,12 @@ function invoicesCte(restaurantId: string, f: ViewFilters | undefined): SQL {
           AS pending_link,
         -- A receiving scan held for its count (#94) — same rule as the hero (leak-hero.ts).
         (NOT bool_or(mr.id IS NOT NULL)) AND inv.counting AS awaiting_count,
+        (NOT bool_or(mr.id IS NOT NULL)) AND inv.question AS awaiting_question,
         COALESCE(bool_or(${LIVE_DUPLICATE}), false) AND ${originalChecked(restaurantId, sql`inv.id`)} AS dup_copy
       FROM inv
       LEFT JOIN match_runs mr ON mr.invoice_id = inv.id AND mr.restaurant_id = ${restaurantId}
       LEFT JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${restaurantId}
-      GROUP BY inv.id, inv.supplier_id, inv.status, inv.at, inv.total_incl_vat, inv.total_excl_vat, inv.counting
+      GROUP BY inv.id, inv.supplier_id, inv.status, inv.at, inv.total_incl_vat, inv.total_excl_vat, inv.counting, inv.question
     )`;
 }
 
@@ -254,10 +259,12 @@ export async function computeLeakSummary(
       COALESCE(SUM(LEAST(raw_leak, total)) FILTER (WHERE status <> 'paid'), 0) AS caught,
       COALESCE(SUM(LEAST(raw_recovered, LEAST(raw_leak, total))), 0) AS recovered,
       COUNT(*) FILTER (WHERE raw_leak > 0) AS with_leak,
-      COUNT(*) FILTER (WHERE pending_link AND NOT awaiting_count) AS pending_count,
-      COALESCE(SUM(total) FILTER (WHERE pending_link AND NOT awaiting_count), 0) AS pending_amount,
+      COUNT(*) FILTER (WHERE pending_link AND NOT awaiting_count AND NOT awaiting_question) AS pending_count,
+      COALESCE(SUM(total) FILTER (WHERE pending_link AND NOT awaiting_count AND NOT awaiting_question), 0) AS pending_amount,
       COUNT(*) FILTER (WHERE awaiting_count) AS awaiting_count,
-      COALESCE(SUM(total) FILTER (WHERE awaiting_count), 0) AS awaiting_amount
+      COALESCE(SUM(total) FILTER (WHERE awaiting_count), 0) AS awaiting_amount,
+      COUNT(*) FILTER (WHERE awaiting_question AND NOT awaiting_count) AS question_count,
+      COALESCE(SUM(total) FILTER (WHERE awaiting_question AND NOT awaiting_count), 0) AS question_amount
     FROM per
   `);
   const r = rowsOf(res)[0] ?? {};
@@ -278,6 +285,8 @@ export async function computeLeakSummary(
     pendingLinkIls: ils(r.pending_amount),
     awaitingCountCount: n(r.awaiting_count),
     awaitingCountIls: ils(r.awaiting_amount),
+    awaitingQuestionCount: n(r.question_count),
+    awaitingQuestionIls: ils(r.question_amount),
   };
 }
 

@@ -156,6 +156,14 @@ export interface UnmappedSku {
 /** Name-keyed questions are capped per read (suggestions cost two queries each). */
 export const NAME_QUESTIONS_MAX = 50;
 
+/**
+ * G-08 charge (review M-2): an invoice line an owner / manager answered
+ * "שורת חיוב — לא מוצר" (deposit, delivery, discount) is listed in its invoice's
+ * `ocr_payload.chargeLineIds`. It is no longer a question, never holds the
+ * invoice and never reaches the engine (buildMatchInput). Aliases: il / i.
+ */
+export const IL_NOT_CHARGE = sql.raw(`not (coalesce(i.ocr_payload -> 'chargeLineIds', '[]'::jsonb) ? il.id::text)`);
+
 
 /**
  * Name-keyed open questions (G-08): unlinked invoice / order / price-list lines
@@ -173,7 +181,7 @@ async function nameKeyedRows(
       select i.supplier_id, il.raw_description as raw
         from invoice_lines il
         join invoices i on i.id = il.invoice_id and i.restaurant_id = ${rid}
-       where il.product_id is null and il.supplier_sku is null
+       where il.product_id is null and il.supplier_sku is null and ${IL_NOT_CHARGE}
       union all
       select po.supplier_id, pl.raw_description
         from po_lines pl
@@ -222,7 +230,7 @@ async function openQuestion(
     with lines as (
       select il.raw_description as raw from invoice_lines il
         join invoices i on i.id = il.invoice_id and i.restaurant_id = ${rid} and i.supplier_id = ${supplierId}
-       where il.product_id is null and il.supplier_sku is null
+       where il.product_id is null and il.supplier_sku is null and ${IL_NOT_CHARGE}
       union all
       select pl.raw_description from po_lines pl
         join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid} and po.supplier_id = ${supplierId}
@@ -244,17 +252,23 @@ async function openQuestion(
  */
 async function invoicesForPoLines(db: Database, rid: string, poLineIds: string[]): Promise<string[]> {
   if (poLineIds.length === 0) return [];
+  const pos = sql`(
+    select pl.po_id from po_lines pl
+      join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid}
+     where pl.id in (${sql.join(poLineIds.map((id) => sql`${id}::uuid`), sql`, `)})
+  )`;
   const rows = (await db.execute(sql`
     select distinct mr.invoice_id as id
       from match_runs mr
      where mr.restaurant_id = ${rid}
-       and mr.po_id in (
-         select pl.po_id from po_lines pl
-           join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid}
-          where pl.id in (${sql.join(poLineIds.map((id) => sql`${id}::uuid`), sql`, `)})
-       )
+       and mr.po_id in ${pos}
        and mr.run_at = (select max(m2.run_at) from match_runs m2
                          where m2.invoice_id = mr.invoice_id and m2.restaurant_id = ${rid})
+    union
+    -- G-08 hold (M-4): invoices whose first match waits for this order's questions
+    select i.id from invoices i
+     where i.restaurant_id = ${rid} and i.status = 'parsed'
+       and (i.ocr_payload ->> 'heldPoId')::uuid in ${pos}
   `)) as unknown as Array<{ id: string }>;
   return rows.map((r) => String(r.id));
 }
@@ -271,14 +285,28 @@ async function releaseLinkHolds(db: Database, rid: string, invoiceIds: string[])
   const rows = (await db.execute(sql`
     update invoices i
        set status = 'matched',
-           ocr_payload = jsonb_set(i.ocr_payload, '{linkReleasedAt}', to_jsonb(now()::text))
+           ocr_payload = (i.ocr_payload - 'heldPoId') || jsonb_build_object('linkReleasedAt', now()::text)
      where i.restaurant_id = ${rid}
        and i.id in (${sql.join([...new Set(invoiceIds)].map((id) => sql`${id}::uuid`), sql`, `)})
        and i.status = 'parsed'
-       and i.ocr_payload -> 'raw' -> 'reviewReasons' = '["unlinked"]'::jsonb
+       -- held ONLY for questions (the match-invoice job applies the same rule)
+       and jsonb_typeof(i.ocr_payload -> 'raw' -> 'reviewReasons') = 'array'
+       and jsonb_array_length(i.ocr_payload -> 'raw' -> 'reviewReasons') > 0
+       and not exists (
+         select 1 from jsonb_array_elements_text(i.ocr_payload -> 'raw' -> 'reviewReasons') r(reason)
+          where r.reason not in ('unlinked', 'unlinkedPo')
+       )
        and (i.ocr_payload -> 'raw' -> 'duplicateOf') is null
-       and not exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null)
+       and not exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null and ${IL_NOT_CHARGE})
        and not exists (select 1 from match_runs mr where mr.invoice_id = i.id and mr.restaurant_id = ${rid})
+       and (
+         (i.ocr_payload ->> 'heldPoId') is null
+         or not exists (
+           select 1 from po_lines pl
+             join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid}
+            where pl.po_id = (i.ocr_payload ->> 'heldPoId')::uuid and pl.product_id is null and pl.supplier_sku is null
+         )
+       )
     returning i.id
   `)) as unknown as Array<{ id: string }>;
   return rows.map((r) => String(r.id));
@@ -302,7 +330,7 @@ async function reholdLinkHolds(db: Database, rid: string, invoiceIds: string[]):
            where i.restaurant_id = ${rid} and i.id = ${id}::uuid
              and i.status in ('matched', 'disputed')
              and i.ocr_payload ? 'linkReleasedAt'
-             and exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null)
+             and exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null and ${IL_NOT_CHARGE})
           returning i.id
         `)) as unknown as Array<{ id: string }>;
         if (rows.length === 0) return;
@@ -316,14 +344,46 @@ async function reholdLinkHolds(db: Database, rid: string, invoiceIds: string[]):
   return held;
 }
 
-/** How many name-keyed questions are open (the home "זה אותו מוצר?" line). Restaurant-scoped. */
+/**
+ * How many questions are open (the home "זה אותו מוצר?" line). Restaurant-scoped.
+ * Name-keyed (no SKU) always; with `includeSku` also the SKU-keyed unlinked
+ * invoice / order lines (owner, manager — G-08 review H-2: a held invoice whose
+ * unknown מק״ט line was printed must still prompt someone).
+ */
+export async function countQuestions(db: Database, rid: string, includeSku: boolean): Promise<number> {
+  const names = await countNameQuestions(db, rid);
+  if (!includeSku) return names;
+  const [r] = (await db.execute(sql`
+    with lines as (
+      select i.supplier_id, il.supplier_sku as sku
+        from invoice_lines il
+        join invoices i on i.id = il.invoice_id and i.restaurant_id = ${rid}
+       where il.product_id is null and il.supplier_sku is not null and ${IL_NOT_CHARGE}
+      union all
+      select po.supplier_id, pl.supplier_sku
+        from po_lines pl
+        join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid}
+       where pl.product_id is null and pl.supplier_sku is not null
+      union all
+      select sci.supplier_id, sci.supplier_sku
+        from supplier_catalog_items sci
+       where sci.restaurant_id = ${rid} and sci.product_id is null and sci.supplier_sku is not null
+    )
+    select count(distinct (l.supplier_id, l.sku))::int as n
+      from lines l
+      join suppliers s on s.id = l.supplier_id and s.restaurant_id = ${rid}
+  `)) as unknown as Array<{ n: number }>;
+  return names + Number(r?.n ?? 0);
+}
+
+/** Name-keyed questions only (the chef's set). */
 export async function countNameQuestions(db: Database, rid: string): Promise<number> {
   const [r] = (await db.execute(sql`
     with lines as (
       select i.supplier_id, il.raw_description as raw
         from invoice_lines il
         join invoices i on i.id = il.invoice_id and i.restaurant_id = ${rid}
-       where il.product_id is null and il.supplier_sku is null
+       where il.product_id is null and il.supplier_sku is null and ${IL_NOT_CHARGE}
       union all
       select po.supplier_id, pl.raw_description
         from po_lines pl
@@ -342,6 +402,11 @@ export async function countNameQuestions(db: Database, rid: string): Promise<num
   return Number(r?.n ?? 0);
 }
 
+
+/** The same rule on an `invoice_lines` row in a one-table UPDATE (no aliases). */
+const NOT_CHARGE_ROW = sql.raw(
+  `not exists (select 1 from invoices ci where ci.id = "invoice_lines"."invoice_id" and coalesce(ci.ocr_payload -> 'chargeLineIds', '[]'::jsonb) ? "invoice_lines"."id"::text)`,
+);
 
 /** The link/backfill input shared by mapping.confirm and mapping.answerLink (G-08). */
 export interface LinkInput {
@@ -572,6 +637,20 @@ async function applyLink(db: Database, rid: string, input: LinkInput) {
     provenance: sku ? 'human' : 'exactKey',
   });
 
+  // Lock order (G-08 review LOW, vs G-09 settle): take the touched invoices'
+  // row locks first, by id, before their lines.
+  await db.execute(sql`
+    select i.id from invoices i
+     where i.restaurant_id = ${rid} and i.supplier_id = ${input.supplierId}
+       and exists (
+         select 1 from invoice_lines il
+          where il.invoice_id = i.id and il.product_id is null and ${IL_NOT_CHARGE}
+            and ${sku ? sql`il.supplier_sku = ${sku}` : sql`il.supplier_sku is null and ${normNameSql(sql`il.raw_description`)} = ${nameKey}`}
+       )
+     order by i.id
+       for update
+  `);
+
   // Backfill already-imported lines, scoped to this restaurant + supplier.
   const updatedPo = await db
     .update(poLines)
@@ -593,6 +672,7 @@ async function applyLink(db: Database, rid: string, input: LinkInput) {
         isNull(invoiceLines.productId),
         invKey,
         inArray(invoiceLines.invoiceId, invIds),
+        NOT_CHARGE_ROW,
       ),
     )
     .returning({ id: invoiceLines.id, invoiceId: invoiceLines.invoiceId });
@@ -640,6 +720,96 @@ async function applyLink(db: Database, rid: string, input: LinkInput) {
       createdProduct,
     },
   };
+}
+
+/** Input of mapping.markCharge (G-08 charge). */
+export interface ChargeInput {
+  supplierId: string;
+  supplierSku?: string;
+  rawName: string;
+  /** Undo ("בטל") a mark made moments ago: exactly these lines become questions again. */
+  undo?: { invoiceLineIds: string[] };
+}
+
+/**
+ * G-08 charge (review M-2): mark every unlinked invoice line of a key (supplier
+ * + SKU, or supplier + normalized name) as a charge line — "שורת חיוב — לא מוצר".
+ * The line keeps product_id NULL; its id joins `ocr_payload.chargeLineIds` (a
+ * jsonb merge, other keys survive). Then the holds it caused release and the
+ * invoices re-match (buildMatchInput leaves charge lines out, totals reconciled).
+ * Invoice lines only: an order or price-list row is a product by definition.
+ */
+async function applyCharge(db: Database, rid: string, input: ChargeInput) {
+  await assertSupplierOwned(db, input.supplierId, rid);
+  const sku = input.supplierSku;
+  const nameKey = normalizeLinkName(input.rawName);
+  const lineKey = sku
+    ? sql`il.supplier_sku = ${sku}`
+    : sql`il.supplier_sku is null and ${normNameSql(sql`il.raw_description`)} = ${nameKey}`;
+  if (!sku) await db.execute(sql`select pg_advisory_xact_lock(hashtext(${`g08:${rid}:${input.supplierId}:${nameKey}`}))`);
+
+  if (input.undo) {
+    const ids = input.undo.invoiceLineIds;
+    if (ids.length === 0) return { invoiceLinesMarked: 0, rematch: await requeueInvoicesForRematch(db, rid, []), undo: null };
+    const idList = sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `);
+    const target = (await db.execute(sql`
+      select il.id, il.invoice_id from invoice_lines il
+        join invoices i on i.id = il.invoice_id and i.restaurant_id = ${rid} and i.supplier_id = ${input.supplierId}
+       where il.id in (${idList}) and il.product_id is null and ${lineKey}
+         and coalesce(i.ocr_payload -> 'chargeLineIds', '[]'::jsonb) ? il.id::text
+       order by il.invoice_id
+    `)) as unknown as Array<{ id: string; invoice_id: string }>;
+    const byInv = groupByInvoice(target);
+    for (const [invoiceId, lineIds] of byInv) {
+      await db.execute(sql`
+        update invoices i
+           set ocr_payload = i.ocr_payload || jsonb_build_object('chargeLineIds', coalesce(
+                 (select jsonb_agg(x) from jsonb_array_elements_text(i.ocr_payload -> 'chargeLineIds') x
+                   where x <> all (${`{${lineIds.join(',')}}`}::text[])), '[]'::jsonb))
+         where i.id = ${invoiceId}::uuid and i.restaurant_id = ${rid}
+      `);
+    }
+    const touched = [...byInv.keys()];
+    const reheld = new Set(await reholdLinkHolds(db, rid, touched));
+    const rematch = await requeueInvoicesForRematch(db, rid, touched.filter((id) => !reheld.has(id)));
+    return { invoiceLinesMarked: 0, rematch, undo: null };
+  }
+
+  // Lock order (as applyLink): the invoices' row locks first, by id.
+  const target = (await db.execute(sql`
+    select il.id, il.invoice_id from invoice_lines il
+      join invoices i on i.id = il.invoice_id and i.restaurant_id = ${rid} and i.supplier_id = ${input.supplierId}
+     where il.product_id is null and ${lineKey} and ${IL_NOT_CHARGE}
+     order by il.invoice_id
+  `)) as unknown as Array<{ id: string; invoice_id: string }>;
+  if (target.length === 0) throw new TRPCError({ code: 'NOT_FOUND', message: 'no open question' });
+  const byInv = groupByInvoice(target);
+  const touched = [...byInv.keys()];
+  await db.execute(sql`
+    select i.id from invoices i
+     where i.restaurant_id = ${rid} and i.id in (${sql.join(touched.map((id) => sql`${id}::uuid`), sql`, `)})
+     order by i.id for update
+  `);
+  for (const [invoiceId, lineIds] of byInv) {
+    await db.execute(sql`
+      update invoices i
+         set ocr_payload = coalesce(i.ocr_payload, '{}'::jsonb) || jsonb_build_object('chargeLineIds',
+               coalesce(i.ocr_payload -> 'chargeLineIds', '[]'::jsonb) || to_jsonb(${`{${lineIds.join(',')}}`}::text[]))
+       where i.id = ${invoiceId}::uuid and i.restaurant_id = ${rid}
+    `);
+  }
+  await releaseLinkHolds(db, rid, touched);
+  const rematch = await requeueInvoicesForRematch(db, rid, touched);
+  return { invoiceLinesMarked: target.length, rematch, undo: { invoiceLineIds: target.map((t) => String(t.id)) } };
+}
+
+function groupByInvoice(rows: Array<{ id: string; invoice_id: string }>): Map<string, string[]> {
+  const m = new Map<string, string[]>();
+  for (const r of rows) {
+    const k = String(r.invoice_id);
+    m.set(k, [...(m.get(k) ?? []), String(r.id)]);
+  }
+  return m;
 }
 
 /**
@@ -696,6 +866,7 @@ export const mappingRouter = router({
           and(
             isNull(invoiceLines.productId),
             sql`${invoiceLines.supplierSku} is not null`,
+            sql`not (coalesce(${invoices.ocrPayload} -> 'chargeLineIds', '[]'::jsonb) ? ${invoiceLines.id}::text)`,
             supplierFilter ? eq(invoices.supplierId, supplierFilter) : undefined,
           ),
         );
@@ -772,7 +943,8 @@ export const mappingRouter = router({
 
   /** G-08: how many "זה אותו מוצר?" questions are open (the home line). No ₪. */
   questionCount: memberProcedure.query(async ({ ctx }) => ({
-    count: await countNameQuestions(ctx.db, ctx.session.restaurantId),
+    // The chef answers name questions only; owner / manager also the SKU ones.
+    count: await countQuestions(ctx.db, ctx.session.restaurantId, ctx.session.role !== 'chef'),
   })),
 
   /** Product picker: fuzzy/ILIKE search over the restaurant's products. */
@@ -896,4 +1068,23 @@ export const mappingRouter = router({
         : null;
       return { ...r, undo: null, undoToken };
     }),
+
+  /**
+   * G-08 charge (review M-2) · "שורת חיוב — לא מוצר": owner / manager mark an
+   * unlinked invoice-line key as a charge (deposit / delivery / discount). No
+   * product, no alias; the line leaves the questions, the hold and the engine
+   * input. `undo` puts exactly the returned lines back as questions.
+   */
+  markCharge: managerProcedure
+    .input(
+      z
+        .object({
+          supplierId: z.string().uuid(),
+          supplierSku: z.string().trim().min(1).max(64).optional(),
+          rawName: z.string().trim().min(1).max(400),
+          undo: z.object({ invoiceLineIds: z.array(z.string().uuid()).max(5000) }).strict().optional(),
+        })
+        .strict(),
+    )
+    .mutation(({ ctx, input }) => applyCharge(ctx.db, ctx.session.restaurantId, input)),
 });

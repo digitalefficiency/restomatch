@@ -277,7 +277,19 @@ function MapRow({
     onSuccess: (r) => onLinked({ row, result: r, answered: true }),
     onError: (e) => toast.error(friendlyError(e, tc)),
   });
-  const pending = confirm.isPending || answer.isPending;
+  // G-08 charge (review M-2): owner / manager answer "שורת חיוב — לא מוצר" — a
+  // deposit / delivery / discount line leaves the questions and the engine input.
+  const utils = trpc.useUtils();
+  const charge = trpc.mapping.markCharge.useMutation({
+    onSuccess: () => {
+      setOpen(false);
+      toast.success(t('mapping.chargeMarked'));
+      void utils.mapping.unmapped.invalidate();
+      void utils.mapping.questionCount.invalidate();
+    },
+    onError: (e) => toast.error(friendlyError(e, tc)),
+  });
+  const pending = confirm.isPending || answer.isPending || charge.isPending;
   const pick = (productId: string) =>
     answer.mutate({ supplierId: row.supplierId, rawName: row.sampleDescription, productId });
 
@@ -420,6 +432,19 @@ function MapRow({
             >
               <Plus className="h-4 w-4" aria-hidden="true" />{' '}
               {t('mapping.createNew', { name: row.sampleDescription || '—' })}
+            </Button>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
+            <span className="text-sm text-muted">{t('mapping.chargeHint')}</span>
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={charge.isPending}
+              disabled={pending || !row.sampleDescription}
+              onClick={() => charge.mutate({ ...confirmKey(row) })}
+            >
+              {t('mapping.markCharge')}
             </Button>
           </div>
 

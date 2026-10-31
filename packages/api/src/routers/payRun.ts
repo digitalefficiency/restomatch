@@ -48,6 +48,8 @@ export interface PayRunInvoice {
    * is in — bound to its order already, so never "waiting to be linked".
    */
   awaitingCount: boolean;
+  /** G-08: held for a "זה אותו מוצר?" question (no run yet) — T4, answered in the mapper. */
+  awaitingQuestion: boolean;
   /** A (non-waived) duplicate copy: held — "don't pay this copy", never a credit to ask for. */
   duplicate: boolean;
   /** The claimable ₪ of the duplicate finding(s) (= the copy's total incl. VAT); not in pending / credit. */
@@ -219,7 +221,10 @@ export const payRunRouter = router({
                ) AS has_ua,
                EXISTS (SELECT 1 FROM match_runs mr WHERE mr.invoice_id = i.id AND mr.restaurant_id = ${rid}) AS matched,
                -- …a receiving scan the OCR held for its receipt's count (#94, same rule as the hero).
-               ${scanAwaitingCountSql(rid, sql`i`)} AS counting
+               ${scanAwaitingCountSql(rid, sql`i`)} AS counting,
+               -- G-08: held for a "זה אותו מוצר?" question (same rule as the hero).
+               (i.status = 'parsed'
+                 AND COALESCE(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| array['unlinked', 'unlinkedPo']) AS question
         FROM invoices i
         LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${rid}
         WHERE i.restaurant_id = ${rid}
@@ -251,9 +256,13 @@ export const payRunRouter = router({
         }
         // Waiting for the count (#94): no run yet, but bound to its order — held, not T4.
         const awaitingCount = row.matched !== true && row.counting === true;
+        // G-08: a question to answer, not "waiting to be linked to an order".
+        const awaitingQuestion = !awaitingCount && row.matched !== true && row.question === true;
         const pendingLink =
-          !awaitingCount && ((b?.pendingLink ?? false) || row.matched !== true || (!b && row.has_ua === true));
-        if (pendingLink || awaitingCount) s.status = 'hold';
+          !awaitingCount &&
+          !awaitingQuestion &&
+          ((b?.pendingLink ?? false) || row.matched !== true || (!b && row.has_ua === true));
+        if (pendingLink || awaitingCount || awaitingQuestion) s.status = 'hold';
         const inv: PayRunInvoice = {
           invoiceId: id,
           invoiceNumber: row.invoice_number == null ? null : String(row.invoice_number),
@@ -261,6 +270,7 @@ export const payRunRouter = router({
           status: s.status,
           pendingLink,
           awaitingCount,
+          awaitingQuestion,
           duplicate: s.duplicate,
           duplicateIls: s.duplicateIls,
           totalInclVat: Number(row.total_incl),

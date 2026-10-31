@@ -58,6 +58,8 @@ export function InvoiceCorrection({
   const unit = useUnitLabel();
   const money = (v: number) => formatIls(v, { maximumFractionDigits: 2, locale });
   const [error, setError] = useState<string | null>(null);
+  // G-08 hold: the re-match was refused for open "זה אותו מוצר?" questions.
+  const [openQuestions, setOpenQuestions] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
   const [rematch, setRematch] = useState<MatchResult | null>(null);
   /** The invoice that already carries the number the user tried to save. */
@@ -113,9 +115,16 @@ export function InvoiceCorrection({
     onSuccess: (res) => {
       setRematch(res);
       setError(null);
+      setOpenQuestions(false);
       router.refresh();
     },
-    onError: onErr,
+    onError: (e) => {
+      // G-08 hold: unlinked lines → the questions, not a raw failure.
+      const code = (e as { data?: { appCode?: unknown } | null }).data?.appCode;
+      setOpenQuestions(code === 'invoice.unlinkedLines');
+      setError(localizeServerError(e, locale, t('correction.failed')));
+      setSaved(null);
+    },
   });
 
   function saveHeader() {
@@ -177,6 +186,18 @@ export function InvoiceCorrection({
           className="rounded-md border-s-4 border-danger bg-danger/5 px-3 py-2 text-sm text-danger"
         >
           {error}
+          {openQuestions ? (
+            <>
+              {' '}
+              <Link
+                href="/dashboard/catalog/mapping"
+                data-testid="open-questions-link"
+                className="font-semibold underline underline-offset-2"
+              >
+                {t('correction.openQuestions')}
+              </Link>
+            </>
+          ) : null}
           {holderId ? (
             <>
               {' '}

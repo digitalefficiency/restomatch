@@ -13,6 +13,7 @@ export const en = {
     hold: 'Hold — awaiting a decision',
     holdLink: 'Waiting to be linked to an order',
     holdCount: 'Waiting for the goods-receipt count',
+    holdQuestion: 'Waiting for a question: is this the same product?',
     holdDuplicate: "Hold — duplicate copy, don't pay",
     claim: 'Ask for a {amount} credit',
   },
@@ -35,6 +36,7 @@ export const en = {
     action: 'Action',
     pending: 'Awaiting a decision: {amount}',
     toApprovals: 'To the approvals queue',
+    toQuestions: 'To the questions',
     openInvoice: 'Open invoice',
   },
   supplier: {

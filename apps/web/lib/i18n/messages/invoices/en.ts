@@ -3,6 +3,7 @@ import type { he } from './he';
 
 export const en: Shape<typeof he> = {
   correction: {
+    openQuestions: 'Answer the questions',
     title: 'Correct invoice',
     subtitle:
       'Fix values the OCR read wrong (quantity / price / total) and re-run the match — the leak figure is calculated from these lines.',

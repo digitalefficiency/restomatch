@@ -163,12 +163,23 @@ export async function buildMatchInputForInvoice(
       unit: invoiceLines.unit,
       unitPriceBilled: invoiceLines.unitPriceBilled,
       lineTotal: invoiceLines.lineTotal,
+      vatRate: invoiceLines.vatRate, // G-08 charge
     })
     .from(invoiceLines)
     .where(eq(invoiceLines.invoiceId, invoiceId));
   if (invLineRows.length === 0) return null;
 
-  const invoiceLineInputs: InvoiceLineInput[] = invLineRows.map((l) => ({
+  // G-08 charge: lines a person answered "שורת חיוב — לא מוצר" (deposit, delivery,
+  // discount; ocr_payload.chargeLineIds) are not products — the engine would call
+  // them UNORDERED_ITEM. They stay out of the engine input, and the invoice totals
+  // passed in are reduced by exactly their amounts (below), so TOTAL / VAT checks
+  // stay reconciled. No charge line ⇒ byte-identical input to before.
+  const chargeIds = readChargeLineIds(inv.ocrPayload);
+  const chargeRows = invLineRows.filter((l) => chargeIds.has(l.id));
+  const productRows = chargeRows.length > 0 ? invLineRows.filter((l) => !chargeIds.has(l.id)) : invLineRows;
+  if (productRows.length === 0) return null;
+
+  const invoiceLineInputs: InvoiceLineInput[] = productRows.map((l) => ({
     id: l.id,
     productId: l.productId,
     supplierSku: l.supplierSku,
@@ -427,6 +438,25 @@ export async function buildMatchInputForInvoice(
     if (Object.keys(acc).length > 0) baselines = acc;
   }
 
+  // G-08 charge: take the charge lines' net and VAT (each line's own vat_rate,
+  // e.g. 0 for a deposit; else the invoice rate) out of the totals, in integer
+  // agorot, half-up per line.
+  let totalExclVat = num(inv.totalExclVat);
+  let vatAmount = num(inv.vatAmount);
+  let totalInclVat = num(inv.totalInclVat);
+  if (chargeRows.length > 0) {
+    let netAg = 0;
+    let vatAg = 0;
+    for (const l of chargeRows) {
+      const lineAg = Math.round(num(l.lineTotal) * 100);
+      netAg += lineAg;
+      vatAg += Math.sign(lineAg) * Math.round(Math.abs(lineAg) * (l.vatRate == null ? vatRate : Number(l.vatRate)));
+    }
+    totalExclVat = (Math.round(totalExclVat * 100) - netAg) / 100;
+    vatAmount = (Math.round(vatAmount * 100) - vatAg) / 100;
+    totalInclVat = (Math.round(totalInclVat * 100) - netAg - vatAg) / 100;
+  }
+
   const input: MatchInput = {
     invoice: {
       // Normalized (see normalizeInvoiceNumber) — the engine only uses it for
@@ -434,9 +464,9 @@ export async function buildMatchInputForInvoice(
       invoiceNumber: normalizeInvoiceNumber(invoiceNumber) ?? '',
       invoiceDate,
       supplierId: inv.supplierId ?? '',
-      totalExclVat: num(inv.totalExclVat),
-      vatAmount: num(inv.vatAmount),
-      totalInclVat: num(inv.totalInclVat),
+      totalExclVat,
+      vatAmount,
+      totalInclVat,
     },
     poLines: poLineInputs,
     grLines: grLineInputs,
@@ -449,6 +479,12 @@ export async function buildMatchInputForInvoice(
   };
 
   return { input, poId: po?.id ?? null, grId };
+}
+
+/** G-08 charge: the invoice-line ids marked "שורת חיוב — לא מוצר" (ocr_payload.chargeLineIds). */
+export function readChargeLineIds(payload: unknown): Set<string> {
+  const ids = (payload as { chargeLineIds?: unknown } | null | undefined)?.chargeLineIds;
+  return new Set(Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string') : []);
 }
 
 /**

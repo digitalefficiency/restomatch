@@ -658,3 +658,41 @@ describe('a receiving scan waiting for its count (#94) is not "waiting to be lin
     });
   });
 });
+
+describe('G-08: an invoice held for a "זה אותו מוצר?" question', () => {
+  it('is its own bucket — in neither leak, spend nor "waiting to be linked to an order"', async () => {
+    const { restaurantId, invoice } = await setup();
+    await invoice({ date: THIS_MONTH, exclVat: '1000', inclVat: '1180', d: [] });
+    const consolidated = await invoice({ date: THIS_MONTH, exclVat: '2000', inclVat: '2360', matched: false });
+    const held = await invoice({ date: THIS_MONTH, exclVat: '500', inclVat: '590', matched: false });
+    await db
+      .update(invoices)
+      .set({ status: 'parsed', ocrPayload: { provider: 'reconciled', raw: { reviewReasons: ['unlinked'] } } as never })
+      .where(eq(invoices.id, held));
+
+    const hero = await computeLeakHero(db, restaurantId, { now: NOW });
+    expect(hero).toMatchObject({
+      spendIls: 1000,
+      pendingLinkCount: 1,
+      pendingLinkIls: 2360,
+      awaitingQuestionCount: 1,
+      awaitingQuestionIls: 590,
+    });
+    expect(await computeLeakSummary(db, restaurantId, { period: 'this_month', now: NOW })).toEqual(hero);
+    const rows = await computeLeakBreakdown(db, restaurantId, { now: NOW });
+    expect(rows.filter((r) => r.pendingLink).map((r) => r.invoiceId)).toEqual([consolidated]);
+    expect(rows.map((r) => r.invoiceId)).not.toContain(held);
+
+    // An order question ('unlinkedPo') counts the same; a low-confidence hold does not.
+    await db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'reconciled', raw: { reviewReasons: ['confidence'] } } as never })
+      .where(eq(invoices.id, held));
+    expect(await computeLeakHero(db, restaurantId, { now: NOW })).toMatchObject({ awaitingQuestionCount: 0, pendingLinkCount: 2 });
+    await db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'reconciled', raw: { reviewReasons: ['unlinkedPo'] } } as never })
+      .where(eq(invoices.id, held));
+    expect(await computeLeakHero(db, restaurantId, { now: NOW })).toMatchObject({ awaitingQuestionCount: 1, pendingLinkCount: 1 });
+  });
+});

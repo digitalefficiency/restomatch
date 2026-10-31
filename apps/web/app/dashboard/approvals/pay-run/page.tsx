@@ -19,10 +19,16 @@ type PayRunStatus = 'pay' | 'hold' | 'claim';
  * "ask for a credit" are T2 (solid badge + ₪ + one CTA); "waiting for a PO link" and "waiting
  * for the goods-receipt count" (#94) are T4 (neutral) — nothing to decide yet.
  */
-function toneOf(inv: { status: PayRunStatus; pendingLink: boolean; awaitingCount: boolean; duplicate: boolean }): BadgeTone {
+function toneOf(inv: {
+  status: PayRunStatus;
+  pendingLink: boolean;
+  awaitingCount: boolean;
+  awaitingQuestion: boolean;
+  duplicate: boolean;
+}): BadgeTone {
   if (inv.status === 'pay') return 'accent';
   if (inv.status === 'claim') return 'danger-solid';
-  return (inv.pendingLink || inv.awaitingCount) && !inv.duplicate ? 'neutral' : 'warning-solid';
+  return (inv.pendingLink || inv.awaitingCount || inv.awaitingQuestion) && !inv.duplicate ? 'neutral' : 'warning-solid';
 }
 
 /**
@@ -67,6 +73,7 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
     status: PayRunStatus;
     pendingLink: boolean;
     awaitingCount: boolean;
+    awaitingQuestion: boolean;
     duplicate: boolean;
     creditIls: number;
   }) =>
@@ -76,6 +83,8 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
         ? t('status.holdDuplicate')
         : inv.status === 'hold' && inv.awaitingCount
           ? t('status.holdCount')
+          : inv.status === 'hold' && inv.awaitingQuestion
+            ? t('status.holdQuestion')
           : inv.status === 'hold' && inv.pendingLink
             ? t('status.holdLink')
             : t(`status.${inv.status}`);
@@ -264,7 +273,12 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
                         {inv.pendingIls > 0 ? (
                           <span className="text-xs text-muted">{t('table.pending', { amount: ils(inv.pendingIls) })}</span>
                         ) : null}
-                        {inv.status === 'hold' && !inv.pendingLink && !inv.awaitingCount ? (
+                        {inv.status === 'hold' && inv.awaitingQuestion ? (
+                          <LinkButton href="/dashboard/catalog/mapping" size="sm" variant="secondary" className="touch-target">
+                            {t('table.toQuestions')}
+                          </LinkButton>
+                        ) : null}
+                        {inv.status === 'hold' && !inv.pendingLink && !inv.awaitingCount && !inv.awaitingQuestion ? (
                           <LinkButton href="/dashboard/approvals" size="sm" variant="primary" className="touch-target">
                             {t('table.toApprovals')}
                           </LinkButton>

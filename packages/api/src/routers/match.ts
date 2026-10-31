@@ -1,12 +1,13 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { releaseClaimsForRematch } from '../recovery/service';
-import { and, desc, eq, invoices, matchRuns, restaurants } from '@restomatch/db';
+import { and, desc, eq, invoices, matchRuns, restaurants, sql } from '@restomatch/db';
 import { runMatch, type MatchStatus } from '@restomatch/matching';
 import { managerProcedure, router } from '../trpc';
 import { assertInvoiceOwned } from '../tenant';
 import { buildMatchInputForInvoice } from '../match/buildMatchInput';
 import { readConsolidatedRaw } from '../match/consolidated';
+import { appError } from '../errors';
 import { loadPriorDecisions, persistMatchRun } from '../match/persist';
 import { buildRules, resolveApprovalThresholds } from '../approvals/engine';
 
@@ -46,6 +47,21 @@ export const matchRouter = router({
         throw new TRPCError({
           code: 'PRECONDITION_FAILED',
           message: 'A consolidated invoice is cross-matched against its delivery notes, not re-matched to a PO.',
+        });
+      }
+
+      // G-08 hold: an unlinked line is an open "זה אותו מוצר?" question — the engine
+      // pairs only by product / SKU and would report a false MISSING + UNORDERED pair.
+      const [open] = (await ctx.db.execute(sql`
+        select count(*)::int as n from invoice_lines il
+          join invoices i on i.id = il.invoice_id and i.restaurant_id = ${restaurantId}
+         where il.invoice_id = ${input.invoiceId}::uuid and il.product_id is null
+           -- G-08 charge: a line answered "שורת חיוב — לא מוצר" is not a question
+           and not (coalesce(i.ocr_payload -> 'chargeLineIds', '[]'::jsonb) ? il.id::text)
+      `)) as unknown as Array<{ n: number }>;
+      if (Number(open?.n ?? 0) > 0) {
+        throw appError('PRECONDITION_FAILED', 'invoice.unlinkedLines', 'Invoice lines are not linked to a product yet.', {
+          count: Number(open!.n),
         });
       }
 

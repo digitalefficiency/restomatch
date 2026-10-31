@@ -8,6 +8,7 @@ import {
   invoices,
   matchRuns,
   poLines,
+  products,
   purchaseOrders,
   restaurants,
   suppliers,
@@ -24,6 +25,8 @@ let restaurantId = '';
 let supplierId = '';
 let poId = '';
 let grId = '';
+// G-08: lines carry a product (an order's name-only line is an open question that holds a first match).
+let productId = '';
 
 async function cleanup() {
   if (!restaurantId) return;
@@ -37,6 +40,7 @@ async function cleanup() {
   const pos = await db.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.restaurantId, restaurantId));
   for (const p of pos) await db.delete(poLines).where(eq(poLines.poId, p.id));
   await db.delete(purchaseOrders).where(eq(purchaseOrders.restaurantId, restaurantId));
+  await db.delete(products).where(eq(products.restaurantId, restaurantId));
   await db.delete(suppliers).where(eq(suppliers.restaurantId, restaurantId));
   await db.delete(restaurants).where(eq(restaurants.id, restaurantId));
 }
@@ -47,6 +51,8 @@ beforeEach(async () => {
   restaurantId = r!.id;
   const [s] = await db.insert(suppliers).values({ restaurantId, name: 'HaSharon' }).returning();
   supplierId = s!.id;
+  const [prod] = await db.insert(products).values({ restaurantId, supplierId, canonicalName: 'עגבניה', defaultUnit: 'kg' }).returning();
+  productId = prod!.id;
   const [po] = await db
     .insert(purchaseOrders)
     .values({ restaurantId, supplierId, expectedDeliveryAt: new Date(), status: 'sent', source: 'manual' })
@@ -54,7 +60,7 @@ beforeEach(async () => {
   poId = po!.id;
   const [pl] = await db
     .insert(poLines)
-    .values({ poId, rawDescription: 'עגבניה', qtyOrdered: '10', unit: 'kg', unitPriceExpected: '8' })
+    .values({ poId, productId, rawDescription: 'עגבניה', qtyOrdered: '10', unit: 'kg', unitPriceExpected: '8' })
     .returning();
   const [gr] = await db.insert(goodsReceipts).values({ restaurantId, poId, status: 'pending' }).returning();
   grId = gr!.id;
@@ -166,6 +172,7 @@ async function heldScan() {
   const [inv] = await db.insert(invoices).values({ restaurantId, supplierId, status: 'matched', source: 'photo' }).returning();
   await db.insert(invoiceLines).values({
     invoiceId: inv!.id,
+    productId,
     rawDescription: 'עגבניה',
     qtyBilled: '10',
     unit: 'kg',
@@ -213,7 +220,7 @@ describe('sibling PO (verifier MINOR 1 + 2): PO1 counted this morning, PO2 being
       .returning();
     const [pl1] = await db
       .insert(poLines)
-      .values({ poId: po1!.id, rawDescription: 'עגבניה', qtyOrdered: '10', unit: 'kg', unitPriceExpected: '8' })
+      .values({ poId: po1!.id, productId, rawDescription: 'עגבניה', qtyOrdered: '10', unit: 'kg', unitPriceExpected: '8' })
       .returning();
     const [gr1] = await db.insert(goodsReceipts).values({ restaurantId, poId: po1!.id, status: 'completed' }).returning();
     await db.insert(grLines).values({ grId: gr1!.id, poLineId: pl1!.id, qtyReceived: '10' });

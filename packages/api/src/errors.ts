@@ -32,6 +32,8 @@ export const APP_ERROR_CODES = [
   'auth.forbidden',
   'input.invalid',
   'invoice.numberTaken',
+  // G-08 hold: a manual re-match while an invoice line is still a question.
+  'invoice.unlinkedLines',
   'FEATURE_DISABLED',
   'leakCheck.invalidLink',
   'growth.referralInvalid',
