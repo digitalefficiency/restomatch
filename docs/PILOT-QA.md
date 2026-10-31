@@ -42,14 +42,20 @@ scripts/pilot-lab.sh`. Once it merges, it goes into `MERGED_ON_MAIN` in the spec
 - 7b (the chef places an order and sees ₪ on the orders screens) waits on W1-11.
 - 11, 8 and 9 wait on S2's manual invoice lines (#216). Without OCR keys, a fresh tenant gets no
   invoice lines. Step 11 runs first because it makes the findings for 8 and 9.
-  - 11: the owner enters two lines by hand on an OCR-failed invoice.
+  - 11: the owner enters three lines by hand on an OCR-failed invoice. Each line is picked from the
+    order line when the invoice knows its order; otherwise it's typed with the exact catalogue name.
     - In the lab, `lab.ts failed-invoice` writes that invoice row, as production does after a photo
       when there's no OCR key.
     - In Stage C, it is the invoice from 5b's upload.
-  - 8: approve one finding, reject one with a written note, and undo the rejection within 10 s.
-    It runs as the manager unless the queue routes the findings to the owner; the report then
-    notes "routing".
-  - 9: the claims letter carries the supplier and the approved ₪ amount.
+    - Expected result: oil at 1,300 against 1,250 ordered is one 50.00 ₪ price gap (not "item not
+      ordered"), and the never-ordered onions are a blocking finding.
+  - 8 follows the owner's routing decision (31.10): small gaps (₪50–300 / 2–5%) go to the manager;
+    larger ones and every blocking gap go to the owner.
+    - The manager sees the onions under "ממתין לאחרים" for the owner, and has the ₪50 oil gap in
+      their own queue.
+    - On the oil gap, the manager rejects it with a written note, undoes that within 10 s, then
+      approves it.
+  - 9: the claims letter carries the supplier and the approved ₪50.
 
 ## Stage A — local lab
 

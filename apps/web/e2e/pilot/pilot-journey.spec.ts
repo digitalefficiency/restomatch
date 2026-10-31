@@ -477,6 +477,20 @@ test('7b · chef orders per CHEF_CAN_CREATE_ORDERS; ₪ on the orders screens on
   expectCleanConsole('chef', 'chef orders');
 });
 
+/**
+ * Hand-entered lines, shaped by the owner's routing decision (31.10):
+ * - oil 1 × 1,300 vs 1,250 ordered → a ₪50 / 4% price gap → the MANAGER decides (₪50–300 / 2–5%);
+ * - tomatoes as ordered → no finding;
+ * - onions, never ordered → a blocking "item not ordered" → routed to the OWNER.
+ */
+const MANUAL_LINES = [
+  { desc: 'שמן זית 18 ליטר', qty: '1', unit: 'יח׳', price: '1300' },
+  { desc: 'עגבניה שרי', qty: '1', unit: 'ק״ג', price: '12.90' },
+  { desc: 'בצל יבש', qty: '5', unit: 'ק״ג', price: '3.20' },
+] as const;
+/** ₪ amounts as rendered: a bidi mark may sit between the number and the sign. */
+const MANAGER_GAP = /50\.00[\s\u200e\u200f]*₪/;
+
 test('11 · an OCR-failed invoice gets manual lines (runs before 8–9: it makes their findings)', async ({}, info) => {
   test.fixme(!MANUAL_LINES_ON_TREE, WAITS.manualLines);
   const page = await as('owner');
@@ -491,82 +505,74 @@ test('11 · an OCR-failed invoice gets manual lines (runs before 8–9: it makes
   await expect(page.getByTestId('invoice-ocr-failed')).toBeVisible({ timeout: 30_000 });
   const row = page.getByTestId('add-invoice-line-row');
   for (const l of MANUAL_LINES) {
-    await row.getByLabel('תיאור', { exact: true }).fill(l.desc);
+    // #216: when the invoice knows its order, pick the order line (links product / SKU); otherwise
+    // type the exact catalogue name, which the server links on its own.
+    const picker = row.getByTestId('pick-order-line');
+    const option = picker.locator('option', { hasText: l.desc });
+    if ((await picker.count()) > 0 && (await option.count()) > 0) {
+      await picker.selectOption({ label: ((await option.first().textContent()) ?? '').trim() });
+    } else {
+      await row.getByLabel('תיאור', { exact: true }).fill(l.desc);
+      await row.getByLabel('יחידה', { exact: true }).fill(l.unit);
+    }
     await row.getByLabel('כמות', { exact: true }).fill(l.qty);
-    await row.getByLabel('יחידה', { exact: true }).fill(l.unit);
     await row.getByLabel('מחיר יח׳', { exact: true }).fill(l.price);
     await page.getByTestId('add-invoice-line').click();
     await expect(row.getByLabel('תיאור', { exact: true })).toHaveValue('', { timeout: 30_000 }); // cleared on success
   }
   await page.reload();
   const text = await mainText(page);
-  expect(text).toMatch(/1,320\.00\s?₪/);
-  expect(text).toMatch(/38\.70\s?₪/);
+  expect(text).toMatch(/1,300\.00\s?₪/);
+  expect(text).toMatch(/16\.00\s?₪/);
   await expectMoneyRightAligned(page, 'invoice');
   await shot(page, info, '11-invoice-manual-lines');
-  // The oil was ordered at 1,250: the owner's truth is a 70 ₪ price gap on it, not an unordered item.
+  // The oil was ordered at 1,250: the truth is one ₪50 price gap on it — not "item not ordered".
   const queue = await visit(page, 'owner', '/dashboard/approvals');
-  expect
-    .soft(queue, 'hand-entered oil line should match the ordered product (70.00 ₪ price gap), not "item not ordered"')
-    .toMatch(/70\.00\s?₪/);
+  expect(queue, 'hand-entered oil line matched to its order line: a 50.00 ₪ price gap').toMatch(MANAGER_GAP);
+  expect(queue, 'onions were never ordered: a blocking "item not ordered"').toContain('בצל יבש');
   expectCleanConsole('owner', 'invoice manual lines');
 });
 
-/** Hand-entered lines: an overcharge on the oil (1,320 vs 1,250 ordered) and 3 kg of tomatoes billed. */
-const MANUAL_LINES = [
-  { desc: 'שמן זית 18 ליטר', qty: '1', unit: 'יח׳', price: '1320' },
-  { desc: 'עגבניה שרי', qty: '3', unit: 'ק״ג', price: '12.90' },
-] as const;
-
-/** The role the approvals queue routes these findings to: the manager, unless the queue says owner. */
-async function decider(): Promise<{ role: Role; page: Page }> {
-  const manager = await as('manager');
-  await visit(manager, 'manager', '/dashboard/approvals');
-  if ((await manager.getByTestId('decide-approve').count()) > 0) return { role: 'manager', page: manager };
-  test.info().annotations.push({
-    type: 'routing',
-    description: 'the manager’s queue routes these findings to the owner ("ממתינים לבעלים") — the owner decides',
-  });
-  const owner = await as('owner');
-  await visit(owner, 'owner', '/dashboard/approvals');
-  return { role: 'owner', page: owner };
-}
 
 test('8 · manager approves one finding, rejects one with a note, undoes within 10 s', async ({}, info) => {
   test.fixme(!MANUAL_LINES_ON_TREE, WAITS.manualLines);
   expect(state().invoiceId, "step 11's invoice (state file)").toBeTruthy();
-  const { role, page } = await decider();
+  const page = await as('manager');
+  await visit(page, 'manager', '/dashboard/approvals');
+  await shot(page, info, '8-approvals-manager');
+  // Routing (owner decision 31.10): the blocking onion line waits for the owner, the ₪50 gap is the
+  // manager's. With items of their own, the manager sees the owner's under "ממתין לאחרים".
+  const others = page.getByTestId('approvals-others');
+  await others.locator('summary').click();
+  await expect(others, 'blocking / large findings are routed to the owner').toContainText(/בעלים/);
+  await expect(others, 'the unordered onions (16.00 ₪) wait for the owner').toContainText(/16\.00[\s\u200e\u200f]*₪/);
   const cards = page.getByTestId('approval-card');
-  const before = await cards.count();
-  expect(before, 'findings waiting in the queue').toBeGreaterThanOrEqual(2);
-  await shot(page, info, `8-approvals-${role}`);
+  const gap = cards.filter({ hasText: SUPPLIER_PRODUCE }).filter({ hasText: MANAGER_GAP });
+  await expect(gap, 'the ₪50 / 4% oil gap is in the manager’s queue').toHaveCount(1);
   await expectMoneyRightAligned(page, 'approvals');
+  const before = await cards.count();
 
-  // Approve the first (→ claim): remember what step 9's letter must carry.
-  const first = cards.first();
-  const what = ((await first.innerText()).split('\n').find((l) => l.includes(SUPPLIER_PRODUCE)) ?? '').trim();
-  const amount = ((await first.getByTestId('card-amount').innerText()) || '').replace(/[‎‏]/g, '').trim();
-  await first.getByTestId('decide-approve').click();
-  await expect(page.getByTestId('approvals-undo')).toBeVisible();
-  remember({ claimed: { amount, what } });
-  // Let its 10 s undo window lapse, so the approval sticks.
-  await expect(page.getByTestId('approvals-undo')).toBeHidden({ timeout: 20_000 });
-  await expect(cards).toHaveCount(before - 1);
-
-  // Reject the next ("pay as billed") with a written note — then undo it inside the 10 s.
-  const next = cards.first();
-  await next.getByTestId('decide-reject').click();
+  // Reject it ("pay as billed") with a written note — and undo inside the 10 s window.
+  await gap.getByTestId('decide-reject').click();
   const reasons = page.getByTestId('waive-reasons');
   await reasons.getByRole('button', { name: 'אחר' }).click();
   await reasons.locator('textarea').fill('בדיקת פיילוט — הספק אישר בטלפון');
   await reasons.getByRole('button', { name: 'שלם כפי שחויב' }).click();
   await expect(page.getByTestId('approvals-undo')).toBeVisible();
-  await expect(cards).toHaveCount(before - 2);
+  await expect(cards).toHaveCount(before - 1);
   await page.getByTestId('approvals-undo-button').click();
   await expect(page.getByText('ההחלטה בוטלה · הפער חזר לתור').first()).toBeVisible();
+  await expect(cards).toHaveCount(before);
+
+  // Approve it (→ a claim), and let the 10 s undo window lapse so it sticks.
+  const amount = (await gap.getByTestId('card-amount').innerText()).replace(/[‎‏]/g, '').trim();
+  await gap.getByTestId('decide-approve').click();
+  await expect(page.getByTestId('approvals-undo')).toBeVisible();
+  remember({ claimed: { amount, what: 'שמן זית 18 ליטר' } });
+  await expect(page.getByTestId('approvals-undo')).toBeHidden({ timeout: 20_000 });
   await expect(cards).toHaveCount(before - 1);
-  await shot(page, info, '8-after-undo');
-  expectCleanConsole(role, 'approvals');
+  await shot(page, info, '8-after-decisions');
+  expectCleanConsole('manager', 'approvals');
 });
 
 test('9 · the claims letter renders with the supplier and ₪', async ({}, info) => {
