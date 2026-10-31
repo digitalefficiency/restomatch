@@ -27,13 +27,13 @@
 ## Wave 1
 
 - **#167 "release: wave 1"** = 12 UX packages (#140–#153) + **G-01** (#165: no "late delivery" e-mail for POs already received), in one merge.
-- Planned to merge **Sun 1.11 ~12:00 IST**, followed by one production build → smoke → promote.
+- **Merged** to `main` on **Sat 31.10.2026** (merge commit `759fb554`), earlier than the planned Sun 1.11 ~12:00. Next step: one production build → smoke → promote, done by Rom.
 
 ## Pilot timeline (IST)
 
 | When | What |
 |---|---|
-| Sun 1.11 ~12:00 | #167 merges. |
+| Sat 31.10 | #167 merged (`759fb554`). |
 | Mon 2.11 20:00 | Release train **A** cut-off: the pilot PRs that must be in before go-live. |
 | Tue 3.11 20:00 | Release train **B** cut-off (e.g. the Sentry dependency). `SENTRY_DSN` stays unset until the sub-processor list, `/privacy` and the DPA all name Sentry. |
 | Wed 4.11 | After this date `SERVERLESS_CRON_SKIP` is removed from production, so all scheduled tasks run. |
