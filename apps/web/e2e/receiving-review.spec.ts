@@ -97,9 +97,12 @@ async function scanAndProcess(page: Page, poId: string): Promise<string> {
     await route.fulfill({ response: res, json: body });
   });
   await page.goto(`/dashboard/receiving/${poId}`);
-  await page.locator('input[type="file"]').setInputFiles({ name: 'invoice.png', mimeType: 'image/png', buffer: TINY_PNG });
-  await expect(page.getByText(/^נשמר · scan-/)).toBeVisible({ timeout: 60_000 });
-  await page.getByRole('button', { name: /^עבד את החשבונית/ }).click();
+  // One input: the rear camera by default; "upload a file / PDF" widens it for one pick (W1-06).
+  await page.getByTestId('scan-input').setInputFiles({ name: 'invoice.png', mimeType: 'image/png', buffer: TINY_PNG });
+  // Uploaded — and no internal scan id on screen (RCV-30).
+  await expect(page.getByTestId('scan-status')).toHaveText('החשבונית הועלתה', { timeout: 60_000 });
+  await expect(page.getByTestId('scan-status')).not.toContainText('scan-');
+  await page.getByRole('button', { name: /^קראו את החשבונית/ }).click();
   await expect.poll(() => invoiceId, { timeout: 30_000 }).not.toBe('');
   return invoiceId;
 }
@@ -176,17 +179,20 @@ test('late OCR: the result lands after the order-only fallback and keeps what wa
   const invoiceId = await scanAndProcess(page, po.poId);
   const [a, b, c] = po.lines;
 
-  // No OCR yet: "still reading" after 30 s → continue with the order (the same
-  // branch as the 120 s timeout: order-only review + background re-poll).
+  // No OCR yet: "still reading" after 10 s → continue with the order (the same
+  // branch as the 120 s timeout: the order-only Delivery Check + background re-poll).
   await page.getByTestId('skip-ocr-wait').click({ timeout: 60_000 });
-  await expect(page.getByRole('heading', REVIEW)).toBeVisible();
+  await expect(page.getByTestId('delivery-check')).toBeVisible();
   await expect(page.getByTestId('ocr-notice-reading')).toBeVisible();
 
-  // The receiver counts one more of c than ordered.
-  await page.getByTestId('continue-adjust').click();
-  const cardC = page.locator('.adjust-card').filter({ hasText: c!.name });
-  await cardC.getByRole('button', { name: 'הגדל כמות' }).click();
-  await expect(cardC.getByRole('spinbutton', { name: 'כמות שהתקבלה' })).toHaveValue(String(c!.qty + 1));
+  // The receiver counts one more of c than ordered (a weighed line: typed, then
+  // confirmed — it is outside the engine's quantity tolerance).
+  const lineC = page.getByTestId('count-line').filter({ hasText: c!.name });
+  await lineC.getByTestId('count-edit').click();
+  await lineC.getByTestId('count-qty').fill(String(c!.qty + 1));
+  await lineC.getByTestId('count-confirm-qty').click();
+  await expect(lineC.getByRole('textbox', { name: /כמות שהתקבלה/ })).toHaveValue(String(c!.qty + 1));
+  await expect(lineC.getByTestId('line-save-state')).toHaveAttribute('data-state', 'saved', { timeout: 15_000 });
 
   // OCR finishes now — after the fallback.
   await finishOcr(invoiceId, [
@@ -195,7 +201,7 @@ test('late OCR: the result lands after the order-only fallback and keeps what wa
     { productId: c!.productId, name: c!.name, qty: c!.qty, price: c!.price },
   ]);
   await expect(page.getByTestId('ocr-notice-ready')).toBeVisible({ timeout: 60_000 });
-  await page.getByRole('button', { name: 'הצג תוצאות' }).click();
+  await page.getByRole('button', { name: 'הציגו תוצאות' }).click();
 
   // The review now carries the invoice lines…
   await expect(page.getByRole('heading', REVIEW)).toBeVisible();
@@ -204,12 +210,9 @@ test('late OCR: the result lands after the order-only fallback and keeps what wa
 
   // …and closing the receipt still records the hand count for c.
   await page.getByTestId('continue-adjust').click();
-  // Settle every other open line "= order"; c keeps the receiver's own count.
-  for (const card of await page.locator('.adjust-card').all()) {
-    if (!(await card.isVisible()) || (await card.innerText()).includes(c!.name)) continue;
-    const btn = card.getByRole('button', { name: /^= הזמנה/ });
-    if (await btn.isVisible()) await btn.click();
-  }
+  // Mark every other line "as ordered" in one tap; c keeps the receiver's own count.
+  await expect(page.getByTestId('count-line').filter({ hasText: c!.name })).toHaveAttribute('data-resolved', 'true');
+  await page.getByTestId('mark-rest').click();
   await expect(page.getByTestId('close-receipt')).toBeEnabled({ timeout: 15_000 });
   await page.getByTestId('close-receipt').click();
   await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 60_000 });

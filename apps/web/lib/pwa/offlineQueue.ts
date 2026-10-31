@@ -170,7 +170,11 @@ export async function clearQueue(store: QueueStore = idbQueueStore): Promise<voi
   for (const i of await store.list()) await store.remove(i.clientUploadId);
 }
 
-/** Drop every item that does not belong to `userId` (a different user signed in on this device). */
+/**
+ * Drop every item that does not belong to `userId`. No longer called at sign-in:
+ * other users' photos are kept and attributed (they upload when their owner
+ * signs in again, never under another account — see processQueue's scope).
+ */
 export async function purgeOtherUsers(userId: string, store: QueueStore = idbQueueStore): Promise<number> {
   let n = 0;
   for (const i of await store.list()) {
@@ -182,7 +186,23 @@ export async function purgeOtherUsers(userId: string, store: QueueStore = idbQue
   return n;
 }
 
-/** Marks the sign-out forms; PwaSessionGuard clears the queue when one is submitted. */
+/** This user's queued photos (any branch) — the sign-out guard names this count. */
+export async function countForUser(userId: string, store: QueueStore = idbQueueStore): Promise<number> {
+  return (await store.list()).filter((i) => i.userId === userId).length;
+}
+
+/** Other users' photos waiting on this device (kept, attributed, never uploaded here). */
+export async function countForOthers(userId: string, store: QueueStore = idbQueueStore): Promise<number> {
+  return (await store.list()).filter((i) => i.userId !== userId).length;
+}
+
+/** Delete ONLY this user's queued photos — the explicit "delete and sign out" choice. */
+export async function clearForUser(userId: string, store: QueueStore = idbQueueStore): Promise<void> {
+  for (const i of await store.list()) if (i.userId === userId) await store.remove(i.clientUploadId);
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(QUEUE_EVENT));
+}
+
+/** Marks the sign-out forms; PwaSessionGuard runs the queued-photos guard when one is submitted. */
 export const LOGOUT_FORM_ATTR = 'data-rm-logout';
 
 /** Only touch IndexedDB if the receiver database already exists (never create it just to check). */

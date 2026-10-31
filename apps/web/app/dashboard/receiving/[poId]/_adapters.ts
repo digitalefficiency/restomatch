@@ -47,6 +47,9 @@ export interface ReceiptLineRow {
   unit: string | null;
   qtyReceived: string | number | null;
   qtyRejected: string | number | null;
+  /** 'missing' / 'damaged' — what the Delivery Check recorded (getReceipt). */
+  rejectReason?: string | null;
+  conditionNotes?: string | null;
 }
 export interface InvoiceLineRow {
   id: string;
@@ -260,23 +263,7 @@ export function adaptReconciliation(args: {
     const key = lineKey(line);
     if (gr) grLineIdByKey[key] = gr.grLineId;
 
-    // Seed the mark from what was already received (or default to expected qty).
-    const recordedReceived = gr ? num(gr.qtyReceived) : null;
-    const recordedRejected = gr ? num(gr.qtyRejected) : null;
-    const defaultQty =
-      recordedReceived !== null && recordedReceived > 0
-        ? recordedReceived
-        : invoiceQty ?? poQty ?? 0;
-    initialMarks[key] = {
-      poLineId: line.poLineId,
-      invoiceLineIndex: line.invoiceLineIndex,
-      productId: line.productId,
-      productName: line.productName,
-      qtyReceived: defaultQty,
-      qtyRejected: recordedRejected ?? 0,
-      condition: (recordedRejected ?? 0) > 0 ? 'rejected' : 'ok',
-      touched: status === 'matched' || (recordedReceived !== null && recordedReceived > 0),
-    };
+    initialMarks[key] = markFromReceipt(line, gr, poQty ?? invoiceQty ?? 0);
   });
 
   // 2. Invoice lines that never matched a PO line. A line linked to a known
@@ -358,6 +345,36 @@ export function adaptReconciliation(args: {
 }
 
 /**
+ * Seed a line's mark from what the Delivery Check already saved on its gr_line
+ * (a reload / a resumed receipt restores every mark), else pre-fill it with
+ * the ordered quantity, UNRESOLVED. "Invoice = order" is never "arrived"
+ * (RCV-01): a line is resolved only by the receiver. A fresh gr_line is
+ * (0 received, 0 rejected, no reason) — that is "not counted yet".
+ */
+export function markFromReceipt(
+  line: Pick<ReconciliationLine, 'poLineId' | 'invoiceLineIndex' | 'productId' | 'productName'>,
+  gr: ReceiptLineRow | undefined,
+  defaultQty: number,
+): LineMark {
+  const received = gr ? num(gr.qtyReceived) : null;
+  const rejected = gr ? num(gr.qtyRejected) ?? 0 : 0;
+  const reason = gr?.rejectReason ?? null;
+  const damaged = reason === 'damaged' || /^damaged/.test(gr?.conditionNotes ?? '');
+  const counted = (received !== null && received > 0) || rejected > 0 || reason !== null || damaged;
+  return {
+    poLineId: line.poLineId,
+    invoiceLineIndex: line.invoiceLineIndex,
+    productId: line.productId,
+    productName: line.productName,
+    qtyReceived: counted ? (received ?? 0) : defaultQty,
+    qtyRejected: rejected,
+    condition: damaged ? 'damaged' : rejected > 0 ? 'rejected' : 'ok',
+    rejectReason: reason ?? (damaged ? 'damaged' : null),
+    touched: counted,
+  };
+}
+
+/**
  * Rebuild marks for a new review projection without losing what the receiver
  * already counted: for every line they adjusted by hand, keep their quantity /
  * rejection / condition; everything else takes the fresh defaults.
@@ -372,7 +389,14 @@ export function keepAdjusted(
     const p = prev[key];
     const n = next[key];
     if (!p || !n) continue;
-    out[key] = { ...n, qtyReceived: p.qtyReceived, qtyRejected: p.qtyRejected, condition: p.condition, touched: true };
+    out[key] = {
+      ...n,
+      qtyReceived: p.qtyReceived,
+      qtyRejected: p.qtyRejected,
+      condition: p.condition,
+      rejectReason: p.rejectReason ?? null,
+      touched: p.touched,
+    };
   }
   return out;
 }

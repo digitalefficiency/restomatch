@@ -38,7 +38,10 @@ export interface LineMark {
   qtyReceived: number;
   qtyRejected: number;
   condition: 'ok' | 'damaged' | 'rejected';
+  /** Why less arrived: 'missing' (never arrived — not a rejection) or 'damaged'. */
+  rejectReason?: string | null;
   notes?: string;
+  /** The receiver resolved this line (✓ as ordered, a count, missing, damaged). */
   touched: boolean;
 }
 
@@ -97,10 +100,9 @@ export function reducer(state: WizardState, action: WizardAction): WizardState {
       const initialMarks: Record<string, LineMark> = {};
       for (const l of action.result.lines) {
         const key = lineKey(l);
-        const defaultQty =
-          l.status === 'matched'
-            ? (l.invoiceQty ?? l.poQty ?? 0)
-            : (l.invoiceQty ?? l.poQty ?? 0);
+        // Pre-filled with what was ordered; nothing is resolved until the
+        // receiver says so (RCV-01: "invoice = order" is not "arrived").
+        const defaultQty = l.poQty ?? l.invoiceQty ?? 0;
         initialMarks[key] = {
           poLineId: l.poLineId,
           invoiceLineIndex: l.invoiceLineIndex,
@@ -109,7 +111,7 @@ export function reducer(state: WizardState, action: WizardAction): WizardState {
           qtyReceived: defaultQty,
           qtyRejected: 0,
           condition: 'ok',
-          touched: l.status === 'matched', // auto-touched
+          touched: false,
         };
       }
       return {
@@ -136,7 +138,8 @@ export function reducer(state: WizardState, action: WizardAction): WizardState {
           [action.lineKey]: {
             ...existing,
             ...action.patch,
-            touched: true,
+            // An explicit `touched: false` is an undo; every other change resolves the line.
+            touched: action.patch.touched ?? true,
           },
         },
       };
@@ -165,31 +168,68 @@ export function reducer(state: WizardState, action: WizardAction): WizardState {
   }
 }
 
-/** Count how many non-matched lines still need a touch in ADJUST_QUANTITIES. */
-export function pendingMarksCount(
+/** Delivery Check progress: how many of the lines the receiver has resolved ("9 מתוך 12 אושרו"). */
+export function countProgress(
   reconciliation: ReconciliationResult | null,
   marks: Record<string, LineMark>,
-): { pending: number; total: number; matched: number } {
-  if (!reconciliation) return { pending: 0, total: 0, matched: 0 };
-  let pending = 0;
-  let total = 0;
-  let matched = 0;
-  for (const l of reconciliation.lines) {
-    if (l.status === 'matched') {
-      matched += 1;
-      continue;
-    }
-    total += 1;
-    const mark = marks[lineKey(l)];
-    if (!mark || !mark.touched) pending += 1;
-  }
-  return { pending, total, matched };
+): { resolved: number; total: number } {
+  if (!reconciliation) return { resolved: 0, total: 0 };
+  let resolved = 0;
+  for (const l of reconciliation.lines) if (marks[lineKey(l)]?.touched) resolved += 1;
+  return { resolved, total: reconciliation.lines.length };
 }
 
-/** Returns only the non-matched lines for the AdjustQuantities screen. */
-export function nonMatchedLines(result: ReconciliationResult | null): ReconciliationLine[] {
+/** A line the receiver still has to resolve, in the order the bulk action resolves it. */
+export function unresolvedOrderLines(
+  result: ReconciliationResult | null,
+  marks: Record<string, LineMark>,
+): ReconciliationLine[] {
   if (!result) return [];
-  return result.lines.filter((l) => l.status !== 'matched');
+  return result.lines.filter((l) => l.poLineId !== null && !marks[lineKey(l)]?.touched);
+}
+
+/** ✓ as ordered. */
+export function asOrderedPatch(line: ReconciliationLine): Partial<LineMark> {
+  return { qtyReceived: line.poQty ?? 0, qtyRejected: 0, condition: 'ok', rejectReason: null };
+}
+
+/** Nothing of it arrived: 0 received, NOTHING rejected (the slip says "חסר", never "נפסל/פגום"). */
+export const MISSING_PATCH: Partial<LineMark> = { qtyReceived: 0, qtyRejected: 0, condition: 'ok', rejectReason: 'missing' };
+
+/** Arrived damaged (kept as a quality note; the count stays what was counted). */
+export const DAMAGED_PATCH: Partial<LineMark> = { condition: 'damaged', rejectReason: 'damaged' };
+
+/** A typed / stepped count. 0 is "missing"; a count clears an earlier "missing". */
+export function qtyPatch(mark: LineMark, qty: number): Partial<LineMark> {
+  if (qty === 0) return MISSING_PATCH;
+  return {
+    qtyReceived: qty,
+    qtyRejected: 0,
+    condition: mark.condition === 'rejected' ? 'ok' : mark.condition,
+    rejectReason: mark.rejectReason === 'missing' ? null : (mark.rejectReason ?? null),
+  };
+}
+
+/**
+ * "✓ סמנו את השאר כמו בהזמנה": every unresolved ORDER line becomes "as
+ * ordered". Lines that are only on the invoice (not ordered) are left for the
+ * receiver — "as ordered" says nothing about them. Returns the new marks and
+ * the previous marks of the lines it changed (for the 10 s undo).
+ */
+export function markRestAsOrdered(
+  result: ReconciliationResult | null,
+  marks: Record<string, LineMark>,
+): { next: Record<string, LineMark>; previous: Record<string, LineMark> } {
+  const next = { ...marks };
+  const previous: Record<string, LineMark> = {};
+  for (const line of unresolvedOrderLines(result, marks)) {
+    const key = lineKey(line);
+    const prev = marks[key];
+    if (!prev) continue;
+    previous[key] = prev;
+    next[key] = { ...prev, ...asOrderedPatch(line), touched: true };
+  }
+  return { next, previous };
 }
 
 /**
