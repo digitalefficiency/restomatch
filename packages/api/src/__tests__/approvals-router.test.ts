@@ -335,7 +335,12 @@ describe('approvals role deadlock (DUPLICATE_INVOICE → bookkeeper)', () => {
     const id = await seedBookkeeperItem(s);
     const queue = await bk(s).approvals.myQueue();
     expect(queue.map((q) => q.id)).toEqual([id]);
-    const updated = await bk(s).approvals.reject({ discrepancyId: id, reason: 'כפולה — לא לשלם' });
+    // reject() on a duplicate = "not a duplicate, pay it" — the reason must say that, not "don't pay".
+    const updated = await bk(s).approvals.reject({
+      discrepancyId: id,
+      reason: 'זו חשבונית אחרת, לא כפולה',
+      reasonCode: 'not_duplicate',
+    });
     expect(updated.resolutionStatus).toBe('rejected');
   });
 
@@ -625,5 +630,51 @@ describe('approval e-mail names the decisions', () => {
     expect(text).toContain(DECISION_COPY.he.reject);
     expect(text).toContain('דרוש מהספק');
     expect(html).toContain(DECISION_COPY.he.reject);
+  });
+});
+
+describe('claimability (verbs keyed by type AND claimability)', () => {
+  it('myQueue flags each row: warn/block with ₪ is claimable; info, PRICE_LOWER and ₪0 are checks', async () => {
+    const s = await seed();
+    const info = await insertD(s, { type: 'QTY_SHORT', severity: 'info', deltaAmount: '4.50' });
+    const lower = await insertD(s, { type: 'PRICE_LOWER', severity: 'warn', deltaAmount: '-3.00' });
+    const zero = await insertD(s, { type: 'UNIT_MISMATCH', severity: 'warn', deltaAmount: '0' });
+    const q = await ownerOf(s).approvals.myQueue({ limit: 100 });
+    const flag = (id: string) => q.find((r) => r.id === id)!.claimable;
+    expect(flag(s.discrepancyOwnerId)).toBe(true);
+    expect(flag(s.discrepancyManagerId)).toBe(true);
+    expect(flag(info.id)).toBe(false);
+    expect(flag(lower.id)).toBe(false);
+    expect(flag(zero.id)).toBe(false);
+  });
+
+  it('queueSummary splits "להחלטה (₪)" from "לבדיקה (ללא ₪)"', async () => {
+    const s = await seed();
+    await insertD(s, { type: 'QTY_SHORT', severity: 'info', deltaAmount: '4.50' });
+    await insertD(s, { type: 'PRICE_LOWER', severity: 'warn', deltaAmount: '-3.00' });
+    const sum = await ownerOf(s).approvals.queueSummary();
+    expect(sum.count).toBe(4);
+    expect(sum.toDecide.count).toBe(2);
+    expect(sum.toReview).toEqual({ count: 2 });
+    expect(sum.toDecide.amountIls).toBe(sum.claimableIls);
+  });
+
+  it('the others lane sums only claimable ₪', async () => {
+    const s = await seed();
+    await insertD(s, { type: 'QTY_SHORT', severity: 'info', deltaAmount: '95.23', requiresRole: 'owner' });
+    const sum = await managerOf(s).approvals.queueSummary();
+    // seed's owner block ₪300 counts; the info ₪95.23 is a check, not money.
+    expect(sum.others).toMatchObject({ count: 2, amountIls: 300 });
+  });
+
+  it('an accepted duplicate is logged as a hold, never as a claim', async () => {
+    const { DECISION_COPY } = await import('../notifications/templates');
+    const { activityEvents } = await import('@restomatch/db');
+    const s = await seed();
+    const dup = await insertD(s, { type: 'DUPLICATE_INVOICE', severity: 'block', deltaAmount: '1170', requiresRole: 'manager' });
+    await managerOf(s).approvals.approve({ discrepancyId: dup.id });
+    const [row] = await db.select().from(activityEvents).where(eq(activityEvents.entityId, dup.id));
+    expect(row!.title).toBe(DECISION_COPY.he.duplicateHeld);
+    expect(row!.title).not.toBe(DECISION_COPY.he.approved);
   });
 });

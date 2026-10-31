@@ -50,13 +50,8 @@ const EXIT_MS = 150;
 /** Undo toast lifetime (R-7); the server allows a little more (REOPEN_WINDOW_MS). */
 const UNDO_MS = 10_000;
 
-/** Types whose ₪ is in the server's claimable total (lib/claims: leak lines only). */
-const NOT_CLAIMABLE = new Set([
-  'PRICE_LOWER',
-  'UNORDERED_ARRIVAL',
-  'DUPLICATE_INVOICE',
-  'MISSING_ON_INVOICE',
-]);
+/** A duplicate's ₪ (incl. VAT) is reported apart from the claimable total. */
+const OUTSIDE_CLAIMABLE_TOTAL = new Set(['DUPLICATE_INVOICE']);
 
 type Decide =
   | { procedure: 'approve' }
@@ -140,8 +135,12 @@ export function ApprovalsList({
       ...s,
       count: Math.max(0, s.count + sign),
       blockers: Math.max(0, s.blockers + (d.severity === 'block' ? sign : 0)),
+      toDecide: d.claimable
+        ? { ...s.toDecide, count: Math.max(0, s.toDecide.count + sign) }
+        : s.toDecide,
+      toReview: d.claimable ? s.toReview : { count: Math.max(0, s.toReview.count + sign) },
       claimableIls:
-        NOT_CLAIMABLE.has(d.type) || d.severity === 'info'
+        !d.claimable || OUTSIDE_CLAIMABLE_TOTAL.has(d.type)
           ? s.claimableIls
           : Math.max(
               0,
@@ -333,6 +332,10 @@ export function ApprovalsList({
             <SummaryTile
               label={t('summary.inQueue')}
               value={formatNumber(summary.count, locale)}
+              caption={t('summary.split', {
+                decide: formatNumber(summary.toDecide.count, locale),
+                review: formatNumber(summary.toReview.count, locale),
+              })}
               testId="summary-count"
             />
             <SummaryTile
@@ -500,7 +503,7 @@ function DecisionCard({
   const supplier = displayName(locale, d.supplierName, d.supplierNameEn);
   const amountNum = Math.abs(Number(d.deltaAmount ?? 0));
   const amount = formatIls(amountNum, { locale, maximumFractionDigits: 2 });
-  const actions = decisionActions(d.type);
+  const actions = decisionActions(d.type, d.claimable);
   const why = whyLine(t, d);
   const headId = `dq-${d.id}-title`;
   const sumId = `dq-${d.id}-summary`;

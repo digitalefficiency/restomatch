@@ -343,6 +343,7 @@ export const DECISION_COPY = {
     rejected: 'שולם כפי שחויב',
     escalated: 'הועבר לבעלים',
     reopened: 'ההחלטה בוטלה',
+    duplicateHeld: 'העותק מוחזק · לא ישולם',
   },
   en: {
     approve: 'Claim {amount} back',
@@ -352,6 +353,7 @@ export const DECISION_COPY = {
     rejected: 'Paid as billed',
     escalated: 'Sent to owner',
     reopened: 'Decision undone',
+    duplicateHeld: 'Copy held · not paid',
   },
 } as const satisfies Record<EmailLocale, Record<string, string>>;
 
