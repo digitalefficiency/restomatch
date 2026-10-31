@@ -70,6 +70,16 @@ describe('invoices.list / counts', () => {
     expect(r.counts.matched).toBe(0);
   });
 
+  it('the five state tabs sum to the month total (a partition) and ממתינות לשיוך = the hero pendingLinkCount', async () => {
+    // Make one invoice of A unmatched (awaiting link) next to the flagged one.
+    await ownerDb.update(matchRuns).set({ invoiceId: null }).where(eq(matchRuns.id, A.matchRunId));
+    const r = await callerOf(A).invoices.list({});
+    const c = r.counts;
+    expect(c.review + c.awaiting + c.matched + c.held + c.paid).toBe(r.rows.length);
+    const hero = await computeLeakHero(ownerDb, A.restaurantId, { now: new Date() });
+    expect(c.awaiting).toBe(hero.pendingLinkCount);
+  });
+
   it('visible total = Σ visible rows', async () => {
     const r = await callerOf(A).invoices.list({ tab: 'review' });
     expect(r.totals.totalInclVatAgorot).toBe(r.rows.reduce((s, x) => s + x.totalInclVatAgorot, 0));
