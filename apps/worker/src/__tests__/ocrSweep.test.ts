@@ -50,8 +50,14 @@ afterAll(async () => {
 });
 
 describe('ocr-pending retry sweep (Postgres queue)', () => {
+  it('sweeps only tenants on real OCR: an empty list or another tenant enqueues nothing', async () => {
+    expect(mine((await runOcrSweep(sql, NOW, [])).requeued)).toEqual([]);
+    expect(mine((await runOcrSweep(sql, NOW, ['33333333-3333-4333-8333-333333333333'])).requeued)).toEqual([]);
+    expect(await jobsFor(ids.stale!)).toHaveLength(0);
+  });
+
   it('re-enqueues only stale, never-run, http(s) invoices whose scan URL is still valid', async () => {
-    const res = await runOcrSweep(sql, NOW);
+    const res = await runOcrSweep(sql, NOW, [restaurantId]);
     expect(mine(res.requeued).sort()).toEqual([ids.race, ids.stale].sort());
     const [job] = await jobsFor(ids.stale!);
     expect(job).toMatchObject({
@@ -65,14 +71,14 @@ describe('ocr-pending retry sweep (Postgres queue)', () => {
   });
 
   it('is idempotent: the retry job itself counts as "on record"', async () => {
-    const second = await runOcrSweep(sql, new Date(NOW.getTime() + 5 * 60_000));
+    const second = await runOcrSweep(sql, new Date(NOW.getTime() + 5 * 60_000), [restaurantId]);
     expect(mine(second.requeued)).toEqual([]);
     expect(await jobsFor(ids.stale!)).toHaveLength(1);
   });
 
   it('two sweeps racing on the same invoice enqueue it once (dedupe key)', async () => {
     await sql`DELETE FROM job_queue WHERE payload->>'invoiceId' = ${ids.race!}`;
-    const [a, b] = await Promise.all([runOcrSweep(sql, NOW), runOcrSweep(sql, NOW)]);
+    const [a, b] = await Promise.all([runOcrSweep(sql, NOW, [restaurantId]), runOcrSweep(sql, NOW, [restaurantId])]);
     const won = [...a.requeued, ...b.requeued].filter((id) => id === ids.race);
     expect(won).toHaveLength(1);
     expect(await jobsFor(ids.race!)).toHaveLength(1);
@@ -119,14 +125,14 @@ describe('ocr-pending retry sweep — commit-race refusal (Postgres queue)', () 
 
   it('an original job refused by the tenant guard did not really run: it gets its one retry; other failures never do', async () => {
     const ours = (list: string[]) => list.filter((id) => Object.values(ids2).includes(id));
-    const res = await runOcrSweep(sql, NOW);
+    const res = await runOcrSweep(sql, NOW, [rid2]);
     expect(ours(res.requeued).sort()).toEqual([ids2.refused, ids2.receiving].sort());
     const jobs = await jobsFor(ids2.refused!);
     expect(jobs.map((j) => j.dedupe_key ?? '').sort()).toEqual(['', `ocr-sweep-${ids2.refused}`].sort());
     expect(await jobsFor(ids2.quota!)).toHaveLength(1);
     expect(await jobsFor(ids2.retryRefused!)).toHaveLength(1);
     // Once retried, the retry job is on record: a later sweep does not enqueue it again.
-    const again = await runOcrSweep(sql, new Date(NOW.getTime() + 5 * 60_000));
+    const again = await runOcrSweep(sql, new Date(NOW.getTime() + 5 * 60_000), [rid2]);
     expect(ours(again.requeued)).toEqual([]);
     expect(await jobsFor(ids2.refused!)).toHaveLength(2);
   });
