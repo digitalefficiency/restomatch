@@ -6,7 +6,8 @@
  *
  *   1. CREATE DATABASE restomatch_e2e (if missing) on the same server
  *   2. migrate (every journal entry) + provision-rls (policies + restomatch_app)
- *   3. seed + seed-demo  → the "כפר הזיתים" demo tenant, fully matched
+ *   3. seed + seed-demo  → the "כפר הזיתים" demo tenant, fully matched,
+ *      then the claims of its decisions (syncClaims catch-up, W2-10a)
  *   4. print `E2E_APP_URL=<restomatch_app DSN>` so the web server runs on the
  *      RLS-enforced app role, exactly like production.
  *
@@ -26,6 +27,19 @@ if (!['localhost', '127.0.0.1'].includes(parsed.hostname)) {
 }
 const dbName = parsed.pathname.replace(/^\//, '');
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+
+/** Every restaurant: create the claims of decisions already taken (syncClaims). */
+const CLAIMS_CATCH_UP = `
+(async () => {
+  const { createDb, restaurants } = await import('@restomatch/db');
+  const { syncClaims } = await import('./src/recovery/service.ts');
+  const db = createDb(process.env.DATABASE_URL);
+  let n = 0;
+  for (const r of await db.select({ id: restaurants.id }).from(restaurants)) n += await syncClaims(db, r.id);
+  console.error('[e2e-db] claims materialised: ' + n);
+  process.exit(0);
+})().catch((e) => { console.error(e); process.exit(1); });
+`;
 
 function run(args: string[], extraEnv: Record<string, string> = {}): string {
   return execFileSync('pnpm', args, {
@@ -64,6 +78,11 @@ async function main(): Promise<void> {
   if (!seeded) {
     run(['--filter', '@restomatch/db', 'seed']);
     run(['--filter', '@restomatch/worker', 'exec', 'tsx', 'scripts/seed-demo.ts']);
+    // W2-10a: a recovery read no longer creates claims (they are made at decision
+    // time). seed-demo writes its decisions directly, so materialise their claims
+    // once here — the same catch-up the old read path did (all `claimed`, credited
+    // to the decider), and nothing more.
+    run(['--filter', '@restomatch/api', 'exec', 'tsx', '-e', CLAIMS_CATCH_UP]);
   }
   // Last line is machine-read by playwright.config.ts.
   process.stdout.write(`E2E_APP_URL=${appUrl}\n`);

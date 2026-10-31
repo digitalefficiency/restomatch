@@ -138,6 +138,11 @@ export async function enqueueRecoveryReminders(
     try {
       if (!(await isFeatureOn(db, r.id, 'recovery'))) continue;
       processed += 1;
+      // Interim catch-up (a job, not a read): claims are materialised at
+      // decision time once W2-04 calls materializeClaims inside approve; until
+      // then this daily pass creates the missing ones, attributed to the
+      // decider (resolved_by) and dated at the decision (resolved_at).
+      // TODO(W2-04/W2-10): drop this call once approve materialises claims.
       await syncClaims(db, r.id);
       const overdue = await findOverdue(db, r.id, now);
       if (overdue.claimIds.length === 0) continue;
