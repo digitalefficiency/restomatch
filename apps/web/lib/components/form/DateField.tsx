@@ -130,8 +130,8 @@ function todayIso(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date());
 }
 
-/** Sunday-first month grid with arrow-key navigation (RTL-aware), Enter/Space picks, Esc closes. */
-function Calendar({
+/** Sunday-first month grid with arrow-key navigation (RTL-aware), Enter/Space picks, Esc closes. Exported for tests. */
+export function Calendar({
   id,
   selected,
   min,
@@ -162,6 +162,8 @@ function Calendar({
   ); // 4 Oct 2026 is a Sunday
   const rtl = locale === 'he';
   const allowed = (d: string) => (!min || d >= min) && (!max || d <= max);
+  // "Today" obeys min/max like every other day: out of range, it is disabled and picks nothing.
+  const today = todayIso();
 
   useEffect(() => {
     grid.current?.querySelector<HTMLButtonElement>(`[data-day="${focusDay}"]`)?.focus();
@@ -254,7 +256,12 @@ function Calendar({
         ))}
       </div>
       <div className="mt-2 flex justify-end">
-        <button type="button" onClick={() => onPick(todayIso())} className="rounded-control px-2 py-1 text-body-sm font-semibold text-primary hover:underline">
+        <button
+          type="button"
+          disabled={!allowed(today)}
+          onClick={() => allowed(today) && onPick(today)}
+          className="rounded-control px-2 py-1 text-body-sm font-semibold text-primary hover:underline disabled:cursor-not-allowed disabled:text-subtle disabled:no-underline"
+        >
           {t('ds.dateField.today')}
         </button>
       </div>
