@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { daySpan, heroDelta, leakHeroState, showsPct } from '..';
+import { daySpan, heroDelta, leakHeroState, leakSplit, showsPct } from '..';
 
 const base = { leakIls: 0, spendIls: 0, leakPct: null, invoiceCount: 0, matchedInvoiceCount: 0, pendingLinkCount: 0 };
 
@@ -49,4 +49,21 @@ describe('daySpan', () => {
     expect(day(from)).toBe('1 Sept');
     expect(day(to)).toBe('25 Sept');
   });
+});
+
+describe('leakSplit — the hero parts always add up to the hero', () => {
+  it('lab: ₪759.54 leak, ₪296 on unpaid invoices → ₪296 + ₪463.54 (paid), to the agora', () => {
+    const p = leakSplit({ leakIls: 759.54, caughtBeforePaymentIls: 296 });
+    expect(p).toEqual({ unpaidIls: 296, paidIls: 463.54 });
+    expect(Math.round((p.unpaidIls + p.paidIls) * 100)).toBe(75954);
+  });
+  it('never negative, never more than the leak', () => {
+    expect(leakSplit({ leakIls: 100, caughtBeforePaymentIls: 120 })).toEqual({ unpaidIls: 100, paidIls: 0 });
+    expect(leakSplit({ leakIls: 0.3, caughtBeforePaymentIls: 0.1 })).toEqual({ unpaidIls: 0.1, paidIls: 0.2 });
+  });
+});
+
+describe('leakHeroState — scans waiting for their count are not "no data"', () => {
+  it('only awaiting-count scans → pendingOnly (no "צלמו חשבונית" CTA)', () =>
+    expect(leakHeroState({ ...base, invoiceCount: 3, awaitingCountCount: 3 })).toBe('pendingOnly'));
 });

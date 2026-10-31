@@ -5,6 +5,7 @@ import type { Locale } from '@/lib/i18n/config';
 import type { Translator } from '@/lib/i18n/translate';
 import type { he as overviewHe } from '@/lib/i18n/messages/overview/he';
 import type { Caller } from './caller';
+import { ReopenReceipt } from './reopen-receipt';
 
 type Receipt = Awaited<ReturnType<Caller['receiving']['getReceipt']>>;
 
@@ -15,11 +16,16 @@ type Receipt = Awaited<ReturnType<Caller['receiving']['getReceipt']>>;
  */
 export function ReceiptView({
   receipt,
+  poId,
+  canReopen,
   supplierName,
   t,
   locale,
 }: {
   receipt: Receipt;
+  poId: string;
+  /** May this viewer receive goods (owner / manager / receiver)? */
+  canReopen: boolean;
   supplierName: string;
   t: Translator<typeof overviewHe>;
   locale: Locale;
@@ -42,7 +48,7 @@ export function ReceiptView({
         <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted">
           <CheckCircle2 className="h-4 w-4 text-primary" aria-hidden="true" />
           <span className="font-semibold text-primary">
-            {receipt.status === 'partial' ? t('board.cta.partial') : t('board.cta.received')}
+            {receipt.status === 'partial' || receipt.status === 'rejected' ? t('board.cta.partial') : t('board.cta.received')}
           </span>
           <span aria-hidden="true">·</span>
           <span className="tabular-nums">{formatDate(receipt.receivedAt, locale, { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
@@ -76,6 +82,14 @@ export function ReceiptView({
             })}
           </tbody>
         </table>
+        {canReopen && receipt.status === 'partial' ? (
+          <ReopenReceipt
+            poId={poId}
+            label={t('board.receipt.followUp.cta')}
+            hint={t('board.receipt.followUp.hint')}
+            failed={t('board.receipt.followUp.failed')}
+          />
+        ) : null}
       </div>
     </section>
   );

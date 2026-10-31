@@ -37,11 +37,9 @@ export const he = {
     pctOfSpend: '{pct} מהקניות שנבדקו',
     spendBase: 'מתוך {spend} לפני מע״מ',
     noSpend: 'עדיין אין חשבוניות החודש',
-    /** Split of the leak (the two parts add up to it). */
-    caught: 'ממתין להחלטה',
-    caughtHint: 'פערים בחשבוניות שעוד לא הוחלט עליהם',
-    recovered: 'נדרש מהספקים',
-    recoveredHint: 'פערים שאושרו לדרישה מהספק',
+    /** Split of the leak by payment status (the two parts add up to it, to the agora). */
+    unpaid: 'על חשבוניות שעוד לא שולמו',
+    paid: 'על חשבוניות ששולמו',
     split: 'מתוכם',
     invoices: 'חשבוניות עם פער',
     invoicesValue: '{withLeak} מתוך {total}',
@@ -66,6 +64,7 @@ export const he = {
       same: 'ללא שינוי',
       vs: 'לעומת {range}',
       none: 'אין חשבוניות באותם ימים בחודש הקודם להשוואה',
+      noneYoy: 'אין חשבוניות באותם ימים בשנה שעברה להשוואה',
     },
     range: '{from}–{to} ב{month}',
     returned: 'הוחזר החודש',
@@ -156,6 +155,11 @@ export const he = {
       received: 'התקבל',
       rejected: 'נדחה',
       notFound: 'הקבלה לא נמצאה',
+      followUp: {
+        cta: 'הגיע משלוח המשך — להשלים את הקבלה',
+        hint: 'הקבלה תיפתח שוב לספירת מה שהגיע עכשיו. הפתיחה נרשמת ביומן.',
+        failed: 'לא הצלחנו לפתוח את הקבלה. נסו שוב.',
+      },
     },
   },
   kpis: {
@@ -164,10 +168,10 @@ export const he = {
     cleanNone: 'אין התאמות עדיין השבוע',
   },
   leaks: {
-    title: 'זחילת מחירים · 30 יום אחרונים',
-    subtitle: 'מחירים שעלו מעל המחיר הרגיל. מדד נפרד — לא חלק מהדליפה של החודש.',
+    title: 'מחירים שעלו · 30 יום אחרונים',
+    subtitle: 'מעל המחיר הרגיל אצל אותו ספק. מדד נפרד — לא נספר בדליפה של החודש.',
     all: 'לכל עליות המחיר',
-    upsell: 'שדרגו כדי לפתוח את בלש הדליפות',
+    upsell: 'שדרגו כדי לראות את כל המחירים שעלו',
   },
   activity: {
     title: 'פעילות אחרונה',

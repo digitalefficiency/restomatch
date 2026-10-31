@@ -91,8 +91,10 @@ test.describe('staff homes: no owner money', () => {
       await expect(page.getByTestId('leak-hero')).toHaveCount(0);
       await expect(page.getByTestId('needs-you')).toHaveCount(0);
       await expect(page.getByTestId('home-view-toggle')).toHaveCount(0);
-      // The back door never sees the restaurant's money.
+      // The back door never sees the restaurant's money (the server side — which
+      // procedures the home calls — is pinned by staff-homes.server.test.ts).
       await expect(page.locator('main')).not.toContainText('₪');
+      await expect(page.getByTestId('home-activity')).toHaveCount(0);
       const cta = page.getByTestId('board-next-cta');
       if (await cta.count()) {
         const box = (await cta.boundingBox())!;
@@ -119,6 +121,9 @@ test.describe('staff homes: no owner money', () => {
       await expect(page.getByTestId('home-view-toggle')).toHaveCount(0);
       const m = messagesOf(await page.locator('html').getAttribute('lang'));
       await expect(page.locator('main')).not.toContainText(m.hero.leakedLabel);
+      // Food-cost % only: no ₪ and no activity feed on the kitchen home.
+      await expect(page.locator('main')).not.toContainText('₪');
+      await expect(page.getByTestId('home-activity')).toHaveCount(0);
       expect(await axeSerious(page)).toEqual([]);
     } finally {
       await context.close();
@@ -147,12 +152,29 @@ test.describe('owner home', () => {
     // The view toolbar is behind one chip on the phone, not a filter form above the money.
     await expect(page.getByTestId('home-view-toggle')).toBeVisible();
     await expect(page.locator('#home-view-toolbar')).toBeHidden();
+
+    // The split tiles are real targets on the phone (≥48 px), and the ⓘ note opens inside the viewport.
+    for (const id of ['hero-unpaid', 'hero-paid']) {
+      const tile = page.getByTestId(id);
+      if (await tile.count()) expect((await tile.boundingBox())!.height, `${id} target height`).toBeGreaterThanOrEqual(48);
+    }
+    const info = page.locator(`[data-testid="leak-hero"] summary[aria-label="${ovHe.hero.howCalc}"]`);
+    if (await info.count()) {
+      await info.click();
+      const note = page.locator('[data-testid="leak-hero"] details[open] > p').first();
+      await expect(note).toBeVisible();
+      const box = (await note.boundingBox())!;
+      expect(box.x, 'ⓘ note left edge').toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width, 'ⓘ note right edge').toBeLessThanOrEqual(PHONE_SMALL.viewport.width);
+    }
   });
 
   test('1440×900: strip ≤330 px, compact hero ≤260 px, page ≤1,800 px, trend collapsed, no target line', async ({ page }) => {
     await page.setViewportSize(DESKTOP.viewport);
     await page.goto('/dashboard');
     await expect(page.getByTestId('leak-hero')).toBeVisible();
+    // Each card streams on its own: wait for the strip itself before measuring it.
+    await expect(page.getByTestId('needs-you')).toBeVisible();
     const strip = (await page.getByTestId('needs-you').boundingBox())!;
     expect(strip.y + strip.height, 'Needs-you strip bottom').toBeLessThanOrEqual(330);
     const hero = (await page.getByTestId('leak-hero').boundingBox())!;
@@ -201,6 +223,12 @@ test.describe('owner home', () => {
     const hero = page.getByTestId('leak-hero');
     await expect(hero).toBeVisible();
     await expect(hero).not.toContainText('נתפס לפני תשלום');
+    // The hero's two parts (by payment status) add up to the hero.
+    if (await hero.getByTestId('hero-unpaid').count()) {
+      const part = async (id: string, label: string) => amount((await hero.getByTestId(id).innerText()).replace(label, ''));
+      const sum = (await part('hero-unpaid', ovHe.hero.unpaid)) + (await part('hero-paid', ovHe.hero.paid));
+      expect(Math.abs(sum - amount(await hero.getByTestId('leak-hero-amount').innerText())), 'unpaid + paid = hero ₪').toBeLessThanOrEqual(1);
+    }
     const rows = page.locator('[data-testid="needs-you"] [data-needs-row] a');
     expect(await rows.count()).toBeGreaterThan(0);
     for (const a of await rows.all()) {
@@ -262,6 +290,9 @@ test.describe('owner home', () => {
       await expect(failed).toContainText(ovHe.section.failed);
       await expect(failed.getByRole('button', { name: ovHe.section.retry })).toBeVisible();
     }
+    // "נסו שוב" never drops focus to <body> (it fails again here: the new retry button takes it).
+    await page.getByTestId('home-section-failed-vat').getByRole('button', { name: ovHe.section.retry }).click();
+    await expect(page.getByTestId('home-section-failed-vat').getByRole('button', { name: ovHe.section.retry })).toBeFocused();
     await expect(page.getByTestId('needs-you')).toBeVisible();
   });
 });
