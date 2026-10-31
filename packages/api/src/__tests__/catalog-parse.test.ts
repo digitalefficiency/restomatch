@@ -173,7 +173,7 @@ describe('strict money cells (catalog-02: "1,250" was stored as ₪1.25)', () =>
     expect(parseMoneyCell(raw)).toEqual({ kind: 'ok', value: expected });
     expect(parseNumeric(raw)).toBe(expected);
   });
-  it.each(['-5', '(5)', '1e3', '1,2345', '1.250,5', 'abc', '₪', '12-'])('rejects %s', (raw) => {
+  it.each(['-5', '(5)', '1e3', '1,23456', '1.250,5', 'abc', '₪', '12-', '1,25,0'])('rejects %s', (raw) => {
     expect(parseMoneyCell(raw).kind).toBe('invalid');
     expect(parseNumeric(raw)).toBeNull();
   });
@@ -276,7 +276,10 @@ describe('review: "0,125" is a decimal, never thousands (finding 3)', () => {
     expect(parseNumeric('10,125')).toBe(10125);
   });
   it('a comma-decimal file never reads "0.125" as thousands', () => {
-    expect(parseMoneyCell('0.125', 'comma').kind).toBe('invalid');
+    expect(parseMoneyCell('0.125', 'comma')).toEqual({ kind: 'ok', value: 0.125 });
+  });
+  it('a single comma before 3–4 digits that is not a thousands group is a decimal comma', () => {
+    expect(parseMoneyCell('1,2345')).toEqual({ kind: 'ok', value: 1.2345 });
   });
 });
 

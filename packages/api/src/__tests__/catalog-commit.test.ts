@@ -97,12 +97,25 @@ describe('commitCatalogRows: suggest, never link a guess (catalog-01)', () => {
     expect(res.createdProducts).toBe(0);
   });
 
-  it('a ≥0.9 match with the same unit links, learning the alias at its real confidence (not 1)', async () => {
-    nextCandidate.value = { productId: A.productId, canonicalName: 'עגבניה A', confidence: 0.93, matchedBy: 'fuzzy' };
+  it('a ≥0.95 match with the same unit links, learning the alias at its real confidence (not 1)', async () => {
+    nextCandidate.value = { productId: A.productId, canonicalName: 'עגבניה A', confidence: 0.97, matchedBy: 'fuzzy' };
     const res = await commitCatalogRows(db, args(), [row()], embedder);
     expect(res.ambiguous).toEqual([]);
     const aliases = await aliasesFor('עגבניה שרי מובחרת');
-    expect(aliases).toEqual([{ productId: A.productId, confidence: '0.930' }]);
+    expect(aliases).toEqual([{ productId: A.productId, confidence: '0.970' }]);
+  });
+
+  it('a 0.9–0.95 match is a suggestion, not a link (auto-link floor 0.95)', async () => {
+    nextCandidate.value = { productId: A.productId, canonicalName: 'עגבניה A', confidence: 0.93, matchedBy: 'fuzzy' };
+    const res = await commitCatalogRows(db, args(), [row()], embedder);
+    expect(res.ambiguous[0]?.reasons).toEqual(['MEDIUM_CONFIDENCE']);
+    expect(await aliasesFor('עגבניה שרי מובחרת')).toEqual([]);
+  });
+
+  it('an exact (confidence 1) machine match is still stored below 1.000 — that is reserved for a person', async () => {
+    nextCandidate.value = { productId: A.productId, canonicalName: 'עגבניה A', confidence: 1, matchedBy: 'sku' };
+    await commitCatalogRows(db, args(), [row({ supplierSku: 'S-EXACT' })], embedder);
+    expect(await aliasesFor('עגבניה שרי מובחרת')).toEqual([{ productId: A.productId, confidence: '0.999' }]);
   });
 
   it('a high-confidence match in a unit that does not convert goes to review (UNIT_MISMATCH)', async () => {
@@ -132,13 +145,13 @@ describe('commitCatalogRows: suggest, never link a guess (catalog-01)', () => {
     expect(res.ambiguous[0]?.reasons).toEqual(['PACK_MISMATCH']);
   });
 
-  it('below the review floor a new product is made from the row, alias confidence 1', async () => {
+  it('below the review floor a new product is made from the row, alias at machine confidence 0.999', async () => {
     nextCandidate.value = { productId: A.productId, canonicalName: 'עגבניה A', confidence: 0.4, matchedBy: 'fuzzy' };
     const res = await commitCatalogRows(db, args(), [row({ supplierNameRaw: 'פטרוזיליה' })], embedder);
     expect(res.createdProducts).toBe(1);
     const aliases = await aliasesFor('פטרוזיליה');
     expect(aliases).toHaveLength(1);
-    expect(aliases[0]!.confidence).toBe('1.000');
+    expect(aliases[0]!.confidence).toBe('0.999');
     expect(aliases[0]!.productId).not.toBe(A.productId);
   });
 

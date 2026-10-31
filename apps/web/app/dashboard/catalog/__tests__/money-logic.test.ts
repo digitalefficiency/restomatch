@@ -39,7 +39,9 @@ describe('typed catalog prices (catalog-02 / -20)', () => {
     expect(parsePriceInput('0,750')).toBe(0.75);
     expect(parsePriceInput('  ')).toBeNull();
     expect(parsePriceInput('-5')).toBe('invalid');
-    expect(parsePriceInput('1,2345')).toBe('invalid');
+    // At most 4 decimals (NUMERIC(12,4)): "1,2345" is a decimal comma, a 5th decimal is refused.
+    expect(parsePriceInput('1,2345')).toBe(1.2345);
+    expect(parsePriceInput('1,23456')).toBe('invalid');
   });
 
   it.each(CASES)('parity with the import parser: %s', (raw) => {

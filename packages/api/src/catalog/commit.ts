@@ -16,8 +16,18 @@ import { areConvertible } from '@restomatch/matching';
 import { sameUnit } from '../lib/unitPrice';
 import type { CatalogRow } from './parse';
 
-/** Confidence at/above which a row auto-links to an existing product. */
-const AUTO_LINK = 0.9;
+/**
+ * Confidence at/above which a row auto-links to an existing product — and only
+ * when its unit and pack also fit. Anything less is a suggestion for a person.
+ */
+const AUTO_LINK = 0.95;
+/**
+ * Interim provenance: an alias at confidence 1.000 means a PERSON linked it
+ * (mapping.confirm, the import review, a catalog edit). A machine link — an
+ * automatic match, or a product made from this very row — is stored just below,
+ * so a guess is never saved as certainty.
+ */
+const MACHINE_MAX_CONFIDENCE = 0.999;
 /** Floor below which we create a new product instead of linking. */
 const REVIEW_FLOOR = 0.6;
 
@@ -233,16 +243,19 @@ export async function commitCatalogRows(
     if (pendingReview) ambiguous.push({ itemId, ...pendingReview });
 
     // 4. Learn the supplier-name → product alias for future invoice OCR — only
-    //    for a product made from this very row (confidence 1) or an automatic
-    //    link at the matcher's own confidence. An existing link was already
-    //    learned when it was made; a suggestion learns nothing until accepted.
+    //    for a product made from this very row or an automatic link, at a
+    //    machine confidence (< 1.000, which is reserved for a person). An
+    //    existing link was already learned when it was made; a suggestion
+    //    learns nothing until accepted.
     if (productId && (createdNewProduct || linkConfidence != null)) {
       await recordConfirmedMatch(db, {
         productId,
         rawName: row.supplierNameRaw,
         supplierId,
         supplierSku: row.supplierSku,
-        confidence: createdNewProduct ? 1 : Math.min(1, Math.round(linkConfidence! * 1000) / 1000),
+        confidence: createdNewProduct
+          ? MACHINE_MAX_CONFIDENCE
+          : Math.min(MACHINE_MAX_CONFIDENCE, Math.floor(linkConfidence! * 1000) / 1000),
       });
     }
 
