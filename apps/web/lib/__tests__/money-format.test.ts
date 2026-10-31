@@ -82,3 +82,77 @@ describe('formatIls default output is byte-identical (1,200-string snapshot)', (
     for (const v of VALUES) expect(formatIls(v)).toBe(formatIls(v, { locale: 'he' }));
   });
 });
+
+describe('formatIls signDisplay (additive option)', () => {
+  const LRM = '‎';
+  const RLM = '‏';
+
+  it('he exceptZero: sign before the digits, inside the leading isolate marks', () => {
+    for (const v of [3.41, -3.41, 1_234.5, -100]) {
+      const out = formatIls(v, { locale: 'he', maximumFractionDigits: 2, signDisplay: 'exceptZero' });
+      expect(out).toMatch(/^‏‎[+-]\d/);
+      expect(out.endsWith(`${RLM}₪`)).toBe(true);
+    }
+    expect(formatIls(3.41, { locale: 'he', maximumFractionDigits: 2, signDisplay: 'exceptZero' })).toBe(
+      `${RLM}${LRM}+3.41 ${RLM}₪`,
+    );
+    expect(formatIls(-3.41, { locale: 'he', maximumFractionDigits: 2, signDisplay: 'exceptZero' })).toBe(
+      `${RLM}${LRM}-3.41 ${RLM}₪`,
+    );
+  });
+
+  it('en exceptZero: +₪3.41 / -₪3.41', () => {
+    expect(formatIls(3.41, { locale: 'en', maximumFractionDigits: 2, signDisplay: 'exceptZero' })).toBe('+₪3.41');
+    expect(formatIls(-3.41, { locale: 'en', maximumFractionDigits: 2, signDisplay: 'exceptZero' })).toBe('-₪3.41');
+  });
+
+  it('exceptZero: zero (and -0, and values that round to zero) carry no sign', () => {
+    for (const locale of LOCALES) {
+      for (const v of [0, -0, 0.004, -0.004]) {
+        const out = formatIls(v, { locale, maximumFractionDigits: 2, signDisplay: 'exceptZero' });
+        expect(out).not.toMatch(/[+-]/);
+      }
+    }
+    expect(formatIls(0, { locale: 'he', maximumFractionDigits: 2, signDisplay: 'exceptZero' })).toBe(
+      `${RLM}0.00 ${RLM}₪`,
+    );
+    expect(formatIls(0, { locale: 'en', maximumFractionDigits: 2, signDisplay: 'exceptZero' })).toBe('₪0.00');
+  });
+
+  it('never: absolute value, no sign, in both locales', () => {
+    expect(formatIls(-120, { locale: 'he', signDisplay: 'never' })).toBe(`${RLM}120 ${RLM}₪`);
+    expect(formatIls(-120, { locale: 'en', signDisplay: 'never' })).toBe('₪120');
+    for (const locale of LOCALES) {
+      for (const v of VALUES) {
+        if (Number.isNaN(v)) continue;
+        const out = formatIls(v, { locale, maximumFractionDigits: 2, signDisplay: 'never' });
+        expect(out).not.toMatch(/[+-]/);
+        expect(out).toBe(formatIls(Math.abs(v), { locale, maximumFractionDigits: 2 }));
+      }
+    }
+  });
+
+  it('auto is identical to the default for every snapshot value', () => {
+    for (const locale of LOCALES) {
+      for (const maximumFractionDigits of DIGITS) {
+        for (const v of VALUES) {
+          expect(formatIls(v, { locale, maximumFractionDigits, signDisplay: 'auto' })).toBe(
+            formatIls(v, { locale, maximumFractionDigits }),
+          );
+        }
+      }
+    }
+  });
+
+  it('-0 trap: auto keeps "-0", exceptZero drops the sign (pinned, do not "fix")', () => {
+    expect(formatIls(-0, { locale: 'he' })).toBe(`${RLM}${LRM}-0 ${RLM}₪`);
+    expect(formatIls(-0, { locale: 'he', signDisplay: 'exceptZero' })).toBe(`${RLM}0 ${RLM}₪`);
+  });
+
+  it('only auto | exceptZero | never are offered', () => {
+    // @ts-expect-error 'always' is deliberately not part of IlsSignDisplay
+    formatIls(1, { signDisplay: 'always' });
+    // @ts-expect-error 'negative' is deliberately not part of IlsSignDisplay
+    formatIls(1, { signDisplay: 'negative' });
+  });
+});

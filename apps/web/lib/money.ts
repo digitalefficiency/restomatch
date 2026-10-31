@@ -12,14 +12,21 @@ import { intlLocaleOf, type Locale } from './i18n/config';
  * tables where the agora matters. `locale` defaults to Hebrew (output unchanged);
  * pass the active locale from `useLocale()` / `getLocale()` on English screens
  * (`₪1,234` instead of `‏1,234 ₪`).
+ *
+ * `signDisplay` (optional; omitted = today's bytes): a sign is not a meaning:
+ * direction words/arrows stay in `<Delta>`/`<PriceMove>` (R-4); use `exceptZero`
+ * for signed deltas, `never` for a credit shown with the word זיכוי.
  */
+export type IlsSignDisplay = 'auto' | 'exceptZero' | 'never';
+
 export function formatIls(
   value: number,
-  opts: { maximumFractionDigits?: number; locale?: Locale } = {},
+  opts: { maximumFractionDigits?: number; locale?: Locale; signDisplay?: IlsSignDisplay } = {},
 ): string {
   return new Intl.NumberFormat(intlLocaleOf(opts.locale ?? 'he'), {
     style: 'currency',
     currency: 'ILS',
     maximumFractionDigits: opts.maximumFractionDigits ?? 0,
+    ...(opts.signDisplay ? { signDisplay: opts.signDisplay } : {}),
   }).format(value);
 }
