@@ -46,3 +46,14 @@ export function isDiscrepancyDecidable(status: ResolutionStatus | string): boole
 export function discrepancyDecidableSql(statusExpr: SQL | unknown): SQL {
   return sql`${statusExpr}::text = ANY(${sql.raw(`ARRAY[${DISCREPANCY_DECIDABLE.map((s) => `'${s}'`).join(',')}]`)})`;
 }
+
+/**
+ * A duplicate-invoice finding that still holds the copy (pay-run "don't pay
+ * this copy"): not waived. Same set as routers/payRun.ts CLAIMABLE_DUP.
+ */
+export const DUPLICATE_HOLDING = ['open', 'escalated', 'accepted'] as const satisfies readonly ResolutionStatus[];
+
+/** SQL: `<statusExpr> IN ('open','escalated','accepted')`. */
+export function duplicateHoldingSql(statusExpr: SQL | unknown): SQL {
+  return sql`${statusExpr}::text = ANY(${sql.raw(`ARRAY[${DUPLICATE_HOLDING.map((s) => `'${s}'`).join(',')}]`)})`;
+}
