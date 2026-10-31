@@ -65,6 +65,10 @@ export type AuditAction =
   | 'invoice.rematch_locked'
   | 'invoice.external_sync'
   | 'invoice.corrected'
+  | 'invoice.ocr_parsed'
+  | 'invoice.match_completed'
+  // Replay records (lib/idempotency.ts interim, until G-03's idempotency_keys)
+  | 'idempotency.recorded'
   // Intake, discrepancy decisions, recovery claims
   | 'intake.approved'
   | 'discrepancy.decided'
