@@ -1,5 +1,8 @@
 import { intlLocaleOf, type Locale } from './i18n/config';
 
+/** Sign options offered by formatIls (`always` / `negative` deliberately not). */
+export type IlsSignDisplay = 'auto' | 'exceptZero' | 'never';
+
 /**
  * Single source of truth for ₪ (ILS) display.
  *
@@ -17,8 +20,6 @@ import { intlLocaleOf, type Locale } from './i18n/config';
  * direction words/arrows stay in `<Delta>`/`<PriceMove>` (R-4); use `exceptZero`
  * for signed deltas, `never` for a credit shown with the word זיכוי.
  */
-export type IlsSignDisplay = 'auto' | 'exceptZero' | 'never';
-
 export function formatIls(
   value: number,
   opts: { maximumFractionDigits?: number; locale?: Locale; signDisplay?: IlsSignDisplay } = {},
