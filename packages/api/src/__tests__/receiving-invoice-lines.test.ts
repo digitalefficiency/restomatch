@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { and, auditLog, createDb, discrepancies, eq, invoiceLines, invoices, matchRuns, poLines, products, restaurants, testDbUrl } from '@restomatch/db';
+import { and, auditLog, createDb, discrepancies, eq, invoiceLines, invoices, matchRuns, poLines, productAliases, products, restaurants, testDbUrl } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
@@ -168,19 +168,31 @@ describe('manual invoice lines (B8)', () => {
   });
 
   describe('a hand line pairs with its order line (S16: no false "not ordered" + "not billed")', () => {
+    let oilLineId = '';
+    const runFindings = (type: string) =>
+      db
+        .select({ id: discrepancies.id, productId: discrepancies.productId, delta: discrepancies.deltaAmount })
+        .from(discrepancies)
+        .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+        .where(and(eq(matchRuns.invoiceId, failedId), eq(discrepancies.type, type as never)));
+
     async function oilOrder() {
       const [oil] = await db
         .insert(products)
         .values({ restaurantId: A.restaurantId, canonicalName: 'שמן זית 18 ליטר' })
         .returning();
-      await db.insert(poLines).values({
-        poId: A.poId,
-        productId: oil!.id,
-        rawDescription: 'שמן זית 18 ליטר',
-        qtyOrdered: '1',
-        unit: 'יח׳',
-        unitPriceExpected: '1250',
-      });
+      const [pl] = await db
+        .insert(poLines)
+        .values({
+          poId: A.poId,
+          productId: oil!.id,
+          rawDescription: 'שמן זית 18 ליטר',
+          qtyOrdered: '1',
+          unit: 'יח׳',
+          unitPriceExpected: '1250',
+        })
+        .returning();
+      oilLineId = pl!.id;
       // The failed scan was taken on A's receipt (registerInvoice stamps it).
       await db
         .update(invoices)
@@ -197,7 +209,8 @@ describe('manual invoice lines (B8)', () => {
 
     it('S16 repro: oil 1 × 1,250 ordered, hand line 1 × 1,320 → a 70.00 price gap, not 1,320 + 1,250', async () => {
       const oilId = await oilOrder();
-      expect((await as('manager').receiving.getInvoice({ invoiceId: failedId })).orderLineNames).toContain('שמן זית 18 ליטר');
+      const picker = (await as('manager').receiving.getInvoice({ invoiceId: failedId })).orderLines;
+      expect(picker.find((l) => l.id === oilLineId)).toMatchObject({ name: 'שמן זית 18 ליטר', qtyOrdered: '1.000', unitPriceExpected: '1250.0000' });
       // Typed by hand: extra space and gershayim noise still match.
       const res = await as('manager').receiving.addInvoiceLine({
         invoiceId: failedId,
@@ -233,6 +246,71 @@ describe('manual invoice lines (B8)', () => {
       });
       const [a] = await db.select({ productId: invoiceLines.productId }).from(invoiceLines).where(eq(invoiceLines.id, amb.lineId));
       expect(a!.productId).toBeNull();
+    });
+
+    it('picked from the order (poLineId) at a higher price → exactly one PRICE gap of 70 and no UNORDERED / MISSING for it', async () => {
+      const oilId = await oilOrder();
+      const res = await as('manager').receiving.addInvoiceLine({
+        invoiceId: failedId,
+        line: { poLineId: oilLineId, rawDescription: 'שמן', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 1320 },
+      });
+      const [line] = await db.select({ productId: invoiceLines.productId }).from(invoiceLines).where(eq(invoiceLines.id, res.lineId));
+      expect(line!.productId).toBe(oilId);
+      const gaps = (await runFindings('PRICE_HIGHER')).filter((d) => d.productId === oilId);
+      expect(gaps.map((g) => g.delta)).toEqual(['70.00']);
+      expect((await runFindings('UNORDERED_ITEM')).filter((d) => d.productId === oilId || d.productId === null)).toHaveLength(0);
+      expect((await runFindings('MISSING_ON_INVOICE')).filter((d) => d.productId === oilId)).toHaveLength(0);
+    });
+
+    it('a free-text line the catalogue knows (this supplier\'s alias) links to that product', async () => {
+      await oilOrder();
+      const [flour] = await db.insert(products).values({ restaurantId: A.restaurantId, canonicalName: 'קמח לבן 25 ק״ג' }).returning();
+      await db.insert(productAliases).values({ productId: flour!.id, supplierId: A.supplierId, supplierNameRaw: 'קמח לחם' });
+      const res = await as('manager').receiving.addInvoiceLine({
+        invoiceId: failedId,
+        line: { rawDescription: 'קמח לחם', qtyBilled: 1, unit: 'שק', unitPriceBilled: 90 },
+      });
+      const [line] = await db.select({ productId: invoiceLines.productId }).from(invoiceLines).where(eq(invoiceLines.id, res.lineId));
+      expect(line!.productId).toBe(flour!.id);
+    });
+
+    it('an unrelated free-text line stays unordered (no product guessed)', async () => {
+      await oilOrder();
+      const res = await as('manager').receiving.addInvoiceLine({
+        invoiceId: failedId,
+        line: { rawDescription: 'מגבות נייר', qtyBilled: 2, unit: 'יח׳', unitPriceBilled: 15 },
+      });
+      const [line] = await db.select({ productId: invoiceLines.productId }).from(invoiceLines).where(eq(invoiceLines.id, res.lineId));
+      expect(line!.productId).toBeNull();
+      const unordered = await db
+        .select({ id: discrepancies.id })
+        .from(discrepancies)
+        .where(and(eq(discrepancies.invoiceLineId, res.lineId), eq(discrepancies.type, 'UNORDERED_ITEM')));
+      expect(unordered).toHaveLength(1);
+    });
+
+    it('a foreign productId, or an order line of another order, is NOT_FOUND — nothing added', async () => {
+      await oilOrder();
+      const before = (await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, failedId))).length;
+      const B = await seedTenant(db, 'MLB');
+      await expect(
+        as('manager').receiving.addInvoiceLine({
+          invoiceId: failedId,
+          line: { rawDescription: 'x', qtyBilled: 1, unit: 'kg', unitPriceBilled: 1, productId: B.productId },
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      await expect(
+        as('manager').receiving.addInvoiceLine({
+          invoiceId: failedId,
+          line: { rawDescription: 'x', qtyBilled: 1, unit: 'kg', unitPriceBilled: 1, poLineId: B.poLineId },
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      expect((await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, failedId))).length).toBe(before);
+    });
+
+    it('a receiver gets no order-line picker (no ₪ for the receiver)', async () => {
+      await oilOrder();
+      expect((await as('receiver').receiving.getInvoice({ invoiceId: failedId })).orderLines).toEqual([]);
     });
   });
 });

@@ -72,7 +72,9 @@ export function InvoiceCorrection({
 
   // B8: hand-entered lines (an invoice the OCR could not read / held for review).
   const linesEditable = canEdit && !consolidated && invoice.linesEditable;
-  const emptyNew = { rawDescription: '', qtyBilled: '', unit: '', unitPriceBilled: '' };
+  /** poLineId: the order line this hand line bills ('' = a line that was not ordered). */
+  const emptyNew = { poLineId: '', rawDescription: '', qtyBilled: '', unit: '', unitPriceBilled: '' };
+  const orderLines = invoice.orderLines;
   const [nl, setNl] = useState(emptyNew);
 
   // Line editing
@@ -144,7 +146,13 @@ export function InvoiceCorrection({
     if (!newLineReady) return;
     addLine.mutate({
       invoiceId: invoice.id,
-      line: { rawDescription: nl.rawDescription.trim(), qtyBilled: newQty!, unit: nl.unit.trim(), unitPriceBilled: newPrice! },
+      line: {
+        rawDescription: nl.rawDescription.trim(),
+        qtyBilled: newQty!,
+        unit: nl.unit.trim(),
+        unitPriceBilled: newPrice!,
+        ...(nl.poLineId ? { poLineId: nl.poLineId } : {}),
+      },
     });
   }
 
@@ -444,23 +452,44 @@ export function InvoiceCorrection({
             {linesEditable && (
               <tr data-testid="add-invoice-line-row" className="bg-surface-2/40">
                 <td className="px-4 py-3">
-                  {/* The order's line names: picking one pairs the hand line with
-                      its order line (the server links the product by it). */}
+                  {/* The receipt's ordered lines first: picking one links the hand
+                      line to its order line (product / SKU), so a price
+                      difference reads as a price gap, never "not ordered". */}
+                  {orderLines.length > 0 && (
+                    <select
+                      aria-label={t('correction.pickOrderLine')}
+                      data-testid="pick-order-line"
+                      className="mb-2 w-full rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink"
+                      value={nl.poLineId}
+                      onChange={(e) => {
+                        const ol = orderLines.find((o) => o.id === e.target.value);
+                        setNl(
+                          ol
+                            ? { ...nl, poLineId: ol.id, rawDescription: ol.rawDescription || ol.name, unit: ol.unit }
+                            : { ...nl, poLineId: '' },
+                        );
+                      }}
+                    >
+                      <option value="">{t('correction.notOrderedLine')}</option>
+                      {orderLines.map((ol) => (
+                        <option key={ol.id} value={ol.id}>
+                          {t('correction.orderLineOption', {
+                            name: ol.name,
+                            qty: formatNumber(Number(ol.qtyOrdered), locale, { maximumFractionDigits: 3 }),
+                            unit: unit(ol.unit),
+                            price: ol.unitPriceExpected != null ? money(Number(ol.unitPriceExpected)) : '—',
+                          })}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                   <Input
                     aria-label={t('correction.colDescription')}
                     placeholder={t('correction.newLineDescription')}
                     value={nl.rawDescription}
                     maxLength={400}
-                    list={invoice.orderLineNames.length > 0 ? 'order-line-names' : undefined}
                     onChange={(e) => setNl({ ...nl, rawDescription: e.target.value })}
                   />
-                  {invoice.orderLineNames.length > 0 && (
-                    <datalist id="order-line-names" data-testid="order-line-names">
-                      {invoice.orderLineNames.map((n) => (
-                        <option key={n} value={n} />
-                      ))}
-                    </datalist>
-                  )}
                 </td>
                 <td className="px-4 py-3">
                   <Input aria-label={t('correction.colQty')} type="number" inputMode="decimal" step="any" min="0" value={nl.qtyBilled} onChange={(e) => setNl({ ...nl, qtyBilled: e.target.value })} />

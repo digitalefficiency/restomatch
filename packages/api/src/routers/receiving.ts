@@ -31,6 +31,7 @@ import {
   type OcrPayload,
 } from '@restomatch/db';
 import { computeInvoiceLeak, HELD_FOR_RECEIPTS_KEY } from '@restomatch/charts';
+import { matchByAlias } from '@restomatch/catalog';
 import { enqueueMatchInvoice, enqueueOcrInvoice, isQueueUnavailableError } from '@restomatch/queue';
 import type { InvoiceOcrResult } from '@restomatch/types';
 import { assertGrOwned, assertSupplierOwned } from '../tenant';
@@ -597,9 +598,19 @@ export const receivingRouter = router({
         linesEditable: linesEditable(invoice.status, ocrPayload),
         // What a hand line can be called so it pairs with its order line (the
         // order's descriptions — no ₪). Only while lines can be added.
-        orderLineNames: linesEditable(invoice.status, ocrPayload)
-          ? [...new Set((await invoiceOrderLines(ctx.db, ctx.session.restaurantId, invoice.id, ocrPayload)).flatMap((l) => [l.rawDescription, l.productName]).filter((n): n is string => !!n?.trim()))]
-          : [],
+        // The order's lines for the add-line picker (ordered qty + price): only
+        // for the roles that may add lines — a receiver never gets ₪ here.
+        orderLines:
+          linesEditable(invoice.status, ocrPayload) && (ctx.session.role === 'owner' || ctx.session.role === 'manager')
+            ? (await invoiceOrderLines(ctx.db, ctx.session.restaurantId, invoice.id, ocrPayload)).map((l) => ({
+                id: l.id,
+                name: l.productName ?? l.rawDescription ?? '',
+                rawDescription: l.rawDescription,
+                qtyOrdered: l.qtyOrdered,
+                unit: l.unit,
+                unitPriceExpected: l.unitPriceExpected,
+              }))
+            : [],
         // A חשבונית ריכוז: cross-matched against its delivery notes, never re-matched to a PO.
         consolidated: readConsolidatedRaw(ocrPayload) !== null,
         // The scanned number already belongs to another invoice of this
@@ -810,7 +821,9 @@ export const receivingRouter = router({
             qtyBilled: z.number().finite().positive().max(1_000_000),
             unit: z.string().trim().min(1).max(32),
             unitPriceBilled: z.number().finite().nonnegative().max(10_000_000),
-            /** Optional catalogue link (this restaurant's product); else map it later. */
+            /** The order line this bills (the page's picker): its product / SKU is linked. */
+            poLineId: z.string().uuid().optional(),
+            /** Optional catalogue link (this restaurant's product). */
             productId: z.string().uuid().optional(),
           })
           .strict(),
@@ -827,13 +840,25 @@ export const receivingRouter = router({
           .limit(1);
         if (!prod) throw new TRPCError({ code: 'NOT_FOUND', message: 'product not found' });
       }
+      const orderLines = await invoiceOrderLines(ctx.db, restaurantId, inv.id, inv.ocrPayload);
+      let picked: OrderLine | undefined;
+      if (input.line.poLineId) {
+        // Only a line of THIS invoice's order (tenant-scoped through it).
+        picked = orderLines.find((l) => l.id === input.line.poLineId);
+        if (!picked) throw new TRPCError({ code: 'NOT_FOUND', message: 'order line not found' });
+        if (input.line.productId && picked.productId && input.line.productId !== picked.productId) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'המוצר אינו המוצר של שורת ההזמנה שנבחרה' });
+        }
+      }
       // S16: a hand line must pair with its order line like a read one, or an
       // ordered item reads as "not ordered" + "order line not billed" (a false,
       // inflated claim). Without an explicit product, take it from the
       // invoice's own order when exactly one line has this description.
-      const link = input.line.productId
-        ? { productId: input.line.productId, supplierSku: null }
-        : orderLineByDescription(await invoiceOrderLines(ctx.db, restaurantId, inv.id, inv.ocrPayload), input.line.rawDescription);
+      const link = picked
+        ? { productId: picked.productId ?? input.line.productId ?? null, supplierSku: picked.productId ? null : picked.supplierSku }
+        : input.line.productId
+          ? { productId: input.line.productId, supplierSku: null }
+          : await freeTextLink(ctx.db, restaurantId, inv.supplierId, orderLines, input.line.rawDescription);
       const qty = decimalString(input.line.qtyBilled, 3);
       const price = decimalString(input.line.unitPriceBilled, 4);
       const totalAgorot = lineTotalAgorot(qty, price);
@@ -1547,7 +1572,16 @@ function linesEditable(status: string, ocrPayload: OcrPayload | null): boolean {
   return isHandEntered(ocrPayload) && (status === 'matched' || status === 'disputed');
 }
 
-type OrderLine = { rawDescription: string | null; productName: string | null; productId: string | null; supplierSku: string | null };
+type OrderLine = {
+  id: string;
+  rawDescription: string | null;
+  productName: string | null;
+  productId: string | null;
+  supplierSku: string | null;
+  qtyOrdered: string;
+  unit: string;
+  unitPriceExpected: string | null;
+};
 
 /**
  * The lines of the order this invoice belongs to: the order of its latest match
@@ -1579,10 +1613,14 @@ async function invoiceOrderLines(
   if (!poId) return [];
   return db
     .select({
+      id: poLines.id,
       rawDescription: poLines.rawDescription,
       productName: products.canonicalName,
       productId: poLines.productId,
       supplierSku: poLines.supplierSku,
+      qtyOrdered: poLines.qtyOrdered,
+      unit: poLines.unit,
+      unitPriceExpected: poLines.unitPriceExpected,
     })
     .from(poLines)
     .innerJoin(purchaseOrders, and(eq(purchaseOrders.id, poLines.poId), eq(purchaseOrders.restaurantId, restaurantId)))
@@ -1600,21 +1638,66 @@ function normDescription(v: string | null | undefined): string {
     .toLowerCase();
 }
 
+type LineLink = { productId: string | null; supplierSku: string | null };
+
 /**
  * The product (or, for an unlinked order line, its supplier SKU — the engine's
  * other pairing key) of the ONE order line whose description or product name
- * matches; null when none or more than one does (never a guess).
+ * matches; null when none does, 'ambiguous' when several do (never a guess).
  */
-function orderLineByDescription(lines: OrderLine[], description: string): { productId: string | null; supplierSku: string | null } | null {
+function orderLineByDescription(lines: OrderLine[], description: string): LineLink | null | 'ambiguous' {
   const key = normDescription(description);
   if (!key) return null;
   const hits = lines.filter(
     (l) => (l.productId || l.supplierSku) && (normDescription(l.rawDescription) === key || normDescription(l.productName) === key),
   );
   const distinct = new Set(hits.map((h) => h.productId ?? `sku:${h.supplierSku}`));
-  if (distinct.size !== 1) return null;
+  if (distinct.size === 0) return null;
+  if (distinct.size > 1) return 'ambiguous';
   const hit = hits[0]!;
   return hit.productId ? { productId: hit.productId, supplierSku: null } : { productId: null, supplierSku: hit.supplierSku };
+}
+
+/**
+ * A free-text hand line: the invoice's own order first (one matching line);
+ * when the name fits several order lines it stays unlinked — the catalogue is
+ * never asked to break that tie. Not on the order at all: the catalogue's exact
+ * links (catalogProductByName).
+ */
+async function freeTextLink(
+  db: Database,
+  restaurantId: string,
+  supplierId: string | null,
+  orderLines: OrderLine[],
+  description: string,
+): Promise<LineLink | null> {
+  const onOrder = orderLineByDescription(orderLines, description);
+  if (onOrder === 'ambiguous') return null;
+  return onOrder ?? (await catalogProductByName(db, restaurantId, supplierId, description));
+}
+
+/**
+ * A free-text hand line not on the order: the catalogue's exact links only (the
+ * matcher's "auto" cases) — this supplier's alias for the name, else ONE product
+ * with exactly this canonical name. Anything fuzzier stays unlinked (a manager
+ * maps it; G-08's decideLink takes over this step when it lands).
+ */
+async function catalogProductByName(
+  db: Database,
+  restaurantId: string,
+  supplierId: string | null,
+  name: string,
+): Promise<{ productId: string; supplierSku: null } | null> {
+  const alias = await matchByAlias(db, restaurantId, supplierId, name);
+  if (alias) return { productId: alias.productId, supplierSku: null };
+  const lower = name.trim().toLowerCase();
+  if (!lower) return null;
+  const hits = await db
+    .select({ id: products.id })
+    .from(products)
+    .where(and(eq(products.restaurantId, restaurantId), sql`lower(${products.canonicalName}) = ${lower}`))
+    .limit(2);
+  return hits.length === 1 ? { productId: hits[0]!.id, supplierSku: null } : null;
 }
 
 type InvoiceTotals = { totalExclVat: string | null; vatAmount: string | null; totalInclVat: string | null };
