@@ -62,6 +62,8 @@ export interface Answer {
   diff: DiffItem[];
   /** Changed lines + 1 for a note — what the primary button counts. */
   changeCount: number;
+  /** Changed lines only — what "confirm as ordered" would discard (the note is always kept). */
+  lineChangeCount: number;
   invalid: boolean;
   orderTotalAgorot: number;
   answerTotalAgorot: number;
@@ -113,6 +115,7 @@ export function computeAnswer(
     rows,
     diff,
     changeCount: rows.filter((r) => r.changed).length + (note.trim() ? 1 : 0),
+    lineChangeCount: rows.filter((r) => r.changed).length,
     invalid: rows.some((r) => r.qtyBad || r.priceBad),
     orderTotalAgorot: priced.reduce((s, r) => s + (r.orderAgorot ?? 0), 0),
     answerTotalAgorot: rows.reduce((s, r) => s + (r.answerAgorot ?? 0), 0),
@@ -126,12 +129,13 @@ export interface AnswerBody {
 }
 
 /**
- * The request body. `answer` carries every line + the note (the server drops
- * unchanged lines). `asIs` sends nothing — the UI only offers it with edits on
- * screen after the supplier explicitly agrees to discard them.
+ * The request body. `answer` carries EVERY line with an explicit quantity (the
+ * server refuses a partial list) + the note. `asIs` sends no lines — the UI
+ * only offers it with line edits on screen after the supplier explicitly agrees
+ * to discard them — but the supplier's note is always carried.
  */
 export function answerBody(kind: 'answer' | 'asIs', a: Answer, note: string): AnswerBody {
-  if (kind === 'asIs') return { lines: [], note: null };
+  if (kind === 'asIs') return { lines: [], note: note.trim() || null };
   return {
     lines: a.rows.map((r) => ({ poLineId: r.line.id, qtyAvailable: r.qty, proposedUnitPrice: r.price })),
     note: note.trim() || null,

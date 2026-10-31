@@ -360,6 +360,11 @@ test.describe('auth-02/03/14/16 · supplier portal', () => {
     const resp = await storedResponse(poId);
     expect(resp?.status).toBe('changes');
     expect((await storedLines(poId)).find((l) => l.poLineId === lineIds[0])?.qtyAvailable).toBe(0.5);
+    // A plain revisit of the link (no 409) restates the recorded answer, not just "already answered".
+    await page.reload();
+    await expect(page.getByTestId('portal-answered')).toContainText('התשובה שנרשמה');
+    await expect(page.getByTestId('portal-answered')).toContainText('חוסר');
+    await expect(page.getByTestId('portal-answered')).not.toContainText('לא נשמרו');
   });
 
   test('"as ordered" with edits asks to discard them first; "out of stock" is one tap', async ({ page }) => {
@@ -375,10 +380,20 @@ test.describe('auth-02/03/14/16 · supplier portal', () => {
     await page.getByRole('button', { name: 'חזרה לשינויים' }).click();
     await expect(page.locator(`#qty-${lineIds[0]}`)).toHaveValue('0');
     expect(await storedResponse(poId)).toBeNull();
+    // The note is the supplier's own words: discarding line edits never drops it.
+    await page.locator('#portal-note').fill('יגיע מחר בבוקר');
     await page.getByRole('button', { name: 'אישור כפי שהוזמן' }).click();
     await page.getByRole('button', { name: 'כן, לאשר כפי שהוזמן' }).click();
-    await expect(page.getByTestId('portal-done')).toBeVisible();
-    expect((await storedResponse(poId))?.status).toBe('confirmed');
+    await expect(page.getByTestId('portal-done')).toContainText('יגיע מחר בבוקר');
+    const stored = await storedResponse(poId);
+    expect(stored?.lines).toEqual([]);
+    const sql = e2eSql();
+    try {
+      const [row] = await sql<{ note: string | null }[]>`select note from supplier_responses where po_id = ${poId}`;
+      expect(row?.note).toBe('יגיע מחר בבוקר');
+    } finally {
+      await sql.end();
+    }
   });
 
   test('409: a second answer shows the recorded one and its date — never a false success', async ({ page }) => {

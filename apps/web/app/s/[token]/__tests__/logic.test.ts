@@ -40,10 +40,21 @@ describe('supplier answer (auth-02): a marked change is never dropped', () => {
     expect(answerBody('answer', a, ' יגיע מחר ').note).toBe('יגיע מחר');
   });
 
-  it('only the explicit "as ordered" choice sends no lines', () => {
+  it('only the explicit "as ordered" choice sends no lines — and it still carries the note', () => {
     const { qty, price } = asOrdered();
     qty.a = '6';
-    expect(answerBody('asIs', computeAnswer(LINES, qty, price, 'x'), 'x')).toEqual({ lines: [], note: null });
+    const a = computeAnswer(LINES, qty, price, ' יגיע מחר ');
+    expect(a.lineChangeCount).toBe(1);
+    expect(answerBody('asIs', a, ' יגיע מחר ')).toEqual({ lines: [], note: 'יגיע מחר' });
+    expect(answerBody('asIs', a, '')).toEqual({ lines: [], note: null });
+  });
+
+  it('the answer body gives every line an explicit quantity (the server refuses partial answers)', () => {
+    const { qty, price } = asOrdered();
+    qty.a = '6';
+    const body = answerBody('answer', computeAnswer(LINES, qty, price, ''), '');
+    expect(body.lines.map((l) => l.poLineId)).toEqual(LINES.map((l) => l.id));
+    expect(body.lines.every((l) => l.qtyAvailable !== null)).toBe(true);
   });
 
   it('flags invalid fields instead of guessing', () => {

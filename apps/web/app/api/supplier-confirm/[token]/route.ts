@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { hashSupplierToken } from '@restomatch/api';
 import { guardPublicRequest } from '@/lib/publicGuard';
 import { SUPPLIER_BODY_MAX_BYTES } from '@/lib/supplierConfirm/guard';
-import { supplierPortalSubmit } from '@/lib/supplierConfirm/data';
+import { supplierPortalSubmit, supplierPortalView } from '@/lib/supplierConfirm/data';
+import { incompleteAnswer } from './completeness';
 
 /**
  * Public supplier answer (wave-1 `supplierConfirm`). No session: the token in the
@@ -49,6 +50,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
   });
   if (!g.ok) return g.response;
   const parsed = g.data;
+  // A line-by-line answer must speak to EVERY line of the order with an
+  // explicit quantity (0 = out of stock): a partial list would silently read as
+  // "as ordered" for the lines it left out. `lines: []` stays the explicit
+  // "confirm as ordered" (the note, if any, is still carried).
+  if (parsed.lines.length > 0) {
+    const view = await supplierPortalView(token);
+    if (!view.ok) return view.error === 'EXPIRED' ? json(410, { ok: false, error: 'expired' }) : json(404, { ok: false, error: 'not_found' });
+    const missing = incompleteAnswer(view.view.lines.map((l) => l.id), parsed.lines);
+    if (missing) return json(400, { ok: false, error: missing });
+  }
   const res = await supplierPortalSubmit(token, parsed);
   if (res.ok) return json(200, { ok: true, status: res.status });
   switch (res.error) {

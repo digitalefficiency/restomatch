@@ -55,7 +55,7 @@ export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; 
   const formRef = useRef<HTMLFormElement>(null);
 
   const answer = useMemo(() => computeAnswer(lines, qty, price, note), [lines, qty, price, note]);
-  const { rows, diff, changeCount, invalid } = answer;
+  const { rows, diff, changeCount, lineChangeCount, invalid } = answer;
   const hasChanges = changeCount > 0;
 
   async function send(what: 'answer' | 'asIs') {
@@ -74,7 +74,7 @@ export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; 
           kind: 'done',
           status: data.status,
           diff: what === 'asIs' ? [] : diff,
-          note: what === 'asIs' ? null : body.note,
+          note: body.note,
         });
       }
       // auth-03: someone already answered this order. Never a false success —
@@ -299,9 +299,9 @@ export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; 
           {confirmDiscard ? (
             <div role="alertdialog" aria-labelledby="discard-q" className="space-y-2">
               <p id="discard-q" className="text-base font-semibold text-ink">
-                {changeCount === 1
+                {lineChangeCount === 1
                   ? t('portal.discardOne')
-                  : t('portal.discardMany', { count: formatNumber(changeCount, locale) })}
+                  : t('portal.discardMany', { count: formatNumber(lineChangeCount, locale) })}
               </p>
               <div className="grid grid-cols-2 gap-2">
                 <Button type="button" variant="secondary" className="min-h-12" onClick={() => setConfirmDiscard(false)} autoFocus>
@@ -324,7 +324,7 @@ export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; 
               >
                 {busy ? t('portal.sending') : primaryLabel}
               </Button>
-              {hasChanges ? (
+              {lineChangeCount > 0 ? (
                 <button
                   type="button"
                   disabled={busy}
