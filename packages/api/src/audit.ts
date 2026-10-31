@@ -67,6 +67,8 @@ export type AuditAction =
   | 'invoice.corrected'
   | 'invoice.ocr_parsed'
   | 'invoice.match_completed'
+  | 'invoice.reocr_requested' // G-09
+  | 'invoice.retired' // G-09 (reserved edge until the invoice_status value exists)
   // Replay records (lib/idempotency.ts interim, until G-03's idempotency_keys)
   | 'idempotency.recorded'
   // Intake, discrepancy decisions, recovery claims

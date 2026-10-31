@@ -16,7 +16,7 @@ import {
   withRestaurant,
   type Database,
 } from '@restomatch/db';
-import { hasColumn, invoiceMachine, isTransitionConflict, transition } from '../lifecycle';
+import { hasColumn, invoiceMachine, isTransitionConflict, isTransitionRefused, transition, transitionMany } from '../lifecycle';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
 
 /**
@@ -163,6 +163,47 @@ describe('invoice machine', () => {
     expect((bad as { code?: string }).code).toBe('BAD_REQUEST');
     await move('match_completed', { to: 'disputed' });
     expect(await invoiceStatus()).toBe('disputed');
+  });
+
+  it('reocr (G-09): parsed|matched → ocr_pending only with no decision and no claim; refused otherwise, nothing written', async () => {
+    // beforeEach: an accepted discrepancy with an open claim on this invoice.
+    const claimed = await move('reocr', { expectedFrom: 'matched' }).catch((e: unknown) => e);
+    expect(isTransitionRefused(claimed)).toBe(true);
+    expect((claimed as { cause: { appParams: { reason: string } } }).cause.appParams.reason).toBe('invoice_has_claim');
+    await ownerDb.delete(recoveryClaims).where(eq(recoveryClaims.restaurantId, A.restaurantId));
+    const decided = await move('reocr', { expectedFrom: 'matched' }).catch((e: unknown) => e);
+    expect((decided as { cause: { appParams: { reason: string } } }).cause.appParams.reason).toBe('invoice_has_decision');
+    expect(await invoiceStatus()).toBe('matched');
+    expect(await invoiceAudits()).toHaveLength(0);
+
+    await ownerDb.update(discrepancies).set({ resolutionStatus: 'open' }).where(eq(discrepancies.id, A.discrepancyId));
+    const r = await move('reocr', { expectedFrom: 'matched', payload: { reason: 'page added' } });
+    expect(r).toMatchObject({ from: 'matched', to: 'ocr_pending' });
+    expect((await invoiceAudits()).map((a) => a.action)).toEqual(['invoice.reocr_requested']);
+    // Batch path refuses with the same reason.
+    await ownerDb.update(invoices).set({ status: 'parsed' }).where(eq(invoices.id, A.invoiceId));
+    await ownerDb.update(discrepancies).set({ resolutionStatus: 'rejected' }).where(eq(discrepancies.id, A.discrepancyId));
+    const b = await asTenant((tx) =>
+      transitionMany(tx, invoiceMachine, {
+        restaurantId: A.restaurantId,
+        event: 'reocr',
+        actorId: A.ownerUserId,
+        items: [{ id: A.invoiceId, expectedStatus: 'parsed' }],
+      }),
+    );
+    expect(b).toEqual({ ok: false, failures: [{ id: A.invoiceId, code: 'REFUSED', currentStatus: 'parsed', reason: 'invoice_has_decision' }] });
+  });
+
+  it('retire (G-09) is reserved until the invoice_status value exists: always refused, nothing written', async () => {
+    await ownerDb.delete(recoveryClaims).where(eq(recoveryClaims.restaurantId, A.restaurantId));
+    const err = await move('retire', { expectedFrom: 'matched', payload: { reason: 'absorbed', intoInvoiceId: A.invoiceId } }).catch(
+      (e: unknown) => e,
+    );
+    expect(isTransitionRefused(err)).toBe(true);
+    expect((err as { cause: { appParams: { reason: string } } }).cause.appParams.reason).toBe('reserved');
+    expect(invoiceMachine.edges.retire).toMatchObject({ from: ['parsed', 'matched', 'disputed'], kind: 'terminal', requiresReason: true });
+    expect(await invoiceStatus()).toBe('matched');
+    expect(await invoiceAudits()).toHaveLength(0);
   });
 
   it.skipIf(!hasPaidAt)('H-03 path: mark_paid stamps invoices.paid_at with the event time; unmark clears it', async () => {

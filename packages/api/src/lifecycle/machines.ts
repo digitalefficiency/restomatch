@@ -39,6 +39,33 @@ async function setOptionalColumn(
 // ── invoice ───────────────────────────────────────────────────────────────
 
 /**
+ * Precondition shared by `reocr` and `retire` (G-09): the invoice carries no
+ * decision (no discrepancy of its match runs is accepted/rejected/resolved, and
+ * none has a G-03 `decision`) and no recovery claim. Re-reading or absorbing an
+ * invoice with a decision or a claim would silently drop a ₪ decision.
+ */
+export async function invoiceHasNoDecisionOrClaim(tx: Database, c: { id: string; restaurantId: string }): Promise<string | null> {
+  const hasDecisionCol = (await columnType(tx, 'discrepancies', 'decision')) !== null;
+  const rows = (await tx.execute(sql`
+    SELECT
+      EXISTS (
+        SELECT 1 FROM discrepancies d JOIN match_runs mr ON mr.id = d.match_run_id
+        WHERE mr.invoice_id = ${c.id}::uuid AND d.restaurant_id = ${c.restaurantId}::uuid
+          AND (d.resolution_status IN ('accepted', 'rejected', 'resolved')
+               ${hasDecisionCol ? sql`OR d.decision IS NOT NULL` : sql``})
+      ) AS decided,
+      EXISTS (
+        SELECT 1 FROM recovery_claims rc
+        WHERE rc.invoice_id = ${c.id}::uuid AND rc.restaurant_id = ${c.restaurantId}::uuid
+      ) AS claimed
+  `)) as unknown;
+  const r = (Array.isArray(rows) ? rows[0] : (rows as { rows?: unknown[] }).rows?.[0]) as { decided?: boolean; claimed?: boolean } | undefined;
+  if (r?.claimed) return 'invoice_has_claim';
+  if (r?.decided) return 'invoice_has_decision';
+  return null;
+}
+
+/**
  * Invoice lifecycle. Owner decision (payment): `mark_paid`, `unmark` and
  * `external_sync` touch ONLY the invoice row — never claims, discrepancies or
  * letters; a paid invoice keeps its claims. The kernel stamps the event time,
@@ -102,6 +129,30 @@ export const invoiceMachine = defineMachine({
       kind: 'side',
       audit: 'invoice.rematch_locked',
       domainEvent: 'invoice.rematch_locked',
+    },
+    reocr: {
+      // G-09: send a parsed/matched invoice back through OCR (e.g. a page was
+      // added). Only while nobody has decided anything on it and no claim exists.
+      from: ['parsed', 'matched'],
+      to: 'ocr_pending',
+      kind: 'reopen',
+      audit: 'invoice.reocr_requested',
+      domainEvent: 'invoice.reocr_requested',
+      precondition: (tx, c) => invoiceHasNoDecisionOrClaim(tx, c),
+    },
+    retire: {
+      // G-09: an invoice absorbed as a page of another. RESERVED: its target
+      // needs a new invoice_status value (e.g. 'retired'), a schema change.
+      // TODO(G-03/H-03 human schema PR): add the invoice_status value, then set
+      // `to` to it and drop `reserved`. Guard stays as defined here.
+      from: ['parsed', 'matched', 'disputed'],
+      to: null,
+      kind: 'terminal',
+      requiresReason: true,
+      audit: 'invoice.retired',
+      domainEvent: 'invoice.retired',
+      precondition: (tx, c) => invoiceHasNoDecisionOrClaim(tx, c),
+      reserved: "needs a new invoice_status value via the G-03/H-03 human schema PR",
     },
     external_sync: {
       // The accounting system reports the invoice paid.

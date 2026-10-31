@@ -28,6 +28,8 @@ export const EVENT_EFFECTS: Readonly<Record<DomainEventType, readonly EffectKind
   'invoice.unmarked_paid': ['audit', 'activity'],
   'invoice.rematch_locked': ['audit'],
   'invoice.external_sync': ['audit', 'activity'],
+  'invoice.reocr_requested': ['audit', 'activity'],
+  'invoice.retired': ['audit', 'activity'],
   'invoice.ocr_failed': ['activity', 'notify', 'task'],
   // discrepancy
   'discrepancy.accepted': ['audit', 'activity', 'claim'],

@@ -17,6 +17,8 @@ export const TRANSITION_EVENT_TYPES = [
   'invoice.unmarked_paid',
   'invoice.rematch_locked',
   'invoice.external_sync',
+  'invoice.reocr_requested',
+  'invoice.retired',
   // discrepancy
   'discrepancy.accepted',
   'discrepancy.rejected',

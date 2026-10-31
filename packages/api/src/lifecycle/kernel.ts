@@ -51,6 +51,18 @@ export interface EdgeSpec<S extends string> {
   via?: string;
   audit: AuditAction;
   domainEvent: TransitionEventType;
+  /**
+   * A business precondition checked on the locked row (e.g. "no decision and
+   * no claim"). Return a reason to refuse (PRECONDITION_FAILED, nothing
+   * written), or null to allow.
+   */
+  precondition?: (tx: Database, c: MoveContext<S, string>) => Promise<string | null>;
+  /**
+   * The edge name and guard are defined but the edge is not enabled yet (e.g.
+   * its target needs a schema change). The text names what enables it; every
+   * call is refused with PRECONDITION_FAILED.
+   */
+  reserved?: string;
 }
 
 export interface MoveContext<S extends string, E extends string> {
@@ -239,6 +251,29 @@ function badRequest(message: string): TRPCError {
   return new TRPCError({ code: 'BAD_REQUEST', message });
 }
 
+export const TRANSITION_REFUSED_PREFIX = 'lifecycle.refused:';
+
+/** The `cause` of a PRECONDITION_FAILED refusal: `appParams.reason` is machine-readable. */
+export class TransitionRefusedCause extends Error {
+  readonly appCode = 'lifecycle.refused';
+  constructor(readonly appParams: { reason: string }) {
+    super('lifecycle.refused');
+    this.name = 'TransitionRefusedCause';
+  }
+}
+
+function refused(message: string, reason: string): TRPCError {
+  return new TRPCError({
+    code: 'PRECONDITION_FAILED',
+    message: `${TRANSITION_REFUSED_PREFIX}${reason}: ${message}`,
+    cause: new TransitionRefusedCause({ reason }),
+  });
+}
+
+export function isTransitionRefused(err: unknown): err is TRPCError & { cause: TransitionRefusedCause } {
+  return err instanceof TRPCError && err.code === 'PRECONDITION_FAILED' && err.cause instanceof TransitionRefusedCause;
+}
+
 interface Prepared<S extends string> {
   edge: EdgeSpec<S>;
   from: readonly S[];
@@ -250,6 +285,7 @@ interface Prepared<S extends string> {
 function prepare<S extends string, E extends string>(machine: Machine<S, E>, input: TransitionInput<S, E>): Prepared<S> {
   const edge = machine.edges[input.event] as EdgeSpec<S> | undefined;
   if (!edge) throw badRequest(`${machine.name}: unknown event ${String(input.event)}`);
+  if (edge.reserved) throw refused(`${machine.name}.${String(input.event)} is reserved: ${edge.reserved}`, 'reserved');
   if (edge.via && input.via !== edge.via) {
     throw badRequest(`${machine.name}.${input.event} is entered only via ${edge.via}`);
   }
@@ -329,6 +365,10 @@ async function move<S extends string, E extends string>(
     at: prepared.at,
   };
   if (prepared.from.length === 0) return null;
+  if (prepared.edge.precondition) {
+    const reason = await prepared.edge.precondition(tx, ctx as unknown as MoveContext<S, string>);
+    if (reason) throw refused(`${machine.name}.${input.event} refused`, reason);
+  }
   const statusKey = Object.entries(machine.table).find(([, col]) => col === machine.statusColumn)?.[0];
   if (!statusKey) throw new Error(`${machine.name}: status column is not a column of its table`);
   const set = { ...(machine.patch?.(ctx) ?? {}), ...(input.set ?? {}), [statusKey]: to };
@@ -483,6 +523,11 @@ export async function transitionMany<S extends string, E extends string>(
       payload: item.payload,
       at,
     };
+    const edge = machine.edges[input.event] as EdgeSpec<S> | undefined;
+    if (edge?.reserved) {
+      failures.push({ id: item.id, code: 'REFUSED', currentStatus: byId.get(item.id)?.status ?? '', reason: 'reserved' });
+      continue;
+    }
     const prepared = prepare(machine, single);
     const row = byId.get(item.id);
     if (!row) {
@@ -497,6 +542,22 @@ export async function transitionMany<S extends string, E extends string>(
     }
     if (prepared.from.length === 0) {
       failures.push({ id: item.id, code: 'REFUSED', currentStatus: row.status, reason: 'not_allowed_from_state' });
+      continue;
+    }
+    const pre = prepared.edge.precondition
+      ? await prepared.edge.precondition(tx, {
+          id: item.id,
+          restaurantId: input.restaurantId,
+          event: input.event,
+          from: row.status,
+          to: (prepared.to ?? row.status) as S,
+          actorId: input.actorId,
+          payload: prepared.payload,
+          at,
+        })
+      : null;
+    if (pre) {
+      failures.push({ id: item.id, code: 'REFUSED', currentStatus: row.status, reason: pre });
       continue;
     }
     const refusal = input.guard ? await input.guard(item, row) : null;
