@@ -12,7 +12,11 @@ beforeAll(async () => {
 });
 
 let n = 0;
-const limit = (max = 100) => ({ limit: max, windowSec: 3600, prefix: `pg-test-${++n}` });
+// A per-run id in every prefix: with DATABASE_URL set, rateLimit.ts uses the
+// Postgres store, whose counters outlive the process (1 h window). Fixed
+// prefixes collided with a previous run's counters in the same test DB.
+const RUN = crypto.randomUUID();
+const limit = (max = 100) => ({ limit: max, windowSec: 3600, prefix: `pg-test-${RUN}-${++n}` });
 
 function post(body: BodyInit | null, headers: Record<string, string> = {}, method = 'POST') {
   return new Request('http://localhost:3000/api/public/x', {
