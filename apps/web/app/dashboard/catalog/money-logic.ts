@@ -1,23 +1,18 @@
+import { parseNumberInput } from '@restomatch/types';
+
 /**
  * Pure helpers for typed catalog prices and the import review (unit-tested).
  *
- * A typed price follows the same strict rules as an imported price-list cell
- * (packages/api lib/parseMoneyCell, auto mode — a parity test pins them):
- * "1,250" is 1250, "7,5" and "12,90" are comma decimals, "1,250.50" groups
- * thousands; a sign, letters or "1,2345" are invalid, never guessed.
+ * A typed price uses the one shared number parser (@restomatch/types
+ * number-input), with the same options as an imported price-list cell:
+ * "1,250" is 1250, "7,5" / "12,90" / "0,250" are comma decimals, "1,250.50"
+ * groups thousands; a sign, letters or 5+ decimals are invalid, never guessed.
  */
 export type PriceInput = number | null | 'invalid';
 
 export function parsePriceInput(raw: string): PriceInput {
-  const s = raw.replace(/₪/g, '').replace(/[\s  ‎‏]/g, '');
-  if (s === '') return null;
-  let norm: string | null = null;
-  if (/^\d+(?:\.\d+)?$/.test(s)) norm = s;
-  else if (/^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(s)) norm = s.replace(/,/g, '');
-  else if (/^\d+,\d{1,2}$/.test(s)) norm = s.replace(',', '.');
-  if (norm === null) return 'invalid';
-  const n = Number(norm);
-  return Number.isFinite(n) ? n : 'invalid';
+  const cell = parseNumberInput(raw, { scale: 4, grouping: true, negative: false });
+  return cell.kind === 'ok' ? cell.value : cell.kind === 'empty' ? null : 'invalid';
 }
 
 /** The value a price input shows after blur: "7,5" → "7.50", "1,250" → "1250.00" (re-parses to itself). */
