@@ -65,6 +65,8 @@ for (const vp of VIEWPORTS) {
         const firstItem = page.getByTestId('catalog-item').first();
         await expect(firstItem).toBeVisible({ timeout: 30_000 });
         await firstItem.click();
+        // W2-06 (orders-01, named exception): a catalog line starts with an EMPTY qty — type it.
+        await page.getByTestId('order-line').first().getByRole('textbox', { name: /כמות|Quantity/ }).fill('1');
 
         // The day is settled while building (W1-11: before the server draft exists).
         const date = page.getByTestId('order-delivery-date');

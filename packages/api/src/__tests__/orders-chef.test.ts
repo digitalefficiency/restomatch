@@ -1,6 +1,6 @@
 import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createDb, eq, suppliers } from '@restomatch/db';
+import { createDb, eq, purchaseOrders, suppliers } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { ORDER_WRITE_ROLES, PRICE_KEY } from '../orders/access';
@@ -80,6 +80,20 @@ describe('orders W2-06 role matrix', () => {
     const r = callerFor('receiver');
     const payloads = [await r.orders.list(), await r.orders.get({ poId: A.poId }), await r.orders.supplierBoard()];
     for (const p of payloads) expect(priceKeys(p)).toEqual([]);
+  });
+
+  it('the receiver never drafts (owner 31.10): createDraft / captureFromText / saveDraft → FORBIDDEN, nothing written', async () => {
+    const r = callerFor('receiver');
+    const before = await db.select().from(purchaseOrders).where(eq(purchaseOrders.restaurantId, A.restaurantId));
+    await expect(
+      r.orders.createDraft({ supplierId: A.supplierId, lines: [{ rawDescription: 'x', qty: 1, unit: 'kg' }] }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(r.orders.captureFromText({ text: '2 ק״ג עגבניות' } as never)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(
+      r.orders.saveDraft({ supplierId: A.supplierId, lines: [{ rawDescription: 'x', qty: 1, unit: 'kg' }], clientMutationId: 'rcv-00001' }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    const after = await db.select().from(purchaseOrders).where(eq(purchaseOrders.restaurantId, A.restaurantId));
+    expect(after).toHaveLength(before.length);
   });
 
   it('the board is readable by every member', async () => {

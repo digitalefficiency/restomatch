@@ -193,6 +193,19 @@ test.describe('phone (he 390, touch)', () => {
   });
 });
 
+test('receiver: a shared WhatsApp order opens the in-shell forward page (no 403/404, no ₪, no drafting)', async ({ page }) => {
+  const url = test.info().project.use.baseURL ?? 'http://localhost:3100';
+  await page.context().addCookies([...receiverCookies, { name: 'rm_cookie_consent', value: 'necessary', url }]);
+  const text = '2 ק״ג עגבניות\n1 ארגז חסה 45 ₪';
+  const res = await page.goto(`/dashboard/orders/capture?text=${encodeURIComponent(text)}`);
+  expect(res?.status()).toBe(200);
+  await expect(page.getByTestId('share-forward')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('share-forward')).toContainText('עגבניות');
+  await expect(page.getByTestId('share-forward-cta')).toBeVisible();
+  // No capture form (the receiver does not draft): the page has no text box to submit.
+  await expect(page.locator('main textarea')).toHaveCount(0);
+});
+
 test('receiver: no ₪ in the orders tRPC responses', async ({ page }) => {
   const url = test.info().project.use.baseURL ?? 'http://localhost:3100';
   await page.context().addCookies([...receiverCookies, { name: 'rm_cookie_consent', value: 'necessary', url }]);

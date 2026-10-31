@@ -29,6 +29,7 @@ import {
   Input,
   LinkButton,
   Select,
+  Skeleton,
   Spinner,
   cn,
   displayName,
@@ -361,6 +362,11 @@ export function NewOrderWizard({
     };
   }, [dirty, t]);
 
+  // The guide's query (shared cache with GuidePanel): BUILD waits for it to avoid layout shift.
+  const guideQ = trpc.orders.orderGuide.useQuery(
+    { supplierId },
+    { enabled: step === 'BUILD' && !!supplierId, retry: false, staleTime: 60_000 },
+  );
   const catalog = trpc.catalog.items.useQuery(
     { supplierId, search: search || undefined, limit: search ? 20 : 8 },
     { enabled: step === 'BUILD' && !!supplierId, placeholderData: (prev) => prev },
@@ -1053,6 +1059,15 @@ export function NewOrderWizard({
               </p>
             ) : null}
             {reorderInfo ? <ReorderNotice info={reorderInfo} /> : null}
+            {guideQ.isLoading ? (
+              // One layout-true skeleton until the guide resolves, so the catalog never
+              // moves under a tap when the guide lands above it (DoD-7 CLS).
+              <div className="space-y-4" aria-busy="true" data-testid="build-skeleton">
+                <Skeleton className="h-48" />
+                <Skeleton className="h-64" />
+              </div>
+            ) : (
+            <>
             {supplierId ? <GuidePanel supplierId={supplierId} lines={lines} onLines={setLines} newKey={newKey} /> : null}
             <Card elevated>
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -1173,6 +1188,8 @@ export function NewOrderWizard({
                 </Button>
               </div>
             </Card>
+            </>
+            )}
 
             <Card elevated>
               {lines.length === 0 ? (
