@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
-import { CheckCircle2, FileText, Pencil, Play, X } from 'lucide-react';
+import { CheckCircle2, FileText, Pencil, Play, Plus, Trash2, X } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
 import { Badge, Button, Card, Field, Input, type BadgeTone } from '@/lib/components';
 import { formatIls } from '@/lib/money';
@@ -70,6 +70,11 @@ export function InvoiceCorrection({
   const [vat, setVat] = useState(invoice.vatAmount != null ? String(invoice.vatAmount) : '');
   const [incl, setIncl] = useState(invoice.totalInclVat != null ? String(invoice.totalInclVat) : '');
 
+  // B8: hand-entered lines (an invoice the OCR could not read / held for review).
+  const linesEditable = canEdit && !consolidated && invoice.linesEditable;
+  const emptyNew = { rawDescription: '', qtyBilled: '', unit: '', unitPriceBilled: '' };
+  const [nl, setNl] = useState(emptyNew);
+
   // Line editing
   const [editingLine, setEditingLine] = useState<string | null>(null);
   const [ld, setLd] = useState({ rawDescription: '', qtyBilled: '', unit: '', unitPriceBilled: '', lineTotal: '' });
@@ -109,6 +114,40 @@ export function InvoiceCorrection({
     },
     onError: onErr,
   });
+  // The server re-matches after a hand edit; a refused re-match keeps the edit.
+  // The header totals were recomputed from the lines: the header drafts follow
+  // them (a later "save details" must never write back the stale figures).
+  const afterManual = (
+    msg: string,
+    res: { rematched: boolean; totals: { totalExclVat: string | null; vatAmount: string | null; totalInclVat: string | null } },
+  ) => {
+    setExcl(res.totals.totalExclVat ?? '');
+    setVat(res.totals.vatAmount ?? '');
+    setIncl(res.totals.totalInclVat ?? '');
+    onOk(res.rematched ? msg : `${msg} ${t('correction.rematchLater')}`);
+  };
+  const addLine = trpc.receiving.addInvoiceLine.useMutation({
+    onSuccess: (res) => {
+      setNl(emptyNew);
+      afterManual(t('correction.lineAdded'), res);
+    },
+    onError: onErr,
+  });
+  const deleteLine = trpc.receiving.deleteInvoiceLine.useMutation({
+    onSuccess: (res) => afterManual(t('correction.lineDeleted'), res),
+    onError: onErr,
+  });
+  const newQty = num(nl.qtyBilled);
+  const newPrice = num(nl.unitPriceBilled);
+  const newLineReady = !!nl.rawDescription.trim() && !!nl.unit.trim() && newQty != null && newQty > 0 && newPrice != null && newPrice >= 0;
+  function saveNewLine() {
+    if (!newLineReady) return;
+    addLine.mutate({
+      invoiceId: invoice.id,
+      line: { rawDescription: nl.rawDescription.trim(), qtyBilled: newQty!, unit: nl.unit.trim(), unitPriceBilled: newPrice! },
+    });
+  }
+
   const runMatch = trpc.match.runForInvoice.useMutation({
     onSuccess: (res) => {
       setRematch(res);
@@ -369,9 +408,26 @@ export function InvoiceCorrection({
                           </Button>
                         </div>
                       ) : (
-                        <Button size="sm" variant="ghost" title={t('correction.edit')} aria-label={t('correction.edit')} onClick={() => startLine(l)}>
-                          <Pencil className="h-4 w-4" />
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          <Button size="sm" variant="ghost" title={t('correction.edit')} aria-label={t('correction.edit')} onClick={() => startLine(l)}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          {linesEditable && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              data-testid="delete-invoice-line"
+                              title={t('correction.deleteLine')}
+                              aria-label={t('correction.deleteLine')}
+                              loading={deleteLine.isPending && deleteLine.variables?.lineId === l.id}
+                              onClick={() => {
+                                if (window.confirm(t('correction.deleteLineConfirm'))) deleteLine.mutate({ lineId: l.id });
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4 text-danger" />
+                            </Button>
+                          )}
+                        </div>
                       )}
                     </td>
                   )}
@@ -381,7 +437,43 @@ export function InvoiceCorrection({
             {invoice.lines.length === 0 && (
               <tr>
                 <td colSpan={canEdit ? 6 : 5} className="px-4 py-6 text-center text-subtle">
-                  {t('correction.noLines')}
+                  {linesEditable ? t('correction.noLinesAddBelow') : t('correction.noLines')}
+                </td>
+              </tr>
+            )}
+            {linesEditable && (
+              <tr data-testid="add-invoice-line-row" className="bg-surface-2/40">
+                <td className="px-4 py-3">
+                  <Input
+                    aria-label={t('correction.colDescription')}
+                    placeholder={t('correction.newLineDescription')}
+                    value={nl.rawDescription}
+                    maxLength={400}
+                    onChange={(e) => setNl({ ...nl, rawDescription: e.target.value })}
+                  />
+                </td>
+                <td className="px-4 py-3">
+                  <Input aria-label={t('correction.colQty')} type="number" inputMode="decimal" step="any" min="0" value={nl.qtyBilled} onChange={(e) => setNl({ ...nl, qtyBilled: e.target.value })} />
+                </td>
+                <td className="px-4 py-3">
+                  <Input aria-label={t('correction.colUnit')} placeholder={t('correction.newLineUnit')} value={nl.unit} maxLength={32} onChange={(e) => setNl({ ...nl, unit: e.target.value })} />
+                </td>
+                <td className="px-4 py-3">
+                  <Input aria-label={t('correction.colUnitPrice')} type="number" inputMode="decimal" step="any" min="0" value={nl.unitPriceBilled} onChange={(e) => setNl({ ...nl, unitPriceBilled: e.target.value })} />
+                </td>
+                {/* The line total is computed on the server (qty × price, to the agora). */}
+                <td className="px-4 py-3 text-xs text-subtle">{t('correction.newLineTotalAuto')}</td>
+                <td className="px-4 py-3">
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    data-testid="add-invoice-line"
+                    loading={addLine.isPending}
+                    disabled={!newLineReady}
+                    onClick={saveNewLine}
+                  >
+                    <Plus className="h-4 w-4" /> {t('correction.addLine')}
+                  </Button>
                 </td>
               </tr>
             )}

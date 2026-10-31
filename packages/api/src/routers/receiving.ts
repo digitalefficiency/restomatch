@@ -592,6 +592,8 @@ export const receivingRouter = router({
         ...invoiceFields,
         ocrFailed: failure?.ocrFailed === true,
         ocrFailureReason: failure?.ocrFailed === true ? (failure.reason ?? 'extraction_failed') : null,
+        // B8: lines may be added / deleted by hand (addInvoiceLine's own rule).
+        linesEditable: linesEditable(invoice.status, ocrPayload),
         // A חשבונית ריכוז: cross-matched against its delivery notes, never re-matched to a PO.
         consolidated: readConsolidatedRaw(ocrPayload) !== null,
         // The scanned number already belongs to another invoice of this
@@ -1519,6 +1521,18 @@ function receiptInvoiceSql(restaurantId: string, grId: string) {
   );
 }
 
+/** The OCR could not read it (raw.ocrFailed), or lines were entered by hand (raw.manualLines). */
+function isHandEntered(ocrPayload: OcrPayload | null): boolean {
+  const raw = (ocrPayload?.raw ?? null) as { ocrFailed?: unknown; manualLines?: unknown } | null;
+  return raw?.ocrFailed === true || raw?.manualLines === true;
+}
+
+/** May lines be added / deleted by hand (see editableInvoice)? One rule for the API and the page. */
+function linesEditable(status: string, ocrPayload: OcrPayload | null): boolean {
+  if (status === 'parsed') return true;
+  return isHandEntered(ocrPayload) && (status === 'matched' || status === 'disputed');
+}
+
 type InvoiceTotals = { totalExclVat: string | null; vatAmount: string | null; totalInclVat: string | null };
 
 /**
@@ -1546,11 +1560,8 @@ async function editableInvoice(db: Database, restaurantId: string, invoiceId: st
     .limit(1)
     .for('update');
   if (!inv) throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
-  const raw = (inv.ocrPayload?.raw ?? null) as { ocrFailed?: unknown; manualLines?: unknown } | null;
-  const handEntered = raw?.ocrFailed === true || raw?.manualLines === true;
-  const editable =
-    inv.status === 'parsed' || (handEntered && (inv.status === 'matched' || inv.status === 'disputed'));
-  if (!editable) {
+  const handEntered = isHandEntered(inv.ocrPayload);
+  if (!linesEditable(inv.status, inv.ocrPayload)) {
     throw new TRPCError({
       code: 'PRECONDITION_FAILED',
       message: 'אפשר להוסיף או למחוק שורות רק בחשבונית שלא נקראה אוטומטית או שממתינה לבדיקה',

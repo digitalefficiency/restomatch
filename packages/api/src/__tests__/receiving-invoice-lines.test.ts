@@ -161,4 +161,9 @@ describe('manual invoice lines (B8)', () => {
     ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
     expect((await header(failedId)).excl).toBe('6.00');
   });
+
+  it('getInvoice tells the page whether lines can be added by hand (one rule with the API)', async () => {
+    expect((await as('manager').receiving.getInvoice({ invoiceId: failedId })).linesEditable).toBe(true);
+    expect((await as('manager').receiving.getInvoice({ invoiceId: A.invoiceId })).linesEditable).toBe(false); // read + matched
+  });
 });
