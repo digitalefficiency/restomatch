@@ -2,36 +2,52 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { FileText, Package, Search, Truck } from 'lucide-react';
+import { FileText, LayoutGrid, Package, Search, Truck } from 'lucide-react';
 import type { UserRole } from '@restomatch/db';
 import { trpc } from '@/lib/trpc/client';
 import { cn, Spinner } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { nav } from '@/lib/i18n/messages/nav';
 import { canSeeRoute } from '@/lib/roles';
-import { buildSearchOptions, type SearchOption } from './searchOptions';
+import { navGroups } from '@/lib/nav';
+import { useNavViewer } from '@/lib/nav/NavProvider';
+import { buildScreenOptions, buildSearchOptions, type SearchOption, type SearchScreen } from './searchOptions';
 import { startRouteProgress } from '@/lib/components/routeProgressState';
 
+/** What the role can actually find (ia-nav-04): the placeholder never promises more. */
+function placeholderKey(role: UserRole) {
+  if (role === 'receiver') return 'search.placeholderReceiver' as const;
+  if (role === 'chef') return 'search.placeholderChef' as const;
+  return 'search.placeholder' as const;
+}
+
 /**
- * Global search box. Debounces input, queries `search.global` (min 2 chars),
- * and shows grouped results (suppliers / products / invoices) as a WAI-ARIA
- * combobox: ↑/↓ move, Enter opens, Esc closes, click opens. Groups the role
- * can't open (e.g. a receiver and the suppliers page) are hidden. In English
- * the product/supplier English name is shown when it exists.
+ * Global search box. Screens ("מסכים", from the nav registry, filtered by role
+ * and flags) match locally from the first character; records debounce into
+ * `search.global` (min 2 chars). Grouped results (screens / suppliers /
+ * products / invoices) form a WAI-ARIA combobox: ↑/↓ move, Enter opens, Esc
+ * closes, click opens. Groups the role can't open (e.g. a receiver and the
+ * suppliers page) are hidden. In English the product/supplier English name is
+ * shown when it exists.
  */
 export function DashboardSearch({
   role,
   className,
   variant = 'header',
+  onNavigate,
 }: {
   role: UserRole;
   className?: string;
-  /** Where it renders: the desktop header or the mobile menu drawer (one of each per page). */
+  /** Where it renders: the desktop header or the phone search sheet (one of each per page). */
   variant?: 'header' | 'drawer';
+  /** Called after a result is opened (the phone sheet closes itself). */
+  onNavigate?: () => void;
 }) {
   const t = useT(nav);
+  const tl = t as unknown as (key: string) => string;
   const locale = useLocale();
   const router = useRouter();
+  const viewer = useNavViewer();
   const [raw, setRaw] = useState('');
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
@@ -66,16 +82,28 @@ export function DashboardSearch({
     return () => document.removeEventListener('mousedown', onDocClick);
   }, []);
 
+  // Every registry screen this viewer may open, localized (label + aliases).
+  const screens: SearchScreen[] = useMemo(() => {
+    if (!viewer) return [];
+    return navGroups(viewer).flatMap((g) =>
+      g.items.map((d) => ({ key: d.key, href: d.path, label: tl(`links.${d.key}`), aliases: d.aliases ?? [] })),
+    );
+  }, [viewer, tl]);
+
+  const screenOptions = useMemo(() => buildScreenOptions(raw, screens), [raw, screens]);
+
   const options: SearchOption[] = useMemo(
-    () =>
-      results.data
+    () => [
+      ...screenOptions,
+      ...(results.data && enabled
         ? buildSearchOptions(results.data, {
             locale,
             canSee: (href) => canSeeRoute(role, href),
             noInvoiceNumber: t('search.noInvoiceNumber'),
           })
-        : [],
-    [results.data, locale, role, t],
+        : []),
+    ],
+    [screenOptions, results.data, enabled, locale, role, t],
   );
 
   // Reset the highlighted row whenever the result set changes.
@@ -92,6 +120,7 @@ export function DashboardSearch({
     inputRef.current?.blur();
     startRouteProgress(opt.href);
     router.push(opt.href);
+    onNavigate?.();
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -115,11 +144,13 @@ export function DashboardSearch({
   }
 
   const groups: Array<{ kind: SearchOption['kind']; icon: React.ReactNode }> = [
+    { kind: 'screen', icon: <LayoutGrid className="h-3.5 w-3.5" aria-hidden="true" /> },
     { kind: 'supplier', icon: <Truck className="h-3.5 w-3.5" aria-hidden="true" /> },
     { kind: 'product', icon: <Package className="h-3.5 w-3.5" aria-hidden="true" /> },
     { kind: 'invoice', icon: <FileText className="h-3.5 w-3.5" aria-hidden="true" /> },
   ];
   const groupLabel = {
+    screen: t('search.groups.screens'),
     supplier: t('search.groups.suppliers'),
     product: t('search.groups.products'),
     invoice: t('search.groups.invoices'),
@@ -142,7 +173,7 @@ export function DashboardSearch({
           }}
           onFocus={() => setOpen(true)}
           onKeyDown={onKeyDown}
-          placeholder={t('search.placeholder')}
+          placeholder={t(placeholderKey(role))}
           aria-label={t('search.label')}
           role="combobox"
           aria-expanded={showPanel}
@@ -164,11 +195,11 @@ export function DashboardSearch({
           aria-label={t('search.label')}
           className="absolute z-50 mt-2 max-h-96 w-full min-w-[18rem] overflow-auto rounded-xl border border-line bg-surface p-1 shadow-card"
         >
-          {!enabled ? (
+          {options.length === 0 && !enabled ? (
             <p className="px-3 py-4 text-center text-sm text-subtle">{t('search.minChars')}</p>
-          ) : results.isError ? (
+          ) : options.length === 0 && results.isError ? (
             <p className="px-3 py-4 text-center text-sm text-danger">{t('search.error')}</p>
-          ) : results.isLoading ? (
+          ) : options.length === 0 && results.isLoading ? (
             <p className="px-3 py-4 text-center text-sm text-subtle">{t('search.searching')}</p>
           ) : options.length === 0 ? (
             <p className="px-3 py-4 text-center text-sm text-subtle">{t('search.noResults')}</p>
@@ -181,7 +212,7 @@ export function DashboardSearch({
                 if (groupOpts.length === 0) return null;
                 return (
                   <div key={kind} role="group" aria-label={groupLabel[kind]} className="py-1">
-                    <div className="flex items-center gap-1.5 px-3 pb-1 pt-1.5 text-xs font-semibold uppercase tracking-wider text-subtle">
+                    <div className="flex items-center gap-1.5 px-3 pb-1 pt-1.5 text-xs font-semibold text-subtle">
                       {icon}
                       {groupLabel[kind]}
                     </div>
