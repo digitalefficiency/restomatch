@@ -58,7 +58,8 @@ function encryptTotpSecret(plain: string): string {
 
 /**
  * Idempotently create a manager of the demo restaurant with a password (and,
- * optionally, an enrolled TOTP secret). Resets lockout counters every call.
+ * optionally, an enrolled TOTP secret). Resets lockout counters every call,
+ * and the login throttle with them (see below).
  */
 export async function ensurePasswordUser(opts: {
   email: string;
@@ -90,6 +91,13 @@ export async function ensurePasswordUser(opts: {
         totp_last_step = null,
         failed_login_count = 0,
         locked_until = null`;
+    // The login throttle (lib/rateLimit.ts: 10/email + 30/IP per fixed 15-min window,
+    // stored in rate_limit_counters) counts SUCCESSFUL logins against the IP too. Every
+    // e2e sign-in comes from 127.0.0.1, so the whole serial run shares one 30-attempt
+    // budget: W1-01..W1-08 spend ~25 of it, and W1-09 auth-11's second correct login
+    // became attempt #31 → a uniform CredentialsSignin. Start every password user from
+    // a clean throttle, like the lockout columns above (and e2e/run-demo-path.sh).
+    await sql`delete from rate_limit_counters where key like 'login:%'`;
   } finally {
     await sql.end();
   }
