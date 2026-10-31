@@ -289,3 +289,23 @@ Findings and evidence stay in `docs/ux/review/area-*.md` and `lens-*.md` (`grep 
 - **Review depth follows risk:**
   - ₪ math, tenant/role, auth, money limits or any immutable-adjacent file get the two-lens review plus a verifier.
   - Copy-only or style-only changes get one lens.
+
+## 13. Updates from the orchestrator, 1.11 (binding; they override anything above that differs)
+- **Owner decisions of 31.10 (late evening), consolidated invoices and payment terms:**
+  1. **Real consolidated-invoice (חשבונית מרכזת) detection lands BEFORE the pilot, in train B.** That means OCR document kind, billing period and delivery-note list (S14), plus their persistence (S13 #224: `raw.kind`, `periodStart`/`periodEnd`, `deliveryNotes[].number`; a consolidated invoice is never single-PO matched; an unknown supplier goes to review; a ח.פ. mismatch is flagged). Wave-2 packages build on those fields; don't re-detect.
+  2. **Payment terms go ALL in wave 2:**
+     - **Structured terms per supplier:** W2-11's terms picker writes canonical strings ("מזומן", "שוטף", "שוטף+N") into the existing `suppliers.payment_terms` column. No schema change.
+     - **A computed due date:** W2-03 `lib/dueDate.ts` `computeDueDate`; the pay run buckets by due date.
+     - **OCR of the printed terms and due date:** the new package **G-17** (ocr-procurement-engineer); values persist in `ocr_payload.raw.printedTerms` / `printedDueDate`.
+     - **The new flag "תנאים קצרים מהמוסכם":** G-17 `termsCheck` + W2-03 renders it. It is a **warn** chip in the pay run, with both dates. The pay run sorts by the **agreed** due date.
+  3. **Three new consolidated flags (G-04 addendum, below):**
+     - a delivery note from another month;
+     - a listed note that isn't in the system;
+     - a note billed twice, including month-total lines and two consolidated invoices for the same supplier and month.
+- **None of these adds a `DiscrepancyType`.** The 12-type union and the engine are immutable. The terms flag carries no ₪. "Billed twice" shows its ₪ as a T2 review item ("אפשר שחויב פעמיים") in the consolidated panel and as a pay-run hold. It enters the leak figure only through a human-authored engine PR. If you think one is needed, write the proposal in your PR body.
+- **Train state:**
+  - train A merges Tue 3.11 09:00 IL;
+  - train B merges Wed 4.11 08:00 IL;
+  - the pilot freeze runs 06.11–10.11;
+  - the first wave-2 integration comes after 10.11.
+  G-17 and the G-04 addendum start after train B is on `main`.
