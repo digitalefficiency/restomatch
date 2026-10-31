@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ALL_ROLES, allowedRolesForPath, canSeeRoute, labelForRole } from '../roles';
+import { ALL_ROLES, ROUTE_ROLES, allowedRolesForPath, canSeeRoute, labelForRole } from '../roles';
 
 /** The role matrix the nav, middleware and page guards all share. */
 describe('roles matrix', () => {
@@ -74,5 +74,18 @@ describe('wave 1 · S12 routes (₪-back tracker, monthly report)', () => {
       expect(canSeeRoute(role, '/dashboard/reports/monthly')).toBe(managers);
       expect(allowedRolesForPath('/dashboard/reports/monthly/pdf')?.includes(role)).toBe(managers);
     }
+  });
+});
+
+describe('W1-03 · ROUTE_ROLES from the nav registry', () => {
+  it('the printable leak report inherits the /leaks gate (the bookkeeper sees its role card, not a bounce)', () => {
+    expect(ROUTE_ROLES['/dashboard/leaks/report']).toBeUndefined();
+    expect(allowedRolesForPath('/dashboard/leaks/report')).toEqual(['owner', 'manager', 'bookkeeper']);
+  });
+
+  it('the supplier ledger: owner, manager, bookkeeper — never the receiver (owner decision) or the chef', () => {
+    expect(allowedRolesForPath('/dashboard/suppliers/ledger')).toEqual(['owner', 'manager', 'bookkeeper']);
+    expect(canSeeRoute('receiver', '/dashboard/suppliers/ledger')).toBe(false);
+    expect(canSeeRoute('chef', '/dashboard/suppliers/ledger')).toBe(false);
   });
 });

@@ -9,7 +9,8 @@ import { e2eSql } from './helpers';
  */
 test.use({ storageState: OWNER_STATE, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
-const BANNER = '[role="dialog"][aria-label="הסכמה לשימוש בעוגיות"]';
+// Role-agnostic: the banner is a dialog today and a region after W1-01 (a11y-12).
+const BANNER = '[aria-label="הסכמה לשימוש בעוגיות"]';
 
 /** True when the element's centre is the top-most hit target (nothing over it). */
 async function onTop(page: Page, loc: Locator): Promise<boolean> {
@@ -36,16 +37,17 @@ test('bottom nav stays clickable above the unanswered cookie banner, and drops b
   await page.goto('/dashboard');
   const banner = page.locator(BANNER);
   await expect(banner).toBeVisible();
-  const bottomNav = page.locator('nav.fixed').filter({ has: page.locator('a[href="/dashboard/receiving"]') });
-  const receiving = bottomNav.locator('a[href="/dashboard/receiving"]');
-  await expect(receiving).toBeVisible();
+  // Shell v2 (W1-03): the owner's bar is בית · אישורים · דליפות · הזמנות · עוד.
+  const bottomNav = page.getByTestId('bottom-bar');
+  const approvals = bottomNav.locator('a[href="/dashboard/approvals"]');
+  await expect(approvals).toBeVisible();
 
   const navBox = (await bottomNav.boundingBox())!;
   const bannerBox = (await banner.locator('> div').boundingBox())!;
   expect(navBox.y + navBox.height, 'nav sits above the banner').toBeLessThanOrEqual(bannerBox.y + 1);
-  expect(await onTop(page, receiving), 'bottom-nav link is not covered').toBe(true);
-  await receiving.click();
-  await expect(page).toHaveURL(/\/dashboard\/receiving$/);
+  expect(await onTop(page, approvals), 'bottom-nav link is not covered').toBe(true);
+  await approvals.click();
+  await expect(page).toHaveURL(/\/dashboard\/approvals$/);
 
   // Choosing releases the space: the nav returns to the bottom edge.
   await page.getByRole('button', { name: 'רק חיוניות' }).click();
@@ -94,6 +96,6 @@ test('receiving wizard: the sticky "close receipt" CTA stays clickable with the 
   await expect(cta).toBeVisible();
   await expect(page.locator(BANNER)).toBeVisible();
   expect(await onTop(page, cta), 'close-receipt CTA is not covered by the banner or the nav').toBe(true);
-  const nav = page.locator('nav.fixed').filter({ has: page.locator('a[href="/dashboard/receiving"]') });
-  expect(await onTop(page, nav.locator('a[href="/dashboard/receiving"]')), 'bottom nav still clickable').toBe(true);
+  // Field route (W1-03 focus mode): no bottom bar competes with the CTA.
+  await expect(page.getByTestId('bottom-bar')).toBeHidden();
 });

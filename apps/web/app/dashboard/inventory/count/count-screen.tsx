@@ -400,7 +400,7 @@ function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void 
       </div>
 
       {/* Finish: one primary action, pinned to the bottom of the phone screen. */}
-      <div className="fixed inset-x-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom)+var(--consent-h,0px))] z-20 border-t border-line bg-surface/95 p-3 backdrop-blur lg:bottom-[var(--consent-h,0px)]">
+      <div className="fixed inset-x-0 bottom-[calc(max(var(--rm-bottomnav-h,0px),env(safe-area-inset-bottom))+var(--consent-h,0px))] z-20 border-t border-line bg-surface/95 p-3 backdrop-blur lg:bottom-[var(--consent-h,0px)]">
         <div className="mx-auto max-w-3xl">
           <div className="mb-2" data-testid="count-progress">
             <div className="flex items-center justify-between gap-2 text-xs">
