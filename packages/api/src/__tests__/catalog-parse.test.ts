@@ -2,11 +2,21 @@ import ExcelJS from 'exceljs';
 const { Workbook } = ExcelJS;
 import { describe, expect, it } from 'vitest';
 import {
+  analyzeCatalogRows,
   autoDetectMapping,
+  detectVatBasis,
   extractCatalogRows,
   parseCatalogFile,
   parseNumeric,
 } from '../catalog/parse';
+import {
+  detectDecimalStyle,
+  exVatPriceUnits,
+  parseMoneyCell,
+  parsePriceCell,
+  priceUnitsToNumeric,
+  toPriceUnits,
+} from '../lib/parseMoneyCell';
 
 /** Build a real .xlsx buffer from an array-of-arrays (used by the XLSX tests). */
 async function xlsxBufferFromAoa(aoa: Array<Array<string | number>>): Promise<Buffer> {
@@ -141,5 +151,110 @@ describe('parseCatalogFile + extractCatalogRows (XLSX via exceljs)', () => {
     await expect(
       parseCatalogFile({ filename: 'huge.xlsx', base64: oversized.toString('base64') }),
     ).rejects.toThrow(/גדול מדי/);
+  });
+});
+
+// ── W1-10 · price-list money safety (catalog-02 / -37) ─────────────────────────
+describe('strict money cells (catalog-02: "1,250" was stored as ₪1.25)', () => {
+  it.each([
+    ['1,250', 1250],
+    ['₪1,250', 1250],
+    ['1,250,000', 1_250_000],
+    ['12,90', 12.9],
+    ['7,5', 7.5],
+    ['1,250.00', 1250],
+    ['₪ 2,400', 2400],
+    ['2,400 ₪', 2400],
+    ['12.5', 12.5],
+    ['1250', 1250],
+    ['0', 0],
+    ['45 ש"ח', 45],
+  ])('%s → %d', (raw, expected) => {
+    expect(parseMoneyCell(raw)).toEqual({ kind: 'ok', value: expected });
+    expect(parseNumeric(raw)).toBe(expected);
+  });
+  it.each(['-5', '(5)', '1e3', '1,2345', '1.250,5', 'abc', '₪', '12-'])('rejects %s', (raw) => {
+    expect(parseMoneyCell(raw).kind).toBe('invalid');
+    expect(parseNumeric(raw)).toBeNull();
+  });
+  it('empty is empty, not invalid', () => {
+    expect(parseMoneyCell('  ')).toEqual({ kind: 'empty' });
+    expect(parseMoneyCell(null)).toEqual({ kind: 'empty' });
+  });
+  it('a comma-decimal file ("1.250,00" in its own cells) reads dots as thousands', () => {
+    expect(detectDecimalStyle(['12', '1.250,00', '7,5'])).toBe('comma');
+    expect(detectDecimalStyle(['1,250', '12,90'])).toBe('auto');
+    expect(parseMoneyCell('1.250,50', 'comma')).toEqual({ kind: 'ok', value: 1250.5 });
+    expect(parseMoneyCell('7,5', 'comma')).toEqual({ kind: 'ok', value: 7.5 });
+    expect(parseMoneyCell('1.250', 'comma')).toEqual({ kind: 'ok', value: 1250 });
+    expect(parseMoneyCell('-5', 'comma').kind).toBe('invalid');
+  });
+  it('the contract importer keeps its number-or-null API on the same parser', () => {
+    expect(parsePriceCell('1,250')).toBe(1250);
+    expect(parsePriceCell('12,5')).toBe(12.5);
+    expect(parsePriceCell('-5')).toBeNull();
+  });
+});
+
+describe('analyzeCatalogRows: held rows, VAT basis', () => {
+  const table = {
+    headers: ['מק"ט', 'תיאור', 'מחיר'],
+    rows: [
+      { 'מק"ט': 'A1', תיאור: 'שמן זית 18 ל׳', מחיר: '1,250' },
+      { 'מק"ט': 'A2', תיאור: 'אורז יסמין', מחיר: '12,90' },
+      { 'מק"ט': 'A3', תיאור: 'מלח', מחיר: '-5' },
+      { 'מק"ט': 'A4', תיאור: 'סוכר', מחיר: 'לפי משקל' },
+      { 'מק"ט': 'A5', תיאור: 'פלפל', מחיר: '' },
+    ],
+  };
+  const mapping = { sku: 'מק"ט', name: 'תיאור', price: 'מחיר' };
+
+  it('commits only readable prices and lists the rest as held ("מחיר לא ברור")', () => {
+    const a = analyzeCatalogRows(table, mapping);
+    expect(a.rows.map((r) => [r.supplierSku, r.listPrice])).toEqual([
+      ['A1', 1250],
+      ['A2', 12.9],
+      ['A5', null],
+    ]);
+    expect(a.held).toEqual([
+      { rowNumber: 3, supplierNameRaw: 'מלח', supplierSku: 'A3', rawPrice: '-5', reason: 'UNCLEAR_PRICE' },
+      { rowNumber: 4, supplierNameRaw: 'סוכר', supplierSku: 'A4', rawPrice: 'לפי משקל', reason: 'UNCLEAR_PRICE' },
+    ]);
+    // The worker's path uses the same rows: a held row can never be stored as a guess.
+    expect(extractCatalogRows(table, mapping).map((r) => r.supplierSku)).toEqual(['A1', 'A2', 'A5']);
+  });
+
+  it('converts a VAT-inclusive list to ex-VAT with the restaurant rate (half-up, 4 dp)', () => {
+    const a = analyzeCatalogRows(table, { ...mapping, vatBasis: 'inc', vatRate: '0.1800' });
+    // 1250 / 1.18 = 1059.32203… → 1059.3220 ; 12.90 / 1.18 = 10.93220… → 10.9322
+    expect(a.rows.map((r) => r.listPrice)).toEqual([1059.322, 10.9322, null]);
+    expect(analyzeCatalogRows(table, { ...mapping, vatBasis: 'ex', vatRate: '0.18' }).rows[0]!.listPrice).toBe(1250);
+  });
+
+  it('half-up at the 4th decimal in integer price units', () => {
+    expect(exVatPriceUnits(toPriceUnits(118), 0.18)).toBe(1_000_000);
+    expect(priceUnitsToNumeric(exVatPriceUnits(toPriceUnits(1), 0.18))).toBe('0.8475'); // 0.847457…
+    expect(priceUnitsToNumeric(123_456)).toBe('12.3456');
+  });
+
+  it('pre-sets the VAT basis from a "כולל מע״מ" header', () => {
+    expect(detectVatBasis(['תיאור', 'מחיר כולל מע"מ'])).toBe('inc');
+    expect(detectVatBasis(['תיאור', 'מחיר כולל מע״מ'])).toBe('inc');
+    expect(detectVatBasis(['Description', 'Price incl. VAT'])).toBe('inc');
+    expect(detectVatBasis(['תיאור', 'מחיר לא כולל מע"מ'])).toBe('ex');
+    expect(detectVatBasis(['תיאור', 'מחיר'])).toBeNull();
+  });
+
+  it('reads a comma-decimal file per its own locale', () => {
+    const t = {
+      headers: ['תיאור', 'מחיר'],
+      rows: [
+        { תיאור: 'שמן', מחיר: '1.250,00' },
+        { תיאור: 'מלח', מחיר: '7,5' },
+      ],
+    };
+    const a = analyzeCatalogRows(t, { name: 'תיאור', price: 'מחיר' });
+    expect(a.decimal).toBe('comma');
+    expect(a.rows.map((r) => r.listPrice)).toEqual([1250, 7.5]);
   });
 });

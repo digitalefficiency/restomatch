@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { originalProps } from '@/lib/i18n/original';
+import { isSaveShortcut } from '../catalog/money-logic';
 import Link from 'next/link';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
-import { ExternalLink, Search } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
 import {
   Button,
@@ -104,7 +105,8 @@ export function NamesGrid({ initial, canEdit }: { initial: ListOutput; canEdit: 
   // Ctrl/⌘+S saves; warn before leaving with unsaved edits.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      // By physical key: on a Hebrew layout `e.key` is "ד" (catalog-40).
+      if (isSaveShortcut(e)) {
         e.preventDefault();
         doSave();
       }
@@ -195,7 +197,7 @@ export function NamesGrid({ initial, canEdit }: { initial: ListOutput; canEdit: 
       ) : (
         <Card elevated padding="none" className={cn('overflow-hidden transition-opacity', q.isFetching && 'opacity-80')}>
           <ul role="list" className="divide-y divide-line/60">
-            <li className="hidden grid-cols-[minmax(0,1.2fr)_minmax(0,1.4fr)_minmax(0,1fr)] gap-3 px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-subtle md:grid">
+            <li className="hidden grid-cols-[minmax(0,1.2fr)_minmax(0,1.4fr)_minmax(0,1fr)] gap-3 px-4 py-2.5 text-xs font-medium text-subtle ltr:uppercase ltr:tracking-wide md:grid">
               <span>{t('names.hebrew')}</span>
               <span>{t('names.english')}</span>
               <span>{t('names.supplier')}</span>
@@ -212,20 +214,19 @@ export function NamesGrid({ initial, canEdit }: { initial: ListOutput; canEdit: 
                   className="grid grid-cols-1 gap-2 px-4 py-3 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1.4fr)_minmax(0,1fr)] md:items-center md:gap-3"
                 >
                   <div className="flex min-w-0 items-center gap-2">
-                    <label htmlFor={inputId} className="truncate font-medium text-ink" lang="he">
-                      {r.canonicalName}
-                    </label>
+                    {/* The Hebrew name IS the product link (keyboard-reachable, catalog-41); it also labels the input. */}
                     <Link
+                      id={`${inputId}-label`}
                       href={`/dashboard/products/${r.id}`}
-                      className="shrink-0 rounded text-subtle hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
-                      aria-label={`${t('names.openProduct')}: ${r.canonicalName}`}
-                      tabIndex={-1}
+                      className="inline-flex min-h-[44px] min-w-0 items-center rounded font-medium text-ink hover:text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 md:min-h-0"
+                      lang="he"
                     >
-                      <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                      <span className="truncate">{r.canonicalName}</span>
                     </Link>
                   </div>
                   <Input
                     id={inputId}
+                    aria-labelledby={`${inputId}-label`}
                     ref={(el: HTMLInputElement | null) => {
                       inputs.current[i] = el;
                     }}
