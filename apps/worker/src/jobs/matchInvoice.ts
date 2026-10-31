@@ -1,6 +1,7 @@
 import {
   approvalNeededEmail,
   buildMatchInputForInvoice,
+  claimableLines,
   buildRules,
   createEmailNotifier,
   createPushNotifier,
@@ -13,7 +14,9 @@ import {
   recipientsForRestaurant,
   recordUsage,
   resolveApprovalThresholds,
+  formatIlsAgorot,
 } from '@restomatch/api';
+import { computeInvoiceLeak } from '@restomatch/charts';
 import { and, desc, eq, invoices, matchRuns, restaurants, suppliers, type Database } from '@restomatch/db';
 import { runMatch, type MatchOutput } from '@restomatch/matching';
 import { makeWorker, type WorkerJob } from '../queue';
@@ -157,6 +160,29 @@ const push = createPushNotifier();
 // Real Resend email when RESEND_API_KEY is set, else dev/console EmailNotifier.
 const email = createEmailNotifier();
 
+/**
+ * The branch-aware deep link of every approval notification (ia-nav-09):
+ * `/dashboard/go?r=<restaurantId>&to=/dashboard/approvals?invoice=<id>`.
+ */
+export function approvalsGoLink(restaurantId: string, invoiceId: string | null, base = appBaseUrl()): string {
+  const to = invoiceId ? `/dashboard/approvals?invoice=${invoiceId}` : '/dashboard/approvals';
+  return `${base}/dashboard/go?r=${encodeURIComponent(restaurantId)}&to=${encodeURIComponent(to)}`;
+}
+
+/** Σ claimable agorot of one invoice: `claimableLines(computeInvoiceLeak(id))`. */
+export async function invoiceClaimAgorot(db: Database, restaurantId: string, invoiceId: string): Promise<number> {
+  const inv = await computeInvoiceLeak(db, restaurantId, invoiceId);
+  if (!inv) return 0;
+  return claimableLines(inv).reduce((n, c) => n + Math.round(c.amount * 100), 0);
+}
+
+/** Push / WhatsApp body: "N פערים · ₪X לדרישת זיכוי" + the link. No baked ₪ template string. */
+export function approvalSummary(count: number, claimAgorot: number, link: string): string {
+  const gaps = count === 1 ? 'פער אחד' : `${count} פערים`;
+  const money = claimAgorot > 0 ? ` · ${formatIlsAgorot(claimAgorot, { maximumFractionDigits: 2 })} לדרישת זיכוי` : '';
+  return `${gaps} בחשבונית${money}\n${link}`;
+}
+
 export function startMatchInvoiceWorker() {
   return makeWorker<MatchInvoiceJob>('match-invoice', processMatchInvoice);
 }
@@ -191,7 +217,11 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
   if (!replaced && persisted.rolesNeedingNotification.length > 0) {
     const ent = await getEntitlements(db, restaurantId);
     const whatsappAllowed = ent.active && ent.features.includes('whatsapp_alerts');
-    const summary = `${result.discrepancies.length} חריגות, סה"כ הפסד פוטנציאלי ₪${result.totalDiscrepancyAmount.toFixed(0)}`;
+    // ₪ = what this invoice can actually claim (the letters' rule), never the
+    // engine's raw Σ|Δ|; formatted once by the server money util.
+    const claimAgorot = await invoiceClaimAgorot(db, restaurantId, invoiceId);
+    const link = approvalsGoLink(restaurantId, invoiceId);
+    const summary = approvalSummary(result.discrepancies.length, claimAgorot, link);
     for (const role of persisted.rolesNeedingNotification) {
       if (whatsappAllowed) {
         await whatsapp.send(db, {
@@ -237,8 +267,9 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
       const rendered = approvalNeededEmail({
         supplierName: sup?.name ?? 'ספק',
         discrepancyCount: result.discrepancies.length,
-        atRiskIls: `₪${result.totalDiscrepancyAmount.toFixed(0)}`,
-        approvalsUrl: `${appBaseUrl()}/dashboard/approvals`,
+        // TODO(W2-13 13a): `claimableIls` + `invoiceUrl` once the template takes them (one line).
+        atRiskIls: formatIlsAgorot(claimAgorot, { maximumFractionDigits: 2 }),
+        approvalsUrl: link,
       });
       for (const r of recipients) {
         await email.send(db, {
@@ -258,7 +289,7 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
   console.log(
     `[match-invoice] restaurant=${restaurantId} invoice=${invoiceId} ` +
       `status=${result.status} discrepancies=${persisted.discrepancyCount} ` +
-      `loss=₪${result.totalDiscrepancyAmount.toFixed(2)} ` +
+      `deltaAgorot=${Math.round(result.totalDiscrepancyAmount * 100)} ` +
       `notifications=${persisted.rolesNeedingNotification.length}`,
   );
 
