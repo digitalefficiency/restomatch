@@ -8,7 +8,7 @@ import { receivingDelivery } from '@/lib/i18n/messages/receiving/delivery';
 import { runLogoutGuard, type LogoutChoice } from './logoutGuard';
 import { clearMineOnDevice, countMineOnDevice } from './fieldOutbox';
 import { LOGOUT_FORM_ATTR, queueDbExists } from './offlineQueue';
-import { purgeFieldSnapshot } from './fieldSnapshot';
+import { purgeFieldSnapshot, purgeSnapshotIfNotOwner } from './fieldSnapshot';
 import { drainNow, useOutboxDrainer } from './useOutboxDrainer';
 
 /** Set on a sign-out form once the guard let it through, so the re-submit is not intercepted again. */
@@ -33,6 +33,10 @@ export function PwaSessionGuard({ userId }: { userId: string }) {
   const locale = useLocale();
   // The field outbox's background drainer (W2-05): counts, closes and photos left on the phone go out from any screen.
   useOutboxDrainer(userId);
+  // Another user's read snapshot never survives a user switch on this device (sign-out or not).
+  useEffect(() => {
+    void purgeSnapshotIfNotOwner(userId);
+  }, [userId]);
   const photosOnlyRef = useRef(true);
   const [sheet, setSheet] = useState<Sheet>(null);
   const answerRef = useRef<((c: LogoutChoice) => void) | null>(null);

@@ -39,6 +39,26 @@ export async function purgeFieldSnapshot(): Promise<void> {
 }
 
 /**
+ * The signed-in user is not the snapshot's owner (another user signed in on
+ * this device, even without our sign-out): wipe it before anything can read it.
+ * Run on every mount of the signed-in shell. Returns whether it purged.
+ */
+export async function purgeSnapshotIfNotOwner(userId: string): Promise<boolean> {
+  const api = cachesApi();
+  if (!api) return false;
+  try {
+    if (!(await api.keys()).includes(SNAPSHOT_CACHE)) return false;
+    const stamp = await (await api.open(SNAPSHOT_CACHE)).match(SNAPSHOT_OWNER_PATH);
+    const owner = stamp ? (await stamp.text()).split(':')[0] : null;
+    if (owner === userId) return false;
+    await api.delete(SNAPSHOT_CACHE); // no stamp at all is not trusted either
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Refresh the snapshot with these pages (best effort, sequential: a phone on
  * a weak link). Returns how many pages were stored.
  */

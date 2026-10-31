@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { SNAPSHOT_CACHE, SNAPSHOT_OWNER_PATH, purgeFieldSnapshot, refreshFieldSnapshot } from '../fieldSnapshot';
+import {
+  SNAPSHOT_CACHE,
+  SNAPSHOT_OWNER_PATH,
+  purgeFieldSnapshot,
+  purgeSnapshotIfNotOwner,
+  refreshFieldSnapshot,
+} from '../fieldSnapshot';
 
 const PO1 = '/dashboard/receiving/11111111-1111-4111-8111-111111111111';
 const PO2 = '/dashboard/receiving/22222222-2222-4222-8222-222222222222';
@@ -19,6 +25,7 @@ function installCaches() {
       };
     },
     delete: async (n: string) => stores.delete(n),
+    keys: async () => [...stores.keys()],
   });
   return stores;
 }
@@ -71,6 +78,24 @@ describe('field snapshot (offline read copy of today’s deliveries)', () => {
     vi.stubGlobal('fetch', vi.fn(async (p: string) => html(p)));
     await refreshFieldSnapshot({ userId: 'u1', restaurantId: 'r1' }, [PO1]);
     await purgeFieldSnapshot();
+    expect(stores.has(SNAPSHOT_CACHE)).toBe(false);
+  });
+
+  it('a user switch on the same device (no sign-out) wipes the previous snapshot before anything reads it', async () => {
+    const stores = installCaches();
+    vi.stubGlobal('fetch', vi.fn(async (p: string) => html(p)));
+    await refreshFieldSnapshot({ userId: 'u1', restaurantId: 'r1' }, [PO1]);
+    expect(await purgeSnapshotIfNotOwner('u1')).toBe(false); // the owner keeps it
+    expect(stores.get(SNAPSHOT_CACHE)!.has(PO1)).toBe(true);
+    expect(await purgeSnapshotIfNotOwner('u2')).toBe(true); // anyone else: gone
+    expect(stores.has(SNAPSHOT_CACHE)).toBe(false);
+  });
+
+  it('a snapshot without an owner stamp is never trusted', async () => {
+    const stores = installCaches();
+    const c = await caches.open(SNAPSHOT_CACHE);
+    await c.put(PO1, html('x'));
+    expect(await purgeSnapshotIfNotOwner('u1')).toBe(true);
     expect(stores.has(SNAPSHOT_CACHE)).toBe(false);
   });
 });

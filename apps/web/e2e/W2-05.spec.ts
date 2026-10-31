@@ -198,3 +198,63 @@ test('the outbox chip opens per-item status; only whoever saved an item may dele
   await expect(list).toContainText('שורה שנספרה');
   await expect(list.getByTestId('pwa-outbox-delete')).toBeVisible(); // mine
 });
+
+/** Is there a read snapshot for this page on the device? */
+async function snapshotHas(page: Page, path: string): Promise<boolean> {
+  return page.evaluate(async (p) => {
+    if (!(await caches.keys()).includes('rm-receiver-snapshot-v1')) return false;
+    return Boolean(await (await caches.open('rm-receiver-snapshot-v1')).match(p));
+  }, path);
+}
+
+async function snapshotOfToday(page: Page, path: string) {
+  await page.goto('/dashboard/receiving');
+  await page.waitForLoadState('networkidle');
+  await expect.poll(() => snapshotHas(page, path), { timeout: 30_000 }).toBe(true);
+}
+
+test('security: the receiver\'s snapshot holds no ₪; sign-out purges it', async ({ page }) => {
+  test.setTimeout(120_000);
+  const po = await freshPo('snap-signout', 2);
+  const path = `/dashboard/receiving/${po.poId}`;
+  await snapshotOfToday(page, path);
+  // Exactly what is cached: the rendered board + PO pages (HTML and their RSC data) — for a receiver, no ₪ and no price fields.
+  const cached = await page.evaluate(async (p) => {
+    const c = await caches.open('rm-receiver-snapshot-v1');
+    return Promise.all(['/dashboard/receiving', p].map(async (k) => (await (await c.match(k))!.text())));
+  }, path);
+  for (const html of cached) {
+    expect(html).not.toContain('₪');
+    expect(html).not.toMatch(/unitPriceExpected\\?"\s*:\s*\\?"?\d/);
+    expect(html).not.toMatch(/totalEstimated\\?"\s*:\s*\\?"?\d/);
+  }
+
+  await page.locator('form[data-rm-logout]').first().evaluate((f: HTMLFormElement) => f.requestSubmit());
+  // Signed out (the app lands on its public home): the receiver's snapshot is gone from the device.
+  await page.waitForURL((u) => !u.pathname.startsWith('/dashboard'), { timeout: 30_000 });
+  expect(await page.evaluate(async () => (await caches.keys()).includes('rm-receiver-snapshot-v1'))).toBe(false);
+});
+
+test('security: another user signing in on the same phone (no sign-out) never sees the previous snapshot', async ({ page, context }) => {
+  test.setTimeout(150_000);
+  const po = await freshPo('snap-switch', 2);
+  const path = `/dashboard/receiving/${po.poId}`;
+  await snapshotOfToday(page, path);
+
+  // The receiver's session just ends (no sign-out form): the manager signs in on the same device.
+  await context.clearCookies();
+  const url = test.info().project.use.baseURL!;
+  await context.addCookies([
+    { name: 'rm_locale', value: 'he', url },
+    { name: 'rm_cookie_consent', value: 'necessary', url },
+  ]);
+  await page.goto('/login');
+  await page.locator('form:has(#password) [name=email]').fill('manager@kfar-hazeitim.test');
+  await page.locator('#password').fill(process.env.DEMO_PASSWORD ?? 'RestoMatch-Demo-2026!');
+  await page.locator('form:has(#password) button[type=submit]').click();
+  await page.waitForURL(/\/dashboard/, { timeout: 60_000 });
+  // The first signed-in screen wipes it — before the manager ever opens receiving.
+  await expect
+    .poll(() => page.evaluate(async () => (await caches.keys()).includes('rm-receiver-snapshot-v1')), { timeout: 20_000 })
+    .toBe(false);
+});

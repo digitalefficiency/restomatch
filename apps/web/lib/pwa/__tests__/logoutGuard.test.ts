@@ -86,3 +86,18 @@ describe('PwaSessionGuard wiring', () => {
     expect(src).not.toMatch(/\bclearForUser\s*\(|\bremoveItem\s*\(|\.remove\(/);
   });
 });
+
+describe('OutboxStatusSheet never shows field data', () => {
+  it("renders only kind, time, state and who saved it: never an item's payload (decision 22: a colleague sees that work waits, not what it says)", async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../OutboxStatusSheet.tsx', import.meta.url), 'utf8');
+    expect(src).not.toMatch(/\.payload\b/);
+    expect(src).not.toMatch(/\.meta\b/);
+  });
+
+  it('the receiving chip lists only the active restaurant\'s items', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../ReceiverPwa.tsx', import.meta.url), 'utf8');
+    expect(src).toMatch(/const mine = all\.filter\(ofBranch\);\s*\n\s*setItems\(mine\);/);
+  });
+});
