@@ -291,6 +291,10 @@ describe('invoice_matched activity carries structured metadata', () => {
       potentialLossIls: res.totalDiscrepancyAmount,
       status: res.status,
     });
+    // The feed's ₪ is exact integer agorot of the leak figure (no baked ₪ text any more).
+    const meta = ev!.metadata as { leakIls: number; leakAgorot: number; leakCount: number };
+    expect(typeof meta.leakCount).toBe('number');
+    expect(meta.leakAgorot).toBe(Math.round(meta.leakIls * 100));
   });
 });
 

@@ -1,8 +1,8 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { activityEvents, and, createDb, discrepancies, eq, matchRuns, testDbUrl } from '@restomatch/db';
+import { activityEvents, and, createDb, discrepancies, eq, invoices, matchRuns, testDbUrl } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext } from '../context';
-import { discrepancyKey, loadPriorDecisions } from '../match/persist';
+import { discrepancyKey, loadPriorDecisions, matchActivitySummary } from '../match/persist';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
 
 /**
@@ -40,6 +40,37 @@ describe('persistMatchRun activity row (v2)', () => {
     expect(m).toMatchObject({ v: 2, invoiceId: A.invoiceId, invoiceNumber: A.invoiceNumber, supplierName: A.supplierName });
     expect(Number.isInteger(m.leakAgorot)).toBe(true);
     expect(m.leakAgorot).toBe(Math.round((m.leakIls as number) * 100));
+  });
+});
+
+describe('the v2 leak figures are the feed leak rule (matchActivitySummary), nothing else', () => {
+  // The leak story has ONE rule: matchActivitySummary. W1-08 (#211, train B) moves it onto charts'
+  // isLeakType() so MISSING_ON_INVOICE is no longer a leak; this pins that persist's v2 metadata is
+  // derived from that rule over the run's persisted findings, so the exclusion flows into the feed.
+  it('leakCount / leakIls / leakAgorot / reviewCount equal matchActivitySummary over the persisted findings', async () => {
+    const A = await seedTenant(db, 'A');
+    const res = await ownerCaller(A).match.runForInvoice({ invoiceId: A.invoiceId });
+    const findings = await db
+      .select({ type: discrepancies.type, severity: discrepancies.severity, deltaAmount: discrepancies.deltaAmount, resolutionStatus: discrepancies.resolutionStatus })
+      .from(discrepancies)
+      .where(eq(discrepancies.matchRunId, res.matchRunId!));
+    const [inv] = await db.select({ total: invoices.totalInclVat }).from(invoices).where(eq(invoices.id, A.invoiceId));
+    const [ev] = await db.select().from(activityEvents).where(eq(activityEvents.entityId, res.matchRunId!));
+    const m = ev!.metadata as Record<string, unknown>;
+    const summary = matchActivitySummary(
+      findings.map((f) => ({ ...f, deltaAmount: Number(f.deltaAmount ?? 0) })),
+      Number(inv!.total ?? 0),
+      { poMatched: m.poMatched as boolean },
+    );
+    expect(findings.length).toBeGreaterThan(0);
+    expect(m).toMatchObject({
+      v: 2,
+      leakCount: summary.leakCount,
+      leakIls: summary.leakIls,
+      leakAgorot: Math.round(summary.leakIls * 100),
+      reviewCount: summary.reviewCount,
+      pendingLink: summary.pendingLink,
+    });
   });
 });
 
