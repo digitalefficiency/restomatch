@@ -5,10 +5,11 @@ import { Lock, Mail, MessageCircle } from 'lucide-react';
 import type { UserRole } from '@restomatch/db';
 import { auth } from '@/auth';
 import { Card, LinkButton } from '@/lib/components';
+import { RefreshCw } from 'lucide-react';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { common } from '@/lib/i18n/messages/common';
 import { originalProps } from '@/lib/i18n/original';
-import { forbiddenFrom, screenKeyForPath } from '@/lib/net/access';
+import { forbiddenFrom, forbiddenOutcome, screenKeyForPath } from '@/lib/net/access';
 import { ALL_ROLES, allowedRolesForPath, labelForRole } from '@/lib/roles';
 import { createServerCaller } from '@/lib/trpc/server';
 import { SwitchBranchButton } from '../chain/switch-button';
@@ -53,8 +54,11 @@ export default async function ForbiddenPage({
   const allowed = allowedRolesForPath(fromPath) ?? ALL_ROLES;
   const notMember = reason === 'notMember';
 
-  // Opened directly (or the role changed since): nothing is forbidden any more.
-  if (!notMember && role && allowed.includes(role) && fromPath !== '/dashboard/forbidden') redirect(from);
+  // DB role vs session (JWT) role: redirect only when BOTH allow (never loops);
+  // a just-promoted user refreshes the session instead (W1-04 review, major 4).
+  const sessionRole = (session.user.role ?? null) as UserRole | null;
+  const outcome = notMember ? 'forbidden' : forbiddenOutcome(allowed, role, sessionRole);
+  if (outcome === 'redirect' && fromPath !== '/dashboard/forbidden') redirect(from);
 
   const screen = t(`shell.screens.${screenKeyForPath(fromPath)}`);
   const roles = joinList(
@@ -91,6 +95,20 @@ export default async function ForbiddenPage({
             </h1>
           </div>
         </div>
+
+        {outcome === 'refreshSession' ? (
+          <div className="space-y-2 rounded-xl border border-line bg-surface-2 p-3" data-testid="forbidden-refresh">
+            <p className="text-sm font-semibold text-ink">{t('shell.forbidden.refreshTitle')}</p>
+            <p className="text-sm text-muted">{t('shell.forbidden.refreshBody', { screen })}</p>
+            <a
+              href={`/api/session/refresh?${new URLSearchParams({ next: from }).toString()}`}
+              className="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-on-primary hover:brightness-90"
+            >
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+              {t('shell.forbidden.refreshCta')}
+            </a>
+          </div>
+        ) : null}
 
         {notMember ? (
           <p className="text-base text-ink">{t('shell.forbidden.notMember')}</p>

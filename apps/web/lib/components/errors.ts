@@ -33,8 +33,8 @@ export function friendlyError(
     // The session is gone, not the permission: say so (perf-states-15). The copy
     // lives in `common` (W1-04 owns it), in the same locale as `t`.
     case 'UNAUTHORIZED': {
-      const tc = createTranslator(t.appLocale, common);
-      return `${tc('shell.session.title')}. ${tc('shell.session.body')}`;
+      // The call was NOT sent (mutations are never replayed after re-auth).
+      return createTranslator(t.appLocale, common)('shell.session.notSent');
     }
     case 'NOT_FOUND':
       return t('errors.notFound');

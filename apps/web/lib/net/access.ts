@@ -1,6 +1,7 @@
 import type { UserRole } from '@restomatch/db';
 import { allowedRolesForPath } from '@/lib/roles';
 import { safeRelativePath } from '@/lib/safeRedirect';
+import { detailParent } from './branchSafeTarget';
 
 /**
  * Forbidden-route helpers shared by the middleware (edge-safe: pure, no I/O)
@@ -101,4 +102,30 @@ export function screenKeyForPath(path: string): ScreenKey {
     if ((path === key || path.startsWith(`${key}/`)) && key.length > best[0].length) best = entry;
   }
   return best[1];
+}
+
+/**
+ * What the forbidden page does. The middleware gates on the SESSION (JWT) role;
+ * the page reads the DB membership. They disagree for a few minutes after a
+ * role change — redirecting then would loop (page → middleware → page), so a
+ * just-promoted user gets "refresh my access" instead (W1-04 review, major 4).
+ */
+export function forbiddenOutcome(
+  allowed: readonly UserRole[],
+  dbRole: UserRole | null,
+  sessionRole: UserRole | null,
+): 'redirect' | 'refreshSession' | 'forbidden' {
+  const db = !!dbRole && allowed.includes(dbRole);
+  const jwt = !!sessionRole && allowed.includes(sessionRole);
+  if (db && jwt) return 'redirect';
+  if (db) return 'refreshSession';
+  return 'forbidden';
+}
+
+/** The 404's "back to <list>" target — only a list this role can open (review minor 7). */
+export function upLinkFor(pathname: string, role: UserRole | null): string | null {
+  const parent = detailParent(pathname);
+  if (!parent || !role) return null;
+  const allowed = allowedRolesForPath(parent);
+  return !allowed || allowed.includes(role) ? parent : null;
 }

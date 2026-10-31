@@ -1,3 +1,5 @@
+import type { UserRole } from '@restomatch/db';
+import { auth } from '@/auth';
 import { getT } from '@/lib/i18n/server';
 import { common } from '@/lib/i18n/messages/common';
 import { Card } from '@/lib/components';
@@ -10,7 +12,8 @@ import { NotFoundActions } from '@/lib/net/NotFoundActions';
  * way up to the parent list instead of only "home". Calm T4 neutral.
  */
 export default async function DashboardNotFound() {
-  const t = await getT(common);
+  const [t, session] = await Promise.all([getT(common), auth()]);
+  const role = (session?.user?.role ?? null) as UserRole | null;
   return (
     <section aria-labelledby="not-found-title" data-testid="dashboard-not-found" className="mx-auto max-w-xl">
       <Card padding="lg" className="space-y-4">
@@ -21,7 +24,7 @@ export default async function DashboardNotFound() {
           </h1>
           <p className="mt-1.5 text-base text-muted">{t('shell.notFound.body')}</p>
         </div>
-        <NotFoundActions />
+        <NotFoundActions role={role} />
       </Card>
     </section>
   );
