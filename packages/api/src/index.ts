@@ -213,6 +213,15 @@ export {
 } from './edge';
 export { canonicalizeEmail } from './email';
 export { startOfDayInTz, endOfDayInTz, addCalendarDaysInTz } from './lib/time';
+export {
+  deliveryState,
+  latestReceiptStatusSql,
+  localDaysBetween,
+  poDeliveryStateSql,
+  LATE_GRACE_MS,
+  type DeliveryState,
+  type DeliveryStateInput,
+} from './lib/deliveryState';
 export { FEATURE_KEYS, featureEnabled, type FeatureKey } from './lib/features';
 export { assertFeature } from './lib/featureGate';
 export {
