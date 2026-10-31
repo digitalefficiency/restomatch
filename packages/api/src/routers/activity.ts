@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { activityEvents, and, desc, eq, lt, type UserRole } from '@restomatch/db';
+import { activityEvents, and, desc, eq, inArray, lt, users, type UserRole } from '@restomatch/db';
 import { hasCap } from '../lib/capabilities';
 import { memberProcedure, router } from '../trpc';
 
@@ -47,6 +47,8 @@ interface FeedRow {
   detail: string | null;
   metadata: Record<string, unknown>;
   createdAt: Date;
+  actorId?: string | null;
+  actorName?: string | null;
 }
 
 /**
@@ -80,6 +82,9 @@ export const activityRouter = router({
    * load the next page.
    *
    * Receiver / chef (no `money.view`) get ₪-free rows: redactActivityForRole.
+   * Every row carries `actorId` + `actorName` (null for system events or a
+   * deleted user) for the actor chip; names are visible to every role that
+   * sees the row.
    */
   feed: memberProcedure
     .input(
@@ -103,6 +108,7 @@ export const activityRouter = router({
           // render the entry in any locale instead of parsing the Hebrew text.
           metadata: activityEvents.metadata,
           createdAt: activityEvents.createdAt,
+          actorId: activityEvents.actorId,
         })
         .from(activityEvents)
         .where(
@@ -113,7 +119,23 @@ export const activityRouter = router({
         )
         .orderBy(desc(activityEvents.createdAt))
         .limit(limit);
-      if (hasCap(ctx.session.role, 'money.view')) return rows;
-      return rows.map((row) => redactActivityForRole(ctx.session.role, row));
+      // Names resolve on the privileged connection: users_self RLS hides
+      // co-members' rows on the tenant connection (same pattern as team.list).
+      // Only actor ids taken from this tenant's own rows are looked up, and only
+      // the display name leaves this function (never the e-mail).
+      const actorIds = [...new Set(rows.map((r) => r.actorId).filter((id): id is string => !!id))];
+      const nameRows = actorIds.length
+        ? await (ctx.adminDb ?? ctx.db)
+            .select({ id: users.id, name: users.name })
+            .from(users)
+            .where(inArray(users.id, actorIds))
+        : [];
+      const nameById = new Map(nameRows.map((u) => [u.id, u.name]));
+      const withActor = rows.map((row) => ({
+        ...row,
+        actorName: row.actorId ? (nameById.get(row.actorId) ?? null) : null,
+      }));
+      if (hasCap(ctx.session.role, 'money.view')) return withActor;
+      return withActor.map((row) => redactActivityForRole(ctx.session.role, row));
     }),
 });

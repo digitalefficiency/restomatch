@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { activityEvents, createDb, testDbUrl, type UserRole } from '@restomatch/db';
+import { activityEvents, createDb, eq, testDbUrl, users, type UserRole } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
@@ -48,6 +48,7 @@ async function seedMoneyEvents(t: Tenant, at: number) {
       eventType: 'discrepancy_approved',
       title: 'פער אושר',
       detail: '‏₪120.50',
+      actorId: t.ownerUserId,
       entityType: 'discrepancy',
       entityId: t.discrepancyId,
       metadata: { discrepancyId: t.discrepancyId, savingsIls: 120.5, type: 'PRICE_INCREASE' },
@@ -87,6 +88,7 @@ beforeAll(async () => {
   B = await seedTenant(db, 'act-b');
   // seedTenant writes its own marker event; this suite owns the feed contents.
   await db.delete(activityEvents);
+  await db.update(users).set({ name: 'דנה כהן' }).where(eq(users.id, A.ownerUserId));
   await seedMoneyEvents(A, Date.parse('2026-10-20T08:00:00Z'));
   await db.insert(activityEvents).values({
     restaurantId: B.restaurantId,
@@ -164,6 +166,19 @@ describe('activity.feed — money scope by role (G-07)', () => {
       ]);
     });
   }
+
+  it('actorId + actorName on every row, for every role (null for a system event)', async () => {
+    for (const role of ['owner', 'manager', 'bookkeeper', 'receiver', 'chef'] as const) {
+      const rows = await caller(A, role).activity.feed();
+      const approved = rows.find((r) => r.eventType === 'discrepancy_approved');
+      expect(approved, role).toMatchObject({ actorId: A.ownerUserId, actorName: 'דנה כהן' });
+      for (const r of rows.filter((x) => x.eventType !== 'discrepancy_approved')) {
+        expect(r, `${role}:${r.eventType}`).toMatchObject({ actorId: null, actorName: null });
+      }
+      // The name only — never the actor's e-mail.
+      expect(JSON.stringify(rows)).not.toContain('@');
+    }
+  });
 
   it('A ≠ B: each tenant reads only its own events, for every role', async () => {
     for (const role of ['owner', 'manager', 'bookkeeper', 'receiver', 'chef'] as const) {
