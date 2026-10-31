@@ -16,8 +16,11 @@ export {
 } from './awaiting-count';
 export {
   computeInvoiceLeak,
+  computeInvoicesLeak,
   computeLeakBreakdown,
   computeLeakHero,
+  invoiceLeakStateCte,
+  monthInvoicesCte,
   type LeakBreakdownInvoice,
   type LeakBreakdownLine,
   type LeakHero,
