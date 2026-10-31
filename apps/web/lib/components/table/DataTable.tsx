@@ -18,7 +18,7 @@ import { ColumnsMenu, DensityMenu, ExportMenu } from './menus';
 import { MobileCardList } from './MobileCardList';
 import { pageWindow } from './paging';
 import { ToolbarPopover } from './Popover';
-import { DEFAULT_BULK_CAP_AGOROT, disabledReason, isOverCap, selectAllIds, summarize, toggleId } from './selection';
+import { DEFAULT_BULK_CAP_AGOROT, afterBatch, batchActionState, disabledReason, isHeldBack, selectAllIds, summarize, toggleId } from './selection';
 import { ariaSortOf, nextSort, sortRows } from './sort';
 import type { BatchAction, ColumnDef, Density, Selectability, SortSpec, TableTotals } from './types';
 import { useScrollMemory, useTableUrlState } from './useTableUrlState';
@@ -52,7 +52,8 @@ export interface DataTableProps<Row> {
   emptyAction?: React.ReactNode;
   // Batch mode
   selectable?: (row: Row) => Selectability;
-  amountAgorot?: (row: Row) => number;
+  /** Integer agorot; return null while the amount is unknown (it then never enters a capped batch). */
+  amountAgorot?: (row: Row) => number | null;
   /** Per-item bulk cap in agorot; `null` turns it off. Default ₪200 (R-12). */
   capAgorot?: number | null;
   batchActions?: BatchAction<Row>[];
@@ -137,6 +138,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
   const captionId = useId();
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [busy, setBusy] = useState(false);
+  const [failedCount, setFailedCount] = useState(0);
 
   const sort = state.sort && columns.some((c) => c.id === state.sort!.id && c.sortable !== false) ? state.sort : defaultSort;
   const density = state.density ?? densityProp;
@@ -176,16 +178,50 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     [],
   );
 
-  const toggle = (rid: string) => setSelected((s) => toggleId(s, rid));
+  const toggle = (rid: string) => {
+    setSelected((s) => toggleId(s, rid));
+    setFailedCount(0);
+  };
   const eligibleOnPage = selectAllIds(rules, pageRows);
   const allOnPage = eligibleOnPage.length > 0 && eligibleOnPage.every((x) => selected.has(x));
   const someOnPage = eligibleOnPage.some((x) => selected.has(x));
 
-  const runBatch = async (a: BatchAction<Row>) => {
+  // Focus goes back into the table whenever the BatchBar unmounts (cleared or done),
+  // never to <body>: the active row, else the first row.
+  const focusTable = () =>
+    requestAnimationFrame(() => {
+      const target = (state.sel ? rowEl(state.sel) : null) ?? body.current?.querySelector<HTMLElement>('tr[data-row-id]');
+      target?.focus();
+    });
+
+  const clearSelection = () => {
+    setSelected(new Set());
+    setFailedCount(0);
+    focusTable();
+  };
+
+  // One call per row (the existing per-item procedure). Rows that succeed leave the
+  // selection and are never re-submitted; rows that fail stay selected and are counted.
+  const runBatch = async (a: BatchAction<Row>, targets: Row[]) => {
     setBusy(true);
     try {
-      await a.run(summary.actionable);
-      setSelected(new Set());
+      let outcomes: ('ok' | 'failed')[];
+      if (a.runAll) {
+        const ok = await Promise.resolve()
+          .then(() => a.runAll!(targets))
+          .then(
+            () => true,
+            () => false,
+          );
+        outcomes = targets.map(() => (ok ? 'ok' : 'failed'));
+      } else {
+        const results = await Promise.allSettled(targets.map(async (r) => a.run?.(r)));
+        outcomes = results.map((r) => (r.status === 'fulfilled' ? 'ok' : 'failed'));
+      }
+      const next = afterBatch(selected, targets.map(rowKey), outcomes);
+      setSelected(next.selected);
+      setFailedCount(next.failed);
+      if (next.selected.size === 0) focusTable();
     } finally {
       setBusy(false);
     }
@@ -244,7 +280,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     } else if (k === 'escape') {
       if (selected.size > 0) {
         e.preventDefault();
-        setSelected(new Set());
+        clearSelection();
       } else if (state.sel) {
         e.preventDefault();
         update({ sel: null });
@@ -345,20 +381,27 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     <BatchBar
       count={summary.count}
       sumAgorot={amountAgorot ? summary.sumAgorot : undefined}
-      overCapCount={summary.overCap.length}
-      capAgorot={capAgorot}
-      onClear={() => setSelected(new Set())}
-      actions={(batchActions ?? []).map((a) => ({
-        id: a.id,
-        primary: a.primary,
-        disabled: busy || summary.actionable.length === 0 || (!!a.capped && summary.overCap.length > 0),
-        disabledReason:
-          a.capped && summary.overCap.length > 0 && capAgorot != null
-            ? copy.overCapDisabled(formatIls(capAgorot / 100, { locale }))
-            : undefined,
-        label: a.label(summary.actionable.length, summary.sumAgorot),
-        onRun: () => void runBatch(a),
-      }))}
+      notes={failedCount > 0 ? [copy.batchFailed(failedCount)] : []}
+      onClear={clearSelection}
+      actions={(batchActions ?? []).map((a) => {
+        const st = batchActionState(a, summary);
+        const reason =
+          st.reason === 'notEnforced'
+            ? copy.notEnforced
+            : st.reason === 'unknown'
+              ? copy.unknownDisabled
+              : st.reason === 'overCap' && capAgorot != null
+                ? copy.overCapDisabled(formatIls(capAgorot / 100, { locale }))
+                : undefined;
+        return {
+          id: a.id,
+          primary: a.primary,
+          disabled: busy || st.disabled,
+          disabledReason: reason,
+          label: a.label(st.rows.length, st.sumAgorot),
+          onRun: () => void runBatch(a, st.rows),
+        };
+      })}
     />
   ) : (
     <div className="flex min-h-10 flex-wrap items-end gap-2">
@@ -435,7 +478,8 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
             data-selected={checked || undefined}
             data-active={active || undefined}
             data-block={reason ? '' : undefined}
-            data-over-cap={selectable && isOverCap(rules, row) ? '' : undefined}
+            data-over-cap={selectable && isHeldBack(rules, row) === 'overCap' ? '' : undefined}
+            data-amount-unknown={selectable && isHeldBack(rules, row) === 'unknown' ? '' : undefined}
             tabIndex={active || (activeIndex < 0 && i === 0) ? 0 : -1}
             onClick={(e) => {
               if ((e.target as HTMLElement).closest('button,a,input,label')) return;

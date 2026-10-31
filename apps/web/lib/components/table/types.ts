@@ -50,13 +50,24 @@ export interface BatchAction<Row> {
   label: (count: number, sumAgorot: number) => string;
   primary?: boolean;
   /**
-   * A ₪-moving action (approve, pay): disabled, with the reason shown, while the
-   * selection holds a row above the per-item cap (R-12). Block rows are never
-   * selectable at all. The server still enforces both rules.
+   * A ₪-moving action (approve, pay). It acts only on in-cap rows with a known
+   * amount (R-12) and is disabled, with the reason shown, while the selection
+   * holds a row above the cap or with an unknown amount. Block rows are never
+   * selectable at all. This guard is UI-only: today's per-item procedures do
+   * not enforce the cap, so a capped action also stays disabled until the host
+   * passes `serverEnforced` (W1-07 / W2-04 add the server cap).
    */
   capped?: boolean;
-  /** Runs once per eligible row (the existing per-item procedure); never a bulk engine. */
-  run: (rows: Row[]) => void | Promise<void>;
+  /** The host's declaration that the server rejects over-cap and block items for this action. */
+  serverEnforced?: boolean;
+  /**
+   * Runs once per row — the existing per-item procedure, never a bulk engine.
+   * A rejected row stays selected (with a count shown); a row that succeeded
+   * leaves the selection and is never re-submitted.
+   */
+  run?: (row: Row) => void | Promise<void>;
+  /** A whole-selection action that is not a mutation (export, print); on a rejection every row stays selected. */
+  runAll?: (rows: Row[]) => void | Promise<void>;
 }
 
 export interface TableView {

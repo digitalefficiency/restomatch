@@ -4,7 +4,7 @@ import { DESK_COPY } from '../copy';
 import { buildExportCsv, exportTable, formatGeneratedAt } from '../exportCsv';
 import { formatMoneyFigure, moneyHeader } from '../cells';
 import { pageWindow } from '../paging';
-import { DEFAULT_BULK_CAP_AGOROT, disabledReason, isOverCap, selectAllIds, summarize, toggleId } from '../selection';
+import { DEFAULT_BULK_CAP_AGOROT, afterBatch, disabledReason, isHeldBack, selectAllIds, summarize, toggleId } from '../selection';
 import { ariaSortOf, compareValues, firstSortDesc, nextSort, sortRows } from '../sort';
 import type { ColumnDef } from '../types';
 import { parseTableState, writeTableState } from '../urlState';
@@ -95,8 +95,8 @@ describe('batch selection (R-12)', () => {
   };
   it('defaults the per-item cap to ₪200', () => {
     expect(DEFAULT_BULK_CAP_AGOROT).toBe(20_000);
-    expect(isOverCap(rules, rows[3]!)).toBe(true);
-    expect(isOverCap(rules, rows[2]!)).toBe(false); // |−₪90| is under the cap
+    expect(isHeldBack(rules, rows[3]!)).toBe('overCap');
+    expect(isHeldBack(rules, rows[2]!)).toBeNull(); // |−₪90| is under the cap
   });
   it('block rows are never selectable and carry the visible reason', () => {
     expect(disabledReason(rules, rows[1]!)).toBe('דורש בדיקה פרטנית');
@@ -105,13 +105,22 @@ describe('batch selection (R-12)', () => {
   it('select-all excludes block rows and rows above the cap', () => {
     expect(selectAllIds(rules, rows)).toEqual(['a', 'c']);
   });
-  it('the bar sums Σ|amount| of eligible rows within the cap; over-cap rows are held back', () => {
+  it('the bar sums Σ|amount| of the selection; only the capped subset excludes over-cap rows', () => {
     const sel = new Set(['a', 'b', 'c', 'd']);
     const s = summarize(rules, rows, sel);
-    expect(s.actionable.map((r) => r.id)).toEqual(['a', 'c']);
-    expect(s.overCap.map((r) => r.id)).toEqual(['d']);
+    expect(s.selected.map((r) => r.id)).toEqual(['a', 'c', 'd']);
+    expect(s.withinCap.map((r) => r.id)).toEqual(['a', 'c']);
+    expect(s.overCapCount).toBe(1);
     expect(s.count).toBe(3); // the block row never counts
-    expect(s.sumAgorot).toBe(21_000);
+    expect(s.sumAgorot).toBe(51_000);
+    expect(s.withinCapSumAgorot).toBe(21_000);
+  });
+  it('after a batch run, succeeded rows leave the selection and failed rows stay', () => {
+    const out = afterBatch(new Set(['a', 'c', 'd']), ['a', 'c', 'd'], ['ok', 'failed', 'ok']);
+    expect([...out.selected]).toEqual(['c']);
+    expect(out.failed).toBe(1);
+    // A capped run that targeted only some rows leaves the others selected.
+    expect([...afterBatch(new Set(['a', 'd']), ['a'], ['ok']).selected]).toEqual(['d']);
   });
   it('a null cap turns the cap off', () => {
     expect(selectAllIds({ ...rules, capAgorot: null }, rows)).toEqual(['a', 'c', 'd']);

@@ -48,11 +48,17 @@ export function DeskLab({
   totals,
   mode,
   labState,
+  simulateEnforced = false,
+  failAssign = false,
 }: {
   /** Server-computed count + Σ|Δ| per built-in view. */
   totals: Record<LabView, { count: number; sumAgorot: number }>;
   mode: 'table' | 'split';
   labState: LabState;
+  /** `?enforced=1`: pretend the server enforces the bulk cap (lab demo of the over-cap UI). */
+  simulateEnforced?: boolean;
+  /** `?fail=assign`: half the rows reject the lab's assign action. */
+  failAssign?: boolean;
 }) {
   const locale = useLocale();
   const t = labCopy(locale);
@@ -309,17 +315,28 @@ export function DeskLab({
             </button>
           }
           selectable={(r) => (r.severity === 'block' ? { disabled: deskCopy(locale).blockReason } : true)}
-          amountAgorot={(r) => r.deltaAgorot}
+          // A pending gap is unknown, never ₪0 — it can't enter a capped batch.
+          amountAgorot={(r) => (r.pendingDelta ? null : r.deltaAgorot)}
           batchActions={[
             {
               id: 'approve',
               primary: true,
               capped: true,
+              // Lab simulation only (`?enforced=1`): no server enforces the cap yet, so by default it stays off.
+              serverEnforced: simulateEnforced,
               label: (n, sum) => t.approveBatch(n, formatIls(sum / 100, { maximumFractionDigits: 2, locale })),
-              run: (sel) => approveRows(sel.map((r) => r.id)),
+              run: (r) => approveRows([r.id]),
             },
-            { id: 'assign', label: (n) => t.assignBatch(n), run: (sel) => setNotice(t.assignedToast(sel.length)) },
-            { id: 'export', label: (n) => t.exportBatch(n), run: exportSelected },
+            {
+              id: 'assign',
+              label: (n) => t.assignBatch(n),
+              // `?fail=assign` makes every other row reject, to exercise the partial-failure path.
+              run: async (r) => {
+                if (failAssign && Number(r.id.slice(4)) % 2 === 0) throw new Error('lab: simulated failure');
+                setNotice(t.assignedToast(1));
+              },
+            },
+            { id: 'export', label: (n) => t.exportBatch(n), runAll: exportSelected },
           ]}
           rowActions={(r) => [
             { id: 'approve', label: t.approve, onRun: () => approveRows([r.id]) },

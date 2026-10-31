@@ -12,6 +12,9 @@ export interface DeskCopy {
   clearHint: string;
   overCap: (n: number, cap: string) => string;
   overCapDisabled: (cap: string) => string;
+  unknownDisabled: string;
+  notEnforced: string;
+  batchFailed: (n: number) => string;
   blockReason: string;
   selectRow: (name: string) => string;
   selectAll: string;
@@ -53,6 +56,9 @@ const he: DeskCopy = {
   clearHint: 'Esc',
   overCap: (n, cap) => (n === 1 ? `שורה אחת מעל ${cap} — לטיפול פרטני` : `${n} שורות מעל ${cap} — לטיפול פרטני`),
   overCapDisabled: (cap) => `אישור מרוכז רק עד ${cap} לחשבונית — הסירו מהבחירה את השורות שמעל`,
+  unknownDisabled: 'בבחירה יש שורות שהסכום שלהן עוד לא ידוע — הסירו אותן כדי לאשר במרוכז',
+  notEnforced: 'אישור מרוכז ייפתח כשהשרת יאכוף את התקרה לחשבונית',
+  batchFailed: (n) => (n === 1 ? 'שורה אחת לא עודכנה ונשארה מסומנת' : `${n} שורות לא עודכנו ונשארו מסומנות`),
   blockReason: 'דורש בדיקה פרטנית',
   selectRow: (name) => `בחירת ${name}`,
   selectAll: 'בחירת כל השורות המתאימות',
@@ -94,6 +100,9 @@ const en: DeskCopy = {
   clearHint: 'Esc',
   overCap: (n, cap) => (n === 1 ? `1 row above ${cap} — review it one by one` : `${n} rows above ${cap} — review them one by one`),
   overCapDisabled: (cap) => `Batch approval only up to ${cap} per invoice — remove the rows above it`,
+  unknownDisabled: 'Some selected rows have no known amount yet — remove them to approve in a batch',
+  notEnforced: 'Batch approval opens once the server enforces the per-invoice cap',
+  batchFailed: (n) => (n === 1 ? '1 row was not updated and stays selected' : `${n} rows were not updated and stay selected`),
   blockReason: 'Needs individual review',
   selectRow: (name) => `Select ${name}`,
   selectAll: 'Select all eligible rows',

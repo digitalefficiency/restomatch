@@ -42,6 +42,15 @@ async function hebrewKey(page: Page, code: string, key: string) {
 
 const sel = (page: Page) => new URL(page.url()).searchParams.get('sel');
 
+/** The page, sorted by gap ascending, where rows under and over the ₪200 cap meet. */
+function crossingPage(): number {
+  const ranked = [...labRows()]
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => Math.abs(a.r.deltaAgorot) - Math.abs(b.r.deltaAgorot) || a.i - b.i);
+  const firstOver = ranked.findIndex((x) => Math.abs(x.r.deltaAgorot) > 20_000);
+  return Math.floor((firstOver - 3) / 50) + 1;
+}
+
 /** In he: the ₪ glyph renders left of the first digit (DoD-4). */
 async function shekelLeftOfDigits(page: Page, selector: string): Promise<boolean[]> {
   return page.$$eval(selector, (els) =>
@@ -129,17 +138,15 @@ test.describe('W1-02 DataTable', () => {
     });
   }
 
-  test('BatchBar: count + Σ₪, block rows disabled with the reason, select-all skips over-cap rows', async ({ page }) => {
+  test('BatchBar: count + Σ₪, block rows disabled with the reason, select-all skips over-cap and unknown rows', async ({ page }) => {
     await open(page, 'he');
     const block = page.locator('tr[data-block]').first();
     await expect(block.locator('input[type=checkbox]')).toBeDisabled();
     await expect(block).toContainText('דורש בדיקה פרטנית');
     // The page (sorted by gap ascending) where rows under and over the ₪200 cap meet.
-    const ranked = [...labRows()].map((r, i) => ({ r, i })).sort((a, b) => Math.abs(a.r.deltaAgorot) - Math.abs(b.r.deltaAgorot) || a.i - b.i);
-    const firstOver = ranked.findIndex((x) => Math.abs(x.r.deltaAgorot) > 20_000);
-    await open(page, 'he', `${LAB}?sort=atRisk:asc&page=${Math.floor((firstOver - 3) / 50) + 1}`);
+    await open(page, 'he', `${LAB}?sort=atRisk:asc&page=${crossingPage()}`);
 
-    const pick = page.locator('tr[data-row-id]:not([data-block]):not([data-over-cap])');
+    const pick = page.locator('tr[data-row-id]:not([data-block]):not([data-over-cap]):not([data-amount-unknown])');
     for (let i = 0; i < 3; i++) await pick.nth(i).locator('input[type=checkbox]').check();
     const bar = page.locator('[data-batchbar]');
     await expect(bar.locator('[data-batch-count]')).toHaveText('3 נבחרו');
@@ -151,37 +158,77 @@ test.describe('W1-02 DataTable', () => {
       new Intl.NumberFormat('he-IL', { minimumFractionDigits: 2 }).format(sum / 100),
     );
     expect(await shekelLeftOfDigits(page, '[data-batch-sum]')).toEqual([true]);
-    // Bulk approve up to ₪200 per invoice (owner-confirmed): enabled for in-cap rows…
+    // No server enforces the cap yet, so bulk approve stays off, with the reason shown.
     const approve = bar.locator('[data-batch-action="approve"]');
-    await expect(approve).toBeEnabled();
-    await expect(approve).toContainText('אישור 3');
-    // …and disabled, with the reason shown, as soon as an over-cap row joins the selection.
-    const over = page.locator('tr[data-over-cap]:not([data-block])').first();
-    await over.locator('input[type=checkbox]').check();
-    await expect(bar.locator('[data-batch-count]')).toHaveText('4 נבחרו');
     await expect(approve).toBeDisabled();
-    await expect(bar.locator('[data-batch-why="approve"]')).toContainText('אישור מרוכז רק עד');
+    await expect(bar.locator('[data-batch-why="approve"]')).toContainText('כשהשרת יאכוף');
     await expect(approve).toHaveAttribute('aria-describedby', 'batch-why-approve');
-    await over.locator('input[type=checkbox]').uncheck();
-    await expect(approve).toBeEnabled();
 
     await bar.getByRole('button', { name: /ניקוי/ }).click();
     await expect(bar).toHaveCount(0);
+    // Focus goes back into the table, never to <body>.
+    await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('tbody'))).toBe(true);
     await page.getByRole('checkbox', { name: 'בחירת כל השורות המתאימות' }).check();
     const checked = await page.$$eval('tbody input[type=checkbox]:checked', (els) =>
       els.map((e) => {
         const tr = e.closest('tr')!;
-        return { block: tr.hasAttribute('data-block'), overCap: tr.hasAttribute('data-over-cap') };
+        return { held: tr.hasAttribute('data-block') || tr.hasAttribute('data-over-cap') || tr.hasAttribute('data-amount-unknown') };
       }),
     );
     expect(checked.length).toBeGreaterThan(0);
-    expect(checked.every((c) => !c.block && !c.overCap)).toBe(true);
+    expect(checked.every((c) => !c.held)).toBe(true);
     // Per-row actions are off in batch mode.
     await expect(page.locator('tbody tr[data-row-id]').first().getByRole('button', { name: 'אישור', exact: true })).toBeDisabled();
     // Esc in the table clears the selection.
     await page.locator('tbody tr[data-row-id]').first().focus();
     await page.keyboard.press('Escape');
     await expect(page.locator('[data-batchbar]')).toHaveCount(0);
+  });
+
+  test('capped approve (server-enforced lab simulation): over-cap and unknown rows disable it; other actions keep them', async ({ page }) => {
+    await open(page, 'he', `${LAB}?sort=atRisk:asc&page=${crossingPage()}&enforced=1`);
+    const bar = page.locator('[data-batchbar]');
+    const approve = bar.locator('[data-batch-action="approve"]');
+    const pick = page.locator('tr[data-row-id]:not([data-block]):not([data-over-cap]):not([data-amount-unknown])');
+    for (let i = 0; i < 3; i++) await pick.nth(i).locator('input[type=checkbox]').check();
+    await expect(approve).toBeEnabled();
+    await expect(approve).toContainText('אישור 3');
+    const over = page.locator('tr[data-over-cap]:not([data-block])').first();
+    await over.locator('input[type=checkbox]').check();
+    await expect(bar.locator('[data-batch-count]')).toHaveText('4 נבחרו');
+    await expect(approve).toBeDisabled();
+    await expect(bar.locator('[data-batch-why="approve"]')).toContainText('אישור מרוכז רק עד');
+    // Only the capped action drops the over-cap row: assign still takes all 4.
+    await expect(bar.locator('[data-batch-action="assign"]')).toBeEnabled();
+    await expect(bar.locator('[data-batch-action="assign"]')).toContainText('שיוך 4');
+    await over.locator('input[type=checkbox]').uncheck();
+    await expect(approve).toBeEnabled();
+    // Esc from inside the bar clears too, and focus lands back in the table.
+    await approve.focus();
+    await page.keyboard.press('Escape');
+    await expect(bar).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('tbody'))).toBe(true);
+
+    // An unknown (pending) gap is never ₪0: it blocks the capped action with its own reason.
+    await open(page, 'he', `${LAB}?sort=atRisk:asc&enforced=1`);
+    const unknown = page.locator('tr[data-amount-unknown]').first();
+    await unknown.locator('input[type=checkbox]').check();
+    await expect(approve).toBeDisabled();
+    await expect(bar.locator('[data-batch-why="approve"]')).toContainText('עוד לא ידוע');
+  });
+
+  test('a partly failed batch keeps only the failed rows selected and says so', async ({ page }) => {
+    await open(page, 'he', `${LAB}?sort=atRisk:asc&page=${crossingPage()}&fail=assign`);
+    const pick = page.locator('tr[data-row-id]:not([data-block])');
+    const ids = await pick.evaluateAll((trs) => trs.slice(0, 4).map((t) => t.getAttribute('data-row-id')!));
+    for (let i = 0; i < 4; i++) await pick.nth(i).locator('input[type=checkbox]').check();
+    const bar = page.locator('[data-batchbar]');
+    await bar.locator('[data-batch-action="assign"]').click();
+    const failing = ids.filter((id) => Number(id.slice(4)) % 2 === 0);
+    await expect(bar.locator('[data-batch-count]')).toHaveText(failing.length === 1 ? '1 נבחרו' : `${failing.length} נבחרו`);
+    await expect(bar.locator('[data-batch-note]')).toBeVisible();
+    const still = await page.$$eval('tbody input[type=checkbox]:checked', (els) => els.map((e) => e.closest('tr')!.getAttribute('data-row-id')));
+    expect(still.sort()).toEqual([...failing].sort());
   });
 
   test('URL state round-trips and Back restores selection and scroll', async ({ page }) => {
