@@ -67,7 +67,7 @@ async function invoice(rid: string, key: string, opts: { status: string; age: nu
 }
 
 const channels = new Map<string, string>();
-async function ingestPage(rid: string, invoiceId: string) {
+async function ingestPage(rid: string, invoiceId: string, opts: { sender?: string; at?: Date; error?: string } = {}) {
   if (!channels.has(rid)) {
     const [c] = await db
       .insert(ingestChannels)
@@ -78,9 +78,17 @@ async function ingestPage(rid: string, invoiceId: string) {
   const ch = { id: channels.get(rid)! };
   const [m] = await db
     .insert(ingestMessages)
-    .values({ restaurantId: rid, channelId: ch.id, kind: 'whatsapp', provider: 'stub', providerMessageId: `m-${invoiceId}`, sender: '9725', senderAllowed: true, status: 'accepted' })
+    .values({ restaurantId: rid, channelId: ch.id, kind: 'whatsapp', provider: 'stub', providerMessageId: `m-${invoiceId}`, sender: opts.sender ?? '9725', senderAllowed: true, status: 'accepted', receivedAt: opts.at ?? minutesAgo(40) })
     .returning({ id: ingestMessages.id });
-  await db.insert(ingestDocuments).values({ restaurantId: rid, messageId: m!.id, status: 'registered', invoiceId, storagePath: `${rid}/scan-a1-0000aaaa.jpg`, mimeType: 'image/jpeg' });
+  await db.insert(ingestDocuments).values({
+    restaurantId: rid,
+    messageId: m!.id,
+    status: 'registered',
+    invoiceId,
+    storagePath: `${rid}/scan-a1-0000aaaa.jpg`,
+    mimeType: 'image/jpeg',
+    error: opts.error ?? null,
+  });
 }
 
 let A = '';
@@ -94,9 +102,9 @@ beforeAll(async () => {
   // U-1: path-form scans.
   await invoice(A, 'lost', { status: 'ocr_pending', age: 15, url: `${A}/scan-a1b2-0000beef.jpg` });
   const queued = await invoice(A, 'queued', { status: 'ocr_pending', age: 15, url: `${A}/scan-a1b2-0000cafe.jpg` });
-  await insertJob(sql, 'ocr-invoice', { restaurantId: A, invoiceId: queued }, { restaurantId: A, dedupeKey: `ocr:${queued}:1` });
+  await insertJob(sql, 'ocr-invoice', { restaurantId: A, invoiceId: queued }, { restaurantId: A, dedupeKey: `ocr:${queued}:scan-a1b2-0000cafe` });
   const reocr = await invoice(A, 'reocr', { status: 'ocr_pending', age: 20, url: `${A}/scan-c0de-0000f00d.pdf`, pages: 2 });
-  await insertJob(sql, 'ocr-invoice', { restaurantId: A, invoiceId: reocr }, { restaurantId: A, dedupeKey: `ocr:${reocr}:1` }); // the old 1-page read
+  await insertJob(sql, 'ocr-invoice', { restaurantId: A, invoiceId: reocr }, { restaurantId: A, dedupeKey: `ocr:${reocr}:scan-a1b2-0000c0de` }); // the old 1-page read: another object
   await invoice(A, 'foreign', { status: 'ocr_pending', age: 15, url: `${B}/scan-a1b2-0000dead.jpg` }); // another tenant's prefix
   await invoice(A, 'freshPath', { status: 'ocr_pending', age: 3, url: `${A}/scan-a1b2-00001234.jpg` });
   // HIGH-2 backstop: held pages.
@@ -106,8 +114,15 @@ beforeAll(async () => {
   await ingestPage(A, young);
   const off = await invoice(OFF, 'heldSwitchOff', { status: 'matched', age: 40, url: `${OFF}/scan-h1-00000003.jpg` });
   await ingestPage(OFF, off);
-  const photo = await invoice(A, 'notIngested', { status: 'matched', age: 40, url: `${A}/scan-h1-00000004.jpg` });
-  void photo;
+  await invoice(A, 'notIngested', { status: 'matched', age: 40, url: `${A}/scan-h1-00000004.jpg` });
+  // A re-shot duplicate is never released (it waits for a person).
+  const dup = await invoice(A, 'heldDuplicate', { status: 'matched', age: 40, url: `${A}/scan-h1-00000005.jpg` });
+  await ingestPage(A, dup, { sender: '9726', error: 'page_duplicate' });
+  // A held page whose sibling (same sender) is merely slow: still ocr_pending.
+  const slowHeld = await invoice(A, 'heldSlowSibling', { status: 'matched', age: 40, url: `${A}/scan-h1-00000006.jpg` });
+  await ingestPage(A, slowHeld, { sender: '9727' });
+  const slow = await invoice(A, 'slowSibling', { status: 'ocr_pending', age: 4, url: `${A}/scan-h1-00000007.jpg` });
+  await ingestPage(A, slow, { sender: '9727', at: minutesAgo(38) });
 });
 
 afterAll(async () => {
@@ -126,7 +141,7 @@ describe('G-09 sweep', () => {
     const res = await runOcrSweep(sql, NOW);
     expect(mine(res.requeued).sort()).toEqual([ids.lost, ids.reocr].sort());
     const [job] = await jobs('ocr-invoice', ids.lost!);
-    expect(job!.dedupe_key).toBe(`ocr-sweep-${ids.lost}:1`);
+    expect(job!.dedupe_key).toBe(`ocr-sweep-${ids.lost}:scan-a1b2-0000beef`);
     expect(job!.payload).toMatchObject({ restaurantId: A, invoiceId: ids.lost });
     expect(String(job!.payload.imageUrl)).toMatch(/\/scans\/scan-a1b2-0000beef\/file$/); // signed (local dev form)
     expect(await jobs('ocr-invoice', ids.queued!)).toHaveLength(1); // its job is on record
@@ -136,14 +151,16 @@ describe('G-09 sweep', () => {
 
   it('U-1: an invoice re-opened for a composed re-OCR (2 pages) is retried despite its old 1-page job', async () => {
     const all = await jobs('ocr-invoice', ids.reocr!);
-    expect(all.map((j) => j.dedupe_key)).toEqual([`ocr:${ids.reocr}:1`, `ocr-sweep-${ids.reocr}:2`]);
+    expect(all.map((j) => j.dedupe_key)).toEqual([`ocr:${ids.reocr}:scan-a1b2-0000c0de`, `ocr-sweep-${ids.reocr}:scan-c0de-0000f00d`]);
   });
 
-  it('HIGH-2: a held page past the cap is released to the match, once; young, switch-off and non-ingest pages are not', async () => {
+  it('HIGH-2 + M-1: a held page past the cap is released once, WHATEVER the switch says; young, non-ingest, duplicate and slow-sibling pages are not', async () => {
     const res = await runOcrSweep(sql, NOW);
     expect(mine(res.released)).toEqual([]); // already released by the first sweep
-    expect((await jobs('match-invoice', ids.held!)).map((j) => j.dedupe_key)).toEqual([`g09-release-${ids.held}`]);
-    for (const k of ['heldYoung', 'heldSwitchOff', 'notIngested']) expect(await jobs('match-invoice', ids[k]!)).toHaveLength(0);
+    for (const k of ['held', 'heldSwitchOff']) {
+      expect((await jobs('match-invoice', ids[k]!)).map((j) => j.dedupe_key)).toEqual([`g09-release-${ids[k]}`]);
+    }
+    for (const k of ['heldYoung', 'notIngested', 'heldDuplicate', 'heldSlowSibling']) expect(await jobs('match-invoice', ids[k]!)).toHaveLength(0);
     expect(mine(res.requeued)).toEqual([]); // idempotent
   });
 });

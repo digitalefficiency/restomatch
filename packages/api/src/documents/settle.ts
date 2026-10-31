@@ -1,6 +1,7 @@
 import {
   and,
   asc,
+  auditLog,
   discrepancies,
   eq,
   ingestDocuments,
@@ -18,7 +19,7 @@ import { enqueueMatchInvoice } from '@restomatch/queue';
 import { enqueueIngestJobs, type OcrJobToEnqueue } from '../ingest/pipeline';
 import { groupMinutes, invoicePageRows, isPageMime, multiPageEnabled, recomposeInvoice, type PageRow } from '../ingest/grouping';
 import { MAX_DOCUMENT_PAGES } from './compose';
-import { reopenForOcr, retireBlocker, retireInvoice } from './reocr';
+import { PAGE_ABSORBED_ACTION, PAGES_RECOMPOSED_ACTION, reopenForOcr, retireBlocker, retireInvoice } from './reocr';
 
 /**
  * G-09 · the same-supplier guard (owner decision 31.10: "multi-page invoices
@@ -78,8 +79,54 @@ export interface PageHeader {
   duplicateOf?: string | null;
   /** The read failed (ocr_payload.raw.ocrFailed) or produced no lines. */
   unreadable?: boolean;
-  /** Content fingerprint (totals + lines) for the re-shot-page check. */
-  fingerprint?: string;
+  /** Content (totals + lines) for the re-shot-page check. */
+  print?: PagePrint;
+  /** Single-page prints of pages already absorbed into this invoice (from the merge audit rows). */
+  absorbedPrints?: PagePrint[];
+  /** A page flag was set on this invoice earlier: it is a chain BREAK, never a candidate. */
+  alreadyFlagged?: PageFlag | null;
+}
+
+/** What a page says: its totals and lines (for the duplicate check). */
+export interface PagePrint {
+  totalExclVat: string | null;
+  totalInclVat: string | null;
+  lines: Array<{ qty: string | null; total: string | null }>;
+}
+
+const num = (v: string | null | undefined): number | null => {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+/**
+ * Tolerant "same page": the same non-null total (incl. or excl. VAT), or at
+ * least 80% of the lines overlapping (same quantity, total within ₪0.50 or
+ * 0.5%). A re-shot photo is usually re-taken because the first was blurry, so
+ * the two reads differ a little; an exact compare would merge it (lines doubled).
+ */
+export function samePage(a: PagePrint | undefined, b: PagePrint | undefined): boolean {
+  if (!a || !b) return false;
+  const [ai, bi, ae, be] = [num(a.totalInclVat), num(b.totalInclVat), num(a.totalExclVat), num(b.totalExclVat)];
+  if ((ai !== null && ai > 0 && ai === bi) || (ae !== null && ae > 0 && ae === be)) return true;
+  const n = Math.max(a.lines.length, b.lines.length);
+  if (n === 0 || a.lines.length === 0 || b.lines.length === 0) return false;
+  const free = [...b.lines];
+  let matched = 0;
+  for (const l of a.lines) {
+    const lt = num(l.total);
+    const i = free.findIndex((m) => {
+      const mt = num(m.total);
+      if (num(m.qty) !== num(l.qty) || lt === null || mt === null) return false;
+      return Math.abs(lt - mt) <= Math.max(0.5, 0.005 * Math.max(Math.abs(lt), Math.abs(mt)));
+    });
+    if (i >= 0) {
+      matched += 1;
+      free.splice(i, 1);
+    }
+  }
+  return matched / n >= 0.8;
 }
 
 const NOTHING: SettleResult = { hold: false, absorbed: false, flagged: [] };
@@ -131,13 +178,16 @@ export function pageMismatch(first: PageHeader, page: PageHeader): 'page_other_s
 /**
  * The merge decision for an ordered cluster (page 1 first). Pure, so every
  * false-leak path is unit-testable:
- *  - page 1 unreadable → nothing merges;
- *  - a page that is unreadable, a duplicate of an invoice OUTSIDE the cluster,
- *    a re-shot copy of page 1 (same content), or that disagrees with page 1 is
- *    flagged, and BREAKS the chain: no later page merges into page 1;
- *  - before the first break, a page with header evidence merges only when it
- *    agrees with page 1; an evidence-less page continues the page right
- *    before it, which (no break yet) is page 1's document.
+ *  - nothing merges into a page 1 that is unreadable, carries NO header
+ *    evidence (number, ח.פ., name), or was itself flagged;
+ *  - a page flagged earlier is a chain BREAK (kept in the cluster, never a
+ *    candidate, not re-flagged);
+ *  - a page that is unreadable, a duplicate of an invoice OUTSIDE the
+ *    cluster, a re-shot copy of ANY earlier page or absorbed page (samePage),
+ *    or that disagrees with page 1 is flagged, and breaks the chain;
+ *  - after the first break nothing merges into page 1; before it, a page with
+ *    header evidence merges only when it agrees with page 1, and an
+ *    evidence-less page continues the page right before it.
  */
 export function decidePages(
   members: PageHeader[],
@@ -147,22 +197,32 @@ export function decidePages(
   const flagged: Array<{ invoiceId: string; reason: PageFlag }> = [];
   if (!first) return { merge, flagged };
   const ids = new Set(members.map((m) => m.invoiceId));
-  let broken = Boolean(first.unreadable);
+  let broken = Boolean(first.unreadable || first.alreadyFlagged || !hasHeaderEvidence(first));
+  const earlier: PagePrint[] = [];
+  const remember = (m: PageHeader) => {
+    if (m.print) earlier.push(m.print);
+    for (const p of m.absorbedPrints ?? []) earlier.push(p);
+  };
+  remember(first);
   for (const page of rest) {
+    if (page.alreadyFlagged) {
+      broken = true; // its question is already asked: a break, not a candidate
+      remember(page);
+      continue;
+    }
     let reason: PageFlag | null = null;
     if (page.unreadable) reason = 'page_unreadable';
     else if (page.duplicateOf && page.duplicateOf !== first.invoiceId && !ids.has(page.duplicateOf)) {
       reason = 'page_other_invoice'; // its number is ANOTHER invoice already on file
-    } else if (page.duplicateOf || alnum(page.invoiceNumber) === alnum(first.invoiceNumber)) {
-      // Same number as page 1: a real page 2, or a re-shot photo of page 1.
-      if (page.fingerprint && page.fingerprint === first.fingerprint) reason = 'page_duplicate';
     }
     if (!reason) reason = pageMismatch(first, page);
+    if (!reason && earlier.some((p) => samePage(p, page.print))) reason = 'page_duplicate';
     if (!reason && broken) reason = 'page_not_merged';
     if (reason) {
       flagged.push({ invoiceId: page.invoiceId, reason });
       broken = true;
     } else merge.push(page);
+    remember(page);
   }
   return { merge, flagged };
 }
@@ -197,6 +257,7 @@ function ocrBits(payload: unknown): {
 }
 
 interface ClusterRow {
+  flag: PageFlag | null;
   docId: string;
   storagePath: string;
   mimeType: string | null;
@@ -216,7 +277,7 @@ export async function settleDocumentPages(
   deps: SettleDeps = {},
 ): Promise<SettleResult> {
   const { restaurantId, invoiceId } = args;
-  const outcome = await db.transaction(async (raw) => {
+  const attempt = () => db.transaction(async (raw) => {
     const tx = raw as unknown as Database;
     const [restaurant] = await tx
       .select({ settings: restaurants.settings })
@@ -282,9 +343,15 @@ export async function settleDocumentPages(
         )
         .orderBy(asc(ingestMessages.receivedAt), asc(ingestDocuments.createdAt), asc(ingestDocuments.id))
     )
-      // A flagged page already had its one question: it never joins again.
-      .filter((r) => !(r.error && (PAGE_FLAGS as readonly string[]).includes(r.error)) && isPageMime(r.mimeType))
-      .map((r) => ({ ...r, storagePath: r.storagePath!, invoiceId: r.invoiceId! }));
+      // A flagged page STAYS in the cluster: it already had its one question, so
+      // it is never a merge candidate again, but it still BREAKS the chain.
+      .filter((r) => isPageMime(r.mimeType))
+      .map((r) => ({
+        ...r,
+        storagePath: r.storagePath!,
+        invoiceId: r.invoiceId!,
+        flag: r.error && (PAGE_FLAGS as readonly string[]).includes(r.error) ? (r.error as PageFlag) : null,
+      }));
 
     // Anchored clustering (the same rule as review groups): a cluster starts at
     // its first message; a message more than N minutes later starts a new one.
@@ -328,19 +395,35 @@ export async function settleDocumentPages(
       })
       .from(invoices)
       .where(and(eq(invoices.restaurantId, restaurantId), inArray(invoices.id, memberIds)));
-    const lineStats = (await tx.execute(sql`
-      select l.invoice_id, count(*)::int as n,
-             string_agg(coalesce(l.line_total::text, '') || '|' || coalesce(l.qty_billed::text, ''), ',' order by l.line_total, l.qty_billed) as sig
+    const lineRows = (await tx.execute(sql`
+      select l.invoice_id, l.qty_billed::text as qty, l.line_total::text as total
       from ${invoiceLines} l
       join ${invoices} i on i.id = l.invoice_id and i.restaurant_id = ${restaurantId}
-      where l.invoice_id in (${sql.join(memberIds.map((id) => sql`${id}`), sql`, `)})
-      group by l.invoice_id`)) as unknown as Array<{ invoice_id: string; n: number; sig: string | null }>;
-    const linesOf = new Map(lineStats.map((l) => [l.invoice_id, l]));
+      where l.invoice_id in (${sql.join(memberIds.map((id) => sql`${id}`), sql`, `)})`)) as unknown as Array<{
+      invoice_id: string;
+      qty: string | null;
+      total: string | null;
+    }>;
+    const linesOf = new Map<string, PagePrint['lines']>();
+    for (const l of lineRows) linesOf.set(l.invoice_id, [...(linesOf.get(l.invoice_id) ?? []), { qty: l.qty, total: l.total }]);
+    // Single-page prints of pages already merged into a member (and of page 1
+    // before its composed re-OCR): kept on the merge audit rows.
+    const printRows = (await tx.execute(sql`
+      select coalesce(after->>'absorbedInto', entity_id::text) as invoice_id, before->'print' as print
+      from ${auditLog}
+      where restaurant_id = ${restaurantId}
+        and action in (${PAGE_ABSORBED_ACTION}, ${PAGES_RECOMPOSED_ACTION})
+        and coalesce(after->>'absorbedInto', entity_id::text) in (${sql.join(memberIds.map((id) => sql`${id}`), sql`, `)})
+        and before ? 'print'`)) as unknown as Array<{ invoice_id: string; print: PagePrint }>;
+    const absorbedOf = new Map<string, PagePrint[]>();
+    for (const p of printRows) absorbedOf.set(p.invoice_id, [...(absorbedOf.get(p.invoice_id) ?? []), p.print]);
+    const flagOf = new Map<string, PageFlag>();
+    for (const r of cluster) if (r.flag && !flagOf.has(r.invoiceId)) flagOf.set(r.invoiceId, r.flag);
     const byId = new Map<string, PageHeader>(
       heads.map((h) => {
         const o = ocrBits(h.ocrPayload);
-        const lines = linesOf.get(h.invoiceId);
-        const parsedNoLines = h.status !== 'ocr_pending' && !lines;
+        const lines = linesOf.get(h.invoiceId) ?? [];
+        const parsedNoLines = h.status !== 'ocr_pending' && lines.length === 0;
         return [
           h.invoiceId,
           {
@@ -352,7 +435,9 @@ export async function settleDocumentPages(
             businessId: o.businessId,
             duplicateOf: o.duplicateOf,
             unreadable: o.failed || parsedNoLines,
-            fingerprint: `${h.totalExclVat ?? ''}|${h.totalInclVat ?? ''}|${lines?.n ?? 0}|${lines?.sig ?? ''}`,
+            print: { totalExclVat: h.totalExclVat, totalInclVat: h.totalInclVat, lines },
+            absorbedPrints: absorbedOf.get(h.invoiceId) ?? [],
+            alreadyFlagged: flagOf.get(h.invoiceId) ?? null,
           },
         ];
       }),
@@ -398,6 +483,19 @@ export async function settleDocumentPages(
       try {
         const job = await tx.transaction(async (rawSp) => {
           const sp = rawSp as unknown as Database;
+          // Keep page 1's single-page print before the re-OCR replaces its lines,
+          // so a later re-shot of page 1 is still recognised as a duplicate.
+          if (!(first.absorbedPrints ?? []).length) {
+            await sp.insert(auditLog).values({
+              restaurantId,
+              userId: null,
+              action: PAGES_RECOMPOSED_ACTION,
+              entityType: 'invoice',
+              entityId: first.invoiceId,
+              before: { print: first.print } as never,
+              after: { pages: [first.invoiceId, ...merging.map((m) => m.invoiceId)] } as never,
+            });
+          }
           if (!(await reopenForOcr(sp, restaurantId, first.invoiceId))) throw new Error('page 1 could not be re-opened');
           const mergingIds = merging.map((m) => m.invoiceId);
           await sp
@@ -405,7 +503,13 @@ export async function settleDocumentPages(
             .set({ invoiceId: first.invoiceId, updatedAt: new Date() })
             .where(and(eq(ingestDocuments.restaurantId, restaurantId), inArray(ingestDocuments.invoiceId, mergingIds)));
           for (const id of mergingIds) {
-            const retired = await retireInvoice(sp, { restaurantId, invoiceId: id, absorbedInto: first.invoiceId, userId: null });
+            const retired = await retireInvoice(sp, {
+              restaurantId,
+              invoiceId: id,
+              absorbedInto: first.invoiceId,
+              userId: null,
+              print: byId.get(id)?.print,
+            });
             if (!retired.ok) throw new Error(`page ${id} could not be retired: ${retired.reason}`);
           }
           const pages: PageRow[] = await invoicePageRows(sp, restaurantId, first.invoiceId);
@@ -447,18 +551,35 @@ export async function settleDocumentPages(
         .from(matchRuns)
         .where(and(eq(matchRuns.restaurantId, restaurantId), inArray(matchRuns.invoiceId, settledIds)));
       const ran = new Set(runs.map((r) => r.invoiceId));
-      for (const id of settledIds) if (!ran.has(id) && byId.get(id)?.status === 'matched') match.push(id);
+      const duplicate = (id: string) =>
+        flagOf.get(id) === 'page_duplicate' || flagged.some((f) => f.invoiceId === id && f.reason === 'page_duplicate');
+      for (const id of settledIds) if (!ran.has(id) && byId.get(id)?.status === 'matched' && !duplicate(id)) match.push(id);
     }
 
     const absorbed = merged && merging.some((m) => m.invoiceId === invoiceId);
+    // A re-shot duplicate is never auto-matched: it waits for a person.
+    const currentIsDuplicate =
+      flagOf.get(invoiceId) === 'page_duplicate' || flagged.some((f) => f.invoiceId === invoiceId && f.reason === 'page_duplicate');
     const result: SettleResult = {
-      hold: merged && first.invoiceId === invoiceId,
+      hold: (merged && first.invoiceId === invoiceId) || currentIsDuplicate,
       absorbed,
       ...(absorbed || (merged && first.invoiceId === invoiceId) ? { mergedInto: first.invoiceId } : {}),
       flagged,
     };
     return { result, ocr, match };
   });
+  // Lock order vs a concurrent claim / decision can deadlock (40P01): Postgres
+  // aborts one side; retry the settle (it is idempotent) at most twice.
+  let outcome: Awaited<ReturnType<typeof attempt>>;
+  for (let tries = 0; ; tries++) {
+    try {
+      outcome = await attempt();
+      break;
+    } catch (err) {
+      if (tries < 2 && (err as { code?: string } | null)?.code === '40P01') continue;
+      throw err;
+    }
+  }
 
   await (deps.enqueueOcr ?? enqueueIngestJobs)(outcome.ocr);
   for (const id of outcome.match) {

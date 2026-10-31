@@ -137,12 +137,20 @@ interface OcrHead {
   failed?: boolean;
   /** Line content (default: unique per invoice). Same content = a re-shot photo. */
   lineTotal?: string;
+  lines?: Array<{ qty: string; total: string }>;
   totalInclVat?: string;
 }
 const ACME: OcrHead = { supplierName: 'תנובה בע"מ', businessId: '51-000123-4', invoiceNumber: 'A-100' };
 const OTHER: OcrHead = { supplierName: 'שטראוס', businessId: '52-999888-7', invoiceNumber: 'S-7' };
 
 let matchCalls: string[] = [];
+let lineSeq = 0;
+
+/** The object id (scan-…) an invoice points at: the OCR dedupe key's suffix. */
+async function objectOf(invoiceId: string): Promise<string> {
+  const [scan] = await ownerDb.select().from(invoiceScans).where(eq(invoiceScans.invoiceId, invoiceId));
+  return scan!.storagePath.split('/')[1]!.replace(/\.[a-z0-9]+$/i, '');
+}
 let ocrCalls: Array<{ invoiceId: string; dedupeKey?: string }> = [];
 
 /**
@@ -173,15 +181,21 @@ async function writeOcr(invoiceId: string, head: OcrHead): Promise<void> {
     .where(eq(invoices.id, invoiceId));
   await ownerDb.delete(invoiceLines).where(eq(invoiceLines.invoiceId, invoiceId));
   if (head.failed) return;
-  const unique = `${10 + (parseInt(invoiceId.slice(0, 6), 16) % 900)}.00`;
-  await ownerDb.insert(invoiceLines).values({
-    invoiceId,
-    rawDescription: `line of ${invoiceId.slice(0, 8)}`,
-    qtyBilled: '1',
-    unit: 'unit',
-    unitPriceBilled: '10.0000',
-    lineTotal: head.lineTotal ?? unique,
-  });
+  // Default content is unique per page (its own quantity and total), so two
+  // different pages never look like a re-shot copy of each other.
+  lineSeq += 1;
+  const lines = head.lines ?? [{ qty: String(lineSeq), total: `${100 + lineSeq * 37}.00` }];
+  if (head.lineTotal) lines.splice(0, lines.length, { qty: '1', total: head.lineTotal });
+  await ownerDb.insert(invoiceLines).values(
+    lines.map((l, i) => ({
+      invoiceId,
+      rawDescription: `line ${i} of ${invoiceId.slice(0, 8)}`,
+      qtyBilled: l.qty,
+      unit: 'unit',
+      unitPriceBilled: '10.0000',
+      lineTotal: l.total,
+    })),
+  );
 }
 
 /** The settle hook, exactly where the worker calls it. */
@@ -265,7 +279,7 @@ describe('owner rule: multi-page invoices FROM THE SAME SUPPLIER', () => {
     expect(s2).toMatchObject({ absorbed: true, mergedInto: p1, flagged: [] });
     expect((await invoicesOfA()).map((i) => i.id)).toEqual([p1]);
     expect(await pdfPagesOf(p1)).toBe(2);
-    expect(ocrCalls).toEqual([{ invoiceId: p1, dedupeKey: `ocr:${p1}:2` }]);
+    expect(ocrCalls).toEqual([{ invoiceId: p1, dedupeKey: `ocr:${p1}:${await objectOf(p1)}` }]);
     const [inv] = await ownerDb.select().from(invoices).where(eq(invoices.id, p1));
     expect(inv!.status).toBe('ocr_pending');
     // The re-OCR of page 1 settles as a 2-page document: nothing left to merge.
@@ -706,7 +720,7 @@ describe('review documents and the mapping row', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ invoiceId: id, pageCount: 1, mimeType: 'image/jpeg' });
     expect(rows[0]!.storagePath.startsWith(`${A.restaurantId}/`)).toBe(true);
-    expect(await ocrJobs(id)).toEqual([{ dedupe_key: `ocr:${id}:1` }]);
+    expect(await ocrJobs(id)).toEqual([{ dedupe_key: `ocr:${id}:${await objectOf(id)}` }]);
   });
 
   it('a new invoice row never stores an expiring signed URL (a stable object form)', async () => {
@@ -714,5 +728,117 @@ describe('review documents and the mapping row', () => {
     const [inv] = await ownerDb.select().from(invoices).where(eq(invoices.id, id));
     expect(inv!.rawImageUrl).not.toMatch(/[?&]token=/);
     expect(toObjectRef(inv!.rawImageUrl!, A.restaurantId)).toBeTruthy();
+  });
+});
+
+describe('re-review fixes (C-1, C-2, H-1)', () => {
+  beforeEach(() => {
+    matchCalls = [];
+    ocrCalls = [];
+  });
+
+  it('C-1: a page sent AFTER a flagged page has settled is not merged into page 1 (other supplier / failed read / other number)', async () => {
+    const variants: Array<[string, OcrHead]> = [
+      ['other supplier', OTHER],
+      ['failed read', { failed: true }],
+      ['other number', { ...ACME, invoiceNumber: 'A-200' }],
+    ];
+    let start = 0;
+    for (const [label, p2Head] of variants) {
+      const [p1, p2] = await pages(2, `c1-${start}`, 1, start);
+      await ocr(p1!, { ...ACME, invoiceNumber: `A-${start}` });
+      const s2 = await ocr(p2!, p2Head);
+      expect({ label, flagged: s2.flagged.length }).toEqual({ label, flagged: 1 });
+      // Two minutes later, OTHER's (or A-200's) header-less page 2 arrives.
+      const p3 = await invoiceOf(await send(ch.wa, wa([jpegBytes(`c1-${start}-late`)]), at(start + 3)));
+      const s3 = await ocr(p3, NOHEAD);
+      expect({ label, s3 }).toMatchObject({ label, s3: { absorbed: false, flagged: [{ invoiceId: p3, reason: 'page_not_merged' }] } });
+      expect(await linesOf(p1!)).toHaveLength(1); // nothing summed into page 1
+      start += 60;
+    }
+    expect(ocrCalls).toEqual([]);
+  });
+
+  it('C-2 (a): a header-less page 1 absorbs nothing, not even a page with a full ח.פ. + number', async () => {
+    const [p1, p2] = await pages(2, 'c2a');
+    await ocr(p1!, NOHEAD);
+    const s2 = await ocr(p2!, OTHER);
+    expect(s2).toMatchObject({ absorbed: false, flagged: [{ invoiceId: p2, reason: 'page_not_merged' }] });
+    expect(await invoicesOfA()).toHaveLength(2);
+  });
+
+  it('C-2 (b): a blurry page 1 (nothing readable) and its re-shot with a full header are never merged (no doubled lines)', async () => {
+    const [p1, p2] = await pages(2, 'c2b');
+    const L = [{ qty: '3', total: '77.00' }, { qty: '2', total: '40.00' }];
+    await ocr(p1!, { ...NOHEAD, lines: L });
+    const s2 = await ocr(p2!, { ...ACME, lines: [{ qty: '3', total: '77.10' }, { qty: '2', total: '40.00' }] });
+    expect(s2.absorbed).toBe(false);
+    expect(s2.flagged).toHaveLength(1);
+    expect(['page_duplicate', 'page_not_merged']).toContain(s2.flagged[0]!.reason);
+    expect(await invoicesOfA()).toHaveLength(2);
+  });
+
+  it('C-2 (c): the 10-min anchor — X = A-100 at t0/t5/t11 (t11 header-less), Y = A-200 at t12/t13 → Y is not absorbed by t11', async () => {
+    const x0 = await invoiceOf(await send(ch.wa, wa([jpegBytes('c2c-x0')]), at(0)));
+    const x5 = await invoiceOf(await send(ch.wa, wa([jpegBytes('c2c-x5')]), at(5)));
+    const x11 = await invoiceOf(await send(ch.wa, wa([jpegBytes('c2c-x11')]), at(11)));
+    const y12 = await invoiceOf(await send(ch.wa, wa([jpegBytes('c2c-y12')]), at(12)));
+    const y13 = await invoiceOf(await send(ch.wa, wa([jpegBytes('c2c-y13')]), at(13)));
+    await ocr(x0, ACME);
+    expect((await ocr(x5, NOHEAD)).absorbed).toBe(true); // X's page 2 joins A-100
+    await ocr(x11, NOHEAD);
+    await ocr(y12, { ...ACME, invoiceNumber: 'A-200' });
+    const s = await ocr(y13, NOHEAD);
+    expect(s.absorbed).toBe(false);
+    expect((await invoicesOfA()).map((i) => i.id).sort()).toEqual([x0, x11, y12, y13].sort());
+    for (const id of [x11, y12, y13]) expect(await linesOf(id)).toHaveLength(1);
+  });
+
+  it('H-1 (1): a re-shot of page 1 that reads one line a little differently (77.10 vs 77.00) is page_duplicate', async () => {
+    const [p1, p2] = await pages(2, 'h1a');
+    await ocr(p1!, { ...ACME, lines: [{ qty: '3', total: '77.00' }] });
+    const s2 = await ocr(p2!, { ...ACME, invoiceNumber: null, lines: [{ qty: '3', total: '77.10' }] });
+    expect(s2.flagged).toEqual([{ invoiceId: p2, reason: 'page_duplicate' }]);
+    expect(s2.hold).toBe(true); // never auto-matched
+    expect(await invoicesOfA()).toHaveLength(2);
+  });
+
+  it('H-1 (2): [P1, P2] merged and re-OCR\'d, then P1 re-shot → page_duplicate against P1\'s stored single-page print', async () => {
+    const [p1, p2] = await pages(2, 'h1b');
+    const L1 = [{ qty: '3', total: '77.00' }, { qty: '2', total: '40.00' }];
+    await ocr(p1!, { ...ACME, lines: L1 });
+    expect((await ocr(p2!, NOHEAD)).absorbed).toBe(true);
+    const re = await invoiceOf(await send(ch.wa, wa([jpegBytes('h1b-reshot')]), at(4)));
+    await ocr(p1!, { ...ACME, lines: [...L1, { qty: '9', total: '999.00' }] }); // the composed 2-page re-OCR
+    // The worker blanks A-100 as already on file (duplicateOf = page 1).
+    const s = await ocr(re, {
+      ...ACME,
+      duplicateOf: { invoiceId: p1!, invoiceNumber: 'A-100' },
+      lines: [{ qty: '3', total: '77.10' }, { qty: '2', total: '40.00' }],
+    });
+    expect(s.flagged).toEqual([{ invoiceId: re, reason: 'page_duplicate' }]);
+    expect(await pdfPagesOf(p1!)).toBe(2);
+  });
+
+  it('H-1 (3): a re-shot of PAGE 2 is page_duplicate against the absorbed page 2, never page 3', async () => {
+    const [p1, p2] = await pages(2, 'h1c');
+    const L2 = [{ qty: '7', total: '210.00' }];
+    await ocr(p1!, ACME);
+    expect((await ocr(p2!, { ...NOHEAD, lines: L2 })).absorbed).toBe(true);
+    const re2 = await invoiceOf(await send(ch.wa, wa([jpegBytes('h1c-reshot2')]), at(3)));
+    expect((await ocr(re2, { ...NOHEAD, lines: L2 })).hold).toBe(true); // page 1 is being re-read
+    const s1 = await ocr(p1!, ACME); // the composed re-OCR settles the cluster
+    expect(s1.flagged).toEqual([{ invoiceId: re2, reason: 'page_duplicate' }]);
+    expect(await pdfPagesOf(p1!)).toBe(2);
+    expect(matchCalls).not.toContain(re2);
+  });
+
+  it("H-1 (4): 'A 100' vs 'A-100' slips past the unique index but is still a duplicate, and is never matched", async () => {
+    const [p1, p2] = await pages(2, 'h1d');
+    const L = [{ qty: '4', total: '88.00' }];
+    await ocr(p1!, { ...ACME, lines: L });
+    const s2 = await ocr(p2!, { ...ACME, invoiceNumber: 'A 100', lines: L });
+    expect(s2).toMatchObject({ hold: true, flagged: [{ invoiceId: p2, reason: 'page_duplicate' }] });
+    expect(matchCalls).toEqual([p1]); // page 1 released, the duplicate not
   });
 });

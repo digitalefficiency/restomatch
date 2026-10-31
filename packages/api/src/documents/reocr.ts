@@ -26,6 +26,8 @@ import type { DocumentFailureReason } from './types';
 
 /** The audit action of a retired page invoice (G-05 can add it to the AuditAction union). */
 export const PAGE_ABSORBED_ACTION = 'document.page_absorbed';
+/** Page 1 re-opened for a composed re-OCR (its single-page print is kept on the row). */
+export const PAGES_RECOMPOSED_ACTION = 'document.pages_recomposed';
 
 /**
  * Re-open an OPEN, unreferenced invoice for OCR (→ `ocr_pending`). The caller
@@ -114,7 +116,7 @@ export async function retireBlocker(
  */
 export async function retireInvoice(
   tx: Database,
-  args: { restaurantId: string; invoiceId: string; absorbedInto: string; userId: string | null },
+  args: { restaurantId: string; invoiceId: string; absorbedInto: string; userId: string | null; print?: unknown },
 ): Promise<{ ok: true } | { ok: false; reason: DocumentFailureReason | 'not_found' }> {
   const { restaurantId, invoiceId } = args;
   const blocker = await retireBlocker(tx, restaurantId, invoiceId);
@@ -150,7 +152,7 @@ export async function retireInvoice(
     action: PAGE_ABSORBED_ACTION,
     entityType: 'invoice',
     entityId: invoiceId,
-    before: before as never,
+    before: { ...before, ...(args.print ? { print: args.print } : {}) } as never,
     after: { absorbedInto: args.absorbedInto } as never,
   });
   return { ok: true };

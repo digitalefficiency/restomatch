@@ -149,7 +149,7 @@ export async function registerIngestedDocument(
       invoiceId,
       supplierId: args.supplierId,
       imageUrl,
-      dedupeKey: ocrDedupeKey(invoiceId, pageCount ?? 1),
+      dedupeKey: ocrDedupeKey(invoiceId, ref),
     };
   }
   // Only a document still awaiting review can be registered (approve/reject race).

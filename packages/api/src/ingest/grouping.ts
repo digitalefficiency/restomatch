@@ -1,8 +1,9 @@
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { featureEnabled } from '../lib/features';
 import { and, asc, eq, ingestDocuments, ingestMessages, sql, type Database } from '@restomatch/db';
 import { composeDocument, MAX_DOCUMENT_PAGES } from '../documents/compose';
-import { extOf, signObjectRef, storedImageValue } from '../documents/objectRef';
+import { extOf, scanIdOf, signObjectRef, storedImageValue } from '../documents/objectRef';
 import { setInvoiceImage, upsertInvoiceScan } from '../documents/intake';
 
 /**
@@ -173,25 +174,32 @@ export function mimeOfRef(ref: string): string {
   return MIME_BY_EXT[extOf(ref) ?? ''] ?? 'application/octet-stream';
 }
 
-/** The OCR dedupe key: at most one job per (invoice, page count). */
-export function ocrDedupeKey(invoiceId: string, pageCount: number): string {
-  return `ocr:${invoiceId}:${pageCount}`;
+/**
+ * The OCR dedupe key: at most one job per (invoice, OBJECT). The object id is
+ * content-addressed (see objectForPages), so a recompose to a different page
+ * set — even back to an earlier page count — gets a fresh job, while a replay of
+ * the same set never re-OCRs. The sweep derives the same key from raw_image_url.
+ */
+export function ocrDedupeKey(invoiceId: string, ref: string): string {
+  return `ocr:${invoiceId}:${scanIdOf(ref)}`;
 }
 
 /**
  * The object for a page list: a single page is itself (no compose, as today);
- * two or more are composed into a versioned PDF `ingest:<firstPageId>#p<N>`.
+ * two or more are composed into a PDF named by the hash of the ordered page ids.
  * Ingest pages are the attachment records, so they are never deleted.
  */
 export async function objectForPages(
   restaurantId: string,
-  firstPageId: string,
+  pageIds: string[],
   paths: string[],
 ): Promise<{ storagePath: string; pageCount: number; mimeType: string }> {
   if (paths.length === 1) return { storagePath: paths[0]!, pageCount: 1, mimeType: mimeOfRef(paths[0]!) };
+  // Named by the ORDERED page ids: a different set or order is a different object.
+  const setHash = createHash('sha256').update(pageIds.join(',')).digest('hex').slice(0, 32);
   const composed = await composeDocument({
     restaurantId,
-    clientDocumentId: `ingest:${firstPageId}#p${paths.length}`,
+    clientDocumentId: `ingest:${setHash}`,
     pageObjects: paths,
     deletePages: false,
   });
@@ -207,7 +215,7 @@ export async function recomposeInvoice(
   tx: Database,
   args: { restaurantId: string; invoiceId: string; supplierId: string | null; pages: PageRow[] },
 ): Promise<{ storagePath: string; pageCount: number; job: { restaurantId: string; invoiceId: string; supplierId: string | null; imageUrl: string; dedupeKey: string } }> {
-  const obj = await objectForPages(args.restaurantId, args.pages[0]!.id, args.pages.map((p) => p.storagePath));
+  const obj = await objectForPages(args.restaurantId, args.pages.map((p) => p.id), args.pages.map((p) => p.storagePath));
   const imageUrl = await signObjectRef(args.restaurantId, obj.storagePath);
   if (!imageUrl) throw new Error('could not sign the composed document');
   await setInvoiceImage(tx, args.restaurantId, args.invoiceId, storedImageValue(args.restaurantId, obj.storagePath));
@@ -226,7 +234,7 @@ export async function recomposeInvoice(
       invoiceId: args.invoiceId,
       supplierId: args.supplierId,
       imageUrl,
-      dedupeKey: ocrDedupeKey(args.invoiceId, obj.pageCount),
+      dedupeKey: ocrDedupeKey(args.invoiceId, obj.storagePath),
     },
   };
 }

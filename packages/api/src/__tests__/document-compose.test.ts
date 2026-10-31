@@ -270,7 +270,7 @@ describe('attachAsPage / splitDocument', () => {
     const docs = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.restaurantId, A.restaurantId));
     expect(new Set(docs.map((d) => d.invoiceId))).toEqual(new Set([first]));
     expect(await pagesOf(first)).toBe(2);
-    expect(enqueued.map((j) => [j.invoiceId, j.dedupeKey])).toEqual([[first, `ocr:${first}:2`]]);
+    expect(enqueued.map((j) => [j.invoiceId, j.dedupeKey])).toEqual([[first, expect.stringMatching(new RegExp(`^ocr:${first}:scan-`))]]);
     const [inv] = await ownerDb.select().from(invoices).where(eq(invoices.id, first));
     expect(inv!.status).toBe('ocr_pending');
   });
