@@ -51,7 +51,11 @@ const WAITS = {
   uploadShrink: 'W1-06 image shrink (6 MB phone photo) — not on main + #167',
   /** S2: manual invoice lines — the only way a non-demo tenant gets findings without OCR. */
   manualLines: "S2's manual invoice lines — without them a fresh tenant has no invoice lines, so no findings",
+  /** W1-11: hide chef order entry + reject it server-side (CHEF_CAN_CREATE_ORDERS = false). */
+  chefOrderRefusal: 'W1-11 chef order entry hidden + server-side reject — not on main + #167',
 } as const;
+/** Flip to true once W1-11's chef refusal is on the tested tree (then step 7b asserts it). */
+const CHEF_REFUSAL_ON_TREE = false;
 
 /** Stage C re-runs on one long-lived tenant: tag the names so each run's rows are its own. */
 const RUN_ID = process.env.PILOT_RUN_ID ?? 'adhoc';
@@ -97,6 +101,8 @@ function israelDate(offsetDays = 0): string {
 async function as(role: Role): Promise<Page> {
   const existing = pages.get(role);
   if (existing) return existing;
+  // Stage C: chef / bookkeeper are optional QA users — no credentials, no step.
+  test.skip(PROBE === 'write' && !process.env[`PILOT_${role.toUpperCase()}_EMAIL`], `PILOT_${role.toUpperCase()}_EMAIL is not set`);
   const ctx = role === 'receiver' ? phone : desk;
   // One browser context per device; roles need their own cookies, so a context per role.
   const own = await ctx.browser()!.newContext({
@@ -332,21 +338,35 @@ test('6 · receiver home, receiving and invoices show no ₪', async ({}, info) 
   expectCleanConsole('receiver', 'receiver money sweep');
 });
 
-test('7 · chef sees no ₪; /dashboard/orders/new matches CHEF_CAN_CREATE_ORDERS', async ({}, info) => {
+test('7 · chef sees no ₪ and no target', async ({}, info) => {
   const page = await as('chef');
   await visit(page, 'chef', '/dashboard');
+  await shot(page, info, '7-chef-home');
   await expectNoShekel(page, 'chef home');
   await expectNoTarget(page, 'chef home');
-  await shot(page, info, '7-chef-home');
-  const text = await visit(page, 'chef', '/dashboard/orders/new');
-  await shot(page, info, '7-chef-orders-new');
+  expectCleanConsole('chef', 'chef home');
+});
+
+test('7b · chef and /dashboard/orders/new match CHEF_CAN_CREATE_ORDERS', async ({}, info) => {
+  test.fixme(!CHEF_CAN_CREATE_ORDERS && !CHEF_REFUSAL_ON_TREE, WAITS.chefOrderRefusal);
+  const page = await as('chef');
+  const res = await page.goto('/dashboard/orders/new');
+  await page.waitForLoadState('networkidle').catch(() => {});
+  const text = await mainText(page);
+  await shot(page, info, '7b-chef-orders-new');
   if (CHEF_CAN_CREATE_ORDERS) {
     expect(text, 'chef reaches the order wizard').toContain('הזמנה חדשה');
     expect(text).toContain(SUPPLIER_PRODUCE);
   } else {
-    expect(text, 'chef is refused the order wizard').toMatch(/403|אין גישה|לא פתוח/);
+    // Refused: a 403 page or a redirect away from the wizard — never the wizard itself.
+    const refused = (res?.status() ?? 0) === 403 || !page.url().includes('/dashboard/orders/new') || /403|אין גישה|לא פתוח/.test(text);
+    expect(refused, 'chef is refused the order wizard').toBe(true);
+    expect(text, 'no supplier picker for the chef').not.toContain(SUPPLIER_PRODUCE);
+    await expect(page.getByRole('navigation').first(), 'no order entry in the chef nav').not.toContainText('הזמנה חדשה');
+    const list = errors.get('chef') ?? [];
+    for (let i = list.length - 1; i >= 0; i--) if (/status of 403/.test(list[i]!)) list.splice(i, 1);
   }
-  expectCleanConsole('chef', 'chef');
+  expectCleanConsole('chef', 'chef orders/new');
 });
 
 test.fixme('8 · manager approves one finding, rejects one with a note, undoes within 10 s', async () => {
