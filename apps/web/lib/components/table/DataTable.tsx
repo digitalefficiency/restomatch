@@ -18,7 +18,7 @@ import { ColumnsMenu, DensityMenu, ExportMenu } from './menus';
 import { MobileCardList } from './MobileCardList';
 import { pageWindow } from './paging';
 import { ToolbarPopover } from './Popover';
-import { DEFAULT_BULK_CAP_AGOROT, afterBatch, batchActionState, disabledReason, isHeldBack, selectAllIds, summarize, toggleId } from './selection';
+import { DEFAULT_BULK_CAP_AGOROT, afterBatch, batchActionState, sumDisplay, disabledReason, isHeldBack, selectAllIds, summarize, toggleId } from './selection';
 import { ariaSortOf, nextSort, sortRows } from './sort';
 import type { BatchAction, ColumnDef, Density, Selectability, SortSpec, TableTotals } from './types';
 import { useScrollMemory, useTableUrlState } from './useTableUrlState';
@@ -139,6 +139,8 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [busy, setBusy] = useState(false);
   const [failedCount, setFailedCount] = useState(0);
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
 
   const sort = state.sort && columns.some((c) => c.id === state.sort!.id && c.sortable !== false) ? state.sort : defaultSort;
   const density = state.density ?? densityProp;
@@ -200,8 +202,9 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     focusTable();
   };
 
-  // One call per row (the existing per-item procedure). Rows that succeed leave the
-  // selection and are never re-submitted; rows that fail stay selected and are counted.
+  // One call per row, one at a time (the existing per-item procedure). Rows that succeed
+  // leave the selection and are never re-submitted; rows that fail stay selected and are
+  // counted. Selection is locked while a run is in flight.
   const runBatch = async (a: BatchAction<Row>, targets: Row[]) => {
     setBusy(true);
     try {
@@ -215,13 +218,22 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
           );
         outcomes = targets.map(() => (ok ? 'ok' : 'failed'));
       } else {
-        const results = await Promise.allSettled(targets.map(async (r) => a.run?.(r)));
-        outcomes = results.map((r) => (r.status === 'fulfilled' ? 'ok' : 'failed'));
+        outcomes = [];
+        for (const r of targets) {
+          try {
+            await a.run?.(r);
+            outcomes.push('ok');
+          } catch {
+            outcomes.push('failed');
+          }
+        }
       }
-      const next = afterBatch(selected, targets.map(rowKey), outcomes);
-      setSelected(next.selected);
-      setFailedCount(next.failed);
-      if (next.selected.size === 0) focusTable();
+      const ids = targets.map(rowKey);
+      const failed = outcomes.filter((o) => o === 'failed').length;
+      // Functional update: remove only the ids that succeeded from whatever is selected now.
+      setSelected((prev) => afterBatch(prev, ids, outcomes).selected);
+      setFailedCount(failed);
+      if (failed === 0 && [...selectedRef.current].every((k) => ids.includes(k))) focusTable();
     } finally {
       setBusy(false);
     }
@@ -232,7 +244,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     const t = totals
       ? { label: copy.totals(totals.count), columnId: totals.columnId, sumAgorot: totals.sumAgorot }
       : undefined;
-    const out = exportTable(cols, sorted, t);
+    const out = exportTable(cols, sorted, t, copy.pending);
     const meta: ExportMeta = {
       title: exportMeta?.title ?? caption,
       period: exportMeta?.period ?? copy.exportMeta.none,
@@ -267,7 +279,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
       if ((e.target as HTMLElement).tagName === 'INPUT') return;
       e.preventDefault();
       update({ sel: rid, peek: state.peek === rid ? null : rid });
-    } else if (k === 'select' && selectable) {
+    } else if (k === 'select' && selectable && !busy) {
       e.preventDefault();
       if (disabledReason(rules, row) == null) toggle(rid);
     } else if (k === 'open' || k === 'openTab') {
@@ -380,7 +392,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
   const toolbarRow = batchMode ? (
     <BatchBar
       count={summary.count}
-      sumAgorot={amountAgorot ? summary.sumAgorot : undefined}
+      sum={amountAgorot ? sumDisplay(summary) : undefined}
       notes={failedCount > 0 ? [copy.batchFailed(failedCount)] : []}
       onClear={clearSelection}
       actions={(batchActions ?? []).map((a) => {
@@ -499,7 +511,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
                   <input
                     type="checkbox"
                     checked={checked}
-                    disabled={!!reason}
+                    disabled={!!reason || busy}
                     onChange={() => toggle(rid)}
                     aria-label={copy.selectRow(label)}
                     aria-describedby={reason ? `${captionId}-why-${rid}` : undefined}
@@ -658,7 +670,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
                       ref={(el) => {
                         if (el) el.indeterminate = !allOnPage && someOnPage;
                       }}
-                      disabled={eligibleOnPage.length === 0 || status !== 'ready'}
+                      disabled={eligibleOnPage.length === 0 || status !== 'ready' || busy}
                       onChange={() =>
                         setSelected((s) => {
                           const next = new Set(s);

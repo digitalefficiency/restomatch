@@ -25,14 +25,15 @@ export interface BatchBarAction {
  */
 export function BatchBar({
   count,
-  sumAgorot,
+  sum,
   notes = [],
   actions,
   onClear,
   className,
 }: {
   count: number;
-  sumAgorot?: number;
+  /** From `sumDisplay`: the known Σ (+ how many are unknown), or the pending state. */
+  sum?: { kind: 'pending' } | { kind: 'sum'; sumAgorot: number; unknownCount: number };
   /** Short status lines under the count (held-back rows, failures). */
   notes?: string[];
   actions: BatchBarAction[];
@@ -61,12 +62,21 @@ export function BatchBar({
     >
       <p aria-live="polite" className="text-sm font-semibold text-ink">
         <span data-batch-count>{copy.selected(count)}</span>
-        {sumAgorot != null ? (
+        {sum ? (
           <>
             {' · '}
-            <bdi data-batch-sum className="tabular-nums lining-nums">
-              {formatIls(sumAgorot / 100, { maximumFractionDigits: 2, locale })}
-            </bdi>
+            <span data-batch-sum="">
+              {sum.kind === 'pending' ? (
+                copy.pending
+              ) : (
+                <>
+                  <bdi className="tabular-nums lining-nums">
+                    {formatIls(sum.sumAgorot / 100, { maximumFractionDigits: 2, locale })}
+                  </bdi>
+                  {sum.unknownCount > 0 ? ` ${copy.plusUnknown(sum.unknownCount)}` : null}
+                </>
+              )}
+            </span>
           </>
         ) : null}
       </p>

@@ -9,7 +9,10 @@ import type { Selectability } from './types';
  *   assign and the like act on the whole selection.
  */
 
-/** R-12 per-item cap for bulk approval: ₪200 per invoice (owner-confirmed, REVIEW-REPORT §8). */
+/**
+ * R-12 per-item cap for bulk approval: ₪200 per invoice (owner-confirmed, REVIEW-REPORT §8).
+ * TODO(W2-04): the single server-side constant lives next to approvals.decideMany; read it from there.
+ */
 export const DEFAULT_BULK_CAP_AGOROT = 20_000;
 
 export interface SelectionRules<Row> {
@@ -60,7 +63,10 @@ export interface SelectionSummary<Row> {
   /** The subset a capped (approve/pay) action may take: known amount, within the cap. */
   withinCap: Row[];
   overCapCount: number;
+  /** Selected rows whose amount is unknown (pending); never counted as ₪0. */
   unknownCount: number;
+  /** False when the table has no amount accessor at all: a capped action then can't run. */
+  hasAmount: boolean;
   count: number;
   /** Σ|amount| of the selected rows whose amount is known, integer agorot. */
   sumAgorot: number;
@@ -78,6 +84,7 @@ export function summarize<Row>(
     withinCap: [],
     overCapCount: 0,
     unknownCount: 0,
+    hasAmount: !!rules.amountAgorot,
     count: 0,
     sumAgorot: 0,
     withinCapSumAgorot: 0,
@@ -85,14 +92,17 @@ export function summarize<Row>(
   for (const r of rows) {
     if (!selected.has(rules.rowKey(r)) || disabledReason(rules, r) != null) continue;
     out.selected.push(r);
+    if (!out.hasAmount) continue;
     const v = knownAmount(rules, r);
-    if (v != null) out.sumAgorot += Math.abs(v);
-    const held = isHeldBack(rules, r);
-    if (held === 'overCap') out.overCapCount++;
-    else if (held === 'unknown') out.unknownCount++;
+    if (v == null) {
+      out.unknownCount++;
+      continue;
+    }
+    out.sumAgorot += Math.abs(v);
+    if (isHeldBack(rules, r) === 'overCap') out.overCapCount++;
     else {
       out.withinCap.push(r);
-      if (v != null) out.withinCapSumAgorot += Math.abs(v);
+      out.withinCapSumAgorot += Math.abs(v);
     }
   }
   out.count = out.selected.length;
@@ -115,6 +125,8 @@ export function batchActionState<Row>(
   if (!action.capped) {
     return { rows: summary.selected, sumAgorot: summary.sumAgorot, disabled: summary.count === 0, reason: null };
   }
+  // No amount accessor means every amount is unknown: a capped action never runs uncapped.
+  if (!summary.hasAmount) return { rows: [], sumAgorot: 0, disabled: true, reason: 'unknown' };
   const reason: BatchBlockReason = !action.serverEnforced
     ? 'notEnforced'
     : summary.unknownCount > 0
@@ -146,4 +158,16 @@ export function afterBatch(
     else failed++;
   });
   return { selected: next, failed };
+}
+
+/**
+ * How the BatchBar shows the selection's ₪: an all-unknown selection is the
+ * pending state (never "0.00 ₪"); otherwise the known Σ plus how many rows have
+ * no known amount yet.
+ */
+export function sumDisplay<Row>(
+  summary: SelectionSummary<Row>,
+): { kind: 'pending' } | { kind: 'sum'; sumAgorot: number; unknownCount: number } {
+  if (summary.count > 0 && summary.unknownCount === summary.count) return { kind: 'pending' };
+  return { kind: 'sum', sumAgorot: summary.sumAgorot, unknownCount: summary.unknownCount };
 }

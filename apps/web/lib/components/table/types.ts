@@ -61,7 +61,9 @@ export interface BatchAction<Row> {
   /** The host's declaration that the server rejects over-cap and block items for this action. */
   serverEnforced?: boolean;
   /**
-   * Runs once per row — the existing per-item procedure, never a bulk engine.
+   * Runs once per row, one row at a time — the existing per-item procedure, never
+   * a bulk engine. For a capped action that procedure MUST re-check, per id, that
+   * the item is not `block` and is within the cap: this table's guard is UI-only.
    * A rejected row stays selected (with a count shown); a row that succeeded
    * leaves the selection and is never re-submitted.
    */
