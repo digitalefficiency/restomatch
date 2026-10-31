@@ -144,6 +144,8 @@ const ROUTE_ROLES_BEFORE: Record<string, UserRole[]> = {
   '/dashboard/suppliers': ['owner', 'manager'],
   '/dashboard/suppliers/ledger': ['owner', 'manager', 'receiver', 'bookkeeper'],
   '/dashboard/catalog': ['owner', 'manager'],
+  // G-08 (orchestrator 31.10): the chef answers "זה אותו מוצר?" on the mapper only.
+  '/dashboard/catalog/mapping': ['owner', 'manager', 'chef'],
   '/dashboard/products': ['owner', 'manager'],
   '/dashboard/orders': ['owner', 'manager'],
   '/dashboard/contracts': ['owner', 'manager', 'bookkeeper'],

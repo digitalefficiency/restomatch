@@ -218,3 +218,97 @@ describe('G-08 name-keyed questions ("זה אותו מוצר?")', () => {
     expect(l?.productId).toBeNull();
   });
 });
+
+describe('G-08 mapping.answerLink — the chef may answer "זה אותו מוצר?" (least privilege)', () => {
+  it('chef links a question to one of its suggestions: lines backfilled, 0.999 alias, no ₪ in the response; undo works', async () => {
+    const pepper = await supplierProduct(A, 'פלפל אדום');
+    const l1 = await unlinkedInvoiceLine(A, 'פלפל אדום חריף');
+    const rows = await callerFor(A, 'chef').mapping.unmapped();
+    expect(rows.every((r) => r.kind === 'name')).toBe(true);
+    expect(JSON.stringify(rows)).not.toMatch(/price|lineTotal|unitPrice|amount|₪/i);
+    const q = rows.find((r) => r.nameKey === 'פלפל אדום חריף')!;
+    expect(q.suggestions.map((x) => x.productId)).toContain(pepper);
+
+    const r = await callerFor(A, 'chef').mapping.answerLink({
+      supplierId: A.supplierId,
+      rawName: q.sampleDescription,
+      productId: pepper,
+    });
+    expect(r.invoiceLinesUpdated).toBe(1);
+    expect(r.createdProduct).toBe(false);
+    expect(JSON.stringify(r)).not.toMatch(/price|lineTotal|unitPrice|amount|₪/i);
+    const [l] = await db.select({ productId: invoiceLines.productId }).from(invoiceLines).where(eq(invoiceLines.id, l1));
+    expect(l?.productId).toBe(pepper);
+    const [alias] = await db
+      .select({ confidence: productAliases.confidence })
+      .from(productAliases)
+      .where(eq(productAliases.supplierNameRaw, 'פלפל אדום חריף'));
+    expect(alias?.confidence).toBe('0.999');
+
+    await callerFor(A, 'chef').mapping.answerLink({
+      supplierId: A.supplierId,
+      rawName: q.sampleDescription,
+      productId: pepper,
+      revert: r.undo!,
+    });
+    const [back] = await db.select({ productId: invoiceLines.productId }).from(invoiceLines).where(eq(invoiceLines.id, l1));
+    expect(back?.productId).toBeNull();
+  });
+
+  it('a product that is NOT among the suggestions is refused (FORBIDDEN), nothing linked', async () => {
+    await supplierProduct(A, 'פלפל אדום');
+    const unrelated = await supplierProduct(A, 'קמח לבן');
+    const l1 = await unlinkedInvoiceLine(A, 'פלפל אדום חריף');
+    await expect(
+      callerFor(A, 'chef').mapping.answerLink({ supplierId: A.supplierId, rawName: 'פלפל אדום חריף', productId: unrelated }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    const [l] = await db.select({ productId: invoiceLines.productId }).from(invoiceLines).where(eq(invoiceLines.id, l1));
+    expect(l?.productId).toBeNull();
+  });
+
+  it('no open question for that name → NOT_FOUND (no alias for arbitrary names)', async () => {
+    const pepper = await supplierProduct(A, 'פלפל אדום');
+    await expect(
+      callerFor(A, 'chef').mapping.answerLink({ supplierId: A.supplierId, rawName: 'פלפל אדום חריף', productId: pepper }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(await db.select().from(productAliases).where(eq(productAliases.supplierNameRaw, 'פלפל אדום חריף'))).toEqual([]);
+  });
+
+  it("B's supplier or B's product → NOT_FOUND; B's lines untouched", async () => {
+    const lineB = await unlinkedInvoiceLine(B, 'שורה של B');
+    await expect(
+      callerFor(A, 'chef').mapping.answerLink({ supplierId: B.supplierId, rawName: 'שורה של B', productId: A.productId }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await unlinkedInvoiceLine(A, 'שורה של A');
+    await expect(
+      callerFor(A, 'chef').mapping.answerLink({ supplierId: A.supplierId, rawName: 'שורה של A', productId: B.productId }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const [l] = await db.select({ productId: invoiceLines.productId }).from(invoiceLines).where(eq(invoiceLines.id, lineB));
+    expect(l?.productId).toBeNull();
+  });
+
+  it('receiver and bookkeeper → FORBIDDEN', async () => {
+    const pepper = await supplierProduct(A, 'פלפל אדום');
+    await unlinkedInvoiceLine(A, 'פלפל אדום חריף');
+    for (const role of ['receiver', 'bookkeeper'] as const) {
+      await expect(
+        callerFor(A, role).mapping.answerLink({ supplierId: A.supplierId, rawName: 'פלפל אדום חריף', productId: pepper }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    }
+  });
+
+  it('an answer cannot undo a product creation or a different product', async () => {
+    const pepper = await supplierProduct(A, 'פלפל אדום');
+    await unlinkedInvoiceLine(A, 'פלפל אדום חריף');
+    const undo = { productId: pepper, poLineIds: [], invoiceLineIds: [], catalogItemIds: [], aliasId: null, createdProduct: true };
+    await expect(
+      callerFor(A, 'chef').mapping.answerLink({ supplierId: A.supplierId, rawName: 'פלפל אדום חריף', productId: pepper, revert: undo }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('chef is still FORBIDDEN on mapping.confirm (the immutable rule holds)', async () => {
+    await expect(
+      callerFor(A, 'chef').mapping.confirm({ supplierId: A.supplierId, rawName: 'x', newProductName: 'x' }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+});

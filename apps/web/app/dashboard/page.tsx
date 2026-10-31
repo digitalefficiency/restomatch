@@ -45,9 +45,9 @@ export default async function DashboardPage({
     <SectionHeader level={1} title={t(`homeTitle.${role}`)} subtitle={t(`homeSubtitle.${role}`)} />
   );
 
-  // G-08: the "זה אותו מוצר?" line for those who can answer it (owner, manager).
+  // G-08: the "זה אותו מוצר?" line for those who can answer it (owner, manager, chef).
   // A count only, no ₪. A failed read hides the line rather than blocking the home.
-  const asks = role === 'owner' || role === 'manager';
+  const asks = role === 'owner' || role === 'manager' || role === 'chef';
   const [questions, tc] = asks
     ? await Promise.all([
         caller.mapping
@@ -79,6 +79,7 @@ export default async function DashboardPage({
     return (
       <div data-home="chef">
         {header}
+        {questionsLine}
         <ChefHome caller={homeCaller(caller, 'chef')} t={t} locale={locale} fail={fail} />
       </div>
     );

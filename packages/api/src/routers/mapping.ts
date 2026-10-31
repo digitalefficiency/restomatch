@@ -18,7 +18,7 @@ import {
 } from '@restomatch/db';
 import { matchProductTopN, normalizeLinkName, recordConfirmedMatch } from '@restomatch/catalog';
 import { enqueue, isQueueUnavailableError, MATCH_INVOICE_QUEUE, type MatchInvoiceQueueJob } from '@restomatch/queue';
-import { managerProcedure, memberProcedure, router } from '../trpc';
+import { chefProcedure, managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
 import { readConsolidatedRaw } from '../match/consolidated';
 
@@ -197,6 +197,33 @@ async function nameKeyedRows(
   }));
 }
 
+/** The top ≤3 products the link policy suggests for a (supplier, raw name). Names only, no ₪. */
+async function suggestionsFor(db: Database, rid: string, supplierId: string, raw: string): Promise<LinkSuggestion[]> {
+  const cands = await matchProductTopN(db, { restaurantId: rid, supplierId, rawDescription: raw }, 3);
+  return cands.map((c) => ({ productId: c.productId, canonicalName: c.canonicalName, confidence: c.confidence }));
+}
+
+/** Is there an open name-keyed question for (supplier, normalized name) in this restaurant? */
+async function questionOpen(db: Database, rid: string, supplierId: string, nameKey: string): Promise<boolean> {
+  const [r] = (await db.execute(sql`
+    select exists (
+      select 1 from invoice_lines il
+        join invoices i on i.id = il.invoice_id and i.restaurant_id = ${rid} and i.supplier_id = ${supplierId}
+       where il.product_id is null and il.supplier_sku is null and ${normNameSql(sql`il.raw_description`)} = ${nameKey}
+      union all
+      select 1 from po_lines pl
+        join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid} and po.supplier_id = ${supplierId}
+       where pl.product_id is null and pl.supplier_sku is null and ${normNameSql(sql`pl.raw_description`)} = ${nameKey}
+      union all
+      select 1 from supplier_catalog_items sci
+       where sci.restaurant_id = ${rid} and sci.supplier_id = ${supplierId}
+         and sci.product_id is null and sci.supplier_sku is null
+         and ${normNameSql(sql`sci.supplier_name_raw`)} = ${nameKey}
+    ) as open
+  `)) as unknown as Array<{ open: boolean }>;
+  return Boolean(r?.open);
+}
+
 /** How many name-keyed questions are open (the home "זה אותו מוצר?" line). Restaurant-scoped. */
 export async function countNameQuestions(db: Database, rid: string): Promise<number> {
   const [r] = (await db.execute(sql`
@@ -221,6 +248,242 @@ export async function countNameQuestions(db: Database, rid: string): Promise<num
      where coalesce(btrim(l.raw), '') <> ''
   `)) as unknown as Array<{ n: number }>;
   return Number(r?.n ?? 0);
+}
+
+
+/** The link/backfill input shared by mapping.confirm and mapping.answerLink (G-08). */
+export interface LinkInput {
+  supplierId: string;
+  supplierSku?: string;
+  rawName: string;
+  productId?: string;
+  newProductName?: string;
+  revert?: z.infer<typeof RevertSchema>;
+}
+
+/**
+ * Link (or undo a link of) a line key to a product: verify the supplier, resolve
+ * or create the product, learn the alias, backfill the unlinked lines in place
+ * and re-match their invoices. Restaurant-scoped on every statement.
+ */
+async function applyLink(db: Database, rid: string, input: LinkInput) {
+  await assertSupplierOwned(db, input.supplierId, rid);
+
+  // The line key: (supplier, SKU), or for a G-08 name question (supplier,
+  // normalized name) on lines that carry NO SKU.
+  const sku = input.supplierSku;
+  const nameKey = normalizeLinkName(input.rawName);
+  const poKey = sku
+    ? eq(poLines.supplierSku, sku)
+    : and(isNull(poLines.supplierSku), sql`${normNameSql(poLines.rawDescription)} = ${nameKey}`);
+  const invKey = sku
+    ? eq(invoiceLines.supplierSku, sku)
+    : and(isNull(invoiceLines.supplierSku), sql`${normNameSql(invoiceLines.rawDescription)} = ${nameKey}`);
+  const itemKey = sku
+    ? eq(supplierCatalogItems.supplierSku, sku)
+    : and(
+        isNull(supplierCatalogItems.supplierSku),
+        sql`${normNameSql(supplierCatalogItems.supplierNameRaw)} = ${nameKey}`,
+      );
+
+  const poIds = db
+    .select({ id: purchaseOrders.id })
+    .from(purchaseOrders)
+    .where(and(eq(purchaseOrders.restaurantId, rid), eq(purchaseOrders.supplierId, input.supplierId)));
+  const invIds = db
+    .select({ id: invoices.id })
+    .from(invoices)
+    .where(and(eq(invoices.restaurantId, rid), eq(invoices.supplierId, input.supplierId)));
+
+  if (input.revert) {
+    const r = input.revert;
+    const undonePo = r.poLineIds.length
+      ? await db
+          .update(poLines)
+          .set({ productId: null })
+          .where(
+            and(
+              inArray(poLines.id, r.poLineIds),
+              eq(poLines.productId, r.productId),
+              poKey,
+              inArray(poLines.poId, poIds),
+            ),
+          )
+          .returning({ id: poLines.id })
+      : [];
+    const undoneInv = r.invoiceLineIds.length
+      ? await db
+          .update(invoiceLines)
+          .set({ productId: null })
+          .where(
+            and(
+              inArray(invoiceLines.id, r.invoiceLineIds),
+              eq(invoiceLines.productId, r.productId),
+              invKey,
+              inArray(invoiceLines.invoiceId, invIds),
+            ),
+          )
+          .returning({ id: invoiceLines.id, invoiceId: invoiceLines.invoiceId })
+      : [];
+    if (r.catalogItemIds.length) {
+      await db
+        .update(supplierCatalogItems)
+        .set({ productId: null, updatedAt: new Date() })
+        .where(
+          and(
+            inArray(supplierCatalogItems.id, r.catalogItemIds),
+            eq(supplierCatalogItems.restaurantId, rid),
+            eq(supplierCatalogItems.supplierId, input.supplierId),
+            eq(supplierCatalogItems.productId, r.productId),
+          ),
+        );
+    }
+    if (r.aliasId) {
+      // Only the alias this confirm created, and only through a product of this restaurant.
+      const own = db
+        .select({ id: products.id })
+        .from(products)
+        .where(and(eq(products.id, r.productId), eq(products.restaurantId, rid)));
+      await db
+        .delete(productAliases)
+        .where(
+          and(
+            eq(productAliases.id, r.aliasId),
+            eq(productAliases.productId, r.productId),
+            eq(productAliases.supplierId, input.supplierId),
+            inArray(productAliases.productId, own),
+          ),
+        );
+    }
+    if (r.createdProduct) {
+      // Remove the product this confirm made — only while no order, invoice or
+      // price-list line still points at it (those are ON DELETE SET NULL and
+      // would be silently unlinked). Recipes / counts are RESTRICT: the
+      // savepoint catches that refusal and the product stays.
+      const used = sql`EXISTS (SELECT 1 FROM invoice_lines WHERE product_id = ${r.productId})
+        OR EXISTS (SELECT 1 FROM po_lines WHERE product_id = ${r.productId})
+        OR EXISTS (SELECT 1 FROM supplier_catalog_items WHERE product_id = ${r.productId})`;
+      try {
+        await db.transaction(async (sp) => {
+          await (sp as unknown as Database)
+            .delete(products)
+            .where(and(eq(products.id, r.productId), eq(products.restaurantId, rid), sql`NOT (${used})`));
+        });
+      } catch {
+        // Still used elsewhere: leave it.
+      }
+    }
+    const rematch = await requeueInvoicesForRematch(
+      db,
+      rid,
+      undoneInv.map((l) => l.invoiceId),
+    );
+    return {
+      productId: r.productId,
+      createdProduct: false,
+      poLinesUpdated: undonePo.length,
+      invoiceLinesUpdated: undoneInv.length,
+      rematch,
+      undo: null,
+    };
+  }
+
+  // Resolve the target product (verify ownership / create new).
+  let productId: string;
+  let createdProduct = false;
+  if (input.productId) {
+    const [owned] = await db
+      .select({ id: products.id })
+      .from(products)
+      .where(and(eq(products.id, input.productId), eq(products.restaurantId, rid)))
+      .limit(1);
+    if (!owned) throw new TRPCError({ code: 'NOT_FOUND', message: 'product not found' });
+    productId = owned.id;
+  } else {
+    const [created] = await db
+      .insert(products)
+      // Stamp the exclusivity owner (input.supplierId is already asserted
+      // same-tenant above) so OCR/mapping-created products don't accumulate
+      // NULL-owner rows that leave exclusivity inert + un-backfillable.
+      .values({ restaurantId: rid, canonicalName: input.newProductName!, supplierId: input.supplierId })
+      .returning({ id: products.id });
+    if (!created) throw new Error('failed to create product');
+    productId = created.id;
+    createdProduct = true;
+  }
+
+  // Learn the alias (name + SKU) so future imports/OCR auto-resolve. A SKU
+  // link is a person's (1.000); a G-08 name answer learns the exact-key
+  // alias (0.999) for this supplier's exact name (orchestrator 31.10).
+  const alias = await recordConfirmedMatch(db, {
+    productId,
+    rawName: input.rawName,
+    supplierId: input.supplierId,
+    supplierSku: sku ?? null,
+    provenance: sku ? 'human' : 'exactKey',
+  });
+
+  // Backfill already-imported lines, scoped to this restaurant + supplier.
+  const updatedPo = await db
+    .update(poLines)
+    .set({ productId })
+    .where(
+      and(
+        isNull(poLines.productId),
+        poKey,
+        inArray(poLines.poId, poIds),
+      ),
+    )
+    .returning({ id: poLines.id });
+
+  const updatedInv = await db
+    .update(invoiceLines)
+    .set({ productId })
+    .where(
+      and(
+        isNull(invoiceLines.productId),
+        invKey,
+        inArray(invoiceLines.invoiceId, invIds),
+      ),
+    )
+    .returning({ id: invoiceLines.id, invoiceId: invoiceLines.invoiceId });
+
+  // Link the priced catalog row too, when one exists for this SKU.
+  const linkedItems = await db
+    .update(supplierCatalogItems)
+    .set({ productId, updatedAt: new Date() })
+    .where(
+      and(
+        eq(supplierCatalogItems.restaurantId, rid),
+        eq(supplierCatalogItems.supplierId, input.supplierId),
+        itemKey,
+        isNull(supplierCatalogItems.productId),
+      ),
+    )
+    .returning({ id: supplierCatalogItems.id });
+
+  // The lines changed, so their invoices' findings (and the leak) must too.
+  const rematch = await requeueInvoicesForRematch(
+    db,
+    rid,
+    updatedInv.map((l) => l.invoiceId),
+  );
+
+  return {
+    productId,
+    createdProduct,
+    poLinesUpdated: updatedPo.length,
+    invoiceLinesUpdated: updatedInv.length,
+    rematch,
+    undo: {
+      productId,
+      poLineIds: updatedPo.map((l) => l.id),
+      invoiceLineIds: updatedInv.map((l) => l.id),
+      catalogItemIds: linkedItems.map((l) => l.id),
+      aliasId: alias.created ? alias.aliasId : null,
+      createdProduct,
+    },
+  };
 }
 
 /**
@@ -334,11 +597,7 @@ export const mappingRouter = router({
       // computed on read and never carrying ₪.
       const named: UnmappedSku[] = [];
       for (const r of await nameKeyedRows(ctx.db, rid, supplierFilter)) {
-        const cands = await matchProductTopN(
-          ctx.db,
-          { restaurantId: rid, supplierId: r.supplierId, rawDescription: r.sample },
-          3,
-        );
+        const suggestions = await suggestionsFor(ctx.db, rid, r.supplierId, r.sample);
         named.push({
           kind: 'name',
           supplierId: r.supplierId,
@@ -347,9 +606,11 @@ export const mappingRouter = router({
           nameKey: r.nameKey,
           sampleDescription: r.sample,
           occurrences: r.occurrences,
-          suggestions: cands.map((c) => ({ productId: c.productId, canonicalName: c.canonicalName, confidence: c.confidence })),
+          suggestions,
         });
       }
+      // The chef answers only "זה אותו מוצר?" (G-08, orchestrator 31.10): no SKU rows.
+      if (ctx.session.role === 'chef') return named;
       return [...byKey.values(), ...named].sort((a, b) => b.occurrences - a.occurrences);
     }),
 
@@ -403,224 +664,57 @@ export const mappingRouter = router({
           message: 'provide a productId or a newProductName',
         }),
     )
+    .mutation(({ ctx, input }) => applyLink(ctx.db, ctx.session.restaurantId, input)),
+
+  /**
+   * G-08 · "זה אותו מוצר?" — the least-privilege answer for owner, manager AND
+   * chef: link a NAME-keyed question to one of ITS OWN server-computed
+   * suggestions. No new product, no SKU path, no ₪ in or out. The suggestion set
+   * is recomputed here; any other productId is refused (FORBIDDEN). Same alias
+   * learning (exact key, 0.999), backfill and undo as mapping.confirm.
+   */
+  answerLink: chefProcedure
+    .input(
+      z
+        .object({
+          supplierId: z.string().uuid(),
+          rawName: z.string().trim().min(1).max(400),
+          productId: z.string().uuid(),
+          revert: RevertSchema.optional(),
+        })
+        .strict(),
+    )
     .mutation(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
       await assertSupplierOwned(ctx.db, input.supplierId, rid);
-
-      // The line key: (supplier, SKU), or for a G-08 name question (supplier,
-      // normalized name) on lines that carry NO SKU.
-      const sku = input.supplierSku;
-      const nameKey = normalizeLinkName(input.rawName);
-      const poKey = sku
-        ? eq(poLines.supplierSku, sku)
-        : and(isNull(poLines.supplierSku), sql`${normNameSql(poLines.rawDescription)} = ${nameKey}`);
-      const invKey = sku
-        ? eq(invoiceLines.supplierSku, sku)
-        : and(isNull(invoiceLines.supplierSku), sql`${normNameSql(invoiceLines.rawDescription)} = ${nameKey}`);
-      const itemKey = sku
-        ? eq(supplierCatalogItems.supplierSku, sku)
-        : and(
-            isNull(supplierCatalogItems.supplierSku),
-            sql`${normNameSql(supplierCatalogItems.supplierNameRaw)} = ${nameKey}`,
-          );
-
-      const poIds = ctx.db
-        .select({ id: purchaseOrders.id })
-        .from(purchaseOrders)
-        .where(and(eq(purchaseOrders.restaurantId, rid), eq(purchaseOrders.supplierId, input.supplierId)));
-      const invIds = ctx.db
-        .select({ id: invoices.id })
-        .from(invoices)
-        .where(and(eq(invoices.restaurantId, rid), eq(invoices.supplierId, input.supplierId)));
-
       if (input.revert) {
-        const r = input.revert;
-        const undonePo = r.poLineIds.length
-          ? await ctx.db
-              .update(poLines)
-              .set({ productId: null })
-              .where(
-                and(
-                  inArray(poLines.id, r.poLineIds),
-                  eq(poLines.productId, r.productId),
-                  poKey,
-                  inArray(poLines.poId, poIds),
-                ),
-              )
-              .returning({ id: poLines.id })
-          : [];
-        const undoneInv = r.invoiceLineIds.length
-          ? await ctx.db
-              .update(invoiceLines)
-              .set({ productId: null })
-              .where(
-                and(
-                  inArray(invoiceLines.id, r.invoiceLineIds),
-                  eq(invoiceLines.productId, r.productId),
-                  invKey,
-                  inArray(invoiceLines.invoiceId, invIds),
-                ),
-              )
-              .returning({ id: invoiceLines.id, invoiceId: invoiceLines.invoiceId })
-          : [];
-        if (r.catalogItemIds.length) {
-          await ctx.db
-            .update(supplierCatalogItems)
-            .set({ productId: null, updatedAt: new Date() })
-            .where(
-              and(
-                inArray(supplierCatalogItems.id, r.catalogItemIds),
-                eq(supplierCatalogItems.restaurantId, rid),
-                eq(supplierCatalogItems.supplierId, input.supplierId),
-                eq(supplierCatalogItems.productId, r.productId),
-              ),
-            );
+        // Undo only what an answer did: never a product removal.
+        if (input.revert.productId !== input.productId || input.revert.createdProduct) {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'not an answer to undo' });
         }
-        if (r.aliasId) {
-          // Only the alias this confirm created, and only through a product of this restaurant.
-          const own = ctx.db
-            .select({ id: products.id })
-            .from(products)
-            .where(and(eq(products.id, r.productId), eq(products.restaurantId, rid)));
-          await ctx.db
-            .delete(productAliases)
-            .where(
-              and(
-                eq(productAliases.id, r.aliasId),
-                eq(productAliases.productId, r.productId),
-                eq(productAliases.supplierId, input.supplierId),
-                inArray(productAliases.productId, own),
-              ),
-            );
-        }
-        if (r.createdProduct) {
-          // Remove the product this confirm made — only while no order, invoice or
-          // price-list line still points at it (those are ON DELETE SET NULL and
-          // would be silently unlinked). Recipes / counts are RESTRICT: the
-          // savepoint catches that refusal and the product stays.
-          const used = sql`EXISTS (SELECT 1 FROM invoice_lines WHERE product_id = ${r.productId})
-            OR EXISTS (SELECT 1 FROM po_lines WHERE product_id = ${r.productId})
-            OR EXISTS (SELECT 1 FROM supplier_catalog_items WHERE product_id = ${r.productId})`;
-          try {
-            await ctx.db.transaction(async (sp) => {
-              await (sp as unknown as Database)
-                .delete(products)
-                .where(and(eq(products.id, r.productId), eq(products.restaurantId, rid), sql`NOT (${used})`));
-            });
-          } catch {
-            // Still used elsewhere: leave it.
-          }
-        }
-        const rematch = await requeueInvoicesForRematch(
-          ctx.db,
-          rid,
-          undoneInv.map((l) => l.invoiceId),
-        );
-        return {
-          productId: r.productId,
-          createdProduct: false,
-          poLinesUpdated: undonePo.length,
-          invoiceLinesUpdated: undoneInv.length,
-          rematch,
-          undo: null,
-        };
+        return applyLink(ctx.db, rid, {
+          supplierId: input.supplierId,
+          rawName: input.rawName,
+          revert: { ...input.revert, createdProduct: false },
+        });
       }
-
-      // Resolve the target product (verify ownership / create new).
-      let productId: string;
-      let createdProduct = false;
-      if (input.productId) {
-        const [owned] = await ctx.db
-          .select({ id: products.id })
-          .from(products)
-          .where(and(eq(products.id, input.productId), eq(products.restaurantId, rid)))
-          .limit(1);
-        if (!owned) throw new TRPCError({ code: 'NOT_FOUND', message: 'product not found' });
-        productId = owned.id;
-      } else {
-        const [created] = await ctx.db
-          .insert(products)
-          // Stamp the exclusivity owner (input.supplierId is already asserted
-          // same-tenant above) so OCR/mapping-created products don't accumulate
-          // NULL-owner rows that leave exclusivity inert + un-backfillable.
-          .values({ restaurantId: rid, canonicalName: input.newProductName!, supplierId: input.supplierId })
-          .returning({ id: products.id });
-        if (!created) throw new Error('failed to create product');
-        productId = created.id;
-        createdProduct = true;
+      const [owned] = await ctx.db
+        .select({ id: products.id })
+        .from(products)
+        .where(and(eq(products.id, input.productId), eq(products.restaurantId, rid)))
+        .limit(1);
+      if (!owned) throw new TRPCError({ code: 'NOT_FOUND', message: 'product not found' });
+      if (!(await questionOpen(ctx.db, rid, input.supplierId, normalizeLinkName(input.rawName)))) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'no open question' });
       }
-
-      // Learn the alias (name + SKU) so future imports/OCR auto-resolve. A SKU
-      // link is a person's (1.000); a G-08 name answer learns the exact-key
-      // alias (0.999) for this supplier's exact name (orchestrator 31.10).
-      const alias = await recordConfirmedMatch(ctx.db, {
-        productId,
-        rawName: input.rawName,
+      const suggestions = await suggestionsFor(ctx.db, rid, input.supplierId, input.rawName);
+      if (!suggestions.some((sug) => sug.productId === input.productId)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'not a suggested product' });
+      }
+      return applyLink(ctx.db, rid, {
         supplierId: input.supplierId,
-        supplierSku: sku ?? null,
-        provenance: sku ? 'human' : 'exactKey',
+        rawName: input.rawName,
+        productId: input.productId,
       });
-
-      // Backfill already-imported lines, scoped to this restaurant + supplier.
-      const updatedPo = await ctx.db
-        .update(poLines)
-        .set({ productId })
-        .where(
-          and(
-            isNull(poLines.productId),
-            poKey,
-            inArray(poLines.poId, poIds),
-          ),
-        )
-        .returning({ id: poLines.id });
-
-      const updatedInv = await ctx.db
-        .update(invoiceLines)
-        .set({ productId })
-        .where(
-          and(
-            isNull(invoiceLines.productId),
-            invKey,
-            inArray(invoiceLines.invoiceId, invIds),
-          ),
-        )
-        .returning({ id: invoiceLines.id, invoiceId: invoiceLines.invoiceId });
-
-      // Link the priced catalog row too, when one exists for this SKU.
-      const linkedItems = await ctx.db
-        .update(supplierCatalogItems)
-        .set({ productId, updatedAt: new Date() })
-        .where(
-          and(
-            eq(supplierCatalogItems.restaurantId, rid),
-            eq(supplierCatalogItems.supplierId, input.supplierId),
-            itemKey,
-            isNull(supplierCatalogItems.productId),
-          ),
-        )
-        .returning({ id: supplierCatalogItems.id });
-
-      // The lines changed, so their invoices' findings (and the leak) must too.
-      const rematch = await requeueInvoicesForRematch(
-        ctx.db,
-        rid,
-        updatedInv.map((l) => l.invoiceId),
-      );
-
-      return {
-        productId,
-        createdProduct,
-        poLinesUpdated: updatedPo.length,
-        invoiceLinesUpdated: updatedInv.length,
-        rematch,
-        undo: {
-          productId,
-          poLineIds: updatedPo.map((l) => l.id),
-          invoiceLineIds: updatedInv.map((l) => l.id),
-          catalogItemIds: linkedItems.map((l) => l.id),
-          aliasId: alias.created ? alias.aliasId : null,
-          createdProduct,
-        },
-      };
     }),
 });

@@ -42,14 +42,18 @@ const rowKey = (row: UnmappedSku) => `${row.supplierId}::${row.kind}::${row.supp
 interface LastLink {
   row: UnmappedSku;
   result: ConfirmResult;
+  /** Made through mapping.answerLink (a suggestion chip): undone the same way. */
+  answered?: boolean;
 }
 
-export function SkuMapper({ initial }: { initial: UnmappedSku[] }) {
+export function SkuMapper({ initial, chef = false }: { initial: UnmappedSku[]; chef?: boolean }) {
   const t = useT(catalogNs);
   const locale = useLocale();
   const utils = trpc.useUtils();
   const q = trpc.mapping.unmapped.useQuery(undefined, { initialData: initial });
-  const rows = q.data ?? [];
+  // The chef's "לא בטוח — להשאיר לבעלים" hides a question for this visit only.
+  const [skipped, setSkipped] = useState<Set<string>>(() => new Set());
+  const rows = (q.data ?? []).filter((r) => !skipped.has(rowKey(r)));
   const questions = rows.filter((r) => r.kind === 'name').length;
   const [last, setLast] = useState<LastLink | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -91,6 +95,7 @@ export function SkuMapper({ initial }: { initial: UnmappedSku[] }) {
         <LinkStatus
           key={last.result.productId + rowKey(last.row)}
           last={last}
+          chef={chef}
           onUndone={() => {
             pause();
             setLast(null);
@@ -112,7 +117,7 @@ export function SkuMapper({ initial }: { initial: UnmappedSku[] }) {
         <EmptyState
           icon={<Boxes className="h-6 w-6" />}
           title={t('mapping.emptyTitle')}
-          description={t('mapping.emptyBody')}
+          description={chef ? t('mapping.chefEmptyBody') : t('mapping.emptyBody')}
         />
       ) : (
         <>
@@ -129,7 +134,12 @@ export function SkuMapper({ initial }: { initial: UnmappedSku[] }) {
           <ul className="space-y-3">
             {rows.map((row) => (
               <li key={rowKey(row)}>
-                <MapRow row={row} onLinked={onLinked} />
+                <MapRow
+                  row={row}
+                  onLinked={onLinked}
+                  chef={chef}
+                  onSkip={() => setSkipped((s) => new Set(s).add(rowKey(row)))}
+                />
               </li>
             ))}
           </ul>
@@ -144,14 +154,14 @@ export function SkuMapper({ initial }: { initial: UnmappedSku[] }) {
  * invoice lines, so their invoices are re-matched (the leak ₪ follows). Inline
  * (not a toast) so the undo button can stay for 10 s and be reached by keyboard.
  */
-function LinkStatus({ last, onUndone }: { last: LastLink; onUndone: () => void }) {
+function LinkStatus({ last, chef, onUndone }: { last: LastLink; chef: boolean; onUndone: () => void }) {
   const t = useT(catalogNs);
   const tc = useT(components);
   const locale = useLocale();
   const toast = useToast();
   const { row, result } = last;
-  const undo = trpc.mapping.confirm.useMutation({
-    onSuccess: (r) => {
+  const undoHandlers = {
+    onSuccess: (r: ConfirmResult) => {
       toast.success(
         t('mapping.undone', {
           count: formatNumber(r.poLinesUpdated + r.invoiceLinesUpdated, locale),
@@ -159,8 +169,13 @@ function LinkStatus({ last, onUndone }: { last: LastLink; onUndone: () => void }
       );
       onUndone();
     },
-    onError: (e) => toast.error(friendlyError(e, tc)),
-  });
+    onError: (e: Parameters<typeof friendlyError>[0]) => toast.error(friendlyError(e, tc)),
+  };
+  const undoConfirm = trpc.mapping.confirm.useMutation(undoHandlers);
+  // An answer (G-08, any role that may answer) is undone through answerLink.
+  const undoAnswer = trpc.mapping.answerLink.useMutation(undoHandlers);
+  const viaAnswer = chef || !!last.answered;
+  const undo = viaAnswer ? undoAnswer : undoConfirm;
   const n = (v: number) => formatNumber(v, locale);
   // The linked row just left the list, so focus would fall to <body>: move it to
   // the undo (the next likely action), where it also pauses the 10 s window.
@@ -200,7 +215,16 @@ function LinkStatus({ last, onUndone }: { last: LastLink; onUndone: () => void }
               ? t('mapping.undoLabel', { sku: row.supplierSku })
               : t('mapping.undoLabelName', { name: row.sampleDescription })
           }
-          onClick={() => undo.mutate({ ...confirmKey(row), revert: result.undo! })}
+          onClick={() =>
+            viaAnswer
+              ? undoAnswer.mutate({
+                  supplierId: row.supplierId,
+                  rawName: row.sampleDescription,
+                  productId: result.productId,
+                  revert: result.undo!,
+                })
+              : undoConfirm.mutate({ ...confirmKey(row), revert: result.undo! })
+          }
         >
           {t('mapping.undo')}
         </Button>
@@ -209,7 +233,17 @@ function LinkStatus({ last, onUndone }: { last: LastLink; onUndone: () => void }
   );
 }
 
-function MapRow({ row, onLinked }: { row: UnmappedSku; onLinked: (link: LastLink) => void }) {
+function MapRow({
+  row,
+  onLinked,
+  chef,
+  onSkip,
+}: {
+  row: UnmappedSku;
+  onLinked: (link: LastLink) => void;
+  chef: boolean;
+  onSkip: () => void;
+}) {
   const t = useT(catalogNs);
   const tc = useT(components);
   const locale = useLocale();
@@ -235,6 +269,15 @@ function MapRow({ row, onLinked }: { row: UnmappedSku; onLinked: (link: LastLink
     },
     onError: (e) => toast.error(friendlyError(e, tc)),
   });
+  // G-08: a suggestion chip answers through answerLink (owner, manager and chef):
+  // the server re-checks that the product is one of this question's suggestions.
+  const answer = trpc.mapping.answerLink.useMutation({
+    onSuccess: (r) => onLinked({ row, result: r, answered: true }),
+    onError: (e) => toast.error(friendlyError(e, tc)),
+  });
+  const pending = confirm.isPending || answer.isPending;
+  const pick = (productId: string) =>
+    answer.mutate({ supplierId: row.supplierId, rawName: row.sampleDescription, productId });
 
   const link = (args: { productId?: string; newProductName?: string }) => {
     confirm.mutate({ ...confirmKey(row), ...args });
@@ -266,15 +309,17 @@ function MapRow({ row, onLinked }: { row: UnmappedSku; onLinked: (link: LastLink
           </div>
           {isQuestion && <p className="mt-1 text-xs text-muted">{t('mapping.questionBody')}</p>}
         </div>
-        <Button
-          variant={open ? 'secondary' : 'primary'}
-          size="sm"
-          aria-expanded={open}
-          aria-controls={panelId}
-          onClick={() => setOpen((v) => !v)}
-        >
-          {open ? t('mapping.close') : t('mapping.map')}
-        </Button>
+        {!chef && (
+          <Button
+            variant={open ? 'secondary' : 'primary'}
+            size="sm"
+            aria-expanded={open}
+            aria-controls={panelId}
+            onClick={() => setOpen((v) => !v)}
+          >
+            {open ? t('mapping.close') : t('mapping.map')}
+          </Button>
+        )}
       </div>
 
       {isQuestion && (
@@ -285,8 +330,8 @@ function MapRow({ row, onLinked }: { row: UnmappedSku; onLinked: (link: LastLink
                 <li key={sug.productId}>
                   <button
                     type="button"
-                    disabled={confirm.isPending}
-                    onClick={() => link({ productId: sug.productId })}
+                    disabled={pending}
+                    onClick={() => pick(sug.productId)}
                     aria-label={t('mapping.linkTo', { name: sug.canonicalName })}
                     className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full border border-line bg-surface-2 px-3 py-1.5 text-sm text-ink transition hover:border-primary/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:opacity-50"
                   >
@@ -299,10 +344,15 @@ function MapRow({ row, onLinked }: { row: UnmappedSku; onLinked: (link: LastLink
           ) : (
             <p className="text-sm text-subtle">{t('mapping.noSuggestions')}</p>
           )}
+          {chef && (
+            <Button variant="ghost" size="sm" className="mt-2" onClick={onSkip}>
+              {t('mapping.skip')}
+            </Button>
+          )}
         </div>
       )}
 
-      {open && (
+      {open && !chef && (
         <div id={panelId} className="mt-4 border-t border-line pt-4">
           <div className="relative">
             <Search

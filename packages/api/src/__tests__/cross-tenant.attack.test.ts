@@ -262,6 +262,9 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'mapping.confirm': 'attack',
   // G-08: the open "זה אותו מוצר?" count for the home line — a restaurant-scoped
   // count, no ₪. See catalog-mapping.attack.test.ts.
+  // G-08: the chef-allowed answer — links a name question ONLY to one of its own
+  // server-computed suggestions; foreign supplier/product → NOT_FOUND.
+  'mapping.answerLink': 'attack — catalog-mapping.attack.test.ts: B supplier/product NOT_FOUND, non-suggested product FORBIDDEN, receiver FORBIDDEN, chef OK, no ₪',
   'mapping.questionCount': 'isolation — catalog-mapping.attack.test.ts: counts only the caller restaurant name-keyed questions; B never counted for A',
   // Canonical product management (rename / recategorize / exclusivity / delete).
   'products.update': 'attack',
