@@ -69,6 +69,8 @@ export const en: Shape<typeof he> = {
     recordedConfirmed: 'The recorded answer: the order is confirmed as is.',
     recordedChanges: 'The recorded answer:',
     conflictBody: 'The answer was recorded on {date}. The changes you just marked were not saved.',
+    ownRecorded: 'Your answer was recorded on {date}.',
+    beforeVat: 'before VAT',
     contactTitle: 'A question about this order?',
     contactWith: 'A question about this order? {name}',
     call: 'Call',

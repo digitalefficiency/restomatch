@@ -8,6 +8,7 @@ import { getUserEmailById } from '@/lib/passwords';
 import { enforceTwoFactorLimit, trustedProxyHops } from '@/lib/rateLimit';
 import { safeRelativePath } from '@/lib/safeRedirect';
 import { issueTwoFactorTicket, verifySecondFactor } from '@/lib/totp';
+import { clearHint } from '../hint';
 
 /**
  * Second-factor verification (Epic C). Runs ONLY for a session that already
@@ -54,5 +55,6 @@ export async function verifyTwoFactorAction(formData: FormData): Promise<void> {
 
 /** Abandon the second step and return to a clean login. */
 export async function cancelTwoFactorAction(): Promise<void> {
+  await clearHint();
   await signOut({ redirectTo: '/login' });
 }

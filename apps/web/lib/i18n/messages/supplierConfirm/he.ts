@@ -66,6 +66,8 @@ export const he = {
     recordedConfirmed: 'התשובה שנרשמה: אישור ההזמנה כפי שהיא.',
     recordedChanges: 'התשובה שנרשמה:',
     conflictBody: 'התשובה נרשמה ב-{date}. השינויים שסימנתם עכשיו לא נשמרו.',
+    ownRecorded: 'התשובה שלכם נרשמה ב-{date}.',
+    beforeVat: 'לפני מע״מ',
     contactTitle: 'שאלה על ההזמנה?',
     contactWith: 'שאלה על ההזמנה? {name}',
     call: 'התקשרו',
