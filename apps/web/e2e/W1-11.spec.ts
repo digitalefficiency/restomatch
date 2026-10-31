@@ -743,7 +743,8 @@ test.describe('pilot · truthful send state · chef orders', () => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await setLocale(page, 'he');
     const poId = await placedByEmail('failed', 'Resend 500');
-    await page.goto(`/dashboard/orders/${poId}`);
+    // The PO page polls sendStatus; 'load' can lag on a cold CI dev server — the state assertions below do the waiting.
+    await page.goto(`/dashboard/orders/${poId}`, { waitUntil: 'domcontentloaded', timeout: 120_000 });
     const note = page.getByTestId('send-status');
     await expect(note).toHaveAttribute('data-state', 'failed', { timeout: 30_000 });
     await expect(note).toContainText(MSG.he.sendStatus.failed);
@@ -760,7 +761,8 @@ test.describe('pilot · truthful send state · chef orders', () => {
     test.setTimeout(120_000);
     await setLocale(page, 'he');
     const poId = await placedByEmail('queued');
-    await page.goto(`/dashboard/orders/${poId}`);
+    // The PO page polls sendStatus; 'load' can lag on a cold CI dev server — the state assertions below do the waiting.
+    await page.goto(`/dashboard/orders/${poId}`, { waitUntil: 'domcontentloaded', timeout: 120_000 });
     const note = page.getByTestId('send-status');
     await expect(note).toHaveAttribute('data-state', 'queued', { timeout: 30_000 });
     await expect(note).toHaveText(MSG.he.sendStatus.queued);
