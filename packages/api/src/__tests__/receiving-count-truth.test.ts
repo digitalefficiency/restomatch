@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { auditLog, createDb, eq, and, goodsReceipts, grLines, matchRuns, poLines, purchaseOrders, sql, testDbUrl } from '@restomatch/db';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { appRouter } from '../index';
+import { LEGACY_LENIENT_CLOSE } from '../routers/receiving';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 
 /**
@@ -159,5 +160,38 @@ describe('submitReceipt: one close per clientMutationId', () => {
       .from(auditLog)
       .where(and(eq(auditLog.action, 'idempotency.recorded'), sql`${auditLog.after}->>'clientMutationId' = ${key}`));
     expect(replays).toHaveLength(1);
+  });
+});
+
+describe('LEGACY_LENIENT_CLOSE (orchestrator 31.10, until the frozen mobile app retires)', () => {
+  it('is ONE named switch, on for now', () => {
+    expect(LEGACY_LENIENT_CLOSE).toBe(true);
+  });
+
+  it('a W2-05-contract caller (clientMutationId) is refused on uncounted lines', async () => {
+    const r = await receiptWith(3);
+    await caller().receiving.markGrLine({ grLineId: r.lineIds[0]!, qtyReceived: 4, qtyRejected: 0 });
+    await expect(caller().receiving.submitReceipt({ grId: r.grId, clientMutationId: randomUUID() })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+    });
+  });
+
+  it('a legacy close (no clientMutationId) still closes — and the uncounted lines are recorded AND surfaced on the receipt', async () => {
+    const r = await receiptWith(3);
+    await caller().receiving.markGrLine({ grLineId: r.lineIds[0]!, qtyReceived: 4, qtyRejected: 0 });
+    const closed = await caller().receiving.submitReceipt({ grId: r.grId });
+    expect(closed.status).toBe('partial');
+    const [row] = await audits('goods_receipt.closed', r.grId);
+    expect(row!.after).toMatchObject({ contract: 'legacy' });
+    expect((row!.after as { uncountedLineIds: string[] }).uncountedLineIds).toHaveLength(2);
+    // getReceipt carries the count the manager sees ("N שורות נסגרו בלי ספירה").
+    expect((await caller().receiving.getReceipt({ grId: r.grId })).closedUncounted).toBe(2);
+  });
+
+  it('a fully counted receipt surfaces nothing', async () => {
+    const r = await receiptWith(2);
+    for (const id of r.lineIds) await caller().receiving.markGrLine({ grLineId: id, qtyReceived: 4, qtyRejected: 0 });
+    await caller().receiving.submitReceipt({ grId: r.grId, clientMutationId: randomUUID() });
+    expect((await caller().receiving.getReceipt({ grId: r.grId })).closedUncounted).toBe(0);
   });
 });

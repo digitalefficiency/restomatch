@@ -95,6 +95,7 @@ export const receivingDelivery: Shape<typeof he> = {
       bulkNote: 'Отмечено как в заказе строк: {count} — не посчитаны поштучно',
     },
     summary: {
+      closedUncounted: 'Закрыто без пересчёта строк: {count}',
       title: 'Приёмка товара уже закрыта',
       subtitle: 'Принято в {time}. Вот записанные количества.',
       subtitleNoTime: 'Вот записанные количества.',

@@ -95,6 +95,7 @@ export const receivingDelivery: Shape<typeof he> = {
       bulkNote: '{count} መስመራት ከም ትእዛዝ ተመልኪቶም — ሓደ ብሓደ ኣይተቖጽሩን',
     },
     summary: {
+      closedUncounted: '{count} መስመራት ብዘይ ቍጽሪ ተዓጽዮም',
       title: 'ምቕባል ኣቕሓ ድሮ ተዓጽዩ',
       subtitle: 'ኣብ {time} ተቐቢሉ። እዚኦም እዮም ዝተመዝገቡ ብዝሓት።',
       subtitleNoTime: 'እዚኦም እዮም ዝተመዝገቡ ብዝሓት።',

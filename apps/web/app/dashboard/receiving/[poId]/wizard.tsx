@@ -92,6 +92,8 @@ export interface ReceiptForClient {
   receivedAt: string | null;
   /** Its open/close cycle (`updatedAt`): offline rows from an earlier cycle are held, never replayed. */
   version: string | null;
+  /** W2-05: lines this receipt was closed with WITHOUT a count (recorded on the close). */
+  closedUncounted?: number;
   lines: ReceiptLineRow[];
 }
 
@@ -876,6 +878,8 @@ export function ReceivingWizard({
             receivedAt={closedAtOpen.receivedAt}
             result={closedView.result}
             marks={closedView.initialMarks}
+            // The manager sees what was closed without a count (T4, never a false alarm); the receiver doesn't.
+            closedUncounted={showMoney ? (closedAtOpen.closedUncounted ?? 0) : 0}
           />
           {dockSlipOn ? (
             <div className="mx-auto max-w-md">

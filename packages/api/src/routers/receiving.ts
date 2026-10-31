@@ -344,8 +344,23 @@ export const receivingRouter = router({
         .where(eq(grLines.grId, receipt.id))
         .orderBy(...lineOrder(products.category, sql`coalesce(${products.canonicalName}, ${poLines.rawDescription})`, grLines.id));
 
+      // W2-05: lines closed without a count ("לא נספר"), from the close's audit row — never silent.
+      const [closeAudit] = await ctx.db
+        .select({ after: auditLog.after })
+        .from(auditLog)
+        .where(
+          and(
+            eq(auditLog.restaurantId, ctx.session.restaurantId),
+            eq(auditLog.action, 'goods_receipt.closed'),
+            eq(auditLog.entityId, receipt.id),
+          ),
+        )
+        .orderBy(desc(auditLog.at))
+        .limit(1);
+      const uncountedIds = (closeAudit?.after as { uncountedLineIds?: unknown } | null)?.uncountedLineIds;
       return {
         ...receipt,
+        closedUncounted: Array.isArray(uncountedIds) ? uncountedIds.length : 0,
         lines: lines.map((l) => ({
           ...l,
           // Surface a human label even when no catalog product is linked.
@@ -927,9 +942,10 @@ export const receivingRouter = router({
       const { clientMutationId, ...request } = input;
       return ctx.db.transaction((tx) => {
         const db = tx as unknown as typeof ctx.db;
-        // The W2-05 contract (a client mutation id) refuses "לא נספר" lines; a legacy close
-        // (the frozen mobile app, older tabs) still closes, but records them by id — never silently.
-        const run = () => submitReceiptOnce(db, ctx.session, request, { strict: Boolean(clientMutationId) });
+        // The W2-05 contract (a client mutation id) refuses "לא נספר" lines. A legacy close
+        // (no clientMutationId) stays lenient while LEGACY_LENIENT_CLOSE holds — see its note.
+        const run = () =>
+          submitReceiptOnce(db, ctx.session, request, { strict: Boolean(clientMutationId) || !LEGACY_LENIENT_CLOSE });
         return clientMutationId
           ? withIdempotency({ db, session: ctx.session }, { key: clientMutationId, procedure: 'receiving.submitReceipt', input: request }, run)
           : run();
@@ -1257,6 +1273,16 @@ async function rematchAfterCount(
 }
 
 /* ── W2-05 · count truth (server) ───────────────────────────────────────── */
+
+/**
+ * Callers without a clientMutationId (the FROZEN mobile receiver app, tabs
+ * opened before W2-05) still close a receipt that has "לא נספר" lines — the ids
+ * are recorded on the close and shown to the manager on the receipt, never
+ * silent. Orchestrator decision 31.10.
+ * TODO(mobile retirement): set to false when apps/mobile/app/receiver is retired;
+ * every close then refuses uncounted lines (PRECONDITION_FAILED).
+ */
+export const LEGACY_LENIENT_CLOSE = true;
 
 type ReceivingDb = Parameters<typeof lockReceipt>[0];
 type ReceivingSession = { restaurantId: string; userId: string };

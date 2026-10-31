@@ -93,6 +93,7 @@ export const en: Shape<typeof he> = {
       bulkNote: '{count} lines marked as ordered — not counted item by item',
     },
     summary: {
+      closedUncounted: '{count} lines were closed without a count',
       title: 'This receipt is already closed',
       subtitle: 'Received at {time}. These are the recorded quantities.',
       subtitleNoTime: 'These are the recorded quantities.',

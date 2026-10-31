@@ -95,6 +95,7 @@ export const receivingDelivery: Shape<typeof he> = {
       bulkNote: 'ทำเครื่องหมาย {count} รายการว่าตรงตามใบสั่งซื้อ — ไม่ได้นับทีละชิ้น',
     },
     summary: {
+      closedUncounted: 'ปิดไปโดยไม่ได้นับ {count} รายการ',
       title: 'การรับสินค้านี้ปิดไปแล้ว',
       subtitle: 'รับเมื่อ {time} นี่คือจำนวนที่บันทึกไว้',
       subtitleNoTime: 'นี่คือจำนวนที่บันทึกไว้',

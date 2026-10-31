@@ -100,6 +100,7 @@ export const he = {
       bulkNote: '{count} שורות סומנו כמו בהזמנה — לא נספרו פריט-פריט',
     },
     summary: {
+      closedUncounted: '{count} שורות נסגרו בלי ספירה',
       title: 'קבלת הסחורה כבר נסגרה',
       subtitle: 'נקלטה ב־{time}. אלה הכמויות שנרשמו.',
       subtitleNoTime: 'אלה הכמויות שנרשמו.',

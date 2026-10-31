@@ -95,6 +95,7 @@ export const receivingDelivery: Shape<typeof he> = {
       bulkNote: 'تم تحديد {count} أسطر كما في الطلبية — لم تُعدّ صنفًا صنفًا',
     },
     summary: {
+      closedUncounted: '{count} أسطر أُغلقت بدون عدّ',
       title: 'استلام البضاعة مُغلق بالفعل',
       subtitle: 'استُلمت في {time}. هذه هي الكميات المسجّلة.',
       subtitleNoTime: 'هذه هي الكميات المسجّلة.',
