@@ -23,10 +23,21 @@ for (const width of [390, 1440]) {
     const info = await page.evaluate(() => {
       const lab = document.querySelector('[data-lab="tokens"]') as HTMLElement;
       const sections = [...lab.children].map((s) => Math.round(s.getBoundingClientRect().height));
+      // Element-level heights inside the two sections that differ in CI (colors = 1, feedback = 13).
+      const walk = (el: Element, depth: number, out: string[]) => {
+        for (const c of [...el.children]) {
+          const r = c.getBoundingClientRect();
+          if (r.height >= 12) out.push(`${depth}:${c.tagName.toLowerCase()}:${Math.round(r.height)}:${(c.textContent ?? '').trim().slice(0, 14)}`);
+          if (depth < 4) walk(c, depth + 1, out);
+        }
+        return out;
+      };
+      const detail = [1, 13].map((i) => walk(lab.children[i]!, 0, []));
       const banner = document.querySelector('#main-content [role="status"]');
       return {
         lab: Math.round(lab.getBoundingClientRect().height),
         sections,
+        detail,
         banner: banner ? Math.round(banner.getBoundingClientRect().height) : 0,
         tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
       };
