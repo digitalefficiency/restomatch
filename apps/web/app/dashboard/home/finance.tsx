@@ -12,7 +12,7 @@ import type { he as leaksHe } from '@/lib/i18n/messages/leaks/he';
 import type { he as recoveryHe } from '@/lib/i18n/messages/recovery/he';
 import type { he as leakProofHe } from '@/lib/i18n/messages/leakProof/he';
 import { EmptyState, EntitlementUpsell, LeakHeatmap, SectionHeader, entitlementCauseOf } from '@/lib/components';
-import { LeakHero, daySpan, heroDelta, leakHeroState, showsPct, type LeakHeroProps } from '@/lib/components/hero';
+import { LeakHero, daySpan, heroDelta, leakHeroState, leakSplit, showsPct, type LeakHeroProps } from '@/lib/components/hero';
 import {
   BreakdownChart,
   DEFAULT_VIEW,
@@ -36,7 +36,7 @@ import type { Caller } from './caller';
 import { buildBoard } from './board';
 import { todayCutoffs } from './cutoffs';
 import {
-  loadMyQueue,
+  loadDecide,
   loadOpenCount,
   loadHeroPair,
   loadPayRun,
@@ -46,7 +46,6 @@ import {
   loadToday,
   loadTrend,
   loadVatAtRisk,
-  queueAtRisk,
 } from './data';
 import { NeedsYou, type NeedRow, type NeedTone } from './needs-you';
 import { HomeSection, Suspense } from './section';
@@ -219,7 +218,7 @@ async function Needs(ctx: Ctx) {
     ops: role === 'manager',
   };
   const [queue, recovery, vat, payRun, today, count, suppliers] = await Promise.all([
-    settle(loadMyQueue()),
+    settle(loadDecide()),
     wants.claims ? settle(loadRecoverySummary()) : null,
     wants.vat ? settle(loadVatAtRisk(restaurantId, role)) : null,
     wants.payRun ? settle(loadPayRun()) : null,
@@ -230,19 +229,20 @@ async function Needs(ctx: Ctx) {
   const sources: Settled<unknown>[] = [queue, recovery, vat, payRun, today, count, suppliers].filter((x) => x !== null) as Settled<unknown>[];
   const rows: NeedRow[] = [];
 
-  if (queue.ok) {
-    const q = queueAtRisk(queue.value);
-    if (q.count > 0) {
-      rows.push({
-        key: 'decide',
-        tone: q.blocking > 0 ? 'danger' : 'warn',
-        label: t('needs.decide.label'),
-        value: ils(q.atRiskIls),
-        sub: q.blocking > 0 ? t('needs.decide.subBlocking', { count: n(q.count), blocking: n(q.blocking) }) : t('needs.decide.sub', { count: n(q.count) }),
-        verb: t('needs.decide.verb'),
-        href: '/dashboard/approvals',
-      });
-    }
+  // The decision queue is this card's core: if it can't be read, the card fails
+  // ("לא נטען · נסו שוב") rather than silently dropping its first row.
+  if (!queue.ok) throw new Error('[home] the decision queue could not be read');
+  const q = queue.value;
+  if (q.count > 0) {
+    rows.push({
+      key: 'decide',
+      tone: q.blocking > 0 ? 'danger' : 'warn',
+      label: t('needs.decide.label'),
+      value: ils(q.atRiskIls),
+      sub: q.blocking > 0 ? t('needs.decide.subBlocking', { count: n(q.count), blocking: n(q.blocking) }) : t('needs.decide.sub', { count: n(q.count) }),
+      verb: t('needs.decide.verb'),
+      href: '/dashboard/approvals',
+    });
   }
   if (role === 'manager' && suppliers?.ok) {
     const cut = todayCutoffs(suppliers.value, new Date());
@@ -352,23 +352,23 @@ async function Needs(ctx: Ctx) {
 
 /* ─────────────────────────────── T1 hero ─────────────────────────────── */
 
-function spanLabel(t: Ctx['t'], locale: Locale, from: Date, to: Date): string {
+function spanLabel(t: Ctx['t'], locale: Locale, from: Date, to: Date, withYear = false): string {
   const sameMonth = formatDate(from, locale, { month: 'numeric', year: 'numeric' }) === formatDate(to, locale, { month: 'numeric', year: 'numeric' });
   if (!sameMonth) {
-    const o: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short' };
+    const o: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', ...(withYear ? { year: 'numeric' as const } : {}) };
     return `${formatDate(from, locale, o)}–${formatDate(to, locale, o)}`;
   }
   return t('hero.range', {
     from: formatDate(from, locale, { day: 'numeric' }),
     to: formatDate(to, locale, { day: 'numeric' }),
-    month: formatDate(from, locale, { month: 'long' }),
+    // A year-over-year comparison names its year ("1–25 באוקטובר 2025").
+    month: formatDate(from, locale, withYear ? { month: 'long', year: 'numeric' } : { month: 'long' }),
   });
 }
 
 async function Hero(ctx: Ctx) {
   const { role, view, t, tv, tr, locale } = ctx;
   const canDrill = canSeeRoute(role, '/dashboard/leaks');
-  const canDecide = canSeeRoute(role, '/dashboard/approvals');
   const defaultView = isDefaultData(view);
   const viewInput = toViewInput(canDrill ? view : { ...view, filters: DEFAULT_VIEW.filters });
   // The comparison is always the same day-span (leak-views cuts a running period at today).
@@ -380,6 +380,7 @@ async function Hero(ctx: Ctx) {
   const ils = (v: number) => formatIls(v, { locale });
   const n = (v: number) => formatNumber(v, locale);
   const state = leakHeroState(current);
+  const split = leakSplit(current);
 
   const drillQuery = serializeView({ ...DEFAULT_VIEW, period: view.period, from: view.from, to: view.to, filters: view.filters }).toString();
   const drillHref = drillQuery ? `/dashboard/leaks/breakdown?${drillQuery}` : '/dashboard/leaks/breakdown';
@@ -391,7 +392,7 @@ async function Hero(ctx: Ctx) {
   const d = heroDelta(current, previous);
   let delta: LeakHeroProps['delta'] = null;
   if (state === 'leak' || state === 'clean') {
-    if (!d || !previous) delta = { none: t('hero.delta.none') };
+    if (!d || !previous) delta = { none: compare === 'yoy' ? t('hero.delta.noneYoy') : t('hero.delta.none') };
     else {
       const prevSpan = daySpan(previous.monthStart, previous.monthEnd);
       const pctText = d.pct == null ? '' : ` (${formatNumber(d.pct, locale, { style: 'percent', maximumFractionDigits: 0, signDisplay: 'exceptZero' })})`;
@@ -399,7 +400,7 @@ async function Hero(ctx: Ctx) {
       delta = {
         direction: d.direction,
         word: d.direction === 'up' ? t('hero.delta.up') : d.direction === 'down' ? t('hero.delta.down') : t('hero.delta.same'),
-        text: `${arrow} ${d.direction === 'same' ? '' : ils(d.amountIls)}${pctText} ${t('hero.delta.vs', { range: spanLabel(t, locale, prevSpan.from, prevSpan.to) })}`.replace(/\s+/g, ' ').trim(),
+        text: `${arrow} ${d.direction === 'same' ? '' : ils(d.amountIls)}${pctText} ${t('hero.delta.vs', { range: spanLabel(t, locale, prevSpan.from, prevSpan.to, compare === 'yoy') })}`.replace(/\s+/g, ' ').trim(),
       };
     }
   }
@@ -427,8 +428,10 @@ async function Hero(ctx: Ctx) {
         parts={
           state === 'leak'
             ? [
-                { label: t('hero.caught'), value: ils(current.caughtBeforePaymentIls), href: canDecide ? '/dashboard/approvals' : undefined, testId: 'hero-caught' },
-                { label: t('hero.recovered'), value: ils(current.recoveredIls), href: canDrill ? '/dashboard/leaks/claims' : undefined, testId: 'hero-claimed' },
+                // By payment status, so the parts add up to the hero (leakSplit). Never labelled
+                // "awaiting a decision": the engine figure is the leak on UNPAID invoices.
+                { label: t('hero.unpaid'), value: ils(split.unpaidIls), href: canDrill ? drillHref : undefined, testId: 'hero-unpaid' },
+                { label: t('hero.paid'), value: ils(split.paidIls), href: canDrill ? '/dashboard/leaks/claims' : undefined, testId: 'hero-paid' },
               ]
             : undefined
         }
@@ -441,7 +444,8 @@ async function Hero(ctx: Ctx) {
         noData={{
           title: t('hero.noData.title', { month: formatDate(current.monthStart, locale, { month: 'long' }) }),
           hint: t('hero.noData.hint'),
-          cta: { label: t('hero.noData.cta'), href: canSeeRoute(role, '/dashboard/receiving') ? '/dashboard/receiving' : '/dashboard/approvals', testId: 'hero-nodata-cta' },
+          // The camera CTA only where invoices are snapped (receiving); the bookkeeper gets the hint alone.
+          cta: canSeeRoute(role, '/dashboard/receiving') ? { label: t('hero.noData.cta'), href: '/dashboard/receiving', testId: 'hero-nodata-cta' } : null,
         }}
         primary={
           canDrill && (state === 'leak' || state === 'pendingOnly')

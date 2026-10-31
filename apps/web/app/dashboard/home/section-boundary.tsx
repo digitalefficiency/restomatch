@@ -1,6 +1,6 @@
 'use client';
 
-import { Component, useTransition } from 'react';
+import { Component, createRef, useEffect, useRef, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { RotateCcw } from 'lucide-react';
 import { useT } from '@/lib/i18n/client';
@@ -14,6 +14,7 @@ type Props = { children: React.ReactNode; name: string };
  */
 class Boundary extends Component<Props, { failed: boolean; attempt: number }> {
   override state = { failed: false, attempt: 0 };
+  private readonly region = createRef<HTMLDivElement>();
 
   static getDerivedStateFromError() {
     return { failed: true };
@@ -23,19 +24,40 @@ class Boundary extends Component<Props, { failed: boolean; attempt: number }> {
     console.error(`[home] section "${this.props.name}" failed`, error);
   }
 
+  override componentDidUpdate(_: Props, prev: { failed: boolean; attempt: number }) {
+    // After "נסו שוב" the button is gone: keep keyboard focus on the card it retried,
+    // never dropped to <body>.
+    if (this.state.attempt !== prev.attempt) this.region.current?.focus();
+  }
+
   override render() {
     if (this.state.failed) {
-      return <SectionFailed name={this.props.name} onRetry={() => this.setState((s) => ({ failed: false, attempt: s.attempt + 1 }))} />;
+      return (
+        <SectionFailed
+          name={this.props.name}
+          // Failed again after a retry: the new retry button takes the focus.
+          focusOnMount={this.state.attempt > 0}
+          onRetry={() => this.setState((s) => ({ failed: false, attempt: s.attempt + 1 }))}
+        />
+      );
     }
-    return <div key={this.state.attempt}>{this.props.children}</div>;
+    return (
+      <div key={this.state.attempt} ref={this.region} tabIndex={-1} className="rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60">
+        {this.props.children}
+      </div>
+    );
   }
 }
 
 /** Same cast as Toast's Provider: the workspace hoists two @types/react (STATE.md). */
 export const SectionBoundary = Boundary as unknown as React.ComponentType<Props>;
 
-function SectionFailed({ name, onRetry }: { name: string; onRetry: () => void }) {
+function SectionFailed({ name, onRetry, focusOnMount }: { name: string; onRetry: () => void; focusOnMount: boolean }) {
   const t = useT(overview);
+  const retry = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (focusOnMount) retry.current?.focus();
+  }, [focusOnMount]);
   const router = useRouter();
   const [pending, start] = useTransition();
   return (
@@ -46,6 +68,7 @@ function SectionFailed({ name, onRetry }: { name: string; onRetry: () => void })
     >
       <span>{t('section.failed')}</span>
       <button
+        ref={retry}
         type="button"
         disabled={pending}
         onClick={() =>

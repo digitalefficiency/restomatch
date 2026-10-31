@@ -89,12 +89,25 @@ describe('receiving.todayExpectations — receiving board', () => {
     const started = await s.po(new Date(s.today.getTime() - DAY));
     await s.receipt(started, 'pending');
     const arrived = await s.po(new Date(s.today.getTime() - DAY));
-    await s.receipt(arrived, 'completed');
+    const arrivedGr = await s.receipt(arrived, 'completed');
     const short = await s.po(new Date(s.today.getTime() - 2 * DAY), 'partial');
-    await s.receipt(short, 'partial');
+    const shortGr = await s.receipt(short, 'partial');
+    // Closed on their own (earlier) days: history, not today's board.
+    await db.update(goodsReceipts).set({ updatedAt: new Date(s.today.getTime() - DAY) }).where(eq(goodsReceipts.id, arrivedGr));
+    await db.update(goodsReceipts).set({ updatedAt: new Date(s.today.getTime() - 2 * DAY) }).where(eq(goodsReceipts.id, shortGr));
     const list = await s.caller.receiving.todayExpectations({ includeLate: true });
     expect(list.map((e) => e.poId)).toEqual([started]);
     expect(list[0]).toMatchObject({ late: true, receiptStatus: 'pending', closedAt: null });
+  });
+
+  it('includeLate: a late truck received TODAY stays on the board as received (not late, not gone)', async () => {
+    const s = await seed();
+    const yesterdays = await s.po(new Date(s.today.getTime() - DAY));
+    await s.receipt(yesterdays, 'completed'); // closed now (updatedAt = now)
+    const list = await s.caller.receiving.todayExpectations({ includeLate: true });
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ poId: yesterdays, receiptStatus: 'completed', late: false });
+    expect(list[0]!.closedAt).not.toBeNull();
   });
 
   it('includeLate: older than a week, cancelled, or another restaurant’s PO never shows', async () => {

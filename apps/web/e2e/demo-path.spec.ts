@@ -466,16 +466,17 @@ test('B · owner: hero ₪, leak detective, approvals, claims, report, chain, br
     n.pct = num(/(\d+(?:\.\d+)?)\s*%/.exec(heroText.replace(BIDI, ''))![1]!);
     n.spend = num(await hero.getByTestId('leak-hero-base').innerText());
     // The split boxes are desktop-only (the phone reads them as one sentence): read the DOM text.
-    n.caught = num((await hero.getByTestId('hero-caught').textContent())!.replace(m.overview.hero.caught, ''));
-    n.claimed = num((await hero.getByTestId('hero-claimed').textContent())!.replace(m.overview.hero.recovered, ''));
+    // The hero split is by payment status (unpaid / paid invoices) and adds up to the hero.
+    n.unpaid = num((await hero.getByTestId('hero-unpaid').textContent())!.replace(m.overview.hero.unpaid, ''));
+    n.paid = num((await hero.getByTestId('hero-paid').textContent())!.replace(m.overview.hero.paid, ''));
     // "מחכה לך": the decisions waiting for the viewer, in ₪ and count (the old count-only KPI is gone).
     n.pendingApprovals = num(await page.getByTestId('needs-decide-sub').innerText());
-    expect(num(await page.getByTestId('needs-decide-value').innerText()), '"waiting for your decision" ₪ vs the hero split').toBe(n.caught);
+    n.decide = num(await page.getByTestId('needs-decide-value').innerText());
     expect(n.leak, 'hero leak > 0 (the demo needs a number)').toBeGreaterThan(0);
     // The % is leak ÷ spend, rounded to one decimal (no target line: R-14 default).
     expect(Math.abs(n.pct - Math.round((n.leak / n.spend) * 1000) / 10), `hero % (${n.pct}) vs ₪${n.leak} ÷ ₪${n.spend}`).toBeLessThanOrEqual(0.1);
-    // The leak splits into "caught before payment" + "claimed from suppliers".
-    expect(Math.abs(n.caught + n.claimed - n.leak), `caught ₪${n.caught} + claimed ₪${n.claimed} vs leak ₪${n.leak}`).toBeLessThanOrEqual(1);
+    // The leak splits into "on unpaid invoices" + "on paid invoices" (by payment status).
+    expect(Math.abs(n.unpaid + n.paid - n.leak), `unpaid ₪${n.unpaid} + paid ₪${n.paid} vs leak ₪${n.leak}`).toBeLessThanOrEqual(1);
     await checkScreen(page, errors, L, 'B2-hero');
   });
 
@@ -495,7 +496,7 @@ test('B · owner: hero ₪, leak detective, approvals, claims, report, chain, br
     const inQueue = num(await valueAfter(page, m.approvals.summary.inQueue));
     n.atRisk = num(await valueAfter(page, m.approvals.summary.atRisk));
     expect(inQueue, 'approvals "in queue" vs dashboard "waiting for your decision"').toBe(n.pendingApprovals);
-    expect(n.atRisk, 'approvals "amount at risk" vs dashboard "awaiting a decision"').toBe(n.caught);
+    expect(n.atRisk, 'approvals "amount at risk" vs dashboard "waiting for your decision" ₪').toBe(n.decide);
     // Owner sees Approve / Reject, never "escalate to owner" (pack 5:30).
     await expect(page.getByRole('button', { name: m.approvals.card.approve, exact: true }).first()).toBeVisible();
     await expect(page.getByRole('button', { name: m.approvals.card.escalate })).toHaveCount(0);

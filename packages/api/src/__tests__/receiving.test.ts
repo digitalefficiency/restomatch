@@ -341,6 +341,35 @@ describe('a closed receipt is read-only (receiving board: "התקבל ✓")', ()
     expect(Number(row!.qtyReceived)).toBe(10);
   });
 
+  it('a retried mark (same values) on a closed receipt is idempotent: the stored line comes back, no CONFLICT', async () => {
+    // The wizard marks every line, then closes; if the close lands but its answer is lost,
+    // the retry re-sends the same marks before the (idempotent) submit — it must not fail.
+    const { caller, lines, receiptId } = await closed('partial');
+    const again = await caller.receiving.markGrLine({ grLineId: lines[0]!.id, qtyReceived: 10 });
+    expect(Number(again.qtyReceived)).toBe(10);
+    const again2 = await caller.receiving.markGrLine({ grLineId: lines[1]!.id, qtyReceived: 3, qtyRejected: 0 });
+    expect(Number(again2.qtyReceived)).toBe(3);
+    const resubmit = await caller.receiving.submitReceipt({ grId: receiptId });
+    expect(resubmit.status).toBe('partial');
+  });
+
+  it('a mark that would CHANGE a closed line (qty, rejection, reason, condition, photos) is a CONFLICT', async () => {
+    const { caller, lines } = await closed('completed');
+    const id = lines[0]!.id;
+    for (const change of [
+      { qtyReceived: 9 },
+      { qtyReceived: 10, qtyRejected: 1 },
+      { qtyReceived: 10, rejectReason: 'late' },
+      { qtyReceived: 10, condition: 'damaged' as const },
+      { qtyReceived: 10, photos: ['https://example.com/p.jpg'] },
+    ]) {
+      await expect(caller.receiving.markGrLine({ grLineId: id, ...change })).rejects.toMatchObject({ code: 'CONFLICT' });
+    }
+    const [row] = (await db.select().from(grLines)).filter((l) => l.id === id);
+    expect(Number(row!.qtyReceived)).toBe(10);
+    expect(Number(row!.qtyRejected)).toBe(0);
+  });
+
   it('a re-submit of a closed receipt changes nothing: status, signature and close time stay', async () => {
     const { s, caller, receiptId, lines, receipt } = await closed('partial');
     // Even if the line were raised behind the API's back, a re-close never flips partial → completed.

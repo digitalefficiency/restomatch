@@ -37,11 +37,9 @@ export const he = {
     pctOfSpend: '{pct} מהקניות שנבדקו',
     spendBase: 'מתוך {spend} לפני מע״מ',
     noSpend: 'עדיין אין חשבוניות החודש',
-    /** Split of the leak (the two parts add up to it). */
-    caught: 'ממתין להחלטה',
-    caughtHint: 'פערים בחשבוניות שעוד לא הוחלט עליהם',
-    recovered: 'נדרש מהספקים',
-    recoveredHint: 'פערים שאושרו לדרישה מהספק',
+    /** Split of the leak by payment status (the two parts add up to it, to the agora). */
+    unpaid: 'על חשבוניות שעוד לא שולמו',
+    paid: 'על חשבוניות ששולמו',
     split: 'מתוכם',
     invoices: 'חשבוניות עם פער',
     invoicesValue: '{withLeak} מתוך {total}',
@@ -66,6 +64,7 @@ export const he = {
       same: 'ללא שינוי',
       vs: 'לעומת {range}',
       none: 'אין חשבוניות באותם ימים בחודש הקודם להשוואה',
+      noneYoy: 'אין חשבוניות באותם ימים בשנה שעברה להשוואה',
     },
     range: '{from}–{to} ב{month}',
     returned: 'הוחזר החודש',

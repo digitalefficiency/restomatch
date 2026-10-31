@@ -70,7 +70,7 @@ const TodayExpectationSchema = z.object({
   status: z.string(),
   receiptId: z.string().uuid().nullable(),
   receiptStatus: z.string().nullable(),
-  /** Only with `includeLate`: dated before today, still not received. */
+  /** Only with `includeLate`: dated before today and still not received (closed today → false). */
   late: z.boolean(),
   /** ISO time the receipt was closed (completed / partial); null while open or not started. */
   closedAt: z.string().nullable(),
@@ -156,8 +156,13 @@ export const receivingRouter = router({
               ? and(
                   gte(purchaseOrders.expectedDeliveryAt, new Date(startOfDay.getTime() - LATE_LOOKBACK_DAYS * 86_400_000)),
                   lt(purchaseOrders.expectedDeliveryAt, startOfDay),
-                  // A closed receipt is not late: it arrived (the PO status stays 'sent').
-                  or(isNull(goodsReceipts.id), eq(goodsReceipts.status, 'pending')),
+                  // Still open → late. Closed today → stays on the board as received (a
+                  // closed receipt is not late: it arrived; the PO status stays 'sent').
+                  or(
+                    isNull(goodsReceipts.id),
+                    eq(goodsReceipts.status, 'pending'),
+                    gte(goodsReceipts.updatedAt, startOfDay),
+                  ),
                 )
               : undefined,
           ),
@@ -191,7 +196,10 @@ export const receivingRouter = router({
       status: r.status,
       receiptId: r.receiptId ?? null,
       receiptStatus: r.receiptStatus ?? null,
-      late: r.expectedAt !== null && r.expectedAt.getTime() < startOfDay.getTime(),
+      late:
+        r.expectedAt !== null &&
+        r.expectedAt.getTime() < startOfDay.getTime() &&
+        (r.receiptStatus === null || r.receiptStatus === 'pending'),
       closedAt:
         r.receiptStatus && r.receiptStatus !== 'pending' && r.receiptUpdatedAt
           ? r.receiptUpdatedAt.toISOString()
@@ -819,18 +827,19 @@ export const receivingRouter = router({
       // goods_receipt, inside the UPDATE itself so there is no TOCTOU window.
       // Only an OPEN receipt takes a count: once closed, the counted quantities are
       // the record the match and the supplier claims were made against.
+      const next = {
+        qtyReceived: input.qtyReceived.toString(),
+        qtyRejected: input.qtyRejected.toString(),
+        rejectReason: input.rejectReason ?? null,
+        conditionNotes:
+          input.condition === 'damaged'
+            ? `damaged: ${input.conditionNotes ?? ''}`.trim()
+            : input.conditionNotes ?? null,
+        photos: input.photos ?? [],
+      };
       const [updated] = await ctx.db
         .update(grLines)
-        .set({
-          qtyReceived: input.qtyReceived.toString(),
-          qtyRejected: input.qtyRejected.toString(),
-          rejectReason: input.rejectReason ?? null,
-          conditionNotes:
-            input.condition === 'damaged'
-              ? `damaged: ${input.conditionNotes ?? ''}`.trim()
-              : input.conditionNotes ?? null,
-          photos: input.photos ?? [],
-        })
+        .set(next)
         .where(
           and(
             eq(grLines.id, input.grLineId),
@@ -852,13 +861,17 @@ export const receivingRouter = router({
       if (!updated) {
         // Same tenant scope as above: a foreign line stays NOT_FOUND (no oracle).
         const [own] = await ctx.db
-          .select({ status: goodsReceipts.status })
+          .select({ line: grLines })
           .from(grLines)
           .innerJoin(goodsReceipts, eq(goodsReceipts.id, grLines.grId))
           .where(and(eq(grLines.id, input.grLineId), eq(goodsReceipts.restaurantId, ctx.session.restaurantId)))
           .limit(1);
-        if (own) throw new TRPCError({ code: 'CONFLICT', message: 'הקבלה כבר נסגרה — אי אפשר לשנות את הספירה' });
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'GR line not found' });
+        if (!own) throw new TRPCError({ code: 'NOT_FOUND', message: 'GR line not found' });
+        // A retry of a mark whose answer was lost (the wizard re-sends its marks before
+        // the idempotent submit) changes nothing: hand back the stored line. Only a real
+        // change to a closed count is refused.
+        if (sameMark(own.line, next)) return own.line;
+        throw new TRPCError({ code: 'CONFLICT', message: 'הקבלה כבר נסגרה — אי אפשר לשנות את הספירה' });
       }
       return updated;
     }),
@@ -1137,6 +1150,22 @@ export const receivingRouter = router({
  * OCR (the OCR job matches it when it lands). A queue failure never fails the
  * submit: the receipt is saved; match.runForInvoice can re-run it on demand.
  */
+/** Whether a stored gr_line already holds exactly what a markGrLine would write. */
+function sameMark(
+  stored: { qtyReceived: string; qtyRejected: string; rejectReason: string | null; conditionNotes: string | null; photos: unknown },
+  next: { qtyReceived: string; qtyRejected: string; rejectReason: string | null; conditionNotes: string | null; photos: string[] },
+): boolean {
+  const photos = Array.isArray(stored.photos) ? (stored.photos as unknown[]) : [];
+  return (
+    Number(stored.qtyReceived) === Number(next.qtyReceived) &&
+    Number(stored.qtyRejected) === Number(next.qtyRejected) &&
+    (stored.rejectReason ?? null) === next.rejectReason &&
+    (stored.conditionNotes ?? null) === next.conditionNotes &&
+    photos.length === next.photos.length &&
+    photos.every((p, i) => p === next.photos[i])
+  );
+}
+
 async function rematchAfterCount(
   db: Database,
   restaurantId: string,

@@ -86,6 +86,25 @@ describe('buildBoard', () => {
     expect(b.undated.map((i) => i.poId)).toEqual(['u']);
   });
 
+  it('an undated receipt closed on an earlier day is history: not "received today", and received never exceeds total', () => {
+    const b = buildBoard(
+      [
+        po('old', { hasDeliveryDate: false, receiptStatus: 'completed', closedAt: at(-3 * 24 * 60) }),
+        po('today', { hasDeliveryDate: false, receiptStatus: 'completed', closedAt: at(-30) }),
+        po('d'),
+      ],
+      NOW,
+    );
+    expect(b.received.map((i) => i.poId)).toEqual(['today']);
+    expect(b.summary).toEqual({ total: 2, received: 1, late: 0 });
+  });
+
+  it('a late truck received today counts as received today', () => {
+    const b = buildBoard([po('y', { late: false, expectedAt: at(-24 * 60), receiptStatus: 'completed', closedAt: at(-15) })], NOW);
+    expect(b.received.map((i) => i.poId)).toEqual(['y']);
+    expect(b.summary).toEqual({ total: 1, received: 1, late: 0 });
+  });
+
   it('every truck appears exactly once', () => {
     const rows = [po('a', { late: true, expectedAt: at(-1440) }), po('b', { receiptStatus: 'pending' }), po('c'), po('d', { expectedAt: at(500) }), po('e', { hasDeliveryDate: false }), po('f', { receiptStatus: 'completed' })];
     const b = buildBoard(rows, NOW);

@@ -21,12 +21,14 @@ export interface HeroFigures {
   invoiceCount: number;
   matchedInvoiceCount: number;
   pendingLinkCount: number;
+  /** Receiving scans waiting for their receipt's count (not "no data": they will be checked). */
+  awaitingCountCount?: number;
 }
 
 export function leakHeroState(h: HeroFigures): LeakHeroState {
   if (h.leakIls > 0) return 'leak';
   if (h.matchedInvoiceCount > 0) return 'clean';
-  if (h.pendingLinkCount > 0) return 'pendingOnly';
+  if (h.pendingLinkCount > 0 || (h.awaitingCountCount ?? 0) > 0) return 'pendingOnly';
   return 'noData';
 }
 
@@ -74,4 +76,17 @@ export function daySpan(monthStart: string, monthEnd: string): { from: Date; to:
   const to = new Date(new Date(monthEnd).getTime() - 1);
   // Guard a zero-length span (never shown, but never "25–24").
   return { from, to: to < from ? from : to };
+}
+
+/**
+ * The hero's split, by payment status, so the parts add up to the hero to the
+ * agora: the leak on invoices not yet marked paid (`caughtBeforePaymentIls`, where
+ * payment can still be held) and the rest, on invoices already paid (a credit is
+ * the only way back). Never a decision status — the engine's "caught" is the leak
+ * on UNPAID invoices whatever their decision, so it is labelled as exactly that.
+ */
+export function leakSplit(h: { leakIls: number; caughtBeforePaymentIls: number }): { unpaidIls: number; paidIls: number } {
+  const leak = Math.max(0, Math.round(h.leakIls * 100));
+  const unpaid = Math.min(leak, Math.max(0, Math.round(h.caughtBeforePaymentIls * 100)));
+  return { unpaidIls: unpaid / 100, paidIls: (leak - unpaid) / 100 };
 }
