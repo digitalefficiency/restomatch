@@ -103,4 +103,23 @@ describe('orders.saveDraft / orders.openDraft', () => {
     expect((await c.orders.openDraft({ supplierId: A.supplierId }))!.lines[0]!.qty).toBe(3);
     expect((await c.orders.openDraft({ supplierId: s2!.id }))!.lines[0]!.rawDescription).toBe('חלב');
   });
+
+  it('after a send (incl. a send retried after a reload), a new order for the same supplier starts empty', async () => {
+    const c = callerFor(A);
+    const a = await c.orders.saveDraft({ supplierId: A.supplierId, lines: [line(3)], clientMutationId: cmid() });
+    // The page reloads inside the undo window: the draft is reopened, then sent once.
+    const reopened = await c.orders.openDraft({ supplierId: A.supplierId });
+    expect(reopened?.draftId).toBe(a.draftId);
+    await c.orders.placeOrder({ poId: a.draftId, channel: 'none' });
+    // A retried send of the same PO is refused, never a second order.
+    await expect(c.orders.placeOrder({ poId: a.draftId, channel: 'none' })).rejects.toMatchObject({ code: 'CONFLICT' });
+    // A sent order never comes back as the open draft.
+    expect(await c.orders.openDraft({ supplierId: A.supplierId })).toBeNull();
+    // The next save starts a NEW draft and does not touch the sent PO.
+    const next = await c.orders.saveDraft({ supplierId: A.supplierId, lines: [line(1, 'בצל')], clientMutationId: cmid() });
+    expect(next.draftId).not.toBe(a.draftId);
+    expect(next.lines).toHaveLength(1);
+    const [sent] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.id, a.draftId));
+    expect(sent?.status).toBe('sent');
+  });
 });
