@@ -114,17 +114,20 @@ export const adminRouter = router({
       .where(and(eq(usageCounters.period, period), eq(usageCounters.metric, 'ocr_scans')));
     const usageMap = new Map(usageRows.map((u) => [u.billingAccountId, u.used]));
 
-    // Each tenant's plan, usage and member count was shown: one access row per tenant.
-    for (const r of rows) {
-      await recordAudit(ctx.db, {
-        restaurantId: r.id,
-        userId: ctx.session.userId,
-        action: 'admin.viewed',
-        entityType: 'restaurant',
-        entityId: r.id,
-        after: { view: 'list' },
-      });
-    }
+    // Each tenant's plan, usage and member count was shown: one access row per
+    // tenant, all or none (a failed insert returns no data and leaves no rows).
+    await ctx.db.transaction(async (tx) => {
+      for (const r of rows) {
+        await recordAudit(tx, {
+          restaurantId: r.id,
+          userId: ctx.session.userId,
+          action: 'admin.viewed',
+          entityType: 'restaurant',
+          entityId: r.id,
+          after: { view: 'list' },
+        });
+      }
+    });
 
     return rows.map((r) => ({
       id: r.id,

@@ -14,7 +14,7 @@ import {
 } from '@restomatch/db';
 import type { AppContext, MemberSession } from './context';
 import { getEntitlements } from './entitlements';
-import { publicErrorMessage, resolveAppError } from './errors';
+import { appError, publicErrorMessage, resolveAppError } from './errors';
 
 const t = initTRPC.context<AppContext>().create({
   transformer: superjson,
@@ -156,16 +156,13 @@ export const invoiceReaderProcedure = requireRoles(INVOICE_READER_ROLES);
 /** Invoice-level money detail (leak drill-down, claims) — matches /dashboard/leaks. */
 export const financeProcedure = requireRoles(['owner', 'manager', 'bookkeeper']);
 
-/** FORBIDDEN message of an admin call whose login has no authenticator (TOTP) enrolled. */
-export const ADMIN_REQUIRES_2FA = 'admin_requires_2fa';
-
 /**
  * Platform-admin procedure for the internal ops console. Cross-tenant BY
  * DESIGN — it does NOT establish a restaurant GUC and runs on the owner/service
  * connection (ctx.adminDb), so it bypasses per-tenant RLS to manage every
  * tenant. Authorized by the users.is_platform_admin flag OR the
  * PLATFORM_ADMIN_EMAILS env allowlist (bootstrap for the first admin), and only
- * once that login has TOTP enrolled (ADMIN_REQUIRES_2FA otherwise).
+ * once that login has TOTP enrolled (FORBIDDEN, appCode admin_requires_2fa).
  */
 export const adminProcedure = authedProcedure.use(async ({ ctx, next }) => {
   const conn = ctx.adminDb ?? ctx.db;
@@ -199,7 +196,7 @@ export const adminProcedure = authedProcedure.use(async ({ ctx, next }) => {
     .where(eq(userCredentials.userId, ctx.session.userId))
     .limit(1);
   if (!cred?.totpEnabledAt) {
-    throw new TRPCError({ code: 'FORBIDDEN', message: ADMIN_REQUIRES_2FA });
+    throw appError('FORBIDDEN', 'admin_requires_2fa', 'admin console requires two-step verification (TOTP)');
   }
   // Admin resolvers query cross-tenant on the owner connection.
   return next({ ctx: { ...ctx, db: conn } });

@@ -2,6 +2,8 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { and, auditLog, createDb, eq, leads, restaurants, testDbUrl, userCredentials, users } from '@restomatch/db';
 import { appRouter } from '../index';
 import { FEATURE_KEYS } from '../lib/features';
+import { resolveAppError } from '../errors';
+import type { TRPCError } from '@trpc/server';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
 
@@ -16,6 +18,17 @@ function adminCaller(userId: string) {
   const session: Session = { userId, restaurantId: null, role: null };
   const ctx: AppContext = { db, session };
   return appRouter.createCaller(ctx);
+}
+
+/** FORBIDDEN with appCode admin_requires_2fa — on the cause, and as the HTTP errorFormatter resolves it (data.appCode). */
+async function expect2fa(call: Promise<unknown>) {
+  const err = (await call.then(
+    () => null,
+    (e: unknown) => e,
+  )) as TRPCError | null;
+  expect(err).toMatchObject({ code: 'FORBIDDEN' });
+  expect((err!.cause as { appCode?: string } | undefined)?.appCode).toBe('admin_requires_2fa');
+  expect(resolveAppError(err!)?.appCode).toBe('admin_requires_2fa');
 }
 
 const enrolTotp = (userId: string) =>
@@ -42,14 +55,11 @@ afterAll(async () => {
 describe('adminProcedure requires an enrolled authenticator (TOTP)', () => {
   it('a platform admin without TOTP is refused with admin_requires_2fa, on reads and writes', async () => {
     const c = adminCaller(adminUserId);
-    const twoFa = { code: 'FORBIDDEN', message: 'admin_requires_2fa' };
-    await expect(c.admin.listRestaurants()).rejects.toMatchObject(twoFa);
-    await expect(c.admin.getRestaurant({ restaurantId: T.restaurantId })).rejects.toMatchObject(twoFa);
-    await expect(c.admin.listLeads()).rejects.toMatchObject(twoFa);
-    await expect(c.admin.assignPlan({ restaurantId: T.restaurantId, planKey: 'pro' })).rejects.toMatchObject(twoFa);
-    await expect(
-      c.admin.setFeatures({ restaurantId: T.restaurantId, features: { contracts: true } }),
-    ).rejects.toMatchObject(twoFa);
+    await expect2fa(c.admin.listRestaurants());
+    await expect2fa(c.admin.getRestaurant({ restaurantId: T.restaurantId }));
+    await expect2fa(c.admin.listLeads());
+    await expect2fa(c.admin.assignPlan({ restaurantId: T.restaurantId, planKey: 'pro' }));
+    await expect2fa(c.admin.setFeatures({ restaurantId: T.restaurantId, features: { contracts: true } }));
     // …and nothing was written.
     const [r] = await db.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, T.restaurantId));
     expect((r!.settings as { features?: unknown }).features).toBeUndefined();
@@ -57,18 +67,13 @@ describe('adminProcedure requires an enrolled authenticator (TOTP)', () => {
 
   it('TOTP set up but not yet confirmed (no totp_enabled_at) is still refused', async () => {
     await db.insert(userCredentials).values({ userId: adminUserId, totpSecretEnc: 'ciphertext', totpEnabledAt: null });
-    await expect(adminCaller(adminUserId).admin.listRestaurants()).rejects.toMatchObject({
-      code: 'FORBIDDEN',
-      message: 'admin_requires_2fa',
-    });
+    await expect2fa(adminCaller(adminUserId).admin.listRestaurants());
   });
 
   it('an allowlisted (PLATFORM_ADMIN_EMAILS) admin needs TOTP too', async () => {
     process.env.PLATFORM_ADMIN_EMAILS = 'owner-Pilot@attack.test';
     try {
-      await expect(adminCaller(T.ownerUserId).admin.listRestaurants()).rejects.toMatchObject({
-        message: 'admin_requires_2fa',
-      });
+      await expect2fa(adminCaller(T.ownerUserId).admin.listRestaurants());
       await enrolTotp(T.ownerUserId);
       await expect(adminCaller(T.ownerUserId).admin.listRestaurants()).resolves.toBeDefined();
     } finally {

@@ -2,11 +2,14 @@ import Link from 'next/link';
 import { admin } from '@/lib/i18n/messages/admin';
 import { getT } from '@/lib/i18n/server';
 
-/** adminProcedure's refusal for a login with no authenticator enrolled (packages/api trpc.ts). */
-const ADMIN_REQUIRES_2FA = 'admin_requires_2fa';
-
+/**
+ * adminProcedure's refusal for a login with no authenticator enrolled: appCode
+ * admin_requires_2fa — `error.data.appCode` over HTTP, `error.cause.appCode` on
+ * the server-side caller these pages use.
+ */
 export function isAdmin2faRequired(err: unknown): boolean {
-  return err instanceof Error && err.message === ADMIN_REQUIRES_2FA;
+  const e = err as { data?: { appCode?: unknown } | null; cause?: { appCode?: unknown } | null } | null;
+  return (e?.data?.appCode ?? e?.cause?.appCode) === 'admin_requires_2fa';
 }
 
 /** Shown on /admin pages instead of tenant data until the admin's login has TOTP. */
