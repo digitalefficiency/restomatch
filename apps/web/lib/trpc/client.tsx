@@ -4,11 +4,11 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { httpBatchLink } from '@trpc/client';
 import { createTRPCReact } from '@trpc/react-query';
 import { usePathname } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import superjson from 'superjson';
 import type { AppRouter } from '@restomatch/api';
 import { ShellResilience } from '@/lib/net/ShellResilience';
-import { createAppQueryClient } from './queryClient';
+import { createAppQueryClient, onRouteChange } from './queryClient';
 
 export const trpc = createTRPCReact<AppRouter>();
 
@@ -20,6 +20,8 @@ function wantsShellLayer(pathname: string | null): boolean {
 export function TrpcProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [queryClient] = useState(createAppQueryClient);
+  // Each landed client navigation: a revisited list uses its fresh server rows.
+  useEffect(() => onRouteChange(queryClient), [pathname, queryClient]);
   const [trpcClient] = useState(() =>
     trpc.createClient({
       links: [

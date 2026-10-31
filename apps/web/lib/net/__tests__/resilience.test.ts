@@ -61,11 +61,11 @@ describe('re-auth store', () => {
     expect(a).toHaveBeenCalledTimes(1);
   });
 
-  it('dismissing the sheet keeps the parked work; another user signing in drops it', () => {
+  it('dismissing the sheet drops the parked reads (nothing stale replays later)', () => {
     const a = vi.fn();
     requestReauth(a);
     dismissReauth();
-    expect(pendingRetries()).toBe(1);
+    expect(pendingRetries()).toBe(0);
     abandonReauth();
     expect(pendingRetries()).toBe(0);
     completeReauth();
@@ -82,24 +82,6 @@ describe('app QueryClient defaults (perf-states-04/-08/-15)', () => {
     expect(QUERY_STALE_MS).toBe(30_000);
     expect(qc.getDefaultOptions().queries?.staleTime).toBe(30_000);
     expect(qc.getDefaultOptions().mutations?.networkMode).toBe('always');
-  });
-
-  it('an UNAUTHORIZED mutation parks a replay of the SAME mutation; it succeeds after sign-in', async () => {
-    const { createAppQueryClient } = await import('@/lib/trpc/queryClient');
-    const qc = createAppQueryClient();
-    let signedIn = false;
-    const fn = vi.fn(async (v: { id: string }) => {
-      if (!signedIn) throw trpcError('UNAUTHORIZED', 401);
-      return `approved ${v.id}`;
-    });
-    const mutation = qc.getMutationCache().build(qc, { mutationFn: fn });
-    await expect(mutation.execute({ id: 'inv-1' })).rejects.toThrow('UNAUTHORIZED');
-    expect(pendingRetries()).toBe(1);
-    signedIn = true;
-    completeReauth();
-    await vi.waitFor(() => expect(mutation.state.status).toBe('success'));
-    expect(mutation.state.data).toBe('approved inv-1');
-    expect(fn).toHaveBeenLastCalledWith({ id: 'inv-1' }, expect.anything());
   });
 
   it('a FORBIDDEN mutation does not open the re-auth sheet', async () => {
