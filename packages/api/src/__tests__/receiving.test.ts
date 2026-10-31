@@ -21,6 +21,7 @@ import {
   suppliers,
   users,
 } from '@restomatch/db';
+import { israelToday } from './fixtures';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 
@@ -79,8 +80,7 @@ async function seed(): Promise<Scenario> {
     .values({ restaurantId: restaurant.id, name: 'ירקני אבי' })
     .returning();
 
-  const today = new Date();
-  today.setHours(10, 0, 0, 0);
+  const today = israelToday(10);
   const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
 
@@ -700,8 +700,7 @@ describe('receiving — multi-tenant isolation', () => {
       .insert(suppliers)
       .values({ restaurantId: otherRest!.id, name: 'Other Supplier' })
       .returning();
-    const today = new Date();
-    today.setHours(10, 0, 0, 0);
+    const today = israelToday(10);
     await db.insert(purchaseOrders).values({
       restaurantId: otherRest!.id,
       supplierId: otherSup!.id,
