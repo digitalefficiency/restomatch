@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { localizeActivity } from '../components/activityText';
+import { components } from '../i18n/messages/components';
 import {
   appLocaleFromCookieHeader,
   baseLocaleOf,
@@ -173,4 +175,28 @@ describe('fallback chain: overlaid namespace → overlay → Hebrew; no overlays
     expect(createTranslator('ar', common)('shell.offline.chip')).toMatch(SCRIPT.ar);
     expect(createTranslator('th', auth)('signin.showPassword')).toMatch(SCRIPT.th);
   });
+});
+
+describe('receiver activity feed: a redacted amount never leaves money wording behind (W2-05 × G-07)', () => {
+  const RECEIVER = ['ar', 'ru', 'th', 'ti'] as const;
+  // G-07 strips the amounts for receiver/chef: the metadata keeps counts, never ₪.
+  const redacted = [
+    { eventType: 'invoice_matched', title: 'x', detail: null, metadata: { invoiceNumber: '881', supplierName: 'ספק', poMatched: true, leakCount: 2, reviewCount: 0 } },
+    { eventType: 'invoice_matched', title: 'x', detail: null, metadata: { invoiceNumber: '882', supplierName: 'ספק', leakCount: 1 } },
+    { eventType: 'invoice_matched', title: 'x', detail: null, metadata: { invoiceNumber: '883', supplierName: 'ספק', discrepancyCount: 3 } },
+    { eventType: 'invoice_received', title: 'x', detail: null, metadata: { invoiceNumber: '884', supplierName: 'ספק' } },
+  ];
+  for (const locale of RECEIVER) {
+    it(`${locale}: no ₪, no literal {amount}, no dangling "claimed / in discrepancies"`, () => {
+      const t = createTranslator(locale, components);
+      const moneyWords = [t('activity.potentialLoss', { amount: '' }).trim(), t('activity.savings', { amount: '' }).trim()];
+      for (const item of redacted) {
+        const { title, detail } = localizeActivity(item as Parameters<typeof localizeActivity>[0], locale);
+        for (const s of [title, detail ?? '']) {
+          expect(s).not.toMatch(/₪|\{amount\}|\{/);
+          for (const w of moneyWords) expect(s.includes(w), `"${s}" carries "${w}"`).toBe(false);
+        }
+      }
+    });
+  }
 });
