@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createDb, discrepancies, matchRuns, testDbUrl } from '@restomatch/db';
 import { awaitingDecision } from '../approvals/awaiting';
+import { plainLabel } from '../ask/periods';
 import { runTool, TOOL_DEFINITIONS } from '../ask/tools';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 
@@ -83,9 +84,9 @@ describe('Ask tools contract', () => {
     expect(out.data).toMatchObject({
       period: { from: '2026-10-01', through: '2026-10-25', complete: false },
       comparedWith: { from: '2026-09-01', through: '2026-09-25', complete: false },
-      spanLabel: '1–25 באוק׳ מול 1–25 בספט׳',
     });
-    expect(out.comparison?.labels).toContain('1–25 באוק׳ מול 1–25 בספט׳');
+    expect(plainLabel((out.data as { spanLabel: string }).spanLabel)).toBe('1–25 באוק׳ מול 1–25 בספט׳');
+    expect(out.comparison?.labels.map(plainLabel)).toContain('1–25 באוק׳ מול 1–25 בספט׳');
   });
 
   it('no description invites comparing months by hand; recoveredIls is "accepted for claim"', () => {

@@ -103,6 +103,10 @@ export function alignedWindows(
   };
 }
 
+/** U+2060 WORD JOINER: invisible, no break. `plainLabel()` strips it for comparisons. */
+export const WJ = '\u2060';
+export const plainLabel = (s: string) => s.replace(/\u2060/g, '');
+
 const HE_MONTHS = [
   'ינו׳',
   'פבר׳',
@@ -136,7 +140,8 @@ const EN_MONTHS = [
 export function spanLabel(p: Period, locale: 'he' | 'en'): string {
   const [, m, d1] = ymd(p.from);
   const [, , d2] = ymd(p.through);
-  const days = d1 === d2 ? `${d1}` : `${d1}–${d2}`;
+  // Word joiners keep "1–25" on one line (an en dash is a line-break opportunity).
+  const days = d1 === d2 ? `${d1}` : `${d1}${WJ}–${WJ}${d2}`;
   return locale === 'he' ? `${days} ב${HE_MONTHS[m - 1]}` : `${EN_MONTHS[m - 1]} ${days}`;
 }
 

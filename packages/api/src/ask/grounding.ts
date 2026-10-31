@@ -38,7 +38,7 @@ export const PERIOD_REFUSAL = {
 
 const COMPARING =
   /(מול|לעומת|בהשוואה|השתנ|ירד|ירדה|עלה|עלתה|גדל|קטנ|יותר מ|פחות מ|הפרש|compared|versus|\bvs\.?\b|than|rose|fell|increas|decreas|went up|went down|difference|change)/i;
-const dash = (t: string) => t.replace(/[-‐-―]/g, '–');
+const dash = (t: string) => t.replace(/\u2060/g, '').replace(/[-‐-―]/g, '–');
 
 /** Why an answer is refused on period grounds, or null when it is fair. */
 export function periodRefusal(answer: string, guard: PeriodGuard): 'unfairPeriods' | 'missingSpan' | null {

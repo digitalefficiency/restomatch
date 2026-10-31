@@ -18,6 +18,7 @@ import {
   fairlyComparable,
   monthKey,
   monthPeriod,
+  plainLabel,
   spanLabel,
 } from '../ask/periods';
 import { runTool } from '../ask/tools';
@@ -112,7 +113,9 @@ describe('aligned windows — case table', () => {
     expect([w.cur.from, w.cur.through]).toEqual(cur);
     expect([w.prev.from, w.prev.through]).toEqual(prev);
     expect(w.cur.complete).toBe(false);
-    expect(comparisonLabel(w.cur, w.prev, 'he')).toBe(label);
+    expect(plainLabel(comparisonLabel(w.cur, w.prev, 'he'))).toBe(label);
+    // The digits of a span never break across lines (word joiners around the dash).
+    expect(comparisonLabel(w.cur, w.prev, 'he')).not.toMatch(/\d–|–\d/);
     expect(fairlyComparable(w.cur, w.prev)).toBe(true);
   });
 
@@ -144,8 +147,8 @@ describe('aligned windows — case table', () => {
     const cur = monthPeriod(0, at('2026-10-25T09:00:00Z'), IL);
     const fullSep = monthPeriod(-1, at('2026-10-25T09:00:00Z'), IL);
     expect(fairlyComparable(cur, fullSep)).toBe(false);
-    expect(spanLabel(fullSep, 'en')).toBe('Sep 1–30');
-    expect(comparisonLabel(cur, fullSep, 'en')).toBe('Oct 1–25 vs Sep 1–30');
+    expect(plainLabel(spanLabel(fullSep, 'en'))).toBe('Sep 1–30');
+    expect(plainLabel(comparisonLabel(cur, fullSep, 'en'))).toBe('Oct 1–25 vs Sep 1–30');
   });
 });
 
@@ -208,7 +211,7 @@ describe('periods on real data', () => {
     const c = await leakComparison(db, t.restaurantId, at('2026-10-25T09:00:00Z'), 'he');
     expect(c.prev).toMatchObject({ from: '2026-09-01', through: '2026-09-25' });
     expect(c.prev.leakIls).toBe(40);
-    expect(c.spanLabel).toBe('1–25 באוק׳ מול 1–25 בספט׳');
+    expect(plainLabel(c.spanLabel)).toBe('1–25 באוק׳ מול 1–25 בספט׳');
   });
 });
 
@@ -248,7 +251,7 @@ describe('lab invariant: the fair delta on 25.10', () => {
     expect(c.cur.leakIls).toBe(759.54);
     expect(c.prev.leakIls).toBe(773.89);
     expect(c.deltaIls).toBe(-14.35);
-    expect(c.spanLabel).toBe('1–25 באוק׳ מול 1–25 בספט׳');
+    expect(plainLabel(c.spanLabel)).toBe('1–25 באוק׳ מול 1–25 בספט׳');
     // The offline answer and the leak_change tool use the same function: same facts.
     const off = await offlineAnswer(db, rid, 'מה השתנה בדליפה החודש?', now, 'he');
     expect(off.intent).toBe('leakChange');
@@ -256,8 +259,8 @@ describe('lab invariant: the fair delta on 25.10', () => {
       leakIls: 759.54,
       prevLeakIls: 773.89,
       deltaIls: -14.35,
-      prevSpanLabel: '1–25 בספט׳',
     });
+    expect(plainLabel(String(off.facts.prevSpanLabel))).toBe('1–25 בספט׳');
     const tool = await runTool('leak_change', {}, { db, restaurantId: rid, now, locale: 'he' });
     expect(tool.data).toMatchObject({
       leakIls: 759.54,
