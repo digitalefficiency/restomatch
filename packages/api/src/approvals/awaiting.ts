@@ -60,6 +60,7 @@ import {
   computeInvoiceLeak,
   notZeroShortTwin,
   type LeakBreakdownInvoice,
+  type LeakBreakdownLine,
 } from '@restomatch/charts';
 import { claimableLines, type VatBasis } from '../lib/claims';
 import { canActOn } from '../lib/roles';
@@ -153,11 +154,32 @@ const toIls = (a: Agorot): IlsByBasis => ({
   mixedBasis: [a.excl, a.incl, a.vat].filter((v) => v !== 0).length > 1,
 });
 
+/** One claimable line in scope: what the letters would claim on it. */
+export interface AwaitingClaim {
+  invoice: LeakBreakdownInvoice;
+  line: LeakBreakdownLine;
+  amountIls: number;
+  basis: VatBasis;
+}
+
 export async function awaitingDecision(
   db: Database,
   ctx: AwaitingContext,
   opts: { scope: AwaitingScope; filters?: AwaitingFilters },
 ): Promise<AwaitingDecision> {
+  return (await awaitingDecisionDetail(db, ctx, opts)).summary;
+}
+
+/**
+ * The same computation, plus the claimable lines behind `ils` (biggest first;
+ * empty without `money.view`). For readers that list lines (Ask's claimable
+ * facts) — never re-derive them.
+ */
+export async function awaitingDecisionDetail(
+  db: Database,
+  ctx: AwaitingContext,
+  opts: { scope: AwaitingScope; filters?: AwaitingFilters },
+): Promise<{ summary: AwaitingDecision; claims: AwaitingClaim[] }> {
   const rid = ctx.session.restaurantId;
   const role = ctx.session.role;
   const f = opts.filters;
@@ -211,6 +233,10 @@ export async function awaitingDecision(
   }
 
   const total = zero();
+  const claims: AwaitingClaim[] = [];
+  const lineOf = new Map<string, { invoice: LeakBreakdownInvoice; line: LeakBreakdownLine }>();
+  for (const inv of leaks.values())
+    for (const l of inv.lines) lineOf.set(l.discrepancyId, { invoice: inv, line: l });
   const perRole = new Map<AwaitingRouting, { count: number; agorot: Agorot }>();
   for (const r of rows) {
     const key: AwaitingRouting = r.requiredRole ?? 'unrouted';
@@ -220,6 +246,8 @@ export async function awaitingDecision(
     if (c) {
       e.agorot[c.basis] += c.agorot;
       total[c.basis] += c.agorot;
+      const src = lineOf.get(r.id);
+      if (src) claims.push({ ...src, amountIls: c.agorot / 100, basis: c.basis });
     }
     perRole.set(key, e);
   }
@@ -237,7 +265,8 @@ export async function awaitingDecision(
     (o, r) => (!o || r.createdAt < o ? r.createdAt : o),
     null,
   );
-  return {
+  claims.sort((a, b) => b.amountIls - a.amountIls);
+  const summary: AwaitingDecision = {
     scope: opts.scope,
     count: rows.length,
     blockers: rows.filter((r) => r.severity === 'block').length,
@@ -251,4 +280,5 @@ export async function awaitingDecision(
       return { role: k, count: e.count, ils: money ? toIls(e.agorot) : null };
     }),
   };
+  return { summary, claims: money ? claims : [] };
 }

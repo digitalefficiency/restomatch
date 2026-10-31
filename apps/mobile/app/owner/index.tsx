@@ -1,53 +1,51 @@
 import { Link } from 'expo-router';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { colors, spacing, typography } from '@restomatch/ui-tokens';
 import { trpc } from '../../src/trpc';
 
+/**
+ * G-12b — the mobile app is FROZEN (owner decision 12). It no longer computes or
+ * shows ₪: the money lives on the web, where one definition renders it. Counts
+ * stay only when they read a canonical server field (approvals.queueSummary).
+ */
+export function webDashboardUrl(): string {
+  const api = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
+  const origin = /^https?:\/\/[^/]+/.exec(api)?.[0] ?? 'http://localhost:3000';
+  return `${origin}/dashboard`;
+}
+
 export default function OwnerHome() {
-  const kpis = trpc.owner.kpis.useQuery();
+  const summary = trpc.approvals.queueSummary.useQuery();
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ padding: spacing.lg }}>
       <Text style={styles.title}>לוח הבעלים</Text>
       <Text style={styles.subtitle}>סטטוס המסעדה שלך ברגע זה</Text>
 
-      {kpis.isLoading ? (
+      <WebCard />
+
+      {summary.isLoading ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: spacing.xl }} />
-      ) : kpis.isError ? (
-        <Text style={styles.error}>שגיאה: {kpis.error.message}</Text>
-      ) : kpis.data ? (
+      ) : summary.isError ? (
+        <Text style={styles.error}>לא הצלחנו לטעון. נסו שוב.</Text>
+      ) : summary.data ? (
         <View style={styles.grid}>
-          <KpiCard
-            label="הפסד פוטנציאלי החודש"
-            value={formatIls(kpis.data.monthPotentialLossIls)}
-            tone="warn"
-          />
-          <KpiCard
-            label="חיסכון שנשמר"
-            value={formatIls(kpis.data.monthSavingsCapturedIls)}
-            tone="accent"
-          />
-          <KpiCard
-            label="ממתינות לאישור"
-            value={kpis.data.pendingApprovalsCount.toString()}
-            tone="default"
-          />
-          <KpiCard
-            label="התאמות נקיות השבוע"
-            // NUM-10: null = no match runs this week (never a fake 100%).
-            value={kpis.data.weekCleanMatchPct == null ? 'אין התאמות עדיין' : `${kpis.data.weekCleanMatchPct.toFixed(0)}%`}
-            tone={kpis.data.weekCleanMatchPct == null ? 'default' : kpis.data.weekCleanMatchPct >= 80 ? 'accent' : 'warn'}
-          />
+          <View style={styles.card}>
+            <Text style={styles.cardLabel}>ממתינים להחלטה</Text>
+            <Text style={styles.cardValue}>{summary.data.count}</Text>
+          </View>
         </View>
       ) : null}
 
       <View style={styles.actionsRow}>
-        <Link href="/owner/leaks" asChild>
-          <Pressable style={styles.actionCard}>
-            <Text style={styles.actionEmoji}>🔍</Text>
-            <Text style={styles.actionLabel}>בלש הדליפות</Text>
-          </Pressable>
-        </Link>
         <Link href="/owner/suppliers" asChild>
           <Pressable style={styles.actionCard}>
             <Text style={styles.actionEmoji}>🏷️</Text>
@@ -59,27 +57,18 @@ export default function OwnerHome() {
   );
 }
 
-function KpiCard({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone: 'default' | 'accent' | 'warn';
-}) {
-  const accent =
-    tone === 'accent' ? colors.accent : tone === 'warn' ? colors.warning : colors.textPrimary;
+/** T4 (neutral): the full figures are on the web. */
+export function WebCard() {
   return (
-    <View style={styles.card}>
-      <Text style={styles.cardLabel}>{label}</Text>
-      <Text style={[styles.cardValue, { color: accent }]}>{value}</Text>
-    </View>
+    <Pressable
+      accessibilityRole="link"
+      style={styles.webCard}
+      onPress={() => void Linking.openURL(webDashboardUrl())}
+    >
+      <Text style={styles.webTitle}>הנתונים המלאים באתר</Text>
+      <Text style={styles.webAction}>פתחו באפליקציה ←</Text>
+    </Pressable>
   );
-}
-
-function formatIls(v: number): string {
-  return `₪${Math.round(v).toLocaleString('he-IL')}`;
 }
 
 const styles = StyleSheet.create({
@@ -147,4 +136,24 @@ const styles = StyleSheet.create({
     fontWeight: typography.fontWeight.semibold,
   },
   error: { color: colors.danger, textAlign: 'center', marginTop: spacing.xl },
+  webCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.lg,
+  },
+  webTitle: {
+    color: colors.textPrimary,
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.semibold,
+    textAlign: 'right',
+  },
+  webAction: {
+    color: colors.primary,
+    fontSize: typography.fontSize.sm,
+    marginTop: spacing.xs,
+    textAlign: 'right',
+  },
 });

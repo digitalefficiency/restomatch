@@ -11,11 +11,62 @@
  *    is then flagged `grounded: false` (a link in an answer is an injection signal);
  *  - every number in the prose (any unit, "40 אלף", "5k", Hebrew "שקלים"…) must
  *    match a tool figure, otherwise the answer is flagged `grounded: false`
- *    (the UI shows a "check the screens" note).
+ *    (the UI shows a "check the screens" note);
+ *  - periods (G-12b): an answer that compares figures of two periods that do not
+ *    compare fairly (a month to date against a full month), or states a
+ *    like-for-like change without its span label, is REFUSED: `grounded: false`
+ *    and the text is replaced by a neutral sentence.
  */
 import type { ClaudeAnswer } from './claude';
+import { fairlyComparable, type Period } from './periods';
 import { ALL_TLDS } from './tlds';
 import type { Figures, ScreenLink } from './tools';
+
+/** What the tools said about periods, for the fairness check. */
+export interface PeriodGuard {
+  /** One entry per month tool output: its period and its ₪ figures. */
+  periods: Array<{ period: Period; ils: number[] }>;
+  /** One entry per like-for-like comparison (leak_change). */
+  comparisons: Array<{ deltaIls: number; labels: string[] }>;
+  locale?: 'he' | 'en';
+}
+
+export const PERIOD_REFUSAL = {
+  he: 'לא אשווה תקופה חלקית לחודש מלא. אפשר לשאול "מה השתנה בדליפה החודש?" — ההשוואה תהיה על אותם ימים בשני החודשים.',
+  en: 'I won’t compare part of a month with a full month. Ask "What changed in the leak this month?" — it compares the same days of both months.',
+} as const;
+
+const COMPARING =
+  /(מול|לעומת|בהשוואה|השתנ|ירד|ירדה|עלה|עלתה|גדל|קטנ|יותר מ|פחות מ|הפרש|compared|versus|\bvs\.?\b|than|rose|fell|increas|decreas|went up|went down|difference|change)/i;
+const dash = (t: string) => t.replace(/[-‐-―]/g, '–');
+
+/** Why an answer is refused on period grounds, or null when it is fair. */
+export function periodRefusal(answer: string, guard: PeriodGuard): 'unfairPeriods' | 'missingSpan' | null {
+  const nums = figuresIn(answer);
+  const text = dash(answer);
+  for (const c of guard.comparisons) {
+    const d = Math.abs(c.deltaIls);
+    if (d < 1 || !nums.some((n) => near(n, [d]))) continue;
+    if (!c.labels.some((l) => l && text.includes(dash(l)))) return 'missingSpan';
+  }
+  if (!COMPARING.test(answer)) return null;
+  // Figures that belong to ONE period only (a figure two periods share proves nothing).
+  const used: Period[] = [];
+  guard.periods.forEach((g, i) => {
+    const others = guard.periods.filter((_, j) => j !== i).flatMap((o) => o.ils);
+    const own = g.ils.filter((v) => Math.abs(v) >= 1 && !near(Math.abs(v), others));
+    if (nums.some((n) => near(n, own))) used.push(g.period);
+  });
+  for (let i = 0; i < used.length; i++) {
+    for (let j = i + 1; j < used.length; j++) {
+      const a = used[i]!;
+      const b = used[j]!;
+      if (a.from === b.from && a.through === b.through) continue;
+      if (!fairlyComparable(a, b)) return 'unfairPeriods';
+    }
+  }
+  return null;
+}
 
 export interface Citation {
   /** Which screen (label rendered by the web in the user's language). */
@@ -31,6 +82,8 @@ export interface GroundedAnswer {
   grounded: boolean;
   /** Figures in the text no tool returned (for the report / logs). */
   ungrounded: number[];
+  /** Set when the answer was refused on period grounds (its text is then neutral). */
+  refused?: 'unfairPeriods' | 'missingSpan';
 }
 
 const INTERNAL = /^\/dashboard(\/[A-Za-z0-9_\-/]*)?(\?[A-Za-z0-9_=&\-]*)?$/;
@@ -279,7 +332,12 @@ export function sanitizeAnswer(text: string): { text: string; stripped: boolean 
   return { text: out.replace(/[ \t]{2,}/g, ' ').replace(/ +([.,;:!?])/g, '$1').trim(), stripped };
 }
 
-export function groundAnswer(raw: ClaudeAnswer, links: readonly ScreenLink[], figures: Figures): GroundedAnswer {
+export function groundAnswer(
+  raw: ClaudeAnswer,
+  links: readonly ScreenLink[],
+  figures: Figures,
+  guard?: PeriodGuard,
+): GroundedAnswer {
   const byHref = new Map(links.filter((l) => INTERNAL.test(l.href)).map((l) => [l.href, l.screen] as const));
   const all = [...figures.ils, ...figures.pct, ...figures.count];
   const citations: Citation[] = [];
@@ -296,5 +354,9 @@ export function groundAnswer(raw: ClaudeAnswer, links: readonly ScreenLink[], fi
   // Anything link-like in the prose is an injection signal: strip it AND flag the answer.
   const { text: answer, stripped } = sanitizeAnswer(raw.answer);
   const ungrounded = figuresIn(answer).filter((n) => !near(n, all));
+  const refused = guard ? periodRefusal(answer, guard) : null;
+  if (refused) {
+    return { answer: PERIOD_REFUSAL[guard?.locale ?? 'he'], citations: [], grounded: false, ungrounded, refused };
+  }
   return { answer, citations, grounded: ungrounded.length === 0 && !stripped, ungrounded };
 }

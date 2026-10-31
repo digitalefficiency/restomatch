@@ -5,13 +5,13 @@
 export const he = {
   title: 'שאלו את RestoMatch',
   subtitle: 'שאלו בשפה חופשית על הכסף של המסעדה. כל תשובה מבוססת רק על הנתונים שלכם, עם קישור למסך שממנו היא באה.',
-  placeholder: 'לדוגמה: למה הדליפה עלתה החודש?',
+  placeholder: 'לדוגמה: מה השתנה בדליפה החודש?',
   label: 'השאלה שלכם',
   submit: 'שאלו',
   thinking: 'בודק בנתונים…',
   suggestionsLabel: 'שאלות נפוצות',
   suggestions: {
-    leakChange: 'למה הדליפה עלתה החודש?',
+    leakChange: 'מה השתנה בדליפה החודש?',
     priceRaise: 'איזה ספק העלה מחירים?',
     claimWeek: 'מה כדאי לתבוע השבוע?',
     leakTotal: 'כמה כסף דלף החודש?',
@@ -36,7 +36,7 @@ export const he = {
   empty: 'עוד לא שאלתם. בחרו שאלה נפוצה או כתבו משלכם.',
   screens: {
     overview: 'סקירה',
-    leaks: 'בלש דליפות',
+    leaks: 'הדליפה החודשית',
     report: 'דוח דליפות חודשי',
     breakdown: 'פירוט הדליפה',
     claims: 'מכתבי תביעה',

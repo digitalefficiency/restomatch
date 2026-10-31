@@ -157,7 +157,7 @@ describe('ask: Claude leg (mocked)', () => {
     expect(b.thinking).toBeUndefined();
     expect(b.tool_choice).toEqual({ type: 'auto' });
     expect(b.tools.map((t: { name: string }) => t.name).sort()).toEqual(
-      ['claimable_lines', 'leak_breakdown', 'leak_hero', 'leak_report'],
+      ['claimable_lines', 'leak_breakdown', 'leak_change', 'leak_hero', 'leak_report'],
     );
     expect(b.tools.every((t: { strict?: boolean }) => t.strict === true)).toBe(true);
     // The second call carries the tool_result for the session restaurant.
@@ -505,5 +505,86 @@ describe('ask: tenant isolation', () => {
     expect(all).not.toContain(B.invoiceId);
     expect(all).not.toContain(B.restaurantId);
     expect(results[2]!.is_error).toBe(true);
+  });
+});
+
+describe('ask: periods are fair (G-12b)', () => {
+  const L = [{ screen: 'overview' as const, href: '/dashboard' }];
+  // 1–25 Oct to date (₪759.54) and ALL of September (₪1,059.54): the unfair pair.
+  const OCT = { from: '2026-10-01', through: '2026-10-25', complete: false };
+  const SEP = { from: '2026-09-01', through: '2026-09-30', complete: true };
+  const FIG = { ils: [759.54, 1059.54, 300], pct: [], count: [] };
+  const guard = {
+    periods: [
+      { period: OCT, ils: [759.54] },
+      { period: SEP, ils: [1059.54] },
+    ],
+    comparisons: [{ deltaIls: -14.35, labels: ['1–25 באוק׳ מול 1–25 בספט׳', '1–25 בספט׳'] }],
+    locale: 'he' as const,
+  };
+
+  it('refuses a month to date compared with a full month (neutral sentence, not grounded)', () => {
+    const g = groundAnswer(
+      { answer: 'הדליפה ירדה: ₪760 החודש לעומת ₪1,060 בספטמבר.', citations: [] },
+      L,
+      FIG,
+      guard,
+    );
+    expect(g).toMatchObject({ grounded: false, refused: 'unfairPeriods', citations: [] });
+    expect(g.answer).not.toMatch(/760|1,060/);
+    expect(g.answer).toContain('מה השתנה בדליפה החודש');
+  });
+
+  it('refuses a like-for-like change quoted without its span label', () => {
+    const fig = { ils: [759.54, 773.89, -14.35], pct: [], count: [] };
+    const g = groundAnswer(
+      { answer: 'הדליפה ירדה ב-₪14 מהחודש שעבר.', citations: [] },
+      L,
+      fig,
+      guard,
+    );
+    expect(g).toMatchObject({ grounded: false, refused: 'missingSpan' });
+    const ok = groundAnswer(
+      { answer: 'הדליפה ירדה ב-₪14.35 לעומת 1–25 בספט׳.', citations: [] },
+      L,
+      { ils: [759.54, 773.89, -14.35], pct: [], count: [1, 25] },
+      guard,
+    );
+    expect(ok.refused).toBeUndefined();
+    expect(ok.grounded).toBe(true);
+  });
+
+  it('a single period, or two closed months, is never refused', () => {
+    const one = groundAnswer({ answer: 'החודש דלפו ₪760.', citations: [] }, L, FIG, guard);
+    expect(one.refused).toBeUndefined();
+    const AUG = { from: '2026-08-01', through: '2026-08-31', complete: true };
+    const two = groundAnswer(
+      { answer: 'בספטמבר ₪1,060 לעומת ₪900 באוגוסט.', citations: [] },
+      L,
+      { ils: [1059.54, 900], pct: [], count: [] },
+      {
+        periods: [
+          { period: SEP, ils: [1059.54] },
+          { period: AUG, ils: [900] },
+        ],
+        comparisons: [],
+        locale: 'he',
+      },
+    );
+    expect(two.refused).toBeUndefined();
+  });
+
+  it('the canned intent is neutral: "מה השתנה" and "למה עלתה" both classify as leakChange', () => {
+    expect(classifyQuestion('מה השתנה בדליפה החודש?')).toBe('leakChange');
+    expect(classifyQuestion('What changed in the leak this month?')).toBe('leakChange');
+    expect(classifyQuestion('למה הדליפה עלתה החודש?')).toBe('leakChange');
+    expect(classifyQuestion('הדליפה ירדה?')).toBe('leakChange');
+  });
+
+  it('the system prompt points comparisons at leak_change and never mentions a target', () => {
+    const p = askSystemPrompt('he', '2026-10-25');
+    expect(p).toContain('leak_change');
+    expect(p).toContain('spanLabel');
+    expect(p).not.toMatch(/1\.5\s*%/);
   });
 });

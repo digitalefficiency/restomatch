@@ -4,13 +4,13 @@ import type { he } from './he';
 export const en: Shape<typeof he> = {
   title: 'Ask RestoMatch',
   subtitle: "Ask about your restaurant's money in plain words. Every answer uses only your data, with a link to the screen it comes from.",
-  placeholder: 'For example: Why did the leak go up this month?',
+  placeholder: 'For example: What changed in the leak this month?',
   label: 'Your question',
   submit: 'Ask',
   thinking: 'Checking your data…',
   suggestionsLabel: 'Common questions',
   suggestions: {
-    leakChange: 'Why did the leak go up this month?',
+    leakChange: 'What changed in the leak this month?',
     priceRaise: 'Which supplier raised prices?',
     claimWeek: 'What should I claim this week?',
     leakTotal: 'How much money leaked this month?',
@@ -35,7 +35,7 @@ export const en: Shape<typeof he> = {
   empty: "You haven't asked anything yet. Pick a common question or write your own.",
   screens: {
     overview: 'Overview',
-    leaks: 'Leak detective',
+    leaks: 'Monthly leak',
     report: 'Monthly leak report',
     breakdown: 'Leak breakdown',
     claims: 'Claim letters',
