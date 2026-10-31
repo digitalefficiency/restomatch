@@ -1,4 +1,11 @@
-import { fillEnglishNames, meterOcrScan, receiptState, scanReceiptToStamp, withScanGrId } from '@restomatch/api';
+import {
+  fillEnglishNames,
+  meterOcrScan,
+  notifyEffect,
+  receiptState,
+  scanReceiptToStamp,
+  withScanGrId,
+} from '@restomatch/api';
 import { matchProductTopN, MockEmbeddingProvider } from '@restomatch/catalog';
 import { HELD_FOR_RECEIPTS_KEY, receiptsBeingCountedForScan } from '@restomatch/charts';
 import { and, eq, invoiceLines, invoices, ne, restaurants, sql, type Database } from '@restomatch/db';
@@ -223,10 +230,10 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
     // EN-3: a failed OCR used to leave the invoice in 'ocr_pending' forever
     // (the receiver's wizard spun until it gave up). On the FINAL attempt
     // move it to a terminal, reviewable state the UI can show.
-    const raw = job as { attemptsMade?: number; opts?: { attempts?: number } };
-    if ((raw.attemptsMade ?? 0) + 1 >= (raw.opts?.attempts ?? 1)) {
-      await markOcrFailed(db, job.data.restaurantId, job.data.invoiceId, err).catch((e) =>
-        console.error(`[ocr-invoice] could not mark invoice=${job.data.invoiceId} failed`, e),
+    const attempt = finalAttempt(job);
+    if (attempt !== null) {
+      await failAndHandOff(db, job.data.restaurantId, job.data.invoiceId, err, attempt).catch(
+        (e) => console.error(`[ocr-invoice] could not mark invoice=${job.data.invoiceId} failed`, e),
       );
     }
     throw err;
@@ -332,12 +339,12 @@ export async function markOcrFailed(
   restaurantId: string,
   invoiceId: string,
   err: unknown,
-): Promise<void> {
+): Promise<{ updated: boolean; reason: 'quota_exceeded' | 'extraction_failed' }> {
   const reason =
     err instanceof Error && err.name === 'QuotaExceededError'
       ? 'quota_exceeded'
       : 'extraction_failed';
-  await db
+  const updated = await db
     .update(invoices)
     .set({
       status: 'parsed',
@@ -355,7 +362,63 @@ export async function markOcrFailed(
         eq(invoices.restaurantId, restaurantId),
         eq(invoices.status, 'ocr_pending'),
       ),
-    );
+    )
+    .returning({ id: invoices.id });
+  return { updated: updated.length > 0, reason };
+}
+
+/** The attempt number when this run is the job's LAST attempt, else null (a retry follows). */
+export function finalAttempt(job: { attemptsMade?: number; opts?: { attempts?: number } }): number | null {
+  const attempt = (job.attemptsMade ?? 0) + 1;
+  return attempt >= (job.opts?.attempts ?? 1) ? attempt : null;
+}
+
+/**
+ * The terminal-failure hand-off (G-06): mark the invoice failed (same guard and
+ * payload), then tell the uploader and the managers — in ONE transaction, with
+ * the notice in a savepoint so a notify error never leaves the invoice stuck in
+ * `ocr_pending`. Only the call that actually moved the row notifies, and the
+ * per-(user, channel) dedupe keys make a replay enqueue nothing.
+ */
+export async function failAndHandOff(
+  db: Database,
+  restaurantId: string,
+  invoiceId: string,
+  err: unknown,
+  attempt?: number,
+): Promise<{ updated: boolean; reason: string }> {
+  return db.transaction(async (rawTx) => {
+    const tx = rawTx as unknown as Database;
+    const res = await markOcrFailed(tx, restaurantId, invoiceId, err);
+    if (!res.updated) return res;
+    try {
+      await tx.transaction(async (sp) =>
+        onOcrFailed(sp as unknown as Database, { restaurantId, invoiceId, reason: res.reason, attempt }),
+      );
+    } catch (e) {
+      console.error(`[ocr-invoice] invoice=${invoiceId} failure notice not enqueued`, e);
+    }
+    return res;
+  });
+}
+
+/**
+ * Interim until G-05 merges: becomes
+ * `emit(tx, { type: 'invoice.ocr_failed', entityType: 'invoice', entityId, payload: { reason, attempt } … })`,
+ * which runs the same `notify` handler (registered from @restomatch/api) plus
+ * W2-08's task effect.
+ */
+export async function onOcrFailed(
+  tx: Database,
+  input: { restaurantId: string; invoiceId: string; reason: string; attempt?: number; at?: Date },
+): Promise<void> {
+  await notifyEffect(tx, {
+    type: 'invoice.ocr_failed',
+    restaurantId: input.restaurantId,
+    entityId: input.invoiceId,
+    at: input.at ?? new Date(),
+    payload: { reason: input.reason, ...(input.attempt ? { attempt: input.attempt } : {}) },
+  });
 }
 
 /**
