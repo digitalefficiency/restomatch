@@ -257,7 +257,7 @@ The planning docs the briefs cite live outside the repo, so the kit ships verbat
 - `ref/DEEP-FIX.he.md`: the 15 bug classes, each with its systemic fix and carrier packages (e.g. class 14 at 701-752, class 15 at 754-799).
 - `ref/GAP-PACKAGES.md`: Part A gap packages, Part B scope amendments, the overlap ledger (e.g. G-02 at 31-41).
 - `ref/MASTER-PLAN.he.md`: windows, dependencies, quality gates per wave (§4) and merge order (§5).
-- `ref/copylab/{lab.mjs,lab-output.txt}`: W2-13's bidi lab I. `lab.mjs` hard-codes local paths; read `lab-output.txt` and don't re-run it.
+- `ref/copylab/lab-output.txt`: W2-13's bidi lab I output. Read it; the generating script is not in the repo (it hard-coded local paths).
 
 Findings and evidence stay in `docs/ux/review/area-*.md` and `lens-*.md` (`grep -n '<id>'`, then ±40 lines). Nothing in `ref/` is binding over AGENTS.md, §7 above or your brief.
 
@@ -269,7 +269,7 @@ Findings and evidence stay in `docs/ux/review/area-*.md` and `lens-*.md` (`grep 
   - W1-08 follow-up: the noData CTA goes to a route every tenant has.
   - W1-04 follow-up: one offline chip on receiving routes.
   - Read the merged code, not the wave-1 PR bodies.
-- **Side menu: owner-approved.** The spec is `docs/ux/sidebar/SPEC.md` (read its top box first) and the prototype is `docs/ux/sidebar/PROTOTYPE.html`. W1-03 builds it at the start of wave 2 on the nav registry.
+- **Side menu: owner-approved.** The spec is `docs/ux/sidebar/SPEC.md` (read its top box first) and the clickable prototype is kept out of the tree (a design file, not product code): `git show 6fe38589:docs/ux/sidebar/PROTOTYPE.html > /tmp/sidebar-prototype.html` and open it locally. W1-03 builds it at the start of wave 2 on the nav registry.
 - **Design elevation (new track, UI wave 2):** the owner wants a more advanced design pass over the side menu and the main screens. It runs as a separate design track (competing bold directions, judged, then the owner picks). Packages build on today's tokens and must not hard-code anything that would block a token-level re-theme.
 - **Owner decisions of 31.10 (evening) — these were open, now decided:**
   1. **The chef sees ₪ in recipes:** plate cost, menu price and margin. (Elsewhere the chef sees ₪ only on the orders screens, also decided 31.10; the receiver sees no ₪ anywhere.) G-07 models both as chef capabilities; H-11's server strip exempts them; W2-07 drops the chef's %-only rule in recipes.

@@ -2,6 +2,8 @@
 
 > **Status:** the owner approved this design on 31.10.2026 for implementation in wave 2 (owner: W1-03, on top of the wave-1 nav registry). The owner also wants a **more advanced design pass in UI wave 2**; build this version first and keep the tokens and structure open to that pass.
 >
+> **Prototype:** the clickable HTML prototype is a design file, not product code, so it is kept out of the tree (CodeQL scans every HTML/JS file). Get it from history: `git show 6fe38589:docs/ux/sidebar/PROTOTYPE.html > /tmp/sidebar-prototype.html`, then open it in a browser. This spec wins wherever they differ.
+>
 > **Corrections that override the prototype where they differ (decisions as of 31.10):**
 > - `/dashboard/leaks` is the monthly **"דליפה"** hub (W1-08 + W1-03 follow-up 7118ea3). Price creep is the `#prices` section inside it and keeps the words "מחירים שעלו" there. Do not show a separate "מחירים שעלו" nav item.
 > - **Bulk approve (≤ ₪200 per invoice, never blocking rows)** and **one-tap WhatsApp approve (≤ ₪500)** stay OFF in the UI until the server enforces both caps (W2-04 `approvals.decideMany` + one server-side cap constant). Show the disabled state with its reason, as the W1-02 BatchBar does.
