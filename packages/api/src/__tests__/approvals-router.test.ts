@@ -416,6 +416,14 @@ async function insertD(s: Scenario, v: Partial<typeof discrepancies.$inferInsert
     .returning();
   return d!;
 }
+/** Give the seed's match run a real invoice, so its rows have ₪ to claim under lib/claims. */
+async function attachInvoice(s: Scenario, total = '5000.00') {
+  const [i] = await db
+    .insert(invoices)
+    .values({ restaurantId: s.restaurantId, source: 'manual', status: 'matched', totalInclVat: total })
+    .returning();
+  await db.update(matchRuns).set({ invoiceId: i!.id }).where(eq(matchRuns.id, s.matchRunId));
+}
 const eqId = (id: string) => eq(discrepancies.id, id);
 const ownerOf = (s: Scenario) => caller({ userId: s.ownerId, restaurantId: s.restaurantId, role: 'owner' });
 const managerOf = (s: Scenario) => caller({ userId: s.managerId, restaurantId: s.restaurantId, role: 'manager' });
@@ -551,6 +559,7 @@ describe('approvals.queueSummary (approvals-08, functional-flows-07)', () => {
 
   it("the manager's empty queue still names what waits for others (never 'all handled')", async () => {
     const s = await seed();
+    await attachInvoice(s);
     await managerOf(s).approvals.approve({ discrepancyId: s.discrepancyManagerId });
     const sum = await managerOf(s).approvals.queueSummary();
     expect(sum.count).toBe(0);
@@ -661,6 +670,7 @@ describe('claimability (verbs keyed by type AND claimability)', () => {
 
   it('the others lane sums only claimable ₪', async () => {
     const s = await seed();
+    await attachInvoice(s);
     await insertD(s, { type: 'QTY_SHORT', severity: 'info', deltaAmount: '95.23', requiresRole: 'owner' });
     const sum = await managerOf(s).approvals.queueSummary();
     // seed's owner block ₪300 counts; the info ₪95.23 is a check, not money.
@@ -676,5 +686,95 @@ describe('claimability (verbs keyed by type AND claimability)', () => {
     const [row] = await db.select().from(activityEvents).where(eq(activityEvents.entityId, dup.id));
     expect(row!.title).toBe(DECISION_COPY.he.duplicateHeld);
     expect(row!.title).not.toBe(DECISION_COPY.he.approved);
+  });
+});
+
+describe('pre-merge review findings (#141)', () => {
+  async function invoiceRun(s: Scenario, total: string) {
+    const [i] = await db
+      .insert(invoices)
+      .values({ restaurantId: s.restaurantId, source: 'manual', status: 'matched', totalInclVat: total })
+      .returning();
+    const [mr] = await db
+      .insert(matchRuns)
+      .values({ restaurantId: s.restaurantId, invoiceId: i!.id, overallStatus: 'major', totalDiscrepancyAmount: '0' })
+      .returning();
+    return mr!.id;
+  }
+
+  it('F1: the before-VAT claimable total never mixes in a VAT amount or an unbilled line', async () => {
+    const s = await seed();
+    const run = await invoiceRun(s, '1000.00');
+    await insertD(s, { matchRunId: run, type: 'PRICE_HIGHER', deltaAmount: '40.00' });
+    await insertD(s, { matchRunId: run, type: 'VAT_MISMATCH', deltaAmount: '20.00' });
+    await insertD(s, { matchRunId: run, type: 'MISSING_ON_INVOICE', deltaAmount: '30.00' });
+    const sum = await managerOf(s).approvals.queueSummary();
+    expect(sum.claimableIls).toBe(40);
+    expect(sum.vatIls).toBe(20);
+  });
+
+  it('F2: the others lane ₪ follows the claims rule (per-invoice cap), not a raw Σ|Δ|', async () => {
+    const s = await seed();
+    const run = await invoiceRun(s, '150.00');
+    await insertD(s, { matchRunId: run, deltaAmount: '104.80', requiresRole: 'owner' });
+    await insertD(s, { matchRunId: run, deltaAmount: '52.55', requiresRole: 'owner' });
+    const sum = await managerOf(s).approvals.queueSummary();
+    // seed's owner ₪300 has no invoice (nothing claimable yet) + this invoice capped at ₪150.
+    expect(sum.others.amountIls).toBe(150);
+  });
+
+  it('F3: paging after the last loaded row never skips rows decided elsewhere', async () => {
+    const s = await seed();
+    for (let i = 0; i < 6; i++) await insertD(s, { deltaAmount: String(10 + i) });
+    const all = (await ownerOf(s).approvals.myQueue({ limit: 100 })).map((q) => q.id);
+    const page1 = all.slice(0, 3);
+    // Someone else decides two of the loaded cards.
+    await ownerOf(s).approvals.approve({ discrepancyId: page1[0]! });
+    await ownerOf(s).approvals.approve({ discrepancyId: page1[1]! });
+    const next = (await ownerOf(s).approvals.myQueue({ limit: 3, afterId: page1[2]! })).map((q) => q.id);
+    expect(next).toEqual(all.slice(3, 6));
+  });
+
+  it('F5: a card made stale by a colleague\'s escalation gets the "already decided" CONFLICT, not FORBIDDEN', async () => {
+    const s = await seed();
+    const [m2] = await db.insert(users).values({ email: 'mgr2@a.test' }).returning();
+    await db.insert(memberships).values({ userId: m2!.id, restaurantId: s.restaurantId, role: 'manager' });
+    await caller({ userId: m2!.id, restaurantId: s.restaurantId, role: 'manager' }).approvals.escalate({
+      discrepancyId: s.discrepancyManagerId,
+    });
+    await expect(managerOf(s).approvals.approve({ discrepancyId: s.discrepancyManagerId })).rejects.toMatchObject({
+      code: 'CONFLICT',
+    });
+  });
+
+  it('F7 + F8: "mark as checked" logs a check, and the activity ₪ goes through the shared formatter', async () => {
+    const { DECISION_COPY, } = await import('../notifications/templates');
+    const { formatIlsAgorot } = await import('../reports/money');
+    const { activityEvents } = await import('@restomatch/db');
+    const s = await seed();
+    const info = await insertD(s, { type: 'QTY_SHORT', severity: 'info', deltaAmount: '4.50' });
+    await managerOf(s).approvals.reject({ discrepancyId: info.id, reason: 'סמנו כנבדק', reasonCode: 'reviewed' });
+    await managerOf(s).approvals.approve({ discrepancyId: s.discrepancyManagerId });
+    const rows = await db.select().from(activityEvents);
+    expect(rows.find((r) => r.entityId === info.id)!.title).toBe(DECISION_COPY.he.reviewed);
+    expect(rows.find((r) => r.entityId === s.discrepancyManagerId)!.detail).toBe(
+      formatIlsAgorot(8000, { maximumFractionDigits: 2 }),
+    );
+  });
+});
+
+describe('myQueue afterId is tenant-scoped', () => {
+  it("a foreign row id as afterId returns nothing (its sort key is never read)", async () => {
+    const s = await seed();
+    const [other] = await db.insert(restaurants).values({ name: 'Other' }).returning();
+    const [mr] = await db
+      .insert(matchRuns)
+      .values({ restaurantId: other!.id, overallStatus: 'major', totalDiscrepancyAmount: '1' })
+      .returning();
+    const [foreign] = await db
+      .insert(discrepancies)
+      .values({ restaurantId: other!.id, matchRunId: mr!.id, type: 'PRICE_HIGHER', severity: 'block', deltaAmount: '1', requiresRole: 'owner', resolutionStatus: 'open' })
+      .returning();
+    expect(await ownerOf(s).approvals.myQueue({ afterId: foreign!.id })).toEqual([]);
   });
 });
