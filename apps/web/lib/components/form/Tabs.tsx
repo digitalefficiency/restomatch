@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { cn } from '../cn';
+import { cnMerge as cn } from '../cn';
 import { CountBadge } from '../feedback/StatusChip';
 
 export interface TabItem {

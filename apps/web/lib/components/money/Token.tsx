@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Check, Copy } from 'lucide-react';
 import { useT } from '@/lib/i18n/client';
 import { components } from '@/lib/i18n/messages/components';
-import { cn } from '../cn';
+import { cnMerge as cn } from '../cn';
 
 export type TokenKind = 'invoice' | 'po' | 'sku' | 'allocation' | 'phone';
 

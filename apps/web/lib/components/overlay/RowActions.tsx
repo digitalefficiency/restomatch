@@ -6,7 +6,7 @@ import { MoreHorizontal } from 'lucide-react';
 import { useT } from '@/lib/i18n/client';
 import { components } from '@/lib/i18n/messages/components';
 import { Button } from '../Button';
-import { cn } from '../cn';
+import { cnMerge as cn } from '../cn';
 
 export interface RowAction {
   label: string;

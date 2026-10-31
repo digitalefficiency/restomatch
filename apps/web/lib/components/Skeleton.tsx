@@ -1,4 +1,4 @@
-import { cn } from './cn';
+import { cnMerge as cn } from './cn';
 
 export type SkeletonVariant = 'block' | 'text' | 'metric' | 'hero' | 'kpiRow' | 'row' | 'card' | 'table' | 'form' | 'wizardStep';
 

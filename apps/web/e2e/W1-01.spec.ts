@@ -265,6 +265,17 @@ test.describe('lab page (platform admins)', () => {
     await expect(toasts, 'plain toasts leave after 5 s').toHaveCount(0);
   });
 
+  test('5 · live regions are cleared on navigation (an old error is not left in role=alert)', async ({ page }) => {
+    await setLang(page, 'he');
+    await page.goto(LAB);
+    await page.getByRole('button', { name: ds.he.lab.showErrorToast }).click();
+    await expect(page.locator('[data-live="assertive"]')).toHaveText(ds.he.lab.toastError);
+    await page.getByRole('link', { name: '/dashboard', exact: true }).click();
+    await page.waitForURL(/\/dashboard$/);
+    await expect(page.locator('[data-live="assertive"]')).toHaveText('');
+    await expect(page.locator('[data-live="polite"]')).toHaveText('');
+  });
+
   test('6 · Field v2 links hint and error; MoneyInput parses 7,5 and 1,250.50 and formats on blur', async ({ page }) => {
     await setLang(page, 'he');
     await page.goto(LAB);

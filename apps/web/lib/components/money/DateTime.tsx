@@ -2,7 +2,7 @@
 
 import { useLocale } from '@/lib/i18n/client';
 import { formatRelative } from '@/lib/i18n/format';
-import { cn } from '../cn';
+import { cnMerge as cn } from '../cn';
 import { formatClock, formatDay } from './format';
 
 export type DateTimeVariant = 'date' | 'datetime' | 'time' | 'relative';

@@ -3,6 +3,16 @@
 import { useEffect } from 'react';
 
 /**
+ * Is this element top chrome? A sticky/fixed bar pinned to the top (`top: 0`)
+ * counts even while something in the flow sits above it (the inline consent
+ * strip), because it covers focused content as soon as the page scrolls.
+ */
+export function isTopChrome(style: { position: string; top: string }, rectTop: number): boolean {
+  if (style.position !== 'sticky' && style.position !== 'fixed') return false;
+  return style.top === '0px' || rectTop <= 1;
+}
+
+/**
  * Publishes the sticky chrome's height as CSS variables on <html> so
  * `scroll-padding` keeps a focused control clear of it (WCAG 2.4.11, a11y-03):
  *   --rm-header-h     a sticky/fixed bar at the top    ([data-rm-chrome="header"] or a sticky <header>)
@@ -26,9 +36,10 @@ export function ChromeMetrics() {
       const candidates = document.querySelectorAll(kind === 'header' ? 'body header' : 'body nav');
       for (const el of candidates) {
         if (!visible(el)) continue;
-        const pos = getComputedStyle(el).position;
+        const style = getComputedStyle(el);
+        const pos = style.position;
         const rect = el.getBoundingClientRect();
-        if (kind === 'header' && (pos === 'sticky' || pos === 'fixed') && rect.top <= 1) return el;
+        if (kind === 'header' && isTopChrome(style, rect.top)) return el;
         if (kind === 'bottomnav' && pos === 'fixed' && rect.top > window.innerHeight / 2)
           return el;
       }

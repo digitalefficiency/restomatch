@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { CircleCheck, Info, OctagonAlert, TriangleAlert, X } from 'lucide-react';
 import { useT } from '@/lib/i18n/client';
 import { components } from '@/lib/i18n/messages/components';
-import { cn } from '../cn';
+import { cnMerge as cn } from '../cn';
 
 export type BannerTone = 'info' | 'warn' | 'danger' | 'success' | 'neutral';
 

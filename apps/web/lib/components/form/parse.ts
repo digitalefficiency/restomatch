@@ -12,10 +12,15 @@ const STRIP = /[\s ‎‏‪-‮₪]/g;
  * "1,250.50" / "1.250,50" (both separators: the last one is the decimal),
  * and "1,250" / "1,250,000" (comma groups of three = thousands).
  */
-export function normalizeDecimal(raw: string): string | null {
-  const s = raw.replace(STRIP, '');
+export function normalizeDecimal(raw: string, opts: { decimalComma?: boolean } = {}): string | null {
+  let s = raw.replace(STRIP, '');
   if (s === '') return null;
-  if (!/^[\d.,]+$/.test(s)) return null;
+  if (!/^[\d.,]+$/.test(s) || !/\d/.test(s)) return null; // a lone "." or "," is not 0
+  // Decimal-comma mode (the keypad, whose only separator key is ","): one comma is the decimal.
+  if (opts.decimalComma) {
+    if (s.includes('.') || (s.match(/,/g) ?? []).length > 1) return null;
+    s = s.replace(',', '.');
+  }
   const lastComma = s.lastIndexOf(',');
   const lastDot = s.lastIndexOf('.');
   let canonical: string;
@@ -57,13 +62,23 @@ export function parseMoneyInput(raw: string): number | null {
 }
 
 /** A typed quantity as a number (up to `maxDecimals`), or null. */
-export function parseQuantityInput(raw: string, maxDecimals = 3): number | null {
-  const n = normalizeDecimal(raw);
+export function parseQuantityInput(raw: string, maxDecimals = 3, opts: { decimalComma?: boolean } = {}): number | null {
+  const n = normalizeDecimal(raw, opts);
   if (n === null) return null;
   const value = Number(n);
   if (!Number.isFinite(value)) return null;
   const f = 10 ** maxDecimals;
   return Math.round(value * f) / f;
+}
+
+/** QtyKeypad text ("1,25": the comma is always the decimal) → a quantity, or null. */
+export function parseKeypadQuantity(text: string, maxDecimals = 3): number | null {
+  return parseQuantityInput(text, maxDecimals, { decimalComma: true });
+}
+
+/** A quantity → QtyKeypad text (decimal comma, no grouping): 1.125 → "1,125". */
+export function formatKeypadText(value: number): string {
+  return String(value).replace('.', ',');
 }
 
 /** Agorot → the field's display text on blur: grouped, 2 dp ("1,250.50"). Not a ₪ string. */
@@ -88,6 +103,18 @@ export function parseDateInput(raw: string): string | null {
   const date = new Date(Date.UTC(y, m - 1, d));
   if (date.getUTCFullYear() !== y || date.getUTCMonth() !== m - 1 || date.getUTCDate() !== d) return null;
   return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+/**
+ * What a DateField holds for its typed text: the ISO date it posts, and
+ * whether to flag it. Anything that is not a whole, real, in-range date
+ * posts nothing ("") — never a stale or half-typed value.
+ */
+export function dateFieldValue(text: string, range: { min?: string; max?: string } = {}): { iso: string | null; invalid: boolean } {
+  if (text.trim() === '') return { iso: null, invalid: false };
+  const iso = parseDateInput(text);
+  if (!iso || (range.min && iso < range.min) || (range.max && iso > range.max)) return { iso: null, invalid: true };
+  return { iso, invalid: false };
 }
 
 /** ISO → "25.10.2026" (Hebrew) or "25/10/2026" (English), independent of the browser locale. */

@@ -1,6 +1,6 @@
 import { Children, cloneElement, isValidElement, useId, type ReactElement } from 'react';
 import { OctagonAlert } from 'lucide-react';
-import { cn } from './cn';
+import { cnMerge as cn } from './cn';
 
 // No width here: fields are full-width unless `fullWidth={false}`, in which case
 // the caller's className sets the width. Focus is the global :focus-visible
