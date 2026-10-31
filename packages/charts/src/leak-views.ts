@@ -99,13 +99,24 @@ function boundsCte(restaurantId: string, spec: ViewSpec, compare: ViewCompare): 
   // A comparison covers the same to-date stretch: a period still running (this month,
   // quarter, 12 months, a range ending in the future) is cut at the end of today before
   // shifting, so 3 days of October compare with Sep 1–3, not all of September.
-  const shiftedHi = compare === 'off' ? sql`b0.hi_l` : sql`LEAST(b0.hi_l, date_trunc('day', b0.nl) + interval '1 day')`;
   const shift =
     compare === 'yoy'
       ? sql`interval '1 year'`
       : compare === 'prev'
         ? (step ?? sql`(b0.hi_l - b0.lo_l)`)
         : sql`interval '0'`;
+  // A calendar shift (month / quarter / year) moves TODAY back by the step and then
+  // ends after that day, capped at the shifted period's end: on 30.10 the previous
+  // month is 1–30.09 and on 31.03 it is 1–28/29.02 (Postgres clamps 31.03 − 1 month
+  // to the month's last day). Shifting the exclusive end instead (31.10 − 1 month =
+  // 30.09) lost a day: 1–29.09. A length shift (ytd / custom prev) keeps its span.
+  const calendarShift = compare === 'yoy' || (compare === 'prev' && step != null);
+  const hiExpr =
+    compare === 'off'
+      ? sql`b0.hi_l`
+      : calendarShift
+        ? sql`LEAST(b0.hi_l - ${shift}, date_trunc('day', b0.nl) - ${shift} + interval '1 day')`
+        : sql`LEAST(b0.hi_l, date_trunc('day', b0.nl) + interval '1 day') - ${shift}`;
   return sql`
     r AS (
       SELECT COALESCE(timezone, 'Asia/Jerusalem') AS tz FROM restaurants WHERE id = ${restaurantId}
@@ -114,7 +125,7 @@ function boundsCte(restaurantId: string, spec: ViewSpec, compare: ViewCompare): 
     b0 AS (SELECT ${lo} AS lo_l, ${hi} AS hi_l, nl, tz FROM nn),
     b AS (
       SELECT (b0.lo_l - ${shift}) AT TIME ZONE b0.tz AS lo,
-             (${shiftedHi} - ${shift}) AT TIME ZONE b0.tz AS hi,
+             (${hiExpr}) AT TIME ZONE b0.tz AS hi,
              b0.tz
       FROM b0
     )`;
