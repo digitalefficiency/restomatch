@@ -134,14 +134,16 @@ export type DecisionAction =
  *  • DUPLICATE_INVOICE: "אל תשלם את העותק" / "שלם · זו לא כפולה";
  *  • everything else: "דרוש ₪X מהספק" / "שלם כפי שחויב".
  */
-export function decisionActions(type: string): DecisionAction[] {
+export function decisionActions(type: string, claimable = true): DecisionAction[] {
   if (type === 'UNORDERED_ARRIVAL') return [{ kind: 'link', label: 'decision.link' }];
-  if (type === 'PRICE_LOWER' || type === 'MISSING_ON_INVOICE') {
+  // No ₪ to claim (info severity, ₪0, PRICE_LOWER — packages/api isClaimableRow): a check, never "דרוש ₪X".
+  if (type === 'PRICE_LOWER' || type === 'MISSING_ON_INVOICE' || !claimable) {
     return [{ kind: 'review', procedure: 'reject', label: 'decision.reviewed', done: 'decision.reviewedDone' }];
   }
   if (type === 'DUPLICATE_INVOICE') {
     return [
-      { kind: 'approve', procedure: 'approve', label: 'decision.duplicateApprove', done: 'decision.approved', withAmount: false },
+      // Accepting a duplicate HOLDS the copy; it is never "דרוש ₪X" nor "נדרש מהספק".
+      { kind: 'approve', procedure: 'approve', label: 'decision.duplicateApprove', done: 'decision.duplicateHeld', withAmount: false },
       { kind: 'reject', procedure: 'reject', label: 'decision.duplicateReject', done: 'decision.rejected' },
     ];
   }
@@ -257,10 +259,12 @@ export function whyLine(t: T, d: WhyFacts): WhySegment[][] {
 
   if ((d.type === 'PRICE_HIGHER' || d.type === 'PRICE_LOWER') && exp != null && act != null) {
     const billed = qty(d.qtyBilled);
-    const formula = billed
-      ? fill(t('why.price'), { actual: ils(act), qty: billed, unit, expected: ils(exp) })
-      : fill(t('why.priceNoQty'), { actual: ils(act), expected: ils(exp) });
+    // The engine's two price bases: the PO line's agreed price, or the supplier's
+    // historical p90 (packages/matching evaluateBaseline). A p90 is never shown as an order price.
     const isP90 = (d.toleranceUsed ?? '').startsWith('actual exceeds historical p90');
+    const formula = billed
+      ? fill(t(isP90 ? 'why.priceP90' : 'why.price'), { actual: ils(act), qty: billed, unit, expected: ils(exp) })
+      : fill(t(isP90 ? 'why.priceP90NoQty' : 'why.priceNoQty'), { actual: ils(act), expected: ils(exp) });
     const po = poLabel(d.poRef, d.poId);
     const source = isP90
       ? [{ text: ' ' }, { text: t('why.sourceP90') }]

@@ -84,6 +84,22 @@ export const WAIVE_REASON_CODES = [
  * row is not readable on the tenant connection (RLS: users are self-only).
  */
 export const DECIDED_CONFLICT_PREFIX = 'approvals.decided:';
+
+/**
+ * Is there ₪ to claim on this open row? The charts LEAK_FILTER (warn/block, not
+ * PRICE_LOWER / UNORDERED_ARRIVAL) plus a non-zero ₪, minus MISSING_ON_INVOICE:
+ * a line that was ordered but never billed has nothing to ask back. A row that
+ * fails it is a check ("סמנו כנבדק"), never "דרוש ₪X" — the UI keys its verbs on
+ * this, and queueSummary splits "להחלטה (₪)" from "לבדיקה (ללא ₪)".
+ */
+const NEVER_CLAIMABLE = new Set(['PRICE_LOWER', 'UNORDERED_ARRIVAL', 'MISSING_ON_INVOICE']);
+export function isClaimableRow(r: { type: string; severity: string; deltaAmount: string | null }): boolean {
+  return (
+    (r.severity === 'warn' || r.severity === 'block') &&
+    !NEVER_CLAIMABLE.has(r.type) &&
+    Math.abs(Number(r.deltaAmount ?? 0)) > 0
+  );
+}
 export interface DecidedConflict {
   status: string;
   role: string | null;
@@ -241,7 +257,10 @@ export const approvalsRouter = router({
             .offset(input?.offset ?? 0);
       // A PO line from another tenant can never be joined in (its PO join is
       // tenant-scoped); drop its orphan facts rather than show them.
-      return rows.map((r) => (r.poId ? r : { ...r, qtyOrdered: null, orderedUnit: null, poRef: null, poDate: null }));
+      return rows.map((r) => ({
+        ...(r.poId ? r : { ...r, qtyOrdered: null, orderedUnit: null, poRef: null, poDate: null }),
+        claimable: isClaimableRow(r),
+      }));
     }),
 
   /**
@@ -252,9 +271,18 @@ export const approvalsRouter = router({
    *  • claimableIls — the lib/claims rule (the credit letters' per-invoice cap),
    *    restricted to the queue's own lines, 2 dp, before VAT (a duplicate's ₪ is
    *    incl. VAT and is reported apart as `duplicateIls`);
+   *  • toDecide / toReview — the viewer's rows split by isClaimableRow:
+   *    "להחלטה (₪)" carries the claimable ₪, "לבדיקה (ללא ₪)" is a count only
+   *    (W1-05 reads toDecide for the manager's ₪ awaiting);
    *  • others — finance roles only: open decisions waiting for OTHER roles
    *    (functional-flows-07), so an empty queue never says "all handled" while
    *    the owner still has items.
+   *
+   * Known limit until W2-13: these counts read the open discrepancy rows of
+   * every match run of an invoice. After a re-match, rows of the superseded run
+   * that were never decided still count (here and in the others lane), and the
+   * decider named on a CONFLICT is read back from audit_log, which carries no
+   * match-run id. W2-13 scopes both to the invoice's latest run.
    */
   queueSummary: memberProcedure.input(z.object(QueueFilters).optional()).query(async ({ ctx, input }) => {
     const rid = ctx.session.restaurantId;
@@ -283,7 +311,9 @@ export const approvalsRouter = router({
     const mine = rows.filter((r) => r.requiredRole && roles.includes(r.requiredRole));
     const others = rows.filter((r) => !r.requiredRole || !roles.includes(r.requiredRole));
 
-    const { claimableIls, duplicateIls } = await claimableOf(ctx.db, rid, mine);
+    // The ₪ and the split come from the same rows, so "להחלטה" count and ₪ always agree.
+    const decide = mine.filter(isClaimableRow);
+    const { claimableIls, duplicateIls } = await claimableOf(ctx.db, rid, decide);
     const oldest = mine.reduce<Date | null>((o, r) => (!o || r.createdAt < o ? r.createdAt : o), null);
 
     const showOthers = DECIDER_ROLES.includes(ctx.session.role);
@@ -293,7 +323,7 @@ export const approvalsRouter = router({
         const key = r.requiredRole ?? 'manager';
         const e = byRole.get(key) ?? { count: 0, agorot: 0 };
         e.count += 1;
-        if (r.type !== 'PRICE_LOWER') e.agorot += Math.abs(Math.round(Number(r.deltaAmount ?? 0) * 100));
+        if (isClaimableRow(r)) e.agorot += Math.abs(Math.round(Number(r.deltaAmount ?? 0) * 100));
         byRole.set(key, e);
       }
     }
@@ -304,6 +334,8 @@ export const approvalsRouter = router({
       oldestAt: oldest,
       claimableIls,
       duplicateIls,
+      toDecide: { count: decide.length, amountIls: claimableIls },
+      toReview: { count: mine.length - decide.length },
       others: {
         count: showOthers ? others.length : 0,
         amountIls: othersTotal / 100,
@@ -340,7 +372,8 @@ export const approvalsRouter = router({
       await logActivity(ctx.db, {
         restaurantId: ctx.session.restaurantId,
         eventType: 'discrepancy_approved',
-        title: DECISION_COPY.he.approved,
+        // An accepted duplicate is a hold on the copy, not a claim.
+        title: updated.type === 'DUPLICATE_INVOICE' ? DECISION_COPY.he.duplicateHeld : DECISION_COPY.he.approved,
         detail: updated.deltaAmount ? `₪${Math.abs(Number(updated.deltaAmount)).toFixed(2)}` : null,
         entityType: 'discrepancy',
         entityId: input.discrepancyId,

@@ -16,6 +16,7 @@ export const en: Shape<typeof he> = {
     atRisk: 'Claimable from suppliers',
     atRiskBasis: 'before VAT',
     blockers: 'Blockers',
+    split: '{decide} to decide (₪) · {review} to check (no ₪)',
     oldest: 'Oldest',
     line: '{count} in queue · {amount} to claim · {blockers} blockers',
     duplicates: '+ {amount} in duplicate invoices (incl. VAT)',
@@ -48,6 +49,7 @@ export const en: Shape<typeof he> = {
     reviewedDone: 'Marked as checked',
     duplicateApprove: "Don't pay this copy",
     duplicateReject: 'Pay · not a duplicate',
+    duplicateHeld: 'Copy held · not paid',
   },
   amountLabel: {
     price: 'Overbilled',
@@ -95,8 +97,10 @@ export const en: Shape<typeof he> = {
   why: {
     price: '{actual} × {qty} {unit} instead of {expected}',
     priceNoQty: '{actual} per unit instead of {expected}',
+    priceP90: '{actual} × {qty} {unit}, above {expected}',
+    priceP90NoQty: '{actual} per unit, above {expected}',
     sourcePo: '(order {po}, {date})',
-    sourceP90: '(usual price)',
+    sourceP90: "(the supplier's 90th-percentile price, not an order price)",
     equals: '= {amount}',
     qtyOver: 'billed {billed} {unit}, received {received}',
     qtyShort: 'ordered {ordered} {unit}, received {received}',

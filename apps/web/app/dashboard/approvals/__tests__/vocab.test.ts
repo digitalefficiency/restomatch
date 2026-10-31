@@ -160,7 +160,7 @@ describe('decision verbs name what happens to the money (approvals-01, functiona
       const acts = decisionActions(type);
       expect(acts).toHaveLength(1);
       expect(acts[0]).toMatchObject({ kind: 'review', procedure: 'reject' });
-      expect(he(acts[0]!.label as never)).toBe('סמן כנבדק');
+      expect(he(acts[0]!.label as never)).toBe('סמנו כנבדק');
     }
   });
 
@@ -218,7 +218,7 @@ describe('whyLine (approvals-06)', () => {
 
   it('the usual-price source is named when the engine flagged against p90', () => {
     const text = whyText(whyLine(he, { ...fact, toleranceUsed: 'actual exceeds historical p90 of ₪139.35', poRef: null }));
-    expect(text).toContain('(המחיר ההיסטורי)');
+    expect(text).toContain('(אחוזון 90 של מחירי הספק, לא מחיר הזמנה)');
   });
 
   it('quantity: billed vs received with its unit', () => {
@@ -250,5 +250,48 @@ describe('parseDecidedConflict', () => {
     ).toEqual({ status: 'accepted', role: 'manager', name: null, at: '2026-10-25T10:00:00.000Z', self: false });
     expect(parseDecidedConflict('nothing to undo')).toBeNull();
     expect(parseDecidedConflict('approvals.decided:{oops')).toBeNull();
+  });
+});
+
+describe('verbs keyed by type AND claimability (deep-fix)', () => {
+  it('a non-claimable row (info, ₪0) is a check, never "דרוש ₪X"', () => {
+    for (const type of ['PRICE_HIGHER', 'QTY_SHORT', 'QTY_OVER', 'UNIT_MISMATCH']) {
+      const acts = decisionActions(type, false);
+      expect(acts, type).toHaveLength(1);
+      expect(acts[0]).toMatchObject({ kind: 'review', procedure: 'reject' });
+      expect(he(acts[0]!.label as never)).toBe('סמנו כנבדק');
+    }
+    expect(decisionActions('PRICE_HIGHER', true)[0]).toMatchObject({ kind: 'approve' });
+  });
+
+  it('an accepted duplicate is a hold, never a claim', () => {
+    const [ap, rj] = decisionActions('DUPLICATE_INVOICE', true);
+    expect(ap).toMatchObject({ kind: 'approve', withAmount: false, done: 'decision.duplicateHeld' });
+    expect(he(ap!.label as never)).toBe('אל תשלמו את העותק');
+    expect(he(ap!.label as never)).not.toMatch(/דרוש/);
+    expect(he((ap as { done: string }).done as never)).toBe(DECISION_COPY.he.duplicateHeld);
+    expect(en('decision.duplicateHeld')).toBe(DECISION_COPY.en.duplicateHeld);
+    expect(he(rj!.label as never)).toBe('שלמו · זו לא כפולה');
+  });
+
+  it('a p90 basis is never shown as an order price', () => {
+    const p90 = {
+      type: 'PRICE_HIGHER',
+      deltaAmount: '19.70',
+      expectedValue: '139.35',
+      actualValue: '149.20',
+      toleranceUsed: 'actual exceeds historical p90 of ₪139.35',
+      qtyBilled: '2',
+      billedUnit: 'ק״ג',
+      poRef: 'PO-7781',
+      poDate: new Date('2026-10-14T08:00:00Z'),
+    };
+    const text = whyText(whyLine(he, p90));
+    expect(text).not.toMatch(/הזמנה PO|במקום/);
+    expect(text).toContain('מעל');
+    expect(text).toContain('אחוזון 90');
+    const enText = whyText(whyLine(en, p90));
+    expect(enText).not.toMatch(/order PO|instead of/);
+    expect(enText).toContain('90th-percentile');
   });
 });
