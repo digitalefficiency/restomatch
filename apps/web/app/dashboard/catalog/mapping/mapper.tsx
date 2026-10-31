@@ -280,12 +280,31 @@ function MapRow({
   // G-08 charge (review M-2): owner / manager answer "שורת חיוב — לא מוצר" — a
   // deposit / delivery / discount line leaves the questions and the engine input.
   const utils = trpc.useUtils();
+  const refresh = () => {
+    void utils.mapping.unmapped.invalidate();
+    void utils.mapping.questionCount.invalidate();
+  };
+  // The row unmounts once its question is gone: the undo chains on the promise.
+  const unCharge = trpc.mapping.markCharge.useMutation();
   const charge = trpc.mapping.markCharge.useMutation({
-    onSuccess: () => {
+    onSuccess: (r) => {
       setOpen(false);
-      toast.success(t('mapping.chargeMarked'));
-      void utils.mapping.unmapped.invalidate();
-      void utils.mapping.questionCount.invalidate();
+      const undo = r.undo;
+      toast.success(
+        t('mapping.chargeMarked'),
+        undo
+          ? {
+              action: {
+                label: t('mapping.undo'),
+                onClick: () =>
+                  void unCharge
+                    .mutateAsync({ ...confirmKey(row), undo })
+                    .then(refresh, (e: Parameters<typeof friendlyError>[0]) => toast.error(friendlyError(e, tc))),
+              },
+            }
+          : undefined,
+      );
+      refresh();
     },
     onError: (e) => toast.error(friendlyError(e, tc)),
   });
