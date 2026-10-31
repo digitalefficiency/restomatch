@@ -28,7 +28,10 @@ import { featureEnabled } from '../lib/features';
 import { enqueueIngestJobs, INGEST_FEATURE, messageStatus, registerIngestedDocument } from '../ingest/pipeline';
 import { assertSupplierOwned } from '../tenant';
 import { captureSourceRef } from '../orders/captureOrder';
-import { financeProcedure, managerProcedure, router } from '../trpc';
+import { can, financeProcedure, managerProcedure, router } from '../trpc';
+import { localScanStorageEnabled, localScanUrl } from '../lib/localScanStorage';
+import { getServiceStorageClient } from '../lib/supabaseStorage';
+import { INVOICE_SCANS_BUCKET } from '../lib/scanUrls';
 
 const KindEnum = z.enum(['whatsapp', 'email']);
 
@@ -74,6 +77,54 @@ async function ownDocument(db: Database, restaurantId: string, documentId: strin
     .for('update', { of: ingestDocuments });
   if (!doc) throw new TRPCError({ code: 'NOT_FOUND', message: 'document not found' });
   return doc;
+}
+
+/** Preview URLs live at most a minute (W2-02 §7): signed per request, never stored. */
+const PREVIEW_TTL_SEC = 60;
+
+async function signPreview(restaurantId: string, storagePath: string): Promise<string | null> {
+  if (!restaurantId || !storagePath.startsWith(`${restaurantId}/`) || storagePath.includes('..') || storagePath.includes('\\')) {
+    return null;
+  }
+  const storage = getServiceStorageClient();
+  if (!storage) {
+    if (!localScanStorageEnabled()) return null;
+    return localScanUrl(storagePath.slice(restaurantId.length + 1).replace(/\.[a-z0-9]+$/i, ''));
+  }
+  const { data } = await storage.storage.from(INVOICE_SCANS_BUCKET).createSignedUrl(storagePath, PREVIEW_TTL_SEC);
+  return data?.signedUrl ?? null;
+}
+
+/** Register one reviewed document (approve → OCR). Shared by approveDocument and bulkApprove. */
+async function approveOne(
+  db: Database,
+  rid: string,
+  userId: string,
+  input: { documentId: string; supplierId?: string; allowSender: boolean },
+) {
+  const doc = await ownDocument(db, rid, input.documentId);
+  await requireIngest(db, rid, doc.kind);
+  if (input.supplierId) await assertSupplierOwned(db, input.supplierId, rid);
+  if (doc.status !== 'needs_review') throw appError('CONFLICT', 'input.invalid', 'המסמך כבר טופל');
+  // Over-quota documents are metadata only — nothing to read; ask the sender to resend.
+  if (!doc.storagePath) throw appError('BAD_REQUEST', 'input.invalid', 'אין קובץ שמור למסמך זה');
+  const supplierId = input.supplierId ?? doc.supplierId ?? null;
+  const reg = await registerIngestedDocument(db, {
+    restaurantId: rid,
+    documentId: doc.id,
+    storagePath: doc.storagePath,
+    kind: doc.kind,
+    supplierId,
+    userId,
+  });
+  if (input.allowSender) {
+    await db
+      .insert(ingestSenders)
+      .values({ restaurantId: rid, kind: doc.kind, sender: doc.sender, supplierId, createdBy: userId })
+      .onConflictDoNothing();
+  }
+  await refreshMessageStatus(db, rid, doc.messageId);
+  return reg;
 }
 
 async function refreshMessageStatus(db: Database, restaurantId: string, messageId: string) {
@@ -315,7 +366,7 @@ export const ingestRouter = router({
     }),
 
   /** Approve a document from an unknown sender: register it → OCR. Optionally allow-list the sender. */
-  approveDocument: managerProcedure
+  approveDocument: can('intake.approve', financeProcedure)
     .input(
       z.object({
         documentId: z.string().uuid(),
@@ -324,35 +375,55 @@ export const ingestRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const rid = ctx.session.restaurantId;
-      const doc = await ownDocument(ctx.db, rid, input.documentId);
-      await requireIngest(ctx.db, rid, doc.kind);
-      if (input.supplierId) await assertSupplierOwned(ctx.db, input.supplierId, rid);
-      if (doc.status !== 'needs_review') throw appError('CONFLICT', 'input.invalid', 'המסמך כבר טופל');
-      // Over-quota documents are metadata only — nothing to read; ask the sender to resend.
-      if (!doc.storagePath) throw appError('BAD_REQUEST', 'input.invalid', 'אין קובץ שמור למסמך זה');
-      const supplierId = input.supplierId ?? doc.supplierId ?? null;
-      const reg = await registerIngestedDocument(ctx.db, {
-        restaurantId: rid,
-        documentId: doc.id,
-        storagePath: doc.storagePath,
-        kind: doc.kind,
-        supplierId,
-        userId: ctx.session.userId,
-      });
-      if (input.allowSender) {
-        await ctx.db
-          .insert(ingestSenders)
-          .values({ restaurantId: rid, kind: doc.kind, sender: doc.sender, supplierId, createdBy: ctx.session.userId })
-          .onConflictDoNothing();
-      }
-      await refreshMessageStatus(ctx.db, rid, doc.messageId);
-      // Same as receiving.registerInvoice: enqueued from inside the member tx.
-      await enqueueIngestJobs(reg.job ? [reg.job] : []);
-      return { invoiceId: reg.invoiceId };
+      const out = await approveOne(ctx.db, ctx.session.restaurantId, ctx.session.userId, input);
+      await enqueueIngestJobs(out.job ? [out.job] : []);
+      return { invoiceId: out.invoiceId };
     }),
 
-  rejectDocument: managerProcedure.input(z.object({ documentId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+  /**
+   * W2-02 bulk "פענחו N": send N reviewed documents to OCR. Not a payment
+   * approval (no ₪ moves), so no bulk ₪ cap; each id is tenant-checked and the
+   * whole batch fails on a foreign id before anything is enqueued.
+   */
+  bulkApprove: can('intake.approve', financeProcedure)
+    .input(z.object({ documentIds: z.array(z.string().uuid()).min(1).max(50) }))
+    .mutation(async ({ ctx, input }) => {
+      const jobs = [];
+      const invoiceIds: string[] = [];
+      for (const documentId of [...new Set(input.documentIds)]) {
+        const out = await approveOne(ctx.db, ctx.session.restaurantId, ctx.session.userId, { documentId, allowSender: false });
+        if (out.job) jobs.push(out.job);
+        invoiceIds.push(out.invoiceId);
+      }
+      await enqueueIngestJobs(jobs);
+      return { invoiceIds };
+    }),
+
+  /**
+   * W2-02 intake preview: a ≤60 s URL for the stored file of one of the
+   * caller's documents. The path is read from the row and checked against the
+   * tenant prefix before signing; nothing is persisted. Foreign id → NOT_FOUND.
+   */
+  documentPreview: can('intake.approve', financeProcedure)
+    .input(z.object({ documentId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const rid = ctx.session.restaurantId;
+      const [doc] = await ctx.db
+        .select({ storagePath: ingestDocuments.storagePath, mimeType: ingestDocuments.mimeType })
+        .from(ingestDocuments)
+        .where(and(eq(ingestDocuments.id, input.documentId), eq(ingestDocuments.restaurantId, rid)))
+        .limit(1);
+      if (!doc) throw new TRPCError({ code: 'NOT_FOUND', message: 'document not found' });
+      const url = doc.storagePath ? await signPreview(rid, doc.storagePath) : null;
+      return {
+        url,
+        mimeType: doc.mimeType,
+        kind: doc.mimeType === 'application/pdf' ? ('pdf' as const) : doc.mimeType?.startsWith('image/') ? ('image' as const) : ('other' as const),
+        expiresInSec: url ? PREVIEW_TTL_SEC : null,
+      };
+    }),
+
+  rejectDocument: can('intake.approve', financeProcedure).input(z.object({ documentId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
     const rid = ctx.session.restaurantId;
     const doc = await ownDocument(ctx.db, rid, input.documentId);
     await requireIngest(ctx.db, rid, doc.kind);
