@@ -1,16 +1,30 @@
-import { and, eq, inArray, invoices, matchRuns, type Database } from '@restomatch/db';
-import { OPEN_STATUSES } from './intake';
+import {
+  and,
+  auditLog,
+  creditNotes,
+  eq,
+  inArray,
+  invoices,
+  matchRuns,
+  priceHistory,
+  sql,
+  type Database,
+} from '@restomatch/db';
+import { invoiceClosedReason, OPEN_STATUSES } from './intake';
+import type { DocumentFailureReason } from './types';
 
 /* ──────────────────────────────────────────────────────────────────────────
  * The re-OCR and retire edges: INTERIM until G-05's invoice machine lands.
  *
  * Callers run these ONLY for restaurants with the multi-page switch on
- * (`settings.ingest.multiPage`, see ingest/grouping.ts) and only after
- * `invoiceClosedReason` returned null (open: no decided פער, no claim, not
- * approved/paid). They are the only two call sites to swap:
+ * (`settings.features.multiPage`, see ingest/grouping.ts). They are the only two
+ * call sites to swap:
  *   reopenForOcr  → G-05 transition `reocr`  (parsed|matched, no decision, no claim → ocr_pending)
  *   retireInvoice → G-05 transition `retire` (needs an invoice_status value: human-PR via H-03/G-03)
  * ────────────────────────────────────────────────────────────────────────── */
+
+/** The audit action of a retired page invoice (G-05 can add it to the AuditAction union). */
+export const PAGE_ABSORBED_ACTION = 'document.page_absorbed';
 
 /**
  * Re-open an OPEN invoice for OCR (→ `ocr_pending`). Its match runs are
@@ -36,11 +50,78 @@ export async function reopenForOcr(tx: Database, restaurantId: string, invoiceId
 }
 
 /**
- * Retire an absorbed page invoice. INTERIM: invoice_status has no retired
- * value, so the open, undecided, unclaimed row is removed (match runs keep a
- * NULL invoice; its lines go with it).
+ * Why a page invoice may NOT be retired (null = it may). Anything that points
+ * at it refuses: not open (approved/paid/disputed), a claim, a decided פער, a
+ * credit note, a goods-receipt link (a match run on a receipt, or a receiving
+ * scan's stamp) or price history.
  */
-export async function retireInvoice(tx: Database, restaurantId: string, invoiceId: string): Promise<boolean> {
+export async function retireBlocker(
+  tx: Database,
+  restaurantId: string,
+  invoiceId: string,
+): Promise<DocumentFailureReason | 'not_found' | null> {
+  const closed = await invoiceClosedReason(tx, restaurantId, invoiceId);
+  if (closed) return closed;
+  const [note] = await tx
+    .select({ id: creditNotes.id })
+    .from(creditNotes)
+    .where(and(eq(creditNotes.restaurantId, restaurantId), eq(creditNotes.invoiceId, invoiceId)))
+    .limit(1);
+  if (note) return 'has_claim';
+  const [grRun] = await tx
+    .select({ id: matchRuns.id })
+    .from(matchRuns)
+    .where(and(eq(matchRuns.restaurantId, restaurantId), eq(matchRuns.invoiceId, invoiceId), sql`${matchRuns.grId} is not null`))
+    .limit(1);
+  if (grRun) return 'linked';
+  const [stamped] = await tx
+    .select({ id: invoices.id })
+    .from(invoices)
+    .where(
+      and(
+        eq(invoices.restaurantId, restaurantId),
+        eq(invoices.id, invoiceId),
+        sql`(${invoices.ocrPayload} -> 'raw' ->> 'scanGrId') is not null`,
+      ),
+    )
+    .limit(1);
+  if (stamped) return 'linked';
+  const [price] = await tx
+    .select({ id: priceHistory.id })
+    .from(priceHistory)
+    .where(and(eq(priceHistory.restaurantId, restaurantId), eq(priceHistory.sourceInvoiceId, invoiceId)))
+    .limit(1);
+  if (price) return 'linked';
+  return null;
+}
+
+/**
+ * Retire an absorbed page invoice. INTERIM: invoice_status has no retired
+ * value, so the open, unreferenced row is removed. It refuses (deletes
+ * nothing) when `retireBlocker` names a reason; it NEVER deletes the stored
+ * scan (the page's object stays, now listed under the surviving invoice); and
+ * it writes an audit row (who, which page invoice, absorbed into which invoice).
+ */
+export async function retireInvoice(
+  tx: Database,
+  args: { restaurantId: string; invoiceId: string; absorbedInto: string; userId: string | null },
+): Promise<{ ok: true } | { ok: false; reason: DocumentFailureReason | 'not_found' }> {
+  const { restaurantId, invoiceId } = args;
+  const blocker = await retireBlocker(tx, restaurantId, invoiceId);
+  if (blocker) return { ok: false, reason: blocker };
+  const [before] = await tx
+    .select({
+      status: invoices.status,
+      supplierId: invoices.supplierId,
+      invoiceNumber: invoices.invoiceNumber,
+      rawImageUrl: invoices.rawImageUrl,
+      source: invoices.source,
+    })
+    .from(invoices)
+    .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
+    .limit(1);
+  if (!before) return { ok: false, reason: 'not_found' };
+  // Undecided runs only (the blocker refused decided ones and receipt runs).
   await tx.delete(matchRuns).where(and(eq(matchRuns.invoiceId, invoiceId), eq(matchRuns.restaurantId, restaurantId)));
   const gone = await tx
     .delete(invoices)
@@ -52,5 +133,15 @@ export async function retireInvoice(tx: Database, restaurantId: string, invoiceI
       ),
     )
     .returning({ id: invoices.id });
-  return gone.length > 0;
+  if (gone.length === 0) return { ok: false, reason: 'approved_or_paid' };
+  await tx.insert(auditLog).values({
+    restaurantId,
+    userId: args.userId,
+    action: PAGE_ABSORBED_ACTION,
+    entityType: 'invoice',
+    entityId: invoiceId,
+    before: before as never,
+    after: { absorbedInto: args.absorbedInto } as never,
+  });
+  return { ok: true };
 }

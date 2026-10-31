@@ -10,6 +10,7 @@ import { PDFDocument } from 'pdf-lib';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   applyAuditImmutableRls,
+  auditLog,
   applyAuthCredentialTables,
   applyCoreTenantRls,
   createDb,
@@ -222,7 +223,7 @@ async function pagesOf(invoiceId: string): Promise<number> {
 async function setMultiPage(on: boolean) {
   await ownerDb
     .update(restaurants)
-    .set({ settings: { features: { ingestWhatsapp: true }, ingest: { multiPage: on } } as never })
+    .set({ settings: { features: { ingestWhatsapp: true, multiPage: on } } as never })
     .where(eq(restaurants.id, A.restaurantId));
 }
 
@@ -259,8 +260,12 @@ describe('attachAsPage / splitDocument', () => {
     const first = await photoInvoice('pair-1', 0);
     const second = await photoInvoice('pair-2', 30);
     expect(second).not.toBe(first);
-    const res = await asA((tx) => attachAsPage(tx, { restaurantId: A.restaurantId, invoiceId: first, documentId: second }, { enqueue: capture }));
+    const res = await asA((tx) =>
+      attachAsPage(tx, { restaurantId: A.restaurantId, invoiceId: first, documentId: second, userId: A.ownerUserId }, { enqueue: capture }),
+    );
     expect(res).toMatchObject({ invoiceId: first, absorbedInvoiceId: second, pageCount: 2, ocrEnqueued: true });
+    const [audit] = await ownerDb.select().from(auditLog).where(eq(auditLog.entityId, second));
+    expect(audit).toMatchObject({ action: 'document.page_absorbed', userId: A.ownerUserId, after: { absorbedInto: first } });
     expect(await ownerDb.select().from(invoices).where(eq(invoices.id, second))).toHaveLength(0);
     const docs = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.restaurantId, A.restaurantId));
     expect(new Set(docs.map((d) => d.invoiceId))).toEqual(new Set([first]));
@@ -308,12 +313,17 @@ describe('attachAsPage / splitDocument', () => {
     expect(enqueued).toHaveLength(0);
   });
 
-  it('refused for an approved invoice and while settings.ingest.multiPage is off', async () => {
+  it('refused for an approved invoice, a receipt-linked absorbed invoice, and while features.multiPage is off', async () => {
     const first = await photoInvoice('st-1', 0);
     const second = await photoInvoice('st-2', 30);
     await ownerDb.update(invoices).set({ status: 'approved' }).where(eq(invoices.id, first));
     expect(await reason(asA((tx) => attachAsPage(tx, { restaurantId: A.restaurantId, invoiceId: first, documentId: second }, { enqueue: capture })))).toBe(
       'approved_or_paid',
+    );
+    await ownerDb.update(invoices).set({ status: 'parsed' }).where(eq(invoices.id, first));
+    await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: second, grId: A.grId, overallStatus: 'clean' });
+    expect(await reason(asA((tx) => attachAsPage(tx, { restaurantId: A.restaurantId, invoiceId: first, documentId: second }, { enqueue: capture })))).toBe(
+      'linked',
     );
     await setMultiPage(false);
     expect(await reason(asA((tx) => splitDocument(tx, { restaurantId: A.restaurantId, invoiceId: second, pages: [[0]] }, { enqueue: capture })))).toBe(

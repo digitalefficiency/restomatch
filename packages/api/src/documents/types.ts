@@ -21,6 +21,8 @@ export type DocumentFailureReason =
   | 'has_claim'
   /** attach/split: the invoice is approved or paid. */
   | 'approved_or_paid'
+  /** attach: the absorbed invoice is referenced (a goods receipt, price history, a credit note): never retired. */
+  | 'linked'
   /** attach: both ids are the same invoice. */
   | 'same_invoice'
   /** split: the page groups are not a partition of the document's pages. */
@@ -60,6 +62,8 @@ export interface AttachAsPageInput {
   documentId: string;
   /** 0-based position of the absorbed pages in the result; default = append. */
   pageIndex?: number;
+  /** The acting user, for the audit row. */
+  userId?: string | null;
 }
 
 export interface AttachAsPageResult {

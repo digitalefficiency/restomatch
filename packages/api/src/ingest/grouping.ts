@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { featureEnabled } from '../lib/features';
 import { and, asc, eq, ingestDocuments, ingestMessages, sql, type Database } from '@restomatch/db';
 import { composeDocument, MAX_DOCUMENT_PAGES } from '../documents/compose';
 import { extOf, signObjectRef, storedImageValue } from '../documents/objectRef';
@@ -25,7 +26,7 @@ export function isPageMime(mime: string | null | undefined): boolean {
 }
 
 /**
- * `settings.ingest.{groupMinutes,multiPage}`, read through a LOCAL parser:
+ * `settings.ingest.groupMinutes`, read through a LOCAL parser:
  * `RestaurantSettings` lives in immutable schema.ts and is not widened.
  */
 const IngestSettings = z
@@ -33,7 +34,6 @@ const IngestSettings = z
     ingest: z
       .object({
         groupMinutes: z.number().int().min(0).max(120).optional().catch(undefined),
-        multiPage: z.boolean().optional().catch(undefined),
       })
       .partial()
       .passthrough()
@@ -42,7 +42,7 @@ const IngestSettings = z
   })
   .passthrough();
 
-function ingestSettings(settings: unknown): { groupMinutes?: number; multiPage?: boolean } {
+function ingestSettings(settings: unknown): { groupMinutes?: number } {
   const parsed = IngestSettings.safeParse(settings ?? {});
   return parsed.success ? (parsed.data.ingest ?? {}) : {};
 }
@@ -53,13 +53,16 @@ export function groupMinutes(settings: unknown): number {
 }
 
 /**
- * THE pilot switch for multi-page documents: `settings.ingest.multiPage === true`
- * per restaurant (default OFF), with a global kill `INGEST_MULTIPAGE_OFF=1`.
+ * THE pilot switch for multi-page documents: `settings.features.multiPage === true`
+ * per restaurant (flipped from the admin feature toggles, with an audit row).
+ * Strict opt-in: the demo's `features.all` does NOT turn it on. Kill switches:
+ * `FEATURES_OFF=multiPage` (or `all`) and `INGEST_MULTIPAGE_OFF=1`.
  * OFF = every page is its own invoice (the pre-G-09 behaviour): no merge, no re-OCR.
  */
 export function multiPageEnabled(settings: unknown, env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.INGEST_MULTIPAGE_OFF === '1' || env.INGEST_MULTIPAGE_OFF === 'true') return false;
-  return ingestSettings(settings).multiPage === true;
+  const features = (settings as { features?: Record<string, unknown> } | null | undefined)?.features;
+  return features?.multiPage === true && featureEnabled(settings, 'multiPage', env);
 }
 
 export interface PageRow {

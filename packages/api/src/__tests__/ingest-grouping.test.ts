@@ -13,6 +13,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   and,
   applyAuditImmutableRls,
+  auditLog,
+  discrepancies,
+  recoveryClaims,
   applyAuthCredentialTables,
   applyCoreTenantRls,
   createDb,
@@ -113,10 +116,13 @@ async function pdfPagesOf(invoiceId: string): Promise<number> {
   return (await PDFDocument.load(bytes)).getPageCount();
 }
 
-async function setSettings(ingest: Record<string, unknown>) {
+async function setSettings(opts: { multiPage?: boolean; groupMinutes?: number; all?: boolean }) {
+  const features: Record<string, boolean> = { ingestWhatsapp: true, ingestEmail: true };
+  if (opts.multiPage !== undefined) features.multiPage = opts.multiPage;
+  if (opts.all) features.all = true;
   await ownerDb
     .update(restaurants)
-    .set({ settings: { features: { ingestWhatsapp: true, ingestEmail: true }, ingest } as never })
+    .set({ settings: { features, ...(opts.groupMinutes !== undefined ? { ingest: { groupMinutes: opts.groupMinutes } } : {}) } as never })
     .where(eq(restaurants.id, A.restaurantId));
 }
 
@@ -366,6 +372,64 @@ describe('one message and one sender window', () => {
     expect(ocrCalls).toEqual([]);
   });
 
+  it('a merged page leaves an audit row and its scan object stays in storage', async () => {
+    const p1 = await invoiceOf(await send(ch.wa, wa([jpegBytes('au-p1')]), at(0)));
+    const p2 = await invoiceOf(await send(ch.wa, wa([jpegBytes('au-p2')]), at(2)));
+    const [page2] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, p2));
+    await ocr(p1, ACME);
+    expect(await ocr(p2, { ...ACME, invoiceNumber: null })).toMatchObject({ absorbed: true });
+    const audit = await ownerDb.select().from(auditLog).where(and(eq(auditLog.restaurantId, A.restaurantId), eq(auditLog.entityId, p2)));
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({ action: 'document.page_absorbed', entityType: 'invoice', userId: null, after: { absorbedInto: p1 } });
+    expect(await localDocumentStorage().read(A.restaurantId, page2!.storagePath!)).not.toBeNull();
+  });
+
+  it('a page that anything references is never retired: claim, decided gap, receipt link, credit note', async () => {
+    const cases: Array<[string, (inv: string) => Promise<void>]> = [
+      ['claim', async (inv) => {
+        const [run] = await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: inv, overallStatus: 'minor' }).returning();
+        const [gap] = await ownerDb
+          .insert(discrepancies)
+          .values({ matchRunId: run!.id, restaurantId: A.restaurantId, type: 'PRICE_HIGHER', severity: 'warn' }) // undecided
+          .returning();
+        await ownerDb.insert(recoveryClaims).values({ restaurantId: A.restaurantId, discrepancyId: gap!.id, invoiceId: inv, amountAgorot: 500 });
+      }],
+      ['decided', async (inv) => {
+        const [run] = await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: inv, overallStatus: 'minor' }).returning();
+        await ownerDb.insert(discrepancies).values({ matchRunId: run!.id, restaurantId: A.restaurantId, type: 'PRICE_HIGHER', severity: 'warn', resolutionStatus: 'accepted' });
+      }],
+      ['receipt', async (inv) => {
+        await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: inv, grId: A.grId, overallStatus: 'clean' });
+      }],
+      ['scan stamp', async (inv) => {
+        await ownerDb.update(invoices).set({ ocrPayload: sql`jsonb_set(coalesce(${invoices.ocrPayload}, '{}'::jsonb), '{raw,scanGrId}', ${JSON.stringify(A.grId)}::jsonb, true)` }).where(eq(invoices.id, inv));
+      }],
+      ['credit note', async (inv) => {
+        const [line] = await ownerDb
+          .insert(invoiceLines)
+          .values({ invoiceId: inv, rawDescription: 'credited', qtyBilled: '1', unit: 'unit', unitPriceBilled: '1.0000', lineTotal: '1.00' })
+          .returning();
+        await ownerDb.execute(
+          sql`insert into credit_notes (restaurant_id, supplier_id, invoice_id, invoice_line_id, amount_agorot, issued_on, source)
+              values (${A.restaurantId}, ${A.supplierId}, ${inv}, ${line!.id}, 100, '2026-11-02', 'invoice_line')`,
+        );
+      }],
+    ];
+    let minute = 0;
+    for (const [label, link] of cases) {
+      const p1 = await invoiceOf(await send(ch.wa, wa([jpegBytes(`ref-${label}-1`)]), at(minute)));
+      const p2 = await invoiceOf(await send(ch.wa, wa([jpegBytes(`ref-${label}-2`)]), at(minute + 1)));
+      await ocr(p1, { ...ACME, invoiceNumber: `A-${minute}` });
+      await ownerDb.update(invoices).set({ status: 'matched', invoiceNumber: null, ocrPayload: { raw: { reconciled: { supplier: { name: ACME.supplierName, businessId: ACME.businessId } } } } as never }).where(eq(invoices.id, p2));
+      await link(p2);
+      const res = await withRestaurant(appDb, A.restaurantId, (tx) => settleDocumentPages(tx, { restaurantId: A.restaurantId, invoiceId: p2 }, { enqueueOcr: async () => {}, enqueueMatch: async () => {} }));
+      expect({ label, res }).toMatchObject({ label, res: { absorbed: false, flagged: [{ invoiceId: p2, reason: 'page_not_merged' }] } });
+      expect(await ownerDb.select().from(invoices).where(eq(invoices.id, p2))).toHaveLength(1);
+      expect(await ownerDb.select().from(auditLog).where(eq(auditLog.entityId, p2))).toHaveLength(0);
+      minute += 30;
+    }
+  });
+
   it("merging into an already-matched page 1 resets its undecided match run (no stale gap)", async () => {
     const p1 = await invoiceOf(await send(ch.wa, wa([jpegBytes('mr-p1')]), at(0)));
     await ocr(p1, ACME);
@@ -385,8 +449,8 @@ describe('one message and one sender window', () => {
     expect(await ocrJobs(d1!.invoiceId!)).toHaveLength(1);
   });
 
-  it('with settings.ingest.multiPage OFF (the default) every page stays its own invoice', async () => {
-    await setSettings({});
+  it('with features.multiPage OFF (the default, even with features.all) every page stays its own invoice', async () => {
+    await setSettings({ all: true });
     const p1 = await invoiceOf(await send(ch.wa, wa([jpegBytes('off-p1')]), at(0)));
     const p2 = await invoiceOf(await send(ch.wa, wa([jpegBytes('off-p2')]), at(2)));
     expect(await ocr(p1, ACME)).toEqual({ hold: false, absorbed: false, flagged: [] });
@@ -394,7 +458,7 @@ describe('one message and one sender window', () => {
     expect(await invoicesOfA()).toHaveLength(2);
   });
 
-  it('INGEST_MULTIPAGE_OFF=1 is a global kill switch', async () => {
+  it('INGEST_MULTIPAGE_OFF=1 is a global kill switch (FEATURES_OFF=multiPage too)', async () => {
     process.env.INGEST_MULTIPAGE_OFF = '1';
     try {
       const p1 = await invoiceOf(await send(ch.wa, wa([jpegBytes('k-p1')]), at(0)));

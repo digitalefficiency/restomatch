@@ -16,7 +16,7 @@ import { enqueueIngestJobs, type OcrJobToEnqueue } from '../ingest/pipeline';
 import { groupMinutes, invoicePageRows, isPageMime, multiPageEnabled, recomposeInvoice, type PageRow } from '../ingest/grouping';
 import { MAX_DOCUMENT_PAGES } from './compose';
 import { invoiceClosedReason } from './intake';
-import { reopenForOcr, retireInvoice } from './reocr';
+import { reopenForOcr, retireBlocker, retireInvoice } from './reocr';
 
 /**
  * G-09 · the same-supplier guard (owner decision 31.10: "multi-page invoices
@@ -256,7 +256,9 @@ export async function settleDocumentPages(
     const firstClosed = toMerge.length > 0 ? await invoiceClosedReason(tx, restaurantId, first.invoiceId) : null;
     const merging: PageHeader[] = [];
     for (const page of toMerge) {
-      if (firstClosed || (await invoiceClosedReason(tx, restaurantId, page.invoiceId))) {
+      // A page is retired only when NOTHING references it (claim, decision,
+      // approval/payment, credit note, goods receipt, price history).
+      if (firstClosed || (await retireBlocker(tx, restaurantId, page.invoiceId))) {
         flagged.push({ invoiceId: page.invoiceId, reason: 'page_not_merged' });
       } else merging.push(page);
     }
@@ -284,7 +286,11 @@ export async function settleDocumentPages(
         .update(ingestDocuments)
         .set({ invoiceId: first.invoiceId, updatedAt: new Date() })
         .where(and(eq(ingestDocuments.restaurantId, restaurantId), inArray(ingestDocuments.invoiceId, mergingIds)));
-      for (const id of mergingIds) await retireInvoice(tx, restaurantId, id);
+      for (const id of mergingIds) {
+        const retired = await retireInvoice(tx, { restaurantId, invoiceId: id, absorbedInto: first.invoiceId, userId: null });
+        // Checked above under the same lock; a refusal here aborts the whole merge.
+        if (!retired.ok) throw new Error(`[documents] page ${id} could not be retired: ${retired.reason}`);
+      }
       const pages: PageRow[] = await invoicePageRows(tx, restaurantId, first.invoiceId);
       const r = await recomposeInvoice(tx, { restaurantId, invoiceId: first.invoiceId, supplierId: first.supplierId, pages });
       ocr.push(r.job);

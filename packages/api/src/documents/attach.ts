@@ -4,7 +4,7 @@ import { invoicePageRows, isPageMime, multiPageEnabled, recomposeInvoice, type P
 import { MAX_DOCUMENT_PAGES } from './compose';
 import { DocumentError, documentNotFound } from './errors';
 import { createIntakeInvoice, invoiceClosedReason } from './intake';
-import { reopenForOcr, retireInvoice } from './reocr';
+import { reopenForOcr, retireBlocker, retireInvoice } from './reocr';
 import { storedImageValue } from './objectRef';
 import type { AttachAsPageInput, AttachAsPageResult, SplitDocumentInput, SplitDocumentResult } from './types';
 
@@ -76,7 +76,10 @@ export async function attachAsPage(db: Database, input: AttachAsPageInput, deps:
     await assertMultiPage(tx, restaurantId);
     await lockInvoices(tx, restaurantId, [invoiceId, documentId]);
     await assertOpen(tx, restaurantId, invoiceId);
-    await assertOpen(tx, restaurantId, documentId);
+    // The absorbed invoice is retired: nothing may reference it.
+    const blocker = await retireBlocker(tx, restaurantId, documentId);
+    if (blocker === 'not_found') throw documentNotFound();
+    if (blocker) throw new DocumentError(blocker);
     const survivor = await pagesOf(tx, restaurantId, invoiceId);
     const absorbed = await pagesOf(tx, restaurantId, documentId);
     if (survivor.length + absorbed.length > MAX_DOCUMENT_PAGES) throw new DocumentError('too_many_pages');
@@ -90,7 +93,8 @@ export async function attachAsPage(db: Database, input: AttachAsPageInput, deps:
       .set({ invoiceId, updatedAt: new Date() })
       .where(and(eq(ingestDocuments.restaurantId, restaurantId), eq(ingestDocuments.invoiceId, documentId)));
     await setPageOrder(tx, restaurantId, merged);
-    if (!(await retireInvoice(tx, restaurantId, documentId))) throw new DocumentError('reocr_not_enabled');
+    const retired = await retireInvoice(tx, { restaurantId, invoiceId: documentId, absorbedInto: invoiceId, userId: input.userId ?? null });
+    if (!retired.ok) throw retired.reason === 'not_found' ? documentNotFound() : new DocumentError(retired.reason);
 
     const [inv] = await tx
       .select({ supplierId: invoices.supplierId })

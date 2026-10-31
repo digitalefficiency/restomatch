@@ -5,7 +5,7 @@ import type { DocumentFailureReason } from './types';
 export class DocumentError extends TRPCError {
   readonly reason: DocumentFailureReason;
   constructor(reason: DocumentFailureReason) {
-    const conflict = reason === 'decided' || reason === 'has_claim' || reason === 'approved_or_paid' || reason === 'reocr_not_enabled';
+    const conflict = reason === 'decided' || reason === 'has_claim' || reason === 'approved_or_paid' || reason === 'linked' || reason === 'reocr_not_enabled';
     super({ code: conflict ? 'CONFLICT' : 'BAD_REQUEST', message: reason });
     this.reason = reason;
   }

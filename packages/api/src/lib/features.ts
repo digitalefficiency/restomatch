@@ -45,6 +45,8 @@ export const FEATURE_KEYS = [
   'supplierLedger',
   // S17: inventory counting (ספירת מלאי) → actual food cost per period.
   'inventoryCount',
+  // G-09: multi-page documents from the same supplier. Strict opt-in: `all` does NOT turn it on.
+  'multiPage',
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
