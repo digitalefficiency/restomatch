@@ -13,6 +13,7 @@ import { PasswordInput } from '../(auth)/_components/PasswordInput';
 import { OutsideSubmitButton } from '../(auth)/_components/OutsideSubmitButton';
 import { SubmitButton } from '../(auth)/_components/SubmitButton';
 import { PwaSessionGuard } from '@/lib/pwa/PwaSessionGuard';
+import { TrpcProvider } from '@/lib/trpc/client';
 import { LOGOUT_FORM_ATTR } from '@/lib/pwa/offlineQueue';
 import { clearHint, readHint, writeHint } from './hint';
 import { FALLBACK_AFTER_FAILS } from './hintCodec';
@@ -161,13 +162,17 @@ export default async function LoginPage({ searchParams }: PageProps) {
           {t('signin.continue')}
         </LinkButton>
         {/* An explicit sign-out: the same shared-device rule as the dashboard
-            (PwaSessionGuard wipes the photo queue on a data-rm-logout submit). */}
-        <PwaSessionGuard userId={session!.user!.id!} />
-        <form action={switchUserAction} className="mt-3" {...{ [LOGOUT_FORM_ATTR]: '' }}>
-          <SubmitButton variant="secondary" className="min-h-12 w-full text-base">
-            {t('signin.switchUser')}
-          </SubmitButton>
-        </form>
+            (PwaSessionGuard uploads this user's queued photos first, or asks
+            before deleting any). The guard uploads through tRPC, and /login
+            sits outside the dashboard's provider, so it brings its own. */}
+        <TrpcProvider>
+          <PwaSessionGuard userId={session!.user!.id!} />
+          <form action={switchUserAction} className="mt-3" {...{ [LOGOUT_FORM_ATTR]: '' }}>
+            <SubmitButton variant="secondary" className="min-h-12 w-full text-base">
+              {t('signin.switchUser')}
+            </SubmitButton>
+          </form>
+        </TrpcProvider>
       </AuthShell>
     );
   }

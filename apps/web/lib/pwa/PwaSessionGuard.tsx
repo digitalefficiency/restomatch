@@ -28,7 +28,9 @@ type Sheet = { kind: 'flushing'; count: number } | { kind: 'ask'; count: number 
  * sheet names the count and offers wait / sign out and keep them on the phone
  * / delete them. Other users' queued photos are kept and attributed — they
  * upload only when their owner signs in again (keep-and-attribute; no purge at
- * sign-in). Mounted in the dashboard shell; renders nothing until needed.
+ * sign-in). Mounted in the dashboard shell and on the signed-in /login screen;
+ * it uploads through tRPC, so every mount needs a TrpcProvider above it.
+ * Renders nothing until needed.
  */
 export function PwaSessionGuard({ userId }: { userId: string }) {
   const t = useT(receivingDelivery);
