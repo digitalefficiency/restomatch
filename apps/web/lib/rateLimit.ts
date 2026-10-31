@@ -4,6 +4,7 @@ import {
   canonicalizeEmail,
   checkRateLimit,
   MemoryRateLimitStore,
+  refundRateLimit,
   resetRateLimit,
   type RateLimitOptions,
   type RateLimitResult,
@@ -71,6 +72,24 @@ export class PostgresRateLimitStore implements RateLimitStore {
     await this.connect();
     await withDeadline(
       this.db.execute(dsql`DELETE FROM rate_limit_counters WHERE key = ${key}`).then(() => undefined),
+      RATE_LIMIT_DEADLINE_MS,
+      () => new Error(`rate-limit store timed out after ${RATE_LIMIT_DEADLINE_MS}ms`),
+    );
+  }
+
+  /**
+   * Give back one unit of a live window (refundRateLimit): never below 0, never
+   * creates a key, and an expired window is left alone.
+   */
+  async decr(key: string): Promise<void> {
+    await this.connect();
+    await withDeadline(
+      this.db
+        .execute(
+          dsql`UPDATE rate_limit_counters SET count = count - 1
+               WHERE key = ${key} AND count > 0 AND expires_at > now()`,
+        )
+        .then(() => undefined),
       RATE_LIMIT_DEADLINE_MS,
       () => new Error(`rate-limit store timed out after ${RATE_LIMIT_DEADLINE_MS}ms`),
     );
@@ -222,7 +241,13 @@ export const LOGIN_EMAIL_LIMIT: RateLimitOptions = {
   prefix: 'login:email',
 };
 
-/** Password-login attempt limit per client IP: 30 per 15 minutes. */
+/**
+ * Password-login limit per client IP: 30 FAILED attempts per 15 minutes. Every
+ * attempt is counted atomically (so a parallel burst stays bounded), and a
+ * successful login gives its unit back (refundLoginIp). Staff sharing one
+ * restaurant Wi-Fi therefore never lock each other out by logging in
+ * (owner decision 31.10).
+ */
 export const LOGIN_IP_LIMIT: RateLimitOptions = {
   limit: 30,
   windowSec: 15 * 60,
@@ -234,8 +259,17 @@ export const LOGIN_IP_LIMIT: RateLimitOptions = {
  * front line; the DB lockout backstop in authorizeCredentials is the durable
  * floor that holds even when the store fails open.
  */
-export async function enforceLoginLimit(email: string, ip: string): Promise<RateLimitResult> {
-  return enforceEmailAndIpLimit(email, ip, LOGIN_EMAIL_LIMIT, LOGIN_IP_LIMIT);
+export async function enforceLoginLimit(email: string, ip: string, attemptAt?: number): Promise<RateLimitResult> {
+  // `attemptAt` pins the fixed window this attempt is counted in, so the refund
+  // of a successful login (refundLoginIp) gives back exactly that window's unit
+  // even when the password check straddles a window boundary.
+  const at = attemptAt === undefined ? undefined : () => attemptAt;
+  return enforceEmailAndIpLimit(
+    email,
+    ip,
+    at ? { ...LOGIN_EMAIL_LIMIT, now: at } : LOGIN_EMAIL_LIMIT,
+    at ? { ...LOGIN_IP_LIMIT, now: at } : LOGIN_IP_LIMIT,
+  );
 }
 
 /**
@@ -243,13 +277,32 @@ export async function enforceLoginLimit(email: string, ip: string): Promise<Rate
  * failed attempts accumulate toward the lockout. (Several people logging into one
  * demo owner account must not lock it after 10 logins.) Every attempt is still
  * counted atomically in enforceLoginLimit, so parallel guesses stay bounded; the
- * per-IP limit is unchanged. Best effort: a store error only logs.
+ * per-IP unit is given back separately by refundLoginIp. Best effort: a store
+ * error only logs.
  */
 export async function clearLoginFailures(email: string): Promise<void> {
   try {
     await resetRateLimit(await getStore(), canonicalizeEmail(email), LOGIN_EMAIL_LIMIT);
   } catch (err) {
     console.warn('[rateLimit] could not clear login failures:', err instanceof Error ? err.message : err);
+  }
+}
+
+/**
+ * Call after a SUCCESSFUL password login: gives back the one per-IP unit that
+ * enforceLoginLimit counted for this attempt, so only failures accumulate toward
+ * LOGIN_IP_LIMIT (owner decision 31.10: staff on one restaurant Wi-Fi share an
+ * IP). Failures, unknown users, locked accounts and rate-denied attempts keep
+ * their unit. Best effort: a store error only logs, like clearLoginFailures.
+ */
+export async function refundLoginIp(ip: string, attemptAt?: number): Promise<void> {
+  try {
+    // Pass the same `attemptAt` given to enforceLoginLimit: the unit is refunded
+    // in the window it was counted in, never taken from the next window.
+    const opts = attemptAt === undefined ? LOGIN_IP_LIMIT : { ...LOGIN_IP_LIMIT, now: () => attemptAt };
+    await refundRateLimit(await getStore(), ip || 'unknown', opts);
+  } catch (err) {
+    console.warn('[rateLimit] could not refund the login IP unit:', err instanceof Error ? err.message : err);
   }
 }
 
