@@ -81,11 +81,17 @@ describe('PILOT receiving — the receiver gets no ₪', () => {
     expect(recv.totalExclVat).toBeNull();
     expect(recv.vatAmount).toBeNull();
     expect(recv.totalInclVat).toBeNull();
-    for (const l of recv.lines) expect(l.lineTotal).toBeNull();
+    for (const l of recv.lines) {
+      expect(l.lineTotal).toBeNull();
+      expect(l.unitPriceBilled).toBeNull();
+      // The wizard still knows the OCR read a price (not an unreadable line).
+      expect(l.priceRead).toBe(true);
+    }
     expect(JSON.stringify(recv)).not.toContain('₪');
     const owner = await caller('owner').receiving.getInvoice({ invoiceId: A.invoiceId });
     expect(owner.totalInclVat).not.toBeNull();
     expect(owner.lines.some((l) => l.lineTotal !== null)).toBe(true);
+    expect(owner.lines.every((l) => l.priceRead === (l.unitPriceBilled != null && Number(l.unitPriceBilled) !== 0))).toBe(true);
     expect(await caller('manager').receiving.getInvoice({ invoiceId: A.invoiceId })).toEqual(owner);
     expect(await caller('bookkeeper').receiving.getInvoice({ invoiceId: A.invoiceId })).toEqual(owner);
     // Lines stay aligned (ids, qty) so the Delivery Check works the same.

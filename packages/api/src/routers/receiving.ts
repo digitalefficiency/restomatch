@@ -593,14 +593,18 @@ export const receivingRouter = router({
       // only the flag + reason (never the raw extraction payload).
       const { ocrPayload, ...rawInvoiceFields } = invoice;
       // G-07 strip (pilot): the receiver polls this during the Delivery Check
-      // but sees no ₪ — header totals and line totals are nulled. The billed
-      // unit price stays for now: the wizard reads it to tell an unreadable OCR
-      // line from a readable one (see the PR body).
+      // but sees no ₪ — header totals, line totals and billed unit prices are
+      // nulled. `priceRead` (every role) keeps the wizard's "was a price read
+      // on this line?" signal, so a read line isn't mistaken for an unread one.
       const isReceiver = ctx.session.role === 'receiver';
       const invoiceFields = isReceiver
         ? nullFields(rawInvoiceFields, ['totalExclVat', 'vatAmount', 'totalInclVat'])
         : rawInvoiceFields;
-      const outLines = isReceiver ? lines.map((l) => nullFields(l, ['lineTotal'])) : lines;
+      const flagged = lines.map((l) => {
+        const price = l.unitPriceBilled == null ? null : Number(l.unitPriceBilled);
+        return { ...l, priceRead: price !== null && Number.isFinite(price) && price !== 0 };
+      });
+      const outLines = isReceiver ? flagged.map((l) => nullFields(l, ['unitPriceBilled', 'lineTotal'])) : flagged;
       const failure = (ocrPayload?.raw ?? null) as { ocrFailed?: boolean; reason?: string } | null;
       return {
         ...invoiceFields,
