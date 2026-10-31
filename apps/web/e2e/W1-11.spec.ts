@@ -112,6 +112,9 @@ async function setLocale(page: Page, locale: 'he' | 'en') {
  * These W1-11 flows used to get qty 1 for free; they now type it, as a user would.
  */
 async function addItem(page: Page, item: Locator, how: 'tap' | 'click' = 'tap') {
+  // The order guide (W2-06) renders above the catalog: let it settle before tapping,
+  // or the list moves under the pointer.
+  await expect(page.getByTestId('order-guide').or(page.getByTestId('guide-empty'))).toBeVisible({ timeout: 30_000 });
   await (how === 'tap' ? item.tap() : item.click());
   const qty = page.getByTestId('order-line').getByRole('textbox', { name: /כמות|Quantity/ });
   await expect(qty.last()).toBeVisible();
