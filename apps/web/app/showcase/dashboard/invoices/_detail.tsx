@@ -3,6 +3,7 @@
 import { useGSAP } from '@gsap/react';
 import { formatIls } from '@/lib/money';
 import { gsap } from 'gsap';
+import { whenMotionOk } from '../../_lib/motion';
 import {
   ArrowDown,
   ArrowLeft,
@@ -51,30 +52,31 @@ export function InvoiceDetail({ record, onClose }: Props) {
   const [compareOpen, setCompareOpen] = useState(false);
 
   useGSAP(
-    () => {
-      gsap.fromTo(overlayRef.current, { opacity: 0 }, { opacity: 1, duration: 0.2 });
-      gsap.fromTo(
-        sheetRef.current,
-        { x: -40, opacity: 0 },
-        { x: 0, opacity: 1, duration: 0.4, ease: 'power3.out' },
-      );
-      gsap.from('.detail-line', {
-        x: -16,
-        opacity: 0,
-        stagger: 0.04,
-        duration: 0.35,
-        ease: 'power2.out',
-        delay: 0.2,
-      });
-      gsap.from('.timeline-event', {
-        opacity: 0,
-        x: 16,
-        stagger: 0.06,
-        duration: 0.4,
-        ease: 'power2.out',
-        delay: 0.3,
-      });
-    },
+    () =>
+      whenMotionOk(() => {
+        gsap.fromTo(overlayRef.current, { opacity: 0 }, { opacity: 1, duration: 0.2 });
+        gsap.fromTo(
+          sheetRef.current,
+          { x: -40, opacity: 0 },
+          { x: 0, opacity: 1, duration: 0.4, ease: 'power3.out' },
+        );
+        gsap.from('.detail-line', {
+          x: -16,
+          opacity: 0,
+          stagger: 0.04,
+          duration: 0.35,
+          ease: 'power2.out',
+          delay: 0.2,
+        });
+        gsap.from('.timeline-event', {
+          opacity: 0,
+          x: 16,
+          stagger: 0.06,
+          duration: 0.4,
+          ease: 'power2.out',
+          delay: 0.3,
+        });
+      }),
     { dependencies: [record.id] },
   );
 
@@ -202,7 +204,7 @@ export function InvoiceDetail({ record, onClose }: Props) {
               <div className="flex-1 min-w-0">
                 <div className="font-semibold text-ink flex items-center gap-2 flex-wrap">
                   {t('detail.compareCard.title')}
-                  <span className="text-[10px] bg-primary/15 text-primary ring-1 ring-primary/25 px-1.5 py-0.5 rounded font-bold">
+                  <span className="text-xs bg-primary/15 text-primary ring-1 ring-primary/25 px-1.5 py-0.5 rounded font-bold">
                     {t('detail.compareCard.recommended')}
                   </span>
                 </div>
@@ -431,7 +433,7 @@ function ComparisonColumn({
 
   return (
     <div className={`rounded-xl border px-3 py-2 ${bg}`}>
-      <div className="text-[10px] uppercase tracking-wider text-muted font-semibold mb-1">
+      <div className="text-xs ltr:uppercase ltr:tracking-wider text-muted font-semibold mb-1">
         {label}
       </div>
       {qty !== null ? (
@@ -442,7 +444,7 @@ function ComparisonColumn({
         <div className="text-sm text-muted italic">—</div>
       )}
       {price !== null && qty !== null ? (
-        <div className="text-[10px] text-muted mt-0.5 font-mono tabular-nums">
+        <div className="text-xs text-muted mt-0.5 font-mono tabular-nums">
           × ₪{price} = ₪{(qty * price).toFixed(2)}
         </div>
       ) : null}
@@ -498,7 +500,7 @@ function RoleBadge({ role, actor }: { role: AuditTimelineEvent['role']; actor: s
   } as const;
   const info = map[role];
   return (
-    <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ${info.tint}`}>
+    <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium ${info.tint}`}>
       {info.label}
     </span>
   );
@@ -515,7 +517,7 @@ function Section({
 }) {
   return (
     <div>
-      <h3 className="text-sm font-semibold text-ink uppercase tracking-wider mb-3 flex items-center gap-2">
+      <h3 className="text-sm font-semibold text-ink ltr:uppercase ltr:tracking-wider mb-3 flex items-center gap-2">
         <span>{title}</span>
         {collapsible ? <ChevronDown className="w-4 h-4 text-muted" /> : null}
       </h3>
