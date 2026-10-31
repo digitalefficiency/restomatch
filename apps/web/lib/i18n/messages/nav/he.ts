@@ -11,6 +11,9 @@ export const he = {
   links: {
     home: 'בית',
     forbidden: 'אין הרשאה',
+    labTokens: 'מעבדת עיצוב',
+    labDesk: 'מעבדת טבלאות',
+    labDeskRow: 'שורה',
     approvals: 'אישורים',
     payRun: 'ריצת תשלומים',
     inbox: 'חשבוניות נכנסות',

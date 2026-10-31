@@ -9,6 +9,9 @@ export const nav: Shape<typeof he> = {
   links: {
     home: 'መበገሲ',
     forbidden: 'ፍቓድ የብልኩምን',
+    labTokens: 'ቤት ፈተነ ዲዛይን',
+    labDesk: 'ቤት ፈተነ ሰንጠረዥ',
+    labDeskRow: 'መስመር',
     approvals: 'ምጽዳቕ',
     payRun: 'ዙርያ ክፍሊት',
     inbox: 'ዝኣተዉ ፋቱራታት',

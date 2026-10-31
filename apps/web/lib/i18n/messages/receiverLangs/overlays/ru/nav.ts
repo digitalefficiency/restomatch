@@ -9,6 +9,9 @@ export const nav: Shape<typeof he> = {
   links: {
     home: 'Главная',
     forbidden: 'Нет доступа',
+    labTokens: 'Лаборатория дизайна',
+    labDesk: 'Лаборатория таблиц',
+    labDeskRow: 'Строка',
     approvals: 'Согласования',
     payRun: 'Платёжный прогон',
     inbox: 'Входящие счета',
