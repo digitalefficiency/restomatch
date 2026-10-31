@@ -3,6 +3,11 @@ import type { he } from './he';
 
 export const en: Shape<typeof he> = {
   toolbar: {
+    view: 'View',
+    viewCount: 'View · {count}',
+    close: 'Close',
+    showing: 'Showing: {summary}',
+    updated: 'The view was updated',
     label: 'View options',
     period: 'Period',
     compare: 'Compare',
@@ -63,6 +68,8 @@ export const en: Shape<typeof he> = {
     status: 'Status',
   },
   delta: {
+    vsSpan: 'vs {previous}',
+    vsSpanFull: '{current} vs {previous}',
     prev: 'vs previous period',
     yoy: 'vs last year',
     up: 'Up {pct}',
@@ -73,14 +80,19 @@ export const en: Shape<typeof he> = {
   },
   kpis: {
     leak: 'Leak in period',
+    leakMonth: 'Leak this month',
+    invoicesOf: '{with} of {total}',
     pct: 'of spend',
     spend: 'Checked spend',
     invoices: 'Invoices with a leak',
     caught: 'Caught before payment',
   },
   explorer: {
-    title: 'Leak explorer',
-    subtitle: 'The same leak, sliced any way: by supplier, category, product or discrepancy type — with comparison and export.',
+    title: 'Leak breakdown',
+    subtitle: 'The same leak, sliced any way: by supplier, category, product or discrepancy type — against the same days of the previous period.',
+    total: 'Total',
+    summary: '{range} · leak {leak} · {invoices} invoices checked',
+    chartSummary: 'Leak by {group}, total {total}. Largest: {top}.',
     colKey: 'Item',
     colLeak: 'Leak',
     colCount: 'Discrepancies',

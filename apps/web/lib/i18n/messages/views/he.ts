@@ -1,6 +1,11 @@
 /** Dashboard view controls (period, compare, group-by, filters, chart, density, TV, export, saved views). */
 export const he = {
   toolbar: {
+    view: 'תצוגה',
+    viewCount: 'תצוגה · {count}',
+    close: 'סגירה',
+    showing: 'מציג: {summary}',
+    updated: 'התצוגה עודכנה',
     label: 'אפשרויות תצוגה',
     period: 'תקופה',
     compare: 'השוואה',
@@ -61,6 +66,8 @@ export const he = {
     status: 'סטטוס',
   },
   delta: {
+    vsSpan: 'מול {previous}',
+    vsSpanFull: '{current} מול {previous}',
     prev: 'מול התקופה הקודמת',
     yoy: 'מול אשתקד',
     up: 'עלייה של {pct}',
@@ -71,14 +78,19 @@ export const he = {
   },
   kpis: {
     leak: 'דליפה בתקופה',
+    leakMonth: 'דליפה החודש',
+    invoicesOf: '{with} מתוך {total}',
     pct: 'מההוצאה',
     spend: 'הוצאה שנבדקה',
     invoices: 'חשבוניות עם דליפה',
     caught: 'נתפס לפני תשלום',
   },
   explorer: {
-    title: 'חוקר הדליפה',
-    subtitle: 'אותה דליפה, בכל חיתוך: לפי ספק, קטגוריה, מוצר או סוג פער — עם השוואה ויצוא.',
+    title: 'פילוח הדליפה',
+    subtitle: 'אותה דליפה, בכל חיתוך: לפי ספק, קטגוריה, מוצר או סוג פער — מול אותם ימים בתקופה הקודמת.',
+    total: 'סה״כ',
+    summary: '{range} · דליפה {leak} · {invoices} חשבוניות נבדקו',
+    chartSummary: 'דליפה לפי {group}, סה״כ {total}. הגדולים: {top}.',
     colKey: 'פריט',
     colLeak: 'דליפה',
     colCount: 'פערים',
