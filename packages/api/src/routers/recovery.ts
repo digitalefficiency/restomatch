@@ -5,6 +5,8 @@ import {
   claimHistory,
   computeRecoverySummary,
   creditLineSuggestions,
+  creditVatRateBp,
+  exclVatAgorot,
   listClaims,
   lockClaims,
   MAX_CLAIMS,
@@ -12,7 +14,11 @@ import {
   returnedInMonth,
   summarize,
   transitionClaim,
+  transitionClaims,
 } from '../recovery/service';
+import { exportRecovery } from '../recovery/export';
+import { buildClaimLetters, sendLetter, unsendLetter } from '../recovery/letters';
+import { supplierReminderDraft } from '../recovery/reminders';
 import { financeProcedure, memberProcedure } from '../trpc';
 import { router } from '../trpc';
 
@@ -82,18 +88,41 @@ export const recoveryRouter = router({
     .input(z.object({ claimId: z.string().uuid() }))
     .query(({ ctx, input }) => claimHistory(ctx.db, ctx.session.restaurantId, input.claimId)),
 
-  /** Move one or more claims (letter sent, acknowledged, disputed, written off, recovered, re-open). */
+  /**
+   * Move one or more claims (letter sent, acknowledged, disputed, written off,
+   * recovered, re-open).
+   *  - `items[{claimId, expectedStatus}]` (W2-10, the desk): all-or-nothing,
+   *    a per-item CONFLICT when a claim moved meanwhile, and a reason on
+   *    terminal edges (`requiresReason`).
+   *  - `claimIds` (legacy, wave-1 callers and the attack suite): unguarded
+   *    single moves in one transaction. TODO(W2-10): drop once no caller sends it.
+   */
   transition: recoveryProcedure
     .input(
-      z.object({
-        claimIds: z.array(z.string().uuid()).min(1).max(200),
-        to: status.exclude(['credited']),
-        note: z.string().trim().max(500).optional(),
-      }),
+      z
+        .object({
+          claimIds: z.array(z.string().uuid()).min(1).max(200).optional(),
+          items: z
+            .array(z.object({ claimId: z.string().uuid(), expectedStatus: status }))
+            .min(1)
+            .max(200)
+            .optional(),
+          to: status.exclude(['credited']),
+          note: z.string().trim().max(500).optional(),
+        })
+        .refine((v) => (v.claimIds ? 1 : 0) + (v.items ? 1 : 0) === 1, { message: 'send claimIds or items, not both' }),
     )
     .mutation(async ({ ctx, input }) => {
+      if (input.items) {
+        return transitionClaims(ctx.db, ctx.session.restaurantId, {
+          items: input.items,
+          to: input.to,
+          note: input.note ?? null,
+          actorId: ctx.session.userId,
+        });
+      }
       const out = [];
-      const ids = await lockClaims(ctx.db, ctx.session.restaurantId, input.claimIds);
+      const ids = await lockClaims(ctx.db, ctx.session.restaurantId, input.claimIds!);
       for (const claimId of ids) {
         out.push(
           await transitionClaim(ctx.db, ctx.session.restaurantId, {
@@ -115,20 +144,71 @@ export const recoveryRouter = router({
           claimIds: z.array(z.string().uuid()).min(1).max(200),
           supplierId: z.string().uuid().optional(),
           number: z.string().trim().max(64).optional(),
+          /** Legacy: the amount BEFORE VAT. The desk sends `printedAgorot` + `vat` instead. */
           amountAgorot: z.number().int().positive().max(100_000_000_00).optional(),
+          /** The amount exactly as printed on the credit note … */
+          printedAgorot: z.number().int().positive().max(100_000_000_00).optional(),
+          /** … and how it was printed: incl. or excl. VAT. No default (chain-09). */
+          vat: z.enum(['incl', 'excl']).optional(),
           issuedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
           invoiceLineId: z.string().uuid().optional(),
           note: z.string().trim().max(500).optional(),
           /** One per form submission (client crypto.randomUUID()): a double submit records once. */
           idempotencyKey: z.string().uuid().optional(),
         })
-        .refine((v) => v.invoiceLineId || (v.supplierId && v.amountAgorot && v.issuedOn), {
+        .refine((v) => (v.printedAgorot == null) === (v.vat == null), {
+          message: 'a printed amount needs its VAT mode (incl. or excl.)',
+        })
+        .refine((v) => !(v.printedAgorot != null && v.amountAgorot != null), { message: 'send amountAgorot or printedAgorot, not both' })
+        .refine((v) => v.invoiceLineId || (v.supplierId && (v.amountAgorot || v.printedAgorot) && v.issuedOn), {
           message: 'manual credit notes need supplier, amount and date',
         }),
     )
-    .mutation(({ ctx, input }) =>
-      recordCreditNote(ctx.db, ctx.session.restaurantId, { ...input, actorId: ctx.session.userId }),
-    ),
+    .mutation(async ({ ctx, input }) => {
+      const { printedAgorot, vat, ...rest } = input;
+      let amountAgorot = rest.amountAgorot;
+      if (printedAgorot != null && vat && rest.supplierId && !rest.invoiceLineId) {
+        // Server-side conversion, in agorot, half-up, at the supplier's rate.
+        const rateBp = await creditVatRateBp(ctx.db, ctx.session.restaurantId, rest.supplierId);
+        amountAgorot = exclVatAgorot(printedAgorot, vat, rateBp);
+      }
+      return recordCreditNote(ctx.db, ctx.session.restaurantId, { ...rest, amountAgorot, actorId: ctx.session.userId });
+    }),
+
+  /**
+   * Claim letters (W2-10): one draft per supplier, built ONLY from that
+   * supplier's `claimed` claims, in two sections (before payment / for credit).
+   * Reads only.
+   */
+  letters: recoveryProcedure
+    .input(z.object({ supplierId: z.string().uuid().optional() }).optional())
+    .query(({ ctx, input }) => buildClaimLetters(ctx.db, ctx.session.restaurantId, { supplierId: input?.supplierId })),
+
+  /** Confirm a letter went out (after the hand-off + 10 s undo): its claims → letter_sent, all or nothing. */
+  sendLetter: recoveryProcedure
+    .input(
+      z.object({
+        supplierId: z.string().uuid(),
+        claimIds: z.array(z.string().uuid()).min(1).max(500),
+        channel: z.enum(['whatsapp', 'email', 'print']),
+      }),
+    )
+    .mutation(({ ctx, input }) => sendLetter(ctx.db, ctx.session.restaurantId, { ...input, actorId: ctx.session.userId })),
+
+  /** Take a sent letter back within the window (guarded letter_sent → claimed). */
+  unsendLetter: recoveryProcedure
+    .input(z.object({ claimIds: z.array(z.string().uuid()).min(1).max(500) }))
+    .mutation(({ ctx, input }) => unsendLetter(ctx.db, ctx.session.restaurantId, { claimIds: input.claimIds, actorId: ctx.session.userId })),
+
+  /** Owner decision 16: the data of a per-supplier overdue reminder DRAFT (opened on a click; nothing is sent). */
+  reminderDraft: recoveryProcedure
+    .input(z.object({ supplierId: z.string().uuid() }))
+    .query(({ ctx, input }) => supplierReminderDraft(ctx.db, ctx.session.restaurantId, input.supplierId)),
+
+  /** CSV / XLSX of every claim (no 200-row cut) plus its history. */
+  export: recoveryProcedure
+    .input(z.object({ format: z.enum(['csv', 'xlsx']), status: status.optional(), supplierId: z.string().uuid().optional() }))
+    .query(({ ctx, input }) => exportRecovery(ctx.db, ctx.session.restaurantId, input)),
 
   creditLineSuggestions: recoveryProcedure
     .input(z.object({ supplierId: z.string().uuid().optional() }).optional())
