@@ -466,7 +466,7 @@ export function InboxClient(props: Props) {
 
       {/* Bulk "פענחו N": sending to OCR is not a payment approval — no ₪ cap applies. */}
       {pickedIds.length > 0 ? (
-        <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-center gap-3 rounded-2xl border border-line bg-surface p-3 shadow-card" role="region" aria-label={t('inbox.selected', { count: formatNumber(pickedIds.length, locale) })} data-testid="ingest-batch-bar">
+        <div className="sticky bottom-[calc(var(--rm-bottomnav-h,0px)+var(--consent-h,0px)+env(safe-area-inset-bottom)+0.75rem)] z-10 flex flex-wrap items-center justify-center gap-3 rounded-2xl border border-line bg-surface p-3 shadow-card" role="region" aria-label={t('inbox.selected', { count: formatNumber(pickedIds.length, locale) })} data-testid="ingest-batch-bar">
           <span className="text-sm text-ink">{t('inbox.selected', { count: formatNumber(pickedIds.length, locale) })}</span>
           <Button className="min-h-11" disabled={bulk.isPending} onClick={bulkRead} data-testid="ingest-bulk-read">
             {t('inbox.bulkRead', { count: formatNumber(pickedIds.length, locale) })}

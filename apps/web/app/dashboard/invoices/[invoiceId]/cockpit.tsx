@@ -17,7 +17,7 @@ import { Token } from '@/lib/components/money';
 import { isTypingTarget, useMediaQuery } from '@/lib/components/desk';
 import { InvoiceScanViewer } from '@/lib/components/invoice';
 import { DocumentFlow, type FlowNode } from '@/lib/components/documents';
-import { STATE_TONE, ddmmyyyy, type InvoiceStateKey } from '../columns';
+import { STATE_TONE, ddmmyyyy, type InvoiceStateKey } from '../(register)/columns';
 
 type Detail = inferRouterOutputs<AppRouter>['invoices']['detail'];
 type Line = Detail['lines'][number];
@@ -277,7 +277,7 @@ export function Cockpit({
     <InvoiceScanViewer
       src={scan?.src ?? null}
       mimeType={scan?.mimeType ?? null}
-      className={wide ? 'sticky top-20 h-[calc(100dvh-7rem)]' : 'h-[70dvh]'}
+      className={!scan ? 'min-h-0' : wide ? 'sticky top-20 h-[calc(100dvh-7rem)]' : 'h-[70dvh]'}
       copy={{ ...t.viewer, zoom: (pct) => fill(t.viewer.zoomTemplate, { pct }) }}
     />
   );
@@ -342,7 +342,13 @@ export function Cockpit({
         <DocumentFlow nodes={flow} label={t.flow.label} missing={t.flow.missing} />
       </header>
       {aside}
-      {wide ? (
+      {wide && !scan ? (
+        // No document stored: the lines take the full width; the empty viewer would only push them aside.
+        <div className="space-y-3">
+          {viewer}
+          {linesPane}
+        </div>
+      ) : wide ? (
         <div className="grid grid-cols-[44fr_56fr] gap-4">
           {viewer}
           {linesPane}
@@ -362,7 +368,7 @@ export function Cockpit({
         </div>
       )}
       {showMoney && openFindings.length > 0 ? (
-        <div className="sticky bottom-3 z-10 mt-4 flex justify-center">
+        <div className="sticky bottom-[calc(var(--rm-bottomnav-h,0px)+var(--consent-h,0px)+env(safe-area-inset-bottom)+0.75rem)] z-10 mt-4 flex justify-center">
           <Link
             href={`/dashboard/approvals?invoice=${d.id}`}
             data-testid="cockpit-decide"
