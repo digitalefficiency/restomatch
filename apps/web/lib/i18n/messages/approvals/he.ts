@@ -160,7 +160,7 @@ export const he = {
     decidedBySelf: 'כבר החלטת על הפער הזה · {time} · {status}',
     someone: 'משתמש אחר',
     hide: 'הסתירו',
-    loadMore: 'טענו עוד',
+    loadMore: 'טעינת עוד',
     srSummary: '{label} · {who} · {amount}',
   },
   why: {
