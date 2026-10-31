@@ -2,7 +2,8 @@ import { cache } from 'react';
 import type { UserRole } from '@restomatch/db';
 import { createServerCaller } from '@/lib/trpc/server';
 import { enabledFeatures } from '@/lib/ingest/features';
-import { decideSummary, type ApprovalsLike } from './queue-summary';
+import { db } from '@/lib/db';
+import { decideSummary } from './queue-summary';
 
 /**
  * Request-scoped loaders for the finance homes. `cache` dedupes a source read by
@@ -15,8 +16,12 @@ export const loadFeatures = cache(async (restaurantId: string) => enabledFeature
 
 export const loadRecoveryFlags = cache(async () => (await caller()).recovery.flags());
 
-/** The viewer's whole decision queue (owner: everyone's) in ₪ and count — see queue-summary.ts. */
-export const loadDecide = cache(async () => decideSummary((await caller()).approvals as unknown as ApprovalsLike));
+/**
+ * The viewer's whole decision queue (owner: everyone's) in ₪ and count — one SQL
+ * aggregate under the restaurant GUC, see queue-summary.ts.
+ * TODO(W2-08): switch to approvals.queueSummary.
+ */
+export const loadDecide = cache(async (restaurantId: string, role: UserRole) => decideSummary(db, restaurantId, role));
 
 export const loadVatAtRisk = cache(async (restaurantId: string, role: UserRole) => {
   if (role !== 'owner' && role !== 'manager' && role !== 'bookkeeper') return null;

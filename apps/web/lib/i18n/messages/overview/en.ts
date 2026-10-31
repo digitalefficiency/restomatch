@@ -150,6 +150,11 @@ export const en: Shape<typeof he> = {
       received: 'Received',
       rejected: 'Rejected',
       notFound: 'Receipt not found',
+      followUp: {
+        cta: 'A follow-up delivery arrived — complete the receipt',
+        hint: 'The receipt reopens to count what arrived now. The reopen is logged.',
+        failed: 'Could not reopen the receipt. Try again.',
+      },
     },
   },
   kpis: {
@@ -158,10 +163,10 @@ export const en: Shape<typeof he> = {
     cleanHint: 'Average of the last seven days',
   },
   leaks: {
-    title: 'Price creep · last 30 days',
-    subtitle: 'Prices that rose above their usual level. A separate measure — not part of this month’s leak.',
+    title: 'Prices that rose · last 30 days',
+    subtitle: 'Above the usual price from the same supplier. A separate measure — not counted in this month’s leak.',
     all: 'All price rises',
-    upsell: 'Upgrade to unlock the leak detective',
+    upsell: 'Upgrade to see every price that rose',
   },
   activity: {
     title: 'Recent activity',

@@ -1,28 +1,22 @@
+import 'server-only';
+import { and, discrepancies, inArray, matchRuns, eq, sql, withRestaurant, type Database, type UserRole } from '@restomatch/db';
+import { notZeroShortTwin } from '@restomatch/charts';
+
 /**
- * "ממתין להחלטה שלך" — the viewer's whole decision queue in ₪ and count, never
- * one capped page. The server aggregate `approvals.queueSummary` (W1-07) is the
- * source when the router has it: the approvals landing shows the same figures.
- * Until then the queue is paged to the end (de-duplicated by id).
+ * "ממתין להחלטה שלך" — the viewer's WHOLE decision queue in ₪ and count, as one
+ * server-side aggregate (never a capped page, never a client-side sum).
+ *
+ * The filters mirror approvals.myQueue exactly (open/escalated, routed to a role
+ * the viewer sees, the zero-₪ QTY_SHORT twin hidden), so the row count here is the
+ * number of rows the approvals landing lists. ₪ at risk is Σ|Δ| without PRICE_LOWER
+ * (a lower price is never money at risk — the approvals strip's rule).
+ *
+ * Runs on the RLS app role under the restaurant GUC (withRestaurant) and is also
+ * scoped by restaurant_id explicitly.
+ *
+ * TODO(W2-08): switch to approvals.queueSummary (W1-07) once it is on main, so the
+ * home and the approvals landing read the same procedure.
  */
-
-export interface QueueItemLike {
-  id: string;
-  type: string;
-  severity: string;
-  deltaAmount: string | number | null;
-  createdAt: Date;
-}
-
-interface ServerSummary {
-  count: number;
-  blockers: number;
-  claimableIls: number;
-}
-
-export interface ApprovalsLike {
-  queueSummary?: () => Promise<ServerSummary>;
-  myQueue: (input: { limit: number; cursor?: string }) => Promise<QueueItemLike[]>;
-}
 
 export interface DecideSummary {
   count: number;
@@ -30,45 +24,36 @@ export interface DecideSummary {
   blocking: number;
 }
 
-const PAGE = 100;
-/** Safety stop: 50 pages × 100 rows; a real queue is a few dozen. */
-const MAX_PAGES = 50;
+/**
+ * Whose queue a role sees — a copy of packages/api lib/roles expandVisibleRoles
+ * (not exported from @restomatch/api); the test pins the two together via myQueue.
+ */
+export function visibleRoles(role: UserRole): UserRole[] {
+  return role === 'owner' ? ['owner', 'manager', 'bookkeeper'] : [role];
+}
 
-export async function decideSummary(approvals: ApprovalsLike): Promise<DecideSummary> {
-  if (approvals.queueSummary) {
-    try {
-      const s = await approvals.queueSummary();
-      return { count: s.count, atRiskIls: s.claimableIls, blocking: s.blockers };
-    } catch (err) {
-      // Only "this router has no queueSummary yet" falls back; a real failure surfaces.
-      // (Matched by code, not instanceof: web and api may load different @trpc copies.)
-      if ((err as { code?: unknown } | null)?.code !== 'NOT_FOUND') throw err;
-    }
-  }
-
-  const seen = new Map<string, QueueItemLike>();
-  let cursor: string | undefined;
-  for (let page = 0; page < MAX_PAGES; page += 1) {
-    const rows = await approvals.myQueue({ limit: PAGE, cursor });
-    let added = 0;
-    for (const r of rows) {
-      if (!seen.has(r.id)) {
-        seen.set(r.id, r);
-        added += 1;
-      }
-    }
-    if (rows.length < PAGE || added === 0) break;
-    // The cursor is strictly older: step 1 ms past the last row so rows sharing its
-    // createdAt are re-read (and de-duplicated) instead of skipped.
-    const last = rows[rows.length - 1]!;
-    cursor = new Date(new Date(last.createdAt).getTime() + 1).toISOString();
-  }
-
-  let agorot = 0;
-  let blocking = 0;
-  for (const d of seen.values()) {
-    if (d.type !== 'PRICE_LOWER') agorot += Math.round(Math.abs(Number(d.deltaAmount ?? 0)) * 100);
-    if (d.severity === 'block') blocking += 1;
-  }
-  return { count: seen.size, atRiskIls: agorot / 100, blocking };
+export async function decideSummary(db: Database, restaurantId: string, role: UserRole): Promise<DecideSummary> {
+  const [row] = await withRestaurant(db, restaurantId, (tx) =>
+    tx
+      .select({
+        count: sql<number>`count(*)::int`,
+        atRiskAgorot: sql<string>`coalesce(sum(case when ${discrepancies.type} <> 'PRICE_LOWER' then round(abs(coalesce(${discrepancies.deltaAmount}, 0)) * 100) else 0 end), 0)::bigint`,
+        blocking: sql<number>`count(*) filter (where ${discrepancies.severity} = 'block')::int`,
+      })
+      .from(discrepancies)
+      .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+      .where(
+        and(
+          eq(discrepancies.restaurantId, restaurantId),
+          inArray(discrepancies.resolutionStatus, ['open', 'escalated']),
+          notZeroShortTwin(),
+          inArray(discrepancies.requiresRole, visibleRoles(role)),
+        ),
+      ),
+  );
+  return {
+    count: Number(row?.count ?? 0),
+    atRiskIls: Number(row?.atRiskAgorot ?? 0) / 100,
+    blocking: Number(row?.blocking ?? 0),
+  };
 }

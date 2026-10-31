@@ -394,6 +394,48 @@ describe('a closed receipt is read-only (receiving board: "התקבל ✓")', ()
     expect(Number(updated.qtyReceived)).toBe(4);
   });
 
+  it('a follow-up delivery: an explicit reopen turns a PARTIAL receipt back to pending, once, and logs it', async () => {
+    const { caller, receiptId, lines, s } = await closed('partial');
+    const r = await caller.receiving.startReceipt({ poId: s.todayPoId, reopen: true });
+    expect(r).toMatchObject({ receiptId, alreadyExisted: true, reopened: true });
+    // Same receipt (one GR per PO), open again: the follow-up count lands on it.
+    const updated = await caller.receiving.markGrLine({ grLineId: lines[1]!.id, qtyReceived: 5 });
+    expect(Number(updated.qtyReceived)).toBe(5);
+    const closedAgain = await caller.receiving.submitReceipt({ grId: receiptId });
+    expect(closedAgain.status).toBe('completed');
+    const audit = await db.execute<{ action: string; before: unknown; after: unknown }>(
+      sql`select action, before, after from audit_log where entity_id = ${receiptId} and action = 'goods_receipt.reopened'`,
+    );
+    const rows = (audit as unknown as { rows?: unknown[] }).rows ?? (audit as unknown as unknown[]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ before: { status: 'partial' }, after: { status: 'pending' } });
+  });
+
+  it('a retried reopen is idempotent (the receipt is already open: no second log)', async () => {
+    const { caller, receiptId, s } = await closed('partial');
+    await caller.receiving.startReceipt({ poId: s.todayPoId, reopen: true });
+    const again = await caller.receiving.startReceipt({ poId: s.todayPoId, reopen: true });
+    expect(again).toMatchObject({ receiptId, alreadyExisted: true, reopened: false });
+    const audit = await db.execute(sql`select 1 from audit_log where entity_id = ${receiptId} and action = 'goods_receipt.reopened'`);
+    const rows = (audit as unknown as { rows?: unknown[] }).rows ?? (audit as unknown as unknown[]);
+    expect(rows).toHaveLength(1);
+  });
+
+  it('a COMPLETED receipt cannot be reopened; without reopen a partial one stays closed', async () => {
+    const done = await closed('completed');
+    await expect(done.caller.receiving.startReceipt({ poId: done.s.todayPoId, reopen: true })).rejects.toMatchObject({ code: 'CONFLICT' });
+    const [gr] = await db.select().from(goodsReceipts).where(sql`${goodsReceipts.id} = ${done.receiptId}`);
+    expect(gr!.status).toBe('completed');
+  });
+
+  it('startReceipt without reopen never reopens a partial receipt (the plain wizard call)', async () => {
+    const { caller, receiptId, s } = await closed('partial');
+    const r = await caller.receiving.startReceipt({ poId: s.todayPoId });
+    expect(r).toMatchObject({ receiptId, alreadyExisted: true });
+    const [gr] = await db.select().from(goodsReceipts).where(sql`${goodsReceipts.id} = ${receiptId}`);
+    expect(gr!.status).toBe('partial');
+  });
+
   it('a line of another restaurant stays NOT_FOUND, open or closed (no status oracle)', async () => {
     const { lines } = await closed('completed');
     const [other] = await db.insert(restaurants).values({ name: 'Other Bistro' }).returning();

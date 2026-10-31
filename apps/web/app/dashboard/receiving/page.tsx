@@ -40,12 +40,16 @@ export default async function ReceivingPage({
     if (err instanceof TRPCError && err.code === 'NOT_FOUND') return null;
     throw err;
   };
-  const [closed, po] = receiptPo
+  const [closed, po, memberships] = receiptPo
     ? await Promise.all([
         caller.receiving.getReceipt({ poId: receiptPo }).catch(notFound),
         caller.receiving.getPo({ poId: receiptPo }).catch(notFound),
+        caller.onboarding.myMemberships(),
       ])
-    : [null, null];
+    : [null, null, []];
+  // Who may receive goods (startReceipt's roles) may open a follow-up delivery.
+  const role = (memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0])?.role;
+  const canReopen = role === 'owner' || role === 'manager' || role === 'receiver';
   const supplierName = po ? (locale === 'en' && po.supplierNameEn ? po.supplierNameEn : po.supplierName) : '';
 
   return (
@@ -57,7 +61,7 @@ export default async function ReceivingPage({
 
       {receiptPo ? (
         closed && closed.status !== 'pending' ? (
-          <ReceiptView receipt={closed} supplierName={supplierName} t={to} locale={locale} />
+          <ReceiptView receipt={closed} poId={receiptPo} canReopen={canReopen} supplierName={supplierName} t={to} locale={locale} />
         ) : (
           <p role="status" className="rounded-2xl border border-line bg-surface p-4 text-sm text-muted">
             {to('board.receipt.notFound')}

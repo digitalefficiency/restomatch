@@ -218,7 +218,7 @@ async function Needs(ctx: Ctx) {
     ops: role === 'manager',
   };
   const [queue, recovery, vat, payRun, today, count, suppliers] = await Promise.all([
-    settle(loadDecide()),
+    settle(loadDecide(restaurantId, role)),
     wants.claims ? settle(loadRecoverySummary()) : null,
     wants.vat ? settle(loadVatAtRisk(restaurantId, role)) : null,
     wants.payRun ? settle(loadPayRun()) : null,
@@ -568,7 +568,7 @@ async function Heatmap({ caller, t, tl, locale }: Ctx) {
 async function ActivitySection({ caller, t }: Ctx) {
   const activity = await caller.activity.feed({ limit: 5 });
   return (
-    <section>
+    <section data-testid="home-activity">
       <SectionHeader title={t('activity.title')} subtitle={t('activity.subtitle')} />
       {activity.length > 0 ? (
         <PaginatedActivityFeed initial={activity} pageSize={5} />

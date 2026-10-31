@@ -26,6 +26,14 @@ describe('truckState', () => {
     expect(truckState({ receiptStatus: 'pending' })).toBe('inProgress');
     expect(truckState({ receiptStatus: 'completed' })).toBe('received');
     expect(truckState({ receiptStatus: 'partial' })).toBe('receivedPartial');
+    // A turned-away truck is closed, not "not started" (so never late).
+    expect(truckState({ receiptStatus: 'rejected' })).toBe('receivedPartial');
+  });
+
+  it('a rejected receipt past its window is closed, never under באיחור', () => {
+    const b = buildBoard([po('r', { receiptStatus: 'rejected', receiptId: 'g', closedAt: at(-10), expectedAt: at(-120) })], NOW);
+    expect(b.late).toEqual([]);
+    expect(b.received.map((i) => i.poId)).toEqual(['r']);
   });
 });
 

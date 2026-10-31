@@ -44,7 +44,7 @@ async function seed() {
   const rid = restaurant!.id;
   const today = new Date();
   today.setHours(10, 0, 0, 0);
-  async function po(at: Date | null, status: 'sent' | 'confirmed' | 'partial' | 'cancelled' = 'sent', createdAt?: Date) {
+  async function po(at: Date | null, status: 'sent' | 'confirmed' | 'partial' | 'closed' | 'cancelled' = 'sent', createdAt?: Date) {
     const [row] = await db
       .insert(purchaseOrders)
       .values({ restaurantId: rid, supplierId: supplier!.id, expectedDeliveryAt: at, status, source: 'manual', ...(createdAt ? { createdAt } : {}) })
@@ -52,7 +52,7 @@ async function seed() {
     await db.insert(poLines).values({ poId: row!.id, rawDescription: 'עגבניה', qtyOrdered: '10', unit: 'ק״ג', unitPriceExpected: '8' });
     return row!.id;
   }
-  async function receipt(poId: string, status: 'pending' | 'completed' | 'partial') {
+  async function receipt(poId: string, status: 'pending' | 'completed' | 'partial' | 'rejected') {
     const [gr] = await db.insert(goodsReceipts).values({ restaurantId: rid, poId, receivedBy: receiver!.id, status }).returning();
     return gr!.id;
   }
@@ -138,6 +138,27 @@ describe('receiving.todayExpectations — receiving board', () => {
     const byId = new Map(list.map((e) => [e.poId, e]));
     expect(byId.get(done)).toMatchObject({ receiptStatus: 'completed', closedAt: closedAt.toISOString(), late: false });
     expect(byId.get(open)).toMatchObject({ receiptStatus: 'pending', closedAt: null });
+  });
+
+  it('"late" follows the goods receipt, never the PO status', async () => {
+    const s = await seed();
+    // A platform sync marked the PO 'partial' but nothing was received here: late.
+    const syncedPartial = await s.po(new Date(s.today.getTime() - DAY), 'partial');
+    // The PO was closed after its receipt was completed today: received, not gone.
+    const closedToday = await s.po(new Date(s.today.getTime() - DAY), 'closed');
+    await s.receipt(closedToday, 'completed');
+    // A turned-away truck (rejected receipt) is closed, not late.
+    const rejected = await s.po(new Date(s.today.getTime() - DAY));
+    await s.receipt(rejected, 'rejected');
+    // A PO closed without any receipt here is not a truck to receive.
+    await s.po(new Date(s.today.getTime() - DAY), 'closed');
+    const list = await s.caller.receiving.todayExpectations({ includeLate: true });
+    const byId = new Map(list.map((e) => [e.poId, e]));
+    expect(new Set(byId.keys())).toEqual(new Set([syncedPartial, closedToday, rejected]));
+    expect(byId.get(syncedPartial)).toMatchObject({ late: true, receiptStatus: null });
+    expect(byId.get(closedToday)).toMatchObject({ late: false, receiptStatus: 'completed' });
+    expect(byId.get(rejected)).toMatchObject({ late: false, receiptStatus: 'rejected' });
+    expect(byId.get(rejected)!.closedAt).not.toBeNull();
   });
 
   it('undated recent POs keep their R5 place (no date → never "late")', async () => {

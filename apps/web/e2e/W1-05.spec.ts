@@ -91,8 +91,10 @@ test.describe('staff homes: no owner money', () => {
       await expect(page.getByTestId('leak-hero')).toHaveCount(0);
       await expect(page.getByTestId('needs-you')).toHaveCount(0);
       await expect(page.getByTestId('home-view-toggle')).toHaveCount(0);
-      // The back door never sees the restaurant's money.
+      // The back door never sees the restaurant's money (the server side — which
+      // procedures the home calls — is pinned by staff-homes.server.test.ts).
       await expect(page.locator('main')).not.toContainText('₪');
+      await expect(page.getByTestId('home-activity')).toHaveCount(0);
       const cta = page.getByTestId('board-next-cta');
       if (await cta.count()) {
         const box = (await cta.boundingBox())!;
@@ -119,6 +121,9 @@ test.describe('staff homes: no owner money', () => {
       await expect(page.getByTestId('home-view-toggle')).toHaveCount(0);
       const m = messagesOf(await page.locator('html').getAttribute('lang'));
       await expect(page.locator('main')).not.toContainText(m.hero.leakedLabel);
+      // Food-cost % only: no ₪ and no activity feed on the kitchen home.
+      await expect(page.locator('main')).not.toContainText('₪');
+      await expect(page.getByTestId('home-activity')).toHaveCount(0);
       expect(await axeSerious(page)).toEqual([]);
     } finally {
       await context.close();

@@ -51,7 +51,8 @@ export const NOW_WINDOW_MS = 90 * 60_000;
 
 export function truckState(e: Pick<BoardExpectation, 'receiptStatus'>): TruckState {
   if (e.receiptStatus === 'completed') return 'received';
-  if (e.receiptStatus === 'partial') return 'receivedPartial';
+  // A rejected receipt (the truck was turned away) is closed too — never "late".
+  if (e.receiptStatus === 'partial' || e.receiptStatus === 'rejected') return 'receivedPartial';
   if (e.receiptStatus === 'pending') return 'inProgress';
   return 'notStarted';
 }

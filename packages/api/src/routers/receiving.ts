@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import {
+  auditLog,
   and,
   asc,
   count,
@@ -133,11 +134,21 @@ export const receivingRouter = router({
           eq(suppliers.restaurantId, ctx.session.restaurantId),
         ),
       )
-      .leftJoin(goodsReceipts, eq(goodsReceipts.poId, purchaseOrders.id))
+      .leftJoin(
+        goodsReceipts,
+        and(eq(goodsReceipts.poId, purchaseOrders.id), eq(goodsReceipts.restaurantId, ctx.session.restaurantId)),
+      )
       .where(
         and(
           eq(purchaseOrders.restaurantId, ctx.session.restaurantId),
-          inArray(purchaseOrders.status, ['sent', 'confirmed', 'partial']),
+          // The truck's state ("late", "received") comes from its goods receipt
+          // (one per PO), never from purchase_orders.status: a platform sync can mark
+          // a PO 'partial' or 'closed' whatever happened at the back door. Open POs are
+          // listed; a closed one only when it has a receipt here (its GR decides).
+          or(
+            inArray(purchaseOrders.status, ['sent', 'confirmed', 'partial']),
+            and(eq(purchaseOrders.status, 'closed'), isNotNull(goodsReceipts.id)),
+          ),
           // R5: a PO without a delivery date used to be invisible here — the
           // receiver could never open it. Show recent undated open POs too.
           or(
@@ -726,9 +737,14 @@ export const receivingRouter = router({
   /**
    * Begin a goods receipt: creates GR + GR lines mirroring the PO.
    * Idempotent — re-calling returns the existing pending receipt.
+   *
+   * `reopen` (W1-05): a follow-up delivery for a PARTIAL receipt. One GR per PO, so
+   * the same receipt goes back to pending — explicitly, and logged in audit_log —
+   * for the rest of the goods to be counted on it. A completed receipt is never
+   * reopened; a retried reopen of an already-open receipt is a no-op (not re-logged).
    */
   startReceipt: receiverProcedure
-    .input(z.object({ poId: z.string().uuid() }))
+    .input(z.object({ poId: z.string().uuid(), reopen: z.boolean().optional() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db
         .select()
@@ -741,7 +757,37 @@ export const receivingRouter = router({
         )
         .limit(1);
       if (existing[0]) {
-        return { receiptId: existing[0].id, alreadyExisted: true as const };
+        const gr = existing[0];
+        if (!input.reopen || gr.status === 'pending') {
+          return { receiptId: gr.id, alreadyExisted: true as const, reopened: false };
+        }
+        if (gr.status !== 'partial') {
+          throw new TRPCError({ code: 'CONFLICT', message: 'רק קבלה חלקית נפתחת להשלמה — הקבלה הזאת נסגרה' });
+        }
+        // Conditional on 'partial': two taps reopen (and log) once.
+        const [reopened] = await ctx.db
+          .update(goodsReceipts)
+          .set({ status: 'pending', updatedAt: new Date() })
+          .where(
+            and(
+              eq(goodsReceipts.id, gr.id),
+              eq(goodsReceipts.restaurantId, ctx.session.restaurantId),
+              eq(goodsReceipts.status, 'partial'),
+            ),
+          )
+          .returning({ id: goodsReceipts.id });
+        if (reopened) {
+          await ctx.db.insert(auditLog).values({
+            restaurantId: ctx.session.restaurantId,
+            userId: ctx.session.userId,
+            action: 'goods_receipt.reopened',
+            entityType: 'goods_receipt',
+            entityId: gr.id,
+            before: { status: 'partial' },
+            after: { status: 'pending', reason: 'follow_up_delivery', role: ctx.session.role },
+          });
+        }
+        return { receiptId: gr.id, alreadyExisted: true as const, reopened: !!reopened };
       }
 
       // Row lock shared with orders.cancelOrder: a receipt never starts on an
@@ -789,7 +835,7 @@ export const receivingRouter = router({
           )
           .limit(1);
         if (!raced) throw new Error('failed to create goods receipt');
-        return { receiptId: raced.id, alreadyExisted: true as const };
+        return { receiptId: raced.id, alreadyExisted: true as const, reopened: false };
       }
 
       if (lines.length > 0) {
@@ -804,7 +850,7 @@ export const receivingRouter = router({
         );
       }
 
-      return { receiptId: receipt.id, alreadyExisted: false as const };
+      return { receiptId: receipt.id, alreadyExisted: false as const, reopened: false };
     }),
 
   /**
