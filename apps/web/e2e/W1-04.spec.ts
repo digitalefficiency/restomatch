@@ -206,9 +206,12 @@ test.describe('in-shell not-found and error (perf-states-09)', () => {
     await signIn(context, page, DEMO_OWNER_EMAIL);
     const sql = e2eSql();
     try {
-      // Only the orders page reads purchase_orders on the server (not the layout).
+      // The receiving board reads purchase_orders on the server (the layout does not)
+      // and has no route-level error.tsx, so it falls to W1-04's dashboard/error.tsx.
+      // Not /dashboard/orders any more: W1-11 (e9a91bac, plan §W1-11 acceptance 7)
+      // gave every orders route its own in-shell orders/error.tsx.
       await sql`revoke select on purchase_orders from restomatch_app`;
-      await page.goto('/dashboard/orders');
+      await page.goto('/dashboard/receiving');
       await expect(page.getByTestId('dashboard-error')).toBeVisible();
       await expect(page.getByRole('heading', { level: 1 })).toHaveText('לא הצלחנו לטעון את הדף');
       await expectShell(page);
@@ -216,7 +219,7 @@ test.describe('in-shell not-found and error (perf-states-09)', () => {
       await sql`grant select on purchase_orders to restomatch_app`;
       await page.getByTestId('dashboard-error-retry').click();
       await expect(page.getByTestId('dashboard-error')).toHaveCount(0);
-      expect(new URL(page.url()).pathname).toBe('/dashboard/orders');
+      expect(new URL(page.url()).pathname).toBe('/dashboard/receiving');
     } finally {
       await sql`grant select on purchase_orders to restomatch_app`;
       await sql.end();
@@ -309,7 +312,8 @@ test.describe('connectivity and session layer (perf-states-08, -15)', () => {
     const page = await context.newPage();
     await signIn(context, page, DEMO_OWNER_EMAIL);
     await page.goto(`/dashboard/go?r=${mainId}&to=/dashboard/approvals`);
-    const approve = page.getByRole('button', { name: 'אשר', exact: true }).first();
+    // W1-07 (ea31655f): the approve CTA names the claim — "דרוש {amount} מהספק".
+    const approve = page.getByRole('button', { name: /^דרוש .+ מהספק$/ }).first();
     await expect(approve).toBeVisible();
     // Requests that reached the server (an offline attempt fails in the browser).
     let approveCalls = 0;
@@ -323,8 +327,11 @@ test.describe('connectivity and session layer (perf-states-08, -15)', () => {
     expect(await axe(page).catch(() => []), 'axe with the offline chip').toEqual([]);
 
     await approve.click();
-    await expect(page.getByRole('alert').filter({ hasText: 'הפעולה נכשלה' })).toBeVisible({ timeout: 2_000 });
+    // W1-07 copy for a decision that did not save (card.error).
+    await expect(page.getByRole('alert').filter({ hasText: 'ההחלטה לא נשמרה' })).toBeVisible({ timeout: 2_000 });
     await expect(approve).not.toHaveAttribute('aria-busy', 'true');
+    // W1-07 marks an in-flight decision with `disabled`: not left pending either.
+    await expect(approve).toBeEnabled();
 
     await context.setOffline(false);
     await expect(page.getByTestId('offline-chip')).toHaveCount(0, { timeout: 10_000 });

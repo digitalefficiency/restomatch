@@ -164,7 +164,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     receiverLangsOn ? <PersistingLanguagePicker className={placement} /> : <LocaleSwitcher className={placement} />;
 
   return (
-    <TrpcProvider>
+    <TrpcProvider identity={{ id: userId, email, restaurantId: session.user.restaurantId ?? null }}>
       <ToastProvider>
         <NavProvider value={{ ...viewer, branch: multiBranch ? active.restaurantName : null }}>
           <style>{CHROME_VARS}</style>
