@@ -2,7 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { LineMark } from '@/app/showcase/receiver/_state';
+import { requestReauth } from '@/lib/net/reauth';
+import { createAuthGate, type AuthGate } from '@/lib/pwa/authGate';
 import { isTransientFailure } from '@/lib/pwa/offlineQueue';
+import { useReauthResumed } from '@/lib/pwa/useReauthResumed';
 import { grLineForMark } from './_adapters';
 import { grLineIsCounted } from './_count';
 import {
@@ -31,20 +34,26 @@ export function payloadIsCounted(p: GrLinePayload): boolean {
  * receiving.markGrLine: saved on change, kept on the phone while offline,
  * retried on `online` and every 15 s. Storage is per user + PO. For a receipt
  * that is already closed, stale unsent rows are dropped, never retried into it.
+ * An expired session (401) opens W1-04's re-auth sheet — these calls bypass the
+ * QueryClient's caches — keeps the row queued, and holds the automatic retries
+ * until the receiver signs in again; then everything unsent goes at once.
  */
 export function useLineSaves(
   storageKey: string,
   send: (p: GrLinePayload) => Promise<unknown>,
   closed = false,
-): { outbox: LineOutbox; states: Record<string, LineSaveState>; pending: number } {
+): { outbox: LineOutbox; states: Record<string, LineSaveState>; pending: number; authGate: AuthGate } {
   const sendRef = useRef(send);
   sendRef.current = send;
   const [states, setStates] = useState<Record<string, LineSaveState>>({});
   const [pending, setPending] = useState(0);
   const boxRef = useRef<LineOutbox | null>(null);
+  const gateRef = useRef<AuthGate | null>(null);
+  if (!gateRef.current) gateRef.current = createAuthGate(() => requestReauth());
+  const authGate = gateRef.current;
   if (!boxRef.current) {
     const box: LineOutbox = createLineOutbox({
-      send: (p) => sendRef.current(p),
+      send: authGate.wrap((p: GrLinePayload) => sendRef.current(p)),
       // No network, or signed out mid-count (401): kept on the phone, retried — never "failed".
       isNetworkError: isTransientFailure,
       storage: typeof window === 'undefined' ? undefined : localStorageOutbox(storageKey),
@@ -63,7 +72,7 @@ export function useLineSaves(
     setPending(outbox.pendingCount());
     setStates(outbox.states());
     const retry = () => {
-      if (navigator.onLine && outbox.pendingCount() > 0) void outbox.retry();
+      if (navigator.onLine && authGate.shouldAutoRetry() && outbox.pendingCount() > 0) void outbox.retry();
     };
     retry();
     window.addEventListener('online', retry);
@@ -72,9 +81,15 @@ export function useLineSaves(
       window.removeEventListener('online', retry);
       window.clearInterval(id);
     };
-  }, [outbox, closed]);
+  }, [outbox, closed, authGate]);
 
-  return { outbox, states, pending };
+  // Signed in again (the sheet closed with a session): send everything unsent now.
+  useReauthResumed(() => {
+    authGate.resume();
+    if (!closed && outbox.pendingCount() > 0) void outbox.retry();
+  });
+
+  return { outbox, states, pending, authGate };
 }
 
 /** What the wizard remembers per PO on this device so a reload resumes (grId, the invoice being read). */

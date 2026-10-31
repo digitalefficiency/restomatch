@@ -23,6 +23,8 @@ import type { Translator } from '@/lib/i18n/translate';
 import { isReceiverLocale } from '@/lib/i18n/config';
 import type { UploadedScan } from '@/lib/supabase/client';
 import { ingest } from '@/lib/i18n/messages/ingest';
+import { requestReauth } from '@/lib/net/reauth';
+import { isSessionExpired } from '@/lib/pwa/authGate';
 import { SYNCED_EVENT, enqueuePhoto, idbAvailable, isNetworkError, isTransientFailure, type SyncedPhotoDetail } from '@/lib/pwa/offlineQueue';
 import { adaptReconciliation, keepAdjusted, markFromCount, type PoLineRow, type ReceiptLineRow } from './_adapters';
 import { fromGrLine } from './_count';
@@ -194,16 +196,17 @@ export function ReceivingWizard({
 
   const utils = trpc.useUtils();
   const registerInvoice = trpc.receiving.registerInvoice.useMutation();
-  // startReceipt / submitReceipt go through the plain client: React Query would
-  // PAUSE them offline (a forever spinner) instead of failing fast.
-  // networkMode 'always': React Query's default ('online') PAUSES a mutation
-  // while the device is offline — the receiver saw "Uploading…" spin forever.
-  // Fail fast instead so the network message (and Retake) shows.
-  const uploadScan = trpc.scans.upload.useMutation({ networkMode: 'always' });
+  // markGrLine / startReceipt / submitReceipt go through the plain client: the
+  // field outbox owns their retries (kept on the phone, resent in order). They
+  // bypass the QueryClient's caches, so W1-04's UNAUTHORIZED handler never sees
+  // them — an expired session is turned into the re-auth sheet here
+  // (requestReauth), never into "no connection". (Mutations already fail fast
+  // offline: W1-04 made networkMode 'always' the app-wide default.)
+  const uploadScan = trpc.scans.upload.useMutation();
   const ensureEnglish = trpc.receiving.ensureEnglish.useMutation();
 
   // Every mark is saved on change (300 ms, full row) and kept on the phone offline.
-  const { outbox, states: saveByGrLine, pending: unsent } = useLineSaves(
+  const { outbox, states: saveByGrLine, pending: unsent, authGate } = useLineSaves(
     `rm-rcv-lines:${storeKey}`,
     (p) => utils.client.receiving.markGrLine.mutate(p),
     Boolean(closedAtOpen),
@@ -586,15 +589,19 @@ export function ReceivingWizard({
       setMarks(withUnsent(keepAdjusted(marksRef.current, adapted.initialMarks, adjustedKeysRef.current), adapted.grLineIdByKey));
       setStep('ADJUST_QUANTITIES');
     } catch (err) {
-      // Offline with a count already on screen (the receiver went to scan the
-      // invoice): back to that count, every mark kept, with the offline note
+      // The session expired (startReceipt / getReceipt said 401): the re-auth
+      // sheet, and a message that says so — never "no connection".
+      const expired = isSessionExpired(err);
+      if (expired) requestReauth();
+      // Offline (or signed out) with a count already on screen (the receiver went
+      // to scan the invoice): back to that count, every mark kept, with the note
       // inline — never stranded on the scan step.
       if (isTransientFailure(err) && Object.keys(marksRef.current).length > 0) {
-        setFooterError(td('delivery.count.offline'));
+        setFooterError(td(expired ? 'delivery.count.sessionExpired' : 'delivery.count.offline'));
         setStep('ADJUST_QUANTITIES');
         return;
       }
-      setError(errorText(err, t, locale));
+      setError(expired ? td('delivery.count.sessionExpired') : errorText(err, t, locale));
       setStep('SCAN_INVOICE');
     }
   }
@@ -674,7 +681,11 @@ export function ReceivingWizard({
     try {
       const flushed = await outbox.flush();
       if (flushed.queued.length > 0 || !navigator.onLine) {
-        setFooterError(td('delivery.count.offline'));
+        // Lines held back by an expired session (a 401 on the flush): sign in, not "offline".
+        if (authGate.blocked) {
+          requestReauth();
+          setFooterError(td('delivery.count.sessionExpired'));
+        } else setFooterError(td('delivery.count.offline'));
         return;
       }
       if (flushed.failed.length > 0) {
@@ -697,7 +708,10 @@ export function ReceivingWizard({
       await utils.receiving.todayExpectations.invalidate();
       void findNextDelivery();
     } catch (err) {
-      setFooterError(isNetworkError(err) ? td('delivery.count.offline') : errorText(err, t, locale));
+      if (isSessionExpired(err)) {
+        requestReauth();
+        setFooterError(td('delivery.count.sessionExpired'));
+      } else setFooterError(isNetworkError(err) ? td('delivery.count.offline') : errorText(err, t, locale));
     } finally {
       submittingRef.current = false;
       setClosing(false);

@@ -505,6 +505,42 @@ test('a count on a line that is only on the invoice survives a reload', async ({
   await expect(again.getByTestId('count-line-result')).toHaveText(/^4/);
 });
 
+test('the session expires mid-count: the sign-in sheet opens (never "no connection"), and the count is sent after signing in', async ({ page, context }) => {
+  test.setTimeout(150_000);
+  const po = await freshPo('reauth');
+  await openPo(page, po.poId);
+  await page.getByTestId('scan-no-invoice').tap();
+  const [a, b] = po.lines;
+  const lineA = page.getByTestId('count-line').filter({ hasText: a!.name });
+  await lineA.getByTestId('count-arrived').tap();
+  await expect(lineA.getByTestId('line-save-state')).toHaveAttribute('data-state', 'saved', { timeout: 15_000 });
+
+  // The session ends while the receiver keeps counting (cookies gone; the page stays).
+  const url = test.info().project.use.baseURL!;
+  await context.clearCookies();
+  await context.addCookies([
+    { name: 'rm_locale', value: 'he', url },
+    { name: 'rm_cookie_consent', value: 'necessary', url },
+  ]);
+  const lineB = page.getByTestId('count-line').filter({ hasText: b!.name });
+  await lineB.getByTestId('count-arrived').tap();
+  const sheet = page.getByTestId('reauth-sheet');
+  await expect(sheet).toBeVisible({ timeout: 20_000 });
+  // Kept on the phone — and nothing claims the phone is offline.
+  await expect(lineB.getByTestId('line-save-state')).toHaveAttribute('data-state', 'queued');
+  await expect(page.getByText('אין חיבור')).toHaveCount(0);
+
+  const email = sheet.locator('#reauth-email');
+  if (await email.isEditable()) await email.fill(RECEIVER);
+  await sheet.locator('#reauth-password').fill(process.env.DEMO_PASSWORD ?? 'RestoMatch-Demo-2026!');
+  await sheet.locator('form button[type="submit"]').click();
+  await expect(sheet).toBeHidden({ timeout: 30_000 });
+  // Signed in again: the queued line goes at once (no waiting for the 15 s timer).
+  await expect(lineB.getByTestId('line-save-state')).toHaveAttribute('data-state', 'saved', { timeout: 10_000 });
+  const row = (await grLines(po.poId)).find((r) => r.poLineId === b!.poLineId)!;
+  expect(Number(row.qty)).toBe(b!.qty);
+});
+
 test('field mode: bar in the bottom third at 390×844 and 375×667, 48 px targets, axe clean (he + en)', async ({ page }) => {
   test.setTimeout(180_000);
   let po = await freshPo('field');

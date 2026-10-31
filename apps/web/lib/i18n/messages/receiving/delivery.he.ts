@@ -70,6 +70,7 @@ export const he = {
       closing: 'סוגרים את קבלת הסחורה…',
       remaining: 'נותרו {count} שורות לסמן',
       offline: 'אין חיבור — הספירה שמורה בטלפון. אפשר לסגור את קבלת הסחורה כשהחיבור יחזור.',
+      sessionExpired: 'פג תוקף ההתחברות — התחברו שוב. הספירה שמורה.',
       saveFailed: 'שמירת {count} שורות נכשלה',
       unorderedNeeds: 'סמנו אם הפריטים שלא הוזמנו הגיעו',
       spotTitle: 'בדיקה מדגמית לפני האישור',
@@ -121,6 +122,7 @@ export const he = {
   pwa: {
     offline: 'אין חיבור · נשמר בטלפון',
     othersQueued: '{count} צילומים של סניף אחר ממתינים במכשיר',
+    signInToUpload: 'התחברו כדי להעלות את צילומי החשבונית',
     capturedByOne: 'הועלה צילום חשבונית · צולם על ידי {names}',
     capturedByMany: 'הועלו {count} צילומי חשבונית · צולמו על ידי {names}',
     someoneElse: 'משתמש אחר',

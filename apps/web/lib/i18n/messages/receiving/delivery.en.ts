@@ -64,6 +64,7 @@ export const en: Shape<typeof he> = {
       closing: 'Closing the receipt…',
       remaining: '{count} lines left to mark',
       offline: 'No connection — the count is saved on the phone. Close the receipt when you are back online.',
+      sessionExpired: 'Your sign-in expired — sign in again. The count is saved.',
       saveFailed: '{count} lines were not saved',
       unorderedNeeds: 'Mark whether the items that were not ordered arrived',
       spotTitle: 'Spot check before you confirm',
@@ -115,6 +116,7 @@ export const en: Shape<typeof he> = {
   pwa: {
     offline: 'Offline · saved on the phone',
     othersQueued: "{count} of another branch's photos are waiting on this device",
+    signInToUpload: 'Sign in to upload the invoice photos',
     capturedByOne: 'Invoice photo uploaded · taken by {names}',
     capturedByMany: '{count} invoice photos uploaded · taken by {names}',
     someoneElse: 'another user',
