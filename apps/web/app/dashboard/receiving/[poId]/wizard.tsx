@@ -816,9 +816,11 @@ export function ReceivingWizard({
   return (
     <div
       ref={rootRef}
-      // The field bar rides on top of the phone's bottom nav / the consent bar. The CSS default is the
-      // nav's height, so the bar paints in place; useFieldBarOffset then only refines it (no jump under a tap).
-      className="mx-auto max-w-3xl px-1 py-2 [--rm-field-bar-bottom:calc(3.3125rem+env(safe-area-inset-bottom)+var(--consent-h,0px))] lg:[--rm-field-bar-bottom:var(--consent-h,0px)]"
+      // The field bar rides on top of the consent bar. This page is a field route (W1-03's nav
+      // registry), so the shell renders no phone bottom nav here: the CSS default is the consent bar
+      // alone and the bar paints in place; useFieldBarOffset then only refines it. (A default of the
+      // old nav's height painted the bar 53 px up, then dropped it under the receiver's thumb.)
+      className="mx-auto max-w-3xl px-1 py-2 [--rm-field-bar-bottom:var(--consent-h,0px)]"
       data-mode="field"
     >
       {error ? (
