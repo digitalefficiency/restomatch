@@ -47,7 +47,7 @@ export function offlineLines(r: AskResult, t: T, locale: Locale): string[] {
       ];
     case 'leakChange': {
       const d = Number(f.deltaIls ?? 0);
-      const vars = { delta: ils(Math.abs(d)), leak: ils(f.leakIls), prev: ils(f.prevLeakIls) };
+      const vars = { delta: ils(Math.abs(d)), leak: ils(f.leakIls), prev: ils(f.prevLeakIls), span: f.spanLabel, curSpan: f.curSpanLabel, prevSpan: f.prevSpanLabel };
       const out = [Math.abs(d) < 1 ? t('answers.leakSame', vars) : t(d > 0 ? 'answers.leakUp' : 'answers.leakDown', vars)];
       if (f.topSupplier) out.push(t('answers.leakDriverSupplier', { supplier: f.topSupplier, amount: ils(f.topSupplierDeltaIls) }));
       if (f.topType) out.push(t('answers.leakDriverType', { type: typeLabel(t, f.topType), amount: ils(f.topTypeDeltaIls) }));

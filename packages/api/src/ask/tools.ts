@@ -12,18 +12,16 @@
  * are data, never instructions (see claude.ts) and the answer's links are
  * re-validated against `links` produced here (grounding.ts).
  */
-import {
-  computeLeakBreakdown,
-  computeLeakHero,
-  computeLeakReport,
-  type LeakBreakdownInvoice,
-  type LeakHero,
-  type LeakReport,
-} from '@restomatch/charts';
+import { computeLeakBreakdown, computeLeakHero, computeLeakReport, type LeakHero, type LeakReport } from '@restomatch/charts';
 import type { Database } from '@restomatch/db';
 import { z } from 'zod';
+import { awaitingDecisionDetail, type AwaitingClaim } from '../approvals/awaiting';
+import { leakComparison } from './compare';
+import { monthKey, monthPeriod, restaurantTimezone, type Period } from './periods';
 
-export type ToolName = 'leak_hero' | 'leak_report' | 'leak_breakdown' | 'claimable_lines';
+export { monthKey } from './periods';
+
+export type ToolName = 'leak_hero' | 'leak_report' | 'leak_breakdown' | 'leak_change' | 'claimable_lines';
 
 /** A screen the answer may link to (validated allow-list, built only here). */
 export interface ScreenLink {
@@ -44,22 +42,16 @@ export interface ToolOutput {
   links: ScreenLink[];
   /** Every number in `data`, by unit (for the grounding check). */
   figures: Figures;
-}
-
-/** 'YYYY-MM' of `offset` months from now in Israel time. */
-export function monthKey(offset = 0, now: Date = new Date()): string {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit' })
-    .formatToParts(now);
-  const y = Number(parts.find((p) => p.type === 'year')!.value);
-  const m = Number(parts.find((p) => p.type === 'month')!.value);
-  const idx = y * 12 + (m - 1) + offset;
-  return `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, '0')}`;
+  /** The period the figures cover (every period tool). */
+  period?: Period;
+  /** A like-for-like comparison: its delta must be quoted with its span label. */
+  comparison?: { cur: Period; prev: Period; deltaIls: number; labels: string[] };
 }
 
 /** Monthly offset (0, -1, …) of a 'YYYY-MM' relative to now; null when out of range. */
-function offsetOf(month: string, now: Date): number | null {
+function offsetOf(month: string, now: Date, tz: string): number | null {
   const [y, m] = month.split('-').map(Number) as [number, number];
-  const [cy, cm] = monthKey(0, now).split('-').map(Number) as [number, number];
+  const [cy, cm] = monthKey(0, now, tz).split('-').map(Number) as [number, number];
   const off = y * 12 + m - (cy * 12 + cm);
   return off <= 0 && off >= -24 ? off : null;
 }
@@ -127,27 +119,38 @@ export function reportData(r: LeakReport, locale: AskLocale = 'en') {
   };
 }
 
-/** Open, leak-counting discrepancy lines (what can still be claimed), biggest first. */
-export function claimableData(invoices: LeakBreakdownInvoice[], locale: AskLocale = 'en') {
-  const lines = invoices.flatMap((inv) =>
-    inv.lines
-      .filter(
-        (l) =>
-          l.countsAsLeak &&
-          (l.resolutionStatus === 'open' || l.resolutionStatus === 'escalated') &&
-          Math.abs(l.deltaAmount) >= 0.01,
-      )
-      .map((l) => ({
-        invoiceId: inv.invoiceId,
-        invoiceNumber: clip(inv.invoiceNumber, 30),
-        supplier: nm(locale, inv.supplierNameEn, inv.supplierName),
-        type: l.type,
-        item: nm(locale, l.productNameEn ?? l.lineDescriptionEn, l.productName, l.lineDescription),
-        amountIls: r2(Math.abs(l.deltaAmount)),
-      })),
-  );
-  lines.sort((a, b) => b.amountIls - a.amountIls);
-  return { totalIls: r2(lines.reduce((s, l) => s + l.amountIls, 0)), count: lines.length, lines: lines.slice(0, 15) };
+/**
+ * What can be claimed now: the open claimable lines of `awaitingDecision` (ALL
+ * open rows, the letters' per-invoice cap — no month window, no limit). ₪ per
+ * VAT basis, never added together: `totalIls` is before VAT; a duplicate's ₪
+ * (incl. VAT) and VAT amounts are reported apart.
+ */
+export function claimableData(claims: readonly AwaitingClaim[], locale: AskLocale = 'en') {
+  const agorot = { excl: 0, incl: 0, vat: 0 };
+  for (const c of claims) agorot[c.basis] += Math.round(c.amountIls * 100);
+  const lines = claims.map((c) => ({
+    invoiceId: c.invoice.invoiceId,
+    invoiceNumber: clip(c.invoice.invoiceNumber, 30),
+    supplier: nm(locale, c.invoice.supplierNameEn, c.invoice.supplierName),
+    type: c.line.type,
+    item: nm(locale, c.line.productNameEn ?? c.line.lineDescriptionEn, c.line.productName, c.line.lineDescription),
+    amountIls: r2(c.amountIls),
+    basis: c.basis,
+  }));
+  return {
+    totalIls: agorot.excl / 100,
+    duplicateInclVatIls: agorot.incl / 100,
+    vatIls: agorot.vat / 100,
+    count: claims.filter((c) => c.basis === 'excl').length,
+    otherBasisCount: claims.filter((c) => c.basis !== 'excl').length,
+    lines: lines.slice(0, 15),
+  };
+}
+
+/** Open claimable lines for Ask: the whole restaurant (Ask is manager tier, which reads every routing with ₪). */
+export async function claimableFor(db: Database, restaurantId: string, locale: AskLocale) {
+  const { claims } = await awaitingDecisionDetail(db, { session: { restaurantId, role: 'manager' } }, { scope: 'all' });
+  return claimableData(claims, locale);
 }
 
 export function figuresOf(value: unknown, key = '', out: Figures = { ils: [], pct: [], count: [] }): Figures {
@@ -171,27 +174,30 @@ const BreakdownInput = z
   })
   .strict();
 
-const MONTH_PROP = { type: 'string', description: "Calendar month 'YYYY-MM' (Israel time). Omit for the current month." };
+const MONTH_PROP = {
+  type: 'string',
+  description: "Calendar month 'YYYY-MM' (the restaurant's local time). Omit for the current month (to date).",
+};
 
 /** Tool definitions sent to Claude (strict JSON schemas, read-only). */
 export const TOOL_DEFINITIONS = [
   {
     name: 'leak_hero',
     description:
-      "The restaurant's headline leak for a month: leaked ₪, % of checked food spend, ₪ caught before payment, ₪ recovered, invoice counts. Use it to compare months.",
+      "The restaurant's headline leak for ONE month: leaked ₪, % of checked food spend, ₪ caught before payment, recoveredIls (₪ accepted for claim — not yet money back), invoice counts. `period` says which days it covers and whether the month is complete; the current month is to date. To compare with an earlier month use leak_change, never two leak_hero results.",
     input_schema: { type: 'object', properties: { month: MONTH_PROP }, additionalProperties: false },
     strict: true,
   },
   {
     name: 'leak_report',
     description:
-      'The monthly leak report: the leak split by discrepancy type and by supplier (spend, leak, leak %), the products whose unit price rose vs the 90 days before (before/after price, % change, excess ₪), and what happened to the leak (open / claimed / waived).',
+      'The monthly leak report: the leak split by discrepancy type and by supplier (spend, leak, leak %), the products whose unit price rose vs the 90 days before (before/after price, % change, excess ₪), and what happened to the leak (open / claimed / waived). `period` says which days it covers and whether the month is complete.',
     input_schema: { type: 'object', properties: { month: MONTH_PROP }, additionalProperties: false },
     strict: true,
   },
   {
     name: 'leak_breakdown',
-    description: "The invoices behind a month's leak, biggest first, with their discrepancy lines.",
+    description: "The invoices behind a month's leak, biggest first, with their discrepancy lines. `period` says which days it covers.",
     input_schema: {
       type: 'object',
       properties: { month: MONTH_PROP, limit: { type: 'integer', description: '1–30, default 10' } },
@@ -200,9 +206,16 @@ export const TOOL_DEFINITIONS = [
     strict: true,
   },
   {
+    name: 'leak_change',
+    description:
+      "How the leak changed, like for like: this month from the 1st to today against the SAME days of the previous month (or a closed month in full against the month before it). Returns both spans, the delta and `spanLabel` — quote the span label whenever you state the change.",
+    input_schema: { type: 'object', properties: { month: MONTH_PROP }, additionalProperties: false },
+    strict: true,
+  },
+  {
     name: 'claimable_lines',
     description:
-      'Discrepancy lines still open (not yet claimed or waived) that count toward the leak, across this and last month — i.e. what can be claimed back from suppliers now, biggest first, with the total.',
+      'Open gaps (not yet decided) with ₪ to claim back from suppliers, from every month, biggest first, capped per invoice like the credit letters. totalIls is before VAT; duplicate invoices (incl. VAT) and VAT amounts are separate totals — never add them.',
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
     strict: true,
   },
@@ -219,15 +232,18 @@ export interface ToolContext {
 /** Execute one tool. Throws on invalid input (the loop returns it as an is_error tool_result). */
 export async function runTool(name: string, rawInput: unknown, ctx: ToolContext): Promise<ToolOutput> {
   const now = ctx.now ?? new Date();
+  const tz = await restaurantTimezone(ctx.db, ctx.restaurantId);
   switch (name as ToolName) {
     case 'leak_hero': {
       const input = MonthInput.parse(rawInput ?? {});
-      const offset = input.month ? offsetOf(input.month, now) : 0;
+      const offset = input.month ? offsetOf(input.month, now, tz) : 0;
       if (offset === null) throw new Error('month out of range (last 24 months only)');
       const hero = await computeLeakHero(ctx.db, ctx.restaurantId, { monthOffset: offset, now });
-      const data = heroData(hero);
+      const period = monthPeriod(offset, now, tz);
+      const data = { period, ...heroData(hero) };
       return {
         data,
+        period,
         figures: figuresOf(data),
         links: [
           { screen: 'overview', href: '/dashboard' },
@@ -237,25 +253,28 @@ export async function runTool(name: string, rawInput: unknown, ctx: ToolContext)
     }
     case 'leak_report': {
       const input = MonthInput.parse(rawInput ?? {});
-      const month = input.month ?? monthKey(0, now);
-      if (offsetOf(month, now) === null) throw new Error('month out of range (last 24 months only)');
-      const data = reportData(await computeLeakReport(ctx.db, ctx.restaurantId, month), ctx.locale);
+      const month = input.month ?? monthKey(0, now, tz);
+      const offset = offsetOf(month, now, tz);
+      if (offset === null) throw new Error('month out of range (last 24 months only)');
+      const period = monthPeriod(offset, now, tz);
+      const data = { period, ...reportData(await computeLeakReport(ctx.db, ctx.restaurantId, month), ctx.locale) };
       const links: ScreenLink[] = [{ screen: 'report', href: `/dashboard/leaks/report?month=${month}` }];
       for (const s of data.bySupplier) {
         if (s.supplierId) links.push({ screen: 'supplier', href: `/dashboard/suppliers/${s.supplierId}` });
       }
-      return { data, figures: figuresOf(data), links };
+      return { data, period, figures: figuresOf(data), links };
     }
     case 'leak_breakdown': {
       const input = BreakdownInput.parse(rawInput ?? {});
-      const offset = input.month ? offsetOf(input.month, now) : 0;
+      const offset = input.month ? offsetOf(input.month, now, tz) : 0;
       if (offset === null) throw new Error('month out of range (last 24 months only)');
       const rows = await computeLeakBreakdown(ctx.db, ctx.restaurantId, {
         monthOffset: offset,
         limit: input.limit ?? 10,
         now,
       });
-      const data = rows.map((inv) => ({
+      const period = monthPeriod(offset, now, tz);
+      const invoices = rows.map((inv) => ({
         invoiceId: inv.invoiceId,
         invoiceNumber: clip(inv.invoiceNumber, 30),
         invoiceDate: inv.invoiceDate,
@@ -271,22 +290,50 @@ export async function runTool(name: string, rawInput: unknown, ctx: ToolContext)
           countsAsLeak: l.countsAsLeak,
         })),
       }));
+      const data = { period, invoices };
       return {
         data,
+        period,
         figures: figuresOf(data),
         links: [
           { screen: 'breakdown', href: `/dashboard/leaks/breakdown?m=${offset}` },
-          ...data.map((d) => ({ screen: 'invoice' as const, href: `/dashboard/invoices/${d.invoiceId}` })),
+          ...invoices.map((d) => ({ screen: 'invoice' as const, href: `/dashboard/invoices/${d.invoiceId}` })),
         ],
+      };
+    }
+    case 'leak_change': {
+      const input = MonthInput.parse(rawInput ?? {});
+      const offset = input.month ? offsetOf(input.month, now, tz) : 0;
+      if (offset === null) throw new Error('month out of range (last 24 months only)');
+      const c = await leakComparison(ctx.db, ctx.restaurantId, now, ctx.locale ?? 'en', offset);
+      const data = {
+        period: { from: c.cur.from, through: c.cur.through, complete: c.cur.complete },
+        comparedWith: { from: c.prev.from, through: c.prev.through, complete: c.prev.complete },
+        spanLabel: c.spanLabel,
+        leakIls: c.cur.leakIls,
+        prevLeakIls: c.prev.leakIls,
+        deltaIls: c.deltaIls,
+        topSupplier: c.topSupplier?.name ?? null,
+        topSupplierDeltaIls: c.topSupplier?.deltaIls ?? null,
+        topType: c.topType?.type ?? null,
+        topTypeDeltaIls: c.topType?.deltaIls ?? null,
+      };
+      const links: ScreenLink[] = [
+        { screen: 'report', href: `/dashboard/leaks/report?month=${c.cur.from.slice(0, 7)}` },
+        { screen: 'report', href: `/dashboard/leaks/report?month=${c.prev.from.slice(0, 7)}` },
+      ];
+      if (c.topSupplier?.id) links.push({ screen: 'supplier', href: `/dashboard/suppliers/${c.topSupplier.id}` });
+      return {
+        data,
+        period: c.cur,
+        comparison: { cur: c.cur, prev: c.prev, deltaIls: c.deltaIls, labels: [c.spanLabel, c.prevSpanLabel] },
+        figures: figuresOf(data),
+        links,
       };
     }
     case 'claimable_lines': {
       z.object({}).strict().parse(rawInput ?? {});
-      const [cur, prev] = await Promise.all([
-        computeLeakBreakdown(ctx.db, ctx.restaurantId, { monthOffset: 0, limit: 100, now }),
-        computeLeakBreakdown(ctx.db, ctx.restaurantId, { monthOffset: -1, limit: 100, now }),
-      ]);
-      const data = claimableData([...cur, ...prev], ctx.locale);
+      const data = await claimableFor(ctx.db, ctx.restaurantId, ctx.locale ?? 'en');
       return {
         data,
         figures: figuresOf(data),

@@ -16,12 +16,18 @@ import { trpc } from '../../src/trpc';
 export default function ManagerQueue() {
   const utils = trpc.useUtils();
   const queue = trpc.approvals.myQueue.useQuery({ limit: 50 });
+  // G-12b: the count is the server's (all open rows), never the loaded page's length.
+  const summary = trpc.approvals.queueSummary.useQuery();
   const approve = trpc.approvals.approve.useMutation({
-    onSuccess: () => utils.approvals.myQueue.invalidate(),
+    onSuccess: () => {
+      utils.approvals.myQueue.invalidate();
+      utils.approvals.queueSummary.invalidate();
+    },
   });
   const reject = trpc.approvals.reject.useMutation({
     onSuccess: () => {
       utils.approvals.myQueue.invalidate();
+      utils.approvals.queueSummary.invalidate();
       setRejectingId(null);
       setReason('');
     },
@@ -33,7 +39,9 @@ export default function ManagerQueue() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>תור אישורים</Text>
-      <Text style={styles.subtitle}>חריגות שמחכות לי</Text>
+      <Text style={styles.subtitle}>
+        {summary.data ? `${summary.data.count} פערים מחכים להחלטה` : 'פערים שמחכים להחלטה'}
+      </Text>
 
       {queue.isLoading ? (
         <ActivityIndicator color={colors.primary} style={{ marginTop: spacing.xl }} />
@@ -58,9 +66,8 @@ export default function ManagerQueue() {
                 </Text>
               </View>
               <Text style={styles.type}>{typeLabel(item.type)}</Text>
-              <Text style={styles.amount}>
-                ₪{Number(item.deltaAmount ?? 0).toLocaleString('he-IL')}
-              </Text>
+              {/* Frozen app: no ₪ here — the amount and its basis are on the web. */}
+              <Text style={styles.amount}>{item.supplierName ?? 'ספק לא ידוע'}</Text>
 
               <View style={styles.actions}>
                 <Pressable
