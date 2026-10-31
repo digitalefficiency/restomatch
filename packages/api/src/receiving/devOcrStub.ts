@@ -20,6 +20,17 @@ export function devOcrStubEnabled(env: NodeJS.ProcessEnv = process.env): boolean
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+/** 'YYYY-MM-DD' of `at` in the IANA zone `tz` (falls back to Asia/Jerusalem). */
+export function localDay(at: Date, tz: string | null | undefined): string {
+  const fmt = (zone: string) =>
+    new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(at);
+  try {
+    return fmt(tz || 'Asia/Jerusalem');
+  } catch {
+    return fmt('Asia/Jerusalem');
+  }
+}
+
 /** First configured rate (numeric string) wins — PO, supplier, restaurant — else 18%. */
 export function stubVatRate(...rates: Array<string | null | undefined>): number {
   for (const r of rates) if (r != null) return Number(r);
@@ -44,6 +55,7 @@ export async function buildDevOcrStub(
       poVat: purchaseOrders.vatRate,
       supplierVat: suppliers.vatRate,
       restaurantVat: restaurants.vatRate,
+      timezone: restaurants.timezone,
     })
     .from(goodsReceipts)
     .innerJoin(purchaseOrders, eq(purchaseOrders.id, goodsReceipts.poId))
@@ -91,7 +103,10 @@ export async function buildDevOcrStub(
   return {
     supplier: { name: gr.supplierName },
     invoiceNumber: `DEV-${Date.now().toString(36).toUpperCase()}`,
-    invoiceDate: new Date().toISOString().slice(0, 10),
+    // The restaurant's calendar day, not the UTC one: between 22:00 and 24:00 UTC
+    // the UTC day is yesterday in Israel, and the scan then looked a day older
+    // than its own receipt (hero month, "opened before the scan", the pay run).
+    invoiceDate: localDay(new Date(), gr.timezone),
     allocationNumber: null,
     lines,
     totals: { subtotal, vat, total: round2(subtotal + vat) },
