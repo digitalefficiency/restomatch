@@ -225,6 +225,9 @@ describe('a received PO outranks an undelivered closer one', () => {
     await ownerDb.update(purchaseOrders).set({ expectedDeliveryAt: D0 }).where(eq(purchaseOrders.id, T.poId));
     await ownerDb.update(poLines).set({ productId: T.productId, unitPriceExpected: '10' }).where(eq(poLines.id, T.poLineId));
     await ownerDb.update(grLines).set({ qtyReceived: received }).where(eq(grLines.id, T.grLineId));
+    // "PO1 received": its receipt is closed (G-04 receipt truth: a pending receipt — a
+    // receiver still counting — feeds the engine nothing).
+    await ownerDb.update(goodsReceipts).set({ status: received === '10' ? 'completed' : 'partial' }).where(eq(goodsReceipts.id, T.grId));
     await ownerDb
       .update(invoices)
       .set({ invoiceDate: new Date(D0.getTime() + 2 * DAY), vatAmount: '18.00', totalInclVat: '118.00', source: 'photo' })
@@ -329,3 +332,36 @@ describe('an emailed invoice goes by the nearest day', () => {
     expect(await runPo(T.invoiceId)).toBe(T.poId);
   });
 });
+
+/**
+ * G-04 (receiving-04 / functional-flows-06): a DRAFT PO — a walk-in's retro PO
+ * before the manager confirms it — is never pinned, so the owner's
+ * UNORDERED_ARRIVAL hold stays; a foreign PO is never pinned either.
+ */
+describe('a draft or foreign PO is never pinned', () => {
+  it('D1: the pinned PO goes back to draft → the re-match drops the pin → UNORDERED_ARRIVAL; confirmed again → pinned', async () => {
+    const T = await linked('D');
+    const mgr = as(T, T.managerId, 'manager');
+    await ownerDb.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, T.grId));
+    await mgr.match.runForInvoice({ invoiceId: T.invoiceId });
+    expect(await runPo(T.invoiceId)).toBe(T.poId);
+    await ownerDb.update(purchaseOrders).set({ status: 'draft' }).where(eq(purchaseOrders.id, T.poId));
+    await mgr.match.runForInvoice({ invoiceId: T.invoiceId });
+    expect(await runPo(T.invoiceId)).toBeNull();
+    expect((await findings(T.invoiceId)).map((f) => f.type)).toContain('UNORDERED_ARRIVAL');
+    await ownerDb.update(purchaseOrders).set({ status: 'confirmed' }).where(eq(purchaseOrders.id, T.poId));
+    await mgr.match.runForInvoice({ invoiceId: T.invoiceId });
+    expect(await runPo(T.invoiceId)).toBe(T.poId);
+    expect((await findings(T.invoiceId)).map((f) => f.type)).not.toContain('UNORDERED_ARRIVAL');
+  });
+  it("D2: another tenant's PO id as the pin is never used", async () => {
+    const A = await linked('A');
+    const B = await linked('B');
+    const { buildMatchInputForInvoice } = await import('../match/buildMatchInput');
+    // The worker's service connection bypasses RLS: the explicit restaurant scoping is what stops it.
+    const built = await buildMatchInputForInvoice(ownerDb, A.restaurantId, A.invoiceId, { pinnedPoId: B.poId });
+    expect(built!.poId).toBe(A.poId);
+    expect(built!.pinSkipped).toBeUndefined();
+  });
+});
+

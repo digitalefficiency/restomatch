@@ -456,6 +456,9 @@ describe('consolidated.coverage — isolation (RLS app role)', () => {
   const wide = { from: '2026-01-01T00:00:00Z', to: '2027-12-31T00:00:00Z' };
 
   it("A's supplier: covered / in the consolidated invoice — and nothing of B", async () => {
+    // G-04 receipt truth: only a CLOSED receipt is a delivery note. The fixture's
+    // receipt is pending (a receiver still counting); this case is about a received one.
+    await ownerDb.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, A.grId));
     const rows = await caller(A).consolidated.coverage({ supplierId: A.supplierId, ...wide });
     const byId = new Map(rows.map((r) => [r.grId, r]));
     expect(byId.get(A.grId)).toMatchObject({ state: 'covered', invoiceId: A.invoiceId, invoiceNumber: A.invoiceNumber });
