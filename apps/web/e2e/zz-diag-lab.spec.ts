@@ -1,4 +1,4 @@
-import { test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { OWNER_STATE } from './env';
 
 /**
@@ -22,10 +22,7 @@ for (const width of [390, 1440]) {
     await page.evaluate(() => document.fonts.ready);
     const info = await page.evaluate(() => {
       const lab = document.querySelector('[data-lab="tokens"]') as HTMLElement;
-      const sections = [...lab.children].map((s) => ({
-        name: (s.querySelector('h1,h2')?.textContent ?? s.tagName).slice(0, 24),
-        h: Math.round(s.getBoundingClientRect().height),
-      }));
+      const sections = [...lab.children].map((s) => Math.round(s.getBoundingClientRect().height));
       const banner = document.querySelector('#main-content [role="status"]');
       return {
         lab: Math.round(lab.getBoundingClientRect().height),
@@ -46,15 +43,25 @@ for (const width of [390, 1440]) {
         const { fonts } = await cdp.send('CSS.getPlatformFontsForNode', { nodeId: id });
         const own = fonts.filter((f) => !f.isCustomFont);
         if (!own.length) continue;
-        const { outerHTML } = await cdp.send('DOM.getOuterHTML', { nodeId: id });
+        const { object } = await cdp.send('DOM.resolveNode', { nodeId: id });
+        const text = object.objectId
+          ? ((await cdp.send('Runtime.callFunctionOn', {
+              objectId: object.objectId,
+              functionDeclaration: 'function () { return (this.textContent || "").slice(0, 40); }',
+              returnByValue: true,
+            })).result.value as string)
+          : '';
         for (const f of own) {
           const list = (sys[f.familyName] ??= []);
-          if (list.length < 6) list.push(`${f.glyphCount}g:${outerHTML.replace(/<[^>]+>/g, '').slice(0, 40)}`);
+          if (list.length < 6) list.push(`${f.glyphCount}g:${text}`);
         }
       } catch {
         /* node without layout */
       }
     }
     console.log(`DIAG-FONTS-${width}`, JSON.stringify(sys));
+    // Fail on purpose so the numbers land in the end-of-run summary (the full CI log is not downloadable here).
+    const browser = page.context().browser()?.version() ?? '?';
+    expect(`DIAG ${width} chromium=${browser} ${JSON.stringify(info)} fonts=${JSON.stringify(sys)}`).toBe('');
   });
 }
