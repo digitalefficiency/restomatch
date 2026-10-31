@@ -9,7 +9,7 @@ import {
 } from '@restomatch/api';
 import { matchProductTopN, MockEmbeddingProvider } from '@restomatch/catalog';
 import { HELD_FOR_RECEIPTS_KEY, receiptsBeingCountedForScan } from '@restomatch/charts';
-import { and, eq, findDemoTenants, invoiceLines, invoices, ne, restaurants, sql, type Database } from '@restomatch/db';
+import { and, eq, findDemoTenants, invoiceLines, invoices, ne, restaurants, sql, suppliers, type Database } from '@restomatch/db';
 import {
   ClaudeVision,
   runOcrPipeline,
@@ -328,7 +328,11 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
     const reviewReasons: string[] = [];
     if (facts.kind !== 'tax_invoice' && facts.kind !== 'consolidated') reviewReasons.push(`doc_kind_${facts.kind}`);
     if (facts.kind === 'consolidated' && !invoice.supplierId) reviewReasons.push('consolidated_unknown_supplier');
-    const holdForHuman = result.needsHumanReview || facts.kind !== 'tax_invoice';
+    //  - the ח.פ. printed on the document is not the one on file for the invoice's
+    //    supplier (tenant-scoped): the wrong supplier, or a look-alike — a human.
+    const businessIdMismatch = await supplierBusinessIdMismatch(db, job.data.restaurantId, invoice.supplierId, r.supplier?.businessId);
+    if (businessIdMismatch) reviewReasons.push('supplier_id_mismatch');
+    const holdForHuman = result.needsHumanReview || facts.kind !== 'tax_invoice' || businessIdMismatch;
 
     // ONE copy of the extraction (the pipeline result repeats it as primary,
     // reconciled and both providers) + the keys the readers look for at the top
@@ -498,7 +502,19 @@ const TAX_INVOICE_KINDS = new Set(['tax_invoice', 'invoice', 'tax_invoice_receip
 export function documentFacts(extraction: unknown): DocumentFacts {
   const e = (extraction ?? {}) as Record<string, unknown>;
   const rawKind = typeof e.documentKind === 'string' ? e.documentKind.trim().toLowerCase() : '';
-  const kind = !rawKind || TAX_INVOICE_KINDS.has(rawKind) ? 'tax_invoice' : CONSOLIDATED_KINDS.has(rawKind) ? 'consolidated' : rawKind.replace(/[^a-z0-9_]/g, '_').slice(0, 40);
+  // S14's classifier (packages/ocr classifyConsolidation → reconciled.consolidation)
+  // is the authority when present: 'consolidated' only with ≥ 2 distinct ת.מ.
+  // listed, or documentKind consolidated + a printed period. A bare documentKind
+  // 'consolidated' without that evidence stays an ordinary invoice.
+  const consolidation = typeof e.consolidation === 'string' ? e.consolidation : null;
+  const kind =
+    consolidation === 'consolidated'
+      ? 'consolidated'
+      : !rawKind || TAX_INVOICE_KINDS.has(rawKind) || (CONSOLIDATED_KINDS.has(rawKind) && consolidation === 'regular')
+        ? 'tax_invoice'
+        : CONSOLIDATED_KINDS.has(rawKind)
+          ? 'consolidated'
+          : rawKind.replace(/[^a-z0-9_]/g, '_').slice(0, 40);
   const period = (e.billingPeriod ?? {}) as Record<string, unknown>;
   const day = (v: unknown) => (typeof v === 'string' && LOCAL_DAY.test(v.trim()) ? v.trim() : null);
   const notes = Array.isArray(e.deliveryNotes) ? e.deliveryNotes : [];
@@ -512,6 +528,41 @@ export function documentFacts(extraction: unknown): DocumentFacts {
     periodEnd: day(period.end ?? period.to ?? e.periodEnd),
     deliveryNotes: [...new Set(numbers)].map((number) => ({ number })),
   };
+}
+
+/** A ח.פ. / ע.מ. reduced to its digits (printed with spaces, dashes or a prefix). */
+export function normalizeBusinessId(v: unknown): string | null {
+  if (typeof v !== 'string' && typeof v !== 'number') return null;
+  const digits = String(v).replace(/\D/g, '');
+  return digits.length >= 8 && digits.length <= 10 ? digits.replace(/^0+(?=\d{9})/, '') : null;
+}
+
+/**
+ * True when the document prints a ח.פ. AND the invoice's supplier (this tenant's
+ * row only) has one on file AND they differ. Unknown on either side is not a
+ * mismatch (nothing to compare — never guessed). A failed lookup is logged and
+ * treated as no mismatch: it must not fail the read.
+ */
+export async function supplierBusinessIdMismatch(
+  db: Database,
+  restaurantId: string,
+  supplierId: string | null,
+  printed: unknown,
+): Promise<boolean> {
+  const onDocument = normalizeBusinessId(printed);
+  if (!supplierId || !onDocument) return false;
+  try {
+    const [row] = await db
+      .select({ businessId: suppliers.businessId })
+      .from(suppliers)
+      .where(and(eq(suppliers.id, supplierId), eq(suppliers.restaurantId, restaurantId)))
+      .limit(1);
+    const onFile = normalizeBusinessId(row?.businessId);
+    return onFile !== null && onFile !== onDocument;
+  } catch (err) {
+    console.warn(`[ocr-invoice] supplier ח.פ. lookup failed: ${err instanceof Error ? err.message : err}`);
+    return false;
+  }
 }
 
 type InvoiceHeader = Pick<

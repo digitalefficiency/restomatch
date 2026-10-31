@@ -32,7 +32,7 @@ vi.mock('@restomatch/api', async (importOriginal) => {
   return { ...real, meterOcrScan: async () => ({ metered: true, used: 1, limit: null }) };
 });
 
-const { documentFacts, ocrCostUsd, processOcrInvoice } = await import('../jobs/ocrInvoice');
+const { documentFacts, normalizeBusinessId, ocrCostUsd, processOcrInvoice } = await import('../jobs/ocrInvoice');
 
 const db = createDb(testDbUrl());
 const qsql = queueSql(testDbUrl());
@@ -50,8 +50,11 @@ const base: InvoiceOcrResult = {
 const consolidated = {
   ...base,
   invoiceNumber: 'R-10',
+  // S14's shape (packages/ocr): consolidation + billingPeriod {from, to} on reconciled.
+  consolidation: 'consolidated',
+  consolidationBasis: 'delivery_note_list',
   documentKind: 'consolidated',
-  billingPeriod: { start: '2026-10-01', end: '2026-10-31' },
+  billingPeriod: { from: '2026-10-01', to: '2026-10-31' },
   deliveryNotes: [{ number: '9001' }, { number: '9002' }, '9001'],
 } as unknown as InvoiceOcrResult;
 
@@ -71,6 +74,17 @@ describe('documentFacts', () => {
     const f = documentFacts({ documentKind: 'Delivery Note', billingPeriod: { start: '1.10.26', end: '2026-10-31' } });
     expect(f.kind).toBe('delivery_note');
     expect([f.periodStart, f.periodEnd]).toEqual([null, '2026-10-31']);
+  });
+  it("S14's classifier wins: documentKind 'consolidated' without its evidence (consolidation 'regular') is an ordinary invoice", () => {
+    expect(documentFacts({ documentKind: 'consolidated', consolidation: 'regular' }).kind).toBe('tax_invoice');
+    expect(documentFacts({ consolidation: 'consolidated', deliveryNotes: [{ number: '1' }, { number: '2' }] }).kind).toBe('consolidated');
+  });
+  it('ח.פ. normalisation: digits only, 8–10 long, a leading 0 dropped', () => {
+    expect(normalizeBusinessId('51-477812-3')).toBe('514778123');
+    expect(normalizeBusinessId('0514778123')).toBe('514778123');
+    expect(normalizeBusinessId('ח.פ. 514778123')).toBe('514778123');
+    expect(normalizeBusinessId('123')).toBeNull();
+    expect(normalizeBusinessId(undefined)).toBeNull();
   });
   it('estimated cost from the list price; an unknown model is not guessed', () => {
     expect(ocrCostUsd({ model: 'claude-opus-4-8', inputTokens: 2000, outputTokens: 500 })).toBeCloseTo(0.0225, 6);
@@ -181,6 +195,46 @@ describe('processOcrInvoice persistence (DB)', () => {
     expect((await row(id)).status).toBe('parsed');
     expect(await raw(id)).toMatchObject({ kind: 'delivery_note', reviewReasons: ['doc_kind_delivery_note'] });
     expect(await matchJobs(id)).toHaveLength(0);
+  });
+
+  it('ח.פ. on the document differs from the supplier on file: held (supplier_id_mismatch), no match', async () => {
+    await db.update(suppliers).set({ businessId: '514778123' }).where(eq(suppliers.id, supplierId));
+    h.result = { ...base, supplier: { name: 'ספק ירקות', businessId: '511111111' } };
+    const id = await newInvoice();
+    await run(id);
+    expect((await row(id)).status).toBe('parsed');
+    expect((await raw(id)).reviewReasons).toEqual(['supplier_id_mismatch']);
+    expect(await matchJobs(id)).toHaveLength(0);
+  });
+
+  it('the same ח.פ. (as printed: with dashes) or none on file is not a mismatch', async () => {
+    await db.update(suppliers).set({ businessId: '514778123' }).where(eq(suppliers.id, supplierId));
+    h.result = { ...base, supplier: { name: 'ספק ירקות', businessId: '51-477812-3' } };
+    const same = await newInvoice();
+    await run(same);
+    expect(await raw(same)).not.toHaveProperty('reviewReasons');
+    await db.update(suppliers).set({ businessId: null }).where(eq(suppliers.id, supplierId));
+    h.result = { ...base, invoiceNumber: 'P-2', supplier: { name: 'ספק ירקות', businessId: '511111111' } };
+    const none = await newInvoice();
+    await run(none);
+    expect(await raw(none)).not.toHaveProperty('reviewReasons');
+  });
+
+  it("another tenant's supplier row is never consulted", async () => {
+    const [other] = await db.insert(restaurants).values({ name: 'OCR persist other' }).returning();
+    try {
+      const [s2] = await db.insert(suppliers).values({ restaurantId: other!.id, name: 'x', businessId: '599999999' }).returning();
+      h.result = { ...base, supplier: { name: 'x', businessId: '511111111' } };
+      // An invoice of OUR tenant pointing at the other tenant's supplier id (a corrupt row).
+      const [inv] = await db
+        .insert(invoices)
+        .values({ restaurantId: rid, supplierId: s2!.id, status: 'ocr_pending', source: 'email', rawImageUrl: `${SCAN_PREFIX}${rid}/y.pdf` })
+        .returning();
+      await run(inv!.id);
+      expect(await raw(inv!.id)).not.toHaveProperty('reviewReasons');
+    } finally {
+      await db.delete(restaurants).where(eq(restaurants.id, other!.id));
+    }
   });
 
   it('needsHumanReview: parsed, no auto-match', async () => {
