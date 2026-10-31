@@ -76,6 +76,8 @@ export const he = {
     intakeCta: 'לתיבה הנכנסת',
     prevMonth: 'החודש הקודם',
     nextMonth: 'החודש הבא',
+    prevMonthShown: 'מציג את החודש הקודם',
+    currentMonth: 'החודש הנוכחי',
     month: 'חודש',
     error: 'לא הצלחנו לטעון את החשבוניות.',
     retry: 'נסו שוב',

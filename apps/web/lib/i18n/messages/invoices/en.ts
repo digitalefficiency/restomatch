@@ -75,6 +75,8 @@ export const en: Shape<typeof he> = {
     intakeCta: 'Go to the inbox',
     prevMonth: 'Previous month',
     nextMonth: 'Next month',
+    prevMonthShown: 'Showing the previous month',
+    currentMonth: 'This month',
     month: 'Month',
     error: "We couldn't load the invoices.",
     retry: 'Try again',

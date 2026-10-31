@@ -6,6 +6,7 @@ import { invoices as invoicesNs } from '@/lib/i18n/messages/invoices';
 import { createServerCaller } from '@/lib/trpc/server';
 import { RegisterClient, type RegisterPageCopy } from './register-client';
 import type { InvoiceStateKey, RegisterRow } from './columns';
+import { pickRegisterMonth } from './month';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,12 +34,20 @@ export default async function InvoicesRegisterPage({
   searchParams: Promise<{ month?: string }>;
 }) {
   const { month } = await searchParams;
-  const monthOffset = Math.max(-24, Math.min(0, Number.parseInt(month ?? '0', 10) || 0));
   const [caller, t, locale] = await Promise.all([createServerCaller(), getT(invoicesNs), getLocale()]);
 
   let data: Awaited<ReturnType<typeof caller.invoices.list>> | null = null;
+  let monthOffset = pickRegisterMonth({ param: month, now: new Date(), currentMonthCount: 1 }).monthOffset;
+  let fellBack = false;
   try {
     data = await caller.invoices.list({ monthOffset });
+    // First days of a month: an empty current month opens the previous one, with a chip back.
+    const pick = pickRegisterMonth({ param: month, now: new Date(), currentMonthCount: data.rows.length });
+    if (pick.fellBack) {
+      monthOffset = pick.monthOffset;
+      fellBack = true;
+      data = await caller.invoices.list({ monthOffset });
+    }
   } catch (err) {
     if (err instanceof TRPCError && err.code === 'FORBIDDEN') notFound();
     data = null; // in-shell error state with retry, never an empty ₪0 register
@@ -66,6 +75,8 @@ export default async function InvoicesRegisterPage({
     intakeCta: t('register.intakeCta'),
     prevMonth: t('register.prevMonth'),
     nextMonth: t('register.nextMonth'),
+    prevMonthShown: t('register.prevMonthShown'),
+    currentMonth: t('register.currentMonth'),
     error: t('register.error'),
     retry: t('register.retry'),
     peekTotal: t('register.peekTotal'),
@@ -91,7 +102,7 @@ export default async function InvoicesRegisterPage({
   return (
     <div>
       <SectionHeader level={1} title={t('register.title')} subtitle={t('register.subtitle')} />
-      <RegisterClient rows={rows} counts={data?.counts ?? null} monthOffset={monthOffset} locale={locale} copy={copy} />
+      <RegisterClient rows={rows} counts={data?.counts ?? null} monthOffset={monthOffset} fellBack={fellBack} locale={locale} copy={copy} />
     </div>
   );
 }

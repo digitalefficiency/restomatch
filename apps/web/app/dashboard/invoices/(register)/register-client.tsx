@@ -22,6 +22,8 @@ export interface RegisterPageCopy extends RegisterCopy {
   intakeCta: string;
   prevMonth: string;
   nextMonth: string;
+  prevMonthShown: string;
+  currentMonth: string;
   error: string;
   retry: string;
   peekTotal: string;
@@ -44,12 +46,15 @@ export function RegisterClient({
   rows,
   counts,
   monthOffset,
+  fellBack = false,
   locale,
   copy: t,
 }: {
   rows: RegisterRow[] | null;
   counts: Record<Tab, number> | null;
   monthOffset: number;
+  /** The first days of a month opened the previous month because this one is still empty. */
+  fellBack?: boolean;
   locale: Locale;
   copy: RegisterPageCopy;
 }) {
@@ -61,12 +66,21 @@ export function RegisterClient({
   const totals = visibleTotals(visible);
   const href = (r: RegisterRow) =>
     `/dashboard/invoices/${r.id}?from=register${view ? `&view=${view}` : ''}${monthOffset ? `&month=${monthOffset}` : ''}`;
-  const monthHref = (o: number) => (o === 0 ? '/dashboard/invoices' : `/dashboard/invoices?month=${o}`);
+  const monthHref = (o: number) => `/dashboard/invoices?month=${o}`;
   const Prev = locale === 'he' ? ChevronRight : ChevronLeft;
   const Next = locale === 'he' ? ChevronLeft : ChevronRight;
 
   const monthNav = (
-    <nav aria-label={t.caption} className="flex items-center gap-2">
+    <nav aria-label={t.caption} className="flex flex-wrap items-center gap-2">
+      {fellBack ? (
+        <span className="inline-flex min-h-10 items-center gap-1 rounded-full border border-line bg-surface-2 px-3 text-sm text-ink" data-testid="register-prev-month-shown">
+          {t.prevMonthShown}
+          <span aria-hidden="true">·</span>
+          <Link href={monthHref(0)} className={cn('font-semibold text-primary underline underline-offset-4', FOCUS)}>
+            {t.currentMonth}
+          </Link>
+        </span>
+      ) : null}
       <Link href={monthHref(monthOffset - 1)} className={BTN} data-testid="register-prev-month">
         <Prev className="h-4 w-4" aria-hidden="true" />
         {t.prevMonth}
