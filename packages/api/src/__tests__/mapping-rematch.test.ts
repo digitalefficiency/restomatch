@@ -6,6 +6,7 @@ import {
   invoiceLines,
   invoices,
   productAliases,
+  products,
   recoveryClaims,
   testDbUrl,
 } from '@restomatch/db';
@@ -21,7 +22,9 @@ import { resetDb, seedTenant, type Tenant } from './fixtures';
  * silently dropped) — and "בטל" puts exactly those lines back.
  */
 type Job = { restaurantId: string; invoiceId: string; rematch?: boolean };
-const enqueued: Array<{ queue: string; payload: Job; runAt?: Date }> = [];
+const enqueued: Array<{ queue: string; payload: Job; runAt?: Date; at: number }> = [];
+/** Simulated queue latency per enqueue (ms). */
+const latency = { ms: 0 };
 const fail = { on: null as string | null };
 vi.mock('@restomatch/queue', async (orig) => {
   const real = await orig<typeof import('@restomatch/queue')>();
@@ -29,7 +32,8 @@ vi.mock('@restomatch/queue', async (orig) => {
     ...real,
     enqueue: async (queue: string, payload: Job, opts?: { runAt?: Date }) => {
       if (fail.on === payload.invoiceId) throw new real.QueueUnavailableError(queue, 'down');
-      enqueued.push({ queue, payload, runAt: opts?.runAt });
+      if (latency.ms) await new Promise((res) => setTimeout(res, latency.ms));
+      enqueued.push({ queue, payload, runAt: opts?.runAt, at: Date.now() });
       return true;
     },
   };
@@ -69,6 +73,7 @@ beforeEach(async () => {
   B = await seedTenant(db, 'B');
   enqueued.length = 0;
   fail.on = null;
+  latency.ms = 0;
 });
 afterAll(() => resetDb(db));
 
@@ -166,5 +171,44 @@ describe('mapping.confirm re-matches the affected invoices', () => {
     const [l] = await db.select().from(invoiceLines).where(eq(invoiceLines.id, theirs.lineId));
     expect(l!.productId).toBe(B.productId);
     expect(await db.select().from(productAliases).where(eq(productAliases.id, linked.undo!.aliasId!))).toHaveLength(1);
+  });
+
+  it('finding 8: each job is delayed from its own enqueue, so a slow queue can\'t expire the guard', async () => {
+    const one = await invoiceWithLine(A);
+    const two = await invoiceWithLine(A);
+    latency.ms = 400;
+    await callerFor(A).mapping.confirm({ supplierId: A.supplierId, supplierSku: SKU, rawName: 'x', productId: A.productId });
+    expect(enqueued.map((e) => e.payload.invoiceId).sort()).toEqual([one.invoiceId, two.invoiceId].sort());
+    for (const e of enqueued) expect(e.runAt!.getTime()).toBeGreaterThanOrEqual(e.at + 2_000);
+  });
+
+  it('finding 9: undoing a link that made a new product removes that product too', async () => {
+    await invoiceWithLine(A);
+    const res = await callerFor(A).mapping.confirm({
+      supplierId: A.supplierId,
+      supplierSku: SKU,
+      rawName: 'עגבניות שרי',
+      newProductName: 'עגבניות שרי חדש',
+    });
+    expect(res.createdProduct).toBe(true);
+    await callerFor(A).mapping.confirm({ supplierId: A.supplierId, supplierSku: SKU, rawName: 'עגבניות שרי', revert: res.undo! });
+    expect(await db.select().from(products).where(eq(products.id, res.productId))).toEqual([]);
+  });
+
+  it('finding 9: …but keeps an existing product, and one still used elsewhere', async () => {
+    const plain = await invoiceWithLine(A);
+    const res = await callerFor(A).mapping.confirm({
+      supplierId: A.supplierId,
+      supplierSku: SKU,
+      rawName: 'עגבניות שרי',
+      newProductName: 'עגבניות שרי חדש',
+    });
+    // Someone links another line to the new product before the undo.
+    const other = await lineOn(plain.invoiceId);
+    await db.update(invoiceLines).set({ productId: res.productId, supplierSku: 'OTHER' }).where(eq(invoiceLines.id, other));
+    await callerFor(A).mapping.confirm({ supplierId: A.supplierId, supplierSku: SKU, rawName: 'עגבניות שרי', revert: res.undo! });
+    expect(await db.select().from(products).where(eq(products.id, res.productId))).toHaveLength(1);
+    const [l] = await db.select().from(invoiceLines).where(eq(invoiceLines.id, other));
+    expect(l!.productId).toBe(res.productId);
   });
 });

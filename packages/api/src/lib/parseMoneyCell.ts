@@ -1,65 +1,28 @@
+import { parseNumberInput, type DecimalStyle } from '@restomatch/types';
+
 /**
- * Strict, locale-aware parsing of a money cell from a supplier file (price
- * list or contract). The parse boundary for imported ₪: a cell either reads
- * as one unambiguous non-negative amount or it is reported, never guessed.
+ * The money-cell view of the shared number parser (@restomatch/types
+ * number-input — the POS importer's `parseScaled` grammar), for supplier files
+ * (price lists, contracts). The parse boundary for imported ₪: a cell either
+ * reads as one unambiguous non-negative amount (≤ 4 decimals, NUMERIC(12,4)) or
+ * it is reported, never guessed.
  *
  * Why strict: the old catalog parser read a lone comma as a decimal point, so
- * "1,250" became ₪1.25 (catalog-02). Israeli price lists write thousands with
- * a comma ("1,250", "₪ 2,400") and occasionally decimals with one ("12,90").
- *
- * Accepted (₪, ש״ח, ILS, NIS, spaces and NBSP ignored):
- *   "1250" · "12.5"                       plain
- *   "1,250" · "1,250,000" · "1,250.00"    comma = thousands (groups of 3)
- *   "12,90" · "7,5"                       comma decimal (1–2 digits, no other separator)
- * With `decimal: 'comma'` (the file's own cells use "1.250,00"):
- *   "1.250,50" · "1.250" · "7,5"          dot = thousands, comma = decimal
- * Rejected: signs ("-5"), accounting negatives ("(5)"), exponents ("1e3"),
- *   "1,2345", "1.250,5" in a dot-decimal file, letters.
+ * "1,250" became ₪1.25 (catalog-02); a too-eager thousands rule then read
+ * "0,250" as 250. Accepted: "1250", "12.5", "1,250", "1,250,000", "1,250.00",
+ * "1.250,50", "12,90", "7,5", "0,250"; a comma-decimal file also reads "1.250"
+ * as 1250. Rejected: signs, "(5)", exponents, letters, 5+ decimals.
  */
-export type DecimalStyle = 'auto' | 'comma';
+export { detectDecimalStyle, type DecimalStyle } from '@restomatch/types';
 
 export type MoneyCell =
   | { kind: 'empty' }
   | { kind: 'ok'; value: number }
   | { kind: 'invalid'; raw: string };
 
-const CURRENCY = /₪|ש["״']?ח|\bils\b|\bnis\b/gi;
-
-/** Strip currency marks and every kind of space, keep the digits and separators. */
-function clean(raw: string): string {
-  return raw.replace(CURRENCY, '').replace(/[\s  ‎‏]/g, '');
-}
-
 export function parseMoneyCell(raw: string | null | undefined, decimal: DecimalStyle = 'auto'): MoneyCell {
-  if (raw == null) return { kind: 'empty' };
-  const original = String(raw).trim();
-  if (original === '') return { kind: 'empty' };
-  const s = clean(original);
-  if (s === '') return { kind: 'invalid', raw: original };
-  let norm: string | null = null;
-  if (decimal === 'comma') {
-    if (/^\d+(?:,\d+)?$/.test(s)) norm = s.replace(',', '.');
-    else if (/^\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(s)) norm = s.replace(/\./g, '').replace(',', '.');
-  } else if (/^\d+(?:\.\d+)?$/.test(s)) norm = s;
-  else if (/^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(s)) norm = s.replace(/,/g, '');
-  else if (/^\d+,\d{1,2}$/.test(s)) norm = s.replace(',', '.');
-  if (norm === null) return { kind: 'invalid', raw: original };
-  const n = Number(norm);
-  return Number.isFinite(n) ? { kind: 'ok', value: n } : { kind: 'invalid', raw: original };
-}
-
-/**
- * The file's decimal style, read from its own cells: one "1.250,00" (dot
- * groups, comma decimals) means the whole column is comma-decimal. Anything
- * else stays 'auto' (a lone "1,250" is thousands).
- */
-export function detectDecimalStyle(values: Iterable<string | null | undefined>): DecimalStyle {
-  for (const v of values) {
-    if (v == null) continue;
-    const s = clean(String(v));
-    if (/^\d{1,3}(?:\.\d{3})+,\d+$/.test(s)) return 'comma';
-  }
-  return 'auto';
+  const cell = parseNumberInput(raw, { scale: 4, grouping: true, negative: false, decimal });
+  return cell.kind === 'ok' ? { kind: 'ok', value: cell.value } : cell;
 }
 
 /** Back-compat number-or-null view (the contract importer's original API). */

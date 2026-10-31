@@ -48,56 +48,75 @@ export function SkuMapper({ initial }: { initial: UnmappedSku[] }) {
     },
     [],
   );
+  /** The undo window runs only while nobody is on it: hover / focus pause it, leaving restarts it. */
+  const pause = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+  };
+  const resume = () => {
+    pause();
+    timer.current = setTimeout(() => setLast(null), UNDO_MS);
+  };
   const onLinked = (link: LastLink) => {
     setLast(link);
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => setLast(null), UNDO_MS);
+    resume();
     void utils.mapping.unmapped.invalidate();
   };
-  const status = last ? (
-    <LinkStatus
-      last={last}
-      onUndone={() => {
-        setLast(null);
-        void utils.mapping.unmapped.invalidate();
+
+  // The live region is always mounted (outside the loading / empty / list
+  // branches), so the link outcome is announced, not just painted.
+  const status = (
+    <div
+      role="status"
+      aria-live="polite"
+      onMouseEnter={pause}
+      onMouseLeave={() => last && resume()}
+      onFocus={pause}
+      onBlur={(e) => {
+        if (last && !e.currentTarget.contains(e.relatedTarget as Node | null)) resume();
       }}
-    />
-  ) : null;
+    >
+      {last ? (
+        <LinkStatus
+          key={last.result.productId + last.row.supplierSku}
+          last={last}
+          onUndone={() => {
+            pause();
+            setLast(null);
+            void utils.mapping.unmapped.invalidate();
+          }}
+        />
+      ) : null}
+    </div>
+  );
 
-  if (q.isLoading) {
-    return (
-      <div className="flex items-center gap-2 py-8 text-muted">
-        <Spinner className="h-4 w-4" /> {t('mapping.loading')}
-      </div>
-    );
-  }
-
-  if (rows.length === 0) {
-    return (
-      <>
-        {status}
+  return (
+    <div className="space-y-3">
+      {status}
+      {q.isLoading ? (
+        <div className="flex items-center gap-2 py-8 text-muted">
+          <Spinner className="h-4 w-4" /> {t('mapping.loading')}
+        </div>
+      ) : rows.length === 0 ? (
         <EmptyState
           icon={<Boxes className="h-6 w-6" />}
           title={t('mapping.emptyTitle')}
           description={t('mapping.emptyBody')}
         />
-      </>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      {status}
-      <p className="text-sm text-muted">
-        {t('mapping.pending', { count: formatNumber(rows.length, locale) })}
-      </p>
-      <ul className="space-y-3">
-        {rows.map((row) => (
-          <li key={`${row.supplierId}::${row.supplierSku}`}>
-            <MapRow row={row} onLinked={onLinked} />
-          </li>
-        ))}
-      </ul>
+      ) : (
+        <>
+          <p className="text-sm text-muted">
+            {t('mapping.pending', { count: formatNumber(rows.length, locale) })}
+          </p>
+          <ul className="space-y-3">
+            {rows.map((row) => (
+              <li key={`${row.supplierId}::${row.supplierSku}`}>
+                <MapRow row={row} onLinked={onLinked} />
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </div>
   );
 }
@@ -125,11 +144,17 @@ function LinkStatus({ last, onUndone }: { last: LastLink; onUndone: () => void }
     onError: (e) => toast.error(friendlyError(e, tc)),
   });
   const n = (v: number) => formatNumber(v, locale);
+  // The linked row just left the list, so focus would fall to <body>: move it to
+  // the undo (the next likely action), where it also pauses the 10 s window.
+  useEffect(() => {
+    document.getElementById('map-undo')?.focus();
+  }, []);
+  const skipped = (key: 'linkedBlocked' | 'linkedSettled' | 'linkedConsolidated', count: number) =>
+    count > 0 ? (
+      <p className="text-xs text-muted">{t(`mapping.${key}`, { count: n(count) })}</p>
+    ) : null;
   return (
-    <div
-      role="status"
-      className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2 text-sm text-ink"
-    >
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2 text-sm text-ink">
       <div className="min-w-0">
         <p className="font-medium">
           {t('mapping.linked', {
@@ -137,11 +162,9 @@ function LinkStatus({ last, onUndone }: { last: LastLink; onUndone: () => void }
             invoices: n(result.rematch.requeued),
           })}
         </p>
-        {result.rematch.blockedByClaims > 0 && (
-          <p className="text-xs text-muted">
-            {t('mapping.linkedBlocked', { count: n(result.rematch.blockedByClaims) })}
-          </p>
-        )}
+        {skipped('linkedBlocked', result.rematch.blockedByClaims)}
+        {skipped('linkedSettled', result.rematch.settled)}
+        {skipped('linkedConsolidated', result.rematch.consolidated)}
         {result.rematch.failed > 0 && (
           <p className="text-xs text-danger">
             {t('mapping.linkedFailed', { count: n(result.rematch.failed) })}
@@ -150,6 +173,7 @@ function LinkStatus({ last, onUndone }: { last: LastLink; onUndone: () => void }
       </div>
       {result.undo && (
         <Button
+          id="map-undo"
           variant="secondary"
           size="sm"
           loading={undo.isPending}

@@ -30,6 +30,10 @@ export const en: Shape<typeof he> = {
     readOnly: 'Read-only — only owners and managers can edit.',
     loadMore: 'Load more',
     openProduct: 'Open product',
+    leaveTitle: '{count} unsaved changes',
+    leaveBody: 'If you open the product page now, the English names you typed won’t be saved.',
+    leave: 'Leave without saving',
+    stay: 'Keep editing',
   },
   form: {
     title: 'Product details',

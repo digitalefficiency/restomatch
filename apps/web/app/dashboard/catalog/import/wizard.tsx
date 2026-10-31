@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
 import {
@@ -97,13 +98,23 @@ async function readFile(file: File): Promise<FileInput> {
 
 const fwd = 'h-4 w-4 rtl:-scale-x-100';
 
-export function ImportWizard({ initialSupplierId }: { initialSupplierId: string }) {
+export function ImportWizard({
+  initialSupplierId,
+  reviewImportId,
+}: {
+  initialSupplierId: string;
+  /** `?review=<importId>` (from the import history): reopen that import's "בדיקה" — it lives on the server. */
+  reviewImportId?: string;
+}) {
   const t = useT(catalogNs);
   const tc = useT(components);
   const locale = useLocale();
   const toast = useToast();
   const once = useSingleFlight();
-  const [step, setStep] = useState<Step>(initialSupplierId ? 'UPLOAD' : 'SUPPLIER');
+  const router = useRouter();
+  const [step, setStep] = useState<Step>(
+    reviewImportId ? 'REVIEW' : initialSupplierId ? 'UPLOAD' : 'SUPPLIER',
+  );
   const [supplierId, setSupplierId] = useState(initialSupplierId);
   const [newSupplier, setNewSupplier] = useState('');
   const [supplierError, setSupplierError] = useState<string | null>(null);
@@ -117,8 +128,9 @@ export function ImportWizard({ initialSupplierId }: { initialSupplierId: string 
   const [flaggedOk, setFlaggedOk] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
   const [result, setResult] = useState<CommitResult | null>(null);
-  const [review, setReview] = useState<ReviewItem[]>([]);
-  const [resolved, setResolved] = useState<Record<string, string>>({});
+  const [lastResolved, setLastResolved] = useState<string | null>(null);
+  /** The mapping / VAT basis changed and the re-check hasn't answered yet: the shown flags are stale. */
+  const [checkStale, setCheckStale] = useState(false);
 
   const suppliers = trpc.suppliers.list.useQuery({});
   const createSupplier = trpc.suppliers.create.useMutation();
@@ -145,23 +157,30 @@ export function ImportWizard({ initialSupplierId }: { initialSupplierId: string 
   );
   const job = queuedId ? imports.data?.find((i) => i.id === queuedId) : undefined;
   const jobDone = job?.status === 'committed';
-  // …and once it lands, its unlinked rows become the review list (no pre-filled suggestion).
+  // The review queue is the server's: this import's rows saved without a product
+  // link. It survives leaving the page ("אבדוק אחר כך" → the import history links
+  // back here with ?review=). The inline commit's suggestions pre-fill it.
+  const reviewId = result?.importId ?? reviewImportId ?? null;
   const unlinked = trpc.catalog.items.useQuery(
-    { importId: queuedId ?? undefined, unlinkedOnly: true, limit: 200 },
-    { enabled: !!queuedId && jobDone },
+    { importId: reviewId ?? undefined, unlinkedOnly: true, limit: 200 },
+    { enabled: !!reviewId && (!result?.queued || jobDone) },
   );
-  useEffect(() => {
-    if (!queuedId || !unlinked.data) return;
-    setReview(
-      unlinked.data.map((it) => ({
+  const suggestions = new Map((result?.ambiguous ?? []).map((a) => [a.itemId, a]));
+  const review: ReviewItem[] = unlinked.data
+    ? unlinked.data.map((it) => ({
         itemId: it.id,
         supplierNameRaw: it.supplierNameRaw,
         supplierSku: it.supplierSku,
         unit: it.unit,
-        suggestion: null,
-      })),
-    );
-  }, [queuedId, unlinked.data]);
+        suggestion: suggestions.get(it.id) ?? null,
+      }))
+    : (result?.ambiguous ?? []).map((a) => ({
+        itemId: a.itemId,
+        supplierNameRaw: a.supplierNameRaw,
+        supplierSku: a.supplierSku,
+        unit: a.unit,
+        suggestion: a,
+      }));
 
   const serverError = (e: unknown) => {
     const key = catalogErrorKey(e);
@@ -231,24 +250,46 @@ export function ImportWizard({ initialSupplierId }: { initialSupplierId: string 
       firstCheck.current = false;
       return;
     }
-    const timer = setTimeout(() => {
-      recheck
-        .mutateAsync({ supplierId, file, mapping, ...(vatBasis ? { vatBasis } : {}) })
-        .then((res) => {
-          setCheck(res.check);
-          setFlaggedOk(false);
-        })
-        .catch(() => {});
-    }, 300);
+    setCheckStale(true);
+    const timer = setTimeout(() => void runRecheck(), 300);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run on the inputs only
   }, [mapping, vatBasis]);
 
-  function handleCommit() {
+  async function runRecheck(): Promise<Check | null> {
+    if (!file || !supplierId) return null;
+    try {
+      const res = await recheck.mutateAsync({
+        supplierId,
+        file,
+        mapping,
+        ...(vatBasis ? { vatBasis } : {}),
+      });
+      setCheck(res.check);
+      setFlaggedOk(false);
+      setCheckStale(false);
+      return res.check;
+    } catch {
+      // Keeps the stale flag: the commit stays blocked until a check answers.
+      return null;
+    }
+  }
+
+  async function handleCommit() {
     setCommitError(null);
     if (!mapping.name) return setCommitError(t('import.mapNameRequired'));
     if (!vatBasis) return setCommitError(t('import.vat.required'));
-    if ((check?.flaggedCount ?? 0) > 0 && !flaggedOk)
+    // Never decide on a stale check: the flags shown may not be this mapping's.
+    // Wait for the fresh one; a confirmation given to the old flags doesn't carry over.
+    let current = check;
+    let confirmed = flaggedOk;
+    if (checkStale || recheck.isPending) {
+      const fresh = await runRecheck();
+      if (!fresh) return setCommitError(t('import.check.checking'));
+      current = fresh;
+      confirmed = false;
+    }
+    if ((current?.flaggedCount ?? 0) > 0 && !confirmed)
       return setCommitError(t('import.check.confirmFlaggedRequired'));
     once(commit);
   }
@@ -256,18 +297,15 @@ export function ImportWizard({ initialSupplierId }: { initialSupplierId: string 
   async function commit() {
     if (!file || !supplierId || !vatBasis) return;
     try {
-      const res = await commitImport.mutateAsync({ supplierId, file, mapping, vatBasis });
+      const res = await commitImport.mutateAsync({
+        supplierId,
+        file,
+        mapping,
+        vatBasis,
+        confirmFlagged: flaggedOk,
+      });
       setResult(res);
-      setResolved({});
-      setReview(
-        res.ambiguous.map((a) => ({
-          itemId: a.itemId,
-          supplierNameRaw: a.supplierNameRaw,
-          supplierSku: a.supplierSku,
-          unit: a.unit,
-          suggestion: a,
-        })),
-      );
+      setLastResolved(null);
       setStep(!res.queued && res.ambiguous.length > 0 ? 'REVIEW' : 'DONE');
       void utils.catalog.items.invalidate();
       void utils.catalog.imports.invalidate();
@@ -275,6 +313,8 @@ export function ImportWizard({ initialSupplierId }: { initialSupplierId: string 
         toast.success(t('import.doneTitle', { count: formatNumber(res.rowCount, locale) }));
     } catch (e) {
       setCommitError(serverError(e));
+      // The server found flags this screen didn't show: refresh the check so they appear.
+      if (catalogErrorKey(e) === 'FLAGGED_PRICES') void runRecheck();
     }
   }
 
@@ -298,14 +338,13 @@ export function ImportWizard({ initialSupplierId }: { initialSupplierId: string 
     setMapping({});
     setVatBasis(null);
     setCheck(null);
-    setReview([]);
-    setResolved({});
+    setLastResolved(null);
     firstCheck.current = true;
     parsePreview.reset();
     commitImport.reset();
   };
 
-  const pending = review.filter((r) => !resolved[r.itemId]);
+  const pending = review;
   const order: Step[] = [
     'SUPPLIER',
     'UPLOAD',
@@ -569,7 +608,11 @@ export function ImportWizard({ initialSupplierId }: { initialSupplierId: string 
             </p>
           )}
           <div className="mt-4 flex items-center gap-2">
-            <Button variant="primary" loading={commitImport.isPending} onClick={handleCommit}>
+            <Button
+              variant="primary"
+              loading={commitImport.isPending}
+              onClick={() => void handleCommit()}
+            >
               {t('import.commit', {
                 count: formatNumber(check?.committable ?? preview.rowCount, locale),
               })}
@@ -584,9 +627,14 @@ export function ImportWizard({ initialSupplierId }: { initialSupplierId: string 
       {step === 'REVIEW' && (
         <ReviewStep
           items={review}
-          resolved={resolved}
-          onResolved={(itemId, label) => setResolved((r) => ({ ...r, [itemId]: label }))}
-          onFinish={() => setStep('DONE')}
+          loading={unlinked.isLoading}
+          lastResolved={lastResolved}
+          onResolved={setLastResolved}
+          onFinish={() =>
+            result
+              ? setStep('DONE')
+              : router.push(`/dashboard/suppliers/${encodeURIComponent(supplierId)}?tab=catalog`)
+          }
         />
       )}
 
@@ -640,7 +688,10 @@ export function ImportWizard({ initialSupplierId }: { initialSupplierId: string 
             >
               {t('import.viewCatalog')}
             </LinkButton>
-            <LinkButton href={`/dashboard/suppliers/${encodeURIComponent(supplierId)}?tab=catalog`} variant="secondary">
+            <LinkButton
+              href={`/dashboard/suppliers/${encodeURIComponent(supplierId)}?tab=catalog`}
+              variant="secondary"
+            >
               {t('import.viewSupplier')}
             </LinkButton>
             <Button variant="ghost" onClick={resetAll}>
@@ -718,7 +769,7 @@ function PriceCheck({
                   {r.supplierNameRaw}
                 </td>
                 <td className="whitespace-nowrap px-3 py-1.5 text-right text-subtle">
-                  <bdi>{r.rawPrice ?? '—'}</bdi>
+                  <bdi dir="ltr">{r.rawPrice ?? '—'}</bdi>
                 </td>
                 <td
                   className="whitespace-nowrap px-3 py-1.5 text-right font-semibold tabular-nums text-ink"
@@ -780,8 +831,9 @@ function HeldList({
             {t('import.check.heldItem', {
               row: formatNumber(h.rowNumber, locale),
               name: h.supplierNameRaw,
-              raw: h.rawPrice,
-            })}
+            })}{' '}
+            {/* The file's own characters, isolated: "-5" must not read "5-" in RTL. */}
+            <bdi dir="ltr">&quot;{h.rawPrice}&quot;</bdi>
           </li>
         ))}
         {count > shown.length && (
@@ -846,45 +898,85 @@ function ImportProgress({
   );
 }
 
-/** "בדיקה · N התאמות דורשות אישור": accept / choose another / new — nothing is linked until a person says so. */
+/**
+ * "בדיקה · N התאמות דורשות אישור": accept / choose another / new — nothing is
+ * linked until a person says so. The rows come from the server (the import's
+ * unlinked rows), so a resolved row leaves the list; focus moves to the next
+ * row (or the finish button) and the outcome is announced.
+ */
 function ReviewStep({
   items,
-  resolved,
+  loading,
+  lastResolved,
   onResolved,
   onFinish,
 }: {
   items: ReviewItem[];
-  resolved: Record<string, string>;
-  onResolved: (itemId: string, label: string) => void;
+  loading: boolean;
+  lastResolved: string | null;
+  onResolved: (label: string) => void;
   onFinish: () => void;
 }) {
   const t = useT(catalogNs);
   const locale = useLocale();
-  const left = items.filter((i) => !resolved[i.itemId]).length;
+  /** Where focus goes once the resolved row has left the list. */
+  const focusAt = useRef<{ index: number; itemId: string } | null>(null);
+  useEffect(() => {
+    const target = focusAt.current;
+    // Wait for the refetch that drops the resolved row; until then it is still listed.
+    if (!target || items.some((i) => i.itemId === target.itemId)) return;
+    const next = items[Math.min(target.index, items.length - 1)];
+    document.getElementById(next ? `rv-row-${next.itemId}` : 'rv-finish')?.focus();
+    focusAt.current = null;
+  }, [items]);
   return (
     <Card elevated flow>
       <h2 className="text-base font-bold text-ink">
         {t('import.review.title', { count: formatNumber(items.length, locale) })}
       </h2>
       <p className="mt-1 text-sm text-muted">{t('import.review.intro')}</p>
-      <p className="mt-2 text-xs text-subtle" aria-live="polite">
-        {t('import.review.remaining', { count: formatNumber(left, locale) })}
+      {/* Always mounted, so each change is announced. */}
+      <p className="mt-2 text-sm text-ink" role="status" aria-live="polite">
+        {lastResolved ? (
+          <span className="inline-flex items-center gap-1 font-semibold text-primary">
+            <Check className="h-4 w-4" aria-hidden="true" />{' '}
+            {t('import.review.resolved', { product: lastResolved })} ·{' '}
+          </span>
+        ) : null}
+        <span className="text-xs text-subtle">
+          {t('import.review.remaining', { count: formatNumber(items.length, locale) })}
+        </span>
       </p>
-      <ul className="mt-3 space-y-3">
-        {items.map((it) => (
-          <li key={it.itemId}>
-            <ReviewRow
-              item={it}
-              resolvedLabel={resolved[it.itemId]}
-              onResolved={(label) => onResolved(it.itemId, label)}
-            />
-          </li>
-        ))}
-      </ul>
-      <div className="mt-4 flex flex-wrap gap-2">
-        <Button variant={left === 0 ? 'primary' : 'secondary'} onClick={onFinish}>
-          {left === 0 ? t('import.review.finish') : t('import.review.later')}
+      {loading && items.length === 0 ? (
+        <div className="flex items-center gap-2 py-4 text-sm text-muted">
+          <Spinner className="h-4 w-4" />
+        </div>
+      ) : (
+        <ul className="mt-3 space-y-3">
+          {items.map((it, i) => (
+            <li key={it.itemId}>
+              <ReviewRow
+                item={it}
+                onResolved={(label) => {
+                  focusAt.current = { index: i, itemId: it.itemId };
+                  onResolved(label);
+                }}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-4">
+        <Button
+          id="rv-finish"
+          variant={items.length === 0 ? 'primary' : 'secondary'}
+          onClick={onFinish}
+        >
+          {items.length === 0 ? t('import.review.finish') : t('import.review.later')}
         </Button>
+        {items.length > 0 && (
+          <p className="mt-2 text-xs text-subtle">{t('import.review.laterHint')}</p>
+        )}
       </div>
     </Card>
   );
@@ -892,11 +984,9 @@ function ReviewStep({
 
 function ReviewRow({
   item,
-  resolvedLabel,
   onResolved,
 }: {
   item: ReviewItem;
-  resolvedLabel: string | undefined;
   onResolved: (label: string) => void;
 }) {
   const t = useT(catalogNs);
@@ -922,128 +1012,112 @@ function ReviewRow({
     setError(null);
     try {
       await update.mutateAsync({ itemId: item.itemId, patch });
-      void utils.catalog.items.invalidate();
       onResolved(label);
+      await utils.catalog.items.invalidate();
+      void utils.catalog.imports.invalidate();
     } catch (e) {
       setError(friendlyError(e, tc));
     }
   }
 
   const panelId = `rv-${item.itemId}`;
+  const headingId = `rv-row-${item.itemId}`;
   return (
-    <div
-      className={cn(
-        'rounded-xl border p-3',
-        resolvedLabel ? 'border-line bg-surface-2' : 'border-warn/40',
-      )}
-    >
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="font-medium text-ink">{item.supplierNameRaw}</p>
-          <p className="text-xs text-subtle">
-            {item.supplierSku ? <bdi className="font-mono">{item.supplierSku}</bdi> : null}
-            {item.supplierSku && item.unit ? ' · ' : null}
-            {item.unit}
-          </p>
-        </div>
-        {resolvedLabel ? (
-          <span
-            className="inline-flex items-center gap-1 text-sm font-semibold text-primary"
-            role="status"
-          >
-            <Check className="h-4 w-4" aria-hidden="true" />{' '}
-            {t('import.review.resolved', { product: resolvedLabel })}
+    <div className="rounded-xl border border-warn/40 p-3" role="group" aria-labelledby={headingId}>
+      <p
+        id={headingId}
+        tabIndex={-1}
+        className="rounded font-medium text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+      >
+        {item.supplierNameRaw}
+      </p>
+      <p className="text-xs text-subtle">
+        {item.supplierSku ? <bdi className="font-mono">{item.supplierSku}</bdi> : null}
+        {item.supplierSku && item.unit ? ' · ' : null}
+        {item.unit}
+      </p>
+      {s ? (
+        <p className="mt-2 text-sm text-ink">
+          {t('import.review.suggestion', { product: s.canonicalName })}{' '}
+          <span className="text-muted">
+            · {t(`import.review.confidence.${confidenceWord(s.confidence)}`)} ·{' '}
+            {suggestionBasis({
+              matchedBy: s.matchedBy,
+              unit: item.unit,
+              productUnit: s.productUnit,
+              reasons: s.reasons,
+            })
+              .map((b) => t(`import.review.basis.${b}`))
+              .join(' · ')}
           </span>
-        ) : null}
+        </p>
+      ) : (
+        <p className="mt-2 text-sm text-muted">{t('import.review.noSuggestion')}</p>
+      )}
+      <div className="mt-3 flex flex-wrap gap-2">
+        {s && (
+          <Button
+            variant="primary"
+            loading={update.isPending}
+            onClick={() => void link({ productId: s.productId }, s.canonicalName)}
+          >
+            <Check className="h-4 w-4" aria-hidden="true" /> {t('import.review.accept')}
+          </Button>
+        )}
+        <Button
+          variant="secondary"
+          aria-expanded={choosing}
+          aria-controls={panelId}
+          onClick={() => setChoosing((v) => !v)}
+        >
+          <Search className="h-4 w-4" aria-hidden="true" /> {t('import.review.choose')}
+        </Button>
+        <Button
+          variant="ghost"
+          disabled={update.isPending}
+          onClick={() => void link({ newProductName: item.supplierNameRaw }, item.supplierNameRaw)}
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" /> {t('import.review.createNew')}
+        </Button>
       </div>
-      {!resolvedLabel && (
-        <>
-          {s ? (
-            <p className="mt-2 text-sm text-ink">
-              {t('import.review.suggestion', { product: s.canonicalName })}{' '}
-              <span className="text-muted">
-                · {t(`import.review.confidence.${confidenceWord(s.confidence)}`)} ·{' '}
-                {suggestionBasis({
-                  matchedBy: s.matchedBy,
-                  unit: item.unit,
-                  productUnit: s.productUnit,
-                  reasons: s.reasons,
-                })
-                  .map((b) => t(`import.review.basis.${b}`))
-                  .join(' · ')}
-              </span>
-            </p>
-          ) : (
-            <p className="mt-2 text-sm text-muted">{t('import.review.noSuggestion')}</p>
-          )}
-          <div className="mt-3 flex flex-wrap gap-2">
-            {s && (
-              <Button
-                variant="primary"
-                loading={update.isPending}
-                onClick={() => void link({ productId: s.productId }, s.canonicalName)}
-              >
-                <Check className="h-4 w-4" aria-hidden="true" /> {t('import.review.accept')}
-              </Button>
+      {choosing && (
+        <div id={panelId} className="mt-3">
+          <Input
+            type="search"
+            value={raw}
+            onChange={(e) => setRaw(e.target.value)}
+            placeholder={t('import.review.searchPlaceholder')}
+            aria-label={t('import.review.searchLabel')}
+            autoFocus
+          />
+          <div className="mt-2 space-y-1.5" aria-live="polite">
+            {results.isFetching && <Spinner className="h-3.5 w-3.5" />}
+            {(results.data ?? []).map((p) => {
+              const name = displayName(p.canonicalName, p.nameEn, locale);
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  disabled={update.isPending}
+                  onClick={() => void link({ productId: p.id }, name.primary)}
+                  aria-label={t('import.review.linkTo', { name: name.primary })}
+                  className="flex min-h-[44px] w-full items-center justify-between gap-2 rounded-lg border border-line bg-surface-2 px-3 text-start text-ink hover:border-primary/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:opacity-50"
+                >
+                  <span className="min-w-0 truncate">{name.primary}</span>
+                  <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+                </button>
+              );
+            })}
+            {q.length >= 1 && !results.isFetching && (results.data?.length ?? 0) === 0 && (
+              <p className="text-sm text-subtle">{t('import.review.noMatches')}</p>
             )}
-            <Button
-              variant="secondary"
-              aria-expanded={choosing}
-              aria-controls={panelId}
-              onClick={() => setChoosing((v) => !v)}
-            >
-              <Search className="h-4 w-4" aria-hidden="true" /> {t('import.review.choose')}
-            </Button>
-            <Button
-              variant="ghost"
-              disabled={update.isPending}
-              onClick={() =>
-                void link({ newProductName: item.supplierNameRaw }, item.supplierNameRaw)
-              }
-            >
-              <Plus className="h-4 w-4" aria-hidden="true" /> {t('import.review.createNew')}
-            </Button>
           </div>
-          {choosing && (
-            <div id={panelId} className="mt-3">
-              <Input
-                type="search"
-                value={raw}
-                onChange={(e) => setRaw(e.target.value)}
-                placeholder={t('import.review.searchPlaceholder')}
-                aria-label={t('import.review.searchLabel')}
-                autoFocus
-              />
-              <div className="mt-2 space-y-1.5" aria-live="polite">
-                {results.isFetching && <Spinner className="h-3.5 w-3.5" />}
-                {(results.data ?? []).map((p) => {
-                  const name = displayName(p.canonicalName, p.nameEn, locale);
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      disabled={update.isPending}
-                      onClick={() => void link({ productId: p.id }, name.primary)}
-                      aria-label={t('import.review.linkTo', { name: name.primary })}
-                      className="flex min-h-[44px] w-full items-center justify-between gap-2 rounded-lg border border-line bg-surface-2 px-3 text-start text-ink hover:border-primary/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:opacity-50"
-                    >
-                      <span className="min-w-0 truncate">{name.primary}</span>
-                      <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
-                    </button>
-                  );
-                })}
-                {q.length >= 1 && !results.isFetching && (results.data?.length ?? 0) === 0 && (
-                  <p className="text-sm text-subtle">{t('import.review.noMatches')}</p>
-                )}
-              </div>
-            </div>
-          )}
-          {error && (
-            <p role="alert" className="mt-2 text-sm text-danger">
-              {error}
-            </p>
-          )}
-        </>
+        </div>
+      )}
+      {error && (
+        <p role="alert" className="mt-2 text-sm text-danger">
+          {error}
+        </p>
       )}
     </div>
   );

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { originalProps } from '@/lib/i18n/original';
 import { isSaveShortcut } from '../catalog/money-logic';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
 import { Search } from 'lucide-react';
@@ -11,6 +12,7 @@ import { trpc } from '@/lib/trpc/client';
 import {
   Button,
   Card,
+  ConfirmDialog,
   EmptyState,
   Input,
   LoadMore,
@@ -76,6 +78,9 @@ export function NamesGrid({ initial, canEdit }: { initial: ListOutput; canEdit: 
 
   const utils = trpc.useUtils();
   const save = trpc.products.setNamesEn.useMutation();
+  const router = useRouter();
+  /** A product link clicked with unsaved edits: where to go once the person decides. */
+  const [leaveTo, setLeaveTo] = useState<string | null>(null);
   const once = useSingleFlight();
 
   const doSave = () => {
@@ -135,6 +140,20 @@ export function NamesGrid({ initial, canEdit }: { initial: ListOutput; canEdit: 
 
   return (
     <div className="space-y-4">
+      {/* In-app navigation skips beforeunload: a product-link click with unsaved edits asks first. */}
+      <ConfirmDialog
+        open={leaveTo != null}
+        title={t('names.leaveTitle', { count: formatNumber(dirty, locale) })}
+        body={t('names.leaveBody')}
+        confirmLabel={t('names.leave')}
+        cancelLabel={t('names.stay')}
+        onConfirm={() => {
+          const to = leaveTo;
+          setLeaveTo(null);
+          if (to) router.push(to);
+        }}
+        onClose={() => setLeaveTo(null)}
+      />
       <div className="flex flex-wrap items-end gap-3">
         <div className="relative min-w-[14rem] flex-1">
           <label htmlFor="names-search" className="mb-1.5 block text-sm font-medium text-muted">
@@ -218,6 +237,12 @@ export function NamesGrid({ initial, canEdit }: { initial: ListOutput; canEdit: 
                     <Link
                       id={`${inputId}-label`}
                       href={`/dashboard/products/${r.id}`}
+                      onClick={(e) => {
+                        if (dirty > 0) {
+                          e.preventDefault();
+                          setLeaveTo(`/dashboard/products/${r.id}`);
+                        }
+                      }}
                       className="inline-flex min-h-[44px] min-w-0 items-center rounded font-medium text-ink hover:text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 md:min-h-0"
                       lang="he"
                     >
