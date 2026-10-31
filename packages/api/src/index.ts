@@ -202,7 +202,7 @@ export {
 } from './catalog/commit';
 export {
   checkRateLimit,
-  peekRateLimit,
+  refundRateLimit,
   resetRateLimit,
   MemoryRateLimitStore,
   RateLimitError,

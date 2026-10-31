@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkRateLimit, MemoryRateLimitStore, peekRateLimit, resetRateLimit, type RateLimitStore } from '../rateLimit';
+import { checkRateLimit, MemoryRateLimitStore, refundRateLimit, resetRateLimit, type RateLimitStore } from '../rateLimit';
 
 describe('checkRateLimit (fixed window)', () => {
   it('allows up to the limit then blocks', async () => {
@@ -89,39 +89,49 @@ describe('resetRateLimit', () => {
   });
 });
 
-describe('peekRateLimit (gate every attempt, record only failures)', () => {
+describe('refundRateLimit (count every attempt atomically, give back successes)', () => {
   const t0 = 1_000_000_000_000;
   const opts = { limit: 30, windowSec: 900, prefix: 'login:ip', now: () => t0 };
 
-  it('reads without counting: 40 peeks (successful logins) leave the count at 0, all allowed', async () => {
+  it('40 successful logins from one IP (count + refund each) are all allowed', async () => {
     const store = new MemoryRateLimitStore(() => t0);
-    for (let i = 0; i < 40; i++) expect((await peekRateLimit(store, '10.0.0.1', opts)).allowed, `peek ${i + 1}`).toBe(true);
-    expect(await peekRateLimit(store, '10.0.0.1', opts)).toMatchObject({ allowed: true, count: 0, remaining: 30 });
+    for (let i = 0; i < 40; i++) {
+      expect((await checkRateLimit(store, '10.0.0.1', opts)).allowed, `login ${i + 1}`).toBe(true);
+      await refundRateLimit(store, '10.0.0.1', opts);
+    }
+    expect(await checkRateLimit(store, '10.0.0.1', opts)).toMatchObject({ allowed: true, count: 1 });
   });
 
-  it('30 recorded failures refuse the 31st attempt; other IPs are unaffected', async () => {
+  it('30 failures refuse the 31st attempt; a success in between gives back only its own unit', async () => {
     const store = new MemoryRateLimitStore(() => t0);
-    for (let i = 0; i < 29; i++) await checkRateLimit(store, '10.0.0.2', opts);
-    expect(await peekRateLimit(store, '10.0.0.2', opts)).toMatchObject({ allowed: true, count: 29 });
-    await checkRateLimit(store, '10.0.0.2', opts); // 30th failure
-    expect(await peekRateLimit(store, '10.0.0.2', opts)).toMatchObject({ allowed: false, count: 30, remaining: 0 });
-    expect((await peekRateLimit(store, '10.0.0.3', opts)).allowed).toBe(true);
+    for (let i = 0; i < 15; i++) await checkRateLimit(store, '10.0.0.2', opts); // 15 failures
+    await checkRateLimit(store, '10.0.0.2', opts); // a success…
+    await refundRateLimit(store, '10.0.0.2', opts); // …refunded: still 15, not reset
+    for (let i = 0; i < 15; i++) await checkRateLimit(store, '10.0.0.2', opts); // 30 failures
+    expect(await checkRateLimit(store, '10.0.0.2', opts)).toMatchObject({ allowed: false, count: 31 });
+    expect((await checkRateLimit(store, '10.0.0.3', opts)).allowed).toBe(true);
   });
 
-  it('a new window starts fresh, and resetSec counts down to it', async () => {
+  it('a parallel burst is still bounded: every attempt is counted before any refund', async () => {
+    const store = new MemoryRateLimitStore(() => t0);
+    const results = await Promise.all(Array.from({ length: 50 }, () => checkRateLimit(store, '10.0.0.4', opts)));
+    expect(results.filter((r) => r.allowed)).toHaveLength(30);
+  });
+
+  it('never goes below 0 and never creates a key (refund in a new window is a no-op)', async () => {
     let t = t0;
     const store = new MemoryRateLimitStore(() => t);
     const o = { ...opts, now: () => t };
-    for (let i = 0; i < 30; i++) await checkRateLimit(store, '10.0.0.4', o);
-    const blocked = await peekRateLimit(store, '10.0.0.4', o);
-    expect(blocked.allowed).toBe(false);
-    expect(blocked.resetSec).toBeGreaterThan(0);
-    t += blocked.resetSec * 1000;
-    expect(await peekRateLimit(store, '10.0.0.4', o)).toMatchObject({ allowed: true, count: 0 });
+    await refundRateLimit(store, '10.0.0.5', o);
+    await refundRateLimit(store, '10.0.0.5', o);
+    expect(await checkRateLimit(store, '10.0.0.5', o)).toMatchObject({ count: 1 });
+    t += 900_000;
+    await refundRateLimit(store, '10.0.0.5', o);
+    expect(await checkRateLimit(store, '10.0.0.5', o)).toMatchObject({ count: 1 });
   });
 
-  it('a store without get reads 0 (fails open, like a store outage)', async () => {
-    const bare: RateLimitStore = { incr: async () => 999 };
-    expect(await peekRateLimit(bare, '10.0.0.5', opts)).toMatchObject({ allowed: true, count: 0 });
+  it('a store without decr throws (the caller logs it), it never silently changes the limit', async () => {
+    const bare: RateLimitStore = { incr: async () => 1 };
+    await expect(refundRateLimit(bare, '10.0.0.6', opts)).rejects.toThrow(/decr/);
   });
 });

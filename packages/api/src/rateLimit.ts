@@ -16,8 +16,11 @@ export interface RateLimitStore {
   incr(key: string, windowSec: number): Promise<number>;
   /** Optional: drop the counter for `key` (resetRateLimit; e.g. a successful login). */
   del?(key: string): Promise<void>;
-  /** Optional: read the counter for `key` WITHOUT changing it (0 when absent/expired). peekRateLimit. */
-  get?(key: string): Promise<number>;
+  /**
+   * Optional: atomically decrement the counter for `key` by one, never below 0,
+   * and never creating a key (refundRateLimit; e.g. give back a successful login).
+   */
+  decr?(key: string): Promise<void>;
 }
 
 export interface RateLimitOptions {
@@ -81,30 +84,17 @@ export async function resetRateLimit(store: RateLimitStore, identifier: string, 
 }
 
 /**
- * Read `identifier`'s current-window count WITHOUT counting this event: for a
- * limiter that only RECORDS failures (checkRateLimit on a failure) but must GATE
- * every attempt. `allowed` is false once `limit` events are already recorded, so
- * with limit 30 the attempt after the 30th recorded failure is refused. A store
- * without `get` reads 0 (allowed): same fail-open stance as a store outage.
- * Not atomic with the later record — a parallel burst can pass the cap by its
- * concurrency; callers keep an atomic limiter (e.g. per account) as the floor.
+ * Give back ONE unit of `identifier`'s current-window count: for a limiter that
+ * must count every attempt atomically (so parallel bursts stay bounded) but
+ * should only let FAILED attempts accumulate — call it after a success. Throws
+ * when the store cannot decrement, so the caller's fail-open wrapper logs it
+ * instead of the limiter silently changing meaning. An attempt counted in the
+ * previous window and refunded in the next is a no-op (no key, never below 0).
  */
-export async function peekRateLimit(
-  store: RateLimitStore,
-  identifier: string,
-  opts: RateLimitOptions,
-): Promise<RateLimitResult> {
+export async function refundRateLimit(store: RateLimitStore, identifier: string, opts: RateLimitOptions): Promise<void> {
+  if (!store.decr) throw new Error('rate-limit store does not support decr (refundRateLimit)');
   const now = opts.now ? opts.now() : Date.now();
-  const { key, windowIndex } = windowKey(identifier, opts, now);
-  const count = store.get ? await store.get(key) : 0;
-  const nextWindowStartMs = (windowIndex + 1) * opts.windowSec * 1000;
-  return {
-    allowed: count < opts.limit,
-    count,
-    limit: opts.limit,
-    remaining: Math.max(0, opts.limit - count),
-    resetSec: Math.max(0, Math.ceil((nextWindowStartMs - now) / 1000)),
-  };
+  await store.decr(windowKey(identifier, opts, now).key);
 }
 
 /**
@@ -130,9 +120,9 @@ export class MemoryRateLimitStore implements RateLimitStore {
     this.counters.delete(key);
   }
 
-  async get(key: string): Promise<number> {
+  async decr(key: string): Promise<void> {
     const existing = this.counters.get(key);
-    return existing && existing.expiresAt > this.now() ? existing.count : 0;
+    if (existing && existing.expiresAt > this.now() && existing.count > 0) existing.count -= 1;
   }
 
   /** Test helper: drop all counters. */
