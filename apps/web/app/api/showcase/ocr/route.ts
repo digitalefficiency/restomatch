@@ -13,6 +13,7 @@ import { clientIpFromHeaders, isOriginAllowed, showcaseScanFetchUrl } from '@res
 import { ClaudeVision } from '@restomatch/ocr';
 import { enforceOcrLimit, trustedProxyHops } from '@/lib/rateLimit';
 import { ownerDbUrl } from '@/lib/env';
+import { SHOWCASE_OCR_OFF_CODE, showcaseRealOcrEnabled } from '../gate';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -113,6 +114,13 @@ async function reconcileContacts(
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
 // Private bucket → reads come as signed URLs (/object/sign/...).
 export async function POST(req: Request) {
+  // Off by default: nothing is read, fetched or sent to Claude.
+  if (!showcaseRealOcrEnabled()) {
+    return NextResponse.json(
+      { ok: false, code: SHOWCASE_OCR_OFF_CODE, error: SHOWCASE_OCR_OFF_CODE },
+      { status: 503, headers: { 'cache-control': 'no-store' } },
+    );
+  }
   // CSRF / abuse: this is a public, expensive (Claude Vision) endpoint. Require a
   // same-origin POST so a third-party page can't drive it, then throttle per IP.
   if (

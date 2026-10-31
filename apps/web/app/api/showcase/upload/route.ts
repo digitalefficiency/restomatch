@@ -18,6 +18,7 @@ import {
   type RateLimitOptions,
 } from '@restomatch/api';
 import { enforceRateLimit, trustedProxyHops } from '@/lib/rateLimit';
+import { SHOWCASE_OCR_OFF_CODE, showcaseRealOcrEnabled } from '../gate';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -36,6 +37,13 @@ const json = (status: number, body: Record<string, unknown>, headers?: Record<st
   NextResponse.json(body, { status, headers: { 'cache-control': 'no-store', ...headers } });
 
 export async function POST(req: Request) {
+  // Same pilot kill-switch as /api/showcase/ocr: no walk-ins writes while it is
+  // off. `not_configured` is the code the browser client already maps to "keep
+  // going with the local preview" (lib/supabase/client.ts), so the demo goes on.
+  if (!showcaseRealOcrEnabled()) {
+    return json(503, { ok: false, error: 'not_configured', code: SHOWCASE_OCR_OFF_CODE });
+  }
+
   if (
     !isOriginAllowed({
       method: req.method,
