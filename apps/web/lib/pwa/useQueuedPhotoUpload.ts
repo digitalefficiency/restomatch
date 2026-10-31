@@ -2,7 +2,7 @@
 
 import { useCallback } from 'react';
 import { trpc } from '@/lib/trpc/client';
-import { announceSynced, type QueuedPhoto } from './offlineQueue';
+import { ScopeChangedError, announceSynced, type QueuedPhoto } from './offlineQueue';
 
 /** Encode a Blob to base64 (chunked — large photos overflow String.fromCharCode). */
 export async function blobToBase64(blob: Blob): Promise<string> {
@@ -35,11 +35,11 @@ export function useQueuedPhotoUpload(): (item: QueuedPhoto) => Promise<{ invoice
   return useCallback(
     async (item: QueuedPhoto) => {
       // scans.upload stores under the SESSION's active restaurant: if another tab
-      // switched branch since this page rendered, never upload this branch's photo there.
+      // switched branch since this page rendered (or the session ended), never
+      // upload this branch's photo there. A colleague's photo of THIS branch is
+      // fine (decision 22: uploaded, attributed to whoever took it).
       const scope = await sessionScope();
-      if (scope?.restaurantId !== item.restaurantId || scope?.userId !== item.userId) {
-        throw new Error('active restaurant changed — photo kept for its own branch');
-      }
+      if (!scope || scope.restaurantId !== item.restaurantId) throw new ScopeChangedError();
       const scan = await utils.client.scans.upload.mutate({
         contentBase64: await blobToBase64(item.blob),
         mimeType: item.mimeType,

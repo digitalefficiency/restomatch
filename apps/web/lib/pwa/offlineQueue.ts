@@ -10,14 +10,18 @@
  * invoice: never a duplicate upload, invoice or OCR job.
  *
  * Only these fields are kept, only on this device, and the entry is deleted as
- * soon as the invoice is registered.
+ * soon as the invoice is registered. Nothing is wiped by leaving: a photo the
+ * receiver could not send uploads with the next signed-in user of the same
+ * branch, attributed to whoever took it ("צולם על ידי", decision 22 default).
  */
 export interface QueuedPhoto {
   clientUploadId: string;
   /** The restaurant the photo was taken for — only uploaded while that restaurant is active. */
   restaurantId: string;
-  /** The signed-in user who took it — never uploaded under another user (shared tablet). */
+  /** The signed-in user who took it (shared tablet: a colleague may upload it, attributed). */
   userId: string;
+  /** Their display name at capture time, for "צולם על ידי". */
+  capturedByName?: string | null;
   poId: string;
   supplierId: string;
   supplierName: string;
@@ -41,15 +45,92 @@ export interface ProcessResult {
   uploaded: string[];
   failed: string[];
   remaining: number;
+  /** Uploaded photos a colleague took on this device ("צולם על ידי"). */
+  attributed: Array<{ clientUploadId: string; capturedByName: string | null }>;
+}
+
+/**
+ * Why a sync call failed — read from the HTTP status / tRPC error code, never
+ * from the message text. `network` (no response) and `auth` (signed out, or
+ * the branch changed under us) cost the item no attempt: nothing is wrong with
+ * the photo. `permanent` (a 4xx) will not succeed by retrying.
+ */
+export type FailureKind = 'network' | 'auth' | 'retryable' | 'permanent';
+
+/** Thrown when the session's branch / user no longer fits the queued item (another tab switched). */
+export class ScopeChangedError extends Error {
+  constructor(message = 'active restaurant changed — photo kept for its own branch') {
+    super(message);
+    this.name = 'ScopeChangedError';
+  }
+}
+
+type ErrorShape = { httpStatus?: unknown; code?: unknown } | null | undefined;
+interface ErrorLike {
+  name?: unknown;
+  status?: unknown;
+  data?: ErrorShape;
+  shape?: { data?: ErrorShape } | null;
+  meta?: { response?: { status?: unknown } | null } | null;
+  cause?: unknown;
+}
+
+const RETRYABLE_CODES = new Set(['TIMEOUT', 'TOO_MANY_REQUESTS', 'INTERNAL_SERVER_ERROR', 'CLIENT_CLOSED_REQUEST']);
+
+function asNumber(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+/** The HTTP status of a failed call, if the server answered at all. */
+export function httpStatusOf(err: unknown): number | null {
+  const e = (err ?? {}) as ErrorLike;
+  return asNumber(e.data?.httpStatus) ?? asNumber(e.shape?.data?.httpStatus) ?? asNumber(e.meta?.response?.status) ?? asNumber(e.status);
+}
+
+/** The tRPC error code (UNAUTHORIZED, BAD_REQUEST…), if any. */
+export function trpcCodeOf(err: unknown): string | null {
+  const e = (err ?? {}) as ErrorLike;
+  const code = e.data?.code ?? e.shape?.data?.code;
+  return typeof code === 'string' ? code : null;
+}
+
+/** fetch() rejected before any response: offline, DNS, reset, aborted (by type, not wording). */
+function noResponse(err: unknown): boolean {
+  for (let e: unknown = err, depth = 0; e && depth < 4; e = (e as ErrorLike).cause, depth += 1) {
+    if (e instanceof TypeError) return true;
+    const name = (e as ErrorLike).name;
+    if (name === 'TypeError' || name === 'AbortError' || name === 'NetworkError') return true;
+  }
+  return false;
+}
+
+export function classifyFailure(
+  err: unknown,
+  online: boolean = typeof navigator === 'undefined' ? true : navigator.onLine !== false,
+): FailureKind {
+  if (!online) return 'network';
+  if (err instanceof ScopeChangedError) return 'auth';
+  const status = httpStatusOf(err);
+  const code = trpcCodeOf(err);
+  if (status === 401 || code === 'UNAUTHORIZED') return 'auth';
+  if (status !== null || code !== null) {
+    if (status !== null && (status >= 500 || status === 408 || status === 425 || status === 429)) return 'retryable';
+    if (code !== null && RETRYABLE_CODES.has(code)) return 'retryable';
+    return 'permanent';
+  }
+  return noResponse(err) ? 'network' : 'retryable';
 }
 
 /** After this many failed attempts an item stays queued but is no longer auto-retried in a loop. */
 export const MAX_AUTO_ATTEMPTS = 8;
 
 /**
- * Upload every queued photo, oldest first. One at a time (a phone on a weak
- * connection), stopping at the first network error — the rest wait for the
- * next `online` event. Items are removed ONLY after the invoice is registered.
+ * Upload every queued photo of the active branch, oldest first — a
+ * colleague's too (shared device), attributed to whoever took it. One at a
+ * time (a phone on a weak connection), stopping at the first network or auth
+ * failure — the rest wait for the next `online` event / sign-in, and those
+ * failures cost no attempt. Items are removed ONLY after the invoice is
+ * registered; a photo the server refuses for good (4xx) is parked, not lost.
  */
 export async function processQueue(
   store: QueueStore,
@@ -57,14 +138,15 @@ export async function processQueue(
   isOnline: () => boolean = () => true,
   scope?: { restaurantId: string; userId: string },
 ): Promise<ProcessResult> {
-  // Another restaurant's / user's photos (shared device, restaurant switch) are
-  // never uploaded under the current session; they wait for their owner.
-  const mine = (i: QueuedPhoto) => !scope || (i.restaurantId === scope.restaurantId && i.userId === scope.userId);
+  // Another branch's photos (restaurant switch) are never uploaded into the
+  // active one; they wait for that branch.
+  const inScope = (i: QueuedPhoto) => !scope || i.restaurantId === scope.restaurantId;
   const items = (await store.list())
-    .filter(mine)
+    .filter(inScope)
     .sort((a, b) => a.createdAt - b.createdAt);
   const uploaded: string[] = [];
   const failed: string[] = [];
+  const attributed: ProcessResult['attributed'] = [];
   for (const item of items) {
     if (!isOnline()) break;
     if (item.attempts >= MAX_AUTO_ATTEMPTS) continue;
@@ -72,25 +154,59 @@ export async function processQueue(
       await upload(item);
       await store.remove(item.clientUploadId);
       uploaded.push(item.clientUploadId);
+      if (scope && item.userId !== scope.userId) {
+        attributed.push({ clientUploadId: item.clientUploadId, capturedByName: item.capturedByName ?? null });
+      }
     } catch (err) {
       failed.push(item.clientUploadId);
-      await store.put({
-        ...item,
-        attempts: item.attempts + 1,
-        lastError: err instanceof Error ? err.message.slice(0, 300) : 'error',
-      });
-      if (isNetworkError(err)) break;
+      const kind = classifyFailure(err);
+      const lastError = err instanceof Error ? err.message.slice(0, 300) : 'error';
+      const attempts =
+        kind === 'network' || kind === 'auth' ? item.attempts : kind === 'permanent' ? MAX_AUTO_ATTEMPTS : item.attempts + 1;
+      await store.put({ ...item, attempts, lastError });
+      if (kind === 'network' || kind === 'auth') break;
     }
   }
   const left = await store.list();
-  return { uploaded, failed, remaining: left.filter(mine).length };
+  return { uploaded, failed, remaining: left.filter(inScope).length, attributed };
 }
 
-/** fetch() rejects with a TypeError when the network is unreachable. */
+/** No response at all (offline / fetch rejected) — by error type and status, never by message text. */
 export function isNetworkError(err: unknown): boolean {
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
-  const msg = err instanceof Error ? `${err.name} ${err.message}` : String(err);
-  return /TypeError|Failed to fetch|NetworkError|Load failed|network/i.test(msg);
+  return classifyFailure(err) === 'network';
+}
+
+/** Kept on the phone and retried later, at no cost: no network, or signed out / branch changed. */
+export function isTransientFailure(err: unknown): boolean {
+  const kind = classifyFailure(err);
+  return kind === 'network' || kind === 'auth';
+}
+
+let persistRequested = false;
+
+/**
+ * Ask the browser not to evict this origin's storage (the queued photos, the
+ * unsent counts) under storage pressure. Once per page load, on the first
+ * enqueue; best-effort (the browser may say no).
+ */
+export async function requestPersistentStorage(): Promise<boolean> {
+  if (persistRequested) return false;
+  persistRequested = true;
+  try {
+    const storage = (typeof navigator === 'undefined' ? undefined : navigator.storage) as
+      | { persist?: () => Promise<boolean>; persisted?: () => Promise<boolean> }
+      | undefined;
+    if (!storage?.persist) return false;
+    if (await storage.persisted?.().catch(() => false)) return true;
+    return await storage.persist();
+  } catch {
+    return false;
+  }
+}
+
+/** Tests only: forget that persistence was already requested. */
+export function resetPersistRequest(): void {
+  persistRequested = false;
 }
 
 /* ── IndexedDB adapter ───────────────────────────────────────────────────── */
@@ -165,7 +281,12 @@ export function announceSynced(detail: SyncedPhotoDetail): void {
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent<SyncedPhotoDetail>(SYNCED_EVENT, { detail }));
 }
 
-/** Wipe the device queue (sign-out on a shared phone). */
+/**
+ * Wipe the whole device queue.
+ * @deprecated Unsent photos are never wiped by leaving (keep and attribute,
+ * decision 22). Kept for callers merging in the same release (W1-09); use
+ * `clearForUser` for the explicit "delete my photos" choice.
+ */
 export async function clearQueue(store: QueueStore = idbQueueStore): Promise<void> {
   for (const i of await store.list()) await store.remove(i.clientUploadId);
 }
@@ -186,12 +307,17 @@ export async function purgeOtherUsers(userId: string, store: QueueStore = idbQue
   return n;
 }
 
+/** Every queued photo on this device (every user, every branch). */
+export async function pendingCountOnDevice(store: QueueStore = idbQueueStore): Promise<number> {
+  return (await store.list()).length;
+}
+
 /** This user's queued photos (any branch) — the sign-out guard names this count. */
 export async function countForUser(userId: string, store: QueueStore = idbQueueStore): Promise<number> {
   return (await store.list()).filter((i) => i.userId === userId).length;
 }
 
-/** Other users' photos waiting on this device (kept, attributed, never uploaded here). */
+/** Other users' photos waiting on this device (kept; this branch's upload, attributed, with the next sync). */
 export async function countForOthers(userId: string, store: QueueStore = idbQueueStore): Promise<number> {
   return (await store.list()).filter((i) => i.userId !== userId).length;
 }
@@ -218,5 +344,6 @@ export async function enqueuePhoto(
   store: QueueStore = idbQueueStore,
 ): Promise<void> {
   await store.put({ ...item, createdAt: Date.now(), attempts: 0, lastError: null });
+  void requestPersistentStorage();
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(QUEUE_EVENT));
 }

@@ -76,6 +76,31 @@ describe('lineOutbox (Delivery Check saves on change)', () => {
     expect(storage.items).toEqual([]);
   });
 
+  it('resume race: a row sent while the server snapshot was loading is still known locally (latest())', async () => {
+    // Opened with an unsent row: the retry sends it at once, and the server ACKs
+    // before the (older) getReceipt snapshot arrives. The restore overlays
+    // latest(), so the count can never fall back to "not counted".
+    const storage = memoryStorage([row('a', 8)]);
+    const send = vi.fn().mockResolvedValue({});
+    const box = createLineOutbox({ send, isNetworkError, storage });
+    await box.retry();
+    expect(box.pending()).toEqual([]);
+    expect(box.latest()).toEqual([row('a', 8)]);
+    box.set(row('a', 7));
+    expect(box.latest()).toEqual([row('a', 7)]);
+  });
+
+  it('clear() forgets every unsent row (the receipt was closed)', async () => {
+    const storage = memoryStorage([row('a', 8), row('b', 2)]);
+    const send = vi.fn().mockRejectedValue(netErr());
+    const box = createLineOutbox({ send, isNetworkError, storage });
+    box.clear();
+    expect(box.pending()).toEqual([]);
+    expect(storage.items).toEqual([]);
+    await box.retry();
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('a reload restores unsent rows from storage as queued and sends them', async () => {
     const storage = memoryStorage([row('a', 7), row('b', 0, { rejectReason: 'missing' })]);
     const send = vi.fn().mockResolvedValue({});

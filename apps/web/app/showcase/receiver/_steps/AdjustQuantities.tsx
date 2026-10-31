@@ -7,9 +7,9 @@ import {
   DAMAGED_PATCH,
   MISSING_PATCH,
   asOrderedPatch,
+  confirmSpotCheck,
   countProgress,
   lineKey,
-  markRestAsOrdered,
   qtyPatch,
   unresolvedOrderLines,
   type LineMark,
@@ -23,6 +23,7 @@ import { ActionBar, PRIMARY_56, SECONDARY_48 } from './ActionBar';
 import { HebrewToggle, ItemName, useUnitLabel } from './english';
 import { outsideTolerance, parseQty, qtyInputText, qtyKind, roundQty, type QtyTolerance } from './qtyEntry';
 import { StepHeader } from './SupplierSelect';
+import { pickSpotCheck } from '@/app/dashboard/receiving/[poId]/_count';
 
 type TD = Translator<typeof receivingDelivery.he>;
 
@@ -89,6 +90,9 @@ export function AdjustQuantities({
   const { resolved, total } = countProgress(result, marks);
   const unresolvedOrder = unresolvedOrderLines(result, marks);
   const [undo, setUndo] = useState<{ previous: Record<string, LineMark>; count: number } | null>(null);
+  // The blind spot check that precedes every bulk "as ordered" (owner decision 20, default).
+  const [spot, setSpot] = useState<{ keys: string[]; mode: 'all' | 'rest' } | null>(null);
+  const [spotMismatch, setSpotMismatch] = useState(false);
   const [open, setOpen] = useState<Set<string>>(
     () => new Set(result.lines.filter((l) => NEEDS_EYES.has(l.status) && !marks[lineKey(l)]?.touched).map(lineKey)),
   );
@@ -104,22 +108,31 @@ export function AdjustQuantities({
     ...result.lines.filter((l) => !NEEDS_EYES.has(l.status)),
   ];
 
-  function markRest(): Record<string, LineMark> {
-    const { next, previous } = markRestAsOrdered(result, marks);
-    for (const key of Object.keys(previous)) onUpdateMark(key, next[key]!);
-    return next;
+  /** Both bulk actions start with a blind count of (up to) two random order lines. */
+  function startSpotCheck(mode: 'all' | 'rest') {
+    const keys = pickSpotCheck(unresolvedOrder.filter((l) => l.poQty !== null).map(lineKey));
+    if (keys.length === 0) return;
+    setSpotMismatch(false);
+    setUndo(null);
+    setSpot({ keys, mode });
   }
 
-  function allArrived() {
-    const next = markRest();
-    const done = result.lines.every((l) => next[lineKey(l)]?.touched);
-    if (done) onSubmit(next);
-  }
-
-  function markRestWithUndo() {
-    const { previous } = markRestAsOrdered(result, marks);
-    markRest();
-    setUndo({ previous, count: Object.keys(previous).length });
+  function confirmSpot(counts: Record<string, number>) {
+    if (!spot) return;
+    const r = confirmSpotCheck(result, marks, counts, tolerance);
+    for (const key of Object.keys(r.previous)) onUpdateMark(key, r.next[key]!);
+    setSpot(null);
+    if (r.mismatched.length > 0) {
+      setSpotMismatch(true);
+      return;
+    }
+    const bulked = Object.keys(r.previous).filter((k) => r.next[k]?.method === 'bulk_as_ordered').length;
+    if (spot.mode === 'all' && result.lines.every((l) => r.next[lineKey(l)]?.touched)) {
+      onSubmit(r.next);
+      return;
+    }
+    // The spot counts are hand counts; only a real bulk is offered for undo.
+    if (bulked > 0) setUndo({ previous: r.previous, count: bulked });
   }
 
   function undoMarkRest() {
@@ -172,6 +185,8 @@ export function AdjustQuantities({
         <HebrewToggle />
       </div>
 
+      {/* Nothing is editable while the receipt is closing (an edit would be saved after the close). */}
+      <fieldset disabled={closing} className="m-0 min-w-0 border-0 p-0">
       <ul className="mb-4 space-y-3">
         {ordered.map((line) => {
           const key = lineKey(line);
@@ -194,6 +209,7 @@ export function AdjustQuantities({
           );
         })}
       </ul>
+      </fieldset>
 
       {onBack ? (
         <button type="button" onClick={onBack} className="min-h-12 text-base text-muted underline underline-offset-4 hover:text-ink">
@@ -204,6 +220,22 @@ export function AdjustQuantities({
       {children}
 
       <ActionBar testId="count-actions">
+        {spot ? (
+          <SpotCheck
+            lines={spot.keys.map((k) => result.lines.find((l) => lineKey(l) === k)!).filter(Boolean)}
+            onConfirm={confirmSpot}
+            onCancel={() => setSpot(null)}
+            td={td}
+            locale={locale}
+          />
+        ) : (
+        <>
+        {spotMismatch && unresolvedOrder.length > 0 ? (
+          <p role="alert" className="flex items-start gap-2 text-base font-semibold text-ink" data-testid="spot-mismatch">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warn" aria-hidden="true" />
+            {td('delivery.count.spotMismatch')}
+          </p>
+        ) : null}
         {footerMessage ? (
           <div role="alert" className="text-base font-medium text-ink" data-testid="count-footer-message">
             {footerMessage}
@@ -216,8 +248,8 @@ export function AdjustQuantities({
               {td('delivery.count.undo')}
             </button>
           </p>
-        ) : resolved > 0 && unresolvedOrder.length > 0 ? (
-          <button type="button" onClick={markRestWithUndo} className={SECONDARY_48} data-testid="mark-rest">
+        ) : resolved > 0 && unresolvedOrder.length > 0 && !spotMismatch ? (
+          <button type="button" onClick={() => startSpotCheck('rest')} className={SECONDARY_48} data-testid="mark-rest">
             {td('delivery.count.markRest', { count: formatNumber(unresolvedOrder.length, locale) })}
           </button>
         ) : null}
@@ -226,8 +258,8 @@ export function AdjustQuantities({
             <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
             {td('delivery.count.closing')}
           </button>
-        ) : resolved === 0 && unresolvedOrder.length > 0 ? (
-          <button type="button" onClick={allArrived} className={PRIMARY_56} data-testid="all-arrived">
+        ) : resolved === 0 && unresolvedOrder.length > 0 && !spotMismatch ? (
+          <button type="button" onClick={() => startSpotCheck('all')} className={PRIMARY_56} data-testid="all-arrived">
             <Check className="h-6 w-6" strokeWidth={3} aria-hidden="true" />
             {td('delivery.count.allArrived', { count: formatNumber(unresolvedOrder.length, locale) })}
           </button>
@@ -249,6 +281,8 @@ export function AdjustQuantities({
               <span id="count-close-reason">{progressText}</span>
             )}
           </button>
+        )}
+        </>
         )}
       </ActionBar>
     </div>
@@ -305,6 +339,11 @@ function CountLine({ line, mark, open, onToggle, onUpdate, saveState, onRetrySav
           <p className="shrink-0 text-end text-lg font-bold tabular-nums text-ink" data-testid="count-line-result">
             {missing ? td('delivery.count.missingTag') : qtyText(mark.qtyReceived)}
             {damaged ? <span className="block text-sm font-semibold text-warn">{td('delivery.count.damagedTag')}</span> : null}
+            {mark.method === 'bulk_as_ordered' ? (
+              <span className="block text-sm font-normal text-muted" data-testid="count-bulk-tag">
+                {td('delivery.count.bulkTag')}
+              </span>
+            ) : null}
           </p>
         ) : null}
       </div>
@@ -402,8 +441,9 @@ function LineEditor({
     const pct = typed && kind === 'measured' && tolerance ? outsideTolerance(line.poQty, qty, tolerance) : null;
     if (pct !== null && qty > 0) {
       // Far from the order: keep the number, ask once before it counts as resolved.
+      // It is still a count — no bulk action may overwrite it (unconfirmed).
       setPendingConfirm(pct);
-      onUpdate({ ...qtyPatch(mark, qty), touched: false });
+      onUpdate({ ...qtyPatch(mark, qty), touched: false, unconfirmed: true });
       return;
     }
     setPendingConfirm(null);
@@ -421,7 +461,6 @@ function LineEditor({
       active ? 'border-primary bg-primary text-on-primary' : 'border-line-strong bg-surface text-ink hover:border-primary'
     }`;
   const isAsOrdered = mark.touched && line.poQty !== null && roundQty(mark.qtyReceived) === roundQty(line.poQty) && mark.rejectReason == null;
-  const isAsInvoiced = mark.touched && line.invoiceQty !== null && roundQty(mark.qtyReceived) === roundQty(line.invoiceQty) && mark.rejectReason == null;
   const isMissing = mark.rejectReason === 'missing';
   const isDamaged = mark.condition === 'damaged';
   const qtyLabel = td('delivery.count.qtyFor', { name, unit: unitLabel || '—' });
@@ -513,20 +552,6 @@ function LineEditor({
             {td('delivery.count.ordered', { qty: qtyText(line.poQty) })}
           </button>
         ) : null}
-        {line.invoiceQty !== null && (line.poQty === null || roundQty(line.invoiceQty) !== roundQty(line.poQty)) ? (
-          <button
-            type="button"
-            aria-pressed={isAsInvoiced}
-            onClick={() => {
-              setPendingConfirm(null);
-              onUpdate({ ...qtyPatch(mark, line.invoiceQty!), condition: 'ok', rejectReason: null });
-            }}
-            className={chip(isAsInvoiced)}
-            data-testid="chip-as-invoiced"
-          >
-            {onOrder ? td('delivery.count.billed', { qty: qtyText(line.invoiceQty) }) : td('delivery.count.arrivedUnordered', { qty: qtyText(line.invoiceQty) })}
-          </button>
-        ) : null}
         <button type="button" aria-pressed={isMissing} onClick={() => { setPendingConfirm(null); onUpdate(MISSING_PATCH); }} className={chip(isMissing)} data-testid="chip-missing">
           {onOrder ? td('delivery.count.missingTag') : td('delivery.count.notArrived')}
         </button>
@@ -548,6 +573,80 @@ function LineEditor({
         {td('delivery.count.doneEditing')}
       </button>
     </div>
+  );
+}
+
+/**
+ * The blind count before a bulk "as ordered": the ordered quantity is NOT
+ * shown (the receiver writes what is on the dock), and the bulk only goes
+ * through when every count agrees with the order.
+ */
+function SpotCheck({
+  lines,
+  onConfirm,
+  onCancel,
+  td,
+  locale,
+}: {
+  lines: ReconciliationLine[];
+  onConfirm: (counts: Record<string, number>) => void;
+  onCancel: () => void;
+  td: TD;
+  locale: 'he' | 'en';
+}) {
+  const unit = useUnitLabel();
+  const [values, setValues] = useState<Record<string, string>>({});
+  const firstRef = useRef<HTMLInputElement>(null);
+  useEffect(() => firstRef.current?.focus(), []);
+  const parsed = Object.fromEntries(lines.map((l) => [lineKey(l), parseQty(values[lineKey(l)] ?? '')]));
+  const ready = lines.every((l) => parsed[lineKey(l)] !== null);
+  return (
+    <form
+      className="space-y-3"
+      data-testid="spot-check"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (ready) onConfirm(parsed as Record<string, number>);
+      }}
+    >
+      <div>
+        <p className="text-base font-semibold text-ink">{td('delivery.count.spotTitle')}</p>
+        <p className="text-sm text-muted">{td('delivery.count.spotHint')}</p>
+      </div>
+      {lines.map((l, i) => {
+        const key = lineKey(l);
+        const name = locale === 'en' && l.productNameEn ? l.productNameEn : l.productName;
+        const u = l.poUnit ? unit(l.poUnit) : '';
+        return (
+          <label key={key} className="flex items-center justify-between gap-3" data-testid="spot-line" data-key={key}>
+            <ItemName he={l.productName} en={l.productNameEn} className="min-w-0 flex-1 text-[17px] font-semibold text-ink" />
+            <span className="flex shrink-0 items-baseline gap-2">
+              <input
+                ref={i === 0 ? firstRef : undefined}
+                type="text"
+                inputMode="decimal"
+                enterKeyHint={i === lines.length - 1 ? 'done' : 'next'}
+                autoComplete="off"
+                dir="ltr"
+                aria-label={td('delivery.count.spotQtyFor', { name, unit: u || '—' })}
+                value={values[key] ?? ''}
+                onChange={(e) => setValues((v) => ({ ...v, [key]: e.target.value }))}
+                className="h-12 w-24 rounded-xl border-2 border-line-strong bg-surface text-center text-xl font-bold tabular-nums text-ink"
+                data-testid="spot-qty"
+              />
+              {u ? <span className="text-base text-muted">{u}</span> : null}
+            </span>
+          </label>
+        );
+      })}
+      <button type="submit" disabled={!ready} className={PRIMARY_56} data-testid="spot-confirm">
+        <Check className="h-6 w-6" strokeWidth={3} aria-hidden="true" />
+        {td('delivery.count.spotConfirm')}
+      </button>
+      <button type="button" onClick={onCancel} className={SECONDARY_48} data-testid="spot-cancel">
+        {td('delivery.count.spotCancel')}
+      </button>
+    </form>
   );
 }
 

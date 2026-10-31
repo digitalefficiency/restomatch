@@ -255,6 +255,31 @@ describe('Delivery Check marks (RCV-01 / RCV-02)', () => {
     expect(markFromReceipt(line, gr({}), 10)).toMatchObject({ qtyReceived: 10, touched: false });
   });
 
+  it('the starting count never comes from the invoice — on any line', () => {
+    const { initialMarks } = adaptReconciliation({
+      po,
+      poLines: [poLines[0]!],
+      receiptLines: [gr({})],
+      invoiceLines: [
+        // Billed 12 against an order of 4: the editor starts at the ORDER.
+        inv({ id: 'a', productId: 'p1', qtyBilled: '12', unitPriceBilled: '20', lineTotal: '240' }),
+        // Billed but never ordered: nothing is assumed to have arrived.
+        inv({ id: 'b', productId: 'p9', rawDescription: 'שמן זית', qtyBilled: '6', unitPriceBilled: '30', lineTotal: '180' }),
+      ],
+    });
+    expect(initialMarks['po-pl1']).toMatchObject({ qtyReceived: 4, touched: false });
+    const unordered = Object.entries(initialMarks).find(([k]) => k.startsWith('inv-'))![1];
+    expect(unordered).toMatchObject({ qtyReceived: 0, touched: false });
+  });
+
+  it('a reload restores how a line was counted (bulk "as ordered" stays marked as such)', () => {
+    const line = { poLineId: 'pl1', invoiceLineIndex: 0, productId: 'p1', productName: 'x' };
+    expect(markFromReceipt(line, gr({ qtyReceived: '4', conditionNotes: 'count:bulk_as_ordered' }), 4)).toMatchObject({
+      qtyReceived: 4, touched: true, method: 'bulk_as_ordered',
+    });
+    expect(markFromReceipt(line, gr({ qtyReceived: '3' }), 4)).toMatchObject({ qtyReceived: 3, touched: true, method: 'per_line' });
+  });
+
   it('keepAdjusted keeps an undone line unresolved', () => {
     const m = { poLineId: 'pl', invoiceLineIndex: 0, productId: null, productName: 'x', qtyRejected: 0, condition: 'ok' as const };
     const out = keepAdjusted({ a: { ...m, qtyReceived: 4, touched: false } }, { a: { ...m, qtyReceived: 9, touched: false } }, new Set(['a']));
