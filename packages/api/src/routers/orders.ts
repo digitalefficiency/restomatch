@@ -23,6 +23,7 @@ import {
   type Database,
 } from '@restomatch/db';
 import { featureEnabled } from '../lib/features';
+import { latestReceiptStatusSql } from '../lib/deliveryState';
 import { resolveTolerances } from '@restomatch/matching';
 import { ClaudePoParser, ORDER_TEXT_MAX_CHARS, orderTextParserFromEnv } from '@restomatch/ocr';
 import { ZesttAdapter } from '@restomatch/procurement';
@@ -303,18 +304,11 @@ async function buildSupplierMessage(
 
 /**
  * The PO's delivery state comes from its latest goods receipt, not from
- * purchase_orders.status: receiving never moves a PO out of 'sent' (and must
- * not — buildMatchInput only discovers sent/confirmed/partial POs, so an
- * invoice arriving after the delivery still finds its order). Display only.
- * The outer column is spelled out: Drizzle leaves `${purchaseOrders.id}`
- * unqualified in a single-table select, where it would bind to g.id.
+ * purchase_orders.status — see lib/deliveryState.ts (one derivation for the
+ * orders list, the late-delivery e-mail and the expectations list). Display only.
  */
 function latestReceiptStatus(restaurantId: string) {
-  return sql<'pending' | 'partial' | 'completed' | 'rejected' | null>`(
-    SELECT g.status::text FROM goods_receipts g
-    WHERE g.po_id = "purchase_orders"."id" AND g.restaurant_id = ${restaurantId}
-    ORDER BY g.received_at DESC, g.created_at DESC LIMIT 1
-  )`;
+  return latestReceiptStatusSql(restaurantId);
 }
 const OPEN_PO_STATUSES = ['sent', 'confirmed', 'partial'] as const;
 /**
