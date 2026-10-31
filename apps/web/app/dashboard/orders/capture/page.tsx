@@ -6,6 +6,8 @@ import { ingest } from '@/lib/i18n/messages/ingest';
 import { enabledFeatures } from '@/lib/ingest/features';
 import { FieldMode } from '../field-mode';
 import { CaptureClient } from './capture-client';
+import { ShareForward } from './share-forward';
+import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,12 +24,22 @@ export default async function OrderCapturePage({
 }) {
   const session = await auth();
   const role = session?.user?.role;
-  if (role !== 'owner' && role !== 'manager') notFound();
   const features = await enabledFeatures(session?.user?.restaurantId);
   if (!features.includes('orderCapture')) notFound();
   const { text, title } = await searchParams;
   const t = await getT(ingest);
   const initialText = [title, text].filter((s): s is string => typeof s === 'string' && s.trim() !== '').join('\n').slice(0, 8000);
+  // A WhatsApp share never 404s (orders-17): a role that cannot create orders
+  // gets an in-shell T4 page that keeps the text and forwards it to the manager.
+  if (role !== 'owner' && role !== 'manager') {
+    const to = await getT(ordersNs);
+    return (
+      <FieldMode className="mx-auto max-w-3xl">
+        <SectionHeader level={1} title={to('w2.shareReceiverTitle')} subtitle={to('w2.shareReceiverBody')} />
+        <ShareForward text={initialText} />
+      </FieldMode>
+    );
+  }
 
   return (
     <FieldMode className="mx-auto max-w-3xl">

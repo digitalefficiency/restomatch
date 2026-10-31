@@ -5,7 +5,7 @@ import { UnitText } from '@/lib/components/UnitText';
 import { useRouter } from 'next/navigation';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
-import { Ban, Copy, Pencil, Repeat, Send, Trash2, X } from 'lucide-react';
+import { Ban, Copy, PackageCheck, Pencil, Repeat, Send, Trash2, X } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
 import {
   Button,
@@ -236,6 +236,12 @@ export function OrderDetail({
         : t('detail.totalExcludes', { count: formatNumber(unpriced, locale) });
   const sendLabel = t(`send.cta.${channel}`, { supplier: supplierName || t('detail.titleNoSupplier') });
   const canReorder = canEdit && !isDraft && data.lines.length > 0;
+  // The order's gap ₪ (shared cache with ThreeWayCard); absent for the receiver (no ₪ keys).
+  const threeWay = trpc.orders.threeWay.useQuery(
+    { poId: po.id },
+    { enabled: !isDraft && data.receiptStatus === 'completed', retry: false },
+  );
+  const gapIls = (threeWay.data as { gapTotalIls?: number | null } | undefined)?.gapTotalIls ?? null;
   // No cancel while a send is counting down: undo that first.
   const menuItems = canEdit && canCancel && sending === null
     ? [
@@ -370,6 +376,18 @@ export function OrderDetail({
                   </Button>
                 </>
               )}
+              {/* The primary follows the state (§5.5): a sent order's next step is receiving it. */}
+              {(po.status === 'sent' || po.status === 'confirmed') && data.receiptStatus !== 'completed' ? (
+                <LinkButton href={`/dashboard/receiving/${po.id}`} className="min-h-12" data-testid="detail-receive">
+                  <PackageCheck className="h-4 w-4" aria-hidden="true" /> {t('w2.primary.receive')}
+                </LinkButton>
+              ) : null}
+              {/* Received with a ₪ gap: the primary is the gap (§5.5; only where ₪ is visible). */}
+              {gapIls ? (
+                <LinkButton href="#three-way" className="min-h-12" data-testid="detail-see-gaps">
+                  {t('w2.seeGaps', { amount: formatIls(gapIls, { locale, maximumFractionDigits: 0 }) })}
+                </LinkButton>
+              ) : null}
               {canReorder ? (
                 <LinkButton href={`/dashboard/orders/new?from=${po.id}`} variant="secondary" className="min-h-12" data-testid="order-again">
                   <Repeat className="h-4 w-4" aria-hidden="true" /> {t('detail.reorder')}

@@ -24,7 +24,15 @@ export interface OrderRow {
   createdAt: Date | string;
   expectedDeliveryAt: Date | string | null;
   lineCount: number;
-  totalEstimated: string | null;
+  /** Absent for roles without price visibility (the receiver's payload carries no ₪). */
+  totalEstimated?: string | null;
+  /** Sent from the user's own WhatsApp (W2-06 §5.3): nothing was queued by us. */
+  sentManually?: boolean;
+  /** The draft's author (the manager's "טיוטות" view). */
+  createdByName?: string | null;
+  /** The supplier's latest answer (W2-06 §5.6). */
+  supplierAnswer?: string | null;
+  supplierAnswerChanges?: number | null;
 }
 
 /** Icon + word + tone: never colour alone; cancelled is history, not an alarm (orders-34). */
@@ -48,7 +56,15 @@ const STATUS_ICON: Record<DisplayOrderStatus, typeof Send> = {
   cancelled: Ban,
 };
 
-export function OrderStatusBadge({ status, receiptStatus }: { status: OrderStatus; receiptStatus?: ReceiptStatus }) {
+export function OrderStatusBadge({
+  status,
+  receiptStatus,
+  sentManually = false,
+}: {
+  status: OrderStatus;
+  receiptStatus?: ReceiptStatus;
+  sentManually?: boolean;
+}) {
   const shown = deliveryStatusOf(status, receiptStatus);
   const t = useT(ordersNs);
   const Icon = STATUS_ICON[shown] ?? FilePen;
@@ -58,7 +74,7 @@ export function OrderStatusBadge({ status, receiptStatus }: { status: OrderStatu
         tone={STATUS_TONE[shown] ?? 'neutral'}
         icon={<Icon className="h-3.5 w-3.5 rtl:-scale-x-100" aria-hidden="true" />}
       >
-        {t(`status.${shown}`)}
+        {shown === 'sent' && sentManually ? t('w2.manual.sentLabel') : t(`status.${shown}`)}
       </Badge>
     </span>
   );
@@ -77,19 +93,35 @@ export function OrdersTable({
   orders,
   hideSupplier = false,
   canReorder = false,
+  showMoney = true,
 }: {
   orders: OrderRow[];
   hideSupplier?: boolean;
   canReorder?: boolean;
+  /** False for the receiver (decision 6): no ₪ column, no ₪ in row labels. */
+  showMoney?: boolean;
 }) {
   const t = useT(ordersNs);
   const locale = useLocale();
   const router = useRouter();
   const date = (d: Date | string | null) => (d ? formatDate(d, locale, SHORT_DATE) : '—');
-  const total = (v: string | null) => (v != null ? formatIls(Number(v), { locale, maximumFractionDigits: 2 }) : '—');
+  const total = (v: string | null | undefined) => (v != null ? formatIls(Number(v), { locale, maximumFractionDigits: 2 }) : '—');
+  const answer = (o: OrderRow): string | null => {
+    if (o.status !== 'sent' && o.status !== 'confirmed') return null;
+    if (o.supplierAnswer === 'confirmed') return t('w2.answer.confirmed');
+    if (o.supplierAnswer === 'changes')
+      return t('w2.answer.changes', { count: formatNumber(o.supplierAnswerChanges ?? 0, locale) });
+    return t('w2.answer.pending');
+  };
+  const author = (o: OrderRow) => (o.status === 'draft' && o.createdByName ? t('w2.by', { name: o.createdByName }) : null);
   const supplier = (o: OrderRow) => displayName(o.supplierName, o.supplierNameEn, locale).primary;
   const rowLabel = (o: OrderRow) =>
-    t('list.rowLabel', { supplier: supplier(o), ref: ltrIsolate(`#${poRefOf(o.id)}`), date: date(o.createdAt), total: total(o.totalEstimated) });
+    t('list.rowLabel', {
+      supplier: supplier(o),
+      ref: ltrIsolate(`#${poRefOf(o.id)}`),
+      date: date(o.createdAt),
+      total: showMoney ? total(o.totalEstimated) : '',
+    }).replace(/ · $/, '');
   const reorderable = (o: OrderRow) => canReorder && o.status !== 'draft' && o.lineCount > 0;
   const reorderHref = (o: OrderRow) => `/dashboard/orders/new?from=${o.id}`;
 
@@ -103,9 +135,10 @@ export function OrdersTable({
               <th scope="col" className="px-4 py-3 text-start font-medium">{t('columns.ref')}</th>
               <th scope="col" className="px-4 py-3 text-start font-medium">{t('columns.created')}</th>
               <th scope="col" className="px-4 py-3 text-start font-medium">{t('columns.status')}</th>
+              <th scope="col" className="px-4 py-3 text-start font-medium">{t('w2.answer.column')}</th>
               <th scope="col" className="px-4 py-3 text-start font-medium">{t('columns.expectedDelivery')}</th>
               <th scope="col" className="px-4 py-3 text-right font-medium">{t('columns.lines')}</th>
-              <th scope="col" className="px-4 py-3 text-right font-medium">{t('columns.total')}</th>
+              {showMoney ? <th scope="col" className="px-4 py-3 text-right font-medium">{t('columns.total')}</th> : null}
               {canReorder ? (
                 <th scope="col" className="w-14 px-2 py-3">
                   <span className="sr-only">{t('columns.actions')}</span>
@@ -151,11 +184,13 @@ export function OrdersTable({
                   )}
                 </td>
                 <td className="px-4 py-3">
-                  <OrderStatusBadge status={o.status} receiptStatus={o.receiptStatus} />
+                  <OrderStatusBadge status={o.status} receiptStatus={o.receiptStatus} sentManually={o.sentManually} />
+                  {author(o) ? <span className="ms-2 text-xs text-muted">{author(o)}</span> : null}
                 </td>
+                <td className="px-4 py-3 text-muted" data-testid="order-answer">{answer(o) ?? '—'}</td>
                 <td className="px-4 py-3 tabular-nums text-muted">{date(o.expectedDeliveryAt)}</td>
                 <td className="px-4 py-3 text-right tabular-nums text-muted">{formatNumber(o.lineCount, locale)}</td>
-                <td className="px-4 py-3 text-right tabular-nums text-ink">{total(o.totalEstimated)}</td>
+                {showMoney ? <td className="px-4 py-3 text-right tabular-nums text-ink">{total(o.totalEstimated)}</td> : null}
                 {canReorder ? (
                   <td className="px-2 py-1 text-end">
                     {reorderable(o) ? (
@@ -196,7 +231,7 @@ export function OrdersTable({
                   >
                     {hideSupplier ? date(o.createdAt) : supplier(o)}
                   </Link>
-                  <OrderStatusBadge status={o.status} receiptStatus={o.receiptStatus} />
+                  <OrderStatusBadge status={o.status} receiptStatus={o.receiptStatus} sentManually={o.sentManually} />
                 </div>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
                   <bdi dir="ltr" className="font-mono text-xs" data-testid="order-ref">
@@ -204,7 +239,9 @@ export function OrdersTable({
                   </bdi>
                   <span className="tabular-nums">{t('list.delivery', { date: date(o.expectedDeliveryAt) })}</span>
                   <span className="tabular-nums">{t('list.linesCount', { count: formatNumber(o.lineCount, locale) })}</span>
-                  <span className="tabular-nums font-medium text-ink">{total(o.totalEstimated)}</span>
+                  {showMoney ? <span className="tabular-nums font-medium text-ink">{total(o.totalEstimated)}</span> : null}
+                  {author(o) ? <span>{author(o)}</span> : null}
+                  {answer(o) ? <span data-testid="order-answer">{answer(o)}</span> : null}
                 </div>
               </div>
               {!reorderable(o) ? (

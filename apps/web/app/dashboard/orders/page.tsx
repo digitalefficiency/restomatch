@@ -73,7 +73,7 @@ async function OrdersContent() {
         }
       />
       {/* The "prices on supplier orders" setting lives with its preview on each order (orders-25). */}
-      <OrdersList initial={initial} canEdit={canEdit} />
+      <OrdersList initial={initial} canEdit={canEdit} showMoney={active?.role !== 'receiver'} />
     </div>
   );
 }

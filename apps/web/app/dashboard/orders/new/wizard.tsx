@@ -29,6 +29,7 @@ import {
   Input,
   LinkButton,
   Select,
+  Skeleton,
   Spinner,
   cn,
   displayName,
@@ -53,18 +54,21 @@ import {
   poRefOf,
   reorderLines,
   unpricedCount,
+  waLink,
 } from '../order-logic';
 import { DecimalInput } from '../decimal-input';
 import { FieldMode } from '../field-mode';
 import { UNDO_MS, UndoCountdown } from '../undo-bar';
 import { InlineDocument } from '../supplier-document';
+import { openWhatsappNow } from '../w2-logic';
+import { GuidePanel } from './steps/guide-panel';
+import { SupplierBoard } from './steps/supplier-board';
 import { OverContractNote, useOrderContractPrices } from './contract-price';
 import { addDays, localNow, nextDeliveryOptions, type DeliveryOption } from './delivery-days';
 import {
   emptyCart,
   loadStore,
   pairServerLines,
-  planDraftSync,
   saveStore,
   withCart,
   type Cart,
@@ -74,7 +78,8 @@ import {
 } from './draft-store';
 
 type Outputs = inferRouterOutputs<AppRouter>;
-type Channel = 'email' | 'whatsapp' | 'none';
+/** 'manual' = "מהוואטסאפ שלי": the user sends from their own WhatsApp; we record it (W2-06 §5.3). */
+type Channel = 'email' | 'whatsapp' | 'none' | 'manual';
 type DeliveryPreview = Outputs['orders']['previewDelivery'];
 type Supplier = Outputs['suppliers']['list'][number];
 type PoLine = Outputs['orders']['get']['lines'][number];
@@ -125,9 +130,6 @@ const cartLineOf = (l: PoLine): CartLine => ({
 const dayKeyOf = (at: Date | string | null | undefined) => (at ? localNow(new Date(at), TZ).date : '');
 
 /** The device cart's server draft was sent or cancelled somewhere else. */
-/** A draft line the cart still pairs with is gone on the server (deleted on the order page). */
-class LineGoneError extends Error {}
-
 class StaleDraftError extends Error {
   constructor(
     readonly poId: string,
@@ -196,6 +198,11 @@ export function NewOrderWizard({
   const [sent, setSent] = useState<{ poId: string; channel: Channel; supplier: string; day: string } | null>(null);
   /** Bumped after every server sync so the literal document re-renders from the saved draft. */
   const [docVersion, setDocVersion] = useState(0);
+  /** The server draft's version (xmin) as last saved — sent with every save (W2-06 §5.7). */
+  const versionRef = useRef<string | null>(null);
+  const [serverSave, setServerSave] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
+  /** "מהוואטסאפ שלי": the exact text, fetched on that explicit choice, kept in memory for the tap. */
+  const [manual, setManual] = useState<{ poId: string; text: string; to: string | null } | null>(null);
   /** A device cart dropped because its draft was sent / cancelled elsewhere. */
   const [stale, setStale] = useState<{ supplierId: string; poId: string; status: string } | null>(null);
 
@@ -248,6 +255,11 @@ export function NewOrderWizard({
         const c = s.carts[initialSupplierId]!;
         applyCart(c);
         if (c.lines.length > 0) setRestoredNote(c.lines.length);
+      } else if (!fromPoId && initialSupplierId) {
+        // Another browser or device: the server draft is the source (W2-06 §5.7).
+        const restored = await restoreServerDraft(initialSupplierId);
+        if (cancelled) return;
+        if (restored > 0) setRestoredNote(restored);
       } else if (!fromPoId && !initialSupplierId && s.activeSupplierId && s.carts[s.activeSupplierId]?.lines.length) {
         setResumeOffer({ supplierId: s.activeSupplierId, count: s.carts[s.activeSupplierId]!.lines.length });
       }
@@ -265,6 +277,29 @@ export function NewOrderWizard({
     setChannel(c.channel);
     setDraftId(c.draftId);
     setServer(c.server);
+    versionRef.current = null;
+    setManual(null);
+  }
+
+  /** Load this user's open server draft for a supplier into the cart; returns its line count. */
+  async function restoreServerDraft(id: string): Promise<number> {
+    const d = await utils.orders.openDraft.fetch({ supplierId: id }).catch(() => null);
+    if (!d || d.lines.length === 0) return 0;
+    applyCart({
+      ...emptyCart(),
+      lines: d.lines.map((l) => ({
+        key: newKey(),
+        productId: l.productId ?? undefined,
+        rawDescription: l.rawDescription ?? '',
+        qty: l.qty,
+        unit: l.unit,
+        unitPriceExpected: l.unitPriceExpected ?? undefined,
+      })),
+      deliveryDate: dayKeyOf(d.expectedDeliveryAt),
+      draftId: d.draftId,
+    });
+    versionRef.current = d.version;
+    return d.lines.length;
   }
 
   // Every change is saved on the device (one cart per supplier). Not while "order
@@ -327,6 +362,11 @@ export function NewOrderWizard({
     };
   }, [dirty, t]);
 
+  // The guide's query (shared cache with GuidePanel): BUILD waits for it to avoid layout shift.
+  const guideQ = trpc.orders.orderGuide.useQuery(
+    { supplierId },
+    { enabled: step === 'BUILD' && !!supplierId, retry: false, staleTime: 60_000 },
+  );
   const catalog = trpc.catalog.items.useQuery(
     { supplierId, search: search || undefined, limit: search ? 20 : 8 },
     { enabled: step === 'BUILD' && !!supplierId, placeholderData: (prev) => prev },
@@ -346,7 +386,16 @@ export function NewOrderWizard({
   const pricedDoc = docSettings.data?.enabled === true;
 
   // Default channel follows what the supplier can actually receive.
-  const defaultChannel: Channel = supplier?.contactEmail ? 'email' : supplier?.contactWhatsapp ? 'whatsapp' : 'none';
+  // Without the platform WhatsApp (plan-gated until H-05), "מהוואטסאפ שלי" is the WhatsApp default (§5.3).
+  const board = trpc.orders.supplierBoard.useQuery(undefined, { retry: false, staleTime: 60_000 });
+  const platformWhatsapp = (board.data as { platformWhatsapp?: boolean } | undefined)?.platformWhatsapp === true;
+  const defaultChannel: Channel = supplier?.contactEmail
+    ? 'email'
+    : supplier?.contactWhatsapp
+      ? platformWhatsapp
+        ? 'whatsapp'
+        : 'manual'
+      : 'none';
   const effectiveChannel = channel ?? defaultChannel;
 
   const total = useMemo(() => orderTotalIls(lines), [lines]);
@@ -368,9 +417,8 @@ export function NewOrderWizard({
   const warningsByProduct = new Map((guardrail.data?.warnings ?? []).map((w) => [w.productId, w]));
 
   const createDraft = trpc.orders.createDraft.useMutation();
-  const updateLine = trpc.orders.updateOrderLine.useMutation();
-  const deleteLine = trpc.orders.deleteOrderLine.useMutation();
-  const cancelOrder = trpc.orders.cancelOrder.useMutation();
+  const saveDraftM = trpc.orders.saveDraft.useMutation();
+  const markManual = trpc.orders.markSentManually.useMutation();
   const placeOrder = trpc.orders.placeOrder.useMutation();
   const once = useSingleFlight();
 
@@ -512,7 +560,11 @@ export function NewOrderWizard({
   function selectSupplier(id: string, nextStep: Step = 'BUILD') {
     const c = store.current.carts[id];
     if (c) applyCart(c);
-    else applyCart(emptyCart());
+    else {
+      applyCart(emptyCart());
+      // A supplier switch keeps both drafts; the other one comes back from the server.
+      void restoreServerDraft(id).then((n) => n > 0 && setRestoredNote(n));
+    }
     setSupplierId(id);
     setRawSearch('');
     setStep(nextStep);
@@ -570,92 +622,115 @@ export function NewOrderWizard({
     setDocVersion((v) => v + 1);
   }
 
-  async function ensureServerDraft(): Promise<string> {
-    // A background line sync may be mid-flight: let it land first.
-    if (syncing.current) await syncing.current.catch(() => undefined);
-    let id = draftId;
-    if (id) {
-      let cur: Awaited<ReturnType<typeof utils.orders.get.fetch>> | null = null;
-      try {
-        cur = await utils.orders.get.fetch({ poId: id });
-      } catch (e) {
-        if (trpcErrorCode(e) !== 'NOT_FOUND') throw e; // unreachable: never guess, never duplicate
-      }
-      if (cur?.po && cur.po.status !== 'draft') throw new StaleDraftError(id, cur.po.status);
-      if (!cur?.po) id = null;
-    }
-    // A persisted draft id without its snapshot (a reload before the read-back):
-    // pair with the draft's real rows instead of replacing it.
-    if (id && !serverRef.current) await readBack(id, lines);
-    if (id) {
-      const plan = planDraftSync({ lines, deliveryDate, deliveryDay, server: serverRef.current });
-      if (!plan.replace) {
-        try {
-          await applyPlan(plan);
-          if (plan.deletes.length > 0 || plan.updates.length > 0) await readBack(id, lines);
-          return id;
-        } catch (e) {
-          if (!(e instanceof LineGoneError)) throw e;
-          // A line was deleted on the order page meanwhile: re-pair with what the
-          // draft really holds; the unpaired cart line makes this a replace below.
-          await readBack(id, lines);
-        }
-      }
-    }
-    const created = await createDraft.mutateAsync({
-      supplierId,
-      // A scheduled supplier's date is re-derived on the server (a cutoff may have
-      // passed since the preview) unless the manager picked another one.
-      expectedDeliveryDate: deliveryDate || (delivery.data?.derived ? undefined : deliveryDay || undefined),
-      lines: lines.map((l) => ({
-        productId: l.productId,
-        rawDescription: l.rawDescription || undefined,
+  /** Lines the server can hold: a description (or product) and a qty. Empty-qty lines stay on the device. */
+  const savableLines = (ls: CartLine[]) =>
+    ls
+      .filter((l) => l.qty > 0 && (l.productId || l.rawDescription.trim()))
+      .map((l) => ({
+        productId: l.productId ?? null,
+        rawDescription: l.rawDescription.trim() || null,
         qty: l.qty,
         unit: l.unit,
-        unitPriceExpected: l.unitPriceExpected,
-      })),
-    });
-    // The stale draft this one replaces (a line was added or the day changed). It
-    // was never sent; the orders list keeps never-sent cancelled drafts out of view.
-    if (id) await cancelOrder.mutateAsync({ poId: id }).catch(() => undefined);
-    // Persist the draft id NOW, not on the next render: a reload or a crash between
-    // here and the save effect must still find it, so a retried send re-uses this
-    // draft (validated) and never creates a second draft or PO.
-    const savedCart = store.current.carts[supplierId];
-    store.current = {
-      ...withCart(store.current, supplierId, {
-        ...(savedCart ?? emptyCart()),
-        lines,
-        deliveryDate,
-        channel,
-        draftId: created.poId,
-        server: null,
-        updatedAt: Date.now(),
-      }),
-      activeSupplierId: supplierId,
-    };
-    saveStore(restaurantId, store.current);
-    setDraftId(created.poId);
-    await readBack(created.poId, lines);
-    return created.poId;
+        unitPriceExpected: l.unitPriceExpected ?? null,
+      }));
+
+  /**
+   * Save the cart as THE server draft (W2-06 §5.7): one draft per (supplier, me),
+   * versioned by xmin. A stale version → the newer server draft is loaded and
+   * named; a draft that was sent / received elsewhere → dropStale.
+   */
+  async function syncServerDraft(snapshot: CartLine[]): Promise<string | null> {
+    const payload = savableLines(snapshot);
+    if (payload.length === 0 && !draftId) return null;
+    setServerSave('saving');
+    try {
+      const r = await saveDraftM.mutateAsync({
+        draftId,
+        supplierId,
+        lines: payload,
+        // A scheduled supplier's date is re-derived on the server unless the manager picked one.
+        deliveryDate: deliveryDate || (delivery.data?.derived ? null : deliveryDay || null),
+        version: versionRef.current,
+        clientMutationId: newKey(),
+      });
+      versionRef.current = r.version;
+      // What is on the server now: the background save skips an identical re-save.
+      lastSaved.current = `${supplierId}|${deliveryDate}|${JSON.stringify(payload)}`;
+      if (r.draftId !== draftId) {
+        // Persist the id NOW: a reload before the next render must find this draft.
+        const savedCart = store.current.carts[supplierId];
+        store.current = {
+          ...withCart(store.current, supplierId, {
+            ...(savedCart ?? emptyCart()),
+            lines: snapshot,
+            deliveryDate,
+            channel,
+            draftId: r.draftId,
+            server: null,
+            updatedAt: Date.now(),
+          }),
+          activeSupplierId: supplierId,
+        };
+        saveStore(restaurantId, store.current);
+        setDraftId(r.draftId);
+      }
+      // Prices the server filled in (contract > last sent > list) show at once.
+      setLines((ls) => {
+        let changed = false;
+        const next = ls.map((l) => {
+          if (l.unitPriceExpected != null || !l.productId) return l;
+          const m = r.lines.find((x) => x.productId === l.productId && x.unit === l.unit && x.unitPriceExpected != null);
+          if (!m) return l;
+          changed = true;
+          return { ...l, unitPriceExpected: m.unitPriceExpected ?? undefined };
+        });
+        // The server priced these lines itself: their filled prices are already saved.
+        lastSaved.current = `${supplierId}|${deliveryDate}|${JSON.stringify(savableLines(changed ? next : ls))}`;
+        return changed ? next : ls;
+      });
+      setServerSave('saved');
+      return r.draftId;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '';
+      if (trpcErrorCode(e) === 'CONFLICT' && msg.startsWith('DRAFT_STALE:')) {
+        // `DRAFT_STALE:<who>:<ISO>` — the ISO has colons, so take it from the end.
+        const rest = msg.slice('DRAFT_STALE:'.length);
+        const iso = /\d{4}-\d{2}-\d{2}T[\d:.]+Z$/.exec(rest)?.[0] ?? '';
+        const by = rest.slice(0, Math.max(0, rest.length - iso.length - 1));
+        await restoreServerDraft(supplierId);
+        toast.error(
+          t('w2.staleDraft', {
+            by: by || '—',
+            at: iso ? formatDate(iso, locale, { hour: '2-digit', minute: '2-digit', timeZone: TZ }) : '',
+          }),
+        );
+        setServerSave('idle');
+        return null;
+      }
+      if (trpcErrorCode(e) === 'CONFLICT' && draftId) throw new StaleDraftError(draftId, 'sent');
+      setServerSave('failed');
+      throw e;
+    }
   }
 
-  async function applyPlan(plan: ReturnType<typeof planDraftSync>) {
-    for (const lineId of plan.deletes) {
+  async function ensureServerDraft(): Promise<string> {
+    // A background save may be mid-flight: let it land first.
+    if (syncing.current) await syncing.current.catch(() => undefined);
+    if (draftId) {
       try {
-        await deleteLine.mutateAsync({ lineId });
+        const cur = await utils.orders.get.fetch({ poId: draftId });
+        if (cur.po && cur.po.status !== 'draft') throw new StaleDraftError(draftId, cur.po.status);
       } catch (e) {
-        if (trpcErrorCode(e) !== 'NOT_FOUND') throw e; // already gone: that is what we wanted
+        if (e instanceof StaleDraftError) throw e;
+        if (trpcErrorCode(e) !== 'NOT_FOUND') throw e; // unreachable: never guess, never duplicate
+        setDraftId(null);
+        versionRef.current = null;
       }
     }
-    for (const u of plan.updates) {
-      try {
-        await updateLine.mutateAsync({ lineId: u.lineId, patch: u.patch });
-      } catch (e) {
-        if (trpcErrorCode(e) === 'NOT_FOUND') throw new LineGoneError();
-        throw e;
-      }
-    }
+    const id = await syncServerDraft(lines);
+    if (!id) throw new Error('draft not saved');
+    await readBack(id, lines);
+    return id;
   }
 
   /** The draft is gone from "unsent": drop the device cart and say where the order is. */
@@ -682,42 +757,31 @@ export function NewOrderWizard({
     }
   }
 
-  // ── Edits after the server draft exists reach it on their own (debounced), so the
-  //    order page never shows — or sends — stale lines. Additions and a day change
-  //    can't be patched (no add-line procedure yet): those wait for the next save.
-  const syncing = useRef<Promise<void> | null>(null);
+  // ── Every line is saved on the server (debounced): a reload, another browser of
+  //    the same user, or a supplier switch never loses the order (orders-07 P0).
+  const syncing = useRef<Promise<unknown> | null>(null);
+  const linesSig = JSON.stringify(savableLines(lines));
+  const lastSaved = useRef<string>('');
   useEffect(() => {
-    if (!draftId || !server || saving || sending || step === 'SENT' || !linesValid(lines)) return;
-    const plan = planDraftSync({ lines, deliveryDate, deliveryDay, server });
-    if (plan.replace || (plan.updates.length === 0 && plan.deletes.length === 0)) return;
+    if (!hydrated || !supplierId || saving || sending || step === 'SENT' || reorderOpen) return;
+    const sig = `${supplierId}|${deliveryDate}|${linesSig}`;
+    if (sig === lastSaved.current) return;
+    if (!draftId && linesSig === '[]') return;
     const timer = window.setTimeout(() => {
       if (syncing.current) return;
-      const poId = draftId;
       const snapshot = lines;
-      syncing.current = (async () => {
-        try {
-          const cur = await utils.orders.get.fetch({ poId });
-          if (cur.po?.status !== 'draft') {
-            if (cur.po) dropStale(new StaleDraftError(poId, cur.po.status));
-            return;
-          }
-          try {
-            await applyPlan(plan);
-          } catch (e) {
-            if (!(e instanceof LineGoneError)) throw e;
-          }
-          // Re-pair with what the draft really holds (also after a NOT_FOUND).
-          await readBack(poId, snapshot);
-        } catch {
-          // Quiet: the next save (review / send) brings the draft in line or says why not.
-        }
-      })().finally(() => {
-        syncing.current = null;
-      });
-    }, 800);
+      syncing.current = syncServerDraft(snapshot)
+        .catch((e) => {
+          if (e instanceof StaleDraftError) dropStale(e);
+          // Otherwise quiet: the chip says "לא נשמר" and the next change retries.
+        })
+        .finally(() => {
+          syncing.current = null;
+        });
+    }, 600);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lines, deliveryDate, deliveryDay, draftId, server, saving, sending, step]);
+  }, [hydrated, supplierId, linesSig, deliveryDate, draftId, saving, sending, step, reorderOpen]);
 
   function goReview() {
     if (!valid) return;
@@ -735,9 +799,51 @@ export function NewOrderWizard({
     });
   }
 
+  /**
+   * "מהוואטסאפ שלי" (§5.3). First tap: save and fetch the exact text (the explicit
+   * choice). Second tap: open wa.me SYNCHRONOUSLY with the text already in memory
+   * (iOS blocks window.open after an await), then record the send — no outbox row.
+   */
+  function manualTap() {
+    if (!manual) {
+      once(async () => {
+        const poId = await save();
+        if (!poId) return;
+        try {
+          const p = await utils.orders.prepareManualSend.fetch({ poId });
+          setManual({ poId, text: p.text, to: p.whatsappTo });
+        } catch (e) {
+          setSaveError(e);
+        }
+      });
+      return;
+    }
+    if (!manual.to) {
+      toast.error(t('w2.manual.noPhone'));
+      return;
+    }
+    openWhatsappNow(waLink(manual.to, manual.text));
+    const poId = manual.poId;
+    markManual.mutate(
+      { poId, clientMutationId: `manual-${poId}` },
+      {
+        onSuccess: () => {
+          store.current = withCart(store.current, supplierId, null);
+          saveStore(restaurantId, store.current);
+          setSent({ poId, channel: 'manual', supplier: supplierLabel, day: deliveryDay });
+          setStep('SENT');
+          setManual(null);
+          void utils.orders.list.invalidate();
+        },
+        onError: (e) => setSaveError(e),
+      },
+    );
+  }
+
   async function commitSend(poId: string) {
     setSending(null);
     try {
+      if (effectiveChannel === 'manual') return; // recorded through manualTap, never queued
       await placeOrder.mutateAsync({ poId, channel: effectiveChannel });
       store.current = withCart(store.current, supplierId, null);
       saveStore(restaurantId, store.current);
@@ -776,14 +882,20 @@ export function NewOrderWizard({
   const dayShort = (iso: string) => formatDate(`${iso}T12:00:00Z`, locale, { weekday: 'short', day: 'numeric', month: 'numeric' });
   const itemsLabel = (n: number) => (n === 1 ? t('wizard.itemsOne') : t('wizard.items', { count: formatNumber(n, locale) }));
   const excludesLabel = unpriced === 0 ? null : unpriced === 1 ? t('wizard.totalExcludesOne') : t('wizard.totalExcludes', { count: formatNumber(unpriced, locale) });
-  const ctaLabel = t(`send.cta.${effectiveChannel}`, { supplier: supplierLabel });
-  const busy = saving || placeOrder.isPending || !!sending;
+  const ctaLabel =
+    effectiveChannel === 'manual'
+      ? manual
+        ? t('w2.manual.open')
+        : t('w2.manual.choice')
+      : t(`send.cta.${effectiveChannel}`, { supplier: supplierLabel });
+  const busy = saving || placeOrder.isPending || markManual.isPending || !!sending;
   const cartCarts = hydrated ? store.current.carts : {};
 
   // ───────────────────────────────── render ─────────────────────────────────
   return (
     <FieldMode className="mx-auto max-w-3xl pb-40 lg:pb-32">
-      <div ref={rootRef}>
+      {/* data-wizard-ready: the cart is hydrated and taps are live (tests wait for it). */}
+      <div ref={rootRef} data-wizard-ready={hydrated ? 'true' : undefined}>
         {/* Task chrome: exit at the start, the step at the end — no breadcrumbs, no nav. */}
         <div className="mb-3 flex items-center justify-between gap-3">
           <Link
@@ -922,11 +1034,9 @@ export function NewOrderWizard({
             ) : (
               <>
                 <h2 className="mb-2 text-base font-bold text-ink">{t('wizard.pickSupplier')}</h2>
-                <SupplierRows
-                  suppliers={suppliers.data ?? []}
+                <SupplierBoard
                   current={supplierId}
-                  nameOf={nameOf}
-                  draftCount={(id) => cartCarts[id]?.lines.length ?? 0}
+                  localDraftCount={(id) => cartCarts[id]?.lines.length ?? 0}
                   onPick={(id) => selectSupplier(id)}
                 />
               </>
@@ -950,10 +1060,30 @@ export function NewOrderWizard({
               </p>
             ) : null}
             {reorderInfo ? <ReorderNotice info={reorderInfo} /> : null}
+            {guideQ.isLoading ? (
+              // One layout-true skeleton until the guide resolves, so the catalog never
+              // moves under a tap when the guide lands above it (DoD-7 CLS).
+              <div className="space-y-4" aria-busy="true" data-testid="build-skeleton">
+                <Skeleton className="h-48" />
+                <Skeleton className="h-64" />
+              </div>
+            ) : (
+            <>
+            {supplierId ? <GuidePanel supplierId={supplierId} lines={lines} onLines={setLines} newKey={newKey} /> : null}
             <Card elevated>
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm text-muted">
                   {t('wizard.supplierLabel')} <span className="font-semibold text-ink">{supplierLabel}</span>
+                  {serverSave !== 'idle' ? (
+                    <span
+                      role="status"
+                      data-testid="server-save"
+                      data-state={serverSave}
+                      className={cn('ms-2 text-xs', serverSave === 'failed' ? 'text-danger' : 'text-subtle')}
+                    >
+                      · {serverSave === 'saving' ? t('w2.saving') : serverSave === 'saved' ? t('w2.savedServer') : t('w2.saveFailed')}
+                    </span>
+                  ) : null}
                 </p>
                 <Button variant="secondary" size="sm" className="min-h-11" onClick={() => setPickerOpen(true)} data-testid="change-supplier">
                   <Repeat className="h-4 w-4" aria-hidden="true" /> {t('draft.changeSupplier')}
@@ -1014,7 +1144,8 @@ export function NewOrderWizard({
                                 productId: it.productId ?? undefined,
                                 rawDescription: it.supplierNameRaw,
                                 nameEn: it.productNameEn,
-                                qty: 1,
+                                // No invented qty (orders-01): the line starts empty.
+                                qty: 0,
                                 unit,
                                 unitPriceExpected: listPrice,
                               })
@@ -1051,13 +1182,15 @@ export function NewOrderWizard({
                   size="sm"
                   className="min-h-11"
                   onClick={() =>
-                    setLines((ls) => [...ls, { key: newKey(), rawDescription: '', qty: 1, unit: locale === 'en' ? 'unit' : 'יח׳' }])
+                    setLines((ls) => [...ls, { key: newKey(), rawDescription: '', qty: 0, unit: locale === 'en' ? 'unit' : 'יח׳' }])
                   }
                 >
                   <Plus className="h-4 w-4" aria-hidden="true" /> {t('wizard.addFreeLine')}
                 </Button>
               </div>
             </Card>
+            </>
+            )}
 
             <Card elevated>
               {lines.length === 0 ? (
@@ -1100,7 +1233,8 @@ export function NewOrderWizard({
                           {t('wizard.qty')}
                           <DecimalInput
                             kind="qty"
-                            value={l.qty}
+                            value={l.qty > 0 ? l.qty : undefined}
+                            placeholder={t('w2.qtyEmpty')}
                             onValue={(v) => patchLine(l.key, { qty: v ?? 0 })}
                             aria-label={t('wizard.qtyOf', { name: label })}
                             className="mt-0.5 min-h-12 px-2 text-end text-base tabular-nums"
@@ -1270,7 +1404,7 @@ export function NewOrderWizard({
                 hint={
                   effectiveChannel === 'email' && supplier?.contactEmail ? (
                     <bdi dir="ltr">{supplier.contactEmail}</bdi>
-                  ) : effectiveChannel === 'whatsapp' && supplier?.contactWhatsapp ? (
+                  ) : (effectiveChannel === 'whatsapp' || effectiveChannel === 'manual') && supplier?.contactWhatsapp ? (
                     <bdi dir="ltr">{supplier.contactWhatsapp}</bdi>
                   ) : undefined
                 }
@@ -1290,12 +1424,29 @@ export function NewOrderWizard({
                       ? t('wizard.channelWhatsapp')
                       : `${t('wizard.channelWhatsapp')} — ${t('wizard.channelMissing')}`}
                   </option>
+                  <option value="manual" disabled={!supplier?.contactWhatsapp}>
+                    {supplier?.contactWhatsapp ? t('w2.manual.choice') : `${t('w2.manual.choice')} — ${t('wizard.channelMissing')}`}
+                  </option>
                   <option value="none">{t('wizard.channelNone')}</option>
                 </Select>
               </Field>
+              {effectiveChannel === 'manual' ? (
+                <div className="space-y-2" data-testid="manual-send">
+                  <p className="text-xs text-muted">{t('w2.manual.hint')}</p>
+                  {manual ? (
+                    <pre
+                      dir="rtl"
+                      data-testid="manual-text"
+                      className="max-h-56 overflow-auto whitespace-pre-wrap rounded-xl border border-line bg-surface-2 p-3 font-sans text-sm text-ink"
+                    >
+                      {manual.text}
+                    </pre>
+                  ) : null}
+                </div>
+              ) : null}
 
               {/* What the supplier will receive — literally, whenever something is sent. */}
-              {effectiveChannel !== 'none' && supplierId && valid ? (
+              {effectiveChannel !== 'none' && effectiveChannel !== 'manual' && supplierId && valid ? (
                 pricedDoc ? (
                   <div className="space-y-2">
                     <p className="flex flex-wrap items-center gap-2 text-xs text-muted" data-testid="prices-chip">
@@ -1361,14 +1512,18 @@ export function NewOrderWizard({
             <p className="mt-3 text-lg font-semibold text-ink" role="status">
               {sent.channel === 'none'
                 ? t('wizard.markedTitle')
-                : t('wizard.sentTitle', {
+                : sent.channel === 'manual'
+                  ? t('w2.manual.done')
+                  : t('wizard.sentTitle', {
                     supplier: sent.supplier,
                     channel: t(`detail.channelNames.${sent.channel}`),
                   })}
             </p>
             <p className="mt-1 text-sm text-muted">
-              {sent.channel === 'none'
-                ? t('wizard.markedBody')
+              {sent.channel === 'none' || sent.channel === 'manual'
+                ? sent.channel === 'none'
+                  ? t('wizard.markedBody')
+                  : ''
                 : sent.day
                   ? t('wizard.sentBody', { date: dayLong(sent.day) })
                   : t('wizard.sentBodyNoDate')}
@@ -1440,9 +1595,9 @@ export function NewOrderWizard({
                   <Button
                     data-testid="cart-primary"
                     className="h-14 w-full text-base sm:w-auto sm:min-w-64"
-                    disabled={!valid || placeOrder.isPending}
-                    loading={saving || placeOrder.isPending}
-                    onClick={startSend}
+                    disabled={!valid || placeOrder.isPending || markManual.isPending}
+                    loading={saving || placeOrder.isPending || markManual.isPending}
+                    onClick={effectiveChannel === 'manual' ? manualTap : startSend}
                   >
                     {ctaLabel}
                   </Button>

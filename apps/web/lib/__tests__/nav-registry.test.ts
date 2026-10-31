@@ -146,6 +146,8 @@ const ROUTE_ROLES_BEFORE: Record<string, UserRole[]> = {
   '/dashboard/catalog': ['owner', 'manager'],
   '/dashboard/products': ['owner', 'manager'],
   '/dashboard/orders': ['owner', 'manager'],
+  // W2-06 (orchestrator-approved exception): the share target's forward page, every role.
+  '/dashboard/orders/capture': ['bookkeeper', 'chef', 'manager', 'owner', 'receiver'],
   '/dashboard/contracts': ['owner', 'manager', 'bookkeeper'],
   '/dashboard/recipes': ['owner', 'manager', 'chef'],
   '/dashboard/inventory': ['owner', 'manager', 'chef'],
@@ -229,7 +231,10 @@ describe('nav per role', () => {
             (d.nav === 'item' || d.nav === 'linked') &&
             canOpen(role, d) &&
             !(d.chain === 'only' && !showChain) &&
-            !(d.chain === 'single' && showChain),
+            !(d.chain === 'single' && showChain) &&
+            // W2-06 exception: the WhatsApp share target is reached from a share, not the nav,
+            // by roles that cannot open its parent (the receiver's "העבירו למנהל" page).
+            !(d.key === 'ordersCapture' && !canOpen(role, REGISTRY.find((p) => p.key === 'orders')!)),
         );
         expect(allowed.filter((d) => !reach.has(d.key)).map((d) => d.path), `${role} chain=${showChain}`).toEqual([]);
       }

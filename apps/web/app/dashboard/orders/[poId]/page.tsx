@@ -8,6 +8,8 @@ import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 import { OrderDetail } from './detail-client';
 import { SupplierDocumentPreview } from '../supplier-document';
 import { SupplierConfirmCard } from './supplier-confirm-card';
+import { ThreeWayCard } from './three-way-card';
+import { OrderTimeline } from './order-timeline';
 import { ltrIsolate, poRefOf } from '../order-logic';
 
 export default async function OrderDetailPage({ params }: { params: Promise<{ poId: string }> }) {
@@ -56,6 +58,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ po
         title={title}
         subtitle={data.po?.status === 'draft' ? t('detail.subtitle') : undefined}
       />
+      <OrderTimeline poId={data.po.id} sentAt={data.po.sentAt} sentChannel={data.po.sentChannel} />
       <OrderDetail
         data={data}
         canEdit={canEdit}
@@ -75,6 +78,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ po
           />
         </div>
       ) : null}
+      {/* W2-06 §5.5: ordered · received · billed · gap ₪, once the order left draft. */}
+      {data.po.status !== 'draft' && data.po.status !== 'cancelled' ? <ThreeWayCard poId={data.po.id} /> : null}
       {/* Wave-1 `supplierConfirm`: renders nothing when the flag is off. */}
       <SupplierConfirmCard
         poId={data.po.id}

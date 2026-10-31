@@ -20,6 +20,9 @@ export const routes: RouteDef[] = [
     path: '/dashboard/orders/capture',
     group: 'procure',
     parent: 'orders',
+    // The WhatsApp share target never 404s/403s (W2-06 §5.4, orders-17): a role that
+    // cannot order gets the in-shell "העבירו למנהל" page. Linked only: no nav entry.
+    roles: ['owner', 'manager', 'chef', 'receiver', 'bookkeeper'],
     nav: 'linked',
     field: true,
   },
