@@ -35,6 +35,8 @@ export interface LeakLineLike {
   /** The engine's expected / charged values (the line's ₪ basis), when known. */
   expected?: number | null;
   actual?: number | null;
+  /** The engine's severity — tells the QTY_OVER shapes apart in the ₪ basis line. */
+  severity?: string | null;
 }
 
 export interface LeakInvoiceLike {

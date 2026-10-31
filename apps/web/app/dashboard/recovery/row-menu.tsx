@@ -101,6 +101,9 @@ export function RowMenu({
                 tabIndex={-1}
                 onClick={() => {
                   setOpen(false);
+                  // Focus returns to the ⋯ button BEFORE the action: a confirm dialog it opens
+                  // then restores focus there on cancel (the menu item is about to unmount).
+                  btn.current?.focus();
                   it.onSelect();
                 }}
                 className={cn(

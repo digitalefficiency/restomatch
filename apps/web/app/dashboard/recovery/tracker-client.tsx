@@ -20,6 +20,7 @@ import {
   CONFIRMED_MOVES,
   batchMoves,
   bySupplier,
+  confirmAgorot,
   countdownOf,
   menuMoves,
   nextStep,
@@ -120,6 +121,11 @@ export function TrackerClient({
   }
 
   const sumOf = (ids: string[]) => ids.reduce((s, id) => s + (byId.get(id)?.outstandingAgorot ?? 0), 0);
+  /** The ₪ a closing confirm names: money back for "recovered", the remainder for a write-off. */
+  const confirmSum = (ids: string[], to: 'written_off' | 'recovered') =>
+    confirmAgorot(ids.map((id) => byId.get(id)).filter((c): c is Claim => c != null), to);
+  /** A row whose move is still in its undo window is not selectable / batchable (it acts on a status not yet written). */
+  const isPending = (id: string) => deferred.pendingTo(id) != null;
   const nameOfIds = (ids: string[]) => {
     const names = [...new Set(ids.map((id) => byId.get(id)).filter(Boolean).map((c) => supplierOf(c!)))];
     return names.length === 1 ? names[0]! : t('undo.suppliers', { count: formatNumber(names.length, locale) });
@@ -143,7 +149,9 @@ export function TrackerClient({
     setSelected(new Set());
   }
 
-  function request(ids: string[], to: Move) {
+  function request(all: string[], to: Move) {
+    const ids = all.filter((id) => !isPending(id));
+    if (ids.length === 0) return;
     if ((CONFIRMED_MOVES as readonly string[]).includes(to)) {
       setReason('');
       setConfirm({ ids, to: to as 'written_off' | 'recovered' });
@@ -193,7 +201,7 @@ export function TrackerClient({
       else next.add(id);
       return next;
     });
-  const selectedIds = [...selected].filter((id) => byId.has(id));
+  const selectedIds = [...selected].filter((id) => byId.has(id) && !isPending(id));
   const selectedMoves = batchMoves(selectedIds.map((id) => statusOf(byId.get(id)!) as RecoveryStatus)) as Move[];
 
   const countdownText = (cd: Countdown) =>
@@ -381,7 +389,8 @@ export function TrackerClient({
                         <input
                           type="checkbox"
                           className="mt-1 h-4 w-4 accent-primary"
-                          checked={selected.has(c.id)}
+                          checked={selected.has(c.id) && !isPending(c.id)}
+                          disabled={isPending(c.id)}
                           onChange={() => toggle(c.id)}
                           aria-label={t('batch.select', { invoice: c.invoiceNumber ?? '—', item: itemOf(c) })}
                         />
@@ -426,7 +435,8 @@ export function TrackerClient({
                               <input
                                 type="checkbox"
                                 className="h-5 w-5 accent-primary"
-                                checked={selected.has(c.id)}
+                                checked={selected.has(c.id) && !isPending(c.id)}
+                                disabled={isPending(c.id)}
                                 onChange={() => toggle(c.id)}
                                 aria-label={t('batch.select', { invoice: c.invoiceNumber ?? '—', item: itemOf(c) })}
                               />
@@ -551,7 +561,7 @@ export function TrackerClient({
         title={
           confirm
             ? t(confirm.to === 'written_off' ? 'confirm.writeOffTitle' : 'confirm.recoveredTitle', {
-                amount: ils(sumOf(confirm.ids)),
+                amount: ils(confirmSum(confirm.ids, confirm.to)),
                 supplier: nameOfIds(confirm.ids),
               })
             : ''
@@ -560,6 +570,12 @@ export function TrackerClient({
           confirm ? (
             <>
               <p>{t(confirm.to === 'written_off' ? 'confirm.writeOffBody' : 'confirm.recoveredBody', { count: formatNumber(confirm.ids.length, locale) })}</p>
+              {confirm.to === 'recovered' && confirmSum(confirm.ids, 'written_off') > 0 ? (
+                // A partial credit: closing it lets the rest go — say how much, in ₪.
+                <p className="font-semibold text-ink" data-testid="confirm-let-go">
+                  {t('confirm.recoveredLetGo', { amount: ils(confirmSum(confirm.ids, 'written_off')) })}
+                </p>
+              ) : null}
               <fieldset>
                 <legend className="mb-1.5 text-xs font-semibold text-subtle">{t('confirm.reason')}</legend>
                 <div role="radiogroup" className="flex flex-wrap gap-2">
@@ -586,7 +602,7 @@ export function TrackerClient({
         confirmLabel={
           confirm
             ? confirm.to === 'written_off'
-              ? t('confirm.writeOffCta', { amount: ils(sumOf(confirm.ids)) })
+              ? t('confirm.writeOffCta', { amount: ils(confirmSum(confirm.ids, 'written_off')) })
               : t('confirm.recoveredCta')
             : ''
         }
@@ -598,6 +614,7 @@ export function TrackerClient({
       <UndoBar
         pending={deferred.pending}
         onUndo={deferred.undo}
+        onHold={deferred.hold}
         undoLabel={t('undo.cta')}
         countdownLabel={(s) => t('undo.seconds', { seconds: formatNumber(s, locale) })}
       />

@@ -194,7 +194,7 @@ export async function LeakExplorer({ view }: { view: ViewState }) {
                 digits={2}
                 totalLabel={t('explorer.total')}
               />
-              {linesTotal - cur.leakIls > 0.005 ? <p className="mt-3 text-xs text-subtle">{t('explorer.linesNote')}</p> : null}
+              {linesTotal - cur.leakIls > 0.005 ? <p className="mt-3 text-xs text-subtle" data-testid="explorer-cap-note">{t('explorer.linesNote')}</p> : null}
             </div>
           )}
         </div>

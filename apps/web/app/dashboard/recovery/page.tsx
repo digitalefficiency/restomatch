@@ -9,7 +9,7 @@ import { recovery as recoveryNs } from '@/lib/i18n/messages/recovery';
 import { Card, EmptyState, SectionHeader } from '@/lib/components';
 import { displayName } from '../approvals/vocab';
 import { TrackerClient } from './tracker-client';
-import { followUps, funnelOf, type FunnelPart } from './logic';
+import { ALL_CLAIMS, followUps, funnelOf, type FunnelPart } from './logic';
 
 const PART_ORDER: FunnelPart[] = ['returned', 'credited', 'open', 'disputed', 'writtenOff'];
 const PART_BAR: Record<FunnelPart, string> = {
@@ -42,7 +42,8 @@ export default async function RecoveryPage({
   const [t, locale] = await Promise.all([getT(recoveryNs), getLocale()]);
   const [{ summary, returnedThisMonth }, claims, suggestions] = await Promise.all([
     caller.recovery.summary(),
-    caller.recovery.list(),
+    // Every claim: the banner, tab counts and cards sum them (never a 200-row first page).
+    caller.recovery.list({ limit: ALL_CLAIMS }),
     caller.recovery.creditLineSuggestions(),
   ]);
   const nowIso = new Date().toISOString();
@@ -93,7 +94,7 @@ export default async function RecoveryPage({
                   title={exact(summary.outstandingAgorot)}
                   data-testid="recovery-outstanding"
                 >
-                  <bdi>{whole(funnel.shekels.open + funnel.shekels.disputed)}</bdi>
+                  <bdi>{whole(Math.round(summary.outstandingAgorot / 100))}</bdi>
                 </p>
                 <p className="mt-1 text-sm text-muted">
                   {t('tracker.outstandingHint', { claimed: whole(funnel.stages.claimed), count: formatNumber(summary.claimCount, locale) })}
@@ -121,8 +122,8 @@ export default async function RecoveryPage({
                 {(['claimed', 'credited', 'returned'] as const).map((s, i) => (
                   <li key={s} className="flex items-baseline gap-2">
                     {i > 0 ? (
-                      <span aria-hidden="true" className="text-subtle">
-                        ←
+                      <span aria-hidden="true" className="text-subtle" data-testid="funnel-arrow">
+                        {locale === 'he' ? '←' : '→'}
                       </span>
                     ) : null}
                     <span className="text-muted">{t(`funnel.stage.${s}`)}</span>

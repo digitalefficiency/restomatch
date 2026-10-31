@@ -98,7 +98,9 @@ describe('view state ⇄ URL', () => {
     expect(serializeView({ ...DEFAULT_VIEW }).has('cmp')).toBe(false);
     const off = parseView(new URLSearchParams('cmp=off'));
     expect(off.compare).toBe('off');
-    expect(isDefaultData(off)).toBe(false);
+    // Compare is not data: this month, no filters is the default data either way.
+    expect(isDefaultData(off)).toBe(true);
+    expect(isDefaultData(parseView(new URLSearchParams('cmp=yoy')))).toBe(true);
     expect(parseView(serializeView(off))).toEqual(off);
   });
 

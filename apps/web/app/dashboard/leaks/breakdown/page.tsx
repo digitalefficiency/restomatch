@@ -9,6 +9,7 @@ import { approvals as approvalsNs } from '@/lib/i18n/messages/approvals';
 import { Badge, Card, SectionHeader, type BadgeTone } from '@/lib/components';
 import { sumAgora } from '../claims/letters';
 import { LeakStateNote, leakStateOf } from '../leak-state';
+import { zeroNoteOf } from '../states';
 import {
   discrepancyLabel,
   displayName,
@@ -271,7 +272,7 @@ export default async function LeakBreakdownPage({
                           </div>
                           <p className="mt-0.5 text-xs text-subtle">
                             {noMoney
-                              ? l.type === 'QTY_SHORT'
+                              ? zeroNoteOf(l, inv.lines) === 'billedShort'
                                 ? t('breakdown.noMoneyShort')
                                 : t('breakdown.noMoney')
                               : resolutionLabel(ta, l.resolutionStatus)}

@@ -18,6 +18,8 @@ async function amounts(page: Page, testId: string): Promise<number[]> {
   return page.getByTestId(testId).evaluateAll((els) => els.map((e) => Number(e.getAttribute('data-amount'))));
 }
 const sumAgora = (xs: number[]) => xs.reduce((s, x) => s + agora(x), 0);
+/** ₪ as he-IL prints it at 2 dp — grouped ("1,201.03"), so totals ≥ ₪1,000 match too. */
+const at2dp = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 test('breakdown: the invoice rows add up to the leak total, shown to the agora', async ({ page }) => {
   const errors = collectPageErrors(page);
@@ -28,33 +30,49 @@ test('breakdown: the invoice rows add up to the leak total, shown to the agora',
   expect(sumAgora(rows)).toBe(agora(total));
   expect(Number(await page.getByTestId('breakdown-rows-total').getAttribute('data-amount'))).toBe(total);
   // Shown at 2 dp next to its rows; the exact value is also in the title.
-  await expect(page.getByTestId('breakdown-total')).toContainText(total.toFixed(2));
+  await expect(page.getByTestId('breakdown-total')).toContainText(at2dp(total));
   // A zero-₪ finding is a calm note, never a red ₪0.00.
   await expect(page.getByTestId('line-no-money').first()).not.toContainText('0.00');
   expect(errors).toEqual([]);
 });
 
-test('explorer: bars total = Σ bars; the T1 tile carries the exact leak; compare is on by default', async ({ page }) => {
+test('explorer: bars total = Σ bars; the T1 tile carries the exact leak, the cap note explains any gap; compare is on by default', async ({ page }) => {
   await page.goto('/dashboard/leaks');
   const rows = await amounts(page, 'chart-row');
   const total = Number(await page.getByTestId('chart-total').getAttribute('data-amount'));
   expect(sumAgora(rows)).toBe(agora(total));
   const tile = page.getByTestId('explorer-leak');
   const leak = Number(await tile.getAttribute('data-amount'));
-  expect(agora(leak)).toBe(agora(total));
-  await expect(tile).toHaveAttribute('title', new RegExp(leak.toFixed(2).replace('.', '\\.')));
+  // Grouped rows are line sums BEFORE the per-invoice cap; the T1 leak is capped. Never forced
+  // equal: when they differ (rows above the leak) the cap note says why.
+  expect(agora(total)).toBeGreaterThanOrEqual(agora(leak));
+  if (agora(total) > agora(leak)) await expect(page.getByTestId('explorer-cap-note')).toBeVisible();
+  else await expect(page.getByTestId('explorer-cap-note')).toHaveCount(0);
+  // A plain substring check — no hand-built regex from a number.
+  expect(await tile.getAttribute('title')).toContain(at2dp(leak));
   // "מול 1–25 בספט׳": the default compare is the aligned previous period.
   await expect(page.locator('main')).toContainText(/מול 1–\d+/);
 });
 
 test('proof: the top catches plus "and N more" add up to the number', async ({ page }) => {
+  // An independent source: the breakdown's per-invoice rows (the proof's "rest" is derived, so it can't check itself).
+  await page.goto('/dashboard/leaks/breakdown');
+  const invoiceRows = (await amounts(page, 'breakdown-row')).map(agora);
   await page.goto('/dashboard/leaks/proof');
   const leak = Number((await page.getByTestId('proof-leak').innerText()).replace(/[^\d.]/g, ''));
   const catches = await page.getByTestId('proof-catch-amount').evaluateAll((els) =>
     els.map((e) => Number((e.textContent ?? '').replace(/[^\d.]/g, ''))),
   );
   const rest = await page.getByTestId('proof-rest').getAttribute('data-amount');
-  expect(sumAgora([...catches, Number(rest ?? 0)])).toBe(agora(leak));
+  expect(agora(leak), 'the proof number = Σ breakdown invoice rows').toBe(invoiceRows.reduce((a, b) => a + b, 0));
+  // Each top catch is a real invoice row, and "and N more" is the rows NOT shown.
+  const left = [...invoiceRows];
+  for (const c of catches) {
+    const i = left.indexOf(agora(c));
+    expect(i, `catch ₪${c} is a breakdown row`).toBeGreaterThanOrEqual(0);
+    left.splice(i, 1);
+  }
+  expect(agora(Number(rest ?? 0))).toBe(left.reduce((a, b) => a + b, 0));
   expect(Number(await page.getByTestId('proof-sum').getAttribute('data-amount'))).toBe(leak);
 });
 
@@ -124,6 +142,62 @@ test('claims: "mark as sent" waits 10 s with undo, then moves the claims in one 
   }
 });
 
+test('claims: keyboard "mark as sent" lands focus on Undo, the countdown holds while it is focused, ONE undo bar for all letters', async ({ page }) => {
+  await page.goto('/dashboard/leaks/claims');
+  const calls: string[] = [];
+  page.on('request', (r) => {
+    if (r.url().includes('recovery.transition')) calls.push(r.url());
+  });
+  const marks = page.getByTestId('letter-mark-sent');
+  test.skip((await marks.count()) < 2, 'needs two letters to send');
+  const roots = await page
+    .getByTestId('supplier-letter')
+    .filter({ has: page.getByTestId('letter-mark-sent') })
+    .evaluateAll((els) => els.slice(0, 2).map((e) => e.getAttribute('data-print-root')));
+  for (const root of roots) {
+    await page.locator(`[data-print-root="${root}"]`).getByTestId('letter-mark-sent').focus();
+    await page.keyboard.press('Enter');
+    // The pressed button is gone; focus is on the newest Undo, one key away.
+    await expect(page.getByTestId('undo-button').last()).toBeFocused();
+  }
+  // Both moves sit in ONE live region (never two fixed bars drawn on top of each other).
+  await expect(page.getByTestId('undo-bar')).toHaveCount(2);
+  await expect(page.locator('[aria-live="polite"]').filter({ has: page.getByTestId('undo-bar') })).toHaveCount(1);
+  // Held while the keyboard is on the bar: nothing is written after the 10 s window.
+  await page.waitForTimeout(11_000);
+  expect(calls).toHaveLength(0);
+  await page.keyboard.press('Enter');
+  await page.getByTestId('undo-button').first().click();
+  await expect(page.getByTestId('undo-bar')).toHaveCount(0);
+  await page.waitForTimeout(500);
+  expect(calls).toHaveLength(0);
+});
+
+test('recovery: "the money came back" names the ₪ credited (never ₪0) and, on a partial credit, the ₪ let go', async ({ page }) => {
+  const sql = e2eSql();
+  try {
+    // A partial credit: ~60% came back, the rest is what closing it lets go.
+    const [c] = await sql<{ id: string; amount_agorot: string; credited_agorot: string }[]>`
+      update recovery_claims set status = 'credited', credited_agorot = floor(amount_agorot * 0.6), credited_at = now()
+      where id = (select id from recovery_claims where status = 'claimed' order by amount_agorot desc limit 1)
+      returning id, amount_agorot, credited_agorot`;
+    const credited = Number(c!.credited_agorot) / 100;
+    const letGo = (Number(c!.amount_agorot) - Number(c!.credited_agorot)) / 100;
+    await page.goto('/dashboard/recovery?tab=all');
+    const row = page.locator('[data-testid="claim-row"][data-status="credited"]').first();
+    await row.getByRole('button', { name: /אשרו שהכסף חזר/ }).click();
+    const dialog = page.getByRole('alertdialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText(at2dp(credited));
+    await expect(dialog).not.toContainText(/(^|[^\d])0\.00/);
+    await expect(dialog.getByTestId('confirm-let-go')).toContainText(at2dp(letGo));
+    await dialog.getByRole('button', { name: 'חזרה' }).click();
+  } finally {
+    await sql`update recovery_claims set status = 'claimed', credited_agorot = 0, credited_at = null where status = 'credited'`;
+    await sql.end();
+  }
+});
+
 test('report: like-for-like compare, the money partition adds up', async ({ page }) => {
   await page.goto('/dashboard/leaks/report');
   await expect(page.getByTestId('report-compare')).toContainText(/1–\d+ .+ מול 1–\d+/);
@@ -132,6 +206,9 @@ test('report: like-for-like compare, the money partition adds up', async ({ page
   const parts = await amounts(page, 'report-part');
   const found = Number(await page.getByTestId('report-found').getAttribute('data-amount'));
   expect(sumAgora(parts)).toBe(agora(found));
+  // "Found" is built from its parts, so check it against an independent sum: the by-type table.
+  const byType = Number(await page.getByTestId('report-type-total').getAttribute('data-amount'));
+  expect(agora(found), 'found = Σ the discrepancy lines by type').toBe(agora(byType));
   await expect(page.locator('main')).not.toContainText('יעד: 1.5%');
   // Owner decision: numbers in tables are physically right-aligned (Hebrew too).
   const align = await page.getByTestId('report-supplier-total').evaluate((el) => getComputedStyle(el).textAlign);
@@ -172,6 +249,16 @@ test.describe('phone 390×844', () => {
       return el.getBoundingClientRect().top - bannerH;
     });
     expect(top).toBeLessThan(844 / 2);
+  });
+
+  test('the view sheet closes when the window widens past phone width (the page never goes inert)', async ({ page }) => {
+    await page.goto('/dashboard/leaks');
+    await page.getByRole('button', { name: /^תצוגה/ }).click();
+    await expect(page.locator('dialog[open]')).toHaveCount(1);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await expect(page.locator('dialog[open]')).toHaveCount(0);
+    // Not inert: a desktop control takes a click.
+    await page.getByTestId('explorer-leak').click({ trial: true, timeout: 3000 });
   });
 
   test('recovery: claim cards grouped by supplier show the outstanding ₪', async ({ page }) => {

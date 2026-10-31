@@ -199,7 +199,9 @@ export function hasFilters(v: ViewState): boolean {
  * filters); pages that show a delta fetch the aligned comparison next to it.
  */
 export function isDefaultData(v: ViewState): boolean {
-  return v.period === 'this_month' && v.compare === DEFAULT_VIEW.compare && !hasFilters(v);
+  // `compare` only adds a delta next to the same numbers — it never changes the data,
+  // so toggling it neither flips the breakdown into "view mode" nor drops the home's proof link.
+  return v.period === 'this_month' && !hasFilters(v);
 }
 
 /** The tRPC `ViewInput` for this state (the server re-validates). */
