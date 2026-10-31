@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getSession, signIn } from 'next-auth/react';
 import { LogIn, WifiOff } from 'lucide-react';
 import { Button, cn, Field, Input } from '@/lib/components';
@@ -26,11 +26,11 @@ import { decideAfterSignIn } from './reauthDecision';
  *   somebody else signing in reloads home — one worker's screen never acts for
  *   another (lib/net/reauthDecision.ts).
  */
-export function ShellResilience() {
+export function ShellResilience({ identity }: { identity?: Identity }) {
   return (
     <>
       <OfflineChip />
-      <ReauthSheet />
+      <ReauthSheet identity={identity} />
     </>
   );
 }
@@ -60,7 +60,8 @@ function OfflineChip() {
   );
 }
 
-interface Identity {
+/** Whose page this is: the signed-in user and the branch the page was rendered for. */
+export interface Identity {
   id: string;
   email: string;
   restaurantId: string | null;
@@ -90,20 +91,38 @@ async function currentIdentity(): Promise<(Identity & { pending: boolean }) | nu
   };
 }
 
-function ReauthSheet() {
+function ReauthSheet({ identity }: { identity?: Identity }) {
   const t = useT(common);
   const open = useReauthOpen();
   const ref = useRef<HTMLDialogElement>(null);
-  const titleId = useId();
-  const bodyId = useId();
-  // The user this page belongs to: read once while the session is still alive.
-  const owner = useRef<Identity | null>(null);
-  const [email, setEmail] = useState('');
+  // Fixed ids, like #reauth-email: one sheet per page. useId() here came out
+  // different on the server and the client on a route's first render in dev
+  // (the sheet renders after the page's {children}), which logged a hydration
+  // mismatch on aria-labelledby/-describedby.
+  const titleId = 'reauth-title';
+  const bodyId = 'reauth-body';
+  // The user this page belongs to: from the server when the layout passes it,
+  // otherwise read once while the session is still alive.
+  const owner = useRef<Identity | null>(identity ?? null);
+  const [email, setEmail] = useState(identity?.email ?? '');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: 'form' });
 
+  // A refreshed layout (another branch) re-renders with the page's new owner.
+  const ownerId = identity?.id;
+  const ownerBranch = identity?.restaurantId ?? null;
+  const ownerEmail = identity?.email ?? '';
   useEffect(() => {
+    if (ownerId) owner.current = { id: ownerId, email: ownerEmail, restaurantId: ownerBranch };
+  }, [ownerId, ownerBranch, ownerEmail]);
+
+  useEffect(() => {
+    // Known from the server: no session read on mount. GET /api/auth/session
+    // re-issues the session cookie, and one answered after a branch switch had set
+    // the new branch put the old one back (the switch was silently lost); a full
+    // navigation during the read also logged a ClientFetchError.
+    if (owner.current) return;
     let alive = true;
     void currentIdentity().then((who) => {
       if (!alive || !who || who.pending) return;

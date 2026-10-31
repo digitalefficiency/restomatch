@@ -75,6 +75,9 @@ async function scanAndProcess(page: Page, poId: string): Promise<string> {
     await route.fulfill({ response: res, json: body });
   });
   await page.goto(`/dashboard/receiving/${poId}`);
+  // The wizard streams in under receiving/[poId]/loading.tsx (W1-06): a file set on the
+  // server-rendered input before hydration has no onChange yet and is silently dropped.
+  await page.waitForLoadState('networkidle');
   // One input: the rear camera by default; "upload a file / PDF" widens it for one pick (W1-06).
   await page.getByTestId('scan-input').setInputFiles({ name: 'invoice.png', mimeType: 'image/png', buffer: TINY_PNG });
   // Uploaded — and no internal scan id on screen (RCV-30).
