@@ -12,7 +12,16 @@ export function siteUrl(): string {
 export const SITE_URL = siteUrl();
 
 /** Public marketing routes (sitemap + hreflang). */
-export const MARKETING_ROUTES = ['/', '/pricing', '/about', '/showcase', '/privacy', '/terms', '/cookies'] as const;
+export const MARKETING_ROUTES = [
+  '/',
+  '/pricing',
+  '/about',
+  '/showcase',
+  '/privacy',
+  '/terms',
+  '/cookies',
+  '/accessibility',
+] as const;
 
 /**
  * hreflang alternates + per-locale canonical: Hebrew at the bare URL, English at

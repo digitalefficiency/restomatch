@@ -9,6 +9,7 @@ import { formatDate } from '@/lib/i18n/format';
 import { suppliers as suppliersNs } from '@/lib/i18n/messages/suppliers';
 import { approvals as approvalsNs } from '@/lib/i18n/messages/approvals';
 import { displayName } from '@/lib/components';
+import { activeMembershipOf } from '@/lib/activeRestaurant';
 import { PrintButton } from '../../../leaks/claims/print-button';
 import { loadSupplierLeakCard } from '../leak-card-data';
 import { LeakCardBody } from '../leak-card-view';
@@ -32,8 +33,8 @@ export default async function SupplierLeakCardPrintPage({ params }: { params: Pr
     caller.onboarding.myMemberships(),
     auth(),
   ]);
-  const restaurant =
-    (memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0])?.restaurantName ?? '';
+  // The card names the ACTIVE restaurant — never another branch (memberships[0]).
+  const restaurant = activeMembershipOf(memberships, session?.user?.restaurantId)?.restaurantName ?? '';
   // The card is handed to an Israeli supplier: always Hebrew RTL, whatever the UI language.
   const th = createTranslator('he', suppliersNs);
   const tah = createTranslator('he', approvalsNs);

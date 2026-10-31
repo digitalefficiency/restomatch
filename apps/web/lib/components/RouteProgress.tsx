@@ -8,6 +8,7 @@ import {
   isCrossRouteClick,
   progressReducer,
   type Phase,
+  wrapRouterPush,
 } from './routeProgressState';
 
 export { isCrossRouteClick, startRouteProgress } from './routeProgressState';
@@ -55,6 +56,17 @@ function hookHistory() {
 }
 
 /**
+ * `router.push()` after a mutation used to show no bar (perf-states-01: only
+ * anchor clicks were seen). The app router instance is a singleton — the same
+ * object `useRouter()` returns and Next exposes as `window.next.router` — so
+ * wrapping its `push` once covers every call site (see wrapRouterPush).
+ */
+function hookRouter() {
+  if (typeof window === 'undefined') return;
+  wrapRouterPush((window as unknown as { next?: { router?: { push?: (href: string) => unknown } } }).next?.router);
+}
+
+/**
  * Thin top progress bar for cross-route navigations. The dashboard routes no
  * longer have a loading.tsx skeleton (it stalled same-route navigations in
  * production builds — see scripts/check-soft-nav.mjs), so this gives feedback
@@ -66,6 +78,7 @@ export function RouteProgress() {
 
   useEffect(() => {
     hookHistory();
+    hookRouter();
     const start = (target: string) => {
       dispatch({ type: 'start', target });
       requestAnimationFrame(() => requestAnimationFrame(() => dispatch({ type: 'frame' })));

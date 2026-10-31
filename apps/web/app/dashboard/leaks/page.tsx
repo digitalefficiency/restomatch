@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { originalProps } from '@/lib/i18n/original';
 import { auth } from '@/auth';
 import { TRPCError } from '@trpc/server';
-import { ArrowLeft, Droplets, FileBarChart, ShieldAlert } from 'lucide-react';
+import { ArrowLeft, FileBarChart, FileCheck2, Lock, TrendingUp } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
 import { formatNumber, formatPercent } from '@/lib/i18n/format';
@@ -16,7 +16,6 @@ import {
   LeakHeatmap,
   SectionHeader,
   Sparkline,
-  StatCard,
   entitlementCauseOf,
 } from '@/lib/components';
 import { canSeeRoute } from '@/lib/roles';
@@ -54,22 +53,26 @@ export default async function LeaksPage({
     }
   }
 
+  // The report is owner|manager only: never offer a link the role cannot open (leaks-22).
+  const canReport = role === 'owner' || role === 'manager';
+  const linkCls =
+    'touch-target inline-flex max-w-full items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold text-primary ring-1 ring-line transition-colors hover:bg-surface-2 hover:text-ink';
   const leakLinks = (
-    <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2">
-      <Link
-        href="/dashboard/leaks/report"
-        className="touch-target inline-flex items-center gap-1.5 rounded-xl bg-gold/12 px-3 py-1.5 text-sm font-semibold text-gold ring-1 ring-gold/30 hover:bg-gold/20"
-      >
-        <FileBarChart className="h-4 w-4" aria-hidden="true" />
-        {t('report.open')}
-      </Link>
-      <Link
-        href="/dashboard/leaks/breakdown"
-        className="touch-target inline-flex max-w-full items-center gap-1 rounded-lg text-sm font-semibold text-primary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
-      >
+    <div className="mb-4 flex flex-wrap items-center gap-2">
+      <Link href="/dashboard/leaks/breakdown" className={linkCls}>
         {t('detective.toBreakdown')}
         <ArrowLeft className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
       </Link>
+      <Link href="/dashboard/leaks/claims" className={linkCls}>
+        <FileCheck2 className="h-4 w-4" aria-hidden="true" />
+        {t('claims.open')}
+      </Link>
+      {canReport ? (
+        <Link href="/dashboard/leaks/report" className={linkCls}>
+          <FileBarChart className="h-4 w-4" aria-hidden="true" />
+          {t('report.open')}
+        </Link>
+      ) : null}
     </div>
   );
   // The explorer is for every finance role (owner/manager/bookkeeper); the
@@ -81,10 +84,15 @@ export default async function LeaksPage({
   if (blocked === 'entitlement') {
     return (
       <div>
-        <SectionHeader level={1} title={t('detective.title')} />
-        {leakLinks}
-        {explorer}
+        <SectionHeader level={1} title={t('hub.title')} subtitle={t('hub.subtitle')} />
+        <div className="flex flex-col">
+          <div className="order-last sm:order-first">{leakLinks}</div>
+          {explorer}
+        </div>
         <OverContractCard variant="compact" />
+        <div id="prices" className="scroll-mt-24">
+          <SectionHeader title={t('detective.title')} />
+        </div>
         <EntitlementUpsell feature="advanced_analytics" title={t('detective.upsell')} />
       </div>
     );
@@ -93,12 +101,15 @@ export default async function LeaksPage({
   if (blocked === 'role') {
     return (
       <div>
-        <SectionHeader level={1} title={t('detective.title')} />
-        {leakLinks}
-        {explorer}
+        <SectionHeader level={1} title={t('hub.title')} subtitle={t('hub.subtitle')} />
+        <div className="flex flex-col">
+          <div className="order-last sm:order-first">{leakLinks}</div>
+          {explorer}
+        </div>
         <OverContractCard variant="compact" />
-        <Card padding="md" className="flex items-center gap-3 border-warn/30 bg-warn/5 text-warn">
-          <ShieldAlert className="h-5 w-5 shrink-0" aria-hidden="true" />
+        {/* T4: a calm note, never an alarm, for a section this role does not see. */}
+        <Card id="prices" padding="md" className="flex scroll-mt-24 items-center gap-3 bg-surface-2 text-muted" data-testid="creep-role-note">
+          <Lock className="h-5 w-5 shrink-0" aria-hidden="true" />
           <span>{t('detective.roleOnly')}</span>
         </Card>
       </div>
@@ -119,46 +130,38 @@ export default async function LeaksPage({
 
   return (
     <div>
-      <SectionHeader
-        level={1}
-        title={t('detective.title')}
-        subtitle={t('detective.subtitle')}
-      />
-      {leakLinks}
-      {explorer}
+      <SectionHeader level={1} title={t('hub.title')} subtitle={t('hub.subtitle')} />
+      <div className="flex flex-col">
+        <div className="order-last sm:order-first">{leakLinks}</div>
+        {explorer}
+      </div>
       {/* Wave-1: lines billed above contract (renders nothing when off / none). */}
       <OverContractCard variant="compact" />
 
+      {/* Prices that rose: a 30-day trend in its own calm section — never the leak's word, red or droplet. */}
+      {/* `#prices`: the price-creep section's own address ("מחירים שעלו"), e.g. from the home's price card. */}
+      <div id="prices" className="scroll-mt-24">
+        <SectionHeader title={t('detective.title')} subtitle={t('detective.subtitle')} />
+      </div>
+
       {rows.length === 0 ? (
         <EmptyState
-          icon={<Droplets className="h-6 w-6" />}
+          icon={<TrendingUp className="h-6 w-6" />}
           title={t('detective.emptyTitle')}
           description={t('detective.emptyDescription')}
         />
       ) : (
         <div className="space-y-8">
-          {/* At-a-glance totals — money leaking this month, in danger. */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <StatCard
-              label={t('detective.totalLabel')}
-              value={formatIls(totalExcess, { locale })}
-              tone="danger"
-              icon={<Droplets className="h-4 w-4" />}
-              hint={t('detective.totalHint')}
-            />
-            <StatCard
-              label={t('detective.hotspots')}
-              value={formatNumber(rows.length, locale)}
-              tone="warn"
-              hint={t('detective.hotspotsHint')}
-            />
-            <StatCard
+          {/* At-a-glance totals of the price trend — calm warn tone, not the leak's danger. */}
+          <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <CreepTile label={t('detective.totalLabel')} value={formatIls(totalExcess, { locale })} title={money(totalExcess)} hint={t('detective.totalHint')} />
+            <CreepTile label={t('detective.hotspots')} value={formatNumber(rows.length, locale)} hint={t('detective.hotspotsHint')} />
+            <CreepTile
               label={t('detective.worst')}
-              value={<span dir="ltr">+{formatPercent(worst, locale, 1)}</span>}
-              tone="danger"
+              value={<bdi>+{formatPercent(worst, locale, 1)}</bdi>}
               hint={t('detective.worstHint')}
             />
-          </div>
+          </dl>
 
           {/* The signature glowing heatmap. */}
           <LeakHeatmap
@@ -180,15 +183,15 @@ export default async function LeaksPage({
           >
             <table className="w-full min-w-[640px] text-sm">
               <caption className="sr-only">{t('detective.caption')}</caption>
-              <thead className="border-b border-line bg-surface-2 text-xs uppercase tracking-wider text-subtle">
+              <thead className="border-b border-line bg-surface-2 text-xs text-subtle">
                 <tr>
                   <th scope="col" className="p-3 text-start font-semibold">{t('detective.colProduct')}</th>
                   <th scope="col" className="p-3 text-start font-semibold">{t('detective.colSupplier')}</th>
-                  <th scope="col" className="p-3 text-start font-semibold">{t('detective.colMedian')}</th>
-                  <th scope="col" className="p-3 text-start font-semibold">{t('detective.colLast')}</th>
+                  <th scope="col" className="p-3 text-right font-semibold">{t('detective.colMedian')}</th>
+                  <th scope="col" className="p-3 text-right font-semibold">{t('detective.colLast')}</th>
                   <th scope="col" className="p-3 text-start font-semibold">{t('detective.colChange')}</th>
                   <th scope="col" className="p-3 text-start font-semibold">{t('detective.colTrend')}</th>
-                  <th scope="col" className="p-3 text-start font-semibold">{t('detective.colExcess')}</th>
+                  <th scope="col" className="p-3 text-right font-semibold">{t('detective.colExcess')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -199,24 +202,25 @@ export default async function LeaksPage({
                   >
                     <td className="p-3">
                       <div className="font-medium text-ink">{row.productName}</div>
-                      <div className="text-xs text-subtle" {...originalProps(row.category)}>
-                        {row.category ?? '—'}
-                      </div>
+                      {/* Categories are Hebrew-only data: not shown under English names (leaks-34). */}
+                      {locale === 'he' && row.category ? (
+                        <div className="text-xs text-subtle" {...originalProps(row.category)}>
+                          {row.category}
+                        </div>
+                      ) : null}
                     </td>
                     <td className="p-3 text-muted">{row.supplierName}</td>
-                    <td className="p-3 font-mono tabular-nums text-muted">{money(row.baselineP50)}</td>
-                    <td className="p-3 font-mono tabular-nums text-ink">{money(row.lastObservedPrice)}</td>
+                    <td className="p-3 text-right tabular-nums text-muted">{money(row.baselineP50)}</td>
+                    <td className="p-3 text-right tabular-nums text-ink">{money(row.lastObservedPrice)}</td>
                     <td className="p-3">
-                      <Badge tone={row.deltaPct >= 0.1 ? 'danger' : 'warning'}>
-                        <span dir="ltr">+{formatPercent(row.deltaPct, locale, 1)}</span>
+                      <Badge tone="warning">
+                        <bdi>+{formatPercent(row.deltaPct, locale, 1)}</bdi>
                       </Badge>
                     </td>
                     <td className="p-3">
                       <Sparkline data={row.series} />
                     </td>
-                    <td className="p-3 font-mono font-semibold tabular-nums text-danger">
-                      {money(row.monthExcessIls)}
-                    </td>
+                    <td className="p-3 text-right font-semibold tabular-nums text-ink">{money(row.monthExcessIls)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -224,6 +228,21 @@ export default async function LeaksPage({
           </Card>
         </div>
       )}
+    </div>
+  );
+}
+
+function CreepTile({ label, value, hint, title }: { label: string; value: React.ReactNode; hint?: string; title?: string }) {
+  return (
+    <div className="rounded-xl border border-line bg-surface p-4">
+      <dt className="flex items-center gap-2 text-sm font-semibold text-subtle">
+        <TrendingUp className="h-4 w-4 text-warn" aria-hidden="true" />
+        {label}
+      </dt>
+      <dd className="mt-1.5 text-2xl font-bold tabular-nums text-ink" title={title}>
+        {value}
+      </dd>
+      {hint ? <dd className="mt-1 text-xs text-muted">{hint}</dd> : null}
     </div>
   );
 }

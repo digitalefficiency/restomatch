@@ -45,7 +45,7 @@ export const receiving: Shape<typeof he> = {
       uploading: 'กำลังอัปโหลด…',
       process: 'ตรวจบิล',
       retake: 'ถ่ายใหม่',
-      capture: 'ถ่ายรูป / อัปโหลด',
+      capture: 'ถ่ายรูปใบแจ้งหนี้',
       useDemo: 'ใช้บิลตัวอย่าง (ไม่ต้องอัปโหลด)',
       backToSupplier: 'กลับไปเลือกผู้จำหน่าย',
       back: 'กลับ',
@@ -83,7 +83,7 @@ export const receiving: Shape<typeof he> = {
     recon: {
       title: 'ผลการตรวจ',
       subtitle: 'บิล {number} · ความมั่นใจในการอ่าน {confidence}',
-      matched: 'ตรงกัน',
+      matched: 'ใบแจ้งหนี้ = ใบสั่งซื้อ',
       different: 'ไม่ตรงกัน',
       unordered: 'ไม่ได้สั่ง',
       missing: 'ไม่มีในบิล',
@@ -114,7 +114,7 @@ export const receiving: Shape<typeof he> = {
       duplicateInvoice: 'บิลเลขที่ {number} ของผู้จำหน่ายรายนี้มีอยู่แล้ว — ทำเครื่องหมายให้ตรวจว่าอาจเป็นบิลซ้ำ รับสินค้าต่อได้ตามปกติ',
     },
     status: {
-      matched: 'ตรงกัน',
+      matched: 'ใบแจ้งหนี้ = ใบสั่งซื้อ',
       qty_diff: 'จำนวนไม่ตรง',
       price_diff: 'ราคาไม่ตรง',
       unordered: 'ไม่ได้สั่ง',
@@ -122,7 +122,7 @@ export const receiving: Shape<typeof he> = {
       pending_review: 'ตรวจเอง',
     },
     adjust: {
-      title: 'ของมาจริงเท่าไร?',
+      title: 'ตรวจของที่ส่งมา',
       subtitle: 'เหลือตรวจ {pending} รายการ · เสร็จแล้ว {done} · ตรงกันอัตโนมัติ {matched}',
       matchedSummary: '{count} รายการตรงกัน — อนุมัติอัตโนมัติ',
       tapToExpand: 'แตะเพื่อดูเพิ่ม',

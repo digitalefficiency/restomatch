@@ -1,9 +1,6 @@
 'use client';
 
-import { useGSAP } from '@gsap/react';
-import { gsap } from 'gsap';
 import { ArrowLeft, Check, Clock, Package } from 'lucide-react';
-import { useRef } from 'react';
 import { useDir, useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
 import { receiving } from '@/lib/i18n/messages/receiving';
@@ -18,26 +15,12 @@ interface Props {
 }
 
 export function SupplierSelect({ selected, onSelect, onContinue }: Props) {
-  const ref = useRef<HTMLDivElement>(null);
   const t = useT(receiving);
   const locale = useLocale();
   const dir = useDir();
 
-  useGSAP(
-    () => {
-      gsap.from('.supplier-card', {
-        y: 24,
-        opacity: 0,
-        stagger: 0.08,
-        duration: 0.5,
-        ease: 'power3.out',
-      });
-    },
-    { scope: ref },
-  );
-
   return (
-    <div ref={ref} dir={dir}>
+    <div dir={dir}>
       <StepHeader
         eyebrow={t('steps.stepOf', { current: 1, total: 5 })}
         title={t('steps.supplier.title')}
@@ -73,14 +56,14 @@ export function SupplierSelect({ selected, onSelect, onContinue }: Props) {
                     <div className="font-semibold text-ink text-base">
                       {locale === 'en' && s.supplierNameEn ? s.supplierNameEn : s.supplierName}
                     </div>
-                    <div className="text-xs text-muted flex items-center gap-2 mt-0.5">
+                    <div className="text-sm text-muted flex items-center gap-2 mt-0.5">
                       <Clock className="w-3 h-3" />
-                      <span className="font-mono tabular-nums">
+                      <span className="tabular-nums">
                         {localTime(s.expectedAt)}
                       </span>
                       <span className="text-subtle">·</span>
                       <Package className="w-3 h-3" />
-                      <span className="font-mono tabular-nums">
+                      <span className="tabular-nums">
                         {t('steps.supplier.items', { count: formatNumber(s.totalLines, locale) })}
                       </span>
                     </div>
@@ -92,7 +75,7 @@ export function SupplierSelect({ selected, onSelect, onContinue }: Props) {
                   </div>
                 ) : null}
               </div>
-              <div className="flex items-center justify-between text-xs">
+              <div className="flex items-center justify-between text-sm">
                 <span className="text-muted">
                   {s.hasActiveReceipt ? (
                     <span className="text-warn font-medium">{t('steps.supplier.receiptStarted')}</span>
@@ -104,7 +87,7 @@ export function SupplierSelect({ selected, onSelect, onContinue }: Props) {
                     </span>
                   )}
                 </span>
-                <span className="font-semibold text-ink font-mono tabular-nums">
+                <span className="font-semibold text-ink tabular-nums">
                   {formatIls(s.totalEstimated, { locale })}
                 </span>
               </div>
@@ -134,23 +117,38 @@ export function SupplierSelect({ selected, onSelect, onContinue }: Props) {
   );
 }
 
+/**
+ * A wizard step's heading. The h1 is focusable (tabIndex -1) so the wizard can
+ * move focus to it on every step change (a11y-06). The eyebrow is letter-spaced
+ * and upper-cased in English only — never on Hebrew (RCV-25, mkt-27).
+ */
 export function StepHeader({
   eyebrow,
   title,
   subtitle,
+  compact = false,
 }: {
-  eyebrow: string;
+  eyebrow?: string;
   title: string;
   subtitle?: string;
+  /** Field screens: a smaller heading so the work starts higher on a phone. */
+  compact?: boolean;
 }) {
   return (
-    <div className="mb-8">
-      <div className="mb-2 h-0.5 w-10 rounded-full flow-stream" aria-hidden="true" />
-      <p className="text-xs uppercase tracking-[0.18em] text-primary font-semibold mb-2">
-        {eyebrow}
-      </p>
-      <h1 className="text-3xl font-extrabold tracking-tight text-ink mb-2">{title}</h1>
-      {subtitle ? <p className="text-muted max-w-2xl">{subtitle}</p> : null}
+    <div className={compact ? 'mb-4' : 'mb-8'}>
+      {eyebrow ? (
+        <p className="mb-1 text-sm font-semibold text-primary ltr:uppercase ltr:tracking-[0.18em] ltr:text-xs">
+          {eyebrow}
+        </p>
+      ) : null}
+      <h1
+        tabIndex={-1}
+        data-step-heading=""
+        className={`${compact ? 'text-2xl' : 'text-3xl'} mb-1 font-extrabold text-ink outline-none ltr:tracking-tight`}
+      >
+        {title}
+      </h1>
+      {subtitle ? <p className="max-w-2xl text-base text-muted">{subtitle}</p> : null}
     </div>
   );
 }

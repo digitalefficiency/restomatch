@@ -90,9 +90,15 @@ export default async function PricingPage() {
                 </span>
                 {priceIls > 0 ? <span className="text-sm text-muted">{t('pricing.perMonth')}</span> : null}
               </div>
+              {plan.key === 'trial' ? (
+                // Owner decision (REVIEW-REPORT §8 item 11): the trial is 30 days on Pro, said explicitly.
+                <p className="mt-2 text-sm font-medium text-ink" data-testid="trial-terms">
+                  {t('pricing.trialTerms')}
+                </p>
+              ) : null}
 
               <Link
-                href="/#lead"
+                href={`/?plan=${plan.key}#lead`}
                 className={
                   'mt-5 inline-flex w-full items-center justify-center rounded-xl px-4 py-3 text-sm font-semibold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg ' +
                   (isHighlight

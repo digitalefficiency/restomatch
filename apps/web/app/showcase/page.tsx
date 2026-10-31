@@ -11,6 +11,7 @@ import {
 import { showcase } from '@/lib/i18n/messages/showcase';
 import { getT } from '@/lib/i18n/server';
 import { alternatesFor, metadataBase } from '../(marketing)/_components/seo';
+import { primaryCtaHref } from '../(marketing)/_components/cta';
 
 type CardId = 'receiver' | 'dashboard' | 'invoices' | 'deliveries' | 'approvals';
 
@@ -39,7 +40,7 @@ export default async function ShowcaseIndex() {
     <main className="max-w-6xl mx-auto px-4 sm:px-6 py-14 sm:py-20">
       <div className="mb-12 sm:mb-14">
         <div className="mb-3 h-0.5 w-12 rounded-full flow-stream" aria-hidden="true" />
-        <p className="text-xs uppercase ltr:tracking-[0.2em] rtl:text-sm text-primary font-semibold mb-3">
+        <p className="text-xs ltr:uppercase ltr:tracking-[0.2em] rtl:text-sm text-primary font-semibold mb-3">
           {t('index.eyebrow')}
         </p>
         <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight mb-4 text-ink">
@@ -71,7 +72,7 @@ export default async function ShowcaseIndex() {
             <p className="text-sm text-muted max-w-xl leading-relaxed">{t('index.ctaBody')}</p>
           </div>
           <Link
-            href="/#lead"
+            href={primaryCtaHref()}
             className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-on-primary shadow-glow-primary hover:brightness-110 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
           >
             {t('index.ctaButton')}
@@ -110,12 +111,12 @@ function ShowcaseCard({
         <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-primary/12 text-primary ring-1 ring-primary/25 group-hover:bg-primary/20 transition-colors">
           {icon}
         </div>
-        <span className="text-[10px] uppercase tracking-[0.15em] text-muted font-semibold font-mono tabular-nums">
+        <span className="text-xs ltr:uppercase ltr:tracking-[0.15em] text-muted font-semibold font-mono tabular-nums">
           {index}
         </span>
       </div>
 
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-primary mb-1.5">{tag}</p>
+      <p className="text-xs font-semibold ltr:uppercase ltr:tracking-wider text-primary mb-1.5">{tag}</p>
       <h2 className="font-bold text-lg mb-2 tracking-tight text-ink leading-snug">{title}</h2>
       <p className="text-sm text-muted leading-relaxed flex-1">{description}</p>
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useOptimistic, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
@@ -16,6 +16,8 @@ import {
   Maximize2,
   RotateCcw,
   Rows3,
+  SlidersHorizontal,
+  X,
   Rows4,
   Table2,
   Trash2,
@@ -81,7 +83,7 @@ const popover =
  * the link is shareable. Each page opts into the controls it supports.
  */
 export function ViewToolbar(props: ViewToolbarProps) {
-  const { view, page } = props;
+  const { page } = props;
   const t = useT(views);
   const ta = useT(approvals);
   const locale = useLocale();
@@ -89,6 +91,31 @@ export function ViewToolbar(props: ViewToolbarProps) {
   const pathname = usePathname();
   // Fixed per page, not useId() (see app/dashboard/search.tsx): one toolbar per page.
   const id = `view-toolbar-${page}`;
+  // Optimistic: the control shows the choice at once while the server re-renders the data
+  // (perf-states-12); the data regions are marked busy meanwhile and the result is announced.
+  const [isPending, startTransition] = useTransition();
+  const [view, setOptimisticView] = useOptimistic(props.view);
+  const [announcement, setAnnouncement] = useState('');
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const wasPending = useRef(false);
+
+  useEffect(() => {
+    const regions = document.querySelectorAll<HTMLElement>('[data-view-region]');
+    if (isPending) {
+      wasPending.current = true;
+      regions.forEach((el) => el.setAttribute('aria-busy', 'true'));
+      return;
+    }
+    regions.forEach((el) => el.removeAttribute('aria-busy'));
+    if (!wasPending.current) return;
+    wasPending.current = false;
+    // Announce what the new view shows (pages put it on [data-view-summary]), debounced.
+    const timer = setTimeout(() => {
+      const summary = document.querySelector('[data-view-summary]')?.getAttribute('data-view-summary');
+      setAnnouncement(summary ? t('toolbar.showing', { summary }) : t('toolbar.updated'));
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [isPending, t]);
 
   const [from, setFrom] = useState(view.from ?? '');
   const [to, setTo] = useState(view.to ?? '');
@@ -112,7 +139,10 @@ export function ViewToolbar(props: ViewToolbarProps) {
     const q = serializeView(next, keep).toString();
     // Same-route soft navigation. It used to stall in production builds under the
     // route-level loading.tsx boundary (removed; see scripts/check-soft-nav.mjs).
-    router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+    startTransition(() => {
+      setOptimisticView(next);
+      router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+    });
   }
   const set = (patch: Partial<ViewState>) => go({ ...view, ...patch });
   const setFilter = <K extends keyof ViewFilters>(key: K, values: ViewFilters[K]) =>
@@ -150,12 +180,13 @@ export function ViewToolbar(props: ViewToolbarProps) {
   const sevLabel = (v: string) => ta(`severity.${v}` as MessageKey<typeof approvalsHe>);
   const statusLabel = (v: string) => ta(`resolution.${v}` as MessageKey<typeof approvalsHe>);
 
-  return (
-    <div
-      role="toolbar"
-      aria-label={t('toolbar.label')}
-      className="mb-6 flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-surface/70 p-2.5 print:hidden"
-    >
+  const activeCount =
+    (view.period !== DEFAULT_VIEW.period ? 1 : 0) +
+    (view.compare !== DEFAULT_VIEW.compare ? 1 : 0) +
+    (Object.values(view.filters) as string[][]).filter((v) => v.length > 0).length;
+
+  const controls = (sfx: string, inSheet: boolean) => (
+    <>
       {props.period ? (
         <label className="inline-flex items-center gap-1.5">
           <CalendarRange className="h-4 w-4 text-subtle" aria-hidden="true" />
@@ -176,11 +207,11 @@ export function ViewToolbar(props: ViewToolbarProps) {
 
       {props.period && customOpen ? (
         <form onSubmit={applyCustom} className="inline-flex flex-wrap items-center gap-1.5">
-          <label className="sr-only" htmlFor={`${id}-from`}>
+          <label className="sr-only" htmlFor={`${id}${sfx}-from`}>
             {t('toolbar.from')}
           </label>
           <input
-            id={`${id}-from`}
+            id={`${id}${sfx}-from`}
             type="date"
             value={from}
             onChange={(e) => setFrom(e.target.value)}
@@ -190,11 +221,11 @@ export function ViewToolbar(props: ViewToolbarProps) {
           <span className="text-subtle" aria-hidden="true">
             –
           </span>
-          <label className="sr-only" htmlFor={`${id}-to`}>
+          <label className="sr-only" htmlFor={`${id}${sfx}-to`}>
             {t('toolbar.to')}
           </label>
           <input
-            id={`${id}-to`}
+            id={`${id}${sfx}-to`}
             type="date"
             value={to}
             onChange={(e) => setTo(e.target.value)}
@@ -387,11 +418,11 @@ export function ViewToolbar(props: ViewToolbarProps) {
                   setSaveName('');
                 }}
               >
-                <label className="sr-only" htmlFor={`${id}-save`}>
+                <label className="sr-only" htmlFor={`${id}${sfx}-save`}>
                   {t('toolbar.saveName')}
                 </label>
                 <input
-                  id={`${id}-save`}
+                  id={`${id}${sfx}-save`}
                   value={saveName}
                   onChange={(e) => setSaveName(e.target.value)}
                   placeholder={t('toolbar.saveCurrent')}
@@ -402,11 +433,11 @@ export function ViewToolbar(props: ViewToolbarProps) {
                   {t('toolbar.save')}
                 </button>
               </form>
-              <p className="mt-1.5 px-1 text-[11px] text-subtle">{t('toolbar.savedHint')}</p>
+              <p className="mt-1.5 px-1 text-xs text-subtle">{t('toolbar.savedHint')}</p>
             </div>
           </details>
         ) : null}
-        {props.tv ? (
+        {props.tv && !inSheet ? (
           <button type="button" className={chip} onClick={enterTv} aria-label={tvLabel} title={tvLabel}>
             <Maximize2 className="h-4 w-4" aria-hidden="true" />
             <span className="hidden sm:inline">{tvLabel}</span>
@@ -422,7 +453,114 @@ export function ViewToolbar(props: ViewToolbarProps) {
           <RotateCcw className="h-4 w-4" aria-hidden="true" />
         </button>
       </div>
+    </>
+  );
+
+  return (
+    <div className="mb-6 print:hidden" data-pending={isPending || undefined}>
+      {/* Below lg: ONE "תצוגה · N" button; every control lives in a bottom sheet, so the
+          T1 figure stays in the first viewport on a phone (leaks-10, command-06). */}
+      <div className="flex flex-wrap items-center gap-2 lg:hidden">
+        <button
+          type="button"
+          className={cn(chip, 'min-h-11', activeCount > 0 && 'border-primary/40 text-primary')}
+          aria-haspopup="dialog"
+          aria-expanded={sheetOpen}
+          onClick={() => setSheetOpen(true)}
+        >
+          <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+          {activeCount > 0 ? t('toolbar.viewCount', { count: activeCount }) : t('toolbar.view')}
+        </button>
+        {hasFilters(view) ? (
+          <button
+            type="button"
+            className={cn(chip, 'min-h-11 border-transparent bg-transparent')}
+            onClick={() => go({ ...view, filters: DEFAULT_VIEW.filters })}
+          >
+            <Filter className="h-4 w-4" aria-hidden="true" />
+            {t('toolbar.clearFilters')}
+          </button>
+        ) : null}
+      </div>
+      <div
+        role="toolbar"
+        aria-label={t('toolbar.label')}
+        className="hidden flex-wrap items-center gap-2 rounded-2xl border border-line bg-surface/70 p-2.5 lg:flex"
+      >
+        {controls('', false)}
+      </div>
+      {isPending ? <div className="mt-1 h-0.5 w-full animate-pulse rounded-full bg-primary/50" aria-hidden="true" /> : null}
+      <p className="sr-only" role="status" aria-live="polite">
+        {announcement}
+      </p>
+      <ViewSheet open={sheetOpen} onClose={() => setSheetOpen(false)} title={t('toolbar.label')} closeLabel={t('toolbar.close')}>
+        <div role="toolbar" aria-label={t('toolbar.label')} className="flex flex-col items-stretch gap-3 [&_select]:w-full">
+          {controls('-sheet', true)}
+        </div>
+      </ViewSheet>
     </div>
+  );
+}
+
+/** The phone sheet: a modal <dialog> (focus stays inside, Esc closes), anchored to the bottom. */
+function ViewSheet({
+  open,
+  onClose,
+  title,
+  closeLabel,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  closeLabel: string;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const d = ref.current;
+    if (!d || typeof d.showModal !== 'function') return;
+    if (open && !d.open) d.showModal();
+    else if (!open && d.open) d.close();
+  }, [open]);
+  // The sheet is phone-only (lg:hidden). Widening past lg while it is open would
+  // leave a hidden MODAL dialog — the whole page inert — so it closes itself.
+  useEffect(() => {
+    if (!open || typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const onChange = () => {
+      if (mq.matches) onClose();
+    };
+    onChange();
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, [open, onClose]);
+  return (
+    <dialog
+      ref={ref}
+      aria-label={title}
+      onClose={onClose}
+      onClick={(e) => e.target === ref.current && onClose()}
+      className="fixed inset-x-0 bottom-0 top-auto m-0 max-h-[85vh] w-full max-w-none overflow-y-auto rounded-t-2xl border border-line bg-surface p-0 text-ink shadow-card backdrop:bg-black/40 lg:hidden"
+    >
+      {open ? (
+        <div className="p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+          <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-line-strong" aria-hidden="true" />
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h2 className="text-base font-bold text-ink">{title}</h2>
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex min-h-11 items-center gap-1 rounded-xl px-3 text-sm font-semibold text-muted hover:text-ink"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+              {closeLabel}
+            </button>
+          </div>
+          {children}
+        </div>
+      ) : null}
+    </dialog>
   );
 }
 
@@ -449,7 +587,18 @@ function MultiFilter({
         ? countLabel(selected.length)
         : allLabel;
   return (
-    <details className="group relative">
+    <details
+      className="group relative"
+      onKeyDown={(e) => {
+        if (e.key !== 'Escape') return;
+        const d = e.currentTarget;
+        if (!d.open) return;
+        e.preventDefault();
+        e.stopPropagation();
+        d.open = false;
+        d.querySelector('summary')?.focus();
+      }}
+    >
       <summary
         className={cn(
           chip,
@@ -498,7 +647,23 @@ function Segmented({
   onChange: (value: string) => void;
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className="inline-flex rounded-xl border border-line bg-surface-2 p-0.5">
+    <div
+      role="radiogroup"
+      aria-label={label}
+      className="inline-flex rounded-xl border border-line bg-surface-2 p-0.5"
+      onKeyDown={(e) => {
+        const keys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'];
+        if (!keys.includes(e.key)) return;
+        e.preventDefault();
+        const i = Math.max(0, options.findIndex((o) => o.value === value));
+        const rtl = getComputedStyle(e.currentTarget).direction === 'rtl';
+        const forward = e.key === 'ArrowDown' || e.key === (rtl ? 'ArrowLeft' : 'ArrowRight');
+        const next =
+          e.key === 'Home' ? 0 : e.key === 'End' ? options.length - 1 : (i + (forward ? 1 : -1) + options.length) % options.length;
+        onChange(options[next]!.value);
+        (e.currentTarget.querySelectorAll('[role="radio"]')[next] as HTMLElement | undefined)?.focus();
+      }}
+    >
       {options.map((o) => {
         const on = o.value === value;
         const Icon = o.icon;
@@ -508,10 +673,11 @@ function Segmented({
             type="button"
             role="radio"
             aria-checked={on}
+            tabIndex={on ? 0 : -1}
             title={o.label}
             onClick={() => onChange(o.value)}
             className={cn(
-              'inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
+              'inline-flex min-h-9 items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
               on ? 'bg-primary/15 text-primary' : 'text-muted hover:text-ink',
             )}
           >
