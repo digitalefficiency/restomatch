@@ -30,7 +30,8 @@ ask() { # var prompt [secret] — fill an unset env var from the terminal
   export "$var=$value"
 }
 
-if [[ "$MODE" != write ]]; then
+# A local lab's healthz reports no commit; production must report the promoted one.
+if [[ "$MODE" != write && ! "$PILOT_BASE_URL" =~ ^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?/?$ ]]; then
   ask EXPECTED_SHA "Promoted commit SHA (healthz must report it)"
 fi
 
