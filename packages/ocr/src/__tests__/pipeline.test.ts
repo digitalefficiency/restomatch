@@ -183,7 +183,8 @@ describe('runOcrPipeline — M11 single provider in both slots', () => {
     });
     expect(spy).toHaveBeenCalledTimes(1);
     expect(result.conflicts).toHaveLength(0);
-    expect(result.confidence).toBe(1);
+    // PR-OCR-2: no longer a fake 1.0 — the model's own confidence, capped by the gate.
+    expect(result.confidence).toBe(AGREEMENT_PERFECT.claude.confidence);
   });
 
   it('still calls both when they are distinct providers', async () => {
@@ -224,7 +225,6 @@ describe('runOcrPipeline — unreadable lines (EN-3)', () => {
     };
     const p = new StubOcrProvider('claude_vision', claude);
     const result = await runOcrPipeline('test-image', { documentAi: p, claude: p });
-    expect(result.confidence).toBe(1);
     expect(result.needsHumanReview).toBe(true);
   });
 

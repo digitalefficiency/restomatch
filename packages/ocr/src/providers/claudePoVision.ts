@@ -19,8 +19,9 @@ import {
   resolveImage,
   toContentBlock,
 } from './_anthropic';
+import { DEFAULT_OCR_MODEL } from './claudeVision';
 
-const DEFAULT_MODEL = 'claude-opus-4-8';
+const DEFAULT_MODEL = DEFAULT_OCR_MODEL;
 const DEFAULT_MAX_TOKENS = 16000;
 
 export type PlatformId = z.infer<typeof NormalizedPurchaseOrder>['platform'];
@@ -29,7 +30,7 @@ export interface ClaudePoParserConfig {
   apiKey: string;
   /** Platform this parser is extracting for; stamped onto the result. */
   platform: PlatformId;
-  /** Claude model id. Falls back to OCR_CLAUDE_MODEL env, then claude-opus-4-8. */
+  /** Claude model id. Falls back to OCR_CLAUDE_MODEL env, then DEFAULT_OCR_MODEL. */
   model?: string;
   maxTokens?: number;
   fetchBytes?: boolean;
