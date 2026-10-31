@@ -432,6 +432,13 @@ describe('R3 MEDIUM: the "awaiting question" bucket is live', () => {
     expect((await computeLeakHero(db, A.restaurantId)).awaitingQuestionCount).toBe(0);
   });
 
+  it("a 'consolidated' reason is never released nor pruned by an answer (only link reasons are)", async () => {
+    const inv = await heldInvoice('פלפל אדום חריף', ['consolidated', 'unlinked']);
+    await callerFor(A).mapping.confirm({ supplierId: S, rawName: 'פלפל אדום חריף', productId: P });
+    expect((await invoiceRow(inv.invoiceId)).status).toBe('parsed');
+    expect(await reasonsOf(inv.invoiceId)).toEqual(['consolidated']);
+  });
+
   it('a stale reason alone never counts: reasons say unlinked but no line is unlinked → not in the bucket', async () => {
     const inv = await heldInvoice('פלפל אדום', ['lowLines', 'unlinked']);
     await db.update(invoiceLines).set({ productId: P }).where(eq(invoiceLines.id, inv.lineId));
