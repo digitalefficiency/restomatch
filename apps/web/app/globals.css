@@ -207,7 +207,10 @@
     color-scheme: light;
     /* Font stacks consumed by tailwind.config (fontFamily.sans / .mono). */
     --font-heebo: 'Heebo';
-    --font-mono: 'JetBrains Mono';
+    /* Safety net (design-system-02, deep-fix 10 #5): the JetBrains Mono subset has
+       no ₪ glyph, so Heebo comes right after it — a not-yet-migrated font-mono
+       amount draws its ₪ from Heebo instead of a random system fallback. */
+    --font-mono: 'JetBrains Mono', 'Heebo';
     /* Colour, motion, layer and density variables are the GENERATED token
        block at the top of this file (packages/ui-tokens). Never hand-write a
        token value here. */
@@ -585,6 +588,47 @@ html[lang='ti'] .font-sans {
     position: absolute;
     inset-inline: 0;
     top: 0;
+  }
+}
+
+/* The one print rule (W2-15). lib/components/PrintButton sets html[data-printing]
+   (+ data-print-scope) and marks the matching [data-print-root=<scope>] with
+   data-print-active, then clears all of it on afterprint. A4, a white sheet,
+   tokens only. The xmatch block above stays as an alias until W2-02, W2-09 and
+   W2-10 move to the shared PrintButton; it goes in W2-15's final PR. */
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+  html[data-printing],
+  html[data-printing] body {
+    background: rgb(var(--c-surface)) !important;
+    background-image: none !important;
+  }
+  html[data-printing][data-print-scope] body * {
+    visibility: hidden;
+  }
+  html[data-printing][data-print-scope] [data-print-active],
+  html[data-printing][data-print-scope] [data-print-active] * {
+    visibility: visible;
+  }
+  html[data-printing][data-print-scope] [data-print-active] {
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    margin: 0;
+    max-width: none;
+    color: rgb(var(--c-ink));
+    background: rgb(var(--c-surface));
+    border: 0;
+    box-shadow: none;
+  }
+  html[data-printing] [data-print-active] section {
+    break-inside: avoid;
+  }
+  html[data-printing] [data-print-button] {
+    display: none;
   }
 }
 

@@ -41,3 +41,5 @@ export * from './overlay';
 export * from './form';
 export * from './data-viz';
 export * from './icon';
+export { PrintButton, startPrint } from './PrintButton';
+export type { PrintEnv } from './PrintButton';
