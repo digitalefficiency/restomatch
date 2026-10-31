@@ -356,7 +356,9 @@ async function markStalledOcrInvoicesFailed(
            SET status = 'parsed', ocr_confidence = 0, updated_at = now(),
                ocr_payload = jsonb_build_object(
                  'provider', 'claude_vision',
-                 'raw', jsonb_build_object('ocrFailed', true, 'reason', 'stalled'),
+                 -- merged, like markOcrFailed: raw.scanGrId (stamped before the read) survives
+                 'raw', (CASE WHEN jsonb_typeof(ocr_payload -> 'raw') = 'object' THEN ocr_payload -> 'raw' ELSE '{}'::jsonb END)
+                        || jsonb_build_object('ocrFailed', true, 'reason', 'stalled'),
                  'reconciledAt', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
          WHERE id = ${invoiceId}::uuid AND restaurant_id = ${j.restaurant_id}::uuid AND status = 'ocr_pending'`;
     } catch (err) {
