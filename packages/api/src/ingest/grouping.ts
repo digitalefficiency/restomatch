@@ -5,6 +5,7 @@ import { and, asc, eq, ingestDocuments, ingestMessages, sql, type Database } fro
 import { composeDocument, MAX_DOCUMENT_PAGES } from '../documents/compose';
 import { extOf, scanIdOf, signObjectRef, storedImageValue } from '../documents/objectRef';
 import { setInvoiceImage, upsertInvoiceScan } from '../documents/intake';
+import { reopenGeneration } from '../documents/reocr';
 
 /**
  * G-09 · grouping inbound images into ONE document.
@@ -178,10 +179,12 @@ export function mimeOfRef(ref: string): string {
  * The OCR dedupe key: at most one job per (invoice, OBJECT). The object id is
  * content-addressed (see objectForPages), so a recompose to a different page
  * set — even back to an earlier page count — gets a fresh job, while a replay of
- * the same set never re-OCRs. The sweep derives the same key from raw_image_url.
+ * the same set never re-OCRs; the generation (re-opens so far, from the audit
+ * log) makes an invoice that RETURNS to an object it had before (split, attach
+ * back) get a fresh job. The sweep derives the same key.
  */
-export function ocrDedupeKey(invoiceId: string, ref: string): string {
-  return `ocr:${invoiceId}:${scanIdOf(ref)}`;
+export function ocrDedupeKey(invoiceId: string, ref: string, generation = 0): string {
+  return `ocr:${invoiceId}:${scanIdOf(ref)}:${generation}`;
 }
 
 /**
@@ -234,7 +237,7 @@ export async function recomposeInvoice(
       invoiceId: args.invoiceId,
       supplierId: args.supplierId,
       imageUrl,
-      dedupeKey: ocrDedupeKey(args.invoiceId, obj.storagePath),
+      dedupeKey: ocrDedupeKey(args.invoiceId, obj.storagePath, await reopenGeneration(tx, args.restaurantId, args.invoiceId)),
     },
   };
 }

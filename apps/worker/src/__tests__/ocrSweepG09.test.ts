@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  auditLog,
   createDb,
   eq,
   ingestChannels,
@@ -102,9 +103,14 @@ beforeAll(async () => {
   // U-1: path-form scans.
   await invoice(A, 'lost', { status: 'ocr_pending', age: 15, url: `${A}/scan-a1b2-0000beef.jpg` });
   const queued = await invoice(A, 'queued', { status: 'ocr_pending', age: 15, url: `${A}/scan-a1b2-0000cafe.jpg` });
-  await insertJob(sql, 'ocr-invoice', { restaurantId: A, invoiceId: queued }, { restaurantId: A, dedupeKey: `ocr:${queued}:scan-a1b2-0000cafe` });
+  await insertJob(sql, 'ocr-invoice', { restaurantId: A, invoiceId: queued }, { restaurantId: A, dedupeKey: `ocr:${queued}:scan-a1b2-0000cafe:0` });
   const reocr = await invoice(A, 'reocr', { status: 'ocr_pending', age: 20, url: `${A}/scan-c0de-0000f00d.pdf`, pages: 2 });
-  await insertJob(sql, 'ocr-invoice', { restaurantId: A, invoiceId: reocr }, { restaurantId: A, dedupeKey: `ocr:${reocr}:scan-a1b2-0000c0de` }); // the old 1-page read: another object
+  await insertJob(sql, 'ocr-invoice', { restaurantId: A, invoiceId: reocr }, { restaurantId: A, dedupeKey: `ocr:${reocr}:scan-a1b2-0000c0de:0` }); // the old 1-page read: another object
+  // Returned to an object it had before (split, then attach back): generation 1
+  // after one re-open; its generation-0 job for the SAME object is history.
+  const back = await invoice(A, 'returned', { status: 'ocr_pending', age: 15, url: `${A}/scan-b0b0-0000abcd.pdf`, pages: 2 });
+  await insertJob(sql, 'ocr-invoice', { restaurantId: A, invoiceId: back }, { restaurantId: A, dedupeKey: `ocr:${back}:scan-b0b0-0000abcd:0` });
+  await db.insert(auditLog).values({ restaurantId: A, action: 'document.reopened_for_ocr', entityType: 'invoice', entityId: back });
   await invoice(A, 'foreign', { status: 'ocr_pending', age: 15, url: `${B}/scan-a1b2-0000dead.jpg` }); // another tenant's prefix
   await invoice(A, 'freshPath', { status: 'ocr_pending', age: 3, url: `${A}/scan-a1b2-00001234.jpg` });
   // HIGH-2 backstop: held pages.
@@ -123,11 +129,17 @@ beforeAll(async () => {
   await ingestPage(A, slowHeld, { sender: '9727' });
   const slow = await invoice(A, 'slowSibling', { status: 'ocr_pending', age: 4, url: `${A}/scan-h1-00000007.jpg` });
   await ingestPage(A, slow, { sender: '9727', at: minutesAgo(38) });
+  // A held page whose sibling has been stuck in ocr_pending for hours: no longer blocks.
+  const stuckHeld = await invoice(A, 'heldStuckSibling', { status: 'matched', age: 40, url: `${A}/scan-h1-00000008.jpg` });
+  await ingestPage(A, stuckHeld, { sender: '9728' });
+  const stuck = await invoice(A, 'stuckSibling', { status: 'ocr_pending', age: 180, url: `${A}/scan-h1-00000009.jpg` });
+  await ingestPage(A, stuck, { sender: '9728', at: minutesAgo(39) });
 });
 
 afterAll(async () => {
   for (const rid of rids) {
     await sql`DELETE FROM job_queue WHERE restaurant_id = ${rid}`;
+    await sql`DELETE FROM audit_log WHERE restaurant_id = ${rid}`;
     await db.delete(ingestDocuments).where(eq(ingestDocuments.restaurantId, rid));
     await db.delete(ingestMessages).where(eq(ingestMessages.restaurantId, rid));
     await db.delete(ingestChannels).where(eq(ingestChannels.restaurantId, rid));
@@ -139,9 +151,14 @@ afterAll(async () => {
 describe('G-09 sweep', () => {
   it('U-1: a path-form ocr_pending invoice whose job was lost is retried, signed at sweep time', async () => {
     const res = await runOcrSweep(sql, NOW);
-    expect(mine(res.requeued).sort()).toEqual([ids.lost, ids.reocr].sort());
+    expect(mine(res.requeued).sort()).toEqual([ids.lost, ids.reocr, ids.returned, ids.stuckSibling].sort()); // the stuck sibling's lost job too
+    // Same object, next generation: the old job does not block the retry.
+    expect((await jobs('ocr-invoice', ids.returned!)).map((j) => j.dedupe_key)).toEqual([
+      `ocr:${ids.returned}:scan-b0b0-0000abcd:0`,
+      `ocr-sweep-${ids.returned}:scan-b0b0-0000abcd:1`,
+    ]);
     const [job] = await jobs('ocr-invoice', ids.lost!);
-    expect(job!.dedupe_key).toBe(`ocr-sweep-${ids.lost}:scan-a1b2-0000beef`);
+    expect(job!.dedupe_key).toBe(`ocr-sweep-${ids.lost}:scan-a1b2-0000beef:0`);
     expect(job!.payload).toMatchObject({ restaurantId: A, invoiceId: ids.lost });
     expect(String(job!.payload.imageUrl)).toMatch(/\/scans\/scan-a1b2-0000beef\/file$/); // signed (local dev form)
     expect(await jobs('ocr-invoice', ids.queued!)).toHaveLength(1); // its job is on record
@@ -151,13 +168,13 @@ describe('G-09 sweep', () => {
 
   it('U-1: an invoice re-opened for a composed re-OCR (2 pages) is retried despite its old 1-page job', async () => {
     const all = await jobs('ocr-invoice', ids.reocr!);
-    expect(all.map((j) => j.dedupe_key)).toEqual([`ocr:${ids.reocr}:scan-a1b2-0000c0de`, `ocr-sweep-${ids.reocr}:scan-c0de-0000f00d`]);
+    expect(all.map((j) => j.dedupe_key)).toEqual([`ocr:${ids.reocr}:scan-a1b2-0000c0de:0`, `ocr-sweep-${ids.reocr}:scan-c0de-0000f00d:0`]);
   });
 
   it('HIGH-2 + M-1: a held page past the cap is released once, WHATEVER the switch says; young, non-ingest, duplicate and slow-sibling pages are not', async () => {
     const res = await runOcrSweep(sql, NOW);
     expect(mine(res.released)).toEqual([]); // already released by the first sweep
-    for (const k of ['held', 'heldSwitchOff']) {
+    for (const k of ['held', 'heldSwitchOff', 'heldStuckSibling']) {
       expect((await jobs('match-invoice', ids[k]!)).map((j) => j.dedupe_key)).toEqual([`g09-release-${ids[k]}`]);
     }
     for (const k of ['heldYoung', 'notIngested', 'heldDuplicate', 'heldSlowSibling']) expect(await jobs('match-invoice', ids[k]!)).toHaveLength(0);

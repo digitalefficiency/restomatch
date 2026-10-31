@@ -1,4 +1,6 @@
-import { and, discrepancies, eq, ingestDocuments, inArray, invoices, matchRuns, restaurants, sql, type Database } from '@restomatch/db';
+import { and, auditLog, discrepancies, eq, ingestDocuments, inArray, invoices, matchRuns, restaurants, sql, type Database } from '@restomatch/db';
+import { PAGE_FLAGS } from './settle';
+import { PAGE_SEPARATE } from './resolve';
 import { enqueueIngestJobs, type OcrJobToEnqueue } from '../ingest/pipeline';
 import { invoicePageRows, isPageMime, multiPageEnabled, recomposeInvoice, type PageRow } from '../ingest/grouping';
 import { MAX_DOCUMENT_PAGES } from './compose';
@@ -93,10 +95,32 @@ export async function attachAsPage(db: Database, input: AttachAsPageInput, deps:
     const merged = [...survivor.slice(0, at), ...absorbed, ...survivor.slice(at)];
 
     if (!(await reopenForOcr(tx, restaurantId, invoiceId))) throw new DocumentError('reocr_not_enabled');
+    // A person attached it: its page flags no longer apply. Keep them in the audit.
+    const flaggedRows = await tx
+      .select({ id: ingestDocuments.id, error: ingestDocuments.error })
+      .from(ingestDocuments)
+      .where(
+        and(
+          eq(ingestDocuments.restaurantId, restaurantId),
+          eq(ingestDocuments.invoiceId, documentId),
+          inArray(ingestDocuments.error, [...PAGE_FLAGS, PAGE_SEPARATE]),
+        ),
+      );
+    if (flaggedRows.length > 0) {
+      await tx.insert(auditLog).values({
+        restaurantId,
+        userId: input.userId ?? null,
+        action: 'document.page_flags_cleared',
+        entityType: 'invoice',
+        entityId: documentId,
+        before: { flags: flaggedRows } as never,
+        after: { attachedTo: invoiceId } as never,
+      });
+    }
     // Every row of the absorbed invoice (pages and duplicate links) now points at the survivor.
     await tx
       .update(ingestDocuments)
-      .set({ invoiceId, updatedAt: new Date() })
+      .set({ invoiceId, error: sql`case when ${ingestDocuments.error} like 'page\_%' then null else ${ingestDocuments.error} end`, updatedAt: new Date() })
       .where(and(eq(ingestDocuments.restaurantId, restaurantId), eq(ingestDocuments.invoiceId, documentId)));
     await setPageOrder(tx, restaurantId, merged);
     const retired = await retireInvoice(tx, { restaurantId, invoiceId: documentId, absorbedInto: invoiceId, userId: input.userId ?? null });

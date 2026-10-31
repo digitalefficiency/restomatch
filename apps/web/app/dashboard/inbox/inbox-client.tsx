@@ -100,7 +100,22 @@ const KNOWN_ERRORS = [
   'rejected_by_user',
   'processing_failed',
   'quota_exceeded',
+  // G-09: a page of a multi-page document that was not merged — the one question.
+  'page_other_supplier',
+  'page_other_invoice',
+  'page_duplicate',
+  'page_unreadable',
+  'page_not_merged',
+  'page_separate',
 ] as const;
+/** Flags that still ask a person something (page_separate is already answered). */
+const PAGE_QUESTIONS: readonly string[] = [
+  'page_other_supplier',
+  'page_other_invoice',
+  'page_duplicate',
+  'page_unreadable',
+  'page_not_merged',
+];
 
 function KindIcon({ kind, className }: { kind: Kind; className?: string }) {
   return kind === 'whatsapp' ? (
@@ -119,6 +134,7 @@ export function InboxClient(props: Props) {
 
   const approve = trpc.ingest.approveDocument.useMutation();
   const reject = trpc.ingest.rejectDocument.useMutation();
+  const resolvePage = trpc.ingest.resolvePageFlag.useMutation();
   const [supplierFor, setSupplierFor] = useState<Record<string, string>>({});
 
   const errorText = (code: string | null) =>
@@ -367,6 +383,40 @@ export function InboxClient(props: Props) {
                               >
                                 {t('inbox.reject')}
                               </Button>
+                            </>
+                          ) : null}
+                          {props.canManage && d.invoiceId && d.error && PAGE_QUESTIONS.includes(d.error) ? (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                className="min-h-11"
+                                disabled={resolvePage.isPending}
+                                onClick={() =>
+                                  act(
+                                    () => resolvePage.mutateAsync({ documentId: d.id, action: 'separate' }),
+                                    t('inbox.pageSeparated'),
+                                  )
+                                }
+                              >
+                                {t('inbox.pageSeparate')}
+                              </Button>
+                              {d.error === 'page_duplicate' ? (
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  className="min-h-11"
+                                  disabled={resolvePage.isPending}
+                                  onClick={() =>
+                                    act(
+                                      () => resolvePage.mutateAsync({ documentId: d.id, action: 'delete_duplicate' }),
+                                      t('inbox.pageDuplicateDeleted'),
+                                    )
+                                  }
+                                >
+                                  {t('inbox.pageDeleteDuplicate')}
+                                </Button>
+                              ) : null}
                             </>
                           ) : null}
                         </div>

@@ -8,18 +8,22 @@ import {
   invoiceLines,
   ingestMessages,
   inArray,
+  invoiceScans,
   invoices,
   matchRuns,
   restaurants,
   sql,
   type Database,
 } from '@restomatch/db';
+import { TRPCError } from '@trpc/server';
 import { INGEST_LIMITS } from '@restomatch/ingest';
 import { enqueueMatchInvoice } from '@restomatch/queue';
 import { enqueueIngestJobs, type OcrJobToEnqueue } from '../ingest/pipeline';
 import { groupMinutes, invoicePageRows, isPageMime, multiPageEnabled, recomposeInvoice, type PageRow } from '../ingest/grouping';
 import { MAX_DOCUMENT_PAGES } from './compose';
-import { PAGE_ABSORBED_ACTION, PAGES_RECOMPOSED_ACTION, reopenForOcr, retireBlocker, retireInvoice } from './reocr';
+import { objectRefMatchValues, tenantPath } from './objectRef';
+import { defaultDocumentStorage } from './storage';
+import { PAGES_RECOMPOSED_ACTION, reopenForOcr, retireBlocker, retireInvoice } from './reocr';
 
 /**
  * G-09 · the same-supplier guard (owner decision 31.10: "multi-page invoices
@@ -81,52 +85,19 @@ export interface PageHeader {
   unreadable?: boolean;
   /** Content (totals + lines) for the re-shot-page check. */
   print?: PagePrint;
-  /** Single-page prints of pages already absorbed into this invoice (from the merge audit rows). */
+  /** Single-page prints of pages already merged into this invoice (from the merge audit rows). */
   absorbedPrints?: PagePrint[];
-  /** A page flag was set on this invoice earlier: it is a chain BREAK, never a candidate. */
+  /** A page flag was set on this invoice earlier: a chain BREAK, never a candidate. */
   alreadyFlagged?: PageFlag | null;
 }
 
-/** What a page says: its totals and lines (for the duplicate check). */
+/** What a page says: its number, totals and lines (for the duplicate check). */
 export interface PagePrint {
+  /** Normalised effective invoice number of the page, when it carried one. */
+  number?: string | null;
   totalExclVat: string | null;
   totalInclVat: string | null;
-  lines: Array<{ qty: string | null; total: string | null }>;
-}
-
-const num = (v: string | null | undefined): number | null => {
-  if (v === null || v === undefined || v === '') return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-};
-
-/**
- * Tolerant "same page": the same non-null total (incl. or excl. VAT), or at
- * least 80% of the lines overlapping (same quantity, total within ₪0.50 or
- * 0.5%). A re-shot photo is usually re-taken because the first was blurry, so
- * the two reads differ a little; an exact compare would merge it (lines doubled).
- */
-export function samePage(a: PagePrint | undefined, b: PagePrint | undefined): boolean {
-  if (!a || !b) return false;
-  const [ai, bi, ae, be] = [num(a.totalInclVat), num(b.totalInclVat), num(a.totalExclVat), num(b.totalExclVat)];
-  if ((ai !== null && ai > 0 && ai === bi) || (ae !== null && ae > 0 && ae === be)) return true;
-  const n = Math.max(a.lines.length, b.lines.length);
-  if (n === 0 || a.lines.length === 0 || b.lines.length === 0) return false;
-  const free = [...b.lines];
-  let matched = 0;
-  for (const l of a.lines) {
-    const lt = num(l.total);
-    const i = free.findIndex((m) => {
-      const mt = num(m.total);
-      if (num(m.qty) !== num(l.qty) || lt === null || mt === null) return false;
-      return Math.abs(lt - mt) <= Math.max(0.5, 0.005 * Math.max(Math.abs(lt), Math.abs(mt)));
-    });
-    if (i >= 0) {
-      matched += 1;
-      free.splice(i, 1);
-    }
-  }
-  return matched / n >= 0.8;
+  lines: Array<{ qty: string | null; total: string | null; unitPrice?: string | null; description?: string | null }>;
 }
 
 const NOTHING: SettleResult = { hold: false, absorbed: false, flagged: [] };
@@ -136,10 +107,12 @@ function digits(v: string | null | undefined): string | null {
   return d.length >= 5 ? d : null;
 }
 
-function alnum(v: string | null | undefined): string | null {
+/** An invoice number for comparison: case-folded, without spaces and punctuation ('A 100' = 'A-100'). */
+export function normalizeInvoiceNumber(v: string | null | undefined): string | null {
   const s = (v ?? '').toLowerCase().replace(/[^0-9a-z֐-׿]/g, '');
   return s.length > 0 ? s : null;
 }
+const alnum = normalizeInvoiceNumber;
 
 /** A supplier name without legal suffixes, quotes and punctuation. */
 export function normalizeSupplierName(v: string | null | undefined): string | null {
@@ -156,38 +129,140 @@ export function hasHeaderEvidence(page: PageHeader): boolean {
   return Boolean(alnum(page.invoiceNumber) || digits(page.businessId) || normalizeSupplierName(page.supplierName));
 }
 
+/** The identity a document chain has established so far (page 1 plus every merged page). */
+export interface ChainIdentity {
+  supplierId: string | null;
+  number: string | null;
+  businessId: string | null;
+  name: string | null;
+}
+
+export function identityOf(page: PageHeader): ChainIdentity {
+  return {
+    supplierId: page.supplierId,
+    number: alnum(page.invoiceNumber),
+    businessId: digits(page.businessId),
+    name: normalizeSupplierName(page.supplierName),
+  };
+}
+
+function namesAgree(a: string | null, b: string | null): boolean {
+  return Boolean(a && b && (a.includes(b) || b.includes(a)));
+}
+
 /**
- * Why `page` may NOT join `first` (null = same supplier, same invoice).
- * Conservative: any positive evidence of a different supplier or a different
- * invoice number refuses; missing data on the page does not (the walk in
- * `decidePages` decides whether an evidence-less page may join at all).
+ * Why `page` may NOT join a chain with identity `chain` (null = it may).
+ * Any positive evidence of another supplier or another invoice number refuses.
+ * A page that brings a NUMBER the chain does not have yet joins only when its
+ * ח.פ. AND supplier name both match the chain's (a name-only page 1 cannot
+ * adopt someone's invoice number).
  */
-export function pageMismatch(first: PageHeader, page: PageHeader): 'page_other_supplier' | 'page_other_invoice' | null {
-  if (first.supplierId && page.supplierId && first.supplierId !== page.supplierId) return 'page_other_supplier';
-  const [ba, bb] = [digits(first.businessId), digits(page.businessId)];
-  if (ba && bb && ba !== bb) return 'page_other_supplier';
-  if (!(ba && bb)) {
-    const [na, nb] = [normalizeSupplierName(first.supplierName), normalizeSupplierName(page.supplierName)];
-    if (na && nb && !na.includes(nb) && !nb.includes(na)) return 'page_other_supplier';
+export function chainMismatch(chain: ChainIdentity, page: PageHeader): 'page_other_supplier' | 'page_other_invoice' | 'page_not_merged' | null {
+  const p = identityOf(page);
+  if (chain.supplierId && p.supplierId && chain.supplierId !== p.supplierId) return 'page_other_supplier';
+  if (chain.businessId && p.businessId && chain.businessId !== p.businessId) return 'page_other_supplier';
+  if (!(chain.businessId && p.businessId) && chain.name && p.name && !namesAgree(chain.name, p.name)) return 'page_other_supplier';
+  if (chain.number && p.number && chain.number !== p.number) return 'page_other_invoice';
+  if (p.number && !chain.number) {
+    const bizOk = Boolean(chain.businessId && p.businessId && chain.businessId === p.businessId);
+    if (!bizOk || !namesAgree(chain.name, p.name)) return 'page_not_merged';
   }
-  const [ia, ib] = [alnum(first.invoiceNumber), alnum(page.invoiceNumber)];
-  if (ia && ib && ia !== ib) return 'page_other_invoice';
   return null;
+}
+
+/** Backwards-compatible single-pair form (page 1 vs a page). */
+export function pageMismatch(first: PageHeader, page: PageHeader): 'page_other_supplier' | 'page_other_invoice' | null {
+  const r = chainMismatch(identityOf(first), page);
+  return r === 'page_not_merged' ? null : r;
+}
+
+function absorb(chain: ChainIdentity, page: PageHeader): void {
+  const p = identityOf(page);
+  chain.number ??= p.number;
+  chain.businessId ??= p.businessId;
+  chain.name ??= p.name;
+  chain.supplierId ??= p.supplierId;
+}
+
+const num = (v: string | null | undefined): number | null => {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+const close = (a: number | null, b: number | null) =>
+  a !== null && b !== null && Math.abs(a - b) <= Math.max(0.5, 0.005 * Math.max(Math.abs(a), Math.abs(b)));
+
+function tokens(v: string | null | undefined): Set<string> {
+  return new Set((v ?? '').toLowerCase().split(/[^0-9a-z֐-׿]+/).filter((t) => t.length > 1));
+}
+
+function similarText(a: string | null | undefined, b: string | null | undefined): boolean {
+  const [ta, tb] = [tokens(a), tokens(b)];
+  if (ta.size === 0 || tb.size === 0) return false;
+  let both = 0;
+  for (const t of ta) if (tb.has(t)) both += 1;
+  return both / (ta.size + tb.size - both) >= 0.6;
+}
+
+/**
+ * Same CONTENT: similar line counts and at least 80% of the lines matching on
+ * description, quantity, unit price and line total (within ₪0.50 or 0.5% —
+ * a re-shot photo reads a little differently). A total alone is never enough.
+ */
+export function sameContent(a: PagePrint | undefined, b: PagePrint | undefined): boolean {
+  if (!a || !b || a.lines.length === 0 || b.lines.length === 0) return false;
+  const [na, nb] = [a.lines.length, b.lines.length];
+  if (Math.abs(na - nb) > Math.max(1, Math.floor(0.2 * Math.max(na, nb)))) return false;
+  const free = [...b.lines];
+  let matched = 0;
+  for (const l of a.lines) {
+    const i = free.findIndex(
+      (m) =>
+        num(m.qty) === num(l.qty) &&
+        close(num(m.total), num(l.total)) &&
+        (l.unitPrice == null || m.unitPrice == null || close(num(m.unitPrice), num(l.unitPrice))) &&
+        similarText(m.description, l.description),
+    );
+    if (i >= 0) {
+      matched += 1;
+      free.splice(i, 1);
+    }
+  }
+  return matched / Math.max(na, nb) >= 0.8;
+}
+
+/**
+ * A re-shot copy of a page already in the chain: IDENTITY (the same normalised
+ * number; or a duplicateOf pointing into the chain; or neither page carries a
+ * number) AND the same content.
+ */
+export function samePage(
+  earlier: PagePrint | undefined,
+  page: PagePrint | undefined,
+  opts: { duplicateOfChain?: boolean } = {},
+): boolean {
+  if (!earlier || !page) return false;
+  const [ne, np] = [alnum(earlier.number), alnum(page.number)];
+  const identity = opts.duplicateOfChain || (ne !== null && ne === np) || (ne === null && np === null);
+  return identity && sameContent(earlier, page);
 }
 
 /**
  * The merge decision for an ordered cluster (page 1 first). Pure, so every
  * false-leak path is unit-testable:
  *  - nothing merges into a page 1 that is unreadable, carries NO header
- *    evidence (number, ח.פ., name), or was itself flagged;
- *  - a page flagged earlier is a chain BREAK (kept in the cluster, never a
- *    candidate, not re-flagged);
- *  - a page that is unreadable, a duplicate of an invoice OUTSIDE the
- *    cluster, a re-shot copy of ANY earlier page or absorbed page (samePage),
- *    or that disagrees with page 1 is flagged, and breaks the chain;
- *  - after the first break nothing merges into page 1; before it, a page with
- *    header evidence merges only when it agrees with page 1, and an
- *    evidence-less page continues the page right before it.
+ *    evidence, or was itself flagged;
+ *  - the chain's IDENTITY (number, ח.פ., name) accumulates from page 1 and every
+ *    merged page; each candidate is checked against it (chainMismatch);
+ *  - a page flagged earlier is a chain BREAK (kept, never a candidate) — except
+ *    an earlier page_duplicate that still matches a chain page (identity + content);
+ *  - a page that is unreadable, a duplicate of an invoice OUTSIDE the cluster,
+ *    a re-shot copy of a CHAIN page (samePage against page 1, the merged pages
+ *    and their stored single-page prints — never against flagged pages), or
+ *    that disagrees with the chain is flagged, and breaks the chain;
+ *  - after the first break nothing merges; before it, an evidence-less page
+ *    continues the page right before it (which is in the chain).
  */
 export function decidePages(
   members: PageHeader[],
@@ -197,32 +272,43 @@ export function decidePages(
   const flagged: Array<{ invoiceId: string; reason: PageFlag }> = [];
   if (!first) return { merge, flagged };
   const ids = new Set(members.map((m) => m.invoiceId));
+  const chainIds = new Set<string>([first.invoiceId]);
+  const chain = identityOf(first);
   let broken = Boolean(first.unreadable || first.alreadyFlagged || !hasHeaderEvidence(first));
-  const earlier: PagePrint[] = [];
-  const remember = (m: PageHeader) => {
-    if (m.print) earlier.push(m.print);
-    for (const p of m.absorbedPrints ?? []) earlier.push(p);
+  const chainPrints: PagePrint[] = [];
+  const addPrints = (m: PageHeader) => {
+    if (m.print) chainPrints.push(m.print);
+    for (const p of m.absorbedPrints ?? []) chainPrints.push(p);
   };
-  remember(first);
+  addPrints(first);
+  const isChainDuplicate = (page: PageHeader) =>
+    chainPrints.some((p) =>
+      samePage(p, page.print, { duplicateOfChain: Boolean(page.duplicateOf && chainIds.has(page.duplicateOf)) }),
+    );
   for (const page of rest) {
     if (page.alreadyFlagged) {
-      broken = true; // its question is already asked: a break, not a candidate
-      remember(page);
+      // A re-shot duplicate of a chain page does not break the chain; anything else does.
+      if (!(page.alreadyFlagged === 'page_duplicate' && isChainDuplicate(page))) broken = true;
       continue;
     }
     let reason: PageFlag | null = null;
     if (page.unreadable) reason = 'page_unreadable';
-    else if (page.duplicateOf && page.duplicateOf !== first.invoiceId && !ids.has(page.duplicateOf)) {
+    else if (page.duplicateOf && !chainIds.has(page.duplicateOf) && !ids.has(page.duplicateOf)) {
       reason = 'page_other_invoice'; // its number is ANOTHER invoice already on file
     }
-    if (!reason) reason = pageMismatch(first, page);
-    if (!reason && earlier.some((p) => samePage(p, page.print))) reason = 'page_duplicate';
+    if (!reason && isChainDuplicate(page)) reason = 'page_duplicate';
+    if (!reason) reason = chainMismatch(chain, page);
     if (!reason && broken) reason = 'page_not_merged';
     if (reason) {
       flagged.push({ invoiceId: page.invoiceId, reason });
-      broken = true;
-    } else merge.push(page);
-    remember(page);
+      // A chain duplicate is just a copy: it does not cut the document.
+      if (reason !== 'page_duplicate') broken = true;
+    } else {
+      merge.push(page);
+      chainIds.add(page.invoiceId);
+      absorb(chain, page);
+      addPrints(page);
+    }
   }
   return { merge, flagged };
 }
@@ -256,6 +342,30 @@ function ocrBits(payload: unknown): {
   };
 }
 
+/** A merge refusal that retrying cannot fix. */
+class PermanentMergeError extends Error {}
+
+/**
+ * Best effort: delete a composed PDF a recompose superseded, when no invoice,
+ * mapping row or attachment still references it. Never a page object (only
+ * composed `.pdf` objects reach here) and never fails the settle.
+ */
+async function removeSupersededObject(db: Database, restaurantId: string, ref: string): Promise<void> {
+  try {
+    const values = objectRefMatchValues(restaurantId, ref);
+    const used = (await db.execute(sql`
+      select 1 from ${invoices} where restaurant_id = ${restaurantId}
+        and split_part(raw_image_url, '?', 1) in (${sql.join(values.map((v) => sql`${v}`), sql`, `)})
+      union all select 1 from ${invoiceScans} where restaurant_id = ${restaurantId} and storage_path = ${ref}
+      union all select 1 from ${ingestDocuments} where restaurant_id = ${restaurantId} and storage_path = ${ref}
+      limit 1`)) as unknown as unknown[];
+    if (used.length > 0) return;
+    await defaultDocumentStorage()?.remove(restaurantId, [ref]);
+  } catch (err) {
+    console.warn(`[documents] could not remove superseded object ${ref}`, err);
+  }
+}
+
 interface ClusterRow {
   flag: PageFlag | null;
   docId: string;
@@ -284,7 +394,7 @@ export async function settleDocumentPages(
       .from(restaurants)
       .where(eq(restaurants.id, restaurantId))
       .limit(1);
-    if (!restaurant || !multiPageEnabled(restaurant.settings)) return { result: NOTHING, ocr: [], match: [] };
+    if (!restaurant || !multiPageEnabled(restaurant.settings)) return { result: NOTHING, ocr: [], match: [], superseded: null };
     const minutes = groupMinutes(restaurant.settings);
 
     // The page(s) of this invoice and their sender.
@@ -304,7 +414,7 @@ export async function settleDocumentPages(
       )
       .orderBy(asc(ingestMessages.receivedAt))
       .limit(1);
-    if (!mine || minutes <= 0) return { result: NOTHING, ocr: [], match: [] };
+    if (!mine || minutes <= 0) return { result: NOTHING, ocr: [], match: [], superseded: null };
 
     // Concurrent OCR completions of one sender's pages settle in turn.
     await tx.execute(
@@ -350,7 +460,11 @@ export async function settleDocumentPages(
         ...r,
         storagePath: r.storagePath!,
         invoiceId: r.invoiceId!,
-        flag: r.error && (PAGE_FLAGS as readonly string[]).includes(r.error) ? (r.error as PageFlag) : null,
+        // A person's "separate invoice" decision is a permanent break too.
+        flag:
+          r.error && ((PAGE_FLAGS as readonly string[]).includes(r.error) || r.error === 'page_separate')
+            ? (r.error as PageFlag)
+            : null,
       }));
 
     // Anchored clustering (the same rule as review groups): a cluster starts at
@@ -367,7 +481,7 @@ export async function settleDocumentPages(
     }
     const cluster = clusters.find((c) => c.some((r) => r.invoiceId === invoiceId)) ?? [];
     const memberIds = [...new Set(cluster.map((r) => r.invoiceId))];
-    if (memberIds.length < 2) return { result: NOTHING, ocr: [], match: [] };
+    if (memberIds.length < 2) return { result: NOTHING, ocr: [], match: [], superseded: null };
 
     // Lock the members and their gaps before any check: a decision, claim,
     // credit note or price-history row cannot appear between check and delete
@@ -396,27 +510,36 @@ export async function settleDocumentPages(
       .from(invoices)
       .where(and(eq(invoices.restaurantId, restaurantId), inArray(invoices.id, memberIds)));
     const lineRows = (await tx.execute(sql`
-      select l.invoice_id, l.qty_billed::text as qty, l.line_total::text as total
+      select l.invoice_id, l.qty_billed::text as qty, l.line_total::text as total,
+             l.unit_price_billed::text as unit_price, l.raw_description as description
       from ${invoiceLines} l
       join ${invoices} i on i.id = l.invoice_id and i.restaurant_id = ${restaurantId}
       where l.invoice_id in (${sql.join(memberIds.map((id) => sql`${id}`), sql`, `)})`)) as unknown as Array<{
       invoice_id: string;
       qty: string | null;
       total: string | null;
+      unit_price: string | null;
+      description: string | null;
     }>;
     const linesOf = new Map<string, PagePrint['lines']>();
-    for (const l of lineRows) linesOf.set(l.invoice_id, [...(linesOf.get(l.invoice_id) ?? []), { qty: l.qty, total: l.total }]);
-    // Single-page prints of pages already merged into a member (and of page 1
-    // before its composed re-OCR): kept on the merge audit rows.
+    for (const l of lineRows) {
+      linesOf.set(l.invoice_id, [
+        ...(linesOf.get(l.invoice_id) ?? []),
+        { qty: l.qty, total: l.total, unitPrice: l.unit_price, description: l.description },
+      ]);
+    }
+    // Single-page prints of the pages already in a member's document (page 1
+    // before its composed re-OCR, and every absorbed page): kept on the
+    // member's own `document.pages_recomposed` audit rows (entity-scoped lookup).
     const printRows = (await tx.execute(sql`
-      select coalesce(after->>'absorbedInto', entity_id::text) as invoice_id, before->'print' as print
+      select entity_id::text as invoice_id, before->'prints' as prints
       from ${auditLog}
-      where restaurant_id = ${restaurantId}
-        and action in (${PAGE_ABSORBED_ACTION}, ${PAGES_RECOMPOSED_ACTION})
-        and coalesce(after->>'absorbedInto', entity_id::text) in (${sql.join(memberIds.map((id) => sql`${id}`), sql`, `)})
-        and before ? 'print'`)) as unknown as Array<{ invoice_id: string; print: PagePrint }>;
+      where entity_type = 'invoice'
+        and entity_id in (${sql.join(memberIds.map((id) => sql`${id}`), sql`, `)})
+        and restaurant_id = ${restaurantId}
+        and action = ${PAGES_RECOMPOSED_ACTION}`)) as unknown as Array<{ invoice_id: string; prints: PagePrint[] | null }>;
     const absorbedOf = new Map<string, PagePrint[]>();
-    for (const p of printRows) absorbedOf.set(p.invoice_id, [...(absorbedOf.get(p.invoice_id) ?? []), p.print]);
+    for (const p of printRows) absorbedOf.set(p.invoice_id, [...(absorbedOf.get(p.invoice_id) ?? []), ...(p.prints ?? [])]);
     const flagOf = new Map<string, PageFlag>();
     for (const r of cluster) if (r.flag && !flagOf.has(r.invoiceId)) flagOf.set(r.invoiceId, r.flag);
     const byId = new Map<string, PageHeader>(
@@ -435,7 +558,12 @@ export async function settleDocumentPages(
             businessId: o.businessId,
             duplicateOf: o.duplicateOf,
             unreadable: o.failed || parsedNoLines,
-            print: { totalExclVat: h.totalExclVat, totalInclVat: h.totalInclVat, lines },
+            print: {
+              number: alnum(h.invoiceNumber ?? o.duplicateNumber ?? o.number),
+              totalExclVat: h.totalExclVat,
+              totalInclVat: h.totalInclVat,
+              lines,
+            },
             absorbedPrints: absorbedOf.get(h.invoiceId) ?? [],
             alreadyFlagged: flagOf.get(h.invoiceId) ?? null,
           },
@@ -443,12 +571,12 @@ export async function settleDocumentPages(
       }),
     );
     const members = memberIds.map((id) => byId.get(id)).filter((h): h is PageHeader => Boolean(h));
-    if (members.length < 2) return { result: NOTHING, ocr: [], match: [] };
+    if (members.length < 2) return { result: NOTHING, ocr: [], match: [], superseded: null };
 
     // A sibling still being read: decide later (its OCR — or its terminal
     // failure, or the sweep backstop — settles the cluster).
     if (members.some((m) => m.invoiceId !== invoiceId && m.status === 'ocr_pending')) {
-      return { result: { ...NOTHING, hold: true }, ocr: [], match: [] };
+      return { result: { ...NOTHING, hold: true }, ocr: [], match: [], superseded: null };
     }
 
     const first = members[0]!;
@@ -477,51 +605,73 @@ export async function settleDocumentPages(
 
     const ocr: OcrJobToEnqueue[] = [];
     let merged = false;
+    /** A transient failure (deadlock, storage, signing) after the bounded retries: leave the pages held. */
+    let transientHold = false;
+    let superseded: { from: string; to: string } | null = null;
     if (merging.length > 0) {
-      // In a savepoint: a compose / sign / storage error rolls back only the
-      // merge; the pages are flagged and the held siblings still get matched.
-      try {
-        const job = await tx.transaction(async (rawSp) => {
-          const sp = rawSp as unknown as Database;
-          // Keep page 1's single-page print before the re-OCR replaces its lines,
-          // so a later re-shot of page 1 is still recognised as a duplicate.
-          if (!(first.absorbedPrints ?? []).length) {
+      // Page 1's current object (from its mapping row: always a full path with
+      // its extension), to clean up a superseded composed PDF after commit.
+      const [cur] = await tx
+        .select({ path: invoiceScans.storagePath })
+        .from(invoiceScans)
+        .where(and(eq(invoiceScans.invoiceId, first.invoiceId), eq(invoiceScans.restaurantId, restaurantId)))
+        .limit(1);
+      const before = cur?.path ? tenantPath(restaurantId, cur.path) : null;
+      // In a savepoint: any error rolls back only the merge. A PERMANENT one
+      // (a refusal, a missing page object, a size limit) flags the pages; a
+      // transient one is retried twice, then the pages stay held (not flagged)
+      // for the next settle or the sweep.
+      for (let tries = 0; ; tries++) {
+        try {
+          const done = await tx.transaction(async (rawSp) => {
+            const sp = rawSp as unknown as Database;
+            // The single-page prints of this document, kept on page 1's own
+            // audit row, so a later re-shot of ANY of its pages is recognised.
+            const prints = [
+              ...((first.absorbedPrints ?? []).length ? [] : first.print ? [first.print] : []),
+              ...merging.flatMap((m) => [...(m.print ? [m.print] : []), ...(m.absorbedPrints ?? [])]),
+            ];
             await sp.insert(auditLog).values({
               restaurantId,
               userId: null,
               action: PAGES_RECOMPOSED_ACTION,
               entityType: 'invoice',
               entityId: first.invoiceId,
-              before: { print: first.print } as never,
+              before: { prints } as never,
               after: { pages: [first.invoiceId, ...merging.map((m) => m.invoiceId)] } as never,
             });
-          }
-          if (!(await reopenForOcr(sp, restaurantId, first.invoiceId))) throw new Error('page 1 could not be re-opened');
-          const mergingIds = merging.map((m) => m.invoiceId);
-          await sp
-            .update(ingestDocuments)
-            .set({ invoiceId: first.invoiceId, updatedAt: new Date() })
-            .where(and(eq(ingestDocuments.restaurantId, restaurantId), inArray(ingestDocuments.invoiceId, mergingIds)));
-          for (const id of mergingIds) {
-            const retired = await retireInvoice(sp, {
-              restaurantId,
-              invoiceId: id,
-              absorbedInto: first.invoiceId,
-              userId: null,
-              print: byId.get(id)?.print,
-            });
-            if (!retired.ok) throw new Error(`page ${id} could not be retired: ${retired.reason}`);
-          }
-          const pages: PageRow[] = await invoicePageRows(sp, restaurantId, first.invoiceId);
-          const r = await recomposeInvoice(sp, { restaurantId, invoiceId: first.invoiceId, supplierId: first.supplierId, pages });
-          return r.job;
-        });
-        ocr.push(job);
-        merged = true;
-      } catch (err) {
-        console.warn(`[documents] merge into invoice=${first.invoiceId} failed; pages stay separate`, err);
-        for (const page of merging) flagged.push({ invoiceId: page.invoiceId, reason: 'page_not_merged' });
-        merging = [];
+            if (!(await reopenForOcr(sp, restaurantId, first.invoiceId))) throw new PermanentMergeError('page 1 could not be re-opened');
+            const mergingIds = merging.map((m) => m.invoiceId);
+            await sp
+              .update(ingestDocuments)
+              .set({ invoiceId: first.invoiceId, updatedAt: new Date() })
+              .where(and(eq(ingestDocuments.restaurantId, restaurantId), inArray(ingestDocuments.invoiceId, mergingIds)));
+            for (const id of mergingIds) {
+              const retired = await retireInvoice(sp, {
+                restaurantId,
+                invoiceId: id,
+                absorbedInto: first.invoiceId,
+                userId: null,
+                print: byId.get(id)?.print,
+              });
+              if (!retired.ok) throw new PermanentMergeError(`page ${id} could not be retired: ${retired.reason}`);
+            }
+            const pages: PageRow[] = await invoicePageRows(sp, restaurantId, first.invoiceId);
+            return recomposeInvoice(sp, { restaurantId, invoiceId: first.invoiceId, supplierId: first.supplierId, pages });
+          });
+          ocr.push(done.job);
+          merged = true;
+          if (before && before !== done.storagePath && /\.pdf$/i.test(before)) superseded = { from: before, to: done.storagePath };
+          break;
+        } catch (err) {
+          const permanent = err instanceof PermanentMergeError || err instanceof TRPCError;
+          if (!permanent && tries < 2) continue;
+          console.warn(`[documents] merge into invoice=${first.invoiceId} failed (${permanent ? 'permanent' : 'transient'})`, err);
+          if (permanent) for (const page of merging) flagged.push({ invoiceId: page.invoiceId, reason: 'page_not_merged' });
+          else transientHold = true;
+          merging = [];
+          break;
+        }
       }
     }
 
@@ -545,7 +695,7 @@ export async function settleDocumentPages(
     const settledIds = members
       .map((m) => m.invoiceId)
       .filter((id) => id !== invoiceId && !(merged && (id === first.invoiceId || merging.some((m) => m.invoiceId === id))));
-    if (settledIds.length > 0) {
+    if (settledIds.length > 0 && !transientHold) {
       const runs = await tx
         .select({ invoiceId: matchRuns.invoiceId })
         .from(matchRuns)
@@ -561,12 +711,12 @@ export async function settleDocumentPages(
     const currentIsDuplicate =
       flagOf.get(invoiceId) === 'page_duplicate' || flagged.some((f) => f.invoiceId === invoiceId && f.reason === 'page_duplicate');
     const result: SettleResult = {
-      hold: (merged && first.invoiceId === invoiceId) || currentIsDuplicate,
+      hold: (merged && first.invoiceId === invoiceId) || currentIsDuplicate || transientHold,
       absorbed,
       ...(absorbed || (merged && first.invoiceId === invoiceId) ? { mergedInto: first.invoiceId } : {}),
       flagged,
     };
-    return { result, ocr, match };
+    return { result, ocr, match, superseded };
   });
   // Lock order vs a concurrent claim / decision can deadlock (40P01): Postgres
   // aborts one side; retry the settle (it is idempotent) at most twice.
@@ -582,6 +732,7 @@ export async function settleDocumentPages(
   }
 
   await (deps.enqueueOcr ?? enqueueIngestJobs)(outcome.ocr);
+  if (outcome.superseded) await removeSupersededObject(db, restaurantId, outcome.superseded.from);
   for (const id of outcome.match) {
     try {
       await (deps.enqueueMatch ?? enqueueMatchInvoice)({ restaurantId, invoiceId: id });

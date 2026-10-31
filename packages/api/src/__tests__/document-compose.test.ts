@@ -367,5 +367,16 @@ describe('attachAsPage / splitDocument', () => {
     expect(b!.restaurantId).toBe(B.restaurantId);
     expect(enqueued).toHaveLength(0);
   });
+
+  it('a flagged page attached by a person loses its flag; the flag stays in the audit', async () => {
+    const first = await photoInvoice('fl-1', 0);
+    const second = await photoInvoice('fl-2', 30);
+    await ownerDb.update(ingestDocuments).set({ error: 'page_other_supplier' }).where(eq(ingestDocuments.invoiceId, second));
+    await asA((tx) => attachAsPage(tx, { restaurantId: A.restaurantId, invoiceId: first, documentId: second, userId: A.ownerUserId }, { enqueue: capture }));
+    const docs = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, first));
+    expect(docs.map((d) => d.error)).toEqual([null, null]);
+    const [audit] = await ownerDb.select().from(auditLog).where(eq(auditLog.action, 'document.page_flags_cleared'));
+    expect(audit).toMatchObject({ entityId: second, userId: A.ownerUserId, after: { attachedTo: first } });
+  });
 });
 

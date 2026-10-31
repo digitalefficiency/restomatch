@@ -121,30 +121,34 @@ export async function runOcrSweep(sql: Sql, now = new Date()): Promise<OcrSweepR
   // invoice re-opened for a composed re-OCR is retried too.
   const pathSince = new Date(now.getTime() - G09_PATH_MAX_AGE_MS);
   const pathStale = await sql<
-    Array<{ id: string; restaurant_id: string; supplier_id: string | null; raw_image_url: string; object: string }>
+    Array<{ id: string; restaurant_id: string; supplier_id: string | null; raw_image_url: string; object: string; gen: number }>
   >`
-    SELECT i.id, i.restaurant_id, i.supplier_id, i.raw_image_url,
-           -- the object id (scan-…): the OCR dedupe key is per (invoice, object)
-           regexp_replace(split_part(i.raw_image_url, '/', 2), '\.[A-Za-z0-9]+$', '') AS object
+    SELECT x.* FROM (
+    SELECT i.id, i.restaurant_id, i.supplier_id, i.raw_image_url, i.updated_at,
+           -- the OCR dedupe key is per (invoice, object, re-open generation)
+           regexp_replace(split_part(i.raw_image_url, '/', 2), '\.[A-Za-z0-9]+$', '') AS object,
+           (SELECT count(*)::int FROM audit_log a
+             WHERE a.entity_type = 'invoice' AND a.entity_id = i.id AND a.restaurant_id = i.restaurant_id
+               AND a.action = 'document.reopened_for_ocr') AS gen
       FROM invoices i
      WHERE i.status = 'ocr_pending'
        AND i.raw_image_url !~* '^[a-z][a-z0-9+.-]*:'
        AND split_part(i.raw_image_url, '/', 1) = i.restaurant_id::text
        AND i.updated_at < ${staleBefore}
        AND i.updated_at >= ${pathSince}
-       AND NOT EXISTS (
+    ) x
+     WHERE NOT EXISTS (
          SELECT 1 FROM job_queue j
-          WHERE j.queue = 'ocr-invoice' AND j.payload->>'invoiceId' = i.id::text
-            AND j.dedupe_key IN (
-              'ocr:' || i.id::text || ':' || regexp_replace(split_part(i.raw_image_url, '/', 2), '\.[A-Za-z0-9]+$', ''),
-              'ocr-sweep-' || i.id::text || ':' || regexp_replace(split_part(i.raw_image_url, '/', 2), '\.[A-Za-z0-9]+$', ''))
+          WHERE j.queue = 'ocr-invoice' AND j.payload->>'invoiceId' = x.id::text
+            AND j.dedupe_key IN ('ocr:' || x.id::text || ':' || x.object || ':' || x.gen::text,
+                                 'ocr-sweep-' || x.id::text || ':' || x.object || ':' || x.gen::text)
             AND NOT (
               j.status = 'failed'
               AND j.dedupe_key NOT LIKE 'ocr-sweep-%'
               AND coalesce(j.last_error, '') ~ ${NOT_FOUND_REFUSAL_PG}
             )
        )
-     ORDER BY i.updated_at
+     ORDER BY x.updated_at
      LIMIT ${OCR_SWEEP_BATCH}`;
   for (const inv of pathStale) {
     const ref = toObjectRef(inv.raw_image_url, inv.restaurant_id);
@@ -158,7 +162,7 @@ export async function runOcrSweep(sql: Sql, now = new Date()): Promise<OcrSweepR
       sql,
       'ocr-invoice',
       { restaurantId: inv.restaurant_id, invoiceId: inv.id, supplierId: inv.supplier_id, imageUrl },
-      { restaurantId: inv.restaurant_id, dedupeKey: `ocr-sweep-${inv.id}:${inv.object}` },
+      { restaurantId: inv.restaurant_id, dedupeKey: `ocr-sweep-${inv.id}:${inv.object}:${inv.gen}` },
     );
     (inserted ? result.requeued : result.raced).push(inv.id);
   }
@@ -171,6 +175,7 @@ export async function runOcrSweep(sql: Sql, now = new Date()): Promise<OcrSweepR
   // run. Never a re-shot duplicate (it waits for a person), and not while a
   // sibling page of the same sender is merely slow (still ocr_pending).
   const holdBefore = new Date(now.getTime() - G09_HOLD_MAX_MS);
+  const siblingSince = new Date(now.getTime() - 2 * G09_HOLD_MAX_MS);
   const held = await sql<Array<{ id: string; restaurant_id: string }>>`
     SELECT i.id, i.restaurant_id
       FROM invoices i
@@ -192,7 +197,9 @@ export async function runOcrSweep(sql: Sql, now = new Date()): Promise<OcrSweepR
             AND m2.channel_id = m.channel_id AND m2.sender = m.sender
             AND i2.id <> i.id AND i2.status = 'ocr_pending'
             AND m2.received_at BETWEEN m.received_at - interval '2 hours' AND m.received_at + interval '2 hours'
-            AND coalesce(i2.updated_at, i2.created_at) >= ${pathSince})
+            -- a sibling blocks only while it is plausibly still being read:
+            -- one stuck longer than 2× the hold cap no longer holds this page
+            AND coalesce(i2.updated_at, i2.created_at) >= ${siblingSince})
        AND NOT EXISTS (SELECT 1 FROM match_runs m WHERE m.invoice_id = i.id AND m.restaurant_id = i.restaurant_id)
        AND NOT EXISTS (SELECT 1 FROM job_queue j
                         WHERE j.queue = 'match-invoice' AND j.payload->>'invoiceId' = i.id::text)

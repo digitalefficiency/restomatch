@@ -5,12 +5,14 @@ import {
   desc,
   eq,
   inArray,
+  or,
   purchaseOrders,
   ingestChannels,
   ingestDocuments,
   ingestMessages,
   ingestSenders,
   restaurants,
+  sql,
   suppliers,
   type Database,
 } from '@restomatch/db';
@@ -26,6 +28,8 @@ import {
 import { appError } from '../errors';
 import { featureEnabled } from '../lib/features';
 import { enqueueIngestJobs, INGEST_FEATURE, messageStatus, registerIngestedDocument } from '../ingest/pipeline';
+import { PAGE_FLAGS } from '../documents/settle';
+import { resolvePageFlag } from '../documents/resolve';
 import { assertSupplierOwned } from '../tenant';
 import { captureSourceRef } from '../orders/captureOrder';
 import { financeProcedure, managerProcedure, router } from '../trpc';
@@ -249,7 +253,13 @@ export const ingestRouter = router({
         input.filter === 'needs_review'
           ? inArray(ingestMessages.status, ['needs_review'])
           : input.filter === 'errors'
-            ? inArray(ingestMessages.status, ['failed', 'rejected'])
+            ? // G-09: a message with a flagged page (the inbox's one question) is an error too.
+              or(
+                inArray(ingestMessages.status, ['failed', 'rejected']),
+                sql`exists (select 1 from ${ingestDocuments} d where d.message_id = ${ingestMessages.id}
+                      and d.restaurant_id = ${ingestMessages.restaurantId}
+                      and d.error in (${sql.join(PAGE_FLAGS.map((f) => sql`${f}`), sql`, `)}))`,
+              )
             : undefined;
       const messages = await ctx.db
         .select({
@@ -350,6 +360,27 @@ export const ingestRouter = router({
       // Same as receiving.registerInvoice: enqueued from inside the member tx.
       await enqueueIngestJobs(reg.job ? [reg.job] : []);
       return { invoiceId: reg.invoiceId };
+    }),
+
+  /**
+   * G-09: the one action on a flagged page (owner/manager). `separate` — it is
+   * its own invoice (sticky; audited; matched); `delete_duplicate` — retire a
+   * re-shot copy behind every refusal guard. Foreign ids → NOT_FOUND.
+   */
+  resolvePageFlag: managerProcedure
+    .input(z.object({ documentId: z.string().uuid(), action: z.enum(['separate', 'delete_duplicate']) }))
+    .mutation(async ({ ctx, input }) => {
+      const rid = ctx.session.restaurantId;
+      const doc = await ownDocument(ctx.db, rid, input.documentId);
+      await requireIngest(ctx.db, rid, doc.kind);
+      const res = await resolvePageFlag(ctx.db, {
+        restaurantId: rid,
+        documentId: doc.id,
+        action: input.action,
+        userId: ctx.session.userId,
+      });
+      await refreshMessageStatus(ctx.db, rid, doc.messageId);
+      return res;
     }),
 
   rejectDocument: managerProcedure.input(z.object({ documentId: z.string().uuid() })).mutation(async ({ ctx, input }) => {

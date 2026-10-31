@@ -28,6 +28,21 @@ import type { DocumentFailureReason } from './types';
 export const PAGE_ABSORBED_ACTION = 'document.page_absorbed';
 /** Page 1 re-opened for a composed re-OCR (its single-page print is kept on the row). */
 export const PAGES_RECOMPOSED_ACTION = 'document.pages_recomposed';
+/** Every re-open for OCR: their count is the generation in the OCR dedupe key. */
+export const REOPENED_FOR_OCR_ACTION = 'document.reopened_for_ocr';
+
+/**
+ * How many times this invoice was re-opened for OCR (entity-scoped audit
+ * lookup). The OCR dedupe key carries it, so an invoice that returns to an
+ * object it had before (split, then attach back) still gets a fresh job.
+ */
+export async function reopenGeneration(tx: Database, restaurantId: string, invoiceId: string): Promise<number> {
+  const rows = (await tx.execute(sql`
+    select count(*)::int as n from ${auditLog}
+    where entity_type = 'invoice' and entity_id = ${invoiceId}
+      and restaurant_id = ${restaurantId} and action = ${REOPENED_FOR_OCR_ACTION}`)) as unknown as Array<{ n: number }>;
+  return Number(rows[0]?.n ?? 0);
+}
 
 /**
  * Re-open an OPEN, unreferenced invoice for OCR (→ `ocr_pending`). The caller
@@ -49,6 +64,13 @@ export async function reopenForOcr(tx: Database, restaurantId: string, invoiceId
     )
     .returning({ id: invoices.id });
   if (moved.length === 0) return false;
+  await tx.insert(auditLog).values({
+    restaurantId,
+    userId: null,
+    action: REOPENED_FOR_OCR_ACTION,
+    entityType: 'invoice',
+    entityId: invoiceId,
+  });
   await tx.delete(matchRuns).where(and(eq(matchRuns.invoiceId, invoiceId), eq(matchRuns.restaurantId, restaurantId)));
   // The re-OCR rewrites every line and the totals. Clear them now, so a failed
   // re-OCR leaves NO lines (nothing to match, no ₪ computed from a stale
@@ -116,7 +138,7 @@ export async function retireBlocker(
  */
 export async function retireInvoice(
   tx: Database,
-  args: { restaurantId: string; invoiceId: string; absorbedInto: string; userId: string | null; print?: unknown },
+  args: { restaurantId: string; invoiceId: string; absorbedInto: string | null; userId: string | null; print?: unknown },
 ): Promise<{ ok: true } | { ok: false; reason: DocumentFailureReason | 'not_found' }> {
   const { restaurantId, invoiceId } = args;
   const blocker = await retireBlocker(tx, restaurantId, invoiceId);
