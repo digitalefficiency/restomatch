@@ -4,9 +4,9 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { components } from '@/lib/i18n/messages/components';
-import { cn } from '../cn';
+import { cnMerge as cn } from '../cn';
 import { fieldBase } from '../Input';
-import { addDays, formatDateField, monthGrid, parseDateInput } from './parse';
+import { addDays, dateFieldValue, formatDateField, monthGrid } from './parse';
 
 type NativeProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'defaultValue' | 'onChange' | 'type'>;
 
@@ -25,6 +25,7 @@ export function DateField({
   min,
   max,
   className,
+  onBlur,
   'aria-describedby': describedBy,
   'aria-invalid': ariaInvalid,
   ...rest
@@ -53,8 +54,6 @@ export function DateField({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
-  const inRange = (d: string) => (!min || d >= min) && (!max || d <= max);
-
   function commit(next: string | null) {
     setIso(next);
     setText(next ? formatDateField(next, locale) : '');
@@ -78,20 +77,19 @@ export function DateField({
           className={cn(fieldBase, 'num w-full min-w-0 rtl:text-right')}
           onChange={(e) => {
             setText(e.target.value);
-            const parsed = parseDateInput(e.target.value);
-            if (parsed && inRange(parsed)) {
-              setIso(parsed);
-              onValueChange?.(parsed);
-            } else if (e.target.value.trim() === '') {
-              setIso(null);
-              onValueChange?.(null);
+            // Only a whole, real, in-range date is held; anything else posts "" (never a stale date).
+            const next = dateFieldValue(e.target.value, { min, max }).iso;
+            if (next !== iso) {
+              setIso(next);
+              onValueChange?.(next);
             }
+            if (next) setInvalid(false);
           }}
-          onBlur={() => {
-            if (text.trim() === '') return setInvalid(false);
-            const parsed = parseDateInput(text);
-            if (parsed && inRange(parsed)) commit(parsed);
-            else setInvalid(true);
+          onBlur={(e) => {
+            const { iso: next, invalid: bad } = dateFieldValue(text, { min, max });
+            if (next) commit(next);
+            setInvalid(bad);
+            onBlur?.(e);
           }}
         />
         <button

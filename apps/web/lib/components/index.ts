@@ -1,4 +1,4 @@
-export { cn } from './cn';
+export { cn, cnMerge } from './cn';
 export { Card } from './Card';
 export { ConfirmDialog } from './ConfirmDialog';
 export { Heading, SectionHeader } from './Heading';

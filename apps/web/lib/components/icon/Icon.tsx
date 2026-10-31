@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, Redo2, SendHorizontal, Undo2, type LucideIcon } from 'lucide-react';
-import { cn } from '../cn';
+import { cnMerge as cn } from '../cn';
 
 /** Icon size follows the text it sits with: caption 14 · body-sm 16 · body 20 · ≥20 px text 24. */
 const SIZE = { caption: 'h-3.5 w-3.5', 'body-sm': 'h-4 w-4', body: 'h-5 w-5', heading: 'h-6 w-6' } as const;

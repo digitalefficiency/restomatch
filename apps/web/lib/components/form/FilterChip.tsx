@@ -3,7 +3,7 @@
 import { ChevronDown, X } from 'lucide-react';
 import { useT } from '@/lib/i18n/client';
 import { components } from '@/lib/i18n/messages/components';
-import { cn } from '../cn';
+import { cnMerge as cn } from '../cn';
 
 /**
  * A filter pill ("ספק: הכל ▾"): 32 px on desk, 44 on touch. Active =

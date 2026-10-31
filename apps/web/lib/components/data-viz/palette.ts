@@ -16,11 +16,20 @@ export const VIZ = {
 
 /**
  * Sequential "price creep" step (1…5) for a 0…1 intensity, with the text class
+ * (literal class names, so Tailwind generates them)
  * that passes on it (ink up to step 3, white from step 4). Every cell still
  * prints its value — colour is never the only signal.
  */
+const CREEP_CLASSES = {
+  1: { bg: 'bg-creep-1', text: 'text-on-creep-1' },
+  2: { bg: 'bg-creep-2', text: 'text-on-creep-2' },
+  3: { bg: 'bg-creep-3', text: 'text-on-creep-3' },
+  4: { bg: 'bg-creep-4', text: 'text-on-creep-4' },
+  5: { bg: 'bg-creep-5', text: 'text-on-creep-5' },
+} as const;
+
 export function creepStep(intensity: number): { step: 1 | 2 | 3 | 4 | 5; bg: string; text: string } {
   const clamped = Math.min(1, Math.max(0, Number.isFinite(intensity) ? intensity : 0));
   const step = (Math.min(4, Math.floor(clamped * 5)) + 1) as 1 | 2 | 3 | 4 | 5;
-  return { step, bg: `bg-creep-${step}`, text: `text-on-creep-${step}` };
+  return { step, ...CREEP_CLASSES[step] };
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { usePathname } from 'next/navigation';
 
 export type Politeness = 'polite' | 'assertive';
 type Announce = (message: string, politeness?: Politeness) => void;
@@ -33,6 +34,15 @@ export function AnnouncerProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => () => cancelAnimationFrame(frame.current), []);
+
+  // A message belongs to the page it was announced on: clear both regions on
+  // navigation, so an old error is not still sitting in role="alert" later.
+  const pathname = usePathname();
+  useEffect(() => {
+    cancelAnimationFrame(frame.current);
+    setPolite('');
+    setAssertive('');
+  }, [pathname]);
   const value = useMemo(() => announce, [announce]);
 
   return (

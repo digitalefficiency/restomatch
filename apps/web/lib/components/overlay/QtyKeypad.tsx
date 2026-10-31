@@ -6,8 +6,8 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
 import { components } from '@/lib/i18n/messages/components';
 import { Button } from '../Button';
-import { cn } from '../cn';
-import { parseQuantityInput } from '../form/parse';
+import { cnMerge as cn } from '../cn';
+import { formatKeypadText, parseKeypadQuantity } from '../form/parse';
 import { Sheet } from './Sheet';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', ',', '0', 'back'] as const;
@@ -44,12 +44,12 @@ export function QtyKeypad({
 
   useEffect(() => {
     if (open) {
-      setText(initial == null ? '' : String(initial).replace('.', ','));
+      setText(initial == null ? '' : formatKeypadText(initial));
       setArmed(false);
     }
   }, [open, initial]);
 
-  const value = parseQuantityInput(text);
+  const value = parseKeypadQuantity(text);
   const variance = value !== null && ordered ? (value - ordered) / ordered : null;
   const over = variance !== null && Math.abs(variance) * 100 > threshold;
 

@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { cn } from '../cn';
+import { cn as plainCn, cnMerge as cn } from '../cn';
 
-describe('cn (tailwind-merge with the token classes)', () => {
+describe('cn stays the v1 plain joiner (existing call sites unchanged)', () => {
+  it('keeps every class and only drops falsy parts', () => {
+    expect(plainCn('px-3 w-full', false, null, undefined, 'w-20')).toBe('px-3 w-full w-20');
+  });
+});
+
+describe('cnMerge (tailwind-merge with the token classes)', () => {
   it('filters falsy parts like before', () => {
     expect(cn('a', false, null, undefined, 'b')).toBe('a b');
   });

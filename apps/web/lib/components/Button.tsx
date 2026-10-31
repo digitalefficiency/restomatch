@@ -1,7 +1,7 @@
 import { useId } from 'react';
 import Link from 'next/link';
 import { Check } from 'lucide-react';
-import { cn } from './cn';
+import { cnMerge as cn } from './cn';
 import { Spinner } from './Spinner';
 
 /**
@@ -182,10 +182,13 @@ const SAFE_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:']);
  * becomes "#". Hrefs are often assembled from form values.
  */
 export function safeHref(href: string): string {
-  const h = href.trim();
-  if (/^[/?#]/.test(h) && !h.startsWith('//')) return h;
+  // Browsers drop tabs/newlines inside URLs and trim spaces/controls, so judge the href as they will.
+  const h = href.replace(/[\u0000-\u0020\u007f]+/g, '');
+  // "//host" and "/\\host" (and "\\\\host") are protocol-relative: another origin, not a path.
+  if (/^[/\\][/\\]/.test(h)) return '#';
+  if (/^[/?#]/.test(h)) return href.trim();
   try {
-    return SAFE_PROTOCOLS.has(new URL(h).protocol) ? h : '#';
+    return SAFE_PROTOCOLS.has(new URL(h).protocol) ? href.trim() : '#';
   } catch {
     return '#';
   }
