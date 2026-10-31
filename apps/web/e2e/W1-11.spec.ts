@@ -750,7 +750,7 @@ test.describe('pilot · truthful send state · chef orders', () => {
     await expect(note).toContainText(MSG.he.sendStatus.failedHint);
     await expect(page.getByTestId('order-status')).toHaveAttribute('data-status', 'unsent');
     await note.getByTestId('copy-order-text').tap();
-    await expect(page.getByText(MSG.he.sendStatus.copied)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByLabel('הודעות').getByText(MSG.he.sendStatus.copied)).toBeVisible({ timeout: 15_000 });
     const copied = await page.evaluate(() => navigator.clipboard.readText());
     expect(copied).toContain('W1-11 pilot עגבניות');
     expect(await axeSeriousOrWorse(page)).toEqual([]);
