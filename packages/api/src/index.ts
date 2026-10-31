@@ -282,6 +282,7 @@ export {
   type FillEnglishResult,
 } from './receiving/english';
 export { devOcrStubEnabled, buildDevOcrStub } from './receiving/devOcrStub';
+export { isAllowedScanUrl } from './lib/scanUrls';
 export {
   localScanStorageEnabled,
   readLocalScan,
