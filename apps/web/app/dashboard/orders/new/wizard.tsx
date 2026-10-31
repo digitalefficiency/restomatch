@@ -894,7 +894,8 @@ export function NewOrderWizard({
   // ───────────────────────────────── render ─────────────────────────────────
   return (
     <FieldMode className="mx-auto max-w-3xl pb-40 lg:pb-32">
-      <div ref={rootRef}>
+      {/* data-wizard-ready: the cart is hydrated and taps are live (tests wait for it). */}
+      <div ref={rootRef} data-wizard-ready={hydrated ? 'true' : undefined}>
         {/* Task chrome: exit at the start, the step at the end — no breadcrumbs, no nav. */}
         <div className="mb-3 flex items-center justify-between gap-3">
           <Link

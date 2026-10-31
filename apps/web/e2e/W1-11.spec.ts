@@ -115,6 +115,8 @@ async function addItem(page: Page, item: Locator, how: 'tap' | 'click' = 'tap') 
   // The order guide (W2-06) renders above the catalog: let it settle before tapping,
   // or the list moves under the pointer.
   await expect(page.getByTestId('order-guide').or(page.getByTestId('guide-empty'))).toBeVisible({ timeout: 30_000 });
+  // A tap before React hydrates is lost (dev server under load): wait for the live cart.
+  await expect(page.locator('[data-wizard-ready="true"]')).toHaveCount(1, { timeout: 30_000 });
   await (how === 'tap' ? item.tap() : item.click());
   const qty = page.getByTestId('order-line').getByRole('textbox', { name: /כמות|Quantity/ });
   await expect(qty.last()).toBeVisible();
