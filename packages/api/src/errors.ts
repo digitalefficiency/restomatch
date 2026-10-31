@@ -30,6 +30,7 @@ export const APP_ERROR_CODES = [
   'entitlement.required',
   'auth.unauthorized',
   'auth.forbidden',
+  'capability.required',
   'input.invalid',
   'invoice.numberTaken',
   'FEATURE_DISABLED',
