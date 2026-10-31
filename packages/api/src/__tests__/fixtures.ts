@@ -42,7 +42,10 @@ import {
   type SubscriptionOverrides,
 } from '@restomatch/db';
 
-/** A fully-populated tenant graph for isolation/attack tests. */
+/** 'YYYY-MM' of the ISRAEL calendar month of `now` (what "this month" means to the app). */
+export function israelMonth(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit' }).format(now).slice(0, 7);
+}
 
 /**
  * `hour`:00 on TODAY'S ISRAEL calendar day (Asia/Jerusalem — the zone the app
@@ -51,11 +54,6 @@ import {
  * Israel, and on the last day of a month last month — seeded rows fell out of
  * "today" / "this month" and ~47 api tests went red every night.
  */
-/** 'YYYY-MM' of the ISRAEL calendar month of `now` (what "this month" means to the app). */
-export function israelMonth(now: Date = new Date()): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit' }).format(now).slice(0, 7);
-}
-
 export function israelToday(hour: number, now: Date = new Date()): Date {
   const tz = 'Asia/Jerusalem';
   const day = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
@@ -70,6 +68,7 @@ export function israelToday(hour: number, now: Date = new Date()): Date {
   return new Date(guess - (asUtc - guess));
 }
 
+/** A fully-populated tenant graph for isolation/attack tests. */
 export interface Tenant {
   restaurantId: string;
   ownerUserId: string;
