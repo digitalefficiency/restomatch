@@ -4,10 +4,13 @@ import { jobDb, jobDbPoolCount } from '../db';
 // Regression for the per-job pool leak: jobs must share one pool per URL.
 describe('jobDb', () => {
   it('returns the same pool for the same URL, however many jobs run', () => {
+    // The pool map is process-wide (globalThis — one pool even when Next loads the
+    // module twice), so earlier suites in this fork may hold pools: count the delta.
     const url = 'postgres://u:p@localhost:5432/never_connected';
+    const before = jobDbPoolCount();
     const first = jobDb(url);
     for (let i = 0; i < 50; i++) expect(jobDb(url)).toBe(first);
-    expect(jobDbPoolCount()).toBe(1);
+    expect(jobDbPoolCount()).toBe(before + 1);
   });
 });
 

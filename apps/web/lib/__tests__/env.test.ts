@@ -495,3 +495,84 @@ describe('owner connection falls back to the Supabase integration when DATABASE_
     warn.mockRestore();
   });
 });
+
+describe('normalizePgUrl — read the way postgres.js reads it (review of #127)', () => {
+  const REF = 'rutbnmvkwirqtixvuhdq';
+  const HOST = 'aws-0-ap-northeast-1.pooler.supabase.com';
+  const raw = (pw: string) => `postgresql://postgres.${REF}:${pw}@${HOST}:6543/postgres`;
+
+  // postgres.js's own parse (no connection is opened).
+  const pgOptions = async (url: string) => {
+    const { default: postgres } = await import('postgres');
+    const sql = postgres(url, { max: 1 });
+    const o = sql.options as unknown as { host: string[]; port: number[]; user: string; pass: string; database: string };
+    await sql.end({ timeout: 0 });
+    return o;
+  };
+
+  it.each([
+    'P@ssw0rd#1', // `new URL` accepts it, postgres.js read host "ssw0rd"
+    'Rest@urant/2024',
+    'a@b?c',
+    '#Abc123',
+    '/Abc123',
+    '2024#Summer',
+    '1234/abcd',
+    'a@b,c', // postgres.js multi-host split at the first '@'
+    'Fo0d%cost!', // a raw % made postgres() throw URIError at import
+    '50%off',
+    'pa ss word', // an inner space is part of the password, not paste noise
+    '[P@ss#1]', // template brackets around a password that holds '@'
+  ])('%s → postgres.js reads the same user, password, host, port and database', async (pw) => {
+    const { normalizePgUrl } = await import('../env');
+    const fixed = normalizePgUrl(raw(pw));
+    expect(fixed, pw).not.toBeNull();
+    const o = await pgOptions(fixed!);
+    expect(o.host).toEqual([HOST]);
+    expect(o.port).toEqual([6543]);
+    expect(o.user).toBe(`postgres.${REF}`);
+    expect(o.pass).toBe(pw.replace(/^\[(.*)\]$/, '$1'));
+    expect(o.database).toBe('postgres');
+  });
+
+  it('a clean, already-encoded URL is returned unchanged and reported ok', async () => {
+    const { normalizePgUrl, dbEnvReport } = await import('../env');
+    const clean = raw(encodeURIComponent('P@ss w#rd%1'));
+    expect(normalizePgUrl(clean)).toBe(clean);
+    expect(dbEnvReport({ DATABASE_URL: clean } as never)).toMatch(/^DATABASE_URL: ok/);
+    expect(dbEnvReport({ DATABASE_URL: raw('P@ssw0rd#1') } as never)).toMatch(/^DATABASE_URL: repaired/);
+    expect(dbEnvReport({ DATABASE_URL: raw('50%off') } as never)).toContain('%25');
+  });
+
+  it('line breaks from a wrapped paste are dropped; a fragment never survives', async () => {
+    const { normalizePgUrl } = await import('../env');
+    const wrapped = `postgresql://postgres.${REF}:abc\n123@${HOST}:6543/\r\npostgres`;
+    expect(normalizePgUrl(wrapped)).toBe(raw('abc123'));
+    expect(new URL(normalizePgUrl(raw('x#y'))!).hash).toBe('');
+  });
+
+  it('applyRepairedDbEnv hands the queue (DATABASE_URL) the repaired value; a clean one is left alone', async () => {
+    const { applyRepairedDbEnv } = await import('../env');
+    const env: Record<string, string> = { DATABASE_URL: raw('P@ssw0rd#1') };
+    expect(applyRepairedDbEnv(env as never)).toBe(true);
+    expect((await pgOptions(env.DATABASE_URL!)).pass).toBe('P@ssw0rd#1');
+    expect(applyRepairedDbEnv(env as never)).toBe(false);
+    const fallback: Record<string, string> = { DATABASE_URL: 'just-a-password', POSTGRES_URL: raw('intPw') };
+    expect(applyRepairedDbEnv(fallback as never)).toBe(true);
+    expect(fallback.DATABASE_URL).toBe(raw('intPw'));
+  });
+
+  it('warnings never carry the password or a URL, encoded or not', async () => {
+    const { resolveWebDbUrl } = await import('../env');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const appPw = 'ap#p/w@1';
+    resolveWebDbUrl({ NODE_ENV: 'production', DATABASE_URL_APP: `DATABASE_URL_APP=postgresql://restomatch_app.${REF}:${appPw}@${HOST}:6543/postgres` } as never);
+    expect(warn).toHaveBeenCalled();
+    for (const [msg] of warn.mock.calls) {
+      expect(String(msg)).not.toContain(appPw);
+      expect(String(msg)).not.toContain(encodeURIComponent(appPw));
+      expect(String(msg)).not.toMatch(/postgres(ql)?:\/\//);
+    }
+    warn.mockRestore();
+  });
+});

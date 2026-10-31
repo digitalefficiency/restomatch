@@ -1,6 +1,6 @@
 
 import { runRetention } from '@restomatch/api';
-import { makeWorker } from '../queue';
+import { makeWorker, type WorkerJob } from '../queue';
 import { jobDb } from '../db';
 
 /**
@@ -26,23 +26,26 @@ export function isPurgeEnabled(): boolean {
 }
 
 export function startRetentionWorker() {
-  return makeWorker<RetentionJob>('retention', async (job) => {
-    const url = process.env.DATABASE_URL;
-    if (!url) throw new Error('DATABASE_URL is required');
-    const db = jobDb(url);
+  return makeWorker<RetentionJob>('retention', processRetention);
+}
 
-    // Dry-run unless the purge flag is explicitly set AND the job didn't force
-    // a preview.
-    const dryRun = job.data.dryRun === true || !isPurgeEnabled();
-    const report = await runRetention(db, { dryRun });
+/** The retention job: run by the worker loop (above) and by the serverless runner (handlers.ts). */
+export async function processRetention(job: WorkerJob<RetentionJob>) {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error('DATABASE_URL is required');
+  const db = jobDb(url);
 
-    console.log(
-      `[retention] dryRun=${report.dryRun} ` +
-        `expiredTokens=${report.expiredVerificationTokens} ` +
-        `unsubscribedLeads=${report.unsubscribedLeads} ` +
-        `staleLeads=${report.staleLeads}`,
-    );
+  // Dry-run unless the purge flag is explicitly set AND the job didn't force
+  // a preview.
+  const dryRun = job.data.dryRun === true || !isPurgeEnabled();
+  const report = await runRetention(db, { dryRun });
 
-    return report;
-  });
+  console.log(
+    `[retention] dryRun=${report.dryRun} ` +
+      `expiredTokens=${report.expiredVerificationTokens} ` +
+      `unsubscribedLeads=${report.unsubscribedLeads} ` +
+      `staleLeads=${report.staleLeads}`,
+  );
+
+  return report;
 }

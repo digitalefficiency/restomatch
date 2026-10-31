@@ -30,6 +30,9 @@ const config: NextConfig = {
     '@restomatch/translate',
     '@restomatch/types',
     '@restomatch/ui-tokens',
+    // The worker's job processors, run by /api/cron/jobs + the after() kick
+    // (imported only as '@restomatch/worker/serverless', never the boot entry).
+    '@restomatch/worker',
   ],
   // @sentry/node: optional, loaded at runtime by @restomatch/observability — never bundled.
   serverExternalPackages: ['nodemailer', 'postgres', '@anthropic-ai/sdk', '@sentry/node'],

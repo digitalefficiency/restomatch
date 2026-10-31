@@ -31,7 +31,7 @@ import {
 } from '@restomatch/db';
 import { redactString } from '@restomatch/observability';
 import { jobDb } from '../db';
-import { makeQueue, makeWorker } from '../queue';
+import { makeQueue, makeWorker, type WorkerJob } from '../queue';
 
 export interface HealthDigestJob {
   /** Override "now" (tests). */
@@ -269,15 +269,21 @@ export async function runHealthDigest(db: Database, probes: QueueProbe[], now = 
 }
 
 export function startHealthDigestWorker() {
-  // Read-only probes on the job_queue table (the worker's queue connection).
-  const probes = DIGEST_QUEUES.map((name) => makeQueue(name) as unknown as QueueProbe);
-  return makeWorker<HealthDigestJob>('health-digest', async (job) => {
-    const url = process.env.DATABASE_URL;
-    if (!url) throw new Error('DATABASE_URL is required');
-    const result = await runHealthDigest(jobDb(url), probes, job.data.now ? new Date(job.data.now) : new Date(), {
-      force: job.data.force,
-    });
-    console.log(`[health-digest] ${JSON.stringify({ ...result, snapshot: undefined })}`);
-    return result;
+  return makeWorker<HealthDigestJob>('health-digest', processHealthDigest);
+}
+
+// Read-only probes on the job_queue table (the worker's queue connection). Built
+// on first use: makeQueue touches no database until a probe is read.
+let digestProbes: QueueProbe[] | null = null;
+
+/** The health-digest job: run by the worker loop (above) and by the serverless runner (handlers.ts). */
+export async function processHealthDigest(job: WorkerJob<HealthDigestJob>) {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error('DATABASE_URL is required');
+  digestProbes ??= DIGEST_QUEUES.map((name) => makeQueue(name) as unknown as QueueProbe);
+  const result = await runHealthDigest(jobDb(url), digestProbes, job.data.now ? new Date(job.data.now) : new Date(), {
+    force: job.data.force,
   });
+  console.log(`[health-digest] ${JSON.stringify({ ...result, snapshot: undefined })}`);
+  return result;
 }

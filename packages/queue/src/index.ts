@@ -1,5 +1,6 @@
 import type { OcrInvoiceJob } from '@restomatch/types';
 import { insertJob, queueDbUrl, queueSql, type EnqueueOptions } from './jobs';
+import { notifyEnqueued } from './kick';
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Producers enqueue into Postgres (0061 job_queue) — Redis/BullMQ are gone
@@ -13,6 +14,7 @@ import { insertJob, queueDbUrl, queueSql, type EnqueueOptions } from './jobs';
  * ────────────────────────────────────────────────────────────────────────── */
 
 export * from './jobs';
+export * from './kick';
 
 /** How long a producer waits for the queue database before giving up (ms). */
 export const ENQUEUE_TIMEOUT_MS = 3_000;
@@ -87,11 +89,13 @@ export async function enqueue(
       timeoutMs,
       () => new QueueUnavailableError(queue, `no answer from the queue database within ${timeoutMs}ms`),
     );
-    return true;
   } catch (err) {
     if (err instanceof QueueUnavailableError) throw err;
     throw new QueueUnavailableError(queue, err instanceof Error ? err.message : String(err));
   }
+  // Serverless mode: let an in-process runner pick it up now (kick.ts). Never throws.
+  notifyEnqueued(queue);
+  return true;
 }
 
 /** Queue name shared with the worker consumer (apps/worker/src/jobs/ocrInvoice.ts). */

@@ -16,7 +16,7 @@ import {
 } from '@restomatch/api';
 import { and, desc, eq, invoices, matchRuns, restaurants, suppliers, type Database } from '@restomatch/db';
 import { runMatch, type MatchOutput } from '@restomatch/matching';
-import { makeWorker } from '../queue';
+import { makeWorker, type WorkerJob } from '../queue';
 import { appBaseUrl } from '../lib/notifyHelpers';
 import { jobDb } from '../db';
 import { findJobInvoice } from './findJobInvoice';
@@ -158,106 +158,109 @@ const push = createPushNotifier();
 const email = createEmailNotifier();
 
 export function startMatchInvoiceWorker() {
-  return makeWorker<MatchInvoiceJob>('match-invoice', async (job): Promise<MatchOutput> => {
-    const url = process.env.DATABASE_URL;
-    if (!url) throw new Error('DATABASE_URL is required');
-    const db = jobDb(url);
-    const { restaurantId, invoiceId } = job.data;
+  return makeWorker<MatchInvoiceJob>('match-invoice', processMatchInvoice);
+}
 
-    // Tenant guard: job payloads are not a trust boundary — verify the invoice
-    // actually belongs to the payload's restaurant before any write. Re-read
-    // briefly first, in case the producer enqueued before its commit.
-    const invoice = await findJobInvoice(db, restaurantId, invoiceId);
-    if (!invoice) {
-      throw new Error(
-        `[match-invoice] invoice=${invoiceId} not found in restaurant=${restaurantId} — refusing to match`,
-      );
-    }
+/** The match-invoice job: run by the worker loop (above) and by the serverless runner (handlers.ts). */
+export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Promise<MatchOutput> {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error('DATABASE_URL is required');
+  const db = jobDb(url);
+  const { restaurantId, invoiceId } = job.data;
 
-    const { result, persisted, replaced, skipped } = await matchInvoiceForJob(db, job.data);
-    if (!persisted) {
-      console.log(`[match-invoice] invoice=${invoiceId} — nothing to do (${skipped})`);
-      return result;
-    }
+  // Tenant guard: job payloads are not a trust boundary — verify the invoice
+  // actually belongs to the payload's restaurant before any write. Re-read
+  // briefly first, in case the producer enqueued before its commit.
+  const invoice = await findJobInvoice(db, restaurantId, invoiceId);
+  if (!invoice) {
+    throw new Error(
+      `[match-invoice] invoice=${invoiceId} not found in restaurant=${restaurantId} — refusing to match`,
+    );
+  }
 
-    // Fire notifications to each role needing attention. WhatsApp is a paid
-    // feature (whatsapp_alerts) — gate it on entitlements. Push is always on.
-    // A re-match after the count replaces a run whose people were already told;
-    // only a first match notifies (the approvals queue shows the fresh numbers).
-    if (!replaced && persisted.rolesNeedingNotification.length > 0) {
-      const ent = await getEntitlements(db, restaurantId);
-      const whatsappAllowed = ent.active && ent.features.includes('whatsapp_alerts');
-      const summary = `${result.discrepancies.length} חריגות, סה"כ הפסד פוטנציאלי ₪${result.totalDiscrepancyAmount.toFixed(0)}`;
-      for (const role of persisted.rolesNeedingNotification) {
-        if (whatsappAllowed) {
-          await whatsapp.send(db, {
-            restaurantId,
-            channel: 'whatsapp',
-            target: `role:${role}`,
-            subject: 'דרושה החלטה לחשבונית',
-            body: summary,
-            relatedEntityType: 'match_run',
-            relatedEntityId: persisted.matchRunId,
-          });
-          if (ent.billingAccountId) {
-            await recordUsage(db, ent.billingAccountId, 'whatsapp_sends');
-          }
-        }
-        await push.send(db, {
+  const { result, persisted, replaced, skipped } = await matchInvoiceForJob(db, job.data);
+  if (!persisted) {
+    console.log(`[match-invoice] invoice=${invoiceId} — nothing to do (${skipped})`);
+    return result;
+  }
+
+  // Fire notifications to each role needing attention. WhatsApp is a paid
+  // feature (whatsapp_alerts) — gate it on entitlements. Push is always on.
+  // A re-match after the count replaces a run whose people were already told;
+  // only a first match notifies (the approvals queue shows the fresh numbers).
+  if (!replaced && persisted.rolesNeedingNotification.length > 0) {
+    const ent = await getEntitlements(db, restaurantId);
+    const whatsappAllowed = ent.active && ent.features.includes('whatsapp_alerts');
+    const summary = `${result.discrepancies.length} חריגות, סה"כ הפסד פוטנציאלי ₪${result.totalDiscrepancyAmount.toFixed(0)}`;
+    for (const role of persisted.rolesNeedingNotification) {
+      if (whatsappAllowed) {
+        await whatsapp.send(db, {
           restaurantId,
-          channel: 'push',
+          channel: 'whatsapp',
           target: `role:${role}`,
-          subject: 'דרושה החלטה',
+          subject: 'דרושה החלטה לחשבונית',
           body: summary,
           relatedEntityType: 'match_run',
           relatedEntityId: persisted.matchRunId,
         });
-      }
-
-      // Email the REAL mailbox of each manager-tier recipient — the
-      // "we caught a ₪ leak, decide now" moment. (WhatsApp/push above use the
-      // symbolic role: target; email needs concrete addresses.) Idempotent at
-      // the job level: an already-matched invoice skips this whole block.
-      const recipients = await recipientsForRestaurant(
-        db,
-        restaurantId,
-        persisted.rolesNeedingNotification,
-      );
-      if (recipients.length > 0) {
-        const [sup] = await db
-          .select({ name: suppliers.name })
-          .from(invoices)
-          .innerJoin(suppliers, eq(suppliers.id, invoices.supplierId))
-          .where(eq(invoices.id, invoiceId))
-          .limit(1);
-        const rendered = approvalNeededEmail({
-          supplierName: sup?.name ?? 'ספק',
-          discrepancyCount: result.discrepancies.length,
-          atRiskIls: `₪${result.totalDiscrepancyAmount.toFixed(0)}`,
-          approvalsUrl: `${appBaseUrl()}/dashboard/approvals`,
-        });
-        for (const r of recipients) {
-          await email.send(db, {
-            restaurantId,
-            channel: 'email',
-            target: r.email,
-            subject: rendered.subject,
-            body: rendered.text,
-            html: rendered.html,
-            relatedEntityType: 'match_run',
-            relatedEntityId: persisted.matchRunId,
-          });
+        if (ent.billingAccountId) {
+          await recordUsage(db, ent.billingAccountId, 'whatsapp_sends');
         }
       }
+      await push.send(db, {
+        restaurantId,
+        channel: 'push',
+        target: `role:${role}`,
+        subject: 'דרושה החלטה',
+        body: summary,
+        relatedEntityType: 'match_run',
+        relatedEntityId: persisted.matchRunId,
+      });
     }
 
-    console.log(
-      `[match-invoice] restaurant=${restaurantId} invoice=${invoiceId} ` +
-        `status=${result.status} discrepancies=${persisted.discrepancyCount} ` +
-        `loss=₪${result.totalDiscrepancyAmount.toFixed(2)} ` +
-        `notifications=${persisted.rolesNeedingNotification.length}`,
+    // Email the REAL mailbox of each manager-tier recipient — the
+    // "we caught a ₪ leak, decide now" moment. (WhatsApp/push above use the
+    // symbolic role: target; email needs concrete addresses.) Idempotent at
+    // the job level: an already-matched invoice skips this whole block.
+    const recipients = await recipientsForRestaurant(
+      db,
+      restaurantId,
+      persisted.rolesNeedingNotification,
     );
+    if (recipients.length > 0) {
+      const [sup] = await db
+        .select({ name: suppliers.name })
+        .from(invoices)
+        .innerJoin(suppliers, eq(suppliers.id, invoices.supplierId))
+        .where(eq(invoices.id, invoiceId))
+        .limit(1);
+      const rendered = approvalNeededEmail({
+        supplierName: sup?.name ?? 'ספק',
+        discrepancyCount: result.discrepancies.length,
+        atRiskIls: `₪${result.totalDiscrepancyAmount.toFixed(0)}`,
+        approvalsUrl: `${appBaseUrl()}/dashboard/approvals`,
+      });
+      for (const r of recipients) {
+        await email.send(db, {
+          restaurantId,
+          channel: 'email',
+          target: r.email,
+          subject: rendered.subject,
+          body: rendered.text,
+          html: rendered.html,
+          relatedEntityType: 'match_run',
+          relatedEntityId: persisted.matchRunId,
+        });
+      }
+    }
+  }
 
-    return result;
-  });
+  console.log(
+    `[match-invoice] restaurant=${restaurantId} invoice=${invoiceId} ` +
+      `status=${result.status} discrepancies=${persisted.discrepancyCount} ` +
+      `loss=₪${result.totalDiscrepancyAmount.toFixed(2)} ` +
+      `notifications=${persisted.rolesNeedingNotification.length}`,
+  );
+
+  return result;
 }

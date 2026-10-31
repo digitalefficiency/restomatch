@@ -10,6 +10,7 @@
 import { handleWhatsAppVerify, handleWhatsAppWebhook, INGEST_IP_LIMIT } from '@restomatch/api';
 import { INGEST_LIMITS } from '@restomatch/ingest';
 import { ingestDeps } from '@/lib/ingest/webhook';
+import { withKickBudget } from '@/lib/jobKick';
 import { guardPublicRequest } from '@/lib/publicGuard';
 
 export const runtime = 'nodejs';
@@ -22,14 +23,18 @@ export async function GET(req: Request, { params }: { params: Promise<{ token: s
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ token: string }> }) {
-  const { token } = await params;
-  // Shared front door (S4): method, streamed body cap, per-IP limit. The HMAC is
-  // verified over g.rawBody in the handler; the per-channel limit runs there too.
-  const g = await guardPublicRequest(req, {
-    rateLimit: { ...INGEST_IP_LIMIT, prefix: 'ingest:wa:ip' },
-    maxBodyBytes: INGEST_LIMITS.whatsappBodyBytes,
-    bodyType: 'text',
+  // The OCR jobs this enqueues are kicked after the response only while a whole
+  // job still fits in maxDuration (lib/jobKick.ts); otherwise /api/cron/jobs runs them.
+  return withKickBudget(maxDuration, async () => {
+    const { token } = await params;
+    // Shared front door (S4): method, streamed body cap, per-IP limit. The HMAC is
+    // verified over g.rawBody in the handler; the per-channel limit runs there too.
+    const g = await guardPublicRequest(req, {
+      rateLimit: { ...INGEST_IP_LIMIT, prefix: 'ingest:wa:ip' },
+      maxBodyBytes: INGEST_LIMITS.whatsappBodyBytes,
+      bodyType: 'text',
+    });
+    if (!g.ok) return g.response;
+    return handleWhatsAppWebhook(req, token, { ...ingestDeps(req), rawBody: g.rawBody });
   });
-  if (!g.ok) return g.response;
-  return handleWhatsAppWebhook(req, token, { ...ingestDeps(req), rawBody: g.rawBody });
 }

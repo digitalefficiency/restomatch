@@ -40,7 +40,7 @@
  */
 import type { Sql } from '@restomatch/queue';
 import { insertJob } from '@restomatch/queue';
-import { makeWorker, workerSql } from '../queue';
+import { makeWorker, workerSql, type WorkerJob } from '../queue';
 
 export type OcrSweepJob = { now?: string };
 
@@ -111,10 +111,13 @@ export async function runOcrSweep(sql: Sql, now = new Date()): Promise<OcrSweepR
 }
 
 export function startOcrSweepWorker() {
-  return makeWorker<OcrSweepJob>('ocr-sweep', async (job) => {
-    if (!process.env.ANTHROPIC_API_KEY) return { skipped: 'ANTHROPIC_API_KEY unset — retries could only fail' };
-    const result = await runOcrSweep(workerSql(), job.data.now ? new Date(job.data.now) : new Date());
-    if (result.requeued.length) console.log(`[ocr-sweep] ${JSON.stringify(result)}`);
-    return result;
-  });
+  return makeWorker<OcrSweepJob>('ocr-sweep', processOcrSweep);
+}
+
+/** The ocr-sweep job: run by the worker loop (above) and by the serverless runner (handlers.ts). */
+export async function processOcrSweep(job: WorkerJob<OcrSweepJob>) {
+  if (!process.env.ANTHROPIC_API_KEY) return { skipped: 'ANTHROPIC_API_KEY unset — retries could only fail' };
+  const result = await runOcrSweep(workerSql(), job.data.now ? new Date(job.data.now) : new Date());
+  if (result.requeued.length) console.log(`[ocr-sweep] ${JSON.stringify(result)}`);
+  return result;
 }

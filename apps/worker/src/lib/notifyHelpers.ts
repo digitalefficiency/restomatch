@@ -14,6 +14,16 @@ export function startOfIlDay(ref: Date): Date {
   return startOfDayInTz(ref, IL_TZ);
 }
 
+/**
+ * The Asia/Jerusalem calendar date of `ref`, 'YYYY-MM-DD' — the day label of a
+ * daily job (its result and its outbox dedupe keys). Not
+ * `startOfIlDay(ref).toISOString().slice(0, 10)`: IL midnight is 21:00/22:00 UTC
+ * of the day before, so that is the previous date.
+ */
+export function ilDateKey(ref: Date): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: IL_TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(ref);
+}
+
 /** Hebrew weekday number for `ref` in IL time: 0 = Sunday … 6 = Saturday. */
 export function ilWeekday(ref: Date): number {
   const name = new Intl.DateTimeFormat('en-US', { timeZone: IL_TZ, weekday: 'short' }).format(ref);
