@@ -6,6 +6,8 @@ import type { he } from '../../../receiving/delivery.he';
 export const receivingDelivery: Shape<typeof he> = {
   delivery: {
     scan: {
+      registerFailed: 'Накладная не сохранилась — сфотографируйте заново',
+      registerRetry: 'Попробовать сохранить снова',
       upload: 'Загрузить файл / PDF',
       uploaded: 'Накладная загружена',
       uploading: 'Загружаем накладную · {seconds} с',
@@ -16,6 +18,7 @@ export const receivingDelivery: Shape<typeof he> = {
       useAnyway: 'Всё равно использовать это фото',
     },
     processing: {
+      ocrDisabled: 'Автоматическое чтение в этом аккаунте выключено — продолжайте по заказу',
       uploaded: 'Накладная получена',
       reading: 'Читаем строки накладной',
       compare: 'Сравниваем с заказом',

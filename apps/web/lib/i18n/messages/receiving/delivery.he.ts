@@ -11,6 +11,8 @@
 export const he = {
   delivery: {
     scan: {
+      registerFailed: 'החשבונית לא נשמרה — צלמו שוב',
+      registerRetry: 'נסו לשמור שוב',
       upload: 'העלו קובץ / PDF',
       uploaded: 'החשבונית הועלתה',
       uploading: 'מעלים את החשבונית · {seconds} שניות',
@@ -21,6 +23,7 @@ export const he = {
       useAnyway: 'להשתמש בתמונה בכל זאת',
     },
     processing: {
+      ocrDisabled: 'קריאה אוטומטית אינה פעילה בחשבון זה — המשיכו מול ההזמנה',
       uploaded: 'החשבונית התקבלה',
       reading: 'קוראים את שורות החשבונית',
       compare: 'משווים להזמנה',
