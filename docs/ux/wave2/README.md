@@ -271,10 +271,10 @@ Findings and evidence stay in `docs/ux/review/area-*.md` and `lens-*.md` (`grep 
   - Read the merged code, not the wave-1 PR bodies.
 - **Side menu: owner-approved.** The spec is `docs/ux/sidebar/SPEC.md` (read its top box first) and the prototype is `docs/ux/sidebar/PROTOTYPE.html`. W1-03 builds it at the start of wave 2 on the nav registry.
 - **Design elevation (new track, UI wave 2):** the owner wants a more advanced design pass over the side menu and the main screens. It runs as a separate design track (competing bold directions, judged, then the owner picks). Packages build on today's tokens and must not hard-code anything that would block a token-level re-theme.
-- **Open owner decisions; build so either answer is a small change:**
-  1. Can the chef see recipe plate cost, menu price and margin ₪? The default until answered is NO (hide them).
-  2. Is MISSING_ON_INVOICE claimable? W1-07 approvals say no, while `lib/claims`/LEAK_FILTER/letters count it. Nothing changes until the owner decides via a human-PR summary. W2-03/W2-08/W2-09 must not widen the disagreement, and they write their tests against one shared helper.
-  3. The recovery service's `overdueCount` and the reminders still use the older "acknowledged = overdue" rule. Align them to `followUps()`: W2-08 owns this.
+- **Owner decisions of 31.10 (evening) — these were open, now decided:**
+  1. **The chef sees ₪ in recipes:** plate cost, menu price and margin. (Elsewhere the chef sees ₪ only on the orders screens, also decided 31.10; the receiver sees no ₪ anywhere.) G-07 models both as chef capabilities; H-11's server strip exempts them; W2-07 drops the chef's %-only rule in recipes.
+  2. **MISSING_ON_INVOICE is NOT claimable.** No claim letter, recovery item or "claim" action for it, consistent with W1-07 approvals. The claims side (`lib/claims` `claimableLines`, the letters, `syncClaims`) is fixed in train A by W1-08. Whether it should also leave the leak figure (`LEAK_FILTER`) is a ₪-math change: a human-PR proposal with a Hebrew summary to the owner, so don't change `LEAK_FILTER` on a package branch.
+  3. **A credit demand is overdue after ONE WEEK (7 days)** from the letter (or the claim, if no letter went out). This replaces 14 days everywhere: `OVERDUE_DAYS`, `ANSWER_DAYS`, `followUps()`, the home overdue row, the copy "מעל 14 יום", and the letter's answer deadline. Use ONE shared constant. Train A (W1-08) changes the constant; W2-08/W2-10 build on it. The recovery service's `overdueCount` and the reminders still use the older "acknowledged = overdue" rule; aligning them to `followUps()` stays with W2-08.
 - **Known items assigned in wave 2:**
   - WorkerStatusBanner pushes content (CLS) when the heartbeat is stale; it moves out of flow (W2-15 or W1-04).
   - Receiver/chef ₪ in tRPC JSON is H-11 (human PR).
