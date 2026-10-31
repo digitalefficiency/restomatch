@@ -8,6 +8,9 @@ export const en: Shape<typeof he> = {
   links: {
     home: 'Home',
     forbidden: 'No access',
+    labTokens: 'Design lab',
+    labDesk: 'Desk lab',
+    labDeskRow: 'Row',
     approvals: 'Approvals',
     payRun: 'Pay run',
     inbox: 'Incoming invoices',

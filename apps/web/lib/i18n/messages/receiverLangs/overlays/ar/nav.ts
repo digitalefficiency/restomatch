@@ -9,6 +9,9 @@ export const nav: Shape<typeof he> = {
   links: {
     home: 'الرئيسية',
     forbidden: 'لا توجد صلاحية',
+    labTokens: 'مختبر التصميم',
+    labDesk: 'مختبر الجداول',
+    labDeskRow: 'صف',
     approvals: 'الموافقات',
     payRun: 'دفعة المدفوعات',
     inbox: 'الفواتير الواردة',
