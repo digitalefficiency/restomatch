@@ -6,6 +6,7 @@ import { LogIn, WifiOff } from 'lucide-react';
 import { Button, cn, Field, Input } from '@/lib/components';
 import { useT } from '@/lib/i18n/client';
 import { common } from '@/lib/i18n/messages/common';
+import { useOfflineChipClaimed } from './offlineChipOwner';
 import { useOnline } from './online';
 import { switchBranchAction } from '@/app/dashboard/branch-actions';
 import { abandonReauth, completeReauth, dismissReauth, useReauthOpen } from './reauth';
@@ -37,6 +38,8 @@ export function ShellResilience() {
 function OfflineChip() {
   const t = useT(common);
   const online = useOnline();
+  // A route with its own, richer offline chip (receiving: queued photos) owns the spot.
+  const yielded = useOfflineChipClaimed();
   return (
     // The live region is always mounted, so the chip appearing is announced.
     <div
@@ -44,7 +47,7 @@ function OfflineChip() {
       aria-live="polite"
       className="pointer-events-none fixed inset-x-0 top-[calc(var(--rm-header-h,4.25rem)+0.5rem)] z-40 flex justify-center px-4 lg:top-[calc(var(--rm-header-h,7.25rem)+0.5rem)]"
     >
-      {online ? null : (
+      {online || yielded ? null : (
         <p
           data-testid="offline-chip"
           className="pointer-events-auto inline-flex max-w-full items-center gap-2 rounded-full border border-line bg-surface px-3.5 py-2 text-sm font-semibold text-ink shadow-card"

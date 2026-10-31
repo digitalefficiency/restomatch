@@ -661,6 +661,84 @@ test('sign-out with a queued invoice photo offline: a sheet names the count; "wa
   await context.setOffline(false);
 });
 
+test('offline with a queued photo on a delivery: exactly one status chip, and "N waiting" is not covered (W1-04 seam)', async ({
+  page,
+  context,
+}) => {
+  const sql = e2eSql();
+  let userId = '';
+  let restaurantId = '';
+  let poId = '';
+  try {
+    const [u] = await sql<{ id: string; rid: string }[]>`
+      select u.id, m.restaurant_id as rid from users u join memberships m on m.user_id = u.id
+      join restaurants r on r.id = m.restaurant_id where u.email = ${RECEIVER} and r.name = ${DEMO_RESTAURANT_NAME} limit 1`;
+    userId = u!.id;
+    restaurantId = u!.rid;
+    const [po] = await sql<{ id: string }[]>`
+      select id from purchase_orders where restaurant_id = ${restaurantId} and status = 'sent' order by created_at limit 1`;
+    poId = po!.id;
+  } finally {
+    await sql.end();
+  }
+  await page.goto(`/dashboard/receiving/${poId}`);
+  await page.evaluate(
+    ({ userId, restaurantId, poId }) =>
+      new Promise<void>((resolve, reject) => {
+        const req = indexedDB.open('restomatch-receiver', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('photos', { keyPath: 'clientUploadId' });
+        req.onsuccess = () => {
+          const tx = req.result.transaction('photos', 'readwrite');
+          tx.objectStore('photos').put({
+            clientUploadId: '22222222-2222-4222-8222-222222222222',
+            restaurantId,
+            userId,
+            poId,
+            supplierId: '00000000-0000-4000-8000-000000000000',
+            supplierName: 'e2e',
+            mimeType: 'image/png',
+            blob: new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }),
+            createdAt: Date.now(),
+            attempts: 0,
+            lastError: null,
+          });
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        };
+        req.onerror = () => reject(req.error);
+      }),
+    { userId, restaurantId, poId },
+  );
+  await context.setOffline(true);
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event('offline'));
+    window.dispatchEvent(new Event('rm-receiver-queue'));
+  });
+  await expect(page.getByTestId('pwa-offline-banner')).toBeVisible();
+  await expect(page.getByTestId('pwa-queue-count')).toBeVisible();
+  // One chip, one announcement: the shell's generic chip yields to the PWA chip.
+  await page.waitForTimeout(500);
+  await expect(page.getByTestId('offline-chip')).toHaveCount(0);
+  const uncovered = await page.getByTestId('pwa-queue-count').evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return !!hit && (hit === el || el.contains(hit));
+  });
+  expect(uncovered, '"N waiting" is readable — nothing paints over it').toBe(true);
+  await context.setOffline(false);
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        const req = indexedDB.open('restomatch-receiver', 1);
+        req.onsuccess = () => {
+          const tx = req.result.transaction('photos', 'readwrite');
+          tx.objectStore('photos').delete('22222222-2222-4222-8222-222222222222');
+          tx.oncomplete = () => resolve();
+        };
+      }),
+  );
+});
+
 test('CLS on the deliveries list and the Delivery Check stays ≤ 0.05 at 4× CPU', async ({ page }) => {
   test.setTimeout(120_000);
   const po = await freshPo('cls');

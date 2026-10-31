@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CloudOff, Download, Loader2, UploadCloud } from 'lucide-react';
+import { claimOfflineChip } from '@/lib/net/offlineChipOwner';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
 import { ingest } from '@/lib/i18n/messages/ingest';
@@ -103,6 +104,10 @@ export function ReceiverPwa({ restaurantId, userId }: { restaurantId: string; us
   }, [attributed]);
 
   const names = [...new Set(attributed.map((a) => a.capturedByName ?? tr('pwa.someoneElse')))].join(', ');
+
+  // This chip (offline + queued-photo count) is the one offline indicator on
+  // receiving routes; the shell's generic chip yields while it is mounted.
+  useEffect(() => claimOfflineChip(), []);
 
   useEffect(() => {
     setOnline(navigator.onLine);
