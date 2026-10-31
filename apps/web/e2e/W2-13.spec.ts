@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { interpolate } from '../lib/i18n/translate';
+import { OWNER_STATE } from './env';
 import { loginViaMagicLink } from './helpers';
 
 /**
@@ -13,11 +14,13 @@ const AXE = readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.mi
 const DESKTOP = { viewport: { width: 1440, height: 900 } };
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
 
+/** The owner reuses the session auth.setup saved (one magic link per run: the link is rate-limited). */
 async function asRole(browser: Browser, email: string, opts: Parameters<Browser['newContext']>[0], baseURL: string) {
-  const context = await browser.newContext({ ...opts, baseURL });
+  const owner = email === 'owner@kfar-hazeitim.test';
+  const context = await browser.newContext({ ...opts, baseURL, ...(owner ? { storageState: OWNER_STATE } : {}) });
   await context.addCookies([{ name: 'rm_cookie_consent', value: 'necessary', url: baseURL }]);
   const page = await context.newPage();
-  await loginViaMagicLink(page, email);
+  if (!owner) await loginViaMagicLink(page, email);
   return { context, page };
 }
 
