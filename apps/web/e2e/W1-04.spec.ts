@@ -104,7 +104,7 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   const sql = e2eSql();
   try {
-    await sql`grant select on purchase_orders to restomatch_app`.catch(() => {});
+    await sql`grant select on invitations to restomatch_app`.catch(() => {});
     if (secondId) await sql`delete from restaurants where id = ${secondId}`;
     if (strangerId) await sql`delete from restaurants where id = ${strangerId}`;
     if (billingId) {
@@ -206,19 +206,21 @@ test.describe('in-shell not-found and error (perf-states-09)', () => {
     await signIn(context, page, DEMO_OWNER_EMAIL);
     const sql = e2eSql();
     try {
-      // Only the orders page reads purchase_orders on the server (not the layout).
-      await sql`revoke select on purchase_orders from restomatch_app`;
-      await page.goto('/dashboard/orders');
+      // The team page lets a failed server read reach the route boundary (the
+      // orders page now shows its own in-page error, W1-11); only it reads
+      // invitations — the layout does not.
+      await sql`revoke select on invitations from restomatch_app`;
+      await page.goto('/dashboard/team');
       await expect(page.getByTestId('dashboard-error')).toBeVisible();
       await expect(page.getByRole('heading', { level: 1 })).toHaveText('לא הצלחנו לטעון את הדף');
       await expectShell(page);
       expect(await axe(page), 'axe on the in-shell error').toEqual([]);
-      await sql`grant select on purchase_orders to restomatch_app`;
+      await sql`grant select on invitations to restomatch_app`;
       await page.getByTestId('dashboard-error-retry').click();
       await expect(page.getByTestId('dashboard-error')).toHaveCount(0);
-      expect(new URL(page.url()).pathname).toBe('/dashboard/orders');
+      expect(new URL(page.url()).pathname).toBe('/dashboard/team');
     } finally {
-      await sql`grant select on purchase_orders to restomatch_app`;
+      await sql`grant select on invitations to restomatch_app`;
       await sql.end();
       await context.close();
     }
@@ -249,7 +251,8 @@ test.describe('branch switch keeps the place (ia-nav-08, exec-desktop-23)', () =
     await page.getByTestId('branch-switcher').click();
     await page.getByTestId('branch-option').filter({ hasText: SECOND_BRANCH }).click();
     await page.waitForURL((u) => u.pathname === '/dashboard/suppliers');
-    await expect(page.getByRole('status').filter({ hasText: 'פתחנו את ספקים' })).toBeVisible();
+    // Toast v2 cards are [data-toast] (the announcement goes through the shared live region).
+    await expect(page.locator('[data-toast]').filter({ hasText: 'פתחנו את ספקים' })).toBeVisible();
     await context.close();
   });
 
@@ -309,7 +312,8 @@ test.describe('connectivity and session layer (perf-states-08, -15)', () => {
     const page = await context.newPage();
     await signIn(context, page, DEMO_OWNER_EMAIL);
     await page.goto(`/dashboard/go?r=${mainId}&to=/dashboard/approvals`);
-    const approve = page.getByRole('button', { name: 'אשר', exact: true }).first();
+    // W1-07's approve verb names the claim: "דרוש <₪> מהספק".
+    const approve = page.getByRole('button', { name: /^דרוש .* מהספק$/ }).first();
     await expect(approve).toBeVisible();
     // Requests that reached the server (an offline attempt fails in the browser).
     let approveCalls = 0;
@@ -323,7 +327,7 @@ test.describe('connectivity and session layer (perf-states-08, -15)', () => {
     expect(await axe(page).catch(() => []), 'axe with the offline chip').toEqual([]);
 
     await approve.click();
-    await expect(page.getByRole('alert').filter({ hasText: 'הפעולה נכשלה' })).toBeVisible({ timeout: 2_000 });
+    await expect(page.getByRole('alert').filter({ hasText: 'ההחלטה לא נשמרה' })).toBeVisible({ timeout: 2_000 });
     await expect(approve).not.toHaveAttribute('aria-busy', 'true');
 
     await context.setOffline(false);
