@@ -13,6 +13,7 @@ import { idbQueueStore, queueDbExists, QUEUE_EVENT } from '@/lib/pwa/offlineQueu
  * privacy stays with PwaSessionGuard: other users' items are dropped at the next
  * sign-in, and an explicit sign-out still clears the queue.
  */
+// TODO(W2-05): read the count via W1-06's pendingCountOnDevice() once wave 2 adopts it.
 export function QueuedPhotosNote() {
   const t = useT(authMessages);
   const [count, setCount] = useState(0);

@@ -16,7 +16,10 @@ export interface PortalLine {
   agreed: boolean;
 }
 
-/** "12", "7.5", "7,5", "0" → number ≥ 0; anything else null. */
+/**
+ * "12", "7.5", "7,5", "0" → number ≥ 0; anything else null.
+ * TODO(G-13): switch to the shared number-input parser once it lands.
+ */
 export function parseQty(raw: string): number | null {
   const s = raw.trim().replace(',', '.');
   if (!/^\d+(?:\.\d{1,3})?$/.test(s)) return null;

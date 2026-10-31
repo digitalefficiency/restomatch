@@ -24,7 +24,10 @@ type ErrorKey = 'notFound' | 'expired' | 'rateLimited' | 'generic';
 const inputClass =
   'mt-1 block min-h-12 w-full rounded-lg border bg-surface px-3 py-2.5 text-base text-ink tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 
-/** ₪ in a plain `<bdi>` — no `dir`, so in Hebrew the ₪ sits left of the digits (E4). */
+/**
+ * ₪ in a plain `<bdi>` — no `dir`, so in Hebrew the ₪ sits left of the digits (E4).
+ * TODO(W2-15): adopt W1-01's `<Money context="line">` (no cross-package imports in wave 1).
+ */
 function Ils({ agorot, locale }: { agorot: number; locale: 'he' | 'en' }) {
   return <bdi className="tabular-nums">{formatIls(agorot / 100, { locale, maximumFractionDigits: 2 })}</bdi>;
 }
