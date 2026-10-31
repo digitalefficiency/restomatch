@@ -10,6 +10,11 @@ import { CredentialsSignin } from 'next-auth';
  * It reveals no account state: the limiters key on any email string and the IP,
  * never on whether the account exists or is locked. A wrong password and the
  * per-account DB lockout stay the plain, uniform CredentialsSignin.
+ *
+ * Accepted residual (warden, PR #221): because a success clears the per-account
+ * counter, "rate" vs "wrong password" can hint whether an address had recent
+ * successful logins — a weak account-activity signal; a timing channel already
+ * existed, and the probe itself spends the attacker's own attempts.
  */
 export class LoginRateLimited extends CredentialsSignin {
   override code = 'rate';

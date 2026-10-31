@@ -83,6 +83,7 @@ export const en: Shape<typeof he> = {
       submit: 'Sign in',
       submitting: 'Signing in…',
       wrong: 'Wrong email or password, or too many attempts. Try again in a moment.',
+      rate: 'Too many attempts. Try again later.',
       magicLink: 'No password? Email me a sign-in link',
       magicSent: 'We sent a sign-in link to {email}. Open it, then come back to this tab — we will continue from here.',
       magicFailed: 'We could not send the link. Try again in a moment.',
