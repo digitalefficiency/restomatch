@@ -31,7 +31,7 @@ const PHONE = { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile:
 
 async function open(page: Page, path: string, { locale = 'he' as Locale, consent = true } = {}) {
   const url = test.info().project.use.baseURL ?? 'http://localhost:3100';
-  const cookies = [{ name: 'rm_locale', value: locale, url }];
+  const cookies: { name: string; value: string; url: string }[] = [{ name: 'rm_locale', value: locale, url }];
   if (consent) cookies.push({ name: 'rm_cookie_consent', value: 'necessary', url });
   await page.context().addCookies(cookies);
   const res = await page.goto(path, { waitUntil: 'load' });
