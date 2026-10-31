@@ -6,6 +6,7 @@ import { en as ovEn } from '../lib/i18n/messages/overview/en';
 import { he as apHe } from '../lib/i18n/messages/approvals/he';
 import { DEMO_RESTAURANT_NAME, OWNER_STATE } from './env';
 import { e2eSql, loginViaMagicLink } from './helpers';
+import { seededLeakMonth } from './seededMonth';
 
 /**
  * W1-05 · Role homes ("Today") and the receiving board, with an honest leak hero.
@@ -221,6 +222,17 @@ test.describe('owner home', () => {
     // No target line (R-14 default) and no full-month "חודש קודם" caption in the hero.
     await expect(page.getByTestId('leak-hero')).not.toContainText('יעד');
     await expect(page.getByTestId('leak-hero')).not.toContainText('חודש קודם');
+    // In a month's first days the seed's leak is all last month's (e2e/seededMonth.ts): this month
+    // has no leak yet, so the hero is honestly in a non-leak state (nothing checked / only invoices
+    // waiting for a PO link / clean) — never a leak amount, and no delta before there is a leak.
+    if ((await seededLeakMonth(page.request)) === -1) {
+      const state = await page.getByTestId('leak-hero').getAttribute('data-state');
+      expect(['noData', 'pendingOnly', 'clean'], `hero state with ₪0 leak this month`).toContain(state);
+      if (state !== 'clean') await expect(page.getByTestId('leak-hero-delta')).toHaveCount(0);
+      test.info().annotations.push({ type: 'month-start', description: 'this month has no leak yet: hero no-data state asserted, delta / ₪ position next month-day' });
+      expect(await axeSerious(page)).toEqual([]);
+      return;
+    }
     // The delta compares the same day-span ("לעומת 1–25 בספטמבר"), never the whole previous month.
     const delta = page.getByTestId('leak-hero-delta');
     await expect(delta).toBeVisible();

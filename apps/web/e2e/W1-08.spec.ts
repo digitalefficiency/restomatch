@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { DEMO_RESTAURANT_NAME, OWNER_STATE } from './env';
+import { explorerQuery, monthQuery, seededLeakMonth, seededMonthKey } from './seededMonth';
 import { collectPageErrors, e2eSql } from './helpers';
 
 /**
@@ -23,7 +24,9 @@ const at2dp = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 
 
 test('breakdown: the invoice rows add up to the leak total, shown to the agora', async ({ page }) => {
   const errors = collectPageErrors(page);
-  await page.goto('/dashboard/leaks/breakdown');
+  // The month the seed populated (last month in a month's first days — e2e/seededMonth.ts).
+  await page.goto('/dashboard');
+  await page.goto(`/dashboard/leaks/breakdown${monthQuery(await seededLeakMonth(page.request))}`);
   const total = Number(await page.getByTestId('breakdown-total').getAttribute('data-amount'));
   expect(total).toBeGreaterThan(0);
   const rows = await amounts(page, 'breakdown-row');
@@ -37,7 +40,10 @@ test('breakdown: the invoice rows add up to the leak total, shown to the agora',
 });
 
 test('explorer: bars total = Σ bars; the T1 tile carries the exact leak, the cap note explains any gap; compare is on by default', async ({ page }) => {
-  await page.goto('/dashboard/leaks');
+  // The month the seed populated (last month in a month's first days — e2e/seededMonth.ts).
+  await page.goto('/dashboard');
+  const offset = await seededLeakMonth(page.request);
+  await page.goto(`/dashboard/leaks${explorerQuery(offset)}`);
   const rows = await amounts(page, 'chart-row');
   const total = Number(await page.getByTestId('chart-total').getAttribute('data-amount'));
   expect(sumAgora(rows)).toBe(agora(total));
@@ -50,8 +56,8 @@ test('explorer: bars total = Σ bars; the T1 tile carries the exact leak, the ca
   else await expect(page.getByTestId('explorer-cap-note')).toHaveCount(0);
   // A plain substring check — no hand-built regex from a number.
   expect(await tile.getAttribute('title')).toContain(at2dp(leak));
-  // "מול 1–25 בספט׳": the default compare is the aligned previous period.
-  await expect(page.locator('main')).toContainText(/מול 1–\d+/);
+  // "מול 1–25 בספט׳": the default (open-month) view compares the aligned previous period.
+  if (offset === 0) await expect(page.locator('main')).toContainText(/מול 1–\d+/);
 });
 
 test('no data yet: the CTA starts where the home does (receiving), never the flag-gated inbox', async ({ page }) => {
@@ -70,9 +76,12 @@ test('no data yet: the CTA starts where the home does (receiving), never the fla
 
 test('proof: the top catches plus "and N more" add up to the number', async ({ page }) => {
   // An independent source: the breakdown's per-invoice rows (the proof's "rest" is derived, so it can't check itself).
-  await page.goto('/dashboard/leaks/breakdown');
+  // Both read the month the seed populated (last month in a month's first days — e2e/seededMonth.ts).
+  await page.goto('/dashboard');
+  const m = monthQuery(await seededLeakMonth(page.request));
+  await page.goto(`/dashboard/leaks/breakdown${m}`);
   const invoiceRows = (await amounts(page, 'breakdown-row')).map(agora);
-  await page.goto('/dashboard/leaks/proof');
+  await page.goto(`/dashboard/leaks/proof${m}`);
   const leak = Number((await page.getByTestId('proof-leak').innerText()).replace(/[^\d.]/g, ''));
   const catches = await page.getByTestId('proof-catch-amount').evaluateAll((els) =>
     els.map((e) => Number((e.textContent ?? '').replace(/[^\d.]/g, ''))),
@@ -213,9 +222,15 @@ test('recovery: "the money came back" names the ₪ credited (never ₪0) and, o
 });
 
 test('report: like-for-like compare, the money partition adds up', async ({ page }) => {
-  await page.goto('/dashboard/leaks/report');
-  await expect(page.getByTestId('report-compare')).toContainText(/1–\d+ .+ מול 1–\d+/);
-  await expect(page.getByTestId('report-freshness')).toContainText(/פתוח/);
+  // The month the seed populated (last month in a month's first days — e2e/seededMonth.ts).
+  await page.goto('/dashboard');
+  const offset = await seededLeakMonth(page.request);
+  await page.goto(offset === 0 ? '/dashboard/leaks/report' : `/dashboard/leaks/report?month=${seededMonthKey(offset)}`);
+  if (offset === 0) {
+    // The open month: like-for-like ("1–25 … מול 1–25 …") and marked as still open.
+    await expect(page.getByTestId('report-compare')).toContainText(/1–\d+ .+ מול 1–\d+/);
+    await expect(page.getByTestId('report-freshness')).toContainText(/פתוח/);
+  }
   await expect(page.getByTestId('report-subtitle')).toContainText(DEMO_RESTAURANT_NAME);
   const parts = await amounts(page, 'report-part');
   const found = Number(await page.getByTestId('report-found').getAttribute('data-amount'));
@@ -254,7 +269,8 @@ test.describe('phone 390×844', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
   test('the T1 leak sits in the top half; the view bar is one button', async ({ page }) => {
-    await page.goto('/dashboard/leaks');
+    await page.goto('/dashboard');
+    await page.goto(`/dashboard/leaks${explorerQuery(await seededLeakMonth(page.request))}`);
     await expect(page.getByRole('button', { name: /^תצוגה/ })).toBeVisible();
     const top = await page.getByTestId('explorer-leak').evaluate((el) => {
       // The lab-only worker banner is not part of the product (DoD-2).
@@ -266,7 +282,8 @@ test.describe('phone 390×844', () => {
   });
 
   test('the view sheet closes when the window widens past phone width (the page never goes inert)', async ({ page }) => {
-    await page.goto('/dashboard/leaks');
+    await page.goto('/dashboard');
+    await page.goto(`/dashboard/leaks${explorerQuery(await seededLeakMonth(page.request))}`);
     await page.getByRole('button', { name: /^תצוגה/ }).click();
     await expect(page.locator('dialog[open]')).toHaveCount(1);
     await page.setViewportSize({ width: 1280, height: 900 });
