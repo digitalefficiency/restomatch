@@ -2,6 +2,7 @@
 
 import { useGSAP } from '@gsap/react';
 import { gsap } from 'gsap';
+import { whenMotionOk } from '../_lib/motion';
 import {
   AlertCircle,
   CheckCircle2,
@@ -21,6 +22,7 @@ import { mockText } from '../_lib/mockText';
 import { supplierProfiles } from './suppliers/[supplierId]/_mock';
 import { dayMemo, invoiceAudits } from './invoices/_mock';
 import { MOCK_SUPPLIERS } from '../receiver/_mock';
+import { SAMPLE_CAUGHT_THIS_MONTH_ILS, ShowcaseEndCard } from '../_components/ShowcaseEndCard';
 
 interface Kpi {
   id: 'leak' | 'saved' | 'pending';
@@ -44,7 +46,7 @@ const KPIS: Kpi[] = [
   },
   {
     id: 'saved',
-    value: 12340,
+    value: SAMPLE_CAUGHT_THIS_MONTH_ILS,
     money: true,
     delta: 34,
     tone: 'good',
@@ -139,7 +141,7 @@ const flowEvents = dayMemo((): FlowEvent[] => {
     // INV-7821 closed at 08:18 with this line sent up for approval.
     id: '3',
     time: '08:18',
-    title: 'חריגת מחיר ממתינה לאישור',
+    title: 'פער מחיר ממתין לאישור',
     detail: `עגבניה שרי — עלייה ${tomatoPct}% מעל ממוצע 60 ימים`,
     type: 'flag',
   },
@@ -169,16 +171,16 @@ export default function DashboardShowcase() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useGSAP(
-    () => {
-      if (reducedMotion()) return;
-      gsap.from('.section-block', {
-        y: 30,
-        opacity: 0,
-        stagger: 0.15,
-        duration: 0.7,
-        ease: 'power3.out',
-      });
-    },
+    () =>
+      whenMotionOk(() => {
+        gsap.from('.section-block', {
+          y: 30,
+          opacity: 0,
+          stagger: 0.15,
+          duration: 0.7,
+          ease: 'power3.out',
+        });
+      }),
     { scope: containerRef },
   );
 
@@ -186,7 +188,7 @@ export default function DashboardShowcase() {
     <main ref={containerRef} className="max-w-7xl mx-auto px-4 sm:px-6 py-12 space-y-12">
       <div className="section-block">
         <div className="mb-2 h-0.5 w-12 rounded-full flow-stream" aria-hidden="true" />
-        <p className="text-xs uppercase ltr:tracking-[0.2em] rtl:text-sm text-primary font-semibold mb-2">
+        <p className="text-xs ltr:uppercase ltr:tracking-[0.2em] rtl:text-sm text-primary font-semibold mb-2">
           {t('dashboard.eyebrow')}
         </p>
         <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-2 text-ink">
@@ -209,6 +211,7 @@ export default function DashboardShowcase() {
           <LiveFlow />
         </div>
       </div>
+      <ShowcaseEndCard kind="dashboard" amountIls={SAMPLE_CAUGHT_THIS_MONTH_ILS} />
     </main>
   );
 }
@@ -223,10 +226,6 @@ function KpiRow() {
   );
 }
 
-/** Count-ups, entrances and the radar ping are skipped for prefers-reduced-motion. */
-function reducedMotion(): boolean {
-  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
 
 function KpiCard({ kpi }: { kpi: Kpi }) {
   const t = useT(showcase);
@@ -237,19 +236,21 @@ function KpiCard({ kpi }: { kpi: Kpi }) {
   useGSAP(
     () => {
       if (!numberRef.current) return;
-      if (reducedMotion()) return; // the server-rendered text is already the final value
-      const obj = { value: 0 };
-      gsap.to(obj, {
-        value: kpi.value,
-        duration: 1.6,
-        ease: 'power2.out',
-        onUpdate: () => {
-          if (numberRef.current) {
-            numberRef.current.textContent = kpi.money
-              ? formatIls(Math.round(obj.value), { locale })
-              : formatNumber(Math.round(obj.value), locale);
-          }
-        },
+      // Reduced motion: no count-up — the server-rendered text is already the final value.
+      return whenMotionOk(() => {
+        const obj = { value: 0 };
+        gsap.to(obj, {
+          value: kpi.value,
+          duration: 1.6,
+          ease: 'power2.out',
+          onUpdate: () => {
+            if (numberRef.current) {
+              numberRef.current.textContent = kpi.money
+                ? formatIls(Math.round(obj.value), { locale })
+                : formatNumber(Math.round(obj.value), locale);
+            }
+          },
+        });
       });
     },
     { scope: cardRef },
@@ -310,7 +311,7 @@ function KpiCard({ kpi }: { kpi: Kpi }) {
         </div>
       </div>
 
-      <div className="text-xs uppercase tracking-wider text-muted font-semibold mb-2">
+      <div className="text-xs ltr:uppercase ltr:tracking-wider text-muted font-semibold mb-2">
         {t(`dashboard.kpi.${kpi.id}`)}
       </div>
       <div className="font-mono text-3xl font-extrabold tabular-nums tracking-tight flex items-baseline gap-1">
@@ -358,7 +359,7 @@ function Heatmap() {
                   <div
                     key={`${pIdx}-${sIdx}`}
                     aria-hidden="true"
-                    className="m-0.5 flex aspect-square items-center justify-center rounded-md text-[10px] text-muted"
+                    className="m-0.5 flex aspect-square items-center justify-center rounded-md text-xs text-muted"
                     style={{ boxShadow: 'inset 0 0 0 1px rgba(15,31,23,0.08)' }}
                   >
                     ·
@@ -389,7 +390,7 @@ function Heatmap() {
                   onMouseLeave={() => setHover(null)}
                 >
                   <span
-                    className={`text-[10px] font-bold font-mono tabular-nums ${
+                    className={`text-xs font-bold font-mono tabular-nums ${
                       Math.abs(heat(cell.variance)) > 0.4 ? 'text-ink' : 'text-muted'
                     }`}
                   >
@@ -523,26 +524,27 @@ function LiveFlow() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useGSAP(
-    () => {
-      if (reducedMotion()) return;
-      gsap.from('.flow-event', {
-        x: -20,
-        opacity: 0,
-        stagger: 0.1,
-        duration: 0.5,
-        ease: 'power2.out',
-        delay: 0.3,
-      });
+    () =>
+      whenMotionOk(() => {
+        gsap.from('.flow-event', {
+          x: -20,
+          opacity: 0,
+          stagger: 0.1,
+          duration: 0.5,
+          ease: 'power2.out',
+          delay: 0.3,
+        });
 
-      gsap.to('.flow-radar', {
-        scale: 2.4,
-        opacity: 0,
-        duration: 1.6,
-        ease: 'power1.out',
-        repeat: -1,
-        stagger: 0.2,
-      });
-    },
+        gsap.to('.flow-radar', {
+          scale: 2.4,
+          opacity: 0,
+          duration: 1.6,
+          ease: 'power1.out',
+          // A few pings, then still (WCAG 2.2.2: nothing moves for more than 5 s unasked).
+          repeat: 2,
+          stagger: 0.2,
+        });
+      }),
     { scope: containerRef },
   );
 

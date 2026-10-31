@@ -13,12 +13,12 @@ git pull && scripts/demo-local.sh
 ```
 
 **כמה זמן זה לוקח:**
-- בפעם הראשונה 8–12 דקות. זה כולל הורדת Postgres/Redis (Docker או Homebrew) ובנייה של האפליקציה, שלוקחת 3–6 דקות.
+- בפעם הראשונה 8–12 דקות. זה כולל הורדת Postgres (Docker או Homebrew) ובנייה של האפליקציה, שלוקחת 3–6 דקות.
 - בכל הרצה אחרי זה כ-30 שניות, כי הבנייה נשמרת. כל הרצה מוחקת וזורעת מחדש את נתוני הדמו.
 
 **מה צריך במק:** Node 22 ו-pnpm. בנוסף **אחד** מאלה:
 - Docker Desktop פתוח;
-- Homebrew. אם אין Postgres, הסקריפט מתקין לבד `postgresql@16 pgvector redis`.
+- Homebrew. אם אין Postgres, הסקריפט מתקין לבד `postgresql@16 pgvector`.
 
 אם חסר משהו, הסקריפט עוצר ואומר בדיוק מה להתקין.
 
@@ -69,7 +69,7 @@ git pull && scripts/demo-local.sh
 scripts/demo-local.sh stop
 ```
 
-הפקודה עוצרת את האפליקציה ואת ה-worker. Postgres ו-Redis נשארים לרוץ, ואין בזה נזק. `scripts/demo-local.sh status` מראה מה רץ. הלוגים נמצאים ב-`.demo-local/`.
+הפקודה עוצרת את האפליקציה ואת ה-worker. Postgres נשאר לרוץ, ואין בזה נזק. `scripts/demo-local.sh status` מראה מה רץ. הלוגים נמצאים ב-`.demo-local/`.
 
 ## ✅ הערב: הרצת ניסיון אחת
 

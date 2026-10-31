@@ -8,9 +8,9 @@ import { collectPageErrors, e2eSql } from './helpers';
  * The stored PO status stays 'sent' after a receipt (buildMatchInput matches
  * invoices against sent/confirmed/partial POs), so the list derives the
  * displayed status from the PO's latest goods receipt. This walks the real
- * flow: open a fresh PO in the receiving wizard → (no OCR queue on the e2e
- * server, so it receives against the order) → every line "= order" → close
- * the receipt → /dashboard/orders shows "התקבלה" / "Received" for it, in Hebrew
+ * flow: open a fresh PO in the Delivery Check → "no invoice right now" →
+ * "everything arrived as ordered" → the blind spot check (W1-06, owner
+ * decision 20) counts both lines → the receipt closes → /dashboard/orders shows "התקבלה" / "Received" for it, in Hebrew
  * and English, at desktop and phone width. A receipt is not an invoice, so the
  * dashboard's leak ₪ must not move.
  */
@@ -27,12 +27,9 @@ const RECEIVED_LABEL: Record<Locale, string> = { he: 'התקבלה', en: 'Receiv
 const RECEIVED_FILTER: Record<Locale, string> = { he: 'התקבלו', en: 'Received' };
 const CANCEL_LABEL: Record<Locale, string> = { he: 'ביטול הזמנה', en: 'Cancel order' };
 
-const TINY_PNG = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
-  'base64',
-);
-
 let poId = '';
+/** po_line id → qty ordered, so the blind spot check can be answered with a true count. */
+const lineQty = new Map<string, number>();
 
 test.beforeAll(async () => {
   const sql = e2eSql();
@@ -50,9 +47,11 @@ test.beforeAll(async () => {
       values (${r.id}, ${sup.id}, now() + interval '1 hour', 'sent', 'manual', 'e2e-orders-received')
       returning id`;
     for (const [i, p] of prods.entries()) {
-      await sql`
+      const [line] = await sql<{ id: string }[]>`
         insert into po_lines (po_id, product_id, raw_description, qty_ordered, unit, unit_price_expected)
-        values (${po!.id}, ${p.id}, ${p.name}, ${3 + i}, 'ק״ג', ${12 + i * 4})`;
+        values (${po!.id}, ${p.id}, ${p.name}, ${3 + i}, 'ק״ג', ${12 + i * 4})
+        returning id`;
+      lineQty.set(line!.id, 3 + i);
     }
     poId = po!.id;
   } finally {
@@ -71,7 +70,8 @@ async function setLocale(page: Page, locale: Locale) {
 async function heroLeak(page: Page): Promise<string> {
   await page.goto('/dashboard');
   const hero = page.locator('section[aria-labelledby="leak-hero-label"]');
-  return (await hero.locator('p.font-mono').first().innerText()).trim();
+  // W1-05 (b73e4f35): the hero ₪ is a plain <bdi> under data-testid="leak-hero-amount" (never mono).
+  return (await hero.getByTestId('leak-hero-amount').first().innerText()).trim();
 }
 
 /** The status badge of this PO's row: the table row on desktop, the card on phone. */
@@ -95,24 +95,19 @@ test('open PO → receive "= order" → close → the orders list says received'
   await expect(rowStatus(page)).toHaveAttribute('data-status', 'sent');
 
   await page.goto(`/dashboard/receiving/${poId}`);
-  await page.locator('input[type="file"]').setInputFiles({ name: 'invoice.png', mimeType: 'image/png', buffer: TINY_PNG });
-  await expect(page.getByText(/^נשמר · scan-/)).toBeVisible({ timeout: 60_000 });
-  await page.getByRole('button', { name: /^עבד את החשבונית/ }).click();
-  // No OCR result comes: without a queue the wizard receives against the order
-  // at once; with one (REDIS_URL set, no worker) the receiver stops waiting
-  // after 30 s and receives against the order.
-  const adjust = page.getByTestId('continue-adjust');
-  const skip = page.getByTestId('skip-ocr-wait');
-  await expect(adjust.or(skip)).toBeVisible({ timeout: 60_000 });
-  if (await skip.isVisible()) await skip.click();
-  await adjust.click();
-  for (const card of await page.locator('.adjust-card').all()) {
-    if (!(await card.isVisible())) continue;
-    const btn = card.getByRole('button', { name: /^= הזמנה/ });
-    if (await btn.isVisible()) await btn.click();
+  // W1-06 Delivery Check: no invoice right now → everything arrived as ordered →
+  // the blind spot check (never shows the order) → the receipt closes.
+  await page.getByTestId('scan-no-invoice').click();
+  await expect(page.getByTestId('delivery-check')).toBeVisible({ timeout: 30_000 });
+  await page.getByTestId('all-arrived').click();
+  const panel = page.getByTestId('spot-check');
+  await expect(panel).toBeVisible();
+  const rows = panel.getByTestId('spot-line');
+  for (let i = 0; i < (await rows.count()); i += 1) {
+    const id = (await rows.nth(i).getAttribute('data-key'))!.replace(/^po-/, '');
+    await rows.nth(i).getByTestId('spot-qty').fill(String(lineQty.get(id)));
   }
-  await expect(page.getByTestId('close-receipt')).toBeEnabled({ timeout: 15_000 });
-  await page.getByTestId('close-receipt').click();
+  await panel.getByTestId('spot-confirm').click();
   await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 60_000 });
 
   expect(await heroLeak(page), 'a goods receipt does not move the leak ₪').toBe(leakBefore);

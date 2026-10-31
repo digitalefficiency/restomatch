@@ -13,8 +13,8 @@ import { authDb } from '@/lib/authDb';
 import { enforceRateLimit, trustedProxyHops } from '@/lib/rateLimit';
 
 // Per-IP limits on the sensitive/unauthenticated tRPC procedures (defense in
-// depth on top of each procedure's own validation). Redis-backed when REDIS_URL
-// is set, in-memory otherwise (enforceRateLimit fails open). D1.6.
+// depth on top of each procedure's own validation). Postgres-backed (0061
+// rate_limit_counters), in-memory without a database (enforceRateLimit fails open). D1.6.
 //  - leads.create: public, unauthenticated write surface (caps volume).
 //  - team.acceptInvite: token-redemption surface — throttle invite-token probing.
 const PER_PROCEDURE_LIMITS: Array<{ procedure: string; opts: RateLimitOptions }> = [

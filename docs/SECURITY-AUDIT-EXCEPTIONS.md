@@ -147,5 +147,19 @@ Newly **baselined** (no patched release in the major we use):
 
 | GHSA | Package | Sev | Why acceptable, and until when |
 |---|---|---|---|
-| GHSA-mrhx-c7xc-m3w5 | zod <4.6.6 (we use ^3.24.1; the only fix is zod ≥4.6.6) | high | Memory exhaustion while validating *oversized constrained collections*. On `main` the only unauthenticated tRPC procedures are `leads.*` and `plans.*`, whose inputs contain no arrays/records/sets/maps; every other input needs a session, and Vercel caps request bodies at 4.5 MB. **Expires with the zod 4 migration** (tracked follow-up). Any new public endpoint that validates a collection (wave-1 leak check, WhatsApp/e-mail ingest webhooks) must cap the raw body size before zod parses it, or this exception no longer holds. |
+| GHSA-mrhx-c7xc-m3w5 | zod <4.6.6 (we use ^3.24.1; the only fix is zod ≥4.6.6) | high | Memory exhaustion while validating *oversized constrained collections*. On `main` the only unauthenticated tRPC procedures are `leads.*` and `plans.*`, whose inputs contain no arrays/records/sets/maps; every other input needs a session, and Vercel caps request bodies at 4.5 MB. **Expires with the zod 4 migration** (tracked follow-up). Any new public endpoint that validates a collection must cap the raw body size before zod parses it, or this exception no longer holds. **Wave-1 public zod inputs (checked at the wave-1 integration):** `growth.pricing` (public tRPC query; `{cycle, branches}` scalars only, no collections); `/api/ingest/whatsapp/[token]` and `/api/ingest/email` (zod parses the payload's arrays only *after* the raw body is read with a hard cap — `INGEST_LIMITS.whatsappBodyBytes` 256 KB / `emailBodyBytes` 20 MB, `packages/api/src/ingest/http.ts` `readBody` → 413 — and after the X-Hub-Signature-256 / Standard-Webhooks HMAC check; every array in `packages/ingest/src/payloads.ts` is also `.max()`-bounded). The public leak check (`/api/leak-check/*`) does not use zod (body capped at `MAX_BODY_BYTES` 4.4 MB). |
 
+
+## 2026-10-31 refresh (pre-pilot)
+
+Six new high advisories, all reached only through the frozen `apps/mobile` Expo tree (owner decision 2026-10-25: the old mobile app is frozen; it is not deployed), turned the gate red on every branch:
+
+| Package | Fix |
+|---|---|
+| node-forge ≤1.4.0 (via `expo` → `@expo/cli`): GHSA-7wch-p9px-956x, GHSA-jc66-7q78-782g, GHSA-8hrf-8g6f-7xwp, GHSA-hqq3-7jhf-c5jx, GHSA-5x38-2vff-x55p | **Fixed**: `pnpm.overrides` `node-forge@<1.4.1` → `^1.4.1` (resolves 1.4.2, a patch release). |
+
+Newly **baselined**:
+
+| GHSA | Package | Sev | Why acceptable, and until when |
+|---|---|---|---|
+| GHSA-qr28-fpjm-wq7f | decode-uri-component ≤0.5.0 (via `expo-router` → `query-string@7`) | high | The only fix is 0.5.1, which is ESM-only, while its consumer `query-string@7` is CommonJS. Forcing it would risk breaking the Expo router at runtime for no deployed benefit. Reached only through the frozen `apps/mobile` app, which is not in the deployed surface. **Expires** when `apps/mobile` is removed or unfrozen (then upgrade `expo-router`). |

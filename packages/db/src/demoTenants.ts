@@ -141,6 +141,39 @@ export async function demoTenantRowCounts(sql: Sql, t: DemoTenants): Promise<Rec
 }
 
 /**
+ * Restaurant-scoped tables that are infrastructure, not tenant data, and change
+ * on their own while the reseed runs. `job_queue` (0061): the running worker's
+ * cron adds a row every 60 s (outbox-dispatch) and every 5 min (ocr-sweep) with
+ * restaurant_id NULL, an ocr-sweep retry carries the stuck tenant's id, and
+ * maintenance prunes finished jobs after 7 days. Counting it made a reseed that
+ * crossed a cron tick fail "NON-demo row counts changed" with nothing changed.
+ */
+export const FINGERPRINT_SKIPPED_TABLES: readonly string[] = ['job_queue'];
+
+/**
+ * Row counts of every restaurant-scoped table OUTSIDE the demo tenants (+ users,
+ * restaurants), taken before and after the production reseed: they must match.
+ * The worker's own queue is left out (FINGERPRINT_SKIPPED_TABLES).
+ */
+export async function nonDemoFingerprint(sql: Sql, demoRids: string[], demoUids: string[]): Promise<Record<string, number>> {
+  const rids = demoRids.length ? demoRids : ['00000000-0000-0000-0000-000000000000'];
+  const uids = demoUids.length ? demoUids : ['00000000-0000-0000-0000-000000000000'];
+  const tables = (await sql`
+    select c.relname as t from pg_class c join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+    join pg_attribute a on a.attrelid = c.oid and a.attname = 'restaurant_id' and not a.attisdropped
+    where c.relkind in ('r', 'p') order by 1
+  `) as unknown as Array<{ t: string }>;
+  const out: Record<string, number> = {};
+  for (const { t } of tables) {
+    if (FINGERPRINT_SKIPPED_TABLES.includes(t)) continue;
+    out[t] = Number((await sql`select count(*)::int as n from ${sql(t)} where restaurant_id is null or restaurant_id not in ${sql(rids)}`)[0]!.n);
+  }
+  out.restaurants = Number((await sql`select count(*)::int as n from restaurants where id not in ${sql(rids)}`)[0]!.n);
+  out.users = Number((await sql`select count(*)::int as n from users where id not in ${sql(uids)}`)[0]!.n);
+  return out;
+}
+
+/**
  * Delete the demo tenants, their users and billing accounts in ONE transaction
  * (cascading FKs remove everything under them). Re-checks the safety rules inside
  * the transaction. Returns the counts that were removed. A second call finds

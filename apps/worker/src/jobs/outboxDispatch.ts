@@ -24,10 +24,11 @@ import {
   isWhatsAppCloudConfigured,
   makeResendDispatcher,
   WhatsAppCloudNotifier,
+  type EmailAttachment,
   type NotificationPayload,
 } from '@restomatch/api';
 import { eq, notificationsOutbox, sql } from '@restomatch/db';
-import { makeWorker } from '../queue';
+import { makeWorker, type WorkerJob } from '../queue';
 import { jobDb } from '../db';
 
 export interface OutboxDispatchJob {
@@ -51,108 +52,125 @@ interface ClaimedRow {
   attempt_count: number;
 }
 
+/** Email attachments ride in `payload.__attachments` (e.g. the order PDF). */
+export function readAttachments(payload: Record<string, unknown> | null): EmailAttachment[] | undefined {
+  const raw = payload?.__attachments;
+  if (!Array.isArray(raw)) return undefined;
+  const out = raw.filter(
+    (a): a is EmailAttachment =>
+      !!a && typeof a === 'object' &&
+      typeof (a as EmailAttachment).filename === 'string' &&
+      typeof (a as EmailAttachment).contentBase64 === 'string',
+  );
+  return out.length ? out : undefined;
+}
+
 export function startOutboxDispatchWorker() {
-  return makeWorker<OutboxDispatchJob>('outbox-dispatch', async (job) => {
-    const url = process.env.DATABASE_URL;
-    if (!url) throw new Error('DATABASE_URL is required');
-    const db = jobDb(url);
+  return makeWorker<OutboxDispatchJob>('outbox-dispatch', processOutboxDispatch);
+}
 
-    const batchSize = job.data.batchSize ?? 50;
+/** The outbox-dispatch job: run by the worker loop (above) and by the serverless runner (handlers.ts). */
+export async function processOutboxDispatch(job: WorkerJob<OutboxDispatchJob>) {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error('DATABASE_URL is required');
+  const db = jobDb(url);
 
-    // Atomically CLAIM a batch: flip queued -> sending and stamp claimed_at in a
-    // single statement whose subquery locks the chosen rows FOR UPDATE SKIP
-    // LOCKED. Concurrent workers/ticks therefore never select the same row, so
-    // a notification (and thus a PO send) is dispatched by exactly one worker —
-    // no double-send. The old SELECT-then-UPDATE had a race window between the
-    // unlocked read and the write where two ticks could both grab a row.
-    const claimed = (await db.execute(sql`
-      UPDATE ${notificationsOutbox}
-      SET status = 'sending', claimed_at = now()
-      WHERE id IN (
-        SELECT id FROM ${notificationsOutbox}
-        WHERE status = 'queued' AND scheduled_at <= now()
-        ORDER BY scheduled_at
-        FOR UPDATE SKIP LOCKED
-        LIMIT ${batchSize}
-      )
-      RETURNING id, restaurant_id, channel, target, subject, body, payload,
-                related_entity_type, related_entity_id, attempt_count
-    `)) as unknown as ClaimedRow[];
+  const batchSize = job.data.batchSize ?? 50;
 
-    if (claimed.length === 0) {
-      return { dispatched: 0, failed: 0 };
-    }
+  // Atomically CLAIM a batch: flip queued -> sending and stamp claimed_at in a
+  // single statement whose subquery locks the chosen rows FOR UPDATE SKIP
+  // LOCKED. Concurrent workers/ticks therefore never select the same row, so
+  // a notification (and thus a PO send) is dispatched by exactly one worker —
+  // no double-send. The old SELECT-then-UPDATE had a race window between the
+  // unlocked read and the write where two ticks could both grab a row.
+  const claimed = (await db.execute(sql`
+    UPDATE ${notificationsOutbox}
+    SET status = 'sending', claimed_at = now()
+    WHERE id IN (
+      SELECT id FROM ${notificationsOutbox}
+      WHERE status = 'queued' AND scheduled_at <= now()
+      ORDER BY scheduled_at
+      FOR UPDATE SKIP LOCKED
+      LIMIT ${batchSize}
+    )
+    RETURNING id, restaurant_id, channel, target, subject, body, payload,
+              related_entity_type, related_entity_id, attempt_count
+  `)) as unknown as ClaimedRow[];
 
-    let dispatched = 0;
-    let failed = 0;
-    let skipped = 0;
+  if (claimed.length === 0) {
+    return { dispatched: 0, failed: 0 };
+  }
 
-    for (const claimedRow of claimed) {
-      const row = {
-        id: claimedRow.id,
-        restaurantId: claimedRow.restaurant_id,
-        channel: claimedRow.channel,
-        target: claimedRow.target,
-        subject: claimedRow.subject,
-        body: claimedRow.body,
-        html: typeof claimedRow.payload?.__html === 'string' ? claimedRow.payload.__html : undefined,
-        relatedEntityType: claimedRow.related_entity_type,
-        relatedEntityId: claimedRow.related_entity_id,
-        attemptCount: claimedRow.attempt_count,
-      };
-      try {
-        const outcome = await dispatch(row);
-        if (outcome === 'no_provider') {
-          await db
-            .update(notificationsOutbox)
-            .set({ status: 'failed', lastError: SKIPPED_NO_PROVIDER, claimedAt: null })
-            .where(eq(notificationsOutbox.id, row.id));
-          skipped += 1;
-          continue;
-        }
+  let dispatched = 0;
+  let failed = 0;
+  let skipped = 0;
+
+  for (const claimedRow of claimed) {
+    const row = {
+      id: claimedRow.id,
+      restaurantId: claimedRow.restaurant_id,
+      channel: claimedRow.channel,
+      target: claimedRow.target,
+      subject: claimedRow.subject,
+      body: claimedRow.body,
+      html: typeof claimedRow.payload?.__html === 'string' ? claimedRow.payload.__html : undefined,
+      attachments: readAttachments(claimedRow.payload),
+      relatedEntityType: claimedRow.related_entity_type,
+      relatedEntityId: claimedRow.related_entity_id,
+      attemptCount: claimedRow.attempt_count,
+    };
+    try {
+      const outcome = await dispatch(row);
+      if (outcome === 'no_provider') {
         await db
           .update(notificationsOutbox)
-          .set({ status: 'sent', sentAt: new Date() })
+          .set({ status: 'failed', lastError: SKIPPED_NO_PROVIDER, claimedAt: null })
           .where(eq(notificationsOutbox.id, row.id));
-        dispatched += 1;
-      } catch (err) {
-        const newAttempt = (row.attemptCount ?? 0) + 1;
-        const errMessage = err instanceof Error ? err.message : String(err);
-        if (newAttempt >= MAX_ATTEMPTS) {
-          // Terminal failure: leave it parked as `failed` (claimedAt cleared).
-          await db
-            .update(notificationsOutbox)
-            .set({
-              status: 'failed',
-              attemptCount: newAttempt,
-              lastError: errMessage,
-              claimedAt: null,
-            })
-            .where(eq(notificationsOutbox.id, row.id));
-          failed += 1;
-        } else {
-          // Retry: release the claim by flipping back to `queued` and clearing
-          // claimedAt, so the next tick re-claims it once the backoff elapses.
-          // (Without this the row stays stuck in `sending` forever.)
-          await db
-            .update(notificationsOutbox)
-            .set({
-              status: 'queued',
-              attemptCount: newAttempt,
-              lastError: errMessage,
-              scheduledAt: backoff(newAttempt),
-              claimedAt: null,
-            })
-            .where(eq(notificationsOutbox.id, row.id));
-        }
+        skipped += 1;
+        continue;
+      }
+      await db
+        .update(notificationsOutbox)
+        .set({ status: 'sent', sentAt: new Date() })
+        .where(eq(notificationsOutbox.id, row.id));
+      dispatched += 1;
+    } catch (err) {
+      const newAttempt = (row.attemptCount ?? 0) + 1;
+      const errMessage = err instanceof Error ? err.message : String(err);
+      if (newAttempt >= MAX_ATTEMPTS) {
+        // Terminal failure: leave it parked as `failed` (claimedAt cleared).
+        await db
+          .update(notificationsOutbox)
+          .set({
+            status: 'failed',
+            attemptCount: newAttempt,
+            lastError: errMessage,
+            claimedAt: null,
+          })
+          .where(eq(notificationsOutbox.id, row.id));
+        failed += 1;
+      } else {
+        // Retry: release the claim by flipping back to `queued` and clearing
+        // claimedAt, so the next tick re-claims it once the backoff elapses.
+        // (Without this the row stays stuck in `sending` forever.)
+        await db
+          .update(notificationsOutbox)
+          .set({
+            status: 'queued',
+            attemptCount: newAttempt,
+            lastError: errMessage,
+            scheduledAt: backoff(newAttempt),
+            claimedAt: null,
+          })
+          .where(eq(notificationsOutbox.id, row.id));
       }
     }
+  }
 
-    console.log(
-      `[outbox-dispatch] claimed=${claimed.length} dispatched=${dispatched} failed=${failed} skipped_no_provider=${skipped}`,
-    );
-    return { dispatched, failed, skipped };
-  });
+  console.log(
+    `[outbox-dispatch] claimed=${claimed.length} dispatched=${dispatched} failed=${failed} skipped_no_provider=${skipped}`,
+  );
+  return { dispatched, failed, skipped };
 }
 
 /**
@@ -177,10 +195,13 @@ export async function dispatch(row: {
   subject: string | null;
   body: string;
   html?: string;
+  attachments?: EmailAttachment[];
   relatedEntityType: string | null;
   relatedEntityId: string | null;
 }): Promise<'sent' | 'no_provider'> {
-  const env = process.env;
+  // Typed as the notifier env: under the web app's ProcessEnv (Next augments it)
+  // the bare process.env fails TS's weak-type check against NotifierFactoryEnv.
+  const env = process.env as NonNullable<Parameters<typeof isResendConfigured>[0]>;
 
   if (row.channel === 'whatsapp') {
     if (!isWhatsAppCloudConfigured(env)) return 'no_provider';
@@ -206,6 +227,7 @@ export async function dispatch(row: {
       subject: row.subject ?? undefined,
       body: row.body,
       html: row.html,
+      attachments: row.attachments,
       relatedEntityType: row.relatedEntityType ?? undefined,
       relatedEntityId: row.relatedEntityId ?? undefined,
     };

@@ -1,0 +1,49 @@
+<!doctype html>
+<!-- Synthetic benchmark invoice (packages/ocr/bench). Ground truth: invoice-1.truth.json.
+     Re-render: node render-fixture.mjs (needs Playwright's Chromium). -->
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<style>
+  body { margin: 0; background: #fff; font-family: "DejaVu Sans", Arial, sans-serif; color: #111; }
+  .page { width: 794px; padding: 40px 48px; box-sizing: border-box; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  .muted { color: #444; font-size: 14px; }
+  .row { display: flex; justify-content: space-between; margin: 18px 0; font-size: 15px; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; margin-top: 12px; }
+  th, td { border: 1px solid #999; padding: 6px 8px; text-align: right; }
+  th { background: #eee; }
+  td.n { direction: ltr; text-align: left; font-variant-numeric: tabular-nums; }
+  .totals { width: 320px; margin-top: 16px; margin-right: auto; font-size: 15px; }
+  .totals td { border: none; padding: 3px 8px; }
+  .grand td { font-weight: bold; border-top: 2px solid #111; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>ירקות השרון בע"מ</h1>
+  <div class="muted">ח.פ. 514276389 · רח' המלאכה 12, כפר סבא · טל' 09-7654321</div>
+  <div class="row">
+    <div><b>חשבונית מס מס' 40917</b></div>
+    <div>תאריך: 14/10/2026</div>
+  </div>
+  <div class="row"><div>מספר הקצאה: 202610140917</div><div>לכבוד: מסעדת כפר הזיתים</div></div>
+  <table>
+    <thead><tr><th>מק"ט</th><th>תיאור</th><th>כמות</th><th>יחידה</th><th>מחיר ליח'</th><th>סה"כ</th></tr></thead>
+    <tbody>
+      <tr><td class="n">1102</td><td>עגבניות שרי</td><td class="n">12</td><td>ק"ג</td><td class="n">14.90</td><td class="n">178.80</td></tr>
+      <tr><td class="n">1107</td><td>מלפפונים</td><td class="n">20</td><td>ק"ג</td><td class="n">6.50</td><td class="n">130.00</td></tr>
+      <tr><td class="n">2210</td><td>בצל יבש</td><td class="n">15</td><td>ק"ג</td><td class="n">4.20</td><td class="n">63.00</td></tr>
+      <tr><td class="n">3304</td><td>פטרוזיליה צרור</td><td class="n">30</td><td>יח'</td><td class="n">3.50</td><td class="n">105.00</td></tr>
+      <tr><td class="n">4120</td><td>תפוחי אדמה לבנים</td><td class="n">25</td><td>ק"ג</td><td class="n">5.80</td><td class="n">145.00</td></tr>
+      <tr><td class="n">5031</td><td>לימונים</td><td class="n">8</td><td>ק"ג</td><td class="n">9.90</td><td class="n">79.20</td></tr>
+    </tbody>
+  </table>
+  <table class="totals">
+    <tr><td>סה"כ לפני מע"מ</td><td class="n">701.00</td></tr>
+    <tr><td>מע"מ 18%</td><td class="n">126.18</td></tr>
+    <tr class="grand"><td>סה"כ לתשלום</td><td class="n">827.18</td></tr>
+  </table>
+</div>
+</body>
+</html>

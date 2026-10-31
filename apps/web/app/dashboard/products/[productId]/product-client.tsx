@@ -12,6 +12,7 @@ import {
   Badge,
   Button,
   Card,
+  ConfirmDialog,
   Field,
   Input,
   Select,
@@ -57,6 +58,7 @@ export function ProductEditor({
   };
   const [form, setForm] = useState<ProductFormState>(initial);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const set = (k: keyof ProductFormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -86,8 +88,10 @@ export function ProductEditor({
 
   const supplierName = (id: string, he: string, en?: string | null) =>
     displayName(he, en ?? suppliers.find((s) => s.id === id)?.nameEn, locale).primary;
-  const prices = detail.items.map((it) => Number(it.listPrice)).filter((n) => Number.isFinite(n) && n > 0);
-  const cheapest = prices.length > 1 ? Math.min(...prices) : null;
+  // "הזול ביותר" compares ₪ per the product's default unit (the server's shared
+  // catalogUnitPrice), and only when two or more active prices are comparable.
+  const cheapest = detail.cheapestUnitPrice;
+  const unitLabel = p.defaultUnit ? t('prices.perUnit', { unit: p.defaultUnit }) : t('prices.perUnitNoUnit');
   const supplierById = new Map(suppliers.map((s) => [s.id, s]));
   const money = (v: string | number | null) =>
     v != null ? formatIls(Number(v), { locale, maximumFractionDigits: 2 }) : '—';
@@ -187,14 +191,25 @@ export function ProductEditor({
                 variant="ghost"
                 size="sm"
                 loading={del.isPending}
-                onClick={() => {
-                  if (confirm(t('form.confirmDelete', { name: p.canonicalName }))) del.mutate({ productId: p.id });
-                }}
+                onClick={() => setConfirmDelete(true)}
               >
                 <Trash2 className="h-4 w-4 text-danger" aria-hidden="true" /> {t('form.delete')}
               </Button>
             </div>
           )}
+          <ConfirmDialog
+            open={confirmDelete}
+            title={t('form.confirmDeleteTitle', { name: p.canonicalName })}
+            body={t('form.confirmDelete', { name: p.canonicalName })}
+            confirmLabel={t('form.delete')}
+            cancelLabel={t('form.keep')}
+            loading={del.isPending}
+            onConfirm={() => {
+              setConfirmDelete(false);
+              del.mutate({ productId: p.id });
+            }}
+            onClose={() => setConfirmDelete(false)}
+          />
         </form>
       </Card>
 
@@ -205,11 +220,12 @@ export function ProductEditor({
         <Card elevated padding="none" className="overflow-x-auto">
           <table className="w-full text-start text-sm sm:min-w-[520px]">
             <thead>
-              <tr className="border-b border-line text-xs uppercase tracking-wide text-subtle">
+              <tr className="border-b border-line text-xs text-subtle ltr:uppercase ltr:tracking-wide">
                 <th scope="col" className="px-4 py-3 text-start font-medium">{t('prices.supplier')}</th>
                 <th scope="col" className="hidden px-4 py-3 text-start font-medium sm:table-cell">{t('prices.sku')}</th>
                 <th scope="col" className="hidden px-4 py-3 text-start font-medium sm:table-cell">{t('prices.unit')}</th>
-                <th scope="col" className="px-4 py-3 text-end font-medium">{t('prices.listPrice')}</th>
+                <th scope="col" className="hidden px-4 py-3 text-right font-medium sm:table-cell">{t('prices.listPrice')}</th>
+                <th scope="col" className="px-4 py-3 text-right font-medium">{unitLabel}</th>
                 <th scope="col" className="px-4 py-3 text-start font-medium">{t('prices.status')}</th>
               </tr>
             </thead>
@@ -225,17 +241,33 @@ export function ProductEditor({
                     </Link>
                     {/* Phones: SKU + unit fold under the supplier so the price stays on screen. */}
                     <span className="mt-0.5 block text-xs text-subtle sm:hidden">
-                      {it.supplierSku ? <span className="font-mono">{it.supplierSku} · </span> : null}
+                      {it.supplierSku ? <bdi className="font-mono">{it.supplierSku}</bdi> : null}
+                      {it.supplierSku ? ' · ' : null}
                       <UnitText unit={it.unit} />
+                      {it.packSize != null && Number(it.packSize) !== 1 ? (
+                        <> · {t('prices.pack', { count: Number(it.packSize).toString() })}</>
+                      ) : null}
+                      {' · '}
+                      {money(it.listPrice)}
                     </span>
                   </td>
                   <td className="hidden px-4 py-3 font-mono text-xs text-subtle sm:table-cell">{it.supplierSku ?? '—'}</td>
                   <td className="hidden px-4 py-3 text-muted sm:table-cell">
                     <UnitText unit={it.unit} />
+                    {it.packSize != null && Number(it.packSize) !== 1 ? (
+                      <span className="block text-xs text-subtle">
+                        {t('prices.pack', { count: Number(it.packSize).toString() })}
+                      </span>
+                    ) : null}
                   </td>
-                  <td className="px-4 py-3 text-end font-mono tabular-nums text-ink">
-                    {money(it.listPrice)}
-                    {cheapest != null && Number(it.listPrice) === cheapest ? (
+                  <td className="hidden px-4 py-3 text-right tabular-nums text-muted sm:table-cell">{money(it.listPrice)}</td>
+                  <td className="px-4 py-3 text-right tabular-nums text-ink" data-testid="unit-price">
+                    {it.unitPricePerDefaultUnit != null ? (
+                      <span className="font-semibold">{money(it.unitPricePerDefaultUnit)}</span>
+                    ) : (
+                      <span className="text-xs text-subtle">{t('prices.notComparable')}</span>
+                    )}
+                    {cheapest != null && it.active && it.unitPricePerDefaultUnit === cheapest ? (
                       <Badge tone="accent" className="ms-2">
                         {t('prices.cheapest')}
                       </Badge>
@@ -250,7 +282,7 @@ export function ProductEditor({
               ))}
               {detail.items.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-subtle">
+                  <td colSpan={6} className="px-4 py-6 text-center text-subtle">
                     {t('prices.empty')}
                   </td>
                 </tr>
@@ -270,10 +302,10 @@ export function ProductEditor({
           ) : (
             <table className="w-full text-start text-sm sm:min-w-[420px]">
               <thead>
-                <tr className="border-b border-line text-xs uppercase tracking-wide text-subtle">
+                <tr className="border-b border-line text-xs text-subtle ltr:uppercase ltr:tracking-wide">
                   <th scope="col" className="px-4 py-3 text-start font-medium">{t('history.date')}</th>
                   <th scope="col" className="px-4 py-3 text-start font-medium">{t('history.supplier')}</th>
-                  <th scope="col" className="px-4 py-3 text-end font-medium">{t('history.unitPrice')}</th>
+                  <th scope="col" className="px-4 py-3 text-right font-medium">{t('history.unitPrice')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -287,7 +319,7 @@ export function ProductEditor({
                       <td className="px-4 py-2.5 text-ink">
                         {s ? displayName(s.name, s.nameEn, locale).primary : t('history.unknownSupplier')}
                       </td>
-                      <td className="px-4 py-2.5 text-end font-mono tabular-nums text-ink">{money(h.unitPrice)}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-ink">{money(h.unitPrice)}</td>
                     </tr>
                   );
                 })}

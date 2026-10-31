@@ -34,7 +34,8 @@ import { he as viewsHe } from '../lib/i18n/messages/views/he';
  *   B. owner: hero ₪ / %, leak detective, approvals, breakdown → claims, monthly
  *      report, chain (this month + ?p=last_month), branches
  *   C. receiver: /login?lang=…, the HaSharon Produce order, photo → dev OCR stub →
- *      review (sections, qty × price, banners) → adjust a quantity → confirm
+ *      review (sections, banners — no ₪ for the receiver) → Delivery Check (one
+ *      hand count, the rest "as ordered" after the blind spot check) → confirm
  *   D. bookkeeper: CSV + uniform-file (1000) exports
  *
  * Every page: zero console errors / uncaught exceptions, no horizontal overflow,
@@ -455,29 +456,39 @@ test('B · owner: hero ₪, leak detective, approvals, claims, report, chain, br
     await expect(page.getByText(m.nav.worker.title), 'worker-offline banner on the demo dashboard').toHaveCount(0);
     const hero = page.locator('section[aria-labelledby="leak-hero-label"]');
     await expect(hero.locator('#leak-hero-label')).toHaveText(m.overview.hero.leakedLabel);
+    // The one number sits above the fold (1366×768 and 390×844): no extra hero tile may push it down.
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const leakBox = await hero.getByTestId('leak-hero-amount').boundingBox();
+    const fold = page.viewportSize()!.height;
+    expect(leakBox, 'hero ₪ is rendered').not.toBeNull();
+    expect(leakBox!.y + leakBox!.height, `hero ₪ bottom vs the ${fold}px fold`).toBeLessThanOrEqual(fold);
     const heroText = await hero.innerText();
-    n.leak = num(await hero.locator('p.font-mono').first().innerText());
+    n.leak = num(await hero.getByTestId('leak-hero-amount').innerText());
     n.pct = num(/(\d+(?:\.\d+)?)\s*%/.exec(heroText.replace(BIDI, ''))![1]!);
-    const spendLine = await hero.locator('p.font-mono + p span').first().innerText();
-    n.spend = num(spendLine);
-    n.caught = num(await valueAfter(hero, m.overview.hero.caught));
-    n.claimed = num(await valueAfter(hero, m.overview.hero.recovered));
-    n.pendingApprovals = num(await valueAfter(page, m.overview.kpis.pending));
-    const lastMonth = /(?:חודש קודם|Last month):?\s*([^\n·]+)/.exec(heroText);
-    if (lastMonth) n.lastMonthLeak = num(lastMonth[1]!);
-
+    n.spend = num(await hero.getByTestId('leak-hero-base').innerText());
+    // The split boxes are desktop-only (the phone reads them as one sentence): read the DOM text.
+    // The hero split is by payment status (unpaid / paid invoices) and adds up to the hero.
+    n.unpaid = num((await hero.getByTestId('hero-unpaid').textContent())!.replace(m.overview.hero.unpaid, ''));
+    n.paid = num((await hero.getByTestId('hero-paid').textContent())!.replace(m.overview.hero.paid, ''));
+    // "מחכה לך": the decisions waiting for the viewer, in ₪ and count (the old count-only KPI is gone).
+    n.pendingApprovals = num(await page.getByTestId('needs-decide-sub').innerText());
+    n.decide = num(await page.getByTestId('needs-decide-value').innerText());
     expect(n.leak, 'hero leak > 0 (the demo needs a number)').toBeGreaterThan(0);
-    // The % is leak ÷ spend, rounded to one decimal (the target line says 1.5%).
+    // The % is leak ÷ spend, rounded to one decimal (no target line: R-14 default).
     expect(Math.abs(n.pct - Math.round((n.leak / n.spend) * 1000) / 10), `hero % (${n.pct}) vs ₪${n.leak} ÷ ₪${n.spend}`).toBeLessThanOrEqual(0.1);
-    // The leak splits into "caught before payment" + "claimed from suppliers".
-    expect(Math.abs(n.caught + n.claimed - n.leak), `caught ₪${n.caught} + claimed ₪${n.claimed} vs leak ₪${n.leak}`).toBeLessThanOrEqual(1);
+    // The leak splits into "on unpaid invoices" + "on paid invoices" (by payment status).
+    expect(Math.abs(n.unpaid + n.paid - n.leak), `unpaid ₪${n.unpaid} + paid ₪${n.paid} vs leak ₪${n.leak}`).toBeLessThanOrEqual(1);
     await checkScreen(page, errors, L, 'B2-hero');
   });
 
-  await test.step('leak detective (בלש דליפות): same ₪ / % / spend, price creep', async () => {
+  await test.step('leak hub (דליפה): same ₪ / % / spend, then price creep (מחירים שעלו)', async () => {
     await clickNav(page, m.nav.links.leaks, '/dashboard/leaks');
     await expect(page.locator('main h1, main h2').first()).toBeVisible();
-    expect(num(await valueAfter(page, m.views.kpis.leak)), 'leak detective ₪ vs dashboard hero').toBe(n.leak);
+    // The default view is this month, so the T1 tile reads "דליפה החודש" (W1-08: the label names its period).
+    expect(num(await valueAfter(page, m.views.kpis.leakMonth)), 'leak detective ₪ vs dashboard hero').toBe(n.leak);
+    // The exact leak (to the agora) behind the whole-shekel tiles — the breakdown shows it at 2 dp.
+    n.leakExact = Number(await page.getByTestId('explorer-leak').getAttribute('data-amount'));
+    expect(Math.round(n.leakExact), 'leak detective exact ₪ rounds to the dashboard hero').toBe(n.leak);
     expect(num(await valueAfter(page, m.views.kpis.pct)), 'leak detective % vs dashboard hero').toBe(n.pct);
     expect(num(await valueAfter(page, m.views.kpis.spend)), 'leak detective spend vs dashboard hero').toBe(n.spend);
     // Price creep: the beer keg (+10.6% in the pack) is the worst offender.
@@ -489,32 +500,40 @@ test('B · owner: hero ₪, leak detective, approvals, claims, report, chain, br
     await clickNav(page, m.nav.links.approvals, '/dashboard/approvals');
     const inQueue = num(await valueAfter(page, m.approvals.summary.inQueue));
     n.atRisk = num(await valueAfter(page, m.approvals.summary.atRisk));
-    expect(inQueue, 'approvals "in queue" vs dashboard "waiting for approval"').toBe(n.pendingApprovals);
-    expect(n.atRisk, 'approvals "amount at risk" vs dashboard "caught before payment"').toBe(n.caught);
+    expect(inQueue, 'approvals "in queue" vs dashboard "waiting for your decision"').toBe(n.pendingApprovals);
+    expect(n.atRisk, 'approvals "amount at risk" vs dashboard "waiting for your decision" ₪').toBe(n.decide);
     // Owner sees Approve / Reject, never "escalate to owner" (pack 5:30).
-    await expect(page.getByRole('button', { name: m.approvals.card.approve, exact: true }).first()).toBeVisible();
-    await expect(page.getByRole('button', { name: m.approvals.card.escalate })).toHaveCount(0);
+    // W1-07: the approve label carries the claim ₪ ("דרוש {amount} מהספק"), so match around it.
+    const approveName = new RegExp(
+      '^' + m.approvals.decision.approve.split('{amount}').map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.+') + '$',
+    );
+    await expect(page.getByRole('button', { name: approveName }).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: m.approvals.decision.escalate })).toHaveCount(0);
     await checkScreen(page, errors, L, 'B4-approvals');
   });
 
   await test.step('what is behind the number → credit letters', async () => {
     await goto(page, '/dashboard/leaks/breakdown');
     const total = amounts(await page.locator('main').last().innerText())[0];
-    expect(total, 'breakdown headline ₪ vs dashboard hero').toBe(n.leak);
+    // W1-08: the breakdown headline is the exact leak at 2 dp, next to its rows (the hero shows whole ₪).
+    expect(total, 'breakdown headline ₪ vs the exact leak (to the agora)').toBe(n.leakExact);
+    expect(Math.round(total!), 'breakdown headline ₪ vs dashboard hero').toBe(n.leak);
     await checkScreen(page, errors, L, 'B5-breakdown');
 
     await page.getByRole('link', { name: m.leaks.claims.open }).first().click();
     await page.waitForURL(/\/dashboard\/leaks\/claims/);
-    const totals = page.getByText(m.leaks.claims.total, { exact: true });
-    const count = await totals.count();
-    expect(count, 'credit letters on the claims page').toBeGreaterThan(0);
-    let sum = 0;
-    for (let i = 0; i < count; i += 1) {
-      const row = totals.nth(i).locator('xpath=ancestor::tr[1]');
-      sum += amounts(await row.innerText()).at(-1)!;
-    }
-    n.claimsTotal = Math.round(sum * 100) / 100;
-    expect(n.claimsTotal, 'Σ credit letters vs approvals "amount at risk"').toBe(n.atRisk);
+    // Decision 18: undecided (open / escalated) lines are never put in a letter — they are the
+    // claims page's "decide" banner. So the approvals "amount at risk" (still undecided) is that
+    // banner's ₪, not Σ letters. Demo-seed invariant (the approvals queue could in general hold
+    // other months), as strict as before: to the agora.
+    const undecided = page.getByTestId('claims-undecided');
+    await expect(undecided).toBeVisible();
+    expect(Number(await undecided.getAttribute('data-amount')), 'claims "undecided" ₪ vs approvals "amount at risk"').toBe(n.atRisk);
+    // The letters themselves (what WAS decided to claim): one total per letter, and the page summary is their Σ.
+    const lt = await page.getByTestId('letter-total').evaluateAll((es) => es.map((e) => Number(e.getAttribute('data-amount'))));
+    expect(lt.length, 'credit letters on the claims page').toBeGreaterThan(0);
+    n.claimsTotal = Math.round(lt.reduce((a, b) => a + Math.round(b * 100), 0)) / 100;
+    expect(n.claimsTotal, 'Σ credit letters vs the claims page summary').toBe(Number(await page.getByTestId('claims-summary').getAttribute('data-amount')));
     // The "From:" line must be the restaurant presenting, not another branch (pack 7:30 risk).
     const froms = await page.getByText(new RegExp(`^${m.leaks.claims.from.replace('{restaurant}', '')}`)).allInnerTexts();
     for (const f of froms) expect(f.trim(), 'credit letter "From:" line').toBe(m.leaks.claims.from.replace('{restaurant}', MAIN_BRANCH));
@@ -526,7 +545,9 @@ test('B · owner: hero ₪, leak detective, approvals, claims, report, chain, br
     const reportText = await page.locator('main').last().innerText();
     expect(reportText).toContain(m.leaks.report.headline);
     const afterHeadline = reportText.slice(reportText.indexOf(m.leaks.report.headline));
-    expect(amounts(afterHeadline)[0], 'report headline ₪ vs dashboard hero').toBe(n.leak);
+    // W1-08: the report headline is the exact leak at 2 dp (it sits on a document with 2-dp tables).
+    expect(amounts(afterHeadline)[0], 'report headline ₪ vs the exact leak (to the agora)').toBe(n.leakExact);
+    expect(Math.round(amounts(afterHeadline)[0]!), 'report headline ₪ vs dashboard hero').toBe(n.leak);
     await expect(page.locator('main').last()).toContainText(MAIN_BRANCH);
     await checkScreen(page, errors, L, 'B7-report');
   });
@@ -572,7 +593,7 @@ test('B · owner: hero ₪, leak detective, approvals, claims, report, chain, br
 
 /* ═══════════════════════════════ C. receiver ═══════════════════════════════ */
 
-test('C · receiver: HaSharon Produce → photo → OCR → review → adjust → confirm', async ({ page, browser }, info) => {
+test('C · receiver: HaSharon Produce → photo → OCR → review → Delivery Check → confirm', async ({ page, browser }, info) => {
   test.skip(!STUB, 'DEMO_STUB_URL unset — the dev OCR stub only runs outside NODE_ENV=production');
   const L = localeOf(info);
   const r = M[L].receiving;
@@ -586,10 +607,13 @@ test('C · receiver: HaSharon Produce → photo → OCR → review → adjust �
 
   await test.step('receiving inbox lists HaSharon Produce today', async () => {
     await clickNav(page, M[L].nav.links.receiving, '/dashboard/receiving');
-    const card = page.getByTestId('receiving-po-card').filter({ hasText: L === 'en' ? HASHARON_EN : 'ירקות השרון' });
+    // The board shows the next truck enlarged (its own card) and the rest as rows.
+    const card = page
+      .locator('[data-testid="receiving-po-card"], [data-testid="board-next"]')
+      .filter({ hasText: L === 'en' ? HASHARON_EN : 'ירקות השרון' });
     if (israelToday() === DEMO_TODAY) {
       await expect(card, `HaSharon card in the receiving inbox on ${DEMO_TODAY}`).toHaveCount(1);
-      await expect(card).toHaveAttribute('href', new RegExp(original));
+      await expect(card.locator('xpath=self::a | .//a').first()).toHaveAttribute('href', new RegExp(original));
     } else {
       info.annotations.push({ type: 'note', description: `inbox check skipped: today is ${israelToday()}, seed is for ${DEMO_TODAY}` });
     }
@@ -608,7 +632,7 @@ test('C · receiver: HaSharon Produce → photo → OCR → review → adjust �
     await expect(page.getByRole('alert').filter({ hasText: /\S/ }), 'error alert on the review').toHaveCount(0);
   });
 
-  await test.step('review: sections, English names + Hebrew original, qty × price = total, potential loss', async () => {
+  await test.step('review: sections, English names + Hebrew original — and no ₪ for the receiver', async () => {
     const cards = page.getByTestId('recon-cards');
     const table = page.getByTestId('recon-table');
     // Exactly ONE rendering of the review: cards on a phone, the table on desktop
@@ -625,41 +649,39 @@ test('C · receiver: HaSharon Produce → photo → OCR → review → adjust �
       await expect(view.getByTestId('item-name-en').first()).toBeVisible();
       await expect(view).toContainText('Cherry tomatoes');
     }
-    // Every "qty unit × ₪price  ₪total" triple must multiply out (to the agora).
-    const text = (await view.innerText()).replace(BIDI, ' ');
-    const triples = [...text.matchAll(/(\d+(?:\.\d+)?)\s*[^\n×]*\n?\s*×\s*\n?\s*₪?\s*(\d[\d,]*\.\d{2})\s*₪?\s*\n?\s*₪?\s*(\d[\d,]*\.\d{2})/g)];
-    expect(triples.length, 'qty × price = total rows on the review').toBeGreaterThanOrEqual(11);
-    for (const [, q, p, tot] of triples) {
-      const want = Math.round(Number(q) * Number(p!.replace(/,/g, '')) * 100) / 100;
-      expect(Number(tot!.replace(/,/g, '')), `${q} × ${p}`).toBeCloseTo(want, 2);
-    }
-    // "Potential loss" = Σ of the +₪ deltas on the "different" rows.
-    const lossLine = page.getByText(r.steps.recon.potentialLoss);
-    await expect(lossLine).toBeVisible();
-    const loss = amounts(await lossLine.locator('xpath=..').innerText())[0]!;
-    const deltas = [...text.matchAll(/\+\s*₪?\s*(\d[\d,]*\.\d{2})/g)].map((d) => Number(d[1]!.replace(/,/g, '')));
-    expect(deltas.length, 'the stub bills two lines differently').toBe(2);
-    expect(loss, `potential loss vs Σ deltas ${deltas.join(' + ')}`).toBeCloseTo(deltas.reduce((a, b) => a + b, 0), 2);
+    // Owner decision: the receiver sees no ₪ — no prices, no totals, no "potential loss".
+    await expect(page.locator('main'), 'no ₪ on the receiver\'s review').not.toContainText('₪');
+    await expect(page.getByText(r.steps.recon.potentialLoss)).toHaveCount(0);
     await checkScreen(page, errors, L, 'C4-review');
   });
 
-  await test.step('adjust quantities: settle both differences, change one by hand', async () => {
+  await test.step('Delivery Check: one line counted by hand, the rest "as ordered" after the blind spot check', async () => {
     await page.getByTestId('continue-adjust').click();
-    await expect(page.getByRole('heading', { name: r.steps.adjust.title })).toBeVisible();
-    const close = page.getByTestId('close-receipt');
-    await expect(close).toBeDisabled();
-    // Price line: received as ordered. Quantity line: one less than billed (the hand edit).
-    const prefix = r.steps.adjust.asOrdered.split('{qty}')[0]!.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const asOrdered = page.getByRole('button', { name: new RegExp(`^${prefix}`) });
-    const count = await asOrdered.count();
-    expect(count, 'difference cards to settle').toBe(2);
-    await asOrdered.first().click();
-    const qty = page.getByLabel(r.steps.adjust.qtyLabel).nth(1);
-    const before = Number(await qty.inputValue());
-    await page.getByRole('button', { name: r.steps.adjust.decrease }).nth(1).click();
-    await expect(qty).toHaveValue(String(before - 1));
-    await expect(close).toBeEnabled();
-    await expect(close).toHaveText(r.steps.adjust.closeAndSave);
+    await expect(page.getByTestId('delivery-check')).toBeVisible();
+    // Nothing is pre-resolved — "invoice = order" is not "arrived".
+    await expect(page.getByTestId('count-line').first()).toHaveAttribute('data-resolved', 'false');
+    // The hand count: the first line, one less than ordered.
+    const first = page.getByTestId('count-line').first();
+    if (await first.getByTestId('count-edit').count()) await first.getByTestId('count-edit').click();
+    const qty = first.getByTestId('count-qty');
+    const before = Number((await qty.inputValue()).replace(',', '.'));
+    await qty.fill(String(before - 1));
+    await qty.press('Enter');
+    if (await first.getByTestId('count-confirm-qty').isVisible().catch(() => false)) await first.getByTestId('count-confirm-qty').click();
+    await expect(first).toHaveAttribute('data-resolved', 'true');
+    // The rest "as ordered" — only after two random lines are counted blind.
+    await page.getByTestId('mark-rest').click();
+    const panel = page.getByTestId('spot-check');
+    await expect(panel).toBeVisible();
+    const rows = panel.getByTestId('spot-line');
+    for (let i = 0; i < (await rows.count()); i += 1) {
+      const id = (await rows.nth(i).getAttribute('data-key'))!.replace(/^po-/, '');
+      const [pl] = await withDb((sql) => sql<{ q: string }[]>`select qty_ordered::text as q from po_lines where id = ${id}`);
+      await rows.nth(i).getByTestId('spot-qty').fill(String(Number(pl!.q)));
+    }
+    await panel.getByTestId('spot-confirm').click();
+    await expect(page.getByTestId('count-bulk-tag').first()).toBeVisible();
+    await expect(page.getByTestId('close-receipt')).toBeEnabled();
     await checkScreen(page, errors, L, 'C5-adjust');
   });
 
@@ -673,20 +695,31 @@ test('C · receiver: HaSharon Produce → photo → OCR → review → adjust �
     await page.getByTestId('close-receipt').click();
     await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('heading', { name: r.steps.confirmed.title })).toBeVisible();
+    // Who received it is on the receipt; the ₪-full invoice page is not linked for the receiver.
+    await expect(page.getByTestId('confirmed-received-by')).toBeVisible();
+    await expect(page.getByTestId('confirmed-invoice-link')).toHaveCount(0);
     await checkScreen(page, errors, L, 'C6-confirmed');
   });
 
-  await test.step('dock slip: the worker re-matches after the count → the engine ₪ (never a pre-count run)', async () => {
+  await test.step('dock slip: quantities only for the receiver; the worker re-matches after the count', async () => {
     // The demo tenant has every feature on (dockSlip included). submitReceipt
     // enqueues the re-match; the real worker runs it against the actual count.
     const slip = page.getByTestId('dock-slip');
     await expect(slip).toBeVisible();
-    await expect(slip.getByTestId('dock-slip-total'), 'engine ₪ after the re-match').toBeVisible({ timeout: 90_000 });
-    await expect(slip.getByTestId('dock-slip-computing')).toHaveCount(0);
-    const lineAmounts = (await slip.getByTestId('dock-slip-amount').allInnerTexts()).map((x) => amounts(x)[0]!);
-    const total = amounts(await slip.getByTestId('dock-slip-total').innerText())[0]!;
-    expect(lineAmounts.length).toBeGreaterThan(0);
-    expect(Math.round(lineAmounts.reduce((a, b) => a + b, 0) * 100)).toBe(Math.round(total * 100));
+    // The receiver sees no ₪ (owner decision): no line amounts, no total.
+    await expect(slip.getByTestId('dock-slip-amount')).toHaveCount(0);
+    await expect(slip.getByTestId('dock-slip-total')).toHaveCount(0);
+    await expect(page.locator('main')).not.toContainText('₪');
+    // The engine's ₪ (what the owner sees) comes from ONE run after the close.
+    await expect
+      .poll(
+        async () =>
+          (await withDb((sql) => sql<{ runs: number }[]>`
+            select count(distinct mr.id)::int as runs from goods_receipts gr
+            join match_runs mr on mr.gr_id = gr.id where gr.po_id = ${clone}`))[0]!.runs,
+        { timeout: 90_000, message: 'the worker re-matched the closed receipt' },
+      )
+      .toBe(1);
     // The run behind it is from after the close, and saw the count: no line read as received 0.
     const sql = db();
     try {

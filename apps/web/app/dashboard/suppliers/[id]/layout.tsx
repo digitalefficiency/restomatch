@@ -8,6 +8,7 @@ import { suppliers as suppliersNs } from '@/lib/i18n/messages/suppliers';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { formatIls } from '@/lib/money';
 import { SupplierTabBar } from './tab-bar';
+import { getWave1Access } from '../../contracts/access';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,6 +66,8 @@ export default async function SupplierDetailLayout({
   }
 
   const name = displayName(supplier.name, supplier.nameEn, locale);
+  // Wave-1 contract tab: `contracts` flag on + finance role (fails silent → hidden).
+  const showContract = (await getWave1Access()).contracts;
 
   return (
     <div className="space-y-6">
@@ -103,7 +106,12 @@ export default async function SupplierDetailLayout({
         </div>
       </header>
 
-      <SupplierTabBar supplierId={id} />
+      <SupplierTabBar
+        supplierId={id}
+        showContract={showContract}
+        leakTab={supplier.leakCardEnabled}
+        ledgerTab={supplier.ledgerEnabled}
+      />
 
       <div>{children}</div>
     </div>

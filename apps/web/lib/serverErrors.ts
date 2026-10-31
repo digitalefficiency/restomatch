@@ -35,7 +35,13 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   'auth.forbidden': 'forbidden',
   'input.invalid': 'invalidInput',
   'invoice.numberTaken': 'invoiceNumberTaken',
-  'receipt.closed': 'receiptClosed',
+  // Wave-1 (S15) codes: generic fallbacks here; the owning screens (growth /
+  // leakCheck namespaces) show their own specific copy.
+  FEATURE_DISABLED: 'forbidden',
+  'leakCheck.invalidLink': 'invalidInput',
+  'growth.referralInvalid': 'invalidInput',
+  'growth.referralSelf': 'invalidInput',
+  'growth.referralAlreadyRedeemed': 'invalidInput',
 };
 
 /**

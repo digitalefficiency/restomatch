@@ -22,17 +22,32 @@ import {
   users,
   type Database,
 } from '@restomatch/db';
+import { featureEnabled } from '../lib/features';
+import { latestReceiptStatusSql } from '../lib/deliveryState';
 import { resolveTolerances } from '@restomatch/matching';
-import { ClaudePoParser } from '@restomatch/ocr';
+import { ClaudePoParser, ORDER_TEXT_MAX_CHARS, orderTextParserFromEnv } from '@restomatch/ocr';
 import { ZesttAdapter } from '@restomatch/procurement';
 import { managerProcedure, memberProcedure, requireFeature, router } from '../trpc';
+import { contractPricesForOrder, orderPriceKey } from '../contracts/orderPrices';
 import { assertPoOwned, assertSupplierOwned } from '../tenant';
 import { getEntitlements } from '../entitlements';
 import { importPurchaseOrder } from '../orders/importPo';
+import { captureOrderDraft } from '../orders/captureOrder';
+import { appError } from '../errors';
 import { estimateTotal, qty3, recomputePoTotal } from '../orders/totals';
 import { DEDUPE_INDEX_PREDICATE } from '../notifications/outbox';
 import { supplierMessageState, type SupplierMessageState } from '../notifications/delivery';
 import { deriveExpectedDelivery, type DerivedDelivery } from '../lib/deriveDelivery';
+import { assertFeatureOn, isFeatureOn } from '../lib/featureGate';
+import {
+  loadOrderDocument,
+  ORDER_DOCUMENT_EXTENSIONS,
+  orderDocumentSettingsOf,
+  orderPdfFilename,
+  renderOrderEmailText,
+  renderOrderPdf,
+  renderOrderWhatsappText,
+} from '../orders/document';
 import { addCalendarDaysInTz, localDateKeyInTz, startOfDayInTz, startOfLocalDateInTz } from '../lib/time';
 import { poRefOf, renderSupplierMessage } from '../orders/supplierMessage';
 
@@ -289,18 +304,11 @@ async function buildSupplierMessage(
 
 /**
  * The PO's delivery state comes from its latest goods receipt, not from
- * purchase_orders.status: receiving never moves a PO out of 'sent' (and must
- * not — buildMatchInput only discovers sent/confirmed/partial POs, so an
- * invoice arriving after the delivery still finds its order). Display only.
- * The outer column is spelled out: Drizzle leaves `${purchaseOrders.id}`
- * unqualified in a single-table select, where it would bind to g.id.
+ * purchase_orders.status — see lib/deliveryState.ts (one derivation for the
+ * orders list, the late-delivery e-mail and the expectations list). Display only.
  */
 function latestReceiptStatus(restaurantId: string) {
-  return sql<'pending' | 'partial' | 'completed' | 'rejected' | null>`(
-    SELECT g.status::text FROM goods_receipts g
-    WHERE g.po_id = "purchase_orders"."id" AND g.restaurant_id = ${restaurantId}
-    ORDER BY g.received_at DESC, g.created_at DESC LIMIT 1
-  )`;
+  return latestReceiptStatusSql(restaurantId);
 }
 const OPEN_PO_STATUSES = ['sent', 'confirmed', 'partial'] as const;
 /**
@@ -490,11 +498,27 @@ export const ordersRouter = router({
         }
       }
 
+      // Flag `contracts`: a contract price in force today (in the line's unit)
+      // wins over the catalog list price for lines left unpriced.
+      const unpriced = input.lines.filter(
+        (l): l is typeof l & { productId: string } => l.unitPriceExpected == null && !!l.productId,
+      );
+      const contractByKey =
+        unpriced.length > 0 && (await isFeatureOn(ctx.db, restaurantId, 'contracts'))
+          ? await contractPricesForOrder(ctx.db, restaurantId, input.supplierId, unpriced)
+          : new Map<string, number>();
+
       const resolvedLines = input.lines.map((l) => {
+        const fromContract =
+          l.unitPriceExpected == null && l.productId ? contractByKey.get(orderPriceKey(l.productId, l.unit)) : undefined;
         const fromCatalog =
           l.unitPriceExpected == null && l.productId ? priceByProduct.get(l.productId) : undefined;
         const unitPriceExpected =
-          l.unitPriceExpected != null ? l.unitPriceExpected.toString() : (fromCatalog ?? null);
+          l.unitPriceExpected != null
+            ? l.unitPriceExpected.toString()
+            : fromContract !== undefined
+              ? fromContract.toString()
+              : (fromCatalog ?? null);
         return { ...l, unitPriceExpected };
       });
 
@@ -695,6 +719,39 @@ export const ordersRouter = router({
       return result;
     }),
 
+  /**
+   * Order capture (flag `orderCapture`): the order message the owner already
+   * sent the supplier (WhatsApp / e-mail, pasted or shared) → a DRAFT PO with
+   * the supplier and catalog lines matched. `needs_supplier` asks the owner to
+   * pick one (pass it back as supplierId). Confirm = placeOrder {channel:'none'}.
+   */
+  captureFromText: managerProcedure
+    .input(
+      z.object({
+        text: z.string().trim().min(1).max(ORDER_TEXT_MAX_CHARS),
+        supplierId: z.string().uuid().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      const [r] = await ctx.db
+        .select({ settings: restaurants.settings })
+        .from(restaurants)
+        .where(eq(restaurants.id, restaurantId))
+        .limit(1);
+      if (!featureEnabled(r?.settings, 'orderCapture')) {
+        throw appError('FORBIDDEN', 'FEATURE_DISABLED', 'הפיצ׳ר אינו פעיל עבור המסעדה');
+      }
+      return captureOrderDraft(ctx.db, {
+        restaurantId,
+        text: input.text,
+        supplierId: input.supplierId ?? null,
+        parser: orderTextParserFromEnv(),
+        source: 'manual',
+        createdBy: ctx.session.userId,
+      });
+    }),
+
   cancelOrder: managerProcedure
     .input(z.object({ poId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
@@ -864,13 +921,53 @@ export const ordersRouter = router({
             message: `לספק אין ${input.channel === 'email' ? 'אימייל' : 'וואטסאפ'} מוגדר`,
           });
         }
-        // The same text orders.supplierMessagePreview showed the manager.
-        const doc = await buildSupplierMessage(ctx.db, restaurantId, po.createdBy ?? ctx.session.userId, {
-          poId: input.poId,
-          supplierName: supplier?.name ?? 'ספק',
-          expectedDeliveryAt: po.expectedDeliveryAt,
-          lines,
-        });
+        // Flag `orderPricesOut`: SKU + agreed prices + totals, and a PDF on email.
+        // Flag off → #100's supplier message (orders.supplierMessagePreview).
+        let subject = `הזמנה חדשה — ${supplier?.name ?? ''}`.trim();
+        let body: string;
+        let payload: Record<string, unknown> | undefined;
+        const pricesOut = await isFeatureOn(ctx.db, restaurantId, 'orderPricesOut');
+        if (pricesOut) {
+          // Extensions (e.g. the supplier-confirmation link) need the PO already
+          // `sent`; same transaction, so any later failure rolls this back.
+          const placedAt = new Date();
+          await ctx.db
+            .update(purchaseOrders)
+            .set({ status: 'sent', sentAt: placedAt, sentChannel: input.channel, updatedAt: placedAt })
+            .where(eq(purchaseOrders.id, input.poId));
+          const loaded = await loadOrderDocument(ctx.db, restaurantId, input.poId, {
+            mode: 'send',
+            userId: ctx.session.userId ?? null,
+            placedAt,
+            extensions: ORDER_DOCUMENT_EXTENSIONS,
+          });
+          if (!loaded) throw new TRPCError({ code: 'NOT_FOUND', message: 'purchase order not found' });
+          if (input.channel === 'email') {
+            body = renderOrderEmailText(loaded.doc);
+            const pdf = await renderOrderPdf(loaded.doc);
+            payload = {
+              __attachments: [
+                {
+                  filename: orderPdfFilename(loaded.doc),
+                  contentBase64: Buffer.from(pdf).toString('base64'),
+                  contentType: 'application/pdf',
+                },
+              ],
+            };
+          } else {
+            body = renderOrderWhatsappText(loaded.doc);
+          }
+        } else {
+          // Flag off: the same text orders.supplierMessagePreview showed the manager (#100).
+          const doc = await buildSupplierMessage(ctx.db, restaurantId, po.createdBy ?? ctx.session.userId, {
+            poId: input.poId,
+            supplierName: supplier?.name ?? 'ספק',
+            expectedDeliveryAt: po.expectedDeliveryAt,
+            lines,
+          });
+          subject = doc.subject;
+          body = doc.body;
+        }
         // Decouple from the (churning) notifier module: write to the outbox the
         // outboxDispatch worker already drains.
         //
@@ -886,8 +983,9 @@ export const ordersRouter = router({
             restaurantId,
             channel: input.channel,
             target,
-            subject: doc.subject,
-            body: doc.body,
+            subject,
+            body,
+            ...(payload ? { payload } : {}),
             status: 'queued',
             relatedEntityType: 'purchase_order',
             relatedEntityId: input.poId,
@@ -902,6 +1000,60 @@ export const ordersRouter = router({
         .set({ status: 'sent', sentAt: new Date(), sentChannel, updatedAt: new Date() })
         .where(eq(purchaseOrders.id, input.poId));
       return { ok: true, sentChannel };
+    }),
+
+  /** Order-document settings (flag `orderPricesOut`). `enabled` false → the UI hides the controls. */
+  documentSettings: memberProcedure.query(async ({ ctx }) => {
+    const restaurantId = ctx.session.restaurantId;
+    const [row] = await ctx.db
+      .select({ settings: restaurants.settings })
+      .from(restaurants)
+      .where(eq(restaurants.id, restaurantId))
+      .limit(1);
+    return { enabled: featureEnabled(row?.settings, 'orderPricesOut'), ...orderDocumentSettingsOf(row?.settings) };
+  }),
+
+  /** Show or hide prices on what the supplier receives (owner / manager). */
+  setDocumentSettings: managerProcedure
+    .input(z.object({ showPrices: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      await assertFeatureOn(ctx.db, restaurantId, 'orderPricesOut');
+      // jsonb_set in one statement: no read-modify-write race with other settings writers.
+      await ctx.db
+        .update(restaurants)
+        .set({
+          settings: sql`jsonb_set(coalesce(${restaurants.settings}, '{}'::jsonb), '{orderDocument}',
+            coalesce(${restaurants.settings} -> 'orderDocument', '{}'::jsonb) || ${JSON.stringify({ showPrices: input.showPrices })}::jsonb)`,
+          updatedAt: new Date(),
+        })
+        .where(eq(restaurants.id, restaurantId));
+      return { showPrices: input.showPrices };
+    }),
+
+  /** What the supplier receives for this PO: email text, WhatsApp text and the PDF (base64). */
+  documentPreview: managerProcedure
+    .input(z.object({ poId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      await assertFeatureOn(ctx.db, restaurantId, 'orderPricesOut');
+      await assertPoOwned(ctx.db, input.poId, restaurantId);
+      const loaded = await loadOrderDocument(ctx.db, restaurantId, input.poId, {
+        mode: 'preview',
+        userId: ctx.session.userId ?? null,
+        extensions: ORDER_DOCUMENT_EXTENSIONS,
+      });
+      if (!loaded) throw new TRPCError({ code: 'NOT_FOUND', message: 'purchase order not found' });
+      const pdf = await renderOrderPdf(loaded.doc);
+      return {
+        emailText: renderOrderEmailText(loaded.doc),
+        whatsappText: renderOrderWhatsappText(loaded.doc),
+        pdfBase64: Buffer.from(pdf).toString('base64'),
+        filename: orderPdfFilename(loaded.doc),
+        showPrices: loaded.doc.showPrices,
+        totalAgorot: loaded.doc.totalAgorot,
+        hasUnpricedLines: loaded.doc.hasUnpricedLines,
+      };
     }),
 
   /** Order-time leak guardrail preview (advanced_analytics). */

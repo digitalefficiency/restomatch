@@ -1,5 +1,6 @@
 import type { UserRole } from '@restomatch/db';
 import type { Locale } from './i18n/config';
+import { generateRouteRoles } from './nav/registry';
 
 /**
  * Single source of truth for tenant-role display + dashboard visibility.
@@ -36,39 +37,14 @@ export function labelForRole(role: string, locale: Locale = 'he'): string {
 }
 
 /**
- * Which roles may see each dashboard route. A `receiver` (shift manager) sees
- * only the overview + receiving inbox — least privilege. Drives both the nav
- * filter and the per-page server guards.
+ * Which roles may see each dashboard route — generated from the nav registry
+ * (lib/nav/routes/*.ts, one file per route folder), so the nav, the middleware
+ * gate and the per-page guards never drift apart. A `receiver` (shift manager)
+ * gets the overview, receiving and other no-₪ screens — never a supplier
+ * ledger or invoice page (owner decision: the receiver sees no ₪). Exact path → roles;
+ * sub-paths inherit by longest prefix (`allowedRolesForPath`).
  */
-export const ROUTE_ROLES: Record<string, UserRole[]> = {
-  '/dashboard': ALL_ROLES,
-  '/dashboard/receiving': ['owner', 'manager', 'receiver'],
-  // Bookkeeper included: duplicate invoices are routed to them (approvals engine),
-  // and approvals.approve/reject/escalate accept bookkeeper-routed items.
-  '/dashboard/approvals': ['owner', 'manager', 'bookkeeper'],
-  '/dashboard/leaks': ['owner', 'manager', 'bookkeeper'],
-  '/dashboard/suppliers': ['owner', 'manager'],
-  '/dashboard/catalog': ['owner', 'manager'],
-  // Product pages are part of the catalog (names grid, price history, cheapest
-  // supplier); without this rule every role could open them by URL.
-  '/dashboard/products': ['owner', 'manager'],
-  '/dashboard/orders': ['owner', 'manager'],
-  '/dashboard/exports': ['owner', 'bookkeeper'],
-  // One supplier invoice (prices, lines, image): opened from receiving, approvals
-  // and the leak drill-down — never the chef. Mirrors receiving.getInvoice.
-  '/dashboard/invoices': ['owner', 'manager', 'receiver', 'bookkeeper'],
-  // Team: owners manage the roster; managers see it read-only and may set a
-  // member's app language (e.g. an English-speaking receiver).
-  '/dashboard/team': ['owner', 'manager'],
-  // Settings holds PERSONAL security (password, 2FA, language, DSR) for every
-  // role; the restaurant sections inside are owner-edit / manager+bookkeeper
-  // read-only / hidden for receiver + chef (see app/dashboard/settings/page.tsx).
-  '/dashboard/settings': ALL_ROLES,
-  // Chain (S8): owner-level money across branches + branch management. The
-  // chain router re-checks owner membership in the DB per request.
-  '/dashboard/chain': ['owner'],
-  '/dashboard/branches': ['owner'],
-};
+export const ROUTE_ROLES: Record<string, UserRole[]> = generateRouteRoles();
 
 /** Whether `role` may see `href` (exact match). Unknown routes default to visible. */
 export function canSeeRoute(role: UserRole, href: string): boolean {

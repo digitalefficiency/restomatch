@@ -6,7 +6,7 @@ import type { Database } from '@restomatch/db';
  * Fail-fast environment validation for the web app.
  *
  * The app must NOT boot into production with missing secrets and then degrade
- * silently (lost invoices on an unset REDIS_URL, dead login on an unset
+ * silently (dead login on an unset
  * RESEND_API_KEY, inert RLS on an unset DATABASE_URL_APP). Call assertWebEnv()
  * once at startup (instrumentation) to turn those into a LOUD boot failure.
  *
@@ -30,7 +30,6 @@ const WebEnvSchema = z.object({
   APP_URL: z.string().url().optional(),
   RESEND_API_KEY: z.string().min(1).optional(),
   EMAIL_FROM: z.string().min(1).optional(),
-  REDIS_URL: z.string().min(1).optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   // Name the Supabase↔Vercel integration syncs for the new-style secret key.
   SUPABASE_SECRET_KEY: z.string().min(1).optional(),
@@ -57,7 +56,15 @@ export function assertWebEnv(env: NodeJS.ProcessEnv = process.env): WebEnv {
   const v = parsed.data;
   if ((v.NODE_ENV ?? env.NODE_ENV) === 'production') {
     const missing: string[] = [];
-    if (!v.DATABASE_URL_APP) missing.push('DATABASE_URL_APP — RLS app-role connection (RLS is inert without it)');
+    if (!ownerDbUrl(env))
+      missing.push(`DATABASE_URL — ${pgUrlProblem(v.DATABASE_URL)} (and no usable POSTGRES_URL from the Supabase integration)`);
+    if (!normalizePgUrl(v.DATABASE_URL_APP) && !deriveAppRoleUrl(env)) {
+      missing.push(
+        v.DATABASE_URL_APP
+          ? `DATABASE_URL_APP — ${pgUrlProblem(v.DATABASE_URL_APP)} (or set APP_ROLE_PASSWORD so it is derived from DATABASE_URL)`
+          : 'DATABASE_URL_APP — RLS app-role connection (RLS is inert without it; or set APP_ROLE_PASSWORD so it is derived from DATABASE_URL)',
+      );
+    }
     if (!v.RESEND_API_KEY) missing.push('RESEND_API_KEY — magic-link login + invites');
     if (!v.EMAIL_FROM) missing.push('EMAIL_FROM — verified sender domain');
     if (!v.AUTH_URL && !v.APP_URL && !env.NEXTAUTH_URL) missing.push('AUTH_URL or APP_URL');
@@ -65,7 +72,6 @@ export function assertWebEnv(env: NodeJS.ProcessEnv = process.env): WebEnv {
     // MissingSecret) — make it a boot failure instead (F4).
     if (!v.AUTH_SECRET && !v.NEXTAUTH_SECRET)
       missing.push('AUTH_SECRET (or NEXTAUTH_SECRET) — signs the session JWT; every login fails without it');
-    if (!v.REDIS_URL) missing.push('REDIS_URL — OCR/match/cron queue (uploads vanish without it)');
     if (!v.SUPABASE_SERVICE_ROLE_KEY && !v.SUPABASE_SECRET_KEY)
       missing.push('SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY) — signed scan URLs');
     // AUTH_ENC_KEY encrypts the TOTP secret at rest (Epic C). Required in prod so
@@ -136,6 +142,9 @@ function originOf(url: string | undefined): string | null {
  */
 export function webEnvWarnings(env: NodeJS.ProcessEnv = process.env): string[] {
   const warnings: string[] = [];
+  if (env.REDIS_URL) {
+    warnings.push('[env] WARNING: REDIS_URL is set but no longer used — the job queue, rate limits and heartbeat are in Postgres (0061). Remove it.');
+  }
   // WARN, never throw: a malformed value is a likely leftover from another
   // project, but bricking a live deploy over it would be worse than the leftover.
   if (env.NODE_ENV === 'production') {
@@ -188,13 +197,246 @@ function isTruthyFlag(value: string | undefined): boolean {
  * NODE_ENV=test). Otherwise an unset DATABASE_URL_APP is a LOUD boot failure
  * rather than a silent owner fallback.
  */
+/**
+ * `next build` imports every route module to collect page data, and the DB
+ * modules (lib/db.ts, lib/authDb.ts) resolve their URL at import. A build
+ * without database env (a Vercel Preview with no DATABASE_URL) died there, even
+ * though no query runs at build time. ONLY in the build phase, with the URL
+ * missing, those modules get this placeholder instead: postgres.js connects
+ * lazily, so it is never dialled unless a page really queries during the build
+ * (then the build fails loudly, as it should). Runtime is unchanged — the boot
+ * guard (assertWebEnv, instrumentation) still refuses to serve without the URLs.
+ */
+export const BUILD_PHASE_DB_PLACEHOLDER = 'postgres://build:build@build-phase-placeholder.invalid:5432/none';
+
+export function isNextBuildPhase(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.NEXT_PHASE === 'phase-production-build';
+}
+
+/**
+ * True when `raw` is a postgres:// / postgresql:// URL that `new URL` — and so
+ * postgres.js — can parse. Raw whitespace or < > never belong in a connection
+ * URL (they would be percent-encoded): `new URL` accepts them, then the login
+ * fails with a mangled password, so they count as malformed here.
+ */
+export function isParsablePgUrl(raw: string | undefined): boolean {
+  if (!raw || raw.trim() === '' || /\s|[<>]/.test(raw.trim())) return false;
+  try {
+    const u = new URL(raw.trim());
+    return (u.protocol === 'postgres:' || u.protocol === 'postgresql:') && u.hostname !== '';
+  } catch {
+    return false;
+  }
+}
+
+/** Why a DB URL cannot be used. Never echoes the value: it carries a password. */
+export function pgUrlProblem(raw: string): string {
+  const v = raw.trim();
+  if (/^[A-Z][A-Z0-9_]*\s*=/.test(v)) return 'the value starts with "NAME=" — paste only the URL';
+  if (/\s/.test(v)) return 'it contains a space or a line break';
+  if (/[<>]/.test(v)) return 'it contains < or > — remove the placeholder brackets around the password';
+  if (/:\[.*\]@[^@]*$/.test(v)) return 'the password is still inside [ ] — remove the brackets';
+  if (!/^postgres(ql)?:\/\//i.test(v)) return 'it does not start with postgresql://';
+  if (/%(?![0-9a-f]{2})/i.test(v)) return 'a % in the password must be encoded as %25';
+  return 'a special character in the password (@ : / ? # % space) must be URL-encoded';
+}
+
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
+/**
+ * True when postgres.js 3.4 reads `url` the way it is written: one `@` before the
+ * host, no fragment, and user/password that decodeURIComponent accepts (it throws
+ * URIError at `postgres()` otherwise). `new URL` alone is not enough — it accepts
+ * `user:P@ss#1@host`, which postgres.js reads as host `ss`.
+ */
+function postgresJsReadsAsWritten(url: string): boolean {
+  if (!isParsablePgUrl(url)) return false;
+  const u = new URL(url);
+  if (u.hash !== '') return false;
+  const authority = url.slice(url.indexOf('://') + 3).split(/[?/]/)[0] ?? '';
+  if ((authority.match(/@/g) ?? []).length > 1) return false;
+  try {
+    decodeURIComponent(u.username);
+    decodeURIComponent(u.password);
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Repair what a DB URL picks up on its way into a dashboard field: a leading
+ * `NAME=`, wrapping quotes, line breaks / tabs, a missing `postgresql://`, `[ ]`
+ * or `< >` left around the password (Supabase's `[YOUR-PASSWORD]` template), and
+ * a password character that was never URL-encoded (`@ : / ? # %` or a space).
+ * The URL is always split structurally — user up to the first `:`, password up
+ * to the LAST `@` — and rebuilt with the password encoded, so a clean URL comes
+ * back unchanged and a mis-encoded one never reaches the wrong host. Returns null
+ * when the result still is not one postgres.js reads as written.
+ */
+export function normalizePgUrl(raw: string | undefined): string | null {
+  if (!raw || raw.trim() === '') return null;
+  let v = raw
+    .trim()
+    .replace(/^[A-Z][A-Z0-9_]*\s*=\s*/, '')
+    .replace(/^(['"])([\s\S]*)\1$/, '$2')
+    .replace(/[\r\n\t]+/g, '')
+    .trim();
+  // `user:password@host…` pasted without its scheme.
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(v) && /^[^:@/]+:.+@[^@/]+/.test(v)) v = `postgresql://${v}`;
+  // user = up to the first ':'; password = up to the LAST '@' (it may hold '@').
+  const m = /^(postgres(?:ql)?:\/\/)([^:@/\s]+):(.*)@([^@\s]*)$/i.exec(v);
+  if (m) {
+    const [, scheme, user, rawPw, rest] = m as unknown as [string, string, string, string, string];
+    const pw = /^\[(.*)\]$/.exec(rawPw)?.[1] ?? /^<(.*)>$/.exec(rawPw)?.[1] ?? rawPw;
+    v = `${scheme}${user}:${encodeURIComponent(safeDecode(pw))}@${rest}`;
+  }
+  return postgresJsReadsAsWritten(v) ? v : null;
+}
+
+/**
+ * Write the repaired owner URL back into DATABASE_URL so every consumer in this
+ * process — the job queue (`QUEUE_DATABASE_URL || DATABASE_URL`), raw postgres()
+ * callers — gets the same value as authDb. Call once at boot, after assertWebEnv.
+ * Returns whether it changed anything (never the value).
+ */
+export function applyRepairedDbEnv(env: NodeJS.ProcessEnv = process.env): boolean {
+  const owner = ownerDbUrl(env);
+  if (!owner || owner === env.DATABASE_URL) return false;
+  env.DATABASE_URL = owner;
+  return true;
+}
+
+/**
+ * Owner URLs the Supabase↔Vercel integration keeps in the project (transaction
+ * pooler first, then the session pooler) — the fallback when DATABASE_URL was
+ * pasted beyond repair.
+ */
+const SUPABASE_INTEGRATION_OWNER_URLS = ['POSTGRES_URL', 'POSTGRES_URL_NON_POOLING'] as const;
+
+/**
+ * Keep only `sslmode`: postgres.js sends any other query parameter (the
+ * integration's `supa=…`, `pgbouncer=true`) to the server as a startup parameter.
+ */
+function withSslmodeOnly(url: string): string {
+  const u = new URL(url);
+  for (const key of [...u.searchParams.keys()]) if (key !== 'sslmode') u.searchParams.delete(key);
+  return u.toString();
+}
+
+/** Which variable the owner connection comes from — DATABASE_URL first — or null. */
+export function ownerDbUrlSource(env: NodeJS.ProcessEnv = process.env): string | null {
+  if (normalizePgUrl(env.DATABASE_URL)) return 'DATABASE_URL';
+  return SUPABASE_INTEGRATION_OWNER_URLS.find((name) => normalizePgUrl(env[name])) ?? null;
+}
+
+/**
+ * The owner connection: DATABASE_URL, repaired by normalizePgUrl — or, when that
+ * is unset or beyond repair, the integration's POSTGRES_URL / POSTGRES_URL_NON_POOLING.
+ * Null when none is usable.
+ */
+export function ownerDbUrl(env: NodeJS.ProcessEnv = process.env): string | null {
+  const source = ownerDbUrlSource(env);
+  if (!source) return null;
+  const url = normalizePgUrl(env[source])!;
+  return source === 'DATABASE_URL' ? url : withSslmodeOnly(url);
+}
+
+/**
+ * The identity layer's owner connection (lib/authDb.ts): DATABASE_URL, repaired
+ * by normalizePgUrl — DATABASE_URL_APP only when DATABASE_URL is unset (legacy
+ * dev setups). A value beyond repair never fails `next build` (the placeholder is
+ * never dialled) but fails at runtime naming the problem, never the value.
+ */
+export function resolveAuthDbUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const owner = ownerDbUrl(env);
+  if (owner) return owner;
+  const name = env.DATABASE_URL?.trim() ? 'DATABASE_URL' : env.DATABASE_URL_APP?.trim() ? 'DATABASE_URL_APP' : null;
+  if (name === 'DATABASE_URL_APP') {
+    const app = normalizePgUrl(env.DATABASE_URL_APP);
+    if (app) return app;
+  }
+  if (isNextBuildPhase(env)) return BUILD_PHASE_DB_PLACEHOLDER;
+  if (!name) return undefined;
+  throw new Error(`[env] ${name} is unusable: ${pgUrlProblem(env[name]!)}.`);
+}
+
+/**
+ * One line on the DB variables — ok / repaired / UNUSABLE / unset, with the
+ * reason — for the build and boot logs. Never contains a value.
+ */
+export function dbEnvReport(env: NodeJS.ProcessEnv = process.env): string {
+  const parts = (['DATABASE_URL', 'DATABASE_URL_APP'] as const).map((name) => {
+    const raw = env[name];
+    if (!raw || raw.trim() === '') return `${name}: unset`;
+    const fixed = normalizePgUrl(raw);
+    if (fixed === raw.trim()) return `${name}: ok`;
+    return `${name}: ${fixed ? 'repaired' : 'UNUSABLE'} (${pgUrlProblem(raw)})`;
+  });
+  parts.push(`owner connection from: ${ownerDbUrlSource(env) ?? 'none'}`);
+  parts.push(`APP_ROLE_PASSWORD: ${env.APP_ROLE_PASSWORD ? 'set' : 'unset'}`);
+  parts.push(`app role derivable: ${deriveAppRoleUrl(env) ? 'yes' : 'no'}`);
+  return parts.join(' · ');
+}
+
+/**
+ * The restomatch_app connection on DATABASE_URL's host, with APP_ROLE_PASSWORD:
+ * the same role and password the Supabase deploy / provision-rls set
+ * (docs/SUPABASE-GITHUB-DEPLOY.md §4.2). Supavisor names users
+ * `<role>.<project-ref>`, so the ref is carried over. Null when either input
+ * is missing or unusable. assertAppRoleNoBypass (instrumentation) still proves
+ * the resulting connection does not bypass RLS before any tenant is served.
+ */
+export function deriveAppRoleUrl(env: NodeJS.ProcessEnv = process.env): string | null {
+  const owner = ownerDbUrl(env);
+  const password = env.APP_ROLE_PASSWORD;
+  if (!owner || !password || /\s/.test(password)) return null;
+  const u = new URL(owner);
+  const ref = /^[^.]+\.([a-z0-9]{20})$/.exec(decodeURIComponent(u.username))?.[1];
+  u.username = ref ? `restomatch_app.${ref}` : 'restomatch_app';
+  u.password = encodeURIComponent(password);
+  return u.toString();
+}
+
 export function resolveWebDbUrl(env: NodeJS.ProcessEnv = process.env): string {
   const appUrl = env.DATABASE_URL_APP;
+  if (env.NODE_ENV === 'production' && normalizePgUrl(appUrl) !== appUrl?.trim()) {
+    // A missing or malformed DATABASE_URL_APP used to fail the build at page-data
+    // collection ("Invalid URL") or every request at boot. Derive the same role
+    // from the owner URL instead, and say why — without the value.
+    const derived = deriveAppRoleUrl(env);
+    if (derived) {
+      if (!isNextBuildPhase(env)) {
+        console.warn(
+          `[env] DATABASE_URL_APP is ${appUrl ? `not used as is (${pgUrlProblem(appUrl)})` : 'unset'} — ` +
+            `connecting as restomatch_app on ${ownerDbUrlSource(env)}'s host with APP_ROLE_PASSWORD`,
+        );
+      }
+      return derived;
+    }
+    const repaired = normalizePgUrl(appUrl);
+    if (repaired) {
+      if (!isNextBuildPhase(env)) console.warn(`[env] DATABASE_URL_APP repaired: ${pgUrlProblem(appUrl!)}`);
+      return repaired;
+    }
+    if (appUrl && appUrl.trim() !== '') {
+      if (isNextBuildPhase(env)) return BUILD_PHASE_DB_PLACEHOLDER;
+      throw new Error(`[env] DATABASE_URL_APP is unusable: ${pgUrlProblem(appUrl)}.`);
+    }
+  }
   if (appUrl && appUrl.length > 0) return appUrl;
 
   const ownerFallbackAllowed =
     (env.NODE_ENV ?? 'development') === 'test' || isTruthyFlag(env.ALLOW_OWNER_DB);
   if (ownerFallbackAllowed && env.DATABASE_URL) return env.DATABASE_URL;
+
+  if (isNextBuildPhase(env)) return BUILD_PHASE_DB_PLACEHOLDER;
 
   throw new Error(
     '[env] DATABASE_URL_APP is required: the web app must serve tenant traffic on the non-owner ' +

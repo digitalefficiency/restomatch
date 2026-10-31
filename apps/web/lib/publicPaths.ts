@@ -17,6 +17,8 @@ export const PUBLIC_EXACT_PATHS = [
   '/privacy',
   '/terms',
   '/cookies',
+  // הצהרת נגישות (reg. 35): must be reachable without a session, from every shell.
+  '/accessibility',
   // Generated SEO/social route (no file extension in the URL, so the static-asset
   // rule below doesn't catch it) — crawlers have no session. The share cards
   // (/og/*.png) and /opengraph-image never reach the middleware at all (matcher).
@@ -29,11 +31,22 @@ export const PUBLIC_PREFIX_PATHS = [
   '/reset',
   '/showcase',
   '/api/showcase',
+  // Free leak check (S15 wave 1): the page 404s unless LEAK_CHECK_PUBLIC=1; each
+  // /api/leak-check route re-checks the gate, origin, rate limits and proof of work.
+  '/leak-check',
+  '/api/leak-check',
   '/api/auth',
   '/api/trpc', // auth is enforced PER PROCEDURE (publicProcedure runs anonymously) — D1.4
   '/api/healthz',
   '/api/cron', // Vercel Cron; each route verifies CRON_SECRET itself
   '/api/inbound', // reserved for the Wave-3 inbox webhook (signature-verified per route)
+  // S13 invoice ingestion webhooks (WhatsApp / inbound e-mail). Each route verifies
+  // the provider HMAC, rate-limits, caps sizes and resolves the tenant ONLY from a
+  // hashed secret token — see packages/api/src/ingest/http.ts + ingest.attack.test.ts.
+  '/api/ingest',
+  // Wave-1 supplier portal (flag `supplierConfirm`): token-scoped, rate-limited, no session.
+  '/s',
+  '/api/supplier-confirm',
   '/_next',
 ] as const;
 

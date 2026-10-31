@@ -3,14 +3,14 @@ import { NextResponse } from 'next/server';
 import type { UserRole } from '@restomatch/db';
 import { authConfig } from './auth.config';
 import {
-  isLocale,
+  isAppLocale,
   LOCALE_COOKIE,
   LOCALE_COOKIE_MAX_AGE_SEC,
   LOCALE_QUERY_PARAM,
   withLocaleCookie,
 } from './lib/i18n/config';
 import { isPublicPath } from './lib/publicPaths';
-import { allowedRolesForPath } from './lib/roles';
+import { forbiddenRewrite } from './lib/net/access';
 import { buildCsp, cspHeaderName, generateNonce, isCspReportOnly } from './lib/securityHeaders';
 
 const { auth } = NextAuth(authConfig);
@@ -75,19 +75,15 @@ export default auth((req) => {
   }
 
   // Server-side role gate: a signed-in member hitting a dashboard route their
-  // role can't see is bounced to the overview. The nav hides these links and the
-  // tRPC procedures enforce data access — this also blocks direct-URL access.
-  // (Role can be briefly stale within the JWT revalidation window; acceptable.)
+  // role can't see gets the in-shell forbidden page (W1-04, ia-nav-07) — a
+  // REWRITE, not a redirect: the URL stays, so the page can name the screen,
+  // the roles that can open it, and another branch where this user can. The nav
+  // hides these links and the tRPC procedures enforce data access; this blocks
+  // direct-URL access. (Role can be briefly stale within the JWT revalidation
+  // window; acceptable.)
   const role = (req.auth?.user as { role?: UserRole | null } | undefined)?.role ?? null;
-  if (req.auth && role && path.startsWith('/dashboard')) {
-    const allowed = allowedRolesForPath(path);
-    if (allowed && !allowed.includes(role)) {
-      const url = req.nextUrl.clone();
-      url.pathname = '/dashboard';
-      url.search = '';
-      return NextResponse.redirect(url);
-    }
-  }
+  const forbiddenTo =
+    req.auth && role && !isApi ? forbiddenRewrite(path, req.nextUrl.search, role) : null;
 
   // Document responses carry a strict, nonce-based CSP (Report-Only by default —
   // set CSP_ENFORCE=1 to enforce; D1.2). API/JSON responses don't render scripts
@@ -102,16 +98,31 @@ export default auth((req) => {
   // Report-Only — that way the report stream isn't polluted by framework scripts
   // and only surfaces genuinely-unexpected sources before we promote to enforce.
   const requestHeaders = new Headers(req.headers);
-  // `?lang=en|he` persists the language choice (shareable English links). The
+  // `?lang=<locale>` persists the language choice (shareable English links; receiver locales are gated by getAppLocale). The
   // REQUEST cookie is rewritten too, so this very render is already in it.
   const langParam = req.nextUrl.searchParams.get(LOCALE_QUERY_PARAM);
-  const langOverride = isLocale(langParam) ? langParam : null;
+  const langOverride = isAppLocale(langParam) ? langParam : null;
   if (langOverride) {
     requestHeaders.set('cookie', withLocaleCookie(req.headers.get('cookie'), langOverride));
   }
   requestHeaders.set('x-nonce', nonce);
   requestHeaders.set('content-security-policy', csp);
-  const res = NextResponse.next({ request: { headers: requestHeaders } });
+  // A document gets a real 403. A client-router (RSC) fetch keeps 200: Next
+  // turns a non-2xx flight response into a full reload, and the in-shell page
+  // renders the same either way.
+  // Next strips its own `RSC` header and `_rsc` query before middleware, so a
+  // flight fetch is recognised as a script fetch (`Sec-Fetch-Dest: empty`) or
+  // by the router's `Next-Url` header. Anything else (documents, curl) gets 403.
+  const isFlight =
+    req.headers.get('rsc') === '1' ||
+    req.headers.has('next-url') ||
+    req.headers.get('sec-fetch-dest') === 'empty';
+  const res = forbiddenTo
+    ? NextResponse.rewrite(new URL(forbiddenTo, req.nextUrl.origin), {
+        status: isFlight ? 200 : 403,
+        request: { headers: requestHeaders },
+      })
+    : NextResponse.next({ request: { headers: requestHeaders } });
   // The RESPONSE header is Report-Only (safe default) or enforcing once promoted.
   res.headers.set(cspHeaderName(reportOnly), csp);
   if (langOverride) {

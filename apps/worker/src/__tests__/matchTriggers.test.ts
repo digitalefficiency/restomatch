@@ -94,6 +94,50 @@ describe('OCR auto-match vs an in-flight receipt submit (F2: receipt lock)', () 
   });
 });
 
+describe('a photo scan whose job lost its receipt (OCR sweep retry of a lost enqueue)', () => {
+  async function scan(source: 'photo' | 'email') {
+    const [inv] = await db.insert(invoices).values({ restaurantId, supplierId, status: 'matched', source }).returning();
+    return inv!.id;
+  }
+
+  it("is held while its supplier's receipt opened before it is being counted; e-mail / WhatsApp scans are not", async () => {
+    const photo = await scan('photo');
+    expect(await ocrAutoMatchDecision(db, restaurantId, undefined, { invoiceId: photo })).toEqual({ match: false });
+    expect(await ocrAutoMatchDecision(db, restaurantId, undefined, { invoiceId: await scan('email') })).toEqual({ match: true });
+    // No scan given (callers that know there is no receipt): unchanged.
+    expect(await ocrAutoMatchDecision(db, restaurantId, undefined)).toEqual({ match: true });
+  });
+
+  it('a receipt opened after the scan, older than 24 h, closed, or of another supplier does not hold it', async () => {
+    const photo = await scan('photo');
+    await db.update(goodsReceipts).set({ createdAt: new Date(Date.now() + 60_000) }).where(eq(goodsReceipts.id, grId));
+    expect(await ocrAutoMatchDecision(db, restaurantId, undefined, { invoiceId: photo })).toEqual({ match: true });
+    await db.update(goodsReceipts).set({ createdAt: new Date(Date.now() - 25 * 3600_000) }).where(eq(goodsReceipts.id, grId));
+    expect(await ocrAutoMatchDecision(db, restaurantId, undefined, { invoiceId: photo })).toEqual({ match: true });
+    await db.update(goodsReceipts).set({ createdAt: new Date(Date.now() - 3600_000), status: 'completed' }).where(eq(goodsReceipts.id, grId));
+    expect(await ocrAutoMatchDecision(db, restaurantId, undefined, { invoiceId: photo })).toEqual({ match: true });
+    await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, grId));
+    const [other] = await db.insert(suppliers).values({ restaurantId, name: 'Galilee' }).returning();
+    await db.update(invoices).set({ supplierId: other!.id }).where(eq(invoices.id, photo));
+    expect(await ocrAutoMatchDecision(db, restaurantId, undefined, { invoiceId: photo })).toEqual({ match: true });
+  });
+
+  it('a submit in flight is waited for; the receipt that just closed pins the match to its PO', async () => {
+    const photo = await scan('photo');
+    let check: Promise<{ match: boolean; poId?: string }> | undefined;
+    let settled = false;
+    await other.transaction(async (tx) => {
+      await lockReceipt(tx as unknown as Database, grId);
+      await tx.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, grId));
+      check = ocrAutoMatchDecision(db, restaurantId, undefined, { invoiceId: photo });
+      check.then(() => (settled = true));
+      await new Promise((r) => setTimeout(r, 300));
+      expect(settled).toBe(false); // blocked on the receipt lock
+    });
+    expect(await check!).toEqual({ match: true, poId });
+  });
+});
+
 describe('match job: a receipt submit never rewrites a signed-off invoice (F4)', () => {
   it('rematch on an approved/paid invoice with a run is skipped and the run is kept', async () => {
     for (const status of ['approved', 'paid'] as const) {

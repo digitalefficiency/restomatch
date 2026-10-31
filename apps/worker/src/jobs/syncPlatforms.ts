@@ -9,7 +9,7 @@ import {
 } from '@restomatch/db';
 import { getAdapter, type PlatformId } from '@restomatch/procurement';
 import type { NormalizedPurchaseOrder } from '@restomatch/types';
-import { makeWorker } from '../queue';
+import { makeWorker, type WorkerJob } from '../queue';
 import { jobDb } from '../db';
 
 export interface SyncPlatformsJob {
@@ -22,77 +22,80 @@ export interface SyncPlatformsJob {
 }
 
 export function startSyncPlatformsWorker() {
-  return makeWorker<SyncPlatformsJob>('sync-platforms', async (job) => {
-    const url = process.env.DATABASE_URL;
-    if (!url) throw new Error('DATABASE_URL is required');
-    const db = jobDb(url);
+  return makeWorker<SyncPlatformsJob>('sync-platforms', processSyncPlatforms);
+}
 
-    const connectionRows = await db
-      .select()
-      .from(procurementConnections)
-      .where(
-        and(
-          eq(procurementConnections.restaurantId, job.data.restaurantId),
-          eq(procurementConnections.platform, job.data.platform),
-        ),
-      )
-      .limit(1);
-    const connection = connectionRows[0];
-    // credentialsOverride is a dev/test escape hatch only — in production a
-    // sync may run solely for restaurants with a real procurement_connection,
-    // otherwise a forged job payload could pull a foreign platform account
-    // into this restaurant's data.
-    const allowOverride =
-      process.env.NODE_ENV !== 'production' && job.data.credentialsOverride !== undefined;
-    if (!connection && !allowOverride) {
-      throw new Error(
-        `No procurement_connection for restaurant ${job.data.restaurantId} platform ${job.data.platform}`,
-      );
-    }
+/** The sync-platforms job: run by the worker loop (above) and by the serverless runner (handlers.ts). */
+export async function processSyncPlatforms(job: WorkerJob<SyncPlatformsJob>) {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error('DATABASE_URL is required');
+  const db = jobDb(url);
 
-    const credentials =
-      (allowOverride ? job.data.credentialsOverride : undefined) ??
-      (connection ? loadCredentials(connection.credentialsVaultRef) : {});
-    const adapter = getAdapter(job.data.platform);
-
-    const since = job.data.sinceOverride
-      ? new Date(job.data.sinceOverride)
-      : connection?.lastSyncAt ?? new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // 30 days back
-
-    const ctx = { restaurantId: job.data.restaurantId, credentials };
-
-    // 1. Sync suppliers first (needed for FK on POs)
-    const supplierMap = await syncSuppliers(
-      db,
-      job.data.restaurantId,
-      job.data.platform,
-      await adapter.listSuppliers(ctx),
+  const connectionRows = await db
+    .select()
+    .from(procurementConnections)
+    .where(
+      and(
+        eq(procurementConnections.restaurantId, job.data.restaurantId),
+        eq(procurementConnections.platform, job.data.platform),
+      ),
+    )
+    .limit(1);
+  const connection = connectionRows[0];
+  // credentialsOverride is a dev/test escape hatch only — in production a
+  // sync may run solely for restaurants with a real procurement_connection,
+  // otherwise a forged job payload could pull a foreign platform account
+  // into this restaurant's data.
+  const allowOverride =
+    process.env.NODE_ENV !== 'production' && job.data.credentialsOverride !== undefined;
+  if (!connection && !allowOverride) {
+    throw new Error(
+      `No procurement_connection for restaurant ${job.data.restaurantId} platform ${job.data.platform}`,
     );
+  }
 
-    // 2. Sync orders (and their lines)
-    const orders = await adapter.listOrders(ctx, since);
-    const poCount = await syncOrders(db, job.data.restaurantId, supplierMap, orders);
+  const credentials =
+    (allowOverride ? job.data.credentialsOverride : undefined) ??
+    (connection ? loadCredentials(connection.credentialsVaultRef) : {});
+  const adapter = getAdapter(job.data.platform);
 
-    // 3. Update sync cursor
-    if (connection) {
-      await db
-        .update(procurementConnections)
-        .set({ lastSyncAt: new Date() })
-        .where(eq(procurementConnections.id, connection.id));
-    }
+  const since = job.data.sinceOverride
+    ? new Date(job.data.sinceOverride)
+    : connection?.lastSyncAt ?? new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // 30 days back
 
-    console.log(
-      `[sync-platforms] platform=${job.data.platform} restaurant=${job.data.restaurantId} ` +
-        `suppliers=${supplierMap.size} orders=${orders.length} persisted=${poCount}`,
-    );
+  const ctx = { restaurantId: job.data.restaurantId, credentials };
 
-    return {
-      platform: job.data.platform,
-      suppliersSynced: supplierMap.size,
-      ordersFetched: orders.length,
-      ordersPersisted: poCount,
-    };
-  });
+  // 1. Sync suppliers first (needed for FK on POs)
+  const supplierMap = await syncSuppliers(
+    db,
+    job.data.restaurantId,
+    job.data.platform,
+    await adapter.listSuppliers(ctx),
+  );
+
+  // 2. Sync orders (and their lines)
+  const orders = await adapter.listOrders(ctx, since);
+  const poCount = await syncOrders(db, job.data.restaurantId, supplierMap, orders);
+
+  // 3. Update sync cursor
+  if (connection) {
+    await db
+      .update(procurementConnections)
+      .set({ lastSyncAt: new Date() })
+      .where(eq(procurementConnections.id, connection.id));
+  }
+
+  console.log(
+    `[sync-platforms] platform=${job.data.platform} restaurant=${job.data.restaurantId} ` +
+      `suppliers=${supplierMap.size} orders=${orders.length} persisted=${poCount}`,
+  );
+
+  return {
+    platform: job.data.platform,
+    suppliersSynced: supplierMap.size,
+    ordersFetched: orders.length,
+    ordersPersisted: poCount,
+  };
 }
 
 /**
@@ -261,11 +264,17 @@ async function syncOrders(
  * or via the job's credentialsOverride. Vault integration comes later
  * (M9 polish) — for now `credentialsVaultRef` is just a key into env.
  */
-function loadCredentials(vaultRef: string): Record<string, unknown> {
+export function loadCredentials(vaultRef: string, env: NodeJS.ProcessEnv = process.env): Record<string, unknown> {
+  // "fixture:<anything>" = the platform's recorded offline fixture (demo tenant,
+  // local QA). Never in production: it would sync synthetic orders into a real tenant.
+  if (vaultRef.startsWith('fixture:')) {
+    if (env.NODE_ENV === 'production') throw new Error('fixture procurement connections are disabled in production');
+    return { mode: 'fixture' };
+  }
   // Convention: vaultRef = "env:VAR_NAME" returns {apiKey: process.env[VAR_NAME]}
   if (vaultRef.startsWith('env:')) {
     const varName = vaultRef.slice(4);
-    const apiKey = process.env[varName];
+    const apiKey = env[varName];
     if (!apiKey) {
       throw new Error(`Credentials env var ${varName} is not set`);
     }

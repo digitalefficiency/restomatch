@@ -9,19 +9,29 @@
  * plan v2 T0).
  */
 export async function registerNode(): Promise<void> {
-  const { assertWebEnv, assertAppRoleNoBypass, assertRlsEnabled } = await import('./lib/env');
+  const { assertWebEnv, assertAppRoleNoBypass, assertRlsEnabled, applyRepairedDbEnv } = await import('./lib/env');
   // Fail fast on a misconfigured production environment (missing
-  // DATABASE_URL_APP/RESEND/REDIS/etc.) instead of booting and degrading silently.
+  // DATABASE_URL_APP/RESEND/etc.) instead of booting and degrading silently.
   assertWebEnv();
+  // The job queue and raw postgres() callers read DATABASE_URL themselves: hand
+  // them the same repaired owner URL authDb uses.
+  if (applyRepairedDbEnv()) console.warn('[env] DATABASE_URL replaced with its repaired form for this process');
 
-  // A malformed REDIS_URL (classically Upstash's https:// REST URL) is a WARN,
-  // not a boot failure: the site still serves, and every enqueue fails fast
-  // with 'queue.unavailable' instead of hanging the request (EN-7).
-  const { redisUrlProblem } = await import('@restomatch/queue');
-  const redisProblem = redisUrlProblem(process.env.REDIS_URL);
-  if (redisProblem) {
-    console.warn(`[boot] ${redisProblem} — OCR/import jobs will not be queued until it is fixed`);
-  }
+  // Server-side Sentry (no-op without SENTRY_DSN; enabling needs the SDK —
+  // docs/MONITORING.md). Every event goes through the PII scrubber.
+  const { initSentryFromEnv } = await import('@restomatch/observability');
+  await initSentryFromEnv({ service: 'web' });
+
+
+  // S14: the assistant's burst limit goes through the app's enforceRateLimit.
+  const { registerAskRateLimit } = await import('./lib/askRateLimit');
+  registerAskRateLimit();
+
+  // Serverless jobs (no worker process): a request that enqueues OCR / match /
+  // catalog work runs it right after its response (after()); everything else —
+  // and anything a kick could not finish — runs from /api/cron/jobs every minute.
+  const { registerJobKick } = await import('./lib/jobKick');
+  registerJobKick();
 
   // Tenant-boundary boot guards (Epic 0.1/0.3). Only meaningful when we are
   // actually serving tenant traffic on the app role: in production the role is

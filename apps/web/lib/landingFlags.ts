@@ -9,7 +9,7 @@
  * kill-switch the tenant flags honour) wins: `FEATURES_OFF=all` or
  * `FEATURES_OFF=landingOrdersStory` turns it off again.
  */
-export const LANDING_FLAG_KEYS = ['landingOrdersStory'] as const;
+export const LANDING_FLAG_KEYS = ['landingOrdersStory', 'landingCompare'] as const;
 
 export type LandingFlag = (typeof LANDING_FLAG_KEYS)[number];
 

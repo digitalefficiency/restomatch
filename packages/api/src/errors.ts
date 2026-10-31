@@ -32,7 +32,11 @@ export const APP_ERROR_CODES = [
   'auth.forbidden',
   'input.invalid',
   'invoice.numberTaken',
-  'receipt.closed',
+  'FEATURE_DISABLED',
+  'leakCheck.invalidLink',
+  'growth.referralInvalid',
+  'growth.referralSelf',
+  'growth.referralAlreadyRedeemed',
 ] as const;
 
 export type AppErrorCode = (typeof APP_ERROR_CODES)[number];

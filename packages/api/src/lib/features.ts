@@ -28,7 +28,23 @@ export const FEATURE_KEYS = [
   'payRun',
   'dockSlip',
   'consolidatedMatch',
-  'receiptReopen',
+  // Wave-1 keys (appended after main's order).
+  // In-app preview of the monthly email (S12, demo 2026-10-25). Read-only: no send.
+  'monthlyDigestPreview',
+  'growth',
+  // S17: alert on a dish whose food cost crossed the target because a supplier raised a price.
+  'dishPriceAlert',
+  'orderPricesOut',
+  'supplierConfirm',
+  'dockPriceContext',
+  'orderCapture',
+  // "How did we get to ₪X?" proof sheet under the dashboard hero (S12). Read-only, no new ₪ math.
+  'leakProof',
+  'vatAtRisk',
+  'supplierLeakCard',
+  'supplierLedger',
+  // S17: inventory counting (ספירת מלאי) → actual food cost per period.
+  'inventoryCount',
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];

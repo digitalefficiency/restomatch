@@ -16,12 +16,13 @@ type PayRunStatus = 'pay' | 'hold' | 'claim';
 
 /**
  * Emphasis tiers (AGENTS.md): "can pay" is T3 (calm green); "hold — awaiting a decision" and
- * "ask for a credit" are T2 (solid badge + ₪ + one CTA); "waiting for a PO link" is T4 (neutral).
+ * "ask for a credit" are T2 (solid badge + ₪ + one CTA); "waiting for a PO link" and "waiting
+ * for the goods-receipt count" (#94) are T4 (neutral) — nothing to decide yet.
  */
-function toneOf(inv: { status: PayRunStatus; pendingLink: boolean; duplicate: boolean }): BadgeTone {
+function toneOf(inv: { status: PayRunStatus; pendingLink: boolean; awaitingCount: boolean; duplicate: boolean }): BadgeTone {
   if (inv.status === 'pay') return 'accent';
   if (inv.status === 'claim') return 'danger-solid';
-  return inv.pendingLink && !inv.duplicate ? 'neutral' : 'warning-solid';
+  return (inv.pendingLink || inv.awaitingCount) && !inv.duplicate ? 'neutral' : 'warning-solid';
 }
 
 /**
@@ -62,14 +63,22 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
   const day = (iso: string) => formatDate(iso, locale, { dateStyle: 'medium' });
   const supplierLabel = (s: { supplierName: string | null; supplierNameEn: string | null }) =>
     displayName(locale, s.supplierName, s.supplierNameEn) || '—';
-  const statusLabel = (inv: { status: PayRunStatus; pendingLink: boolean; duplicate: boolean; creditIls: number }) =>
+  const statusLabel = (inv: {
+    status: PayRunStatus;
+    pendingLink: boolean;
+    awaitingCount: boolean;
+    duplicate: boolean;
+    creditIls: number;
+  }) =>
     inv.status === 'claim'
       ? t('status.claim', { amount: ils(inv.creditIls) })
       : inv.status === 'hold' && inv.duplicate
         ? t('status.holdDuplicate')
-        : inv.status === 'hold' && inv.pendingLink
-          ? t('status.holdLink')
-          : t(`status.${inv.status}`);
+        : inv.status === 'hold' && inv.awaitingCount
+          ? t('status.holdCount')
+          : inv.status === 'hold' && inv.pendingLink
+            ? t('status.holdLink')
+            : t(`status.${inv.status}`);
   const isLink = (i: { pendingLink: boolean; duplicate: boolean }) => i.pendingLink && !i.duplicate;
   const count = (st: PayRunStatus) =>
     data.suppliers.reduce((n, s) => n + s.invoices.filter((i) => i.status === st && !isLink(i)).length, 0);
@@ -255,7 +264,7 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
                         {inv.pendingIls > 0 ? (
                           <span className="text-xs text-muted">{t('table.pending', { amount: ils(inv.pendingIls) })}</span>
                         ) : null}
-                        {inv.status === 'hold' && !inv.pendingLink ? (
+                        {inv.status === 'hold' && !inv.pendingLink && !inv.awaitingCount ? (
                           <LinkButton href="/dashboard/approvals" size="sm" variant="primary" className="touch-target">
                             {t('table.toApprovals')}
                           </LinkButton>

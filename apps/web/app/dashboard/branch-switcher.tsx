@@ -2,12 +2,17 @@
 
 import { useEffect, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { Check, ChevronDown, Network, Settings2, Store } from 'lucide-react';
 import type { UserRole } from '@restomatch/db';
 import { cn, Spinner, useToast } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { originalProps } from '@/lib/i18n/original';
 import { chain } from '@/lib/i18n/messages/chain';
+import { common } from '@/lib/i18n/messages/common';
+import { screenKeyForPath } from '@/lib/net/access';
+import { branchSafeTarget, type BranchTarget } from '@/lib/net/branchSafeTarget';
+import { saveSwitchNotice, takeSwitchNotice } from '@/lib/net/switchNotice';
 import { labelForRole } from '@/lib/roles';
 import { switchBranchAction } from './branch-actions';
 
@@ -24,6 +29,11 @@ const focusRing =
  * Branch switcher for users with more than one membership. Lists every
  * membership (any role); picking one calls the switch server action, which
  * re-validates the membership before refreshing the session.
+ *
+ * The switch keeps the user's place (W1-04, ia-nav-08 / exec-desktop-23): a
+ * list keeps its path and non-entity filters, a detail page falls back to its
+ * parent list, a screen the target role can't open falls back to home — the
+ * last two with a toast that says why (lib/net/branchSafeTarget.ts).
  */
 export function BranchSwitcher({
   branches,
@@ -38,8 +48,10 @@ export function BranchSwitcher({
   variant?: 'popover' | 'list';
 }) {
   const t = useT(chain);
+  const tc = useT(common);
   const locale = useLocale();
   const toast = useToast();
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -70,9 +82,29 @@ export function BranchSwitcher({
     };
   }, [open]);
 
+  // After the full navigation of a switch: say why we did not land on the same page.
+  useEffect(() => {
+    if (variant !== 'popover') return;
+    const notice = takeSwitchNotice();
+    if (!notice) return;
+    const screen = tc(`shell.screens.${notice.screen}`);
+    toast.success(
+      notice.reason === 'parent'
+        ? tc('shell.branch.openedParent', { branch: notice.branch, screen })
+        : tc('shell.branch.openedHome', { branch: notice.branch, screen }),
+    );
+    // Once per page load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   if (branches.length < 2 || !active) return null;
 
-  function pick(id: string, then = '/dashboard') {
+  /** Same page in the target branch, minus what belongs to the branch being left. */
+  function placeIn(target: SwitcherBranch): BranchTarget {
+    return branchSafeTarget(pathname ?? '/dashboard', window.location.search, target.role);
+  }
+
+  function pick(id: string, then?: string) {
     if (id === activeId || isPending) {
       setOpen(false);
       return;
@@ -81,7 +113,20 @@ export function BranchSwitcher({
     startTransition(async () => {
       const res = await switchBranchAction(id).catch(() => ({ ok: false as const }));
       if (res.ok) {
-        window.location.assign(then);
+        const target = branches.find((b) => b.restaurantId === id);
+        let href = then ?? '/dashboard';
+        if (!then && target) {
+          const place = placeIn(target);
+          href = place.href;
+          if (place.reason !== 'kept') {
+            saveSwitchNotice({
+              branch: target.restaurantName,
+              reason: place.reason,
+              screen: screenKeyForPath(place.reason === 'parent' ? place.href : place.fromPath),
+            });
+          }
+        }
+        window.location.assign(href);
         return;
       }
       toast.error(t('switcher.failed'));

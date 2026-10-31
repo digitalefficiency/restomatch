@@ -1,4 +1,4 @@
-import { DEFAULT_LOCALE, type Locale } from './config';
+import { baseLocaleOf, DEFAULT_LOCALE, type AppLocale, type Locale, type ReceiverLocale } from './config';
 
 /**
  * Tiny, dependency-free message runtime.
@@ -7,8 +7,25 @@ import { DEFAULT_LOCALE, type Locale } from './config';
  * truth) plus an English twin whose shape is enforced by `Shape<typeof he>` —
  * a missing English key is a type error AND fails `i18n.test.ts`.
  *
- * Interpolation: `{name}` placeholders, filled from the vars object.
- * Fallback chain: active locale → Hebrew → the key itself (never throws).
+ * Interpolation: `{name}` placeholders, filled from the vars object, plus
+ * ICU-lite plurals: `{count, plural, =0 {…} one {…} two {…} other {# …}}`,
+ * resolved with `Intl.PluralRules` for the rendered locale (Hebrew has a dual:
+ * יום אחד · יומיים · 3 ימים). `#` is the count, locale-formatted. Strings
+ * without plural syntax render exactly as before.
+ * Fallback chain (he/en): active locale → Hebrew → the key itself (never throws).
+ *
+ * Receiver locales (ar/ru/th/ti) are OVERLAYS: a namespace may carry
+ * `extra[locale]`, a deep-partial of the English shape. Lookup for a receiver
+ * locale depends on whether the namespace has overlays at all:
+ *   - overlaid namespace (`ns.extra` set): overlay → Hebrew → key. A receiver
+ *     at an Israeli restaurant reads the floor's Hebrew better than English,
+ *     so a key the overlay does not cover (a slice overlay, or a key added
+ *     before its translation lands) falls back to Hebrew, never English.
+ *   - namespace without overlays: English → Hebrew → key, so a non-receiver
+ *     screen (owner/bookkeeper tooling) renders in English.
+ * Receiver-facing namespaces declare their overlays with `CompleteOverlays<…>`
+ * (every key, every receiver locale — a type error otherwise), either over the
+ * whole namespace or over its receiver-facing slice.
  */
 export interface MessageTree {
   [key: string]: string | MessageTree;
@@ -24,18 +41,40 @@ export type MessageKey<T> = {
 
 export type MessageVars = Record<string, string | number>;
 
+/** Same keys as T but every key optional (an overlay may cover a subtree). */
+export type DeepPartial<T> = { [K in keyof T]?: T[K] extends string ? string : DeepPartial<T[K]> };
+
+/** Per-receiver-locale overlays (any subset of keys). */
+export type Overlays<T> = { readonly [L in ReceiverLocale]?: DeepPartial<Shape<T>> };
+
+/**
+ * Complete overlays: every receiver locale, every key of T. Use with the whole
+ * namespace (`CompleteOverlays<typeof he>`) or with the receiver-facing slice
+ * of a larger one (`CompleteOverlays<Pick<typeof he, 'login'>>`).
+ */
+export type CompleteOverlays<T> = { readonly [L in ReceiverLocale]: Shape<T> };
+
 export interface Namespace<T extends MessageTree = MessageTree> {
   readonly name: string;
   readonly he: T;
   readonly en: Shape<T>;
+  readonly extra?: Overlays<T>;
 }
 
 export type Translator<T extends MessageTree> = ((key: MessageKey<T>, vars?: MessageVars) => string) & {
+  /** Base (he/en) locale — what formatters and non-receiver code expect. */
   readonly locale: Locale;
+  /** The rendered locale, including receiver locales. */
+  readonly appLocale: AppLocale;
 };
 
 export function defineMessages<T extends MessageTree>(name: string, he: T, en: Shape<T>): Namespace<T> {
   return { name, he, en };
+}
+
+/** Attach receiver-locale overlays to a namespace (returns a new namespace). */
+export function withReceiverLocales<T extends MessageTree>(ns: Namespace<T>, extra: Overlays<T>): Namespace<T> {
+  return { ...ns, extra };
 }
 
 export function lookup(tree: MessageTree | undefined, key: string): string | undefined {
@@ -47,19 +86,89 @@ export function lookup(tree: MessageTree | undefined, key: string): string | und
   return typeof node === 'string' ? node : undefined;
 }
 
-export function interpolate(template: string, vars?: MessageVars): string {
+const PLURAL_START = /\{\s*(\w+)\s*,\s*plural\s*,/g;
+const PLURAL_CATEGORIES = new Set(['zero', 'one', 'two', 'few', 'many', 'other']);
+
+/** Index of the `}` closing the `{` at `open`, or -1. */
+function closingBrace(s: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < s.length; i += 1) {
+    if (s[i] === '{') depth += 1;
+    else if (s[i] === '}' && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/** `=0 {…} one {…} other {…}` → selector → message; null when malformed. */
+function pluralOptions(body: string): Map<string, string> | null {
+  const options = new Map<string, string>();
+  let i = 0;
+  while (i < body.length) {
+    const m = /^\s*(=\d+|[a-z]+)\s*\{/.exec(body.slice(i));
+    if (!m) return /^\s*$/.test(body.slice(i)) && options.has('other') ? options : null;
+    const open = i + m[0].length - 1;
+    const close = closingBrace(body, open);
+    if (close < 0) return null;
+    const selector = m[1]!;
+    if (!selector.startsWith('=') && !PLURAL_CATEGORIES.has(selector)) return null;
+    options.set(selector, body.slice(open + 1, close));
+    i = close + 1;
+  }
+  return options.has('other') ? options : null;
+}
+
+/** Resolve every `{name, plural, …}` whose count is in `vars`; anything else is left verbatim. */
+function resolvePlurals(template: string, vars: MessageVars, intlLocale: string): string {
+  let out = '';
+  let from = 0;
+  PLURAL_START.lastIndex = 0;
+  for (let m = PLURAL_START.exec(template); m; m = PLURAL_START.exec(template)) {
+    const close = closingBrace(template, m.index);
+    if (close < 0) break;
+    const raw = template.slice(m.index, close + 1);
+    const options = pluralOptions(template.slice(m.index + m[0].length, close));
+    const n = Number(vars[m[1]!]);
+    let resolved = raw;
+    if (options && Object.prototype.hasOwnProperty.call(vars, m[1]!) && Number.isFinite(n)) {
+      const message =
+        options.get(`=${n}`) ?? options.get(new Intl.PluralRules(intlLocale).select(n)) ?? options.get('other')!;
+      resolved = resolvePlurals(message, vars, intlLocale).replace(/#/g, new Intl.NumberFormat(intlLocale).format(n));
+    }
+    out += template.slice(from, m.index) + resolved;
+    from = close + 1;
+    PLURAL_START.lastIndex = from;
+  }
+  return out + template.slice(from);
+}
+
+export function interpolate(template: string, vars?: MessageVars, intlLocale = 'he-IL'): string {
   if (!vars) return template;
-  return template.replace(/\{(\w+)\}/g, (match, name: string) =>
+  const withPlurals = template.includes('plural') ? resolvePlurals(template, vars, intlLocale) : template;
+  return withPlurals.replace(/\{(\w+)\}/g, (match, name: string) =>
     Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : match,
   );
 }
 
-export function createTranslator<T extends MessageTree>(locale: Locale, ns: Namespace<T>): Translator<T> {
-  const primary = (locale === 'he' ? ns.he : ns.en) as MessageTree;
-  const fallback = ns[DEFAULT_LOCALE] as MessageTree;
+export function createTranslator<T extends MessageTree>(locale: AppLocale, ns: Namespace<T>): Translator<T> {
+  const chain: Array<MessageTree | undefined> =
+    locale === 'he'
+      ? [ns.he]
+      : locale === 'en'
+        ? [ns.en as MessageTree, ns[DEFAULT_LOCALE]]
+        : ns.extra
+          ? // Receiver locale, overlaid namespace: a gap falls back to Hebrew, never English.
+            [ns.extra[locale] as MessageTree | undefined, ns[DEFAULT_LOCALE]]
+          : // Receiver locale, no overlays (non-receiver screen): English.
+            [ns.en as MessageTree, ns[DEFAULT_LOCALE]];
+  // Plural categories follow the RENDERED language (ru has few/many, he has a dual).
+  const pluralLocale = locale === 'he' ? 'he-IL' : locale === 'en' ? 'en-GB' : locale;
   const t = (key: MessageKey<T>, vars?: MessageVars): string => {
-    const raw = lookup(primary, key) ?? lookup(fallback, key) ?? key;
-    return interpolate(raw, vars);
+    let raw: string | undefined;
+    for (const tree of chain) {
+      raw = lookup(tree, key);
+      if (raw !== undefined) break;
+    }
+    return interpolate(raw ?? key, vars, pluralLocale);
   };
-  return Object.assign(t, { locale });
+  return Object.assign(t, { locale: baseLocaleOf(locale), appLocale: locale });
 }

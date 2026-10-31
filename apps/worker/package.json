@@ -4,12 +4,20 @@
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./serverless": "./src/serverless.ts"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "seed:chain-demo": "tsx scripts/seed-chain-demo.ts",
+    "seed:recovery-demo": "tsx scripts/seed-recovery-demo.ts",
+    "seed:recipes-demo": "tsx scripts/seed-recipes-demo.ts",
+    "seed:inventory-demo": "tsx scripts/seed-inventory-demo.ts",
+    "seed:contracts-demo": "tsx scripts/seed-wave1-contracts-demo.ts",
     "reseed:demo": "tsx scripts/reseed-demo.ts",
     "check:demo": "tsx scripts/check-demo.ts"
   },
@@ -25,8 +33,7 @@
     "@restomatch/queue": "workspace:*",
     "@restomatch/translate": "workspace:*",
     "@restomatch/types": "workspace:*",
-    "bullmq": "^5.34.5",
-    "ioredis": "^5.4.2"
+    "cron-parser": "4.9.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

@@ -1,3 +1,4 @@
+import type { UserRole } from '@restomatch/db';
 import type { Locale } from '@/lib/i18n/config';
 import { displayName } from '@/lib/components/displayName';
 
@@ -8,13 +9,16 @@ export interface SearchResults {
 }
 
 export interface SearchOption {
-  kind: 'supplier' | 'product' | 'invoice';
+  kind: 'screen' | 'supplier' | 'product' | 'invoice';
   id: string;
   label: string;
   /** Hebrew original under an English label, when it differs. */
   secondary?: string;
   href: string;
 }
+
+/** The section routes `search.global` results open (suppliers, products, invoices). */
+export const RECORD_SECTIONS = ['/dashboard/suppliers', '/dashboard/catalog', '/dashboard/invoices'] as const;
 
 /**
  * Flatten `search.global` into keyboard-navigable options, in display order
@@ -62,4 +66,66 @@ export function buildSearchOptions(
     }
   }
   return out;
+}
+
+/**
+ * What the role can actually find (ia-nav-04): the placeholder never promises
+ * more. The receiver and the chef open no supplier, product or invoice page
+ * (they see no ₪), so their search finds screens only.
+ */
+export function searchPlaceholderKey(role: UserRole) {
+  if (role === 'receiver' || role === 'chef') return 'search.placeholderScreens' as const;
+  return 'search.placeholder' as const;
+}
+
+/** A registry screen the viewer may open (label already localized). */
+export interface SearchScreen {
+  key: string;
+  href: string;
+  label: string;
+  aliases: readonly string[];
+}
+
+/**
+ * Fold a query or a label for matching: case, niqqud, geresh/gershayim and
+ * quotes, Hebrew final letters (ך→כ…), and runs of whitespace.
+ */
+export function normalizeSearch(s: string): string {
+  return s
+    .toLocaleLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0591-\u05C7]/g, '')
+    .replace(/[׳״'"`]/g, '')
+    .replace(/ך/g, 'כ')
+    .replace(/ם/g, 'מ')
+    .replace(/ן/g, 'נ')
+    .replace(/ף/g, 'פ')
+    .replace(/ץ/g, 'צ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * The "מסכים" section: registry screens whose label or alias contains the
+ * query (from 1 character, no network). Label-prefix matches first, then
+ * alias-prefix, then anywhere; at most `limit`.
+ */
+export function buildScreenOptions(query: string, screens: readonly SearchScreen[], limit = 6): SearchOption[] {
+  const q = normalizeSearch(query);
+  if (!q) return [];
+  const scored: Array<{ s: SearchScreen; score: number }> = [];
+  for (const s of screens) {
+    const label = normalizeSearch(s.label);
+    const aliases = s.aliases.map(normalizeSearch);
+    let score = -1;
+    if (label.startsWith(q)) score = 0;
+    else if (label.split(' ').some((w) => w.startsWith(q))) score = 1;
+    else if (aliases.some((a) => a.startsWith(q))) score = 2;
+    else if (label.includes(q) || aliases.some((a) => a.includes(q))) score = 3;
+    if (score >= 0) scored.push({ s, score });
+  }
+  return scored
+    .sort((a, b) => a.score - b.score)
+    .slice(0, limit)
+    .map(({ s }) => ({ kind: 'screen' as const, id: s.key, label: s.label, href: s.href }));
 }

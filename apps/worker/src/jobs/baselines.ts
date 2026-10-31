@@ -1,6 +1,6 @@
 import { computeBaselines } from '@restomatch/charts';
 import { eq, restaurants } from '@restomatch/db';
-import { makeWorker } from '../queue';
+import { makeWorker, type WorkerJob } from '../queue';
 import { jobDb } from '../db';
 
 export interface BaselinesJob {
@@ -11,30 +11,33 @@ export interface BaselinesJob {
 }
 
 export function startBaselinesWorker() {
-  return makeWorker<BaselinesJob>('baselines', async (job) => {
-    const url = process.env.DATABASE_URL;
-    if (!url) throw new Error('DATABASE_URL is required');
-    const db = jobDb(url);
+  return makeWorker<BaselinesJob>('baselines', processBaselines);
+}
 
-    const targets = job.data.restaurantId
-      ? await db.select().from(restaurants).where(eq(restaurants.id, job.data.restaurantId))
-      : await db.select().from(restaurants);
+/** The baselines job: run by the worker loop (above) and by the serverless runner (handlers.ts). */
+export async function processBaselines(job: WorkerJob<BaselinesJob>) {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error('DATABASE_URL is required');
+  const db = jobDb(url);
 
-    const summary: Array<{ restaurantId: string; baselineCount: number }> = [];
+  const targets = job.data.restaurantId
+    ? await db.select().from(restaurants).where(eq(restaurants.id, job.data.restaurantId))
+    : await db.select().from(restaurants);
 
-    for (const r of targets) {
-      const baselines = await computeBaselines(db, r.id, {
-        windowDays: job.data.windowDays,
-        minSamples: job.data.minSamples,
-      });
-      summary.push({ restaurantId: r.id, baselineCount: baselines.length });
-    }
+  const summary: Array<{ restaurantId: string; baselineCount: number }> = [];
 
-    console.log(
-      `[baselines] restaurants=${summary.length} ` +
-        `total=${summary.reduce((s, r) => s + r.baselineCount, 0)}`,
-    );
+  for (const r of targets) {
+    const baselines = await computeBaselines(db, r.id, {
+      windowDays: job.data.windowDays,
+      minSamples: job.data.minSamples,
+    });
+    summary.push({ restaurantId: r.id, baselineCount: baselines.length });
+  }
 
-    return summary;
-  });
+  console.log(
+    `[baselines] restaurants=${summary.length} ` +
+      `total=${summary.reduce((s, r) => s + r.baselineCount, 0)}`,
+  );
+
+  return summary;
 }

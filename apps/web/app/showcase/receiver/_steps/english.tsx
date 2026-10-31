@@ -11,8 +11,9 @@
  */
 import { useCallback, useSyncExternalStore } from 'react';
 import { Languages } from 'lucide-react';
-import { unitLabel } from '@restomatch/translate/units';
-import { useDir, useLocale, useT } from '@/lib/i18n/client';
+import { unitLabelFor } from '@restomatch/translate/units';
+import { useAppLocale, useDir, useLocale, useT } from '@/lib/i18n/client';
+import { isReceiverLocale } from '@/lib/i18n/config';
 import { formatNumber } from '@/lib/i18n/format';
 import { receiving } from '@/lib/i18n/messages/receiving';
 
@@ -90,6 +91,9 @@ export function ItemName({
   strike?: boolean;
 }) {
   const locale = useLocale();
+  // Receiver languages (S14): the primary name is in ar/ru/th/ti, tagged so it
+  // shapes/reads correctly (the base locale is 'en', so the layout is shared).
+  const appLocale = useAppLocale();
   const [showHebrew] = useShowHebrew();
   const strikeCls = strike ? 'line-through opacity-70' : '';
   if (locale !== 'en') return <span className={`${className} ${strikeCls}`}>{he}</span>;
@@ -103,7 +107,7 @@ export function ItemName({
   }
   return (
     <span className={`flex flex-col ${className}`}>
-      <span className={strikeCls} data-testid="item-name-en">
+      <span className={strikeCls} data-testid="item-name-en" lang={appLocale} dir="auto">
         {english}
       </span>
       {showHebrew ? (
@@ -115,24 +119,28 @@ export function ItemName({
   );
 }
 
-/** Unit label in the active language (ק״ג → kg in English). */
+/** Unit label in the active language (ק״ג → kg in English; ארגז → صندوق in Arabic). */
 export function useUnitLabel(): (unit: string | null | undefined) => string {
-  const locale = useLocale();
-  return useCallback((unit) => unitLabel(unit, locale), [locale]);
+  const appLocale = useAppLocale();
+  return useCallback((unit) => unitLabelFor(unit, appLocale), [appLocale]);
 }
 
 /** "12 kg" / "12 ק״ג" — isolated in the page direction, number first. */
 export function Qty({ qty, unit }: { qty: number | null; unit?: string | null }) {
   const locale = useLocale();
+  const appLocale = useAppLocale();
   const dir = useDir();
   const label = useUnitLabel();
   if (qty === null) return <span>—</span>;
+  // Quantities use the text font with tabular digits (never the mono "token"
+  // face); receiver-language unit words keep the text font explicitly.
+  const unitCls = isReceiverLocale(appLocale) ? 'font-sans' : undefined;
   // Page direction, not a forced LTR: in Hebrew "37.5 ליטר" must keep the
   // number first (to the right), it read "ליטר 37.5" inside an LTR isolate.
   return (
-    <bdi dir={dir} className="whitespace-nowrap font-mono tabular-nums">
+    <bdi dir={dir} className="whitespace-nowrap tabular-nums">
       {formatNumber(qty, locale, { maximumFractionDigits: 3 })}
-      {unit ? ` ${label(unit)}` : ''}
+      {unit ? <span className={unitCls}>{` ${label(unit)}`}</span> : ''}
     </bdi>
   );
 }

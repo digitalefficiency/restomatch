@@ -15,6 +15,7 @@ import {
   lineLabel,
   lineTotalIls,
   linesValid,
+  ltrIsolate,
   orderTotalIls,
   parsePositive,
   parsePrice,
@@ -264,6 +265,13 @@ describe('supplier order schedule', () => {
     expect(scheduleRowProblem({ orderDays: [0], cutoff: '12:00' })).toBeNull();
     expect(scheduleRowProblem({ orderDays: [0], cutoff: '' })).toBe('pickCutoff');
     expect(scheduleRowProblem({ orderDays: [], cutoff: '12:00' })).toBe('pickDay');
+  });
+});
+
+describe('ltrIsolate (channel <option> labels)', () => {
+  it('wraps the value in LRI … PDI so Hebrew labels keep the address intact', () => {
+    expect(ltrIsolate('orders@sharon-produce.test')).toBe('\u2066orders@sharon-produce.test\u2069');
+    expect(`אימייל (${ltrIsolate('a@b.test')})`).toBe('אימייל (\u2066a@b.test\u2069)');
   });
 });
 

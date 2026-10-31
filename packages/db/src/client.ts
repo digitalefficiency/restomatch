@@ -15,10 +15,12 @@ export function dbPoolMax(env: NodeJS.ProcessEnv = process.env): number {
   return Number.isInteger(n) && n > 0 ? n : 10;
 }
 
-export function createDb(connectionString: string) {
+export function createDb(connectionString: string, opts: { idleTimeoutSec?: number } = {}) {
   // idle_timeout: release idle connections after 20 s so warm serverless instances
-  // don't hold pooler slots they aren't using.
-  const client = postgres(connectionString, { prepare: false, max: dbPoolMax(), idle_timeout: 20 });
+  // don't hold pooler slots they aren't using. The long-lived worker passes a
+  // longer one: every reconnect costs a TLS handshake plus postgres.js's type
+  // lookup, which on a metered (free-plan) project is most of the idle egress.
+  const client = postgres(connectionString, { prepare: false, max: dbPoolMax(), idle_timeout: opts.idleTimeoutSec ?? 20 });
   return drizzle(client, { schema });
 }
 

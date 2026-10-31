@@ -1,9 +1,14 @@
 import Link from 'next/link';
-import { Menu, Receipt } from 'lucide-react';
+import { Mail, MessageCircle, Phone, Receipt } from 'lucide-react';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { marketing } from '@/lib/i18n/messages/marketing';
 import { getT } from '@/lib/i18n/server';
+import { contactChannels } from '@/lib/contact';
 import { AnchorScrollFix } from './AnchorScrollFix';
+import { Attribution } from './Attribution';
+import { MobileMenu } from './MobileMenu';
+import { StickyCta } from './StickyCta';
+import { leakCheckPublic, primaryCtaHref, whatsappLink } from './cta';
 
 const NAV_BASE = [
   { href: '/#how', key: 'shell.nav.how' },
@@ -12,15 +17,6 @@ const NAV_BASE = [
   { href: '/showcase', key: 'shell.nav.demo' },
   { href: '/about', key: 'shell.nav.about' },
 ] as const;
-
-/**
- * The public free-leak-check page (S15) is env-gated: LEAK_CHECK_PUBLIC=1.
- * Read at request time on the server, so flipping the env needs no rebuild.
- * (Swap for `leakCheck.leakCheckPublicEnabled()` from @restomatch/api once it is on this base.)
- */
-function leakCheckPublic(): boolean {
-  return process.env.LEAK_CHECK_PUBLIC === '1';
-}
 
 const LEAK_CHECK = { href: '/leak-check', key: 'shell.nav.leakCheck' } as const;
 
@@ -42,13 +38,19 @@ function Logo({ small = false }: { small?: boolean }) {
  * root homepage (`app/page.tsx` lives outside the `(marketing)` group, so it
  * can't inherit that layout — it wraps itself in this shell instead).
  *
- * The mobile menu is a native <details> disclosure — no client JS needed.
+ * Below lg the nav is a client sheet (MobileMenu); below md a sticky CTA bar
+ * follows the visitor once the hero CTA has scrolled away (StickyCta). Every
+ * "בדיקת דליפה חינם" goes to the same place (primaryCtaHref).
  */
 export async function MarketingShell({ children }: { children: React.ReactNode }) {
   const t = await getT(marketing);
   const year = new Date().getFullYear();
   const leakCheck = leakCheckPublic();
   const NAV = leakCheck ? [...NAV_BASE.slice(0, 3), LEAK_CHECK, ...NAV_BASE.slice(3)] : NAV_BASE;
+  const ctaHref = primaryCtaHref();
+  const channels = contactChannels();
+  const wa = whatsappLink(t('shell.whatsappText'));
+  const whatsapp = wa ? { href: wa, label: t('shell.whatsapp') } : null;
   const link =
     'touch-target flex items-center rounded-lg px-3 py-2 text-sm font-medium text-muted transition-colors hover:bg-surface-2 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60';
 
@@ -88,38 +90,23 @@ export async function MarketingShell({ children }: { children: React.ReactNode }
               {t('shell.login')}
             </Link>
             <Link
-              href="/#lead"
+              href={ctaHref}
               className="hidden items-center rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-on-primary shadow-glow-primary transition-all hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-bg md:inline-flex"
             >
               {t('shell.cta')}
             </Link>
-            <details className="group relative lg:hidden">
-              <summary
-                aria-label={t('shell.menuOpen')}
-                className="flex h-9 w-9 cursor-pointer list-none items-center justify-center rounded-lg border border-line bg-surface-2 text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 [&::-webkit-details-marker]:hidden"
-              >
-                <Menu className="h-4 w-4" aria-hidden="true" />
-              </summary>
-              <nav
-                aria-label={t('shell.navLabel')}
-                className="absolute end-0 top-12 z-50 flex w-60 flex-col gap-0.5 rounded-2xl border border-line bg-surface p-2 shadow-card"
-              >
-                {NAV.map((n) => (
-                  <Link key={n.href} href={n.href} className={link}>
-                    {t(n.key)}
-                  </Link>
-                ))}
-                <Link href="/login" className={link}>
-                  {t('shell.login')}
-                </Link>
-                <Link
-                  href="/#lead"
-                  className="touch-target mt-1 flex items-center justify-center rounded-xl bg-primary px-3 py-2.5 text-center text-sm font-semibold text-on-primary"
-                >
-                  {t('shell.cta')}
-                </Link>
-              </nav>
-            </details>
+            <MobileMenu
+              items={NAV.map((n) => ({ href: n.href, label: t(n.key) }))}
+              login={{ href: '/login', label: t('shell.login') }}
+              cta={{ href: ctaHref, label: t('shell.cta') }}
+              whatsapp={whatsapp ? { href: whatsapp.href, label: t('shell.whatsappLabel') } : null}
+              labels={{
+                open: t('shell.menuOpen'),
+                close: t('shell.menuClose'),
+                title: t('shell.menuTitle'),
+                nav: t('shell.navLabel'),
+              }}
+            />
           </div>
         </div>
       </header>
@@ -129,7 +116,9 @@ export async function MarketingShell({ children }: { children: React.ReactNode }
       </main>
 
       <AnchorScrollFix />
-      <footer className="rm-defer border-t border-line bg-surface/40">
+      <Attribution />
+      <StickyCta cta={{ href: ctaHref, label: t('shell.cta') }} whatsapp={whatsapp} label={t('shell.stickyLabel')} />
+      <footer data-site-footer className="rm-defer border-t border-line bg-surface/40">
         <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
           <div className="flex flex-col gap-10 md:flex-row md:items-start md:justify-between">
             <div className="max-w-sm">
@@ -172,8 +161,37 @@ export async function MarketingShell({ children }: { children: React.ReactNode }
                   {t('shell.nav.about')}
                 </Link>
                 <Link href="/#lead" className="touch-target inline-flex items-center text-muted hover:text-ink">
-                  {t('shell.contact')}
+                  {t('shell.contactFormLink')}
                 </Link>
+                {whatsapp ? (
+                  <a
+                    href={whatsapp.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="touch-target inline-flex items-center gap-1.5 text-muted hover:text-ink"
+                  >
+                    <MessageCircle className="h-4 w-4" aria-hidden="true" />
+                    {t('shell.whatsappLabel')}
+                  </a>
+                ) : null}
+                {channels.phone ? (
+                  <a href={channels.phone.href} className="touch-target inline-flex items-center gap-1.5 text-muted hover:text-ink">
+                    <Phone className="h-4 w-4" aria-hidden="true" />
+                    <span>
+                      {t('shell.phoneLabel')}:{' '}
+                      <bdi dir="ltr">{channels.phone.display}</bdi>
+                    </span>
+                  </a>
+                ) : null}
+                {channels.email ? (
+                  <a href={channels.email.href} className="touch-target inline-flex items-center gap-1.5 text-muted hover:text-ink">
+                    <Mail className="h-4 w-4" aria-hidden="true" />
+                    <span>
+                      {t('shell.emailLabel')}:{' '}
+                      <bdi dir="ltr">{channels.email.address}</bdi>
+                    </span>
+                  </a>
+                ) : null}
                 <Link href="/login" className="touch-target inline-flex items-center text-muted hover:text-ink">
                   {t('shell.loginFull')}
                 </Link>
@@ -191,11 +209,14 @@ export async function MarketingShell({ children }: { children: React.ReactNode }
                 <Link href="/cookies" className="touch-target inline-flex items-center text-muted hover:text-ink">
                   {t('shell.cookies')}
                 </Link>
+                <Link href="/accessibility" className="touch-target inline-flex items-center text-muted hover:text-ink">
+                  {t('shell.accessibility')}
+                </Link>
               </nav>
             </div>
           </div>
 
-          <div className="mt-10 border-t border-line pt-6 font-mono text-xs tabular-nums text-muted">
+          <div className="mt-10 border-t border-line pt-6 text-xs tabular-nums text-muted">
             {t('shell.rights', { year })}
           </div>
         </div>

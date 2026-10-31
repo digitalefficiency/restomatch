@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ALL_ROLES, allowedRolesForPath, canSeeRoute, labelForRole } from '../roles';
+import { ALL_ROLES, ROUTE_ROLES, allowedRolesForPath, canSeeRoute, labelForRole } from '../roles';
 
 /** The role matrix the nav, middleware and page guards all share. */
 describe('roles matrix', () => {
@@ -32,6 +32,12 @@ describe('roles matrix', () => {
     }
   });
 
+  it('integrations hub: owner, manager, bookkeeper (sections scoped inside); never receiver/chef', () => {
+    expect(allowedRolesForPath('/dashboard/integrations')).toEqual(['owner', 'manager', 'bookkeeper']);
+    expect(canSeeRoute('receiver', '/dashboard/integrations')).toBe(false);
+    expect(canSeeRoute('chef', '/dashboard/integrations')).toBe(false);
+  });
+
   it('bookkeeper can open the approvals queue (duplicate invoices are routed to them)', () => {
     expect(canSeeRoute('bookkeeper', '/dashboard/approvals')).toBe(true);
     expect(canSeeRoute('chef', '/dashboard/approvals')).toBe(false);
@@ -43,18 +49,46 @@ describe('roles matrix', () => {
     expect(allowedRolesForPath('/dashboard/approvals/pay-run')).not.toContain('chef');
   });
 
-  it('an invoice page is for the roles that reach it (receiving, approvals, leaks) — never the chef', () => {
-    for (const r of ['owner', 'manager', 'receiver', 'bookkeeper'] as const) {
+  it('an invoice page is for the roles that reach it (approvals, inbox, leaks) — never the chef or the receiver (no ₪)', () => {
+    for (const r of ['owner', 'manager', 'bookkeeper'] as const) {
       expect(canSeeRoute(r, '/dashboard/invoices')).toBe(true);
     }
-    expect(canSeeRoute('chef', '/dashboard/invoices')).toBe(false);
-    // The detail route inherits it (middleware gate + global-search links).
-    expect(allowedRolesForPath('/dashboard/invoices/3f1c0e3e-0000-4000-8000-000000000000')).not.toContain('chef');
+    // Owner decision: the receiver and the chef see no ₪ (unit prices, line totals, VAT).
+    for (const r of ['chef', 'receiver'] as const) {
+      expect(canSeeRoute(r, '/dashboard/invoices')).toBe(false);
+      // The detail route inherits it (middleware gate + global-search links).
+      expect(allowedRolesForPath('/dashboard/invoices/3f1c0e3e-0000-4000-8000-000000000000')).not.toContain(r);
+    }
   });
 
   it('labels roles in both languages', () => {
     expect(labelForRole('receiver')).toBe('מקבל סחורה');
     expect(labelForRole('receiver', 'en')).toBe('Receiver');
     expect(labelForRole('unknown', 'en')).toBe('unknown');
+  });
+});
+
+describe('wave 1 · S12 routes (₪-back tracker, monthly report)', () => {
+  it('nav visibility (exact path) and middleware gating (prefix) agree', () => {
+    for (const role of ['owner', 'manager', 'bookkeeper', 'receiver', 'chef'] as const) {
+      const finance = ['owner', 'manager', 'bookkeeper'].includes(role);
+      const managers = ['owner', 'manager'].includes(role);
+      expect(canSeeRoute(role, '/dashboard/recovery')).toBe(finance);
+      expect(canSeeRoute(role, '/dashboard/reports/monthly')).toBe(managers);
+      expect(allowedRolesForPath('/dashboard/reports/monthly/pdf')?.includes(role)).toBe(managers);
+    }
+  });
+});
+
+describe('W1-03 · ROUTE_ROLES from the nav registry', () => {
+  it('the printable leak report inherits the /leaks gate (the bookkeeper sees its role card, not a bounce)', () => {
+    expect(ROUTE_ROLES['/dashboard/leaks/report']).toBeUndefined();
+    expect(allowedRolesForPath('/dashboard/leaks/report')).toEqual(['owner', 'manager', 'bookkeeper']);
+  });
+
+  it('the supplier ledger: owner, manager, bookkeeper — never the receiver (owner decision) or the chef', () => {
+    expect(allowedRolesForPath('/dashboard/suppliers/ledger')).toEqual(['owner', 'manager', 'bookkeeper']);
+    expect(canSeeRoute('receiver', '/dashboard/suppliers/ledger')).toBe(false);
+    expect(canSeeRoute('chef', '/dashboard/suppliers/ledger')).toBe(false);
   });
 });

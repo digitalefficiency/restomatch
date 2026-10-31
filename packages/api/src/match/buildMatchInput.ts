@@ -11,7 +11,6 @@ import {
   isNull,
   lt,
   lte,
-  matchRuns,
   ne,
   or,
   poLines,
@@ -31,13 +30,16 @@ import {
   type PoLineInput,
 } from '@restomatch/matching';
 import { addCalendarDaysInTz, endOfDayInTz, startOfDayInTz } from '../lib/time';
+import { featureEnabled } from '../lib/features';
+import { applyContractPrices } from '../contracts/load';
+import { localDateKey } from '../contracts/core';
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
 
 /** PO statuses eligible to be matched against an incoming invoice. */
 const ELIGIBLE_PO_STATUSES = ['sent', 'confirmed', 'partial'] as const;
 /** ± window (days) around the invoice date in which a PO's expected delivery may fall. */
-const PO_MATCH_WINDOW_DAYS = 7;
+export const PO_MATCH_WINDOW_DAYS = 7;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_BASELINE_WINDOW_DAYS = 90;
 
@@ -322,14 +324,19 @@ export async function buildMatchInputForInvoice(
         qtyReceived: num(g.qtyReceived),
       }));
     }
-    ({ poLines: poLineInputs, grLines: grLineInputs } = await splitBilledOrder(
+  }
+
+  // ── Contract prices (wave-1 `contracts`): the contract in force on the
+  //    invoice's LOCAL date beats the PO price as the expected unit price, so an
+  //    over-contract line is a PRICE_HIGHER against the contract. Feature-gated;
+  //    off ⇒ byte-identical input to before. See contracts/core.ts for the rule.
+  if (inv.supplierId && poLineInputs.length > 0 && featureEnabled(restaurant?.settings, 'contracts')) {
+    ({ poLines: poLineInputs } = await applyContractPrices(
       db,
       restaurantId,
-      { id: invoiceId, createdAt: inv.createdAt },
-      po.id,
+      inv.supplierId,
       poLineInputs,
-      grLineInputs,
-      invoiceLineInputs,
+      localDateKey(invoiceDate, tz),
     ));
   }
 
@@ -442,83 +449,6 @@ export async function buildMatchInputForInvoice(
   };
 
   return { input, poId: po?.id ?? null, grId };
-}
-
-/**
- * One order, several invoices ("receive the rest": a partial delivery billed on
- * one invoice, the rest delivered and billed on another — one receipt per PO).
- * The engine checks ONE invoice against the whole PO + the cumulative receipt, so
- * for an invoice of a split-billed order this narrows the input to its share:
- *
- *  • a PO line ANOTHER invoice of the order bills, and this one doesn't, is left
- *    out — else it reads as MISSING_ON_INVOICE (warn, the line's full value): a
- *    false leak of the part already billed;
- *  • what EARLIER invoices of the order already billed (same unit as the PO line)
- *    comes off both the ordered and the received qty of a line this one bills —
- *    so a normal split is clean, and units billed twice (received once) read as
- *    QTY_OVER on the later invoice only, never on both.
- *
- * Pairing mirrors the engine: by product, or by supplier SKU for a line with no
- * product. "Invoice of this order" = one whose CURRENT match run is on this PO
- * (a re-match replaces the run; a run moved to another PO or deleted with its
- * invoice stops counting at once). "Earlier" = created before this one, ties by
- * id — the same order duplicate detection uses. Stored runs are snapshots: a
- * sibling that goes away changes this invoice's findings on its next match
- * (match.runForInvoice / the next receipt close), not retroactively.
- */
-async function splitBilledOrder(
-  db: Database,
-  restaurantId: string,
-  inv: { id: string; createdAt: Date },
-  poId: string,
-  po: PoLineInput[],
-  gr: GrLineInput[],
-  own: InvoiceLineInput[],
-): Promise<{ poLines: PoLineInput[]; grLines: GrLineInput[] }> {
-  const others = await db
-    .select({
-      productId: invoiceLines.productId,
-      supplierSku: invoiceLines.supplierSku,
-      unit: invoiceLines.unit,
-      qtyBilled: invoiceLines.qtyBilled,
-      earlier: sql<boolean>`(${invoices.createdAt} < ${inv.createdAt.toISOString()}::timestamptz
-        or (${invoices.createdAt} = ${inv.createdAt.toISOString()}::timestamptz and ${invoices.id} < ${inv.id}))`,
-    })
-    .from(invoiceLines)
-    .innerJoin(matchRuns, eq(matchRuns.invoiceId, invoiceLines.invoiceId))
-    .innerJoin(invoices, eq(invoices.id, invoiceLines.invoiceId))
-    .where(and(eq(matchRuns.restaurantId, restaurantId), eq(matchRuns.poId, poId), ne(matchRuns.invoiceId, inv.id)));
-  if (others.length === 0) return { poLines: po, grLines: gr };
-  const pairs = (x: { productId: string | null; supplierSku?: string | null }, l: PoLineInput) =>
-    l.productId ? x.productId === l.productId : !!l.supplierSku && x.supplierSku === l.supplierSku;
-  const round = (n: number) => Math.round(n * 1000) / 1000;
-
-  const poLines: PoLineInput[] = [];
-  const received = new Map<string, number>(); // what to take off each PO line's received qty
-  for (const l of po) {
-    const billsIt = own.some((x) => pairs(x, l));
-    if (!billsIt) {
-      if (!others.some((x) => pairs(x, l))) poLines.push(l); // nobody bills it: still MISSING
-      continue;
-    }
-    const before = others
-      .filter((x) => x.earlier && x.unit === l.unit && pairs(x, l))
-      .reduce((t, x) => t + num(x.qtyBilled), 0);
-    if (before <= 0) {
-      poLines.push(l);
-      continue;
-    }
-    poLines.push({ ...l, qtyOrdered: Math.max(0, round(l.qtyOrdered - before)) });
-    received.set(l.id, before);
-  }
-  const grLines = gr.map((g) => {
-    const left = g.poLineId ? received.get(g.poLineId) : undefined;
-    if (!left || !g.poLineId) return g;
-    const take = Math.min(left, g.qtyReceived);
-    received.set(g.poLineId, round(left - take));
-    return { ...g, qtyReceived: round(g.qtyReceived - take) };
-  });
-  return { poLines, grLines };
 }
 
 /**

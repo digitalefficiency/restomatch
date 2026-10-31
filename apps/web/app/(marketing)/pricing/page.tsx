@@ -7,6 +7,7 @@ import { getLocale, getT } from '@/lib/i18n/server';
 import { formatNumber } from '@/lib/i18n/format';
 import { marketing } from '@/lib/i18n/messages/marketing';
 import { formatIls } from '@/lib/money';
+import { ChainPricingSection } from '@/lib/growth/ChainPricingSection';
 import { alternatesFor, metadataBase, socialFor } from '../_components/seo';
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -89,9 +90,15 @@ export default async function PricingPage() {
                 </span>
                 {priceIls > 0 ? <span className="text-sm text-muted">{t('pricing.perMonth')}</span> : null}
               </div>
+              {plan.key === 'trial' ? (
+                // Owner decision (REVIEW-REPORT §8 item 11): the trial is 30 days on Pro, said explicitly.
+                <p className="mt-2 text-sm font-medium text-ink" data-testid="trial-terms">
+                  {t('pricing.trialTerms')}
+                </p>
+              ) : null}
 
               <Link
-                href="/#lead"
+                href={`/?plan=${plan.key}#lead`}
                 className={
                   'mt-5 inline-flex w-full items-center justify-center rounded-xl px-4 py-3 text-sm font-semibold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg ' +
                   (isHighlight
@@ -122,6 +129,9 @@ export default async function PricingPage() {
           );
         })}
       </div>
+
+      {/* Wave-1 S15 (`growth`): renders only when GROWTH_PRICING_PUBLIC=1. */}
+      <ChainPricingSection plans={plans} />
 
       <div className="mx-auto mt-12 flex max-w-3xl items-start gap-4 rounded-2xl border border-gold/25 bg-gold/[0.06] p-6">
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gold/15 text-gold">

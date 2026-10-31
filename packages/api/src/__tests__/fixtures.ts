@@ -3,7 +3,11 @@ import {
   approvalRules,
   auditLog,
   billingAccounts,
+  creditNotes,
   discrepancies,
+  monthlyReports,
+  recoveryClaims,
+  recoveryEvents,
   emailInboxes,
   eq,
   goodsReceipts,
@@ -22,6 +26,10 @@ import {
   procurementConnections,
   productAliases,
   products,
+  inventoryCountLines,
+  inventoryCounts,
+  recipeItems,
+  recipes,
   purchaseOrders,
   restaurants,
   subscriptions,
@@ -61,6 +69,11 @@ export async function resetDb(db: Database): Promise<void> {
   await db.delete(procurementConnections);
   await db.delete(emailInboxes);
   await db.delete(supplierIntegrations);
+  // Wave 1 (S12): claims block discrepancy deletes (0048, NO ACTION) — clear them first.
+  await db.delete(recoveryEvents);
+  await db.delete(recoveryClaims);
+  await db.delete(creditNotes);
+  await db.delete(monthlyReports);
   await db.delete(discrepancies);
   await db.delete(matchRuns);
   await db.delete(invoiceLines);
@@ -72,6 +85,12 @@ export async function resetDb(db: Database): Promise<void> {
   await db.delete(poLines);
   await db.delete(purchaseOrders);
   await db.delete(productAliases);
+  // inventory_count_lines → products is ON DELETE RESTRICT (0070): counts go first.
+  await db.delete(inventoryCountLines);
+  await db.delete(inventoryCounts);
+  // recipe_items → products is ON DELETE RESTRICT (0057): recipes go first.
+  await db.delete(recipeItems);
+  await db.delete(recipes);
   await db.delete(products);
   await db.delete(suppliers);
   await db.delete(usageCounters);

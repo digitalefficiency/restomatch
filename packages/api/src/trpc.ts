@@ -148,8 +148,15 @@ export const managerProcedure = requireRoles(['owner', 'manager']);
 export const receiverProcedure = requireRoles(['owner', 'manager', 'receiver']);
 export const bookkeeperProcedure = requireRoles(['owner', 'bookkeeper']);
 export const chefProcedure = requireRoles(['owner', 'manager', 'chef']);
-/** One supplier invoice (lines, prices, image) — matches /dashboard/invoices (no chef). */
-export const invoiceReaderProcedure = requireRoles(['owner', 'manager', 'receiver', 'bookkeeper']);
+/**
+ * Roles that may read a supplier invoice's lines over tRPC (no chef). Wider than
+ * the /dashboard/invoices page gate: the receiver keeps it for the Delivery Check
+ * wizard's OCR polling (receiving.getInvoice) but opens no invoice page (no ₪).
+ * Stripping ₪ fields for the receiver is H-11.
+ */
+export const INVOICE_READER_ROLES: ReadonlyArray<UserRole> = ['owner', 'manager', 'receiver', 'bookkeeper'];
+/** One supplier invoice (lines, prices, image) — see INVOICE_READER_ROLES. */
+export const invoiceReaderProcedure = requireRoles(INVOICE_READER_ROLES);
 /** Invoice-level money detail (leak drill-down, claims) — matches /dashboard/leaks. */
 export const financeProcedure = requireRoles(['owner', 'manager', 'bookkeeper']);
 

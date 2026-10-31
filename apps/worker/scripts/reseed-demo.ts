@@ -3,7 +3,9 @@
  * branches) at a given DEMO_TODAY — including whatever was added to them while
  * testing (invoices, duplicates, receipts, users invited into them). Every other
  * tenant is left untouched, and the script proves it: a per-table row count of
- * all NON-demo data is taken before and after and must be identical.
+ * all NON-demo data is taken before and after and must be identical (the
+ * worker's own job queue excepted — it writes there every minute; see
+ * FINGERPRINT_SKIPPED_TABLES in packages/db/src/demoTenants.ts).
  *
  *   pnpm --filter @restomatch/worker reseed:demo -- --today 2026-10-25 --dry-run
  *   pnpm --filter @restomatch/worker reseed:demo -- --today 2026-10-25
@@ -37,6 +39,7 @@ import {
   demoTenantRowCounts,
   findDemoTenants,
   isLocalDbUrl,
+  nonDemoFingerprint,
   supabaseProjectRef,
 } from '@restomatch/db';
 import postgres from 'postgres';
@@ -74,24 +77,6 @@ if (!local) {
   if (ref !== want) fail(`RESEED_PROJECT_REF=${want} but DATABASE_URL points at project ${ref ?? '(unknown)'} — refusing`);
   const pw = process.env.DEMO_PASSWORD?.trim();
   if (!pw || pw === DEFAULT_DEMO_PASSWORD) fail('remote database: set DEMO_PASSWORD to a private value (the default is public in the repo)');
-}
-
-/** Row counts of every restaurant-scoped table OUTSIDE the demo tenants (+ users, restaurants). */
-async function nonDemoFingerprint(sql: postgres.Sql, demoRids: string[], demoUids: string[]): Promise<Record<string, number>> {
-  const rids = demoRids.length ? demoRids : ['00000000-0000-0000-0000-000000000000'];
-  const uids = demoUids.length ? demoUids : ['00000000-0000-0000-0000-000000000000'];
-  const tables = (await sql`
-    select c.relname as t from pg_class c join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
-    join pg_attribute a on a.attrelid = c.oid and a.attname = 'restaurant_id' and not a.attisdropped
-    where c.relkind in ('r', 'p') order by 1
-  `) as unknown as Array<{ t: string }>;
-  const out: Record<string, number> = {};
-  for (const { t } of tables) {
-    out[t] = Number((await sql`select count(*)::int as n from ${sql(t)} where restaurant_id is null or restaurant_id not in ${sql(rids)}`)[0]!.n);
-  }
-  out.restaurants = Number((await sql`select count(*)::int as n from restaurants where id not in ${sql(rids)}`)[0]!.n);
-  out.users = Number((await sql`select count(*)::int as n from users where id not in ${sql(uids)}`)[0]!.n);
-  return out;
 }
 
 function run(label: string, cmd: string[], env: NodeJS.ProcessEnv) {

@@ -51,9 +51,10 @@ export type AuditAction =
   // Chain / branches (chain router)
   | 'chain.branch_added'
   | 'chain.branch_renamed'
-  // Receiving: a closed goods receipt reopened (receiving router)
-  | 'receiving.receipt_reopened'
-  | 'receiving.count_corrected';
+  // Inventory counts (inventory router, flag inventoryCount)
+  | 'inventory.count_closed'
+  | 'inventory.count_discarded'
+  | 'inventory.line_amended';
 
 export interface AuditEntry {
   /** Tenant the action belongs to. On a tenant connection this must equal the GUC. */

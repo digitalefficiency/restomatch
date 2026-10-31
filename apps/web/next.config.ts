@@ -23,12 +23,19 @@ const config: NextConfig = {
     '@restomatch/api',
     '@restomatch/charts',
     '@restomatch/db',
+    '@restomatch/ingest',
+    '@restomatch/observability',
     '@restomatch/ocr',
+    '@restomatch/queue',
     '@restomatch/translate',
     '@restomatch/types',
     '@restomatch/ui-tokens',
+    // The worker's job processors, run by /api/cron/jobs + the after() kick
+    // (imported only as '@restomatch/worker/serverless', never the boot entry).
+    '@restomatch/worker',
   ],
-  serverExternalPackages: ['nodemailer', 'postgres', 'ioredis', '@anthropic-ai/sdk'],
+  // @sentry/node: optional, loaded at runtime by @restomatch/observability — never bundled.
+  serverExternalPackages: ['nodemailer', 'postgres', '@anthropic-ai/sdk', '@sentry/node'],
   // Baseline security headers on EVERY response (incl. static assets the
   // middleware short-circuits). The per-request, nonce-based CSP is set in
   // middleware (it needs a fresh nonce); these are static — D1.1.

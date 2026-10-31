@@ -1,111 +1,74 @@
-import Link from 'next/link';
-import { ArrowLeft, Clock, PackageCheck, Truck } from 'lucide-react';
+import { TRPCError } from '@trpc/server';
 import { createServerCaller } from '@/lib/trpc/server';
-import { Badge, Card, EmptyState, SectionHeader, type BadgeTone } from '@/lib/components';
+import { SectionHeader } from '@/lib/components';
 import { getLocale, getT } from '@/lib/i18n/server';
-import { formatDate, formatNumber } from '@/lib/i18n/format';
 import { receiving } from '@/lib/i18n/messages/receiving';
-import type { Translator } from '@/lib/i18n/translate';
+import { overview } from '@/lib/i18n/messages/overview';
+import { auth } from '@/auth';
+import { enabledFeatures } from '@/lib/ingest/features';
+import { ReceiverPwa } from '@/lib/pwa/ReceiverPwa';
+import { ReceivingBoard } from '../home/receiving-board';
+import { ReceiptView } from '../home/receipt-view';
 
 export const dynamic = 'force-dynamic';
 
-/** Label + tone for the (optional) in-progress goods_receipt status. */
-function receiptBadge(
-  status: string | null,
-  t: Translator<typeof receiving.he>,
-): { label: string; tone: BadgeTone } | null {
-  if (!status) return null;
-  const map: Record<string, { label: string; tone: BadgeTone }> = {
-    pending: { label: t('inbox.badge.pending'), tone: 'warning' },
-    partial: { label: t('inbox.badge.partial'), tone: 'warning' },
-    completed: { label: t('inbox.badge.completed'), tone: 'accent' },
-  };
-  return map[status] ?? { label: status, tone: 'info' };
-}
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export default async function ReceivingPage() {
+/**
+ * The receiving board (W1-05): today's trucks with one state-labelled action
+ * each, late ones carried over, and closed receipts opened read-only
+ * (`?receipt=<poId>`) instead of re-entering the wizard.
+ */
+export default async function ReceivingPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = await searchParams;
+  const receiptPo = typeof sp.receipt === 'string' && UUID.test(sp.receipt) ? sp.receipt : null;
   const caller = await createServerCaller();
-  const [expectations, locale, t] = await Promise.all([
-    caller.receiving.todayExpectations(),
+  const session = await auth();
+  const [expectations, locale, t, to, features] = await Promise.all([
+    caller.receiving.todayExpectations({ includeLate: true }),
     getLocale(),
     getT(receiving),
+    getT(overview),
+    enabledFeatures(session?.user?.restaurantId),
   ]);
+
+  const notFound = (err: unknown) => {
+    if (err instanceof TRPCError && err.code === 'NOT_FOUND') return null;
+    throw err;
+  };
+  const [closed, po, memberships] = receiptPo
+    ? await Promise.all([
+        caller.receiving.getReceipt({ poId: receiptPo }).catch(notFound),
+        caller.receiving.getPo({ poId: receiptPo }).catch(notFound),
+        caller.onboarding.myMemberships(),
+      ])
+    : [null, null, []];
+  // Who may receive goods (startReceipt's roles) may open a follow-up delivery.
+  const role = (memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0])?.role;
+  const canReopen = role === 'owner' || role === 'manager' || role === 'receiver';
+  const supplierName = po ? (locale === 'en' && po.supplierNameEn ? po.supplierNameEn : po.supplierName) : '';
 
   return (
     <div>
-      <SectionHeader title={t('inbox.title')} subtitle={t('inbox.subtitle')} />
+      {features.includes('receiverPwa') && session?.user?.restaurantId && session.user.id ? (
+        <ReceiverPwa restaurantId={session.user.restaurantId} userId={session.user.id} />
+      ) : null}
+      <SectionHeader level={1} title={t('inbox.title')} subtitle={t('inbox.subtitle')} />
 
-      {expectations.length === 0 ? (
-        <EmptyState
-          icon={<PackageCheck className="h-6 w-6" />}
-          title={t('inbox.emptyTitle')}
-          description={t('inbox.emptyDescription')}
-        />
+      {receiptPo ? (
+        closed && closed.status !== 'pending' ? (
+          <ReceiptView receipt={closed} poId={receiptPo} canReopen={canReopen} supplierName={supplierName} t={to} locale={locale} />
+        ) : (
+          <p role="status" className="rounded-2xl border border-line bg-surface p-4 text-sm text-muted">
+            {to('board.receipt.notFound')}
+          </p>
+        )
       ) : (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          {expectations.map((e) => {
-            const badge = receiptBadge(e.receiptStatus, t);
-            const supplierName = locale === 'en' && e.supplierNameEn ? e.supplierNameEn : e.supplierName;
-            const expectedTime = e.hasDeliveryDate
-              ? formatDate(e.expectedAt, locale, { hour: '2-digit', minute: '2-digit' })
-              : t('inbox.noDeliveryDate');
-            return (
-              <Link
-                key={e.poId}
-                href={`/dashboard/receiving/${e.poId}`}
-                data-testid="receiving-po-card"
-                className="group block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-              ><Card
-                elevated
-                flow
-                padding="md"
-                className="block h-full transition-all group-hover:border-primary/40"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-primary/25 bg-primary/12 text-primary">
-                      <Truck className="h-5 w-5" aria-hidden="true" />
-                    </div>
-                    <div>
-                      <h3 className="text-base font-bold text-ink">{supplierName}</h3>
-                      <div className="mt-0.5 flex items-center gap-2 text-xs text-muted">
-                        <Clock className="h-3 w-3" aria-hidden="true" />
-                        <span className={e.hasDeliveryDate ? 'font-mono tabular-nums' : 'text-warn'}>
-                          {expectedTime}
-                        </span>
-                        <span className="text-subtle">·</span>
-                        <span className="tabular-nums">
-                          {t('inbox.items', { count: formatNumber(e.lineCount, locale) })}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  {badge ? <Badge tone={badge.tone}>{badge.label}</Badge> : null}
-                </div>
-
-                <div className="mt-4 flex items-center justify-between border-t border-line pt-3 text-sm">
-                  {/* The label matches what the receipt page will open: a closed
-                      (partial / completed) receipt opens read-only, not a count. */}
-                  <span className="text-muted" data-testid="receiving-po-state">
-                    {!e.receiptId
-                      ? t('inbox.openReceipt')
-                      : e.receiptStatus === 'pending'
-                        ? t('inbox.continueReceipt')
-                        : t('inbox.closedReceipt')}
-                  </span>
-                  <span className="inline-flex items-center gap-1 font-semibold text-primary">
-                    {e.receiptId && e.receiptStatus !== 'pending' ? t('inbox.viewReceipt') : t('inbox.receiveGoods')}
-                    <ArrowLeft
-                      className="h-4 w-4 transition-transform ltr:-scale-x-100 rtl:group-hover:-translate-x-0.5 ltr:group-hover:translate-x-0.5"
-                      aria-hidden="true"
-                    />
-                  </span>
-                </div>
-              </Card>
-              </Link>
-            );
-          })}
-        </div>
+        <ReceivingBoard rows={expectations} t={to} locale={locale} />
       )}
     </div>
   );

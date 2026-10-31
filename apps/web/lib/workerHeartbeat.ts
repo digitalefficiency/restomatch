@@ -1,11 +1,11 @@
 /**
  * Worker liveness evaluation (plan v2, Wave 0). Pure: the cron route and the
- * dashboard banner both call evaluateHeartbeat() on the JSON the worker writes
- * under WORKER_HEARTBEAT_KEY (see apps/worker/src/heartbeat.ts).
+ * dashboard banner both call evaluateHeartbeat() on the heartbeat document
+ * (lib/workerHeartbeatStore.ts reads it from worker_heartbeats; the worker writes
+ * it, apps/worker/src/heartbeat.ts).
  */
-export const WORKER_HEARTBEAT_KEY = 'restomatch:worker:heartbeat';
-/** A beat older than this is "down" (the worker beats every 60s, TTL 300s). */
-export const WORKER_STALE_AFTER_MS = 10 * 60_000;
+/** A beat older than this is "down" (the worker beats every 60s). */
+export const WORKER_STALE_AFTER_MS = 5 * 60_000;
 
 export interface HeartbeatDoc {
   at: string;
