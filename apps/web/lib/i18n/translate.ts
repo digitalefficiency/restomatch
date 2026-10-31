@@ -12,14 +12,20 @@ import { baseLocaleOf, DEFAULT_LOCALE, type AppLocale, type Locale, type Receive
  * resolved with `Intl.PluralRules` for the rendered locale (Hebrew has a dual:
  * יום אחד · יומיים · 3 ימים). `#` is the count, locale-formatted. Strings
  * without plural syntax render exactly as before.
- * Fallback chain: active locale → Hebrew → the key itself (never throws).
+ * Fallback chain (he/en): active locale → Hebrew → the key itself (never throws).
  *
  * Receiver locales (ar/ru/th/ti) are OVERLAYS: a namespace may carry
  * `extra[locale]`, a deep-partial of the English shape. Lookup for a receiver
- * locale is overlay → English → Hebrew → key, so a screen nobody translated
- * renders in English. Receiver-facing namespaces declare their overlays with
- * `CompleteOverlays<…>` (every key, every receiver locale — a type error
- * otherwise); everything else simply has none.
+ * locale depends on whether the namespace has overlays at all:
+ *   - overlaid namespace (`ns.extra` set): overlay → Hebrew → key. A receiver
+ *     at an Israeli restaurant reads the floor's Hebrew better than English,
+ *     so a key the overlay does not cover (a slice overlay, or a key added
+ *     before its translation lands) falls back to Hebrew, never English.
+ *   - namespace without overlays: English → Hebrew → key, so a non-receiver
+ *     screen (owner/bookkeeper tooling) renders in English.
+ * Receiver-facing namespaces declare their overlays with `CompleteOverlays<…>`
+ * (every key, every receiver locale — a type error otherwise), either over the
+ * whole namespace or over its receiver-facing slice.
  */
 export interface MessageTree {
   [key: string]: string | MessageTree;
@@ -149,7 +155,11 @@ export function createTranslator<T extends MessageTree>(locale: AppLocale, ns: N
       ? [ns.he]
       : locale === 'en'
         ? [ns.en as MessageTree, ns[DEFAULT_LOCALE]]
-        : [ns.extra?.[locale] as MessageTree | undefined, ns.en as MessageTree, ns[DEFAULT_LOCALE]];
+        : ns.extra
+          ? // Receiver locale, overlaid namespace: a gap falls back to Hebrew, never English.
+            [ns.extra[locale] as MessageTree | undefined, ns[DEFAULT_LOCALE]]
+          : // Receiver locale, no overlays (non-receiver screen): English.
+            [ns.en as MessageTree, ns[DEFAULT_LOCALE]];
   // Plural categories follow the RENDERED language (ru has few/many, he has a dual).
   const pluralLocale = locale === 'he' ? 'he-IL' : locale === 'en' ? 'en-GB' : locale;
   const t = (key: MessageKey<T>, vars?: MessageVars): string => {

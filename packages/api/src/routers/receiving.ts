@@ -299,6 +299,10 @@ export const receivingRouter = router({
           poId: goodsReceipts.poId,
           status: goodsReceipts.status,
           receivedAt: goodsReceipts.receivedAt,
+          // The receipt's version: changes only when it is closed or reopened. The
+          // Delivery Check stamps its offline rows with it so a row counted before a
+          // close / reopen is never replayed into the receipt (W1-06 × W1-05).
+          updatedAt: goodsReceipts.updatedAt,
           signatureUrl: goodsReceipts.signatureUrl,
           notes: goodsReceipts.notes,
         })

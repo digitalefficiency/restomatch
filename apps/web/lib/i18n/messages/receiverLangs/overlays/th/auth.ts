@@ -2,7 +2,7 @@ import type { Shape } from '../../../../translate';
 import type { he } from '../../../auth/he';
 
 /** auth — th overlay (Thai). */
-export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor'>> = {
+export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor' | 'signin'>> = {
   login: {
     title: 'เข้าสู่ระบบ RestoMatch',
     subtitle: 'เข้าสู่ระบบด้วยรหัสผ่าน หรือรับลิงก์เข้าสู่ระบบทางอีเมล',
@@ -40,5 +40,21 @@ export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor'>> 
     codeLabel: 'รหัสยืนยัน',
     submit: 'ยืนยัน',
     switchAccount: 'เข้าสู่ระบบด้วยบัญชีอื่น',
+  },
+  signin: {
+    forgotShort: 'ลืม?',
+    showPassword: 'แสดงรหัสผ่าน',
+    hidePassword: 'ซ่อนรหัสผ่าน',
+    pending: 'สักครู่…',
+    lockoutHint: 'หลังจากใส่ผิดหลายครั้ง การเข้าสู่ระบบจะถูกล็อกชั่วคราว คุณเข้าสู่ระบบโดยไม่ใช้รหัสผ่านได้ด้วย:',
+    magicFallback: 'รับลิงก์เข้าสู่ระบบทางอีเมล',
+    emailMissing: 'ใส่อีเมลเพื่อรับลิงก์เข้าสู่ระบบ',
+    queuedOne: 'รูปใบแจ้งหนี้ 1 รูปรออยู่ในเครื่อง · จะส่งเมื่อคนที่ถ่ายเข้าสู่ระบบ',
+    queuedMany: 'รูปใบแจ้งหนี้ {count} รูปรออยู่ในเครื่อง · จะส่งเมื่อคนที่ถ่ายเข้าสู่ระบบ',
+    signedInAs: 'คุณเข้าสู่ระบบอยู่แล้วในชื่อ {email}',
+    continue: 'ไปที่บัญชี',
+    switchUser: 'เข้าสู่ระบบด้วยผู้ใช้อื่น',
+    newHere: 'ใหม่กับ RestoMatch? การเข้าสู่ระบบครั้งแรกด้วยลิงก์ทางอีเมลจะเปิดบัญชีให้',
+    demo: 'ดูเดโม',
   },
 };

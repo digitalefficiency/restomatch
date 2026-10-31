@@ -2,7 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { LineMark } from '@/app/showcase/receiver/_state';
+import { requestReauth } from '@/lib/net/reauth';
+import { createAuthGate, type AuthGate } from '@/lib/pwa/authGate';
 import { isTransientFailure } from '@/lib/pwa/offlineQueue';
+import { useReauthResumed } from '@/lib/pwa/useReauthResumed';
 import { grLineForMark } from './_adapters';
 import { grLineIsCounted } from './_count';
 import {
@@ -11,6 +14,8 @@ import {
   type GrLinePayload,
   type LineOutbox,
   type LineSaveState,
+  type RowStamp,
+  type RowStatus,
 } from '@/lib/pwa/lineOutbox';
 
 /** How often queued (offline) line saves are retried while the wizard is open. */
@@ -31,20 +36,31 @@ export function payloadIsCounted(p: GrLinePayload): boolean {
  * receiving.markGrLine: saved on change, kept on the phone while offline,
  * retried on `online` and every 15 s. Storage is per user + PO. For a receipt
  * that is already closed, stale unsent rows are dropped, never retried into it.
+ * An expired session (401) opens W1-04's re-auth sheet — these calls bypass the
+ * QueryClient's caches — keeps the row queued, and holds the automatic retries
+ * until the receiver signs in again; then everything unsent goes at once.
  */
 export function useLineSaves(
   storageKey: string,
   send: (p: GrLinePayload) => Promise<unknown>,
   closed = false,
-): { outbox: LineOutbox; states: Record<string, LineSaveState>; pending: number } {
+  /** Is a stored row for the receipt as it is now (not counted before a close / reopen)? */
+  rowStatus?: (p: GrLinePayload) => RowStatus,
+): { outbox: LineOutbox; states: Record<string, LineSaveState>; pending: number; authGate: AuthGate } {
   const sendRef = useRef(send);
   sendRef.current = send;
   const [states, setStates] = useState<Record<string, LineSaveState>>({});
   const [pending, setPending] = useState(0);
+  const statusRef = useRef(rowStatus);
+  statusRef.current = rowStatus;
   const boxRef = useRef<LineOutbox | null>(null);
+  const gateRef = useRef<AuthGate | null>(null);
+  if (!gateRef.current) gateRef.current = createAuthGate(() => requestReauth());
+  const authGate = gateRef.current;
   if (!boxRef.current) {
     const box: LineOutbox = createLineOutbox({
-      send: (p) => sendRef.current(p),
+      send: authGate.wrap((p: GrLinePayload) => sendRef.current(p)),
+      rowStatus: (p) => statusRef.current?.(p) ?? 'current',
       // No network, or signed out mid-count (401): kept on the phone, retried — never "failed".
       isNetworkError: isTransientFailure,
       storage: typeof window === 'undefined' ? undefined : localStorageOutbox(storageKey),
@@ -63,7 +79,7 @@ export function useLineSaves(
     setPending(outbox.pendingCount());
     setStates(outbox.states());
     const retry = () => {
-      if (navigator.onLine && outbox.pendingCount() > 0) void outbox.retry();
+      if (navigator.onLine && authGate.shouldAutoRetry() && outbox.pendingCount() > 0) void outbox.retry();
     };
     retry();
     window.addEventListener('online', retry);
@@ -72,9 +88,15 @@ export function useLineSaves(
       window.removeEventListener('online', retry);
       window.clearInterval(id);
     };
-  }, [outbox, closed]);
+  }, [outbox, closed, authGate]);
 
-  return { outbox, states, pending };
+  // Signed in again (the sheet closed with a session): send everything unsent now.
+  useReauthResumed(() => {
+    authGate.resume();
+    if (!closed && outbox.pendingCount() > 0) void outbox.retry();
+  });
+
+  return { outbox, states, pending, authGate };
 }
 
 /** What the wizard remembers per PO on this device so a reload resumes (grId, the invoice being read). */
@@ -82,13 +104,17 @@ export interface ReceiptDraft {
   grId: string;
   invoiceId: string | null;
   savedAt: number;
+  /** The receipt's version (open/close cycle) the draft belongs to. */
+  version?: string | null;
 }
 
 export function readDraft(key: string): ReceiptDraft | null {
   try {
     const raw = window.localStorage.getItem(key);
     const d = raw ? (JSON.parse(raw) as Partial<ReceiptDraft>) : null;
-    return d && typeof d.grId === 'string' ? { grId: d.grId, invoiceId: d.invoiceId ?? null, savedAt: d.savedAt ?? 0 } : null;
+    return d && typeof d.grId === 'string'
+      ? { grId: d.grId, invoiceId: d.invoiceId ?? null, savedAt: d.savedAt ?? 0, version: d.version ?? null }
+      : null;
   } catch {
     return null;
   }
@@ -105,22 +131,25 @@ export function writeDraft(key: string, draft: ReceiptDraft | null): void {
 
 /**
  * Marks on lines that are only on the invoice (not ordered) have no gr_line to
- * save to; they are kept on this device per PO so a reload never loses them.
+ * save to; they are kept on this device per PO so a reload never loses them —
+ * stamped with the receipt's open/close cycle, and only restored into that
+ * same cycle (never into a receipt closed or reopened since).
  */
-export function readLocalMarks(key: string): Record<string, LineMark> {
+export function readLocalMarks(key: string, stamp: RowStamp | null): Record<string, LineMark> {
   try {
     const raw = window.localStorage.getItem(key);
-    const parsed: unknown = raw ? JSON.parse(raw) : {};
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, LineMark>) : {};
+    const parsed = (raw ? JSON.parse(raw) : null) as { stamp?: RowStamp; marks?: Record<string, LineMark> } | null;
+    if (!stamp || !parsed?.stamp || !parsed.marks) return {};
+    return parsed.stamp.grId === stamp.grId && parsed.stamp.version === stamp.version ? parsed.marks : {};
   } catch {
     return {};
   }
 }
 
-export function writeLocalMarks(key: string, marks: Record<string, LineMark> | null): void {
+export function writeLocalMarks(key: string, marks: Record<string, LineMark> | null, stamp: RowStamp | null = null): void {
   try {
-    if (!marks || Object.keys(marks).length === 0) window.localStorage.removeItem(key);
-    else window.localStorage.setItem(key, JSON.stringify(marks));
+    if (!marks || Object.keys(marks).length === 0 || !stamp) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, JSON.stringify({ stamp, marks }));
   } catch {
     /* storage blocked: these marks live in memory until the close */
   }

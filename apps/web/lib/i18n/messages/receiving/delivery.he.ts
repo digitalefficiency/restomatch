@@ -4,8 +4,9 @@
  * A sibling of 'receiving' rather than new keys in it: 'receiving' has complete,
  * type-checked receiver-language overlays (ar/ru/th/ti, owned by the
  * receiverLangs package), and a key added there without its four translations
- * fails them. Until those overlays add this block, receiver languages read it
- * in English (the translator's fallback chain).
+ * fails them. This block has its own complete overlays
+ * (receiverLangs/overlays/receivingDelivery.ts) — a key added here needs its
+ * ar/ru/th/ti translations too (the type check and receiver-langs.test.ts say so).
  */
 export const he = {
   delivery: {
@@ -70,6 +71,13 @@ export const he = {
       closing: 'סוגרים את קבלת הסחורה…',
       remaining: 'נותרו {count} שורות לסמן',
       offline: 'אין חיבור — הספירה שמורה בטלפון. אפשר לסגור את קבלת הסחורה כשהחיבור יחזור.',
+      sessionExpired: 'פג תוקף ההתחברות — התחברו שוב. הספירה שמורה.',
+      heldTitle: 'נספר בטלפון הזה לפני שקבלת הסחורה נסגרה',
+      heldBody: 'הספירות האלה לא נשלחו — קבלת הסחורה נסגרה בינתיים. בחרו מה לעשות בכל שורה.',
+      heldLine: '{name}: {phone} בטלפון · {record} ברישום',
+      heldApply: 'החילו את הספירה מהטלפון',
+      heldDiscard: 'מחקו את הספירה מהטלפון',
+      heldNotCounted: 'לא נספר',
       saveFailed: 'שמירת {count} שורות נכשלה',
       unorderedNeeds: 'סמנו אם הפריטים שלא הוזמנו הגיעו',
       spotTitle: 'בדיקה מדגמית לפני האישור',
@@ -121,6 +129,7 @@ export const he = {
   pwa: {
     offline: 'אין חיבור · נשמר בטלפון',
     othersQueued: '{count} צילומים של סניף אחר ממתינים במכשיר',
+    signInToUpload: 'התחברו כדי להעלות את צילומי החשבונית',
     capturedByOne: 'הועלה צילום חשבונית · צולם על ידי {names}',
     capturedByMany: 'הועלו {count} צילומי חשבונית · צולמו על ידי {names}',
     someoneElse: 'משתמש אחר',

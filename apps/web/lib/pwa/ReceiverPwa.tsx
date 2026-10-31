@@ -6,7 +6,9 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
 import { ingest } from '@/lib/i18n/messages/ingest';
 import { receivingDelivery } from '@/lib/i18n/messages/receiving/delivery';
+import { requestReauth } from '@/lib/net/reauth';
 import { QUEUE_EVENT, idbAvailable, idbQueueStore, processQueue, type ProcessResult } from './offlineQueue';
+import { useReauthResumed } from './useReauthResumed';
 import { useQueuedPhotoUpload } from './useQueuedPhotoUpload';
 
 export { blobToBase64 } from './useQueuedPhotoUpload';
@@ -56,6 +58,9 @@ export function ReceiverPwa({ restaurantId, userId }: { restaurantId: string; us
   const [syncingShown, setSyncingShown] = useState(false);
   const [syncError, setSyncError] = useState(false);
   const [attributed, setAttributed] = useState<ProcessResult['attributed']>([]);
+  // The session expired: queued photos wait for a sign-in (no auto-sync that would re-open the sheet).
+  const [needsSignIn, setNeedsSignIn] = useState(false);
+  const needsSignInRef = useRef(false);
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [installed, setInstalled] = useState(false);
   const running = useRef(false);
@@ -76,7 +81,7 @@ export function ReceiverPwa({ restaurantId, userId }: { restaurantId: string; us
   }, [ofBranch]);
 
   const sync = useCallback(async () => {
-    if (running.current || !idbAvailable() || !navigator.onLine) return;
+    if (running.current || needsSignInRef.current || !idbAvailable() || !navigator.onLine) return;
     running.current = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
     try {
@@ -87,6 +92,13 @@ export function ReceiverPwa({ restaurantId, userId }: { restaurantId: string; us
       setSyncError(r.failed.length > 0);
       setQueued(r.remaining);
       if (r.attributed.length > 0) setAttributed(r.attributed);
+      if (r.authExpired) {
+        // Signed out (W1-04): the re-auth sheet, and "sign in to upload" — never "sync failed".
+        needsSignInRef.current = true;
+        setNeedsSignIn(true);
+        setSyncError(false);
+        requestReauth();
+      }
     } catch {
       setSyncError(true);
     } finally {
@@ -95,6 +107,13 @@ export function ReceiverPwa({ restaurantId, userId }: { restaurantId: string; us
       setSyncingShown(false);
     }
   }, [upload, ofBranch, restaurantId, userId]);
+
+  // Signed in again: upload what waited.
+  useReauthResumed(() => {
+    needsSignInRef.current = false;
+    setNeedsSignIn(false);
+    void sync();
+  });
 
   useEffect(() => {
     if (attributed.length === 0) return;
@@ -147,6 +166,12 @@ export function ReceiverPwa({ restaurantId, userId }: { restaurantId: string; us
     ? { testId: 'pwa-offline-banner', icon: <CloudOff className="h-4 w-4 shrink-0" aria-hidden="true" />, text: tr('pwa.offline') }
     : syncingShown
       ? { testId: 'pwa-sync-banner', icon: <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />, text: t('pwa.syncing') }
+      : needsSignIn && queued > 0
+        ? {
+            testId: 'pwa-signin-banner',
+            icon: <UploadCloud className="h-4 w-4 shrink-0" aria-hidden="true" />,
+            text: tr('pwa.signInToUpload'),
+          }
       : queued > 0
         ? {
             testId: 'pwa-sync-banner',

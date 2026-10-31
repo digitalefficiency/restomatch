@@ -9,6 +9,8 @@ import {
   pendingCountOnDevice,
   processQueue,
   resetPersistRequest,
+  ScopeChangedError,
+  SessionGoneError,
   type QueueStore,
   type QueuedPhoto,
 } from '../pwa/offlineQueue';
@@ -52,7 +54,7 @@ describe('receiver PWA offline queue', () => {
       return { invoiceId: `inv-${item.clientUploadId}` };
     });
     expect(seen).toEqual(['a', 'b']);
-    expect(r).toEqual({ uploaded: ['a', 'b'], failed: [], remaining: 0, attributed: [] });
+    expect(r).toEqual({ uploaded: ['a', 'b'], failed: [], remaining: 0, attributed: [], authExpired: false });
   });
 
   it('re-sends the SAME clientUploadId on retry (idempotent server side) and keeps the item until success', async () => {
@@ -140,6 +142,26 @@ describe('receiver PWA offline queue', () => {
       expect(store.map.get('a')!.attempts, String(err)).toBe(attempts);
       expect(calls, String(err)).toEqual(stopped ? ['a'] : ['a', 'b']);
     }
+  });
+
+  it('an expired session stops the run, costs nothing, and says so (authExpired) — a branch switch does not', async () => {
+    const unauthorized = Object.assign(new Error('x'), { data: { httpStatus: 401, code: 'UNAUTHORIZED' } });
+    for (const [err, expired] of [
+      [unauthorized, true],
+      [new SessionGoneError(), true],
+      [new ScopeChangedError(), false],
+    ] as const) {
+      const store = memStore([photo('a', 1), photo('b', 2)]);
+      const calls: string[] = [];
+      const r = await processQueue(store, async (i) => {
+        calls.push(i.clientUploadId);
+        throw err;
+      });
+      expect(r.authExpired, String(err)).toBe(expired);
+      expect(calls, String(err)).toEqual(['a']);
+      expect(store.map.get('a')!.attempts, String(err)).toBe(0);
+    }
+    expect(classifyFailure(new SessionGoneError(), true)).toBe('auth');
   });
 
   it('classifies by HTTP status / tRPC code, never by the message text', () => {

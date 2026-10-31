@@ -47,6 +47,8 @@ export interface ProcessResult {
   remaining: number;
   /** Uploaded photos a colleague took on this device ("צולם על ידי"). */
   attributed: Array<{ clientUploadId: string; capturedByName: string | null }>;
+  /** The run stopped because the session is gone (401 / signed out): sign in to upload. */
+  authExpired: boolean;
 }
 
 /**
@@ -56,6 +58,14 @@ export interface ProcessResult {
  * the photo. `permanent` (a 4xx) will not succeed by retrying.
  */
 export type FailureKind = 'network' | 'auth' | 'retryable' | 'permanent';
+
+/** Thrown when there is no session at all (expired / signed out): the receiver must sign in again. */
+export class SessionGoneError extends Error {
+  constructor(message = 'signed out — photo kept until the next sign-in') {
+    super(message);
+    this.name = 'SessionGoneError';
+  }
+}
 
 /** Thrown when the session's branch / user no longer fits the queued item (another tab switched). */
 export class ScopeChangedError extends Error {
@@ -109,7 +119,7 @@ export function classifyFailure(
   online: boolean = typeof navigator === 'undefined' ? true : navigator.onLine !== false,
 ): FailureKind {
   if (!online) return 'network';
-  if (err instanceof ScopeChangedError) return 'auth';
+  if (err instanceof ScopeChangedError || err instanceof SessionGoneError) return 'auth';
   const status = httpStatusOf(err);
   const code = trpcCodeOf(err);
   if (status === 401 || code === 'UNAUTHORIZED') return 'auth';
@@ -147,6 +157,7 @@ export async function processQueue(
   const uploaded: string[] = [];
   const failed: string[] = [];
   const attributed: ProcessResult['attributed'] = [];
+  let authExpired = false;
   for (const item of items) {
     if (!isOnline()) break;
     if (item.attempts >= MAX_AUTO_ATTEMPTS) continue;
@@ -164,11 +175,13 @@ export async function processQueue(
       const attempts =
         kind === 'network' || kind === 'auth' ? item.attempts : kind === 'permanent' ? MAX_AUTO_ATTEMPTS : item.attempts + 1;
       await store.put({ ...item, attempts, lastError });
+      // A branch switch is not an expired session: only a missing session asks for a sign-in.
+      if (kind === 'auth' && !(err instanceof ScopeChangedError)) authExpired = true;
       if (kind === 'network' || kind === 'auth') break;
     }
   }
   const left = await store.list();
-  return { uploaded, failed, remaining: left.filter(inScope).length, attributed };
+  return { uploaded, failed, remaining: left.filter(inScope).length, attributed, authExpired };
 }
 
 /** No response at all (offline / fetch rejected) — by error type and status, never by message text. */

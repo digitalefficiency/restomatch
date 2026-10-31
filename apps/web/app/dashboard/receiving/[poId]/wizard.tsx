@@ -23,9 +23,12 @@ import type { Translator } from '@/lib/i18n/translate';
 import { isReceiverLocale } from '@/lib/i18n/config';
 import type { UploadedScan } from '@/lib/supabase/client';
 import { ingest } from '@/lib/i18n/messages/ingest';
+import { requestReauth } from '@/lib/net/reauth';
+import { isSessionExpired } from '@/lib/pwa/authGate';
 import { SYNCED_EVENT, enqueuePhoto, idbAvailable, isNetworkError, isTransientFailure, type SyncedPhotoDetail } from '@/lib/pwa/offlineQueue';
 import { adaptReconciliation, keepAdjusted, markFromCount, type PoLineRow, type ReceiptLineRow } from './_adapters';
 import { fromGrLine } from './_count';
+import { withoutStamp, type GrLinePayload, type RowStamp } from '@/lib/pwa/lineOutbox';
 import { localizeInvoiceLines, localizePoLines, localizeReceiptLines, type LocalNames } from './_localize';
 import { receivingErrorText as errorText } from './_errors';
 import { pollInvoiceUntilRead } from './_poll';
@@ -85,6 +88,8 @@ export interface ReceiptForClient {
   id: string;
   status: string;
   receivedAt: string | null;
+  /** Its open/close cycle (`updatedAt`): offline rows from an earlier cycle are held, never replayed. */
+  version: string | null;
   lines: ReceiptLineRow[];
 }
 
@@ -148,6 +153,10 @@ export function ReceivingWizard({
     closedAtOpen ? 'SUMMARY' : existingReceipt ? 'RESUMING' : 'SCAN_INVOICE',
   );
   const [grId, setGrId] = useState<string | null>(existingReceipt?.id ?? null);
+  /** The receipt's version as loaded now (changes only on close / reopen). */
+  const [receiptVersion, setReceiptVersion] = useState<string | null>(closedAtOpen ? null : (existingReceipt?.version ?? null));
+  const stampRef = useRef<RowStamp | null>(null);
+  stampRef.current = grId && receiptVersion ? { grId, version: receiptVersion } : null;
   const [invoiceId, setInvoiceId] = useState<string | null>(null);
   const [ocrNotice, setOcrNotice] = useState<OcrNotice>(null);
   /** The scanned number is already on another invoice of this supplier. */
@@ -194,25 +203,41 @@ export function ReceivingWizard({
 
   const utils = trpc.useUtils();
   const registerInvoice = trpc.receiving.registerInvoice.useMutation();
-  // startReceipt / submitReceipt go through the plain client: React Query would
-  // PAUSE them offline (a forever spinner) instead of failing fast.
-  // networkMode 'always': React Query's default ('online') PAUSES a mutation
-  // while the device is offline — the receiver saw "Uploading…" spin forever.
-  // Fail fast instead so the network message (and Retake) shows.
-  const uploadScan = trpc.scans.upload.useMutation({ networkMode: 'always' });
+  // markGrLine / startReceipt / submitReceipt go through the plain client: the
+  // field outbox owns their retries (kept on the phone, resent in order). They
+  // bypass the QueryClient's caches, so W1-04's UNAUTHORIZED handler never sees
+  // them — an expired session is turned into the re-auth sheet here
+  // (requestReauth), never into "no connection". (Mutations already fail fast
+  // offline: W1-04 made networkMode 'always' the app-wide default.)
+  const uploadScan = trpc.scans.upload.useMutation();
   const ensureEnglish = trpc.receiving.ensureEnglish.useMutation();
 
   // Every mark is saved on change (300 ms, full row) and kept on the phone offline.
-  const { outbox, states: saveByGrLine, pending: unsent } = useLineSaves(
+  const { outbox, states: saveByGrLine, pending: unsent, authGate } = useLineSaves(
     `rm-rcv-lines:${storeKey}`,
     (p) => utils.client.receiving.markGrLine.mutate(p),
     Boolean(closedAtOpen),
+    // A row counted before this receipt was closed / reopened (another device closed
+    // it; W1-05 reopened it for a follow-up delivery) is HELD — never replayed over
+    // the count the match and claims were made against.
+    (p) => {
+      const cur = stampRef.current;
+      if (!cur) return 'unknown';
+      return p.stamp && p.stamp.grId === cur.grId && p.stamp.version === cur.version ? 'current' : 'stale';
+    },
   );
+  // Once the receipt's version is known, sort the stored rows: current ones go, stale ones are held.
+  useEffect(() => {
+    if (grId && receiptVersion && !closedAtOpen) void outbox.retry();
+  }, [grId, receiptVersion, closedAtOpen, outbox]);
   // Marks on invoice-only lines (no gr_line to save to) are kept on the device.
   const localMarksKey = `rm-rcv-unordered:${storeKey}`;
   const saveStates = useMemo(() => {
     const out: Record<string, LineSaveUi> = {};
-    for (const [key, id] of Object.entries(grLineIdByKey)) if (saveByGrLine[id]) out[key] = saveByGrLine[id];
+    for (const [key, id] of Object.entries(grLineIdByKey)) {
+      const st = saveByGrLine[id];
+      if (st && st !== 'held') out[key] = st; // held rows are shown in their own panel
+    }
     return out;
   }, [grLineIdByKey, saveByGrLine]);
 
@@ -235,9 +260,9 @@ export function ReceivingWizard({
   // Remember the receipt + invoice on this device so a reload resumes the same read.
   useEffect(() => {
     if (grId && step !== 'CONFIRMED' && step !== 'SUMMARY' && step !== 'RESUMING') {
-      writeDraft(draftKey, { grId, invoiceId, savedAt: Date.now() });
+      writeDraft(draftKey, { grId, invoiceId, savedAt: Date.now(), version: receiptVersion });
     }
-  }, [grId, invoiceId, step, draftKey]);
+  }, [grId, invoiceId, step, draftKey, receiptVersion]);
 
   // Is there anything to dispute? (short / rejected / over-priced / unordered / duplicate)
   const slipNeeded = useMemo(
@@ -499,7 +524,7 @@ export function ReceivingWizard({
    */
   function withUnsent(base: Record<string, LineMark>, idByKey: Record<string, string>): Record<string, LineMark> {
     const out = { ...base };
-    for (const [key, m] of Object.entries(readLocalMarks(localMarksKey))) {
+    for (const [key, m] of Object.entries(readLocalMarks(localMarksKey, stampRef.current))) {
       if (out[key] && !idByKey[key]) {
         out[key] = { ...out[key], ...m };
         adjustedKeysRef.current.add(key);
@@ -536,9 +561,20 @@ export function ReceivingWizard({
     }
   }
 
+  /**
+   * The receipt's version as just loaded. Set before the marks are restored, so
+   * the restore (and the outbox) only ever take rows from THIS open/close cycle.
+   */
+  function noteVersion(activeGrId: string, updatedAt: string | Date | null | undefined) {
+    const version = updatedAt ? new Date(updatedAt).toISOString() : null;
+    stampRef.current = version ? { grId: activeGrId, version } : null;
+    setReceiptVersion(version);
+  }
+
   type InvoiceSnapshot = Awaited<ReturnType<typeof utils.receiving.getInvoice.fetch>>;
   async function buildReconciliation(activeGrId: string, invoice: InvoiceSnapshot, toStep: Step = 'RECONCILIATION_REVIEW') {
     const receipt = await loadReceipt(activeGrId);
+    noteVersion(activeGrId, receipt.updatedAt);
     const adapted = adaptReconciliation({
       po: {
         id: po.id,
@@ -566,6 +602,7 @@ export function ReceivingWizard({
     try {
       const activeGrId = await ensureReceipt(knownGrId ?? grId);
       const receipt = await loadReceipt(activeGrId);
+      noteVersion(activeGrId, receipt.updatedAt);
       const adapted = adaptReconciliation({
         po: {
           id: po.id,
@@ -586,15 +623,19 @@ export function ReceivingWizard({
       setMarks(withUnsent(keepAdjusted(marksRef.current, adapted.initialMarks, adjustedKeysRef.current), adapted.grLineIdByKey));
       setStep('ADJUST_QUANTITIES');
     } catch (err) {
-      // Offline with a count already on screen (the receiver went to scan the
-      // invoice): back to that count, every mark kept, with the offline note
+      // The session expired (startReceipt / getReceipt said 401): the re-auth
+      // sheet, and a message that says so — never "no connection".
+      const expired = isSessionExpired(err);
+      if (expired) requestReauth();
+      // Offline (or signed out) with a count already on screen (the receiver went
+      // to scan the invoice): back to that count, every mark kept, with the note
       // inline — never stranded on the scan step.
       if (isTransientFailure(err) && Object.keys(marksRef.current).length > 0) {
-        setFooterError(td('delivery.count.offline'));
+        setFooterError(td(expired ? 'delivery.count.sessionExpired' : 'delivery.count.offline'));
         setStep('ADJUST_QUANTITIES');
         return;
       }
-      setError(errorText(err, t, locale));
+      setError(expired ? td('delivery.count.sessionExpired') : errorText(err, t, locale));
       setStep('SCAN_INVOICE');
     }
   }
@@ -604,7 +645,8 @@ export function ReceivingWizard({
   useEffect(() => {
     if (step !== 'RESUMING' || !existingReceipt) return;
     const draft = readDraft(draftKey);
-    const knownInvoice = draft?.grId === existingReceipt.id ? draft.invoiceId : null;
+    // Only an invoice read in THIS open/close cycle of the receipt (not before a close / reopen).
+    const knownInvoice = draft?.grId === existingReceipt.id && draft.version === existingReceipt.version ? draft.invoiceId : null;
     const serverProgress = existingReceipt.lines.some(
       (l) => Number(l.qtyReceived ?? 0) > 0 || Number(l.qtyRejected ?? 0) > 0 || Boolean(l.rejectReason),
     );
@@ -653,13 +695,35 @@ export function ReceivingWizard({
     setMarks({ ...marksRef.current, [key]: nextMark });
     setFooterError(null);
     const grLineId = grLineIdByKeyRef.current[key];
-    if (grLineId) outbox.set(payloadFor(grLineId, nextMark));
+    if (grLineId) outbox.set({ ...payloadFor(grLineId, nextMark), ...(stampRef.current ? { stamp: stampRef.current } : {}) });
     else {
       // Invoice-only line: no gr_line exists — keep it on the device so a reload restores it.
-      const local = readLocalMarks(localMarksKey);
+      const local = readLocalMarks(localMarksKey, stampRef.current);
       local[key] = nextMark;
-      writeLocalMarks(localMarksKey, local);
+      writeLocalMarks(localMarksKey, local, stampRef.current);
     }
+  }
+
+  /**
+   * Rows counted on this phone before the receipt was closed / reopened. Never
+   * replayed and never dropped unseen: the receiver applies or discards each.
+   */
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const heldRows = useMemo(() => outbox.held(), [outbox, saveByGrLine]);
+
+  /** "Apply": the phone's count becomes the count of THIS cycle (re-stamped, sent, shown). */
+  function applyHeld(p: GrLinePayload) {
+    const key = Object.entries(grLineIdByKeyRef.current).find(([, id]) => id === p.grLineId)?.[0];
+    const m = key ? marksRef.current[key] : undefined;
+    if (!key || !m || !stampRef.current) return;
+    const row = withoutStamp(p);
+    const counted = payloadIsCounted(row);
+    setMarks({
+      ...marksRef.current,
+      [key]: counted ? markFromCount(m, fromGrLine(row, null), m.qtyReceived, row.conditionNotes ?? null) : { ...m, touched: false },
+    });
+    adjustedKeysRef.current.add(key);
+    outbox.set({ ...row, stamp: stampRef.current });
   }
 
   /** Close the receipt: every line is already saved (or flushed now); then submitReceipt re-matches. */
@@ -674,7 +738,11 @@ export function ReceivingWizard({
     try {
       const flushed = await outbox.flush();
       if (flushed.queued.length > 0 || !navigator.onLine) {
-        setFooterError(td('delivery.count.offline'));
+        // Lines held back by an expired session (a 401 on the flush): sign in, not "offline".
+        if (authGate.blocked) {
+          requestReauth();
+          setFooterError(td('delivery.count.sessionExpired'));
+        } else setFooterError(td('delivery.count.offline'));
         return;
       }
       if (flushed.failed.length > 0) {
@@ -697,7 +765,10 @@ export function ReceivingWizard({
       await utils.receiving.todayExpectations.invalidate();
       void findNextDelivery();
     } catch (err) {
-      setFooterError(isNetworkError(err) ? td('delivery.count.offline') : errorText(err, t, locale));
+      if (isSessionExpired(err)) {
+        requestReauth();
+        setFooterError(td('delivery.count.sessionExpired'));
+      } else setFooterError(isNetworkError(err) ? td('delivery.count.offline') : errorText(err, t, locale));
     } finally {
       submittingRef.current = false;
       setClosing(false);
@@ -882,6 +953,19 @@ export function ReceivingWizard({
 
       {step === 'ADJUST_QUANTITIES' && result ? (
         <>
+          {heldRows.length > 0 ? (
+            <HeldCounts
+              rows={heldRows}
+              result={result}
+              marks={marks}
+              grLineIdByKey={grLineIdByKey}
+              onApply={applyHeld}
+              onDiscard={(p) => outbox.discard(p.grLineId)}
+              dir={dir}
+              td={td}
+              locale={locale}
+            />
+          ) : null}
           {result.invoiceMeta.noInvoice && !invoiceId && !image ? (
             // The invoice can still be photographed: marks are kept (count first, invoice in parallel — RCV-05).
             <div className="mb-3 flex justify-end" dir={dir}>
@@ -1134,5 +1218,75 @@ function ProcessingPoll({
         </button>
       ) : null}
     </div>
+  );
+}
+
+/** The held rows (counted before the receipt was closed / reopened), each with apply / discard. */
+function HeldCounts({
+  rows,
+  result,
+  marks,
+  grLineIdByKey,
+  onApply,
+  onDiscard,
+  dir,
+  td,
+  locale,
+}: {
+  rows: GrLinePayload[];
+  result: ReconciliationResult;
+  marks: Record<string, LineMark>;
+  grLineIdByKey: Record<string, string>;
+  onApply: (p: GrLinePayload) => void;
+  onDiscard: (p: GrLinePayload) => void;
+  dir: 'rtl' | 'ltr';
+  td: Translator<typeof receivingDelivery.he>;
+  locale: 'he' | 'en';
+}) {
+  const keyById = new Map(Object.entries(grLineIdByKey).map(([k, id]) => [id, k]));
+  const qty = (q: number) => formatNumber(q, locale, { maximumFractionDigits: 3 });
+  const phoneText = (p: GrLinePayload) =>
+    p.rejectReason === 'missing' ? td('delivery.count.missingTag') : payloadIsCounted(p) ? qty(p.qtyReceived) : td('delivery.count.heldNotCounted');
+  const recordText = (m: LineMark | undefined) =>
+    !m?.touched ? td('delivery.count.heldNotCounted') : m.rejectReason === 'missing' ? td('delivery.count.missingTag') : qty(m.qtyReceived);
+  return (
+    <section dir={dir} role="alert" className="mb-4 space-y-3 rounded-2xl border border-warn/60 bg-surface p-4" data-testid="held-counts">
+      <div>
+        <p className="text-base font-semibold text-ink">{td('delivery.count.heldTitle')}</p>
+        <p className="text-sm text-muted">{td('delivery.count.heldBody')}</p>
+      </div>
+      <ul className="space-y-3">
+        {rows.map((p) => {
+          const key = keyById.get(p.grLineId);
+          const line = key ? result.lines.find((l) => lineKey(l) === key) : undefined;
+          const name = line ? (locale === 'en' && line.productNameEn ? line.productNameEn : line.productName) : '—';
+          return (
+            <li key={p.grLineId} className="space-y-2" data-testid="held-line" data-grline={p.grLineId}>
+              <p className="text-base text-ink">
+                {td('delivery.count.heldLine', { name, phone: phoneText(p), record: recordText(key ? marks[key] : undefined) })}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => onApply(p)}
+                  className="inline-flex min-h-12 items-center rounded-xl border border-primary bg-surface px-4 text-base font-semibold text-primary"
+                  data-testid="held-apply"
+                >
+                  {td('delivery.count.heldApply')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDiscard(p)}
+                  className="inline-flex min-h-12 items-center rounded-xl border border-line-strong bg-surface px-4 text-base font-semibold text-ink"
+                  data-testid="held-discard"
+                >
+                  {td('delivery.count.heldDiscard')}
+                </button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }

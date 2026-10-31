@@ -2,7 +2,7 @@
 
 import { useCallback } from 'react';
 import { trpc } from '@/lib/trpc/client';
-import { ScopeChangedError, announceSynced, type QueuedPhoto } from './offlineQueue';
+import { ScopeChangedError, SessionGoneError, announceSynced, type QueuedPhoto } from './offlineQueue';
 
 /** Encode a Blob to base64 (chunked — large photos overflow String.fromCharCode). */
 export async function blobToBase64(blob: Blob): Promise<string> {
@@ -39,7 +39,9 @@ export function useQueuedPhotoUpload(): (item: QueuedPhoto) => Promise<{ invoice
       // upload this branch's photo there. A colleague's photo of THIS branch is
       // fine (decision 22: uploaded, attributed to whoever took it).
       const scope = await sessionScope();
-      if (!scope || scope.restaurantId !== item.restaurantId) throw new ScopeChangedError();
+      // No session at all is an EXPIRED session (sign in to upload), not a branch switch.
+      if (!scope) throw new SessionGoneError();
+      if (scope.restaurantId !== item.restaurantId) throw new ScopeChangedError();
       const scan = await utils.client.scans.upload.mutate({
         contentBase64: await blobToBase64(item.blob),
         mimeType: item.mimeType,
