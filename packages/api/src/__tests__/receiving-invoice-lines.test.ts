@@ -613,4 +613,26 @@ describe('#216 money review — round 2', () => {
     await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, A.grId));
     expect((await as('manager').match.runForInvoice({ invoiceId: failedId })).matchRunId).not.toBeNull();
   });
+  it('addendum (#224): an invoice still being read takes no header or line edit — nothing written, the read lands clean', async () => {
+    const [line] = await db
+      .insert(invoiceLines)
+      .values({ invoiceId: failedId, rawDescription: 'x', qtyBilled: '1', unit: 'kg', unitPriceBilled: '1', lineTotal: '1.00' })
+      .returning({ id: invoiceLines.id });
+    await db.update(invoices).set({ status: 'ocr_pending', ocrPayload: { provider: 'claude_vision', raw: { scanGrId: A.grId } } }).where(eq(invoices.id, failedId));
+    const before = await header(failedId);
+    const reading = { code: 'PRECONDITION_FAILED', message: 'החשבונית עדיין נקראת — נסו שוב בעוד דקה' };
+    await expect(
+      as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: 95, vatAmount: 17.1, totalInclVat: 112.1 } }),
+    ).rejects.toMatchObject(reading);
+    await expect(as('manager').receiving.updateInvoiceLine({ lineId: line!.id, patch: { qtyBilled: 2 } })).rejects.toMatchObject(reading);
+    await expect(
+      as('manager').receiving.addInvoiceLine({ invoiceId: failedId, line: { rawDescription: 'y', qtyBilled: 1, unit: 'kg', unitPriceBilled: 1 } }),
+    ).rejects.toMatchObject(reading);
+    await expect(as('manager').receiving.deleteInvoiceLine({ lineId: line!.id })).rejects.toMatchObject(reading);
+    expect(await header(failedId)).toEqual(before);
+    const [row] = await db.select({ payload: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, failedId));
+    expect(row!.payload?.raw).toEqual({ scanGrId: A.grId }); // no headerEntered left for the read to inherit
+    const [l] = await db.select({ qty: invoiceLines.qtyBilled }).from(invoiceLines).where(eq(invoiceLines.id, line!.id));
+    expect(Number(l!.qty)).toBe(1);
+  });
 });

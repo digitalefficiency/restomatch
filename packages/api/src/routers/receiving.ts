@@ -683,11 +683,14 @@ export const receivingRouter = router({
           totalExclVat: invoices.totalExclVat,
           vatAmount: invoices.vatAmount,
           totalInclVat: invoices.totalInclVat,
+          status: invoices.status,
         })
         .from(invoices)
         .where(and(eq(invoices.id, input.invoiceId), eq(invoices.restaurantId, restaurantId)))
-        .limit(1);
+        .limit(1)
+        .for('update'); // a retake (→ ocr_pending) takes the same row lock
       if (!current) throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
+      assertNotBeingRead(current.status);
       const p = input.patch;
       const set: Partial<typeof invoices.$inferInsert> = { updatedAt: new Date() };
       if (p.invoiceNumber !== undefined) set.invoiceNumber = p.invoiceNumber?.trim() || null;
@@ -800,6 +803,7 @@ export const receivingRouter = router({
           unit: invoiceLines.unit,
           unitPriceBilled: invoiceLines.unitPriceBilled,
           lineTotal: invoiceLines.lineTotal,
+          status: invoices.status,
         })
         .from(invoiceLines)
         .innerJoin(
@@ -807,8 +811,10 @@ export const receivingRouter = router({
           and(eq(invoices.id, invoiceLines.invoiceId), eq(invoices.restaurantId, restaurantId)),
         )
         .where(eq(invoiceLines.id, input.lineId))
-        .limit(1);
+        .limit(1)
+        .for('update');
       if (!owned) throw new TRPCError({ code: 'NOT_FOUND', message: 'invoice line not found' });
+      assertNotBeingRead(owned.status);
 
       const p = input.patch;
       const set: Partial<typeof invoiceLines.$inferInsert> = {};
@@ -1749,6 +1755,18 @@ function deletableLineIds(ocrPayload: OcrPayload | null, lineIds: string[]): str
 }
 
 /** May lines be added / deleted by hand (see editableInvoice)? One rule for the API and the page. */
+/**
+ * An invoice still being read (ocr_pending) takes no edit: the read merges over
+ * ocr_payload.raw (#224), so a header typed now would be overwritten by the
+ * OCR while keeping raw.headerEntered — and the next line edit would treat the
+ * OCR's header as typed. Callers hold the invoice row lock (a retake takes it).
+ */
+function assertNotBeingRead(status: string): void {
+  if (status === 'ocr_pending') {
+    throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'החשבונית עדיין נקראת — נסו שוב בעוד דקה' });
+  }
+}
+
 function linesEditable(status: string, ocrPayload: OcrPayload | null): boolean {
   if (readConsolidatedRaw(ocrPayload) !== null) return false; // cross-matched against its delivery notes
   if (status === 'parsed') return true;
@@ -1971,6 +1989,7 @@ async function editableInvoice(db: Database, restaurantId: string, invoiceId: st
     .limit(1)
     .for('update');
   if (!inv) throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
+  assertNotBeingRead(inv.status);
   const handEntered = isHandEntered(inv.ocrPayload);
   if (readConsolidatedRaw(inv.ocrPayload) !== null) {
     throw appError('PRECONDITION_FAILED', 'invoice.linesLocked', LINES_LOCKED_MSG.consolidated);
