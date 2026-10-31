@@ -4,6 +4,7 @@ import { captureException } from '@restomatch/observability';
 import {
   eq,
   sql,
+  userCredentials,
   users,
   withRestaurant,
   withUser,
@@ -13,7 +14,7 @@ import {
 } from '@restomatch/db';
 import type { AppContext, MemberSession } from './context';
 import { getEntitlements } from './entitlements';
-import { publicErrorMessage, resolveAppError } from './errors';
+import { appError, publicErrorMessage, resolveAppError } from './errors';
 
 const t = initTRPC.context<AppContext>().create({
   transformer: superjson,
@@ -160,7 +161,8 @@ export const financeProcedure = requireRoles(['owner', 'manager', 'bookkeeper'])
  * DESIGN — it does NOT establish a restaurant GUC and runs on the owner/service
  * connection (ctx.adminDb), so it bypasses per-tenant RLS to manage every
  * tenant. Authorized by the users.is_platform_admin flag OR the
- * PLATFORM_ADMIN_EMAILS env allowlist (bootstrap for the first admin).
+ * PLATFORM_ADMIN_EMAILS env allowlist (bootstrap for the first admin), and only
+ * once that login has TOTP enrolled (FORBIDDEN, appCode admin_requires_2fa).
  */
 export const adminProcedure = authedProcedure.use(async ({ ctx, next }) => {
   const conn = ctx.adminDb ?? ctx.db;
@@ -185,6 +187,16 @@ export const adminProcedure = authedProcedure.use(async ({ ctx, next }) => {
   const isAdmin = !!user && (user.isAdmin || allowlisted);
   if (!isAdmin) {
     throw new TRPCError({ code: 'FORBIDDEN', message: 'platform admin only' });
+  }
+  // The console reads and writes every tenant: a stolen password alone must not
+  // open it. Require an enrolled authenticator (TOTP) on the admin's own login.
+  const [cred] = await conn
+    .select({ totpEnabledAt: userCredentials.totpEnabledAt })
+    .from(userCredentials)
+    .where(eq(userCredentials.userId, ctx.session.userId))
+    .limit(1);
+  if (!cred?.totpEnabledAt) {
+    throw appError('FORBIDDEN', 'admin_requires_2fa', 'admin console requires two-step verification (TOTP)');
   }
   // Admin resolvers query cross-tenant on the owner connection.
   return next({ ctx: { ...ctx, db: conn } });

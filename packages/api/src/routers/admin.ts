@@ -10,15 +10,18 @@ import {
   memberships,
   plans,
   restaurants,
+  sql,
+  userCredentials,
   subscriptions,
   usageCounters,
   users,
   type PlanLimits,
 } from '@restomatch/db';
-import { adminProcedure, router } from '../trpc';
+import { adminProcedure, authedProcedure, router } from '../trpc';
 import { recordAudit } from '../audit';
 import { appError } from '../errors';
 import { usagePeriod } from '../entitlements';
+import { FEATURE_KEYS, featureEnabled, type FeatureKey } from '../lib/features';
 
 const PlanKeyEnum = z.enum(['trial', 'basic', 'pro', 'chain']);
 const StatusEnum = z.enum(['trialing', 'active', 'past_due', 'canceled']);
@@ -42,11 +45,59 @@ const OverridesSchema = z.object({
 });
 
 /**
+ * A per-restaurant feature-flag patch (restaurants.settings.features). Keys are
+ * the wave-1 FEATURE_KEYS only: 'all' (the demo tenant's switch) is not
+ * settable here — an unknown key is rejected, never stored.
+ */
+const FeaturePatchSchema = z
+  .record(z.enum(FEATURE_KEYS), z.boolean())
+  .refine((p) => Object.keys(p).length > 0, { message: 'no features to change' });
+
+type StoredFeatures = Partial<Record<FeatureKey | 'all', boolean>>;
+
+function storedFeatures(settings: unknown): StoredFeatures {
+  const f = (settings as { features?: unknown } | null | undefined)?.features;
+  return f && typeof f === 'object' && !Array.isArray(f) ? (f as StoredFeatures) : {};
+}
+
+/** What the console shows for one tenant's flags: what is stored, and what is in effect. */
+function featureState(settings: unknown) {
+  const stored = storedFeatures(settings);
+  return {
+    stored,
+    all: stored.all === true,
+    effective: Object.fromEntries(FEATURE_KEYS.map((k) => [k, featureEnabled(settings, k)])) as Record<
+      FeatureKey,
+      boolean
+    >,
+    /** Turned off for every tenant by the FEATURES_OFF kill-switch. */
+    killed: FEATURE_KEYS.filter((k) => featureEnabled({ features: { [k]: true } }, k) === false),
+  };
+}
+
+/**
  * Internal ops console. Every procedure is adminProcedure — cross-tenant on the
- * owner connection, gated by users.is_platform_admin / PLATFORM_ADMIN_EMAILS.
- * Mutations are audit-logged.
+ * owner connection, gated by users.is_platform_admin / PLATFORM_ADMIN_EMAILS
+ * and an enrolled authenticator. Mutations are audit-logged, and so are reads
+ * of tenant data ('admin.viewed', one row per tenant viewed).
  */
 export const adminRouter = router({
+  /**
+   * Whether the caller's own login has an authenticator (TOTP) enrolled — the
+   * console's precondition (adminProcedure refuses with admin_requires_2fa
+   * without it). /admin asks first so it can show the enrol prompt without a
+   * refused call. Reveals only the caller's own enrolment, nothing cross-tenant.
+   */
+  twoFactorStatus: authedProcedure.query(async ({ ctx }) => {
+    const conn = ctx.adminDb ?? ctx.db;
+    const [cred] = await conn
+      .select({ totpEnabledAt: userCredentials.totpEnabledAt })
+      .from(userCredentials)
+      .where(eq(userCredentials.userId, ctx.session.userId))
+      .limit(1);
+    return { enabled: cred?.totpEnabledAt != null };
+  }),
+
   /** All restaurants with their resolved plan, status, usage, member count. */
   listRestaurants: adminProcedure.query(async ({ ctx }) => {
     const rows = await ctx.db
@@ -80,6 +131,21 @@ export const adminRouter = router({
       .where(and(eq(usageCounters.period, period), eq(usageCounters.metric, 'ocr_scans')));
     const usageMap = new Map(usageRows.map((u) => [u.billingAccountId, u.used]));
 
+    // Each tenant's plan, usage and member count was shown: one access row per
+    // tenant, all or none (a failed insert returns no data and leaves no rows).
+    await ctx.db.transaction(async (tx) => {
+      for (const r of rows) {
+        await recordAudit(tx, {
+          restaurantId: r.id,
+          userId: ctx.session.userId,
+          action: 'admin.viewed',
+          entityType: 'restaurant',
+          entityId: r.id,
+          after: { view: 'list' },
+        });
+      }
+    });
+
     return rows.map((r) => ({
       id: r.id,
       name: r.name,
@@ -104,11 +170,13 @@ export const adminRouter = router({
           businessId: restaurants.businessId,
           createdAt: restaurants.createdAt,
           billingAccountId: restaurants.billingAccountId,
+          settings: restaurants.settings,
         })
         .from(restaurants)
         .where(eq(restaurants.id, input.restaurantId))
         .limit(1);
       if (!r) throw appError('NOT_FOUND', 'admin.notFound', 'restaurant not found');
+      const { settings, ...restaurant } = r;
 
       let subscription: {
         planKey: string;
@@ -143,7 +211,16 @@ export const adminRouter = router({
         .innerJoin(users, eq(users.id, memberships.userId))
         .where(eq(memberships.restaurantId, input.restaurantId));
 
-      return { restaurant: r, subscription, members };
+      await recordAudit(ctx.db, {
+        restaurantId: r.id,
+        userId: ctx.session.userId,
+        action: 'admin.viewed',
+        entityType: 'restaurant',
+        entityId: r.id,
+        after: { view: 'detail' },
+      });
+
+      return { restaurant, subscription, members, features: featureState(settings) };
     }),
 
   /** Assign / change a plan; creates the billing account + subscription as needed. */
@@ -229,10 +306,10 @@ export const adminRouter = router({
           entityType: 'restaurant',
           entityId: r.id,
           before: prior ?? null,
-          after: { planKey: input.planKey, status },
+          after: { planKey: input.planKey, status, trialEndsAt },
         });
 
-        return { billingAccountId, planKey: input.planKey, status };
+        return { billingAccountId, planKey: input.planKey, status, trialEndsAt };
       });
     }),
 
@@ -282,6 +359,48 @@ export const adminRouter = router({
         after: overrides,
       });
       return { ok: true as const };
+    }),
+
+  /**
+   * Turn individual wave-1 features on or off for one tenant
+   * (restaurants.settings.features). MERGES the patch into the stored flags in
+   * one statement (jsonb ||): every other settings key — tolerances, recipes,
+   * the demo's 'all' — and every flag not in the patch stay exactly as they were.
+   */
+  setFeatures: adminProcedure
+    .input(z.object({ restaurantId: z.string().uuid(), features: FeaturePatchSchema }))
+    .mutation(async ({ ctx, input }) => {
+      return ctx.db.transaction(async (tx) => {
+        const [r] = await tx
+          .select({ id: restaurants.id, settings: restaurants.settings })
+          .from(restaurants)
+          .where(eq(restaurants.id, input.restaurantId))
+          .for('update')
+          .limit(1);
+        if (!r) throw appError('NOT_FOUND', 'admin.notFound', 'restaurant not found');
+        const before = storedFeatures(r.settings);
+
+        const [updated] = await tx
+          .update(restaurants)
+          .set({
+            settings: sql`jsonb_set(coalesce(${restaurants.settings}, '{}'::jsonb), '{features}', (case when jsonb_typeof(${restaurants.settings}->'features') = 'object' then ${restaurants.settings}->'features' else '{}'::jsonb end) || ${JSON.stringify(input.features)}::jsonb)`,
+            updatedAt: new Date(),
+          })
+          .where(eq(restaurants.id, r.id))
+          .returning({ settings: restaurants.settings });
+        const after = storedFeatures(updated?.settings);
+
+        await recordAudit(tx, {
+          restaurantId: r.id,
+          userId: ctx.session.userId,
+          action: 'admin.features',
+          entityType: 'restaurant',
+          entityId: r.id,
+          before,
+          after,
+        });
+        return { features: featureState(updated?.settings) };
+      });
     }),
 
   /** Change a member's role within a restaurant. */
@@ -351,10 +470,16 @@ export const adminRouter = router({
   listLeads: adminProcedure
     .input(z.object({ limit: z.number().int().positive().max(200).default(100) }).optional())
     .query(async ({ ctx, input }) => {
-      return ctx.db
+      const rows = await ctx.db
         .select()
         .from(leads)
         .orderBy(desc(leads.createdAt))
         .limit(input?.limit ?? 100);
+      // Leads belong to no tenant and audit_log.restaurant_id is NOT NULL, so this
+      // read is logged as a structured server line instead of an audit row.
+      console.info(
+        JSON.stringify({ audit: 'admin.viewed', entityType: 'leads', userId: ctx.session.userId, count: rows.length }),
+      );
+      return rows;
     }),
 });

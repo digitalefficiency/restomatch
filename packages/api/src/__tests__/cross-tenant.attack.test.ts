@@ -178,6 +178,9 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'admin.setOverrides': 'admin-denial',
   'admin.setMemberRole': 'admin-denial',
   'admin.listLeads': 'admin-denial',
+  'admin.setFeatures': 'admin-denial',
+  'admin.twoFactorStatus':
+    'authedProcedure read of the CALLER\'s own user_credentials.totp_enabled_at only (keyed to ctx.session.userId, no client input) — returns one boolean, no tenant data; lets /admin show the enrol-2FA prompt without a refused admin call.',
   // Phase 5+6 additions
   'settings.get': 'isolation',
   'settings.update': 'isolation',
@@ -1356,6 +1359,16 @@ describe('platform-admin procedures reject a non-admin tenant user', () => {
   });
   it('admin.listLeads → FORBIDDEN', async () => {
     await expect(callerFor(A).admin.listLeads()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+  it('admin.setFeatures → FORBIDDEN (and B\'s flags are untouched)', async () => {
+    await expect(
+      callerFor(A).admin.setFeatures({ restaurantId: B.restaurantId, features: { contracts: true } }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    const [b] = await db
+      .select({ settings: restaurants.settings })
+      .from(restaurants)
+      .where(eq(restaurants.id, B.restaurantId));
+    expect((b!.settings as { features?: { contracts?: boolean } }).features?.contracts).not.toBe(true);
   });
 });
 
