@@ -26,9 +26,16 @@ import {
   validateLead,
 } from '../leadForm.logic';
 
+/** The config with nothing supplied yet — the "pending" state every fact can be in. */
+const UNSET = {
+  a11yCoordinator: { name: null, phone: null, email: null },
+  company: { legalName: null, companyId: null, address: null, privacyContact: null },
+  channels: { whatsapp: null, phone: null, email: null },
+};
+
 describe('lib/contact — channels render only when configured (mkt-06)', () => {
-  it('no env → no channel at all', () => {
-    const c = contactChannels({});
+  it('nothing configured → no channel at all', () => {
+    const c = contactChannels({}, UNSET);
     expect(c).toEqual({ whatsapp: null, phone: null, email: null });
     expect(hasAnyChannel(c)).toBe(false);
   });
@@ -56,27 +63,35 @@ describe('lib/contact — channels render only when configured (mkt-06)', () => 
   });
 
   it('a malformed value is treated as not configured (never a dead link)', () => {
-    const c = contactChannels({
-      NEXT_PUBLIC_CONTACT_WHATSAPP: 'TBD',
-      NEXT_PUBLIC_CONTACT_EMAIL: 'not-an-email',
-    });
+    const c = contactChannels(
+      { NEXT_PUBLIC_CONTACT_WHATSAPP: 'TBD', NEXT_PUBLIC_CONTACT_EMAIL: 'not-an-email' },
+      UNSET,
+    );
     expect(c.whatsapp).toBeNull();
     expect(c.email).toBeNull();
   });
 
-  it('the coordinator is Rom Koren (owner decision); phone and e-mail stay pending until supplied', () => {
-    const c = accessibilityCoordinator({});
-    expect(c.name).toEqual({ he: 'רום קורן', en: 'Rom Koren' });
-    expect(c.phone).toBeNull();
-    expect(c.email).toBeNull();
-    // The deployment env fills a pending fact without a code change.
+  it('the owner-confirmed values (2026-10-31) are the ones configured', () => {
+    expect(accessibilityCoordinator({})).toEqual({
+      name: { he: 'רום קורן', en: 'Rom Koren' },
+      phone: '054-3544245',
+      email: 'info@digitalefficiency.co.il',
+    });
+    const c = contactChannels({});
+    expect(c.whatsapp?.digits).toBe('972543544245');
+    expect(c.phone?.href).toBe('tel:+972543544245');
+    expect(c.email?.href).toBe('mailto:info@digitalefficiency.co.il');
+  });
+
+  it('a pending coordinator fact is null, and the deployment env can fill it without a code change', () => {
+    expect(accessibilityCoordinator({}, UNSET).phone).toBeNull();
     expect(
-      accessibilityCoordinator({ NEXT_PUBLIC_A11Y_COORDINATOR_PHONE: ' 050-1234567 ' }).phone,
+      accessibilityCoordinator({ NEXT_PUBLIC_A11Y_COORDINATOR_PHONE: ' 050-1234567 ' }, UNSET)
+        .phone,
     ).toBe('050-1234567');
   });
 
-  it('no contact value is invented: every pending fact is null in the one config spot', () => {
-    expect(PUBLIC_FACTS.channels).toEqual({ whatsapp: null, phone: null, email: null });
+  it('nothing is invented: the company legal details are still pending (null)', () => {
     expect(PUBLIC_FACTS.company).toEqual({
       legalName: null,
       companyId: null,
@@ -101,8 +116,10 @@ describe('the statement never ships to production with a placeholder', () => {
     },
   };
 
-  it('lists what is still pending', () => {
-    expect(pendingStatementFacts({})).toEqual([
+  it('lists what is still pending: only the company legal name and ח״פ', () => {
+    expect(pendingStatementFacts({})).toEqual(['company.legalName', 'company.companyId']);
+    expect(pendingStatementFacts({}, UNSET)).toEqual([
+      'a11yCoordinator.name',
       'a11yCoordinator.phone',
       'a11yCoordinator.email',
       'company.legalName',
@@ -112,7 +129,12 @@ describe('the statement never ships to production with a placeholder', () => {
   });
 
   it('a production deploy fails while anything is pending', () => {
-    expect(() => assertStatementPublishable('production', {})).toThrow(/a11yCoordinator\.phone/);
+    expect(() => assertStatementPublishable('production', {})).toThrow(
+      /company\.legalName, company\.companyId/,
+    );
+    expect(() => assertStatementPublishable('production', {}, UNSET)).toThrow(
+      /a11yCoordinator\.phone/,
+    );
   });
 
   it('previews and local builds are allowed; production passes once every fact is filled', () => {

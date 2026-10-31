@@ -31,8 +31,8 @@ export const PUBLIC_FACTS: {
 } = {
   a11yCoordinator: {
     name: { he: 'רום קורן', en: 'Rom Koren' },
-    phone: null, // pending from the owner
-    email: null, // pending from the owner
+    phone: '054-3544245', // owner-confirmed 2026-10-31
+    email: 'info@digitalefficiency.co.il', // owner-confirmed 2026-10-31
   },
   company: {
     legalName: null, // pending from the owner
@@ -41,9 +41,9 @@ export const PUBLIC_FACTS: {
     privacyContact: null, // pending from the owner (legal text signing is H-02)
   },
   channels: {
-    whatsapp: null, // pending from the owner
-    phone: null, // pending from the owner
-    email: null, // pending from the owner
+    whatsapp: '054-3544245', // owner-confirmed 2026-10-31
+    phone: '054-3544245', // owner-confirmed 2026-10-31
+    email: 'info@digitalefficiency.co.il', // owner-confirmed 2026-10-31
   },
 };
 
