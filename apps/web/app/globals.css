@@ -1,3 +1,157 @@
+/* @tokens:start — GENERATED from packages/ui-tokens; do not edit by hand.
+   Regenerate: pnpm --filter @restomatch/ui-tokens tokens:css */
+:root {
+  --c-bg: 246 248 247; /* #F6F8F7 */
+  --c-surface: 255 255 255; /* #FFFFFF */
+  --c-surface-2: 238 243 240; /* #EEF3F0 */
+  --c-line: 211 221 215; /* #D3DDD7 */
+  --c-line-strong: 122 139 130; /* #7A8B82 */
+  --c-ink: 15 31 23; /* #0F1F17 */
+  --c-muted: 74 93 83; /* #4A5D53 */
+  --c-subtle: 90 106 98; /* #5A6A62 */
+  --c-primary: 6 107 74; /* #066B4A */
+  --c-on-primary: 255 255 255; /* #FFFFFF */
+  --c-gold: 117 92 0; /* #755C00 */
+  --c-danger: 184 15 42; /* #B80F2A */
+  --c-warn: 166 61 0; /* #A63D00 */
+  --c-info: 26 91 199; /* #1A5BC7 */
+  --c-surface-sunken: 238 243 240; /* #EEF3F0 */
+  --c-line-field: 102 117 109; /* #66756D */
+  --c-on-bold: 255 255 255; /* #FFFFFF */
+  --c-neutral: 74 93 83; /* #4A5D53 */
+  --c-focus: 26 91 199; /* #1A5BC7 */
+  --c-primary-bold: 6 107 74; /* #066B4A */
+  --c-primary-bold-hover: 5 88 61; /* #05583D */
+  --c-primary-subtle: 231 243 237; /* #E7F3ED */
+  --c-primary-subtle-hover: 211 234 223; /* #D3EADF */
+  --c-primary-border-subtle: 169 211 192; /* #A9D3C0 */
+  --c-danger-bold: 184 15 42; /* #B80F2A */
+  --c-danger-bold-hover: 153 12 35; /* #990C23 */
+  --c-danger-subtle: 252 236 239; /* #FCECEF */
+  --c-danger-subtle-hover: 248 218 223; /* #F8DADF */
+  --c-danger-border-subtle: 237 179 189; /* #EDB3BD */
+  --c-warn-bold: 166 61 0; /* #A63D00 */
+  --c-warn-bold-hover: 137 50 0; /* #893200 */
+  --c-warn-subtle: 253 240 231; /* #FDF0E7 */
+  --c-warn-subtle-hover: 249 224 207; /* #F9E0CF */
+  --c-warn-border-subtle: 235 191 159; /* #EBBF9F */
+  --c-gold-bold: 117 92 0; /* #755C00 */
+  --c-gold-bold-hover: 95 74 0; /* #5F4A00 */
+  --c-gold-subtle: 248 242 221; /* #F8F2DD */
+  --c-gold-subtle-hover: 239 230 195; /* #EFE6C3 */
+  --c-gold-border-subtle: 217 199 137; /* #D9C789 */
+  --c-info-bold: 26 91 199; /* #1A5BC7 */
+  --c-info-bold-hover: 21 75 166; /* #154BA6 */
+  --c-info-subtle: 235 242 253; /* #EBF2FD */
+  --c-info-subtle-hover: 217 230 251; /* #D9E6FB */
+  --c-info-border-subtle: 177 202 241; /* #B1CAF1 */
+  --c-neutral-bold: 74 93 83; /* #4A5D53 */
+  --c-neutral-bold-hover: 59 75 67; /* #3B4B43 */
+  --c-neutral-subtle: 238 243 240; /* #EEF3F0 */
+  --c-neutral-subtle-hover: 226 234 229; /* #E2EAE5 */
+  --c-neutral-border-subtle: 211 221 215; /* #D3DDD7 */
+  --c-viz-1: 6 107 74; /* #066B4A */
+  --c-viz-2: 26 91 199; /* #1A5BC7 */
+  --c-viz-3: 117 92 0; /* #755C00 */
+  --c-viz-4: 138 79 191; /* #8A4FBF */
+  --c-viz-5: 0 131 143; /* #00838F */
+  --c-viz-6: 166 61 0; /* #A63D00 */
+  --c-creep-1: 253 240 231; /* #FDF0E7 */
+  --c-on-creep-1: 15 31 23; /* #0F1F17 */
+  --c-creep-2: 244 205 176; /* #F4CDB0 */
+  --c-on-creep-2: 15 31 23; /* #0F1F17 */
+  --c-creep-3: 232 166 122; /* #E8A67A */
+  --c-on-creep-3: 15 31 23; /* #0F1F17 */
+  --c-creep-4: 180 83 26; /* #B4531A */
+  --c-on-creep-4: 255 255 255; /* #FFFFFF */
+  --c-creep-5: 122 45 0; /* #7A2D00 */
+  --c-on-creep-5: 255 255 255; /* #FFFFFF */
+  --scrim: rgba(15,31,23,.48);
+  --dur-micro: 100ms;
+  --dur-short: 150ms;
+  --dur-medium: 240ms;
+  --dur-long: 400ms;
+  --ease-standard: cubic-bezier(0.2,0,0.38,0.9);
+  --ease-enter: cubic-bezier(0,0,0.38,0.9);
+  --ease-exit: cubic-bezier(0.2,0,1,0.9);
+  --shadow-e0: none;
+  --shadow-e1: 0 1px 2px rgba(15,31,23,0.06), 0 8px 24px -12px rgba(15,31,23,0.12);
+  --shadow-e2: 0 8px 16px -4px rgba(15,31,23,.16), 0 0 1px rgba(15,31,23,.24);
+  --shadow-e3: 0 20px 24px -8px rgba(15,31,23,.22), 0 0 1px rgba(15,31,23,.24);
+  --radius-control: 0.5rem;
+  --radius-card: 0.75rem;
+  --radius-overlay: 1rem;
+  --radius-pill: 9999px;
+  --z-content: 0;
+  --z-sticky-header: 10;
+  --z-action-bar: 30;
+  --z-top-bar: 40;
+  --z-bottom-bar: 40;
+  --z-consent: 45;
+  --z-scrim: 50;
+  --z-sheet: 51;
+  --z-snackbar: 60;
+  --z-skip-link: 70;
+  --container-app: 1600px;
+  --container-form: 720px;
+  --container-prose: 70ch;
+  --container-marketing: 1280px;
+  --container-auth: 440px;
+  --focus-width: 2px;
+  --focus-offset: 2px;
+  --fs-caption: 0.75rem;
+  --lh-caption: 1rem;
+  --fs-metric-hero: 2.5rem;
+  --lh-metric-hero: 2.75rem;
+  --row-h: 48px;
+  --control-h: 40px;
+  --cell-inline: 16px;
+}
+@media (min-width: 768px) {
+  :root {
+    --fs-metric-hero: 3.5rem;
+    --lh-metric-hero: 3.75rem;
+  }
+}
+[data-density='compact'] {
+  --row-h: 32px;
+  --control-h: 32px;
+  --cell-inline: 12px;
+}
+[data-density='default'] {
+  --row-h: 48px;
+  --control-h: 40px;
+  --cell-inline: 16px;
+}
+[data-density='touch'] {
+  --row-h: 56px;
+  --control-h: 48px;
+  --cell-inline: 16px;
+}
+/* Touch is the floor on coarse pointers, whatever density a region asks for. */
+@media (pointer: coarse) {
+  :root, [data-density] {
+    --row-h: 56px;
+    --control-h: 48px;
+  }
+}
+/* Field mode (lens-mobile-field §3.6): bigger floor, stronger borders, 3 px focus. */
+[data-mode='field'] {
+  --fs-caption: 0.875rem;
+  --lh-caption: 1.25rem;
+  --c-line-strong: 102 117 109;
+  --focus-width: 3px;
+  --control-h: 48px;
+}
+@media (prefers-contrast: more) {
+  :root {
+    --c-muted: 15 31 23;
+    --c-subtle: 15 31 23;
+    --c-line-strong: 15 31 23;
+  }
+}
+/* @tokens:end */
+
 @tailwind base;
 
 /* Self-hosted variable fonts (SIL OFL; license files next to each font in public/fonts). Served from
@@ -54,68 +208,39 @@
     /* Font stacks consumed by tailwind.config (fontFamily.sans / .mono). */
     --font-heebo: 'Heebo';
     --font-mono: 'JetBrains Mono';
-    /* Design tokens as RGB channels — tailwind.config wraps each in
-       rgb(var(--c-*) / <alpha-value>). Light identity; every text/background
-       pair is WCAG AA (≥4.5:1, ≥3:1 for line-strong). Mirrors packages/ui-tokens. */
-    --c-bg: 246 248 247; /* #F6F8F7 canvas */
-    --c-surface: 255 255 255; /* #FFFFFF cards */
-    --c-surface-2: 238 243 240; /* #EEF3F0 raised / hover / inputs */
-    --c-line: 211 221 215; /* #D3DDD7 dividers (decorative) */
-    --c-line-strong: 122 139 130; /* #7A8B82 control borders */
-    --c-ink: 15 31 23; /* #0F1F17 */
-    --c-muted: 74 93 83; /* #4A5D53 */
-    --c-subtle: 90 106 98; /* #5A6A62 */
-    --c-primary: 6 107 74; /* #066B4A deep money-green */
-    --c-on-primary: 255 255 255;
-    --c-gold: 117 92 0; /* #755C00 money recovered (ΔE 39 from warn) */
-    --c-danger: 184 15 42; /* #B80F2A leak / block */
-    --c-warn: 166 61 0; /* #A63D00 */
-    --c-info: 26 91 199; /* #1A5BC7 */
-    /* Hex aliases for raw CSS / gradients. */
-    --rm-bg: #f6f8f7;
-    --rm-surface: #ffffff;
-    --rm-surface-2: #eef3f0;
-    --rm-line: #d3ddd7;
-    --rm-ink: #0f1f17;
-    --rm-muted: #4a5d53;
-    --rm-subtle: #5a6a62;
-    --rm-primary: #066b4a;
-    --rm-gold: #755c00;
-    --rm-danger: #b80f2a;
+    /* Colour, motion, layer and density variables are the GENERATED token
+       block at the top of this file (packages/ui-tokens). Never hand-write a
+       token value here. */
   }
 
   html {
     /* Direction comes from <html dir> (root layout, per rm_locale). A CSS
        `direction: rtl` here overrode dir="ltr" and laid English out RTL. */
-    /* Calm off-white canvas with a faint money-green wash up top. */
-    background-color: #f6f8f7;
-    background-image: radial-gradient(
-      ellipse 90% 55% at 50% -10%,
-      rgba(6, 107, 74, 0.05),
-      transparent 60%
-    );
-    background-attachment: fixed;
+    /* Calm, flat canvas (design-system-13: no radial washes inside the app). */
+    background-color: rgb(var(--c-bg));
     min-height: 100vh;
   }
 
   body {
-    color: var(--rm-ink);
+    color: rgb(var(--c-ink));
     background: transparent;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
 
-  /* Money figures / KPIs lean on tabular mono — terminal feel. */
+  /* Numerals: tabular + lining figures (Heebo's digits are already equal width;
+     this keeps a fallback font aligned too). `.num` is the v2 name, `.nums` v1. */
+  .num,
   .nums {
-    font-variant-numeric: tabular-nums;
-    font-feature-settings: 'tnum';
+    font-variant-numeric: tabular-nums lining-nums;
+    font-feature-settings: 'tnum', 'lnum';
   }
 
   /* Text selection — money-green tint. */
   ::selection {
-    background: rgba(6, 107, 74, 0.18);
-    color: var(--rm-ink);
+    background: rgb(var(--c-primary) / 0.18);
+    color: rgb(var(--c-ink));
   }
 
   /* Quiet light scrollbar. */
@@ -460,5 +585,111 @@ html[lang='ti'] .font-sans {
     position: absolute;
     inset-inline: 0;
     top: 0;
+  }
+}
+
+/* ───────────── W1-01 design-system foundation v2 (tokens: app/tokens.css) ───────────── */
+
+@layer base {
+  /* One focus indicator everywhere (R-5, WCAG 2.4.7 / 1.4.11): a 2 px #1A5BC7
+     outline with a 2 px offset (3 px in field mode). `!important` so it beats
+     the v1 `focus:outline-none` / `ring-primary/60` / `ring-line` sites without
+     a codemod. Outline (not box-shadow) so forced-colors mode keeps it. */
+  :focus-visible {
+    outline: var(--focus-width, 2px) solid rgb(var(--c-focus)) !important;
+    outline-offset: var(--focus-offset, 2px) !important;
+  }
+  @media (forced-colors: active) {
+    :focus-visible {
+      outline-color: Highlight !important;
+    }
+  }
+
+  /* Focus is never hidden under sticky chrome (WCAG 2.4.11). The shell, the
+     action bars and the cookie banner publish their heights; browsers apply
+     scroll-padding to focus scrolling. */
+  html {
+    scroll-padding-top: calc(var(--rm-header-h, 0px) + 8px);
+    scroll-padding-bottom: calc(
+      var(--rm-bottomnav-h, 0px) + var(--rm-actionbar-h, 0px) + var(--consent-h, 0px) + 8px
+    );
+  }
+
+  /* Coarse pointers: row and list links get the 44 px floor too (a11y-17). */
+  @media (pointer: coarse) {
+    table a,
+    li > a,
+    [data-row-link] {
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+    }
+  }
+}
+
+/* Reduced motion (a11y-15, design-system-15): no decorative animation or
+   transition anywhere. `.motion-essential` (the spinner) is the allow-list. */
+@media (prefers-reduced-motion: reduce) {
+  *:not(.motion-essential),
+  *:not(.motion-essential)::before,
+  *:not(.motion-essential)::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Skeleton shimmer — motion-safe only; reduced motion gets a static fill. */
+@keyframes rm-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .rm-shimmer {
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgb(var(--c-surface) / 0.6) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: rm-shimmer 1.4s var(--ease-standard) infinite;
+  }
+}
+
+/* The T1 hero's ₪ glyph (<Money context="hero">): smaller, lighter, muted. */
+.money-glyph {
+  font-size: 0.55em;
+  font-weight: 600;
+  color: rgb(var(--c-muted));
+}
+
+/* Bottom sheet detents (lib/components/overlay/Sheet). */
+dialog.rm-sheet {
+  max-height: none;
+  max-width: none;
+}
+dialog.rm-sheet::backdrop {
+  background: var(--scrim);
+}
+dialog.rm-dialog::backdrop {
+  background: var(--scrim);
+}
+
+@keyframes rm-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
