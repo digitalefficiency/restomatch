@@ -254,6 +254,8 @@ export const en: Shape<typeof he> = {
     chefTitle: 'Is this the same product?',
     chefSubtitle: 'Invoice lines the system isn’t sure about. Pick the matching product, or leave it for the owner.',
     chefEmptyBody: 'No open questions right now.',
+    chefQuestionBody: 'A line with no SKU. Pick the matching product, or leave it for the owner.',
+    chefNoSuggestions: 'No good suggestion. Leave it for the owner to decide.',
     pendingQuestions: '{count} products waiting for a question: is this the same product?',
     undoLabelName: 'Undo the link of {name}',
   },

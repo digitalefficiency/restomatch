@@ -307,7 +307,11 @@ function MapRow({
           <div className="mt-1 truncate text-ink" lang="he">
             {row.sampleDescription || '—'}
           </div>
-          {isQuestion && <p className="mt-1 text-xs text-muted">{t('mapping.questionBody')}</p>}
+          {isQuestion && (
+            <p className="mt-1 text-xs text-muted">
+              {chef ? t('mapping.chefQuestionBody') : t('mapping.questionBody')}
+            </p>
+          )}
         </div>
         {!chef && (
           <Button
@@ -342,7 +346,9 @@ function MapRow({
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-subtle">{t('mapping.noSuggestions')}</p>
+            <p className="text-sm text-subtle">
+              {chef ? t('mapping.chefNoSuggestions') : t('mapping.noSuggestions')}
+            </p>
           )}
           {chef && (
             <Button variant="ghost" size="sm" className="mt-2" onClick={onSkip}>
