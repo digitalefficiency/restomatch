@@ -54,8 +54,16 @@ const WAITS = {
   /** W1-11: open order writes to the chef (route, nav entry, server: managerProcedure today). */
   chefOrders: 'W1-11 chef order writes (route + nav + server) — not on main + #167',
 } as const;
-/** Flip to true once W1-11's chef ordering is on the tested tree (then step 7b runs). */
-const CHEF_ORDERS_ON_TREE = false;
+/**
+ * Waiting PRs that are on the tested tree: list them in MERGED_ON_MAIN once they merge, or name them in
+ * PILOT_ON_TREE (comma list) to run a lab built from their branch, e.g. PILOT_ON_TREE=w1-06.
+ */
+const MERGED_ON_MAIN: readonly string[] = []; // add 'w1-06' / 'w1-11' as they merge
+const ON_TREE = new Set([...MERGED_ON_MAIN, ...(process.env.PILOT_ON_TREE ?? '').split(',').map((s) => s.trim().toLowerCase())]);
+/** W1-06's photo shrink (#210) → step 5b runs. */
+const UPLOAD_SHRINK_ON_TREE = ON_TREE.has('w1-06');
+/** W1-11's chef ordering → step 7b runs. */
+const CHEF_ORDERS_ON_TREE = ON_TREE.has('w1-11');
 
 /** Stage C re-runs on one long-lived tenant: tag the names so each run's rows are its own. */
 const RUN_ID = process.env.PILOT_RUN_ID ?? 'adhoc';
@@ -321,11 +329,86 @@ test('5 · receiver on the phone: today + late POs → Delivery Check → close'
   expectCleanConsole('receiver', 'receiving');
 });
 
-test.fixme('5b · receiver uploads a 6 MB phone photo of the invoice', async () => {
-  // Waits on: W1-06 image shrink. Then: build a 6 MB JPEG in the test, setInputFiles on the
-  // photo step, expect "Check result"/the ocr_disabled notice (no ANTHROPIC_API_KEY) and the
-  // receiver continuing against the order.
-  void WAITS.uploadShrink;
+/** A real, decodable ~6 MB 4000×3000 JPEG (a phone camera's size), made by the browser. */
+async function sixMegabyteJpeg(page: Page): Promise<Buffer> {
+  const b64 = await page.evaluate(async () => {
+    const c = document.createElement('canvas');
+    c.width = 4000;
+    c.height = 3000;
+    const g = c.getContext('2d')!;
+    const img = g.createImageData(c.width, c.height);
+    let seed = 1; // deterministic noise: JPEG can't compress it away
+    for (let i = 0; i < img.data.length; i += 4) {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      const v = (seed >> 8) & 255;
+      img.data[i] = v;
+      img.data[i + 1] = (v * 7) & 255;
+      img.data[i + 2] = 255 - v;
+      img.data[i + 3] = 255;
+    }
+    g.putImageData(img, 0, 0);
+    let q = 0.5;
+    for (let k = 0; k < 10; k++) {
+      const blob = await new Promise<Blob>((res) => c.toBlob((b) => res(b!), 'image/jpeg', q));
+      if (blob.size > 5.5e6 && blob.size < 7.5e6) {
+        const buf = new Uint8Array(await blob.arrayBuffer());
+        let bin = '';
+        for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+        return btoa(bin);
+      }
+      q = blob.size < 5.5e6 ? q + (1 - q) / 2 : q / 1.3;
+    }
+    return '';
+  });
+  return Buffer.from(b64, 'base64');
+}
+
+test('5b · receiver uploads a 6 MB phone photo of the invoice', async ({}, info) => {
+  test.fixme(!UPLOAD_SHRINK_ON_TREE, WAITS.uploadShrink);
+  // The late order: step 5 received today's, this one is still open on the board.
+  const { orderLateId } = state();
+  expect(orderLateId, "step 4's late order (state file)").toBeTruthy();
+  const page = await as('receiver');
+  await visit(page, 'receiver', '/dashboard/receiving');
+  await page.locator(`a[href*="/dashboard/receiving/${orderLateId}"]`).first().click();
+  await page.waitForURL(new RegExp(`/dashboard/receiving/${orderLateId}`));
+  await page.waitForLoadState('networkidle').catch(() => {});
+  const photo = await sixMegabyteJpeg(page);
+  expect(photo.length, 'test photo is phone-sized (> 5.5 MB)').toBeGreaterThan(5.5e6);
+
+  // Pick the photo; a pick during hydration is lost, so re-pick until the upload request goes out.
+  let upload: import('@playwright/test').Response | undefined;
+  await expect(async () => {
+    const res = page.waitForResponse((r) => r.url().includes('/api/trpc/scans.upload'), { timeout: 8_000 });
+    await page.getByTestId('scan-input').setInputFiles({ name: 'IMG_0001.jpg', mimeType: 'image/jpeg', buffer: photo });
+    upload = await res;
+  }).toPass({ timeout: 45_000 });
+  const sent = upload!.request().postDataBuffer()?.length ?? 0;
+  info.annotations.push({ type: 'upload', description: `${(photo.length / 1e6).toFixed(2)} MB photo → ${(sent / 1e6).toFixed(2)} MB request` });
+  // Shrunk in the browser, before any request: under Vercel's 4.5 MB body limit (base64 included).
+  expect(sent, 'upload request body (bytes)').toBeLessThan(4.5 * 1024 * 1024);
+  expect(sent, 'the photo was re-encoded, not sent as is').toBeLessThan(photo.length);
+  const body = await upload!.text();
+  expect(body, 'the server refused the upload size').not.toMatch(/PAYLOAD_TOO_LARGE|too_big|BAD_REQUEST/);
+  await shot(page, info, '5b-photo-upload');
+
+  if (LAB) {
+    // The lab's scan storage is a placeholder Supabase: the upload stops there (500). What W1-06
+    // promises — shrink first, never fail at the back door on size — is what this step proves.
+    info.annotations.push({ type: 'lab', description: 'scan storage is a placeholder in the lab: upload ends at storage, not on size' });
+    const list = errors.get('receiver') ?? [];
+    for (let i = list.length - 1; i >= 0; i--) if (/status of 500/.test(list[i]!)) list.splice(i, 1);
+  } else {
+    expect(upload!.ok(), `scans.upload ${upload!.status()}`).toBe(true);
+    await expect(main(page)).not.toContainText(/Upload failed|העלאת הסריקה נכשלה/);
+    await page.getByTestId('scan-process').click();
+    // No ANTHROPIC_API_KEY for a non-demo tenant: a calm "not read automatically" notice, then the count.
+    await expect(
+      main(page).getByText(/קריאה אוטומטית אינה פעילה|Automatic reading is off|Delivery check|בדיקת משלוח|Reading|קוראים/i).first(),
+    ).toBeVisible({ timeout: 60_000 });
+    await shot(page, info, '5b-after-upload');
+  }
+  expectCleanConsole('receiver', 'photo upload');
 });
 
 test('6 · receiver home, receiving and invoices show no ₪', async ({}, info) => {

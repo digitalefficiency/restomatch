@@ -30,8 +30,15 @@ against the pilot customer's tenant or the demo tenant. Files: `scripts/pilot-la
   any visited screen, and a demo PO id is not-found or forbidden.
 
 Steps that wait on an unmerged PR are `test.fixme`, with the PR named in `WAITS`
-(`pilot-journey.spec.ts`):
-- 5b (6 MB photo upload) waits on W1-06's image shrink.
+(`pilot-journey.spec.ts`).
+To run one against a lab built from its branch, name it: `PILOT_ON_TREE=w1-06,w1-11
+scripts/pilot-lab.sh`. Once it merges, it goes into `MERGED_ON_MAIN` in the spec:
+- 5b (6 MB photo upload) waits on W1-06's image shrink (#210, merges Wed 4.11 08:00).
+  - In the lab, it proves the shrink: a 6.95 MB phone JPEG goes out as a 1.75 MB request, under
+    Vercel's 4.5 MB body limit, and the server does not refuse it on size. The lab's scan storage
+    is a placeholder, so the upload itself stops there.
+  - In Stage C, it also expects the upload to succeed and the calm "automatic reading is off"
+    notice (no OCR key for a non-demo tenant).
 - 7b (the chef places an order and sees ₪ on the orders screens) waits on W1-11.
 - 8, 9 and 11 (approve/reject/undo, the claims letter, a manual line on an OCR-failed invoice) wait
   on S2's manual invoice lines. Without OCR keys, a fresh tenant gets no invoice lines.
