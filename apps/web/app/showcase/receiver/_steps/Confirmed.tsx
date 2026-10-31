@@ -27,6 +27,8 @@ interface Props {
   children?: React.ReactNode;
   /** Who received the goods (the signed-in person on a shared tablet). */
   receivedBy?: string | null;
+  /** Lines marked "as ordered" in bulk, not counted one by one (T4 note). */
+  bulkCount?: number;
 }
 
 /**
@@ -46,6 +48,7 @@ export function Confirmed({
   amount,
   children,
   receivedBy,
+  bulkCount = 0,
 }: Props) {
   const t = useT(receiving);
   const td = useT(receivingDelivery);
@@ -104,6 +107,11 @@ export function Confirmed({
         {receivedBy ? (
           <p className="text-base text-muted" data-testid="confirmed-received-by">
             {td('delivery.confirmed.receivedBy', { name: receivedBy })}
+          </p>
+        ) : null}
+        {bulkCount > 0 ? (
+          <p className="text-base text-muted" data-testid="confirmed-bulk-note">
+            {td('delivery.confirmed.bulkNote', { count: formatNumber(bulkCount, locale) })}
           </p>
         ) : null}
         {amount ? <div className="text-base text-muted">{amount}</div> : null}

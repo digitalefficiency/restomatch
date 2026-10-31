@@ -121,6 +121,31 @@ async function expectEachOnce(page: Page, names: string[]) {
 
 const REVIEW = { name: 'תוצאת ההצלבה' };
 
+/**
+ * The blind spot check before a bulk "as ordered" (owner decision 20): count
+ * each picked line — as ordered, unless `count` says otherwise. The ordered
+ * qty is not on the screen, so the test reads it from the order.
+ */
+async function passSpotCheck(page: Page, count?: (poLineId: string, ordered: number) => number): Promise<number> {
+  const panel = page.getByTestId('spot-check');
+  await expect(panel).toBeVisible();
+  const rows = panel.getByTestId('spot-line');
+  const n = await rows.count();
+  const sql = e2eSql();
+  try {
+    for (let i = 0; i < n; i += 1) {
+      const id = (await rows.nth(i).getAttribute('data-key'))!.replace(/^po-/, '');
+      const [pl] = await sql<{ q: string }[]>`select qty_ordered::text as q from po_lines where id = ${id}`;
+      const ordered = Number(pl!.q);
+      await rows.nth(i).getByTestId('spot-qty').fill(String(count ? count(id, ordered) : ordered));
+    }
+  } finally {
+    await sql.end();
+  }
+  await panel.getByTestId('spot-confirm').click();
+  return n;
+}
+
 test.beforeEach(async ({ page }) => {
   const url = test.info().project.use.baseURL!;
   await page.context().addCookies([
@@ -210,9 +235,10 @@ test('late OCR: the result lands after the order-only fallback and keeps what wa
 
   // …and closing the receipt still records the hand count for c.
   await page.getByTestId('continue-adjust').click();
-  // Mark every other line "as ordered" in one tap; c keeps the receiver's own count.
+  // Mark every other line "as ordered" (after the blind spot check); c keeps the receiver's own count.
   await expect(page.getByTestId('count-line').filter({ hasText: c!.name })).toHaveAttribute('data-resolved', 'true');
   await page.getByTestId('mark-rest').click();
+  await passSpotCheck(page);
   await expect(page.getByTestId('close-receipt')).toBeEnabled({ timeout: 15_000 });
   await page.getByTestId('close-receipt').click();
   await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 60_000 });

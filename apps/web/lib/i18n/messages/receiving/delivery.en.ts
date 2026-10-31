@@ -47,7 +47,6 @@ export const en: Shape<typeof he> = {
       qtyFor: 'Quantity received — {name} ({unit})',
       decreaseFor: 'Decrease quantity — {name}',
       increaseFor: 'Increase quantity — {name}',
-      arrivedUnordered: 'Arrived · {qty}',
       notArrived: 'Did not arrive',
       outsideTolerance: '{pct} off the order ({ordered}). Confirm this quantity?',
       confirmQty: 'Confirm quantity',
@@ -67,6 +66,13 @@ export const en: Shape<typeof he> = {
       offline: 'No connection — the count is saved on the phone. Close the receipt when you are back online.',
       saveFailed: '{count} lines were not saved',
       unorderedNeeds: 'Mark whether the items that were not ordered arrived',
+      spotTitle: 'Spot check before you confirm',
+      spotHint: 'Count these items and enter what actually arrived.',
+      spotQtyFor: 'Counted — {name} ({unit})',
+      spotConfirm: 'Confirm the check',
+      spotCancel: 'Cancel',
+      spotMismatch: 'The spot check found a difference — count the rest item by item',
+      bulkTag: 'Not counted item by item',
     },
     confirmed: {
       summary: '{lines} lines · {exceptions} gaps',
@@ -76,6 +82,7 @@ export const en: Shape<typeof he> = {
       next: 'Next delivery: {supplier}',
       nextAt: 'Next delivery: {supplier} · {time}',
       receivedBy: 'Received by {name}',
+      bulkNote: '{count} lines marked as ordered — not counted item by item',
     },
     summary: {
       title: 'This receipt is already closed',
@@ -107,6 +114,9 @@ export const en: Shape<typeof he> = {
   },
   pwa: {
     offline: 'Offline · saved on the phone',
-    othersQueued: "{count} of another user's photos are waiting on this device",
+    othersQueued: "{count} of another branch's photos are waiting on this device",
+    capturedByOne: 'Invoice photo uploaded · taken by {names}',
+    capturedByMany: '{count} invoice photos uploaded · taken by {names}',
+    someoneElse: 'another user',
   },
 };

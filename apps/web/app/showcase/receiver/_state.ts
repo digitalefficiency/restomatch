@@ -6,6 +6,7 @@
  */
 
 import { lineTotalIls } from '@/app/dashboard/orders/order-logic';
+import { spotCountMatches, type CountMethod, type CountTolerance } from '@/app/dashboard/receiving/[poId]/_count';
 import type { MockSupplierExpectation, ReconciliationLine, ReconciliationResult } from './_mock';
 
 export type WizardStep =
@@ -43,6 +44,8 @@ export interface LineMark {
   notes?: string;
   /** The receiver resolved this line (✓ as ordered, a count, missing, damaged). */
   touched: boolean;
+  /** How it was resolved: one by one (default), the bulk "as ordered", or a blind spot count. */
+  method?: CountMethod;
 }
 
 export interface WizardState {
@@ -101,8 +104,9 @@ export function reducer(state: WizardState, action: WizardAction): WizardState {
       for (const l of action.result.lines) {
         const key = lineKey(l);
         // Pre-filled with what was ordered; nothing is resolved until the
-        // receiver says so (RCV-01: "invoice = order" is not "arrived").
-        const defaultQty = l.poQty ?? l.invoiceQty ?? 0;
+        // receiver says so (RCV-01: "invoice = order" is not "arrived"). Never
+        // the invoice qty: a count is evidence against the invoice.
+        const defaultQty = l.poQty ?? 0;
         initialMarks[key] = {
           poLineId: l.poLineId,
           invoiceLineIndex: l.invoiceLineIndex,
@@ -140,6 +144,8 @@ export function reducer(state: WizardState, action: WizardAction): WizardState {
             ...action.patch,
             // An explicit `touched: false` is an undo; every other change resolves the line.
             touched: action.patch.touched ?? true,
+            // A hand change is a per-line count unless the patch says otherwise (bulk, spot check, undo).
+            method: action.patch.method ?? 'per_line',
           },
         },
       };
@@ -212,9 +218,10 @@ export function qtyPatch(mark: LineMark, qty: number): Partial<LineMark> {
 
 /**
  * "✓ סמנו את השאר כמו בהזמנה": every unresolved ORDER line becomes "as
- * ordered". Lines that are only on the invoice (not ordered) are left for the
- * receiver — "as ordered" says nothing about them. Returns the new marks and
- * the previous marks of the lines it changed (for the 10 s undo).
+ * ordered", recorded as `bulk_as_ordered` (nobody counted it one by one).
+ * Lines that are only on the invoice (not ordered) are left for the receiver —
+ * "as ordered" says nothing about them. Returns the new marks and the previous
+ * marks of the lines it changed (for the 10 s undo).
  */
 export function markRestAsOrdered(
   result: ReconciliationResult | null,
@@ -227,9 +234,39 @@ export function markRestAsOrdered(
     const prev = marks[key];
     if (!prev) continue;
     previous[key] = prev;
-    next[key] = { ...prev, ...asOrderedPatch(line), touched: true };
+    next[key] = { ...prev, ...asOrderedPatch(line), touched: true, method: 'bulk_as_ordered' };
   }
   return { next, previous };
+}
+
+/**
+ * The spot check before a bulk "as ordered": the receiver counted `counts`
+ * (lineKey → qty) blind. Each is recorded as a `spot_check` count. If every
+ * one agrees with the order (the engine's quantity tolerance), the rest is
+ * marked as ordered in bulk; if any disagrees, NOTHING is bulked — the
+ * receiver counts the rest one by one. `previous` covers every changed line (undo).
+ */
+export function confirmSpotCheck(
+  result: ReconciliationResult | null,
+  marks: Record<string, LineMark>,
+  counts: Record<string, number>,
+  tolerance: CountTolerance | undefined,
+): { next: Record<string, LineMark>; previous: Record<string, LineMark>; mismatched: string[] } {
+  const next = { ...marks };
+  const previous: Record<string, LineMark> = {};
+  const mismatched: string[] = [];
+  for (const line of result?.lines ?? []) {
+    const key = lineKey(line);
+    const qty = counts[key];
+    const prev = marks[key];
+    if (qty === undefined || !prev) continue;
+    previous[key] = prev;
+    next[key] = { ...prev, ...qtyPatch(prev, qty), touched: true, method: 'spot_check' };
+    if (line.poQty === null || !spotCountMatches(qty, line.poQty, tolerance)) mismatched.push(key);
+  }
+  if (mismatched.length > 0) return { next, previous, mismatched };
+  const bulk = markRestAsOrdered(result, next);
+  return { next: bulk.next, previous: { ...bulk.previous, ...previous }, mismatched };
 }
 
 /**

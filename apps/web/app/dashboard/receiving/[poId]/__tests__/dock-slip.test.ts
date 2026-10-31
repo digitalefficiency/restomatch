@@ -70,6 +70,17 @@ describe('dock slip — issues from what the receiver recorded', () => {
     const l = line({ poQty: 10, invoiceQty: 10 });
     expect(lineIssues(l, mark({ qtyReceived: 8 }))).toEqual(['short', 'billedNotReceived']);
   });
+  it('a line nobody counted takes NOTHING from the invoice: no short, no billed-not-received, no received qty', () => {
+    // Billed 10 of an order of 15: before, the invoice stood in for the count.
+    const billedShort = line({ poQty: 15, invoiceQty: 10 });
+    expect(lineIssues(billedShort, undefined)).toEqual([]);
+    // An unresolved line pre-filled with the order is not "received" either.
+    const overBilled = line({ poQty: 15, invoiceQty: 20 });
+    expect(lineIssues(overBilled, mark({ qtyReceived: 15, touched: false }))).toEqual([]);
+    const [row] = buildSlipLines([overBilled], { [lineKey(overBilled)]: mark({ qtyReceived: 15, touched: false }) }, [engine({})]);
+    expect(row!.received).toBeNull();
+  });
+
   it('a possible duplicate alone is enough for a slip', () => {
     expect(needsSlip([], '1234')).toBe(true);
   });

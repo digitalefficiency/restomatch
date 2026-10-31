@@ -53,7 +53,6 @@ export const he = {
       qtyFor: 'כמות שהתקבלה — {name} ({unit})',
       decreaseFor: 'הפחתת כמות — {name}',
       increaseFor: 'הוספת כמות — {name}',
-      arrivedUnordered: 'הגיע · {qty}',
       notArrived: 'לא הגיע',
       outsideTolerance: 'שונה ב־{pct} מההזמנה ({ordered}). לאשר את הכמות?',
       confirmQty: 'אישור הכמות',
@@ -73,6 +72,13 @@ export const he = {
       offline: 'אין חיבור — הספירה שמורה בטלפון. אפשר לסגור את קבלת הסחורה כשהחיבור יחזור.',
       saveFailed: 'שמירת {count} שורות נכשלה',
       unorderedNeeds: 'סמנו אם הפריטים שלא הוזמנו הגיעו',
+      spotTitle: 'בדיקה מדגמית לפני האישור',
+      spotHint: 'ספרו את הפריטים האלה ורשמו כמה הגיע בפועל.',
+      spotQtyFor: 'כמות שנספרה — {name} ({unit})',
+      spotConfirm: 'אישור הבדיקה',
+      spotCancel: 'ביטול',
+      spotMismatch: 'נמצא פער בבדיקה המדגמית — ספרו את השאר פריט-פריט',
+      bulkTag: 'לא נספר פריט-פריט',
     },
     confirmed: {
       summary: '{lines} שורות · {exceptions} פערים',
@@ -82,6 +88,7 @@ export const he = {
       next: 'המשלוח הבא: {supplier}',
       nextAt: 'המשלוח הבא: {supplier} · {time}',
       receivedBy: 'התקבל ע״י {name}',
+      bulkNote: '{count} שורות סומנו כמו בהזמנה — לא נספרו פריט-פריט',
     },
     summary: {
       title: 'קבלת הסחורה כבר נסגרה',
@@ -113,6 +120,9 @@ export const he = {
   },
   pwa: {
     offline: 'אין חיבור · נשמר בטלפון',
-    othersQueued: '{count} צילומים של משתמש אחר ממתינים במכשיר',
+    othersQueued: '{count} צילומים של סניף אחר ממתינים במכשיר',
+    capturedByOne: 'הועלה צילום חשבונית · צולם על ידי {names}',
+    capturedByMany: 'הועלו {count} צילומי חשבונית · צולמו על ידי {names}',
+    someoneElse: 'משתמש אחר',
   },
 };

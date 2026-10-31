@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { LineMark } from '@/app/showcase/receiver/_state';
-import { isNetworkError } from '@/lib/pwa/offlineQueue';
+import { isTransientFailure } from '@/lib/pwa/offlineQueue';
+import { grLineForMark } from './_adapters';
+import { grLineIsCounted } from './_count';
 import {
   createLineOutbox,
   localStorageOutbox,
@@ -14,22 +16,14 @@ import {
 /** How often queued (offline) line saves are retried while the wizard is open. */
 const RETRY_EVERY_MS = 15_000;
 
-/** The full gr_line row for a mark. An unresolved line is the fresh row (nothing counted). */
+/** The full gr_line row for a mark (through the count model). An unresolved line is the fresh row. */
 export function payloadFor(grLineId: string, mark: LineMark): GrLinePayload {
-  if (!mark.touched) return { grLineId, qtyReceived: 0, qtyRejected: 0, condition: 'ok' };
-  return {
-    grLineId,
-    qtyReceived: mark.qtyReceived,
-    qtyRejected: mark.qtyRejected,
-    ...(mark.rejectReason ? { rejectReason: mark.rejectReason } : {}),
-    condition: mark.condition,
-    ...(mark.notes ? { conditionNotes: mark.notes } : {}),
-  };
+  return { grLineId, ...grLineForMark(mark) };
 }
 
 /** Is this unsent payload a resolved line (vs a reset to "not counted")? */
 export function payloadIsCounted(p: GrLinePayload): boolean {
-  return p.qtyReceived > 0 || p.qtyRejected > 0 || Boolean(p.rejectReason) || p.condition === 'damaged';
+  return grLineIsCounted({ ...p, condition: p.condition ?? 'ok' });
 }
 
 /**
@@ -49,7 +43,8 @@ export function useLineSaves(
   if (!boxRef.current) {
     const box: LineOutbox = createLineOutbox({
       send: (p) => sendRef.current(p),
-      isNetworkError,
+      // No network, or signed out mid-count (401): kept on the phone, retried — never "failed".
+      isNetworkError: isTransientFailure,
       storage: typeof window === 'undefined' ? undefined : localStorageOutbox(storageKey),
       onChange: (s) => {
         setStates(s);

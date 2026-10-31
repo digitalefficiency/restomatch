@@ -24,7 +24,8 @@ import { isReceiverLocale } from '@/lib/i18n/config';
 import type { UploadedScan } from '@/lib/supabase/client';
 import { ingest } from '@/lib/i18n/messages/ingest';
 import { SYNCED_EVENT, enqueuePhoto, idbAvailable, isNetworkError, type SyncedPhotoDetail } from '@/lib/pwa/offlineQueue';
-import { adaptReconciliation, keepAdjusted, type PoLineRow, type ReceiptLineRow } from './_adapters';
+import { adaptReconciliation, keepAdjusted, markFromCount, type PoLineRow, type ReceiptLineRow } from './_adapters';
+import { fromGrLine } from './_count';
 import { localizeInvoiceLines, localizePoLines, localizeReceiptLines, type LocalNames } from './_localize';
 import { receivingErrorText as errorText } from './_errors';
 import { pollInvoiceUntilRead } from './_poll';
@@ -299,6 +300,8 @@ export function ReceivingWizard({
           supplierName: po.supplierName,
           mimeType: file.type || 'image/jpeg',
           blob: file,
+          // Shared tablet: a colleague may upload it later — "צולם על ידי".
+          capturedByName: receiverName ?? null,
         });
         return { invoiceId: `queued-${clientUploadId}`, publicUrl: '', scanRouteUrl: '', storagePath: '', mimeType: file.type };
       };
@@ -490,15 +493,11 @@ export function ReceivingWizard({
       const key = keyById.get(p.grLineId);
       const m = key ? out[key] : undefined;
       if (!key || !m) continue;
-      const counted = payloadIsCounted(p);
-      out[key] = {
-        ...m,
-        qtyReceived: counted ? p.qtyReceived : m.qtyReceived,
-        qtyRejected: p.qtyRejected,
-        condition: p.condition ?? 'ok',
-        rejectReason: p.rejectReason ?? null,
-        touched: counted,
-      };
+      // Through the count model: a reset is "not counted", a missing line stays missing,
+      // and the method (bulk / spot check / one by one) comes back with it.
+      out[key] = payloadIsCounted(p)
+        ? markFromCount(m, fromGrLine(p, null), m.qtyReceived, p.conditionNotes ?? null)
+        : { ...m, touched: false };
       adjustedKeysRef.current.add(key);
     }
     return out;
@@ -600,7 +599,13 @@ export function ReceivingWizard({
     const existing = marksRef.current[key];
     if (!existing) return;
     // An explicit `touched: false` is an undo / an unconfirmed weight; anything else resolves the line.
-    const nextMark: LineMark = { ...existing, ...patch, touched: patch.touched ?? true };
+    const nextMark: LineMark = {
+      ...existing,
+      ...patch,
+      touched: patch.touched ?? true,
+      // A hand change is a per-line count unless the patch says how (bulk, spot check, undo).
+      method: patch.method ?? 'per_line',
+    };
     adjustedKeysRef.current.add(key);
     setMarks({ ...marksRef.current, [key]: nextMark });
     setFooterError(null);
@@ -866,6 +871,7 @@ export function ReceivingWizard({
           invoiceHref={invoiceId ? `/dashboard/invoices/${invoiceId}` : null}
           amount={showMoney && exceptions > 0 && !dockSlipOn ? td('delivery.confirmed.amountPending') : null}
           receivedBy={receiverName}
+          bulkCount={Object.values(marks).filter((m) => m.touched && m.method === 'bulk_as_ordered').length}
           resetLabel={next?.label ?? t('steps.confirmed.backToInbox')}
           onReset={() => router.push(next ? `/dashboard/receiving/${next.poId}` : '/dashboard/receiving')}
         >

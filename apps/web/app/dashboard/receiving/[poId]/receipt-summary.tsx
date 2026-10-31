@@ -58,7 +58,8 @@ export function ReceiptSummary({
         {result.lines
           .filter((l) => l.poLineId !== null)
           .map((l) => {
-            const m = marks[lineKey(l)];
+            // Only a counted line has a received qty (an unresolved mark merely pre-fills the editor).
+            const m = marks[lineKey(l)]?.touched ? marks[lineKey(l)] : undefined;
             const missing = m?.rejectReason === 'missing';
             return (
               <li key={lineKey(l)} className="flex items-start justify-between gap-3 px-4 py-3" data-testid="receipt-summary-line">
@@ -71,6 +72,11 @@ export function ReceiptSummary({
                 <p className="shrink-0 text-end text-lg font-bold tabular-nums text-ink">
                   {missing ? td('delivery.count.missingTag') : m ? td('delivery.count.received', { qty: qty(m.qtyReceived, l.poUnit) }) : '—'}
                   {m?.condition === 'damaged' ? <span className="block text-sm text-warn">{td('delivery.count.damagedTag')}</span> : null}
+                  {m?.method === 'bulk_as_ordered' ? (
+                    <span className="block text-sm font-normal text-muted" data-testid="summary-bulk-tag">
+                      {td('delivery.count.bulkTag')}
+                    </span>
+                  ) : null}
                 </p>
               </li>
             );
