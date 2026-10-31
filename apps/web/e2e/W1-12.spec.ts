@@ -81,7 +81,14 @@ test.describe('accessibility statement', () => {
       await expect(page.getByRole('heading', { name: m.a11y.gapsTitle })).toBeVisible();
       const coordinator = page.getByTestId('a11y-coordinator');
       await expect(coordinator).toContainText(m.a11y.sla);
-      // Owner decision: the coordinator is Rom Koren; pending phone / e-mail show as marked placeholders.
+      // Operator: the legal name alone — no company number (owner decision) and no placeholder.
+      const operator = page.getByTestId('a11y-operator');
+      await expect(operator).toHaveText(
+        locale === 'he' ? 'דיגיטל אפישנסי בע״מ' : 'Digital Efficiency Ltd.',
+      );
+      await expect(page.locator('[data-placeholder]')).toHaveCount(0);
+      expect(await page.locator('main').innerText()).not.toMatch(/\d{9}/);
+      // Owner decision: the coordinator is Rom Koren, with phone and e-mail.
       await expect(coordinator).toContainText(locale === 'he' ? 'רום קורן' : 'Rom Koren');
       // Name / phone / e-mail are present — either the owner's values or marked placeholders.
       await expect(coordinator.locator('dd')).toHaveCount(3);

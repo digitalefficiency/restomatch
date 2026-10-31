@@ -22,7 +22,7 @@ export const PUBLIC_FACTS: {
   a11yCoordinator: { name: Localized | null; phone: string | null; email: string | null };
   company: {
     legalName: Localized | null;
-    /** ח״פ */
+    /** ח״פ. Optional: never required to publish, never shown when null. */
     companyId: string | null;
     address: Localized | null;
     privacyContact: string | null;
@@ -38,9 +38,9 @@ export const PUBLIC_FACTS: {
     // Owner-supplied 2026-10-31. The Hebrew name is owner-confirmed; the English form is the
     // orchestrator's transliteration, pending owner confirmation.
     legalName: { he: 'דיגיטל אפישנסי בע״מ', en: 'Digital Efficiency Ltd.' },
-    // Owner-supplied 2026-10-31, being re-verified with the owner: a בע״מ registration number
-    // normally starts with 51, and this one has the shape of a personal ID. Correct it here.
-    companyId: '318163235',
+    // Optional. Owner decision 2026-10-31: publish no company number for now. While it is null
+    // the pages show the legal name alone, with no number and no placeholder.
+    companyId: null,
     address: null, // pending from the owner
     privacyContact: null, // pending from the owner (legal text signing is H-02)
   },
@@ -140,9 +140,24 @@ export function accessibilityCoordinator(
   };
 }
 
-/** The operator named on the statement: legal name + ח״פ. */
+/** The operator named on the statement: legal name, plus the ח״פ only when one is configured. */
 export function companyDetails(facts = PUBLIC_FACTS) {
   return { legalName: facts.company.legalName, companyId: clean(facts.company.companyId) };
+}
+
+/**
+ * The operator line on the statement, or null while the legal name is pending
+ * (then the page shows a marked placeholder). The company number is appended
+ * only when configured — with none, no number and no placeholder appear.
+ */
+export function operatorText(
+  locale: 'he' | 'en',
+  formatId: (id: string) => string,
+  facts = PUBLIC_FACTS,
+): string | null {
+  const { legalName, companyId } = companyDetails(facts);
+  if (!legalName) return null;
+  return companyId ? `${legalName[locale]} · ${formatId(companyId)}` : legalName[locale];
 }
 
 /** Facts the accessibility statement shows that are still placeholders. */
@@ -156,8 +171,8 @@ export function pendingStatementFacts(
   if (!c.name) pending.push('a11yCoordinator.name');
   if (!c.phone) pending.push('a11yCoordinator.phone');
   if (!c.email) pending.push('a11yCoordinator.email');
+  // The company number is optional (owner decision 2026-10-31), so it never blocks publishing.
   if (!co.legalName) pending.push('company.legalName');
-  if (!co.companyId) pending.push('company.companyId');
   return pending;
 }
 

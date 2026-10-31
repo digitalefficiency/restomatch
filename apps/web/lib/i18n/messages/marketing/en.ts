@@ -184,7 +184,7 @@ export const en: Shape<typeof he> = {
       'We want RestoMatch to work for everyone who works in a restaurant and everyone who visits this site, including people with disabilities. We are making the site and the product accessible under the Israeli Equal Rights for Persons with Disabilities (Service Accessibility Adjustments) Regulations, 5773-2013.',
     operatorLabel: 'Operated by',
     companyId: 'Company no. {id}',
-    operatorPlaceholder: '[Legal company name and company number]',
+    operatorPlaceholder: '[Legal company name]',
     levelTitle: 'Conformance level',
     levelBody: 'Our target: Israeli Standard IS 5568 at level AA, and WCAG 2.2 at level AA.',
     levelStatus:
