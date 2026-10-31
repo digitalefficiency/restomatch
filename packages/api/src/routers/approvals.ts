@@ -550,6 +550,9 @@ export const approvalsRouter = router({
           expectedStatus: input.expectedStatus,
           channel: 'desk',
         });
+        // After the CAS (a stale card still gets its CONFLICT), still inside the
+        // transaction: no owner connection → INTERNAL, and the escalation rolls back.
+        escalationReader(ctx);
         await notifyOwnersOfEscalation(tx, ctx, row, input.note ?? null, auditId);
         return updated;
       }),
@@ -875,6 +878,19 @@ export function approvalsGoLink(restaurantId: string, invoiceId: string | null, 
   return `${base}/dashboard/go?r=${encodeURIComponent(restaurantId)}&to=${encodeURIComponent(to)}`;
 }
 
+/** Thrown (INTERNAL) when the owner connection is missing: an escalation must never reach nobody. */
+export const ESCALATION_NO_READER = 'approvals.escalationNoReader';
+
+/**
+ * The connection that may read the owners' addresses. Never the tenant
+ * connection: there `users` is self-only, so it would find only the decider
+ * (who is skipped) and the escalation would silently reach nobody.
+ */
+function escalationReader(ctx: Ctx): Database {
+  if (!ctx.adminDb) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: ESCALATION_NO_READER });
+  return ctx.adminDb;
+}
+
 /**
  * One outbox row per owner, to a concrete address (never a `role:` target),
  * with the ₪ and the supplier. The dispatcher applies the quiet hours; nothing
@@ -889,13 +905,14 @@ async function notifyOwnersOfEscalation(
   note: string | null,
   auditId: string,
 ): Promise<void> {
+  const adminDb = escalationReader(ctx);
   await inSavepoint(tx, 'escalation notification', async (sp) => {
     // The owners' addresses live in `users`, which the tenant (RLS) connection
     // reads self-only — a manager would find no owner at all. Read them on the
     // owner connection (as dsr.ts does), filtered to THIS session's restaurant
     // only; the outbox insert itself stays on the tenant transaction.
     // INTERIM(G-06): notify() resolves the audience.
-    const owners = await recipientsForRestaurant(ctx.adminDb ?? sp, ctx.session.restaurantId, ['owner']);
+    const owners = await recipientsForRestaurant(adminDb, ctx.session.restaurantId, ['owner']);
     const link = approvalsGoLink(ctx.session.restaurantId, row.invoiceId);
     const supplier = row.supplierName ?? 'ספק';
     const amount = row.claimAgorot > 0 ? formatIlsAgorot(row.claimAgorot, { maximumFractionDigits: 2 }) : null;

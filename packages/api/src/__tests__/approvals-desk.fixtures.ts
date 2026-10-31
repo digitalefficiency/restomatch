@@ -35,7 +35,8 @@ export async function seedDesk(db: Database, tag: string): Promise<Desk> {
 }
 
 export function callerAs(db: Database, T: Desk, role: UserRole, userId = T.users[role]) {
-  const ctx: AppContext = { db, session: { userId, restaurantId: T.restaurantId, role } };
+  // The web passes the owner connection as adminDb (apps/web/lib/trpc/server.ts).
+  const ctx: AppContext = { db, adminDb: db, session: { userId, restaurantId: T.restaurantId, role } };
   return appRouter.createCaller(ctx);
 }
 

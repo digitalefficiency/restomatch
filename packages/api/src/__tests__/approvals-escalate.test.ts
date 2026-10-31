@@ -5,10 +5,12 @@
  * the escalator keeps seeing the row as "waiting on the owner".
  */
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { and, auditLog, createDb, eq, ne, memberships, notificationsOutbox, sql, testDbUrl, users } from '@restomatch/db';
+import { and, auditLog, createDb, discrepancies, eq, ne, memberships, notificationsOutbox, sql, testDbUrl, users } from '@restomatch/db';
 import { resetDb } from './fixtures';
 import { callerAs, seedDesk, type Desk } from './approvals-desk.fixtures';
-import { approvalsGoLink } from '../routers/approvals';
+import { approvalsGoLink, ESCALATION_NO_READER } from '../routers/approvals';
+import { appRouter } from '../index';
+import type { AppContext } from '../context';
 
 const db = createDb(testDbUrl());
 let T: Desk;
@@ -86,5 +88,14 @@ describe('approvals.escalate', () => {
     await callerAs(db, T, 'owner').approvals.escalate({ discrepancyId: T.discrepancyId });
     const rows = await db.select().from(notificationsOutbox).where(and(eq(notificationsOutbox.restaurantId, T.restaurantId), eq(notificationsOutbox.relatedEntityType, 'discrepancy')));
     expect(rows).toHaveLength(0);
+  });
+
+  it('without the owner connection (adminDb) the escalation fails loudly and nothing changes', async () => {
+    const ctx: AppContext = { db, session: { userId: T.users.manager, restaurantId: T.restaurantId, role: 'manager' } };
+    const err = await appRouter.createCaller(ctx).approvals.escalate({ discrepancyId: T.discrepancyId }).catch((e) => e);
+    expect(err).toMatchObject({ code: 'INTERNAL_SERVER_ERROR', message: ESCALATION_NO_READER });
+    const [d] = await db.select().from(discrepancies).where(eq(discrepancies.id, T.discrepancyId));
+    expect(d!.resolutionStatus).toBe('open');
+    expect(await db.select().from(auditLog).where(eq(auditLog.action, 'discrepancy.escalated'))).toHaveLength(0);
   });
 });

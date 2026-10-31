@@ -120,7 +120,8 @@ async function seed(): Promise<Scenario> {
 }
 
 function caller(session: { userId: string; restaurantId: string; role: 'owner' | 'manager' | 'bookkeeper' }) {
-  const ctx: AppContext = { db, session };
+  // adminDb: the owner connection the web passes (escalation reads the owners' addresses on it).
+  const ctx: AppContext = { db, adminDb: db, session };
   return appRouter.createCaller(ctx);
 }
 
