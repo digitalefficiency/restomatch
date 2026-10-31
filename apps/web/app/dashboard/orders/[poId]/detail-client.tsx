@@ -5,7 +5,7 @@ import { UnitText } from '@/lib/components/UnitText';
 import { useRouter } from 'next/navigation';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
-import { Ban, Copy, Pencil, Repeat, Send, Trash2, X } from 'lucide-react';
+import { Ban, Copy, PackageCheck, Pencil, Repeat, Send, Trash2, X } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
 import {
   Button,
@@ -370,6 +370,12 @@ export function OrderDetail({
                   </Button>
                 </>
               )}
+              {/* The primary follows the state (§5.5): a sent order's next step is receiving it. */}
+              {(po.status === 'sent' || po.status === 'confirmed') && data.receiptStatus !== 'completed' ? (
+                <LinkButton href={`/dashboard/receiving/${po.id}`} className="min-h-12" data-testid="detail-receive">
+                  <PackageCheck className="h-4 w-4" aria-hidden="true" /> {t('w2.primary.receive')}
+                </LinkButton>
+              ) : null}
               {canReorder ? (
                 <LinkButton href={`/dashboard/orders/new?from=${po.id}`} variant="secondary" className="min-h-12" data-testid="order-again">
                   <Repeat className="h-4 w-4" aria-hidden="true" /> {t('detail.reorder')}

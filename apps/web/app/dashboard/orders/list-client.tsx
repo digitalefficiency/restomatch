@@ -10,6 +10,10 @@ import { useT } from '@/lib/i18n/client';
 import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 import { OrdersTable, type OrderStatus } from './orders-table';
 import { matchesOrderSearch } from './order-logic';
+import { sumVisibleAgorot } from './w2-logic';
+import { useLocale } from '@/lib/i18n/client';
+import { formatNumber } from '@/lib/i18n/format';
+import { formatIls } from '@/lib/money';
 
 type Order = inferRouterOutputs<AppRouter>['orders']['list'][number];
 type StatusFilter = 'all' | OrderStatus | 'received';
@@ -31,7 +35,16 @@ function queryOf(f: StatusFilter): { status?: OrderStatus; delivery?: 'awaiting'
   return { status: f };
 }
 
-export function OrdersList({ initial, canEdit }: { initial: Order[]; canEdit: boolean }) {
+export function OrdersList({
+  initial,
+  canEdit,
+  showMoney = true,
+}: {
+  initial: Order[];
+  canEdit: boolean;
+  /** False for the receiver: no ₪ anywhere on the list (decision 6). */
+  showMoney?: boolean;
+}) {
   const t = useT(ordersNs);
   const [status, setStatus] = useState<StatusFilter>('all');
   // Pages past the first, fetched by offset (orders.list caps `limit` at 100, so
@@ -144,12 +157,27 @@ export function OrdersList({ initial, canEdit }: { initial: Order[]; canEdit: bo
         />
       ) : (
         <div className={cn('transition-opacity', q.isFetching && !q.isLoading && 'opacity-70')}>
-          <OrdersTable orders={orders} canReorder={canEdit} />
+          <OrdersTable orders={orders} canReorder={canEdit} showMoney={showMoney} />
+          {showMoney ? <VisibleSum orders={orders} /> : null}
         </div>
       )}
 
       {moreError ? <ErrorNotice message={t('list.error')} /> : null}
       <LoadMore onClick={loadMore} loading={loadingMore || q.isFetching} hasMore={hasMore} />
     </div>
+  );
+}
+
+/** Σ of exactly the rows on screen (DoD-4: every visible total equals its visible rows). */
+function VisibleSum({ orders }: { orders: Order[] }) {
+  const t = useT(ordersNs);
+  const locale = useLocale();
+  const { agorot, counted } = sumVisibleAgorot(orders);
+  if (counted === 0) return null;
+  return (
+    <p className="mt-2 flex justify-end gap-3 px-1 text-sm font-semibold text-ink" data-testid="orders-sum">
+      <span>{t('w2.sum', { count: formatNumber(counted, locale) })}</span>
+      <span className="tabular-nums">{formatIls(agorot / 100, { locale, maximumFractionDigits: 2 })}</span>
+    </p>
   );
 }

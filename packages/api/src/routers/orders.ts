@@ -1118,7 +1118,10 @@ export const ordersRouter = router({
       restaurantId: ctx.session.restaurantId,
       userId: ctx.session.userId ?? null,
     });
-    return forRole(ctx.session.role, board);
+    // The platform WhatsApp is plan-gated (until H-05); without it, "מהוואטסאפ שלי" is the default.
+    const ent = await getEntitlements(ctx.db, ctx.session.restaurantId);
+    const platformWhatsapp = ent.active && ent.features.includes('whatsapp_alerts');
+    return forRole(ctx.session.role, { ...board, platformWhatsapp });
   }),
 
   /** The caller's open server draft for a supplier (§5.7), or null. */
@@ -1162,9 +1165,10 @@ export const ordersRouter = router({
       if (input.lines.some((l) => l.productId)) {
         await assertProductsOwned(ctx.db, restaurantId, input.lines.flatMap((l) => (l.productId ? [l.productId] : [])));
       }
+      // No picked day → the schedule's day (as createDraft derives it), else none.
       const expectedDeliveryAt = input.deliveryDate
         ? deliveryFromLocalDate(input.deliveryDate, new Date(), await restaurantTz(ctx.db, restaurantId))
-        : null;
+        : ((await deriveForSupplier(ctx.db, restaurantId, input.supplierId, new Date()))?.expectedDeliveryAt ?? null);
       return saveServerDraft(ctx.db, {
         restaurantId,
         userId: ctx.session.userId,

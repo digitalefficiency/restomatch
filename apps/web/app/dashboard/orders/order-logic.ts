@@ -66,7 +66,8 @@ export function addOrMerge<T extends DraftLineLike>(
   if (idx >= 0) {
     const copy = lines.slice();
     const cur = copy[idx]!;
-    copy[idx] = { ...cur, qty: cur.qty + (next.qty || 1) };
+    // W2-06 (orders-01): never invent a qty — an empty add (0) adds nothing.
+    copy[idx] = { ...cur, qty: cur.qty + (next.qty || 0) };
     return { lines: copy, merged: true };
   }
   return { lines: [...lines, { ...next, key: makeKey() } as T], merged: false };
