@@ -10,7 +10,8 @@ const line = (over: Partial<LeakBreakdownLine> = {}): LeakBreakdownLine => ({
   discrepancyId: over.discrepancyId ?? `d-${Math.random()}`,
   type: 'PRICE_HIGHER',
   severity: 'warn',
-  resolutionStatus: 'open',
+  // Decided (approved to claim) unless a test says otherwise — only decided lines reach a letter.
+  resolutionStatus: 'accepted',
   deltaAmount: 100,
   expected: 139,
   actual: 149,
@@ -71,14 +72,42 @@ describe('claim letters: one per supplier (leaks-07)', () => {
     expect(l!.claimIds).toHaveLength(1);
   });
 
-  it('never prints a tracked line twice: a claimed month line stays before payment and carries its claim', () => {
+  it('never prints a tracked line twice: a claimed month line is the CLAIM’s line, before payment while unpaid', () => {
     const inv = invoice({ invoiceId: 'inv-a', lines: [line({ discrepancyId: 'd-a' })] });
     const c = claim({ discrepancyId: 'd-a', invoiceId: 'inv-a', discrepancyType: 'PRICE_HIGHER', productName: 'אנטריקוט', outstandingAgorot: 10000 });
     const { letters } = buildLetters({ month: [inv], tracked: [c] });
     expect(letters[0]!.beforePayment).toHaveLength(1);
     expect(letters[0]!.forCredit).toHaveLength(0);
     expect(letters[0]!.beforePayment[0]!.claimId).toBe(c.id);
+    expect(letters[0]!.beforePayment[0]!.key).toBe(c.id);
     expect(letters[0]!.total).toBe(100);
+  });
+
+  it('dedupes by discrepancy id: a line with ANY live claim is never a month line — a written-off claim gives it back', () => {
+    const inv = invoice({ invoiceId: 'inv-a', lines: [line({ discrepancyId: 'd-a' })] });
+    for (const status of ['acknowledged', 'credited', 'disputed', 'recovered']) {
+      const { letters } = buildLetters({ month: [inv], tracked: [claim({ discrepancyId: 'd-a', status, outstandingAgorot: 10000 })] });
+      expect(letters, status).toHaveLength(0);
+    }
+    const back = buildLetters({ month: [inv], tracked: [claim({ discrepancyId: 'd-a', status: 'written_off', outstandingAgorot: 0 })] });
+    expect(back.letters[0]!.beforePayment.map((l) => l.key)).toEqual(['d-a']);
+  });
+
+  it('undecided lines (open / escalated) are never addressed to a supplier — they come back as a "decide" count', () => {
+    const inv = invoice({
+      invoiceId: 'inv-a',
+      leakIls: 160,
+      lines: [
+        line({ discrepancyId: 'o', resolutionStatus: 'open', deltaAmount: 50 }),
+        line({ discrepancyId: 'e', resolutionStatus: 'escalated', deltaAmount: 10 }),
+        line({ discrepancyId: 'a', resolutionStatus: 'accepted', deltaAmount: 100 }),
+      ],
+    });
+    const { letters, undecided } = buildLetters({ month: [inv], tracked: [] });
+    expect(letters[0]!.beforePayment.map((l) => l.key)).toEqual(['a']);
+    expect(undecided.count).toBe(2);
+    expect(undecided.amount).toBe(60);
+    expect(undecided.bySupplier.get('קצביית הכרם')).toEqual({ count: 2, amount: 60 });
   });
 
   it('a month line whose claim already went out (letter_sent …) leaves the letter and shows as sent', () => {
@@ -150,7 +179,7 @@ describe('claim letters: one per supplier (leaks-07)', () => {
     const openClaim = claim({ discrepancyId: 'd-2', invoiceId: 'inv-a', discrepancyType: 'PRICE_HIGHER', productName: 'אנטריקוט', outstandingAgorot: 20000 });
     const { letters } = buildLetters({ month: [inv], tracked: [sentClaim, openClaim] });
     expect(letters).toHaveLength(1);
-    expect(letters[0]!.beforePayment.map((l) => [l.key, l.claimId, l.amount])).toEqual([['d-2', openClaim.id, 200]]);
+    expect(letters[0]!.beforePayment.map((l) => [l.key, l.claimId, l.amount])).toEqual([[openClaim.id, openClaim.id, 200]]);
     expect(letters[0]!.forCredit).toHaveLength(0);
     expect(letters[0]!.claimIds).toEqual([openClaim.id]);
   });

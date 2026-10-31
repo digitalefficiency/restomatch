@@ -142,8 +142,9 @@ export function LeakCardBody({
               const item = displayName(locale, l.productName ?? l.lineDescription, l.productNameEn ?? l.lineDescriptionEn);
               const inv = l.invoiceNumber ? t('leakCard.invoice', { number: l.invoiceNumber }) : t('leakCard.invoiceNoNumber');
               // Expected vs charged, so the supplier can verify the line (SUP-02).
+              // TODO(W2-09): render through W1-07's flags/WhyLine once both are on main (no cross-package imports in wave 1).
               const math = lineMathText(
-                { type: l.type, expected: l.expected ?? null, actual: l.actual ?? null, deltaAmount: l.deltaAmount },
+                { type: l.type, severity: l.severity ?? null, expected: l.expected ?? null, actual: l.actual ?? null, deltaAmount: l.deltaAmount },
                 t.appLocale,
               );
               return (

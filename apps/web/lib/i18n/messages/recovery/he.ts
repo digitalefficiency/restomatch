@@ -136,6 +136,7 @@ export const he = {
     writeOffCta: 'ויתור על {amount}',
     recoveredTitle: 'לאשר ש-{amount} חזרו מ{supplier}?',
     recoveredBody: 'זה הצעד האחרון: {count} דרישות ייסגרו כ"הוחזר".',
+    recoveredLetGo: 'החלק שלא זוכה, {amount}, ייסגר כוויתור.',
     recoveredCta: 'אישור: הכסף חזר',
     reason: 'סיבה (נשמרת ביומן הדרישה)',
     cancel: 'חזרה',

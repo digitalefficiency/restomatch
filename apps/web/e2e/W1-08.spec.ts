@@ -36,14 +36,18 @@ test('breakdown: the invoice rows add up to the leak total, shown to the agora',
   expect(errors).toEqual([]);
 });
 
-test('explorer: bars total = Σ bars; the T1 tile carries the exact leak; compare is on by default', async ({ page }) => {
+test('explorer: bars total = Σ bars; the T1 tile carries the exact leak, the cap note explains any gap; compare is on by default', async ({ page }) => {
   await page.goto('/dashboard/leaks');
   const rows = await amounts(page, 'chart-row');
   const total = Number(await page.getByTestId('chart-total').getAttribute('data-amount'));
   expect(sumAgora(rows)).toBe(agora(total));
   const tile = page.getByTestId('explorer-leak');
   const leak = Number(await tile.getAttribute('data-amount'));
-  expect(agora(leak)).toBe(agora(total));
+  // Grouped rows are line sums BEFORE the per-invoice cap; the T1 leak is capped. Never forced
+  // equal: when they differ (rows above the leak) the cap note says why.
+  expect(agora(total)).toBeGreaterThanOrEqual(agora(leak));
+  if (agora(total) > agora(leak)) await expect(page.getByTestId('explorer-cap-note')).toBeVisible();
+  else await expect(page.getByTestId('explorer-cap-note')).toHaveCount(0);
   await expect(tile).toHaveAttribute('title', new RegExp(at2dp(leak).replace(/[.,]/g, '\\$&')));
   // "מול 1–25 בספט׳": the default compare is the aligned previous period.
   await expect(page.locator('main')).toContainText(/מול 1–\d+/);
@@ -168,14 +172,16 @@ test('claims: keyboard "mark as sent" lands focus on Undo, the countdown holds w
   expect(calls).toHaveLength(0);
 });
 
-test('recovery: "the money came back" names the ₪ credited, not the ₪0 still owed', async ({ page }) => {
+test('recovery: "the money came back" names the ₪ credited (never ₪0) and, on a partial credit, the ₪ let go', async ({ page }) => {
   const sql = e2eSql();
   try {
-    const [c] = await sql<{ id: string; amount_agorot: string }[]>`
-      update recovery_claims set status = 'credited', credited_agorot = amount_agorot, credited_at = now()
+    // A partial credit: ~60% came back, the rest is what closing it lets go.
+    const [c] = await sql<{ id: string; amount_agorot: string; credited_agorot: string }[]>`
+      update recovery_claims set status = 'credited', credited_agorot = floor(amount_agorot * 0.6), credited_at = now()
       where id = (select id from recovery_claims where status = 'claimed' order by amount_agorot desc limit 1)
-      returning id, amount_agorot`;
-    const credited = Number(c!.amount_agorot) / 100;
+      returning id, amount_agorot, credited_agorot`;
+    const credited = Number(c!.credited_agorot) / 100;
+    const letGo = (Number(c!.amount_agorot) - Number(c!.credited_agorot)) / 100;
     await page.goto('/dashboard/recovery?tab=all');
     const row = page.locator('[data-testid="claim-row"][data-status="credited"]').first();
     await row.getByRole('button', { name: /אשרו שהכסף חזר/ }).click();
@@ -183,6 +189,7 @@ test('recovery: "the money came back" names the ₪ credited, not the ₪0 still
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText(at2dp(credited));
     await expect(dialog).not.toContainText(/(^|[^\d])0\.00/);
+    await expect(dialog.getByTestId('confirm-let-go')).toContainText(at2dp(letGo));
     await dialog.getByRole('button', { name: 'חזרה' }).click();
   } finally {
     await sql`update recovery_claims set status = 'claimed', credited_agorot = 0, credited_at = null where status = 'credited'`;

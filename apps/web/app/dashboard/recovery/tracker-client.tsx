@@ -570,6 +570,12 @@ export function TrackerClient({
           confirm ? (
             <>
               <p>{t(confirm.to === 'written_off' ? 'confirm.writeOffBody' : 'confirm.recoveredBody', { count: formatNumber(confirm.ids.length, locale) })}</p>
+              {confirm.to === 'recovered' && confirmSum(confirm.ids, 'written_off') > 0 ? (
+                // A partial credit: closing it lets the rest go — say how much, in ₪.
+                <p className="font-semibold text-ink" data-testid="confirm-let-go">
+                  {t('confirm.recoveredLetGo', { amount: ils(confirmSum(confirm.ids, 'written_off')) })}
+                </p>
+              ) : null}
               <fieldset>
                 <legend className="mb-1.5 text-xs font-semibold text-subtle">{t('confirm.reason')}</legend>
                 <div role="radiogroup" className="flex flex-wrap gap-2">

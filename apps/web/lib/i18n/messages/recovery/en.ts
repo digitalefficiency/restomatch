@@ -135,6 +135,7 @@ export const en: Shape<typeof he> = {
     writeOffCta: 'Write off {amount}',
     recoveredTitle: 'Confirm {amount} came back from {supplier}?',
     recoveredBody: 'This is the last step: {count} claims close as "returned".',
+    recoveredLetGo: 'The part not credited, {amount}, will be closed as let go.',
     recoveredCta: 'Confirm: money back',
     reason: 'Reason (kept in the claim history)',
     cancel: 'Back',

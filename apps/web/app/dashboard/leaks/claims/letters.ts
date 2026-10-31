@@ -2,13 +2,16 @@ import type { LeakBreakdownInvoice, LeakBreakdownLine } from '@restomatch/charts
 import { claimableLines, vatBasisOf, type VatBasis } from '@restomatch/api';
 
 /**
- * The claim-letter model (pure, unit-tested): ONE letter per supplier, merging
- *  • "before payment" — this month's claimable lines on invoices not yet paid
- *    (the shared claimableLines rule, the same as the pay run), and
- *  • "for credit"     — ₪-back tracker claims still waiting for a letter
- *    (status `claimed`, on paid invoices too).
- * A tracker claim that IS one of this month's lines stays in "before payment"
- * (never printed twice) and carries its claimId so "mark as sent" moves it.
+ * The claim-letter model (pure, unit-tested): ONE letter per supplier. A letter
+ * asks only for what the team DECIDED to claim (decision 18):
+ *  • every ₪-back tracker claim still waiting for a letter (status `claimed`), and
+ *  • this month's lines approved to claim (`accepted`) that no claim holds yet
+ *    (the tracker off, or not synced yet).
+ * Each sits in "before payment" when its invoice is not paid yet (offset it from the
+ * payment) or "for credit" when it is paid / unknown. A discrepancy with a claim that
+ * is not written off is the CLAIM's line — never also a month line (dedupe by
+ * discrepancy id). Undecided lines (open / escalated) are never addressed to a
+ * supplier: they come back as `undecided`, a T2 "decide" prompt.
  * No new money math: every amount is a breakdown or tracker amount as is.
  */
 
@@ -109,14 +112,22 @@ function fromBreakdown(inv: LeakBreakdownInvoice, l: LeakBreakdownLine, amount: 
   };
 }
 
+/** Month lines nobody decided on yet (open / escalated) — never in a letter. */
+export interface UndecidedLines {
+  count: number;
+  amount: number;
+  /** Per supplier (letter key), for a one-supplier view. */
+  bySupplier: Map<string, { count: number; amount: number }>;
+}
+
 export function buildLetters(input: {
   /** owner.leakBreakdown of the letters' month. */
   month: LeakBreakdownInvoice[];
   /** recovery.list rows (any status — only `claimed` / `letter_sent` are used). */
   tracked: ReadonlyArray<TrackedClaim>;
-  /** Extra breakdown months, only to add invoice dates and the ₪ basis to tracker lines. */
+  /** Extra breakdown months: invoice date, paid status and ₪ basis of tracker lines. */
   history?: ReadonlyArray<LeakBreakdownInvoice>;
-}): { letters: SupplierLetter[]; sent: SentLetter[] } {
+}): { letters: SupplierLetter[]; sent: SentLetter[]; undecided: UndecidedLines } {
   const groups = new Map<string, SupplierLetter>();
   const group = (name: string | null, nameEn: string | null, supplierId: string | null) => {
     const key = supplierKey(name);
@@ -141,45 +152,47 @@ export function buildLetters(input: {
     return g;
   };
 
-  // Every tracker claim, by the discrepancy it is for (one claim per discrepancy —
-  // two lines of the same product on one invoice never swap claims). A month line
-  // that is a tracked claim already past `claimed` (sent, credited, written off…)
-  // is handled on the tracker, so it leaves the letter.
-  const tracked = new Map<string, TrackedClaim>();
+  // The claim of each discrepancy (a `claimed` one wins over an older closed one). A
+  // written-off claim gives the discrepancy back to the month (it may be claimed again).
+  const claimOf = new Map<string, TrackedClaim>();
   for (const c of input.tracked) {
-    const prev = tracked.get(c.discrepancyId);
-    if (!prev || (c.status === 'claimed' && prev.status !== 'claimed')) tracked.set(c.discrepancyId, c);
+    if (c.status === 'written_off') continue;
+    const prev = claimOf.get(c.discrepancyId);
+    if (!prev || (c.status === 'claimed' && prev.status !== 'claimed')) claimOf.set(c.discrepancyId, c);
   }
 
-  // 1. This month, before payment. A matching tracker claim is consumed here.
-  for (const inv of input.month) {
-    for (const { line, amount, basis } of claimableLines(inv)) {
-      const claim = tracked.get(line.discrepancyId);
-      if (claim) tracked.delete(line.discrepancyId);
-      if (claim && claim.status !== 'claimed') continue;
-      const g = group(inv.supplierName, inv.supplierNameEn, null);
-      const out = fromBreakdown(inv, line, amount, basis);
-      if (claim) {
-        out.claimId = claim.id;
-        g.claimIds.push(claim.id);
-        if (claim.supplierId) g.supplierId = claim.supplierId;
-      }
-      g.beforePayment.push(out);
-    }
-  }
-
-  // Basis lookup for the remaining tracker lines (invoice date, expected / actual).
+  // Lookup for tracker lines: invoice (date, paid?) and the engine's expected / actual.
   const known = new Map<string, { inv: LeakBreakdownInvoice; line: LeakBreakdownLine }>();
   for (const inv of [...input.month, ...(input.history ?? [])]) {
     for (const line of inv.lines) if (!known.has(line.discrepancyId)) known.set(line.discrepancyId, { inv, line });
   }
+  const unpaid = (inv: LeakBreakdownInvoice | undefined) => inv != null && inv.status !== 'paid' && !inv.pendingLink;
 
-  // 2. The rest of the tracker's `claimed` claims: for credit.
-  for (const c of input.tracked) {
-    if (c.status !== 'claimed' || c.outstandingAgorot <= 0 || tracked.get(c.discrepancyId) !== c) continue;
+  // 1. This month's DECIDED lines no claim holds; undecided ones are counted, not sent.
+  const undecided: UndecidedLines = { count: 0, amount: 0, bySupplier: new Map() };
+  for (const inv of input.month) {
+    for (const { line, amount, basis } of claimableLines(inv)) {
+      if (claimOf.has(line.discrepancyId)) continue;
+      if (line.resolutionStatus !== 'accepted') {
+        const key = supplierKey(inv.supplierName);
+        const u = undecided.bySupplier.get(key) ?? { count: 0, amount: 0 };
+        u.count += 1;
+        u.amount = sumAgora([u.amount, amount]);
+        undecided.bySupplier.set(key, u);
+        undecided.count += 1;
+        undecided.amount = sumAgora([undecided.amount, amount]);
+        continue;
+      }
+      group(inv.supplierName, inv.supplierNameEn, null).beforePayment.push(fromBreakdown(inv, line, amount, basis));
+    }
+  }
+
+  // 2. Every tracker claim still waiting for its letter: before payment while its invoice is unpaid.
+  for (const c of claimOf.values()) {
+    if (c.status !== 'claimed' || c.outstandingAgorot <= 0) continue;
     const g = group(c.supplierName, c.supplierNameEn, c.supplierId);
     const hit = known.get(c.discrepancyId);
-    g.forCredit.push({
+    const out: LetterLine = {
       key: c.id,
       invoiceId: c.invoiceId,
       invoiceNumber: c.invoiceNumber,
@@ -196,7 +209,8 @@ export function buildLetters(input: {
       actual: hit?.line.actual ?? null,
       deltaAmount: hit?.line.deltaAmount ?? null,
       claimId: c.id,
-    });
+    };
+    (unpaid(hit?.inv) ? g.beforePayment : g.forCredit).push(out);
     g.claimIds.push(c.id);
   }
 
@@ -229,7 +243,7 @@ export function buildLetters(input: {
     sentBy.set(key, s);
   }
   const sent = [...sentBy.values()].sort((a, b) => b.sentAt.localeCompare(a.sentAt) || a.key.localeCompare(b.key));
-  return { letters, sent };
+  return { letters, sent, undecided };
 }
 
 /**

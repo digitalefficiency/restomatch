@@ -127,7 +127,12 @@ export const en: Shape<typeof he> = {
     total: 'Total to credit',
     closing: 'Thank you for handling this by {date}. Feel free to contact us with any question.',
     signature: 'Kind regards,',
-    note: 'Includes open and approved-to-claim discrepancies on unpaid invoices, plus ₪-back claims not yet sent. Excludes waived discrepancies.',
+    note: 'Includes only what was decided: ₪-back claims not yet sent and gaps approved for a claim. Undecided or waived gaps are not included.',
+    undecided: {
+      badge: 'Decide',
+      body: '{count} gaps this month are not decided yet — they stay out of the letters until you approve them for a claim.',
+      cta: 'To the approvals queue',
+    },
     math: {
       price: 'Billed {qty} × {charged} · expected price {expected}',
       qty: 'Billed {billed} · received {received} · × {price}',
