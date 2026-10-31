@@ -24,6 +24,7 @@ const h = vi.hoisted(() => ({
   claudeResult: null as unknown,
   meter: vi.fn(async () => ({ metered: true, used: 1, limit: null })),
   demoIds: null as string[] | null,
+  stubThrows: false,
 }));
 
 vi.mock('@restomatch/ocr', async (importOriginal) => {
@@ -43,7 +44,14 @@ vi.mock('@restomatch/ocr', async (importOriginal) => {
 
 vi.mock('@restomatch/api', async (importOriginal) => {
   const real = await importOriginal<typeof import('@restomatch/api')>();
-  return { ...real, meterOcrScan: h.meter };
+  return {
+    ...real,
+    meterOcrScan: h.meter,
+    buildDevOcrStub: (async (...args: Parameters<typeof real.buildDevOcrStub>) => {
+      if (h.stubThrows) throw new Error('stub build failed (db blip)');
+      return real.buildDevOcrStub(...args);
+    }) as typeof real.buildDevOcrStub,
+  };
 });
 
 vi.mock('@restomatch/db', async (importOriginal) => {
@@ -167,6 +175,7 @@ describe('processOcrInvoice gate (DB)', () => {
     h.claudeUrls.length = 0;
     h.claudeResult = extraction;
     h.demoIds = null;
+    h.stubThrows = false;
     const [r] = await db.insert(restaurants).values({ name: 'OCR allowlist QA' }).returning();
     rid = r!.id;
     const [s] = await db.insert(suppliers).values({ restaurantId: rid, name: 'ספק' }).returning();
@@ -268,6 +277,18 @@ describe('processOcrInvoice gate (DB)', () => {
     const res = await run({ invoiceId: inv.id, mockProviders: { docAi: extraction, claude: extraction } });
     expect(res).toMatchObject({ skipped: 'ocr_disabled' });
     expect(await lines(inv.id)).toHaveLength(0);
+  });
+
+  it('a failure BEFORE the read (the demo stub build) marks the invoice failed — never left ocr_pending (review #5)', async () => {
+    h.demoIds = [rid];
+    h.stubThrows = true;
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const inv = await newInvoice();
+    await expect(run({ invoiceId: inv.id, grId })).rejects.toThrow('stub build failed');
+    const row = await read(inv.id);
+    expect(row.status).toBe('parsed');
+    expect(row.ocrPayload?.raw).toEqual({ ocrFailed: true, reason: 'extraction_failed' });
+    expect(h.meter).not.toHaveBeenCalled();
   });
 
   it('isDemoTenant uses the real identity finder: an ordinary tenant is not demo', async () => {

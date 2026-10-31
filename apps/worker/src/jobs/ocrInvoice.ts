@@ -98,6 +98,11 @@ export async function ocrModeFor(
   return 'disabled';
 }
 
+/** The string entries of an unknown value that should be a string[] (else none). */
+function stringList(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.length > 0 && x.length <= 64) : [];
+}
+
 /** First 8 characters of an id, for logs. */
 const short = (id: string) => id.slice(0, 8);
 
@@ -228,42 +233,42 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
     return { invoiceId: job.data.invoiceId, skipped: 'not_pending' as const };
   }
 
-  const mock = payloadMockProviders(job.data);
-  mode = mock ? 'mock' : await ocrModeFor(job.data.restaurantId, { grId: job.data.grId, isDemo: (id) => isDemoTenant(db, id) });
+  // Everything from here runs inside the classified try (review #5): a failure
+  // before the read (the demo-tenant lookup, the stub build, a missing key) used
+  // to dead-letter the job and leave the invoice 'ocr_pending' forever.
+  try {
+    const mock = payloadMockProviders(job.data);
+    mode = mock ? 'mock' : await ocrModeFor(job.data.restaurantId, { grId: job.data.grId, isDemo: (id) => isDemoTenant(db, id) });
 
-  let providers: { documentAi: OcrProvider; claude: OcrProvider };
-  // The URL on the ROW, never the payload's.
-  const imageUrl = invoice.rawImageUrl ?? '';
-  if (mode === 'disabled') {
-    await markOcrFailed(db, job.data.restaurantId, job.data.invoiceId, null, 'ocr_disabled');
-    outcome = 'skipped=ocr_disabled';
-    logLine();
-    return { invoiceId: job.data.invoiceId, skipped: 'ocr_disabled' as const };
-  }
-  if (mode === 'claude' && !isAllowedScanUrl(imageUrl)) {
-    // Re-checked here: the row is the trust boundary, not the producer.
-    await markOcrFailed(db, job.data.restaurantId, job.data.invoiceId, null, 'scan_url_refused');
-    outcome = 'skipped=scan_url_refused';
-    logLine();
-    return { invoiceId: job.data.invoiceId, skipped: 'scan_url_refused' as const };
-  }
-  if (mode === 'stub') {
-    const stub = job.data.grId
-      ? await buildDevOcrStub(db, job.data.restaurantId, job.data.grId, { invoicePrefix: 'DEMO-' })
-      : null;
-    if (!stub) {
-      // A receipt with no PO lines: nothing to build, and nothing is made up.
+    let providers: { documentAi: OcrProvider; claude: OcrProvider };
+    // The URL on the ROW, never the payload's.
+    const imageUrl = invoice.rawImageUrl ?? '';
+    if (mode === 'disabled') {
       await markOcrFailed(db, job.data.restaurantId, job.data.invoiceId, null, 'ocr_disabled');
-      outcome = 'skipped=no_po_lines';
-      logLine();
+      outcome = 'skipped=ocr_disabled';
       return { invoiceId: job.data.invoiceId, skipped: 'ocr_disabled' as const };
     }
-    providers = stubProviders(stub);
-  } else {
-    providers = mock ?? realProviders(usage);
-  }
+    if (mode === 'claude' && !isAllowedScanUrl(imageUrl)) {
+      // Re-checked here: the row is the trust boundary, not the producer.
+      await markOcrFailed(db, job.data.restaurantId, job.data.invoiceId, null, 'scan_url_refused');
+      outcome = 'skipped=scan_url_refused';
+      return { invoiceId: job.data.invoiceId, skipped: 'scan_url_refused' as const };
+    }
+    if (mode === 'stub') {
+      const stub = job.data.grId
+        ? await buildDevOcrStub(db, job.data.restaurantId, job.data.grId, { invoicePrefix: 'DEMO-' })
+        : null;
+      if (!stub) {
+        // A receipt with no PO lines: nothing to build, and nothing is made up.
+        await markOcrFailed(db, job.data.restaurantId, job.data.invoiceId, null, 'ocr_disabled');
+        outcome = 'skipped=no_po_lines';
+        return { invoiceId: job.data.invoiceId, skipped: 'ocr_disabled' as const };
+      }
+      providers = stubProviders(stub);
+    } else {
+      providers = mock ?? realProviders(usage);
+    }
 
-  try {
     // Metered once per scan: the retry of a transient failure (attempt 2) is the
     // same scan, not a second one.
     if ((mode === 'claude' || mode === 'mock') && (job.attemptsMade ?? 0) === 0) {
@@ -327,12 +332,23 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
     //    with no known supplier there is nothing to cross-match, so a human.
     const reviewReasons: string[] = [];
     if (facts.kind !== 'tax_invoice' && facts.kind !== 'consolidated') reviewReasons.push(`doc_kind_${facts.kind}`);
+    // Explicit, so a link-only release (G-08) can never flip a ריכוז to 'matched'.
+    if (facts.kind === 'consolidated') reviewReasons.push('consolidated');
     if (facts.kind === 'consolidated' && !invoice.supplierId) reviewReasons.push('consolidated_unknown_supplier');
+    if (facts.consolidatedEvidence) reviewReasons.push('consolidated_evidence');
     //  - the ח.פ. printed on the document is not the one on file for the invoice's
     //    supplier (tenant-scoped): the wrong supplier, or a look-alike — a human.
     const businessIdMismatch = await supplierBusinessIdMismatch(db, job.data.restaurantId, invoice.supplierId, r.supplier?.businessId);
     if (businessIdMismatch) reviewReasons.push('supplier_id_mismatch');
-    const holdForHuman = result.needsHumanReview || facts.kind !== 'tax_invoice' || businessIdMismatch;
+    const holdForHuman =
+      result.needsHumanReview || facts.kind !== 'tax_invoice' || businessIdMismatch || facts.consolidatedEvidence;
+    // The pipeline's own reasons (G-08 link holds 'unlinked' / 'unlinkedPo', #174's
+    // checks) are kept too — the de-duplicated union, never dropped (review #2).
+    const pipelineReasons = [
+      ...stringList((result as { reviewReasons?: unknown }).reviewReasons),
+      ...stringList((result as { checks?: { reasons?: unknown } }).checks?.reasons),
+    ];
+    const allReasons = [...new Set([...pipelineReasons, ...reviewReasons])];
 
     // ONE copy of the extraction (the pipeline result repeats it as primary,
     // reconciled and both providers) + the keys the readers look for at the top
@@ -348,7 +364,8 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
         ...(facts.kind === 'consolidated'
           ? { periodStart: facts.periodStart, periodEnd: facts.periodEnd, deliveryNotes: facts.deliveryNotes }
           : {}),
-        ...(reviewReasons.length ? { reviewReasons } : {}),
+        ...(allReasons.length ? { reviewReasons: allReasons } : {}),
+        ...((result as { checks?: unknown }).checks !== undefined ? { checks: (result as { checks?: unknown }).checks } : {}),
       },
       scanGrId,
     );
@@ -359,6 +376,18 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
     // from one read over lines from another.
     const written = await db.transaction(async (rawTx) => {
       const tx = rawTx as unknown as Database;
+      // Merge over what is already on the row (review #4): keys stamped before the
+      // read — raw.scanGrId (S2's one-receipt-one-invoice resume), a link hold —
+      // survive the read; the read's own keys win; reasons are united.
+      const [cur] = await tx
+        .select({ payload: invoices.ocrPayload })
+        .from(invoices)
+        .where(and(eq(invoices.id, job.data.invoiceId), eq(invoices.restaurantId, job.data.restaurantId)))
+        .for('update');
+      const prior = cur?.payload?.raw;
+      const priorRaw = prior && typeof prior === 'object' && !Array.isArray(prior) ? (prior as Record<string, unknown>) : {};
+      const reasons = [...new Set([...stringList(priorRaw.reviewReasons), ...stringList((raw as { reviewReasons?: unknown }).reviewReasons)])];
+      const mergedRaw = { ...priorRaw, ...raw, ...(reasons.length ? { reviewReasons: reasons } : {}) };
       const header = await writeOcrHeader(
         tx,
         { restaurantId: job.data.restaurantId, invoiceId: job.data.invoiceId, supplierId: invoice.supplierId },
@@ -369,7 +398,7 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
           vatAmount: r.totals.vat?.toString() ?? null,
           totalInclVat: r.totals.total?.toString() ?? null,
           allocationNumber: r.allocationNumber ?? null,
-          ocrPayload: { provider: 'reconciled', raw, reconciledAt: new Date().toISOString() },
+          ocrPayload: { provider: 'reconciled', raw: mergedRaw, reconciledAt: new Date().toISOString() },
           ocrConfidence: result.confidence.toString(),
           status: holdForHuman ? 'parsed' : 'matched',
         },
@@ -491,21 +520,47 @@ export interface DocumentFacts {
   /** Consolidated only: the billed period, local dates 'YYYY-MM-DD'. */
   periodStart: string | null;
   periodEnd: string | null;
-  /** Consolidated only: the delivery notes (ת.מ.) it lists, by number. */
-  deliveryNotes: Array<{ number: string }>;
+  /** The delivery notes (ת.מ.) the document lists, by canonical number (written for consolidated only). */
+  deliveryNotes: Array<{ number: string; printed?: string }>;
+  /**
+   * A document read as an ordinary invoice that nonetheless carries the marks of
+   * a consolidated one (≥ 2 distinct delivery-note numbers, or a printed billing
+   * period): held for a human ('consolidated_evidence'), never auto-matched.
+   */
+  consolidatedEvidence: boolean;
 }
 
 const LOCAL_DAY = /^\d{4}-\d{2}-\d{2}$/;
 const CONSOLIDATED_KINDS = new Set(['consolidated', 'consolidated_invoice', 'monthly_consolidated']);
 const TAX_INVOICE_KINDS = new Set(['tax_invoice', 'invoice', 'tax_invoice_receipt']);
+/** A printed delivery-note label in front of the number: ת.מ. / ת"מ / ת״מ / תעודת משלוח / DN / D.N. / No. */
+const NOTE_PREFIX = /^(?:תעודת\s*משלוח|ת\s*[.״"']?\s*מ\s*[.׳']?|d\s*\.?\s*n\s*\.?|no\s*\.?|מס['׳]?)\s*[:#.\-]?\s*/i;
 
+/**
+ * A delivery-note number as written, reduced to its digit run: the printed label
+ * (ת.מ., DN …) is stripped. A range ("1201-1205") or a list ("1201, 1202") is not
+ * ONE note and is rejected (null), as is anything that is not a digit run.
+ */
+export function canonicalNoteNumber(v: unknown): string | null {
+  if (typeof v === 'number') return Number.isInteger(v) && v >= 0 ? String(v) : null;
+  if (typeof v !== 'string') return null;
+  let t = v.trim();
+  for (let k = 0; k < 2 && NOTE_PREFIX.test(t); k++) t = t.replace(NOTE_PREFIX, '').trim();
+  return /^\d{1,20}$/.test(t) ? t : null;
+}
+
+/**
+ * What kind of document the read was, from the extraction's documentKind /
+ * consolidation / billingPeriod / deliveryNotes (the fields #174 / S14 add to
+ * the reconciled result). Read loosely: an extraction without them (today's, the
+ * stub) is an ordinary tax invoice. `kind` is what `ocr_payload.raw.kind`
+ * stores — 'consolidated' is what match/consolidated.ts and ledger/coverage.ts
+ * look for. When the extraction carries an explicit `consolidation` verdict it
+ * wins over a bare documentKind.
+ */
 export function documentFacts(extraction: unknown): DocumentFacts {
   const e = (extraction ?? {}) as Record<string, unknown>;
   const rawKind = typeof e.documentKind === 'string' ? e.documentKind.trim().toLowerCase() : '';
-  // S14's classifier (packages/ocr classifyConsolidation → reconciled.consolidation)
-  // is the authority when present: 'consolidated' only with ≥ 2 distinct ת.מ.
-  // listed, or documentKind consolidated + a printed period. A bare documentKind
-  // 'consolidated' without that evidence stays an ordinary invoice.
   const consolidation = typeof e.consolidation === 'string' ? e.consolidation : null;
   const kind =
     consolidation === 'consolidated'
@@ -518,23 +573,44 @@ export function documentFacts(extraction: unknown): DocumentFacts {
   const period = (e.billingPeriod ?? {}) as Record<string, unknown>;
   const day = (v: unknown) => (typeof v === 'string' && LOCAL_DAY.test(v.trim()) ? v.trim() : null);
   const notes = Array.isArray(e.deliveryNotes) ? e.deliveryNotes : [];
-  const numbers = notes
-    .map((n) => (typeof n === 'object' && n !== null ? (n as { number?: unknown }).number : n))
-    .map((v) => (typeof v === 'number' ? String(v) : typeof v === 'string' ? v.trim() : ''))
-    .filter((v) => v.length > 0 && v.length <= 32);
+  const byNumber = new Map<string, { number: string; printed?: string }>();
+  for (const n of notes) {
+    const v = typeof n === 'object' && n !== null ? (n as { number?: unknown }).number : n;
+    const number = canonicalNoteNumber(v);
+    if (!number || byNumber.has(number)) continue;
+    const printed = typeof v === 'string' && v.trim() !== number ? v.trim().slice(0, 64) : undefined;
+    byNumber.set(number, printed ? { number, printed } : { number });
+  }
+  const periodStart = day(period.start ?? period.from ?? e.periodStart);
+  const periodEnd = day(period.end ?? period.to ?? e.periodEnd);
   return {
     kind,
-    periodStart: day(period.start ?? period.from ?? e.periodStart),
-    periodEnd: day(period.end ?? period.to ?? e.periodEnd),
-    deliveryNotes: [...new Set(numbers)].map((number) => ({ number })),
+    periodStart,
+    periodEnd,
+    deliveryNotes: [...byNumber.values()],
+    consolidatedEvidence: kind === 'tax_invoice' && (byNumber.size >= 2 || periodStart !== null || periodEnd !== null),
   };
 }
 
-/** A ח.פ. / ע.מ. reduced to its digits (printed with spaces, dashes or a prefix). */
+/**
+ * A ח.פ. / ע.מ. / ת.ז. as 9 canonical digits, or null when it is not a valid
+ * Israeli id (review #6): digits only (spaces, dashes, a "ח.פ." label are
+ * dropped), leading zeros not significant, at most 9 significant digits (a phone
+ * number is not an id), padded to 9, and the check digit must hold (the
+ * standard Israeli id checksum: weights 1,2,1,2… with digit-sum of products).
+ * Null = unknown — never a mismatch.
+ */
 export function normalizeBusinessId(v: unknown): string | null {
   if (typeof v !== 'string' && typeof v !== 'number') return null;
-  const digits = String(v).replace(/\D/g, '');
-  return digits.length >= 8 && digits.length <= 10 ? digits.replace(/^0+(?=\d{9})/, '') : null;
+  const significant = String(v).replace(/\D/g, '').replace(/^0+/, '');
+  if (significant.length === 0 || significant.length > 9) return null;
+  const id = significant.padStart(9, '0');
+  let sum = 0;
+  for (let k = 0; k < 9; k++) {
+    const p = Number(id[k]) * (k % 2 === 0 ? 1 : 2);
+    sum += p > 9 ? p - 9 : p;
+  }
+  return sum % 10 === 0 ? id : null;
 }
 
 /**
