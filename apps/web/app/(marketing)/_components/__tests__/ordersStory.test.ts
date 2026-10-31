@@ -22,12 +22,13 @@ describe('landing orders story', () => {
     expect(ordersStoryGapIls()).toBe(30);
   });
 
-  it('labels the gap one-time and the 1.5% as a target, in both languages', () => {
+  // Owner decision (REVIEW-REPORT §8 item 4): 1.5% is never shown as a target,
+  // because it reads as if the leak were the goal.
+  it('labels the gap one-time and never presents 1.5% as a target, in both languages', () => {
     for (const m of [landing.he, landing.en]) {
       const note = m.v2.story.note;
-      expect(note).toMatch(/1\.5%/);
       expect(note).toMatch(/חד-פעמי|one-time/);
-      expect(note).toMatch(/יעד|target/);
+      expect(note).not.toMatch(/יעד|target/);
       // It is the fictional product tour, never the live demo restaurant.
       expect(note).toMatch(/בדויים|fictional/);
     }

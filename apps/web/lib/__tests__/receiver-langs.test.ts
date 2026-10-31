@@ -8,13 +8,26 @@ import {
   resolveAppLocale,
   resolveLocale,
 } from '../i18n/config';
-import { ALL_NAMESPACES, auth, components, ingest, nav, receiverLangs, receiving, scans } from '../i18n/messages';
-import { createTranslator, lookup, type MessageTree } from '../i18n/translate';
+import {
+  ALL_NAMESPACES,
+  auth,
+  common,
+  components,
+  ingest,
+  nav,
+  overview,
+  receiverLangs,
+  receiving,
+  receivingDelivery,
+  scans,
+} from '../i18n/messages';
+import { createTranslator, defineMessages, lookup, withReceiverLocales, type MessageTree } from '../i18n/translate';
 
 /**
  * Receiver languages (S14, flag `receiverLanguages`). The receiver-facing
  * namespaces must be COMPLETE in ar/ru/th/ti (typed by CompleteOverlays and
- * re-checked here at runtime); every other namespace falls back to English.
+ * re-checked here at runtime). A gap in an overlaid namespace falls back to
+ * Hebrew; a namespace with no overlays at all falls back to English.
  */
 function leafPaths(tree: MessageTree, prefix = ''): string[] {
   return Object.entries(tree).flatMap(([k, v]) =>
@@ -32,14 +45,35 @@ const SCRIPT: Record<(typeof RECEIVER_LOCALES)[number], RegExp> = {
   ti: /[ሀ-᎟ⶀ-⷟]/,
 };
 
-/** Receiver namespaces and the subtrees that must be complete. */
+/** Receiver namespaces and the subtrees (or single leaves — dotted roots work) that must be complete. */
 const RECEIVER: Array<{ ns: { name: string; he: MessageTree; extra?: unknown }; roots?: string[] }> = [
   { ns: receiving as never },
+  // W1-06 Delivery Check: capture, count, save state, leave + sign-out guards.
+  { ns: receivingDelivery as never },
   { ns: scans as never },
   { ns: nav as never },
   { ns: components as never },
   { ns: receiverLangs as never },
-  { ns: auth as never, roots: ['login', 'checkEmail', 'twoFactor'] },
+  { ns: auth as never, roots: ['login', 'checkEmail', 'twoFactor', 'signin'] },
+  // The receiver's home (W1-05): the deliveries board and its h1/subtitle.
+  { ns: overview as never, roots: ['board', 'homeTitle.receiver', 'homeSubtitle.receiver'] },
+  // Shell resilience (W1-04): offline chip, re-auth sheet, 403/404/error pages inside the shell.
+  // …plus the generic actions/states and screen names every receiver screen uses.
+  {
+    ns: common as never,
+    roots: [
+      'shell.offline',
+      'shell.session',
+      'shell.forbidden',
+      'shell.notFound',
+      'shell.error',
+      'shell.screens',
+      'shell.listSep',
+      'shell.listLast',
+      'actions',
+      'states',
+    ],
+  },
   // The receiver PWA (S13) speaks to the same receivers: offline banner, queue, sync.
   { ns: ingest as never, roots: ['pwa'] },
 ];
@@ -63,7 +97,7 @@ describe('receiver locale config', () => {
 
 describe('receiver namespaces are complete in ar/ru/th/ti', () => {
   for (const { ns, roots } of RECEIVER) {
-    const heKeys = leafPaths(ns.he).filter((k) => !roots || roots.some((r) => k.startsWith(`${r}.`)));
+    const heKeys = leafPaths(ns.he).filter((k) => !roots || roots.some((r) => k === r || k.startsWith(`${r}.`)));
     for (const locale of RECEIVER_LOCALES) {
       it(`${ns.name} (${locale}): every key, same placeholders, no Hebrew, native script`, () => {
         const tree = (ns.extra as Record<string, MessageTree> | undefined)?.[locale];
@@ -86,7 +120,7 @@ describe('receiver namespaces are complete in ar/ru/th/ti', () => {
   }
 });
 
-describe('fallback chain: receiver overlay → English → Hebrew → key', () => {
+describe('fallback chain: overlaid namespace → overlay → Hebrew; no overlays → English → Hebrew', () => {
   it('a receiver namespace renders in the receiver language', () => {
     const t = createTranslator('ar', nav);
     expect(t('links.receiving')).toMatch(SCRIPT.ar);
@@ -107,9 +141,36 @@ describe('fallback chain: receiver overlay → English → Hebrew → key', () =
     }
   });
 
-  it('a receiver subtree outside the overlay (auth.reset) falls back to English', () => {
+  it('a key outside an overlaid namespace\'s slice (auth.reset) falls back to Hebrew, never English', () => {
     const t = createTranslator('th', auth);
-    expect(t('reset.requestTitle')).toBe(lookup(auth.en as MessageTree, 'reset.requestTitle'));
+    expect(t('reset.requestTitle')).toBe(lookup(auth.he as MessageTree, 'reset.requestTitle'));
+    expect(t('reset.requestTitle')).not.toBe(lookup(auth.en as MessageTree, 'reset.requestTitle'));
     expect(t('login.title')).toMatch(SCRIPT.th);
+  });
+
+  it('overlaid namespace + missing key → Hebrew; non-overlaid namespace → English', () => {
+    const he = { a: 'שלום', b: 'להתראות {name}' };
+    const en = { a: 'Hello', b: 'Goodbye {name}' };
+    const bare = defineMessages('fallbackBare', he, en);
+    const overlaid = withReceiverLocales(bare, { ru: { a: 'Привет' } });
+    for (const locale of RECEIVER_LOCALES) {
+      const tb = createTranslator(locale, bare);
+      expect(tb('a')).toBe('Hello');
+      expect(tb('b', { name: 'X' })).toBe('Goodbye X');
+      const to = createTranslator(locale, overlaid);
+      expect(to('b', { name: 'X' })).toBe('להתראות X');
+      expect(to('a')).toBe(locale === 'ru' ? 'Привет' : 'שלום');
+    }
+    // he/en are untouched by overlays.
+    expect(createTranslator('en', overlaid)('a')).toBe('Hello');
+    expect(createTranslator('he', overlaid)('a')).toBe('שלום');
+  });
+
+  it('the W1-06 receiver flow renders in the receiver language (delivery, board, shell, sign-in)', () => {
+    expect(createTranslator('ti', receivingDelivery)('delivery.count.sessionExpired')).toMatch(SCRIPT.ti);
+    expect(createTranslator('ru', overview)('board.cta.start')).toMatch(SCRIPT.ru);
+    expect(createTranslator('ru', overview)('homeTitle.receiver')).toMatch(SCRIPT.ru);
+    expect(createTranslator('ar', common)('shell.offline.chip')).toMatch(SCRIPT.ar);
+    expect(createTranslator('th', auth)('signin.showPassword')).toMatch(SCRIPT.th);
   });
 });

@@ -7,6 +7,7 @@ import {
   creditLineSuggestions,
   listClaims,
   lockClaims,
+  MAX_CLAIMS,
   recordCreditNote,
   returnedInMonth,
   summarize,
@@ -55,11 +56,24 @@ export const recoveryRouter = router({
     return { summary: summarize(claims), returnedThisMonth: returned };
   }),
 
+  /** One page of claims; `limit` (default 200, at most MAX_CLAIMS) lets a screen that sums them ask for all. */
   list: recoveryProcedure
-    .input(z.object({ status: status.optional(), supplierId: z.string().uuid().optional() }).optional())
+    .input(
+      z
+        .object({
+          status: status.optional(),
+          supplierId: z.string().uuid().optional(),
+          limit: z.number().int().min(1).max(MAX_CLAIMS).optional(),
+        })
+        .optional(),
+    )
     .query(async ({ ctx, input }) => {
       await syncClaims(ctx.db, ctx.session.restaurantId, ctx.session.userId);
-      return listClaims(ctx.db, ctx.session.restaurantId, { status: input?.status, supplierId: input?.supplierId });
+      return listClaims(ctx.db, ctx.session.restaurantId, {
+        status: input?.status,
+        supplierId: input?.supplierId,
+        limit: input?.limit,
+      });
     }),
 
   history: recoveryProcedure

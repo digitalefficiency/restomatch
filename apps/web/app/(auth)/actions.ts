@@ -1,6 +1,6 @@
 'use server';
 
-import { headers } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { clientIpFromHeaders } from '@restomatch/api';
 import { signOut } from '@/auth';
@@ -17,6 +17,8 @@ import {
   setUserPassword,
 } from '@/lib/passwords';
 import { enforcePasswordResetLimit, trustedProxyHops } from '@/lib/rateLimit';
+import { encodeHint } from '../login/hintCodec';
+import { RESET_HINT_COOKIE } from './reset/resetHint';
 
 /** Absolute base URL for emailed links (prefers explicit env, else the request host). */
 async function baseUrl(): Promise<string> {
@@ -36,6 +38,16 @@ async function baseUrl(): Promise<string> {
 export async function requestPasswordResetAction(formData: FormData): Promise<void> {
   const email = String(formData.get('email') ?? '').trim();
   if (!email) redirect('/reset?sent=1');
+  // The "sent" state names the (masked) address and times the resend — kept in
+  // an httpOnly cookie scoped to /reset, never the URL. Set for every address
+  // alike, so it says nothing about whether an account exists.
+  (await cookies()).set(RESET_HINT_COOKIE, encodeHint({ email, fails: 0, sentAt: Date.now(), next: null }), {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/reset',
+    maxAge: 15 * 60,
+  });
 
   const h = await headers();
   const ip = clientIpFromHeaders(h, { trustedProxyHops: trustedProxyHops() });

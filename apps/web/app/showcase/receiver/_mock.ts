@@ -182,7 +182,10 @@ export function mockReconcile(supplierId: string): ReconciliationResult {
         invoiceUnit: 'ק״ג',
         poUnitPrice: 12,
         invoiceUnitPrice: 12,
-        status: 'qty_diff', // billed 8 kg, 7.5 kg arrived (INV-7821)
+        // Billed 8 kg = ordered 8 kg: the invoice matches the order. That only 7.5 kg
+        // arrived is what the receiver records on the Delivery Check (RCV-01/34);
+        // deltaIls carries that short's value for the invoices-page audit.
+        status: 'matched',
         deltaIls: (8 - 7.5) * 12,
       },
       {
@@ -325,7 +328,9 @@ export function mockReconcile(supplierId: string): ReconciliationResult {
         invoiceUnit: 'ק״ג',
         poUnitPrice: 195,
         invoiceUnitPrice: 195,
-        status: 'qty_diff', // billed 4 kg, 3.2 kg arrived (INV-9012)
+        // Billed 4 kg = ordered: the short delivery (3.2 kg) is counted at the door;
+        // deltaIls carries its value for the invoices-page audit.
+        status: 'matched',
         deltaIls: 156, // (4 − 3.2) × ₪195, written out to avoid 155.99999…
       },
       {

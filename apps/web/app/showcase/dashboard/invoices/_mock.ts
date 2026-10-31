@@ -251,7 +251,7 @@ function authored(): RecordInput[] {
         at: isoAt(8, 13),
         actor: 'מערכת',
         role: 'system',
-        action: 'זיהתה 4 חריגות',
+        action: 'זיהתה 4 פערים',
         detail: 'מחיר גבוה, כמות חסרה, פריט לא בהזמנה, פריט שלא סופק',
       },
       {
@@ -450,7 +450,7 @@ function authored(): RecordInput[] {
         at: isoAt(11, 7),
         actor: 'מערכת',
         role: 'system',
-        action: 'זיהתה 2 חריגות',
+        action: 'זיהתה 2 פערים',
         detail: 'כמות קצרה + מחיר גבוה',
       },
       {
@@ -537,7 +537,7 @@ function authored(): RecordInput[] {
         at: isoAt(11, 25),
         actor: 'מערכת',
         role: 'system',
-        action: 'זיהתה 2 חריגות',
+        action: 'זיהתה 2 פערים',
         detail: 'מחיר גולדסטאר גבוה, פריט לא בהזמנה (תוויות ללא עלות)',
       },
       {

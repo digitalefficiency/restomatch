@@ -102,6 +102,26 @@ describe('first count: blank ≠ zero, close by owner/manager, price source, fir
     });
   });
 
+  it('the chef counts but sees no ₪ (owner decision): no values, prices, sales or period; no CSV', async () => {
+    const chef = caller(A, 'chef');
+    const view = await chef.inventory.get({ countId: first });
+    expect(view).toMatchObject({ showMoney: false, totalValueAgorot: null, foodSalesExVat: null });
+    for (const l of view.lines) expect(l).toMatchObject({ unitCost: null, valueAgorot: null, priceSource: null });
+    // The count itself still reads: quantities, status and tallies.
+    expect(view.lines.find((l) => l.productId === beef)).toMatchObject({ qty: '5.0000', status: 'ok' });
+    const hist = await chef.inventory.history();
+    expect(hist.length).toBeGreaterThan(0);
+    for (const h of hist) expect(h).toMatchObject({ totalValueAgorot: null, foodSalesExVat: null });
+    await expect(chef.inventory.period()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(chef.inventory.exportCsv({ countId: first })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(chef.inventory.setMeta({ countId: first, foodSalesExVat: '1.00' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    // Owner and manager keep every ₪.
+    const owner = await caller(A, 'manager').inventory.get({ countId: first });
+    expect(owner.showMoney).toBe(true);
+    expect(owner.totalValueAgorot).toBe(60_000);
+    expect((await caller(A, 'manager').inventory.history())[0]!.totalValueAgorot).toBe(60_000);
+  });
+
   it('owner-only amendment of a closed count, with a reason, recomputes the total and is logged', async () => {
     await expect(caller(A, 'manager').inventory.amendLine({ countId: first, productId: beef, qty: '4', reason: 'recount' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await expect(caller(B).inventory.amendLine({ countId: first, productId: beef, qty: '4', reason: 'hijack' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
