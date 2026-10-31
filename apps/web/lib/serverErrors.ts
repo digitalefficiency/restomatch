@@ -28,6 +28,8 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   'dsr.soleOwner': 'soleOwner',
   'admin.lastOwner': 'adminLastOwner',
   'admin.notFound': 'notFound',
+  // /admin shows its own enrol-2FA prompt; this is the generic fallback.
+  admin_requires_2fa: 'forbidden',
   'subscription.inactive': 'subscriptionInactive',
   'quota.exceeded': 'quotaExceeded',
   'entitlement.required': 'entitlementRequired',
