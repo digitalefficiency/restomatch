@@ -279,9 +279,11 @@ describe('invoice_matched activity carries structured metadata', () => {
       .from(activityEvents)
       .where(and(eq(activityEvents.restaurantId, A.restaurantId), eq(activityEvents.entityId, res.matchRunId!)));
     expect(ev!.eventType).toBe('invoice_matched');
-    expect(ev!.title).toBe(`חשבונית ${A.invoiceNumber} הותאמה`);
-    expect(ev!.detail).toContain(A.supplierName);
+    // W2-13: v2 rows carry a machine title and no detail; the feed renders from metadata.
+    expect(ev!.title).toBe(`invoice_matched:${A.invoiceNumber}`);
+    expect(ev!.detail).toBeNull();
     expect(ev!.metadata).toMatchObject({
+      v: 2,
       invoiceId: A.invoiceId,
       invoiceNumber: A.invoiceNumber,
       supplierName: A.supplierName,
@@ -543,8 +545,9 @@ describe('the feed tells the hero’s story (matchActivitySummary)', () => {
     expect(res.poMatched).toBe(false);
     const [ev] = await db.select().from(activityEvents).where(eq(activityEvents.entityId, res.matchRunId!));
     // Pending a PO link, plus the small VAT finding that counts as leak (the hero counts it too).
-    expect(ev!.detail).toBe(`${A.supplierName} · ממתינה לשיוך להזמנה · חריגה אחת · הפסד פוטנציאלי ₪1`);
-    expect(ev!.metadata).toMatchObject({ pendingLink: true, poMatched: false, leakCount: 1, leakIls: 1 });
+    // W2-13: the same facts as metadata (v2), no baked Hebrew/₪ detail.
+    expect(ev!.detail).toBeNull();
+    expect(ev!.metadata).toMatchObject({ v: 2, supplierName: A.supplierName, pendingLink: true, poMatched: false, leakCount: 1, leakIls: 1, leakAgorot: 100 });
   });
 });
 
