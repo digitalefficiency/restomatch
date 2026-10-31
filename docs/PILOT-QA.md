@@ -17,10 +17,12 @@ against the pilot customer's tenant or the demo tenant. Files: `scripts/pilot-la
 ## What the journey asserts (owner decisions)
 
 - No "1.5%" and no "יעד" (target) on any screen it visits.
-- Chef and receiver see no ₪ (receiver on a Pixel 7 phone context; office roles at 1440 px).
-- Chef and orders: `CHEF_CAN_CREATE_ORDERS = false` in `apps/web/e2e/pilot/support.ts` (owner
-  decision for the pilot). The chef sends to the manager, who records the order. Step 7b expects
-  the wizard refused, and is fixme until W1-11 hides the entry and rejects it server-side.
+- The receiver sees no ₪; the chef sees ₪ only on the orders screens (receiver on a Pixel 7
+  phone context; office roles at 1440 px).
+- Chef and orders: `CHEF_CAN_CREATE_ORDERS = true` in `apps/web/e2e/pilot/support.ts` (owner
+  decision, 31.10). The chef creates orders freely, with no manager approval, and sees prices and
+  totals on the orders screens only. Everywhere else the chef sees no ₪. Step 7b is fixme until
+  W1-11 opens chef order writes (route, nav, server).
 - ₪ amounts are never left-aligned in RTL. Each worker signs in with their own email and password.
 - Terminology: מרכזת / פער / דרישת זיכוי / קבלת סחורה (`TERMINOLOGY` in `support.ts`).
 - The cookie banner shows on a fresh visit; `/accessibility` and `/privacy` return 200.
@@ -30,7 +32,7 @@ against the pilot customer's tenant or the demo tenant. Files: `scripts/pilot-la
 Steps that wait on an unmerged PR are `test.fixme`, with the PR named in `WAITS`
 (`pilot-journey.spec.ts`):
 - 5b (6 MB photo upload) waits on W1-06's image shrink.
-- 7b (chef refused the order wizard) waits on W1-11.
+- 7b (the chef places an order and sees ₪ on the orders screens) waits on W1-11.
 - 8, 9 and 11 (approve/reject/undo, the claims letter, a manual line on an OCR-failed invoice) wait
   on S2's manual invoice lines. Without OCR keys, a fresh tenant gets no invoice lines.
 

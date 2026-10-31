@@ -10,11 +10,10 @@ import { expect, type Browser, type BrowserContext, type Locator, type Page, typ
 /* ── owner decisions (assertions read these) ───────────────────────────────── */
 
 /**
- * Can the chef create an order? Owner decision for the pilot (orchestrator, 31.10): NO. The chef
- * sends to the manager and the manager records; the sidebar spec hides chef order entry until
- * wave 2, which also keeps ₪ away from the chef. The journey expects the order wizard refused.
+ * Can the chef create an order? Owner decision (31.10, final): YES — freely, no manager approval.
+ * The chef sees prices and totals on the ORDERS screens only; everywhere else the chef sees no ₪.
  */
-export const CHEF_CAN_CREATE_ORDERS = false;
+export const CHEF_CAN_CREATE_ORDERS = true;
 
 /** No target anywhere: the 1.5% pilot target and the word "יעד" must not reach a screen. */
 export const FORBIDDEN_TARGET_COPY: readonly RegExp[] = [/1\.5\s*%/, /יעד/];

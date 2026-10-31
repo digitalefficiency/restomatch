@@ -51,11 +51,11 @@ const WAITS = {
   uploadShrink: 'W1-06 image shrink (6 MB phone photo) — not on main + #167',
   /** S2: manual invoice lines — the only way a non-demo tenant gets findings without OCR. */
   manualLines: "S2's manual invoice lines — without them a fresh tenant has no invoice lines, so no findings",
-  /** W1-11: hide chef order entry + reject it server-side (CHEF_CAN_CREATE_ORDERS = false). */
-  chefOrderRefusal: 'W1-11 chef order entry hidden + server-side reject — not on main + #167',
+  /** W1-11: open order writes to the chef (route, nav entry, server: managerProcedure today). */
+  chefOrders: 'W1-11 chef order writes (route + nav + server) — not on main + #167',
 } as const;
-/** Flip to true once W1-11's chef refusal is on the tested tree (then step 7b asserts it). */
-const CHEF_REFUSAL_ON_TREE = false;
+/** Flip to true once W1-11's chef ordering is on the tested tree (then step 7b runs). */
+const CHEF_ORDERS_ON_TREE = false;
 
 /** Stage C re-runs on one long-lived tenant: tag the names so each run's rows are its own. */
 const RUN_ID = process.env.PILOT_RUN_ID ?? 'adhoc';
@@ -246,8 +246,8 @@ test('3 · catalog import from a Hebrew-header CSV — "1,250" becomes ₪1,250'
   expectCleanConsole('owner', 'catalog');
 });
 
-async function placeRecordOnlyOrder(page: Page, date: string): Promise<string> {
-  await visit(page, 'owner', '/dashboard/orders/new');
+async function placeRecordOnlyOrder(page: Page, date: string, role: Role = 'owner'): Promise<string> {
+  await visit(page, role, '/dashboard/orders/new');
   await main(page).getByRole('button', { name: SUPPLIER_PRODUCE }).click();
   await main(page).getByRole('button', { name: /^עגבניה שרי/ }).click();
   await main(page).getByRole('button', { name: /^שמן זית 18 ליטר/ }).click();
@@ -347,26 +347,30 @@ test('7 · chef sees no ₪ and no target', async ({}, info) => {
   expectCleanConsole('chef', 'chef home');
 });
 
-test('7b · chef and /dashboard/orders/new match CHEF_CAN_CREATE_ORDERS', async ({}, info) => {
-  test.fixme(!CHEF_CAN_CREATE_ORDERS && !CHEF_REFUSAL_ON_TREE, WAITS.chefOrderRefusal);
+test('7b · chef orders per CHEF_CAN_CREATE_ORDERS; ₪ on the orders screens only', async ({}, info) => {
+  test.fixme(CHEF_CAN_CREATE_ORDERS !== CHEF_ORDERS_ON_TREE, WAITS.chefOrders);
   const page = await as('chef');
-  const res = await page.goto('/dashboard/orders/new');
-  await page.waitForLoadState('networkidle').catch(() => {});
-  const text = await mainText(page);
-  await shot(page, info, '7b-chef-orders-new');
   if (CHEF_CAN_CREATE_ORDERS) {
-    expect(text, 'chef reaches the order wizard').toContain('הזמנה חדשה');
-    expect(text).toContain(SUPPLIER_PRODUCE);
+    // Freely, no manager approval: the record-only order goes straight to "marked sent".
+    await placeRecordOnlyOrder(page, israelDate(0), 'chef');
+    expect(await mainText(page), 'chef sees totals on the order page').toMatch(/\d\s?₪|₪\s?\d/);
+    await shot(page, info, '7b-chef-order');
+    expect(await visit(page, 'chef', '/dashboard/orders'), 'chef sees prices on the orders list').toMatch(/\d\s?₪|₪\s?\d/);
+    await expect(page.getByRole('navigation').first(), 'order entry in the chef nav').toContainText('הזמנות');
+    // …and still no ₪ anywhere else the chef goes.
+    await visit(page, 'chef', '/dashboard');
+    await expectNoShekel(page, 'chef home (after ordering)');
   } else {
-    // Refused: a 403 page or a redirect away from the wizard — never the wizard itself.
+    const res = await page.goto('/dashboard/orders/new');
+    await page.waitForLoadState('networkidle').catch(() => {});
+    const text = await mainText(page);
+    await shot(page, info, '7b-chef-orders-new');
     const refused = (res?.status() ?? 0) === 403 || !page.url().includes('/dashboard/orders/new') || /403|אין גישה|לא פתוח/.test(text);
     expect(refused, 'chef is refused the order wizard').toBe(true);
-    expect(text, 'no supplier picker for the chef').not.toContain(SUPPLIER_PRODUCE);
-    await expect(page.getByRole('navigation').first(), 'no order entry in the chef nav').not.toContainText('הזמנה חדשה');
     const list = errors.get('chef') ?? [];
     for (let i = list.length - 1; i >= 0; i--) if (/status of 403/.test(list[i]!)) list.splice(i, 1);
   }
-  expectCleanConsole('chef', 'chef orders/new');
+  expectCleanConsole('chef', 'chef orders');
 });
 
 test.fixme('8 · manager approves one finding, rejects one with a note, undoes within 10 s', async () => {
