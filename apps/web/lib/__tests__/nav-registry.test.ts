@@ -260,7 +260,7 @@ describe('bottom bars', () => {
     expect(bar(viewer('receiver'))).toEqual(['home:today', 'receiving:receipts']);
     expect(bar(viewer('chef'))).toEqual(['home:today', 'inventory:count', 'recipes:dishes']);
     expect(bar(viewer('manager'))).toEqual(['home:today', 'orders:orders', 'receiving:receive', 'approvals:approvals']);
-    expect(bar(viewer('owner'))).toEqual(['home:home', 'approvals:approvals', 'leaks:leaks', 'orders:orders']);
+    expect(bar(viewer('owner'))).toEqual(['home:home', 'approvals:approvals', 'leaks:prices', 'orders:orders']);
     expect(bar(viewer('bookkeeper'))).toEqual(['home:home', 'approvals:approvals', 'payRun:payments', 'inbox:invoices']);
   });
 
@@ -306,6 +306,19 @@ describe('matching, field routes, active item, crumbs, titles', () => {
     for (const p of ['/dashboard', '/dashboard/receiving', '/dashboard/orders', '/dashboard/orders/abc']) {
       expect(isFieldPath(p), p).toBe(false);
     }
+  });
+
+  it('"דליפה" names only the monthly leak; price creep is "מחירים שעלו" (nav, titles, search)', () => {
+    const t = createTranslator('he', nav) as (k: string) => string;
+    expect(t('links.leaks')).toBe('מחירים שעלו');
+    expect(t('bar.prices')).toBe('מחירים');
+    expect(t('links.leaksBreakdown')).toContain('דליפה');
+    const aliases = routeByKey('leaks')!.aliases ?? [];
+    expect(aliases.some((a) => a.includes('דליפ'))).toBe(false);
+    const screens = navGroups(viewer('owner')).flatMap((g) =>
+      g.items.map((d) => ({ key: d.key, href: d.path, label: t(`links.${d.key}`), aliases: d.aliases ?? [] })),
+    );
+    expect(buildScreenOptions('מחירים', screens)[0]?.id).toBe('leaks');
   });
 
   it('a detail page lights its nav parent', () => {

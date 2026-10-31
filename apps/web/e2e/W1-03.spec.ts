@@ -23,7 +23,7 @@ const BARS: Record<Role, { he: string[]; en: string[] }> = {
   receiver: { he: ['היום', 'קבלות', 'עוד'], en: ['Today', 'Receipts', 'More'] },
   chef: { he: ['היום', 'ספירה', 'מנות', 'עוד'], en: ['Today', 'Count', 'Dishes', 'More'] },
   manager: { he: ['היום', 'הזמנות', 'קבלה', 'אישורים', 'עוד'], en: ['Today', 'Orders', 'Receive', 'Approvals', 'More'] },
-  owner: { he: ['בית', 'אישורים', 'דליפות', 'הזמנות', 'עוד'], en: ['Home', 'Approvals', 'Leaks', 'Orders', 'More'] },
+  owner: { he: ['בית', 'אישורים', 'מחירים', 'הזמנות', 'עוד'], en: ['Home', 'Approvals', 'Prices', 'Orders', 'More'] },
   bookkeeper: { he: ['בית', 'אישורים', 'תשלומים', 'חשבוניות', 'עוד'], en: ['Home', 'Approvals', 'Payments', 'Invoices', 'More'] },
 };
 

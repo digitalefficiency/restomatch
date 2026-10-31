@@ -24,7 +24,7 @@ export type BarLabel =
   | 'today'
   | 'home'
   | 'approvals'
-  | 'leaks'
+  | 'prices'
   | 'orders'
   | 'receive'
   | 'receipts'

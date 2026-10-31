@@ -8,8 +8,9 @@ export const routes: RouteDef[] = [
     rank: 10,
     roles: ['owner', 'manager', 'bookkeeper'],
     nav: 'item',
-    bar: { owner: { slot: 3, label: 'leaks' } },
-    aliases: ['דליפות', 'בלש דליפות', 'leak', 'leaks', 'detective'],
+    bar: { owner: { slot: 3, label: 'prices' } },
+    // Price creep (the detective): "דליפה" names only the monthly leak.
+    aliases: ['מחירים', 'מחירים שעלו', 'זחילת מחירים', 'בלש', 'price', 'prices', 'price creep', 'detective'],
   },
   { key: 'leaksBreakdown', path: '/dashboard/leaks/breakdown', group: 'leaks', parent: 'leaks', nav: 'linked' },
   {
