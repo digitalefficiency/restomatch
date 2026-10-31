@@ -1,4 +1,5 @@
 import { Droplets, FileWarning, Percent, Receipt } from 'lucide-react';
+import { auth } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
 import { formatNumber, formatPercent } from '@/lib/i18n/format';
@@ -22,6 +23,7 @@ import {
 } from '@/lib/components/views';
 import { discrepancyLabel, displayName } from '../approvals/vocab';
 import { LeakStateNote, leakStateOf } from './leak-state';
+import { noDataCtaFor } from './states';
 
 /**
  * Leak explorer: the hero leak for any period, sliced by supplier / category /
@@ -123,7 +125,9 @@ export async function LeakExplorer({ view }: { view: ViewState }) {
           className="aria-busy:opacity-60 motion-safe:transition-opacity"
         >
           {state === 'noData' ? (
-            <LeakStateNote state="noData" labels={{ title: tl('states.noData'), hint: tl('states.noDataHint'), cta: tl('states.noDataCta') }} />
+            <LeakStateNote state="noData" labels={{ title: tl('states.noData'), hint: tl('states.noDataHint') }}
+              cta={noDataCtaFor(((await auth())?.user as { role?: string } | undefined)?.role, tl('states.noDataCta'))}
+            />
           ) : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {/* T1 — the leak: whole shekels, the exact figure in the title (and read out). */}

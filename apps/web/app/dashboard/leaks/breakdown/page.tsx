@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { ArrowLeft, ArrowRight, ExternalLink, FileBarChart, FileCheck2, FileText, Hourglass, Info } from 'lucide-react';
+import { auth } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
 import { formatDate, formatNumber, formatPercent } from '@/lib/i18n/format';
@@ -9,7 +10,7 @@ import { approvals as approvalsNs } from '@/lib/i18n/messages/approvals';
 import { Badge, Card, SectionHeader, type BadgeTone } from '@/lib/components';
 import { sumAgora } from '../claims/letters';
 import { LeakStateNote, leakStateOf } from '../leak-state';
-import { zeroNoteOf } from '../states';
+import { noDataCtaFor, zeroNoteOf } from '../states';
 import {
   discrepancyLabel,
   displayName,
@@ -207,7 +208,9 @@ export default async function LeakBreakdownPage({
       </Card>
 
       {state === 'noData' ? (
-        <LeakStateNote state="noData" labels={{ title: t('states.noData'), hint: t('states.noDataHint'), cta: t('states.noDataCta') }} />
+        <LeakStateNote state="noData" labels={{ title: t('states.noData'), hint: t('states.noDataHint') }}
+          cta={noDataCtaFor(((await auth())?.user as { role?: string } | undefined)?.role, t('states.noDataCta'))}
+        />
       ) : leaking.length === 0 ? (
         <LeakStateNote
           state="clean"
