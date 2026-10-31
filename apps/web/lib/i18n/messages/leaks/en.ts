@@ -225,4 +225,25 @@ export const en: Shape<typeof he> = {
     method:
       'Method: warn or block discrepancies against orders and delivery notes, capped at each invoice’s total. Excludes "Price below expected" and "Waiting for a PO link". Spend counts checked invoices only.',
   },
+  why: {
+    price: 'billed {actual} × {qty} {unit}',
+    priceNoQty: 'billed {actual} per unit',
+    priceP90: 'billed {actual} × {qty} {unit}',
+    priceP90NoQty: 'billed {actual} per unit',
+    expected: 'expected {expected}',
+    sourcePo: 'ordered at {expected} ({po}, {date})',
+    expectedP90: "above the supplier's usual price (90 days): {expected}",
+    sourceP90: "above the supplier's usual price (90 days): {expected}",
+    p90Why: "higher than 90% of this supplier's prices in the last 90 days",
+    equals: 'difference {amount}',
+    qtyOver: 'billed {billed} {unit}, received {received}',
+    qtyShort: 'ordered {ordered} {unit}, received {received}',
+    threshold: 'threshold {tolerance}',
+    capped: 'capped at the invoice total',
+    unavailable: 'Breakdown unavailable',
+  },
+  drill: {
+    open: '{label} {amount} — {count, plural, =0 {no rows} one {open 1 row} other {open # rows}}',
+    openNoCount: '{label} {amount} — open the breakdown',
+  },
 };
