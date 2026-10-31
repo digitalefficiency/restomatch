@@ -11,12 +11,13 @@ import {
   plans,
   restaurants,
   sql,
+  userCredentials,
   subscriptions,
   usageCounters,
   users,
   type PlanLimits,
 } from '@restomatch/db';
-import { adminProcedure, router } from '../trpc';
+import { adminProcedure, authedProcedure, router } from '../trpc';
 import { recordAudit } from '../audit';
 import { appError } from '../errors';
 import { usagePeriod } from '../entitlements';
@@ -81,6 +82,22 @@ function featureState(settings: unknown) {
  * of tenant data ('admin.viewed', one row per tenant viewed).
  */
 export const adminRouter = router({
+  /**
+   * Whether the caller's own login has an authenticator (TOTP) enrolled — the
+   * console's precondition (adminProcedure refuses with admin_requires_2fa
+   * without it). /admin asks first so it can show the enrol prompt without a
+   * refused call. Reveals only the caller's own enrolment, nothing cross-tenant.
+   */
+  twoFactorStatus: authedProcedure.query(async ({ ctx }) => {
+    const conn = ctx.adminDb ?? ctx.db;
+    const [cred] = await conn
+      .select({ totpEnabledAt: userCredentials.totpEnabledAt })
+      .from(userCredentials)
+      .where(eq(userCredentials.userId, ctx.session.userId))
+      .limit(1);
+    return { enabled: cred?.totpEnabledAt != null };
+  }),
+
   /** All restaurants with their resolved plan, status, usage, member count. */
   listRestaurants: adminProcedure.query(async ({ ctx }) => {
     const rows = await ctx.db

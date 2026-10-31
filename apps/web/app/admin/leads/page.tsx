@@ -8,6 +8,8 @@ import { LeadEraseButton } from './erase-button';
 
 export default async function AdminLeadsPage() {
   const caller = await createServerCaller();
+  // No authenticator yet: show the enrol prompt instead of a refused admin call.
+  if (!(await caller.admin.twoFactorStatus()).enabled) return <TwoFactorRequired />;
   let leads;
   try {
     leads = await caller.admin.listLeads();

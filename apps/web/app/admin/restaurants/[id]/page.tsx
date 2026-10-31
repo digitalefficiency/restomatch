@@ -34,6 +34,8 @@ function overridesSummary(o: Overrides, t: (k: AdminKey) => string): string {
 export default async function AdminRestaurantDetail({ params }: PageProps) {
   const { id } = await params;
   const caller = await createServerCaller();
+  // No authenticator yet: show the enrol prompt instead of a refused admin call.
+  if (!(await caller.admin.twoFactorStatus()).enabled) return <TwoFactorRequired />;
   let data;
   try {
     data = await caller.admin.getRestaurant({ restaurantId: id });

@@ -89,6 +89,14 @@ describe('adminProcedure requires an enrolled authenticator (TOTP)', () => {
     });
   });
 
+  it('twoFactorStatus reports only the caller\'s own enrolment (so /admin can show the prompt without a refused call)', async () => {
+    expect(await adminCaller(adminUserId).admin.twoFactorStatus()).toEqual({ enabled: false });
+    expect(await adminCaller(T.ownerUserId).admin.twoFactorStatus()).toEqual({ enabled: false });
+    await enrolTotp(adminUserId);
+    expect(await adminCaller(adminUserId).admin.twoFactorStatus()).toEqual({ enabled: true });
+    expect(await adminCaller(T.ownerUserId).admin.twoFactorStatus()).toEqual({ enabled: false }); // not someone else's
+  });
+
   it('a platform admin with TOTP enrolled gets in', async () => {
     await enrolTotp(adminUserId);
     await expect(adminCaller(adminUserId).admin.listRestaurants()).resolves.toBeDefined();

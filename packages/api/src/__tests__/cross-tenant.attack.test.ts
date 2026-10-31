@@ -179,6 +179,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'admin.setMemberRole': 'admin-denial',
   'admin.listLeads': 'admin-denial',
   'admin.setFeatures': 'admin-denial',
+  'admin.twoFactorStatus':
+    'authedProcedure read of the CALLER\'s own user_credentials.totp_enabled_at only (keyed to ctx.session.userId, no client input) — returns one boolean, no tenant data; lets /admin show the enrol-2FA prompt without a refused admin call.',
   // Phase 5+6 additions
   'settings.get': 'isolation',
   'settings.update': 'isolation',

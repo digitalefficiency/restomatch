@@ -10,6 +10,8 @@ type AdminKey = MessageKey<typeof admin.he>;
 
 export default async function AdminRestaurantsPage() {
   const caller = await createServerCaller();
+  // No authenticator yet: show the enrol prompt instead of a refused admin call.
+  if (!(await caller.admin.twoFactorStatus()).enabled) return <TwoFactorRequired />;
   let restaurants;
   try {
     restaurants = await caller.admin.listRestaurants();
