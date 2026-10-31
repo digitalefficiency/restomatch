@@ -54,6 +54,20 @@ test('explorer: bars total = Σ bars; the T1 tile carries the exact leak, the ca
   await expect(page.locator('main')).toContainText(/מול 1–\d+/);
 });
 
+test('no data yet: the CTA starts where the home does (receiving), never the flag-gated inbox', async ({ page }) => {
+  // Two years back has no checked invoice — the state a fresh pilot restaurant opens on day one.
+  for (const url of ['/dashboard/leaks/breakdown?m=-24', '/dashboard/leaks?p=custom&from=2020-01-01&to=2020-01-31']) {
+    await page.goto(url);
+    await expect(page.getByTestId('leak-state'), url).toHaveAttribute('data-state', 'noData');
+    await expect(page.getByTestId('leak-state-cta'), url).toHaveAttribute('href', '/dashboard/receiving');
+    await expect(page.locator('main a[href="/dashboard/inbox"]'), url).toHaveCount(0);
+  }
+  // The target exists for every tenant (no feature flag): it opens, no 404.
+  await page.getByTestId('leak-state-cta').click();
+  await page.waitForURL(/\/dashboard\/receiving/);
+  await expect(page.getByText('404', { exact: true })).toHaveCount(0);
+});
+
 test('proof: the top catches plus "and N more" add up to the number', async ({ page }) => {
   // An independent source: the breakdown's per-invoice rows (the proof's "rest" is derived, so it can't check itself).
   await page.goto('/dashboard/leaks/breakdown');

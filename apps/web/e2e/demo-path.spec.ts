@@ -516,16 +516,18 @@ test('B · owner: hero ₪, leak detective, approvals, claims, report, chain, br
 
     await page.getByRole('link', { name: m.leaks.claims.open }).first().click();
     await page.waitForURL(/\/dashboard\/leaks\/claims/);
-    const totals = page.getByText(m.leaks.claims.total, { exact: true });
-    const count = await totals.count();
-    expect(count, 'credit letters on the claims page').toBeGreaterThan(0);
-    let sum = 0;
-    for (let i = 0; i < count; i += 1) {
-      const row = totals.nth(i).locator('xpath=ancestor::tr[1]');
-      sum += amounts(await row.innerText()).at(-1)!;
-    }
-    n.claimsTotal = Math.round(sum * 100) / 100;
-    expect(n.claimsTotal, 'Σ credit letters vs approvals "amount at risk"').toBe(n.atRisk);
+    // Decision 18: undecided (open / escalated) lines are never put in a letter — they are the
+    // claims page's "decide" banner. So the approvals "amount at risk" (still undecided) is that
+    // banner's ₪, not Σ letters. Demo-seed invariant (the approvals queue could in general hold
+    // other months), as strict as before: to the agora.
+    const undecided = page.getByTestId('claims-undecided');
+    await expect(undecided).toBeVisible();
+    expect(Number(await undecided.getAttribute('data-amount')), 'claims "undecided" ₪ vs approvals "amount at risk"').toBe(n.atRisk);
+    // The letters themselves (what WAS decided to claim): one total per letter, and the page summary is their Σ.
+    const lt = await page.getByTestId('letter-total').evaluateAll((es) => es.map((e) => Number(e.getAttribute('data-amount'))));
+    expect(lt.length, 'credit letters on the claims page').toBeGreaterThan(0);
+    n.claimsTotal = Math.round(lt.reduce((a, b) => a + Math.round(b * 100), 0)) / 100;
+    expect(n.claimsTotal, 'Σ credit letters vs the claims page summary').toBe(Number(await page.getByTestId('claims-summary').getAttribute('data-amount')));
     // The "From:" line must be the restaurant presenting, not another branch (pack 7:30 risk).
     const froms = await page.getByText(new RegExp(`^${m.leaks.claims.from.replace('{restaurant}', '')}`)).allInnerTexts();
     for (const f of froms) expect(f.trim(), 'credit letter "From:" line').toBe(m.leaks.claims.from.replace('{restaurant}', MAIN_BRANCH));

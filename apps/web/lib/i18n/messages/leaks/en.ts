@@ -16,8 +16,8 @@ export const en: Shape<typeof he> = {
   },
   states: {
     noData: 'No invoices checked in this period yet',
-    noDataHint: 'Once you upload an invoice and it is matched to an order, the leak is calculated here.',
-    noDataCta: 'Upload an invoice',
+    noDataHint: 'Once you snap an invoice at receiving and it is matched to an order, the leak is calculated here.',
+    noDataCta: 'Snap an invoice',
     clean: 'No leak · {count} invoices checked ✓',
     cleanHint: 'Every checked invoice matches its order and what arrived.',
     unavailable: 'Not available · try again',

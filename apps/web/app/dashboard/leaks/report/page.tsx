@@ -18,6 +18,7 @@ import { DeltaBadge, ViewToolbar, compareSpanLabel, isThinBase, parseView } from
 import { approvedNotClaimed, sumAgora } from '../claims/letters';
 import { ALL_CLAIMS } from '../../recovery/logic';
 import { LeakStateNote, leakStateOf } from '../leak-state';
+import { noDataCtaFor } from '../states';
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 
@@ -261,7 +262,9 @@ export default async function LeakReportPage({
         </section>
 
         {state === 'noData' ? (
-          <LeakStateNote state="noData" labels={{ title: t('states.noData'), hint: t('states.noDataHint'), cta: t('states.noDataCta') }} />
+          <LeakStateNote state="noData" labels={{ title: t('states.noData'), hint: t('states.noDataHint') }}
+            cta={noDataCtaFor(role, t('states.noDataCta'))}
+          />
         ) : state === 'clean' ? (
           <LeakStateNote
             state="clean"

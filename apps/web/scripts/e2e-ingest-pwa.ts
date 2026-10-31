@@ -206,6 +206,14 @@ async function prodFlagOff(browser: Browser, rid: string) {
       (await page.getByTestId('ingest-channels').count()) === 0 &&
       (await page.getByText('404', { exact: true }).count()) > 0;
     check(notFoundUi && (res?.status() ?? 500) < 500, `flag off: /dashboard/inbox renders the 404 page (HTTP ${res?.status()}), no inbox data`);
+    // The leak pages' "no data yet" CTA (a fresh pilot restaurant, ingest flags off) must not lead to the inbox 404.
+    await page.goto(`${BASE}/dashboard/leaks/breakdown?m=-24`, { waitUntil: 'networkidle' });
+    check((await page.getByTestId('leak-state').getAttribute('data-state')) === 'noData', 'flag off: an empty month shows the breakdown noData state');
+    check((await page.locator('main a[href="/dashboard/inbox"]').count()) === 0, 'flag off: the breakdown noData state has no link to /dashboard/inbox');
+    check(
+      (await page.getByTestId('leak-state-cta').getAttribute('href')) === '/dashboard/receiving',
+      'flag off: the breakdown noData CTA goes to receiving (as the home does)',
+    );
     await page.goto(`${BASE}/dashboard/receiving`, { waitUntil: 'networkidle' });
     check((await page.locator('link[rel="manifest"]').count()) === 0, 'flag off: no PWA manifest on receiving');
     await context.close();

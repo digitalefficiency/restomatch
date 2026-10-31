@@ -1,3 +1,6 @@
+import type { UserRole } from '@restomatch/db';
+import { canFollowPath } from '@/lib/nav/visibility';
+
 /**
  * The three honest states of a leak figure (rubric A4), pure: no checked
  * invoice yet → `noData` (never a green or red ₪0), nothing leaked → `clean`,
@@ -33,4 +36,21 @@ export function zeroNoteOf(
       ((line.poLineId != null && o.poLineId === line.poLineId) || (line.poLineId == null && line.productId != null && o.productId === line.productId)),
   );
   return billed ? 'billedShort' : 'none';
+}
+
+/**
+ * Where the "no checked invoice yet" CTA leads: receiving — where invoices are
+ * snapped, the same start the home gives this state, and a route with no feature
+ * flag, so it exists for a fresh tenant (the pilot starts empty, ingest flags off).
+ */
+export const NO_DATA_CTA_HREF = '/dashboard/receiving';
+
+/**
+ * The noData CTA for this role, or undefined (the hint alone, as on the home) when
+ * the link would not lead anywhere for them — checked with every flag OFF, so a
+ * flag-gated page (the inbox) can never be the target.
+ */
+export function noDataCtaFor(role: string | null | undefined, label: string): { label: string; href: string } | undefined {
+  if (!role) return undefined;
+  return canFollowPath({ role: role as UserRole, features: [] }, NO_DATA_CTA_HREF) ? { label, href: NO_DATA_CTA_HREF } : undefined;
 }
