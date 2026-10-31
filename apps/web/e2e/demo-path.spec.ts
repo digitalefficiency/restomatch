@@ -484,7 +484,11 @@ test('B · owner: hero ₪, leak detective, approvals, claims, report, chain, br
   await test.step('leak detective (בלש דליפות): same ₪ / % / spend, price creep', async () => {
     await clickNav(page, m.nav.links.leaks, '/dashboard/leaks');
     await expect(page.locator('main h1, main h2').first()).toBeVisible();
-    expect(num(await valueAfter(page, m.views.kpis.leak)), 'leak detective ₪ vs dashboard hero').toBe(n.leak);
+    // The default view is this month, so the T1 tile reads "דליפה החודש" (W1-08: the label names its period).
+    expect(num(await valueAfter(page, m.views.kpis.leakMonth)), 'leak detective ₪ vs dashboard hero').toBe(n.leak);
+    // The exact leak (to the agora) behind the whole-shekel tiles — the breakdown shows it at 2 dp.
+    n.leakExact = Number(await page.getByTestId('explorer-leak').getAttribute('data-amount'));
+    expect(Math.round(n.leakExact), 'leak detective exact ₪ rounds to the dashboard hero').toBe(n.leak);
     expect(num(await valueAfter(page, m.views.kpis.pct)), 'leak detective % vs dashboard hero').toBe(n.pct);
     expect(num(await valueAfter(page, m.views.kpis.spend)), 'leak detective spend vs dashboard hero').toBe(n.spend);
     // Price creep: the beer keg (+10.6% in the pack) is the worst offender.
@@ -511,7 +515,9 @@ test('B · owner: hero ₪, leak detective, approvals, claims, report, chain, br
   await test.step('what is behind the number → credit letters', async () => {
     await goto(page, '/dashboard/leaks/breakdown');
     const total = amounts(await page.locator('main').last().innerText())[0];
-    expect(total, 'breakdown headline ₪ vs dashboard hero').toBe(n.leak);
+    // W1-08: the breakdown headline is the exact leak at 2 dp, next to its rows (the hero shows whole ₪).
+    expect(total, 'breakdown headline ₪ vs the exact leak (to the agora)').toBe(n.leakExact);
+    expect(Math.round(total!), 'breakdown headline ₪ vs dashboard hero').toBe(n.leak);
     await checkScreen(page, errors, L, 'B5-breakdown');
 
     await page.getByRole('link', { name: m.leaks.claims.open }).first().click();
@@ -539,7 +545,9 @@ test('B · owner: hero ₪, leak detective, approvals, claims, report, chain, br
     const reportText = await page.locator('main').last().innerText();
     expect(reportText).toContain(m.leaks.report.headline);
     const afterHeadline = reportText.slice(reportText.indexOf(m.leaks.report.headline));
-    expect(amounts(afterHeadline)[0], 'report headline ₪ vs dashboard hero').toBe(n.leak);
+    // W1-08: the report headline is the exact leak at 2 dp (it sits on a document with 2-dp tables).
+    expect(amounts(afterHeadline)[0], 'report headline ₪ vs the exact leak (to the agora)').toBe(n.leakExact);
+    expect(Math.round(amounts(afterHeadline)[0]!), 'report headline ₪ vs dashboard hero').toBe(n.leak);
     await expect(page.locator('main').last()).toContainText(MAIN_BRANCH);
     await checkScreen(page, errors, L, 'B7-report');
   });
