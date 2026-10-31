@@ -6,13 +6,13 @@ export const routes: RouteDef[] = [
     // approvals, the inbox and the leak drill-down. Never the chef or the receiver
     // (owner decision: they see no ₪; the Delivery Check wizard reads
     // receiving.getInvoice over tRPC, not this page). The server-side ₪ strip is H-11.
-    // Gate-only until the invoice register (W2-02) gives it a page.
+    // PILOT (W2-02, train B): the page lists invoices waiting for lines (reached
+    // from the home "מחכה לך" row). W2-02's register (#217) makes it a nav item.
     key: 'invoices',
     path: '/dashboard/invoices',
     group: 'money',
     roles: ['owner', 'manager', 'bookkeeper'],
     nav: 'hidden',
-    gateOnly: true,
   },
   {
     key: 'invoiceDetail',
