@@ -12,6 +12,7 @@ import { buildProof } from '@/lib/leakProof';
 import { discrepancyLabel, displayName } from '../../approvals/vocab';
 import { PrintButton } from './print-button';
 import { approvedNotClaimed, sumAgora } from '../claims/letters';
+import { ALL_CLAIMS } from '../../recovery/logic';
 
 /**
  * "How did we get to ₪X?" (flag `leakProof`): a print-friendly sheet that
@@ -42,7 +43,7 @@ export default async function LeakProofPage({ searchParams }: { searchParams: Pr
   const restIls = Math.round((hero.leakIls - topIls) * 100) / 100;
   const restCount = Math.max(0, hero.invoicesWithLeak - proof.top.length);
   // "טופל" lines are in "approved to claim" but no letter claims them: name them.
-  const tracked = flags.recovery ? await caller.recovery.list().catch(() => null) : null;
+  const tracked = flags.recovery ? await caller.recovery.list({ limit: ALL_CLAIMS }).catch(() => null) : null;
   const resolved = (tracked ? approvedNotClaimed(breakdown, tracked) : []).map(({ invoice, line }) => ({
     amount: Math.abs(line.deltaAmount),
     type: line.type,

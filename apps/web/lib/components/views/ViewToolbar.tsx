@@ -523,6 +523,18 @@ function ViewSheet({
     if (open && !d.open) d.showModal();
     else if (!open && d.open) d.close();
   }, [open]);
+  // The sheet is phone-only (lg:hidden). Widening past lg while it is open would
+  // leave a hidden MODAL dialog — the whole page inert — so it closes itself.
+  useEffect(() => {
+    if (!open || typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const onChange = () => {
+      if (mq.matches) onClose();
+    };
+    onChange();
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, [open, onClose]);
   return (
     <dialog
       ref={ref}

@@ -105,7 +105,10 @@ export function LeakCardBody({
           </div>
           {!print && (
             <LinkButton href={`/dashboard/leaks/claims?sup=${supplierId}`} size="sm" data-testid="supplier-claims-cta">
-              {tl('claims.openSupplierLetter', { amount: ils(card.openAgorot, locale) })}
+              {/* The ₪ the letter it opens prints — never the 90-day open total. */}
+              {card.letterAgorot > 0
+                ? tl('claims.openSupplierLetter', { amount: ils(card.letterAgorot, locale) })
+                : tl('claims.openSupplierLetterPlain')}
             </LinkButton>
           )}
         </section>

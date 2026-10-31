@@ -13,9 +13,10 @@ import { Badge, Card, EmptyState, SectionHeader } from '@/lib/components';
 import { discrepancyLabel, displayName } from '../../approvals/vocab';
 import { PrintButton } from './print-button';
 import { LetterActions } from './letter-actions';
+import { DeferredProvider } from '../../recovery/deferred';
 import { addDays, buildLetters, daysLeft, sumAgora, type LetterLine, type SupplierLetter } from './letters';
 import { lineMathText } from './why';
-import { ANSWER_DAYS } from '../../recovery/logic';
+import { ALL_CLAIMS, ANSWER_DAYS } from '../../recovery/logic';
 
 const REASON_TYPES = [
   'PRICE_HIGHER',
@@ -62,7 +63,7 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
     caller.owner.viewOptions(),
   ]);
   // Tracker claims (any status: `claimed` get letters, `letter_sent` show as sent, the rest are handled).
-  const tracked = flags.recovery ? await caller.recovery.list().catch(() => []) : [];
+  const tracked = flags.recovery ? await caller.recovery.list({ limit: ALL_CLAIMS }).catch(() => []) : [];
   const history = flags.recovery
     ? (
         await Promise.all(
@@ -246,8 +247,6 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
                 days: formatNumber(ANSWER_DAYS, locale),
               }),
               undoMoved: t('claims.undoMoved', { supplier: supplierOf(letter), amount: ils(letter.total) }),
-              undo: tr('undo.cta'),
-              seconds: tr('undo.seconds'),
               failed: tr('actions.failed'),
               notTracked: t('claims.notTracked'),
             }}
@@ -306,7 +305,9 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
       ) : (
         <div className="space-y-6">
           {letters.length > 0 ? <p className="text-xs text-subtle print:hidden">{t('claims.note')}</p> : null}
-          {letters.map(renderLetter)}
+          <DeferredProvider undoLabel={tr('undo.cta')} secondsLabel={tr('undo.seconds')}>
+            <div className="space-y-6">{letters.map(renderLetter)}</div>
+          </DeferredProvider>
 
           {sent.length > 0 ? (
             <section aria-labelledby="sent-letters-title" className="print:hidden" data-testid="sent-letters">

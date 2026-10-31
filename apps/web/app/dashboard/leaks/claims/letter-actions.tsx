@@ -1,11 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Check, Mail, MessageCircle } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
 import { Badge, Button } from '@/lib/components';
-import { UndoBar, useDeferredCommit } from '../../recovery/deferred';
+import { useSharedDeferred } from '../../recovery/deferred';
 import { PrintButton } from './print-button';
 
 /**
@@ -33,20 +32,14 @@ export function LetterActions({
     markSentAria: string;
     sentBadge: string;
     undoMoved: string;
-    undo: string;
-    /** "{seconds}" is filled in. */
-    seconds: string;
     failed: string;
     notTracked: string;
   };
 }) {
-  const router = useRouter();
   const [error, setError] = useState(false);
   const transition = trpc.recovery.transition.useMutation();
-  const deferred = useDeferredCommit({
-    onCommitted: () => router.refresh(),
-    onFailed: () => setError(true),
-  });
+  // One queue + ONE undo bar for all the letters (DeferredProvider on the page).
+  const deferred = useSharedDeferred();
   const pending = claimIds.length > 0 && claimIds.every((id) => deferred.pendingTo(id) === 'letter_sent');
   const wa = `https://wa.me/?text=${encodeURIComponent(whatsappText)}`;
   const mail = `mailto:?subject=${encodeURIComponent(mailSubject)}&body=${encodeURIComponent(whatsappText)}`;
@@ -85,6 +78,7 @@ export function LetterActions({
                 to: 'letter_sent',
                 label: labels.undoMoved,
                 run: () => transition.mutateAsync({ claimIds, to: 'letter_sent' }),
+                onFailed: () => setError(true),
               });
             }}
           >
@@ -100,7 +94,6 @@ export function LetterActions({
           {labels.failed}
         </p>
       ) : null}
-      <UndoBar pending={deferred.pending} onUndo={deferred.undo} undoLabel={labels.undo} countdownLabel={(n) => labels.seconds.replace('{seconds}', String(n))} />
     </div>
   );
 }

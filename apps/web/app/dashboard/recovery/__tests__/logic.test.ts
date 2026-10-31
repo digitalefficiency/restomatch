@@ -4,6 +4,7 @@ import {
   NEXT,
   batchMoves,
   bySupplier,
+  confirmAgorot,
   countdownOf,
   followUps,
   funnelOf,
@@ -102,14 +103,41 @@ describe('follow-up queues (the banner split)', () => {
     const q = followUps(
       [
         { status: 'claimed', outstandingAgorot: 1000, letterSentAt: null, claimedAt: '2026-09-01T00:00:00Z' },
-        { status: 'letter_sent', outstandingAgorot: 2000, letterSentAt: '2026-10-01T00:00:00Z', claimedAt: '2026-09-01T00:00:00Z' },
-        { status: 'letter_sent', outstandingAgorot: 4000, letterSentAt: '2026-10-24T00:00:00Z', claimedAt: '2026-09-01T00:00:00Z' },
+        { status: 'letter_sent', outstandingAgorot: 2000, letterSentAt: '2026-10-01T00:00:00Z', claimedAt: '2026-09-01T00:00:00Z', supplierName: 'A' },
+        { status: 'letter_sent', outstandingAgorot: 4000, letterSentAt: '2026-10-24T00:00:00Z', claimedAt: '2026-09-01T00:00:00Z', supplierName: 'B' },
         { status: 'credited', outstandingAgorot: 8000, letterSentAt: '2026-09-01T00:00:00Z', claimedAt: '2026-09-01T00:00:00Z' },
       ],
       '2026-10-25T10:00:00.000Z',
     );
     expect(q.unsent).toEqual({ count: 1, agorot: 1000 });
     expect(q.waiting).toEqual({ count: 1, agorot: 2000 });
+  });
+  it('"waiting" is the sent list’s rule: letter_sent only, late by the supplier’s LATEST send', () => {
+    const q = followUps(
+      [
+        // Acknowledged = the supplier answered — not waiting, even when old.
+        { status: 'acknowledged', outstandingAgorot: 1000, letterSentAt: '2026-09-01T00:00:00Z', claimedAt: '2026-09-01T00:00:00Z', supplierName: 'A' },
+        // Supplier B: one old send, then a fresh one → the letter is NOT late (the sent list shows "N days left").
+        { status: 'letter_sent', outstandingAgorot: 2000, letterSentAt: '2026-10-01T00:00:00Z', claimedAt: '2026-09-01T00:00:00Z', supplierName: 'B' },
+        { status: 'letter_sent', outstandingAgorot: 3000, letterSentAt: '2026-10-24T00:00:00Z', claimedAt: '2026-09-01T00:00:00Z', supplierName: 'B' },
+        // Supplier C: late → both its claims wait.
+        { status: 'letter_sent', outstandingAgorot: 400, letterSentAt: '2026-10-01T00:00:00Z', claimedAt: '2026-09-01T00:00:00Z', supplierName: 'C' },
+        { status: 'letter_sent', outstandingAgorot: 500, letterSentAt: '2026-10-02T00:00:00Z', claimedAt: '2026-09-01T00:00:00Z', supplierName: 'C' },
+      ],
+      '2026-10-25T10:00:00.000Z',
+    );
+    expect(q.waiting).toEqual({ count: 2, agorot: 900 });
+  });
+});
+
+describe('closing confirms name the right ₪', () => {
+  it('"the money came back" names Σ credited (a fully credited claim is not ₪0); a write-off names Σ still owed', () => {
+    const claims = [
+      { creditedAgorot: 13132, outstandingAgorot: 0 },
+      { creditedAgorot: 5000, outstandingAgorot: 1000 },
+    ];
+    expect(confirmAgorot(claims, 'recovered')).toBe(18132);
+    expect(confirmAgorot(claims, 'written_off')).toBe(1000);
   });
 });
 

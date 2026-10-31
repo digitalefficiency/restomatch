@@ -6,11 +6,14 @@ import { formatIls } from '@/lib/money';
 import { lineMath, type LetterLine } from './letters';
 
 /**
- * A claim line's ₪ basis in words — "חויב 10 × ₪149.00 · בהזמנה ₪139.00" —
+ * A claim line's ₪ basis in words — "חויב 10 × ₪149.00 · מחיר צפוי ₪139.00" —
  * shared by the claim letters and the supplier leak card (display only; the
  * claimed amount is never recomputed). null when the engine left no basis.
  */
-export function lineMathText(l: Pick<LetterLine, 'type' | 'expected' | 'actual' | 'deltaAmount'>, locale: AppLocale): string | null {
+export function lineMathText(
+  l: Pick<LetterLine, 'type' | 'expected' | 'actual' | 'deltaAmount'> & { severity?: string | null },
+  locale: AppLocale,
+): string | null {
   const m = lineMath(l);
   if (!m) return null;
   const t = createTranslator(locale, leaks);
@@ -19,9 +22,11 @@ export function lineMathText(l: Pick<LetterLine, 'type' | 'expected' | 'actual' 
   const num = (v: number) => formatNumber(v, base, { maximumFractionDigits: 3 });
   switch (m.kind) {
     case 'price':
-      return t('claims.math.price', { qty: num(m.qty), charged: ils(m.charged), ordered: ils(m.ordered) });
+      return t('claims.math.price', { qty: num(m.qty), charged: ils(m.charged), expected: ils(m.expected) });
     case 'qty':
       return t('claims.math.qty', { billed: num(m.billed), received: num(m.received), price: ils(m.unitPrice) });
+    case 'qtyReceived':
+      return t('claims.math.qtyReceived', { ordered: num(m.ordered), received: num(m.received), price: ils(m.unitPrice) });
     case 'vat':
       return t('claims.math.vat', { charged: ils(m.charged), expected: ils(m.expected) });
     case 'total':

@@ -16,6 +16,7 @@ import { PrintButton } from '../claims/print-button';
 import { views as viewsNs } from '@/lib/i18n/messages/views';
 import { DeltaBadge, ViewToolbar, compareSpanLabel, isThinBase, parseView } from '@/lib/components/views';
 import { approvedNotClaimed, sumAgora } from '../claims/letters';
+import { ALL_CLAIMS } from '../../recovery/logic';
 import { LeakStateNote, leakStateOf } from '../leak-state';
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -101,7 +102,7 @@ export default async function LeakReportPage({
     caller.recovery.flags(),
   ]);
   // Approved lines no ₪-back claim holds (only meaningful with the tracker on).
-  const tracked = flags.recovery ? await caller.recovery.list().catch(() => null) : null;
+  const tracked = flags.recovery ? await caller.recovery.list({ limit: ALL_CLAIMS }).catch(() => null) : null;
   // The report names the ACTIVE restaurant (never memberships[0]).
   const restaurant = activeMembershipOf(memberships, session?.user?.restaurantId)?.restaurantName ?? profile.name ?? '';
   const businessId = profile.businessId?.trim() || null;
@@ -340,7 +341,7 @@ export default async function LeakReportPage({
                     <tr>
                       <th scope="row" className="pt-2 pe-3 text-start font-semibold text-ink">{t('report.total')}</th>
                       <td />
-                      <td className="pt-2 pe-3 text-right font-bold tabular-nums text-ink" data-testid="report-type-total">{ils(typeTotal)}</td>
+                      <td className="pt-2 pe-3 text-right font-bold tabular-nums text-ink" data-testid="report-type-total" data-amount={typeTotal}>{ils(typeTotal)}</td>
                       <td />
                     </tr>
                   </tfoot>

@@ -15,6 +15,8 @@ import { claimableLines, vatBasisOf, type VatBasis } from '@restomatch/api';
 /** The fields of a tracker claim the letters use (recovery.list rows). */
 export interface TrackedClaim {
   id: string;
+  /** The discrepancy this claim is for — the ONE key that pairs it with a breakdown line. */
+  discrepancyId: string;
   status: string;
   outstandingAgorot: number;
   supplierId: string | null;
@@ -37,6 +39,8 @@ export interface LetterLine {
   invoiceNumber: string | null;
   invoiceDate: string | null;
   type: string;
+  /** The engine's severity (null when unknown) — tells the QTY_OVER shapes apart. */
+  severity: string | null;
   productName: string | null;
   productNameEn: string | null;
   lineDescription: string | null;
@@ -78,9 +82,6 @@ export interface SentLetter {
 }
 
 const supplierKey = (name: string | null | undefined) => (name ?? '').trim() || '—';
-const itemKey = (productName: string | null, lineDescription: string | null) => (productName ?? lineDescription ?? '').trim();
-const lineKey = (invoiceId: string | null, type: string, productName: string | null, lineDescription: string | null) =>
-  `${invoiceId ?? ''}|${type}|${itemKey(productName, lineDescription)}`;
 
 /** Σ of ₪ amounts to the agora (integer agorot, so 0.1 + 0.2 never drifts). */
 export function sumAgora(values: ReadonlyArray<number>): number {
@@ -94,6 +95,7 @@ function fromBreakdown(inv: LeakBreakdownInvoice, l: LeakBreakdownLine, amount: 
     invoiceNumber: inv.invoiceNumber,
     invoiceDate: inv.invoiceDate,
     type: l.type,
+    severity: l.severity,
     productName: l.productName,
     productNameEn: l.productNameEn,
     lineDescription: l.lineDescription,
@@ -139,20 +141,21 @@ export function buildLetters(input: {
     return g;
   };
 
-  // Every tracker claim, queued per line key (a key can repeat). A month line that
-  // is a tracked claim already past `claimed` (sent, credited, written off…) is
-  // handled on the tracker, so it leaves the letter.
-  const tracked = new Map<string, TrackedClaim[]>();
+  // Every tracker claim, by the discrepancy it is for (one claim per discrepancy —
+  // two lines of the same product on one invoice never swap claims). A month line
+  // that is a tracked claim already past `claimed` (sent, credited, written off…)
+  // is handled on the tracker, so it leaves the letter.
+  const tracked = new Map<string, TrackedClaim>();
   for (const c of input.tracked) {
-    const k = lineKey(c.invoiceId, c.discrepancyType, c.productName, c.lineDescription);
-    tracked.set(k, [...(tracked.get(k) ?? []), c]);
+    const prev = tracked.get(c.discrepancyId);
+    if (!prev || (c.status === 'claimed' && prev.status !== 'claimed')) tracked.set(c.discrepancyId, c);
   }
-  for (const queue of tracked.values()) queue.sort((a, b) => Number(b.status === 'claimed') - Number(a.status === 'claimed'));
 
   // 1. This month, before payment. A matching tracker claim is consumed here.
   for (const inv of input.month) {
     for (const { line, amount, basis } of claimableLines(inv)) {
-      const claim = tracked.get(lineKey(inv.invoiceId, line.type, line.productName, line.lineDescription))?.shift();
+      const claim = tracked.get(line.discrepancyId);
+      if (claim) tracked.delete(line.discrepancyId);
       if (claim && claim.status !== 'claimed') continue;
       const g = group(inv.supplierName, inv.supplierNameEn, null);
       const out = fromBreakdown(inv, line, amount, basis);
@@ -168,37 +171,33 @@ export function buildLetters(input: {
   // Basis lookup for the remaining tracker lines (invoice date, expected / actual).
   const known = new Map<string, { inv: LeakBreakdownInvoice; line: LeakBreakdownLine }>();
   for (const inv of [...input.month, ...(input.history ?? [])]) {
-    for (const line of inv.lines) {
-      const k = lineKey(inv.invoiceId, line.type, line.productName, line.lineDescription);
-      if (!known.has(k)) known.set(k, { inv, line });
-    }
+    for (const line of inv.lines) if (!known.has(line.discrepancyId)) known.set(line.discrepancyId, { inv, line });
   }
 
   // 2. The rest of the tracker's `claimed` claims: for credit.
-  for (const queue of tracked.values()) {
-    for (const c of queue) {
-      if (c.status !== 'claimed' || c.outstandingAgorot <= 0) continue;
-      const g = group(c.supplierName, c.supplierNameEn, c.supplierId);
-      const hit = known.get(lineKey(c.invoiceId, c.discrepancyType, c.productName, c.lineDescription));
-      g.forCredit.push({
-        key: c.id,
-        invoiceId: c.invoiceId,
-        invoiceNumber: c.invoiceNumber,
-        invoiceDate: hit?.inv.invoiceDate ?? null,
-        type: c.discrepancyType,
-        productName: c.productName,
-        productNameEn: c.productNameEn,
-        lineDescription: c.lineDescription,
-        lineDescriptionEn: c.lineDescriptionEn,
-        amount: c.outstandingAgorot / 100,
-        basis: vatBasisOf(c.discrepancyType),
-        expected: hit?.line.expected ?? null,
-        actual: hit?.line.actual ?? null,
-        deltaAmount: hit?.line.deltaAmount ?? null,
-        claimId: c.id,
-      });
-      g.claimIds.push(c.id);
-    }
+  for (const c of input.tracked) {
+    if (c.status !== 'claimed' || c.outstandingAgorot <= 0 || tracked.get(c.discrepancyId) !== c) continue;
+    const g = group(c.supplierName, c.supplierNameEn, c.supplierId);
+    const hit = known.get(c.discrepancyId);
+    g.forCredit.push({
+      key: c.id,
+      invoiceId: c.invoiceId,
+      invoiceNumber: c.invoiceNumber,
+      invoiceDate: hit?.inv.invoiceDate ?? null,
+      type: c.discrepancyType,
+      severity: hit?.line.severity ?? null,
+      productName: c.productName,
+      productNameEn: c.productNameEn,
+      lineDescription: c.lineDescription,
+      lineDescriptionEn: c.lineDescriptionEn,
+      amount: c.outstandingAgorot / 100,
+      basis: vatBasisOf(c.discrepancyType),
+      expected: hit?.line.expected ?? null,
+      actual: hit?.line.actual ?? null,
+      deltaAmount: hit?.line.deltaAmount ?? null,
+      claimId: c.id,
+    });
+    g.claimIds.push(c.id);
   }
 
   const letters = [...groups.values()]
@@ -235,32 +234,41 @@ export function buildLetters(input: {
 
 /**
  * The ₪ basis of one claim line, from the engine's expected / actual (display
- * only — the claimed amount itself is never recomputed):
- *  • PRICE_HIGHER   expected = ordered unit price, actual = billed unit price → qty = |Δ| ÷ (billed − ordered)
- *  • QTY_OVER       expected = received qty, actual = billed qty → unit price = |Δ| ÷ (billed − received)
+ * only — the claimed amount itself is never recomputed). Each wording states only
+ * what the engine's shape actually holds:
+ *  • PRICE_HIGHER   expected = the reference price (the order's, OR the supplier's
+ *                   usual p90 — the line can't tell which), actual = billed price
+ *                   → qty = |Δ| ÷ (billed − expected); worded neutrally ("expected price").
+ *  • QTY_OVER block expected = received qty, actual = billed qty (billed > received)
+ *  • QTY_OVER other expected = ordered qty, actual = received qty (more arrived than ordered)
  *  • VAT_MISMATCH   expected = VAT on the subtotal, actual = VAT on the invoice
  *  • TOTAL_MISMATCH expected = Σ lines, actual = the invoice subtotal
  *  • UNORDERED_ITEM actual = billed qty
  */
 export type LineMath =
-  | { kind: 'price'; qty: number; charged: number; ordered: number }
+  | { kind: 'price'; qty: number; charged: number; expected: number }
   | { kind: 'qty'; billed: number; received: number; unitPrice: number }
+  | { kind: 'qtyReceived'; ordered: number; received: number; unitPrice: number }
   | { kind: 'vat'; charged: number; expected: number }
   | { kind: 'total'; charged: number; expected: number }
   | { kind: 'unordered'; qty: number };
 
 const round = (v: number, dp: number) => Math.round(v * 10 ** dp) / 10 ** dp;
 
-export function lineMath(l: Pick<LetterLine, 'type' | 'expected' | 'actual' | 'deltaAmount'>): LineMath | null {
+export function lineMath(l: Pick<LetterLine, 'type' | 'expected' | 'actual' | 'deltaAmount'> & { severity?: string | null }): LineMath | null {
   const { expected: e, actual: a } = l;
   const delta = l.deltaAmount == null ? null : Math.abs(l.deltaAmount);
   switch (l.type) {
     case 'PRICE_HIGHER':
       if (e == null || a == null || delta == null || !(a > e)) return null;
-      return { kind: 'price', qty: round(delta / (a - e), 3), charged: a, ordered: e };
+      return { kind: 'price', qty: round(delta / (a - e), 3), charged: a, expected: e };
     case 'QTY_OVER':
       if (e == null || a == null || delta == null || !(a > e)) return null;
-      return { kind: 'qty', billed: a, received: e, unitPrice: round(delta / (a - e), 2) };
+      // Only the block shape is billed-vs-received; unknown severity → no basis line.
+      if (l.severity === 'block') return { kind: 'qty', billed: a, received: e, unitPrice: round(delta / (a - e), 2) };
+      if (l.severity === 'warn' || l.severity === 'info')
+        return { kind: 'qtyReceived', ordered: e, received: a, unitPrice: round(delta / (a - e), 2) };
+      return null;
     case 'VAT_MISMATCH':
       return e == null || a == null ? null : { kind: 'vat', charged: a, expected: e };
     case 'TOTAL_MISMATCH':
@@ -297,26 +305,33 @@ export function addDays(iso: string, n: number): string {
 /**
  * Lines approved to claim (accepted / "טופל") that no ₪-back claim holds — the
  * gap between "approved to claim" and what the letters ask for (leaks-03, the
- * ₪12.66 VAT line). Display only; matched on invoice + type + item like the letters.
+ * ₪12.66 VAT line). Display only; matched on the discrepancy id like the letters.
  */
 export function approvedNotClaimed(
   invoices: ReadonlyArray<LeakBreakdownInvoice>,
-  tracked: ReadonlyArray<Pick<TrackedClaim, 'invoiceId' | 'discrepancyType' | 'productName' | 'lineDescription'>>,
+  tracked: ReadonlyArray<Pick<TrackedClaim, 'discrepancyId'>>,
 ): Array<{ invoice: LeakBreakdownInvoice; line: LeakBreakdownLine }> {
-  const held = new Map<string, number>();
-  for (const c of tracked) {
-    const k = lineKey(c.invoiceId, c.discrepancyType, c.productName, c.lineDescription);
-    held.set(k, (held.get(k) ?? 0) + 1);
-  }
+  const held = new Set(tracked.map((c) => c.discrepancyId));
   const out: Array<{ invoice: LeakBreakdownInvoice; line: LeakBreakdownLine }> = [];
   for (const inv of invoices) {
     for (const line of inv.lines) {
       if (!line.countsAsLeak || (line.resolutionStatus !== 'accepted' && line.resolutionStatus !== 'resolved')) continue;
-      const k = lineKey(inv.invoiceId, line.type, line.productName, line.lineDescription);
-      const n = held.get(k) ?? 0;
-      if (n > 0) held.set(k, n - 1);
-      else out.push({ invoice: inv, line });
+      if (!held.has(line.discrepancyId)) out.push({ invoice: inv, line });
     }
   }
   return out;
+}
+
+/**
+ * The ₪ of ONE supplier's claim letter, in agorot — what a "open the credit
+ * request · ₪X" button may promise (the same total the letter prints). Matched
+ * on the supplier id when the letter has one, else on its name; 0 = no letter.
+ */
+export function letterAgorotFor(
+  letters: ReadonlyArray<Pick<SupplierLetter, 'supplierId' | 'supplierName' | 'total'>>,
+  supplier: { id: string; name: string | null },
+): number {
+  const name = (supplier.name ?? '').trim();
+  const hit = letters.find((l) => l.supplierId === supplier.id) ?? (name ? letters.find((l) => (l.supplierName ?? '').trim() === name) : undefined);
+  return hit ? Math.round(hit.total * 100) : 0;
 }
