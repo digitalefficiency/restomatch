@@ -17,6 +17,8 @@ export const PUBLIC_EXACT_PATHS = [
   '/privacy',
   '/terms',
   '/cookies',
+  // הצהרת נגישות (reg. 35): must be reachable without a session, from every shell.
+  '/accessibility',
   // Generated SEO/social route (no file extension in the URL, so the static-asset
   // rule below doesn't catch it) — crawlers have no session. The share cards
   // (/og/*.png) and /opengraph-image never reach the middleware at all (matcher).
