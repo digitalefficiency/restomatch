@@ -1,31 +1,42 @@
-// RestoMatch design tokens — "Command Center for Money" (חדר בקרה לכסף).
+// RestoMatch design tokens — "Command Center Light v2" (חדר בקרה לכסף).
 //
-// Two palettes during the light-theme transition (see docs/DESIGN-BRIEF.md):
-// - `webColors` — the LIGHT identity of apps/web (the source of truth there is
-//   the CSS variables in apps/web/app/globals.css; keep the two in sync).
-// - `colors` — the previous dark palette, still consumed by apps/mobile through
-//   its legacy aliases. Unchanged on purpose until mobile gets its own pass.
+// Three tiers (docs/ux/review/lens-design-system.md §3.1):
+// - `semantic.ts` — colour ROLES: surfaces, text, focus, six status families,
+//   money states and data-viz. Components consume roles, never hex.
+// - `scale.ts`    — type roles, radius, elevation, motion, density, layers.
+// - `build.ts`    — emits the CSS-variable block of apps/web/app/globals.css
+//   and the Tailwind preset. Web code never hand-copies a value from here.
+//
+// `colors`, `spacing` and `typography` below are the previous DARK palette,
+// still consumed by apps/mobile (frozen — owner decision 12). Unchanged on purpose.
 
+export * from './semantic';
+export * from './scale';
+export { channels, colorVars, cssVariables, tailwindPreset, tokenBlockOf, withTokenBlock, TOKENS_START, TOKENS_END } from './build';
+export { contrastRatio } from './contrast';
+
+import { focus, status, surfaces, text } from './semantic';
+
+/**
+ * @deprecated v1 mirror of the web palette — use the roles in `semantic.ts`.
+ * Derived from them, so it can no longer drift.
+ */
 export const webColors = {
-  // Canvas / surfaces
-  bg: '#F6F8F7', // off-white canvas
-  surface: '#FFFFFF', // cards
-  surface2: '#EEF3F0', // raised / hover / inputs
-  line: '#D3DDD7', // dividers (decorative)
-  lineStrong: '#7A8B82', // control borders (≥3:1)
-
-  // Text
-  ink: '#0F1F17', // primary text
-  muted: '#4A5D53', // secondary text
-  subtle: '#5A6A62', // tertiary / placeholder
-
-  // Brand + semantics
-  primary: '#066B4A', // deep money-green (primary action, positive, clean-match)
-  onPrimary: '#FFFFFF', // text ON primary
-  gold: '#755C00', // savings / money recovered / positive ₪
-  danger: '#B80F2A', // leak / loss / block
-  warn: '#A63D00', // warning severity
-  info: '#1A5BC7', // informational
+  bg: surfaces.canvas,
+  surface: surfaces.surface,
+  surface2: surfaces.sunken,
+  line: surfaces.line,
+  lineStrong: surfaces.lineStrong,
+  ink: text.ink,
+  muted: text.muted,
+  subtle: text.subtle,
+  primary: status.primary.text,
+  onPrimary: text.onBold,
+  gold: status.gold.text,
+  danger: status.danger.text,
+  warn: status.warn.text,
+  info: status.info.text,
+  focus,
 } as const;
 
 export const colors = {
@@ -59,22 +70,6 @@ export const colors = {
   border: '#2A3A31', // → line
 } as const;
 
-/** Glow + soft-shadow recipes for the dark canvas (soft borders + glows, not heavy drop shadows). */
-export const glows = {
-  primary: 'rgba(34,211,154,.22)',
-  danger: 'rgba(255,92,122,.20)',
-  gold: 'rgba(224,179,65,.18)',
-} as const;
-
-export const spacing = {
-  xs: 4,
-  sm: 8,
-  md: 16,
-  lg: 24,
-  xl: 32,
-  '2xl': 48,
-} as const;
-
 export const radius = {
   sm: 4,
   md: 8,
@@ -85,9 +80,10 @@ export const radius = {
 
 export const typography = {
   fontFamily: {
-    // Heebo drives Hebrew text + display; heavy weights (700/800) for big numbers.
+    // Heebo drives Hebrew text, display and money (tabular-nums lining-nums).
     sans: '"Heebo", "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif',
-    // Mono stack for money figures / KPIs — terminal / command-center feel.
+    // Mono is for IDENTIFIERS only (invoice, PO, SKU numbers via <Token>) — never money:
+    // the JetBrains Mono subset has no ₪ glyph (design-system-02).
     mono: 'ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace',
   },
   fontSize: {

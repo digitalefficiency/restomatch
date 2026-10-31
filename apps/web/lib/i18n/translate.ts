@@ -7,7 +7,11 @@ import { baseLocaleOf, DEFAULT_LOCALE, type AppLocale, type Locale, type Receive
  * truth) plus an English twin whose shape is enforced by `Shape<typeof he>` —
  * a missing English key is a type error AND fails `i18n.test.ts`.
  *
- * Interpolation: `{name}` placeholders, filled from the vars object.
+ * Interpolation: `{name}` placeholders, filled from the vars object, plus
+ * ICU-lite plurals: `{count, plural, =0 {…} one {…} two {…} other {# …}}`,
+ * resolved with `Intl.PluralRules` for the rendered locale (Hebrew has a dual:
+ * יום אחד · יומיים · 3 ימים). `#` is the count, locale-formatted. Strings
+ * without plural syntax render exactly as before.
  * Fallback chain: active locale → Hebrew → the key itself (never throws).
  *
  * Receiver locales (ar/ru/th/ti) are OVERLAYS: a namespace may carry
@@ -76,9 +80,65 @@ export function lookup(tree: MessageTree | undefined, key: string): string | und
   return typeof node === 'string' ? node : undefined;
 }
 
-export function interpolate(template: string, vars?: MessageVars): string {
+const PLURAL_START = /\{\s*(\w+)\s*,\s*plural\s*,/g;
+const PLURAL_CATEGORIES = new Set(['zero', 'one', 'two', 'few', 'many', 'other']);
+
+/** Index of the `}` closing the `{` at `open`, or -1. */
+function closingBrace(s: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < s.length; i += 1) {
+    if (s[i] === '{') depth += 1;
+    else if (s[i] === '}' && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/** `=0 {…} one {…} other {…}` → selector → message; null when malformed. */
+function pluralOptions(body: string): Map<string, string> | null {
+  const options = new Map<string, string>();
+  let i = 0;
+  while (i < body.length) {
+    const m = /^\s*(=\d+|[a-z]+)\s*\{/.exec(body.slice(i));
+    if (!m) return /^\s*$/.test(body.slice(i)) && options.has('other') ? options : null;
+    const open = i + m[0].length - 1;
+    const close = closingBrace(body, open);
+    if (close < 0) return null;
+    const selector = m[1]!;
+    if (!selector.startsWith('=') && !PLURAL_CATEGORIES.has(selector)) return null;
+    options.set(selector, body.slice(open + 1, close));
+    i = close + 1;
+  }
+  return options.has('other') ? options : null;
+}
+
+/** Resolve every `{name, plural, …}` whose count is in `vars`; anything else is left verbatim. */
+function resolvePlurals(template: string, vars: MessageVars, intlLocale: string): string {
+  let out = '';
+  let from = 0;
+  PLURAL_START.lastIndex = 0;
+  for (let m = PLURAL_START.exec(template); m; m = PLURAL_START.exec(template)) {
+    const close = closingBrace(template, m.index);
+    if (close < 0) break;
+    const raw = template.slice(m.index, close + 1);
+    const options = pluralOptions(template.slice(m.index + m[0].length, close));
+    const n = Number(vars[m[1]!]);
+    let resolved = raw;
+    if (options && Object.prototype.hasOwnProperty.call(vars, m[1]!) && Number.isFinite(n)) {
+      const message =
+        options.get(`=${n}`) ?? options.get(new Intl.PluralRules(intlLocale).select(n)) ?? options.get('other')!;
+      resolved = resolvePlurals(message, vars, intlLocale).replace(/#/g, new Intl.NumberFormat(intlLocale).format(n));
+    }
+    out += template.slice(from, m.index) + resolved;
+    from = close + 1;
+    PLURAL_START.lastIndex = from;
+  }
+  return out + template.slice(from);
+}
+
+export function interpolate(template: string, vars?: MessageVars, intlLocale = 'he-IL'): string {
   if (!vars) return template;
-  return template.replace(/\{(\w+)\}/g, (match, name: string) =>
+  const withPlurals = template.includes('plural') ? resolvePlurals(template, vars, intlLocale) : template;
+  return withPlurals.replace(/\{(\w+)\}/g, (match, name: string) =>
     Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : match,
   );
 }
@@ -90,13 +150,15 @@ export function createTranslator<T extends MessageTree>(locale: AppLocale, ns: N
       : locale === 'en'
         ? [ns.en as MessageTree, ns[DEFAULT_LOCALE]]
         : [ns.extra?.[locale] as MessageTree | undefined, ns.en as MessageTree, ns[DEFAULT_LOCALE]];
+  // Plural categories follow the RENDERED language (ru has few/many, he has a dual).
+  const pluralLocale = locale === 'he' ? 'he-IL' : locale === 'en' ? 'en-GB' : locale;
   const t = (key: MessageKey<T>, vars?: MessageVars): string => {
     let raw: string | undefined;
     for (const tree of chain) {
       raw = lookup(tree, key);
       if (raw !== undefined) break;
     }
-    return interpolate(raw ?? key, vars);
+    return interpolate(raw ?? key, vars, pluralLocale);
   };
   return Object.assign(t, { locale: baseLocaleOf(locale), appLocale: locale });
 }
