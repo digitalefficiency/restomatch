@@ -8,7 +8,7 @@ import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 import { OrderDetail } from './detail-client';
 import { SupplierDocumentPreview } from '../supplier-document';
 import { SupplierConfirmCard } from './supplier-confirm-card';
-import { poRefOf } from '../order-logic';
+import { ltrIsolate, poRefOf } from '../order-logic';
 
 export default async function OrderDetailPage({ params }: { params: Promise<{ poId: string }> }) {
   const { poId } = await params;
@@ -47,7 +47,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ po
         label={tc('breadcrumbs.label')}
         items={[
           { label: t('detail.breadcrumb'), href: '/dashboard/orders' },
-          { label: `#${ref}` },
+          // Isolated: in RTL a bare "#F8E05686" renders as "F8E05686#".
+          { label: ltrIsolate(`#${ref}`) },
         ]}
       />
       <SectionHeader
