@@ -250,12 +250,25 @@ describe('OCR_JOB_HEADROOM_MS: an OCR read is kicked only with room to finish (O
     expect(schedule).toHaveBeenCalledTimes(1);
   });
 
-  it('the headroom is configurable; a lower value lets a 60 s route kick OCR again', async () => {
+  it('the headroom is configurable down to 60 s (OCR_JOB_HEADROOM_MIN_MS): a lower value acts as 60 s', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.stubEnv('OCR_JOB_HEADROOM_MS', '30000');
+    const clock = { t: 0 };
+    const now = () => clock.t;
     const schedule = vi.fn();
-    const now = () => 0;
-    await withKickBudget(60, async () => expect(kickQueue('ocr-invoice', schedule, async () => vi.fn(), now)).toBe(true), now);
+    await withKickBudget(
+      90,
+      async () => {
+        // 90 s left ≥ 60 s: kicked (the 120 s default would not kick a 90 s route).
+        expect(kickQueue('ocr-invoice', schedule, async () => vi.fn(), now)).toBe(true);
+        // 59 s left: an unclamped 30 s headroom would kick; the 60 s floor does not.
+        clock.t = 31_000;
+        expect(kickQueue('ocr-invoice', schedule, async () => vi.fn(), now)).toBe(false);
+      },
+      now,
+    );
     expect(schedule).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
   });
 
   it('late in a 300 s invocation (under 120 s left) OCR is not kicked; with room it is', async () => {

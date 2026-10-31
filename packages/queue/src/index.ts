@@ -87,12 +87,25 @@ export function ocrJobHeadroomMs(env: NodeJS.ProcessEnv = process.env): number {
     }
     return OCR_JOB_HEADROOM_MAX_MS;
   }
+  // …and clamped up to a floor: below ~60 s the job deadline (headroom − the
+  // persistence margin) is shorter than a typical read, so every read would time
+  // out, be retried, time out again — paid twice for nothing.
+  if (n < OCR_JOB_HEADROOM_MIN_MS) {
+    if (!warnedHeadroomLow) {
+      warnedHeadroomLow = true;
+      console.warn(`[queue] OCR_JOB_HEADROOM_MS=${Math.floor(n)} is below ${OCR_JOB_HEADROOM_MIN_MS} — clamped`);
+    }
+    return OCR_JOB_HEADROOM_MIN_MS;
+  }
   return Math.floor(n);
 }
 
 /** The largest OCR_JOB_HEADROOM_MS honoured: the cron claim window (240 s) minus a 40 s margin. */
 export const OCR_JOB_HEADROOM_MAX_MS = 200_000;
+/** The smallest OCR_JOB_HEADROOM_MS honoured: a 40 s job deadline (60 s − the 20 s persistence margin). */
+export const OCR_JOB_HEADROOM_MIN_MS = 60_000;
 let warnedHeadroom = false;
+let warnedHeadroomLow = false;
 
 /** Time kept for persisting a read (header + lines + match enqueue) after the provider returns. */
 export const OCR_PERSIST_MARGIN_MS = 20_000;
@@ -104,7 +117,8 @@ export const OCR_PERSIST_MARGIN_MS = 20_000;
  * never a function cut off mid-read (stall → paid twice).
  */
 export function ocrJobDeadlineMs(env: NodeJS.ProcessEnv = process.env): number {
-  return Math.max(10_000, ocrJobHeadroomMs(env) - OCR_PERSIST_MARGIN_MS);
+  // ≥ 40 s: the headroom is clamped to at least OCR_JOB_HEADROOM_MIN_MS.
+  return ocrJobHeadroomMs(env) - OCR_PERSIST_MARGIN_MS;
 }
 
 /**

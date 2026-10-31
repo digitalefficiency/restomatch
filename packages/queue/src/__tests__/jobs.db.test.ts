@@ -14,6 +14,7 @@ import {
   isTerminalJobError,
   OCR_JOB_HEADROOM_DEFAULT_MS,
   OCR_JOB_HEADROOM_MAX_MS,
+  OCR_JOB_HEADROOM_MIN_MS,
   ocrJobDeadlineMs,
   ocrJobHeadroomMs,
   TERMINAL_JOB_ERROR,
@@ -241,7 +242,6 @@ describe('OCR-A PR-OCR-3: terminal errors and OCR headroom', () => {
     expect(OCR_JOB_HEADROOM_DEFAULT_MS).toBe(120_000);
     expect(ocrJobHeadroomMs({})).toBe(120_000);
     expect(ocrJobHeadroomMs({ OCR_JOB_HEADROOM_MS: ' 90000 ' })).toBe(90_000);
-    expect(ocrJobHeadroomMs({ OCR_JOB_HEADROOM_MS: '0' })).toBe(0);
     for (const bad of ['', 'abc', '-5', 'Infinity']) expect(ocrJobHeadroomMs({ OCR_JOB_HEADROOM_MS: bad })).toBe(120_000);
   });
 
@@ -253,6 +253,18 @@ describe('OCR-A PR-OCR-3: terminal errors and OCR headroom', () => {
     expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();
     expect(ocrJobDeadlineMs({})).toBe(100_000); // 120 s headroom − 20 s to persist
-    expect(ocrJobDeadlineMs({ OCR_JOB_HEADROOM_MS: '0' })).toBe(10_000); // never below 10 s
+  });
+
+  it('OCR_JOB_HEADROOM_MS is clamped UP to 60 s (one warning): the job deadline is never shorter than a read', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(OCR_JOB_HEADROOM_MIN_MS).toBe(60_000);
+    expect(ocrJobHeadroomMs({ OCR_JOB_HEADROOM_MS: '0' })).toBe(60_000);
+    expect(ocrJobHeadroomMs({ OCR_JOB_HEADROOM_MS: '30000' })).toBe(60_000);
+    expect(ocrJobHeadroomMs({ OCR_JOB_HEADROOM_MS: '60000' })).toBe(60_000);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+    // 40 s, not the old 10 s floor (a 10 s deadline cut every read off: paid twice).
+    expect(ocrJobDeadlineMs({ OCR_JOB_HEADROOM_MS: '0' })).toBe(40_000);
+    expect(ocrJobDeadlineMs({ OCR_JOB_HEADROOM_MS: '30000' })).toBe(40_000);
   });
 });
