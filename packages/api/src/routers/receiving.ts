@@ -28,8 +28,9 @@ import {
   suppliers,
   users,
   type Database,
+  type OcrPayload,
 } from '@restomatch/db';
-import { computeInvoiceLeak } from '@restomatch/charts';
+import { computeInvoiceLeak, HELD_FOR_RECEIPTS_KEY } from '@restomatch/charts';
 import { enqueueMatchInvoice, enqueueOcrInvoice, isQueueUnavailableError } from '@restomatch/queue';
 import type { InvoiceOcrResult } from '@restomatch/types';
 import { assertGrOwned, assertSupplierOwned } from '../tenant';
@@ -1016,9 +1017,16 @@ export const receivingRouter = router({
         grId: z.string().uuid(),
         imageUrl: z.string().url().max(2048),
         supplierId: z.string().uuid(),
+        /** A deliberate SECOND invoice on this receipt (owner / manager only). */
+        additionalInvoice: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      // Pilot rule: one order = one invoice. Only an owner / manager may put a
+      // second invoice on a receipt — a receiver's re-scan resumes the first.
+      if (input.additionalInvoice && ctx.session.role !== 'owner' && ctx.session.role !== 'manager') {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'רק בעלים או מנהל יכולים להוסיף חשבונית שנייה לקבלה' });
+      }
       // S4 / A.8: the worker fetches this URL server-side. Only a signed URL on
       // our private invoice-scans bucket is acceptable (no SSRF to internal hosts).
       if (!isAllowedScanUrl(input.imageUrl)) {
@@ -1066,6 +1074,40 @@ export const receivingRouter = router({
           .limit(1);
         if (existing) return { invoiceId: existing.id, created: false as const };
 
+        // B7: one receipt, one invoice. Re-opening a half-finished receipt and
+        // scanning again used to register a SECOND invoice on it (spend + leak
+        // doubled, and no UI could remove the copy). Under a per-receipt lock:
+        // the receipt's invoice is resumed — unless an owner / manager asks for
+        // an additional one. A first scan whose OCR failed (no lines yet) is a
+        // retake: the same invoice takes the new photo and is read again.
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`register-invoice-gr:${input.grId}`}))`);
+        if (!input.additionalInvoice) {
+          const [own] = await tx
+            .select({ id: invoices.id, ocrPayload: invoices.ocrPayload })
+            .from(invoices)
+            .where(and(eq(invoices.restaurantId, restaurantId), receiptInvoiceSql(restaurantId, input.grId)))
+            .orderBy(asc(invoices.createdAt), asc(invoices.id))
+            .limit(1);
+          if (own) {
+            const failed = (own.ocrPayload?.raw as { ocrFailed?: unknown } | null | undefined)?.ocrFailed === true;
+            const [line] = failed
+              ? await tx.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, own.id)).limit(1)
+              : [];
+            if (!failed || line) return { invoiceId: own.id, created: false as const, resumed: true as const };
+            await tx
+              .update(invoices)
+              .set({
+                rawImageUrl: input.imageUrl,
+                status: 'ocr_pending',
+                ocrConfidence: null,
+                ocrPayload: receiptStamp(grPo ? input.grId : undefined),
+                updatedAt: new Date(),
+              })
+              .where(and(eq(invoices.id, own.id), eq(invoices.restaurantId, restaurantId)));
+            return { invoiceId: own.id, created: true as const };
+          }
+        }
+
         const [row] = await tx
           .insert(invoices)
           .values({
@@ -1075,13 +1117,20 @@ export const receivingRouter = router({
             status: 'ocr_pending',
             source: 'photo',
             createdBy: ctx.session.userId,
+            // The receipt the scan was taken on, from the moment it exists (the
+            // OCR job re-stamps it): a re-scan finds it before OCR has run.
+            ocrPayload: receiptStamp(grPo ? input.grId : undefined),
           })
           .returning({ id: invoices.id });
         if (!row) throw new Error('failed to register invoice');
         return { invoiceId: row.id, created: true as const };
       });
       if (!outcome.created) {
-        return { invoiceId: outcome.invoiceId, alreadyExisted: true as const };
+        return {
+          invoiceId: outcome.invoiceId,
+          alreadyExisted: true as const,
+          ...('resumed' in outcome ? { resumed: true as const } : {}),
+        };
       }
       const invoice = { id: outcome.invoiceId };
 
@@ -1271,4 +1320,33 @@ async function rematchAfterCount(
       );
     }
   }
+}
+
+/**
+ * ocr_payload for a scan registered on a receipt, before OCR: just the receipt
+ * stamp (raw.scanGrId — readScanGrId / scanOwnerReceipt). Only a receipt already
+ * checked to be this tenant's and this supplier's. The OCR job's own payload
+ * replaces it, keeping the stamp (withScanGrId).
+ */
+function receiptStamp(grId: string | undefined): OcrPayload | null {
+  return grId ? { provider: 'claude_vision', raw: { scanGrId: grId } } : null;
+}
+
+/**
+ * "This invoice is the receipt's" (alias-free, for a WHERE on invoices): stamped
+ * with the receipt (raw.scanGrId), held for it alone (raw.heldForReceipts =
+ * [grId], a photo), or matched against it (a match run with this gr_id).
+ */
+function receiptInvoiceSql(restaurantId: string, grId: string) {
+  return or(
+    sql`${invoices.ocrPayload} -> 'raw' ->> 'scanGrId' = ${grId}`,
+    and(
+      eq(invoices.source, 'photo'),
+      sql`${invoices.ocrPayload} -> 'raw' -> ${sql.raw(`'${HELD_FOR_RECEIPTS_KEY}'`)} = jsonb_build_array(${grId}::text)`,
+    ),
+    inArray(
+      invoices.id,
+      sql`(select ${matchRuns.invoiceId} from ${matchRuns} where ${matchRuns.restaurantId} = ${restaurantId} and ${matchRuns.grId} = ${grId})`,
+    ),
+  );
 }
