@@ -34,7 +34,8 @@ import { he as viewsHe } from '../lib/i18n/messages/views/he';
  *   B. owner: hero ₪ / %, leak detective, approvals, breakdown → claims, monthly
  *      report, chain (this month + ?p=last_month), branches
  *   C. receiver: /login?lang=…, the HaSharon Produce order, photo → dev OCR stub →
- *      review (sections, qty × price, banners) → adjust a quantity → confirm
+ *      review (sections, banners — no ₪ for the receiver) → Delivery Check (one
+ *      hand count, the rest "as ordered" after the blind spot check) → confirm
  *   D. bookkeeper: CSV + uniform-file (1000) exports
  *
  * Every page: zero console errors / uncaught exceptions, no horizontal overflow,
@@ -578,7 +579,7 @@ test('B · owner: hero ₪, leak detective, approvals, claims, report, chain, br
 
 /* ═══════════════════════════════ C. receiver ═══════════════════════════════ */
 
-test('C · receiver: HaSharon Produce → photo → OCR → review → adjust → confirm', async ({ page, browser }, info) => {
+test('C · receiver: HaSharon Produce → photo → OCR → review → Delivery Check → confirm', async ({ page, browser }, info) => {
   test.skip(!STUB, 'DEMO_STUB_URL unset — the dev OCR stub only runs outside NODE_ENV=production');
   const L = localeOf(info);
   const r = M[L].receiving;
@@ -617,7 +618,7 @@ test('C · receiver: HaSharon Produce → photo → OCR → review → adjust �
     await expect(page.getByRole('alert').filter({ hasText: /\S/ }), 'error alert on the review').toHaveCount(0);
   });
 
-  await test.step('review: sections, English names + Hebrew original, qty × price = total, potential loss', async () => {
+  await test.step('review: sections, English names + Hebrew original — and no ₪ for the receiver', async () => {
     const cards = page.getByTestId('recon-cards');
     const table = page.getByTestId('recon-table');
     // Exactly ONE rendering of the review: cards on a phone, the table on desktop
@@ -634,41 +635,39 @@ test('C · receiver: HaSharon Produce → photo → OCR → review → adjust �
       await expect(view.getByTestId('item-name-en').first()).toBeVisible();
       await expect(view).toContainText('Cherry tomatoes');
     }
-    // Every "qty unit × ₪price  ₪total" triple must multiply out (to the agora).
-    const text = (await view.innerText()).replace(BIDI, ' ');
-    const triples = [...text.matchAll(/(\d+(?:\.\d+)?)\s*[^\n×]*\n?\s*×\s*\n?\s*₪?\s*(\d[\d,]*\.\d{2})\s*₪?\s*\n?\s*₪?\s*(\d[\d,]*\.\d{2})/g)];
-    expect(triples.length, 'qty × price = total rows on the review').toBeGreaterThanOrEqual(11);
-    for (const [, q, p, tot] of triples) {
-      const want = Math.round(Number(q) * Number(p!.replace(/,/g, '')) * 100) / 100;
-      expect(Number(tot!.replace(/,/g, '')), `${q} × ${p}`).toBeCloseTo(want, 2);
-    }
-    // "Potential loss" = Σ of the +₪ deltas on the "different" rows.
-    const lossLine = page.getByText(r.steps.recon.potentialLoss);
-    await expect(lossLine).toBeVisible();
-    const loss = amounts(await lossLine.locator('xpath=..').innerText())[0]!;
-    const deltas = [...text.matchAll(/\+\s*₪?\s*(\d[\d,]*\.\d{2})/g)].map((d) => Number(d[1]!.replace(/,/g, '')));
-    expect(deltas.length, 'the stub bills two lines differently').toBe(2);
-    expect(loss, `potential loss vs Σ deltas ${deltas.join(' + ')}`).toBeCloseTo(deltas.reduce((a, b) => a + b, 0), 2);
+    // Owner decision: the receiver sees no ₪ — no prices, no totals, no "potential loss".
+    await expect(page.locator('main'), 'no ₪ on the receiver\'s review').not.toContainText('₪');
+    await expect(page.getByText(r.steps.recon.potentialLoss)).toHaveCount(0);
     await checkScreen(page, errors, L, 'C4-review');
   });
 
-  await test.step('adjust quantities: settle both differences, change one by hand', async () => {
+  await test.step('Delivery Check: one line counted by hand, the rest "as ordered" after the blind spot check', async () => {
     await page.getByTestId('continue-adjust').click();
-    await expect(page.getByRole('heading', { name: r.steps.adjust.title })).toBeVisible();
-    const close = page.getByTestId('close-receipt');
-    await expect(close).toBeDisabled();
-    // Price line: received as ordered. Quantity line: one less than billed (the hand edit).
-    const prefix = r.steps.adjust.asOrdered.split('{qty}')[0]!.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const asOrdered = page.getByRole('button', { name: new RegExp(`^${prefix}`) });
-    const count = await asOrdered.count();
-    expect(count, 'difference cards to settle').toBe(2);
-    await asOrdered.first().click();
-    const qty = page.getByLabel(r.steps.adjust.qtyLabel).nth(1);
-    const before = Number(await qty.inputValue());
-    await page.getByRole('button', { name: r.steps.adjust.decrease }).nth(1).click();
-    await expect(qty).toHaveValue(String(before - 1));
-    await expect(close).toBeEnabled();
-    await expect(close).toHaveText(r.steps.adjust.closeAndSave);
+    await expect(page.getByTestId('delivery-check')).toBeVisible();
+    // Nothing is pre-resolved — "invoice = order" is not "arrived".
+    await expect(page.getByTestId('count-line').first()).toHaveAttribute('data-resolved', 'false');
+    // The hand count: the first line, one less than ordered.
+    const first = page.getByTestId('count-line').first();
+    if (await first.getByTestId('count-edit').count()) await first.getByTestId('count-edit').click();
+    const qty = first.getByTestId('count-qty');
+    const before = Number((await qty.inputValue()).replace(',', '.'));
+    await qty.fill(String(before - 1));
+    await qty.press('Enter');
+    if (await first.getByTestId('count-confirm-qty').isVisible().catch(() => false)) await first.getByTestId('count-confirm-qty').click();
+    await expect(first).toHaveAttribute('data-resolved', 'true');
+    // The rest "as ordered" — only after two random lines are counted blind.
+    await page.getByTestId('mark-rest').click();
+    const panel = page.getByTestId('spot-check');
+    await expect(panel).toBeVisible();
+    const rows = panel.getByTestId('spot-line');
+    for (let i = 0; i < (await rows.count()); i += 1) {
+      const id = (await rows.nth(i).getAttribute('data-key'))!.replace(/^po-/, '');
+      const [pl] = await withDb((sql) => sql<{ q: string }[]>`select qty_ordered::text as q from po_lines where id = ${id}`);
+      await rows.nth(i).getByTestId('spot-qty').fill(String(Number(pl!.q)));
+    }
+    await panel.getByTestId('spot-confirm').click();
+    await expect(page.getByTestId('count-bulk-tag').first()).toBeVisible();
+    await expect(page.getByTestId('close-receipt')).toBeEnabled();
     await checkScreen(page, errors, L, 'C5-adjust');
   });
 
@@ -682,20 +681,31 @@ test('C · receiver: HaSharon Produce → photo → OCR → review → adjust �
     await page.getByTestId('close-receipt').click();
     await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('heading', { name: r.steps.confirmed.title })).toBeVisible();
+    // Who received it is on the receipt; the ₪-full invoice page is not linked for the receiver.
+    await expect(page.getByTestId('confirmed-received-by')).toBeVisible();
+    await expect(page.getByTestId('confirmed-invoice-link')).toHaveCount(0);
     await checkScreen(page, errors, L, 'C6-confirmed');
   });
 
-  await test.step('dock slip: the worker re-matches after the count → the engine ₪ (never a pre-count run)', async () => {
+  await test.step('dock slip: quantities only for the receiver; the worker re-matches after the count', async () => {
     // The demo tenant has every feature on (dockSlip included). submitReceipt
     // enqueues the re-match; the real worker runs it against the actual count.
     const slip = page.getByTestId('dock-slip');
     await expect(slip).toBeVisible();
-    await expect(slip.getByTestId('dock-slip-total'), 'engine ₪ after the re-match').toBeVisible({ timeout: 90_000 });
-    await expect(slip.getByTestId('dock-slip-computing')).toHaveCount(0);
-    const lineAmounts = (await slip.getByTestId('dock-slip-amount').allInnerTexts()).map((x) => amounts(x)[0]!);
-    const total = amounts(await slip.getByTestId('dock-slip-total').innerText())[0]!;
-    expect(lineAmounts.length).toBeGreaterThan(0);
-    expect(Math.round(lineAmounts.reduce((a, b) => a + b, 0) * 100)).toBe(Math.round(total * 100));
+    // The receiver sees no ₪ (owner decision): no line amounts, no total.
+    await expect(slip.getByTestId('dock-slip-amount')).toHaveCount(0);
+    await expect(slip.getByTestId('dock-slip-total')).toHaveCount(0);
+    await expect(page.locator('main')).not.toContainText('₪');
+    // The engine's ₪ (what the owner sees) comes from ONE run after the close.
+    await expect
+      .poll(
+        async () =>
+          (await withDb((sql) => sql<{ runs: number }[]>`
+            select count(distinct mr.id)::int as runs from goods_receipts gr
+            join match_runs mr on mr.gr_id = gr.id where gr.po_id = ${clone}`))[0]!.runs,
+        { timeout: 90_000, message: 'the worker re-matched the closed receipt' },
+      )
+      .toBe(1);
     // The run behind it is from after the close, and saw the count: no line read as received 0.
     const sql = db();
     try {

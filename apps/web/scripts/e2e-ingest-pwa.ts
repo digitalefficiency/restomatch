@@ -302,21 +302,25 @@ async function mobileReceiver(browser: Browser, rid: string, locale: Locale, exp
     // so the photo must STAY queued (never lost) and the receiver sees why.
     await page.waitForTimeout(3000);
     check((await queueCount(page)) === 1, 'prod build without storage: photo stays queued (not lost) after a refused upload');
-    // S4 I3: the queue never outlives the session on a shared device.
+    // S4 I3, flipped (decision 22 default: keep and attribute). Leaving never
+    // wipes an unsent photo: it stays on this device and uploads — attributed
+    // ("צולם על ידי") — with the next signed-in user of this branch.
+    // NOTE: the expired-session case needs /login's PwaQueueReset to stop
+    // clearing the queue (W1-09's file); until then this check fails by design.
     if (locale === 'he') {
-      // Session expired: no cookie → middleware redirects to /login → queue wiped.
       await context.clearCookies();
       await page.goto(`${BASE}/dashboard/receiving`, { waitUntil: 'networkidle' });
       check(new URL(page.url()).pathname.startsWith('/login'), 'expired session → /login');
-      for (let i = 0; i < 20 && (await queueCount(page)) !== 0; i += 1) await page.waitForTimeout(250);
-      check((await queueCount(page)) === 0, 'session-expired redirect to /login clears the offline photo queue');
+      await page.waitForTimeout(1500);
+      check((await queueCount(page)) === 1, 'session-expired redirect to /login keeps the unsent photo on the device');
     } else {
       await page.getByRole('button', { name: 'Open menu' }).click();
-      await Promise.all([
-        page.waitForURL((u) => !u.pathname.startsWith('/dashboard'), { timeout: 30_000 }),
-        page.getByRole('button', { name: 'Sign out' }).last().click(),
-      ]);
-      check((await queueCount(page)) === 0, 'sign-out clears the offline photo queue (shared device)');
+      await page.getByRole('button', { name: 'Sign out' }).last().click();
+      // The upload is refused here, so the sign-out guard asks: keep it on the phone and sign out.
+      await page.getByTestId('logout-keep').click();
+      await page.waitForURL((u) => !u.pathname.startsWith('/dashboard'), { timeout: 30_000 });
+      await page.waitForTimeout(1500);
+      check((await queueCount(page)) === 1, 'sign-out keeps the unsent photo on the device (uploads attributed later)');
     }
   }
   check(w.serverErrors.filter((e) => !/\/api\/trpc\/scans\.upload/.test(e)).length === 0, `mobile/${locale}: zero unexpected 5xx`);

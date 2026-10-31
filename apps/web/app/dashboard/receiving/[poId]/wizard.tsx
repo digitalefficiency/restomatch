@@ -23,8 +23,9 @@ import type { Translator } from '@/lib/i18n/translate';
 import { isReceiverLocale } from '@/lib/i18n/config';
 import type { UploadedScan } from '@/lib/supabase/client';
 import { ingest } from '@/lib/i18n/messages/ingest';
-import { SYNCED_EVENT, enqueuePhoto, idbAvailable, isNetworkError, type SyncedPhotoDetail } from '@/lib/pwa/offlineQueue';
-import { adaptReconciliation, keepAdjusted, type PoLineRow, type ReceiptLineRow } from './_adapters';
+import { SYNCED_EVENT, enqueuePhoto, idbAvailable, isNetworkError, isTransientFailure, type SyncedPhotoDetail } from '@/lib/pwa/offlineQueue';
+import { adaptReconciliation, keepAdjusted, markFromCount, type PoLineRow, type ReceiptLineRow } from './_adapters';
+import { fromGrLine } from './_count';
 import { localizeInvoiceLines, localizePoLines, localizeReceiptLines, type LocalNames } from './_localize';
 import { receivingErrorText as errorText } from './_errors';
 import { pollInvoiceUntilRead } from './_poll';
@@ -33,6 +34,8 @@ import {
   payloadFor,
   payloadIsCounted,
   readDraft,
+  readLocalMarks,
+  writeLocalMarks,
   useLeaveGuard,
   useLineSaves,
   useFieldBarOffset,
@@ -200,9 +203,13 @@ export function ReceivingWizard({
   const ensureEnglish = trpc.receiving.ensureEnglish.useMutation();
 
   // Every mark is saved on change (300 ms, full row) and kept on the phone offline.
-  const { outbox, states: saveByGrLine, pending: unsent } = useLineSaves(`rm-rcv-lines:${storeKey}`, (p) =>
-    utils.client.receiving.markGrLine.mutate(p),
+  const { outbox, states: saveByGrLine, pending: unsent } = useLineSaves(
+    `rm-rcv-lines:${storeKey}`,
+    (p) => utils.client.receiving.markGrLine.mutate(p),
+    Boolean(closedAtOpen),
   );
+  // Marks on invoice-only lines (no gr_line to save to) are kept on the device.
+  const localMarksKey = `rm-rcv-unordered:${storeKey}`;
   const saveStates = useMemo(() => {
     const out: Record<string, LineSaveUi> = {};
     for (const [key, id] of Object.entries(grLineIdByKey)) if (saveByGrLine[id]) out[key] = saveByGrLine[id];
@@ -299,6 +306,8 @@ export function ReceivingWizard({
           supplierName: po.supplierName,
           mimeType: file.type || 'image/jpeg',
           blob: file,
+          // Shared tablet: a colleague may upload it later — "צולם על ידי".
+          capturedByName: receiverName ?? null,
         });
         return { invoiceId: `queued-${clientUploadId}`, publicUrl: '', scanRouteUrl: '', storagePath: '', mimeType: file.type };
       };
@@ -482,31 +491,54 @@ export function ReceivingWizard({
     pollTokenRef.current += 1;
   }, []);
 
-  /** Restore the marks the outbox still holds (not yet on the server) over a fresh projection. */
+  /**
+   * Overlay what THIS device wrote (unsent, or sent and acknowledged this
+   * session) on a fresh server projection. The snapshot may predate a row the
+   * outbox's retry just sent (the resume race): the local row wins, so a count
+   * can never fall back to "not counted" and be overwritten by a bulk action.
+   */
   function withUnsent(base: Record<string, LineMark>, idByKey: Record<string, string>): Record<string, LineMark> {
     const out = { ...base };
+    for (const [key, m] of Object.entries(readLocalMarks(localMarksKey))) {
+      if (out[key] && !idByKey[key]) {
+        out[key] = { ...out[key], ...m };
+        adjustedKeysRef.current.add(key);
+      }
+    }
     const keyById = new Map(Object.entries(idByKey).map(([k, id]) => [id, k]));
-    for (const p of outbox.pending()) {
+    for (const p of outbox.latest()) {
       const key = keyById.get(p.grLineId);
       const m = key ? out[key] : undefined;
       if (!key || !m) continue;
-      const counted = payloadIsCounted(p);
-      out[key] = {
-        ...m,
-        qtyReceived: counted ? p.qtyReceived : m.qtyReceived,
-        qtyRejected: p.qtyRejected,
-        condition: p.condition ?? 'ok',
-        rejectReason: p.rejectReason ?? null,
-        touched: counted,
-      };
+      // Through the count model: a reset is "not counted", a missing line stays missing,
+      // and the method (bulk / spot check / one by one) comes back with it.
+      out[key] = payloadIsCounted(p)
+        ? markFromCount(m, fromGrLine(p, null), m.qtyReceived, p.conditionNotes ?? null)
+        : { ...m, touched: false };
       adjustedKeysRef.current.add(key);
     }
     return out;
   }
 
+  /**
+   * getReceipt that never PAUSES offline (react-query's default networkMode
+   * waits for the network — the receiver would be stuck on the scan step):
+   * it fails at once, and then the cached copy stands in.
+   */
+  async function loadReceipt(activeGrId: string) {
+    const input = { grId: activeGrId };
+    try {
+      return await utils.receiving.getReceipt.fetch(input, { networkMode: 'always', gcTime: Infinity });
+    } catch (err) {
+      const cached = utils.receiving.getReceipt.getData(input);
+      if (cached && isTransientFailure(err)) return cached;
+      throw err;
+    }
+  }
+
   type InvoiceSnapshot = Awaited<ReturnType<typeof utils.receiving.getInvoice.fetch>>;
   async function buildReconciliation(activeGrId: string, invoice: InvoiceSnapshot, toStep: Step = 'RECONCILIATION_REVIEW') {
-    const receipt = await utils.receiving.getReceipt.fetch({ grId: activeGrId });
+    const receipt = await loadReceipt(activeGrId);
     const adapted = adaptReconciliation({
       po: {
         id: po.id,
@@ -533,7 +565,7 @@ export function ReceivingWizard({
   async function buildFromPoOnly(knownGrId: string | null) {
     try {
       const activeGrId = await ensureReceipt(knownGrId ?? grId);
-      const receipt = await utils.receiving.getReceipt.fetch({ grId: activeGrId });
+      const receipt = await loadReceipt(activeGrId);
       const adapted = adaptReconciliation({
         po: {
           id: po.id,
@@ -554,6 +586,14 @@ export function ReceivingWizard({
       setMarks(withUnsent(keepAdjusted(marksRef.current, adapted.initialMarks, adjustedKeysRef.current), adapted.grLineIdByKey));
       setStep('ADJUST_QUANTITIES');
     } catch (err) {
+      // Offline with a count already on screen (the receiver went to scan the
+      // invoice): back to that count, every mark kept, with the offline note
+      // inline — never stranded on the scan step.
+      if (isTransientFailure(err) && Object.keys(marksRef.current).length > 0) {
+        setFooterError(td('delivery.count.offline'));
+        setStep('ADJUST_QUANTITIES');
+        return;
+      }
       setError(errorText(err, t, locale));
       setStep('SCAN_INVOICE');
     }
@@ -598,14 +638,28 @@ export function ReceivingWizard({
 
   function updateMark(key: string, patch: Partial<LineMark>) {
     const existing = marksRef.current[key];
-    if (!existing) return;
+    // Nothing changes while the receipt is closing (it would be saved after the close).
+    if (!existing || submittingRef.current) return;
     // An explicit `touched: false` is an undo / an unconfirmed weight; anything else resolves the line.
-    const nextMark: LineMark = { ...existing, ...patch, touched: patch.touched ?? true };
+    const nextMark: LineMark = {
+      ...existing,
+      ...patch,
+      touched: patch.touched ?? true,
+      // A hand change is a per-line count unless the patch says how (bulk, spot check, undo).
+      method: patch.method ?? 'per_line',
+      unconfirmed: patch.unconfirmed ?? false,
+    };
     adjustedKeysRef.current.add(key);
     setMarks({ ...marksRef.current, [key]: nextMark });
     setFooterError(null);
     const grLineId = grLineIdByKeyRef.current[key];
     if (grLineId) outbox.set(payloadFor(grLineId, nextMark));
+    else {
+      // Invoice-only line: no gr_line exists — keep it on the device so a reload restores it.
+      const local = readLocalMarks(localMarksKey);
+      local[key] = nextMark;
+      writeLocalMarks(localMarksKey, local);
+    }
   }
 
   /** Close the receipt: every line is already saved (or flushed now); then submitReceipt re-matches. */
@@ -637,6 +691,9 @@ export function ReceivingWizard({
       setConfirmedAt(new Date().toISOString());
       setStep('CONFIRMED');
       writeDraft(draftKey, null);
+      // Closed: nothing left to send or restore for this receipt.
+      outbox.clear();
+      writeLocalMarks(localMarksKey, null);
       await utils.receiving.todayExpectations.invalidate();
       void findNextDelivery();
     } catch (err) {
@@ -861,11 +918,13 @@ export function ReceivingWizard({
           supplierName={supplierLabel}
           result={result}
           confirmedAt={confirmedAt}
-          capturedImage={image}
+          // The invoice page and the scan are full of ₪: no link for the receiver / chef (owner decision).
+          capturedImage={showMoney ? image : null}
           exceptions={exceptions}
-          invoiceHref={invoiceId ? `/dashboard/invoices/${invoiceId}` : null}
+          invoiceHref={showMoney && invoiceId ? `/dashboard/invoices/${invoiceId}` : null}
           amount={showMoney && exceptions > 0 && !dockSlipOn ? td('delivery.confirmed.amountPending') : null}
           receivedBy={receiverName}
+          bulkCount={Object.values(marks).filter((m) => m.touched && m.method === 'bulk_as_ordered').length}
           resetLabel={next?.label ?? t('steps.confirmed.backToInbox')}
           onReset={() => router.push(next ? `/dashboard/receiving/${next.poId}` : '/dashboard/receiving')}
         >

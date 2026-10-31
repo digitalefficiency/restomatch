@@ -107,7 +107,9 @@ export default async function ReceivingPoPage({
       }
     : null;
 
-  // Normalize numerics / dates for the client boundary.
+  // Normalize numerics / dates for the client boundary. The receiver / chef
+  // get no money in the page payload at all — no PO prices, no order total
+  // (owner decision; the server-side block of the procedures is H-11).
   const poForClient = {
     id: po.id,
     supplierId: po.supplierId,
@@ -115,7 +117,7 @@ export default async function ReceivingPoPage({
     supplierNameEn: po.supplierNameEn ?? null,
     expectedAt: po.expectedAt ? new Date(po.expectedAt).toISOString() : null,
     status: po.status,
-    totalEstimated: po.totalEstimated != null ? Number(po.totalEstimated) : null,
+    totalEstimated: showMoney && po.totalEstimated != null ? Number(po.totalEstimated) : null,
     features: { dockSlip: po.features.dockSlip },
     lines: localizePoLines(po.lines.map((l) => ({
       id: l.id,
@@ -125,7 +127,7 @@ export default async function ReceivingPoPage({
       productNameEn: l.productNameEn ?? null,
       qtyOrdered: Number(l.qtyOrdered),
       unit: l.unit,
-      unitPriceExpected: l.unitPriceExpected != null ? Number(l.unitPriceExpected) : null,
+      unitPriceExpected: showMoney && l.unitPriceExpected != null ? Number(l.unitPriceExpected) : null,
     })), localNames),
   };
 

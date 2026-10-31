@@ -48,21 +48,32 @@ export interface SlipLine {
 const EPS = 0.0005;
 const norm = (s: string | null | undefined) => (s ?? '').replace(/["'׳״]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
 
-/** What the receiver's marks say is wrong with one reconciliation line. */
+/** The counted mark, or null when nobody counted the line (an unresolved mark only pre-fills the editor). */
+function countedMark(mark: LineMark | undefined): LineMark | null {
+  return mark?.touched ? mark : null;
+}
+
+/**
+ * What the receiver's count says is wrong with one reconciliation line. A
+ * line nobody counted contributes NO quantity finding: the invoice never
+ * stands in for the count (a short delivery billed in full would pass at ₪0).
+ */
 export function lineIssues(line: ReconciliationLine, mark: LineMark | undefined): SlipIssue[] {
   const out: SlipIssue[] = [];
-  const received = mark ? mark.qtyReceived : (line.invoiceQty ?? line.poQty ?? 0);
-  const rejected = mark?.qtyRejected ?? 0;
+  const counted = countedMark(mark);
   if (line.poLineId === null && line.invoiceLineIndex !== null) out.push('unordered');
-  if (line.poQty !== null && received + EPS < line.poQty) out.push('short');
-  // "חסר" is a short delivery, never a rejection: the slip must not tell the
-  // supplier that goods which never arrived were "rejected / damaged".
-  const missing = mark?.rejectReason === 'missing';
-  if (!missing && (rejected > EPS || mark?.condition === 'rejected' || mark?.condition === 'damaged')) out.push('rejected');
+  if (counted) {
+    const received = counted.qtyReceived;
+    if (line.poQty !== null && received + EPS < line.poQty) out.push('short');
+    // "חסר" is a short delivery, never a rejection: the slip must not tell the
+    // supplier that goods which never arrived were "rejected / damaged".
+    const missing = counted.rejectReason === 'missing';
+    if (!missing && (counted.qtyRejected > EPS || counted.condition === 'rejected' || counted.condition === 'damaged')) out.push('rejected');
+  }
   if (line.poUnitPrice !== null && line.invoiceUnitPrice !== null && line.invoiceUnitPrice > line.poUnitPrice + EPS) {
     out.push('overPrice');
   }
-  if (line.invoiceQty !== null && line.invoiceQty > received + EPS) out.push('billedNotReceived');
+  if (counted && line.invoiceQty !== null && line.invoiceQty > counted.qtyReceived + EPS) out.push('billedNotReceived');
   return out;
 }
 
@@ -95,8 +106,8 @@ export function buildSlipLines(
       issues,
       engineTypes: mine.map((e) => e.type),
       ordered: line.poQty,
-      received: mark ? mark.qtyReceived : null,
-      rejected: mark?.qtyRejected ?? 0,
+      received: countedMark(mark)?.qtyReceived ?? null,
+      rejected: countedMark(mark)?.qtyRejected ?? 0,
       invoiced: line.invoiceQty,
       unit: line.invoiceUnit ?? line.poUnit,
       poPrice: line.poUnitPrice,

@@ -6,7 +6,7 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
 import { ingest } from '@/lib/i18n/messages/ingest';
 import { receivingDelivery } from '@/lib/i18n/messages/receiving/delivery';
-import { QUEUE_EVENT, countForOthers, idbAvailable, idbQueueStore, processQueue } from './offlineQueue';
+import { QUEUE_EVENT, idbAvailable, idbQueueStore, processQueue, type ProcessResult } from './offlineQueue';
 import { useQueuedPhotoUpload } from './useQueuedPhotoUpload';
 
 export { blobToBase64 } from './useQueuedPhotoUpload';
@@ -17,6 +17,9 @@ interface BeforeInstallPromptEvent extends Event {
 
 /** "Syncing" shows only when it lasts longer than this — a fast sync never flashes (perf-states-05). */
 export const SYNC_CHIP_DELAY_MS = 400;
+
+/** How long "uploaded · taken by …" stays up. */
+const ATTRIBUTION_MS = 8_000;
 
 /**
  * Large-touch-target "installed" mode: only when launched from the home screen
@@ -38,7 +41,9 @@ html[data-pwa='installed'] body { overscroll-behavior-y: contain; }
  * prompt. Its state is ONE fixed chip under the header (mobile-field
  * §3.7) — it never sits in the content flow, so it can't push the delivery
  * cards under the receiver's thumb (CLS). Offline is neutral (T4), never a
- * warning. Renders nothing while online with an empty queue.
+ * warning. Renders nothing while online with an empty queue. A colleague's
+ * photo of this branch (shared tablet) uploads too, and the chip says who took
+ * it ("צולם על ידי", decision 22 default).
  */
 export function ReceiverPwa({ restaurantId, userId }: { restaurantId: string; userId: string }) {
   const t = useT(ingest);
@@ -50,37 +55,38 @@ export function ReceiverPwa({ restaurantId, userId }: { restaurantId: string; us
   const [others, setOthers] = useState(0);
   const [syncingShown, setSyncingShown] = useState(false);
   const [syncError, setSyncError] = useState(false);
+  const [attributed, setAttributed] = useState<ProcessResult['attributed']>([]);
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [installed, setInstalled] = useState(false);
   const running = useRef(false);
   const queuedText = queued === 1 ? t('pwa.queuedOne') : t('pwa.queued', { count: formatNumber(queued, locale) });
 
-  const mine = useCallback(
-    (i: { restaurantId: string; userId: string }) => i.restaurantId === restaurantId && i.userId === userId,
-    [restaurantId, userId],
-  );
+  // This branch's photos — the colleague's too — upload here; another branch's wait for it.
+  const ofBranch = useCallback((i: { restaurantId: string }) => i.restaurantId === restaurantId, [restaurantId]);
 
   const refreshCount = useCallback(async () => {
     if (!idbAvailable()) return;
     try {
-      setQueued((await idbQueueStore.list()).filter(mine).length);
-      setOthers(await countForOthers(userId));
+      const all = await idbQueueStore.list();
+      setQueued(all.filter(ofBranch).length);
+      setOthers(all.filter((i) => !ofBranch(i)).length);
     } catch {
       /* private mode without IndexedDB */
     }
-  }, [mine, userId]);
+  }, [ofBranch]);
 
   const sync = useCallback(async () => {
     if (running.current || !idbAvailable() || !navigator.onLine) return;
     running.current = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
     try {
-      // Nothing of ours queued: no sync, no chip, no layout work at all.
-      if ((await idbQueueStore.list()).filter(mine).length === 0) return;
+      // Nothing of this branch queued: no sync, no chip, no layout work at all.
+      if ((await idbQueueStore.list()).filter(ofBranch).length === 0) return;
       timer = setTimeout(() => setSyncingShown(true), SYNC_CHIP_DELAY_MS);
       const r = await processQueue(idbQueueStore, upload, () => navigator.onLine, { restaurantId, userId });
       setSyncError(r.failed.length > 0);
       setQueued(r.remaining);
+      if (r.attributed.length > 0) setAttributed(r.attributed);
     } catch {
       setSyncError(true);
     } finally {
@@ -88,7 +94,15 @@ export function ReceiverPwa({ restaurantId, userId }: { restaurantId: string; us
       running.current = false;
       setSyncingShown(false);
     }
-  }, [upload, mine, restaurantId, userId]);
+  }, [upload, ofBranch, restaurantId, userId]);
+
+  useEffect(() => {
+    if (attributed.length === 0) return;
+    const id = setTimeout(() => setAttributed([]), ATTRIBUTION_MS);
+    return () => clearTimeout(id);
+  }, [attributed]);
+
+  const names = [...new Set(attributed.map((a) => a.capturedByName ?? tr('pwa.someoneElse')))].join(', ');
 
   useEffect(() => {
     setOnline(navigator.onLine);
@@ -139,7 +153,16 @@ export function ReceiverPwa({ restaurantId, userId }: { restaurantId: string; us
             icon: <UploadCloud className="h-4 w-4 shrink-0" aria-hidden="true" />,
             text: syncError ? t('pwa.syncFailed') : queuedText,
           }
-        : null;
+        : attributed.length > 0
+          ? {
+              testId: 'pwa-attributed',
+              icon: <UploadCloud className="h-4 w-4 shrink-0" aria-hidden="true" />,
+              text:
+                attributed.length === 1
+                  ? tr('pwa.capturedByOne', { names })
+                  : tr('pwa.capturedByMany', { count: formatNumber(attributed.length, locale), names }),
+            }
+          : null;
 
   return (
     <>

@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { LineMark } from '@/app/showcase/receiver/_state';
-import { isNetworkError } from '@/lib/pwa/offlineQueue';
+import { isTransientFailure } from '@/lib/pwa/offlineQueue';
+import { grLineForMark } from './_adapters';
+import { grLineIsCounted } from './_count';
 import {
   createLineOutbox,
   localStorageOutbox,
@@ -14,32 +16,26 @@ import {
 /** How often queued (offline) line saves are retried while the wizard is open. */
 const RETRY_EVERY_MS = 15_000;
 
-/** The full gr_line row for a mark. An unresolved line is the fresh row (nothing counted). */
+/** The full gr_line row for a mark (through the count model). An unresolved line is the fresh row. */
 export function payloadFor(grLineId: string, mark: LineMark): GrLinePayload {
-  if (!mark.touched) return { grLineId, qtyReceived: 0, qtyRejected: 0, condition: 'ok' };
-  return {
-    grLineId,
-    qtyReceived: mark.qtyReceived,
-    qtyRejected: mark.qtyRejected,
-    ...(mark.rejectReason ? { rejectReason: mark.rejectReason } : {}),
-    condition: mark.condition,
-    ...(mark.notes ? { conditionNotes: mark.notes } : {}),
-  };
+  return { grLineId, ...grLineForMark(mark) };
 }
 
 /** Is this unsent payload a resolved line (vs a reset to "not counted")? */
 export function payloadIsCounted(p: GrLinePayload): boolean {
-  return p.qtyReceived > 0 || p.qtyRejected > 0 || Boolean(p.rejectReason) || p.condition === 'damaged';
+  return grLineIsCounted({ ...p, condition: p.condition ?? 'ok' });
 }
 
 /**
  * The Delivery Check's line outbox (lib/pwa/lineOutbox) bound to
  * receiving.markGrLine: saved on change, kept on the phone while offline,
- * retried on `online` and every 15 s. Storage is per user + PO.
+ * retried on `online` and every 15 s. Storage is per user + PO. For a receipt
+ * that is already closed, stale unsent rows are dropped, never retried into it.
  */
 export function useLineSaves(
   storageKey: string,
   send: (p: GrLinePayload) => Promise<unknown>,
+  closed = false,
 ): { outbox: LineOutbox; states: Record<string, LineSaveState>; pending: number } {
   const sendRef = useRef(send);
   sendRef.current = send;
@@ -49,18 +45,21 @@ export function useLineSaves(
   if (!boxRef.current) {
     const box: LineOutbox = createLineOutbox({
       send: (p) => sendRef.current(p),
-      isNetworkError,
+      // No network, or signed out mid-count (401): kept on the phone, retried — never "failed".
+      isNetworkError: isTransientFailure,
       storage: typeof window === 'undefined' ? undefined : localStorageOutbox(storageKey),
       onChange: (s) => {
         setStates(s);
         setPending(box.pendingCount());
       },
     });
+    if (closed) box.clear();
     boxRef.current = box;
   }
   const outbox = boxRef.current;
 
   useEffect(() => {
+    if (closed) return;
     setPending(outbox.pendingCount());
     setStates(outbox.states());
     const retry = () => {
@@ -73,7 +72,7 @@ export function useLineSaves(
       window.removeEventListener('online', retry);
       window.clearInterval(id);
     };
-  }, [outbox]);
+  }, [outbox, closed]);
 
   return { outbox, states, pending };
 }
@@ -101,6 +100,29 @@ export function writeDraft(key: string, draft: ReceiptDraft | null): void {
     else window.localStorage.removeItem(key);
   } catch {
     /* storage blocked: the server keeps the counts; only the invoice link is lost */
+  }
+}
+
+/**
+ * Marks on lines that are only on the invoice (not ordered) have no gr_line to
+ * save to; they are kept on this device per PO so a reload never loses them.
+ */
+export function readLocalMarks(key: string): Record<string, LineMark> {
+  try {
+    const raw = window.localStorage.getItem(key);
+    const parsed: unknown = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, LineMark>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function writeLocalMarks(key: string, marks: Record<string, LineMark> | null): void {
+  try {
+    if (!marks || Object.keys(marks).length === 0) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, JSON.stringify(marks));
+  } catch {
+    /* storage blocked: these marks live in memory until the close */
   }
 }
 
@@ -171,8 +193,11 @@ export function useLeaveGuard(dirty: boolean, onAsk: (target: LeaveTarget) => vo
         // Stay: put the guard entry back and ask.
         window.history.pushState(window.history.state, '', window.location.href);
         askRef.current({ kind: 'back' });
-      } else {
+      } else if (guardPushed.current) {
+        // Everything was sent since the guard entry went in: this back press only
+        // left the duplicate entry — take the real step back so it isn't a dead press.
         guardPushed.current = false;
+        window.history.back();
       }
     };
     window.addEventListener('beforeunload', onBeforeUnload);
