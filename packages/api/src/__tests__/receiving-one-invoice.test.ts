@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { and, createDb, eq, invoices, matchRuns, testDbUrl } from '@restomatch/db';
+import { and, auditLog, createDb, eq, goodsReceipts, invoiceLines, invoices, matchRuns, testDbUrl } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
@@ -113,5 +113,41 @@ describe('registerInvoice — one receipt, one invoice', () => {
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
     const [bInv] = await db.select().from(invoices).where(and(eq(invoices.restaurantId, A.restaurantId), eq(invoices.id, B.invoiceId)));
     expect(bInv).toBeUndefined();
+  });
+
+  it('H-1: a follow-up delivery on a reopened partial receipt gets ITS OWN invoice (never swallowed into the first)', async () => {
+    await db.delete(matchRuns).where(eq(matchRuns.restaurantId, A.restaurantId));
+    const d1 = await as(A, 'receiver').receiving.registerInvoice({ grId: A.grId, imageUrl: scan('d1'), supplierId: A.supplierId });
+    await as(A, 'receiver').receiving.submitReceipt({ grId: A.grId }); // 5 of 10 → partial
+    const [gr] = await db.select({ status: goodsReceipts.status }).from(goodsReceipts).where(eq(goodsReceipts.id, A.grId));
+    expect(gr!.status).toBe('partial');
+    await new Promise((r) => setTimeout(r, 20)); // distinct timestamps
+    await as(A, 'receiver').receiving.startReceipt({ poId: A.poId, reopen: true });
+    const d2 = await as(A, 'receiver').receiving.registerInvoice({ grId: A.grId, imageUrl: scan('d2'), supplierId: A.supplierId });
+    expect(d2.invoiceId).not.toBe(d1.invoiceId);
+    expect(d2.alreadyExisted).toBe(false);
+    const [row] = await db.select({ url: invoices.rawImageUrl }).from(invoices).where(eq(invoices.id, d2.invoiceId));
+    expect(row!.url).toBe(scan('d2'));
+    // …and a re-scan in THIS cycle resumes d2 (not d1).
+    const again = await as(A, 'receiver').receiving.registerInvoice({ grId: A.grId, imageUrl: scan('d2b'), supplierId: A.supplierId });
+    expect(again.invoiceId).toBe(d2.invoiceId);
+  });
+
+  it('a retake never resets an invoice that was built on (lines) — it resumes; a retake is audited', async () => {
+    await db.delete(matchRuns).where(eq(matchRuns.restaurantId, A.restaurantId));
+    const first = await as(A, 'receiver').receiving.registerInvoice({ grId: A.grId, imageUrl: scan('r1'), supplierId: A.supplierId });
+    const failedRaw = { provider: 'claude_vision' as const, raw: { ocrFailed: true, reason: 'extraction_failed', scanGrId: A.grId } };
+    await db.update(invoices).set({ status: 'parsed', ocrPayload: failedRaw }).where(eq(invoices.id, first.invoiceId));
+    await db.insert(invoiceLines).values({ invoiceId: first.invoiceId, rawDescription: 'ידני', qtyBilled: '1', unit: 'kg', unitPriceBilled: '5', lineTotal: '5.00' });
+    const r = await as(A, 'receiver').receiving.registerInvoice({ grId: A.grId, imageUrl: scan('r2'), supplierId: A.supplierId });
+    expect(r).toEqual({ invoiceId: first.invoiceId, alreadyExisted: true, resumed: true });
+    const [row] = await db.select({ status: invoices.status, url: invoices.rawImageUrl }).from(invoices).where(eq(invoices.id, first.invoiceId));
+    expect(row).toEqual({ status: 'parsed', url: scan('r1') });
+
+    await db.delete(invoiceLines).where(eq(invoiceLines.invoiceId, first.invoiceId));
+    await as(A, 'receiver').receiving.registerInvoice({ grId: A.grId, imageUrl: scan('r3'), supplierId: A.supplierId });
+    const audits = await db.select().from(auditLog).where(and(eq(auditLog.entityId, first.invoiceId), eq(auditLog.action, 'receiving.invoice_retaken')));
+    expect(audits).toHaveLength(1);
+    expect(audits[0]!.after).toMatchObject({ status: 'ocr_pending', rawImageUrl: scan('r3') });
   });
 });

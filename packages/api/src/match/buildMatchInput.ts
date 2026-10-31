@@ -55,8 +55,8 @@ const num = (v: string | null, fallback = 0): number => (v == null ? fallback : 
 /** Default Israeli VAT used when no rate is configured at any level (18% since 2025-01-01). */
 const DEFAULT_VAT_RATE = 0.18;
 
-/** First non-null rate (numeric string) wins; otherwise the default. */
-const firstVatRate = (...rates: Array<string | null>): number => {
+/** First non-null rate (numeric string) wins; otherwise the default. Shared with receiving's manual totals. */
+export const firstVatRate = (...rates: Array<string | null>): number => {
   for (const r of rates) {
     if (r != null) return Number(r);
   }

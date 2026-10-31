@@ -59,7 +59,8 @@ export type AuditAction =
   | 'receiving.invoice_header_updated'
   | 'receiving.invoice_line_updated'
   | 'receiving.invoice_line_added'
-  | 'receiving.invoice_line_deleted';
+  | 'receiving.invoice_line_deleted'
+  | 'receiving.invoice_retaken';
 
 export interface AuditEntry {
   /** Tenant the action belongs to. On a tenant connection this must equal the GUC. */

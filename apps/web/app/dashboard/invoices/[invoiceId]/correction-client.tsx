@@ -121,12 +121,25 @@ export function InvoiceCorrection({
   // them (a later "save details" must never write back the stale figures).
   const afterManual = (
     msg: string,
-    res: { rematched: boolean; totals: { totalExclVat: string | null; vatAmount: string | null; totalInclVat: string | null } },
+    res: {
+      rematched: boolean;
+      rematchSkipped?: 'receipt_open' | 'no_lines' | 'refused';
+      totals: { totalExclVat: string | null; vatAmount: string | null; totalInclVat: string | null };
+    },
   ) => {
     setExcl(res.totals.totalExclVat ?? '');
     setVat(res.totals.vatAmount ?? '');
     setIncl(res.totals.totalInclVat ?? '');
-    onOk(res.rematched ? msg : `${msg} ${t('correction.rematchLater')}`);
+    // Held for the receipt's count / nothing left to match / refused (re-run by hand).
+    const note =
+      res.rematched
+        ? t('correction.rematchedNote')
+        : res.rematchSkipped === 'no_lines'
+          ? ''
+        : res.rematchSkipped === 'receipt_open'
+          ? t('correction.rematchAfterCount')
+          : t('correction.rematchLater');
+    onOk(note ? `${msg} ${note}` : msg);
   };
   const addLine = trpc.receiving.addInvoiceLine.useMutation({
     onSuccess: (res) => {
@@ -420,7 +433,7 @@ export function InvoiceCorrection({
                           <Button size="sm" variant="ghost" title={t('correction.edit')} aria-label={t('correction.edit')} onClick={() => startLine(l)}>
                             <Pencil className="h-4 w-4" />
                           </Button>
-                          {linesEditable && (
+                          {linesEditable && invoice.deletableLineIds.includes(l.id) && (
                             <Button
                               size="sm"
                               variant="ghost"
