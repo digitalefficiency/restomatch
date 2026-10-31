@@ -27,5 +27,13 @@ export default async function DeskLabPage({
     LabView,
     { count: number; sumAgorot: number }
   >;
-  return <DeskLab totals={totals} mode={mode} labState={state} />;
+  return (
+    <DeskLab
+      totals={totals}
+      mode={mode}
+      labState={state}
+      simulateEnforced={sp.enforced === '1'}
+      failAssign={sp.fail === 'assign'}
+    />
+  );
 }
